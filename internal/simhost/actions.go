@@ -11,6 +11,7 @@ import (
 type Request struct {
 	Action    string            `json:"action"`
 	Kind      string            `json:"kind,omitempty"`
+	Runtime   string            `json:"runtime,omitempty"`
 	App       string            `json:"app,omitempty"`
 	BundleID  string            `json:"bundleId,omitempty"`
 	Args      []string          `json:"args,omitempty"`
@@ -41,18 +42,22 @@ func (h *Host) Call(ctx context.Context, owner string, req Request) (map[string]
 	case "list":
 		return h.list(ctx, owner)
 	case "acquire":
-		view, err := h.acquire(ctx, owner, req.Kind)
+		view, err := h.acquire(ctx, owner, req.Kind, req.Runtime)
 		if err != nil {
 			return nil, err
 		}
 		return map[string]any{"lease": view, "next": HowTo}, nil
 	case "renew":
-		view, err := h.renew(owner, req.Kind)
+		view, err := h.renew(owner, req.Kind, req.Runtime)
 		return map[string]any{"lease": view}, err
 	case "release":
-		return map[string]any{"released": h.Release(owner, req.Kind)}, nil
+		released, err := h.release(owner, req.Kind, req.Runtime)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"released": released}, nil
 	}
-	l, err := h.held(owner, req.Kind)
+	l, err := h.held(owner, req.Kind, req.Runtime)
 	if err != nil {
 		return nil, err
 	}
@@ -115,6 +120,14 @@ func (h *Host) list(ctx context.Context, owner string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	installed, err := h.iosRuntimes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	runtimes := make([]string, len(installed))
+	for i, r := range installed {
+		runtimes[i] = r.Version
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	kinds := make([]string, 0, len(Kinds))
@@ -122,23 +135,35 @@ func (h *Host) list(ctx context.Context, owner string) (map[string]any, error) {
 		kinds = append(kinds, name)
 	}
 	sort.Strings(kinds)
+	present := agenthailDevices(all)
 	var out []map[string]any
 	for _, name := range kinds {
 		kind := Kinds[name]
 		entry := map[string]any{"kind": name, "device": kind.Name, "exists": false, "holder": ""}
-		for _, d := range all {
-			if d.Name == kind.Name {
-				entry["exists"], entry["state"], entry["udid"] = true, d.State, d.UDID
-				if l := h.leases[d.UDID]; l != nil {
-					entry["holder"] = map[bool]string{true: "you", false: "another session"}[l.owner == owner]
-					if l.owner == owner {
-						entry["lease"] = h.view(l)
-					}
-				}
-				break
-			}
+		if d, ok := lowest(all, func(d device) bool { return d.Name == kind.Name }); ok {
+			h.describeEntry(entry, owner, d.UDID, d.State, d.Runtime)
 		}
 		out = append(out, entry)
+		for _, d := range present {
+			if d.Kind == name && d.Device != kind.Name {
+				entry := map[string]any{"kind": name, "device": d.Device, "runtime": d.Runtime, "holder": ""}
+				h.describeEntry(entry, owner, d.UDID, d.State, "")
+				out = append(out, entry)
+			}
+		}
 	}
-	return map[string]any{"simulators": out, "outDir": h.ownerDir(owner)}, nil
+	return map[string]any{"simulators": out, "runtimes": runtimes, "outDir": h.ownerDir(owner)}, nil
+}
+
+func (h *Host) describeEntry(entry map[string]any, owner, udid, state, runtime string) {
+	entry["exists"], entry["state"], entry["udid"] = true, state, udid
+	if version := runtimeVersion(runtime); version != "" {
+		entry["runtime"] = "iOS " + version
+	}
+	if l := h.leases[udid]; l != nil {
+		entry["holder"] = map[bool]string{true: "you", false: "another session"}[l.owner == owner]
+		if l.owner == owner {
+			entry["lease"] = h.view(l)
+		}
+	}
 }

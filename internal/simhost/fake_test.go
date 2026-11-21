@@ -12,22 +12,24 @@ import (
 )
 
 type fakeSim struct {
-	mu       sync.Mutex
-	calls    []Command
-	devices  map[string]string
-	missing  map[string]bool
-	describe string
-	created  int
-	block    map[string]chan struct{}
-	onCall   func(Command)
+	mu           sync.Mutex
+	calls        []Command
+	devices      map[string]string
+	runtimes     map[string]string
+	missing      map[string]bool
+	describe     string
+	runtimesJSON string
+	created      int
+	block        map[string]chan struct{}
+	onCall       func(Command)
 }
 
-const runtimesJSON = `{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-18-5","isAvailable":true},{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-0","isAvailable":true}]}`
+const runtimesJSON = `{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-18-5","isAvailable":true,"supportedDeviceTypes":[{"identifier":"t.iPad-Pro-11-M4","name":"iPad Pro 11-inch (M4)"},{"identifier":"t.iPhone-16","name":"iPhone 16"}]},{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-0","isAvailable":true}]}`
 
 const deviceTypesJSON = `{"devicetypes":[{"identifier":"t.iPad-Pro-13","name":"iPad Pro 13-inch (M5)"},{"identifier":"t.iPad-Pro-11","name":"iPad Pro 11-inch (M5)"},{"identifier":"t.iPhone-17","name":"iPhone 17"}]}`
 
 func newFakeSim() *fakeSim {
-	return &fakeSim{devices: map[string]string{}, missing: map[string]bool{}, block: map[string]chan struct{}{}}
+	return &fakeSim{devices: map[string]string{}, runtimes: map[string]string{}, missing: map[string]bool{}, block: map[string]chan struct{}{}}
 }
 
 func (f *fakeSim) exec(_ context.Context, cmd Command) ([]byte, error) {
@@ -56,19 +58,31 @@ func (f *fakeSim) exec(_ context.Context, cmd Command) ([]byte, error) {
 	line := strings.Join(append([]string{cmd.Name}, cmd.Args...), " ")
 	switch {
 	case strings.HasPrefix(line, "xcrun simctl list runtimes"):
+		if f.runtimesJSON != "" {
+			return []byte(f.runtimesJSON), nil
+		}
 		return []byte(runtimesJSON), nil
 	case strings.HasPrefix(line, "xcrun simctl list devicetypes"):
 		return []byte(deviceTypesJSON), nil
 	case strings.HasPrefix(line, "xcrun simctl list devices"):
-		var rows []string
+		rows := map[string][]string{}
 		for udid, name := range f.devices {
-			rows = append(rows, fmt.Sprintf(`{"udid":%q,"name":%q,"state":"Booted"}`, udid, name))
+			runtime := f.runtimes[udid]
+			if runtime == "" {
+				runtime = "com.apple.CoreSimulator.SimRuntime.iOS-27-0"
+			}
+			rows[runtime] = append(rows[runtime], fmt.Sprintf(`{"udid":%q,"name":%q,"state":"Booted"}`, udid, name))
 		}
-		return []byte(`{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-0":[` + strings.Join(rows, ",") + `]}}`), nil
+		var groups []string
+		for runtime, list := range rows {
+			groups = append(groups, fmt.Sprintf("%q:[%s]", runtime, strings.Join(list, ",")))
+		}
+		return []byte(`{"devices":{` + strings.Join(groups, ",") + `}}`), nil
 	case strings.HasPrefix(line, "xcrun simctl create"):
 		f.created++
 		udid := fmt.Sprintf("UDID-%d", f.created)
 		f.devices[udid] = cmd.Args[2]
+		f.runtimes[udid] = cmd.Args[4]
 		return []byte(udid + "\n"), nil
 	case strings.HasPrefix(line, "xcrun simctl rename"):
 		f.devices[cmd.Args[2]] = cmd.Args[3]

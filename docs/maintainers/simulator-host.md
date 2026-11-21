@@ -39,6 +39,42 @@ script both find or create a device only while holding
 `/tmp/agenthail-simulator-create.lock`, so two first users on a Mac create one
 device between them.
 
+## Devices for an older runtime
+
+`acquire` with a `runtime`, such as `18.5`, leases a device on that installed
+iOS runtime instead, for an app that does not run on the newest one. A
+`runtime` is an installed version (`18.5`, `iOS 18.5`), a shorter version that
+names only one installed runtime (`18`), or a runtime identifier. The daemon
+picks the device this way:
+
+- the shared device of that kind, when it is on that runtime;
+- otherwise one device per kind and runtime, named like
+  `Agenthail iPhone (iOS 18.5)`, created on the first request for it and
+  shared from then on. When the newest runtime is asked for and the kind has no
+  shared device yet, the shared device is created instead.
+
+It is created the same way as a shared device, under the same lock and slimmed
+before it takes its name, and its leases end and clean up the same way. A
+runtime that is not installed, or a shorter version that names more than one,
+is refused as `invalid`, naming the installed versions (also in `installed`
+for the Mac's own sessions; a forwarded refusal carries only its message);
+Agenthail never downloads a runtime. It is checked before any lease, so the
+answer never depends on what is held. A new device is created as the first
+iPhone or 11-inch iPad Pro the runtime itself supports, since an older runtime
+does not run the newest models. A simulator that already has the device's name but
+is on another runtime is refused as `conflict`, to be renamed or deleted by
+hand. Without `runtime`, `acquire` leases the shared device as it always has.
+
+A session may hold the shared device and a device for a runtime of the same
+kind at once; then every call names the one it means with `runtime` as well
+as `kind`, and `release` with a `kind` that names both is refused. `release`
+with neither `kind` nor `runtime` ends every lease the session holds. `list` shows every Agenthail device with its runtime, and the
+installed runtimes in `runtimes`; `agenthail doctor` (not the daemon's
+minute-by-minute status probe) prints each device and
+its runtime under its `simulators:` line, and `simulators.devices` in
+`--json`. `scripts/ios-simulator.sh iphone --runtime 18.5 run ...` finds or
+creates the same device for a test run.
+
 ## Leases
 
 A session drives a device only while it holds its lease:
@@ -48,7 +84,9 @@ A session drives a device only while it holds its lease:
   `scripts/ios-simulator.sh run` takes through `lockf`, so a lease and a script
   test run never share a device. Another session's lease, or a script run,
   answers `busy` at once; nothing waits.
-- One session may hold both kinds; then each call names its `kind`.
+- One session may hold both kinds, and devices for more than one runtime;
+  then each call names its `kind`, and its `runtime` when that is needed to
+  tell them apart.
 - A lease ends 10 minutes after its last call, 60 minutes after it began unless
   `renew` moves that on, at `release`, and when its session is archived. The
   daemon checks every 30 seconds. A daemon that exits releases every lock with

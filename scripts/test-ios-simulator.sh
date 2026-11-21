@@ -15,7 +15,9 @@ case "$1 $2 ${3:-}" in
   "simctl list devices")
     if [ -n "${STATE:-}" ]; then cat "$STATE"; sleep 0.5
     else echo '{"devices":{"ios":[{"name":"Agenthail iPhone","udid":"UDID-IPHONE"}]}}'; fi ;;
-  "simctl list runtimes") echo '{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-0","isAvailable":true}]}' ;;
+  "simctl list runtimes")
+    if [ -n "${RUNTIMES:-}" ]; then echo "$RUNTIMES"
+    else echo '{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-0","isAvailable":true}]}'; fi ;;
   "simctl list devicetypes") echo "${DEVICE_TYPES:?}" ;;
   "simctl create"*)
     printf '%s\n' "$@" >"$CREATED"
@@ -167,6 +169,41 @@ done
 wait
 { [ "$(wc -l <"$WORK/state.creates")" -eq 1 ] && [ "$(cat "$WORK/race-1")" = UDID-NEW ] && [ "$(cat "$WORK/race-2")" = UDID-NEW ]; } ||
   fail "two first runs did not share one new simulator: $(wc -l <"$WORK/state.creates" 2>/dev/null) created ($(cat "$WORK/race-1") / $(cat "$WORK/race-2"))"
+
+two='{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-18-5","version":"18.5","isAvailable":true,"supportedDeviceTypes":[{"name":"iPhone 16 Pro","identifier":"iPhone-16-Pro"}]},{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-0","version":"27.0","isAvailable":true}]}'
+on_runtime() {
+  rm -f "$CREATED" "$RENAMED"
+  runtime_status=0
+  RUNTIMES="$two" DEVICE_TYPES="{\"devicetypes\":[$phone]}" "$@" >"$WORK/rt-out" 2>&1 || runtime_status=$?
+  created_as="$(sed -n 3p "$CREATED" 2>/dev/null || true)"
+  created_on="$(sed -n 5p "$CREATED" 2>/dev/null || true)"
+  created_type="$(sed -n 4p "$CREATED" 2>/dev/null || true)"
+}
+on_runtime "$ROOT/scripts/ios-simulator.sh" iphone --runtime 18.5
+{ [ "$runtime_status" = 0 ] && [ "$created_as" = "Agenthail iPhone (iOS 18.5)" ] && [ "$created_on" = com.apple.CoreSimulator.SimRuntime.iOS-18-5 ]; } ||
+  fail "--runtime 18.5 did not create its own device on iOS 18.5: exit $runtime_status, $created_as on $created_on"
+[ "$created_type" = iPhone-16-Pro ] || fail "a device for iOS 18.5 was not one of the types iOS 18.5 supports: $created_type"
+on_runtime env PATH="$WORK/slim:$PATH" "$ROOT/scripts/ios-simulator.sh" iphone --runtime "iOS 18.5"
+{ [ "$created_as" = "Agenthail iPhone (iOS 18.5) (slimming)" ] && [ "$(cat "$RENAMED" 2>/dev/null)" = "UDID-NEW Agenthail iPhone (iOS 18.5)" ]; } ||
+  fail "a device for a runtime was not slimmed before taking its name: $created_as"
+on_runtime "$ROOT/scripts/ios-simulator.sh" iphone --runtime 17.4
+{ [ "$runtime_status" != 0 ] && [ -z "$created_as" ] && grep -q "Installed: 18.5, 27.0" "$WORK/rt-out"; } ||
+  fail "a runtime that is not installed was not refused with the installed ones: exit $runtime_status, $(cat "$WORK/rt-out")"
+echo '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-0":[{"name":"Agenthail iPhone","udid":"UDID-SHARED"}],"com.apple.CoreSimulator.SimRuntime.iOS-18-5":[{"name":"Agenthail iPhone (iOS 18.5)","udid":"UDID-18"}]}}' >"$WORK/rt-state"
+on_runtime env STATE="$WORK/rt-state" "$ROOT/scripts/ios-simulator.sh" iphone --runtime 18
+{ [ "$(cat "$WORK/rt-out")" = UDID-18 ] && [ -z "$created_as" ]; } || fail "the existing iOS 18.5 device was not found: $(cat "$WORK/rt-out")"
+on_runtime env STATE="$WORK/rt-state" "$ROOT/scripts/ios-simulator.sh" iphone --runtime 27.0
+{ [ "$(cat "$WORK/rt-out")" = UDID-SHARED ] && [ -z "$created_as" ]; } || fail "the shared device on iOS 27.0 was not used for --runtime 27.0: $(cat "$WORK/rt-out")"
+on_runtime env STATE="$WORK/rt-state" "$ROOT/scripts/ios-simulator.sh" iphone
+[ "$(cat "$WORK/rt-out")" = UDID-SHARED ] || fail "the default path changed beside a runtime device: $(cat "$WORK/rt-out")"
+echo '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-0":[{"name":"Agenthail iPhone (iOS 18.5)","udid":"UDID-STRAY"}]}}' >"$WORK/rt-state"
+on_runtime env STATE="$WORK/rt-state" "$ROOT/scripts/ios-simulator.sh" iphone --runtime 18.5
+{ [ "$runtime_status" != 0 ] && [ -z "$created_as" ] && grep -q "another runtime" "$WORK/rt-out"; } ||
+  fail "a same-named device on another runtime was not refused: exit $runtime_status, $(cat "$WORK/rt-out")"
+echo '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-18-5":[{"name":"Agenthail iPhone (iOS 18.5)","udid":"UDID-18"}]}}' >"$WORK/rt-state"
+rm -f "$LOCKED"
+RUNTIMES="$two" STATE="$WORK/rt-state" "$ROOT/scripts/ios-simulator.sh" iphone --runtime 18.5 run xcrun simctl install booted App.app >/dev/null 2>&1 || fail "run with --runtime failed"
+[ "$(tr '\n' ' ' <"$LOCKED" 2>/dev/null)" = "xcrun simctl install booted App.app " ] || fail "run with --runtime did not run its command: $(cat "$LOCKED" 2>/dev/null)"
 
 if [ "$failures" -gt 0 ]; then
   exit 1

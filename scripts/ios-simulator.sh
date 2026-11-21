@@ -2,8 +2,8 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 [iphone|ipad] [--boot]" >&2
-  echo "       $0 [iphone|ipad] run <command> [args...]" >&2
+  echo "usage: $0 [iphone|ipad] [--runtime <iOS version>] [--boot]" >&2
+  echo "       $0 [iphone|ipad] [--runtime <iOS version>] run <command> [args...]" >&2
   exit 2
 }
 
@@ -90,50 +90,105 @@ case "$kind" in
   *) usage ;;
 esac
 name="${AGENTHAIL_SIMULATOR_NAME:-$name}"
+shift || true
+if [ "${1:-}" = --runtime ]; then
+  [ "$#" -ge 2 ] && [ -n "$2" ] || usage
+  export AGENTHAIL_SIMULATOR_RUNTIME="$2"
+  shift 2
+fi
+
+create_device() {
+  local new_name="$1" runtime="$2" types="${3:-}" device udid
+  # An older runtime does not support the newest device types, so its own list wins.
+  [ -n "$types" ] || types="$(xcrun simctl list devicetypes --json)"
+  # The iPad UI tests are written for the 11-inch iPad Pro; Xcode lists the 13-inch first.
+  device="$(jq -r --arg family "$family" --arg prefer "$prefer" '.devicetypes | (map(select(.name | startswith($prefer))) | first) // (map(select(.name | startswith($family))) | first) | .identifier // empty' <<<"$types")"
+  if [ -z "$device" ]; then
+    echo "$0: Xcode has no $family simulator device type for $runtime" >&2
+    exit 1
+  fi
+  if command -v simslim >/dev/null; then
+    # The device takes its name only once slimmed and shut down, so a failed slim is never found and reused.
+    udid="$(xcrun simctl create "$new_name (slimming)" "$device" "$runtime")"
+    if ! { simslim on "$udid" --profile "$(dirname "$(readlink -f "$0")")/simslim-profile.json" >&2 &&
+      xcrun simctl shutdown "$udid" && xcrun simctl rename "$udid" "$new_name"; }; then
+      xcrun simctl shutdown "$udid" 2>/dev/null || true
+      xcrun simctl delete "$udid" || echo "$0: could not delete $udid; delete '$new_name (slimming)' by hand" >&2
+      echo "$0: could not slim and name a new $new_name simulator" >&2
+      exit 1
+    fi
+  else
+    udid="$(xcrun simctl create "$new_name" "$device" "$runtime")"
+  fi
+  printf '%s\n' "$udid"
+}
 
 find_or_create() {
-  local devices udid runtime device
+  local devices udid runtime
   devices="$(xcrun simctl list devices available --json)"
   udid="$(jq -r --arg name "$name" '[.devices[][] | select(.name == $name)] | first | .udid // empty' <<<"$devices")"
 
   if [ -z "$udid" ]; then
     runtime="$(xcrun simctl list runtimes --json | jq -r '.runtimes | map(select(.isAvailable and (.identifier | contains("iOS")))) | last | .identifier')"
-    # The iPad UI tests are written for the 11-inch iPad Pro; Xcode lists the 13-inch first.
-    device="$(xcrun simctl list devicetypes --json | jq -r --arg family "$family" --arg prefer "$prefer" '.devicetypes | (map(select(.name | startswith($prefer))) | first) // (map(select(.name | startswith($family))) | first) | .identifier')"
-    if command -v simslim >/dev/null; then
-      # The device takes its name only once slimmed and shut down, so a failed slim is never found and reused.
-      udid="$(xcrun simctl create "$name (slimming)" "$device" "$runtime")"
-      if ! { simslim on "$udid" --profile "$(dirname "$(readlink -f "$0")")/simslim-profile.json" >&2 &&
-        xcrun simctl shutdown "$udid" && xcrun simctl rename "$udid" "$name"; }; then
-        xcrun simctl shutdown "$udid" 2>/dev/null || true
-        xcrun simctl delete "$udid" || echo "$0: could not delete $udid; delete '$name (slimming)' by hand" >&2
-        echo "$0: could not slim and name a new $name simulator" >&2
-        exit 1
-      fi
-    else
-      udid="$(xcrun simctl create "$name" "$device" "$runtime")"
+    udid="$(create_device "$name" "$runtime")"
+  fi
+  printf '%s\n' "$udid"
+}
+
+# Never downloads a runtime: one that is not installed is refused.
+find_or_create_on() {
+  local want="$1" runtimes picked runtime version devices udid versioned newest
+  runtimes="$(xcrun simctl list runtimes --json | jq -c '[.runtimes[] | select(.isAvailable and (.identifier | contains("iOS"))) | . + {short: (.identifier | capture("iOS-(?<v>.*)$").v | gsub("-"; "."))} | .version = (.version // .short)]')"
+  picked="$(jq -r --arg w "$want" '
+    ($w | sub("^[iI][oO][sS] +"; "")) as $v
+    | ([.[] | select(.identifier == $v or .version == $v or .short == $v)] | first)
+      // ([.[] | select(((.version + ".") | startswith($v + ".")) or ((.short + ".") | startswith($v + ".")))] | if length == 1 then .[0] else null end)
+    | if . then "\(.identifier) \(.short)" else empty end' <<<"$runtimes")"
+  if [ -z "$picked" ]; then
+    echo "$0: iOS $want is not installed, or names more than one runtime. Installed: $(jq -r 'map(.version) | join(", ")' <<<"$runtimes"). Install one in Xcode > Settings > Components." >&2
+    exit 1
+  fi
+  runtime="${picked%% *}"
+  version="${picked#* }"
+  devices="$(xcrun simctl list devices available --json | jq -c '[.devices | to_entries[] | .key as $runtime | .value[] | . + {runtime: $runtime}]')"
+  udid="$(jq -r --arg name "$name" --arg runtime "$runtime" '[.[] | select(.name == $name)] | first | select(. != null and .runtime == $runtime) | .udid' <<<"$devices")"
+  versioned="$name (iOS $version)"
+  [ -n "$udid" ] || udid="$(jq -r --arg name "$versioned" --arg runtime "$runtime" '[.[] | select(.name == $name and .runtime == $runtime)] | first | .udid // empty' <<<"$devices")"
+  if [ -z "$udid" ]; then
+    if [ -n "$(jq -r --arg name "$versioned" '[.[] | select(.name == $name)] | first | .udid // empty' <<<"$devices")" ]; then
+      echo "$0: a simulator named '$versioned' is on another runtime; rename or delete it" >&2
+      exit 1
     fi
+    newest="$(jq -r 'last | .identifier' <<<"$runtimes")"
+    if [ "$runtime" = "$newest" ] && [ -z "$(jq -r --arg name "$name" '[.[] | select(.name == $name)] | first | .udid // empty' <<<"$devices")" ]; then
+      versioned="$name"
+    fi
+    udid="$(create_device "$versioned" "$runtime" "$(jq -c --arg id "$runtime" '.[] | select(.identifier == $id) | select((.supportedDeviceTypes // []) | length > 0) | {devicetypes: .supportedDeviceTypes}' <<<"$runtimes")")"
   fi
   printf '%s\n' "$udid"
 }
 
 if [ -n "${AGENTHAIL_SIMULATOR_FIND_LOCKED:-}" ]; then
-  find_or_create
+  if [ -n "${AGENTHAIL_SIMULATOR_RUNTIME:-}" ]; then
+    find_or_create_on "$AGENTHAIL_SIMULATOR_RUNTIME"
+  else
+    find_or_create
+  fi
   exit 0
 fi
 # One machine-wide lock, shared with the Agenthail daemon, so two first users cannot both create the simulator.
 udid="$(AGENTHAIL_SIMULATOR_FIND_LOCKED=1 lockf -k /tmp/agenthail-simulator-create.lock "$0" "$kind")"
 [ -n "$udid" ]
 
-case "${2:-}" in
+case "${1:-}" in
   "") ;;
   --boot)
     xcrun simctl boot "$udid" 2>/dev/null || true
     xcrun simctl bootstatus "$udid" -b >/dev/null
     ;;
   run)
-    [ "$#" -ge 3 ] || usage
-    shift 2
+    [ "$#" -ge 2 ] || usage
+    shift
     guard_xcodebuild "$@"
     set -- "${guarded[@]}"
     # Fixed path, not TMPDIR: every session on this machine must contend for the same lock.
