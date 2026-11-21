@@ -419,6 +419,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 		defer close(noticesDone)
 		d.runRemoteInboxNotices(ctx)
 	}()
+	eventsDone := make(chan struct{})
+	go func() {
+		defer close(eventsDone)
+		d.runEventDeliveries(ctx)
+	}()
 	go d.runIdleCompaction(ctx)
 	go d.runGoalSweeps(ctx)
 	go d.runWorkCleans(ctx)
@@ -452,6 +457,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 			<-extensionsDone
 			<-uiDone
 			<-noticesDone
+			<-eventsDone
 			d.log.Printf("stopping")
 			return nil
 		case <-observerTicker.C:

@@ -23,6 +23,7 @@ const (
 	tokenInfoRemote     = "agenthail.remote"
 	tokenInfoBinding    = "agenthail.binding"
 	tokenInfoEpoch      = "agenthail.epoch"
+	tokenInfoTokenHash  = "agenthail.token_hash"
 	remoteInboxURIStart = "agenthail://inbox/"
 )
 
@@ -52,11 +53,17 @@ type remoteMCP struct {
 	// afterEpoch between verify's epoch read and its token check, for tests.
 	beforeNotice func()
 	afterEpoch   func()
+
+	eventWake chan struct{}
+	// webhookClient, eventRetries and eventTrialEvery are replaced by tests.
+	webhookClient   *http.Client
+	eventRetries    []time.Duration
+	eventTrialEvery time.Duration
 }
 
 func (d *Daemon) remoteMCP() *remoteMCP {
 	d.remoteOnce.Do(func() {
-		m := &remoteMCP{d: d, sessions: map[*mcp.ServerSession]*remotePushSession{}, wake: make(chan struct{}, 1)}
+		m := &remoteMCP{d: d, sessions: map[*mcp.ServerSession]*remotePushSession{}, wake: make(chan struct{}, 1), eventWake: make(chan struct{}, 1), webhookClient: newWebhookClient(), eventRetries: eventRetrySchedule, eventTrialEvery: eventTrialEvery}
 		m.stopCtx, m.stopRequests = context.WithCancel(context.Background())
 		m.server = mcp.NewServer(&mcp.Implementation{Name: "agenthail", Version: d.build.Version}, &mcp.ServerOptions{
 			SupportedProtocolVersions: mcpProtocolVersions,
@@ -66,6 +73,7 @@ func (d *Daemon) remoteMCP() *remoteMCP {
 		})
 		m.server.AddReceivingMiddleware(m.track)
 		d.registerMCPTools(m.server)
+		m.registerEvents()
 		m.server.AddResourceTemplate(&mcp.ResourceTemplate{URITemplate: remoteInboxURIStart + "{name}", Name: "inbox", Title: "Inbox", Description: "How many messages wait unread in your inbox. Read them with agenthail_read.", MIMEType: "application/json"}, m.readInbox)
 		stream := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return m.server }, &mcp.StreamableHTTPOptions{EventStore: mcp.NewMemoryEventStore(nil), SessionTimeout: cmp.Or(d.remoteIdle, remoteSessionIdle)})
 		bearer := auth.RequireBearerToken(m.verify, &auth.RequireBearerTokenOptions{})
@@ -202,7 +210,7 @@ func (m *remoteMCP) verify(ctx context.Context, token string, r *http.Request) (
 	if err := d.Registry.TouchRemoteIdentity(remote.IdentityID, time.Now()); err != nil {
 		d.logRuntimeError("remote mcp last seen", err)
 	}
-	return &auth.TokenInfo{UserID: remote.IdentityID, Expiration: time.Now().Add(remoteTokenLife), Extra: map[string]any{tokenInfoRemote: remote.Name, tokenInfoBinding: binding, tokenInfoEpoch: epoch}}, nil
+	return &auth.TokenInfo{UserID: remote.IdentityID, Expiration: time.Now().Add(remoteTokenLife), Extra: map[string]any{tokenInfoRemote: remote.Name, tokenInfoBinding: binding, tokenInfoEpoch: epoch, tokenInfoTokenHash: remote.TokenHash}}, nil
 }
 
 // An identity has the person's reach, as the CLI it sends with does.
