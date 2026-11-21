@@ -506,7 +506,7 @@ func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session
 	if !found || ask.SessionID != session.ID {
 		return actionResult{}, staleRequest()
 	}
-	if ask.State != registry.AskOpen {
+	if ask.State != registry.AskOpen && !replacedTerminalPick(ask, response) {
 		return actionResult{}, settledRequest(ask)
 	}
 	if p.Kind == principalPerson && source != "" {

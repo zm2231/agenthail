@@ -47,6 +47,7 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	if item == nil {
 		return
 	}
+	ctx = surface.WithQueueItem(ctx, item.ID)
 	if item.Operation == registry.QueueOperationCompact {
 		// The compact may resume the session and move it to another process;
 		// it works on its own copy so the observer's session is never written

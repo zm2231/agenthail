@@ -50,7 +50,7 @@ func (c *Claude) MoveToRoot(ctx context.Context, out *surface.MoveOut, moveID, r
 		return nil, c.unplaceRootMove(conversation, moveID, target, err, undo)
 	}
 	c.transcripts.pass(roots)(conversation)
-	resumed, err := c.resumeAs(ctx, conversation, out.Cwd, claudehost.OpenRequest{Model: out.Model, PermissionMode: out.PermissionMode, Name: out.Title})
+	resumed, err := c.resumeAs(ctx, conversation, out.Cwd, "it moved to another config root", claudehost.OpenRequest{Model: out.Model, PermissionMode: out.PermissionMode, Name: out.Title})
 	if err != nil && surface.IsDeliveryOutcomeUnknown(err) {
 		return nil, fmt.Errorf("%w: %v", surface.ErrMoveInPlaced, err)
 	}

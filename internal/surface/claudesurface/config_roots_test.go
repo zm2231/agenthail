@@ -258,7 +258,7 @@ func TestResumingAConversationNoRecordNamesRefusesOneInTwoConfigRoots(t *testing
 	fixture.AddRoot("claude-work")
 	fixture.Transcript(fixtureConversation, fixture.Home)
 	c := surfacetest.InDaemon(NewClaude(nil, fixture.Home))
-	if _, err := c.resumeAs(context.Background(), fixtureConversation, fixture.Home, claudehost.OpenRequest{}); err == nil || !strings.Contains(err.Error(), "more than one Claude config directory") {
+	if _, err := c.resumeAs(context.Background(), fixtureConversation, fixture.Home, "", claudehost.OpenRequest{}); err == nil || !strings.Contains(err.Error(), "more than one Claude config directory") {
 		t.Fatalf("err=%v", err)
 	}
 }

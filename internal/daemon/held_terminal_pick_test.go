@@ -58,12 +58,24 @@ func (s *heldInTerminals) run(t *testing.T) (*runningDaemon, func()) {
 // every terminal.
 func holdInTerminals(t *testing.T, count int) (*heldInTerminals, *runningDaemon, func()) {
 	t.Helper()
+	return holdInTerminalsAs(t, count, 0, nil)
+}
+
+// holdInTerminalsAs is holdInTerminals with terminals open for age before the
+// message is queued, each with its record rewritten by record when set.
+func holdInTerminalsAs(t *testing.T, count int, age time.Duration, record func(*claudetest.Holder)) (*heldInTerminals, *runningDaemon, func()) {
+	t.Helper()
 	fixture := claudetest.New(t)
 	s := &heldInTerminals{fixture: fixture, cwd: filepath.Join(t.TempDir(), "release-notes")}
 	fixture.Transcript(heldConversation, s.cwd)
 	for range count {
-		s.holders = append(s.holders, fixture.Holder(heldConversation, s.cwd))
+		holder := fixture.Holder(heldConversation, s.cwd)
+		if record != nil {
+			record(holder)
+		}
+		s.holders = append(s.holders, holder)
 	}
+	time.Sleep(age)
 	recordNativeSender(t, fixture.Root, "sender-native")
 	store, err := registry.Open(registrytest.Path(t))
 	if err != nil {
@@ -87,13 +99,18 @@ func holdInTerminals(t *testing.T, count int) (*heldInTerminals, *runningDaemon,
 // offers exactly the given terminals, then Cancel and Dismiss.
 func (s *heldInTerminals) awaitAsk(t *testing.T, holders ...*claudetest.Holder) registry.Ask {
 	t.Helper()
+	return s.awaitAskWithin(t, 5*time.Second, holders...)
+}
+
+func (s *heldInTerminals) awaitAskWithin(t *testing.T, wait time.Duration, holders ...*claudetest.Holder) registry.Ask {
+	t.Helper()
 	want := []string{}
 	for _, holder := range holders {
 		want = append(want, registry.TerminalOption(holder.PID))
 	}
 	want = append(want, registry.DeliveryCancel, registry.DeliveryDismiss)
 	var found []registry.Ask
-	testkit.Eventually(t, "an ask to pick one of the terminals", 5*time.Second, func() bool {
+	testkit.Eventually(t, "an ask to pick one of the terminals", wait, func() bool {
 		found = nil
 		for _, ask := range openDeliveryAsks(t, s.store) {
 			if strings.HasPrefix(ask.Ref, fmt.Sprintf("queue:%d:shared:", s.queued)) {
@@ -214,8 +231,8 @@ func TestAPickedTerminalThatClosedHoldsTheMessageAgainAmongTheOthers(t *testing.
 	gone := s.holders[0]
 	gone.Exit()
 	status, payload := h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": ask.SessionID, "requestId": ask.ID, "decision": map[string]any{"choices": []string{registry.TerminalOption(gone.PID)}}})
-	if status != http.StatusOK {
-		t.Fatalf("pick status=%d body=%s", status, payload)
+	if status != http.StatusConflict || !strings.Contains(string(payload), fmt.Sprintf("process %d did not hold", gone.PID)) || !strings.Contains(string(payload), "terminals still open") {
+		t.Fatalf("pick status=%d body=%s, want it refused as closed", status, payload)
 	}
 
 	h.awaitQueueItem(s.queued, "the message held among the terminals left", func(item dashboardQueue) bool {
@@ -275,5 +292,62 @@ func TestCancellingAHeldMessageDropsItAndTellsTheSender(t *testing.T) {
 	})
 	if got := s.received(t); !slices.Equal(got, []int{0, 0}) {
 		t.Fatalf("a canceled message reached a terminal: %v", got)
+	}
+}
+
+func TestAPickFromAnAskReplacedWhenAnotherTerminalClosedStillReachesItsTerminal(t *testing.T) {
+	pickFromAReplacedAsk(t, nil)
+}
+
+func TestAPickFromAReplacedAskReachesATerminalWhoseRecordNamesOnlyItsProcessStart(t *testing.T) {
+	pickFromAReplacedAsk(t, func(holder *claudetest.Holder) { holder.RecordProcStart(heldConversation) })
+}
+
+func pickFromAReplacedAsk(t *testing.T, record func(*claudetest.Holder)) {
+	t.Helper()
+	s, h, _ := holdInTerminalsAs(t, 3, 1500*time.Millisecond, record)
+	ask := s.awaitAsk(t, s.holders...)
+	h.execStore(`UPDATE message_queue SET available_at_ms=? WHERE id=?`, time.Now().Add(time.Hour).UnixMilli(), s.queued)
+	s.holders[0].Exit()
+	if again := s.awaitAskWithin(t, 30*time.Second, s.holders[1:]...); again.ID == ask.ID {
+		t.Fatalf("ask %s was not replaced after a terminal closed", ask.ID)
+	}
+
+	picked := s.holders[2]
+	status, payload := h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": ask.SessionID, "requestId": ask.ID, "decision": map[string]any{"choices": []string{registry.TerminalOption(picked.PID)}}})
+	if status != http.StatusOK {
+		t.Fatalf("pick status=%d body=%s, want the replaced ask's pick accepted", status, payload)
+	}
+	h.awaitQueueItem(s.queued, "the message delivered to the picked terminal", func(item dashboardQueue) bool {
+		return item.Historical && item.Status == "delivered"
+	})
+	if got := s.received(t); !slices.Equal(got, []int{0, 0, 1}) {
+		t.Fatalf("received=%v, want only the picked terminal", got)
+	}
+}
+
+func TestAPickFromAReplacedAskNeverReachesALaterProcessUnderItsPid(t *testing.T) {
+	s, h, _ := holdInTerminals(t, 3)
+	ask := s.awaitAsk(t, s.holders...)
+	reused := s.holders[2]
+	time.Sleep(5 * time.Millisecond)
+	reused.Restart(heldConversation)
+	h.execStore(`UPDATE message_queue SET available_at_ms=0 WHERE id=?`, s.queued)
+	testkit.Eventually(t, "the message held again with the later process", 30*time.Second, func() bool {
+		for _, open := range openDeliveryAsks(t, s.store) {
+			if open.ID != ask.ID && strings.HasPrefix(open.Ref, fmt.Sprintf("queue:%d:shared:", s.queued)) && len(open.Questions[0].Options) == 5 {
+				return true
+			}
+		}
+		return false
+	})
+	h.execStore(`UPDATE message_queue SET available_at_ms=? WHERE id=?`, time.Now().Add(time.Hour).UnixMilli(), s.queued)
+
+	status, payload := h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": ask.SessionID, "requestId": ask.ID, "decision": map[string]any{"choices": []string{registry.TerminalOption(reused.PID)}}})
+	if status != http.StatusConflict {
+		t.Fatalf("pick status=%d body=%s, want the later process refused", status, payload)
+	}
+	if got := s.received(t); !slices.Equal(got, []int{0, 0, 0}) {
+		t.Fatalf("received=%v, want no terminal reached", got)
 	}
 }

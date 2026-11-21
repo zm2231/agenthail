@@ -15,6 +15,8 @@ import (
 
 const DeliveryShared = "shared"
 
+var ErrMessageNotHeld = errors.New("the message is no longer held")
+
 const terminalOptionPrefix = "pid-"
 
 func heldHolders(cause error) (string, error) {
@@ -55,12 +57,12 @@ func sharedProblem(id, refusal int64, message string, holders []surface.Holder) 
 
 const maxOptionLabel = 40
 
-func (r *Registry) PinHeldMessage(id int64, pid int) error {
+func (r *Registry) PinHeldMessage(id int64, pid int, accept func(surface.Holder) bool) error {
 	return r.deliveryWrite(func(tx *sql.Tx) error {
 		var raw string
 		err := tx.QueryRow(`SELECT holders_json FROM message_queue WHERE id=? AND `+queueRefusedRow+` AND status='pending'`, id).Scan(&raw)
 		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("queue item %d is no longer held", id)
+			return fmt.Errorf("queue item %d: %w", id, ErrMessageNotHeld)
 		}
 		if err != nil {
 			return err
@@ -70,7 +72,7 @@ func (r *Registry) PinHeldMessage(id int64, pid int) error {
 			return err
 		}
 		for _, holder := range holders {
-			if holder.PID == pid {
+			if holder.PID == pid && (accept == nil || accept(holder)) {
 				_, err := tx.Exec(`UPDATE message_queue SET holder_pid=?,holder_start=?,refused=0,available_at_ms=0,updated_at=datetime('now') WHERE id=?`, pid, holder.Start, id)
 				return err
 			}
