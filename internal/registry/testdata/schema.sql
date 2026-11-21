@@ -1,4 +1,4 @@
--- schemaVersion 117
+-- schemaVersion 118
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -154,6 +154,9 @@ CREATE INDEX tasks_running ON tasks(child_session_id) WHERE state='running';
 
 -- index trigger_runs_state
 CREATE INDEX trigger_runs_state ON trigger_runs(state, trigger_name, id);
+
+-- index turn_ends_open
+CREATE INDEX turn_ends_open ON turn_ends(started_at_ms) WHERE completed_turn_id='';
 
 -- index turn_judgments_ended
 CREATE INDEX turn_judgments_ended ON turn_judgments(ended_at_ms);

@@ -103,7 +103,7 @@ func (d *Daemon) resumeAfterLimits(ctx context.Context, now time.Time) {
 // forgetting one that something ran after. It reads transcripts only, so a
 // pass asks nothing of the sessions' processes or of Claude.
 func (d *Daemon) sweepLimitStops(ctx context.Context, now time.Time) {
-	sessions, err := d.Registry.ListSessions(0)
+	sessions, err := d.Registry.ListSessionsOf(surface.KindClaude)
 	if err != nil {
 		d.log.Printf("list sessions for usage-limit stops: %s", err)
 		return
