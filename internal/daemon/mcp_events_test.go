@@ -30,6 +30,7 @@ const webhookSecret = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
 type webhookCall struct {
 	id, timestamp, subscription string
 	body                        map[string]any
+	at                          time.Time
 }
 
 type webhookReceiver struct {
@@ -40,11 +41,13 @@ type webhookReceiver struct {
 	mu     sync.Mutex
 	secret string
 	reply  func(call webhookCall) (int, string)
+	header http.Header
 	gate   chan struct{}
+	gated  chan struct{}
 }
 
 func newWebhookReceiver(t *testing.T) *webhookReceiver {
-	w := &webhookReceiver{t: t, calls: make(chan webhookCall, 64), secret: webhookSecret}
+	w := &webhookReceiver{t: t, calls: make(chan webhookCall, 64), secret: webhookSecret, gated: make(chan struct{}, 1)}
 	w.reply = func(call webhookCall) (int, string) {
 		if call.body["type"] == "verification" {
 			return http.StatusOK, fmt.Sprintf(`{"challenge":%q}`, call.body["challenge"])
@@ -69,9 +72,9 @@ func (w *webhookReceiver) client() *http.Client {
 
 func (w *webhookReceiver) serve(rw http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
-	call := webhookCall{id: r.Header.Get("webhook-id"), timestamp: r.Header.Get("webhook-timestamp"), subscription: r.Header.Get("X-MCP-Subscription-Id")}
+	call := webhookCall{at: time.Now(), id: r.Header.Get("webhook-id"), timestamp: r.Header.Get("webhook-timestamp"), subscription: r.Header.Get("X-MCP-Subscription-Id")}
 	w.mu.Lock()
-	secret, reply, gate := w.secret, w.reply, w.gate
+	secret, reply, gate, header := w.secret, w.reply, w.gate, w.header
 	w.mu.Unlock()
 	if !validWebhookSignature(secret, call.id, call.timestamp, body, r.Header.Get("webhook-signature")) || r.Header.Get("Content-Type") != "application/json" {
 		w.t.Errorf("a webhook failed verification: id=%q signature=%q", call.id, r.Header.Get("webhook-signature"))
@@ -82,10 +85,16 @@ func (w *webhookReceiver) serve(rw http.ResponseWriter, r *http.Request) {
 		w.t.Errorf("webhook body %s: %v", body, err)
 	}
 	if gate != nil && call.body["type"] == nil {
+		w.gated <- struct{}{}
 		<-gate
 	}
 	status, text := reply(call)
 	w.calls <- call
+	if call.body["type"] == nil {
+		for key, values := range header {
+			rw.Header()[key] = values
+		}
+	}
 	rw.WriteHeader(status)
 	_, _ = io.WriteString(rw, text)
 }
@@ -285,10 +294,13 @@ func TestARemoteIdentityIsWokenBySignedWebhooksThatCarryOnlyACount(t *testing.T)
 	gate := w.gate
 	w.mu.Unlock()
 	f.deliver(t, "second")
-	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-w.gated:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no event reached the gate")
+	}
 	f.deliver(t, "third")
 	f.deliver(t, "fourth")
-	time.Sleep(200 * time.Millisecond)
 	close(gate)
 	if held := w.next(t, "the event held at the gate"); held.body["data"].(map[string]any)["unread"] != float64(2) {
 		t.Fatalf("held event=%v", held.body)
@@ -346,6 +358,50 @@ func TestAWebhookIsRetriedWithItsEventIDAndA410EndsTheSubscription(t *testing.T)
 	})
 	if history := f.eventHistory(t); !strings.Contains(history, "disabled") {
 		t.Fatalf("history:\n%s", history)
+	}
+}
+
+func TestAWebhookWaitsAsLongAsItsRetryAfterAsks(t *testing.T) {
+	f, w, start := eventsFixture(t)
+	session := f.eventsSession(t)
+	if _, err := subscribe(t.Context(), session, w.url+"/hook", webhookSecret, ""); err != nil {
+		t.Fatal(err)
+	}
+	w.next(t, "the verification handshake")
+	attempts := 0
+	w.answer(func(webhookCall) (int, string) {
+		attempts++
+		if attempts == 1 {
+			return http.StatusTooManyRequests, ""
+		}
+		return http.StatusOK, ""
+	})
+	w.mu.Lock()
+	w.header = http.Header{"Retry-After": {"1"}}
+	w.mu.Unlock()
+	start()
+	f.deliver(t, "one")
+	first, retried := w.next(t, "the throttled attempt"), w.next(t, "the retry")
+	if gap := retried.at.Sub(first.at); gap < 900*time.Millisecond || first.id != retried.id {
+		t.Fatalf("retried after %s with id %s then %s, want at least the 1s asked", gap, first.id, retried.id)
+	}
+
+	for name, value := range map[string]string{"seconds": "3600", "HTTP date": time.Now().Add(time.Hour).UTC().Format(http.TimeFormat)} {
+		w.answer(func(webhookCall) (int, string) { return http.StatusServiceUnavailable, "" })
+		w.mu.Lock()
+		w.header = http.Header{"Retry-After": {value}}
+		w.mu.Unlock()
+		f.deliver(t, "deferred by "+name)
+		w.next(t, name+": the attempt that is told to wait an hour")
+		w.quiet(t, name+": within the hour asked", 500*time.Millisecond)
+		f.deliver(t, "more mail while deferred by "+name)
+		w.quiet(t, name+": new mail while deferred", 500*time.Millisecond)
+		if history := f.eventHistory(t); !strings.Contains(history, "deferred") || strings.Contains(history, "failed") {
+			t.Fatalf("%s history:\n%s", name, history)
+		}
+		if _, err := subscribe(t.Context(), session, w.url+"/hook", webhookSecret, ""); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

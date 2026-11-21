@@ -957,6 +957,7 @@ CREATE TABLE IF NOT EXISTS mcp_event_subscriptions (
 	notified_through INTEGER NOT NULL DEFAULT 0,
 	failures INTEGER NOT NULL DEFAULT 0,
 	suspended_at_ms INTEGER NOT NULL DEFAULT 0,
+	deferred_until_ms INTEGER NOT NULL DEFAULT 0,
 	created_at_ms INTEGER NOT NULL,
 	UNIQUE(identity_id,url,name,args)
 );

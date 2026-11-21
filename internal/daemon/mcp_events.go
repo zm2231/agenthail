@@ -41,6 +41,7 @@ const (
 	eventURLLimit          = 2048
 	eventResponseLimit     = 64 << 10
 	eventSweep             = 5 * time.Second
+	eventRetryAfterInRun   = 10 * time.Minute
 
 	codeCallbackEndpoint = -32015
 	historyMCPEvent      = "mcp-event"
@@ -425,9 +426,7 @@ func (m *remoteMCP) postWebhook(ctx context.Context, subscription, callback, id 
 	defer resp.Body.Close()
 	reply := webhookReply{status: resp.StatusCode}
 	reply.body, _ = io.ReadAll(io.LimitReader(resp.Body, eventResponseLimit))
-	if seconds, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && seconds > 0 {
-		reply.retryAfter = time.Duration(seconds) * time.Second
-	}
+	reply.retryAfter = retryAfter(resp.Header.Get("Retry-After"), time.Now())
 	switch {
 	case resp.StatusCode >= 500:
 		reply.reason = "http_5xx"
@@ -435,6 +434,16 @@ func (m *remoteMCP) postWebhook(ctx context.Context, subscription, callback, id 
 		reply.reason = "http_4xx"
 	}
 	return reply
+}
+
+func retryAfter(value string, now time.Time) time.Duration {
+	if seconds, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil {
+		return time.Duration(max(seconds, 0)) * time.Second
+	}
+	if at, err := http.ParseTime(value); err == nil {
+		return max(at.Sub(now), 0)
+	}
+	return 0
 }
 
 func transportReason(err error) string {

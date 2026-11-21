@@ -105,6 +105,9 @@ func (r *Registry) SubscribeEvent(s EventSubscribe) (EventSubscription, error) {
 	if current == 0 || epoch != s.Epoch {
 		return EventSubscription{}, ErrRemoteCredentialsMoved
 	}
+	if _, err := tx.Exec(`DELETE FROM mcp_event_subscriptions WHERE identity_id=? AND refresh_before_ms<>0 AND refresh_before_ms<=?`, s.IdentityID, now.UnixMilli()); err != nil {
+		return EventSubscription{}, err
+	}
 	var held int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM mcp_event_subscriptions WHERE identity_id=? AND id<>?`, s.IdentityID, s.ID).Scan(&held); err != nil {
 		return EventSubscription{}, err
@@ -122,7 +125,7 @@ func (r *Registry) SubscribeEvent(s EventSubscribe) (EventSubscription, error) {
 			prev_secret=CASE WHEN secret<>excluded.secret THEN secret ELSE prev_secret END,
 			prev_secret_until_ms=CASE WHEN secret<>excluded.secret THEN ?11 ELSE prev_secret_until_ms END,
 			secret=excluded.secret,refresh_before_ms=excluded.refresh_before_ms,
-			verified_at_ms=MAX(verified_at_ms,excluded.verified_at_ms),failures=0,suspended_at_ms=0`,
+			verified_at_ms=MAX(verified_at_ms,excluded.verified_at_ms),failures=0,suspended_at_ms=0,deferred_until_ms=0`,
 		s.ID, s.IdentityID, s.TokenHash, s.Name, s.Args, s.URL, s.Secret, millis(s.RefreshBefore), verified, now.UnixMilli(), now.Add(s.SecretGrace).UnixMilli()); err != nil {
 		return EventSubscription{}, err
 	}
@@ -167,7 +170,7 @@ func (r *Registry) DueEvents(now time.Time, trialEvery time.Duration) ([]DueEven
 		return due, err
 	}, `SELECT `+eventSubscriptionColumns+`,u.newest,u.unread`+liveEventFrom+`
 		JOIN (SELECT identity_id,MAX(id) newest,COUNT(*) unread FROM agent_inbox WHERE read_at_ms=0 GROUP BY identity_id) u ON u.identity_id=s.identity_id AND u.newest>s.notified_through`+
-		liveEventWhere+` AND (s.suspended_at_ms=0 OR s.suspended_at_ms<=?2) ORDER BY s.id`, now.UnixMilli(), now.Add(-trialEvery).UnixMilli())
+		liveEventWhere+` AND (s.suspended_at_ms=0 OR s.suspended_at_ms<=?2) AND s.deferred_until_ms<=?1 ORDER BY s.id`, now.UnixMilli(), now.Add(-trialEvery).UnixMilli())
 }
 
 func (r *Registry) LiveEventSubscription(id string, now time.Time) (EventSubscription, bool, error) {
@@ -179,7 +182,7 @@ func (r *Registry) LiveEventSubscription(id string, now time.Time) (EventSubscri
 }
 
 func (r *Registry) EventDelivered(id string, through int64) error {
-	_, err := r.db.Exec(`UPDATE mcp_event_subscriptions SET notified_through=MAX(notified_through,?),failures=0,suspended_at_ms=0 WHERE id=?`, through, id)
+	_, err := r.db.Exec(`UPDATE mcp_event_subscriptions SET notified_through=MAX(notified_through,?),failures=0,suspended_at_ms=0,deferred_until_ms=0 WHERE id=?`, through, id)
 	return err
 }
 
@@ -207,6 +210,11 @@ func (r *Registry) EventFailed(id string, suspendAfter int) (bool, error) {
 		return false, err
 	}
 	return failures == suspendAfter, tx.Commit()
+}
+
+func (r *Registry) DeferEvent(id string, until time.Time) error {
+	_, err := r.db.Exec(`UPDATE mcp_event_subscriptions SET deferred_until_ms=? WHERE id=?`, until.UnixMilli(), id)
+	return err
 }
 
 func (r *Registry) PruneExpiredEventSubscriptions(now time.Time) (int64, error) {

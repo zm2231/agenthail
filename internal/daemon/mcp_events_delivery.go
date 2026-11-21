@@ -142,7 +142,19 @@ func (m *remoteMCP) deliverEvent(ctx context.Context, event registry.DueEvent) {
 		if !retryable(reply.status) {
 			break
 		}
-		wait = min(reply.retryAfter, eventRetrySchedule[len(eventRetrySchedule)-1])
+		wait = 0
+		if reply.retryAfter > 0 {
+			if attempt+1 < len(schedule) && reply.retryAfter <= eventRetryAfterInRun {
+				wait = reply.retryAfter
+				continue
+			}
+			until := time.Now().Add(reply.retryAfter)
+			if err := m.d.Registry.DeferEvent(sub.ID, until); err != nil {
+				m.d.logRuntimeError("event deliveries", err)
+			}
+			m.recordEvent(sub.IdentityID, sub.URL, fmt.Sprintf("deferred %s until %s, as the endpoint asked: %s", occurrence.EventID, until.UTC().Format(time.RFC3339), reason))
+			return
+		}
 	}
 	suspended, err := m.d.Registry.EventFailed(event.ID, eventSuspendAfter)
 	if err != nil {
