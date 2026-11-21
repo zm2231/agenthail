@@ -60,6 +60,8 @@ Answer with `respond`, `decision.choices` a one-element list of the option id (`
 
 A queue row (`/api/v1/queue`, the dashboard queue) and an inbox message (`/api/v1/inbox`) carry `askId` while a delivery ask about them is open, so an app opens the ask from the row.
 
+An answer to a delivery ask that is no longer open is `stale` (409), and its reply also carries `settled`: the id of the option that settled it (`retry`, `delete`, `dismiss` or `cancel`), or `withdrawn`. An app holding the message as not sent removes it on Delete unless it was retried, in which case it says the message is being sent again.
+
 A choice the ask does not offer is `400 invalid_request`. A choice that can no longer apply (the row was already retried or canceled) is `409 conflict` and records the failure as the ask's apply status. `queue-cancel` refuses a dead row with `409 conflict`; answer its ask. There is no queue retry action.
 
 A `send` or `steer` that fails after the daemon recorded its delivery answers with the error body plus the ask to answer:

@@ -53,15 +53,37 @@ struct FailedSendDeleteTest {
         await pane.respond(to: SessionRequest(id: "ask-1", kind: "ask", tool: "", questions: [question]), decision: .choose(FailedSendAsk.delete))
         check(model.outbox.rows["S"]?.isEmpty ?? true, "Delete on the pinned ask removes the failed send's row")
 
-        FailedSendDeleteStub.actionReply = (409, #"{"ok":false,"error":{"code":"stale","message":"this request was already answered or has expired"}}"#)
-        let row = failedSend()
-        model.outbox.record(row, in: "S")
-        model.deleteSend(row, in: "S")
+        func deleteAfterSettled(_ reply: String) async -> LocalSend {
+            FailedSendDeleteStub.actionReply = (409, reply)
+            model.operationError = nil
+            let row = failedSend()
+            model.outbox.record(row, in: "S")
+            model.deleteSend(row, in: "S")
+            for _ in 0..<200 where model.outbox.rows["S"]?.contains(where: { $0.id == row.id }) == true && model.operationError == nil {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            return row
+        }
+        let stale = #"{"ok":false,"error":{"code":"stale","message":"this request was already answered or has expired"}"#
+
+        _ = await deleteAfterSettled(stale + #","settled":"delete"}"#)
+        check(model.outbox.rows["S"]?.isEmpty ?? true, "Delete on a row whose ask was deleted elsewhere removes the row")
+        check(model.operationError == nil, "an ask deleted elsewhere is not reported as a failure")
+
+        _ = await deleteAfterSettled(stale + #","settled":"retry"}"#)
+        check(model.outbox.rows["S"]?.isEmpty ?? true, "a row whose message is being sent again is no longer shown as not sent")
+        check(model.operationError == SettledAsk.resentNotice, "Delete says the message was already sent again rather than claiming it was deleted")
+
+        let kept = await deleteAfterSettled(stale + "}")
+        check(model.outbox.rows["S"]?.contains { $0.id == kept.id } == true, "a stale reply that does not say how the ask was settled keeps the row")
+        model.outbox.discard(kept, in: "S")
+
+        model.outbox.record(failedSend(), in: "S")
+        NotificationCenter.default.post(name: .agenthailRequestAnswered, object: AnsweredRequest(requestID: "ask-1", choice: FailedSendAsk.delete))
         for _ in 0..<200 where !(model.outbox.rows["S"]?.isEmpty ?? true) {
             try? await Task.sleep(for: .milliseconds(10))
         }
-        check(model.outbox.rows["S"]?.isEmpty ?? true, "Delete on a row whose ask was already settled removes the row")
-        check(model.operationError == nil, "a settled ask is not reported as a failure")
+        check(model.outbox.rows["S"]?.isEmpty ?? true, "Delete from a notification removes the failed send's row")
         print("ok")
     }
 }

@@ -503,8 +503,11 @@ func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
 	}
-	if !found || ask.SessionID != session.ID || ask.State != registry.AskOpen {
+	if !found || ask.SessionID != session.ID {
 		return actionResult{}, staleRequest()
+	}
+	if ask.State != registry.AskOpen {
+		return actionResult{}, settledRequest(ask)
 	}
 	if p.Kind == principalPerson && source != "" {
 		p, source = sessionPrincipal(source), ""

@@ -1126,16 +1126,36 @@ final class ComposerSendTests: XCTestCase {
         XCTAssertNil(model.refusedSends[session.id], "Delete on the pinned ask removes the refused send it named")
     }
 
-    func testDeleteOnARefusedSendWhoseAskWasAlreadySettledRemovesIt() async throws {
-        ComposerSendProtocol.state.script([.answer(409, keptRefusal), .answer(409, #"{"ok":false,"error":{"code":"stale","message":"this request was already answered or has expired"}}"#)])
+    private func refusedSend(settledReply: String) async throws -> (AgenthailIOSModel, SessionState) {
+        ComposerSendProtocol.state.script([.answer(409, keptRefusal), .answer(409, settledReply)])
         ComposerSendProtocol.state.listRequests(deleteOffered)
         let (model, session) = try makeModel()
         model.composer = "/Volumes/4/CF holds 680 GiB"
         model.send(to: session)
         try await waitUntil { model.refusedSends[session.id]?.canDelete == true }
+        return (model, session)
+    }
+
+    private let stale = #"{"ok":false,"error":{"code":"stale","message":"this request was already answered or has expired"}"#
+
+    func testDeleteOnARefusedSendWhoseAskWasDeletedElsewhereRemovesIt() async throws {
+        let (model, session) = try await refusedSend(settledReply: stale + #","settled":"delete"}"#)
         model.deleteRefusedSend(in: session.id)
         try await waitUntil { model.refusedSends[session.id] == nil }
-        XCTAssertNil(model.operationError, "an ask settled elsewhere is not reported as a failure")
+        XCTAssertNil(model.operationError, "an ask deleted elsewhere is not reported as a failure")
+    }
+
+    func testDeleteOnARefusedSendThatWasRetriedElsewhereSaysItWasSentAgain() async throws {
+        let (model, session) = try await refusedSend(settledReply: stale + #","settled":"retry"}"#)
+        model.deleteRefusedSend(in: session.id)
+        try await waitUntil { model.refusedSends[session.id] == nil }
+        XCTAssertEqual(model.operationError, SettledAsk.resentNotice)
+    }
+
+    func testDeleteFromANotificationRemovesTheRefusedSend() async throws {
+        let (model, session) = try await refusedSend(settledReply: stale + "}")
+        NotificationCenter.default.post(name: .agenthailRequestAnswered, object: AnsweredRequest(requestID: "ask-1", choice: FailedSendAsk.delete))
+        try await waitUntil { model.refusedSends[session.id] == nil }
     }
 
     private func makeModel(store: ComposerStore? = nil) throws -> (model: AgenthailIOSModel, session: SessionState) {

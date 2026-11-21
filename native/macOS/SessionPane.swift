@@ -1054,7 +1054,7 @@ final class SessionPane: Identifiable {
         do {
             _ = try await api.respond(sessionID: id, requestID: request.id, decision: decision)
             if requestError != nil { requestError = nil }
-            if decision.choices == [FailedSendAsk.delete] { model.outbox.deleted(ask: request.id, in: id) }
+            if decision.choices == [FailedSendAsk.delete] { model.outbox.deleted(ask: request.id) }
         } catch {
             failure = RequestAnswerFailure(error)
             if failure?.dropsCard == true { requests = requests?.removing(request.id) }

@@ -183,6 +183,31 @@ func staleRequest() error {
 	return actionFailed(http.StatusConflict, "stale", surface.ErrRequestStale.Error())
 }
 
+// settledRequest refuses an answer to an ask that is no longer open. For a
+// failed delivery it also says how the ask was settled, so a client holding
+// the message as not sent can tell a deleted or dismissed one, which never
+// reached the session, from one that is being sent again.
+func settledRequest(ask registry.Ask) error {
+	if ask.Origin != registry.AskOriginDelivery {
+		return staleRequest()
+	}
+	failure := &actionError{Status: http.StatusConflict, Code: "stale", Message: surface.ErrRequestStale.Error()}
+	if ask.State == registry.AskWithdrawn {
+		failure.Extra = map[string]any{"settled": registry.AskWithdrawn}
+		return failure
+	}
+	if len(ask.Questions) == 0 {
+		return failure
+	}
+	question := ask.Questions[0]
+	for _, option := range question.Options {
+		if ask.Answer.Answers[question.Question] == option.Label {
+			failure.Extra = map[string]any{"settled": option.ID}
+		}
+	}
+	return failure
+}
+
 // recordSetting writes a model or permission-mode change into the session's
 // history with who made it.
 func (d *Daemon) recordSetting(session *surface.Session, action, value, actor string) {

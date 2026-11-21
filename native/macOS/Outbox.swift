@@ -83,21 +83,27 @@ final class Outbox {
                 _ = try await api.respond(sessionID: session, requestID: ask.id, decision: .choose(FailedSendAsk.delete))
                 notice(nil)
                 discard(row, in: resolve(session))
-            } catch AgenthailAPIError.requestStale {
-                // The ask was settled from another control; the message never reached the session, so the row goes.
-                notice(nil)
-                discard(row, in: resolve(session))
             } catch {
-                notice(AgenthailAPIError.userMessage(error))
-                readAsk(ask, of: row.id, in: resolve(session))
+                switch SettledAsk.of(error) {
+                case .gone:
+                    notice(nil)
+                    discard(row, in: resolve(session))
+                case .resent:
+                    notice(SettledAsk.resentNotice)
+                    discard(row, in: resolve(session))
+                case nil:
+                    notice(AgenthailAPIError.userMessage(error))
+                    readAsk(ask, of: row.id, in: resolve(session))
+                }
             }
         }
     }
 
-    func deleted(ask askID: String, in sessionID: String) {
-        let session = resolve(sessionID)
-        for row in rows[session] ?? [] where row.ask?.id == askID {
-            discard(row, in: session)
+    func deleted(ask askID: String) {
+        for (session, sends) in rows {
+            for row in sends where row.ask?.id == askID {
+                discard(row, in: session)
+            }
         }
     }
 

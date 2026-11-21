@@ -141,7 +141,7 @@ struct RequestNotificationsTest {
         do {
             _ = try await api.respond(sessionID: "s1", requestID: "req-1", decision: .choose("o1"))
             check(false, "a stale answer succeeded")
-        } catch AgenthailAPIError.requestStale(let message) {
+        } catch AgenthailAPIError.requestStale(let message, _) {
             check(message.contains("already answered"), "stale message \(message)")
         } catch {
             check(false, "stale error \(error)")

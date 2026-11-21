@@ -8,7 +8,7 @@ enum AgenthailAPIError: LocalizedError {
     case invalidResponse
     case request(Int, String)
     case chooseTerminal(Int)
-    case requestStale(String)
+    case requestStale(String, settled: String? = nil)
     case outcomeUnknown(String)
     case historyGap(String)
     case olderHost
@@ -23,7 +23,7 @@ enum AgenthailAPIError: LocalizedError {
         case .invalidResponse: return "Agenthail returned an invalid response."
         case .request(_, let message): return message
         case .chooseTerminal(let count): return "Open in \(count) terminals. Choose a terminal, then try again."
-        case .requestStale(let message): return message
+        case .requestStale(let message, _): return message
         case .outcomeUnknown(let message): return "\(message) The outcome is unknown; check the session before retrying."
         case .historyGap(let message): return message
         case .olderHost: return "This computer runs an older Agenthail. Update it to use this."
@@ -1091,7 +1091,7 @@ final class AgenthailAPI: @unchecked Sendable {
                     throw AgenthailAPIError.outcomeUnknown(message)
                 }
                 if let error = object["error"] as? [String: Any], error["code"] as? String == "stale" {
-                    throw AgenthailAPIError.requestStale(message)
+                    throw AgenthailAPIError.requestStale(message, settled: object["settled"] as? String)
                 }
                 if let error = object["error"] as? [String: Any], error["code"] as? String == "history_gap" {
                     throw AgenthailAPIError.historyGap("The oldest activity is no longer retained. Current activity is still available here; no new session is needed.")
