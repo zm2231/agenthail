@@ -222,6 +222,59 @@ func TestRemoteMCPTokenOnlyModeIdentifiesTheIdentityAndEndsWithItsToken(t *testi
 	}
 }
 
+func TestAnUnauthenticatedTunnelProbeGetsABearerChallenge(t *testing.T) {
+	f := newRemoteFixture(t, "")
+	from, err := f.r.Session("from")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := issueMCPToken(t, f.d, *from)
+	tunnel := func(token string) map[string]string {
+		headers := map[string]string{"Cf-Ray": "8f1a2b3c4d5e6f70-SJC", "Cf-Connecting-Ip": "203.0.113.9", "X-Forwarded-For": "203.0.113.9", "X-Forwarded-Proto": "https", "Cdn-Loop": "cloudflare"}
+		if token != "" {
+			headers["Authorization"] = "Bearer " + token
+		}
+		return headers
+	}
+	cases := []struct {
+		name      string
+		headers   map[string]string
+		status    int
+		challenge string
+		code      string
+	}{
+		{"tunnel, no credential", tunnel(""), http.StatusUnauthorized, `Bearer realm="agenthail"`, ""},
+		{"tunnel, the identity's remote token", tunnel(f.token), http.StatusOK, "", ""},
+		{"tunnel, a session credential", tunnel(session), http.StatusForbidden, "", "remote_refused"},
+		{"loopback, no credential", nil, http.StatusUnauthorized, "", "unauthenticated"},
+		{"loopback, a session credential", map[string]string{"Authorization": "Bearer " + session}, http.StatusOK, "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, f.server.URL+"/mcp", strings.NewReader(mcpInitialize))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Host = "127.0.0.1:7412"
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Accept", "application/json, text/event-stream")
+			for key, value := range tc.headers {
+				request.Header.Set(key, value)
+			}
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			var body map[string]any
+			_ = json.NewDecoder(response.Body).Decode(&body)
+			if response.StatusCode != tc.status || response.Header.Get("WWW-Authenticate") != tc.challenge || (tc.code != "" && errorCode(body) != tc.code) {
+				t.Fatalf("status=%d challenge=%q body=%v", response.StatusCode, response.Header.Get("WWW-Authenticate"), body)
+			}
+		})
+	}
+}
+
 func TestAccessRequestsReachOnlyMCP(t *testing.T) {
 	f := newRemoteFixture(t, "client-a")
 	f.access(t)
