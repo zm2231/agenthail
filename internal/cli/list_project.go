@@ -5,15 +5,13 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-
-	"github.com/zm2231/agenthail/internal/daemon"
 )
 
 func listProjectID(ctx context.Context, client *daemonAPIClient, selector, scope string) (string, error) {
 	if scope != "archived" {
 		scope = "all"
 	}
-	var state daemon.SessionViewSnapshot
+	var state listSnapshot
 	if err := client.getJSON(ctx, "/api/v1/snapshot", url.Values{"scope": {scope}, "limit": {"1"}}, &state); err != nil {
 		return "", err
 	}

@@ -9,11 +9,10 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/daemonapi"
 )
 
-func renderListView(state daemon.SessionViewSnapshot, wide bool) error {
+func renderListView(state listSnapshot, wide bool) error {
 	count := state.View.Counts[state.View.Scope]
 	var buffer bytes.Buffer
 	fmt.Fprintf(&buffer, "%s: %s, %s\n", state.View.Scope, daemonapi.CountText(count.Families, "conversation"), daemonapi.CountText(count.Sessions, "session"))
