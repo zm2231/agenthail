@@ -8,7 +8,6 @@ import (
 	"os"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -71,18 +70,10 @@ func (c *Codex) NativeImages(*surface.Session, surface.Route) bool { return true
 // refuseCodexComposerCommand refuses a message that reads as a Codex slash
 // command. Codex runs those only in its own composer; turn input passes the
 // text to the model as a prompt, so the command never runs. As in that
-// composer, text that starts with a space or whose first word holds another
-// slash, such as a path, is a prompt.
+// composer, text that starts with a space is a prompt.
 func refuseCodexComposerCommand(message string) error {
-	rest, ok := strings.CutPrefix(message, "/")
+	name, ok := slashCommandName(message)
 	if !ok {
-		return nil
-	}
-	name := rest
-	if end := strings.IndexFunc(rest, unicode.IsSpace); end >= 0 {
-		name = rest[:end]
-	}
-	if name == "" || strings.Contains(name, "/") {
 		return nil
 	}
 	return surface.DeliveryTerminal(fmt.Errorf("Codex runs /%s only in its own composer; sent here it would reach the model as plain text and nothing would run. To use a skill named %s, send $%s", name, name, name), surface.DeliveryInvalidRequest)

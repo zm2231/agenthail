@@ -200,7 +200,7 @@ func validateClaudeControl(action, value string) error {
 			return fmt.Errorf("permission mode must be one of %s", strings.Join(claudePermissionModes, ", "))
 		}
 	case "steer":
-		if value == "" || strings.HasPrefix(value, "/") {
+		if _, command := slashCommandName(value); value == "" || command {
 			return fmt.Errorf("steer requires a message, not a slash command")
 		}
 	case "rename":

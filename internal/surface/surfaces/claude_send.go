@@ -50,7 +50,7 @@ func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string
 // run one. It is checked before reaching the session and again on the
 // transport the session was reached through.
 func peerSlashCommand(sess *surface.Session, message string) error {
-	if sess.Transport == "uds" && strings.HasPrefix(strings.TrimSpace(message), "/") {
+	if _, command := slashCommandName(strings.TrimSpace(message)); sess.Transport == "uds" && command {
 		return surface.DeliveryTerminal(fmt.Errorf("Claude peer messages cannot execute slash commands; use the Claude session directly"), surface.DeliveryInvalidRequest)
 	}
 	return nil
