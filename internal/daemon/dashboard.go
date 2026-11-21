@@ -12,6 +12,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/uiconf"
 	"github.com/zm2231/agenthail/internal/voice"
+	"golang.org/x/sync/singleflight"
 )
 
 type dashboardServer struct {
@@ -25,6 +26,7 @@ type dashboardServer struct {
 	stateVersion  atomic.Uint64
 	cachedVersion uint64
 	state         dashboardState
+	rebuilds      singleflight.Group
 	voice         *voice.Service
 }
 
