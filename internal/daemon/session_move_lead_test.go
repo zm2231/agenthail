@@ -20,19 +20,19 @@ import (
 )
 
 // moveMesh is three hosts each paired with the other two, the first's
-// checkout movable to the second. wrap, when given, wraps the first's
-// handler before it serves.
-func moveMesh(t *testing.T, wrap func(http.Handler) http.Handler) (a, b, c *moveNode) {
+// checkout movable to the second. wraps wraps the named hosts' handlers
+// before they serve.
+func moveMesh(t *testing.T, wraps map[string]func(http.Handler) http.Handler) (a, b, c *moveNode) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	claudetest.New(t)
 	a, b, c = newMoveNode(t), newMoveNode(t), newMoveNode(t)
-	if wrap != nil {
-		a.handler = wrap(a.handler)
-	}
 	checkoutsForMove(t, a, b)
 	nodes := map[string]*moveNode{"a": a, "b": b, "c": c}
+	for name, wrap := range wraps {
+		nodes[name].handler = wrap(nodes[name].handler)
+	}
 	for _, node := range nodes {
 		node.serve(t, nil)
 	}
@@ -278,7 +278,7 @@ func leadOn(t *testing.T, a, b, c *moveNode) (*CatalogProject, *surface.Session,
 
 func TestASendToAProjectFromAHostThatHasNotSeenItsLeadMoveReachesTheLeadOnItsNewHost(t *testing.T) {
 	stale := &staleCatalog{}
-	a, b, c := moveMesh(t, stale.wrap)
+	a, b, c := moveMesh(t, map[string]func(http.Handler) http.Handler{"a": stale.wrap})
 	project, session, _ := leadOn(t, a, b, c)
 	claudetest.ListenPeerManager(t, a.host.Home)
 	onB := claudetest.ListenPeerManager(t, b.host.Home)
@@ -299,6 +299,35 @@ func TestASendToAProjectFromAHostThatHasNotSeenItsLeadMoveReachesTheLeadOnItsNew
 		return onB.Containing("to the lead where it was.") >= 1
 	})
 	if got := onB.Containing("to the lead where it was."); got != 1 {
+		t.Fatalf("the send reached the moved lead %d times", got)
+	}
+}
+
+func TestASendToAProjectFromAHostThatHearsItsLeadLeaveBeforeItHearsItArriveReachesTheLead(t *testing.T) {
+	stale := &staleCatalog{}
+	a, b, c := moveMesh(t, map[string]func(http.Handler) http.Handler{"b": stale.wrap})
+	project, session, _ := leadOn(t, a, b, c)
+	claudetest.ListenPeerManager(t, a.host.Home)
+	onB := claudetest.ListenPeerManager(t, b.host.Home)
+
+	stale.frozen.Store(true)
+	if _, err := a.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "b"}); err != nil {
+		stale.frozen.Store(false)
+		t.Fatal(err)
+	}
+	formerHost := mustHostID(t, a.federationNode)
+	testkit.Eventually(t, "the third host to hear the lead leave its former host", 15*time.Second, func() bool {
+		return !leadRows(c, project.ID)[formerHost]
+	})
+	reply := sendAsPerson(c.daemon, fmt.Sprintf(`{"action":"coordinator-send","project":%q,"message":"to the lead on its way."}`, project.ID))
+	stale.frozen.Store(false)
+	if reply.Status != http.StatusOK {
+		t.Fatalf("a send to the project whose lead is arriving answered %d: %s", reply.Status, reply.Body)
+	}
+	testkit.Eventually(t, "the send to reach the lead on its new host", 15*time.Second, func() bool {
+		return onB.Containing("to the lead on its way.") >= 1
+	})
+	if got := onB.Containing("to the lead on its way."); got != 1 {
 		t.Fatalf("the send reached the moved lead %d times", got)
 	}
 }
