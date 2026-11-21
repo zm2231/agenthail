@@ -69,7 +69,7 @@ func (d *Daemon) remoteMCP() *remoteMCP {
 		m.server.AddResourceTemplate(&mcp.ResourceTemplate{URITemplate: remoteInboxURIStart + "{name}", Name: "inbox", Title: "Inbox", Description: "How many messages wait unread in your inbox. Read them with agenthail_read.", MIMEType: "application/json"}, m.readInbox)
 		stream := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return m.server }, &mcp.StreamableHTTPOptions{EventStore: mcp.NewMemoryEventStore(nil), SessionTimeout: cmp.Or(d.remoteIdle, remoteSessionIdle)})
 		bearer := auth.RequireBearerToken(m.verify, &auth.RequireBearerTokenOptions{})
-		m.handler = bearer(http.NewCrossOriginProtection().Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m.handler = bearerChallenge(bearer(http.NewCrossOriginProtection().Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			m.admitMu.Lock()
 			if m.stopped.Load() {
 				m.admitMu.Unlock()
@@ -83,14 +83,31 @@ func (d *Daemon) remoteMCP() *remoteMCP {
 			defer cancel()
 			defer context.AfterFunc(m.stopCtx, cancel)()
 			stream.ServeHTTP(w, r.WithContext(ctx))
-		})))
+		}))))
 		d.remote = m
 	})
 	return d.remote
 }
 
 func remoteRequest(r *http.Request) bool {
-	return r.Header.Get(cfaccess.Header) != "" || strings.HasPrefix(bearerToken(r), registry.RemoteTokenPrefix)
+	token := bearerToken(r)
+	return r.Header.Get(cfaccess.Header) != "" || strings.HasPrefix(token, registry.RemoteTokenPrefix) || (token == "" && cloudflareProxied(r))
+}
+
+func cloudflareProxied(r *http.Request) bool {
+	return r.Header.Get("Cf-Ray") != "" || r.Header.Get("Cf-Connecting-Ip") != ""
+}
+
+// A URL-only client asks the person for a token only when a probe without one gets a Bearer challenge.
+func bearerChallenge(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if bearerToken(r) == "" {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="agenthail"`)
+			http.Error(w, "a bearer token is required", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // A tunnel that publishes more than /mcp still exposes nothing else.
