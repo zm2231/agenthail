@@ -1,4 +1,4 @@
--- schemaVersion 116
+-- schemaVersion 117
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -88,6 +88,9 @@ CREATE INDEX ledger_grants_session ON ledger_grants(session_id);
 -- index message_queue_delivery_key
 CREATE UNIQUE INDEX message_queue_delivery_key
 		ON message_queue(delivery_key) WHERE delivery_key!='';
+
+-- index message_queue_open
+CREATE INDEX message_queue_open ON message_queue(session_id) WHERE status IN ('pending','inflight');
 
 -- index paired_devices_active
 CREATE INDEX paired_devices_active ON paired_devices(revoked_at, created_at DESC);

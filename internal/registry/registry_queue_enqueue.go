@@ -210,8 +210,10 @@ func (r *Registry) PendingSteer(sessionID string) (bool, error) {
 	return found > 0, err
 }
 
+const queueCountsQuery = `SELECT session_id,COUNT(*) FROM message_queue WHERE status IN ('pending','inflight') GROUP BY session_id`
+
 func (r *Registry) QueueCounts() (map[string]int, error) {
-	rows, err := r.read.Query(`SELECT session_id,COUNT(*) FROM message_queue WHERE status IN ('pending','inflight') GROUP BY session_id`)
+	rows, err := r.read.Query(queueCountsQuery)
 	if err != nil {
 		return nil, err
 	}

@@ -108,16 +108,18 @@ const watchedForTurnEnd = `
 	SELECT l.id FROM sessions l
 	WHERE l.host_id='' AND (SELECT te.completed_turn_id='' AND te.started_at_ms>=? FROM turn_ends te WHERE te.session_id=l.id ORDER BY te.started_at_ms DESC LIMIT 1)`
 
+const watchedSessionsQuery = `
+	SELECT s.id,s.surface,EXISTS(SELECT 1 FROM session_runtime r WHERE r.session_id=s.id AND r.notification_armed=1),
+		s.id NOT IN (` + watchedForWork + `)
+	FROM sessions s
+	WHERE s.host_id='' AND s.id IN (` + watchedForWork + ` UNION ` + watchedForTurnEnd + `)
+	ORDER BY s.surface,s.id`
+
 func (r *Registry) WatchedSessions() ([]WatchedSession, error) {
 	now := time.Now()
 	work := awaitingTurnArgs(now)
 	args := append(append(append([]any{}, work...), work...), now.Add(-TurnEndWatch).UnixMilli())
-	rows, err := r.read.Query(`
-		SELECT s.id,s.surface,EXISTS(SELECT 1 FROM session_runtime r WHERE r.session_id=s.id AND r.notification_armed=1),
-			s.id NOT IN (`+watchedForWork+`)
-		FROM sessions s
-		WHERE s.host_id='' AND s.id IN (`+watchedForWork+` UNION `+watchedForTurnEnd+`)
-		ORDER BY s.surface,s.id`, args...)
+	rows, err := r.read.Query(watchedSessionsQuery, args...)
 	if err != nil {
 		return nil, err
 	}
