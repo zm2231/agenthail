@@ -32,6 +32,13 @@ final class TranscriptRowTops {
         tops.filter { (shown[$0.key] ?? 0) > 0 && $0.key != first && $0.value < bottom }.min { $0.value < $1.value }.map { ($0.key, $0.value) }
     }
 
+    // A row taller than the view starts above it, so with no row starting in view the one across its top is used.
+    func inView(from top: CGFloat, to bottom: CGFloat) -> (id: String, top: CGFloat)? {
+        let laidOut = tops.filter { (shown[$0.key] ?? 0) > 0 && $0.key != first && $0.value < bottom }
+        let starting = laidOut.filter { $0.value >= top }.min { $0.value < $1.value }
+        return (starting ?? laidOut.max { $0.value < $1.value }).map { ($0.key, $0.value) }
+    }
+
     func holdOlderPlace() { holdingOlder?() }
 }
 

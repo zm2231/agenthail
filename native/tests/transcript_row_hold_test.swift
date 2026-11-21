@@ -85,20 +85,27 @@ struct TranscriptRowHoldTest {
 
         let anchor = TranscriptRowAnchor()
         var anchorTops: [String: CGFloat] = ["r20": 34646, "r21": 35178]
-        let picked = anchor.pass(offset: 34537, visible: 600, top: { anchorTops[$0] }, leading: { ("r20", 34646) })
+        let picked = anchor.pass(offset: 34537, visible: 600, range: -44...99999, resized: false, top: { anchorTops[$0] }, leading: { ("r20", 34646) })
         expect(picked == nil && anchor.id == "r20", "a reader at rest anchors the leading row without moving, anchored \(String(describing: anchor.id))")
         anchorTops = ["r20": 34563, "r21": 35095]
-        let shrunk = anchor.pass(offset: 34537, visible: 600, top: { anchorTops[$0] }, leading: { ("r20", 34563) })
+        let shrunk = anchor.pass(offset: 34537, visible: 600, range: -44...99999, resized: true, top: { anchorTops[$0] }, leading: { ("r20", 34563) })
         expect(shrunk == 34454, "rows above the reader re-estimated 83 pt shorter move the offset with the row, target \(String(describing: shrunk))")
         anchorTops = ["r20": 34543, "r21": 35075]
-        let twice = anchor.pass(offset: 34537, visible: 600, top: { anchorTops[$0] }, leading: { ("r20", 34543) })
-        expect(twice == 34434, "a second move before the first correction lands adds to it, target \(String(describing: twice))")
-        anchor.applied()
-        expect(anchor.pass(offset: 34200, visible: 600, top: { anchorTops[$0] }, leading: { ("r20", 34543) }) == nil, "a scroll moves only the offset, so the anchor does not undo it")
+        let twice = anchor.pass(offset: 34537, visible: 600, range: -44...99999, resized: true, top: { anchorTops[$0] }, leading: { ("r20", 34543) })
+        expect(twice == 34434, "a second move before the first correction lands is measured from where the reader saw the row, target \(String(describing: twice))")
+        expect(anchor.pass(offset: 34200, visible: 600, range: -44...99999, resized: true, top: { anchorTops[$0] }, leading: { ("r20", 34543) }) == nil, "a move while a correction is still queued does not replace where the reader saw the row")
+        expect(anchor.pass(offset: 34434, visible: 600, range: -44...99999, resized: true, top: { anchorTops[$0] }, leading: { ("r20", 34543) }) == nil, "the queued correction lands")
+        expect(anchor.pass(offset: 34200, visible: 600, range: -44...99999, resized: true, top: { anchorTops[$0] }, leading: { ("r20", 34543) }) == nil, "a scroll moves only the offset, so the anchor does not undo it")
+        anchorTops["r20"] = 34643
+        expect(anchor.pass(offset: 34300, visible: 600, range: -44...99999, resized: true, top: { anchorTops[$0] }, leading: { ("r20", 34643) }) == nil, "a move the offset already followed, as a resize does, needs no correction")
         anchorTops["r20"] = 30000
-        expect(anchor.pass(offset: 34200, visible: 600, top: { anchorTops[$0] }, leading: { ("r21", 35075) }) == nil && anchor.id == "r21", "a row the reader scrolled away from is replaced by the leading row in view, anchored \(String(describing: anchor.id))")
+        expect(anchor.pass(offset: 34300, visible: 600, range: -44...99999, resized: true, top: { anchorTops[$0] }, leading: { ("r21", 35075) }) == nil && anchor.id == "r21", "a row the reader scrolled away from is replaced by the leading row in view, anchored \(String(describing: anchor.id))")
         anchor.release()
         expect(anchor.id == nil, "a released anchor holds nothing")
+        let resizing = TranscriptRowAnchor()
+        _ = resizing.pass(offset: 34537, visible: 600, range: -44...99999, resized: true, top: { _ in 34160 }, leading: { ("r20", 34160) })
+        expect(resizing.pass(offset: 34537, visible: 600, range: -44...99999, resized: true, top: { _ in 34640 }, leading: { ("r20", 34640) }) == nil, "a row picked while the transcript resized takes its next report as where it is rather than as a move")
+        expect(resizing.pass(offset: 34537, visible: 600, range: -44...99999, resized: true, top: { _ in 34557 }, leading: { ("r20", 34557) }) == 34454, "after that, a move is corrected")
 
         let once = TranscriptRowHold()
         once.arm("m120", above: 71, before: 39, fresh: true)

@@ -61,6 +61,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 if new == .interacting || new == .decelerating { layout.releaseHold() }
                 // A reader who scrolls while an older page loads is held where they come to rest.
                 if new == .idle, old == .interacting || old == .decelerating, layout.olderPending { holdOlderPlace(fresh: false) }
+                if new == .idle, let geometry = layout.geometry { _ = anchorTarget(geometry, inserted: false) }
                 layout.animationStart = new == .animating ? .now : nil
                 if new == .animating {
                     let start = layout.animationStart
@@ -184,15 +185,14 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             layout.anchor.release()
             return nil
         }
-        let bottom = geometry.contentOffset.y + geometry.containerSize.height
-        return layout.anchor.pass(offset: geometry.contentOffset.y, visible: geometry.containerSize.height, top: rows.top, leading: { rows.leading(above: bottom) })
+        let offset = geometry.contentOffset.y
+        let visible = geometry.containerSize.height + geometry.contentInsets.top + geometry.contentInsets.bottom
+        let range = -geometry.contentInsets.top...max(geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height - geometry.contentInsets.top, -geometry.contentInsets.top)
+        return layout.anchor.pass(offset: offset, visible: visible, range: range, resized: layout.resized, top: rows.top, leading: { rows.inView(from: offset, to: offset + visible) })
     }
 
     private func settleAnchor(_ target: CGFloat, in geometry: ScrollGeometry) {
-        settleHold { position in
-            position.scrollTo(y: Self.scrollY(target, in: geometry))
-            layout.anchor.applied()
-        }
+        settleHold { $0.scrollTo(y: Self.scrollY(target, in: geometry)) }
     }
 
     // A held row that is not laid out, or still has its pre-insert top, is built by scrolling to it; it reports again once laid out.
