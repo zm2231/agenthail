@@ -18,8 +18,8 @@ import (
 	"github.com/zm2231/agenthail/internal/nodehost"
 	"github.com/zm2231/agenthail/internal/poll"
 	"github.com/zm2231/agenthail/internal/simhost"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/surface/codexsurface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 const daemonLogMaxBytes = 1024 * 1024
@@ -94,7 +94,7 @@ func (a *App) daemonRun() error {
 	d.SetBuild(a.build())
 	hostVersion := a.Version + "+" + a.Revision
 	d.SetClaudeHost(&claudehost.Manager{Home: home, Launch: func() (claudehost.Launch, error) {
-		return surfaces.ClaudeHostLaunch(home, hostVersion)
+		return claudesurface.ClaudeHostLaunch(home, hostVersion)
 	}})
 	d.SetBrowserHost(&browserhost.Manager{Home: home, Launch: func() (browserhost.Launch, error) {
 		return browserhost.InstalledLaunch(hostVersion)

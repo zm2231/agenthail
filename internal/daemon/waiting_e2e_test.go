@@ -19,16 +19,16 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 	"github.com/zm2231/agenthail/internal/surface/codexsurface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 // recordingClaude is the real Claude surface reading a synthetic transcript,
 // with the peer socket replaced by a recorder.
 type recordingClaude struct {
-	*surfaces.Claude
+	*claudesurface.Claude
 	mu       sync.Mutex
 	sent     []string
 	steered  []string
@@ -276,7 +276,7 @@ func newClaudeQuestion(t *testing.T) claudeQuestion {
 		t.Fatal(err)
 	}
 	pushes := newPushRecorder(t, store)
-	claude := &recordingClaude{Claude: surfaces.NewClaude(nil, process.Home)}
+	claude := &recordingClaude{Claude: claudesurface.NewClaude(nil, process.Home)}
 
 	return claudeQuestion{store: store, claude: claude, pushes: pushes, session: session, transcript: transcript, process: process}
 }
@@ -657,7 +657,7 @@ func TestQueuedSteerToAClaudeSessionWithoutABridgeWaitsForTheTurn(t *testing.T) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	adapters := surface.Adapters{surfaces.NewClaude(nil, t.TempDir())}
+	adapters := surface.Adapters{claudesurface.NewClaude(nil, t.TempDir())}
 	for _, test := range []struct {
 		bridge string
 		want   registry.QueueHold
@@ -702,7 +702,7 @@ func TestQueuedPeerMessageReachesARunningOrWaitingClaudeTurnOverItsSocket(t *tes
 		if item, err := q.store.QueueItem(peerID, nil); err != nil || item.HeldBy != "" {
 			t.Fatalf("waiting=%v: item=%+v err=%v, want the peer message ready to send", waiting, item, err)
 		}
-		runDaemon(t, q.store, surfaces.NewClaude(nil, q.process.Home))
+		runDaemon(t, q.store, claudesurface.NewClaude(nil, q.process.Home))
 		testkit.Eventually(t, "the peer message over the socket", 5*time.Second, func() bool { return manager.Count("handoff") == 1 })
 		testkit.Eventually(t, "the peer message acknowledged", 5*time.Second, func() bool {
 			item, err := q.store.QueueItem(peerID, nil)

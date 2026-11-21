@@ -83,7 +83,7 @@ output, not on disk, so a session outside the host without 1M evidence shows
 tokens only.
 `message.model` never carries the `[1m]` selection, so it only rules out a
 window chosen for another model. The validator in
-`internal/surface/surfaces/claude_run_source.go` recognizes a `[1m]` model; a
+`internal/surface/claudesurface/run_source.go` recognizes a `[1m]` model; a
 plain model name and a missing model both produce `source: "unknown"` and no
 denominator.
 

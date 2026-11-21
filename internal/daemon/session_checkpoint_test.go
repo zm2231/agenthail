@@ -14,12 +14,12 @@ import (
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 )
 
 type catchUpClaude struct {
-	*surfaces.Claude
+	*claudesurface.Claude
 	pages, forward int
 }
 
@@ -95,7 +95,7 @@ func newCheckpointFixture(t *testing.T) *checkpointFixture {
 	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
-	f := &checkpointFixture{registry: r, session: session, adapter: &catchUpClaude{Claude: surfaces.NewClaude(nil, fixture.Home)}}
+	f := &checkpointFixture{registry: r, session: session, adapter: &catchUpClaude{Claude: claudesurface.NewClaude(nil, fixture.Home)}}
 	f.start(t)
 	if _, found, err := r.SessionTranscriptCheckpoint(checkpointConversation); err != nil || !found {
 		t.Fatalf("seed left no checkpoint: found=%v err=%v", found, err)
@@ -272,7 +272,7 @@ func TestALiveSourceLeavesItsCheckpointWhereItsStreamStopped(t *testing.T) {
 	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
-	d.Surfaces = []surface.Surface{surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}
+	d.Surfaces = []surface.Surface{claudesurface.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}
 	handler := dashboardRouter(d)
 	if got := readDashboardExchanges(t, handler, conversation, ""); len(got) != 2 {
 		t.Fatalf("first page exchanges=%+v", got)

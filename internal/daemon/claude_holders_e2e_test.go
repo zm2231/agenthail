@@ -19,8 +19,8 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -29,7 +29,7 @@ import (
 // messaging socket directly rather than through the peer manager, which
 // runDaemon does not start.
 type nativeSenderClaude struct {
-	*surfaces.Claude
+	*claudesurface.Claude
 	source string
 }
 
@@ -103,7 +103,7 @@ func TestConversationResumedInASecondTerminalIsNeverSentToOneOfThemSilently(t *t
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	claude := nativeSenderClaude{Claude: surfaces.NewClaude(nil, fixture.Home), source: "sender-native"}
+	claude := nativeSenderClaude{Claude: claudesurface.NewClaude(nil, fixture.Home), source: "sender-native"}
 	h, _ := runDaemon(t, store, claude)
 
 	testkit.Eventually(t, "the later process's starting conversation to be registered", 5*time.Second, func() bool {

@@ -1,0 +1,154 @@
+package claudesurface
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+
+	"github.com/zm2231/agenthail/internal/claudehost"
+	"github.com/zm2231/agenthail/internal/surface"
+)
+
+var claudePermissionModes = []string{"acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"}
+
+// hostWaiting is the oldest request the host holds for the session. Its id is
+// Claude's own request id, so each request is its own question.
+func (c *Claude) hostWaiting(ctx context.Context, sess *surface.Session) (*surface.Waiting, bool) {
+	listed, ok := c.host.session(ctx, sess.ID, sess.PID)
+	if !c.host.requestsKnown(sess.ID, sess.PID) {
+		return nil, false
+	}
+	if !ok || len(listed.Requests) == 0 {
+		return nil, true
+	}
+	oldest := listed.Requests[0]
+	open := make([]string, 0, len(listed.Requests))
+	for _, request := range listed.Requests {
+		open = append(open, request.RequestID)
+	}
+	return &surface.Waiting{Kind: claudeRequestKind(oldest.Kind), ID: oldest.RequestID, Since: oldest.CreatedAt.UTC(), Answerable: true, Open: open}, true
+}
+
+// Requests lists the open requests of a session the host runs, oldest first,
+// read from the host now rather than from its cached listing. While a host
+// does not answer, a session it may run has requests no one can read, which
+// is an error rather than none.
+func (c *Claude) Requests(ctx context.Context, sess *surface.Session) (surface.RequestState, error) {
+	state := surface.RequestState{Requests: []surface.Request{}}
+	if !claudeHosted(sess) {
+		state.Requests = c.prompts.requests(sess.ID)
+		return state, nil
+	}
+	c.host.forget()
+	listed, ok := c.host.session(ctx, sess.ID, sess.PID)
+	if !c.host.requestsKnown(sess.ID, sess.PID) || !ok && c.host.unanswered() {
+		return state, fmt.Errorf("the Claude host running session %s did not answer", sess.ID)
+	}
+	if !ok {
+		return state, nil
+	}
+	state.PermissionMode = listed.PermissionMode
+	for _, request := range listed.Requests {
+		state.Requests = append(state.Requests, claudeRequest(request))
+	}
+	return state, nil
+}
+
+// Respond answers one open request of a session the host runs. A request no
+// host holds is stale: it was answered or withdrawn, its process ended, or
+// its process runs on without a host, which no answer reaches. A request
+// lives only in the host that holds Claude's prompt, so none outlives it.
+func (c *Claude) Respond(ctx context.Context, sess *surface.Session, requestID string, decision surface.Decision) (string, error) {
+	if requestID == "" {
+		return "", fmt.Errorf("a request id is required")
+	}
+	if decision.Stop || (decision.Behavior == "deny" && decision.Always) {
+		return "", fmt.Errorf("claude requests offer neither a denial that stops the turn nor one that always denies")
+	}
+	if !claudeHosted(sess) {
+		return c.prompts.answer(sess.ID, requestID, decision)
+	}
+	defer c.host.forget()
+	outcome, err := c.host.client.Respond(ctx, sess.ID, requestID, claudehost.Decision{Behavior: decision.Behavior, Always: decision.Always, Message: decision.Message, Answers: decision.Answers, Content: decision.Content})
+	switch {
+	case claudehost.IsCode(err, "stale"), claudehost.IsCode(err, "not_open"), claudehost.IsCode(err, "held"), errors.Is(err, claudehost.ErrNotRunning):
+		return "", fmt.Errorf("%w: %s", surface.ErrRequestStale, err)
+	case err != nil:
+		return "", claudeHostDeliveryError(err)
+	}
+	return outcome, nil
+}
+
+// hostSetting changes a hosted session's model, effort or permission mode
+// while it runs. The host keeps them, so a later resume reopens with them.
+func (c *Claude) hostSetting(ctx context.Context, sess *surface.Session, action, value string) (*surface.ControlResult, error) {
+	var listed claudehost.Session
+	var err error
+	switch action {
+	case "model":
+		listed, err = c.host.client.SetModel(ctx, sess.ID, value)
+	case "effort":
+		listed, err = c.host.client.SetEffort(ctx, sess.ID, value)
+	case "permission-mode":
+		listed, err = c.host.client.SetPermissionMode(ctx, sess.ID, value)
+	}
+	c.host.forget()
+	if err != nil {
+		return nil, claudeHostDeliveryError(err)
+	}
+	output := listed.PermissionMode
+	switch action {
+	case "model":
+		sess.ConfiguredModel = listed.Model
+		output = listed.Model
+	case "effort":
+		output = listed.Effort
+	}
+	return &surface.ControlResult{SessionID: sess.ID, Action: action, Evidence: surface.EvidenceDelivered, Source: "claude-host", Output: output}, nil
+}
+
+func validClaudePermissionMode(mode string) bool {
+	return slices.Contains(claudePermissionModes, mode)
+}
+
+func claudeRequestKind(kind string) surface.WaitingKind {
+	switch kind {
+	case "question":
+		return surface.WaitingQuestion
+	case "input":
+		return surface.WaitingInput
+	default:
+		return surface.WaitingApproval
+	}
+}
+
+func claudeRequest(request claudehost.Request) surface.Request {
+	out := surface.Request{
+		ID: request.RequestID, Kind: claudeRequestKind(request.Kind), Tool: request.Tool,
+		Title: request.Title, DisplayName: request.DisplayName, Description: request.Description,
+		Reason: request.DecisionReason, BlockedPath: request.BlockedPath, AgentID: request.AgentID,
+		Input: request.Input, AlwaysAllow: request.AlwaysAllow, CreatedAt: request.CreatedAt.UTC(),
+	}
+	for _, question := range request.Questions {
+		options := make([]surface.QuestionOption, 0, len(question.Options))
+		for _, option := range question.Options {
+			options = append(options, surface.QuestionOption{Label: option.Label, Description: option.Description})
+		}
+		out.Questions = append(out.Questions, surface.Question{Question: question.Question, Header: question.Header, MultiSelect: question.MultiSelect, Options: options})
+	}
+	if e := request.Elicitation; e != nil {
+		out.Elicitation = &surface.Elicitation{Server: e.Server, Message: e.Message, Mode: e.Mode, URL: e.URL}
+		for _, field := range e.Fields {
+			options := make([]surface.ElicitationOption, 0, len(field.Options))
+			for _, option := range field.Options {
+				options = append(options, surface.ElicitationOption{Value: option.Value, Label: option.Label})
+			}
+			out.Elicitation.Fields = append(out.Elicitation.Fields, surface.ElicitationField{
+				Name: field.Name, Title: field.Title, Description: field.Description, Type: field.Type,
+				Required: field.Required, MultiSelect: field.MultiSelect, Options: options, Default: field.Default,
+			})
+		}
+	}
+	return out
+}

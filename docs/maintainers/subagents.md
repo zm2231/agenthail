@@ -31,7 +31,7 @@ covers subagents killed before writing a terminal record.
 ## Cost
 
 No request path scans the subagent tree. `claudeSubagentObserver`
-(`internal/surface/surfaces/claude_subagents.go`) keeps one cache entry per
+(`internal/surface/claudesurface/subagents.go`) keeps one cache entry per
 subagents directory. Each observation stats the directory and lists it again
 only when its mtime changed, then stats each agent transcript and reads only
 the bytes appended since the last observation (the first read of a transcript

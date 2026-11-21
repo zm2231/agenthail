@@ -12,7 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 )
 
 func TestTheAppSetsRemoteControlAtStartupPerClaudeRootAndRefusesABrokenSettingsFile(t *testing.T) {
@@ -39,7 +39,7 @@ func TestTheAppSetsRemoteControlAtStartupPerClaudeRootAndRefusesABrokenSettingsF
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.Close() })
-	claude := surfaces.NewClaude(nil, home)
+	claude := claudesurface.NewClaude(nil, home)
 	router := dashboardRouter(newTestDaemon(t, r, []surface.Surface{claude}))
 	call := func(method, body string) (int, struct {
 		Available bool                          `json:"available"`

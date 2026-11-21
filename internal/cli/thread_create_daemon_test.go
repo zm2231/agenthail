@@ -9,7 +9,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -21,7 +21,7 @@ func TestATerminalThreadCreateStartsThroughTheDaemonWithTheAgenthailMCPServer(t 
 			t.Fatalf("%s is set; this is an agent's shell, not a terminal", source.Variable)
 		}
 	}
-	serveAppDaemon(t, c.app, c.r, []surface.Surface{surfaces.NewClaude(nil, c.claude.Home)})
+	serveAppDaemon(t, c.app, c.r, []surface.Surface{claudesurface.NewClaude(nil, c.claude.Home)})
 	output, err := c.run(t, "thread", "create", "claude", "start the work", "--cwd", c.host.Cwd, "--json")
 	var created threadCreateOutput
 	if err != nil || json.Unmarshal([]byte(output), &created) != nil || !created.OK || created.Session == nil {

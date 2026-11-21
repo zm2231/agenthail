@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 )
 
 func TestAgentSendToAConversationOpenInTwoTerminalsNamesThePinsAndAPinReachesOne(t *testing.T) {
@@ -17,7 +17,7 @@ func TestAgentSendToAConversationOpenInTwoTerminalsNamesThePinsAndAPinReachesOne
 	first := fixture.Holder(conversation, fixture.Home)
 	later := fixture.Holder(conversation, fixture.Home)
 	peers := claudetest.ListenPeerManager(t, fixture.Home)
-	app, r := claudeCLIFixture(t, surfaces.NewClaude(nil, fixture.Home))
+	app, r := claudeCLIFixture(t, claudesurface.NewClaude(nil, fixture.Home))
 
 	err := app.Run([]string{"send", conversation, "which terminal?"})
 	if err == nil {

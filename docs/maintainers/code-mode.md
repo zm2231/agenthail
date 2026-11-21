@@ -17,7 +17,7 @@ Code mode is detected by the shape of the call, not by configuration. A tool cal
 
 `internal/surface/codemode` is surface-agnostic. `Read` parses the script with goja's parser (wrapped in an async function so top-level `await` parses) and returns each `tools.NAME(...)` call with the string properties of its first object argument. `Present` turns the calls into one row: the first call names it (namespaces such as `multi_agent_v1__` are dropped) and its string fields are the row's input, so `exec_command` reads as "Run `go test ./...`". A first call with no literal fields reads as "Calls …" with the tools the script uses. A surface plugs in by reading its own record shape and calling these two functions.
 
-The Codex mapper (`internal/surface/surfaces`) adds what is specific to Codex:
+The Codex mapper (`internal/surface/codexsurface`) adds what is specific to Codex:
 
 - The script's output header (`Script completed`, `Script failed`, `Script running with cell ID …`, wall time, `Output:`) is removed; a failed script marks its result failed.
 - Codex records each action a script took as an `item_completed` event (`CommandExecution`, `McpToolCall`, `CollabAgentToolCall`, `FileChange`, `WebSearch`, `Extension`, `ImageView`, `FunctionCallOutput`). The first action recorded between a call and its output is authoritative: it replaces the call row in place (same item ID) with its structured input and becomes the call's result, with failure taken from its status and exit code. The script's own output is then not served. Further actions in the same call get rows of their own.

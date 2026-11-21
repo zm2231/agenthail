@@ -14,8 +14,8 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -45,7 +45,7 @@ func (c closingOnSend) Send(ctx context.Context, session *surface.Session, messa
 }
 
 func (s *heldInTerminals) claude() surface.Surface {
-	return closingOnSend{nativeSenderClaude: nativeSenderClaude{Claude: surfaces.NewClaude(nil, s.fixture.Home), source: "sender-native"}, held: s}
+	return closingOnSend{nativeSenderClaude: nativeSenderClaude{Claude: claudesurface.NewClaude(nil, s.fixture.Home), source: "sender-native"}, held: s}
 }
 
 func (s *heldInTerminals) run(t *testing.T) (*runningDaemon, func()) {

@@ -11,7 +11,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 )
 
 func TestClaudeConfigRootsReachSessionOptionsCreationAndTheSessionRow(t *testing.T) {
@@ -33,7 +33,7 @@ func TestClaudeConfigRootsReachSessionOptionsCreationAndTheSessionRow(t *testing
 			t.Fatal(err)
 		}
 	}
-	d := newTestDaemon(t, registry, []surface.Surface{surfaces.NewClaude(nil, host.Home)})
+	d := newTestDaemon(t, registry, []surface.Surface{claudesurface.NewClaude(nil, host.Home)})
 	handler := dashboardRouter(d)
 	call := func(method, path string, body []byte) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(method, path, bytes.NewReader(body))

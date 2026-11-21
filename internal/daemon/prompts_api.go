@@ -8,7 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/registry"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 )
 
 const (
@@ -114,5 +114,5 @@ func (d *Daemon) typedPrompt(row registry.JournalPrompt) (promptItem, bool) {
 // Journal rows written before their provider marked injections carry no
 // origin, so the injected wrappers are recognised by their text.
 func isTypedPrompt(text string) bool {
-	return surfaces.IsTypedHumanPrompt(text)
+	return claudesurface.IsTypedHumanPrompt(text)
 }

@@ -11,8 +11,8 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 )
 
 func TestSessionRowReportsTheLifecycleItsRuntimeSupports(t *testing.T) {
@@ -20,7 +20,7 @@ func TestSessionRowReportsTheLifecycleItsRuntimeSupports(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
-	adapter := surfaces.NewClaude(nil, home)
+	adapter := claudesurface.NewClaude(nil, home)
 	d := newTestDaemon(t, registry, []surface.Surface{adapter})
 	transcript := filepath.Join(home, ".claude", "projects", "-work", "s.jsonl")
 	for _, tc := range []struct {
@@ -73,7 +73,7 @@ func TestResumingABackgroundJobRegistersItsHostSession(t *testing.T) {
 	if err := registry.RecordObservedSession(surface.Session{ID: conversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeBackground, Cwd: fixture.Home, Status: surface.StatusOffline}); err != nil {
 		t.Fatal(err)
 	}
-	adapter := surfaces.NewClaude(nil, fixture.Home)
+	adapter := claudesurface.NewClaude(nil, fixture.Home)
 	d := newTestDaemon(t, registry, []surface.Surface{adapter})
 	handler := dashboardRouter(d)
 	body, _ := json.Marshal(map[string]string{"action": "session-lifecycle-resume", "sessionId": conversation})

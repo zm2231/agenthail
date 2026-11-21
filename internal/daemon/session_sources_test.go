@@ -18,8 +18,8 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
+	providers "github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/surface/codexsurface"
-	providers "github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 type sourceCountingSurface struct {

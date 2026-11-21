@@ -22,7 +22,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehooks"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 )
 
 const cmuxSettings = `{
@@ -282,7 +282,7 @@ func TestThePromptHookGivesUpWhenItsDaemonServiceNeverBringsADaemonBack(t *testi
 		claudePromptHookRetry, claudePromptHookHeld, claudePromptHookUnheldLimit = previousRetry, previousHeld, previousLimit
 	})
 	prompt := `{"session_id":"terminal-1","tool_name":"Bash","tool_input":{"command":"ls"},"permission_suggestions":[]}`
-	decided := make(chan *surfaces.ClaudePromptDecision, 1)
+	decided := make(chan *claudesurface.ClaudePromptDecision, 1)
 	var checks atomic.Int32
 	started := time.Now()
 	go func() {
@@ -318,7 +318,7 @@ func TestThePromptHookKeepsHoldingWhileADaemonHoldsItsPromptBetweenRestarts(t *t
 	client := &daemonAPIClient{baseURL: server.URL, token: "dashboard-synthetic", httpClient: server.Client()}
 	prompt := `{"session_id":"terminal-1","tool_name":"Bash","tool_input":{"command":"ls"},"permission_suggestions":[]}`
 	ctx, cancel := context.WithCancel(context.Background())
-	decided := make(chan *surfaces.ClaudePromptDecision, 1)
+	decided := make(chan *claudesurface.ClaudePromptDecision, 1)
 	go func() {
 		decided <- holdClaudePrompt(ctx, client, strings.NewReader(prompt), 4242, func() bool { return true })
 	}()

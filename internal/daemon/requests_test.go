@@ -16,7 +16,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -69,7 +69,7 @@ func TestAPhoneAnswersAHostSessionsPermissionRequestOnceAndHistoryNamesIt(t *tes
 	client := fixture.Start(t)
 	id := uuid.NewString()
 	fixture.Open(t, client, id)
-	claude := surfaces.NewClaude(nil, fixture.Home)
+	claude := claudesurface.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
 	if err := r.RecordObservedSession(session); err != nil {
@@ -134,7 +134,7 @@ func TestAPermissionModeChangeTakesTheCreationGuardAndIsRecordedWithWhoChangedIt
 	client := fixture.Start(t)
 	id := uuid.NewString()
 	fixture.Open(t, client, id)
-	claude := surfaces.NewClaude(nil, fixture.Home)
+	claude := claudesurface.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
 	if err := r.RecordObservedSession(session); err != nil {
@@ -208,7 +208,7 @@ func TestTheCatalogPassAHostRequestAsksForSeesTheRequest(t *testing.T) {
 	client := fixture.Start(t)
 	id := uuid.NewString()
 	fixture.Open(t, client, id)
-	claude := surfaces.NewClaude(nil, fixture.Home)
+	claude := claudesurface.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	d := newTestDaemon(t, hostRegistry(t), []surface.Surface{claude})
 	d.SetClaudeHost(fixture.Manager(t, "test"))
@@ -248,7 +248,7 @@ func TestTheDashboardOffersAHostSessionNoRemoteControlCommands(t *testing.T) {
 	client := fixture.Start(t)
 	id := uuid.NewString()
 	fixture.Open(t, client, id)
-	claude := surfaces.NewClaude(nil, fixture.Home)
+	claude := claudesurface.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
 	if err := r.RecordObservedSession(session); err != nil {
@@ -271,7 +271,7 @@ func TestAWaitingHostRequestPushNamesOnlyTheRequestAndTheButtonsComeFromTheMac(t
 	client := fixture.Start(t)
 	id := uuid.NewString()
 	fixture.Open(t, client, id)
-	claude := surfaces.NewClaude(nil, fixture.Home)
+	claude := claudesurface.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
 	if err := r.RecordObservedSession(session); err != nil {
@@ -472,7 +472,7 @@ func TestAQuestionRequestIsAnsweredByTheIDsOfItsOptions(t *testing.T) {
 	client := fixture.Start(t)
 	id := uuid.NewString()
 	fixture.Open(t, client, id)
-	claude := surfaces.NewClaude(nil, fixture.Home)
+	claude := claudesurface.NewClaude(nil, fixture.Home)
 	r := hostRegistry(t)
 	if err := r.RecordObservedSession(hostedSession(t, claude, id)); err != nil {
 		t.Fatal(err)

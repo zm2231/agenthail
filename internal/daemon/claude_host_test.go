@@ -27,7 +27,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -41,7 +41,7 @@ func hostRegistry(t *testing.T) *registry.Registry {
 	return r
 }
 
-func hostedSession(t *testing.T, claude *surfaces.Claude, id string) surface.Session {
+func hostedSession(t *testing.T, claude *claudesurface.Claude, id string) surface.Session {
 	t.Helper()
 	var found surface.Session
 	testkit.Eventually(t, "the host session to be listed", 15*time.Second, func() bool {
@@ -76,7 +76,7 @@ func TestAPersonsMessageToAHostSessionIsDeliveredUnderItsIntentUUID(t *testing.T
 	client := fixture.Start(t)
 	id := uuid.NewString()
 	fixture.Open(t, client, id)
-	claude := surfaces.NewClaude(nil, fixture.Home)
+	claude := claudesurface.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
 	if err := r.RecordObservedSession(session); err != nil {
@@ -121,7 +121,7 @@ func TestAPersonCompactsAHostSessionFromTheDashboard(t *testing.T) {
 	client := fixture.Start(t)
 	id := uuid.NewString()
 	fixture.Open(t, client, id)
-	claude := surfaces.NewClaude(nil, fixture.Home)
+	claude := claudesurface.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
 	if err := r.RecordObservedSession(session); err != nil {
@@ -158,7 +158,7 @@ func TestAnIdleHostSessionIsCompactedAndItsNextTurnSaysTheCompactionWasIdle(t *t
 	client := fixture.Start(t)
 	id := uuid.NewString()
 	fixture.Open(t, client, id)
-	claude := surfaces.NewClaude(nil, fixture.Home)
+	claude := claudesurface.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
 	if err := r.RecordObservedSession(session); err != nil {
@@ -388,7 +388,7 @@ func updateFromAProtocol1Host(t *testing.T, prompt string) {
 	client := claudehost.NewClient(fixture.Home)
 	id := uuid.NewString()
 	opened := fixture.Open(t, client, id)
-	claude := surfaces.NewClaude(nil, fixture.Home)
+	claude := claudesurface.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
 	if err := r.RecordObservedSession(session); err != nil {
@@ -548,7 +548,7 @@ func TestAnUpdateFromAProtocol2HostAnswersItsPromptThroughTheNewDaemon(t *testin
 			client := claudehost.NewClient(fixture.Home)
 			id := uuid.NewString()
 			opened := fixture.Open(t, client, id)
-			claude := surfaces.NewClaude(nil, fixture.Home)
+			claude := claudesurface.NewClaude(nil, fixture.Home)
 			session := hostedSession(t, claude, id)
 			r := hostRegistry(t)
 			if err := r.RecordObservedSession(session); err != nil {
@@ -609,7 +609,7 @@ func TestAMessageClaudeHoldsIsADeliveryProblemAndItsSenderIsTold(t *testing.T) {
 	sender, target := uuid.NewString(), uuid.NewString()
 	fixture.Open(t, client, sender)
 	fixture.OpenInMode(t, client, target, "bypassPermissions")
-	claude := surfaces.NewClaude(nil, fixture.Home)
+	claude := claudesurface.NewClaude(nil, fixture.Home)
 	senderSession, targetSession := hostedSession(t, claude, sender), hostedSession(t, claude, target)
 	r := hostRegistry(t)
 	for _, session := range []surface.Session{senderSession, targetSession} {
@@ -676,7 +676,7 @@ func TestASessionStreamOpenedOnANewHostSessionDeliversItsFirstReply(t *testing.T
 	client := fixture.Start(t)
 	id := uuid.NewString()
 	fixture.Open(t, client, id)
-	claude := surfaces.NewClaude(nil, fixture.Home)
+	claude := claudesurface.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
 	if err := r.RecordObservedSession(session); err != nil {
@@ -723,13 +723,13 @@ func TestASessionStreamOpenedOnANewHostSessionDeliversItsFirstReply(t *testing.T
 	}
 }
 
-func newHostedSourceFixture(t *testing.T) (*surfaces.Claude, surface.Session, *registry.Registry, string) {
+func newHostedSourceFixture(t *testing.T) (*claudesurface.Claude, surface.Session, *registry.Registry, string) {
 	t.Helper()
 	fixture := claudehosttest.New(t, "")
 	client := fixture.Start(t)
 	id := uuid.NewString()
 	fixture.Open(t, client, id)
-	claude := surfaces.NewClaude(nil, fixture.Home)
+	claude := claudesurface.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
 	if err := r.RecordObservedSession(session); err != nil {
@@ -839,7 +839,7 @@ func TestAnOpenRequestStaysAnswerableThroughHostUpdates(t *testing.T) {
 			}
 			id := uuid.NewString()
 			opened := fixture.Open(t, client, id)
-			claude := surfaces.NewClaude(nil, fixture.Home)
+			claude := claudesurface.NewClaude(nil, fixture.Home)
 			session := hostedSession(t, claude, id)
 			r := hostRegistry(t)
 			if err := r.RecordObservedSession(session); err != nil {
@@ -858,7 +858,7 @@ func TestAnOpenRequestStaysAnswerableThroughHostUpdates(t *testing.T) {
 
 			var d *Daemon
 			for _, version := range test.updates {
-				claude = surfaces.NewClaude(nil, fixture.Home)
+				claude = claudesurface.NewClaude(nil, fixture.Home)
 				d = newTestDaemon(t, r, []surface.Surface{claude})
 				d.log = log.New(io.Discard, "", 0)
 				d.SetClaudeHost(fixture.Manager(t, version))
@@ -1004,7 +1004,7 @@ func retiringRequest(t *testing.T) (*claudehosttest.Fixture, surface.Session, su
 	}
 	id := uuid.NewString()
 	opened := fixture.Open(t, client, id)
-	claude := surfaces.NewClaude(nil, fixture.Home)
+	claude := claudesurface.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	fixture.Peer(t, opened.PID, "TOOL")
 	var request surface.Request
@@ -1030,7 +1030,7 @@ func TestARetiringHostThatDoesNotAnswerHidesNoOtherHostsRequest(t *testing.T) {
 	ctx := context.Background()
 	silentHost(t, fixture)
 
-	claude := surfaces.NewClaude(nil, fixture.Home)
+	claude := claudesurface.NewClaude(nil, fixture.Home)
 	if listed := hostedSession(t, claude, session.ID); listed.PID != session.PID {
 		t.Fatalf("listed pid = %d, want %d", listed.PID, session.PID)
 	}
@@ -1072,7 +1072,7 @@ func TestASessionWhoseRetiringHostDoesNotAnswerKeepsItsRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claude := surfaces.NewClaude(nil, fixture.Home)
+	claude := claudesurface.NewClaude(nil, fixture.Home)
 	hostedSession(t, claude, session.ID)
 	if err := syscall.Kill(hello.PID, syscall.SIGSTOP); err != nil {
 		t.Fatal(err)
@@ -1121,7 +1121,7 @@ func TestAnAnnouncedRequestStaysAnnouncedWhileItsHostDoesNotAnswer(t *testing.T)
 	client := fixture.Start(t)
 	id := uuid.NewString()
 	opened := fixture.Open(t, client, id)
-	claude := surfaces.NewClaude(nil, fixture.Home)
+	claude := claudesurface.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
 	if err := r.RecordObservedSession(session); err != nil {
@@ -1252,7 +1252,7 @@ func TestAHostRequestIsRecordedAsAnswerable(t *testing.T) {
 	}
 	id := uuid.NewString()
 	opened := fixture.Open(t, client, id)
-	claude := surfaces.NewClaude(nil, fixture.Home)
+	claude := claudesurface.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
 	if err := r.RecordObservedSession(session); err != nil {

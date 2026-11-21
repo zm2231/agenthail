@@ -15,7 +15,7 @@ import (
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -45,7 +45,7 @@ func serveTestDaemon(t *testing.T, store *registry.Registry, adapters []surface.
 // The caller sets HOME first: the dashboard config is written there.
 func startTestDaemon(t *testing.T, app *App, store *registry.Registry, claudeHome string) {
 	t.Helper()
-	serveAppDaemon(t, app, store, []surface.Surface{surfaces.NewClaude(nil, claudeHome)})
+	serveAppDaemon(t, app, store, []surface.Surface{claudesurface.NewClaude(nil, claudeHome)})
 }
 
 func serveCreates(t *testing.T, app *App) func() {
@@ -91,7 +91,7 @@ func TestTheCLIReadsAndAnswersATerminalQuestionTheDaemonHolds(t *testing.T) {
 	if _, err := claudehooks.InstallAt(filepath.Join(h.claude.Root, "settings.json"), "/usr/local/bin/agenthail"); err != nil {
 		t.Fatal(err)
 	}
-	claude := surfaces.NewClaude(nil, h.claude.Home)
+	claude := claudesurface.NewClaude(nil, h.claude.Home)
 	app := &App{Registry: h.store, Surfaces: []SurfaceEntry{{Name: string(surface.KindClaude), Surface: claude}}, DefaultTimeout: claudeFixtureTimeout, daemonService: &fakeService{},
 		catalogDaemonRunning: func() bool { return true }, daemonAPIOverride: func() (*daemonAPIClient, error) { return h.client, nil }}
 	session, err := h.store.Session(restartConversation)
@@ -119,7 +119,7 @@ func TestTheCLIReadsAndAnswersATerminalQuestionTheDaemonHolds(t *testing.T) {
 }
 
 type daemonOnlyAnswers struct {
-	*surfaces.Claude
+	*claudesurface.Claude
 	t *testing.T
 }
 
@@ -137,7 +137,7 @@ func TestTheCLIAnswersAHostSessionsQuestionThroughTheDaemon(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	app, r, host, client, id := hostedClaudeApp(t)
 	startTestDaemon(t, app, r, host.Home)
-	app.Surfaces[0].Surface = daemonOnlyAnswers{Claude: app.Surfaces[0].Surface.(*surfaces.Claude), t: t}
+	app.Surfaces[0].Surface = daemonOnlyAnswers{Claude: app.Surfaces[0].Surface.(*claudesurface.Claude), t: t}
 	if _, err := client.Send(context.Background(), claudehost.SendRequest{SessionID: id, UUID: uuid.NewString(), Text: "QUESTION", Origin: &claudehost.Origin{Kind: "human"}}); err != nil {
 		t.Fatal(err)
 	}

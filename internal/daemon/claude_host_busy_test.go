@@ -9,19 +9,19 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 // busyHostSession opens a host session and starts a turn that runs until it
 // is interrupted.
-func busyHostSession(t *testing.T) (*claudehosttest.Fixture, claudehost.Client, *surfaces.Claude, *Daemon, surface.Session, string) {
+func busyHostSession(t *testing.T) (*claudehosttest.Fixture, claudehost.Client, *claudesurface.Claude, *Daemon, surface.Session, string) {
 	t.Helper()
 	fixture := claudehosttest.New(t, "")
 	client := fixture.Start(t)
 	id := uuid.NewString()
 	fixture.Open(t, client, id)
-	claude := surfaces.NewClaude(nil, fixture.Home)
+	claude := claudesurface.NewClaude(nil, fixture.Home)
 	session := hostedSession(t, claude, id)
 	r := hostRegistry(t)
 	if err := r.RecordObservedSession(session); err != nil {

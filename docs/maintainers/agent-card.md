@@ -70,4 +70,4 @@ The row survives a Claude rekey (`rekeySessionTx`), as both the session and the 
 
 ## Tests
 
-`go test ./internal/cli -run 'TestASession|TestThreadCreate|TestThreadFork|Whoami|TestAClaudeSession|TestTheCodexContextHook|Hooks'`, `go test ./internal/registry -run Schema29`, `go test ./internal/surface/surfaces -run TestHooksInstallCodex` and `go test ./internal/daemon -run 'TestDashboardRecordsWhichSession|TestAnIdleClaudeSessionMovesToAPairedHost'`.
+`go test ./internal/cli -run 'TestASession|TestThreadCreate|TestThreadFork|Whoami|TestAClaudeSession|TestTheCodexContextHook|Hooks'`, `go test ./internal/registry -run Schema29`, `go test ./internal/surface/codexsurface -run TestHooksInstallCodex` and `go test ./internal/daemon -run 'TestDashboardRecordsWhichSession|TestAnIdleClaudeSessionMovesToAPairedHost'`.

@@ -14,7 +14,6 @@ import (
 	"github.com/zm2231/agenthail/internal/mcpstdio"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/codexsurface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 const mcpUsage = "usage: agenthail mcp stdio|install|uninstall|status"
@@ -117,7 +116,7 @@ func claudeMCPState(config claudeMCPConfig, executable string) (string, error) {
 // Homebrew deletes a version's Cellar directory on upgrade; its opt link
 // follows the installed version.
 func relayExecutable() string {
-	executable := surfaces.AgenthailExecutable()
+	executable := surface.AgenthailExecutable()
 	marker := strings.Index(executable, "/Cellar/agenthail/")
 	if marker <= 0 {
 		return executable

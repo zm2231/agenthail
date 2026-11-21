@@ -10,8 +10,8 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -56,7 +56,7 @@ func TestRelayToABusyClaudeSessionRidesItsPeerSocketAtOnce(t *testing.T) {
 	if _, err := store.AddRoute(from.ID, session.ID, ".*"); err != nil {
 		t.Fatal(err)
 	}
-	runDaemonWith(t, store, func(d *Daemon) { d.fireRelays(&from, "relay-turn", 0, "finished the release notes") }, surfaces.NewClaude(nil, process.Home))
+	runDaemonWith(t, store, func(d *Daemon) { d.fireRelays(&from, "relay-turn", 0, "finished the release notes") }, claudesurface.NewClaude(nil, process.Home))
 	testkit.Eventually(t, "the relay over the peer socket", 5*time.Second, func() bool { return manager.Containing("finished the release notes") == 1 })
 	sends := manager.Sends()
 	if len(sends) != 1 || sends[0].Source != from.ID || sends[0].Target == "" {
@@ -70,7 +70,7 @@ func TestQueuedMessageToABusyRemoteControlClaudeSteersUnderTheSteerPolicy(t *tes
 	if err := SaveDashboardConfig(DashboardConfig{BusyDelivery: "steer"}); err != nil {
 		t.Fatal(err)
 	}
-	claude := &recordingClaude{Claude: surfaces.NewClaude(nil, process.Home)}
+	claude := &recordingClaude{Claude: claudesurface.NewClaude(nil, process.Home)}
 	id, _, err := store.QueueDeliveryWithIntent(session.ID, "into the turn", "", surface.SendOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -150,7 +150,7 @@ func TestQueuedMessagesToABusyBridgedPeerNeverSteerUnderTheSteerPolicy(t *testin
 	if err := SaveDashboardConfig(DashboardConfig{BusyDelivery: "steer"}); err != nil {
 		t.Fatal(err)
 	}
-	claude := &recordingClaude{Claude: surfaces.NewClaude(nil, process.Home)}
+	claude := &recordingClaude{Claude: claudesurface.NewClaude(nil, process.Home)}
 	ids := []int64{}
 	for _, message := range []string{"first handoff", "second handoff"} {
 		id, _, err := store.QueueDeliveryWithIntent(session.ID, message, "", surface.SendOptions{SourceSessionID: "sender"})

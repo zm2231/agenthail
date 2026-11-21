@@ -14,8 +14,8 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 )
 
 const restartConversation = "conversation-question"
@@ -26,7 +26,7 @@ type promptRestart struct {
 	store   *registry.Registry
 	listen  string
 	client  *daemonAPIClient
-	decided chan *surfaces.ClaudePromptDecision
+	decided chan *claudesurface.ClaudePromptDecision
 }
 
 func newPromptRestart(t *testing.T) (*promptRestart, func()) {
@@ -51,7 +51,7 @@ func newPromptRestart(t *testing.T) (*promptRestart, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &promptRestart{t: t, claude: claude, store: store, listen: listener.Addr().String(), decided: make(chan *surfaces.ClaudePromptDecision, 1)}
+	h := &promptRestart{t: t, claude: claude, store: store, listen: listener.Addr().String(), decided: make(chan *claudesurface.ClaudePromptDecision, 1)}
 	listener.Close()
 	if err := daemon.SaveDashboardConfig(daemon.DashboardConfig{Enabled: true, Listen: h.listen}); err != nil {
 		t.Fatal(err)
@@ -71,7 +71,7 @@ func newPromptRestart(t *testing.T) (*promptRestart, func()) {
 
 func (h *promptRestart) serve() func() {
 	h.t.Helper()
-	return serveTestDaemon(h.t, h.store, []surface.Surface{surfaces.NewClaude(nil, h.claude.Home)}, h.listen)
+	return serveTestDaemon(h.t, h.store, []surface.Surface{claudesurface.NewClaude(nil, h.claude.Home)}, h.listen)
 }
 
 func (h *promptRestart) heldRequest() string {
@@ -101,7 +101,7 @@ func (h *promptRestart) stillHeld() {
 	}
 }
 
-func (h *promptRestart) decision() *surfaces.ClaudePromptDecision {
+func (h *promptRestart) decision() *claudesurface.ClaudePromptDecision {
 	h.t.Helper()
 	select {
 	case decision := <-h.decided:

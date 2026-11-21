@@ -15,8 +15,8 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehooks"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/surface/codexsurface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 const claudeHookInputLimit = 1 << 20
@@ -136,7 +136,7 @@ func (a *App) cmdHook(args []string) error {
 // connection posted again, until no daemon has held the prompt for
 // claudePromptHookUnheldLimit. A call that failed within claudePromptHookHeld
 // never counts as held, so a daemon that crashes as it starts cannot extend it.
-func holdClaudePrompt(ctx context.Context, client *daemonAPIClient, input io.Reader, parent int, serviceLoaded func() bool) *surfaces.ClaudePromptDecision {
+func holdClaudePrompt(ctx context.Context, client *daemonAPIClient, input io.Reader, parent int, serviceLoaded func() bool) *claudesurface.ClaudePromptDecision {
 	var request daemon.ClaudePermissionRequest
 	if err := json.NewDecoder(io.LimitReader(input, claudeHookInputLimit)).Decode(&request.Prompt); err != nil {
 		return nil
@@ -336,7 +336,7 @@ func (a *App) claudeHooksAt(action string, roots []string, executable string) er
 func cmdCodexHooks(action string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	executable := surfaces.AgenthailExecutable()
+	executable := surface.AgenthailExecutable()
 	if executable == "" {
 		return errors.New("run this from the installed agenthail binary; Codex hooks name the binary that wrote them")
 	}

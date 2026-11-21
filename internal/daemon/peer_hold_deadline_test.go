@@ -10,7 +10,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 )
 
 func TestAHeldMessageWhoseDropIsNeverReportedFailsPastClaudesDeadline(t *testing.T) {
@@ -58,7 +58,7 @@ func TestAHeldMessageWhoseDropIsNeverReportedFailsPastClaudesDeadline(t *testing
 			if err != nil || len(held) != 1 {
 				t.Fatalf("held=%+v err=%v", held, err)
 			}
-			d := newTestDaemon(t, r, []surface.Surface{surfaces.NewClaude(nil, home)})
+			d := newTestDaemon(t, r, []surface.Surface{claudesurface.NewClaude(nil, home)})
 			d.log = log.New(io.Discard, "", 0)
 			status := func(after time.Duration) *registry.DeliveryIntent {
 				t.Helper()

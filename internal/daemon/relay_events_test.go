@@ -16,7 +16,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 )
 
 func (f *daemonSurface) ReadCompletions(ctx context.Context, session *surface.Session, cursor string) (surface.CompletionBatch, error) {
@@ -86,7 +86,7 @@ func TestDurableRelayClaudeBurstFailureRestartAndOutbox(t *testing.T) {
 	if err := r.RecordObservedSession(other); err != nil {
 		t.Fatal(err)
 	}
-	reader := surfaces.NewClaude(nil, t.TempDir())
+	reader := claudesurface.NewClaude(nil, t.TempDir())
 	if err := r.PrepareRelaySource(context.Background(), reader, &source, registry.HandoffTurnFinished); err != nil {
 		t.Fatal(err)
 	}
@@ -123,8 +123,8 @@ func TestDurableRelayClaudeBurstFailureRestartAndOutbox(t *testing.T) {
 	}
 	t.Cleanup(func() { reopened.Close() })
 	restarted := newTestDaemon(t, reopened, []surface.Surface{target})
-	restarted.syncRelays(context.Background(), surfaces.NewClaude(nil, t.TempDir()), &source)
-	restarted.syncRelays(context.Background(), surfaces.NewClaude(nil, t.TempDir()), &source)
+	restarted.syncRelays(context.Background(), claudesurface.NewClaude(nil, t.TempDir()), &source)
+	restarted.syncRelays(context.Background(), claudesurface.NewClaude(nil, t.TempDir()), &source)
 	routes, _ = reopened.ListRoutes()
 	if routes[0].FireCount != 3 || routes[0].PendingCount != 0 || routes[1].FireCount != 3 || reopened.QueueCount(to.ID) != 3 {
 		t.Fatalf("restart/replay: %+v", routes)
@@ -304,7 +304,7 @@ func TestRelayUserPrefixCannotSpoofHopLimit(t *testing.T) {
 }
 
 type racingClaudeReader struct {
-	*surfaces.Claude
+	*claudesurface.Claude
 	race func()
 }
 
@@ -337,7 +337,7 @@ func TestRelayPreparationLosingToAShorterCaptureStillBaselinesWhatItRead(t *test
 	if err := r.RecordObservedSession(source); err != nil {
 		t.Fatal(err)
 	}
-	reader := &racingClaudeReader{Claude: surfaces.NewClaude(nil, t.TempDir())}
+	reader := &racingClaudeReader{Claude: claudesurface.NewClaude(nil, t.TempDir())}
 	if err := r.PrepareRelaySource(context.Background(), reader, &source, registry.HandoffTurnFinished); err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +406,7 @@ func TestDurableRelayClaudeRelaysReplyTextOnceAfterItsLastContentBlock(t *testin
 	if err := r.RecordObservedSession(source); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.PrepareRelaySource(context.Background(), surfaces.NewClaude(nil, t.TempDir()), &source, registry.HandoffTurnFinished); err != nil {
+	if err := r.PrepareRelaySource(context.Background(), claudesurface.NewClaude(nil, t.TempDir()), &source, registry.HandoffTurnFinished); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.AddRoute(source.ID, to.ID, ".*"); err != nil {
@@ -420,18 +420,18 @@ func TestDurableRelayClaudeRelaysReplyTextOnceAfterItsLastContentBlock(t *testin
 		return routes[0].FireCount
 	}
 	write(prompt("one"), thinking("one"), text("one"), hook, duration)
-	d.syncRelays(context.Background(), surfaces.NewClaude(nil, t.TempDir()), &source)
+	d.syncRelays(context.Background(), claudesurface.NewClaude(nil, t.TempDir()), &source)
 	if fires() != 1 || r.QueueCount(to.ID) != 1 {
 		t.Fatalf("thinking and text in one read: fires=%d queued=%d", fires(), r.QueueCount(to.ID))
 	}
 	write(prompt("two"), thinking("two"))
-	d.syncRelays(context.Background(), surfaces.NewClaude(nil, t.TempDir()), &source)
+	d.syncRelays(context.Background(), claudesurface.NewClaude(nil, t.TempDir()), &source)
 	if fires() != 1 || r.QueueCount(to.ID) != 1 {
 		t.Fatalf("closing turn relayed before its text: fires=%d queued=%d", fires(), r.QueueCount(to.ID))
 	}
 	write(text("two"), duration)
-	d.syncRelays(context.Background(), surfaces.NewClaude(nil, t.TempDir()), &source)
-	d.syncRelays(context.Background(), surfaces.NewClaude(nil, t.TempDir()), &source)
+	d.syncRelays(context.Background(), claudesurface.NewClaude(nil, t.TempDir()), &source)
+	d.syncRelays(context.Background(), claudesurface.NewClaude(nil, t.TempDir()), &source)
 	if fires() != 2 || r.QueueCount(to.ID) != 2 {
 		t.Fatalf("split turn: fires=%d queued=%d", fires(), r.QueueCount(to.ID))
 	}

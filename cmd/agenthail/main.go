@@ -12,9 +12,9 @@ import (
 	"github.com/zm2231/agenthail/internal/cli"
 	"github.com/zm2231/agenthail/internal/codexconfig"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/surface/notionsurface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 var (
@@ -60,7 +60,7 @@ func main() {
 	}
 
 	helpers := sidecarAvailable(runtime.GOOS, os.Getenv("AGENTHAIL_SIDECAR"))
-	claude := surfaces.NewClaude(app, home)
+	claude := claudesurface.NewClaude(app, home)
 	if !helpers {
 		claude.DisableRemoteControl()
 	}

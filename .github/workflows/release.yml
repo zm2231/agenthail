@@ -137,11 +137,11 @@ jobs:
           race=(-race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m)
           case "$SUITE" in
             rest)
-              go test $(go list ./... | grep -vxE 'github.com/zm2231/agenthail/internal/(daemon|surface/surfaces|surface/codexsurface)') "${race[@]}"
+              go test $(go list ./... | grep -vxE 'github.com/zm2231/agenthail/internal/(daemon|surface/claudesurface|surface/codexsurface)') "${race[@]}"
               go vet ./...
               ;;
             surfaces)
-              go test ./internal/surface/surfaces ./internal/surface/codexsurface "${race[@]}"
+              go test ./internal/surface/claudesurface ./internal/surface/codexsurface "${race[@]}"
               ;;
             daemon)
               pattern="$(go run ./scripts/go-test-shard -seconds scripts/go-test-shard/seconds/internal-daemon.tsv "$SHARD" 4 ./internal/daemon -race)"

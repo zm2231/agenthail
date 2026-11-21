@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
@@ -168,7 +168,7 @@ func TestPagesNeverSplitATurnWhoseIDIsReused(t *testing.T) {
 		read func(request surface.SessionReadRequest) *surface.SessionReadResult
 	}{
 		{"claude", func(request surface.SessionReadRequest) *surface.SessionReadResult {
-			read, err := surfaces.NewClaude(nil, "/nonexistent/agenthail-timeline-home").ReadSession(context.Background(), &surface.Session{Transcript: surfacetest.TimelineFixture(t, claude), Status: surface.StatusIdle}, request)
+			read, err := claudesurface.NewClaude(nil, "/nonexistent/agenthail-timeline-home").ReadSession(context.Background(), &surface.Session{Transcript: surfacetest.TimelineFixture(t, claude), Status: surface.StatusIdle}, request)
 			if err != nil {
 				t.Fatal(err)
 			}

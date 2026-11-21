@@ -7,7 +7,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 )
 
 type ledgerCaptureRequest struct {
@@ -54,7 +54,7 @@ func (d *Daemon) apiLedgerCaptureHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	now := time.Now()
-	if _, peer := surface.ParsePeerEnvelope(req.Prompt); peer || !surfaces.IsTypedHumanPrompt(req.Prompt) || d.notPerson.has(req.PromptID, now) {
+	if _, peer := surface.ParsePeerEnvelope(req.Prompt); peer || !claudesurface.IsTypedHumanPrompt(req.Prompt) || d.notPerson.has(req.PromptID, now) {
 		d.markTurnTyped(session.ID, false)
 		writeDashboardJSON(w, http.StatusOK, ledgerCaptureResponse{})
 		return

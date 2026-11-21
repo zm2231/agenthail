@@ -17,8 +17,8 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/browsercookie"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -78,7 +78,7 @@ func exitedClaudeWithoutDaemon(t *testing.T) exitedClaude {
 	fixture := claudetest.New(t)
 	host := claudehosttest.New(t, fixture.Home)
 	host.Start(t)
-	app, r := claudeCLIFixture(t, surfaces.NewClaude(nil, fixture.Home))
+	app, r := claudeCLIFixture(t, claudesurface.NewClaude(nil, fixture.Home))
 	exited := surface.Session{ID: terminalConversation, Bridge: "session_terminal", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "fixture terminal", PID: exitedPID, Status: surface.StatusBusy, Cwd: fixture.Home, Transcript: fixture.Transcript(terminalConversation, fixture.Home)}
 	if err := r.RecordObservedSession(exited); err != nil {
 		t.Fatal(err)

@@ -11,8 +11,8 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 )
 
 const (
@@ -25,7 +25,7 @@ func liveClaudeApp(t *testing.T) (*App, *registry.Registry, *claudetest.Fixture,
 	t.Helper()
 	fixture := claudetest.New(t)
 	posts := &claudePosts{}
-	app, r := claudeCLIFixture(t, surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, posts.request))
+	app, r := claudeCLIFixture(t, claudesurface.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, posts.request))
 	return app, r, fixture, posts
 }
 

@@ -12,7 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -34,7 +34,7 @@ func openLeadRequest(t *testing.T, prompt string) *replacedLeadRequest {
 	f := &replacedLeadRequest{fixture: claudehosttest.New(t, ""), id: uuid.NewString(), next: uuid.NewString()}
 	client := f.fixture.Start(t)
 	f.fixture.Open(t, client, f.id)
-	claude := surfaces.NewClaude(nil, f.fixture.Home)
+	claude := claudesurface.NewClaude(nil, f.fixture.Home)
 	session := hostedSession(t, claude, f.id)
 	f.r = hostRegistry(t)
 	if err := f.r.RecordObservedSession(session); err != nil {

@@ -15,8 +15,8 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 )
 
 func TestAStoppingDaemonStopsACatchUpAndTheNextStartFinishesIt(t *testing.T) {
@@ -37,7 +37,7 @@ func TestAStoppingDaemonStopsACatchUpAndTheNextStartFinishesIt(t *testing.T) {
 	if err := r.RecordObservedSession(surface.Session{ID: conversation, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Transcript: path, Cwd: fixture.Home}); err != nil {
 		t.Fatal(err)
 	}
-	claude := surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)
+	claude := claudesurface.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)
 	d.Surfaces = []surface.Surface{claude}
 	handler := dashboardRouter(d)
 	if got := readDashboardExchanges(t, handler, conversation, ""); len(got) != 1 {

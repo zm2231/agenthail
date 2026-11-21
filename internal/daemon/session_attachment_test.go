@@ -17,7 +17,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
@@ -51,7 +51,7 @@ func TestASentFileDownloadsSandboxedAndASentPDFOpensInline(t *testing.T) {
 	if err := registry.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
-	claude := surfaces.NewClaude(nil, t.TempDir())
+	claude := claudesurface.NewClaude(nil, t.TempDir())
 	d.Surfaces = []surface.Surface{claude}
 	read, err := claude.ReadSession(context.Background(), &from, surface.SessionReadRequest{Limit: 20})
 	if err != nil {

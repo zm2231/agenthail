@@ -18,7 +18,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -45,7 +45,7 @@ type retiringFixture struct {
 	t       *testing.T
 	ctx     context.Context
 	f       *claudehosttest.Fixture
-	claude  *surfaces.Claude
+	claude  *claudesurface.Claude
 	r       *registry.Registry
 	d       *Daemon
 	log     *lockedLog
@@ -56,7 +56,7 @@ type retiringFixture struct {
 func newRetiringFixture(t *testing.T) *retiringFixture {
 	t.Helper()
 	f := claudehosttest.New(t, "")
-	x := &retiringFixture{t: t, ctx: context.Background(), f: f, claude: surfaces.NewClaude(nil, f.Home), r: hostRegistry(t), log: &lockedLog{}}
+	x := &retiringFixture{t: t, ctx: context.Background(), f: f, claude: claudesurface.NewClaude(nil, f.Home), r: hostRegistry(t), log: &lockedLog{}}
 	x.d = newTestDaemon(t, x.r, []surface.Surface{x.claude})
 	x.d.log = log.New(x.log, "", 0)
 	x.update()
@@ -294,7 +294,7 @@ func TestAHostFromBeforeReleaseIsReleasedOnceAndLeavesAsItAlwaysDid(t *testing.T
 	if _, err := client.Send(ctx, claudehost.SendRequest{SessionID: id, UUID: uuid.NewString(), Text: "SLOW 60000"}); err != nil {
 		t.Fatal(err)
 	}
-	claude := surfaces.NewClaude(nil, f.Home)
+	claude := claudesurface.NewClaude(nil, f.Home)
 	r := hostRegistry(t)
 	if err := r.RecordObservedSession(hostedSession(t, claude, id)); err != nil {
 		t.Fatal(err)
