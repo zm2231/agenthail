@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/surface"
 	_ "modernc.org/sqlite"
 )
 
@@ -497,10 +496,8 @@ func migrateTx(tx *sql.Tx) error {
 		}
 	}
 	if version >= 1 && version < 119 {
-		if _, err := tx.Exec(retireRemovedIdentities, string(surface.RuntimeAgentInbox)); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(dropPairedSessionAliases); err != nil {
+		// A paired host's session is answered at host::@alias, so a local name only takes one from this host.
+		if _, err := tx.Exec(`DELETE FROM aliases WHERE session_id IN (SELECT id FROM sessions WHERE host_id<>'') AND name NOT IN (SELECT name FROM coordinators)`); err != nil {
 			return err
 		}
 	}

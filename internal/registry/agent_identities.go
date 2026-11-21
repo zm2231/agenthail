@@ -130,8 +130,8 @@ func (r *Registry) AddAgentIdentity(name string) (AgentIdentity, error) {
 	return AgentIdentity{Name: name, SessionID: id, CreatedAt: now}, nil
 }
 
-// RemoveAgentIdentity drops the identity, its inbox and its alias, and retires
-// its session row.
+// RemoveAgentIdentity drops the identity, its inbox and its alias. Its session
+// row stays for discovery to retire, so paired hosts drop their mirror of it.
 func (r *Registry) RemoveAgentIdentity(name string) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -158,17 +158,8 @@ func (r *Registry) RemoveAgentIdentity(name string) error {
 	if _, err := tx.Exec(`UPDATE sessions SET ended=1, status=?, updated_at=datetime('now') WHERE id=?`, string(surface.StatusOffline), id); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(retireRemovedIdentities, string(surface.RuntimeAgentInbox)); err != nil {
-		return err
-	}
 	return tx.Commit()
 }
-
-// Paired hosts drop their mirror of a retired row on their next snapshot, not a day later.
-const retireRemovedIdentities = `UPDATE catalog_sessions SET current=0,retired=1 WHERE retired=0
-	AND session_id IN (SELECT id FROM sessions WHERE runtime_kind=? AND host_id='' AND id NOT IN (SELECT identity_id FROM agent_identities))`
-
-const dropPairedSessionAliases = `DELETE FROM aliases WHERE session_id IN (SELECT id FROM sessions WHERE host_id<>'') AND name NOT IN (SELECT name FROM coordinators)`
 
 func agentIdentityIDTx(q catalogQuerier, name string) (string, error) {
 	var id string
