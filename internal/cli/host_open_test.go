@@ -84,9 +84,10 @@ func TestAReplySendToAClosedClaudeConversationPrintsTheReplyOfTheTurnItsMessageS
 			}
 		}
 		at := time.Now().UTC().Format(time.RFC3339Nano)
+		msgID := e.peers.Sends()[0].MsgID
 		var lines []byte
 		for _, record := range []map[string]any{
-			{"type": "user", "uuid": "turn-1", "sessionId": terminalConversation, "timestamp": at, "origin": map[string]any{"kind": "peer", "msg_id": "peer-1", "name": "cli"}, "message": map[string]any{"role": "user", "content": "<cross-session-message>hello</cross-session-message>"}},
+			{"type": "user", "uuid": "turn-1", "sessionId": terminalConversation, "timestamp": at, "origin": map[string]any{"kind": "peer", "msg_id": msgID, "name": "cli"}, "message": map[string]any{"role": "user", "content": "<cross-session-message>hello</cross-session-message>"}},
 			{"type": "assistant", "uuid": "answer-1", "sessionId": terminalConversation, "timestamp": at, "message": map[string]any{"id": "m-1", "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": "the reply to hello"}}}},
 			{"type": "system", "subtype": "turn_duration", "sessionId": terminalConversation, "timestamp": at},
 		} {

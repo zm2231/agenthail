@@ -318,13 +318,13 @@ func ListenPeerManager(t testing.TB, home string) *PeerManager {
 			}
 			var request PeerSend
 			if json.NewDecoder(conn).Decode(&request) == nil {
+				if request.MsgID == "" {
+					request.MsgID = uuid.NewString()
+				}
+				id := request.MsgID
 				manager.mu.Lock()
 				manager.messages = append(manager.messages, request.Message)
 				manager.sends = append(manager.sends, request)
-				id := request.MsgID
-				if id == "" {
-					id = uuid.NewString()
-				}
 				manager.mu.Unlock()
 				_ = json.NewEncoder(conn).Encode(map[string]any{"ok": true, "result": map[string]any{"uuid": id, "accepted": true}})
 			}
