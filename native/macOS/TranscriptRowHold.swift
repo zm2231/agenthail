@@ -3,6 +3,7 @@ import CoreGraphics
 struct TranscriptPass {
     var leadingChanged: Bool
     var resting: Bool
+    var following: Bool
     var content: CGFloat
 }
 
@@ -16,13 +17,23 @@ final class TranscriptRowHold {
     var holding: Bool { row.map { $0.content != nil && ContinuousClock.now < $0.until } ?? false }
     var id: String? { row?.id }
     var before: CGFloat? { row?.before }
+    var measured: Bool { row?.top != nil }
+
+    func request(fresh: Bool) {
+        if fresh || !pending { olderUntil = .now + .seconds(30) }
+    }
 
     func arm(_ id: String, above: CGFloat, before: CGFloat, fresh: Bool) {
-        if fresh || !pending { olderUntil = .now + .seconds(30) }
+        request(fresh: fresh)
         row = (id, above, before, olderUntil ?? .now, nil, nil, true)
     }
 
     func release() { row = nil }
+
+    func settle(until: ContinuousClock.Instant?) {
+        guard row?.content != nil else { return }
+        row?.until = until ?? .now + .seconds(86_400)
+    }
 
     func forget() {
         olderUntil = nil
@@ -31,7 +42,16 @@ final class TranscriptRowHold {
 
     /// The row to restore when this pass lands an armed hold.
     func pass(_ pass: TranscriptPass) -> String? {
-        guard pass.leadingChanged, pass.resting, let row, row.content == nil, ContinuousClock.now < row.until else { return nil }
+        guard pass.leadingChanged else { return nil }
+        guard pass.resting, !pass.following else {
+            forget()
+            return nil
+        }
+        guard let row else {
+            olderUntil = nil
+            return nil
+        }
+        guard row.content == nil, ContinuousClock.now < row.until else { return nil }
         olderUntil = nil
         self.row?.content = pass.content
         self.row?.until = .now + .seconds(2)
@@ -56,7 +76,9 @@ final class TranscriptRowHold {
         }
         if abs(offset - target) <= 1 {
             self.row?.landing = false
-        } else if !row.landing {
+        } else if row.landing {
+            return target
+        } else {
             self.row = nil
         }
         return nil

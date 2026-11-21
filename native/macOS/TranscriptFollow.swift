@@ -84,10 +84,9 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 layout.seen = new
                 let inserted = leadingRow != placedLeadingRow && placedLeadingRow.map(hasRow) == true
                 placedLeadingRow = leadingRow
-                if inserted, !resting { layout.row.forget() }
                 let resized = old.contentSize != new.contentSize || old.containerSize != new.containerSize
                 if resized { layout.markResized() }
-                if !following, let rows, let id = layout.row.pass(TranscriptPass(leadingChanged: inserted, resting: resting, content: new.contentSize.height)) {
+                if let rows, let id = layout.row.pass(TranscriptPass(leadingChanged: inserted, resting: resting, following: following, content: new.contentSize.height)) {
                     restoreHeld(id, in: rows)
                     return
                 }
@@ -97,10 +96,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                     return
                 }
                 if !following, !inserted, resting, let target = layout.heldTarget(new, rows: rows) {
-                    settle { position in
-                        guard layout.holding else { return }
-                        position.scrollTo(y: Self.scrollY(target, in: new))
-                    }
+                    settleHold { $0.scrollTo(y: Self.scrollY(target, in: new)) }
                     return
                 }
                 if !resized {
@@ -119,10 +115,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                     let distance = layout.heldFromEnd ?? (old.contentSize.height - old.contentOffset.y)
                     layout.holdFromEnd(distance, content: new.contentSize.height)
                     let target = max(new.contentSize.height - distance, 0)
-                    settle { position in
-                        guard layout.holding else { return }
-                        position.scrollTo(y: Self.scrollY(target, in: new))
-                    }
+                    settleHold { $0.scrollTo(y: Self.scrollY(target, in: new)) }
                 } else if !following, resting, Self.atEnd(new) {
                     // Content that shrank to the reader's position, or now fits, leaves nothing to jump to.
                     following = true
@@ -143,9 +136,8 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             .onDisappear { layout.cancelCheck() }
             // A page can land without changing the scroll geometry, so the geometry action may not see it.
             .onChange(of: leadingRow) { old, new in
-                guard old.map(hasRow) == true else { return }
-                guard resting else { return layout.row.forget() }
-                guard !following, let rows, let id = layout.row.pass(TranscriptPass(leadingChanged: true, resting: true, content: layout.geometry?.contentSize.height ?? 0)) else { return }
+                guard old.map(hasRow) == true, let rows,
+                      let id = layout.row.pass(TranscriptPass(leadingChanged: true, resting: resting, following: following, content: layout.geometry?.contentSize.height ?? 0)) else { return }
                 placedLeadingRow = new
                 restoreHeld(id, in: rows)
             }
@@ -169,7 +161,8 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
 
     // Armed when the reader asks for an older page, from the row frames already reported, so nothing is inferred while the page lands.
     private func holdOlderPlace(fresh: Bool) {
-        guard !following, let leading = rows?.leading, let geometry = layout.geometry else { return }
+        guard !following else { return }
+        guard let geometry = layout.geometry, let leading = rows?.leading(above: geometry.contentOffset.y + geometry.containerSize.height) else { return layout.row.request(fresh: fresh) }
         layout.armRow(leading.id, above: leading.top - geometry.contentOffset.y, before: leading.top, fresh: fresh)
     }
 
@@ -180,9 +173,9 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
 
     // A held row that is not laid out, or still has its pre-insert top, is built by scrolling to it; it reports again once laid out.
     private func restoreHeld(_ id: String, in rows: TranscriptRowTops) {
-        settle { position in
-            guard layout.holdingRow, layout.heldRow == id else { return }
-            if rows.top(id).map({ $0 == layout.heldBefore }) ?? true {
+        settleHold { position in
+            guard layout.heldRow == id else { return }
+            if !layout.row.measured, rows.top(id).map({ $0 == layout.heldBefore }) ?? true {
                 position.scrollTo(id: id, anchor: .top)
             } else {
                 correct(in: rows)
@@ -192,10 +185,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
 
     private func correct(in rows: TranscriptRowTops) {
         guard let geometry = layout.geometry, let target = layout.heldTarget(geometry, rows: rows) else { return }
-        settle { position in
-            guard layout.holding else { return }
-            position.scrollTo(y: Self.scrollY(target, in: geometry))
-        }
+        settleHold { $0.scrollTo(y: Self.scrollY(target, in: geometry)) }
     }
 
     // A scroll position still at the bottom edge keeps the bottom in place as content grows, even when not following.
@@ -235,6 +225,15 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
         let scheduled = generation
         Task { @MainActor in
             guard scheduled == generation else { return }
+            move(&position)
+        }
+    }
+
+    // Dropped when a newer restore was queued or the hold was released or replaced; a hold that only ran out of time while it waited still gets it.
+    private func settleHold(_ move: @escaping (inout ScrollPosition) -> Void) {
+        let queued = layout.queueRestore()
+        settle { position in
+            guard layout.runRestore(queued) else { return }
             move(&position)
         }
     }
@@ -281,7 +280,27 @@ private final class Layout {
 
     func holdFromEnd(_ distance: CGFloat, content: CGFloat) {
         row.release()
+        renew()
         fromEnd = (distance, .now + .seconds(2), content, true)
+    }
+
+    private var sequence = 0
+
+    private func renew() { sequence &+= 1 }
+
+    // Only the newest queued restore runs, and a busy main thread can run it after the settle window, so the window starts once it has.
+    func queueRestore() -> Int {
+        sequence &+= 1
+        row.settle(until: nil)
+        fromEnd?.until = .now + .seconds(86_400)
+        return sequence
+    }
+
+    func runRestore(_ queued: Int) -> Bool {
+        guard queued == sequence else { return false }
+        row.settle(until: .now + .seconds(2))
+        fromEnd?.until = .now + .seconds(2)
+        return true
     }
 
     var holding: Bool { holdingRow || heldFromEnd != nil }
@@ -292,6 +311,7 @@ private final class Layout {
     var olderPending: Bool { row.pending }
 
     func armRow(_ id: String, above: CGFloat, before: CGFloat, fresh: Bool) {
+        renew()
         fromEnd = nil
         row.arm(id, above: above, before: before, fresh: fresh)
     }
@@ -302,6 +322,7 @@ private final class Layout {
     }
 
     func releaseHold() {
+        renew()
         fromEnd = nil
         row.release()
         revealed = nil
@@ -324,7 +345,9 @@ private final class Layout {
         }
         if abs(content - geometry.contentOffset.y - distance) <= 1 {
             fromEnd?.landing = false
-        } else if fromEnd?.landing == false {
+        } else if fromEnd?.landing == true {
+            return max(content - distance, 0)
+        } else {
             releaseHold()
         }
         return nil
