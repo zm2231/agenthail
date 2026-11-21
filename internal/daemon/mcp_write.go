@@ -11,7 +11,7 @@ import (
 )
 
 type mcpWrite struct {
-	ClientRequestID string `json:"clientRequestId,omitempty" jsonschema:"Optional. A key you choose; repeating it replays the first result instead of acting twice."`
+	ClientRequestID string `json:"clientRequestId,omitempty" jsonschema:"Optional. Send one to make a retry safe: repeating it replays the first result instead of acting twice."`
 }
 
 func (w mcpWrite) key(tool string) (string, error) {
