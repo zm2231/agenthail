@@ -726,6 +726,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         do {
             let (api, route) = try resolve(sessionID)
             _ = try await api.respond(sessionID: route.sessionID, requestID: request.id, decision: decision)
+            refusedSendDeleted(ask: request.id, decision: decision, in: sessionID)
         } catch {
             failure = RequestAnswerFailure(error)
         }
@@ -1714,6 +1715,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
             let (api, route) = try resolve(sessionID)
             _ = try await api.respond(sessionID: route.sessionID, requestID: request.id, decision: decision)
             operationError = nil
+            refusedSendDeleted(ask: request.id, decision: decision, in: sessionID)
         } catch {
             failure = RequestAnswerFailure(error)
             if failure?.dropsCard == true { sessionRequests = sessionRequests?.removing(request.id) }
@@ -2065,6 +2067,9 @@ final class AgenthailIOSModel: HostConnectionDelegate {
                 let (api, route) = try resolve(sessionID)
                 _ = try await api.respond(sessionID: route.sessionID, requestID: ask.id, decision: .choose(FailedSendAsk.delete))
                 dropRefusedSend(refused, in: rekeys.resolve(sessionID))
+            } catch AgenthailAPIError.requestStale {
+                // The ask was settled from another control; the message never reached the session, so the row goes.
+                dropRefusedSend(refused, in: rekeys.resolve(sessionID))
             } catch {
                 operationError = AgenthailAPIError.userMessage(error)
                 readRefusedAsk(refused, in: rekeys.resolve(sessionID))
@@ -2081,6 +2086,12 @@ final class AgenthailIOSModel: HostConnectionDelegate {
             guard let current = refusedSends[session], current.ask?.id == ask.id else { return }
             refusedSends[session]?.ask = requests.map(ask.reading) ?? FailedSendAsk(id: ask.id)
         }
+    }
+
+    private func refusedSendDeleted(ask askID: String, decision: RequestDecision, in sessionID: String) {
+        let session = rekeys.resolve(sessionID)
+        guard decision.choices == [FailedSendAsk.delete], let refused = refusedSends[session], refused.ask?.id == askID else { return }
+        dropRefusedSend(refused, in: session)
     }
 
     private func dropRefusedSend(_ refused: RefusedSend, in sessionID: String) {

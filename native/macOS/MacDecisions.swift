@@ -74,6 +74,7 @@ extension AgenthailModel {
         guard let api else { return .failed(RequestAnswerFailure(AgenthailAPIError.unavailable("Agenthail isn't connected."))) }
         do {
             _ = try await api.respond(sessionID: sessionID, requestID: request.id, decision: decision)
+            if decision.choices == [FailedSendAsk.delete] { outbox.deleted(ask: request.id, in: sessionID) }
             return .answered
         } catch {
             return .failed(RequestAnswerFailure(error))
