@@ -1,9 +1,11 @@
 package cli
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
-func (a *App) usage() {
-	fmt.Print(`agenthail - hail an agent
+const usageHead = `agenthail - hail an agent
 
 Usage:
   agenthail <command> [target] [args] [options]
@@ -199,9 +201,9 @@ Claude hooks (answer terminal Claude prompts from Agenthail; tell each session w
   hooks uninstall codex         Remove them
   hooks status codex            Show whether they are installed
 
-`)
-	fmt.Print(ledgerHelp)
-	fmt.Print(`
+`
+
+const usageTail = `
 Dashboard (optional):
   dashboard enable              Enable the local dashboard and open it
   dashboard disable             Disable the dashboard listener
@@ -260,5 +262,38 @@ Targets: @name, PID, session id prefix, cwd/name fragment, surface:target, or ho
 Sender: --from resolves a session or agent identity; otherwise identity comes from AGENTHAIL_SESSION_ID,
         CLAUDE_CODE_SESSION_ID, then CODEX_THREAD_ID.
         Native Claude peers require the daemon and register automatically before sending.
-`)
+`
+
+func (a *App) usage() {
+	fmt.Print(usageHead + ledgerHelp + usageTail)
+}
+
+func (a *App) commandHelp(command string, args []string) {
+	usage := commandUsage(command)
+	if usage == "" {
+		a.usage()
+		return
+	}
+	fmt.Print(usage)
+	if spec, known := commandFlagSpec(command, args); known {
+		fmt.Printf("Flags: %s\n", spec.accepted())
+	}
+}
+
+func commandUsage(command string) string {
+	var out strings.Builder
+	taking := false
+	for _, line := range strings.Split(usageHead+usageTail, "\n") {
+		entry, isEntry := strings.CutPrefix(line, "  ")
+		if isEntry && entry != "" && entry[0] != ' ' {
+			name, _, _ := strings.Cut(entry, " ")
+			taking = name == command
+		} else if !strings.HasPrefix(line, "    ") {
+			taking = false
+		}
+		if taking {
+			out.WriteString(line + "\n")
+		}
+	}
+	return out.String()
 }
