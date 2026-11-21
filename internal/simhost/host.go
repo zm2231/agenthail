@@ -95,11 +95,15 @@ func (h *Host) Status(ctx context.Context) Status {
 		return Status{Runtime: runtime, Problem: "AXe, which taps, types and reads the screen, is not installed", Fix: "brew install cameroncooke/axe/axe"}
 	}
 	_, slimErr := h.run(ctx, "simslim", "--version")
-	status := Status{Ready: true, AXe: strings.TrimSpace(string(out)), Runtime: runtime, Simslim: slimErr == nil}
-	if all, err := h.devices(ctx); err == nil {
-		status.Devices = agenthailDevices(all)
+	return Status{Ready: true, AXe: strings.TrimSpace(string(out)), Runtime: runtime, Simslim: slimErr == nil}
+}
+
+func (h *Host) Devices(ctx context.Context) ([]DeviceView, error) {
+	all, err := h.devices(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return status
+	return agenthailDevices(all), nil
 }
 
 func (h *Host) Local() bool { return h.goos == "darwin" }

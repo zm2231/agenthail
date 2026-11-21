@@ -69,7 +69,8 @@ A session may hold the shared device and a device for a runtime of the same
 kind at once; then every call names the one it means with `runtime` as well
 as `kind`, and `release` with a `kind` that names both is refused. `release`
 with neither `kind` nor `runtime` ends every lease the session holds. `list` shows every Agenthail device with its runtime, and the
-installed runtimes in `runtimes`; `agenthail doctor` prints each device and
+installed runtimes in `runtimes`; `agenthail doctor` (not the daemon's
+minute-by-minute status probe) prints each device and
 its runtime under its `simulators:` line, and `simulators.devices` in
 `--json`. `scripts/ios-simulator.sh iphone --runtime 18.5 run ...` finds or
 creates the same device for a test run.

@@ -180,9 +180,15 @@ func TestListAndStatusNameEveryAgenthailDeviceWithItsRuntime(t *testing.T) {
 	if runtimes := out["runtimes"].([]string); strings.Join(runtimes, ",") != "18.5,27.0" {
 		t.Fatalf("runtimes = %v", runtimes)
 	}
-	status := h.Status(context.Background())
+	if status := h.Status(context.Background()); len(status.Devices) != 0 {
+		t.Fatalf("the status probe listed devices: %+v", status.Devices)
+	}
+	views, err := h.Devices(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	var devices []string
-	for _, d := range status.Devices {
+	for _, d := range views {
 		devices = append(devices, d.Device+"="+d.Runtime)
 	}
 	if strings.Join(devices, ";") != "Agenthail iPhone=iOS 27.0;Agenthail iPhone (iOS 18.5)=iOS 18.5" {

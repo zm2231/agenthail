@@ -15,7 +15,11 @@ var doctorSimulators = func(ctx context.Context) *simhost.Status {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	status := simhost.New(simhost.Config{}).Status(ctx)
+	host := simhost.New(simhost.Config{})
+	status := host.Status(ctx)
+	if status.Ready {
+		status.Devices, _ = host.Devices(ctx)
+	}
 	return &status
 }
 
