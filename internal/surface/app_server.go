@@ -9,5 +9,8 @@ const (
 
 // Shared means Desktop drives Codex's app-server daemon, the one Agenthail dials.
 type AppServer struct {
-	Mode AppServerMode `json:"mode,omitempty"`
+	Mode      AppServerMode `json:"mode,omitempty"`
+	HostID    string        `json:"hostId,omitempty"`
+	Version   string        `json:"version,omitempty"`
+	Transport string        `json:"transport,omitempty"`
 }

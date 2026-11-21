@@ -14,14 +14,21 @@ func (c *Codex) desktopAppServer(ctx context.Context) (*surface.AppServer, error
 		return nil, err
 	}
 	defer desktop.Close()
+	host, reported := desktopLocalHost(ctx, desktop)
+	if reported && host.State != "" && host.State != "connected" && host.Fatal == "" {
+		return nil, fmt.Errorf("Codex Desktop's app-server is %s", host.State)
+	}
 	if _, err := c.loadedThreadIDs(ctx, desktop, 1); err != nil {
 		return nil, err
 	}
-	mode := c.desktopAppServerMode(ctx, desktop)
-	if mode == "" {
+	server := &surface.AppServer{Mode: c.desktopAppServerMode(ctx, desktop)}
+	if reported {
+		server.HostID, server.Version, server.Transport = host.HostID, host.AppServerVersion, host.Transport
+	}
+	if *server == (surface.AppServer{}) {
 		return nil, nil
 	}
-	return &surface.AppServer{Mode: mode}, nil
+	return server, nil
 }
 
 func codexServerProcess(ctx context.Context, client codexClient) (int64, error) {

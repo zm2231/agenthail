@@ -27,6 +27,7 @@ const codexHookSource = `
     next: current && Number.isSafeInteger(current.next) ? current.next : 0,
     pending: current && current.pending instanceof Map ? current.pending : new Map(),
     toolRequests: new Map(),
+    hosts: current && current.hosts && typeof current.hosts === 'object' ? {...current.hosts} : {},
   };
   if (current && current.toolRequests instanceof Map) {
     for (const [key, request] of current.toolRequests) {
@@ -39,9 +40,37 @@ const codexHookSource = `
   }
   bridge.waiters = new Set();
   const wake = () => { for (const waiter of [...bridge.waiters]) waiter(false); };
+  const stopped = host => ({error: {code: 'app_server_stopped', message: 'Codex Desktop app-server stopped: ' + host.fatal}});
+  const noteHost = data => {
+    if (typeof data.hostId !== 'string' || data.hostId === '') return;
+    const host = {...(bridge.hosts[data.hostId] || {}), hostId: data.hostId};
+    if (typeof data.transport === 'string') host.transport = data.transport;
+    if (typeof data.appServerVersion === 'string' && data.appServerVersion) host.appServerVersion = data.appServerVersion;
+    if (data.type === 'codex-app-server-connection-changed' && typeof data.state === 'string') {
+      host.state = data.state;
+      if (data.state === 'connected') host.fatal = null;
+    }
+    if (data.type === 'codex-app-server-initialized') {
+      host.state = 'connected';
+      host.fatal = null;
+    }
+    if (data.type === 'codex-app-server-fatal-error') host.fatal = String(data.errorMessage || 'unknown error');
+    bridge.hosts[data.hostId] = host;
+    if (data.hostId === 'local' && host.fatal) {
+      for (const [id, resolve] of [...bridge.pending]) {
+        bridge.pending.delete(id);
+        resolve(stopped(host));
+      }
+    }
+  };
   window.addEventListener('message', event => {
     const data = event.data;
-    if (bridge.retired || !data || data.hostId !== 'local') return;
+    if (bridge.retired || !data) return;
+    if (data.type === 'codex-app-server-connection-changed' || data.type === 'codex-app-server-initialized' || data.type === 'codex-app-server-fatal-error') {
+      noteHost(data);
+      return;
+    }
+    if (data.hostId !== 'local') return;
     if (data.type === 'mcp-response' && data.message && data.message.id != null) {
       const id = String(data.message.id);
       const resolve = bridge.pending.get(id);
@@ -101,6 +130,8 @@ const codexHookSource = `
     bridge.toolRequests.delete(key);
   };
   bridge.request = (method, params, timeoutMs) => new Promise(resolve => {
+    const local = bridge.hosts.local;
+    if (local && local.fatal) return resolve(stopped(local));
     const id = 'agenthail-' + Date.now() + '-' + (++bridge.next);
     const timer = setTimeout(() => {
       if (bridge.pending.delete(id)) resolve({error:{code:'timeout', message:'Codex Desktop app-server request timed out'}});
@@ -111,6 +142,7 @@ const codexHookSource = `
     });
   });
   globalThis.__agenthailCodexDesktopRendererV2 = bridge;
+  Promise.resolve(globalThis.electronBridge.sendMessageFromView({type:'request-app-server-state'})).catch(() => {});
   return 'hooked';
 })()
 `
