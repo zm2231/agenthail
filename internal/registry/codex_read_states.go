@@ -1,6 +1,8 @@
 package registry
 
 import (
+	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -43,4 +45,13 @@ func (r *Registry) CodexReadStates() (map[string]surface.ReadState, error) {
 		states[id] = state
 	}
 	return states, rows.Err()
+}
+
+func (r *Registry) CodexReadState(sessionID string) (surface.ReadState, bool, error) {
+	var state surface.ReadState
+	err := r.read.QueryRow(`SELECT first_unread,revision FROM codex_read_states WHERE session_id=?`, sessionID).Scan(&state.FirstUnread, &state.Revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return surface.ReadState{}, false, nil
+	}
+	return state, err == nil, err
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/zm2231/agenthail/internal/simhost"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/uploads"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -41,6 +42,7 @@ const (
 )
 
 type Daemon struct {
+	readOpens            singleflight.Group
 	presentation         presentationClock
 	coordinatorNow       func() time.Time
 	Registry             *registry.Registry

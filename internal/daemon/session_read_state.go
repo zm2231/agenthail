@@ -29,7 +29,15 @@ func (d *Daemon) doSessionReadState(ctx context.Context, p principal, session *s
 	if !ok {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "read_state_unsupported", fmt.Sprintf("%s conversations have no read state", session.Surface))
 	}
-	state, err := writer.SetReadState(ctx, session, unread, revision)
+	var state *surface.ReadState
+	if unread {
+		var marked surface.ReadState
+		if marked, err = writer.MarkUnread(ctx, session, revision); err == nil {
+			state = &marked
+		}
+	} else {
+		state, err = d.openRead(ctx, writer, session, revision)
+	}
 	if changed := (*surface.ReadStateConflict)(nil); errors.As(err, &changed) {
 		d.storeReadState(session.ID, changed.Current)
 		return actionResult{}, actionFailed(http.StatusConflict, "read_state_conflict", changed.Error())
@@ -37,8 +45,26 @@ func (d *Daemon) doSessionReadState(ctx context.Context, p principal, session *s
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusBadGateway, "session_operation_failed", err.Error())
 	}
-	d.storeReadState(session.ID, state)
-	return actionOK(map[string]any{"ok": true, "sessionId": session.ID, "readState": state}), nil
+	body := map[string]any{"ok": true, "sessionId": session.ID}
+	if state != nil {
+		d.storeReadState(session.ID, *state)
+		body["readState"] = *state
+	}
+	return actionOK(body), nil
+}
+
+// Opens of one conversation share one load, and a conversation already read at the revision shown is loaded but not marked again.
+func (d *Daemon) openRead(ctx context.Context, writer surface.ReadStateWriter, session *surface.Session, revision string) (*surface.ReadState, error) {
+	stored, known, err := d.Registry.CodexReadState(session.ID)
+	if err != nil {
+		return nil, err
+	}
+	mark := !known || stored.Unread() || stored.Revision != revision
+	value, err, _ := d.readOpens.Do(session.ID+"\x00"+revision, func() (any, error) {
+		return writer.OpenRead(ctx, session, revision, mark)
+	})
+	state, _ := value.(*surface.ReadState)
+	return state, err
 }
 
 func (d *Daemon) storeReadState(sessionID string, state surface.ReadState) {

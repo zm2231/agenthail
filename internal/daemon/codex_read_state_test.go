@@ -81,6 +81,14 @@ func TestAFinishedCodexTurnShowsUnreadUntilThePersonReadsIt(t *testing.T) {
 	if receipt := lifecycle.Daemon().ReadState(id); receipt["firstUnread"] != nil {
 		t.Fatalf("Codex receipt = %v, want read", receipt)
 	}
+	read := h.sessionReadState(id)
+	status, payload = h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "session-read", "sessionId": id, "revision": read.Revision})
+	if status != http.StatusOK {
+		t.Fatalf("reopen status=%d body=%s", status, payload)
+	}
+	if updates := len(lifecycle.Daemon().Calls("thread/readState/update")); updates != 1 {
+		t.Fatalf("reopening a read conversation marked it again: %d updates", updates)
+	}
 
 	status, payload = h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "session-unread", "sessionId": id, "revision": unread.Revision})
 	if status != http.StatusConflict {

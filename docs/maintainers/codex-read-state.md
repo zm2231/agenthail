@@ -30,14 +30,22 @@ the next pass, within 30 seconds. Receipts are stored in `codex_read_states`
 `/api/v1/actions`.
 
 `session-read` is what a client sends when the person opens a conversation. It
-first loads the thread into its writer with the same call a send makes, so the
+loads the thread into its writer with the same call a send makes, so the
 conversation is live and writable at once, then marks it read on that same
 connection. The writer is chosen as for a send: the runtime that has the thread
-loaded, otherwise Codex Desktop for a thread Desktop created or whose creator
-is unknown, otherwise the daemon's app-server, which is started when it is not
-running. A thread whose writer is Desktop while Desktop is down is marked
-through the daemon without being loaded, so it never takes Desktop's writer.
-A thread that is already live and writable is not resumed again.
+loaded, otherwise Codex Desktop for a thread Desktop created or whose creator is
+unknown, otherwise the daemon's app-server. Unlike a send, opening never starts
+Codex's daemon and never takes Desktop's writer: when the writer is not running,
+the thread is not loaded and is only marked, through Desktop or the daemon if
+either is up, and nothing happens otherwise.
+
+The mark is made only when the conversation was unread or its receipt has moved
+since the revision sent; opening a conversation already read at that revision
+loads it and leaves the receipt alone. Opens of one conversation at one revision
+that arrive together share one load. Opening a live conversation with Desktop
+down costs four requests on the daemon's app-server (`thread/loaded/list`, two
+`thread/read`, and the mark) and no `thread/resume`; with Desktop up, add its
+connection and one more `thread/loaded/list`.
 
 `session-unread` only marks; it loads nothing.
 

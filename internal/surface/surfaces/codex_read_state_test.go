@@ -3,6 +3,9 @@ package surfaces
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -42,10 +45,11 @@ func TestCodexListsAFinishedTurnAsUnread(t *testing.T) {
 
 func TestCodexMarksReadAtTheRevisionSeen(t *testing.T) {
 	daemon, codex, session := finishedCodexThread(t)
-	state, err := codex.SetReadState(context.Background(), &session, false, session.ReadState.Revision)
+	marked, err := codex.OpenRead(context.Background(), &session, session.ReadState.Revision, true)
 	if err != nil {
 		t.Fatal(err)
 	}
+	state := *marked
 	if state.Unread() || state.Revision == session.ReadState.Revision {
 		t.Fatalf("marked state = %+v", state)
 	}
@@ -56,7 +60,7 @@ func TestCodexMarksReadAtTheRevisionSeen(t *testing.T) {
 
 func TestCodexRefusesAMarkAgainstAStaleRevision(t *testing.T) {
 	daemon, codex, session := finishedCodexThread(t)
-	_, err := codex.SetReadState(context.Background(), &session, false, "rev-stale")
+	_, err := codex.OpenRead(context.Background(), &session, "rev-stale", true)
 	var conflict *surface.ReadStateConflict
 	if !errors.As(err, &conflict) {
 		t.Fatalf("err = %v, want a read state conflict", err)
@@ -97,7 +101,7 @@ func unreadUnloadedThread(t *testing.T, originator string) (*codextest.Daemon, *
 
 func TestCodexReadingAConversationLoadsItIntoItsWriter(t *testing.T) {
 	daemon, codex, session := unreadUnloadedThread(t, "agenthail")
-	if _, err := codex.SetReadState(context.Background(), &session, false, session.ReadState.Revision); err != nil {
+	if _, err := codex.OpenRead(context.Background(), &session, session.ReadState.Revision, true); err != nil {
 		t.Fatal(err)
 	}
 	if !daemon.Loaded(session.ID) {
@@ -110,7 +114,7 @@ func TestCodexReadingAConversationLoadsItIntoItsWriter(t *testing.T) {
 
 func TestCodexReadingADesktopConversationWhileDesktopIsDownOnlyMarksIt(t *testing.T) {
 	daemon, codex, session := unreadUnloadedThread(t, codexDesktopOriginator)
-	if _, err := codex.SetReadState(context.Background(), &session, false, session.ReadState.Revision); err != nil {
+	if _, err := codex.OpenRead(context.Background(), &session, session.ReadState.Revision, true); err != nil {
 		t.Fatal(err)
 	}
 	if daemon.Loaded(session.ID) || len(daemon.Calls("thread/resume")) != 0 {
@@ -123,10 +127,44 @@ func TestCodexReadingADesktopConversationWhileDesktopIsDownOnlyMarksIt(t *testin
 
 func TestCodexMarkingUnreadLoadsNothing(t *testing.T) {
 	daemon, codex, session := unreadUnloadedThread(t, "agenthail")
-	if _, err := codex.SetReadState(context.Background(), &session, true, session.ReadState.Revision); err != nil {
+	if _, err := codex.MarkUnread(context.Background(), &session, session.ReadState.Revision); err != nil {
 		t.Fatal(err)
 	}
 	if daemon.Loaded(session.ID) || len(daemon.Calls("thread/resume")) != 0 {
 		t.Fatal("marking unread loaded the conversation")
+	}
+}
+
+func TestCodexOpeningALiveConversationCostsFourRequestsAndNoResume(t *testing.T) {
+	daemon, codex, session := finishedCodexThread(t)
+	before := len(daemon.Methods())
+	if _, err := codex.OpenRead(context.Background(), &session, session.ReadState.Revision, true); err != nil {
+		t.Fatal(err)
+	}
+	if sent := fmt.Sprint(daemon.Methods()[before:]); sent != "[initialize thread/loaded/list thread/read thread/read thread/readState/update]" {
+		t.Fatalf("opening a live conversation and marking it read sent %s", sent)
+	}
+	before = len(daemon.Methods())
+	if state, err := codex.OpenRead(context.Background(), &session, session.ReadState.Revision, false); err != nil || state != nil {
+		t.Fatalf("opening a read conversation returned %+v, %v", state, err)
+	}
+	if sent := fmt.Sprint(daemon.Methods()[before:]); sent != "[initialize thread/loaded/list thread/read thread/read]" {
+		t.Fatalf("opening a read conversation sent %s, want no mark", sent)
+	}
+}
+
+func TestCodexOpeningAConversationNeverStartsTheDaemon(t *testing.T) {
+	lifecycle := codextest.InstallLifecycle(t, codextest.Home(t), nil)
+	rollout := filepath.Join(t.TempDir(), "rollout.jsonl")
+	if err := os.WriteFile(rollout, []byte(`{"type":"session_meta","payload":{"originator":"agenthail"}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	session := surface.Session{ID: managedThreadID, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transcript: rollout}
+	codex := isolatedManagedRuntime(t)
+	_, _ = codex.OpenRead(context.Background(), &session, "rev-1", true)
+	_, _ = codex.OpenRead(context.Background(), &session, "rev-1", false)
+	_, _ = codex.MarkUnread(context.Background(), &session, "rev-1")
+	if commands := lifecycle.Commands(); len(commands) != 0 {
+		t.Fatalf("opening a conversation ran %v", commands)
 	}
 }

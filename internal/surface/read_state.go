@@ -15,7 +15,8 @@ const ReadFromStart = "threadStart"
 func (s ReadState) Unread() bool { return s.FirstUnread != "" }
 
 type ReadStateWriter interface {
-	SetReadState(ctx context.Context, sess *Session, unread bool, revision string) (ReadState, error)
+	OpenRead(ctx context.Context, sess *Session, revision string, mark bool) (*ReadState, error)
+	MarkUnread(ctx context.Context, sess *Session, revision string) (ReadState, error)
 }
 
 // Never retried: only the person can judge the newer receipt.

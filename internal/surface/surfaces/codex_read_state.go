@@ -40,17 +40,51 @@ func attachCodexReadStates(result map[string]any, threads []any) {
 	}
 }
 
-func (c *Codex) SetReadState(ctx context.Context, sess *surface.Session, unread bool, revision string) (surface.ReadState, error) {
-	client, err := c.readStateClient(ctx, sess, unread)
+func (c *Codex) OpenRead(ctx context.Context, sess *surface.Session, revision string, mark bool) (*surface.ReadState, error) {
+	client, err := c.openRunningWriter(ctx, sess)
+	if err != nil && !mark {
+		return nil, nil
+	}
+	if err != nil {
+		if client, err = c.openReader(ctx, sess); err != nil {
+			return nil, err
+		}
+	}
+	defer client.Close()
+	if !mark {
+		return nil, nil
+	}
+	state, err := c.updateReadState(ctx, client, sess.ID, "read", revision)
+	if err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
+func (c *Codex) MarkUnread(ctx context.Context, sess *surface.Session, revision string) (surface.ReadState, error) {
+	client, err := c.openReader(ctx, sess)
 	if err != nil {
 		return surface.ReadState{}, err
 	}
 	defer client.Close()
-	operation := "read"
-	if unread {
-		operation = "unread"
+	return c.updateReadState(ctx, client, sess.ID, "unread", revision)
+}
+
+// Opening a conversation never starts Codex's daemon, and never takes Desktop's writer: a send does the starting.
+func (c *Codex) openRunningWriter(ctx context.Context, sess *surface.Session) (codexClient, error) {
+	client, err := c.openRouteStarting(ctx, sess, false)
+	if err != nil {
+		return nil, err
 	}
-	response, err := client.Request(ctx, "thread/readState/update", map[string]any{"threadId": sess.ID, "expectedRevision": revision, "operation": map[string]any{"type": operation}}, 5*time.Second)
+	if err := c.requireDirectInput(ctx, client, sess); err != nil {
+		_ = client.Close()
+		return nil, err
+	}
+	return client, nil
+}
+
+func (c *Codex) updateReadState(ctx context.Context, client codexClient, threadID, operation, revision string) (surface.ReadState, error) {
+	response, err := client.Request(ctx, "thread/readState/update", map[string]any{"threadId": threadID, "expectedRevision": revision, "operation": map[string]any{"type": operation}}, 5*time.Second)
 	if rpcErr := (*codexRPCError)(nil); errors.As(err, &rpcErr) {
 		return surface.ReadState{}, codexReadStateRefusal(rpcErr)
 	}
@@ -62,16 +96,6 @@ func (c *Codex) SetReadState(ctx context.Context, sess *surface.Session, unread 
 		return *state, nil
 	}
 	return surface.ReadState{}, fmt.Errorf("thread/readState/update response missing readState")
-}
-
-// Reading a conversation loads it into its writer as a send would; one no writer can take, such as Desktop's while Desktop is down, is only marked.
-func (c *Codex) readStateClient(ctx context.Context, sess *surface.Session, unread bool) (codexClient, error) {
-	if !unread {
-		if client, err := c.openWriter(ctx, sess); err == nil {
-			return client, nil
-		}
-	}
-	return c.openReader(ctx, sess)
 }
 
 func codexReadStateRefusal(err *codexRPCError) error {
