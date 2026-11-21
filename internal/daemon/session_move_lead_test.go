@@ -182,6 +182,18 @@ func TestALeadMovesWithItsSessionAndEveryHostSeesOneLeadThroughout(t *testing.T)
 			t.Errorf("%s delivered %d times", text, got)
 		}
 	}
+	testkit.Eventually(t, "the former host to confirm every send it handed to the new host", 10*time.Second, func() bool {
+		queue, err := a.reg.ListQueue(true, nil)
+		if err != nil {
+			return false
+		}
+		for _, item := range queue {
+			if item.Status != "delivered" {
+				return false
+			}
+		}
+		return true
+	})
 
 	none := map[string]time.Time{}
 	longest := map[string]time.Duration{}
