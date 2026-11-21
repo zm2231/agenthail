@@ -21,11 +21,16 @@ struct IOSNameSessionSheet: View {
     private var clearing: Bool { SessionHandle.clears(text, current: alias) }
     private var canSave: Bool { problem == nil && SessionHandle.normalized(text) != (alias ?? "") }
 
-    var body: some View {
+    private var dirty: Bool { text != (alias ?? "") }
+
+    var body: some View { content.holdsDraft(dirty) }
+
+    @ViewBuilder private var content: some View {
         NavigationStack {
             Form {
                 TextField("Name", text: $text, axis: .vertical).lineLimit(2...8)
                     .textInputAutocapitalization(.never).autocorrectionDisabled(true)
+                    .accessibilityIdentifier("rename-session-name")
                 Text((alias ?? "").isEmpty ? "Use 1–80 characters without spaces, /, or #." : "Use 1–80 characters without spaces, /, or #. Leave it empty to clear the name.").font(.footnote)
                 if let message = error ?? (!text.isEmpty ? problem : nil) { Text(message).foregroundStyle(PhonePalette.failed) }
             }

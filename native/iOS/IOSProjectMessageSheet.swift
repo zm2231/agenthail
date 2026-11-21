@@ -21,7 +21,11 @@ struct IOSProjectMessageSheet: View {
         }
     }
 
-    var body: some View {
+    private var dirty: Bool { !text.isEmpty }
+
+    var body: some View { content.holdsDraft(dirty) }
+
+    @ViewBuilder private var content: some View {
         NavigationStack {
             Form {
                 if let sent {

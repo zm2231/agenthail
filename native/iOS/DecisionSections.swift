@@ -127,7 +127,11 @@ struct DecisionSheet: View {
     @State private var reply = ""
     @State private var sending = false
 
-    var body: some View {
+    private var dirty: Bool { !reply.isEmpty }
+
+    var body: some View { content.holdsDraft(dirty) }
+
+    @ViewBuilder private var content: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {

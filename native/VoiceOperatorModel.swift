@@ -86,6 +86,7 @@ final class VoiceOperatorModel: ObservableObject {
             detail = try? JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.previewDetailJSON.utf8))
 #endif
             ready = true
+            if ProcessInfo.processInfo.arguments.contains("--preview-voice-live") { attemptID = "preview-call" }
             return
         }
 #endif

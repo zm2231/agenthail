@@ -30,7 +30,7 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNU
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .sound, .badge]
+        Self.presentation(notification.request.content.userInfo, onScreen: OnScreenSessions.shared.contains)
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
@@ -38,14 +38,12 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNU
         guard let sessionID = userInfo["sessionId"] as? String, !sessionID.isEmpty,
               let host = userInfo["host"] as? String, !host.isEmpty else { return }
         if let choice = RequestNotifications.choice(forAction: response.actionIdentifier, category: response.notification.request.content.categoryIdentifier), let requestID = userInfo["requestId"] as? String {
-            await RequestAnswer.send(choice: choice, text: (response as? UNTextInputNotificationResponse)?.userText, sessionID: sessionID, requestID: requestID, api: { @Sendable in try Self.pairedAPI(host: host) })
+            await RequestAnswer.send(choice: choice, text: (response as? UNTextInputNotificationResponse)?.userText, sessionID: sessionID, host: host, requestID: requestID, api: { @Sendable in try Self.pairedAPI(host: host) })
             return
         }
         guard let opened = Self.openedSession(userInfo) else { return }
         let turn = Self.openedTurn(userInfo)
-        await MainActor.run {
-            NotificationCenter.default.post(name: .agenthailNotificationOpened, object: OpenedNotification(session: opened, turn: turn))
-        }
+        await MainActor.run { PhoneRoute.shared.open(OpenedNotification(session: opened, turn: turn)) }
     }
 }
 
@@ -54,6 +52,11 @@ extension IOSAppDelegate {
         guard let sessionID = userInfo["sessionId"] as? String, !sessionID.isEmpty,
               let host = userInfo["host"] as? String, !host.isEmpty else { return nil }
         return HostCatalog.qualify(host, sessionID)
+    }
+
+    nonisolated static func presentation(_ userInfo: [AnyHashable: Any], onScreen: (String) -> Bool) -> UNNotificationPresentationOptions {
+        if let session = openedSession(userInfo), onScreen(session) { return [.badge] }
+        return [.banner, .sound, .badge]
     }
 
     nonisolated static func openedTurn(_ userInfo: [AnyHashable: Any]) -> String? {
@@ -69,21 +72,58 @@ extension IOSAppDelegate {
     }
 }
 
-struct OpenedNotification: Sendable {
+struct OpenedNotification: Sendable, Equatable {
+    let id = UUID()
     let session: String
     let turn: String?
+}
+
+@MainActor
+@Observable
+final class PhoneRoute {
+    static let shared = PhoneRoute()
+    private(set) var pending: OpenedNotification?
+
+    func open(_ opened: OpenedNotification) {
+        pending = opened
+    }
+
+    func take() -> OpenedNotification? {
+        defer { pending = nil }
+        return pending
+    }
+}
+
+final class OnScreenSessions: @unchecked Sendable {
+    static let shared = OnScreenSessions()
+    private let lock = NSLock()
+    private var counts: [String: Int] = [:]
+
+    func appeared(_ id: String) {
+        lock.withLock { counts[id, default: 0] += 1 }
+    }
+
+    func disappeared(_ id: String) {
+        lock.withLock {
+            guard let count = counts[id] else { return }
+            counts[id] = count > 1 ? count - 1 : nil
+        }
+    }
+
+    func contains(_ id: String) -> Bool {
+        lock.withLock { counts[id] != nil }
+    }
 }
 
 extension Notification.Name {
     static let agenthailPushToken = Notification.Name("AgenthailPushToken")
     static let agenthailPushRegistrationFailed = Notification.Name("AgenthailPushRegistrationFailed")
-    static let agenthailNotificationOpened = Notification.Name("AgenthailNotificationOpened")
 }
 
 @main
 struct AgenthailIOSApp: App {
     @UIApplicationDelegateAdaptor(IOSAppDelegate.self) private var appDelegate
-    @State private var model = AgenthailIOSModel(autoConnect: !sessionPreviewEnabled, composerStore: sessionPreviewEnabled ? nil : .standard(protectedDataIsAvailable: { UIApplication.shared.isProtectedDataAvailable }))
+    @State private var model = AgenthailIOSModel(autoConnect: !sessionPreviewEnabled, composerStore: sessionPreviewEnabled ? nil : .standard(protectedDataIsAvailable: { UIApplication.shared.isProtectedDataAvailable }), onScreen: .shared)
     @State private var voiceCalls = VoiceCallCoordinator(makeModel: { Self.voiceModel() })
     @Environment(\.scenePhase) private var scenePhase
     @State private var wasInBackground = false

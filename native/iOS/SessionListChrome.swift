@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// What the ring around a session's agent says at a glance. The row says the
 /// same thing in words, in its status line and to VoiceOver.
@@ -141,7 +142,6 @@ struct VoiceToolbarButton: View {
     var model: AgenthailIOSModel
     @EnvironmentObject private var voiceCalls: VoiceCallCoordinator
     @State private var presented = false
-    @State private var operatorID: String?
 
     var body: some View {
         let live = voiceCalls.model?.hasLocalCall == true
@@ -158,17 +158,115 @@ struct VoiceToolbarButton: View {
         .accessibilityIdentifier("voice-entry")
         .sheet(isPresented: $presented) {
             if let call = voiceCalls.model {
-                AgenthailVoiceOperatorSheet(model: call, rowMemory: model.rowMemory) { id in operatorID = model.voiceSessionID(id) }
-                    .sheet(isPresented: Binding(get: { operatorID != nil }, set: { if !$0 { operatorID = nil } })) {
-                        if let id = operatorID {
-                            NavigationStack {
-                                SessionRouteView(model: model, sessionID: id)
-                                    .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Back to Voice") { operatorID = nil } } }
-                            }
-                        }
-                    }
+                AgenthailVoiceOperatorSheet(model: call, rowMemory: model.rowMemory) { model.openSession(model.voiceSessionID($0)) }
             }
         }
         .onChange(of: model.isPaired) { _, paired in if !paired { presented = false } }
+    }
+}
+
+@MainActor
+enum PresentedSheets {
+    private static var drafts: Set<UUID> = []
+    private static var afterDraftsClose: (@MainActor () -> Void)?
+
+    static var holdsDraft: Bool { !drafts.isEmpty }
+
+    // A sheet whose input differs from what it opened with holds a route:
+    // moving the conversation underneath would close it, because the
+    // conversation that presents it leaves the screen. The route runs once
+    // the last such sheet closes, and those sheets say one is waiting.
+    static func whenNoDraftIsOpen(_ route: @escaping @MainActor () -> Void) {
+        guard drafts.isEmpty else {
+            afterDraftsClose = route
+            HeldRoute.shared.waiting = true
+            return
+        }
+        afterDraftsClose = nil
+        HeldRoute.shared.waiting = false
+        route()
+    }
+
+    static func closeAll() {
+        guard drafts.isEmpty else { return }
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            for window in scene.windows where window.isKeyWindow {
+                guard let root = window.rootViewController, root.presentedViewController != nil else { continue }
+                root.dismiss(animated: true)
+            }
+        }
+    }
+
+    fileprivate static func set(_ id: UUID, holding: Bool) {
+        if holding { drafts.insert(id) } else { drafts.remove(id) }
+    }
+
+    fileprivate static func closed(_ id: UUID) {
+        drafts.remove(id)
+        guard drafts.isEmpty, let route = afterDraftsClose else { return }
+        afterDraftsClose = nil
+        HeldRoute.shared.waiting = false
+        route()
+    }
+}
+
+@MainActor
+@Observable
+final class HeldRoute {
+    static let shared = HeldRoute()
+    fileprivate(set) var waiting = false
+}
+
+private struct HoldsDraft: ViewModifier {
+    let dirty: Bool
+    @State private var id = UUID()
+
+    func body(content: Content) -> some View {
+        content
+            .safeAreaInset(edge: .bottom) {
+                if dirty && HeldRoute.shared.waiting {
+                    Label("A notification is waiting. Its conversation opens when you close this.", systemImage: "bell.badge")
+                        .font(.footnote)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(.bar)
+                        .accessibilityIdentifier("held-route")
+                }
+            }
+            .onChange(of: dirty, initial: true) { _, dirty in PresentedSheets.set(id, holding: dirty) }
+            .onDisappear { PresentedSheets.closed(id) }
+    }
+}
+
+extension View {
+    func holdsDraft(_ dirty: Bool) -> some View {
+        modifier(HoldsDraft(dirty: dirty))
+    }
+}
+
+struct DraftBaseline<Values: Equatable> {
+    private var opened: Values?
+    private var touched = false
+
+    mutating func follow(_ values: Values) {
+        if !touched { opened = values }
+    }
+
+    mutating func touch() {
+        touched = true
+    }
+
+    func differs(_ values: Values) -> Bool {
+        touched && opened != values
+    }
+}
+
+extension Binding {
+    func touching<Values>(_ baseline: Binding<DraftBaseline<Values>>) -> Binding<Value> {
+        Binding(get: { wrappedValue }, set: { new in
+            baseline.wrappedValue.touch()
+            wrappedValue = new
+        })
     }
 }

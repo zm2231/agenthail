@@ -128,4 +128,67 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertFalse(app.buttons["inbox-message-11"].exists, "a message waiting in the queue stays in Current")
         XCTAssertTrue(app.buttons["inbox-message-14"].waitForExistence(timeout: 12), "History reloads while it is on screen")
     }
+
+    func testANotificationTappedAsAgenthailLaunchesOpensItsSession() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-route-at-launch"]
+        app.launch()
+        XCTAssertTrue(app.textViews["composer-input"].waitForExistence(timeout: 15), "a tap that arrived before the tabs appeared still opened its session")
+    }
+
+    func testANotificationTappedDuringACallClosesTheCallSheetAndTheCallGoesOn() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-voice-entry", "--preview-voice-live", "--preview-route-after", "8"]
+        app.launch()
+        let voice = app.buttons["voice-entry"]
+        XCTAssertTrue(voice.waitForExistence(timeout: 10))
+        voice.tapWhenReady()
+        let call = app.navigationBars["Talk to orchestrator"]
+        XCTAssertTrue(call.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textViews["composer-input"].waitForExistence(timeout: 20), "the notification opened its session")
+        XCTAssertTrue(call.waitForNonExistence(timeout: 5), "the call sheet closed instead of hiding the session")
+        XCTAssertTrue(app.buttons["return-to-call"].waitForExistence(timeout: 5), "the live call is one tap away from the session")
+        app.buttons["return-to-call"].tapWhenReady()
+        XCTAssertTrue(call.waitForExistence(timeout: 5), "Return to call reopens the same call")
+    }
+
+    func testOpenFullTimelineInACallOpensTheSession() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-voice-entry"]
+        app.launch()
+        app.buttons["voice-entry"].tapWhenReady()
+        let call = app.navigationBars["Talk to orchestrator"]
+        XCTAssertTrue(call.waitForExistence(timeout: 5))
+        let activity = app.descendants(matching: .any)["voice-activity"].firstMatch
+        for _ in 0..<4 where !activity.isHittable { app.swipeUp() }
+        activity.tapWhenReady()
+        let timeline = app.buttons["Open full timeline"].firstMatch
+        for _ in 0..<4 where !timeline.isHittable { app.swipeUp() }
+        timeline.tapWhenReady()
+        XCTAssertTrue(app.textViews["composer-input"].waitForExistence(timeout: 10), "Open full timeline opened the session")
+        XCTAssertTrue(call.waitForNonExistence(timeout: 5), "the call sheet closed, so the session is not behind it")
+        XCTAssertFalse(app.buttons["Back to Voice"].exists, "the session opens in the app, not in a second sheet")
+    }
+
+    func testANotificationDoesNotCloseARenameWithATypedNameAndClosingItShowsTheSession() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-route-on-draft"]
+        app.launch()
+        app.buttons["session-computer::demo"].tapWhenReady()
+        app.buttons["session-summary"].tapWhenReady()
+        let rename = app.buttons["Name conversation"]
+        for _ in 0..<4 where !rename.isHittable { app.swipeUp() }
+        rename.tapWhenReady()
+        let field = app.descendants(matching: .any)["rename-session-name"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("keepme")
+        let renaming = app.navigationBars["Name conversation"]
+        XCTAssertTrue(app.descendants(matching: .any)["held-route"].waitForExistence(timeout: 10), "the rename sheet says a notification is waiting on it")
+        XCTAssertTrue(renaming.exists, "the rename sheet with a typed name stayed open")
+        XCTAssertTrue((field.value as? String ?? "").contains("keepme"), "the typed name survived: \(String(describing: field.value))")
+        renaming.buttons["Cancel"].tapWhenReady()
+        XCTAssertTrue(app.textViews["composer-input"].waitForExistence(timeout: 10), "closing the rename sheet shows the routed session")
+        XCTAssertFalse(app.buttons["Name conversation"].isHittable, "the session details closed with it")
+    }
 }

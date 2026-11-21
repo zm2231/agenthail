@@ -17,7 +17,7 @@ struct SessionEditingControls: View {
                     if editingName {
                         IOSNameSessionSheet(model: model, sessionID: detail.session.id, alias: detail.alias) { editingName = false }
                     } else {
-                        editor
+                        editor.holdsDraft(editingBudget ? budgetText != (detail.goal?.tokenBudget.map(String.init) ?? "") : text != (detail.goal?.objective ?? ""))
                     }
                 }
             let goal = GoalControls(detail)

@@ -95,7 +95,8 @@ have control permission. With several computers paired, Settings > **Voice**
 chooses which one runs the orchestrator.
 
 Live conversation and agent activity remain visible. **Open full timeline**
-opens the same ordinary session. Enter a session ID or alias to route the call to
+opens the same ordinary session; on iPhone it closes the Voice screen, the call
+keeps going, and **Return to call** at the top of the session reopens it. Enter a session ID or alias to route the call to
 that exact session; during a call, **Transfer to session** moves it there,
 **Return to orchestrator** moves it back, and **Stop selected session** stops
 that session's running turn without hanging up. **Hang up** ends audio, not agent
@@ -119,9 +120,9 @@ See [Voice setup, capabilities, and verification](maintainers/codex-voice.md).
 
 ## Notifications
 
-Notifications are optional. Agenthail can tell you whether a Claude Code, Codex, or Notion agent finishes or fails without putting the agent name, conversation title, or conversation text in the alert. Tapping an alert opens the related conversation.
+Notifications are optional. Agenthail can tell you whether a Claude Code, Codex, or Notion agent finishes or fails without putting the agent name, conversation title, or conversation text in the alert. Tapping an alert opens the related conversation. On iPhone the tap closes any sheet in front of it, except one where you have typed or changed something: that sheet stays open and says a notification is waiting, and the conversation opens when you close it. While the iPhone app shows a conversation, an alert about that conversation only updates the badge.
 
-When a session the Claude host runs waits on a tool approval or a question, the alert says only that the agent is waiting on you and names the request by an opaque ID. Before iOS shows it, Agenthail's notification service asks your paired computer for that request directly over Tailscale, within five seconds, and the alert then shows what is asked, with the same buttons as on the Mac, including **Reply…** or **Deny with message…** to type an answer. Several questions, or one that takes several answers, show the first question and no buttons; tapping opens the session at the request. If that computer can't be reached in time or the request is no longer open, the alert arrives as it was sent, and tapping it opens the session. A button needs your phone unlocked; the app, not the notification service, sends the answer to your paired computer. If sending fails, a notification says why and repeats what you typed.
+When a session the Claude host runs waits on a tool approval or a question, the alert says only that the agent is waiting on you and names the request by an opaque ID. Before iOS shows it, Agenthail's notification service asks your paired computer for that request directly over Tailscale, within five seconds, and the alert then shows what is asked, with the same buttons as on the Mac, including **Reply…** or **Deny with message…** to type an answer. Several questions, or one that takes several answers, show the first question and no buttons; tapping opens the session at the request. If that computer can't be reached in time or the request is no longer open, the alert arrives as it was sent, and tapping it opens the session. A button needs your phone unlocked; the app, not the notification service, sends the answer to your paired computer. If sending fails, a notification says why and repeats what you typed, and tapping it opens the session.
 
 Each paired computer registers the phone for its own notifications, and an alert's buttons answer through the computer that sent it. Turning notifications off removes that phone's notification registration from every paired computer. You can also forget a paired computer from the iPhone app if it is no longer available.
 

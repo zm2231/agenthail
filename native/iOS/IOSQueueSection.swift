@@ -126,7 +126,11 @@ struct IOSQueueEditorSheet: View {
 
     private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    var body: some View {
+    private var dirty: Bool { text != editor.text }
+
+    var body: some View { content.holdsDraft(dirty) }
+
+    @ViewBuilder private var content: some View {
         NavigationStack {
             Form {
                 Section {
