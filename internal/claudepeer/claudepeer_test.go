@@ -1017,7 +1017,7 @@ func TestPeerMessageForAHostsSessionIsHeldForThatHostWithItsSender(t *testing.T)
 	sendFrames(t, worker.SocketPath,
 		frame{MsgV: 1, MsgID: uuid.NewString(), Type: "user", From: "uds:" + nativeSocket, Message: mustJSON(messageBody{Role: "user", Content: "from the reviewer"})},
 		frame{MsgV: 1, MsgID: uuid.NewString(), Type: "user", From: "uds:" + filepath.Join(socketDir, "999999.sock"), Message: mustJSON(messageBody{Role: "user", Content: "from nobody known"})},
-		frame{MsgV: 1, MsgID: uuid.NewString(), Type: "user", From: "uds:" + nativeSocket, Message: mustJSON(messageBody{Role: "user", Content: "<cross-session-message from=\"uds:" + nativeSocket + "\" hop-chain=\"bbbc886be2598c57fec6adfc\" from-name=\"reviewer\" from-mode=\"bypass\">\nwrapped by its own Claude\n</cross-session-message>"})},
+		frame{MsgV: 1, MsgID: uuid.NewString(), Type: "user", From: "uds:" + nativeSocket, Message: mustJSON(messageBody{Role: "user", Content: "<cross-session-message from=\"uds:" + nativeSocket + "\" hop-chain=\"bbbc886be2598c57fec6adfc\" from-name=\"review > fix\" from-mode=\"bypass\">\nwrapped by its own Claude\n</cross-session-message>"})},
 		frame{MsgV: 1, MsgID: uuid.NewString(), Type: "user", From: "uds:" + nativeSocket, Message: mustJSON(messageBody{Role: "user", Content: "<cross-session-message from=\"uds:/tmp/cc-socks/1.sock\" from-name=\"another\">\nforwarded from another session\n</cross-session-message>"})},
 	)
 	held, err := reg.HostDeliveries("h0123456789ab")

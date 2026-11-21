@@ -34,7 +34,7 @@ func listedName(reg *registry.Registry, session surface.Session) string {
 
 var peerTag = regexp.MustCompile(`(?i)<(\s*/?\s*cross-session-message\b)`)
 
-var claudeEnvelope = regexp.MustCompile(`(?s)\A<cross-session-message from="([^"]*)"[^>\n]*>\n(.*)\n</cross-session-message>\z`)
+var claudeEnvelope = regexp.MustCompile(`(?s)\A<cross-session-message from="([^"]*)"(?: [a-z-]+="[^"]*")*>\n(.*)\n</cross-session-message>\z`)
 
 // Claude wraps a message it sends in its own envelope; only the sender's own one is peeled.
 func authoredText(content, from string) string {

@@ -111,7 +111,7 @@ func TestARemovedIdentityCannotSendAsItself(t *testing.T) {
 		t.Fatal(err)
 	}
 	app.scopeOverride = func(daemon.ScopeRequest) (*daemon.ScopeReply, error) {
-		return nil, errors.New("the daemon was asked about a removed identity's send")
+		return nil, errors.New("the daemon scope check ran")
 	}
 	identity, err := r.AddAgentIdentity("kat")
 	if err != nil {
@@ -127,9 +127,13 @@ func TestARemovedIdentityCannotSendAsItself(t *testing.T) {
 			t.Fatalf("send with AGENTHAIL_SESSION_ID=%s: err=%v", sender, err)
 		}
 	}
-	t.Setenv("AGENTHAIL_SESSION_ID", "")
-	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "--from", "kat", "target", "from a flag"}) }); err == nil || !strings.Contains(err.Error(), "removed") {
-		t.Fatalf("send --from kat: err=%v", err)
+	for _, caller := range []string{"", "target"} {
+		t.Setenv("AGENTHAIL_SESSION_ID", caller)
+		for _, sender := range []string{"kat", identity.SessionID} {
+			if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "--from", sender, "target", "from a flag"}) }); err == nil || !strings.Contains(err.Error(), "removed") {
+				t.Fatalf("send --from %s as %q: err=%v", sender, caller, err)
+			}
+		}
 	}
 	if len(fake.sent) != 0 {
 		t.Fatalf("a removed identity sent %v", fake.sent)
