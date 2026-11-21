@@ -45,7 +45,6 @@ var notSessionViewInputs = map[string]string{
 	"project_tiles":           "the person's tile order reaches only the snapshot's tileOrder, which arranges project tiles; no session view shows it",
 	"host_held_actions":       "a held channel leg belongs to a paired host, not a session; it reaches a session view only as the host's deliveries",
 	"approvals":               "only answering an approval and its audit read the stored action; a session view shows the approval as its row in asks",
-	"turn_judgments":          "only GET /api/v1/turn-judgments reads recorded judgments; nothing a session view shows comes from them",
 	"decision_dismissals":     "the Inbox's dismissed stopped cards, read only by the decisions page; no session view shows them",
 	"agent_identities":        "read only by agenthail identity, agenthail inbox and the inbox adapter; an identity's session row is a view input, and the session list hides it",
 	"agent_inbox":             "an identity's messages, read only by agenthail inbox and the inbox adapter's tail; no session view shows them",

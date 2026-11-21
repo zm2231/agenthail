@@ -1,4 +1,4 @@
--- schemaVersion 125
+-- schemaVersion 126
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -1530,7 +1530,7 @@ BEGIN
 END;
 
 -- trigger catalog_presentation_version_session_runtime_update
-CREATE TRIGGER catalog_presentation_version_session_runtime_update AFTER UPDATE OF session_id,completed_turn_id ON session_runtime WHEN (NEW.session_id IS NOT OLD.session_id OR NEW.completed_turn_id IS NOT OLD.completed_turn_id)
+CREATE TRIGGER catalog_presentation_version_session_runtime_update AFTER UPDATE OF session_id,completed_turn_id,notice_turn_id,notice_outcome,notice_request_id,notice_at_ms ON session_runtime WHEN (NEW.session_id IS NOT OLD.session_id OR NEW.completed_turn_id IS NOT OLD.completed_turn_id OR NEW.notice_turn_id IS NOT OLD.notice_turn_id OR NEW.notice_outcome IS NOT OLD.notice_outcome OR NEW.notice_request_id IS NOT OLD.notice_request_id OR NEW.notice_at_ms IS NOT OLD.notice_at_ms)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;
@@ -1602,7 +1602,7 @@ BEGIN
 END;
 
 -- trigger catalog_presentation_version_turn_judgments_update
-CREATE TRIGGER catalog_presentation_version_turn_judgments_update AFTER UPDATE OF session_id,turn_id,state,facts_json,error,pushed_at_ms ON turn_judgments WHEN (NEW.session_id IS NOT OLD.session_id OR NEW.turn_id IS NOT OLD.turn_id OR NEW.state IS NOT OLD.state OR NEW.facts_json IS NOT OLD.facts_json OR NEW.error IS NOT OLD.error OR NEW.pushed_at_ms IS NOT OLD.pushed_at_ms)
+CREATE TRIGGER catalog_presentation_version_turn_judgments_update AFTER UPDATE OF ended_at_ms,ending,error,facts_json,headline,judged_at_ms,model,ms,needs,needs_tail,promise,promise_model,pushed_at_ms,session_id,state,state_json,turn_id ON turn_judgments WHEN (NEW.ended_at_ms IS NOT OLD.ended_at_ms OR NEW.ending IS NOT OLD.ending OR NEW.error IS NOT OLD.error OR NEW.facts_json IS NOT OLD.facts_json OR NEW.headline IS NOT OLD.headline OR NEW.judged_at_ms IS NOT OLD.judged_at_ms OR NEW.model IS NOT OLD.model OR NEW.ms IS NOT OLD.ms OR NEW.needs IS NOT OLD.needs OR NEW.needs_tail IS NOT OLD.needs_tail OR NEW.promise IS NOT OLD.promise OR NEW.promise_model IS NOT OLD.promise_model OR NEW.pushed_at_ms IS NOT OLD.pushed_at_ms OR NEW.session_id IS NOT OLD.session_id OR NEW.state IS NOT OLD.state OR NEW.state_json IS NOT OLD.state_json OR NEW.turn_id IS NOT OLD.turn_id)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;
