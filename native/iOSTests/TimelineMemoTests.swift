@@ -26,15 +26,16 @@ final class TimelineMemoTests: XCTestCase {
         XCTAssertEqual(memo.groups(latest: [item("z")], older: [item("y")], foldAgents: false).flatMap(\.items).map(\.id), ["y", "z"], "groups kept rows after the items changed")
     }
 
-    func testFocusFoldsTheTurnsWorkIntoOneLineAfterItsRepliesAndFollowsTheSetting() {
+    func testFocusFoldsTheTurnsWorkIntoOneLineBeforeItsLastReplyAndFollowsTheSetting() {
         let memo = TimelineMemo()
         let call = TimelineItem(id: "call", kind: "toolCall", role: nil, title: "Bash", text: "ls", timestamp: nil, callId: "k", status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
-        let rows = [item("a"), call, item("b")]
+        let late = TimelineItem(id: "late", kind: "toolCall", role: nil, title: "Bash", text: "pwd", timestamp: nil, callId: "l", status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+        let rows = [item("a"), call, item("b"), late]
         let focused = memo.groups(latest: rows, older: [], foldAgents: true, focus: true)
-        XCTAssertEqual(focused.flatMap(\.items).map(\.id), ["a", "b", "call"], "the turn's work moves after its replies and is kept")
+        XCTAssertEqual(focused.flatMap(\.items).map(\.id), ["a", "call", "late", "b"], "the turn's work gathers just before its last reply, which reads last")
         let work = focused.first { $0.items.contains { $0.id == "call" } }
         XCTAssertEqual(work?.focus, true)
         XCTAssertEqual(work?.folds, true, "the work is one folded line")
-        XCTAssertEqual(memo.groups(latest: rows, older: [], foldAgents: true, focus: false).flatMap(\.items).map(\.id), ["a", "call", "b"], "groups ignored turning focus off")
+        XCTAssertEqual(memo.groups(latest: rows, older: [], foldAgents: true, focus: false).flatMap(\.items).map(\.id), ["a", "call", "b", "late"], "groups ignored turning focus off")
     }
 }

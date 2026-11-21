@@ -5,17 +5,22 @@ enum TranscriptFocus {
 
     static let workKinds: Set<String> = ["toolCall", "toolResult", "reasoning", "tool", "command"]
 
-    /// Each turn's tool work moves after its prose, so the turn reads as what was said followed by one run of what was done.
+    /// Each turn's tool work gathers into one run just before the turn's last reply, so the turn reads as what was done followed by what was said.
     /// Asks and their answers stay where they were asked; notices and events other than the turn's duration are left out.
     static func focused(_ items: [TimelineItem]) -> [TimelineItem] {
         var out: [TimelineItem] = []
         var work: [TimelineItem] = []
+        var reply: Int?
         var kept = Set<String>()
+        func endTurn() {
+            if let reply { out.insert(contentsOf: work, at: reply) } else { out += work }
+            work = []
+            reply = nil
+        }
         for item in items {
             if item.kind == "notice" || item.kind == "event" && item.title != "Turn duration" { continue }
             if startsTurn(item) {
-                out += work
-                work = []
+                endTurn()
                 out.append(item)
             } else if isAsk(item) || item.agent != nil {
                 if let call = item.callId { kept.insert(call) }
@@ -23,10 +28,12 @@ enum TranscriptFocus {
             } else if item.agent == nil, workKinds.contains(item.kind), !(item.kind == "toolResult" && item.callId.map(kept.contains) == true) {
                 work.append(item)
             } else {
+                if item.role == "assistant", ["message", "text"].contains(item.kind) { reply = out.count }
                 out.append(item)
             }
         }
-        return out + work
+        endTurn()
+        return out
     }
 
     /// Tracks which tool items belong to an ask, so Focus keeps an ask out of the work run beside it.

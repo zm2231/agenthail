@@ -36,7 +36,7 @@ struct TranscriptFocusTest {
         ]
         let focused = TranscriptFocus.focused(items).map(\.id)
         let expected = ["ask-person", "question", "answer", "mcp-ask", "codex-ask", "reasoning", "bash", "bash-out", "peer", "send", "sent", "streamed", "file", "image", "reply", "duration", "done", "goal"]
-        check(focused == expected, "focus keeps what was said and asked in place and moves the turn's work after it: \(focused)")
+        check(focused == expected, "focus keeps what was said and asked in place, and a turn without a reply keeps its work at its end: \(focused)")
 
         let blocks = TranscriptBlock.build(TranscriptFocus.focused(items), foldAgents: false, focus: true)
         let tools = blocks.compactMap { if case .tools(let run) = $0.kind { run.map(\.id) } else { nil } }
@@ -62,12 +62,23 @@ struct TranscriptFocusTest {
             item("t4", "toolCall", "Bash", call: "4"),
         ]
         let order = TranscriptFocus.focused(turns).map(\.id)
-        check(order == ["p1", "say1", "say2", "t1", "t2", "helper", "t3", "p2", "t4"], "a turn ends at the next prompt or helper message, and its work follows its prose: \(order)")
+        check(order == ["p1", "say1", "t1", "t2", "say2", "helper", "t3", "p2", "t4"], "a turn ends at the next prompt or helper message, and its work comes just before its last reply: \(order)")
         var timed = turns.filter { $0.kind == "toolCall" }
         timed[0].timestamp = "2026-11-17T10:00:00Z"
         timed[1].timestamp = "2026-11-17T10:06:00Z"
         check(ToolRunSummary.focusLine(Array(timed.prefix(2))) == "6m of work · 2 steps", "the work line: \(ToolRunSummary.focusLine(Array(timed.prefix(2))))")
         check(ToolRunSummary.focusLine([timed[2]]) == "1 step", "a single untimed step: \(ToolRunSummary.focusLine([timed[2]]))")
+
+        let replied = [
+            item("ask", "message", role: "user"),
+            item("note", "message", role: "assistant"),
+            item("run", "toolCall", "Bash", call: "r"),
+            item("run-out", "toolResult", "Bash", call: "r"),
+            item("answer", "message", role: "assistant"),
+            item("took", "event", "Turn duration"),
+        ]
+        let read = TranscriptFocus.focused(replied).map(\.id)
+        check(read == ["ask", "note", "run", "run-out", "answer", "took"], "the turn's work sits above its final reply, as in the full transcript, and the reply reads last: \(read)")
 
         let ended = [
             item("bash", "toolCall", "Bash", call: "b"),
