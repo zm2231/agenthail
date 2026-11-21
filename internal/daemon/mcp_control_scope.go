@@ -24,8 +24,45 @@ func (d *Daemon) mcpResolveSession(ref string) (*surface.Session, error) {
 	return session, nil
 }
 
-// mcpControlTarget resolves a target the caller may act on; upward admits the caller's spawner chain and any session in its project, which only queued sends use.
-func (d *Daemon) mcpControlTarget(ctx context.Context, caller *mcpCaller, ref string, upward bool) (*surface.Session, error) {
+// controlReach is what the caller does to the target; a queued message
+// alone may go up to the caller's spawner chain and to any session in its
+// project.
+type controlReach int
+
+const (
+	reachQueued controlReach = iota
+	reachSteer
+	reachSession
+)
+
+func (d *Daemon) mcpControlTarget(ctx context.Context, caller *mcpCaller, ref string) (*surface.Session, error) {
+	session, _, err := d.mcpReachTarget(ctx, caller, ref, reachSession)
+	return session, err
+}
+
+// mcpReachTarget resolves a target the caller may message or steer. A
+// target in another project the person's policy admits comes with what to
+// tell the person once the action has run.
+func (d *Daemon) mcpReachTarget(ctx context.Context, caller *mcpCaller, ref string, reach controlReach) (*surface.Session, string, error) {
+	session, err := d.reachTarget(ctx, caller, ref, reach)
+	if _, refusedAcross := approvableControl(err); !refusedAcross || session == nil {
+		if err != nil {
+			return nil, "", err
+		}
+		return session, "", nil
+	}
+	notice, admitted, crossErr := d.crossProjectReach(caller, session, reach)
+	if crossErr != nil {
+		return nil, "", crossErr
+	}
+	if !admitted {
+		return nil, "", err
+	}
+	return session, notice, nil
+}
+
+func (d *Daemon) reachTarget(ctx context.Context, caller *mcpCaller, ref string, reach controlReach) (*surface.Session, error) {
+	upward := reach == reachQueued
 	if strings.TrimSpace(ref) == "" {
 		return nil, refuse("invalid", "target is required: a session id or @alias.")
 	}
@@ -89,7 +126,38 @@ func (d *Daemon) mcpControlTarget(ctx context.Context, caller *mcpCaller, ref st
 		}
 		return session, nil
 	}
-	return nil, crossProject(scopeRefusal(session.ID, "not_spawned_or_led", "That session is not in your project; reach another project through its coordinator, by sending with project."))
+	return session, crossProject(scopeRefusal(session.ID, "not_spawned_or_led", "That session is not in your project; reach another project through its coordinator, by sending with project."))
+}
+
+func (d *Daemon) crossProjectReach(caller *mcpCaller, session *surface.Session, reach controlReach) (string, bool, error) {
+	action, what := "cross-project-message", "Sent a message to "
+	switch {
+	case caller.extension != "" || reach == reachSession:
+		return "", false, nil
+	case reach == reachSteer:
+		if surface.IsAgentIdentity(session) {
+			return "", false, nil
+		}
+		action, what = "cross-project-steer", "Steered, interrupted or sent now to "
+	}
+	decision := d.agentPolicy().Decision(action)
+	if decision == AgentAsk {
+		return "", false, nil
+	}
+	if reach == reachSteer {
+		if err := d.mcpCeilingCovers(caller, session.ID); err != nil {
+			return "", false, err
+		}
+	} else if archived, err := d.Registry.SessionArchived(session.ID); err != nil || archived {
+		if err == nil {
+			err = scopeRefusal(session.ID, "archived", "That session is archived.")
+		}
+		return "", false, err
+	}
+	if decision == AgentNotify {
+		return what + d.resolveDisplay(session.ID) + " in another project", true, nil
+	}
+	return "", true, nil
 }
 
 const mcpDownOnly = "Control flows down only: you may send a queued message to your spawner or your project's coordinator, but not steer, interrupt, answer, change its goal or settings, or send now."

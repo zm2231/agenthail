@@ -13,7 +13,7 @@ type mcpPRInput struct {
 func (d *Daemon) mcpPR(ctx context.Context, caller *mcpCaller, input mcpPRInput) (any, error) {
 	target := caller.session.ID
 	if input.Session != "" {
-		controlled, err := d.mcpControlTarget(ctx, caller, input.Session, false)
+		controlled, err := d.mcpControlTarget(ctx, caller, input.Session)
 		if err != nil {
 			return nil, err
 		}

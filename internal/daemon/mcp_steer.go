@@ -16,9 +16,11 @@ func (d *Daemon) mcpSteer(ctx context.Context, caller *mcpCaller, input mcpSteer
 	if strings.TrimSpace(input.Message) == "" {
 		return nil, refuse("invalid", "message is required.")
 	}
-	target, err := d.mcpControlTarget(ctx, caller, input.Target, false)
+	target, notice, err := d.mcpReachTarget(ctx, caller, input.Target, reachSteer)
 	if err != nil {
 		return d.mcpAskOnRefusal(ctx, caller, err, input.mcpAskPerson, dashboardActionRequest{Action: "steer", Message: input.Message})
 	}
-	return d.mcpAction(ctx, caller, "agenthail_steer", input.mcpWrite, dashboardActionRequest{Action: "steer", SessionID: target.ID, Message: input.Message, SourceSessionID: caller.session.ID})
+	result, err := d.mcpAction(ctx, caller, "agenthail_steer", input.mcpWrite, dashboardActionRequest{Action: "steer", SessionID: target.ID, Message: input.Message, SourceSessionID: caller.session.ID})
+	d.noticeAfter(ctx, caller, notice, err)
+	return result, err
 }

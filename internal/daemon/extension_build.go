@@ -23,13 +23,15 @@ func limitExtensionBuild(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// The builder is an ordinary session the person starts: the folder is its
-// working directory and it keeps the surface's own permission mode, so it
-// asks only what the person's other sessions ask.
+// The builder is an ordinary session in the person's own mode: the folder is
+// its working directory and it keeps the surface's own permission mode, so it
+// asks only what the person's other sessions ask. An agent that starts one
+// names itself, and the person's agent policy decides whether it may.
 func (d *Daemon) apiExtensionBuildHandler(w http.ResponseWriter, r *http.Request) {
 	var request struct {
-		Message string `json:"message"`
-		Surface string `json:"surface"`
+		Message   string `json:"message"`
+		Surface   string `json:"surface"`
+		SessionID string `json:"sessionId"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, extensionBuildBodyLimit)).Decode(&request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid", "Send {\"message\": \"<what to build>\", \"surface\": \"claude\" or \"codex\"}.")
@@ -48,6 +50,21 @@ func (d *Daemon) apiExtensionBuildHandler(w http.ResponseWriter, r *http.Request
 		writeAPIError(w, http.StatusBadRequest, "invalid", "The builder is claude or codex.")
 		return
 	}
+	decision := AgentAllow
+	agent := strings.TrimSpace(request.SessionID)
+	if agent != "" {
+		caller, err := d.scopeCaller(agent)
+		if err != nil {
+			writeScopeRefusal(w, mcpRefusalFor(err))
+			return
+		}
+		if !caller.has("control.all") {
+			if decision = d.agentPolicy().Decision("extension-build"); decision == AgentAsk {
+				writeScopeRefusal(w, scopeRefusal("extension-build", "person_only", "Starting an extension builder is for the person here; to work on an extension yourself, edit ~/.agenthail/extensions and read its AGENTS.md."))
+				return
+			}
+		}
+	}
 	workspace, err := d.prepareExtensionWorkspace()
 	if err != nil {
 		writeActionResult(w, actionResult{}, err)
@@ -62,7 +79,11 @@ func (d *Daemon) apiExtensionBuildHandler(w http.ResponseWriter, r *http.Request
 	if key == "" {
 		key = "extension-build-" + uuid.NewString()
 	}
-	d.performAction(r.Context(), principalFromRequest(r), actionFormatAPIv1, body, key).write(w)
+	reply := d.performAction(r.Context(), principalFromRequest(r), actionFormatAPIv1, body, key)
+	if decision == AgentNotify && reply.Status >= http.StatusOK && reply.Status < http.StatusMultipleChoices {
+		d.notifyAgentAction(r.Context(), agent, "Started an extension builder: "+clipText(message, 200))
+	}
+	reply.write(w)
 }
 
 func (d *Daemon) prepareExtensionWorkspace() (string, error) {

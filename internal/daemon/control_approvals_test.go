@@ -36,6 +36,7 @@ func (f approvalFixture) workerCaller(t *testing.T) *mcpCaller {
 
 func TestAnAgentAsksThePersonToMessageAnotherProjectsSessionAndTheMessageIsItsOwn(t *testing.T) {
 	f := newApprovalFixture(t)
+	setAgentDecision(t, "cross-project-message", AgentAsk)
 	outsider := f.outsider(t)
 	caller := f.workerCaller(t)
 	send := mcpSendInput{mcpWrite: mcpWrite{ClientRequestID: "cross-1"}, Target: outsider.ID, Message: "the gadget API changed; rebuild against v2"}
@@ -115,6 +116,8 @@ func TestOnlyACrossProjectRefusalCanBeAskedFor(t *testing.T) {
 }
 
 func TestTheCLIAsksWithTheBodyTheDaemonRebuildsNotTheOneItSent(t *testing.T) {
+	setAgentDecision(t, "cross-project-message", AgentAsk)
+	setAgentDecision(t, "cross-project-steer", AgentAsk)
 	f := newApprovalFixture(t)
 	outsider := f.outsider(t)
 	crafted := `{"action":"send","sessionId":"outsider","message":"ship it","noQueue":true,"sourceSessionId":"to","author":"person","scopeProjectId":"elsewhere","relayHops":2}`

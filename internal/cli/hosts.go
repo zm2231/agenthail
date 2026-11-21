@@ -350,7 +350,7 @@ func (a *App) isLocalHost(ref string) (bool, error) {
 	return strings.EqualFold(ref, identity.ID) || strings.EqualFold(ref, identity.Name), nil
 }
 
-// An empty hostText starts the session on this host as the calling agent, bounded by its reach.
+// A calling agent starts the session through the daemon, bounded by its reach, on this host or a paired one.
 func (a *App) createThreadThroughDaemon(hostText string, request threadCreateRequest, creator string, args []string) error {
 	timeout, err := commandTimeout(args, a.DefaultTimeout)
 	if err != nil {
@@ -383,7 +383,7 @@ func (a *App) createThreadThroughDaemon(hostText string, request threadCreateReq
 	}
 	var data []byte
 	var status int
-	if hostText == "" && a.agentEnvironment() {
+	if a.agentEnvironment() {
 		data, status, err = a.agentCreate(ctx, payload)
 		if err != nil {
 			return err

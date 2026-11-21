@@ -173,6 +173,7 @@ type Daemon struct {
 	mcpCredentials           atomic.Pointer[daemonMCPCredentials]
 	busyPolicyProblem        atomic.Pointer[string]
 	spawnLocks               keyedLocks
+	agentNotices             agentNotices
 	// launchCodex, when set, replaces running 'agenthail launch codex'.
 	launchCodex func(ctx context.Context, executable string) ([]byte, error)
 	// limitResumeEnabled, when set, replaces the host's resume after limit

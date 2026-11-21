@@ -20,6 +20,7 @@ const projectUsage = `usage: agenthail project list [--all] [--json]
        agenthail project link <joined: name|id|path> <into: name|id|path> [--json]
        agenthail project unlink <name|id|path> [--json]
        agenthail project mcp <name|id|path> on|off [--json]
+       agenthail project limit-resume <name|id|path> host|on|off [--json]
 
 A project is a folder you add, and it may be a folder inside a repository. A
 session belongs to the deepest added project that holds its folder, reading a
@@ -40,7 +41,12 @@ own again.
 mcp off keeps the Agenthail tools from the project's Claude sessions that
 Agenthail did not start, such as Claude in a plain terminal; sessions
 Agenthail starts keep them. Like a link, it holds on every paired host for a
-repository with a remote and on this host for a folder without one.`
+repository with a remote and on this host for a folder without one.
+
+limit-resume decides whether the project's sessions a usage limit stopped
+resume once it resets: on or off for this project, or host to follow each
+host's own 'agenthail limit-resume on|off'. It reaches paired hosts as mcp
+does.`
 
 type projectHost struct {
 	ID    string `json:"id"`
@@ -188,8 +194,8 @@ func (a *App) cmdProject(args []string) error {
 		return nil
 	case "link", "unlink":
 		return a.cmdProjectLink(ctx, client, positional, jsonOut)
-	case "mcp":
-		return a.cmdProjectMCP(ctx, client, positional, jsonOut)
+	case "mcp", "limit-resume":
+		return a.cmdProjectSetting(ctx, client, positional, jsonOut)
 	case "add":
 		if len(positional) != 2 {
 			return fmt.Errorf("%s", projectUsage)

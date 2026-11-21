@@ -227,17 +227,3 @@ func daemonAt(t *testing.T, app *App, server *scopeServer) {
 		return &daemonAPIClient{baseURL: http.URL, token: "dashboard-synthetic", httpClient: http.Client()}, nil
 	}
 }
-
-func TestAnAgentStartsSessionsOnlyOnItsOwnHost(t *testing.T) {
-	app := threadFixture(t, &starterCLISurface{cliSurface: &cliSurface{kind: surface.KindCodex}})
-	if err := app.Registry.RecordObservedSession(surface.Session{ID: "worker", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTHAIL_SESSION_ID", "worker")
-	_, err := captureStdout(t, func() error {
-		return app.Run([]string{"thread", "create", "codex", "Build it", "--cwd", "/srv/work", "--host", "elsewhere"})
-	})
-	if err == nil || !strings.Contains(err.Error(), "refused (out_of_scope)") {
-		t.Fatalf("err=%v", err)
-	}
-}

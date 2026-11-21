@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/broadcast"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -604,7 +605,7 @@ func TestACancelDuringAPassIsNotOverriddenByTheStaleRow(t *testing.T) {
 	if response := serveDashboardRequest(handler, http.MethodPost, "/api/v1/actions", `{"action":"limit-resume-cancel","sessionId":"worker"}`); response.Code != http.StatusOK {
 		t.Fatalf("cancel status=%d body=%s", response.Code, response.Body.String())
 	}
-	f.d.resumeAccount("/roots/work", read, true, true, resetsAt.Add(limitResumeGrace))
+	f.d.resumeAccount("/roots/work", read, resumeAlways, true, resetsAt.Add(limitResumeGrace))
 	if state := f.state("worker"); state != registry.LimitResumeCanceled {
 		t.Fatalf("the pass released a canceled stop: %q", state)
 	}
@@ -613,7 +614,7 @@ func TestACancelDuringAPassIsNotOverriddenByTheStaleRow(t *testing.T) {
 	}
 	read[0].ResetsAt = time.Time{}
 	read[0].Attempts = limitProbeTries
-	f.d.resumeAccount("/roots/work", read, true, true, resetsAt.Add(limitResumeGrace))
+	f.d.resumeAccount("/roots/work", read, resumeAlways, true, resetsAt.Add(limitResumeGrace))
 	if state := f.state("worker"); state != registry.LimitResumeCanceled {
 		t.Fatalf("the pass lapsed a canceled stop: %q", state)
 	}
@@ -807,5 +808,38 @@ func TestTheResumeNoticeReachesTheSessionAsAgenthailWithNothingAdded(t *testing.
 	}
 	if queued != 1 {
 		t.Fatalf("history has %d queued entries, want the notice once", queued)
+	}
+}
+
+func resumeAlways(string) bool { return true }
+
+func TestAProjectThatTurnsResumingOffKeepsItsSessionsStoppedWhileTheHostResumesOthers(t *testing.T) {
+	f := newLimitFixture(t, "widget-worker", "loose")
+	widget := widgetRepo(t, "https://github.com/example/widget.git")
+	session := f.fake.sessions["widget-worker"]
+	session.Cwd = widget
+	f.fake.sessions["widget-worker"] = session
+	if err := f.r.RecordObservedSession(session); err != nil {
+		t.Fatal(err)
+	}
+	f.d.discoverCatalog(t.Context())
+	project, err := broadcast.FindProject(f.r, "widget")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.r.SetProjectSetting(project.ID, registry.ProjectSettingLimitResume, registry.ProjectLimitResumeOff); err != nil {
+		t.Fatal(err)
+	}
+	refusedAt := time.Now().Add(-time.Hour).Truncate(time.Second)
+	resetsAt := refusedAt.Add(time.Minute)
+	f.refused("widget-worker", "/roots/widget", "w1", refusedAt, resetsAt)
+	f.refused("loose", "/roots/loose", "l1", refusedAt, resetsAt)
+	f.pass(refusedAt.Add(time.Second))
+	f.pass(resetsAt.Add(limitResumeGrace))
+	if state, queued := f.state("widget-worker"), f.queued("widget-worker"); state != registry.LimitResumeReleased || len(queued) != 0 {
+		t.Fatalf("the project's session: state=%q queued=%q, want released with no resume", state, queued)
+	}
+	if queued := f.queued("loose"); len(queued) != 1 {
+		t.Fatalf("a session in no such project was not resumed: queued=%q", queued)
 	}
 }

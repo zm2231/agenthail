@@ -56,12 +56,21 @@ func controlApproval(caller *mcpCaller, request dashboardActionRequest) (dashboa
 	return body, nil
 }
 
-func queuedSend(body dashboardActionRequest) bool {
-	return body.Action == "send" && body.BusyDelivery == "queue" && !body.NoQueue
+func reachOf(body dashboardActionRequest) controlReach {
+	switch body.Action {
+	case "send":
+		if body.BusyDelivery == "queue" && !body.NoQueue {
+			return reachQueued
+		}
+		return reachSteer
+	case "steer", "interrupt":
+		return reachSteer
+	}
+	return reachSession
 }
 
 func (d *Daemon) controlApprovalTarget(ctx context.Context, caller *mcpCaller, body dashboardActionRequest) error {
-	_, err := d.mcpControlTarget(ctx, caller, body.SessionID, queuedSend(body))
+	_, _, err := d.mcpReachTarget(ctx, caller, body.SessionID, reachOf(body))
 	return err
 }
 
@@ -123,9 +132,9 @@ func (d *Daemon) controlPayloadScope(ctx context.Context, caller *mcpCaller, req
 	if body.SessionID == caller.session.ID {
 		return ScopeReply{TargetID: caller.session.ID}, nil
 	}
-	target, err := d.mcpControlTarget(ctx, caller, body.SessionID, queuedSend(body))
+	target, notice, err := d.mcpReachTarget(ctx, caller, body.SessionID, reachOf(body))
 	if err == nil {
-		reply := ScopeReply{TargetID: target.ID}
+		reply := ScopeReply{TargetID: target.ID, Notice: d.holdAgentNotice(caller, notice)}
 		if body.Action == "send" {
 			reply.ScopeProjectID, err = d.remoteSendScope(caller, target)
 		}

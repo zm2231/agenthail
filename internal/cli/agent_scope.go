@@ -10,6 +10,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -128,6 +129,20 @@ func (a *App) personAction(ctx context.Context, api string, payload map[string]a
 	return nil
 }
 
+// sendAgentNotices tells the person what this command did, once it has done
+// it; a notice for an action that failed is never sent.
+func (a *App) sendAgentNotices() {
+	notices := a.agentNotices
+	a.agentNotices = nil
+	for _, notice := range notices {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		if _, err := a.agentScope(ctx, daemon.ScopeRequest{Action: "notice", Notice: notice}); err != nil {
+			fmt.Fprintf(os.Stderr, "agenthail: telling the person what this did failed: %s\n", err)
+		}
+		cancel()
+	}
+}
+
 // payloadScope checks a send or control from the body it would run, so a
 // cross-project refusal can be asked of the person with --ask-person.
 func (a *App) payloadScope(ctx context.Context, action string, payload map[string]any) (*daemon.ScopeReply, error) {
@@ -207,6 +222,9 @@ func (a *App) agentScope(ctx context.Context, request daemon.ScopeRequest) (*dae
 		var reply daemon.ScopeReply
 		if err := json.Unmarshal(body, &reply); err != nil {
 			return nil, fmt.Errorf("read the daemon's scope answer: %w", err)
+		}
+		if reply.Notice != "" {
+			a.agentNotices = append(a.agentNotices, reply.Notice)
 		}
 		return &reply, nil
 	}

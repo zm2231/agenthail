@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/broadcast"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -29,8 +30,7 @@ type PersonAction struct {
 
 type personActionRequest struct {
 	dashboardActionRequest
-	Host             string `json:"host"`
-	ResumeAfterLimit bool   `json:"resumeAfterLimit"`
+	ResumeAfterLimit bool `json:"resumeAfterLimit"`
 }
 
 func (a PersonAction) decode() (personActionRequest, error) {
@@ -47,31 +47,59 @@ func (a PersonAction) decode() (personActionRequest, error) {
 	return request, nil
 }
 
-func (d *Daemon) personActionScope(ctx context.Context, caller *mcpCaller, action PersonAction) error {
+func (d *Daemon) personActionScope(ctx context.Context, caller *mcpCaller, action PersonAction) (string, error) {
 	request, err := action.decode()
 	if err != nil {
-		return err
+		return "", err
 	}
 	if slices.Contains(controlApprovalActions, request.Action) {
-		return refuse("invalid", "the action "+request.Action+" is checked as a send or control, not as the person's.")
+		return "", refuse("invalid", "the action "+request.Action+" is checked as a send or control, not as the person's.")
 	}
 	description, err := d.describePersonAction(action.API, request)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if caller.has("control.all") || d.leadMayRun(ctx, caller, action.API, request) {
-		return nil
+	if caller.has("control.all") {
+		return "", nil
 	}
-	return &mcpRefusal{Code: "capability_missing", Message: description + " is for the person. To ask them to allow it, run the same command again with --ask-person --reason \"<why you need it>\"; their answer arrives as your next message.",
+	if d.leadActsOnOwn(ctx, caller, action.API, request) {
+		switch d.agentPolicy().Decision(agentPolicyActionOf(request)) {
+		case AgentAllow:
+			return "", nil
+		case AgentNotify:
+			return d.agentNotices.hold(caller.session.ID, description, time.Now()), nil
+		}
+	}
+	return "", &mcpRefusal{Code: "capability_missing", Message: description + " is for the person. To ask them to allow it, run the same command again with --ask-person --reason \"<why you need it>\"; their answer arrives as your next message.",
 		Detail: map[string]any{"rule": "person_only", "approvable": true}}
 }
 
-func (d *Daemon) leadMayRun(ctx context.Context, caller *mcpCaller, api string, request personActionRequest) bool {
-	if api != PersonActionAPI || !caller.has("control.project") || caller.project == nil || !d.mcpIsProjectLead(caller, caller.session.ID) {
+func agentPolicyActionOf(request personActionRequest) string {
+	if request.Action == "project-setting" && request.Setting == registry.ProjectSettingLimitResume {
+		return registry.ProjectSettingLimitResume
+	}
+	return request.Action
+}
+
+// leadActsOnOwn reports whether a project's lead is acting on its own
+// project; only then does the person's agent policy decide.
+func (d *Daemon) leadActsOnOwn(ctx context.Context, caller *mcpCaller, api string, request personActionRequest) bool {
+	if !caller.has("control.project") || caller.project == nil || !d.mcpIsProjectLead(caller, caller.session.ID) {
+		return false
+	}
+	if api != PersonActionAPI {
 		return false
 	}
 	switch request.Action {
-	case "project-rename":
+	case "channel-create":
+		return true
+	case "project-add":
+		if request.Host != "" || strings.TrimSpace(request.Path) == "" {
+			return false
+		}
+		found, err := ResolvePathProject(ctx, d.Registry, request.Path)
+		return err == nil && found == nil
+	case "project-rename", "project-setting", "project-archive", "project-unarchive", "project-remove", "coordinator-clear":
 		return d.ownProject(caller, request.ProjectID)
 	case "project-link":
 		return d.ownProject(caller, request.Survivor)
@@ -79,12 +107,18 @@ func (d *Daemon) leadMayRun(ctx context.Context, caller *mcpCaller, api string, 
 		links, _, err := d.projectLinkState()
 		link, found := links[request.ProjectID]
 		return err == nil && found && link.Linked && d.ownProject(caller, link.Survivor)
-	case "project-add":
-		if request.Host != "" || strings.TrimSpace(request.Path) == "" {
+	case "coordinator-set":
+		return request.Host == "" && d.sessionsInProject(caller, request.SessionID)
+	case "coordinator-new":
+		where := strings.TrimSpace(request.Cwd)
+		if where == "" {
+			where = strings.TrimSpace(request.Path)
+		}
+		if request.Host != "" || where == "" {
 			return false
 		}
-		found, err := ResolvePathProject(ctx, d.Registry, request.Path)
-		return err == nil && found == nil
+		found, err := ResolvePathProject(ctx, d.Registry, where)
+		return err == nil && found != nil && found.ID == caller.project.ID
 	case "relay-add":
 		return d.sessionsInProject(caller, request.FromID, request.ToID)
 	case "relay-remove":
@@ -93,6 +127,10 @@ func (d *Daemon) leadMayRun(ctx context.Context, caller *mcpCaller, api string, 
 		}
 		from, to, found := d.relayEnds(request.RelayID)
 		return found && d.sessionsInProject(caller, from, to)
+	case "channel-rename", "channel-delete":
+		return d.ownChannel(caller, request.Channel)
+	case "channel-add", "channel-remove":
+		return d.ownChannel(caller, request.Channel) && d.sessionsInProject(caller, request.TargetID)
 	case "queue-clear":
 		if request.Senders == nil {
 			return false
@@ -116,6 +154,20 @@ func (d *Daemon) leadMayRun(ctx context.Context, caller *mcpCaller, api string, 
 		return d.sessionsInProject(caller, ends...)
 	}
 	return false
+}
+
+// A stored channel belongs to no project, so a lead manages one only while
+// every session in it is in the lead's own project.
+func (d *Daemon) ownChannel(caller *mcpCaller, channel string) bool {
+	target, err := broadcast.Resolve(d.Registry, d.localChannelRef(channel))
+	if err != nil || target.Channel == "" {
+		return false
+	}
+	members, err := d.Registry.ChannelMembers(target.Channel)
+	if err != nil {
+		return false
+	}
+	return len(members) == 0 || d.sessionsInProject(caller, members...)
 }
 
 func (d *Daemon) ownProject(caller *mcpCaller, projectID string) bool {

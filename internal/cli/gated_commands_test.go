@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -111,8 +112,9 @@ func (f gatedFixture) queued() string {
 }
 
 const (
-	refused = "refused"
-	runs    = "runs"
+	refused  = "refused"
+	runs     = "runs"
+	admitted = "admitted"
 )
 
 var gatedCommands = []struct {
@@ -121,30 +123,30 @@ var gatedCommands = []struct {
 	worker, ownLead, otherLead string
 }{
 	{"project-add", func(f gatedFixture) []string { return []string{"project", "add", f.folder()} }, refused, runs, runs},
-	{"project-remove", func(gatedFixture) []string { return []string{"project", "remove", widgetProject} }, refused, refused, refused},
+	{"project-remove", func(gatedFixture) []string { return []string{"project", "remove", widgetProject} }, refused, runs, refused},
 	{"project-rename", func(gatedFixture) []string { return []string{"project", "rename", widgetProject, "Widgets"} }, refused, runs, refused},
-	{"project-archive", func(gatedFixture) []string { return []string{"project", "archive", widgetProject} }, refused, refused, refused},
-	{"project-unarchive", func(gatedFixture) []string { return []string{"project", "unarchive", widgetProject} }, refused, refused, refused},
+	{"project-archive", func(gatedFixture) []string { return []string{"project", "archive", widgetProject} }, refused, runs, refused},
+	{"project-unarchive", func(gatedFixture) []string { return []string{"project", "unarchive", widgetProject} }, refused, runs, refused},
 	{"project-link", func(f gatedFixture) []string { return []string{"project", "link", f.addedFolder(), widgetProject} }, refused, runs, refused},
 	{"project-unlink", func(f gatedFixture) []string { return []string{"project", "unlink", f.linkedFolder()} }, refused, runs, refused},
-	{"project-setting", func(gatedFixture) []string { return []string{"project", "mcp", widgetProject, "off"} }, refused, refused, refused},
+	{"project-setting", func(gatedFixture) []string { return []string{"project", "mcp", widgetProject, "off"} }, refused, runs, refused},
 	{"coordinator-set", func(f gatedFixture) []string {
-		return []string{"coordinator", "set", "widget-other", "--cwd", f.widget}
-	}, refused, refused, refused},
-	{"coordinator-new", func(f gatedFixture) []string { return []string{"coordinator", "new", "codex", "--cwd", f.widget} }, refused, refused, refused},
-	{"coordinator-clear", func(f gatedFixture) []string { return []string{"coordinator", "clear", "--cwd", f.widget} }, refused, refused, refused},
+		return []string{"coordinator", "set", "widget-other", "--cwd", f.widget, "--replace"}
+	}, refused, runs, refused},
+	{"coordinator-new", func(f gatedFixture) []string { return []string{"coordinator", "new", "codex", "--cwd", f.widget} }, refused, admitted, refused},
+	{"coordinator-clear", func(f gatedFixture) []string { return []string{"coordinator", "clear", "--cwd", f.widget} }, refused, runs, refused},
 	{"resume-after-limit", func(gatedFixture) []string { return []string{"limit-resume", "off"} }, refused, refused, refused},
 	{"relay-add", func(gatedFixture) []string { return []string{"relay", "add", "worker", "widget-other"} }, refused, runs, refused},
 	{"relay-remove", func(f gatedFixture) []string { return []string{"relay", "rm", f.relay()} }, refused, runs, refused},
 	{"channel-create", func(f gatedFixture) []string {
 		return []string{"channel", "create", "ch" + strconv.FormatInt(time.Now().UnixNano(), 36)}
-	}, refused, refused, refused},
-	{"channel-delete", func(f gatedFixture) []string { return []string{"channel", "rm", f.channel(""), "--all"} }, refused, refused, refused},
+	}, refused, runs, runs},
+	{"channel-delete", func(f gatedFixture) []string { return []string{"channel", "rm", f.channel(""), "--all"} }, refused, runs, runs},
 	{"channel-rename", func(f gatedFixture) []string {
 		return []string{"channel", "rename", f.channel(""), "n" + strconv.FormatInt(time.Now().UnixNano(), 36)}
-	}, refused, refused, refused},
-	{"channel-add", func(f gatedFixture) []string { return []string{"channel", "add", f.channel(""), "worker"} }, refused, refused, refused},
-	{"channel-remove", func(f gatedFixture) []string { return []string{"channel", "rm", f.channel("worker"), "worker"} }, refused, refused, refused},
+	}, refused, runs, runs},
+	{"channel-add", func(f gatedFixture) []string { return []string{"channel", "add", f.channel(""), "worker"} }, refused, runs, refused},
+	{"channel-remove", func(f gatedFixture) []string { return []string{"channel", "rm", f.channel("worker"), "worker"} }, refused, runs, refused},
 	{"queue-cancel", func(f gatedFixture) []string { return []string{"queue", "rm", f.queued()} }, refused, runs, refused},
 	{"queue-clear", func(f gatedFixture) []string { return []string{"queue", "clear", "widget-other"} }, refused, runs, refused},
 }
@@ -173,6 +175,8 @@ func TestEveryGatedCommandAnswersEachCallerAsItsRuleSays(t *testing.T) {
 					t.Errorf("%s %v: the refusal %q tells the person to run something", caller.session, args, err)
 				case caller.want == runs && err != nil:
 					t.Errorf("%s %v: err=%v, want it to run", caller.session, args, err)
+				case caller.want == admitted && err != nil && strings.Contains(err.Error(), "is for the person"):
+					t.Errorf("%s %v: err=%v, want it past the reach check", caller.session, args, err)
 				}
 			}
 		})
@@ -212,6 +216,18 @@ func TestARefusedAgentAsksThePersonByRunningTheSameCommandAgain(t *testing.T) {
 
 func TestAnAgentAsksThePersonToSendOrControlAnotherProjectsSession(t *testing.T) {
 	f := newGatedFixture(t)
+	config, err := daemon.LoadDashboardConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"cross-project-message", "cross-project-steer"} {
+		if err := config.SetAgentDecision(action, daemon.AgentAsk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := daemon.SaveDashboardConfig(config); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("AGENTHAIL_SESSION_ID", "worker")
 	if err := f.app.Run([]string{"interrupt", "gadget-other"}); err == nil || !strings.Contains(err.Error(), "--ask-person") {
 		t.Fatalf("interrupting another project's session answered %v, want a refusal that says how to ask", err)

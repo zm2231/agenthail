@@ -140,7 +140,7 @@ func registerBusyChildren(t *testing.T, r *registry.Registry, spawner string, co
 func TestTwoCreatesRacingForTheLastSlotStartOneSession(t *testing.T) {
 	f := newMCPCodexFixture(t)
 	spawner, token, root := f.startParent(t)
-	registerBusyChildren(t, f.registry, spawner, mcpChildrenLimit-1)
+	registerBusyChildren(t, f.registry, spawner, defaultAgentRunning-1)
 	results := make(chan map[string]any, 2)
 	for _, key := range []string{"r1", "r2"} {
 		go func() {
@@ -162,7 +162,7 @@ func TestTwoCreatesRacingForTheLastSlotStartOneSession(t *testing.T) {
 func TestASpawnerRunsAtMostEightChildrenAtOnce(t *testing.T) {
 	f := newMCPCodexFixture(t)
 	registerChain(t, f.registry, "spawner")
-	for index := range mcpChildrenLimit {
+	for index := range defaultAgentRunning {
 		child := fmt.Sprintf("busy-%d", index)
 		if err := f.registry.RecordObservedSession(surface.Session{ID: child, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy}); err != nil {
 			t.Fatal(err)

@@ -24,10 +24,17 @@ const (
 	ProjectSettingMCP = "mcp"
 	ProjectMCPOn      = "on"
 	ProjectMCPOff     = "off"
+	// ProjectSettingLimitResume decides whether the project's sessions a
+	// usage limit stopped resume; host follows each host's own setting.
+	ProjectSettingLimitResume = "limit-resume"
+	ProjectLimitResumeHost    = "host"
+	ProjectLimitResumeOn      = "on"
+	ProjectLimitResumeOff     = "off"
 )
 
 var projectSettingValues = map[string][]string{
-	ProjectSettingMCP: {ProjectMCPOn, ProjectMCPOff},
+	ProjectSettingMCP:         {ProjectMCPOn, ProjectMCPOff},
+	ProjectSettingLimitResume: {ProjectLimitResumeHost, ProjectLimitResumeOn, ProjectLimitResumeOff},
 }
 
 func validProjectSetting(name, value string) bool {

@@ -88,9 +88,11 @@ func (a *App) cmdExtensions(args []string) error {
 	switch {
 	case sub == "build" && len(positional) >= 2:
 		if a.agentEnvironment() {
-			return errors.New("starting a builder is the person's to do; to work on an extension yourself, edit ~/.agenthail/extensions and read its AGENTS.md")
+			if caller, err = a.sourceSessionID(ctx, ""); err != nil {
+				return err
+			}
 		}
-		return a.buildExtension(ctx, client, strings.Join(positional[1:], " "), flagVal(args, "--agent"), asJSON)
+		return a.buildExtension(ctx, client, strings.Join(positional[1:], " "), flagVal(args, "--agent"), caller, asJSON)
 	case sub == "call" && len(positional) == 3:
 		input, inputErr := extensionCallInput(flagVal(args, "--input"))
 		if inputErr != nil {
@@ -326,14 +328,14 @@ func printExtensionCall(data []byte) error {
 	return nil
 }
 
-func (a *App) buildExtension(ctx context.Context, client *daemonAPIClient, message, agent string, asJSON bool) error {
+func (a *App) buildExtension(ctx context.Context, client *daemonAPIClient, message, agent, caller string, asJSON bool) error {
 	if agent == "" {
 		agent = "claude"
 	}
 	if agent != "claude" && agent != "codex" {
 		return errors.New("--agent is claude or codex")
 	}
-	data, _, err := client.call(ctx, http.MethodPost, "/api/v1/extensions/build", nil, map[string]any{"message": message, "surface": agent}, http.Header{"Idempotency-Key": []string{"cli-" + uuid.NewString()}, daemon.ActionActorHeader: []string{daemon.CLIActor}})
+	data, _, err := client.call(ctx, http.MethodPost, "/api/v1/extensions/build", nil, map[string]any{"message": message, "surface": agent, "sessionId": caller}, http.Header{"Idempotency-Key": []string{"cli-" + uuid.NewString()}, daemon.ActionActorHeader: []string{daemon.CLIActor}})
 	if err != nil {
 		return err
 	}
