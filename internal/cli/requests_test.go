@@ -12,8 +12,8 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -25,7 +25,7 @@ func hostedClaudeApp(t *testing.T) (*App, *registry.Registry, *claudehosttest.Fi
 	client := host.Start(t)
 	id := uuid.NewString()
 	host.Open(t, client, id)
-	claude := surfaces.NewClaude(nil, fixture.Home)
+	claude := claudesurface.NewClaude(nil, fixture.Home)
 	app, r := claudeCLIFixture(t, claude)
 	var session surface.Session
 	testkit.Eventually(t, "the host session", 15*time.Second, func() bool {

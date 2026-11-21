@@ -8,15 +8,15 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 )
 
 // claudePromptHolder is the Claude adapter's side of the PermissionRequest
 // hook: it holds a terminal session's prompt until a person answers it
 // through Agenthail or the session settles it.
 type claudePromptHolder interface {
-	HoldPrompt(ctx context.Context, prompt surfaces.ClaudePermissionPrompt) (*surfaces.ClaudePromptDecision, error)
-	OnPromptChange(changed func(surfaces.ClaudePromptChange))
+	HoldPrompt(ctx context.Context, prompt claudesurface.ClaudePermissionPrompt) (*claudesurface.ClaudePromptDecision, error)
+	OnPromptChange(changed func(claudesurface.ClaudePromptChange))
 }
 
 func (d *Daemon) claudePrompts() claudePromptHolder {
@@ -32,14 +32,14 @@ func (d *Daemon) claudePrompts() claudePromptHolder {
 // the hook's input as Claude passed it, the pid of the Claude process that
 // ran the hook, and when it ran.
 type ClaudePermissionRequest struct {
-	Prompt surfaces.ClaudePermissionPrompt `json:"prompt"`
-	PID    int                             `json:"pid"`
+	Prompt claudesurface.ClaudePermissionPrompt `json:"prompt"`
+	PID    int                                  `json:"pid"`
 	// AskedAtMS is when the hook read the prompt, in Unix milliseconds.
 	AskedAtMS int64 `json:"askedAt,omitempty"`
 }
 
 type ClaudePermissionResponse struct {
-	Decision *surfaces.ClaudePromptDecision `json:"decision"`
+	Decision *claudesurface.ClaudePromptDecision `json:"decision"`
 }
 
 // claudePermissionRequestHandler holds the request open until the prompt is
@@ -56,7 +56,7 @@ func (d *Daemon) claudePermissionRequestHandler(w http.ResponseWriter, r *http.R
 	}
 	holder := d.claudePrompts()
 	if holder == nil {
-		writeAPIError(w, http.StatusNotFound, "not_held", surfaces.ErrPromptNotHeld.Error())
+		writeAPIError(w, http.StatusNotFound, "not_held", claudesurface.ErrPromptNotHeld.Error())
 		return
 	}
 	var request ClaudePermissionRequest
@@ -70,7 +70,7 @@ func (d *Daemon) claudePermissionRequestHandler(w http.ResponseWriter, r *http.R
 	}
 	decision, err := holder.HoldPrompt(r.Context(), request.Prompt)
 	switch {
-	case errors.Is(err, surfaces.ErrPromptNotHeld):
+	case errors.Is(err, claudesurface.ErrPromptNotHeld):
 		writeAPIError(w, http.StatusConflict, "not_held", err.Error())
 		return
 	case r.Context().Err() != nil:
@@ -88,7 +88,7 @@ func (d *Daemon) claudePermissionRequestHandler(w http.ResponseWriter, r *http.R
 // claudePromptChanged records what the session waits on once a held prompt
 // opens or closes, which announces the question with what it asks and
 // withdraws the notifications of the wait it replaced.
-func (d *Daemon) claudePromptChanged(change surfaces.ClaudePromptChange) {
+func (d *Daemon) claudePromptChanged(change claudesurface.ClaudePromptChange) {
 	d.background.start(func(lifetime context.Context) {
 		session, err := d.Registry.Session(change.SessionID)
 		if err != nil || session == nil {

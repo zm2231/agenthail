@@ -22,7 +22,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 )
 
 const apiTestPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
@@ -370,7 +370,7 @@ func TestAPIV1SessionAttachmentServesReferencedBytesAndRejectsOversize(t *testin
 	if err := registry.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
-	claude := surfaces.NewClaude(nil, t.TempDir())
+	claude := claudesurface.NewClaude(nil, t.TempDir())
 	d.Surfaces = []surface.Surface{claude}
 	read, err := claude.ReadSession(context.Background(), &from, surface.SessionReadRequest{Limit: 20})
 	if err != nil || len(read.Items) != 2 || read.Items[1].Attachment == nil || read.Items[0].Text != "caption" || read.Items[1].CallID != "call-1" {

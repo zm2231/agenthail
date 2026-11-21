@@ -15,7 +15,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 )
 
 func TestATurnOpenedOnAHostReadsBusyUntilItFinishes(t *testing.T) {
@@ -24,7 +24,7 @@ func TestATurnOpenedOnAHostReadsBusyUntilItFinishes(t *testing.T) {
 	host := h.hosts[0]
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(host.home, ".claude"))
 	t.Setenv(claudepeer.SocketDirEnv, host.dir("sockets"))
-	claude := surfaces.NewClaude(nil, host.home)
+	claude := claudesurface.NewClaude(nil, host.home)
 
 	id := control(t, handler, "/hosts/0/turn/start", `{"text":"Ship the release"}`)
 	if again := post(handler, "/hosts/0/turn/start", `{"text":"Again"}`); again.Code != http.StatusConflict {
@@ -59,7 +59,7 @@ func TestATurnOpenedOnAHostReadsBusyUntilItFinishes(t *testing.T) {
 	}
 }
 
-func listed(t *testing.T, claude *surfaces.Claude, id string) surface.Session {
+func listed(t *testing.T, claude *claudesurface.Claude, id string) surface.Session {
 	t.Helper()
 	sessions, err := claude.List(context.Background())
 	if err != nil {

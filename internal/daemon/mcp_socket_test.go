@@ -23,7 +23,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -174,7 +174,7 @@ func mcpSocketDaemon(t *testing.T, more ...surface.Surface) (*Daemon, *registry.
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reg.Close() })
-	d := newTestDaemon(t, reg, append([]surface.Surface{surfaces.NewClaude(nil, os.Getenv("HOME"))}, more...))
+	d := newTestDaemon(t, reg, append([]surface.Surface{claudesurface.NewClaude(nil, os.Getenv("HOME"))}, more...))
 	stop, err := d.startMCPSocket()
 	if err != nil {
 		t.Fatal(err)

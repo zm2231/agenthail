@@ -1,0 +1,177 @@
+package claudesurface
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"sync"
+
+	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
+)
+
+type claudeCompletionCursor struct {
+	Identity    string
+	Offset      int64
+	Anchor      string
+	Current     claudeTurn
+	CompletedID string
+}
+
+func (c *Claude) ReadCompletions(ctx context.Context, sess *surface.Session, cursor string) (surface.CompletionBatch, error) {
+	path, err := c.sessionTranscript(sess)
+	if err != nil {
+		return surface.CompletionBatch{}, err
+	}
+	return c.readCompletions(ctx, sess, path, cursor)
+}
+
+// CompletionScan reads each session's completions through one listing of the
+// transcripts, taken at its first read.
+func (c *Claude) CompletionScan() surface.CompletionReader {
+	return &claudeCompletionScan{claude: c}
+}
+
+type claudeCompletionScan struct {
+	claude      *Claude
+	once        sync.Once
+	roots       []string
+	transcripts func(string) []string
+	err         error
+}
+
+func (s *claudeCompletionScan) ReadCompletions(ctx context.Context, sess *surface.Session, cursor string) (surface.CompletionBatch, error) {
+	s.once.Do(func() {
+		if s.roots, s.err = surface.ClaudeConfigRoots(s.claude.home); s.err == nil {
+			s.transcripts = s.claude.transcripts.pass(s.roots)
+		}
+	})
+	if s.err != nil {
+		return surface.CompletionBatch{}, s.err
+	}
+	path, err := sessionTranscriptIn(sess, s.roots, s.transcripts)
+	if err != nil {
+		return surface.CompletionBatch{}, err
+	}
+	return s.claude.readCompletions(ctx, sess, path, cursor)
+}
+
+func (c *Claude) readCompletions(ctx context.Context, sess *surface.Session, path, cursor string) (surface.CompletionBatch, error) {
+	var checkpoint claudeCompletionCursor
+	info, err := os.Stat(path)
+	if err != nil {
+		return surface.CompletionBatch{}, err
+	}
+	if cursor != "" {
+		if err := json.Unmarshal([]byte(cursor), &checkpoint); err != nil {
+			return surface.CompletionBatch{}, err
+		}
+		anchor, err := completionAnchor(path, checkpoint.Offset)
+		if err != nil {
+			return surface.CompletionBatch{}, err
+		}
+		if anchor != checkpoint.Anchor {
+			return surface.CompletionBatch{}, fmt.Errorf("relay transcript changed before its saved cursor; restore the transcript or recreate the relay")
+		}
+	}
+	tail := transcript.Cursor{Identity: checkpoint.Identity, Offset: checkpoint.Offset}
+	reset := tail.Reset(info)
+	if cursor != "" && reset {
+		return surface.CompletionBatch{}, fmt.Errorf("relay transcript changed before its saved cursor; restore the transcript or recreate the relay")
+	}
+	state := &claudeObservationState{current: checkpoint.Current, hasCurrent: checkpoint.Current.UserID != "" || checkpoint.Current.MessageID != ""}
+	batch := surface.CompletionBatch{}
+	collect := func() {
+		if state.hasCompleted && state.completed.MessageID != checkpoint.CompletedID {
+			turn := state.completed
+			checkpoint.CompletedID = turn.MessageID
+			if cursor != "" && !turn.Interrupted {
+				batch.Events = append(batch.Events, surface.Completion{ID: turn.MessageID, InputID: turn.UserID, Text: turn.Assistant, User: turn.User, CompletedAt: turn.TerminalAt})
+			}
+		}
+	}
+	apply := func(line []byte) error {
+		var record claudeRecord
+		if err := json.Unmarshal(line, &record); err != nil {
+			return fmt.Errorf("invalid relay transcript record: %w", err)
+		}
+		if err := state.apply(line); err != nil {
+			return err
+		}
+		collect()
+		return nil
+	}
+	// Baseline once from the bounded tail; subsequent reads resume the durable
+	// byte offset even across daemon restarts and retain every intervening turn.
+	if cursor == "" {
+		lines, offset, err := transcript.ReadRecentJSONLLines(ctx, path, 0, initialClaudeObservationBytes, maxClaudeTranscriptRecordBytes)
+		if err != nil {
+			return batch, err
+		}
+		for _, line := range lines {
+			if err := apply(line); err != nil {
+				return batch, err
+			}
+		}
+		tail.Offset = offset
+	} else {
+		offset, err := transcript.ScanAppendedJSONL(ctx, path, tail.Offset, maxClaudeTranscriptRecordBytes, apply)
+		if err != nil {
+			return surface.CompletionBatch{}, err
+		}
+		tail.Offset = offset
+	}
+	if state.hasCurrent && state.current.Closing && c.settledAfter(sess, state.current.TerminalAt) {
+		state.settle()
+		collect()
+	}
+	checkpoint.Current = state.current
+	checkpoint.Identity, checkpoint.Offset = tail.Identity, tail.Offset
+	anchor, err := completionAnchor(path, tail.Offset)
+	if err != nil {
+		return surface.CompletionBatch{}, err
+	}
+	checkpoint.Anchor = anchor
+	encoded, err := json.Marshal(checkpoint)
+	batch.Cursor = string(encoded)
+	return batch, err
+}
+
+const transcriptAnchorBytes = 256
+
+func completionAnchor(path string, offset int64) (string, error) {
+	tail, err := transcriptTail(path, offset)
+	if err != nil {
+		return "", err
+	}
+	return anchorOf(tail), nil
+}
+
+func anchorOf(tail []byte) string {
+	return fmt.Sprintf("%x", sha256.Sum256(tail))
+}
+
+// transcriptTail returns the bytes an anchor at offset covers.
+func transcriptTail(path string, offset int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if offset < 0 || offset > info.Size() {
+		return nil, fmt.Errorf("relay transcript was truncated before its saved cursor")
+	}
+	start := max(int64(0), offset-transcriptAnchorBytes)
+	data := make([]byte, offset-start)
+	if _, err := io.ReadFull(io.NewSectionReader(f, start, offset-start), data); err != nil {
+		return nil, err
+	}
+	return data, nil
+}

@@ -10,8 +10,8 @@ import (
 
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 )
 
 func TestALiveSessionNothingWatchesKeepsItsJournalFollowingItsTranscript(t *testing.T) {
@@ -23,7 +23,7 @@ func TestALiveSessionNothingWatchesKeepsItsJournalFollowingItsTranscript(t *test
 	path := fixture.Transcript(conversation, fixture.Home)
 	fixture.Listen()
 	fixture.Record(conversation, fixture.Home, "")
-	d.Surfaces = []surface.Surface{surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}
+	d.Surfaces = []surface.Surface{claudesurface.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}
 	d.discoverCatalog(t.Context())
 	if _, err := r.Session(conversation); err != nil {
 		t.Fatalf("discovery did not list the live session: %v", err)
@@ -78,7 +78,7 @@ func TestAStaleRecordWhosePidAnotherProcessReusedHoldsNoSource(t *testing.T) {
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	d.Surfaces = []surface.Surface{surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}
+	d.Surfaces = []surface.Surface{claudesurface.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}
 	d.discoverCatalog(t.Context())
 	d.sources.mu.Lock()
 	_, running := d.sources.sources[conversation]

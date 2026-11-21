@@ -15,7 +15,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -32,7 +32,7 @@ func createClaudeSessionInTheHost(t *testing.T, launcher string) {
 	host := claudehosttest.New(t, "")
 	host.Start(t)
 	home := host.Cwd
-	d := newTestDaemon(t, registry, []surface.Surface{surfaces.NewClaude(nil, host.Home)})
+	d := newTestDaemon(t, registry, []surface.Surface{claudesurface.NewClaude(nil, host.Home)})
 	handler := dashboardRouter(d)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/session-options", nil)
 	request.Header.Set("Authorization", "Bearer secret")
@@ -89,7 +89,7 @@ func createClaudeSessionInTheHost(t *testing.T, launcher string) {
 
 // lostAnswerClaude starts sessions in the host and then loses the answer to
 // the first turn, as a dropped connection after the host accepted it would.
-type lostAnswerClaude struct{ *surfaces.Claude }
+type lostAnswerClaude struct{ *claudesurface.Claude }
 
 func (c lostAnswerClaude) StartSession(ctx context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
 	session, _, err := c.Claude.StartSession(ctx, options)
@@ -103,7 +103,7 @@ func TestAClaudeCreationWhoseFirstTurnIsUnconfirmedRecordsThatTurnsUUID(t *testi
 	_, registry, _, _, _ := daemonFixture(t)
 	host := claudehosttest.New(t, "")
 	host.Start(t)
-	d := newTestDaemon(t, registry, []surface.Surface{lostAnswerClaude{surfaces.NewClaude(nil, host.Home)}})
+	d := newTestDaemon(t, registry, []surface.Surface{lostAnswerClaude{claudesurface.NewClaude(nil, host.Home)}})
 	body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "claude", "message": "first", "cwd": host.Cwd})
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/actions", bytes.NewReader(body))
 	request.Header.Set("Authorization", "Bearer secret")
@@ -166,7 +166,7 @@ func TestClaudeCreationThatNeverStartedIsAFailureNotUnknown(t *testing.T) {
 			_, registry, _, _, _ := daemonFixture(t)
 			home := t.TempDir()
 			t.Setenv("AGENTHAIL_CLAUDE_BIN", test.binary(home))
-			d := newTestDaemon(t, registry, []surface.Surface{surfaces.NewClaude(nil, home)})
+			d := newTestDaemon(t, registry, []surface.Surface{claudesurface.NewClaude(nil, home)})
 			body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "claude", "launcher": surface.LauncherClaudeBG, "message": "fixture instruction", "cwd": home})
 			response := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", string(body))
 			var failure struct {

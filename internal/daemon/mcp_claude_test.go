@@ -14,7 +14,7 @@ import (
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -41,7 +41,7 @@ func newMCPClaudeFixture(t *testing.T) *mcpClaudeFixture {
 	host := claudehosttest.New(t, "")
 	host.Start(t)
 	r := hostRegistry(t)
-	d := newTestDaemon(t, r, []surface.Surface{surfaces.NewClaude(nil, host.Home)})
+	d := newTestDaemon(t, r, []surface.Surface{claudesurface.NewClaude(nil, host.Home)})
 	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: dashboardTestToken}))
 	t.Cleanup(server.Close)
 	d.attachMCPCredentials(strings.TrimPrefix(server.URL, "http://"))

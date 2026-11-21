@@ -12,12 +12,12 @@ import (
 
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 )
 
 type heldCatchUpClaude struct {
-	*surfaces.Claude
+	*claudesurface.Claude
 	gate chan struct{}
 }
 
@@ -50,7 +50,7 @@ func TestASeededSessionsPageAnswersFromTheJournalWhileItCatchesUp(t *testing.T) 
 	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
-	adapter := &heldCatchUpClaude{Claude: surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home), gate: make(chan struct{})}
+	adapter := &heldCatchUpClaude{Claude: claudesurface.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home), gate: make(chan struct{})}
 	d.Surfaces = []surface.Surface{adapter}
 	handler := dashboardRouter(d)
 	if got := readDashboardExchanges(t, handler, conversation, ""); len(got) != 2 {

@@ -11,7 +11,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 )
 
 func TestAPeerMessageIsDeliveredWhenTheTurnThatReadItEndsOnASessionNothingElseWatches(t *testing.T) {
@@ -64,7 +64,7 @@ func TestAPeerMessageIsDeliveredWhenTheTurnThatReadItEndsOnASessionNothingElseWa
 					t.Fatal(err)
 				}
 			}
-			d := newTestDaemon(t, r, []surface.Surface{surfaces.NewClaude(nil, home)})
+			d := newTestDaemon(t, r, []surface.Surface{claudesurface.NewClaude(nil, home)})
 			d.log = log.New(io.Discard, "", 0)
 			intent, err := r.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: "target", Message: "hello", Status: registry.DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
 			if err != nil {

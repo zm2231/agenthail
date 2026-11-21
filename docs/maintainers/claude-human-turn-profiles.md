@@ -10,7 +10,7 @@ and voice delivery are later layers. Their plans follow below.
 `role: user` through the existing authenticated web request. It requires a
 Remote Control attachment: `Session.Bridge`, the `bridgeSessionId` of the live
 process record whose `sessionId` is the session ID
-([`Claude.List`](../../internal/surface/surfaces/claude.go)). It is cleared when
+([`Claude.List`](../../internal/surface/claudesurface/claude.go)). It is cleared when
 that process moves to another conversation. `CanSendHumanTurn`
 reports whether that identity exists, matching the controls that already use it
 (`EffectiveCapabilities`). Busy sessions return an unaccepted result without
@@ -133,7 +133,7 @@ signs into another account (`/login` prints "Remote Control disconnected"), so
 a bridge always belongs to its root's current account. A Remote Control request
 about a session therefore carries the cookies of the profile signed into the
 `oauthAccount` of the root that holds the session's transcript, or its session
-record before the transcript exists ([`claude_signin.go`](../../internal/surface/surfaces/claude_signin.go)):
+record before the transcript exists ([`signin.go`](../../internal/surface/claudesurface/signin.go)):
 `signin.Resolver.SigninCandidates` lists the consumer's choice first, then
 every other readable profile, and the first whose `GET /api/account` names that
 account's `accountUuid` is used. Each profile's account is kept for five

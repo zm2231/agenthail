@@ -17,7 +17,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 )
 
 func TestASessionStartedThroughTheBackgroundLauncherRunsTheHostsClaudeStub(t *testing.T) {
@@ -38,7 +38,7 @@ func TestASessionStartedThroughTheBackgroundLauncherRunsTheHostsClaudeStub(t *te
 	t.Setenv("HOME", host.home)
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(host.home, ".claude"))
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", stub)
-	claude := surfaces.NewClaude(nil, host.home)
+	claude := claudesurface.NewClaude(nil, host.home)
 
 	session, _, err := claude.BackgroundStarter().StartSession(context.Background(), surface.SessionStartOptions{Cwd: cwd, Name: "From the phone", Message: "Plan the release"})
 	if err != nil {
@@ -77,7 +77,7 @@ func TestAPromptRaisedInATurnHoldsAtTheHostUntilItIsAnswered(t *testing.T) {
 	host := h.hosts[0]
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(host.home, ".claude"))
 	t.Setenv(claudepeer.SocketDirEnv, host.dir("sockets"))
-	claude := surfaces.NewClaude(nil, host.home)
+	claude := claudesurface.NewClaude(nil, host.home)
 	if err := os.WriteFile(filepath.Join(host.home, ".agenthail", "dashboard.token"), []byte("host-token\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -102,8 +102,8 @@ func TestAPromptRaisedInATurnHoldsAtTheHostUntilItIsAnswered(t *testing.T) {
 		body, _ := io.ReadAll(r.Body)
 		json.Unmarshal(body, &got.request)
 		var hook struct {
-			Prompt surfaces.ClaudePermissionPrompt `json:"prompt"`
-			PID    int                             `json:"pid"`
+			Prompt claudesurface.ClaudePermissionPrompt `json:"prompt"`
+			PID    int                                  `json:"pid"`
 		}
 		json.Unmarshal(body, &hook)
 		hook.Prompt.PID = hook.PID
@@ -139,7 +139,7 @@ func TestAPromptRaisedInATurnHoldsAtTheHostUntilItIsAnswered(t *testing.T) {
 	if got.auth != "Bearer host-token" || prompt["session_id"] != id || prompt["tool_name"] != "Bash" || input["command"] != "git push" || got.request["pid"] != float64(host.turn.process.Process.Pid) {
 		t.Fatalf("the host got %q %+v, want the hook's request for the turn's process", got.auth, got.request)
 	}
-	if errors.Is(got.holdErr, surfaces.ErrPromptNotHeld) {
+	if errors.Is(got.holdErr, claudesurface.ErrPromptNotHeld) {
 		t.Fatalf("the host's Claude adapter would refuse to hold the prompt: %v", got.holdErr)
 	}
 	if got.waiting == nil || got.waiting.Kind != surface.WaitingApproval {

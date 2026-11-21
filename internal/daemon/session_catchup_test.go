@@ -11,8 +11,8 @@ import (
 
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -121,7 +121,7 @@ func TestDashboardSessionPageShowsClaudeTurnsWrittenAfterItsSourceStopped(t *tes
 	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
-	d.Surfaces = []surface.Surface{surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}
+	d.Surfaces = []surface.Surface{claudesurface.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}
 	handler := dashboardRouter(d)
 
 	if got := readDashboardExchanges(t, handler, conversation, ""); len(got) != 1 || got[0].User != "first question" || got[0].Assistant != "first answer" {
@@ -176,7 +176,7 @@ func TestABuiltInCommandRunBetweenTurnsIsTheSessionPagesLatestExchange(t *testin
 	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
-	d.Surfaces = []surface.Surface{surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}
+	d.Surfaces = []surface.Surface{claudesurface.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}
 	handler := dashboardRouter(d)
 	if got := readDashboardExchanges(t, handler, conversation, ""); len(got) != 1 || got[0].Assistant != "READY" {
 		t.Fatalf("first page exchanges=%+v", got)

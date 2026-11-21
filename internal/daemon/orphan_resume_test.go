@@ -18,8 +18,8 @@ import (
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/browsercookie"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 )
 
 const (
@@ -104,7 +104,7 @@ func newOrphanFixtureOn(t *testing.T, transport string) *orphanFixture {
 	// Codex carries the voice operator the voice fixtures create.
 	operator := surface.Session{ID: "operator", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Voice operator", Transport: "desktop", Status: surface.StatusIdle}
 	codex := &daemonSurface{sessions: map[string]surface.Session{operator.ID: operator}, observations: map[string]*surface.TurnObservation{}, accepted: true}
-	fixture.daemon = newTestDaemon(t, r, []surface.Surface{surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.claude.Home, fixture.posts.request), codex})
+	fixture.daemon = newTestDaemon(t, r, []surface.Surface{claudesurface.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.claude.Home, fixture.posts.request), codex})
 	fixture.handler = dashboardRouter(fixture.daemon)
 	fixture.token = pairedControlToken(t, r)
 	return fixture

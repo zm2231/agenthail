@@ -14,7 +14,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 )
 
 type signinRequest struct {
@@ -158,7 +158,7 @@ func TestDoctorShowsTheResolvedSigninAndHowToChangeIt(t *testing.T) {
 	if _, err := reg.BindSignin(signin.Claude, signin.RefOff); err != nil {
 		t.Fatal(err)
 	}
-	app.Surfaces = []SurfaceEntry{{Name: "claude", Surface: surfaces.NewClaude(reg, home)}}
+	app.Surfaces = []SurfaceEntry{{Name: "claude", Surface: claudesurface.NewClaude(reg, home)}}
 	app.DefaultTimeout = claudeFixtureTimeout
 	output, err := captureStdout(t, func() error { return app.Run([]string{"doctor"}) })
 	if err != nil {

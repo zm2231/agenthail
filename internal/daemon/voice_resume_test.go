@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 	"github.com/zm2231/agenthail/internal/testkit"
 	"github.com/zm2231/agenthail/internal/voice"
 )
@@ -150,7 +150,7 @@ func TestVoiceDelegationToAHostSessionIsAPersonsTurnAndSpeaksTheReply(t *testing
 	f := newOrphanFixture(t)
 	client := f.host.Start(t)
 	f.host.Open(t, client, orphanConversation)
-	claude := f.daemon.adapters()[0].(*surfaces.Claude)
+	claude := f.daemon.adapters()[0].(*claudesurface.Claude)
 	hosted := hostedSession(t, claude, orphanConversation)
 	hosted.Name = "orphan"
 	if err := f.r.RecordObservedSession(hosted); err != nil {

@@ -1,0 +1,285 @@
+package claudesurface
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
+)
+
+var claudeTaskIDTag = regexp.MustCompile(`(?:<|\\u003c)task-id(?:>|\\u003e)(.*?)(?:<|\\u003c)/task-id`)
+
+// claudeBackground reads the background tasks of a live session: from the host
+// for a session it runs, otherwise from the transcript and the process's own
+// status.
+func (c *Claude) claudeBackground(ctx context.Context, sess *surface.Session) *surface.BackgroundTasks {
+	if claudeHosted(sess) {
+		if tasks, ok := c.hostBackground(ctx, sess); ok {
+			return tasks
+		}
+	}
+	return c.recordBackground(ctx, sess)
+}
+
+// hostBackground reads the tasks Claude last reported to the host. A host that
+// predates task listing reports none, and ok is false. A task that has ended
+// still runs until the turn that tells the model starts, since Claude is idle
+// with no task in between and the session's work is not done.
+func (c *Claude) hostBackground(ctx context.Context, sess *surface.Session) (*surface.BackgroundTasks, bool) {
+	listed, ok := c.host.session(ctx, sess.ID, sess.PID)
+	if !ok || listed.Tasks == nil {
+		return nil, false
+	}
+	tasks := make([]surface.BackgroundTask, 0, len(listed.Tasks))
+	for _, task := range listed.Tasks {
+		tasks = append(tasks, surface.BackgroundTask{ID: task.ID, Kind: claudeTaskKind(task.Type), Description: task.Description, ParentID: task.ParentID, Ambient: task.Ambient, Since: task.Since.UTC()})
+	}
+	background := surface.BackgroundOf(tasks, surface.BackgroundSourceHost)
+	if listed.TaskTurnOwed && !surface.BackgroundRunning(background) {
+		if background == nil {
+			background = &surface.BackgroundTasks{Source: surface.BackgroundSourceHost}
+		}
+		background.Running = true
+	}
+	return background, true
+}
+
+// claudeTaskKind names Claude's task types by what they are.
+func claudeTaskKind(taskType string) string {
+	switch taskType {
+	case "local_bash":
+		return surface.BackgroundShell
+	case "local_agent", "remote_agent", "in_process_teammate":
+		return surface.BackgroundAgent
+	case "monitor_mcp", "monitor_ws":
+		return surface.BackgroundMonitor
+	default:
+		return taskType
+	}
+}
+
+// recordBackground reads a terminal session's tasks from its transcript: those
+// its live process started and that have not ended. Claude's record says
+// "shell" while a background shell runs, so a shell the transcript leaves open
+// counts only then, and "shell" with no shell listed still counts.
+func (c *Claude) recordBackground(ctx context.Context, sess *surface.Session) *surface.BackgroundTasks {
+	record, live := c.liveRecord(*sess)
+	if !live {
+		return nil
+	}
+	shell := transcript.String(record, "status") == "shell"
+	var started time.Time
+	if at, ok := record["startedAt"].(float64); ok {
+		started = time.UnixMilli(int64(at))
+	}
+	var tasks []surface.BackgroundTask
+	if path := sess.Transcript; path != "" {
+		for _, task := range c.transcriptTasks(ctx, path) {
+			if task.Since.Before(started) || task.Kind == surface.BackgroundShell && !shell {
+				continue
+			}
+			tasks = append(tasks, task)
+		}
+	}
+	background := surface.BackgroundOf(tasks, surface.BackgroundSourceTranscript)
+	if shell && !surface.BackgroundRunning(background) {
+		if background == nil {
+			background = &surface.BackgroundTasks{Source: surface.BackgroundSourceStatus}
+		}
+		background.Running = true
+		if at, ok := record["statusUpdatedAt"].(float64); ok {
+			background.Since = time.UnixMilli(int64(at)).UTC()
+		}
+	}
+	return background
+}
+
+// claudeTaskScan follows one transcript's background tasks as Claude appends
+// to it: a Bash or Agent call run in the background, or a Monitor, starts a
+// task its result names; a task notification or a TaskStop on the id ends it.
+// Calls holds the calls still waiting for their result. A scan is saved with
+// the offset it has read to, so another process resumes it where it stopped.
+type claudeTaskScan struct {
+	file    os.FileInfo
+	Path    string                            `json:"path"`
+	Offset  int64                             `json:"offset"`
+	Anchor  string                            `json:"anchor"`
+	Calls   map[string]surface.BackgroundTask `json:"calls"`
+	Running []surface.BackgroundTask          `json:"running"`
+}
+
+func (c *Claude) transcriptTasks(ctx context.Context, path string) []surface.BackgroundTask {
+	c.tasksMu.Lock()
+	defer c.tasksMu.Unlock()
+	if c.taskScans == nil {
+		c.taskScans = map[string]*claudeTaskScan{}
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		delete(c.taskScans, path)
+		return nil
+	}
+	scan := c.taskScans[path]
+	if scan == nil || !os.SameFile(scan.file, info) || info.Size() < scan.Offset || !scan.matches(path) {
+		scan = c.loadTaskScan(path, info)
+		c.taskScans[path] = scan
+	}
+	scan.file = info
+	from, anchor := scan.Offset, scan.Anchor
+	scan.advance(ctx)
+	scan = c.settleTaskScan(ctx, scan, from, anchor)
+	return append([]surface.BackgroundTask(nil), scan.Running...)
+}
+
+// settleTaskScan keeps a scan that has read from offset from only if the
+// transcript before from did not change while it read; otherwise it reads the
+// transcript again from the start.
+func (c *Claude) settleTaskScan(ctx context.Context, scan *claudeTaskScan, from int64, anchor string) *claudeTaskScan {
+	if !scan.unchangedBefore(from, anchor) {
+		file := scan.file
+		scan = newTaskScan(scan.Path)
+		scan.file = file
+		c.taskScans[scan.Path] = scan
+		from, anchor = 0, scan.Anchor
+		scan.advance(ctx)
+	}
+	if scan.Offset != from && scan.unchangedBefore(from, anchor) {
+		c.saveTaskScan(scan)
+	}
+	return scan
+}
+
+func (s *claudeTaskScan) advance(ctx context.Context) {
+	for {
+		next, err := transcript.ScanAppendedJSONL(ctx, s.Path, s.Offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
+			s.read(line)
+			return nil
+		})
+		s.Offset = next
+		if !errors.As(err, new(transcript.RecordTooLarge)) {
+			return
+		}
+		// A record too large to read cannot be decoded; the scan goes on
+		// after it once it is whole.
+		past, whole := skipJSONLRecord(s.Path, next)
+		if !whole {
+			return
+		}
+		s.Offset = past
+	}
+}
+
+func (s *claudeTaskScan) read(line []byte) {
+	if bytes.Contains(line, []byte("task-id")) {
+		for _, match := range claudeTaskIDTag.FindAllSubmatch(line, -1) {
+			s.end(string(match[1]))
+		}
+	}
+	if !bytes.Contains(line, []byte(`"tool_use"`)) && !bytes.Contains(line, []byte(`"toolUseResult"`)) {
+		return
+	}
+	var record struct {
+		Type      string `json:"type"`
+		Timestamp string `json:"timestamp"`
+		Message   struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"message"`
+		Result json.RawMessage `json:"toolUseResult"`
+	}
+	// Claude also records the requests it sends, which repeat calls already
+	// made; only its own messages make and answer them.
+	if json.Unmarshal(line, &record) != nil || record.Type != "assistant" && record.Type != "user" {
+		return
+	}
+	// A failed call's result is its error text, and it still ends the call.
+	var result struct {
+		BackgroundTaskID string `json:"backgroundTaskId"`
+		AgentID          string `json:"agentId"`
+		IsAsync          bool   `json:"isAsync"`
+		TaskID           string `json:"taskId"`
+	}
+	if len(record.Result) > 0 && record.Result[0] == '{' {
+		_ = json.Unmarshal(record.Result, &result)
+	}
+	var blocks []struct {
+		Type      string `json:"type"`
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		ToolUseID string `json:"tool_use_id"`
+		Input     struct {
+			Description string `json:"description"`
+			Command     string `json:"command"`
+			TaskID      string `json:"task_id"`
+			ShellID     string `json:"shell_id"`
+		} `json:"input"`
+	}
+	if json.Unmarshal(record.Message.Content, &blocks) != nil {
+		return
+	}
+	at, _ := time.Parse(time.RFC3339Nano, record.Timestamp)
+	for _, block := range blocks {
+		switch block.Type {
+		case "tool_use":
+			description := strings.TrimSpace(block.Input.Description)
+			if description == "" {
+				description = strings.TrimSpace(block.Input.Command)
+			}
+			// The result says whether a call went to the background: a shell
+			// can be moved there while it runs and an agent can be
+			// asynchronous by its definition, so the input's flag is not the
+			// mark.
+			switch {
+			case block.Name == "Bash":
+				s.Calls[block.ID] = surface.BackgroundTask{Kind: surface.BackgroundShell, Description: description}
+			case block.Name == "Agent":
+				s.Calls[block.ID] = surface.BackgroundTask{Kind: surface.BackgroundAgent, Description: description}
+			case block.Name == "Monitor":
+				s.Calls[block.ID] = surface.BackgroundTask{Kind: surface.BackgroundMonitor, Description: description}
+			case block.Name == "TaskStop":
+				s.end(block.Input.TaskID)
+				s.end(block.Input.ShellID)
+			}
+		case "tool_result":
+			task, ok := s.Calls[block.ToolUseID]
+			if !ok {
+				continue
+			}
+			delete(s.Calls, block.ToolUseID)
+			switch task.Kind {
+			case surface.BackgroundShell:
+				task.ID = result.BackgroundTaskID
+			case surface.BackgroundAgent:
+				if result.IsAsync {
+					task.ID = result.AgentID
+				}
+			case surface.BackgroundMonitor:
+				task.ID = result.TaskID
+			}
+			if task.ID == "" {
+				continue
+			}
+			task.Since = at.UTC()
+			s.end(task.ID)
+			s.Running = append(s.Running, task)
+		}
+	}
+}
+
+func (s *claudeTaskScan) end(id string) {
+	if id == "" {
+		return
+	}
+	for index, task := range s.Running {
+		if task.ID == id {
+			s.Running = append(s.Running[:index], s.Running[index+1:]...)
+			return
+		}
+	}
+}

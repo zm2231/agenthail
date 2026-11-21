@@ -18,8 +18,8 @@ import (
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/browsercookie"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 )
 
 const (
@@ -32,7 +32,7 @@ const (
 )
 
 type nativeRecordingClaude struct {
-	*surfaces.Claude
+	*claudesurface.Claude
 	native     []string
 	beforeSend func()
 }
@@ -75,7 +75,7 @@ func newHumanTurnFixtureSignedIn(t *testing.T, signins signin.Resolver) *humanTu
 	f := &humanTurnFixture{r: r, home: process.Home, process: process}
 	process.Listen()
 	process.Record("conversation-bridge", process.Home, "session_bridge")
-	f.claude = &nativeRecordingClaude{Claude: surfaces.NewClaudeWithRequest(signins, process.Home, func(_ context.Context, method, url string, _ map[string]string, body string, _ browsercookie.Source, _ time.Duration) (int, string, error) {
+	f.claude = &nativeRecordingClaude{Claude: claudesurface.NewClaudeWithRequest(signins, process.Home, func(_ context.Context, method, url string, _ map[string]string, body string, _ browsercookie.Source, _ time.Duration) (int, string, error) {
 		if method == http.MethodGet && f.get != nil {
 			return f.get(url)
 		}
@@ -325,7 +325,7 @@ func (f *humanTurnFixture) withoutWebBridgeSidecar(t *testing.T) {
 	t.Helper()
 	t.Setenv("AGENTHAIL_SIDECAR", "")
 	t.Setenv("PATH", "/usr/bin:/bin")
-	f.claude = &nativeRecordingClaude{Claude: surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, f.home)}
+	f.claude = &nativeRecordingClaude{Claude: claudesurface.NewClaude(signin.Fixed{Browser: signin.Chrome}, f.home)}
 	f.d.Surfaces = []surface.Surface{f.claude}
 }
 
@@ -347,7 +347,7 @@ func (f *humanTurnFixture) withoutCookieBridge(t *testing.T) string {
 	t.Setenv("AGENTHAIL_PYTHON", python)
 	t.Setenv("AGENTHAIL_COOKIE_BRIDGE", "")
 	t.Setenv("PATH", "/usr/bin:/bin")
-	f.claude = &nativeRecordingClaude{Claude: surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, f.home)}
+	f.claude = &nativeRecordingClaude{Claude: claudesurface.NewClaude(signin.Fixed{Browser: signin.Chrome}, f.home)}
 	f.d.Surfaces = []surface.Surface{f.claude}
 	return sent
 }

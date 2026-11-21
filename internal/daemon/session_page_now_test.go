@@ -16,12 +16,12 @@ import (
 
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 )
 
 type slowCatchUpClaude struct {
-	*surfaces.Claude
+	*claudesurface.Claude
 	delay time.Duration
 }
 
@@ -53,7 +53,7 @@ func TestACatchUpThatOutlastsThePageWaitArrivesOverTheStreamInTranscriptOrder(t 
 		t.Fatal(err)
 	}
 	const catchUpDelay = 1500 * time.Millisecond
-	d.Surfaces = []surface.Surface{&slowCatchUpClaude{Claude: surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home), delay: catchUpDelay}}
+	d.Surfaces = []surface.Surface{&slowCatchUpClaude{Claude: claudesurface.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home), delay: catchUpDelay}}
 	handler := dashboardRouter(d)
 	if got := readDashboardExchanges(t, handler, conversation, ""); len(got) != 2 {
 		t.Fatalf("first page exchanges=%+v", got)

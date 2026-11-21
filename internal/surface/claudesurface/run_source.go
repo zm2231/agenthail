@@ -1,0 +1,144 @@
+package claudesurface
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
+)
+
+// ClaudeRunObservation is the provider-owned metadata available in a local
+// Claude Code background job record. Fields absent from that record remain
+// absent; this source does not infer lifecycle state from transcript text.
+type ClaudeRunObservation = surface.ClaudeRunObservation
+type ClaudeSubagentLink = surface.ClaudeSubagentLink
+
+// ClaudeContextWindowObservation is the only context-window claim a Claude
+// provider may make for a session. A zero window is deliberate: it means the
+// provider has no authoritative capacity for that session and callers must
+// render usage as tokens, not a percentage.
+type ClaudeContextWindowObservation struct {
+	Window   int64  `json:"window,omitempty"`
+	Source   string `json:"source"`
+	Model    string `json:"model,omitempty"`
+	Reliable bool   `json:"reliable"`
+}
+
+const (
+	ClaudeContextWindowSourceConfigured = "configured"
+	ClaudeContextWindowSourceRequest    = "request"
+	ClaudeContextWindowSourceTranscript = "transcript"
+	ClaudeContextWindowSourceProvider   = "provider"
+	ClaudeContextWindowSourceUnknown    = "unknown"
+)
+
+// ObserveClaudeConfiguredContextWindow validates an explicit launch value or a
+// transcript's requestedModel. A transcript's message.model must not be passed
+// here: it omits the [1m] selection.
+func ObserveClaudeConfiguredContextWindow(model string) ClaudeContextWindowObservation {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return ClaudeContextWindowObservation{Source: ClaudeContextWindowSourceUnknown}
+	}
+	if strings.Contains(strings.ToLower(model), "[1m]") {
+		return ClaudeContextWindowObservation{Window: 1_000_000, Source: ClaudeContextWindowSourceConfigured, Model: model, Reliable: true}
+	}
+	return ClaudeContextWindowObservation{Source: ClaudeContextWindowSourceUnknown, Model: model}
+}
+
+type claudeRunRecord struct {
+	Template        string `json:"template"`
+	State           string `json:"state"`
+	SessionID       string `json:"sessionId"`
+	ResumeSessionID string `json:"resumeSessionId"`
+	CreatedAt       string `json:"createdAt"`
+	UpdatedAt       string `json:"updatedAt"`
+}
+
+// ObserveClaudeRuns reads the installed Claude Code job-record producer
+// without invoking Claude Code or changing any session. It observes only
+// background records under <home>/.claude/jobs.
+func ObserveClaudeRuns(ctx context.Context, home string) ([]ClaudeRunObservation, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if home == "" {
+		var err error
+		home, err = os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("resolve home: %w", err)
+		}
+	}
+	roots, err := surface.ClaudeConfigRoots(home)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, root := range roots {
+		found, err := filepath.Glob(filepath.Join(root, "jobs", "*", "state.json"))
+		if err != nil {
+			return nil, fmt.Errorf("discover Claude job records: %w", err)
+		}
+		paths = append(paths, found...)
+	}
+	sort.Strings(paths)
+	observations := make([]ClaudeRunObservation, 0, len(paths))
+	for _, path := range paths {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		observation, err := readClaudeRunRecord(path)
+		if err != nil {
+			return nil, err
+		}
+		observations = append(observations, observation)
+	}
+	return observations, nil
+}
+
+func readClaudeRunRecord(path string) (ClaudeRunObservation, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ClaudeRunObservation{}, fmt.Errorf("read Claude job record %s: %w", path, err)
+	}
+	var record claudeRunRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return ClaudeRunObservation{}, fmt.Errorf("parse Claude job record %s: %w", path, err)
+	}
+	createdAt, err := parseClaudeRunTime(record.CreatedAt, "createdAt", path)
+	if err != nil {
+		return ClaudeRunObservation{}, err
+	}
+	updatedAt, err := parseClaudeRunTime(record.UpdatedAt, "updatedAt", path)
+	if err != nil {
+		return ClaudeRunObservation{}, err
+	}
+	jobID := filepath.Base(filepath.Dir(path))
+	return ClaudeRunObservation{
+		RecordPath:      path,
+		JobID:           jobID,
+		SessionID:       record.SessionID,
+		ResumeSessionID: record.ResumeSessionID,
+		RunType:         record.Template,
+		ProviderState:   record.State,
+		CreatedAt:       createdAt,
+		UpdatedAt:       updatedAt,
+	}, nil
+}
+
+func parseClaudeRunTime(value, field, path string) (time.Time, error) {
+	if value == "" {
+		return time.Time{}, nil
+	}
+	at, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse Claude job record %s %s: %w", path, field, err)
+	}
+	return at, nil
+}

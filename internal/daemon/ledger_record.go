@@ -9,7 +9,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 )
 
 type ledgerTarget struct {
@@ -178,7 +178,7 @@ func journalPromptRef(payload sessionJournalPayload) string {
 		}
 		return ledger.DeliveryRef(payload.MessageID)
 	}
-	if payload.Origin != "" || payload.PromptID == "" || !surfaces.IsTypedHumanPrompt(payload.Body) {
+	if payload.Origin != "" || payload.PromptID == "" || !claudesurface.IsTypedHumanPrompt(payload.Body) {
 		return ""
 	}
 	return ledger.PromptRef(payload.PromptID)

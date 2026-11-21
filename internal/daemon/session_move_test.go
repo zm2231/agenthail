@@ -20,8 +20,8 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -43,7 +43,7 @@ func runGit(t *testing.T, dir string, args ...string) string {
 type moveNode struct {
 	*federationNode
 	host   *claudehosttest.Fixture
-	claude *surfaces.Claude
+	claude *claudesurface.Claude
 }
 
 func newMoveNode(t *testing.T) *moveNode {
@@ -56,7 +56,7 @@ func moveNodeOn(t *testing.T, host *claudehosttest.Fixture) *moveNode {
 	t.Helper()
 	allowLoopbackHosts(t)
 	host.Start(t)
-	claude := surfaces.NewClaude(nil, host.Home)
+	claude := claudesurface.NewClaude(nil, host.Home)
 	reg, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)

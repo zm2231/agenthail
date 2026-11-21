@@ -10,7 +10,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 )
 
 const idleCompactionThenAnEmptyLastReply = `{"type":"user","uuid":"u1","promptId":"p1","timestamp":"2026-11-07T05:54:18Z","message":{"role":"user","content":"first"}}
@@ -57,7 +57,7 @@ func TestAnIdleCompactionIsRecordedOnTheNextTurnWhenThatTurnsLastReplyWasEmpty(t
 	if err := r.RecordIdleCompactionRequest(history[queued].QueueID, "c1"); err != nil {
 		t.Fatal(err)
 	}
-	claude := surfaces.NewClaude(nil, home)
+	claude := claudesurface.NewClaude(nil, home)
 	d := newTestDaemon(t, r, []surface.Surface{claude})
 	page, err := d.readProviderHistoryPage(context.Background(), &session, claude, 0, 20)
 	if err != nil {

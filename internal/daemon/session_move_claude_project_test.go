@@ -16,8 +16,8 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 )
 
 func claudeConfigPath(t *testing.T, node *moveNode) string {
@@ -156,7 +156,7 @@ func TestATargetConfigThatCannotTakeTheSettingsRefusesTheMoveBeforeItLeaves(t *t
 }
 
 type stagedClaude struct {
-	*surfaces.Claude
+	*claudesurface.Claude
 	reg      *registry.Registry
 	failures atomic.Int32
 	fail     string
@@ -183,7 +183,7 @@ func stagedMoveNode(t *testing.T, fail string, failures int32) (*moveNode, *stag
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reg.Close() })
-	claude := surfaces.NewClaude(nil, host.Home)
+	claude := claudesurface.NewClaude(nil, host.Home)
 	staged := &stagedClaude{Claude: claude, reg: reg, fail: fail}
 	staged.failures.Store(failures)
 	d := newTestDaemon(t, reg, []surface.Surface{staged})

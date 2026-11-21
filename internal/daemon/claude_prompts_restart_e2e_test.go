@@ -15,8 +15,8 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -226,7 +226,7 @@ func TestATerminalSessionInAnotherConfigRootIsAnsweredQuestionAfterQuestionAcros
 		t.Fatal(err)
 	}
 	asker := newTerminalAsker(t, process, transcript, id)
-	h, stop := runDaemon(t, store, surfaces.NewClaude(nil, process.Home))
+	h, stop := runDaemon(t, store, claudesurface.NewClaude(nil, process.Home))
 	asker.serve(h)
 
 	var answered []string
@@ -250,7 +250,7 @@ func TestATerminalSessionInAnotherConfigRootIsAnsweredQuestionAfterQuestionAcros
 	// The stopping daemon process takes the hook's connection with it.
 	asker.serve(nil)
 	stop()
-	restarted, _ := runDaemon(t, store, surfaces.NewClaude(nil, process.Home))
+	restarted, _ := runDaemon(t, store, claudesurface.NewClaude(nil, process.Home))
 	asker.serve(restarted)
 	after := answerHeld(t, restarted, id, 3, root)
 	if after == before || slices.Contains(answered, after) {

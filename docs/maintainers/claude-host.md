@@ -523,7 +523,7 @@ scripts/fetch-node.sh
 scripts/test-fetch-node.sh
 npm ci --prefix claude-host --omit=optional
 npm test --prefix claude-host
-go test ./internal/claudehost/... ./internal/surface/surfaces/ ./internal/daemon/ -run 'Host|Ensure|Subscribe|Client' -race
+go test ./internal/claudehost/... ./internal/surface/claudesurface/ ./internal/daemon/ -run 'Host|Ensure|Subscribe|Client' -race
 ```
 
 The tests run the real host against a fake Claude CLI

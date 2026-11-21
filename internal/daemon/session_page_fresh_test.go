@@ -8,8 +8,8 @@ import (
 
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
-	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 )
 
 func TestAPageThatWaitsShowsWhatTheTranscriptGainedWhileNothingFollowed(t *testing.T) {
@@ -32,7 +32,7 @@ func TestAPageThatWaitsShowsWhatTheTranscriptGainedWhileNothingFollowed(t *testi
 	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
-	d.Surfaces = []surface.Surface{surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}
+	d.Surfaces = []surface.Surface{claudesurface.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home)}
 	handler := dashboardRouter(d)
 	if got := readDashboardExchanges(t, handler, conversation, ""); len(got) != 2 {
 		t.Fatalf("first page exchanges=%+v", got)
