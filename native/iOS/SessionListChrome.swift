@@ -170,16 +170,20 @@ enum PresentedSheets {
     private static var drafts: Set<UUID> = []
     private static var afterDraftsClose: (@MainActor () -> Void)?
 
+    static var holdsDraft: Bool { !drafts.isEmpty }
+
     // A sheet whose input differs from what it opened with holds a route:
     // moving the conversation underneath would close it, because the
     // conversation that presents it leaves the screen. The route runs once
-    // the last such sheet closes.
+    // the last such sheet closes, and those sheets say one is waiting.
     static func whenNoDraftIsOpen(_ route: @escaping @MainActor () -> Void) {
         guard drafts.isEmpty else {
             afterDraftsClose = route
+            HeldRoute.shared.waiting = true
             return
         }
         afterDraftsClose = nil
+        HeldRoute.shared.waiting = false
         route()
     }
 
@@ -201,8 +205,16 @@ enum PresentedSheets {
         drafts.remove(id)
         guard drafts.isEmpty, let route = afterDraftsClose else { return }
         afterDraftsClose = nil
+        HeldRoute.shared.waiting = false
         route()
     }
+}
+
+@MainActor
+@Observable
+final class HeldRoute {
+    static let shared = HeldRoute()
+    fileprivate(set) var waiting = false
 }
 
 private struct HoldsDraft: ViewModifier {
@@ -211,6 +223,17 @@ private struct HoldsDraft: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .safeAreaInset(edge: .bottom) {
+                if dirty && HeldRoute.shared.waiting {
+                    Label("A notification is waiting. Its conversation opens when you close this.", systemImage: "bell.badge")
+                        .font(.footnote)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(.bar)
+                        .accessibilityIdentifier("held-route")
+                }
+            }
             .onChange(of: dirty, initial: true) { _, dirty in PresentedSheets.set(id, holding: dirty) }
             .onDisappear { PresentedSheets.closed(id) }
     }

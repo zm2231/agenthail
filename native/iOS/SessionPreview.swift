@@ -95,6 +95,13 @@ struct SessionPreview: View {
                     try? await Task.sleep(for: .seconds(seconds))
                     PhoneRoute.shared.open(OpenedNotification(session: session, turn: nil))
                 }
+                .task {
+                    guard ProcessInfo.processInfo.arguments.contains("--preview-route-on-draft"),
+                          let session = IOSAppDelegate.openedSession(["sessionId": "demo", "host": "computer"]) else { return }
+                    while !PresentedSheets.holdsDraft && !Task.isCancelled { try? await Task.sleep(for: .milliseconds(200)) }
+                    try? await Task.sleep(for: .seconds(1))
+                    PhoneRoute.shared.open(OpenedNotification(session: session, turn: nil))
+                }
         } else if ProcessInfo.processInfo.arguments.contains("--preview-new") {
             NewSessionSheet(model: model)
         } else if ProcessInfo.processInfo.arguments.contains("--preview-inspector") {

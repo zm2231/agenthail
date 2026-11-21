@@ -172,7 +172,7 @@ final class SessionNavigationTests: XCTestCase {
 
     func testANotificationDoesNotCloseARenameWithATypedNameAndClosingItShowsTheSession() {
         let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-app", "--preview-route-after", "20"]
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-route-on-draft"]
         app.launch()
         app.buttons["session-computer::demo"].tapWhenReady()
         app.buttons["session-summary"].tapWhenReady()
@@ -184,7 +184,7 @@ final class SessionNavigationTests: XCTestCase {
         field.tap()
         field.typeText("keepme")
         let renaming = app.navigationBars["Name conversation"]
-        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "the notification route fires")], timeout: 22)
+        XCTAssertTrue(app.descendants(matching: .any)["held-route"].waitForExistence(timeout: 10), "the rename sheet says a notification is waiting on it")
         XCTAssertTrue(renaming.exists, "the rename sheet with a typed name stayed open")
         XCTAssertTrue((field.value as? String ?? "").contains("keepme"), "the typed name survived: \(String(describing: field.value))")
         renaming.buttons["Cancel"].tapWhenReady()
