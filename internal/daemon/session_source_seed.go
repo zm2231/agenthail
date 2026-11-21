@@ -192,16 +192,19 @@ func (s *sessionSource) loadSeed() error {
 		s.session.CodexToolWindow = read.CodexToolWindow
 		s.session.ClaudeClosingTurn = read.ClaudeClosingTurn
 		s.session.TranscriptIdentity = read.TranscriptIdentity
-	} else if localTranscript {
+	} else if transcriptBacked {
 		held, err := s.journalHoldsTranscript()
 		if err != nil {
 			return err
 		}
 		if held {
-			return fmt.Errorf("Codex local transcript is unavailable")
+			return fmt.Errorf("the session's local transcript is unavailable")
 		}
 	}
 	s.session.TranscriptFromStart = !read.TranscriptOffsetSet
+	if transcriptBacked && !read.TranscriptOffsetSet && len(read.Items) == 0 {
+		return nil
+	}
 	if localTranscript && read.TranscriptOffsetSet && read.TranscriptIdentity == "" {
 		return fmt.Errorf("Codex local transcript identity is unavailable: %w", surface.ErrTranscriptUnavailable)
 	}
