@@ -513,6 +513,9 @@ func migrateTx(tx *sql.Tx) error {
 	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS message_queue_open ON message_queue(session_id) WHERE status IN ('pending','inflight')`); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS turn_ends_open ON turn_ends(started_at_ms) WHERE completed_turn_id=''`); err != nil {
+		return err
+	}
 	if version == schemaVersion {
 		return nil
 	}

@@ -121,6 +121,11 @@ func TestWatchedSessionsFromTurnEndsMatchTheFullSessionScan(t *testing.T) {
 	if strings.Join(want, ",") != "claude/future/turn,claude/long-ago/work,claude/recent-claude/turn" {
 		t.Fatalf("seed covers %v", want)
 	}
+	for _, step := range queryPlan(t, r, watchedForTurnEnd, cutoff) {
+		if strings.HasPrefix(step, "SCAN te") {
+			t.Fatalf("open turns are found by scanning every turn: %q", step)
+		}
+	}
 }
 
 func watchedRows(t *testing.T, r *Registry, query string, args []any) []string {
