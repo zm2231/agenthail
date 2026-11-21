@@ -81,6 +81,9 @@ func TestALateRowThePersonSentAsksThePersonAboutTheTarget(t *testing.T) {
 	if item, err := r.ClaimNextMessage("target", now); err != nil || item == nil || item.ID != queueID {
 		t.Fatalf("claim=%+v err=%v, want the row claimed again past the bound", item, err)
 	}
+	if err := r.SyncDeliveryAsks(now); err != nil {
+		t.Fatal(err)
+	}
 	ask := onlyDeliveryAsk(t, r)
 	if ask.SessionID != "target" || ask.RoutedTo != AskToPerson || ask.Ref != fmt.Sprintf("queue:%d:late", queueID) {
 		t.Fatalf("ask=%+v, want it on the target and routed to the person", ask)

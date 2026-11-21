@@ -53,9 +53,6 @@ func claimInflightExpired(status string, operation QueueOperation, inflightAt in
 }
 
 func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDelivery string) (*QueuedMessage, error) {
-	if err := r.SyncDeliveryAsks(now); err != nil {
-		return nil, err
-	}
 	filter := claimCandidateFilter(busyDelivery, r.busyMode())
 	var open, inflight, due bool
 	if err := r.read.QueryRow(`SELECT `+queueTargetOpen+`,EXISTS(SELECT 1 FROM message_queue WHERE session_id=?1 AND host_request='' AND status='inflight'),EXISTS(SELECT 1 FROM message_queue WHERE `+filter+`)`, sessionID, now.UnixMilli()).Scan(&open, &inflight, &due); err != nil {
