@@ -2,8 +2,11 @@ package codexsurface
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func (c *Codex) readSessionFromRPC(ctx context.Context, sess *surface.Session, n int, recorded map[string]*surface.TurnMetadata) (*surface.SessionReadResult, error) {
@@ -52,9 +55,16 @@ func latestRPCReply(session *surface.Session, exchanges []surface.Exchange, thre
 // ReadSession uses the local transcript for Desktop content and the managed app-server for
 // managed exchanges; timeline items always come from the local transcript.
 func (c *Codex) ReadSession(ctx context.Context, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
-	page, err := readCodexTranscriptPage(ctx, c.home, c.home.transcriptPath(session), session.ID, request.Before, request.Limit)
+	path, info, err := c.home.statTranscript(session)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	page, err := readCodexTranscriptPage(ctx, c.home, path, session.ID, request.Before, request.Limit)
 	if err != nil {
 		return nil, err
+	}
+	if compressed, ok := info.(compressedRolloutInfo); ok && page.TranscriptIdentity != "" {
+		page.TranscriptIdentity = transcript.FileIdentity(compressed)
 	}
 	local := surface.BoundSessionRead(session, page)
 	if request.Before > 0 {

@@ -73,7 +73,11 @@ func (c *Codex) rolloutUsage(ctx context.Context, path string) *surface.Usage {
 	if cached != nil && identity != "" && cached.identity == identity && cached.size == info.Size() {
 		return cached.usage
 	}
-	lines, _, err := transcript.ReadRecentJSONLLines(ctx, path, 0, codexUsageTailBytes, transcript.MaxRecordBytes)
+	readable, _, err := statReadableRollout(path)
+	if err != nil {
+		return nil
+	}
+	lines, _, err := transcript.ReadRecentJSONLLines(ctx, readable, 0, codexUsageTailBytes, transcript.MaxRecordBytes)
 	if err != nil {
 		return nil
 	}
@@ -170,7 +174,7 @@ func newestCodexRollouts(root string, limit int) []string {
 	for _, day := range days {
 		entries, _ := os.ReadDir(day)
 		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+			if entry.IsDir() || !strings.HasSuffix(strings.TrimSuffix(entry.Name(), ".zst"), ".jsonl") {
 				continue
 			}
 			if info, err := entry.Info(); err == nil {

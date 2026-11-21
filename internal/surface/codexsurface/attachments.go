@@ -9,7 +9,9 @@ import (
 )
 
 func (c *Codex) ReadAttachment(ctx context.Context, s *surface.Session, id string) (*surface.Attachment, []byte, error) {
-	return transcript.ReadAttachment(ctx, s, id, codexTranscript{}, c.home.transcriptPath)
+	readable := *s
+	readable.Transcript = c.home.transcriptPath(s)
+	return transcript.ReadAttachment(ctx, &readable, id, codexTranscript{}, c.home.transcriptPath)
 }
 
 func codexAttachmentReferences(record map[string]any) []transcript.AttachmentReference {

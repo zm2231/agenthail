@@ -8,10 +8,11 @@ import (
 
 func (c *Codex) SessionSettings(ctx context.Context, sess *surface.Session) (surface.RuntimeSettings, error) {
 	var settings surface.RuntimeSettings
-	current, ok := readCodexThreadSettings(ctx, sess.Transcript)
+	rollout := c.home.transcriptPath(sess)
+	current, ok := readCodexThreadSettings(ctx, rollout)
 	if !ok {
 		why := "the thread's rollout has no turn yet"
-		if sess.Transcript == "" {
+		if rollout == "" {
 			why = "the thread has no rollout on this machine"
 		}
 		for _, field := range []string{"model", "effort", "permission", "collaborationMode"} {
@@ -29,7 +30,7 @@ func (c *Codex) SessionSettings(ctx context.Context, sess *surface.Session) (sur
 		settings.Missing("effort", "the rollout names no effort and the model's default is unknown")
 	}
 	permission := surface.PermissionSetting{ApprovalPolicy: current.Approval, Source: surface.SettingFromRollout}
-	if turn, ok := readCodexTurnContext(ctx, sess.Transcript); ok {
+	if turn, ok := readCodexTurnContext(ctx, rollout); ok {
 		permission.Sandbox = turn.Sandbox
 	}
 	if permission.ApprovalPolicy != "" || permission.Sandbox != "" {

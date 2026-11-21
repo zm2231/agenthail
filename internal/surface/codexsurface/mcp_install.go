@@ -136,7 +136,7 @@ func CodexRelayState(ctx context.Context, home CodexHome, executable string) (st
 // HoldsThread compares with symlinks resolved, since Codex may report a
 // rollout under the resolved form of a CODEX_HOME that passes through a link.
 func (h CodexHome) HoldsThread(session surface.Session) bool {
-	path := h.transcriptPath(&session)
+	path := h.rolloutFile(&session)
 	if path == "" {
 		return false
 	}

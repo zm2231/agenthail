@@ -26,7 +26,7 @@ type codexThreadSettings struct {
 var codexModeOptions = []surface.TurnSettingOption{{ID: "default", Label: "Default"}, {ID: "plan", Label: "Plan"}}
 
 func (c *Codex) TurnSettings(ctx context.Context, sess *surface.Session) ([]surface.TurnSetting, error) {
-	current, _ := readCodexThreadSettings(ctx, sess.Transcript)
+	current, _ := readCodexThreadSettings(ctx, c.home.transcriptPath(sess))
 	if current.Model == "" {
 		model, err := c.Model(ctx, sess, "")
 		if err != nil {

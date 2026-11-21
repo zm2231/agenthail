@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/filewake"
@@ -13,13 +12,13 @@ import (
 )
 
 func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
-	path := c.home.transcriptPath(session)
-	if path == "" {
+	source := c.home.rolloutFile(session)
+	if source == "" {
 		return fmt.Errorf("Codex local transcript is unavailable")
 	}
-	fileInfo, err := os.Stat(path)
+	path, fileInfo, err := statReadableRollout(source)
 	if err != nil {
-		return fmt.Errorf("Codex local transcript is unavailable: %w", surface.ErrTranscriptUnavailable)
+		return fmt.Errorf("Codex local transcript is unavailable: %v: %w", err, surface.ErrTranscriptUnavailable)
 	}
 	identity := transcript.FileIdentity(fileInfo)
 	if identity == "" {
@@ -45,16 +44,27 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 	if err != nil {
 		return err
 	}
-	wake := filewake.Follow(path)
-	defer wake.Release()
+	wake := filewake.Follow(source)
+	defer func() { wake.Release() }()
 	deadline := time.Now().Add(timeout)
 	currentTurnID := session.CodexCurrentTurnID
 	for first := true; first || time.Now().Before(deadline); first = false {
-		currentInfo, statErr := os.Stat(path)
+		currentSource := c.home.rolloutFile(session)
+		currentPath, currentInfo, statErr := statReadableRollout(currentSource)
 		if statErr != nil || currentInfo == nil {
 			return fmt.Errorf("Codex transcript changed during stream: %w", surface.ErrTranscriptUnavailable)
 		}
-		if currentIdentity := transcript.FileIdentity(currentInfo); currentIdentity != identity || currentInfo.Size() < offset {
+		currentIdentity := transcript.FileIdentity(currentInfo)
+		if currentSource == source+".zst" {
+			identity = currentIdentity
+			session.TranscriptIdentity = identity
+		}
+		if currentSource != source {
+			wake.Release()
+			wake = filewake.Follow(currentSource)
+		}
+		source, path = currentSource, currentPath
+		if currentIdentity != identity || currentInfo.Size() < offset {
 			identity, offset = currentIdentity, 0
 			session.TranscriptIdentity, session.TranscriptOffset = identity, 0
 			currentTurnID = ""
