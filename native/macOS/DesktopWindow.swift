@@ -973,6 +973,7 @@ struct TranscriptView: View {
                 rescaling = false
             }
         }
+        .onChange(of: blocks.first?.id, initial: true) { rowTops.first = blocks.first?.id }
         .transcriptFollow(session.id, leadingRow: pane.timelineItems.first?.id, hasRow: { id in pane.timelineItems.contains { $0.id == id } }, held: { selectionHold.held(over: [.infinite]) }, rows: rowTops, position: $position, following: $following, rescaling: rescaling)
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
             geometry.contentSize.height - geometry.containerSize.height * 1.5

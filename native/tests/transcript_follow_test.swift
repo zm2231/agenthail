@@ -17,6 +17,7 @@ final class Feed: ObservableObject {
     @Published var rows: [Row] = []
     @Published var inset: CGFloat = 100
     @Published var header: CGFloat = 44
+    var merged: Set<String> = []
     @Published var usesTail = false
     var following = true
     let hold = TranscriptSelectionHold()
@@ -85,7 +86,8 @@ struct Transcript: View {
             guard feed.usesTail else { return }
             layout.tail.update(ids, in: feed.transcript, rows: layout.rows, visible: layout.visible, following: following) { feed.hold.held(over: $0, buttons: 0) }
         }
-        .transcriptFollow(feed.transcript, leadingRow: feed.rows.first?.id, hasRow: { id in feed.rows.contains { $0.id == id } }, rows: readerTops, position: $position, following: $following)
+        .onChange(of: feed.rows.first?.id, initial: true) { readerTops.first = feed.rows.first?.id }
+        .transcriptFollow(feed.transcript, leadingRow: feed.rows.first?.id, hasRow: { id in feed.merged.contains(id) || feed.rows.contains { $0.id == id } }, rows: readerTops, position: $position, following: $following)
         .safeAreaInset(edge: .top, spacing: 0) { Color.gray.frame(height: feed.header) }
         .safeAreaInset(edge: .bottom, spacing: 0) { Color.gray.frame(height: feed.inset) }
         .onChange(of: following) {
@@ -449,6 +451,21 @@ struct TranscriptFollowTest {
             expect(abs(screenY(placeRow, scroll) - placeY) < 2, "the reader's row stays in place once an older page of \(older)-line rows settles, from \(start) \(placeRow) at \(placeY) moved to \(screenY(placeRow, scroll))")
             expect(!feed.following, "holding the reader's row does not start following")
         }
+
+        feed.transcript = "Zr"
+        feed.rows = rows("Zr", 100)
+        spin(0.6)
+        move(scroll, to: 0)
+        spin(0.3)
+        let keptY = screenY("Zr1", scroll)
+        readerTops.holdOlderPlace()
+        let first = feed.rows[0]
+        feed.merged = [first.id]
+        feed.rows = rows("Zro", 20) + [Row(id: "Zr0merged", lines: first.lines + 3)] + feed.rows.dropFirst()
+        expectEventually(abs(screenY("Zr1", scroll) - keptY) < 2, "an older page that merges into the first row keeps the reader in place, Zr1 at \(keptY) moved to \(screenY("Zr1", scroll))")
+        spin(0.3)
+        expect(abs(screenY("Zr1", scroll) - keptY) < 2, "the reader stays in place once a page that merged into the first row settles, Zr1 at \(keptY) moved to \(screenY("Zr1", scroll))")
+        feed.merged = []
 
         feed.transcript = "Zs"
         feed.rows = rows("Zs", 5)
