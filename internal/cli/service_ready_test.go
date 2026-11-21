@@ -14,7 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonctl"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -103,7 +104,7 @@ func TestALiveDaemonThatNeverStartsFailsAtTheStartBound(t *testing.T) {
 	scratchDaemonHome(t)
 	shortenDaemonBounds(t, 400*time.Millisecond, 30*time.Second)
 	_, err := daemonStart{goneBound: daemonGoneBound, process: func() int { return 101 }}.wait()
-	if err == nil || !strings.Contains(err.Error(), "did not become ready") || !strings.Contains(err.Error(), daemon.LogFilePath()) {
+	if err == nil || !strings.Contains(err.Error(), "did not become ready") || !strings.Contains(err.Error(), daemonctl.LogFilePath()) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -128,13 +129,13 @@ func TestReadinessWaitsForAnEnabledDashboardToAnswer(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	config, err := daemon.LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	config.Enabled = true
 	config.Listen = server.Listener.Addr().(*net.TCPAddr).String()
-	if err := daemon.SaveDashboardConfig(config); err != nil {
+	if err := dashconfig.Save(config); err != nil {
 		t.Fatal(err)
 	}
 	want := startFakeDaemon(t)
@@ -162,7 +163,7 @@ func TestLaunchdInstallWaitsPastTheGoneBoundForAStartThatIsMigrating(t *testing.
 	if err != nil {
 		t.Fatalf("install: %v\n%s", err, out)
 	}
-	pid, running := daemon.IsRunning()
+	pid, running := daemonctl.IsRunning()
 	if !running || !strings.Contains(out, "(pid "+strconv.Itoa(pid)+")") {
 		t.Fatalf("install reported %q; daemon %d, %v", out, pid, running)
 	}

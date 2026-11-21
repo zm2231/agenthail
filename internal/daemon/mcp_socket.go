@@ -10,11 +10,11 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"slices"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/peerproc"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -26,11 +26,6 @@ var (
 	mcpSocketSessionWait = 5 * time.Second
 	mcpSocketShutdown    = 5 * time.Second
 )
-
-func MCPSocketPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".agenthail", "mcp.sock")
-}
 
 type mcpPeerKey struct{}
 
@@ -61,7 +56,7 @@ func mcpNoCallerRefusal(ctx context.Context) *mcpRefusal {
 }
 
 func (d *Daemon) startMCPSocket() (func(), error) {
-	path := MCPSocketPath()
+	path := daemonctl.MCPSocketPath()
 	listener, err := listenUserSocket(path)
 	if err != nil {
 		return nil, err

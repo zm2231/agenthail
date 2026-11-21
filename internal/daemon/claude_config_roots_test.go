@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 )
@@ -68,11 +69,11 @@ func TestClaudeConfigRootsReachSessionOptionsCreationAndTheSessionRow(t *testing
 	}
 
 	transcript := filepath.Join(second, "projects", "-work", receipt.Session.ID+".jsonl")
-	row := d.catalogSessionProjection(d.Surfaces[0], surface.Session{ID: receipt.Session.ID, Surface: surface.KindClaude, Transcript: transcript}, catalogIdentity{}, receipt.Session.LastActive, "", 0, nil, false, false, DashboardConfig{})
+	row := d.catalogSessionProjection(d.Surfaces[0], surface.Session{ID: receipt.Session.ID, Surface: surface.KindClaude, Transcript: transcript}, catalogIdentity{}, receipt.Session.LastActive, "", 0, nil, false, false, dashconfig.Config{})
 	if row.ClaudeConfigRoot == nil || row.ClaudeConfigRoot.Name != "work" || row.ClaudeConfigRoot.SignedInAs != "work@example.com" || row.ClaudeConfigRoot.Root != second {
 		t.Fatalf("row config root=%+v", row.ClaudeConfigRoot)
 	}
-	codex := d.catalogSessionProjection(d.Surfaces[0], surface.Session{ID: "c", Surface: surface.KindCodex, Transcript: transcript}, catalogIdentity{}, receipt.Session.LastActive, "", 0, nil, false, false, DashboardConfig{})
+	codex := d.catalogSessionProjection(d.Surfaces[0], surface.Session{ID: "c", Surface: surface.KindCodex, Transcript: transcript}, catalogIdentity{}, receipt.Session.LastActive, "", 0, nil, false, false, dashconfig.Config{})
 	if codex.ClaudeConfigRoot != nil {
 		t.Fatalf("a Codex row carries a Claude config root: %+v", codex.ClaudeConfigRoot)
 	}

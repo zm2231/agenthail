@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -762,10 +763,10 @@ func TestCatalogStreamShowsDevicesTheSessionListAndHostsEveryRow(t *testing.T) {
 	if ids := snapshotIDs(hostToken); !ids[resting.ID] || !ids[buried.ID] || !ids[working.ID] {
 		t.Fatalf("host snapshot=%v, want every row", ids)
 	}
-	if err := os.MkdirAll(filepath.Dir(DashboardConfigPath()), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dashconfig.Path()), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(DashboardConfigPath(), []byte(`{`), 0600); err != nil {
+	if err := os.WriteFile(dashconfig.Path(), []byte(`{`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	request, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/snapshot?fresh=1", nil)
@@ -781,7 +782,7 @@ func TestCatalogStreamShowsDevicesTheSessionListAndHostsEveryRow(t *testing.T) {
 	if response.StatusCode == http.StatusOK {
 		t.Fatal("host snapshot served the cached session list when the refresh failed; a host must see every row or an error")
 	}
-	if err := os.Remove(DashboardConfigPath()); err != nil {
+	if err := os.Remove(dashconfig.Path()); err != nil {
 		t.Fatal(err)
 	}
 

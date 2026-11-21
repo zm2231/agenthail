@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/apitime"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -84,12 +85,12 @@ func TestTheBaseSnapshotCarriesNoSessionStateAndItsTagIgnoresSessionActivity(t *
 	}
 	tag = led.Header().Get("ETag")
 
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	config.BusyDelivery = deliverypolicy.Steer
-	if err := SaveDashboardConfig(config); err != nil {
+	if err := dashconfig.Save(config); err != nil {
 		t.Fatal(err)
 	}
 	d.publishEvent("settings.updated", "", nil)

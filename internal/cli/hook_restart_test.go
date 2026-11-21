@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -53,7 +53,7 @@ func newPromptRestart(t *testing.T) (*promptRestart, func()) {
 	}
 	h := &promptRestart{t: t, claude: claude, store: store, listen: listener.Addr().String(), decided: make(chan *claudesurface.ClaudePromptDecision, 1)}
 	listener.Close()
-	if err := daemon.SaveDashboardConfig(daemon.DashboardConfig{Enabled: true, Listen: h.listen}); err != nil {
+	if err := dashconfig.Save(dashconfig.Config{Enabled: true, Listen: h.listen}); err != nil {
 		t.Fatal(err)
 	}
 	stop := h.serve()

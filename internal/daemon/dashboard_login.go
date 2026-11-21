@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -24,11 +25,11 @@ type loginLink struct {
 }
 
 func (d *Daemon) createLoginLink(remote bool) (loginLink, error) {
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		return loginLink{}, err
 	}
-	base, name, lifetime := DashboardBaseURL(config), "Browser on this computer", localLoginLinkLifetime
+	base, name, lifetime := dashconfig.BaseURL(config), "Browser on this computer", localLoginLinkLifetime
 	if remote {
 		status := RemoteAccessStatusForConfig(config)
 		if !status.Enabled || status.URL == "" {

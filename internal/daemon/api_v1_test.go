@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/buildinfo"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 )
@@ -36,14 +37,14 @@ func pairingRemoteAccess(t *testing.T) {
 	script := `#!/bin/sh
 case "$*" in
   "status --json") printf '%s\n' '{"BackendState":"Running","Self":{"DNSName":"agenthail.example.ts.net.","Online":true}}' ;;
-  "serve status --json") printf '%s\n' '{"AllowFunnel":{},"Web":{"agenthail.example.ts.net:7412":{"Handlers":{"/":{"Proxy":"http://` + DefaultDashboardListen + `"}}}}}' ;;
+  "serve status --json") printf '%s\n' '{"AllowFunnel":{},"Web":{"agenthail.example.ts.net:7412":{"Handlers":{"/":{"Proxy":"http://` + dashconfig.DefaultListen + `"}}}}}' ;;
   "serve status") printf '%s\n' 'https://agenthail.example.ts.net:7412 (tailnet only)' ;;
 esac
 `
 	if err := os.WriteFile(tailscale, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := SaveDashboardConfig(DashboardConfig{Enabled: true, Listen: DefaultDashboardListen, RemoteAccess: RemoteAccessConfig{Enabled: true, Provider: "tailscale", Port: 7412, TailscalePath: tailscale}}); err != nil {
+	if err := dashconfig.Save(dashconfig.Config{Enabled: true, Listen: dashconfig.DefaultListen, RemoteAccess: dashconfig.RemoteAccess{Enabled: true, Provider: "tailscale", Port: 7412, TailscalePath: tailscale}}); err != nil {
 		t.Fatal(err)
 	}
 }

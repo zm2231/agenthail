@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 )
 
 func serveFakeDebugSocket(t *testing.T, handler http.HandlerFunc) {
@@ -21,10 +22,10 @@ func serveFakeDebugSocket(t *testing.T, handler http.HandlerFunc) {
 	}
 	t.Cleanup(func() { os.RemoveAll(home) })
 	t.Setenv("HOME", home)
-	if err := os.MkdirAll(filepath.Dir(daemon.DebugSocketPath()), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(daemonctl.DebugSocketPath()), 0700); err != nil {
 		t.Fatal(err)
 	}
-	listener, err := net.Listen("unix", daemon.DebugSocketPath())
+	listener, err := net.Listen("unix", daemonctl.DebugSocketPath())
 	if err != nil {
 		t.Fatal(err)
 	}

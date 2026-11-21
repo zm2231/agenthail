@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -145,7 +145,7 @@ func TestLaunchdInstallLetsRunAtLoadStartTheDaemon(t *testing.T) {
 	if fake.kickstarted() {
 		t.Fatal("install kickstarted the service it had just bootstrapped")
 	}
-	pid, running := daemon.IsRunning()
+	pid, running := daemonctl.IsRunning()
 	if !running || !strings.Contains(out, "(pid "+strconv.Itoa(pid)+")") {
 		t.Fatalf("install reported %q; running daemon %d, %v", out, pid, running)
 	}
@@ -156,10 +156,10 @@ func TestLaunchdInstallFailsWhenLaunchdDoesNotRunTheDaemon(t *testing.T) {
 	fake.write("orphan", "")
 	shortenDaemonBounds(t, 500*time.Millisecond, 15*time.Second)
 	out, err := captureStdout(t, launchdService{}.Install)
-	if err == nil || !strings.Contains(err.Error(), daemon.LogFilePath()) {
+	if err == nil || !strings.Contains(err.Error(), daemonctl.LogFilePath()) {
 		t.Fatalf("install of a daemon launchd does not run = %v\n%s", err, out)
 	}
-	if _, running := daemon.IsRunning(); !running {
+	if _, running := daemonctl.IsRunning(); !running {
 		t.Fatal("the unsupervised daemon should be running for this case")
 	}
 }
@@ -173,7 +173,7 @@ func TestLaunchdRestartWaitsForTheDaemonLaunchdStarts(t *testing.T) {
 			if err != nil {
 				t.Fatalf("restart: %v\n%s", err, out)
 			}
-			pid, running := daemon.IsRunning()
+			pid, running := daemonctl.IsRunning()
 			service, loaded := launchdServiceJob(label)
 			if !running || pid == before || !loaded || service.pid != pid || !strings.Contains(out, "(pid "+strconv.Itoa(pid)+")") {
 				t.Fatalf("restart reported %q; daemon %d (was %d), launchd pid %d", out, pid, before, service.pid)
@@ -201,7 +201,7 @@ func TestLaunchdServiceOfAnotherHomeIsLeftAlone(t *testing.T) {
 				t.Fatal("the other HOME's service counts as this HOME's")
 			}
 			out, err := captureStdout(t, launchdService{}.Restart)
-			pid, running := daemon.IsRunning()
+			pid, running := daemonctl.IsRunning()
 			if running {
 				fake.write("pids", strconv.Itoa(pid)+"\n")
 			}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -63,7 +64,7 @@ func (d *Daemon) sessionViewBuildFor(ctx context.Context, request sessionViewReq
 	shared := d.presentation.fingerprints
 	d.presentation.fingerprints = presentationFingerprints{}
 	defer func() { d.presentation.fingerprints = shared }()
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		return nil, err
 	}

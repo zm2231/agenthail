@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/pprof/profile"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 )
 
 func debugSocketHome(t *testing.T) string {
@@ -30,7 +31,7 @@ func debugSocketHome(t *testing.T) string {
 func debugClient() *http.Client {
 	return &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		var dialer net.Dialer
-		return dialer.DialContext(ctx, "unix", DebugSocketPath())
+		return dialer.DialContext(ctx, "unix", daemonctl.DebugSocketPath())
 	}}}
 }
 
@@ -39,7 +40,7 @@ func TestTheDebugSocketServesEachRuntimeProfileToItsOwnerOnly(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".agenthail"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	stale, err := net.Listen("unix", DebugSocketPath())
+	stale, err := net.Listen("unix", daemonctl.DebugSocketPath())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +51,7 @@ func TestTheDebugSocketServesEachRuntimeProfileToItsOwnerOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a socket left by a stopped daemon blocked startup: %v", err)
 	}
-	info, err := os.Stat(DebugSocketPath())
+	info, err := os.Stat(daemonctl.DebugSocketPath())
 	if err != nil || info.Mode().Perm() != 0600 {
 		t.Fatalf("socket mode=%v err=%v", info.Mode().Perm(), err)
 	}
@@ -87,7 +88,7 @@ func TestTheDebugSocketServesEachRuntimeProfileToItsOwnerOnly(t *testing.T) {
 		t.Fatalf("an unlisted profile was served: %v %v", response, err)
 	}
 	stop()
-	if _, err := os.Lstat(DebugSocketPath()); !os.IsNotExist(err) {
+	if _, err := os.Lstat(daemonctl.DebugSocketPath()); !os.IsNotExist(err) {
 		t.Fatalf("socket left behind after stop: %v", err)
 	}
 }
@@ -97,14 +98,14 @@ func TestTheDebugSocketLeavesAFileAtItsPathAlone(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".agenthail"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(DebugSocketPath(), []byte("keep"), 0600); err != nil {
+	if err := os.WriteFile(daemonctl.DebugSocketPath(), []byte("keep"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	d := &Daemon{log: log.New(io.Discard, "", 0)}
 	if _, err := d.startDebugSocket(); err == nil {
 		t.Fatal("started over a regular file")
 	}
-	if data, _ := os.ReadFile(DebugSocketPath()); string(data) != "keep" {
+	if data, _ := os.ReadFile(daemonctl.DebugSocketPath()); string(data) != "keep" {
 		t.Fatalf("the file was replaced: %q", data)
 	}
 }

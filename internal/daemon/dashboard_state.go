@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -22,7 +23,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if d.events != nil {
 		eventCursor = d.events.cursor()
 	}
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("load dashboard config: %w", err)
 	}

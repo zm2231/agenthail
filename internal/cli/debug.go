@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 )
 
 const debugUsage = "usage: agenthail debug heap <dir> | agenthail debug cpu <dir> [seconds]"
@@ -42,7 +43,7 @@ func (a *App) cmdDebug(args []string) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
-	socket := daemon.DebugSocketPath()
+	socket := daemonctl.DebugSocketPath()
 	client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		var dialer net.Dialer
 		return dialer.DialContext(ctx, "unix", socket)

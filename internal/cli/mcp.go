@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudemcp"
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/mcpstdio"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/codexsurface"
@@ -24,7 +24,7 @@ func (a *App) cmdMCP(args []string) error {
 	}
 	switch args[0] {
 	case "stdio":
-		return mcpstdio.Run(context.Background(), daemon.MCPSocketPath(), a.Version, os.Stdin, os.Stdout)
+		return mcpstdio.Run(context.Background(), daemonctl.MCPSocketPath(), a.Version, os.Stdin, os.Stdout)
 	case "install", "uninstall", "status":
 		return errors.Join(claudeMCPAt(args[0]), codexMCPAt(args[0]))
 	}

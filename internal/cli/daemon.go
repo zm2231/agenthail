@@ -15,6 +15,8 @@ import (
 	"github.com/zm2231/agenthail/internal/browserhost"
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonctl"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/nodehost"
 	"github.com/zm2231/agenthail/internal/poll"
 	"github.com/zm2231/agenthail/internal/simhost"
@@ -37,7 +39,7 @@ func (a *App) daemonRestart() error {
 }
 
 func (a *App) daemonStatus() error {
-	pid, ok := daemon.IsRunning()
+	pid, ok := daemonctl.IsRunning()
 	if !ok {
 		for _, line := range a.service().StatusLines() {
 			fmt.Println(line)
@@ -63,14 +65,14 @@ func daemonStatusLogPath() string {
 	if err == nil {
 		return daemonLogPathForExecutable(executable)
 	}
-	return daemon.LogFilePath()
+	return daemonctl.LogFilePath()
 }
 
 func daemonLogPathForExecutable(executable string) string {
 	if marker := strings.Index(executable, "/Cellar/agenthail/"); marker > 0 {
 		return filepath.Join(executable[:marker], "var", "log", "agenthail.log")
 	}
-	return daemon.LogFilePath()
+	return daemonctl.LogFilePath()
 }
 
 func (a *App) daemonRun() error {
@@ -78,7 +80,7 @@ func (a *App) daemonRun() error {
 		_ = e
 	}
 	// Opening can migrate, so a daemon that may not run must find that out first.
-	release, err := daemon.HoldDaemonLock()
+	release, err := daemonctl.HoldLock()
 	if err != nil {
 		return err
 	}
@@ -115,14 +117,14 @@ func (a *App) cmdDashboard(args []string) error {
 	if len(positional) > 0 {
 		action = positional[0]
 	}
-	config, err := daemon.LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		return err
 	}
 	switch action {
 	case "enable":
 		config.Enabled = true
-		if err := daemon.SaveDashboardConfig(config); err != nil {
+		if err := dashconfig.Save(config); err != nil {
 			return err
 		}
 		if err := a.restartDaemonForDashboard(); err != nil {
@@ -138,10 +140,10 @@ func (a *App) cmdDashboard(args []string) error {
 		return a.openDashboard()
 	case "disable":
 		config.Enabled = false
-		if err := daemon.SaveDashboardConfig(config); err != nil {
+		if err := dashconfig.Save(config); err != nil {
 			return err
 		}
-		if _, running := daemon.IsRunning(); running {
+		if _, running := daemonctl.IsRunning(); running {
 			if err := a.restartDaemonForDashboard(); err != nil {
 				return err
 			}
@@ -155,10 +157,10 @@ func (a *App) cmdDashboard(args []string) error {
 		}
 		fmt.Printf("dashboard: enabled on %s\n", config.Listen)
 		fmt.Printf("Codex current window: %dh\n", config.CodexRecentHours)
-		if _, running := daemon.IsRunning(); !running {
+		if _, running := daemonctl.IsRunning(); !running {
 			fmt.Println("daemon: not running (start it with 'agenthail daemon start')")
 		} else {
-			fmt.Printf("address: %s (sign in with 'agenthail dashboard')\n", daemon.DashboardBaseURL(config))
+			fmt.Printf("address: %s (sign in with 'agenthail dashboard')\n", dashconfig.BaseURL(config))
 		}
 		return nil
 	case "config":
@@ -175,7 +177,7 @@ func (a *App) cmdDashboard(args []string) error {
 			return fmt.Errorf("Codex recent hours must be at least 1")
 		}
 		config.CodexRecentHours = hours
-		if err := daemon.SaveDashboardConfig(config); err != nil {
+		if err := dashconfig.Save(config); err != nil {
 			return err
 		}
 		fmt.Printf("Codex current window: %dh\n", config.CodexRecentHours)
@@ -188,7 +190,7 @@ func (a *App) cmdDashboard(args []string) error {
 		if !config.Enabled {
 			return fmt.Errorf("dashboard is disabled; run 'agenthail dashboard enable'")
 		}
-		if _, running := daemon.IsRunning(); !running {
+		if _, running := daemonctl.IsRunning(); !running {
 			return fmt.Errorf("daemon is not running; start it with 'agenthail daemon start'")
 		}
 		return a.openDashboard()

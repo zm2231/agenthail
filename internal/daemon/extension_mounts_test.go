@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/extension"
 	"github.com/zm2231/agenthail/internal/nodehost"
 	"github.com/zm2231/agenthail/internal/proxyacct"
@@ -460,12 +461,12 @@ func TestRemoteAccessOffWithNoDaemonRunningWithdrawsTheMountsItPublished(t *test
 	previous := remoteTailscale
 	remoteTailscale = func(string) (tailscale.Runner, string, error) { return fake.run, "/fake/tailscale", nil }
 	t.Cleanup(func() { remoteTailscale = previous })
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	config.RemoteAccess.Enabled = true
-	if err := SaveDashboardConfig(config); err != nil {
+	if err := dashconfig.Save(config); err != nil {
 		t.Fatal(err)
 	}
 	f.declare(t, upstream.URL)

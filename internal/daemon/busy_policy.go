@@ -1,6 +1,9 @@
 package daemon
 
-import "github.com/zm2231/agenthail/internal/deliverypolicy"
+import (
+	"github.com/zm2231/agenthail/internal/dashconfig"
+	"github.com/zm2231/agenthail/internal/deliverypolicy"
+)
 
 // The policy is read on every claim, so a problem is logged when it changes rather than each time.
 func (d *Daemon) busyPolicy() deliverypolicy.Mode {
@@ -13,7 +16,7 @@ func (d *Daemon) busyPolicy() deliverypolicy.Mode {
 		if problem == "" {
 			d.log.Printf("busy delivery setting readable again; using %s", mode)
 		} else {
-			d.log.Printf("busy delivery setting unreadable in %s; delivering as %s until it is fixed: %s", DashboardConfigPath(), mode, problem)
+			d.log.Printf("busy delivery setting unreadable in %s; delivering as %s until it is fixed: %s", dashconfig.Path(), mode, problem)
 		}
 	}
 	return mode

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -35,7 +36,7 @@ func TestTheDashboardAnswersNothingBeforeItsSurfacesHaveTheirCredentials(t *test
 	}
 	listen := listener.Addr().String()
 	listener.Close()
-	if err := SaveDashboardConfig(DashboardConfig{Enabled: true, Listen: listen}); err != nil {
+	if err := dashconfig.Save(dashconfig.Config{Enabled: true, Listen: listen}); err != nil {
 		t.Fatal(err)
 	}
 	held := &heldCredentials{daemonSurface: &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}}, entered: make(chan struct{}), release: make(chan struct{})}

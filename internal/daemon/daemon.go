@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -16,6 +14,7 @@ import (
 	"github.com/zm2231/agenthail/internal/browserhost"
 	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/claudehost"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/github"
 	"github.com/zm2231/agenthail/internal/ledger"
@@ -532,11 +531,11 @@ func (d *Daemon) RunWithSignal() error {
 	defer stop()
 	d.log.Printf("daemon pid %d", os.Getpid())
 	d.logRegistryStartup()
-	if err := os.WriteFile(PidFilePath(), []byte(fmt.Sprintf("%d", os.Getpid())), 0600); err != nil {
+	if err := os.WriteFile(daemonctl.PidFilePath(), []byte(fmt.Sprintf("%d", os.Getpid())), 0600); err != nil {
 		return fmt.Errorf("write pidfile: %w", err)
 	}
 	defer func() {
-		if removeErr := removePIDFileIfOwned(os.Getpid()); removeErr != nil {
+		if removeErr := daemonctl.RemovePIDFileIfOwned(os.Getpid()); removeErr != nil {
 			d.log.Printf("warn: remove pidfile: %s", removeErr)
 		}
 	}()
@@ -581,44 +580,4 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
-}
-
-func PidFilePath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".agenthail", "daemon.pid")
-}
-
-func LogFilePath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".agenthail", "daemon.log")
-}
-
-func IsRunning() (int, bool) {
-	data, err := os.ReadFile(PidFilePath())
-	if err != nil {
-		return 0, false
-	}
-	var pid int
-	fmt.Sscanf(string(data), "%d", &pid)
-	if pid <= 0 {
-		return 0, false
-	}
-	if err := exec.Command("kill", "-0", fmt.Sprintf("%d", pid)).Run(); err != nil || !processIsDaemon(pid) {
-		return 0, false
-	}
-	return pid, true
-}
-
-func Stop() error {
-	pid, ok := IsRunning()
-	if !ok {
-		return fmt.Errorf("daemon not running")
-	}
-	if err := exec.Command("kill", "-TERM", fmt.Sprintf("%d", pid)).Run(); err != nil {
-		return err
-	}
-	if !waitForStopped(pid, 5*time.Second) {
-		return fmt.Errorf("daemon pid %d did not stop within 5s", pid)
-	}
-	return nil
 }

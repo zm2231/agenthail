@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/proxyacct"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -17,7 +18,7 @@ const limitMoveLead = 15 * time.Minute
 
 // moveAfterLimitEnabled reads the host's setting; it is on unless turned off.
 func (d *Daemon) moveAfterLimitEnabled() bool {
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		d.log.Printf("read move after limit setting: %s", err)
 		return true

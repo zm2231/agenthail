@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/claudepick"
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -88,11 +88,11 @@ func TestDoctorReportsAnUnreadableSettingsFile(t *testing.T) {
 	if _, problem := report(); problem != "" {
 		t.Fatalf("no settings file is not a problem: %s", problem)
 	}
-	if err := os.WriteFile(daemon.DashboardConfigPath(), []byte(`{not json`), 0600); err != nil {
+	if err := os.WriteFile(dashconfig.Path(), []byte(`{not json`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	ok, problem := report()
-	if ok || !strings.Contains(problem, daemon.DashboardConfigPath()) || !strings.Contains(problem, "parse dashboard config") {
+	if ok || !strings.Contains(problem, dashconfig.Path()) || !strings.Contains(problem, "parse dashboard config") {
 		t.Fatalf("doctor names the file and the parse error: ok=%v problem=%q", ok, problem)
 	}
 }

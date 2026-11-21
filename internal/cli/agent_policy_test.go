@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 )
 
 func TestOnlyThePersonChangesTheAgentPolicyAndAnAgentCanReadIt(t *testing.T) {
@@ -22,8 +22,8 @@ func TestOnlyThePersonChangesTheAgentPolicyAndAnAgentCanReadIt(t *testing.T) {
 	if _, err := captureStdout(t, func() error { return f.app.Run([]string{"agent-policy", "set", "project-remove", "allow"}) }); err != nil {
 		t.Fatal(err)
 	}
-	config, err := daemon.LoadDashboardConfig()
-	if err != nil || config.Agents.Decision("project-remove") != daemon.AgentAllow {
+	config, err := dashconfig.Load()
+	if err != nil || config.Agents.Decision("project-remove") != dashconfig.AgentAllow {
 		t.Fatalf("the person's choice was stored as %+v (%v)", config.Agents, err)
 	}
 	t.Setenv("AGENTHAIL_SESSION_ID", "widget-lead")

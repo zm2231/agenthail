@@ -15,6 +15,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/buildinfo"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sse"
@@ -328,7 +329,7 @@ func (d *Daemon) apiPairingsHandler(w http.ResponseWriter, r *http.Request) {
 	pairingURL := "agenthail://pair?" + values.Encode()
 	response := map[string]any{"id": pairing.ID, "expiresAt": pairing.ExpiresAt, "pairingURL": pairingURL, "endpoint": endpoint, "secret": pairing.Secret, "scopes": pairing.Scopes}
 	if request.QR {
-		image, err := RemoteAccessQR(pairingURL)
+		image, err := dashconfig.RemoteAccessQR(pairingURL)
 		if err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "pairing_qr_failed", err.Error())
 			return
@@ -625,7 +626,7 @@ func requestEndpoint(r *http.Request) string {
 }
 
 func pairingEndpoint(r *http.Request) (string, error) {
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		return "", err
 	}

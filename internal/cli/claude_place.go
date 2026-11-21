@@ -7,7 +7,7 @@ import (
 	"slices"
 
 	"github.com/zm2231/agenthail/internal/claudepick"
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -23,7 +23,7 @@ func (a *App) placeClaudeSession(creator string) (claudepick.Pick, error) {
 		return claudepick.Pick{}, err
 	}
 	return claudepick.Place(roots, claudepick.Origin{CreatorTranscript: a.claudeTranscript(creator)}, func() (string, error) {
-		config, err := daemon.LoadDashboardConfig()
+		config, err := dashconfig.Load()
 		if err != nil {
 			return "", err
 		}
@@ -44,7 +44,7 @@ func (a *App) claudeTranscript(id string) string {
 
 func (a *App) cmdRootsDefault(args []string) error {
 	positional := stripFlags(args)[1:]
-	config, err := daemon.LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		return err
 	}
@@ -74,7 +74,7 @@ func (a *App) cmdRootsDefault(args []string) error {
 	default:
 		return errors.New(rootsDefaultUsage)
 	}
-	if err := daemon.SaveDashboardConfig(config); err != nil {
+	if err := dashconfig.Save(config); err != nil {
 		return err
 	}
 	fmt.Println("saved; new Claude sessions on this host follow it")

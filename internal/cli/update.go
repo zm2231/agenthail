@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -83,7 +83,7 @@ func defaultUpdateDeps() *updateDeps {
 		copyTree:        defaultCopyTree,
 		wrapperDirs:     defaultWrapperDirs,
 		registryLevel:   registry.DiskLevel,
-		holdDaemonLock:  daemon.HoldDaemonLock,
+		holdDaemonLock:  daemonctl.HoldLock,
 		restoreRegistry: registry.RestoreMigrationBackup,
 		run: func(name string, args ...string) error {
 			command := exec.Command(name, args...)

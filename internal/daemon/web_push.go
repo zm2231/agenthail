@@ -18,6 +18,7 @@ import (
 	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -39,7 +40,7 @@ type webPushKeys struct {
 }
 
 func WebPushKeyPath() string {
-	return filepath.Join(filepath.Dir(PidFilePath()), "web-push-vapid.json")
+	return filepath.Join(filepath.Dir(daemonctl.PidFilePath()), "web-push-vapid.json")
 }
 
 var webPushKeyMu sync.Mutex

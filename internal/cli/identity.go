@@ -11,6 +11,7 @@ import (
 	"github.com/zm2231/agenthail/internal/broadcast"
 
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 )
@@ -273,7 +274,7 @@ func (a *App) cmdRelay(args []string) error {
 		if err != nil {
 			return err
 		}
-		if _, ok := daemon.IsRunning(); !ok {
+		if _, ok := daemonctl.IsRunning(); !ok {
 			fmt.Fprintf(os.Stderr, "warning: daemon is not running; relay will not fire until you start it (agenthail daemon start)\n")
 		}
 		mode := "persistent"

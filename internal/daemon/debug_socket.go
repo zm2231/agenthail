@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/nodehost"
 )
 
@@ -25,15 +26,10 @@ const (
 	MaxCPUProfileSeconds     = 300
 )
 
-func DebugSocketPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".agenthail", "debug.sock")
-}
-
 // startDebugSocket serves the runtime profiles on a Unix socket only the
 // daemon's user can open.
 func (d *Daemon) startDebugSocket() (func(), error) {
-	path := DebugSocketPath()
+	path := daemonctl.DebugSocketPath()
 	listener, err := listenUserSocket(path)
 	if err != nil {
 		return nil, err

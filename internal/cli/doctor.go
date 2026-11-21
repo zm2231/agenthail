@@ -11,7 +11,8 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehooks"
 	"github.com/zm2231/agenthail/internal/claudemcp"
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonctl"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/nodehost"
 	"github.com/zm2231/agenthail/internal/permissions"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -137,9 +138,9 @@ func (a *App) cmdDoctor(args []string) error {
 		results = append(results, result)
 	}
 	signins := a.signinStatus(ctx)
-	_, settingsErr := daemon.LoadDashboardConfig()
+	_, settingsErr := dashconfig.Load()
 	if settingsErr != nil {
-		settingsErr = fmt.Errorf("%s cannot be read; until it is fixed new sessions can be refused and queued messages wait for an idle session rather than steer: %w", daemon.DashboardConfigPath(), settingsErr)
+		settingsErr = fmt.Errorf("%s cannot be read; until it is fixed new sessions can be refused and queued messages wait for an idle session rather than steer: %w", dashconfig.Path(), settingsErr)
 		failures++
 	}
 	home, _ := os.UserHomeDir()
@@ -147,7 +148,7 @@ func (a *App) cmdDoctor(args []string) error {
 	if claudeRootsErr != nil {
 		failures++
 	}
-	mcpSocket := map[string]string{"path": daemon.MCPSocketPath()}
+	mcpSocket := map[string]string{"path": daemonctl.MCPSocketPath()}
 	if err := nodehost.CheckSocketPath(mcpSocket["path"]); err != nil {
 		mcpSocket["problem"] = err.Error()
 	}

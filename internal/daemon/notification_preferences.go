@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+
+	"github.com/zm2231/agenthail/internal/dashconfig"
 )
 
 const notificationPreferenceLeadCompletionsOnly = "leadCompletionsOnly"
@@ -21,7 +23,7 @@ var notificationPreferences = []notificationPreference{
 	{ID: notificationPreferenceLeadCompletionsOnly, Title: "Only the lead's completions in projects with a lead", Detail: "Other agents in a project with a lead stay quiet when they finish. Questions, permission requests and Needs you always come through.", Default: true},
 }
 
-func notificationPreferenceRows(config DashboardConfig) []notificationPreference {
+func notificationPreferenceRows(config dashconfig.Config) []notificationPreference {
 	rows := make([]notificationPreference, 0, len(notificationPreferences))
 	for _, row := range notificationPreferences {
 		row.Value = row.Default
@@ -34,7 +36,7 @@ func notificationPreferenceRows(config DashboardConfig) []notificationPreference
 }
 
 func (d *Daemon) notificationPreference(id string) bool {
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		d.log.Printf("read notification preferences: %s", err)
 	}
@@ -65,7 +67,7 @@ func (d *Daemon) completionQuietedForLead(sessionID string) bool {
 }
 
 func (d *Daemon) notificationPreferencesHandler(w http.ResponseWriter, r *http.Request) {
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -98,7 +100,7 @@ func (d *Daemon) notificationPreferencesHandler(w http.ResponseWriter, r *http.R
 		if *request.Value == known.Default {
 			delete(config.NotificationPreferences, request.ID)
 		}
-		if err := SaveDashboardConfig(config); err != nil {
+		if err := dashconfig.Save(config); err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}

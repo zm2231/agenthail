@@ -1,4 +1,4 @@
-package daemon
+package dashconfig
 
 import (
 	"os"
@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-func TestDashboardConfigDefaultsCodexRecency(t *testing.T) {
+func TestConfigDefaultsCodexRecency(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	config, err := LoadDashboardConfig()
+	config, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,34 +23,34 @@ func TestDashboardConfigDefaultsCodexRecency(t *testing.T) {
 	}
 }
 
-func TestDashboardConfigRejectsInvalidValues(t *testing.T) {
-	for name, config := range map[string]DashboardConfig{
+func TestConfigRejectsInvalidValues(t *testing.T) {
+	for name, config := range map[string]Config{
 		"busy delivery": {BusyDelivery: "drop"},
 		"codex recency": {CodexRecentHours: 169},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
-			if err := SaveDashboardConfig(config); err == nil {
+			if err := Save(config); err == nil {
 				t.Fatalf("invalid config accepted: %+v", config)
 			}
 		})
 	}
 }
 
-func TestDashboardConfigPersistsCodexRecency(t *testing.T) {
+func TestConfigPersistsCodexRecency(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	config := DashboardConfig{Enabled: true, Listen: DefaultDashboardListen, CodexRecentHours: 9}
-	if err := SaveDashboardConfig(config); err != nil {
+	config := Config{Enabled: true, Listen: DefaultListen, CodexRecentHours: 9}
+	if err := Save(config); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := LoadDashboardConfig()
+	loaded, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if loaded.CodexRecentHours != 9 {
 		t.Fatalf("Codex recent hours=%d, want 9", loaded.CodexRecentHours)
 	}
-	info, err := os.Stat(DashboardConfigPath())
+	info, err := os.Stat(Path())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,15 +59,15 @@ func TestDashboardConfigPersistsCodexRecency(t *testing.T) {
 	}
 }
 
-func TestDashboardConfigMigratesMissingCodexRecency(t *testing.T) {
+func TestConfigMigratesMissingCodexRecency(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	if err := os.MkdirAll(filepath.Dir(DashboardConfigPath()), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(Path()), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(DashboardConfigPath(), []byte(`{"enabled":true,"listen":"127.0.0.1:7412"}`), 0600); err != nil {
+	if err := os.WriteFile(Path(), []byte(`{"enabled":true,"listen":"127.0.0.1:7412"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	config, err := LoadDashboardConfig()
+	config, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,17 +79,17 @@ func TestDashboardConfigMigratesMissingCodexRecency(t *testing.T) {
 func TestDashboardListenIsLoopbackOnly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	for _, listen := range []string{"127.0.0.1:7412", "[::1]:7412", "localhost:7412"} {
-		if err := SaveDashboardConfig(DashboardConfig{Listen: listen}); err != nil {
+		if err := Save(Config{Listen: listen}); err != nil {
 			t.Fatalf("%s: %v", listen, err)
 		}
 	}
-	if err := SaveDashboardConfig(DashboardConfig{Listen: "0.0.0.0:7412"}); err == nil {
+	if err := Save(Config{Listen: "0.0.0.0:7412"}); err == nil {
 		t.Fatal("non-loopback listener was saved")
 	}
-	if err := os.WriteFile(DashboardConfigPath(), []byte(`{"enabled":true,"listen":"0.0.0.0:7412"}`), 0600); err != nil {
+	if err := os.WriteFile(Path(), []byte(`{"enabled":true,"listen":"0.0.0.0:7412"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadDashboardConfig(); err == nil {
+	if _, err := Load(); err == nil {
 		t.Fatal("hand-edited non-loopback listener was loaded")
 	}
 }

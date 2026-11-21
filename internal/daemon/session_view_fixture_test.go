@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -437,7 +438,7 @@ func newViewFixture(t *testing.T) *viewFixture {
 			mirror("far", []surface.SessionStatus{surface.StatusIdle, surface.StatusBusy}[rng.Intn(2)])
 		}},
 		{"the Codex recent window", func(rng *rand.Rand) {
-			if err := SaveDashboardConfig(DashboardConfig{CodexRecentHours: 1 + rng.Intn(12)}); err != nil {
+			if err := dashconfig.Save(dashconfig.Config{CodexRecentHours: 1 + rng.Intn(12)}); err != nil {
 				t.Fatal(err)
 			}
 		}},

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -84,7 +85,7 @@ func (d *Daemon) publishLive(ctx context.Context, sessionID string, owns registr
 	}
 	read := session
 	change(&session)
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		d.log.Printf("catalog config: %s", err)
 		d.requestCatalogDiscovery()

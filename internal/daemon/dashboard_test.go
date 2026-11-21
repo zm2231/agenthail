@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/delivery"
 	registrypkg "github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -1256,7 +1257,7 @@ func TestDashboardStateReadsPersistedCatalogStatus(t *testing.T) {
 
 func TestChangingTheCodexWindowRepublishesPresence(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	if err := SaveDashboardConfig(DashboardConfig{CodexRecentHours: 5}); err != nil {
+	if err := dashconfig.Save(dashconfig.Config{CodexRecentHours: 5}); err != nil {
 		t.Fatal(err)
 	}
 	r, err := registrypkg.Open(filepath.Join(t.TempDir(), "registry.db"))

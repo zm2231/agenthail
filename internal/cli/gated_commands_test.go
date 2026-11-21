@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -216,16 +216,16 @@ func TestARefusedAgentAsksThePersonByRunningTheSameCommandAgain(t *testing.T) {
 
 func TestAnAgentAsksThePersonToSendOrControlAnotherProjectsSession(t *testing.T) {
 	f := newGatedFixture(t)
-	config, err := daemon.LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, action := range []string{"cross-project-message", "cross-project-steer"} {
-		if err := config.SetAgentDecision(action, daemon.AgentAsk); err != nil {
+		if err := config.SetAgentDecision(action, dashconfig.AgentAsk); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := daemon.SaveDashboardConfig(config); err != nil {
+	if err := dashconfig.Save(config); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_SESSION_ID", "worker")

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/broadcast"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -36,12 +37,14 @@ func (p *toldPerson) told() []string {
 
 func setAgentDecision(t *testing.T, action, decision string) {
 	t.Helper()
-	changeAgentPolicy(t, func(config *DashboardConfig) error { return config.SetAgentDecision(action, decision) })
+	changeAgentPolicy(t, func(config *dashconfig.Config) error { return config.SetAgentDecision(action, decision) })
 }
 
-func changeAgentPolicy(t *testing.T, change func(*DashboardConfig) error) {
+var defaultAgentRunning = (*dashconfig.AgentPolicy)(nil).RunningLimit()
+
+func changeAgentPolicy(t *testing.T, change func(*dashconfig.Config) error) {
 	t.Helper()
-	path := DashboardConfigPath()
+	path := dashconfig.Path()
 	before, readErr := os.ReadFile(path)
 	t.Cleanup(func() {
 		if readErr != nil {
@@ -52,14 +55,14 @@ func changeAgentPolicy(t *testing.T, change func(*DashboardConfig) error) {
 			t.Error(err)
 		}
 	})
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := change(&config); err != nil {
 		t.Fatal(err)
 	}
-	if err := SaveDashboardConfig(config); err != nil {
+	if err := dashconfig.Save(config); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -113,7 +116,7 @@ func TestWhileThePersonKeepsPairedStartsAnAgentIsRefusedAndNothingStarts(t *test
 	local, remote, _ := pairedFederation(t)
 	person := &toldPerson{}
 	local.daemon.notifyDesktop = person.notify
-	setAgentDecision(t, "session-create-remote", AgentAsk)
+	setAgentDecision(t, "session-create-remote", dashconfig.AgentAsk)
 	boundedSpawner(t, local.reg, "spawner", "edits")
 	payload, _ := json.Marshal(map[string]any{"surface": "codex", "host": "vps", "cwd": "/srv/work", "message": "help"})
 	refused := askScope(t, local.daemon, ScopeRequest{SessionID: "spawner", Action: "create", Create: payload}, "127.0.0.1:50000")
@@ -146,7 +149,7 @@ func TestAnAgentStartsAnExtensionBuilderInThePersonsModeAndThePersonIsTold(t *te
 		t.Fatalf("the person was told %q", told)
 	}
 
-	setAgentDecision(t, "extension-build", AgentAsk)
+	setAgentDecision(t, "extension-build", dashconfig.AgentAsk)
 	response, body = f.request(t, http.MethodPost, "/api/v1/extensions/build", "secret", map[string]string{"message": "another", "surface": "codex", "sessionId": "lead"})
 	if response.StatusCode != http.StatusForbidden || !strings.Contains(string(body), "person_only") || len(f.fake.startOptions) != 1 {
 		t.Fatalf("a build the person keeps for themselves answered %d %s with %d starts", response.StatusCode, body, len(f.fake.startOptions))
@@ -198,11 +201,11 @@ func TestALeadsActionThePersonHearsAboutIsToldOnceAndOnlyWhenItsCommandReportsIt
 		t.Fatalf("the person was told %q", told)
 	}
 
-	setAgentDecision(t, "project-archive", AgentAllow)
+	setAgentDecision(t, "project-archive", dashconfig.AgentAllow)
 	if quiet := archive(lead.ID); quiet.status != http.StatusOK || quiet.reply.Notice != "" {
 		t.Fatalf("an allowed archive: %+v", quiet)
 	}
-	setAgentDecision(t, "project-archive", AgentAsk)
+	setAgentDecision(t, "project-archive", dashconfig.AgentAsk)
 	if refused := archive(lead.ID); refused.code != "capability_missing" {
 		t.Fatalf("an archive the person keeps for themselves: %+v", refused)
 	}
@@ -240,7 +243,7 @@ func TestAnAgentMessagesAnotherProjectFreelyAndThePersonHearsWhenItSteersOne(t *
 		t.Fatalf("answering for a session in another project: %+v", refused)
 	}
 
-	setAgentDecision(t, "cross-project-message", AgentAsk)
+	setAgentDecision(t, "cross-project-message", dashconfig.AgentAsk)
 	if refused := askScope(t, d, queued, local); refused.code != "out_of_scope" {
 		t.Fatalf("a queued message the person keeps for themselves: %+v", refused)
 	}
@@ -286,7 +289,7 @@ func TestALeadTurnsResumingAfterALimitOffForItsOwnProjectAndThePersonIsTold(t *t
 func TestThePersonsRunningLimitBoundsAnAgentsStarts(t *testing.T) {
 	f := newMCPCodexFixture(t)
 	spawner, _, root := f.startParent(t)
-	changeAgentPolicy(t, func(config *DashboardConfig) error { return config.SetAgentLimit("running", 2) })
+	changeAgentPolicy(t, func(config *dashconfig.Config) error { return config.SetAgentLimit("running", 2) })
 	registerBusyChildren(t, f.registry, spawner, 2)
 	payload, _ := json.Marshal(map[string]any{"surface": "codex", "cwd": root, "message": "one more"})
 	refused := askScope(t, f.daemon, ScopeRequest{SessionID: spawner, Action: "create", Create: payload}, "127.0.0.1:50000")

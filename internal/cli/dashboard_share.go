@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonctl"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/tailscale"
 )
 
@@ -25,11 +27,11 @@ type dashboardShareResult struct {
 }
 
 func dashboardShareQRPath() string {
-	return filepath.Join(filepath.Dir(daemon.PidFilePath()), "dashboard-share.png")
+	return filepath.Join(filepath.Dir(daemonctl.PidFilePath()), "dashboard-share.png")
 }
 
 func writeDashboardQR(value, path string) error {
-	data, err := daemon.RemoteAccessQR(value)
+	data, err := dashconfig.RemoteAccessQR(value)
 	if err != nil {
 		return fmt.Errorf("encode dashboard QR: %w", err)
 	}
@@ -78,29 +80,29 @@ func printDashboardRemote(result dashboardShareResult, asJSON, copied bool) erro
 	return nil
 }
 
-func (a *App) ensureDashboardReady() (daemon.DashboardConfig, error) {
-	config, err := daemon.LoadDashboardConfig()
+func (a *App) ensureDashboardReady() (dashconfig.Config, error) {
+	config, err := dashconfig.Load()
 	if err != nil {
-		return daemon.DashboardConfig{}, err
+		return dashconfig.Config{}, err
 	}
 	changed := !config.Enabled
 	if changed {
 		config.Enabled = true
-		if err := daemon.SaveDashboardConfig(config); err != nil {
-			return daemon.DashboardConfig{}, err
+		if err := dashconfig.Save(config); err != nil {
+			return dashconfig.Config{}, err
 		}
 	}
 	if !a.isDaemonServiceLoaded() {
 		if err := a.daemonInstallService(); err != nil {
-			return daemon.DashboardConfig{}, err
+			return dashconfig.Config{}, err
 		}
 	} else if changed || !dashboardDaemonRunning() {
 		if err := a.restartDaemonForDashboard(); err != nil {
-			return daemon.DashboardConfig{}, err
+			return dashconfig.Config{}, err
 		}
 	}
 	if err := waitForDashboard(config.Listen, 15*time.Second); err != nil {
-		return daemon.DashboardConfig{}, err
+		return dashconfig.Config{}, err
 	}
 	return config, nil
 }
@@ -124,12 +126,12 @@ func (a *App) syncDaemonMounts() error {
 }
 
 func dashboardDaemonRunning() bool {
-	_, running := daemon.IsRunning()
+	_, running := daemonctl.IsRunning()
 	return running
 }
 
-func dashboardRemoteEnabled(config daemon.DashboardConfig, serve tailscale.Serve, dnsName, target string, httpsReady bool) bool {
-	return config.Enabled && serve.Routes(dnsName, target, daemon.DefaultRemoteAccessPort, httpsReady)
+func dashboardRemoteEnabled(config dashconfig.Config, serve tailscale.Serve, dnsName, target string, httpsReady bool) bool {
+	return config.Enabled && serve.Routes(dnsName, target, dashconfig.DefaultRemoteAccessPort, httpsReady)
 }
 
 func (a *App) cmdDashboardRemote(args, positional []string) error {
@@ -152,7 +154,7 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 	asJSON := hasFlag(args, "--json")
 	switch action {
 	case "off":
-		config, err := daemon.LoadDashboardConfig()
+		config, err := dashconfig.Load()
 		if err != nil {
 			return err
 		}
@@ -160,12 +162,12 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 		if err != nil {
 			return err
 		}
-		removed, err := tailscale.Unpublish(run, node.Self.DNSName, target, daemon.DefaultRemoteAccessPort)
+		removed, err := tailscale.Unpublish(run, node.Self.DNSName, target, dashconfig.DefaultRemoteAccessPort)
 		if err != nil {
 			return err
 		}
 		config.RemoteAccess.Enabled = false
-		if err := daemon.SaveDashboardConfig(config); err != nil {
+		if err := dashconfig.Save(config); err != nil {
 			return err
 		}
 		if dashboardDaemonRunning() {
@@ -179,7 +181,7 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 			return err
 		}
 		if asJSON {
-			return emit(map[string]any{"enabled": false, "port": daemon.DefaultRemoteAccessPort})
+			return emit(map[string]any{"enabled": false, "port": dashconfig.DefaultRemoteAccessPort})
 		}
 		if removed {
 			fmt.Println("remote dashboard access disabled")
@@ -192,7 +194,7 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 		if err != nil {
 			return err
 		}
-		config, err := daemon.LoadDashboardConfig()
+		config, err := dashconfig.Load()
 		if err != nil {
 			return err
 		}
@@ -200,20 +202,20 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 		if err != nil {
 			return err
 		}
-		httpsReady, err := tailscale.ServesHTTPS(run, node.Self.DNSName, daemon.DefaultRemoteAccessPort)
+		httpsReady, err := tailscale.ServesHTTPS(run, node.Self.DNSName, dashconfig.DefaultRemoteAccessPort)
 		if err != nil {
 			return err
 		}
 		enabled := dashboardRemoteEnabled(config, status, node.Self.DNSName, target, httpsReady)
 		if asJSON {
-			return emit(map[string]any{"enabled": enabled, "dashboardEnabled": config.Enabled, "dnsName": node.Self.DNSName, "https": httpsReady, "port": daemon.DefaultRemoteAccessPort, "proxy": status.Proxy(node.Self.DNSName, daemon.DefaultRemoteAccessPort)})
+			return emit(map[string]any{"enabled": enabled, "dashboardEnabled": config.Enabled, "dnsName": node.Self.DNSName, "https": httpsReady, "port": dashconfig.DefaultRemoteAccessPort, "proxy": status.Proxy(node.Self.DNSName, dashconfig.DefaultRemoteAccessPort)})
 		}
 		if !enabled {
 			fmt.Println("remote dashboard access: off")
 			return nil
 		}
 		fmt.Println("remote dashboard access: on")
-		fmt.Printf("phone: %s (sign in with a link from 'agenthail dashboard remote')\n", tailscale.URL(node.Self.DNSName, daemon.DefaultRemoteAccessPort))
+		fmt.Printf("phone: %s (sign in with a link from 'agenthail dashboard remote')\n", tailscale.URL(node.Self.DNSName, dashconfig.DefaultRemoteAccessPort))
 		return nil
 	case "on":
 	default:
@@ -227,11 +229,11 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 	if err != nil {
 		return err
 	}
-	if err := tailscale.Publish(run, node.Self.DNSName, target, daemon.DefaultRemoteAccessPort); err != nil {
+	if err := tailscale.Publish(run, node.Self.DNSName, target, dashconfig.DefaultRemoteAccessPort); err != nil {
 		return err
 	}
-	config.RemoteAccess = daemon.RemoteAccessConfig{Enabled: true, Provider: "tailscale", Port: daemon.DefaultRemoteAccessPort, TailscalePath: path}
-	if err := daemon.SaveDashboardConfig(config); err != nil {
+	config.RemoteAccess = dashconfig.RemoteAccess{Enabled: true, Provider: "tailscale", Port: dashconfig.DefaultRemoteAccessPort, TailscalePath: path}
+	if err := dashconfig.Save(config); err != nil {
 		return err
 	}
 	if err := a.syncDaemonMounts(); err != nil {
@@ -241,7 +243,7 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 	if err != nil {
 		return err
 	}
-	result := dashboardShareResult{URL: link.URL, ExpiresAt: link.ExpiresAt, QRPath: dashboardShareQRPath(), DNSName: node.Self.DNSName, Port: daemon.DefaultRemoteAccessPort}
+	result := dashboardShareResult{URL: link.URL, ExpiresAt: link.ExpiresAt, QRPath: dashboardShareQRPath(), DNSName: node.Self.DNSName, Port: dashconfig.DefaultRemoteAccessPort}
 	if err := writeDashboardQR(result.URL, result.QRPath); err != nil {
 		return err
 	}

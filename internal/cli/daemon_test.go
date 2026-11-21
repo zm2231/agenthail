@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 )
 
 func TestDashboardConfigCommandSetsCodexRecency(t *testing.T) {
@@ -25,7 +25,7 @@ func TestDashboardConfigCommandSetsCodexRecency(t *testing.T) {
 	if !strings.Contains(output, "7h") {
 		t.Fatalf("output=%q", output)
 	}
-	config, err := daemon.LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,8 +64,8 @@ func TestDashboardRemoteOffClearsDesiredStateWithoutRoute(t *testing.T) {
 	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
 		t.Fatal(err)
 	}
-	config := daemon.DashboardConfig{Enabled: true, RemoteAccess: daemon.RemoteAccessConfig{Enabled: true}}
-	if err := daemon.SaveDashboardConfig(config); err != nil {
+	config := dashconfig.Config{Enabled: true, RemoteAccess: dashconfig.RemoteAccess{Enabled: true}}
+	if err := dashconfig.Save(config); err != nil {
 		t.Fatal(err)
 	}
 	app := &App{}
@@ -74,7 +74,7 @@ func TestDashboardRemoteOffClearsDesiredStateWithoutRoute(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	config, err := daemon.LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		t.Fatal(err)
 	}

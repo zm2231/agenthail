@@ -14,6 +14,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/claudepick"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/browsercookie"
@@ -220,7 +221,7 @@ func TestEveryWayOfNamingThePrimaryLaunchesWithoutAConfigDir(t *testing.T) {
 
 func TestNoSessionStartsWhenTheDefaultRootCannotBeRead(t *testing.T) {
 	f := newPickFixture(t, true)
-	writeUsageFixture(t, map[string]string{DashboardConfigPath(): `{"codexRecentHours":9999,"claude":{"defaultRoot":"work"}}`})
+	writeUsageFixture(t, map[string]string{dashconfig.Path(): `{"codexRecentHours":9999,"claude":{"defaultRoot":"work"}}`})
 	request := map[string]string{"action": "session-create", "surface": "claude", "message": "hello", "cwd": f.host.Cwd}
 	if code := f.call(http.MethodPost, "/api/v1/actions", request, nil); code != http.StatusInternalServerError {
 		t.Fatalf("a create that cannot read the default must refuse, not start in the primary: %d", code)
@@ -246,7 +247,7 @@ func TestAnUnreadableDefaultDoesNotStopARootThatIsAlreadyKnown(t *testing.T) {
 	f := newPickFixture(t, true)
 	agent := f.claudeSessionIn("agent-in-work", f.second)
 	lead := f.claudeSessionIn("old-lead", f.second)
-	writeUsageFixture(t, map[string]string{DashboardConfigPath(): `{"codexRecentHours":9999}`})
+	writeUsageFixture(t, map[string]string{dashconfig.Path(): `{"codexRecentHours":9999}`})
 	if pick, dir := f.createFrom("", agent); dir == nil || *dir != f.second || pick.Name != "work" {
 		t.Fatalf("an agent's root does not need the default: pick=%+v dir=%v", pick, dir)
 	}

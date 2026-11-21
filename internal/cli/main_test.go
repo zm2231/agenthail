@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/simhost"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
@@ -16,6 +16,6 @@ func TestMain(m *testing.M) {
 	daemonStartBound = 20 * time.Second
 	doctorSimulators = func(context.Context) *simhost.Status { return nil }
 	os.Exit(testkit.RunInOwnHome(func() int {
-		return testkit.RunAwayFromLiveDashboard(m.Run, daemon.StandardDashboardListen, &daemon.DefaultDashboardListen)
+		return testkit.RunAwayFromLiveDashboard(m.Run, dashconfig.StandardListen, &dashconfig.DefaultListen)
 	}))
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/apitime"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sse"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -363,7 +364,7 @@ func (d *Daemon) discoverCatalog(ctx context.Context) { d.discoverCatalogOf(ctx,
 // so a pass of one surface lists, publishes and retires that surface's
 // sessions without waiting on the others.
 func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.SurfaceKind]bool) {
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		d.log.Printf("catalog config: %s", err)
 		return
@@ -564,7 +565,7 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 			d.requestObservation()
 		}
 	}()
-	var config *DashboardConfig
+	var config *dashconfig.Config
 	var counts map[string]int
 	var limits map[string]*dashboardLimitResume
 	var view catalogViewState
@@ -622,7 +623,7 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 			continue
 		}
 		if config == nil {
-			loaded, err := LoadDashboardConfig()
+			loaded, err := dashconfig.Load()
 			if err != nil {
 				d.log.Printf("catalog config: %s", err)
 				return
@@ -667,7 +668,7 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 // Under the session's waiting lock, check, when set, runs before the row is
 // written and stops the write when it fails, and done, when set, runs last
 // with whether the row committed.
-func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surface, session surface.Session, update *registry.SessionUpdate, identity catalogIdentity, alias string, queueCount int, limitResume *dashboardLimitResume, open bool, config DashboardConfig, view catalogViewState, observedAt time.Time, check func() bool, done func(committed bool)) (committed bool) {
+func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surface, session surface.Session, update *registry.SessionUpdate, identity catalogIdentity, alias string, queueCount int, limitResume *dashboardLimitResume, open bool, config dashconfig.Config, view catalogViewState, observedAt time.Time, check func() bool, done func(committed bool)) (committed bool) {
 	defer d.lockWaiting(session.ID)()
 	if done != nil {
 		defer func() { done(committed) }()
@@ -879,7 +880,7 @@ func (d *Daemon) publishCatalogPresence() {
 	p := &d.presence
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		d.log.Printf("catalog config: %s", err)
 		return
@@ -1114,7 +1115,7 @@ func StoredSessionProject(reg *registry.Registry, sessionID string) *CatalogProj
 	return project
 }
 
-func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surface.Session, identity catalogIdentity, observedAt time.Time, alias string, queueCount int, limitResume *dashboardLimitResume, open, lead bool, config DashboardConfig) dashboardSession {
+func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surface.Session, identity catalogIdentity, observedAt time.Time, alias string, queueCount int, limitResume *dashboardLimitResume, open, lead bool, config dashconfig.Config) dashboardSession {
 	if session.Runtime == nil {
 		session.Runtime = &surface.Runtime{Launcher: surface.LauncherExternal, Focusable: false}
 	}

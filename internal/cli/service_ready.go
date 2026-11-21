@@ -7,7 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonctl"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/poll"
 )
 
@@ -31,7 +32,7 @@ type daemonStart struct {
 func (s daemonStart) wait() (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), daemonStartBound)
 	defer cancel()
-	config, configErr := daemon.LoadDashboardConfig()
+	config, configErr := dashconfig.Load()
 	wantDashboard := configErr == nil && config.Enabled
 	seen := map[int]bool{}
 	var gone time.Duration
@@ -41,7 +42,7 @@ func (s daemonStart) wait() (int, error) {
 	err := poll.Until(ctx, 100*time.Millisecond, func() (bool, error) {
 		now := time.Now()
 		current := s.process()
-		if pid, running := daemon.IsRunning(); running && pid != s.previous && (!s.supervised || current == pid) {
+		if pid, running := daemonctl.IsRunning(); running && pid != s.previous && (!s.supervised || current == pid) {
 			if !wantDashboard || dashboardAnswers(config.Listen) {
 				ready = pid
 				return true, nil

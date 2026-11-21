@@ -10,7 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonctl"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 )
 
 const systemdUnitName = "agenthail.service"
@@ -95,7 +96,7 @@ func (s *systemdService) Start() error {
 	if err := s.Check(); err != nil {
 		return err
 	}
-	if pid, ok := daemon.IsRunning(); ok {
+	if pid, ok := daemonctl.IsRunning(); ok {
 		return fmt.Errorf("daemon already running (pid %d)", pid)
 	}
 	if output, err := s.systemctl("start", systemdUnitName); err != nil {
@@ -116,7 +117,7 @@ func (s *systemdService) Stop() error {
 	if err := s.Check(); err != nil {
 		return err
 	}
-	pid, running := daemon.IsRunning()
+	pid, running := daemonctl.IsRunning()
 	if output, err := s.systemctl("stop", systemdUnitName); err != nil {
 		return fmt.Errorf("stop %s: %w (%s)", systemdUnitName, err, output)
 	}
@@ -135,7 +136,7 @@ func (s *systemdService) Restart() error {
 	if err := s.Check(); err != nil {
 		return err
 	}
-	before, _ := daemon.IsRunning()
+	before, _ := daemonctl.IsRunning()
 	if output, err := s.systemctl("restart", systemdUnitName); err != nil {
 		return fmt.Errorf("restart %s: %w (%s)", systemdUnitName, err, output)
 	}
@@ -164,22 +165,22 @@ func (s *systemdService) Install() error {
 		if output, err := s.systemctl("stop", systemdUnitName); err != nil {
 			return fmt.Errorf("stop %s: %w (%s)", systemdUnitName, err, output)
 		}
-	} else if _, running := daemon.IsRunning(); running {
-		if err := daemon.Stop(); err != nil {
+	} else if _, running := daemonctl.IsRunning(); running {
+		if err := daemonctl.Stop(); err != nil {
 			return fmt.Errorf("stop existing daemon: %w", err)
 		}
 	}
-	if _, err := os.Stat(daemon.DashboardConfigPath()); os.IsNotExist(err) {
-		config, loadErr := daemon.LoadDashboardConfig()
+	if _, err := os.Stat(dashconfig.Path()); os.IsNotExist(err) {
+		config, loadErr := dashconfig.Load()
 		if loadErr != nil {
 			return loadErr
 		}
 		config.Enabled = true
-		if err := daemon.SaveDashboardConfig(config); err != nil {
+		if err := dashconfig.Save(config); err != nil {
 			return err
 		}
 	}
-	logPath := daemon.LogFilePath()
+	logPath := daemonctl.LogFilePath()
 	if err := os.MkdirAll(filepath.Dir(logPath), 0700); err != nil {
 		return err
 	}
@@ -290,7 +291,7 @@ func (s *systemdService) Problems() []serviceProblem {
 			problems = append(problems, serviceProblem{
 				Problem: "service-inactive",
 				Detail:  fmt.Sprintf("%s is %s", systemdUnitName, state),
-				Fix:     fmt.Sprintf("run 'systemctl --user restart %s' and inspect %s", systemdUnitName, daemon.LogFilePath()),
+				Fix:     fmt.Sprintf("run 'systemctl --user restart %s' and inspect %s", systemdUnitName, daemonctl.LogFilePath()),
 			})
 		}
 		if data, err := os.ReadFile(s.unitPath); err == nil {
@@ -337,7 +338,7 @@ func isExecutable(path string) bool {
 
 func storageProblems(environment map[string]string, unitPath string) []serviceProblem {
 	var problems []serviceProblem
-	stateDir := filepath.Dir(daemon.PidFilePath())
+	stateDir := filepath.Dir(daemonctl.PidFilePath())
 	if reason := probeExec(stateDir); reason != "" {
 		problems = append(problems, serviceProblem{
 			Problem: "state-dir-noexec",

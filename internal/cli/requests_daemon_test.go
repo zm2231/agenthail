@@ -13,6 +13,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehooks"
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/claudesurface"
@@ -62,7 +63,7 @@ func serveAppDaemon(t *testing.T, app *App, store *registry.Registry, adapters [
 	}
 	listen := listener.Addr().String()
 	listener.Close()
-	if err := daemon.SaveDashboardConfig(daemon.DashboardConfig{Enabled: true, Listen: listen}); err != nil {
+	if err := dashconfig.Save(dashconfig.Config{Enabled: true, Listen: listen}); err != nil {
 		t.Fatal(err)
 	}
 	stopServing := serveTestDaemon(t, store, adapters, listen)

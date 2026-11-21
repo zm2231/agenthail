@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/codexsurface"
@@ -75,7 +76,7 @@ func startCodexRelay(t *testing.T, throughShell bool) *mcp.ClientSession {
 	if throughShell {
 		process = exec.Command("sh", "-c", `"$0" -test.run='^TestMCPStdioRelayHelper$'; :`, os.Args[0])
 	}
-	process.Env = append(os.Environ(), "AGENTHAIL_TEST_RELAY_READY="+ready, "AGENTHAIL_TEST_RELAY_SOCKET="+MCPSocketPath())
+	process.Env = append(os.Environ(), "AGENTHAIL_TEST_RELAY_READY="+ready, "AGENTHAIL_TEST_RELAY_SOCKET="+daemonctl.MCPSocketPath())
 	stdin, err := process.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -230,7 +231,7 @@ func postFromCodexChild(t *testing.T, body []byte) (int, string) {
 func postPathFromCodexChild(t *testing.T, path string) (int, string) {
 	t.Helper()
 	process := exec.Command(os.Args[0], "-test.run=^TestMCPSocketPostHelper$")
-	process.Env = append(os.Environ(), "AGENTHAIL_TEST_POST_BODY="+path, "AGENTHAIL_TEST_RELAY_SOCKET="+MCPSocketPath())
+	process.Env = append(os.Environ(), "AGENTHAIL_TEST_POST_BODY="+path, "AGENTHAIL_TEST_RELAY_SOCKET="+daemonctl.MCPSocketPath())
 	out, err := process.Output()
 	if err != nil {
 		t.Fatalf("post helper: %v", err)

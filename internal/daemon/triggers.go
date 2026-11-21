@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/triggers"
@@ -34,12 +35,12 @@ type triggerService struct {
 }
 
 func newTriggerService() *triggerService {
-	dir := filepath.Dir(PidFilePath())
+	dir := filepath.Dir(daemonctl.PidFilePath())
 	return &triggerService{path: TriggersConfigPath(), runner: triggers.Runner{WorkDir: dir}, slots: make(chan struct{}, triggerSlots), active: map[string]bool{}, again: map[string]bool{}}
 }
 
 func TriggersConfigPath() string {
-	return filepath.Join(filepath.Dir(PidFilePath()), "triggers.json")
+	return filepath.Join(filepath.Dir(daemonctl.PidFilePath()), "triggers.json")
 }
 
 func (d *Daemon) startTriggers() {

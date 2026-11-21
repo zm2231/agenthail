@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/uiconf"
 	"github.com/zm2231/agenthail/internal/voice"
 	"golang.org/x/sync/singleflight"
@@ -41,11 +42,11 @@ func (d *Daemon) invalidateDashboard() {
 }
 
 func (d *Daemon) startDashboard() (*dashboardServer, error) {
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil || !config.Enabled {
 		return nil, err
 	}
-	token, err := dashboardToken()
+	token, err := dashconfig.Token()
 	if err != nil {
 		return nil, err
 	}

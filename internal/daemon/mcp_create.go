@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -127,7 +128,7 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 			PermissionMode: start.permissionMode, Approval: start.approval, Alias: strings.TrimSpace(input.Alias), Ceiling: start.ceiling.encode(),
 			Isolation: isolation, Worktree: strings.TrimSpace(input.Branch), Base: strings.TrimSpace(input.Base),
 		})
-		if err == nil && decision == AgentNotify {
+		if err == nil && decision == dashconfig.AgentNotify {
 			d.notifyAgentAction(ctx, caller.session.ID, remoteCreateWords(kind, host, cwd))
 		}
 		return result, err
@@ -164,7 +165,7 @@ func (d *Daemon) remoteCreateScope(caller *mcpCaller, host string, kind surface.
 		return childStart{}, "", "", refuse("invalid", fmt.Sprintf("No paired computer is named %q.", host))
 	}
 	decision := d.agentPolicy().Decision("session-create-remote")
-	if decision == AgentAsk && !caller.has("control.all") {
+	if decision == dashconfig.AgentAsk && !caller.has("control.all") {
 		return childStart{}, "", "", scopeRefusal(about, "other_host", "Starting a session on another computer is for the person here; ask your coordinator or the person to start it.")
 	}
 	cwd := strings.TrimSpace(rawCwd)
@@ -224,7 +225,7 @@ func (d *Daemon) agentCreateOnHost(ctx context.Context, caller *mcpCaller, host 
 		return actionReply{}, err
 	}
 	reply := d.performAction(ctx, sessionPrincipal(caller.session.ID), actionFormatAPIv1, body, "cli-create-"+uuid.NewString())
-	if decision == AgentNotify && reply.Status >= 200 && reply.Status < 300 {
+	if decision == dashconfig.AgentNotify && reply.Status >= 200 && reply.Status < 300 {
 		d.notifyAgentAction(ctx, caller.session.ID, remoteCreateWords(kind, host, cwd))
 	}
 	return reply, nil

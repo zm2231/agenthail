@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -34,13 +34,13 @@ func TestLimitResumeListsStopsAndTurnsTheSettingOff(t *testing.T) {
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"limit-resume", "off"}) }); err != nil {
 		t.Fatal(err)
 	}
-	if config, err := daemon.LoadDashboardConfig(); err != nil || config.ResumesAfterLimit() {
+	if config, err := dashconfig.Load(); err != nil || config.ResumesAfterLimit() {
 		t.Fatalf("config=%+v err=%v", config, err)
 	}
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"limit-resume", "on"}) }); err != nil {
 		t.Fatal(err)
 	}
-	if config, err := daemon.LoadDashboardConfig(); err != nil || !config.ResumesAfterLimit() {
+	if config, err := dashconfig.Load(); err != nil || !config.ResumesAfterLimit() {
 		t.Fatalf("config=%+v err=%v", config, err)
 	}
 	if err := app.Run([]string{"limit-resume", "sideways"}); err == nil || !strings.HasPrefix(err.Error(), "usage:") {

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/mcpstdio"
 	"github.com/zm2231/agenthail/internal/procstart"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -52,7 +53,7 @@ func startRelayedSession(t *testing.T, root, sessionID string) *relayedSession {
 	t.Helper()
 	ready := filepath.Join(t.TempDir(), "ready")
 	process := exec.Command("sh", "-c", `"$0" -test.run='^TestMCPStdioRelayHelper$'; :`, os.Args[0])
-	process.Env = append(os.Environ(), "AGENTHAIL_TEST_RELAY_READY="+ready, "AGENTHAIL_TEST_RELAY_SOCKET="+MCPSocketPath())
+	process.Env = append(os.Environ(), "AGENTHAIL_TEST_RELAY_READY="+ready, "AGENTHAIL_TEST_RELAY_SOCKET="+daemonctl.MCPSocketPath())
 	stdin, err := process.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -275,7 +276,7 @@ func socketClient(t *testing.T) *mcp.ClientSession {
 	client := mcp.NewClient(&mcp.Implementation{Name: "stranger", Version: "test"}, nil)
 	transport := &mcp.StreamableClientTransport{Endpoint: "http://agenthail/mcp", DisableStandaloneSSE: true, HTTPClient: &http.Client{Transport: &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "unix", MCPSocketPath())
+			return (&net.Dialer{}).DialContext(ctx, "unix", daemonctl.MCPSocketPath())
 		},
 	}}}
 	session, err := client.Connect(context.Background(), transport, nil)
@@ -357,7 +358,7 @@ func TestAnMCPSocketPathTooLongForThePlatformIsRefusedSayingWhatToChange(t *test
 		stop()
 		t.Fatal("the daemon listened on a socket path the platform cannot hold")
 	}
-	if !strings.Contains(err.Error(), MCPSocketPath()) || !strings.Contains(err.Error(), "shorter home directory") {
+	if !strings.Contains(err.Error(), daemonctl.MCPSocketPath()) || !strings.Contains(err.Error(), "shorter home directory") {
 		t.Fatalf("the refusal does not name the path and what to change: %v", err)
 	}
 }

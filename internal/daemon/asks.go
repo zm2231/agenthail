@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/coordinator"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -288,7 +289,7 @@ func (d *Daemon) escalateAsk(ask registry.Ask, to, why string) registry.Ask {
 }
 
 func (d *Daemon) askEscalateAfter() time.Duration {
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil || config.AskEscalateMinutes <= 0 {
 		return defaultAskEscalate
 	}
