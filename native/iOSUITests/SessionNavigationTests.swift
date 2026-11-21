@@ -190,4 +190,3 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertFalse(app.buttons["Name conversation"].isHittable, "the session details closed with it")
     }
 }
-

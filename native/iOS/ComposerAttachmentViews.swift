@@ -39,7 +39,6 @@ struct ComposerAttachmentMenu: View {
                 addImage(data, name: "Photo.jpg")
             }
             .ignoresSafeArea()
-            .holdsDraft(true)
         }
         .fileImporter(isPresented: $choosingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             guard case let .success(urls) = result else { return }

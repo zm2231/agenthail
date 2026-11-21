@@ -213,3 +213,9 @@ extension View {
         modifier(HoldsDraft(dirty: dirty))
     }
 }
+
+extension Binding {
+    func marking(_ edited: Binding<Bool>) -> Binding<Value> {
+        Binding(get: { wrappedValue }, set: { wrappedValue = $0; edited.wrappedValue = true })
+    }
+}

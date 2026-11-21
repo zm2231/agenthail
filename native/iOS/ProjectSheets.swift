@@ -77,30 +77,28 @@ private struct IOSAddProjectForm: View {
     @State private var suggestions: [String] = []
     @State private var saving = false
     @State private var error: String?
-    @State private var startFolder: String?
+    @State private var edited = false
     @Environment(\.dismiss) private var dismiss
 
-    private var dirty: Bool { !title.isEmpty || startFolder.map { folder != $0 } == true }
+    private var dirty: Bool { edited || !title.isEmpty }
 
     private var path: String { folder.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
-        content
-            .onAppear { if startFolder == nil { startFolder = folder } }
-            .holdsDraft(dirty)
+        content.holdsDraft(dirty)
     }
 
     @ViewBuilder private var content: some View {
         Form {
             if model.creationHosts.count > 1 {
-                Picker("Computer", selection: $host) {
+                Picker("Computer", selection: $host.marking($edited)) {
                     ForEach(model.creationHosts) { host in Text(host.name).tag(host.id).disabled(!host.isAvailable) }
                 }
             }
             Section("Folder") {
-                TextField("/path/to/folder", text: $folder).textInputAutocapitalization(.never).autocorrectionDisabled()
+                TextField("/path/to/folder", text: $folder.marking($edited)).textInputAutocapitalization(.never).autocorrectionDisabled()
                 ForEach(suggestions, id: \.self) { suggestion in
-                    Button(suggestion) { folder = suggestion }.font(.footnote)
+                    Button(suggestion) { folder = suggestion; edited = true }.font(.footnote)
                 }
             }
             Section("Name") {
@@ -180,6 +178,7 @@ private struct IOSProjectLeadForm: View {
     var model: AgenthailIOSModel
     let project: ListedProject
     @State private var checkout = 0
+    @State private var edited = false
     @State private var surface = "claude"
     @State private var name = ""
     @State private var saving = false
@@ -191,7 +190,7 @@ private struct IOSProjectLeadForm: View {
         project.state.checkouts.enumerated().filter { $0.element.archived != true && ["local", "connected"].contains($0.element.host.state) }.map { ($0.offset, $0.element) }
     }
 
-    private var dirty: Bool { !name.isEmpty || surface != "claude" || checkout != 0 }
+    private var dirty: Bool { edited || !name.isEmpty }
 
     var body: some View { content.holdsDraft(dirty) }
 
@@ -199,11 +198,11 @@ private struct IOSProjectLeadForm: View {
         Form {
             Section {
                 if usable.count > 1 {
-                    Picker("Computer", selection: $checkout) {
+                    Picker("Computer", selection: $checkout.marking($edited)) {
                         ForEach(usable, id: \.index) { entry in Text(entry.checkout.host.name).tag(entry.index) }
                     }
                 }
-                Picker("Agent", selection: $surface) {
+                Picker("Agent", selection: $surface.marking($edited)) {
                     Text("Claude").tag("claude")
                     Text("Codex").tag("codex")
                 }
