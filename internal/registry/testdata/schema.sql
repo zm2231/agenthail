@@ -1,4 +1,4 @@
--- schemaVersion 123
+-- schemaVersion 125
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -634,6 +634,28 @@ CREATE TABLE mcp_access (
 	changed_at_ms INTEGER NOT NULL,
 	keys_read_at_ms INTEGER NOT NULL DEFAULT 0,
 	keys_error TEXT NOT NULL DEFAULT ''
+);
+
+-- table mcp_event_subscriptions
+CREATE TABLE mcp_event_subscriptions (
+	id TEXT PRIMARY KEY,
+	generation TEXT NOT NULL,
+	identity_id TEXT NOT NULL REFERENCES identity_remote(identity_id) ON DELETE CASCADE,
+	token_hash TEXT NOT NULL,
+	name TEXT NOT NULL,
+	args TEXT NOT NULL,
+	url TEXT NOT NULL,
+	secret TEXT NOT NULL,
+	prev_secret TEXT NOT NULL DEFAULT '',
+	prev_secret_until_ms INTEGER NOT NULL DEFAULT 0,
+	refresh_before_ms INTEGER NOT NULL DEFAULT 0,
+	verified_at_ms INTEGER NOT NULL DEFAULT 0,
+	notified_through INTEGER NOT NULL DEFAULT 0,
+	failures INTEGER NOT NULL DEFAULT 0,
+	suspended_at_ms INTEGER NOT NULL DEFAULT 0,
+	deferred_until_ms INTEGER NOT NULL DEFAULT 0,
+	created_at_ms INTEGER NOT NULL,
+	UNIQUE(identity_id,url,name,args)
 );
 
 -- table mcp_remote_epoch
@@ -1731,6 +1753,22 @@ BEGIN UPDATE mcp_remote_epoch SET epoch=epoch+1 WHERE id=1; END;
 -- trigger mcp_access_epoch_removed
 CREATE TRIGGER mcp_access_epoch_removed AFTER DELETE ON mcp_access
 BEGIN UPDATE mcp_remote_epoch SET epoch=epoch+1 WHERE id=1; END;
+
+-- trigger mcp_event_subscriptions_access_added
+CREATE TRIGGER mcp_event_subscriptions_access_added AFTER INSERT ON mcp_access
+BEGIN DELETE FROM mcp_event_subscriptions; END;
+
+-- trigger mcp_event_subscriptions_access_changed
+CREATE TRIGGER mcp_event_subscriptions_access_changed AFTER UPDATE OF team,aud ON mcp_access
+BEGIN DELETE FROM mcp_event_subscriptions; END;
+
+-- trigger mcp_event_subscriptions_access_removed
+CREATE TRIGGER mcp_event_subscriptions_access_removed AFTER DELETE ON mcp_access
+BEGIN DELETE FROM mcp_event_subscriptions; END;
+
+-- trigger mcp_event_subscriptions_credentials_changed
+CREATE TRIGGER mcp_event_subscriptions_credentials_changed AFTER UPDATE OF token_hash,access_client_id,access_email ON identity_remote
+BEGIN DELETE FROM mcp_event_subscriptions WHERE identity_id=NEW.identity_id; END;
 
 -- trigger message_queue_catalog_delete
 CREATE TRIGGER message_queue_catalog_delete AFTER DELETE ON message_queue
