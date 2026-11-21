@@ -12,6 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/browsercookie"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 func TestAProfileThatAnswers401OnceIsAskedAgainOnFreshCookiesAndTheMessageGoesOutOnce(t *testing.T) {
@@ -21,15 +22,15 @@ func TestAProfileThatAnswers401OnceIsAskedAgainOnFreshCookiesAndTheMessageGoesOu
 	if err := os.WriteFile(bridge, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	installNode(t, "#!/bin/sh\necho read >> "+shellQuote(bridgeLog)+"\nprintf 'sessionKey=rotated'\n")
+	surfacetest.InstallNode(t, "#!/bin/sh\necho read >> "+surfacetest.ShellQuote(bridgeLog)+"\nprintf 'sessionKey=rotated'\n")
 	sidecar := `import json, os, sys
 req = json.loads(sys.stdin.read())
-with open(` + pyQuote(sidecarLog) + `, "a") as log:
+with open(` + surfacetest.PyQuote(sidecarLog) + `, "a") as log:
     log.write(req["method"] + " " + req["url"] + "\n")
 status, body = 200, {}
 if req["url"].endswith("/api/account"):
-    first = not os.path.exists(` + pyQuote(probes) + `)
-    open(` + pyQuote(probes) + `, "a").close()
+    first = not os.path.exists(` + surfacetest.PyQuote(probes) + `)
+    open(` + surfacetest.PyQuote(probes) + `, "a").close()
     status, body = (401, {"error": {"type": "authentication_error"}}) if first else (200, {"uuid": "c", "email_address": "c@example.com"})
 sys.stdout.write(json.dumps({"status": status, "body": json.dumps(body), "error": ""}))
 `
@@ -47,12 +48,12 @@ sys.stdout.write(json.dumps({"status": status, "body": json.dumps(body), "error"
 	if _, err := claude.postMessage(context.Background(), session, "from the phone"); err != nil {
 		t.Fatalf("err=%v, want the message sent once the profile answers on fresh cookies", err)
 	}
-	requests := readLines(t, sidecarLog)
+	requests := surfacetest.ReadLines(t, sidecarLog)
 	want := []string{"GET https://claude.ai/api/account", "GET https://claude.ai/api/account", "POST https://claude.ai/v1/code/sessions/cse_fixture/events"}
 	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("requests=%q, want the account asked twice and the message posted once", requests)
 	}
-	if reads := readLines(t, bridgeLog); len(reads) != 2 {
+	if reads := surfacetest.ReadLines(t, bridgeLog); len(reads) != 2 {
 		t.Fatalf("cookie reads=%d, want a fresh read after the 401", len(reads))
 	}
 	if route := claude.Route(session, surface.AuthorPerson); route != surface.RouteHumanTurn {
@@ -98,7 +99,7 @@ func TestTheSigninCheckLogSaysACookieReadFailedRatherThanThatCookiesWereUsed(t *
 	if err := os.WriteFile(bridge, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	installNode(t, "#!/bin/sh\necho 'profile is locked' >&2\nexit 1\n")
+	surfacetest.InstallNode(t, "#!/bin/sh\necho 'profile is locked' >&2\nexit 1\n")
 	sidecar := filepath.Join(dir, "sidecar.py")
 	if err := os.WriteFile(sidecar, []byte("import sys\nsys.exit(1)\n"), 0600); err != nil {
 		t.Fatal(err)

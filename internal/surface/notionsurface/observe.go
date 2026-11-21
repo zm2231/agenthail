@@ -1,4 +1,4 @@
-package surfaces
+package notionsurface
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 )
 
 func (n *Notion) Observe(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {
@@ -28,7 +29,7 @@ func (n *Notion) threadExists(ctx context.Context, threadID string) (bool, error
 		return false, err
 	}
 	body, _ := json.Marshal(map[string]any{"requests": []map[string]any{{"pointer": map[string]any{"table": "thread", "id": threadID}, "version": -1}}})
-	status, responseBody, err := sidecarRequestWithCookies(ctx, "POST", notionAPI("syncRecordValues"), account.headers(), string(body), account.cookies, 15*time.Second)
+	status, responseBody, err := browsercookie.SidecarRequest(ctx, "POST", notionAPI("syncRecordValues"), account.headers(), string(body), account.cookies, 15*time.Second)
 	if err != nil {
 		return false, fmt.Errorf("resolve Notion thread: %w", err)
 	}

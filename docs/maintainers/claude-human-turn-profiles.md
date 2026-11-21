@@ -104,7 +104,7 @@ anything is sent
 ([`signin.go`](../../internal/signin/signin.go),
 [`registry/signin.go`](../../internal/registry/signin.go)). The cookie cache,
 the per-key read lock and invalidation are keyed on that source
-([`transport.go`](../../internal/surface/surfaces/transport.go)), and
+([`browsercookie/cookie.go`](../../internal/surface/browsercookie/cookie.go)), and
 [`cookie.mjs`](../../sidecar/cookie.mjs) reads only the browser and profile
 directory it is given. Resolution opens the profile's cookie store and closes
 it unread, so a missing store and a permission error (EPERM on a protected

@@ -63,7 +63,7 @@ func cookieSourceError(err error) error {
 	if surface.IsDeliveryTerminal(err) || surface.IsDeliveryUnavailable(err) {
 		return err
 	}
-	return surface.DeliveryTerminal(err, signinTerminalKind(err))
+	return surface.DeliveryTerminal(err, surface.SigninTerminalKind(err))
 }
 
 func (c *Claude) cookies(source signin.Source) browsercookie.Source {

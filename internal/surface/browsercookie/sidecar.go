@@ -1,12 +1,10 @@
-package surfaces
+package browsercookie
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,12 +13,9 @@ import (
 
 	"github.com/zm2231/agenthail/internal/installdir"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 )
 
-const chromeUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
-
-func sidecarPath() (string, error) {
+func SidecarPath() (string, error) {
 	if p := os.Getenv("AGENTHAIL_SIDECAR"); p != "" {
 		if _, err := os.Stat(p); err == nil {
 			return p, nil
@@ -72,22 +67,8 @@ type workerResponse struct {
 	Error  string `json:"error"`
 }
 
-// startFailure names a working folder that is gone. A command in its own
-// process group skips os.StartProcess's check of its folder, so the child's
-// failed chdir reports the program as missing instead.
-func startFailure(cmd *exec.Cmd, err error) error {
-	var path *fs.PathError
-	if cmd.Dir == "" || !errors.As(err, &path) {
-		return err
-	}
-	if info, statErr := os.Stat(cmd.Dir); statErr == nil && info.IsDir() {
-		return err
-	}
-	return surface.DeliveryUnavailable(fmt.Errorf("the folder %s is gone", cmd.Dir))
-}
-
-func sidecarRequestWithCookies(parent context.Context, method, url string, headers map[string]string, body string, cookies browsercookie.Source, timeout time.Duration) (int, string, error) {
-	worker, err := sidecarPath()
+func SidecarRequest(parent context.Context, method, url string, headers map[string]string, body string, cookies Source, timeout time.Duration) (int, string, error) {
+	worker, err := SidecarPath()
 	if err != nil {
 		return 0, "", surface.DeliveryUnavailable(err)
 	}
@@ -95,7 +76,7 @@ func sidecarRequestWithCookies(parent context.Context, method, url string, heade
 	if err != nil {
 		return 0, "", surface.DeliveryUnavailable(err)
 	}
-	cookie, err := browsercookie.LoadHeader(parent, cookies)
+	cookie, err := LoadHeader(parent, cookies)
 	if err != nil {
 		return 0, "", surface.DeliveryUnavailable(err)
 	}
@@ -150,7 +131,7 @@ func sidecarRequestWithCookies(parent context.Context, method, url string, heade
 		return 0, "", fmt.Errorf("sidecar: %s", resp.Error)
 	}
 	if resp.Status == 401 || resp.Status == 403 {
-		browsercookie.Invalidate(cookies)
+		Invalidate(cookies)
 	}
 	return resp.Status, resp.Body, nil
 }

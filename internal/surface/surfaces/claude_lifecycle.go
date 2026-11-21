@@ -48,7 +48,7 @@ func (c *Claude) backgroundCommand(ctx context.Context, root, cwd string, args .
 		cmd.Env = append(cmd.Env, "CLAUDE_CONFIG_DIR="+dir)
 	}
 	output, err := cmd.CombinedOutput()
-	return output, startFailure(cmd, err)
+	return output, surface.StartFailure(cmd, err)
 }
 
 // claudeCommandEnv is the environment of every Claude Agenthail launches.

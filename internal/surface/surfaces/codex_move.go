@@ -30,7 +30,7 @@ var codexRolloutFileName = regexp.MustCompile(`^rollout-(\d{4})-(\d{2})-(\d{2})T
 const codexMoveWait = 30 * time.Second
 
 func validCodexMoveThread(id string) bool {
-	return looksLikeUUID(id) && strings.ToLower(id) == id && !strings.ContainsAny(id, `/\`)
+	return surface.LooksLikeUUID(id) && strings.ToLower(id) == id && !strings.ContainsAny(id, `/\`)
 }
 
 func codexRolloutOf(name, threadID string) bool {

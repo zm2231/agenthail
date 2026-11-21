@@ -1,4 +1,4 @@
-package surfaces
+package notionsurface
 
 import (
 	"context"
@@ -8,11 +8,12 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 )
 
 const notionTimelineMessageBudget = 200
 
-var notionRecordRequest = sidecarRequestWithCookies
+var notionRecordRequest = browsercookie.SidecarRequest
 
 type notionThreadMessage struct {
 	ID        string

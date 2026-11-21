@@ -11,7 +11,7 @@ import (
 )
 
 func (c *Codex) Resolve(ctx context.Context, target string) (*surface.Session, error) {
-	if looksLikeUUID(target) {
+	if surface.LooksLikeUUID(target) {
 		return c.resolveID(ctx, target)
 	}
 	results, err := c.SearchSessions(ctx, target, 20)

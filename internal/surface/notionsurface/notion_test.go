@@ -1,4 +1,4 @@
-package surfaces
+package notionsurface
 
 import (
 	"context"

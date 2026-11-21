@@ -1,4 +1,4 @@
-package surfaces
+package notionsurface
 
 import (
 	"context"
@@ -127,7 +127,7 @@ func newNotionThreadID(spaceID string) (string, error) {
 }
 
 func (a *notionAccount) detect(ctx context.Context) error {
-	status, respBody, err := sidecarRequestWithCookies(ctx, "POST",
+	status, respBody, err := browsercookie.SidecarRequest(ctx, "POST",
 		"https://app.notion.com/api/v3/getSpaces",
 		a.headers(), "{}", a.cookies, 15*time.Second)
 	if err != nil {
@@ -252,7 +252,7 @@ func (n *Notion) List(ctx context.Context) ([]surface.Session, error) {
 		"limit":              50,
 		"includeWriterChats": false,
 	})
-	status, respBody, err := sidecarRequestWithCookies(ctx, "POST",
+	status, respBody, err := browsercookie.SidecarRequest(ctx, "POST",
 		notionAPI("getInferenceTranscriptsForUser"),
 		account.headers(), string(body), account.cookies, 15*time.Second)
 	if err != nil {
@@ -294,7 +294,7 @@ func (n *Notion) Resolve(ctx context.Context, target string) (*surface.Session, 
 		name := strings.TrimPrefix(target, "new:")
 		return &surface.Session{ID: target, Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Name: name, Status: surface.StatusIdle}, nil
 	}
-	if looksLikeUUID(target) {
+	if surface.LooksLikeUUID(target) {
 		exists, err := n.threadExists(ctx, target)
 		if err != nil {
 			return nil, err
@@ -323,12 +323,12 @@ func (n *Notion) Send(ctx context.Context, sess *surface.Session, message string
 	return n.SendWithOptions(ctx, sess, message, surface.SendOptions{})
 }
 
-var notionInferenceRequest = sidecarRequestWithCookies
+var notionInferenceRequest = browsercookie.SidecarRequest
 
 func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
 	cookies, err := n.cookies()
 	if err != nil {
-		return nil, surface.DeliveryTerminal(err, signinTerminalKind(err))
+		return nil, surface.DeliveryTerminal(err, surface.SigninTerminalKind(err))
 	}
 	account, err := n.accountFor(ctx, cookies)
 	if err != nil {
@@ -479,7 +479,7 @@ func (n *Notion) modelLabels(ctx context.Context, account notionAccount) (map[st
 		return cached.labels, nil
 	}
 	body, _ := json.Marshal(map[string]any{"spaceId": account.spaceID})
-	status, responseBody, err := sidecarRequestWithCookies(ctx, "POST", notionAPI("getAvailableModels"), account.headers(), string(body), account.cookies, 15*time.Second)
+	status, responseBody, err := browsercookie.SidecarRequest(ctx, "POST", notionAPI("getAvailableModels"), account.headers(), string(body), account.cookies, 15*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("list Notion models: %w", err)
 	}
