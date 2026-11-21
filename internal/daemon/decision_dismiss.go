@@ -24,17 +24,6 @@ const (
 
 var errNotThePersonsDismissal = actionFailed(http.StatusForbidden, "forbidden", "only the person dismisses a decision")
 
-// A paired host forwards a session's action under the actor "session <id>".
-func dismissesForThePerson(p principal) bool {
-	switch p.Kind {
-	case principalSession:
-		return false
-	case principalHost:
-		return !strings.HasPrefix(p.Claimed, "session ")
-	}
-	return true
-}
-
 func reportedPark(request map[string]any) bool {
 	action, _ := request["action"].(string)
 	workItem, _ := request["workItem"].(string)
@@ -59,7 +48,7 @@ func (d *Daemon) routeReportedPark(request map[string]any) (*pairedHost, bool, e
 }
 
 func (d *Daemon) doDismissDecision(ctx context.Context, p principal, request dashboardActionRequest) (actionResult, error) {
-	if !dismissesForThePerson(p) {
+	if !p.forThePerson() {
 		return actionResult{}, errNotThePersonsDismissal
 	}
 	result := map[string]any{"outcome": "dismissed"}

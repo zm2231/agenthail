@@ -41,36 +41,37 @@ func attachCodexReadStates(result map[string]any, threads []any) {
 }
 
 func (c *Codex) SetReadState(ctx context.Context, sess *surface.Session, unread bool, revision string) (surface.ReadState, error) {
-	runtimes := c.openRuntimes(ctx)
-	defer runtimes.Close()
-	clients := runtimes.readers()
-	if len(clients) == 0 {
-		return surface.ReadState{}, runtimes.unavailable()
+	client, err := c.readStateClient(ctx, sess, unread)
+	if err != nil {
+		return surface.ReadState{}, err
 	}
+	defer client.Close()
 	operation := "read"
 	if unread {
 		operation = "unread"
 	}
-	params := map[string]any{"threadId": sess.ID, "expectedRevision": revision, "operation": map[string]any{"type": operation}}
-	var err error
-	for _, client := range clients {
-		var response map[string]any
-		response, err = client.Request(ctx, "thread/readState/update", params, 5*time.Second)
-		// The bridge's own refusals carry no JSON-RPC code; the next runtime may still answer.
-		var rpcErr *codexRPCError
-		if errors.As(err, &rpcErr) && rpcErr.Code != 0 {
-			return surface.ReadState{}, codexReadStateRefusal(rpcErr)
-		}
-		if err != nil {
-			continue
-		}
-		result, _ := response["result"].(map[string]any)
-		if state := codexReadState(result[codexReadStateKey]); state != nil {
-			return *state, nil
-		}
-		return surface.ReadState{}, fmt.Errorf("thread/readState/update response missing readState")
+	response, err := client.Request(ctx, "thread/readState/update", map[string]any{"threadId": sess.ID, "expectedRevision": revision, "operation": map[string]any{"type": operation}}, 5*time.Second)
+	if rpcErr := (*codexRPCError)(nil); errors.As(err, &rpcErr) {
+		return surface.ReadState{}, codexReadStateRefusal(rpcErr)
 	}
-	return surface.ReadState{}, err
+	if err != nil {
+		return surface.ReadState{}, err
+	}
+	result, _ := response["result"].(map[string]any)
+	if state := codexReadState(result[codexReadStateKey]); state != nil {
+		return *state, nil
+	}
+	return surface.ReadState{}, fmt.Errorf("thread/readState/update response missing readState")
+}
+
+// Reading a conversation loads it into its writer as a send would; one no writer can take, such as Desktop's while Desktop is down, is only marked.
+func (c *Codex) readStateClient(ctx context.Context, sess *surface.Session, unread bool) (codexClient, error) {
+	if !unread {
+		if client, err := c.openWriter(ctx, sess); err == nil {
+			return client, nil
+		}
+	}
+	return c.openReader(ctx, sess)
 }
 
 func codexReadStateRefusal(err *codexRPCError) error {

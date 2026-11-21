@@ -33,8 +33,8 @@ func (d *Daemon) routeHostAction(ctx context.Context, p principal, raw []byte, k
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "a session cannot name an author; its messages are its own")
 		})
 	}
-	if action, _ := request["action"].(string); action == dismissDecisionAction && !dismissesForThePerson(p) {
-		return replyWith(func(w http.ResponseWriter) { writeActionResult(w, actionResult{}, errNotThePersonsDismissal) })
+	if action, _ := request["action"].(string); !p.forThePerson() && personOnlyActions[action] != nil {
+		return replyWith(func(w http.ResponseWriter) { writeActionResult(w, actionResult{}, personOnlyActions[action]) })
 	}
 	host, rewritten, err := d.routeActionRequest(ctx, request)
 	if err != nil {

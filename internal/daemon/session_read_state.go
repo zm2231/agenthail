@@ -10,9 +10,13 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
+var errNotThePersonsMark = actionFailed(http.StatusForbidden, "person_only", "only the person marks a conversation read or unread")
+
+var personOnlyActions = map[string]error{dismissDecisionAction: errNotThePersonsDismissal, "session-read": errNotThePersonsMark, "session-unread": errNotThePersonsMark}
+
 func (d *Daemon) doSessionReadState(ctx context.Context, p principal, session *surface.Session, unread bool, revision string) (actionResult, error) {
-	if p.Kind == principalSession {
-		return actionResult{}, actionFailed(http.StatusForbidden, "person_only", "only the person marks a conversation read or unread")
+	if !p.forThePerson() {
+		return actionResult{}, errNotThePersonsMark
 	}
 	if revision == "" {
 		return actionResult{}, invalidRequest("revision is required: send the readState.revision the conversation showed")

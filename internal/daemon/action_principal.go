@@ -47,6 +47,17 @@ func principalFromRequest(r *http.Request) principal {
 	return p
 }
 
+// A paired host forwards a session's action under the actor "session <id>".
+func (p principal) forThePerson() bool {
+	switch p.Kind {
+	case principalSession:
+		return false
+	case principalHost:
+		return !strings.HasPrefix(p.Claimed, "session ")
+	}
+	return true
+}
+
 // A claimed actor is trusted only from a paired host or the local dashboard token, which only the CLI holds.
 func (p principal) actor() string {
 	if p.Kind == principalSession {

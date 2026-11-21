@@ -84,3 +84,49 @@ func TestCodexWatchWakesTheCatalogWhenAReceiptChanges(t *testing.T) {
 	daemon.CompleteTurn(id, "done")
 	testkit.Eventually(t, "the finished turn's receipt to wake the catalog", 5*time.Second, func() bool { return wakes.Load() > attached })
 }
+
+func unreadUnloadedThread(t *testing.T, originator string) (*codextest.Daemon, *Codex, surface.Session) {
+	t.Helper()
+	daemon := startManagedCodex(t, nil)
+	id := "019f004a-0000-7000-8000-0000000000d3"
+	daemon.AddThread(codextest.Thread{ID: id, Cwd: t.TempDir(), Originator: originator, Turns: []codextest.Turn{{ID: "turn-1", Status: "inProgress"}}})
+	daemon.CompleteTurn(id, "done")
+	receipt := codexReadState(daemon.ReadState(id))
+	return daemon, isolatedManagedRuntime(t), surface.Session{ID: id, Surface: surface.KindCodex, ReadState: receipt}
+}
+
+func TestCodexReadingAConversationLoadsItIntoItsWriter(t *testing.T) {
+	daemon, codex, session := unreadUnloadedThread(t, "agenthail")
+	if _, err := codex.SetReadState(context.Background(), &session, false, session.ReadState.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if !daemon.Loaded(session.ID) {
+		t.Fatal("reading the conversation left it unloaded, so a send would still have to load it")
+	}
+	if receipt := daemon.ReadState(session.ID); receipt["firstUnread"] != nil {
+		t.Fatalf("Codex receipt = %v, want read", receipt)
+	}
+}
+
+func TestCodexReadingADesktopConversationWhileDesktopIsDownOnlyMarksIt(t *testing.T) {
+	daemon, codex, session := unreadUnloadedThread(t, codexDesktopOriginator)
+	if _, err := codex.SetReadState(context.Background(), &session, false, session.ReadState.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if daemon.Loaded(session.ID) || len(daemon.Calls("thread/resume")) != 0 {
+		t.Fatal("reading took Desktop's conversation into the daemon")
+	}
+	if receipt := daemon.ReadState(session.ID); receipt["firstUnread"] != nil {
+		t.Fatalf("Codex receipt = %v, want read", receipt)
+	}
+}
+
+func TestCodexMarkingUnreadLoadsNothing(t *testing.T) {
+	daemon, codex, session := unreadUnloadedThread(t, "agenthail")
+	if _, err := codex.SetReadState(context.Background(), &session, true, session.ReadState.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if daemon.Loaded(session.ID) || len(daemon.Calls("thread/resume")) != 0 {
+		t.Fatal("marking unread loaded the conversation")
+	}
+}

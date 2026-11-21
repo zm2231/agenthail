@@ -65,6 +65,10 @@ func TestAFinishedCodexTurnShowsUnreadUntilThePersonReadsIt(t *testing.T) {
 	if agent.Status != http.StatusForbidden {
 		t.Fatalf("an agent's read status=%d body=%s, want 403", agent.Status, agent.Body)
 	}
+	forwarded := d.performAction(t.Context(), principal{ID: "host:peer", Kind: principalHost, Claimed: "session other"}, actionFormatAPIv1, mustJSON(t, map[string]any{"action": "session-read", "sessionId": id, "revision": unread.Revision}), "forwarded-agent-read")
+	if forwarded.Status != http.StatusForbidden {
+		t.Fatalf("an agent's read forwarded by a paired host status=%d body=%s, want 403", forwarded.Status, forwarded.Body)
+	}
 
 	status, payload = h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "session-read", "sessionId": id, "revision": unread.Revision})
 	if status != http.StatusOK {
