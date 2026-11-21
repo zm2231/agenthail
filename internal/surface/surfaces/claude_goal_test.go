@@ -12,6 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -203,7 +204,7 @@ func TestClaudeStreamSendsTheGoalWhenClaudeRecordsAVerdict(t *testing.T) {
 	select {
 	case again := <-goals:
 		t.Fatalf("a record without a goal change sent %+v", again.goal)
-	case <-time.After(10 * transcriptPollInterval):
+	case <-time.After(10 * transcript.PollInterval):
 	}
 }
 
@@ -215,7 +216,7 @@ func TestClaudeStreamSendsNoGoalForASessionWithoutOne(t *testing.T) {
 	select {
 	case goal := <-goals:
 		t.Fatalf("goal event %+v for a session without a goal", goal.goal)
-	case <-time.After(5 * transcriptPollInterval):
+	case <-time.After(5 * transcript.PollInterval):
 	}
 }
 

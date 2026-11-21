@@ -18,6 +18,7 @@ import (
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -112,7 +113,7 @@ func TestAPairedHostsSentFileArrivesWholeAndSandboxedOrNotAtAll(t *testing.T) {
 			t.Fatalf("%s: status=%d bytes=%d headers=%v", route, response.Code, response.Body.Len(), response.Header())
 		}
 	}
-	over := bytes.Repeat([]byte("x"), int(surfaces.MaxSentFileBytes)+1)
+	over := bytes.Repeat([]byte("x"), int(transcript.MaxSentFileBytes)+1)
 	attaching.data.Store(&over)
 	if response := local.request(t, http.MethodGet, "/api/v1/session-attachment?sessionId="+qualified+"&id=sent", nil); response.Code != http.StatusBadGateway {
 		t.Fatalf("an answer over the cap: status=%d bytes=%d", response.Code, response.Body.Len())

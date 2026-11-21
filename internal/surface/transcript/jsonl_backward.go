@@ -1,4 +1,4 @@
-package surfaces
+package transcript
 
 import (
 	"bytes"
@@ -7,10 +7,10 @@ import (
 
 const jsonlBackwardChunk = int64(64 << 10)
 
-// scanJSONLBackward visits the complete lines that end at or before end, newest
+// ScanJSONLBackward visits the complete lines that end at or before end, newest
 // first, reading fixed chunks and no more than limit bytes, until visit
 // returns false. It returns how many bytes it read.
-func scanJSONLBackward(file io.ReaderAt, end, limit int64, visit func(line []byte, offset int64) bool) int64 {
+func ScanJSONLBackward(file io.ReaderAt, end, limit int64, visit func(line []byte, offset int64) bool) int64 {
 	var read int64
 	var tail []byte
 	for read < end && read < limit {

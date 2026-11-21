@@ -16,6 +16,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudepick"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
@@ -48,7 +49,7 @@ func newPickFixture(t *testing.T, twoRoots bool) pickFixture {
 	percent := map[string]string{"org-a": "80", "org-b": "10"}
 	profiles := []signin.Source{{ProfileID: "sp_a", Label: "a", Browser: signin.Chrome, Dir: "/a"}, {ProfileID: "sp_b", Label: "b", Browser: signin.Chrome, Dir: "/b"}}
 	reads, delay := &atomic.Int32{}, &atomic.Int64{}
-	claude := surfaces.NewClaudeWithRequest(candidates(profiles), host.Home, func(ctx context.Context, _ string, url string, _ map[string]string, _ string, cookies surfaces.CookieSource, _ time.Duration) (int, string, error) {
+	claude := surfaces.NewClaudeWithRequest(candidates(profiles), host.Home, func(ctx context.Context, _ string, url string, _ map[string]string, _ string, cookies browsercookie.Source, _ time.Duration) (int, string, error) {
 		reads.Add(1)
 		select {
 		case <-time.After(time.Duration(delay.Load())):

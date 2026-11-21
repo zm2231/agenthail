@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // Codex reports no change to a thread's background terminals, so the status
@@ -251,11 +252,11 @@ func (w *terminalWatch) list(ctx context.Context, threadID string, readStatus bo
 		entries, _ := page["data"].([]any)
 		for _, entry := range entries {
 			terminal, _ := entry.(map[string]any)
-			if id := str(terminal, "processId"); id != "" {
-				result.terminals = append(result.terminals, codexTerminal{processID: id, itemID: str(terminal, "itemId"), command: str(terminal, "command")})
+			if id := transcript.String(terminal, "processId"); id != "" {
+				result.terminals = append(result.terminals, codexTerminal{processID: id, itemID: transcript.String(terminal, "itemId"), command: transcript.String(terminal, "command")})
 			}
 		}
-		cursor := str(page, "nextCursor")
+		cursor := transcript.String(page, "nextCursor")
 		if cursor == "" {
 			return result
 		}

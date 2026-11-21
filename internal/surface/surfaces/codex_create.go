@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // StartSession creates the thread on Codex Desktop when its bridge is
@@ -57,7 +58,7 @@ func (c *Codex) prepareManagedTerminalSession(ctx context.Context, client codexC
 	}
 	result, _ := response["result"].(map[string]any)
 	thread, _ := result["thread"].(map[string]any)
-	threadID := str(thread, "id")
+	threadID := transcript.String(thread, "id")
 	if threadID == "" {
 		return nil, errors.New("thread/start managed terminal returned no thread id")
 	}
@@ -67,7 +68,7 @@ func (c *Codex) prepareManagedTerminalSession(ctx context.Context, client codexC
 	setCodexTransport(&session, codexTransportManaged)
 	session.Source = "agenthail"
 	if session.Cwd == "" {
-		session.Cwd = str(result, "cwd")
+		session.Cwd = transcript.String(result, "cwd")
 	}
 	if session.Cwd == "" {
 		session.Cwd = cwd
@@ -108,15 +109,15 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 	}
 	result, _ := response["result"].(map[string]any)
 	thread, _ := result["thread"].(map[string]any)
-	threadID := str(thread, "id")
+	threadID := transcript.String(thread, "id")
 	if threadID == "" {
 		return nil, nil, fmt.Errorf("thread/start returned no thread id")
 	}
 	session := &surface.Session{
 		ID:         threadID,
 		Surface:    surface.KindCodex,
-		Name:       surface.DeriveName(str(thread, "name"), message, 80),
-		Cwd:        str(result, "cwd"),
+		Name:       surface.DeriveName(transcript.String(thread, "name"), message, 80),
+		Cwd:        transcript.String(result, "cwd"),
 		Status:     surface.StatusBusy,
 		HasLocal:   true,
 		Source:     "agenthail",
@@ -145,9 +146,9 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 	}
 	turnID := threadID
 	if turnResult, _ := turnResponse["result"].(map[string]any); turnResult != nil {
-		if turn, _ := turnResult["turn"].(map[string]any); str(turn, "id") != "" {
-			turnID = str(turn, "id")
-		} else if value := str(turnResult, "turnId"); value != "" {
+		if turn, _ := turnResult["turn"].(map[string]any); transcript.String(turn, "id") != "" {
+			turnID = transcript.String(turn, "id")
+		} else if value := transcript.String(turnResult, "turnId"); value != "" {
 			turnID = value
 		}
 	}

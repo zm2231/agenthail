@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // managedNotificationsHandled, when set by a test, runs after a managed
@@ -134,7 +135,7 @@ func (c *Codex) followManagedTurnClient(ctx context.Context, client codexClient,
 		}
 		// Wait for a notification that may change the turn, or the poll
 		// interval, which still covers anything the app-server does not send.
-		timer := time.NewTimer(transcriptPollInterval)
+		timer := time.NewTimer(transcript.PollInterval)
 	wait:
 		for {
 			select {

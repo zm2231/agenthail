@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 const (
@@ -86,7 +87,7 @@ func (c *Codex) codexOpenRequests(ctx context.Context, client codexAnswerer, ses
 	var settle <-chan time.Time
 	for {
 		for _, event := range client.DrainNotifications() {
-			if str(event.Params, "threadId") != sess.ID {
+			if transcript.String(event.Params, "threadId") != sess.ID {
 				continue
 			}
 			if event.Method == codexRequestResolved {
@@ -153,23 +154,23 @@ func codexRPCKey(value any) string {
 // codexRequest reads one server request as a surface request. Its id names
 // the thread and the item it gates, which every connection sees the same.
 func codexRequest(threadID, method string, params map[string]any) (surface.Request, bool) {
-	itemID := str(params, "itemId")
+	itemID := transcript.String(params, "itemId")
 	if itemID == "" {
 		return surface.Request{}, false
 	}
 	id := threadID + ":" + itemID
-	if approval := str(params, "approvalId"); approval != "" {
+	if approval := transcript.String(params, "approvalId"); approval != "" {
 		id += ":" + approval
 	}
-	request := surface.Request{ID: id, Kind: surface.WaitingApproval, Reason: str(params, "reason"), NoReason: true, CreatedAt: time.Now().UTC()}
+	request := surface.Request{ID: id, Kind: surface.WaitingApproval, Reason: transcript.String(params, "reason"), NoReason: true, CreatedAt: time.Now().UTC()}
 	if started, ok := params["startedAtMs"].(float64); ok && started > 0 {
 		request.CreatedAt = time.UnixMilli(int64(started)).UTC()
 	}
 	switch method {
 	case codexCommandApproval:
 		request.Tool = "Bash"
-		request.Title = str(params, "command")
-		request.Input, _ = json.Marshal(map[string]any{"command": str(params, "command"), "cwd": str(params, "cwd")})
+		request.Title = transcript.String(params, "command")
+		request.Input, _ = json.Marshal(map[string]any{"command": transcript.String(params, "command"), "cwd": transcript.String(params, "cwd")})
 		decisions := codexDecisions(params)
 		request.AlwaysAllow = decisions.always != nil
 		request.AlwaysDeny = decisions.never != nil
@@ -177,7 +178,7 @@ func codexRequest(threadID, method string, params map[string]any) (surface.Reque
 	case codexFileChangeApproval:
 		request.Tool = "Edit"
 		request.Title = "Codex wants to change files"
-		if root := str(params, "grantRoot"); root != "" {
+		if root := transcript.String(params, "grantRoot"); root != "" {
 			request.BlockedPath = root
 		}
 		request.AlwaysAllow, request.Stoppable = true, true
@@ -191,14 +192,14 @@ func codexRequest(threadID, method string, params map[string]any) (surface.Reque
 		request.Tool = "request_user_input"
 		for _, raw := range asList(params["questions"]) {
 			question, _ := raw.(map[string]any)
-			text := str(question, "question")
+			text := transcript.String(question, "question")
 			if text == "" {
 				continue
 			}
-			entry := surface.Question{Question: text, Header: str(question, "header")}
+			entry := surface.Question{Question: text, Header: transcript.String(question, "header")}
 			for _, option := range asList(question["options"]) {
 				object, _ := option.(map[string]any)
-				entry.Options = append(entry.Options, surface.QuestionOption{Label: str(object, "label"), Description: str(object, "description")})
+				entry.Options = append(entry.Options, surface.QuestionOption{Label: transcript.String(object, "label"), Description: transcript.String(object, "description")})
 			}
 			request.Questions = append(request.Questions, entry)
 		}
@@ -250,7 +251,7 @@ func codexDecisions(params map[string]any) codexOffered {
 			}
 			if amendment, ok := value["applyNetworkPolicyAmendment"].(map[string]any); ok {
 				rule, _ := amendment["network_policy_amendment"].(map[string]any)
-				switch str(rule, "action") {
+				switch transcript.String(rule, "action") {
 				case "allow":
 					if offered.always == nil {
 						offered.always = value
@@ -322,8 +323,8 @@ func codexAnswer(open codexOpenRequest, decision surface.Decision) (any, string,
 		if allow {
 			for _, raw := range asList(open.params["questions"]) {
 				question, _ := raw.(map[string]any)
-				if answer, ok := decision.Answers[str(question, "question")]; ok && strings.TrimSpace(answer) != "" {
-					answers[str(question, "id")] = map[string]any{"answers": []string{answer}}
+				if answer, ok := decision.Answers[transcript.String(question, "question")]; ok && strings.TrimSpace(answer) != "" {
+					answers[transcript.String(question, "id")] = map[string]any{"answers": []string{answer}}
 				}
 			}
 			if len(answers) == 0 {
@@ -424,7 +425,7 @@ func (c *Codex) Respond(ctx context.Context, sess *surface.Session, requestID st
 	key := codexRPCKey(target.rpcID)
 	for {
 		for _, event := range client.DrainNotifications() {
-			if event.Method == codexRequestResolved && str(event.Params, "threadId") == sess.ID && codexRPCKey(event.Params["requestId"]) == key {
+			if event.Method == codexRequestResolved && transcript.String(event.Params, "threadId") == sess.ID && codexRPCKey(event.Params["requestId"]) == key {
 				return outcome, nil
 			}
 		}

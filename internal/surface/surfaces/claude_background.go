@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 var claudeTaskIDTag = regexp.MustCompile(`(?:<|\\u003c)task-id(?:>|\\u003e)(.*?)(?:<|\\u003c)/task-id`)
@@ -73,7 +74,7 @@ func (c *Claude) recordBackground(ctx context.Context, sess *surface.Session) *s
 	if !live {
 		return nil
 	}
-	shell := str(record, "status") == "shell"
+	shell := transcript.String(record, "status") == "shell"
 	var started time.Time
 	if at, ok := record["startedAt"].(float64); ok {
 		started = time.UnixMilli(int64(at))
@@ -157,12 +158,12 @@ func (c *Claude) settleTaskScan(ctx context.Context, scan *claudeTaskScan, from 
 
 func (s *claudeTaskScan) advance(ctx context.Context) {
 	for {
-		next, err := scanAppendedJSONL(ctx, s.Path, s.Offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
+		next, err := transcript.ScanAppendedJSONL(ctx, s.Path, s.Offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
 			s.read(line)
 			return nil
 		})
 		s.Offset = next
-		if !errors.As(err, new(transcriptRecordTooLarge)) {
+		if !errors.As(err, new(transcript.RecordTooLarge)) {
 			return
 		}
 		// A record too large to read cannot be decoded; the scan goes on

@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // replayCheckpointSpacing is how many bytes of replay lie between saved
@@ -79,7 +80,7 @@ func (c *replayCheckpointCache) lookup(identity string, offset int64) (replayRes
 	var best *replayRegion
 	index := -1
 	for _, region := range c.regions {
-		if region.identity != identity || region.limit != turnScanLimit || region.start < max(0, offset-turnScanLimit) {
+		if region.identity != identity || region.limit != transcript.TurnScanLimit || region.start < max(0, offset-transcript.TurnScanLimit) {
 			continue
 		}
 		at, found := slices.BinarySearchFunc(region.checkpoints, offset, func(checkpoint replayCheckpoint, offset int64) int {
@@ -147,7 +148,7 @@ func (c *replayCheckpointCache) resume(ctx context.Context, file *os.File, ident
 }
 
 func (c *replayCheckpointCache) record(file *os.File, identity string, offset int64, tracker *claudeTurnTracker, recorder *replayRecorder) {
-	if identity == "" || recorder.start < 0 || recorder.start < max(0, offset-turnScanLimit) {
+	if identity == "" || recorder.start < 0 || recorder.start < max(0, offset-transcript.TurnScanLimit) {
 		return
 	}
 	if tracker.sawInterleaving() {
@@ -159,7 +160,7 @@ func (c *replayCheckpointCache) record(file *os.File, identity string, offset in
 	defer c.mu.Unlock()
 	c.clock++
 	for _, region := range c.regions {
-		if region.identity == identity && region.limit == turnScanLimit && region.start == recorder.start && bytes.Equal(region.startPrint, recorder.startPrint) {
+		if region.identity == identity && region.limit == transcript.TurnScanLimit && region.start == recorder.start && bytes.Equal(region.startPrint, recorder.startPrint) {
 			region.checkpoints = mergeReplayCheckpoints(region.checkpoints, recorder.checkpoints)
 			if offset > region.verified {
 				region.verified, region.meterTurn, region.seen = offset, tracker.meter.turnID, tracker.meter.usageIDs(nil)
@@ -176,7 +177,7 @@ func (c *replayCheckpointCache) record(file *os.File, identity string, offset in
 	}
 	c.regions = append(c.regions, &replayRegion{
 		identity:    identity,
-		limit:       turnScanLimit,
+		limit:       transcript.TurnScanLimit,
 		start:       recorder.start,
 		startPrint:  recorder.startPrint,
 		checkpoints: mergeReplayCheckpoints(nil, recorder.checkpoints),
@@ -200,7 +201,7 @@ func (c *replayCheckpointCache) extend(identity string, start, offset int64, che
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, region := range c.regions {
-		if region.identity != identity || region.start != start || region.limit != turnScanLimit {
+		if region.identity != identity || region.start != start || region.limit != transcript.TurnScanLimit {
 			continue
 		}
 		region.checkpoints = mergeReplayCheckpoints(region.checkpoints, checkpoints)
@@ -273,7 +274,7 @@ func newReplayRecorder() *replayRecorder {
 }
 
 // visit must see each record before the tracker observes it; it reports
-// whether the record starts a turn as a turnStartSearch finds them.
+// whether the record starts a turn as a transcript.TurnStartSearch finds them.
 func (r *replayRecorder) visit(tracker *claudeTurnTracker, record map[string]any, line []byte, offset int64) bool {
 	if claudeSearchStartsTurn(record) && claudeLineMayStartTurn(line) {
 		r.start, r.startPrint, r.last, r.checkpoints = offset, replayPrint(line), offset, nil

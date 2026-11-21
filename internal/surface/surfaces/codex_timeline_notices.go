@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 const (
@@ -29,7 +30,7 @@ func codexDoneItem(status string, payload map[string]any) surface.TimelineItem {
 func codexTurnError(payload map[string]any) (message, info string) {
 	switch failure := payload["error"].(type) {
 	case map[string]any:
-		message, info = str(failure, "message"), str(failure, "codex_error_info")
+		message, info = transcript.String(failure, "message"), transcript.String(failure, "codex_error_info")
 	case string:
 		message = failure
 	}
@@ -43,7 +44,7 @@ func codexTurnError(payload map[string]any) (message, info string) {
 }
 
 func codexInterruptionNotice(payload map[string]any) (surface.TimelineItem, bool) {
-	if str(payload, "role") != "user" {
+	if transcript.String(payload, "role") != "user" {
 		return surface.TimelineItem{}, false
 	}
 	blocks, _ := payload["content"].([]any)
@@ -51,10 +52,10 @@ func codexInterruptionNotice(payload map[string]any) (surface.TimelineItem, bool
 		return surface.TimelineItem{}, false
 	}
 	block, _ := blocks[0].(map[string]any)
-	if str(block, "type") != "input_text" {
+	if transcript.String(block, "type") != "input_text" {
 		return surface.TimelineItem{}, false
 	}
-	text := strings.TrimSpace(str(block, "text"))
+	text := strings.TrimSpace(transcript.String(block, "text"))
 	if !strings.HasPrefix(text, codexTurnAbortedOpen) || !strings.HasSuffix(text, codexTurnAbortedClose) {
 		return surface.TimelineItem{}, false
 	}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func (c *Claude) transcriptPath(s *surface.Session) string {
@@ -154,11 +155,11 @@ func (x *claudeTranscriptIndex) forget(dir string) {
 }
 
 func (c *Claude) firstUserMessage(path string) string {
-	if path == "" || !fileExists(path) {
+	if path == "" || !transcript.FileExists(path) {
 		return ""
 	}
 	message := ""
-	_ = findJSONL(path, func(line []byte) (bool, error) {
+	_ = transcript.FindJSONL(path, func(line []byte) (bool, error) {
 		var e struct {
 			Type string `json:"type"`
 			Msg  struct {

@@ -14,6 +14,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/zm2231/agenthail/internal/atomicfile"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // Codex's thread/revert keeps a thread's id but continues it in a new rollout
@@ -49,7 +50,7 @@ type codexRolloutSegment struct {
 
 func readCodexRolloutHeader(path string) (codexRolloutHeader, int64, error) {
 	var header codexRolloutHeader
-	end, err := readFirstJSONL(path, &header)
+	end, err := transcript.ReadFirstJSONL(path, &header)
 	if err != nil {
 		return header, 0, fmt.Errorf("read Codex rollout header: %w", err)
 	}
@@ -208,15 +209,15 @@ func pruneCodexRolloutCache(dir string) {
 // are always the current rollout's: a stream follows only that one.
 func readCodexTranscriptPage(ctx context.Context, home CodexHome, path, threadID string, before int64, limit int) (*surface.SessionReadResult, error) {
 	if path == "" {
-		return readTranscriptPage(ctx, path, codexTranscript{}, before, limit)
+		return transcript.ReadPage(ctx, path, codexTranscript{}, before, limit)
 	}
 	header, _, err := readCodexRolloutHeader(path)
 	if err != nil || header.Payload.HistoryBase == nil {
-		return readTranscriptPage(ctx, path, codexTranscript{}, before, limit)
+		return transcript.ReadPage(ctx, path, codexTranscript{}, before, limit)
 	}
 	segments, err := home.rolloutLineage(path, threadID)
 	if err != nil {
-		page, pageErr := readTranscriptPage(ctx, path, codexTranscript{}, before, limit)
+		page, pageErr := transcript.ReadPage(ctx, path, codexTranscript{}, before, limit)
 		if pageErr != nil {
 			return nil, pageErr
 		}
@@ -263,7 +264,7 @@ func readCodexTranscriptPage(ctx context.Context, home CodexHome, path, threadID
 			if local == 0 && index != last {
 				local = segment.end
 			}
-			page, err = readTranscriptWindow(ctx, segment.path, codexTranscript{}, segment.start, local, remaining)
+			page, err = transcript.ReadWindow(ctx, segment.path, codexTranscript{}, segment.start, local, remaining)
 			if err != nil {
 				return nil, err
 			}
@@ -291,7 +292,7 @@ func readCodexTranscriptPage(ctx context.Context, home CodexHome, path, threadID
 		index, local = index-1, 0
 	}
 	if first != last {
-		current, err := readTranscriptPage(ctx, path, codexTranscript{}, 0, 1)
+		current, err := transcript.ReadPage(ctx, path, codexTranscript{}, 0, 1)
 		if err != nil {
 			return nil, err
 		}
@@ -320,7 +321,7 @@ func (c *Codex) TranscriptContinuation(ctx context.Context, session *surface.Ses
 		matched := trustedPath != "" && (segment.source == trustedPath || segment.source == trustedPath+".zst")
 		if !matched && trustedIdentity != "" {
 			if info, err := os.Stat(segment.source); err == nil {
-				matched = transcriptFileIdentity(info) == trustedIdentity
+				matched = transcript.FileIdentity(info) == trustedIdentity
 			}
 		}
 		if !matched {
@@ -345,7 +346,7 @@ func codexRevertedItems(ctx context.Context, segment codexRolloutSegment) ([]sur
 		if before == 0 && info.Size() <= segment.end {
 			return nil, nil
 		}
-		page, err := readTranscriptWindow(ctx, segment.path, codexTranscript{}, segment.end, before, 0)
+		page, err := transcript.ReadWindow(ctx, segment.path, codexTranscript{}, segment.end, before, 0)
 		if err != nil {
 			return nil, err
 		}

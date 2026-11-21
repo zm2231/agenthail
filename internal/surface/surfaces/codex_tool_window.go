@@ -7,6 +7,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/codemode"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // codexRecordItems serves one transcript record in order. The window joins a
@@ -18,7 +19,7 @@ func codexRecordItems(window *surface.CodexToolWindow, record map[string]any, tu
 		window.Known = true
 		window.Open = nil
 	}
-	if str(record, "type") == "event_msg" && str(payload, "type") == "item_completed" {
+	if transcript.String(record, "type") == "event_msg" && transcript.String(payload, "type") == "item_completed" {
 		item, _ := payload["item"].(map[string]any)
 		return codexCompletedItems(window, item, turnID)
 	}
@@ -32,10 +33,10 @@ func codexRecordItems(window *surface.CodexToolWindow, record map[string]any, tu
 		window.Open = nil
 		return items
 	}
-	if str(record, "type") != "response_item" || len(items) == 0 || items[0].CallID == "" {
+	if transcript.String(record, "type") != "response_item" || len(items) == 0 || items[0].CallID == "" {
 		return items
 	}
-	switch str(payload, "type") {
+	switch transcript.String(payload, "type") {
 	case "function_call", "custom_tool_call":
 		codexOpenCall(window, record, items[0], turnID)
 	case "function_call_output", "custom_tool_call_output":
@@ -48,7 +49,7 @@ func codexRecordItems(window *surface.CodexToolWindow, record map[string]any, tu
 
 func codexOpenCall(window *surface.CodexToolWindow, record map[string]any, item surface.TimelineItem, turnID string) {
 	payload, _ := record["payload"].(map[string]any)
-	call := surface.CodexOpenCall{CallID: item.CallID, CallKey: codexTranscriptItemKey(record, item, 0), TurnID: turnID, At: str(record, "timestamp"), Tools: []string{item.Title}}
+	call := surface.CodexOpenCall{CallID: item.CallID, CallKey: codexTranscriptItemKey(record, item, 0), TurnID: turnID, At: transcript.String(record, "timestamp"), Tools: []string{item.Title}}
 	if calls, ok := codexCodeModeScript(payload); ok {
 		call.Tools = nil
 		for _, script := range calls {
@@ -58,7 +59,7 @@ func codexOpenCall(window *surface.CodexToolWindow, record map[string]any, item 
 	} else if item.Title == "exec_command" {
 		var input map[string]any
 		_ = json.Unmarshal([]byte(item.Text), &input)
-		if command := strings.TrimSpace(str(input, "cmd")); command != "" {
+		if command := strings.TrimSpace(transcript.String(input, "cmd")); command != "" {
 			call.Commands = []string{command}
 		}
 	}
@@ -99,7 +100,7 @@ func codexActionCall(window *surface.CodexToolWindow, action codexAction, turnID
 }
 
 func codexCompletedItems(window *surface.CodexToolWindow, item map[string]any, turnID string) []surface.TimelineItem {
-	if str(item, "type") == "SubAgentActivity" {
+	if transcript.String(item, "type") == "SubAgentActivity" {
 		return codexSubAgentActivity(window, item)
 	}
 	action, ok, mirrored := codexCompletedAction(item)
@@ -107,7 +108,7 @@ func codexCompletedItems(window *surface.CodexToolWindow, item map[string]any, t
 		return nil
 	}
 	if !ok {
-		return []surface.TimelineItem{codexUnknownItem(str(item, "type"))}
+		return []surface.TimelineItem{codexUnknownItem(transcript.String(item, "type"))}
 	}
 	if index := codexActionCall(window, action, turnID); index >= 0 {
 		window.Open = slices.Clone(window.Open)
@@ -119,21 +120,21 @@ func codexCompletedItems(window *surface.CodexToolWindow, item map[string]any, t
 			row := surface.TimelineItem{ID: call.CallKey, Kind: "toolCall", Title: action.Tool, Text: codexActionInput(action), CallID: call.CallID, Timestamp: call.At}
 			return []surface.TimelineItem{row, codexActionResult(action, call.CallID)}
 		}
-		return codexActionRow(action, str(item, "id"))
+		return codexActionRow(action, transcript.String(item, "id"))
 	}
 	if action.Tool == "exec_command" && (window.Known || codexBackgroundIndex(window, action.Command) >= 0) {
 		return []surface.TimelineItem{codexBackgroundFinished(window, action)}
 	}
-	return codexActionRow(action, str(item, "id"))
+	return codexActionRow(action, transcript.String(item, "id"))
 }
 
 // Codex records a sub-agent activity beside the collaboration call that shares its id; without that call it is the only record.
 func codexSubAgentActivity(window *surface.CodexToolWindow, item map[string]any) []surface.TimelineItem {
-	id := str(item, "id")
+	id := transcript.String(item, "id")
 	if id != "" && slices.ContainsFunc(window.Open, func(call surface.CodexOpenCall) bool { return call.CallID == id }) {
 		return nil
 	}
-	return []surface.TimelineItem{{Kind: "notice", Title: strings.TrimSpace("Sub-agent " + str(item, "kind")), Text: str(item, "agent_path"), CallID: id}}
+	return []surface.TimelineItem{{Kind: "notice", Title: strings.TrimSpace("Sub-agent " + transcript.String(item, "kind")), Text: transcript.String(item, "agent_path"), CallID: id}}
 }
 
 func codexActionRow(action codexAction, id string) []surface.TimelineItem {

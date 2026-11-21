@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -102,9 +103,9 @@ func TestCodexStreamResumedMidTurnCountsTheWholeTurn(t *testing.T) {
 }
 
 func TestCodexTurnWhoseStartIsOutOfReachHasNoUsage(t *testing.T) {
-	limit := turnScanLimit
-	turnScanLimit = 1
-	t.Cleanup(func() { turnScanLimit = limit })
+	limit := transcript.TurnScanLimit
+	transcript.TurnScanLimit = 1
+	t.Cleanup(func() { transcript.TurnScanLimit = limit })
 	path := timelineFixture(t, codexTurnRecords)
 	testkit.AppendFile(t, path, codexTurnRest)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -298,17 +299,17 @@ func TestClaudeCompactionsBetweenTurnsBelongToTheNextTurnWhereverAReaderJoins(t 
 }
 
 func TestClaudeCompactionInATurnJoinedMidwayIsNotTheNextTurns(t *testing.T) {
-	limit := turnScanLimit
-	turnScanLimit = 1
-	t.Cleanup(func() { turnScanLimit = limit })
+	limit := transcript.TurnScanLimit
+	transcript.TurnScanLimit = 1
+	t.Cleanup(func() { transcript.TurnScanLimit = limit })
 	turns := streamedClaudeTurns(t, claudeTurnHead, claudeTurnTail, "u2")
 	wantTurn(t, "after a turn joined midway", turns["u2"], claudeInterruptedTurn)
 }
 
 func TestCodexCompactionInATurnJoinedMidwayIsNotTheNextTurns(t *testing.T) {
-	limit := turnScanLimit
-	turnScanLimit = 1
-	t.Cleanup(func() { turnScanLimit = limit })
+	limit := transcript.TurnScanLimit
+	transcript.TurnScanLimit = 1
+	t.Cleanup(func() { transcript.TurnScanLimit = limit })
 	path := timelineFixture(t, codexTurnRecords)
 	testkit.AppendFile(t, path, `{"timestamp":"2026-10-19T10:00:02Z","type":"compacted","payload":{"message":"","window_number":1,"window_id":"window-1"}}`+"\n"+codexTurnRest)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -359,9 +360,9 @@ func TestATurnWhoseEarlierHistoryIsOutOfReachDoesNotClaimItHadNoCompactions(t *t
 	records := codexTurnRecords + codexTurnRest
 	start := strings.Index(records, `{"timestamp":"2026-10-19T10:01:00Z","type":"event_msg","payload":{"type":"task_started"`)
 	split := strings.Index(records, `{"timestamp":"2026-10-19T10:01:02Z","type":"event_msg","payload":{"type":"token_count"`)
-	limit := turnScanLimit
-	turnScanLimit = int64(split - start + 1)
-	t.Cleanup(func() { turnScanLimit = limit })
+	limit := transcript.TurnScanLimit
+	transcript.TurnScanLimit = int64(split - start + 1)
+	t.Cleanup(func() { transcript.TurnScanLimit = limit })
 	turn := streamedCodexTurns(t, records[:split], records[split:], 1)[0]
 	if turn.Compactions != nil || !slices.Contains(turn.Unavailable, "compactions") {
 		t.Fatalf("codex turn=%s, want its compactions unavailable", turnJSON(t, turn))
@@ -370,7 +371,7 @@ func TestATurnWhoseEarlierHistoryIsOutOfReachDoesNotClaimItHadNoCompactions(t *t
 	claude := claudeTurnHead + claudeTurnTail
 	start = strings.Index(claude, `{"type":"user","uuid":"u2"`)
 	split = strings.Index(claude, `{"type":"assistant","uuid":"a5"`)
-	turnScanLimit = int64(split - start + 1)
+	transcript.TurnScanLimit = int64(split - start + 1)
 	turn = streamedClaudeTurns(t, claude[:split], claude[split:], "u2")["u2"]
 	if turn == nil || turn.Compactions != nil || !slices.Contains(turn.Unavailable, "compactions") {
 		t.Fatalf("claude turn=%s, want its compactions unavailable", turnJSON(t, turn))

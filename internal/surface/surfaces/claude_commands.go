@@ -5,6 +5,7 @@ import (
 	"unicode"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 var claudeCommandElements = []string{"name", "message", "args"}
@@ -174,7 +175,7 @@ func claudePromptText(originKind, text string) (string, bool) {
 // origin.kind human and stays their prompt.
 func claudeRecordIsCommand(record map[string]any) bool {
 	origin, _ := record["origin"].(map[string]any)
-	if str(record, "type") != "user" || str(origin, "kind") == claudeOriginHuman {
+	if transcript.String(record, "type") != "user" || transcript.String(origin, "kind") == claudeOriginHuman {
 		return false
 	}
 	message, _ := record["message"].(map[string]any)

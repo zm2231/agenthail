@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
@@ -41,7 +42,7 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 		sess.TranscriptOffsetSet = true
 	}
 	if !sess.TranscriptOffsetSet {
-		read, err := c.ReadSession(ctx, sess, surface.SessionReadRequest{Limit: timelineItemLimit})
+		read, err := c.ReadSession(ctx, sess, surface.SessionReadRequest{Limit: transcript.TimelineItemLimit})
 		if err != nil {
 			return err
 		}
@@ -62,7 +63,7 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 func (h CodexHome) awaitRollout(ctx context.Context, sess *surface.Session, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
-		if path := h.transcriptPath(sess); path != "" && fileExists(path) {
+		if path := h.transcriptPath(sess); path != "" && transcript.FileExists(path) {
 			return nil
 		}
 		if !time.Now().Before(deadline) {
@@ -71,7 +72,7 @@ func (h CodexHome) awaitRollout(ctx context.Context, sess *surface.Session, time
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(transcriptPollInterval):
+		case <-time.After(transcript.PollInterval):
 		}
 	}
 }

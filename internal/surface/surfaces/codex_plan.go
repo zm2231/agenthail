@@ -7,12 +7,13 @@ import (
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 const codexPlanFirstReadBytes = int64(4 << 20)
 
 type codexPlanState struct {
-	cursor transcriptCursor
+	cursor transcript.Cursor
 	plan   *surface.Plan
 	read   bool
 }
@@ -36,15 +37,15 @@ func (c *Codex) plan(ctx context.Context, path string, info os.FileInfo) *surfac
 		c.planState = map[string]*codexPlanState{}
 	}
 	state := c.planState[path]
-	reset := state == nil || state.cursor.reset(info)
-	if !reset && info.Size() == state.cursor.offset {
+	reset := state == nil || state.cursor.Reset(info)
+	if !reset && info.Size() == state.cursor.Offset {
 		state.read = true
 		return state.plan
 	}
 	if reset {
 		state = &codexPlanState{}
-		state.cursor.reset(info)
-		lines, offset, err := readRecentJSONLLines(ctx, path, 0, codexPlanFirstReadBytes, maxTranscriptRecordBytes)
+		state.cursor.Reset(info)
+		lines, offset, err := transcript.ReadRecentJSONLLines(ctx, path, 0, codexPlanFirstReadBytes, transcript.MaxRecordBytes)
 		if err != nil {
 			delete(c.planState, path)
 			return nil
@@ -52,15 +53,15 @@ func (c *Codex) plan(ctx context.Context, path string, info os.FileInfo) *surfac
 		for _, line := range lines {
 			state.apply(line)
 		}
-		state.cursor.offset = offset
+		state.cursor.Offset = offset
 		c.planState[path] = state
 	}
-	offset, err := scanAppendedJSONL(ctx, path, state.cursor.offset, maxTranscriptRecordBytes, func(line []byte) error {
+	offset, err := transcript.ScanAppendedJSONL(ctx, path, state.cursor.Offset, transcript.MaxRecordBytes, func(line []byte) error {
 		state.apply(line)
 		return nil
 	})
 	if err == nil {
-		state.cursor.offset = offset
+		state.cursor.Offset = offset
 	}
 	state.read = true
 	return state.plan

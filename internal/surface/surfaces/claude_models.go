@@ -137,7 +137,7 @@ func (c *Claude) loadModels(ctx context.Context) ([]surface.ModelOption, error) 
 	defer catalogCancel()
 	processCtx, cancel := context.WithCancel(catalogCtx)
 	defer cancel()
-	cmd := processGroupCommand(processCtx, binary,
+	cmd := surface.ProcessGroupCommand(processCtx, binary,
 		"--print", "--input-format", "stream-json", "--output-format", "stream-json",
 		"--verbose", "--no-session-persistence", "--permission-prompts", "none")
 	cmd.Dir = c.home

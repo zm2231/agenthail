@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 type codexTurn struct {
@@ -90,7 +91,7 @@ func (c *Codex) readThread(ctx context.Context, conn codexClient, threadID strin
 	if !ok {
 		return nil, fmt.Errorf("thread/read response missing thread")
 	}
-	thread := &codexThread{ID: str(value, "id"), Name: surface.DeriveName(str(value, "name"), str(value, "preview"), 60), Cwd: str(value, "cwd"), Status: codexStatus(value["status"]), Waiting: codexWaitingKind(value["status"])}
+	thread := &codexThread{ID: transcript.String(value, "id"), Name: surface.DeriveName(transcript.String(value, "name"), transcript.String(value, "preview"), 60), Cwd: transcript.String(value, "cwd"), Status: codexStatus(value["status"]), Waiting: codexWaitingKind(value["status"])}
 	if thread.ID == "" {
 		thread.ID = threadID
 	}
@@ -106,7 +107,7 @@ func (c *Codex) readThread(ctx context.Context, conn codexClient, threadID strin
 	for index, rawTurn := range turns {
 		entry, _ := rawTurn.(map[string]any)
 		status, done, turnError := codexTurnState(entry["status"])
-		turn := codexTurn{ID: str(entry, "id"), Status: status, Done: done, Error: turnError, Unsettled: codexTurnUnsettled(entry), Stop: codexTurnStop(entry), CompletedAt: codexUnixTime(entry["completedAt"])}
+		turn := codexTurn{ID: transcript.String(entry, "id"), Status: status, Done: done, Error: turnError, Unsettled: codexTurnUnsettled(entry), Stop: codexTurnStop(entry), CompletedAt: codexUnixTime(entry["completedAt"])}
 		items, _ := entry["items"].([]any)
 		if len(items) == 0 && turn.ID != "" && hydrate[index] {
 			page, pageErr := c.listThreadItems(ctx, conn, thread.ID, turn.ID)
@@ -122,7 +123,7 @@ func (c *Codex) readThread(ctx context.Context, conn codexClient, threadID strin
 				turn.User = codexItemText(item)
 			case "agentMessage", "assistant":
 				if text := codexItemText(item); text != "" {
-					assistant := codexAssistantItem{ID: str(item, "id"), Phase: str(item, "phase"), Text: text}
+					assistant := codexAssistantItem{ID: transcript.String(item, "id"), Phase: transcript.String(item, "phase"), Text: text}
 					turn.AssistantItems = append(turn.AssistantItems, assistant)
 					turn.Assistant = text
 				}
@@ -178,7 +179,7 @@ func (c *Codex) threadFromTurns(ctx context.Context, conn codexClient, threadID 
 	for index, rawTurn := range turns {
 		entry, _ := rawTurn.(map[string]any)
 		status, done, turnError := codexTurnState(entry["status"])
-		turn := codexTurn{ID: str(entry, "id"), Status: status, Done: done, Error: turnError, Unsettled: codexTurnUnsettled(entry), Stop: codexTurnStop(entry), CompletedAt: codexUnixTime(entry["completedAt"])}
+		turn := codexTurn{ID: transcript.String(entry, "id"), Status: status, Done: done, Error: turnError, Unsettled: codexTurnUnsettled(entry), Stop: codexTurnStop(entry), CompletedAt: codexUnixTime(entry["completedAt"])}
 		items, _ := entry["items"].([]any)
 		if len(items) == 0 && turn.ID != "" && hydrate[index] {
 			page, pageErr := c.listThreadItems(ctx, conn, thread.ID, turn.ID)
@@ -194,7 +195,7 @@ func (c *Codex) threadFromTurns(ctx context.Context, conn codexClient, threadID 
 				turn.User = codexItemText(item)
 			case "agentMessage", "assistant":
 				if text := codexItemText(item); text != "" {
-					assistant := codexAssistantItem{ID: str(item, "id"), Phase: str(item, "phase"), Text: text}
+					assistant := codexAssistantItem{ID: transcript.String(item, "id"), Phase: transcript.String(item, "phase"), Text: text}
 					turn.AssistantItems = append(turn.AssistantItems, assistant)
 					turn.Assistant = text
 				}

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // claudeTask is what a transcript shows of one task its session made.
@@ -41,16 +42,16 @@ func (s *claudePlanState) apply(record claudeRecord, line []byte) {
 	case "assistant":
 		for _, raw := range blocks {
 			block, _ := raw.(map[string]any)
-			if str(block, "type") != "tool_use" {
+			if transcript.String(block, "type") != "tool_use" {
 				continue
 			}
 			input, _ := block["input"].(map[string]any)
-			switch name := str(block, "name"); name {
+			switch name := transcript.String(block, "name"); name {
 			case "TaskCreate", "TaskUpdate":
 				if s.calls == nil {
 					s.calls = map[string]claudeTaskCall{}
 				}
-				s.calls[str(block, "id")] = claudeTaskCall{name: name, subject: str(input, "subject"), taskID: str(input, "taskId"), status: str(input, "status")}
+				s.calls[transcript.String(block, "id")] = claudeTaskCall{name: name, subject: transcript.String(input, "subject"), taskID: transcript.String(input, "taskId"), status: transcript.String(input, "status")}
 			case "TodoWrite":
 				s.tasks, s.stale = nil, false
 				s.plan = claudeTodoPlan(input)
@@ -66,8 +67,8 @@ func (s *claudePlanState) apply(record claudeRecord, line []byte) {
 		}
 		for _, raw := range blocks {
 			block, _ := raw.(map[string]any)
-			if str(block, "type") == "tool_result" {
-				ids = append(ids, str(block, "tool_use_id"))
+			if transcript.String(block, "type") == "tool_result" {
+				ids = append(ids, transcript.String(block, "tool_use_id"))
 			}
 		}
 		for _, id := range ids {
@@ -133,12 +134,12 @@ func claudeTodoPlan(input map[string]any) *surface.Plan {
 	for _, raw := range todos {
 		todo, _ := raw.(map[string]any)
 		plan.Total++
-		switch str(todo, "status") {
+		switch transcript.String(todo, "status") {
 		case "completed":
 			plan.Done++
 		case "in_progress":
 			if plan.Current == "" {
-				plan.Current = planStep(str(todo, "activeForm"), str(todo, "content"))
+				plan.Current = planStep(transcript.String(todo, "activeForm"), transcript.String(todo, "content"))
 			}
 		}
 	}

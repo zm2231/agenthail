@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 )
 
 func TestClaudePromptsCarryTheIDTheirSenderGaveThem(t *testing.T) {
@@ -65,7 +66,7 @@ func TestAPromptClaudeSentItselfKeepsItsPromptIDAndIsNotThePersons(t *testing.T)
 func TestClaudeRemoteControlPostsUnderTheDeliveryID(t *testing.T) {
 	fixture := newClaudeRootFixture(t, "b", "b@example.com")
 	var posted []string
-	claude := NewClaudeWithRequest(twoProfiles, fixture.home, func(ctx context.Context, method, url string, headers map[string]string, body string, cookies CookieSource, timeout time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(twoProfiles, fixture.home, func(ctx context.Context, method, url string, headers map[string]string, body string, cookies browsercookie.Source, timeout time.Duration) (int, string, error) {
 		if method == "POST" && strings.HasSuffix(url, "/events") {
 			var request struct {
 				Events []struct {

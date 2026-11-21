@@ -40,7 +40,7 @@ func (c *Claude) backgroundCommand(ctx context.Context, root, cwd string, args .
 	if cwd == "" {
 		cwd = c.home
 	}
-	cmd := processGroupCommand(ctx, binary, args...)
+	cmd := surface.ProcessGroupCommand(ctx, binary, args...)
 	cmd.WaitDelay = time.Second
 	cmd.Dir = cwd
 	cmd.Env = claudeCommandEnv(c.home)

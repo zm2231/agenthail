@@ -1,4 +1,4 @@
-package surfaces
+package transcript
 
 import (
 	"bytes"

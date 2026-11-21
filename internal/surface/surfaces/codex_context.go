@@ -11,10 +11,11 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 type codexContextState struct {
-	cursor       transcriptCursor
+	cursor       transcript.Cursor
 	usage        surface.ContextUsage
 	awaitingPost bool
 	pendingPre   int64
@@ -62,12 +63,12 @@ func (c *Codex) ContextUsage(ctx context.Context, sess *surface.Session) (*surfa
 		c.contextState = map[string]*codexContextState{}
 	}
 	state := c.contextState[path]
-	if state == nil || state.cursor.reset(info) {
+	if state == nil || state.cursor.Reset(info) {
 		state = &codexContextState{}
-		state.cursor.reset(info)
+		state.cursor.Reset(info)
 		c.contextState[path] = state
 	}
-	offset, err := scanAppendedJSONL(ctx, path, state.cursor.offset, maxTranscriptRecordBytes, func(line []byte) error {
+	offset, err := transcript.ScanAppendedJSONL(ctx, path, state.cursor.Offset, transcript.MaxRecordBytes, func(line []byte) error {
 		var record codexContextRecord
 		if json.Unmarshal(line, &record) != nil {
 			return nil
@@ -114,7 +115,7 @@ func (c *Codex) ContextUsage(ctx context.Context, sess *surface.Session) (*surfa
 		}
 		return nil
 	})
-	state.cursor.offset = offset
+	state.cursor.Offset = offset
 	if err != nil {
 		return nil, err
 	}

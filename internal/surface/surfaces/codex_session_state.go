@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // setCodexTransport routes a session and records the runtime that carries it:
@@ -33,16 +34,16 @@ func codexListsThread(thread map[string]any) bool {
 
 func codexSession(thread map[string]any) surface.Session {
 	session := surface.Session{
-		ID:         str(thread, "id"),
+		ID:         transcript.String(thread, "id"),
 		Surface:    surface.KindCodex,
-		Name:       surface.DeriveName(str(thread, "name"), str(thread, "preview"), 60),
-		Cwd:        str(thread, "cwd"),
+		Name:       surface.DeriveName(transcript.String(thread, "name"), transcript.String(thread, "preview"), 60),
+		Cwd:        transcript.String(thread, "cwd"),
 		Status:     codexStatus(thread["status"]),
 		Ended:      codexThreadEnded(thread["status"]),
 		Source:     codexSource(thread["source"]),
-		WaitingOn:  codexSessionWaiting(str(thread, "id"), thread["status"]),
+		WaitingOn:  codexSessionWaiting(transcript.String(thread, "id"), thread["status"]),
 		Subagent:   codexSubagent(thread),
-		Transcript: str(thread, "path"),
+		Transcript: transcript.String(thread, "path"),
 		ReadState:  codexReadState(thread[codexReadStateKey]),
 	}
 	setCodexTransport(&session, "")

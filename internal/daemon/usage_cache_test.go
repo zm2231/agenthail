@@ -13,6 +13,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
@@ -39,7 +40,7 @@ func TestUsageReadsClaudeAIOncePerMinuteAcrossPolls(t *testing.T) {
 	var reads atomic.Int32
 	resets := time.Now().Add(3 * time.Hour).UTC().Format(time.RFC3339)
 	profiles := []signin.Source{{ProfileID: "sp_work", Label: "work", Browser: signin.Chrome, Dir: "/work"}}
-	d.Surfaces = []surface.Surface{surfaces.NewClaudeWithRequest(candidates(profiles), home, func(_ context.Context, _ string, url string, _ map[string]string, _ string, _ surfaces.CookieSource, _ time.Duration) (int, string, error) {
+	d.Surfaces = []surface.Surface{surfaces.NewClaudeWithRequest(candidates(profiles), home, func(_ context.Context, _ string, url string, _ map[string]string, _ string, _ browsercookie.Source, _ time.Duration) (int, string, error) {
 		switch {
 		case strings.HasSuffix(url, "/api/account"):
 			return 200, `{"uuid":"acct-work"}`, nil

@@ -11,6 +11,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 )
 
 func TestAProfileThatAnswers401OnceIsAskedAgainOnFreshCookiesAndTheMessageGoesOutOnce(t *testing.T) {
@@ -62,7 +63,7 @@ sys.stdout.write(json.dumps({"status": status, "body": json.dumps(body), "error"
 func TestAProfileStillRefusedOnFreshCookiesAfterAnsweringForTheAccountLeavesTheAnswerOpen(t *testing.T) {
 	root := newClaudeRootFixture(t, "c", "c@example.com")
 	refuse := false
-	request := func(ctx context.Context, method, url string, headers map[string]string, body string, cookies CookieSource, timeout time.Duration) (int, string, error) {
+	request := func(ctx context.Context, method, url string, headers map[string]string, body string, cookies browsercookie.Source, timeout time.Duration) (int, string, error) {
 		if refuse && strings.HasSuffix(url, "/api/account") {
 			return 401, `{"error":{"type":"authentication_error"}}`, nil
 		}

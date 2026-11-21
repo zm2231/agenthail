@@ -15,10 +15,11 @@ import (
 	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/peerbridge"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func (c *Claude) peerSocket(ctx context.Context, record map[string]any) string {
-	path := str(record, "messagingSocketPath")
+	path := transcript.String(record, "messagingSocketPath")
 	pid, _ := record["pid"].(float64)
 	if pid <= 0 || !slices.Contains(claudeSocketPaths(int(pid)), path) {
 		return ""
@@ -69,7 +70,7 @@ func (c *Claude) sendPeer(ctx context.Context, session *surface.Session, message
 	if !found {
 		return nil, surface.DeliveryUnavailable(fmt.Errorf("Claude process %d has no session record", session.PID))
 	}
-	if session.ID != str(record, "sessionId") {
+	if session.ID != transcript.String(record, "sessionId") {
 		return nil, surface.DeliveryTerminal(fmt.Errorf("Claude PID no longer belongs to this session"), surface.DeliveryTargetMissing)
 	}
 	socket := c.peerSocket(ctx, record)
@@ -186,7 +187,7 @@ func (c *Claude) nativeCaller(ctx context.Context, id string) (*surface.Session,
 			continue
 		}
 		candidate, present := c.peerRecord(process.session.PID)
-		if !present || str(candidate, "agenthail") != "" {
+		if !present || transcript.String(candidate, "agenthail") != "" {
 			continue
 		}
 		if sender != nil {
@@ -222,7 +223,7 @@ func (c *Claude) PeerSocketSession(ctx context.Context, from string) string {
 		if c.peerSocket(ctx, record.fields) != path {
 			continue
 		}
-		id := str(record.fields, "sessionId")
+		id := transcript.String(record.fields, "sessionId")
 		if session != "" && session != id {
 			return ""
 		}
@@ -267,18 +268,18 @@ func (c *Claude) idleSince(sess *surface.Session) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	var record map[string]any
-	if candidate, found := c.peerRecord(sess.PID); sess.PID > 0 && found && str(candidate, "sessionId") == sess.ID {
+	if candidate, found := c.peerRecord(sess.PID); sess.PID > 0 && found && transcript.String(candidate, "sessionId") == sess.ID {
 		record = candidate
 	} else if _, records, err := c.records(); err == nil {
 		for _, candidate := range records {
-			if str(candidate.fields, "sessionId") == sess.ID {
+			if transcript.String(candidate.fields, "sessionId") == sess.ID {
 				record = candidate.fields
 				break
 			}
 		}
 	}
 	updated, _ := record["statusUpdatedAt"].(float64)
-	if str(record, "status") != "idle" || updated <= 0 {
+	if transcript.String(record, "status") != "idle" || updated <= 0 {
 		return time.Time{}, false
 	}
 	return time.UnixMilli(int64(updated)), true

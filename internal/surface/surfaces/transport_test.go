@@ -14,6 +14,7 @@ import (
 	"github.com/zm2231/agenthail/internal/signin"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
@@ -59,7 +60,7 @@ func TestClaudeSendClassifiesDeliveryOutcome(t *testing.T) {
 		{name: "not found", status: http.StatusNotFound, body: "rejected", terminal: surface.DeliveryTargetMissing},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			err := sendToReadyClaude(t, func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+			err := sendToReadyClaude(t, func(context.Context, string, string, map[string]string, string, browsercookie.Source, time.Duration) (int, string, error) {
 				return test.status, test.body, test.err
 			})
 			if test.terminal == "" {
@@ -80,7 +81,7 @@ func TestClaudeSendWaitsForRecordedIdle(t *testing.T) {
 	fixture := claudetest.New(t)
 	fixture.RecordStatus("conversation-test", fixture.Home, "session_test", "busy", "", time.Time{})
 	home, pid := fixture.Home, fixture.PID
-	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(context.Context, string, string, map[string]string, string, browsercookie.Source, time.Duration) (int, string, error) {
 		calls++
 		return 200, `{}`, nil
 	})
@@ -123,7 +124,7 @@ func TestAnAgentsMessageIsNeverPostedAsARemoteControlTurn(t *testing.T) {
 	calls := 0
 	fixture := claudetest.New(t)
 	fixture.RecordStatus("conversation-test", fixture.Home, "session_test", "idle", "", time.Time{})
-	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, func(context.Context, string, string, map[string]string, string, browsercookie.Source, time.Duration) (int, string, error) {
 		calls++
 		return 200, `{}`, nil
 	})
@@ -144,7 +145,7 @@ func TestClaudeSendHumanTurnUsesAuthenticatedBridgeForUDSSession(t *testing.T) {
 {"type":"system","subtype":"stop_hook_summary"}`)
 	var requestBody, requestURL string
 	home, pid := liveHumanTurnProcess(t)
-	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(_ context.Context, method, url string, _ map[string]string, body string, _ CookieSource, _ time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(_ context.Context, method, url string, _ map[string]string, body string, _ browsercookie.Source, _ time.Duration) (int, string, error) {
 		if method != http.MethodPost {
 			t.Fatalf("method=%s", method)
 		}
@@ -180,7 +181,7 @@ func TestClaudeSendHumanTurnUsesAuthenticatedBridgeForUDSSession(t *testing.T) {
 }
 
 func TestClaudeSendHumanTurnRejectsNativeOnlySession(t *testing.T) {
-	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, t.TempDir(), func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, t.TempDir(), func(context.Context, string, string, map[string]string, string, browsercookie.Source, time.Duration) (int, string, error) {
 		t.Fatal("human turn attempted a web request without a bridge identity")
 		return 0, "", nil
 	})
@@ -197,7 +198,7 @@ func TestClaudeSendHumanTurnUsesBridgeOnlySessionID(t *testing.T) {
 {"type":"system","subtype":"stop_hook_summary"}`)
 	var requestURL string
 	home, pid := liveHumanTurnProcess(t)
-	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(_ context.Context, _ string, url string, _ map[string]string, _ string, _ CookieSource, _ time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(_ context.Context, _ string, url string, _ map[string]string, _ string, _ browsercookie.Source, _ time.Duration) (int, string, error) {
 		requestURL = url
 		return http.StatusOK, `{}`, nil
 	})
@@ -215,7 +216,7 @@ func TestClaudeSendHumanTurnRetainsIdleGate(t *testing.T) {
 	fixture.Listen()
 	fixture.RecordStatus("conversation-bridge", fixture.Home, "session_bridge", "busy", "", time.Time{})
 	home, pid := fixture.Home, fixture.PID
-	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(context.Context, string, string, map[string]string, string, browsercookie.Source, time.Duration) (int, string, error) {
 		t.Fatal("human turn bypassed the active-turn gate")
 		return 0, "", nil
 	})
@@ -240,7 +241,7 @@ func TestClaudeCompactPostsRemoteSlashCommandAndConfirmsBoundary(t *testing.T) {
 	path := writeTranscript(t, `{"type":"user","message":{"content":"ready"}}`)
 	var body string
 	home, pid := liveBridgeProcess(t)
-	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, connectedRemoteControl(func(_ context.Context, method, url string, _ map[string]string, requestBody string, _ CookieSource, _ time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, connectedRemoteControl(func(_ context.Context, method, url string, _ map[string]string, requestBody string, _ browsercookie.Source, _ time.Duration) (int, string, error) {
 		if method != "POST" || !strings.Contains(url, "/v1/code/sessions/") {
 			t.Fatalf("method=%s url=%s", method, url)
 		}
@@ -281,7 +282,7 @@ func TestClaudeCompactDoesNotAcceptBoundaryBeforeRequestRecord(t *testing.T) {
 	home, pid := liveBridgeProcess(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, connectedRemoteControl(func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, connectedRemoteControl(func(context.Context, string, string, map[string]string, string, browsercookie.Source, time.Duration) (int, string, error) {
 		defer cancel()
 		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 		if err != nil {
@@ -307,7 +308,7 @@ func TestClaudeCompactReportsUnknownAfterAcceptedCommandLosesConfirmation(t *tes
 	home, pid := liveBridgeProcess(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, connectedRemoteControl(func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, connectedRemoteControl(func(context.Context, string, string, map[string]string, string, browsercookie.Source, time.Duration) (int, string, error) {
 		cancel()
 		return 200, `{}`, nil
 	}))

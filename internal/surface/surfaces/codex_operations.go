@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func applyCodexTurnOptions(model string, options surface.TurnOptions, params map[string]any) error {
@@ -39,10 +40,10 @@ func applyCodexLaunchSettings(ctx context.Context, client codexClient, session *
 				return err
 			}
 			result, _ := response["result"].(map[string]any)
-			model = str(result, "model")
+			model = transcript.String(result, "model")
 			if model == "" {
 				thread, _ := result["thread"].(map[string]any)
-				model = str(thread, "model")
+				model = transcript.String(thread, "model")
 			}
 			if model == "" {
 				return fmt.Errorf("cannot select collaboration mode without the session model")
@@ -72,7 +73,7 @@ func (c *Codex) ForkSession(ctx context.Context, session *surface.Session, optio
 	}
 	result, _ := response["result"].(map[string]any)
 	thread, _ := result["thread"].(map[string]any)
-	id := str(thread, "id")
+	id := transcript.String(thread, "id")
 	if id == "" {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("fork returned no thread id"))
 	}
@@ -81,14 +82,14 @@ func (c *Codex) ForkSession(ctx context.Context, session *surface.Session, optio
 	fork.PID = 0
 	fork.Transcript = ""
 	fork.Status = surface.StatusIdle
-	fork.Name = str(thread, "name")
+	fork.Name = transcript.String(thread, "name")
 	fork.Subagent = codexSubagent(thread)
-	fork.Cwd = str(result, "cwd")
+	fork.Cwd = transcript.String(result, "cwd")
 	if source := codexSource(thread["source"]); source != "" {
 		fork.Source = source
 	}
 	if fork.Cwd == "" {
-		fork.Cwd = str(thread, "cwd")
+		fork.Cwd = transcript.String(thread, "cwd")
 	}
 	fork.LastActive = time.Now()
 	if fork.Cwd == "" {

@@ -278,7 +278,7 @@ func claudeHostDeliveryError(err error) error {
 func ClaudeHostLaunch(home, version string) (claudehost.Launch, error) {
 	script := strings.TrimSpace(os.Getenv("AGENTHAIL_CLAUDE_HOST"))
 	if script == "" {
-		root, err := installRoot()
+		root, err := surface.InstallRoot()
 		if err != nil {
 			return claudehost.Launch{}, err
 		}
@@ -287,7 +287,7 @@ func ClaudeHostLaunch(home, version string) (claudehost.Launch, error) {
 	if _, err := os.Stat(script); err != nil {
 		return claudehost.Launch{}, fmt.Errorf("the Claude host script is missing (set AGENTHAIL_CLAUDE_HOST): %w", err)
 	}
-	node, err := shippedNode()
+	node, err := surface.ShippedNode()
 	if err != nil {
 		return claudehost.Launch{}, err
 	}

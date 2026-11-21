@@ -1,18 +1,18 @@
-package surfaces
+package transcript
 
 import "encoding/json"
 
-func str(m map[string]any, key string) string {
+func String(m map[string]any, key string) string {
 	v, _ := m[key].(string)
 	return v
 }
 
-func strNested(record map[string]any, object, field string) string {
+func NestedString(record map[string]any, object, field string) string {
 	value, _ := record[object].(map[string]any)
-	return str(value, field)
+	return String(value, field)
 }
 
-func int64Value(value any) int64 {
+func Int64Value(value any) int64 {
 	switch number := value.(type) {
 	case int64:
 		return number

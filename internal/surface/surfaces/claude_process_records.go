@@ -13,6 +13,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // claudeSessionRecord is a Claude process's session record and the config
@@ -52,7 +53,7 @@ func (c *Claude) records() ([]string, []claudeSessionRecord, error) {
 				continue
 			}
 			var m map[string]any
-			if json.Unmarshal(raw, &m) != nil || str(m, "agenthail") != "" || strings.HasPrefix(str(m, "sessionId"), claudehost.ListingSessionPrefix) {
+			if json.Unmarshal(raw, &m) != nil || transcript.String(m, "agenthail") != "" || strings.HasPrefix(transcript.String(m, "sessionId"), claudehost.ListingSessionPrefix) {
 				continue
 			}
 			if pid, ok := m["pid"].(float64); ok && pid > 0 && !claudeRecordLive(m) {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
@@ -78,7 +79,7 @@ func TestAPersonsMessageRoutedToTheSocketForSigninStillComesFromThePerson(t *tes
 	fixture.Transcript(goneConversation, fixture.Home)
 	fixture.Record(goneConversation, fixture.Home, "session_unsigned")
 	peers := claudetest.ListenPeerManager(t, fixture.Home)
-	c := NewClaudeWithRequest(unreadableClaudeSignin{}, fixture.Home, func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+	c := NewClaudeWithRequest(unreadableClaudeSignin{}, fixture.Home, func(context.Context, string, string, map[string]string, string, browsercookie.Source, time.Duration) (int, string, error) {
 		t.Fatal("a request went to claude.ai without a sign-in")
 		return 0, "", nil
 	})

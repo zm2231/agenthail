@@ -14,6 +14,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 	"github.com/zm2231/agenthail/internal/testkit"
@@ -46,7 +47,7 @@ func limitMoveNodeWith(t *testing.T, workPercent string, proxy func(home string)
 	resets := time.Now().Add(3 * time.Hour).UTC().Format(time.RFC3339)
 	percent := map[string]string{"org-a": "100", "org-b": workPercent}
 	profiles := []signin.Source{{ProfileID: "sp_a", Label: "a", Browser: signin.Chrome, Dir: "/a"}, {ProfileID: "sp_b", Label: "b", Browser: signin.Chrome, Dir: "/b"}}
-	claude := surfaces.NewClaudeWithRequest(candidates(profiles), host.Home, func(_ context.Context, _ string, url string, _ map[string]string, _ string, cookies surfaces.CookieSource, _ time.Duration) (int, string, error) {
+	claude := surfaces.NewClaudeWithRequest(candidates(profiles), host.Home, func(_ context.Context, _ string, url string, _ map[string]string, _ string, cookies browsercookie.Source, _ time.Duration) (int, string, error) {
 		if strings.HasSuffix(url, "/api/account") {
 			return 200, `{"uuid":"acct` + strings.ReplaceAll(cookies.Signin.Dir, "/", "-") + `"}`, nil
 		}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
@@ -33,7 +34,7 @@ func newFakeRemoteControl(t *testing.T) *fakeRemoteControl {
 	return &fakeRemoteControl{t: t, connected: true}
 }
 
-func (f *fakeRemoteControl) request(_ context.Context, method, url string, _ map[string]string, body string, _ CookieSource, _ time.Duration) (int, string, error) {
+func (f *fakeRemoteControl) request(_ context.Context, method, url string, _ map[string]string, body string, _ browsercookie.Source, _ time.Duration) (int, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	switch {
@@ -276,7 +277,7 @@ func TestClaudeCommandAfterACompetingPromptIsUnknown(t *testing.T) {
 }
 
 func TestClaudeControlValuesAreValidatedBeforeAnyRequest(t *testing.T) {
-	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, t.TempDir(), func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, t.TempDir(), func(context.Context, string, string, map[string]string, string, browsercookie.Source, time.Duration) (int, string, error) {
 		t.Fatal("invalid control reached claude.ai")
 		return 0, "", nil
 	})
@@ -291,7 +292,7 @@ func TestClaudeControlValuesAreValidatedBeforeAnyRequest(t *testing.T) {
 // connectedRemoteControl answers the Remote Control state read for
 // session_test as connected and passes every other request to next.
 func connectedRemoteControl(next ClaudeRequest) ClaudeRequest {
-	return func(ctx context.Context, method, url string, headers map[string]string, body string, cookies CookieSource, timeout time.Duration) (int, string, error) {
+	return func(ctx context.Context, method, url string, headers map[string]string, body string, cookies browsercookie.Source, timeout time.Duration) (int, string, error) {
 		if method == "GET" && strings.HasSuffix(url, "/v1/code/sessions/cse_test") {
 			return 200, `{"response_shape":{"id":"cse_test","connection_status":"connected","external_metadata":{}}}`, nil
 		}

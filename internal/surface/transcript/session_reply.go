@@ -1,4 +1,4 @@
-package surfaces
+package transcript
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func readSessionReply(ctx context.Context, reader surface.SessionReader, sess *surface.Session, limit int) (*surface.ReplyResult, error) {
+func ReadSessionReply(ctx context.Context, reader surface.SessionReader, sess *surface.Session, limit int) (*surface.ReplyResult, error) {
 	read, err := reader.ReadSession(ctx, sess, surface.SessionReadRequest{Limit: max(1, limit)})
 	if err != nil {
 		return nil, err

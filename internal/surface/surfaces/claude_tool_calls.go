@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"io"
 	"os"
 )
@@ -31,14 +32,14 @@ func newClaudeToolCalls(path string) *claudeToolCalls {
 }
 
 func (c *claudeToolCalls) observe(record map[string]any, offset int64) {
-	if c == nil || str(record, "type") != "assistant" {
+	if c == nil || transcript.String(record, "type") != "assistant" {
 		return
 	}
 	message, _ := record["message"].(map[string]any)
 	blocks, _ := message["content"].([]any)
 	for _, raw := range blocks {
-		if block, _ := raw.(map[string]any); str(block, "type") == "tool_use" && str(block, "id") != "" {
-			c.calls[str(block, "id")] = claudeCallSite{name: str(block, "name"), offset: offset}
+		if block, _ := raw.(map[string]any); transcript.String(block, "type") == "tool_use" && transcript.String(block, "id") != "" {
+			c.calls[transcript.String(block, "id")] = claudeCallSite{name: transcript.String(block, "name"), offset: offset}
 		}
 	}
 }

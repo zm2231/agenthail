@@ -33,7 +33,7 @@ func (n *Notion) threadExists(ctx context.Context, threadID string) (bool, error
 		return false, fmt.Errorf("resolve Notion thread: %w", err)
 	}
 	if status != 200 {
-		return false, fmt.Errorf("resolve Notion thread (HTTP %d): %s", status, diagnosticExcerpt(responseBody))
+		return false, fmt.Errorf("resolve Notion thread (HTTP %d): %s", status, surface.DiagnosticExcerpt(responseBody))
 	}
 	var response struct {
 		RecordMap struct {
@@ -114,7 +114,7 @@ func (a notionAccount) agentCompletions(ctx context.Context, sess *surface.Sessi
 		return nil, fmt.Errorf("notion reply: %w", err)
 	}
 	if status != 200 {
-		return nil, fmt.Errorf("notion reply (HTTP %d): %s", status, diagnosticExcerpt(responseBody))
+		return nil, fmt.Errorf("notion reply (HTTP %d): %s", status, surface.DiagnosticExcerpt(responseBody))
 	}
 	var threadResponse struct {
 		RecordMap struct {
@@ -162,7 +162,7 @@ func (a notionAccount) agentCompletions(ctx context.Context, sess *surface.Sessi
 		return nil, fmt.Errorf("notion reply messages: %w", err)
 	}
 	if status != 200 {
-		return nil, fmt.Errorf("notion reply messages (HTTP %d): %s", status, diagnosticExcerpt(responseBody))
+		return nil, fmt.Errorf("notion reply messages (HTTP %d): %s", status, surface.DiagnosticExcerpt(responseBody))
 	}
 	var messageResponse struct {
 		RecordMap struct {

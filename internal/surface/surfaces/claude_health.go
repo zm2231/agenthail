@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/signin"
+	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func (c *Claude) Health(ctx context.Context) error {
@@ -38,7 +40,7 @@ func (c *Claude) Health(ctx context.Context) error {
 	if _, err := sidecarPath(); err != nil {
 		return err
 	}
-	if c.cookieBridge == "" || !fileExists(c.cookieBridge) {
+	if c.cookieBridge == "" || !transcript.FileExists(c.cookieBridge) {
 		return fmt.Errorf("Claude cookie bridge not found (set AGENTHAIL_COOKIE_BRIDGE or install cookie.mjs alongside agenthail)")
 	}
 	status, body, err := sidecarRequestWithCookies(ctx, "GET", "https://claude.ai/api/organizations", c.headerMap("", ""), "", cookies, 15*time.Second)
@@ -46,7 +48,7 @@ func (c *Claude) Health(ctx context.Context) error {
 		return fmt.Errorf("Claude authentication probe: %w", err)
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("Claude authentication probe returned HTTP %d: %s", status, diagnosticExcerpt(body))
+		return fmt.Errorf("Claude authentication probe returned HTTP %d: %s", status, surface.DiagnosticExcerpt(body))
 	}
 	return nil
 }

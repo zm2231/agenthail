@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 )
 
 // errSigninUnconfirmed is a sign-in check that could not ask every profile
@@ -48,7 +49,7 @@ func (c *Claude) remoteControlUnauthenticated(sess *surface.Session, err error) 
 	if c.refused == nil {
 		c.refused = map[string]time.Time{}
 	}
-	c.refused[sess.ID] = time.Now().Add(cookieHeaderTTL)
+	c.refused[sess.ID] = time.Now().Add(browsercookie.HeaderTTL)
 	c.refusedMu.Unlock()
 	return fmt.Errorf("%w: %w; Claude conversation %s takes it on its messaging socket", surface.ErrRouteChanged, err, sess.ID)
 }

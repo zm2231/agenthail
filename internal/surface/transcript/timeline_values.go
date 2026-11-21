@@ -1,11 +1,11 @@
-package surfaces
+package transcript
 
 import (
 	"encoding/json"
 	"strings"
 )
 
-func timelineValue(value any) string {
+func TimelineValue(value any) string {
 	if value == nil {
 		return ""
 	}
@@ -22,7 +22,7 @@ func timelineValue(value any) string {
 func redactInlineImageData(value any, imageContext bool) any {
 	switch typed := value.(type) {
 	case map[string]any:
-		isImage := imageContext || strings.Contains(strings.ToLower(str(typed, "type")), "image")
+		isImage := imageContext || strings.Contains(strings.ToLower(String(typed, "type")), "image")
 		out := make(map[string]any, len(typed))
 		for key, child := range typed {
 			lower := strings.ToLower(key)
@@ -47,19 +47,19 @@ func redactInlineImageData(value any, imageContext bool) any {
 	return value
 }
 
-func toolResultImageContent(value any) []map[string]any {
+func ToolResultImageContent(value any) []map[string]any {
 	content, _ := value.([]any)
 	images := make([]map[string]any, 0)
 	for _, raw := range content {
 		block, _ := raw.(map[string]any)
-		if str(block, "type") == "image" {
+		if String(block, "type") == "image" {
 			images = append(images, block)
 		}
 	}
 	return images
 }
 
-func timelineToolResultText(value any) string {
+func TimelineToolResultText(value any) string {
 	if text, ok := value.(string); ok {
 		return text
 	}
@@ -68,11 +68,11 @@ func timelineToolResultText(value any) string {
 		textOnly := true
 		for _, entry := range content {
 			block, isBlock := entry.(map[string]any)
-			if isBlock && str(block, "type") == "image" {
+			if isBlock && String(block, "type") == "image" {
 				continue
 			}
-			if isBlock && str(block, "type") == "text" && str(block, "text") != "" {
-				textParts = append(textParts, str(block, "text"))
+			if isBlock && String(block, "type") == "text" && String(block, "text") != "" {
+				textParts = append(textParts, String(block, "text"))
 				continue
 			}
 			textOnly = false
@@ -85,7 +85,7 @@ func timelineToolResultText(value any) string {
 	if remaining, ok := clean.([]any); clean == nil || ok && len(remaining) == 0 {
 		return ""
 	}
-	return timelineValue(clean)
+	return TimelineValue(clean)
 }
 
 func sanitizeToolResultValue(value any) any {
@@ -93,7 +93,7 @@ func sanitizeToolResultValue(value any) any {
 	case []any:
 		clean := make([]any, 0, len(value))
 		for _, entry := range value {
-			if block, ok := entry.(map[string]any); ok && str(block, "type") == "image" {
+			if block, ok := entry.(map[string]any); ok && String(block, "type") == "image" {
 				continue
 			}
 			if sanitized := sanitizeToolResultValue(entry); sanitized != nil {
@@ -102,12 +102,12 @@ func sanitizeToolResultValue(value any) any {
 		}
 		return clean
 	case map[string]any:
-		if str(value, "type") == "image" {
+		if String(value, "type") == "image" {
 			return nil
 		}
 		clean := make(map[string]any, len(value))
 		for key, entry := range value {
-			if key == "data" && strings.Contains(strings.ToLower(str(value, "media_type")), "image/") {
+			if key == "data" && strings.Contains(strings.ToLower(String(value, "media_type")), "image/") {
 				continue
 			}
 			if sanitized := sanitizeToolResultValue(entry); sanitized != nil {

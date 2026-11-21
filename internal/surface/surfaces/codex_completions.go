@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func (c *Codex) ReadCompletions(ctx context.Context, sess *surface.Session, cursor string) (surface.CompletionBatch, error) {
@@ -53,7 +54,7 @@ func (c *Codex) readCompletions(ctx context.Context, conn codexClient, threadID,
 		stop := false
 		for _, raw := range values {
 			turn, _ := raw.(map[string]any)
-			id := str(turn, "id")
+			id := transcript.String(turn, "id")
 			if id == "" {
 				return surface.CompletionBatch{}, fmt.Errorf("completion page has a turn without an id")
 			}
@@ -78,7 +79,7 @@ func (c *Codex) readCompletions(ctx context.Context, conn codexClient, threadID,
 			}
 			turns = append(turns, turn)
 		}
-		next := str(result, "nextCursor")
+		next := transcript.String(result, "nextCursor")
 		if stop || next == "" {
 			break
 		}
@@ -102,9 +103,9 @@ func (c *Codex) readCompletions(ctx context.Context, conn codexClient, threadID,
 		if failure != "" {
 			continue
 		}
-		turn := codexTurn{ID: str(entry, "id")}
+		turn := codexTurn{ID: transcript.String(entry, "id")}
 		items, _ := entry["items"].([]any)
-		if len(items) == 0 || str(entry, "itemsView") != "full" {
+		if len(items) == 0 || transcript.String(entry, "itemsView") != "full" {
 			var err error
 			items, err = c.completionItems(ctx, conn, threadID, turn.ID)
 			if err != nil {
@@ -117,7 +118,7 @@ func (c *Codex) readCompletions(ctx context.Context, conn codexClient, threadID,
 			case "userMessage", "user":
 				turn.User = codexItemText(item)
 			case "agentMessage", "assistant":
-				turn.AssistantItems = append(turn.AssistantItems, codexAssistantItem{ID: str(item, "id"), Phase: str(item, "phase"), Text: codexItemText(item)})
+				turn.AssistantItems = append(turn.AssistantItems, codexAssistantItem{ID: transcript.String(item, "id"), Phase: transcript.String(item, "phase"), Text: codexItemText(item)})
 			}
 		}
 		answer, _ := turn.authoritativeAssistant()
@@ -152,7 +153,7 @@ func (c *Codex) completionItems(ctx context.Context, conn codexClient, threadID,
 				items = append(items, value)
 			}
 		}
-		next := str(result, "nextCursor")
+		next := transcript.String(result, "nextCursor")
 		if next == "" {
 			return items, nil
 		}

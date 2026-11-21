@@ -11,6 +11,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
@@ -37,7 +38,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		return err
 	}
 	fromStart := sess.TranscriptFromStart
-	if path == "" || !fileExists(path) {
+	if path == "" || !transcript.FileExists(path) {
 		if !claudeHosted(sess) {
 			return fmt.Errorf("no local transcript for streaming")
 		}
@@ -52,14 +53,14 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 	if err != nil {
 		return err
 	}
-	identity := state.cursor.identity
-	offset := state.cursor.offset
+	identity := state.cursor.Identity
+	offset := state.cursor.Offset
 	var closing surface.ClaudeClosingTurn
 	if uuid != "" {
 		// A targeted wait looks back so a turn submitted before the tail started is still found;
 		// events outside that turn are filtered below.
-		offset = max(int64(0), state.cursor.offset-initialClaudeObservationBytes)
-	} else if sess.TranscriptOffsetSet && sess.TranscriptOffset <= state.cursor.offset && identity != "" && sess.TranscriptIdentity == identity {
+		offset = max(int64(0), state.cursor.Offset-initialClaudeObservationBytes)
+	} else if sess.TranscriptOffsetSet && sess.TranscriptOffset <= state.cursor.Offset && identity != "" && sess.TranscriptIdentity == identity {
 		// The session source resumes at its seed or previous window boundary, so records written
 		// in between are delivered once without replaying history the seed bounded away.
 		offset = sess.TranscriptOffset
@@ -122,7 +123,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			turns.closing = surface.ClaudeClosingTurn{}
 		}
 		lineOffset := offset
-		next, scanErr := scanAppendedJSONL(ctx, path, offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
+		next, scanErr := transcript.ScanAppendedJSONL(ctx, path, offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
 			recordOffset := lineOffset
 			lineOffset += int64(len(line))
 			tail = append(tail, line...)
@@ -143,7 +144,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			if interrupted {
 				return nil
 			}
-			if err := decorateTimelineAttachments(ctx, items, claudeAttachmentReferences(record), recordOffset); err != nil {
+			if err := transcript.DecorateTimelineAttachments(ctx, items, claudeAttachmentReferences(record), recordOffset); err != nil {
 				return err
 			}
 			items, err := appendSentFiles(ctx, items, calls, record, recordOffset, line)
@@ -153,17 +154,17 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			if uuid != "" && turnID != uuid {
 				return nil
 			}
-			startsTurn := turnID != "" && turnID == str(record, "uuid")
+			startsTurn := turnID != "" && turnID == transcript.String(record, "uuid")
 			for index, item := range items {
 				key := item.ID
 				if key == "" {
-					key = stableTimelineItemID(recordOffset, line, index)
+					key = transcript.StableTimelineItemID(recordOffset, line, index)
 				}
 				version := uint64(len(item.Text))
 				if version == 0 {
 					version = 1
 				}
-				at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
+				at, _ := time.Parse(time.RFC3339Nano, transcript.String(record, "timestamp"))
 				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, MessageID: item.MessageID, PromptID: item.PromptID, TurnStart: startsTurn, Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status, ResetsAt: item.ResetsAt, Attachment: item.Attachment, Files: item.Files, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text})
 			}
 			return nil
@@ -190,12 +191,12 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 	for first := true; first || time.Now().Before(deadline); first = false {
 		info, statErr := os.Stat(path)
 		if statErr == nil {
-			if current := transcriptFileIdentity(info); identity != "" && current != identity {
+			if current := transcript.FileIdentity(info); identity != "" && current != identity {
 				// A transcript replaced at the same path is read from its start, as a shorter rewrite is.
 				identity, offset = current, 0
 			}
 		}
-		if statErr != nil || read == nil || !sameTranscriptState(read, info) {
+		if statErr != nil || read == nil || !transcript.SameState(read, info) {
 			if err := readAppended(); err != nil {
 				return err
 			}
@@ -217,7 +218,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		if route != nil && route.reread(ctx) {
 			commands.Refresh()
 		}
-		if err := awaitTranscript(ctx, wake); err != nil {
+		if err := transcript.Await(ctx, wake); err != nil {
 			return err
 		}
 	}

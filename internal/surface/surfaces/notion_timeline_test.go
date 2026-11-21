@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/zm2231/agenthail/internal/signin"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ func TestNotionReadSessionUsesBoundedProviderMessageIDs(t *testing.T) {
 	original := notionRecordRequest
 	t.Cleanup(func() { notionRecordRequest = original })
 	var requested [][]string
-	notionRecordRequest = func(_ context.Context, _ string, _ string, _ map[string]string, body string, _ CookieSource, _ time.Duration) (int, string, error) {
+	notionRecordRequest = func(_ context.Context, _ string, _ string, _ map[string]string, body string, _ browsercookie.Source, _ time.Duration) (int, string, error) {
 		var request struct {
 			Requests []struct {
 				Pointer struct {

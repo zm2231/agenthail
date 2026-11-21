@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // Observe reads a session whose process exited as offline, unless no other
@@ -127,10 +128,10 @@ func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.T
 // when it started waiting, so it names one question.
 func (c *Claude) recordWaiting(sess *surface.Session) *surface.Waiting {
 	record, live := c.liveRecord(*sess)
-	if !live || str(record, "status") != "waiting" {
+	if !live || transcript.String(record, "status") != "waiting" {
 		return nil
 	}
-	kind := claudeWaitingKind(str(record, "waitingFor"))
+	kind := claudeWaitingKind(transcript.String(record, "waitingFor"))
 	since, _ := record["statusUpdatedAt"].(float64)
 	waiting := &surface.Waiting{Kind: kind, ID: fmt.Sprintf("%s:%s:%d", sess.ID, kind, int64(since))}
 	if since > 0 {
@@ -161,7 +162,7 @@ func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surfa
 		path = c.transcriptPath(sess)
 	}
 	observation := &surface.TurnObservation{Status: claudeStatus(sess.Status)}
-	if path == "" || !fileExists(path) {
+	if path == "" || !transcript.FileExists(path) {
 		if observation.Status != surface.StatusOffline {
 			observation.Status = surface.StatusUnknown
 		}

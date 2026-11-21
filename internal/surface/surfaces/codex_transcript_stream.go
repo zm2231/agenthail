@@ -9,6 +9,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
@@ -20,7 +21,7 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 	if err != nil {
 		return fmt.Errorf("Codex local transcript is unavailable: %w", surface.ErrTranscriptUnavailable)
 	}
-	identity := transcriptFileIdentity(fileInfo)
+	identity := transcript.FileIdentity(fileInfo)
 	if identity == "" {
 		return fmt.Errorf("Codex transcript identity is unavailable: %w", surface.ErrTranscriptUnavailable)
 	}
@@ -53,7 +54,7 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 		if statErr != nil || currentInfo == nil {
 			return fmt.Errorf("Codex transcript changed during stream: %w", surface.ErrTranscriptUnavailable)
 		}
-		if currentIdentity := transcriptFileIdentity(currentInfo); currentIdentity != identity || currentInfo.Size() < offset {
+		if currentIdentity := transcript.FileIdentity(currentInfo); currentIdentity != identity || currentInfo.Size() < offset {
 			identity, offset = currentIdentity, 0
 			session.TranscriptIdentity, session.TranscriptOffset = identity, 0
 			currentTurnID = ""
@@ -67,7 +68,7 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 			}
 		}
 		lineOffset := offset
-		next, err := scanAppendedJSONL(ctx, path, offset, maxTranscriptRecordBytes, func(line []byte) error {
+		next, err := transcript.ScanAppendedJSONL(ctx, path, offset, transcript.MaxRecordBytes, func(line []byte) error {
 			recordOffset := lineOffset
 			lineOffset += int64(len(line))
 			var record map[string]any
@@ -103,7 +104,7 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 			if len(items) == 0 {
 				return nil
 			}
-			if err := decorateTimelineAttachments(ctx, items, codexAttachmentReferences(record), recordOffset); err != nil {
+			if err := transcript.DecorateTimelineAttachments(ctx, items, codexAttachmentReferences(record), recordOffset); err != nil {
 				return err
 			}
 			for index, item := range items {
@@ -117,7 +118,7 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 		offset = next
 		session.TranscriptOffset = offset
 		session.TranscriptOffsetSet = true
-		if err := awaitTranscript(ctx, wake); err != nil {
+		if err := transcript.Await(ctx, wake); err != nil {
 			return err
 		}
 	}
@@ -138,7 +139,7 @@ func emitCodexTranscriptItem(session *surface.Session, uuid string, record map[s
 	key := codexServedItemKey(record, line, offset, item, index)
 	stamp := item.Timestamp
 	if stamp == "" {
-		stamp = str(record, "timestamp")
+		stamp = transcript.String(record, "timestamp")
 	}
 	at, _ := time.Parse(time.RFC3339Nano, stamp)
 	operation := "upsert"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"sync"
 	"time"
 )
@@ -82,7 +83,7 @@ func (s *codexTurnStarts) settle(threadID string, turns []map[string]any, full b
 		return
 	}
 	for i, turn := range turns {
-		if str(turn, "id") == start.turnID {
+		if transcript.String(turn, "id") == start.turnID {
 			if i > 0 || turn["completedAt"] != nil {
 				delete(s.started, threadID)
 			}
@@ -142,7 +143,7 @@ func (c *Codex) startTurn(ctx context.Context, client codexClient, threadID, met
 	}
 	result, _ := response["result"].(map[string]any)
 	turn, _ := result["turn"].(map[string]any)
-	id := str(turn, "id")
+	id := transcript.String(turn, "id")
 	if id != "" {
 		c.turnStarts.identify(threadID, id)
 	}
@@ -189,7 +190,7 @@ func awaitTurnUnderway(ctx context.Context, client codexClient, threadID string,
 	started := map[string]bool{}
 	for {
 		for _, event := range notifier.DrainNotifications() {
-			if str(event.Params, "threadId") != threadID {
+			if transcript.String(event.Params, "threadId") != threadID {
 				continue
 			}
 			turn, _ := event.Params["turn"].(map[string]any)
@@ -200,9 +201,9 @@ func awaitTurnUnderway(ctx context.Context, client codexClient, threadID string,
 					return ""
 				}
 			case event.Method == "turn/started" && after >= 0 && event.received > after:
-				started[str(turn, "id")] = true
-			case event.Method == "item/started" && str(item, "type") == "contextCompaction" && started[str(event.Params, "turnId")]:
-				return str(event.Params, "turnId")
+				started[transcript.String(turn, "id")] = true
+			case event.Method == "item/started" && transcript.String(item, "type") == "contextCompaction" && started[transcript.String(event.Params, "turnId")]:
+				return transcript.String(event.Params, "turnId")
 			}
 		}
 		select {

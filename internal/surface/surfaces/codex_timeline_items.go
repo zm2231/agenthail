@@ -5,18 +5,19 @@ import (
 
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/codemode"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 	payload, _ := record["payload"].(map[string]any)
-	if str(record, "type") == "realtime_item" {
+	if transcript.String(record, "type") == "realtime_item" {
 		return codexVoiceTimelineItems(payload)
 	}
-	if str(record, "type") == "compacted" {
-		return []surface.TimelineItem{{Kind: "event", Title: "Context compacted", Text: str(payload, "message")}}
+	if transcript.String(record, "type") == "compacted" {
+		return []surface.TimelineItem{{Kind: "event", Title: "Context compacted", Text: transcript.String(payload, "message")}}
 	}
-	if str(record, "type") == "event_msg" && str(payload, "type") == "user_message" {
-		text := str(payload, "message")
+	if transcript.String(record, "type") == "event_msg" && transcript.String(payload, "type") == "user_message" {
+		text := transcript.String(payload, "message")
 		items := []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: text}}
 		if images, ok := payload["images"].([]any); ok && len(images) > 0 {
 			for range images {
@@ -25,7 +26,7 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 		}
 		return items
 	}
-	if str(record, "type") == "event_msg" {
+	if transcript.String(record, "type") == "event_msg" {
 		if status, ended := codexTurnEnd(payload); ended {
 			done := codexDoneItem(status, payload)
 			if status != "failed" {
@@ -36,12 +37,12 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 			return []surface.TimelineItem{notice, done}
 		}
 	}
-	if str(record, "type") != "response_item" {
+	if transcript.String(record, "type") != "response_item" {
 		return nil
 	}
 	item := surface.TimelineItem{}
 	messageAttachmentCount := 0
-	switch str(payload, "type") {
+	switch transcript.String(payload, "type") {
 	case "message":
 		if notice, ok := codexInterruptionNotice(payload); ok {
 			return []surface.TimelineItem{notice}
@@ -50,42 +51,42 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 			return []surface.TimelineItem{{Kind: "instructions", Title: "Instructions", Text: text}}
 		}
 		item.Kind = "message"
-		item.Role = str(payload, "role")
-		item.Phase = str(payload, "phase")
+		item.Role = transcript.String(payload, "role")
+		item.Phase = transcript.String(payload, "phase")
 		item.Title = item.Role
-		if channel := str(payload, "channel"); channel != "" {
+		if channel := transcript.String(payload, "channel"); channel != "" {
 			item.Title += " · " + channel
 		}
 		blocks, _ := payload["content"].([]any)
 		var parts []string
 		for _, raw := range blocks {
 			block, _ := raw.(map[string]any)
-			if text := str(block, "text"); codexImageWrapper(text) {
+			if text := transcript.String(block, "text"); codexImageWrapper(text) {
 				continue
 			} else if text != "" {
 				parts = append(parts, text)
-			} else if strings.Contains(str(block, "type"), "image") {
+			} else if strings.Contains(transcript.String(block, "type"), "image") {
 				messageAttachmentCount++
 			}
 		}
 		item.Text = strings.Join(parts, "\n\n")
 	case "function_call", "custom_tool_call":
 		item.Kind = "toolCall"
-		item.Title = str(payload, "name")
-		item.CallID = str(payload, "call_id")
+		item.Title = transcript.String(payload, "name")
+		item.CallID = transcript.String(payload, "call_id")
 		if calls, ok := codexCodeModeScript(payload); ok {
 			row := codemode.Present(calls)
 			item.Title, item.Text = row.Tool, row.Text()
 			break
 		}
-		item.Text = timelineValue(payload["arguments"])
+		item.Text = transcript.TimelineValue(payload["arguments"])
 		if item.Text == "" {
-			item.Text = timelineValue(payload["input"])
+			item.Text = transcript.TimelineValue(payload["input"])
 		}
 	case "function_call_output", "custom_tool_call_output":
 		item.Kind = "toolResult"
 		item.Title = "Tool result"
-		item.CallID = str(payload, "call_id")
+		item.CallID = transcript.String(payload, "call_id")
 		if text, images, ok := codexTypedToolOutput(payload["output"]); ok {
 			item.Text = text
 			if body, status, ok := codexScriptOutput(text); ok {
@@ -97,7 +98,7 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 			}
 			return items
 		}
-		item.Text = timelineValue(payload["output"])
+		item.Text = transcript.TimelineValue(payload["output"])
 	case "reasoning":
 		item.Kind = "reasoning"
 		item.Title = "Reasoning summary"
@@ -105,7 +106,7 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 		var parts []string
 		for _, raw := range blocks {
 			block, _ := raw.(map[string]any)
-			if text := str(block, "text"); text != "" {
+			if text := transcript.String(block, "text"); text != "" {
 				parts = append(parts, text)
 			}
 		}
@@ -116,8 +117,8 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 	case "web_search_call":
 		item.Kind = "toolCall"
 		item.Title = "Web search"
-		item.Text = timelineValue(payload["action"])
-		item.Status = str(payload, "status")
+		item.Text = transcript.TimelineValue(payload["action"])
+		item.Status = transcript.String(payload, "status")
 	default:
 		return nil
 	}
@@ -140,19 +141,19 @@ func codexInstructions(payload map[string]any) (string, bool) {
 	var parts []string
 	for _, raw := range blocks {
 		block, _ := raw.(map[string]any)
-		text := str(block, "text")
+		text := transcript.String(block, "text")
 		if strings.TrimSpace(text) == "" {
-			if str(payload, "role") == "user" && strings.Contains(str(block, "type"), "image") {
+			if transcript.String(payload, "role") == "user" && strings.Contains(transcript.String(block, "type"), "image") {
 				return "", false
 			}
 			continue
 		}
-		if str(payload, "role") == "user" && !surface.IsCodexInjectedContext(text) {
+		if transcript.String(payload, "role") == "user" && !surface.IsCodexInjectedContext(text) {
 			return "", false
 		}
 		parts = append(parts, text)
 	}
-	switch str(payload, "role") {
+	switch transcript.String(payload, "role") {
 	case "developer", "system":
 		return strings.Join(parts, "\n\n"), true
 	case "user":
@@ -173,7 +174,7 @@ func codexTypedToolOutput(value any) (string, int, bool) {
 		if !ok {
 			return "", 0, false
 		}
-		switch str(block, "type") {
+		switch transcript.String(block, "type") {
 		case "input_text":
 			part, ok := block["text"].(string)
 			if !ok {
@@ -184,7 +185,7 @@ func codexTypedToolOutput(value any) (string, int, bool) {
 			}
 			text.WriteString(part)
 		case "input_image":
-			if _, ok := attachmentReferenceFromValue(block); !ok {
+			if _, ok := transcript.AttachmentReferenceFromValue(block); !ok {
 				return "", 0, false
 			}
 			images++

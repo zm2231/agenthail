@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 const (
@@ -65,14 +66,14 @@ func (c *Codex) rolloutUsage(ctx context.Context, path string) *surface.Usage {
 	if err != nil {
 		return nil
 	}
-	identity := transcriptFileIdentity(info)
+	identity := transcript.FileIdentity(info)
 	c.usageMu.Lock()
 	cached := c.usageReads[path]
 	c.usageMu.Unlock()
 	if cached != nil && identity != "" && cached.identity == identity && cached.size == info.Size() {
 		return cached.usage
 	}
-	lines, _, err := readRecentJSONLLines(ctx, path, 0, codexUsageTailBytes, maxTranscriptRecordBytes)
+	lines, _, err := transcript.ReadRecentJSONLLines(ctx, path, 0, codexUsageTailBytes, transcript.MaxRecordBytes)
 	if err != nil {
 		return nil
 	}

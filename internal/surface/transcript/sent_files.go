@@ -1,4 +1,4 @@
-package surfaces
+package transcript
 
 import (
 	"context"
@@ -29,7 +29,7 @@ type sentFileFacts struct {
 
 // The recorded type is used only where the bytes sniff as generic; Claude
 // records null for some files, and the extension is never trusted.
-func describeSentFile(ref attachmentReference, data []byte) sentFileFacts {
+func describeSentFile(ref AttachmentReference, data []byte) sentFileFacts {
 	sum := sha256.Sum256(data)
 	facts := sentFileFacts{hash: hex.EncodeToString(sum[:]), bytes: int64(len(data))}
 	if ref.Image {
@@ -60,7 +60,7 @@ var sentFileCache = struct {
 
 const sentFileCacheEntries = 256
 
-func sentFileFactsFor(ctx context.Context, ref attachmentReference) (sentFileFacts, error) {
+func sentFileFactsFor(ctx context.Context, ref AttachmentReference) (sentFileFacts, error) {
 	info, err := os.Lstat(ref.Path)
 	if err != nil || !info.Mode().IsRegular() {
 		return sentFileFacts{}, ErrAttachmentNotFound
@@ -89,7 +89,7 @@ func sentFileFactsFor(ctx context.Context, ref attachmentReference) (sentFileFac
 	return facts, nil
 }
 
-func decorateSentFile(ctx context.Context, item *surface.TimelineItem, ref attachmentReference, offset int64, index int) error {
+func DecorateSentFile(ctx context.Context, item *surface.TimelineItem, ref AttachmentReference, offset int64, index int) error {
 	if info, err := os.Lstat(ref.Path); err == nil && info.Mode().IsRegular() && len(item.Files) == 1 {
 		item.Files[0].Bytes = info.Size()
 	}
@@ -100,7 +100,7 @@ func decorateSentFile(ctx context.Context, item *surface.TimelineItem, ref attac
 		}
 		return nil
 	}
-	id := attachmentIDFromHash(offset, index, facts.hash)
+	id := AttachmentIDFromHash(offset, index, facts.hash)
 	if facts.image {
 		caption := item.Text
 		if caption == "" {
@@ -114,7 +114,7 @@ func decorateSentFile(ctx context.Context, item *surface.TimelineItem, ref attac
 	return nil
 }
 
-func readSentFile(ctx context.Context, ref attachmentReference, expected string) (*surface.Attachment, []byte, error) {
+func readSentFile(ctx context.Context, ref AttachmentReference, expected string) (*surface.Attachment, []byte, error) {
 	data, err := readLocalFile(ctx, ref.Path, MaxSentFileBytes)
 	if errors.Is(err, ErrAttachmentTooLarge) {
 		return nil, nil, ErrSentFileTooLarge

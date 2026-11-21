@@ -15,6 +15,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func commandInserts(commands *surface.RuntimeCommands) []string {
@@ -89,7 +90,7 @@ func TestAProcessTheHostStartsOnlyToListCommandsIsNoSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, record := range records {
-		if str(record.fields, "sessionId") == listing {
+		if transcript.String(record.fields, "sessionId") == listing {
 			t.Fatalf("records include the listing process %+v", record.fields)
 		}
 	}

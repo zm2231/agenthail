@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // codexTurnStop is the stop a failed app-server turn leaves, or nil for a turn
@@ -21,7 +22,7 @@ func codexTurnStop(entry map[string]any) *surface.TurnStop {
 	default:
 		return nil
 	}
-	return codexFailureStop(str(entry, "id"), codexUnixTime(entry["completedAt"]), entry["error"])
+	return codexFailureStop(transcript.String(entry, "id"), codexUnixTime(entry["completedAt"]), entry["error"])
 }
 
 // codexFailureStop reads a turn's error, which the app-server keys
@@ -31,7 +32,7 @@ func codexFailureStop(turnID string, at time.Time, failure any) *surface.TurnSto
 	message, kind := "", ""
 	switch failure := failure.(type) {
 	case map[string]any:
-		message = str(failure, "message")
+		message = transcript.String(failure, "message")
 		info := failure["codexErrorInfo"]
 		if info == nil {
 			info = failure["codex_error_info"]

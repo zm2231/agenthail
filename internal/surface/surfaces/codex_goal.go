@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 type CodexGoalNotification struct {
@@ -27,7 +28,7 @@ func ParseCodexGoalNotification(method string, params map[string]any) (CodexGoal
 	if method != "thread/goal/updated" && method != "thread/goal/cleared" {
 		return CodexGoalNotification{}, false
 	}
-	notification := CodexGoalNotification{Method: method, ThreadID: str(params, "threadId")}
+	notification := CodexGoalNotification{Method: method, ThreadID: transcript.String(params, "threadId")}
 	if turnID, ok := params["turnId"].(string); ok {
 		notification.TurnID = &turnID
 	}
@@ -97,15 +98,15 @@ func (c *Codex) GoalGet(ctx context.Context, sess *surface.Session) (*surface.Go
 
 func decodeCodexGoal(goal map[string]any) *surface.GoalState {
 	state := &surface.GoalState{
-		Objective:       str(goal, "objective"),
-		Status:          str(goal, "status"),
-		TimeUsedSeconds: int64Value(goal["timeUsedSeconds"]),
-		TokensUsed:      int64Value(goal["tokensUsed"]),
+		Objective:       transcript.String(goal, "objective"),
+		Status:          transcript.String(goal, "status"),
+		TimeUsedSeconds: transcript.Int64Value(goal["timeUsedSeconds"]),
+		TokensUsed:      transcript.Int64Value(goal["tokensUsed"]),
 		CreatedAt:       codexUnixTime(goal["createdAt"]),
 		UpdatedAt:       codexUnixTime(goal["updatedAt"]),
 	}
 	if goal["tokenBudget"] != nil {
-		value := int64Value(goal["tokenBudget"])
+		value := transcript.Int64Value(goal["tokenBudget"])
 		state.TokenBudget = &value
 	}
 	return state
@@ -130,7 +131,7 @@ func stringValue(value *string) string {
 }
 
 func codexUnixTime(value any) time.Time {
-	seconds := int64Value(value)
+	seconds := transcript.Int64Value(value)
 	if seconds == 0 {
 		return time.Time{}
 	}

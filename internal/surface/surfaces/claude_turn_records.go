@@ -4,11 +4,12 @@ import (
 	"strings"
 
 	"github.com/tidwall/gjson"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func claudeRecordStartsTurn(record map[string]any) bool {
 	compactSummary, _ := record["isCompactSummary"].(bool)
-	return str(record, "type") == "user" && str(record, "uuid") != "" && !compactSummary && !claudeRecordHasToolResult(record) && !claudeRecordIsInterrupt(record) && !claudeRecordIsCommand(record)
+	return transcript.String(record, "type") == "user" && transcript.String(record, "uuid") != "" && !compactSummary && !claudeRecordHasToolResult(record) && !claudeRecordIsInterrupt(record) && !claudeRecordIsCommand(record)
 }
 
 func claudeRecordHasToolResult(record map[string]any) bool {
@@ -16,16 +17,16 @@ func claudeRecordHasToolResult(record map[string]any) bool {
 	blocks, _ := message["content"].([]any)
 	for _, raw := range blocks {
 		block, _ := raw.(map[string]any)
-		if str(block, "type") == "tool_result" {
+		if transcript.String(block, "type") == "tool_result" {
 			return true
 		}
 	}
-	return str(message, "tool_use_id") != ""
+	return transcript.String(message, "tool_use_id") != ""
 }
 
 func claudeRecordIsInterrupt(record map[string]any) bool {
 	origin, _ := record["origin"].(map[string]any)
-	if str(record, "type") != "user" || str(origin, "kind") == claudeOriginHuman {
+	if transcript.String(record, "type") != "user" || transcript.String(origin, "kind") == claudeOriginHuman {
 		return false
 	}
 	message, _ := record["message"].(map[string]any)
@@ -36,14 +37,14 @@ func claudeRecordIsInterrupt(record map[string]any) bool {
 // end_turn block starts closing it (see appendClaudeTurn), and an interruption
 // cancels it.
 func claudeStreamTerminal(record map[string]any) (done, ending, interrupted bool) {
-	switch str(record, "type") {
+	switch transcript.String(record, "type") {
 	case "system":
-		return str(record, "subtype") == "turn_duration", false, false
+		return transcript.String(record, "subtype") == "turn_duration", false, false
 	case "assistant":
 		if apiError, _ := record["isApiErrorMessage"].(bool); apiError {
 			return true, false, false
 		}
-		reason := strNested(record, "message", "stop_reason")
+		reason := transcript.NestedString(record, "message", "stop_reason")
 		return false, reason == "end_turn", claudeTerminalInterruption(reason)
 	case "user":
 		return false, false, claudeRecordIsInterrupt(record)
@@ -63,7 +64,7 @@ func claudeStopHooksEndTurn(subtype string, sidechain, prevented bool, hookError
 func claudeRecordIsStopHookFeedback(record map[string]any) bool {
 	meta, _ := record["isMeta"].(bool)
 	message, _ := record["message"].(map[string]any)
-	return meta && str(record, "type") == "user" && isClaudeStopHookFeedback(transcriptText(message["content"]))
+	return meta && transcript.String(record, "type") == "user" && isClaudeStopHookFeedback(transcriptText(message["content"]))
 }
 
 func isClaudeStopHookFeedback(text string) bool {
@@ -71,13 +72,13 @@ func isClaudeStopHookFeedback(text string) bool {
 }
 
 func claudeRecordStopsAfterHooks(record map[string]any) bool {
-	if str(record, "type") != "system" {
+	if transcript.String(record, "type") != "system" {
 		return false
 	}
 	sidechain, _ := record["isSidechain"].(bool)
 	prevented, _ := record["preventedContinuation"].(bool)
 	hookErrors, _ := record["hookErrors"].([]any)
-	return claudeStopHooksEndTurn(str(record, "subtype"), sidechain, prevented, len(hookErrors))
+	return claudeStopHooksEndTurn(transcript.String(record, "subtype"), sidechain, prevented, len(hookErrors))
 }
 
 func claudeLineMayStartTurn(line []byte) bool {

@@ -16,6 +16,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 	"github.com/zm2231/agenthail/internal/testkit"
@@ -31,7 +32,7 @@ type claudePosts struct {
 	bodies []string
 }
 
-func (p *claudePosts) request(_ context.Context, method, url string, _ map[string]string, body string, _ surfaces.CookieSource, _ time.Duration) (int, string, error) {
+func (p *claudePosts) request(_ context.Context, method, url string, _ map[string]string, body string, _ browsercookie.Source, _ time.Duration) (int, string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if method == "POST" && strings.Contains(url, "/v1/code/sessions/") {

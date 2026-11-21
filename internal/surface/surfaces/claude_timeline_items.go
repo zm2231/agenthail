@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // claudeRecordTimelineItems returns the timeline items of one transcript
@@ -16,7 +17,7 @@ func claudeRecordTimelineItems(ctx context.Context, calls *claudeToolCalls, reco
 	if !interrupted {
 		items = claudeTimelineItems(record)
 	}
-	if err := decorateTimelineAttachments(ctx, items, claudeAttachmentReferences(record), offset); err != nil {
+	if err := transcript.DecorateTimelineAttachments(ctx, items, claudeAttachmentReferences(record), offset); err != nil {
 		return nil, err
 	}
 	if !interrupted {
@@ -25,10 +26,10 @@ func claudeRecordTimelineItems(ctx context.Context, calls *claudeToolCalls, reco
 			return nil, err
 		}
 	}
-	at := str(record, "timestamp")
+	at := transcript.String(record, "timestamp")
 	for i := range items {
 		if items[i].ID == "" {
-			items[i].ID = stableTimelineItemID(offset, line, i)
+			items[i].ID = transcript.StableTimelineItemID(offset, line, i)
 		}
 		items[i].TurnID = turnID
 		items[i].Timestamp = at
@@ -45,11 +46,11 @@ func claudeRecordTimelineItems(ctx context.Context, calls *claudeToolCalls, reco
 
 // claudeTranscriptReply returns the reply of the latest turn in records that
 // has one, and the index of that turn, or -1.
-func claudeTranscriptReply(records []transcriptRecord, source string, settled func(time.Time) bool) (*surface.ReplyResult, int) {
+func claudeTranscriptReply(records []transcript.Record, source string, settled func(time.Time) bool) (*surface.ReplyResult, int) {
 	var turns []claudeTurn
 	for _, record := range records {
 		var parsed claudeRecord
-		if json.Unmarshal(record.line, &parsed) == nil {
+		if json.Unmarshal(record.Line, &parsed) == nil {
 			turns = appendClaudeTurn(turns, parsed)
 		}
 	}
@@ -72,20 +73,20 @@ func claudeTranscriptReply(records []transcriptRecord, source string, settled fu
 }
 
 func claudeRecordItems(record map[string]any) []surface.TimelineItem {
-	kind := str(record, "type")
+	kind := transcript.String(record, "type")
 	if kind == "system" {
-		subtype := str(record, "subtype")
+		subtype := transcript.String(record, "subtype")
 		switch subtype {
 		case "turn_duration":
-			text := str(record, "content")
+			text := transcript.String(record, "content")
 			if milliseconds, ok := record["durationMs"].(float64); ok && milliseconds >= 0 {
 				text = (time.Duration(milliseconds) * time.Millisecond).Round(time.Second).String()
 			}
 			return []surface.TimelineItem{{Kind: "event", Title: "Turn duration", Text: text}}
 		case "compact_boundary":
-			return []surface.TimelineItem{{Kind: "event", Title: "Context compacted", Text: str(record, "content")}}
+			return []surface.TimelineItem{{Kind: "event", Title: "Context compacted", Text: transcript.String(record, "content")}}
 		case "local_command":
-			return []surface.TimelineItem{claudeLocalCommandItem(str(record, "content"))}
+			return []surface.TimelineItem{claudeLocalCommandItem(transcript.String(record, "content"))}
 		}
 		return nil
 	}
@@ -107,12 +108,12 @@ func claudeRecordItems(record map[string]any) []surface.TimelineItem {
 	}
 	if kind == "user" {
 		origin, _ := record["origin"].(map[string]any)
-		if text := claudeMessageText(message["content"]); text != "" && str(message, "tool_use_id") == "" {
+		if text := claudeMessageText(message["content"]); text != "" && transcript.String(message, "tool_use_id") == "" {
 			if injected := claudePromptOrigin(origin, text); injected != claudeOriginHuman {
 				return []surface.TimelineItem{claudeInjectedItem(injected, origin, text)}
 			}
 			if claudeCommandMarkup(text) {
-				if str(origin, "kind") != claudeOriginHuman {
+				if transcript.String(origin, "kind") != claudeOriginHuman {
 					return claudeCommandItems(text)
 				}
 				if claudeCommandInvocation(text) {
@@ -128,9 +129,9 @@ func claudeRecordItems(record map[string]any) []surface.TimelineItem {
 		}
 	}
 	origin, _ := record["origin"].(map[string]any)
-	typed := str(origin, "kind") == claudeOriginHuman
+	typed := transcript.String(origin, "kind") == claudeOriginHuman
 	if text, ok := message["content"].(string); ok && text != "" {
-		if callID := str(message, "tool_use_id"); callID != "" {
+		if callID := transcript.String(message, "tool_use_id"); callID != "" {
 			item := surface.TimelineItem{Kind: "toolResult", Title: "Tool result", Text: text, CallID: callID}
 			markToolOutputCut(&item, message)
 			return []surface.TimelineItem{item}
@@ -146,33 +147,33 @@ func claudeRecordItems(record map[string]any) []surface.TimelineItem {
 	for _, raw := range blocks {
 		block, _ := raw.(map[string]any)
 		item := surface.TimelineItem{Role: kind}
-		switch str(block, "type") {
+		switch transcript.String(block, "type") {
 		case "text":
 			item.Kind = "message"
 			item.Title = kind
-			item.Text = str(block, "text")
+			item.Text = transcript.String(block, "text")
 			if kind == "user" && !typed {
 				item.Origin = claudeRecordedOrigin(item.Text)
 			}
 		case "thinking":
 			item.Kind = "reasoning"
 			item.Title = "Thinking"
-			item.Text = str(block, "thinking")
+			item.Text = transcript.String(block, "thinking")
 		case "tool_use":
 			item.Kind = "toolCall"
-			item.Title = str(block, "name")
-			item.CallID = str(block, "id")
-			item.Text = timelineValue(block["input"])
+			item.Title = transcript.String(block, "name")
+			item.CallID = transcript.String(block, "id")
+			item.Text = transcript.TimelineValue(block["input"])
 		case "tool_result":
 			item.Kind = "toolResult"
 			item.Title = "Tool result"
-			item.CallID = str(block, "tool_use_id")
-			item.Text = timelineToolResultText(block["content"])
+			item.CallID = transcript.String(block, "tool_use_id")
+			item.Text = transcript.TimelineToolResultText(block["content"])
 			markToolOutputCut(&item, block)
 			if failed, _ := block["is_error"].(bool); failed {
 				item.Status = "error"
 			}
-			if images := toolResultImageContent(block["content"]); item.Text == "" && item.Status == "" && len(images) > 0 {
+			if images := transcript.ToolResultImageContent(block["content"]); item.Text == "" && item.Status == "" && len(images) > 0 {
 				for range images {
 					items = append(items, surface.TimelineItem{Kind: "attachment", Role: kind, Title: "Image", Text: "Image attachment", CallID: item.CallID})
 				}
@@ -186,9 +187,9 @@ func claudeRecordItems(record map[string]any) []surface.TimelineItem {
 			continue
 		}
 		items = append(items, item)
-		if str(block, "type") == "tool_result" {
-			for range toolResultImageContent(block["content"]) {
-				items = append(items, surface.TimelineItem{Kind: "attachment", Role: kind, Title: "Image", Text: "Image attachment", CallID: str(block, "tool_use_id")})
+		if transcript.String(block, "type") == "tool_result" {
+			for range transcript.ToolResultImageContent(block["content"]) {
+				items = append(items, surface.TimelineItem{Kind: "attachment", Role: kind, Title: "Image", Text: "Image attachment", CallID: transcript.String(block, "tool_use_id")})
 			}
 		}
 	}
@@ -196,8 +197,8 @@ func claudeRecordItems(record map[string]any) []surface.TimelineItem {
 }
 
 func markToolOutputCut(item *surface.TimelineItem, object map[string]any) {
-	if recordCut(object) {
+	if transcript.RecordCut(object) {
 		item.Truncated = true
-		item.TruncationReason = toolOutputLimit
+		item.TruncationReason = transcript.ToolOutputLimit
 	}
 }

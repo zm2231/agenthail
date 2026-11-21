@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 )
 
 var langTagRe = regexp.MustCompile(`(?i)^<lang[^>]*/?>\s*`)
@@ -34,7 +35,7 @@ type Notion struct {
 // one sign-in profile and the user and space detected through them. It is
 // never mutated, so a binding change cannot mix two accounts in one request.
 type notionAccount struct {
-	cookies  CookieSource
+	cookies  browsercookie.Source
 	spaceID  string
 	userID   string
 	userName string
@@ -53,16 +54,16 @@ func NewNotion(signins signin.Resolver, spaceID, userID string) *Notion {
 		configuredSpace:    spaceID,
 		configuredUser:     userID,
 		configuredTimezone: os.Getenv("AGENTHAIL_NOTION_TZ"),
-		cookieBridge:       configuredCookieBridge(),
+		cookieBridge:       browsercookie.ConfiguredBridge(),
 	}
 }
 
-func (n *Notion) cookies() (CookieSource, error) {
+func (n *Notion) cookies() (browsercookie.Source, error) {
 	source, err := signin.Resolve(n.signins, signin.Target{Consumer: signin.Notion})
 	if err != nil {
-		return CookieSource{}, err
+		return browsercookie.Source{}, err
 	}
-	return CookieSource{Bridge: n.cookieBridge, URL: "https://app.notion.com/", Signin: source}, nil
+	return browsercookie.Source{Bridge: n.cookieBridge, URL: "https://app.notion.com/", Signin: source}, nil
 }
 
 // currentAccount resolves the sign-in profile, then reuses the account
@@ -75,7 +76,7 @@ func (n *Notion) currentAccount(ctx context.Context) (notionAccount, error) {
 	return n.accountFor(ctx, cookies)
 }
 
-func (n *Notion) accountFor(ctx context.Context, cookies CookieSource) (notionAccount, error) {
+func (n *Notion) accountFor(ctx context.Context, cookies browsercookie.Source) (notionAccount, error) {
 	n.accountMu.Lock()
 	cached := n.account
 	n.accountMu.Unlock()
@@ -258,7 +259,7 @@ func (n *Notion) List(ctx context.Context) ([]surface.Session, error) {
 		return nil, fmt.Errorf("list threads: %w", err)
 	}
 	if status != 200 {
-		return nil, fmt.Errorf("list threads (HTTP %d): %s", status, diagnosticExcerpt(respBody))
+		return nil, fmt.Errorf("list threads (HTTP %d): %s", status, surface.DiagnosticExcerpt(respBody))
 	}
 	var resp struct {
 		Transcripts []struct {
@@ -437,7 +438,7 @@ func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, mes
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("notion send: %w", err))
 	}
 	if status != 200 {
-		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("notion send (HTTP %d): %s", status, diagnosticExcerpt(respBody)))
+		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("notion send (HTTP %d): %s", status, surface.DiagnosticExcerpt(respBody)))
 	}
 	if err := validateNotionInferenceResponse(respBody); err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("notion inference: %w", err))
@@ -483,7 +484,7 @@ func (n *Notion) modelLabels(ctx context.Context, account notionAccount) (map[st
 		return nil, fmt.Errorf("list Notion models: %w", err)
 	}
 	if status != 200 {
-		return nil, fmt.Errorf("list Notion models (HTTP %d): %s", status, diagnosticExcerpt(responseBody))
+		return nil, fmt.Errorf("list Notion models (HTTP %d): %s", status, surface.DiagnosticExcerpt(responseBody))
 	}
 	var response struct {
 		Models []struct {
@@ -537,7 +538,7 @@ func validateNotionInferenceResponse(ndjson string) error {
 		recordCount++
 		typeName, _ := record["type"].(string)
 		if typeName == "error" || record["isNotionError"] == true || record["error"] != nil {
-			return fmt.Errorf("upstream error: %s", diagnosticExcerpt(line))
+			return fmt.Errorf("upstream error: %s", surface.DiagnosticExcerpt(line))
 		}
 	}
 	if recordCount == 0 {

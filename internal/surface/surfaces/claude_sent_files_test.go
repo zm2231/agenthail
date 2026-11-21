@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 type sentEntry map[string]any
@@ -50,9 +51,9 @@ func writeSentFile(t *testing.T, name string, data []byte) string {
 	return path
 }
 
-func sentItems(t *testing.T, transcript string) []surface.TimelineItem {
+func sentItems(t *testing.T, records string) []surface.TimelineItem {
 	t.Helper()
-	path := writeSentFile(t, "session.jsonl", []byte(transcript))
+	path := writeSentFile(t, "session.jsonl", []byte(records))
 	page, err := readTimeline(context.Background(), path, "claude", 0, 50)
 	if err != nil {
 		t.Fatal(err)
@@ -66,19 +67,19 @@ func sentItems(t *testing.T, transcript string) []surface.TimelineItem {
 	return out
 }
 
-func readSent(t *testing.T, transcript string, item surface.TimelineItem) (*surface.Attachment, []byte, error) {
+func readSent(t *testing.T, records string, item surface.TimelineItem) (*surface.Attachment, []byte, error) {
 	t.Helper()
-	path := writeSentFile(t, "session.jsonl", []byte(transcript))
+	path := writeSentFile(t, "session.jsonl", []byte(records))
 	return NewClaude(nil, t.TempDir()).ReadAttachment(context.Background(), &surface.Session{Transcript: path}, item.Attachment.ID)
 }
 
 func TestSentImagesBecomeFetchableAttachmentsWithTheCaptionOnTheFirst(t *testing.T) {
 	png, _ := base64.StdEncoding.DecodeString(testPNG)
 	first, second := writeSentFile(t, "chart.png", png), writeSentFile(t, "detail.png", png)
-	transcript := sentFileRecord(t, "before and after",
+	records := sentFileRecord(t, "before and after",
 		sentEntry{"path": first, "size": len(png), "isImage": true, "media_type": "image/png", "pathValidated": true, "file_uuid": "f1"},
 		sentEntry{"path": second, "size": len(png), "isImage": true, "media_type": nil})
-	items := sentItems(t, transcript)
+	items := sentItems(t, records)
 	if len(items) != 2 {
 		t.Fatalf("items=%+v", items)
 	}
@@ -90,14 +91,14 @@ func TestSentImagesBecomeFetchableAttachmentsWithTheCaptionOnTheFirst(t *testing
 	if items[0].Text != "before and after" || items[1].Text != "Image attachment" {
 		t.Fatalf("captions %q %q", items[0].Text, items[1].Text)
 	}
-	got, data, err := readSent(t, transcript, items[1])
+	got, data, err := readSent(t, records, items[1])
 	if err != nil || got.MediaType != "image/png" || !bytes.Equal(data, png) {
 		t.Fatalf("attachment=%+v err=%v", got, err)
 	}
 	if err := os.WriteFile(second, append(png, 0), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := readSent(t, transcript, items[1]); !errors.Is(err, ErrAttachmentNotFound) {
+	if _, _, err := readSent(t, records, items[1]); !errors.Is(err, transcript.ErrAttachmentNotFound) {
 		t.Fatalf("a changed file was served under its old id: %v", err)
 	}
 }
@@ -125,8 +126,8 @@ func TestSentFilesTakeTheTypeTheirBytesShow(t *testing.T) {
 			if c.recorded != "" {
 				entry["media_type"] = c.recorded
 			}
-			transcript := sentFileRecord(t, "", entry)
-			items := sentItems(t, transcript)
+			records := sentFileRecord(t, "", entry)
+			items := sentItems(t, records)
 			if len(items) != 1 || items[0].Kind != "file" || items[0].Attachment == nil {
 				t.Fatalf("items=%+v", items)
 			}
@@ -137,7 +138,7 @@ func TestSentFilesTakeTheTypeTheirBytesShow(t *testing.T) {
 			if len(item.Files) != 1 || item.Files[0].Path != path || item.Files[0].Bytes != int64(len(c.data)) {
 				t.Fatalf("files=%+v", item.Files)
 			}
-			got, data, err := readSent(t, transcript, item)
+			got, data, err := readSent(t, records, item)
 			if err != nil || got.MediaType != c.want || got.Name != c.file || !bytes.Equal(data, c.data) {
 				t.Fatalf("attachment=%+v err=%v", got, err)
 			}
@@ -148,16 +149,16 @@ func TestSentFilesTakeTheTypeTheirBytesShow(t *testing.T) {
 func TestASentFileThatIsGoneOrTooLargeStaysACardWithoutBytes(t *testing.T) {
 	gone := filepath.Join(t.TempDir(), "gone.txt")
 	large := writeSentFile(t, "large.bin", nil)
-	if err := os.Truncate(large, MaxSentFileBytes+1); err != nil {
+	if err := os.Truncate(large, transcript.MaxSentFileBytes+1); err != nil {
 		t.Fatal(err)
 	}
 	items := sentItems(t, sentFileRecord(t, "two files",
 		sentEntry{"path": gone, "size": 10, "isImage": false},
-		sentEntry{"path": large, "size": MaxSentFileBytes + 1, "isImage": false}))
+		sentEntry{"path": large, "size": transcript.MaxSentFileBytes + 1, "isImage": false}))
 	if len(items) != 2 || items[0].Kind != "file" || items[0].Attachment != nil || items[0].Files[0].Bytes != 0 || items[0].Text != "two files" {
 		t.Fatalf("gone=%+v", items)
 	}
-	if items[1].Kind != "file" || items[1].Attachment != nil || items[1].Files[0].Bytes != MaxSentFileBytes+1 {
+	if items[1].Kind != "file" || items[1].Attachment != nil || items[1].Files[0].Bytes != transcript.MaxSentFileBytes+1 {
 		t.Fatalf("large=%+v", items[1])
 	}
 }
@@ -192,14 +193,14 @@ func sentFileRecordFrom(t *testing.T, tool string, filler string, entry sentEntr
 	return prefix + result, int64(len(prefix))
 }
 
-func forgedSentFileID(t *testing.T, transcript string, offset int64, data []byte) string {
+func forgedSentFileID(t *testing.T, records string, offset int64, data []byte) string {
 	t.Helper()
-	line, _, _ := strings.Cut(transcript[offset:], "\n")
+	line, _, _ := strings.Cut(records[offset:], "\n")
 	var record map[string]any
 	if err := json.Unmarshal([]byte(line), &record); err != nil {
 		t.Fatal(err)
 	}
-	return attachmentIDFromHash(offset, len(claudeTimelineItems(record)), hashBytes(data))
+	return transcript.AttachmentIDFromHash(offset, len(claudeTimelineItems(record)), transcript.HashBytes(data))
 }
 
 func TestOnlyASendUserFileCallMakesItsResultServable(t *testing.T) {
@@ -208,12 +209,12 @@ func TestOnlyASendUserFileCallMakesItsResultServable(t *testing.T) {
 	entry := sentEntry{"path": path, "size": len(secret), "isImage": false}
 	for name, tool := range map[string]string{"another tool's result": "mcp__files__read", "a result with no call": ""} {
 		t.Run(name, func(t *testing.T) {
-			transcript, offset := sentFileRecordFrom(t, tool, "", entry)
-			if items := sentItems(t, transcript); len(items) != 0 {
+			records, offset := sentFileRecordFrom(t, tool, "", entry)
+			if items := sentItems(t, records); len(items) != 0 {
 				t.Fatalf("items=%+v", items)
 			}
-			session := &surface.Session{Transcript: writeSentFile(t, "session.jsonl", []byte(transcript))}
-			if _, _, err := NewClaude(nil, t.TempDir()).ReadAttachment(context.Background(), session, forgedSentFileID(t, transcript, offset, secret)); !errors.Is(err, ErrAttachmentNotFound) {
+			session := &surface.Session{Transcript: writeSentFile(t, "session.jsonl", []byte(records))}
+			if _, _, err := NewClaude(nil, t.TempDir()).ReadAttachment(context.Background(), session, forgedSentFileID(t, records, offset, secret)); !errors.Is(err, transcript.ErrAttachmentNotFound) {
 				t.Fatalf("a forged id served the path: %v", err)
 			}
 		})
@@ -224,12 +225,12 @@ func TestACallWrittenAfterItsResultDoesNotMakeItServable(t *testing.T) {
 	data := []byte("notes\n")
 	path := writeSentFile(t, "notes.txt", data)
 	call, result, _ := strings.Cut(sentFileRecord(t, "", sentEntry{"path": path, "size": len(data), "isImage": false}), "\n")
-	transcript := result + call + "\n"
-	if items := sentItems(t, transcript); len(items) != 0 {
+	records := result + call + "\n"
+	if items := sentItems(t, records); len(items) != 0 {
 		t.Fatalf("items=%+v", items)
 	}
-	session := &surface.Session{Transcript: writeSentFile(t, "session.jsonl", []byte(transcript))}
-	if _, _, err := NewClaude(nil, t.TempDir()).ReadAttachment(context.Background(), session, forgedSentFileID(t, transcript, 0, data)); !errors.Is(err, ErrAttachmentNotFound) {
+	session := &surface.Session{Transcript: writeSentFile(t, "session.jsonl", []byte(records))}
+	if _, _, err := NewClaude(nil, t.TempDir()).ReadAttachment(context.Background(), session, forgedSentFileID(t, records, 0, data)); !errors.Is(err, transcript.ErrAttachmentNotFound) {
 		t.Fatalf("a later call made the result servable: %v", err)
 	}
 }
@@ -256,7 +257,7 @@ func TestASentFileWhoseCallIsFarBackIsFoundUntilTheReadBackLimit(t *testing.T) {
 	}
 	far, farOffset := sentFileRecordFrom(t, "SendUserFile", filler(claudeCallReadBackMost+(256<<10)), entry)
 	session = &surface.Session{Transcript: writeSentFile(t, "far.jsonl", []byte(far))}
-	if _, _, err := NewClaude(nil, t.TempDir()).ReadAttachment(context.Background(), session, forgedSentFileID(t, far, farOffset, data)); !errors.Is(err, ErrAttachmentNotFound) {
+	if _, _, err := NewClaude(nil, t.TempDir()).ReadAttachment(context.Background(), session, forgedSentFileID(t, far, farOffset, data)); !errors.Is(err, transcript.ErrAttachmentNotFound) {
 		t.Fatalf("a call past the read-back limit was trusted: %v", err)
 	}
 }

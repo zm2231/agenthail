@@ -7,21 +7,22 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 const codexReadStateKey = "readState"
 
 func codexReadState(value any) *surface.ReadState {
 	object, _ := value.(map[string]any)
-	revision := str(object, "revision")
+	revision := transcript.String(object, "revision")
 	if revision == "" {
 		return nil
 	}
 	state := &surface.ReadState{Revision: revision}
 	position, _ := object["firstUnread"].(map[string]any)
-	switch str(position, "type") {
+	switch transcript.String(position, "type") {
 	case "turn":
-		state.FirstUnread = str(position, "turnId")
+		state.FirstUnread = transcript.String(position, "turnId")
 	case surface.ReadFromStart:
 		state.FirstUnread = surface.ReadFromStart
 	}
@@ -33,7 +34,7 @@ func attachCodexReadStates(result map[string]any, threads []any) {
 	receipts, _ := result["readStates"].(map[string]any)
 	for _, value := range threads {
 		if thread, _ := value.(map[string]any); thread != nil {
-			if receipt, ok := receipts[str(thread, "id")]; ok {
+			if receipt, ok := receipts[transcript.String(thread, "id")]; ok {
 				thread[codexReadStateKey] = receipt
 			}
 		}
@@ -106,7 +107,7 @@ func (c *Codex) updateReadState(ctx context.Context, client codexClient, threadI
 
 func codexReadStateRefusal(err *codexRPCError) error {
 	data, _ := err.Data.(map[string]any)
-	if str(data, "reason") == "readStateConflict" {
+	if transcript.String(data, "reason") == "readStateConflict" {
 		if current := codexReadState(data[codexReadStateKey]); current != nil {
 			return &surface.ReadStateConflict{Current: *current}
 		}

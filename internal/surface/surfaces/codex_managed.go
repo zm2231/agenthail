@@ -16,6 +16,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 type codexClient interface {
@@ -221,7 +222,7 @@ func (c *managedCodexClient) requestOrdered(ctx context.Context, method string, 
 	case reply := <-waiter:
 		if envelope, ok := reply.message["error"].(map[string]any); ok {
 			code, _ := envelope["code"].(float64)
-			return nil, reply.after, &codexRPCError{Method: method, Code: int(code), Message: str(envelope, "message"), Data: envelope["data"]}
+			return nil, reply.after, &codexRPCError{Method: method, Code: int(code), Message: transcript.String(envelope, "message"), Data: envelope["data"]}
 		}
 		return reply.message, reply.after, nil
 	case <-ctx.Done():

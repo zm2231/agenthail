@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 const (
@@ -149,10 +150,10 @@ func (r *codexRuntimes) release(keep codexClient) {
 // codexThreadOriginator returns the client Codex recorded as the thread's
 // creator, from the thread object or, when absent, from its rollout.
 func codexThreadOriginator(thread map[string]any) string {
-	if originator := str(thread, "originator"); originator != "" {
+	if originator := transcript.String(thread, "originator"); originator != "" {
 		return originator
 	}
-	return codexRolloutOriginator(str(thread, "path"))
+	return codexRolloutOriginator(transcript.String(thread, "path"))
 }
 
 func codexRolloutOriginator(path string) string {
@@ -165,7 +166,7 @@ func codexRolloutOriginator(path string) string {
 			Originator string `json:"originator"`
 		} `json:"payload"`
 	}
-	if _, err := readFirstJSONL(path, &record); err != nil || record.Type != "session_meta" {
+	if _, err := transcript.ReadFirstJSONL(path, &record); err != nil || record.Type != "session_meta" {
 		return ""
 	}
 	return record.Payload.Originator

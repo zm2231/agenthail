@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -27,7 +28,7 @@ func timelineFixture(t *testing.T, data string) string {
 }
 
 func TestMain(m *testing.M) {
-	transcriptPollInterval = 20 * time.Millisecond
+	transcript.PollInterval = 20 * time.Millisecond
 	os.Exit(testkit.RunInOwnHome(m.Run))
 }
 
@@ -128,10 +129,10 @@ func TestCodexTimelineSkipsOversizedRecordAndAdvancesCursor(t *testing.T) {
 	message := func(text string) string {
 		return fmt.Sprintf(`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":%q}]}}`, text)
 	}
-	previous := timelineReadBudget
-	timelineReadBudget = 64 << 10
-	t.Cleanup(func() { timelineReadBudget = previous })
-	path := timelineFixture(t, message("before")+"\n"+message(strings.Repeat("x", int(2*timelineReadBudget)))+"\n"+message("after")+"\n")
+	previous := transcript.TimelineReadBudget
+	transcript.TimelineReadBudget = 64 << 10
+	t.Cleanup(func() { transcript.TimelineReadBudget = previous })
+	path := timelineFixture(t, message("before")+"\n"+message(strings.Repeat("x", int(2*transcript.TimelineReadBudget)))+"\n"+message("after")+"\n")
 
 	var cursor int64
 	var texts []string
@@ -352,7 +353,7 @@ func TestCodexEmptySeedPairsUsersByTurnWithoutDroppingLaterUser(t *testing.T) {
 }
 
 func TestClaudeReadGroupsTurnsFiltersNonHumanRecordsAndKeepsFullReply(t *testing.T) {
-	long := strings.Repeat("界", 3*timelineTextBudget)
+	long := strings.Repeat("界", 3*transcript.TimelineTextBudget)
 	assistant := func(id, text string, done bool) string {
 		message := map[string]any{"id": id, "content": []map[string]string{{"type": "text", "text": text}}}
 		if done {
@@ -385,7 +386,7 @@ func TestClaudeReadGroupsTurnsFiltersNonHumanRecordsAndKeepsFullReply(t *testing
 	if read.Reply == nil || read.Reply.Text != "Looking at the file\n"+long || read.Reply.UserText != "fix it" || !read.Reply.Done {
 		t.Fatalf("reply=%+v", read.Reply)
 	}
-	if !read.Truncated || len(read.Items) == 0 || len(read.Items[len(read.Items)-1].Text) > timelineTextBudget {
+	if !read.Truncated || len(read.Items) == 0 || len(read.Items[len(read.Items)-1].Text) > transcript.TimelineTextBudget {
 		t.Fatalf("items must stay bounded: truncated=%t items=%d", read.Truncated, len(read.Items))
 	}
 }
@@ -497,8 +498,8 @@ func TestCodexDesktopStreamCheckpointsOffsetAcrossLifetimes(t *testing.T) {
 		defer cancel()
 		// The lifetime ends once the stream has read the transcript and
 		// checkpointed its offset, however long that read takes.
-		transcriptWaiting = cancel
-		defer func() { transcriptWaiting = nil }()
+		transcript.Waiting = cancel
+		defer func() { transcript.Waiting = nil }()
 		var events []surface.StreamEvent
 		err := codex.Stream(ctx, session, "", func(event surface.StreamEvent) {
 			if event.Kind != "commands" {
@@ -531,7 +532,7 @@ func TestCodexTranscriptPreservesTerminalStatusesAndOpaqueRecords(t *testing.T) 
 		records = append(records, `{"type":"event_msg","payload":{"type":"`+status+`","turn_id":"turn-1"}}`)
 	}
 	inline := "data:image/png;base64," + strings.Repeat("A", 128)
-	opaque, _ := json.Marshal(map[string]any{"type": "response_item", "payload": map[string]any{"type": "future_item", "role": "user", "content": strings.Repeat("x", timelineTextBudget*2)}})
+	opaque, _ := json.Marshal(map[string]any{"type": "response_item", "payload": map[string]any{"type": "future_item", "role": "user", "content": strings.Repeat("x", transcript.TimelineTextBudget*2)}})
 	image, _ := json.Marshal(map[string]any{"type": "response_item", "payload": map[string]any{"type": "future_image", "role": "user", "source": map[string]any{"type": "image", "data": inline}}})
 	records = append(records, string(opaque), string(image))
 	page, err := readTimeline(context.Background(), timelineFixture(t, strings.Join(records, "\n")+"\n"), "codex", 0, 0)

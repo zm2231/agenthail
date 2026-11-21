@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func (c *Claude) headerMap(_, _ string) map[string]string {
@@ -45,7 +46,7 @@ func (c *Claude) recordBridge(record map[string]any) string {
 	if c.localOnly {
 		return ""
 	}
-	bridge := str(record, "bridgeSessionId")
+	bridge := transcript.String(record, "bridgeSessionId")
 	if bridge == "" {
 		return ""
 	}
@@ -121,17 +122,17 @@ func (c *Claude) postContent(ctx context.Context, sess *surface.Session, content
 	}
 	switch status {
 	case http.StatusBadRequest:
-		return nil, surface.DeliveryTerminal(fmt.Errorf("send failed (HTTP %d): %s", status, diagnosticExcerpt(respBody)), surface.DeliveryInvalidRequest)
+		return nil, surface.DeliveryTerminal(fmt.Errorf("send failed (HTTP %d): %s", status, surface.DiagnosticExcerpt(respBody)), surface.DeliveryInvalidRequest)
 	case http.StatusUnauthorized:
-		return nil, c.remoteControlUnauthenticated(sess, surface.DeliveryTerminal(fmt.Errorf("send failed (HTTP %d): %s", status, diagnosticExcerpt(respBody)), surface.DeliveryAuthenticationNeeded))
+		return nil, c.remoteControlUnauthenticated(sess, surface.DeliveryTerminal(fmt.Errorf("send failed (HTTP %d): %s", status, surface.DiagnosticExcerpt(respBody)), surface.DeliveryAuthenticationNeeded))
 	case http.StatusForbidden:
-		return nil, c.remoteControlUnauthenticated(sess, surface.DeliveryTerminal(fmt.Errorf("send failed (HTTP %d): %s", status, diagnosticExcerpt(respBody)), surface.DeliveryAccessDenied))
+		return nil, c.remoteControlUnauthenticated(sess, surface.DeliveryTerminal(fmt.Errorf("send failed (HTTP %d): %s", status, surface.DiagnosticExcerpt(respBody)), surface.DeliveryAccessDenied))
 	case http.StatusNotFound:
 		c.forgetBridge(sess.Bridge)
-		return nil, surface.DeliveryTerminal(fmt.Errorf("%w: send failed (HTTP %d): %s", errRemoteControlGone, status, diagnosticExcerpt(respBody)), surface.DeliveryTargetMissing)
+		return nil, surface.DeliveryTerminal(fmt.Errorf("%w: send failed (HTTP %d): %s", errRemoteControlGone, status, surface.DiagnosticExcerpt(respBody)), surface.DeliveryTargetMissing)
 	}
 	if status != http.StatusOK {
-		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("send failed (HTTP %d): %s", status, diagnosticExcerpt(respBody)))
+		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("send failed (HTTP %d): %s", status, surface.DiagnosticExcerpt(respBody)))
 	}
 	return &surface.SendResult{UUID: uuid, Accepted: true}, nil
 }

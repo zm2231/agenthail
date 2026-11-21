@@ -1,4 +1,4 @@
-package surfaces
+package transcript
 
 import (
 	"fmt"
@@ -8,22 +8,22 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func fileExists(path string) bool {
+func FileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
 
-// sameTranscriptState reports whether two stats of a transcript show the same
+// SameState reports whether two stats of a transcript show the same
 // file at the same size, modification time and change time. Every write moves
 // the change time, which no one can set back as they can the modification
 // time.
-func sameTranscriptState(a, b os.FileInfo) bool {
-	return surface.Stamp(a).Equal(surface.Stamp(b)) && transcriptFileIdentity(a) == transcriptFileIdentity(b) && transcriptChangeTime(a) == transcriptChangeTime(b)
+func SameState(a, b os.FileInfo) bool {
+	return surface.Stamp(a).Equal(surface.Stamp(b)) && FileIdentity(a) == FileIdentity(b) && ChangeTime(a) == ChangeTime(b)
 }
 
-// transcriptChangeTime is a stat's inode change time, or "" where the platform
+// ChangeTime is a stat's inode change time, or "" where the platform
 // does not report one.
-func transcriptChangeTime(info os.FileInfo) string {
+func ChangeTime(info os.FileInfo) string {
 	if info.Sys() == nil {
 		return ""
 	}

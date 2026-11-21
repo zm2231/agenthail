@@ -1,4 +1,4 @@
-package surfaces
+package surface
 
 import (
 	"fmt"
@@ -8,10 +8,10 @@ import (
 	"github.com/zm2231/agenthail/internal/installdir"
 )
 
-// shippedNode is the Node runtime Agenthail ships. A node on PATH is never
+// ShippedNode is the Node runtime Agenthail ships. A node on PATH is never
 // used: its version is whatever the machine happens to have.
-func shippedNode() (string, error) {
-	root, err := installRoot()
+func ShippedNode() (string, error) {
+	root, err := InstallRoot()
 	if err != nil {
 		return "", err
 	}
@@ -22,7 +22,7 @@ func shippedNode() (string, error) {
 	return node, nil
 }
 
-var installRoot = func() (string, error) {
+var InstallRoot = func() (string, error) {
 	executable, err := os.Executable()
 	if err == nil {
 		executable, err = filepath.EvalSymlinks(executable)

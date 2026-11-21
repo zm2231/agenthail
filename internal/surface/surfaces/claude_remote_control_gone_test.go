@@ -11,13 +11,14 @@ import (
 
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
 const goneConversation = "conversation-gone"
 
 func goneRemoteControl(posts *int) ClaudeRequest {
-	return func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+	return func(context.Context, string, string, map[string]string, string, browsercookie.Source, time.Duration) (int, string, error) {
 		*posts++
 		return http.StatusNotFound, `{"error":{"message":"Session cse_gone not found"}}`, nil
 	}

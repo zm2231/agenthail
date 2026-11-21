@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 type codexThreadSpawn struct {
@@ -19,14 +20,14 @@ type codexThreadSpawn struct {
 // it comes from session_id in the rollout session_meta.
 func codexSubagent(thread map[string]any) *surface.Subagent {
 	spawn := codexThreadSpawnSource(thread["source"])
-	parent := str(thread, "parentThreadId")
+	parent := transcript.String(thread, "parentThreadId")
 	if parent == "" && spawn != nil {
 		parent = spawn.ParentThreadID
 	}
 	if parent == "" {
 		return nil
 	}
-	subagent := &surface.Subagent{ParentID: parent, Depth: 1, Nickname: str(thread, "agentNickname"), Role: str(thread, "agentRole")}
+	subagent := &surface.Subagent{ParentID: parent, Depth: 1, Nickname: transcript.String(thread, "agentNickname"), Role: transcript.String(thread, "agentRole")}
 	if spawn != nil {
 		if spawn.Depth > 0 {
 			subagent.Depth = spawn.Depth
@@ -40,7 +41,7 @@ func codexSubagent(thread map[string]any) *surface.Subagent {
 	}
 	if subagent.Depth == 1 {
 		subagent.RootID = parent
-	} else if path := str(thread, "path"); path != "" {
+	} else if path := transcript.String(thread, "path"); path != "" {
 		if meta, err := codexRolloutSubagents.read(path); err == nil && meta != nil && meta.ParentID == parent {
 			subagent.RootID = meta.RootID
 		}
@@ -106,7 +107,7 @@ type codexSessionMetaLine struct {
 // "subAgent".
 func readCodexRolloutSubagent(path string) (*surface.Subagent, error) {
 	var meta codexSessionMetaLine
-	if _, err := readFirstJSONL(path, &meta); err != nil {
+	if _, err := transcript.ReadFirstJSONL(path, &meta); err != nil {
 		return nil, fmt.Errorf("parse Codex rollout %s session_meta: %w", path, err)
 	}
 	if meta.Type != "session_meta" {

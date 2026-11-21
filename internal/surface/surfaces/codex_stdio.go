@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/zm2231/agenthail/internal/surface"
 	"io"
 	"os/exec"
 	"sync"
@@ -29,7 +30,7 @@ type codexStdioClient struct {
 func startCodexStdio(ctx context.Context, binary string, env []string) (*codexStdioClient, error) {
 	// Plugins are off because at startup Codex syncs its plugin catalog with a
 	// git clone into CODEX_HOME, which this short run would leave half done.
-	cmd := processGroupCommand(ctx, binary, "app-server", "--disable", "plugins")
+	cmd := surface.ProcessGroupCommand(ctx, binary, "app-server", "--disable", "plugins")
 	cmd.Env = env
 	cmd.Stderr = nil
 	stdin, err := cmd.StdinPipe()

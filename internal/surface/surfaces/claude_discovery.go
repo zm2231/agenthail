@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // List returns one session per conversation. A conversation open in several
@@ -112,7 +113,7 @@ func (c *Claude) CatalogWatchDirs() []string {
 // record's conversation; the bridge and socket belong to the process.
 func (c *Claude) process(ctx context.Context, record claudeSessionRecord, transcripts func(string) []string) (claudeProcess, bool) {
 	m := record.fields
-	conversation := str(m, "sessionId")
+	conversation := transcript.String(m, "sessionId")
 	bridge := c.recordBridge(m)
 	socket := c.peerSocket(ctx, m)
 	pid, _ := m["pid"].(float64)
@@ -125,9 +126,9 @@ func (c *Claude) process(ctx context.Context, record claudeSessionRecord, transc
 		Bridge:      bridge,
 		Surface:     surface.KindClaude,
 		RuntimeKind: surface.RuntimeClaudeCLI,
-		Cwd:         str(m, "cwd"),
-		Status:      surface.SessionStatus(str(m, "status")),
-		Entrypoint:  str(m, "entrypoint"),
+		Cwd:         transcript.String(m, "cwd"),
+		Status:      surface.SessionStatus(transcript.String(m, "status")),
+		Entrypoint:  transcript.String(m, "entrypoint"),
 	}
 	sess.PID = int(pid)
 	if sess.PID > 0 {
@@ -139,14 +140,14 @@ func (c *Claude) process(ctx context.Context, record claudeSessionRecord, transc
 	switch {
 	case hosted:
 		sess.RuntimeKind = surface.RuntimeClaudeHost
-	case str(m, "kind") == "bg":
+	case transcript.String(m, "kind") == "bg":
 		sess.RuntimeKind = surface.RuntimeClaudeBackground
 	}
 	if n, ok := m["name"].(string); ok {
 		sess.Name = n
 	}
 	sess.Transcript = claudeRootTranscript(transcripts(conversation), record.root)
-	sess.HasLocal = sess.Transcript != "" && fileExists(sess.Transcript)
+	sess.HasLocal = sess.Transcript != "" && transcript.FileExists(sess.Transcript)
 	if sess.HasLocal {
 		sess.ForkedFrom = claudeForkedFrom(sess.Transcript)
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
@@ -48,7 +49,7 @@ func busyRemoteControlClaude(t *testing.T, onPost func(payload map[string]any)) 
 		t.Fatal(err)
 	}
 	posts := &remoteControlPosts{}
-	claude := surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, process.Home, func(_ context.Context, method, url string, _ map[string]string, body string, _ surfaces.CookieSource, _ time.Duration) (int, string, error) {
+	claude := surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, process.Home, func(_ context.Context, method, url string, _ map[string]string, body string, _ browsercookie.Source, _ time.Duration) (int, string, error) {
 		switch {
 		case method == "GET" && strings.HasSuffix(url, "/v1/code/sessions/cse_control"):
 			return 200, `{"response_shape":{"id":"cse_control","connection_status":"connected"}}`, nil
@@ -152,7 +153,7 @@ func TestARemoteControlSteerWhoseTurnEndsFirstIsSentAsTheNextTurn(t *testing.T) 
 	}
 	var once sync.Once
 	posts := &remoteControlPosts{}
-	claude := surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, process.Home, func(_ context.Context, method, url string, _ map[string]string, body string, _ surfaces.CookieSource, _ time.Duration) (int, string, error) {
+	claude := surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, process.Home, func(_ context.Context, method, url string, _ map[string]string, body string, _ browsercookie.Source, _ time.Duration) (int, string, error) {
 		switch {
 		case method == "GET" && strings.HasSuffix(url, "/v1/code/sessions/cse_race"):
 			once.Do(func() {

@@ -10,11 +10,12 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func TestAPageAndTheStreamPlaceASlashCommandLongerThanAMegabyteInTheSameTurn(t *testing.T) {
-	command := `<command-name>/review</command-name><command-args>` + strings.Repeat("x", 2*compactLineBytes) + `</command-args>`
+	command := `<command-name>/review</command-name><command-args>` + strings.Repeat("x", 2*transcript.CompactLineBytes) + `</command-args>`
 	head := `{"type":"user","uuid":"first","timestamp":"2026-10-19T10:00:00Z","message":{"content":"inspect"}}
 {"type":"assistant","uuid":"a1","timestamp":"2026-10-19T10:00:01Z","message":{"id":"m1","content":[{"type":"text","text":"looking"}]}}
 `

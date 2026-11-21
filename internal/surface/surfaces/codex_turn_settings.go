@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // CodexThreadSettingsVersion is the first Codex whose app-server has thread/settings/update.
@@ -144,7 +145,7 @@ func readCodexTurnContext(ctx context.Context, rollout string) (codexThreadSetti
 	return readNewestCodexSettings(ctx, rollout, func(line []byte) bool {
 		return bytes.Contains(line, []byte(`"turn_context"`))
 	}, func(record map[string]any) (codexThreadSettings, bool) {
-		if str(record, "type") != "turn_context" {
+		if transcript.String(record, "type") != "turn_context" {
 			return codexThreadSettings{}, false
 		}
 		return codexSettingsRecord(record)
@@ -169,13 +170,13 @@ func readNewestCodexSettings(ctx context.Context, rollout string, candidate func
 		return codexThreadSettings{}, false
 	}
 	match := func(record map[string]any) bool { _, ok := read(record); return ok }
-	start, found, err := transcriptRecordBefore(ctx, file, info.Size(), candidate, match)
+	start, found, err := transcript.RecordBefore(ctx, file, info.Size(), candidate, match)
 	if err != nil || !found {
 		return codexThreadSettings{}, false
 	}
 	var settings codexThreadSettings
 	var ok bool
-	_ = scanTranscriptRecords(ctx, file, start, info.Size(), true, func(record map[string]any, _ int64, _ []byte) {
+	_ = transcript.ScanRecords(ctx, file, start, info.Size(), true, func(record map[string]any, _ int64, _ []byte) {
 		if !ok {
 			settings, ok = read(record)
 		}
@@ -186,14 +187,14 @@ func readNewestCodexSettings(ctx context.Context, rollout string, candidate func
 func codexSettingsRecord(record map[string]any) (codexThreadSettings, bool) {
 	payload, _ := record["payload"].(map[string]any)
 	switch {
-	case str(record, "type") == "turn_context":
+	case transcript.String(record, "type") == "turn_context":
 		mode, _ := payload["collaboration_mode"].(map[string]any)
 		sandbox, _ := payload["sandbox_policy"].(map[string]any)
-		return codexThreadSettings{Model: str(payload, "model"), Effort: str(payload, "effort"), Mode: str(mode, "mode"), Approval: str(payload, "approval_policy"), Sandbox: str(sandbox, "type")}, true
-	case str(record, "type") == "event_msg" && str(payload, "type") == "thread_settings_applied":
+		return codexThreadSettings{Model: transcript.String(payload, "model"), Effort: transcript.String(payload, "effort"), Mode: transcript.String(mode, "mode"), Approval: transcript.String(payload, "approval_policy"), Sandbox: transcript.String(sandbox, "type")}, true
+	case transcript.String(record, "type") == "event_msg" && transcript.String(payload, "type") == "thread_settings_applied":
 		applied, _ := payload["thread_settings"].(map[string]any)
 		mode, _ := applied["collaboration_mode"].(map[string]any)
-		return codexThreadSettings{Model: str(applied, "model"), Effort: str(applied, "reasoning_effort"), Mode: str(mode, "mode"), Approval: str(applied, "approval_policy")}, true
+		return codexThreadSettings{Model: transcript.String(applied, "model"), Effort: transcript.String(applied, "reasoning_effort"), Mode: transcript.String(mode, "mode"), Approval: transcript.String(applied, "approval_policy")}, true
 	}
 	return codexThreadSettings{}, false
 }

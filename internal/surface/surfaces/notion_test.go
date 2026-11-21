@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/zm2231/agenthail/internal/signin"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 	"strings"
 	"testing"
 	"time"
@@ -59,7 +60,7 @@ func TestNotionPostDispatchFailuresHaveUnknownOutcome(t *testing.T) {
 		{name: "oversized error", status: 200, body: `{"type":"error","error":"` + strings.Repeat("界", 1_000_000) + `"}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			notionInferenceRequest = func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+			notionInferenceRequest = func(context.Context, string, string, map[string]string, string, browsercookie.Source, time.Duration) (int, string, error) {
 				return test.status, test.body, test.err
 			}
 			notion := &Notion{
@@ -72,7 +73,7 @@ func TestNotionPostDispatchFailuresHaveUnknownOutcome(t *testing.T) {
 			if !surface.IsDeliveryOutcomeUnknown(err) {
 				t.Fatalf("err=%v", err)
 			}
-			if len(err.Error()) > maxDiagnosticBytes+400 {
+			if len(err.Error()) > surface.MaxDiagnosticBytes+400 {
 				t.Fatalf("unbounded diagnostic: %d bytes", len(err.Error()))
 			}
 		})
@@ -84,12 +85,12 @@ func TestNotionRepeatSendsToExistingThreadReturnPerTurnKeys(t *testing.T) {
 	t.Cleanup(func() { notionInferenceRequest, notionRecordRequest = originalInference, originalRecord })
 	const threadID = "11111111-1111-1111-1111-111111111111"
 	messages := []string{"reply-0"}
-	notionInferenceRequest = func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+	notionInferenceRequest = func(context.Context, string, string, map[string]string, string, browsercookie.Source, time.Duration) (int, string, error) {
 		next := len(messages)
 		messages = append(messages, fmt.Sprintf("user-%d", next), fmt.Sprintf("reply-%d", next+1))
 		return 200, `{"type":"agent-inference","value":[]}`, nil
 	}
-	notionRecordRequest = func(_ context.Context, _ string, _ string, _ map[string]string, body string, _ CookieSource, _ time.Duration) (int, string, error) {
+	notionRecordRequest = func(_ context.Context, _ string, _ string, _ map[string]string, body string, _ browsercookie.Source, _ time.Duration) (int, string, error) {
 		if strings.Contains(body, `"table":"thread"`) {
 			payload, _ := json.Marshal(map[string]any{"recordMap": map[string]any{"thread": map[string]any{threadID: map[string]any{"value": map[string]any{"value": map[string]any{"messages": messages}}}}}})
 			return 200, string(payload), nil

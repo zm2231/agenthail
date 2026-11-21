@@ -11,96 +11,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
-	"syscall"
 	"time"
-	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/installdir"
-	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 )
 
 const chromeUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
-
-const maxDiagnosticBytes = 2048
-
-const cookieHeaderTTL = 5 * time.Minute
-const cookieHeaderFailureTTL = time.Minute
-
-func diagnosticExcerpt(value string) string {
-	value = strings.TrimSpace(value)
-	if len(value) <= maxDiagnosticBytes {
-		return value
-	}
-	cut := value[:maxDiagnosticBytes]
-	for !utf8.ValidString(cut) && len(cut) > 0 {
-		cut = cut[:len(cut)-1]
-	}
-	return fmt.Sprintf("%s... [truncated; %d bytes total]", strings.TrimSpace(cut), len(value))
-}
-
-type cookieHeaderCacheEntry struct {
-	header    string
-	err       error
-	readAt    time.Time
-	expiresAt time.Time
-}
-
-// Reads for one source are serialized; a slow browser never delays another.
-var cookieHeaderCache = struct {
-	sync.Mutex
-	entries map[string]cookieHeaderCacheEntry
-	reads   map[string]*sync.Mutex
-}{entries: map[string]cookieHeaderCacheEntry{}, reads: map[string]*sync.Mutex{}}
-
-func cachedCookieHeader(key string) (cookieHeaderCacheEntry, bool) {
-	cookieHeaderCache.Lock()
-	defer cookieHeaderCache.Unlock()
-	entry, ok := cookieHeaderCache.entries[key]
-	return entry, ok && time.Now().Before(entry.expiresAt)
-}
-
-func storeCookieHeader(key string, entry cookieHeaderCacheEntry) {
-	entry.readAt = time.Now()
-	cookieHeaderCache.Lock()
-	cookieHeaderCache.entries[key] = entry
-	cookieHeaderCache.Unlock()
-}
-
-func cookieReadLock(key string) *sync.Mutex {
-	cookieHeaderCache.Lock()
-	defer cookieHeaderCache.Unlock()
-	lock := cookieHeaderCache.reads[key]
-	if lock == nil {
-		lock = &sync.Mutex{}
-		cookieHeaderCache.reads[key] = lock
-	}
-	return lock
-}
-
-// CookieSource is everything one request needs to read its cookies: the
-// bridge script, the site, and the browser profile resolved for the request.
-type CookieSource struct {
-	Bridge string
-	URL    string
-	Signin signin.Source
-}
-
-func (s CookieSource) cacheKey() string {
-	return strings.Join([]string{s.Bridge, s.URL, s.Signin.ProfileID, string(s.Signin.Browser), s.Signin.Dir}, "\x00")
-}
-
-func (s CookieSource) bridgeArgs() []string {
-	args := []string{s.Bridge, "--browser", string(s.Signin.Browser)}
-	if s.Signin.Dir != "" {
-		args = append(args, "--profile-dir", s.Signin.Dir)
-	}
-	if s.URL != "" {
-		args = append(args, s.URL)
-	}
-	return args
-}
 
 func sidecarPath() (string, error) {
 	if p := os.Getenv("AGENTHAIL_SIDECAR"); p != "" {
@@ -168,122 +86,7 @@ func startFailure(cmd *exec.Cmd, err error) error {
 	return surface.DeliveryUnavailable(fmt.Errorf("the folder %s is gone", cmd.Dir))
 }
 
-func processGroupCommand(ctx context.Context, path string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, path, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil && err != syscall.ESRCH {
-			return err
-		}
-		return nil
-	}
-	return cmd
-}
-
-func loadCookieHeader(parent context.Context, source CookieSource) (header string, err error) {
-	origin := cookieOrigin{read: true, readAt: time.Now()}
-	defer func() {
-		origin.failed = err != nil
-		noteCookieOrigin(parent, origin)
-	}()
-	if source.Bridge == "" {
-		return "", fmt.Errorf("cookie bridge not found (set AGENTHAIL_COOKIE_BRIDGE or install cookie.mjs alongside agenthail)")
-	}
-	if source.Signin.Browser == "" {
-		return "", fmt.Errorf("cookie bridge: no browser profile resolved")
-	}
-	key := source.cacheKey()
-	if entry, ok := cachedCookieHeader(key); ok {
-		origin.cached, origin.readAt = true, entry.readAt
-		return entry.header, entry.err
-	}
-	lock := cookieReadLock(key)
-	lock.Lock()
-	defer lock.Unlock()
-	if entry, ok := cachedCookieHeader(key); ok {
-		origin.cached, origin.readAt = true, entry.readAt
-		return entry.header, entry.err
-	}
-	node, err := shippedNode()
-	if err != nil {
-		return "", fmt.Errorf("cookie bridge: %w", err)
-	}
-	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
-	defer cancel()
-	cmd := processGroupCommand(ctx, node, source.bridgeArgs()...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	output, err := cmd.Output()
-	if err != nil {
-		if ctx.Err() != nil {
-			return "", fmt.Errorf("cookie bridge (%s): %w", source.Signin.Browser.Label(), ctx.Err())
-		}
-		if detail := strings.TrimSpace(stderr.String()); detail != "" {
-			err = fmt.Errorf("cookie bridge (%s): %w: %s", source.Signin.Browser.Label(), err, diagnosticExcerpt(detail))
-		} else {
-			err = fmt.Errorf("cookie bridge (%s): %w", source.Signin.Browser.Label(), err)
-		}
-		storeCookieHeader(key, cookieHeaderCacheEntry{err: err, expiresAt: time.Now().Add(cookieHeaderFailureTTL)})
-		return "", err
-	}
-	header = strings.TrimSpace(string(output))
-	if header == "" {
-		err := fmt.Errorf("cookie bridge returned no cookies")
-		storeCookieHeader(key, cookieHeaderCacheEntry{err: err, expiresAt: time.Now().Add(cookieHeaderFailureTTL)})
-		return "", err
-	}
-	storeCookieHeader(key, cookieHeaderCacheEntry{header: header, expiresAt: time.Now().Add(cookieHeaderTTL)})
-	return header, nil
-}
-
-// cookieOrigin records, for a request whose context carries it, where
-// loadCookieHeader took that request's cookies from.
-type cookieOrigin struct {
-	read   bool
-	cached bool
-	failed bool
-	readAt time.Time
-}
-
-type cookieOriginKey struct{}
-
-func withCookieOrigin(ctx context.Context, origin *cookieOrigin) context.Context {
-	return context.WithValue(ctx, cookieOriginKey{}, origin)
-}
-
-func noteCookieOrigin(ctx context.Context, origin cookieOrigin) {
-	if recorded, ok := ctx.Value(cookieOriginKey{}).(*cookieOrigin); ok {
-		*recorded = origin
-	}
-}
-
-func (o cookieOrigin) String() string {
-	switch {
-	case !o.read:
-		return "not read"
-	case o.cached && o.failed:
-		return fmt.Sprintf("not read: the cached result is a failed read from %s ago", time.Since(o.readAt).Round(time.Second))
-	case o.failed:
-		return "not read: reading them from the browser failed"
-	case o.cached:
-		return fmt.Sprintf("cached, read %s ago", time.Since(o.readAt).Round(time.Second))
-	}
-	return "read fresh from the browser"
-}
-
-func invalidateCookieHeader(source CookieSource) {
-	if source.Bridge == "" {
-		return
-	}
-	cookieHeaderCache.Lock()
-	delete(cookieHeaderCache.entries, source.cacheKey())
-	cookieHeaderCache.Unlock()
-}
-
-func sidecarRequestWithCookies(parent context.Context, method, url string, headers map[string]string, body string, cookies CookieSource, timeout time.Duration) (int, string, error) {
+func sidecarRequestWithCookies(parent context.Context, method, url string, headers map[string]string, body string, cookies browsercookie.Source, timeout time.Duration) (int, string, error) {
 	worker, err := sidecarPath()
 	if err != nil {
 		return 0, "", surface.DeliveryUnavailable(err)
@@ -292,7 +95,7 @@ func sidecarRequestWithCookies(parent context.Context, method, url string, heade
 	if err != nil {
 		return 0, "", surface.DeliveryUnavailable(err)
 	}
-	cookie, err := loadCookieHeader(parent, cookies)
+	cookie, err := browsercookie.LoadHeader(parent, cookies)
 	if err != nil {
 		return 0, "", surface.DeliveryUnavailable(err)
 	}
@@ -316,7 +119,7 @@ func sidecarRequestWithCookies(parent context.Context, method, url string, heade
 
 	ctx, cancel := context.WithTimeout(parent, timeout+10*time.Second)
 	defer cancel()
-	cmd := processGroupCommand(ctx, python, worker)
+	cmd := surface.ProcessGroupCommand(ctx, python, worker)
 	cmd.Stdin = strings.NewReader(string(input))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -347,31 +150,7 @@ func sidecarRequestWithCookies(parent context.Context, method, url string, heade
 		return 0, "", fmt.Errorf("sidecar: %s", resp.Error)
 	}
 	if resp.Status == 401 || resp.Status == 403 {
-		invalidateCookieHeader(cookies)
+		browsercookie.Invalidate(cookies)
 	}
 	return resp.Status, resp.Body, nil
-}
-
-// configuredCookieBridge locates cookie.mjs: AGENTHAIL_COOKIE_BRIDGE, then a
-// copy in the install directory or on PATH.
-func configuredCookieBridge() string {
-	if bridge := os.Getenv("AGENTHAIL_COOKIE_BRIDGE"); bridge != "" {
-		return bridge
-	}
-	return cookieBridgePath("cookie")
-}
-
-func cookieBridgePath(name string) string {
-	for _, check := range []string{name, name + ".mjs"} {
-		if exe, err := os.Executable(); err == nil {
-			sibling := filepath.Join(installdir.Of(exe), check)
-			if _, err := os.Stat(sibling); err == nil {
-				return sibling
-			}
-		}
-		if p, err := exec.LookPath(check); err == nil {
-			return p
-		}
-	}
-	return ""
 }

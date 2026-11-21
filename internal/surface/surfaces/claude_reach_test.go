@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
@@ -30,7 +31,7 @@ type claudePosts struct {
 	bodies []string
 }
 
-func (p *claudePosts) request(_ context.Context, method, url string, _ map[string]string, body string, _ CookieSource, _ time.Duration) (int, string, error) {
+func (p *claudePosts) request(_ context.Context, method, url string, _ map[string]string, body string, _ browsercookie.Source, _ time.Duration) (int, string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if method == "POST" && strings.Contains(url, "/v1/code/sessions/") {
@@ -245,7 +246,7 @@ func TestClaudeResumeLockExcludesAnotherProcess(t *testing.T) {
 func TestClaudeCompactOfExitedSessionDoesNotResumeIt(t *testing.T) {
 	fixture, host, _ := hostResume(t)
 	session := exitedSession(fixture)
-	c := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+	c := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, func(context.Context, string, string, map[string]string, string, browsercookie.Source, time.Duration) (int, string, error) {
 		t.Fatal("compact was posted to a session without Remote Control")
 		return 0, "", nil
 	})

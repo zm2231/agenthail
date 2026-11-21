@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // A subagent whose last turn never recorded a terminal stop (a killed
@@ -43,7 +44,7 @@ type claudeSubagentFile struct {
 	validated bool
 	read      bool
 	stamp     surface.FileStamp
-	cursor    transcriptCursor
+	cursor    transcript.Cursor
 	done      bool
 	started   time.Time
 }
@@ -219,10 +220,10 @@ func (f *claudeSubagentFile) refresh(ctx context.Context, transcriptID string, n
 		return fmt.Errorf("stat Claude subagent transcript %s: %w", f.path, err)
 	}
 	stamp := surface.Stamp(info)
-	if !f.cursor.reset(info) && f.stamp.Equal(stamp) {
+	if !f.cursor.Reset(info) && f.stamp.Equal(stamp) {
 		return nil
 	}
-	if f.cursor.offset == 0 {
+	if f.cursor.Offset == 0 {
 		f.validated, f.read, f.done = false, false, false
 	}
 	if !f.validated {
@@ -236,7 +237,7 @@ func (f *claudeSubagentFile) refresh(ctx context.Context, transcriptID string, n
 		return nil
 	}
 	if !f.read {
-		lines, end, err := readRecentJSONLLines(ctx, f.path, 0, claudeSubagentTailBytes, maxClaudeTranscriptRecordBytes)
+		lines, end, err := transcript.ReadRecentJSONLLines(ctx, f.path, 0, claudeSubagentTailBytes, maxClaudeTranscriptRecordBytes)
 		if err != nil {
 			return fmt.Errorf("read Claude subagent transcript %s: %w", f.path, err)
 		}
@@ -244,14 +245,14 @@ func (f *claudeSubagentFile) refresh(ctx context.Context, transcriptID string, n
 		for _, line := range lines {
 			f.apply(line)
 		}
-		f.cursor.offset, f.read = end, true
+		f.cursor.Offset, f.read = end, true
 		return nil
 	}
-	offset, err := scanAppendedJSONL(ctx, f.path, f.cursor.offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
+	offset, err := transcript.ScanAppendedJSONL(ctx, f.path, f.cursor.Offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
 		f.apply(line)
 		return nil
 	})
-	f.cursor.offset = offset
+	f.cursor.Offset = offset
 	if err != nil {
 		return fmt.Errorf("read Claude subagent transcript %s: %w", f.path, err)
 	}
@@ -259,7 +260,7 @@ func (f *claudeSubagentFile) refresh(ctx context.Context, transcriptID string, n
 }
 
 func (f *claudeSubagentFile) validate(transcriptID string) error {
-	err := findJSONL(f.path, func(line []byte) (bool, error) {
+	err := transcript.FindJSONL(f.path, func(line []byte) (bool, error) {
 		var record claudeSubagentRecord
 		if json.Unmarshal(line, &record) != nil || record.SessionID == "" || record.AgentID == "" {
 			return false, nil

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 type claudeSentFile struct {
@@ -13,7 +14,7 @@ type claudeSentFile struct {
 }
 
 func claudeSentFiles(record map[string]any) (callID, caption string, files []claudeSentFile) {
-	if str(record, "type") != "user" {
+	if transcript.String(record, "type") != "user" {
 		return "", "", nil
 	}
 	result, _ := record["toolUseResult"].(map[string]any)
@@ -23,26 +24,26 @@ func claudeSentFiles(record map[string]any) (callID, caption string, files []cla
 	}
 	for _, raw := range entries {
 		entry, _ := raw.(map[string]any)
-		path := str(entry, "path")
+		path := transcript.String(entry, "path")
 		_, sized := entry["size"].(float64)
 		image, hinted := entry["isImage"].(bool)
 		if !filepath.IsAbs(path) || !sized || !hinted {
 			return "", "", nil
 		}
-		files = append(files, claudeSentFile{path: path, mediaType: str(entry, "media_type"), image: image})
+		files = append(files, claudeSentFile{path: path, mediaType: transcript.String(entry, "media_type"), image: image})
 	}
-	return callID, str(result, "caption"), files
+	return callID, transcript.String(result, "caption"), files
 }
 
 func claudeToolResultID(record map[string]any) string {
 	message, _ := record["message"].(map[string]any)
-	if id := str(message, "tool_use_id"); id != "" {
+	if id := transcript.String(message, "tool_use_id"); id != "" {
 		return id
 	}
 	blocks, _ := message["content"].([]any)
 	for _, raw := range blocks {
-		if block, _ := raw.(map[string]any); str(block, "type") == "tool_result" {
-			return str(block, "tool_use_id")
+		if block, _ := raw.(map[string]any); transcript.String(block, "type") == "tool_result" {
+			return transcript.String(block, "tool_use_id")
 		}
 	}
 	return ""
@@ -63,8 +64,8 @@ func verifiedSentFiles(ctx context.Context, calls *claudeToolCalls, record map[s
 	return caption, files, nil
 }
 
-func sentFileReference(file claudeSentFile) attachmentReference {
-	return attachmentReference{MediaType: file.mediaType, Path: file.path, Sent: true, Image: file.image}
+func sentFileReference(file claudeSentFile) transcript.AttachmentReference {
+	return transcript.AttachmentReference{MediaType: file.mediaType, Path: file.path, Sent: true, Image: file.image}
 }
 
 func appendSentFiles(ctx context.Context, items []surface.TimelineItem, calls *claudeToolCalls, record map[string]any, offset int64, line []byte) ([]surface.TimelineItem, error) {
@@ -76,11 +77,11 @@ func appendSentFiles(ctx context.Context, items []surface.TimelineItem, calls *c
 	for i, file := range files {
 		index := len(items)
 		name := filepath.Base(file.path)
-		item := surface.TimelineItem{ID: stableTimelineItemID(offset, line, index) + "-file", Kind: "file", Role: "assistant", Title: name, CallID: callID, Files: []surface.AttachedFile{{Name: name, Path: file.path}}}
+		item := surface.TimelineItem{ID: transcript.StableTimelineItemID(offset, line, index) + "-file", Kind: "file", Role: "assistant", Title: name, CallID: callID, Files: []surface.AttachedFile{{Name: name, Path: file.path}}}
 		if i == 0 {
 			item.Text = caption
 		}
-		if err := decorateSentFile(ctx, &item, sentFileReference(file), offset, index); err != nil {
+		if err := transcript.DecorateSentFile(ctx, &item, sentFileReference(file), offset, index); err != nil {
 			return items, err
 		}
 		items = append(items, item)
