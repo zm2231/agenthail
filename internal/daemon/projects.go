@@ -34,7 +34,7 @@ type catalogViewState struct {
 	leads     leadDirectory
 }
 
-func (d *Daemon) loadCatalogViewState() (catalogViewState, error) {
+func (d *Daemon) buildCatalogViewState() (catalogViewState, error) {
 	archive, err := d.Registry.ArchiveState()
 	if err != nil {
 		return catalogViewState{}, fmt.Errorf("read archive state: %w", err)

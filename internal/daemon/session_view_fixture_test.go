@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -235,6 +236,15 @@ func newViewFixture(t *testing.T) *viewFixture {
 				t.Fatal(err)
 			}
 			d.discoverCatalog(f.ctx)
+		}},
+		{"a turn judged again with a new headline", func(rng *rand.Rand) {
+			id := session(rng)
+			if err := reg.SaveRuntimeState(id, surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "judged-turn"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := reg.RecordTurnJudgment(registry.TurnJudgment{SessionID: id, TurnID: "judged-turn", EndedAt: f.clock, JudgedAt: f.clock, State: turnWaitingPerson, Headline: fmt.Sprint("Pick option ", rng.Intn(1000))}); err != nil {
+				t.Fatal(err)
+			}
 		}},
 		{"delivery asks synced on their own", func(*rand.Rand) {
 			if err := reg.SyncDeliveryAsks(f.clock); err != nil {
@@ -488,8 +498,9 @@ func newViewFixture(t *testing.T) *viewFixture {
 				t.Fatalf("failed read of pull request 9 not recorded: %v", err)
 			}
 		}
-		if err := reg.SetAlias("filled", "s0"); err != nil {
-			t.Fatal(err)
+		aliased := slices.ContainsFunc([]string{"s0", "s1", "s2", "s3", "s4"}, func(id string) bool { return reg.SetAlias("filled", id) == nil })
+		if !aliased {
+			t.Fatal("every fixture session refused an alias; a lead's alias cannot change")
 		}
 		if err := reg.QueueMessage("s2", "filled"); err != nil {
 			t.Fatal(err)

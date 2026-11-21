@@ -80,6 +80,7 @@ type Daemon struct {
 	ledgerAskSync        sync.Mutex
 	catalogNudge         chan struct{}
 	presence             catalogPresence
+	catalogView          catalogViewCache
 	leads                leadWatch
 	observerNudge        chan struct{}
 	mcpStall             mcpStall
