@@ -62,6 +62,8 @@ const (
 	// Kept apart from the general readers so a background scan cannot hold up naming a caller.
 	callerConnections = 2
 	deadReviewWindow  = time.Hour
+	// SQLite keeps a reader's page cache until its connection closes; the OS file cache serves the pages as fast.
+	readerIdleTime = time.Minute
 )
 
 func SchemaVersion() int { return schemaVersion }
@@ -209,7 +211,7 @@ func connect(path string) (*Registry, error) {
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	read, err := sql.Open("sqlite", path+sep+"_pragma=busy_timeout(15000)&_pragma=query_only(1)&_pragma=cache_size(-65536)")
+	read, err := sql.Open("sqlite", path+sep+"_pragma=busy_timeout(15000)&_pragma=query_only(1)&_pragma=cache_size(-2048)")
 	if err != nil {
 		db.Close()
 		closeOpenLock(openLock)
@@ -217,6 +219,7 @@ func connect(path string) (*Registry, error) {
 	}
 	read.SetMaxOpenConns(readConnections)
 	read.SetMaxIdleConns(readConnections)
+	read.SetConnMaxIdleTime(readerIdleTime)
 	callers, err := sql.Open("sqlite", path+sep+"_pragma=busy_timeout(15000)&_pragma=query_only(1)&_pragma=cache_size(-2048)")
 	if err != nil {
 		read.Close()
@@ -226,6 +229,7 @@ func connect(path string) (*Registry, error) {
 	}
 	callers.SetMaxOpenConns(callerConnections)
 	callers.SetMaxIdleConns(callerConnections)
+	callers.SetConnMaxIdleTime(readerIdleTime)
 	r := &Registry{db: &writeDB{raw: db}, read: read, callers: callers, openLock: openLock, path: path, now: time.Now, retryBackoff: QueueRetryBackoff}
 	r.seen = newStampQueue(r.writeDeviceSeen)
 	r.credentialUse = newStampQueue(r.writeCredentialUse)
