@@ -64,17 +64,17 @@ struct FailedSendDeleteTest {
             }
             return row
         }
-        let stale = #"{"ok":false,"error":{"code":"stale","message":"this request was already answered or has expired"}"#
+        let staleFields = #""ok":false,"error":{"code":"stale","message":"this request was already answered or has expired"}"#
 
-        _ = await deleteAfterSettled(stale + #","settled":"delete"}"#)
+        _ = await deleteAfterSettled("{\(staleFields),\"settled\":\"delete\"}")
         check(model.outbox.rows["S"]?.isEmpty ?? true, "Delete on a row whose ask was deleted elsewhere removes the row")
         check(model.operationError == nil, "an ask deleted elsewhere is not reported as a failure")
 
-        _ = await deleteAfterSettled(stale + #","settled":"retry"}"#)
+        _ = await deleteAfterSettled("{\(staleFields),\"settled\":\"retry\"}")
         check(model.outbox.rows["S"]?.isEmpty ?? true, "a row whose message is being sent again is no longer shown as not sent")
         check(model.operationError == SettledAsk.resentNotice, "Delete says the message was already sent again rather than claiming it was deleted")
 
-        let kept = await deleteAfterSettled(stale + "}")
+        let kept = await deleteAfterSettled("{\(staleFields)}")
         check(model.outbox.rows["S"]?.contains { $0.id == kept.id } == true, "a stale reply that does not say how the ask was settled keeps the row")
         model.outbox.discard(kept, in: "S")
 

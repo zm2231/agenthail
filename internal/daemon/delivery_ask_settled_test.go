@@ -1,12 +1,14 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -41,6 +43,12 @@ func TestAnAnswerToASettledDeliveryAskSaysHowItWasSettled(t *testing.T) {
 			}
 			if err := json.Unmarshal(late.Body.Bytes(), &reply); err != nil || late.Code != http.StatusConflict || reply.Error.Code != "stale" || reply.Settled != first {
 				t.Fatalf("late delete status=%d body=%s, want stale and settled %q", late.Code, late.Body.String(), first)
+			}
+			// A second device that read the ask while it was open loses the claim.
+			_, raced := d.answerDelivery(context.Background(), asks[0], surface.Response{Choices: []string{"delete"}}, registry.AskToPerson, "test")
+			var failure *actionError
+			if !errors.As(raced, &failure) || failure.Code != "stale" || failure.Extra["settled"] != first {
+				t.Fatalf("raced delete err=%#v, want stale and settled %q", raced, first)
 			}
 		})
 	}

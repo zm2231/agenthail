@@ -1136,24 +1136,24 @@ final class ComposerSendTests: XCTestCase {
         return (model, session)
     }
 
-    private let stale = #"{"ok":false,"error":{"code":"stale","message":"this request was already answered or has expired"}"#
+    private let staleFields = #""ok":false,"error":{"code":"stale","message":"this request was already answered or has expired"}"#
 
     func testDeleteOnARefusedSendWhoseAskWasDeletedElsewhereRemovesIt() async throws {
-        let (model, session) = try await refusedSend(settledReply: stale + #","settled":"delete"}"#)
+        let (model, session) = try await refusedSend(settledReply: "{\(staleFields),\"settled\":\"delete\"}")
         model.deleteRefusedSend(in: session.id)
         try await waitUntil { model.refusedSends[session.id] == nil }
         XCTAssertNil(model.operationError, "an ask deleted elsewhere is not reported as a failure")
     }
 
     func testDeleteOnARefusedSendThatWasRetriedElsewhereSaysItWasSentAgain() async throws {
-        let (model, session) = try await refusedSend(settledReply: stale + #","settled":"retry"}"#)
+        let (model, session) = try await refusedSend(settledReply: "{\(staleFields),\"settled\":\"retry\"}")
         model.deleteRefusedSend(in: session.id)
         try await waitUntil { model.refusedSends[session.id] == nil }
         XCTAssertEqual(model.operationError, SettledAsk.resentNotice)
     }
 
     func testDeleteFromANotificationRemovesTheRefusedSend() async throws {
-        let (model, session) = try await refusedSend(settledReply: stale + "}")
+        let (model, session) = try await refusedSend(settledReply: "{\(staleFields)}")
         NotificationCenter.default.post(name: .agenthailRequestAnswered, object: AnsweredRequest(requestID: "ask-1", choice: FailedSendAsk.delete))
         try await waitUntil { model.refusedSends[session.id] == nil }
     }
