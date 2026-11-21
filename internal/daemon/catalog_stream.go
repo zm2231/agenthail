@@ -418,7 +418,8 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 			priorStamps[id] = prior
 		}
 		passCtx := surface.WithProbePass(ctx)
-		operationCtx, cancel := context.WithTimeout(passCtx, 12*time.Second)
+		gapCtx, gap := surface.WithRuntimeGap(passCtx)
+		operationCtx, cancel := context.WithTimeout(gapCtx, 12*time.Second)
 		complete := true
 		var sessions []surface.Session
 		var err error
@@ -429,6 +430,9 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 		}
 		cancel()
 		health := d.recordSurfaceHealth(passCtx, adapter, err)
+		if err == nil {
+			d.noteCatalogRuntimeGap(adapter.Name(), gap.Without())
+		}
 		if err != nil {
 			d.forgetCatalogLive(adapter.Name(), nil)
 			observedAt := time.Now().UTC()

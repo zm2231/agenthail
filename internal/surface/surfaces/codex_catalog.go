@@ -27,6 +27,13 @@ func (c *Codex) CatalogList(ctx context.Context) ([]surface.Session, bool, error
 	return sessions, complete, err
 }
 
+func (c *Codex) listedWithout(runtimes *codexRuntimes) string {
+	if runtimes.desktop != nil || c.DesktopScope() != nil || len(runtimes.failures) == 0 {
+		return ""
+	}
+	return "Codex Desktop (" + runtimes.failures[0] + ")"
+}
+
 // CatalogWatchDirs are the folders where a new thread's rollout file
 // appears: Codex's sessions folder and its newest year, month and day
 // folders. Watching each level means the folder for a new day is watched as

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -48,6 +50,20 @@ func (c *Codex) dial(ctx context.Context) (*cdpConn, error) {
 		_ = conn.close()
 	}
 	return nil, fmt.Errorf("connect Codex Desktop renderer bridge: %s", strings.Join(failures, "; "))
+}
+
+// A failed dial with Desktop's debugging port still open is a Desktop that is starting or busy, not one that quit.
+func (c *Codex) desktopListening(ctx context.Context) bool {
+	endpoint, err := url.Parse(c.desktopURL)
+	if c.DesktopScope() != nil || err != nil || endpoint.Host == "" {
+		return false
+	}
+	conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(ctx, "tcp", endpoint.Host)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 type codexDesktopProbe struct{ endpoint string }
