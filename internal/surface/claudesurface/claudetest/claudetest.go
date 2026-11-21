@@ -442,6 +442,29 @@ func (h *Holder) Record(conversation, status string) {
 	h.f.write(filepath.Join("sessions", fmt.Sprint(h.PID)+".json"), string(data))
 }
 
+// RecordProcStart rewrites the holder's record in the form that names the
+// process by its ps start time alone, without startedAt.
+func (h *Holder) RecordProcStart(conversation string) {
+	h.f.t.Helper()
+	command := exec.Command("ps", "-o", "lstart=", "-p", fmt.Sprint(h.PID))
+	command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+	start, err := command.Output()
+	if err != nil {
+		h.f.t.Fatal(err)
+	}
+	record := map[string]any{"pid": h.PID, "sessionId": conversation, "cwd": h.cwd, "status": "idle", "kind": "interactive", "entrypoint": "cli", "version": "2.1.270", "procStart": string(start), "messagingSocketPath": h.socket}
+	data, _ := json.Marshal(record)
+	h.f.write(filepath.Join("sessions", fmt.Sprint(h.PID)+".json"), string(data))
+}
+
+// Restart rewrites the holder's record as a later process under the same pid
+// would write it, with a start of now.
+func (h *Holder) Restart(conversation string) {
+	h.f.t.Helper()
+	h.startedAt = time.Now().UnixMilli()
+	h.Record(conversation, "idle")
+}
+
 // Exit ends the holder's process and removes its record.
 func (h *Holder) Exit() {
 	h.f.t.Helper()

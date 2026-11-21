@@ -457,7 +457,7 @@ func (c *Claude) ReceiveMove(ctx context.Context, in surface.MoveIn, archive io.
 		if err := surface.CheckPrefix(filepath.Join(staging, in.Conversation+".jsonl"), dest); err != nil {
 			return nil, fmt.Errorf("%w with a different transcript: Claude conversation %s", surface.ErrMoveInRunning, in.Conversation)
 		}
-		resumed, err := c.resumeAs(ctx, in.Conversation, in.Cwd, claudehost.OpenRequest{Model: in.Model, PermissionMode: in.PermissionMode, Name: in.Title})
+		resumed, err := c.resumeAs(ctx, in.Conversation, in.Cwd, "it moved here from another host", claudehost.OpenRequest{Model: in.Model, PermissionMode: in.PermissionMode, Name: in.Title})
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", surface.ErrMoveInRunning, err)
 		}
@@ -504,7 +504,7 @@ func (c *Claude) placeAndResume(ctx context.Context, in surface.MoveIn, staging,
 			return nil, err
 		}
 	}
-	return c.resumeAs(ctx, in.Conversation, in.Cwd, claudehost.OpenRequest{Model: in.Model, PermissionMode: in.PermissionMode, Name: in.Title})
+	return c.resumeAs(ctx, in.Conversation, in.Cwd, "it moved here from another host", claudehost.OpenRequest{Model: in.Model, PermissionMode: in.PermissionMode, Name: in.Title})
 }
 
 // setAsideExisting moves a copy of a part the arriving conversation extends

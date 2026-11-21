@@ -16,6 +16,7 @@ import (
 
 func (d *Daemon) syncDeliveryAsks() {
 	d.failUnreportedPeerHolds(time.Now())
+	d.dropExitedHolders(time.Now())
 	if err := d.Registry.SyncDeliveryAsks(time.Now()); err != nil {
 		d.log.Printf("sync delivery asks: %s", err)
 	}
@@ -119,15 +120,24 @@ func (d *Daemon) answerDelivery(ctx context.Context, ask registry.Ask, response 
 	if !ok {
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", "unreadable delivery ask "+ask.ID)
 	}
+	pid, terminal := registry.TerminalChoice(option.ID)
+	terminal = terminal && ref.Kind == registry.DeliveryShared
+	if terminal {
+		d.dropExitedHolders(time.Now())
+	}
 	claimed, err := d.Registry.ClaimAsk(ask.ID, registry.AskAnswer{Answers: map[string]string{ask.Questions[0].Question: option.Label}}, by, via, time.Now())
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
 	}
 	if !claimed {
-		if current, found, err := d.Registry.Ask(ask.ID); err == nil && found {
-			return actionResult{}, settledRequest(current)
+		current, found, err := d.Registry.Ask(ask.ID)
+		if err != nil || !found {
+			return actionResult{}, staleRequest()
 		}
-		return actionResult{}, staleRequest()
+		if terminal && current.State == registry.AskWithdrawn {
+			return d.pinAfterHoldersChanged(current, ref, pid)
+		}
+		return actionResult{}, settledRequest(current)
 	}
 	defer d.publishAsk(ask.SessionID)
 	if err := d.applyDelivery(ctx, ask, ref, option.ID, by); err != nil {
@@ -145,7 +155,7 @@ func (d *Daemon) answerDelivery(ctx context.Context, ask registry.Ask, response 
 
 func (d *Daemon) applyDelivery(ctx context.Context, ask registry.Ask, ref registry.DeliveryRef, choice, by string) error {
 	if pid, ok := registry.TerminalChoice(choice); ok && ref.Kind == registry.DeliveryShared {
-		return d.Registry.PinHeldMessage(ref.QueueID, pid)
+		return d.Registry.PinHeldMessage(ref.QueueID, pid, nil)
 	}
 	switch choice {
 	case registry.DeliveryDismiss:

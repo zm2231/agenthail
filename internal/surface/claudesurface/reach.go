@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,7 +73,7 @@ func (c *Claude) reach(ctx context.Context, sess *surface.Session) (bool, error)
 	if err := c.recordedRootGone(sess); err != nil {
 		return false, err
 	}
-	resumed, err := c.resume(ctx, conversation, cwd)
+	resumed, err := c.resume(ctx, conversation, cwd, "no running process holds it")
 	if err != nil {
 		return false, err
 	}
@@ -235,8 +236,8 @@ func deliveryError(err error) error {
 // that holds it, and waits until its process is listed. A process from an
 // earlier host that still runs holds the conversation, and a Claude that
 // fails to start has refused it.
-func (c *Claude) resume(ctx context.Context, conversation, cwd string) (*surface.Session, error) {
-	return c.resumeAs(ctx, conversation, cwd, claudehost.OpenRequest{})
+func (c *Claude) resume(ctx context.Context, conversation, cwd, why string) (*surface.Session, error) {
+	return c.resumeAs(ctx, conversation, cwd, why, claudehost.OpenRequest{})
 }
 
 // claudeTranscriptExists reads the filesystem itself rather than the
@@ -259,7 +260,7 @@ func claudeTranscriptExists(root, conversation string) bool {
 
 // resumeAs is resume with the model, permission mode and name of options,
 // for a conversation the host has no settings for yet.
-func (c *Claude) resumeAs(ctx context.Context, conversation, cwd string, options claudehost.OpenRequest) (*surface.Session, error) {
+func (c *Claude) resumeAs(ctx context.Context, conversation, cwd, why string, options claudehost.OpenRequest) (*surface.Session, error) {
 	root, err := c.conversationRoot(conversation)
 	if err != nil {
 		return nil, err
@@ -287,6 +288,9 @@ func (c *Claude) resumeAs(ctx context.Context, conversation, cwd string, options
 	if options.Name == "" {
 		options.Name = c.conversationTitle(ctx, conversation, root)
 	}
+	if unreadable := c.unreadableRecords(); len(unreadable) > 0 {
+		return nil, refuseUnknownHolders(conversation, unreadable)
+	}
 	opened, err := c.hostOpen(ctx, claudehost.OpenRequest{Resume: conversation, Cwd: cwd, ConfigDir: root, Name: options.Name, Model: options.Model, PermissionMode: options.PermissionMode})
 	if err != nil {
 		return nil, claudeHostResumeError(conversation, err)
@@ -299,6 +303,7 @@ func (c *Claude) resumeAs(ctx context.Context, conversation, cwd string, options
 		c.host.forget()
 		process, _, err := c.conversationProcess(ctx, conversation, claudePin{pid: opened.PID})
 		if err == nil && process != nil && process.PID == opened.PID && claudeHosted(process) {
+			log.Printf("Claude host: resumed conversation %s as process %d for %s: %s", conversation, opened.PID, surface.ResumeCause(ctx), why)
 			return process, nil
 		}
 		select {

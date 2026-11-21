@@ -130,7 +130,7 @@ func nativeRecord(home, socket string) (string, sessionRecord, bool, error) {
 			continue
 		}
 		var record sessionRecord
-		if json.Unmarshal(data, &record) == nil && record.MessagingSocketPath == socket {
+		if surface.DecodeClaudeSessionRecord(path, data, &record) == nil && record.MessagingSocketPath == socket {
 			return filepath.Dir(filepath.Dir(path)), record, true, nil
 		}
 	}

@@ -86,7 +86,7 @@ func (c *Claude) AdoptSession(ctx context.Context, sess *surface.Session, reques
 	if cwd == "" {
 		return nil, surface.DeliveryTerminal(fmt.Errorf("Claude conversation %s has no known working directory to resume in", conversation), surface.DeliveryTargetMissing)
 	}
-	if result.Session, err = c.resume(ctx, conversation, cwd); err != nil {
+	if result.Session, err = c.resume(ctx, conversation, cwd, "it is adopted into the Claude host"); err != nil {
 		return nil, err
 	}
 	return result, nil

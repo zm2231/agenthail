@@ -1,7 +1,6 @@
 package claudesurface
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -48,12 +47,13 @@ func (c *Claude) records() ([]string, []claudeSessionRecord, error) {
 				continue
 			}
 			readAt := time.Now()
-			raw, err := os.ReadFile(filepath.Join(sessionsDir, e.Name()))
+			path := filepath.Join(sessionsDir, e.Name())
+			raw, err := os.ReadFile(path)
 			if err != nil {
 				continue
 			}
 			var m map[string]any
-			if json.Unmarshal(raw, &m) != nil || transcript.String(m, "agenthail") != "" || strings.HasPrefix(transcript.String(m, "sessionId"), claudehost.ListingSessionPrefix) {
+			if surface.DecodeClaudeSessionRecord(path, raw, &m) != nil || transcript.String(m, "agenthail") != "" || strings.HasPrefix(transcript.String(m, "sessionId"), claudehost.ListingSessionPrefix) {
 				continue
 			}
 			if pid, ok := m["pid"].(float64); ok && pid > 0 && !claudeRecordLive(m) {
@@ -82,7 +82,7 @@ func (c *Claude) pidRecord(pid int) (string, map[string]any, bool) {
 			continue
 		}
 		var record map[string]any
-		if json.Unmarshal(raw, &record) != nil {
+		if surface.DecodeClaudeSessionRecord(path, raw, &record) != nil {
 			continue
 		}
 		if len(paths) == 1 || claudeRecordLive(record) {

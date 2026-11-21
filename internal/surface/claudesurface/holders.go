@@ -255,6 +255,9 @@ func (c *Claude) heldRecord(conversation string, holder surface.Holder) (map[str
 	if !found || transcript.String(record, "sessionId") != conversation || !claudeRecordLive(record) {
 		return nil, false
 	}
+	if holder.Start != "" && recordStart(record) != holder.Start {
+		return nil, false
+	}
 	if !holder.StartedAt.IsZero() {
 		if startedAt, ok := record["startedAt"].(float64); !ok || int64(startedAt) != holder.StartedAt.UnixMilli() {
 			return nil, false
