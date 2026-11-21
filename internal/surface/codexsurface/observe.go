@@ -46,13 +46,11 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 	observation = dropUnconfirmedTurn(thread, observation)
 	observation.Unheld = unheld && observation.Status != surface.StatusBusy
 	observation.WaitingOn = c.preciseWait(ctx, conn, sess, observation.WaitingOn)
-	path := c.home.transcriptPath(sess)
-	var info os.FileInfo
-	if path != "" {
-		if stat, err := os.Stat(path); err == nil {
-			info = stat
-			observation.Plan = c.plan(ctx, path, info)
-		}
+	path, info, err := c.home.statTranscript(sess)
+	if err == nil {
+		observation.Plan = c.plan(ctx, path, info)
+	} else {
+		path, info = "", nil
 	}
 	observation.BackgroundTasks = c.codexBackground(ctx, sess.ID, path, info)
 	return observation, nil
@@ -164,11 +162,7 @@ func (c *Codex) unheld(ctx context.Context, runtimes *codexRuntimes, sess *surfa
 	} else if runtimes.managedLoaded == nil || runtimes.managedLoaded[sess.ID] {
 		return false
 	}
-	path := c.home.transcriptPath(sess)
-	if path == "" {
-		return false
-	}
-	info, err := os.Stat(path)
+	path, info, err := c.home.statTranscript(sess)
 	if err != nil || now.Sub(info.ModTime()) <= codexQuietAfter || codexTurnOpen(path, info, now) {
 		return false
 	}

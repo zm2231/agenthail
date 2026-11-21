@@ -15,18 +15,18 @@ const (
 )
 
 func (c *Codex) reconcileLocalStatus(ctx context.Context, session *surface.Session) {
-	path := c.home.transcriptPath(session)
-	if path == "" {
+	source := c.home.rolloutFile(session)
+	if source == "" {
 		return
 	}
-	info, err := os.Stat(path)
+	path, info, err := statReadableRollout(source)
 	if err != nil {
 		session.Transcript = ""
 		return
 	}
-	session.Transcript = path
+	session.Transcript = source
 	session.HasLocal = true
-	c.applyCodexTranscriptStatus(ctx, session, info)
+	c.applyCodexTranscriptStatus(ctx, session, path, info)
 }
 
 // applyCodexTranscriptStatus lets the transcript's latest task lifecycle
@@ -35,11 +35,11 @@ func (c *Codex) reconcileLocalStatus(ctx context.Context, session *surface.Sessi
 // carries the open turn's activity even after the rollout has gone quiet
 // for longer than the transcript alone counts as busy, since the runtime
 // still reports the turn running.
-func (c *Codex) applyCodexTranscriptStatus(ctx context.Context, session *surface.Session, info os.FileInfo) {
-	session.Plan = c.plan(ctx, session.Transcript, info)
-	session.BackgroundTasks = c.codexBackground(ctx, session.ID, session.Transcript, info)
+func (c *Codex) applyCodexTranscriptStatus(ctx context.Context, session *surface.Session, path string, info os.FileInfo) {
+	session.Plan = c.plan(ctx, path, info)
+	session.BackgroundTasks = c.codexBackground(ctx, session.ID, path, info)
 	deep := session.Status == surface.StatusBusy || c.threadLoaded(session.ID)
-	turn := c.liveTurn(ctx, session.ID, session.Transcript, info, deep, time.Now())
+	turn := c.liveTurn(ctx, session.ID, path, info, deep, time.Now())
 	session.Activity, session.TurnStop = nil, turn.stop
 	if turn.status != surface.StatusUnknown {
 		session.Status = turn.status
@@ -68,10 +68,10 @@ func (c *Codex) LocalStatus(ctx context.Context, session surface.Session) (surfa
 	if session.Transcript == "" {
 		return session, nil
 	}
-	info, err := os.Stat(session.Transcript)
+	path, info, err := c.home.statTranscript(&session)
 	if err != nil {
 		return session, err
 	}
-	c.applyCodexTranscriptStatus(ctx, &session, info)
+	c.applyCodexTranscriptStatus(ctx, &session, path, info)
 	return session, nil
 }

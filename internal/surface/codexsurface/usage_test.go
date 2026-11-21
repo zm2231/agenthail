@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
@@ -57,6 +58,35 @@ func TestCodexUsageReadsTheNewestRolloutThatRecordsLimits(t *testing.T) {
 	}
 	if !usage.FetchedAt.Equal(time.Date(2026, 10, 23, 13, 0, 0, 0, time.UTC)) || len(usage.Limits) != 2 || usage.Limits[0] != want[0] || usage.Limits[1] != want[1] {
 		t.Fatalf("a rollout started yesterday and still written gives the newest reading, shortest window first: %+v", usage)
+	}
+}
+
+func TestCodexUsageReadsARolloutCodexCompressed(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	written := time.Date(2026, 10, 23, 13, 0, 0, 0, time.UTC)
+	plain := writeRollout(t, home, "2026/10/23", "rollout.jsonl", written,
+		tokenCount("2026-10-23T13:00:00Z", `{"primary":{"used_percent":61.5,"window_minutes":10080,"resets_at":1793293773},"secondary":null}`))
+	body, err := os.ReadFile(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoder, err := zstd.NewWriter(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(plain+".zst", encoder.EncodeAll(body, nil), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(plain); err != nil {
+		t.Fatal(err)
+	}
+	usage, err := surfacetest.InDaemon(NewCodex("")).Usage(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(usage.Limits) != 1 || usage.Limits[0].Percent != 61.5 || !usage.FetchedAt.Equal(written) {
+		t.Fatalf("the last reading on a machine whose rollouts are all compressed: %+v", usage)
 	}
 }
 

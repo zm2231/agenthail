@@ -63,7 +63,7 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 func (h CodexHome) awaitRollout(ctx context.Context, sess *surface.Session, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
-		if path := h.transcriptPath(sess); path != "" && transcript.FileExists(path) {
+		if path := h.rolloutFile(sess); path != "" && transcript.FileExists(path) {
 			return nil
 		}
 		if !time.Now().Before(deadline) {

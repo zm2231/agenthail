@@ -186,7 +186,7 @@ func (c *Codex) PrepareMove(ctx context.Context, sess *surface.Session, _ surfac
 	}
 	current := transcript.String(thread, "path")
 	if current == "" {
-		current = c.home.transcriptPath(sess)
+		current = c.home.rolloutFile(sess)
 	}
 	owned, err := codexThreadRollouts(c.home.sessionsDir(), sess.ID, true)
 	if err != nil {

@@ -308,9 +308,12 @@ func readCodexTranscriptPage(ctx context.Context, home CodexHome, path, threadID
 
 // A trusted rollout Codex compressed or rewrote since is matched by path.
 func (c *Codex) TranscriptContinuation(ctx context.Context, session *surface.Session, trustedPath, trustedIdentity string) ([]surface.TimelineItem, bool, error) {
-	current := c.home.transcriptPath(session)
+	current := c.home.rolloutFile(session)
 	if current == "" || current == trustedPath {
 		return nil, false, nil
+	}
+	if trustedPath != "" && current == trustedPath+".zst" {
+		return nil, true, nil
 	}
 	segments, err := c.home.rolloutLineage(current, session.ID)
 	if err != nil {

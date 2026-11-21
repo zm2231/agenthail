@@ -82,7 +82,11 @@ func (c *codexRolloutSubagentCache) read(path string) (*surface.Subagent, error)
 	if found {
 		return cached, nil
 	}
-	subagent, err := readCodexRolloutSubagent(path)
+	readable, err := codexReadableRollout(path)
+	if err != nil {
+		return nil, err
+	}
+	subagent, err := readCodexRolloutSubagent(readable)
 	if err != nil {
 		return nil, err
 	}

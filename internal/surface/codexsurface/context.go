@@ -3,9 +3,8 @@ package codexsurface
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
-	"sort"
+	"errors"
+	"io/fs"
 	"strconv"
 	"strings"
 	"time"
@@ -46,13 +45,9 @@ type codexContextRecord struct {
 }
 
 func (c *Codex) ContextUsage(ctx context.Context, sess *surface.Session) (*surface.ContextUsage, error) {
-	path := c.home.transcriptPath(sess)
-	if path == "" {
-		return nil, nil
-	}
-	info, err := os.Stat(path)
+	path, info, err := c.home.statTranscript(sess)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
 		}
 		return nil, err
@@ -124,22 +119,6 @@ func (c *Codex) ContextUsage(ctx context.Context, sess *surface.Session) (*surfa
 	}
 	usage := state.usage
 	return &usage, nil
-}
-
-func (h CodexHome) transcriptPath(sess *surface.Session) string {
-	if sess.Transcript != "" {
-		return sess.Transcript
-	}
-	var matches []string
-	for _, day := range codexRolloutDays(uuidV7Time(sess.ID)) {
-		found, _ := filepath.Glob(filepath.Join(h.sessionsDir(), day, "*"+sess.ID+"*.jsonl"))
-		matches = append(matches, found...)
-	}
-	sort.Strings(matches)
-	if len(matches) == 0 {
-		return ""
-	}
-	return matches[len(matches)-1]
 }
 
 func uuidV7Time(value string) time.Time {

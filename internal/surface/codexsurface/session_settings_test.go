@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
@@ -44,6 +45,38 @@ func TestCodexSessionSettingsComeFromTheRolloutWithTheSandboxOfTheLastTurn(t *te
 	}
 	if p := settings.Permission; p == nil || p.ApprovalPolicy != "untrusted" || p.Sandbox != "read-only" {
 		t.Fatalf("permission after a later turn = %+v", p)
+	}
+}
+
+func TestCodexSessionSettingsComeFromARolloutCodexCompressed(t *testing.T) {
+	_, codex, session := settingsThread(t, settingsModels)
+	plain := []byte(`{"type":"turn_context","payload":{"model":"gpt-sol","approval_policy":"never","sandbox_policy":{"type":"read-only"}}}` + "\n")
+	encoder, err := zstd.NewWriter(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(session.Transcript+".zst", encoder.EncodeAll(plain, nil), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(session.Transcript); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	settings, err := codex.SessionSettings(context.Background(), session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := settings.Model; m == nil || m.Value != "gpt-sol" {
+		t.Fatalf("model from a compressed rollout = %+v", m)
+	}
+	if p := settings.Permission; p == nil || p.Sandbox != "read-only" {
+		t.Fatalf("permission from a compressed rollout = %+v", p)
+	}
+	turn, err := codex.TurnSettings(context.Background(), session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turn) == 0 || turn[0].Value != "gpt-sol" {
+		t.Fatalf("turn settings from a compressed rollout = %+v", turn)
 	}
 }
 
