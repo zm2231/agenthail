@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -25,7 +26,14 @@ import (
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
-const webhookSecret = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
+func newWebhookSecret(t *testing.T) string {
+	t.Helper()
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	return "whsec_" + base64.StdEncoding.EncodeToString(key)
+}
 
 type webhookCall struct {
 	id, timestamp, subscription string
@@ -47,7 +55,7 @@ type webhookReceiver struct {
 }
 
 func newWebhookReceiver(t *testing.T) *webhookReceiver {
-	w := &webhookReceiver{t: t, calls: make(chan webhookCall, 64), secret: webhookSecret, gated: make(chan struct{}, eventSubscriptionLimit)}
+	w := &webhookReceiver{t: t, calls: make(chan webhookCall, 64), secret: newWebhookSecret(t), gated: make(chan struct{}, eventSubscriptionLimit)}
 	w.reply = func(call webhookCall) (int, string) {
 		if call.body["type"] == "verification" {
 			return http.StatusOK, fmt.Sprintf(`{"challenge":%q}`, call.body["challenge"])
@@ -259,7 +267,7 @@ func TestARemoteIdentityIsWokenBySignedWebhooksThatCarryOnlyACount(t *testing.T)
 		t.Fatalf("events/list=%+v err=%v", listed, err)
 	}
 	callback := w.url + "/hooks/kat?token=receiver-credential"
-	subscribed, err := subscribe(t.Context(), session, callback, webhookSecret, "")
+	subscribed, err := subscribe(t.Context(), session, callback, w.secret, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +278,7 @@ func TestARemoteIdentityIsWokenBySignedWebhooksThatCarryOnlyACount(t *testing.T)
 	if subscribed.RefreshBefore != nil || subscribed.Cursor != nil || subscribed.Truncated {
 		t.Fatalf("subscribe result=%+v", subscribed)
 	}
-	again, err := subscribe(t.Context(), session, callback, webhookSecret, "")
+	again, err := subscribe(t.Context(), session, callback, w.secret, "")
 	if err != nil || again.ID != subscribed.ID {
 		t.Fatalf("a refresh id=%v err=%v, want the same id", again, err)
 	}
@@ -311,7 +319,7 @@ func TestARemoteIdentityIsWokenBySignedWebhooksThatCarryOnlyACount(t *testing.T)
 	w.quiet(t, "after the burst was told", 300*time.Millisecond)
 
 	history := f.eventHistory(t)
-	if !strings.Contains(history, "subscribed") || !strings.Contains(history, "delivered") || strings.Contains(history, "receiver-credential") || strings.Contains(history, strings.TrimPrefix(webhookSecret, "whsec_")) || strings.Contains(history, "private") {
+	if !strings.Contains(history, "subscribed") || !strings.Contains(history, "delivered") || strings.Contains(history, "receiver-credential") || strings.Contains(history, strings.TrimPrefix(w.secret, "whsec_")) || strings.Contains(history, "private") {
 		t.Fatalf("history:\n%s", history)
 	}
 
@@ -327,7 +335,7 @@ func TestARemoteIdentityIsWokenBySignedWebhooksThatCarryOnlyACount(t *testing.T)
 func TestAWebhookIsRetriedWithItsEventIDAndA410EndsTheSubscription(t *testing.T) {
 	f, w, start := eventsFixture(t)
 	session := f.eventsSession(t)
-	subscribed, err := subscribe(t.Context(), session, w.url+"/hook", webhookSecret, "")
+	subscribed, err := subscribe(t.Context(), session, w.url+"/hook", w.secret, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +372,7 @@ func TestAWebhookIsRetriedWithItsEventIDAndA410EndsTheSubscription(t *testing.T)
 func TestAWebhookWaitsAsLongAsItsRetryAfterAsks(t *testing.T) {
 	f, w, start := eventsFixture(t)
 	session := f.eventsSession(t)
-	if _, err := subscribe(t.Context(), session, w.url+"/hook", webhookSecret, ""); err != nil {
+	if _, err := subscribe(t.Context(), session, w.url+"/hook", w.secret, ""); err != nil {
 		t.Fatal(err)
 	}
 	w.next(t, "the verification handshake")
@@ -399,7 +407,7 @@ func TestAWebhookWaitsAsLongAsItsRetryAfterAsks(t *testing.T) {
 		if history := f.eventHistory(t); !strings.Contains(history, "deferred") || strings.Contains(history, "failed") {
 			t.Fatalf("%s history:\n%s", name, history)
 		}
-		if _, err := subscribe(t.Context(), session, w.url+"/hook", webhookSecret, ""); err != nil {
+		if _, err := subscribe(t.Context(), session, w.url+"/hook", w.secret, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -409,7 +417,7 @@ func TestASubscriptionSuspendedForFailingIsRetriedOnATrialAndRecovers(t *testing
 	f, w, start := eventsFixture(t)
 	f.d.remoteMCP().eventRetries = []time.Duration{0}
 	session := f.eventsSession(t)
-	subscribed, err := subscribe(t.Context(), session, w.url+"/hook", webhookSecret, "")
+	subscribed, err := subscribe(t.Context(), session, w.url+"/hook", w.secret, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +456,7 @@ func TestEventSubscribeRefusesCallbacksItCannotSafelyReach(t *testing.T) {
 		"loopback":        "https://127.0.0.1/hook",
 		"credentials":     "https://user:pass@example.com/hook",
 	} {
-		if _, err := subscribe(t.Context(), session, callback, webhookSecret, ""); err == nil {
+		if _, err := subscribe(t.Context(), session, callback, w.secret, ""); err == nil {
 			t.Fatalf("%s: subscribed", name)
 		} else if code, _ := rpcError(t, err); code != jsonrpc.CodeInvalidParams {
 			t.Fatalf("%s: code %d", name, code)
@@ -459,7 +467,7 @@ func TestEventSubscribeRefusesCallbacksItCannotSafelyReach(t *testing.T) {
 	}
 
 	f.d.remoteMCP().webhookClient = newWebhookClient()
-	_, err := subscribe(t.Context(), session, "https://localhost:"+strings.Split(w.server.URL, ":")[2]+"/hook", webhookSecret, "")
+	_, err := subscribe(t.Context(), session, "https://localhost:"+strings.Split(w.server.URL, ":")[2]+"/hook", w.secret, "")
 	if code, data := rpcError(t, err); code != codeCallbackEndpoint || data["reason"] != "blocked_address" {
 		t.Fatalf("a name that resolves to loopback: code=%d data=%v", code, data)
 	}
@@ -467,7 +475,7 @@ func TestEventSubscribeRefusesCallbacksItCannotSafelyReach(t *testing.T) {
 
 	f.d.remoteMCP().webhookClient = w.client()
 	w.answer(func(webhookCall) (int, string) { return http.StatusOK, `{"challenge":"not the one sent"}` })
-	_, err = subscribe(t.Context(), session, w.url+"/hook", webhookSecret, "")
+	_, err = subscribe(t.Context(), session, w.url+"/hook", w.secret, "")
 	if code, data := rpcError(t, err); code != codeCallbackEndpoint || data["reason"] != "challenge_failed" {
 		t.Fatalf("a wrong challenge: code=%d data=%v", code, data)
 	}
@@ -479,11 +487,11 @@ func TestEventSubscribeRefusesCallbacksItCannotSafelyReach(t *testing.T) {
 func TestEventSubscriptionsAreBoundedAndTheirLifetimeFollowsTTL(t *testing.T) {
 	f, w, _ := eventsFixture(t)
 	session := f.eventsSession(t)
-	forever, err := subscribe(t.Context(), session, w.url+"/forever", webhookSecret, "null")
+	forever, err := subscribe(t.Context(), session, w.url+"/forever", w.secret, "null")
 	if err != nil || forever.RefreshBefore != nil {
 		t.Fatalf("ttlMs null: %+v err=%v", forever, err)
 	}
-	short, err := subscribe(t.Context(), session, w.url+"/short", webhookSecret, "1000")
+	short, err := subscribe(t.Context(), session, w.url+"/short", w.secret, "1000")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,11 +499,11 @@ func TestEventSubscriptionsAreBoundedAndTheirLifetimeFollowsTTL(t *testing.T) {
 		t.Fatalf("ttlMs 1000 granted %s, want the floor", *short.RefreshBefore)
 	}
 	for i := 2; i < eventSubscriptionLimit; i++ {
-		if _, err := subscribe(t.Context(), session, fmt.Sprintf("%s/hook-%d", w.url, i), webhookSecret, ""); err != nil {
+		if _, err := subscribe(t.Context(), session, fmt.Sprintf("%s/hook-%d", w.url, i), w.secret, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
-	_, err = subscribe(t.Context(), session, w.url+"/one-too-many", webhookSecret, "")
+	_, err = subscribe(t.Context(), session, w.url+"/one-too-many", w.secret, "")
 	if code, data := rpcError(t, err); code != jsonrpc.CodeInvalidParams || data["limit"] != "subscriptions" || data["max"] != float64(eventSubscriptionLimit) {
 		t.Fatalf("over the limit: code=%d data=%v", code, data)
 	}
@@ -512,7 +520,7 @@ func TestACredentialChangeEndsEventDeliveryAndASubscriptionOutlivesARestart(t *t
 		t.Run(name, func(t *testing.T) {
 			f, w, _ := eventsFixture(t)
 			session := f.eventsSession(t)
-			subscribed, err := subscribe(t.Context(), session, w.url+"/hook", webhookSecret, "")
+			subscribed, err := subscribe(t.Context(), session, w.url+"/hook", w.secret, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -549,7 +557,7 @@ func TestStoppingDeliveriesReturnsWhileEveryEndpointHangs(t *testing.T) {
 	f, w, _ := eventsFixture(t)
 	session := f.eventsSession(t)
 	for i := range eventSubscriptionLimit {
-		if _, err := subscribe(t.Context(), session, fmt.Sprintf("%s/hook-%d", w.url, i), webhookSecret, ""); err != nil {
+		if _, err := subscribe(t.Context(), session, fmt.Sprintf("%s/hook-%d", w.url, i), w.secret, ""); err != nil {
 			t.Fatal(err)
 		}
 		w.next(t, "a verification handshake")
