@@ -246,7 +246,7 @@ func TestCodexEnsureRuntimeNamesMissingCodex(t *testing.T) {
 func isolatedManagedRuntime(t *testing.T) *Codex {
 	t.Helper()
 	server := httptest.NewServer(http.NotFoundHandler())
-	t.Cleanup(server.Close)
+	server.Close()
 	codex := inDaemon(NewCodex(server.URL))
 	codex.managed = true
 	return codex

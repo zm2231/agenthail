@@ -56,6 +56,7 @@ type Daemon struct {
 	pollInterval         time.Duration
 	Surfaces             []surface.Surface
 	log                  *log.Logger
+	catalogGaps          catalogRuntimeGaps
 	idleHolds            idleCompactionHolds
 	idleWake             chan struct{}
 	retiringDecisions    retiringDecisions

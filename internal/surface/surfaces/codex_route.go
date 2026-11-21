@@ -24,6 +24,7 @@ const (
 // per-thread writer lock in the process that has the thread loaded.
 type codexRuntimes struct {
 	desktop       codexClient
+	desktopUp     bool
 	managed       codexClient
 	desktopLoaded map[string]bool
 	managedLoaded map[string]bool
@@ -38,6 +39,7 @@ func (c *Codex) openRuntimes(ctx context.Context) *codexRuntimes {
 		runtimes.desktopLoaded = runtimes.loadedSet(ctx, c, client, "Codex Desktop")
 	} else {
 		runtimes.failures = append(runtimes.failures, err.Error())
+		runtimes.desktopUp = c.desktopListening(ctx)
 	}
 	if client, err := c.dialManaged(ctx); err == nil {
 		runtimes.managed = client
@@ -96,7 +98,7 @@ func (r *codexRuntimes) route(threadID, originator string) string {
 		return codexTransportManaged
 	case originator != "" && originator != codexDesktopOriginator:
 		return codexTransportManaged
-	case r.desktop != nil:
+	case r.desktop != nil || r.desktopUp:
 		return codexTransportDesktop
 	default:
 		return codexTransportReadOnly
@@ -213,6 +215,10 @@ func (c *Codex) openRoute(ctx context.Context, sess *surface.Session) (codexClie
 	c.resolveRoute(ctx, runtimes, sess)
 	switch sess.Transport {
 	case codexTransportDesktop:
+		if runtimes.desktop == nil {
+			runtimes.Close()
+			return nil, runtimes.unavailable()
+		}
 		runtimes.release(runtimes.desktop)
 		return runtimes.desktop, nil
 	case codexTransportManaged:

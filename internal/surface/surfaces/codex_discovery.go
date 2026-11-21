@@ -51,6 +51,7 @@ func (c *Codex) list(ctx context.Context, sweep bool) ([]surface.Session, bool, 
 	if !succeeded {
 		return nil, false, fmt.Errorf("thread/list: %s", strings.Join(failures, "; "))
 	}
+	surface.NoteRuntimeGap(ctx, c.listedWithout(runtimes))
 	out := make([]surface.Session, 0, len(byID))
 	for _, session := range byID {
 		c.reconcileLocalStatus(ctx, &session)
