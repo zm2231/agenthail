@@ -119,12 +119,28 @@ func (d *Daemon) rebuildDashboardState(ctx context.Context, dashboard *dashboard
 	if err != nil {
 		return taggedDashboardState{}, err
 	}
+	builtAt := time.Now()
 	dashboard.stateMu.Lock()
 	defer dashboard.stateMu.Unlock()
+	if !supersedes(dashboard, state, version) {
+		return taggedDashboardState{state: state, tag: dashboardSnapshotTag(state, version, builtAt)}, nil
+	}
 	dashboard.state = state
-	dashboard.stateAt = time.Now()
+	dashboard.stateAt = builtAt
 	dashboard.cachedVersion = version
-	return taggedDashboardState{state: state, tag: dashboardSnapshotTag(state, version, dashboard.stateAt)}, nil
+	return taggedDashboardState{state: state, tag: dashboardSnapshotTag(state, version, builtAt)}, nil
+}
+
+// A build that finishes after a newer one must not replace it.
+func supersedes(dashboard *dashboardServer, state dashboardState, version uint64) bool {
+	stored := dashboard.state
+	if dashboard.stateAt.IsZero() || stored.HostEpoch != state.HostEpoch {
+		return true
+	}
+	if version != dashboard.cachedVersion {
+		return version > dashboard.cachedVersion
+	}
+	return state.CatalogSeq >= stored.CatalogSeq
 }
 
 func dashboardSnapshotTag(state dashboardState, version uint64, builtAt time.Time) string {
