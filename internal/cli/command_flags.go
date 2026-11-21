@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -56,11 +57,27 @@ func stripFlags(args []string) []string {
 	return out
 }
 
-func validateCommandFlags(command string, args []string) error {
-	type flagSpec struct {
-		values map[string]bool
-		bools  map[string]bool
+type flagSpec struct {
+	values map[string]bool
+	bools  map[string]bool
+}
+
+func (spec flagSpec) accepted() string {
+	var flags []string
+	for flag := range spec.values {
+		flags = append(flags, flag+" <value>")
 	}
+	for flag := range spec.bools {
+		flags = append(flags, flag)
+	}
+	if len(flags) == 0 {
+		return "no flags"
+	}
+	sort.Strings(flags)
+	return strings.Join(flags, ", ")
+}
+
+func commandFlagSpec(command string, args []string) (flagSpec, bool) {
 	specs := map[string]flagSpec{
 		"list": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--all": true, "--archived": true, "--recent": true, "--running": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--all": true, "--archived": true, "--recent": true, "--running": true, "--wide": true, "--json": true}}, "runs": {bools: map[string]bool{"--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "roots": {bools: map[string]bool{"--json": true}}, "usage": {bools: map[string]bool{"--json": true}}, "proxies": {values: map[string]bool{"--key-file": true, "--key-env": true, "--keychain-service": true, "--keychain-account": true}, bools: map[string]bool{"--json": true, "--key-command": true}}, "claude": {values: map[string]bool{"--root": true, "--model": true, "--enabled": true, "--idle": true}, bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
 		"send":  {values: surface.SendValueFlags, bools: surface.SendBoolFlags},
@@ -84,7 +101,7 @@ func validateCommandFlags(command string, args []string) error {
 	}
 	spec, known := specs[command]
 	if !known {
-		return nil
+		return flagSpec{}, false
 	}
 	if command == "queue" && len(args) > 0 && args[0] == "list" {
 		spec.values = map[string]bool{"--target": true, "--cwd": true, "--project": true}
@@ -112,6 +129,14 @@ func validateCommandFlags(command string, args []string) error {
 			spec.bools = map[string]bool{"--all": true}
 		}
 	}
+	return spec, true
+}
+
+func validateCommandFlags(command string, args []string) error {
+	spec, known := commandFlagSpec(command, args)
+	if !known {
+		return nil
+	}
 	seen := map[string]bool{}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -135,7 +160,7 @@ func validateCommandFlags(command string, args []string) error {
 		if spec.bools[arg] {
 			continue
 		}
-		return fmt.Errorf("unknown flag %s for %s", arg, command)
+		return fmt.Errorf("unknown flag %s for %s; it takes %s ('agenthail %s --help' shows its usage)", arg, command, spec.accepted(), command)
 	}
 	return nil
 }

@@ -145,6 +145,10 @@ func (a *App) Run(args []string) (err error) {
 	if cmd == "launcher-exec" {
 		return a.cmdLauncherExec(rest)
 	}
+	if spec, known := commandFlagSpec(cmd, rest); known && !spec.bools["--help"] && (len(rest) > 0 && rest[0] == "-h" || hasFlag(rest, "--help")) {
+		a.commandHelp(cmd, rest)
+		return nil
+	}
 	if err := validateCommandFlags(cmd, rest); err != nil {
 		return err
 	}
@@ -270,6 +274,10 @@ func (a *App) Run(args []string) (err error) {
 		}
 		if len(rest) > 0 && rest[0] == "ledger" {
 			fmt.Print(ledgerHelp)
+			return nil
+		}
+		if len(rest) > 0 {
+			a.commandHelp(rest[0], rest[1:])
 			return nil
 		}
 		a.usage()
