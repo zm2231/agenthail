@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -72,6 +73,7 @@ type leadSample struct {
 	lead     string
 	err      error
 	rowsLeft int
+	listed   []string
 }
 
 // sampleLead reads a host's lead between two reads of its coordinator rows.
@@ -92,6 +94,7 @@ func sampleLead(node *moveNode, name, projectID string) leadSample {
 		if before[host] {
 			sample.rowsLeft++
 		}
+		sample.listed = append(sample.listed, host)
 	}
 	return sample
 }
@@ -182,7 +185,20 @@ func TestALeadMovesWithItsSessionAndEveryHostSeesOneLeadThroughout(t *testing.T)
 			t.Errorf("%s delivered %d times", text, got)
 		}
 	}
+	testkit.Eventually(t, "the former host to confirm every send it handed to the new host", 10*time.Second, func() bool {
+		queue, err := a.reg.ListQueue(true, nil)
+		if err != nil {
+			return false
+		}
+		for _, item := range queue {
+			if item.Status != "delivered" {
+				return false
+			}
+		}
+		return true
+	})
 
+	t.Logf("the third host listed the lead from: %s", listedSequence(samples, "c", map[string]string{mustHostID(t, a.federationNode): "a", mustHostID(t, b.federationNode): "b"}))
 	none := map[string]time.Time{}
 	longest := map[string]time.Duration{}
 	for _, sample := range samples {
@@ -231,6 +247,26 @@ func TestALeadMovesWithItsSessionAndEveryHostSeesOneLeadThroughout(t *testing.T)
 	if _, err := a.reg.Coordinator(project.ID); !errors.Is(err, registry.ErrNoCoordinator) {
 		t.Fatalf("the former host keeps its coordinator: %v", err)
 	}
+}
+
+// listedSequence shows the order in which host applied the hosts' lead rows.
+func listedSequence(samples []leadSample, host string, names map[string]string) string {
+	var steps []string
+	for _, sample := range samples {
+		if sample.host != host {
+			continue
+		}
+		var hosts []string
+		for _, id := range sample.listed {
+			hosts = append(hosts, names[id])
+		}
+		sort.Strings(hosts)
+		step := "{" + strings.Join(hosts, ",") + "}"
+		if len(steps) == 0 || steps[len(steps)-1] != step {
+			steps = append(steps, step)
+		}
+	}
+	return strings.Join(steps, " -> ")
 }
 
 // leadOn makes a movable session on a the lead of its repository's project,

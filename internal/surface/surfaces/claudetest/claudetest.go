@@ -14,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const script = `#!/bin/sh
@@ -293,6 +295,7 @@ type PeerSend struct {
 	Source  string `json:"sourceSessionId"`
 	Target  string `json:"targetSocket"`
 	Message string `json:"message"`
+	MsgID   string `json:"msgId,omitempty"`
 }
 
 func ListenPeerManager(t testing.TB, home string) *PeerManager {
@@ -315,10 +318,13 @@ func ListenPeerManager(t testing.TB, home string) *PeerManager {
 			}
 			var request PeerSend
 			if json.NewDecoder(conn).Decode(&request) == nil {
+				if request.MsgID == "" {
+					request.MsgID = uuid.NewString()
+				}
+				id := request.MsgID
 				manager.mu.Lock()
 				manager.messages = append(manager.messages, request.Message)
 				manager.sends = append(manager.sends, request)
-				id := fmt.Sprintf("peer-%d", len(manager.messages))
 				manager.mu.Unlock()
 				_ = json.NewEncoder(conn).Encode(map[string]any{"ok": true, "result": map[string]any{"uuid": id, "accepted": true}})
 			}
