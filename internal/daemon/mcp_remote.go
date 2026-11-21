@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
@@ -40,6 +41,7 @@ type remoteMCP struct {
 
 	mu       sync.Mutex
 	sessions map[*mcp.ServerSession]*remotePushSession
+	stopped  atomic.Bool
 	wake     chan struct{}
 	// beforeNotice runs between a pass's last epoch check and its sends, and
 	// afterEpoch between verify's epoch read and its token check, for tests.
@@ -61,7 +63,13 @@ func (d *Daemon) remoteMCP() *remoteMCP {
 		m.server.AddResourceTemplate(&mcp.ResourceTemplate{URITemplate: remoteInboxURIStart + "{name}", Name: "inbox", Title: "Inbox", Description: "How many messages wait unread in your inbox. Read them with agenthail_read.", MIMEType: "application/json"}, m.readInbox)
 		stream := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return m.server }, &mcp.StreamableHTTPOptions{EventStore: mcp.NewMemoryEventStore(nil), SessionTimeout: cmp.Or(d.remoteIdle, remoteSessionIdle)})
 		bearer := auth.RequireBearerToken(m.verify, &auth.RequireBearerTokenOptions{})
-		m.handler = bearer(http.NewCrossOriginProtection().Handler(stream))
+		m.handler = bearer(http.NewCrossOriginProtection().Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if m.stopped.Load() {
+				http.Error(w, "the daemon is stopping", http.StatusServiceUnavailable)
+				return
+			}
+			stream.ServeHTTP(w, r)
+		})))
 		d.remote = m
 	})
 	return d.remote

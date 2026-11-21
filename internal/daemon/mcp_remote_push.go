@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -12,7 +13,10 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
-const remoteInboxSweep = 5 * time.Second
+const (
+	remoteInboxSweep = 5 * time.Second
+	remoteRetireWait = 2 * time.Second
+)
 
 type remotePushSession struct {
 	identity string
@@ -21,9 +25,14 @@ type remotePushSession struct {
 	notified int64
 	// retells counts subscribes and level changes, so a pass collected before one cannot mark it told.
 	retells uint64
+	// Requests run under ctx, so retiring a session ends its waits and Close is not held by them.
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func remoteInboxURI(name string) string { return remoteInboxURIStart + name }
+
+var errRemoteStale = errors.New("the remote credentials changed since this request was verified; reconnect")
 
 // The SDK's InitializedHandler gets no TokenInfo, so a session binds on its first verified message once initialized.
 func (m *remoteMCP) track(next mcp.MethodHandler) mcp.MethodHandler {
@@ -34,49 +43,83 @@ func (m *remoteMCP) track(next mcp.MethodHandler) mcp.MethodHandler {
 			return next(ctx, method, req)
 		}
 		epoch, _ := info.Extra[tokenInfoEpoch].(int64)
-		m.mu.Lock()
-		_, known := m.sessions[session]
-		m.mu.Unlock()
-		if !known {
-			current, err := m.d.Registry.RemoteEpoch()
-			if err != nil {
-				return nil, err
-			}
-			if epoch < current {
-				go session.Close()
-				return nil, errors.New("the remote credentials changed since this request was verified; reconnect")
-			}
-			m.mu.Lock()
-			if _, known = m.sessions[session]; !known {
-				m.sessions[session] = &remotePushSession{identity: info.UserID, name: name, epoch: epoch}
-			}
-			m.mu.Unlock()
-			if !known {
-				go m.unbindWhenDone(session)
-			}
+		state, err := m.bind(session, info.UserID, name, epoch)
+		if errors.Is(err, errRemoteStale) {
+			go session.Close()
 		}
-		result, err := next(ctx, method, req)
-		retell := err == nil && (method == "resources/subscribe" || method == "logging/setLevel")
-		if retell {
-			m.mu.Lock()
-			if state, ok := m.sessions[session]; ok {
-				state.notified = 0
-				state.retells++
-			}
-			m.mu.Unlock()
+		if err != nil {
+			return nil, err
 		}
-		if !known || retell {
+		requestCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		defer context.AfterFunc(state.ctx, cancel)()
+		result, err := next(requestCtx, method, req)
+		if err == nil && (method == "resources/subscribe" || method == "logging/setLevel") {
+			m.mu.Lock()
+			state.notified = 0
+			state.retells++
+			m.mu.Unlock()
 			m.poke()
 		}
 		return result, err
 	}
 }
 
-func (m *remoteMCP) unbindWhenDone(session *mcp.ServerSession) {
-	_ = session.Wait()
+// One lock over the epoch read and the insert: a notice pass either sees the session or read its epoch first.
+func (m *remoteMCP) bind(session *mcp.ServerSession, identity, name string, epoch int64) (*remotePushSession, error) {
 	m.mu.Lock()
-	delete(m.sessions, session)
+	defer m.mu.Unlock()
+	if m.stopped.Load() {
+		return nil, errRemoteStale
+	}
+	if state, ok := m.sessions[session]; ok {
+		return state, nil
+	}
+	current, err := m.d.Registry.RemoteEpoch()
+	if err != nil {
+		return nil, err
+	}
+	if epoch < current {
+		return nil, errRemoteStale
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	state := &remotePushSession{identity: identity, name: name, epoch: epoch, ctx: ctx, cancel: cancel}
+	m.sessions[session] = state
+	go m.unbindWhenDone(session, state)
+	m.poke()
+	return state, nil
+}
+
+func (m *remoteMCP) unbindWhenDone(session *mcp.ServerSession, state *remotePushSession) {
+	_ = session.Wait()
+	state.cancel()
+	m.mu.Lock()
+	if m.sessions[session] == state {
+		delete(m.sessions, session)
+	}
 	m.mu.Unlock()
+}
+
+func retire(sessions map[*mcp.ServerSession]*remotePushSession) bool {
+	var wg sync.WaitGroup
+	for session, state := range sessions {
+		if state != nil {
+			state.cancel()
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = session.Close()
+		}()
+	}
+	closed := make(chan struct{})
+	go func() { wg.Wait(); close(closed) }()
+	select {
+	case <-closed:
+		return true
+	case <-time.After(remoteRetireWait):
+		return false
+	}
 }
 
 func (m *remoteMCP) subscribe(_ context.Context, req *mcp.SubscribeRequest) error {
@@ -143,25 +186,22 @@ func (d *Daemon) runRemoteInboxNotices(ctx context.Context) {
 	}
 }
 
-func (m *remoteMCP) closeStale(epoch int64) {
-	var stale []*mcp.ServerSession
-	m.mu.Lock()
-	for session, state := range m.sessions {
-		if state.epoch < epoch {
-			stale = append(stale, session)
-			delete(m.sessions, session)
-		}
-	}
-	m.mu.Unlock()
-	for _, session := range stale {
-		_ = session.Close()
-	}
-}
-
 func (m *remoteMCP) closeAll() {
-	m.closeStale(1 << 62)
-	for session := range m.server.Sessions() {
-		_ = session.Close()
+	m.stopped.Store(true)
+	m.mu.Lock()
+	bound := m.sessions
+	m.sessions = map[*mcp.ServerSession]*remotePushSession{}
+	m.mu.Unlock()
+	retire(bound)
+	for deadline := time.Now().Add(remoteRetireWait); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		rest := map[*mcp.ServerSession]*remotePushSession{}
+		for session := range m.server.Sessions() {
+			rest[session] = nil
+		}
+		if len(rest) == 0 {
+			return
+		}
+		retire(rest)
 	}
 }
 
@@ -189,20 +229,22 @@ func (m *remoteMCP) notify(ctx context.Context) {
 		retells uint64
 	}
 	var notices []due
-	var stale []*mcp.ServerSession
+	stale := map[*mcp.ServerSession]*remotePushSession{}
 	m.mu.Lock()
 	for session, state := range m.sessions {
 		switch newest := latest[state.identity]; {
 		case state.epoch < epoch:
-			stale = append(stale, session)
+			stale[session] = state
 			delete(m.sessions, session)
 		case newest > state.notified:
 			notices = append(notices, due{session: session, name: state.name, newest: newest, retells: state.retells})
 		}
 	}
 	m.mu.Unlock()
-	for _, session := range stale {
-		_ = session.Close()
+	if len(stale) > 0 && !retire(stale) {
+		// A stale session still open may still be subscribed, and ResourceUpdated reaches every subscriber.
+		m.poke()
+		return
 	}
 	if len(notices) == 0 {
 		return

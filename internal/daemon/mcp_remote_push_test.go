@@ -341,3 +341,69 @@ func TestStoppingTheNotifierClosesEveryRemoteSession(t *testing.T) {
 		t.Fatal("a remote session outlived the notifier")
 	}
 }
+
+func (l *pushListener) longWait() chan error {
+	done := make(chan error, 1)
+	go func() {
+		_, err := l.session.CallTool(context.Background(), callParams("agenthail_wait", map[string]any{"tasks": []string{}, "timeoutSec": 600}))
+		done <- err
+	}()
+	return done
+}
+
+func TestRevokingASessionWithALongWaitInFlightEndsBoth(t *testing.T) {
+	f := newRemoteFixture(t, "")
+	f.notices(t)
+	listener := f.listen(t, map[string]string{"Authorization": "Bearer " + f.token})
+	waiting := listener.longWait()
+	time.Sleep(300 * time.Millisecond)
+	if _, _, err := f.r.RotateRemoteIdentity("scout"); err != nil {
+		t.Fatal(err)
+	}
+	f.d.remoteMCP().poke()
+	ended := make(chan struct{})
+	go func() { _ = listener.session.Wait(); close(ended) }()
+	for name, done := range map[string]<-chan struct{}{"session": ended} {
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("the %s outlived its revocation while a wait was in flight", name)
+		}
+	}
+	select {
+	case <-waiting:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the in-flight wait outlived its session")
+	}
+}
+
+func TestStoppingWithALongWaitInFlightIsPromptAndRefusesNewSessions(t *testing.T) {
+	f := newRemoteFixture(t, "")
+	listener := f.listen(t, map[string]string{"Authorization": "Bearer " + f.token})
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { f.d.runRemoteInboxNotices(ctx); close(done) }()
+	waiting := listener.longWait()
+	time.Sleep(300 * time.Millisecond)
+	start := time.Now()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the notifier did not stop while a wait was in flight")
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("stopping took %s", took)
+	}
+	select {
+	case <-waiting:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the in-flight wait outlived the stop")
+	}
+	if status, _ := postMCP(t, f.server, map[string]string{"Authorization": "Bearer " + f.token}); status != http.StatusServiceUnavailable {
+		t.Fatalf("a session opened after the stop got status %d", status)
+	}
+	for range f.d.remoteMCP().server.Sessions() {
+		t.Fatal("a remote session outlived the stop")
+	}
+}
