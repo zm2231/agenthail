@@ -258,8 +258,7 @@ func TestARemoteIdentityIsWokenBySignedWebhooksThatCarryOnlyACount(t *testing.T)
 	if handshake.body["type"] != "verification" || handshake.subscription != subscribed.ID || !strings.HasPrefix(handshake.id, "msg_verification_") {
 		t.Fatalf("handshake=%+v subscription=%s", handshake, subscribed.ID)
 	}
-	refresh, err := time.Parse(time.RFC3339, *subscribed.RefreshBefore)
-	if err != nil || time.Until(refresh) < eventDefaultTTL-time.Minute || subscribed.Cursor != nil || subscribed.Truncated {
+	if subscribed.RefreshBefore != nil || subscribed.Cursor != nil || subscribed.Truncated {
 		t.Fatalf("subscribe result=%+v", subscribed)
 	}
 	again, err := subscribe(t.Context(), session, callback, webhookSecret, "")

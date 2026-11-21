@@ -31,7 +31,6 @@ import (
 const (
 	eventInboxUnread       = "inbox.unread"
 	eventSubscriptionLimit = 8
-	eventDefaultTTL        = 7 * 24 * time.Hour
 	eventMinTTL            = 5 * time.Minute
 	eventVerifiedFor       = 24 * time.Hour
 	eventSecretGrace       = 10 * time.Minute
@@ -261,10 +260,7 @@ func webhookKey(secret string) ([]byte, bool) {
 }
 
 func eventTTL(raw json.RawMessage, now time.Time) (time.Time, error) {
-	if len(raw) == 0 {
-		return now.Add(eventDefaultTTL), nil
-	}
-	if string(raw) == "null" {
+	if len(raw) == 0 || string(raw) == "null" {
 		return time.Time{}, nil
 	}
 	var ms int64
