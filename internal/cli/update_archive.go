@@ -18,6 +18,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/poll"
+	"github.com/zm2231/agenthail/internal/registry"
 )
 
 var archiveLayout = map[string]bool{"agenthail": true, "browser-host": true, "extension-host": true, "claude-host": true, "runtime": true, "skills": true, "README.md": true, "LICENSE": true, "COMMERCIAL.md": true}
@@ -152,7 +153,7 @@ func installArchiveUpdate(deps *updateDeps, release *latestRelease, executable s
 		return fmt.Errorf("refusing to update without a reachable service manager to restart and verify the daemon: %w", err)
 	}
 	restart := deps.daemonExpected()
-	schema := deps.registrySchema()
+	level := deps.registryLevel()
 	previous := dataDir + ".previous"
 	if err := os.RemoveAll(previous); err != nil {
 		return fmt.Errorf("clear %s: %w", previous, err)
@@ -169,7 +170,7 @@ func installArchiveUpdate(deps *updateDeps, release *latestRelease, executable s
 	if restart {
 		binary := filepath.Join(dataDir, "agenthail")
 		if err := restartAndCheck(deps, binary); err != nil {
-			return rollBackUpdate(deps, release.TagName, schema, binary, err, func() error { return swapArchiveBack(dataDir, previous) })
+			return rollBackUpdate(deps, release.TagName, level, binary, err, func() error { return swapArchiveBack(dataDir, previous) })
 		}
 	}
 	return os.RemoveAll(previous)
@@ -189,24 +190,25 @@ func restartAndCheck(deps *updateDeps, binary string) error {
 // read before, which has no copy to go back to; otherwise the copy taken before the
 // migration goes back first, under the daemon lock, so a service manager
 // cannot start the new build on it before the swap.
-func rollBackUpdate(deps *updateDeps, tag string, before int, restart string, cause error, swapBack func() error) error {
+func rollBackUpdate(deps *updateDeps, tag string, before registry.Level, restart string, cause error, swapBack func() error) error {
 	release, restoredNote := func() {}, ""
-	if after := deps.registrySchema(); after > before {
+	after := deps.registryLevel()
+	if key, moved := after.UpgradedFrom(before); moved {
 		unlock, err := deps.holdDaemonLock()
 		if err != nil {
-			return fmt.Errorf("update to %s is in place but unverified: %v; its daemon is running on the registry it moved from schema %d to %d, which the previous version cannot open; check it with 'agenthail daemon status'", tag, cause, before, after)
+			return fmt.Errorf("update to %s is in place but unverified: %v; its daemon is running on the registry it moved from %s to %s, which the previous version cannot open; check it with 'agenthail daemon status'", tag, cause, before, after)
 		}
-		if before < 1 {
+		if before.Schema < 1 {
 			unlock()
-			return fmt.Errorf("update to %s failed (%v); its daemon left a schema %d registry where none could be read before, which the previous version cannot open, so the update stays in place", tag, cause, after)
+			return fmt.Errorf("update to %s failed (%v); its daemon left a registry at %s where none could be read before, which the previous version cannot open, so the update stays in place", tag, cause, after)
 		}
-		restored, err := deps.restoreRegistry(after)
+		restored, err := deps.restoreRegistry(key)
 		if err != nil {
 			unlock()
-			return fmt.Errorf("update to %s failed (%v) after moving the registry from schema %d to %d, and the copy from before could not be restored, so the update stays in place: %v", tag, cause, before, after, err)
+			return fmt.Errorf("update to %s failed (%v) after moving the registry from %s to %s, and the copy from before could not be restored, so the update stays in place: %v", tag, cause, before, after, err)
 		}
 		release = unlock
-		restoredNote = fmt.Sprintf("; the registry is back at schema %d from %s, and the one it replaced is kept as %s", restored.Schema, restored.From, restored.Aside)
+		restoredNote = fmt.Sprintf("; the registry is back at %s from %s, and the one it replaced is kept as %s", restored.Level, restored.From, restored.Aside)
 	}
 	err := swapBack()
 	release()

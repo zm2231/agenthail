@@ -131,12 +131,12 @@ func TestTheBuildThatRefusesANewerRegistryCanRestoreItsCopy(t *testing.T) {
 	path, future := newerRegistryWithCompressedCopy(t, home)
 
 	refusal, err := runAgenthail(t, home, "whoami")
-	restore := "agenthail registry restore " + strconv.Itoa(future)
+	restore := "agenthail registry restore v" + strconv.Itoa(future)
 	if err == nil || !strings.Contains(refusal, restore) {
 		t.Fatalf("err=%v output=%q, want the refusal to offer %q", err, refusal, restore)
 	}
 	listing, err := runAgenthail(t, home, "registry", "restore")
-	if err != nil || !strings.Contains(listing, "schema "+strconv.Itoa(registry.SchemaVersion())) {
+	if err != nil || !strings.Contains(listing, "v"+strconv.Itoa(future)+"\t") {
 		t.Fatalf("listing against a newer registry: err=%v output=%q", err, listing)
 	}
 
@@ -177,7 +177,7 @@ func TestARestoreRefusesARunningDaemon(t *testing.T) {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		t.Fatal(err)
 	}
-	output, err := runAgenthail(t, home, "registry", "restore", strconv.Itoa(future))
+	output, err := runAgenthail(t, home, "registry", "restore", "v"+strconv.Itoa(future))
 	if err == nil || !strings.Contains(output, "agenthail daemon stop") {
 		t.Fatalf("err=%v output=%q", err, output)
 	}

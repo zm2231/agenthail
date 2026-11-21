@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1057,10 +1058,9 @@ func TestOpeningACurrentRegistryWaitsForNoWriter(t *testing.T) {
 	}
 }
 
-// A registry at schemaVersion is opened without migrating, so the schema a
-// build creates may change only together with the version.
-func TestTheSchemaChangesOnlyWithItsVersion(t *testing.T) {
-	const regenerate = "AGENTHAIL_UPDATE_SCHEMA=1 go test ./internal/registry -run TestTheSchemaChangesOnlyWithItsVersion"
+// A registry with every known migration is opened without migrating, so the schema a build creates may change only together with a new migration.
+func TestTheSchemaChangesOnlyWithANewMigration(t *testing.T) {
+	const regenerate = "AGENTHAIL_UPDATE_SCHEMA=1 go test ./internal/registry -run TestTheSchemaChangesOnlyWithANewMigration"
 	golden := filepath.Join("testdata", "schema.sql")
 	rows, err := openTestRegistry(t).db.Query(`SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY type, name`)
 	if err != nil {
@@ -1078,26 +1078,39 @@ func TestTheSchemaChangesOnlyWithItsVersion(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	header := fmt.Sprintf("-- schemaVersion %d\n\n", schemaVersion)
+	known := knownMigrationNames()
+	header := "-- registry schema\n"
+	for _, name := range known {
+		header += "-- migration " + name + "\n"
+	}
 	recorded, err := os.ReadFile(golden)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		t.Fatal(err)
 	}
 	recordedHeader, recordedSchema, _ := strings.Cut(string(recorded), "\n\n")
+	var recordedNames []string
+	for _, line := range strings.Split(recordedHeader, "\n") {
+		if name, ok := strings.CutPrefix(line, "-- migration "); ok {
+			recordedNames = append(recordedNames, name)
+		}
+	}
 	changed := recordedSchema != created.String()
 	if os.Getenv("AGENTHAIL_UPDATE_SCHEMA") != "" {
-		if recordedHeader+"\n\n" == header && changed {
-			t.Fatalf("the schema changed but schemaVersion is still %d; raise it before regenerating %s", schemaVersion, golden)
+		if changed && slices.Equal(recordedNames, known) {
+			t.Fatalf("the schema changed but no migration was added; add a dated one (docs/maintainers/registry-migrations.md) before regenerating %s", golden)
 		}
-		if err := os.WriteFile(golden, []byte(header+created.String()), 0o644); err != nil {
+		if len(known) < len(recordedNames) || !slices.Equal(known[:len(recordedNames)], recordedNames) {
+			t.Fatalf("%s records the migrations %v, and they must stay first and in order; name a new migration after the newest of them", golden, recordedNames)
+		}
+		if err := os.WriteFile(golden, []byte(header+"\n"+created.String()), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		return
 	}
 	switch {
-	case recordedHeader+"\n\n" != header:
-		t.Fatalf("%s records %q; regenerate it for schemaVersion %d with %s", golden, recordedHeader, schemaVersion, regenerate)
+	case recordedHeader+"\n" != header:
+		t.Fatalf("%s records the migrations %v, but this build has %v; regenerate it with %s", golden, recordedNames, known, regenerate)
 	case changed:
-		t.Fatalf("the schema changed but schemaVersion is still %d; raise it, then regenerate %s with %s", schemaVersion, golden, regenerate)
+		t.Fatalf("the schema changed but no migration was added; add a dated one (docs/maintainers/registry-migrations.md), then regenerate %s with %s", golden, regenerate)
 	}
 }

@@ -15,11 +15,11 @@ import (
 	"time"
 )
 
-func plainCopyOfBackup(t *testing.T, path string, target int) string {
+func plainCopyOfBackup(t *testing.T, path, key string) string {
 	t.Helper()
-	file := existingMigrationBackup(path, target)
+	file := existingMigrationBackup(path, key)
 	if file == "" {
-		t.Fatalf("no backup for schema %d", target)
+		t.Fatalf("no backup for %s", key)
 	}
 	plain := filepath.Join(t.TempDir(), "backup.db")
 	if err := writeRestoredCopy(file, plain); err != nil {
@@ -49,7 +49,7 @@ func registryNewerThanBuildWithBackup(t *testing.T, compress bool) (path string,
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := plain.db.Exec(`VACUUM INTO ?`, migrationBackupPath(path, newer)); err != nil {
+	if _, err := plain.db.Exec(`VACUUM INTO ?`, migrationBackupPath(path, schemaBackupKey(newer))); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := plain.db.Exec(`DELETE FROM sessions`); err != nil {
@@ -71,7 +71,7 @@ func TestAMigrationCompressesItsCopyAndAnyOlderOne(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
 	registryAtSchema(t, path, schemaVersion-1)
 	older := schemaVersion - 1
-	registryAtSchemaCopy(t, path, migrationBackupPath(path, older), schemaVersion-2)
+	registryAtSchemaCopy(t, path, migrationBackupPath(path, schemaBackupKey(older)), schemaVersion-2)
 	r, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
@@ -82,18 +82,18 @@ func TestAMigrationCompressesItsCopyAndAnyOlderOne(t *testing.T) {
 		t.Fatalf("timing=%+v", timing)
 	}
 	for _, target := range []int{schemaVersion, older} {
-		if _, err := os.Stat(migrationBackupPath(path, target)); !os.IsNotExist(err) {
+		if _, err := os.Stat(migrationBackupPath(path, schemaBackupKey(target))); !os.IsNotExist(err) {
 			t.Fatalf("schema %d kept its plain copy: %v", target, err)
 		}
-		info, err := os.Stat(compressedBackupPath(path, target))
+		info, err := os.Stat(compressedBackupPath(path, schemaBackupKey(target)))
 		if err != nil || info.Mode().Perm() != 0600 {
 			t.Fatalf("schema %d compressed copy: %v %v", target, err, info)
 		}
 	}
-	if got := backupSchema(compressedBackupPath(path, schemaVersion)); got != schemaVersion-1 {
+	if got := backupSchema(compressedBackupPath(path, schemaBackupKey(schemaVersion))); got != schemaVersion-1 {
 		t.Fatalf("schema read from the compressed header = %d", got)
 	}
-	if got := backupSchema(compressedBackupPath(path, older)); got != schemaVersion-2 {
+	if got := backupSchema(compressedBackupPath(path, schemaBackupKey(older))); got != schemaVersion-2 {
 		t.Fatalf("schema read from the older compressed header = %d", got)
 	}
 }
@@ -101,7 +101,7 @@ func TestAMigrationCompressesItsCopyAndAnyOlderOne(t *testing.T) {
 func TestACopyThatCannotBeCompressedStaysAndTheMigrationStands(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
 	registryAtSchema(t, path, schemaVersion-1)
-	blocked := compressedBackupPath(path, schemaVersion) + ".tmp"
+	blocked := compressedBackupPath(path, schemaBackupKey(schemaVersion)) + ".tmp"
 	if err := os.MkdirAll(filepath.Join(blocked, "occupied"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestACopyThatCannotBeCompressedStaysAndTheMigrationStands(t *testing.T) {
 	if got := schemaOf(path); got != schemaVersion {
 		t.Fatalf("schema=%d", got)
 	}
-	if got := schemaOf(migrationBackupPath(path, schemaVersion)); got != schemaVersion-1 {
+	if got := schemaOf(migrationBackupPath(path, schemaBackupKey(schemaVersion))); got != schemaVersion-1 {
 		t.Fatalf("the plain copy was lost: schema %d", got)
 	}
 }
@@ -126,8 +126,8 @@ func TestACrashAtAnyStepOfCompressionLeavesAUsableCopy(t *testing.T) {
 	prepare := func(t *testing.T) (string, []byte) {
 		path := filepath.Join(t.TempDir(), "registry.db")
 		registryAtSchema(t, path, schemaVersion)
-		registryAtSchemaCopy(t, path, migrationBackupPath(path, 7), schemaVersion)
-		data, err := os.ReadFile(migrationBackupPath(path, 7))
+		registryAtSchemaCopy(t, path, migrationBackupPath(path, schemaBackupKey(7)), schemaVersion)
+		data, err := os.ReadFile(migrationBackupPath(path, schemaBackupKey(7)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -135,33 +135,33 @@ func TestACrashAtAnyStepOfCompressionLeavesAUsableCopy(t *testing.T) {
 	}
 	assertRecovers := func(t *testing.T, path string, want []byte) {
 		t.Helper()
-		if got := backupSchema(existingMigrationBackup(path, 7)); got != schemaVersion {
+		if got := backupSchema(existingMigrationBackup(path, schemaBackupKey(7))); got != schemaVersion {
 			t.Fatalf("before recovery the copy reads as schema %d", got)
 		}
 		if err := compressMigrationBackups(path); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := os.Stat(migrationBackupPath(path, 7)); !os.IsNotExist(err) {
+		if _, err := os.Stat(migrationBackupPath(path, schemaBackupKey(7))); !os.IsNotExist(err) {
 			t.Fatalf("plain copy stayed: %v", err)
 		}
-		if _, err := os.Stat(compressedBackupPath(path, 7) + ".tmp"); !os.IsNotExist(err) {
+		if _, err := os.Stat(compressedBackupPath(path, schemaBackupKey(7)) + ".tmp"); !os.IsNotExist(err) {
 			t.Fatalf("temporary file stayed: %v", err)
 		}
-		got, err := os.ReadFile(plainCopyOfBackup(t, path, 7))
+		got, err := os.ReadFile(plainCopyOfBackup(t, path, schemaBackupKey(7)))
 		if err != nil || !bytes.Equal(got, want) {
 			t.Fatalf("copy changed: err=%v len=%d want %d", err, len(got), len(want))
 		}
 	}
 	t.Run("during the write", func(t *testing.T) {
 		path, want := prepare(t)
-		if err := os.WriteFile(compressedBackupPath(path, 7)+".tmp", []byte("partial"), 0600); err != nil {
+		if err := os.WriteFile(compressedBackupPath(path, schemaBackupKey(7))+".tmp", []byte("partial"), 0600); err != nil {
 			t.Fatal(err)
 		}
 		assertRecovers(t, path, want)
 	})
 	t.Run("after the rename", func(t *testing.T) {
 		path, want := prepare(t)
-		if err := writeCompressedCopy(migrationBackupPath(path, 7), compressedBackupPath(path, 7)); err != nil {
+		if err := writeCompressedCopy(migrationBackupPath(path, schemaBackupKey(7)), compressedBackupPath(path, schemaBackupKey(7))); err != nil {
 			t.Fatal(err)
 		}
 		assertRecovers(t, path, want)
@@ -170,13 +170,13 @@ func TestACrashAtAnyStepOfCompressionLeavesAUsableCopy(t *testing.T) {
 
 func TestASecondUpgradeToTheSameSchemaReplacesTheCompressedCopy(t *testing.T) {
 	path, newer := registryNewerThanBuildWithBackup(t, true)
-	stale, err := os.ReadFile(compressedBackupPath(path, newer))
+	stale, err := os.ReadFile(compressedBackupPath(path, schemaBackupKey(newer)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	stampSchema(t, path, schemaVersion)
-	target := compressedBackupPath(path, schemaVersion)
-	if err := os.Rename(compressedBackupPath(path, newer), target); err != nil {
+	target := compressedBackupPath(path, schemaBackupKey(schemaVersion))
+	if err := os.Rename(compressedBackupPath(path, schemaBackupKey(newer)), target); err != nil {
 		t.Fatal(err)
 	}
 	stampSchema(t, path, schemaVersion-1)
@@ -199,16 +199,16 @@ func TestASecondUpgradeToTheSameSchemaReplacesTheCompressedCopy(t *testing.T) {
 
 func TestOnlyTheTwoNewestCopiesAreKeptAcrossBothForms(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
-	for _, file := range []string{migrationBackupPath(path, 5), compressedBackupPath(path, 5), compressedBackupPath(path, 6), migrationBackupPath(path, 7)} {
+	for _, file := range []string{migrationBackupPath(path, schemaBackupKey(5)), compressedBackupPath(path, schemaBackupKey(5)), compressedBackupPath(path, schemaBackupKey(6)), migrationBackupPath(path, schemaBackupKey(7))} {
 		if err := os.WriteFile(file, []byte("x"), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
 	pruneMigrationBackups(path)
-	if got := migrationBackups(path); len(got) != 2 || got[0] != 7 || got[1] != 6 {
+	if got := migrationBackups(path); len(got) != 2 || got[0] != "v7" || got[1] != "v6" {
 		t.Fatalf("kept %v", got)
 	}
-	for _, file := range []string{migrationBackupPath(path, 5), compressedBackupPath(path, 5)} {
+	for _, file := range []string{migrationBackupPath(path, schemaBackupKey(5)), compressedBackupPath(path, schemaBackupKey(5))} {
 		if _, err := os.Stat(file); !os.IsNotExist(err) {
 			t.Fatalf("%s stayed: %v", file, err)
 		}
@@ -219,11 +219,11 @@ func TestARestoreWorksFromEitherFormOnARegistryNewerThanThisBuild(t *testing.T) 
 	for _, compress := range []bool{true, false} {
 		t.Run(strconv.FormatBool(compress), func(t *testing.T) {
 			path, newer := registryNewerThanBuildWithBackup(t, compress)
-			restored, err := restoreMigrationBackup(path, newer)
+			restored, err := restoreMigrationBackup(path, schemaBackupKey(newer))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if restored.Schema != schemaVersion || restored.Aside != filepath.Join(filepath.Dir(path), "registry-v"+strconv.Itoa(newer)+".db") {
+			if restored.Level.Schema != schemaVersion || restored.Aside != filepath.Join(filepath.Dir(path), "registry-v"+strconv.Itoa(newer)+".db") {
 				t.Fatalf("restored=%+v", restored)
 			}
 			if got := schemaOf(restored.Aside); got != newer {
@@ -241,7 +241,7 @@ func TestARestoreWorksFromEitherFormOnARegistryNewerThanThisBuild(t *testing.T) 
 			if _, err := r.Session("kept"); err != nil {
 				t.Fatalf("the restore lost the registry's data: %v", err)
 			}
-			if existingMigrationBackup(path, newer) == "" {
+			if existingMigrationBackup(path, schemaBackupKey(newer)) == "" {
 				t.Fatal("the restore consumed its copy")
 			}
 		})
@@ -272,8 +272,8 @@ func TestRowsOnlyInTheWALSurviveInTheSetAsideRegistry(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	registryAtSchemaCopy(t, live, migrationBackupPath(path, schemaVersion+1), schemaVersion)
-	restored, err := restoreMigrationBackup(path, schemaVersion+1)
+	registryAtSchemaCopy(t, live, migrationBackupPath(path, schemaBackupKey(schemaVersion+1)), schemaVersion)
+	restored, err := restoreMigrationBackup(path, schemaBackupKey(schemaVersion+1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestARestoreNeverOverwritesAnEarlierSetAside(t *testing.T) {
 	if err := os.WriteFile(taken, []byte("earlier"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	restored, err := restoreMigrationBackup(path, newer)
+	restored, err := restoreMigrationBackup(path, schemaBackupKey(newer))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,12 +309,12 @@ func TestARestoreNeverOverwritesAnEarlierSetAside(t *testing.T) {
 func TestARefusedRestoreLeavesTheRegistryAlone(t *testing.T) {
 	cases := map[string]func(t *testing.T, path string, target int){
 		"no copy": func(t *testing.T, path string, target int) {
-			if err := os.Remove(compressedBackupPath(path, target)); err != nil {
+			if err := os.Remove(compressedBackupPath(path, schemaBackupKey(target))); err != nil {
 				t.Fatal(err)
 			}
 		},
 		"corrupt compressed copy": func(t *testing.T, path string, target int) {
-			file := compressedBackupPath(path, target)
+			file := compressedBackupPath(path, schemaBackupKey(target))
 			data, err := os.ReadFile(file)
 			if err != nil {
 				t.Fatal(err)
@@ -324,7 +324,7 @@ func TestARefusedRestoreLeavesTheRegistryAlone(t *testing.T) {
 			}
 		},
 		"damaged database inside": func(t *testing.T, path string, target int) {
-			plain := plainCopyOfBackup(t, path, target)
+			plain := plainCopyOfBackup(t, path, schemaBackupKey(target))
 			data, err := os.ReadFile(plain)
 			if err != nil {
 				t.Fatal(err)
@@ -332,20 +332,20 @@ func TestARefusedRestoreLeavesTheRegistryAlone(t *testing.T) {
 			for i := 4096; i < len(data); i++ {
 				data[i] = 0xff
 			}
-			if err := os.WriteFile(migrationBackupPath(path, target), data, 0600); err != nil {
+			if err := os.WriteFile(migrationBackupPath(path, schemaBackupKey(target)), data, 0600); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.Remove(compressedBackupPath(path, target)); err != nil {
+			if err := os.Remove(compressedBackupPath(path, schemaBackupKey(target))); err != nil {
 				t.Fatal(err)
 			}
 		},
 		"copy newer than this build": func(t *testing.T, path string, target int) {
-			plain := plainCopyOfBackup(t, path, target)
+			plain := plainCopyOfBackup(t, path, schemaBackupKey(target))
 			stampSchema(t, plain, schemaVersion+1)
-			if err := os.Remove(compressedBackupPath(path, target)); err != nil {
+			if err := os.Remove(compressedBackupPath(path, schemaBackupKey(target))); err != nil {
 				t.Fatal(err)
 			}
-			if err := writeCompressedCopy(plain, compressedBackupPath(path, target)); err != nil {
+			if err := writeCompressedCopy(plain, compressedBackupPath(path, schemaBackupKey(target))); err != nil {
 				t.Fatal(err)
 			}
 		},
@@ -358,7 +358,7 @@ func TestARefusedRestoreLeavesTheRegistryAlone(t *testing.T) {
 				t.Fatal(err)
 			}
 			breakIt(t, path, newer)
-			if _, err := restoreMigrationBackup(path, newer); err == nil {
+			if _, err := restoreMigrationBackup(path, schemaBackupKey(newer)); err == nil {
 				t.Fatal("the restore went ahead")
 			}
 			after, err := os.ReadFile(path)
@@ -423,7 +423,7 @@ func TestTheRegistryPathNeverGoesMissingDuringARestore(t *testing.T) {
 			}
 		}
 	}()
-	if _, err := restoreMigrationBackup(path, newer); err != nil {
+	if _, err := restoreMigrationBackup(path, schemaBackupKey(newer)); err != nil {
 		t.Fatal(err)
 	}
 	close(stop)
@@ -453,10 +453,10 @@ func TestAnOpenDuringARestoreWaitsForItAndGetsTheRestoredRegistry(t *testing.T) 
 		t.Fatalf("the open went through during a restore: %v", err)
 	case <-time.After(300 * time.Millisecond):
 	}
-	if _, err := restoreMigrationBackup(path, newer); err == nil {
+	if _, err := restoreMigrationBackup(path, schemaBackupKey(newer)); err == nil {
 		t.Fatal("a second restore ran alongside the first")
 	}
-	if _, err := swapInMigrationBackup(path, compressedBackupPath(path, newer)); err != nil {
+	if _, err := swapInMigrationBackup(path, compressedBackupPath(path, schemaBackupKey(newer))); err != nil {
 		t.Fatal(err)
 	}
 	unlock()
@@ -477,7 +477,7 @@ func registryAtSchemaWithBackup(t *testing.T) (path string, target int) {
 	path = filepath.Join(t.TempDir(), "registry.db")
 	registryAtSchema(t, path, schemaVersion)
 	target = schemaVersion + 1
-	registryAtSchemaCopy(t, path, migrationBackupPath(path, target), schemaVersion)
+	registryAtSchemaCopy(t, path, migrationBackupPath(path, schemaBackupKey(target)), schemaVersion)
 	return path, target
 }
 
@@ -492,7 +492,7 @@ func TestARestoreRefusesWhileAnotherProcessHasTheRegistryOpenAndSaysWhat(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = restoreMigrationBackup(path, target)
+	_, err = restoreMigrationBackup(path, schemaBackupKey(target))
 	if err == nil {
 		t.Fatal("the restore ran with the registry open")
 	}
@@ -508,7 +508,7 @@ func TestARestoreRefusesWhileAnotherProcessHasTheRegistryOpenAndSaysWhat(t *test
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := restoreMigrationBackup(path, target); err != nil {
+	if _, err := restoreMigrationBackup(path, schemaBackupKey(target)); err != nil {
 		t.Fatalf("after the holder closed: %v", err)
 	}
 }
@@ -587,11 +587,11 @@ func TestAWriteFromAnOpenBeforeARestoreCannotLandInTheSetAsideRegistry(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := restoreMigrationBackup(path, target); err == nil {
+	if _, err := restoreMigrationBackup(path, schemaBackupKey(target)); err == nil {
 		t.Fatal("a restore started between an opener's lock and its first SQLite call")
 	}
 	closeOpenLock(opener)
-	if _, err := restoreMigrationBackup(path, target); err != nil {
+	if _, err := restoreMigrationBackup(path, schemaBackupKey(target)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -614,7 +614,7 @@ func TestAChildOfAnOpenRegistryDoesNotHoldItsLock(t *testing.T) {
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := restoreMigrationBackup(path, target); err != nil {
+	if _, err := restoreMigrationBackup(path, schemaBackupKey(target)); err != nil {
 		t.Fatalf("a spawned child kept the lock: %v", err)
 	}
 }
@@ -643,14 +643,14 @@ func TestAKilledHolderReleasesTheLock(t *testing.T) {
 			break
 		}
 	}
-	if _, err := restoreMigrationBackup(path, target); err == nil {
+	if _, err := restoreMigrationBackup(path, schemaBackupKey(target)); err == nil {
 		t.Fatal("the restore ran while another process held the registry")
 	}
 	if err := holder.Process.Signal(syscall.SIGKILL); err != nil {
 		t.Fatal(err)
 	}
 	holder.Wait()
-	if _, err := restoreMigrationBackup(path, target); err != nil {
+	if _, err := restoreMigrationBackup(path, schemaBackupKey(target)); err != nil {
 		t.Fatalf("after the holder was killed: %v", err)
 	}
 }
@@ -673,11 +673,11 @@ func TestHolderProcessThatIsKilled(t *testing.T) {
 
 func TestListingNamesEachCopyOnce(t *testing.T) {
 	path, newer := registryNewerThanBuildWithBackup(t, true)
-	if err := os.WriteFile(migrationBackupPath(path, newer), []byte("x"), 0600); err != nil {
+	if err := os.WriteFile(migrationBackupPath(path, schemaBackupKey(newer)), []byte("x"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	got := listMigrationBackups(path)
-	if len(got) != 1 || got[0].Target != newer || got[0].Schema != schemaVersion || got[0].Size <= 0 {
+	if len(got) != 1 || got[0].Key != schemaBackupKey(newer) || got[0].Size <= 0 {
 		t.Fatalf("listed %+v", got)
 	}
 }

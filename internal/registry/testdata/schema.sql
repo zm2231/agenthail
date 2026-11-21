@@ -1,4 +1,4 @@
--- schemaVersion 126
+-- registry schema
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -894,6 +894,11 @@ CREATE TABLE routes (
 	last_goal_key TEXT NOT NULL DEFAULT '',
 	last_error TEXT NOT NULL DEFAULT ''
 );
+
+-- table schema_migrations
+CREATE TABLE schema_migrations (
+	name TEXT PRIMARY KEY, applied_at_ms INTEGER NOT NULL
+) WITHOUT ROWID;
 
 -- table session_archive
 CREATE TABLE session_archive (

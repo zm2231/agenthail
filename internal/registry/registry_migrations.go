@@ -11,7 +11,8 @@ import (
 )
 
 func (r *Registry) migrate(allowUpgrade bool) error {
-	if err := r.chooseVacuumForNewFile(); err != nil {
+	created, err := r.chooseVacuumForNewFile()
+	if err != nil {
 		return err
 	}
 	tx, err := r.db.Begin()
@@ -19,34 +20,49 @@ func (r *Registry) migrate(allowUpgrade bool) error {
 		return err
 	}
 	defer tx.Rollback()
-	var version int
-	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+	var found Level
+	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&found.Schema); err != nil {
 		return err
 	}
-	timing := MigrationTiming{From: version, To: schemaVersion}
-	switch {
-	case version == schemaVersion:
+	if found.Schema > schemaVersion {
+		return r.newerSchemaError(found.Schema)
+	}
+	if found.Applied, err = appliedMigrations(tx); err != nil {
+		return err
+	}
+	if unknown := without(found.Applied, knownMigrationNames()); len(unknown) > 0 {
+		refusal, err := unknownMigrationsError(tx, r.diskPath(), unknown)
+		if err != nil {
+			return err
+		}
+		return refusal
+	}
+	target := currentLevel()
+	key, upgrade := target.UpgradedFrom(found)
+	if !upgrade {
 		return nil
-	case version > schemaVersion:
-		return r.newerSchemaError(version)
-	case version > 0 && version < schemaVersion && !allowUpgrade:
-		return &DevUpgradeError{Path: r.diskPath(), Found: version, Target: schemaVersion}
-	case version > 0 && version < schemaVersion:
+	}
+	existing := found.Schema > 0
+	if existing && !allowUpgrade {
+		return &DevUpgradeError{Path: r.diskPath(), Found: found.String(), Target: target.String(), Key: key}
+	}
+	timing := MigrationTiming{From: found.String(), To: target.String()}
+	if existing {
 		began := time.Now()
-		if err := r.backUpBeforeMigration(version, schemaVersion); err != nil {
+		if err := r.backUpBeforeMigration(found.Schema, key); err != nil {
 			return err
 		}
 		timing.Backup = time.Since(began)
 	}
 	began := time.Now()
-	if err := migrateTx(tx); err != nil {
+	if err := r.upgradeTx(tx, found, created); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
 	timing.Migrate = time.Since(began)
-	if version > 0 {
+	if existing {
 		began = time.Now()
 		timing.CompressErr = compressMigrationBackups(r.diskPath())
 		timing.Compress = time.Since(began)
@@ -55,17 +71,34 @@ func (r *Registry) migrate(allowUpgrade bool) error {
 	return nil
 }
 
-// An existing file would need a VACUUM to change this, and that stalls writers for longer than busy_timeout on a large registry, so only a new file gets it.
-func (r *Registry) chooseVacuumForNewFile() error {
-	var pages int
-	if err := r.db.QueryRow(`PRAGMA page_count`).Scan(&pages); err != nil {
+func (r *Registry) upgradeTx(tx *sql.Tx, found Level, created bool) error {
+	if err := migrateTx(tx); err != nil {
 		return err
 	}
+	pending := pendingMigrations(found.Applied)
+	if !created {
+		if err := runMigrations(tx, pending); err != nil {
+			return err
+		}
+	}
+	if err := recordMigrations(tx, pending, r.now().UnixMilli()); err != nil {
+		return err
+	}
+	_, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion))
+	return err
+}
+
+// An existing file would need a VACUUM to change this, and that stalls writers for longer than busy_timeout on a large registry, so only a new file gets it.
+func (r *Registry) chooseVacuumForNewFile() (bool, error) {
+	var pages int
+	if err := r.db.QueryRow(`PRAGMA page_count`).Scan(&pages); err != nil {
+		return false, err
+	}
 	if pages > 0 {
-		return nil
+		return false, nil
 	}
 	_, err := r.db.Exec(`PRAGMA auto_vacuum=INCREMENTAL`)
-	return err
+	return true, err
 }
 
 // Migration is what opening this registry spent upgrading it, if it did.
@@ -78,7 +111,7 @@ func (r *Registry) Migration() (MigrationTiming, bool) {
 
 func (r *Registry) newerSchemaError(found int) *NewerSchemaError {
 	refusal := &NewerSchemaError{Found: found, Supported: schemaVersion, Path: r.diskPath()}
-	if backup := existingMigrationBackup(refusal.Path, found); backup != "" {
+	if backup := existingMigrationBackup(refusal.Path, schemaBackupKey(found)); backup != "" {
 		if schema := backupSchema(backup); schema > 0 && schema <= schemaVersion {
 			refusal.Backup, refusal.BackupSchema = backup, schema
 		}
@@ -525,24 +558,16 @@ func migrateTx(tx *sql.Tx) error {
 	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS sessions_pid ON sessions(pid) WHERE pid>0`); err != nil {
 		return err
 	}
-	if version == schemaVersion {
+	if version != 0 {
 		return nil
 	}
-	if version >= 1 {
-		_, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion))
-		return err
-	}
-	_, err := tx.Exec(fmt.Sprintf(`
+	_, err := tx.Exec(`
 		UPDATE message_queue SET status=CASE WHEN delivered=1 THEN 'delivered' ELSE 'pending' END
 		WHERE status='' OR (delivered=1 AND status!='delivered');
 		DELETE FROM aliases WHERE rowid NOT IN (SELECT MAX(rowid) FROM aliases GROUP BY session_id);
 		CREATE UNIQUE INDEX IF NOT EXISTS message_queue_delivery_key
 		ON message_queue(delivery_key) WHERE delivery_key!='';
-		CREATE UNIQUE INDEX IF NOT EXISTS aliases_session_id ON aliases(session_id);`))
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion))
+		CREATE UNIQUE INDEX IF NOT EXISTS aliases_session_id ON aliases(session_id);`)
 	return err
 }
 

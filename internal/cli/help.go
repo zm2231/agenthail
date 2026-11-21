@@ -231,7 +231,7 @@ Interface preferences (ui.conf, versioned; every change is a commit):
 Other:
   launch <surface>              Launch a surface app with debug settings
   doctor [--json]               Health check (nonzero when any surface is unhealthy)
-  registry restore [<N>]        Go back to the copy from before schema N; lists the copies without N
+  registry restore [<copy>]     Go back to the copy from before an upgrade; lists the copies without one
   triggers [status] [--json]    Completion triggers from triggers.json and their last runs
   triggers runs [--trigger <name>] [--session <id>] [--limit <n>] [--json]
                                 Recent trigger runs, newest first

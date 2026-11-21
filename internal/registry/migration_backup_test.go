@@ -49,7 +49,7 @@ func migrationKeepsACopy(t *testing.T, journal string) {
 	}
 	plain.Close()
 	for _, old := range []int{schemaVersion - 3, schemaVersion - 2} {
-		if err := os.WriteFile(migrationBackupPath(path, old), []byte("old"), 0600); err != nil {
+		if err := os.WriteFile(migrationBackupPath(path, schemaBackupKey(old)), []byte("old"), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -59,12 +59,12 @@ func migrationKeepsACopy(t *testing.T, journal string) {
 	}
 	r.Close()
 
-	kept := compressedBackupPath(path, schemaVersion)
+	kept := compressedBackupPath(path, schemaBackupKey(schemaVersion))
 	info, err := os.Stat(kept)
 	if err != nil || info.Mode().Perm() != 0600 {
 		t.Fatalf("backup %s: err=%v mode=%v", kept, err, info.Mode().Perm())
 	}
-	backup := plainCopyOfBackup(t, path, schemaVersion)
+	backup := plainCopyOfBackup(t, path, schemaBackupKey(schemaVersion))
 	if got := schemaOf(backup); got != schemaVersion-1 {
 		t.Fatalf("backup schema=%d, want %d", got, schemaVersion-1)
 	}
@@ -76,10 +76,10 @@ func migrationKeepsACopy(t *testing.T, journal string) {
 		t.Fatalf("the backup lost the registry's data: %v", err)
 	}
 	copied.Close()
-	if got := migrationBackups(path); len(got) != 2 || got[0] != schemaVersion || got[1] != schemaVersion-2 {
+	if got := migrationBackups(path); len(got) != 2 || got[0] != schemaBackupKey(schemaVersion) || got[1] != schemaBackupKey(schemaVersion-2) {
 		t.Fatalf("kept backups for schemas %v, want the newest two", got)
 	}
-	if _, err := os.Stat(migrationBackupPath(path, schemaVersion) + ".tmp"); !os.IsNotExist(err) {
+	if _, err := os.Stat(migrationBackupPath(path, schemaBackupKey(schemaVersion)) + ".tmp"); !os.IsNotExist(err) {
 		t.Fatalf("the temporary copy was left behind: %v", err)
 	}
 }
@@ -117,11 +117,11 @@ func TestABackupHoldsWhatIsStillInTheWALAndStandsAlone(t *testing.T) {
 	}
 	timing, recorded := migrated.Migration()
 	migrated.Close()
-	if !recorded || timing.From != schemaVersion-1 || timing.To != schemaVersion || timing.Backup <= 0 || timing.Migrate <= 0 {
+	if !recorded || timing.From != "schema 126" || timing.To != "schema 127" || timing.Backup <= 0 || timing.Migrate <= 0 {
 		t.Fatalf("migration timing = %+v, %v", timing, recorded)
 	}
 
-	backup := plainCopyOfBackup(t, path, schemaVersion)
+	backup := plainCopyOfBackup(t, path, schemaBackupKey(schemaVersion))
 	header := make([]byte, 20)
 	file, err := os.Open(backup)
 	if err != nil {
@@ -171,7 +171,7 @@ func TestABackupWorksInADirectoryWithAnOddName(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.Close()
-	if got := backupSchema(compressedBackupPath(path, schemaVersion)); got != schemaVersion-1 {
+	if got := backupSchema(compressedBackupPath(path, schemaBackupKey(schemaVersion))); got != schemaVersion-1 {
 		t.Fatalf("backup schema=%d, want %d", got, schemaVersion-1)
 	}
 }
@@ -230,7 +230,7 @@ func TestAnOpenDuringAMigrationWaitsAndSucceeds(t *testing.T) {
 		r, err := Open(path)
 		opened <- result{r, err}
 	}()
-	if err := migrating.backUpBeforeMigration(schemaVersion-1, schemaVersion); err != nil {
+	if err := migrating.backUpBeforeMigration(schemaVersion-1, schemaBackupKey(schemaVersion)); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -238,7 +238,7 @@ func TestAnOpenDuringAMigrationWaitsAndSucceeds(t *testing.T) {
 		t.Fatalf("an open finished while the migration held the lock: %v", got.err)
 	case <-time.After(200 * time.Millisecond):
 	}
-	if err := migrateTx(tx); err != nil {
+	if err := migrating.upgradeTx(tx, Level{Schema: schemaVersion - 1}, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -261,7 +261,7 @@ func TestARegistryThatCannotBeBackedUpIsNotMigrated(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "registry.db")
 	registryAtSchema(t, path, schemaVersion-1)
-	blocked := migrationBackupPath(path, schemaVersion)
+	blocked := migrationBackupPath(path, schemaBackupKey(schemaVersion))
 	if err := os.MkdirAll(filepath.Join(blocked, "occupied"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +290,7 @@ func TestANewerSchemaRefusalNamesTheCopyFromBeforeItAndHowToRestoreIt(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := plain.db.Exec(`VACUUM INTO ?`, migrationBackupPath(path, newer)); err != nil {
+	if _, err := plain.db.Exec(`VACUUM INTO ?`, migrationBackupPath(path, schemaBackupKey(newer))); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := plain.db.Exec(`PRAGMA user_version=` + strconv.Itoa(newer)); err != nil {
@@ -300,13 +300,13 @@ func TestANewerSchemaRefusalNamesTheCopyFromBeforeItAndHowToRestoreIt(t *testing
 
 	_, err = Open(path)
 	var refused *NewerSchemaError
-	if !errors.As(err, &refused) || refused.Backup != migrationBackupPath(path, newer) || refused.BackupSchema != schemaVersion {
+	if !errors.As(err, &refused) || refused.Backup != migrationBackupPath(path, schemaBackupKey(newer)) || refused.BackupSchema != schemaVersion {
 		t.Fatalf("err=%v, want a refusal naming the backup", err)
 	}
-	if want := "agenthail daemon stop; agenthail registry restore " + strconv.Itoa(newer) + "; agenthail daemon start"; !strings.HasSuffix(err.Error(), want) {
+	if want := "agenthail daemon stop; agenthail registry restore v" + strconv.Itoa(newer) + "; agenthail daemon start"; !strings.HasSuffix(err.Error(), want) {
 		t.Fatalf("err=%v, want it to end %q", err, want)
 	}
-	if _, err := restoreMigrationBackup(path, newer); err != nil {
+	if _, err := restoreMigrationBackup(path, schemaBackupKey(newer)); err != nil {
 		t.Fatal(err)
 	}
 	restored, err := Open(path)
@@ -325,7 +325,7 @@ func TestANewerSchemaRefusalNamesTheCopyFromBeforeItAndHowToRestoreIt(t *testing
 func TestANewerSchemaRefusalNamesNoCopyThisBuildCannotRead(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
 	registryAtSchema(t, path, schemaVersion+2)
-	registryAtSchemaCopy(t, path, migrationBackupPath(path, schemaVersion+2), schemaVersion+1)
+	registryAtSchemaCopy(t, path, migrationBackupPath(path, schemaBackupKey(schemaVersion+2)), schemaVersion+1)
 	_, err := Open(path)
 	var refused *NewerSchemaError
 	if !errors.As(err, &refused) || refused.Backup != "" || strings.Contains(err.Error(), "daemon stop") {

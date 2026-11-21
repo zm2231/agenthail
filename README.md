@@ -48,7 +48,7 @@ agenthail update --check
 agenthail update
 ```
 
-An update that changes the registry's schema first copies it to `~/.agenthail/registry-before-v<N>.db.zst` (the last two are kept). If you go back to an older Agenthail, it refuses the newer registry and prints the steps to restore that copy with `agenthail registry restore <N>`; anything changed since the update is lost.
+An update that changes the registry's schema first copies it to `~/.agenthail/registry-before-<key>.db.zst` (the last two are kept; `agenthail registry restore` lists them). If you go back to an older Agenthail, it refuses the newer registry and prints the steps to restore that copy with `agenthail registry restore <key>`; anything changed since the update is lost.
 
 To remove a package installation, run `sudo agenthail-uninstall`. Your local conversations, queue, and history are preserved unless you add `--purge-data`. It also takes Agenthail's MCP server out of each Claude config root. Before `brew uninstall agenthail`, run `agenthail mcp uninstall`, since Homebrew runs nothing on uninstall; otherwise Claude shows a failed `agenthail` server at every start.
 

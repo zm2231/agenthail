@@ -23,15 +23,16 @@ import (
 // updateRegistry stands in for the registry an update's daemon migrates and
 // for the daemon lock, recording the installed binary at each lock change.
 type updateRegistry struct {
-	schema int
-	backup int
-	held   bool
-	binary string
-	events []string
+	schema  int
+	applied []string
+	backup  registry.Level
+	held    bool
+	binary  string
+	events  []string
 }
 
 func (r *updateRegistry) wire(deps *updateDeps) {
-	deps.registrySchema = func() int { return r.schema }
+	deps.registryLevel = func() registry.Level { return registry.Level{Schema: r.schema, Applied: r.applied} }
 	deps.holdDaemonLock = func() (func(), error) {
 		if r.held {
 			return nil, errors.New("the daemon holds the lock")
@@ -39,10 +40,10 @@ func (r *updateRegistry) wire(deps *updateDeps) {
 		r.events = append(r.events, "lock with "+r.installed())
 		return func() { r.events = append(r.events, "unlock with "+r.installed()) }, nil
 	}
-	deps.restoreRegistry = func(target int) (registry.RestoredRegistry, error) {
-		r.events = append(r.events, fmt.Sprintf("restore before v%d", target))
-		r.schema = r.backup
-		return registry.RestoredRegistry{Schema: r.backup, From: fmt.Sprintf("registry-before-v%d.db.zst", target), Aside: fmt.Sprintf("registry-v%d.db", target)}, nil
+	deps.restoreRegistry = func(key string) (registry.RestoredRegistry, error) {
+		r.events = append(r.events, "restore before "+key)
+		r.schema, r.applied = r.backup.Schema, r.backup.Applied
+		return registry.RestoredRegistry{Level: r.backup, From: "registry-before-" + key + ".db.zst", Aside: "registry-v" + key + ".db"}, nil
 	}
 }
 
@@ -160,7 +161,7 @@ func newArchiveUpdateFixture(t *testing.T, archive []byte) *archiveUpdateFixture
 		},
 		daemonHealthy: func() error { return nil },
 	}
-	fixture.registry = &updateRegistry{schema: 96, backup: 96, binary: filepath.Join(dataDir, "agenthail")}
+	fixture.registry = &updateRegistry{schema: 96, backup: registry.Level{Schema: 96}, binary: filepath.Join(dataDir, "agenthail")}
 	fixture.registry.wire(deps)
 	fixture.app = &App{Version: "v0.1.7", update: deps}
 	return fixture
@@ -373,6 +374,29 @@ func TestLinuxUpdateRestoresTheRegistryItsStoppedDaemonMigratedBeforeRollingBack
 	}
 }
 
+func TestLinuxUpdateRestoresTheCopyFromBeforeTheNamedMigrationsItsDaemonApplied(t *testing.T) {
+	fixture := newArchiveUpdateFixture(t, releaseArchive(t, "v0.2.0"))
+	installed := registry.Level{Schema: 127, Applied: []string{"2026-12-01-first"}}
+	fixture.registry.schema, fixture.registry.applied, fixture.registry.backup = installed.Schema, installed.Applied, installed
+	healthChecks := 0
+	fixture.app.update.daemonHealthy = func() error {
+		healthChecks++
+		if healthChecks == 1 {
+			fixture.registry.applied = []string{"2026-12-01-first", "2026-12-02-second", "2026-12-03-third"}
+			return errors.New("daemon did not answer on its API")
+		}
+		return nil
+	}
+	err := fixture.app.Run([]string{"update"})
+	if err == nil || !strings.Contains(err.Error(), "rolled back") || !strings.Contains(err.Error(), "registry is back at 2026-12-01-first") {
+		t.Fatalf("err=%v", err)
+	}
+	want := []string{"lock with " + versionScript("v0.2.0"), "restore before 2026-12-03-third", "unlock with " + versionScript("v0.1.7")}
+	if strings.Join(fixture.registry.events, "|") != strings.Join(want, "|") {
+		t.Fatalf("events=%q, want the copy from before the newest migration restored", fixture.registry.events)
+	}
+}
+
 func TestLinuxUpdateStaysUnverifiedWhenItsRunningDaemonMigratedTheRegistry(t *testing.T) {
 	fixture := newArchiveUpdateFixture(t, releaseArchive(t, "v0.2.0"))
 	fixture.app.update.daemonHealthy = func() error {
@@ -380,7 +404,7 @@ func TestLinuxUpdateStaysUnverifiedWhenItsRunningDaemonMigratedTheRegistry(t *te
 		return errors.New("daemon did not answer on its API")
 	}
 	err := fixture.app.Run([]string{"update"})
-	if err == nil || !strings.Contains(err.Error(), "in place but unverified") || !strings.Contains(err.Error(), "from schema 96 to 97") {
+	if err == nil || !strings.Contains(err.Error(), "in place but unverified") || !strings.Contains(err.Error(), "from schema 96 to schema 97") {
 		t.Fatalf("err=%v", err)
 	}
 	if fixture.installedVersion(t) != versionScript("v0.2.0") || len(fixture.restarts) != 1 || len(fixture.registry.events) != 0 {

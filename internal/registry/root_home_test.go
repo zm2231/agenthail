@@ -113,7 +113,7 @@ func TestEveryOpenAndARestoreRefuseBeforeCreatingAnything(t *testing.T) {
 		"Open":        func() error { _, err := Open(path); return err },
 		"OpenDefault": func() error { _, err := OpenDefault(context.Background(), true); return err },
 		"OpenCurrent": func() error { _, err := OpenCurrent(path); return err },
-		"restore":     func() error { _, err := restoreMigrationBackup(path, 1); return err },
+		"restore":     func() error { _, err := restoreMigrationBackup(path, schemaBackupKey(1)); return err },
 		"any command": RefuseSudoHome,
 	} {
 		err := attempt()
