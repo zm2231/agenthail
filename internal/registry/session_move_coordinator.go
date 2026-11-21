@@ -156,9 +156,7 @@ func dropMovedCoordinatorTx(tx *sql.Tx, conversation, movedTo string, now time.T
 	return err
 }
 
-// HandOverHostCoordinator moves the coordinator a paired host lists for a
-// project to the host its session moved to, until that host lists its own,
-// so the project keeps its lead in between.
+// HandOverHostCoordinator keeps a moving lead listed until its new host lists it, never over that host's own rows.
 func (r *Registry) HandOverHostCoordinator(fromHostID, toHostID, projectID string) error {
 	if fromHostID == "" || toHostID == "" {
 		return fmt.Errorf("a mirrored coordinator needs its host")
@@ -168,16 +166,14 @@ func (r *Registry) HandOverHostCoordinator(fromHostID, toHostID, projectID strin
 		return err
 	}
 	defer tx.Rollback()
-	var name, sessionID string
-	err = tx.QueryRow(`SELECT name,session_id FROM coordinators WHERE host_id=? AND project_id=? AND NOT EXISTS(SELECT 1 FROM coordinators WHERE host_id=? AND project_id=?)`, fromHostID, projectID, toHostID, projectID).Scan(&name, &sessionID)
+	var sessionID string
+	err = tx.QueryRow(`SELECT c.session_id FROM coordinators c WHERE c.host_id=? AND c.project_id=? AND NOT EXISTS(SELECT 1 FROM coordinators t WHERE t.host_id=? AND (t.project_id=c.project_id OR t.name=c.name))`, fromHostID, projectID, toHostID).Scan(&sessionID)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		_, err = tx.Exec(`DELETE FROM coordinators WHERE host_id=? AND project_id=?`, fromHostID, projectID)
 	case err == nil:
-		if _, err = tx.Exec(`DELETE FROM coordinators WHERE host_id=? AND name=?`, toHostID, name); err == nil {
-			_, conversation, _ := hosts.Split(sessionID)
-			_, err = tx.Exec(`UPDATE coordinators SET host_id=?,session_id=?,moved_from=? WHERE host_id=? AND project_id=?`, toHostID, hosts.Qualify(toHostID, conversation), fromHostID, fromHostID, projectID)
-		}
+		_, conversation, _ := hosts.Split(sessionID)
+		_, err = tx.Exec(`UPDATE coordinators SET host_id=?,session_id=?,moved_from=? WHERE host_id=? AND project_id=?`, toHostID, hosts.Qualify(toHostID, conversation), fromHostID, fromHostID, projectID)
 	}
 	if err != nil {
 		return err
