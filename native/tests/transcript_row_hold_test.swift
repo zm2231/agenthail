@@ -85,27 +85,70 @@ struct TranscriptRowHoldTest {
 
         let anchor = TranscriptRowAnchor()
         var anchorTops: [String: CGFloat] = ["r20": 34646, "r21": 35178]
-        let picked = anchor.pass(offset: 34537, visible: 600, range: -44...99999, resized: false, top: { anchorTops[$0] }, leading: { ("r20", 34646) })
-        expect(picked == nil && anchor.id == "r20", "a reader at rest anchors the leading row without moving, anchored \(String(describing: anchor.id))")
+        func step(_ offset: CGFloat, leading: String = "r20") -> TranscriptRowAnchor.Step {
+            anchor.pass(offset: offset, range: -44...99999, top: { anchorTops[$0] }, leading: { (leading, anchorTops[leading] ?? 0, (anchorTops[leading] ?? 0) - offset) })
+        }
+        expect(step(34537) == .none && anchor.id == "r20", "a reader at rest anchors the leading row without moving, anchored \(String(describing: anchor.id))")
         anchorTops = ["r20": 34563, "r21": 35095]
-        let shrunk = anchor.pass(offset: 34537, visible: 600, range: -44...99999, resized: true, top: { anchorTops[$0] }, leading: { ("r20", 34563) })
-        expect(shrunk == 34454, "rows above the reader re-estimated 83 pt shorter move the offset with the row, target \(String(describing: shrunk))")
+        let shrunk = step(34537)
+        expect(shrunk == .scroll(34454), "rows above the reader re-estimated 83 pt shorter move the offset with the row, step \(shrunk)")
         anchorTops = ["r20": 34543, "r21": 35075]
-        let twice = anchor.pass(offset: 34537, visible: 600, range: -44...99999, resized: true, top: { anchorTops[$0] }, leading: { ("r20", 34543) })
-        expect(twice == 34434, "a second move before the first correction lands is measured from where the reader saw the row, target \(String(describing: twice))")
-        expect(anchor.pass(offset: 34200, visible: 600, range: -44...99999, resized: true, top: { anchorTops[$0] }, leading: { ("r20", 34543) }) == nil, "a move while a correction is still queued does not replace where the reader saw the row")
-        expect(anchor.pass(offset: 34434, visible: 600, range: -44...99999, resized: true, top: { anchorTops[$0] }, leading: { ("r20", 34543) }) == nil, "the queued correction lands")
-        expect(anchor.pass(offset: 34200, visible: 600, range: -44...99999, resized: true, top: { anchorTops[$0] }, leading: { ("r20", 34543) }) == nil, "a scroll moves only the offset, so the anchor does not undo it")
+        let twice = step(34537)
+        expect(twice == .scroll(34434), "a second move before the first correction lands is measured from where the reader saw the row, step \(twice)")
+        expect(step(34200) == .none, "a scroll while a correction is still queued does not replace where the reader saw the row")
+        expect(step(34434) == .none, "the queued correction lands")
+        expect(step(34200) == .none && step(34200) == .none, "a scroll moves only the offset, so the anchor does not undo it")
         anchorTops["r20"] = 34643
-        expect(anchor.pass(offset: 34300, visible: 600, range: -44...99999, resized: true, top: { anchorTops[$0] }, leading: { ("r20", 34643) }) == nil, "a move the offset already followed, as a resize does, needs no correction")
-        anchorTops["r20"] = 30000
-        expect(anchor.pass(offset: 34300, visible: 600, range: -44...99999, resized: true, top: { anchorTops[$0] }, leading: { ("r21", 35075) }) == nil && anchor.id == "r21", "a row the reader scrolled away from is replaced by the leading row in view, anchored \(String(describing: anchor.id))")
+        expect(step(34300) == .none, "a move the offset already followed, as a resize does, needs no correction")
+        expect(step(36000, leading: "r21") == .none && anchor.id == "r21", "a reader who scrolls away anchors the row now in view, anchored \(String(describing: anchor.id))")
         anchor.release()
         expect(anchor.id == nil, "a released anchor holds nothing")
-        let resizing = TranscriptRowAnchor()
-        _ = resizing.pass(offset: 34537, visible: 600, range: -44...99999, resized: true, top: { _ in 34160 }, leading: { ("r20", 34160) })
-        expect(resizing.pass(offset: 34537, visible: 600, range: -44...99999, resized: true, top: { _ in 34640 }, leading: { ("r20", 34640) }) == nil, "a row picked while the transcript resized takes its next report as where it is rather than as a move")
-        expect(resizing.pass(offset: 34537, visible: 600, range: -44...99999, resized: true, top: { _ in 34557 }, leading: { ("r20", 34557) }) == 34454, "after that, a move is corrected")
+
+        let late = TranscriptRowAnchor()
+        var lateTop: CGFloat = 34646
+        let lateStep = { late.pass(offset: 34537, range: -44...99999, top: { _ in lateTop }, leading: { ("r20", lateTop, lateTop - 34537) }) }
+        _ = lateStep()
+        expect(lateStep() == .none && late.id == "r20", "a resize whose row has not reported yet keeps the row")
+        lateTop = 34563
+        let reported = lateStep()
+        expect(reported == .scroll(34454), "a row that reports its move a turn after the resize is put back where the reader saw it, step \(reported)")
+
+        let midResize = TranscriptRowAnchor()
+        let moved = midResize.pass(offset: 34537, range: -44...99999, top: { _ in 34563 }, leading: { ("r20", 34646, 109) })
+        expect(midResize.id == "r20" && moved == .scroll(34454), "a row picked mid-resize, after it moved, is put back where the reader saw it before the resize, step \(moved)")
+        let compensated = TranscriptRowAnchor()
+        let kept = compensated.pass(offset: 34454, range: -44...99999, top: { _ in 34563 }, leading: { ("r20", 34646, 109) })
+        expect(kept == .none, "a row picked mid-resize whose offset already moved with it needs no correction, step \(kept)")
+
+        let undone = TranscriptRowAnchor()
+        var undoneTop: CGFloat = 34646
+        let undoneStep = { (offset: CGFloat) in undone.pass(offset: offset, range: -44...99999, top: { _ in undoneTop }, leading: { ("r20", undoneTop, undoneTop - offset) }) }
+        _ = undoneStep(34537)
+        undoneTop = 34563
+        expect(undoneStep(34537) == .scroll(34454), "a move queues a correction")
+        undoneTop = 34646
+        expect(undoneStep(34537) == .cancel, "a move undone before its correction runs drops the queued correction")
+        expect(undoneStep(34300) == .none && undoneStep(34300) == .none, "a later scroll is where the reader now is, not something to undo")
+        undoneTop = 34600
+        let afterScroll = undoneStep(34300)
+        expect(afterScroll == .scroll(34254), "a move after that scroll is measured from where the reader scrolled to, step \(afterScroll)")
+
+        let clamped = TranscriptRowAnchor()
+        var clampedTop: CGFloat = 400
+        let clampedStep = { (offset: CGFloat) in clamped.pass(offset: offset, range: -44...99999, top: { _ in clampedTop }, leading: { ("r1", clampedTop, clampedTop - offset) }) }
+        _ = clampedStep(40)
+        clampedTop = 300
+        let floor = clampedStep(40)
+        expect(floor == .scroll(-44), "a correction past the top of the transcript stops at it, step \(floor)")
+        expect(clampedStep(-44) == .none && clampedStep(-44) == .none, "a clamped correction that lands ends")
+
+        let tall = TranscriptRowAnchor()
+        var tallTop: CGFloat = 32000
+        let tallStep = { tall.pass(offset: 34537, range: -44...99999, top: { _ in tallTop }, leading: { ("r9", tallTop, tallTop - 34537) }) }
+        _ = tallStep()
+        tallTop = 31900
+        let tallMove = tallStep()
+        expect(tallMove == .scroll(34437), "a row taller than the view, starting far above it, is still held, step \(tallMove)")
 
         let once = TranscriptRowHold()
         once.arm("m120", above: 71, before: 39, fresh: true)

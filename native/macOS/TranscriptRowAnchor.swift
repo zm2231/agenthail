@@ -4,7 +4,13 @@ import CoreGraphics
 /// which moves it in the content without any scroll; a scroll moves only the offset, and a resize that already keeps it in place leaves it be.
 @MainActor
 final class TranscriptRowAnchor {
-    private var row: (id: String, top: CGFloat, screen: CGFloat, confirmed: Bool)?
+    enum Step: Equatable {
+        case none
+        case scroll(CGFloat)
+        case cancel
+    }
+
+    private var row: (id: String, top: CGFloat, screen: CGFloat)?
     private var pending: CGFloat?
 
     var id: String? { row?.id }
@@ -14,27 +20,28 @@ final class TranscriptRowAnchor {
         pending = nil
     }
 
-    func pass(offset: CGFloat, visible: CGFloat, range: ClosedRange<CGFloat>, resized: Bool, top: (String) -> CGFloat?, leading: () -> (id: String, top: CGFloat)?) -> CGFloat? {
-        guard let row, let now = top(row.id), now - offset < visible, now - offset > -visible else {
-            self.row = leading().map { ($0.id, $0.top, $0.top - offset, !resized) }
-            pending = nil
-            return nil
-        }
-        // A row picked while the transcript was resizing can carry a top from before that layout, so its next report is taken as where it is.
-        guard row.confirmed else {
-            self.row = (row.id, now, now - offset, true)
-            return nil
-        }
+    /// `leading` is the row in view with its top and where the reader saw it; mid-resize, as they saw it before the resize.
+    func pass(offset: CGFloat, range: ClosedRange<CGFloat>, top: (String) -> CGFloat?, leading: () -> (id: String, top: CGFloat, screen: CGFloat)?) -> Step {
         if let pending, abs(offset - pending) <= 1 { self.pending = nil }
-        guard resized, abs(now - row.top) >= 1 else {
-            self.row?.top = now
-            if pending == nil { self.row?.screen = now - offset }
-            return nil
+        if self.row.flatMap({ top($0.id) }) == nil { pick(leading) }
+        guard let row, let now = top(row.id) else { return .none }
+        guard abs(now - row.top) >= 1 else {
+            if pending == nil, abs(now - offset - row.screen) >= 1 { pick(leading) }
+            return .none
         }
         self.row?.top = now
         let target = min(max(now - row.screen, range.lowerBound), range.upperBound)
-        guard abs(target - offset) >= 1 else { return nil }
+        guard abs(target - offset) >= 1 else {
+            guard pending != nil else { return .none }
+            pending = nil
+            return .cancel
+        }
         pending = target
-        return target
+        return .scroll(target)
+    }
+
+    private func pick(_ leading: () -> (id: String, top: CGFloat, screen: CGFloat)?) {
+        pending = nil
+        row = leading()
     }
 }

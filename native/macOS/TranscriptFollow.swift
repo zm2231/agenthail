@@ -61,7 +61,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 if new == .interacting || new == .decelerating { layout.releaseHold() }
                 // A reader who scrolls while an older page loads is held where they come to rest.
                 if new == .idle, old == .interacting || old == .decelerating, layout.olderPending { holdOlderPlace(fresh: false) }
-                if new == .idle, let geometry = layout.geometry { _ = anchorTarget(geometry, inserted: false) }
+                if new == .idle, let geometry = layout.geometry { settleAnchor(anchorStep(geometry, inserted: false), in: geometry) }
                 layout.animationStart = new == .animating ? .now : nil
                 if new == .animating {
                     let start = layout.animationStart
@@ -86,7 +86,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 let inserted = leadingRow != placedLeadingRow && placedLeadingRow.map(hasRow) == true
                 placedLeadingRow = leadingRow
                 let resized = old.contentSize != new.contentSize || old.containerSize != new.containerSize
-                if resized { layout.markResized() }
+                if resized { layout.markResized(from: old.contentOffset.y) }
                 if let rows, let id = layout.row.pass(TranscriptPass(leadingChanged: inserted, resting: resting, following: following, content: new.contentSize.height)) {
                     restoreHeld(id, in: rows)
                     return
@@ -100,10 +100,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                     settleHold { $0.scrollTo(y: Self.scrollY(target, in: new)) }
                     return
                 }
-                if let target = anchorTarget(new, inserted: inserted) {
-                    settleAnchor(target, in: new)
-                    return
-                }
+                if settleAnchor(anchorStep(new, inserted: inserted), in: new) { return }
                 if !resized {
                     if following, resting, layout.resized, !Self.atBottom(new) {
                         // Layout that moves the offset in the same pass as a resize, as a lazy stack re-measuring rows does, is not the reader leaving the bottom.
@@ -172,27 +169,39 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     }
 
     private func rowMoved(_ id: String) {
-        if id == layout.anchor.id, let geometry = layout.geometry, let target = anchorTarget(geometry, inserted: false) {
-            return settleAnchor(target, in: geometry)
-        }
+        if id == layout.anchor.id, let geometry = layout.geometry, settleAnchor(anchorStep(geometry, inserted: false), in: geometry) { return }
         guard let rows, !following, layout.holdingRow, id == layout.heldRow else { return }
         restoreHeld(id, in: rows)
     }
 
     // Only a reader at rest with no other hold in force; anything else lets the next resting pass pick the row afresh.
-    private func anchorTarget(_ geometry: ScrollGeometry, inserted: Bool) -> CGFloat? {
+    private func anchorStep(_ geometry: ScrollGeometry, inserted: Bool) -> TranscriptRowAnchor.Step {
         guard let rows, !following, !inserted, resting, !layout.holding, layout.revealed == nil, !layout.olderPending else {
             layout.anchor.release()
-            return nil
+            return .none
         }
         let offset = geometry.contentOffset.y
         let visible = geometry.containerSize.height + geometry.contentInsets.top + geometry.contentInsets.bottom
         let range = -geometry.contentInsets.top...max(geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height - geometry.contentInsets.top, -geometry.contentInsets.top)
-        return layout.anchor.pass(offset: offset, visible: visible, range: range, resized: layout.resized, top: rows.top, leading: { rows.inView(from: offset, to: offset + visible) })
+        let seen = layout.resized ? layout.turnOffset ?? offset : offset
+        return layout.anchor.pass(offset: offset, range: range, top: rows.top) {
+            rows.inView(from: seen, to: seen + visible, beforeTurn: layout.resized).map { ($0.id, $0.top, $0.top - seen) }
+        }
     }
 
-    private func settleAnchor(_ target: CGFloat, in geometry: ScrollGeometry) {
-        settleHold { $0.scrollTo(y: Self.scrollY(target, in: geometry)) }
+    // A correction whose move was undone, or whose reader has since jumped to the end, is dropped before it runs.
+    @discardableResult
+    private func settleAnchor(_ step: TranscriptRowAnchor.Step, in geometry: ScrollGeometry) -> Bool {
+        switch step {
+        case .none: return false
+        case .cancel: layout.dropRestore(); return false
+        case .scroll(let target):
+            settleHold { position in
+                guard !following, layout.anchor.id != nil else { return }
+                position.scrollTo(y: Self.scrollY(target, in: geometry))
+            }
+            return true
+        }
     }
 
     // A held row that is not laid out, or still has its pre-insert top, is built by scrolling to it; it reports again once laid out.
@@ -324,6 +333,8 @@ private final class Layout {
         return sequence
     }
 
+    func dropRestore() { sequence &+= 1 }
+
     func runRestore(_ queued: Int) -> Bool {
         guard queued == sequence else { return false }
         row.settle(until: .now + .seconds(2))
@@ -388,8 +399,10 @@ private final class Layout {
     }
 
     var resized: Bool { resizedTurn == RunLoopTurn.current }
+    private(set) var turnOffset: CGFloat?
 
-    func markResized() {
+    func markResized(from offset: CGFloat) {
+        if !resized { turnOffset = offset }
         resizedTurn = RunLoopTurn.current
     }
 }
