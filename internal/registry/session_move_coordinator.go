@@ -168,14 +168,16 @@ func (r *Registry) HandOverHostCoordinator(fromHostID, toHostID, projectID strin
 		return err
 	}
 	defer tx.Rollback()
-	var sessionID string
-	err = tx.QueryRow(`SELECT session_id FROM coordinators WHERE host_id=? AND project_id=? AND NOT EXISTS(SELECT 1 FROM coordinators WHERE host_id=? AND project_id=?)`, fromHostID, projectID, toHostID, projectID).Scan(&sessionID)
+	var name, sessionID string
+	err = tx.QueryRow(`SELECT name,session_id FROM coordinators WHERE host_id=? AND project_id=? AND NOT EXISTS(SELECT 1 FROM coordinators WHERE host_id=? AND project_id=?)`, fromHostID, projectID, toHostID, projectID).Scan(&name, &sessionID)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		_, err = tx.Exec(`DELETE FROM coordinators WHERE host_id=? AND project_id=?`, fromHostID, projectID)
 	case err == nil:
-		_, conversation, _ := hosts.Split(sessionID)
-		_, err = tx.Exec(`UPDATE coordinators SET host_id=?,session_id=?,moved_from=? WHERE host_id=? AND project_id=?`, toHostID, hosts.Qualify(toHostID, conversation), fromHostID, fromHostID, projectID)
+		if _, err = tx.Exec(`DELETE FROM coordinators WHERE host_id=? AND name=?`, toHostID, name); err == nil {
+			_, conversation, _ := hosts.Split(sessionID)
+			_, err = tx.Exec(`UPDATE coordinators SET host_id=?,session_id=?,moved_from=? WHERE host_id=? AND project_id=?`, toHostID, hosts.Qualify(toHostID, conversation), fromHostID, fromHostID, projectID)
+		}
 	}
 	if err != nil {
 		return err
