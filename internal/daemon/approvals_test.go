@@ -175,10 +175,10 @@ func TestACoordinatorRunsItsOwnProjectsChangesWithoutAsking(t *testing.T) {
 		{"the lead adds a folder in no project", f.lead.ID, `{"action":"project-add","path":"` + outside + `"}`, http.StatusOK},
 		{"the lead adds a folder on another host", f.lead.ID, `{"action":"project-add","path":"` + outside + `","host":"elsewhere"}`, http.StatusForbidden},
 		{"the lead adds a folder already in a project", f.lead.ID, `{"action":"project-add","path":"` + f.lead.Cwd + `"}`, http.StatusForbidden},
-		{"the lead archives its project", f.lead.ID, `{"action":"project-archive","projectId":"` + project.ID + `"}`, http.StatusForbidden},
-		{"the lead removes its project", f.lead.ID, `{"action":"project-remove","projectId":"` + project.ID + `"}`, http.StatusForbidden},
-		{"the lead turns its project's tools off", f.lead.ID, `{"action":"project-setting","projectId":"` + project.ID + `","setting":"mcp","value":"off"}`, http.StatusForbidden},
-		{"the lead clears its project's coordinator", f.lead.ID, `{"action":"coordinator-clear","projectId":"` + project.ID + `"}`, http.StatusForbidden},
+		{"the lead archives its project", f.lead.ID, `{"action":"project-archive","projectId":"` + project.ID + `"}`, http.StatusOK},
+		{"the lead removes its project", f.lead.ID, `{"action":"project-remove","projectId":"` + project.ID + `"}`, http.StatusOK},
+		{"the lead turns its project's tools off", f.lead.ID, `{"action":"project-setting","projectId":"` + project.ID + `","setting":"mcp","value":"off"}`, http.StatusOK},
+		{"the lead clears its project's coordinator", f.lead.ID, `{"action":"coordinator-clear","projectId":"` + project.ID + `"}`, http.StatusOK},
 	}
 	for _, c := range cases {
 		answer := askScope(t, f.d, ScopeRequest{SessionID: c.caller, Action: "operator", Payload: scopePayload(PersonActionAPI, c.body)}, "127.0.0.1:50000")

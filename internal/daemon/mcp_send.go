@@ -36,7 +36,11 @@ func (d *Daemon) mcpSend(ctx context.Context, caller *mcpCaller, input mcpSendIn
 	if mode == "now" {
 		busyDelivery = "steer"
 	}
-	target, err := d.mcpControlTarget(ctx, caller, input.Target, mode == "queue")
+	reach := reachSteer
+	if mode == "queue" {
+		reach = reachQueued
+	}
+	target, notice, err := d.mcpReachTarget(ctx, caller, input.Target, reach)
 	if err != nil {
 		return d.mcpAskOnRefusal(ctx, caller, err, input.mcpAskPerson, dashboardActionRequest{Action: "send", Message: input.Message, BusyDelivery: busyDelivery})
 	}
@@ -45,6 +49,7 @@ func (d *Daemon) mcpSend(ctx context.Context, caller *mcpCaller, input mcpSendIn
 		return nil, err
 	}
 	result, err := d.mcpAction(ctx, caller, "agenthail_send", input.mcpWrite, dashboardActionRequest{Action: "send", SessionID: target.ID, Message: input.Message, SourceSessionID: caller.session.ID, BusyDelivery: busyDelivery, ScopeProjectID: scope})
+	d.noticeAfter(ctx, caller, notice, err)
 	if err != nil {
 		return nil, err
 	}

@@ -9,9 +9,11 @@ type mcpInterruptInput struct {
 }
 
 func (d *Daemon) mcpInterrupt(ctx context.Context, caller *mcpCaller, input mcpInterruptInput) (any, error) {
-	target, err := d.mcpControlTarget(ctx, caller, input.Target, false)
+	target, notice, err := d.mcpReachTarget(ctx, caller, input.Target, reachSteer)
 	if err != nil {
 		return d.mcpAskOnRefusal(ctx, caller, err, input.mcpAskPerson, dashboardActionRequest{Action: "interrupt"})
 	}
-	return d.mcpAction(ctx, caller, "agenthail_interrupt", input.mcpWrite, dashboardActionRequest{Action: "interrupt", SessionID: target.ID})
+	result, err := d.mcpAction(ctx, caller, "agenthail_interrupt", input.mcpWrite, dashboardActionRequest{Action: "interrupt", SessionID: target.ID})
+	d.noticeAfter(ctx, caller, notice, err)
+	return result, err
 }

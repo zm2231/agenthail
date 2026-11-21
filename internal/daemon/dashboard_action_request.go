@@ -79,4 +79,5 @@ type dashboardActionRequest struct {
 	ChangedBy       string                     `json:"changedBy"`
 	Ceiling         json.RawMessage            `json:"ceiling,omitempty"`
 	Task            bool                       `json:"task,omitempty"`
+	Host            string                     `json:"host,omitempty"`
 }

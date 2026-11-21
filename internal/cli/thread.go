@@ -110,9 +110,6 @@ func (a *App) cmdThread(args []string) error {
 		if err != nil {
 			return err
 		}
-		if !local && a.agentEnvironment() {
-			return &agentScopeRefusal{Code: "out_of_scope", Message: "An agent session starts sessions only on its own host; ask your coordinator or the person to start one on " + hostText + "."}
-		}
 		if local {
 			if request.cwd, err = resolveThreadCwd(request.cwd); err != nil {
 				return err

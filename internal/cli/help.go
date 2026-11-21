@@ -72,6 +72,11 @@ Session commands:
   limit-resume resume <target>  Resume a stopped session now
   limit-resume cancel <target>  Do not resume a stopped session for its current stop
   limit-resume on|off           Resume stopped sessions once their limit resets (default on)
+  agent-policy [list] [--json]  Show what agents may do on their own, do and tell you, or must ask you
+  agent-policy set <action> allow|notify|ask
+                                 Change one action; reset <action> goes back to its default
+  agent-policy limit depth|running <n>
+                                 How deep sessions nest and how many each agent runs; 0 is the default
 
 Delivery (send, queue, steer):
   idle target                   send delivers now; queue holds it for the daemon; steer has no turn to reach and says

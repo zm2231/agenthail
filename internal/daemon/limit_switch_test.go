@@ -50,7 +50,7 @@ func resumeRoot(t *testing.T, d *Daemon, root string, now time.Time) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d.resumeAccount(root, stops, true, true, now)
+	d.resumeAccount(root, stops, resumeAlways, true, now)
 }
 
 func awaitProxyReading(t *testing.T, d *Daemon) {

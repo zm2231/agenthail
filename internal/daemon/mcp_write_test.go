@@ -85,8 +85,9 @@ func TestAChildsQueuedSendReachesItsSpawnerAsTheChild(t *testing.T) {
 	}
 }
 
-func TestASessionCannotMessageOneOutsideItsProject(t *testing.T) {
+func TestWhileThePersonKeepsMessagesToOtherProjectsASessionCannotMessageOneOutsideItsProject(t *testing.T) {
 	f := newMCPWriteFixture(t)
+	setAgentDecision(t, "cross-project-message", AgentAsk)
 	stranger := surface.Session{ID: "stranger", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
 	if err := f.r.RecordObservedSession(stranger); err != nil {
 		t.Fatal(err)

@@ -68,10 +68,16 @@ func TestAnAgentPostsOnlyToItsOwnProjectsChannel(t *testing.T) {
 	if out, refused := callMCP(t, foreign, "agenthail_send", map[string]any{"project": "widget", "message": "from gadget to the widget lead", "clientRequestId": "lead-queued"}); refused || leadMessages() != 1 {
 		t.Fatalf("another project's agent queueing to its coordinator: %v sent=%d", out, leadMessages())
 	}
-	out, refused = callMCP(t, foreign, "agenthail_send", map[string]any{"project": "widget", "message": "from gadget to the widget lead", "mode": "now", "clientRequestId": "lead-now"})
+	told := &toldPerson{}
+	d.notifyDesktop = told.notify
+	if out, refused := callMCP(t, foreign, "agenthail_send", map[string]any{"project": "widget", "message": "from gadget to the widget lead", "mode": "now", "clientRequestId": "lead-now"}); refused || leadMessages() != 2 || len(told.told()) != 1 {
+		t.Fatalf("another project's agent sending now to its coordinator: %v sent=%d told=%q", out, leadMessages(), told.told())
+	}
+	setAgentDecision(t, "cross-project-steer", AgentAsk)
+	out, refused = callMCP(t, foreign, "agenthail_send", map[string]any{"project": "widget", "message": "from gadget to the widget lead", "mode": "now", "clientRequestId": "lead-now-kept"})
 	detail, _ = out["detail"].(map[string]any)
-	if !refused || out["code"] != "out_of_scope" || detail["rule"] != "different_project" || leadMessages() != 1 {
-		t.Fatalf("another project's agent sending now to its coordinator: refused=%v out=%v sent=%d", refused, out, leadMessages())
+	if !refused || out["code"] != "out_of_scope" || detail["rule"] != "different_project" || leadMessages() != 2 {
+		t.Fatalf("a message sent now the person keeps for themselves: refused=%v out=%v sent=%d", refused, out, leadMessages())
 	}
 
 	if out, refused := callMCP(t, asOperator(t, d, server, operator.ID), "agenthail_channel_send", map[string]any{"channel": "#widget", "message": "from the operator", "clientRequestId": "operator"}); refused || widgetPosts() != 3 {

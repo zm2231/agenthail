@@ -45,6 +45,7 @@ type App struct {
 	scopeOverride             func(daemon.ScopeRequest) (*daemon.ScopeReply, error)
 	askPerson                 bool
 	askReason                 string
+	agentNotices              []string
 	deadlineClock             func() time.Time
 }
 
@@ -133,6 +134,11 @@ func (a *App) Run(args []string) (err error) {
 	var rest []string
 	rest, a.askPerson, a.askReason = askPersonFlags(args[1:])
 	defer func() {
+		if err == nil {
+			a.sendAgentNotices()
+		}
+	}()
+	defer func() {
 		var asked *askedPerson
 		if errors.As(err, &asked) {
 			fmt.Printf("Asked the person to allow this (%s). Their answer, and the result if they allow it, arrives as your next message.\n", asked.askID)
@@ -204,6 +210,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdQueue(rest)
 	case "limit-resume":
 		return a.cmdLimitResume(rest)
+	case "agent-policy":
+		return a.cmdAgentPolicy(rest)
 	case "history":
 		return a.cmdHistory(rest)
 	case "thread":

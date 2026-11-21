@@ -302,7 +302,7 @@ func TestIdleUnsettledTasksCountTowardTheChildrenLimit(t *testing.T) {
 	if running, err = f.r.RunningChildren(f.task.Parent); err != nil || len(running) != 0 {
 		t.Fatalf("a settled task frees it: running=%v err=%v", running, err)
 	}
-	for index := range mcpChildrenLimit {
+	for index := range defaultAgentRunning {
 		child := surface.Session{ID: fmt.Sprintf("child-%d", index), Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}
 		if err := f.r.RecordObservedSession(child); err != nil {
 			t.Fatal(err)

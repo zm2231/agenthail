@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/broadcast"
@@ -30,6 +31,7 @@ type ScopeRequest struct {
 	AskPerson      bool            `json:"askPerson,omitempty"`
 	Reason         string          `json:"reason,omitempty"`
 	Create         json.RawMessage `json:"create,omitempty"`
+	Notice         string          `json:"notice,omitempty"`
 }
 
 type ScopeReply struct {
@@ -37,6 +39,7 @@ type ScopeReply struct {
 	ProjectID      string `json:"projectId,omitempty"`
 	ScopeProjectID string `json:"scopeProjectId,omitempty"`
 	AskID          string `json:"askId,omitempty"`
+	Notice         string `json:"notice,omitempty"`
 }
 
 func (d *Daemon) registerScopeAPI(mux *http.ServeMux, dashboard *dashboardServer) {
@@ -98,6 +101,9 @@ func (d *Daemon) agentCreate(ctx context.Context, caller *mcpCaller, payload jso
 	var asked dashboardActionRequest
 	if err := json.Unmarshal(payload, &asked); err != nil {
 		return actionReply{}, refuse("invalid", "create: "+err.Error())
+	}
+	if host := strings.TrimSpace(asked.Host); host != "" && !d.isLocalHostRef(host) {
+		return d.agentCreateOnHost(ctx, caller, host, asked)
 	}
 	configRoot, err := d.agentConfigRoot(caller, asked.ConfigRoot)
 	if err != nil {
@@ -167,11 +173,18 @@ func (d *Daemon) agentScope(r *http.Request, caller *mcpCaller, request ScopeReq
 		if strings.TrimSpace(request.Target) == caller.session.ID {
 			return ScopeReply{TargetID: caller.session.ID}, nil
 		}
-		target, err := d.mcpControlTarget(r.Context(), caller, request.Target, request.Action == "send" && mode != "now")
+		reach := reachSession
+		if request.Action == "send" {
+			reach = reachQueued
+			if mode == "now" {
+				reach = reachSteer
+			}
+		}
+		target, notice, err := d.mcpReachTarget(r.Context(), caller, request.Target, reach)
 		if err != nil {
 			return ScopeReply{}, err
 		}
-		reply := ScopeReply{TargetID: target.ID}
+		reply := ScopeReply{TargetID: target.ID, Notice: d.holdAgentNotice(caller, notice)}
 		if request.Action == "send" {
 			reply.ScopeProjectID, err = d.remoteSendScope(caller, target)
 		}
@@ -179,11 +192,11 @@ func (d *Daemon) agentScope(r *http.Request, caller *mcpCaller, request ScopeReq
 	case "answer":
 		return d.answerScope(r.Context(), caller, request.Target, mode)
 	case "lead-send":
-		project, refusal := d.mcpLeadScope(caller, request.Project, mode)
+		project, notice, refusal := d.mcpLeadScope(caller, request.Project, mode)
 		if refusal != nil {
 			return ScopeReply{}, refusal
 		}
-		return ScopeReply{ProjectID: project.ID}, nil
+		return ScopeReply{ProjectID: project.ID, Notice: d.holdAgentNotice(caller, notice)}, nil
 	case "channel-send":
 		if target, err := broadcast.Resolve(d.Registry, d.localChannelRef(request.Channel)); err == nil && target.ProjectID != "" {
 			if refusal := mcpProjectPostScope(caller, target); refusal != nil {
@@ -206,14 +219,19 @@ func (d *Daemon) agentScope(r *http.Request, caller *mcpCaller, request ScopeReq
 			return ScopeReply{}, scopeRefusal("project:"+strings.TrimSpace(request.Project), "different_project", "You may write only your own project's ledger; run the command in your own project's folder, or ask that project's coordinator.")
 		}
 		return ScopeReply{ProjectID: own}, nil
+	case "notice":
+		if what, found := d.agentNotices.take(strings.TrimSpace(request.Notice), caller.session.ID, time.Now()); found {
+			d.notifyAgentAction(r.Context(), caller.session.ID, what)
+		}
+		return ScopeReply{}, nil
 	case "operator":
 		if request.Payload == nil {
 			return ScopeReply{}, refuse("invalid", "operator needs the payload the command sends.")
 		}
-		err := d.personActionScope(r.Context(), caller, *request.Payload)
+		notice, err := d.personActionScope(r.Context(), caller, *request.Payload)
 		var refusal *mcpRefusal
 		if err == nil || !request.AskPerson || !errors.As(err, &refusal) || refusal.Detail["approvable"] != true {
-			return ScopeReply{}, err
+			return ScopeReply{Notice: notice}, err
 		}
 		ask, err := d.askPersonToAllow(r.Context(), caller, *request.Payload, request.Reason)
 		if err != nil {
@@ -221,7 +239,7 @@ func (d *Daemon) agentScope(r *http.Request, caller *mcpCaller, request ScopeReq
 		}
 		return ScopeReply{AskID: ask.ID}, nil
 	}
-	return ScopeReply{}, refuse("invalid", "action is send, control, lead-send, channel-send, create, ledger or operator.")
+	return ScopeReply{}, refuse("invalid", "action is send, control, lead-send, channel-send, create, ledger, operator or notice.")
 }
 
 func writeScopeRefusal(w http.ResponseWriter, refusal *mcpRefusal) {
@@ -255,7 +273,7 @@ func (d *Daemon) answerScope(ctx context.Context, caller *mcpCaller, ref, decisi
 		return ScopeReply{}, mcpTargetRefusal(err)
 	}
 	if remote == nil {
-		target, err := d.mcpControlTarget(ctx, caller, ref, false)
+		target, err := d.mcpControlTarget(ctx, caller, ref)
 		if err != nil {
 			return ScopeReply{}, err
 		}
