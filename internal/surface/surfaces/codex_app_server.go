@@ -15,7 +15,10 @@ func (c *Codex) desktopAppServer(ctx context.Context) (*surface.AppServer, error
 	}
 	defer desktop.Close()
 	host, reported := desktopLocalHost(ctx, desktop)
-	if reported && host.State != "" && host.State != "connected" && host.Fatal == "" {
+	switch {
+	case reported && host.Fatal != "":
+		return nil, fmt.Errorf("Codex Desktop's app-server stopped: %s", host.Fatal)
+	case reported && host.State != "" && host.State != "connected":
 		return nil, fmt.Errorf("Codex Desktop's app-server is %s", host.State)
 	}
 	if _, err := c.loadedThreadIDs(ctx, desktop, 1); err != nil {
@@ -45,8 +48,7 @@ func codexServerProcess(ctx context.Context, client codexClient) (int64, error) 
 	return int64(id), nil
 }
 
-// desktopAppServerMode is empty when it cannot be proven: one process
-// answering both the Desktop bridge and the daemon socket is a shared server.
+// One process answering both the Desktop bridge and the daemon socket is a shared server.
 func (c *Codex) desktopAppServerMode(ctx context.Context, desktop codexClient) surface.AppServerMode {
 	if !c.managed {
 		return ""

@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const codexHostsJS = `(()=>{const b=globalThis.__agenthailCodexDesktopRendererV2;return JSON.stringify(b&&b.hosts?Object.values(b.hosts):[])})()`
+const codexHostsJS = `(async()=>{const b=globalThis.__agenthailCodexDesktopRendererV2;if(b&&typeof b.settled==='function')await b.settled();return JSON.stringify(b&&b.hosts?Object.values(b.hosts):[])})()`
 
 type codexDesktopHost struct {
 	HostID           string `json:"hostId"`

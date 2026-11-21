@@ -46,7 +46,7 @@ func (c *Codex) createVoiceOperator(ctx context.Context, client codexClient, cwd
 		"threadSource": "agenthail", "serviceName": "agenthail-voice", "dynamicTools": voice.DynamicTools(),
 	}, 15*time.Second)
 	if err != nil {
-		return nil, surface.DeliveryOutcomeUnknown(err)
+		return nil, codexOperationOutcome(err)
 	}
 	result, _ := response["result"].(map[string]any)
 	thread, _ := result["thread"].(map[string]any)
