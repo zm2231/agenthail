@@ -77,7 +77,33 @@ An ack can only affect the caller's own inbox, and a client that follows the loo
 
 A message whose encoded text is over 4 KiB comes back clipped with `truncated`, its full size in `bytes` and a `bodyRef`; `agenthail_read` with that `bodyRef` (and `offset`, from `nextOffset`) pages its whole text, acknowledged or not. `agenthail_wait` with `tasks: []` returns once a message is unread, so an agent long-waits on it to learn of mail. The loop is: wait, read, handle, then read with `ack` (which also returns anything newer), and wait again with `ack` as `cursor`.
 
-The transport is stateless Streamable HTTP: the daemon keeps no session, and each request is checked on its own, so a rotated, rebound or turned-off token, or a change to the Access settings, takes effect on the next request. The daemon sends nothing it was not asked for.
+### Push and the session lifecycle
+
+The transport is stateful Streamable HTTP, so the daemon can tell an identity when mail arrives. Every request, the event stream (GET) included, is still checked on its own as above.
+
+Notices are contentless: no sender and no text. A session subscribed to `agenthail://inbox/<name>` gets `notifications/resources/updated`, and a session that set a logging level gets a `notifications/message` at level `notice` with `{inbox, unread, next}`. Reading the resource gives the same count. Message text is reached only through `agenthail_read`, a verified request.
+
+The credential epoch (`mcp_remote_epoch`) is one counter that SQLite triggers raise in the same transaction as any change to a remote token or binding, removal of remote access or of the identity, and any write to the Access team or audience; last-seen and key-status writes do not count. It never repeats, so clearing and restoring the same settings, or two rotations in one millisecond, still count. Any change retires every remote session; clients reconnect with whatever credential is now valid.
+
+| State | Event | Next | Sent |
+|---|---|---|---|
+| open | `initialize` (the SDK binds the session to the identity it was verified as; another identity naming it is refused) | open | nothing |
+| open | first verified message once initialized, verified under the current epoch, daemon not stopping | bound | the unread count |
+| open | that message was verified under an older epoch, or the daemon is stopping | retiring | nothing; the request is refused |
+| bound | subscribe or set a logging level | bound | the unread count again, even if a notice pass is under way |
+| bound | notice pass with new mail, epoch unchanged at the pass's last check | bound | one contentless notice |
+| bound | notice pass finds the epoch has risen | retiring | nothing |
+| bound | daemon stops | retiring | nothing |
+| bound | client ends the session, an hour with no request (a request in flight pauses this), or the connection ends | gone | nothing |
+| retiring | the SDK ends the session | gone | nothing |
+
+Binding reads the epoch and records the session under one lock, so a notice pass either sees the session or read its epoch first. Every request on a bound session runs under the session's own context. Retiring cancels that context, which ends any request in flight such as a long `agenthail_wait`, and closes the session; it stays tracked until the SDK ends it, so it is never bound again or retold. A notice that could not be sent is tried again on the next pass; one sent while the event stream is down waits in the SDK's event store for the client to resume.
+
+Two windows are accepted, both because notices are contentless: a credential change landing after a pass's last epoch check can let that pass's notice through, and a retiring session keeps its subscription until the SDK ends it, so it can still get the `resources/updated` broadcast meant for another session of the same inbox. Either way it learns only that mail is waiting, and reading needs a valid credential. Holding notices back until a retiring session is gone would delay every live session of that inbox for as long as the close takes, with no limit.
+
+When the daemon stops it refuses new remote requests (503), cancels and drains the requests already admitted, then retires every remote session, bound or not. If an admitted request has not finished within 2 seconds, the stop goes ahead after retiring them, and they are retired again in the background once every admitted request has exited, so a session such a request opens is closed when the request ends. The daemon does not ping clients: the SDK's keepalive closes the session of any client that keeps no event stream open, and a client that only calls tools would then find its session gone.
+
+The notifier follows the inbox's change signal and also sweeps every 5 seconds.
 
 Cloudflare's side (the Access application, its service token, the tunnel and DNS) is set up in Cloudflare; the daemon only checks what arrives.
 
@@ -85,4 +111,4 @@ Cloudflare's side (the Access application, its service token, the tunnel and DNS
 
 - The Mac and iPhone apps and the web dashboard do not show identities or their inboxes. Messages from one show its name like any agent's.
 - `agenthail inbox` reads the local registry, so it runs on the identity's own host. Off that host, use the remote MCP.
-- A remote identity is not pushed a notice when mail arrives; it learns of mail by waiting with `agenthail_wait`.
+- `notifications/message` reaches only a client that sets a logging level, and MCP logging is deprecated in the 2026-07-28 protocol revision; `resources/updated` reaches only a subscriber. A client that does neither learns of mail with `agenthail_wait`.

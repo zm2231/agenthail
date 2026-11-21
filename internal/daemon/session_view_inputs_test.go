@@ -51,6 +51,7 @@ var notSessionViewInputs = map[string]string{
 	"agent_inbox":         "an identity's messages, read only by agenthail inbox and the inbox adapter's tail; no session view shows them",
 	"identity_remote":     "an identity's remote token hash and Access binding, read only by the remote MCP verifier, agenthail identity and doctor",
 	"mcp_access":          "the Cloudflare Access team and audience, read only by the remote MCP verifier, agenthail identity access and doctor",
+	"mcp_remote_epoch":    "a counter of remote credential changes, read only by the remote MCP notifier and verifier",
 }
 
 // Dropping session_archive or projects from the registry's presentation inputs

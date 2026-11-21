@@ -366,7 +366,7 @@ To continue an idle Claude session or Codex thread on another paired machine, ru
 
 ## Give an outside agent a name
 
-An agent that runs commands on one of your machines but isn't an Agenthail session can still take part. Run `agenthail identity add scout` there, then have it `export AGENTHAIL_SESSION_ID=scout`: its `agenthail send` messages arrive from `@scout` (`server::@scout` on a paired machine), and anything sent to `@scout` waits in an inbox it reads with `agenthail inbox --wait 10m`. No model runs behind the name, so nothing replies on its behalf. An agent on no machine of yours can use an identity through the daemon's `/mcp`, behind Cloudflare Access or with its own token: `agenthail identity remote scout` prints that token, and the agent waits for and reads its inbox with the usual tools. [How agent identities work](docs/maintainers/agent-identities.md).
+An agent that runs commands on one of your machines but isn't an Agenthail session can still take part. Run `agenthail identity add scout` there, then have it `export AGENTHAIL_SESSION_ID=scout`: its `agenthail send` messages arrive from `@scout` (`server::@scout` on a paired machine), and anything sent to `@scout` waits in an inbox it reads with `agenthail inbox --wait 10m`. No model runs behind the name, so nothing replies on its behalf. An agent on no machine of yours can use an identity through the daemon's `/mcp`, behind Cloudflare Access or with its own token: `agenthail identity remote scout` prints that token, and the daemon pushes the agent a notice when mail arrives, which it reads with the usual tools. [How agent identities work](docs/maintainers/agent-identities.md).
 
 ## Keep track of what was asked
 

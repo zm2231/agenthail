@@ -42,9 +42,12 @@ type remoteFixture struct {
 	log    *bytes.Buffer
 }
 
-func newRemoteFixture(t *testing.T, clientID string) *remoteFixture {
+func newRemoteFixture(t *testing.T, clientID string, setup ...func(*Daemon)) *remoteFixture {
 	t.Helper()
 	d, r, _, _, _ := daemonFixture(t)
+	for _, apply := range setup {
+		apply(d)
+	}
 	f := &remoteFixture{d: d, r: r, issuer: cfaccesstest.New(t), log: &bytes.Buffer{}}
 	d.log = log.New(f.log, "", 0)
 	d.remoteMCP().certsURL = f.issuer.CertsURL()

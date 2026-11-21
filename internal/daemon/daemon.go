@@ -151,6 +151,7 @@ type Daemon struct {
 	federation               *federation
 	remoteOnce               sync.Once
 	remote                   *remoteMCP
+	remoteIdle               time.Duration
 	remoteExtensions         *remoteExtensions
 	uploads                  *uploads.Store
 	limitResumes             *limitResumer
@@ -410,6 +411,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.sweepUploads(ctx)
 	go d.sweepSimulatorLeases(ctx)
 	go d.runLimitResumes(ctx)
+	noticesDone := make(chan struct{})
+	go func() {
+		defer close(noticesDone)
+		d.runRemoteInboxNotices(ctx)
+	}()
 	go d.runIdleCompaction(ctx)
 	go d.runGoalSweeps(ctx)
 	go d.runWorkCleans(ctx)
@@ -442,6 +448,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 			<-browserDone
 			<-extensionsDone
 			<-uiDone
+			<-noticesDone
 			d.log.Printf("stopping")
 			return nil
 		case <-observerTicker.C:

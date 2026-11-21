@@ -246,7 +246,29 @@ func (r *Registry) StoreInboxMessage(message InboxMessage) (InboxMessage, bool, 
 		return InboxMessage{}, false, err
 	}
 	message.Identity = name
-	return message, true, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return InboxMessage{}, false, err
+	}
+	r.signalChange(ChangeAgentInbox)
+	return message, true, nil
+}
+
+func (r *Registry) LatestUnreadInbox() (map[string]int64, error) {
+	rows, err := r.read.Query(`SELECT identity_id,MAX(id) FROM agent_inbox WHERE read_at_ms=0 GROUP BY identity_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	latest := map[string]int64{}
+	for rows.Next() {
+		var id string
+		var newest int64
+		if err := rows.Scan(&id, &newest); err != nil {
+			return nil, err
+		}
+		latest[id] = newest
+	}
+	return latest, rows.Err()
 }
 
 // Only delivered messages can be acknowledged.
