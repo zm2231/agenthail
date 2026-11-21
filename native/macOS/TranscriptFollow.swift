@@ -84,7 +84,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 layout.seen = new
                 let inserted = leadingRow != placedLeadingRow && placedLeadingRow.map(hasRow) == true
                 placedLeadingRow = leadingRow
-                if inserted, !resting { layout.forgetOlder() }
+                if inserted, !resting { layout.row.forget() }
                 let resized = old.contentSize != new.contentSize || old.containerSize != new.containerSize
                 if resized { layout.markResized() }
                 if !following, let rows, let id = layout.row.pass(TranscriptPass(leadingChanged: inserted, resting: resting, content: new.contentSize.height)) {
@@ -144,7 +144,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             // A page can land without changing the scroll geometry, so the geometry action may not see it.
             .onChange(of: leadingRow) { old, _ in
                 guard old.map(hasRow) == true else { return }
-                guard resting else { return layout.forgetOlder() }
+                guard resting else { return layout.row.forget() }
                 guard !following, let rows, let id = layout.row.pass(TranscriptPass(leadingChanged: true, resting: true, content: layout.geometry?.contentSize.height ?? 0)) else { return }
                 restoreHeld(id, in: rows)
             }
