@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/registry"
-	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func (d *Daemon) registerDecisionsAPI(mux *http.ServeMux, dashboard *dashboardServer) {
@@ -60,21 +59,17 @@ func (d *Daemon) decisionRows(ctx context.Context) ([]dashboardSession, string, 
 }
 
 func (d *Daemon) queuedBehind() (map[string][]string, error) {
-	queue, err := d.Registry.ListQueue(false, d.adapters())
+	senders, err := d.Registry.QueuedSenders()
 	if err != nil {
 		return nil, err
 	}
 	sources := map[string]map[string]bool{}
-	for _, row := range queue {
-		source := row.SourceSessionID
-		if row.Status == "dead" || source == "" || source == row.SessionID || source == surface.SystemSessionID || source == surface.PersonSessionID || row.Author == surface.AuthorPerson {
-			continue
-		}
-		target := d.publicSessionID(row.SessionID)
+	for _, sender := range senders {
+		target := d.publicSessionID(sender.SessionID)
 		if sources[target] == nil {
 			sources[target] = map[string]bool{}
 		}
-		sources[target][d.publicSessionID(source)] = true
+		sources[target][d.publicSessionID(sender.SourceSessionID)] = true
 	}
 	queued := make(map[string][]string, len(sources))
 	for target, from := range sources {

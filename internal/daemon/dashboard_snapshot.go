@@ -85,9 +85,14 @@ func (d *Daemon) cachedDashboardState(ctx context.Context, dashboard *dashboardS
 	}
 	previous, hadPrevious := dashboard.state, !dashboard.stateAt.IsZero()
 	dashboard.stateMu.Unlock()
-	refreshCtx, cancel := context.WithTimeout(ctx, dashboardRefreshBudget)
-	defer cancel()
-	state, err := d.dashboardState(refreshCtx)
+	rebuild := func() (any, error) { return d.rebuildDashboardState(ctx, dashboard, version) }
+	var built any
+	var err error
+	if fresh {
+		built, err = rebuild()
+	} else {
+		built, err, _ = dashboard.rebuilds.Do(fmt.Sprintf("%s-%d-%d", hostEpoch, catalogSeq, version), rebuild)
+	}
 	if err != nil {
 		if !hadPrevious {
 			return dashboardState{}, "", err
@@ -98,13 +103,28 @@ func (d *Daemon) cachedDashboardState(ctx context.Context, dashboard *dashboardS
 		stale.Daemon["refreshError"] = err.Error()
 		return stale, "", nil
 	}
+	result := built.(taggedDashboardState)
+	return result.state, result.tag, nil
+}
+
+type taggedDashboardState struct {
+	state dashboardState
+	tag   string
+}
+
+func (d *Daemon) rebuildDashboardState(ctx context.Context, dashboard *dashboardServer, version uint64) (taggedDashboardState, error) {
+	refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dashboardRefreshBudget)
+	defer cancel()
+	state, err := d.dashboardState(refreshCtx)
+	if err != nil {
+		return taggedDashboardState{}, err
+	}
 	dashboard.stateMu.Lock()
+	defer dashboard.stateMu.Unlock()
 	dashboard.state = state
 	dashboard.stateAt = time.Now()
 	dashboard.cachedVersion = version
-	tag := dashboardSnapshotTag(state, version, dashboard.stateAt)
-	dashboard.stateMu.Unlock()
-	return state, tag, nil
+	return taggedDashboardState{state: state, tag: dashboardSnapshotTag(state, version, dashboard.stateAt)}, nil
 }
 
 func dashboardSnapshotTag(state dashboardState, version uint64, builtAt time.Time) string {

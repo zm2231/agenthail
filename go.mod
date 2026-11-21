@@ -19,6 +19,7 @@ require (
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/tidwall/gjson v1.20.0
 	github.com/tidwall/sjson v1.2.5
+	golang.org/x/sync v0.24.0
 	golang.org/x/sys v0.47.0
 	howett.net/plist v1.0.1
 	modernc.org/sqlite v1.53.0
@@ -41,7 +42,6 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
-	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	modernc.org/libc v1.73.4 // indirect
