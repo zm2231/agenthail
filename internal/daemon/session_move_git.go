@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/projectresolve"
 )
 
 const moveGitTimeout = 2 * time.Minute
@@ -30,44 +32,44 @@ type moveCheckout struct {
 func sourceCheckout(ctx context.Context, cwd string) (moveCheckout, error) {
 	ctx, cancel := context.WithTimeout(ctx, moveGitTimeout)
 	defer cancel()
-	repository, notRepository, err := resolveCatalogRepository(ctx, cwd, nil)
+	repository, notRepository, err := projectresolve.ResolveCatalogRepository(ctx, cwd, nil)
 	if notRepository {
 		return moveCheckout{}, fmt.Errorf("%s is not in a git repository; only a session in a repository with a remote can move", cwd)
 	}
 	if err != nil {
 		return moveCheckout{}, err
 	}
-	if repository.bare || repository.repository == nil {
-		return moveCheckout{}, fmt.Errorf("the repository at %s has no remote the other host could fetch from", repository.toplevel)
+	if repository.Bare || repository.Repository == nil {
+		return moveCheckout{}, fmt.Errorf("the repository at %s has no remote the other host could fetch from", repository.Toplevel)
 	}
-	canonical, err := canonicalCatalogPath(cwd)
+	canonical, err := projectresolve.CanonicalCatalogPath(cwd)
 	if err != nil {
 		return moveCheckout{}, err
 	}
-	rel, err := filepath.Rel(repository.toplevel, canonical)
+	rel, err := filepath.Rel(repository.Toplevel, canonical)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return moveCheckout{}, fmt.Errorf("%s is outside its repository %s", cwd, repository.toplevel)
+		return moveCheckout{}, fmt.Errorf("%s is outside its repository %s", cwd, repository.Toplevel)
 	}
-	status, err := catalogGit(ctx, repository.toplevel, "status", "--porcelain", "--untracked-files=normal")
+	status, err := projectresolve.CatalogGit(ctx, repository.Toplevel, "status", "--porcelain", "--untracked-files=normal")
 	if err != nil {
 		return moveCheckout{}, err
 	}
 	if strings.TrimSpace(status) != "" {
-		return moveCheckout{}, fmt.Errorf("the working tree at %s has uncommitted changes; commit and push them first", repository.toplevel)
+		return moveCheckout{}, fmt.Errorf("the working tree at %s has uncommitted changes; commit and push them first", repository.Toplevel)
 	}
-	commit, err := catalogGit(ctx, repository.toplevel, "rev-parse", "--verify", "HEAD^{commit}")
+	commit, err := projectresolve.CatalogGit(ctx, repository.Toplevel, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil {
 		return moveCheckout{}, err
 	}
-	remotes, err := catalogGit(ctx, repository.toplevel, "branch", "--remotes", "--contains", commit)
+	remotes, err := projectresolve.CatalogGit(ctx, repository.Toplevel, "branch", "--remotes", "--contains", commit)
 	if err != nil {
 		return moveCheckout{}, err
 	}
 	if strings.TrimSpace(remotes) == "" {
-		return moveCheckout{}, fmt.Errorf("commit %s at %s is on no remote branch; push it first", commit[:min(12, len(commit))], repository.toplevel)
+		return moveCheckout{}, fmt.Errorf("commit %s at %s is on no remote branch; push it first", commit[:min(12, len(commit))], repository.Toplevel)
 	}
-	branch, _ := catalogGit(ctx, repository.toplevel, "symbolic-ref", "--quiet", "--short", "HEAD")
-	checkout := moveCheckout{Repository: repository.repository.CanonicalKey, Path: filepath.ToSlash(rel), Commit: commit, Branch: branch}
+	branch, _ := projectresolve.CatalogGit(ctx, repository.Toplevel, "symbolic-ref", "--quiet", "--short", "HEAD")
+	checkout := moveCheckout{Repository: repository.Repository.CanonicalKey, Path: filepath.ToSlash(rel), Commit: commit, Branch: branch}
 	if checkout.Path == "." {
 		checkout.Path = ""
 	}
@@ -110,7 +112,7 @@ func (d *Daemon) repositoryCheckouts(ctx context.Context, canonical string) ([]s
 		if state.HostID != "" {
 			continue
 		}
-		var project CatalogProject
+		var project projectresolve.CatalogProject
 		if json.Unmarshal(state.Project, &project) == nil && project.RootPath != "" && project.Repository != nil && project.Repository.CanonicalKey == canonical {
 			candidates[project.RootPath] = true
 		}
@@ -120,13 +122,13 @@ func (d *Daemon) repositoryCheckouts(ctx context.Context, canonical string) ([]s
 		if info, err := os.Stat(candidate); err != nil || !info.IsDir() {
 			continue
 		}
-		gitCtx, cancel := context.WithTimeout(ctx, catalogIdentityGitTimeout)
-		repository, _, err := resolveCatalogRepository(gitCtx, candidate, nil)
+		gitCtx, cancel := context.WithTimeout(ctx, projectresolve.CatalogIdentityGitTimeout)
+		repository, _, err := projectresolve.ResolveCatalogRepository(gitCtx, candidate, nil)
 		cancel()
-		if err != nil || repository.bare || repository.repository == nil || repository.repository.CanonicalKey != canonical {
+		if err != nil || repository.Bare || repository.Repository == nil || repository.Repository.CanonicalKey != canonical {
 			continue
 		}
-		found[repository.mainRoot] = true
+		found[repository.MainRoot] = true
 	}
 	roots := make([]string, 0, len(found))
 	for root := range found {
@@ -166,17 +168,17 @@ func (d *Daemon) resolveMoveTarget(ctx context.Context, moveID string, checkout 
 		return moveTarget{}, fmt.Errorf("this host has more than one checkout of %s (%s)", checkout.Repository, strings.Join(roots, ", "))
 	}
 	main := roots[0]
-	if _, err := catalogGit(ctx, main, "cat-file", "-e", checkout.Commit+"^{commit}"); err != nil {
-		if _, fetchErr := catalogGit(ctx, main, "fetch", "--quiet", "--no-tags", "origin"); fetchErr != nil {
+	if _, err := projectresolve.CatalogGit(ctx, main, "cat-file", "-e", checkout.Commit+"^{commit}"); err != nil {
+		if _, fetchErr := projectresolve.CatalogGit(ctx, main, "fetch", "--quiet", "--no-tags", "origin"); fetchErr != nil {
 			return moveTarget{}, fmt.Errorf("fetch %s in %s: %w", checkout.Repository, main, fetchErr)
 		}
-		if _, err := catalogGit(ctx, main, "cat-file", "-e", checkout.Commit+"^{commit}"); err != nil {
+		if _, err := projectresolve.CatalogGit(ctx, main, "cat-file", "-e", checkout.Commit+"^{commit}"); err != nil {
 			return moveTarget{}, fmt.Errorf("commit %s is not in %s even after a fetch", checkout.Commit[:12], main)
 		}
 	}
 	target := moveTarget{main: main, checkout: main}
-	head, _ := catalogGit(ctx, main, "rev-parse", "--verify", "HEAD^{commit}")
-	status, statusErr := catalogGit(ctx, main, "status", "--porcelain", "--untracked-files=normal")
+	head, _ := projectresolve.CatalogGit(ctx, main, "rev-parse", "--verify", "HEAD^{commit}")
+	status, statusErr := projectresolve.CatalogGit(ctx, main, "status", "--porcelain", "--untracked-files=normal")
 	if head != checkout.Commit || statusErr != nil || strings.TrimSpace(status) != "" {
 		target.checkout = moveWorktreePath(main, moveID)
 		target.worktree = true
@@ -199,14 +201,14 @@ func ensureMoveCheckout(ctx context.Context, target moveTarget, checkout moveChe
 	defer cancel()
 	if target.worktree {
 		if _, err := os.Stat(target.checkout); err == nil {
-			head, err := catalogGit(ctx, target.checkout, "rev-parse", "--verify", "HEAD^{commit}")
+			head, err := projectresolve.CatalogGit(ctx, target.checkout, "rev-parse", "--verify", "HEAD^{commit}")
 			if err != nil || head != checkout.Commit {
 				return fmt.Errorf("%s exists and is not at commit %s", target.checkout, checkout.Commit[:12])
 			}
 		} else {
 			args := []string{"worktree", "add", "--quiet"}
 			if checkout.Branch != "" {
-				if _, err := catalogGit(ctx, target.main, "rev-parse", "--verify", "--quiet", "refs/heads/"+checkout.Branch); err != nil {
+				if _, err := projectresolve.CatalogGit(ctx, target.main, "rev-parse", "--verify", "--quiet", "refs/heads/"+checkout.Branch); err != nil {
 					args = append(args, "-b", checkout.Branch)
 				} else {
 					args = append(args, "--detach")
@@ -214,7 +216,7 @@ func ensureMoveCheckout(ctx context.Context, target moveTarget, checkout moveChe
 			} else {
 				args = append(args, "--detach")
 			}
-			if _, err := catalogGit(ctx, target.main, append(args, target.checkout, checkout.Commit)...); err != nil {
+			if _, err := projectresolve.CatalogGit(ctx, target.main, append(args, target.checkout, checkout.Commit)...); err != nil {
 				return fmt.Errorf("make a worktree for the session at %s: %w", target.checkout, err)
 			}
 		}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
@@ -135,7 +136,7 @@ func TestTheCoordinatorIsToldOnceEachTimeABacklogItemBecomesReady(t *testing.T) 
 	mac, _, _ := ledgerOnTwoHosts(t)
 	revisit := time.Now().Add(time.Hour)
 	id := parkedWork(t, mac, "after the release", ledger.Park{Kind: ledger.ParkLater, Why: "after the release", Revisit: revisit})
-	project := &CatalogProject{ID: widgetKey, Key: widgetKey}
+	project := &projectresolve.CatalogProject{ID: widgetKey, Key: widgetKey}
 
 	if line := mac.daemon.backlogReadyLine(t.Context(), "lead", project, time.Now()); line != "" {
 		t.Fatalf("told %q before the revisit date", line)

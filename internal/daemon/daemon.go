@@ -19,6 +19,7 @@ import (
 	"github.com/zm2231/agenthail/internal/github"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/notify"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/simhost"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -113,7 +114,7 @@ type Daemon struct {
 	// reads and writes; a session's waiting lock orders its row and entry.
 	catalogLiveMu     sync.Mutex
 	catalogLive       map[string]*catalogLiveSession
-	catalogIdentities *catalogIdentityCache
+	catalogIdentities *projectresolve.CatalogIdentityCache
 	repositoryKeys    repositoryKeyWatch
 	ledgerOnce        sync.Once
 	ledger            *ledger.Store
@@ -234,7 +235,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		sourceHolds:       map[string]map[string]func(){},
 		liveSources:       map[string]surface.SurfaceKind{},
 		catalogLive:       map[string]*catalogLiveSession{},
-		catalogIdentities: newCatalogIdentityCache(),
+		catalogIdentities: projectresolve.NewCatalogIdentityCache(),
 		catalogEnded:      newCatalogEnded(),
 		catalogNudge:      make(chan struct{}, 1),
 		observerNudge:     make(chan struct{}, 1),
@@ -283,8 +284,8 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 	}
 	d.catalog = newCatalogHub(reg)
 	d.decisions = newDecisionsRevision()
-	d.catalogIdentities.changed = d.requestCatalogDiscovery
-	d.catalogIdentities.observeRoot = d.observeRepositoryKey
+	d.catalogIdentities.Changed = d.requestCatalogDiscovery
+	d.catalogIdentities.ObserveRoot = d.observeRepositoryKey
 	if prompts := d.claudePrompts(); prompts != nil {
 		prompts.OnPromptChange(d.claudePromptChanged)
 	}
@@ -482,7 +483,7 @@ func (d *Daemon) runCatalog(ctx context.Context) {
 		d.runCatalogStatus(ctx)
 	}()
 	defer func() { <-statusDone }()
-	defer d.catalogIdentities.wait()
+	defer d.catalogIdentities.Wait()
 	wakes := newCatalogWakes(d.Surfaces, filewake.FollowDir)
 	defer wakes.close()
 	wakes.notify(ctx)

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -66,7 +67,7 @@ func TestRevisionRowsFollowStalenessAndGeneration(t *testing.T) {
 }
 
 func TestSearchFindsASessionByItsBranch(t *testing.T) {
-	row := dashboardSession{ID: "s1", Name: "task", Cwd: "/w/app", Checkout: &catalogCheckout{ID: "c1", Path: "/w/app/.worktrees/login", Branch: "Fix-Login"}}
+	row := dashboardSession{ID: "s1", Name: "task", Cwd: "/w/app", Checkout: &projectresolve.CatalogCheckout{ID: "c1", Path: "/w/app/.worktrees/login", Branch: "Fix-Login"}}
 	if !strings.Contains(presentationSearch(row), "fix-login") {
 		t.Fatalf("search text %q does not hold the branch", presentationSearch(row))
 	}

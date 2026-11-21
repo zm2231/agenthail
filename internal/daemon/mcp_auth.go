@@ -10,6 +10,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -19,7 +20,7 @@ type mcpCallerKey struct{}
 type mcpCaller struct {
 	credential   registry.SessionCredential
 	session      surface.Session
-	project      *CatalogProject
+	project      *projectresolve.CatalogProject
 	capabilities []string
 	ceiling      json.RawMessage
 	extension    string

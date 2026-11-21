@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -231,14 +232,14 @@ func (d *Daemon) restoreEndedSession(item catalogRestore, publish func(ended, re
 	return publish(ended, *session)
 }
 
-func (d *Daemon) discoverEndedSessions(ctx context.Context, adapter surface.Surface, keeper surface.EndedConversations, seen, hidden map[string]struct{}, observedAt time.Time, publish func(ended surface.Session, read *surface.Session, identity catalogIdentity) bool) error {
+func (d *Daemon) discoverEndedSessions(ctx context.Context, adapter surface.Surface, keeper surface.EndedConversations, seen, hidden map[string]struct{}, observedAt time.Time, publish func(ended surface.Session, read *surface.Session, identity projectresolve.CatalogIdentity) bool) error {
 	if err := d.recordEndedDiscovery(adapter.Name(), keeper, seen, hidden, observedAt); err != nil {
 		return err
 	}
 	d.restoreEndedSessions(adapter.Name(), keeper, seen, func(session, read surface.Session) bool {
 		identityCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
-		return publish(session, &read, d.catalogIdentities.identity(identityCtx, session, observedAt, func() *CatalogProject { return d.storedCatalogProject(session.ID) }))
+		return publish(session, &read, d.catalogIdentities.Identity(identityCtx, session, observedAt, func() *projectresolve.CatalogProject { return d.storedCatalogProject(session.ID) }))
 	})
 	return nil
 }

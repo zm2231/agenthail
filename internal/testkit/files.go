@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func AppendFile(t testing.TB, path string, content ...string) {
@@ -34,6 +35,18 @@ func WriteExecutable(t testing.TB, path, content string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// rewriteKeepingTime writes content over path and puts its modification time
+// back to at, as a same-size rewrite inside one timestamp tick leaves it.
+func RewriteKeepingTime(t testing.TB, path, content string, at time.Time) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, at, at); err != nil {
 		t.Fatal(err)
 	}
 }

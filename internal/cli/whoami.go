@@ -10,7 +10,7 @@ import (
 	"github.com/zm2231/agenthail/internal/agentcard"
 	"github.com/zm2231/agenthail/internal/agenttools"
 	"github.com/zm2231/agenthail/internal/claudehooks"
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/sessiontools"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -105,7 +105,7 @@ func (a *App) callerCard() (agentcard.Card, error) {
 }
 
 func (a *App) pathProject(ctx context.Context, cwd string) (*agentcard.Project, error) {
-	found, err := daemon.ResolvePathProject(ctx, a.registry(), cwd)
+	found, err := projectresolve.ResolvePathProject(ctx, a.registry(), cwd)
 	if err != nil || found == nil {
 		return nil, err
 	}
@@ -113,7 +113,7 @@ func (a *App) pathProject(ctx context.Context, cwd string) (*agentcard.Project, 
 }
 
 func (a *App) sessionProject(ctx context.Context, session surface.Session, project func(context.Context, string) (*agentcard.Project, error)) (string, string) {
-	if stored := daemon.StoredSessionProject(a.registry(), session.ID); stored != nil {
+	if stored := projectresolve.StoredSessionProject(a.registry(), session.ID); stored != nil {
 		return stored.ID, stored.DisplayName
 	}
 	if session.Cwd == "" {

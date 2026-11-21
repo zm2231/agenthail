@@ -12,6 +12,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/claudesurface"
@@ -103,7 +104,7 @@ func TestACreatedClaudeHostSessionReachesTheMCPServerAsItself(t *testing.T) {
 
 func (f *mcpClaudeFixture) addProject(t *testing.T) {
 	t.Helper()
-	root, err := canonicalCatalogPath(f.host.Cwd)
+	root, err := projectresolve.CanonicalCatalogPath(f.host.Cwd)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +160,7 @@ func TestAPersonsMessageThatStartsACoordinatorIsCapturedOnceAsTheirWords(t *test
 
 func startCoordinatorAndCapture(t *testing.T, order string) {
 	f := newMCPClaudeFixture(t)
-	root, err := canonicalCatalogPath(f.host.Cwd)
+	root, err := projectresolve.CanonicalCatalogPath(f.host.Cwd)
 	if err != nil {
 		t.Fatal(err)
 	}

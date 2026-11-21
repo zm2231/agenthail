@@ -11,15 +11,17 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func addFolderProject(t *testing.T, d *Daemon, path string) string {
 	t.Helper()
 	response := runDashboardAction(t, d, `{"action":"project-add","path":"`+path+`"}`)
 	var answer struct {
-		Project CatalogProject `json:"project"`
+		Project projectresolve.CatalogProject `json:"project"`
 	}
 	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &answer) != nil || answer.Project.LocalID == "" {
 		t.Fatalf("project-add %s: %d %s", path, response.Code, response.Body)
@@ -33,7 +35,7 @@ func plainFolder(t *testing.T) string {
 	if err := os.MkdirAll(folder, 0700); err != nil {
 		t.Fatal(err)
 	}
-	canonical, err := canonicalCatalogPath(folder)
+	canonical, err := projectresolve.CanonicalCatalogPath(folder)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +53,7 @@ func folderSession(t *testing.T, r *registry.Registry, id, cwd string) surface.S
 
 func ledgerKeyAt(t *testing.T, r *registry.Registry, path string) string {
 	t.Helper()
-	key, err := ResolvePathLedgerKey(context.Background(), r, path)
+	key, err := projectresolve.ResolvePathLedgerKey(context.Background(), r, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,8 +81,8 @@ func TestAFolderWithoutAUsableRemoteKeepsALedgerUnderItsProjectID(t *testing.T) 
 	for name, folder := range map[string]func(t *testing.T) string{
 		"no git": plainFolder,
 		"file remote": func(t *testing.T) string {
-			repo := catalogTestRepo(t)
-			gitRun(t, repo, "remote", "add", "origin", "/srv/git/notes.git")
+			repo := testkit.GitRepo(t)
+			testkit.Git(t, repo, "remote", "add", "origin", "/srv/git/notes.git")
 			return repo
 		},
 	} {
@@ -109,8 +111,8 @@ func TestAFolderWithoutAUsableRemoteKeepsALedgerUnderItsProjectID(t *testing.T) 
 
 func TestAKeylessLedgerStaysPutWhenItsFolderGainsARemote(t *testing.T) {
 	d, r, handler := ledgerDaemon(t)
-	path := catalogTestRepo(t)
-	gitRun(t, path, "remote", "add", "origin", "/srv/git/notes.git")
+	path := testkit.GitRepo(t)
+	testkit.Git(t, path, "remote", "add", "origin", "/srv/git/notes.git")
 	id := addFolderProject(t, d, path)
 	key := ledgerKeyAt(t, r, path)
 	store := ledger.NewStore(r.WriteDB(), r.ReadDB())
@@ -120,13 +122,13 @@ func TestAKeylessLedgerStaysPutWhenItsFolderGainsARemote(t *testing.T) {
 	s := folderSession(t, r, "worker", path)
 	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: s.ID, PromptID: "p1", Prompt: "before the remote"})
 
-	gitRun(t, path, "remote", "set-url", "origin", "https://github.com/example/notes.git")
+	testkit.Git(t, path, "remote", "set-url", "origin", "https://github.com/example/notes.git")
 	records, err := r.ListProjects()
 	if err != nil {
 		t.Fatal(err)
 	}
 	d.refreshProjectRepositories(context.Background(), records, time.Now())
-	if project, err := ResolvePathProject(context.Background(), r, path); err != nil || project.Key != "repo:github.com/example/notes" {
+	if project, err := projectresolve.ResolvePathProject(context.Background(), r, path); err != nil || project.Key != "repo:github.com/example/notes" {
 		t.Fatalf("the project did not take its new remote: %+v %v", project, err)
 	}
 
@@ -155,7 +157,7 @@ func TestRemovingAFolderKeepsItsLedgerForWhenItIsAddedAgain(t *testing.T) {
 	if response := runDashboardAction(t, d, `{"action":"project-remove","projectId":"`+id+`"}`); response.Code != http.StatusOK {
 		t.Fatalf("remove: %d %s", response.Code, response.Body)
 	}
-	if _, err := ResolvePathLedgerKey(context.Background(), r, path); err == nil || !strings.Contains(err.Error(), key) {
+	if _, err := projectresolve.ResolvePathLedgerKey(context.Background(), r, path); err == nil || !strings.Contains(err.Error(), key) {
 		t.Fatalf("a removed folder's ledger is not named: %v", err)
 	}
 	if again := addFolderProject(t, d, path); again != id {
@@ -199,14 +201,14 @@ func TestALinkNeverLeavesAKeylessLedgerBehind(t *testing.T) {
 
 func TestALinkFindsAKeylessLedgerUnderTheRemoteItsProjectGained(t *testing.T) {
 	d, r, _ := ledgerDaemon(t)
-	path := catalogTestRepo(t)
-	gitRun(t, path, "remote", "add", "origin", "/srv/git/notes.git")
+	path := testkit.GitRepo(t)
+	testkit.Git(t, path, "remote", "add", "origin", "/srv/git/notes.git")
 	addFolderProject(t, d, path)
 	other := addFolderProject(t, d, plainFolder(t))
 	if err := ledger.NewStore(r.WriteDB(), r.ReadDB()).Enable(ledgerKeyAt(t, r, path), ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, path, "remote", "set-url", "origin", "https://github.com/example/notes.git")
+	testkit.Git(t, path, "remote", "set-url", "origin", "https://github.com/example/notes.git")
 	records, err := r.ListProjects()
 	if err != nil {
 		t.Fatal(err)
@@ -244,8 +246,8 @@ func TestASessionInAKeylessProjectReadsItsLedgerOverMCP(t *testing.T) {
 
 func TestAGrantAloneKeepsAKeylessProjectsLedger(t *testing.T) {
 	d, r, handler := ledgerDaemon(t)
-	path := catalogTestRepo(t)
-	gitRun(t, path, "remote", "add", "origin", "/srv/git/notes.git")
+	path := testkit.GitRepo(t)
+	testkit.Git(t, path, "remote", "add", "origin", "/srv/git/notes.git")
 	id := addFolderProject(t, d, path)
 	key := ledgerKeyAt(t, r, path)
 	folderSession(t, r, "worker", path)
@@ -253,7 +255,7 @@ func TestAGrantAloneKeepsAKeylessProjectsLedger(t *testing.T) {
 		t.Fatalf("grant: %d %s", code, body)
 	}
 
-	gitRun(t, path, "remote", "set-url", "origin", "https://github.com/example/notes.git")
+	testkit.Git(t, path, "remote", "set-url", "origin", "https://github.com/example/notes.git")
 	records, err := r.ListProjects()
 	if err != nil {
 		t.Fatal(err)
@@ -265,7 +267,7 @@ func TestAGrantAloneKeepsAKeylessProjectsLedger(t *testing.T) {
 	if response := runDashboardAction(t, d, `{"action":"project-remove","projectId":"`+id+`"}`); response.Code != http.StatusOK {
 		t.Fatalf("remove: %d %s", response.Code, response.Body)
 	}
-	if _, err := ResolvePathLedgerKey(context.Background(), r, path); err == nil || !strings.Contains(err.Error(), key) {
+	if _, err := projectresolve.ResolvePathLedgerKey(context.Background(), r, path); err == nil || !strings.Contains(err.Error(), key) {
 		t.Fatalf("the removed folder resolves without naming its kept ledger: %v", err)
 	}
 	if again := addFolderProject(t, d, path); again != id || ledgerKeyAt(t, r, path) != key {
@@ -279,7 +281,7 @@ func TestAGrantAloneKeepsAKeylessProjectsLedger(t *testing.T) {
 
 func gainRemote(t *testing.T, d *Daemon, r *registry.Registry, repo string) {
 	t.Helper()
-	gitRun(t, repo, "remote", "set-url", "origin", "https://github.com/example/notes.git")
+	testkit.Git(t, repo, "remote", "set-url", "origin", "https://github.com/example/notes.git")
 	records, err := r.ListProjects()
 	if err != nil {
 		t.Fatal(err)
@@ -289,8 +291,8 @@ func gainRemote(t *testing.T, d *Daemon, r *registry.Registry, repo string) {
 
 func TestARemovedSubfolderOfARepositoryNamesItsKeptLedger(t *testing.T) {
 	d, r, _ := ledgerDaemon(t)
-	repo := catalogTestRepo(t)
-	gitRun(t, repo, "remote", "add", "origin", "/srv/git/notes.git")
+	repo := testkit.GitRepo(t)
+	testkit.Git(t, repo, "remote", "add", "origin", "/srv/git/notes.git")
 	sub := filepath.Join(repo, "docs")
 	if err := os.MkdirAll(sub, 0700); err != nil {
 		t.Fatal(err)
@@ -304,7 +306,7 @@ func TestARemovedSubfolderOfARepositoryNamesItsKeptLedger(t *testing.T) {
 	if response := runDashboardAction(t, d, `{"action":"project-remove","projectId":"`+id+`"}`); response.Code != http.StatusOK {
 		t.Fatalf("remove: %d %s", response.Code, response.Body)
 	}
-	if _, err := ResolvePathLedgerKey(context.Background(), r, sub); err == nil || !strings.Contains(err.Error(), key) {
+	if _, err := projectresolve.ResolvePathLedgerKey(context.Background(), r, sub); err == nil || !strings.Contains(err.Error(), key) {
 		t.Fatalf("the removed subfolder resolves without naming its kept ledger: %v", err)
 	}
 	if again := addFolderProject(t, d, sub); again != id || ledgerKeyAt(t, r, sub) != key {
@@ -314,8 +316,8 @@ func TestARemovedSubfolderOfARepositoryNamesItsKeptLedger(t *testing.T) {
 
 func TestRemovingAProjectLeavesItsRepositorysOtherCheckoutsTheirLedger(t *testing.T) {
 	d, r, _ := ledgerDaemon(t)
-	repo := catalogTestRepo(t)
-	gitRun(t, repo, "remote", "add", "origin", "/srv/git/notes.git")
+	repo := testkit.GitRepo(t)
+	testkit.Git(t, repo, "remote", "add", "origin", "/srv/git/notes.git")
 	id := addFolderProject(t, d, repo)
 	key := ledgerKeyAt(t, r, repo)
 	store := ledger.NewStore(r.WriteDB(), r.ReadDB())
@@ -327,8 +329,8 @@ func TestRemovingAProjectLeavesItsRepositorysOtherCheckoutsTheirLedger(t *testin
 		t.Fatalf("remove: %d %s", response.Code, response.Body)
 	}
 	checkout := filepath.Join(t.TempDir(), "other")
-	gitRun(t, repo, "worktree", "add", "-q", checkout)
-	checkout, err := canonicalCatalogPath(checkout)
+	testkit.Git(t, repo, "worktree", "add", "-q", checkout)
+	checkout, err := projectresolve.CanonicalCatalogPath(checkout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +341,7 @@ func TestRemovingAProjectLeavesItsRepositorysOtherCheckoutsTheirLedger(t *testin
 	if err != nil || len(targets) != 1 || targets[0].key != "repo:github.com/example/notes" {
 		t.Fatalf("another checkout's session writes to %+v %v", targets, err)
 	}
-	if _, err := ResolvePathLedgerKey(context.Background(), r, repo); err == nil || !strings.Contains(err.Error(), key) {
+	if _, err := projectresolve.ResolvePathLedgerKey(context.Background(), r, repo); err == nil || !strings.Contains(err.Error(), key) {
 		t.Fatalf("the removed checkout does not name its kept ledger: %v", err)
 	}
 }

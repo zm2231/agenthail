@@ -8,13 +8,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func (f *mcpCodexFixture) startParent(t *testing.T) (string, string, string) {
 	t.Helper()
-	root, err := canonicalCatalogPath(t.TempDir())
+	root, err := projectresolve.CanonicalCatalogPath(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

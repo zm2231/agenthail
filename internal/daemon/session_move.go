@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -792,7 +793,7 @@ func (d *Daemon) removeMoveWorktree(ctx context.Context, move registry.SessionMo
 	if _, err := os.Stat(worktree); err != nil {
 		return
 	}
-	if _, err := catalogGit(ctx, roots[0], "worktree", "remove", worktree); err != nil {
+	if _, err := projectresolve.CatalogGit(ctx, roots[0], "worktree", "remove", worktree); err != nil {
 		d.log.Printf("move %s: keep worktree %s: %s", move.ID, worktree, err)
 	}
 }
@@ -1034,7 +1035,7 @@ type movedLeadPlace struct {
 }
 
 func (d *Daemon) movedCoordinatorPlace(ctx context.Context, cwd string) (movedLeadPlace, error) {
-	project, err := ResolvePathProject(ctx, d.Registry, cwd)
+	project, err := projectresolve.ResolvePathProject(ctx, d.Registry, cwd)
 	if err != nil {
 		return movedLeadPlace{}, err
 	}

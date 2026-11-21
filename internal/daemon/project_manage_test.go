@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
@@ -37,8 +38,8 @@ func TestProjectAddAndRenameRepeatSafelyAndAnswerWithTypedErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	type answer struct {
-		Project CatalogProject `json:"project"`
-		Created bool           `json:"created"`
+		Project projectresolve.CatalogProject `json:"project"`
+		Created bool                          `json:"created"`
 	}
 	add := func(body string) (answer, *httptest.ResponseRecorder) {
 		t.Helper()
@@ -204,7 +205,7 @@ func TestFederationAddsAndRemovesAProjectOnTheHostItNames(t *testing.T) {
 	}
 	added := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-add", "host": "vps", "path": cwd, "title": "Server work"})
 	var answer struct {
-		Project CatalogProject `json:"project"`
+		Project projectresolve.CatalogProject `json:"project"`
 	}
 	if added.Code != http.StatusOK || json.Unmarshal(added.Body.Bytes(), &answer) != nil {
 		t.Fatalf("add: %d %s", added.Code, added.Body)
@@ -232,7 +233,7 @@ func TestFederationAddsAndRemovesAProjectOnTheHostItNames(t *testing.T) {
 
 func TestFederationRenamesOneRepositoryProjectOnEveryHost(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	upstream := catalogTestRepo(t)
+	upstream := testkit.GitRepo(t)
 	remote := newFederationNode(t, "remote-a", "remote-b")
 	moveSessions(t, remote, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "vps-gadget")), "src"))
 	remote.serve(t, nil)

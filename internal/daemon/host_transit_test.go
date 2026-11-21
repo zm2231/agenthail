@@ -143,7 +143,7 @@ func (movableSurface) DropMoveIn(context.Context, string, string, func() error, 
 
 func TestAPairedHostCannotMoveASessionToAThirdHost(t *testing.T) {
 	h := pairThreeHosts(t)
-	moveSession(t, h.middle, "local-a", cloneAt(t, catalogTestRepo(t), filepath.Join(t.TempDir(), "widget")), time.Now())
+	moveSession(t, h.middle, "local-a", cloneAt(t, testkit.GitRepo(t), filepath.Join(t.TempDir(), "widget")), time.Now())
 	h.middle.daemon.Surfaces = []surface.Surface{movableSurface{h.middle.fake}}
 	status, body := h.ask(t, http.MethodPost, "/api/v1/session-moves", nil, map[string]any{"sessionId": "local-a", "host": "vps"})
 	refusedInTransit(t, "a move to the third host", status, body)

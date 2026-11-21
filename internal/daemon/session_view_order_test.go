@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemonapi"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -18,7 +19,7 @@ type orderFixture struct {
 
 func newOrderFixture() *orderFixture {
 	f := &orderFixture{now: time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC), rows: map[string]*dashboardSession{}}
-	projects := []*CatalogProject{{ID: "p-beta", DisplayName: "beta"}, {ID: "p-alpha", DisplayName: "Alpha"}, {ID: "p-gamma", DisplayName: "gamma"}}
+	projects := []*projectresolve.CatalogProject{{ID: "p-beta", DisplayName: "beta"}, {ID: "p-alpha", DisplayName: "Alpha"}, {ID: "p-gamma", DisplayName: "gamma"}}
 	for i := range 18 {
 		project := projects[i%3]
 		row := &dashboardSession{ID: fmt.Sprintf("s%02d", i), Surface: surface.KindClaude, Project: project, Status: surface.StatusIdle, RegisteredAt: f.now.Add(-time.Duration(30+i) * time.Hour), LastActive: f.now.Add(-time.Duration(2+i) * time.Hour)}

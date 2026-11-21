@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/codextest"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -134,7 +135,7 @@ func TestAResumedCodexThreadKeepsItsCredentialWhileTheDaemonHoldsIt(t *testing.T
 func TestACodexCoordinatorStartedByItsFirstMessageStartsWithItsLeadCredential(t *testing.T) {
 	fixture := newMCPCodexFixture(t)
 	cwd := t.TempDir()
-	root, err := canonicalCatalogPath(cwd)
+	root, err := projectresolve.CanonicalCatalogPath(cwd)
 	if err != nil {
 		t.Fatal(err)
 	}

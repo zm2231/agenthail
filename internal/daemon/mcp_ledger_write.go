@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -21,7 +22,7 @@ func (d *Daemon) mcpLedgerWrite(ctx context.Context, caller *mcpCaller, input mc
 	if !caller.has("ledger.write") {
 		return nil, refuse("capability_missing", "Writing the ledger needs ledger.write.")
 	}
-	projectKey, err := LedgerKey(d.Registry, caller.project)
+	projectKey, err := projectresolve.LedgerKey(d.Registry, caller.project)
 	if err != nil {
 		return nil, err
 	}

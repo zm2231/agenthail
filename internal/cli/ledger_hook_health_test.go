@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudehooks"
-	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -160,7 +160,7 @@ func TestAnUnresolvedFolderKeepsTheProblemAndFailsDoctor(t *testing.T) {
 		t.Fatal(err)
 	}
 	resolve := resolveSessionProject
-	resolveSessionProject = func(ctx context.Context, r *registry.Registry, path string) (*daemon.CatalogProject, error) {
+	resolveSessionProject = func(ctx context.Context, r *registry.Registry, path string) (*projectresolve.CatalogProject, error) {
 		if path == unknown {
 			return nil, errors.New("repository identity is unavailable")
 		}

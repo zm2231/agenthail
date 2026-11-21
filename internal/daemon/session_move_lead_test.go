@@ -14,6 +14,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
@@ -271,9 +272,9 @@ func listedSequence(samples []leadSample, host string, names map[string]string) 
 
 // leadOn makes a movable session on a the lead of its repository's project,
 // which b knows by the same repository, and waits until every host sees it.
-func leadOn(t *testing.T, a, b, c *moveNode) (*CatalogProject, *surface.Session, time.Time) {
+func leadOn(t *testing.T, a, b, c *moveNode) (*projectresolve.CatalogProject, *surface.Session, time.Time) {
 	t.Helper()
-	project, err := ResolvePathProject(context.Background(), a.reg, a.host.Cwd)
+	project, err := projectresolve.ResolvePathProject(context.Background(), a.reg, a.host.Cwd)
 	if err != nil || project == nil || !strings.HasPrefix(project.ID, hosts.RepositoryPrefix) {
 		t.Fatalf("the source's project is %+v err=%v, want a repository's", project, err)
 	}
@@ -334,7 +335,7 @@ func TestATargetThatCannotTakeTheLeadLeavesTheLeadWhereItWas(t *testing.T) {
 	source, target := newMoveNode(t), newMoveNode(t)
 	target.handler = withoutCarries(target.handler)
 	moveBothWays(t, source, target)
-	project, err := ResolvePathProject(context.Background(), source.reg, source.host.Cwd)
+	project, err := projectresolve.ResolvePathProject(context.Background(), source.reg, source.host.Cwd)
 	if err != nil || project == nil {
 		t.Fatalf("the source's project is %+v err=%v", project, err)
 	}

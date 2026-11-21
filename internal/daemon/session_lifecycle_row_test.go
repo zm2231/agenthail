@@ -11,6 +11,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/dashconfig"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
@@ -37,7 +38,7 @@ func TestSessionRowReportsTheLifecycleItsRuntimeSupports(t *testing.T) {
 		{surface.RuntimeClaudeBackground, "", map[string]bool{"status": true, "logs": true, "stop": true, "resume": true, "adopt": true}},
 	} {
 		runtime, want := tc.runtime, tc.want
-		row := d.catalogSessionProjection(adapter, surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: runtime, Transport: "uds", Transcript: tc.transcript, HasLocal: tc.transcript != ""}, catalogIdentity{}, time.Now(), "", 0, nil, false, false, dashconfig.Config{})
+		row := d.catalogSessionProjection(adapter, surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: runtime, Transport: "uds", Transcript: tc.transcript, HasLocal: tc.transcript != ""}, projectresolve.CatalogIdentity{}, time.Now(), "", 0, nil, false, false, dashconfig.Config{})
 		data, err := json.Marshal(row)
 		if err != nil {
 			t.Fatal(err)

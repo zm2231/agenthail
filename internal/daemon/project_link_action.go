@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -26,7 +27,7 @@ func (d *Daemon) doProjectLink(request projectRequest) (actionResult, error) {
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
 	}
-	name := func(id string) string { return projectIDName(id, records) }
+	name := func(id string) string { return projectresolve.ProjectIDName(id, records) }
 	if current, found := links[joined]; found && current.Linked {
 		if current.Survivor == survivor {
 			return projectLinkReply(current, false), nil
@@ -73,7 +74,7 @@ func (d *Daemon) doProjectUnlink(request projectRequest) (actionResult, error) {
 	}
 	current, found := links[request.ProjectID]
 	if !found || !current.Linked {
-		return actionResult{}, actionFailed(http.StatusConflict, "project_not_linked", fmt.Sprintf("%s is not linked into another project", projectIDName(request.ProjectID, records)))
+		return actionResult{}, actionFailed(http.StatusConflict, "project_not_linked", fmt.Sprintf("%s is not linked into another project", projectresolve.ProjectIDName(request.ProjectID, records)))
 	}
 	link, err := d.Registry.SetProjectLink(current.Joined, current.Survivor, false)
 	if err != nil {

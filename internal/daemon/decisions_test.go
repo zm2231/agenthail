@@ -6,13 +6,14 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemonapi"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
 var decisionStart = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 
 func decisionRow(id, kind string, minute int) dashboardSession {
-	row := dashboardSession{ID: id, Display: &daemonapi.SessionDisplay{Kind: "idle"}, Project: &CatalogProject{ID: "web-app"}, LastActive: decisionStart.Add(time.Duration(minute) * time.Minute)}
+	row := dashboardSession{ID: id, Display: &daemonapi.SessionDisplay{Kind: "idle"}, Project: &projectresolve.CatalogProject{ID: "web-app"}, LastActive: decisionStart.Add(time.Duration(minute) * time.Minute)}
 	if kind == "" {
 		return row
 	}

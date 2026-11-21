@@ -13,6 +13,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/dashconfig"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sse"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -350,7 +351,7 @@ func writeCatalogStreamEntry(w http.ResponseWriter, event registry.CatalogEvent)
 type catalogLiveSession struct {
 	adapter  surface.Surface
 	session  surface.Session
-	identity catalogIdentity
+	identity projectresolve.CatalogIdentity
 	alias    string
 	open     bool
 	files    []string
@@ -397,7 +398,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 		d.log.Printf("catalog projects: %s", err)
 	} else {
 		d.refreshProjectRepositories(ctx, projects, time.Now())
-		d.catalogIdentities.setProjects(projects)
+		d.catalogIdentities.SetProjects(projects)
 	}
 	if err := d.refreshProjectLinks(); err != nil {
 		d.log.Printf("catalog project links: %s", err)
@@ -474,7 +475,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 			}
 			seen[session.ID] = struct{}{}
 			identityCtx, identityCancel := context.WithTimeout(ctx, 3*time.Second)
-			identity := d.catalogIdentities.identity(identityCtx, session, observedAt, func() *CatalogProject { return d.storedCatalogProject(session.ID) })
+			identity := d.catalogIdentities.Identity(identityCtx, session, observedAt, func() *projectresolve.CatalogProject { return d.storedCatalogProject(session.ID) })
 			identityCancel()
 			open := openSessions[session.ID]
 			alias := aliasByID[session.ID]
@@ -504,7 +505,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 		d.followLiveSessions(adapter.Name(), sessions, openSessions, complete)
 		var recordErr error
 		if keeper, keeps := adapter.(surface.EndedConversations); keeps && complete {
-			recordErr = d.discoverEndedSessions(ctx, adapter, keeper, seen, hidden, observedAt, func(session surface.Session, read *surface.Session, identity catalogIdentity) bool {
+			recordErr = d.discoverEndedSessions(ctx, adapter, keeper, seen, hidden, observedAt, func(session surface.Session, read *surface.Session, identity projectresolve.CatalogIdentity) bool {
 				restore := &registry.SessionUpdate{From: *read, Owns: registry.SessionActivityFields | registry.SessionProcessFields, Guard: registry.AllSessionFields}
 				return d.publishCatalogSession(ctx, adapter, session, restore, identity, aliasByID[session.ID], counts[session.ID], limits[session.ID], false, config, view, observedAt, nil, nil)
 			})
@@ -516,7 +517,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 		}
 		d.publishSurfaceHealth(health, time.Now().UTC())
 	}
-	d.catalogIdentities.prune(time.Now())
+	d.catalogIdentities.Prune(time.Now())
 	d.publishUnarchivedProjects()
 	d.publishProjectMoves()
 }
@@ -668,7 +669,7 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 // Under the session's waiting lock, check, when set, runs before the row is
 // written and stops the write when it fails, and done, when set, runs last
 // with whether the row committed.
-func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surface, session surface.Session, update *registry.SessionUpdate, identity catalogIdentity, alias string, queueCount int, limitResume *dashboardLimitResume, open bool, config dashconfig.Config, view catalogViewState, observedAt time.Time, check func() bool, done func(committed bool)) (committed bool) {
+func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surface, session surface.Session, update *registry.SessionUpdate, identity projectresolve.CatalogIdentity, alias string, queueCount int, limitResume *dashboardLimitResume, open bool, config dashconfig.Config, view catalogViewState, observedAt time.Time, check func() bool, done func(committed bool)) (committed bool) {
 	defer d.lockWaiting(session.ID)()
 	if done != nil {
 		defer func() { done(committed) }()
@@ -1098,24 +1099,11 @@ func (d *Daemon) correlateObservedTerminalLaunches(ctx context.Context, sessions
 	}
 }
 
-func (d *Daemon) storedCatalogProject(sessionID string) *CatalogProject {
-	return StoredSessionProject(d.Registry, sessionID)
+func (d *Daemon) storedCatalogProject(sessionID string) *projectresolve.CatalogProject {
+	return projectresolve.StoredSessionProject(d.Registry, sessionID)
 }
 
-// The stored project survives a transient git failure, as the daemon's own resolution does.
-func StoredSessionProject(reg *registry.Registry, sessionID string) *CatalogProject {
-	raw, _, err := reg.CatalogSessionProject(sessionID)
-	if err != nil || len(raw) == 0 {
-		return nil
-	}
-	var project *CatalogProject
-	if json.Unmarshal(raw, &project) != nil || project == nil || project.ID == "" || project.LocalID == "" {
-		return nil
-	}
-	return project
-}
-
-func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surface.Session, identity catalogIdentity, observedAt time.Time, alias string, queueCount int, limitResume *dashboardLimitResume, open, lead bool, config dashconfig.Config) dashboardSession {
+func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surface.Session, identity projectresolve.CatalogIdentity, observedAt time.Time, alias string, queueCount int, limitResume *dashboardLimitResume, open, lead bool, config dashconfig.Config) dashboardSession {
 	if session.Runtime == nil {
 		session.Runtime = &surface.Runtime{Launcher: surface.LauncherExternal, Focusable: false}
 	}

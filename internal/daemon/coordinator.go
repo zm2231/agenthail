@@ -17,6 +17,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/delivery"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -254,8 +255,8 @@ func (d *Daemon) sendToCoordinator(ctx context.Context, request coordinatorReque
 	return actionOK(reply), nil
 }
 
-func (d *Daemon) coordinatorProject(ctx context.Context, folder string) (*CatalogProject, error) {
-	project, err := ResolvePathProject(ctx, d.Registry, folder)
+func (d *Daemon) coordinatorProject(ctx context.Context, folder string) (*projectresolve.CatalogProject, error) {
+	project, err := projectresolve.ResolvePathProject(ctx, d.Registry, folder)
 	if err != nil {
 		return nil, invalidRequest(fmt.Sprintf("find the project of %s: %s", folder, err))
 	}
@@ -265,7 +266,7 @@ func (d *Daemon) coordinatorProject(ctx context.Context, folder string) (*Catalo
 	return project, nil
 }
 
-func (d *Daemon) coordinatorSpec(request coordinatorRequest, project *CatalogProject, agent, cwd, model string) (registry.CoordinatorSpec, error) {
+func (d *Daemon) coordinatorSpec(request coordinatorRequest, project *projectresolve.CatalogProject, agent, cwd, model string) (registry.CoordinatorSpec, error) {
 	name := strings.TrimPrefix(strings.TrimSpace(request.Name), "@")
 	if name == "" {
 		name = DefaultCoordinatorName(project.DisplayName)

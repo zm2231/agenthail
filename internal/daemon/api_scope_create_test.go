@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/daemonapi"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 )
 
 func TestAnAgentsCLIStartsRacingForTheLastSlotStartOneSession(t *testing.T) {
@@ -47,7 +48,7 @@ func TestAnAgentsCLIStartIsBoundedByItsCeiling(t *testing.T) {
 	if bounds, _ := parseCeiling(ceiling); err != nil || len(bounds.Roots) != 1 || bounds.Roots[0] != root || bounds.Permission != "full" {
 		t.Fatalf("the child's ceiling=%s err=%v", ceiling, err)
 	}
-	elsewhere, err := canonicalCatalogPath(t.TempDir())
+	elsewhere, err := projectresolve.CanonicalCatalogPath(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -198,7 +198,7 @@ func (a *App) filterQueueRows(ctx context.Context, rows []registry.QueueRow, tar
 		return nil, fmt.Errorf("choose either --cwd or --project")
 	}
 	if projectSelector != "" || cwd != "" {
-		projects, err := daemon.CatalogSessionProjects(a.registry())
+		projects, err := projectresolve.CatalogSessionProjects(a.registry())
 		if err != nil {
 			return nil, err
 		}

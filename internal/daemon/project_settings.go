@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -21,7 +22,7 @@ func (d *Daemon) doProjectSetting(request projectRequest) (actionResult, error) 
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
 	}
 	if link, found := links[request.ProjectID]; found && link.Linked {
-		return actionResult{}, actionFailed(http.StatusConflict, "project_linked", fmt.Sprintf("%s is linked into %s, whose settings it follows; set it there", projectIDName(link.Joined, records), projectIDName(link.Survivor, records)))
+		return actionResult{}, actionFailed(http.StatusConflict, "project_linked", fmt.Sprintf("%s is linked into %s, whose settings it follows; set it there", projectresolve.ProjectIDName(link.Joined, records), projectresolve.ProjectIDName(link.Survivor, records)))
 	}
 	setting, err := d.Registry.SetProjectSetting(request.ProjectID, request.Setting, request.Value)
 	if err != nil {
@@ -31,7 +32,7 @@ func (d *Daemon) doProjectSetting(request projectRequest) (actionResult, error) 
 	return actionOK(map[string]any{"ok": true, "setting": map[string]any{"project": setting.Project, "name": setting.Name, "value": setting.Value}}), nil
 }
 
-func (d *Daemon) projectToolsOff(project *CatalogProject) bool {
+func (d *Daemon) projectToolsOff(project *projectresolve.CatalogProject) bool {
 	if project == nil {
 		return false
 	}

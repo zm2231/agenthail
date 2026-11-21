@@ -9,6 +9,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 )
 
 type mcpLedgerInput struct {
@@ -23,7 +24,7 @@ func (d *Daemon) mcpLedgerRead(_ context.Context, caller *mcpCaller, input mcpLe
 	if !caller.has("ledger.read") {
 		return nil, refuse("capability_missing", "Reading the ledger needs ledger.read.")
 	}
-	key, err := LedgerKey(d.Registry, caller.project)
+	key, err := projectresolve.LedgerKey(d.Registry, caller.project)
 	if err != nil {
 		return nil, err
 	}

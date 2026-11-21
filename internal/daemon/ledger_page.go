@@ -13,6 +13,7 @@ import (
 	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sse"
 )
@@ -94,11 +95,11 @@ func (d *Daemon) ledgerPageTarget(projectID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return LedgerKey(d.Registry, found)
+	return projectresolve.LedgerKey(d.Registry, found)
 }
 
-func (d *Daemon) catalogProjectOf(projectID string) (*CatalogProject, error) {
-	links, err := loadProjectLinks(d.Registry)
+func (d *Daemon) catalogProjectOf(projectID string) (*projectresolve.CatalogProject, error) {
+	links, err := projectresolve.LoadProjectLinks(d.Registry)
 	if err != nil {
 		return nil, err
 	}
@@ -106,9 +107,9 @@ func (d *Daemon) catalogProjectOf(projectID string) (*CatalogProject, error) {
 	if err != nil {
 		return nil, err
 	}
-	var found CatalogProject
+	var found projectresolve.CatalogProject
 	if len(raw) > 0 && json.Unmarshal(raw, &found) == nil && found.ID != "" {
-		return links.apply(&found), nil
+		return links.Apply(&found), nil
 	}
 	coordinators, err := d.Registry.LocalCoordinators()
 	if err != nil {
@@ -116,10 +117,10 @@ func (d *Daemon) catalogProjectOf(projectID string) (*CatalogProject, error) {
 	}
 	for _, spec := range coordinators {
 		if lead := coordinatorCatalogProject(spec); lead.LocalID == projectID {
-			return links.apply(lead), nil
+			return links.Apply(lead), nil
 		}
 	}
-	return &CatalogProject{ID: projectID, Key: projectID}, nil
+	return &projectresolve.CatalogProject{ID: projectID, Key: projectID}, nil
 }
 
 // A project with nothing recorded yet reads as an empty ledger, not an error.

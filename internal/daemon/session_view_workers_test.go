@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemonapi"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -18,7 +19,7 @@ func newWorkerFixture() *workerFixture {
 }
 
 func (f *workerFixture) add(id, startedBy, checkout string, edit ...func(*dashboardSession)) {
-	row := dashboardSession{ID: id, Surface: surface.KindCodex, Status: surface.StatusIdle, StartedBy: startedBy, Project: &CatalogProject{ID: "project", DisplayName: "Project"}, Checkout: &catalogCheckout{ID: checkout}, LastActive: f.now.Add(-time.Minute), RegisteredAt: f.now.Add(-time.Hour)}
+	row := dashboardSession{ID: id, Surface: surface.KindCodex, Status: surface.StatusIdle, StartedBy: startedBy, Project: &projectresolve.CatalogProject{ID: "project", DisplayName: "Project"}, Checkout: &projectresolve.CatalogCheckout{ID: checkout}, LastActive: f.now.Add(-time.Minute), RegisteredAt: f.now.Add(-time.Hour)}
 	for _, e := range edit {
 		e(&row)
 	}

@@ -46,7 +46,7 @@ func TestALeadReplacedByAnotherSessionHandsItsRelaysToTheNewLead(t *testing.T) {
 
 func TestALeadReplacedFromAPairedHostHandsItsRelaysToTheNewLeadOnBothHosts(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	upstream := catalogTestRepo(t)
+	upstream := testkit.GitRepo(t)
 	laptop := newFederationNode(t, "laptop-a", "laptop-b")
 	vps := newFederationNode(t, "vps-a", "vps-b")
 	moveSessions(t, laptop, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "laptop-gadget")), "src"))
@@ -92,7 +92,7 @@ func TestALeadReplacedFromAPairedHostHandsItsRelaysToTheNewLeadOnBothHosts(t *te
 
 func TestAReplaceThatFailsOnALaterPairedHostMovesNoEarlierHostsRelays(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	upstream := catalogTestRepo(t)
+	upstream := testkit.GitRepo(t)
 	laptop := newFederationNode(t, "laptop-a")
 	first := newFederationNode(t, "first-a", "first-b")
 	second := newFederationNode(t, "second-a")

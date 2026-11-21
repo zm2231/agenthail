@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 )
@@ -75,7 +76,7 @@ func (d *Daemon) recordPersonWordsOnce(session surface.Session, u ledger.Utteran
 // resolved from its own folder through the identity cache, which discovery
 // keeps warm for every session it lists. Anything that covers many sessions
 // uses recordedProject instead, which never runs git.
-func (d *Daemon) sessionProject(session surface.Session) (*CatalogProject, error) {
+func (d *Daemon) sessionProject(session surface.Session) (*projectresolve.CatalogProject, error) {
 	identity, err := d.sessionIdentity(session)
 	if err != nil {
 		return nil, err
@@ -88,7 +89,7 @@ func (d *Daemon) sessionProject(session surface.Session) (*CatalogProject, error
 
 // recordedProject is the project discovery last recorded for the session;
 // found is false before discovery has recorded it.
-func (d *Daemon) recordedProject(session surface.Session) (project *CatalogProject, found bool, err error) {
+func (d *Daemon) recordedProject(session surface.Session) (project *projectresolve.CatalogProject, found bool, err error) {
 	raw, found, err := d.Registry.CatalogSessionProject(session.ID)
 	if err != nil || !found {
 		return nil, found, err
@@ -100,11 +101,11 @@ func (d *Daemon) recordedProject(session surface.Session) (project *CatalogProje
 	return project, true, nil
 }
 
-func decodeRecordedProject(raw []byte) (*CatalogProject, error) {
+func decodeRecordedProject(raw []byte) (*projectresolve.CatalogProject, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}
-	var project *CatalogProject
+	var project *projectresolve.CatalogProject
 	if err := json.Unmarshal(raw, &project); err != nil {
 		return nil, err
 	}
@@ -114,16 +115,16 @@ func decodeRecordedProject(raw []byte) (*CatalogProject, error) {
 	return project, nil
 }
 
-func (d *Daemon) sessionIdentity(session surface.Session) (catalogIdentity, error) {
+func (d *Daemon) sessionIdentity(session surface.Session) (projectresolve.CatalogIdentity, error) {
 	records, err := d.Registry.ListProjects()
 	if err != nil {
-		return catalogIdentity{}, err
+		return projectresolve.CatalogIdentity{}, err
 	}
-	d.catalogIdentities.setProjects(records)
+	d.catalogIdentities.SetProjects(records)
 	if err := d.refreshProjectLinks(); err != nil {
-		return catalogIdentity{}, err
+		return projectresolve.CatalogIdentity{}, err
 	}
-	return d.catalogIdentities.identity(context.Background(), session, time.Now(), func() *CatalogProject { return nil }), nil
+	return d.catalogIdentities.Identity(context.Background(), session, time.Now(), func() *projectresolve.CatalogProject { return nil }), nil
 }
 
 func (d *Daemon) backfillPrompt(session surface.Session, payload sessionJournalPayload) {

@@ -8,14 +8,14 @@ import (
 	"path/filepath"
 
 	"github.com/zm2231/agenthail/internal/claudehooks"
-	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
 var (
-	resolveSessionProject = daemon.ResolvePathProject
+	resolveSessionProject = projectresolve.ResolvePathProject
 	localSessionPlaces    = (*registry.Registry).LocalSessionPlaces
 )
 
@@ -117,7 +117,7 @@ func enabledProjectsByRoot(ctx context.Context, r *registry.Registry, roots []su
 			project, err := resolveSessionProject(ctx, r, place.Cwd)
 			if err != nil {
 				resolveErrs[place.Cwd] = fmt.Errorf("project of %s: %w", place.Cwd, err)
-			} else if key, err = daemon.LedgerKey(r, project); err != nil {
+			} else if key, err = projectresolve.LedgerKey(r, project); err != nil {
 				resolveErrs[place.Cwd] = fmt.Errorf("ledger of %s: %w", place.Cwd, err)
 			}
 			keys[place.Cwd] = key

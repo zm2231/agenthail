@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/dashconfig"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -243,7 +244,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		if adapterErr != nil {
 			continue
 		}
-		identity := catalogIdentity{}
+		identity := projectresolve.CatalogIdentity{}
 		observedAt := time.Time{}
 		if record, found := catalogSessions[session.ID]; found {
 			_ = json.Unmarshal(record.Project, &identity.Project)
@@ -313,7 +314,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		if err != nil {
 			return dashboardState{}, fmt.Errorf("read coordinators: %w", err)
 		}
-		links, err := loadProjectLinks(d.Registry)
+		links, err := projectresolve.LoadProjectLinks(d.Registry)
 		if err != nil {
 			return dashboardState{}, fmt.Errorf("read project links: %w", err)
 		}

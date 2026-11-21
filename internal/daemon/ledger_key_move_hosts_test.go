@@ -33,7 +33,7 @@ func TestARemoteChangeCarriesASharedLedgerOnBothHosts(t *testing.T) {
 			if !ownerMoves {
 				moved, lagging, movedRepo = mac, owner, macRepo
 			}
-			gitRun(t, movedRepo, "remote", "set-url", "origin", "https://github.com/example/renamed-widget.git")
+			testkit.Git(t, movedRepo, "remote", "set-url", "origin", "https://github.com/example/renamed-widget.git")
 			moved.daemon.discoverCatalog(context.Background())
 			if ownerMoves {
 				testkit.Eventually(t, "the replica takes the owner's move", 20*time.Second, func() bool {

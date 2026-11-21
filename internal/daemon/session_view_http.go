@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/zm2231/agenthail/internal/projectresolve"
 )
 
 var errPresentationChanged = errors.New("the catalog changed; reload the view")
@@ -89,13 +91,15 @@ func (d *Daemon) sessionViewHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
-	request, err := parseSessionViewRequest(r, func(folder string) (string, error) { return ProjectHolding(r.Context(), d.Registry, folder) })
+	request, err := parseSessionViewRequest(r, func(folder string) (string, error) {
+		return projectresolve.ProjectHolding(r.Context(), d.Registry, folder)
+	})
 	if err != nil {
 		status, code := http.StatusBadRequest, "invalid_view"
 		if errors.Is(err, errPresentationCursor) {
 			code = "invalid_cursor"
 		}
-		if errors.Is(err, ErrNoProject) {
+		if errors.Is(err, projectresolve.ErrNoProject) {
 			status, code = http.StatusNotFound, "not_found"
 		}
 		writeAPIError(w, status, code, err.Error())

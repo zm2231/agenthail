@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/broadcast"
 	"github.com/zm2231/agenthail/internal/daemonapi"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -185,7 +186,7 @@ func (d *Daemon) agentScope(r *http.Request, caller *mcpCaller, request daemonap
 		if !caller.has("ledger.write") {
 			return daemonapi.ScopeReply{}, refuse("capability_missing", "Writing the ledger needs ledger.write.")
 		}
-		own, err := LedgerKey(d.Registry, caller.project)
+		own, err := projectresolve.LedgerKey(d.Registry, caller.project)
 		if err != nil {
 			return daemonapi.ScopeReply{}, err
 		}

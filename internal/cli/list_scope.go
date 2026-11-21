@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/workspace"
 )
 
@@ -25,7 +25,7 @@ func listScopeFromArgs(args []string) (string, error) {
 	return scope, nil
 }
 
-func (a *App) scopeProject(ctx context.Context, projects daemon.SessionProjects, selector, cwd string) (string, error) {
+func (a *App) scopeProject(ctx context.Context, projects projectresolve.SessionProjects, selector, cwd string) (string, error) {
 	if selector != "" {
 		return projects.Named(selector)
 	}
@@ -33,5 +33,5 @@ func (a *App) scopeProject(ctx context.Context, projects daemon.SessionProjects,
 	if err != nil {
 		return "", fmt.Errorf("normalize --cwd: %w", err)
 	}
-	return daemon.ProjectHolding(ctx, a.registry(), folder)
+	return projectresolve.ProjectHolding(ctx, a.registry(), folder)
 }
