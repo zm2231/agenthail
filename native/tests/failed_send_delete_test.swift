@@ -30,7 +30,7 @@ struct FailedSendDeleteTest {
     }
 
     static func failedSend() -> LocalSend {
-        var send = LocalSend(text: "/Volumes/4/CF holds 680 GiB", sentAt: Date(), status: nil)
+        var send = LocalSend(text: "/srv/footage holds 680 GiB", sentAt: Date(), status: nil)
         send.failure = "steer requires a message, not a slash command"
         send.ask = FailedSendAsk(id: "ask-1", choices: [FailedSendAsk.delete, "dismiss"])
         return send
@@ -47,7 +47,7 @@ struct FailedSendDeleteTest {
 
         FailedSendDeleteStub.actionReply = (200, #"{"ok":true,"result":{"requestId":"ask-1","outcome":"answered","choice":"delete"}}"#)
         model.outbox.record(failedSend(), in: "S")
-        let question = SessionRequest.Question(question: #"Message not delivered: "/Volumes/4/CF holds 680 GiB""#, header: "", multiSelect: false, options: [
+        let question = SessionRequest.Question(question: #"Message not delivered: "/srv/footage holds 680 GiB""#, header: "", multiSelect: false, options: [
             SessionRequest.Option(id: "delete", label: "Delete", description: ""), SessionRequest.Option(id: "dismiss", label: "Dismiss", description: ""),
         ])
         await pane.respond(to: SessionRequest(id: "ask-1", kind: "ask", tool: "", questions: [question]), decision: .choose(FailedSendAsk.delete))

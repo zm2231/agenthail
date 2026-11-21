@@ -1118,7 +1118,7 @@ final class ComposerSendTests: XCTestCase {
         ComposerSendProtocol.state.script([.answer(409, keptRefusal), .answer(200, #"{"ok":true,"result":{"requestId":"ask-1","outcome":"answered","choice":"delete"}}"#)])
         ComposerSendProtocol.state.listRequests(deleteOffered)
         let (model, session) = try makeModel()
-        model.composer = "/Volumes/4/CF holds 680 GiB"
+        model.composer = "/srv/footage holds 680 GiB"
         model.send(to: session)
         try await waitUntil { model.refusedSends[session.id]?.ask?.offersDelete == true }
         let request = SessionRequest(id: "ask-1", kind: "ask", tool: "", questions: [SessionRequest.Question(question: "Message not delivered", header: "", multiSelect: false, options: [SessionRequest.Option(id: "delete", label: "Delete", description: "")])])
@@ -1130,7 +1130,7 @@ final class ComposerSendTests: XCTestCase {
         ComposerSendProtocol.state.script([.answer(409, keptRefusal), .answer(409, settledReply)])
         ComposerSendProtocol.state.listRequests(deleteOffered)
         let (model, session) = try makeModel()
-        model.composer = "/Volumes/4/CF holds 680 GiB"
+        model.composer = "/srv/footage holds 680 GiB"
         model.send(to: session)
         try await waitUntil { model.refusedSends[session.id]?.canDelete == true }
         return (model, session)
