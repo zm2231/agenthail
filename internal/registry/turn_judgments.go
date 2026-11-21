@@ -141,11 +141,14 @@ func (r *Registry) CurrentTurnJudgments() (map[string]TurnJudgment, error) {
 	return currentTurnJudgments(context.Background(), r.read)
 }
 
+var currentTurnJudgmentsQuery = `SELECT ` + turnJudgmentColumns + `
+		FROM session_runtime rt CROSS JOIN turn_judgments j ON j.session_id=rt.session_id AND j.turn_id=rt.completed_turn_id
+		WHERE rt.completed_turn_id<>''`
+
 func currentTurnJudgments(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }) (map[string]TurnJudgment, error) {
-	rows, err := q.QueryContext(ctx, `SELECT `+turnJudgmentColumns+`
-		FROM turn_judgments j JOIN session_runtime rt ON rt.session_id=j.session_id AND rt.completed_turn_id=j.turn_id`)
+	rows, err := q.QueryContext(ctx, currentTurnJudgmentsQuery)
 	if err != nil {
 		return nil, err
 	}

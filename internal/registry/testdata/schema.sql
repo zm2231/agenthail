@@ -1,4 +1,4 @@
--- schemaVersion 119
+-- schemaVersion 122
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -139,6 +139,9 @@ CREATE INDEX session_prs_watched ON session_prs(repo) WHERE watch=1 AND unlinked
 
 -- index sessions_parent
 CREATE INDEX sessions_parent ON sessions(parent_session_id) WHERE parent_session_id<>'';
+
+-- index sessions_pid
+CREATE INDEX sessions_pid ON sessions(pid) WHERE pid>0;
 
 -- index sessions_recent
 CREATE INDEX sessions_recent ON sessions(last_active_ms DESC, updated_at DESC, id);

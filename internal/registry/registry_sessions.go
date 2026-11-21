@@ -70,6 +70,8 @@ func upsertSessionRuntimeTx(tx *sql.Tx, s surface.Session) error {
 
 // A Claude process holds one conversation, so a row that takes its pid takes
 // it from any other row.
+const releaseClaudePIDSQL = `UPDATE sessions SET pid=0,pid_identity='',bridge='',updated_at=datetime('now') WHERE surface=? AND pid=? AND pid>0 AND id<>?`
+
 func releaseClaudePIDsTx(tx *sql.Tx, s surface.Session) error {
 	if s.Surface != surface.KindClaude {
 		return nil
@@ -82,7 +84,7 @@ func releaseClaudePIDsTx(tx *sql.Tx, s surface.Session) error {
 		pids = append(pids, holder.PID)
 	}
 	for _, pid := range pids {
-		if _, err := tx.Exec(`UPDATE sessions SET pid=0,pid_identity='',bridge='',updated_at=datetime('now') WHERE surface=? AND pid=? AND id<>?`, string(surface.KindClaude), pid, s.ID); err != nil {
+		if _, err := tx.Exec(releaseClaudePIDSQL, string(surface.KindClaude), pid, s.ID); err != nil {
 			return err
 		}
 	}
