@@ -401,7 +401,7 @@ func (c *Claude) movedAway(conversation string) bool {
 		if claudeTranscriptExists(root, conversation) {
 			return false
 		}
-		if info, err := os.Stat(filepath.Join(root, claudeMovedDir, conversation)); err == nil && info.IsDir() {
+		if info, err := os.Stat(filepath.Join(root, movedDir, conversation)); err == nil && info.IsDir() {
 			archived = true
 		}
 	}

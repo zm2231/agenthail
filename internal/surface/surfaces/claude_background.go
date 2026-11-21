@@ -100,23 +100,6 @@ func (c *Claude) recordBackground(ctx context.Context, sess *surface.Session) *s
 	return background
 }
 
-func backgroundOf(tasks []surface.BackgroundTask, source string) *surface.BackgroundTasks {
-	if len(tasks) == 0 {
-		return nil
-	}
-	background := &surface.BackgroundTasks{Tasks: tasks, Source: source}
-	for _, task := range tasks {
-		if task.Ambient {
-			continue
-		}
-		background.Running = true
-		if !task.Since.IsZero() && (background.Since.IsZero() || task.Since.Before(background.Since)) {
-			background.Since = task.Since
-		}
-	}
-	return background
-}
-
 // claudeTaskScan follows one transcript's background tasks as Claude appends
 // to it: a Bash or Agent call run in the background, or a Monitor, starts a
 // task its result names; a task notification or a TaskStop on the id ends it.

@@ -95,7 +95,7 @@ func TestAMovedConversationIsArchivedOutOfReachAndRestoredWhereItWas(t *testing.
 			t.Fatalf("%s was not restored: %v", back, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(fixture.Root, claudeMovedDir, fixtureConversation, fixtureMove)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(fixture.Root, movedDir, fixtureConversation, fixtureMove)); !os.IsNotExist(err) {
 		t.Fatalf("the archive outlived the restore: %v", err)
 	}
 	if found := c.transcripts.pass(roots)(fixtureConversation); len(found) != 1 {
@@ -345,7 +345,7 @@ func TestASecondMoveOfAConversationIgnoresTheCopyAnEarlierMoveLeft(t *testing.T)
 	if err != nil || !strings.Contains(string(data), "assistant") {
 		t.Fatalf("the second move's own transcript did not come back: %q %v", data, err)
 	}
-	if _, err := os.Stat(filepath.Join(fixture.Root, claudeMovedDir, fixtureConversation, fixtureMove, fixtureConversation+".jsonl")); err != nil {
+	if _, err := os.Stat(filepath.Join(fixture.Root, movedDir, fixtureConversation, fixtureMove, fixtureConversation+".jsonl")); err != nil {
 		t.Fatalf("the first move's recovery copy is gone: %v", err)
 	}
 }
@@ -397,7 +397,7 @@ func TestAMoveInKeepsTheCopyHereItExtends(t *testing.T) {
 	if _, err := c.ReceiveMove(context.Background(), in, bytes.NewReader(buildArchive(t, tarPart{name: conversation + ".jsonl", body: body})), admitMove); err != nil {
 		t.Fatal(err)
 	}
-	kept, err := os.ReadFile(filepath.Join(root, claudeMovedDir, conversation, in.MoveID, "previous", conversation+".jsonl"))
+	kept, err := os.ReadFile(filepath.Join(root, movedDir, conversation, in.MoveID, "previous", conversation+".jsonl"))
 	if err != nil || string(kept) != older {
 		t.Fatalf("the copy here was not kept: %q %v", kept, err)
 	}

@@ -2,13 +2,11 @@ package surfaces
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/signin"
-	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func (c *Claude) Health(ctx context.Context) error {
@@ -51,17 +49,4 @@ func (c *Claude) Health(ctx context.Context) error {
 		return fmt.Errorf("Claude authentication probe returned HTTP %d: %s", status, diagnosticExcerpt(body))
 	}
 	return nil
-}
-
-func signinTerminalKind(err error) surface.DeliveryTerminalKind {
-	var problem signin.ProblemError
-	switch {
-	case signin.IsOff(err):
-		return surface.DeliverySigninOff
-	case signin.IsUnavailable(err):
-		return surface.DeliverySigninUnavailable
-	case errors.As(err, &problem):
-		return surface.DeliverySigninUnreadable
-	}
-	return surface.DeliveryAuthenticationNeeded
 }

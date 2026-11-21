@@ -89,7 +89,7 @@ func TestARootMoveResumesTheSessionUnderTheTargetWithItsProjectConfig(t *testing
 	if _, err := os.Stat(filepath.Join(f.second, "tasks", f.session.ID, "1.json")); err != nil {
 		t.Fatalf("tasks did not move: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(primary, claudeMovedDir, f.session.ID, moveID)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(primary, movedDir, f.session.ID, moveID)); !os.IsNotExist(err) {
 		t.Fatalf("the move left its archive: %v", err)
 	}
 	spawns := f.host.Spawns(t, f.session.ID)

@@ -28,7 +28,7 @@ func (h CodexHome) sessionsDir() string { return filepath.Join(h.Codex, "session
 func (h CodexHome) archivedDir() string { return filepath.Join(h.Codex, "archived_sessions") }
 
 func (h CodexHome) moveDir(threadID, moveID string) string {
-	return filepath.Join(h.Codex, claudeMovedDir, threadID, moveID)
+	return filepath.Join(h.Codex, movedDir, threadID, moveID)
 }
 
 func (h CodexHome) socketPath() string {
