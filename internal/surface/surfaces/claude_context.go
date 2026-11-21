@@ -10,10 +10,11 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 type claudeContextState struct {
-	cursor              transcriptCursor
+	cursor              transcript.Cursor
 	usage               surface.ContextUsage
 	latestCommandAt     time.Time
 	latestCommandDoneAt time.Time
@@ -89,9 +90,9 @@ func (c *Claude) transcriptContextUsage(ctx context.Context, sess *surface.Sessi
 		c.contextState = map[string]*claudeContextState{}
 	}
 	state := c.contextState[path]
-	if state == nil || state.cursor.reset(info) {
+	if state == nil || state.cursor.Reset(info) {
 		state = &claudeContextState{seenBoundaries: map[string]bool{}}
-		state.cursor.reset(info)
+		state.cursor.Reset(info)
 		c.contextState[path] = state
 	}
 	if state.seenBoundaries == nil {
@@ -169,8 +170,8 @@ func (c *Claude) transcriptContextUsage(ctx context.Context, sess *surface.Sessi
 		}
 		return nil
 	}
-	if state.cursor.offset == 0 {
-		lines, offset, readErr := readRecentJSONLLines(ctx, path, 0, initialClaudeObservationBytes, maxClaudeTranscriptRecordBytes)
+	if state.cursor.Offset == 0 {
+		lines, offset, readErr := transcript.ReadRecentJSONLLines(ctx, path, 0, initialClaudeObservationBytes, maxClaudeTranscriptRecordBytes)
 		if readErr != nil {
 			return surface.ContextUsage{}, "", readErr
 		}
@@ -179,10 +180,10 @@ func (c *Claude) transcriptContextUsage(ctx context.Context, sess *surface.Sessi
 				return surface.ContextUsage{}, "", err
 			}
 		}
-		state.cursor.offset = offset
+		state.cursor.Offset = offset
 	} else {
-		offset, scanErr := scanAppendedJSONL(ctx, path, state.cursor.offset, maxClaudeTranscriptRecordBytes, visit)
-		state.cursor.offset = offset
+		offset, scanErr := transcript.ScanAppendedJSONL(ctx, path, state.cursor.Offset, maxClaudeTranscriptRecordBytes, visit)
+		state.cursor.Offset = offset
 		if scanErr != nil {
 			return surface.ContextUsage{}, "", scanErr
 		}

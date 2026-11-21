@@ -15,6 +15,7 @@ import (
 	"github.com/zm2231/agenthail/internal/proxyacct"
 	"github.com/zm2231/agenthail/internal/proxyacct/proxyaccttest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
@@ -49,7 +50,7 @@ func newProxyUsageFixture(t *testing.T, management string) proxyUsageFixture {
 		filepath.Join(home, ".claude.json"):              `{"oauthAccount":{"accountUuid":"acct-work","emailAddress":"work@example.com","organizationUuid":"org-work"}}`,
 		filepath.Join(team, "settings.json"):             `{"env":{"ANTHROPIC_BASE_URL":"http://localhost:` + port + `/","ANTHROPIC_AUTH_TOKEN":"client-token"}}`,
 	})
-	d.Surfaces = []surface.Surface{surfaces.NewClaudeWithRequest(candidates(nil), home, func(context.Context, string, string, map[string]string, string, surfaces.CookieSource, time.Duration) (int, string, error) {
+	d.Surfaces = []surface.Surface{surfaces.NewClaudeWithRequest(candidates(nil), home, func(context.Context, string, string, map[string]string, string, browsercookie.Source, time.Duration) (int, string, error) {
 		return 404, "{}", nil
 	})}
 	return proxyUsageFixture{daemon: d, proxy: proxy, home: home, team: team, port: port}

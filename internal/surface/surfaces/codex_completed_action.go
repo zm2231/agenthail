@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"fmt"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"maps"
 	"slices"
 	"strings"
@@ -22,16 +23,16 @@ var codexMirroredItems = []string{"UserMessage", "AgentMessage", "Reasoning", "C
 
 // Mirrored items repeat records that already render as messages or notices.
 func codexCompletedAction(item map[string]any) (action codexAction, ok bool, mirrored bool) {
-	typ := str(item, "type")
+	typ := transcript.String(item, "type")
 	if slices.Contains(codexMirroredItems, typ) {
 		return codexAction{}, false, true
 	}
-	failed := str(item, "status") == "failed"
+	failed := transcript.String(item, "status") == "failed"
 	switch typ {
 	case "CommandExecution":
 		command := codexExecutedCommand(item)
 		action = codexAction{Tool: "exec_command", Input: map[string]any{"cmd": command}, Output: codexFirstString(item, "aggregated_output", "formatted_output", "stdout"), Failed: failed, Command: command, Duration: codexItemDuration(item)}
-		if cwd := strings.TrimPrefix(str(item, "cwd"), "file://"); cwd != "" {
+		if cwd := strings.TrimPrefix(transcript.String(item, "cwd"), "file://"); cwd != "" {
 			action.Input["workdir"] = cwd
 		}
 		if code, ok := item["exit_code"].(float64); ok {
@@ -40,36 +41,36 @@ func codexCompletedAction(item map[string]any) (action codexAction, ok bool, mir
 			action.Failed = action.Failed || exit != 0
 		}
 	case "McpToolCall":
-		action = codexAction{Tool: "mcp__" + str(item, "server") + "__" + str(item, "tool"), Input: codexObject(item["arguments"]), Failed: failed}
+		action = codexAction{Tool: "mcp__" + transcript.String(item, "server") + "__" + transcript.String(item, "tool"), Input: codexObject(item["arguments"]), Failed: failed}
 		result, _ := item["result"].(map[string]any)
 		action.Output = codexContentText(result["content"])
 		if isError, _ := result["isError"].(bool); isError {
 			action.Failed = true
 		}
 		if action.Output == "" {
-			action.Output = timelineValue(item["error"])
+			action.Output = transcript.TimelineValue(item["error"])
 		}
 	case "CollabAgentToolCall":
-		action = codexAction{Tool: str(item, "tool"), Input: map[string]any{}, Failed: failed, Output: codexAgentStates(item)}
+		action = codexAction{Tool: transcript.String(item, "tool"), Input: map[string]any{}, Failed: failed, Output: codexAgentStates(item)}
 		for _, key := range []string{"prompt", "model"} {
-			if value := str(item, key); value != "" {
+			if value := transcript.String(item, key); value != "" {
 				action.Input[key] = value
 			}
 		}
 	case "FileChange":
-		action = codexAction{Tool: "apply_patch", Input: map[string]any{"input": codexPatch(item["changes"])}, Output: str(item, "stdout"), Failed: failed}
+		action = codexAction{Tool: "apply_patch", Input: map[string]any{"input": codexPatch(item["changes"])}, Output: transcript.String(item, "stdout"), Failed: failed}
 	case "WebSearch":
 		action = codexAction{Tool: "web_search", Input: map[string]any{"query": codexSearchQuery(item)}, Output: codexSearchResults(item["results"]), Failed: failed}
 	case "Extension":
-		if str(item, "kind") == "web.search" {
+		if transcript.String(item, "kind") == "web.search" {
 			action = codexAction{Tool: "web_search", Input: map[string]any{"query": codexSearchQuery(item)}, Output: codexSearchResults(item["results"]), Failed: failed}
 		} else {
-			action = codexAction{Tool: str(item, "kind"), Input: map[string]any{}, Failed: failed}
+			action = codexAction{Tool: transcript.String(item, "kind"), Input: map[string]any{}, Failed: failed}
 		}
 	case "ImageView":
-		action = codexAction{Tool: "view_image", Input: map[string]any{"path": strings.TrimPrefix(str(item, "path"), "file://")}, Failed: failed}
+		action = codexAction{Tool: "view_image", Input: map[string]any{"path": strings.TrimPrefix(transcript.String(item, "path"), "file://")}, Failed: failed}
 	case "FunctionCallOutput":
-		action = codexAction{Tool: strings.Trim(str(item, "namespace")+"."+str(item, "name"), "."), Input: map[string]any{}, Output: timelineValue(item["output"]), Failed: failed}
+		action = codexAction{Tool: strings.Trim(transcript.String(item, "namespace")+"."+transcript.String(item, "name"), "."), Input: map[string]any{}, Output: transcript.TimelineValue(item["output"]), Failed: failed}
 	default:
 		return codexAction{}, false, false
 	}
@@ -88,8 +89,8 @@ func codexExecutedCommand(item map[string]any) string {
 		}
 	}
 	if parsed, ok := item["parsed_cmd"].([]any); ok && len(parsed) == 1 {
-		if first, ok := parsed[0].(map[string]any); ok && str(first, "cmd") != "" {
-			return strings.TrimSpace(str(first, "cmd"))
+		if first, ok := parsed[0].(map[string]any); ok && transcript.String(first, "cmd") != "" {
+			return strings.TrimSpace(transcript.String(first, "cmd"))
 		}
 	}
 	switch command := item["command"].(type) {
@@ -114,7 +115,7 @@ func codexItemDuration(item map[string]any) time.Duration {
 
 func codexFirstString(item map[string]any, keys ...string) string {
 	for _, key := range keys {
-		if value := str(item, key); value != "" {
+		if value := transcript.String(item, key); value != "" {
 			return value
 		}
 	}
@@ -133,7 +134,7 @@ func codexContentText(value any) string {
 	var parts []string
 	for _, raw := range blocks {
 		block, _ := raw.(map[string]any)
-		if text := str(block, "text"); text != "" {
+		if text := transcript.String(block, "text"); text != "" {
 			parts = append(parts, text)
 		}
 	}
@@ -145,7 +146,7 @@ func codexAgentStates(item map[string]any) string {
 	agents, _ := item["receiver_agents"].([]any)
 	for _, raw := range agents {
 		agent, _ := raw.(map[string]any)
-		names[str(agent, "thread_id")] = str(agent, "agent_nickname")
+		names[transcript.String(agent, "thread_id")] = transcript.String(agent, "agent_nickname")
 	}
 	states, _ := item["agents_states"].(map[string]any)
 	var lines []string
@@ -165,10 +166,10 @@ func codexPatch(value any) string {
 	patch.WriteString("*** Begin Patch\n")
 	for _, path := range slices.Sorted(maps.Keys(changes)) {
 		change, _ := changes[path].(map[string]any)
-		switch str(change, "type") {
+		switch transcript.String(change, "type") {
 		case "add":
 			patch.WriteString("*** Add File: " + path + "\n")
-			for _, line := range strings.SplitAfter(str(change, "content"), "\n") {
+			for _, line := range strings.SplitAfter(transcript.String(change, "content"), "\n") {
 				if line != "" {
 					patch.WriteString("+" + strings.TrimSuffix(line, "\n") + "\n")
 				}
@@ -177,7 +178,7 @@ func codexPatch(value any) string {
 			patch.WriteString("*** Delete File: " + path + "\n")
 		default:
 			patch.WriteString("*** Update File: " + path + "\n")
-			if diff := str(change, "unified_diff"); diff != "" {
+			if diff := transcript.String(change, "unified_diff"); diff != "" {
 				patch.WriteString(strings.TrimSuffix(diff, "\n") + "\n")
 			}
 		}
@@ -187,11 +188,11 @@ func codexPatch(value any) string {
 }
 
 func codexSearchQuery(item map[string]any) string {
-	if query := str(item, "query"); query != "" {
+	if query := transcript.String(item, "query"); query != "" {
 		return query
 	}
 	action, _ := item["action"].(map[string]any)
-	if query := str(action, "query"); query != "" {
+	if query := transcript.String(action, "query"); query != "" {
 		return query
 	}
 	queries, _ := action["queries"].([]any)
@@ -209,7 +210,7 @@ func codexSearchResults(value any) string {
 	var lines []string
 	for _, raw := range results {
 		result, _ := raw.(map[string]any)
-		if title, url := str(result, "title"), str(result, "url"); title != "" || url != "" {
+		if title, url := transcript.String(result, "title"), transcript.String(result, "url"); title != "" || url != "" {
 			lines = append(lines, strings.TrimSpace(title+" "+url))
 		}
 	}

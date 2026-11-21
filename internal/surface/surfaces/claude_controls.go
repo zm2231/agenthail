@@ -13,6 +13,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/poll"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 var claudeControlPoll = 250 * time.Millisecond
@@ -47,7 +48,7 @@ func (c *Claude) remoteRequest(ctx context.Context, sess *surface.Session, metho
 	if status == http.StatusOK {
 		return data, nil
 	}
-	err = fmt.Errorf("Claude control %s returned HTTP %d: %s", method, status, diagnosticExcerpt(data))
+	err = fmt.Errorf("Claude control %s returned HTTP %d: %s", method, status, surface.DiagnosticExcerpt(data))
 	switch status {
 	case http.StatusBadRequest:
 		return "", surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
@@ -425,7 +426,7 @@ func (c *Claude) commandControl(ctx context.Context, sess *surface.Session, acti
 			return false, surface.DeliveryOutcomeUnknown(errors.New("command transcript was replaced or truncated"))
 		}
 		found := false
-		offset, err = scanAppendedJSONL(ctx, path, offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
+		offset, err = transcript.ScanAppendedJSONL(ctx, path, offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
 			var record claudeRecord
 			if json.Unmarshal(line, &record) != nil || record.Type != "system" || record.Subtype != "local_command" || record.CommandRun == nil || record.CommandRun.Command != action || record.CommandRun.Args != value {
 				return nil

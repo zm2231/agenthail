@@ -1,4 +1,4 @@
-package surfaces
+package transcript
 
 import (
 	"bufio"
@@ -25,12 +25,12 @@ var ErrAttachmentNotFound = errors.New("attachment not found")
 var ErrAttachmentTooLarge = errors.New("attachment exceeds 10 MiB")
 var ErrAttachmentInvalid = errors.New("attachment is not a supported image")
 
-type attachmentReference struct {
+type AttachmentReference struct {
 	MediaType, Data, Path string
 	Sent, Image           bool
 }
 
-func readTranscriptAttachment(ctx context.Context, s *surface.Session, id string, format transcriptFormat, transcriptPath func(*surface.Session) string) (*surface.Attachment, []byte, error) {
+func ReadAttachment(ctx context.Context, s *surface.Session, id string, format Format, transcriptPath func(*surface.Session) string) (*surface.Attachment, []byte, error) {
 	path := s.Transcript
 	if path == "" {
 		path = transcriptPath(s)
@@ -58,7 +58,7 @@ func readTranscriptAttachment(ctx context.Context, s *surface.Session, id string
 	if err != nil {
 		return nil, nil, err
 	}
-	if hashBytes(data) != expected {
+	if HashBytes(data) != expected {
 		return nil, nil, ErrAttachmentNotFound
 	}
 	media, width, height, err := validateAttachment(data)
@@ -84,33 +84,33 @@ func parseAttachmentID(id string) (int64, int, string, error) {
 	return o, i, p[3], nil
 }
 
-func readAttachmentRecord(ctx context.Context, path string, format transcriptFormat, offset int64, index int) (attachmentReference, bool, error) {
+func readAttachmentRecord(ctx context.Context, path string, format Format, offset int64, index int) (AttachmentReference, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return attachmentReference{}, false, err
+		return AttachmentReference{}, false, err
 	}
 	defer f.Close()
 	if _, err = f.Seek(offset, io.SeekStart); err != nil {
-		return attachmentReference{}, false, err
+		return AttachmentReference{}, false, err
 	}
 	if offset > 0 {
 		var previous [1]byte
 		if _, err = f.ReadAt(previous[:], offset-1); err != nil || previous[0] != '\n' {
-			return attachmentReference{}, false, nil
+			return AttachmentReference{}, false, nil
 		}
 		if _, err = f.Seek(offset, io.SeekStart); err != nil {
-			return attachmentReference{}, false, err
+			return AttachmentReference{}, false, err
 		}
 	}
 	r := bufio.NewReaderSize(f, 64*1024)
 	var line []byte
 	for {
 		if err := ctx.Err(); err != nil {
-			return attachmentReference{}, false, err
+			return AttachmentReference{}, false, err
 		}
 		part, e := r.ReadSlice('\n')
 		if int64(len(line))+int64(len(part)) > maxAttachmentRecordBytes {
-			return attachmentReference{}, false, ErrAttachmentTooLarge
+			return AttachmentReference{}, false, ErrAttachmentTooLarge
 		}
 		line = append(line, part...)
 		if e == bufio.ErrBufferFull {
@@ -122,17 +122,17 @@ func readAttachmentRecord(ctx context.Context, path string, format transcriptFor
 		if e == io.EOF {
 			break
 		}
-		return attachmentReference{}, false, e
+		return AttachmentReference{}, false, e
 	}
 	if err := ctx.Err(); err != nil {
-		return attachmentReference{}, false, err
+		return AttachmentReference{}, false, err
 	}
 	var record map[string]any
 	if json.Unmarshal(line, &record) != nil {
-		return attachmentReference{}, false, nil
+		return AttachmentReference{}, false, nil
 	}
-	items := format.recordItems(record)
-	refs := format.attachmentReferences(record)
+	items := format.RecordItems(record)
+	refs := format.AttachmentReferences(record)
 	refIndex := 0
 	for itemIndex, item := range items {
 		if item.Kind != "attachment" {
@@ -144,12 +144,12 @@ func readAttachmentRecord(ctx context.Context, path string, format transcriptFor
 		refIndex++
 	}
 	if index >= len(items) {
-		return format.trailingAttachment(ctx, path, record, offset, index-len(items))
+		return format.TrailingAttachment(ctx, path, record, offset, index-len(items))
 	}
-	return attachmentReference{}, false, nil
+	return AttachmentReference{}, false, nil
 }
 
-func readAttachmentReference(ctx context.Context, ref attachmentReference) ([]byte, error) {
+func readAttachmentReference(ctx context.Context, ref AttachmentReference) ([]byte, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -226,56 +226,56 @@ func validateAttachment(data []byte) (string, int, int, error) {
 	}
 	return media, width, height, nil
 }
-func hashBytes(data []byte) string { h := sha256.Sum256(data); return hex.EncodeToString(h[:]) }
-func attachmentID(offset int64, index int, data []byte) string {
-	return attachmentIDFromHash(offset, index, hashBytes(data))
+func HashBytes(data []byte) string { h := sha256.Sum256(data); return hex.EncodeToString(h[:]) }
+func AttachmentID(offset int64, index int, data []byte) string {
+	return AttachmentIDFromHash(offset, index, HashBytes(data))
 }
-func attachmentIDFromHash(offset int64, index int, hash string) string {
+func AttachmentIDFromHash(offset int64, index int, hash string) string {
 	return "attachment:" + strconv.FormatInt(offset, 10) + ":" + strconv.Itoa(index) + ":" + hash
 }
 
-func attachmentReferenceFromValue(v any) (attachmentReference, bool) {
+func AttachmentReferenceFromValue(v any) (AttachmentReference, bool) {
 	switch x := v.(type) {
 	case string:
 		if strings.HasPrefix(x, "data:") {
-			return attachmentReference{Data: x}, true
+			return AttachmentReference{Data: x}, true
 		}
 		if filepath.IsAbs(x) {
-			return attachmentReference{Path: x}, true
+			return AttachmentReference{Path: x}, true
 		}
 	case map[string]any:
-		if str(x, "type") == "image" {
-			return attachmentReferenceFromValue(x["source"])
+		if String(x, "type") == "image" {
+			return AttachmentReferenceFromValue(x["source"])
 		}
-		media := str(x, "media_type")
+		media := String(x, "media_type")
 		if media == "" {
-			media = str(x, "mediaType")
+			media = String(x, "mediaType")
 		}
 		switch imageURL := x["image_url"].(type) {
 		case string:
-			return attachmentReferenceFromValue(imageURL)
+			return AttachmentReferenceFromValue(imageURL)
 		case map[string]any:
-			return attachmentReferenceFromValue(str(imageURL, "url"))
+			return AttachmentReferenceFromValue(String(imageURL, "url"))
 		}
-		if data := str(x, "data"); data != "" {
+		if data := String(x, "data"); data != "" {
 			if strings.HasPrefix(data, "data:") {
-				return attachmentReference{MediaType: media, Data: data}, true
+				return AttachmentReference{MediaType: media, Data: data}, true
 			}
-			return attachmentReference{MediaType: media, Data: "data:" + media + ";base64," + data}, true
+			return AttachmentReference{MediaType: media, Data: "data:" + media + ";base64," + data}, true
 		}
 		for _, k := range []string{"path", "file_path", "filename", "image_path"} {
-			if p := str(x, k); filepath.IsAbs(p) {
-				return attachmentReference{MediaType: media, Path: p}, true
+			if p := String(x, k); filepath.IsAbs(p) {
+				return AttachmentReference{MediaType: media, Path: p}, true
 			}
 		}
 	}
-	return attachmentReference{}, false
+	return AttachmentReference{}, false
 }
-func appendAttachmentReference(out []attachmentReference, value any) []attachmentReference {
-	ref, _ := attachmentReferenceFromValue(value)
+func AppendAttachmentReference(out []AttachmentReference, value any) []AttachmentReference {
+	ref, _ := AttachmentReferenceFromValue(value)
 	return append(out, ref)
 }
-func decorateTimelineAttachments(ctx context.Context, items []surface.TimelineItem, refs []attachmentReference, offset int64) error {
+func DecorateTimelineAttachments(ctx context.Context, items []surface.TimelineItem, refs []AttachmentReference, offset int64) error {
 	for itemIndex := range items {
 		item := &items[itemIndex]
 		if item.Kind != "message" || item.Role != "user" {
@@ -313,7 +313,7 @@ func decorateTimelineAttachments(ctx context.Context, items []surface.TimelineIt
 		if err != nil {
 			continue
 		}
-		items[itemIndex].Attachment = &surface.Attachment{ID: attachmentID(offset, itemIndex, data), MediaType: media, Width: width, Height: height, Bytes: int64(len(data))}
+		items[itemIndex].Attachment = &surface.Attachment{ID: AttachmentID(offset, itemIndex, data), MediaType: media, Width: width, Height: height, Bytes: int64(len(data))}
 		items[itemIndex].Text = "Image attachment"
 	}
 	return nil

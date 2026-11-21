@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -17,9 +18,9 @@ import (
 // so an event inside the bound can only have come from a file wake.
 func slowPoll(t *testing.T) {
 	t.Helper()
-	original := transcriptPollInterval
-	transcriptPollInterval = 10 * time.Second
-	t.Cleanup(func() { transcriptPollInterval = original })
+	original := transcript.PollInterval
+	transcript.PollInterval = 10 * time.Second
+	t.Cleanup(func() { transcript.PollInterval = original })
 }
 
 const wakeBound = time.Second
@@ -30,8 +31,8 @@ const wakeBound = time.Second
 func streamWaits(t *testing.T) *atomic.Int64 {
 	t.Helper()
 	waits := &atomic.Int64{}
-	transcriptWaiting = func() { waits.Add(1) }
-	t.Cleanup(func() { transcriptWaiting = nil })
+	transcript.Waiting = func() { waits.Add(1) }
+	t.Cleanup(func() { transcript.Waiting = nil })
 	return waits
 }
 

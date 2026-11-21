@@ -4,27 +4,28 @@ import (
 	"context"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func (c *Claude) ReadAttachment(ctx context.Context, s *surface.Session, id string) (*surface.Attachment, []byte, error) {
 	if _, err := c.sessionTranscript(s); err != nil {
 		return nil, nil, err
 	}
-	return readTranscriptAttachment(ctx, s, id, claudeTranscript{}, c.transcriptPath)
+	return transcript.ReadAttachment(ctx, s, id, claudeTranscript{}, c.transcriptPath)
 }
 
-func claudeAttachmentReferences(record map[string]any) []attachmentReference {
+func claudeAttachmentReferences(record map[string]any) []transcript.AttachmentReference {
 	message, _ := record["message"].(map[string]any)
 	blocks, _ := message["content"].([]any)
-	var out []attachmentReference
+	var out []transcript.AttachmentReference
 	for _, raw := range blocks {
 		b, _ := raw.(map[string]any)
-		switch str(b, "type") {
+		switch transcript.String(b, "type") {
 		case "image":
-			out = appendAttachmentReference(out, b["source"])
+			out = transcript.AppendAttachmentReference(out, b["source"])
 		case "tool_result":
-			for _, image := range toolResultImageContent(b["content"]) {
-				out = appendAttachmentReference(out, image)
+			for _, image := range transcript.ToolResultImageContent(b["content"]) {
+				out = transcript.AppendAttachmentReference(out, image)
 			}
 		}
 	}

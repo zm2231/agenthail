@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func (c *Claude) SessionSettings(ctx context.Context, sess *surface.Session) (surface.RuntimeSettings, error) {
@@ -76,16 +77,16 @@ func readClaudeLatestPermissionMode(ctx context.Context, path string) string {
 		return ""
 	}
 	match := func(record map[string]any) bool {
-		return str(record, "type") == "user" && str(record, "permissionMode") != ""
+		return transcript.String(record, "type") == "user" && transcript.String(record, "permissionMode") != ""
 	}
-	start, found, err := transcriptRecordBefore(ctx, file, info.Size(), lineContains([]byte(`"permissionMode"`)), match)
+	start, found, err := transcript.RecordBefore(ctx, file, info.Size(), transcript.LineContains([]byte(`"permissionMode"`)), match)
 	if err != nil || !found {
 		return ""
 	}
 	mode := ""
-	_ = scanTranscriptRecords(ctx, file, start, info.Size(), true, func(record map[string]any, _ int64, _ []byte) {
+	_ = transcript.ScanRecords(ctx, file, start, info.Size(), true, func(record map[string]any, _ int64, _ []byte) {
 		if mode == "" && match(record) {
-			mode = str(record, "permissionMode")
+			mode = transcript.String(record, "permissionMode")
 		}
 	})
 	return mode

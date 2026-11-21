@@ -13,6 +13,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 )
 
 const fixtureNotionSpace = "11111111-2222-3333-4444-555555555555"
@@ -181,7 +182,7 @@ func (u unreadableSignin) SigninCandidates(consumer signin.Consumer) ([]signin.S
 
 func TestClaudeRemoteControlWithAnUnreadableProfileFailsBeforePosting(t *testing.T) {
 	posted := false
-	claude := NewClaudeWithRequest(unreadableSignin{}, t.TempDir(), func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(unreadableSignin{}, t.TempDir(), func(context.Context, string, string, map[string]string, string, browsercookie.Source, time.Duration) (int, string, error) {
 		posted = true
 		return 200, "{}", nil
 	})
@@ -196,7 +197,7 @@ func TestClaudeRemoteControlWithAnUnreadableProfileFailsBeforePosting(t *testing
 
 func TestClaudeRemoteControlWithSigninOffFailsBeforePosting(t *testing.T) {
 	posted := false
-	claude := NewClaudeWithRequest(nil, t.TempDir(), func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(nil, t.TempDir(), func(context.Context, string, string, map[string]string, string, browsercookie.Source, time.Duration) (int, string, error) {
 		posted = true
 		return 200, "{}", nil
 	})
@@ -210,9 +211,9 @@ func TestClaudeRemoteControlWithSigninOffFailsBeforePosting(t *testing.T) {
 }
 
 func TestClaudeRemoteControlPassesTheResolvedProfile(t *testing.T) {
-	var got CookieSource
+	var got browsercookie.Source
 	source := signin.Source{ProfileID: "sp_cccccccccccc", Browser: signin.Firefox, Dir: "/fixture/firefox/abc.default"}
-	claude := NewClaudeWithRequest(signin.Fixed(source), t.TempDir(), func(_ context.Context, _, _ string, _ map[string]string, _ string, cookies CookieSource, _ time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(signin.Fixed(source), t.TempDir(), func(_ context.Context, _, _ string, _ map[string]string, _ string, cookies browsercookie.Source, _ time.Duration) (int, string, error) {
 		got = cookies
 		return 200, "{}", nil
 	})
@@ -226,24 +227,24 @@ func TestClaudeRemoteControlPassesTheResolvedProfile(t *testing.T) {
 
 func TestCookieCacheIsKeyedByProfile(t *testing.T) {
 	fixture := newCookieFixture(t)
-	a := CookieSource{Bridge: fixture.bridge, URL: "https://claude.ai/", Signin: signin.Source{ProfileID: "sp_a", Browser: signin.Chrome, Dir: "/a"}}
-	b := CookieSource{Bridge: fixture.bridge, URL: "https://claude.ai/", Signin: signin.Source{ProfileID: "sp_b", Browser: signin.Chrome, Dir: "/b"}}
-	for _, source := range []CookieSource{a, a, b} {
-		if header, err := loadCookieHeader(context.Background(), source); err != nil || header != "sid=fixture" {
+	a := browsercookie.Source{Bridge: fixture.bridge, URL: "https://claude.ai/", Signin: signin.Source{ProfileID: "sp_a", Browser: signin.Chrome, Dir: "/a"}}
+	b := browsercookie.Source{Bridge: fixture.bridge, URL: "https://claude.ai/", Signin: signin.Source{ProfileID: "sp_b", Browser: signin.Chrome, Dir: "/b"}}
+	for _, source := range []browsercookie.Source{a, a, b} {
+		if header, err := browsercookie.LoadHeader(context.Background(), source); err != nil || header != "sid=fixture" {
 			t.Fatalf("header=%q err=%v", header, err)
 		}
 	}
 	if calls := readLines(t, fixture.bridgeLog); len(calls) != 2 {
 		t.Fatalf("calls=%q, want one read per profile", calls)
 	}
-	invalidateCookieHeader(a)
-	if _, err := loadCookieHeader(context.Background(), b); err != nil {
+	browsercookie.Invalidate(a)
+	if _, err := browsercookie.LoadHeader(context.Background(), b); err != nil {
 		t.Fatal(err)
 	}
 	if calls := readLines(t, fixture.bridgeLog); len(calls) != 2 {
 		t.Fatalf("invalidating one profile reread another: %q", calls)
 	}
-	if _, err := loadCookieHeader(context.Background(), a); err != nil {
+	if _, err := browsercookie.LoadHeader(context.Background(), a); err != nil {
 		t.Fatal(err)
 	}
 	if calls := readLines(t, fixture.bridgeLog); len(calls) != 3 {

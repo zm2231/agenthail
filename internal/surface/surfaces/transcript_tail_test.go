@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"os"
 	"runtime"
 	"testing"
@@ -9,7 +10,7 @@ import (
 
 func TestAPollOfATranscriptThatDidNotGrowReadsNothing(t *testing.T) {
 	path := writeTranscript(t, `{"type":"user","uuid":"u1","message":{"content":"one"}}`)
-	end, err := scanAppendedJSONL(context.Background(), path, 0, maxClaudeTranscriptRecordBytes, func([]byte) error { return nil })
+	end, err := transcript.ScanAppendedJSONL(context.Background(), path, 0, maxClaudeTranscriptRecordBytes, func([]byte) error { return nil })
 	if err != nil || end == 0 {
 		t.Fatalf("first scan end=%d err=%v", end, err)
 	}
@@ -17,7 +18,7 @@ func TestAPollOfATranscriptThatDidNotGrowReadsNothing(t *testing.T) {
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
 	for range polls {
-		next, err := scanAppendedJSONL(context.Background(), path, end, maxClaudeTranscriptRecordBytes, func([]byte) error {
+		next, err := transcript.ScanAppendedJSONL(context.Background(), path, end, maxClaudeTranscriptRecordBytes, func([]byte) error {
 			t.Fatal("an unchanged transcript yielded a record")
 			return nil
 		})
@@ -38,7 +39,7 @@ func TestAPollOfATranscriptThatDidNotGrowReadsNothing(t *testing.T) {
 	}
 	file.Close()
 	records := 0
-	if next, err := scanAppendedJSONL(context.Background(), path, end, maxClaudeTranscriptRecordBytes, func([]byte) error { records++; return nil }); err != nil || next <= end || records != 1 {
+	if next, err := transcript.ScanAppendedJSONL(context.Background(), path, end, maxClaudeTranscriptRecordBytes, func([]byte) error { records++; return nil }); err != nil || next <= end || records != 1 {
 		t.Fatalf("after an append end=%d records=%d err=%v", next, records, err)
 	}
 }

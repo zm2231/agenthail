@@ -1,23 +1,23 @@
-package surfaces
+package transcript
 
 import (
 	"bytes"
 	"encoding/json"
 )
 
-func decodeShrunkRecord(line []byte, record *map[string]any) error {
+func DecodeShrunkRecord(line []byte, record *map[string]any) error {
 	return json.Unmarshal(shrinkTranscriptLine(line), record)
 }
 
 func shrinkTranscriptLine(line []byte) []byte {
-	if len(line) <= compactLineBytes {
+	if len(line) <= CompactLineBytes {
 		return line
 	}
-	cut, _ := cutJSONStrings(line, compactStringBytes)
+	cut, _ := CutJSONStrings(line, compactStringBytes)
 	return cut
 }
 
-func cutJSONStrings(line []byte, limit int) ([]byte, bool) {
+func CutJSONStrings(line []byte, limit int) ([]byte, bool) {
 	if len(line) <= limit {
 		return line, false
 	}

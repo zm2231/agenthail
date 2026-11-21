@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -66,7 +67,7 @@ func TestAttachmentOversizedRecordPreservesTypedTooLarge(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, err := NewClaude(nil, t.TempDir()).ReadAttachment(context.Background(), &surface.Session{Transcript: path}, "attachment:0:0:"+strings.Repeat("0", 64))
-	if !errors.Is(err, ErrAttachmentTooLarge) {
+	if !errors.Is(err, transcript.ErrAttachmentTooLarge) {
 		t.Fatalf("err=%v, want ErrAttachmentTooLarge", err)
 	}
 }
@@ -84,7 +85,7 @@ func TestAttachmentRejectsMidRecordOffsetAndHonorsCancellation(t *testing.T) {
 	}
 	forged := parts[0] + ":1:" + parts[2]
 	_, _, err := NewClaude(nil, t.TempDir()).ReadAttachment(context.Background(), &surface.Session{Transcript: path}, forged)
-	if !errors.Is(err, ErrAttachmentNotFound) {
+	if !errors.Is(err, transcript.ErrAttachmentNotFound) {
 		t.Fatalf("mid-record err=%v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -321,17 +322,17 @@ func TestAnAttachmentReadThatRanOutOfTimeIsNotReportedMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := base64.StdEncoding.DecodeString(testPNG)
-	id := attachmentID(0, 0, data)
-	if _, _, err := readTranscriptAttachment(context.Background(), &surface.Session{Transcript: path}, id, claudeTranscript{}, nil); err != nil {
+	id := transcript.AttachmentID(0, 0, data)
+	if _, _, err := transcript.ReadAttachment(context.Background(), &surface.Session{Transcript: path}, id, claudeTranscript{}, nil); err != nil {
 		t.Fatalf("read in time: %v", err)
 	}
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
-	_, _, err := readTranscriptAttachment(ctx, &surface.Session{Transcript: path}, id, claudeTranscript{}, nil)
-	if status, code, _ := AttachmentHTTPStatus(err); status != http.StatusGatewayTimeout || code != "attachment_timeout" {
+	_, _, err := transcript.ReadAttachment(ctx, &surface.Session{Transcript: path}, id, claudeTranscript{}, nil)
+	if status, code, _ := transcript.AttachmentHTTPStatus(err); status != http.StatusGatewayTimeout || code != "attachment_timeout" {
 		t.Fatalf("err=%v status=%d code=%s, want 504 attachment_timeout", err, status, code)
 	}
-	if status, code, _ := AttachmentHTTPStatus(ErrAttachmentNotFound); status != http.StatusNotFound || code != "attachment_not_found" {
+	if status, code, _ := transcript.AttachmentHTTPStatus(transcript.ErrAttachmentNotFound); status != http.StatusNotFound || code != "attachment_not_found" {
 		t.Fatalf("not found: status=%d code=%s", status, code)
 	}
 }

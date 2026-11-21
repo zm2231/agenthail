@@ -580,9 +580,9 @@ func installNode(t *testing.T, script string) string {
 	if err := os.WriteFile(node, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
-	previous := installRoot
-	installRoot = func() (string, error) { return root, nil }
-	t.Cleanup(func() { installRoot = previous })
+	previous := surface.InstallRoot
+	surface.InstallRoot = func() (string, error) { return root, nil }
+	t.Cleanup(func() { surface.InstallRoot = previous })
 	return node
 }
 

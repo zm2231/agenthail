@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {
@@ -67,7 +68,7 @@ func codexThreadReadsNotLoaded(ctx context.Context, conn codexClient, threadID s
 	result, _ := response["result"].(map[string]any)
 	thread, _ := result["thread"].(map[string]any)
 	status, _ := thread["status"].(map[string]any)
-	return str(status, "type") == "notLoaded", nil
+	return transcript.String(status, "type") == "notLoaded", nil
 }
 
 func dropUnconfirmedTurn(thread *codexThread, observation *surface.TurnObservation) *surface.TurnObservation {
@@ -102,13 +103,13 @@ func (c *Codex) activeTurnID(ctx context.Context, conn codexClient, threadID, ex
 			return "", err
 		}
 		if status, _, _ := codexTurnState(newest["status"]); status == surface.StatusBusy {
-			return str(newest, "id"), nil
+			return transcript.String(newest, "id"), nil
 		}
-		if newest != nil && codexTurnUnsettled(newest) && c.turnStarts.running(threadID, str(newest, "id")) {
-			return str(newest, "id"), nil
+		if newest != nil && codexTurnUnsettled(newest) && c.turnStarts.running(threadID, transcript.String(newest, "id")) {
+			return transcript.String(newest, "id"), nil
 		}
 		unsettled := newest != nil && codexTurnUnsettled(newest)
-		unlisted := expected != "" && str(newest, "id") != expected
+		unlisted := expected != "" && transcript.String(newest, "id") != expected
 		if !(unsettled || unlisted) || !time.Now().Before(deadline) {
 			return "", nil
 		}
@@ -181,7 +182,7 @@ func codexTurnOpen(path string, info os.FileInfo, now time.Time) bool {
 	}
 	defer file.Close()
 	open := false
-	scanJSONLBackward(file, info.Size(), info.Size(), func(line []byte, _ int64) bool {
+	transcript.ScanJSONLBackward(file, info.Size(), info.Size(), func(line []byte, _ int64) bool {
 		record, at, ok := parseCodexLiveTurnRecord(line)
 		if !ok {
 			return true

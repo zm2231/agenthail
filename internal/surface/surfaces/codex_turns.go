@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // codexTurnMeter accumulates, one rollout record at a time, the model and
@@ -37,7 +38,7 @@ func newCodexTurnMeter() *codexTurnMeter {
 
 func codexRecordStartsTurn(record map[string]any) bool {
 	payload, _ := record["payload"].(map[string]any)
-	return str(record, "type") == "event_msg" && codexStartsTurn(str(payload, "type"))
+	return transcript.String(record, "type") == "event_msg" && codexStartsTurn(transcript.String(payload, "type"))
 }
 
 func codexStartsTurn(typ string) bool {
@@ -53,7 +54,7 @@ func codexRecordEndsTurn(record map[string]any) (string, bool) {
 // that failed at the model, such as one refused at capacity, as
 // task_complete carrying an error.
 func codexTurnEnd(payload map[string]any) (string, bool) {
-	switch typ := str(payload, "type"); typ {
+	switch typ := transcript.String(payload, "type"); typ {
 	case "task_complete", "task_completed", "turn_completed":
 		if payload["error"] != nil {
 			return "failed", true
@@ -71,7 +72,7 @@ func (m *codexTurnMeter) observe(record map[string]any) *surface.TurnMetadata {
 		*m = codexTurnMeter{started: true, turnID: codexRecordTurnID(record), lastTotal: m.lastTotal, context: m.context, measured: m.measured, compactions: m.compactions, compactionsKnown: m.between, awaitPost: m.awaitPost}
 		return nil
 	}
-	if str(record, "type") == "compacted" {
+	if transcript.String(record, "type") == "compacted" {
 		compaction := surface.TurnCompaction{Trigger: surface.CompactionUnknown, PreTokens: m.context}
 		if !m.measured {
 			compaction.PreTokens = nil
@@ -80,13 +81,13 @@ func (m *codexTurnMeter) observe(record map[string]any) *surface.TurnMetadata {
 		m.awaitPost, m.measured = true, false
 		return nil
 	}
-	if str(record, "type") == "turn_context" {
-		if turnID := str(payload, "turn_id"); m.turnID == "" || turnID == "" || turnID == m.turnID {
-			m.model = str(payload, "model")
+	if transcript.String(record, "type") == "turn_context" {
+		if turnID := transcript.String(payload, "turn_id"); m.turnID == "" || turnID == "" || turnID == m.turnID {
+			m.model = transcript.String(payload, "model")
 		}
 		return nil
 	}
-	if str(record, "type") == "event_msg" && str(payload, "type") == "token_count" {
+	if transcript.String(record, "type") == "event_msg" && transcript.String(payload, "type") == "token_count" {
 		m.count(payload)
 		return nil
 	}
@@ -96,7 +97,7 @@ func (m *codexTurnMeter) observe(record map[string]any) *surface.TurnMetadata {
 	}
 	var duration *int64
 	if value, ok := payload["duration_ms"]; ok {
-		ms := int64Value(value)
+		ms := transcript.Int64Value(value)
 		duration = &ms
 	}
 	return m.finish(status, duration)
@@ -137,7 +138,7 @@ func (m *codexTurnMeter) count(payload map[string]any) {
 		return
 	}
 	if value, ok := last["total_tokens"]; ok {
-		size := int64Value(value)
+		size := transcript.Int64Value(value)
 		m.context, m.measured = &size, true
 		if n := len(m.compactions); m.awaitPost && n > 0 && (m.compactions[n-1].PreTokens == nil || size < *m.compactions[n-1].PreTokens) {
 			m.compactions[n-1].PostTokens = &size
@@ -145,21 +146,21 @@ func (m *codexTurnMeter) count(payload map[string]any) {
 		}
 	}
 	if total != nil {
-		running := int64Value(total["total_tokens"])
+		running := transcript.Int64Value(total["total_tokens"])
 		if running == m.lastTotal {
 			return
 		}
 		m.lastTotal = running
 	}
-	m.usage.InputTokens += int64Value(last["input_tokens"])
-	m.usage.CachedInputTokens += int64Value(last["cached_input_tokens"])
-	m.usage.CacheWriteTokens += int64Value(last["cache_write_input_tokens"])
-	m.usage.OutputTokens += int64Value(last["output_tokens"])
+	m.usage.InputTokens += transcript.Int64Value(last["input_tokens"])
+	m.usage.CachedInputTokens += transcript.Int64Value(last["cached_input_tokens"])
+	m.usage.CacheWriteTokens += transcript.Int64Value(last["cache_write_input_tokens"])
+	m.usage.OutputTokens += transcript.Int64Value(last["output_tokens"])
 	if value, ok := last["reasoning_output_tokens"]; ok {
 		if m.usage.ReasoningTokens == nil {
 			m.usage.ReasoningTokens = new(int64)
 		}
-		*m.usage.ReasoningTokens += int64Value(value)
+		*m.usage.ReasoningTokens += transcript.Int64Value(value)
 	}
 }
 
@@ -167,18 +168,18 @@ func codexTurnMeterAt(ctx context.Context, file *os.File, offset int64) (*codexT
 	return codexTurnMeterFrom(ctx, file, offset, newCodexTurnStartSearch())
 }
 
-func newCodexTurnStartSearch() *turnStartSearch {
-	return newTurnStartSearch(lineContains([]byte(`_started"`)), decodeShrunkRecord, codexRecordStartsTurn)
+func newCodexTurnStartSearch() *transcript.TurnStartSearch {
+	return transcript.NewTurnStartSearch(transcript.LineContains([]byte(`_started"`)), transcript.DecodeShrunkRecord, codexRecordStartsTurn)
 }
 
-func codexTurnMeterFrom(ctx context.Context, file *os.File, offset int64, starts *turnStartSearch) (*codexTurnMeter, error) {
+func codexTurnMeterFrom(ctx context.Context, file *os.File, offset int64, starts *transcript.TurnStartSearch) (*codexTurnMeter, error) {
 	meter := newCodexTurnMeter()
-	from, found, err := turnReplayStart(ctx, file, offset, starts)
+	from, found, err := transcript.TurnReplayStart(ctx, file, offset, starts)
 	if err != nil || !found {
 		return meter, err
 	}
 	meter.between = from == 0
-	err = scanTranscriptRecords(ctx, file, from, offset, true, func(record map[string]any, _ int64, _ []byte) {
+	err = transcript.ScanRecords(ctx, file, from, offset, true, func(record map[string]any, _ int64, _ []byte) {
 		meter.observe(record)
 	})
 	return meter, err
@@ -219,7 +220,7 @@ func codexRolloutTurnMetadata(ctx context.Context, path, turnID string) *surface
 	if err != nil {
 		return nil
 	}
-	end, found, err := transcriptRecordBefore(ctx, file, info.Size(), lineContains([]byte(turnID)), func(record map[string]any) bool {
+	end, found, err := transcript.RecordBefore(ctx, file, info.Size(), transcript.LineContains([]byte(turnID)), func(record map[string]any) bool {
 		_, ended := codexRecordEndsTurn(record)
 		return ended && codexRecordTurnID(record) == turnID
 	})
@@ -231,7 +232,7 @@ func codexRolloutTurnMetadata(ctx context.Context, path, turnID string) *surface
 		return nil
 	}
 	var turn *surface.TurnMetadata
-	_ = scanTranscriptRecords(ctx, file, end, info.Size(), true, func(record map[string]any, _ int64, _ []byte) {
+	_ = transcript.ScanRecords(ctx, file, end, info.Size(), true, func(record map[string]any, _ int64, _ []byte) {
 		if turn == nil {
 			turn = meter.observe(record)
 		}

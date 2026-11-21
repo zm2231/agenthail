@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func (c *Codex) Resolve(ctx context.Context, target string) (*surface.Session, error) {
@@ -129,7 +130,7 @@ func (c *Codex) SearchSessions(ctx context.Context, query string, limit int) ([]
 		if session.ID == "" {
 			continue
 		}
-		output = append(output, surface.SessionSearchResult{Session: session, Snippet: str(entry, "snippet")})
+		output = append(output, surface.SessionSearchResult{Session: session, Snippet: transcript.String(entry, "snippet")})
 	}
 	return output, nil
 }

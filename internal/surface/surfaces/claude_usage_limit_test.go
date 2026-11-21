@@ -12,6 +12,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 const claudeUsageLimitLine = `{"type":"assistant","uuid":"u2","timestamp":"2026-10-09T10:11:12.653Z","message":{"id":"m2","model":"<synthetic>","role":"assistant","stop_reason":"stop_sequence","type":"message","content":[{"type":"text","text":"You've hit your session limit · resets 7am (America/New_York)"}]},"apiError":"usage_limit_reached","apiErrorParams":{"rate_limit_info":{"status":"rejected","resetsAt":1791543600,"rateLimitType":"five_hour"}},"quotaLimits":{"status":"rejected","resetsAt":1791543600,"rateLimitType":"five_hour"},"error":"rate_limit","isApiErrorMessage":true,"apiErrorStatus":429}`
@@ -40,9 +41,9 @@ func TestAUsageLimitRecordIsANoticeWithItsResetTime(t *testing.T) {
 }
 
 func TestAUsageLimitedTurnEndsTheReplyWithTheLimit(t *testing.T) {
-	records := []transcriptRecord{
-		{line: []byte(`{"type":"user","uuid":"u1","timestamp":"2026-10-09T10:11:10Z","message":{"role":"user","content":"keep going"}}`)},
-		{line: []byte(claudeUsageLimitLine)},
+	records := []transcript.Record{
+		{Line: []byte(`{"type":"user","uuid":"u1","timestamp":"2026-10-09T10:11:10Z","message":{"role":"user","content":"keep going"}}`)},
+		{Line: []byte(claudeUsageLimitLine)},
 	}
 	reply, _ := claudeTranscriptReply(records, "claude", nil)
 	if !reply.Done || !strings.Contains(reply.Error, "out of usage") || !strings.Contains(reply.Error, "session limit") {

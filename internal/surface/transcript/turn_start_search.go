@@ -1,4 +1,4 @@
-package surfaces
+package transcript
 
 import (
 	"context"
@@ -6,11 +6,11 @@ import (
 	"slices"
 )
 
-// turnStartSearch finds the last record before an offset that match accepts,
+// TurnStartSearch finds the last record before an offset that match accepts,
 // within turnScanLimit bytes. It keeps what it scanned, so asking again at
 // an earlier offset, as a page widening its window does, reads only the
 // bytes below what it already read.
-type turnStartSearch struct {
+type TurnStartSearch struct {
 	candidate func([]byte) bool
 	decode    func([]byte, *map[string]any) error
 	match     func(map[string]any) bool
@@ -21,12 +21,12 @@ type turnStartSearch struct {
 	found     []int64
 }
 
-func newTurnStartSearch(candidate func([]byte) bool, decode func([]byte, *map[string]any) error, match func(map[string]any) bool) *turnStartSearch {
-	return &turnStartSearch{candidate: candidate, decode: decode, match: match}
+func NewTurnStartSearch(candidate func([]byte) bool, decode func([]byte, *map[string]any) error, match func(map[string]any) bool) *TurnStartSearch {
+	return &TurnStartSearch{candidate: candidate, decode: decode, match: match}
 }
 
-func (s *turnStartSearch) before(ctx context.Context, file *os.File, offset int64) (int64, bool, error) {
-	floor := max(0, offset-turnScanLimit)
+func (s *TurnStartSearch) before(ctx context.Context, file *os.File, offset int64) (int64, bool, error) {
+	floor := max(0, offset-TurnScanLimit)
 	if !s.scanned || offset > s.hi || offset < s.lo {
 		s.scanned, s.floor, s.lo, s.hi, s.found = true, offset, offset, offset, nil
 	}

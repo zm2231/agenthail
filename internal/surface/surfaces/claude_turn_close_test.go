@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -250,9 +251,9 @@ func TestClaudeSourceStreamDropsClosingTurnWhenTranscriptIsRewrittenMidWindow(t 
 		rewritten.WriteString(`{"type":"user","uuid":"v1","message":{"content":"new generation"}}` + "\n")
 	}
 	rewritten.WriteString(`{"type":"user","uuid":"v2","message":{"content":"after the old offset"}}` + "\n")
-	original := transcriptPollInterval
-	transcriptPollInterval = 300 * time.Millisecond
-	t.Cleanup(func() { transcriptPollInterval = original })
+	original := transcript.PollInterval
+	transcript.PollInterval = 300 * time.Millisecond
+	t.Cleanup(func() { transcript.PollInterval = original })
 	var mu sync.Mutex
 	done := map[string]int{}
 	closingSeen := make(chan struct{})
@@ -364,7 +365,7 @@ func TestAClosingTurnClearsWhenItsTranscriptIsRewrittenAtTheSameSizeAndTime(t *t
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	parked, resume := make(chan struct{}), make(chan struct{})
-	transcriptWaiting = func() {
+	transcript.Waiting = func() {
 		select {
 		case parked <- struct{}{}:
 		case <-ctx.Done():
@@ -375,7 +376,7 @@ func TestAClosingTurnClearsWhenItsTranscriptIsRewrittenAtTheSameSizeAndTime(t *t
 		case <-ctx.Done():
 		}
 	}
-	t.Cleanup(func() { transcriptWaiting = nil })
+	t.Cleanup(func() { transcript.Waiting = nil })
 	nextPass := func() {
 		t.Helper()
 		select {
@@ -416,7 +417,7 @@ func TestAClosingTurnClearsWhenItsTranscriptIsRewrittenAtTheSameSizeAndTime(t *t
 		if err != nil {
 			t.Fatal(err)
 		}
-		if changed := transcriptChangeTime(rewritten); changed == "" || changed != transcriptChangeTime(info) {
+		if changed := transcript.ChangeTime(rewritten); changed == "" || changed != transcript.ChangeTime(info) {
 			break
 		}
 	}

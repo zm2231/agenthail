@@ -13,6 +13,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // claudeConversation is what Claude's own records say about one conversation:
@@ -129,7 +130,7 @@ func (c *Claude) reachableAsIs(ctx context.Context, sess *surface.Session) bool 
 		return false
 	}
 	record, ok := c.peerRecord(sess.PID)
-	if !ok || str(record, "sessionId") != sess.ID || sess.HolderStart != "" && recordStart(record) != sess.HolderStart {
+	if !ok || transcript.String(record, "sessionId") != sess.ID || sess.HolderStart != "" && recordStart(record) != sess.HolderStart {
 		return false
 	}
 	sess.Bridge = c.recordBridge(record)
@@ -446,7 +447,7 @@ func (c *Claude) atRest(ctx context.Context, sess *surface.Session) bool {
 
 func claudeTranscriptCwd(path string) string {
 	cwd := ""
-	_ = findJSONL(path, func(line []byte) (bool, error) {
+	_ = transcript.FindJSONL(path, func(line []byte) (bool, error) {
 		var record struct {
 			Cwd string `json:"cwd"`
 		}
@@ -476,7 +477,7 @@ func (c *Claude) conversationTitle(ctx context.Context, conversation, root strin
 
 func claudeTranscriptTitle(ctx context.Context, path string) string {
 	title := ""
-	_ = findJSONL(path, func(line []byte) (bool, error) {
+	_ = transcript.FindJSONL(path, func(line []byte) (bool, error) {
 		if ctx.Err() != nil {
 			return true, nil
 		}

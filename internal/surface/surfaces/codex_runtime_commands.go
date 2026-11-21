@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // Codex runs a skill named with $; neither Codex route runs a message that
@@ -36,7 +37,7 @@ func codexRuntimeCommands(resp map[string]any) *surface.RuntimeCommands {
 		skills, _ := entry["skills"].([]any)
 		for _, rawSkill := range skills {
 			skill, _ := rawSkill.(map[string]any)
-			name := str(skill, "name")
+			name := transcript.String(skill, "name")
 			if name == "" || seen[name] || skill["enabled"] == false {
 				continue
 			}
@@ -48,11 +49,11 @@ func codexRuntimeCommands(resp map[string]any) *surface.RuntimeCommands {
 }
 
 func codexSkillDescription(skill map[string]any) string {
-	if face, _ := skill["interface"].(map[string]any); str(face, "shortDescription") != "" {
-		return str(face, "shortDescription")
+	if face, _ := skill["interface"].(map[string]any); transcript.String(face, "shortDescription") != "" {
+		return transcript.String(face, "shortDescription")
 	}
-	if short := str(skill, "shortDescription"); short != "" {
+	if short := transcript.String(skill, "shortDescription"); short != "" {
 		return short
 	}
-	return str(skill, "description")
+	return transcript.String(skill, "description")
 }

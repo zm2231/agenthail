@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // holderRecords returns the session records of the live processes that hold
@@ -18,7 +19,7 @@ import (
 func holderRecords(records []claudeSessionRecord, conversation string) []map[string]any {
 	var out []map[string]any
 	for _, record := range records {
-		if str(record.fields, "sessionId") != conversation {
+		if transcript.String(record.fields, "sessionId") != conversation {
 			continue
 		}
 		if pid, _ := record.fields["pid"].(float64); pid <= 0 {
@@ -47,7 +48,7 @@ func sessionHolders(records []map[string]any) []surface.Holder {
 	holders := make([]surface.Holder, 0, len(records))
 	for _, record := range records {
 		pid := recordPID(record)
-		holder := surface.Holder{PID: pid, Start: recordStart(record), TTY: processTTY(pid), App: terminalApp(pid), Cwd: str(record, "cwd"), Status: claudePeerStatus(record)}
+		holder := surface.Holder{PID: pid, Start: recordStart(record), TTY: processTTY(pid), App: terminalApp(pid), Cwd: transcript.String(record, "cwd"), Status: claudePeerStatus(record)}
 		if startedAt, ok := record["startedAt"].(float64); ok {
 			holder.StartedAt = time.UnixMilli(int64(startedAt))
 		}
@@ -92,7 +93,7 @@ func (p claudePin) matches(record map[string]any) bool {
 // the process recorded for itself, else when it began its session. A process
 // that later reuses the pid writes a record that names neither.
 func recordStart(record map[string]any) string {
-	if start := str(record, "procStart"); start != "" {
+	if start := transcript.String(record, "procStart"); start != "" {
 		return start
 	}
 	if startedAt, ok := record["startedAt"].(float64); ok {
@@ -212,7 +213,7 @@ func (c *Claude) sharedLocalStatus(ctx context.Context, session surface.Session)
 
 func holderRoot(records []claudeSessionRecord, fields map[string]any) string {
 	for _, record := range records {
-		if recordPID(record.fields) == recordPID(fields) && str(record.fields, "sessionId") == str(fields, "sessionId") {
+		if recordPID(record.fields) == recordPID(fields) && transcript.String(record.fields, "sessionId") == transcript.String(fields, "sessionId") {
 			return record.root
 		}
 	}
@@ -226,7 +227,7 @@ func holderRoot(records []claudeSessionRecord, fields map[string]any) string {
 func (c *Claude) sharedLiveRecord(sess surface.Session) (map[string]any, bool) {
 	var chosen map[string]any
 	rank := func(record map[string]any) int {
-		switch str(record, "status") {
+		switch transcript.String(record, "status") {
 		case "waiting":
 			return 2
 		case "busy":
@@ -251,7 +252,7 @@ func (c *Claude) sharedLiveRecord(sess surface.Session) (map[string]any, bool) {
 // reused the pid since is a change of holders, which only discovery publishes.
 func (c *Claude) heldRecord(conversation string, holder surface.Holder) (map[string]any, bool) {
 	_, record, found := c.pidRecord(holder.PID)
-	if !found || str(record, "sessionId") != conversation || !claudeRecordLive(record) {
+	if !found || transcript.String(record, "sessionId") != conversation || !claudeRecordLive(record) {
 		return nil, false
 	}
 	if !holder.StartedAt.IsZero() {

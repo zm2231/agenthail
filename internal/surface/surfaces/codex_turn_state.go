@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 type codexLiveTurnRecord struct {
@@ -119,7 +120,7 @@ type codexLifecycleScan struct {
 
 func lastCodexLifecycle(file io.ReaderAt, size, limit int64) codexLifecycleScan {
 	var scan codexLifecycleScan
-	scan.read = scanJSONLBackward(file, size, limit, func(line []byte, offset int64) bool {
+	scan.read = transcript.ScanJSONLBackward(file, size, limit, func(line []byte, offset int64) bool {
 		record, recordAt, ok := parseCodexLiveTurnRecord(line)
 		if !ok {
 			return true
@@ -138,7 +139,7 @@ func lastCodexLifecycle(file io.ReaderAt, size, limit int64) codexLifecycleScan 
 
 type codexLiveTurnState struct {
 	path       string
-	cursor     transcriptCursor
+	cursor     transcript.Cursor
 	turn       codexLiveTurn
 	deep       bool
 	read       bool
@@ -165,14 +166,14 @@ func (c *Codex) liveTurn(ctx context.Context, sessionID, path string, info os.Fi
 		c.turnState[sessionID] = state
 	}
 	if state.path != path {
-		state.path, state.cursor = path, transcriptCursor{}
+		state.path, state.cursor = path, transcript.Cursor{}
 	}
 	state.read = true
-	if state.cursor.reset(info) || (deep && !state.deep && !state.turn.known) {
+	if state.cursor.Reset(info) || (deep && !state.deep && !state.turn.known) {
 		state.turn, state.deep = codexLiveTurn{}, deep
 		file, err := os.Open(path)
 		if err != nil {
-			state.cursor = transcriptCursor{}
+			state.cursor = transcript.Cursor{}
 			return codexLiveTurnRead{status: surface.StatusUnknown}
 		}
 		limit := codexStatusReadLimit
@@ -182,16 +183,16 @@ func (c *Codex) liveTurn(ctx context.Context, sessionID, path string, info os.Fi
 		scan := lastCodexLifecycle(file, info.Size(), limit)
 		file.Close()
 		state.turn.lastAt = scan.newest
-		state.cursor.offset = info.Size()
+		state.cursor.Offset = info.Size()
 		if scan.found {
-			state.cursor.offset = scan.offset
+			state.cursor.Offset = scan.offset
 		}
 	}
-	if offset, err := scanAppendedJSONL(ctx, path, state.cursor.offset, maxTranscriptRecordBytes, func(line []byte) error {
+	if offset, err := transcript.ScanAppendedJSONL(ctx, path, state.cursor.Offset, transcript.MaxRecordBytes, func(line []byte) error {
 		state.turn.apply(line)
 		return nil
 	}); err == nil {
-		state.cursor.offset = offset
+		state.cursor.Offset = offset
 	}
 	status, activity := state.turn.status(info.ModTime(), now)
 	return codexLiveTurnRead{status: status, activity: activity, newest: state.turn.lastAt, stop: state.turn.stop}

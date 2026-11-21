@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // initialClaudeObservationBytes bounds the transcript tail read when a Claude
@@ -15,7 +16,7 @@ import (
 var initialClaudeObservationBytes int64 = 32 * 1024 * 1024
 
 type claudeObservationState struct {
-	cursor               transcriptCursor
+	cursor               transcript.Cursor
 	current              claudeTurn
 	completed            claudeTurn
 	hasCurrent           bool
@@ -41,10 +42,10 @@ func (c *Claude) observeTranscript(ctx context.Context, path string, sess *surfa
 	if err != nil {
 		return nil, err
 	}
-	if state == nil || state.cursor.reset(info) {
+	if state == nil || state.cursor.Reset(info) {
 		state = &claudeObservationState{}
-		state.cursor.reset(info)
-		lines, offset, err := readRecentJSONLLines(ctx, path, 0, initialClaudeObservationBytes, maxClaudeTranscriptRecordBytes)
+		state.cursor.Reset(info)
+		lines, offset, err := transcript.ReadRecentJSONLLines(ctx, path, 0, initialClaudeObservationBytes, maxClaudeTranscriptRecordBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -58,11 +59,11 @@ func (c *Claude) observeTranscript(ctx context.Context, path string, sess *surfa
 		for _, line := range lines {
 			_ = state.apply(line)
 		}
-		state.cursor.offset = offset
+		state.cursor.Offset = offset
 		c.observeState[path] = state
 	}
-	offset, err := scanAppendedJSONL(ctx, path, state.cursor.offset, maxClaudeTranscriptRecordBytes, state.apply)
-	state.cursor.offset = offset
+	offset, err := transcript.ScanAppendedJSONL(ctx, path, state.cursor.Offset, maxClaudeTranscriptRecordBytes, state.apply)
+	state.cursor.Offset = offset
 	if err != nil {
 		return nil, err
 	}

@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/hosts"
-	providers "github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"github.com/zm2231/agenthail/internal/uploads"
 )
 
@@ -64,7 +64,7 @@ type hostAnswer struct {
 	payload []byte
 }
 
-const maxHostAnswerBytes = max(32<<20, providers.MaxSentFileBytes)
+const maxHostAnswerBytes = max(32<<20, transcript.MaxSentFileBytes)
 
 var errHostAnswerTooLarge = errors.New("host answer too large")
 

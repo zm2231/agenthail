@@ -17,6 +17,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
@@ -74,7 +75,7 @@ func newHumanTurnFixtureSignedIn(t *testing.T, signins signin.Resolver) *humanTu
 	f := &humanTurnFixture{r: r, home: process.Home, process: process}
 	process.Listen()
 	process.Record("conversation-bridge", process.Home, "session_bridge")
-	f.claude = &nativeRecordingClaude{Claude: surfaces.NewClaudeWithRequest(signins, process.Home, func(_ context.Context, method, url string, _ map[string]string, body string, _ surfaces.CookieSource, _ time.Duration) (int, string, error) {
+	f.claude = &nativeRecordingClaude{Claude: surfaces.NewClaudeWithRequest(signins, process.Home, func(_ context.Context, method, url string, _ map[string]string, body string, _ browsercookie.Source, _ time.Duration) (int, string, error) {
 		if method == http.MethodGet && f.get != nil {
 			return f.get(url)
 		}

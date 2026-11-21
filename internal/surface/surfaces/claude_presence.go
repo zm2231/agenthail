@@ -7,6 +7,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/procstart"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // Presence counts a Claude session current only while its process is open,
@@ -50,7 +51,7 @@ func (c *Claude) liveRecord(sess surface.Session) (map[string]any, bool) {
 		return c.sharedLiveRecord(sess)
 	}
 	_, record, found := c.pidRecord(sess.PID)
-	if !found || str(record, "sessionId") != sess.ID || !claudeRecordLive(record) {
+	if !found || transcript.String(record, "sessionId") != sess.ID || !claudeRecordLive(record) {
 		return nil, false
 	}
 	return record, true
@@ -64,7 +65,7 @@ func claudeRecordLive(record map[string]any) bool {
 	if pid <= 0 || !claudeProcessAlive(int(pid)) {
 		return false
 	}
-	started := str(record, "procStart")
+	started := transcript.String(record, "procStart")
 	if started == "" {
 		return claudeRecordPredatesProcess(record, int(pid))
 	}
@@ -73,7 +74,7 @@ func claudeRecordLive(record map[string]any) bool {
 		return err == nil && actual == started
 	}
 	actual, err := processStartTime(int(pid))
-	return err == nil && sameClaudeProcessStart(str(record, "version"), started, actual.UTC().Format(psStartLayout))
+	return err == nil && sameClaudeProcessStart(transcript.String(record, "version"), started, actual.UTC().Format(psStartLayout))
 }
 
 // claudeRecordPredatesProcess dates a record that names no procStart by its

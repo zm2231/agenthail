@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 type codexBackgroundState struct {
-	cursor transcriptCursor
+	cursor transcript.Cursor
 	window surface.CodexToolWindow
 	turnID string
 	read   bool
@@ -64,11 +65,11 @@ func (c *Codex) backgroundCommands(ctx context.Context, path string, info os.Fil
 		c.backgroundState = map[string]*codexBackgroundState{}
 	}
 	state := c.backgroundState[path]
-	reset := state == nil || state.cursor.reset(info)
+	reset := state == nil || state.cursor.Reset(info)
 	if reset {
 		state = &codexBackgroundState{}
-		state.cursor.reset(info)
-		lines, offset, err := readRecentJSONLLines(ctx, path, 0, codexPlanFirstReadBytes, maxTranscriptRecordBytes)
+		state.cursor.Reset(info)
+		lines, offset, err := transcript.ReadRecentJSONLLines(ctx, path, 0, codexPlanFirstReadBytes, transcript.MaxRecordBytes)
 		if err != nil {
 			delete(c.backgroundState, path)
 			return nil
@@ -76,16 +77,16 @@ func (c *Codex) backgroundCommands(ctx context.Context, path string, info os.Fil
 		for _, line := range lines {
 			state.apply(line)
 		}
-		state.cursor.offset = offset
+		state.cursor.Offset = offset
 		c.backgroundState[path] = state
 	}
-	if info.Size() > state.cursor.offset {
-		offset, err := scanAppendedJSONL(ctx, path, state.cursor.offset, maxTranscriptRecordBytes, func(line []byte) error {
+	if info.Size() > state.cursor.Offset {
+		offset, err := transcript.ScanAppendedJSONL(ctx, path, state.cursor.Offset, transcript.MaxRecordBytes, func(line []byte) error {
 			state.apply(line)
 			return nil
 		})
 		if err == nil {
-			state.cursor.offset = offset
+			state.cursor.Offset = offset
 		}
 	}
 	state.read = true

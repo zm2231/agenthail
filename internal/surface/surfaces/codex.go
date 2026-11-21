@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 type Codex struct {
@@ -92,7 +93,7 @@ func (c *Codex) Health(ctx context.Context) error {
 }
 
 func (c *Codex) Reply(ctx context.Context, sess *surface.Session, limit int) (*surface.ReplyResult, error) {
-	return readSessionReply(ctx, c, sess, limit)
+	return transcript.ReadSessionReply(ctx, c, sess, limit)
 }
 
 func (c *Codex) Tail(ctx context.Context, sess *surface.Session, n int) ([]surface.Exchange, error) {

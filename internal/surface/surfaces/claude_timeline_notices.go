@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // claudeAPIErrorNotice turns the message Claude Code writes in place of a
@@ -23,7 +24,7 @@ func claudeAPIErrorNotice(record map[string]any) surface.TimelineItem {
 }
 
 func claudeUsageLimitRecord(record map[string]any) bool {
-	return str(record, "error") == "rate_limit" || str(record, "apiError") == "usage_limit_reached"
+	return transcript.String(record, "error") == "rate_limit" || transcript.String(record, "apiError") == "usage_limit_reached"
 }
 
 func claudeUsageLimitResetsAt(record map[string]any) time.Time {
@@ -66,7 +67,7 @@ func claudeImageSourceCompanion(record, message map[string]any) bool {
 	}
 	for _, raw := range blocks {
 		block, _ := raw.(map[string]any)
-		if str(block, "type") != "text" || !claudeImageNote(str(block, "text")) {
+		if transcript.String(block, "type") != "text" || !claudeImageNote(transcript.String(block, "text")) {
 			return false
 		}
 	}

@@ -1,4 +1,4 @@
-package surfaces
+package transcript
 
 import (
 	"cmp"
@@ -11,10 +11,10 @@ import (
 )
 
 const (
-	compactLineBytes   = 1 << 20
+	CompactLineBytes   = 1 << 20
 	compactStringBytes = 64 << 10
 	compactCutField    = "agenthailCut"
-	toolOutputLimit    = "tool output limit"
+	ToolOutputLimit    = "tool output limit"
 )
 
 type lineEdit struct {
@@ -22,12 +22,12 @@ type lineEdit struct {
 	replacement string
 }
 
-func decodeCompactRecord(line []byte, record *map[string]any) error {
+func DecodeCompactRecord(line []byte, record *map[string]any) error {
 	return json.Unmarshal(compactTranscriptLine(line), record)
 }
 
 func compactTranscriptLine(line []byte) []byte {
-	if len(line) <= compactLineBytes {
+	if len(line) <= CompactLineBytes {
 		return line
 	}
 	text := string(line)
@@ -105,7 +105,7 @@ func jsonStringPrefix(raw string, limit int) string {
 	return raw[:at]
 }
 
-func recordCut(object map[string]any) bool {
+func RecordCut(object map[string]any) bool {
 	cut, _ := object[compactCutField].(bool)
 	return cut
 }

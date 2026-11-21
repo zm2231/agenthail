@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // ClaudePermissionPrompt is what Claude Code passes a PermissionRequest hook
@@ -219,7 +220,7 @@ func (c *Claude) terminalProcess(sessionID string) (int, bool) {
 	}
 	for _, record := range records {
 		fields := record.fields
-		if str(fields, "sessionId") != sessionID || str(fields, "kind") != "interactive" || str(fields, "entrypoint") != "cli" {
+		if transcript.String(fields, "sessionId") != sessionID || transcript.String(fields, "kind") != "interactive" || transcript.String(fields, "entrypoint") != "cli" {
 			continue
 		}
 		if pid, ok := fields["pid"].(float64); ok && pid > 0 && claudeRecordLive(fields) {
@@ -268,7 +269,7 @@ func (c *Claude) promptSettled(session surface.Session, held *claudePrompt) bool
 		return true
 	}
 	since, _ := record["statusUpdatedAt"].(float64)
-	if str(record, "status") == "waiting" {
+	if transcript.String(record, "status") == "waiting" {
 		c.prompts.mu.Lock()
 		defer c.prompts.mu.Unlock()
 		if held.shownMS == 0 && int64(since) >= held.createdMS-int64(claudePromptRecordWait/time.Millisecond) {

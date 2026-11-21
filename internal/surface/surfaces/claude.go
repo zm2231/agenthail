@@ -8,6 +8,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 )
 
 type Claude struct {
@@ -43,7 +44,7 @@ type Claude struct {
 	mcpAttachment
 }
 
-type ClaudeRequest func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error)
+type ClaudeRequest func(context.Context, string, string, map[string]string, string, browsercookie.Source, time.Duration) (int, string, error)
 
 func NewClaude(signins signin.Resolver, home string) *Claude {
 	return NewClaudeWithRequest(signins, home, claudeSendRequest)
@@ -53,7 +54,7 @@ func NewClaudeWithRequest(signins signin.Resolver, home string, request ClaudeRe
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	return &Claude{signins: signins, home: home, cookieBridge: configuredCookieBridge(), subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(), entrypoints: newClaudeEntrypoints(), host: newClaudeHost(home), prompts: newClaudePrompts(), webAccounts: claudeWebAccounts{byProfile: map[string]claudeWebAccountEntry{}}}
+	return &Claude{signins: signins, home: home, cookieBridge: browsercookie.ConfiguredBridge(), subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(), entrypoints: newClaudeEntrypoints(), host: newClaudeHost(home), prompts: newClaudePrompts(), webAccounts: claudeWebAccounts{byProfile: map[string]claudeWebAccountEntry{}}}
 }
 
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }

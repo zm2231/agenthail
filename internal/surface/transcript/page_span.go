@@ -1,4 +1,4 @@
-package surfaces
+package transcript
 
 import (
 	"bytes"
@@ -16,7 +16,7 @@ import (
 // records after start. It reports whether a larger span would give the same
 // page: the page stopped at a record its own limits chose, after the first
 // record whose state the span knows exactly.
-func readTranscriptSpan(ctx context.Context, file *os.File, path string, format transcriptFormat, floor, start, end, completeEnd, before int64, limit int, starts *turnStartSearch, result *surface.SessionReadResult) (bool, error) {
+func readTranscriptSpan(ctx context.Context, file *os.File, path string, format Format, floor, start, end, completeEnd, before int64, limit int, starts *TurnStartSearch, result *surface.SessionReadResult) (bool, error) {
 	var err error
 	windowStart := start
 	data := make([]byte, end-start)
@@ -40,16 +40,16 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path string, format 
 		data = nil
 	}
 	lines := bytes.SplitAfter(data, []byte{'\n'})
-	span, err := format.readSpan(ctx, file, transcriptSpan{path: path, start: start, end: end, completeEnd: completeEnd, before: before, lines: lines, starts: starts, result: result})
+	span, err := format.ReadSpan(ctx, file, Span{Path: path, Start: start, End: end, CompleteEnd: completeEnd, Before: before, Lines: lines, Starts: starts, Result: result})
 	if err != nil {
 		return false, err
 	}
-	exactFrom := span.exactFrom()
+	exactFrom := span.ExactFrom()
 	offset := start + int64(len(data))
 	budget := 512 << 10
 	var groups [][]surface.TimelineItem
 	var groupOffsets []int64
-	var records []transcriptRecord
+	var records []Record
 	// truncatedAt holds the records the page shortened or dropped; only those
 	// on the page mark it truncated.
 	var truncatedAt []int64
@@ -64,11 +64,11 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path string, format 
 			return false, err
 		}
 		var record map[string]any
-		if decodeCompactRecord(line, &record) != nil {
+		if DecodeCompactRecord(line, &record) != nil {
 			truncatedAt = append(truncatedAt, offset)
 			continue
 		}
-		items, skip, err := span.items(ctx, index, record, offset, line)
+		items, skip, err := span.Items(ctx, index, record, offset, line)
 		if err != nil {
 			return false, err
 		}
@@ -77,14 +77,14 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path string, format 
 		}
 		if len(items) == 0 {
 			// Records without items still close a Claude turn whose last block was written.
-			records = append(records, transcriptRecord{offset: offset, line: line})
+			records = append(records, Record{offset: offset, Line: line})
 			continue
 		}
 		full := slices.Clone(items)
 		for i := range items {
 			item := &items[i]
-			if len(item.Text) > timelineTextBudget {
-				cut := timelineTextBudget
+			if len(item.Text) > TimelineTextBudget {
+				cut := TimelineTextBudget
 				for cut > 0 && !utf8.RuneStart(item.Text[cut]) {
 					cut--
 				}
@@ -98,12 +98,12 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path string, format 
 		for _, group := range groups {
 			count += len(group)
 		}
-		if len(groups) > 0 && (len(encoded) > budget || count+len(items) > timelineItemLimit) {
+		if len(groups) > 0 && (len(encoded) > budget || count+len(items) > TimelineItemLimit) {
 			result.NextBefore = offset + int64(len(line))
 			stopped = true
 			break
 		}
-		records = append(records, transcriptRecord{offset: offset, line: line, items: full})
+		records = append(records, Record{offset: offset, Line: line, items: full})
 		// A single oversized record must not defeat the response budget.
 		for len(encoded) > budget && len(items) > 1 {
 			items = items[1:]
@@ -154,7 +154,7 @@ func readTranscriptSpan(ctx context.Context, file *os.File, path string, format 
 	// Records that reached the span's start may continue before it: a reply
 	// from their first turn may be that turn's tail, and no reply may only
 	// mean it is further back.
-	replyKnown := !span.reply(records, result) || stopped || start <= floor
+	replyKnown := !span.Reply(records, result) || stopped || start <= floor
 	pageStart := int64(-1)
 	if limit > 0 && len(result.Exchanges) > limit {
 		result.Exchanges = result.Exchanges[len(result.Exchanges)-limit:]

@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // codexHookSource is installed with its own hash as its ABI, so any change to
@@ -264,7 +265,7 @@ func (c *Codex) rpc(ctx context.Context, conn *cdpConn, method string, params ma
 	}
 	if envelope, ok := response["error"].(map[string]any); ok {
 		code, _ := envelope["code"].(float64)
-		refused := &codexRPCError{Method: method, Code: int(code), Message: str(envelope, "message"), Data: envelope["data"]}
+		refused := &codexRPCError{Method: method, Code: int(code), Message: transcript.String(envelope, "message"), Data: envelope["data"]}
 		if bridgeCode, _ := envelope["code"].(string); codexBridgeUnsent[bridgeCode] {
 			return nil, surface.DeliveryUnavailable(refused)
 		}

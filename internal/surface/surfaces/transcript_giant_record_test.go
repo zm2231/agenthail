@@ -1,6 +1,7 @@
 package surfaces
 
 import (
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"math/rand"
 	"strings"
 	"testing"
@@ -17,9 +18,9 @@ func TestAPageCutsAGiantToolResultButKeepsTheReplyWhole(t *testing.T) {
 			{"type": "assistant", "uuid": "answer-1", "timestamp": at, "message": map[string]any{"id": "message-1", "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": reply}}}},
 		}
 	}
-	transcript := writePageTranscript(t, records, 1, 1)
-	page := readPageWithFirstWindow(t, 64<<10, transcript.path, "claude", 0, 10)
-	samePage(t, "giant records", page, readPageWithFirstWindow(t, timelineReadBudget, transcript.path, "claude", 0, 10))
+	written := writePageTranscript(t, records, 1, 1)
+	page := readPageWithFirstWindow(t, 64<<10, written.path, "claude", 0, 10)
+	samePage(t, "giant records", page, readPageWithFirstWindow(t, transcript.TimelineReadBudget, written.path, "claude", 0, 10))
 	if len(page.Exchanges) != 1 || page.Exchanges[0].Assistant != reply || page.Exchanges[0].User != "read the log" {
 		t.Fatalf("exchanges = %d; the reply must come back whole", len(page.Exchanges))
 	}

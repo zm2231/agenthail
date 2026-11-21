@@ -13,6 +13,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 )
 
 type candidateSignin struct{ sources []signin.Source }
@@ -50,7 +51,7 @@ func newClaudeRootFixture(t *testing.T, accountUUID, email string) *claudeRootFi
 	return &claudeRootFixture{home: home, session: &surface.Session{ID: "conversation", Surface: surface.KindClaude, Bridge: "session_fixture", Transcript: transcript}}
 }
 
-func (f *claudeRootFixture) request(_ context.Context, method, url string, _ map[string]string, _ string, cookies CookieSource, _ time.Duration) (int, string, error) {
+func (f *claudeRootFixture) request(_ context.Context, method, url string, _ map[string]string, _ string, cookies browsercookie.Source, _ time.Duration) (int, string, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, method+" "+strings.TrimPrefix(url, "https://claude.ai")+" "+cookies.Signin.Dir)
 	f.mu.Unlock()
@@ -215,7 +216,7 @@ func TestClaudeRemoteControlThatCannotReadSessionRecordsIsHeldNotRefused(t *test
 
 func TestClaudeRemoteControlHoldsWhenAProfileCannotBeAsked(t *testing.T) {
 	fixture := newClaudeRootFixture(t, "c", "c@example.com")
-	request := func(ctx context.Context, method, url string, headers map[string]string, body string, cookies CookieSource, timeout time.Duration) (int, string, error) {
+	request := func(ctx context.Context, method, url string, headers map[string]string, body string, cookies browsercookie.Source, timeout time.Duration) (int, string, error) {
 		if strings.HasSuffix(url, "/api/account") {
 			switch cookies.Signin.Dir {
 			case "/a":
@@ -240,7 +241,7 @@ func TestClaudeRemoteControlHoldsWhenAProfileCannotBeAsked(t *testing.T) {
 
 func TestClaudeRemoteControlRefusesWhenEveryProfileIsSignedOutOrAnotherAccount(t *testing.T) {
 	fixture := newClaudeRootFixture(t, "c", "c@example.com")
-	request := func(ctx context.Context, method, url string, headers map[string]string, body string, cookies CookieSource, timeout time.Duration) (int, string, error) {
+	request := func(ctx context.Context, method, url string, headers map[string]string, body string, cookies browsercookie.Source, timeout time.Duration) (int, string, error) {
 		if strings.HasSuffix(url, "/api/account") && cookies.Signin.Dir == "/a" {
 			return 401, `{"type":"error"}`, nil
 		}
@@ -275,7 +276,7 @@ func TestClaudeRemoteControlWithAnUnreadableRootLoginIsHeld(t *testing.T) {
 
 func TestClaudeRemoteControlHoldsWhenCloudflareAnswersForAProfile(t *testing.T) {
 	fixture := newClaudeRootFixture(t, "c", "c@example.com")
-	request := func(ctx context.Context, method, url string, headers map[string]string, body string, cookies CookieSource, timeout time.Duration) (int, string, error) {
+	request := func(ctx context.Context, method, url string, headers map[string]string, body string, cookies browsercookie.Source, timeout time.Duration) (int, string, error) {
 		if strings.HasSuffix(url, "/api/account") && cookies.Signin.Dir == "/a" {
 			return 403, "<html>Access denied</html>", nil
 		}
@@ -290,7 +291,7 @@ func TestClaudeRemoteControlHoldsWhenCloudflareAnswersForAProfile(t *testing.T) 
 
 func TestClaudeConfigRootsUsageProblemDoesNotNameTheOrganization(t *testing.T) {
 	fixture := newClaudeRootFixture(t, "b", "b@example.com")
-	request := func(ctx context.Context, method, url string, headers map[string]string, body string, cookies CookieSource, timeout time.Duration) (int, string, error) {
+	request := func(ctx context.Context, method, url string, headers map[string]string, body string, cookies browsercookie.Source, timeout time.Duration) (int, string, error) {
 		if strings.HasSuffix(url, "/usage") {
 			return 0, "", errors.New("sidecar failed: Max retries exceeded with url: " + strings.TrimPrefix(url, "https://claude.ai"))
 		}

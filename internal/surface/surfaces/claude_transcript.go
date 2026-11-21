@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"io"
 	"os"
 	"regexp"
@@ -210,8 +211,8 @@ func noteClaudeTurnActivity(turn *claudeTurn, record claudeRecord) {
 	case "assistant":
 		for _, raw := range blocks {
 			block, _ := raw.(map[string]any)
-			if str(block, "type") == "tool_use" && str(block, "id") != "" {
-				turn.Tools = append(append([]claudeToolCall(nil), turn.Tools...), claudeToolCall{ID: str(block, "id"), Name: str(block, "name"), StartedAt: at})
+			if transcript.String(block, "type") == "tool_use" && transcript.String(block, "id") != "" {
+				turn.Tools = append(append([]claudeToolCall(nil), turn.Tools...), claudeToolCall{ID: transcript.String(block, "id"), Name: transcript.String(block, "name"), StartedAt: at})
 			}
 		}
 	case "user":
@@ -221,8 +222,8 @@ func noteClaudeTurnActivity(turn *claudeTurn, record claudeRecord) {
 		}
 		for _, raw := range blocks {
 			block, _ := raw.(map[string]any)
-			if str(block, "type") == "tool_result" {
-				finished[str(block, "tool_use_id")] = true
+			if transcript.String(block, "type") == "tool_result" {
+				finished[transcript.String(block, "tool_use_id")] = true
 			}
 		}
 		if len(finished) == 0 || len(turn.Tools) == 0 {
@@ -387,7 +388,7 @@ func readClaudeCompactCompletion(path string, offset int64, requestUUID string) 
 	matchedRequest := false
 	boundaries := map[string]bool{}
 	summaryParent := map[string]string{}
-	err = findJSONLFrom(path, offset, func(line []byte) (bool, error) {
+	err = transcript.FindJSONLFrom(path, offset, func(line []byte) (bool, error) {
 		var record claudeRecord
 		if json.Unmarshal(line, &record) != nil {
 			return false, nil
@@ -465,7 +466,7 @@ func claudeForkedFrom(path string) string {
 			SessionID string `json:"sessionId"`
 		} `json:"forkedFrom"`
 	}
-	if _, err := readFirstJSONL(path, &record); err != nil {
+	if _, err := transcript.ReadFirstJSONL(path, &record); err != nil {
 		return ""
 	}
 	return record.ForkedFrom.SessionID
@@ -482,7 +483,7 @@ func claudeTurnError(turn claudeTurn) string {
 // claudeRecordAPIError is the error of a record Claude Code wrote in place of
 // a reply the API refused, or empty for any other record.
 func claudeRecordAPIError(record map[string]any) string {
-	if apiError, _ := record["isApiErrorMessage"].(bool); !apiError || str(record, "type") != "assistant" {
+	if apiError, _ := record["isApiErrorMessage"].(bool); !apiError || transcript.String(record, "type") != "assistant" {
 		return ""
 	}
 	message, _ := record["message"].(map[string]any)

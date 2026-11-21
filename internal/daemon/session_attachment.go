@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
-	providers "github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func (d *Daemon) apiSessionAttachmentHandler(w http.ResponseWriter, r *http.Request) {
@@ -37,7 +37,7 @@ func (d *Daemon) apiSessionAttachmentHandler(w http.ResponseWriter, r *http.Requ
 	defer cancel()
 	attachment, data, err := reader.ReadAttachment(ctx, session, id)
 	if err != nil {
-		status, code, message := providers.AttachmentHTTPStatus(err)
+		status, code, message := transcript.AttachmentHTTPStatus(err)
 		writeAPIError(w, status, code, message)
 		return
 	}

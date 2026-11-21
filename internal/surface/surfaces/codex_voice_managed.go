@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"github.com/zm2231/agenthail/internal/voice"
 )
 
@@ -65,7 +66,7 @@ func (v *CodexVoice) openVoiceLink(ctx context.Context, session *surface.Session
 		return nil, classifyCodexWrite(fmt.Errorf("thread/resume: %w", err))
 	}
 	result, _ := resumed["result"].(map[string]any)
-	if thread, _ := result["thread"].(map[string]any); str(thread, "name") != voiceOperatorName {
+	if thread, _ := result["thread"].(map[string]any); transcript.String(thread, "name") != voiceOperatorName {
 		if err := nameVoiceOperator(ctx, managed, session.ID); err != nil {
 			_ = managed.Close()
 			return nil, classifyCodexWrite(fmt.Errorf("name the voice operator: %w", err))
@@ -146,7 +147,7 @@ func voiceEventMethod(event codexEvent) bool {
 		return true
 	case event.Method == "item/completed":
 		item, _ := event.Params["item"].(map[string]any)
-		return str(item, "type") == "agentMessage" && str(item, "phase") == "final_answer"
+		return transcript.String(item, "type") == "agentMessage" && transcript.String(item, "phase") == "final_answer"
 	}
 	return false
 }
@@ -238,18 +239,18 @@ func (l *voiceLink) realtimeLoginRefusal() error {
 	if !l.accountRead {
 		return nil
 	}
-	switch str(l.account, "type") {
+	switch transcript.String(l.account, "type") {
 	case "chatgpt", "apiKey":
 		return nil
 	case "":
 		return &voice.RejectedError{Reason: "Codex on this host is not signed in, and voice needs its login. " + realtimeRemedy(nil)}
 	default:
-		return &voice.RejectedError{Reason: "Codex on this host is signed in with " + str(l.account, "type") + ", which has no realtime voice. " + realtimeRemedy(l.account)}
+		return &voice.RejectedError{Reason: "Codex on this host is signed in with " + transcript.String(l.account, "type") + ", which has no realtime voice. " + realtimeRemedy(l.account)}
 	}
 }
 
 func realtimeRemedy(account map[string]any) string {
-	switch str(account, "type") {
+	switch transcript.String(account, "type") {
 	case "apiKey":
 		return "Codex here uses an API key, so voice goes to the OpenAI Realtime API with that key: use a key with Realtime API access, or sign in with ChatGPT by running 'codex login' on this host."
 	case "chatgpt":

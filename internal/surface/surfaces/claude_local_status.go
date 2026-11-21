@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func (c *Claude) LocalStatusFiles(session surface.Session) []string {
@@ -47,7 +48,7 @@ func claudeStatus(status surface.SessionStatus) surface.SessionStatus {
 // "shell" when its prompt is ready but a background shell is still running,
 // and "waiting" while the turn is blocked on the user.
 func claudePeerStatus(record map[string]any) surface.SessionStatus {
-	status := surface.NormalizeStatus(str(record, "status"))
+	status := surface.NormalizeStatus(transcript.String(record, "status"))
 	if status == surface.StatusBusy {
 		return surface.StatusBusy
 	}

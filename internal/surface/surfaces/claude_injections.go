@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 const (
@@ -35,7 +36,7 @@ func claudePromptOrigin(origin map[string]any, text string) string {
 	if _, _, ok := surface.ParseNotice(text); ok {
 		return claudeOriginNotice
 	}
-	if kind := str(origin, "kind"); kind != "" {
+	if kind := transcript.String(origin, "kind"); kind != "" {
 		return kind
 	}
 	if surface.IsAgenthailNotice(text) {
@@ -74,8 +75,8 @@ func claudeInjectedItem(kind string, origin map[string]any, text string) surface
 		}
 		return item
 	case claudeOriginPeer:
-		sender := str(origin, "name")
-		body := str(origin, "body")
+		sender := transcript.String(origin, "name")
+		body := transcript.String(origin, "body")
 		if envelope := claudePeerEnvelope.FindStringSubmatch(text); envelope != nil {
 			if body == "" {
 				body = strings.TrimSpace(envelope[2])
@@ -89,7 +90,7 @@ func claudeInjectedItem(kind string, origin map[string]any, text string) surface
 		}
 		if sender == surface.CLIPeerSender {
 			if notice, ok := surface.CLINotice(body); ok {
-				if id := str(origin, "msg_id"); id != "" {
+				if id := transcript.String(origin, "msg_id"); id != "" {
 					notice.ID = "peer:" + id
 				}
 				return notice
@@ -97,7 +98,7 @@ func claudeInjectedItem(kind string, origin map[string]any, text string) surface
 		}
 		if words, ok := claudePersonWords(text, body); ok {
 			item := surface.TimelineItem{Kind: "message", Role: "user", Origin: surface.OriginPerson, Title: "user", Text: words}
-			if id := str(origin, "msg_id"); id != "" {
+			if id := transcript.String(origin, "msg_id"); id != "" {
 				item.ID = "peer:" + id
 			}
 			return item
@@ -106,7 +107,7 @@ func claudeInjectedItem(kind string, origin map[string]any, text string) surface
 		if item.Title == "" {
 			item.Title = "Agent message"
 		}
-		if id := str(origin, "msg_id"); id != "" {
+		if id := transcript.String(origin, "msg_id"); id != "" {
 			item.ID = "peer:" + id
 		}
 		return item
@@ -146,7 +147,7 @@ func claudeRecordedOrigin(text string) string {
 // this attachment, so it is their message here.
 func claudeQueuedCommandItems(record map[string]any) []surface.TimelineItem {
 	attachment, _ := record["attachment"].(map[string]any)
-	if str(attachment, "type") != "queued_command" {
+	if transcript.String(attachment, "type") != "queued_command" {
 		return nil
 	}
 	prompt, ok := attachment["prompt"].(string)
@@ -169,8 +170,8 @@ func claudeMessageText(content any) string {
 	var parts []string
 	for _, raw := range blocks {
 		block, _ := raw.(map[string]any)
-		if str(block, "type") == "text" {
-			parts = append(parts, str(block, "text"))
+		if transcript.String(block, "type") == "text" {
+			parts = append(parts, transcript.String(block, "text"))
 		}
 	}
 	return strings.Join(parts, "\n\n")

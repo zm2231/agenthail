@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
@@ -174,7 +175,7 @@ func TestNotionCompletionReplayPreservesBurstAndInputProvenance(t *testing.T) {
 	ids := []string{"old"}
 	missing := ""
 	toolOnly := ""
-	notionRecordRequest = func(_ context.Context, _, _ string, _ map[string]string, body string, _ CookieSource, _ time.Duration) (int, string, error) {
+	notionRecordRequest = func(_ context.Context, _, _ string, _ map[string]string, body string, _ browsercookie.Source, _ time.Duration) (int, string, error) {
 		if strings.Contains(body, `"table":"thread"`) {
 			payload, _ := json.Marshal(map[string]any{"recordMap": map[string]any{"thread": map[string]any{"source": map[string]any{"value": map[string]any{"value": map[string]any{"messages": ids}}}}}})
 			return 200, string(payload), nil

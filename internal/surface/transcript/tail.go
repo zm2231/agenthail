@@ -1,4 +1,4 @@
-package surfaces
+package transcript
 
 import (
 	"bufio"
@@ -13,21 +13,21 @@ import (
 // maxJSONLRecordBytes bounds every transcript line read by shared JSONL readers.
 const maxJSONLRecordBytes = 32 * 1024 * 1024
 
-type transcriptCursor struct {
-	identity string
-	offset   int64
+type Cursor struct {
+	Identity string
+	Offset   int64
 }
 
-func (c *transcriptCursor) reset(info os.FileInfo) bool {
-	identity := transcriptFileIdentity(info)
-	if c.identity == identity && identity != "" && info.Size() >= c.offset {
+func (c *Cursor) Reset(info os.FileInfo) bool {
+	identity := FileIdentity(info)
+	if c.Identity == identity && identity != "" && info.Size() >= c.Offset {
 		return false
 	}
-	c.identity, c.offset = identity, 0
+	c.Identity, c.Offset = identity, 0
 	return true
 }
 
-func readFirstJSONL(path string, value any) (int64, error) {
+func ReadFirstJSONL(path string, value any) (int64, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return 0, err
@@ -38,7 +38,7 @@ func readFirstJSONL(path string, value any) (int64, error) {
 	for {
 		part, readErr := reader.ReadSlice('\n')
 		if len(line)+len(part) > maxJSONLRecordBytes {
-			return 0, transcriptRecordTooLarge{limit: maxJSONLRecordBytes}
+			return 0, RecordTooLarge{limit: maxJSONLRecordBytes}
 		}
 		line = append(line, part...)
 		if readErr != bufio.ErrBufferFull {
@@ -51,11 +51,11 @@ func readFirstJSONL(path string, value any) (int64, error) {
 	return int64(len(line)), json.Unmarshal(line, value)
 }
 
-func findJSONL(path string, visit func([]byte) (bool, error)) error {
-	return findJSONLFrom(path, 0, visit)
+func FindJSONL(path string, visit func([]byte) (bool, error)) error {
+	return FindJSONLFrom(path, 0, visit)
 }
 
-func findJSONLFrom(path string, offset int64, visit func([]byte) (bool, error)) error {
+func FindJSONLFrom(path string, offset int64, visit func([]byte) (bool, error)) error {
 	file, err := os.Open(path)
 	if err != nil {
 		return err
@@ -74,7 +74,7 @@ func findJSONLFrom(path string, offset int64, visit func([]byte) (bool, error)) 
 	return err
 }
 
-func readRecentJSONLLines(ctx context.Context, path string, limit int, byteLimit int64, recordLimit int) ([][]byte, int64, error) {
+func ReadRecentJSONLLines(ctx context.Context, path string, limit int, byteLimit int64, recordLimit int) ([][]byte, int64, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, 0, err
@@ -140,13 +140,13 @@ func readRecentJSONLLines(ctx context.Context, path string, limit int, byteLimit
 	return lines, end, nil
 }
 
-type transcriptRecordTooLarge struct{ limit int }
+type RecordTooLarge struct{ limit int }
 
-func (e transcriptRecordTooLarge) Error() string {
+func (e RecordTooLarge) Error() string {
 	return fmt.Sprintf("transcript record exceeds %d bytes", e.limit)
 }
 
-func scanAppendedJSONL(ctx context.Context, path string, offset int64, limit int, visit func([]byte) error) (int64, error) {
+func ScanAppendedJSONL(ctx context.Context, path string, offset int64, limit int, visit func([]byte) error) (int64, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return offset, err
@@ -180,7 +180,7 @@ func scanJSONL(ctx context.Context, file *os.File, offset int64, limit int, fina
 		for {
 			part, partErr := reader.ReadSlice('\n')
 			if len(line)+len(part) > limit {
-				return current, transcriptRecordTooLarge{limit: limit}
+				return current, RecordTooLarge{limit: limit}
 			}
 			line = append(line, part...)
 			readErr = partErr

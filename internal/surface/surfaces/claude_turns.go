@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 type claudeTurnEnd struct {
@@ -80,8 +81,8 @@ func newClaudeTurnTracker(current string, closing surface.ClaudeClosingTurn) *cl
 // and the item index after its items, as the live stream has always keyed it.
 func (t *claudeTurnTracker) observe(record map[string]any, offset int64, line []byte, itemCount func() int) (string, []claudeTurnEnd, bool) {
 	var ended []claudeTurnEnd
-	messageID := strNested(record, "message", "id")
-	if t.closing.TurnID != "" && !claudeRecordContinuesMessage(str(record, "type"), messageID, t.closing.MessageID) {
+	messageID := transcript.NestedString(record, "message", "id")
+	if t.closing.TurnID != "" && !claudeRecordContinuesMessage(transcript.String(record, "type"), messageID, t.closing.MessageID) {
 		if !claudeRecordIsInterrupt(record) {
 			ended = t.finish(ended, t.closing.TurnID, t.closing.Key, "")
 		}
@@ -89,9 +90,9 @@ func (t *claudeTurnTracker) observe(record map[string]any, offset int64, line []
 	}
 	if claudeRecordStartsTurn(record) && !(claudeRecordIsStopHookFeedback(record) && t.answeredWithoutEnd(t.current)) {
 		if t.answeredWithoutEnd(t.current) {
-			ended = t.finish(ended, t.current, stableTimelineItemID(offset, line, itemCount()), "")
+			ended = t.finish(ended, t.current, transcript.StableTimelineItemID(offset, line, itemCount()), "")
 		}
-		t.current = str(record, "uuid")
+		t.current = transcript.String(record, "uuid")
 		t.interleaved = t.sawInterleaving()
 		t.meter = claudeTurnMeter{turnID: t.current, usage: map[string]surface.TurnUsage{}, compactions: t.between, compactionsKnown: t.betweenKnown}
 		t.between, t.betweenKnown = nil, false
@@ -102,12 +103,12 @@ func (t *claudeTurnTracker) observe(record map[string]any, offset int64, line []
 		t.meter.observe(record)
 	}
 	if t.answeredWithoutEnd(turnID) && claudeRecordStopsAfterHooks(record) {
-		return turnID, t.finish(ended, turnID, stableTimelineItemID(offset, line, itemCount()), ""), false
+		return turnID, t.finish(ended, turnID, transcript.StableTimelineItemID(offset, line, itemCount()), ""), false
 	}
 	done, ending, interrupted := claudeStreamTerminal(record)
 	if interrupted {
 		if turnID != "" {
-			ended = t.finish(ended, turnID, stableTimelineItemID(offset, line, 0), "cancelled")
+			ended = t.finish(ended, turnID, transcript.StableTimelineItemID(offset, line, 0), "cancelled")
 		}
 		return turnID, ended, true
 	}
@@ -120,9 +121,9 @@ func (t *claudeTurnTracker) observe(record map[string]any, offset int64, line []
 	if !ending && !done {
 		return turnID, ended, false
 	}
-	key := stableTimelineItemID(offset, line, itemCount())
+	key := transcript.StableTimelineItemID(offset, line, itemCount())
 	if ending {
-		at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
+		at, _ := time.Parse(time.RFC3339Nano, transcript.String(record, "timestamp"))
 		t.closing = surface.ClaudeClosingTurn{TurnID: turnID, MessageID: messageID, Key: key, At: at}
 	} else if done {
 		if reason := claudeRecordAPIError(record); reason != "" {
@@ -177,19 +178,19 @@ func (t *claudeTurnTracker) observeCompaction(record map[string]any) {
 	if open {
 		compactions = &t.meter.compactions
 	}
-	if str(record, "type") == "user" {
+	if transcript.String(record, "type") == "user" {
 		t.observeCompactRequest(record, *compactions)
 		return
 	}
-	if str(record, "type") != "system" {
+	if transcript.String(record, "type") != "system" {
 		return
 	}
-	switch str(record, "subtype") {
+	switch transcript.String(record, "subtype") {
 	case "compact_boundary":
 		metadata, _ := record["compactMetadata"].(map[string]any)
 		compaction := surface.TurnCompaction{Trigger: surface.CompactionThreshold, RequestID: t.compactRequest}
 		t.compactRequest, t.summaryPrompt = "", ""
-		switch str(metadata, "trigger") {
+		switch transcript.String(metadata, "trigger") {
 		case "manual":
 			compaction.Trigger = surface.CompactionManual
 		case "auto":
@@ -197,11 +198,11 @@ func (t *claudeTurnTracker) observeCompaction(record map[string]any) {
 			compaction.Trigger = surface.CompactionUnknown
 		}
 		if value, ok := metadata["preTokens"]; ok {
-			pre := int64Value(value)
+			pre := transcript.Int64Value(value)
 			compaction.PreTokens = &pre
 		}
 		if value, ok := metadata["postTokens"]; ok {
-			post := int64Value(value)
+			post := transcript.Int64Value(value)
 			compaction.PostTokens = &post
 			if open {
 				t.meter.context = &post
@@ -209,14 +210,14 @@ func (t *claudeTurnTracker) observeCompaction(record map[string]any) {
 		}
 		*compactions = append(*compactions, compaction)
 	case "informational":
-		if n := len(*compactions); n > 0 && claudeIdleCompactionNotice(str(record, "content")) {
+		if n := len(*compactions); n > 0 && claudeIdleCompactionNotice(transcript.String(record, "content")) {
 			(*compactions)[n-1].Trigger = surface.CompactionIdle
 		}
 	}
 }
 
 func (t *claudeTurnTracker) observeCompactRequest(record map[string]any, compactions []surface.TurnCompaction) {
-	prompt := str(record, "promptId")
+	prompt := transcript.String(record, "promptId")
 	if summary, _ := record["isCompactSummary"].(bool); summary {
 		t.summaryPrompt = prompt
 		return
@@ -226,11 +227,11 @@ func (t *claudeTurnTracker) observeCompactRequest(record map[string]any, compact
 		return
 	}
 	if n := len(compactions); n > 0 && compactions[n-1].RequestID == "" && prompt != "" && prompt == t.summaryPrompt {
-		compactions[n-1].RequestID = str(record, "uuid")
+		compactions[n-1].RequestID = transcript.String(record, "uuid")
 		t.summaryPrompt = ""
 		return
 	}
-	t.compactRequest = str(record, "uuid")
+	t.compactRequest = transcript.String(record, "uuid")
 }
 
 func claudeIdleCompactionNotice(content string) bool {
@@ -238,20 +239,20 @@ func claudeIdleCompactionNotice(content string) bool {
 }
 
 func (m *claudeTurnMeter) observe(record map[string]any) {
-	if at, err := time.Parse(time.RFC3339Nano, str(record, "timestamp")); err == nil {
+	if at, err := time.Parse(time.RFC3339Nano, transcript.String(record, "timestamp")); err == nil {
 		if m.startedAt.IsZero() {
 			m.startedAt = at
 		}
 		m.lastAt = at
 	}
-	if str(record, "type") != "assistant" {
+	if transcript.String(record, "type") != "assistant" {
 		return
 	}
 	message, _ := record["message"].(map[string]any)
 	apiError, _ := record["isApiErrorMessage"].(bool)
 	m.answered = true
-	m.endBlock = m.endBlock || apiError || str(message, "stop_reason") == "end_turn"
-	model := str(message, "model")
+	m.endBlock = m.endBlock || apiError || transcript.String(message, "stop_reason") == "end_turn"
+	model := transcript.String(message, "model")
 	if model == claudeSyntheticModel {
 		return
 	}
@@ -259,21 +260,21 @@ func (m *claudeTurnMeter) observe(record map[string]any) {
 		m.model = model
 	}
 	usage, _ := message["usage"].(map[string]any)
-	id := str(message, "id")
+	id := transcript.String(message, "id")
 	if usage == nil || id == "" {
 		return
 	}
-	cacheRead := int64Value(usage["cache_read_input_tokens"])
-	cacheWrite := int64Value(usage["cache_creation_input_tokens"])
+	cacheRead := transcript.Int64Value(usage["cache_read_input_tokens"])
+	cacheWrite := transcript.Int64Value(usage["cache_creation_input_tokens"])
 	counted := surface.TurnUsage{
-		InputTokens:       int64Value(usage["input_tokens"]) + cacheRead + cacheWrite,
+		InputTokens:       transcript.Int64Value(usage["input_tokens"]) + cacheRead + cacheWrite,
 		CachedInputTokens: cacheRead,
 		CacheWriteTokens:  cacheWrite,
-		OutputTokens:      int64Value(usage["output_tokens"]),
+		OutputTokens:      transcript.Int64Value(usage["output_tokens"]),
 	}
 	details, _ := usage["output_tokens_details"].(map[string]any)
 	if thinking, ok := details["thinking_tokens"]; ok {
-		reasoning := int64Value(thinking)
+		reasoning := transcript.Int64Value(thinking)
 		counted.ReasoningTokens = &reasoning
 	}
 	if id != m.lastUsage {
@@ -328,27 +329,27 @@ func claudeTurnStateAt(ctx context.Context, file *os.File, offset int64) (*claud
 	return claudeTurnStateFrom(ctx, file, offset, newClaudeTurnStartSearch())
 }
 
-func newClaudeTurnStartSearch() *turnStartSearch {
-	return newTurnStartSearch(claudeLineMayStartTurn, decodeCompactRecord, claudeSearchStartsTurn)
+func newClaudeTurnStartSearch() *transcript.TurnStartSearch {
+	return transcript.NewTurnStartSearch(claudeLineMayStartTurn, transcript.DecodeCompactRecord, claudeSearchStartsTurn)
 }
 
 func claudeSearchStartsTurn(record map[string]any) bool {
 	return claudeRecordStartsTurn(record) && !claudeRecordIsStopHookFeedback(record)
 }
 
-func claudeTurnStateFrom(ctx context.Context, file *os.File, offset int64, starts *turnStartSearch) (*claudeTurnTracker, error) {
+func claudeTurnStateFrom(ctx context.Context, file *os.File, offset int64, starts *transcript.TurnStartSearch) (*claudeTurnTracker, error) {
 	info, err := file.Stat()
 	if err != nil {
 		return nil, err
 	}
-	identity := transcriptFileIdentity(info)
+	identity := transcript.FileIdentity(info)
 	if identity != "" {
 		if tracker, ok, err := claudeReplayCheckpoints.resume(ctx, file, identity, info.Size(), offset); err != nil || ok {
 			return tracker, err
 		}
 	}
 	tracker := newClaudeTurnTracker("", surface.ClaudeClosingTurn{})
-	from, found, err := turnReplayStart(ctx, file, offset, starts)
+	from, found, err := transcript.TurnReplayStart(ctx, file, offset, starts)
 	if err != nil || !found {
 		return tracker, err
 	}
@@ -375,7 +376,7 @@ func replayItemCount(record map[string]any, exact bool, line []byte) func() int 
 			return len(claudeTimelineItems(record))
 		}
 		var full map[string]any
-		if decodeCompactRecord(line, &full) != nil {
+		if transcript.DecodeCompactRecord(line, &full) != nil {
 			return 0
 		}
 		return len(claudeTimelineItems(full))
@@ -389,19 +390,19 @@ const replayStringBytes = 256
 // as every other reader decodes them, so commands, interrupts and stop-hook
 // feedback are recognised from their whole text. exact reports which.
 func decodeReplayRecord(line []byte) (record map[string]any, exact bool) {
-	cut, shortened := cutJSONStrings(line, replayStringBytes)
+	cut, shortened := transcript.CutJSONStrings(line, replayStringBytes)
 	if shortened && json.Unmarshal(cut, &record) == nil && !claudeReplayReadsText(record) {
 		return record, false
 	}
 	record = nil
-	if decodeCompactRecord(line, &record) != nil {
+	if transcript.DecodeCompactRecord(line, &record) != nil {
 		return nil, false
 	}
 	return record, true
 }
 
 func claudeReplayReadsText(record map[string]any) bool {
-	switch str(record, "type") {
+	switch transcript.String(record, "type") {
 	case "user":
 		message, _ := record["message"].(map[string]any)
 		switch content := message["content"].(type) {
@@ -409,7 +410,7 @@ func claudeReplayReadsText(record map[string]any) bool {
 			return true
 		case []any:
 			for _, raw := range content {
-				if block, _ := raw.(map[string]any); str(block, "type") == "text" {
+				if block, _ := raw.(map[string]any); transcript.String(block, "type") == "text" {
 					return true
 				}
 			}
@@ -479,11 +480,11 @@ func (c *Claude) TranscriptItems(ctx context.Context, session *surface.Session, 
 	if err != nil {
 		return nil, err
 	}
-	identity := transcriptFileIdentity(info)
+	identity := transcript.FileIdentity(info)
 	if request.Identity != "" && (identity != request.Identity || request.From > info.Size()) {
 		return nil, surface.ErrTranscriptChanged
 	}
-	end, err := completeJSONLEnd(ctx, file, info.Size())
+	end, err := transcript.CompleteJSONLEnd(ctx, file, info.Size())
 	if err != nil {
 		return nil, err
 	}
@@ -498,7 +499,7 @@ func (c *Claude) TranscriptItems(ctx context.Context, session *surface.Session, 
 	var items []surface.TimelineItem
 	var itemErr error
 	calls := newClaudeToolCalls(path)
-	err = scanTranscriptRecords(ctx, file, from, end, false, func(record map[string]any, offset int64, line []byte) {
+	err = transcript.ScanRecords(ctx, file, from, end, false, func(record map[string]any, offset int64, line []byte) {
 		if itemErr != nil {
 			return
 		}

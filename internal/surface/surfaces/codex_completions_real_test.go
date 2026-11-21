@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tidwall/gjson"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 type slowModel struct{ mockResponses }
@@ -94,8 +95,8 @@ func TestAnInterruptSentWhileACodexTurnStartsStopsThatTurn(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if str(newest, "id") == turnID && newest["completedAt"] != nil {
-			if status := str(newest, "status"); status != "interrupted" {
+		if transcript.String(newest, "id") == turnID && newest["completedAt"] != nil {
+			if status := transcript.String(newest, "status"); status != "interrupted" {
 				t.Fatalf("the interrupted turn ended %s", status)
 			}
 			return

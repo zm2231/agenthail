@@ -6,11 +6,12 @@ import (
 	"slices"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func codexRecordTurnID(record map[string]any) string {
 	payload, _ := record["payload"].(map[string]any)
-	for _, value := range []string{str(payload, "turn_id"), str(payload, "turnId"), str(record, "turn_id"), str(record, "turnId")} {
+	for _, value := range []string{transcript.String(payload, "turn_id"), transcript.String(payload, "turnId"), transcript.String(record, "turn_id"), transcript.String(record, "turnId")} {
 		if value != "" {
 			return value
 		}
@@ -34,12 +35,12 @@ type codexUserProjection struct {
 
 func (p *codexUserProjection) consume(record map[string]any, items []surface.TimelineItem, turnID string) bool {
 	payload, _ := record["payload"].(map[string]any)
-	if str(record, "type") == "event_msg" && str(payload, "type") == "user_message" {
+	if transcript.String(record, "type") == "event_msg" && transcript.String(payload, "type") == "user_message" {
 		p.pending = true
 		p.turnID = turnID
 		return false
 	}
-	if str(record, "type") != "response_item" || !hasUserTimelineItem(items) {
+	if transcript.String(record, "type") != "response_item" || !hasUserTimelineItem(items) {
 		if p.pending && p.turnID != "" {
 			if turnID != "" && turnID != p.turnID {
 				p.pending = false
@@ -56,12 +57,12 @@ func (p *codexUserProjection) consume(record map[string]any, items []surface.Tim
 
 func codexOpaqueTimelineItem(record map[string]any) *surface.TimelineItem {
 	payload, _ := record["payload"].(map[string]any)
-	typ := str(payload, "type")
+	typ := transcript.String(payload, "type")
 	if status, ended := codexTurnEnd(payload); ended {
 		done := codexDoneItem(status, payload)
 		return &done
 	}
-	if typ == "" || (str(record, "type") != "response_item" && str(record, "type") != "event_msg") {
+	if typ == "" || (transcript.String(record, "type") != "response_item" && transcript.String(record, "type") != "event_msg") {
 		return nil
 	}
 	switch typ {
@@ -95,28 +96,28 @@ func codexTranscriptFallbackKey(offset int64, line []byte, index int) string {
 
 func codexTranscriptItemKey(record map[string]any, item surface.TimelineItem, index int) string {
 	payload, _ := record["payload"].(map[string]any)
-	semanticID := str(payload, "id")
+	semanticID := transcript.String(payload, "id")
 	if semanticID == "" {
 		semanticID = item.CallID
 	}
 	if semanticID == "" {
-		semanticID = str(payload, "call_id")
+		semanticID = transcript.String(payload, "call_id")
 	}
 	if semanticID == "" {
-		semanticID = str(record, "uuid")
+		semanticID = transcript.String(record, "uuid")
 	}
 	if semanticID == "" {
 		return ""
 	}
-	turnID := str(payload, "turn_id")
+	turnID := transcript.String(payload, "turn_id")
 	if turnID == "" {
-		turnID = str(payload, "turnId")
+		turnID = transcript.String(payload, "turnId")
 	}
 	if turnID == "" {
-		turnID = str(record, "turn_id")
+		turnID = transcript.String(record, "turn_id")
 	}
 	if turnID == "" {
-		turnID = str(record, "turnId")
+		turnID = transcript.String(record, "turnId")
 	}
 	kind := codexDesktopKeyKind(item.Kind)
 	switch kind {

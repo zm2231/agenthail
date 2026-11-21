@@ -17,6 +17,8 @@ import (
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -119,7 +121,7 @@ func TestClaudeHumanTurnCarriesImagesAsContentBlocks(t *testing.T) {
 {"type":"system","subtype":"stop_hook_summary"}`)
 	var requestBody string
 	home, pid := liveHumanTurnProcess(t)
-	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(_ context.Context, _, _ string, _ map[string]string, body string, _ CookieSource, _ time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(_ context.Context, _, _ string, _ map[string]string, body string, _ browsercookie.Source, _ time.Duration) (int, string, error) {
 		requestBody = body
 		return http.StatusOK, `{}`, nil
 	})
@@ -226,7 +228,7 @@ func TestSentImagesRenderAsAttachmentsWithoutRuntimePathNoise(t *testing.T) {
 				if item.Kind != "attachment" {
 					continue
 				}
-				_, data, err := readTranscriptAttachment(context.Background(), &surface.Session{Transcript: path}, item.Attachment.ID, transcriptFormatOf(test.source), func(*surface.Session) string { return path })
+				_, data, err := transcript.ReadAttachment(context.Background(), &surface.Session{Transcript: path}, item.Attachment.ID, transcriptFormatOf(test.source), func(*surface.Session) string { return path })
 				if err != nil || len(data) == 0 {
 					t.Fatalf("attachment %s is not fetchable: %v", item.Attachment.ID, err)
 				}

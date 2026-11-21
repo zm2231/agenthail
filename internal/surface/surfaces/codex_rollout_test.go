@@ -10,6 +10,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 const (
@@ -84,8 +85,8 @@ func TestAContinuedRolloutReadsItsRetainedHistoryWithoutTheRevertedTurn(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if page.TranscriptIdentity != transcriptFileIdentity(info) || !page.TranscriptOffsetSet || page.TranscriptOffset != info.Size() {
-		t.Fatalf("identity=%q offset=%d set=%v, want the continuation's %q at %d", page.TranscriptIdentity, page.TranscriptOffset, page.TranscriptOffsetSet, transcriptFileIdentity(info), info.Size())
+	if page.TranscriptIdentity != transcript.FileIdentity(info) || !page.TranscriptOffsetSet || page.TranscriptOffset != info.Size() {
+		t.Fatalf("identity=%q offset=%d set=%v, want the continuation's %q at %d", page.TranscriptIdentity, page.TranscriptOffset, page.TranscriptOffsetSet, transcript.FileIdentity(info), info.Size())
 	}
 }
 
@@ -124,7 +125,7 @@ func TestAContinuationReportsTheItemsItRevertedFromTheTrustedRollout(t *testing.
 	}
 	codex := inDaemon(NewCodexIn(home, "http://127.0.0.1:1"))
 	session := surface.Session{ID: continuedThread, Surface: surface.KindCodex, Transcript: continued}
-	dropped, continues, err := codex.TranscriptContinuation(context.Background(), &session, "", transcriptFileIdentity(info))
+	dropped, continues, err := codex.TranscriptContinuation(context.Background(), &session, "", transcript.FileIdentity(info))
 	if err != nil || !continues {
 		t.Fatalf("continues=%v err=%v, want a continuation of the trusted rollout", continues, err)
 	}
@@ -181,7 +182,7 @@ func TestARolloutThatDoesNotContinueTheTrustedOneIsNotAContinuation(t *testing.T
 	}
 	codex := inDaemon(NewCodexIn(home, "http://127.0.0.1:1"))
 	session := surface.Session{ID: continuedThread, Surface: surface.KindCodex, Transcript: unrelated}
-	if _, continues, err := codex.TranscriptContinuation(context.Background(), &session, original, transcriptFileIdentity(info)); err != nil || continues {
+	if _, continues, err := codex.TranscriptContinuation(context.Background(), &session, original, transcript.FileIdentity(info)); err != nil || continues {
 		t.Fatalf("continues=%v err=%v, want a rollout without history_base rejected", continues, err)
 	}
 	other := filepath.Join(filepath.Dir(continued), "rollout-2026-09-15T10-00-00-"+continuedThread+"_01a0a482-5500-7000-8000-000000000003.jsonl")
@@ -189,7 +190,7 @@ func TestARolloutThatDoesNotContinueTheTrustedOneIsNotAContinuation(t *testing.T
 		t.Fatal(err)
 	}
 	session.Transcript = other
-	if _, continues, err := codex.TranscriptContinuation(context.Background(), &session, original, transcriptFileIdentity(info)); err != nil || continues {
+	if _, continues, err := codex.TranscriptContinuation(context.Background(), &session, original, transcript.FileIdentity(info)); err != nil || continues {
 		t.Fatalf("continues=%v err=%v, want another thread's rollout rejected", continues, err)
 	}
 }
@@ -221,7 +222,7 @@ func TestTwoRevertsReadAsOneHistoryAndReportOnlyTheTrustedRolloutsRevertedTurn(t
 	}
 	codex := inDaemon(NewCodexIn(home, "http://127.0.0.1:1"))
 	session := surface.Session{ID: continuedThread, Surface: surface.KindCodex, Transcript: latest}
-	dropped, continues, err := codex.TranscriptContinuation(context.Background(), &session, "", transcriptFileIdentity(info))
+	dropped, continues, err := codex.TranscriptContinuation(context.Background(), &session, "", transcript.FileIdentity(info))
 	if err != nil || !continues {
 		t.Fatalf("continues=%v err=%v", continues, err)
 	}

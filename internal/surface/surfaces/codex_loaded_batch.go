@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"time"
 )
 
@@ -15,7 +16,7 @@ func (c *Codex) readThreadObjects(ctx context.Context, conn codexClient, ids []s
 	for start := 0; start < len(ids); start += codexIncludedThreadLimit {
 		chunk := ids[start:min(start+codexIncludedThreadLimit, len(ids))]
 		for _, thread := range c.listThreadsByID(ctx, conn, chunk) {
-			byID[str(thread, "id")] = thread
+			byID[transcript.String(thread, "id")] = thread
 		}
 	}
 	threads := make([]map[string]any, 0, len(ids))

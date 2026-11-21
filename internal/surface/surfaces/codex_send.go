@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func (c *Codex) Send(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
@@ -54,9 +55,9 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 	}
 	turnID := sess.ID
 	if result, _ := resp["result"].(map[string]any); result != nil {
-		if turn, _ := result["turn"].(map[string]any); turn != nil && str(turn, "id") != "" {
-			turnID = str(turn, "id")
-		} else if value := str(result, "turnId"); value != "" {
+		if turn, _ := result["turn"].(map[string]any); turn != nil && transcript.String(turn, "id") != "" {
+			turnID = transcript.String(turn, "id")
+		} else if value := transcript.String(result, "turnId"); value != "" {
 			turnID = value
 		}
 	}

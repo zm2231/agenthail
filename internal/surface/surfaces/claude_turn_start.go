@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"encoding/json"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"os"
 	"slices"
 	"strings"
@@ -19,7 +20,7 @@ func claudeTurnBefore(path string, end int64) (claudeTurn, bool) {
 	var turn claudeTurn
 	var queued []string
 	found := false
-	scanJSONLBackward(file, end, end, func(line []byte, _ int64) bool {
+	transcript.ScanJSONLBackward(file, end, end, func(line []byte, _ int64) bool {
 		var record claudeRecord
 		if json.Unmarshal(line, &record) != nil {
 			return true

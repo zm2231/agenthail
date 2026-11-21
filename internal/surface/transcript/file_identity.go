@@ -1,4 +1,4 @@
-package surfaces
+package transcript
 
 import (
 	"bytes"
@@ -9,12 +9,12 @@ import (
 	"reflect"
 )
 
-func completeJSONLEnd(ctx context.Context, file *os.File, end int64) (int64, error) {
+func CompleteJSONLEnd(ctx context.Context, file *os.File, end int64) (int64, error) {
 	if end == 0 {
 		return 0, nil
 	}
 	const chunkSize int64 = 64 << 10
-	remaining := int64(maxTranscriptRecordBytes)
+	remaining := int64(MaxRecordBytes)
 	position := end
 	for position > 0 && remaining > 0 {
 		readSize := minInt64(chunkSize, position)
@@ -47,7 +47,7 @@ func minInt64(a, b int64) int64 {
 	return b
 }
 
-func transcriptFileIdentity(info os.FileInfo) string {
+func FileIdentity(info os.FileInfo) string {
 	if info == nil || info.Sys() == nil {
 		return ""
 	}
@@ -65,4 +65,4 @@ func transcriptFileIdentity(info os.FileInfo) string {
 	return ""
 }
 
-const maxTranscriptRecordBytes = 32 * 1024 * 1024
+const MaxRecordBytes = 32 * 1024 * 1024

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // conversationRoot returns the config root that holds a conversation's
@@ -21,7 +22,7 @@ func (c *Claude) conversationRoot(conversationID string) (string, error) {
 	}
 	found := map[string]bool{}
 	for _, record := range records {
-		if str(record.fields, "sessionId") == conversationID {
+		if transcript.String(record.fields, "sessionId") == conversationID {
 			found[record.root] = true
 		}
 	}
@@ -107,12 +108,12 @@ func (c *Claude) awaitHostTranscript(ctx context.Context, sess *surface.Session,
 	probe := *sess
 	probe.Transcript = ""
 	for ticks := 0; ; ticks++ {
-		if ticks%claudeHostTranscriptLookupTicks == 0 || slices.ContainsFunc(likely, fileExists) {
+		if ticks%claudeHostTranscriptLookupTicks == 0 || slices.ContainsFunc(likely, transcript.FileExists) {
 			path, err := c.sessionTranscript(&probe)
 			if err != nil {
 				return "", err
 			}
-			if path != "" && fileExists(path) {
+			if path != "" && transcript.FileExists(path) {
 				return path, nil
 			}
 		}

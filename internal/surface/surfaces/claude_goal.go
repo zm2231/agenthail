@@ -12,6 +12,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // Claude Code's /goal is a session Stop hook whose evaluator judges the
@@ -50,7 +51,7 @@ type claudeGoalRecord struct {
 // so a later read parses only what Claude appended since. version counts the
 // goal's changes and streamed is the version a stream last sent.
 type claudeGoalCursor struct {
-	cursor   transcriptCursor
+	cursor   transcript.Cursor
 	goal     *surface.GoalState
 	version  uint64
 	streamed uint64
@@ -102,11 +103,11 @@ func (c *Claude) readGoalLocked(ctx context.Context, path string) (*claudeGoalCu
 		cursor = &claudeGoalCursor{}
 		c.goals[path] = cursor
 	}
-	goal, offset := cursor.goal, cursor.cursor.offset
-	if cursor.cursor.reset(info) {
+	goal, offset := cursor.goal, cursor.cursor.Offset
+	if cursor.cursor.Reset(info) {
 		goal, offset = nil, 0
 	}
-	offset, err = scanAppendedJSONL(ctx, path, offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
+	offset, err = transcript.ScanAppendedJSONL(ctx, path, offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
 		if record, ok := parseClaudeGoalRecord(line); ok {
 			goal = nextClaudeGoal(goal, record)
 		}
@@ -118,7 +119,7 @@ func (c *Claude) readGoalLocked(ctx context.Context, path string) (*claudeGoalCu
 	if !sameGoal(cursor.goal, goal) {
 		cursor.version++
 	}
-	cursor.cursor.offset, cursor.goal = offset, goal
+	cursor.cursor.Offset, cursor.goal = offset, goal
 	return cursor, nil
 }
 
@@ -291,7 +292,7 @@ func claudeGoalCommandOutput(ctx context.Context, path string, offset *int64, ar
 		return "", false, errors.New("the transcript was truncated")
 	}
 	output, found := "", false
-	next, err := scanAppendedJSONL(ctx, path, *offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
+	next, err := transcript.ScanAppendedJSONL(ctx, path, *offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
 		var record claudeRecord
 		if found || json.Unmarshal(line, &record) != nil || record.Type != "system" || record.Subtype != "local_command" || record.CommandRun == nil || record.CommandRun.Command != "goal" || strings.TrimSpace(record.CommandRun.Args) != args {
 			return nil

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func (c *Codex) List(ctx context.Context) ([]surface.Session, error) {
@@ -183,11 +184,11 @@ func loadedThreadID(value any) string {
 		return id
 	}
 	entry, _ := value.(map[string]any)
-	if id := str(entry, "id"); id != "" {
+	if id := transcript.String(entry, "id"); id != "" {
 		return id
 	}
 	thread, _ := entry["thread"].(map[string]any)
-	return str(thread, "id")
+	return transcript.String(thread, "id")
 }
 
 func mergeCodexSessions(primary, secondary []surface.Session) []surface.Session {
@@ -246,5 +247,5 @@ func (c *Codex) listPageCursor(ctx context.Context, conn codexClient, params map
 			sessions = append(sessions, runtimes.session(thread))
 		}
 	}
-	return sessions, str(result, "nextCursor"), nil
+	return sessions, transcript.String(result, "nextCursor"), nil
 }

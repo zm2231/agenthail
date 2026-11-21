@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"github.com/zm2231/agenthail/internal/voice"
 )
 
@@ -49,13 +50,13 @@ func (c *Codex) createVoiceOperator(ctx context.Context, client codexClient, cwd
 	}
 	result, _ := response["result"].(map[string]any)
 	thread, _ := result["thread"].(map[string]any)
-	id := str(thread, "id")
+	id := transcript.String(thread, "id")
 	if id == "" {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Codex did not return an operator thread ID"))
 	}
 	session := &surface.Session{ID: id, Name: voiceOperatorName, Cwd: cwd,
 		Surface: surface.KindCodex, Source: "agenthail",
-		HasLocal: true, Status: surface.StatusIdle, Transcript: str(thread, "path"), LastActive: time.Now()}
+		HasLocal: true, Status: surface.StatusIdle, Transcript: transcript.String(thread, "path"), LastActive: time.Now()}
 	setCodexTransport(session, codexTransportDesktop)
 	return session, nil
 }

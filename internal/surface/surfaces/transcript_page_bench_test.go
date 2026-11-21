@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,14 +16,14 @@ func BenchmarkTranscriptNewestPage(b *testing.B) {
 		b.Skip("AGENTHAIL_TRANSCRIPT_BENCH names the transcripts to read")
 	}
 	for _, path := range strings.Split(paths, ",") {
-		var format transcriptFormat = claudeTranscript{settled: func(time.Time) bool { return true }}
+		var format transcript.Format = claudeTranscript{settled: func(time.Time) bool { return true }}
 		if strings.Contains(filepath.Base(path), "rollout") {
 			format = codexTranscript{}
 		}
 		b.Run(filepath.Base(path), func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				page, err := readTranscriptPage(context.Background(), path, format, 0, 40)
+				page, err := transcript.ReadPage(context.Background(), path, format, 0, 40)
 				if err != nil {
 					b.Fatal(err)
 				}

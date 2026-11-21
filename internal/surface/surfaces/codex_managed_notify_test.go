@@ -11,6 +11,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // slowManagedPoll raises the stream's poll interval far above the bound the
@@ -18,9 +19,9 @@ import (
 // notification.
 func slowManagedPoll(t *testing.T) {
 	t.Helper()
-	original := transcriptPollInterval
-	transcriptPollInterval = 10 * time.Second
-	t.Cleanup(func() { transcriptPollInterval = original })
+	original := transcript.PollInterval
+	transcript.PollInterval = 10 * time.Second
+	t.Cleanup(func() { transcript.PollInterval = original })
 }
 
 const notifyBound = time.Second

@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 const (
@@ -67,8 +68,8 @@ func codexOutputTail(output string) string {
 
 func codexGoalNotice(payload map[string]any) surface.TimelineItem {
 	goal, _ := payload["goal"].(map[string]any)
-	objective, _, _ := strings.Cut(strings.TrimSpace(str(goal, "objective")), "\n")
-	return surface.TimelineItem{Kind: "event", Title: "Goal updated", Text: objective, Status: str(goal, "status")}
+	objective, _, _ := strings.Cut(strings.TrimSpace(transcript.String(goal, "objective")), "\n")
+	return surface.TimelineItem{Kind: "event", Title: "Goal updated", Text: objective, Status: transcript.String(goal, "status")}
 }
 
 func codexUnknownItem(typ string) surface.TimelineItem {

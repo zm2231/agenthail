@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 const (
@@ -46,7 +47,7 @@ func (c *Codex) codexThreadRequest(ctx context.Context, client codexClient, meth
 		if err == nil {
 			result, _ := response["result"].(map[string]any)
 			thread, _ := result["thread"].(map[string]any)
-			c.openedWithoutMCP(str(thread, "id"), errMCPServerNotRunning)
+			c.openedWithoutMCP(transcript.String(thread, "id"), errMCPServerNotRunning)
 		}
 		return response, err
 	}
@@ -62,7 +63,7 @@ func (c *Codex) codexThreadRequest(ctx context.Context, client codexClient, meth
 		}
 		result, _ := response["result"].(map[string]any)
 		thread, _ := result["thread"].(map[string]any)
-		if id := str(thread, "id"); id != "" {
+		if id := transcript.String(thread, "id"); id != "" {
 			if err := credentials.Claim(ref, id); err != nil {
 				credentials.Unattached(id, fmt.Errorf("claim the new thread's credential: %w", err))
 			}
@@ -215,7 +216,7 @@ func codexMCPConnected(ctx context.Context, client codexClient, threadID string)
 	servers, _ := result["data"].([]any)
 	for _, server := range servers {
 		entry, _ := server.(map[string]any)
-		if str(entry, "name") == mcpServerName && str(entry, "runtimeStatus") == "connected" {
+		if transcript.String(entry, "name") == mcpServerName && transcript.String(entry, "runtimeStatus") == "connected" {
 			return true, nil
 		}
 	}

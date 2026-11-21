@@ -1,14 +1,17 @@
 package surfaces
 
-import "github.com/zm2231/agenthail/internal/surface"
+import (
+	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
+)
 
 func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 	items := claudeRecordItems(record)
 	id := claudeMessageID(record)
 	promptID, turnOrigin := "", ""
-	if str(record, "type") == "user" {
-		promptID = str(record, "promptId")
-		turnOrigin = str(record, "turnOrigin")
+	if transcript.String(record, "type") == "user" {
+		promptID = transcript.String(record, "promptId")
+		turnOrigin = transcript.String(record, "turnOrigin")
 	}
 	notPerson := turnOrigin != "" && turnOrigin != claudeOriginHuman
 	for i := range items {
@@ -32,19 +35,19 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 // carry theirs as source_uuid.
 func claudeMessageID(record map[string]any) string {
 	attachment, _ := record["attachment"].(map[string]any)
-	queued := str(attachment, "type") == "queued_command"
-	if !queued && str(record, "type") != "user" {
+	queued := transcript.String(attachment, "type") == "queued_command"
+	if !queued && transcript.String(record, "type") != "user" {
 		return ""
 	}
 	origin, _ := record["origin"].(map[string]any)
 	if queued {
 		origin, _ = attachment["origin"].(map[string]any)
 	}
-	if id := str(origin, "msg_id"); id != "" {
+	if id := transcript.String(origin, "msg_id"); id != "" {
 		return id
 	}
 	if queued {
-		return str(attachment, "source_uuid")
+		return transcript.String(attachment, "source_uuid")
 	}
-	return str(record, "uuid")
+	return transcript.String(record, "uuid")
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 const claudeIdleCompactionTailBytes int64 = 4 << 20
@@ -49,7 +50,7 @@ func (c *Claude) IdleCompactionState(ctx context.Context, sess *surface.Session,
 	if err != nil {
 		return surface.IdleCompactionRead{}, err
 	}
-	identity := transcriptFileIdentity(info)
+	identity := transcript.FileIdentity(info)
 	if identity != "" && from.File == identity && from.Offset > 0 && from.Offset <= info.Size() && info.Size()-from.Offset <= claudeIdleCompactionTailBytes {
 		appended := make([]byte, info.Size()-from.Offset)
 		if _, err := file.ReadAt(appended, from.Offset); err != nil && err != io.EOF {
@@ -65,7 +66,7 @@ func (c *Claude) IdleCompactionState(ctx context.Context, sess *surface.Session,
 		read.Offset += int64(complete)
 		return read, ctx.Err()
 	}
-	lines, end, err := readRecentJSONLLines(ctx, path, 0, claudeIdleCompactionTailBytes, maxClaudeTranscriptRecordBytes)
+	lines, end, err := transcript.ReadRecentJSONLLines(ctx, path, 0, claudeIdleCompactionTailBytes, maxClaudeTranscriptRecordBytes)
 	if err != nil {
 		return surface.IdleCompactionRead{}, err
 	}

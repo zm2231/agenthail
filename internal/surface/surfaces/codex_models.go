@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 func (c *Codex) Model(ctx context.Context, sess *surface.Session, name string) (string, error) {
@@ -38,9 +39,9 @@ func codexThreadModel(ctx context.Context, client codexClient, threadID string) 
 	}
 	result, _ := response["result"].(map[string]any)
 	thread, _ := result["thread"].(map[string]any)
-	model := str(thread, "model")
+	model := transcript.String(thread, "model")
 	if model == "" {
-		model = str(result, "model")
+		model = transcript.String(result, "model")
 	}
 	if model == "" {
 		return "", fmt.Errorf("session metadata does not include the active model")
@@ -75,9 +76,9 @@ func listCodexModels(ctx context.Context, conn codexClient) ([]surface.ModelOpti
 		data, _ := result["data"].([]any)
 		for _, raw := range data {
 			value, _ := raw.(map[string]any)
-			id := str(value, "model")
+			id := transcript.String(value, "model")
 			if id == "" {
-				id = str(value, "id")
+				id = transcript.String(value, "id")
 			}
 			if id == "" {
 				continue
@@ -86,17 +87,17 @@ func listCodexModels(ctx context.Context, conn codexClient) ([]surface.ModelOpti
 				continue
 			}
 			seen[id] = struct{}{}
-			displayName := str(value, "displayName")
+			displayName := transcript.String(value, "displayName")
 			if displayName == "" {
 				displayName = id
 			}
 			models = append(models, surface.ModelOption{
 				ID:                        id,
 				DisplayName:               displayName,
-				Description:               str(value, "description"),
+				Description:               transcript.String(value, "description"),
 				Default:                   value["isDefault"] == true,
 				SupportedReasoningEfforts: stringList(value["supportedReasoningEfforts"], "reasoningEffort"),
-				DefaultReasoningEffort:    str(value, "defaultReasoningEffort"),
+				DefaultReasoningEffort:    transcript.String(value, "defaultReasoningEffort"),
 				ServiceTiers:              stringList(value["serviceTiers"], "id"),
 			})
 		}

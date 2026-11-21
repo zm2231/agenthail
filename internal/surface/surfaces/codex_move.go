@@ -20,6 +20,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/atomicfile"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 // A rollout file belongs to the thread its name carries; thread/revert adds
@@ -183,7 +184,7 @@ func (c *Codex) PrepareMove(ctx context.Context, sess *surface.Session, _ surfac
 	if err := c.refuseUnmovableThread(ctx, client, &route, thread); err != nil {
 		return nil, err
 	}
-	current := str(thread, "path")
+	current := transcript.String(thread, "path")
 	if current == "" {
 		current = c.home.transcriptPath(sess)
 	}
@@ -204,13 +205,13 @@ func (c *Codex) PrepareMove(ctx context.Context, sess *surface.Session, _ surfac
 			return nil, surface.MoveRefusal{Reason: fmt.Sprintf("its history continues %s, outside this thread's rollouts", filepath.Base(segment.source))}
 		}
 	}
-	state := codexMoveState{Rollout: filepath.Base(current), Name: str(thread, "name")}
+	state := codexMoveState{Rollout: filepath.Base(current), Name: transcript.String(thread, "name")}
 	if state.Goal, err = c.moveGoal(ctx, client, sess.ID); err != nil {
 		return nil, err
 	}
 	out = &surface.MoveOut{Conversation: sess.ID, Cwd: sess.Cwd, Title: state.Name}
 	if out.Cwd == "" {
-		out.Cwd = str(thread, "cwd")
+		out.Cwd = transcript.String(thread, "cwd")
 	}
 	if out.Cwd == "" {
 		return nil, fmt.Errorf("Codex thread %s has no known working directory", sess.ID)
@@ -287,8 +288,8 @@ func (c *Codex) refuseUnmovableThread(ctx context.Context, client codexClient, s
 	children, _ := result["data"].([]any)
 	var names []string
 	for _, child := range children {
-		if object, _ := child.(map[string]any); str(object, "id") != "" {
-			names = append(names, str(object, "id"))
+		if object, _ := child.(map[string]any); transcript.String(object, "id") != "" {
+			names = append(names, transcript.String(object, "id"))
 		}
 	}
 	if len(names) > 0 {

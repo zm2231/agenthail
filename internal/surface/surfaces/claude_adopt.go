@@ -10,6 +10,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
 const (
@@ -109,19 +110,19 @@ func (c *Claude) adoptHolder(ctx context.Context, conversation, root string) (*c
 	}
 	transcripts := c.transcripts.pass(roots)
 	for _, record := range records {
-		if str(record.fields, "sessionId") != conversation {
+		if transcript.String(record.fields, "sessionId") != conversation {
 			continue
 		}
 		if pid, _ := record.fields["pid"].(float64); pid <= 0 {
 			continue
 		}
-		holder := &claudeAdoptHolder{record: record.fields, background: str(record.fields, "kind") == "bg"}
+		holder := &claudeAdoptHolder{record: record.fields, background: transcript.String(record.fields, "kind") == "bg"}
 		if process, ok := c.process(ctx, record, transcripts); ok {
 			c.enrich(ctx, &process)
 			holder.session = process.session
 		} else {
 			pid, _ := record.fields["pid"].(float64)
-			holder.session = surface.Session{ID: conversation, PID: int(pid), Cwd: str(record.fields, "cwd"), Status: claudePeerStatus(record.fields), Transcript: onlyTranscript(transcripts(conversation))}
+			holder.session = surface.Session{ID: conversation, PID: int(pid), Cwd: transcript.String(record.fields, "cwd"), Status: claudePeerStatus(record.fields), Transcript: onlyTranscript(transcripts(conversation))}
 			holder.session.BackgroundTasks = c.recordBackground(ctx, &holder.session)
 		}
 		holder.hosted = claudeHosted(&holder.session)
@@ -144,7 +145,7 @@ func (c *Claude) adoptHolder(ctx context.Context, conversation, root string) (*c
 // adoptBusy names the work a stop would cut off: a turn, a question or
 // permission prompt, or a running background task.
 func adoptBusy(holder *claudeAdoptHolder) string {
-	status := str(holder.record, "status")
+	status := transcript.String(holder.record, "status")
 	switch {
 	case holder.starting:
 		return "its background job is starting"
