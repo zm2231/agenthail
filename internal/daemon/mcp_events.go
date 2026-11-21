@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/netip"
@@ -437,8 +438,13 @@ func (m *remoteMCP) postWebhook(ctx context.Context, subscription, callback, id 
 }
 
 func retryAfter(value string, now time.Time) time.Duration {
-	if seconds, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil {
-		return time.Duration(max(seconds, 0)) * time.Second
+	if digits := strings.TrimSpace(value); digits != "" && strings.Trim(digits, "0123456789") == "" {
+		const most = math.MaxInt64 / int64(time.Second)
+		seconds, err := strconv.ParseInt(digits, 10, 64)
+		if err != nil || seconds > most {
+			seconds = most
+		}
+		return time.Duration(seconds) * time.Second
 	}
 	if at, err := http.ParseTime(value); err == nil {
 		return max(at.Sub(now), 0)

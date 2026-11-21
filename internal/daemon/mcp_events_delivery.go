@@ -114,7 +114,7 @@ func (m *remoteMCP) deliverEvent(ctx context.Context, event registry.DueEvent) {
 			m.d.logRuntimeError("event deliveries", err)
 			return
 		}
-		if !live {
+		if !live || sub.Generation != event.Generation {
 			return
 		}
 		reply := m.postWebhook(ctx, sub.ID, sub.URL, occurrence.EventID, body, sub.Secrets(time.Now()))
@@ -123,13 +123,13 @@ func (m *remoteMCP) deliverEvent(ctx context.Context, event registry.DueEvent) {
 		}
 		switch {
 		case reply.reason == "" && reply.status >= 200 && reply.status < 300:
-			if err := m.d.Registry.EventDelivered(sub.ID, event.Newest); err != nil {
+			if err := m.d.Registry.EventDelivered(sub.ID, sub.Generation, event.Newest); err != nil {
 				m.d.logRuntimeError("event deliveries", err)
 			}
 			m.recordEvent(sub.IdentityID, sub.URL, fmt.Sprintf("delivered %s after %d attempt(s)", occurrence.EventID, attempt+1))
 			return
 		case reply.status == http.StatusGone:
-			if err := m.d.Registry.DropEventSubscription(sub.ID); err != nil {
+			if err := m.d.Registry.DropEventSubscription(sub.ID, sub.Generation); err != nil {
 				m.d.logRuntimeError("event deliveries", err)
 			}
 			m.recordEvent(sub.IdentityID, sub.URL, "disabled: the endpoint answered 410 Gone")
@@ -149,14 +149,14 @@ func (m *remoteMCP) deliverEvent(ctx context.Context, event registry.DueEvent) {
 				continue
 			}
 			until := time.Now().Add(reply.retryAfter)
-			if err := m.d.Registry.DeferEvent(sub.ID, until); err != nil {
+			if err := m.d.Registry.DeferEvent(sub.ID, sub.Generation, until); err != nil {
 				m.d.logRuntimeError("event deliveries", err)
 			}
 			m.recordEvent(sub.IdentityID, sub.URL, fmt.Sprintf("deferred %s until %s, as the endpoint asked: %s", occurrence.EventID, until.UTC().Format(time.RFC3339), reason))
 			return
 		}
 	}
-	suspended, err := m.d.Registry.EventFailed(event.ID, eventSuspendAfter)
+	suspended, err := m.d.Registry.EventFailed(event.ID, event.Generation, eventSuspendAfter)
 	if err != nil {
 		m.d.logRuntimeError("event deliveries", err)
 	}

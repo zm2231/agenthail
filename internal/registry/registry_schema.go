@@ -944,6 +944,7 @@ CREATE TRIGGER mcp_access_epoch_removed AFTER DELETE ON mcp_access
 BEGIN UPDATE mcp_remote_epoch SET epoch=epoch+1 WHERE id=1; END;
 CREATE TABLE IF NOT EXISTS mcp_event_subscriptions (
 	id TEXT PRIMARY KEY,
+	generation TEXT NOT NULL,
 	identity_id TEXT NOT NULL REFERENCES identity_remote(identity_id) ON DELETE CASCADE,
 	token_hash TEXT NOT NULL,
 	name TEXT NOT NULL,

@@ -386,7 +386,7 @@ func TestAWebhookWaitsAsLongAsItsRetryAfterAsks(t *testing.T) {
 		t.Fatalf("retried after %s with id %s then %s, want at least the 1s asked", gap, first.id, retried.id)
 	}
 
-	for name, value := range map[string]string{"seconds": "3600", "HTTP date": time.Now().Add(time.Hour).UTC().Format(http.TimeFormat)} {
+	for name, value := range map[string]string{"seconds": "3600", "HTTP date": time.Now().Add(time.Hour).UTC().Format(http.TimeFormat), "beyond int64": "99999999999999999999"} {
 		w.answer(func(webhookCall) (int, string) { return http.StatusServiceUnavailable, "" })
 		w.mu.Lock()
 		w.header = http.Header{"Retry-After": {value}}
