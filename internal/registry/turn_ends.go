@@ -158,7 +158,7 @@ func (r *Registry) CurrentTurnEnd(sessionID string) (TurnEnd, bool, error) {
 func currentTurnEnds(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }) (map[string]TurnEnd, error) {
-	rows, err := q.QueryContext(ctx, `SELECT `+turnEndColumns+` FROM turn_ends te WHERE `+currentTurnEnd)
+	rows, err := q.QueryContext(ctx, currentTurnEndsQuery)
 	if err != nil {
 		return nil, err
 	}
@@ -172,6 +172,13 @@ func currentTurnEnds(ctx context.Context, q interface {
 	}
 	return out, nil
 }
+
+// Each session's latest turn is found first, so the read does not grow with every turn ever kept.
+const currentTurnEndsQuery = `SELECT ` + turnEndColumns + `
+ FROM (SELECT s.id AS session_id,(SELECT MAX(started_at_ms) FROM turn_ends WHERE session_id=s.id) AS started_at_ms FROM sessions s) latest
+ CROSS JOIN turn_ends te ON te.session_id=latest.session_id AND te.started_at_ms=latest.started_at_ms
+ WHERE te.ended_at_ms>0
+ AND (te.completed_turn_id='' OR te.completed_turn_id=COALESCE((SELECT completed_turn_id FROM session_runtime WHERE session_id=te.session_id),''))`
 
 const currentTurnEnd = `te.ended_at_ms>0
  AND te.started_at_ms=(SELECT MAX(started_at_ms) FROM turn_ends WHERE session_id=te.session_id)
