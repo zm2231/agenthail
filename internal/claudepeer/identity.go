@@ -34,6 +34,16 @@ func listedName(reg *registry.Registry, session surface.Session) string {
 
 var peerTag = regexp.MustCompile(`(?i)<(\s*/?\s*cross-session-message\b)`)
 
+var claudeEnvelope = regexp.MustCompile(`(?s)\A<cross-session-message from="([^"]*)"[^>\n]*>\n(.*)\n</cross-session-message>\z`)
+
+// Claude wraps a message it sends in its own envelope; only the sender's own one is peeled.
+func authoredText(content, from string) string {
+	if match := claudeEnvelope.FindStringSubmatch(content); match != nil && match[1] == from {
+		return match[2]
+	}
+	return content
+}
+
 // messageID is the delivery's own uuid when it has one, so a report on the
 // message names the delivery it belongs to.
 func messageID(id string) string {
