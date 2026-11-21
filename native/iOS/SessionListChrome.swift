@@ -214,8 +214,24 @@ extension View {
     }
 }
 
-extension Binding {
-    func marking(_ edited: Binding<Bool>) -> Binding<Value> {
-        Binding(get: { wrappedValue }, set: { wrappedValue = $0; edited.wrappedValue = true })
+struct DraftEdits {
+    private var openedWith: [String: Any] = [:]
+    private var differs: [String: Bool] = [:]
+
+    var dirty: Bool { differs.values.contains(true) }
+
+    mutating func record<Value: Equatable>(_ key: String, from old: Value, to new: Value) {
+        let opened = openedWith[key] as? Value ?? old
+        if openedWith[key] == nil { openedWith[key] = old }
+        differs[key] = new != opened
+    }
+}
+
+extension Binding where Value: Equatable {
+    func tracking(_ edits: Binding<DraftEdits>, key: String? = nil, line: Int = #line, column: Int = #column) -> Binding<Value> {
+        Binding(get: { wrappedValue }, set: { new in
+            edits.wrappedValue.record(key ?? "\(line):\(column)", from: wrappedValue, to: new)
+            wrappedValue = new
+        })
     }
 }
