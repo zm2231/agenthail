@@ -16,6 +16,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zm2231/agenthail/internal/peerproc"
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -175,7 +176,7 @@ func (d *Daemon) socketCaller(ctx context.Context, request mcpSocketRequest) soc
 	if sessionID == "" {
 		return socketAnswer{}
 	}
-	session, err := d.awaitLocalSession(ctx, sessionID)
+	record, err := d.awaitLocalSession(ctx, sessionID)
 	if sessionLookupFailed(err) {
 		d.logMCPAuthRefusal("socket", sessionID, "busy", err)
 		return socketAnswer{tools: true, refusal: mcpCheckFailed()}
@@ -183,7 +184,7 @@ func (d *Daemon) socketCaller(ctx context.Context, request mcpSocketRequest) soc
 	if err != nil {
 		return socketAnswer{}
 	}
-	caller, err := d.agentCaller(session)
+	caller, err := d.agentCaller(record)
 	if err != nil {
 		d.logMCPAuthRefusal("socket", sessionID, "busy", err)
 		return socketAnswer{tools: true, refusal: mcpCheckFailed()}
@@ -236,15 +237,15 @@ func (d *Daemon) codexCaller(ctx context.Context, request mcpSocketRequest, load
 	if !slices.Contains(loaded, thread) {
 		return refused("unauthenticated", "The Codex process that started this server has no thread "+thread+" loaded.")
 	}
-	session, err := d.awaitLocalSession(ctx, thread)
+	record, err := d.awaitLocalSession(ctx, thread)
 	if sessionLookupFailed(err) {
 		d.logMCPAuthRefusal("socket", thread, "busy", err)
 		return socketAnswer{tools: true, refusal: mcpCheckFailed()}
 	}
-	if err != nil || session.Surface != surface.KindCodex {
+	if err != nil || record.Session.Surface != surface.KindCodex {
 		return refused("unauthenticated", "Codex thread "+thread+" is not a session on this host; it may have moved or been archived.")
 	}
-	caller, err := d.agentCaller(session)
+	caller, err := d.agentCaller(record)
 	if err != nil {
 		d.logMCPAuthRefusal("socket", thread, "busy", err)
 		return socketAnswer{tools: true, refusal: mcpCheckFailed()}
@@ -300,16 +301,19 @@ func (d *Daemon) processSession(pid int) string {
 // awaitLocalSession waits for discovery to register a session that has just
 // started: Claude starts its MCP servers as soon as it writes its record, and
 // lists their tools once.
-func (d *Daemon) awaitLocalSession(ctx context.Context, sessionID string) (surface.Session, error) {
+func (d *Daemon) awaitLocalSession(ctx context.Context, sessionID string) (registry.CallerRecord, error) {
 	ctx, cancel := context.WithTimeout(ctx, mcpSocketSessionWait)
 	defer cancel()
 	for {
-		session, err := d.Registry.Session(sessionID)
+		record, err := d.Registry.Caller(sessionID)
 		if err == nil {
-			return d.servableSession(*session)
+			if record.HostID != "" || record.Archived {
+				return registry.CallerRecord{}, errMCPSessionEnded
+			}
+			return record, nil
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
-			return surface.Session{}, err
+			return registry.CallerRecord{}, err
 		}
 		select {
 		case d.catalogNudge <- struct{}{}:
@@ -317,25 +321,10 @@ func (d *Daemon) awaitLocalSession(ctx context.Context, sessionID string) (surfa
 		}
 		select {
 		case <-ctx.Done():
-			return surface.Session{}, ctx.Err()
+			return registry.CallerRecord{}, ctx.Err()
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
-}
-
-func (d *Daemon) servableSession(session surface.Session) (surface.Session, error) {
-	host, err := d.Registry.SessionHost(session.ID)
-	if err != nil {
-		return surface.Session{}, err
-	}
-	archived, err := d.Registry.SessionArchived(session.ID)
-	if err != nil {
-		return surface.Session{}, err
-	}
-	if host != "" || archived {
-		return surface.Session{}, errMCPSessionEnded
-	}
-	return session, nil
 }
 
 var errMCPSessionEnded = errors.New("the session has moved or been archived")

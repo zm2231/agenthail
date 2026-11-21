@@ -90,16 +90,28 @@ func (d *Daemon) sessionProject(session surface.Session) (*CatalogProject, error
 // found is false before discovery has recorded it.
 func (d *Daemon) recordedProject(session surface.Session) (project *CatalogProject, found bool, err error) {
 	raw, found, err := d.Registry.CatalogSessionProject(session.ID)
-	if err != nil || !found || len(raw) == 0 {
+	if err != nil || !found {
 		return nil, found, err
 	}
-	if err := json.Unmarshal(raw, &project); err != nil {
+	project, err = decodeRecordedProject(raw)
+	if err != nil {
 		return nil, true, fmt.Errorf("read the stored project of %s: %w", session.ID, err)
 	}
-	if project == nil || project.ID == "" {
-		return nil, true, nil
-	}
 	return project, true, nil
+}
+
+func decodeRecordedProject(raw []byte) (*CatalogProject, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var project *CatalogProject
+	if err := json.Unmarshal(raw, &project); err != nil {
+		return nil, err
+	}
+	if project == nil || project.ID == "" {
+		return nil, nil
+	}
+	return project, nil
 }
 
 func (d *Daemon) sessionIdentity(session surface.Session) (catalogIdentity, error) {

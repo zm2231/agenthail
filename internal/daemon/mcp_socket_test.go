@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -400,5 +401,44 @@ func TestAProjectWithTheToolsOffGivesItsTerminalSessionsNoneUntilTurnedBackOn(t 
 	set(registry.ProjectMCPOn)
 	if names := listedToolNames(t, client); !slices.Contains(names, "agenthail_send") {
 		t.Fatalf("with the tools back on the session lists %v", names)
+	}
+}
+
+func TestASocketCallerIsNamedWhileBackgroundReadsHoldEveryGeneralReader(t *testing.T) {
+	_, reg, root, _ := mcpSocketDaemon(t)
+	registerClaude(t, reg, "claude-one")
+	session := startRelayedSession(t, root, "claude-one")
+	listed, err := reg.Session("claude-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := reg.RecordCatalogSession(registry.CatalogSessionState{Session: *listed, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:claude-one", Type: "session.upserted", EntityID: "claude-one", Payload: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	previous := mcpCallerBound
+	mcpCallerBound = 2 * time.Second
+	t.Cleanup(func() { mcpCallerBound = previous })
+	var held []*sql.Conn
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		conn, err := reg.ReadDB().Conn(ctx)
+		cancel()
+		if err != nil {
+			break
+		}
+		held = append(held, conn)
+	}
+	if len(held) == 0 {
+		t.Fatal("held no general reader")
+	}
+	releaseAll := func() {
+		for _, conn := range held {
+			_ = conn.Close()
+		}
+	}
+	time.AfterFunc(3*mcpCallerBound, releaseAll)
+	t.Cleanup(releaseAll)
+	if id, ok := session.whoami(t); !ok || id != "claude-one" {
+		t.Fatalf("with every general reader held, whoami = %q, %v", id, ok)
 	}
 }

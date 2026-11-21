@@ -115,11 +115,11 @@ func (d *Daemon) credentialCaller(token string) (*mcpCaller, error) {
 	if err != nil {
 		return nil, err
 	}
-	session, err := d.Registry.Session(credential.SessionID)
+	record, err := d.Registry.Caller(credential.SessionID)
 	if err != nil {
 		return nil, err
 	}
-	caller, err := d.agentCaller(*session)
+	caller, err := d.agentCaller(record)
 	if err != nil {
 		return nil, errCallerPermissions
 	}
@@ -157,17 +157,17 @@ func (d *Daemon) sessionRunning(session *surface.Session) bool {
 }
 
 // The CLI in a session's shell gets this same caller, so the two cannot disagree.
-func (d *Daemon) agentCaller(session surface.Session) (*mcpCaller, error) {
-	capabilities, err := d.capabilitiesOf(session.ID)
+func (d *Daemon) agentCaller(record registry.CallerRecord) (*mcpCaller, error) {
+	caller := &mcpCaller{session: record.Session, capabilities: sessionCapabilities(record.Roles), ceiling: record.Ceiling}
+	if !record.Recorded {
+		caller.project, _ = d.sessionProject(record.Session)
+		return caller, nil
+	}
+	project, err := decodeRecordedProject(record.Project)
 	if err != nil {
 		return nil, err
 	}
-	ceiling, err := d.Registry.SessionCeiling(session.ID)
-	if err != nil {
-		return nil, err
-	}
-	caller := &mcpCaller{session: session, capabilities: capabilities, ceiling: ceiling}
-	caller.project, _ = d.sessionProject(session)
+	caller.project = project
 	return caller, nil
 }
 
