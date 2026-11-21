@@ -27,11 +27,9 @@ final class TranscriptRowTops {
 
     func top(_ id: String) -> CGFloat? { (shown[id] ?? 0) > 0 ? tops[id] : nil }
 
-    // An older page that continues the first block re-keys it, so the first block is held only when nothing else is laid out.
+    // An older page that continues the first block re-keys it, so that block is never held; with nothing else laid out, the distance from the end holds.
     var leading: (id: String, top: CGFloat)? {
-        let laidOut = tops.filter { (shown[$0.key] ?? 0) > 0 }
-        let later = laidOut.filter { $0.key != first }
-        return (later.isEmpty ? laidOut : later).min { $0.value < $1.value }.map { ($0.key, $0.value) }
+        tops.filter { (shown[$0.key] ?? 0) > 0 && $0.key != first }.min { $0.value < $1.value }.map { ($0.key, $0.value) }
     }
 
     func holdOlderPlace() { holdingOlder?() }

@@ -142,10 +142,11 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             }
             .onDisappear { layout.cancelCheck() }
             // A page can land without changing the scroll geometry, so the geometry action may not see it.
-            .onChange(of: leadingRow) { old, _ in
+            .onChange(of: leadingRow) { old, new in
                 guard old.map(hasRow) == true else { return }
                 guard resting else { return layout.row.forget() }
                 guard !following, let rows, let id = layout.row.pass(TranscriptPass(leadingChanged: true, resting: true, content: layout.geometry?.contentSize.height ?? 0)) else { return }
+                placedLeadingRow = new
                 restoreHeld(id, in: rows)
             }
             .onChange(of: transcript) {

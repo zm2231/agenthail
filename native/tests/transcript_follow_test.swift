@@ -66,6 +66,7 @@ struct Transcript: View {
                             .padding(.top, 20)
                             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TranscriptRows.contentSpace)) } action: { layout.rows[row.id] = $0 }
                             .onDisappear { layout.rows[row.id] = nil }
+                            .reportsTop(row.id, to: readerTops)
                     }
                 }
             }
@@ -465,6 +466,20 @@ struct TranscriptFollowTest {
         expectEventually(abs(screenY("Zr1", scroll) - keptY) < 2, "an older page that merges into the first row keeps the reader in place, Zr1 at \(keptY) moved to \(screenY("Zr1", scroll))")
         spin(0.3)
         expect(abs(screenY("Zr1", scroll) - keptY) < 2, "the reader stays in place once a page that merged into the first row settles, Zr1 at \(keptY) moved to \(screenY("Zr1", scroll))")
+        feed.merged = []
+
+        feed.transcript = "Zu"
+        feed.rows = [Row(id: "Zu0", lines: 120)]
+        spin(0.6)
+        move(scroll, to: 600)
+        spin(0.3)
+        let onlyGap = gap(scroll)
+        readerTops.holdOlderPlace()
+        feed.merged = ["Zu0"]
+        feed.rows = rows("Zuo", 20) + [Row(id: "Zu0merged", lines: 130)]
+        spin(0.8)
+        expect(abs(gap(scroll) - onlyGap) < 5, "an older page that merges into the only laid-out row keeps the reader's distance from the end, \(onlyGap) became \(gap(scroll))")
+        expect(!feed.following, "holding the place in a merged only row does not start following")
         feed.merged = []
 
         feed.transcript = "Zs"
