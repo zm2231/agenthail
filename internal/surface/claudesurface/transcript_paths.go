@@ -130,3 +130,8 @@ func (c *Claude) awaitHostTranscript(ctx context.Context, sess *surface.Session,
 const claudeHostTranscriptTick = 250 * time.Millisecond
 
 var claudeHostTranscriptLookupTicks = 8
+
+func (c *Claude) TranscriptOnDisk(sess *surface.Session) bool {
+	path, err := c.sessionTranscript(sess)
+	return err == nil && transcript.FileExists(path)
+}

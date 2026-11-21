@@ -33,29 +33,7 @@ func openCodexSessionFromRollout(t *testing.T, rollout codexRolloutOnDisk) (stri
 	codextest.Start(t, func(string, map[string]any) map[string]any { return nil })
 	_, reg, _, _, _ := daemonFixture(t)
 	id := uuid.Must(uuid.NewV7()).String()
-	at := time.Now()
-	dir := filepath.Join(os.Getenv("CODEX_HOME"), "sessions", at.Format("2006"), at.Format("01"), at.Format("02"))
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	data := []byte(rollout.body)
-	if rollout.body == "" {
-		data = []byte(`{"type":"session_meta","payload":{"id":"` + id + `","cwd":"/work"}}` + "\n" + codexOldRollout)
-	}
-	path := filepath.Join(dir, "rollout-"+at.Format("2006-01-02T15-04-05")+"-"+id+".jsonl")
-	if rollout.corrupt {
-		path += ".zst"
-	} else if rollout.compressed {
-		encoder, err := zstd.NewWriter(nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		data = encoder.EncodeAll(data, nil)
-		path += ".zst"
-	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeCodexRollout(t, id, rollout)
 	session := surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, HasLocal: true}
 	if err := reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
@@ -82,6 +60,34 @@ func openCodexSessionFromRollout(t *testing.T, rollout codexRolloutOnDisk) (stri
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+func writeCodexRollout(t *testing.T, id string, rollout codexRolloutOnDisk) string {
+	t.Helper()
+	at := time.Now()
+	dir := filepath.Join(os.Getenv("CODEX_HOME"), "sessions", at.Format("2006"), at.Format("01"), at.Format("02"))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(rollout.body)
+	if rollout.body == "" {
+		data = []byte(`{"type":"session_meta","payload":{"id":"` + id + `","cwd":"/work"}}` + "\n" + codexOldRollout)
+	}
+	path := filepath.Join(dir, "rollout-"+at.Format("2006-01-02T15-04-05")+"-"+id+".jsonl")
+	if rollout.corrupt {
+		path += ".zst"
+	} else if rollout.compressed {
+		encoder, err := zstd.NewWriter(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data = encoder.EncodeAll(data, nil)
+		path += ".zst"
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func TestACodexSessionReseedsFromAPlainRollout(t *testing.T) {
