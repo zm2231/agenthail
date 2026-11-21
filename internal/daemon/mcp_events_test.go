@@ -477,6 +477,9 @@ func TestACredentialChangeEndsEventDeliveryAndASubscriptionOutlivesARestart(t *t
 			if _, live, err := f.r.LiveEventSubscription(subscribed.ID, time.Now()); err != nil || live {
 				t.Fatalf("live=%v err=%v after the change", live, err)
 			}
+			if verified, err := f.r.EventEndpointVerified(f.scout.SessionID, w.url+"/hook", time.Time{}); err != nil || verified {
+				t.Fatalf("the endpoint stayed verified for new credentials: %v %v", verified, err)
+			}
 			if name != "remove identity" {
 				if _, _, err := f.r.StoreInboxMessage(registry.InboxMessage{Identity: f.scout.SessionID, UUID: "after", Message: "after"}); err != nil {
 					t.Fatal(err)
