@@ -129,6 +129,13 @@ CREATE TABLE IF NOT EXISTS message_queue (
 	holder_start TEXT NOT NULL DEFAULT '',
 	deferred_since_ms INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS codex_read_states (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	first_unread TEXT NOT NULL DEFAULT '',
+	revision TEXT NOT NULL,
+	updated_at_ms INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS session_runtime (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	last_status TEXT NOT NULL DEFAULT 'unknown',

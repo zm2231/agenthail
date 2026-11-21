@@ -1,4 +1,4 @@
--- schemaVersion 122
+-- schemaVersion 123
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -333,6 +333,14 @@ CREATE TABLE channel_members (
 CREATE TABLE channels (
 	id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- table codex_read_states
+CREATE TABLE codex_read_states (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	first_unread TEXT NOT NULL DEFAULT '',
+	revision TEXT NOT NULL,
+	updated_at_ms INTEGER NOT NULL
 );
 
 -- table coordinator_history
@@ -1267,6 +1275,24 @@ END;
 
 -- trigger catalog_presentation_version_catalog_sessions_update
 CREATE TRIGGER catalog_presentation_version_catalog_sessions_update AFTER UPDATE OF session_id,unavailable_reason,waiting_on,background_tasks,usage_limit,turn_stop,host_queue_count,projection_generation,projection_fingerprint,misses,discovery_failures,retired,current,host_project ON catalog_sessions WHEN (NEW.session_id IS NOT OLD.session_id OR NEW.unavailable_reason IS NOT OLD.unavailable_reason OR NEW.waiting_on IS NOT OLD.waiting_on OR NEW.background_tasks IS NOT OLD.background_tasks OR NEW.usage_limit IS NOT OLD.usage_limit OR NEW.turn_stop IS NOT OLD.turn_stop OR NEW.host_queue_count IS NOT OLD.host_queue_count OR NEW.projection_generation IS NOT OLD.projection_generation OR NEW.projection_fingerprint IS NOT OLD.projection_fingerprint OR NEW.misses IS NOT OLD.misses OR NEW.discovery_failures IS NOT OLD.discovery_failures OR NEW.retired IS NOT OLD.retired OR NEW.current IS NOT OLD.current OR NEW.host_project IS NOT OLD.host_project)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_codex_read_states_delete
+CREATE TRIGGER catalog_presentation_version_codex_read_states_delete AFTER DELETE ON codex_read_states
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_codex_read_states_insert
+CREATE TRIGGER catalog_presentation_version_codex_read_states_insert AFTER INSERT ON codex_read_states
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_codex_read_states_update
+CREATE TRIGGER catalog_presentation_version_codex_read_states_update AFTER UPDATE OF session_id,first_unread,revision ON codex_read_states WHEN (NEW.session_id IS NOT OLD.session_id OR NEW.first_unread IS NOT OLD.first_unread OR NEW.revision IS NOT OLD.revision)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;

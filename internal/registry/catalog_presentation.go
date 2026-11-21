@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 type CatalogPresentationSubagent struct {
@@ -38,6 +39,7 @@ type CatalogPresentationRow struct {
 	Freshness                              CatalogPresentationFreshness
 	Retired                                bool
 	PinnedAt                               time.Time
+	ReadState                              *surface.ReadState
 	Snooze                                 Snooze
 	TurnEnd                                *TurnEnd
 	Judgment                               *TurnJudgment
@@ -165,14 +167,18 @@ func catalogPresentationRows(ctx context.Context, tx *sql.Tx, history bool) ([]C
 		var waiting, background, limit, stop string
 		var pinnedAt, snoozedAt, snoozedUntil int64
 		var snoozeWake, starterHost string
+		var firstUnread, revision string
 		if err := rows.Scan(&row.ID, &row.HostID, &row.Name, &row.Surface, &row.Status, &row.Ended, &row.Cwd, &lastActive, &row.RuntimeKind, &row.Source, &row.Transport,
 			&row.UnavailableReason, &subagent.ParentID, &subagent.RootID, &subagent.Depth, &subagent.Nickname, &subagent.Role, &waiting, &background, &limit, &stop,
 			&row.Alias, &row.QueueCount, &row.Archived, &row.Freshness.Generation, &row.Freshness.Stale, &row.Retired, &registered,
-			&pinnedAt, &snoozedAt, &snoozedUntil, &snoozeWake, &row.StartedBy, &starterHost, &row.Task); err != nil {
+			&pinnedAt, &snoozedAt, &snoozedUntil, &snoozeWake, &row.StartedBy, &starterHost, &row.Task, &firstUnread, &revision); err != nil {
 			return nil, err
 		}
 		row.StartedBy = hosts.Qualify(starterHost, row.StartedBy)
 		row.PinnedAt = unixMilliOrZero(pinnedAt)
+		if revision != "" {
+			row.ReadState = &surface.ReadState{FirstUnread: firstUnread, Revision: revision}
+		}
 		row.Snooze = scanSnooze(snoozedAt, snoozedUntil, snoozeWake)
 		if row.RegisteredAt, err = parseRegisteredAt(registered); err != nil {
 			return nil, err
@@ -248,7 +254,8 @@ const catalogPresentationSelect = `SELECT s.id,s.host_id,s.name,s.surface,s.stat
  cs.projection_generation,(cs.misses>0 OR cs.discovery_failures>0 OR (s.host_id!='' AND cs.unavailable_reason!='')),
  cs.retired,s.registered_at,s.pinned_at_ms,
  s.snoozed_at_ms,s.snoozed_until_ms,s.snooze_wake,COALESCE(o.creator_session_id,''),COALESCE(sc.host_id,''),
- EXISTS (SELECT 1 FROM tasks t WHERE t.child_session_id=s.id)
+ EXISTS (SELECT 1 FROM tasks t WHERE t.child_session_id=s.id),
+ COALESCE(rs.first_unread,''),COALESCE(rs.revision,'')
  `
 
 const catalogPresentationJoins = ` JOIN sessions s ON s.id=cs.session_id
@@ -257,5 +264,6 @@ const catalogPresentationJoins = ` JOIN sessions s ON s.id=cs.session_id
  LEFT JOIN sessions sc ON sc.id=o.creator_session_id
  LEFT JOIN (SELECT session_id,COUNT(*) n FROM message_queue WHERE status IN ('pending','inflight') GROUP BY session_id) q ON q.session_id=s.id
  LEFT JOIN session_archive sa ON sa.session_id=s.id
+ LEFT JOIN codex_read_states rs ON rs.session_id=s.id
  LEFT JOIN projects p ON p.id=json_extract(cs.host_project,'$.localId')
  ORDER BY cs.session_id`

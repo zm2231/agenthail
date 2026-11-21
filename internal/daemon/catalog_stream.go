@@ -496,6 +496,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 				}
 			})
 		}
+		d.recordReadStates(sessions, observedAt)
 		d.forgetCatalogLive(adapter.Name(), seen)
 		d.followLiveSessions(adapter.Name(), sessions, openSessions, complete)
 		var recordErr error

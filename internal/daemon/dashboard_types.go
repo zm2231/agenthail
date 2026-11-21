@@ -47,6 +47,7 @@ type dashboardSession struct {
 	Current           bool                       `json:"current"`
 	Archived          bool                       `json:"archived,omitempty"`
 	PinnedAt          time.Time                  `json:"pinnedAt,omitzero"`
+	ReadState         *surface.ReadState         `json:"readState,omitempty"`
 	Snooze            *dashboardSnooze           `json:"snooze,omitempty"`
 	InboxSection      string                     `json:"inboxSection,omitempty"`
 	EndTurn           *dashboardEndTurn          `json:"endTurn,omitempty"`
