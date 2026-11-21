@@ -10,6 +10,9 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
+// A collapsed open outlives the caller that started it, so it is bounded on its own.
+const readOpenTimeout = 30 * time.Second
+
 var errNotThePersonsMark = actionFailed(http.StatusForbidden, "person_only", "only the person marks a conversation read or unread")
 
 var personOnlyActions = map[string]error{dismissDecisionAction: errNotThePersonsDismissal, "session-read": errNotThePersonsMark, "session-unread": errNotThePersonsMark}
@@ -60,8 +63,11 @@ func (d *Daemon) openRead(ctx context.Context, writer surface.ReadStateWriter, s
 		return nil, err
 	}
 	mark := !known || stored.Unread() || stored.Revision != revision
-	value, err, _ := d.readOpens.Do(session.ID+"\x00"+revision, func() (any, error) {
-		return writer.OpenRead(ctx, session, revision, mark)
+	key := fmt.Sprintf("%s\x00%s\x00%t", session.ID, revision, mark)
+	value, err, _ := d.readOpens.Do(key, func() (any, error) {
+		shared, cancel := context.WithTimeout(context.WithoutCancel(ctx), readOpenTimeout)
+		defer cancel()
+		return writer.OpenRead(shared, session, revision, mark)
 	})
 	state, _ := value.(*surface.ReadState)
 	return state, err

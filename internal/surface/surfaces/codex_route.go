@@ -207,10 +207,6 @@ func (c *Codex) openWriter(ctx context.Context, sess *surface.Session) (codexCli
 // openRoute returns a client on the session's writer route, starting Codex's
 // daemon only when the route is managed and the daemon is not running.
 func (c *Codex) openRoute(ctx context.Context, sess *surface.Session) (codexClient, error) {
-	return c.openRouteStarting(ctx, sess, true)
-}
-
-func (c *Codex) openRouteStarting(ctx context.Context, sess *surface.Session, start bool) (codexClient, error) {
 	runtimes := c.openRuntimes(ctx)
 	if err := runtimes.ownershipUnknown(); err != nil {
 		runtimes.Close()
@@ -231,9 +227,6 @@ func (c *Codex) openRouteStarting(ctx context.Context, sess *surface.Session, st
 			return runtimes.managed, nil
 		}
 		runtimes.Close()
-		if !start {
-			return nil, errors.New("the Codex app-server daemon is not running")
-		}
 		return c.openManaged(ctx)
 	default:
 		runtimes.Close()

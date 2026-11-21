@@ -29,23 +29,25 @@ the next pass, within 30 seconds. Receipts are stored in `codex_read_states`
 `readState.revision` of the row the client showed, through `/api/action` and
 `/api/v1/actions`.
 
-`session-read` is what a client sends when the person opens a conversation. It
-loads the thread into its writer with the same call a send makes, so the
-conversation is live and writable at once, then marks it read on that same
-connection. The writer is chosen as for a send: the runtime that has the thread
-loaded, otherwise Codex Desktop for a thread Desktop created or whose creator is
-unknown, otherwise the daemon's app-server. Unlike a send, opening never starts
-Codex's daemon and never takes Desktop's writer: when the writer is not running,
-the thread is not loaded and is only marked, through Desktop or the daemon if
-either is up, and nothing happens otherwise.
+`session-read` is what a client sends when the person opens a conversation.
+With Codex Desktop reachable, it loads the thread into Desktop's app-server
+(`thread/resume`, unless Desktop already has it live) and marks it read on that
+connection, whichever app created the thread. If the daemon's app-server has the
+thread loaded, or is mid-turn on it, the thread stays there and is only marked,
+through the daemon, so a thread never has two writers. With Desktop not
+reachable, nothing is loaded: the thread is marked through the daemon's
+app-server if it is already running, and nothing happens otherwise. Opening
+never starts Codex's daemon.
+
+Sends keep their own routing: the runtime that has the thread loaded takes it
+first, so a thread an open loaded into Desktop is sent through Desktop.
 
 The mark is made only when the conversation was unread or its receipt has moved
 since the revision sent; opening a conversation already read at that revision
 loads it and leaves the receipt alone. Opens of one conversation at one revision
-that arrive together share one load. Opening a live conversation with Desktop
-down costs four requests on the daemon's app-server (`thread/loaded/list`, two
-`thread/read`, and the mark) and no `thread/resume`; with Desktop up, add its
-connection and one more `thread/loaded/list`.
+that arrive together share one load. Opening a thread the daemon holds costs
+three requests on the daemon's app-server (`initialize`, `thread/loaded/list`
+and the mark) plus one `thread/loaded/list` on Desktop when it is up.
 
 `session-unread` only marks; it loads nothing.
 

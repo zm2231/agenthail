@@ -41,16 +41,22 @@ func attachCodexReadStates(result map[string]any, threads []any) {
 }
 
 func (c *Codex) OpenRead(ctx context.Context, sess *surface.Session, revision string, mark bool) (*surface.ReadState, error) {
-	client, err := c.openRunningWriter(ctx, sess)
-	if err != nil && !mark {
+	runtimes := c.openRuntimes(ctx)
+	client, load := runtimes.openTarget(sess.ID)
+	if client == nil {
+		runtimes.Close()
+		if mark {
+			return nil, runtimes.unavailable()
+		}
 		return nil, nil
 	}
-	if err != nil {
-		if client, err = c.openReader(ctx, sess); err != nil {
+	runtimes.release(client)
+	defer client.Close()
+	if load {
+		if err := c.requireDirectInput(ctx, client, sess); err != nil && !mark {
 			return nil, err
 		}
 	}
-	defer client.Close()
 	if !mark {
 		return nil, nil
 	}
@@ -70,17 +76,17 @@ func (c *Codex) MarkUnread(ctx context.Context, sess *surface.Session, revision 
 	return c.updateReadState(ctx, client, sess.ID, "unread", revision)
 }
 
-// Opening a conversation never starts Codex's daemon, and never takes Desktop's writer: a send does the starting.
-func (c *Codex) openRunningWriter(ctx context.Context, sess *surface.Session) (codexClient, error) {
-	client, err := c.openRouteStarting(ctx, sess, false)
-	if err != nil {
-		return nil, err
+// An open loads the thread into Desktop, unless the daemon holds it, so the writer is never split; it never starts the daemon.
+func (r *codexRuntimes) openTarget(threadID string) (codexClient, bool) {
+	switch {
+	case r.managedLoaded[threadID] && r.managed != nil:
+		return r.managed, false
+	case r.desktop != nil:
+		return r.desktop, r.ownershipUnknown() == nil
+	case r.managed != nil:
+		return r.managed, false
 	}
-	if err := c.requireDirectInput(ctx, client, sess); err != nil {
-		_ = client.Close()
-		return nil, err
-	}
-	return client, nil
+	return nil, false
 }
 
 func (c *Codex) updateReadState(ctx context.Context, client codexClient, threadID, operation, revision string) (surface.ReadState, error) {

@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -99,32 +102,6 @@ func unreadUnloadedThread(t *testing.T, originator string) (*codextest.Daemon, *
 	return daemon, isolatedManagedRuntime(t), surface.Session{ID: id, Surface: surface.KindCodex, ReadState: receipt}
 }
 
-func TestCodexReadingAConversationLoadsItIntoItsWriter(t *testing.T) {
-	daemon, codex, session := unreadUnloadedThread(t, "agenthail")
-	if _, err := codex.OpenRead(context.Background(), &session, session.ReadState.Revision, true); err != nil {
-		t.Fatal(err)
-	}
-	if !daemon.Loaded(session.ID) {
-		t.Fatal("reading the conversation left it unloaded, so a send would still have to load it")
-	}
-	if receipt := daemon.ReadState(session.ID); receipt["firstUnread"] != nil {
-		t.Fatalf("Codex receipt = %v, want read", receipt)
-	}
-}
-
-func TestCodexReadingADesktopConversationWhileDesktopIsDownOnlyMarksIt(t *testing.T) {
-	daemon, codex, session := unreadUnloadedThread(t, codexDesktopOriginator)
-	if _, err := codex.OpenRead(context.Background(), &session, session.ReadState.Revision, true); err != nil {
-		t.Fatal(err)
-	}
-	if daemon.Loaded(session.ID) || len(daemon.Calls("thread/resume")) != 0 {
-		t.Fatal("reading took Desktop's conversation into the daemon")
-	}
-	if receipt := daemon.ReadState(session.ID); receipt["firstUnread"] != nil {
-		t.Fatalf("Codex receipt = %v, want read", receipt)
-	}
-}
-
 func TestCodexMarkingUnreadLoadsNothing(t *testing.T) {
 	daemon, codex, session := unreadUnloadedThread(t, "agenthail")
 	if _, err := codex.MarkUnread(context.Background(), &session, session.ReadState.Revision); err != nil {
@@ -132,24 +109,6 @@ func TestCodexMarkingUnreadLoadsNothing(t *testing.T) {
 	}
 	if daemon.Loaded(session.ID) || len(daemon.Calls("thread/resume")) != 0 {
 		t.Fatal("marking unread loaded the conversation")
-	}
-}
-
-func TestCodexOpeningALiveConversationCostsFourRequestsAndNoResume(t *testing.T) {
-	daemon, codex, session := finishedCodexThread(t)
-	before := len(daemon.Methods())
-	if _, err := codex.OpenRead(context.Background(), &session, session.ReadState.Revision, true); err != nil {
-		t.Fatal(err)
-	}
-	if sent := fmt.Sprint(daemon.Methods()[before:]); sent != "[initialize thread/loaded/list thread/read thread/read thread/readState/update]" {
-		t.Fatalf("opening a live conversation and marking it read sent %s", sent)
-	}
-	before = len(daemon.Methods())
-	if state, err := codex.OpenRead(context.Background(), &session, session.ReadState.Revision, false); err != nil || state != nil {
-		t.Fatalf("opening a read conversation returned %+v, %v", state, err)
-	}
-	if sent := fmt.Sprint(daemon.Methods()[before:]); sent != "[initialize thread/loaded/list thread/read thread/read]" {
-		t.Fatalf("opening a read conversation sent %s, want no mark", sent)
 	}
 }
 
@@ -166,5 +125,105 @@ func TestCodexOpeningAConversationNeverStartsTheDaemon(t *testing.T) {
 	_, _ = codex.MarkUnread(context.Background(), &session, "rev-1")
 	if commands := lifecycle.Commands(); len(commands) != 0 {
 		t.Fatalf("opening a conversation ran %v", commands)
+	}
+}
+
+func TestCodexOpeningWithoutDesktopOnlyMarksThroughTheRunningDaemon(t *testing.T) {
+	daemon, codex, session := unreadUnloadedThread(t, "agenthail")
+	if _, err := codex.OpenRead(context.Background(), &session, session.ReadState.Revision, true); err != nil {
+		t.Fatal(err)
+	}
+	if daemon.Loaded(session.ID) || len(daemon.Calls("thread/resume")) != 0 {
+		t.Fatal("opening without Desktop loaded the conversation into the daemon")
+	}
+	if receipt := daemon.ReadState(session.ID); receipt["firstUnread"] != nil {
+		t.Fatalf("Codex receipt = %v, want read", receipt)
+	}
+}
+
+func TestCodexOpeningAConversationTheDaemonHoldsCostsTwoRequestsAndLeavesItThere(t *testing.T) {
+	daemon, _, session := finishedCodexThread(t)
+	desktop := codextest.StartDesktop(t, func(method string) string {
+		if method == "thread/loaded/list" {
+			return `{"result":{"data":[]}}`
+		}
+		return `{"result":{}}`
+	})
+	codex := inDaemon(NewCodex(desktop.URL))
+	codex.managed = true
+	before := len(daemon.Methods())
+	if _, err := codex.OpenRead(context.Background(), &session, session.ReadState.Revision, true); err != nil {
+		t.Fatal(err)
+	}
+	if sent := fmt.Sprint(daemon.Methods()[before:]); sent != "[initialize thread/loaded/list thread/readState/update]" {
+		t.Fatalf("opening a conversation the daemon holds sent %s to the daemon", sent)
+	}
+	if sent := fmt.Sprint(desktop.Methods()); sent != "[thread/loaded/list]" {
+		t.Fatalf("opening a conversation the daemon holds sent %s to Desktop", sent)
+	}
+}
+
+func TestCodexOpeningLoadsAConversationIntoDesktopAndSendsFollowIt(t *testing.T) {
+	daemon, _, session := unreadUnloadedThread(t, "agenthail")
+	var mu sync.Mutex
+	loaded := false
+	desktop := codextest.StartDesktop(t, func(method string) string {
+		mu.Lock()
+		defer mu.Unlock()
+		switch method {
+		case "thread/loaded/list":
+			if loaded {
+				return `{"result":{"data":["` + session.ID + `"]}}`
+			}
+			return `{"result":{"data":[]}}`
+		case "thread/read":
+			return fmt.Sprintf(`{"result":{"thread":{"id":%q,"originator":"agenthail","source":"vscode","status":{"type":"idle"},"canAcceptDirectInput":%t}}}`, session.ID, loaded)
+		case "thread/resume":
+			loaded = true
+			return fmt.Sprintf(`{"result":{"thread":{"id":%q}}}`, session.ID)
+		case "thread/readState/update":
+			return `{"result":{"readState":{"firstUnread":null,"revision":"rev-desktop"}}}`
+		}
+		return `{"result":{}}`
+	})
+	codex := inDaemon(NewCodex(desktop.URL))
+	codex.managed = true
+	state, err := codex.OpenRead(context.Background(), &session, session.ReadState.Revision, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state == nil || state.Unread() || state.Revision != "rev-desktop" {
+		t.Fatalf("marked state = %+v, want read through Desktop", state)
+	}
+	if desktop.Request("thread/resume") == "" {
+		t.Fatalf("Desktop was sent %v, want a resume", desktop.Methods())
+	}
+	if daemon.Loaded(session.ID) || len(daemon.Calls("thread/resume")) != 0 {
+		t.Fatal("opening loaded the conversation into the daemon as well")
+	}
+	client, err := codex.openRoute(context.Background(), &session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Close()
+	if session.Transport != codexTransportDesktop {
+		t.Fatalf("the next send routes to %q, want Desktop", session.Transport)
+	}
+}
+
+func TestCodexOpeningADesktopConversationWhileDesktopIsUnreachableOnlyMarksIt(t *testing.T) {
+	daemon, _, session := unreadUnloadedThread(t, codexDesktopOriginator)
+	starting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("[]")) }))
+	t.Cleanup(starting.Close)
+	codex := inDaemon(NewCodex(starting.URL))
+	codex.managed = true
+	if _, err := codex.OpenRead(context.Background(), &session, session.ReadState.Revision, true); err != nil {
+		t.Fatal(err)
+	}
+	if daemon.Loaded(session.ID) || len(daemon.Calls("thread/resume")) != 0 {
+		t.Fatal("opening while Desktop was unreachable loaded its conversation into the daemon")
+	}
+	if receipt := daemon.ReadState(session.ID); receipt["firstUnread"] != nil {
+		t.Fatalf("Codex receipt = %v, want read", receipt)
 	}
 }
