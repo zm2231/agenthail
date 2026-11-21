@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -229,6 +230,38 @@ func TestDeleteIsOfferedOnlyForADeletableFailureAndRetryOnlyWithADeadQueueRow(t 
 				t.Fatalf("delete offered=%v but DeleteFailedDelivery err=%v", offered, deleteErr)
 			}
 		})
+	}
+}
+
+func TestASendFromAPairedHostRefusedOnArrivalIsAskedOnlyThere(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "target")
+	hostID := "h3a1b97d15648"
+	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "mac", Endpoint: "https://mac.example.ts.net:7412", Address: "100.64.0.3", Token: "ahd_secret"}); err != nil {
+		t.Fatal(err)
+	}
+	entity := hostID + "::replier"
+	if _, _, err := r.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: "replier", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "replier"}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	fail := func(status DeliveryIntentStatus, evidence surface.DeliveryEvidence) int64 {
+		t.Helper()
+		intent, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: "replier", TargetSessionID: "target", Message: "a reply", Status: status, Evidence: evidence})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if changed, err := r.RecordDeliveryFailure(intent.ID, "delivery rejected [invalid request]: no such agent identity"); err != nil || !changed {
+			t.Fatalf("changed=%v err=%v", changed, err)
+		}
+		return intent.ID
+	}
+	refused := fail(DeliveryIntentSubmitted, surface.EvidenceSubmitted)
+	if _, found, err := r.DeliveryAskOf(refused); err != nil || found {
+		t.Fatalf("a refusal the sending host got back raised an ask here: found=%v err=%v", found, err)
+	}
+	accepted := fail(DeliveryIntentSent, surface.EvidenceTransportAccepted)
+	if ask, found, err := r.DeliveryAskOf(accepted); err != nil || !found || ask.SessionID != "replier" {
+		t.Fatalf("a failure after this host accepted the send: ask=%+v found=%v err=%v", ask, found, err)
 	}
 }
 

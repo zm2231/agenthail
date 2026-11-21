@@ -139,7 +139,8 @@ func clip(text string, max int) string {
 func deliveryProblems(ctx context.Context, tx *sql.Tx, now time.Time) ([]deliveryProblem, error) {
 	var problems []deliveryProblem
 	rows, err := tx.QueryContext(ctx, `SELECT di.id,di.sender_session_id,di.target_session_id,di.relayed,di.status,di.retries,di.message,CASE WHEN di.status IN ('held','sent') THEN di.failure ELSE `+deliveryReasonOf("di.failure")+` END,(`+deletableFailure+`),
-		EXISTS(SELECT 1 FROM message_queue mq WHERE mq.id=di.queue_id AND di.queue_id!=0 AND mq.status='dead')
+		EXISTS(SELECT 1 FROM message_queue mq WHERE mq.id=di.queue_id AND di.queue_id!=0 AND mq.status='dead'),
+		di.status='failed' AND di.failed_from='submitted' AND EXISTS(SELECT 1 FROM sessions s WHERE s.id=di.sender_session_id AND s.host_id<>'')
 		FROM delivery_intents di
 		WHERE di.status='held' OR di.status='sent' AND di.failure!='' OR di.status='failed' AND di.updated_at>=datetime('now','-1 day') AND NOT (`+settledDeliveryFailure+`)
 		ORDER BY di.id`)
@@ -149,11 +150,15 @@ func deliveryProblems(ctx context.Context, tx *sql.Tx, now time.Time) ([]deliver
 	for rows.Next() {
 		var id int64
 		var sender, target, status, message, failure string
-		var relayed, deletable, retryable bool
+		var relayed, deletable, retryable, refusedToHost bool
 		var retries int
-		if err := rows.Scan(&id, &sender, &target, &relayed, &status, &retries, &message, &failure, &deletable, &retryable); err != nil {
+		if err := rows.Scan(&id, &sender, &target, &relayed, &status, &retries, &message, &failure, &deletable, &retryable, &refusedToHost); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		// A paired host's send refused on arrival went back in its response, so that host asks its sender.
+		if refusedToHost {
+			continue
 		}
 		if status == string(DeliveryIntentSent) {
 			status = deliveryMaybeHeld
