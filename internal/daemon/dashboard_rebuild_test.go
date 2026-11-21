@@ -53,3 +53,41 @@ func TestConcurrentSnapshotReadsShareOneRebuild(t *testing.T) {
 		t.Fatalf("%d concurrent reads asked the surface %d times, one build asks it %d times", readers, calls, perBuild)
 	}
 }
+
+type firstBuildHeld struct {
+	*daemonSurface
+	calls   atomic.Int32
+	held    chan struct{}
+	release chan struct{}
+}
+
+func (f *firstBuildHeld) Capabilities() surface.Capabilities {
+	if f.calls.Add(1) == 1 {
+		close(f.held)
+		<-f.release
+	}
+	return f.daemonSurface.Capabilities()
+}
+
+func TestAnOlderRebuildFinishingLastKeepsTheNewerState(t *testing.T) {
+	d, _, fake, dashboard, handler, _ := baseFixture(t)
+	held := &firstBuildHeld{daemonSurface: fake, held: make(chan struct{}), release: make(chan struct{})}
+	d.Surfaces = []surface.Surface{held}
+	older := make(chan int, 1)
+	go func() { older <- getSnapshot(t, handler, "/api/v1/snapshot", "").Code }()
+	<-held.held
+	dashboard.invalidate()
+	newer := getSnapshot(t, handler, "/api/v1/snapshot", "")
+	tag := newer.Header().Get("ETag")
+	if newer.Code != http.StatusOK || tag == "" {
+		t.Fatalf("newer read: status=%d etag=%q", newer.Code, tag)
+	}
+	close(held.release)
+	if code := <-older; code != http.StatusOK {
+		t.Fatalf("older read: status %d", code)
+	}
+	calls := held.calls.Load()
+	if again := getSnapshot(t, handler, "/api/v1/snapshot", tag); again.Code != http.StatusNotModified || held.calls.Load() != calls {
+		t.Fatalf("after the older build finished: status=%d etag=%q, want the newer state %q served from the cache", again.Code, again.Header().Get("ETag"), tag)
+	}
+}
