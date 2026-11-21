@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 func TestClaudeObserveReportsWhenAWorkingTurnLastProgressedAndTheToolItRuns(t *testing.T) {
@@ -31,7 +32,7 @@ func TestClaudeObserveReportsWhenAWorkingTurnLastProgressedAndTheToolItRuns(t *t
 		t.Fatalf("activity=%+v, want %+v", got, want)
 	}
 
-	appendTranscript(t, path, `{"type":"user","uuid":"r2","timestamp":"2026-10-23T10:20:00Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_2","content":"built"}]}}`+"\n")
+	surfacetest.AppendTranscript(t, path, `{"type":"user","uuid":"r2","timestamp":"2026-10-23T10:20:00Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_2","content":"built"}]}}`+"\n")
 	observation, err = claude.Observe(context.Background(), session)
 	if err != nil || observation.Activity == nil || observation.Activity.Tool != nil || !observation.Activity.LastProgressAt.Equal(time.Date(2026, 10, 23, 10, 20, 0, 0, time.UTC)) {
 		t.Fatalf("after the tool returned activity=%+v err=%v", observation.Activity, err)

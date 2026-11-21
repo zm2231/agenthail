@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 type scopedCodex struct {
@@ -26,7 +26,7 @@ func TestLaunchCodexStopsBeforeOpeningDesktopOutsideItsScope(t *testing.T) {
 func TestLaunchCodexFromAScratchHomeNamesTheOptIn(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CODEX_HOME", "")
-	err := launchCodex(surfaces.NewCodex(""))
+	err := launchCodex(codexsurface.NewCodex(""))
 	if err == nil || !strings.Contains(err.Error(), "AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT") {
 		t.Fatalf("launch from a scratch home: %v", err)
 	}

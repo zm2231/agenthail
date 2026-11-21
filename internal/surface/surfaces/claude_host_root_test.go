@@ -9,6 +9,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 // hostInOtherRootThanCaller starts the Claude host as the daemon does, under
@@ -25,7 +26,7 @@ func hostInOtherRootThanCaller(t *testing.T) (*claudetest.Fixture, *claudehostte
 	host := claudehosttest.New(t, fixture.Home)
 	host.Start(t)
 	t.Setenv("CLAUDE_CONFIG_DIR", second)
-	return fixture, host, inDaemon(NewClaude(nil, fixture.Home)), second
+	return fixture, host, surfacetest.InDaemon(NewClaude(nil, fixture.Home)), second
 }
 
 func TestASendFromACallerInAnotherRootResumesTheConversationInTheRootThatHoldsIt(t *testing.T) {
@@ -71,7 +72,7 @@ func TestAResumeInTheDefaultRootThroughAHostStartedInAnotherRootRunsWithoutAConf
 	}
 	fixture.Root = filepath.Join(fixture.Home, ".claude")
 	session := exitedSession(fixture)
-	if _, err := inDaemon(NewClaude(nil, fixture.Home)).SendHumanTurn(context.Background(), &session, "are you there", nil); err != nil {
+	if _, err := surfacetest.InDaemon(NewClaude(nil, fixture.Home)).SendHumanTurn(context.Background(), &session, "are you there", nil); err != nil {
 		t.Fatal(err)
 	}
 	spawns := host.Spawns(t, fixtureConversation)
@@ -100,7 +101,7 @@ func TestASessionStartedInThePrimaryRootThroughAHostStartedInAnotherRootRunsInTh
 			if err := surface.RecordDaemonClaudeRoot(fixture.Home); err != nil {
 				t.Fatal(err)
 			}
-			session, _, err := inDaemon(NewClaude(nil, fixture.Home)).StartSession(context.Background(), surface.SessionStartOptions{Message: "hello", Cwd: t.TempDir(), Name: "in-" + uuid.NewString()[:8]})
+			session, _, err := surfacetest.InDaemon(NewClaude(nil, fixture.Home)).StartSession(context.Background(), surface.SessionStartOptions{Message: "hello", Cwd: t.TempDir(), Name: "in-" + uuid.NewString()[:8]})
 			if err != nil {
 				t.Fatal(err)
 			}

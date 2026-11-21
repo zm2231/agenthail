@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 func TestAHostSessionTurnSettingsChangeModelEffortAndModeNow(t *testing.T) {
@@ -30,7 +31,7 @@ func TestAHostSessionTurnSettingsChangeModelEffortAndModeNow(t *testing.T) {
 			t.Fatalf("%s applies %q on a hosted session", setting.Key, setting.Applies)
 		}
 	}
-	mode := settingValue(t, settings, surface.TurnSettingMode)
+	mode := surfacetest.SettingValue(t, settings, surface.TurnSettingMode)
 	var confirmed []string
 	for _, option := range mode.Options {
 		if option.Confirm {
@@ -52,7 +53,7 @@ func TestAHostSessionTurnSettingsChangeModelEffortAndModeNow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := [3]string{settingValue(t, settings, "model").Value, settingValue(t, settings, "effort").Value, settingValue(t, settings, "mode").Value}; got != [3]string{"opus", "xhigh", "plan"} {
+	if got := [3]string{surfacetest.SettingValue(t, settings, "model").Value, surfacetest.SettingValue(t, settings, "effort").Value, surfacetest.SettingValue(t, settings, "mode").Value}; got != [3]string{"opus", "xhigh", "plan"} {
 		t.Fatalf("settings read back as %v", got)
 	}
 	data, err := os.ReadFile(filepath.Join(fixture.ClaudeDir, "controls.jsonl"))
@@ -76,7 +77,7 @@ func TestAHostSessionTurnSettingsChangeModelEffortAndModeNow(t *testing.T) {
 }
 
 func TestAClaudeSessionWithoutTheHostOrRemoteControlHasNoTurnSettings(t *testing.T) {
-	c := inDaemon(NewClaude(nil, t.TempDir()))
+	c := surfacetest.InDaemon(NewClaude(nil, t.TempDir()))
 	c.DisableRemoteControl()
 	sess := &surface.Session{ID: uuid.NewString(), Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: os.Getpid()}
 	settings, err := c.TurnSettings(context.Background(), sess)

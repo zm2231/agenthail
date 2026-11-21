@@ -13,6 +13,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -163,7 +164,7 @@ func TestATerminalSessionsBackgroundTasksComeFromItsTranscript(t *testing.T) {
 			t.Fatalf("task %d = %+v, want %+v", i, got, want[i])
 		}
 	}
-	appendTranscript(t, path, mustJSON(t, backgroundCall(now.Add(5*time.Second), "call-stop", "TaskStop", map[string]any{"task_id": "m-ci"}))+"\n"+
+	surfacetest.AppendTranscript(t, path, mustJSON(t, backgroundCall(now.Add(5*time.Second), "call-stop", "TaskStop", map[string]any{"task_id": "m-ci"}))+"\n"+
 		mustJSON(t, backgroundNotification(now.Add(6*time.Second), "a-review"))+"\n"+
 		mustJSON(t, backgroundNotification(now.Add(6*time.Second), "b-moved"))+"\n"+
 		mustJSON(t, map[string]any{"type": "attachment", "attachment": map[string]any{"type": "queued_command", "prompt": "<task-notification>\n<task-id>b-shell</task-id>\n</task-notification>"}})+"\n")

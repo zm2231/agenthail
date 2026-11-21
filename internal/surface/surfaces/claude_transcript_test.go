@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -267,7 +269,7 @@ func TestClaudeStreamDoesNotDuplicateTurnDurationCompletion(t *testing.T) {
 
 func seededClaudeStreamSession(t *testing.T, path, transport string) *surface.Session {
 	t.Helper()
-	seed, err := readTimeline(context.Background(), path, "claude", 0, 20)
+	seed, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 20)
 	if err != nil || !seed.TranscriptOffsetSet || seed.TranscriptIdentity == "" {
 		t.Fatalf("seed=%+v err=%v", seed, err)
 	}
@@ -302,13 +304,13 @@ func TestAStreamWindowThatHasAlreadyRunOutStillReadsOnce(t *testing.T) {
 	claudeSession := seededClaudeStreamSession(t, claudePath, "")
 	testkit.AppendFile(t, claudePath, `{"type":"user","uuid":"u2","message":{"content":"appended"}}`+"\n")
 	codexRecord := fmt.Sprintf(`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","stdout":%q}}}`+"\n", "appended")
-	codexSession := &surface.Session{ID: "codex", Transcript: timelineFixture(t, codexRecord), TranscriptOffsetSet: true}
+	codexSession := &surface.Session{ID: "codex", Transcript: surfacetest.TimelineFixture(t, codexRecord), TranscriptOffsetSet: true}
 	for name, stream := range map[string]func(func(surface.StreamEvent)) error{
 		"claude": func(onEvent func(surface.StreamEvent)) error {
 			return NewClaude(nil, t.TempDir()).Stream(context.Background(), claudeSession, "", onEvent, 0)
 		},
 		"codex": func(onEvent func(surface.StreamEvent)) error {
-			return inDaemon(NewCodex("")).Stream(context.Background(), codexSession, "", onEvent, 0)
+			return surfacetest.InDaemon(codexsurface.NewCodex("")).Stream(context.Background(), codexSession, "", onEvent, 0)
 		},
 	} {
 		var texts []string
@@ -708,7 +710,7 @@ func TestClaudeStreamSupportsUDSTranscriptTail(t *testing.T) {
 	if len(events) != 2 || events[0].Kind != "message" || events[0].Text != "answer" || events[0].TurnID != "u1" || events[1].Kind != "done" {
 		t.Fatalf("events=%+v", events)
 	}
-	page, err := readTimeline(context.Background(), path, "claude", 0, 20)
+	page, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 20)
 	if err != nil || len(page.Items) != 3 || page.Items[1].ID != events[0].ID || page.Items[1].TurnID != "u1" || page.Items[2].Kind != "done" || page.Items[2].ID != events[1].ID || page.Items[2].TurnID != "u1" {
 		t.Fatalf("page/live identity mismatch: page=%+v live=%q err=%v", page, events[0].ID, err)
 	}

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 func TestACodexJournalFromAnOlderMappingIsReadAgainFromItsTranscript(t *testing.T) {
@@ -26,7 +26,7 @@ func TestACodexJournalFromAnOlderMappingIsReadAgainFromItsTranscript(t *testing.
 	if err := reg.RecordObservedSession(from); err != nil {
 		t.Fatal(err)
 	}
-	adapter := surfaces.NewCodex("http://127.0.0.1:1")
+	adapter := codexsurface.NewCodex("http://127.0.0.1:1")
 	manager := newTestSourceManager(t, reg)
 	first, err := manager.prepareStream(context.Background(), &from, adapter)
 	if err != nil {

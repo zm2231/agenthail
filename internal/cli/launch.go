@@ -15,7 +15,7 @@ import (
 	"github.com/zm2231/agenthail/internal/codexconfig"
 	"github.com/zm2231/agenthail/internal/poll"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 func (a *App) cmdLaunch(args []string) error {
@@ -48,14 +48,14 @@ func launchCodex(codex surface.Surface) error {
 			return err
 		}
 	}
-	home := surfaces.CodexHomeFromEnv()
-	if adapter, ok := codex.(*surfaces.Codex); ok {
+	home := codexsurface.CodexHomeFromEnv()
+	if adapter, ok := codex.(*codexsurface.Codex); ok {
 		home = adapter.Home()
 	}
-	install := surfaces.DetectCodexInstallation(home)
+	install := codexsurface.DetectCodexInstallation(home)
 	exe := install.Desktop
 	if exe == "" {
-		message := fmt.Sprintf("Codex Desktop is not installed (tried %s)", strings.Join(surfaces.CodexDesktopExecutables, ", "))
+		message := fmt.Sprintf("Codex Desktop is not installed (tried %s)", strings.Join(codexsurface.CodexDesktopExecutables, ", "))
 		if install.Daemon != "" {
 			message += "; Agenthail creates and drives Codex conversations on Codex's app-server daemon without it"
 		}
@@ -141,7 +141,7 @@ func findCodexPID() int {
 	if err != nil {
 		return 0
 	}
-	return selectCodexPID(string(output), surfaces.CodexDesktopExecutables)
+	return selectCodexPID(string(output), codexsurface.CodexDesktopExecutables)
 }
 
 func selectCodexPID(output string, expectedExecutables []string) int {

@@ -11,14 +11,14 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 func (a *App) cmdCodex(args []string) error {
 	if len(args) == 1 && args[0] == "--repair-managed-runtime" {
 		return repairManagedCodexRuntime(context.Background())
 	}
-	home := surfaces.CodexHomeFromEnv()
+	home := codexsurface.CodexHomeFromEnv()
 	codex, err := a.managedCodexForLaunch(home, strings.TrimSpace(os.Getenv("AGENTHAIL_CODEX_LAUNCH_ID")))
 	if err != nil {
 		return err
@@ -28,7 +28,7 @@ func (a *App) cmdCodex(args []string) error {
 			return fmt.Errorf("agenthail codex manages the remote transport; remove %s", arg)
 		}
 	}
-	path, err := surfaces.CodexDaemonCLI(home)
+	path, err := codexsurface.CodexDaemonCLI(home)
 	if err != nil {
 		return fmt.Errorf("find codex: %w", err)
 	}
@@ -97,7 +97,7 @@ func managedCodexLaunchBindingFromEnv() (managedCodexLaunchBinding, error) {
 	return binding, nil
 }
 
-func runManagedCodexLaunch(ctx context.Context, args []string, cwd, launchID, receiptPath string, binding managedCodexLaunchBinding, prepare managedCodexPreparer, execute managedCodexExec, path string, home surfaces.CodexHome) error {
+func runManagedCodexLaunch(ctx context.Context, args []string, cwd, launchID, receiptPath string, binding managedCodexLaunchBinding, prepare managedCodexPreparer, execute managedCodexExec, path string, home codexsurface.CodexHome) error {
 	model, message, err := managedCodexLaunchArgs(args)
 	if err != nil {
 		return err
@@ -161,7 +161,7 @@ func managedCodexLaunchArgs(args []string) (string, string, error) {
 }
 
 func repairManagedCodexRuntime(ctx context.Context) error {
-	if err := surfaces.RestartManagedCodexRuntime(ctx, surfaces.CodexHomeFromEnv()); err != nil {
+	if err := codexsurface.RestartManagedCodexRuntime(ctx, codexsurface.CodexHomeFromEnv()); err != nil {
 		return fmt.Errorf("restart managed Codex runtime: %w", err)
 	}
 	fmt.Println("Codex's app-server daemon restarted; retry the affected conversation")

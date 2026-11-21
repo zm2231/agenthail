@@ -18,7 +18,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -30,7 +30,7 @@ type codexProcess struct {
 func codexSocketDaemon(t *testing.T) (*Daemon, *registry.Registry, *codexProcess) {
 	t.Helper()
 	home := t.TempDir()
-	d, reg, _, _ := mcpSocketDaemon(t, surfaces.NewCodexIn(surfaces.CodexHome{Codex: home, State: filepath.Join(home, "state")}, ""))
+	d, reg, _, _ := mcpSocketDaemon(t, codexsurface.NewCodexIn(codexsurface.CodexHome{Codex: home, State: filepath.Join(home, "state")}, ""))
 	locks := filepath.Join(home, "thread-writer-locks")
 	if err := os.MkdirAll(locks, 0o700); err != nil {
 		t.Fatal(err)

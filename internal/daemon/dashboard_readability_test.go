@@ -14,7 +14,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 type readabilityDashboard struct {
@@ -62,7 +62,7 @@ type followingSurface struct {
 
 func (f *followingSurface) Usage(context.Context) (*surface.Usage, error) {
 	if f.usage == nil {
-		return nil, surfaces.ErrNoCodexUsage
+		return nil, codexsurface.ErrNoCodexUsage
 	}
 	return f.usage, nil
 }

@@ -14,7 +14,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 func TestACodexDesktopThreadKeepsItsRowUntilDesktopQuits(t *testing.T) {
@@ -67,7 +67,7 @@ func TestACodexDesktopThreadKeepsItsRowUntilDesktopQuits(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	d := newTestDaemon(t, store, []surface.Surface{surfaces.NewCodex(endpoint.Port())})
+	d := newTestDaemon(t, store, []surface.Surface{codexsurface.NewCodex(endpoint.Port())})
 	pass := func() []map[string]any {
 		t.Helper()
 		_, before, err := store.CatalogState()

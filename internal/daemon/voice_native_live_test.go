@@ -16,7 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/voice"
 )
 
@@ -61,7 +61,7 @@ func TestNativeVoiceHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { reg.Close() })
-	codex := surfaces.NewCodex(os.Getenv("AGENTHAIL_CODEX_REMOTE"))
+	codex := codexsurface.NewCodex(os.Getenv("AGENTHAIL_CODEX_REMOTE"))
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	sessions, err := codex.List(ctx)
 	cancel()
@@ -86,7 +86,7 @@ func TestNativeVoiceHost(t *testing.T) {
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		provider := &surfaces.CodexVoice{Codex: codex}
+		provider := &codexsurface.CodexVoice{Codex: codex}
 		if err := provider.Request(ctx, saved.State.Session, "thread/realtime/stop", map[string]any{"threadId": saved.State.Session.ID}); err != nil {
 			t.Errorf("native test hangup: %v", err)
 		}

@@ -19,6 +19,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 	"github.com/zm2231/agenthail/internal/testkit"
@@ -364,7 +365,7 @@ func TestCodexPendingApprovalShowsWaitingAndHoldsSteerUntilApproved(t *testing.T
 	}
 	t.Cleanup(func() { store.Close() })
 	pushes := newPushRecorder(t, store)
-	h, stop := runDaemon(t, store, surfaces.NewCodex(unreachableDesktop))
+	h, stop := runDaemon(t, store, codexsurface.NewCodex(unreachableDesktop))
 	status, payload := h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "session-create", "surface": "codex", "message": "Apply the migration", "cwd": t.TempDir()})
 	var created struct {
 		Session struct {
@@ -377,7 +378,7 @@ func TestCodexPendingApprovalShowsWaitingAndHoldsSteerUntilApproved(t *testing.T
 	id := created.Session.ID
 	lifecycle.Daemon().SetActiveFlags(id, "waitingOnApproval")
 	stop()
-	h, _ = runDaemon(t, store, surfaces.NewCodex(unreachableDesktop))
+	h, _ = runDaemon(t, store, codexsurface.NewCodex(unreachableDesktop))
 	testkit.Eventually(t, "the thread to show it is waiting on an approval", 5*time.Second, func() bool {
 		waiting := h.sessionWaiting(id)
 		return waiting != nil && waiting.Kind == surface.WaitingApproval
@@ -776,7 +777,7 @@ func TestCodexInputRequestIsNotifiedAsInputNotApproval(t *testing.T) {
 	}
 	t.Cleanup(func() { store.Close() })
 	pushes := newPushRecorder(t, store)
-	h, stop := runDaemon(t, store, surfaces.NewCodex(unreachableDesktop))
+	h, stop := runDaemon(t, store, codexsurface.NewCodex(unreachableDesktop))
 	status, payload := h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "session-create", "surface": "codex", "message": "Pick the migration", "cwd": t.TempDir()})
 	var created struct {
 		Session struct {
@@ -789,7 +790,7 @@ func TestCodexInputRequestIsNotifiedAsInputNotApproval(t *testing.T) {
 	id := created.Session.ID
 	lifecycle.Daemon().SetActiveFlags(id, "waitingOnUserInput")
 	stop()
-	h, _ = runDaemon(t, store, surfaces.NewCodex(unreachableDesktop))
+	h, _ = runDaemon(t, store, codexsurface.NewCodex(unreachableDesktop))
 	testkit.Eventually(t, "the thread to show it waits on input", 5*time.Second, func() bool {
 		waiting := h.sessionWaiting(id)
 		return waiting != nil && waiting.Kind == surface.WaitingInput

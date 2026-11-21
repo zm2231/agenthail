@@ -24,7 +24,7 @@ import (
 	"github.com/zm2231/agenthail/internal/delivery"
 	registrypkg "github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 const dashboardTestToken = "secret"
@@ -1269,7 +1269,7 @@ func TestChangingTheCodexWindowRepublishesPresence(t *testing.T) {
 	if _, _, err := r.RecordCatalogSession(registrypkg.CatalogSessionState{Session: session, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: projection}, registrypkg.CatalogEvent{DedupeKey: "session.upserted:" + session.ID, Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
 		t.Fatal(err)
 	}
-	d := newTestDaemon(t, r, []surface.Surface{&surfaces.Codex{}})
+	d := newTestDaemon(t, r, []surface.Surface{&codexsurface.Codex{}})
 	handler := dashboardRouter(d)
 	if response := serveDashboardRequest(handler, http.MethodPost, "/api/settings", `{"action":"dashboard-config","codexRecentHours":1}`); response.Code != http.StatusOK {
 		t.Fatalf("settings status=%d body=%s", response.Code, response.Body.String())

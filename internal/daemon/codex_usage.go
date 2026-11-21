@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 const codexUsageTimeout = 5 * time.Second
@@ -30,7 +30,7 @@ func (d *Daemon) codexUsageHandler(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	usage, err := reader.Usage(ctx)
 	switch {
-	case errors.Is(err, surfaces.ErrNoCodexUsage):
+	case errors.Is(err, codexsurface.ErrNoCodexUsage):
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"usage": nil, "usageProblem": "No Codex usage recorded yet"})
 	case err != nil:
 		writeAPIError(w, http.StatusServiceUnavailable, "codex_usage_unavailable", err.Error())

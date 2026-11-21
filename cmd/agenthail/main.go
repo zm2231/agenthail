@@ -12,6 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/cli"
 	"github.com/zm2231/agenthail/internal/codexconfig"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/surface/notionsurface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
@@ -63,7 +64,7 @@ func main() {
 	if !helpers {
 		claude.DisableRemoteControl()
 	}
-	codex := surfaces.NewCodex(codexconfig.RemoteDebuggingPort())
+	codex := codexsurface.NewCodex(codexconfig.RemoteDebuggingPort())
 	app.Surfaces = []cli.SurfaceEntry{
 		{Name: "claude", Surface: claude},
 		{Name: "codex", Surface: codex},

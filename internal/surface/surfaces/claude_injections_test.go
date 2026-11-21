@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 const syntheticNotification = `<task-notification>\n<task-id>task-7</task-id>\n<tool-use-id>toolu_synthetic</tool-use-id>\n<output-file>/tmp/synthetic.output</output-file>\n<status>completed</status>\n<summary>Background build finished</summary>\n</task-notification>`
@@ -18,13 +19,13 @@ const syntheticNotification = `<task-notification>\n<task-id>task-7</task-id>\n<
 func TestClaudeTaskNotificationsOfOneTaskKeepTheirOwnIdentity(t *testing.T) {
 	first := `<task-notification>\n<task-id>monitor-1</task-id>\n<summary>Monitor event: first</summary>\n</task-notification>`
 	second := `<task-notification>\n<task-id>monitor-1</task-id>\n<summary>Monitor event: second</summary>\n</task-notification>`
-	path := timelineFixture(t, `{"type":"user","uuid":"n1","origin":{"kind":"task-notification"},"message":{"content":"`+first+`"}}
+	path := surfacetest.TimelineFixture(t, `{"type":"user","uuid":"n1","origin":{"kind":"task-notification"},"message":{"content":"`+first+`"}}
 {"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"one"}]}}
 {"type":"attachment","uuid":"q2","attachment":{"type":"queued_command","prompt":"`+second+`"}}
 {"type":"user","uuid":"n2","origin":{"kind":"task-notification"},"message":{"content":"`+second+`"}}
 {"type":"assistant","uuid":"a2","message":{"id":"m2","stop_reason":"end_turn","content":[{"type":"text","text":"two"}]}}
 `)
-	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	page, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +41,7 @@ func TestClaudeTaskNotificationsOfOneTaskKeepTheirOwnIdentity(t *testing.T) {
 }
 
 func TestClaudeTimelineClassifiesInjectedPrompts(t *testing.T) {
-	path := timelineFixture(t, `{"type":"user","uuid":"u1","origin":{"kind":"human"},"message":{"content":"Run the build"}}
+	path := surfacetest.TimelineFixture(t, `{"type":"user","uuid":"u1","origin":{"kind":"human"},"message":{"content":"Run the build"}}
 {"type":"attachment","uuid":"q1","attachment":{"type":"queued_command","prompt":"`+syntheticNotification+`"}}
 {"type":"attachment","uuid":"q2","attachment":{"type":"queued_command","prompt":"also check lint","origin":{"kind":"human"}}}
 {"type":"queue-operation","operation":"enqueue","content":"`+syntheticNotification+`"}
@@ -52,7 +53,7 @@ func TestClaudeTimelineClassifiesInjectedPrompts(t *testing.T) {
 {"type":"user","uuid":"u6","message":{"content":"legacy prompt"}}
 {"type":"user","uuid":"u7","message":{"content":[{"type":"tool_result","tool_use_id":"call-1","content":"ok"}]}}
 `)
-	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	page, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +110,7 @@ func TestClaudeQueuedHumanPromptIsThePersonsMessage(t *testing.T) {
 // Claude Code records a person's message absorbed into a running turn only as
 // a queued_command attachment; no user record follows it.
 func TestClaudeMidTurnMessageIsInTheTimelineAtItsTime(t *testing.T) {
-	path := timelineFixture(t, `{"type":"user","uuid":"u1","timestamp":"2026-10-23T08:29:00Z","origin":{"kind":"human"},"message":{"content":"Run the build"}}
+	path := surfacetest.TimelineFixture(t, `{"type":"user","uuid":"u1","timestamp":"2026-10-23T08:29:00Z","origin":{"kind":"human"},"message":{"content":"Run the build"}}
 {"type":"assistant","uuid":"a1","timestamp":"2026-10-23T08:29:10Z","message":{"id":"m1","content":[{"type":"tool_use","id":"call-1","name":"Bash","input":{"command":"make"}}]}}
 {"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-23T08:29:27Z","content":"store it in the task"}
 {"type":"queue-operation","operation":"remove","timestamp":"2026-10-23T08:29:31Z","content":"store it in the task","reason":"absorbed_mid_turn","commandUuid":"cmd-1","deliveryId":"delivery-1"}
@@ -117,7 +118,7 @@ func TestClaudeMidTurnMessageIsInTheTimelineAtItsTime(t *testing.T) {
 {"type":"attachment","uuid":"q1","timestamp":"2026-10-23T08:29:27Z","attachment":{"type":"queued_command","prompt":"store it in the task","source_uuid":"cmd-1","delivery_id":"delivery-1","commandMode":"prompt","origin":{"kind":"human"},"timestamp":"2026-10-23T08:29:27Z","humanTurn":true}}
 {"type":"assistant","uuid":"a2","timestamp":"2026-10-23T08:29:40Z","message":{"id":"m2","stop_reason":"end_turn","content":[{"type":"text","text":"Stored."}]}}
 `)
-	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	page, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,11 +165,11 @@ func TestClaudeStreamCarriesAMidTurnMessage(t *testing.T) {
 }
 
 func TestClaudeTimelineShowsAnAgenthailTurnAsItsNoticeAndThePersonsTypingAsTheirs(t *testing.T) {
-	path := timelineFixture(t, `{"type":"user","uuid":"u1","turnOrigin":"sdk","message":{"content":"[agenthail] @builder is blocked on a prompt: Bash"}}
+	path := surfacetest.TimelineFixture(t, `{"type":"user","uuid":"u1","turnOrigin":"sdk","message":{"content":"[agenthail] @builder is blocked on a prompt: Bash"}}
 {"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"Answering."}]}}
 {"type":"user","uuid":"u2","origin":{"kind":"human"},"message":{"content":"[agenthail] is the prefix I mean"}}
 `)
-	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	page, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,11 +195,11 @@ func TestClaudeTimelineShowsAnAgenthailTurnAsItsNoticeAndThePersonsTypingAsTheir
 
 func TestClaudeTimelineShowsTheLimitResumeNoticeAsAgenthails(t *testing.T) {
 	notice := strings.ReplaceAll(surface.LimitResumeNotice(), `"`, `\"`)
-	path := timelineFixture(t, `{"type":"user","uuid":"u1","origin":{"kind":"human"},"message":{"content":"`+notice+`"}}
+	path := surfacetest.TimelineFixture(t, `{"type":"user","uuid":"u1","origin":{"kind":"human"},"message":{"content":"`+notice+`"}}
 {"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"Continuing."}]}}
 {"type":"user","uuid":"u2","message":{"content":"`+notice+`"}}
 `)
-	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	page, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,11 +229,11 @@ func TestClaudeTimelineShowsTheCLIsPeerDeliveredNoticeAsAgenthails(t *testing.T)
 		}
 		return string(line) + "\n"
 	}
-	path := timelineFixture(t, record("u1", map[string]any{"kind": "peer", "name": "agenthail/cli: Agenthail CLI", "msg_id": "m1", "body": body}, "Another Claude session sent a message:\n"+envelope)+
+	path := surfacetest.TimelineFixture(t, record("u1", map[string]any{"kind": "peer", "name": "agenthail/cli: Agenthail CLI", "msg_id": "m1", "body": body}, "Another Claude session sent a message:\n"+envelope)+
 		record("u2", map[string]any{"kind": "peer", "name": "agenthail/cli: Agenthail CLI", "msg_id": "m2"}, envelope)+
 		record("u3", map[string]any{"kind": "peer", "name": "reviewer", "msg_id": "m3", "body": surface.LimitResumeNotice()}, "<cross-session-message from-name=\"reviewer\">"+surface.LimitResumeNotice()+"</cross-session-message>")+
 		record("u4", map[string]any{"kind": "peer", "name": "agenthail/claude: Agenthail CLI", "msg_id": "m4", "body": body}, "<cross-session-message from-name=\"agenthail/claude: Agenthail CLI\">"+body+"</cross-session-message>"))
-	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	page, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

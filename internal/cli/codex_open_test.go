@@ -10,7 +10,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 type unloadedCodex struct {
@@ -44,13 +44,13 @@ func unloadedCodexThread(t *testing.T) unloadedCodex {
 	if err := r.RecordObservedSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "managed", Status: surface.StatusIdle, Cwd: cwd}); err != nil {
 		t.Fatal(err)
 	}
-	app := &App{Registry: r, Surfaces: []SurfaceEntry{{Name: "codex", Surface: surfaces.NewCodex("1")}}, DefaultTimeout: 10 * time.Second, catalogDaemonRunning: func() bool { return false }}
+	app := &App{Registry: r, Surfaces: []SurfaceEntry{{Name: "codex", Surface: codexsurface.NewCodex("1")}}, DefaultTimeout: 10 * time.Second, catalogDaemonRunning: func() bool { return false }}
 	return unloadedCodex{app: app, r: r, fake: fake, id: id}
 }
 
 func (c unloadedCodex) serveDaemon(t *testing.T) {
 	t.Helper()
-	serveAppDaemon(t, c.app, c.r, []surface.Surface{surfaces.NewCodex("1")})
+	serveAppDaemon(t, c.app, c.r, []surface.Surface{codexsurface.NewCodex("1")})
 }
 
 func agenthailBearer(config map[string]any) string {

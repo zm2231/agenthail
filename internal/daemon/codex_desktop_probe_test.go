@@ -6,7 +6,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 func TestACatalogPassLooksUpCodexDesktopOnceAndStillFindsIt(t *testing.T) {
@@ -26,7 +26,7 @@ func TestACatalogPassLooksUpCodexDesktopOnceAndStillFindsIt(t *testing.T) {
 		return ""
 	})
 	_, registry, _, _, _ := daemonFixture(t)
-	d := newTestDaemon(t, registry, []surface.Surface{surfaces.NewCodex(desktop.URL)})
+	d := newTestDaemon(t, registry, []surface.Surface{codexsurface.NewCodex(desktop.URL)})
 	for pass := 1; pass <= 2; pass++ {
 		d.discoverCatalog(context.Background())
 		if lookups := desktop.Lookups(); lookups != pass {
@@ -44,7 +44,7 @@ func TestACatalogPassLooksUpCodexDesktopOnceAndStillFindsIt(t *testing.T) {
 
 func TestAnUnreachableDesktopAgenthailCannotLaunchOffersNoLaunchRepair(t *testing.T) {
 	_, registry, _, _, _ := daemonFixture(t)
-	d := newTestDaemon(t, registry, []surface.Surface{surfaces.NewCodex("ws://127.0.0.1:1")})
+	d := newTestDaemon(t, registry, []surface.Surface{codexsurface.NewCodex("ws://127.0.0.1:1")})
 	d.discoverCatalog(context.Background())
 	health, _ := d.observedSurfaceHealth(surface.KindCodex)
 	if health.Runtime == nil || health.Runtime.Problem != surface.RuntimeDesktopUnreachable || health.RepairAction != "" {

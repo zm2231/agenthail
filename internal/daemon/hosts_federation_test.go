@@ -27,7 +27,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -64,7 +64,7 @@ func (s *federatedSurface) Usage(context.Context) (*surface.Usage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.usage == nil {
-		return nil, surfaces.ErrNoCodexUsage
+		return nil, codexsurface.ErrNoCodexUsage
 	}
 	return s.usage, nil
 }

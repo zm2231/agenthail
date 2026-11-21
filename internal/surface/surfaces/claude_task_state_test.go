@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 func taskIDs(tasks []surface.BackgroundTask) []string {
@@ -74,7 +75,7 @@ func TestAProcessResumesATranscriptsTasksFromTheScanAnotherSaved(t *testing.T) {
 	if got := taskIDs(command.transcriptTasks(context.Background(), path)); !slices.Equal(got, []string{"b-1", "b-saved"}) {
 		t.Fatalf("a later process reads on from the saved offset: %v", got)
 	}
-	appendTranscript(t, path, mustJSON(t, backgroundNotification(now.Add(time.Second), "b-1"))+"\n")
+	surfacetest.AppendTranscript(t, path, mustJSON(t, backgroundNotification(now.Add(time.Second), "b-1"))+"\n")
 	if got := taskIDs(command.transcriptTasks(context.Background(), path)); !slices.Equal(got, []string{"b-saved"}) {
 		t.Fatalf("tasks = %v", got)
 	}
@@ -86,7 +87,7 @@ func TestAnOlderSavedScanOnlyCostsARereadOfWhatFollowsIt(t *testing.T) {
 	first := NewClaude(nil, home)
 	first.transcriptTasks(context.Background(), path)
 	older, _ := readSavedScan(t, first, path)
-	appendTranscript(t, path, launch(t, now.Add(time.Second), "call-2", "b-2")+mustJSON(t, backgroundNotification(now.Add(2*time.Second), "b-1"))+"\n")
+	surfacetest.AppendTranscript(t, path, launch(t, now.Add(time.Second), "call-2", "b-2")+mustJSON(t, backgroundNotification(now.Add(2*time.Second), "b-1"))+"\n")
 	second := NewClaude(nil, home)
 	second.transcriptTasks(context.Background(), path)
 	if _, saved := readSavedScan(t, second, path); saved.Offset != fileSize(t, path) {
@@ -113,7 +114,7 @@ func TestASavedScanThatNoLongerMatchesItsTranscriptIsReadFromTheStart(t *testing
 			if err := os.Truncate(path, fileSize(t, path)/2); err != nil {
 				t.Fatal(err)
 			}
-			appendTranscript(t, path, "\n"+launch(t, now, "call-9", "b-9"))
+			surfacetest.AppendTranscript(t, path, "\n"+launch(t, now, "call-9", "b-9"))
 		},
 		"shorter than the offset": func(t *testing.T, path string) {
 			if err := os.WriteFile(path, []byte(launch(t, now, "call-9", "b-9")), 0o600); err != nil {
@@ -207,7 +208,7 @@ func TestSavedScansOfTranscriptsThatAreGoneAreRemoved(t *testing.T) {
 	if err := os.Remove(gone); err != nil {
 		t.Fatal(err)
 	}
-	appendTranscript(t, kept, launch(t, now, "call-3", "b-3"))
+	surfacetest.AppendTranscript(t, kept, launch(t, now, "call-3", "b-3"))
 	c := NewClaude(nil, home)
 	c.transcriptTasks(context.Background(), kept)
 	if _, err := os.Stat(c.taskStatePath(gone)); !os.IsNotExist(err) {
@@ -225,7 +226,7 @@ func TestAScanWhoseTranscriptChangedBeforeItsStartWhileItReadIsReadAgain(t *test
 	path := writeTranscript(t, launch(t, now, "call-1", "b-1"))
 	c := NewClaude(nil, home)
 	c.transcriptTasks(context.Background(), path)
-	appendTranscript(t, path, launch(t, now, "call-2", "b-2"))
+	surfacetest.AppendTranscript(t, path, launch(t, now, "call-2", "b-2"))
 	scan := c.taskScans[path]
 	from, anchor := scan.Offset, scan.Anchor
 	scan.advance(context.Background())

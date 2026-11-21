@@ -16,7 +16,9 @@ import (
 
 	"github.com/zm2231/agenthail/internal/procstart"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 func TestClaudeLifecycleCapabilitiesFollowTheRuntime(t *testing.T) {
@@ -42,7 +44,7 @@ func TestClaudeLifecycleCapabilitiesFollowTheRuntime(t *testing.T) {
 	if adapter.Capabilities().Lifecycle != (surface.Lifecycle{Status: true, Logs: true, Stop: true, Resume: true, Adopt: true}) {
 		t.Fatal("the adapter advertises less lifecycle than its sessions reach")
 	}
-	var codex surface.Surface = inDaemon(NewCodex(""))
+	var codex surface.Surface = surfacetest.InDaemon(codexsurface.NewCodex(""))
 	if codex.Capabilities().Lifecycle != (surface.Lifecycle{}) {
 		t.Fatalf("Codex advertises a lifecycle: %+v", codex.Capabilities().Lifecycle)
 	}

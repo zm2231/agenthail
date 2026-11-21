@@ -15,7 +15,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	providers "github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 const (
@@ -106,7 +106,7 @@ func TestARevertedCodexThreadCatchesUpFromItsContinuationAfterARestart(t *testin
 	if err := reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
-	adapter := providers.NewCodex("http://127.0.0.1:1")
+	adapter := codexsurface.NewCodex("http://127.0.0.1:1")
 	manager := newTestSourceManager(t, reg)
 	first, err := manager.prepareStream(context.Background(), &session, adapter)
 	if err != nil {
@@ -158,7 +158,7 @@ func TestARunningCodexSourceFollowsARevertIntoTheContinuation(t *testing.T) {
 	if err := reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
-	adapter := providers.NewCodex("http://127.0.0.1:1")
+	adapter := codexsurface.NewCodex("http://127.0.0.1:1")
 	manager := newTestSourceManager(t, reg)
 	subscription, err := manager.prepareStream(context.Background(), &session, adapter)
 	if err != nil {
@@ -198,7 +198,7 @@ func TestARevertWhoseLineageCannotBeProvenReloadsFromTheNewRolloutWithANotice(t 
 	if err := reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
-	adapter := providers.NewCodex("http://127.0.0.1:1")
+	adapter := codexsurface.NewCodex("http://127.0.0.1:1")
 	manager := newTestSourceManager(t, reg)
 	first, err := manager.prepareStream(context.Background(), &session, adapter)
 	if err != nil {
@@ -279,7 +279,7 @@ func TestARevertBeforeTheSeededWindowJournalsItsRetainedHistoryWithNoOlderCursor
 	if err := reg.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
-	adapter := providers.NewCodex("http://127.0.0.1:1")
+	adapter := codexsurface.NewCodex("http://127.0.0.1:1")
 	manager := newTestSourceManager(t, reg)
 	seeded, err := manager.prepareStream(context.Background(), &session, adapter)
 	if err != nil {

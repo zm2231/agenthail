@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 func finishingFixture(t *testing.T, endedAt time.Time) (*Claude, *surface.Session, string, string) {
@@ -53,7 +54,7 @@ func TestAReplyThatJustEndedIsNotFinishingYetButFallsDue(t *testing.T) {
 func TestFinishingEndsWhenAStopHookContinuesTheTurnOrTheProcessGoesIdle(t *testing.T) {
 	endedAt := time.Now().Add(-time.Minute).Truncate(time.Millisecond)
 	claude, session, home, path := finishingFixture(t, endedAt)
-	appendTranscript(t, path, `{"type":"assistant","uuid":"a2","timestamp":"`+time.Now().UTC().Format(time.RFC3339Nano)+`","message":{"id":"m2","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{}}]}}`+"\n")
+	surfacetest.AppendTranscript(t, path, `{"type":"assistant","uuid":"a2","timestamp":"`+time.Now().UTC().Format(time.RFC3339Nano)+`","message":{"id":"m2","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{}}]}}`+"\n")
 	observation, err := claude.Observe(context.Background(), session)
 	if err != nil || observation.Status != surface.StatusBusy || observation.Activity == nil || !observation.Activity.FinishingSince.IsZero() || observation.Activity.Tool == nil {
 		t.Fatalf("continued turn activity=%+v err=%v; want working on Bash", observation.Activity, err)

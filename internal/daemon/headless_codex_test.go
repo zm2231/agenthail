@@ -11,7 +11,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 type headlessCodexFixture struct {
@@ -42,7 +42,7 @@ func newHeadlessCodexFixture(t *testing.T, desktopURL string) *headlessCodexFixt
 }
 
 func (f *headlessCodexFixture) restartAgenthail(t *testing.T, desktopURL string) {
-	f.handler = dashboardRouter(newTestDaemon(t, f.registry, []surface.Surface{surfaces.NewCodex(desktopURL)}))
+	f.handler = dashboardRouter(newTestDaemon(t, f.registry, []surface.Surface{codexsurface.NewCodex(desktopURL)}))
 }
 
 func (f *headlessCodexFixture) action(t *testing.T, body map[string]any) (int, map[string]any) {
@@ -93,7 +93,7 @@ func TestHeadlessCodexDashboardCreatesAndDrivesAThreadOnTheDaemon(t *testing.T) 
 	if err != nil || stored.Transport != "managed" {
 		t.Fatalf("stored=%+v err=%v", stored, err)
 	}
-	listed, err := surfaces.NewCodex(unreachableDesktop).List(t.Context())
+	listed, err := codexsurface.NewCodex(unreachableDesktop).List(t.Context())
 	if err != nil || len(listed) != 1 || listed[0].ID != id || listed[0].Transport != "managed" {
 		t.Fatalf("listed=%+v err=%v", listed, err)
 	}

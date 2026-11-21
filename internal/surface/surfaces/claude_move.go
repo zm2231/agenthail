@@ -44,7 +44,7 @@ type claudeMoveOrigin struct {
 // until Release so nothing here resumes it meanwhile.
 func (c *Claude) PrepareMove(ctx context.Context, sess *surface.Session, request surface.AdoptRequest) (out *surface.MoveOut, err error) {
 	conversation := sess.ID
-	if !safeFileName(conversation) {
+	if !surface.SafeFileName(conversation) {
 		return nil, fmt.Errorf("Claude session %q is not a conversation id", sess.ID)
 	}
 	unlock, err := c.holdForMove(ctx, conversation)
@@ -106,7 +106,7 @@ func (c *Claude) PrepareMove(ctx context.Context, sess *surface.Session, request
 	if out.ProjectSettings, out.SettingsWithoutCredentials, err = surface.ClaudeProjectForMove(c.home, root, out.Cwd); err != nil {
 		return nil, fmt.Errorf("read the project's Claude settings: %w", err)
 	}
-	if out.Size, out.SHA256, err = hashFile(transcripts[0]); err != nil {
+	if out.Size, out.SHA256, err = surface.HashFile(transcripts[0]); err != nil {
 		return nil, err
 	}
 	projectDir := filepath.Base(filepath.Dir(transcripts[0]))
@@ -176,7 +176,7 @@ func claudeMoveParts(conversation string) []string {
 // movedDir holds one move's copy of a conversation, so the copy a finished
 // move left is never taken for another move's.
 func (c *Claude) movedDir(root, conversation, moveID string) string {
-	return filepath.Join(root, movedDir, conversation, moveID)
+	return filepath.Join(root, surface.MovedDir, conversation, moveID)
 }
 
 // rootPath is where a move archive part lives under a config root.
@@ -192,7 +192,7 @@ func claudeRootPart(root, projectDir, part string) string {
 // <root>/agenthail-moved/<id>/<move id>/. It may run again after a crash: a
 // part already archived stays where it is.
 func (c *Claude) ArchiveMove(conversation, moveID string) error {
-	if !safeFileName(conversation) || !safeFileName(moveID) {
+	if !surface.SafeFileName(conversation) || !surface.SafeFileName(moveID) {
 		return fmt.Errorf("Claude session %q or move %q is not a valid id", conversation, moveID)
 	}
 	roots, err := surface.ClaudeConfigRoots(c.home)
@@ -220,7 +220,7 @@ func (c *Claude) ArchiveMove(conversation, moveID string) error {
 	}
 	for _, part := range claudeMoveParts(conversation) {
 		from := claudeRootPart(origin.Root, origin.ProjectDir, part)
-		if err := renameIfPresent(from, filepath.Join(dir, filepath.FromSlash(part))); err != nil {
+		if err := surface.RenameIfPresent(from, filepath.Join(dir, filepath.FromSlash(part))); err != nil {
 			return err
 		}
 	}
@@ -231,7 +231,7 @@ func (c *Claude) ArchiveMove(conversation, moveID string) error {
 // RestoreMove puts a move's archived files back where ArchiveMove found
 // them. A move that archived nothing leaves the conversation as it is.
 func (c *Claude) RestoreMove(conversation, moveID string) error {
-	if !safeFileName(conversation) || !safeFileName(moveID) {
+	if !surface.SafeFileName(conversation) || !surface.SafeFileName(moveID) {
 		return fmt.Errorf("Claude session %q or move %q is not a valid id", conversation, moveID)
 	}
 	roots, err := surface.ClaudeConfigRoots(c.home)
@@ -251,7 +251,7 @@ func (c *Claude) RestoreMove(conversation, moveID string) error {
 		if err := os.MkdirAll(filepath.Dir(to), 0700); err != nil {
 			return err
 		}
-		if err := renameIfPresent(filepath.Join(dir, filepath.FromSlash(part)), to); err != nil {
+		if err := surface.RenameIfPresent(filepath.Join(dir, filepath.FromSlash(part)), to); err != nil {
 			return err
 		}
 	}
@@ -400,7 +400,7 @@ func (c *Claude) CarryProjectSettings(in surface.MoveIn) (func() error, error) {
 // checkMoveInPlace refuses a conversation id or working directory Claude
 // could not keep as given.
 func checkMoveInPlace(in surface.MoveIn) error {
-	if !safeFileName(in.Conversation) {
+	if !surface.SafeFileName(in.Conversation) {
 		return fmt.Errorf("Claude session %q is not a conversation id", in.Conversation)
 	}
 	if !filepath.IsAbs(in.Cwd) {
@@ -424,7 +424,7 @@ func (c *Claude) ReceiveMove(ctx context.Context, in surface.MoveIn, archive io.
 	if err := checkMoveInPlace(in); err != nil {
 		return nil, err
 	}
-	if !safeFileName(in.MoveID) {
+	if !surface.SafeFileName(in.MoveID) {
 		return nil, fmt.Errorf("move id %q is not valid", in.MoveID)
 	}
 	unlock, err := c.lockConversation(ctx, in.Conversation)
@@ -454,7 +454,7 @@ func (c *Claude) ReceiveMove(ctx context.Context, in surface.MoveIn, archive io.
 		return nil, err
 	} else if alive {
 		dest := filepath.Join(root, "projects", claudeProjectDirName(in.Cwd), in.Conversation+".jsonl")
-		if err := checkPrefix(filepath.Join(staging, in.Conversation+".jsonl"), dest); err != nil {
+		if err := surface.CheckPrefix(filepath.Join(staging, in.Conversation+".jsonl"), dest); err != nil {
 			return nil, fmt.Errorf("%w with a different transcript: Claude conversation %s", surface.ErrMoveInRunning, in.Conversation)
 		}
 		resumed, err := c.resumeAs(ctx, in.Conversation, in.Cwd, claudehost.OpenRequest{Model: in.Model, PermissionMode: in.PermissionMode, Name: in.Title})
@@ -468,7 +468,7 @@ func (c *Claude) ReceiveMove(ctx context.Context, in surface.MoveIn, archive io.
 	}
 	projectDir := filepath.Join(root, "projects", claudeProjectDirName(in.Cwd))
 	dest := filepath.Join(projectDir, in.Conversation+".jsonl")
-	if err := checkPrefix(dest, filepath.Join(staging, in.Conversation+".jsonl")); err != nil {
+	if err := surface.CheckPrefix(dest, filepath.Join(staging, in.Conversation+".jsonl")); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(projectDir, 0700); err != nil {
@@ -529,7 +529,7 @@ func (c *Claude) setAsideExisting(root string, in surface.MoveIn, part, at strin
 // the move's folder under agenthail-moved/, and runs commit before any other
 // Agenthail process can resume the conversation.
 func (c *Claude) DropMoveIn(ctx context.Context, conversation, moveID string, admit, commit func() error) error {
-	if !safeFileName(conversation) || !safeFileName(moveID) {
+	if !surface.SafeFileName(conversation) || !surface.SafeFileName(moveID) {
 		return fmt.Errorf("Claude session %q or move %q is not a valid id", conversation, moveID)
 	}
 	unlock, err := c.lockConversation(ctx, conversation)

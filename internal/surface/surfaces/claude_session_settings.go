@@ -13,7 +13,7 @@ func (c *Claude) SessionSettings(ctx context.Context, sess *surface.Session) (su
 	models := c.loadedModels()
 	if claudeHosted(sess) {
 		if listed, ok := c.host.session(ctx, sess.ID, sess.PID); ok {
-			settings.Model = modelSetting(listed.Model, surface.SettingFromRuntime, models)
+			settings.Model = surface.NewModelSetting(listed.Model, surface.SettingFromRuntime, models)
 			if listed.Effort != "" {
 				settings.Effort = &surface.SettingValue{Value: listed.Effort, Source: surface.SettingFromRuntime}
 			} else {
@@ -28,7 +28,7 @@ func (c *Claude) SessionSettings(ctx context.Context, sess *surface.Session) (su
 		read := *sess
 		if c.reachableAsIs(ctx, &read) && read.Bridge != "" {
 			if model, err := c.remoteState(ctx, &read); err == nil && model != "" {
-				settings.Model = modelSetting(model, surface.SettingFromRuntime, models)
+				settings.Model = surface.NewModelSetting(model, surface.SettingFromRuntime, models)
 			}
 		}
 	}
@@ -38,7 +38,7 @@ func (c *Claude) SessionSettings(ctx context.Context, sess *surface.Session) (su
 	}
 	if settings.Model == nil {
 		if model, err := readClaudeLatestModel(ctx, path); err == nil && model != "" {
-			settings.Model = modelSetting(model, surface.SettingFromTranscript, models)
+			settings.Model = surface.NewModelSetting(model, surface.SettingFromTranscript, models)
 		} else {
 			settings.Missing("model", claudeTranscriptMissing(path, "no reply names a model yet"))
 		}

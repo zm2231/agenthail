@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/zm2231/agenthail/internal/claudehost"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 // The only caller of the host's open: every conversation it opens, except a sandboxed checker, carries its agenthail credential.
@@ -13,7 +14,7 @@ func (c *Claude) hostOpen(ctx context.Context, request claudehost.OpenRequest) (
 	if request.Checker != nil {
 		return c.host.client.Open(ctx, request)
 	}
-	credentials, err := c.opening()
+	credentials, err := c.Opening()
 	if err != nil {
 		return claudehost.Session{}, err
 	}
@@ -22,7 +23,7 @@ func (c *Claude) hostOpen(ctx context.Context, request claudehost.OpenRequest) (
 		id = request.SessionID
 	}
 	if credentials == nil {
-		c.openedWithoutMCP(id, errMCPServerNotRunning)
+		c.OpenedWithoutMCP(id, surface.ErrMCPServerNotRunning)
 		return c.host.client.Open(ctx, request)
 	}
 	token, err := claudeHostToken(ctx, credentials, id, request.Resume != "")
@@ -38,7 +39,7 @@ func (c *Claude) hostOpen(ctx context.Context, request claudehost.OpenRequest) (
 	return opened, err
 }
 
-func claudeHostToken(ctx context.Context, credentials MCPCredentials, id string, resume bool) (string, error) {
+func claudeHostToken(ctx context.Context, credentials surface.MCPCredentials, id string, resume bool) (string, error) {
 	if id == "" {
 		return "", errors.New("the conversation has no id before it opens")
 	}

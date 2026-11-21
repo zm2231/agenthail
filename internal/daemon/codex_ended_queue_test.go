@@ -8,7 +8,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 func TestAMessageQueuedForAnAppServerThreadWhoseRuntimeStoppedStartsItAndIsDeliveredOnce(t *testing.T) {
@@ -23,7 +23,7 @@ func TestAMessageQueuedForAnAppServerThreadWhoseRuntimeStoppedStartsItAndIsDeliv
 	if err := r.QueueMessage(thread, "deliver once Codex is back"); err != nil {
 		t.Fatal(err)
 	}
-	d := newTestDaemon(t, r, []surface.Surface{surfaces.NewCodex(unreachableDesktop)})
+	d := newTestDaemon(t, r, []surface.Surface{codexsurface.NewCodex(unreachableDesktop)})
 	for range 2 {
 		d.scanAndRelay(context.Background())
 	}
@@ -52,7 +52,7 @@ func TestAMessageQueuedForAnAppServerThreadThatIsNotLoadedLoadsItAndIsDeliveredO
 			if err := r.QueueMessage(thread, "deliver once it is loaded"); err != nil {
 				t.Fatal(err)
 			}
-			d := newTestDaemon(t, r, []surface.Surface{surfaces.NewCodex(unreachableDesktop)})
+			d := newTestDaemon(t, r, []surface.Surface{codexsurface.NewCodex(unreachableDesktop)})
 			for range 2 {
 				d.scanAndRelay(context.Background())
 			}

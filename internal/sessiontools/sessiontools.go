@@ -10,7 +10,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudemcp"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 // Of is GivenTools for a session holding a live credential for the server
@@ -58,8 +58,8 @@ func of(reg *registry.Registry, session surface.Session, project func() (string,
 func relayConfigured(session surface.Session, outside bool) bool {
 	switch {
 	case session.Surface == surface.KindCodex:
-		home := surfaces.CodexHomeFromEnv()
-		return (!outside || home.HoldsThread(session)) && surfaces.CodexRelayConfigured(home)
+		home := codexsurface.CodexHomeFromEnv()
+		return (!outside || home.HoldsThread(session)) && codexsurface.CodexRelayConfigured(home)
 	case session.Surface == surface.KindClaude && session.RuntimeKind == surface.RuntimeClaudeCLI:
 		home, _ := os.UserHomeDir()
 		for _, root := range surface.ClaudeSessionRoots(session) {

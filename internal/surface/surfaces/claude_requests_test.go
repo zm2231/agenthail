@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -173,7 +174,7 @@ func TestAHostSessionChangesModelAndPermissionModeLive(t *testing.T) {
 }
 
 func TestAPermissionModeChangeNeedsTheHost(t *testing.T) {
-	c := inDaemon(NewClaude(nil, t.TempDir()))
+	c := surfacetest.InDaemon(NewClaude(nil, t.TempDir()))
 	sess := &surface.Session{ID: uuid.NewString(), Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: os.Getpid(), LastActive: time.Now()}
 	if _, err := c.Control(context.Background(), sess, surface.ControlRequest{Action: "permission-mode", Value: "plan"}); err == nil {
 		t.Fatal("a CLI session changed its permission mode")

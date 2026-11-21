@@ -1,0 +1,116 @@
+package codexsurface
+
+import (
+	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
+)
+
+// setCodexTransport routes a session and records the runtime that carries it:
+// the managed app-server for managed threads, Codex Desktop for the rest,
+// including read-only threads whose Desktop bridge is unavailable.
+func setCodexTransport(session *surface.Session, transport string) {
+	session.Transport = transport
+	session.RuntimeKind = surface.RuntimeCodexDesktop
+	if transport == codexTransportManaged {
+		session.RuntimeKind = surface.RuntimeCodexAppServer
+	}
+}
+
+// codexListsThread excludes threads that are not conversations to address:
+// ephemeral threads, which Codex never stores, and subagents Codex runs for
+// itself (review, compaction, memory) with no parent thread to sit under.
+func codexListsThread(thread map[string]any) bool {
+	if ephemeral, _ := thread["ephemeral"].(bool); ephemeral {
+		return false
+	}
+	source, _ := thread["source"].(map[string]any)
+	if _, subagent := source["subAgent"]; subagent && codexSubagent(thread) == nil {
+		return false
+	}
+	return true
+}
+
+func codexSession(thread map[string]any) surface.Session {
+	session := surface.Session{
+		ID:         transcript.String(thread, "id"),
+		Surface:    surface.KindCodex,
+		Name:       surface.DeriveName(transcript.String(thread, "name"), transcript.String(thread, "preview"), 60),
+		Cwd:        transcript.String(thread, "cwd"),
+		Status:     codexStatus(thread["status"]),
+		Ended:      codexThreadEnded(thread["status"]),
+		Source:     codexSource(thread["source"]),
+		WaitingOn:  codexSessionWaiting(transcript.String(thread, "id"), thread["status"]),
+		Subagent:   codexSubagent(thread),
+		Transcript: transcript.String(thread, "path"),
+		ReadState:  codexReadState(thread[codexReadStateKey]),
+	}
+	setCodexTransport(&session, "")
+	if timestamp, ok := thread["recencyAt"].(float64); ok && timestamp > 0 {
+		session.LastActive = time.Unix(int64(timestamp), 0)
+	}
+	return session
+}
+
+// codexWaitingKind reads the waiting flags of an active ThreadStatus: the
+// app-server sets them while an approval or user-input request is pending.
+func codexWaitingKind(status any) surface.WaitingKind {
+	object, _ := status.(map[string]any)
+	if object == nil || object["type"] != "active" {
+		return ""
+	}
+	flags, _ := object["activeFlags"].([]any)
+	for _, flag := range flags {
+		switch flag {
+		case "waitingOnApproval":
+			return surface.WaitingApproval
+		case "waitingOnUserInput":
+			return surface.WaitingInput
+		}
+	}
+	return ""
+}
+
+func codexSessionWaiting(threadID string, status any) *surface.Waiting {
+	return codexWaiting(threadID, codexWaitingKind(status))
+}
+
+// codexWaiting names what a thread waits on the same way from a thread
+// listing and from an observation, so either one recognizes the other's
+// record. Codex reports the wait on the thread, without the request id.
+func codexWaiting(threadID string, kind surface.WaitingKind) *surface.Waiting {
+	if kind == "" {
+		return nil
+	}
+	return &surface.Waiting{Kind: kind, ID: threadID + ":" + string(kind)}
+}
+
+// codexThreadStatuses maps every ThreadStatus type of Codex's app-server
+// protocol. A thread no runtime has loaded keeps its own status: the queue
+// loads it before delivery, and it has ended.
+var codexThreadStatuses = map[string]surface.SessionStatus{
+	"active":      surface.StatusBusy,
+	"idle":        surface.StatusIdle,
+	"notLoaded":   surface.StatusNotLoaded,
+	"systemError": surface.StatusUnknown,
+}
+
+func codexStatusType(s any) string {
+	if m, ok := s.(map[string]any); ok {
+		s = m["type"]
+	}
+	str, _ := s.(string)
+	return str
+}
+
+func codexStatus(s any) surface.SessionStatus {
+	if status, ok := codexThreadStatuses[codexStatusType(s)]; ok {
+		return status
+	}
+	return surface.StatusUnknown
+}
+
+func codexThreadEnded(s any) bool {
+	return codexStatusType(s) == "notLoaded"
+}

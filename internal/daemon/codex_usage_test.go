@@ -7,14 +7,14 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 func TestCodexUsageAnswersTheAccountsLimitsFromItsRollouts(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
-	d.Surfaces = []surface.Surface{surfaces.NewCodex("")}
+	d.Surfaces = []surface.Surface{codexsurface.NewCodex("")}
 	api := signinAPIClient{t: t, handler: d.dashboardHandler(&dashboardServer{token: "secret"}), token: "secret"}
 	var usage struct {
 		Usage        *surface.Usage `json:"usage"`

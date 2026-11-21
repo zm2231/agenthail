@@ -8,7 +8,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 func TestASendQueuedForAnUnloadedDesktopThreadWithNoTurnsLoadsItAndIsDelivered(t *testing.T) {
@@ -51,7 +51,7 @@ func TestASendQueuedForAnUnloadedDesktopThreadWithNoTurnsLoadsItAndIsDelivered(t
 		t.Fatal(err)
 	}
 
-	newTestDaemon(t, r, []surface.Surface{surfaces.NewCodex(desktop.URL)}).scanAndRelay(context.Background())
+	newTestDaemon(t, r, []surface.Surface{codexsurface.NewCodex(desktop.URL)}).scanAndRelay(context.Background())
 
 	if !strings.Contains(desktop.Request("turn/start"), "deliver after Desktop loads it") || r.QueueCount(thread) != 0 {
 		t.Fatalf("Desktop methods=%v pending=%d", desktop.Methods(), r.QueueCount(thread))

@@ -9,11 +9,12 @@ import (
 
 	"github.com/zm2231/agenthail/internal/procstart"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 func TestPresenceUsesEachRuntimesTruth(t *testing.T) {
 	now := time.Date(2026, 7, 12, 20, 0, 0, 0, time.UTC)
-	claude, codex := NewClaude(nil, t.TempDir()), &Codex{}
+	claude, codex := NewClaude(nil, t.TempDir()), &codexsurface.Codex{}
 	tests := []struct {
 		name        string
 		adapter     surface.Surface

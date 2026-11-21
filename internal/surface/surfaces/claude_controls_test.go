@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +14,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 // fakeRemoteControl serves the claude.ai Remote Control endpoints a control
@@ -99,18 +99,6 @@ func shortControlPoll(t *testing.T) {
 	t.Cleanup(func() { claudeControlPoll = previous })
 }
 
-func appendTranscript(t *testing.T, path, lines string) {
-	t.Helper()
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	if _, err := f.WriteString(lines); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func busyControlSession(t *testing.T) (*claudetest.Fixture, *surface.Session) {
 	fixture := claudetest.New(t)
 	fixture.RecordStatus("conversation-test", fixture.Home, "session_test", "busy", "", time.Time{})
@@ -185,7 +173,7 @@ func TestClaudeInterruptConfirmsTheActiveTurnEnded(t *testing.T) {
 	remote := newFakeRemoteControl(t)
 	remote.onPost = func(payload map[string]any) []map[string]any {
 		fixture.RecordStatus("conversation-test", fixture.Home, "session_test", "idle", "", time.Time{})
-		appendTranscript(t, session.Transcript, `{"type":"user","uuid":"marker","message":{"content":"[Request interrupted by user]"}}`+"\n")
+		surfacetest.AppendTranscript(t, session.Transcript, `{"type":"user","uuid":"marker","message":{"content":"[Request interrupted by user]"}}`+"\n")
 		return []map[string]any{controlResponse(payload, "success", "")}
 	}
 	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, remote.request)
@@ -235,7 +223,7 @@ func TestClaudeCommandOutputIsJoinedToItsRequest(t *testing.T) {
 	fixture, session := busyControlSession(t)
 	remote := newFakeRemoteControl(t)
 	remote.onPost = func(payload map[string]any) []map[string]any {
-		appendTranscript(t, session.Transcript,
+		surfacetest.AppendTranscript(t, session.Transcript,
 			`{"type":"system","subtype":"local_command","uuid":"stale","parentUuid":"earlier","commandRun":{"command":"context","args":""},"content":"<local-command-stdout>stale usage</local-command-stdout>"}`+"\n"+
 				fmt.Sprintf(`{"type":"system","subtype":"local_command","uuid":"fresh","parentUuid":%q,"commandRun":{"command":"context","args":""},"content":"<local-command-stdout>\u001b[1mContext Usage\u001b[22m 12%%</local-command-stdout>"}`, payload["uuid"])+"\n")
 		return nil
@@ -252,7 +240,7 @@ func TestClaudeCommandOnStderrIsARejection(t *testing.T) {
 	fixture, session := busyControlSession(t)
 	remote := newFakeRemoteControl(t)
 	remote.onPost = func(payload map[string]any) []map[string]any {
-		appendTranscript(t, session.Transcript, fmt.Sprintf(`{"type":"system","subtype":"local_command","uuid":"fresh","parentUuid":%q,"commandRun":{"command":"context","args":""},"content":"<local-command-stderr>\u001b[31mdenied\u001b[39m</local-command-stderr>"}`, payload["uuid"])+"\n")
+		surfacetest.AppendTranscript(t, session.Transcript, fmt.Sprintf(`{"type":"system","subtype":"local_command","uuid":"fresh","parentUuid":%q,"commandRun":{"command":"context","args":""},"content":"<local-command-stderr>\u001b[31mdenied\u001b[39m</local-command-stderr>"}`, payload["uuid"])+"\n")
 		return nil
 	}
 	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, remote.request)

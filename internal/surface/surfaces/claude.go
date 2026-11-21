@@ -41,7 +41,7 @@ type Claude struct {
 	goneBridges  map[string]bool
 	refusedMu    sync.Mutex
 	refused      map[string]time.Time
-	mcpAttachment
+	surface.MCPAttachment
 }
 
 type ClaudeRequest func(context.Context, string, string, map[string]string, string, browsercookie.Source, time.Duration) (int, string, error)

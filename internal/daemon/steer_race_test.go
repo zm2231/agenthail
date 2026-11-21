@@ -10,7 +10,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 // The fake ends the active turn just before Agenthail's steer reads it: the
@@ -94,7 +94,7 @@ func TestQueuedSteerWhoseTurnEndsFirstIsSentAsTheNextTurn(t *testing.T) {
 	thread, armed = id, true
 	mu.Unlock()
 
-	newTestDaemon(t, r, []surface.Surface{surfaces.NewCodex(unreachableDesktop)}).scanAndRelay(context.Background())
+	newTestDaemon(t, r, []surface.Surface{codexsurface.NewCodex(unreachableDesktop)}).scanAndRelay(context.Background())
 	got := fixture.thread(t, id)
 	if len(got.Turns) != 2 || got.Turns[1].User != "Second task" || len(fixture.lifecycle.Daemon().Calls("turn/steer")) != 0 || r.QueueCount(id) != 0 {
 		t.Fatalf("thread=%+v steers=%d queued=%d", got, len(fixture.lifecycle.Daemon().Calls("turn/steer")), r.QueueCount(id))

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
@@ -54,7 +55,7 @@ func writeSentFile(t *testing.T, name string, data []byte) string {
 func sentItems(t *testing.T, records string) []surface.TimelineItem {
 	t.Helper()
 	path := writeSentFile(t, "session.jsonl", []byte(records))
-	page, err := readTimeline(context.Background(), path, "claude", 0, 50)
+	page, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 50)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +75,7 @@ func readSent(t *testing.T, records string, item surface.TimelineItem) (*surface
 }
 
 func TestSentImagesBecomeFetchableAttachmentsWithTheCaptionOnTheFirst(t *testing.T) {
-	png, _ := base64.StdEncoding.DecodeString(testPNG)
+	png, _ := base64.StdEncoding.DecodeString(surfacetest.TestPNG)
 	first, second := writeSentFile(t, "chart.png", png), writeSentFile(t, "detail.png", png)
 	records := sentFileRecord(t, "before and after",
 		sentEntry{"path": first, "size": len(png), "isImage": true, "media_type": "image/png", "pathValidated": true, "file_uuid": "f1"},

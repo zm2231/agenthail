@@ -9,7 +9,6 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 const pendingCredentialLifetime = surfaceOperationTimeout + startNameMargin
@@ -112,7 +111,7 @@ func (d *Daemon) attachMCPCredentials(listen string) {
 	d.mcpCredentials.Store(credentials)
 	for _, adapter := range d.Surfaces {
 		if attachable, ok := adapter.(interface {
-			SetMCPCredentials(surfaces.MCPCredentials)
+			SetMCPCredentials(surface.MCPCredentials)
 		}); ok {
 			attachable.SetMCPCredentials(credentials)
 		}

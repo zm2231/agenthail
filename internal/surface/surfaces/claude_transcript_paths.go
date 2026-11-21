@@ -96,7 +96,7 @@ func (c *Claude) awaitHostTranscript(ctx context.Context, sess *surface.Session,
 		return "", err
 	}
 	var likely []string
-	if sess.Cwd != "" && safeFileName(sess.ID) {
+	if sess.Cwd != "" && surface.SafeFileName(sess.ID) {
 		for _, root := range roots {
 			likely = append(likely, filepath.Join(root, "projects", claudeProjectDirName(sess.Cwd), sess.ID+".jsonl"))
 		}

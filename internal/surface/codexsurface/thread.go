@@ -1,0 +1,381 @@
+package codexsurface
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/transcript"
+)
+
+type codexTurn struct {
+	ID             string
+	Status         surface.SessionStatus
+	User           string
+	Assistant      string
+	AssistantItems []codexAssistantItem
+	Done           bool
+	Error          string
+	Unsettled      bool
+	Stop           *surface.TurnStop
+	CompletedAt    time.Time
+}
+
+type codexAssistantItem struct {
+	ID    string
+	Phase string
+	Text  string
+}
+
+func (t codexTurn) authoritativeAssistant() (codexAssistantItem, bool) {
+	if len(t.AssistantItems) == 0 {
+		if t.Assistant == "" {
+			return codexAssistantItem{}, false
+		}
+		return codexAssistantItem{Text: t.Assistant}, true
+	}
+	items := make([]codexAssistantItem, 0, len(t.AssistantItems))
+	indexes := make(map[string]int, len(t.AssistantItems))
+	for _, item := range t.AssistantItems {
+		if item.Text == "" {
+			continue
+		}
+		if item.ID == "" {
+			items = append(items, item)
+			continue
+		}
+		if index, ok := indexes[item.ID]; ok {
+			items[index] = item
+			continue
+		}
+		indexes[item.ID] = len(items)
+		items = append(items, item)
+	}
+	for index := len(items) - 1; index >= 0; index-- {
+		if items[index].Phase == "final_answer" {
+			return items[index], true
+		}
+	}
+	if len(items) == 0 {
+		return codexAssistantItem{}, false
+	}
+	return items[len(items)-1], true
+}
+
+type codexThread struct {
+	ID     string
+	Name   string
+	Cwd    string
+	Status surface.SessionStatus
+	// Waiting is the kind of user response an active thread waits on.
+	Waiting surface.WaitingKind
+	Turns   []codexTurn
+}
+
+func (c *Codex) readThread(ctx context.Context, conn codexClient, threadID string) (*codexThread, error) {
+	response, err := conn.Request(ctx, "thread/read", map[string]any{
+		"threadId":     threadID,
+		"includeTurns": true,
+	}, 5*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("thread/read: %w", err)
+	}
+	result, ok := response["result"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("thread/read response missing result")
+	}
+	value, ok := result["thread"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("thread/read response missing thread")
+	}
+	thread := &codexThread{ID: transcript.String(value, "id"), Name: surface.DeriveName(transcript.String(value, "name"), transcript.String(value, "preview"), 60), Cwd: transcript.String(value, "cwd"), Status: codexStatus(value["status"]), Waiting: codexWaitingKind(value["status"])}
+	if thread.ID == "" {
+		thread.ID = threadID
+	}
+	turns, _ := value["turns"].([]any)
+	if len(turns) == 0 {
+		var pageErr error
+		turns, pageErr = c.listThreadTurns(ctx, conn, thread.ID, 50)
+		if pageErr != nil {
+			return nil, pageErr
+		}
+	}
+	hydrate := codexHydrationCandidates(turns, true)
+	for index, rawTurn := range turns {
+		entry, _ := rawTurn.(map[string]any)
+		status, done, turnError := codexTurnState(entry["status"])
+		turn := codexTurn{ID: transcript.String(entry, "id"), Status: status, Done: done, Error: turnError, Unsettled: codexTurnUnsettled(entry), Stop: codexTurnStop(entry), CompletedAt: codexUnixTime(entry["completedAt"])}
+		items, _ := entry["items"].([]any)
+		if len(items) == 0 && turn.ID != "" && hydrate[index] {
+			page, pageErr := c.listThreadItems(ctx, conn, thread.ID, turn.ID)
+			if pageErr != nil {
+				return nil, pageErr
+			}
+			items = page
+		}
+		for _, rawItem := range items {
+			item, _ := rawItem.(map[string]any)
+			switch item["type"] {
+			case "userMessage", "user":
+				turn.User = codexItemText(item)
+			case "agentMessage", "assistant":
+				if text := codexItemText(item); text != "" {
+					assistant := codexAssistantItem{ID: transcript.String(item, "id"), Phase: transcript.String(item, "phase"), Text: text}
+					turn.AssistantItems = append(turn.AssistantItems, assistant)
+					turn.Assistant = text
+				}
+			}
+		}
+		thread.Turns = append(thread.Turns, turn)
+	}
+	return thread, nil
+}
+
+func (c *Codex) readObservationThread(ctx context.Context, conn codexClient, threadID string) (*codexThread, error) {
+	return c.readThreadWithOptions(ctx, conn, threadID, 3, false)
+}
+
+// codexTurnsNotListedYet reports the app-server refusing to list a new
+// thread's turns until its first turn ends. The refusals carry no data and
+// generic codes, so they are matched by code and exact text: a change to
+// either reads as a real error rather than as a thread with no turns.
+func codexTurnsNotListedYet(err error) bool {
+	var rpc *codexRPCError
+	if !errors.As(err, &rpc) {
+		return false
+	}
+	switch rpc.Code {
+	case -32600:
+		return strings.HasPrefix(rpc.Message, "thread ") && strings.HasSuffix(rpc.Message, " is not materialized yet; thread/turns/list is unavailable before first user message")
+	case -32601:
+		return rpc.Message == "list_turns is not supported yet" || rpc.Message == "paginated_threads is not supported yet"
+	}
+	return false
+}
+
+// readLatestTurn reads the thread's newest turn with all of its items.
+func (c *Codex) readLatestTurn(ctx context.Context, conn codexClient, threadID string) (*codexThread, error) {
+	turns, err := c.listThreadTurnsView(ctx, conn, threadID, 1, "full")
+	if err != nil {
+		return nil, err
+	}
+	return c.threadFromTurns(ctx, conn, threadID, turns, true)
+}
+
+func (c *Codex) readThreadWithOptions(ctx context.Context, conn codexClient, threadID string, turnLimit int, hydrateAll bool) (*codexThread, error) {
+	turns, err := c.listThreadTurns(ctx, conn, threadID, turnLimit)
+	if err != nil {
+		return nil, err
+	}
+	return c.threadFromTurns(ctx, conn, threadID, turns, hydrateAll)
+}
+
+func (c *Codex) threadFromTurns(ctx context.Context, conn codexClient, threadID string, turns []any, hydrateAll bool) (*codexThread, error) {
+	thread := &codexThread{ID: threadID, Status: surface.StatusUnknown}
+	hydrate := codexHydrationCandidates(turns, hydrateAll)
+	for index, rawTurn := range turns {
+		entry, _ := rawTurn.(map[string]any)
+		status, done, turnError := codexTurnState(entry["status"])
+		turn := codexTurn{ID: transcript.String(entry, "id"), Status: status, Done: done, Error: turnError, Unsettled: codexTurnUnsettled(entry), Stop: codexTurnStop(entry), CompletedAt: codexUnixTime(entry["completedAt"])}
+		items, _ := entry["items"].([]any)
+		if len(items) == 0 && turn.ID != "" && hydrate[index] {
+			page, pageErr := c.listThreadItems(ctx, conn, thread.ID, turn.ID)
+			if pageErr != nil {
+				return nil, pageErr
+			}
+			items = page
+		}
+		for _, rawItem := range items {
+			item, _ := rawItem.(map[string]any)
+			switch item["type"] {
+			case "userMessage", "user":
+				turn.User = codexItemText(item)
+			case "agentMessage", "assistant":
+				if text := codexItemText(item); text != "" {
+					assistant := codexAssistantItem{ID: transcript.String(item, "id"), Phase: transcript.String(item, "phase"), Text: text}
+					turn.AssistantItems = append(turn.AssistantItems, assistant)
+					turn.Assistant = text
+				}
+			}
+		}
+		thread.Turns = append(thread.Turns, turn)
+	}
+	for _, turn := range thread.Turns {
+		if turn.Status == surface.StatusBusy {
+			thread.Status = surface.StatusBusy
+			break
+		}
+		if turn.Done && thread.Status == surface.StatusUnknown {
+			thread.Status = surface.StatusIdle
+		}
+	}
+	return thread, nil
+}
+
+func codexHydrationCandidates(turns []any, hydrateAll bool) map[int]bool {
+	candidates := make(map[int]bool, len(turns))
+	if hydrateAll {
+		for index := range turns {
+			candidates[index] = true
+		}
+		return candidates
+	}
+	needActive, needTerminal := true, true
+	for index := len(turns) - 1; index >= 0 && (needActive || needTerminal); index-- {
+		entry, _ := turns[index].(map[string]any)
+		status, done, _ := codexTurnState(entry["status"])
+		if needActive && status == surface.StatusBusy {
+			candidates[index] = true
+			needActive = false
+		}
+		if needTerminal && done {
+			candidates[index] = true
+			needTerminal = false
+		}
+	}
+	return candidates
+}
+
+func (c *Codex) listThreadTurns(ctx context.Context, conn codexClient, threadID string, limit int) ([]any, error) {
+	return c.listThreadTurnsView(ctx, conn, threadID, limit, "")
+}
+
+// listThreadTurnsView lists the newest limit turns, oldest first. itemsView
+// "full" returns every item of each turn; empty leaves the server's summary.
+// A new thread whose turns cannot be listed yet has none.
+func (c *Codex) listThreadTurnsView(ctx context.Context, conn codexClient, threadID string, limit int, itemsView string) ([]any, error) {
+	if limit < 1 {
+		limit = 1
+	}
+	params := map[string]any{
+		"threadId":      threadID,
+		"limit":         limit,
+		"sortDirection": "desc",
+	}
+	if itemsView != "" {
+		params["itemsView"] = itemsView
+	}
+	response, err := conn.Request(ctx, "thread/turns/list", params, 5*time.Second)
+	if codexTurnsNotListedYet(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("thread/turns/list: %w", err)
+	}
+	result, _ := response["result"].(map[string]any)
+	turns, _ := result["data"].([]any)
+	for left, right := 0, len(turns)-1; left < right; left, right = left+1, right-1 {
+		turns[left], turns[right] = turns[right], turns[left]
+	}
+	return turns, nil
+}
+
+func (c *Codex) listThreadItems(ctx context.Context, conn codexClient, threadID, turnID string) ([]any, error) {
+	response, err := conn.Request(ctx, "thread/items/list", map[string]any{
+		"threadId": threadID,
+		"turnId":   turnID,
+		"limit":    100,
+	}, 5*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("thread/items/list: %w", err)
+	}
+	result, _ := response["result"].(map[string]any)
+	values, _ := result["data"].([]any)
+	items := make([]any, 0, len(values))
+	for _, value := range values {
+		entry, _ := value.(map[string]any)
+		if item, ok := entry["item"]; ok {
+			items = append(items, item)
+			continue
+		}
+		items = append(items, value)
+	}
+	return items, nil
+}
+
+func codexTurnState(value any) (surface.SessionStatus, bool, string) {
+	if object, ok := value.(map[string]any); ok {
+		value = object["type"]
+	}
+	status, _ := value.(string)
+	normalized := strings.ToLower(strings.ReplaceAll(status, "_", ""))
+	switch normalized {
+	case "running", "inprogress", "active", "queued":
+		return surface.StatusBusy, false, ""
+	case "completed", "complete", "succeeded", "success":
+		return surface.StatusIdle, true, ""
+	case "interrupted", "cancelled", "canceled", "failed", "error", "systemerror":
+		return surface.StatusIdle, true, "turn " + normalized
+	case "":
+		return surface.StatusUnknown, false, ""
+	default:
+		return surface.SessionStatus(status), false, ""
+	}
+}
+
+// codexTurnUnsettled reports a listed turn Codex shows interrupted without
+// recording an end. Codex lists an in-progress turn that way whenever its
+// thread is not active: while the turn starts, to a process that has not
+// loaded the thread, and after a crash, so such a turn may still be running.
+func codexTurnUnsettled(entry map[string]any) bool {
+	_, _, failure := codexTurnState(entry["status"])
+	return failure == codexTurnInterrupted && entry["completedAt"] == nil
+}
+
+func codexItemText(item map[string]any) string {
+	if text, _ := item["text"].(string); text != "" {
+		return text
+	}
+	content, _ := item["content"].([]any)
+	var parts []string
+	for _, raw := range content {
+		entry, _ := raw.(map[string]any)
+		if text, _ := entry["text"].(string); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func codexObservation(thread *codexThread) *surface.TurnObservation {
+	observation := &surface.TurnObservation{Status: thread.Status}
+	for i := len(thread.Turns) - 1; i >= 0; i-- {
+		turn := thread.Turns[i]
+		if turn.Status == surface.StatusBusy {
+			observation.Status = surface.StatusBusy
+			observation.ActiveTurnID = turn.ID
+			break
+		}
+	}
+	if thread.Waiting != "" && observation.Status == surface.StatusBusy {
+		observation.WaitingOn = codexWaiting(thread.ID, thread.Waiting)
+	}
+	for i := len(thread.Turns) - 1; i >= 0; i-- {
+		turn := thread.Turns[i]
+		if turn.ID == "" || !turn.Done {
+			continue
+		}
+		if observation.TerminalTurnID == "" {
+			observation.TerminalTurnID = turn.ID
+		}
+		if turn.Assistant == "" && turn.Error == "" {
+			continue
+		}
+		observation.CompletedTurnID = turn.ID
+		observation.CompletedAt = turn.CompletedAt
+		observation.Reply = &surface.ReplyResult{Text: turn.Assistant, UserText: turn.User, Done: true, Error: turn.Error}
+		break
+	}
+	if observation.Status != surface.StatusBusy {
+		for i := len(thread.Turns) - 1; i >= 0; i-- {
+			if turn := thread.Turns[i]; turn.ID == observation.TerminalTurnID {
+				observation.TurnStop = turn.Stop
+				break
+			}
+		}
+	}
+	return observation
+}

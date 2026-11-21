@@ -12,6 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 type rootMoveFixture struct {
@@ -30,7 +31,7 @@ func newRootMoveFixture(t *testing.T) rootMoveFixture {
 	host.Start(t)
 	second := filepath.Join(host.Home, ".work", ".claude")
 	configureClaudeRoots(t, host.Home, second)
-	c := inDaemon(NewClaude(nil, host.Home))
+	c := surfacetest.InDaemon(NewClaude(nil, host.Home))
 	session, _, err := c.StartSession(context.Background(), surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd})
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +90,7 @@ func TestARootMoveResumesTheSessionUnderTheTargetWithItsProjectConfig(t *testing
 	if _, err := os.Stat(filepath.Join(f.second, "tasks", f.session.ID, "1.json")); err != nil {
 		t.Fatalf("tasks did not move: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(primary, movedDir, f.session.ID, moveID)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(primary, surface.MovedDir, f.session.ID, moveID)); !os.IsNotExist(err) {
 		t.Fatalf("the move left its archive: %v", err)
 	}
 	spawns := f.host.Spawns(t, f.session.ID)

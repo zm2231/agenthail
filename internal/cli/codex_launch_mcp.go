@@ -10,7 +10,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 type launchMCPCredentials struct {
@@ -40,8 +40,8 @@ func launchUnattached(threadID string, err error) {
 	fmt.Fprintf(os.Stderr, "agenthail: %s starts without the agenthail MCP server: %s\n", threadID, err)
 }
 
-func (a *App) managedCodexForLaunch(home surfaces.CodexHome, launchID string) (*surfaces.Codex, error) {
-	codex := surfaces.NewCodexIn(home, "")
+func (a *App) managedCodexForLaunch(home codexsurface.CodexHome, launchID string) (*codexsurface.Codex, error) {
+	codex := codexsurface.NewCodexIn(home, "")
 	if launchID == "" {
 		return codex, nil
 	}

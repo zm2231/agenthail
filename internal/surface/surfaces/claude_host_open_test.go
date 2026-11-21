@@ -10,14 +10,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 func TestAStartedClaudeHostConversationCarriesItsClaimedCredential(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	host := claudehosttest.New(t, "")
 	host.Start(t)
-	c := inDaemon(NewClaude(nil, host.Home))
-	credentials := &fakeCredentials{}
+	c := surfacetest.InDaemon(NewClaude(nil, host.Home))
+	credentials := &surfacetest.FakeCredentials{}
 	c.SetMCPCredentials(credentials)
 	session, _, err := c.StartSession(context.Background(), surface.SessionStartOptions{Cwd: host.Cwd, Message: "hello"})
 	if err != nil {
@@ -33,8 +34,8 @@ func TestAStartedClaudeHostConversationCarriesItsClaimedCredential(t *testing.T)
 	if !bearer || !allowed {
 		t.Fatalf("pending bearer passed=%v, agenthail tools allowed=%v", bearer, allowed)
 	}
-	if len(credentials.claims) != 1 || credentials.claims[0] != "ref-1="+session.ID {
-		t.Fatalf("claims=%v", credentials.claims)
+	if len(credentials.Claims) != 1 || credentials.Claims[0] != "ref-1="+session.ID {
+		t.Fatalf("claims=%v", credentials.Claims)
 	}
 }
 
@@ -42,33 +43,33 @@ func TestACheckerOpensWithoutTheAgenthailServer(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	host := claudehosttest.New(t, "")
 	host.Start(t)
-	c := inDaemon(NewClaude(nil, host.Home))
-	credentials := &fakeCredentials{}
+	c := surfacetest.InDaemon(NewClaude(nil, host.Home))
+	credentials := &surfacetest.FakeCredentials{}
 	c.SetMCPCredentials(credentials)
 	run := uuid.NewString()
 	if _, err := c.StartChecker(context.Background(), surface.CheckerStart{Run: run, Token: "run-secret", Cwd: host.Cwd, Message: "check"}); err != nil {
 		t.Fatal(err)
 	}
-	if spawns := host.Spawns(t, run); len(spawns) != 1 || len(host.Attached(t, run)) != 0 || len(credentials.claims) != 0 {
-		t.Fatalf("checker spawns=%d claims=%d, a checker must not get the agenthail server", len(spawns), len(credentials.claims))
+	if spawns := host.Spawns(t, run); len(spawns) != 1 || len(host.Attached(t, run)) != 0 || len(credentials.Claims) != 0 {
+		t.Fatalf("checker spawns=%d claims=%d, a checker must not get the agenthail server", len(spawns), len(credentials.Claims))
 	}
 }
 
 func TestAResumedClaudeConversationKeepsRotatesOrClaimsItsCredential(t *testing.T) {
 	ctx := context.Background()
-	held := &fakeCredentials{live: map[string]string{"c": "ahs_live"}}
-	if token, err := claudeHostToken(ctx, held, "c", true); err != nil || token != "ahs_live" || held.rotations != 0 {
-		t.Fatalf("err=%v rotations=%d, the held token was not reused", err, held.rotations)
+	held := &surfacetest.FakeCredentials{LiveTokens: map[string]string{"c": "ahs_live"}}
+	if token, err := claudeHostToken(ctx, held, "c", true); err != nil || token != "ahs_live" || held.Rotations != 0 {
+		t.Fatalf("err=%v rotations=%d, the held token was not reused", err, held.Rotations)
 	}
-	registered := &fakeCredentials{}
-	if token, err := claudeHostToken(ctx, registered, "c", true); err != nil || token != "ahs_rotated" || len(registered.claims) != 0 {
-		t.Fatalf("err=%v claims=%d, the credential was not rotated", err, len(registered.claims))
+	registered := &surfacetest.FakeCredentials{}
+	if token, err := claudeHostToken(ctx, registered, "c", true); err != nil || token != "ahs_rotated" || len(registered.Claims) != 0 {
+		t.Fatalf("err=%v claims=%d, the credential was not rotated", err, len(registered.Claims))
 	}
-	unregistered := &fakeCredentials{rotateErr: errors.New("session c: not found")}
-	if token, err := claudeHostToken(ctx, unregistered, "c", true); err != nil || token != "ahs_pending" || len(unregistered.claims) != 1 {
-		t.Fatalf("err=%v claims=%d, no pending credential was claimed", err, len(unregistered.claims))
+	unregistered := &surfacetest.FakeCredentials{RotateErr: errors.New("session c: not found")}
+	if token, err := claudeHostToken(ctx, unregistered, "c", true); err != nil || token != "ahs_pending" || len(unregistered.Claims) != 1 {
+		t.Fatalf("err=%v claims=%d, no pending credential was claimed", err, len(unregistered.Claims))
 	}
-	if _, err := claudeHostToken(ctx, &fakeCredentials{}, "", false); err == nil {
+	if _, err := claudeHostToken(ctx, &surfacetest.FakeCredentials{}, "", false); err == nil {
 		t.Fatal("a conversation without an id got a credential")
 	}
 }

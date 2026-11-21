@@ -12,7 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -21,7 +21,7 @@ import (
 type codexMoveNode struct {
 	*federationNode
 	real  *codextest.Real
-	codex *surfaces.Codex
+	codex *codexsurface.Codex
 	cwd   string
 }
 
@@ -29,7 +29,7 @@ func newCodexMoveNode(t *testing.T) *codexMoveNode {
 	t.Helper()
 	allowLoopbackHosts(t)
 	real := codextest.StartReal(t, &codextest.MockModel{})
-	codex := surfaces.NewCodexIn(surfaces.CodexHome{Codex: real.CodexHome, State: filepath.Join(real.Home, ".agenthail")}, "")
+	codex := codexsurface.NewCodexIn(codexsurface.CodexHome{Codex: real.CodexHome, State: filepath.Join(real.Home, ".agenthail")}, "")
 	reg, err := registry.Open(registrytest.Path(t))
 	if err != nil {
 		t.Fatal(err)

@@ -15,6 +15,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehooks"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
@@ -339,31 +340,31 @@ func cmdCodexHooks(action string) error {
 	if executable == "" {
 		return errors.New("run this from the installed agenthail binary; Codex hooks name the binary that wrote them")
 	}
-	home := surfaces.CodexHomeFromEnv()
+	home := codexsurface.CodexHomeFromEnv()
 	switch action {
 	case "install":
-		changed, err := surfaces.InstallCodexContext(ctx, home, executable)
+		changed, err := codexsurface.InstallCodexContext(ctx, home, executable)
 		if err != nil {
 			return err
 		}
 		fmt.Printf("codex: %s\n", map[bool]string{true: "installed", false: "already installed"}[changed])
 	case "uninstall":
-		changed, err := surfaces.UninstallCodexContext(ctx, home)
+		changed, err := codexsurface.UninstallCodexContext(ctx, home)
 		if err != nil {
 			return err
 		}
 		fmt.Printf("codex: %s\n", map[bool]string{true: "removed", false: "not installed"}[changed])
 	case "status":
-		state, err := surfaces.CodexContextState(ctx, home, executable)
+		state, err := codexsurface.CodexContextState(ctx, home, executable)
 		if err != nil {
 			return err
 		}
 		switch state {
 		case "":
 			state = "Codex is not set up for this user"
-		case surfaces.CodexHooksOutdated:
+		case codexsurface.CodexHooksOutdated:
 			state += "; run: agenthail hooks install codex"
-		case surfaces.CodexHooksUntrusted:
+		case codexsurface.CodexHooksUntrusted:
 			state = "Codex hook not trusted yet: run agenthail hooks install codex or trust it in Codex"
 		}
 		fmt.Printf("codex: %s\n", state)

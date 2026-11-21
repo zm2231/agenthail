@@ -14,83 +14,16 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/browsercookie"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
-func storedUploads(t *testing.T) (surface.Upload, surface.Upload) {
-	t.Helper()
-	dir := t.TempDir()
-	png, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
-	imagePath, notesPath := filepath.Join(dir, "shot.png"), filepath.Join(dir, "notes.txt")
-	if err := os.WriteFile(imagePath, png, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(notesPath, []byte("synthetic notes\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return surface.Upload{ID: "upload:image", Name: "shot.png", Path: imagePath, MediaType: "image/png"},
-		surface.Upload{ID: "upload:notes", Name: "notes.txt", Path: notesPath, MediaType: "text/plain; charset=utf-8"}
-}
-
-func TestCodexTurnTakesImagesAsLocalImageInputAndFilesAsPaths(t *testing.T) {
-	picture, notes := storedUploads(t)
-	fake := startManagedCodex(t, nil)
-	fake.AddThread(codextest.Thread{ID: managedThreadID, Originator: "agenthail"})
-	codex := isolatedManagedRuntime(t)
-	session := &surface.Session{ID: managedThreadID, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: codexTransportManaged}
-	result, err := surface.RouteSend.Send(context.Background(), codex, session, "compare", surface.SendOptions{Uploads: surface.Uploads{picture, notes}})
-	if err != nil || result == nil || !result.Accepted {
-		t.Fatalf("result=%+v err=%v", result, err)
-	}
-	starts := fake.Calls("turn/start")
-	if len(starts) != 1 {
-		t.Fatalf("turn/start calls=%v", fake.Methods())
-	}
-	var input []map[string]any
-	encoded, _ := json.Marshal(starts[0]["input"])
-	_ = json.Unmarshal(encoded, &input)
-	want := []map[string]any{
-		{"type": "text", "text": "compare\n\nAttached file: " + notes.Path},
-		{"type": "localImage", "path": picture.Path},
-	}
-	if !reflect.DeepEqual(input, want) {
-		t.Fatalf("input=%v want %v", input, want)
-	}
-}
-
-func TestCodexSteerTakesImagesAsLocalImageInput(t *testing.T) {
-	picture, _ := storedUploads(t)
-	fake := startManagedCodex(t, nil)
-	fake.AddThread(codextest.Thread{ID: managedThreadID, Originator: "agenthail"})
-	codex := isolatedManagedRuntime(t)
-	session := &surface.Session{ID: managedThreadID, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}
-	if _, err := surface.RouteSend.Send(context.Background(), codex, session, "start", surface.SendOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	result, err := surface.SteerWithEvidence(context.Background(), codex, session, "look", surface.Uploads{picture})
-	if err != nil || result.Evidence != surface.EvidenceDelivered {
-		t.Fatalf("result=%+v err=%v", result, err)
-	}
-	steers := fake.Calls("turn/steer")
-	if len(steers) != 1 {
-		t.Fatalf("turn/steer calls=%v", fake.Methods())
-	}
-	var input []map[string]any
-	encoded, _ := json.Marshal(steers[0]["input"])
-	_ = json.Unmarshal(encoded, &input)
-	want := []map[string]any{{"type": "text", "text": "look"}, {"type": "localImage", "path": picture.Path}}
-	if !reflect.DeepEqual(input, want) {
-		t.Fatalf("input=%v want %v", input, want)
-	}
-}
-
 func TestAHostSessionSteerCarriesImagesAtPriorityNow(t *testing.T) {
-	picture, _ := storedUploads(t)
+	picture, _ := surfacetest.StoredUploads(t)
 	c, fixture := hostedClaude(t)
 	client := fixture.Start(t)
 	id := uuid.NewString()
@@ -114,7 +47,7 @@ func TestAHostSessionSteerCarriesImagesAtPriorityNow(t *testing.T) {
 }
 
 func TestClaudeHumanTurnCarriesImagesAsContentBlocks(t *testing.T) {
-	picture, notes := storedUploads(t)
+	picture, notes := surfacetest.StoredUploads(t)
 	transcript := writeTranscript(t, `
 {"type":"user","uuid":"u1","timestamp":"2026-07-19T01:00:00Z","message":{"content":"previous"}}
 {"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}
@@ -153,62 +86,26 @@ func TestClaudeHumanTurnCarriesImagesAsContentBlocks(t *testing.T) {
 	}
 }
 
-func timelineSummary(items []surface.TimelineItem) []string {
-	summary := make([]string, 0, len(items))
-	for _, item := range items {
-		entry := item.Kind + ":" + item.Role + ":" + item.Text
-		if item.Kind == "attachment" && item.Attachment == nil {
-			entry += ":unresolved"
-		}
-		summary = append(summary, entry)
-	}
-	return summary
-}
-
 func TestSentImagesRenderAsAttachmentsWithoutRuntimePathNoise(t *testing.T) {
 	for _, test := range []struct {
-		name, source, transcript string
-		want                     []string
+		name, transcript string
+		want             []string
 	}{
 		{
-			name:       "codex local image input",
-			source:     "codex",
-			transcript: `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"what is this?"},{"type":"input_text","text":"<image name=[Image #1] path=\"/daemon/uploads/shot.png\">"},{"type":"input_image","image_url":"data:image/png;base64,` + testPNG + `","detail":"high"},{"type":"input_text","text":"</image>"}]}}`,
-			want:       []string{"message:user:what is this?", "attachment:user:Image attachment"},
-		},
-		{
-			name:   "codex item records that mirror the sent turn",
-			source: "codex",
-			transcript: `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"what is this?"},{"type":"input_image","image_url":"data:image/png;base64,` + testPNG + `"}]}}
-{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","content":[{"type":"text","text":"what is this?"},{"type":"local_image","path":"/daemon/uploads/shot.png"}]}}}
-{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"A red square."}]}}
-{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","content":[{"type":"Text","text":"A red square."}]}}}`,
-			want: []string{"message:user:what is this?", "attachment:user:Image attachment", "message:assistant:A red square."},
-		},
-		{
-			name:       "codex image without text",
-			source:     "codex",
-			transcript: `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<image name=[Image #1]>"},{"type":"input_image","image_url":"data:image/png;base64,` + testPNG + `"},{"type":"input_text","text":"</image>"}]}}`,
-			want:       []string{"attachment:user:Image attachment"},
-		},
-		{
-			name:   "claude image turn and its saved-image companion",
-			source: "claude",
-			transcript: `{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + testPNG + `"}},{"type":"text","text":"what is this?"}]}}
+			name: "claude image turn and its saved-image companion",
+			transcript: `{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + surfacetest.TestPNG + `"}},{"type":"text","text":"what is this?"}]}}
 {"type":"user","uuid":"u2","isMeta":true,"turnCompanion":true,"message":{"role":"user","content":[{"type":"text","text":"[Image: source: /tmp/claude/images/1.png]"}]}}`,
 			want: []string{"attachment:user:Image attachment", "message:user:what is this?"},
 		},
 		{
-			name:   "claude note about a resized image it read",
-			source: "claude",
-			transcript: `{"type":"user","uuid":"u4","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-read","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + testPNG + `"}}]}]}}
+			name: "claude note about a resized image it read",
+			transcript: `{"type":"user","uuid":"u4","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-read","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + surfacetest.TestPNG + `"}}]}]}}
 {"type":"user","uuid":"u5","isMeta":true,"message":{"role":"user","content":"[Image: original 2016x1456, displayed at 2000x1444. Multiply coordinates by 1.01 to map to original image.]"}}`,
 			want: []string{"attachment:user:Image attachment"},
 		},
 		{
 			name:       "claude tool result that is only an image",
-			source:     "claude",
-			transcript: `{"type":"user","uuid":"u3","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-read","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + testPNG + `"}}]}]}}`,
+			transcript: `{"type":"user","uuid":"u3","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-read","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + surfacetest.TestPNG + `"}}]}]}}`,
 			want:       []string{"attachment:user:Image attachment"},
 		},
 	} {
@@ -217,18 +114,18 @@ func TestSentImagesRenderAsAttachmentsWithoutRuntimePathNoise(t *testing.T) {
 			if err := os.WriteFile(path, []byte(test.transcript+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			page, err := readTimeline(context.Background(), path, test.source, 0, 20)
+			page, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 20)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := timelineSummary(page.Items); !reflect.DeepEqual(got, test.want) {
+			if got := surfacetest.TimelineSummary(page.Items); !reflect.DeepEqual(got, test.want) {
 				t.Fatalf("items=%q want %q", got, test.want)
 			}
 			for _, item := range page.Items {
 				if item.Kind != "attachment" {
 					continue
 				}
-				_, data, err := transcript.ReadAttachment(context.Background(), &surface.Session{Transcript: path}, item.Attachment.ID, transcriptFormatOf(test.source), func(*surface.Session) string { return path })
+				_, data, err := transcript.ReadAttachment(context.Background(), &surface.Session{Transcript: path}, item.Attachment.ID, claudeTranscript{}, func(*surface.Session) string { return path })
 				if err != nil || len(data) == 0 {
 					t.Fatalf("attachment %s is not fetchable: %v", item.Attachment.ID, err)
 				}
@@ -238,13 +135,12 @@ func TestSentImagesRenderAsAttachmentsWithoutRuntimePathNoise(t *testing.T) {
 }
 
 func TestSentFilesRenderAsFilesBesideTheTypedText(t *testing.T) {
-	_, notes := storedUploads(t)
+	_, notes := surfacetest.StoredUploads(t)
 	composed, _ := surface.Uploads{notes}.Compose("read this", true)
 	missing := "/daemon/uploads/swept/old.txt"
 	for _, test := range []struct {
 		source, transcript string
 	}{
-		{"codex", `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":` + strconv.Quote(composed+"\nAttached file: "+missing) + `}]}}`},
 		{"claude", `{"type":"user","uuid":"u1","message":{"role":"user","content":` + strconv.Quote(composed+"\nAttached file: "+missing) + `}}`},
 	} {
 		t.Run(test.source, func(t *testing.T) {
@@ -252,7 +148,7 @@ func TestSentFilesRenderAsFilesBesideTheTypedText(t *testing.T) {
 			if err := os.WriteFile(path, []byte(test.transcript+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			page, err := readTimeline(context.Background(), path, test.source, 0, 20)
+			page, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 20)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -265,7 +161,7 @@ func TestSentFilesRenderAsFilesBesideTheTypedText(t *testing.T) {
 }
 
 func TestAPersonsImageToAHostSessionArrivesAsAnImageBlock(t *testing.T) {
-	picture, notes := storedUploads(t)
+	picture, notes := surfacetest.StoredUploads(t)
 	c, fixture := hostedClaude(t)
 	c.localOnly = true
 	client := fixture.Start(t)

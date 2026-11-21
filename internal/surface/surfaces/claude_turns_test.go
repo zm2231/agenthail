@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 const claudeCatchUpTurns = `{"type":"assistant","uuid":"a1","timestamp":"2026-10-19T10:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"one"}]}}
@@ -56,7 +57,7 @@ func TestClaudeCatchUpPageCarriesTheLiveTurnsAndDoneKeys(t *testing.T) {
 	if !errors.Is(err, surface.ErrStreamWindow) {
 		t.Fatalf("stream err=%v", err)
 	}
-	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	page, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +149,7 @@ func TestATurnWhoseLastReplyWasEmptyEndsOnceWithItsUsage(t *testing.T) {
 	if blocked := measured["u4"]; blocked == nil || blocked.Usage == nil || blocked.Usage.OutputTokens != 24 {
 		t.Fatalf("a turn a Stop hook sent back did not keep both replies: %+v", blocked)
 	}
-	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	page, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +166,7 @@ func TestATurnWhoseLastReplyWasEmptyEndsOnceWithItsUsage(t *testing.T) {
 
 func TestClaudeTranscriptItemsMatchThePageFromAnOffset(t *testing.T) {
 	path := writeTranscript(t, `{"type":"user","uuid":"u1","timestamp":"2026-10-19T10:00:00Z","message":{"content":"first"}}`+"\n"+claudeCatchUpTurns)
-	page, err := readTimeline(context.Background(), path, "claude", 0, 0)
+	page, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

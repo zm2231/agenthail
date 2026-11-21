@@ -10,7 +10,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
-	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
 func TestHeadlessCodexCLICreatesReadsAndDrivesAThread(t *testing.T) {
@@ -23,7 +23,7 @@ func TestHeadlessCodexCLICreatesReadsAndDrivesAThread(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.Close() })
-	app := &App{Registry: r, Surfaces: []SurfaceEntry{{Name: "codex", Surface: surfaces.NewCodex("1")}}, DefaultTimeout: 10 * time.Second, catalogDaemonRunning: func() bool { return false }}
+	app := &App{Registry: r, Surfaces: []SurfaceEntry{{Name: "codex", Surface: codexsurface.NewCodex("1")}}, DefaultTimeout: 10 * time.Second, catalogDaemonRunning: func() bool { return false }}
 	stop := serveCreates(t, app)
 
 	output, err := captureStdout(t, func() error {
