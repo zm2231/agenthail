@@ -226,7 +226,7 @@ func TestSentImagesRenderAsAttachmentsWithoutRuntimePathNoise(t *testing.T) {
 				if item.Kind != "attachment" {
 					continue
 				}
-				_, data, err := readTranscriptAttachment(context.Background(), &surface.Session{Transcript: path}, item.Attachment.ID, test.source, func(*surface.Session) string { return path })
+				_, data, err := readTranscriptAttachment(context.Background(), &surface.Session{Transcript: path}, item.Attachment.ID, transcriptFormatOf(test.source), func(*surface.Session) string { return path })
 				if err != nil || len(data) == 0 {
 					t.Fatalf("attachment %s is not fetchable: %v", item.Attachment.ID, err)
 				}

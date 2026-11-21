@@ -260,9 +260,9 @@ func TestNativeClaudeSenderUsesItsOwnSocket(t *testing.T) {
 func TestClaudeProcessStartMatchesOnlyTheSameInstant(t *testing.T) {
 	instant := time.Date(2026, time.September, 13, 3, 2, 13, 0, time.UTC)
 	localLocation := time.FixedZone("EDT", -4*60*60)
-	utc := instant.Format(claudeProcessStartLayout)
-	local := instant.In(localLocation).Format(claudeProcessStartLayout)
-	later := instant.Add(time.Second).Format(claudeProcessStartLayout)
+	utc := instant.Format(psStartLayout)
+	local := instant.In(localLocation).Format(psStartLayout)
+	later := instant.Add(time.Second).Format(psStartLayout)
 	for _, test := range []struct {
 		name, version, recorded, observed string
 		same                              bool

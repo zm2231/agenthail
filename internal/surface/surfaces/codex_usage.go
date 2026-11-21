@@ -72,7 +72,7 @@ func (c *Codex) rolloutUsage(ctx context.Context, path string) *surface.Usage {
 	if cached != nil && identity != "" && cached.identity == identity && cached.size == info.Size() {
 		return cached.usage
 	}
-	lines, _, err := readRecentJSONLLines(ctx, path, 0, codexUsageTailBytes, maxCodexTranscriptRecordBytes)
+	lines, _, err := readRecentJSONLLines(ctx, path, 0, codexUsageTailBytes, maxTranscriptRecordBytes)
 	if err != nil {
 		return nil
 	}

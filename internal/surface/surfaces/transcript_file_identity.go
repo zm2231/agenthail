@@ -14,7 +14,7 @@ func completeJSONLEnd(ctx context.Context, file *os.File, end int64) (int64, err
 		return 0, nil
 	}
 	const chunkSize int64 = 64 << 10
-	remaining := int64(maxCodexTranscriptRecordBytes)
+	remaining := int64(maxTranscriptRecordBytes)
 	position := end
 	for position > 0 && remaining > 0 {
 		readSize := minInt64(chunkSize, position)
@@ -64,3 +64,5 @@ func transcriptFileIdentity(info os.FileInfo) string {
 	}
 	return ""
 }
+
+const maxTranscriptRecordBytes = 32 * 1024 * 1024

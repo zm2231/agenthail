@@ -73,7 +73,7 @@ func claudeRecordLive(record map[string]any) bool {
 		return err == nil && actual == started
 	}
 	actual, err := processStartTime(int(pid))
-	return err == nil && sameClaudeProcessStart(str(record, "version"), started, actual.UTC().Format(claudeProcessStartLayout))
+	return err == nil && sameClaudeProcessStart(str(record, "version"), started, actual.UTC().Format(psStartLayout))
 }
 
 // claudeRecordPredatesProcess dates a record that names no procStart by its

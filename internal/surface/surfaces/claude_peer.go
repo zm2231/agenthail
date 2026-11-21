@@ -37,8 +37,6 @@ func (c *Claude) peerSocket(ctx context.Context, record map[string]any) string {
 	return path
 }
 
-const claudeProcessStartLayout = "Mon Jan 2 15:04:05 2006"
-
 func claudeSocketPaths(pid int) []string {
 	name := strconv.Itoa(pid) + ".sock"
 	var paths []string
@@ -61,8 +59,8 @@ func sameClaudeProcessStartInLocation(version, recorded, actual string, localLoc
 	if major > 2 || major == 2 && (minor > 1 || minor == 1 && patch >= 267) {
 		recordedLocation = time.UTC
 	}
-	recordedAt, recordedErr := time.ParseInLocation(claudeProcessStartLayout, strings.TrimSpace(recorded), recordedLocation)
-	actualAt, actualErr := time.ParseInLocation(claudeProcessStartLayout, strings.TrimSpace(actual), time.UTC)
+	recordedAt, recordedErr := time.ParseInLocation(psStartLayout, strings.TrimSpace(recorded), recordedLocation)
+	actualAt, actualErr := time.ParseInLocation(psStartLayout, strings.TrimSpace(actual), time.UTC)
 	return recordedErr == nil && actualErr == nil && recordedAt.Equal(actualAt)
 }
 

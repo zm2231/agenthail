@@ -68,7 +68,7 @@ func (c *Codex) backgroundCommands(ctx context.Context, path string, info os.Fil
 	if reset {
 		state = &codexBackgroundState{}
 		state.cursor.reset(info)
-		lines, offset, err := readRecentJSONLLines(ctx, path, 0, codexPlanFirstReadBytes, maxCodexTranscriptRecordBytes)
+		lines, offset, err := readRecentJSONLLines(ctx, path, 0, codexPlanFirstReadBytes, maxTranscriptRecordBytes)
 		if err != nil {
 			delete(c.backgroundState, path)
 			return nil
@@ -80,7 +80,7 @@ func (c *Codex) backgroundCommands(ctx context.Context, path string, info os.Fil
 		c.backgroundState[path] = state
 	}
 	if info.Size() > state.cursor.offset {
-		offset, err := scanAppendedJSONL(ctx, path, state.cursor.offset, maxCodexTranscriptRecordBytes, func(line []byte) error {
+		offset, err := scanAppendedJSONL(ctx, path, state.cursor.offset, maxTranscriptRecordBytes, func(line []byte) error {
 			state.apply(line)
 			return nil
 		})

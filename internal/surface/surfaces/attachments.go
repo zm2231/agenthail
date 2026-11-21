@@ -30,17 +30,7 @@ type attachmentReference struct {
 	Sent, Image           bool
 }
 
-func (c *Claude) ReadAttachment(ctx context.Context, s *surface.Session, id string) (*surface.Attachment, []byte, error) {
-	if _, err := c.sessionTranscript(s); err != nil {
-		return nil, nil, err
-	}
-	return readTranscriptAttachment(ctx, s, id, "claude", c.transcriptPath)
-}
-func (c *Codex) ReadAttachment(ctx context.Context, s *surface.Session, id string) (*surface.Attachment, []byte, error) {
-	return readTranscriptAttachment(ctx, s, id, "codex", c.home.transcriptPath)
-}
-
-func readTranscriptAttachment(ctx context.Context, s *surface.Session, id, source string, transcriptPath func(*surface.Session) string) (*surface.Attachment, []byte, error) {
+func readTranscriptAttachment(ctx context.Context, s *surface.Session, id string, format transcriptFormat, transcriptPath func(*surface.Session) string) (*surface.Attachment, []byte, error) {
 	path := s.Transcript
 	if path == "" {
 		path = transcriptPath(s)
@@ -49,7 +39,7 @@ func readTranscriptAttachment(ctx context.Context, s *surface.Session, id, sourc
 	if err != nil || path == "" {
 		return nil, nil, ErrAttachmentNotFound
 	}
-	ref, ok, err := readAttachmentRecord(ctx, path, source, offset, index)
+	ref, ok, err := readAttachmentRecord(ctx, path, format, offset, index)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -94,7 +84,7 @@ func parseAttachmentID(id string) (int64, int, string, error) {
 	return o, i, p[3], nil
 }
 
-func readAttachmentRecord(ctx context.Context, path, source string, offset int64, index int) (attachmentReference, bool, error) {
+func readAttachmentRecord(ctx context.Context, path string, format transcriptFormat, offset int64, index int) (attachmentReference, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return attachmentReference{}, false, err
@@ -141,8 +131,8 @@ func readAttachmentRecord(ctx context.Context, path, source string, offset int64
 	if json.Unmarshal(line, &record) != nil {
 		return attachmentReference{}, false, nil
 	}
-	items := timelineItemsForSource(record, source)
-	refs := attachmentReferencesForSource(record, source)
+	items := format.recordItems(record)
+	refs := format.attachmentReferences(record)
 	refIndex := 0
 	for itemIndex, item := range items {
 		if item.Kind != "attachment" {
@@ -153,14 +143,8 @@ func readAttachmentRecord(ctx context.Context, path, source string, offset int64
 		}
 		refIndex++
 	}
-	if source == "claude" && index >= len(items) {
-		_, files, err := verifiedSentFiles(ctx, newClaudeToolCalls(path), record, offset)
-		if err != nil {
-			return attachmentReference{}, false, err
-		}
-		if sent := index - len(items); sent < len(files) {
-			return sentFileReference(files[sent]), true, nil
-		}
+	if index >= len(items) {
+		return format.trailingAttachment(ctx, path, record, offset, index-len(items))
 	}
 	return attachmentReference{}, false, nil
 }
@@ -287,65 +271,11 @@ func attachmentReferenceFromValue(v any) (attachmentReference, bool) {
 	}
 	return attachmentReference{}, false
 }
-func claudeAttachmentReferences(record map[string]any) []attachmentReference {
-	message, _ := record["message"].(map[string]any)
-	blocks, _ := message["content"].([]any)
-	var out []attachmentReference
-	for _, raw := range blocks {
-		b, _ := raw.(map[string]any)
-		switch str(b, "type") {
-		case "image":
-			out = appendAttachmentReference(out, b["source"])
-		case "tool_result":
-			for _, image := range toolResultImageContent(b["content"]) {
-				out = appendAttachmentReference(out, image)
-			}
-		}
-	}
-	return out
-}
-func codexAttachmentReferences(record map[string]any) []attachmentReference {
-	payload, _ := record["payload"].(map[string]any)
-	var out []attachmentReference
-	if images, ok := payload["images"].([]any); ok {
-		for _, v := range images {
-			out = appendAttachmentReference(out, v)
-		}
-	}
-	blocks, _ := payload["content"].([]any)
-	for _, v := range blocks {
-		b, _ := v.(map[string]any)
-		if str(b, "text") == "" && strings.Contains(str(b, "type"), "image") {
-			out = appendAttachmentReference(out, b)
-		}
-	}
-	if _, images, ok := codexTypedToolOutput(payload["output"]); ok && images > 0 {
-		outputs, _ := payload["output"].([]any)
-		for _, v := range outputs {
-			if b, _ := v.(map[string]any); str(b, "type") == "input_image" {
-				out = appendAttachmentReference(out, b)
-			}
-		}
-	}
-	return out
-}
 func appendAttachmentReference(out []attachmentReference, value any) []attachmentReference {
 	ref, _ := attachmentReferenceFromValue(value)
 	return append(out, ref)
 }
-func timelineItemsForSource(record map[string]any, source string) []surface.TimelineItem {
-	if source == "claude" {
-		return claudeTimelineItems(record)
-	}
-	return codexTimelineItems(record)
-}
-func attachmentReferencesForSource(record map[string]any, source string) []attachmentReference {
-	if source == "claude" {
-		return claudeAttachmentReferences(record)
-	}
-	return codexAttachmentReferences(record)
-}
-func decorateTimelineAttachments(ctx context.Context, items []surface.TimelineItem, record map[string]any, source string, offset int64) error {
+func decorateTimelineAttachments(ctx context.Context, items []surface.TimelineItem, refs []attachmentReference, offset int64) error {
 	for itemIndex := range items {
 		item := &items[itemIndex]
 		if item.Kind != "message" || item.Role != "user" {
@@ -362,7 +292,6 @@ func decorateTimelineAttachments(ctx context.Context, items []surface.TimelineIt
 		}
 		item.Text, item.Files = text, files
 	}
-	refs := attachmentReferencesForSource(record, source)
 	refIndex := 0
 	for itemIndex := range items {
 		if items[itemIndex].Kind != "attachment" {

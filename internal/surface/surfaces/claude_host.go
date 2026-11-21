@@ -15,7 +15,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost"
-	"github.com/zm2231/agenthail/internal/installdir"
 	"github.com/zm2231/agenthail/internal/procstart"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -299,29 +298,4 @@ func ClaudeHostLaunch(home, version string) (claudehost.Launch, error) {
 	launch := claudehost.Launch{Node: node, Script: script, Claude: claude, Version: version, Env: claudeCommandEnv(home)}
 	launch.Agenthail = AgenthailExecutable()
 	return launch, nil
-}
-
-var installRoot = func() (string, error) {
-	executable, err := os.Executable()
-	if err == nil {
-		executable, err = filepath.EvalSymlinks(executable)
-	}
-	if err != nil {
-		return "", err
-	}
-	return installdir.Of(executable), nil
-}
-
-// shippedNode is the Node runtime Agenthail ships. A node on PATH is never
-// used: its version is whatever the machine happens to have.
-func shippedNode() (string, error) {
-	root, err := installRoot()
-	if err != nil {
-		return "", err
-	}
-	node := installdir.Node(root)
-	if _, err := os.Stat(node); err != nil {
-		return "", fmt.Errorf("the Node runtime Agenthail ships is missing at %s; reinstall Agenthail, or for a source build run scripts/fetch-node.sh", node)
-	}
-	return node, nil
 }

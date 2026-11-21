@@ -322,12 +322,12 @@ func TestAnAttachmentReadThatRanOutOfTimeIsNotReportedMissing(t *testing.T) {
 	}
 	data, _ := base64.StdEncoding.DecodeString(testPNG)
 	id := attachmentID(0, 0, data)
-	if _, _, err := readTranscriptAttachment(context.Background(), &surface.Session{Transcript: path}, id, "claude", nil); err != nil {
+	if _, _, err := readTranscriptAttachment(context.Background(), &surface.Session{Transcript: path}, id, claudeTranscript{}, nil); err != nil {
 		t.Fatalf("read in time: %v", err)
 	}
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
-	_, _, err := readTranscriptAttachment(ctx, &surface.Session{Transcript: path}, id, "claude", nil)
+	_, _, err := readTranscriptAttachment(ctx, &surface.Session{Transcript: path}, id, claudeTranscript{}, nil)
 	if status, code, _ := AttachmentHTTPStatus(err); status != http.StatusGatewayTimeout || code != "attachment_timeout" {
 		t.Fatalf("err=%v status=%d code=%s, want 504 attachment_timeout", err, status, code)
 	}

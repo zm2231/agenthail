@@ -67,7 +67,7 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 			}
 		}
 		lineOffset := offset
-		next, err := scanAppendedJSONL(ctx, path, offset, maxCodexTranscriptRecordBytes, func(line []byte) error {
+		next, err := scanAppendedJSONL(ctx, path, offset, maxTranscriptRecordBytes, func(line []byte) error {
 			recordOffset := lineOffset
 			lineOffset += int64(len(line))
 			var record map[string]any
@@ -103,7 +103,7 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 			if len(items) == 0 {
 				return nil
 			}
-			if err := decorateTimelineAttachments(ctx, items, record, "codex", recordOffset); err != nil {
+			if err := decorateTimelineAttachments(ctx, items, codexAttachmentReferences(record), recordOffset); err != nil {
 				return err
 			}
 			for index, item := range items {

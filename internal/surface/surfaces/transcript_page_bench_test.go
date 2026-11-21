@@ -15,14 +15,14 @@ func BenchmarkTranscriptNewestPage(b *testing.B) {
 		b.Skip("AGENTHAIL_TRANSCRIPT_BENCH names the transcripts to read")
 	}
 	for _, path := range strings.Split(paths, ",") {
-		source := "claude"
+		var format transcriptFormat = claudeTranscript{settled: func(time.Time) bool { return true }}
 		if strings.Contains(filepath.Base(path), "rollout") {
-			source = "codex"
+			format = codexTranscript{}
 		}
 		b.Run(filepath.Base(path), func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				page, err := readTranscriptPage(context.Background(), path, source, 0, 40, func(time.Time) bool { return true })
+				page, err := readTranscriptPage(context.Background(), path, format, 0, 40)
 				if err != nil {
 					b.Fatal(err)
 				}
