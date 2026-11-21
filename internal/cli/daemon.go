@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -12,15 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/browserhost"
-	"github.com/zm2231/agenthail/internal/claudehost"
-	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/dashconfig"
-	"github.com/zm2231/agenthail/internal/nodehost"
 	"github.com/zm2231/agenthail/internal/poll"
-	"github.com/zm2231/agenthail/internal/simhost"
-	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
 
@@ -76,8 +71,8 @@ func daemonLogPathForExecutable(executable string) string {
 }
 
 func (a *App) daemonRun() error {
-	for _, e := range a.Surfaces {
-		_ = e
+	if a.RunDaemon == nil {
+		return errors.New("this build cannot run the daemon")
 	}
 	// Opening can migrate, so a daemon that may not run must find that out first.
 	release, err := daemonctl.HoldLock()
@@ -86,26 +81,13 @@ func (a *App) daemonRun() error {
 	}
 	defer release()
 	began := time.Now()
-	opened := a.registry()
-	d := daemon.New(opened, a.allSurfaces())
-	d.SetStartup(began, time.Since(began))
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	d.SetBuild(a.build())
-	hostVersion := a.Version + "+" + a.Revision
-	d.SetClaudeHost(&claudehost.Manager{Home: home, Launch: func() (claudehost.Launch, error) {
-		return claudesurface.ClaudeHostLaunch(home, hostVersion)
-	}})
-	d.SetBrowserHost(&browserhost.Manager{Home: home, Launch: func() (browserhost.Launch, error) {
-		return browserhost.InstalledLaunch(hostVersion)
-	}})
-	d.SetSimulatorHost(simhost.New(simhost.Config{OutRoot: filepath.Join(home, ".agenthail", "simulator", "out")}))
-	d.SetExtensionHost(home, func() (nodehost.Launch, error) {
-		return nodehost.InstalledLaunch("extension host", "extension-host", "AGENTHAIL_EXTENSION_HOST", hostVersion)
+	return a.RunDaemon(DaemonRun{
+		Registry:    a.registry(),
+		Surfaces:    a.allSurfaces(),
+		Build:       a.build(),
+		HostVersion: a.Version + "+" + a.Revision,
+		Began:       began,
 	})
-	return d.RunWithSignal()
 }
 
 func (a *App) cmdDashboard(args []string) error {

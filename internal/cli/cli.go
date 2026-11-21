@@ -36,6 +36,7 @@ type App struct {
 	Version                   string
 	Revision                  string
 	BuiltAt                   string
+	RunDaemon                 func(DaemonRun) error
 	catalogDaemonRunning      func() bool
 	daemonService             daemonService
 	update                    *updateDeps

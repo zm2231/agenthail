@@ -57,6 +57,7 @@ func main() {
 		Version:             version,
 		Revision:            revision,
 		BuiltAt:             builtAt,
+		RunDaemon:           runDaemon,
 	}
 
 	helpers := sidecarAvailable(runtime.GOOS, os.Getenv("AGENTHAIL_SIDECAR"))
