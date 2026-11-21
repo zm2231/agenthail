@@ -264,7 +264,7 @@ func (c *Codex) rpc(ctx context.Context, conn *cdpConn, method string, params ma
 	}
 	if envelope, ok := response["error"].(map[string]any); ok {
 		code, _ := envelope["code"].(float64)
-		refused := &codexRPCError{Method: method, Code: int(code), Message: str(envelope, "message")}
+		refused := &codexRPCError{Method: method, Code: int(code), Message: str(envelope, "message"), Data: envelope["data"]}
 		if bridgeCode, _ := envelope["code"].(string); codexBridgeUnsent[bridgeCode] {
 			return nil, surface.DeliveryUnavailable(refused)
 		}

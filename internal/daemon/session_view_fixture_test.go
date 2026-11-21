@@ -294,6 +294,15 @@ func newViewFixture(t *testing.T) *viewFixture {
 				t.Fatal(err)
 			}
 		}},
+		{"a read receipt", func(rng *rand.Rand) {
+			state := surface.ReadState{Revision: fmt.Sprint("rev-", rng.Intn(4))}
+			if rng.Intn(2) == 0 {
+				state.FirstUnread = "turn-1"
+			}
+			if err := reg.RecordCodexReadStates(map[string]surface.ReadState{session(rng): state}, f.clock); err != nil {
+				t.Fatal(err)
+			}
+		}},
 		{"a pinned session", func(rng *rand.Rand) {
 			if _, err := reg.PinSession(session(rng), f.clock); err != nil {
 				t.Fatal(err)
@@ -445,6 +454,9 @@ func newViewFixture(t *testing.T) *viewFixture {
 			t.Fatal(err)
 		}
 		if _, err := reg.PinSession("s0", f.clock); err != nil {
+			t.Fatal(err)
+		}
+		if err := reg.RecordCodexReadStates(map[string]surface.ReadState{"s0": {FirstUnread: "fill", Revision: "rev-fill"}}, f.clock); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := reg.EndTurn(registry.TurnEnd{SessionID: "s0", Headline: "filled", Source: registry.TurnSourceTool}, "", f.clock); err != nil {

@@ -75,6 +75,7 @@ type dashboardActionRequest struct {
 	ChangedAt       time.Time                  `json:"changedAt"`
 	Until           time.Time                  `json:"until"`
 	Wake            string                     `json:"wake"`
+	Revision        string                     `json:"revision"`
 	ChangedBy       string                     `json:"changedBy"`
 	Ceiling         json.RawMessage            `json:"ceiling,omitempty"`
 	Task            bool                       `json:"task,omitempty"`

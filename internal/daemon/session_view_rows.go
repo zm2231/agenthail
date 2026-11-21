@@ -122,6 +122,7 @@ func presentationRow(record registry.CatalogPresentationRow, source presentation
 	if record.HostID == "" {
 		row.Archived, row.StartedBy, row.Task = record.Archived, record.StartedBy, record.Task
 		row.PinnedAt = record.PinnedAt
+		row.ReadState = record.ReadState
 		row.Snooze = snoozeRow(record.Snooze)
 		row.EndTurn = endTurnRow(record.TurnEnd)
 		row.Ask = askRow(record.Ask)

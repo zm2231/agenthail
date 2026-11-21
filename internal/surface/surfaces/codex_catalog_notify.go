@@ -74,6 +74,10 @@ func (c *Codex) forwardCodexStatusChanges(ctx context.Context, client *managedCo
 					report = true
 					continue
 				}
+				if event.Method == "thread/readState/changed" {
+					report = true
+					continue
+				}
 				if event.Method != "thread/status/changed" {
 					continue
 				}

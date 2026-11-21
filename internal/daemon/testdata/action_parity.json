@@ -2375,6 +2375,30 @@
     },
     "body": "{\"ok\":true,\"pinned\":true,\"pinnedAt\":\"\u003ctime\u003e\",\"sessionId\":\"to\"}\n"
   },
+  "api/action session-read": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"read_state_unsupported\",\"message\":\"codex conversations have no read state\"}}\n"
+  },
+  "api/action session-read no revision": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"revision is required: send the readState.revision the conversation showed\"}}\n"
+  },
   "api/action session-snooze": {
     "status": 200,
     "header": {
@@ -2434,6 +2458,18 @@
       ]
     },
     "body": "{\"ok\":true,\"pinned\":false,\"sessionId\":\"to\"}\n"
+  },
+  "api/action session-unread": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"read_state_unsupported\",\"message\":\"codex conversations have no read state\"}}\n"
   },
   "api/action session-wake": {
     "status": 200,
@@ -4979,6 +5015,30 @@
     },
     "body": "{\"ok\":true,\"pinned\":true,\"pinnedAt\":\"\u003ctime\u003e\",\"sessionId\":\"to\"}\n"
   },
+  "api/v1/actions session-read": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"read_state_unsupported\",\"message\":\"codex conversations have no read state\"}}\n"
+  },
+  "api/v1/actions session-read no revision": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"revision is required: send the readState.revision the conversation showed\"}}\n"
+  },
   "api/v1/actions session-snooze": {
     "status": 200,
     "header": {
@@ -5038,6 +5098,18 @@
       ]
     },
     "body": "{\"ok\":true,\"pinned\":false,\"sessionId\":\"to\"}\n"
+  },
+  "api/v1/actions session-unread": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"read_state_unsupported\",\"message\":\"codex conversations have no read state\"}}\n"
   },
   "api/v1/actions session-wake": {
     "status": 200,

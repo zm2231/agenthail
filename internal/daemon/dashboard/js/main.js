@@ -30,6 +30,7 @@ import { toast } from "./feedback.js";
 import { app } from "./state.js";
 import { startLiveOrder } from "./live-order.js";
 import { rereadSoon } from "./order-refresh.js";
+import { readWhileLooking } from "./read-state.js";
 
 bindVoiceEvents();
 bindConversationEvents();
@@ -64,12 +65,16 @@ window.addEventListener("resize", () => {
 });
 
 window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
-window.addEventListener("focus", () => startLiveStream());
+window.addEventListener("focus", () => {
+  startLiveStream();
+  readWhileLooking(true);
+});
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     rereadSoon(0);
     startLiveStream();
+    readWhileLooking(true);
   } else {
     stopLiveStream();
   }

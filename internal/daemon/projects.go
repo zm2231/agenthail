@@ -26,6 +26,7 @@ type catalogViewState struct {
 	archive   registry.ArchiveState
 	attention map[string]bool
 	marks     map[string]registry.SessionMark
+	reads     map[string]surface.ReadState
 	turnEnds  map[string]registry.TurnEnd
 	asks      map[string]registry.Ask
 	notices   map[string]registry.TurnNotice
@@ -52,6 +53,10 @@ func (d *Daemon) loadCatalogViewState() (catalogViewState, error) {
 	if err != nil {
 		return catalogViewState{}, fmt.Errorf("read pinned and snoozed sessions: %w", err)
 	}
+	reads, err := d.Registry.CodexReadStates()
+	if err != nil {
+		return catalogViewState{}, fmt.Errorf("read read states: %w", err)
+	}
 	turnEnds, err := d.Registry.CurrentTurnEnds()
 	if err != nil {
 		return catalogViewState{}, fmt.Errorf("read turn ends: %w", err)
@@ -72,7 +77,7 @@ func (d *Daemon) loadCatalogViewState() (catalogViewState, error) {
 	if err != nil {
 		return catalogViewState{}, fmt.Errorf("read project leads: %w", err)
 	}
-	return catalogViewState{archive: archive, attention: attention, marks: marks, turnEnds: turnEnds, asks: asks, notices: notices, judgments: judgments, leads: leads}, nil
+	return catalogViewState{archive: archive, attention: attention, marks: marks, reads: reads, turnEnds: turnEnds, asks: asks, notices: notices, judgments: judgments, leads: leads}, nil
 }
 
 // settleArchiveActivity unarchives each archived session that shows activity
@@ -126,6 +131,10 @@ func applyCatalogView(row *dashboardSession, view catalogViewState) {
 	mark := view.marks[row.ID]
 	row.PinnedAt = mark.PinnedAt
 	row.Snooze = snoozeRow(mark.Snooze)
+	row.ReadState = nil
+	if read, ok := view.reads[row.ID]; ok {
+		row.ReadState = &read
+	}
 	if end, ok := view.turnEnds[row.ID]; ok {
 		row.EndTurn = endTurnRow(&end)
 	}

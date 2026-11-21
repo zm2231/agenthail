@@ -221,7 +221,7 @@ func (c *managedCodexClient) requestOrdered(ctx context.Context, method string, 
 	case reply := <-waiter:
 		if envelope, ok := reply.message["error"].(map[string]any); ok {
 			code, _ := envelope["code"].(float64)
-			return nil, reply.after, &codexRPCError{Method: method, Code: int(code), Message: str(envelope, "message")}
+			return nil, reply.after, &codexRPCError{Method: method, Code: int(code), Message: str(envelope, "message"), Data: envelope["data"]}
 		}
 		return reply.message, reply.after, nil
 	case <-ctx.Done():
@@ -243,6 +243,7 @@ type codexRPCError struct {
 	Method  string
 	Code    int
 	Message string
+	Data    any
 }
 
 func (e *codexRPCError) Error() string {

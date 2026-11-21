@@ -24,6 +24,7 @@ import { friendlyError, toast } from "./feedback.js";
 import { refreshShownProject } from "./project-pane.js";
 import { dropMissingScope, renderTiles } from "./project-tiles-view.js";
 import { adoptTileOrder } from "./tile-order.js";
+import { readWhileLooking } from "./read-state.js";
 
 export function renderAll() {
   try {
@@ -44,6 +45,7 @@ export function renderAll() {
   if (app.settings && app.operationsTab === "settings") renderSettings();
   $("#sync").textContent =
     `Synced ${new Date(app.state.updatedAt || Date.now()).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  readWhileLooking();
 }
 
 export function ensureSessionOrder() {

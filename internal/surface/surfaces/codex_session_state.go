@@ -43,6 +43,7 @@ func codexSession(thread map[string]any) surface.Session {
 		WaitingOn:  codexSessionWaiting(str(thread, "id"), thread["status"]),
 		Subagent:   codexSubagent(thread),
 		Transcript: str(thread, "path"),
+		ReadState:  codexReadState(thread[codexReadStateKey]),
 	}
 	setCodexTransport(&session, "")
 	if timestamp, ok := thread["recencyAt"].(float64); ok && timestamp > 0 {

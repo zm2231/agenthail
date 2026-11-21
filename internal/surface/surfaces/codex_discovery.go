@@ -142,17 +142,16 @@ func (c *Codex) readLoaded(ctx context.Context, conn codexClient, limit int, run
 	if err != nil {
 		return nil, nil, err
 	}
-	sessions := make([]surface.Session, 0, len(ids))
-	var readErrors []string
-	for _, id := range ids {
-		thread, err := c.readThreadObject(ctx, conn, id)
-		if err != nil {
-			readErrors = append(readErrors, err.Error())
-			continue
-		}
+	threads, failures := c.readThreadObjects(ctx, conn, ids)
+	sessions := make([]surface.Session, 0, len(threads))
+	for _, thread := range threads {
 		if codexListsThread(thread) {
 			sessions = append(sessions, runtimes.session(thread))
 		}
+	}
+	readErrors := make([]string, 0, len(failures))
+	for _, failure := range failures {
+		readErrors = append(readErrors, failure.Error())
 	}
 	return sessions, readErrors, nil
 }
@@ -239,6 +238,7 @@ func (c *Codex) listPageCursor(ctx context.Context, conn codexClient, params map
 	}
 	result, _ := resp["result"].(map[string]any)
 	threads, _ := result["data"].([]any)
+	attachCodexReadStates(result, threads)
 	sessions := make([]surface.Session, 0, len(threads))
 	for _, value := range threads {
 		thread, _ := value.(map[string]any)
