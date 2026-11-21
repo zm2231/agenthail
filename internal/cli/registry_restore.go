@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -19,6 +20,10 @@ func (a *App) cmdRegistry(args []string) error {
 		return printMigrationBackups()
 	}
 	key := args[1]
+	// Older builds' refusals and release notes give the bare schema number.
+	if n, err := strconv.Atoi(key); err == nil && n > 0 {
+		key = "v" + strconv.Itoa(n)
+	}
 	if !registry.ValidBackupKey(key) {
 		return errors.New(registryUsage)
 	}

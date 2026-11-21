@@ -255,3 +255,18 @@ func TestACommandRefusesARegistryANewerAgenthailMigrated(t *testing.T) {
 		t.Fatal("refusing the registry wrote to it")
 	}
 }
+
+func TestABareSchemaNumberRestoresTheCopyFromBeforeThatSchema(t *testing.T) {
+	home := t.TempDir()
+	_, future := newerRegistryWithCompressedCopy(t, home)
+	if output, err := runAgenthail(t, home, "registry", "restore", "0"); err == nil || !strings.Contains(output, "usage: agenthail registry restore") {
+		t.Fatalf("restore 0: err=%v output=%q, want the usage error", err, output)
+	}
+	output, err := runAgenthail(t, home, "registry", "restore", "0"+strconv.Itoa(future))
+	if err != nil {
+		t.Fatalf("restore 0%d: %v\n%s", future, err, output)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".agenthail", "registry-v"+strconv.Itoa(future)+".db")); err != nil {
+		t.Fatalf("the newer registry was not set aside: %v\n%s", err, output)
+	}
+}
