@@ -79,7 +79,7 @@ func runCodexDaemon(ctx context.Context, home CodexHome, action string) ([]byte,
 func (c *Codex) RuntimeStatus(ctx context.Context) surface.RuntimeStatus {
 	install := DetectCodexInstallation(c.home)
 	desktopCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	desktopErr := c.DesktopReady(desktopCtx)
+	appServer, desktopErr := c.desktopAppServer(desktopCtx)
 	cancel()
 	if desktopErr == nil {
 		return surface.RuntimeStatus{
@@ -88,6 +88,7 @@ func (c *Codex) RuntimeStatus(ctx context.Context) surface.RuntimeStatus {
 			Reachable: true,
 			Durable:   true,
 			Backend:   "desktop",
+			AppServer: appServer,
 		}
 	}
 	problem, remediation := c.desktopProblem()

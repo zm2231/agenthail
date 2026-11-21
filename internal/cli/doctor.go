@@ -517,6 +517,9 @@ func (a *App) cmdDoctor(args []string) error {
 					fmt.Printf(" (%s)", result.Runtime.Detail)
 				}
 				fmt.Println()
+				if line := appServerLine(result.Runtime.AppServer); line != "" {
+					fmt.Printf("  app-server: %s\n", line)
+				}
 				if result.Runtime.Remediation != "" {
 					fmt.Printf("  fix: %s\n", result.Runtime.Remediation)
 				}

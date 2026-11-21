@@ -1,0 +1,13 @@
+package surface
+
+type AppServerMode string
+
+const (
+	AppServerShared  AppServerMode = "shared"
+	AppServerPrivate AppServerMode = "private"
+)
+
+// Shared means Desktop drives Codex's app-server daemon, the one Agenthail dials.
+type AppServer struct {
+	Mode AppServerMode `json:"mode,omitempty"`
+}
