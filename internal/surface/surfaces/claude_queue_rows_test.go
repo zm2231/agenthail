@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
@@ -59,15 +60,21 @@ func TestSteersMatchesTheSessionCapabilities(t *testing.T) {
 		{ID: "native", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"},
 		{ID: "bridged", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", Bridge: "bridge"},
 		{ID: "background", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeBackground},
+		{ID: "refused", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", Bridge: "bridge"},
+		{ID: "codex-managed", Surface: surface.KindCodex, Transport: "managed"},
+		{ID: "codex-read-only", Surface: surface.KindCodex, Transport: "readOnly"},
 	}
 	for _, localOnly := range []bool{false, true} {
 		c := NewClaude(nil, fixture.Home)
 		if localOnly {
 			c.DisableRemoteControl()
 		}
-		for _, session := range sessions {
-			if got, want := surface.CanSteer(c, session), surface.EffectiveCapabilities(c, session).Steer; got != want {
-				t.Errorf("localOnly=%v session=%+v: CanSteer=%v, capabilities say %v", localOnly, session, got, want)
+		c.refused = map[string]time.Time{"refused": time.Now().Add(time.Hour)}
+		for _, adapter := range []surface.Surface{c, NewCodex("")} {
+			for _, session := range sessions {
+				if got, want := surface.CanSteer(adapter, session), surface.EffectiveCapabilities(adapter, session).Steer; got != want {
+					t.Errorf("%T localOnly=%v session=%+v: CanSteer=%v, capabilities say %v", adapter, localOnly, session, got, want)
+				}
 			}
 		}
 	}
