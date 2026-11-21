@@ -71,7 +71,7 @@ func (d *Daemon) mcpAuth(next http.Handler) http.Handler {
 			caller, err := d.credentialCaller(token)
 			if err != nil && credentialRefused(err) {
 				if id := d.Registry.CredentialSession(token); id != "" {
-					return credentialCheck{refusedSession: d.resolveDisplay(id)}, err
+					return credentialCheck{refusedSession: d.callerDisplay(id)}, err
 				}
 			}
 			return credentialCheck{caller: caller}, err
@@ -136,15 +136,34 @@ func (d *Daemon) authenticateSession(token string, now time.Time) (registry.Sess
 	if !errors.As(err, &idle) {
 		return credential, err
 	}
-	session, sessionErr := d.Registry.Session(idle.SessionID)
+	record, sessionErr := d.Registry.Caller(idle.SessionID)
 	if sessionErr != nil {
 		return credential, fmt.Errorf("reading the session of an idle credential: %w", sessionErr)
 	}
-	if !d.sessionRunning(session) {
-		d.log.Printf("refused the idle-expired credential of %s: unused for a day and the session is not running", d.resolveDisplay(idle.SessionID))
+	if !d.sessionRunning(&record.Session) {
+		d.log.Printf("refused the idle-expired credential of %s: unused for a day and the session is not running", recordDisplay(record))
 		return credential, err
 	}
 	return d.Registry.AuthenticateRunningSessionToken(token, now)
+}
+
+// callerDisplay names a caller in a log line without waiting on the general readers.
+func (d *Daemon) callerDisplay(sessionID string) string {
+	record, err := d.Registry.Caller(sessionID)
+	if err != nil {
+		return truncate(sessionID, 24)
+	}
+	return recordDisplay(record)
+}
+
+func recordDisplay(record registry.CallerRecord) string {
+	switch {
+	case record.Alias != "":
+		return "@" + record.Alias
+	case record.Session.Name != "":
+		return string(record.Session.Surface) + "/" + truncate(record.Session.Name, 20)
+	}
+	return truncate(record.Session.ID, 24)
 }
 
 func (d *Daemon) sessionRunning(session *surface.Session) bool {

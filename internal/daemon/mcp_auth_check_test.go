@@ -20,7 +20,7 @@ func TestASessionCredentialThatCannotBeCheckedIsABusyRefusalNotA401(t *testing.T
 	server := mcpServer(t, d)
 	token := issueMCPToken(t, d, from)
 	client := mcpSession(t, server, token)
-	if err := r.ReadDB().Close(); err != nil {
+	if _, err := r.WriteDB().Exec(`ALTER TABLE catalog_sessions RENAME TO catalog_sessions_gone`); err != nil {
 		t.Fatal(err)
 	}
 	if status, body := postMCP(t, server, map[string]string{"Authorization": "Bearer " + token}); status == http.StatusUnauthorized {
@@ -58,7 +58,7 @@ func TestASocketCallerTheDaemonCannotReadIsABusyRefusal(t *testing.T) {
 	parent := &relayedSession{record: filepath.Join(root, "sessions", strconv.Itoa(os.Getppid())+".json")}
 	parent.writeFor(t, os.Getppid(), "claude-one", true)
 	client := socketClient(t)
-	if err := d.Registry.ReadDB().Close(); err != nil {
+	if _, err := d.Registry.WriteDB().Exec(`ALTER TABLE catalog_sessions RENAME TO catalog_sessions_gone`); err != nil {
 		t.Fatal(err)
 	}
 	out, refused := callMCP(t, client, "agenthail_whoami", nil)
@@ -124,5 +124,23 @@ func TestACodexSocketCallForAThreadItsProcessDoesNotHoldIsLogged(t *testing.T) {
 	}
 	if want := "mcp auth session=thread-c path=socket outcome=refused:unauthenticated"; !strings.Contains(logged.String(), want) {
 		t.Fatalf("the daemon log has no %q:\n%s", want, logged.String())
+	}
+}
+
+func TestARevokedCredentialIsRefusedWhileBackgroundReadsHoldEveryGeneralReader(t *testing.T) {
+	d, r, _, from, token, logged := credentialFixture(t)
+	if err := r.SetAlias("quiet", from.ID); err != nil {
+		t.Fatal(err)
+	}
+	server := mcpServer(t, d)
+	if err := r.RevokeSessionCredentials(from.ID, "revoked", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	holdEveryGeneralReader(t, r)
+	if status, body := postMCP(t, server, map[string]string{"Authorization": "Bearer " + token}); status != http.StatusUnauthorized || errorCode(body) != "credential_revoked" {
+		t.Fatalf("with every general reader held, a revoked credential answered %d %v", status, body)
+	}
+	if want := "mcp auth session=@quiet path=http outcome=refused:credential_revoked:revoked"; !strings.Contains(logged.String(), want) {
+		t.Fatalf("the daemon log has no %q:\n%s", want, logged)
 	}
 }

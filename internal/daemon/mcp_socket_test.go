@@ -415,6 +415,16 @@ func TestASocketCallerIsNamedWhileBackgroundReadsHoldEveryGeneralReader(t *testi
 	if _, _, err := reg.RecordCatalogSession(registry.CatalogSessionState{Session: *listed, Project: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:claude-one", Type: "session.upserted", EntityID: "claude-one", Payload: []byte(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
+	holdEveryGeneralReader(t, reg)
+	if id, ok := session.whoami(t); !ok || id != "claude-one" {
+		t.Fatalf("with every general reader held, whoami = %q, %v", id, ok)
+	}
+}
+
+// holdEveryGeneralReader shortens the caller bound and holds every general
+// reader for three bounds, as the background scans did when callers stalled.
+func holdEveryGeneralReader(t *testing.T, reg *registry.Registry) {
+	t.Helper()
 	previous := mcpCallerBound
 	mcpCallerBound = 2 * time.Second
 	t.Cleanup(func() { mcpCallerBound = previous })
@@ -438,7 +448,4 @@ func TestASocketCallerIsNamedWhileBackgroundReadsHoldEveryGeneralReader(t *testi
 	}
 	time.AfterFunc(3*mcpCallerBound, releaseAll)
 	t.Cleanup(releaseAll)
-	if id, ok := session.whoami(t); !ok || id != "claude-one" {
-		t.Fatalf("with every general reader held, whoami = %q, %v", id, ok)
-	}
 }

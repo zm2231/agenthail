@@ -209,7 +209,7 @@ func (r *Registry) CredentialSession(token string) string {
 		return ""
 	}
 	var sessionID sql.NullString
-	_ = r.read.QueryRow(`SELECT session_id FROM session_credentials WHERE token_hash=?`, HashSessionToken(token)).Scan(&sessionID)
+	_ = r.callers.QueryRow(`SELECT session_id FROM session_credentials WHERE token_hash=?`, HashSessionToken(token)).Scan(&sessionID)
 	return sessionID.String
 }
 

@@ -99,15 +99,15 @@ var projectScopeCalls = []struct {
 	{"agenthail_read", map[string]any{"sessionId": "peer-04", "since": 0}},
 }
 
-func callProjectScope(t *testing.T, session *mcp.ClientSession, tool string, args map[string]any) map[string]any {
+func callProjectScope(t *testing.T, session *mcp.ClientSession, tool string, args map[string]any, listed int) map[string]any {
 	t.Helper()
 	got := callWithin(t, func() (map[string]any, bool) { return callMCP(t, session, tool, args) }, 10*time.Second, tool)
 	if got.refused {
 		t.Fatalf("%s was refused: %v", tool, got.out)
 	}
 	if tool == "agenthail_sessions" {
-		if listed, _ := got.out["sessions"].([]any); len(listed) != 26 {
-			t.Fatalf("the project filter listed %d sessions, want the caller and the 25 in its project", len(listed))
+		if sessions, _ := got.out["sessions"].([]any); len(sessions) != listed {
+			t.Fatalf("the project filter listed %d sessions, want %d", len(sessions), listed)
 		}
 	}
 	return got.out
@@ -115,16 +115,11 @@ func callProjectScope(t *testing.T, session *mcp.ClientSession, tool string, arg
 
 func TestMCPProjectScopeRunsNoGitAndAnswersAtOnceWithManySessions(t *testing.T) {
 	f := newProjectScopeFixture(t)
-	// Discovery resolves every session it lists on each pass, so a live
-	// caller's own folder is cached.
-	if _, err := f.d.sessionIdentity(f.from); err != nil {
-		t.Fatal(err)
-	}
 	calls := gitCalls(t, 2*time.Second)
 	session := mcpSession(t, mcpServer(t, f.d), issueMCPToken(t, f.d, f.from))
 	for _, call := range projectScopeCalls {
 		started := time.Now()
-		callProjectScope(t, session, call.tool, call.args)
+		callProjectScope(t, session, call.tool, call.args, 26)
 		if took := time.Since(started); took > time.Second {
 			t.Fatalf("%s took %s with 51 sessions", call.tool, took)
 		}
@@ -134,13 +129,16 @@ func TestMCPProjectScopeRunsNoGitAndAnswersAtOnceWithManySessions(t *testing.T) 
 	}
 }
 
-func TestACallersColdFolderIsResolvedOnceAndNoPeersFolderIs(t *testing.T) {
+func TestACallerDiscoveryHasNotRecordedResolvesOnlyItsOwnFolderOnce(t *testing.T) {
 	f := newProjectScopeFixture(t)
+	if _, err := f.d.Registry.WriteDB().Exec(`DELETE FROM catalog_sessions WHERE session_id=?`, f.from.ID); err != nil {
+		t.Fatal(err)
+	}
 	calls := gitCalls(t, 0)
 	session := mcpSession(t, mcpServer(t, f.d), issueMCPToken(t, f.d, f.from))
 	for index, call := range projectScopeCalls {
 		before := len(loggedGitCalls(t, calls))
-		callProjectScope(t, session, call.tool, call.args)
+		callProjectScope(t, session, call.tool, call.args, 25)
 		ran := loggedGitCalls(t, calls)
 		for _, line := range ran[before:] {
 			if !strings.HasPrefix(line, "-C "+f.callerDir+" ") {
