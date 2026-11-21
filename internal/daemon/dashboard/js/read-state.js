@@ -2,8 +2,10 @@ import { app } from "./state.js";
 import { action } from "./actions.js";
 import { mobileConversationView } from "./navigation.js";
 
+const dwellMs = 1000;
 const sent = new Map();
 const held = new Set();
+let pending = null;
 
 export function unread(session) {
   return Boolean(session?.readState?.firstUnread);
@@ -14,9 +16,9 @@ function lookingAtChat() {
 }
 
 // Codex takes a conflicting mark only on a fresh action by the person, so a refused or undone mark waits for one.
-function markSeen(session, fresh = false) {
+function markSeen(session, fresh) {
   if (fresh) held.delete(session.id);
-  if (held.has(session.id) || !unread(session) || sent.get(session.id) === session.readState.revision) return;
+  if (!session.readState || held.has(session.id) || !(fresh || unread(session)) || sent.get(session.id) === session.readState.revision) return;
   sent.set(session.id, session.readState.revision);
   action("session-read", { revision: session.readState.revision }, crypto.randomUUID(), session.id).catch((error) => {
     if (error.status === 409) held.add(session.id);
@@ -24,7 +26,16 @@ function markSeen(session, fresh = false) {
 }
 
 export function readWhileLooking(fresh = false) {
-  if (app.selected && lookingAtChat()) markSeen(app.selected, fresh);
+  const id = app.selected?.id;
+  const opened = fresh || Boolean(pending?.fresh && pending.id === id);
+  if (pending) clearTimeout(pending.timer);
+  pending = null;
+  if (!id || !lookingAtChat()) return;
+  const timer = setTimeout(() => {
+    pending = null;
+    if (app.selected?.id === id && lookingAtChat()) markSeen(app.selected, opened);
+  }, dwellMs);
+  pending = { id, fresh: opened, timer };
 }
 
 export async function markUnread(session) {
