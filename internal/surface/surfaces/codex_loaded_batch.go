@@ -48,6 +48,7 @@ func (c *Codex) listThreadsByID(ctx context.Context, conn codexClient, ids []str
 	}
 	result, _ := response["result"].(map[string]any)
 	values, _ := result["data"].([]any)
+	attachCodexReadStates(result, values)
 	threads := make([]map[string]any, 0, len(values))
 	for _, value := range values {
 		if thread, _ := value.(map[string]any); thread != nil {

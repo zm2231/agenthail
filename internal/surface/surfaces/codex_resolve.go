@@ -76,6 +76,9 @@ func (c *Codex) readThreadObject(ctx context.Context, conn codexClient, id strin
 	if thread == nil {
 		return nil, fmt.Errorf("thread/read response missing thread")
 	}
+	if receipt, ok := result[codexReadStateKey]; ok {
+		thread[codexReadStateKey] = receipt
+	}
 	return thread, nil
 }
 

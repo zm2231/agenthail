@@ -267,6 +267,7 @@ type Session struct {
 	Subagent        *Subagent         `json:"subagent,omitempty"`
 	Subagents       *SubagentRollup   `json:"subagents,omitempty"`
 	Holders         []Holder          `json:"holders,omitempty"`
+	ReadState       *ReadState        `json:"readState,omitempty"`
 	HolderPID       int               `json:"-"`
 	// PIDIdentity names the process behind PID by its start, so a later
 	// process given the same pid is told apart from it. Empty when it could

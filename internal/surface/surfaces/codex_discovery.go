@@ -238,6 +238,7 @@ func (c *Codex) listPageCursor(ctx context.Context, conn codexClient, params map
 	}
 	result, _ := resp["result"].(map[string]any)
 	threads, _ := result["data"].([]any)
+	attachCodexReadStates(result, threads)
 	sessions := make([]surface.Session, 0, len(threads))
 	for _, value := range threads {
 		thread, _ := value.(map[string]any)

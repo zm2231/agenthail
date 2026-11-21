@@ -80,6 +80,7 @@ type Daemon struct {
 	loaded    map[string]bool
 	heldBy    map[string]bool
 	loadedCfg map[string]map[string]any
+	receipts  map[string]*receipt
 	conns     map[*connection]bool
 	called    chan struct{}
 	next      int
@@ -105,7 +106,7 @@ func (c *connection) write(message map[string]any) {
 
 // broadcastNotifications reach every connection, subscribed or not, as the
 // app-server sends them.
-var broadcastNotifications = map[string]bool{"thread/status/changed": true, "thread/goal/cleared": true}
+var broadcastNotifications = map[string]bool{"thread/status/changed": true, "thread/goal/cleared": true, "thread/readState/changed": true}
 
 func (c *connection) receives(notification map[string]any) bool {
 	method, _ := notification["method"].(string)
@@ -258,6 +259,10 @@ func (d *Daemon) serve(ws *websocket.Conn) {
 			response = map[string]any{"id": id, "error": result["error"]}
 		}
 		conn.write(response)
+		if !failed && method == "thread/readState/update" {
+			threadID, _ := params["threadId"].(string)
+			d.Notify("thread/readState/changed", map[string]any{"threadId": threadID, "readState": result["readState"]})
+		}
 		if !failed && method == "turn/start" {
 			threadID, _ := params["threadId"].(string)
 			d.Notify("thread/status/changed", map[string]any{"threadId": threadID, "status": map[string]any{"type": "active", "activeFlags": []any{}}})
@@ -576,11 +581,16 @@ func (d *Daemon) Loaded(threadID string) bool {
 
 func (d *Daemon) CompleteTurn(threadID, reply string) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
+	var changed map[string]any
 	if turn := d.activeTurn(threadID); turn != nil {
 		turn.Status = "completed"
 		turn.Assistant = reply
 		turn.CompletedAt = time.Now()
+		changed = d.markTurnUnreadLocked(threadID, turn.ID)
+	}
+	d.mu.Unlock()
+	if changed != nil {
+		d.Notify("thread/readState/changed", changed)
 	}
 }
 
@@ -687,7 +697,9 @@ func (d *Daemon) lifecycle(method string, params map[string]any, result map[stri
 			return rpcError("thread not found: " + threadID)
 		}
 		includeTurns, _ := params["includeTurns"].(bool)
-		return map[string]any{"thread": d.threadJSON(thread, includeTurns)}
+		return map[string]any{"thread": d.threadJSON(thread, includeTurns), "readState": d.receiptJSONLocked(threadID)}
+	case "thread/readState/update":
+		return d.updateReadStateLocked(threadID, params)
 	case "thread/loaded/list":
 		ids := make([]any, 0, len(d.loaded))
 		for _, id := range d.order {
@@ -705,12 +717,14 @@ func (d *Daemon) lifecycle(method string, params map[string]any, result map[stri
 			}
 		}
 		threads := make([]any, 0, len(d.order))
+		receipts := map[string]any{}
 		for index := len(d.order) - 1; index >= 0; index-- {
 			if id := d.order[index]; !filtered || wanted[id] {
 				threads = append(threads, d.threadJSON(d.threads[id], false))
+				receipts[id] = d.receiptJSONLocked(id)
 			}
 		}
-		return map[string]any{"data": threads}
+		return map[string]any{"data": threads, "readStates": receipts}
 	case "thread/turns/list":
 		thread := d.threads[threadID]
 		if thread == nil {
