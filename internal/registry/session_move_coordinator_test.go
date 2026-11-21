@@ -172,29 +172,42 @@ func TestAThirdHostListsOneLeadForAMovingConversation(t *testing.T) {
 }
 
 func TestAThirdHostKeepsALeadItHearsLeaveUntilItsNewHostListsIt(t *testing.T) {
-	const target = "h00dd44ee55ff"
+	const target, gadget = "h00dd44ee55ff", "repo:github.com/example/gadget"
 	at := time.UnixMilli(1_700_000_000_000).UTC()
-	r := openTestRegistry(t)
-	for id, name := range map[string]string{leadSource: "source", target: "target"} {
-		if _, err := r.AddHost(PairedHost{ID: id, Name: name, Endpoint: "https://" + name + ".example.ts.net:7412", Address: "100.64.0.9", Token: "ahd_" + name}); err != nil {
+	third := func(t *testing.T) *Registry {
+		t.Helper()
+		r := openTestRegistry(t)
+		for id, name := range map[string]string{leadSource: "source", target: "target"} {
+			if _, err := r.AddHost(PairedHost{ID: id, Name: name, Endpoint: "https://" + name + ".example.ts.net:7412", Address: "100.64.0.9", Token: "ahd_" + name}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := r.PutHostCoordinator(leadSource, CoordinatorEntry{ProjectID: leadProject, ProjectRoot: "/src/widget", Name: leadName, Surface: "claude", SessionID: leadSource + "::" + moveConversation, ChangedAt: at}); err != nil {
 			t.Fatal(err)
 		}
+		return r
 	}
-	if err := r.PutHostCoordinator(leadSource, CoordinatorEntry{ProjectID: leadProject, ProjectRoot: "/src/widget", Name: leadName, Surface: "claude", SessionID: leadSource + "::" + moveConversation, ChangedAt: at}); err != nil {
+
+	r := third(t)
+	if err := r.HandOverHostCoordinator(leadSource, target, leadProject); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.PutHostCoordinator(target, CoordinatorEntry{ProjectID: "repo:github.com/example/gadget", ProjectRoot: "/target/gadget", Name: leadName, Surface: "claude", SessionID: target + "::earlier", ChangedAt: at}); err != nil {
+	if leads, err := r.ProjectCoordinators(leadProject); err != nil || len(leads) != 1 || leads[0].HostID != target || leads[0].SessionID != target+"::"+moveConversation {
+		t.Fatalf("listed %+v err=%v, want the lead on its new host", leads, err)
+	}
+
+	r = third(t)
+	if err := r.PutHostCoordinator(target, CoordinatorEntry{ProjectID: gadget, ProjectRoot: "/target/gadget", Name: leadName, Surface: "claude", SessionID: target + "::gadget-lead", ChangedAt: at.Add(time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.HandOverHostCoordinator(leadSource, target, leadProject); err != nil {
 		t.Fatal(err)
 	}
-	leads, err := r.ProjectCoordinators(leadProject)
-	if err != nil || len(leads) != 1 || leads[0].HostID != target || leads[0].SessionID != target+"::"+moveConversation {
-		t.Fatalf("listed %+v err=%v, want the lead on its new host", leads, err)
+	if leads, err := r.ProjectCoordinators(leadProject); err != nil || len(leads) != 0 {
+		t.Fatalf("listed %+v err=%v over the new host's own @%s, want the old row dropped", leads, err, leadName)
 	}
-	if stale, err := r.ProjectCoordinators("repo:github.com/example/gadget"); err != nil || len(stale) != 0 {
-		t.Fatalf("the new host still leads another project as @%s: %+v err=%v", leadName, stale, err)
+	if own, err := r.ProjectCoordinators(gadget); err != nil || len(own) != 1 || own[0].SessionID != target+"::gadget-lead" {
+		t.Fatalf("the new host's own @%s is %+v err=%v, want it kept", leadName, own, err)
 	}
 }
 
