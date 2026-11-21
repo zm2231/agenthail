@@ -105,10 +105,30 @@ When the daemon stops it refuses new remote requests (503), cancels and drains t
 
 The notifier follows the inbox's change signal and also sweeps every 5 seconds.
 
+### Webhook events
+
+A client that is not connected when mail arrives can be woken by a webhook, following the draft MCP Events extension as ChatGPT implements it. The remote `/mcp` advertises `capabilities.events` in its `initialize` and `server/discover` results and serves `events/list`, `events/subscribe` and `events/unsubscribe`. These are not served on the local MCP endpoint.
+
+There is one event, `inbox.unread`. It takes no arguments, and its data is `{"unread": <count>}`: no sender and no text. Its cursor is always null (it is not replayable) and `truncated` is always false.
+
+- **Subscribe.** `delivery` is `{mode: "webhook", url, secret}`. The URL must be https, at most 2048 bytes, with no credentials or fragment, and a literal IP in it must be public. The secret is `whsec_` plus base64 of 24 to 64 bytes. The subscription id is `sub_` plus the first 16 bytes of the SHA-256 of the identity, URL, event name and arguments, so subscribing again updates the same subscription. An identity may hold 8; a ninth is refused with `-32602` and `data: {limit: "subscriptions", max: 8}`.
+- **Verification.** Before the first delivery to a URL, the daemon POSTs a signed `{"type": "verification", "challenge": ...}` and needs a 2xx whose JSON `challenge` matches, compared in constant time. A URL that passed stays verified for that identity for 24 hours. A failure is refused with `-32015` (CallbackEndpointError, the code ChatGPT's integration documents; the draft's `-32027` is provisional) and `data.reason`: `connection_refused`, `timeout`, `tls_error`, `http_4xx`, `http_5xx`, `challenge_failed` or `blocked_address`.
+- **Lifetime.** With `ttlMs` omitted a subscription lasts 7 days; `ttlMs: null` grants no expiry and returns `refreshBefore: null`; a given `ttlMs` is honored with a 5 minute floor. Subscribing again re-grants it. A new secret replaces the old one, and the old one also signs for 10 minutes.
+- **Unsubscribe.** It takes `name`, `arguments` and `delivery.url`, and returns `{}` whether or not the subscription existed.
+
+An event is sent when the identity's newest unread message is newer than the last one its subscription was told of. At most one event per subscription is in flight; mail that arrives meanwhile is told in one more event with the count at that time. Each POST carries `{eventId, name, timestamp, data, cursor}` and the Standard Webhooks headers `webhook-id` (the event id), `webhook-timestamp` and `webhook-signature` (`v1,` and the base64 HMAC-SHA256 of `id.timestamp.body` keyed with the decoded secret), plus `X-MCP-Subscription-Id`.
+
+A 2xx acknowledges an event. Network errors, 408, 425, 429 and 5xx are retried after waits of about 15 seconds, then 1, 4 and 10 minutes (with 20% jitter, and later if the endpoint sends `Retry-After`), keeping the event id and signing each attempt afresh. A 410 deletes the subscription. A redirect, 413 or any other 4xx drops that event without retrying. Once three events in a row fail, the subscription is suspended; it then gets one trial delivery every 6 hours, and a 2xx, or subscribing again, resumes it. After a restart, an event that was mid-retry is sent again as a new event with the current count.
+
+Outbound requests go through a dialer whose control function ([`code.dny.dev/ssrf`](https://github.com/daenney/ssrf)) refuses any address outside public unicast, checked against the IP actually connected after resolution, so a name that resolves to a private address is refused. There is no proxy, redirects are not followed, TLS 1.2 is the minimum, each request has 10 seconds, at most 4 run at once, and at most 64 KiB of a response is read.
+
+Subscriptions are rows of `mcp_event_subscriptions` (schema 120). The secret is stored as given, since signing needs it, in the registry that only its owner can read; it is never returned, logged or recorded. A subscription belongs to the token it was made with. It is deleted when the identity's remote access is turned off or the identity is removed (a cascade), when its token or binding changes, or when the Access team or audience changes (triggers). Every attempt rereads the row joined to the identity's current token hash, and subscribing writes only if the token and epoch it was verified with are still current. History records each subscribe, refusal, unsubscribe, delivery, failure, suspension and 410 as `mcp-event`, with the URL cut to scheme, host and path.
+
 Cloudflare's side (the Access application, its service token, the tunnel and DNS) is set up in Cloudflare; the daemon only checks what arrives.
 
 ## Known gaps
 
 - The Mac and iPhone apps and the web dashboard do not show identities or their inboxes. Messages from one show its name like any agent's.
 - `agenthail inbox` reads the local registry, so it runs on the identity's own host. Off that host, use the remote MCP.
-- `notifications/message` reaches only a client that sets a logging level, and MCP logging is deprecated in the 2026-07-28 protocol revision; `resources/updated` reaches only a subscriber. A client that does neither learns of mail with `agenthail_wait`.
+- `notifications/message` reaches only a client that sets a logging level, and MCP logging is deprecated in the 2026-07-28 protocol revision; `resources/updated` reaches only a subscriber. A client that does neither learns of mail with `agenthail_wait` or a webhook event.
+- Webhook events are not replayable, and the draft's poll and push delivery modes and its `gap` and `terminated` envelopes are not served.
