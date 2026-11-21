@@ -48,3 +48,20 @@ func TestACodexListingReportsTheDesktopItRanWithoutOnlyToItsOwnPass(t *testing.T
 		t.Fatalf("a listing with Desktop out of scope reported %q", otherGap.Without())
 	}
 }
+
+func TestASendToADesktopThreadWhileDesktopsAppServerIsStoppedWaitsForIt(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	bridge := startDesktopBridge(t, func(string) string {
+		return `{"error":{"code":"app_server_down","message":"Codex Desktop app-server stopped: exited"}}`
+	})
+	session := &surface.Session{ID: "desktop-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Source: "vscode", Transport: codexTransportDesktop}
+	_, err := inDaemon(NewCodex(bridge.URL)).Send(context.Background(), session, "for Desktop")
+	if !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryOutcomeUnknown(err) {
+		t.Fatalf("err=%v unavailable=%t unknown=%t, want unavailable", err, surface.IsDeliveryUnavailable(err), surface.IsDeliveryOutcomeUnknown(err))
+	}
+	for _, method := range bridge.Methods() {
+		if method == "turn/start" {
+			t.Fatalf("a stopped app-server was sent %s", method)
+		}
+	}
+}
