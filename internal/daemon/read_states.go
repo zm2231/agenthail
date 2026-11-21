@@ -18,8 +18,8 @@ func listedReadStates(sessions []surface.Session, view catalogViewState) map[str
 	return states
 }
 
-func (d *Daemon) recordReadStates(states map[string]surface.ReadState, observedAt time.Time) {
-	if err := d.Registry.RecordCodexReadStates(states, observedAt); err != nil {
+func (d *Daemon) recordReadStates(states map[string]surface.ReadState, listedAt time.Time) {
+	if err := d.Registry.RecordListedCodexReadStates(states, listedAt); err != nil {
 		d.log.Printf("catalog read states: %s", err)
 	}
 }

@@ -94,4 +94,13 @@ context.readWhileLooking(true);
 dwell();
 assert.deepEqual(sent.at(-1), { name: "session-read", sessionID: "s1", revision: "rev-5" });
 
+context.app.selected = row("s3", "rev-1");
+context.readWhileLooking(true);
+const opened = timers.length;
+context.app.selected = row("s3", "rev-1");
+context.readWhileLooking();
+assert.ok(timers.length === opened && timers[opened - 1], "a render during the second keeps the deadline set at the open");
+dwell();
+assert.deepEqual(sent.at(-1), { name: "session-read", sessionID: "s3", revision: "rev-1" });
+
 console.log("dashboard read state ok");

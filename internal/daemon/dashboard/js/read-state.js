@@ -25,12 +25,15 @@ function markSeen(session, fresh) {
   });
 }
 
+// The second counts from the open or refocus; a render while it runs keeps its deadline.
 export function readWhileLooking(fresh = false) {
   const id = app.selected?.id;
+  const looking = Boolean(id) && lookingAtChat();
+  if (looking && !fresh && pending?.id === id) return;
   const opened = fresh || Boolean(pending?.fresh && pending.id === id);
   if (pending) clearTimeout(pending.timer);
   pending = null;
-  if (!id || !lookingAtChat()) return;
+  if (!looking) return;
   const timer = setTimeout(() => {
     pending = null;
     if (app.selected?.id === id && lookingAtChat()) markSeen(app.selected, opened);

@@ -21,7 +21,8 @@ Each catalog pass reads receipts from `thread/list` (its `readStates` map) and
 `thread/read`. A `thread/readState/changed` notification on the managed
 app-server starts a pass at once. A mark made in Codex Desktop reaches rows on
 the next pass, within 30 seconds. Receipts are stored in `codex_read_states`
-(schema 121).
+(schema 123). A pass never overwrites a receipt stored after its listing began,
+such as a mark the person made while it ran.
 
 ## Marking
 

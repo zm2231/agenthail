@@ -423,6 +423,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 		complete := true
 		var sessions []surface.Session
 		var err error
+		listedAt := time.Now()
 		if lister, ok := adapter.(surface.CatalogLister); ok {
 			sessions, complete, err = lister.CatalogList(operationCtx)
 		} else {
@@ -497,7 +498,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 				}
 			})
 		}
-		d.recordReadStates(listedReads, observedAt)
+		d.recordReadStates(listedReads, listedAt)
 		d.forgetCatalogLive(adapter.Name(), seen)
 		d.followLiveSessions(adapter.Name(), sessions, openSessions, complete)
 		var recordErr error
