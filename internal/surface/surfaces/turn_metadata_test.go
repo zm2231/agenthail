@@ -2,7 +2,6 @@ package surfaces
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"reflect"
 	"slices"
@@ -11,27 +10,12 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 	"github.com/zm2231/agenthail/internal/surface/transcript"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func count(n int64) *int64 { return &n }
-
-func turnJSON(t *testing.T, turn *surface.TurnMetadata) string {
-	t.Helper()
-	encoded, err := json.Marshal(turn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(encoded)
-}
-
-func wantTurn(t *testing.T, label string, got, want *surface.TurnMetadata) {
-	t.Helper()
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("%s turn:\n got %s\nwant %s", label, turnJSON(t, got), turnJSON(t, want))
-	}
-}
 
 const codexTurnRecords = `{"timestamp":"2026-10-19T10:00:00Z","type":"session_meta","payload":{"id":"thread"}}
 {"timestamp":"2026-10-19T10:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}
@@ -68,8 +52,8 @@ func TestCodexTranscriptReportsEachTurnsModelUsageAndDuration(t *testing.T) {
 	if err != nil || len(read.Exchanges) != 2 {
 		t.Fatalf("read=%+v err=%v", read, err)
 	}
-	wantTurn(t, "completed", read.Exchanges[0].Turn, codexCompletedTurn)
-	wantTurn(t, "aborted", read.Exchanges[1].Turn, codexAbortedTurn)
+	surfacetest.WantTurn(t, "completed", read.Exchanges[0].Turn, codexCompletedTurn)
+	surfacetest.WantTurn(t, "aborted", read.Exchanges[1].Turn, codexAbortedTurn)
 }
 
 func TestCodexStreamResumedMidTurnCountsTheWholeTurn(t *testing.T) {
@@ -96,8 +80,8 @@ func TestCodexStreamResumedMidTurnCountsTheWholeTurn(t *testing.T) {
 			if len(turns) != 2 {
 				t.Fatalf("done turns=%d", len(turns))
 			}
-			wantTurn(t, "completed", turns[0], codexCompletedTurn)
-			wantTurn(t, "aborted", turns[1], codexAbortedTurn)
+			surfacetest.WantTurn(t, "completed", turns[0], codexCompletedTurn)
+			surfacetest.WantTurn(t, "aborted", turns[1], codexAbortedTurn)
 		})
 	}
 }
@@ -120,7 +104,7 @@ func TestCodexTurnWhoseStartIsOutOfReachHasNoUsage(t *testing.T) {
 	if err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
-	wantTurn(t, "joined midway", first, &surface.TurnMetadata{V: 1, State: "completed", DurationMs: count(4200), Unavailable: []string{"model", "usage", "contextTokens", "compactions"}})
+	surfacetest.WantTurn(t, "joined midway", first, &surface.TurnMetadata{V: 1, State: "completed", DurationMs: count(4200), Unavailable: []string{"model", "usage", "contextTokens", "compactions"}})
 }
 
 const claudeTurnHead = `{"type":"permission-mode","permissionMode":"default","sessionId":"session"}
@@ -161,8 +145,8 @@ func TestClaudeTranscriptReportsEachTurnsModelUsageAndDuration(t *testing.T) {
 		if err != nil || len(read.Exchanges) != 2 {
 			t.Fatalf("read=%+v err=%v", read, err)
 		}
-		wantTurn(t, "completed", read.Exchanges[0].Turn, claudeCompletedTurn)
-		wantTurn(t, notice, read.Exchanges[1].Turn, claudeInterruptedTurn)
+		surfacetest.WantTurn(t, "completed", read.Exchanges[0].Turn, claudeCompletedTurn)
+		surfacetest.WantTurn(t, notice, read.Exchanges[1].Turn, claudeInterruptedTurn)
 	}
 }
 
@@ -179,8 +163,8 @@ func TestClaudeStreamResumedMidTurnCountsTheWholeTurn(t *testing.T) {
 	if !errors.Is(err, surface.ErrStreamWindow) || len(turns) != 2 {
 		t.Fatalf("err=%v turns=%v", err, turns)
 	}
-	wantTurn(t, "completed", turns["u1"], claudeCompletedTurn)
-	wantTurn(t, "interrupted", turns["u2"], claudeInterruptedTurn)
+	surfacetest.WantTurn(t, "completed", turns["u1"], claudeCompletedTurn)
+	surfacetest.WantTurn(t, "interrupted", turns["u2"], claudeInterruptedTurn)
 }
 
 func TestATurnStillInProgressIsRunningAndOneWithoutAnEndIsUnknownUntilTheNextStarts(t *testing.T) {
@@ -189,7 +173,7 @@ func TestATurnStillInProgressIsRunningAndOneWithoutAnEndIsUnknownUntilTheNextSta
 	if err != nil || len(read.Exchanges) != 1 {
 		t.Fatalf("read=%+v err=%v", read, err)
 	}
-	wantTurn(t, "in progress", read.Exchanges[0].Turn, &surface.TurnMetadata{V: 1, State: "running", Unavailable: []string{"model", "durationMs", "usage", "contextTokens", "compactions"}})
+	surfacetest.WantTurn(t, "in progress", read.Exchanges[0].Turn, &surface.TurnMetadata{V: 1, State: "running", Unavailable: []string{"model", "durationMs", "usage", "contextTokens", "compactions"}})
 
 	path = timelineFixture(t, `{"timestamp":"2026-09-07T12:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"hi"}}
 {"timestamp":"2026-09-07T12:01:00Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}}
@@ -200,9 +184,9 @@ func TestATurnStillInProgressIsRunningAndOneWithoutAnEndIsUnknownUntilTheNextSta
 		t.Fatalf("read=%+v err=%v", read, err)
 	}
 	unknown := &surface.TurnMetadata{V: 1, State: "unknown", Unavailable: []string{"state", "model", "durationMs", "usage", "contextTokens", "compactions"}}
-	wantTurn(t, "superseded", read.Exchanges[0].Turn, unknown)
-	wantTurn(t, "idle tail", read.Exchanges[1].Turn, unknown)
-	if strings.Contains(turnJSON(t, unknown), "inputTokens") {
+	surfacetest.WantTurn(t, "superseded", read.Exchanges[0].Turn, unknown)
+	surfacetest.WantTurn(t, "idle tail", read.Exchanges[1].Turn, unknown)
+	if strings.Contains(surfacetest.TurnJSON(t, unknown), "inputTokens") {
 		t.Fatal("unavailable usage must not read as zero tokens")
 	}
 
@@ -216,7 +200,7 @@ func TestATurnStillInProgressIsRunningAndOneWithoutAnEndIsUnknownUntilTheNextSta
 	if err != nil || len(read.Exchanges) != 1 {
 		t.Fatalf("read=%+v err=%v", read, err)
 	}
-	wantTurn(t, "turn without an end before a silent turn", read.Exchanges[0].Turn, &surface.TurnMetadata{V: 1, State: "interrupted", Usage: &surface.TurnUsage{}, Unavailable: []string{"model", "durationMs", "usage.reasoningTokens", "contextTokens"}})
+	surfacetest.WantTurn(t, "turn without an end before a silent turn", read.Exchanges[0].Turn, &surface.TurnMetadata{V: 1, State: "interrupted", Usage: &surface.TurnUsage{}, Unavailable: []string{"model", "durationMs", "usage.reasoningTokens", "contextTokens"}})
 }
 
 func TestManagedCodexTurnsCarryWhatTheirRolloutRecorded(t *testing.T) {
@@ -248,9 +232,9 @@ func TestManagedCodexTurnsCarryWhatTheirRolloutRecorded(t *testing.T) {
 	if err != nil || read.Source != "rpc" || len(read.Exchanges) != 3 {
 		t.Fatalf("read=%+v err=%v", read, err)
 	}
-	wantTurn(t, "completed", read.Exchanges[0].Turn, codexCompletedTurn)
-	wantTurn(t, "aborted", read.Exchanges[1].Turn, codexAbortedTurn)
-	wantTurn(t, "app server only", read.Exchanges[2].Turn, &surface.TurnMetadata{V: 1, State: "failed", Unavailable: []string{"model", "durationMs", "usage", "contextTokens", "compactions"}})
+	surfacetest.WantTurn(t, "completed", read.Exchanges[0].Turn, codexCompletedTurn)
+	surfacetest.WantTurn(t, "aborted", read.Exchanges[1].Turn, codexAbortedTurn)
+	surfacetest.WantTurn(t, "app server only", read.Exchanges[2].Turn, &surface.TurnMetadata{V: 1, State: "failed", Unavailable: []string{"model", "durationMs", "usage", "contextTokens", "compactions"}})
 
 	startManagedCodex(t, managedThreadReads(managedTurn("turn-1", "completed", agentMessage("final", "final_answer", "built"))))
 	var done *surface.TurnMetadata
@@ -262,7 +246,7 @@ func TestManagedCodexTurnsCarryWhatTheirRolloutRecorded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTurn(t, "streamed", done, codexCompletedTurn)
+	surfacetest.WantTurn(t, "streamed", done, codexCompletedTurn)
 }
 
 // streamedClaudeTurns streams rest after head until the last turn ends, and
@@ -295,7 +279,7 @@ func TestClaudeCompactionsBetweenTurnsBelongToTheNextTurnWhereverAReaderJoins(t 
 	if len(turns) != 1 {
 		t.Fatalf("turns=%v", turns)
 	}
-	wantTurn(t, "after the idle compaction", turns["u2"], claudeInterruptedTurn)
+	surfacetest.WantTurn(t, "after the idle compaction", turns["u2"], claudeInterruptedTurn)
 }
 
 func TestClaudeCompactionInATurnJoinedMidwayIsNotTheNextTurns(t *testing.T) {
@@ -303,7 +287,7 @@ func TestClaudeCompactionInATurnJoinedMidwayIsNotTheNextTurns(t *testing.T) {
 	transcript.TurnScanLimit = 1
 	t.Cleanup(func() { transcript.TurnScanLimit = limit })
 	turns := streamedClaudeTurns(t, claudeTurnHead, claudeTurnTail, "u2")
-	wantTurn(t, "after a turn joined midway", turns["u2"], claudeInterruptedTurn)
+	surfacetest.WantTurn(t, "after a turn joined midway", turns["u2"], claudeInterruptedTurn)
 }
 
 func TestCodexCompactionInATurnJoinedMidwayIsNotTheNextTurns(t *testing.T) {
@@ -325,7 +309,7 @@ func TestCodexCompactionInATurnJoinedMidwayIsNotTheNextTurns(t *testing.T) {
 	if err != nil && !errors.Is(err, context.Canceled) || len(turns) != 2 {
 		t.Fatalf("turns=%d err=%v", len(turns), err)
 	}
-	wantTurn(t, "after a turn joined midway", turns[1], codexAbortedTurn)
+	surfacetest.WantTurn(t, "after a turn joined midway", turns[1], codexAbortedTurn)
 }
 
 func streamedCodexTurns(t *testing.T, head, rest string, want int) []*surface.TurnMetadata {
@@ -350,10 +334,10 @@ func streamedCodexTurns(t *testing.T, head, rest string, want int) []*surface.Tu
 
 func TestAReaderJoiningAfterACompactionReportsTheTurnsWholeCompactionHistory(t *testing.T) {
 	claudeSplit := strings.Index(claudeTurnTail, `{"type":"assistant","uuid":"a5"`)
-	wantTurn(t, "claude", streamedClaudeTurns(t, claudeTurnHead+claudeTurnTail[:claudeSplit], claudeTurnTail[claudeSplit:], "u2")["u2"], claudeInterruptedTurn)
+	surfacetest.WantTurn(t, "claude", streamedClaudeTurns(t, claudeTurnHead+claudeTurnTail[:claudeSplit], claudeTurnTail[claudeSplit:], "u2")["u2"], claudeInterruptedTurn)
 	records := codexTurnRecords + codexTurnRest
 	codexSplit := strings.Index(records, `{"timestamp":"2026-10-19T10:01:02Z","type":"event_msg","payload":{"type":"token_count"`)
-	wantTurn(t, "codex", streamedCodexTurns(t, records[:codexSplit], records[codexSplit:], 1)[0], codexAbortedTurn)
+	surfacetest.WantTurn(t, "codex", streamedCodexTurns(t, records[:codexSplit], records[codexSplit:], 1)[0], codexAbortedTurn)
 }
 
 func TestATurnWhoseEarlierHistoryIsOutOfReachDoesNotClaimItHadNoCompactions(t *testing.T) {
@@ -365,7 +349,7 @@ func TestATurnWhoseEarlierHistoryIsOutOfReachDoesNotClaimItHadNoCompactions(t *t
 	t.Cleanup(func() { transcript.TurnScanLimit = limit })
 	turn := streamedCodexTurns(t, records[:split], records[split:], 1)[0]
 	if turn.Compactions != nil || !slices.Contains(turn.Unavailable, "compactions") {
-		t.Fatalf("codex turn=%s, want its compactions unavailable", turnJSON(t, turn))
+		t.Fatalf("codex turn=%s, want its compactions unavailable", surfacetest.TurnJSON(t, turn))
 	}
 
 	claude := claudeTurnHead + claudeTurnTail
@@ -374,7 +358,7 @@ func TestATurnWhoseEarlierHistoryIsOutOfReachDoesNotClaimItHadNoCompactions(t *t
 	transcript.TurnScanLimit = int64(split - start + 1)
 	turn = streamedClaudeTurns(t, claude[:split], claude[split:], "u2")["u2"]
 	if turn == nil || turn.Compactions != nil || !slices.Contains(turn.Unavailable, "compactions") {
-		t.Fatalf("claude turn=%s, want its compactions unavailable", turnJSON(t, turn))
+		t.Fatalf("claude turn=%s, want its compactions unavailable", surfacetest.TurnJSON(t, turn))
 	}
 }
 
@@ -407,7 +391,7 @@ func TestCodexCompactionsBackToBackLeaveTheSizeBetweenThemUnknown(t *testing.T) 
 			turn := read.Exchanges[0].Turn
 			want := []surface.TurnCompaction{{Trigger: "unknown", PreTokens: count(500)}, {Trigger: "unknown", PreTokens: between.pre, PostTokens: count(40)}}
 			if !reflect.DeepEqual(turn.Compactions, want) || *turn.ContextTokens != 40 {
-				t.Fatalf("turn=%s", turnJSON(t, turn))
+				t.Fatalf("turn=%s", surfacetest.TurnJSON(t, turn))
 			}
 		})
 	}

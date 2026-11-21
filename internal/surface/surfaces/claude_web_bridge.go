@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/browsercookie"
 	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
@@ -36,7 +37,7 @@ func toCse(bridgeID string) string {
 	return "cse_" + s
 }
 
-var claudeSendRequest = sidecarRequestWithCookies
+var claudeSendRequest = browsercookie.SidecarRequest
 
 // errRemoteControlGone is a Remote Control session claude.ai no longer knows.
 // Claude can keep naming it in its session record after the server drops it.
@@ -136,3 +137,5 @@ func (c *Claude) postContent(ctx context.Context, sess *surface.Session, content
 	}
 	return &surface.SendResult{UUID: uuid, Accepted: true}, nil
 }
+
+const chromeUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"

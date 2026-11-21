@@ -1,10 +1,11 @@
-package surfaces
+package notionsurface
 
 import (
 	"context"
 	"encoding/json"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface/browsercookie"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 	"strings"
 	"testing"
 	"time"
@@ -69,7 +70,7 @@ func TestNotionReadSessionUsesBoundedProviderMessageIDs(t *testing.T) {
 		t.Fatalf("provider request=%v", requested)
 	}
 	for _, exchange := range read.Exchanges {
-		wantTurn(t, "notion", exchange.Turn, &surface.TurnMetadata{V: 1, State: "unknown", Unavailable: []string{"state", "model", "durationMs", "usage", "contextTokens", "compactions"}})
+		surfacetest.WantTurn(t, "notion", exchange.Turn, &surface.TurnMetadata{V: 1, State: "unknown", Unavailable: []string{"state", "model", "durationMs", "usage", "contextTokens", "compactions"}})
 	}
 
 	older, err := notion.ReadSession(context.Background(), &surface.Session{ID: "thread-1", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb}, surface.SessionReadRequest{Limit: 2, Before: read.NextBefore})

@@ -16,10 +16,10 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/delivery"
-	"github.com/zm2231/agenthail/internal/installdir"
 	"github.com/zm2231/agenthail/internal/procstart"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -447,7 +447,7 @@ func TestTheClaudeHostInheritsAConfiguredPrimaryConfigDirAndDropsABlankOne(t *te
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_HOST", script)
-	installNode(t, "#!/bin/sh\n")
+	surfacetest.InstallNode(t, "#!/bin/sh\n")
 	configured := filepath.Join(fixture.Home, "claude-main")
 	for value, want := range map[string][]string{"": nil, "  ": nil, configured: {"CLAUDE_CONFIG_DIR=" + configured}} {
 		t.Setenv("CLAUDE_CONFIG_DIR", value)
@@ -568,24 +568,6 @@ func TestAStreamWhoseSourceSawNoTranscriptReadsOneCreatedBeforeItStartedFromTheS
 	}
 }
 
-// installNode stands script in for the Node runtime of an install at a
-// temporary root, which the daemon runs in place of any node on PATH.
-func installNode(t *testing.T, script string) string {
-	t.Helper()
-	root := t.TempDir()
-	node := installdir.Node(root)
-	if err := os.MkdirAll(filepath.Dir(node), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(node, []byte(script), 0700); err != nil {
-		t.Fatal(err)
-	}
-	previous := surface.InstallRoot
-	surface.InstallRoot = func() (string, error) { return root, nil }
-	t.Cleanup(func() { surface.InstallRoot = previous })
-	return node
-}
-
 func TestTheClaudeHostRunsTheNodeAgenthailShips(t *testing.T) {
 	fixture := claudetest.New(t)
 	script := filepath.Join(fixture.Home, "host.mjs")
@@ -598,7 +580,7 @@ func TestTheClaudeHostRunsTheNodeAgenthailShips(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", onPath+string(os.PathListSeparator)+os.Getenv("PATH"))
-	node := installNode(t, "#!/bin/sh\n")
+	node := surfacetest.InstallNode(t, "#!/bin/sh\n")
 	launch, err := ClaudeHostLaunch(fixture.Home, "test")
 	if err != nil || launch.Node != node {
 		t.Fatalf("node=%q err=%v, want the shipped %q", launch.Node, err, node)

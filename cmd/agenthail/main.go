@@ -12,6 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/cli"
 	"github.com/zm2231/agenthail/internal/codexconfig"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface/notionsurface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
@@ -69,7 +70,7 @@ func main() {
 		{Name: "agent", Surface: agentinbox.New(app.OpenedRegistry)},
 	}
 	if helpers {
-		app.Surfaces = append(app.Surfaces, cli.SurfaceEntry{Name: "notion", Surface: surfaces.NewNotion(
+		app.Surfaces = append(app.Surfaces, cli.SurfaceEntry{Name: "notion", Surface: notionsurface.NewNotion(
 			app,
 			envOr("AGENTHAIL_NOTION_SPACE", ""),
 			envOr("AGENTHAIL_NOTION_USER", ""),
