@@ -64,7 +64,11 @@ func (s *Store) RecordContext(projectKey string, p ContextPayload, now time.Time
 	defer release()
 	board.mu.RLock()
 	known := board.utterances[p.UtteranceID] != nil
+	_, retracted := board.retracted[p.UtteranceID]
 	board.mu.RUnlock()
+	if retracted {
+		return false, nil
+	}
 	if !known {
 		return false, refuse("%s has no message %s", projectKey, p.UtteranceID)
 	}
@@ -176,8 +180,8 @@ func (s *Store) LocalWithoutContextSince(projectKey string, notBefore time.Time)
 		notBefore = whole.Add(time.Second)
 	}
 	rows, err := s.read.Query(`SELECT u.ref, u.seq, json_extract(u.payload,'$.ts'), json_extract(u.payload,'$.targetId') FROM ledger_events u WHERE u.project_key=? AND u.type=? AND u.actor_host_id=COALESCE((SELECT host_id FROM host_identity WHERE id=1),'')
-		AND json_extract(u.payload,'$.ts')>=? AND NOT EXISTS (SELECT 1 FROM ledger_events c WHERE c.project_key=u.project_key AND c.ref=? || u.ref) ORDER BY u.seq`,
-		projectKey, string(EventUtterance), notBefore.UTC().Format(time.RFC3339), contextRef(""))
+		AND json_extract(u.payload,'$.ts')>=? AND NOT EXISTS (SELECT 1 FROM ledger_events c WHERE c.project_key=u.project_key AND c.ref!='' AND c.ref IN (? || u.ref, ? || u.ref)) ORDER BY u.seq`,
+		projectKey, string(EventUtterance), notBefore.UTC().Format(time.RFC3339), contextRef(""), reclassifiedRef(""))
 	if err != nil {
 		return nil, err
 	}
