@@ -42,7 +42,12 @@ type remoteMCP struct {
 	mu       sync.Mutex
 	sessions map[*mcp.ServerSession]*remotePushSession
 	stopped  atomic.Bool
-	wake     chan struct{}
+	// admitMu orders admitting a request against stopping, so every admitted one is drained.
+	admitMu      sync.Mutex
+	admitted     sync.WaitGroup
+	stopCtx      context.Context
+	stopRequests context.CancelFunc
+	wake         chan struct{}
 	// beforeNotice runs between a pass's last epoch check and its sends, and
 	// afterEpoch between verify's epoch read and its token check, for tests.
 	beforeNotice func()
@@ -52,6 +57,7 @@ type remoteMCP struct {
 func (d *Daemon) remoteMCP() *remoteMCP {
 	d.remoteOnce.Do(func() {
 		m := &remoteMCP{d: d, sessions: map[*mcp.ServerSession]*remotePushSession{}, wake: make(chan struct{}, 1)}
+		m.stopCtx, m.stopRequests = context.WithCancel(context.Background())
 		m.server = mcp.NewServer(&mcp.Implementation{Name: "agenthail", Version: d.build.Version}, &mcp.ServerOptions{
 			SupportedProtocolVersions: mcpProtocolVersions,
 			SubscribeHandler:          m.subscribe,
@@ -64,11 +70,19 @@ func (d *Daemon) remoteMCP() *remoteMCP {
 		stream := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return m.server }, &mcp.StreamableHTTPOptions{EventStore: mcp.NewMemoryEventStore(nil), SessionTimeout: cmp.Or(d.remoteIdle, remoteSessionIdle)})
 		bearer := auth.RequireBearerToken(m.verify, &auth.RequireBearerTokenOptions{})
 		m.handler = bearer(http.NewCrossOriginProtection().Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			m.admitMu.Lock()
 			if m.stopped.Load() {
+				m.admitMu.Unlock()
 				http.Error(w, "the daemon is stopping", http.StatusServiceUnavailable)
 				return
 			}
-			stream.ServeHTTP(w, r)
+			m.admitted.Add(1)
+			m.admitMu.Unlock()
+			defer m.admitted.Done()
+			ctx, cancel := context.WithCancel(r.Context())
+			defer cancel()
+			defer context.AfterFunc(m.stopCtx, cancel)()
+			stream.ServeHTTP(w, r.WithContext(ctx))
 		})))
 		d.remote = m
 	})

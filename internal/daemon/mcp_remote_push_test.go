@@ -407,3 +407,37 @@ func TestStoppingWithALongWaitInFlightIsPromptAndRefusesNewSessions(t *testing.T
 		t.Fatal("a remote session outlived the stop")
 	}
 }
+
+func TestARetiringSessionHoldsBackNoOtherSessionsNotices(t *testing.T) {
+	f := newRemoteFixture(t, "")
+	m := f.d.remoteMCP()
+	headers := map[string]string{"Authorization": "Bearer " + f.token}
+	retiring := f.listen(t, headers)
+	live := f.listen(t, headers)
+	m.mu.Lock()
+	var held *remotePushSession
+	var notifiedBefore int64
+	var retellsBefore uint64
+	for session, state := range m.sessions {
+		if session.ID() == retiring.session.ID() {
+			state.retiring = true
+			held, notifiedBefore, retellsBefore = state, state.notified, state.retells
+		}
+	}
+	m.mu.Unlock()
+	if held == nil {
+		t.Fatal("the first listener was never bound")
+	}
+	f.deliver(t, "for the live one")
+	m.notify(t.Context())
+	live.expect(t, "the live session", 1, "for the live one")
+	if err := retiring.session.Subscribe(t.Context(), &mcp.SubscribeParams{URI: "agenthail://inbox/scout"}); err == nil {
+		t.Fatal("a retiring session was bound again")
+	}
+	m.mu.Lock()
+	notified, retells := held.notified, held.retells
+	m.mu.Unlock()
+	if notified != notifiedBefore || retells != retellsBefore {
+		t.Fatalf("a retiring session was told or retold: notified=%d retells=%d", notified, retells)
+	}
+}

@@ -28,6 +28,8 @@ type remotePushSession struct {
 	// Requests run under ctx, so retiring a session ends its waits and Close is not held by them.
 	ctx    context.Context
 	cancel context.CancelFunc
+	// retiring sessions stay tracked until the SDK ends them, so they are neither bound again nor told.
+	retiring bool
 }
 
 func remoteInboxURI(name string) string { return remoteInboxURIStart + name }
@@ -56,8 +58,10 @@ func (m *remoteMCP) track(next mcp.MethodHandler) mcp.MethodHandler {
 		result, err := next(requestCtx, method, req)
 		if err == nil && (method == "resources/subscribe" || method == "logging/setLevel") {
 			m.mu.Lock()
-			state.notified = 0
-			state.retells++
+			if !state.retiring {
+				state.notified = 0
+				state.retells++
+			}
 			m.mu.Unlock()
 			m.poke()
 		}
@@ -73,6 +77,9 @@ func (m *remoteMCP) bind(session *mcp.ServerSession, identity, name string, epoc
 		return nil, errRemoteStale
 	}
 	if state, ok := m.sessions[session]; ok {
+		if state.retiring {
+			return nil, errRemoteStale
+		}
 		return state, nil
 	}
 	current, err := m.d.Registry.RemoteEpoch()
@@ -100,7 +107,17 @@ func (m *remoteMCP) unbindWhenDone(session *mcp.ServerSession, state *remotePush
 	m.mu.Unlock()
 }
 
-func retire(sessions map[*mcp.ServerSession]*remotePushSession) bool {
+// retireLocked starts retiring a bound session; m.mu must be held.
+func (m *remoteMCP) retireLocked(session *mcp.ServerSession, state *remotePushSession) {
+	if state.retiring {
+		return
+	}
+	state.retiring = true
+	state.cancel()
+	go session.Close()
+}
+
+func retire(sessions map[*mcp.ServerSession]*remotePushSession) {
 	var wg sync.WaitGroup
 	for session, state := range sessions {
 		if state != nil {
@@ -116,9 +133,7 @@ func retire(sessions map[*mcp.ServerSession]*remotePushSession) bool {
 	go func() { wg.Wait(); close(closed) }()
 	select {
 	case <-closed:
-		return true
 	case <-time.After(remoteRetireWait):
-		return false
 	}
 }
 
@@ -186,23 +201,30 @@ func (d *Daemon) runRemoteInboxNotices(ctx context.Context) {
 	}
 }
 
+// Draining admitted requests first means no session is created after the snapshot.
 func (m *remoteMCP) closeAll() {
+	m.admitMu.Lock()
 	m.stopped.Store(true)
-	m.mu.Lock()
-	bound := m.sessions
-	m.sessions = map[*mcp.ServerSession]*remotePushSession{}
-	m.mu.Unlock()
-	retire(bound)
-	for deadline := time.Now().Add(remoteRetireWait); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-		rest := map[*mcp.ServerSession]*remotePushSession{}
-		for session := range m.server.Sessions() {
-			rest[session] = nil
-		}
-		if len(rest) == 0 {
-			return
-		}
-		retire(rest)
+	m.admitMu.Unlock()
+	m.stopRequests()
+	drained := make(chan struct{})
+	go func() { m.admitted.Wait(); close(drained) }()
+	select {
+	case <-drained:
+	case <-time.After(remoteRetireWait):
 	}
+	m.mu.Lock()
+	all := map[*mcp.ServerSession]*remotePushSession{}
+	for session, state := range m.sessions {
+		all[session] = state
+	}
+	m.mu.Unlock()
+	for session := range m.server.Sessions() {
+		if _, bound := all[session]; !bound {
+			all[session] = nil
+		}
+	}
+	retire(all)
 }
 
 func (m *remoteMCP) notify(ctx context.Context) {
@@ -229,23 +251,17 @@ func (m *remoteMCP) notify(ctx context.Context) {
 		retells uint64
 	}
 	var notices []due
-	stale := map[*mcp.ServerSession]*remotePushSession{}
 	m.mu.Lock()
 	for session, state := range m.sessions {
 		switch newest := latest[state.identity]; {
+		case state.retiring:
 		case state.epoch < epoch:
-			stale[session] = state
-			delete(m.sessions, session)
+			m.retireLocked(session, state)
 		case newest > state.notified:
 			notices = append(notices, due{session: session, name: state.name, newest: newest, retells: state.retells})
 		}
 	}
 	m.mu.Unlock()
-	if len(stale) > 0 && !retire(stale) {
-		// A stale session still open may still be subscribed, and ResourceUpdated reaches every subscriber.
-		m.poke()
-		return
-	}
 	if len(notices) == 0 {
 		return
 	}
@@ -277,7 +293,7 @@ func (m *remoteMCP) notify(ctx context.Context) {
 			continue
 		}
 		m.mu.Lock()
-		if state, ok := m.sessions[notice.session]; ok && state.retells == notice.retells && notice.newest > state.notified {
+		if state, ok := m.sessions[notice.session]; ok && !state.retiring && state.retells == notice.retells && notice.newest > state.notified {
 			state.notified = notice.newest
 		}
 		m.mu.Unlock()
