@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os/exec"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testnode"
+	"github.com/zm2231/agenthail/internal/voice"
 )
 
 func TestCodexDesktopBridgeFollowsTheAppServerConnection(t *testing.T) {
@@ -175,6 +177,39 @@ func TestCodexSendRefusedByAStoppedDesktopAppServerDidNotStart(t *testing.T) {
 			_, err := inDaemon(NewCodex(bridge.URL)).Send(context.Background(), &session, "hello")
 			if err == nil || surface.IsDeliveryUnavailable(err) != test.unavailable || surface.IsDeliveryOutcomeUnknown(err) == test.unavailable {
 				t.Fatalf("err=%v unavailable=%t unknown=%t", err, surface.IsDeliveryUnavailable(err), surface.IsDeliveryOutcomeUnknown(err))
+			}
+		})
+	}
+}
+
+func TestADesktopVoiceCallIsRejectedOnlyByTheAppServer(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, test := range []struct {
+		name     string
+		start    string
+		rejected bool
+	}{
+		{name: "app-server refused", start: `{"error":{"code":-32000,"message":"401 Unauthorized"}}`, rejected: true},
+		{name: "app-server down before sending", start: `{"error":{"code":"app_server_down","message":"Codex Desktop app-server stopped: exited"}}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			bridge := startDesktopBridge(t, func(method string) string {
+				switch method {
+				case "thread/read":
+					return `{"result":{"thread":{"id":"operator","source":"vscode","status":{"type":"idle"},"canAcceptDirectInput":true}}}`
+				case "thread/loaded/list":
+					return `{"result":{"data":["operator"]}}`
+				case "thread/realtime/start":
+					return test.start
+				}
+				return ""
+			})
+			v := &CodexVoice{Codex: inDaemon(NewCodex(bridge.URL))}
+			session := &surface.Session{ID: "operator", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Source: "vscode", Transport: codexTransportDesktop}
+			err := v.Request(context.Background(), session, "thread/realtime/start", voice.StartParams(session.ID, "call-a", "v=0 offer", false, ""))
+			var rejected *voice.RejectedError
+			if errors.As(err, &rejected) != test.rejected || surface.IsDeliveryUnavailable(err) == test.rejected {
+				t.Fatalf("err=%v rejected=%t unavailable=%t", err, errors.As(err, &rejected), surface.IsDeliveryUnavailable(err))
 			}
 		})
 	}
