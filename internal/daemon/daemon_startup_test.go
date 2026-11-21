@@ -48,7 +48,7 @@ func TestTheDaemonLogsWhatAnUpgradeSpent(t *testing.T) {
 	output := logged.String()
 	for _, want := range []string{
 		"registry open took 12ms",
-		fmt.Sprintf("registry migrated from schema %d to %d: backup ", schema-1, schema),
+		fmt.Sprintf("registry migrated from schema %d to schema %d: backup ", schema-1, schema),
 		", migration ",
 		", compress ",
 		"after launch",

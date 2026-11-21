@@ -19,13 +19,13 @@ const (
 	sqliteUserVersionAt    = 60
 )
 
-func compressedBackupPath(path string, target int) string {
-	return migrationBackupPath(path, target) + compressedBackupSuffix
+func compressedBackupPath(path, key string) string {
+	return migrationBackupPath(path, key) + compressedBackupSuffix
 }
 
-// existingMigrationBackup is the copy for a schema, or "" when there is none.
-func existingMigrationBackup(path string, target int) string {
-	for _, file := range []string{compressedBackupPath(path, target), migrationBackupPath(path, target)} {
+// existingMigrationBackup is the copy for a key, or "" when there is none.
+func existingMigrationBackup(path, key string) string {
+	for _, file := range []string{compressedBackupPath(path, key), migrationBackupPath(path, key)} {
 		if _, err := os.Stat(file); err == nil {
 			return file
 		}
@@ -35,8 +35,8 @@ func existingMigrationBackup(path string, target int) string {
 
 func compressMigrationBackups(path string) error {
 	var failures []error
-	for _, target := range migrationBackups(path) {
-		failures = append(failures, compressBackup(migrationBackupPath(path, target)))
+	for _, key := range migrationBackups(path) {
+		failures = append(failures, compressBackup(migrationBackupPath(path, key)))
 	}
 	return errors.Join(failures...)
 }

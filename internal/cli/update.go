@@ -42,9 +42,9 @@ type updateDeps struct {
 	runInstaller    func(string, []string) error
 	copyTree        func(string, string) error
 	wrapperDirs     func() []string
-	registrySchema  func() int
+	registryLevel   func() registry.Level
 	holdDaemonLock  func() (func(), error)
-	restoreRegistry func(int) (registry.RestoredRegistry, error)
+	restoreRegistry func(string) (registry.RestoredRegistry, error)
 }
 
 type releaseAsset struct {
@@ -82,7 +82,7 @@ func defaultUpdateDeps() *updateDeps {
 		runInstaller:    defaultRunInstaller,
 		copyTree:        defaultCopyTree,
 		wrapperDirs:     defaultWrapperDirs,
-		registrySchema:  registry.DiskSchema,
+		registryLevel:   registry.DiskLevel,
 		holdDaemonLock:  daemon.HoldDaemonLock,
 		restoreRegistry: registry.RestoreMigrationBackup,
 		run: func(name string, args ...string) error {

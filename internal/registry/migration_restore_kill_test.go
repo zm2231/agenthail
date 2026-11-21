@@ -33,7 +33,7 @@ func TestRestoreProcessThatIsKilled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = restoreMigrationBackup(os.Getenv(killPathEnv), target)
+	_, err = restoreMigrationBackup(os.Getenv(killPathEnv), schemaBackupKey(target))
 	t.Fatalf("the restore finished without reaching %q: %v", step, err)
 }
 
@@ -79,8 +79,8 @@ func TestKillingARestoreAtAnyStepLeavesAnOpenableRegistry(t *testing.T) {
 				}
 			}
 			target := schemaVersion + 1
-			registryAtSchemaCopy(t, live, migrationBackupPath(path, target), schemaVersion)
-			backup, err := connect(migrationBackupPath(path, target))
+			registryAtSchemaCopy(t, live, migrationBackupPath(path, schemaBackupKey(target)), schemaVersion)
+			backup, err := connect(migrationBackupPath(path, schemaBackupKey(target)))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -148,11 +148,11 @@ func TestKillingARestoreAtAnyStepLeavesAnOpenableRegistry(t *testing.T) {
 				kept.Close()
 			}
 
-			retried, err := restoreMigrationBackup(path, target)
+			retried, err := restoreMigrationBackup(path, schemaBackupKey(target))
 			if err != nil {
 				t.Fatalf("the restore could not be run again: %v", err)
 			}
-			if retried.Schema != schemaVersion {
+			if retried.Level.Schema != schemaVersion {
 				t.Fatalf("retried=%+v", retried)
 			}
 		})

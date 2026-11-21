@@ -9,7 +9,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
-const registryUsage = "usage: agenthail registry restore [<N>]"
+const registryUsage = "usage: agenthail registry restore [<copy>]"
 
 // This never touches a.registry(): the build running it can be older than the registry it replaces.
 func (a *App) cmdRegistry(args []string) error {
@@ -19,8 +19,12 @@ func (a *App) cmdRegistry(args []string) error {
 	if len(args) == 1 {
 		return printMigrationBackups()
 	}
-	target, err := strconv.Atoi(args[1])
-	if err != nil || target < 1 {
+	key := args[1]
+	// Older builds' refusals and release notes give the bare schema number.
+	if n, err := strconv.Atoi(key); err == nil && n > 0 {
+		key = "v" + strconv.Itoa(n)
+	}
+	if !registry.ValidBackupKey(key) {
 		return errors.New(registryUsage)
 	}
 	release, err := daemon.HoldDaemonLock()
@@ -28,9 +32,9 @@ func (a *App) cmdRegistry(args []string) error {
 		return fmt.Errorf("the daemon is running or starting; run 'agenthail daemon stop' first: %w", err)
 	}
 	defer release()
-	restored, err := registry.RestoreMigrationBackup(target)
+	restored, err := registry.RestoreMigrationBackup(key)
 	if restored.From != "" {
-		fmt.Printf("Restored the registry to schema %d from %s\n", restored.Schema, restored.From)
+		fmt.Printf("Restored the registry to %s from %s\n", restored.Level, restored.From)
 		if restored.Aside != "" {
 			fmt.Printf("The registry it replaced is kept as %s\n", restored.Aside)
 		}
@@ -46,7 +50,7 @@ func printMigrationBackups() error {
 		return nil
 	}
 	for _, backup := range backups {
-		fmt.Printf("%d\tschema %d\t%s\t%s\n", backup.Target, backup.Schema, humanSize(backup.Size), backup.Path)
+		fmt.Printf("%s\t%s\t%s\n", backup.Key, humanSize(backup.Size), backup.Path)
 	}
 	return nil
 }

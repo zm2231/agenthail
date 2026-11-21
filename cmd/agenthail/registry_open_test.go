@@ -131,12 +131,12 @@ func TestTheBuildThatRefusesANewerRegistryCanRestoreItsCopy(t *testing.T) {
 	path, future := newerRegistryWithCompressedCopy(t, home)
 
 	refusal, err := runAgenthail(t, home, "whoami")
-	restore := "agenthail registry restore " + strconv.Itoa(future)
+	restore := "agenthail registry restore v" + strconv.Itoa(future)
 	if err == nil || !strings.Contains(refusal, restore) {
 		t.Fatalf("err=%v output=%q, want the refusal to offer %q", err, refusal, restore)
 	}
 	listing, err := runAgenthail(t, home, "registry", "restore")
-	if err != nil || !strings.Contains(listing, "schema "+strconv.Itoa(registry.SchemaVersion())) {
+	if err != nil || !strings.Contains(listing, "v"+strconv.Itoa(future)+"\t") {
 		t.Fatalf("listing against a newer registry: err=%v output=%q", err, listing)
 	}
 
@@ -177,7 +177,7 @@ func TestARestoreRefusesARunningDaemon(t *testing.T) {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		t.Fatal(err)
 	}
-	output, err := runAgenthail(t, home, "registry", "restore", strconv.Itoa(future))
+	output, err := runAgenthail(t, home, "registry", "restore", "v"+strconv.Itoa(future))
 	if err == nil || !strings.Contains(output, "agenthail daemon stop") {
 		t.Fatalf("err=%v output=%q", err, output)
 	}
@@ -253,5 +253,20 @@ func TestACommandRefusesARegistryANewerAgenthailMigrated(t *testing.T) {
 	}
 	if !bytes.Equal(before, after) {
 		t.Fatal("refusing the registry wrote to it")
+	}
+}
+
+func TestABareSchemaNumberRestoresTheCopyFromBeforeThatSchema(t *testing.T) {
+	home := t.TempDir()
+	_, future := newerRegistryWithCompressedCopy(t, home)
+	if output, err := runAgenthail(t, home, "registry", "restore", "0"); err == nil || !strings.Contains(output, "usage: agenthail registry restore") {
+		t.Fatalf("restore 0: err=%v output=%q, want the usage error", err, output)
+	}
+	output, err := runAgenthail(t, home, "registry", "restore", "0"+strconv.Itoa(future))
+	if err != nil {
+		t.Fatalf("restore 0%d: %v\n%s", future, err, output)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".agenthail", "registry-v"+strconv.Itoa(future)+".db")); err != nil {
+		t.Fatalf("the newer registry was not set aside: %v\n%s", err, output)
 	}
 }

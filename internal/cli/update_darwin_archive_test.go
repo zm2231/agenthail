@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zm2231/agenthail/internal/registry"
 )
 
 func darwinInstall(t *testing.T) string {
@@ -161,7 +163,7 @@ func newDarwinUpdateFixture(t *testing.T) *darwinUpdateFixture {
 			return os.WriteFile(filepath.Join(f.dataDir, "agenthail"), []byte(versionScript("v0.2.134")), 0755)
 		},
 	}}
-	f.registry = &updateRegistry{schema: 96, backup: 96, binary: filepath.Join(f.dataDir, "agenthail")}
+	f.registry = &updateRegistry{schema: 96, backup: registry.Level{Schema: 96}, binary: filepath.Join(f.dataDir, "agenthail")}
 	f.registry.wire(f.app.update)
 	return f
 }

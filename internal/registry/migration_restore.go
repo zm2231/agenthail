@@ -15,23 +15,16 @@ import (
 
 // MigrationBackup is a pre-migration copy kept beside the registry.
 type MigrationBackup struct {
-	Target int
-	Schema int
-	Path   string
-	Size   int64
+	Key  string
+	Path string
+	Size int64
 }
 
 // RestoredRegistry says what a restore put in place and where the previous registry went.
 type RestoredRegistry struct {
-	Schema int
-	From   string
-	Aside  string
-}
-
-// DiskSchema is the schema of the registry on disk, or -1 when it cannot be
-// read. It never migrates, so it reads a registry newer than this build.
-func DiskSchema() int {
-	return schemaOf(defaultPath())
+	Level Level
+	From  string
+	Aside string
 }
 
 func ListMigrationBackups() []MigrationBackup {
@@ -40,8 +33,8 @@ func ListMigrationBackups() []MigrationBackup {
 
 func listMigrationBackups(path string) []MigrationBackup {
 	var backups []MigrationBackup
-	for _, target := range migrationBackups(path) {
-		file := existingMigrationBackup(path, target)
+	for _, key := range migrationBackups(path) {
+		file := existingMigrationBackup(path, key)
 		if file == "" {
 			continue
 		}
@@ -49,23 +42,26 @@ func listMigrationBackups(path string) []MigrationBackup {
 		if err != nil {
 			continue
 		}
-		backups = append(backups, MigrationBackup{Target: target, Schema: backupSchema(file), Path: file, Size: info.Size()})
+		backups = append(backups, MigrationBackup{Key: key, Path: file, Size: info.Size()})
 	}
 	return backups
 }
 
 // RestoreMigrationBackup never opens the current registry through Open, because it must work on a registry newer than this build.
-func RestoreMigrationBackup(target int) (RestoredRegistry, error) {
-	return restoreMigrationBackup(defaultPath(), target)
+func RestoreMigrationBackup(key string) (RestoredRegistry, error) {
+	return restoreMigrationBackup(defaultPath(), key)
 }
 
-func restoreMigrationBackup(path string, target int) (RestoredRegistry, error) {
+func restoreMigrationBackup(path, key string) (RestoredRegistry, error) {
 	if err := refuseSudoHomeFor(path); err != nil {
 		return RestoredRegistry{}, err
 	}
-	file := existingMigrationBackup(path, target)
+	file := ""
+	if ValidBackupKey(key) {
+		file = existingMigrationBackup(path, key)
+	}
 	if file == "" {
-		return RestoredRegistry{}, fmt.Errorf("no copy was kept from before schema %d", target)
+		return RestoredRegistry{}, fmt.Errorf("no copy was kept from before %s", key)
 	}
 	unlock, err := holdRestoreLock(path)
 	if err != nil {
@@ -91,7 +87,8 @@ func swapInMigrationBackup(path, file string) (RestoredRegistry, error) {
 	if err := writeRestoredCopy(file, temporary); err != nil {
 		return RestoredRegistry{}, fmt.Errorf("restore %s: %w", file, err)
 	}
-	if err := verifyRestoredCopy(temporary, schema); err != nil {
+	level, err := verifyRestoredCopy(temporary, schema)
+	if err != nil {
 		return RestoredRegistry{}, fmt.Errorf("restore %s: %w", file, err)
 	}
 	restoreStep("verified")
@@ -108,7 +105,7 @@ func swapInMigrationBackup(path, file string) (RestoredRegistry, error) {
 		return RestoredRegistry{}, errors.Join(fmt.Errorf("restore %s: %w", file, err), reattachSidecars(path, aside, sidecars))
 	}
 	restoreStep("swapped")
-	restored := RestoredRegistry{Schema: schema, From: file, Aside: aside}
+	restored := RestoredRegistry{Level: level, From: file, Aside: aside}
 	if err := syncDirectory(filepath.Dir(path)); err != nil {
 		return restored, fmt.Errorf("the registry was restored from %s, but it may not survive a power loss until the disk recovers: %w", file, err)
 	}
@@ -144,27 +141,27 @@ func writeRestoredCopy(file, to string) error {
 	return destination.Close()
 }
 
-func verifyRestoredCopy(path string, schema int) error {
+func verifyRestoredCopy(path string, schema int) (Level, error) {
 	db, err := sql.Open("sqlite", path+"?mode=ro&_pragma=query_only(1)")
 	if err != nil {
-		return err
+		return Level{}, err
 	}
 	defer db.Close()
-	var version int
-	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
-		return err
+	level := levelOn(db)
+	if level.Schema != schema {
+		return Level{}, fmt.Errorf("the copy is schema %d, want %d", level.Schema, schema)
 	}
-	if version != schema {
-		return fmt.Errorf("the copy is schema %d, want %d", version, schema)
+	if unknown := without(level.Applied, knownMigrationNames()); len(unknown) > 0 {
+		return Level{}, fmt.Errorf("the copy has migrations this agenthail does not know (%s); install a newer agenthail", strings.Join(unknown, ", "))
 	}
 	var check string
 	if err := db.QueryRow(`PRAGMA quick_check(1)`).Scan(&check); err != nil {
-		return err
+		return Level{}, err
 	}
 	if check != "ok" {
-		return fmt.Errorf("the copy is damaged: %s", check)
+		return Level{}, fmt.Errorf("the copy is damaged: %s", check)
 	}
-	return nil
+	return level, nil
 }
 
 // A WAL with nothing in it leaves nothing to lose if a kill lands between unlinking it and the swap. Failing here changes nothing: the WAL is then linked aside with the rest.

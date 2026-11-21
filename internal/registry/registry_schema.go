@@ -5,6 +5,9 @@ import (
 )
 
 const schema = `
+CREATE TABLE IF NOT EXISTS schema_migrations (
+	name TEXT PRIMARY KEY, applied_at_ms INTEGER NOT NULL
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS sessions (
 	id TEXT PRIMARY KEY, surface TEXT NOT NULL, name TEXT NOT NULL DEFAULT '',
 	cwd TEXT NOT NULL DEFAULT '', pid INTEGER NOT NULL DEFAULT 0,

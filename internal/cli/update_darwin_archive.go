@@ -80,7 +80,7 @@ func installDarwinArchiveUpdate(deps *updateDeps, release *latestRelease, execut
 		env = []string{"AGENTHAIL_DATA_DIR=" + named, "AGENTHAIL_INSTALL_DIR=" + filepath.Dir(wrapper)}
 	}
 	running := deps.daemonExpected()
-	schema := deps.registrySchema()
+	level := deps.registryLevel()
 	restart := ""
 	if running {
 		restart = filepath.Join(dataDir, "agenthail")
@@ -97,7 +97,7 @@ func installDarwinArchiveUpdate(deps *updateDeps, release *latestRelease, execut
 		return nil
 	}
 	rollback := func(cause error) error {
-		return rollBackUpdate(deps, release.TagName, schema, restart, cause, swapBack)
+		return rollBackUpdate(deps, release.TagName, level, restart, cause, swapBack)
 	}
 	if err := deps.runInstaller(filepath.Join(next, "install.sh"), env); err != nil {
 		return rollback(fmt.Errorf("the release's installer: %w", err))

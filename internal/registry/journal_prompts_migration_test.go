@@ -23,7 +23,7 @@ func TestARealRegistryCopyKeepsEveryPromptThroughTheRoleMigration(t *testing.T) 
 	if r.migration == nil {
 		t.Fatal("the copy was already at the current schema")
 	}
-	t.Logf("migrated %d to %d in %v (backup %v)", r.migration.From, r.migration.To, r.migration.Migrate, r.migration.Backup)
+	t.Logf("migrated %s to %s in %v (backup %v)", r.migration.From, r.migration.To, r.migration.Migrate, r.migration.Backup)
 	var stored, parsed, mismatched int
 	if err := r.db.QueryRow(`SELECT
 		(SELECT count(*) FROM session_journal WHERE payload_role='user'),

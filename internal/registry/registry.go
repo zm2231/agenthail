@@ -57,7 +57,8 @@ func (r *Registry) Steers(busyDelivery string) bool {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 126
+	// Frozen: the schema now moves by named migrations, and every build from 126 down refuses 127.
+	schemaVersion   = 127
 	readConnections = 4
 	// Kept apart from the general readers so a background scan cannot hold up naming a caller.
 	callerConnections = 2
@@ -81,7 +82,7 @@ func (e *NewerSchemaError) Error() string {
 	if e.Backup == "" {
 		return refusal
 	}
-	return fmt.Sprintf("%s, or go back to the copy taken before that upgrade (schema %d; anything changed since is lost): agenthail daemon stop; agenthail registry restore %d; agenthail daemon start", refusal, e.BackupSchema, e.Found)
+	return fmt.Sprintf("%s, or go back to the copy taken before that upgrade (schema %d; anything changed since is lost): agenthail daemon stop; agenthail registry restore %s; agenthail daemon start", refusal, e.BackupSchema, schemaBackupKey(e.Found))
 }
 
 func defaultPath() string {
@@ -168,14 +169,10 @@ func OpenCurrent(path string) (*Registry, error) {
 	if err != nil {
 		return nil, err
 	}
-	var version int
-	if err := r.read.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+	level := levelOn(r.read)
+	if want := currentLevel(); !level.equal(want) {
 		r.Close()
-		return nil, err
-	}
-	if version != schemaVersion {
-		r.Close()
-		return nil, fmt.Errorf("registry is schema %d; this agenthail uses %d", version, schemaVersion)
+		return nil, fmt.Errorf("registry is at %s; this agenthail uses %s", level, want)
 	}
 	if err := r.prepare(); err != nil {
 		return nil, err
@@ -184,15 +181,15 @@ func OpenCurrent(path string) (*Registry, error) {
 }
 
 func (r *Registry) current() (bool, error) {
-	var version int
-	if err := r.read.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
-		return false, err
-	}
 	var mode string
 	if err := r.read.QueryRow(`PRAGMA journal_mode`).Scan(&mode); err != nil {
 		return false, err
 	}
-	return version == schemaVersion && mode == "wal", nil
+	level := levelOn(r.read)
+	if level.Schema < 0 {
+		return false, errors.New("read the registry's schema")
+	}
+	return mode == "wal" && level.equal(currentLevel()), nil
 }
 
 func connect(path string) (*Registry, error) {

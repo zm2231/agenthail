@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -25,24 +24,44 @@ const keptMigrationBackups = 2
 // registry: the installed agenthail would then refuse the schema it left.
 type DevUpgradeError struct {
 	Path   string
-	Found  int
-	Target int
+	Found  string
+	Target string
+	Key    string
 }
 
 func (e *DevUpgradeError) Error() string {
-	return fmt.Sprintf("this is a development build: it would migrate %s from schema %d to %d, which the installed agenthail then refuses. Run it with a scratch HOME, or set AGENTHAIL_ALLOW_DEV_MIGRATION=1 to migrate (a copy goes to %s first)", e.Path, e.Found, e.Target, migrationBackupPath(e.Path, e.Target))
+	return fmt.Sprintf("this is a development build: it would migrate %s from %s to %s, which the installed agenthail then refuses. Run it with a scratch HOME, or set AGENTHAIL_ALLOW_DEV_MIGRATION=1 to migrate (a copy goes to %s first)", e.Path, e.Found, e.Target, migrationBackupPath(e.Path, e.Key))
 }
 
-// migrationBackupPath is the copy of the registry at path taken before it
-// was migrated to schema target.
-func migrationBackupPath(path string, target int) string {
+// A copy is keyed by the upgrade it preceded: v<N> for a schema number, or the newest migration that upgrade applied.
+var backupKey = regexp.MustCompile(`^(?:v[0-9]+|[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9]+(?:-[a-z0-9]+)*)$`)
+
+func ValidBackupKey(key string) bool { return backupKey.MatchString(key) }
+
+func schemaBackupKey(version int) string { return "v" + strconv.Itoa(version) }
+
+// Named keys sort after every schema number, since the numbers stopped at the first named migration.
+func newerBackupKey(a, b string) bool {
+	aSchema, bSchema := strings.HasPrefix(a, "v"), strings.HasPrefix(b, "v")
+	if aSchema != bSchema {
+		return bSchema
+	}
+	if aSchema {
+		an, _ := strconv.Atoi(a[1:])
+		bn, _ := strconv.Atoi(b[1:])
+		return an > bn
+	}
+	return a > b
+}
+
+func migrationBackupPath(path, key string) string {
 	stem := strings.TrimSuffix(path, filepath.Ext(path))
-	return fmt.Sprintf("%s-before-v%d.db", stem, target)
+	return fmt.Sprintf("%s-before-%s.db", stem, key)
 }
 
 // MigrationTiming is what an open that upgraded the registry spent on it.
 type MigrationTiming struct {
-	From, To int
+	From, To string
 	Backup   time.Duration
 	Migrate  time.Duration
 	Compress time.Duration
@@ -51,8 +70,8 @@ type MigrationTiming struct {
 }
 
 // Every other open waits on the caller's write lock, so this copies pages rather than rebuilding with VACUUM.
-func (r *Registry) backUpBeforeMigration(found, target int) error {
-	final := migrationBackupPath(r.diskPath(), target)
+func (r *Registry) backUpBeforeMigration(found int, key string) error {
+	final := migrationBackupPath(r.diskPath(), key)
 	temporary := final + ".tmp"
 	removeCopy(temporary)
 	file, err := os.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
@@ -151,30 +170,42 @@ func schemaOf(path string) int {
 
 func pruneMigrationBackups(path string) {
 	backups := migrationBackups(path)
-	for _, target := range backups[min(len(backups), keptMigrationBackups):] {
-		plain := migrationBackupPath(path, target)
+	for _, key := range backups[min(len(backups), keptMigrationBackups):] {
+		plain := migrationBackupPath(path, key)
 		for _, file := range []string{plain, plain + compressedBackupSuffix, plain + compressedBackupSuffix + ".tmp"} {
 			_ = os.Remove(file)
 		}
 	}
 }
 
-// migrationBackups lists the schemas a pre-migration copy beside path was
-// taken for, newest first.
-func migrationBackups(path string) []int {
-	stem := strings.TrimSuffix(path, filepath.Ext(path))
-	pattern := regexp.MustCompile(`^` + regexp.QuoteMeta(filepath.Base(stem)) + `-before-v([0-9]+)\.db(?:\.zst)?$`)
+// migrationBackups lists the keys of the pre-migration copies beside path, newest first.
+func migrationBackups(path string) []string {
+	prefix := filepath.Base(strings.TrimSuffix(path, filepath.Ext(path))) + "-before-"
 	entries, _ := os.ReadDir(filepath.Dir(path))
-	var targets []int
+	var keys []string
 	for _, entry := range entries {
-		if match := pattern.FindStringSubmatch(entry.Name()); match != nil {
-			if target, err := strconv.Atoi(match[1]); err == nil {
-				targets = append(targets, target)
-			}
+		key, found := strings.CutPrefix(entry.Name(), prefix)
+		if !found {
+			continue
+		}
+		key, plain := strings.CutSuffix(key, ".db")
+		if !plain {
+			key, found = strings.CutSuffix(key, ".db"+compressedBackupSuffix)
+		}
+		if (plain || found) && ValidBackupKey(key) {
+			keys = append(keys, key)
 		}
 	}
-	sort.Sort(sort.Reverse(sort.IntSlice(targets)))
-	return slices.Compact(targets)
+	slices.SortFunc(keys, func(a, b string) int {
+		if a == b {
+			return 0
+		}
+		if newerBackupKey(a, b) {
+			return -1
+		}
+		return 1
+	})
+	return slices.Compact(keys)
 }
 
 // diskPath is the registry's file without connection parameters.
