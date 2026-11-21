@@ -15,6 +15,7 @@ struct KeptDelivery: LocalizedError {
 
 struct FailedSendAsk: Equatable {
     static let delete = "delete"
+    static let retry = "retry"
 
     let id: String
     var choices: [String] = []
@@ -24,5 +25,20 @@ struct FailedSendAsk: Equatable {
     func reading(_ requests: SessionRequests) -> FailedSendAsk {
         let options = requests.requests.first { $0.id == id }?.questions?.first?.options ?? []
         return FailedSendAsk(id: id, choices: options.map(\.id))
+    }
+}
+
+// How a failed send's ask was settled when Delete on it finds it no longer open.
+enum SettledAsk: Equatable {
+    // Deleted, dismissed or withdrawn: the message never reached the session.
+    case gone
+    // Retried from another control: the daemon is sending it again.
+    case resent
+
+    static let resentNotice = "That message was already sent again from another device, so it was not deleted."
+
+    static func of(_ error: Error) -> SettledAsk? {
+        guard case AgenthailAPIError.requestStale(_, let settled?) = error else { return nil }
+        return settled == FailedSendAsk.retry ? .resent : .gone
     }
 }

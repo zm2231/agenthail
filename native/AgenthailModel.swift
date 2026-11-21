@@ -113,6 +113,7 @@ final class AgenthailModel {
     @ObservationIgnored private var spoolTried: Set<UUID> = []
     @ObservationIgnored private var draftWatches: [ObjectIdentifier: AnyCancellable] = [:]
     @ObservationIgnored nonisolated(unsafe) private var terminationWatch: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var answerWatch: NSObjectProtocol?
     private(set) var fetchedSubagents = SubagentPageCache()
 
     private(set) var api: AgenthailAPI? {
@@ -308,6 +309,7 @@ final class AgenthailModel {
         refreshTask?.cancel()
         statusRefreshTask?.cancel()
         if let terminationWatch { NotificationCenter.default.removeObserver(terminationWatch) }
+        if let answerWatch { NotificationCenter.default.removeObserver(answerWatch) }
     }
 
     func pickHolder(_ holder: SessionHolder?, for sessionID: String) {
@@ -989,6 +991,10 @@ final class AgenthailModel {
     }
 
     private func connectOutbox() {
+        answerWatch = NotificationCenter.default.addObserver(forName: .agenthailRequestAnswered, object: nil, queue: .main) { [weak self] note in
+            guard let answered = note.object as? AnsweredRequest, answered.choice == FailedSendAsk.delete else { return }
+            MainActor.assumeIsolated { self?.outbox.deleted(ask: answered.requestID) }
+        }
         outbox.api = { [unowned self] in api }
         outbox.resolve = { [unowned self] in rekeys.resolve($0) }
         outbox.returnToComposer = { [unowned self] send, sessionID in restoreToComposer(send.text, attachments: send.attachments, sessionID: sessionID) }

@@ -155,6 +155,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     @ObservationIgnored private var composerStore: ComposerStore?
     @ObservationIgnored private var waitingComposerStore: ComposerStore?
     @ObservationIgnored private var protectedDataObserver: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var answerWatch: NSObjectProtocol?
     private static let composerFileKeptNotice = "Saved drafts couldn’t be loaded. Their file was kept on this iPhone."
     private static let composerUnreadNotice = "Saved drafts couldn’t be read. Until they can, drafts and unconfirmed messages are lost if Agenthail closes."
     @ObservationIgnored private var composerWaitAnnounced = false
@@ -298,6 +299,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         for credential in PairedCredential.all() { add(HostConnection(credential: credential, session: session, drops: drops)) }
         rebuild()
         connectSendQueue()
+        watchRequestAnswers()
         restoreComposerState()
 #if DEBUG
         for hostID in LiveTestHosts.loopbackHostIDs() { clearHost(hostID) }
@@ -316,10 +318,12 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         add(HostConnection(id: hostID, name: hostName, api: api))
         rebuild()
         connectSendQueue()
+        watchRequestAnswers()
         restoreComposerState()
     }
 
     deinit {
+        if let answerWatch { NotificationCenter.default.removeObserver(answerWatch) }
         sessionStreamTask?.cancel()
         sessionReload?.task.cancel()
         unsupportedRefreshTask?.cancel()
@@ -726,6 +730,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         do {
             let (api, route) = try resolve(sessionID)
             _ = try await api.respond(sessionID: route.sessionID, requestID: request.id, decision: decision)
+            refusedSendDeleted(ask: request.id, choice: decision.choices.first)
         } catch {
             failure = RequestAnswerFailure(error)
         }
@@ -1714,6 +1719,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
             let (api, route) = try resolve(sessionID)
             _ = try await api.respond(sessionID: route.sessionID, requestID: request.id, decision: decision)
             operationError = nil
+            refusedSendDeleted(ask: request.id, choice: decision.choices.first)
         } catch {
             failure = RequestAnswerFailure(error)
             if failure?.dropsCard == true { sessionRequests = sessionRequests?.removing(request.id) }
@@ -2066,8 +2072,16 @@ final class AgenthailIOSModel: HostConnectionDelegate {
                 _ = try await api.respond(sessionID: route.sessionID, requestID: ask.id, decision: .choose(FailedSendAsk.delete))
                 dropRefusedSend(refused, in: rekeys.resolve(sessionID))
             } catch {
-                operationError = AgenthailAPIError.userMessage(error)
-                readRefusedAsk(refused, in: rekeys.resolve(sessionID))
+                switch SettledAsk.of(error) {
+                case .gone:
+                    dropRefusedSend(refused, in: rekeys.resolve(sessionID))
+                case .resent:
+                    operationError = SettledAsk.resentNotice
+                    dropRefusedSend(refused, in: rekeys.resolve(sessionID))
+                case nil:
+                    operationError = AgenthailAPIError.userMessage(error)
+                    readRefusedAsk(refused, in: rekeys.resolve(sessionID))
+                }
             }
         }
     }
@@ -2080,6 +2094,20 @@ final class AgenthailIOSModel: HostConnectionDelegate {
             let session = rekeys.resolve(sessionID)
             guard let current = refusedSends[session], current.ask?.id == ask.id else { return }
             refusedSends[session]?.ask = requests.map(ask.reading) ?? FailedSendAsk(id: ask.id)
+        }
+    }
+
+    private func refusedSendDeleted(ask askID: String, choice: String?) {
+        guard choice == FailedSendAsk.delete else { return }
+        for (session, refused) in refusedSends where refused.ask?.id == askID {
+            dropRefusedSend(refused, in: session)
+        }
+    }
+
+    private func watchRequestAnswers() {
+        answerWatch = NotificationCenter.default.addObserver(forName: .agenthailRequestAnswered, object: nil, queue: .main) { [weak self] note in
+            guard let answered = note.object as? AnsweredRequest else { return }
+            MainActor.assumeIsolated { self?.refusedSendDeleted(ask: answered.requestID, choice: answered.choice) }
         }
     }
 

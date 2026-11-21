@@ -6,6 +6,7 @@ enum RequestAnswer {
         var failure: String
         do {
             _ = try await api().respond(sessionID: sessionID, requestID: requestID, decision: .choose(choice, message: text))
+            await MainActor.run { NotificationCenter.default.post(name: .agenthailRequestAnswered, object: AnsweredRequest(requestID: requestID, choice: choice)) }
             return
         } catch {
             let answer = RequestAnswerFailure(error)
@@ -21,4 +22,13 @@ enum RequestAnswer {
         content.threadIdentifier = sessionID
         try? await center.add(UNNotificationRequest(identifier: "answer-" + requestID, content: content, trigger: nil))
     }
+}
+
+struct AnsweredRequest: Sendable {
+    let requestID: String
+    let choice: String
+}
+
+extension Notification.Name {
+    static let agenthailRequestAnswered = Notification.Name("AgenthailRequestAnswered")
 }

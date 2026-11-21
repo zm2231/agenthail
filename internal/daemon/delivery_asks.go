@@ -124,6 +124,9 @@ func (d *Daemon) answerDelivery(ctx context.Context, ask registry.Ask, response 
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
 	}
 	if !claimed {
+		if current, found, err := d.Registry.Ask(ask.ID); err == nil && found {
+			return actionResult{}, settledRequest(current)
+		}
 		return actionResult{}, staleRequest()
 	}
 	defer d.publishAsk(ask.SessionID)

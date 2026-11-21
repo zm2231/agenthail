@@ -84,8 +84,25 @@ final class Outbox {
                 notice(nil)
                 discard(row, in: resolve(session))
             } catch {
-                notice(AgenthailAPIError.userMessage(error))
-                readAsk(ask, of: row.id, in: resolve(session))
+                switch SettledAsk.of(error) {
+                case .gone:
+                    notice(nil)
+                    discard(row, in: resolve(session))
+                case .resent:
+                    notice(SettledAsk.resentNotice)
+                    discard(row, in: resolve(session))
+                case nil:
+                    notice(AgenthailAPIError.userMessage(error))
+                    readAsk(ask, of: row.id, in: resolve(session))
+                }
+            }
+        }
+    }
+
+    func deleted(ask askID: String) {
+        for (session, sends) in rows {
+            for row in sends where row.ask?.id == askID {
+                discard(row, in: session)
             }
         }
     }
