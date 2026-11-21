@@ -1111,3 +1111,25 @@ func TestAReplyRelaySocketNamesItsSenderUntilAnHourAfterItRetiresAcrossRestarts(
 		names(socket, time.Now().Add(2*time.Hour), "")
 	}
 }
+
+func TestASenderFromAPairedHostTakesNoNameHere(t *testing.T) {
+	f := newPeerFixture(t)
+	if _, err := f.reg.AddHost(registry.PairedHost{ID: "h0123456789ab", Name: "katbox", Endpoint: "https://katbox.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_synthetic"}); err != nil {
+		t.Fatal(err)
+	}
+	remote := surface.Session{ID: "agent:h0123456789ab:kat", Surface: surface.KindAgent, RuntimeKind: surface.RuntimeAgentInbox, Name: "kat", Status: surface.StatusIdle}
+	if _, _, err := f.reg.ApplyHostCatalogRow("h0123456789ab", registry.HostCatalogRow{Session: remote, EntityID: "h0123456789ab::" + remote.ID, Projection: []byte(`{"id":"h0123456789ab::agent:h0123456789ab:kat","alias":"kat"}`), ObservedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	native := f.startNative()
+	if receipt, err := f.manager.Send(f.ctx, remote.ID, native.socket, "from katbox"); err != nil || receipt == nil || !receipt.Accepted {
+		t.Fatalf("send receipt=%+v err=%v", receipt, err)
+	}
+	message, _ := native.await(t, "user")["message"].(map[string]any)
+	if content, _ := message["content"].(string); !strings.Contains(content, `from-name="agenthail/agent: katbox::@kat"`) {
+		t.Fatalf("content=%q, want the sender named by its host", content)
+	}
+	if alias, err := f.reg.ReverseAlias(remote.ID); err != sql.ErrNoRows {
+		t.Fatalf("a paired host's session took the name @%s here (err=%v)", alias, err)
+	}
+}
