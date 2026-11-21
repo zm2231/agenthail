@@ -120,7 +120,7 @@ func scanQueueRow(scanner rowScanner, adapters surface.Adapters, now time.Time) 
 	}
 	target := &surface.Session{ID: row.SessionID, Surface: surface.SurfaceKind(targetSurface), Transport: transport, Bridge: bridge, RuntimeKind: surface.RuntimeKind(runtimeKind)}
 	row.HeldBy = otherHold
-	if adapter, err := adapters.For(target); err == nil && surface.EffectiveCapabilities(adapter, target).Steer {
+	if adapter, err := adapters.For(target); err == nil && surface.CanSteer(adapter, target) {
 		row.HeldBy = steerHold
 	}
 	row.Historical = queueRowIsHistorical(row, now)

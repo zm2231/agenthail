@@ -1323,6 +1323,23 @@ func CapabilitiesFor(adapter Surface, session *Session) Capabilities {
 	return adapter.Capabilities()
 }
 
+// SteerSource is implemented by an adapter that can tell whether it steers a
+// session without working out the session's other capabilities.
+type SteerSource interface {
+	Steers(session *Session) bool
+}
+
+// CanSteer is EffectiveCapabilities(adapter, session).Steer.
+func CanSteer(adapter Surface, session *Session) bool {
+	if IsReadOnlySession(session) {
+		return false
+	}
+	if source, ok := adapter.(SteerSource); ok {
+		return source.Steers(session)
+	}
+	return CapabilitiesFor(adapter, session).Steer
+}
+
 // EffectiveCapabilities is what may be done to the session: nothing when it is
 // read-only, otherwise what its adapter can do for it.
 func EffectiveCapabilities(adapter Surface, session *Session) SessionCapabilities {
