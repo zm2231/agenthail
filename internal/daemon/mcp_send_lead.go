@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 
+	"github.com/zm2231/agenthail/internal/agentroles"
+
 	"github.com/zm2231/agenthail/internal/broadcast"
-	"github.com/zm2231/agenthail/internal/dashconfig"
 )
 
 func (d *Daemon) mcpSendToLead(ctx context.Context, caller *mcpCaller, input mcpSendInput) (any, error) {
@@ -34,8 +35,8 @@ func (d *Daemon) mcpLeadScope(caller *mcpCaller, name, mode string) (broadcast.P
 		return broadcast.Project{}, "", scopeRefusal("project:"+project.ID, "down_only", "Control flows down only: send your coordinator a queued message.")
 	}
 	refused := scopeRefusal("project:"+project.ID, "different_project", "Another project's coordinator takes only a queued message from you.")
-	decision := d.agentPolicy().Decision("cross-project-steer")
-	if caller.extension != "" || decision == dashconfig.AgentAsk {
+	decision := caller.role.Decision("cross-project-steer")
+	if caller.extension != "" || decision == agentroles.Ask {
 		return broadcast.Project{}, "", refused
 	}
 	if lead, found := d.projectLeadSession(project.ID); found {
@@ -47,7 +48,7 @@ func (d *Daemon) mcpLeadScope(caller *mcpCaller, name, mode string) (broadcast.P
 			return broadcast.Project{}, "", refused
 		}
 	}
-	if decision == dashconfig.AgentNotify {
+	if decision == agentroles.Notify {
 		return project, "Sent now to the coordinator of " + project.DisplayName + ", another project", nil
 	}
 	return project, "", nil

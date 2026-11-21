@@ -26,6 +26,13 @@ type mcpCaller struct {
 	extension    string
 	// remote is how a remote identity got in: its Access binding, or "token only".
 	remote string
+	// role is nil for an extension, which no agent action is open to.
+	role *resolvedRole
+}
+
+func (c *mcpCaller) actAs(role resolvedRole) {
+	c.role = &role
+	c.capabilities = role.Capabilities()
 }
 
 func (c *mcpCaller) has(capability string) bool {
@@ -178,7 +185,8 @@ func (d *Daemon) sessionRunning(session *surface.Session) bool {
 
 // The CLI in a session's shell gets this same caller, so the two cannot disagree.
 func (d *Daemon) agentCaller(record registry.CallerRecord) (*mcpCaller, error) {
-	caller := &mcpCaller{session: record.Session, capabilities: sessionCapabilities(record.Roles), ceiling: record.Ceiling}
+	caller := &mcpCaller{session: record.Session, ceiling: record.Ceiling}
+	caller.actAs(d.callerRole(record.Roles, false))
 	if !record.Recorded {
 		caller.project, _ = d.sessionProject(record.Session)
 		return caller, nil

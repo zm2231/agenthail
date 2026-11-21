@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zm2231/agenthail/internal/agentroles"
 	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/projectresolve"
 )
@@ -12,7 +13,7 @@ import (
 func TestAnAgentsCLIStartsRacingForTheLastSlotStartOneSession(t *testing.T) {
 	f := newMCPCodexFixture(t)
 	spawner, _, root := f.startParent(t)
-	registerBusyChildren(t, f.registry, spawner, defaultAgentRunning-1)
+	registerBusyChildren(t, f.registry, spawner, agentroles.DefaultRunning-1)
 	results := make(chan scopeAnswer, 2)
 	for _, key := range []string{"r1", "r2"} {
 		go func() {

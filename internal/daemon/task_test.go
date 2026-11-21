@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/agentroles"
+
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -302,7 +304,7 @@ func TestIdleUnsettledTasksCountTowardTheChildrenLimit(t *testing.T) {
 	if running, err = f.r.RunningChildren(f.task.Parent); err != nil || len(running) != 0 {
 		t.Fatalf("a settled task frees it: running=%v err=%v", running, err)
 	}
-	for index := range defaultAgentRunning {
+	for index := range agentroles.DefaultRunning {
 		child := surface.Session{ID: fmt.Sprintf("child-%d", index), Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}
 		if err := f.r.RecordObservedSession(child); err != nil {
 			t.Fatal(err)

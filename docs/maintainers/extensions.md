@@ -476,7 +476,7 @@ working directory and the surface's own permission mode, so it asks only what
 the person's other sessions ask. Its first message is "Build or change an
 Agenthail extension in this folder. Read AGENTS.md first." followed by the
 person's text. The person keeps talking to it to iterate, and each of its turns
-is a change in the history that the person can undo. Run from inside a session, `build` names that session (`sessionId`) and the agent policy's `extension-build` decides it ([mcp.md](mcp.md#agent-policy)): by default the builder starts, still in the person's own mode, and the person is told.
+is a change in the history that the person can undo. Run from inside a session, `build` names that session (`sessionId`) and its role's `extension-build` decides it ([mcp.md](mcp.md#agent-roles)): by default the builder starts, still in the person's own mode, and the person is told.
 
 The daemon writes `AGENTS.md`, `CLAUDE.md` (`@AGENTS.md`) and `recipes/*.md`
 into the folder from copies built into the binary, when the daemon starts with

@@ -24,6 +24,7 @@ type mcpWhoamiView struct {
 	Host         map[string]string `json:"host"`
 	Project      *mcpProjectView   `json:"project"`
 	Coordinator  bool              `json:"coordinator"`
+	Role         *mcpRoleView      `json:"role,omitempty"`
 	Capabilities []string          `json:"capabilities"`
 	Ceiling      json.RawMessage   `json:"ceiling"`
 	Credential   map[string]string `json:"credential,omitempty"`
@@ -40,10 +41,24 @@ func (d *Daemon) mcpWhoami(_ context.Context, caller *mcpCaller, _ struct{}) (an
 		Host:         map[string]string{"id": host.ID, "name": host.Name},
 		Project:      projectView(caller.project),
 		Coordinator:  d.coordinates(caller),
+		Role:         roleView(caller.role),
 		Capabilities: caller.capabilities,
 		Ceiling:      caller.ceiling,
 		Credential:   credentialView(caller.credential),
 	}, nil
+}
+
+type mcpRoleView struct {
+	Name   string `json:"name"`
+	Reach  string `json:"reach"`
+	Source string `json:"source"`
+}
+
+func roleView(role *resolvedRole) *mcpRoleView {
+	if role == nil {
+		return nil
+	}
+	return &mcpRoleView{Name: role.Name, Reach: role.Reach, Source: role.Source}
 }
 
 // A caller the socket named by its process holds no credential.

@@ -213,7 +213,8 @@ func (m *remoteMCP) verify(ctx context.Context, token string, r *http.Request) (
 	return &auth.TokenInfo{UserID: remote.IdentityID, Expiration: time.Now().Add(remoteTokenLife), Extra: map[string]any{tokenInfoRemote: remote.Name, tokenInfoBinding: binding, tokenInfoEpoch: epoch, tokenInfoTokenHash: remote.TokenHash}}, nil
 }
 
-// An identity has the person's reach, as the CLI it sends with does.
+// An identity acts under the remote role, which by default has the person's
+// reach, as the CLI it sends with does.
 func (d *Daemon) remoteCaller(info *auth.TokenInfo) (*mcpCaller, error) {
 	if info == nil {
 		return nil, nil
@@ -230,11 +231,7 @@ func (d *Daemon) remoteCaller(info *auth.TokenInfo) (*mcpCaller, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, capability := range operatorCapabilities {
-		if !caller.has(capability) {
-			caller.capabilities = append(caller.capabilities, capability)
-		}
-	}
+	caller.actAs(d.callerRole(record.Roles, true))
 	caller.remote, _ = info.Extra[tokenInfoBinding].(string)
 	return caller, nil
 }

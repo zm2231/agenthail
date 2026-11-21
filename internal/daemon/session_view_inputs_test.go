@@ -42,6 +42,7 @@ var notSessionViewInputs = map[string]string{
 	"schema_migrations":    "the registry's own record of applied migrations; only an open reads it",
 	"session_codex_config": codexConfig, "trigger_runs": "only GET /api/v1/triggers reads trigger runs; a finished run reaches a session view as its delivery_history entry",
 	"peer_relay_sockets":      "only a Claude host's hold report reads which session a reply relay socket belongs to; the hold reaches a session view as its delivery intent",
+	"agent_roles":             "a role decides what an agent may do at each call and reaches the dashboard's agent settings; no session view shows it",
 	"project_settings":        "a project's settings reach the dashboard's project rows and the MCP socket, which reads them at each request; no session view shows them",
 	"project_tiles":           "the person's tile order reaches only the snapshot's tileOrder, which arranges project tiles; no session view shows it",
 	"host_held_actions":       "a held channel leg belongs to a paired host, not a session; it reaches a session view only as the host's deliveries",

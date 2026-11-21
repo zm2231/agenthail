@@ -9,9 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/agentroles"
+
 	"github.com/zm2231/agenthail/internal/broadcast"
 	"github.com/zm2231/agenthail/internal/daemonapi"
-	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 )
@@ -55,10 +56,10 @@ func (d *Daemon) personActionScope(ctx context.Context, caller *mcpCaller, actio
 		return "", nil
 	}
 	if d.leadActsOnOwn(ctx, caller, action.API, request) {
-		switch d.agentPolicy().Decision(agentPolicyActionOf(request)) {
-		case dashconfig.AgentAllow:
+		switch caller.role.Decision(agentActionOf(request)) {
+		case agentroles.Allow:
 			return "", nil
-		case dashconfig.AgentNotify:
+		case agentroles.Notify:
 			return d.agentNotices.hold(caller.session.ID, description, time.Now()), nil
 		}
 	}
@@ -66,17 +67,17 @@ func (d *Daemon) personActionScope(ctx context.Context, caller *mcpCaller, actio
 		Detail: map[string]any{"rule": "person_only", "approvable": true}}
 }
 
-func agentPolicyActionOf(request personActionRequest) string {
+func agentActionOf(request personActionRequest) string {
 	if request.Action == "project-setting" && request.Setting == registry.ProjectSettingLimitResume {
 		return registry.ProjectSettingLimitResume
 	}
 	return request.Action
 }
 
-// leadActsOnOwn reports whether a project's lead is acting on its own
-// project; only then does the person's agent policy decide.
+// leadActsOnOwn reports whether an agent with project reach is acting on its
+// own project; only then does its role decide.
 func (d *Daemon) leadActsOnOwn(ctx context.Context, caller *mcpCaller, api string, request personActionRequest) bool {
-	if !caller.has("control.project") || caller.project == nil || !d.mcpIsProjectLead(caller, caller.session.ID) {
+	if !caller.has("control.project") || caller.project == nil {
 		return false
 	}
 	if api != daemonapi.PersonActionAPI {

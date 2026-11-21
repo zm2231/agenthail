@@ -1,0 +1,248 @@
+package cli
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"os"
+	"slices"
+	"strconv"
+	"strings"
+	"text/tabwriter"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/agentroles"
+	"github.com/zm2231/agenthail/internal/daemonapi"
+
+	"github.com/zm2231/agenthail/internal/daemon"
+)
+
+const rolesUsage = `usage: agenthail roles [list] [--json] | show <role> [--json]
+       agenthail roles create <name> [<from-role>] | delete <role> | reset <role>
+       agenthail roles set <role> <action> allow|notify|ask|default
+       agenthail roles reach <role> descendants|project|all
+       agenthail roles limit <role> depth|running <n>
+       agenthail roles tools <role> all | +<tool> -<tool> ...`
+
+const rolesTimeout = 10 * time.Second
+
+func (a *App) cmdRoles(args []string) error {
+	positional := stripFlags(args)
+	asJSON := hasFlag(args, "--json")
+	if len(positional) == 0 || positional[0] == "list" && len(positional) == 1 {
+		return a.listRoles(asJSON)
+	}
+	if positional[0] == "show" && len(positional) == 2 {
+		return a.showRole(positional[1], asJSON)
+	}
+	if a.agentEnvironment() {
+		return errors.New("roles are the person's to change; an agent may read them with 'agenthail roles' and 'agenthail roles show <role>'")
+	}
+	view, err := a.fetchRoles()
+	if err != nil {
+		return err
+	}
+	verb, rest := positional[0], positional[1:]
+	if verb == "create" && (len(rest) == 1 || len(rest) == 2) {
+		from := "worker"
+		if len(rest) == 2 {
+			from = rest[1]
+		}
+		if _, found := roleNamed(view, rest[0]); found {
+			return fmt.Errorf("a role named %s already exists", rest[0])
+		}
+		source, found := roleNamed(view, from)
+		if !found {
+			return fmt.Errorf("no role named %s to copy", from)
+		}
+		role := source.Definition
+		role.Description = ""
+		return a.putRole(rest[0], role)
+	}
+	if (verb == "delete" || verb == "reset") && len(rest) == 1 {
+		role, found := roleNamed(view, rest[0])
+		switch {
+		case !found:
+			return fmt.Errorf("no role named %s", rest[0])
+		case verb == "delete" && role.BuiltIn:
+			return fmt.Errorf("%s is built in; 'agenthail roles reset %s' returns it to how Agenthail ships it", role.Name, role.Name)
+		case verb == "reset" && !role.BuiltIn:
+			return fmt.Errorf("%s is a role you made; 'agenthail roles delete %s' removes it", role.Name, role.Name)
+		}
+		return a.postRole(daemon.AgentRoleRequest{Op: "delete", Name: role.Name})
+	}
+	if len(rest) < 2 {
+		return errors.New(rolesUsage)
+	}
+	current, found := roleNamed(view, rest[0])
+	if !found {
+		return fmt.Errorf("no role named %s", rest[0])
+	}
+	role, err := editRole(current.Definition, verb, rest[1:], view.Tools)
+	if err != nil {
+		return err
+	}
+	return a.putRole(current.Name, role)
+}
+
+func editRole(role agentroles.Role, verb string, args []string, tools []string) (agentroles.Role, error) {
+	switch {
+	case verb == "set" && len(args) == 2:
+		actions := map[string]string{}
+		for name, decision := range role.Actions {
+			actions[name] = decision
+		}
+		if args[1] == "default" {
+			delete(actions, args[0])
+		} else {
+			actions[args[0]] = args[1]
+		}
+		role.Actions = actions
+	case verb == "reach" && len(args) == 1:
+		role.Reach = args[0]
+	case verb == "limit" && len(args) == 2:
+		value, err := strconv.Atoi(args[1])
+		if err != nil {
+			return role, fmt.Errorf("a limit is a whole number, not %q", args[1])
+		}
+		switch args[0] {
+		case "depth":
+			role.Depth = value
+		case "running":
+			role.Running = value
+		default:
+			return role, errors.New("the limits are depth and running")
+		}
+	case verb == "tools" && len(args) == 1 && args[0] == "all":
+		role.Tools = nil
+	case verb == "tools":
+		seen := role.Tools
+		if seen == nil {
+			seen = slices.Clone(tools)
+		}
+		for _, change := range args {
+			name := strings.TrimLeft(change, "+-")
+			if name == "" {
+				return role, fmt.Errorf("a tool change is +<tool> or -<tool>, not %q", change)
+			}
+			switch change[0] {
+			case '+':
+				if !slices.Contains(seen, name) {
+					seen = append(seen, name)
+				}
+			case '-':
+				seen = slices.DeleteFunc(seen, func(tool string) bool { return tool == name })
+			default:
+				return role, fmt.Errorf("a tool change is +<tool> or -<tool>, not %q", change)
+			}
+		}
+		role.Tools = seen
+		if role.Tools == nil {
+			role.Tools = []string{}
+		}
+	default:
+		return role, errors.New(rolesUsage)
+	}
+	return role, nil
+}
+
+func roleNamed(view daemon.AgentRolesView, name string) (daemon.AgentRoleView, bool) {
+	for _, role := range view.Roles {
+		if role.Name == name {
+			return role, true
+		}
+	}
+	return daemon.AgentRoleView{}, false
+}
+
+func (a *App) fetchRoles() (daemon.AgentRolesView, error) {
+	client, err := a.daemonAPI()
+	if err != nil {
+		return daemon.AgentRolesView{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), rolesTimeout)
+	defer cancel()
+	var view daemon.AgentRolesView
+	err = client.getJSON(ctx, "/api/v1/agents", nil, &view)
+	return view, err
+}
+
+func (a *App) putRole(name string, role agentroles.Role) error {
+	if err := a.postRole(daemon.AgentRoleRequest{Op: "put", Name: name, Role: role}); err != nil {
+		return err
+	}
+	return a.showRole(name, false)
+}
+
+func (a *App) postRole(request daemon.AgentRoleRequest) error {
+	client, err := a.daemonAPI()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), rolesTimeout)
+	defer cancel()
+	_, _, err = client.call(ctx, http.MethodPost, "/api/v1/agents", nil, request, http.Header{daemonapi.ActionActorHeader: []string{daemonapi.CLIActor}})
+	return err
+}
+
+func (a *App) listRoles(asJSON bool) error {
+	view, err := a.fetchRoles()
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		return emit(view)
+	}
+	out := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(out, "ROLE\tREACH\tKIND\tDESCRIPTION")
+	for _, role := range view.Roles {
+		fmt.Fprintf(out, "%s\t%s\t%s\t%s\n", role.Name, role.Reach, roleKind(role), role.Description)
+	}
+	return out.Flush()
+}
+
+func roleKind(role daemon.AgentRoleView) string {
+	switch {
+	case role.BuiltIn && role.Edited:
+		return "built in, changed"
+	case role.BuiltIn:
+		return "built in"
+	}
+	return "yours"
+}
+
+func (a *App) showRole(name string, asJSON bool) error {
+	view, err := a.fetchRoles()
+	if err != nil {
+		return err
+	}
+	role, found := roleNamed(view, name)
+	if !found {
+		return fmt.Errorf("no role named %s", name)
+	}
+	if asJSON {
+		return emit(role)
+	}
+	fmt.Printf("%s (%s): %s\n", role.Name, roleKind(role), role.Description)
+	fmt.Printf("reach: %s\n", role.Reach)
+	out := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(out, "ACTION\tDECISION\tWHAT")
+	for _, action := range view.Actions {
+		decision := role.Decisions[action.Name]
+		if _, changed := role.Definition.Actions[action.Name]; changed {
+			decision += " (changed)"
+		}
+		fmt.Fprintf(out, "%s\t%s\t%s\n", action.Name, decision, action.Detail)
+	}
+	if err := out.Flush(); err != nil {
+		return err
+	}
+	if role.AllTools {
+		fmt.Println("tools: all")
+	} else {
+		fmt.Printf("tools: %s\n", strings.Join(role.Tools, ", "))
+	}
+	fmt.Printf("sessions it starts nest at most %d deep; it runs at most %d at once\n", role.Depth, role.Running)
+	return nil
+}
