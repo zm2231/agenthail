@@ -19,27 +19,41 @@ type remotePushSession struct {
 	name     string
 	epoch    int64
 	notified int64
+	// retells counts subscribes and level changes, so a pass collected before one cannot mark it told.
+	retells uint64
 }
 
 func remoteInboxURI(name string) string { return remoteInboxURIStart + name }
 
-// The SDK's InitializedHandler gets no TokenInfo, so a session binds on its first verified message.
+// The SDK's InitializedHandler gets no TokenInfo, so a session binds on its first verified message once initialized.
 func (m *remoteMCP) track(next mcp.MethodHandler) mcp.MethodHandler {
 	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 		session, ok := req.GetSession().(*mcp.ServerSession)
 		name, info := remoteName(req.GetExtra())
-		if !ok || name == "" || method == "initialize" {
+		if !ok || name == "" || session.InitializeParams() == nil {
 			return next(ctx, method, req)
 		}
 		epoch, _ := info.Extra[tokenInfoEpoch].(int64)
 		m.mu.Lock()
 		_, known := m.sessions[session]
-		if !known {
-			m.sessions[session] = &remotePushSession{identity: info.UserID, name: name, epoch: epoch}
-		}
 		m.mu.Unlock()
 		if !known {
-			go m.unbindWhenDone(session)
+			current, err := m.d.Registry.RemoteEpoch()
+			if err != nil {
+				return nil, err
+			}
+			if epoch < current {
+				go session.Close()
+				return nil, errors.New("the remote credentials changed since this request was verified; reconnect")
+			}
+			m.mu.Lock()
+			if _, known = m.sessions[session]; !known {
+				m.sessions[session] = &remotePushSession{identity: info.UserID, name: name, epoch: epoch}
+			}
+			m.mu.Unlock()
+			if !known {
+				go m.unbindWhenDone(session)
+			}
 		}
 		result, err := next(ctx, method, req)
 		retell := err == nil && (method == "resources/subscribe" || method == "logging/setLevel")
@@ -47,6 +61,7 @@ func (m *remoteMCP) track(next mcp.MethodHandler) mcp.MethodHandler {
 			m.mu.Lock()
 			if state, ok := m.sessions[session]; ok {
 				state.notified = 0
+				state.retells++
 			}
 			m.mu.Unlock()
 		}
@@ -145,6 +160,9 @@ func (m *remoteMCP) closeStale(epoch int64) {
 
 func (m *remoteMCP) closeAll() {
 	m.closeStale(1 << 62)
+	for session := range m.server.Sessions() {
+		_ = session.Close()
+	}
 }
 
 func (m *remoteMCP) notify(ctx context.Context) {
@@ -159,7 +177,6 @@ func (m *remoteMCP) notify(ctx context.Context) {
 		m.d.logRuntimeError("remote inbox notices", err)
 		return
 	}
-	m.closeStale(epoch)
 	latest, err := m.d.Registry.LatestUnreadInbox()
 	if err != nil {
 		m.d.logRuntimeError("remote inbox notices", err)
@@ -169,15 +186,24 @@ func (m *remoteMCP) notify(ctx context.Context) {
 		session *mcp.ServerSession
 		name    string
 		newest  int64
+		retells uint64
 	}
 	var notices []due
+	var stale []*mcp.ServerSession
 	m.mu.Lock()
 	for session, state := range m.sessions {
-		if newest := latest[state.identity]; newest > state.notified {
-			notices = append(notices, due{session: session, name: state.name, newest: newest})
+		switch newest := latest[state.identity]; {
+		case state.epoch < epoch:
+			stale = append(stale, session)
+			delete(m.sessions, session)
+		case newest > state.notified:
+			notices = append(notices, due{session: session, name: state.name, newest: newest, retells: state.retells})
 		}
 	}
 	m.mu.Unlock()
+	for _, session := range stale {
+		_ = session.Close()
+	}
 	if len(notices) == 0 {
 		return
 	}
@@ -204,9 +230,12 @@ func (m *remoteMCP) notify(ctx context.Context) {
 		}
 	}
 	for _, notice := range notices {
-		_ = notice.session.Log(ctx, &mcp.LoggingMessageParams{Level: "notice", Logger: "agenthail", Data: remoteNotice(notice.name, unread[notice.name])})
+		// The SDK hides per-subscriber resource errors; a failed Log on the same session stands for both.
+		if err := notice.session.Log(ctx, &mcp.LoggingMessageParams{Level: "notice", Logger: "agenthail", Data: remoteNotice(notice.name, unread[notice.name])}); err != nil {
+			continue
+		}
 		m.mu.Lock()
-		if state, ok := m.sessions[notice.session]; ok && notice.newest > state.notified {
+		if state, ok := m.sessions[notice.session]; ok && state.retells == notice.retells && notice.newest > state.notified {
 			state.notified = notice.newest
 		}
 		m.mu.Unlock()

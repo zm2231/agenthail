@@ -41,8 +41,10 @@ type remoteMCP struct {
 	mu       sync.Mutex
 	sessions map[*mcp.ServerSession]*remotePushSession
 	wake     chan struct{}
-	// beforeNotice runs between a pass's last epoch check and its sends, for tests.
+	// beforeNotice runs between a pass's last epoch check and its sends, and
+	// afterEpoch between verify's epoch read and its token check, for tests.
 	beforeNotice func()
+	afterEpoch   func()
 }
 
 func (d *Daemon) remoteMCP() *remoteMCP {
@@ -120,6 +122,9 @@ func (m *remoteMCP) verify(ctx context.Context, token string, r *http.Request) (
 	epoch, err := d.Registry.RemoteEpoch()
 	if err != nil {
 		return nil, err
+	}
+	if m.afterEpoch != nil {
+		m.afterEpoch()
 	}
 	remote, err := d.Registry.RemoteIdentityByToken(token)
 	if errors.Is(err, registry.ErrRemoteUnknown) {

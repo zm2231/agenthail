@@ -264,3 +264,80 @@ func TestTheInboxResourceSaysOnlyHowManyAreUnread(t *testing.T) {
 		t.Fatal("subscribed to another identity's inbox")
 	}
 }
+
+func TestASubscribeDuringANoticePassIsToldAgain(t *testing.T) {
+	f := newRemoteFixture(t, "")
+	m := f.d.remoteMCP()
+	listener := f.listen(t, map[string]string{"Authorization": "Bearer " + f.token})
+	var once sync.Once
+	m.beforeNotice = func() {
+		once.Do(func() {
+			if err := listener.session.Subscribe(t.Context(), &mcp.SubscribeParams{URI: "agenthail://inbox/scout"}); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	f.deliver(t, "waiting")
+	f.notices(t)
+	listener.expect(t, "the pass the subscribe interrupted", 1, "waiting")
+	listener.expect(t, "the retell the subscribe asked for", 1, "waiting")
+}
+
+func TestASessionVerifiedBeforeACredentialChangeIsNeverBound(t *testing.T) {
+	f := newRemoteFixture(t, "")
+	m := f.d.remoteMCP()
+	other, err := f.r.AddAgentIdentity("builder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var once sync.Once
+	m.afterEpoch = func() {
+		for session := range m.server.Sessions() {
+			if session.InitializeParams() != nil {
+				once.Do(func() {
+					if _, _, err := f.r.BindRemoteIdentity(other.Name, "", ""); err != nil {
+						t.Error(err)
+					}
+				})
+			}
+		}
+	}
+	transport := &mcp.StreamableClientTransport{Endpoint: f.server.URL + "/mcp", HTTPClient: &http.Client{Transport: headerTransport{"Authorization": "Bearer " + f.token}}, MaxRetries: -1, DisableStandaloneSSE: true}
+	session, err := mcp.NewClient(&mcp.Implementation{Name: "late", Version: "1"}, nil).Connect(t.Context(), transport, nil)
+	if err == nil {
+		defer session.Close()
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		live := 0
+		for range m.server.Sessions() {
+			live++
+		}
+		if live == 0 && f.tracked() == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("live=%d tracked=%d: a session verified before the change stayed open", live, f.tracked())
+		}
+	}
+}
+
+func TestStoppingTheNotifierClosesEveryRemoteSession(t *testing.T) {
+	f := newRemoteFixture(t, "")
+	m := f.d.remoteMCP()
+	if status, _ := postMCP(t, f.server, map[string]string{"Authorization": "Bearer " + f.token}); status != http.StatusOK {
+		t.Fatalf("initialize status=%d", status)
+	}
+	f.listen(t, map[string]string{"Authorization": "Bearer " + f.token})
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { f.d.runRemoteInboxNotices(ctx); close(done) }()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the notifier did not stop")
+	}
+	for range m.server.Sessions() {
+		t.Fatal("a remote session outlived the notifier")
+	}
+}
