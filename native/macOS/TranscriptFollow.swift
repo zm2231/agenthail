@@ -20,6 +20,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     let leadingRow: String?
     let hasRow: (String) -> Bool
     let held: () -> Bool
+    var rows: TranscriptRowTops?
     @Binding var position: ScrollPosition
     @Binding var following: Bool
     var rescaling = false
@@ -58,6 +59,8 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                     following = Self.atEnd(geometry)
                 }
                 if new == .interacting || new == .decelerating { layout.releaseHold() }
+                // A reader who scrolls while an older page loads is held where they come to rest.
+                if new == .idle, old == .interacting || old == .decelerating, layout.olderPending { holdOlderPlace(fresh: false) }
                 layout.animationStart = new == .animating ? .now : nil
                 if new == .animating {
                     let start = layout.animationStart
@@ -83,13 +86,17 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 placedLeadingRow = leadingRow
                 let resized = old.contentSize != new.contentSize || old.containerSize != new.containerSize
                 if resized { layout.markResized() }
+                if let rows, let id = layout.row.pass(TranscriptPass(leadingChanged: inserted, resting: resting, following: following, content: new.contentSize.height)) {
+                    restoreHeld(id, in: rows)
+                    return
+                }
                 if layout.revealed?.expired == true { layout.revealed = nil }
                 if !following, resting, let target = layout.revealed?.target(in: new, resized: resized) {
                     settle { $0.scrollTo(y: target) }
                     return
                 }
-                if !following, !inserted, resting, let target = layout.heldTarget(new) {
-                    settle { $0.scrollTo(y: Self.scrollY(target, in: new)) }
+                if !following, !inserted, resting, let target = layout.heldTarget(new, rows: rows) {
+                    settleHold { $0.scrollTo(y: Self.scrollY(target, in: new)) }
                     return
                 }
                 if !resized {
@@ -102,11 +109,13 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                     }
                 } else if following, phase == .idle || phase == .animating, !Self.atBottom(new) {
                     settle { $0.scrollTo(edge: .bottom) }
+                } else if !following, inserted, resting, layout.holdingRow {
+                    // Rows below the reader that were never laid out are re-estimated as a page arrives, so the end moves; the held row does not.
                 } else if !following, inserted, resting {
                     let distance = layout.heldFromEnd ?? (old.contentSize.height - old.contentOffset.y)
                     layout.holdFromEnd(distance, content: new.contentSize.height)
                     let target = max(new.contentSize.height - distance, 0)
-                    settle { $0.scrollTo(y: Self.scrollY(target, in: new)) }
+                    settleHold { $0.scrollTo(y: Self.scrollY(target, in: new)) }
                 } else if !following, resting, Self.atEnd(new) {
                     // Content that shrank to the reader's position, or now fits, leaves nothing to jump to.
                     following = true
@@ -120,10 +129,21 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 layout.revealed = RevealedRow(top: top)
                 position.scrollTo(y: top.wrappedValue)
             })
+            .onAppear {
+                rows?.moved = { rowMoved($0) }
+                rows?.holdingOlder = { holdOlderPlace(fresh: true) }
+            }
             .onDisappear { layout.cancelCheck() }
+            // A page can land without changing the scroll geometry, so the geometry action may not see it.
+            .onChange(of: leadingRow) { old, new in
+                guard old.map(hasRow) == true, let rows,
+                      let id = layout.row.pass(TranscriptPass(leadingChanged: true, resting: resting, following: following, content: layout.geometry?.contentSize.height ?? 0)) else { return }
+                placedLeadingRow = new
+                restoreHeld(id, in: rows)
+            }
             .onChange(of: transcript) {
                 generation &+= 1
-                layout.releaseHold()
+                layout.forgetOlder()
                 layout.cancelCheck()
                 layout.lastGrowth = nil
                 placedLeadingRow = leadingRow
@@ -138,6 +158,35 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     }
 
     private var resting: Bool { phase == .idle || (phase == .animating && !animating) }
+
+    // Armed when the reader asks for an older page, from the row frames already reported, so nothing is inferred while the page lands.
+    private func holdOlderPlace(fresh: Bool) {
+        guard !following else { return }
+        guard let geometry = layout.geometry, let leading = rows?.leading(above: geometry.contentOffset.y + geometry.containerSize.height) else { return layout.requestOlder(fresh: fresh) }
+        layout.armRow(leading.id, above: leading.top - geometry.contentOffset.y, before: leading.top, fresh: fresh)
+    }
+
+    private func rowMoved(_ id: String) {
+        guard let rows, !following, layout.holdingRow, id == layout.heldRow else { return }
+        restoreHeld(id, in: rows)
+    }
+
+    // A held row that is not laid out, or still has its pre-insert top, is built by scrolling to it; it reports again once laid out.
+    private func restoreHeld(_ id: String, in rows: TranscriptRowTops) {
+        settleHold { position in
+            guard layout.heldRow == id else { return }
+            if rows.top(id).map({ !layout.row.measured && $0 == layout.heldBefore }) ?? true {
+                position.scrollTo(id: id, anchor: .top)
+            } else {
+                correct(in: rows)
+            }
+        }
+    }
+
+    private func correct(in rows: TranscriptRowTops) {
+        guard let geometry = layout.geometry, let target = layout.heldTarget(geometry, rows: rows) else { return }
+        settleHold { $0.scrollTo(y: Self.scrollY(target, in: geometry)) }
+    }
 
     // A scroll position still at the bottom edge keeps the bottom in place as content grows, even when not following.
     private func holdPlace() {
@@ -179,6 +228,15 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             move(&position)
         }
     }
+
+    // Dropped when a newer restore was queued or the hold was released or replaced; a hold that only ran out of time while it waited still gets it.
+    private func settleHold(_ move: @escaping (inout ScrollPosition) -> Void) {
+        let queued = layout.queueRestore()
+        settle { position in
+            guard layout.runRestore(queued) else { return }
+            move(&position)
+        }
+    }
 }
 
 /// The latest scroll geometry, when an animated scroll began, and whether the layout pass now running resized the transcript.
@@ -193,6 +251,7 @@ private final class Layout {
     var animationStart: ContinuousClock.Instant?
     private var resizedTurn: Int?
     private var fromEnd: (distance: CGFloat, until: ContinuousClock.Instant, content: CGFloat, landing: Bool)?
+    let row = TranscriptRowHold()
     var revealed: RevealedRow?
     private var check: Task<Void, Never>?
 
@@ -220,17 +279,69 @@ private final class Layout {
     }
 
     func holdFromEnd(_ distance: CGFloat, content: CGFloat) {
+        row.release()
+        renew()
         fromEnd = (distance, .now + .seconds(2), content, true)
     }
 
-    func releaseHold() {
+    private var sequence = 0
+
+    private func renew() { sequence &+= 1 }
+
+    // Only the newest queued restore runs, and a busy main thread can run it after the settle window, so the window starts once it has.
+    func queueRestore() -> Int {
+        sequence &+= 1
+        row.settle(until: nil)
+        fromEnd?.until = .now + .seconds(86_400)
+        return sequence
+    }
+
+    func runRestore(_ queued: Int) -> Bool {
+        guard queued == sequence else { return false }
+        row.settle(until: .now + .seconds(2))
+        fromEnd?.until = .now + .seconds(2)
+        return true
+    }
+
+    var holding: Bool { holdingRow || heldFromEnd != nil }
+
+    var holdingRow: Bool { row.holding }
+    var heldRow: String? { row.id }
+    var heldBefore: CGFloat? { row.before }
+    var olderPending: Bool { row.pending }
+
+    func requestOlder(fresh: Bool) {
+        renew()
         fromEnd = nil
+        row.request(fresh: fresh)
+    }
+
+    func armRow(_ id: String, above: CGFloat, before: CGFloat, fresh: Bool) {
+        renew()
+        fromEnd = nil
+        row.arm(id, above: above, before: before, fresh: fresh)
+    }
+
+    func forgetOlder() {
+        row.forget()
+        releaseHold()
+    }
+
+    func releaseHold() {
+        renew()
+        fromEnd = nil
+        row.release()
         revealed = nil
     }
 
     /// Earlier rows keep re-measuring after they arrive, moving the rows below them without scrolling, and the geometry action
     /// can miss such a resize, so the height is compared with the last one handled. Any other move while settled is the reader's.
-    func heldTarget(_ geometry: ScrollGeometry) -> CGFloat? {
+    func heldTarget(_ geometry: ScrollGeometry, rows: TranscriptRowTops?) -> CGFloat? {
+        if row.landed {
+            let target = row.target(top: row.id.flatMap { rows?.top($0) }, offset: geometry.contentOffset.y, content: geometry.contentSize.height)
+            if row.id == nil { releaseHold() }
+            return target
+        }
         guard let distance = heldFromEnd else { return nil }
         let content = geometry.contentSize.height
         if content != fromEnd?.content {
@@ -240,7 +351,9 @@ private final class Layout {
         }
         if abs(content - geometry.contentOffset.y - distance) <= 1 {
             fromEnd?.landing = false
-        } else if fromEnd?.landing == false {
+        } else if fromEnd?.landing == true {
+            return max(content - distance, 0)
+        } else {
             releaseHold()
         }
         return nil
@@ -272,8 +385,8 @@ enum RunLoopTurn {
 }
 
 extension View {
-    func transcriptFollow<ID: Equatable>(_ transcript: ID, leadingRow: String?, hasRow: @escaping (String) -> Bool, held: @escaping () -> Bool = { false }, position: Binding<ScrollPosition>, following: Binding<Bool>, rescaling: Bool = false) -> some View {
-        modifier(TranscriptFollow(transcript: transcript, leadingRow: leadingRow, hasRow: hasRow, held: held, position: position, following: following, rescaling: rescaling))
+    func transcriptFollow<ID: Equatable>(_ transcript: ID, leadingRow: String?, hasRow: @escaping (String) -> Bool, held: @escaping () -> Bool = { false }, rows: TranscriptRowTops? = nil, position: Binding<ScrollPosition>, following: Binding<Bool>, rescaling: Bool = false) -> some View {
+        modifier(TranscriptFollow(transcript: transcript, leadingRow: leadingRow, hasRow: hasRow, held: held, rows: rows, position: position, following: following, rescaling: rescaling))
     }
 }
 

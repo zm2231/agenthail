@@ -17,6 +17,7 @@ final class Feed: ObservableObject {
     @Published var rows: [Row] = []
     @Published var inset: CGFloat = 100
     @Published var header: CGFloat = 44
+    var merged: Set<String> = []
     @Published var usesTail = false
     var following = true
     let hold = TranscriptSelectionHold()
@@ -33,6 +34,13 @@ final class Feed: ObservableObject {
 @MainActor var live: Set<String> = []
 @MainActor let rowMemory = TranscriptRowMemory()
 @MainActor weak var watched: Feed?
+@MainActor let readerTops = TranscriptRowTops()
+@MainActor var stallAfterGrowth: (above: CGFloat, seconds: Double)?
+
+@MainActor func busy(_ seconds: Double) {
+    let end = Date().addingTimeInterval(seconds)
+    while Date() < end {}
+}
 
 func rows(_ prefix: String, _ count: Int) -> [Row] {
     (0..<count).map { Row(id: "\(prefix)\($0)", lines: 1 + ($0 * 7) % 9) }
@@ -55,6 +63,7 @@ struct Transcript: View {
                     ForEach(feed.rows.prefix(split)) { row in
                         RowView(row: row)
                             .padding(.top, 20)
+                            .reportsTop(row.id, to: readerTops)
                     }
                 }
                 VStack(alignment: .leading, spacing: 0) {
@@ -63,6 +72,7 @@ struct Transcript: View {
                             .padding(.top, 20)
                             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TranscriptRows.contentSpace)) } action: { layout.rows[row.id] = $0 }
                             .onDisappear { layout.rows[row.id] = nil }
+                            .reportsTop(row.id, to: readerTops)
                     }
                 }
             }
@@ -75,6 +85,11 @@ struct Transcript: View {
         .onScrollGeometryChange(for: Bool.self) { geometry in
             layout.visible = geometry.visibleRect
             reported = (geometry.contentOffset.y, geometry.contentSize.height)
+            // Queued behind the work this pass schedules, so the main thread is busy after a page lands and before its restores run.
+            if let stall = stallAfterGrowth, geometry.contentSize.height > stall.above {
+                stallAfterGrowth = nil
+                DispatchQueue.main.async { busy(stall.seconds) }
+            }
             seenGeometry.append(String(format: "%.3f offset %.0f content %.0f visible maxY %.0f insets %.0f/%.0f end %.0f", Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 100), geometry.contentOffset.y, geometry.contentSize.height, geometry.visibleRect.maxY, geometry.contentInsets.top, geometry.contentInsets.bottom, geometry.contentSize.height - (geometry.visibleRect.maxY - geometry.contentInsets.bottom)))
             if seenGeometry.count > 12 { seenGeometry.removeFirst() }
             return true
@@ -83,7 +98,8 @@ struct Transcript: View {
             guard feed.usesTail else { return }
             layout.tail.update(ids, in: feed.transcript, rows: layout.rows, visible: layout.visible, following: following) { feed.hold.held(over: $0, buttons: 0) }
         }
-        .transcriptFollow(feed.transcript, leadingRow: feed.rows.first?.id, hasRow: { id in feed.rows.contains { $0.id == id } }, position: $position, following: $following)
+        .onChange(of: feed.rows.first?.id, initial: true) { readerTops.first = feed.rows.first?.id }
+        .transcriptFollow(feed.transcript, leadingRow: feed.rows.first?.id, hasRow: { id in feed.merged.contains(id) || feed.rows.contains { $0.id == id } }, rows: readerTops, position: $position, following: $following)
         .safeAreaInset(edge: .top, spacing: 0) { Color.gray.frame(height: feed.header) }
         .safeAreaInset(edge: .bottom, spacing: 0) { Color.gray.frame(height: feed.inset) }
         .onChange(of: following) {
@@ -155,6 +171,10 @@ struct TranscriptFollowTest {
     @MainActor
     static func main() {
         _ = NSApplication.shared
+        // A busy app stalls the main thread between layout passes; AGENTHAIL_TEST_STALL_MS runs every case under random stalls up to that long.
+        if let stall = ProcessInfo.processInfo.environment["AGENTHAIL_TEST_STALL_MS"].flatMap(Double.init), stall > 0 {
+            Timer.scheduledTimer(withTimeInterval: 0.07, repeats: true) { _ in MainActor.assumeIsolated { busy(Double.random(in: 0...stall) / 1000) } }
+        }
         let feed = Feed()
         watched = feed
         let hosting = NSHostingView(rootView: Transcript(feed: feed))
@@ -414,6 +434,23 @@ struct TranscriptFollowTest {
             expect(abs(gap(scroll) - heldGap) < 5, "older pages keep a place held in the tail and the drift does not build up, after page \(page) distance from bottom \(heldGap) became \(gap(scroll)), offset \(heldOffset) became \(offset(scroll))")
         }
 
+        feed.transcript = "Zd"
+        feed.rows = rows("Zd", 100)
+        spin(0.6)
+        NotificationCenter.default.post(name: .toggleRow, object: "Zd98")
+        spin(0.5)
+        let busyGap = gap(scroll)
+        expect(!feed.following, "expanding a tail row holds the place before a busy page")
+        for page in 0..<4 {
+            let content = scroll.documentView?.frame.height ?? 0
+            if page == 1 { stallAfterGrowth = (content, 2.5) }
+            feed.rows = rows("Zdo\(page)-", 20) + feed.rows
+            awaitReport("older page \(page) on a busy main thread") { $0.content > content }
+            expectEventually(abs(gap(scroll) - busyGap) < 5, "older pages keep a place held in the tail when the main thread is busy as one lands, after page \(page) distance from bottom \(busyGap) became \(gap(scroll))")
+            spin(0.8)
+            expect(abs(gap(scroll) - busyGap) < 5, "a place held in the tail stays put once a page that landed on a busy main thread settles, after page \(page) distance from bottom \(busyGap) became \(gap(scroll))")
+        }
+
         for start in [0, 300] as [CGFloat] {
             feed.transcript = "Zt\(Int(start))"
             feed.rows = rows("Zt", 100)
@@ -429,6 +466,97 @@ struct TranscriptFollowTest {
                 expect(abs(gap(scroll) - place) < 2, "a reader near the top stays in place once page \(page) settles, from \(Int(start)) distance from bottom \(place) became \(gap(scroll))")
             }
         }
+
+        for (start, older) in [(0, 1), (0, 40), (300, 1), (300, 40)] as [(CGFloat, Int)] {
+            feed.transcript = "Zg\(Int(start))-\(older)"
+            feed.rows = rows("Zg", 100)
+            spin(0.6)
+            move(scroll, to: start)
+            spin(0.3)
+            let placeRow = readerRow(scroll, feed)
+            let placeY = screenY(placeRow, scroll)
+            let content = scroll.documentView?.frame.height ?? 0
+            readerTops.holdOlderPlace()
+            feed.rows = (0..<20).map { Row(id: "Zg\(Int(start))-\(older)o\($0)", lines: older) } + feed.rows
+            awaitReport("an older page of \(older)-line rows") { $0.content > content }
+            expectEventually(abs(screenY(placeRow, scroll) - placeY) < 2, "an older page of \(older)-line rows keeps the reader's row in place while rows below it are still estimated, from \(start) \(placeRow) at \(placeY) moved to \(screenY(placeRow, scroll))")
+            spin(0.3)
+            expect(abs(screenY(placeRow, scroll) - placeY) < 2, "the reader's row stays in place once an older page of \(older)-line rows settles, from \(start) \(placeRow) at \(placeY) moved to \(screenY(placeRow, scroll))")
+            expect(!feed.following, "holding the reader's row does not start following")
+        }
+
+        for older in [1, 40] {
+            feed.transcript = "Zb\(older)"
+            feed.rows = rows("Zb", 100)
+            spin(0.6)
+            move(scroll, to: 300)
+            spin(0.3)
+            let placeRow = readerRow(scroll, feed)
+            let placeY = screenY(placeRow, scroll)
+            let content = scroll.documentView?.frame.height ?? 0
+            readerTops.holdOlderPlace()
+            stallAfterGrowth = (content, 2.5)
+            feed.rows = (0..<20).map { Row(id: "Zb\(older)o\($0)", lines: older) } + feed.rows
+            awaitReport("an older page of \(older)-line rows on a busy main thread") { $0.content > content }
+            expectEventually(abs(screenY(placeRow, scroll) - placeY) < 2, "an older page of \(older)-line rows keeps the reader's row in place when the main thread is busy as it lands, \(placeRow) at \(placeY) moved to \(screenY(placeRow, scroll))")
+            spin(0.3)
+            expect(abs(screenY(placeRow, scroll) - placeY) < 2, "the reader's row stays in place once a page that landed on a busy main thread settles, \(placeRow) at \(placeY) moved to \(screenY(placeRow, scroll))")
+        }
+
+        feed.transcript = "Zr"
+        feed.rows = rows("Zr", 100)
+        spin(0.6)
+        move(scroll, to: 0)
+        spin(0.3)
+        let keptY = screenY("Zr1", scroll)
+        readerTops.holdOlderPlace()
+        let first = feed.rows[0]
+        feed.merged = [first.id]
+        feed.rows = rows("Zro", 20) + [Row(id: "Zr0merged", lines: first.lines + 3)] + feed.rows.dropFirst()
+        expectEventually(abs(screenY("Zr1", scroll) - keptY) < 2, "an older page that merges into the first row keeps the reader in place, Zr1 at \(keptY) moved to \(screenY("Zr1", scroll))")
+        spin(0.3)
+        expect(abs(screenY("Zr1", scroll) - keptY) < 2, "the reader stays in place once a page that merged into the first row settles, Zr1 at \(keptY) moved to \(screenY("Zr1", scroll))")
+        feed.merged = []
+
+        feed.transcript = "Zu"
+        feed.rows = [Row(id: "Zu0", lines: 120)]
+        spin(0.6)
+        move(scroll, to: 600)
+        spin(0.3)
+        let onlyGap = gap(scroll)
+        readerTops.holdOlderPlace()
+        feed.merged = ["Zu0"]
+        feed.rows = rows("Zuo", 20) + [Row(id: "Zu0merged", lines: 130)]
+        spin(0.8)
+        expect(abs(gap(scroll) - onlyGap) < 5, "an older page that merges into the only laid-out row keeps the reader's distance from the end, \(onlyGap) became \(gap(scroll))")
+        expect(!feed.following, "holding the place in a merged only row does not start following")
+        feed.merged = []
+
+        feed.transcript = "Zw"
+        feed.rows = [Row(id: "Zw0", lines: 60)] + rows("Zwr", 100)
+        spin(0.6)
+        move(scroll, to: 0)
+        spin(0.6)
+        move(scroll, to: 300)
+        spin(0.3)
+        let lone = feed.rows.filter { live.contains($0.id) && (rowTops[$0.id] ?? .infinity) < offset(scroll) + scroll.contentView.bounds.height }.map(\.id)
+        expect(lone == ["Zw0"], "only the first block starts in the visible area before the request, \(lone)")
+        readerTops.holdOlderPlace()
+        var dragTo = offset(scroll)
+        let seen = scroll.contentView.bounds.height
+        while !(readerRow(scroll, feed).hasPrefix("Zwr") && screenY(readerRow(scroll, feed), scroll) < seen / 2), dragTo < 80000 {
+            dragTo += 400
+            drag(scroll, to: dragTo)
+        }
+        spin(0.3)
+        let movedRow = readerRow(scroll, feed)
+        let movedY = screenY(movedRow, scroll)
+        expect(movedRow.hasPrefix("Zwr") && movedY < seen / 2, "the reader scrolled onto holdable rows while the page loads, reader row \(movedRow) at \(movedY)")
+        feed.rows = (0..<20).map { Row(id: "Zwo\($0)", lines: 40) } + feed.rows
+        expectEventually(abs(screenY(movedRow, scroll) - movedY) < 2, "a reader who scrolls off a lone first block while a page loads is held where they stop, \(movedRow) at \(movedY) moved to \(screenY(movedRow, scroll))")
+        spin(0.3)
+        expect(abs(screenY(movedRow, scroll) - movedY) < 2, "the reader stays where they stopped once that page settles, \(movedRow) at \(movedY) moved to \(screenY(movedRow, scroll))")
+        expect(!feed.following, "holding the place after a scroll during a load does not start following")
 
         feed.transcript = "Zs"
         feed.rows = rows("Zs", 5)
@@ -467,7 +595,7 @@ struct TranscriptFollowTest {
         feed.transcript = "F"
         feed.rows = rows("F", 1_500)
         spin(0.6)
-        move(scroll, to: 0)
+        readerScroll(scroll, to: 0)
         feed.rows += rows("Fn", 5)
         spin(0.3)
         expect(!feed.following, "a reader at the top of a long transcript is not following")
@@ -492,9 +620,9 @@ struct TranscriptFollowTest {
         spin(0.6)
         expectBottom(scroll, "a transcript under a tall header opens at the live edge")
         let bottom = offset(scroll)
-        move(scroll, to: bottom - 400)
-        expect(!feed.following, "scrolling up under a tall header stops following")
-        move(scroll, to: bottom)
+        readerScroll(scroll, to: bottom - 400)
+        expect(!feed.following, "scrolling up under a tall header stops following; \(geometry(scroll))")
+        readerScroll(scroll, to: bottom)
         expect(feed.following, "scrolling back to the end under a tall header follows again, \(Int(gap(scroll))) points short of the bottom")
         for index in 0..<10 {
             feed.rows += rows("Hs\(index)-", 1)
@@ -567,9 +695,9 @@ struct TranscriptFollowTest {
                 spin(0.6)
                 expectBottom(scroll, "with \(size) a transcript opens at the live edge")
                 let end = offset(scroll)
-                move(scroll, to: end - 400)
-                expect(!feed.following, "with \(size) scrolling up stops following")
-                move(scroll, to: end)
+                readerScroll(scroll, to: end - 400)
+                expect(!feed.following, "with \(size) scrolling up stops following; \(geometry(scroll))")
+                readerScroll(scroll, to: end)
                 expect(feed.following, "with \(size) the exact end follows again, \(Int(gap(scroll))) points short")
                 move(scroll, to: end - TranscriptFollow<String>.bottomSlack + 1)
                 expect(feed.following, "with \(size) a layout move inside the slack keeps following")
@@ -732,11 +860,40 @@ struct TranscriptFollowTest {
         spin(0.3)
     }
 
+    // Phased trackpad gestures, which SwiftUI does not undo on a busy main thread as it can a bare clip move; rows built on the way are measured again, so a further gesture covers what is left.
+    @MainActor
+    private static func readerScroll(_ scroll: NSScrollView, to y: CGFloat) {
+        guard let window = scroll.window, let content = window.contentView else { return expect(false, "the transcript is in a window") }
+        let center = scroll.convert(NSPoint(x: scroll.bounds.midX, y: scroll.bounds.midY), to: nil)
+        guard let target = content.hitTest(content.convert(center, from: nil)) else { return expect(false, "the transcript is under the pointer") }
+        func wheel(_ phase: Int64, _ dy: Int32) -> NSEvent {
+            let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: dy, wheel2: 0, wheel3: 0)!
+            event.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+            event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+            return NSEvent(cgEvent: event)!
+        }
+        for _ in 0..<5 {
+            let left = Int32((offset(scroll) - y).rounded())
+            if left == 0 { break }
+            target.scrollWheel(with: wheel(1, 0))
+            var sent: Int32 = 0
+            while sent != left {
+                let part = max(min(left - sent, 400), -400)
+                target.scrollWheel(with: wheel(2, part))
+                sent += part
+                spin(0.016)
+            }
+            target.scrollWheel(with: wheel(4, 0))
+            awaitReport("the scroll") { abs($0.offset - offset(scroll)) < 1 }
+            spin(0.3)
+        }
+        expect(abs(offset(scroll) - y) < 1, "the reader's scroll reached \(y), stopped at \(offset(scroll))")
+    }
+
     // A loaded machine can take longer than any fixed wait to report a change, so checks start from the reported geometry.
     @MainActor
     private static func awaitReport(_ what: String, _ done: ((offset: CGFloat, content: CGFloat)) -> Bool) {
-        let deadline = Date().addingTimeInterval(2)
-        while reported.map(done) != true, Date() < deadline { spin(0.02) }
+        waitUntil { reported.map(done) == true }
         expect(reported.map(done) == true, "the transcript reported \(what) within 2 s, last report \(String(describing: reported))")
     }
 
@@ -757,6 +914,16 @@ struct TranscriptFollowTest {
     @MainActor
     private static func bottomOffset(_ scroll: NSScrollView) -> CGFloat {
         offset(scroll) + gap(scroll)
+    }
+
+    @MainActor
+    private static func readerRow(_ scroll: NSScrollView, _ feed: Feed) -> String {
+        feed.rows.filter { live.contains($0.id) && (rowTops[$0.id] ?? -1) >= offset(scroll) }.min { (rowTops[$0.id] ?? 0) < (rowTops[$1.id] ?? 0) }?.id ?? "none"
+    }
+
+    @MainActor
+    private static func screenY(_ row: String, _ scroll: NSScrollView) -> CGFloat {
+        live.contains(row) ? (rowTops[row] ?? .infinity) - offset(scroll) : .infinity
     }
 
     @MainActor
@@ -785,9 +952,19 @@ struct TranscriptFollowTest {
 
     @MainActor
     private static func expectEventually(_ condition: @autoclosure () -> Bool, _ message: @autoclosure () -> String) {
-        let deadline = Date().addingTimeInterval(2)
-        while !condition(), Date() < deadline { spin(0.02) }
+        waitUntil(condition)
         expect(condition(), message())
+    }
+
+    // A stalled main thread uses up wall time without running anything, so the wait also lasts a second of run loop turns.
+    @MainActor
+    private static func waitUntil(_ condition: () -> Bool) {
+        let deadline = Date().addingTimeInterval(2)
+        var turns = 0
+        while !condition(), Date() < deadline || turns < 50 {
+            spin(0.02)
+            turns += 1
+        }
     }
 
     private static func expect(_ condition: Bool, _ message: String) {
