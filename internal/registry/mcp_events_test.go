@@ -1,13 +1,12 @@
 package registry
 
 import (
-	"errors"
 	"fmt"
 	"testing"
 	"time"
 )
 
-func eventSubscriber(t *testing.T) (*Registry, func(n int, refreshBefore time.Time) (EventSubscription, error)) {
+func eventSubscriber(t *testing.T) (*Registry, func(n int) (EventSubscription, error)) {
 	t.Helper()
 	r := openTestRegistry(t)
 	identity, err := r.AddAgentIdentity("kat")
@@ -17,7 +16,7 @@ func eventSubscriber(t *testing.T) (*Registry, func(n int, refreshBefore time.Ti
 	if _, _, err := r.BindRemoteIdentity("kat", "", ""); err != nil {
 		t.Fatal(err)
 	}
-	return r, func(n int, refreshBefore time.Time) (EventSubscription, error) {
+	return r, func(n int) (EventSubscription, error) {
 		remote, err := r.RemoteIdentityNamed("kat")
 		if err != nil {
 			return EventSubscription{}, err
@@ -26,44 +25,20 @@ func eventSubscriber(t *testing.T) (*Registry, func(n int, refreshBefore time.Ti
 		if err != nil {
 			return EventSubscription{}, err
 		}
-		return r.SubscribeEvent(EventSubscribe{ID: fmt.Sprintf("sub_%d", n), IdentityID: identity.SessionID, TokenHash: remote.TokenHash, Epoch: epoch, Name: "inbox.unread", Args: "{}", URL: fmt.Sprintf("https://example.com/%d", n), Secret: "whsec_x", RefreshBefore: refreshBefore, Verified: true, Limit: 8})
-	}
-}
-
-func TestAnExpiredEventSubscriptionFreesItsPlaceAtOnce(t *testing.T) {
-	_, subscribeAt := eventSubscriber(t)
-	subscribe := func(n int, refreshBefore time.Time) error {
-		_, err := subscribeAt(n, refreshBefore)
-		return err
-	}
-	for n := range 8 {
-		if err := subscribe(n, time.Now().Add(-time.Second)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := subscribe(8, time.Time{}); err != nil {
-		t.Fatalf("eight expired subscriptions held the place: %v", err)
-	}
-	for n := 9; n < 16; n++ {
-		if err := subscribe(n, time.Time{}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := subscribe(16, time.Time{}); !errors.Is(err, ErrEventSubscriptionLimit) {
-		t.Fatalf("a ninth live subscription: %v", err)
+		return r.SubscribeEvent(EventSubscribe{ID: fmt.Sprintf("sub_%d", n), IdentityID: identity.SessionID, TokenHash: remote.TokenHash, Epoch: epoch, Name: "inbox.unread", Args: "{}", URL: fmt.Sprintf("https://example.com/%d", n), Secret: "whsec_x", Verified: true, Limit: 8})
 	}
 }
 
 func TestADeliveryBegunBeforeARefreshCannotUndoIt(t *testing.T) {
 	r, subscribe := eventSubscriber(t)
-	old, err := subscribe(1, time.Time{})
+	old, err := subscribe(1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := r.RotateRemoteIdentity("kat"); err != nil {
 		t.Fatal(err)
 	}
-	fresh, err := subscribe(1, time.Time{})
+	fresh, err := subscribe(1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +56,7 @@ func TestADeliveryBegunBeforeARefreshCannotUndoIt(t *testing.T) {
 	if err := r.DropEventSubscription(old.ID, old.Generation); err != nil {
 		t.Fatal(err)
 	}
-	sub, live, err := r.LiveEventSubscription(fresh.ID, time.Now())
+	sub, live, err := r.LiveEventSubscription(fresh.ID)
 	if err != nil || !live || sub.Failures != 0 || !sub.SuspendedAt.IsZero() || sub.Generation != fresh.Generation {
 		t.Fatalf("the fresh subscription after stale writes: %+v live=%v err=%v", sub, live, err)
 	}
@@ -91,5 +66,34 @@ func TestADeliveryBegunBeforeARefreshCannotUndoIt(t *testing.T) {
 	due, err := r.DueEvents(time.Now(), time.Hour)
 	if err != nil || len(due) != 1 || due[0].ID != fresh.ID {
 		t.Fatalf("due=%+v err=%v, want the fresh subscription despite a stale deferral", due, err)
+	}
+}
+
+func TestAnUpgradeKeepsAnEventSubscriptionThatWasSetToExpire(t *testing.T) {
+	r, subscribe := eventSubscriber(t)
+	sub, err := subscribe(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`ALTER TABLE mcp_event_subscriptions ADD COLUMN refresh_before_ms INTEGER NOT NULL DEFAULT 0;
+		UPDATE mcp_event_subscriptions SET refresh_before_ms=?;
+		DELETE FROM schema_migrations WHERE name='2026-11-21-event-subscriptions-never-expire'`, time.Now().Add(-time.Minute).UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	path := r.path
+	r.Close()
+	upgraded, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upgraded.Close()
+	if kept, live, err := upgraded.LiveEventSubscription(sub.ID); err != nil || !live || kept.Generation != sub.Generation {
+		t.Fatalf("after the upgrade: %+v live=%v err=%v", kept, live, err)
+	}
+	if _, _, err := upgraded.StoreInboxMessage(InboxMessage{Identity: sub.IdentityID, UUID: "m", Message: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	if due, err := upgraded.DueEvents(time.Now(), time.Hour); err != nil || len(due) != 1 || due[0].ID != sub.ID {
+		t.Fatalf("due=%+v err=%v, want the subscription that was set to expire", due, err)
 	}
 }

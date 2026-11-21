@@ -956,7 +956,6 @@ CREATE TABLE IF NOT EXISTS mcp_event_subscriptions (
 	secret TEXT NOT NULL,
 	prev_secret TEXT NOT NULL DEFAULT '',
 	prev_secret_until_ms INTEGER NOT NULL DEFAULT 0,
-	refresh_before_ms INTEGER NOT NULL DEFAULT 0,
 	verified_at_ms INTEGER NOT NULL DEFAULT 0,
 	notified_through INTEGER NOT NULL DEFAULT 0,
 	failures INTEGER NOT NULL DEFAULT 0,

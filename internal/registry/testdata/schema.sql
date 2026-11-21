@@ -1,4 +1,5 @@
 -- registry schema
+-- migration 2026-11-21-event-subscriptions-never-expire
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -648,7 +649,6 @@ CREATE TABLE mcp_event_subscriptions (
 	secret TEXT NOT NULL,
 	prev_secret TEXT NOT NULL DEFAULT '',
 	prev_secret_until_ms INTEGER NOT NULL DEFAULT 0,
-	refresh_before_ms INTEGER NOT NULL DEFAULT 0,
 	verified_at_ms INTEGER NOT NULL DEFAULT 0,
 	notified_through INTEGER NOT NULL DEFAULT 0,
 	failures INTEGER NOT NULL DEFAULT 0,

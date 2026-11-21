@@ -361,7 +361,7 @@ func TestAWebhookIsRetriedWithItsEventIDAndA410EndsTheSubscription(t *testing.T)
 	w.next(t, "the event answered 410")
 	w.quiet(t, "after 410", 300*time.Millisecond)
 	testkit.Eventually(t, "the 410 removes the subscription", 5*time.Second, func() bool {
-		_, live, err := f.r.LiveEventSubscription(subscribed.ID, time.Now())
+		_, live, err := f.r.LiveEventSubscription(subscribed.ID)
 		return err == nil && !live
 	})
 	if history := f.eventHistory(t); !strings.Contains(history, "disabled") {
@@ -436,9 +436,9 @@ func TestASubscriptionSuspendedForFailingIsRetriedOnATrialAndRecovers(t *testing
 	if trial.body["data"].(map[string]any)["unread"] != float64(1) {
 		t.Fatalf("trial=%v", trial.body)
 	}
-	sub, live, err := f.r.LiveEventSubscription(subscribed.ID, time.Now())
+	sub, live, err := f.r.LiveEventSubscription(subscribed.ID)
 	testkit.Eventually(t, "the trial clears the suspension", 5*time.Second, func() bool {
-		sub, live, err = f.r.LiveEventSubscription(subscribed.ID, time.Now())
+		sub, live, err = f.r.LiveEventSubscription(subscribed.ID)
 		return err == nil && live && sub.SuspendedAt.IsZero() && sub.Failures == 0
 	})
 	f.deliver(t, "two")
@@ -484,19 +484,23 @@ func TestEventSubscribeRefusesCallbacksItCannotSafelyReach(t *testing.T) {
 	}
 }
 
-func TestEventSubscriptionsAreBoundedAndTheirLifetimeFollowsTTL(t *testing.T) {
+func TestEventSubscriptionsAreBoundedAndNeverExpireWhateverTTLIsAsked(t *testing.T) {
 	f, w, _ := eventsFixture(t)
 	session := f.eventsSession(t)
+	week, err := subscribe(t.Context(), session, w.url+"/week", w.secret, "604800000")
+	if err != nil || week.RefreshBefore != nil {
+		t.Fatalf("ttlMs of a week: %+v err=%v, want no refreshBefore", week, err)
+	}
+	if _, live, err := f.r.LiveEventSubscription(week.ID); err != nil || !live {
+		t.Fatalf("the week-long subscription: live=%v err=%v", live, err)
+	}
 	forever, err := subscribe(t.Context(), session, w.url+"/forever", w.secret, "null")
 	if err != nil || forever.RefreshBefore != nil {
 		t.Fatalf("ttlMs null: %+v err=%v", forever, err)
 	}
-	short, err := subscribe(t.Context(), session, w.url+"/short", w.secret, "1000")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if at, _ := time.Parse(time.RFC3339, *short.RefreshBefore); time.Until(at) < eventMinTTL-time.Minute {
-		t.Fatalf("ttlMs 1000 granted %s, want the floor", *short.RefreshBefore)
+	_, err = subscribe(t.Context(), session, w.url+"/malformed", w.secret, "-1")
+	if code, _ := rpcError(t, err); code != jsonrpc.CodeInvalidParams {
+		t.Fatalf("ttlMs -1: code=%d err=%v", code, err)
 	}
 	for i := 2; i < eventSubscriptionLimit; i++ {
 		if _, err := subscribe(t.Context(), session, fmt.Sprintf("%s/hook-%d", w.url, i), w.secret, ""); err != nil {
@@ -537,7 +541,7 @@ func TestACredentialChangeEndsEventDeliveryAndASubscriptionOutlivesARestart(t *t
 			if err := change(f); err != nil {
 				t.Fatal(err)
 			}
-			if _, live, err := f.r.LiveEventSubscription(subscribed.ID, time.Now()); err != nil || live {
+			if _, live, err := f.r.LiveEventSubscription(subscribed.ID); err != nil || live {
 				t.Fatalf("live=%v err=%v after the change", live, err)
 			}
 			if verified, err := f.r.EventEndpointVerified(f.scout.SessionID, w.url+"/hook", time.Time{}); err != nil || verified {

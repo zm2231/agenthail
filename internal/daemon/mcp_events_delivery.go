@@ -46,9 +46,6 @@ func (d *Daemon) runEventDeliveries(ctx context.Context) {
 	var mu sync.Mutex
 	inFlight := map[string]bool{}
 	for {
-		if _, err := d.Registry.PruneExpiredEventSubscriptions(time.Now()); err != nil {
-			d.logRuntimeError("prune event subscriptions", err)
-		}
 		due, err := d.Registry.DueEvents(time.Now(), m.eventTrialEvery)
 		if err != nil {
 			d.logRuntimeError("event deliveries", err)
@@ -106,7 +103,7 @@ func (m *remoteMCP) deliverEvent(ctx context.Context, event registry.DueEvent) {
 			case <-time.After(wait):
 			}
 		}
-		sub, live, err := m.d.Registry.LiveEventSubscription(event.ID, time.Now())
+		sub, live, err := m.d.Registry.LiveEventSubscription(event.ID)
 		if err != nil {
 			m.d.logRuntimeError("event deliveries", err)
 			return
