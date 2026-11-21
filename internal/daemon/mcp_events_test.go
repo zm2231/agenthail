@@ -47,7 +47,7 @@ type webhookReceiver struct {
 }
 
 func newWebhookReceiver(t *testing.T) *webhookReceiver {
-	w := &webhookReceiver{t: t, calls: make(chan webhookCall, 64), secret: webhookSecret, gated: make(chan struct{}, 1)}
+	w := &webhookReceiver{t: t, calls: make(chan webhookCall, 64), secret: webhookSecret, gated: make(chan struct{}, eventSubscriptionLimit)}
 	w.reply = func(call webhookCall) (int, string) {
 		if call.body["type"] == "verification" {
 			return http.StatusOK, fmt.Sprintf(`{"challenge":%q}`, call.body["challenge"])
@@ -542,5 +542,37 @@ func TestACredentialChangeEndsEventDeliveryAndASubscriptionOutlivesARestart(t *t
 			}
 			w.quiet(t, "after the credentials changed", 500*time.Millisecond)
 		})
+	}
+}
+
+func TestStoppingDeliveriesReturnsWhileEveryEndpointHangs(t *testing.T) {
+	f, w, _ := eventsFixture(t)
+	session := f.eventsSession(t)
+	for i := range eventSubscriptionLimit {
+		if _, err := subscribe(t.Context(), session, fmt.Sprintf("%s/hook-%d", w.url, i), webhookSecret, ""); err != nil {
+			t.Fatal(err)
+		}
+		w.next(t, "a verification handshake")
+	}
+	w.mu.Lock()
+	w.gate = make(chan struct{})
+	gate := w.gate
+	w.mu.Unlock()
+	t.Cleanup(func() { close(gate) })
+	stop := f.deliveries(t)
+	f.deliver(t, "one")
+	for range eventDeliveries {
+		select {
+		case <-w.gated:
+		case <-time.After(10 * time.Second):
+			t.Fatal("deliveries did not reach the hanging endpoints")
+		}
+	}
+	stopped := make(chan struct{})
+	go func() { stop(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stopping the delivery loop hung behind deliveries in flight")
 	}
 }

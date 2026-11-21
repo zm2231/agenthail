@@ -43,9 +43,8 @@ func (d *Daemon) runEventDeliveries(ctx context.Context) {
 	defer ticker.Stop()
 	var wg sync.WaitGroup
 	defer wg.Wait()
-	slots := make(chan struct{}, eventDeliveries)
+	var mu sync.Mutex
 	inFlight := map[string]bool{}
-	finished := make(chan string, eventDeliveries)
 	for {
 		if _, err := d.Registry.PruneExpiredEventSubscriptions(time.Now()); err != nil {
 			d.logRuntimeError("prune event subscriptions", err)
@@ -54,28 +53,26 @@ func (d *Daemon) runEventDeliveries(ctx context.Context) {
 		if err != nil {
 			d.logRuntimeError("event deliveries", err)
 		}
+		mu.Lock()
 		for _, event := range due {
-			if inFlight[event.ID] {
-				continue
-			}
-			select {
-			case slots <- struct{}{}:
-			default:
+			if inFlight[event.ID] || len(inFlight) >= eventDeliveries {
 				continue
 			}
 			inFlight[event.ID] = true
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				defer func() { <-slots; finished <- event.ID }()
 				m.deliverEvent(ctx, event)
+				mu.Lock()
+				delete(inFlight, event.ID)
+				mu.Unlock()
+				m.pokeEvents()
 			}()
 		}
+		mu.Unlock()
 		select {
 		case <-ctx.Done():
 			return
-		case id := <-finished:
-			delete(inFlight, id)
 		case <-ticker.C:
 		case <-m.eventWake:
 		case <-follow:
