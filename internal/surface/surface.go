@@ -455,6 +455,10 @@ type LocalTranscriptProvider interface {
 	RequiresLocalTranscript(*Session) bool
 }
 
+type TranscriptChecker interface {
+	TranscriptOnDisk(*Session) bool
+}
+
 // TranscriptContinuer is implemented by an adapter whose transcript can move
 // to a new file that continues the old one. It reports whether the session's
 // current transcript continues the one last read at trustedPath with file

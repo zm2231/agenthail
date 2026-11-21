@@ -79,3 +79,8 @@ type compressedRolloutInfo struct {
 
 func (i compressedRolloutInfo) ModTime() time.Time { return i.source.ModTime() }
 func (i compressedRolloutInfo) Sys() any           { return i.source.Sys() }
+
+func (c *Codex) TranscriptOnDisk(sess *surface.Session) bool {
+	_, _, err := c.home.statTranscript(sess)
+	return err == nil
+}

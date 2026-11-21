@@ -188,3 +188,9 @@ func (m *sessionSourceManager) shutdown() {
 }
 
 var ErrSessionSourceManagerClosed = errors.New("session source manager is closed")
+
+func (m *sessionSourceManager) open(sessionID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sources[sessionID] != nil
+}

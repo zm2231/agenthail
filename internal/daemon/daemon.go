@@ -438,6 +438,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.startTurnJudge(ctx)
 	go d.runDecisionsRevision(ctx)
 	d.background.start(d.runJournalSweeps)
+	d.background.start(d.runJournalCaps)
 	d.proxyUsageSets(time.Now())
 	uiDone := make(chan struct{})
 	go func() {
