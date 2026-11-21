@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// What the ring around a session's agent says at a glance. The row says the
 /// same thing in words, in its status line and to VoiceOver.
@@ -141,7 +142,6 @@ struct VoiceToolbarButton: View {
     var model: AgenthailIOSModel
     @EnvironmentObject private var voiceCalls: VoiceCallCoordinator
     @State private var presented = false
-    @State private var operatorID: String?
 
     var body: some View {
         let live = voiceCalls.model?.hasLocalCall == true
@@ -158,17 +158,58 @@ struct VoiceToolbarButton: View {
         .accessibilityIdentifier("voice-entry")
         .sheet(isPresented: $presented) {
             if let call = voiceCalls.model {
-                AgenthailVoiceOperatorSheet(model: call, rowMemory: model.rowMemory) { id in operatorID = model.voiceSessionID(id) }
-                    .sheet(isPresented: Binding(get: { operatorID != nil }, set: { if !$0 { operatorID = nil } })) {
-                        if let id = operatorID {
-                            NavigationStack {
-                                SessionRouteView(model: model, sessionID: id)
-                                    .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Back to Voice") { operatorID = nil } } }
-                            }
-                        }
-                    }
+                AgenthailVoiceOperatorSheet(model: call, rowMemory: model.rowMemory) { model.openSession(model.voiceSessionID($0)) }
             }
         }
         .onChange(of: model.isPaired) { _, paired in if !paired { presented = false } }
+    }
+}
+
+@MainActor
+enum PresentedSheets {
+    private static var drafts: Set<UUID> = []
+    private static var closeWhenDraftsClose = false
+
+    // A sheet whose input differs from what it opened with is never closed by a
+    // route: the session opens underneath, and the other sheets close once the
+    // last such sheet does.
+    static func closeAll() {
+        guard drafts.isEmpty else {
+            closeWhenDraftsClose = true
+            return
+        }
+        closeWhenDraftsClose = false
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            for window in scene.windows where window.isKeyWindow {
+                guard let root = window.rootViewController, root.presentedViewController != nil else { continue }
+                root.dismiss(animated: true)
+            }
+        }
+    }
+
+    fileprivate static func set(_ id: UUID, holding: Bool) {
+        if holding { drafts.insert(id) } else { drafts.remove(id) }
+    }
+
+    fileprivate static func closed(_ id: UUID) {
+        drafts.remove(id)
+        if drafts.isEmpty, closeWhenDraftsClose { closeAll() }
+    }
+}
+
+private struct HoldsDraft: ViewModifier {
+    let dirty: Bool
+    @State private var id = UUID()
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: dirty, initial: true) { _, dirty in PresentedSheets.set(id, holding: dirty) }
+            .onDisappear { PresentedSheets.closed(id) }
+    }
+}
+
+extension View {
+    func holdsDraft(_ dirty: Bool) -> some View {
+        modifier(HoldsDraft(dirty: dirty))
     }
 }

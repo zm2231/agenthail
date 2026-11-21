@@ -39,6 +39,9 @@ struct SessionPreview: View {
             model.deliveryStatus[session.id] = "Queued for the agent"
         }
         _model = State(initialValue: model)
+        if ProcessInfo.processInfo.arguments.contains("--preview-route-at-launch"), let demo = IOSAppDelegate.openedSession(["sessionId": "demo", "host": "computer"]) {
+            PhoneRoute.shared.open(OpenedNotification(session: demo, turn: nil))
+        }
     }
     var body: some View {
         AppearanceScope(appearance: model.appearance) { previewBody }
@@ -83,7 +86,14 @@ struct SessionPreview: View {
                     guard let index = ProcessInfo.processInfo.arguments.firstIndex(of: "--preview-open-turn"), index + 1 < ProcessInfo.processInfo.arguments.count,
                           let session = IOSAppDelegate.openedSession(["sessionId": "demo", "host": "computer"]) else { return }
                     try? await Task.sleep(for: .seconds(3))
-                    NotificationCenter.default.post(name: .agenthailNotificationOpened, object: OpenedNotification(session: session, turn: ProcessInfo.processInfo.arguments[index + 1]))
+                    PhoneRoute.shared.open(OpenedNotification(session: session, turn: ProcessInfo.processInfo.arguments[index + 1]))
+                }
+                .task {
+                    let arguments = ProcessInfo.processInfo.arguments
+                    guard let index = arguments.firstIndex(of: "--preview-route-after"), index + 1 < arguments.count, let seconds = Double(arguments[index + 1]),
+                          let session = IOSAppDelegate.openedSession(["sessionId": "demo", "host": "computer"]) else { return }
+                    try? await Task.sleep(for: .seconds(seconds))
+                    PhoneRoute.shared.open(OpenedNotification(session: session, turn: nil))
                 }
         } else if ProcessInfo.processInfo.arguments.contains("--preview-new") {
             NewSessionSheet(model: model)

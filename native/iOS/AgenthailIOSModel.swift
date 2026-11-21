@@ -44,7 +44,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         }
     }
     private(set) var finishedUnseen = FinishedSessions()
-    @ObservationIgnored private var sessionsOnScreen: [String: Int] = [:]
+    @ObservationIgnored private let onScreen: OnScreenSessions
     private(set) var hosts: [PairedHostStatus] = []
     /// Which transcript rows were opened in each session, kept while the app runs.
     let rowMemory = TranscriptRowMemory()
@@ -192,6 +192,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     var notificationPreferences: [NotificationPreferenceState] = []
     var notificationPreferenceProblem: String?
     var requestedSessionID: String?
+    private(set) var routeOpenings = 0
     var forgetCandidate: PairedHostStatus?
     var showPairingConfirmation = false
     var voiceHostID: String? {
@@ -288,7 +289,8 @@ final class AgenthailIOSModel: HostConnectionDelegate {
         return session(qualified)?.displayName ?? id
     }
 
-    init(autoConnect: Bool = true, session: URLSession = .shared, drops: ConnectionDrops? = .shared, composerStore: ComposerStore? = nil, notificationDefaults: UserDefaults = .standard) {
+    init(autoConnect: Bool = true, session: URLSession = .shared, drops: ConnectionDrops? = .shared, composerStore: ComposerStore? = nil, notificationDefaults: UserDefaults = .standard, onScreen: OnScreenSessions = OnScreenSessions()) {
+        self.onScreen = onScreen
         self.notificationDefaults = notificationDefaults
         networkSession = session
         connectionDrops = drops
@@ -309,6 +311,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     }
 
     init(api: AgenthailAPI, paired: Bool = false, hostID: String = "computer", hostName: String = "computer", composerStore: ComposerStore? = nil) {
+        onScreen = OnScreenSessions()
         notificationDefaults = .standard
         networkSession = .shared
         connectionDrops = nil
@@ -363,19 +366,18 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     }
 
     func sessionAppeared(_ id: String) {
-        sessionsOnScreen[id, default: 0] += 1
+        onScreen.appeared(id)
         if finishedUnseen.contains(id) { finishedUnseen.markSeen(id) }
     }
 
     func sessionDisappeared(_ id: String) {
-        guard let count = sessionsOnScreen[id] else { return }
-        sessionsOnScreen[id] = count > 1 ? count - 1 : nil
+        onScreen.disappeared(id)
     }
 
     private func trackFinishedSessions(from previous: DashboardSnapshot?) {
         guard let previous, let current = snapshot else { return }
         var next = finishedUnseen
-        next.track(previous: previous.sessions, current: current.sessions) { sessionsOnScreen[$0] != nil }
+        next.track(previous: previous.sessions, current: current.sessions) { onScreen.contains($0) }
         if next != finishedUnseen { finishedUnseen = next }
     }
 
@@ -1902,6 +1904,7 @@ final class AgenthailIOSModel: HostConnectionDelegate {
     func openSession(_ sessionID: String, turn: String? = nil) {
         let resolved = rekeys.resolve(sessionID)
         if let turn { openedTurns[resolved] = turn }
+        routeOpenings += 1
         requestedSessionID = resolved
     }
 

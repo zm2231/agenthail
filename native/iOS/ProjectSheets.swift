@@ -77,11 +77,20 @@ private struct IOSAddProjectForm: View {
     @State private var suggestions: [String] = []
     @State private var saving = false
     @State private var error: String?
+    @State private var startFolder: String?
     @Environment(\.dismiss) private var dismiss
+
+    private var dirty: Bool { !title.isEmpty || startFolder.map { folder != $0 } == true }
 
     private var path: String { folder.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
+        content
+            .onAppear { if startFolder == nil { startFolder = folder } }
+            .holdsDraft(dirty)
+    }
+
+    @ViewBuilder private var content: some View {
         Form {
             if model.creationHosts.count > 1 {
                 Picker("Computer", selection: $host) {
@@ -135,7 +144,11 @@ private struct IOSRenameProjectForm: View {
 
     private var trimmed: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    var body: some View {
+    private var dirty: Bool { title != project.state.displayName }
+
+    var body: some View { content.holdsDraft(dirty) }
+
+    @ViewBuilder private var content: some View {
         Form {
             Section {
                 TextField("Name", text: $title)
@@ -178,7 +191,11 @@ private struct IOSProjectLeadForm: View {
         project.state.checkouts.enumerated().filter { $0.element.archived != true && ["local", "connected"].contains($0.element.host.state) }.map { ($0.offset, $0.element) }
     }
 
-    var body: some View {
+    private var dirty: Bool { !name.isEmpty || surface != "claude" || checkout != 0 }
+
+    var body: some View { content.holdsDraft(dirty) }
+
+    @ViewBuilder private var content: some View {
         Form {
             Section {
                 if usable.count > 1 {

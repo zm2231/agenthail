@@ -24,12 +24,18 @@ struct NewSessionSheet: View {
         if let place { _ = hosts.select(place.host) }
         _hosts = State(initialValue: hosts)
         _cwd = State(initialValue: place?.folder ?? "")
+        startFolder = place?.folder ?? ""
     }
+
+    private let startFolder: String
+    private var dirty: Bool { !message.isEmpty || cwd != startFolder || launch != LaunchSettings() }
+
+    var body: some View { content.holdsDraft(dirty) }
 
     private var options: SessionCreationOptions? { hosts.options }
     private var hostName: String { hosts.selectedHost?.name ?? "your computer" }
 
-    var body: some View {
+    @ViewBuilder private var content: some View {
         NavigationStack {
             Form {
                 if loading { ProgressView("Loading session options") }

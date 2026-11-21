@@ -18,4 +18,22 @@ final class NotificationDelegateQueueTests: XCTestCase {
         }
         XCTAssertEqual(options, [.banner, .sound, .badge])
     }
+
+    func testTappingAFailedAnswerNoticeOpensItsSession() {
+        let notice = RequestAnswer.failureNotice(RequestAnswerFailure(URLError(.timedOut)), text: "ship it", sessionID: "s1", host: "studio")
+        XCTAssertEqual(IOSAppDelegate.openedSession(notice.userInfo), HostCatalog.qualify("studio", "s1"), "the notice names the computer, so a tap can open the session")
+    }
+
+    @MainActor
+    func testANotificationForTheSessionOnScreenOnlyBadges() {
+        let onScreen = OnScreenSessions()
+        let model = AgenthailIOSModel(autoConnect: false, onScreen: onScreen)
+        let shown = HostCatalog.qualify("studio", "s1")
+        let about: ([AnyHashable: Any]) -> UNNotificationPresentationOptions = { IOSAppDelegate.presentation($0, onScreen: onScreen.contains) }
+        model.sessionAppeared(shown)
+        XCTAssertEqual(about(["sessionId": "s1", "host": "studio"]), [.badge], "the session on screen already shows what the notification says")
+        XCTAssertEqual(about(["sessionId": "s2", "host": "studio"]), [.banner, .sound, .badge], "another session's notification still shows")
+        model.sessionDisappeared(shown)
+        XCTAssertEqual(about(["sessionId": "s1", "host": "studio"]), [.banner, .sound, .badge], "once the session leaves the screen its notifications show again")
+    }
 }

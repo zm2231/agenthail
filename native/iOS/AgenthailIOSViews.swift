@@ -159,11 +159,11 @@ struct MainTabs: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { model.decisionFeed.reload() }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .agenthailNotificationOpened)) { notification in
-            guard let opened = notification.object as? OpenedNotification else { return }
+        .onChange(of: PhoneRoute.shared.pending, initial: true) { _, _ in
+            guard let opened = PhoneRoute.shared.take() else { return }
             model.openSession(opened.session, turn: opened.turn)
-            selection = .sessions
         }
+        .onChange(of: model.routeOpenings) { _, _ in PresentedSheets.closeAll() }
     }
 }
 
@@ -911,6 +911,16 @@ struct SessionScreen: View {
                     }
                 }
             }
+            if voiceCalls.model?.hasLocalCall == true {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        voiceCalls.open()
+                        showingVoice = true
+                    } label: { Image(systemName: "phone.fill").foregroundStyle(PhonePalette.working) }
+                    .accessibilityLabel("Return to call")
+                    .accessibilityIdentifier("return-to-call")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 IOSNowButton(model: model, sessionID: session.id, showing: $showingNow)
             }
@@ -943,11 +953,11 @@ struct SessionScreen: View {
             }
         }
         .sheet(isPresented: $showingNow) {
-            PhoneHappeningNow(model: model, session: liveSession, items: items) { model.requestedSessionID = $0 }
+            PhoneHappeningNow(model: model, session: liveSession, items: items) { model.openSession($0) }
         }
         .sheet(isPresented: $showingVoice) {
             if let call = voiceCalls.model {
-                AgenthailVoiceOperatorSheet(model: call, rowMemory: model.rowMemory) { _ in }
+                AgenthailVoiceOperatorSheet(model: call, rowMemory: model.rowMemory) { model.openSession(model.voiceSessionID($0)) }
             }
         }
         .task(id: session.id) {

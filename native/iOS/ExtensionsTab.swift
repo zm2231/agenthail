@@ -282,7 +282,11 @@ struct NewExtensionForm: View {
     @State private var starting = false
     @State private var failure: String?
 
-    var body: some View {
+    private var dirty: Bool { !message.isEmpty }
+
+    var body: some View { content.holdsDraft(dirty) }
+
+    @ViewBuilder private var content: some View {
         Form {
             Section {
                 TextField("What should it show or do?", text: $message, axis: .vertical)
