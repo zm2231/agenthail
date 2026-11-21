@@ -83,6 +83,23 @@ struct TranscriptRowHoldTest {
         replaced.request(fresh: true)
         expect(!replaced.holding && replaced.id == nil && replaced.pending, "a new request with no row to hold ends the previous page's hold and stays pending, holding \(replaced.holding) row \(String(describing: replaced.id))")
 
+        let anchor = TranscriptRowAnchor()
+        var anchorTops: [String: CGFloat] = ["r20": 34646, "r21": 35178]
+        let picked = anchor.pass(offset: 34537, visible: 600, top: { anchorTops[$0] }, leading: { ("r20", 34646) })
+        expect(picked == nil && anchor.id == "r20", "a reader at rest anchors the leading row without moving, anchored \(String(describing: anchor.id))")
+        anchorTops = ["r20": 34563, "r21": 35095]
+        let shrunk = anchor.pass(offset: 34537, visible: 600, top: { anchorTops[$0] }, leading: { ("r20", 34563) })
+        expect(shrunk == 34454, "rows above the reader re-estimated 83 pt shorter move the offset with the row, target \(String(describing: shrunk))")
+        anchorTops = ["r20": 34543, "r21": 35075]
+        let twice = anchor.pass(offset: 34537, visible: 600, top: { anchorTops[$0] }, leading: { ("r20", 34543) })
+        expect(twice == 34434, "a second move before the first correction lands adds to it, target \(String(describing: twice))")
+        anchor.applied()
+        expect(anchor.pass(offset: 34200, visible: 600, top: { anchorTops[$0] }, leading: { ("r20", 34543) }) == nil, "a scroll moves only the offset, so the anchor does not undo it")
+        anchorTops["r20"] = 30000
+        expect(anchor.pass(offset: 34200, visible: 600, top: { anchorTops[$0] }, leading: { ("r21", 35075) }) == nil && anchor.id == "r21", "a row the reader scrolled away from is replaced by the leading row in view, anchored \(String(describing: anchor.id))")
+        anchor.release()
+        expect(anchor.id == nil, "a released anchor holds nothing")
+
         let once = TranscriptRowHold()
         once.arm("m120", above: 71, before: 39, fresh: true)
         _ = once.pass(TranscriptPass(leadingChanged: true, resting: true, following: false, content: 4388))

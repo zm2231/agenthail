@@ -99,6 +99,10 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                     settleHold { $0.scrollTo(y: Self.scrollY(target, in: new)) }
                     return
                 }
+                if let target = anchorTarget(new, inserted: inserted) {
+                    settleAnchor(target, in: new)
+                    return
+                }
                 if !resized {
                     if following, resting, layout.resized, !Self.atBottom(new) {
                         // Layout that moves the offset in the same pass as a resize, as a lazy stack re-measuring rows does, is not the reader leaving the bottom.
@@ -167,8 +171,28 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     }
 
     private func rowMoved(_ id: String) {
+        if id == layout.anchor.id, let geometry = layout.geometry, let target = anchorTarget(geometry, inserted: false) {
+            return settleAnchor(target, in: geometry)
+        }
         guard let rows, !following, layout.holdingRow, id == layout.heldRow else { return }
         restoreHeld(id, in: rows)
+    }
+
+    // Only a reader at rest with no other hold in force; anything else lets the next resting pass pick the row afresh.
+    private func anchorTarget(_ geometry: ScrollGeometry, inserted: Bool) -> CGFloat? {
+        guard let rows, !following, !inserted, resting, !layout.holding, layout.revealed == nil, !layout.olderPending else {
+            layout.anchor.release()
+            return nil
+        }
+        let bottom = geometry.contentOffset.y + geometry.containerSize.height
+        return layout.anchor.pass(offset: geometry.contentOffset.y, visible: geometry.containerSize.height, top: rows.top, leading: { rows.leading(above: bottom) })
+    }
+
+    private func settleAnchor(_ target: CGFloat, in geometry: ScrollGeometry) {
+        settleHold { position in
+            position.scrollTo(y: Self.scrollY(target, in: geometry))
+            layout.anchor.applied()
+        }
     }
 
     // A held row that is not laid out, or still has its pre-insert top, is built by scrolling to it; it reports again once laid out.
@@ -252,6 +276,7 @@ private final class Layout {
     private var resizedTurn: Int?
     private var fromEnd: (distance: CGFloat, until: ContinuousClock.Instant, content: CGFloat, landing: Bool)?
     let row = TranscriptRowHold()
+    let anchor = TranscriptRowAnchor()
     var revealed: RevealedRow?
     private var check: Task<Void, Never>?
 
@@ -286,7 +311,10 @@ private final class Layout {
 
     private var sequence = 0
 
-    private func renew() { sequence &+= 1 }
+    private func renew() {
+        sequence &+= 1
+        anchor.release()
+    }
 
     // Only the newest queued restore runs, and a busy main thread can run it after the settle window, so the window starts once it has.
     func queueRestore() -> Int {
