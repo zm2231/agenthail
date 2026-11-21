@@ -942,4 +942,34 @@ BEGIN UPDATE mcp_remote_epoch SET epoch=epoch+1 WHERE id=1; END;
 DROP TRIGGER IF EXISTS mcp_access_epoch_removed;
 CREATE TRIGGER mcp_access_epoch_removed AFTER DELETE ON mcp_access
 BEGIN UPDATE mcp_remote_epoch SET epoch=epoch+1 WHERE id=1; END;
+CREATE TABLE IF NOT EXISTS mcp_event_subscriptions (
+	id TEXT PRIMARY KEY,
+	identity_id TEXT NOT NULL REFERENCES identity_remote(identity_id) ON DELETE CASCADE,
+	token_hash TEXT NOT NULL,
+	name TEXT NOT NULL,
+	args TEXT NOT NULL,
+	url TEXT NOT NULL,
+	secret TEXT NOT NULL,
+	prev_secret TEXT NOT NULL DEFAULT '',
+	prev_secret_until_ms INTEGER NOT NULL DEFAULT 0,
+	refresh_before_ms INTEGER NOT NULL DEFAULT 0,
+	verified_at_ms INTEGER NOT NULL DEFAULT 0,
+	notified_through INTEGER NOT NULL DEFAULT 0,
+	failures INTEGER NOT NULL DEFAULT 0,
+	suspended_at_ms INTEGER NOT NULL DEFAULT 0,
+	created_at_ms INTEGER NOT NULL,
+	UNIQUE(identity_id,url,name,args)
+);
+DROP TRIGGER IF EXISTS mcp_event_subscriptions_credentials_changed;
+CREATE TRIGGER mcp_event_subscriptions_credentials_changed AFTER UPDATE OF token_hash,access_client_id,access_email ON identity_remote
+BEGIN DELETE FROM mcp_event_subscriptions WHERE identity_id=NEW.identity_id; END;
+DROP TRIGGER IF EXISTS mcp_event_subscriptions_access_added;
+CREATE TRIGGER mcp_event_subscriptions_access_added AFTER INSERT ON mcp_access
+BEGIN DELETE FROM mcp_event_subscriptions; END;
+DROP TRIGGER IF EXISTS mcp_event_subscriptions_access_changed;
+CREATE TRIGGER mcp_event_subscriptions_access_changed AFTER UPDATE OF team,aud ON mcp_access
+BEGIN DELETE FROM mcp_event_subscriptions; END;
+DROP TRIGGER IF EXISTS mcp_event_subscriptions_access_removed;
+CREATE TRIGGER mcp_event_subscriptions_access_removed AFTER DELETE ON mcp_access
+BEGIN DELETE FROM mcp_event_subscriptions; END;
 `
