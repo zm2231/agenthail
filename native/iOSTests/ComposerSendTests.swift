@@ -1111,6 +1111,33 @@ final class ComposerSendTests: XCTestCase {
                             readOnlyReason: "", cwd: detail.session.cwd)
     }
 
+    private let keptRefusal = #"{"error":{"code":"conflict","message":"steer requires a message, not a slash command"},"askId":"ask-1"}"#
+    private let deleteOffered = #"{"permissionMode":"","requests":[{"id":"ask-1","kind":"ask","tool":"","questions":[{"question":"Message not delivered","header":"","multiSelect":false,"options":[{"id":"delete","label":"Delete","description":""},{"id":"dismiss","label":"Dismiss","description":""}]}]}]}"#
+
+    func testDeleteOnARefusedSendsPinnedAskRemovesTheRefusedSend() async throws {
+        ComposerSendProtocol.state.script([.answer(409, keptRefusal), .answer(200, #"{"ok":true,"result":{"requestId":"ask-1","outcome":"answered","choice":"delete"}}"#)])
+        ComposerSendProtocol.state.listRequests(deleteOffered)
+        let (model, session) = try makeModel()
+        model.composer = "/Volumes/4/CF holds 680 GiB"
+        model.send(to: session)
+        try await waitUntil { model.refusedSends[session.id]?.ask?.offersDelete == true }
+        let request = SessionRequest(id: "ask-1", kind: "ask", tool: "", questions: [SessionRequest.Question(question: "Message not delivered", header: "", multiSelect: false, options: [SessionRequest.Option(id: "delete", label: "Delete", description: "")])])
+        await model.respond(to: request, sessionID: session.id, decision: .choose(FailedSendAsk.delete))
+        XCTAssertNil(model.refusedSends[session.id], "Delete on the pinned ask removes the refused send it named")
+    }
+
+    func testDeleteOnARefusedSendWhoseAskWasAlreadySettledRemovesIt() async throws {
+        ComposerSendProtocol.state.script([.answer(409, keptRefusal), .answer(409, #"{"ok":false,"error":{"code":"stale","message":"this request was already answered or has expired"}}"#)])
+        ComposerSendProtocol.state.listRequests(deleteOffered)
+        let (model, session) = try makeModel()
+        model.composer = "/Volumes/4/CF holds 680 GiB"
+        model.send(to: session)
+        try await waitUntil { model.refusedSends[session.id]?.canDelete == true }
+        model.deleteRefusedSend(in: session.id)
+        try await waitUntil { model.refusedSends[session.id] == nil }
+        XCTAssertNil(model.operationError, "an ask settled elsewhere is not reported as a failure")
+    }
+
     private func makeModel(store: ComposerStore? = nil) throws -> (model: AgenthailIOSModel, session: SessionState) {
         let model = AgenthailIOSModel(api: makeAPI(), composerStore: store)
         let session = try makeSession()
@@ -1150,11 +1177,14 @@ private final class ComposerSendProtocol: URLProtocol, @unchecked Sendable {
         private var recorded: [Attempt] = []
         private var uploadSteps: [UploadStep] = []
         private var uploadNames: [String] = []
+        private var requestsBody = "{}"
 
         var attempts: [Attempt] { lock.withLock { recorded } }
         var uploads: [String] { lock.withLock { uploadNames } }
 
-        func reset() { lock.withLock { steps = []; recorded = []; uploadSteps = []; uploadNames = [] } }
+        func reset() { lock.withLock { steps = []; recorded = []; uploadSteps = []; uploadNames = []; requestsBody = "{}" } }
+        func listRequests(_ body: String) { lock.withLock { requestsBody = body } }
+        var requests: String { lock.withLock { requestsBody } }
         func script(_ steps: [Step]) { lock.withLock { self.steps = steps } }
         func scriptUploads(_ steps: [UploadStep]) { lock.withLock { uploadSteps = steps } }
 
@@ -1183,6 +1213,7 @@ private final class ComposerSendProtocol: URLProtocol, @unchecked Sendable {
 
     private func answer() {
         if request.url?.path == "/api/v1/uploads" { return answerUpload() }
+        if request.url?.path == "/api/v1/requests" { return respond(200, Self.state.requests) }
         guard request.url?.path == "/api/v1/actions" else { return respond(200, "{}") }
         switch Self.state.next(Attempt(key: request.value(forHTTPHeaderField: "Idempotency-Key"), raw: requestBody() ?? Data())) {
         case .answer(let status, let text): respond(status, text)
