@@ -3,10 +3,13 @@ package surfaces
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func finishedCodexThread(t *testing.T) (*codextest.Daemon, *Codex, surface.Session) {
@@ -67,4 +70,17 @@ func TestCodexRefusesAMarkAgainstAStaleRevision(t *testing.T) {
 	if current := daemon.ReadState(session.ID); current["firstUnread"] == nil {
 		t.Fatalf("a refused mark changed the receipt: %v", current)
 	}
+}
+
+func TestCodexWatchWakesTheCatalogWhenAReceiptChanges(t *testing.T) {
+	daemon := startManagedCodex(t, nil)
+	id := "019f004a-0000-7000-8000-0000000000d2"
+	daemon.AddThread(codextest.Thread{ID: id, Cwd: t.TempDir(), Turns: []codextest.Turn{{ID: "turn-1", Status: "inProgress"}}})
+	daemon.Load(id)
+	var wakes atomic.Int32
+	watchedCodexWaking(t, id, func() { wakes.Add(1) })
+	testkit.Eventually(t, "the watch to attach", 5*time.Second, func() bool { return wakes.Load() > 0 })
+	attached := wakes.Load()
+	daemon.CompleteTurn(id, "done")
+	testkit.Eventually(t, "the finished turn's receipt to wake the catalog", 5*time.Second, func() bool { return wakes.Load() > attached })
 }

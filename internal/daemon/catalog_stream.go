@@ -464,6 +464,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 		d.correlateObservedTerminalLaunches(locateCtx, sessions)
 		locateCancel()
 		openSessions := surface.OpenSessions(ctx, adapter, sessions)
+		listedReads := listedReadStates(sessions, view)
 		source, _ := adapter.(surface.LocalStatusSource)
 		for _, session := range sessions {
 			if session.Runtime == nil {
@@ -496,7 +497,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 				}
 			})
 		}
-		d.recordReadStates(sessions, observedAt)
+		d.recordReadStates(listedReads, observedAt)
 		d.forgetCatalogLive(adapter.Name(), seen)
 		d.followLiveSessions(adapter.Name(), sessions, openSessions, complete)
 		var recordErr error
