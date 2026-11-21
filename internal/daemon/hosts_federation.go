@@ -788,12 +788,16 @@ func (d *Daemon) applyHostCatalogEvent(host *pairedHost, envelope catalogStreamE
 		}
 	case "coordinator.removed":
 		var payload struct {
-			ProjectID string `json:"projectId"`
+			ProjectID   string `json:"projectId"`
+			MovedToHost string `json:"movedToHost"`
 		}
 		if err := json.Unmarshal(envelope.Data, &payload); err != nil {
 			return err
 		}
 		if entry, ok := mirroredCoordinator(host.record.ID, registry.CoordinatorEntry{ProjectID: payload.ProjectID, Name: "-"}); ok {
+			if to, found := d.pairedHost(payload.MovedToHost); found && to != host {
+				return d.Registry.HandOverHostCoordinator(host.record.ID, to.record.ID, entry.ProjectID)
+			}
 			return d.Registry.RemoveHostCoordinator(host.record.ID, entry.ProjectID)
 		}
 	case "project.linked":

@@ -138,7 +138,7 @@ func insertMovedCoordinatorTx(tx *sql.Tx, conversation, alias, from string, lead
 	return err
 }
 
-func dropMovedCoordinatorTx(tx *sql.Tx, conversation string, now time.Time) error {
+func dropMovedCoordinatorTx(tx *sql.Tx, conversation, movedTo string, now time.Time) error {
 	lead, err := movedCoordinator(tx, conversation)
 	if err != nil || lead == nil {
 		return err
@@ -151,9 +151,36 @@ func dropMovedCoordinatorTx(tx *sql.Tx, conversation string, now time.Time) erro
 	if err := recordCoordinatorHistoryTx(tx, lead.ProjectID, "moved", lead.Name, "", lead.Name, conversation, "", now); err != nil {
 		return err
 	}
-	payload, _ := json.Marshal(map[string]string{"projectId": lead.ProjectID})
+	payload, _ := json.Marshal(map[string]string{"projectId": lead.ProjectID, "movedToHost": movedTo})
 	_, _, err = appendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("coordinator.removed:%s:%d", lead.ProjectID, now.UnixNano()), Type: "coordinator.removed", EntityID: lead.ProjectID, Payload: payload})
 	return err
+}
+
+// HandOverHostCoordinator moves the coordinator a paired host lists for a
+// project to the host its session moved to, until that host lists its own,
+// so the project keeps its lead in between.
+func (r *Registry) HandOverHostCoordinator(fromHostID, toHostID, projectID string) error {
+	if fromHostID == "" || toHostID == "" {
+		return fmt.Errorf("a mirrored coordinator needs its host")
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var sessionID string
+	err = tx.QueryRow(`SELECT session_id FROM coordinators WHERE host_id=? AND project_id=? AND NOT EXISTS(SELECT 1 FROM coordinators WHERE host_id=? AND project_id=?)`, fromHostID, projectID, toHostID, projectID).Scan(&sessionID)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		_, err = tx.Exec(`DELETE FROM coordinators WHERE host_id=? AND project_id=?`, fromHostID, projectID)
+	case err == nil:
+		_, conversation, _ := hosts.Split(sessionID)
+		_, err = tx.Exec(`UPDATE coordinators SET host_id=?,session_id=?,moved_from=? WHERE host_id=? AND project_id=?`, toHostID, hosts.Qualify(toHostID, conversation), fromHostID, fromHostID, projectID)
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *Registry) MovingOut(session string) (bool, error) {

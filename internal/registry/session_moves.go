@@ -525,7 +525,7 @@ func (r *Registry) completeMoveOutTx(move SessionMove, items []MovedQueueItem, h
 	if err := dropMovedChannelsTx(tx, move.Conversation); err != nil {
 		return nil, false, err
 	}
-	if err := dropMovedCoordinatorTx(tx, move.Conversation, r.now()); err != nil {
+	if err := dropMovedCoordinatorTx(tx, move.Conversation, move.PeerHost, r.now()); err != nil {
 		return nil, false, err
 	}
 	if err := dropMovedRelaysTx(tx, move.Conversation); err != nil {
