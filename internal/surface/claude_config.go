@@ -69,19 +69,27 @@ func ClaudeConfigRoots(home string) ([]string, error) {
 }
 
 func claudeConfigRootSources(home string) ([]claudeRootSource, error) {
+	return claudeRoots.sources(home)
+}
+
+func resolveClaudeConfigRootSources(home string) ([]claudeRootSource, []string, error) {
 	configured, err := configuredClaudeRoots(home)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	daemonRoot, err := recordedDaemonClaudeRoot(home)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	primary := claudeRootSource{path: filepath.Clean(ClaudeConfigDir(home)), source: ClaudeRootFromDefault}
 	if strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")) != "" {
 		primary.source = ClaudeRootFromEnv
 	}
 	roots := []claudeRootSource{primary}
+	candidates := []string{primary.path}
+	if daemonRoot != "" {
+		candidates = append(candidates, daemonRoot)
+	}
 	seen := map[string]bool{claudeRootIdentity(primary.path): true}
 	if daemonRoot != "" && !seen[claudeRootIdentity(daemonRoot)] {
 		seen[claudeRootIdentity(daemonRoot)] = true
@@ -89,13 +97,14 @@ func claudeConfigRootSources(home string) ([]claudeRootSource, error) {
 	}
 	for _, root := range configured {
 		if strings.TrimSpace(root) == "" || !filepath.IsAbs(root) {
-			return nil, fmt.Errorf("Agenthail config %s: claudeConfigDirs entries must be absolute paths, got %q", AgenthailConfigPath(home), root)
+			return nil, nil, fmt.Errorf("Agenthail config %s: claudeConfigDirs entries must be absolute paths, got %q", AgenthailConfigPath(home), root)
 		}
 		root = filepath.Clean(root)
+		candidates = append(candidates, root)
 		if info, err := os.Stat(root); err == nil && !info.IsDir() {
-			return nil, fmt.Errorf("Agenthail config %s: Claude config directory %s is not a directory", AgenthailConfigPath(home), root)
+			return nil, nil, fmt.Errorf("Agenthail config %s: Claude config directory %s is not a directory", AgenthailConfigPath(home), root)
 		} else if err != nil && !os.IsNotExist(err) {
-			return nil, fmt.Errorf("Agenthail config %s: %w", AgenthailConfigPath(home), err)
+			return nil, nil, fmt.Errorf("Agenthail config %s: %w", AgenthailConfigPath(home), err)
 		}
 		identity := claudeRootIdentity(root)
 		if seen[identity] {
@@ -104,7 +113,7 @@ func claudeConfigRootSources(home string) ([]claudeRootSource, error) {
 		seen[identity] = true
 		roots = append(roots, claudeRootSource{path: root, source: ClaudeRootFromConfig})
 	}
-	return roots, nil
+	return roots, candidates, nil
 }
 
 func configuredClaudeRoots(home string) ([]string, error) {
