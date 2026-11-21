@@ -53,3 +53,12 @@ func refuseUnknownHolders(conversation string, unreadable []unreadableRecord) er
 	first := unreadable[0]
 	return surface.DeliveryUnavailable(fmt.Errorf("%w: Claude process %d runs but its session record %s cannot be read, so it may hold conversation %s; Agenthail does not open a second copy in the Claude host until the record reads", surface.ErrDeliveryHeld, first.pid, first.path, conversation))
 }
+
+func (c *Claude) UnreadableRecord(pid int) (string, bool) {
+	for _, record := range c.unreadableRecords() {
+		if record.pid == pid {
+			return record.path, true
+		}
+	}
+	return "", false
+}

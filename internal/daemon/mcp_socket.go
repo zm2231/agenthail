@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -38,6 +39,10 @@ type processSessions interface {
 	ProcessSession(pid int) string
 }
 
+type processRecords interface {
+	UnreadableRecord(pid int) (string, bool)
+}
+
 type processThreads interface {
 	ProcessThreads(pid int) []string
 }
@@ -49,6 +54,7 @@ type socketAnswer struct {
 	tools   bool
 	refusal *mcpRefusal
 	status  int
+	unnamed string
 }
 
 type mcpAnswerKey struct{}
@@ -95,13 +101,15 @@ func (d *Daemon) startMCPSocket() (func(), error) {
 // live session process among its ancestors, or a Codex process as its parent;
 // any other process gets a server with no tools.
 func (d *Daemon) mcpSocketHandler() http.Handler {
-	empty, full := d.newBareMCPServer(), d.newMCPServer()
+	empty, full, unnamed := d.newBareMCPServer(), d.newMCPServer(), d.newUnnamedMCPServer()
 	forCaller := d.mcpServerFor(full)
 	stream := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		answer, _ := r.Context().Value(mcpAnswerKey{}).(socketAnswer)
 		switch {
 		case answer.caller != nil:
 			return forCaller(r)
+		case answer.unnamed != "":
+			return unnamed
 		case !answer.tools:
 			return empty
 		}
@@ -166,23 +174,29 @@ func readMCPRequest(r *http.Request) ([]byte, error) {
 
 func (d *Daemon) socketCaller(ctx context.Context, request mcpSocketRequest) socketAnswer {
 	peer := request.peer
-	if peer.PID == 0 || peer.UID != os.Getuid() {
-		return socketAnswer{}
+	switch {
+	case peer.PID == 0:
+		return d.unnamedCaller(peer.PID, "the daemon could not read which process is calling over its socket")
+	case peer.UID != os.Getuid():
+		return d.unnamedCaller(peer.PID, "the calling process belongs to another user")
 	}
 	if threads := d.codexParentThreads(peer.PID); len(threads) > 0 {
 		return d.codexCaller(ctx, request, threads)
 	}
-	sessionID := d.processSession(peer.PID)
+	sessionID, why := d.processSession(peer.PID)
 	if sessionID == "" {
-		return socketAnswer{}
+		return d.unnamedCaller(peer.PID, why)
 	}
 	record, err := d.awaitLocalSession(ctx, sessionID)
 	if sessionLookupFailed(err) {
 		d.logMCPAuthRefusal("socket", sessionID, "busy", err)
 		return socketAnswer{tools: true, refusal: mcpCheckFailed()}
 	}
+	if errors.Is(err, errMCPSessionEnded) {
+		return d.unnamedCaller(peer.PID, "its session "+sessionID+" has moved to another host or been archived")
+	}
 	if err != nil {
-		return socketAnswer{}
+		return d.unnamedCaller(peer.PID, "its session "+sessionID+" is not registered with the daemon yet")
 	}
 	caller, err := d.agentCaller(record)
 	if err != nil {
@@ -280,22 +294,29 @@ func mcpRequestThread(request mcpSocketRequest) (method, thread string, err erro
 	return message.Method, message.Params.Meta.ThreadID, nil
 }
 
-func (d *Daemon) processSession(pid int) string {
+func (d *Daemon) processSession(pid int) (string, string) {
+	why := "no Claude or Codex session is among the calling process's parents"
+	unreadable := false
 	for range mcpSocketAncestors {
 		parent, err := peerproc.Parent(pid)
 		if err != nil || parent <= 1 {
-			return ""
+			break
 		}
 		pid = parent
 		for _, adapter := range d.Surfaces {
 			if owner, ok := adapter.(processSessions); ok {
 				if id := owner.ProcessSession(pid); id != "" {
-					return id
+					return id, ""
+				}
+			}
+			if records, ok := adapter.(processRecords); ok && !unreadable {
+				if path, found := records.UnreadableRecord(pid); found {
+					why, unreadable = fmt.Sprintf("the session record %s of Claude process %d cannot be read", path, pid), true
 				}
 			}
 		}
 	}
-	return ""
+	return "", why
 }
 
 // awaitLocalSession waits for discovery to register a session that has just
