@@ -22,7 +22,7 @@ mkdir -p "$REPO"
   git init -q
   for file in README.md SECURITY.md docs/native-apps.md internal/daemon/dashboard/index.html internal/daemon/dashboard/js/main.js \
     native/AgenthailApp.swift native/macOS/DesktopWindow.swift native/macOS/DesktopSettings.swift native/macOS/CommandPalette.swift \
-    native/macOS/NewSession.swift native/iOS/AgenthailIOSViews.swift native/AgenthailAPI.swift native/project.yml \
+    native/macOS/NewSession.swift native/iOS/IOSRoot.swift native/iOS/IOSConversationList.swift native/iOS/IOSSessionScreen.swift native/iOS/IOSComposer.swift native/iOS/IOSTimeline.swift native/iOS/IOSSessionInspector.swift native/iOS/IOSSettings.swift native/iOS/IOSSheets.swift native/AgenthailAPI.swift native/project.yml \
     native/Agenthail.xcodeproj/project.pbxproj .github/workflows/ci.yml push-relay/wrangler.toml skills/x/SKILL.md ci/x scripts/x.sh; do
     mkdir -p "$(dirname "$file")"
     echo "plain text" >"$file"
