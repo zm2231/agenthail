@@ -345,16 +345,18 @@ func TestADeliveryThatFinishesAfterTheDueReadIsNotSentAgain(t *testing.T) {
 	w.next(t, "the verification handshake")
 	m := f.d.remoteMCP()
 	var armed atomic.Bool
-	listed := make(chan struct{})
+	listed, drain, drained := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	m.afterDueRead = func() {
 		if !armed.CompareAndSwap(true, false) {
 			return
 		}
+		close(listed)
+		<-drain
 		select {
 		case <-m.eventWake:
 		default:
 		}
-		close(listed)
+		close(drained)
 		<-m.eventWake
 	}
 	w.mu.Lock()
@@ -375,6 +377,8 @@ func TestADeliveryThatFinishesAfterTheDueReadIsNotSentAgain(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the loop did not read the due events while the delivery was held")
 	}
+	close(drain)
+	<-drained
 	close(gate)
 	if told := w.next(t, "the held event"); told.body["data"].(map[string]any)["unread"] != float64(1) {
 		t.Fatalf("held event=%v", told.body)
