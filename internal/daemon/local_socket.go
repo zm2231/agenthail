@@ -21,6 +21,10 @@ type hostedProcesses interface {
 	HostedProcessSession(ctx context.Context, pid int) string
 }
 
+// unnamedSession stands for a session process whose record cannot be read: an
+// agent runs there, though Agenthail cannot say which.
+const unnamedSession = "\x00unnamed"
+
 // startLocalSocket serves what only the person may do. A dashboard token is
 // readable by every process the person runs, agents included, so a write
 // here is told apart by the process that makes it, which the kernel names.
@@ -59,7 +63,8 @@ func (d *Daemon) startLocalSocket() (func(), error) {
 
 // agentProcessSession names the session pid runs inside: the process itself
 // or any ancestor is a session's Claude process, a Codex process holding a
-// thread, or a Claude process a Claude host started.
+// thread, or a Claude process a Claude host started. A live Claude process
+// whose session record cannot be read is a session too, named unnamedSession.
 func (d *Daemon) agentProcessSession(ctx context.Context, pid int) string {
 	owns := func(pid int) string {
 		if id := d.claudeProcessSession(pid); id != "" {
@@ -74,6 +79,9 @@ func (d *Daemon) agentProcessSession(ctx context.Context, pid int) string {
 					return id
 				}
 			}
+		}
+		if _, found := d.unreadableRecord(pid); found {
+			return unnamedSession
 		}
 		return ""
 	}
@@ -90,7 +98,11 @@ func (d *Daemon) localAgentRolesHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if r.Method == http.MethodPost {
-		if session := d.agentProcessSession(r.Context(), peer.PID); session != "" {
+		if session := d.agentProcessSession(r.Context(), peer.PID); session == unnamedSession {
+			d.tellPerson(r.Context(), "Agent role change refused", "A command run inside an agent session Agenthail could not name tried to change agent roles.", "", "agent.role.refused")
+			writeAPIError(w, http.StatusForbidden, "person_only", "Agent roles are the person's to change, and this command runs inside an agent session Agenthail could not name: a Claude process among its parents has a session record that cannot be read. Run it from a terminal of your own.")
+			return
+		} else if session != "" {
 			d.tellPerson(r.Context(), "Agent role change refused", "A command run inside session "+d.resolveDisplay(session)+" tried to change agent roles.", session, "agent.role.refused")
 			writeAPIError(w, http.StatusForbidden, "person_only", "Agent roles are the person's to change, and this command runs inside session "+session+". Run it from a terminal of your own.")
 			return

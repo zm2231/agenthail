@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/agentroles"
@@ -71,5 +72,29 @@ func TestAnAgentCannotRaiseItsOwnRoleWhileThePersonsTerminalCan(t *testing.T) {
 	}
 	if records, err := reg.AgentRoles(); err != nil || len(records) != 0 {
 		t.Fatalf("a refused write left roles %v (%v)", records, err)
+	}
+}
+
+func TestAnAgentWhoseClaudeRecordIsTornCannotChangeRoles(t *testing.T) {
+	d, reg, root, _ := mcpSocketDaemon(t)
+	stop, err := d.startLocalSocket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(stop)
+	registerClaude(t, reg, "claude-one")
+	record := filepath.Join(root, "sessions", strconv.Itoa(os.Getppid())+".json")
+	if err := os.MkdirAll(filepath.Dir(record), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(record, []byte(`{"pid":`+strconv.Itoa(os.Getppid())+`,"sessionId":"claude-o`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	raise := AgentRoleRequest{Op: "assign", Name: agentroles.Operator, Kind: registry.AssignSession, Target: "claude-one"}
+	if status, body := localSocketPost(t, raise); status != http.StatusForbidden || !strings.Contains(body, "could not name") {
+		t.Fatalf("a command below a Claude process whose record is torn got %d %s", status, body)
+	}
+	if assignments, err := reg.AgentRoleAssignments(); err != nil || len(assignments) != 0 {
+		t.Fatalf("a refused write left assignments %v (%v)", assignments, err)
 	}
 }
