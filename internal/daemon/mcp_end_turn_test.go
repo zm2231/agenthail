@@ -68,6 +68,9 @@ func TestEndTurnNamesEveryIdItFindsByItsOwnText(t *testing.T) {
 		"W451 and A12 are done":                                  {"names a work item id (W451, A12)"},
 		"r2 passed; the second review round and round 4 are too": {"names a review round (r2, second review round, round 4)"},
 		"Landed 73fa66e6a and a0768f1f1":                         {"names a commit hash or id (73fa66e6a, a0768f1f1)"},
+		"Limit fix passed review; gate running before the push":  {"names a step of the work (review, gate, before the push)", "say where the work stands in their words"},
+		"Rebased, re-reviewed and pushed for the lead to merge":  {"names a step of the work (Rebased, re-reviewed, pushed, the lead)"},
+		"The verdict is SHIP":                                    {"names a step of the work (SHIP)"},
 	}
 	f.turn(t, f.from, "turn-1", func() {
 		for headline, wants := range cases {
@@ -82,7 +85,7 @@ func TestEndTurnNamesEveryIdItFindsByItsOwnText(t *testing.T) {
 				}
 			}
 		}
-		for _, plain := range []string{"The R2 bucket holds the 3rd party build for the W3C demo", "Q&A and A/B tests on #hashtags passed"} {
+		for _, plain := range []string{"The R2 bucket holds the 3rd party build for the W3C demo", "Q&A and A/B tests on #hashtags passed", "Remote control is merged, released and installed; ships to phones next", "A lead can now steer its project's sessions; phone push names them"} {
 			out, _ := callMCP(t, f.person, "agenthail_end_turn", map[string]any{"headline": plain})
 			if then, _ := out["then"].(string); then != endTurnThen {
 				t.Errorf("for %q the result is %q", plain, then)
