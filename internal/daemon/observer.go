@@ -338,7 +338,7 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 	canDrainSteer := canSteerQueued && observation.Status == surface.StatusBusy && observation.WaitingOn == nil
 	canDrainPeer := observation.Status == surface.StatusBusy && surface.RouteFor(adapter, session, "") == surface.RoutePeer
 	if canDrainQueue || canDrainPeer || canDrainSteer {
-		queued := d.Registry.QueueCount(session.ID)
+		before, markErr := d.Registry.QueueMark(session.ID)
 		if canDrainQueue {
 			d.drainMessageQueue(ctx, adapter, session)
 		} else {
@@ -349,7 +349,7 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 				d.drainSteerMessageQueue(ctx, adapter, session)
 			}
 		}
-		if queued > 0 {
+		if after, err := d.Registry.QueueMark(session.ID); markErr != nil || err != nil || after != before {
 			d.publishEvent("state.changed", session.ID, map[string]string{"source": "queue"})
 		}
 	}
