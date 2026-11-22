@@ -59,3 +59,34 @@ func TestEndTurnShowsTheAgentTheCutHeadlineAndWhatItNamesWithoutRefusingIt(t *te
 		t.Fatalf("the replacing headline is not the one shown: %+v", end)
 	}
 }
+
+func TestEndTurnNamesEveryIdItFindsByItsOwnText(t *testing.T) {
+	f := newAskFixture(t)
+	cases := map[string][]string{
+		"PR 12 fixes #13, then pull/14":                          {"names a PR or issue number (PR 12, #13, pull/14)"},
+		"Finished fix, #123":                                     {"names a PR or issue number (#123)"},
+		"W451 and A12 are done":                                  {"names a work item id (W451, A12)"},
+		"r2 passed; the second review round and round 4 are too": {"names a review round (r2, second review round, round 4)"},
+		"Landed 73fa66e6a and a0768f1f1":                         {"names a commit hash or id (73fa66e6a, a0768f1f1)"},
+	}
+	f.turn(t, f.from, "turn-1", func() {
+		for headline, wants := range cases {
+			out, refused := callMCP(t, f.person, "agenthail_end_turn", map[string]any{"headline": headline})
+			if refused {
+				t.Fatalf("%q was refused: %v", headline, out)
+			}
+			then, _ := out["then"].(string)
+			for _, want := range wants {
+				if !strings.Contains(then, want) {
+					t.Errorf("for %q the result %q does not say %q", headline, then, want)
+				}
+			}
+		}
+		for _, plain := range []string{"The R2 bucket holds the 3rd party build for the W3C demo", "Q&A and A/B tests on #hashtags passed"} {
+			out, _ := callMCP(t, f.person, "agenthail_end_turn", map[string]any{"headline": plain})
+			if then, _ := out["then"].(string); then != endTurnThen {
+				t.Errorf("for %q the result is %q", plain, then)
+			}
+		}
+	})
+}
