@@ -327,10 +327,32 @@ be reached. The reasons, in the order they are checked: the session ended
 (its Claude process is gone, as when a retiring host closed it), off for the
 root, not idle (a status that never left busy shows here), waiting on a prompt, a
 background task running, the root at a usage limit, no compact for the
-session, and a queued or in-flight item. The holds live in the daemon's memory
+session, another session under the root compacting near its usage limit,
+and a queued or in-flight item. The holds live in the daemon's memory
 and start empty when it restarts. A session that a retiring Claude host still
 runs stays there while it could be compacted, and the same pass releases it
 otherwise (see [Claude host](claude-host.md#replacement)).
+
+A root near its usage limit does not wait the 50 minutes. A session that
+waits out the limit while its cache expires pays to write its whole context
+again on its first turn after the reset, so `Daemon.compactBeforeLimits`
+(`internal/daemon/prelimit_compaction.go`) compacts it while the cache is warm.
+The root's binding window is the fuller of its 5-hour and weekly windows, from
+the cached claude.ai reading; for a root through a proxy it is the proxy's own
+fill (`proxyacct.Fill`): the least-full usable Claude account's fuller window
+as a percent of its ceiling, with the earliest moment an account frees up as
+its reset, since the proxy picks the account. When that window is at or past
+the root's `preLimitPercent` (90 by default, 0 for off) and under 98%, where
+the compact itself could be refused, the pass queues one compact for the
+largest session that passes every rule above except the 50 minutes, and whose
+cache would expire before the window resets. A root waits while any of its
+sessions has an idle compact queued or in flight, so its sessions compact one
+at a time, largest first. While the window is at or past the percent, a
+session that reaches its 50 minutes waits the same way, held as another
+session under this root compacting near its usage limit. Each is logged as `queued pre-limit compaction for
+<session> at <tokens> tokens: <root> <window> at <percent>%, resets <time>,
+cache expires <time>`. It shares the `idle_compactions` row of the request, so
+the 50-minute pass does not compact the same request again.
 
 Each transcript changed in the last hour is read on every pass, held or not,
 so the reads are incremental: `Claude.IdleCompactionState` continues from the

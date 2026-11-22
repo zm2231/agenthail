@@ -30,7 +30,8 @@ export function claudeSettingLabel(value) {
 
 function agenthailIdleLabel(idle) {
   if (!idle || !idle.enabled) return "off";
-  return `on, from ${Number(idle.minContextTokens).toLocaleString()} tokens`;
+  const before = idle.preLimitPercent > 0 ? `from ${idle.preLimitPercent}%` : "off";
+  return `on, from ${Number(idle.minContextTokens).toLocaleString()} tokens; before a usage limit: ${before}`;
 }
 
 const idleHoldsShown = 5;
@@ -62,6 +63,8 @@ export function bindClaudeSettingsEvents() {
     }
     const idleMin = $("#claude-compact-agenthail-idle-min").value.trim();
     if (idleMin) body.agenthailIdleMinTokens = Number(idleMin);
+    const preLimit = $("#claude-compact-agenthail-prelimit").value.trim();
+    if (preLimit) body.agenthailPreLimitPercent = preLimit === "off" ? 0 : Number(preLimit);
     try {
       const response = await fetch("/api/claude/compact-settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       if (!response.ok) throw await responseError(response);

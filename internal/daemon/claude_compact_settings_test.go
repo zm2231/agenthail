@@ -137,15 +137,15 @@ func TestAgenthailsIdleCompactionIsOnByDefaultAndSetPerRootInItsOwnConfig(t *tes
 		}
 		return settings
 	}
-	on := surface.IdleCompaction{Enabled: true, MinContextTokens: surface.DefaultIdleCompactionMinTokens}
+	on := surface.IdleCompaction{Enabled: true, MinContextTokens: surface.DefaultIdleCompactionMinTokens, PreLimitPercent: surface.DefaultPreLimitPercent}
 	if got := read(); got[primary] != on || got[work] != on {
 		t.Fatalf("defaults = %+v, want on from %d tokens under every root", got, surface.DefaultIdleCompactionMinTokens)
 	}
 
-	if response := serveDashboardRequest(router, http.MethodPost, "/api/claude/compact-settings", `{"root":"claude-work","agenthailIdleCompaction":false,"agenthailIdleMinTokens":300000}`); response.Code != http.StatusOK {
+	if response := serveDashboardRequest(router, http.MethodPost, "/api/claude/compact-settings", `{"root":"claude-work","agenthailIdleCompaction":false,"agenthailIdleMinTokens":300000,"agenthailPreLimitPercent":95}`); response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
-	if got := read(); got[primary] != on || got[work] != (surface.IdleCompaction{Enabled: false, MinContextTokens: 300000}) {
+	if got := read(); got[primary] != on || got[work] != (surface.IdleCompaction{Enabled: false, MinContextTokens: 300000, PreLimitPercent: 95}) {
 		t.Fatalf("after turning it off under the work root: %+v", got)
 	}
 	if _, err := os.Stat(filepath.Join(work, "settings.json")); !os.IsNotExist(err) {
@@ -157,6 +157,9 @@ func TestAgenthailsIdleCompactionIsOnByDefaultAndSetPerRootInItsOwnConfig(t *tes
 	}
 	if response := serveDashboardRequest(router, http.MethodPost, "/api/claude/compact-settings", `{"root":"claude-work","agenthailIdleCompaction":true,"agenthailIdleMinTokens":50000}`); response.Code != http.StatusBadRequest {
 		t.Fatalf("a threshold under the minimum: status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := serveDashboardRequest(router, http.MethodPost, "/api/claude/compact-settings", `{"root":"claude-work","agenthailPreLimitPercent":99}`); response.Code != http.StatusBadRequest {
+		t.Fatalf("a pre-limit percent past where a compact could be refused: status=%d body=%s", response.Code, response.Body.String())
 	}
 	if after, _ := os.ReadFile(config); string(after) != string(before) {
 		t.Fatalf("a refused change wrote the config:\n%s", after)

@@ -136,25 +136,26 @@ func claudeSettingsBool(data []byte, key string) *bool {
 
 // Window is a token count, "auto", or "unset" to remove the key; Model
 // scopes it to that model's modelSettings entry.
-// AgenthailIdle and AgenthailIdleMinTokens change Agenthail's own idle
-// compaction, which takes effect on its next check, running sessions included.
+// The Agenthail fields change Agenthail's own idle compaction, which takes
+// effect on its next check, running sessions included.
 type ClaudeCompactChange struct {
-	Model                  string
-	Window                 string
-	Enabled                *bool
-	Idle                   *bool
-	AgenthailIdle          *bool
-	AgenthailIdleMinTokens *int64
+	Model                    string
+	Window                   string
+	Enabled                  *bool
+	Idle                     *bool
+	AgenthailIdle            *bool
+	AgenthailIdleMinTokens   *int64
+	AgenthailPreLimitPercent *int
 }
 
 func (c ClaudeCompactChange) Changes() bool {
-	return c.Window != "" || c.Model != "" || c.Enabled != nil || c.Idle != nil || c.AgenthailIdle != nil || c.AgenthailIdleMinTokens != nil
+	return c.Window != "" || c.Model != "" || c.Enabled != nil || c.Idle != nil || c.AgenthailIdle != nil || c.AgenthailIdleMinTokens != nil || c.AgenthailPreLimitPercent != nil
 }
 
 // A running Claude does not reread the file; the change applies to sessions
 // started after it.
 func WriteClaudeCompactSettings(home, root string, change ClaudeCompactChange) (ClaudeCompactSettings, error) {
-	if err := validIdleCompactionMinTokens(change.AgenthailIdleMinTokens); err != nil {
+	if err := validIdleCompaction(change); err != nil {
 		return ClaudeCompactSettings{}, err
 	}
 	path := ClaudeSettingsPath(root)
@@ -199,7 +200,7 @@ func WriteClaudeCompactSettings(home, root string, change ClaudeCompactChange) (
 			return ClaudeCompactSettings{}, err
 		}
 	}
-	if err := writeIdleCompaction(home, root, change.AgenthailIdle, change.AgenthailIdleMinTokens); err != nil {
+	if err := writeIdleCompaction(home, root, change); err != nil {
 		return ClaudeCompactSettings{}, err
 	}
 	return ReadClaudeCompactSettings(home, root)

@@ -84,3 +84,20 @@ func (r *Registry) IdleCompactionRequests(sessionID string) (map[string]bool, er
 	}
 	return requests, rows.Err()
 }
+
+func (r *Registry) IdleCompactionsInFlight() (map[string]bool, error) {
+	rows, err := r.read.Query(`SELECT DISTINCT c.session_id FROM idle_compactions c JOIN message_queue q ON q.id=c.queue_id WHERE q.status IN ('pending','inflight')`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	sessions := map[string]bool{}
+	for rows.Next() {
+		var session string
+		if err := rows.Scan(&session); err != nil {
+			return nil, err
+		}
+		sessions[session] = true
+	}
+	return sessions, rows.Err()
+}

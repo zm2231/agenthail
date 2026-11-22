@@ -51,6 +51,7 @@ func (d *Daemon) claudeCompactSettingsHandler(w http.ResponseWriter, r *http.Req
 			Idle                   *bool  `json:"idleCompaction"`
 			AgenthailIdle          *bool  `json:"agenthailIdleCompaction"`
 			AgenthailIdleMinTokens *int64 `json:"agenthailIdleMinTokens"`
+			AgenthailPreLimit      *int   `json:"agenthailPreLimitPercent"`
 		}
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
 		decoder.DisallowUnknownFields()
@@ -63,7 +64,7 @@ func (d *Daemon) claudeCompactSettingsHandler(w http.ResponseWriter, r *http.Req
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
-		settings, err := surface.WriteClaudeCompactSettings(home, root, surface.ClaudeCompactChange{Model: request.Model, Window: request.Window, Enabled: request.Enabled, Idle: request.Idle, AgenthailIdle: request.AgenthailIdle, AgenthailIdleMinTokens: request.AgenthailIdleMinTokens})
+		settings, err := surface.WriteClaudeCompactSettings(home, root, surface.ClaudeCompactChange{Model: request.Model, Window: request.Window, Enabled: request.Enabled, Idle: request.Idle, AgenthailIdle: request.AgenthailIdle, AgenthailIdleMinTokens: request.AgenthailIdleMinTokens, AgenthailPreLimitPercent: request.AgenthailPreLimit})
 		if err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
