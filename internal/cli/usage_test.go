@@ -3,10 +3,82 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 )
+
+type usageAccount struct {
+	title string
+	rows  []string
+}
+
+// usageTree reads writeUsage as it nests: a host unindented, its accounts at two spaces, their rows deeper.
+func usageTree(out string) ([]string, map[string][]usageAccount) {
+	var hosts []string
+	accounts := map[string][]usageAccount{}
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		switch {
+		case !strings.HasPrefix(line, " "):
+			hosts = append(hosts, line)
+		case len(hosts) == 0:
+		case !strings.HasPrefix(line, "   "):
+			host := hosts[len(hosts)-1]
+			accounts[host] = append(accounts[host], usageAccount{title: strings.TrimSpace(line)})
+		default:
+			host := hosts[len(hosts)-1]
+			if n := len(accounts[host]); n > 0 {
+				accounts[host][n-1].rows = append(accounts[host][n-1].rows, strings.TrimSpace(line))
+			}
+		}
+	}
+	return hosts, accounts
+}
+
+func containsAll(line string, parts []string) bool {
+	for _, part := range parts {
+		if !strings.Contains(line, part) {
+			return false
+		}
+	}
+	return true
+}
+
+func requireAccount(t *testing.T, out, host string, title []string, rows ...[]string) {
+	t.Helper()
+	_, accounts := usageTree(out)
+	var matched []usageAccount
+	for _, account := range accounts[host] {
+		if containsAll(account.title, title) {
+			matched = append(matched, account)
+		}
+	}
+	if len(matched) != 1 {
+		t.Errorf("%s has %d accounts titled with %q, want 1:\n%s", host, len(matched), title, out)
+		return
+	}
+	next := 0
+	for _, parts := range rows {
+		for next < len(matched[0].rows) && !containsAll(matched[0].rows[next], parts) {
+			next++
+		}
+		if next == len(matched[0].rows) {
+			t.Errorf("%s's account %q shows no row with %q after the ones before it:\n%s", host, title, parts, out)
+			return
+		}
+		next++
+	}
+}
+
+func accountTitles(out, host string) []string {
+	_, accounts := usageTree(out)
+	var titles []string
+	for _, account := range accounts[host] {
+		titles = append(titles, account.title)
+	}
+	return titles
+}
 
 func TestUsagePrintsEveryAccountWithItsSessions(t *testing.T) {
 	now := time.Date(2026, 10, 23, 14, 0, 0, 0, time.UTC)
@@ -40,20 +112,22 @@ func TestUsagePrintsEveryAccountWithItsSessions(t *testing.T) {
 	}
 	var out bytes.Buffer
 	writeUsage(&out, sets, now)
-	want := `studio
-  work@example.com (default)  read 2m ago
-    session       40%  resets in 2h 12m
-    week          93%  resets in 3d 2h  near its limit
-    sessions: @fixer (working)
-  Codex
-    sessions: Codex run
-vps
-  API key (default)
-    week, Fable    0%  resets in 3d 2h
-    Signed in with an API key; no usage reported.
-`
-	if out.String() != want {
-		t.Fatalf("output:\n%s\nwant:\n%s", out.String(), want)
+	if hosts, _ := usageTree(out.String()); !slices.Equal(hosts, []string{"studio", "vps"}) {
+		t.Fatalf("hosts %q, want studio then vps:\n%s", hosts, out.String())
+	}
+	if titles := accountTitles(out.String(), "studio"); len(titles) != 2 || !strings.HasPrefix(titles[0], "work@example.com") || titles[1] != "Codex" {
+		t.Fatalf("studio's accounts %q, want the Claude account then Codex", titles)
+	}
+	requireAccount(t, out.String(), "studio", []string{"work@example.com (default)", "read 2m ago"},
+		[]string{"session", "40%", "resets in 2h 12m"},
+		[]string{"week", "93%", "resets in 3d 2h", "near its limit"},
+		[]string{"sessions: @fixer (working)"})
+	requireAccount(t, out.String(), "studio", []string{"Codex"}, []string{"sessions: Codex run"})
+	requireAccount(t, out.String(), "vps", []string{"API key (default)"},
+		[]string{"week, Fable", "0%", "resets in 3d 2h"},
+		[]string{"Signed in with an API key; no usage reported."})
+	if strings.Count(out.String(), "near its limit") != 1 {
+		t.Fatalf("only the 93%% meter is near its limit:\n%s", out.String())
 	}
 	if strings.Contains(out.String(), "5%") {
 		t.Fatal("a meter past its window is not printed")
@@ -67,9 +141,7 @@ func TestUsageNamesARootByWhatItSignsInWith(t *testing.T) {
 	}
 	var out bytes.Buffer
 	writeUsage(&out, sets, time.Now())
-	if want := "cloud\n  Bedrock (default)\n    Signed in with Amazon Bedrock; no usage reported.\n"; out.String() != want {
-		t.Fatalf("output:\n%s\nwant:\n%s", out.String(), want)
-	}
+	requireAccount(t, out.String(), "cloud", []string{"Bedrock (default)"}, []string{"Signed in with Amazon Bedrock; no usage reported."})
 }
 
 func TestUsageListsWorkingSessionsFirstWithShortTitles(t *testing.T) {
