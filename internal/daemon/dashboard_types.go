@@ -67,6 +67,7 @@ type dashboardSession struct {
 	Checkout          *projectresolve.CatalogCheckout `json:"checkout,omitempty"`
 	Worktree          *workView                       `json:"worktree,omitempty"`
 	PRs               []prView                        `json:"prs,omitempty"`
+	HeldWork          []heldWorkRow                   `json:"heldWork,omitempty"`
 	Move              *moveView                       `json:"move,omitempty"`
 	ObservedAt        time.Time                       `json:"observedAt,omitempty"`
 	UnavailableReason string                          `json:"unavailableReason,omitempty"`

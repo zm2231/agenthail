@@ -4,10 +4,32 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
+
+	"github.com/zm2231/agenthail/internal/ledger"
 )
 
-// ledgerCheckpoint asks the local daemon how many of the session's words are provisional. A checkpoint never stands in the way of the command that reached it, so any failure is empty.
+type ledgerCheckpointReply struct {
+	Instruction string            `json:"instruction"`
+	Held        []ledger.WorkItem `json:"held"`
+}
+
 func (a *App) ledgerCheckpoint(ctx context.Context, sessionID string) string {
+	return a.readLedgerCheckpoint(ctx, map[string]any{"sessionId": sessionID}).Instruction
+}
+
+func (a *App) ledgerStartContext(ctx context.Context, sessionID string, mcp bool) string {
+	reply := a.readLedgerCheckpoint(ctx, map[string]any{"sessionId": sessionID, "start": true})
+	var parts []string
+	for _, part := range []string{ledger.HeldNote(reply.Held, mcp), reply.Instruction} {
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func (a *App) readLedgerCheckpoint(ctx context.Context, request map[string]any) ledgerCheckpointReply {
 	var client *daemonAPIClient
 	var err error
 	if a.daemonAPIOverride != nil {
@@ -16,17 +38,15 @@ func (a *App) ledgerCheckpoint(ctx context.Context, sessionID string) string {
 		client, err = newDaemonAPIClient()
 	}
 	if err != nil {
-		return ""
+		return ledgerCheckpointReply{}
 	}
-	body, status, err := client.call(ctx, http.MethodPost, "/api/v1/ledger/checkpoint", nil, map[string]string{"sessionId": sessionID}, nil)
+	body, status, err := client.call(ctx, http.MethodPost, "/api/v1/ledger/checkpoint", nil, request, nil)
 	if err != nil || status != http.StatusOK {
-		return ""
+		return ledgerCheckpointReply{}
 	}
-	var out struct {
-		Instruction string `json:"instruction"`
-	}
+	var out ledgerCheckpointReply
 	if json.Unmarshal(body, &out) != nil {
-		return ""
+		return ledgerCheckpointReply{}
 	}
-	return out.Instruction
+	return out
 }

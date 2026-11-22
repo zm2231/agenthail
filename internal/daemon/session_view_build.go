@@ -90,6 +90,10 @@ func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewReques
 	if err != nil {
 		return nil, err
 	}
+	held, err := d.heldWorkBySession()
+	if err != nil {
+		return nil, err
+	}
 	build := &sessionViewBuild{key: key, hostEpoch: read.HostEpoch, seq: read.CatalogSeq}
 	host := build.key.host
 	internal := map[string]string{}
@@ -113,6 +117,7 @@ func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewReques
 		}
 		if record.HostID == "" {
 			row.TurnState = turnStateOf(&row, record.Judgment, directory)
+			row.HeldWork = held[record.ID]
 			local := host
 			row.Host = &local
 			session := surface.Session{ID: record.ID, Surface: row.Surface, Status: row.Status, RuntimeKind: row.RuntimeKind, LastActive: row.LastActive}

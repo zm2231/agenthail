@@ -103,6 +103,9 @@ var placementIgnoredMutations = map[string]func(*dashboardSession, time.Time){
 	"PRs": func(r *dashboardSession, _ time.Time) {
 		r.PRs = []prView{{Repo: "github.com/acme/app", Number: 1}}
 	},
+	"HeldWork": func(r *dashboardSession, _ time.Time) {
+		r.HeldWork = []heldWorkRow{{ItemID: "app-W1", Text: "fix the login", State: "in_progress"}}
+	},
 	"Move": func(r *dashboardSession, _ time.Time) {
 		r.Move = &moveView{State: "copying", Host: "h0123456789ab"}
 	},

@@ -139,6 +139,7 @@ func (s *Store) Board(projectKey string) (*Board, error) {
 }
 
 func (s *Store) Forget(projectKeys ...string) {
+	s.writes.Add(1)
 	if s.cache == nil {
 		return
 	}

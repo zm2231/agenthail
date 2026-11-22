@@ -13,6 +13,7 @@ type Store struct {
 	cache    *boardCache
 	changed  atomic.Pointer[func(string)]
 	recorded atomic.Pointer[func(string)]
+	writes   atomic.Uint64
 }
 
 func NewStore(db, read *sql.DB) *Store {

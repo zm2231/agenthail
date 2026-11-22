@@ -30,7 +30,13 @@ func (s *Store) notifyRecorded(projectKey string) {
 	}
 }
 
+// Generation moves on every committed write and every Forget, so anything derived from the boards is current while it holds still.
+func (s *Store) Generation() uint64 {
+	return s.writes.Load()
+}
+
 func (s *Store) notify(projectKey string) {
+	s.writes.Add(1)
 	if fn := s.changed.Load(); fn != nil {
 		(*fn)(projectKey)
 	}

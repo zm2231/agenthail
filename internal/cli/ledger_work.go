@@ -118,6 +118,9 @@ func (a *App) ledgerWork(store *ledger.Store, args []string) error {
 		}{result, checkpoint})
 	}
 	fmt.Println(result.Readback)
+	if result.Guidance != "" {
+		fmt.Println(result.Guidance)
+	}
 	if checkpoint != "" {
 		fmt.Println("\n" + checkpoint)
 	}

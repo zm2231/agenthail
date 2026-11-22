@@ -47,5 +47,6 @@ func (v catalogViewState) clone() catalogViewState {
 	v.judgments = maps.Clone(v.judgments)
 	v.leads.byProject = maps.Clone(v.leads.byProject)
 	v.leads.aliases = maps.Clone(v.leads.aliases)
+	v.held = maps.Clone(v.held)
 	return v
 }

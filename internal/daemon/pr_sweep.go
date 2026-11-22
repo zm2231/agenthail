@@ -84,9 +84,7 @@ func (d *Daemon) linkBranchPRs(ctx context.Context) error {
 			if pr.CreatedAt.Before(item.record.CreatedAt) {
 				continue
 			}
-			if _, err := d.changePRs(func(r *registry.Registry) (bool, error) {
-				return r.LinkPR(registry.SessionPR{SessionID: item.record.SessionID, Repo: pr.Repo.String(), Number: pr.Number, URL: pr.URL, Source: registry.PRSourceBranch, Title: pr.Title, State: pr.State, HeadSHA: pr.HeadSHA}, false, time.Now())
-			}); err != nil {
+			if err := d.linkPR(registry.SessionPR{SessionID: item.record.SessionID, Repo: pr.Repo.String(), Number: pr.Number, URL: pr.URL, Source: registry.PRSourceBranch, Title: pr.Title, State: pr.State, HeadSHA: pr.HeadSHA}, false); err != nil {
 				return err
 			}
 		}
