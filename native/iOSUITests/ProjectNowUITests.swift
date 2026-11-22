@@ -22,7 +22,7 @@ final class ProjectNowUITests: XCTestCase {
         XCTAssertTrue(work.waitForExistence(timeout: 5))
         XCTAssertLessThan(top(now(app)), top(work), "Now comes before the work list")
         XCTAssertTrue(app.staticTexts["Now · 2"].exists)
-        XCTAssertFalse(app.staticTexts["main"].exists)
+        XCTAssertFalse(nowGroup(app, "main").exists, "one checkout needs no line over its rows")
         XCTAssertLessThan(top(app.buttons["project-session-computer::waiting"]), top(app.buttons["project-session-computer::idle"]))
     }
 
@@ -43,20 +43,30 @@ final class ProjectNowUITests: XCTestCase {
 
     private func top(_ element: XCUIElement) -> CGFloat { element.frame.minY }
 
+    private func projectList(_ app: XCUIApplication) -> XCUIElement {
+        app.collectionViews.containing(NSPredicate(format: "label BEGINSWITH 'Now'")).firstMatch
+    }
+
+    private func nowGroup(_ app: XCUIApplication, _ checkout: String) -> XCUIElement {
+        app.staticTexts["project-now-group-computer::checkout-" + checkout]
+    }
+
     func testSeveralCheckoutsGroupUnderCloseLinesAndSortByWhatNeedsThePerson() {
         let app = launch("multi")
-        let line = app.staticTexts["feat/export"]
+        let line = nowGroup(app, "export")
         let title = app.buttons["project-session-computer::csv"].staticTexts["Add CSV export"]
         XCTAssertTrue(line.waitForExistence(timeout: 5))
         XCTAssertTrue(title.waitForExistence(timeout: 5))
         XCTAssertLessThan(title.frame.minY - line.frame.maxY, 22, "the line reads as the header of the rows under it")
         XCTAssertTrue(app.staticTexts["Now · 5"].exists)
-        XCTAssertFalse(app.staticTexts["Recent"].exists)
-        XCTAssertFalse(app.staticTexts["Running now · 3"].exists)
-        let search = app.staticTexts["fix/search · modified"]
-        let export = app.staticTexts["feat/export"]
-        let main = app.staticTexts["main"]
-        XCTAssertTrue(search.exists)
+        XCTAssertTrue(projectList(app).exists, "the project's list is on screen")
+        XCTAssertFalse(projectList(app).staticTexts["Recent"].exists, "the project shows no Recent section")
+        XCTAssertFalse(projectList(app).staticTexts["Running now · 3"].exists)
+        let search = nowGroup(app, "search")
+        let export = nowGroup(app, "export")
+        let main = nowGroup(app, "main")
+        XCTAssertEqual(search.label, "fix/search · modified")
+        XCTAssertEqual(export.label, "feat/export")
         XCTAssertLessThan(top(search), top(export))
         XCTAssertLessThan(top(export), top(main))
         let waiting = app.buttons["project-session-computer::waiting"]

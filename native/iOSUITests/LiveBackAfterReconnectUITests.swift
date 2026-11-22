@@ -54,7 +54,7 @@ final class LiveBackAfterReconnectUITests: XCTestCase {
                 let streamed = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
                 requireLive(streamed.waitForExistence(timeout: 30), "the reply streams in round \(round)", app)
             }
-            app.navigationBars.buttons.element(boundBy: 0).tap()
+            app.backToSessions()
             requireLive(upRow.waitForExistence(timeout: 15), "Back returns to the sessions list in round \(round)", app)
             requireLive(app.navigationBars["Sessions"].exists, "the sessions list is on screen in round \(round)", app)
 

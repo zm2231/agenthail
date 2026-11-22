@@ -54,7 +54,7 @@ final class SessionRowMenuUITests: XCTestCase {
         let unpin = app.buttons["Unpin"]
         XCTAssertTrue(unpin.waitForExistence(timeout: 5), "the session menu of a pinned session offers Unpin")
         unpin.tap()
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.backToSessions()
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         XCTAssertTrue(waitForGone(mark), "unpinning removes the mark")
     }

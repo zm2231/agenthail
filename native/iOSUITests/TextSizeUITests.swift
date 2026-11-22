@@ -43,8 +43,7 @@ final class TextSizeUITests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
         let height = text.frame.height
-        let back = app.navigationBars.buttons.firstMatch
-        if back.exists { back.tap() }
+        app.backToSessions()
         return height
     }
 }

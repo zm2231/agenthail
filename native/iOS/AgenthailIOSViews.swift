@@ -403,6 +403,7 @@ struct ConversationListView: View {
         }
         .listStyle(.insetGrouped)
         .listSectionSpacing(14)
+        .accessibilityIdentifier("session-list")
         .holdsOrder(model)
         .phoneBackdrop(.list)
         .navigationTitle("Sessions")
