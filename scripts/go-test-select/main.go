@@ -74,11 +74,11 @@ func run(stdout, stderr io.Writer, base string, all bool) error {
 }
 
 func changedFiles(base string) ([]string, error) {
-	mergeBase, err := output("git", "merge-base", base, "HEAD")
+	mergeBase, err := output(nil, "git", "merge-base", base, "HEAD")
 	if err != nil {
 		return nil, err
 	}
-	names, err := output("git", "diff", "--name-only", "--no-renames", strings.TrimSpace(string(mergeBase)), "HEAD")
+	names, err := output(nil, "git", "diff", "--name-only", "--no-renames", strings.TrimSpace(string(mergeBase)), "HEAD")
 	if err != nil {
 		return nil, err
 	}
@@ -94,11 +94,7 @@ type listed struct {
 }
 
 func loadGraph(root string) (graph, error) {
-	module, err := output("go", "-C", root, "list", "-m")
-	if err != nil {
-		return graph{}, err
-	}
-	out, err := output("go", "-C", root, "list", "-deps", "-test", "-json=ImportPath,Dir,Deps,ForTest,Module", "./...")
+	module, err := output(nil, "go", "-C", root, "list", "-m")
 	if err != nil {
 		return graph{}, err
 	}
@@ -107,16 +103,30 @@ func loadGraph(root string) (graph, error) {
 		return graph{}, err
 	}
 	g := graph{module: strings.TrimSpace(string(module)), packages: map[string]string{}, deps: map[string]map[string]bool{}, tests: map[string]map[string]bool{}}
+	// The macOS jobs test the darwin build, whose files can import what the Linux build does not.
+	for _, goos := range []string{"linux", "darwin"} {
+		out, err := output([]string{"GOOS=" + goos}, "go", "-C", root, "list", "-deps", "-test", "-json=ImportPath,Dir,Deps,ForTest,Module", "./...")
+		if err != nil {
+			return graph{}, err
+		}
+		if err := g.add(out, absRoot); err != nil {
+			return graph{}, err
+		}
+	}
+	return g, nil
+}
+
+func (g graph) add(out []byte, absRoot string) error {
 	for decoder := json.NewDecoder(bytes.NewReader(out)); decoder.More(); {
 		var p listed
 		if err := decoder.Decode(&p); err != nil {
-			return graph{}, err
+			return err
 		}
 		if p.Module == nil || p.Module.Path != g.module {
 			continue
 		}
 		if pkg, ok := strings.CutSuffix(p.ImportPath, ".test"); ok {
-			g.tests[pkg] = withSelf(pkg, p.Deps)
+			g.tests[pkg] = union(g.tests[pkg], withSelf(pkg, p.Deps))
 			continue
 		}
 		if p.ForTest != "" {
@@ -124,12 +134,22 @@ func loadGraph(root string) (graph, error) {
 		}
 		rel, err := filepath.Rel(absRoot, p.Dir)
 		if err != nil {
-			return graph{}, err
+			return err
 		}
 		g.packages[filepath.ToSlash(rel)] = p.ImportPath
-		g.deps[p.ImportPath] = withSelf(p.ImportPath, p.Deps)
+		g.deps[p.ImportPath] = union(g.deps[p.ImportPath], withSelf(p.ImportPath, p.Deps))
 	}
-	return g, nil
+	return nil
+}
+
+func union(a, b map[string]bool) map[string]bool {
+	if a == nil {
+		return b
+	}
+	for k := range b {
+		a[k] = true
+	}
+	return a
 }
 
 func withSelf(self string, deps []string) map[string]bool {
@@ -141,9 +161,12 @@ func withSelf(self string, deps []string) map[string]bool {
 	return set
 }
 
-func output(name string, args ...string) ([]byte, error) {
+func output(env []string, name string, args ...string) ([]byte, error) {
 	var stderr bytes.Buffer
 	cmd := exec.Command(name, args...)
+	if env != nil {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {

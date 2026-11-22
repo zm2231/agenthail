@@ -32,17 +32,17 @@ check() {
 }
 
 M=example.com/m
-check "a push selects everything" "-all" "daemon=true;surfaces=true;packages=$M/a $M/b;skippable=[];" \
+check "a push selects everything" "-all" "daemon=true;surfaces=true;packages=$M/a $M/b;skippable=[];selected=$M/a $M/b $M/internal/daemon $M/internal/surface/claudesurface;" \
 	push "" false "" "$M/a $M/b $M/internal/daemon $M/internal/surface/claudesurface"
-check "a merge train selects everything" "-all" "daemon=false;surfaces=false;packages=$M/a;skippable=[\"verify-linux-daemon\",\"verify-linux-surfaces\"];" \
+check "a merge train selects everything" "-all" "daemon=false;surfaces=false;packages=$M/a;skippable=[\"verify-linux-daemon\",\"verify-linux-surfaces\"];selected=$M/a;" \
 	pull_request train/1 false "" "$M/a"
-check "a pull request diffs against its base" "-base base1" "daemon=true;surfaces=false;packages=$M/a;skippable=[\"verify-linux-surfaces\"];" \
+check "a pull request diffs against its base" "-base base1" "daemon=true;surfaces=false;packages=$M/a;skippable=[\"verify-linux-surfaces\"];selected=$M/a $M/internal/daemon;" \
 	pull_request feature false "" "$M/a $M/internal/daemon"
-check "a Node host change runs the surfaces job" "-base base1" "daemon=false;surfaces=true;packages=;skippable=[\"verify-linux-daemon\"];" \
+check "a Node host change runs the surfaces job" "-base base1" "daemon=false;surfaces=true;packages=;skippable=[\"verify-linux-daemon\"];selected=suite:node-hosts;" \
 	pull_request feature false "" "suite:node-hosts"
-check "a stack diffs against the stack's base" "-base origin/main" "daemon=false;surfaces=true;packages=;skippable=[\"verify-linux-daemon\"];" \
+check "a stack diffs against the stack's base" "-base origin/main" "daemon=false;surfaces=true;packages=;skippable=[\"verify-linux-daemon\"];selected=$M/internal/surface/codexsurface;" \
 	pull_request feature true main "$M/internal/surface/codexsurface"
-check "a stack with no base selects everything" "-all" "daemon=false;surfaces=false;packages=;skippable=[\"verify-linux-daemon\",\"verify-linux-surfaces\"];" \
+check "a stack with no base selects everything" "-all" "daemon=false;surfaces=false;packages=;skippable=[\"verify-linux-daemon\",\"verify-linux-surfaces\"];selected=;" \
 	pull_request feature true "" ""
 [ "$failures" -eq 0 ] || exit 1
 echo "ci-go-select ok"
