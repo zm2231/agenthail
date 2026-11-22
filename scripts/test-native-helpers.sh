@@ -96,6 +96,7 @@ SOURCES=(
   SessionTreeOrder.swift
   SessionAttention.swift
   OrderHold.swift
+  DaemonOrder.swift
   CatalogNews.swift
   LeadReplacement.swift
   SessionRowTime.swift

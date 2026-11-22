@@ -99,6 +99,7 @@ targets:
       - path: SessionTreeOrder.swift
       - path: SessionAttention.swift
       - path: OrderHold.swift
+      - path: DaemonOrder.swift
       - path: CatalogNews.swift
       - path: LeadReplacement.swift
       - path: SessionRowTime.swift

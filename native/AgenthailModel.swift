@@ -205,8 +205,7 @@ final class AgenthailModel {
     private(set) var subagentIDs: [String: [String]] = [:]
     private(set) var menuSessions = MenuSessions()
     private(set) var scopedTrees: [ScopeRequest: SessionTree] = [:]
-    private var orderHold = OrderHold()
-    @ObservationIgnored private var heldCells: [String: SessionCell] = [:]
+    @ObservationIgnored private var orderHold = OrderHold()
 
     /// Rebuilds the sidebar's sessions, attention and tree when one of their
     /// inputs changes, so views read them instead of rebuilding them.
@@ -222,23 +221,9 @@ final class AgenthailModel {
         sessionAttention = SessionAttention.of(knownSessions)
         let rows = Dictionary(knownSessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let shown = orderHold.shown(list: listView, current: currentView, rows: rows)
-        sessionTree = SessionTree.ordered(list: shown.list, current: shown.current, rows: shown.rows, attention: sessionAttention, cells: treeCells(shown.rows))
+        sessionTree = SessionTree.ordered(list: shown.list, current: shown.current, rows: shown.rows, attention: sessionAttention, cells: orderHold.cells(live: cells.byID, rows: shown.rows))
         scopedTrees = buildScopedTrees()
         menuSessions = MenuSessions.build(current: currentView, rows: rows)
-    }
-
-    private func treeCells(_ rows: [String: SessionState]) -> [String: SessionCell] {
-        var all = cells.byID
-        guard orderHold.held else {
-            heldCells = [:]
-            return all
-        }
-        for (id, row) in rows where all[id] == nil {
-            let cell = heldCells[id] ?? SessionCell(row)
-            heldCells[id] = cell
-            all[id] = cell
-        }
-        return all
     }
 
     /// Keeps the sidebar's order while the person aims at it; rows still update in place.
