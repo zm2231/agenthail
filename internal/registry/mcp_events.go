@@ -154,7 +154,7 @@ func liveCredential(key string) string {
 	return `(r.token_hash=` + key + ` OR EXISTS(SELECT 1 FROM identity_oauth_grants g WHERE g.identity_id=r.identity_id AND '` + OAuthCredentialPrefix + `'||g.grant_id=` + key + `))`
 }
 
-const dueEventsQuery = `SELECT ` + eventSubscriptionColumns + `,u.newest,u.unread` + liveEventFrom + `
+var dueEventsQuery = `SELECT ` + eventSubscriptionColumns + `,u.newest,u.unread` + liveEventFrom + `
 		JOIN (SELECT identity_id,MAX(id) newest,COUNT(*) unread FROM agent_inbox WHERE read_at_ms=0 GROUP BY identity_id) u ON u.identity_id=s.identity_id AND u.newest>s.notified_through` +
 	` WHERE (s.suspended_at_ms=0 OR s.suspended_at_ms<=?2) AND s.deferred_until_ms<=?1`
 
