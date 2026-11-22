@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zm2231/agenthail/internal/cfaccess"
+	"github.com/zm2231/agenthail/internal/mcpoauth"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -54,6 +56,8 @@ type remoteMCP struct {
 	beforeNotice func()
 	afterEpoch   func()
 
+	oauth *oauthState
+
 	eventWake chan struct{}
 	// afterDueRead runs between the delivery loop's due read and its in-flight check, for tests.
 	afterDueRead func()
@@ -65,7 +69,7 @@ type remoteMCP struct {
 
 func (d *Daemon) remoteMCP() *remoteMCP {
 	d.remoteOnce.Do(func() {
-		m := &remoteMCP{d: d, sessions: map[*mcp.ServerSession]*remotePushSession{}, wake: make(chan struct{}, 1), eventWake: make(chan struct{}, 1), webhookClient: newWebhookClient(), eventRetries: eventRetrySchedule, eventTrialEvery: eventTrialEvery}
+		m := &remoteMCP{d: d, sessions: map[*mcp.ServerSession]*remotePushSession{}, wake: make(chan struct{}, 1), eventWake: make(chan struct{}, 1), oauth: newOAuthState(), webhookClient: newWebhookClient(), eventRetries: eventRetrySchedule, eventTrialEvery: eventTrialEvery}
 		m.stopCtx, m.stopRequests = context.WithCancel(context.Background())
 		m.server = mcp.NewServer(&mcp.Implementation{Name: "agenthail", Version: d.build.Version}, &mcp.ServerOptions{
 			SupportedProtocolVersions: mcpProtocolVersions,
@@ -78,8 +82,7 @@ func (d *Daemon) remoteMCP() *remoteMCP {
 		m.registerEvents()
 		m.server.AddResourceTemplate(&mcp.ResourceTemplate{URITemplate: remoteInboxURIStart + "{name}", Name: "inbox", Title: "Inbox", Description: "How many messages wait unread in your inbox. Read them with agenthail_read.", MIMEType: "application/json"}, m.readInbox)
 		stream := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return m.server }, &mcp.StreamableHTTPOptions{EventStore: mcp.NewMemoryEventStore(nil), SessionTimeout: cmp.Or(d.remoteIdle, remoteSessionIdle)})
-		bearer := auth.RequireBearerToken(m.verify, &auth.RequireBearerTokenOptions{})
-		m.handler = bearerChallenge(bearer(http.NewCrossOriginProtection().Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m.handler = m.bearerChallenge(http.NewCrossOriginProtection().Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if refuseTunnelHost(w, r) {
 				return
 			}
@@ -96,7 +99,7 @@ func (d *Daemon) remoteMCP() *remoteMCP {
 			defer cancel()
 			defer context.AfterFunc(m.stopCtx, cancel)()
 			stream.ServeHTTP(w, r.WithContext(ctx))
-		}))))
+		})))
 		d.remote = m
 	})
 	return d.remote
@@ -104,29 +107,35 @@ func (d *Daemon) remoteMCP() *remoteMCP {
 
 func remoteRequest(r *http.Request) bool {
 	token := bearerToken(r)
-	return r.Header.Get(cfaccess.Header) != "" || strings.HasPrefix(token, registry.RemoteTokenPrefix) || (token == "" && cloudflareProxied(r))
+	return r.Header.Get(cfaccess.Header) != "" || strings.HasPrefix(token, registry.RemoteTokenPrefix) || strings.HasPrefix(token, registry.OAuthAccessPrefix) || (token == "" && (cloudflareProxied(r) || !localReach(r)))
 }
 
 func cloudflareProxied(r *http.Request) bool {
 	return r.Header.Get("Cf-Ray") != "" || r.Header.Get("Cf-Connecting-Ip") != ""
 }
 
-// A URL-only client asks the person for a token only when a probe without one gets a Bearer challenge.
-func bearerChallenge(next http.Handler) http.Handler {
+// A URL-only client starts OAuth, or asks the person for a token, only when a probe without one gets a Bearer challenge.
+func (m *remoteMCP) bearerChallenge(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var options auth.RequireBearerTokenOptions
+		challenge := `Bearer realm="agenthail"`
+		if issuer := m.d.oauthIssuer(); issuer != "" {
+			options.ResourceMetadataURL = mcpoauth.ResourceMetadataURL(issuer)
+			challenge += fmt.Sprintf(`, resource_metadata=%q`, options.ResourceMetadataURL)
+		}
 		if bearerToken(r) == "" {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="agenthail"`)
+			w.Header().Set("WWW-Authenticate", challenge)
 			http.Error(w, "a bearer token is required", http.StatusUnauthorized)
 			return
 		}
-		next.ServeHTTP(w, r)
+		auth.RequireBearerToken(m.verify, &options)(next).ServeHTTP(w, r)
 	})
 }
 
 // A tunnel that publishes more than /mcp still exposes nothing else.
 func accessPathGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get(cfaccess.Header) != "" && r.URL.Path != "/mcp" {
+		if r.Header.Get(cfaccess.Header) != "" && r.URL.Path != mcpoauth.ResourcePath && !slices.Contains(mcpoauth.Paths, r.URL.Path) {
 			http.NotFound(w, r)
 			return
 		}
@@ -178,6 +187,9 @@ func (m *remoteMCP) verify(ctx context.Context, token string, r *http.Request) (
 	if m.afterEpoch != nil {
 		m.afterEpoch()
 	}
+	if strings.HasPrefix(token, registry.OAuthAccessPrefix) {
+		return m.verifyOAuth(token, r, epoch, refuse)
+	}
 	remote, err := d.Registry.RemoteIdentityByToken(token)
 	if errors.Is(err, registry.ErrRemoteUnknown) {
 		return refuse("the bearer is not a remote token of any identity here")
@@ -216,6 +228,29 @@ func (m *remoteMCP) verify(ctx context.Context, token string, r *http.Request) (
 		d.logRuntimeError("remote mcp last seen", err)
 	}
 	return &auth.TokenInfo{UserID: remote.IdentityID, Expiration: time.Now().Add(remoteTokenLife), Extra: map[string]any{tokenInfoRemote: remote.Name, tokenInfoBinding: binding, tokenInfoEpoch: epoch, tokenInfoTokenHash: remote.TokenHash}}, nil
+}
+
+func (m *remoteMCP) verifyOAuth(token string, r *http.Request, epoch int64, refuse func(string) (*auth.TokenInfo, error)) (*auth.TokenInfo, error) {
+	d := m.d
+	if d.oauthIssuer() == "" {
+		return refuse("OAuth is off here")
+	}
+	grant, expires, err := d.Registry.OAuthGrantByAccess(token)
+	if errors.Is(err, registry.ErrOAuthUnknown) {
+		return refuse("the bearer is not a live OAuth token of any identity here")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if _, _, configured, err := d.Registry.AccessSettings(); err != nil {
+		return nil, err
+	} else if !configured && r.Header.Get(cfaccess.Header) != "" {
+		return refuse("this request came through Access, and no Access settings are set here; run agenthail identity access set")
+	}
+	if err := d.Registry.TouchOAuthGrant(grant.ID, time.Now()); err != nil {
+		d.logRuntimeError("oauth grant last seen", err)
+	}
+	return &auth.TokenInfo{UserID: grant.IdentityID, Expiration: expires, Extra: map[string]any{tokenInfoRemote: grant.Identity, tokenInfoBinding: "oauth " + grant.ClientName, tokenInfoEpoch: epoch, tokenInfoTokenHash: grant.Credential()}}, nil
 }
 
 // An identity acts under the remote role, which by default has the person's
