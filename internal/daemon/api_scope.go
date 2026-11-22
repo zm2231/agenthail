@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/broadcast"
 	"github.com/zm2231/agenthail/internal/daemonapi"
+	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -197,7 +198,14 @@ func (d *Daemon) agentScope(r *http.Request, caller *mcpCaller, request daemonap
 		if own == "" || own != strings.TrimSpace(request.Project) {
 			return daemonapi.ScopeReply{}, scopeRefusal("project:"+strings.TrimSpace(request.Project), "different_project", "You may write only your own project's ledger; run the command in your own project's folder, or ask that project's coordinator.")
 		}
-		return daemonapi.ScopeReply{ProjectID: own}, nil
+		if request.Mode != string(ledger.WorkTakeover) {
+			return daemonapi.ScopeReply{ProjectID: own}, nil
+		}
+		notice, err := d.takeoverScope(caller, strings.TrimSpace(request.Target))
+		if err != nil {
+			return daemonapi.ScopeReply{}, err
+		}
+		return daemonapi.ScopeReply{ProjectID: own, Notice: d.holdAgentNotice(caller, notice)}, nil
 	case "notice":
 		if what, found := d.agentNotices.take(strings.TrimSpace(request.Notice), caller.session.ID, time.Now()); found {
 			d.notifyAgentAction(r.Context(), caller.session.ID, what)

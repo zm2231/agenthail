@@ -111,6 +111,7 @@ type WorkItemStatePayload struct {
 	UtteranceID string    `json:"utteranceId,omitempty"`
 	Handoff     *Handoff  `json:"handoff,omitempty"`
 	Park        *Park     `json:"park,omitempty"`
+	Takeover    *Takeover `json:"takeover,omitempty"`
 }
 
 type DelegationPayload struct {

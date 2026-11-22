@@ -29,6 +29,7 @@ const ledgerWorkUsage = `usage: agenthail ledger work [list] [--state <s,...>] [
        agenthail ledger work close <item_id> --reason "done: <what finished it>|duplicate|wontfix|obsolete ..."
        agenthail ledger work delete <item_id> [--reason "..."]
        agenthail ledger work <approve|reject> <item_id> [--utterance <the person's words>] [--reason "..."]
+       agenthail ledger work takeover <item_id> --then release|submit|done --reason "..." [--utterance <the person's words> [--force]]
        agenthail ledger work dep <item_id> --on <item_id> [--remove]
        agenthail ledger work handoff <item_id> [--done "..."] [--remaining "..."] [--decisions "..."] [--uncertain "..."]
        agenthail ledger work park <item_id>... (--usage claude[:<root>]|codex | --later "<why>" | --person "<question>" [--ask <id>]
@@ -81,6 +82,9 @@ func (a *App) ledgerWork(store *ledger.Store, args []string) error {
 	}
 	req := ledger.WorkRequest{Action: action, Reason: w.value("--reason"), DependsOn: w.value("--on"), UtteranceID: w.value("--utterance"), LogType: w.value("--type"),
 		Handoff: ledger.Handoff{Done: w.values["--done"], Remaining: w.values["--remaining"], Decisions: w.values["--decisions"], Uncertain: w.values["--uncertain"]}}
+	if action == ledger.WorkTakeover {
+		req.Takeover = &ledger.Takeover{Then: w.value("--then"), Force: w.bools["--force"]}
+	}
 	if action == ledger.WorkDep && w.bools["--remove"] {
 		req.Action = ledger.WorkUndep
 	}
@@ -262,7 +266,7 @@ var workActions = map[ledger.WorkAction]bool{
 	ledger.WorkAdd: true, ledger.WorkClaim: true, ledger.WorkBlock: true, ledger.WorkUnblock: true, ledger.WorkSubmit: true,
 	ledger.WorkApprove: true, ledger.WorkReject: true, ledger.WorkReopen: true, ledger.WorkHandoff: true, ledger.WorkDep: true,
 	ledger.WorkComment: true, ledger.WorkLog: true, ledger.WorkEdit: true, ledger.WorkLink: true, ledger.WorkClose: true,
-	ledger.WorkDelete: true, ledger.WorkRestore: true, ledger.WorkPark: true, ledger.WorkUnpark: true,
+	ledger.WorkDelete: true, ledger.WorkRestore: true, ledger.WorkPark: true, ledger.WorkUnpark: true, ledger.WorkTakeover: true,
 }
 
 func workLine(item ledger.WorkItem) string {

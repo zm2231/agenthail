@@ -21,6 +21,7 @@ type WorkEntry struct {
 	Text    string    `json:"text,omitempty"`
 	State   WorkState `json:"state,omitempty"`
 	LogType string    `json:"logType,omitempty"`
+	Source  string    `json:"source,omitempty"`
 }
 
 type WorkNotePayload struct {
@@ -28,6 +29,7 @@ type WorkNotePayload struct {
 	Text    string `json:"text"`
 	LogType string `json:"logType,omitempty"`
 	Actor   string `json:"actor"`
+	Source  string `json:"source,omitempty"`
 }
 
 func (b *Board) planWorkNote(req WorkRequest) (EventType, any, string, error) {
@@ -52,7 +54,7 @@ func (b *Board) planWorkNote(req WorkRequest) (EventType, any, string, error) {
 	case item.Assignee != req.SessionID:
 		return "", nil, "", refuse("%s is claimed by %s; only its assignee logs to it, so use comment", item.ID, item.Assignee)
 	}
-	payload.LogType = req.LogType
+	payload.LogType, payload.Source = req.LogType, req.Source
 	if payload.LogType == "" {
 		payload.LogType = WorkLogTypes[0]
 	}
@@ -75,7 +77,7 @@ func (b *Board) applyWorkNote(event Event) error {
 	if event.Type == EventWorkLog {
 		kind = "log"
 	}
-	item.Timeline = append(item.Timeline, WorkEntry{At: event.CreatedAt, Actor: p.Actor, Kind: kind, Text: p.Text, LogType: p.LogType})
+	item.Timeline = append(item.Timeline, WorkEntry{At: event.CreatedAt, Actor: p.Actor, Kind: kind, Text: p.Text, LogType: p.LogType, Source: p.Source})
 	return nil
 }
 

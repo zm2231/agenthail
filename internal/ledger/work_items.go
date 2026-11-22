@@ -26,26 +26,27 @@ func (s WorkState) settled() bool { return s == WorkDone || s == WorkClosed || s
 type WorkAction string
 
 const (
-	WorkAdd     WorkAction = "add"
-	WorkClaim   WorkAction = "claim"
-	WorkBlock   WorkAction = "block"
-	WorkUnblock WorkAction = "unblock"
-	WorkSubmit  WorkAction = "submit"
-	WorkApprove WorkAction = "approve"
-	WorkReject  WorkAction = "reject"
-	WorkReopen  WorkAction = "reopen"
-	WorkHandoff WorkAction = "handoff"
-	WorkDep     WorkAction = "dep"
-	WorkUndep   WorkAction = "undep"
-	WorkComment WorkAction = "comment"
-	WorkLog     WorkAction = "log"
-	WorkEdit    WorkAction = "edit"
-	WorkLink    WorkAction = "link"
-	WorkClose   WorkAction = "close"
-	WorkDelete  WorkAction = "delete"
-	WorkRestore WorkAction = "restore"
-	WorkPark    WorkAction = "park"
-	WorkUnpark  WorkAction = "unpark"
+	WorkAdd      WorkAction = "add"
+	WorkClaim    WorkAction = "claim"
+	WorkBlock    WorkAction = "block"
+	WorkUnblock  WorkAction = "unblock"
+	WorkSubmit   WorkAction = "submit"
+	WorkApprove  WorkAction = "approve"
+	WorkReject   WorkAction = "reject"
+	WorkReopen   WorkAction = "reopen"
+	WorkHandoff  WorkAction = "handoff"
+	WorkDep      WorkAction = "dep"
+	WorkUndep    WorkAction = "undep"
+	WorkComment  WorkAction = "comment"
+	WorkLog      WorkAction = "log"
+	WorkEdit     WorkAction = "edit"
+	WorkLink     WorkAction = "link"
+	WorkClose    WorkAction = "close"
+	WorkDelete   WorkAction = "delete"
+	WorkRestore  WorkAction = "restore"
+	WorkPark     WorkAction = "park"
+	WorkUnpark   WorkAction = "unpark"
+	WorkTakeover WorkAction = "takeover"
 )
 
 type Handoff struct {
@@ -94,6 +95,10 @@ type WorkRequest struct {
 	LogType     string     `json:"logType,omitempty"`
 	Fields      WorkFields `json:"fields,omitempty"`
 	Change      WorkChange `json:"change,omitempty"`
+	Takeover    *Takeover  `json:"takeover,omitempty"`
+	// Source marks a log the daemon writes itself; a request from outside
+	// cannot set it.
+	Source string `json:"-"`
 }
 
 type WorkResult struct {
@@ -194,6 +199,9 @@ func (b *Board) applyWorkItemState(event Event) error {
 
 func stateEntryText(p WorkItemStatePayload) string {
 	var parts []string
+	if p.Takeover != nil {
+		parts = append(parts, takeoverText(*p.Takeover))
+	}
 	if p.Reason != "" {
 		parts = append(parts, p.Reason)
 	}

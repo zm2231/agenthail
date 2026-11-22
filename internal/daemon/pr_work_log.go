@@ -39,10 +39,10 @@ func (d *Daemon) logToHeldWork(sessionID, line string) {
 		return
 	}
 	for _, h := range held {
-		if h.projectID == "" || slices.ContainsFunc(h.item.Timeline, func(e ledger.WorkEntry) bool { return e.Text == line }) {
+		if h.projectID == "" || slices.ContainsFunc(h.item.Timeline, func(e ledger.WorkEntry) bool { return e.Text == line && e.Source == ledger.WorkSourcePRWatcher }) {
 			continue
 		}
-		req := ledger.WorkRequest{ProjectKey: h.key, SessionID: sessionID, Action: ledger.WorkLog, ItemID: h.item.ID, Text: line, LogType: "progress"}
+		req := ledger.WorkRequest{ProjectKey: h.key, SessionID: sessionID, Action: ledger.WorkLog, ItemID: h.item.ID, Text: line, LogType: "progress", Source: ledger.WorkSourcePRWatcher}
 		if _, err := d.ledgerStore().Work(req, time.Now()); err != nil {
 			d.log.Printf("log %q to %s: %s", line, h.item.ID, err)
 		}

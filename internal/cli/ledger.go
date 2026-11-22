@@ -85,7 +85,11 @@ func (a *App) cmdLedger(args []string) error {
 				return err
 			}
 		}
-		if _, err := a.agentScope(context.Background(), daemonapi.ScopeRequest{Action: "ledger", Project: key}); err != nil {
+		scope := daemonapi.ScopeRequest{Action: "ledger", Project: key}
+		if item, takeover := ledgerTakeoverItem(args, positional); takeover && flagVal(args, "--utterance") == "" {
+			scope.Mode, scope.Target = string(ledger.WorkTakeover), item
+		}
+		if _, err := a.agentScope(context.Background(), scope); err != nil {
 			return err
 		}
 	}
@@ -352,8 +356,21 @@ func (a *App) ledgerSetScope(positional []string, enabled bool, mode ledger.Atta
 
 var ledgerWorkShortForms = map[string]bool{"add": true, "create": true, "new": true, "list": true, "edit": true, "update": true,
 	"start": true, "claim": true, "log": true, "comment": true, "handoff": true, "block": true, "unblock": true, "review": true, "submit": true,
-	"approve": true, "reject": true, "park": true, "unpark": true, "close": true, "reopen": true, "delete": true, "restore": true, "dep": true, "link": true,
+	"approve": true, "reject": true, "park": true, "unpark": true, "close": true, "reopen": true, "delete": true, "restore": true, "dep": true, "link": true, "takeover": true,
 	"ready": true, "next": true, "critical-path": true, "search": true, "tree": true}
+
+func ledgerTakeoverItem(args []string, positional []string) (string, bool) {
+	if positional[0] == "work" {
+		positional = positional[1:]
+	}
+	if len(positional) == 0 || positional[0] != string(ledger.WorkTakeover) {
+		return "", false
+	}
+	if len(positional) < 2 {
+		return "", true
+	}
+	return positional[1], true
+}
 
 func workArgs(args []string, i int) []string {
 	if args[i] == "list" {

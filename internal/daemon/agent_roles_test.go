@@ -344,6 +344,7 @@ var decisionsBeforeRoles = map[string][2]string{
 	"channel-add":           {agentroles.Ask, agentroles.Allow},
 	"channel-remove":        {agentroles.Ask, agentroles.Allow},
 	"channel-delete":        {agentroles.Ask, agentroles.Notify},
+	"work-takeover":         {agentroles.Ask, agentroles.Notify},
 	"limit-resume":          {agentroles.Ask, agentroles.Notify},
 	"cross-project-message": {agentroles.Allow, agentroles.Allow},
 	"cross-project-steer":   {agentroles.Notify, agentroles.Notify},
