@@ -341,7 +341,8 @@ func (d *Daemon) ledgerPageEventsHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	ctx := r.Context()
-	boardWake := d.ledgerBoardChanges(ctx, projectID)
+	boardWake, unwatch := d.watchLedgerBoard(projectID)
+	defer unwatch()
 	wake := make(chan string, 1)
 	go func() {
 		for {

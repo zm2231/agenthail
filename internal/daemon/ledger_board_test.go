@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -67,6 +68,9 @@ func TestTheWorkBoardPutsEachHeldItemInTheFirstLaneThatMatches(t *testing.T) {
 	logged(merged, "s-idle", "PR merged: "+mergedURL)
 	idle := held("s-idle", "Write the search docs")
 	logged(idle, "s-idle", "outline drafted\nsections next")
+	forged := held("s-idle", "Tidy the index names")
+	logged(forged, "s-idle", "PR opened: javascript:alert(1)")
+	logged(forged, "s-idle", "PR opened: https://github.com/acme/widget/pull/99")
 	running := held("s-busy", "Build the order index")
 	asking := held("s-asking", "Keep deleted orders searchable")
 	work(t, store, ledger.WorkRequest{ProjectKey: p.key, SessionID: "s-asking", Action: ledger.WorkSubmit, ItemID: asking.ID})
@@ -94,12 +98,13 @@ func TestTheWorkBoardPutsEachHeldItemInTheFirstLaneThatMatches(t *testing.T) {
 		waiting.ID:  laneBlocked,
 		merged.ID:   laneIdle,
 		idle.ID:     laneIdle,
+		forged.ID:   laneIdle,
 	} {
 		if lanes[item] != want {
 			t.Errorf("%s is in lane %q, want %q", item, lanes[item], want)
 		}
 	}
-	if len(lanes) != 8 {
+	if len(lanes) != 9 {
 		t.Errorf("the board holds %d items, want each held item once: %v", len(lanes), lanes)
 	}
 
@@ -114,6 +119,9 @@ func TestTheWorkBoardPutsEachHeldItemInTheFirstLaneThatMatches(t *testing.T) {
 	}
 	if prs := flights[merged.ID].PRs; len(prs) != 1 || prs[0].State != "merged" {
 		t.Errorf("a merged PR reads %+v", prs)
+	}
+	if prs := flights[forged.ID].PRs; len(prs) != 0 {
+		t.Errorf("log lines naming PRs this host never linked show %+v", prs)
 	}
 	if prs := flights[idle.ID].PRs; len(prs) != 0 {
 		t.Errorf("an item whose log names no PR shows %+v from its holder's other PRs", prs)
@@ -136,10 +144,9 @@ func TestTheWorkBoardPutsEachHeldItemInTheFirstLaneThatMatches(t *testing.T) {
 
 func TestAnOpenWorkPageHearsWhenItsHoldersOrPRsChangeButNotOtherPRs(t *testing.T) {
 	shortLedgerChangeWait(t)
-	wait := ledgerBoardWait
-	ledgerBoardWait = 50 * time.Millisecond
-	t.Cleanup(func() { ledgerBoardWait = wait })
+	const wait = 50 * time.Millisecond
 	d, p, _, base := ledgerPageDaemon(t)
+	d.ledgerBoards.wait = wait
 	r := d.Registry
 	fake := d.Surfaces[0].(*daemonSurface)
 	holder := surface.Session{ID: "s-idle", Surface: fake.Name(), Cwd: p.dir, Status: surface.StatusIdle, LastActive: time.Now()}
@@ -150,12 +157,14 @@ func TestAnOpenWorkPageHearsWhenItsHoldersOrPRsChangeButNotOtherPRs(t *testing.T
 	if err != nil || key == "" {
 		t.Fatalf("the page reads the ledger of %q, %v", key, err)
 	}
-	shown := boardPR(t, r, "s-idle", 7, "pending")
 	boardPR(t, r, "s-idle", 8, "pending")
 	store := d.ledgerStore()
 	item := work(t, store, ledger.WorkRequest{ProjectKey: key, SessionID: "s-idle", Action: ledger.WorkAdd, Text: "Fix the flaky index test"})
 	work(t, store, ledger.WorkRequest{ProjectKey: key, SessionID: "s-idle", Action: ledger.WorkClaim, ItemID: item.ID})
-	work(t, store, ledger.WorkRequest{ProjectKey: key, SessionID: "s-idle", Action: ledger.WorkLog, ItemID: item.ID, Text: "PR opened: " + shown})
+	shown := "https://github.com/acme/widget/pull/7"
+	if err := d.linkPR(registry.SessionPR{SessionID: "s-idle", Repo: "acme/widget", Number: 7, URL: shown, Source: "test", Watch: true}, true); err != nil {
+		t.Fatal(err)
+	}
 	d.discoverCatalog(ctx)
 	events := openWorkPageEvents(t, base, "proj-widget")
 	drain := func() {
@@ -186,7 +195,7 @@ func TestAnOpenWorkPageHearsWhenItsHoldersOrPRsChangeButNotOtherPRs(t *testing.T
 	select {
 	case change := <-events:
 		t.Fatalf("the page heard %+v for a PR no item on it names", change)
-	case <-time.After(5 * ledgerBoardWait):
+	case <-time.After(5 * wait):
 	}
 	heard := func(what, lane string) {
 		t.Helper()
@@ -210,4 +219,60 @@ func TestAnOpenWorkPageHearsWhenItsHoldersOrPRsChangeButNotOtherPRs(t *testing.T
 	fake.sessions[holder.ID] = holder
 	d.discoverCatalog(ctx)
 	heard("its holder went busy", laneRunning)
+}
+
+func TestManyOpenWorkPagesOfOneProjectShareOneBoardReadPerWait(t *testing.T) {
+	const wait = 100 * time.Millisecond
+	d, p, _, base := ledgerPageDaemon(t)
+	d.ledgerBoards.wait = wait
+	r := d.Registry
+	fake := d.Surfaces[0].(*daemonSurface)
+	fake.sessions["s-idle"] = surface.Session{ID: "s-idle", Surface: fake.Name(), Cwd: p.dir, Status: surface.StatusIdle, LastActive: time.Now()}
+	ctx := context.Background()
+	d.discoverCatalog(ctx)
+	boardPR(t, r, "s-idle", 8, "pending")
+	d.discoverCatalog(ctx)
+	var reads atomic.Int32
+	d.ledgerBoards.read = func(projectID string) string {
+		reads.Add(1)
+		return d.ledgerBoardVersion(projectID)
+	}
+	const pages = 8
+	for range pages {
+		openWorkPageEvents(t, base, "proj-widget")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		d.ledgerBoards.mu.Lock()
+		open := len(d.ledgerBoards.pages["proj-widget"])
+		d.ledgerBoards.mu.Unlock()
+		if open == pages {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d of %d pages are watching", open, pages)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	start := time.Now()
+	checks := []string{"failing", "pending"}
+	for i := range 12 {
+		row, _, err := r.SessionPR("s-idle", "acme/widget", 8)
+		if err != nil {
+			t.Fatal(err)
+		}
+		next := row
+		next.Checks = checks[i%2]
+		if _, err := d.changePRs(func(r *registry.Registry) (bool, error) { return r.RecordPRRead(next, row.Wakes, time.Now()) }); err != nil {
+			t.Fatal(err)
+		}
+		d.discoverCatalog(ctx)
+		time.Sleep(25 * time.Millisecond)
+	}
+	time.Sleep(2 * wait)
+	elapsed := time.Since(start)
+	if got, most := int(reads.Load()), 1+int(elapsed/wait)+2; got < 2 || got > most {
+		t.Fatalf("%d pages read the board %d times in %s, want 2 to %d", pages, got, elapsed, most)
+	}
 }

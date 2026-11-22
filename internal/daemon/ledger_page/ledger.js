@@ -96,7 +96,7 @@ function link(className, href, text) {
 
 function prLine(pr) {
   const element = node("div", "pr-line");
-  element.append(link("", pr.url, prName(pr)));
+  element.append(pr.url.startsWith("https://") ? link("", pr.url, prName(pr)) : node("span", "", prName(pr)));
   const words = [pr.title && plain(pr.title), prWords(pr)].filter(Boolean).join(" · ");
   if (words) element.append(document.createTextNode(` ${words}`));
   return element;

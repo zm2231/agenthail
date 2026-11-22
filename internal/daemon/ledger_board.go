@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"slices"
 	"strings"
 	"time"
@@ -30,8 +29,6 @@ const (
 	prMergedLog = "PR merged: "
 	prClosedLog = "PR closed unmerged: "
 )
-
-var ledgerBoardWait = time.Second
 
 var ledgerBoardLanes = []string{laneYou, laneCIFailing, laneCIPending, laneReview, laneBlocked, laneRunning, laneIdle}
 
@@ -160,8 +157,10 @@ func boardLane(item ledger.WorkItem, flight *ledgerPageFlight) string {
 
 // itemPRs lists the pull requests an item's own log names, in the order they
 // were opened, with what this host last read of each. A PR is tied to an item
-// only by that log, never by sharing a holder.
-func itemPRs(item ledger.WorkItem, watched map[string]registry.SessionPR) []ledgerPagePR {
+// only by that log, never by sharing a holder. Any holder can write any log
+// line, so a URL counts only when this host has that PR linked: linkPR records
+// the PR from a parsed GitHub reference before it writes the line.
+func itemPRs(item ledger.WorkItem, linked map[string]registry.SessionPR) []ledgerPagePR {
 	var order []string
 	ended := map[string]string{}
 	for _, entry := range item.Timeline {
@@ -170,7 +169,7 @@ func itemPRs(item ledger.WorkItem, watched map[string]registry.SessionPR) []ledg
 		}
 		for _, prefix := range []string{prOpenedLog, prMergedLog, prClosedLog} {
 			url, ok := strings.CutPrefix(strings.TrimSpace(entry.Text), prefix)
-			if !ok || url == "" || strings.ContainsAny(url, " \n") {
+			if _, known := linked[url]; !ok || !known {
 				continue
 			}
 			if !slices.Contains(order, url) {
@@ -186,12 +185,10 @@ func itemPRs(item ledger.WorkItem, watched map[string]registry.SessionPR) []ledg
 	}
 	prs := make([]ledgerPagePR, 0, len(order))
 	for _, url := range order {
-		pr := ledgerPagePR{URL: url, State: "open"}
-		if read, ok := watched[url]; ok {
-			pr.Number, pr.Title, pr.Checks, pr.Review = read.Number, read.Title, read.Checks, read.Review
-			if read.State != "" {
-				pr.State = read.State
-			}
+		read := linked[url]
+		pr := ledgerPagePR{URL: url, Number: read.Number, Title: read.Title, State: "open", Checks: read.Checks, Review: read.Review}
+		if read.State != "" {
+			pr.State = read.State
 		}
 		if state, ok := ended[url]; ok {
 			pr.State = state
@@ -199,45 +196,6 @@ func itemPRs(item ledger.WorkItem, watched map[string]registry.SessionPR) []ledg
 		prs = append(prs, pr)
 	}
 	return prs
-}
-
-func (d *Daemon) ledgerBoardChanges(ctx context.Context, projectID string) <-chan string {
-	changed := make(chan string, 1)
-	_, latest, err := d.Registry.CatalogState()
-	if err != nil {
-		d.logRuntimeError("ledger-page:catalog", err)
-		return changed
-	}
-	_, follower, err := d.catalog.subscribe(latest)
-	if err != nil {
-		d.logRuntimeError("ledger-page:catalog", err)
-		return changed
-	}
-	go func() {
-		defer follower.Cancel()
-		shown := d.ledgerBoardVersion(projectID)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-follower.Wake:
-			}
-			if version := d.ledgerBoardVersion(projectID); version != shown {
-				shown = version
-				select {
-				case <-changed:
-				default:
-				}
-				changed <- version
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(ledgerBoardWait):
-			}
-		}
-	}()
-	return changed
 }
 
 func (d *Daemon) ledgerBoardVersion(projectID string) string {
