@@ -22,6 +22,9 @@ const (
 // PastAccess admits OAuth clients, which cannot carry an Access credential, while Access settings are set.
 const PastAccess = false
 
+// NarrowRole gives an OAuth client the connected-app role instead of the identity's remote role.
+const NarrowRole = false
+
 var Paths = []string{ProtectedResourcePath, ResourceMetadataPath, AuthServerPath, AuthorizePath, TokenPath, RegisterPath, RevokePath}
 
 func ResourceMetadataURL(issuer string) string { return issuer + ResourceMetadataPath }

@@ -30,10 +30,11 @@ const (
 )
 
 const (
-	Worker   = "worker"
-	Lead     = "lead"
-	Operator = "operator"
-	Remote   = "remote"
+	Worker       = "worker"
+	Lead         = "lead"
+	Operator     = "operator"
+	Remote       = "remote"
+	ConnectedApp = "connected-app"
 )
 
 const (
@@ -103,6 +104,12 @@ var BuiltIn = map[string]Role{
 	Lead:     {Description: "A project's coordinator: it manages its own project and its sessions.", Reach: ReachProject},
 	Operator: {Description: "The person's voice operator: it acts for the person everywhere.", Reach: ReachAll},
 	Remote:   {Description: "An agent identity that reaches this computer from elsewhere: it acts for the person everywhere.", Reach: ReachAll},
+	ConnectedApp: {
+		Description: "An app connected to an agent identity: it reads what the identity may read and sends queued messages to a project's coordinator, nothing more.",
+		Reach:       ReachDescendants,
+		Actions:     map[string]string{"cross-project-message": Ask, "cross-project-steer": Ask},
+		Tools:       []string{"agenthail_whoami", "agenthail_capabilities", "agenthail_sessions", "agenthail_projects", "agenthail_read", "agenthail_wait", "agenthail_send"},
+	},
 }
 
 // BaseCapabilities are what every role holds.
