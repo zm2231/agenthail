@@ -15,6 +15,7 @@ type PullRequest struct {
 	State     string
 	HeadSHA   string
 	HeadRef   string
+	BaseRef   string
 	CreatedAt time.Time
 }
 
@@ -31,7 +32,7 @@ type Client interface {
 	Watch(ctx context.Context, host string, refs []Ref) (Watch, error)
 }
 
-const pullFields = `number url title state headRefOid headRefName createdAt isCrossRepository`
+const pullFields = `number url title state headRefOid headRefName baseRefName createdAt isCrossRepository`
 
 type pullNode struct {
 	Number            int       `json:"number"`
@@ -40,12 +41,13 @@ type pullNode struct {
 	State             string    `json:"state"`
 	HeadRefOid        string    `json:"headRefOid"`
 	HeadRefName       string    `json:"headRefName"`
+	BaseRefName       string    `json:"baseRefName"`
 	CreatedAt         time.Time `json:"createdAt"`
 	IsCrossRepository bool      `json:"isCrossRepository"`
 }
 
 func (n pullNode) pullRequest(repo Repo) PullRequest {
-	return PullRequest{Ref: Ref{Repo: repo, Number: n.Number}, URL: n.URL, Title: n.Title, State: strings.ToLower(n.State), HeadSHA: n.HeadRefOid, HeadRef: n.HeadRefName, CreatedAt: n.CreatedAt}
+	return PullRequest{Ref: Ref{Repo: repo, Number: n.Number}, URL: n.URL, Title: n.Title, State: strings.ToLower(n.State), HeadSHA: n.HeadRefOid, HeadRef: n.HeadRefName, BaseRef: n.BaseRefName, CreatedAt: n.CreatedAt}
 }
 
 func (g GH) PullRequest(ctx context.Context, ref Ref) (PullRequest, error) {

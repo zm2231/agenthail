@@ -68,6 +68,8 @@ func newWorkHint(record registry.WorkRecord) *workHint {
 		return &workHint{Reason: "It holds more ignored files outside build and package folders than can be listed here.", Command: git + "status --ignored"}
 	case registry.WorkKeptRunning:
 		return &workHint{Reason: "Its session is still working; it is removed once the turn ends."}
+	case registry.WorkKeptOpen:
+		return &workHint{Reason: "A session that is not archived still works in it; it is removed once that session is archived."}
 	default:
 		return &workHint{Reason: "Removing it " + strings.TrimSpace(reason) + "."}
 	}

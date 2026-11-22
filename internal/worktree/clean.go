@@ -32,9 +32,12 @@ type Outcome struct {
 
 // Options.RemoveIgnored names the ignored files the person agreed to delete
 // with the worktree. Clean removes it only while they are exactly the ignored
-// files that would keep it.
+// files that would keep it. MergedHeads are the head commits of pull requests
+// merged from the branch: a squash merge leaves them off the base, yet every
+// commit they reach is merged.
 type Options struct {
 	RemoveIgnored []string
+	MergedHeads   []string
 }
 
 // KeptPathLimit is how many ignored files a kept worktree names. Past it the
@@ -80,7 +83,7 @@ func Clean(ctx context.Context, record Record, options Options) (Outcome, error)
 		tips = append(tips, branch)
 	}
 	for _, tip := range tips {
-		safe, err := tipSafe(ctx, record, tip)
+		safe, err := tipSafe(ctx, record, tip, options.MergedHeads)
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -133,9 +136,17 @@ func sameSet(paths, named []string) bool {
 	return slices.Equal(slices.Compact(slices.Sorted(slices.Values(paths))), slices.Compact(slices.Sorted(slices.Values(named))))
 }
 
-func tipSafe(ctx context.Context, record Record, tip string) (bool, error) {
-	if tip == record.BaseCommit {
+func tipSafe(ctx context.Context, record Record, tip string, mergedHeads []string) (bool, error) {
+	if tip == record.BaseCommit || slices.Contains(mergedHeads, tip) {
 		return true, nil
+	}
+	for _, head := range mergedHeads {
+		if known, err := gitOK(ctx, record.RepoRoot, "cat-file", "-e", head+"^{commit}"); err != nil || !known {
+			continue
+		}
+		if merged, err := gitOK(ctx, record.RepoRoot, "merge-base", "--is-ancestor", tip, head); err == nil && merged {
+			return true, nil
+		}
 	}
 	if merged, err := gitOK(ctx, record.RepoRoot, "merge-base", "--is-ancestor", tip, record.BaseRef); err == nil && merged {
 		return true, nil

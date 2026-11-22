@@ -44,7 +44,7 @@ func TestGHSaysWhyItCannotReadPullRequests(t *testing.T) {
 }
 
 func TestGHReadsAPullRequestAndBranchPullRequests(t *testing.T) {
-	pr := `{"number":42,"url":"https://github.com/acme/app/pull/42","title":"Fix","state":"OPEN","headRefOid":"abc","headRefName":"ah/x","createdAt":"2026-11-06T10:00:00Z","isCrossRepository":false}`
+	pr := `{"number":42,"url":"https://github.com/acme/app/pull/42","title":"Fix","state":"OPEN","headRefOid":"abc","headRefName":"ah/x","baseRefName":"main","createdAt":"2026-11-06T10:00:00Z","isCrossRepository":false}`
 	fork := `{"number":9,"url":"https://github.com/acme/app/pull/9","title":"Fork","state":"OPEN","headRefOid":"def","headRefName":"ah/x","createdAt":"2026-11-06T10:00:00Z","isCrossRepository":true}`
 	gh := stubGH(t, `case "$*" in
 *pullRequests*) echo '{"data":{"b0":{"pullRequests":{"nodes":[`+pr+`,`+fork+`]}},"b1":null}}' ;;
@@ -52,7 +52,7 @@ func TestGHReadsAPullRequestAndBranchPullRequests(t *testing.T) {
 esac`)
 	repo := Repo{Host: "github.com", Owner: "acme", Name: "app"}
 	got, err := gh.PullRequest(t.Context(), Ref{Repo: repo, Number: 42})
-	if err != nil || got.Title != "Fix" || got.State != "open" || got.HeadSHA != "abc" {
+	if err != nil || got.Title != "Fix" || got.State != "open" || got.HeadSHA != "abc" || got.BaseRef != "main" {
 		t.Fatalf("PullRequest = %+v, %v", got, err)
 	}
 	mine, missing := Branch{Repo: repo, Head: "ah/x"}, Branch{Repo: Repo{Host: "github.com", Owner: "acme", Name: "gone"}, Head: "ah/x"}

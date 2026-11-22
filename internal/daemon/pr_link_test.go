@@ -19,11 +19,13 @@ type fakeGitHub struct {
 	branches    map[github.Branch][]github.PullRequest
 	err         error
 	branchReads [][]github.Branch
-	statuses    map[github.Ref]github.Status
-	viewer      string
-	watchErr    error
-	watchReads  [][]github.Ref
-	duringRead  func()
+	// unboundedBranchReads counts branch reads made without a deadline.
+	unboundedBranchReads int
+	statuses             map[github.Ref]github.Status
+	viewer               string
+	watchErr             error
+	watchReads           [][]github.Ref
+	duringRead           func()
 }
 
 func (f *fakeGitHub) Watch(_ context.Context, host string, refs []github.Ref) (github.Watch, error) {
@@ -67,10 +69,13 @@ func (f *fakeGitHub) PullRequest(_ context.Context, ref github.Ref) (github.Pull
 	return pr, nil
 }
 
-func (f *fakeGitHub) BranchPullRequests(_ context.Context, branches []github.Branch) (map[github.Branch][]github.PullRequest, error) {
+func (f *fakeGitHub) BranchPullRequests(ctx context.Context, branches []github.Branch) (map[github.Branch][]github.PullRequest, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.branchReads = append(f.branchReads, branches)
+	if _, bounded := ctx.Deadline(); !bounded {
+		f.unboundedBranchReads++
+	}
 	if f.err != nil {
 		return nil, f.err
 	}
