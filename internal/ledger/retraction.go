@@ -107,6 +107,12 @@ func (b *Board) collectRetracted(events []Event) error {
 	if len(b.retracted) == 0 {
 		return nil
 	}
+	for _, e := range events {
+		var link WorkLinkPayload
+		if e.Type == EventWorkLink && json.Unmarshal(e.Payload, &link) == nil && link.FromClauseID != "" {
+			b.moved[link.ItemID] = true
+		}
+	}
 	askOf := map[string]string{}
 	for _, e := range events {
 		var src eventSource

@@ -154,6 +154,10 @@ type WorkLinkPayload struct {
 	ItemID   string `json:"itemId"`
 	ClauseID string `json:"clauseId"`
 	Actor    string `json:"actor"`
+	// FromClauseID is the clause a move takes the item off; empty when
+	// found work is linked.
+	FromClauseID string `json:"fromClauseId,omitempty"`
+	Reason       string `json:"reason,omitempty"`
 }
 
 func (b *Board) planWorkEdit(req WorkRequest) (EventType, any, string, error) {
@@ -279,21 +283,36 @@ func (b *Board) applyWorkEdit(event Event) error {
 	return nil
 }
 
-// planWorkLink adopts found work into the person's intent by hanging it off a live clause.
+// planWorkLink adopts found work into the person's intent by hanging it off a
+// live clause, or moves linked work to another clause for a stated reason.
 func (b *Board) planWorkLink(req WorkRequest) (EventType, any, string, error) {
 	item := b.workItems[req.ItemID]
+	reason := strings.TrimSpace(req.Reason)
 	switch {
 	case item == nil:
 		return "", nil, "", refuse("%q is not a work item in %s", req.ItemID, req.ProjectKey)
-	case item.ClauseID != "":
-		return "", nil, "", refuse("%s already hangs off %s; only found work is linked", item.ID, item.ClauseID)
 	case req.ClauseID == "":
 		return "", nil, "", refuse("link needs the clause the work belongs to")
+	case item.ClauseID == req.ClauseID:
+		return "", nil, "", refuse("%s already hangs off %s", item.ID, item.ClauseID)
+	case item.ClauseID != "" && reason == "":
+		return "", nil, "", refuse("%s hangs off %s; moving it needs --reason: why it belongs to %s", item.ID, item.ClauseID, req.ClauseID)
 	}
 	if err := b.liveClause(req.ClauseID, req.ProjectKey); err != nil {
 		return "", nil, "", err
 	}
-	return EventWorkLink, WorkLinkPayload{ItemID: item.ID, ClauseID: req.ClauseID, Actor: req.SessionID}, fmt.Sprintf("%s now hangs off %s", item.ID, req.ClauseID), nil
+	payload := WorkLinkPayload{ItemID: item.ID, ClauseID: req.ClauseID, Actor: req.SessionID, FromClauseID: item.ClauseID}
+	if item.ClauseID == "" {
+		return EventWorkLink, payload, fmt.Sprintf("%s now hangs off %s", item.ID, req.ClauseID), nil
+	}
+	payload.Reason = reason
+	readback := fmt.Sprintf("%s moved from %s to %s", item.ID, item.ClauseID, req.ClauseID)
+	if from := b.clauses[item.ClauseID]; from != nil && !slices.ContainsFunc(from.WorkItems, func(other *WorkItem) bool {
+		return other != item && other.State != WorkClosed && other.State != WorkDeleted
+	}) {
+		readback += fmt.Sprintf("; %s now has no work", from.ID)
+	}
+	return EventWorkLink, payload, readback, nil
 }
 
 func (b *Board) applyWorkLink(event Event) error {
@@ -302,12 +321,29 @@ func (b *Board) applyWorkLink(event Event) error {
 		return err
 	}
 	item, c := b.workItems[p.ItemID], b.clauses[p.ClauseID]
-	if item == nil || c == nil || item.ClauseID != "" {
+	if item == nil || item.ClauseID == p.ClauseID || item.ClauseID != p.FromClauseID && (item.ClauseID != "" || b.clauses[p.FromClauseID] != nil) {
 		return nil
+	}
+	from := b.clauses[item.ClauseID]
+	if from != nil {
+		from.WorkItems = slices.DeleteFunc(from.WorkItems, func(have *WorkItem) bool { return have == item })
+	}
+	if c == nil {
+		// The target's words were retracted on replay: the move still takes
+		// the item off its old clause, so it is found work again.
+		if item.ClauseID != "" {
+			item.ClauseID = ""
+			item.Timeline = append(item.Timeline, WorkEntry{At: event.CreatedAt, Actor: p.Actor, Kind: "link", Text: fmt.Sprintf("moved off %s: %s", p.FromClauseID, p.Reason)})
+		}
+		return nil
+	}
+	text := "hangs off " + c.ID
+	if p.FromClauseID != "" {
+		text = fmt.Sprintf("moved from %s to %s: %s", p.FromClauseID, c.ID, p.Reason)
 	}
 	item.ClauseID = c.ID
 	c.WorkItems = append(c.WorkItems, item)
-	item.Timeline = append(item.Timeline, WorkEntry{At: event.CreatedAt, Actor: p.Actor, Kind: "link", Text: "hangs off " + c.ID})
+	item.Timeline = append(item.Timeline, WorkEntry{At: event.CreatedAt, Actor: p.Actor, Kind: "link", Text: text})
 	return nil
 }
 

@@ -111,11 +111,14 @@ type Board struct {
 	kept               map[string]string
 	dropped            map[string]string
 	orphaned           map[string]string
-	replaying          bool
-	attachedBy         map[string][]string
-	retractions        []Retraction
-	capture            Scope
-	applied            int64
+	// moved holds the work items a later link moved off the clause they
+	// were created under; replay anchors them to where they moved.
+	moved       map[string]bool
+	replaying   bool
+	attachedBy  map[string][]string
+	retractions []Retraction
+	capture     Scope
+	applied     int64
 }
 
 func NewBoard() *Board {
@@ -143,6 +146,7 @@ func (b *Board) reset() {
 	b.kept = map[string]string{}
 	b.dropped = map[string]string{}
 	b.orphaned = map[string]string{}
+	b.moved = map[string]bool{}
 	b.attachedBy = map[string][]string{}
 	b.retractions = nil
 	b.capture = Scope{}

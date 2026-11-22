@@ -12,7 +12,7 @@ func dependencies(t EventType, src eventSource) []string {
 	if t != EventAsk {
 		add(RetractedAsk, src.AskID)
 	}
-	if t != EventClause {
+	if t != EventClause && t != EventWorkLink {
 		add(RetractedClause, src.ClauseID)
 	}
 	if t != EventDecision {
@@ -43,6 +43,9 @@ func (b *Board) orphan(t EventType, src eventSource) bool {
 		return true
 	}
 	for _, dep := range dependencies(t, src) {
+		if t == EventWorkItem && b.moved[src.ItemID] && dep == skippedKey(RetractedClause, src.ClauseID) {
+			continue
+		}
 		root, ok := b.dropped[dep]
 		if !ok {
 			root, ok = b.orphaned[dep]
