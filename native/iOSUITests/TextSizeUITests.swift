@@ -18,6 +18,25 @@ final class TextSizeUITests: XCTestCase {
         }
     }
 
+    func testAnUnreadableBackgroundShowsItsProblemInSettingsInBothThemes() {
+        for theme in ["dark", "light"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--preview-session", "--preview-app", "--preview-theme", theme, "--preview-backdrop", "image: backgrounds/missing.jpg"]
+            app.launch()
+            app.tab("Settings").tapWhenReady(timeout: 10)
+            let problem = app.descendants(matching: .any).matching(identifier: "appearance-problem").firstMatch
+            let list = app.collectionViews.firstMatch
+            for _ in 0..<8 where !problem.isHittable { list.swipeUp() }
+            XCTAssertTrue(problem.isHittable, "\(theme): Settings shows the background problem")
+            XCTAssertTrue(problem.label.contains("backgrounds/missing.jpg can't be read"), "\(theme): the problem names the image: \(problem.label)")
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = "\(theme) settings appearance problem"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            app.terminate()
+        }
+    }
+
     private func setTextSize(_ app: XCUIApplication, steps: Int, expect: String) {
         app.tab("Settings").tapWhenReady(timeout: 10)
         let stepper = app.steppers["text-size"]

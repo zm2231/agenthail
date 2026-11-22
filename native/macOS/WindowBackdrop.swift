@@ -31,7 +31,7 @@ final class WindowBackdrop: ObservableObject {
     private var scale: CGFloat = 2
     private var dark = true
     private var config = UIConfig.defaults
-    private var wallpapers: [String: WallpaperImage] = [:]
+    private var wallpapers: [Bool: WallpaperImage] = [:]
     private var renderTask: Task<Void, Never>?
     private(set) var rendering = false
     private var pending = false
@@ -58,7 +58,7 @@ final class WindowBackdrop: ObservableObject {
 
     var paneRadius: CGFloat { gutter > 0 ? DesktopRadius.sheet : 0 }
 
-    func configure(_ config: UIConfig, wallpapers: [String: WallpaperImage]) {
+    func configure(_ config: UIConfig, wallpapers: [Bool: WallpaperImage]) {
         self.config = config
         self.wallpapers = wallpapers
         refresh()
@@ -66,7 +66,7 @@ final class WindowBackdrop: ObservableObject {
 
     private func refresh() {
         generation += 1
-        let wanted = Self.wallpaper(config.background(dark: dark), images: wallpapers) != nil
+        let wanted = Self.wallpaper(config.background(dark: dark), image: wallpapers[dark]) != nil
         if active != wanted { active = wanted }
         let desktop = config.background(dark: dark) == .desktop
         if self.desktop != desktop { self.desktop = desktop }
@@ -145,7 +145,11 @@ final class WindowBackdrop: ObservableObject {
 
     var current: Bool { !active || (rendered != nil && spec() == rendered) }
 
-    func shows(_ config: UIConfig) -> Bool { self.config == config && current }
+    func shows(_ config: UIConfig, wallpapers: [Bool: WallpaperImage]) -> Bool {
+        self.config == config && self.wallpapers[dark] == wallpapers[dark] && current
+    }
+
+    func shows(_ interface: InterfaceStore) -> Bool { shows(interface.config, wallpapers: interface.drawn) }
 
     private func paneStyles() -> [BackdropRole: BackdropSpec.PaneStyle] {
         [
@@ -159,7 +163,7 @@ final class WindowBackdrop: ObservableObject {
     private var readable: Bool { config.readability || NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast }
 
     private func spec() -> BackdropSpec? {
-        guard windowSize.width > 0, windowSize.height > 0, let wallpaper = Self.wallpaper(config.background(dark: dark), images: wallpapers) else { return nil }
+        guard windowSize.width > 0, windowSize.height > 0, let wallpaper = Self.wallpaper(config.background(dark: dark), image: wallpapers[dark]) else { return nil }
         let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
         let ground = DesktopPalette.ground(dark: dark)
         let colors = TextColors(config)
@@ -214,11 +218,11 @@ final class WindowBackdrop: ObservableObject {
         BackdropRGB(Float(c.red), Float(c.green), Float(c.blue))
     }
 
-    private static func wallpaper(_ background: UIConfig.Background, images: [String: WallpaperImage]) -> BackdropSpec.Wallpaper? {
+    private static func wallpaper(_ background: UIConfig.Background, image: WallpaperImage?) -> BackdropSpec.Wallpaper? {
         switch background {
         case .none: return nil
         case .desktop: return .desktop
-        case .image(let path): return images[path].map { .image($0) }
+        case .image: return image.map { .image($0) }
         case .linear(let angle, let stops): return .linear(angle: Float(angle), stops: stops.map { BackdropStop(color: rgb($0.color), location: Float($0.location)) })
         case .mesh(let columns, let rows, let colors): return .mesh(columns: columns, rows: rows, colors: colors.map(rgb))
         }

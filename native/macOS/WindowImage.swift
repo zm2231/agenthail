@@ -7,9 +7,15 @@ enum WindowImage {
     enum Failure: Error, Equatable {
         case unavailable
         case empty
+        case undrawn
+        case changed
 
         var message: String {
             switch self {
+            case .changed:
+                "The appearance changed again before the snapshot was taken."
+            case .undrawn:
+                "The window's background didn't finish drawing in time."
             case .unavailable:
                 "This version of macOS no longer provides CGWindowListCreateImage, which Agenthail uses to capture its own window, so it cannot take a snapshot."
             case .empty:

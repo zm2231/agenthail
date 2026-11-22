@@ -18,9 +18,9 @@ struct WindowBackdropHost: ViewModifier {
             }
             .environment(\.windowBackdrop, backdrop)
             .environment(\.backdropPlace, BackdropPlace(role: nil, anchor: anchor))
-            .onAppear { backdrop.configure(interface.config, wallpapers: interface.wallpapers) }
-            .onChange(of: interface.config) { backdrop.configure(interface.config, wallpapers: interface.wallpapers) }
-            .onChange(of: interface.wallpapers) { backdrop.configure(interface.config, wallpapers: interface.wallpapers) }
+            .onAppear { backdrop.configure(interface.config, wallpapers: interface.drawn) }
+            .onChange(of: interface.config) { backdrop.configure(interface.config, wallpapers: interface.drawn) }
+            .onChange(of: interface.drawn) { backdrop.configure(interface.config, wallpapers: interface.drawn) }
     }
 }
 
