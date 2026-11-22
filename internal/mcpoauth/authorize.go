@@ -14,13 +14,16 @@ var AuthorizeParams = []string{"response_type", "client_id", "redirect_uri", "st
 type AuthorizeRequest struct {
 	ClientID    string
 	RedirectURI string
-	State       string
-	Challenge   string
+	// RedirectGiven makes redirect_uri required at the token endpoint (OAuth 2.1 section 4.1.3).
+	RedirectGiven bool
+	State         string
+	Challenge     string
 }
 
 // An error about the client or redirect is shown to the person, never sent to an unverified redirect.
 func ParseAuthorize(q url.Values, issuer string, redirects func(clientID string) ([]string, bool)) (AuthorizeRequest, *Error, bool) {
 	req := AuthorizeRequest{ClientID: q.Get("client_id"), RedirectURI: q.Get("redirect_uri"), State: q.Get("state"), Challenge: q.Get("code_challenge")}
+	req.RedirectGiven = req.RedirectURI != ""
 	registered, ok := redirects(req.ClientID)
 	if !ok {
 		return req, failure(http.StatusBadRequest, "invalid_client", "this client is not registered here; register it again"), false

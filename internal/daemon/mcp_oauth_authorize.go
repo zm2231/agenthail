@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"math/big"
@@ -17,6 +18,7 @@ import (
 const (
 	oauthApprove = "approve"
 	oauthDecline = "decline"
+	oauthExpired = "expired"
 )
 
 type oauthPending struct {
@@ -91,6 +93,15 @@ func (m *remoteMCP) oauthAsk(w http.ResponseWriter, r *http.Request, req mcpoaut
 	}
 	s.pending[id] = pending
 	s.mu.Unlock()
+	d.background.start(func(ctx context.Context) {
+		select {
+		case <-time.After(time.Until(pending.expires.Add(oauthCodeLife))):
+			s.mu.Lock()
+			m.sweepOAuthLocked(time.Now())
+			s.mu.Unlock()
+		case <-ctx.Done():
+		}
+	})
 	if remote, err := d.Registry.RemoteIdentityNamed(name); err == nil {
 		m.raiseOAuthAsk(id, pending, remote)
 	} else {
@@ -153,13 +164,13 @@ func (m *remoteMCP) oauthWait(w http.ResponseWriter, r *http.Request, issuer, id
 			return
 		}
 		http.Redirect(w, r, mcpoauth.CodeRedirect(pending.req, issuer, code), http.StatusFound)
-	case pending.decision == oauthDecline || now.After(pending.expires):
+	case pending.decision == oauthDecline || !now.Before(pending.expires):
+		m.expireOAuthPending(pending)
 		delete(s.pending, id)
 		s.mu.Unlock()
 		description := "the person declined"
-		if pending.decision != oauthDecline {
+		if pending.decision == oauthExpired {
 			description = "no one approved in time"
-			m.expireOAuthPending(pending)
 		}
 		http.Redirect(w, r, mcpoauth.ErrorRedirect(pending.req, issuer, &mcpoauth.Error{Code: "access_denied", Description: description}), http.StatusFound)
 	default:
@@ -171,9 +182,12 @@ func (m *remoteMCP) oauthWait(w http.ResponseWriter, r *http.Request, issuer, id
 func (m *remoteMCP) sweepOAuthLocked(now time.Time) {
 	s := m.oauth
 	for id, pending := range s.pending {
-		if now.After(pending.expires) {
+		if now.Before(pending.expires) {
+			continue
+		}
+		m.expireOAuthPending(pending)
+		if !now.Before(pending.expires.Add(oauthCodeLife)) {
 			delete(s.pending, id)
-			m.expireOAuthPending(pending)
 		}
 	}
 	for hash, code := range s.codes {
@@ -183,8 +197,13 @@ func (m *remoteMCP) sweepOAuthLocked(now time.Time) {
 	}
 }
 
+// The page keeps its expired approval a little longer, so its next refresh can send the client access_denied.
 func (m *remoteMCP) expireOAuthPending(pending *oauthPending) {
-	if pending.askID == "" || pending.decision != "" {
+	if pending.decision != "" {
+		return
+	}
+	pending.decision = oauthExpired
+	if pending.askID == "" {
 		return
 	}
 	if ask, found, err := m.d.Registry.Ask(pending.askID); err == nil && found {

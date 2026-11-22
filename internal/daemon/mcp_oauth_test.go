@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -335,5 +337,89 @@ func TestARefreshRotatesTheTokensAndASpentOneRevokesTheGrant(t *testing.T) {
 	}
 	if history := f.history(t); !strings.Contains(history, "a spent refresh token was presented") {
 		t.Fatalf("the revocation is not recorded:\n%s", history)
+	}
+}
+
+type approvedCode struct {
+	clientID string
+	code     string
+	verifier string
+}
+
+func (f *oauthFixture) approvedCode(t *testing.T, sendRedirect bool) approvedCode {
+	t.Helper()
+	client, err := f.r.RegisterOAuthClient("Kat", []string{oauthTestCallback}, 64, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier := strings.Repeat("v", 50)
+	sum := sha256.Sum256([]byte(verifier))
+	query := url.Values{"response_type": {"code"}, "client_id": {client.ID}, "state": {"s"}, "code_challenge": {base64.RawURLEncoding.EncodeToString(sum[:])}, "code_challenge_method": {"S256"}}
+	if sendRedirect {
+		query.Set("redirect_uri", oauthTestCallback)
+	}
+	back := f.authorize(t, f.issuer+mcpoauth.AuthorizePath+"?"+query.Encode(), "scout", oauthApprove).Query()
+	if back.Get("code") == "" {
+		t.Fatalf("no code came back: %v", back)
+	}
+	return approvedCode{clientID: client.ID, code: back.Get("code"), verifier: verifier}
+}
+
+func (c approvedCode) exchange(redirect string) url.Values {
+	form := url.Values{"grant_type": {"authorization_code"}, "client_id": {c.clientID}, "code": {c.code}, "code_verifier": {c.verifier}}
+	if redirect != "" {
+		form.Set("redirect_uri", redirect)
+	}
+	return form
+}
+
+func TestACodeIsRedeemedOnlyWithTheRedirectURIItsRequestNamed(t *testing.T) {
+	f := newOAuthFixture(t)
+	named := f.approvedCode(t, true)
+	if status, body := f.token(t, named.exchange("")); status != http.StatusBadRequest || body["error"] != "invalid_grant" {
+		t.Fatalf("redirect_uri omitted: status=%d body=%v", status, body)
+	}
+	if status, body := f.token(t, f.approvedCode(t, true).exchange(oauthTestCallback)); status != http.StatusOK {
+		t.Fatalf("exact redirect_uri: status=%d body=%v", status, body)
+	}
+	if status, body := f.token(t, f.approvedCode(t, false).exchange("")); status != http.StatusOK {
+		t.Fatalf("a request that named no redirect_uri: status=%d body=%v", status, body)
+	}
+}
+
+func TestACodeUsedTwiceLeavesNoLiveGrantEvenWhenBothUsesRace(t *testing.T) {
+	f := newOAuthFixture(t)
+	for round := range 5 {
+		code := f.approvedCode(t, true)
+		type outcome struct {
+			status int
+			body   map[string]any
+		}
+		results := make(chan outcome, 2)
+		for range 2 {
+			go func() {
+				response, err := f.client.PostForm(f.issuer+mcpoauth.TokenPath, code.exchange(oauthTestCallback))
+				if err != nil {
+					results <- outcome{}
+					return
+				}
+				defer response.Body.Close()
+				var body map[string]any
+				_ = json.NewDecoder(response.Body).Decode(&body)
+				results <- outcome{response.StatusCode, body}
+			}()
+		}
+		for range 2 {
+			got := <-results
+			if got.status != http.StatusOK {
+				continue
+			}
+			if status, _ := f.probe(t, got.body["access_token"].(string)); status != http.StatusUnauthorized {
+				t.Fatalf("round %d: a token issued for a code used twice still works (%d)", round, status)
+			}
+		}
+		if grants, err := f.r.OAuthGrants(); err != nil || len(grants) != 0 {
+			t.Fatalf("round %d: grants=%+v err=%v", round, grants, err)
+		}
 	}
 }

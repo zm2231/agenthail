@@ -15,6 +15,7 @@ type oauthCode struct {
 	pending *oauthPending
 	expires time.Time
 	used    bool
+	reused  bool
 	grantID string
 }
 
@@ -79,13 +80,11 @@ func (m *remoteMCP) exchangeOAuthCode(code, clientID, redirectURI, verifier stri
 		return registry.OAuthTokens{}, invalidGrant("the code is unknown or expired")
 	}
 	if entry.used {
+		entry.reused = true
 		grantID := entry.grantID
-		delete(s.codes, oauthCodeKey(code))
 		s.mu.Unlock()
 		if grantID != "" {
-			if grant, err := d.Registry.RevokeOAuthGrant(grantID); err == nil {
-				d.recordOAuth(grant.IdentityID, "revoke "+oauthGrantLabel(grant), "its code was used twice")
-			}
+			m.revokeReusedCode(grantID)
 		}
 		return registry.OAuthTokens{}, invalidGrant("the code was already used")
 	}
@@ -97,7 +96,7 @@ func (m *remoteMCP) exchangeOAuthCode(code, clientID, redirectURI, verifier stri
 	case clientID != pending.client.ID:
 		s.mu.Unlock()
 		return registry.OAuthTokens{}, invalidGrant("the code was issued to another client")
-	case redirectURI != "" && redirectURI != pending.req.RedirectURI:
+	case redirectURI != pending.req.RedirectURI && (pending.req.RedirectGiven || redirectURI != ""):
 		s.mu.Unlock()
 		return registry.OAuthTokens{}, invalidGrant("redirect_uri differs from the authorization request's")
 	case !mcpoauth.VerifyS256(verifier, pending.req.Challenge):
@@ -111,11 +110,25 @@ func (m *remoteMCP) exchangeOAuthCode(code, clientID, redirectURI, verifier stri
 		d.logRuntimeError("issue an OAuth grant", err)
 		return registry.OAuthTokens{}, invalidGrant("the grant could not be issued")
 	}
+	d.recordOAuth(pending.identityID, "issue "+oauthGrantLabel(tokens.Grant), "ok")
 	s.mu.Lock()
 	entry.grantID = tokens.Grant.ID
+	reused := entry.reused
 	s.mu.Unlock()
-	d.recordOAuth(pending.identityID, "issue "+oauthGrantLabel(tokens.Grant), "ok")
+	if reused {
+		m.revokeReusedCode(tokens.Grant.ID)
+		return registry.OAuthTokens{}, invalidGrant("the code was already used")
+	}
 	return tokens, nil
+}
+
+func (m *remoteMCP) revokeReusedCode(grantID string) {
+	grant, err := m.d.Registry.RevokeOAuthGrant(grantID)
+	if err != nil {
+		m.d.logRuntimeError("revoke a grant whose code was used twice", err)
+		return
+	}
+	m.d.recordOAuth(grant.IdentityID, "revoke "+oauthGrantLabel(grant), "its code was used twice")
 }
 
 func (m *remoteMCP) refreshOAuth(refresh, clientID string) (registry.OAuthTokens, *mcpoauth.Error) {
