@@ -162,7 +162,6 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/actions", d.apiV1Guard(dashboard, "control", d.actionsHTTPHandler(actionFormatAPIv1)))
 	mux.HandleFunc("/api/v1/settings", d.apiV1Guard(dashboard, "settings", apiV1JSONHandler(d.dashboardSettingsHandler)))
 	mux.HandleFunc("/api/v1/agents", d.apiV1Guard(dashboard, "settings", apiV1JSONHandler(d.agentRolesHandler)))
-	mux.HandleFunc(daemonapi.IdentityOAuthPath, d.apiV1Guard(dashboard, "settings", apiV1JSONHandler(d.identityOAuthHandler)))
 	mux.HandleFunc("/api/v1/notification-preferences", d.apiV1Guard(dashboard, "control", apiV1JSONHandler(d.notificationPreferencesHandler)))
 	mux.HandleFunc("/api/v1/proxies/prefer", d.proxyPreferGuard(dashboard))
 	mux.HandleFunc("/api/v1/claude/compact-settings", d.apiV1Guard(dashboard, "settings", apiV1JSONHandler(d.claudeCompactSettingsHandler)))

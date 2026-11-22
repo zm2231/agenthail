@@ -15,7 +15,6 @@ type remoteMCPHealth struct {
 	Keys       registry.AccessKeys       `json:"keys"`
 	Identities []registry.RemoteIdentity `json:"identities"`
 	Unread     map[string]int            `json:"unread"`
-	OAuth      oauthStatus               `json:"oauth"`
 	Problems   []string                  `json:"problems"`
 }
 
@@ -26,9 +25,6 @@ func remoteMCPHealthOf(r *registry.Registry, now time.Time) (remoteMCPHealth, er
 		return health, err
 	}
 	if health.Identities, err = r.RemoteIdentities(); err != nil {
-		return health, err
-	}
-	if health.OAuth, err = oauthStatusOf(r); err != nil {
 		return health, err
 	}
 	for _, identity := range health.Identities {
@@ -72,11 +68,7 @@ func (h remoteMCPHealth) String() string {
 	case "off":
 		lines = append(lines, "remote mcp: off (no identity has remote access)")
 	case "token only":
-		published := "/mcp"
-		if h.OAuth.Issuer != "" {
-			published = "/mcp and the OAuth paths"
-		}
-		lines = append(lines, "remote mcp: token only (no Access settings); publish only "+published+" to it")
+		lines = append(lines, "remote mcp: token only (no Access settings); publish only /mcp to it")
 	default:
 		keys := "keys never read"
 		if !h.Keys.ReadAt.IsZero() {
@@ -85,14 +77,7 @@ func (h remoteMCPHealth) String() string {
 		lines = append(lines, fmt.Sprintf("remote mcp: Access and token (team %s, audience %s), %s", h.Team, h.AUD, keys))
 	}
 	for _, identity := range h.Identities {
-		oauth := ""
-		if identity.OAuth {
-			oauth = ", OAuth sign-in on"
-		}
-		lines = append(lines, fmt.Sprintf("  @%s: %s%s, last seen %s, %d unread", identity.Name, identity.Binding(), oauth, lastSeen(identity.LastSeen), h.Unread[identity.Name]))
-	}
-	if h.OAuth.Issuer != "" {
-		lines = append(lines, "  "+strings.ReplaceAll(h.OAuth.String(), "\n", "\n  "))
+		lines = append(lines, fmt.Sprintf("  @%s: %s, last seen %s, %d unread", identity.Name, identity.Binding(), lastSeen(identity.LastSeen), h.Unread[identity.Name]))
 	}
 	for _, problem := range h.Problems {
 		lines = append(lines, "  problem: "+problem)

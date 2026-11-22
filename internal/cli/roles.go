@@ -20,7 +20,7 @@ import (
 const rolesUsage = `usage: agenthail roles [list] [--json] | show <role> [--json]
        agenthail roles create <name> [<from-role>] | delete <role> | reset <role>
        agenthail roles set <role> <action> allow|notify|ask|default
-       agenthail roles reach <role> self|descendants|project|all
+       agenthail roles reach <role> descendants|project|all
        agenthail roles limit <role> depth|running <n>
        agenthail roles tools <role> all | +<tool> -<tool> ...
        agenthail roles assign <role> --session <@alias|id> | --identity <name> | --alias <name>
