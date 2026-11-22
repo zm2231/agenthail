@@ -128,11 +128,20 @@ func (s *relayedSession) writeFor(t *testing.T, pid int, sessionID string, byTha
 	}
 }
 
-func (s *relayedSession) whoami(t *testing.T) (string, bool) {
+func (s *relayedSession) whoami(t *testing.T) (string, error) {
 	t.Helper()
 	result, err := s.client.CallTool(context.Background(), &mcp.CallToolParams{Name: "agenthail_whoami"})
-	if err != nil || result.IsError {
-		return "", false
+	if err != nil {
+		return "", err
+	}
+	if result.IsError {
+		var refusal strings.Builder
+		for _, content := range result.Content {
+			if text, ok := content.(*mcp.TextContent); ok {
+				refusal.WriteString(text.Text)
+			}
+		}
+		return "", fmt.Errorf("whoami refused: %s", refusal.String())
 	}
 	view, _ := json.Marshal(result.StructuredContent)
 	var whoami struct {
@@ -143,7 +152,7 @@ func (s *relayedSession) whoami(t *testing.T) (string, bool) {
 	if whoami.Credential != nil {
 		t.Fatalf("a session named by its process was shown a credential: %v", whoami.Credential)
 	}
-	return whoami.SessionID, true
+	return whoami.SessionID, nil
 }
 
 func (s *relayedSession) toolCount(t *testing.T) int {
@@ -208,12 +217,12 @@ func TestASessionsOwnStdioServerActsAsTheSessionItsProcessHoldsNow(t *testing.T)
 	}()
 	session := startRelayedSession(t, root, "claude-one")
 	testkit.Eventually(t, "the session's tools are listed", 10*time.Second, func() bool { return session.toolCount(t) > 0 })
-	if id, ok := session.whoami(t); !ok || id != "claude-one" {
-		t.Fatalf("whoami = %q, %v", id, ok)
+	if id, err := session.whoami(t); err != nil || id != "claude-one" {
+		t.Fatalf("whoami = %q, %v", id, err)
 	}
 	session.write(t, "claude-two")
-	if id, ok := session.whoami(t); !ok || id != "claude-two" {
-		t.Fatalf("after /clear the record names claude-two, but whoami = %q, %v", id, ok)
+	if id, err := session.whoami(t); err != nil || id != "claude-two" {
+		t.Fatalf("after /clear the record names claude-two, but whoami = %q, %v", id, err)
 	}
 	stop()
 	restarted, err := d.startMCPSocket()
@@ -221,13 +230,13 @@ func TestASessionsOwnStdioServerActsAsTheSessionItsProcessHoldsNow(t *testing.T)
 		t.Fatal(err)
 	}
 	t.Cleanup(restarted)
-	if id, ok := session.whoami(t); !ok || id != "claude-two" {
-		t.Fatalf("after the daemon's socket restarts, whoami = %q, %v", id, ok)
+	if id, err := session.whoami(t); err != nil || id != "claude-two" {
+		t.Fatalf("after the daemon's socket restarts, whoami = %q, %v", id, err)
 	}
 	if err := reg.ArchiveSession("claude-two", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if id, ok := session.whoami(t); ok {
+	if id, err := session.whoami(t); err == nil {
 		t.Fatalf("an archived session still acted, as %q", id)
 	}
 }
@@ -250,8 +259,8 @@ func TestASessionStartedWhileTheDaemonIsDownGetsItsToolsWhenItComesUp(t *testing
 	case <-time.After(15 * time.Second):
 		t.Fatal("the session was never told its tools changed")
 	}
-	if id, ok := session.whoami(t); !ok || id != "claude-one" {
-		t.Fatalf("whoami = %q, %v", id, ok)
+	if id, err := session.whoami(t); err != nil || id != "claude-one" {
+		t.Fatalf("whoami = %q, %v", id, err)
 	}
 }
 
@@ -315,8 +324,8 @@ func TestARelayedSessionWhoseRecordCouldNotBeReadGetsItsToolsOnceItReads(t *test
 	case <-time.After(15 * time.Second):
 		t.Fatal("the session was never told its tools changed once its record read")
 	}
-	if id, ok := session.whoami(t); !ok || id != "claude-one" {
-		t.Fatalf("whoami = %q, %v", id, ok)
+	if id, err := session.whoami(t); err != nil || id != "claude-one" {
+		t.Fatalf("whoami = %q, %v", id, err)
 	}
 }
 
@@ -466,8 +475,8 @@ func TestASocketCallerIsNamedWhileBackgroundReadsHoldEveryGeneralReader(t *testi
 		t.Fatal(err)
 	}
 	holdEveryGeneralReader(t, reg)
-	if id, ok := session.whoami(t); !ok || id != "claude-one" {
-		t.Fatalf("with every general reader held, whoami = %q, %v", id, ok)
+	if id, err := session.whoami(t); err != nil || id != "claude-one" {
+		t.Fatalf("with every general reader held, whoami = %q, %v", id, err)
 	}
 }
 
