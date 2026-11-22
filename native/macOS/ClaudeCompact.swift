@@ -18,6 +18,11 @@ enum ClaudeCompactFacts {
         idle.enabled ? "on, from \(idle.minContextTokens.formatted()) tokens" : "off"
     }
 
+    static func preLimit(_ idle: ClaudeIdleCompaction) -> String? {
+        guard let percent = idle.preLimitPercent else { return nil }
+        return idle.enabled && percent > 0 ? "from \(percent)%" : "off"
+    }
+
     static func modelLines(_ root: ClaudeCompactRoot) -> [(model: String, window: String)] {
         (root.modelWindows ?? [:]).sorted { $0.key < $1.key }.map { (modelName($0.key), window($0.value)) }
     }

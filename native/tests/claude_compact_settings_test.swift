@@ -5,7 +5,7 @@ import Network
 @main
 @MainActor
 struct ClaudeCompactSettingsTest {
-    static let settings = #"{"roots":[{"root":"/u/.claude","settingsPath":"/u/.claude/settings.json","autoCompactWindow":{"tokens":400000},"modelWindows":{"claude-opus-5-5":{"auto":true},"claude-haiku-5-5":{"ignored":"5000"}},"autoCompactEnabled":true,"agenthailIdleCompaction":{"enabled":true,"minContextTokens":200000},"overrides":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"300000"}},{"root":"/u/.claude-work","settingsPath":"/u/.claude-work/settings.json","idleCompaction":false,"agenthailIdleCompaction":{"enabled":false,"minContextTokens":200000}}],"idleCompactionHolds":[{"sessionId":"s1","session":"@lead","root":"/u/.claude","requestAt":"2026-11-08T11:00:00Z","contextTokens":250000,"reason":"the account is at its limit","at":"2026-11-08T11:00:00.123456789Z"},{"sessionId":"s2","session":"","root":"/u/.claude","requestAt":"2026-11-08T11:30:00Z","contextTokens":210000,"reason":"busy","at":"2026-11-08T11:30:00Z"},{"sessionId":"s3","session":"@w","root":"/u/.claude-work","requestAt":"2026-11-08T11:40:00Z","contextTokens":1,"reason":"x","at":"2026-11-08T11:40:00Z"}]}"#
+    static let settings = #"{"roots":[{"root":"/u/.claude","settingsPath":"/u/.claude/settings.json","autoCompactWindow":{"tokens":400000},"modelWindows":{"claude-opus-5-5":{"auto":true},"claude-haiku-5-5":{"ignored":"5000"}},"autoCompactEnabled":true,"agenthailIdleCompaction":{"enabled":true,"minContextTokens":200000,"preLimitPercent":90},"overrides":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"300000"}},{"root":"/u/.claude-work","settingsPath":"/u/.claude-work/settings.json","idleCompaction":false,"agenthailIdleCompaction":{"enabled":false,"minContextTokens":200000,"preLimitPercent":95}}],"idleCompactionHolds":[{"sessionId":"s1","session":"@lead","root":"/u/.claude","requestAt":"2026-11-08T11:00:00Z","contextTokens":250000,"reason":"the account is at its limit","at":"2026-11-08T11:00:00.123456789Z"},{"sessionId":"s2","session":"","root":"/u/.claude","requestAt":"2026-11-08T11:30:00Z","contextTokens":210000,"reason":"busy","at":"2026-11-08T11:30:00Z"},{"sessionId":"s3","session":"@w","root":"/u/.claude-work","requestAt":"2026-11-08T11:40:00Z","contextTokens":1,"reason":"x","at":"2026-11-08T11:40:00Z"}]}"#
 
     static func main() async throws {
         let response = try JSONDecoder().decode(ClaudeCompactResponse.self, from: Data(settings.utf8))
@@ -19,6 +19,10 @@ struct ClaudeCompactSettingsTest {
         check(ClaudeCompactFacts.title("/u/.claude", home: "/u") == "Default" && ClaudeCompactFacts.title("/u/.forge-proxy/.claude", home: "/u") == "forge-proxy" && ClaudeCompactFacts.title("/srv/claude", home: "/u") == "claude", "a folder reads by its name")
         check(ClaudeCompactFacts.toggle(main.autoCompactEnabled) == "on" && ClaudeCompactFacts.toggle(work.idleCompaction) == "off" && ClaudeCompactFacts.toggle(main.idleCompaction) == "not set", "toggles read on, off and not set")
         check(ClaudeCompactFacts.agenthailIdle(main.agenthailIdleCompaction) == "on, from \(Int64(200000).formatted()) tokens" && ClaudeCompactFacts.agenthailIdle(work.agenthailIdleCompaction) == "off", "Agenthail idle shows its minimum when on")
+        check(ClaudeCompactFacts.preLimit(main.agenthailIdleCompaction) == "from 90%", "compaction before a usage limit reads its percent")
+        check(ClaudeCompactFacts.preLimit(ClaudeIdleCompaction(enabled: true, minContextTokens: 1, preLimitPercent: 0)) == "off", "a percent of 0 reads off")
+        check(ClaudeCompactFacts.preLimit(work.agenthailIdleCompaction) == "off", "with idle compaction off, compaction before a usage limit is off too")
+        check(ClaudeCompactFacts.preLimit(ClaudeIdleCompaction(enabled: true, minContextTokens: 1)) == nil, "a daemon that sends no percent shows no row")
         let now = TurnClock.date("2026-11-08T12:00:00Z")!
         let lines = ClaudeCompactFacts.holdLines(main, holds: holds, now: now)
         check(lines.count == 2 && lines[0].hasPrefix("s2 at \(Int64(210000).formatted()) tokens, ") && lines[0].hasSuffix(": busy") && lines[1].contains("@lead"), "holds are the folder's own, newest first, named by session: \(lines)")
@@ -33,8 +37,16 @@ struct ClaudeCompactSettingsTest {
         draft.minTokens = "12x"
         check(draft.problem == "From context size must be a whole number of tokens.", "a bad minimum is refused")
         draft.minTokens = "150000"
+        draft.preLimit = "40"
+        check(draft.problem == "Before a usage limit must be off or a percent from 50 to 97." && draft.body["agenthailPreLimitPercent"] == nil, "a percent outside 50 to 97 is refused")
+        draft.preLimit = "off"
+        check(draft.problem == nil && draft.body["agenthailPreLimitPercent"] as? Int == 0, "off sends 0")
+        draft.preLimit = " 95 "
         let body = draft.body
-        check(draft.problem == nil && draft.changes && body["window"] as? String == "auto" && body["model"] as? String == "claude-opus-5-5" && body["enabled"] as? Bool == false && body["idleCompaction"] == nil && body["agenthailIdleMinTokens"] as? Int64 == 150000, "the body sends only what changed: \(body)")
+        check(draft.problem == nil && draft.changes && body["window"] as? String == "auto" && body["model"] as? String == "claude-opus-5-5" && body["enabled"] as? Bool == false && body["idleCompaction"] == nil && body["agenthailIdleMinTokens"] as? Int64 == 150000 && body["agenthailPreLimitPercent"] as? Int == 95, "the body sends only what changed: \(body)")
+        var onlyPercent = ClaudeCompactDraft(root: "/u/.claude")
+        onlyPercent.preLimit = "92"
+        check(onlyPercent.changes && onlyPercent.problem == nil && onlyPercent.body["agenthailPreLimitPercent"] as? Int == 92, "the percent alone is a change to save")
 
         try await saves()
         print("ok")
