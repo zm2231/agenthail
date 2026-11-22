@@ -230,6 +230,8 @@ func (b *Board) dispatch(event Event) error {
 		err = b.applyWorkItemState(event)
 	case EventWorkItemDep:
 		err = b.applyWorkDep(event)
+	case EventWorkItemUndep:
+		err = b.applyWorkUndep(event)
 	case EventWorkComment, EventWorkLog:
 		err = b.applyWorkNote(event)
 	case EventWorkEdit:

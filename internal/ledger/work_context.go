@@ -36,6 +36,8 @@ type WorkContext struct {
 	FoundIn    *FoundRef  `json:"foundIn,omitempty"`
 	DependsOn  []WorkRef  `json:"dependsOn,omitempty"`
 	Dependents []WorkRef  `json:"dependents,omitempty"`
+	Parent     *WorkRef   `json:"parent,omitempty"`
+	Children   []WorkRef  `json:"children,omitempty"`
 }
 
 type FoundRef struct {
@@ -69,6 +71,15 @@ func (b *Board) WorkContext(id string) (WorkContext, bool) {
 		}
 	}
 	sort.Slice(ctx.Dependents, func(i, j int) bool { return idNumber(ctx.Dependents[i].ID) < idNumber(ctx.Dependents[j].ID) })
+	if p := b.workItems[item.Parent]; p != nil {
+		ctx.Parent = &WorkRef{ID: p.ID, State: p.State, Text: p.Text}
+	}
+	for _, id := range item.Children {
+		if c := b.workItems[id]; c != nil {
+			ctx.Children = append(ctx.Children, WorkRef{ID: c.ID, State: c.State, Text: c.Text})
+		}
+	}
+	sort.Slice(ctx.Children, func(i, j int) bool { return idNumber(ctx.Children[i].ID) < idNumber(ctx.Children[j].ID) })
 	return ctx, true
 }
 

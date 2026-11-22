@@ -8,7 +8,7 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
                                  Items with every word in their id, td id, text, description, acceptance,
                                  labels, comments or logs, in any state but deleted
                                  Filters: --state <s,...> --type <t,...> --priority <P0,...> --label <l> (repeat:
-                                 all must match) --assignee <session> | --mine, --clause <id>, --found,
+                                 all must match) --assignee <session> | --mine, --clause <id>, --found, --parent <id>,
                                  --sort id|priority|created|updated, --limit <n>
   ledger show <item_id|td_id|ask_id>
                                  Everything about one item in one read: fields, the clause with the person's
@@ -17,11 +17,15 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
                                  One captured message: what the person typed, what they quoted, and the reply
                                  it answered; --context N adds the N turns before and after it, read from the
                                  session's journal on the host that captured it (other hosts refuse)
-  ledger add "<text>" [--clause <clause_id> | --found-in <item|clause>] [--type task|bug|feature]
+  ledger add "<text>" [--clause <clause_id> | --found-in <item|clause>] [--parent <item_id>] [--type task|bug|feature]
              [--priority P0-P3] [--description "..."] [--acceptance "..."] [--label <l>]...
-                                 Add asked work under a clause, or found work with none (create, new)
+                                 Add asked work under a clause, or found work with none (create, new);
+                                 --parent makes it a step of a bigger item, on that item's clause
   ledger edit <item_id> [--text|--type|--priority|--description|--acceptance "..."] [--label|--unlabel <l>]
-                                 Change an item's fields (update)
+             [--parent <item_id> | --no-parent]
+                                 Change an item's fields, or move it under another item (update)
+  ledger tree [<item_id>] [--all]
+                                 Unfinished items nested under their parents; --all adds finished ones
   ledger start <item_id>         Claim an item; waits for its dependencies (claim)
   ledger log <item_id> "<text>" [--type progress|blocker|decision|hypothesis|tried|result]
                                  Add to the running log of an item you hold
@@ -48,8 +52,10 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
   ledger reopen <item_id>        Take a done or closed item back to open
   ledger delete <item_id> | ledger restore <item_id>
                                  Hide an item from every list, or bring it back
-  ledger dep <item_id> --on <item_id>
-                                 Record that one item waits on another
+  ledger dep <item_id> --on <item_id> [--remove]
+                                 Record that one item waits on another, or that it no longer does.
+                                 A parent waits on its children too: it is not ready, and cannot be
+                                 submitted, approved, closed or deleted, while one is unfinished
   ledger link <item_id> <clause_id>
                                  Hang found work off a clause of the person's
   ledger ready | ledger next     Open items whose dependencies are settled, most urgent first
@@ -109,7 +115,11 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
                                  Bring a td database's open issues over as found work, with their comments,
                                  logs, handoffs, reviews and dependencies; --all adds closed ones as done.
                                  The default path is .todos/issues.db here or above. Running it again skips
-                                 what is already imported; --dry-run leaves out what this host's copy holds
+                                 what is already imported; --dry-run leaves out what this host's copy holds.
+                                 td parents become the items' parents
+  ledger import td [<path>] --fix-parents [--dry-run] [--json]
+                                 Put items already imported under their td parents, dropping the
+                                 dependency an earlier import recorded for each link instead
   ledger digest [--through N]    Hash of this host's ledger log in owner order through owner position N (default:
                                  the sync cursor, or the log's end on the owner); equal on two hosts means equal logs
 `

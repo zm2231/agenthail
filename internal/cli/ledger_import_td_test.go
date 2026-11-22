@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -87,7 +88,7 @@ func TestLedgerImportTDBringsOpenIssuesOverAsFoundWorkAndLeavesTDUntouched(t *te
 		for i, item := range req.Items {
 			result.Imported = append(result.Imported, ledger.WorkImported{ImportedFrom: item.ImportedFrom, ItemID: "widget-W" + string(rune('1'+i))})
 		}
-		result.Deps = len(req.Deps)
+		result.Deps, result.Parents = len(req.Deps), len(req.Parents)
 		return http.StatusOK, result
 	})
 	dir, _ := os.Getwd()
@@ -100,10 +101,10 @@ func TestLedgerImportTDBringsOpenIssuesOverAsFoundWorkAndLeavesTDUntouched(t *te
 	if after, _ := os.ReadFile(path); !bytes.Equal(before, after) {
 		t.Fatal("the import wrote to the td database")
 	}
-	if len(*calls) != 2 || (*calls)[0]["path"] != "/api/v1/ledger/import" {
+	if len(*calls) != 3 || (*calls)[0]["path"] != "/api/v1/ledger/import" {
 		t.Fatalf("import requests = %v", *calls)
 	}
-	items, deps := decodeImport(t, (*calls)[0]).Items, decodeImport(t, (*calls)[1]).Deps
+	items, deps, parents := decodeImport(t, (*calls)[0]).Items, decodeImport(t, (*calls)[1]).Deps, decodeImport(t, (*calls)[2]).Parents
 	var origins []string
 	for _, item := range items {
 		origins = append(origins, item.ImportedFrom)
@@ -126,10 +127,13 @@ func TestLedgerImportTDBringsOpenIssuesOverAsFoundWorkAndLeavesTDUntouched(t *te
 	if got := strings.Join(kinds, " | "); got != `log:security: token in the log | log:found the leak | comment:same on main | handoff:done ["found it"], remaining ["fix it"], decisions [], uncertain []` {
 		t.Fatalf("leak timeline = %s", got)
 	}
-	if len(deps) != 2 || deps[0] != (ledger.WorkImportDep{Item: "td:td-epic", On: "td:td-leak"}) || deps[1] != (ledger.WorkImportDep{Item: "td:td-leak", On: "td:td-schema"}) {
+	if len(deps) != 1 || deps[0] != (ledger.WorkImportDep{Item: "td:td-leak", On: "td:td-schema"}) {
 		t.Fatalf("deps = %+v", deps)
 	}
-	for _, want := range []string{"imported 3 items and 2 dependencies", "1 deleted issues", "1 closed issues", "1 in-progress or in-review", "1 issues with points, sprint",
+	if len(parents) != 1 || parents[0] != (ledger.WorkImportParent{Item: "td:td-leak", Parent: "td:td-epic"}) {
+		t.Fatalf("parents = %+v", parents)
+	}
+	for _, want := range []string{"imported 3 items, 1 dependencies and 1 parent links", "1 deleted issues", "1 closed issues", "1 in-progress or in-review", "1 issues with points, sprint",
 		`1 "security" log entries`, "1 notes"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output lacks %q:\n%s", want, out)
@@ -150,10 +154,10 @@ func TestLedgerImportTDAllBringsClosedIssuesAsDone(t *testing.T) {
 	if len(items) != 4 || items[0].ImportedFrom != "td:td-old" || items[0].State != ledger.WorkDone || items[0].Reviewer != "td:ses_c" {
 		t.Fatalf("items = %+v", items)
 	}
-	if deps := decodeImport(t, (*calls)[1]).Deps; len(deps) != 3 {
+	if deps := decodeImport(t, (*calls)[1]).Deps; len(deps) != 2 {
 		t.Fatalf("deps = %+v", deps)
 	}
-	if _, err := captureStdout(t, func() error { return app.cmdLedger([]string{"import", "td", path, "--dry-run"}) }); err != nil || len(*calls) != 2 {
+	if _, err := captureStdout(t, func() error { return app.cmdLedger([]string{"import", "td", path, "--dry-run"}) }); err != nil || len(*calls) != 3 {
 		t.Fatalf("dry run sent requests or failed: %v %d", err, len(*calls))
 	}
 }
@@ -188,7 +192,7 @@ func TestLedgerImportTDSplitsDependenciesAcrossRequestsUnderTheBodyLimit(t *test
 			depRequests, deps = depRequests+1, deps+len(req.Deps)
 		}
 	}
-	if want := n - 1 + 2; deps != want || depRequests < 2 {
+	if want := n - 1 + 1; deps != want || depRequests < 2 {
 		t.Fatalf("sent %d dependencies in %d requests, want %d in several", deps, depRequests, want)
 	}
 }
@@ -241,20 +245,22 @@ func TestLedgerImportTDDryRunLeavesOutWhatIsAlreadyImported(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, err := captureStdout(t, func() error { return app.cmdLedger([]string{"import", "td", path, "--dry-run"}) })
-	if err != nil || !strings.Contains(out, "would import 1 items and 1 dependencies from "+path+" (2 already imported)") {
+	if err != nil || !strings.Contains(out, "would import 1 items, 1 dependencies and 1 parent links from "+path+" (2 already imported)") {
 		t.Fatalf("dry run printed %q, err %v", out, err)
 	}
 	out, err = captureStdout(t, func() error { return app.cmdLedger([]string{"import", "td", path, "--dry-run", "--json"}) })
 	var plan struct {
-		Items   []ledger.WorkImport    `json:"items"`
-		Deps    []ledger.WorkImportDep `json:"deps"`
-		Present []ledger.WorkImported  `json:"present"`
+		Items   []ledger.WorkImport       `json:"items"`
+		Deps    []ledger.WorkImportDep    `json:"deps"`
+		Parents []ledger.WorkImportParent `json:"parents"`
+		Present []ledger.WorkImported     `json:"present"`
 	}
 	if err != nil || json.Unmarshal([]byte(out), &plan) != nil {
 		t.Fatalf("dry run json %q, err %v", out, err)
 	}
 	if len(plan.Items) != 1 || plan.Items[0].ImportedFrom != "td:td-schema" || len(plan.Present) != 2 ||
-		len(plan.Deps) != 1 || plan.Deps[0] != (ledger.WorkImportDep{Item: "td:td-leak", On: "td:td-schema"}) {
+		len(plan.Deps) != 1 || plan.Deps[0] != (ledger.WorkImportDep{Item: "td:td-leak", On: "td:td-schema"}) ||
+		len(plan.Parents) != 1 || plan.Parents[0] != (ledger.WorkImportParent{Item: "td:td-leak", Parent: "td:td-epic"}) {
 		t.Fatalf("dry run plan = %+v", plan)
 	}
 	if len(*calls) != 0 {
@@ -307,5 +313,71 @@ func TestLedgerImportTDParksDeferredIssuesForLaterUntilTheirDate(t *testing.T) {
 	}
 	if strings.Contains(out, "defer") {
 		t.Fatalf("defer dates were reported as left behind:\n%s", out)
+	}
+}
+
+func TestLedgerImportFixParentsTurnsAnEarlierImportsParentDependenciesIntoParentsOnce(t *testing.T) {
+	var store *ledger.Store
+	app, calls := ledgerWriteFixture(t, func(_ string, body map[string]any) (int, any) {
+		result, err := store.ImportWork(decodeImport(t, body), time.Now())
+		if err != nil {
+			return http.StatusBadRequest, map[string]any{"error": map[string]any{"code": "invalid", "message": err.Error()}}
+		}
+		return http.StatusOK, result
+	})
+	store = ledger.NewStore(app.registry().WriteDB(), app.registry().ReadDB())
+	path, _ := tdFixture(t, t.TempDir())
+	const key = "repo:github.com/acme/widget"
+	if _, err := store.ImportWork(ledger.WorkImportRequest{ProjectKey: key, SessionID: "s1",
+		Items: []ledger.WorkImport{{ImportedFrom: "td:td-epic", Text: "search"}, {ImportedFrom: "td:td-leak", Text: "index leaks a handle"}},
+		Deps:  []ledger.WorkImportDep{{Item: "td:td-epic", On: "td:td-leak"}}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	items := func() (epic, leak ledger.WorkItem, ready []string) {
+		board, err := store.Board(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range board.WorkItems() {
+			switch item.ImportedFrom {
+			case "td:td-epic":
+				epic = item
+			case "td:td-leak":
+				leak = item
+			}
+		}
+		for _, item := range board.Ready() {
+			ready = append(ready, item.ID)
+		}
+		return epic, leak, ready
+	}
+
+	out, err := captureStdout(t, func() error { return app.cmdLedger([]string{"import", "td", path, "--fix-parents", "--dry-run"}) })
+	if err != nil || !strings.Contains(out, "would put 1 imported items under their td parents") || !strings.Contains(out, "dropping 1 dependencies") || len(*calls) != 0 {
+		t.Fatalf("dry run printed %q, err %v, sent %d requests", out, err, len(*calls))
+	}
+	if out, err = captureStdout(t, func() error { return app.cmdLedger([]string{"import", "td", path, "--fix-parents"}) }); err != nil {
+		t.Fatal(err)
+	}
+	epic, leak, ready := items()
+	if leak.Parent != epic.ID || !slices.Equal(epic.Children, []string{leak.ID}) || len(epic.DependsOn) != 0 {
+		t.Fatalf("after the fix epic = %+v, leak = %+v\n%s", epic, leak, out)
+	}
+	if !slices.Equal(ready, []string{leak.ID}) {
+		t.Fatalf("ready = %v, want only the child while it is open", ready)
+	}
+	if !strings.Contains(out, "put 1 imported items under their td parents") || !strings.Contains(out, "dropped 1 dependencies") {
+		t.Fatalf("fix printed %q", out)
+	}
+
+	sent := len(*calls)
+	if out, err = captureStdout(t, func() error { return app.cmdLedger([]string{"import", "td", path, "--fix-parents"}) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(*calls) != sent || !strings.Contains(out, "already under its td parent") {
+		t.Fatalf("a second fix sent %d requests and printed %q", len(*calls)-sent, out)
+	}
+	if again, againLeak, _ := items(); len(again.Timeline) != len(epic.Timeline) || len(againLeak.Timeline) != len(leak.Timeline) {
+		t.Fatal("a second fix recorded events")
 	}
 }

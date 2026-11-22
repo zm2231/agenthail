@@ -98,7 +98,7 @@ func (a *App) cmdLedger(args []string) error {
 }
 
 var ledgerReads = map[string]bool{"asks": true, "ask": true, "show": true, "words": true, "goals": true, "questions": true, "digest": true,
-	"list": true, "ready": true, "next": true, "critical-path": true, "search": true, "backlog": true}
+	"list": true, "ready": true, "next": true, "critical-path": true, "search": true, "backlog": true, "tree": true}
 
 func ledgerRead(positional []string) bool {
 	if positional[0] == "work" {
@@ -351,7 +351,7 @@ func (a *App) ledgerSetScope(positional []string, enabled bool, mode ledger.Atta
 var ledgerWorkShortForms = map[string]bool{"add": true, "create": true, "new": true, "list": true, "edit": true, "update": true,
 	"start": true, "claim": true, "log": true, "comment": true, "handoff": true, "block": true, "unblock": true, "review": true, "submit": true,
 	"approve": true, "reject": true, "park": true, "unpark": true, "close": true, "reopen": true, "delete": true, "restore": true, "dep": true, "link": true,
-	"ready": true, "next": true, "critical-path": true, "search": true}
+	"ready": true, "next": true, "critical-path": true, "search": true, "tree": true}
 
 func workArgs(args []string, i int) []string {
 	if args[i] == "list" {

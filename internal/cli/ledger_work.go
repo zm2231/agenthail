@@ -14,11 +14,14 @@ const ledgerWorkUsage = `usage: agenthail ledger work [list] [--state <s,...>] [
                              [--clause <id>] [--found] [--sort id|priority|created|updated] [--limit <n>] [--all]
        agenthail ledger work search <words>... [the same filters]
        agenthail ledger work <item_id>
+                             [--parent <item_id>]
        agenthail ledger work <critical-path|ready|next>
-       agenthail ledger work add "<text>" [--clause <clause_id> | --found-in <item|clause>] [--type task|bug|feature] [--priority P0-P3]
+       agenthail ledger work tree [<item_id>] [--all]
+       agenthail ledger work add "<text>" [--clause <clause_id> | --found-in <item|clause>] [--parent <item_id>] [--type task|bug|feature] [--priority P0-P3]
                                           [--description "..."] [--acceptance "..."] [--label <label>]...
        (work create and work new are short for work add)
-       agenthail ledger work edit <item_id> [--text "..."] [--type ...] [--priority ...] [--description "..."] [--acceptance "..."] [--label ...] [--unlabel ...]   (or work update)
+       agenthail ledger work edit <item_id> [--text "..."] [--type ...] [--priority ...] [--description "..."] [--acceptance "..."] [--label ...] [--unlabel ...]
+                                          [--parent <item_id> | --no-parent]   (or work update)
        agenthail ledger work link <item_id> <clause_id>
        agenthail ledger work comment <item_id> "<text>"
        agenthail ledger work log <item_id> "<text>" [--type progress|blocker|decision|hypothesis|tried|result]
@@ -26,7 +29,7 @@ const ledgerWorkUsage = `usage: agenthail ledger work [list] [--state <s,...>] [
        agenthail ledger work close <item_id> --reason "done: <what finished it>|duplicate|wontfix|obsolete ..."
        agenthail ledger work delete <item_id> [--reason "..."]
        agenthail ledger work <approve|reject> <item_id> [--utterance <the person's words>] [--reason "..."]
-       agenthail ledger work dep <item_id> --on <item_id>
+       agenthail ledger work dep <item_id> --on <item_id> [--remove]
        agenthail ledger work handoff <item_id> [--done "..."] [--remaining "..."] [--decisions "..."] [--uncertain "..."]
        agenthail ledger work park <item_id>... (--usage claude[:<root>]|codex | --later "<why>" | --person "<question>" [--ask <id>]
                                                | --idea --utterance <ref> [--goal "..."] [--plan "..."] [--first-test "..."])
@@ -56,6 +59,9 @@ func (a *App) ledgerWork(store *ledger.Store, args []string) error {
 		}
 		return a.ledgerWorkList(store, w, w.positional[2:])
 	}
+	if w.positional[1] == "tree" {
+		return a.ledgerWorkTree(store, w)
+	}
 	switch view := w.positional[1]; view {
 	case "critical-path", "ready", "next":
 		if len(w.positional) != 2 {
@@ -75,6 +81,9 @@ func (a *App) ledgerWork(store *ledger.Store, args []string) error {
 	}
 	req := ledger.WorkRequest{Action: action, Reason: w.value("--reason"), DependsOn: w.value("--on"), UtteranceID: w.value("--utterance"), LogType: w.value("--type"),
 		Handoff: ledger.Handoff{Done: w.values["--done"], Remaining: w.values["--remaining"], Decisions: w.values["--decisions"], Uncertain: w.values["--uncertain"]}}
+	if action == ledger.WorkDep && w.bools["--remove"] {
+		req.Action = ledger.WorkUndep
+	}
 	if action == ledger.WorkPark || action == ledger.WorkUnpark {
 		return a.ledgerPark(w, req)
 	}
@@ -86,10 +95,12 @@ func (a *App) ledgerWork(store *ledger.Store, args []string) error {
 		}
 		req.ClauseID, req.Text, req.LogType = w.value("--clause"), strings.Join(w.positional[2:], " "), ""
 		req.Fields = ledger.WorkFields{Type: ledger.WorkType(w.value("--type")), Priority: w.value("--priority"), Description: w.value("--description"),
-			Acceptance: w.value("--acceptance"), Labels: w.values["--label"], From: w.value("--found-in")}
+			Acceptance: w.value("--acceptance"), Labels: w.values["--label"], From: w.value("--found-in"), Parent: w.value("--parent")}
 	case action == ledger.WorkEdit && len(w.positional) == 3:
 		req.ItemID, req.LogType = w.positional[2], ""
-		req.Change = workChange(w)
+		if req.Change, err = workChange(w); err != nil {
+			return err
+		}
 	case action == ledger.WorkLink && len(w.positional) == 4:
 		req.ItemID, req.ClauseID = w.positional[2], w.positional[3]
 	case note && len(w.positional) >= 4:
@@ -127,7 +138,7 @@ func (a *App) ledgerWork(store *ledger.Store, args []string) error {
 	return nil
 }
 
-func workChange(w ledgerWriteArgs) ledger.WorkChange {
+func workChange(w ledgerWriteArgs) (ledger.WorkChange, error) {
 	set := func(flag string) *string {
 		if v, ok := w.values[flag]; ok && len(v) > 0 {
 			return &v[0]
@@ -140,7 +151,15 @@ func workChange(w ledgerWriteArgs) ledger.WorkChange {
 		typ := ledger.WorkType(*t)
 		change.Type = &typ
 	}
-	return change
+	change.Parent = set("--parent")
+	if w.bools["--no-parent"] {
+		if change.Parent != nil {
+			return change, fmt.Errorf("give --parent or --no-parent, not both")
+		}
+		none := ""
+		change.Parent = &none
+	}
+	return change, nil
 }
 
 func (a *App) workBoard(store *ledger.Store, w ledgerWriteArgs) (*ledger.Board, error) {
@@ -182,7 +201,7 @@ func (a *App) ledgerWorkList(store *ledger.Store, w ledgerWriteArgs, terms []str
 
 func (a *App) workQuery(w ledgerWriteArgs, terms []string) (ledger.WorkQuery, error) {
 	q := ledger.WorkQuery{Terms: terms, All: w.bools["--all"] || len(terms) > 0, Labels: w.values["--label"], Assignee: w.value("--assignee"),
-		Clause: w.value("--clause"), Found: w.bools["--found"], Sort: w.value("--sort")}
+		Clause: w.value("--clause"), Found: w.bools["--found"], Parent: w.value("--parent"), Sort: w.value("--sort")}
 	for _, s := range commaList(w.value("--state")) {
 		q.States = append(q.States, ledger.WorkState(s))
 	}
@@ -266,6 +285,12 @@ func workLine(item ledger.WorkItem) string {
 	}
 	if item.Park != nil {
 		line += " " + parkLine(*item.Park)
+	}
+	if item.Parent != "" {
+		line += " child of " + item.Parent
+	}
+	if len(item.Children) > 0 {
+		line += fmt.Sprintf(" (%d children)", len(item.Children))
 	}
 	if len(item.DependsOn) > 0 {
 		line += " waits on " + strings.Join(item.DependsOn, ", ")

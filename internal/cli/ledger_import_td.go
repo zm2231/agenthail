@@ -23,6 +23,7 @@ type tdIssue struct {
 type tdExport struct {
 	items    []ledger.WorkImport
 	deps     []ledger.WorkImportDep
+	parents  []ledger.WorkImportParent
 	leftOver []string
 }
 
@@ -127,8 +128,8 @@ func readTD(db *sql.DB, all bool, now time.Time) (tdExport, error) {
 			item.State, item.Park = ledger.WorkParked, &ledger.Park{Kind: ledger.ParkLater, Why: why, Revisit: is.deferUntil}
 		}
 		out.items = append(out.items, item)
-		if is.parent != "" {
-			out.deps = append(out.deps, ledger.WorkImportDep{Item: tdOrigin(is.parent), On: tdOrigin(is.id)})
+		if is.parent != "" && imported[is.parent] {
+			out.parents = append(out.parents, ledger.WorkImportParent{Item: tdOrigin(is.id), Parent: tdOrigin(is.parent)})
 		}
 	}
 	rows, err := db.Query(`SELECT issue_id, depends_on_id FROM issue_dependencies WHERE relation_type='depends_on' ORDER BY issue_id, depends_on_id`)
@@ -304,4 +305,23 @@ func tdList(raw string) []string {
 		}
 	}
 	return out
+}
+
+// tdParents is every parent link between issues td still holds, closed ones included.
+func tdParents(db *sql.DB) ([]ledger.WorkImportParent, error) {
+	issues, err := tdIssues(db)
+	if err != nil {
+		return nil, err
+	}
+	live := map[string]bool{}
+	for _, is := range issues {
+		live[is.id] = !is.deleted
+	}
+	var links []ledger.WorkImportParent
+	for _, is := range issues {
+		if live[is.id] && is.parent != "" && live[is.parent] {
+			links = append(links, ledger.WorkImportParent{Item: tdOrigin(is.id), Parent: tdOrigin(is.parent)})
+		}
+	}
+	return links, nil
 }

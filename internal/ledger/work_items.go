@@ -36,6 +36,7 @@ const (
 	WorkReopen  WorkAction = "reopen"
 	WorkHandoff WorkAction = "handoff"
 	WorkDep     WorkAction = "dep"
+	WorkUndep   WorkAction = "undep"
 	WorkComment WorkAction = "comment"
 	WorkLog     WorkAction = "log"
 	WorkEdit    WorkAction = "edit"
@@ -71,6 +72,7 @@ type WorkItem struct {
 	Reason       string      `json:"reason,omitempty"`
 	Reviewer     string      `json:"reviewer,omitempty"`
 	DependsOn    []string    `json:"dependsOn,omitempty"`
+	Children     []string    `json:"children,omitempty"`
 	Handoff      *Handoff    `json:"handoff,omitempty"`
 	Park         *Park       `json:"park,omitempty"`
 	Timeline     []WorkEntry `json:"timeline,omitempty"`
@@ -159,6 +161,7 @@ func (b *Board) applyWorkItem(event Event) error {
 			WorkEntry{At: event.CreatedAt, Actor: event.ActorSessionID, Kind: "imported", Text: "from " + p.ImportedFrom, State: h.State})
 	}
 	b.workItems[p.ItemID] = item
+	b.adoptChild(item.Parent, item.ID)
 	if c := b.clauses[p.ClauseID]; c != nil && p.ClauseID != "" {
 		c.WorkItems = append(c.WorkItems, item)
 	}
