@@ -36,6 +36,6 @@ echo "internal/daemon: $daemon; surfaces and Node hosts: $surfaces; other packag
 {
 	echo "daemon=$daemon"
 	echo "surfaces=$surfaces"
-	echo "packages=${packages[*]}"
-	echo "skippable=[$(IFS=,; echo "${skippable[*]}")]"
+	echo "packages=${packages[*]+"${packages[*]}"}"
+	echo "skippable=[$(IFS=,; echo "${skippable[*]+"${skippable[*]}"}")]"
 } >>"$GITHUB_OUTPUT"
