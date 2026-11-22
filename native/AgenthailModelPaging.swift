@@ -19,20 +19,11 @@ extension AgenthailModel {
 
     /// Each known session's place in the daemon's order: Current first, then the loaded listings.
     var daemonOrder: [String: Int] {
-        var order: [String: Int] = [:]
-        let views = [currentView] + reader.requests.sorted().map { reader.views[$0] }
-        for member in views.compactMap({ $0 }).flatMap({ $0.families.flatMap(\.members) }) where order[member.id] == nil {
-            order[member.id] = order.count
-        }
-        return order
+        DaemonOrder.rank(([currentView] + reader.requests.sorted().map { reader.views[$0] }).compactMap { $0 })
     }
 
     func inDaemonOrder(_ sessions: [SessionState]) -> [SessionState] {
-        let order = daemonOrder
-        return sessions.enumerated().sorted { lhs, rhs in
-            let (left, right) = (order[lhs.element.id] ?? Int.max, order[rhs.element.id] ?? Int.max)
-            return left != right ? left < right : lhs.offset < rhs.offset
-        }.map(\.element)
+        DaemonOrder.sorted(sessions, by: daemonOrder)
     }
 
     func paletteSessions(_ query: String) -> [SessionState] {

@@ -42,6 +42,8 @@ struct SessionTreeTest {
         joinsComputers()
         detectsNews()
         holdsOrder()
+        holdsCells()
+        ranksInDaemonOrder()
         familiesAndAttention()
         print("session tree tests passed")
     }
@@ -154,6 +156,34 @@ struct SessionTreeTest {
         expect(shown.list == first && shown.rows["a"]?.status == "busy" && shown.rows["gone"] != nil, "a held list keeps its order and removed rows, and takes fresh data for the rows it has")
         hold.release()
         expect(hold.shown(list: second, current: second, rows: [:]).list == second, "a released list takes the newest order")
+    }
+
+    static func holdsCells() {
+        var hold = OrderHold()
+        let live = ["a": SessionCell(session("a"))]
+        let both = rows([session("a"), session("gone")])
+        expect(hold.cells(live: live, rows: both).keys.sorted() == ["a"], "a list that is not held uses only live cells")
+        hold.hold(list: nil, current: nil, rows: [:])
+        let first = hold.cells(live: live, rows: both)
+        let again = hold.cells(live: live, rows: both)
+        expect(first["gone"] != nil && first["gone"] === again["gone"], "a held row with no live cell keeps one cell across rebuilds")
+        expect(first["a"] === live["a"], "a live cell wins over a held one")
+        let back = SessionCell(session("gone"))
+        expect(hold.cells(live: live.merging(["gone": back]) { old, _ in old }, rows: both)["gone"] === back, "a row whose live cell comes back uses it instead of its held one")
+        hold.release()
+        expect(hold.cells(live: live, rows: both)["gone"] == nil, "a released list drops its held cells")
+        hold.hold(list: nil, current: nil, rows: [:])
+        let later = hold.cells(live: live, rows: both)
+        expect(later["gone"] != nil && later["gone"] !== first["gone"], "a new hold starts with fresh cells")
+    }
+
+    static func ranksInDaemonOrder() {
+        let current = view([family("c", project: "p")], projects: [("p", [])])
+        let listing = view([family("b", project: "p"), family("c", project: "p", members: [("d", 1)])], projects: [("p", [])])
+        let rank = DaemonOrder.rank([current, listing])
+        expect(rank == ["c": 0, "b": 1, "d": 2], "Current comes first, then each listing, and a session's first sighting wins")
+        let sorted = DaemonOrder.sorted([session("x"), session("d"), session("y"), session("c"), session("b")], by: rank).map(\.id)
+        expect(sorted == ["c", "b", "d", "x", "y"], "sessions no view lists keep their order after the listed ones")
     }
 
     static func familiesAndAttention() {

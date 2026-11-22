@@ -25,7 +25,6 @@ final class SessionListing {
     @ObservationIgnored private var orderHold = OrderHold()
     @ObservationIgnored private var heldList: ScopePage.View?
     @ObservationIgnored private var heldKey: ListKey?
-    @ObservationIgnored private var heldCells: [String: SessionCell] = [:]
     @ObservationIgnored private var shownOrder: [ScopePage.View?] = []
     private(set) var listing = ListingState()
 
@@ -136,27 +135,13 @@ final class SessionListing {
         let rows = Dictionary((snapshot?.sessions ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let shown = orderHold.shown(list: listOrder(key), current: currentOrder, rows: rows)
         heldList = shown.list
-        let tree = SessionTree.ordered(list: shown.list, current: shown.current, rows: shown.rows, attention: sessionAttention, cells: treeCells(shown.rows))
+        let tree = SessionTree.ordered(list: shown.list, current: shown.current, rows: shown.rows, attention: sessionAttention, cells: orderHold.cells(live: cells.byID, rows: shown.rows))
         let counted = key.refinement.isActive ? key.request.flatMap { request in joinedOrder { $0.view(request) } } : currentOrder
         let counts = Dictionary(uniqueKeysWithValues: SessionFilter.allCases.map { ($0, counted?.counts[$0.viewScope]?.families ?? 0) })
         let listed = (counted ?? currentOrder)?.surfaces.map(\.surface) ?? []
         let configured = listedHosts.flatMap { $0.snapshot?.surfaces.map(\.name) ?? [] }
         let surfaces = Set(listed + configured + [key.refinement.surface].compactMap { $0 }).sorted()
         return SessionList(tree: tree, counts: counts, surfaces: surfaces)
-    }
-
-    private func treeCells(_ rows: [String: SessionState]) -> [String: SessionCell] {
-        var all = cells.byID
-        guard orderHold.held else {
-            heldCells = [:]
-            return all
-        }
-        for (id, row) in rows where all[id] == nil {
-            let cell = heldCells[id] ?? SessionCell(row)
-            heldCells[id] = cell
-            all[id] = cell
-        }
-        return all
     }
 
     private var orderHosts: [HostConnection] { listedHosts.filter(\.shownReachable) + listedHosts.filter { !$0.shownReachable } }
@@ -169,15 +154,8 @@ final class SessionListing {
 
     /// Sessions in the daemon's order: Current first, then each loaded listing; others keep their place after.
     func inDaemonOrder(_ sessions: [SessionState]) -> [SessionState] {
-        var order: [String: Int] = [:]
         let listings = listedHosts.flatMap { host in host.reader.requests.sorted().compactMap { host.view($0)?.renamed { HostCatalog.qualify(host.id, $0) } } }
-        for member in ([currentOrder].compactMap { $0 } + listings).flatMap({ $0.families.flatMap(\.members) }) where order[member.id] == nil {
-            order[member.id] = order.count
-        }
-        return sessions.enumerated().sorted { lhs, rhs in
-            let (left, right) = (order[lhs.element.id] ?? Int.max, order[rhs.element.id] ?? Int.max)
-            return left != right ? left < right : lhs.offset < rhs.offset
-        }.map(\.element)
+        return DaemonOrder.sorted(sessions, by: DaemonOrder.rank([currentOrder].compactMap { $0 } + listings))
     }
 
     private var orderSignature: [ScopePage.View?] {
