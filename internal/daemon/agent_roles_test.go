@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"slices"
 	"strings"
@@ -630,5 +631,38 @@ func TestThePersonsStoredAgentPolicyBecomesTheRolesItAppliedTo(t *testing.T) {
 	again, err := r.AgentRoles()
 	if err != nil || !slices.EqualFunc(records, again, func(a, b registry.AgentRoleRecord) bool { return a.ChangedAt.Equal(b.ChangedAt) }) {
 		t.Fatalf("a second start folded again: %v", err)
+	}
+}
+
+func TestASessionsDetailNamesTheRoleItActsUnderAndWhatItReplaced(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	handler := dashboardRouter(d)
+	role := func() map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id=from", nil)
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		var body struct {
+			Role map[string]any `json:"role"`
+		}
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
+			t.Fatalf("session detail answered %d %s", response.Code, response.Body)
+		}
+		return body.Role
+	}
+	if got := role(); got["name"] != agentroles.Worker || got["label"] != agentroles.Worker || got["replaces"] != nil {
+		t.Fatalf("an unassigned session's role reads %v", got)
+	}
+	for _, request := range []AgentRoleRequest{
+		{Op: "put", Name: "reviewer", Role: agentroles.Role{Reach: agentroles.ReachProject}},
+		{Op: "assign", Name: "reviewer", Kind: registry.AssignSession, Target: "from"},
+	} {
+		if err := d.changeAgentRole(context.Background(), daemonapi.CLIActor, request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := role(); got["name"] != "reviewer" || got["reach"] != agentroles.ReachProject || got["replaces"] != agentroles.Worker || got["label"] != "worker (replaced by reviewer)" || got["source"] != "assigned to this session" {
+		t.Fatalf("an assigned session's role reads %v", got)
 	}
 }

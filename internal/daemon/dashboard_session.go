@@ -116,6 +116,9 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 		response["transcriptOriginalExchanges"] = transcript.OriginalExchanges
 		response["transcriptReturnedExchanges"] = len(exchanges)
 	}
+	if role := d.sessionRole(session.ID); role != nil {
+		response["role"] = role
+	}
 	response["journalSeq"] = sessionRead.JournalSeq
 	response["catchingUp"] = catchingUp
 	if sessionReadErr != nil {

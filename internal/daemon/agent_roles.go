@@ -176,3 +176,12 @@ func assignmentSource(key assignmentKey, branched bool) string {
 	}
 	return "assigned to " + key.kind + " @" + key.target
 }
+
+func (d *Daemon) sessionRole(sessionID string) *mcpRoleView {
+	record, err := d.Registry.Caller(sessionID)
+	if err != nil || record.HostID != "" {
+		return nil
+	}
+	role := d.callerRole(record, false)
+	return roleView(&role)
+}
