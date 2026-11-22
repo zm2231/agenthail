@@ -6,7 +6,7 @@ list="${UI_TEST_TIERS:-$root/native/ui-test-tiers.txt}"
 sources="${UI_TEST_SOURCES:-$root/native/iOSUITests}"
 all_tiers="smoke main nightly"
 known_tiers="$all_tiers live"
-wide='^(native/iOSUITests/|native/ui-test-tiers\.txt$|scripts/ios-ui-tests\.sh$|scripts/ios-simulator\.sh$|\.github/workflows/ios\.yml$|native/iOS/AgenthailIOSViews\.swift$|native/iOS/(SessionPreview|Preview|Transcript|QueueTail|OlderPlace|OpeningRebuild|StreamBatch|ScrollJump|CompactActivity|IOSAgentMessageRows|Timeline)[^/]*\.swift$)'
+wide='^(native/iOSUITests/|native/ui-test-tiers\.txt$|scripts/ios-ui-tests\.sh$|scripts/ios-simulator\.sh$|\.github/workflows/ios\.yml$|native/iOS/IOS(Root|ConversationList|SessionScreen|Composer|Timeline|SessionInspector|Settings|Sheets)\.swift$|native/iOS/(SessionPreview|Preview|Transcript|QueueTail|OlderPlace|OpeningRebuild|StreamBatch|ScrollJump|CompactActivity|IOSAgentMessageRows|Timeline)[^/]*\.swift$)'
 
 usage() {
 	cat >&2 <<EOF

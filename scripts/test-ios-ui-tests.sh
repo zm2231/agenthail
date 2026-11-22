@@ -81,7 +81,7 @@ printf 'ui-all\n' >"$work/labels"
 : >"$work/labels"
 printf 'docs/readme.md\n' >"$work/changed"
 [ "$(run tiers pull_request "$work/changed" "$work/labels")" = smoke ] || fail "an unrelated change runs smoke"
-for path in native/iOSUITests/AUITests.swift native/iOS/QueueTail.swift native/iOS/AgenthailIOSViews.swift native/iOS/SessionPreview.swift native/ui-test-tiers.txt; do
+for path in native/iOSUITests/AUITests.swift native/iOS/QueueTail.swift native/iOS/IOSSessionScreen.swift native/iOS/SessionPreview.swift native/ui-test-tiers.txt; do
 	printf '%s\n' "$path" >"$work/changed"
 	[ "$(run tiers pull_request "$work/changed" "$work/labels")" = "smoke main" ] || fail "$path widens to the main tier"
 done

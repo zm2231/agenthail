@@ -35,7 +35,10 @@ var statusColours = map[string]statusColour{
 		files: map[string]colourUse{
 			"QuestionPagerView.swift":           {2, "questions not answered yet"},
 			"RequestCard.swift":                 {1, "an end-of-turn ask waiting on the person"},
-			"iOS/AgenthailIOSViews.swift":       {6, "the needs-you header, the waiting label, a goal needing the person, sign-in to fix, an end-of-turn ask, workers that need the person"},
+			"iOS/IOSConversationList.swift":     {3, "the needs-you header, the waiting label, workers that need the person"},
+			"iOS/IOSSessionScreen.swift":        {1, "an end-of-turn ask"},
+			"iOS/IOSSessionInspector.swift":     {1, "a goal needing the person"},
+			"iOS/IOSSettings.swift":             {1, "sign-in to fix"},
 			"iOS/SessionListRow.swift":          {1, "a needs-you row's reason"},
 			"iOS/PhoneHappeningNow.swift":       {4, "the count of workers that need the person, a waiting worker's dot and label, and the request in its card"},
 			"macOS/HappeningNow.swift":          {2, "a waiting worker's label and the request in its card"},
@@ -62,7 +65,9 @@ var statusColours = map[string]statusColour{
 		job:  "live work: a turn running, background work, subagents working, a live call",
 		uses: statusColourUses("working", "working"),
 		files: map[string]colourUse{
-			"iOS/AgenthailIOSViews.swift":    {7, "working and background-work labels, working subagents, working workers, a live call"},
+			"iOS/IOSConversationList.swift":  {4, "working and background-work labels, working workers"},
+			"iOS/IOSSessionScreen.swift":     {1, "a live call"},
+			"iOS/IOSSessionInspector.swift":  {2, "working subagents"},
 			"iOS/SessionStatusLabel.swift":   {1, "the session header's working status"},
 			"iOS/SessionListChrome.swift":    {5, "the working and finishing rings, a live call"},
 			"iOS/UsageAccountsSheet.swift":   {1, "sessions working on an account"},
