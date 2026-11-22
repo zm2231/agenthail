@@ -109,7 +109,7 @@ final class LiveHostOutageUITests: XCTestCase {
         let startedRow = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", task)).firstMatch
         requireLive(startedRow.waitForExistence(timeout: 30), "host B started the session", app)
         step("10 host B started a session", app)
-        if app.navigationBars.buttons.element(boundBy: 0).exists, !app.navigationBars["Sessions"].exists { app.backToSessions() }
+        app.backToSessions()
 
         showAllSessions(in: app)
         requireLive(banner.exists, "host A's reason is still shown before it starts", app)

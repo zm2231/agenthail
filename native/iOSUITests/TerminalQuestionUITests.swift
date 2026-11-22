@@ -29,9 +29,8 @@ final class TerminalQuestionUITests: XCTestCase {
         let other = app.buttons["session-computer::codex-demo"]
         XCTAssertTrue(other.waitForExistence(timeout: 10))
         other.tap()
-        let back = app.navigationBars.buttons.element(boundBy: 0)
-        XCTAssertTrue(back.waitForExistence(timeout: 10))
-        back.tap()
+        XCTAssertTrue(app.buttons["Session menu"].waitForExistence(timeout: 10))
+        app.backToSessions()
 
         let asking = app.buttons["needs-you-computer::demo"]
         XCTAssertTrue(asking.waitForExistence(timeout: 10))
