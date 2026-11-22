@@ -11,14 +11,15 @@ final class HostDropTests: XCTestCase {
         let model = AgenthailIOSModel(autoConnect: false, session: URLSession(configuration: configuration), drops: .isolated())
         model.tailnetUp = { true }
         model.connect()
-        try await eventually { HostDropProtocol.state.streaming && model.snapshot?.sessions.first?.host?.state == "connected" }
+        try await eventually("the computer connects with its stream open") { HostDropProtocol.state.streaming && model.snapshot?.sessions.first?.host?.state == "connected" }
         XCTAssertEqual(model.snapshot?.sessions.first?.host?.state, "connected")
         return model
     }
 
-    private func eventually(within limit: Duration = .seconds(20), _ done: () -> Bool) async throws {
+    private func eventually(_ what: String, within limit: Duration = .seconds(20), file: StaticString = #filePath, line: UInt = #line, _ done: () -> Bool) async throws {
         let end = ContinuousClock.now + limit
         while !done(), ContinuousClock.now < end { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(done(), "never happened: \(what)", file: file, line: line)
     }
 
     private func states(of model: AgenthailIOSModel, for duration: Duration, until last: String? = nil) async throws -> [String] {
@@ -64,7 +65,7 @@ final class HostDropTests: XCTestCase {
         connection.grace.window = 1
         HostDropProtocol.state.setDown(true)
         HostDropProtocol.state.dropStreams()
-        try await eventually { model.snapshot?.sessions.first?.host?.state == "unreachable" }
+        try await eventually("the computer is shown unreachable") { model.snapshot?.sessions.first?.host?.state == "unreachable" }
         XCTAssertEqual(model.snapshot?.sessions.first?.host?.state, "unreachable")
         XCTAssertTrue((model.snapshot?.sessions.first?.unavailableReason ?? "").contains("can't be reached"))
     }
@@ -75,7 +76,7 @@ final class HostDropTests: XCTestCase {
         let onConnect = HostDropProtocol.state.probeTimeouts.count
         XCTAssertGreaterThan(onConnect, 0, "connecting probes")
         HostDropProtocol.state.dropStreams()
-        try await eventually { HostDropProtocol.state.probeTimeouts.count > onConnect }
+        try await eventually("a dropped stream probes") { HostDropProtocol.state.probeTimeouts.count != onConnect }
         let timeouts = HostDropProtocol.state.probeTimeouts
         XCTAssertGreaterThan(timeouts.count, onConnect, "a dropped stream probes")
         XCTAssertTrue(timeouts.allSatisfy { $0 == AgenthailAPI.probeTimeout }, "probe timeouts: \(timeouts)")
@@ -103,7 +104,7 @@ final class HostDropTests: XCTestCase {
         model.connection("hdrop")!.drops = drops
         HostDropProtocol.state.failNextProbes(1)
         HostDropProtocol.state.dropStreams()
-        try await eventually { !HostDropProtocol.state.dropUploads.isEmpty }
+        try await eventually("the drop is reported") { !HostDropProtocol.state.dropUploads.isEmpty }
         let upload = try XCTUnwrap(HostDropProtocol.state.dropUploads.first, "the drop was never reported")
         let rows = try XCTUnwrap((try JSONSerialization.jsonObject(with: upload) as? [String: Any])?["drops"] as? [[String: Any]])
         XCTAssertEqual(rows.count, 1, "retries were reported as separate drops: \(rows)")
@@ -120,7 +121,7 @@ final class HostDropTests: XCTestCase {
         XCTAssertNotNil(row["sinceForegroundMs"])
         XCTAssertNotNil(row["recoveredBy"])
         XCTAssertNotNil((row["startedAt"] as? String).flatMap { try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse($0) }, "dates are not RFC 3339")
-        try await eventually { drops.log.closed.isEmpty }
+        try await eventually("the reported drop leaves the queue") { drops.log.closed.isEmpty }
         XCTAssertTrue(drops.log.closed.isEmpty, "a reported drop stayed queued")
     }
 
@@ -165,13 +166,13 @@ final class HostDropTests: XCTestCase {
         let connection = try XCTUnwrap(model.connection("hdrop"))
         HostDropProtocol.state.setDown(true)
         HostDropProtocol.state.dropStreams()
-        try await eventually { connection.holding }
+        try await eventually("the computer is held") { connection.holding }
         XCTAssertTrue(connection.holding)
         XCTAssertFalse(connection.reachable)
         HostDropProtocol.state.setSnapshotFails(true)
         HostDropProtocol.state.setDown(false)
-        try await eventually { HostDropProtocol.state.streaming }
-        try await eventually { !connection.holding }
+        try await eventually("the stream reconnects") { HostDropProtocol.state.streaming }
+        try await eventually("the hold ends") { !connection.holding }
         XCTAssertTrue(connection.reachable, "an open event stream is real contact")
         XCTAssertFalse(connection.holding)
     }
@@ -183,7 +184,7 @@ final class HostDropTests: XCTestCase {
         connection.grace.window = 1
         HostDropProtocol.state.setSnapshotTimesOut(true)
         model.resumeConnection()
-        try await eventually { model.snapshot?.sessions.first?.host?.state == "unreachable" }
+        try await eventually("the computer is shown unreachable") { model.snapshot?.sessions.first?.host?.state == "unreachable" }
         XCTAssertEqual(model.snapshot?.sessions.first?.host?.state, "unreachable", "answering probes kept a computer that serves nothing shown connected")
         XCTAssertTrue((model.connectionError ?? "").hasPrefix("Didn't answer within"), "the reason: \(model.connectionError ?? "nil")")
     }
@@ -196,12 +197,12 @@ final class HostDropTests: XCTestCase {
         model.tailnetUp = { false }
         HostDropProtocol.state.setSnapshotTimesOut(true)
         model.resumeConnection()
-        try await eventually { model.connectionError == HostProblem.tailnetOff }
+        try await eventually("the error says Tailscale is off") { model.connectionError == HostProblem.tailnetOff }
         XCTAssertEqual(model.connectionError, HostProblem.tailnetOff)
         HostDropProtocol.state.setSnapshotTimesOut(false)
         HostDropProtocol.state.setSnapshotFails(true)
         model.resumeConnection()
-        try await eventually { model.connectionError != HostProblem.tailnetOff }
+        try await eventually("the Tailscale diagnosis clears") { model.connectionError != HostProblem.tailnetOff }
         XCTAssertNotEqual(model.connectionError, HostProblem.tailnetOff, "an HTTP error kept the earlier network diagnosis")
         XCTAssertNil(connection.problem)
     }
@@ -223,7 +224,7 @@ final class HostDropTests: XCTestCase {
         XCTAssertEqual(model.connectionError, "The connection dropped.")
         model.tailnetUp = { false }
         model.resumeConnection()
-        try await eventually { model.connectionError == HostProblem.tailnetOff }
+        try await eventually("the error says Tailscale is off") { model.connectionError == HostProblem.tailnetOff }
         XCTAssertEqual(model.connectionError, HostProblem.tailnetOff, "a tailnet computer failing with Tailscale off says so once")
     }
 
@@ -238,14 +239,14 @@ final class HostDropTests: XCTestCase {
 
         HostDropProtocol.state.setDown(true)
         HostDropProtocol.state.dropStreams()
-        try await eventually { connection.holding }
+        try await eventually("the computer is held") { connection.holding }
         await model.loadSubagents(of: parent)
         XCTAssertNotNil(model.fetchedSubagents.errors[parent.id])
 
         HostDropProtocol.state.setSubagentsFail(true)
         let failed = model.fetchedSubagents.revision(parent.id)
         HostDropProtocol.state.setDown(false)
-        try await eventually { model.fetchedSubagents.revision(parent.id) != failed }
+        try await eventually("recovery reloads the failed list") { model.fetchedSubagents.revision(parent.id) != failed }
         XCTAssertNotEqual(model.fetchedSubagents.revision(parent.id), failed, "recovery reloads the failed list")
 
         await model.loadSubagents(of: parent)
@@ -269,7 +270,7 @@ final class HostDropTests: XCTestCase {
         XCTAssertNil(model.connectionState(for: session.id).error, "the held computer raises no banner")
         model.composerSession.composer = "Keep the regression test"
         model.composerSession.send(to: session)
-        try await eventually { model.composerSession.pendingSends[session.id]?.first?.unconfirmed == true }
+        try await eventually("the send waits unconfirmed") { model.composerSession.pendingSends[session.id]?.first?.unconfirmed == true }
         XCTAssertEqual(model.deliveryStatus[session.id], "Not confirmed yet · retrying")
         XCTAssertEqual(model.composerSession.composer, "", "it may have arrived, so it waits instead of coming back")
     }
@@ -280,7 +281,7 @@ final class HostDropTests: XCTestCase {
         HostDropProtocol.state.setDown(true)
         HostDropProtocol.state.dropStreams()
         let connection = try XCTUnwrap(model.connection("hdrop"))
-        try await eventually { !connection.reachable }
+        try await eventually("the computer stops being reachable") { !connection.reachable }
         XCTAssertTrue(connection.holding && !connection.reachable, "the computer is held through the grace")
         do {
             _ = try await model.inboxPage()
@@ -298,7 +299,7 @@ final class HostDropTests: XCTestCase {
         HostDropProtocol.state.setDown(true)
         HostDropProtocol.state.dropStreams()
         let connection = try XCTUnwrap(model.connection("hdrop"))
-        try await eventually { !connection.reachable }
+        try await eventually("the computer stops being reachable") { !connection.reachable }
         XCTAssertTrue(connection.holding && !connection.reachable, "the computer is held through the grace")
         XCTAssertEqual(model.creationHosts.first { $0.id == "hdrop" }?.state, "connected", "new sessions stopped offering a computer shown connected")
         await model.searchSessions("regression")
