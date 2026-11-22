@@ -92,7 +92,7 @@ func (r *Registry) SubscribeEvent(s EventSubscribe) (EventSubscription, error) {
 		return EventSubscription{}, err
 	}
 	var current int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM identity_remote WHERE identity_id=? AND token_hash=?`, s.IdentityID, s.TokenHash).Scan(&current); err != nil {
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM identity_remote r WHERE r.identity_id=?1 AND `+liveCredential(`?2`), s.IdentityID, s.TokenHash).Scan(&current); err != nil {
 		return EventSubscription{}, err
 	}
 	if current == 0 || epoch != s.Epoch {
@@ -147,8 +147,12 @@ type DueEvent struct {
 	Unread int
 }
 
-// The join on token_hash ends delivery the moment the identity's credentials change.
-const liveEventFrom = ` FROM mcp_event_subscriptions s JOIN identity_remote r ON r.identity_id=s.identity_id AND r.token_hash=s.token_hash`
+// The join on the credential ends delivery the moment the identity's token changes or its grant goes.
+var liveEventFrom = ` FROM mcp_event_subscriptions s JOIN identity_remote r ON r.identity_id=s.identity_id AND ` + liveCredential(`s.token_hash`)
+
+func liveCredential(key string) string {
+	return `(r.token_hash=` + key + ` OR EXISTS(SELECT 1 FROM identity_oauth_grants g WHERE g.identity_id=r.identity_id AND '` + OAuthCredentialPrefix + `'||g.grant_id=` + key + `))`
+}
 
 const dueEventsQuery = `SELECT ` + eventSubscriptionColumns + `,u.newest,u.unread` + liveEventFrom + `
 		JOIN (SELECT identity_id,MAX(id) newest,COUNT(*) unread FROM agent_inbox WHERE read_at_ms=0 GROUP BY identity_id) u ON u.identity_id=s.identity_id AND u.newest>s.notified_through` +

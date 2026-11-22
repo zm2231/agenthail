@@ -8,6 +8,7 @@
 -- migration 2026-11-22-signing-keys-for-hosts
 -- migration 2026-11-22-signing-keys-sign-handovers
 -- migration 2026-11-22-work-item-for-session-prs
+-- migration 2026-11-23-tokens-for-oauth-clients
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -82,6 +83,9 @@ CREATE INDEX device_streams_recent ON device_streams(device_id, closed_at_ms DES
 -- index host_held_actions_open
 CREATE INDEX host_held_actions_open ON host_held_actions(host_id, id) WHERE status IN ('pending','inflight');
 
+-- index identity_oauth_grants_client
+CREATE INDEX identity_oauth_grants_client ON identity_oauth_grants(client_id);
+
 -- index idle_compactions_queue
 CREATE INDEX idle_compactions_queue ON idle_compactions(queue_id) WHERE queue_id!=0;
 
@@ -106,6 +110,9 @@ CREATE UNIQUE INDEX message_queue_delivery_key
 
 -- index message_queue_open
 CREATE INDEX message_queue_open ON message_queue(session_id) WHERE status IN ('pending','inflight');
+
+-- index oauth_spent_refresh_grant
+CREATE INDEX oauth_spent_refresh_grant ON oauth_spent_refresh(grant_id);
 
 -- index paired_devices_active
 CREATE INDEX paired_devices_active ON paired_devices(revoked_at, created_at DESC);
@@ -587,6 +594,19 @@ CREATE TABLE hosts (
 	catalog_retired_clock INTEGER NOT NULL DEFAULT -1
 );
 
+-- table identity_oauth_grants
+CREATE TABLE identity_oauth_grants (
+	grant_id TEXT PRIMARY KEY,
+	identity_id TEXT NOT NULL REFERENCES identity_remote(identity_id) ON DELETE CASCADE,
+	client_id TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,
+	access_hash TEXT NOT NULL UNIQUE,
+	access_expires_at_ms INTEGER NOT NULL,
+	refresh_hash TEXT NOT NULL UNIQUE,
+	refresh_expires_at_ms INTEGER NOT NULL,
+	created_at_ms INTEGER NOT NULL,
+	last_seen_at_ms INTEGER NOT NULL DEFAULT 0
+);
+
 -- table identity_remote
 CREATE TABLE identity_remote (
 	identity_id TEXT PRIMARY KEY REFERENCES agent_identities(identity_id) ON DELETE CASCADE,
@@ -703,6 +723,13 @@ CREATE TABLE mcp_event_subscriptions (
 	UNIQUE(identity_id,url,name,args)
 );
 
+-- table mcp_oauth
+CREATE TABLE mcp_oauth (
+	id INTEGER PRIMARY KEY CHECK (id=1),
+	issuer TEXT NOT NULL,
+	changed_at_ms INTEGER NOT NULL
+);
+
 -- table mcp_remote_epoch
 CREATE TABLE mcp_remote_epoch (
 	id INTEGER PRIMARY KEY CHECK (id=1),
@@ -753,6 +780,22 @@ CREATE TABLE move_dropped_relays (
 CREATE TABLE notification_withdrawals (
 	ask_id TEXT PRIMARY KEY,
 	seq INTEGER NOT NULL
+);
+
+-- table oauth_clients
+CREATE TABLE oauth_clients (
+	client_id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	redirect_uris TEXT NOT NULL,
+	created_at_ms INTEGER NOT NULL,
+	approved_at_ms INTEGER NOT NULL DEFAULT 0
+);
+
+-- table oauth_spent_refresh
+CREATE TABLE oauth_spent_refresh (
+	refresh_hash TEXT PRIMARY KEY,
+	grant_id TEXT NOT NULL REFERENCES identity_oauth_grants(grant_id) ON DELETE CASCADE,
+	spent_at_ms INTEGER NOT NULL
 );
 
 -- table paired_devices
@@ -1815,6 +1858,13 @@ BEGIN
 		UNION SELECT id FROM sessions WHERE root_session_id<>'' AND root_session_id IN (NEW.session_id,(SELECT NULLIF(root_session_id,'') FROM sessions WHERE id=NEW.session_id)));
 END;
 
+-- trigger identity_oauth_grants_removed
+CREATE TRIGGER identity_oauth_grants_removed AFTER DELETE ON identity_oauth_grants
+BEGIN
+	UPDATE mcp_remote_epoch SET epoch=epoch+1 WHERE id=1;
+	DELETE FROM mcp_event_subscriptions WHERE token_hash='oauth:'||OLD.grant_id;
+END;
+
 -- trigger identity_remote_epoch_added
 CREATE TRIGGER identity_remote_epoch_added AFTER INSERT ON identity_remote
 BEGIN UPDATE mcp_remote_epoch SET epoch=epoch+1 WHERE id=1; END;
@@ -1853,7 +1903,15 @@ BEGIN DELETE FROM mcp_event_subscriptions; END;
 
 -- trigger mcp_event_subscriptions_credentials_changed
 CREATE TRIGGER mcp_event_subscriptions_credentials_changed AFTER UPDATE OF token_hash,access_client_id,access_email ON identity_remote
-BEGIN DELETE FROM mcp_event_subscriptions WHERE identity_id=NEW.identity_id; END;
+BEGIN DELETE FROM mcp_event_subscriptions WHERE identity_id=NEW.identity_id AND token_hash NOT LIKE 'oauth:%'; END;
+
+-- trigger mcp_oauth_issuer_changed
+CREATE TRIGGER mcp_oauth_issuer_changed AFTER UPDATE OF issuer ON mcp_oauth
+BEGIN DELETE FROM oauth_clients; END;
+
+-- trigger mcp_oauth_issuer_removed
+CREATE TRIGGER mcp_oauth_issuer_removed AFTER DELETE ON mcp_oauth
+BEGIN DELETE FROM oauth_clients; END;
 
 -- trigger message_queue_catalog_delete
 CREATE TRIGGER message_queue_catalog_delete AFTER DELETE ON message_queue
