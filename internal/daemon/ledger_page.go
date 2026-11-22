@@ -336,13 +336,13 @@ func (d *Daemon) ledgerPageEventsHandler(w http.ResponseWriter, r *http.Request)
 	hub := d.ledgerChanges()
 	id, ledgerWake, cancel := hub.subscribe(key)
 	defer cancel()
+	boardWake, unwatch := d.watchLedgerBoard(projectID)
+	defer unwatch()
 	sse.Open(w)
 	if sse.Flush(w) != nil {
 		return
 	}
 	ctx := r.Context()
-	boardWake, unwatch := d.watchLedgerBoard(projectID)
-	defer unwatch()
 	wake := make(chan string, 1)
 	go func() {
 		for {

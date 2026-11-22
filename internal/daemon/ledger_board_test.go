@@ -276,3 +276,55 @@ func TestManyOpenWorkPagesOfOneProjectShareOneBoardReadPerWait(t *testing.T) {
 		t.Fatalf("%d pages read the board %d times in %s, want 2 to %d", pages, got, elapsed, most)
 	}
 }
+
+func TestAWorkPageHearsABoardChangeThatLandsWhileItsWatchStarts(t *testing.T) {
+	d, p, _, base := ledgerPageDaemon(t)
+	d.ledgerBoards.wait = 50 * time.Millisecond
+	r := d.Registry
+	fake := d.Surfaces[0].(*daemonSurface)
+	fake.sessions["s-idle"] = surface.Session{ID: "s-idle", Surface: fake.Name(), Cwd: p.dir, Status: surface.StatusIdle, LastActive: time.Now()}
+	ctx := context.Background()
+	d.discoverCatalog(ctx)
+	key, err := d.ledgerPageTarget("proj-widget")
+	if err != nil || key == "" {
+		t.Fatalf("the page reads the ledger of %q, %v", key, err)
+	}
+	store := d.ledgerStore()
+	item := work(t, store, ledger.WorkRequest{ProjectKey: key, SessionID: "s-idle", Action: ledger.WorkAdd, Text: "Fix the flaky index test"})
+	work(t, store, ledger.WorkRequest{ProjectKey: key, SessionID: "s-idle", Action: ledger.WorkClaim, ItemID: item.ID})
+	if err := d.linkPR(registry.SessionPR{SessionID: "s-idle", Repo: "acme/widget", Number: 7, URL: "https://github.com/acme/widget/pull/7", Source: "test", Watch: true}, true); err != nil {
+		t.Fatal(err)
+	}
+	d.discoverCatalog(ctx)
+
+	var baseline atomic.Bool
+	d.ledgerBoards.read = func(projectID string) string {
+		version := d.ledgerBoardVersion(projectID)
+		if baseline.CompareAndSwap(false, true) {
+			row, _, err := r.SessionPR("s-idle", "acme/widget", 7)
+			if err != nil {
+				t.Error(err)
+				return version
+			}
+			next := row
+			next.State, next.Checks = "open", "failing"
+			if _, err := d.changePRs(func(r *registry.Registry) (bool, error) { return r.RecordPRRead(next, row.Wakes, time.Now()) }); err != nil {
+				t.Error(err)
+			}
+			d.discoverCatalog(ctx)
+		}
+		return version
+	}
+	events := openWorkPageEvents(t, base, "proj-widget")
+	select {
+	case change := <-events:
+		if change.Version == "" {
+			t.Fatalf("the page heard %+v", change)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a board change made while the page's watch started was never heard")
+	}
+	if _, view := ledgerPageRead(t, base, "proj-widget", "test-token", ""); len(view.Board[laneCIFailing]) != 1 {
+		t.Fatalf("the board reads %+v", view.Board)
+	}
+}
