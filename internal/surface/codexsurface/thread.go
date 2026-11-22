@@ -156,6 +156,15 @@ func codexTurnsNotListedYet(err error) bool {
 	return false
 }
 
+// codexRolloutNotWrittenYet matches codex-cli 0.163.0's thread/read of a rollout its first turn created but has not yet given a session metadata line.
+func codexRolloutNotWrittenYet(err error) bool {
+	var rpc *codexRPCError
+	if !errors.As(err, &rpc) || rpc.Code != -32603 {
+		return false
+	}
+	return strings.HasPrefix(rpc.Message, "failed to read thread: thread-store internal error: failed to read session metadata ") && strings.Contains(rpc.Message, ": rollout at ") && strings.HasSuffix(rpc.Message, " is empty")
+}
+
 // readLatestTurn reads the thread's newest turn with all of its items.
 func (c *Codex) readLatestTurn(ctx context.Context, conn codexClient, threadID string) (*codexThread, error) {
 	turns, err := c.listThreadTurnsView(ctx, conn, threadID, 1, "full")
