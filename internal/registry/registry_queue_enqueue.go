@@ -192,6 +192,13 @@ func (r *Registry) readExists(query string, args ...any) (bool, error) {
 	return exists, err
 }
 
+// QueueMark changes with any write to a session's open queue rows that a client could see; a deferral can leave the counts as they were.
+func (r *Registry) QueueMark(sessionID string) (string, error) {
+	var mark string
+	err := r.read.QueryRow(`SELECT COALESCE(group_concat(row, char(30)),'') FROM (SELECT concat_ws(char(31),id,status,attempts,deferrals,deferred_since_ms,last_error,refused,refusal,holders_json,holder_pid,holder_start,updated_at) AS row FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') ORDER BY id)`, sessionID).Scan(&mark)
+	return mark, err
+}
+
 func (r *Registry) QueueCount(sessionID string) int {
 	var n int
 	r.read.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight')`, sessionID).Scan(&n)
