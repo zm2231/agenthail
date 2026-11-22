@@ -1,4 +1,4 @@
-package claudesurface
+package sourceguard
 
 import (
 	"go/ast"
@@ -11,7 +11,7 @@ import (
 )
 
 func TestOnlyHostOpenOpensAClaudeHostConversation(t *testing.T) {
-	root := filepath.Join("..", "..", "..")
+	root := filepath.Join("..", "..")
 	checked := 0
 	for _, dir := range []string{"internal", "cmd"} {
 		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, entry fs.DirEntry, err error) error {

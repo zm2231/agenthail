@@ -1,4 +1,4 @@
-package codexsurface
+package sourceguard
 
 import (
 	"go/ast"
@@ -14,7 +14,7 @@ import (
 var threadMethods = map[string]string{"thread/start": "codexThreadStart", "thread/resume": "codexThreadResume", "thread/fork": "codexThreadFork"}
 
 func TestOnlyCodexThreadRequestSendsThreadStartResumeOrFork(t *testing.T) {
-	root := filepath.Join("..", "..", "..")
+	root := filepath.Join("..", "..")
 	checked := 0
 	for _, dir := range []string{"internal", "cmd"} {
 		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, entry fs.DirEntry, err error) error {
