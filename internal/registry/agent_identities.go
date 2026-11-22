@@ -19,6 +19,7 @@ type AgentIdentity struct {
 	CreatedAt time.Time `json:"createdAt"`
 	Unread    int       `json:"unread"`
 	Total     int       `json:"total"`
+	SendMode  string    `json:"sendMode"`
 }
 
 type InboxMessage struct {
@@ -172,13 +173,14 @@ func agentIdentityIDTx(q catalogQuerier, name string) (string, error) {
 
 const agentIdentitySelect = `SELECT i.name,i.identity_id,i.created_at_ms,
 	(SELECT COUNT(*) FROM agent_inbox m WHERE m.identity_id=i.identity_id AND m.read_at_ms=0),
-	(SELECT COUNT(*) FROM agent_inbox m WHERE m.identity_id=i.identity_id)
+	(SELECT COUNT(*) FROM agent_inbox m WHERE m.identity_id=i.identity_id),
+	COALESCE((SELECT s.send_mode FROM identity_settings s WHERE s.identity_id=i.identity_id),'queue')
 	FROM agent_identities i`
 
 func scanAgentIdentity(row rowScanner) (AgentIdentity, error) {
 	var identity AgentIdentity
 	var created int64
-	if err := row.Scan(&identity.Name, &identity.SessionID, &created, &identity.Unread, &identity.Total); err != nil {
+	if err := row.Scan(&identity.Name, &identity.SessionID, &created, &identity.Unread, &identity.Total, &identity.SendMode); err != nil {
 		return AgentIdentity{}, err
 	}
 	identity.CreatedAt = time.UnixMilli(created).UTC()

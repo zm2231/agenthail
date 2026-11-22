@@ -13,7 +13,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const identityUsage = "usage: agenthail identity <add <name>|rm <name>|list|remote <name> ...|access ...> [--json]"
+const identityUsage = "usage: agenthail identity <add <name>|rm <name>|list|set <name> --send-mode now|queue|remote <name> ...|access ...> [--json]"
 
 func (a *App) cmdIdentity(args []string) error {
 	positional := stripFlags(args)
@@ -79,6 +79,9 @@ func (a *App) cmdIdentity(args []string) error {
 			if remote, ok := remoteByName[identity.Name]; ok {
 				line += "  remote: " + remote.Binding() + ", last seen " + lastSeen(remote.LastSeen)
 			}
+			if identity.SendMode == registry.SendModeNow {
+				line += "  sends now by default"
+			}
 			fmt.Println(line)
 		}
 		return nil
@@ -86,6 +89,11 @@ func (a *App) cmdIdentity(args []string) error {
 		return a.identityRemote(reg, positional, args, jsonOut)
 	case "access":
 		return identityAccess(reg, positional, args, jsonOut)
+	case "set":
+		if len(positional) != 2 || flagVal(args, "--send-mode") == "" {
+			return errors.New("usage: agenthail identity set <name> --send-mode now|queue [--json]")
+		}
+		return a.setIdentitySettings(positional[1], flagVal(args, "--send-mode"), jsonOut)
 	}
 	return errors.New(identityUsage)
 }

@@ -1016,4 +1016,9 @@ BEGIN DELETE FROM mcp_event_subscriptions; END;
 DROP TRIGGER IF EXISTS mcp_event_subscriptions_access_removed;
 CREATE TRIGGER mcp_event_subscriptions_access_removed AFTER DELETE ON mcp_access
 BEGIN DELETE FROM mcp_event_subscriptions; END;
+CREATE TABLE IF NOT EXISTS identity_settings (
+	identity_id TEXT PRIMARY KEY REFERENCES agent_identities(identity_id) ON DELETE CASCADE,
+	send_mode TEXT NOT NULL CHECK (send_mode IN ('now','queue')),
+	changed_at_ms INTEGER NOT NULL
+);
 `
