@@ -67,8 +67,8 @@ type CatalogIdentity struct {
 }
 
 // catalogIdentityTTL bounds how long a resolved workspace identity is reused.
-// A change to the checkout's HEAD or index invalidates it sooner; working
-// tree edits that touch neither show up in Dirty once the entry expires.
+// A change to the git state it was read from invalidates it sooner; working
+// tree edits that touch none of it show up in Dirty once the entry expires.
 const catalogIdentityTTL = 2 * time.Minute
 
 const CatalogIdentityGitTimeout = 3 * time.Second
@@ -167,7 +167,7 @@ func (c *CatalogIdentityCache) RootRepository(ctx context.Context, root string, 
 	c.mu.Lock()
 	entry, found := c.roots[root]
 	c.mu.Unlock()
-	if found && now.Sub(entry.resolvedAt) < catalogIdentityTTL && catalogGitStamp(entry.gitDirs) == entry.gitStamp {
+	if found && now.Sub(entry.resolvedAt) < catalogIdentityTTL && catalogConfigStamp(entry.gitDirs) == entry.gitStamp {
 		return entry.key, entry.repository, true
 	}
 	resolved, notRepository, err := ResolveCatalogRepository(ctx, root, c.repositories)
@@ -183,7 +183,7 @@ func (c *CatalogIdentityCache) RootRepository(ctx context.Context, root string, 
 		}
 	}
 	c.mu.Lock()
-	c.roots[root] = catalogRootEntry{key: key, repository: repository, gitDirs: dirs, gitStamp: catalogGitStamp(dirs), resolvedAt: now}
+	c.roots[root] = catalogRootEntry{key: key, repository: repository, gitDirs: dirs, gitStamp: catalogConfigStamp(dirs), resolvedAt: now}
 	c.mu.Unlock()
 	return key, repository, true
 }
@@ -206,8 +206,9 @@ func (c *CatalogIdentityCache) Identity(ctx context.Context, session surface.Ses
 	if !found || catalogConfigStamp(entry.gitDirs) != entry.configStamp {
 		return c.resolve(ctx, path, now, prior)
 	}
-	if now.Sub(entry.resolvedAt) >= catalogIdentityTTL || catalogGitStamp(entry.gitDirs) != entry.gitStamp {
-		c.refreshLater(ctx, path, now, prior)
+	moved := catalogGitStamp(entry.gitDirs) != entry.gitStamp
+	if moved || now.Sub(entry.resolvedAt) >= catalogIdentityTTL {
+		c.refreshLater(ctx, path, now, prior, !moved && entry.gitDirs.checkout != "" && entry.identity.Problem == "")
 	}
 	return entry.identity
 }
@@ -247,8 +248,9 @@ func (c *CatalogIdentityCache) resolve(ctx context.Context, path string, now tim
 }
 
 // refreshLater re-resolves path in the background unless a refresh of it is
-// already running or every refresh slot is taken; a later pass retries.
-func (c *CatalogIdentityCache) refreshLater(ctx context.Context, path string, now time.Time, prior func() *CatalogProject) {
+// already running or every refresh slot is taken; a later pass retries. With
+// dirtyOnly, git state the stamp covers has not moved, so only Dirty is read.
+func (c *CatalogIdentityCache) refreshLater(ctx context.Context, path string, now time.Time, prior func() *CatalogProject, dirtyOnly bool) {
 	c.mu.Lock()
 	if _, running := c.refreshing[path]; running {
 		c.mu.Unlock()
@@ -266,7 +268,13 @@ func (c *CatalogIdentityCache) refreshLater(ctx context.Context, path string, no
 	c.mu.Unlock()
 	go func() {
 		defer c.inflight.Done()
-		after := c.resolve(context.WithoutCancel(ctx), path, now, prior)
+		after, refreshed := CatalogIdentity{}, false
+		if dirtyOnly {
+			after, refreshed = c.refreshDirty(context.WithoutCancel(ctx), path, now)
+		}
+		if !refreshed {
+			after = c.resolve(context.WithoutCancel(ctx), path, now, prior)
+		}
 		c.mu.Lock()
 		delete(c.refreshing, path)
 		<-c.slots
@@ -276,6 +284,50 @@ func (c *CatalogIdentityCache) refreshLater(ctx context.Context, path string, no
 			changed()
 		}
 	}()
+}
+
+// refreshDirty rereads whether path's checkout is dirty and renews its entry;
+// false when anything else may have changed, so path is resolved in full.
+func (c *CatalogIdentityCache) refreshDirty(ctx context.Context, path string, now time.Time) (CatalogIdentity, bool) {
+	c.mu.Lock()
+	entry, found := c.entries[path]
+	generation := c.generation
+	c.mu.Unlock()
+	stamp := catalogGitStamp(entry.gitDirs)
+	if !found || stamp != entry.gitStamp || catalogNestedRepository(path, entry.identity.Checkout.Path) {
+		return CatalogIdentity{}, false
+	}
+	gitCtx, cancel := context.WithTimeout(ctx, CatalogIdentityGitTimeout)
+	defer cancel()
+	dirty, err := catalogCheckoutDirty(gitCtx, entry.identity.Checkout.Path)
+	if err != nil {
+		return CatalogIdentity{}, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	current, found := c.entries[path]
+	if !found || generation != c.generation || current.resolvedAt != entry.resolvedAt {
+		return current.identity, found
+	}
+	current.identity.Checkout.Dirty = dirty
+	current.gitStamp, current.resolvedAt = stamp, now
+	c.entries[path] = current
+	return current.identity, true
+}
+
+// catalogNestedRepository reports a .git between path and its checkout root,
+// which makes path part of another repository from the one it resolved to.
+func catalogNestedRepository(path, root string) bool {
+	inside := root
+	if !strings.HasSuffix(inside, string(filepath.Separator)) {
+		inside += string(filepath.Separator)
+	}
+	for dir := path; dir != root && strings.HasPrefix(dir, inside); dir = filepath.Dir(dir) {
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // Prune forgets the paths no listed session asked for within the TTL.
@@ -302,13 +354,25 @@ type catalogGitDirs struct {
 	common   string
 }
 
-// catalogGitStamp fingerprints the files that change on a branch switch,
-// commit or staging change, and the repository config, which holds the
-// remote the project key comes from.
+// catalogGitStamp fingerprints every file an identity's git reads depend on:
+// HEAD for the branch or detached commit, the index, the config holding the
+// remotes, and origin's HEAD, which decides whether the branch is the main one.
 func catalogGitStamp(dirs catalogGitDirs) string {
+	return catalogFileStamp(catalogGitFile{dirs.checkout, "HEAD"}, catalogGitFile{dirs.checkout, "index"}, catalogGitFile{dirs.common, "config"}, catalogGitFile{dirs.common, filepath.Join("refs", "remotes", "origin", "HEAD")})
+}
+
+// catalogConfigStamp fingerprints the repository config, which holds the
+// remote the project key comes from.
+func catalogConfigStamp(dirs catalogGitDirs) string {
+	return catalogFileStamp(catalogGitFile{dirs.common, "config"})
+}
+
+type catalogGitFile struct{ dir, name string }
+
+func catalogFileStamp(files ...catalogGitFile) string {
 	readAt := time.Now()
 	var stamp strings.Builder
-	for _, file := range []struct{ dir, name string }{{dirs.checkout, "HEAD"}, {dirs.checkout, "index"}, {dirs.common, "config"}} {
+	for _, file := range files {
 		if file.dir == "" {
 			continue
 		}
@@ -319,12 +383,6 @@ func catalogGitStamp(dirs catalogGitDirs) string {
 		}
 	}
 	return stamp.String()
-}
-
-// catalogConfigStamp fingerprints the repository config, which holds the
-// remote the project key comes from.
-func catalogConfigStamp(dirs catalogGitDirs) string {
-	return catalogGitStamp(catalogGitDirs{common: dirs.common})
 }
 
 // resolveCatalogIdentity returns the workspace's identity, the git
@@ -616,12 +674,17 @@ func resolveCatalogCheckout(ctx context.Context, checkout *CatalogCheckout) stri
 	} else {
 		return "repository head is unavailable"
 	}
-	porcelain, err := CatalogGit(ctx, root, "status", "--porcelain=v1", "-z", "--untracked-files=normal")
+	dirty, err := catalogCheckoutDirty(ctx, root)
 	if err != nil {
 		return "repository status is unavailable"
 	}
-	checkout.Dirty = porcelain != ""
+	checkout.Dirty = dirty
 	return ""
+}
+
+func catalogCheckoutDirty(ctx context.Context, root string) (bool, error) {
+	porcelain, err := CatalogGit(ctx, root, "status", "--porcelain=v1", "-z", "--untracked-files=normal")
+	return porcelain != "", err
 }
 
 func CatalogProjectName(root string) string {
