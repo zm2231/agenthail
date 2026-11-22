@@ -33,7 +33,7 @@ const (
 
 var ledgerBoardWait = time.Second
 
-var ledgerBoardLanes = []string{laneYou, laneCIFailing, laneCIPending, laneReview, laneRunning, laneBlocked, laneIdle}
+var ledgerBoardLanes = []string{laneYou, laneCIFailing, laneCIPending, laneReview, laneBlocked, laneRunning, laneIdle}
 
 type ledgerPageFlight struct {
 	Lane        string          `json:"lane"`

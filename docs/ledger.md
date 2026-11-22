@@ -363,8 +363,8 @@ Each project's view in the dashboard has a Work section: the project's ledger as
 | CI failing | a PR the item's log names is open and its checks fail |
 | Waiting on CI | such a PR is open and its checks are still running |
 | In review | the item is in review |
-| Working now | its holder session is busy |
 | Blocked | the item is blocked, or waits on an item not yet done |
+| Working now | its holder session is busy |
 | Held, not running | anything else |
 
 The Waiting on you lane also lists work parked on a question for the person. A card shows the item's title, its holder by alias with whether that session is working, idle or ended, its PR with checks and review, and how long it has been in its state (for an ask, since the ask was raised). Opened, it shows the asks, every PR with a link, why it is blocked or what it waits on, and the newest line of its log. An item is tied to a PR only by the `PR opened: <url>` line its holder's PR link writes to the item's log; a PR is never guessed from sharing a holder. Checks and review are this host's last read of the PR.

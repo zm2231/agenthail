@@ -31,7 +31,7 @@ assert.deepEqual(shownRows([1, 2], false), [1, 2]);
 
 const boardSource = readFileSync(new URL("../internal/daemon/ledger_page/ledger-board.js", import.meta.url), "utf8");
 const { lanes, prChip, prWords, laneSince, holderWord } = await import("data:text/javascript," + encodeURIComponent(boardSource));
-assert.deepEqual(lanes.map(([lane]) => lane), ["you", "ciFailing", "ciPending", "review", "running", "blocked", "idle"], "the page shows the lanes in the order the daemon picks them");
+assert.deepEqual(lanes.map(([lane]) => lane), ["you", "ciFailing", "ciPending", "review", "blocked", "running", "idle"], "the page shows the lanes in the order the daemon picks them");
 const failing = { url: "u7", number: 7, state: "open", checks: "failing", review: "none" };
 const merged = { url: "u6", number: 6, state: "merged", checks: "failing" };
 assert.deepEqual(prChip({ prs: [merged, failing] }), { text: "PR #7 checks failing", tone: "bad" }, "the card names the open PR over an older merged one");

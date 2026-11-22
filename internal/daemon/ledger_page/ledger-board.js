@@ -3,8 +3,8 @@ export const lanes = [
   ["ciFailing", "CI failing"],
   ["ciPending", "Waiting on CI"],
   ["review", "In review"],
-  ["running", "Working now"],
   ["blocked", "Blocked"],
+  ["running", "Working now"],
   ["idle", "Held, not running"],
 ];
 
