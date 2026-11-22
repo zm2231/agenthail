@@ -101,8 +101,7 @@ var (
 	settingsWrite = personOnlyWrite{title: "Identity settings change refused", tried: "tried to change an identity's settings", rule: "An identity's settings are the person's to change", event: "identity.settings.refused"}
 )
 
-// fromThePerson reports whether a local socket request may make write: a GET
-// passes once the caller is named, a POST only from outside every agent session.
+// A GET passes once the caller is named; a POST only from outside every agent session.
 func (d *Daemon) fromThePerson(w http.ResponseWriter, r *http.Request, write personOnlyWrite) bool {
 	peer, ok := r.Context().Value(mcpPeerKey{}).(peerproc.Peer)
 	if !ok || peer.PID == 0 || peer.UID != os.Getuid() {
