@@ -4,6 +4,7 @@ import { shortHostName } from "./hosts.js";
 import { sessionButton } from "./session-row.js";
 import { orderReady, projectKey, projectSessions } from "./session-order.js";
 import { projectNow } from "./project-now.js";
+import { renderInlineAnswer } from "./project-now-answer.js";
 import { hostDown, presenceLabel, unavailable } from "./presence.js";
 import { leadSessionID } from "./project-tiles.js";
 
@@ -76,15 +77,15 @@ function card(title, body, trailing = "") {
   return `<section class="project-card"><header><h2>${escape(title)}</h2>${trailing}</header>${body}</section>`;
 }
 
-function rows(sessions, empty) {
+function rows(sessions, empty, below = () => "") {
   return sessions.length
-    ? sessions.map((session) => `<div class="project-row">${sessionButton(session)}<span class="project-row-time">${escape(rowTime(session))}</span></div>`).join("")
+    ? sessions.map((session) => `<div class="project-row">${sessionButton(session)}<span class="project-row-time">${escape(rowTime(session))}</span></div>${below(session)}`).join("")
     : `<p class="project-empty">${escape(empty)}</p>`;
 }
 
 function nowRows(now) {
   if (!now.count) return rows([], "Nothing in the last day");
-  return now.groups.map((group) => `${now.showsGroups ? `<h3 class="project-now-group">${escape(group.title)}</h3>` : ""}${rows(group.sessions, "")}`).join("");
+  return now.groups.map((group) => `${now.showsGroups ? `<h3 class="project-now-group">${escape(group.title)}</h3>` : ""}${rows(group.sessions, "", (session) => renderInlineAnswer(session))}`).join("");
 }
 
 function leadCard(project, contents) {

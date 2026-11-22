@@ -103,12 +103,24 @@ func (d *Daemon) readOpenRequests(ctx context.Context, session *surface.Session,
 		}
 		request.ID = id
 		request = request.WithOptionIDs()
-		requests = append(requests, openRequestView{Request: request, Prompt: request.Prompt(), Brief: clipUTF8(request.Detail(), mcpDetailLimit), Actions: request.Actions(), ReplacedBy: d.publicSessionID(replacedBy)})
+		requests = append(requests, viewOpenRequest(request, d.publicSessionID(replacedBy)))
 	}
 	for _, ask := range asking {
-		requests = append(requests, openRequestView{Request: ask, Prompt: ask.Prompt(), Brief: clipUTF8(ask.Detail(), mcpDetailLimit), Actions: ask.Actions()})
+		requests = append(requests, viewOpenRequest(ask, ""))
 	}
 	return openRequests{requests: requests, permissionMode: state.PermissionMode, providerError: providerError}, nil
+}
+
+// viewOpenRequest sends a request's detail up to mcpDetailLimit. Its one-line
+// summary goes only with a detail sent whole, so a client never offers to
+// approve a request whose full detail it cannot show.
+func viewOpenRequest(request surface.Request, replacedBy string) openRequestView {
+	detail := request.Detail()
+	view := openRequestView{Request: request, Prompt: request.Prompt(), Brief: clipUTF8(detail, mcpDetailLimit), Actions: request.Actions(), ReplacedBy: replacedBy}
+	if view.Brief == detail {
+		view.Summary = request.Summary()
+	}
+	return view
 }
 
 // asksCover reports whether every request the provider lists has its ask; one
@@ -135,6 +147,7 @@ type openRequestView struct {
 	surface.Request
 	Prompt  string                  `json:"prompt"`
 	Brief   string                  `json:"detail,omitempty"`
+	Summary string                  `json:"summary,omitempty"`
 	Actions []surface.RequestAction `json:"actions,omitempty"`
 	// ReplacedBy is the project's current lead when this request is from a lead a restart replaced.
 	ReplacedBy string `json:"replacedBy,omitempty"`

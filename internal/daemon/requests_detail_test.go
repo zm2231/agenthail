@@ -27,28 +27,33 @@ func TestTheRequestsAPIDescribesARequestAsAgentsReadIt(t *testing.T) {
 	responder.open = []surface.Request{
 		{ID: "run", Kind: surface.WaitingApproval, Tool: "Bash", Input: json.RawMessage(`{"command":"make release"}`), CreatedAt: time.Now()},
 		{ID: "long", Kind: surface.WaitingApproval, Tool: "Bash", Input: json.RawMessage(`{"command":"` + long + `"}`), CreatedAt: time.Now()},
+		{ID: "edit", Kind: surface.WaitingApproval, Tool: "Edit", Input: json.RawMessage(`{"file_path":"go.mod","old_string":"","new_string":"` + long + `"}`), CreatedAt: time.Now()},
 	}
 	worker := surface.Session{ID: "w", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusIdle}
 	if err := r.RecordObservedSession(worker); err != nil {
 		t.Fatal(err)
 	}
 	base.sessions["w"] = worker
-	d.syncWaits(worker, &surface.Waiting{Kind: surface.WaitingApproval, ID: "run", Answerable: true, Open: []string{"run", "long"}})
+	d.syncWaits(worker, &surface.Waiting{Kind: surface.WaitingApproval, ID: "run", Answerable: true, Open: []string{"run", "long", "edit"}})
 	response := httptest.NewRecorder()
 	d.requestsHandler(response, httptest.NewRequest(http.MethodGet, "/api/v1/requests?sessionId=w", nil))
 	var body struct {
 		Requests []struct {
-			ID     string `json:"id"`
-			Detail string `json:"detail"`
+			ID      string `json:"id"`
+			Detail  string `json:"detail"`
+			Summary string `json:"summary"`
 		} `json:"requests"`
 	}
-	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil || len(body.Requests) != 2 {
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil || len(body.Requests) != 3 {
 		t.Fatalf("requests answered %d %s", response.Code, response.Body)
 	}
-	if body.Requests[0].Detail != "make release" {
-		t.Fatalf("a command request's detail is %q, want the command", body.Requests[0].Detail)
+	if body.Requests[0].Detail != "make release" || body.Requests[0].Summary != "make release" {
+		t.Fatalf("a command request's detail and summary are %q and %q, want the command", body.Requests[0].Detail, body.Requests[0].Summary)
 	}
 	if detail := body.Requests[1].Detail; !utf8.ValidString(detail) || len(detail) > mcpDetailLimit || !strings.HasPrefix(long, detail) || detail == "" {
 		t.Fatalf("a long command's detail must be cut on a character within %d bytes, got %d bytes", mcpDetailLimit, len(detail))
+	}
+	if edit := body.Requests[2]; !strings.HasPrefix(edit.Detail, "go.mod: +1 -0 lines") || edit.Summary != "" {
+		t.Fatalf("an edit whose detail is cut must carry no summary, so no client approves it from one line: %+v", edit)
 	}
 }

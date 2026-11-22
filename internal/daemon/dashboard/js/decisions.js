@@ -9,6 +9,30 @@ export const decisionGroups = [
 export const decisionTimeout = 6000;
 const separator = "::";
 
+export const answeredMark = (sessionId, requestId) => `${sessionId}\u0001${requestId}`;
+
+export function recommended(request) {
+  if (!request || !["question", "ask"].includes(request.kind) || !request.questions?.length) return null;
+  const choices = [];
+  for (const question of request.questions) {
+    const option = Number.isInteger(question.suggested) ? question.options?.[question.suggested] : null;
+    if (!option?.id) return null;
+    choices.push(option.id);
+  }
+  return { choices };
+}
+
+export function shownDecisions() {
+  const decisions = app.decisions?.decisions || [];
+  const answered = app.decisionsAnswered || new Set();
+  return decisions.flatMap((item) => {
+    if (!item.requests?.length) return [item];
+    const requests = item.requests.filter((request) => !answered.has(answeredMark(item.sessionId, request.id)));
+    return requests.length ? [{ ...item, requests }] : [];
+  });
+}
+
+
 export function decisionHosts() {
   const local = app.state?.daemon?.host;
   const paired = app.state?.daemon?.hosts || [];

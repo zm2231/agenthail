@@ -21,8 +21,9 @@ export function syncProjectPane() {
 let ticking = 0;
 
 export function refreshShownProject() {
+  if (!app.selectedProject) return;
   const conversations = document.querySelector('[data-view-panel="conversations"]');
-  if (app.selectedProject && conversations && !conversations.classList.contains("hidden")) syncProjectPane();
+  if (conversations && !conversations.classList.contains("hidden")) syncProjectPane();
 }
 
 export function openProject(id) {
