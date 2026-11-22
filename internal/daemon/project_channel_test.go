@@ -336,3 +336,47 @@ func TestAProjectChannelReachesPinnedAndRecentlyUsedConversationsWhoseProcessEnd
 		t.Fatalf("this host delivered %d messages, want its coordinator and two members", delivered)
 	}
 }
+
+func TestAProjectChannelSkipsOneOffRunsUntilATaskSettles(t *testing.T) {
+	local, _, _ := widgetOnTwoHosts(t)
+	repo := local.fake.sessions["local-a"].Cwd
+	for _, id := range []string{"worker", "task-running", "task-settled", "exec-run", "spawned-agent"} {
+		moveSession(t, local, id, repo, time.Now())
+	}
+	exec := local.fake.sessions["exec-run"]
+	exec.Source = "exec"
+	local.fake.sessions["exec-run"] = exec
+	spawned := local.fake.sessions["spawned-agent"]
+	spawned.Subagent = &surface.Subagent{ParentID: "worker"}
+	local.fake.sessions["spawned-agent"] = spawned
+	for _, id := range []string{"exec-run", "spawned-agent"} {
+		if err := local.reg.RecordObservedSession(local.fake.sessions[id]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, child := range []string{"task-running", "task-settled"} {
+		if _, err := local.reg.CreateTask("local-a", child, "check the index", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := local.reg.SettleTask("task-settled", registry.TaskSettlement{State: registry.TaskDone, Kind: registry.TaskKindReported, Result: "done"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	local.daemon.discoverCatalog(context.Background())
+	response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "#widget", "message": "release notes", "sourceSessionId": "local-a"})
+	var answer struct {
+		Recipients []broadcast.Recipient `json:"recipients"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &answer) != nil {
+		t.Fatalf("send status=%d body=%s", response.Code, response.Body)
+	}
+	reached := map[string]bool{}
+	for _, recipient := range answer.Recipients {
+		if recipient.HostID == "" && recipient.Coordinator == "" {
+			reached[recipient.SessionID] = true
+		}
+	}
+	if !reached["worker"] || !reached["task-settled"] || reached["task-running"] || reached["exec-run"] || reached["spawned-agent"] {
+		t.Fatalf("this host's members %v, want the worker and the settled task's session but no running task, exec run or sub-agent: %+v", reached, answer.Recipients)
+	}
+}
