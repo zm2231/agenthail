@@ -58,6 +58,7 @@ Each runner is a separate service under the same macOS user, in `~/actions-runne
 3. Configure the runner with `PATH` including `/opt/homebrew/bin`, then `./svc.sh install && ./svc.sh start`.
 4. Copy `scripts/ci-runner-job-started.sh` to `~/actions-runner-agenthail-hooks/job-started.sh` and add `ACTIONS_RUNNER_HOOK_JOB_STARTED=<that path>` to the runner's `.env`. Restart the runner service.
 5. Turn off crash reporter dialogs for the runner's user: `defaults write com.apple.CrashReporter DialogType none`. See [Crash reporter dialogs](#crash-reporter-dialogs).
+6. Turn off Spotlight indexing on the host: `sudo mdutil -a -i off`, then check that `mdutil -as` shows `Indexing disabled.` for every volume. Each job creates and deletes many files in its workspace, caches, DerivedData and simulators, and indexing them used about 16% of a core on average on one runner host. `sudo mdutil -a -i on` turns it back on.
 
 ## Crash reporter dialogs
 
