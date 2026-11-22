@@ -49,7 +49,7 @@ func TestARootWhoseConfigTurnsTheMCPServerOffLosesItOnInstallAndSaysSo(t *testin
 		t.Fatal(err)
 	}
 	app := &App{daemonService: &fakeService{}}
-	if status, err := captureStdout(t, func() error { return app.Run([]string{"mcp", "status"}) }); err != nil || !strings.Contains(status, "off but installed; run: agenthail mcp install") {
+	if status, err := captureStdout(t, func() error { return app.Run([]string{"mcp", "status"}) }); err != nil || !strings.Contains(status, "off but installed; run: agenthail mcp uninstall") {
 		t.Fatalf("status = %q, %v", status, err)
 	}
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"daemon", "install"}) }); err != nil {
@@ -61,11 +61,11 @@ func TestARootWhoseConfigTurnsTheMCPServerOffLosesItOnInstallAndSaysSo(t *testin
 	if status, err := captureStdout(t, func() error { return app.Run([]string{"mcp", "status"}) }); err != nil || !strings.Contains(status, ": agenthail MCP server off\n") {
 		t.Fatalf("status = %q, %v", status, err)
 	}
-	if _, err := captureStdout(t, func() error { return app.Run([]string{"mcp", "install"}) }); err != nil {
-		t.Fatal(err)
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"mcp", "install"}) }); err == nil {
+		t.Fatal("mcp install from a binary that is not installed succeeded")
 	}
-	if data, _ := os.ReadFile(config); string(data) != `{"mcpServers":{}}` {
-		t.Fatalf("mcp install added the server to a root that turns it off:\n%s", data)
+	if off, err := surface.ClaudeRootMCPOff(home, root); err != nil || !off {
+		t.Fatalf("an mcp install that could not install cleared the opt-out: off=%v, %v", off, err)
 	}
 }
 
@@ -93,7 +93,7 @@ func TestCodexMCPOffTakesTheRelayOutOfCodexsConfigOnInstallAndSaysSo(t *testing.
 		t.Fatal(err)
 	}
 	app := &App{daemonService: &fakeService{}}
-	if status, err := captureStdout(t, func() error { return app.Run([]string{"mcp", "status"}) }); err != nil || !strings.Contains(status, "agenthail_relay MCP server off but installed; run: agenthail mcp install") {
+	if status, err := captureStdout(t, func() error { return app.Run([]string{"mcp", "status"}) }); err != nil || !strings.Contains(status, "agenthail_relay MCP server off but installed; run: agenthail mcp uninstall") {
 		t.Fatalf("status = %q, %v", status, err)
 	}
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"daemon", "install"}) }); err != nil {
