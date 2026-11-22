@@ -99,3 +99,35 @@ func waitGone(pid int) error {
 	}
 	return fmt.Errorf("the turn's process %d is still running", pid)
 }
+
+func TestResetEndsALeftoverTurnAndStartsAStoppedHost(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+	if err := h.start(ctx, "127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(h.shutdown)
+	handler := h.controlHandler(ctx)
+	host := h.hosts[0]
+
+	control(t, handler, "/hosts/0/turn/start", `{"text":"Soak turn"}`)
+	control(t, handler, "/hosts/0/turn/finish", `{"text":"Done."}`)
+	pid, record := host.turn.process.Process.Pid, host.turn.record
+	if stopped := post(handler, "/hosts/0/stop", ""); stopped.Code != http.StatusOK || host.running() {
+		t.Fatalf("stop answered %d, running=%v", stopped.Code, host.running())
+	}
+
+	if reset := post(handler, "/reset", ""); reset.Code != http.StatusOK {
+		t.Fatalf("reset answered %d: %s", reset.Code, reset.Body)
+	}
+	if !host.running() {
+		t.Fatal("reset left the stopped host down")
+	}
+	if _, err := os.Stat(record); !os.IsNotExist(err) {
+		t.Fatalf("the leftover turn's session record outlived the reset: %v", err)
+	}
+	if err := waitGone(pid); err != nil {
+		t.Fatal(err)
+	}
+	control(t, handler, "/hosts/0/turn/start", `{"text":"Outage turn"}`)
+}

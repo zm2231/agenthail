@@ -81,6 +81,7 @@ The test command gets the control address in `AGENTHAIL_LIVE_CONTROL`. It also g
 | `GET /hosts/{i}/turn/ask` | `{"session", "answered", "decision", "error"}`: whether the open turn's prompt was answered, the decision the hook got, or why the host refused it |
 | `POST /hosts/{i}/stop` | stops host `i`'s daemon by the process ID the harness recorded |
 | `POST /hosts/{i}/start` | starts it again on the same port and waits until it answers |
+| `POST /reset` | ends every host's turn and starts every stopped host, so each test starts from the same state whatever the test before it left. `LiveControl` calls it when a test creates one |
 
 Once the test command exits, the harness refuses new commands and closes the control port, so a later command fails. Commands already running finish before it stops the hosts. It then stops each open turn's process by the process ID it recorded and removes its socket and session record.
 

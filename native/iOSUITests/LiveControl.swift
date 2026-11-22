@@ -7,6 +7,8 @@ struct LiveControl {
     init() throws {
         let value = try XCTUnwrap(ProcessInfo.processInfo.environment["AGENTHAIL_LIVE_CONTROL"], "run under cmd/ios-live-harness, which sets AGENTHAIL_LIVE_CONTROL")
         base = try XCTUnwrap(URL(string: value))
+        // One harness serves every test, so each starts with both hosts up and no turn open, whatever the last one left.
+        _ = try post("reset")
     }
 
     func pairingLink(host: Int) throws -> String {
