@@ -2,15 +2,22 @@ import SwiftUI
 
 struct AgentAssignmentsSettings: View {
     var model: AgenthailModel
+
+    var body: some View {
+        AgentAssignmentsPage(store: model.agentRoles, sessions: model.snapshot?.sessions ?? []).agentRolesLoading(model)
+    }
+}
+
+struct AgentAssignmentsPage: View {
+    var store: AgentRolesStore
+    let sessions: [SessionState]
     @State private var kind = AgentAssignmentKind.session
     @State private var session = ""
     @State private var typed = ""
     @State private var role = ""
 
-    private var store: AgentRolesStore { model.agentRoles }
-
-    private var sessions: [SessionState] {
-        (model.snapshot?.sessions ?? []).filter { $0.archived != true }.sorted { label($0).localizedCaseInsensitiveCompare(label($1)) == .orderedAscending }
+    private var choices: [SessionState] {
+        sessions.filter { $0.archived != true }.sorted { label($0).localizedCaseInsensitiveCompare(label($1)) == .orderedAscending }
     }
 
     private var target: String {
@@ -41,7 +48,7 @@ struct AgentAssignmentsSettings: View {
                         if kind == .session {
                             Picker("Session", selection: $session) {
                                 Text("Choose a session").tag("")
-                                ForEach(sessions) { Text(label($0)).tag($0.id) }
+                                ForEach(choices) { Text(label($0)).tag($0.id) }
                             }
                             .accessibilityIdentifier("agent-assign-session")
                         }
@@ -76,7 +83,6 @@ struct AgentAssignmentsSettings: View {
             }
             .formStyle(.grouped)
         }
-        .agentRolesLoading(model)
         .onChange(of: kind) { typed = "" }
     }
 
@@ -100,7 +106,7 @@ struct AgentAssignmentsSettings: View {
     }
 
     private func sessionName(_ id: String) -> String? {
-        model.snapshot?.sessions.first { $0.id == id }.map(label)
+        sessions.first { $0.id == id }.map(label)
     }
 }
 

@@ -2,11 +2,15 @@ import XCTest
 
 @MainActor
 final class AgentRolesUITests: XCTestCase {
-    private func launch(_ theme: String) -> XCUIApplication {
+    private func launch(_ theme: String, settings: Bool = true) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-app", "--preview-roles", "--preview-theme", theme]
+        app.launchArguments = ["--preview-session"] + (settings ? ["--preview-app"] : []) + ["--preview-roles", "--preview-theme", ProcessInfo.processInfo.environment["AGENTHAIL_UI_THEME"] ?? theme]
         app.launch()
+        guard settings else { return app }
         app.tab("Settings").tapWhenReady()
+        let section = app.buttons["agent-roles"]
+        for _ in 0..<6 where !section.isHittable { app.swipeUp() }
+        shoot(app, "settings agents section")
         return app
     }
 
@@ -59,5 +63,15 @@ final class AgentRolesUITests: XCTestCase {
         app.buttons["agent-assign"].tapWhenReady()
         XCTAssertTrue(app.descendants(matching: .any)["agent-assignment-release-bot"].waitForExistence(timeout: 5), "the new assignment is listed")
         shoot(app, "assignment added")
+    }
+
+    func testSessionDetailsNameTheRoleItActsUnder() {
+        let app = launch("dark", settings: false)
+        app.buttons["Session menu"].tapWhenReady()
+        app.buttons["Session details"].tapWhenReady()
+        let role = app.descendants(matching: .any)["session-role"]
+        XCTAssertTrue(role.waitForExistence(timeout: 5), "session details show the role")
+        XCTAssertTrue(role.label.contains("worker (replaced by reviewer)") || (role.value as? String)?.contains("worker (replaced by reviewer)") == true || app.staticTexts["worker (replaced by reviewer)"].exists, "the role reads as its label: \(role.label)")
+        shoot(app, "session role")
     }
 }

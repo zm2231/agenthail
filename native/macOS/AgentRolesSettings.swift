@@ -2,10 +2,16 @@ import SwiftUI
 
 struct AgentRolesSettings: View {
     var model: AgenthailModel
-    @State private var selected: String?
-    @State private var creating = false
 
-    private var store: AgentRolesStore { model.agentRoles }
+    var body: some View {
+        AgentRolesPage(store: model.agentRoles).agentRolesLoading(model)
+    }
+}
+
+struct AgentRolesPage: View {
+    var store: AgentRolesStore
+    @State var selected: String?
+    @State private var creating = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,7 +42,6 @@ struct AgentRolesSettings: View {
                 Spacer()
             }
         }
-        .agentRolesLoading(model)
         .onChange(of: store.view?.roles.map(\.name)) { _, names in
             if let names, selected == nil || !names.contains(selected ?? "") { selected = names.first }
         }

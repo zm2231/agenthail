@@ -63,6 +63,7 @@ struct LocalSocketHTTP: Sendable {
         let connection = NWConnection(to: .unix(path: path), using: .tcp)
         let queue = DispatchQueue(label: "agenthail.local-socket")
         let once = Once()
+        let connected = Once()
         let timeout = timeout
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
@@ -75,12 +76,13 @@ struct LocalSocketHTTP: Sendable {
                 connection.stateUpdateHandler = { state in
                     switch state {
                     case .ready:
+                        _ = connected.claim()
                         connection.send(content: request, completion: .contentProcessed { error in
                             if let error { finish(.failure(LocalSocketError.broken(error.localizedDescription))) }
                         })
                         Self.receive(connection, Data(), finish)
                     case .waiting(let error), .failed(let error):
-                        finish(.failure(Self.connectFailure(error)))
+                        if connected.claim() { finish(.failure(Self.connectFailure(error))) }
                     case .cancelled:
                         finish(.failure(CancellationError()))
                     default:

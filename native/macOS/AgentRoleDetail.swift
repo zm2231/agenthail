@@ -69,14 +69,22 @@ struct AgentRoleDetail: View {
     }
 
     private var footer: some View {
-        HStack(spacing: DesktopSpace.s) {
+        VStack(alignment: .leading, spacing: DesktopSpace.s) {
             if let error = store.saveError {
-                Text(error)
+                Label(error, systemImage: "exclamationmark.triangle")
                     .foregroundStyle(DesktopPalette.failed)
                     .textSelection(.enabled)
-                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("agent-role-error")
             }
+            buttons
+        }
+        .font(.system(size: DesktopType.secondary))
+        .padding(DesktopSpace.m)
+    }
+
+    private var buttons: some View {
+        HStack(spacing: DesktopSpace.s) {
             Spacer()
             Button("New from This Role…", action: newFromThis).disabled(locked)
             if role.builtIn {
@@ -90,8 +98,6 @@ struct AgentRoleDetail: View {
                 .disabled(locked || !draft.changed)
                 .accessibilityIdentifier("agent-role-save")
         }
-        .font(.system(size: DesktopType.secondary))
-        .padding(DesktopSpace.m)
     }
 
     private func save() async {
