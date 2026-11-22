@@ -14,7 +14,7 @@ import (
 )
 
 type mcpLedgerInput struct {
-	View    string `json:"view,omitempty" jsonschema:"board (capture, sync, counts, goals and the newest provisional words; the default), goals, asks, decisions, questions, work, ready (the next work, ranked), backlog (parked work, ready first), triage (unowned work idle 14 days), item (one work item or ask with its context, by id), or words (one captured message with its context, by utterance id)"`
+	View    string `json:"view,omitempty" jsonschema:"board (capture, sync, counts, goals and the newest provisional words; the default), goals, asks, decisions, questions, work, ready (the next work, ranked), backlog (parked work, ready first), triage (unowned work idle 14 days), item (one work item or ask with its context, by id), status (your work and what to take next, or the session id names), or words (one captured message with its context, by utterance id)"`
 	ID      string `json:"id,omitempty" jsonschema:"the work item, work action or ask id for item; the utterance id for words"`
 	Context int    `json:"context,omitempty" jsonschema:"words: also this many turns before and after it, 0 to 5, read on the capturing host"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"entries per page, 1 to 100 (ready: 1 to 50); default 25"`
@@ -34,6 +34,9 @@ func (d *Daemon) mcpLedgerRead(_ context.Context, caller *mcpCaller, input mcpLe
 	}
 	if input.View == "words" {
 		return d.mcpLedgerWords(key, input)
+	}
+	if input.View == "status" && input.ID == "" {
+		input.ID = caller.session.ID
 	}
 	result, err := d.ledgerRead(key, ledger.ReadRequest{View: input.View, ID: input.ID, Limit: input.Limit, Cursor: input.Cursor, Budget: mcpPageBudget})
 	var refusal *ledger.Refusal

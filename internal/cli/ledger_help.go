@@ -59,6 +59,8 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
   ledger link <item_id> <clause_id>
                                  Hang found work off a clause of the person's
   ledger ready | ledger next     Open items whose dependencies are settled, most urgent first
+  ledger status | ledger current [<session|@alias>] [--json]
+                                 What a session holds, was sent back, handed in, could review and could take next; yours by default
   ledger critical-path           Longest chain of unfinished items
 
  The person's intent:

@@ -1,0 +1,62 @@
+package ledger_test
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/zm2231/agenthail/internal/ledger"
+)
+
+func statusIDs(rows []ledger.StatusRow) string {
+	ids := make([]string, len(rows))
+	for i, row := range rows {
+		ids[i] = row.ID
+	}
+	return strings.Join(ids, ",")
+}
+
+func TestASessionsStatusSortsItsWorkAndNamesARejection(t *testing.T) {
+	s := newStore(t)
+	searchAsk(t, s)
+	items(t, s, "schema", "index", "endpoint", "docs", "theirs", "spare")
+	for _, id := range []string{"widget-W1", "widget-W2", "widget-W3", "widget-W4"} {
+		work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: id})
+	}
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkLog, ItemID: "widget-W1", Text: "chose sqlite", LogType: "decision"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkBlock, ItemID: "widget-W2", Reason: "waiting on the schema review"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkSubmit, ItemID: "widget-W3"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkReject, ItemID: "widget-W3", SessionID: "reviewer", Reason: "no tests for the empty query"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkSubmit, ItemID: "widget-W4"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W5", SessionID: "other"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkSubmit, ItemID: "widget-W5", SessionID: "other"})
+
+	status := board(t, s).SessionStatus("s1")
+	for name, got := range map[string]string{
+		"holding": statusIDs(status.Holding), "rejected": statusIDs(status.Rejected), "waiting": statusIDs(status.Waiting),
+		"inReview": statusIDs(status.InReview), "reviewable": statusIDs(status.Reviewable), "ready": statusIDs(status.Ready),
+	} {
+		want := map[string]string{"holding": "widget-W1", "rejected": "widget-W3", "waiting": "widget-W2", "inReview": "widget-W4", "reviewable": "widget-W5", "ready": "widget-W6"}[name]
+		if got != want {
+			t.Fatalf("%s = %q, want %q", name, got, want)
+		}
+	}
+	if r := status.Rejected[0]; r.RejectedBy != "reviewer" || r.Rejection != "no tests for the empty query" {
+		t.Fatalf("rejected row = %+v", r)
+	}
+	if status.Holding[0].LastLog == nil || status.Holding[0].LastLog.Text != "chose sqlite" || status.Waiting[0].Reason != "waiting on the schema review" {
+		t.Fatalf("holding %+v waiting %+v", status.Holding[0], status.Waiting[0])
+	}
+
+	held := board(t, s).HeldBy("s1")
+	note := ledger.HeldNote(held, false)
+	if !strings.Contains(note, "You hold widget-W3 (endpoint). reviewer sent it back from review: no tests for the empty query. Fix that and submit it again.") {
+		t.Fatalf("the start note does not carry the rejection:\n%s", note)
+	}
+	if strings.Count(note, "sent it back") != 1 {
+		t.Fatalf("only the rejected item carries a rejection:\n%s", note)
+	}
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkSubmit, ItemID: "widget-W3"})
+	if status := board(t, s).SessionStatus("s1"); len(status.Rejected) != 0 || statusIDs(status.InReview) != "widget-W3,widget-W4" {
+		t.Fatalf("after resubmitting: rejected %v, in review %v", statusIDs(status.Rejected), statusIDs(status.InReview))
+	}
+}

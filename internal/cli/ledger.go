@@ -49,6 +49,8 @@ var ledgerCommands = map[string]func(a *App, c ledgerCall) error{
 	"question":     func(a *App, c ledgerCall) error { return a.ledgerQuestion(c.args) },
 	"questions":    func(a *App, c ledgerCall) error { return a.ledgerQuestions(c.store, c.args) },
 	"work":         func(a *App, c ledgerCall) error { return a.ledgerWork(c.store, c.args) },
+	"status":       func(a *App, c ledgerCall) error { return a.ledgerStatus(c.store, c.args) },
+	"current":      func(a *App, c ledgerCall) error { return a.ledgerStatus(c.store, c.args) },
 	"backlog":      func(a *App, c ledgerCall) error { return a.ledgerBacklog(c.args) },
 	"import":       func(a *App, c ledgerCall) error { return a.ledgerImport(c.store, c.args) },
 	"owner":        func(a *App, c ledgerCall) error { return a.ledgerOwner(c.store, c.args) },
@@ -97,7 +99,7 @@ func (a *App) cmdLedger(args []string) error {
 	return run(a, ledgerCall{store: store, args: args, positional: positional})
 }
 
-var ledgerReads = map[string]bool{"asks": true, "ask": true, "show": true, "words": true, "goals": true, "questions": true, "digest": true,
+var ledgerReads = map[string]bool{"asks": true, "ask": true, "show": true, "words": true, "status": true, "current": true, "goals": true, "questions": true, "digest": true,
 	"list": true, "ready": true, "next": true, "critical-path": true, "search": true, "backlog": true, "tree": true}
 
 func ledgerRead(positional []string) bool {
