@@ -826,14 +826,22 @@ struct TranscriptFollowTest {
         waitUntil { !inView().isEmpty }
         guard let anchor = inView().first else { return expect(false, "a row is in view above the end, \(geometry(scroll))") }
         let placed = place(anchor)
+        let contentTop = readerTops.top(anchor) ?? 0
         var worst: CGFloat = 0
+        var shifted: CGFloat = 0
+        guard let anchorIndex = feed.rows.firstIndex(where: { $0.id == anchor }),
+              let above = feed.rows[..<anchorIndex].lastIndex(where: { readerTops.top($0.id) != nil })
+        else { return expect(false, "a laid-out row sits above the reader's row, \(geometry(scroll))") }
         for index in 0..<40 {
             feed.rows += rows("Rs\(index)-", 1)
+            if index % 8 == 0 { feed.rows[above] = Row(id: feed.rows[above].id, lines: feed.rows[above].lines + 1) }
             spin(0.05)
             worst = max(worst, abs(place(anchor) - placed))
+            shifted = max(shifted, abs((readerTops.top(anchor) ?? contentTop) - contentTop))
         }
         spin(0.4)
-        expect(abs(place(anchor) - placed) < 1 && worst < 2, "the reader's row stays put while the stream grows below it, \(anchor) at \(placed) moved to \(place(anchor)), at most \(worst)")
+        expect(shifted >= 10, "a row above the reader that grows while the stream runs moves the reader's row in the content, so there is something to hold, moved \(shifted)")
+        expect(abs(place(anchor) - placed) < 1 && worst < 2, "the reader's row stays put while the stream grows below it and a row above it grows, \(anchor) at \(placed) moved to \(place(anchor)), at most \(worst)")
         expect(!feed.following, "a reader above the end keeps not following while rows stream")
 
         waitUntil { inView().count >= 2 }

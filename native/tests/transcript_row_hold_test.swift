@@ -142,6 +142,27 @@ struct TranscriptRowHoldTest {
         expect(floor == .scroll(-44), "a correction past the top of the transcript stops at it, step \(floor)")
         expect(clampedStep(-44) == .none && clampedStep(-44) == .none, "a clamped correction that lands ends")
 
+        let swapping = TranscriptRowAnchor()
+        var replacedTops: [String: CGFloat] = ["r1": 1000, "r2": 1400]
+        let replacedStep = { (offset: CGFloat) in swapping.pass(offset: offset, range: -44...99999, top: { replacedTops[$0] }, leading: { ("r2", replacedTops["r2"] ?? 0, (replacedTops["r2"] ?? 0) - offset) }) }
+        _ = swapping.pass(offset: 900, range: -44...99999, top: { replacedTops[$0] }, leading: { ("r1", 1000, 100) })
+        replacedTops["r1"] = 1020
+        expect(replacedStep(900) == .scroll(920), "a move queues a correction")
+        replacedTops["r1"] = nil
+        let swapped = replacedStep(900)
+        expect(swapped == .cancel && swapping.id == "r2", "a row that leaves before its correction runs drops the correction as another row is picked, step \(swapped)")
+
+        let shrinking = TranscriptRowAnchor()
+        var shrinkingTop: CGFloat = 1200
+        let shrinkingStep = { (offset: CGFloat, upper: CGFloat) in shrinking.pass(offset: offset, range: -44...upper, top: { _ in shrinkingTop }, leading: { ("r1", shrinkingTop, shrinkingTop - offset) }) }
+        _ = shrinkingStep(1000, 5000)
+        shrinkingTop = 1300
+        expect(shrinkingStep(1000, 5000) == .scroll(1100), "a move queues a correction")
+        expect(shrinkingStep(1050, 1050) == .none, "a correction the shrunk range stops short lands where it stopped")
+        shrinkingTop = 1330
+        let rebased = shrinkingStep(1050, 2000)
+        expect(rebased == .scroll(1080), "the next move is measured from where that correction landed, step \(rebased)")
+
         let tall = TranscriptRowAnchor()
         var tallTop: CGFloat = 32000
         let tallStep = { tall.pass(offset: 34537, range: -44...99999, top: { _ in tallTop }, leading: { ("r9", tallTop, tallTop - 34537) }) }

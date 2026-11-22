@@ -189,15 +189,16 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
         }
     }
 
-    // A correction whose move was undone, or whose reader has since jumped to the end, is dropped before it runs.
+    // A correction whose move was undone, whose row was replaced, or whose reader has since jumped to the end, is dropped before it runs.
     @discardableResult
     private func settleAnchor(_ step: TranscriptRowAnchor.Step, in geometry: ScrollGeometry) -> Bool {
         switch step {
         case .none: return false
         case .cancel: layout.dropRestore(); return false
         case .scroll(let target):
+            let id = layout.anchor.id
             settleHold { position in
-                guard !following, layout.anchor.id != nil else { return }
+                guard !following, layout.anchor.id == id else { return }
                 position.scrollTo(y: Self.scrollY(target, in: geometry))
             }
             return true

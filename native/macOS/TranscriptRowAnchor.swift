@@ -22,17 +22,21 @@ final class TranscriptRowAnchor {
 
     /// `leading` is the row in view with its top and where the reader saw it; mid-resize, as they saw it before the resize.
     func pass(offset: CGFloat, range: ClosedRange<CGFloat>, top: (String) -> CGFloat?, leading: () -> (id: String, top: CGFloat, screen: CGFloat)?) -> Step {
-        if let pending, abs(offset - pending) <= 1 { self.pending = nil }
-        if self.row.flatMap({ top($0.id) }) == nil { pick(leading) }
-        guard let row, let now = top(row.id) else { return .none }
+        // A correction clamped by a range that shrank lands short of its target, and the reader is where it landed.
+        if let pending, abs(offset - min(max(pending, range.lowerBound), range.upperBound)) <= 1 {
+            self.pending = nil
+            if let row { self.row?.screen = row.top - offset }
+        }
+        let dropped = row.flatMap({ top($0.id) }) == nil && pick(leading)
+        guard let row, let now = top(row.id) else { return dropped ? .cancel : .none }
         guard abs(now - row.top) >= 1 else {
             if pending == nil, abs(now - offset - row.screen) >= 1 { pick(leading) }
-            return .none
+            return dropped ? .cancel : .none
         }
         self.row?.top = now
         let target = min(max(now - row.screen, range.lowerBound), range.upperBound)
         guard abs(target - offset) >= 1 else {
-            guard pending != nil else { return .none }
+            guard pending != nil || dropped else { return .none }
             pending = nil
             return .cancel
         }
@@ -40,8 +44,10 @@ final class TranscriptRowAnchor {
         return .scroll(target)
     }
 
-    private func pick(_ leading: () -> (id: String, top: CGFloat, screen: CGFloat)?) {
-        pending = nil
+    @discardableResult
+    private func pick(_ leading: () -> (id: String, top: CGFloat, screen: CGFloat)?) -> Bool {
+        defer { pending = nil }
         row = leading()
+        return pending != nil
     }
 }
