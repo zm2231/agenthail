@@ -210,7 +210,7 @@ func (m *remoteMCP) listEvents(ctx context.Context, _ *mcp.ServerSession, _ *eve
 
 func eventArguments(name string, raw json.RawMessage) (string, error) {
 	if name != eventInboxUnread {
-		return "", invalidEventParams("no event has that name; events/list names %s", eventInboxUnread)
+		return "", invalidEventParams("no event is named %q; events/list names %s", name, eventInboxUnread)
 	}
 	if len(raw) == 0 || string(raw) == "null" {
 		return "{}", nil
@@ -285,7 +285,7 @@ func (m *remoteMCP) subscribeEvent(ctx context.Context, _ *mcp.ServerSession, pa
 		return nil, err
 	}
 	result, outcome := m.subscribeOutcome(ctx, principal, params)
-	outcome.event, outcome.url = params.Name, params.Delivery.URL
+	outcome.named, outcome.event, outcome.url = true, params.Name, params.Delivery.URL
 	m.recordEventCall(principal, "events/subscribe", outcome)
 	if outcome.err != nil {
 		return nil, outcome.err
@@ -340,7 +340,7 @@ func (m *remoteMCP) unsubscribeEvent(ctx context.Context, _ *mcp.ServerSession, 
 		return nil, err
 	}
 	outcome := m.unsubscribeOutcome(principal, params)
-	outcome.event, outcome.url = params.Name, params.Delivery.URL
+	outcome.named, outcome.event, outcome.url = true, params.Name, params.Delivery.URL
 	m.recordEventCall(principal, "events/unsubscribe", outcome)
 	if outcome.err != nil {
 		return nil, outcome.err

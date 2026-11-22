@@ -18,6 +18,7 @@ import (
 type eventCallOutcome struct {
 	event, url, result string
 	reason             string
+	named              bool
 	err                error
 }
 
@@ -35,7 +36,7 @@ func (p *eventParams) UnmarshalJSON(data []byte) error {
 func decodedEventCall[P any, R mcp.Result](method string, m *remoteMCP, handler func(context.Context, *mcp.ServerSession, *P) (R, error)) func(context.Context, *mcp.ServerSession, *eventParams) (R, error) {
 	return func(ctx context.Context, session *mcp.ServerSession, params *eventParams) (R, error) {
 		decoded := new(P)
-		if len(params.raw) > 0 && string(params.raw) != "null" {
+		if params != nil && len(params.raw) > 0 && string(params.raw) != "null" {
 			decoder := segmentjson.NewDecoder(bytes.NewReader(params.raw))
 			decoder.DontMatchCaseInsensitiveStructFields()
 			if err := decoder.Decode(decoded); err != nil {
@@ -63,9 +64,9 @@ func (m *remoteMCP) eventCall(ctx context.Context, method string) (eventPrincipa
 // recordEventCall writes one mcp-event entry per call, never the secret or the URL's query.
 func (m *remoteMCP) recordEventCall(principal eventPrincipal, method string, outcome eventCallOutcome) {
 	message := method + " by @" + principal.name
-	switch outcome.event {
-	case "":
-	case eventInboxUnread:
+	switch {
+	case !outcome.named:
+	case outcome.event == eventInboxUnread:
 		message += " " + outcome.event
 	default:
 		message += " an unknown event"
@@ -76,6 +77,9 @@ func (m *remoteMCP) recordEventCall(principal eventPrincipal, method string, out
 	result := outcome.result
 	if outcome.err != nil {
 		reason := outcome.reason
+		if reason == "" && outcome.named && outcome.event != eventInboxUnread {
+			reason = "invalid params: no such event"
+		}
 		if reason == "" {
 			reason = eventErrorReason(outcome.err)
 		}

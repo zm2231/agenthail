@@ -628,6 +628,28 @@ func TestEveryEventCallIsRecordedEvenWhenItsParamsAreMalformedAndNoCredentialIsK
 			t.Fatalf("%s with array params left no record:\n%s", method, history)
 		}
 	}
+	missing := map[string]string{"events/list": "=> listed inbox.unread", "events/subscribe": "an unknown event => refused: invalid params: no such event", "events/unsubscribe": "an unknown event => refused: invalid params: no such event"}
+	for method, line := range missing {
+		for _, body := range []string{"", "null"} {
+			before := strings.Count(f.eventHistory(t), method+" by @scout "+line)
+			var params *rawEventParams
+			if body != "" {
+				params = &rawEventParams{body: body}
+			}
+			var err error
+			if method == "events/list" {
+				_, err = mcp.CallCustomMethod[*rawEventParams, *eventsListResult](t.Context(), session, method, params)
+			} else {
+				_, err = mcp.CallCustomMethod[*rawEventParams, *eventsUnsubscribeResult](t.Context(), session, method, params)
+			}
+			if (method == "events/list") != (err == nil) {
+				t.Fatalf("%s with params %q: err=%v", method, body, err)
+			}
+			if after := strings.Count(f.eventHistory(t), method+" by @scout "+line); after != before+1 {
+				t.Fatalf("%s with params %q: %d new records:\n%s", method, body, after-before, f.eventHistory(t))
+			}
+		}
+	}
 	leaky := []string{w.secret, "https://user:pass@example.com/?token=receiver-credential#frag"}
 	for _, name := range leaky {
 		if _, err := mcp.CallCustomMethod[*eventsSubscribeParams, *eventsSubscribeResult](t.Context(), session, "events/subscribe", &eventsSubscribeParams{Name: name, Delivery: eventDelivery{Mode: "webhook", URL: w.url + "/hook", Secret: w.secret}}); err == nil {
@@ -638,7 +660,7 @@ func TestEveryEventCallIsRecordedEvenWhenItsParamsAreMalformedAndNoCredentialIsK
 		}
 	}
 	history := f.eventHistory(t)
-	if strings.Count(history, "an unknown event to "+w.url+"/hook => refused: invalid params: no event has that name") != 4 {
+	if strings.Count(history, "an unknown event to "+w.url+"/hook => refused: invalid params: no such event") != 4 {
 		t.Fatalf("history:\n%s", history)
 	}
 	for _, kept := range []string{strings.TrimPrefix(w.secret, "whsec_"), "pass@", "receiver-credential", "frag"} {
