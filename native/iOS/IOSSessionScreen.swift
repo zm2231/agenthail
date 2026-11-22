@@ -254,7 +254,7 @@ struct SessionScreen: View {
                 }.transcriptScrimRow()
                 .environment(\.sentFiles, SentFileContext(hostName: model.hostName(forSession: session.id)) { [model, id = session.id] item in try await model.sentFile(item, sessionID: id) })
             }
-            .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? RowAction(owner: session.id) { model.editAndResend($0) } : nil)
+            .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? RowAction(owner: session.id) { model.composerSession.editAndResend($0) } : nil)
             .environment(\.revealRow, RowAction(owner: session.id) {
                 olderPlace.release()
                 position.scrollTo(y: $0.wrappedValue)
@@ -378,7 +378,7 @@ struct SessionScreen: View {
                                 .padding(.horizontal, 14)
                                 .accessibilityIdentifier("session-move-note")
                         }
-                        IOSComposer(model: model, draft: model.draft, store: model.store, session: session, context: ComposerContext(detail), showQueuedRow: showQueuedRow)
+                        IOSComposer(model: model, draft: model.composerSession.draft, store: model.store, session: session, context: ComposerContext(detail), showQueuedRow: showQueuedRow)
                             .equatable()
                             .countsAppearances("composerAppeared")
                     }

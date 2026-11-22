@@ -346,9 +346,9 @@ final class WorkflowParityTests: XCTestCase {
         try await model.takeBack(queued(9, "first"))
         await model.loadSession("computer::old")
         XCTAssertEqual(model.selectedSessionID, "computer::new")
-        XCTAssertEqual(model.composer, "first")
+        XCTAssertEqual(model.composerSession.composer, "first")
         try await model.takeBack(queued(10, "second"))
-        XCTAssertEqual(model.composer, "second\n\nfirst")
+        XCTAssertEqual(model.composerSession.composer, "second\n\nfirst")
         XCTAssertEqual(ParityProtocol.state.actions.compactMap { $0["action"] as? String }, ["queue-cancel", "queue-cancel"])
         XCTAssertEqual(ParityProtocol.state.actions.compactMap { $0["queueId"] as? Int }, [9, 10])
     }
@@ -362,23 +362,23 @@ final class WorkflowParityTests: XCTestCase {
         var detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
         detail.session.id = "computer::old"
         model.selectedDetail = detail
-        model.composer = "half written"
-        model.toggleStash()
-        XCTAssertEqual(model.composer, "")
-        XCTAssertEqual(model.stashes["computer::old"]?.text, "half written")
-        model.composer = "a quick question"
-        model.toggleStash()
-        XCTAssertEqual(model.composer, "half written")
-        XCTAssertEqual(model.stashes["computer::old"]?.text, "a quick question")
-        model.send(to: try XCTUnwrap(model.snapshot?.sessions.first))
-        XCTAssertEqual(model.composer, "a quick question")
-        XCTAssertNil(model.stashes["computer::old"])
+        model.composerSession.composer = "half written"
+        model.composerSession.toggleStash()
+        XCTAssertEqual(model.composerSession.composer, "")
+        XCTAssertEqual(model.composerSession.stashes["computer::old"]?.text, "half written")
+        model.composerSession.composer = "a quick question"
+        model.composerSession.toggleStash()
+        XCTAssertEqual(model.composerSession.composer, "half written")
+        XCTAssertEqual(model.composerSession.stashes["computer::old"]?.text, "a quick question")
+        model.composerSession.send(to: try XCTUnwrap(model.snapshot?.sessions.first))
+        XCTAssertEqual(model.composerSession.composer, "a quick question")
+        XCTAssertNil(model.composerSession.stashes["computer::old"])
         for _ in 0 ..< 200 where !ParityProtocol.state.actions.contains(where: { $0["action"] as? String == "send" }) { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(ParityProtocol.state.actions.last?["message"] as? String, "half written")
-        model.toggleStash()
+        model.composerSession.toggleStash()
         model.host(try XCTUnwrap(model.connection("computer")), rekeyed: ["old": "new"])
-        XCTAssertNil(model.stashes["computer::old"])
-        XCTAssertEqual(model.stashes["computer::new"]?.text, "a quick question")
+        XCTAssertNil(model.composerSession.stashes["computer::old"])
+        XCTAssertEqual(model.composerSession.stashes["computer::new"]?.text, "a quick question")
     }
 
     @MainActor
@@ -400,7 +400,7 @@ final class WorkflowParityTests: XCTestCase {
         XCTAssertEqual((fork["fork"] as? [String: Any])?["beforeTurnId"] as? String, "t2")
         XCTAssertEqual(model.requestedSessionID, "computer::forked")
         await model.loadSession("computer::forked")
-        XCTAssertEqual(model.composer, "second")
+        XCTAssertEqual(model.composerSession.composer, "second")
     }
 
     @MainActor

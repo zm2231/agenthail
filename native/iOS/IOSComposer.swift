@@ -31,11 +31,11 @@ struct IOSComposer: View, @MainActor Equatable {
         BodyRuns.changed("in.composer.context", id, context)
         BodyRuns.changed("in.composer.queuedRow", id, showQueuedRow)
         BodyRuns.observe("obs.composer.receipt", id) {
-            _ = model.deliveryStatus[session.id] != nil && model.failedSends[session.id] == nil && model.pendingSends[session.id]?.contains(where: \.unconfirmed) != true
+            _ = model.deliveryStatus[session.id] != nil && model.composerSession.failedSends[session.id] == nil && model.composerSession.pendingSends[session.id]?.contains(where: \.unconfirmed) != true
         }
-        BodyRuns.observe("obs.composer.attachments", id) { _ = model.composerAttachments.isEmpty }
-        BodyRuns.observe("obs.composer.attachmentProblem", id) { _ = model.attachmentProblem }
-        BodyRuns.observe("obs.composer.stash", id) { _ = model.stashes[session.id] }
+        BodyRuns.observe("obs.composer.attachments", id) { _ = model.composerSession.composerAttachments.isEmpty }
+        BodyRuns.observe("obs.composer.attachmentProblem", id) { _ = model.composerSession.attachmentProblem }
+        BodyRuns.observe("obs.composer.stash", id) { _ = model.composerSession.stashes[session.id] }
         BodyRuns.observe("obs.composer.steering", id) { _ = steering }
         BodyRuns.observe("obs.composer.sending", id) { _ = sending }
         BodyRuns.observe("obs.composer.canSend", id) { _ = canSend }
@@ -45,24 +45,24 @@ struct IOSComposer: View, @MainActor Equatable {
 #endif
 
     private var steering: Bool { context.busy && !context.waiting && context.capabilities.steer && model.busyDelivery(for: context.sessionID) == "steer" }
-    private var sending: Bool { model.pendingSends[session.id]?.first.map { !$0.unconfirmed } == true && draft.text.isEmpty }
+    private var sending: Bool { model.composerSession.pendingSends[session.id]?.first.map { !$0.unconfirmed } == true && draft.text.isEmpty }
     private var stashActionTitle: String {
-        let empty = ComposerAttachments.isEmpty(text: draft.text, attachments: model.composerAttachments)
-        if !empty { return model.stashes[session.id] == nil ? "Stash draft" : "Swap with stashed draft" }
+        let empty = ComposerAttachments.isEmpty(text: draft.text, attachments: model.composerSession.composerAttachments)
+        if !empty { return model.composerSession.stashes[session.id] == nil ? "Stash draft" : "Swap with stashed draft" }
         return "Bring back stashed draft"
     }
 
     @ViewBuilder private var composerMenu: some View {
         Button { showingPrompts = true } label: { Label("Recent Prompts", systemImage: "clock.arrow.circlepath") }
-        let empty = ComposerAttachments.isEmpty(text: draft.text, attachments: model.composerAttachments)
-        if !empty || model.stashes[session.id] != nil {
-            Button { model.toggleStash() } label: { Label(stashActionTitle, systemImage: "tray.and.arrow.down") }
+        let empty = ComposerAttachments.isEmpty(text: draft.text, attachments: model.composerSession.composerAttachments)
+        if !empty || model.composerSession.stashes[session.id] != nil {
+            Button { model.composerSession.toggleStash() } label: { Label(stashActionTitle, systemImage: "tray.and.arrow.down") }
         }
     }
 
     private var canSend: Bool {
         !sending && !model.pendingControls.contains(session.id)
-            && !ComposerAttachments.isEmpty(text: draft.text, attachments: model.composerAttachments)
+            && !ComposerAttachments.isEmpty(text: draft.text, attachments: model.composerSession.composerAttachments)
             && context.capabilities.send
     }
 
@@ -76,7 +76,7 @@ struct IOSComposer: View, @MainActor Equatable {
             label: steering ? "Instruction for the current turn" : "Message to this agent",
             lines: lines,
             windowShare: windowShare,
-            pasteAttachments: attachShown && !sending ? { model.paste($0) } : nil,
+            pasteAttachments: attachShown && !sending ? { model.composerSession.paste($0) } : nil,
             editor: editor,
             onCaret: { caret in updateCompletion { $0.caret = caret } },
             draftID: session.id
@@ -110,7 +110,7 @@ struct IOSComposer: View, @MainActor Equatable {
             .accessibilityLabel("Stop current turn")
             .disabled(model.pendingControls.contains(session.id))
         }
-        Button { model.send(to: session) } label: {
+        Button { model.composerSession.send(to: session) } label: {
             if sending { ProgressView().frame(width: 44, height: 44) }
             else { Image(systemName: "arrow.up").font(.system(size: 18, weight: .semibold)).frame(width: 44, height: 44) }
         }
@@ -122,7 +122,7 @@ struct IOSComposer: View, @MainActor Equatable {
         .disabled(!canSend)
         .contextMenu { composerMenu }
         .accessibilityAction(named: "Recent prompts") { showingPrompts = true }
-        .accessibilityAction(named: stashActionTitle) { model.toggleStash() }
+        .accessibilityAction(named: stashActionTitle) { model.composerSession.toggleStash() }
     }
 
     var body: some View {
@@ -132,7 +132,7 @@ struct IOSComposer: View, @MainActor Equatable {
 #endif
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 6) {
-                if let status = model.deliveryStatus[session.id], model.failedSends[session.id] == nil, model.pendingSends[session.id]?.contains(where: \.unconfirmed) != true {
+                if let status = model.deliveryStatus[session.id], model.composerSession.failedSends[session.id] == nil, model.composerSession.pendingSends[session.id]?.contains(where: \.unconfirmed) != true {
                     ComposerReceipt(status: status, showQueuedRow: showQueuedRow.map { action in { action(()) } })
                 }
                 ComposerSendStatus(model: model, session: session)
@@ -141,19 +141,19 @@ struct IOSComposer: View, @MainActor Equatable {
                         .font(.footnote).foregroundStyle(PhonePalette.muted).padding(.horizontal, 8)
                         .accessibilityIdentifier("composer-host-down")
                 }
-                if !model.composerAttachments.isEmpty {
+                if !model.composerSession.composerAttachments.isEmpty {
                     ComposerAttachmentStrip(model: model)
                 }
-                if let problem = model.attachmentProblem {
+                if let problem = model.composerSession.attachmentProblem {
                     Text(problem).font(.footnote).foregroundStyle(PhonePalette.failed).padding(.horizontal, 8)
                         .accessibilityIdentifier("attachment-problem")
                 }
                 if !session.sharedHolders.isEmpty {
                     IOSHolderPicker(model: model, session: session)
                 }
-                if model.stashes[session.id] != nil {
-                    let empty = ComposerAttachments.isEmpty(text: draft.text, attachments: model.composerAttachments)
-                    Button { model.toggleStash() } label: {
+                if model.composerSession.stashes[session.id] != nil {
+                    let empty = ComposerAttachments.isEmpty(text: draft.text, attachments: model.composerSession.composerAttachments)
+                    Button { model.composerSession.toggleStash() } label: {
                         Label(empty ? "Bring back stashed draft" : "Draft stashed · returns after you send", systemImage: "tray.and.arrow.down")
                             .font(.footnote).foregroundStyle(PhonePalette.muted)
                             .padding(.horizontal, 8).frame(minHeight: 44, alignment: .leading)

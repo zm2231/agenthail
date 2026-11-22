@@ -6,22 +6,22 @@ struct ComposerSendStatus: View {
     let session: SessionState
     @State private var confirmingPutBack = false
 
-    private var waiting: PendingSend? { model.pendingSends[session.id]?.first { $0.unconfirmed } }
+    private var waiting: PendingSend? { model.composerSession.pendingSends[session.id]?.first { $0.unconfirmed } }
 
     var body: some View {
-        if let failure = model.failedSends[session.id] {
+        if let failure = model.composerSession.failedSends[session.id] {
             row(failure, color: PhonePalette.failed, identifier: "send-failure") {
-                Button("Retry") { model.send(to: session) }
+                Button("Retry") { model.composerSession.send(to: session) }
                     .accessibilityIdentifier("send-retry")
-                if model.refusedSends[session.id]?.canDelete == true {
-                    Button("Delete", role: .destructive) { model.deleteRefusedSend(in: session.id) }
+                if model.composerSession.refusedSends[session.id]?.canDelete == true {
+                    Button("Delete", role: .destructive) { model.composerSession.deleteRefusedSend(in: session.id) }
                         .accessibilityIdentifier("send-delete")
                 }
             }
         } else if let waiting {
             row(waiting.unconfirmedTitle, detail: waiting.previewLine, color: PhonePalette.muted, identifier: "send-unconfirmed") {
                 if waiting.offersRetry {
-                    Button("Retry") { model.retrySend(waiting) }
+                    Button("Retry") { model.composerSession.retrySend(waiting) }
                         .accessibilityIdentifier("send-unconfirmed-retry")
                 }
                 putBack(waiting)
@@ -33,7 +33,7 @@ struct ComposerSendStatus: View {
         Button("Put back") { confirmingPutBack = true }
             .accessibilityIdentifier("send-put-back")
             .confirmationDialog("It may already have arrived. Put it back in the composer?", isPresented: $confirmingPutBack, titleVisibility: .visible) {
-                Button("Put back") { model.putBack(send) }
+                Button("Put back") { model.composerSession.putBack(send) }
                 Button(send.retryStopped ? "Keep it here" : "Keep retrying", role: .cancel) {}
             }
     }

@@ -148,10 +148,10 @@ final class SessionRecoveryTests: XCTestCase {
     private func sendQueuedInstruction(_ model: AgenthailIOSModel) async throws {
         await model.loadSession("computer::demo")
         _ = await model.refresh()
-        model.composer = "Keep the regression test"
-        model.send(to: model.snapshot!.sessions[0])
-        for _ in 0..<100 where model.sendingSessionIDs.contains("computer::demo") { try await Task.sleep(for: .milliseconds(10)) }
-        XCTAssertFalse(model.sendingSessionIDs.contains("computer::demo"))
+        model.composerSession.composer = "Keep the regression test"
+        model.composerSession.send(to: model.snapshot!.sessions[0])
+        for _ in 0..<100 where model.composerSession.sendingSessionIDs.contains("computer::demo") { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertFalse(model.composerSession.sendingSessionIDs.contains("computer::demo"))
     }
 
     private func makeModel() -> AgenthailIOSModel {

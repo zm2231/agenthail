@@ -27,23 +27,23 @@ final class SessionExperienceTests: XCTestCase {
         SessionExperienceProtocol.state.reset()
         let model = makeModel()
         await model.loadSession("computer::A")
-        model.composer = "Only for A"
+        model.composerSession.composer = "Only for A"
         await model.loadSession("computer::B")
-        XCTAssertEqual(model.composer, "")
-        model.composer = "Only for B"
+        XCTAssertEqual(model.composerSession.composer, "")
+        model.composerSession.composer = "Only for B"
         await model.loadSession("computer::A")
-        XCTAssertEqual(model.composer, "Only for A")
+        XCTAssertEqual(model.composerSession.composer, "Only for A")
         let stale = session(id: "computer::A", busy: true)
-        model.send(to: stale)
-        for _ in 0..<100 where model.sendingSessionIDs.contains("computer::A") { try await Task.sleep(for: .milliseconds(10)) }
+        model.composerSession.send(to: stale)
+        for _ in 0..<100 where model.composerSession.sendingSessionIDs.contains("computer::A") { try await Task.sleep(for: .milliseconds(10)) }
         let calls = SessionExperienceProtocol.state.actions
         XCTAssertEqual(calls.count, 1)
         XCTAssertEqual(calls.first?["action"] as? String, "send")
         XCTAssertEqual(calls.first?["message"] as? String, "Only for A")
         XCTAssertEqual(model.deliveryStatus["computer::A"], "Queued for A; sends when current turn ends.")
         await model.loadSession("computer::B")
-        XCTAssertEqual(model.composer, "Only for B")
-        model.send(to: session(id: "computer::B", busy: false))
+        XCTAssertEqual(model.composerSession.composer, "Only for B")
+        model.composerSession.send(to: session(id: "computer::B", busy: false))
         XCTAssertEqual(SessionExperienceProtocol.state.actions.count, 1, "read-only detail must override writable list row")
     }
 
