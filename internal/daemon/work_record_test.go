@@ -359,8 +359,15 @@ func TestAWorktreeAnotherSessionIsWorkingInIsKeptUntilItStops(t *testing.T) {
 	}
 	settleIdle(t, reg, "visitor")
 	d.sweepWork(context.Background(), time.Now())
+	if work := workOf(t, reg, "started"); work.Cleanup != registry.WorkCleanupKept || work.CleanupReason != registry.WorkKeptOpen {
+		t.Fatalf("an idle session that is not archived still has it open: %+v", work)
+	}
+	if err := reg.ArchiveSession("visitor", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	d.sweepWork(context.Background(), time.Now())
 	if work := workOf(t, reg, "started"); work.Cleanup != registry.WorkCleanupRemoved {
-		t.Fatalf("the worktree was not cleaned once nothing worked in it: %+v", work)
+		t.Fatalf("the worktree was not cleaned once every session in it was archived: %+v", work)
 	}
 }
 

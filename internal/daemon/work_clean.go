@@ -7,6 +7,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/prwatch"
+	"github.com/zm2231/agenthail/internal/github"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/worktree"
@@ -23,8 +25,14 @@ const (
 func (d *Daemon) runWorkCleans(ctx context.Context) {
 	ticker := time.NewTicker(workCleanEvery)
 	defer ticker.Stop()
+	var handMadeSwept time.Time
 	for {
-		d.sweepWork(ctx, time.Now())
+		now := time.Now()
+		d.sweepWork(ctx, now)
+		if now.Sub(handMadeSwept) >= handMadeSweepEvery {
+			d.sweepHandMadeWorktrees(ctx)
+			handMadeSwept = now
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -68,7 +76,7 @@ func (d *Daemon) sweepWork(ctx context.Context, now time.Time) {
 		return
 	}
 	for _, record := range records {
-		if _, err := d.cleanWork(ctx, record.WorktreePath, worktree.Options{}); err != nil {
+		if _, err := d.cleanWork(ctx, record.WorktreePath, worktree.Options{}, true); err != nil {
 			d.log.Printf("clean worktree %s: %s", record.WorktreePath, err)
 		}
 	}
@@ -110,19 +118,27 @@ func (d *Daemon) reconcileCreatingWork(now time.Time) {
 }
 
 // cleanWork removes settled work when nothing in it would be lost, and keeps
-// it with the reason otherwise. Work whose session is mid-turn waits.
-func (d *Daemon) cleanWork(ctx context.Context, worktreePath string, options worktree.Options) (registry.WorkRecord, error) {
+// it with the reason otherwise. Work a session is mid-turn in waits, and
+// automatic cleanup also waits while a session that is not archived has it
+// open; the person's own request does not.
+func (d *Daemon) cleanWork(ctx context.Context, worktreePath string, options worktree.Options, automatic bool) (registry.WorkRecord, error) {
 	d.workClean.Lock()
 	defer d.workClean.Unlock()
 	record, found, err := d.Registry.WorkAt(worktreePath)
 	if err != nil || !found || record.State != registry.WorkSettled || record.Cleanup == registry.WorkCleanupRemoved {
 		return record, err
 	}
-	if d.worktreeInUse(record) {
+	switch d.worktreeUse(record.WorktreePath, record.SessionID) {
+	case worktreeWorking:
 		return d.setWorkCleanup(record, registry.WorkCleanupKept, registry.WorkKeptRunning, nil)
+	case worktreeOpen:
+		if automatic {
+			return d.setWorkCleanup(record, registry.WorkCleanupKept, registry.WorkKeptOpen, nil)
+		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, workCleanTimeout)
 	defer cancel()
+	options.MergedHeads = append(options.MergedHeads, d.branchMergedHeads(ctx, record.RepoRoot, record.Branch)...)
 	outcome, err := worktree.Clean(ctx, worktree.Record{RepoRoot: record.RepoRoot, WorktreePath: record.WorktreePath, Branch: record.Branch, BaseRef: record.BaseRef, BaseCommit: record.BaseCommit}, options)
 	if err != nil {
 		return d.setWorkCleanup(record, registry.WorkCleanupKept, fmt.Sprintf("failed: %s", err), nil)
@@ -148,25 +164,78 @@ func (d *Daemon) setWorkCleanup(record registry.WorkRecord, cleanup, reason stri
 	return record, err
 }
 
-// worktreeInUse is whether its owner, or any other session working in it,
-// is mid-turn or running background work.
-func (d *Daemon) worktreeInUse(record registry.WorkRecord) bool {
+type worktreeUsage int
+
+const (
+	worktreeFree worktreeUsage = iota
+	// worktreeOpen: a session that is not archived owns it or has its folder
+	// inside it. Sessions sit idle for days and then resume there.
+	worktreeOpen
+	// worktreeWorking: such a session is mid-turn or running background work.
+	worktreeWorking
+)
+
+// worktreeUse is how sessions use the worktree at path: its owner, if any,
+// and every session whose folder is inside it. A read that fails counts as
+// working, the safer answer before removing files.
+func (d *Daemon) worktreeUse(path, owner string) worktreeUsage {
 	sessions, err := d.Registry.ListSessions(0)
 	if err != nil {
-		return true
+		return worktreeWorking
 	}
+	use := worktreeFree
 	for _, listed := range sessions {
-		if listed.ID != record.SessionID && !underRoot(listed.Cwd, []string{record.WorktreePath}) {
+		if (owner == "" || listed.ID != owner) && !underRoot(listed.Cwd, []string{path}) {
 			continue
 		}
 		// The listing shows a session missing from the catalog as offline;
 		// its recorded status is the safer read before removing files.
 		session, err := d.Registry.Session(listed.ID)
 		if err != nil || session.Status == surface.StatusBusy || surface.BackgroundRunning(session.BackgroundTasks) {
-			return true
+			return worktreeWorking
+		}
+		archived, err := d.Registry.SessionArchived(listed.ID)
+		if err != nil {
+			return worktreeWorking
+		}
+		if !archived {
+			use = worktreeOpen
 		}
 	}
-	return false
+	return use
+}
+
+// branchMergedHeads are the head commits of the pull requests merged from
+// branch into the repository's default branch, read from GitHub. A failed
+// read gives none, so the worktree is judged without them.
+func (d *Daemon) branchMergedHeads(ctx context.Context, root, branch string) []string {
+	repo, ok := prwatch.BranchRepo(ctx, root, branch)
+	if !ok {
+		return nil
+	}
+	target := github.Branch{Repo: repo, Head: branch}
+	prs, err := d.github.BranchPullRequests(ctx, []github.Branch{target})
+	if err != nil {
+		d.log.Printf("read pull requests of branch %s: %s", branch, err)
+		return nil
+	}
+	heads, _ := mergedHeads(prs[target], branch, worktree.DefaultBranch(ctx, root))
+	return heads
+}
+
+// mergedHeads are the head commits, and links, of the pull requests among
+// prs merged from branch into base. A pull request into any other branch
+// never reached base, so its head proves nothing.
+func mergedHeads(prs []github.PullRequest, branch, base string) (heads, urls []string) {
+	if base == "" {
+		return nil, nil
+	}
+	for _, pr := range prs {
+		if pr.State == "merged" && pr.HeadRef == branch && pr.BaseRef == base && pr.HeadSHA != "" {
+			heads, urls = append(heads, pr.HeadSHA), append(urls, pr.URL)
+		}
+	}
+	return heads, urls
 }
 
 // doWorkClean is the person settling a session's worktree, or asking again
@@ -193,7 +262,7 @@ func (d *Daemon) doWorkClean(ctx context.Context, p principal, sessionID string,
 			return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 		}
 	}
-	record, err = d.cleanWork(ctx, record.WorktreePath, options)
+	record, err = d.cleanWork(ctx, record.WorktreePath, options, false)
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 	}

@@ -103,19 +103,34 @@ func TestAWatchedPullRequestWakesItsSessionOncePerHead(t *testing.T) {
 	}
 }
 
-func TestAMergedPullRequestSettlesItsSessionsWorktreeWithoutAWake(t *testing.T) {
+func TestASquashMergedPullRequestSettlesItsSessionsWorktreeWithoutAWakeAndRemovesItOnceArchived(t *testing.T) {
 	checkout := pushedCheckout(t)
 	d, r, _, _, _ := daemonFixture(t)
 	if code, answer := workAction(t, d, map[string]any{"action": "session-create", "surface": "codex", "message": "Build", "cwd": checkout, "isolation": "worktree", "alias": "builder"}); code != http.StatusCreated {
 		t.Fatal(code, answer)
 	}
 	path := filepath.Join(checkout, worktree.Dir, "ah-builder")
+	if err := os.WriteFile(filepath.Join(path, "app", "feature.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, path, "add", ".")
+	gitIn(t, path, "commit", "--quiet", "-m", "feature")
 	gitIn(t, path, "push", "--quiet", "origin", "ah/builder")
+	head := gitIn(t, path, "rev-parse", "HEAD")
+	gitIn(t, checkout, "merge", "--quiet", "--squash", "ah/builder")
+	gitIn(t, checkout, "commit", "--quiet", "-m", "squash")
+	gitIn(t, checkout, "push", "--quiet", "origin", "HEAD:main")
+	gitIn(t, checkout, "push", "--quiet", "origin", "--delete", "ah/builder")
+	gitIn(t, checkout, "fetch", "--quiet", "--prune")
+	gitIn(t, checkout, "remote", "add", "github", "https://github.com/acme/app.git")
+	gitIn(t, checkout, "config", "branch.ah/builder.remote", "github")
 	settleIdle(t, r, "started")
 	ref := linkWatched(t, r, "started", 7)
-	merged := openStatus(ref, "ddddddd4444")
+	merged := openStatus(ref, head)
 	merged.State, merged.HeadRef = "merged", "ah/builder"
-	fake := &fakeGitHub{}
+	fake := &fakeGitHub{branches: map[github.Branch][]github.PullRequest{
+		{Repo: acmeApp, Head: "ah/builder"}: {{Ref: ref, URL: ref.URL(), State: "merged", HeadSHA: head, HeadRef: "ah/builder", BaseRef: "main"}},
+	}}
 	fake.setStatus(merged)
 	d.github = fake
 
@@ -126,8 +141,18 @@ func TestAMergedPullRequestSettlesItsSessionsWorktreeWithoutAWake(t *testing.T) 
 		t.Fatalf("work %+v", work)
 	}
 	d.sweepWork(t.Context(), time.Now())
+	if work := workOf(t, r, "started"); work.Cleanup != registry.WorkCleanupKept || work.CleanupReason != registry.WorkKeptOpen {
+		t.Fatalf("the worktree of a session that is not archived: %+v", work)
+	}
+	if err := r.ArchiveSession("started", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	d.sweepWork(t.Context(), time.Now())
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("worktree of a merged pull request kept: %v", err)
+		t.Fatalf("the squash-merged worktree of an archived session kept: %v %+v", err, workOf(t, r, "started"))
+	}
+	if len(fake.branchReads) == 0 || fake.unboundedBranchReads != 0 {
+		t.Fatalf("cleanup read the branch's pull requests %d times, %d without a deadline", len(fake.branchReads), fake.unboundedBranchReads)
 	}
 	if wakes := wakesFor(t, r, "started"); len(wakes) != 0 {
 		t.Fatalf("merging woke the session: %q", wakes)

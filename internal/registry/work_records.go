@@ -23,6 +23,9 @@ const (
 	WorkCleanupKept    = "kept"
 
 	WorkKeptRunning = "running"
+	// WorkKeptOpen is work a session that is not archived still has as its
+	// folder; automatic cleanup waits for that session to be archived.
+	WorkKeptOpen = "open"
 )
 
 // WorkRecord is a worktree Agenthail made for a session. Its row is written
@@ -120,9 +123,9 @@ func (r *Registry) WorkForSession(sessionID string) (WorkRecord, bool, error) {
 }
 
 // WorkToClean is settled work whose cleanup has not run, or was put off
-// because the session was still running a turn.
+// because a session was still running a turn in it or still has it open.
 func (r *Registry) WorkToClean() ([]WorkRecord, error) {
-	return r.workRecords(`WHERE state=? AND (cleanup=? OR (cleanup=? AND cleanup_reason=?))`, WorkSettled, WorkCleanupPending, WorkCleanupKept, WorkKeptRunning)
+	return r.workRecords(`WHERE state=? AND (cleanup=? OR (cleanup=? AND cleanup_reason IN (?,?)))`, WorkSettled, WorkCleanupPending, WorkCleanupKept, WorkKeptRunning, WorkKeptOpen)
 }
 
 // StaleCreatingWork is work begun before the cutoff whose session was never

@@ -60,7 +60,7 @@ func (w *Watcher) LinkBranches(ctx context.Context) error {
 		if record.Cleanup == registry.WorkCleanupRemoved {
 			continue
 		}
-		repo, ok := branchRepo(ctx, record)
+		repo, ok := BranchRepo(ctx, record.RepoRoot, record.Branch)
 		if !ok {
 			continue
 		}
@@ -96,15 +96,17 @@ func (w *Watcher) LinkBranches(ctx context.Context) error {
 	return nil
 }
 
-func branchRepo(ctx context.Context, record registry.WorkRecord) (github.Repo, bool) {
+// BranchRepo is the GitHub repository a branch of the checkout at root pushes
+// to: its configured remote, else origin.
+func BranchRepo(ctx context.Context, root, branch string) (github.Repo, bool) {
 	git := func(args ...string) string {
-		out, err := exec.CommandContext(ctx, "git", append([]string{"-C", record.RepoRoot}, args...)...).Output()
+		out, err := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...).Output()
 		if err != nil {
 			return ""
 		}
 		return strings.TrimSpace(string(out))
 	}
-	remote := git("config", "branch."+record.Branch+".remote")
+	remote := git("config", "branch."+branch+".remote")
 	if remote == "" || remote == "." {
 		remote = "origin"
 	}

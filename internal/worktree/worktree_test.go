@@ -238,3 +238,62 @@ func TestABaseBehindItsUpstreamIsReported(t *testing.T) {
 		t.Fatalf("plan %+v err=%v", plan, err)
 	}
 }
+
+func TestASquashMergedBranchIsRemovedOnlyWhenItsTipIsInTheMergedHead(t *testing.T) {
+	checkout := repository(t)
+	commit := func(dir, name string) string {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("package main\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		run(t, dir, "add", ".")
+		run(t, dir, "commit", "--quiet", "-m", name)
+		return run(t, dir, "rev-parse", "HEAD")
+	}
+	squashed := func(branch string) (Plan, string) {
+		t.Helper()
+		plan := made(t, Spec{Cwd: checkout, Branch: branch})
+		commit(plan.Cwd, Slug(branch)+"-one.go")
+		head := commit(plan.Cwd, Slug(branch)+"-two.go")
+		run(t, plan.Cwd, "push", "--quiet", "origin", "HEAD:"+branch)
+		run(t, checkout, "merge", "--quiet", "--squash", branch)
+		run(t, checkout, "commit", "--quiet", "-m", "squash "+branch)
+		run(t, checkout, "push", "--quiet", "origin", "HEAD:main")
+		run(t, checkout, "push", "--quiet", "origin", "--delete", branch)
+		run(t, checkout, "fetch", "--quiet", "--prune")
+		return plan, head
+	}
+
+	done, head := squashed("ah/done")
+	if outcome, err := cleanOf(record(done)); err != nil || outcome.Removed || outcome.KeptReason != KeptUnpushed {
+		t.Fatalf("without the merged head a squash-merged branch reads as unpushed: %+v err=%v", outcome, err)
+	}
+	if outcome, err := Clean(context.Background(), record(done), Options{MergedHeads: []string{head}}); err != nil || !outcome.Removed || branchExists(t, checkout, "ah/done") {
+		t.Fatalf("a branch whose tip is its merged pull request's head: %+v err=%v", outcome, err)
+	}
+
+	more, head := squashed("ah/more")
+	commit(more.Cwd, "after.go")
+	if outcome, err := Clean(context.Background(), record(more), Options{MergedHeads: []string{head}}); err != nil || outcome.Removed || outcome.KeptReason != KeptUnpushed {
+		t.Fatalf("a commit after the merged head keeps the worktree: %+v err=%v", outcome, err)
+	}
+}
+
+func TestListNamesTheBranchWorktreesInTheWorktreesFolder(t *testing.T) {
+	checkout := repository(t)
+	made(t, Spec{Cwd: checkout, Branch: "ah/listed"})
+	detached := filepath.Join(checkout, Dir, "detached")
+	run(t, checkout, "worktree", "add", "--quiet", "--detach", detached)
+	elsewhere := filepath.Join(t.TempDir(), "elsewhere")
+	run(t, checkout, "worktree", "add", "--quiet", "-b", "ah/elsewhere", elsewhere)
+	listed, err := List(context.Background(), checkout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []Listed{{Path: filepath.Join(checkout, Dir, "ah-listed"), Branch: "ah/listed"}}; !slices.Equal(listed, want) {
+		t.Fatalf("listed %+v, want %+v", listed, want)
+	}
+	if root, err := MainCheckout(context.Background(), filepath.Join(checkout, Dir, "ah-listed")); err != nil || root != checkout {
+		t.Fatalf("main checkout %q err=%v", root, err)
+	}
+}
