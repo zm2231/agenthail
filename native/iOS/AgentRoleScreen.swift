@@ -14,9 +14,8 @@ struct IOSAgentRoleScreen: View {
             if let view = store.view, let role = view.role(name) {
                 form(view, role)
                     .onAppear { if draft == nil { draft = AgentRoleDraft(role) } }
-                    .onChange(of: role) { _, updated in
-                        if draft?.changed != true { draft = AgentRoleDraft(updated) }
-                    }
+                    .onChange(of: role) { _, updated in draft?.follow(updated) }
+                    .onChange(of: draft) { draft?.follow(role) }
             } else {
                 Text("This role is gone.").foregroundStyle(PhonePalette.muted)
             }

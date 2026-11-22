@@ -61,9 +61,8 @@ struct AgentRoleDetail: View {
             Divider()
             footer
         }
-        .onChange(of: role) { _, updated in
-            if !draft.changed { draft = AgentRoleDraft(updated) }
-        }
+        .onChange(of: role) { _, updated in draft.follow(updated) }
+        .onChange(of: draft) { draft.follow(role) }
         .confirmationDialog(role.builtIn ? "Reset \(role.name) to how Agenthail ships it?" : "Delete \(role.name)?", isPresented: $confirmingRemove) {
             Button(role.builtIn ? "Reset" : "Delete", role: .destructive) { Task { await remove() } }
         } message: {

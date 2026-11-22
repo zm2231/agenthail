@@ -115,15 +115,17 @@ enum AgentRoleFacts {
 
     static func reachTitle(_ reach: String) -> String { reaches.first { $0.id == reach }?.title ?? reach }
 
-    static func effectiveDefault(_ action: AgentActionView, in role: AgentRoleView?) -> String {
-        if let known = role?.effectiveDefaults?[action.name] { return known }
-        if let role, role.definition.actions?[action.name] == nil, let decided = role.decisions[action.name] { return decided }
-        return action.default
+    static func effectiveDefault(_ action: AgentActionView, in role: AgentRoleView) -> String? {
+        if let effective = role.effectiveDefaults {
+            return effective[action.name] ?? action.default
+        }
+        if role.definition.actions?[action.name] == nil { return role.decisions[action.name] }
+        return nil
     }
 
     static func defaultTitle(_ action: AgentActionView, in role: AgentRoleView, reach: String) -> String {
-        guard reach == role.reach else { return "Default" }
-        return "Default (\(effectiveDefault(action, in: role).capitalized))"
+        guard reach == role.reach, let known = effectiveDefault(action, in: role) else { return "Default" }
+        return "Default (\(known.capitalized))"
     }
 
     static func nameHint(_ name: String, taken: [String]) -> String? {
@@ -179,6 +181,10 @@ struct AgentRoleDraft: Equatable, Sendable {
     }
 
     func conflicts(with role: AgentRoleView) -> Bool { changed && base != role.definition }
+
+    mutating func follow(_ role: AgentRoleView) {
+        if !changed && base != role.definition { self = AgentRoleDraft(role) }
+    }
 
     var depth: Int {
         get { definition.depth.flatMap { $0 > 0 ? $0 : nil } ?? AgentRoleFacts.defaultDepth }

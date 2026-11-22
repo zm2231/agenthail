@@ -22,7 +22,7 @@ struct AgentRolesTest {
 
         check(AgentRoleFacts.effectiveDefault(archive, in: worker) == "ask", "a role's effective default comes from the daemon")
         check(AgentRoleFacts.effectiveDefault(remote, in: reviewer) == "notify", "without effective defaults, an action the role leaves unset defaults to what the role gets")
-        check(AgentRoleFacts.effectiveDefault(archive, in: reviewer) == "notify", "without effective defaults, an action the role sets falls back to the action's default")
+        check(AgentRoleFacts.effectiveDefault(archive, in: reviewer) == nil && AgentRoleFacts.defaultTitle(archive, in: reviewer, reach: "project") == "Default", "without effective defaults, an action the role sets names no default it cannot know")
         check(AgentRoleFacts.defaultTitle(archive, in: worker, reach: "descendants") == "Default (Ask)" && AgentRoleFacts.defaultTitle(archive, in: worker, reach: "project") == "Default", "a draft at another reach names no default it cannot know")
 
         var draft = AgentRoleDraft(reviewer)
@@ -37,6 +37,13 @@ struct AgentRolesTest {
         moved.description = "changed elsewhere"
         let external = try JSONDecoder().decode(AgentRoleView.self, from: JSONEncoder().encode(EncodableRole(reviewer, definition: moved)))
         check(draft.conflicts(with: external) && !draft.conflicts(with: reviewer) && !AgentRoleDraft(external).conflicts(with: external), "a dirty draft notices the role changed under it")
+        var stale = AgentRoleDraft(reviewer)
+        stale.definition.depth = 5
+        stale.follow(external)
+        check(stale.definition.depth == 5 && stale.conflicts(with: external), "a dirty draft keeps its edit and flags the change under it")
+        stale.definition.depth = reviewer.definition.depth
+        stale.follow(external)
+        check(stale.definition == external.definition && !stale.changed && !stale.conflicts(with: external), "a draft that turns clean adopts the role as it is now")
         check(draft.depth == 2 && draft.running == AgentRoleFacts.defaultRunning, "limits read their value or the default")
         draft.depth = AgentRoleFacts.defaultDepth
         check(draft.definition.depth == nil, "a limit at its default stores none")
