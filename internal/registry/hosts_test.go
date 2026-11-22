@@ -233,7 +233,7 @@ func TestLocalRegistrationRefusesHostOwnedSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.RecordPendingLaunch("terminal", surface.KindClaude, "/work", "local takeover", name, surface.Location{}, time.Now(), time.Now().Add(time.Hour)); err != nil {
+	if _, err := r.RecordPendingLaunch("terminal", surface.KindClaude, "/work", "local takeover", "", name, surface.Location{}, time.Now(), time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	launches, err := r.PendingLaunches()

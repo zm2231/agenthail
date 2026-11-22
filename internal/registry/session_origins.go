@@ -33,10 +33,22 @@ func OriginOf(sessionID, creatorID string) SessionOrigin {
 
 // A session is started once, so a second record for it is ignored.
 func (r *Registry) RecordSessionOrigin(origin SessionOrigin) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := recordSessionOriginTx(tx, origin); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func recordSessionOriginTx(tx *sql.Tx, origin SessionOrigin) error {
 	if err := origin.valid(); err != nil {
 		return err
 	}
-	_, err := r.db.Exec(`INSERT INTO session_origins(session_id,via,creator_session_id) VALUES(?,?,?) ON CONFLICT(session_id) DO NOTHING`, origin.SessionID, string(origin.Via), origin.CreatorID)
+	_, err := tx.Exec(`INSERT INTO session_origins(session_id,via,creator_session_id) VALUES(?,?,?) ON CONFLICT(session_id) DO NOTHING`, origin.SessionID, string(origin.Via), origin.CreatorID)
 	return err
 }
 

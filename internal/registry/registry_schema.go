@@ -202,6 +202,7 @@ CREATE TABLE IF NOT EXISTS launcher_pending (
 	token TEXT NOT NULL DEFAULT '',
 	expires_at_ms INTEGER NOT NULL DEFAULT 0,
 	location BLOB NOT NULL,
+	creator TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS alias_reservations (

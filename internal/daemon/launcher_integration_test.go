@@ -329,7 +329,7 @@ func TestPendingCorrelationFiltersAgentAndCwd(t *testing.T) {
 		"claude": {Workspace: "workspace-1", Surface: "surface-1"},
 	}}
 	d.SetLaunchers([]surface.Launcher{launcher})
-	if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Created", registry.AliasReservation{}, surface.Location{Workspace: "workspace-1"}, time.Now(), time.Now().Add(time.Hour)); err != nil {
+	if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Created", "", registry.AliasReservation{}, surface.Location{Workspace: "workspace-1"}, time.Now(), time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	d.correlatePendingLaunches(context.Background(), []surface.Session{
@@ -353,7 +353,7 @@ func TestWorkspaceOnlyLaunchCorrelationUsesDiscoveredLocation(t *testing.T) {
 	fullLocation := surface.Location{Workspace: "workspace-1", Surface: "surface-1"}
 	launcher := &launcherFixture{id: surface.LauncherCMUX, agents: []surface.SurfaceKind{surface.KindClaude}, locations: map[string]surface.Location{"created": fullLocation}}
 	d.SetLaunchers([]surface.Launcher{launcher})
-	if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Created", registry.AliasReservation{}, location, time.Now(), time.Now().Add(time.Hour)); err != nil {
+	if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Created", "", registry.AliasReservation{}, location, time.Now(), time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	d.correlatePendingLaunches(context.Background(), []surface.Session{{ID: "created", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: "/repo", Status: surface.StatusIdle}})
@@ -400,5 +400,23 @@ func TestCatalogDiscoveryUsesFreshLocateContextAndPreservesTerminalRuntime(t *te
 	}
 	if stored.Runtime == nil || stored.Runtime.Launcher != want.Launcher || stored.Runtime.Location == nil || *stored.Runtime.Location != *want.Location || !stored.Runtime.Focusable {
 		t.Fatalf("second discovery runtime=%+v", stored.Runtime)
+	}
+}
+
+func TestALaunchFoundAfterItsStartRecordsWhoStartedIt(t *testing.T) {
+	d, r, _, spawner, _ := daemonFixture(t)
+	location := surface.Location{Workspace: "workspace-1", Surface: "surface-1"}
+	d.SetLaunchers([]surface.Launcher{&launcherFixture{id: surface.LauncherCMUX, agents: []surface.SurfaceKind{surface.KindClaude}, locations: map[string]surface.Location{"by-agent": location}}})
+	if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Created", spawner.ID, registry.AliasReservation{}, location, time.Now(), time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	found := surface.Session{ID: "by-agent", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: "/repo", Status: surface.StatusIdle}
+	d.correlatePendingLaunches(context.Background(), []surface.Session{found})
+	origin, recorded, err := r.SessionOrigin(found.ID)
+	if err != nil || !recorded || origin.Via != registry.OriginAgent || origin.CreatorID != spawner.ID {
+		t.Fatalf("origin=%+v recorded=%v err=%v", origin, recorded, err)
+	}
+	if d.startedOutside(found) {
+		t.Fatal("a session Agenthail launched counts as started outside it")
 	}
 }
