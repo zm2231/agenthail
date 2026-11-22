@@ -175,14 +175,6 @@ async function guardTheme(browser, theme, dashboards) {
 
 const started = Date.now();
 const { browser, close, abandon } = await launch();
-const deadline = Number(process.env.AGENTHAIL_GUARD_DEADLINE);
-if (deadline) {
-  setTimeout(() => {
-    console.log(`readability guard: not finished by its deadline after ${((Date.now() - started) / 1000).toFixed(0)} s`);
-    abandon();
-    process.exit(1);
-  }, Math.max(deadline - Date.now(), 0)).unref();
-}
 const pageState = (page) =>
   Promise.race([
     page.evaluate(async () => {
@@ -194,24 +186,36 @@ const pageState = (page) =>
   ]).catch((error) => `unreadable: ${error.message}`);
 
 let stopping = false;
-setInterval(async () => {
+// The test times out a minute after the deadline, so the stall file goes first and pages are probed at once.
+async function stop(reason, stuckThemes) {
+  stopping = true;
+  console.log(`readability guard: ${reason}`);
+  const pages = stuckThemes.flatMap(([theme, mine]) => Object.entries(mine.pages).map(([key, page]) => ({ theme, key, page, ...(requests.get(page) ?? { url: null, pending: () => [] }) })));
+  const stuck = pages.flatMap(({ url, pending }) => pending().map((entry) => ({ dashboard: url, id: entry.id, path: entry.path })));
+  if (process.env.AGENTHAIL_GUARD_STALL_FILE) fs.writeFileSync(process.env.AGENTHAIL_GUARD_STALL_FILE, JSON.stringify(stuck));
+  const states = await Promise.all(pages.map(({ page }) => pageState(page)));
+  pages.forEach(({ theme, key, page, pending }, index) => {
+    console.log(`readability guard: ${theme} ${key} page at ${steps.get(page) ?? "no step"}, ${states[index]}`);
+    console.log(`readability guard: ${theme} ${key} page requests: ${describeRequests(pending())}`);
+  });
+  abandon();
+  process.exit(1);
+}
+
+const deadline = Number(process.env.AGENTHAIL_GUARD_DEADLINE);
+if (deadline) {
+  setTimeout(() => {
+    if (stopping) return;
+    stop(`not finished by its deadline after ${((Date.now() - started) / 1000).toFixed(0)} s`, [...progress].filter(([, mine]) => mine.doing !== "done"));
+  }, Math.max(deadline - Date.now(), 0)).unref();
+}
+setInterval(() => {
   const now = Date.now();
   const stalled = [...progress].find(([, mine]) => mine.doing !== "done" && now - mine.last > STALL_LIMIT_MS);
   if (!stalled || stopping) return;
-  stopping = true;
-  console.log(`readability guard: ${stalled[0]} finished nothing in ${STALL_LIMIT_MS / 1000} s, stuck on ${stalled[1].doing}`);
-  const stuck = [];
-  for (const [key, page] of Object.entries(stalled[1].pages)) {
-    const { url, pending } = requests.get(page);
-    const entries = pending();
-    console.log(`readability guard: ${stalled[0]} ${key} page at ${steps.get(page) ?? "no step"}, ${await pageState(page)}`);
-    console.log(`readability guard: ${stalled[0]} ${key} page requests: ${describeRequests(entries)}`);
-    stuck.push(...entries.map((entry) => ({ dashboard: url, id: entry.id, path: entry.path })));
-  }
-  if (process.env.AGENTHAIL_GUARD_STALL_FILE) fs.writeFileSync(process.env.AGENTHAIL_GUARD_STALL_FILE, JSON.stringify(stuck));
-  abandon();
-  process.exit(1);
+  stop(`${stalled[0]} finished nothing in ${STALL_LIMIT_MS / 1000} s, stuck on ${stalled[1].doing}`, [stalled]);
 }, 1000).unref();
+
 let failures = [];
 try {
   const results = await Promise.all(Object.entries(themes).map(([theme, dashboards]) => guardTheme(browser, theme, dashboards)));

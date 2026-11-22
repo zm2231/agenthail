@@ -19,8 +19,7 @@ type guardRequest struct {
 	done     time.Time
 }
 
-// guardRequests records, per request the guard tagged, how far the dashboard
-// server got with it, so a stalled guard can say which side a request died on.
+// guardRequests records how far the server got with each tagged request, so a stall names the side.
 type guardRequests struct {
 	mu   sync.Mutex
 	seen map[string]*guardRequest

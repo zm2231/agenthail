@@ -11,8 +11,7 @@ function tagFetches(header) {
   };
 }
 
-// Network events come from the browser process, so a page whose own script
-// stops answering still shows which of its requests never finished.
+// Network events come from the browser, so they still report a page whose script stopped answering.
 export async function trackRequests(page) {
   const pending = new Map();
   await page.evaluateOnNewDocument(tagFetches, REQUEST_HEADER);
