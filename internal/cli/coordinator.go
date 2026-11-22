@@ -25,7 +25,7 @@ const coordinatorUsage = `usage:
   agenthail coordinator list [--json]
   agenthail coordinator set <target> [--name <name>] [--instructions <file>] [--permission-mode <mode>] [--replace]
   agenthail coordinator new <claude|codex> [--cwd <path>] [--host <host>] [--name <name>] [--model <model>] [--instructions <file>] [--permission-mode <mode>] [--replace]
-  agenthail coordinator clear [--cwd <path>]`
+  agenthail coordinator clear [--cwd <path> | --name <name>]`
 
 func (a *App) coordinator() coordinator.Service {
 	return coordinator.Service{Registry: a.registry(), Adapters: a.adapters(), Dispatcher: a.dispatcher()}
@@ -66,7 +66,7 @@ func (a *App) cmdCoordinator(args []string) error {
 		if len(positional) != 1 {
 			return errors.New(coordinatorUsage)
 		}
-		return a.coordinatorClear(flagVal(args, "--cwd"), hasFlag(args, "--json"))
+		return a.coordinatorClear(flagVal(args, "--cwd"), flagVal(args, "--name"), hasFlag(args, "--json"))
 	}
 	return errors.New(coordinatorUsage)
 }
@@ -251,7 +251,7 @@ func (a *App) coordinatorList(jsonOut bool) error {
 		}
 		project := r.ProjectRoot
 		if !r.ProjectSeen {
-			project += " (no project here now; move it with 'coordinator set --replace')"
+			project += fmt.Sprintf(" (no project here now; free its name with 'agenthail coordinator clear --name %s')", r.Name)
 		}
 		fmt.Printf("%-12s @%-23s %-7s %-38s %s\n", truncate(r.Host, 12), r.Name, r.Surface, session, project)
 		if r.Replaced != nil {
@@ -422,8 +422,8 @@ func (a *App) runCoordinatorChange(ctx context.Context, payload map[string]any, 
 
 // coordinatorClear clears the coordinator of the project at a folder, on
 // whichever host holds it. Its conversation and name stay.
-func (a *App) coordinatorClear(path string, jsonOut bool) error {
-	found, err := a.projectAt(path)
+func (a *App) coordinatorClear(path, name string, jsonOut bool) error {
+	projectID, root, err := a.clearTarget(path, name)
 	if err != nil {
 		return err
 	}
@@ -436,7 +436,7 @@ func (a *App) coordinatorClear(path string, jsonOut bool) error {
 	if err != nil {
 		return err
 	}
-	payload := map[string]any{"action": "coordinator-clear", "projectId": found.ID}
+	payload := map[string]any{"action": "coordinator-clear", "projectId": projectID}
 	if session := a.callerSession(); session != nil {
 		payload["sourceSessionId"] = session.ID
 	}
@@ -451,11 +451,33 @@ func (a *App) coordinatorClear(path string, jsonOut bool) error {
 		return emit(answer)
 	}
 	if answer.Cleared == nil {
-		fmt.Printf("%s has no coordinator\n", found.RootPath)
+		fmt.Printf("%s has no coordinator\n", root)
 		return nil
 	}
-	fmt.Printf("cleared coordinator %s of %s; its session and name are unchanged\n", a.coordinator().Ref(*answer.Cleared), found.RootPath)
+	fmt.Printf("cleared coordinator %s of %s; its session and name are unchanged\n", a.coordinator().Ref(*answer.Cleared), root)
 	return nil
+}
+
+func (a *App) clearTarget(path, name string) (string, string, error) {
+	name = strings.TrimPrefix(strings.TrimSpace(name), "@")
+	if name == "" {
+		found, err := a.projectAt(path)
+		if err != nil {
+			return "", "", err
+		}
+		return found.ID, found.RootPath, nil
+	}
+	if path != "" {
+		return "", "", errors.New("name a coordinator or a folder, not both")
+	}
+	spec, err := a.registry().CoordinatorNamed(name)
+	if errors.Is(err, registry.ErrNoCoordinator) {
+		return "", "", fmt.Errorf("no coordinator on this computer is named @%s", name)
+	}
+	if err != nil {
+		return "", "", err
+	}
+	return spec.ProjectID, spec.ProjectRoot, nil
 }
 
 // sendToNamedCoordinator delivers to a coordinator by its name when its

@@ -23,7 +23,7 @@ func cardFixture(t *testing.T) (*App, *starterCLISurface, string) {
 	}
 	app := threadFixture(t, starter)
 	store := app.Registry
-	if err := store.AddProject(registry.ProjectRecord{ID: "project-card", WorkspaceRoot: cwd, Title: "card", Added: true}); err != nil {
+	if _, err := store.AddProject(registry.ProjectRecord{ID: "project-card", WorkspaceRoot: cwd, Title: "card", Added: true}, ""); err != nil {
 		t.Fatal(err)
 	}
 	for _, session := range []surface.Session{

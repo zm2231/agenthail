@@ -139,7 +139,7 @@ func TestACodexCoordinatorStartedByItsFirstMessageStartsWithItsLeadCredential(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := fixture.registry.AddProject(registry.ProjectRecord{ID: "p-codex", WorkspaceRoot: root, Title: "Codex", CreatedAt: time.Now()}); err != nil {
+	if _, err := fixture.registry.AddProject(registry.ProjectRecord{ID: "p-codex", WorkspaceRoot: root, Title: "Codex", CreatedAt: time.Now()}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if code, body := fixture.action(t, map[string]any{"action": "coordinator-new", "surface": "codex", "cwd": cwd, "name": "captain"}); code != http.StatusOK {

@@ -54,7 +54,7 @@ func TestALargeTranscriptMovesBetweenTwoDaemonProcesses(t *testing.T) {
 		checkout := filepath.Join(node.host.Home, "checkouts", "widget")
 		runGit(t, node.host.Home, "clone", "--quiet", filepath.Join(dir, "repo"), checkout)
 		runGit(t, checkout, "remote", "set-url", "origin", moveRemote)
-		if err := node.reg.AddProject(registry.ProjectRecord{ID: "project-widget", WorkspaceRoot: checkout, Title: "widget", Added: true}); err != nil {
+		if _, err := node.reg.AddProject(registry.ProjectRecord{ID: "project-widget", WorkspaceRoot: checkout, Title: "widget", Added: true}, ""); err != nil {
 			t.Fatal(err)
 		}
 		node.serve(t, nil)

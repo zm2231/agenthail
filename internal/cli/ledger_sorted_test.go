@@ -14,7 +14,7 @@ func TestTheBoardListsAutoFiledMessagesUnderTheirGoalAndCountsOverrides(t *testi
 	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
 	dir := t.TempDir()
 	const key = "repo:github.com/acme/widget"
-	if err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: key}); err != nil {
+	if _, err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: key}, ""); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)

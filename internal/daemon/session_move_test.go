@@ -126,7 +126,7 @@ func checkoutsIn(t *testing.T, repo, targetRoot string, target *federationNode) 
 	checkout := filepath.Join(targetRoot, "checkouts", "widget")
 	runGit(t, targetRoot, "clone", "--quiet", repo, checkout)
 	runGit(t, checkout, "remote", "set-url", "origin", moveRemote)
-	if err := target.reg.AddProject(registry.ProjectRecord{ID: "project-widget", WorkspaceRoot: checkout, Title: "widget", Added: true}); err != nil {
+	if _, err := target.reg.AddProject(registry.ProjectRecord{ID: "project-widget", WorkspaceRoot: checkout, Title: "widget", Added: true}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if head := runGit(t, checkout, "rev-parse", "HEAD"); head != commit {
@@ -303,7 +303,7 @@ func TestAMoveTheTargetRefusesLeavesTheSessionWhereItWas(t *testing.T) {
 		t.Fatal(err)
 	}
 	sourceTranscript := claudeTranscriptIn(t, source.host.Home, session.ID)
-	if err := target.reg.RemoveProject("project-widget"); err != nil {
+	if _, err := target.reg.RemoveProject("project-widget", ""); err != nil {
 		t.Fatal(err)
 	}
 

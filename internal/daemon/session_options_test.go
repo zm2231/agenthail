@@ -148,7 +148,7 @@ func TestLaunchProjectsListRecentProjectsThenAddedFolders(t *testing.T) {
 	if err := reg.ArchiveProject(registrypkg.ProjectRecord{ID: "implicit:/work/old", WorkspaceRoot: "/work/old", Title: "old"}, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := reg.AddProject(registrypkg.ProjectRecord{ID: "p-notes", WorkspaceRoot: "/work/notes", Title: "notes", CreatedAt: now}); err != nil {
+	if _, err := reg.AddProject(registrypkg.ProjectRecord{ID: "p-notes", WorkspaceRoot: "/work/notes", Title: "notes", CreatedAt: now}, ""); err != nil {
 		t.Fatal(err)
 	}
 	projects, err := d.launchProjects()

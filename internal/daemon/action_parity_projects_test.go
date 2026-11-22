@@ -31,7 +31,7 @@ func withAddedProject(t *testing.T, d *Daemon, r *registry.Registry) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.AddProject(registry.ProjectRecord{ID: "p-parity", WorkspaceRoot: root, Title: "Parity", CreatedAt: time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)}); err != nil {
+	if _, err := r.AddProject(registry.ProjectRecord{ID: "p-parity", WorkspaceRoot: root, Title: "Parity", CreatedAt: time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)}, ""); err != nil {
 		t.Fatal(err)
 	}
 }

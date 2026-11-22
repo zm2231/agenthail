@@ -114,6 +114,8 @@ func moveProjectRowsTx(tx *sql.Tx, move ProjectMove, held projectHolding) error 
 		`UPDATE ledger_state SET project_key=?2 WHERE project_key=?1`,
 		`UPDATE ledger_events SET project_key=?2 WHERE project_key=?1`,
 		`UPDATE ledger_grants SET project_key=?2 WHERE project_key=?1`,
+		`UPDATE OR IGNORE ledger_backlog_told SET project_key=?2 WHERE project_key=?1`,
+		`DELETE FROM ledger_backlog_told WHERE project_key=?1`,
 		`UPDATE coordinators SET project_id=?2 WHERE project_id=?1 AND host_id=''`,
 		`UPDATE coordinator_history SET project_id=?2 WHERE project_id=?1`,
 		`UPDATE coordinator_replaced SET project_id=?2 WHERE project_id=?1`,

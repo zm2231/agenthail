@@ -108,7 +108,7 @@ func (f *mcpClaudeFixture) addProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.registry.AddProject(registry.ProjectRecord{ID: "p-lead", WorkspaceRoot: root, Title: "Lead", CreatedAt: time.Now()}); err != nil {
+	if _, err := f.registry.AddProject(registry.ProjectRecord{ID: "p-lead", WorkspaceRoot: root, Title: "Lead", CreatedAt: time.Now()}, ""); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -165,7 +165,7 @@ func startCoordinatorAndCapture(t *testing.T, order string) {
 		t.Fatal(err)
 	}
 	const key = "repo:example.com/lead"
-	if err := f.registry.AddProject(registry.ProjectRecord{ID: "p-lead", WorkspaceRoot: root, Title: "Lead", Key: key, CreatedAt: time.Now()}); err != nil {
+	if _, err := f.registry.AddProject(registry.ProjectRecord{ID: "p-lead", WorkspaceRoot: root, Title: "Lead", Key: key, CreatedAt: time.Now()}, ""); err != nil {
 		t.Fatal(err)
 	}
 	store := ledger.NewStore(f.registry.WriteDB(), f.registry.ReadDB())

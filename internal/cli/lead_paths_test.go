@@ -29,7 +29,7 @@ func TestLeadPathAddressesTheCoordinatorsSubagents(t *testing.T) {
 	}
 	dir := mustEvalSymlinks(t, t.TempDir())
 	t.Chdir(dir)
-	if err := r.AddProject(registry.ProjectRecord{ID: "project-widget", WorkspaceRoot: dir, Title: "widget", Added: true}); err != nil {
+	if _, err := r.AddProject(registry.ProjectRecord{ID: "project-widget", WorkspaceRoot: dir, Title: "widget", Added: true}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: "project-widget", ProjectRoot: dir, Name: "widget-lead", Surface: string(surface.KindCodex), Cwd: dir}, registry.CoordinatorChange{SessionID: lead}); err != nil {

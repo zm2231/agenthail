@@ -14,7 +14,7 @@ func TestCriticalPathReadsTheRequestedProject(t *testing.T) {
 	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
 	dir := t.TempDir()
 	const here, other = "repo:github.com/acme/widget", "repo:github.com/acme/infra"
-	if err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: here}); err != nil {
+	if _, err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: here}, ""); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)

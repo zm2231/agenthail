@@ -422,7 +422,11 @@ func (d *Daemon) coordinatorError(ctx context.Context, err error) error {
 	case errors.As(err, &exists):
 		return actionFailed(http.StatusConflict, "coordinator_exists", fmt.Sprintf("the project already has coordinator %s; replace it to take over", d.coordinatorRefs(ctx, exists.Existing)))
 	case errors.As(err, &nameTaken):
-		return actionFailed(http.StatusConflict, "name_taken", fmt.Sprintf("%s already coordinates %s; choose another name", d.coordinatorRef(ctx, registry.CoordinatorSpec{Name: nameTaken.Name, HostID: nameTaken.HostID}), nameTaken.ProjectRoot))
+		next := "choose another name"
+		if nameTaken.HostID == "" {
+			next += fmt.Sprintf(", or free it with 'agenthail coordinator clear --name %s'", nameTaken.Name)
+		}
+		return actionFailed(http.StatusConflict, "name_taken", fmt.Sprintf("%s already coordinates %s; %s", d.coordinatorRef(ctx, registry.CoordinatorSpec{Name: nameTaken.Name, HostID: nameTaken.HostID}), nameTaken.ProjectRoot, next))
 	case errors.As(err, &aliasTaken):
 		return actionFailed(http.StatusConflict, "name_taken", fmt.Sprintf("@%s already names session %s; choose another name", aliasTaken.Name, aliasTaken.Owner))
 	case errors.As(err, &aliasReserved):

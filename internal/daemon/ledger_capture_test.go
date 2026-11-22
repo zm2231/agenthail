@@ -22,12 +22,12 @@ func TestPersonSendCapturesUtterance(t *testing.T) {
 
 	projectDir := t.TempDir()
 	projectKey := "test-project-key"
-	if err := r.AddProject(registry.ProjectRecord{
+	if _, err := r.AddProject(registry.ProjectRecord{
 		ID:            "proj-1",
 		WorkspaceRoot: projectDir,
 		Title:         "Test Project",
 		Key:           projectKey,
-	}); err != nil {
+	}, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -104,12 +104,12 @@ func TestPersonSendSkipsDisabledLedger(t *testing.T) {
 
 	projectDir := t.TempDir()
 	projectKey := "disabled-project"
-	if err := r.AddProject(registry.ProjectRecord{
+	if _, err := r.AddProject(registry.ProjectRecord{
 		ID:            "proj-2",
 		WorkspaceRoot: projectDir,
 		Title:         "Disabled Project",
 		Key:           projectKey,
-	}); err != nil {
+	}, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -164,14 +164,14 @@ func TestPersonSendCapturesNestedProject(t *testing.T) {
 	if err := os.MkdirAll(innerDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.AddProject(registry.ProjectRecord{
+	if _, err := r.AddProject(registry.ProjectRecord{
 		ID: "outer", WorkspaceRoot: outerDir, Title: "Outer", Key: "outer-key",
-	}); err != nil {
+	}, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.AddProject(registry.ProjectRecord{
+	if _, err := r.AddProject(registry.ProjectRecord{
 		ID: "inner", WorkspaceRoot: innerDir, Title: "Inner", Key: "inner-key",
-	}); err != nil {
+	}, ""); err != nil {
 		t.Fatal(err)
 	}
 

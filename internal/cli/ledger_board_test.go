@@ -16,7 +16,7 @@ import (
 func TestLedgerBoardSaysWhatItCaptures(t *testing.T) {
 	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
 	dir := t.TempDir()
-	if err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: "board-key"}); err != nil {
+	if _, err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: "board-key"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)
@@ -86,7 +86,7 @@ func TestLedgerBoardShowsGoalsProvenanceAndProvisionalWords(t *testing.T) {
 	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
 	dir := t.TempDir()
 	const key, other = "repo:github.com/acme/widget", "repo:github.com/acme/infra"
-	if err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: key}); err != nil {
+	if _, err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: key}, ""); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)
@@ -148,7 +148,7 @@ func TestLedgerBoardKeepsWithdrawnCutsAndMarksDefaultedDecisions(t *testing.T) {
 	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
 	dir := t.TempDir()
 	const key = "repo:github.com/acme/widget"
-	if err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: key}); err != nil {
+	if _, err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: key}, ""); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)
@@ -248,7 +248,7 @@ func TestLedgerEnableAndDisableAskTheDaemon(t *testing.T) {
 func TestLedgerEnableFailsWhenTheDaemonIsDown(t *testing.T) {
 	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
 	dir := t.TempDir()
-	if err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: "down-key"}); err != nil {
+	if _, err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: "down-key"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)

@@ -59,7 +59,7 @@ func newMCPAnswerFixture(t *testing.T) *mcpAnswerFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.AddProject(registry.ProjectRecord{ID: "p-answer", WorkspaceRoot: root, Title: "Answer", CreatedAt: time.Now()}); err != nil {
+	if _, err := r.AddProject(registry.ProjectRecord{ID: "p-answer", WorkspaceRoot: root, Title: "Answer", CreatedAt: time.Now()}, ""); err != nil {
 		t.Fatal(err)
 	}
 	sessions := map[string]surface.Session{}

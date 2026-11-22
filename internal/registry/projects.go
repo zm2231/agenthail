@@ -35,15 +35,15 @@ func (e *WorkspaceTakenError) Error() string {
 	return fmt.Sprintf("Workspace %s already belongs to project %s.", e.WorkspaceRoot, e.ProjectID)
 }
 
-// AddProject records an added project. An implicit project's archive row for
-// the same folder gives way to it and passes on its archive state.
-func (r *Registry) AddProject(project ProjectRecord) error {
+// AddProject records an added project; the archive state and lead of the
+// implicit project it supersedes pass to it.
+func (r *Registry) AddProject(project ProjectRecord, supersedes string) (ProjectMoveOutcome, error) {
 	if project.ID == "" || project.WorkspaceRoot == "" || project.Title == "" {
-		return fmt.Errorf("project id, workspace root and title are required")
+		return ProjectMoveOutcome{}, fmt.Errorf("project id, workspace root and title are required")
 	}
 	tx, err := r.db.Begin()
 	if err != nil {
-		return err
+		return ProjectMoveOutcome{}, err
 	}
 	defer tx.Rollback()
 	var existingID string
@@ -52,45 +52,79 @@ func (r *Registry) AddProject(project ProjectRecord) error {
 	err = tx.QueryRow(`SELECT id,added,archived_at_ms FROM projects WHERE workspace_root=?`, project.WorkspaceRoot).Scan(&existingID, &added, &archivedAt)
 	switch {
 	case err == nil && added == 1:
-		return &WorkspaceTakenError{WorkspaceRoot: project.WorkspaceRoot, ProjectID: existingID}
+		return ProjectMoveOutcome{}, &WorkspaceTakenError{WorkspaceRoot: project.WorkspaceRoot, ProjectID: existingID}
 	case err == nil:
 		if _, err := tx.Exec(`DELETE FROM projects WHERE id=?`, existingID); err != nil {
-			return err
+			return ProjectMoveOutcome{}, err
 		}
 	case !errors.Is(err, sql.ErrNoRows):
-		return err
+		return ProjectMoveOutcome{}, err
 	}
 	if _, err := tx.Exec(`INSERT INTO projects(id,workspace_root,title,added,project_key,repository,created_at_ms,archived_at_ms) VALUES(?,?,?,1,?,?,?,?)`,
 		project.ID, project.WorkspaceRoot, project.Title, project.Key, append([]byte{}, project.Repository...), project.CreatedAt.UnixMilli(), archivedAt); err != nil {
-		return err
+		return ProjectMoveOutcome{}, err
 	}
 	if _, err := tx.Exec(`DELETE FROM removed_project_ledgers WHERE workspace_root=? AND project_id=?`, project.WorkspaceRoot, project.ID); err != nil {
-		return err
+		return ProjectMoveOutcome{}, err
 	}
-	return tx.Commit()
+	outcome, err := r.handOverProjectTx(tx, supersedes, project.effectiveID())
+	if err != nil {
+		return outcome, err
+	}
+	return outcome, tx.Commit()
 }
 
-// RemoveProject deletes an added project. Its sessions are untouched, and a
-// ledger it holds under its own id is kept for its folder.
-func (r *Registry) RemoveProject(id string) error {
+// RemoveProject deletes an added project, keeping a ledger it holds for its
+// folder; its lead passes to the fallback project the folder returns to.
+func (r *Registry) RemoveProject(id, fallback string) (ProjectMoveOutcome, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
-		return err
+		return ProjectMoveOutcome{}, err
 	}
 	defer tx.Rollback()
+	var key string
+	if err := tx.QueryRow(`SELECT project_key FROM projects WHERE id=? AND added=1`, id).Scan(&key); err != nil {
+		return ProjectMoveOutcome{}, err
+	}
 	if err := keepRemovedProjectLedger(tx, id, time.Now()); err != nil {
-		return err
+		return ProjectMoveOutcome{}, err
 	}
-	result, err := tx.Exec(`DELETE FROM projects WHERE id=? AND added=1`, id)
+	if _, err := tx.Exec(`DELETE FROM projects WHERE id=? AND added=1`, id); err != nil {
+		return ProjectMoveOutcome{}, err
+	}
+	outcome, err := r.handOverProjectTx(tx, ProjectRecord{ID: id, Key: key}.effectiveID(), fallback)
 	if err != nil {
-		return err
+		return outcome, err
 	}
-	if changed, err := result.RowsAffected(); err != nil {
-		return err
-	} else if changed == 0 {
-		return sql.ErrNoRows
+	return outcome, tx.Commit()
+}
+
+func (p ProjectRecord) effectiveID() string {
+	if p.Key != "" {
+		return p.Key
 	}
-	return tx.Commit()
+	return p.ID
+}
+
+type ProjectHandOverError struct{ Refusal ProjectMoveRefusal }
+
+func (e ProjectHandOverError) Error() string {
+	return fmt.Sprintf("the lead and settings of %s cannot move to %s: %s", e.Refusal.From, e.Refusal.To, e.Refusal.Reason)
+}
+
+func (r *Registry) handOverProjectTx(tx *sql.Tx, from, to string) (ProjectMoveOutcome, error) {
+	if from == "" || to == "" || from == to {
+		return ProjectMoveOutcome{}, nil
+	}
+	identity, err := hostIdentityTx(tx)
+	if err != nil {
+		return ProjectMoveOutcome{}, err
+	}
+	outcome, err := applyProjectMoveTx(tx, ProjectMove{From: from, To: to, ChangedAt: r.now().Truncate(time.Millisecond), OriginHost: identity})
+	if err == nil && outcome.Refused != nil {
+		err = ProjectHandOverError{Refusal: *outcome.Refused}
+	}
+	return outcome, err
 }
 
 // SetProjectTitle names an added project; an id of no added project is

@@ -109,7 +109,7 @@ func newViewFixture(t *testing.T) *viewFixture {
 	}
 	mirror("far", surface.StatusIdle)
 	here := registry.ProjectRecord{ID: "project-here", WorkspaceRoot: cwd, Title: "here", Added: true, CreatedAt: f.clock}
-	if err := reg.AddProject(here); err != nil {
+	if _, err := reg.AddProject(here, ""); err != nil {
 		t.Fatal(err)
 	}
 	for i := range 6 {
@@ -204,7 +204,7 @@ func newViewFixture(t *testing.T) *viewFixture {
 		}},
 		{"a project", func(rng *rand.Rand) {
 			project := registry.ProjectRecord{ID: fmt.Sprint("project-", rng.Intn(3)), WorkspaceRoot: filepath.Join(t.TempDir(), "work"), Title: "work", Added: true, CreatedAt: f.clock}
-			_ = reg.AddProject(project)
+			_, _ = reg.AddProject(project, "")
 			if rng.Intn(2) == 0 {
 				_ = reg.ArchiveProject(project, f.clock)
 			} else {
@@ -542,7 +542,7 @@ func newViewFixture(t *testing.T) *viewFixture {
 			}
 		}
 		gone := registry.ProjectRecord{ID: "project-gone", WorkspaceRoot: t.TempDir(), Title: "gone", Added: true, CreatedAt: f.clock}
-		if err := reg.AddProject(gone); err != nil {
+		if _, err := reg.AddProject(gone, ""); err != nil {
 			t.Fatal(err)
 		}
 		if err := reg.ArchiveProject(gone, f.clock); err != nil {

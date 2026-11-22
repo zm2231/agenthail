@@ -18,7 +18,7 @@ import (
 func folderScopedQueue(t *testing.T) (http.Handler, map[string]int64) {
 	t.Helper()
 	d, reg, _, _, _ := daemonFixture(t)
-	if err := reg.AddProject(registry.ProjectRecord{ID: "p-root", WorkspaceRoot: "/work/root", Title: "root"}); err != nil {
+	if _, err := reg.AddProject(registry.ProjectRecord{ID: "p-root", WorkspaceRoot: "/work/root", Title: "root"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	queued := map[string]int64{}

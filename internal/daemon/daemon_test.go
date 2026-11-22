@@ -630,7 +630,7 @@ func TestAPhonePushIsTitledWithTheAliasAndNeverNamesItsProjectOrTitle(t *testing
 	t.Setenv("HOME", t.TempDir())
 	d, r, fake, from, _ := daemonFixture(t)
 	root := t.TempDir()
-	if err := r.AddProject(registry.ProjectRecord{ID: "project-widget", WorkspaceRoot: root, Title: "widget", Added: true, CreatedAt: time.Now()}); err != nil {
+	if _, err := r.AddProject(registry.ProjectRecord{ID: "project-widget", WorkspaceRoot: root, Title: "widget", Added: true, CreatedAt: time.Now()}, ""); err != nil {
 		t.Fatal(err)
 	}
 	from.Name, from.Cwd = "private-project-title", root

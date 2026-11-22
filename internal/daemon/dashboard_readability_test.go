@@ -126,7 +126,7 @@ func seedReadabilityFixture(t *testing.T, store *registry.Registry, fake *follow
 			BackgroundTasks: &surface.BackgroundTasks{Running: true, Source: surface.BackgroundSourceHost, Since: now, Tasks: []surface.BackgroundTask{{ID: "shell-1", Kind: "shell", Description: "go test ./internal/daemon", Since: now}}},
 		},
 	}
-	if err := store.AddProject(registry.ProjectRecord{ID: "p-agenthail", WorkspaceRoot: "/work/agenthail", Title: "agenthail", Added: true}); err != nil {
+	if _, err := store.AddProject(registry.ProjectRecord{ID: "p-agenthail", WorkspaceRoot: "/work/agenthail", Title: "agenthail", Added: true}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.AddHost(registry.PairedHost{ID: "h0123456789ab", Name: "build-server", Endpoint: "https://build-server.invalid:7412", Address: "100.64.0.2", Token: "ahd_fixture"}); err != nil {
