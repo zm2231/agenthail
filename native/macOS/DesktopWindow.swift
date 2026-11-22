@@ -943,7 +943,6 @@ struct TranscriptView: View {
             .environment(\.transcriptRows, TranscriptRows(memory: pane.rowMemory, session: session.id))
             .environment(\.toolCallStates, ToolCallStates(items: pane.timelineItems, active: session.isWorking || session.isWaitingOnYou))
             .environment(\.transcriptOverhang, layout.overhang)
-            .textual.tableWidthHint(layout.column)
             .environment(\.expandAgentMessages, expandAgents)
             .environment(\.focusWork, focus)
         }
