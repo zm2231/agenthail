@@ -1,4 +1,4 @@
-package daemon
+package prwatch
 
 import (
 	"fmt"
@@ -11,10 +11,10 @@ import (
 )
 
 const (
-	prCommentWakeLimit = 10
-	prWakeNameLimit    = 5
-	prWakeTitleLimit   = 80
-	prWakeLimit        = 600
+	CommentWakeLimit = 10
+	prWakeNameLimit  = 5
+	prWakeTitleLimit = 80
+	prWakeLimit      = 600
 )
 
 type prVerdict struct {
@@ -76,9 +76,9 @@ func decidePR(row registry.SessionPR, status github.Status, viewer string) prVer
 		return prVerdict{row: next, reasons: reasons}
 	}
 	next.CommentWakes++
-	if next.CommentWakes >= prCommentWakeLimit {
+	if next.CommentWakes >= CommentWakeLimit {
 		next.Watch = false
-		reasons = append(reasons, fmt.Sprintf("that is %d comment-only wakes in a row, so the watch stopped; agenthail_pr watch turns it back on", prCommentWakeLimit))
+		reasons = append(reasons, fmt.Sprintf("that is %d comment-only wakes in a row, so the watch stopped; agenthail_pr watch turns it back on", CommentWakeLimit))
 	}
 	return prVerdict{row: next, reasons: reasons}
 }

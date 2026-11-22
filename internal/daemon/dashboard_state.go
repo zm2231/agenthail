@@ -266,7 +266,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			entry.Worktree = newWorkView(work)
 		}
 		if prs := sessionPRs[session.ID]; len(prs) > 0 {
-			entry.PRs = d.prViews(prs)
+			entry.PRs = d.prs.Views(prs)
 		}
 		if move, found := moves[session.ID]; found {
 			entry.Move = moveRow(&move)

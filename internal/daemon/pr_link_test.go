@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/prwatch"
 	"github.com/zm2231/agenthail/internal/github"
 	"github.com/zm2231/agenthail/internal/registry"
 )
@@ -139,7 +140,7 @@ func TestAnAgentLinksUnlinksAndWatchesPullRequests(t *testing.T) {
 
 func TestAPullRequestLinkedOutsideTheDaemonShowsInTheNextSessionView(t *testing.T) {
 	d, reg, _, _, _ := daemonFixture(t)
-	viewed := func() []prView {
+	viewed := func() []prwatch.View {
 		t.Helper()
 		view, err := d.readSessionView(context.Background(), sessionViewRequest{Scope: "all", Limit: 50})
 		if err != nil {

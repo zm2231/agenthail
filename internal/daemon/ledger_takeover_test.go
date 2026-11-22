@@ -62,7 +62,7 @@ func TestTheLeadFinishesAMergedItemWhoseHolderIsArchivedButTheDaemonNotTheCaller
 	status := openStatus(ref, "abc123")
 	status.State = "merged"
 	fake.setStatus(status)
-	if err := d.watchPRs(t.Context(), time.Now()); err != nil {
+	if err := d.prs.Watch(t.Context(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 

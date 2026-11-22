@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/zm2231/agenthail/internal/daemon/prwatch"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -77,7 +78,7 @@ func (c *presentationFingerprints) adopt(read registry.CatalogPresentation) erro
 	return nil
 }
 
-func presentationRow(record registry.CatalogPresentationRow, source presentationFingerprint, prViews func([]registry.SessionPR) []prView) (dashboardSession, error) {
+func presentationRow(record registry.CatalogPresentationRow, source presentationFingerprint, prViews func([]registry.SessionPR) []prwatch.View) (dashboardSession, error) {
 	row := source.row
 	row.Holders, row.Plan, row.Runtime, row.ClaudeConfigRoot = nil, nil, nil, nil
 	row.Name, row.Surface, row.Status, row.Ended, row.Cwd = record.Name, surface.SurfaceKind(record.Surface), surface.SessionStatus(record.Status), record.Ended, record.Cwd

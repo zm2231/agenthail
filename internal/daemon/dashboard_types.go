@@ -3,6 +3,7 @@ package daemon
 import (
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/prwatch"
 	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -66,7 +67,7 @@ type dashboardSession struct {
 	Project           *projectresolve.CatalogProject  `json:"project,omitempty"`
 	Checkout          *projectresolve.CatalogCheckout `json:"checkout,omitempty"`
 	Worktree          *workView                       `json:"worktree,omitempty"`
-	PRs               []prView                        `json:"prs,omitempty"`
+	PRs               []prwatch.View                  `json:"prs,omitempty"`
 	HeldWork          []heldWorkRow                   `json:"heldWork,omitempty"`
 	Move              *moveView                       `json:"move,omitempty"`
 	ObservedAt        time.Time                       `json:"observedAt,omitempty"`

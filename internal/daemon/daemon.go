@@ -14,6 +14,7 @@ import (
 	"github.com/zm2231/agenthail/internal/browserhost"
 	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/claudehost"
+	"github.com/zm2231/agenthail/internal/daemon/prwatch"
 	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/github"
@@ -170,7 +171,7 @@ type Daemon struct {
 	workClean                sync.Mutex
 	workWake                 chan struct{}
 	github                   github.Client
-	prWatch                  prWatchState
+	prs                      *prwatch.Watcher
 	taskGoals                taskGoalReads
 	taskWaitRead             func()
 	taskNoticeMu             sync.Mutex
@@ -274,6 +275,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 	d.sources.hookCaptured = d.holdsUncheckedHookCapture
 	d.ui = newUIState(reg)
 	d.snapshots = newSnapshotRelay()
+	d.prs = prwatch.New(reg, prHost{d}, d.log)
 	identity, err := reg.HostIdentity()
 	if err != nil {
 		d.log.Printf("host identity: %s", err)
@@ -440,7 +442,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.runIdleCompaction(ctx)
 	go d.runGoalSweeps(ctx)
 	go d.runWorkCleans(ctx)
-	go d.runPRSweeps(ctx)
+	go d.prs.Run(ctx)
 	go d.runReplacementAnnouncements(ctx)
 	go d.runLedgerSweeps(ctx)
 	d.settleUnranApprovals()

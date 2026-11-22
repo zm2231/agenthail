@@ -49,7 +49,7 @@ func TestAPullRequestsLifeIsLoggedToEveryItemItsSessionHolds(t *testing.T) {
 	merged := openStatus(ref, "abc123")
 	merged.State = "merged"
 	fake.setStatus(merged)
-	if err := d.watchPRs(t.Context(), time.Now()); err != nil {
+	if err := d.prs.Watch(t.Context(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 

@@ -1,4 +1,4 @@
-package daemon
+package prwatch
 
 import (
 	"context"
@@ -16,22 +16,24 @@ const createdPRReadTimeout = 30 * time.Second
 
 var shellTools = []string{"Bash", "exec_command", "shell", "local_shell"}
 
-func (d *Daemon) linkCreatedPRs(ctx context.Context, adapter surface.Surface, session surface.Session) {
+// LinkCreated links the pull requests a session's newest turn created with a
+// shell command.
+func (w *Watcher) LinkCreated(ctx context.Context, adapter surface.Surface, session surface.Session) {
 	ctx, cancel := context.WithTimeout(ctx, createdPRReadTimeout)
 	defer cancel()
-	read, _, err := d.readSessionPage(ctx, &session, adapter, 0, 1, createdPRReadTimeout, true)
+	items, err := w.host.LatestTimeline(ctx, &session, adapter, createdPRReadTimeout)
 	if err != nil {
-		d.log.Printf("pull requests created by %s: %s", d.resolveDisplay(session.ID), err)
+		w.log.Printf("pull requests created by %s: %s", w.host.Display(session.ID), err)
 		return
 	}
-	for _, ref := range d.createdPRs(session.ID, read.Items) {
-		if err := d.linkPR(registry.SessionPR{SessionID: session.ID, Repo: ref.Repo.String(), Number: ref.Number, URL: ref.URL(), Source: registry.PRSourceCreated}, false); err != nil {
-			d.log.Printf("link %s to %s: %s", ref.URL(), d.resolveDisplay(session.ID), err)
+	for _, ref := range w.createdPRs(session.ID, items) {
+		if err := w.Link(registry.SessionPR{SessionID: session.ID, Repo: ref.Repo.String(), Number: ref.Number, URL: ref.URL(), Source: registry.PRSourceCreated}, false); err != nil {
+			w.log.Printf("link %s to %s: %s", ref.URL(), w.host.Display(session.ID), err)
 		}
 	}
 }
 
-func (d *Daemon) createdPRs(sessionID string, items []surface.TimelineItem) []github.Ref {
+func (w *Watcher) createdPRs(sessionID string, items []surface.TimelineItem) []github.Ref {
 	commands := map[string]string{}
 	var refs []github.Ref
 	for _, item := range items {
@@ -40,27 +42,16 @@ func (d *Daemon) createdPRs(sessionID string, items []surface.TimelineItem) []gi
 			if !slices.Contains(shellTools, item.Title) || !item.Truncated && !strings.Contains(item.Text, "pr create") {
 				continue
 			}
-			if command := shellCommand(d.itemText(sessionID, item)); strings.Contains(command, "pr create") {
+			if command := shellCommand(w.host.TimelineText(sessionID, item)); strings.Contains(command, "pr create") {
 				commands[item.CallID] = command
 			}
 		case "toolResult":
 			if command, ok := commands[item.CallID]; ok && item.Status != "error" {
-				refs = append(refs, github.CreatedBy(command, d.itemText(sessionID, item))...)
+				refs = append(refs, github.CreatedBy(command, w.host.TimelineText(sessionID, item))...)
 			}
 		}
 	}
 	return refs
-}
-
-func (d *Daemon) itemText(sessionID string, item surface.TimelineItem) string {
-	if !item.Truncated || item.BodyRef == "" {
-		return item.Text
-	}
-	body, _, err := d.Registry.SessionJournalBody(sessionID, item.BodyRef, 0, sessionJournalRetentionBytes)
-	if err != nil {
-		return item.Text
-	}
-	return string(body)
 }
 
 func shellCommand(input string) string {

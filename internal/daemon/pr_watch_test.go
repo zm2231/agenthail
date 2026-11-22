@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/prwatch"
 	"github.com/zm2231/agenthail/internal/github"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/worktree"
@@ -53,8 +54,8 @@ func TestAWatchedPullRequestWakesItsSessionOncePerHead(t *testing.T) {
 	now := time.Now()
 	tick := func() {
 		t.Helper()
-		now = now.Add(prSweepEvery)
-		if err := d.watchPRs(t.Context(), now); err != nil {
+		now = now.Add(prwatch.SweepEvery)
+		if err := d.prs.Watch(t.Context(), now); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -118,7 +119,7 @@ func TestAMergedPullRequestSettlesItsSessionsWorktreeWithoutAWake(t *testing.T) 
 	fake.setStatus(merged)
 	d.github = fake
 
-	if err := d.watchPRs(t.Context(), time.Now()); err != nil {
+	if err := d.prs.Watch(t.Context(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if work := workOf(t, r, "started"); work.State != registry.WorkSettled || work.SettledReason != registry.WorkSettledMerged {
@@ -148,7 +149,7 @@ func TestAMergedPullRequestFromAnotherBranchLeavesTheWorktree(t *testing.T) {
 	fake := &fakeGitHub{}
 	fake.setStatus(merged)
 	d.github = fake
-	if err := d.watchPRs(t.Context(), time.Now()); err != nil {
+	if err := d.prs.Watch(t.Context(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if work := workOf(t, r, "started"); work.State != registry.WorkActive {
@@ -168,7 +169,7 @@ func TestAReportedTasksPullRequestWakesItsSpawner(t *testing.T) {
 	fake := &fakeGitHub{}
 	fake.setStatus(openStatus(ref, "aaaaaaa1111", github.Check{Name: "test", State: github.CheckFailed}))
 	d.github = fake
-	if err := d.watchPRs(t.Context(), time.Now()); err != nil {
+	if err := d.prs.Watch(t.Context(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if wakes := wakesFor(t, r, "to"); len(wakes) != 0 {
@@ -186,11 +187,11 @@ func TestAHostGitHubRefusesShowsItsProblemAndBacksOff(t *testing.T) {
 	fake.setStatus(openStatus(ref, "aaaaaaa1111", github.Check{Name: "test", State: github.CheckFailed}))
 	d.github = fake
 	now := time.Now()
-	if err := d.watchPRs(t.Context(), now); err == nil {
+	if err := d.prs.Watch(t.Context(), now); err == nil {
 		t.Fatal("a read without a gh sign-in reported success")
 	}
 	prs, _ := r.PRsForSession("to")
-	if views := d.prViews(prs); len(views) != 1 || !strings.Contains(views[0].Problem, "gh auth login") {
+	if views := d.prs.Views(prs); len(views) != 1 || !strings.Contains(views[0].Problem, "gh auth login") {
 		t.Fatalf("views = %+v", views)
 	}
 	if wakes := wakesFor(t, r, "to"); len(wakes) != 0 {
@@ -198,18 +199,18 @@ func TestAHostGitHubRefusesShowsItsProblemAndBacksOff(t *testing.T) {
 	}
 
 	fake.watchErr = &github.RateLimitedError{Message: "API rate limit exceeded"}
-	_ = d.watchPRs(t.Context(), now)
+	_ = d.prs.Watch(t.Context(), now)
 	reads := len(fake.watchReads)
-	_ = d.watchPRs(t.Context(), now.Add(prSweepEvery))
+	_ = d.prs.Watch(t.Context(), now.Add(prwatch.SweepEvery))
 	if len(fake.watchReads) != reads {
 		t.Fatal("a rate-limited host was read again before its backoff")
 	}
 	fake.watchErr = nil
-	if err := d.watchPRs(t.Context(), now.Add(prBackoffFirst)); err != nil {
+	if err := d.prs.Watch(t.Context(), now.Add(prwatch.BackoffFirst)); err != nil {
 		t.Fatal(err)
 	}
 	prs, _ = r.PRsForSession("to")
-	if views := d.prViews(prs); views[0].Problem != "" || views[0].Checks != "failing" {
+	if views := d.prs.Views(prs); views[0].Problem != "" || views[0].Checks != "failing" {
 		t.Fatalf("after the backoff = %+v", views)
 	}
 }
@@ -220,7 +221,7 @@ func TestAHostsGitHubProblemReachesASessionViewAlreadyBuilt(t *testing.T) {
 	fake := &fakeGitHub{}
 	fake.setStatus(openStatus(ref, "aaaaaaa1111"))
 	d.github = fake
-	if err := d.watchPRs(t.Context(), time.Now()); err != nil {
+	if err := d.prs.Watch(t.Context(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	d.discoverCatalog(t.Context())
@@ -228,14 +229,14 @@ func TestAHostsGitHubProblemReachesASessionViewAlreadyBuilt(t *testing.T) {
 		t.Fatalf("before the refusal = %+v", prs)
 	}
 	fake.watchErr = &github.UnavailableError{Reason: "gh is not signed in to github.com; run gh auth login"}
-	_ = d.watchPRs(t.Context(), time.Now())
+	_ = d.prs.Watch(t.Context(), time.Now())
 	d.discoverCatalog(t.Context())
 	if prs := viewedPRs(t, d, "to"); len(prs) != 1 || !strings.Contains(prs[0].Problem, "gh auth login") {
 		t.Fatalf("after the refusal = %+v", prs)
 	}
 }
 
-func viewedPRs(t *testing.T, d *Daemon, id string) []prView {
+func viewedPRs(t *testing.T, d *Daemon, id string) []prwatch.View {
 	t.Helper()
 	view, err := d.readSessionView(t.Context(), sessionViewRequest{Scope: "all", Limit: 50})
 	if err != nil {
