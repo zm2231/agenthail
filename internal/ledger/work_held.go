@@ -32,7 +32,11 @@ func (item WorkItem) LatestLog() *WorkEntry {
 func HeldNote(items []WorkItem, mcp bool) string {
 	lines := make([]string, 0, len(items))
 	for _, item := range items {
-		lines = append(lines, fmt.Sprintf("You hold %s (%s). %s", item.ID, clipText(item.Text, 120), HolderGuidance(item.ID, mcp)))
+		rejected := ""
+		if by, why, ok := item.Rejection(); ok {
+			rejected = fmt.Sprintf("%s sent it back from review: %s. Fix that and submit it again. ", by, clipText(why, 200))
+		}
+		lines = append(lines, fmt.Sprintf("You hold %s (%s). %s%s", item.ID, clipText(item.Text, 120), rejected, HolderGuidance(item.ID, mcp)))
 	}
 	return strings.Join(lines, "\n")
 }

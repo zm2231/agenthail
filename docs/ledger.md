@@ -202,6 +202,17 @@ Two kinds of notes attach to an item:
 - `--assignee <session>` or `--mine`, `--clause <id>`, and `--found` for found work only.
 - `--sort id|priority|created|updated` (newest first for the dates) and `--limit <n>`.
 
+`agenthail ledger status` (or `ledger current`) is where a session stands, in one read:
+
+- the items it holds, each with its newest log line, any handoff's remaining work, and its unfinished children with who holds them;
+- items a reviewer sent back to it, with who rejected them and why, until it submits them again;
+- items it holds that are blocked or wait on unfinished dependencies;
+- what it submitted that waits for review;
+- others' work in review that it could review, most urgent first (ten at most, with the total);
+- the top three of `ledger ready`.
+
+It is about the calling session; `ledger status <session|@alias>` shows another one, and `--json` prints the same as the `status` view of `agenthail_ledger_read`. A Claude or Codex session that starts, resumes or compacts while holding work is told which items it holds and how to log to them, and for an item sent back from review, who sent it back and why.
+
 Every command that takes an item also takes an imported item's td id, with or without the `td:` prefix: `ledger show td-1a2b3c`, `ledger close td-1a2b3c --reason "done: PR #12"`, `ledger dep td-1a2b3c --on td-4d5e6f`. Only the whole id matches.
 
 Comments and logs stay on the item when the clause above it is cut, and they survive a rebuild. When the person's words behind a clause are retracted, asked work added under that clause goes with them, notes included, and the board lists it among the retractions; found work that was linked to the clause goes back to found.
@@ -343,6 +354,7 @@ GET /api/v1/ledger/events                                   # ledger.changed, on
   - `ready`, the ranked next work;
   - `backlog`, parked work with whether each item can come back and why (`kind`, `ready`), and `triage`, unowned open or blocked work idle `days` days (14 by default), as `agenthail ledger backlog` prints them;
   - `item`: one work item with its context, or one ask, as `agenthail ledger show --json` prints it.
+  - `status`: where the session `id` stands, as `agenthail ledger status --json` prints it. Over MCP, `id` defaults to the calling session.
   - `words`: one captured message, what was typed and what was quoted, and with `context` (0 to 20) the turns around it from the session's journal, as `agenthail ledger words --json` prints it. Only the host that captured the message holds those turns; asked elsewhere, it answers `409` naming that host. `agenthail ledger words` reads through this view, so it needs the daemon running.
 - **Work filters.** With no filter, the `work` view lists every work item, settled and deleted ones included. With any filter, it selects as `agenthail ledger list` does: `q`, `state`, `type`, `priority`, `label`, `assignee`, `clause`, `found` and `all`.
 - **Paging.** Lists are ordered by id and paged with `limit` (1 to 100) and the `nextCursor` of the previous page. A page starts after that id, so items added meanwhile don't shift it.

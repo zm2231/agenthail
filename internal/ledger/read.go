@@ -20,7 +20,7 @@ const (
 	readReplyClip    = 600
 )
 
-var readViews = []string{"board", "goals", "asks", "decisions", "questions", "work", "ready", "backlog", "triage", "item"}
+var readViews = []string{"board", "goals", "asks", "decisions", "questions", "work", "ready", "backlog", "triage", "item", "status"}
 
 type ReadRequest struct {
 	View    string
@@ -86,6 +86,12 @@ func (s *Store) Read(projectKey string, req ReadRequest) (map[string]any, error)
 		return result, nil
 	case "backlog", "triage":
 		return readBacklog(board, view, req, result)
+	case "status":
+		if req.ID == "" {
+			return nil, refuse("the status view needs the session it is about as id")
+		}
+		result["status"] = board.SessionStatus(req.ID)
+		return result, nil
 	}
 	limit, err := readLimit(req.Limit, readMaxLimit)
 	if err != nil {
