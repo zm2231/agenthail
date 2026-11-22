@@ -19,6 +19,7 @@ type WorkQuery struct {
 	Assignee   string      `json:"assignee,omitempty"`
 	Clause     string      `json:"clause,omitempty"`
 	Found      bool        `json:"found,omitempty"`
+	Parent     string      `json:"parent,omitempty"`
 	Sort       string      `json:"sort,omitempty"`
 	Limit      int         `json:"limit,omitempty"`
 }
@@ -70,7 +71,8 @@ func (q WorkQuery) keeps(item *WorkItem) bool {
 		len(q.Priorities) > 0 && !slices.Contains(q.Priorities, item.Priority),
 		q.Assignee != "" && item.Assignee != q.Assignee,
 		q.Clause != "" && item.ClauseID != q.Clause,
-		q.Found && item.ClauseID != "":
+		q.Found && item.ClauseID != "",
+		q.Parent != "" && item.Parent != q.Parent:
 		return false
 	}
 	for _, l := range q.Labels {
@@ -177,7 +179,12 @@ func (b *Board) workItem(ref string) *WorkItem {
 }
 
 func (b *Board) canonicalWorkRefs(req WorkRequest) WorkRequest {
-	refs := []*string{&req.ItemID, &req.DependsOn}
+	refs := []*string{&req.ItemID, &req.DependsOn, &req.Fields.Parent}
+	if req.Change.Parent != nil {
+		parent := *req.Change.Parent
+		req.Change.Parent = &parent
+		refs = append(refs, req.Change.Parent)
+	}
 	if b.clauses[req.Fields.From] == nil {
 		refs = append(refs, &req.Fields.From)
 	}

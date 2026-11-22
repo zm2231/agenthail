@@ -31,6 +31,7 @@ const (
 	EventQuestionEsc   EventType = "question.escalated"
 	EventGate          EventType = "gate"
 	EventWorkItemDep   EventType = "work_item.dep"
+	EventWorkItemUndep EventType = "work_item.undep"
 	EventWorkComment   EventType = "work_item.comment"
 	EventWorkLog       EventType = "work_item.log"
 	EventCutWithdrawn  EventType = "cut.withdrawn"

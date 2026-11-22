@@ -42,6 +42,21 @@ func (a *App) ledgerWorkShow(store *ledger.Store, w ledgerWriteArgs, id string) 
 	for _, d := range ctx.Dependents {
 		fmt.Printf("blocks %s [%s]: %s\n", d.ID, d.State, d.Text)
 	}
+	if p := ctx.Parent; p != nil {
+		fmt.Printf("child of %s [%s]: %s\n", p.ID, p.State, p.Text)
+	}
+	if len(ctx.Children) > 0 {
+		done := 0
+		for _, c := range ctx.Children {
+			if c.State == ledger.WorkDone || c.State == ledger.WorkClosed || c.State == ledger.WorkDeleted {
+				done++
+			}
+		}
+		fmt.Printf("children, %d of %d finished:\n", done, len(ctx.Children))
+		for _, c := range ctx.Children {
+			fmt.Printf("  %s [%s]: %s\n", c.ID, c.State, c.Text)
+		}
+	}
 	if len(item.Timeline) == 0 {
 		return nil
 	}
@@ -115,6 +130,46 @@ func (a *App) ledgerWorkReady(store *ledger.Store, w ledgerWriteArgs, next bool)
 	}
 	for _, item := range ready {
 		fmt.Println(workLine(item))
+	}
+	return nil
+}
+
+func (a *App) ledgerWorkTree(store *ledger.Store, w ledgerWriteArgs) error {
+	if len(w.positional) > 3 {
+		return fmt.Errorf("%s", ledgerWorkUsage)
+	}
+	board, err := a.workBoard(store, w)
+	if err != nil {
+		return err
+	}
+	root := ""
+	if len(w.positional) == 3 {
+		root = w.positional[2]
+	}
+	tree, ok := board.Tree(root, w.bools["--all"])
+	if !ok {
+		return fmt.Errorf("%q is not a work item; `agenthail ledger work` lists the items", root)
+	}
+	if w.bools["--json"] {
+		return emit(tree)
+	}
+	if len(tree) == 0 {
+		fmt.Println("no unfinished work items")
+		return nil
+	}
+	var printNode func(node ledger.WorkTree, depth int)
+	printNode = func(node ledger.WorkTree, depth int) {
+		line := fmt.Sprintf("%s%s [%s] %s", strings.Repeat("  ", depth), node.ID, node.State, node.Text)
+		if node.Assignee != "" {
+			line += " assignee=" + node.Assignee
+		}
+		fmt.Println(line)
+		for _, child := range node.Children {
+			printNode(child, depth+1)
+		}
+	}
+	for _, node := range tree {
+		printNode(node, 0)
 	}
 	return nil
 }

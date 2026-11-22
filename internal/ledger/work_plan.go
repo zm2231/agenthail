@@ -31,6 +31,8 @@ func (b *Board) planWork(req WorkRequest, ids *idIssuer) (EventType, any, string
 		return b.planWorkAdd(req, ids)
 	case WorkDep:
 		return b.planWorkDep(req)
+	case WorkUndep:
+		return b.planWorkUndep(req)
 	case WorkComment, WorkLog:
 		return b.planWorkNote(req)
 	case WorkEdit:
@@ -40,7 +42,7 @@ func (b *Board) planWork(req WorkRequest, ids *idIssuer) (EventType, any, string
 	}
 	transition, ok := workTransitions[req.Action]
 	if !ok {
-		return "", nil, "", refuse("unknown work action %q; use add, claim, block, unblock, park, unpark, submit, approve, reject, reopen, handoff, dep, comment or log", req.Action)
+		return "", nil, "", refuse("unknown work action %q; use add, claim, block, unblock, park, unpark, submit, approve, reject, reopen, handoff, dep, undep, comment or log", req.Action)
 	}
 	item := b.workItems[req.ItemID]
 	if item == nil {
@@ -48,6 +50,16 @@ func (b *Board) planWork(req WorkRequest, ids *idIssuer) (EventType, any, string
 	}
 	if !slices.Contains(transition.from, item.State) {
 		return "", nil, "", refuse("%s is %s; %s needs it %s", item.ID, item.State, req.Action, joinStates(transition.from))
+	}
+	switch req.Action {
+	case WorkSubmit, WorkApprove, WorkClose, WorkDelete:
+		if err := b.refuseOpenChildren(item, req.Action); err != nil {
+			return "", nil, "", err
+		}
+	case WorkReopen, WorkRestore:
+		if err := b.refuseSettledParent(item, req.Action); err != nil {
+			return "", nil, "", err
+		}
 	}
 	payload := WorkItemStatePayload{ItemID: item.ID, FromState: item.State, ToState: transition.to, Actor: req.SessionID, Assignee: item.Assignee, Reason: strings.TrimSpace(req.Reason)}
 	readback := fmt.Sprintf("%s %s (%s)", item.ID, transition.to, item.origin())
@@ -145,15 +157,33 @@ func (b *Board) planWorkAdd(req WorkRequest, ids *idIssuer) (EventType, any, str
 	if fields.From != "" && b.workItems[fields.From] == nil && b.clauses[fields.From] == nil {
 		return "", nil, "", refuse("--found-in %q is not a work item or clause in %s", fields.From, req.ProjectKey)
 	}
+	if fields.Parent != "" {
+		parent, err := b.checkParent("", fields.Parent, req.ProjectKey)
+		if err != nil {
+			return "", nil, "", err
+		}
+		fields.Parent = parent.ID
+		if req.ClauseID == "" && fields.From == "" {
+			if parent.ClauseID != "" && b.liveClause(parent.ClauseID, req.ProjectKey) == nil {
+				req.ClauseID = parent.ClauseID
+			} else {
+				fields.From = parent.ID
+			}
+		}
+	}
 	id, err := ids.next(EventWorkItem, "W")
 	if err != nil {
 		return "", nil, "", err
 	}
 	payload := WorkItemPayload{ItemID: id, ClauseID: req.ClauseID, Text: text, CreatedBy: req.SessionID, WorkFields: fields}
-	if req.ClauseID == "" {
-		return EventWorkItem, payload, fmt.Sprintf("+%s found (%s %s)", id, fields.withDefaults().Type, fields.withDefaults().Priority), nil
+	under := ""
+	if fields.Parent != "" {
+		under = ", a child of " + fields.Parent
 	}
-	return EventWorkItem, payload, fmt.Sprintf("+%s on %s", id, req.ClauseID), nil
+	if req.ClauseID == "" {
+		return EventWorkItem, payload, fmt.Sprintf("+%s found (%s %s)%s", id, fields.withDefaults().Type, fields.withDefaults().Priority, under), nil
+	}
+	return EventWorkItem, payload, fmt.Sprintf("+%s on %s%s", id, req.ClauseID, under), nil
 }
 
 func (b *Board) liveClause(id, projectKey string) error {

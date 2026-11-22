@@ -36,7 +36,7 @@ func (b *Board) reaches(from, to string) bool {
 			continue
 		}
 		seen[id] = true
-		stack = append(stack, b.workItems[id].DependsOn...)
+		stack = append(stack, b.waitsOn(b.workItems[id])...)
 	}
 	return false
 }
@@ -62,7 +62,7 @@ func (b *Board) CriticalPath() []WorkItem {
 		}
 		item := b.workItems[id]
 		var best []string
-		deps := append([]string(nil), item.DependsOn...)
+		deps := b.waitsOn(item)
 		sort.Strings(deps)
 		for _, dep := range deps {
 			if d := b.workItems[dep]; d != nil && !d.State.settled() {

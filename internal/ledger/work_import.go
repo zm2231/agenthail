@@ -27,11 +27,19 @@ type WorkImportDep struct {
 	On   string `json:"on"`
 }
 
+// WorkImportParent puts Item under Parent, both named by importedFrom. A dependency of Parent on Item, which
+// an earlier import made of the same link, is dropped, so importing again corrects it.
+type WorkImportParent struct {
+	Item   string `json:"item"`
+	Parent string `json:"parent"`
+}
+
 type WorkImportRequest struct {
-	ProjectKey string          `json:"projectKey"`
-	SessionID  string          `json:"sessionId"`
-	Items      []WorkImport    `json:"items,omitempty"`
-	Deps       []WorkImportDep `json:"deps,omitempty"`
+	ProjectKey string             `json:"projectKey"`
+	SessionID  string             `json:"sessionId"`
+	Items      []WorkImport       `json:"items,omitempty"`
+	Deps       []WorkImportDep    `json:"deps,omitempty"`
+	Parents    []WorkImportParent `json:"parents,omitempty"`
 }
 
 type WorkImported struct {
@@ -45,10 +53,13 @@ type WorkImportSkip struct {
 }
 
 type WorkImportResult struct {
-	Imported []WorkImported   `json:"imported,omitempty"`
-	Present  []WorkImported   `json:"present,omitempty"`
-	Deps     int              `json:"deps"`
-	Skipped  []WorkImportSkip `json:"skipped,omitempty"`
+	Imported []WorkImported `json:"imported,omitempty"`
+	Present  []WorkImported `json:"present,omitempty"`
+	Deps     int            `json:"deps"`
+	Parents  int            `json:"parents"`
+	// DepsReplaced counts dependencies an earlier import made of a parent link, dropped for the link.
+	DepsReplaced int              `json:"depsReplaced"`
+	Skipped      []WorkImportSkip `json:"skipped,omitempty"`
 }
 
 type WorkHistory struct {
@@ -112,6 +123,13 @@ func (b *Board) planImport(req WorkImportRequest, ids *idIssuer, now time.Time, 
 		}
 		return append(append([]string(nil), deps...), added[id]...)
 	}
+	waitsOrChildOf := func(id string) []string {
+		deps := waitsOn(id)
+		if item := b.workItems[id]; item != nil {
+			deps = append(deps, item.Children...)
+		}
+		return deps
+	}
 	for _, dep := range req.Deps {
 		item, on := byOrigin[dep.Item], byOrigin[dep.On]
 		label := dep.Item + " waits on " + dep.On
@@ -124,13 +142,61 @@ func (b *Board) planImport(req WorkImportRequest, ids *idIssuer, now time.Time, 
 			continue
 		case slices.Contains(waitsOn(item), on):
 			continue
-		case reachesThrough(waitsOn, on, item):
+		case reachesThrough(waitsOrChildOf, on, item):
 			result.Skipped = append(result.Skipped, WorkImportSkip{ImportedFrom: label, Reason: fmt.Sprintf("%s already waits on %s, so this would be a cycle", on, item)})
 			continue
 		}
 		added[item] = append(added[item], on)
 		events = append(events, plannedWrite{EventWorkItemDep, WorkDepPayload{ItemID: item, DependsOn: on, Actor: req.SessionID}})
 		result.Deps++
+	}
+	parentOf := map[string]string{}
+	dropped := map[string][]string{}
+	for id, item := range b.workItems {
+		parentOf[id] = item.Parent
+	}
+	children := map[string][]string{}
+	for id, parent := range parentOf {
+		if parent != "" {
+			children[parent] = append(children[parent], id)
+		}
+	}
+	waitsOrChildren := func(id string) []string {
+		deps := slices.DeleteFunc(waitsOn(id), func(dep string) bool { return slices.Contains(dropped[id], dep) })
+		return append(deps, children[id]...)
+	}
+	for _, link := range req.Parents {
+		item, parent := byOrigin[link.Item], byOrigin[link.Parent]
+		label := link.Item + " under " + link.Parent
+		switch {
+		case item == "" || parent == "":
+			result.Skipped = append(result.Skipped, WorkImportSkip{ImportedFrom: label, Reason: "one side was not imported"})
+			continue
+		case item == parent:
+			result.Skipped = append(result.Skipped, WorkImportSkip{ImportedFrom: label, Reason: "an item cannot be its own parent"})
+			continue
+		case parentOf[item] == parent:
+			continue
+		case parentOf[item] != "":
+			result.Skipped = append(result.Skipped, WorkImportSkip{ImportedFrom: label, Reason: fmt.Sprintf("%s is already a child of %s", item, parentOf[item])})
+			continue
+		}
+		if slices.Contains(waitsOn(parent), item) {
+			dropped[parent] = append(dropped[parent], item)
+			added[parent] = slices.DeleteFunc(added[parent], func(dep string) bool { return dep == item })
+			if current := b.workItems[parent]; current != nil && slices.Contains(current.DependsOn, item) {
+				events = append(events, plannedWrite{EventWorkItemUndep, WorkDepPayload{ItemID: parent, DependsOn: item, Actor: req.SessionID}})
+				result.DepsReplaced++
+			}
+		}
+		if reachesThrough(waitsOrChildren, item, parent) {
+			result.Skipped = append(result.Skipped, WorkImportSkip{ImportedFrom: label, Reason: fmt.Sprintf("%s already waits on %s, so this would be a cycle", item, parent)})
+			continue
+		}
+		parentOf[item], children[parent] = parent, append(children[parent], item)
+		under := parent
+		events = append(events, plannedWrite{EventWorkEdit, WorkEditPayload{ItemID: item, Actor: req.SessionID, WorkChange: WorkChange{Parent: &under}}})
+		result.Parents++
 	}
 	return events, nil
 }

@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
 )
@@ -71,5 +73,62 @@ func TestLedgerWorkRecordsFoundWorkAndItsFields(t *testing.T) {
 	}
 	if got[4]["action"] != "close" || got[4]["reason"] != "duplicate of widget-W2" {
 		t.Fatalf("close request %v", got[4])
+	}
+}
+
+func TestLedgerWorkNestsItemsUnderParentsAndShowsTheTree(t *testing.T) {
+	var store *ledger.Store
+	app, calls := ledgerWriteFixture(t, func(_ string, body map[string]any) (int, any) {
+		data, _ := json.Marshal(body)
+		var req ledger.WorkRequest
+		if err := json.Unmarshal(data, &req); err != nil {
+			t.Fatal(err)
+		}
+		result, err := store.Work(req, time.Now())
+		if err != nil {
+			return http.StatusBadRequest, map[string]any{"error": map[string]any{"code": "invalid", "message": err.Error()}}
+		}
+		return http.StatusOK, result
+	})
+	store = ledger.NewStore(app.registry().WriteDB(), app.registry().ReadDB())
+	for _, args := range [][]string{
+		{"add", "ship", "search"},
+		{"add", "schema", "--parent", "widget-W1"},
+		{"add", "index", "--parent", "widget-W1"},
+		{"add", "docs"},
+		{"edit", "widget-W4", "--parent", "widget-W2"},
+		{"dep", "widget-W4", "--on", "widget-W3"},
+		{"dep", "widget-W4", "--on", "widget-W3", "--remove"},
+		{"edit", "widget-W3", "--no-parent"},
+	} {
+		if _, err := captureStdout(t, func() error { return app.cmdLedger(args) }); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+	if fields, _ := (*calls)[1]["fields"].(map[string]any); fields["parent"] != "widget-W1" {
+		t.Fatalf("add --parent sent %v", (*calls)[1])
+	}
+	if change, _ := (*calls)[7]["change"].(map[string]any); change["parent"] != "" {
+		t.Fatalf("edit --no-parent sent %v", (*calls)[7])
+	}
+	if (*calls)[6]["action"] != "undep" {
+		t.Fatalf("dep --remove sent %v", (*calls)[6])
+	}
+	if _, err := captureStdout(t, func() error {
+		return app.cmdLedger([]string{"edit", "widget-W3", "--parent", "widget-W1", "--no-parent"})
+	}); err == nil {
+		t.Fatal("edit took both --parent and --no-parent")
+	}
+	out, err := captureStdout(t, func() error { return app.cmdLedger([]string{"tree"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "widget-W1 [open] ship search\n  widget-W2 [open] schema\n    widget-W4 [open] docs\nwidget-W3 [open] index\n"
+	if out != want {
+		t.Fatalf("tree printed\n%s\nwant\n%s", out, want)
+	}
+	out, err = captureStdout(t, func() error { return app.cmdLedger([]string{"show", "widget-W1"}) })
+	if err != nil || !strings.Contains(out, "children, 0 of 1 finished:\n  widget-W2 [open]: schema") {
+		t.Fatalf("show printed %q, err %v", out, err)
 	}
 }

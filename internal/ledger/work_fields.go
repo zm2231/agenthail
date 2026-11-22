@@ -38,6 +38,7 @@ type WorkFields struct {
 	Acceptance  string   `json:"acceptance,omitempty"`
 	Labels      []string `json:"labels,omitempty"`
 	From        string   `json:"from,omitempty"`
+	Parent      string   `json:"parent,omitempty"`
 }
 
 func (f WorkFields) withDefaults() WorkFields {
@@ -58,7 +59,7 @@ func (f WorkFields) normalized() (WorkFields, error) {
 	if f.Priority, err = workPriority(f.Priority); err != nil {
 		return f, err
 	}
-	f.Description, f.Acceptance, f.From = strings.TrimSpace(f.Description), strings.TrimSpace(f.Acceptance), strings.TrimSpace(f.From)
+	f.Description, f.Acceptance, f.From, f.Parent = strings.TrimSpace(f.Description), strings.TrimSpace(f.Acceptance), strings.TrimSpace(f.From), strings.TrimSpace(f.Parent)
 	if err := fieldLength("description", f.Description); err != nil {
 		return f, err
 	}
@@ -139,6 +140,8 @@ type WorkChange struct {
 	Acceptance   *string   `json:"acceptance,omitempty"`
 	AddLabels    []string  `json:"addLabels,omitempty"`
 	RemoveLabels []string  `json:"removeLabels,omitempty"`
+	// Parent moves the item under another; an empty one takes it out from under its parent.
+	Parent *string `json:"parent,omitempty"`
 }
 
 type WorkEditPayload struct {
@@ -201,8 +204,27 @@ func (b *Board) planWorkEdit(req WorkRequest) (EventType, any, string, error) {
 	for _, l := range c.RemoveLabels {
 		changed = append(changed, "-"+l)
 	}
+	if c.Parent != nil {
+		parent := strings.TrimSpace(*c.Parent)
+		switch {
+		case parent == "" && item.Parent == "":
+			return "", nil, "", refuse("%s has no parent", item.ID)
+		case parent == "":
+			changed = append(changed, "no parent")
+		default:
+			p, err := b.checkParent(item.ID, parent, req.ProjectKey)
+			if err != nil {
+				return "", nil, "", err
+			}
+			if p.ID == item.Parent {
+				return "", nil, "", refuse("%s is already a child of %s", item.ID, p.ID)
+			}
+			parent, changed = p.ID, append(changed, "parent "+p.ID)
+		}
+		c.Parent = &parent
+	}
 	if len(changed) == 0 {
-		return "", nil, "", refuse("edit needs at least one of --text, --type, --priority, --description, --acceptance, --label or --unlabel")
+		return "", nil, "", refuse("edit needs at least one of --text, --type, --priority, --description, --acceptance, --label, --unlabel, --parent or --no-parent")
 	}
 	slices.Sort(changed)
 	return EventWorkEdit, WorkEditPayload{ItemID: item.ID, Actor: req.SessionID, WorkChange: c}, fmt.Sprintf("%s edited: %s", item.ID, strings.Join(changed, ", ")), nil
@@ -242,6 +264,16 @@ func (b *Board) applyWorkEdit(event Event) error {
 	for _, l := range p.RemoveLabels {
 		item.Labels = slices.DeleteFunc(item.Labels, func(have string) bool { return have == l })
 		changed = append(changed, "-"+l)
+	}
+	if p.Parent != nil && (*p.Parent == "" || b.workItems[*p.Parent] != nil) {
+		b.releaseChild(item.Parent, item.ID)
+		item.Parent = *p.Parent
+		b.adoptChild(item.Parent, item.ID)
+		if item.Parent == "" {
+			changed = append(changed, "no parent")
+		} else {
+			changed = append(changed, "parent "+item.Parent)
+		}
 	}
 	item.Timeline = append(item.Timeline, WorkEntry{At: event.CreatedAt, Actor: p.Actor, Kind: "edit", Text: strings.Join(changed, "; ")})
 	return nil

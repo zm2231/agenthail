@@ -241,9 +241,23 @@ When a project's coordinator gets a prompt, the session-context hook (`UserPromp
 
 `agenthail ledger backlog --triage [--days N]` lists open or blocked items that nobody holds and that have had no activity for N days (14 by default), to park them in a batch with `ledger park <id>...`. It is `view=triage` (`days`) on the same endpoint.
 
+### Sub-items
+
+An item can be a step of a bigger one. `ledger add "<text>" --parent <item>` adds it under that item, on the parent's clause, or as work found in the parent when the parent is found work or its clause is no longer in scope. `ledger edit <item> --parent <other>` moves an item under another, and `--no-parent` takes it out. The parent is the item's `parent` field (on `work_item` when it is added, on `work_item.edit` when it moves), and each item lists its `children`, so it replicates like any other field.
+
+A parent waits on its children as it waits on its dependencies:
+
+- It is not in `ready` while a child is unfinished; its open children are.
+- It cannot be submitted, approved, closed or deleted while a child is unfinished. The refusal names each one, for example `widget-W12 has 2 open children: widget-W13 in_progress, widget-W14 open`. Claiming it stays allowed, so a session can hold the whole piece while others take the steps.
+- A finished parent takes no new children, and a closed or deleted child of one is not reopened or restored until the parent is reopened.
+- Making an item a child of something it already waits on, or a dependency of its own child, is refused as a cycle.
+- The critical path counts children as steps.
+
+`ledger show` lists the children and how many are finished. `ledger tree [<item>]` prints unfinished items nested under their parents (`--all` adds finished ones), and `ledger list --parent <item>` lists one item's children. `ledger dep <item> --on <other> --remove` drops a dependency (`work_item.undep`).
+
 To pick up work:
 
-- `agenthail ledger work ready` lists open items whose dependencies are settled, the most urgent first and then the ones that unblock the most.
+- `agenthail ledger work ready` lists open items whose dependencies and children are settled, the most urgent first and then the ones that unblock the most.
 - `agenthail ledger work next` shows the first of those.
 - `agenthail ledger work critical-path` shows the longest chain of unfinished items.
 
@@ -253,12 +267,13 @@ To pick up work:
 
 The import maps td onto the ledger as follows:
 
-- An epic becomes a `feature` labelled `epic` that waits on each of its child issues.
+- An epic becomes a `feature` labelled `epic`, and each issue under a td parent becomes that item's child.
 - td dependencies become dependencies. One that would make a cycle is skipped and listed.
 - `P4` becomes `P3`.
 - In-progress and in-review issues come over open: their claims were td sessions, which cannot submit or hand off in the ledger.
 - A log type the ledger does not have becomes a progress log whose text starts with that type.
 - An open or blocked issue deferred to a future date arrives parked for later (`deferred in td`), coming back on that date. A defer date that has passed is dropped, and the issue arrives open.
+- `agenthail ledger import td [<path>] --fix-parents` puts items already imported under their td parents, for a ledger imported before parents were kept, when each link became a dependency of the parent on its child. It drops that dependency and records the parent, as ordinary events, imports nothing new, and changes nothing on a second run. It needs the td database the items came from.
 - Deleted issues, points, sprints, minor flags, due dates, and td's notes, boards, file links and work sessions are not carried over. The import lists how many of each it left behind.
 
 Each item records the td issue it came from (`imported from td:td-1a2b3c` in `ledger work <item>`), and running the import again skips issues already imported, so an interrupted import can simply be rerun. Imported items are found work until they are linked to a clause of the person's.

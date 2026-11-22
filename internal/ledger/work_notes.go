@@ -92,6 +92,7 @@ func (b *Board) WorkItem(id string) (WorkItem, bool) {
 func (item *WorkItem) snapshot() WorkItem {
 	out := *item
 	out.DependsOn = slices.Clone(item.DependsOn)
+	out.Children = slices.Clone(item.Children)
 	out.Labels = slices.Clone(item.Labels)
 	out.Timeline = slices.Clone(item.Timeline)
 	if item.Handoff != nil {
@@ -123,7 +124,7 @@ func (b *Board) Ready() []WorkItem {
 	}
 	var ready []WorkItem
 	for _, item := range b.workItems {
-		if item.State == WorkOpen && len(b.openDeps(item)) == 0 {
+		if item.State == WorkOpen && len(b.openDeps(item)) == 0 && len(b.openChildren(item)) == 0 {
 			ready = append(ready, item.snapshot())
 		}
 	}
