@@ -197,10 +197,18 @@ struct AppearanceLoadTest {
         let budget = SnapshotBudget(deadlineMs: 2300)
         await budget.wait { backdrop.shows(shown) }
         check(!backdrop.shows(shown), "a snapshot whose backdrop never draws the store's config is still not drawn when its budget runs out")
+        check(shown.captureFailure(for: "mesh", backdrop: backdrop) == .undrawn, "a revision's capture fails while its backdrop hasn't drawn")
+        check(shown.captureFailure(for: "mesh", backdrop: nil) == .undrawn, "a revision's capture fails without a backdrop to show it")
+        check(shown.captureFailure(for: nil, backdrop: nil) == nil, "a capture without a revision stays best-effort")
         backdrop.configure(shown.config, wallpapers: shown.drawn)
         check(!backdrop.shows(shown), "a backdrop given the config shows it only once rendered")
         await wait(30) { backdrop.shows(shown) }
         check(backdrop.shows(shown), "the backdrop shows the store's config once rendered")
+        check(shown.captureFailure(for: "mesh", backdrop: backdrop) == nil, "a revision captures once its backdrop has drawn it")
+        serve(#"{"rev":"later","values":{"theme":"dark","background":"mesh: 2x2, #F0E0D0, #203040, #E0F0C0, #102040"},"chosen":{},"overrides":{},"problems":[]}"#)
+        shown.load(from: api)
+        await wait { shown.config.rev == "later" }
+        check(shown.captureFailure(for: "mesh", backdrop: backdrop) == .changed, "a capture fails once a later revision replaces the requested one")
         print("appearance load: ok")
     }
 }

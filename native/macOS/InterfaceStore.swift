@@ -56,6 +56,13 @@ final class InterfaceStore: ObservableObject {
         return nil
     }
 
+    func captureFailure(for rev: String?, backdrop: WindowBackdrop?) -> WindowImage.Failure? {
+        guard let rev, !rev.isEmpty else { return nil }
+        guard config.rev == rev else { return .changed }
+        guard snapshotProblem(for: rev) == nil, backdrop?.shows(self) == true else { return .undrawn }
+        return nil
+    }
+
     /// Shows a value at once, before it is written, while a slider moves.
     func preview(_ key: String, _ value: UIConfig.Value) {
         overlay[key] = value

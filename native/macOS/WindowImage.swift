@@ -8,9 +8,12 @@ enum WindowImage {
         case unavailable
         case empty
         case undrawn
+        case changed
 
         var message: String {
             switch self {
+            case .changed:
+                "The appearance changed again before the snapshot was taken."
             case .undrawn:
                 "The window's background didn't finish drawing in time."
             case .unavailable:
