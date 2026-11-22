@@ -177,11 +177,22 @@ func assignmentSource(key assignmentKey, branched bool) string {
 	return "assigned to " + key.kind + " @" + key.target
 }
 
-func (d *Daemon) sessionRole(sessionID string) *mcpRoleView {
+// sessionRoles is the role a session on this host acts under itself and,
+// when its agent identity may be reached from elsewhere, the role a caller
+// reaching it that way acts under; the two differ in their implicit role.
+func (d *Daemon) sessionRoles(sessionID string) (local, remote *mcpRoleView) {
 	record, err := d.Registry.Caller(sessionID)
-	if err != nil || record.HostID != "" {
-		return nil
+	if err != nil {
+		return nil, nil
 	}
 	role := d.callerRole(record, false)
-	return roleView(&role)
+	local = roleView(&role)
+	if record.Identity == "" {
+		return local, nil
+	}
+	if _, err := d.Registry.RemoteIdentityNamed(record.Identity); err != nil {
+		return local, nil
+	}
+	reached := d.callerRole(record, true)
+	return local, roleView(&reached)
 }

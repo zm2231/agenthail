@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/agentinbox"
 	"github.com/zm2231/agenthail/internal/daemonapi"
 
 	"github.com/zm2231/agenthail/internal/agentroles"
@@ -637,9 +639,9 @@ func TestThePersonsStoredAgentPolicyBecomesTheRolesItAppliedTo(t *testing.T) {
 func TestASessionsDetailNamesTheRoleItActsUnderAndWhatItReplaced(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
 	handler := dashboardRouter(d)
-	role := func() map[string]any {
+	role := func(id string) map[string]any {
 		t.Helper()
-		request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id=from", nil)
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id="+id, nil)
 		request.Header.Set("Authorization", "Bearer secret")
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
@@ -651,7 +653,7 @@ func TestASessionsDetailNamesTheRoleItActsUnderAndWhatItReplaced(t *testing.T) {
 		}
 		return body.Role
 	}
-	if got := role(); got["name"] != agentroles.Worker || got["label"] != agentroles.Worker || got["replaces"] != nil {
+	if got := role("from"); got["name"] != agentroles.Worker || got["label"] != agentroles.Worker || got["replaces"] != nil {
 		t.Fatalf("an unassigned session's role reads %v", got)
 	}
 	for _, request := range []AgentRoleRequest{
@@ -662,7 +664,61 @@ func TestASessionsDetailNamesTheRoleItActsUnderAndWhatItReplaced(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := role(); got["name"] != "reviewer" || got["reach"] != agentroles.ReachProject || got["replaces"] != agentroles.Worker || got["label"] != "worker (replaced by reviewer)" || got["source"] != "assigned to this session" {
+	if got := role("from"); got["name"] != "reviewer" || got["reach"] != agentroles.ReachProject || got["replaces"] != agentroles.Worker || got["label"] != "worker (replaced by reviewer)" || got["source"] != "assigned to this session" {
 		t.Fatalf("an assigned session's role reads %v", got)
+	}
+}
+
+func TestARemoteIdentitysDetailShowsTheRoleARemoteCallerActsUnderAsWhoamiDoes(t *testing.T) {
+	f := newRemoteFixture(t, "")
+	f.d.Surfaces = append(f.d.Surfaces, agentinbox.New(func() *registry.Registry { return f.r }))
+	handler := dashboardRouter(f.d)
+	detail := func() (map[string]any, map[string]any) {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id="+f.scout.SessionID, nil)
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		var body struct {
+			Role       map[string]any `json:"role"`
+			RemoteRole map[string]any `json:"remoteRole"`
+		}
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
+			t.Fatalf("session detail answered %d %s", response.Code, response.Body)
+		}
+		return body.Role, body.RemoteRole
+	}
+	whoami := func() map[string]any {
+		t.Helper()
+		out, refused := callMCP(t, f.connect(t, map[string]string{"Authorization": "Bearer " + f.token}, nil), "agenthail_whoami", nil)
+		if refused {
+			t.Fatalf("whoami: %v", out)
+		}
+		role, _ := out["role"].(map[string]any)
+		return role
+	}
+	agree := func(want string) {
+		t.Helper()
+		local, remote := detail()
+		reached := whoami()
+		if remote["name"] != want || !maps.Equal(remote, reached) {
+			t.Fatalf("the detail's remote role %v, whoami from elsewhere %v, want %s", remote, reached, want)
+		}
+		if local["name"] == agentroles.Remote {
+			t.Fatalf("the session's own role reads %v", local)
+		}
+	}
+	agree(agentroles.Remote)
+	for _, request := range []AgentRoleRequest{
+		{Op: "put", Name: "reviewer", Role: agentroles.Role{Reach: agentroles.ReachProject}},
+		{Op: "assign", Name: "reviewer", Kind: registry.AssignIdentity, Target: "scout"},
+	} {
+		if err := f.d.changeAgentRole(context.Background(), daemonapi.CLIActor, request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	agree("reviewer")
+	if _, remote := detail(); remote["label"] != "remote (replaced by reviewer)" {
+		t.Fatalf("the remote role's label reads %v", remote["label"])
 	}
 }
