@@ -319,7 +319,7 @@ func TestARemoteIdentityIsWokenBySignedWebhooksThatCarryOnlyACount(t *testing.T)
 	w.quiet(t, "after the burst was told", 300*time.Millisecond)
 
 	history := f.eventHistory(t)
-	if !strings.Contains(history, "subscribed") || !strings.Contains(history, "delivered") || strings.Contains(history, "receiver-credential") || strings.Contains(history, strings.TrimPrefix(w.secret, "whsec_")) || strings.Contains(history, "private") {
+	if !strings.Contains(history, "events/list by @scout => listed inbox.unread") || !strings.Contains(history, "events/subscribe by @scout inbox.unread to "+w.url+"/hooks/kat => subscribed "+subscribed.ID+"; verification passed: HTTP 200") || !strings.Contains(history, "; verified within 24h0m0s") || !strings.Contains(history, "delivered") || strings.Contains(history, "receiver-credential") || strings.Contains(history, strings.TrimPrefix(w.secret, "whsec_")) || strings.Contains(history, "private") {
 		t.Fatalf("history:\n%s", history)
 	}
 
@@ -330,6 +330,9 @@ func TestARemoteIdentityIsWokenBySignedWebhooksThatCarryOnlyACount(t *testing.T)
 	}
 	f.deliver(t, "after unsubscribing")
 	w.quiet(t, "after unsubscribing", 500*time.Millisecond)
+	if history := f.eventHistory(t); !strings.Contains(history, "events/unsubscribe by @scout inbox.unread to "+w.url+"/hooks/kat => unsubscribed "+subscribed.ID) || !strings.Contains(history, "=> no subscription "+subscribed.ID) {
+		t.Fatalf("history:\n%s", history)
+	}
 }
 
 func TestAWebhookIsRetriedWithItsEventIDAndA410EndsTheSubscription(t *testing.T) {
@@ -479,8 +482,25 @@ func TestEventSubscribeRefusesCallbacksItCannotSafelyReach(t *testing.T) {
 	if code, data := rpcError(t, err); code != codeCallbackEndpoint || data["reason"] != "challenge_failed" {
 		t.Fatalf("a wrong challenge: code=%d data=%v", code, data)
 	}
-	if history := f.eventHistory(t); !strings.Contains(history, "refused: challenge_failed") {
-		t.Fatalf("history:\n%s", history)
+	w.answer(func(webhookCall) (int, string) { return http.StatusNotFound, "" })
+	if _, err := subscribe(t.Context(), session, w.url+"/missing?token=receiver-credential", w.secret, ""); err == nil {
+		t.Fatal("an endpoint that answered 404 subscribed")
+	}
+	history := f.eventHistory(t)
+	for _, line := range []string{
+		"events/subscribe by @scout inbox.unread to https://10.0.0.7/hook => refused: invalid params: delivery.url must reach a public address",
+		"events/subscribe by @scout inbox.unread to https://example.com/hook => refused: invalid params: delivery.url must not carry credentials",
+		"=> refused: invalid params: delivery.secret must be whsec_",
+		"/hook => refused: verification failed: blocked_address",
+		w.url + "/hook => refused: verification failed: challenge_failed (HTTP 200)",
+		w.url + "/missing => refused: verification failed: http_4xx (HTTP 404)",
+	} {
+		if !strings.Contains(history, line) {
+			t.Fatalf("no %q in history:\n%s", line, history)
+		}
+	}
+	if strings.Contains(history, "pass@") || strings.Contains(history, "receiver-credential") || strings.Contains(history, strings.TrimPrefix(w.secret, "whsec_")) {
+		t.Fatalf("history kept a credential:\n%s", history)
 	}
 }
 

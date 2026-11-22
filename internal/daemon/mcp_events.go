@@ -200,9 +200,11 @@ func callbackError(reason string) error {
 }
 
 func (m *remoteMCP) listEvents(ctx context.Context, _ *mcp.ServerSession, _ *eventsListParams) (*eventsListResult, error) {
-	if _, err := eventCaller(ctx); err != nil {
+	principal, err := m.eventCall(ctx, "events/list")
+	if err != nil {
 		return nil, err
 	}
+	m.recordEventCall(principal, "events/list", eventCallOutcome{result: "listed " + eventInboxUnread})
 	return &eventsListResult{Events: []eventDescriptor{inboxUnreadEvent}}, nil
 }
 
@@ -278,70 +280,92 @@ func eventSubscriptionID(identity, callback, name, args string) string {
 }
 
 func (m *remoteMCP) subscribeEvent(ctx context.Context, _ *mcp.ServerSession, params *eventsSubscribeParams) (*eventsSubscribeResult, error) {
-	principal, err := eventCaller(ctx)
+	principal, err := m.eventCall(ctx, "events/subscribe")
 	if err != nil {
 		return nil, err
 	}
+	result, outcome := m.subscribeOutcome(ctx, principal, params)
+	outcome.name, outcome.url = params.Name, params.Delivery.URL
+	m.recordEventCall(principal, "events/subscribe", outcome)
+	if outcome.err != nil {
+		return nil, outcome.err
+	}
+	m.pokeEvents()
+	return result, nil
+}
+
+func (m *remoteMCP) subscribeOutcome(ctx context.Context, principal eventPrincipal, params *eventsSubscribeParams) (*eventsSubscribeResult, eventCallOutcome) {
 	args, err := eventArguments(params.Name, params.Arguments)
 	if err != nil {
-		return nil, err
+		return nil, eventCallOutcome{err: err}
 	}
 	callback, err := eventCallbackURL(params.Delivery)
 	if err != nil {
-		return nil, err
+		return nil, eventCallOutcome{err: err}
 	}
 	if _, ok := webhookKey(params.Delivery.Secret); !ok {
-		return nil, invalidEventParams("delivery.secret must be whsec_ followed by base64 of 24 to 64 bytes")
+		return nil, eventCallOutcome{err: invalidEventParams("delivery.secret must be whsec_ followed by base64 of 24 to 64 bytes")}
 	}
 	if err := checkEventTTL(params.TTLMs); err != nil {
-		return nil, err
+		return nil, eventCallOutcome{err: err}
 	}
 	now := time.Now()
 	id := eventSubscriptionID(principal.identity, callback, params.Name, args)
 	verified, err := m.d.Registry.EventEndpointVerified(principal.identity, callback, now.Add(-eventVerifiedFor))
 	if err != nil {
-		return nil, err
+		return nil, eventCallOutcome{err: err}
 	}
+	check := "verified within " + eventVerifiedFor.String()
 	if !verified {
-		if reason := m.verifyCallback(ctx, id, callback, params.Delivery.Secret); reason != "" {
-			m.recordEvent(principal.identity, callback, "refused: "+reason)
-			return nil, callbackError(reason)
+		reply := m.verifyCallback(ctx, id, callback, params.Delivery.Secret)
+		if reply.reason != "" {
+			return nil, eventCallOutcome{err: callbackError(reply.reason), result: "verification failed: " + reply.describe()}
 		}
+		check = "verification passed: " + reply.describe()
 	}
 	sub, err := m.d.Registry.SubscribeEvent(registry.EventSubscribe{ID: id, IdentityID: principal.identity, TokenHash: principal.tokenHash, Epoch: principal.epoch, Name: params.Name, Args: args, URL: callback, Secret: params.Delivery.Secret, Verified: !verified, Limit: eventSubscriptionLimit, SecretGrace: eventSecretGrace})
 	if errors.Is(err, registry.ErrEventSubscriptionLimit) {
 		data, _ := json.Marshal(map[string]any{"limit": "subscriptions", "max": eventSubscriptionLimit})
-		return nil, &jsonrpc.Error{Code: jsonrpc.CodeInvalidParams, Message: err.Error(), Data: data}
+		return nil, eventCallOutcome{err: &jsonrpc.Error{Code: jsonrpc.CodeInvalidParams, Message: err.Error(), Data: data}, result: check}
 	}
 	if err != nil {
-		return nil, err
+		return nil, eventCallOutcome{err: err, result: check}
 	}
-	m.recordEvent(principal.identity, callback, "subscribed")
-	m.pokeEvents()
-	return &eventsSubscribeResult{ID: sub.ID}, nil
+	return &eventsSubscribeResult{ID: sub.ID}, eventCallOutcome{result: "subscribed " + sub.ID + "; " + check}
 }
 
 func (m *remoteMCP) unsubscribeEvent(ctx context.Context, _ *mcp.ServerSession, params *eventsUnsubscribeParams) (*eventsUnsubscribeResult, error) {
-	principal, err := eventCaller(ctx)
+	principal, err := m.eventCall(ctx, "events/unsubscribe")
 	if err != nil {
 		return nil, err
 	}
+	outcome := m.unsubscribeOutcome(principal, params)
+	outcome.name, outcome.url = params.Name, params.Delivery.URL
+	m.recordEventCall(principal, "events/unsubscribe", outcome)
+	if outcome.err != nil {
+		return nil, outcome.err
+	}
+	return &eventsUnsubscribeResult{}, nil
+}
+
+func (m *remoteMCP) unsubscribeOutcome(principal eventPrincipal, params *eventsUnsubscribeParams) eventCallOutcome {
 	args, err := eventArguments(params.Name, params.Arguments)
 	if err != nil {
-		return nil, err
+		return eventCallOutcome{err: err}
 	}
 	callback, err := eventCallbackURL(params.Delivery)
 	if err != nil {
-		return nil, err
+		return eventCallOutcome{err: err}
 	}
-	removed, err := m.d.Registry.UnsubscribeEvent(principal.identity, eventSubscriptionID(principal.identity, callback, params.Name, args))
+	id := eventSubscriptionID(principal.identity, callback, params.Name, args)
+	removed, err := m.d.Registry.UnsubscribeEvent(principal.identity, id)
 	if err != nil {
-		return nil, err
+		return eventCallOutcome{err: err}
 	}
-	if removed {
-		m.recordEvent(principal.identity, callback, "unsubscribed")
+	if !removed {
+		return eventCallOutcome{result: "no subscription " + id}
 	}
-	return &eventsUnsubscribeResult{}, nil
+	return eventCallOutcome{result: "unsubscribed " + id}
 }
 
 // A query string can carry the receiver's own credentials, so history keeps only where it points.
@@ -461,33 +485,34 @@ func transportReason(err error) string {
 	return "connection_refused"
 }
 
-// verifyCallback returns the reason the endpoint failed the handshake, or "" once it echoed the challenge.
-func (m *remoteMCP) verifyCallback(ctx context.Context, subscription, callback, secret string) string {
+// verifyCallback returns the endpoint's reply, with a reason unless it echoed the challenge.
+func (m *remoteMCP) verifyCallback(ctx context.Context, subscription, callback, secret string) webhookReply {
 	nonce := make([]byte, 32)
 	idBytes := make([]byte, 12)
 	if _, err := rand.Read(nonce); err != nil {
-		return "connection_refused"
+		return webhookReply{reason: "connection_refused"}
 	}
 	if _, err := rand.Read(idBytes); err != nil {
-		return "connection_refused"
+		return webhookReply{reason: "connection_refused"}
 	}
 	challenge := base64.RawURLEncoding.EncodeToString(nonce)
 	body, err := json.Marshal(map[string]string{"type": "verification", "challenge": challenge})
 	if err != nil {
-		return "connection_refused"
+		return webhookReply{reason: "connection_refused"}
 	}
 	reply := m.postWebhook(ctx, subscription, callback, "msg_verification_"+hex.EncodeToString(idBytes), body, []string{secret})
 	if reply.reason != "" {
-		return reply.reason
+		return reply
 	}
 	if reply.status < 200 || reply.status > 299 {
-		return "http_4xx"
+		reply.reason = "http_4xx"
+		return reply
 	}
 	var echoed struct {
 		Challenge string `json:"challenge"`
 	}
 	if json.Unmarshal(reply.body, &echoed) != nil || subtle.ConstantTimeCompare([]byte(echoed.Challenge), []byte(challenge)) != 1 {
-		return "challenge_failed"
+		reply.reason = "challenge_failed"
 	}
-	return ""
+	return reply
 }
