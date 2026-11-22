@@ -252,8 +252,8 @@ func TestASessionsOwnStdioServerActsAsTheSessionItsProcessHoldsNow(t *testing.T)
 	if err := reg.ArchiveSession("claude-two", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if id, err := session.whoami(t); err == nil {
-		t.Fatalf("an archived session still acted, as %q", id)
+	if id, err := session.whoami(t); err == nil || !strings.Contains(err.Error(), "its session claude-two has moved to another host or been archived") {
+		t.Fatalf("an archived session's whoami = %q, %v, want it refused as archived", id, err)
 	}
 }
 
