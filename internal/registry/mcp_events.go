@@ -115,7 +115,7 @@ func (r *Registry) SubscribeEvent(s EventSubscribe) (EventSubscription, error) {
 			prev_secret=CASE WHEN secret<>excluded.secret THEN secret ELSE prev_secret END,
 			prev_secret_until_ms=CASE WHEN secret<>excluded.secret THEN ?10 ELSE prev_secret_until_ms END,
 			secret=excluded.secret,
-			verified_at_ms=MAX(verified_at_ms,excluded.verified_at_ms),failures=0,suspended_at_ms=0,deferred_until_ms=0`,
+			verified_at_ms=MAX(verified_at_ms,excluded.verified_at_ms),failures=0,suspended_at_ms=0`,
 		s.ID, s.IdentityID, s.TokenHash, s.Name, s.Args, s.URL, s.Secret, verified, now.UnixMilli(), now.Add(s.SecretGrace).UnixMilli(), rand.Text()); err != nil {
 		return EventSubscription{}, err
 	}

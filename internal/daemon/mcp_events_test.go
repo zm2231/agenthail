@@ -463,23 +463,35 @@ func TestAWebhookWaitsAsLongAsItsRetryAfterAsks(t *testing.T) {
 	if gap := retried.at.Sub(first.at); gap < 900*time.Millisecond || first.id != retried.id {
 		t.Fatalf("retried after %s with id %s then %s, want at least the 1s asked", gap, first.id, retried.id)
 	}
+}
 
+func TestAWebhookDeferredLongerThanARetryHoldsItsSubscriptionUntilThen(t *testing.T) {
 	for name, value := range map[string]string{"seconds": "3600", "HTTP date": time.Now().Add(time.Hour).UTC().Format(http.TimeFormat), "beyond int64": "99999999999999999999"} {
-		w.answer(func(webhookCall) (int, string) { return http.StatusServiceUnavailable, "" })
-		w.mu.Lock()
-		w.header = http.Header{"Retry-After": {value}}
-		w.mu.Unlock()
-		f.deliver(t, "deferred by "+name)
-		w.next(t, name+": the attempt that is told to wait an hour")
-		w.quiet(t, name+": within the hour asked", 500*time.Millisecond)
-		f.deliver(t, "more mail while deferred by "+name)
-		w.quiet(t, name+": new mail while deferred", 500*time.Millisecond)
-		if history := f.eventHistory(t); !strings.Contains(history, "deferred") || strings.Contains(history, "failed") {
-			t.Fatalf("%s history:\n%s", name, history)
-		}
-		if _, err := subscribe(t.Context(), session, w.url+"/hook", w.secret, ""); err != nil {
-			t.Fatal(err)
-		}
+		t.Run(name, func(t *testing.T) {
+			f, w, start := eventsFixture(t)
+			session := f.eventsSession(t)
+			if _, err := subscribe(t.Context(), session, w.url+"/hook", w.secret, ""); err != nil {
+				t.Fatal(err)
+			}
+			w.next(t, "the verification handshake")
+			w.answer(func(webhookCall) (int, string) { return http.StatusServiceUnavailable, "" })
+			w.mu.Lock()
+			w.header = http.Header{"Retry-After": {value}}
+			w.mu.Unlock()
+			start()
+			f.deliver(t, "deferred")
+			w.next(t, "the attempt that is told to wait an hour")
+			w.quiet(t, "within the hour asked", 500*time.Millisecond)
+			f.deliver(t, "more mail while deferred")
+			w.quiet(t, "new mail while deferred", 500*time.Millisecond)
+			if history := f.eventHistory(t); !strings.Contains(history, "deferred") || strings.Contains(history, "failed") {
+				t.Fatalf("history:\n%s", history)
+			}
+			if _, err := subscribe(t.Context(), session, w.url+"/hook", w.secret, ""); err != nil {
+				t.Fatal(err)
+			}
+			w.quiet(t, "after the subscription was refreshed", 500*time.Millisecond)
+		})
 	}
 }
 
