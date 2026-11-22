@@ -305,7 +305,8 @@ final class ComposerSession {
             dropRefusedSend(refused, in: sessionID)
             return
         }
-        Task {
+        Task { [owner = router] in
+            defer { withExtendedLifetime(owner) {} }
             do {
                 let (api, route) = try resolve(sessionID)
                 _ = try await api.respond(sessionID: route.sessionID, requestID: ask.id, decision: .choose(FailedSendAsk.delete))
@@ -327,7 +328,8 @@ final class ComposerSession {
 
     private func readRefusedAsk(_ refused: RefusedSend, in sessionID: String) {
         guard let ask = refused.ask else { return }
-        Task {
+        Task { [owner = router] in
+            defer { withExtendedLifetime(owner) {} }
             var requests: SessionRequests?
             if let (api, route) = try? resolve(sessionID) { requests = try? await api.requests(sessionID: route.sessionID) }
             let session = rekeys.resolve(sessionID)
@@ -383,7 +385,12 @@ final class ComposerSession {
     }
 
     private func connectSendQueue() {
-        sendQueue.deliver = { [weak self] send in await self?.deliver(send) ?? .unconfirmed }
+        sendQueue.deliver = { [weak self] send in
+            guard let self, let owner = router else { return .unconfirmed }
+            let outcome = await deliver(send)
+            withExtendedLifetime(owner) {}
+            return outcome
+        }
         sendQueue.changed = { [weak self] in
             guard let self else { return }
             pendingSends = sendQueue.pending

@@ -622,6 +622,29 @@ final class ComposerSendTests: XCTestCase {
         XCTAssertNil(gone, "nothing in the composer keeps the model alive")
     }
 
+    func testAModelClosedWhileItsUploadIsInFlightStillSavesTheNewerDraft() async throws {
+        ComposerSendProtocol.state.scriptUploads([.held("up-1")])
+        ComposerSendProtocol.state.script([.answer(200, sentReceipt)])
+        let store = temporaryStore()
+        weak var gone: AgenthailIOSModel?
+        var sessionID = ""
+        do {
+            let (model, session) = try makeModel(store: store)
+            sessionID = session.id
+            model.composerSession.composerAttachments = [ComposerAttachment(name: "notes.txt", data: Data("hello".utf8), mediaType: "text/plain")]
+            model.composerSession.composer = "Went out"
+            model.composerSession.send(to: session)
+            try await waitUntil { ComposerSendProtocol.state.holding }
+            model.composerSession.composer = "Typed while it was sending"
+            model.composerSession.saveComposerState()
+            gone = model
+        }
+        XCTAssertNotNil(gone, "a send in flight keeps its model until it finishes")
+        ComposerSendProtocol.state.releaseHeld()
+        try await waitUntil(seconds: 3) { gone == nil && ComposerSendProtocol.state.attempts.count == 1 }
+        XCTAssertEqual(store.load().saved.drafts[sessionID], "Typed while it was sending")
+    }
+
     func testChangingTheTerminalWhileWaitingRetriesTheFirstRequest() async throws {
         ComposerSendProtocol.state.script([.lostResponse, .answer(200, sentReceipt)])
         let (model, session) = try makeModel()
@@ -1225,6 +1248,7 @@ private final class ComposerSendProtocol: URLProtocol, @unchecked Sendable {
     enum UploadStep {
         case stored(String)
         case offline
+        case held(String)
     }
 
     struct Attempt {
@@ -1240,15 +1264,19 @@ private final class ComposerSendProtocol: URLProtocol, @unchecked Sendable {
         private var uploadSteps: [UploadStep] = []
         private var uploadNames: [String] = []
         private var requestsBody = "{}"
+        private var parked: (() -> Void)?
 
         var attempts: [Attempt] { lock.withLock { recorded } }
         var uploads: [String] { lock.withLock { uploadNames } }
 
-        func reset() { lock.withLock { steps = []; recorded = []; uploadSteps = []; uploadNames = []; requestsBody = "{}" } }
+        func reset() { lock.withLock { steps = []; recorded = []; uploadSteps = []; uploadNames = []; requestsBody = "{}"; parked = nil } }
         func listRequests(_ body: String) { lock.withLock { requestsBody = body } }
         var requests: String { lock.withLock { requestsBody } }
         func script(_ steps: [Step]) { lock.withLock { self.steps = steps } }
         func scriptUploads(_ steps: [UploadStep]) { lock.withLock { uploadSteps = steps } }
+        var holding: Bool { lock.withLock { parked != nil } }
+        func park(_ answer: @escaping () -> Void) { lock.withLock { parked = answer } }
+        func releaseHeld() { lock.withLock { defer { parked = nil }; return parked }?() }
 
         func nextUpload(_ name: String) -> UploadStep {
             lock.withLock {
@@ -1288,6 +1316,7 @@ private final class ComposerSendProtocol: URLProtocol, @unchecked Sendable {
         let name = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "name" }?.value ?? ""
         switch Self.state.nextUpload(name) {
         case .stored(let id): respond(200, #"{"upload":{"id":"\#(id)","name":"\#(name)","mediaType":"text/plain","bytes":5}}"#)
+        case .held(let id): Self.state.park { [self] in respond(200, #"{"upload":{"id":"\#(id)","name":"\#(name)","mediaType":"text/plain","bytes":5}}"#) }
         case .offline: client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
         }
     }
