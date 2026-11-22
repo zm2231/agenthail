@@ -136,7 +136,26 @@ func TestTheRepositorysCIInputsSelectTheTestsThatUseThem(t *testing.T) {
 			t.Errorf("a change to %s selects %v, without %s", changed, short(s), want)
 		}
 	}
-	for _, changed := range []string{"scripts/ci-go-select.sh", "go.mod", ".github/workflows/ci.yml", "scripts/go-test-select/inputs.tsv"} {
+	for changed, want := range map[string]string{
+		"native/Package.swift":                    "native-helpers",
+		"native/AgenthailModel.swift":             "native-helpers",
+		"native/macOS/AgenthailProcess.swift":     "native-helpers",
+		"native/tests/accent_contrast_test.swift": "native-helpers",
+		"native/Packages/Textual/Package.swift":   "textual",
+		"scripts/test-native-helpers.sh":          "native-helpers",
+	} {
+		s, err := selectTests(g, inputs, []string{changed})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(s.suites, want) {
+			t.Errorf("a change to %s selects suites %v, without %s", changed, s.suites, want)
+		}
+	}
+	if s, err := selectTests(g, inputs, []string{"native/iOS/AgenthailIOSApp.swift"}); err != nil || slices.Contains(s.suites, "native-helpers") {
+		t.Errorf("an iOS-only change selects suites %v (err %v), with native-helpers", s.suites, err)
+	}
+	for _, changed := range []string{"scripts/ci-go-select.sh", "scripts/ci-darwin-tests.sh", "scripts/go-darwin-packages/main.go", "go.mod", ".github/workflows/ci.yml", "scripts/go-test-select/inputs.tsv"} {
 		if s, err := selectTests(g, inputs, []string{changed}); err != nil || !s.all {
 			t.Errorf("a change to %s does not select everything (err %v)", changed, err)
 		}

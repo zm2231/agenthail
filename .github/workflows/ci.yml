@@ -48,7 +48,7 @@ jobs:
         run: scripts/ci-package-inputs.sh
 
   verify:
-    needs: gate
+    needs: [gate, select]
     if: ${{ !cancelled() && (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size) }}
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
     timeout-minutes: 20
@@ -93,10 +93,12 @@ jobs:
       - name: Stage the shipped Node
         run: scripts/fetch-node.sh
       - name: Tests of the packages with macOS code paths, the readability guard and native helpers
-        # Linux runs every package with -race. A gate that did not decide runs the native helper tests.
+        # Linux runs every package with -race. Each part runs only when the selection reaches it, and all of them when it did not run.
         env:
           FULL: ${{ needs.gate.outputs.full == 'true' || needs.gate.result != 'success' }}
           GUARD_CACHE: ${{ runner.tool_cache }}/agenthail-cache/chrome-for-testing
+          SELECT_RESULT: ${{ needs.select.result }}
+          SELECTED: ${{ needs.select.outputs.selected }}
         run: AGENTHAIL_BROWSER_TEST_BROWSERS="${AGENTHAIL_BUILD_CACHE:-$HOME/.cache/agenthail-build}/playwright" scripts/ci-darwin-tests.sh
       - name: Session process identity tests
         # The macOS kernel's peer credentials, parent pid and open files, named so a run shows each one passing.
@@ -179,6 +181,7 @@ jobs:
           scripts/test-ci-concurrently.sh
           scripts/test-ci-full-label.sh
           scripts/test-ci-go-select.sh
+          scripts/test-ci-darwin-tests.sh
           scripts/test-ci-package-inputs.sh
           scripts/test-ci-failure-issue.sh
           scripts/test-ios-ui-tests.sh
@@ -230,6 +233,7 @@ jobs:
       surfaces: ${{ steps.select.outputs.surfaces }}
       packages: ${{ steps.select.outputs.packages }}
       skippable: ${{ steps.select.outputs.skippable }}
+      selected: ${{ steps.select.outputs.selected }}
     steps:
       - uses: actions/checkout@v5
         with:

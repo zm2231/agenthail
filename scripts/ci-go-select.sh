@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Decides which Linux Go test jobs a run needs, from scripts/go-test-select, and writes
-# daemon, surfaces, packages and skippable to GITHUB_OUTPUT. A push, a merge-train branch
-# and a stack whose base is unknown select everything.
+# Decides which Go test jobs a run needs, from scripts/go-test-select, and writes daemon,
+# surfaces, packages, skippable and selected (every selected package and suite) to
+# GITHUB_OUTPUT. A push, a merge-train branch and a stack whose base is unknown select
+# everything.
 # Needs EVENT, HEAD_REF, BASE, STACKED and STACK_BASE_REF.
 set -euo pipefail
 
@@ -38,4 +39,5 @@ echo "internal/daemon: $daemon; surfaces and Node hosts: $surfaces; other packag
 	echo "surfaces=$surfaces"
 	echo "packages=${packages[*]+"${packages[*]}"}"
 	echo "skippable=[$(IFS=,; echo "${skippable[*]+"${skippable[*]}"}")]"
+	echo "selected=$(tr '\n' ' ' <<<"$selected" | sed 's/ *$//')"
 } >>"$GITHUB_OUTPUT"

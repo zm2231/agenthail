@@ -3,6 +3,8 @@ go.sum	all	-
 .github/workflows/ci.yml	all	-
 scripts/go-test-select/**	all	-
 scripts/ci-go-select.sh	all	-
+scripts/ci-darwin-tests.sh	all	-
+scripts/go-darwin-packages/**	all	-
 .github/**	none	-
 .gitignore	none	-
 *.md	none	-
@@ -49,3 +51,8 @@ internal/**	imports	internal/daemon
 **/*.go	tests	internal/sourceguard
 **/*.go	tests	scripts/go-test-select
 scripts/test-home.mjs	suite	node-hosts
+native/*.swift	suite	native-helpers
+native/macOS/**	suite	native-helpers
+native/tests/**	suite	native-helpers
+scripts/test-native-helpers.sh	suite	native-helpers
+native/Packages/Textual/**	suite	textual
