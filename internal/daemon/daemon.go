@@ -117,6 +117,8 @@ type Daemon struct {
 	catalogIdentities *projectresolve.CatalogIdentityCache
 	repositoryKeys    repositoryKeyWatch
 	ledgerOnce        sync.Once
+	heldWorkVersion   atomic.Uint64
+	heldWorkRows      heldWorkCache
 	ledger            *ledger.Store
 	ledgerHub         *ledgerChangeHub
 	ledgerSync        ledgerSyncHealth

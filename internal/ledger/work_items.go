@@ -97,6 +97,7 @@ type WorkRequest struct {
 type WorkResult struct {
 	Item     WorkItem `json:"item"`
 	Readback string   `json:"readback"`
+	Guidance string   `json:"guidance,omitempty"`
 }
 
 type WorkDepPayload struct {
@@ -125,7 +126,11 @@ func (s *Store) Work(req WorkRequest, now time.Time) (WorkResult, error) {
 	}
 	defer release()
 	item, _ := board.WorkItem(id)
-	return WorkResult{Item: item, Readback: "intent ledger: " + readback}, nil
+	result := WorkResult{Item: item, Readback: "intent ledger: " + readback}
+	if req.Action == WorkClaim {
+		result.Guidance = HolderGuidance(item.ID, false)
+	}
+	return result, nil
 }
 
 func joinStates(states []WorkState) string {

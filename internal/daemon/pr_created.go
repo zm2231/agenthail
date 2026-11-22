@@ -25,9 +25,7 @@ func (d *Daemon) linkCreatedPRs(ctx context.Context, adapter surface.Surface, se
 		return
 	}
 	for _, ref := range d.createdPRs(session.ID, read.Items) {
-		if _, err := d.changePRs(func(r *registry.Registry) (bool, error) {
-			return r.LinkPR(registry.SessionPR{SessionID: session.ID, Repo: ref.Repo.String(), Number: ref.Number, URL: ref.URL(), Source: registry.PRSourceCreated}, false, time.Now())
-		}); err != nil {
+		if err := d.linkPR(registry.SessionPR{SessionID: session.ID, Repo: ref.Repo.String(), Number: ref.Number, URL: ref.URL(), Source: registry.PRSourceCreated}, false); err != nil {
 			d.log.Printf("link %s to %s: %s", ref.URL(), d.resolveDisplay(session.ID), err)
 		}
 	}

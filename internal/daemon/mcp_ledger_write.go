@@ -63,7 +63,11 @@ func (d *Daemon) mcpLedgerWrite(ctx context.Context, caller *mcpCaller, input mc
 	if refusal != nil {
 		return nil, refusal
 	}
-	if action, _ := request["action"].(string); op == "work" && ledger.WorkAction(action).AttachCheckpoint() {
+	action, _ := request["action"].(string)
+	if op == "work" && ledger.WorkAction(action) == ledger.WorkClaim {
+		result = withToolGuidance(result)
+	}
+	if op == "work" && ledger.WorkAction(action).AttachCheckpoint() {
 		return d.withLedgerCheckpoint(caller.session, result), nil
 	}
 	return result, nil
@@ -85,4 +89,21 @@ func (d *Daemon) withLedgerCheckpoint(session surface.Session, result json.RawMe
 		return result
 	}
 	return merged
+}
+
+func withToolGuidance(result json.RawMessage) json.RawMessage {
+	var claimed ledger.WorkResult
+	if json.Unmarshal(result, &claimed) != nil || claimed.Guidance == "" {
+		return result
+	}
+	var fields map[string]any
+	if json.Unmarshal(result, &fields) != nil {
+		return result
+	}
+	fields["guidance"] = ledger.HolderGuidance(claimed.Item.ID, true)
+	out, err := json.Marshal(fields)
+	if err != nil {
+		return result
+	}
+	return out
 }

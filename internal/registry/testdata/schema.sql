@@ -2,6 +2,7 @@
 -- migration 2026-11-21-event-subscriptions-never-expire
 -- migration 2026-11-21-roles-for-agents
 -- migration 2026-11-22-agent-role-assignments
+-- migration 2026-11-22-held-work-moves-session-views
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -1414,6 +1415,24 @@ END;
 
 -- trigger catalog_presentation_version_hosts_update
 CREATE TRIGGER catalog_presentation_version_hosts_update AFTER UPDATE OF host_id,name ON hosts WHEN (NEW.host_id IS NOT OLD.host_id OR NEW.name IS NOT OLD.name)
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_ledger_events_delete
+CREATE TRIGGER catalog_presentation_version_ledger_events_delete AFTER DELETE ON ledger_events WHEN OLD.type IN ('work_item','work_item.state','work_item.log','work_item.edit')
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_ledger_events_insert
+CREATE TRIGGER catalog_presentation_version_ledger_events_insert AFTER INSERT ON ledger_events WHEN NEW.type IN ('work_item','work_item.state','work_item.log','work_item.edit')
+BEGIN
+	UPDATE catalog_presentation_version SET version=version+1;
+END;
+
+-- trigger catalog_presentation_version_ledger_events_update
+CREATE TRIGGER catalog_presentation_version_ledger_events_update AFTER UPDATE OF type ON ledger_events WHEN (NEW.type IN ('work_item','work_item.state','work_item.log','work_item.edit') OR OLD.type IN ('work_item','work_item.state','work_item.log','work_item.edit')) AND (NEW.type IS NOT OLD.type)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;

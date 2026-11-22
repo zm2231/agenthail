@@ -1198,6 +1198,23 @@ select {
   color: var(--muted);
   font-size: 12px;
 }
+.session-work {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+  white-space: nowrap;
+  margin: 2px 0 0 17px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.session-work-id {
+  flex: none;
+  font-weight: 600;
+}
+.session-work-log {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .session-more {
   width: 100%;
   margin-top: 8px;

@@ -33,6 +33,7 @@ type catalogViewState struct {
 	notices   map[string]registry.TurnNotice
 	judgments map[string]registry.TurnJudgment
 	leads     leadDirectory
+	held      map[string][]heldWorkRow
 }
 
 func (d *Daemon) buildCatalogViewState() (catalogViewState, error) {
@@ -78,7 +79,11 @@ func (d *Daemon) buildCatalogViewState() (catalogViewState, error) {
 	if err != nil {
 		return catalogViewState{}, fmt.Errorf("read project leads: %w", err)
 	}
-	return catalogViewState{archive: archive, attention: attention, marks: marks, reads: reads, turnEnds: turnEnds, asks: asks, notices: notices, judgments: judgments, leads: leads}, nil
+	held, err := d.heldWorkBySession()
+	if err != nil {
+		return catalogViewState{}, fmt.Errorf("read held work: %w", err)
+	}
+	return catalogViewState{archive: archive, attention: attention, marks: marks, reads: reads, turnEnds: turnEnds, asks: asks, notices: notices, judgments: judgments, leads: leads, held: held}, nil
 }
 
 // settleArchiveActivity unarchives each archived session that shows activity
@@ -150,6 +155,7 @@ func applyCatalogView(row *dashboardSession, view catalogViewState) {
 		judgment = &current
 	}
 	row.TurnState = turnStateOf(row, judgment, view.leads)
+	row.HeldWork = view.held[row.ID]
 }
 
 // catalogViewArchive reports whether the view archives the row, and whether

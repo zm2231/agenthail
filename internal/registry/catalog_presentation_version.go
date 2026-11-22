@@ -34,6 +34,7 @@ var presentationInputs = []presentationInput{
 	{table: "work_records", columns: presentationWorkColumns, when: `%[1]s.session_id<>''`},
 	{table: "session_prs", columns: presentationPRColumns, when: `%[1]s.unlinked=0`, shown: map[string]string{"read_failures": fmt.Sprintf("(%%[1]s.read_failures>=%d)", PRReadFailureLimit)}},
 	{table: "catalog_retired_version"},
+	{table: "ledger_events", columns: "type", when: `%[1]s.type IN ('work_item','work_item.state','work_item.log','work_item.edit')`},
 	{table: "session_moves", columns: "id,conversation,peer_host,state,detail,outcome_unknown_at,manifest", when: `%[1]s.role='out'`},
 	{table: "hosts", columns: "host_id,name"},
 	{table: "session_runtime", columns: "session_id,completed_turn_id,notice_turn_id,notice_outcome,notice_request_id,notice_at_ms"},

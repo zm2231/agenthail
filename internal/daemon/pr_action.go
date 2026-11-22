@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/github"
@@ -87,9 +86,7 @@ func (d *Daemon) doPR(ctx context.Context, p principal, session *surface.Session
 		if err != nil {
 			return actionResult{}, githubFailure(ref, err)
 		}
-		if _, err := d.changePRs(func(r *registry.Registry) (bool, error) {
-			return r.LinkPR(registry.SessionPR{SessionID: session.ID, Repo: repo, Number: ref.Number, URL: pr.URL, Source: prSource(p), Title: pr.Title, State: pr.State, HeadSHA: pr.HeadSHA}, true, time.Now())
-		}); err != nil {
+		if err := d.linkPR(registry.SessionPR{SessionID: session.ID, Repo: repo, Number: ref.Number, URL: pr.URL, Source: prSource(p), Title: pr.Title, State: pr.State, HeadSHA: pr.HeadSHA}, true); err != nil {
 			return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 		}
 	case "unlink":

@@ -130,6 +130,9 @@ func (d *Daemon) watchPRs(ctx context.Context, now time.Time) error {
 			if len(verdict.reasons) > 0 {
 				d.wakeForPR(verdict.row, verdict.reasons)
 			}
+			if line := prOutcomeLine(row, verdict.row); line != "" {
+				d.logToHeldWork(row.SessionID, line)
+			}
 			if verdict.merged {
 				d.settleMergedPR(row.SessionID, status.HeadRef)
 			}

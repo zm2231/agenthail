@@ -11,10 +11,12 @@ import (
 
 type ledgerCheckpointRequest struct {
 	SessionID string `json:"sessionId"`
+	Start     bool   `json:"start,omitempty"`
 }
 
 type ledgerCheckpointResponse struct {
-	Instruction string `json:"instruction,omitempty"`
+	Instruction string            `json:"instruction,omitempty"`
+	Held        []ledger.WorkItem `json:"held,omitempty"`
 }
 
 func (d *Daemon) ledgerCheckpoint(session surface.Session) (string, error) {
@@ -64,5 +66,15 @@ func (d *Daemon) apiLedgerCheckpointHandler(w http.ResponseWriter, r *http.Reque
 		writeAPIError(w, http.StatusInternalServerError, "checkpoint_failed", "The provisional words could not be counted.")
 		return
 	}
-	writeDashboardJSON(w, http.StatusOK, ledgerCheckpointResponse{Instruction: text})
+	out := ledgerCheckpointResponse{Instruction: text}
+	if req.Start {
+		held, err := d.heldWork(*session)
+		if err != nil {
+			d.log.Printf("held work for %s: %s", req.SessionID, err)
+		}
+		for _, h := range held {
+			out.Held = append(out.Held, h.item)
+		}
+	}
+	writeDashboardJSON(w, http.StatusOK, out)
 }

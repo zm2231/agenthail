@@ -83,7 +83,7 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 		claimed, err := store.ClaimSessionStart(session.ID, fmt.Sprintf("%s:%d", hook.Source, parent), card.Fingerprint(), now)
 		if err == nil && claimed {
 			text = agentcard.Render(card)
-			ledgerContext = a.ledgerCheckpoint(ctx, session.ID)
+			ledgerContext = a.ledgerStartContext(ctx, session.ID, card.MCP)
 		}
 	} else {
 		change, err := store.ClaimContextChange(session.ID, card.Fingerprint(), now)
