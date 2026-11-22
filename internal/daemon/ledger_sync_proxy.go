@@ -40,6 +40,10 @@ func (d *Daemon) ledgerWriteRoute(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		body = d.stampPark(r.Context(), r.URL.Path, body, time.Now())
+		if body, err = d.stampTakeover(r.Context(), r.URL.Path, body); err != nil {
+			writeLedgerError(w, err)
+			return
+		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		var head struct {
 			ProjectKey string `json:"projectKey"`

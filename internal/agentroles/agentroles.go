@@ -87,6 +87,7 @@ var Actions = []Action{
 	{"channel-add", Allow, "Add a session in its project to a channel whose sessions are all in its project", true},
 	{"channel-remove", Allow, "Remove a session from a channel whose sessions are all in its project", true},
 	{"channel-delete", Notify, "Delete a channel whose sessions are all in its project", true},
+	{"work-takeover", Notify, "Take over a work item in its own project whose holder is archived or gone: release it, submit it, or mark it done once its PR merged", true},
 	{"limit-resume", Notify, "Turn resuming its own project's sessions a usage limit stopped on or off", true},
 	{"cross-project-message", Allow, "Send a queued message to a session in another project on this computer", false},
 	{"cross-project-steer", Notify, "Steer, interrupt or send now to a session in another project on this computer, or to its coordinator, within its ceiling", false},

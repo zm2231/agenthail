@@ -15,7 +15,7 @@ import (
 type mcpLedgerWriteInput struct {
 	mcpWrite
 	Op      string         `json:"op" jsonschema:"attach, clause, question or work: the same operations as agenthail ledger attach, clause, question and work."`
-	Request map[string]any `json:"request" jsonschema:"The operation's fields, as the CLI sends them; your project and session are filled in for you. Unknown keys are refused. A work add nests type, priority, description, acceptance, labels, from and parent under fields (fields.type); an edit nests text, type, priority, description, acceptance, addLabels, removeLabels and parent (empty to clear) under change; undep drops a dependsOn; a park nests kind (usage, idea, later, person) and its fields under park, as the CLI sends them. attach also takes fragments, a list of attaches recorded in one call, each on its own."`
+	Request map[string]any `json:"request" jsonschema:"The operation's fields, as the CLI sends them; your project and session are filled in for you. Unknown keys are refused. A work add nests type, priority, description, acceptance, labels, from and parent under fields (fields.type); an edit nests text, type, priority, description, acceptance, addLabels, removeLabels and parent (empty to clear) under change; undep drops a dependsOn; a park nests kind (usage, idea, later, person) and its fields under park, as the CLI sends them; a takeover nests then (release, submit or done) and force under takeover. attach also takes fragments, a list of attaches recorded in one call, each on its own."`
 }
 
 func (d *Daemon) mcpLedgerWrite(ctx context.Context, caller *mcpCaller, input mcpLedgerWriteInput) (any, error) {
@@ -43,6 +43,14 @@ func (d *Daemon) mcpLedgerWrite(ctx context.Context, caller *mcpCaller, input mc
 		return nil, refuse("invalid", "Ledger ownership is set by the person, not over MCP.")
 	}
 	request["projectKey"], request["sessionId"] = projectKey, caller.session.ID
+	action, _ := request["action"].(string)
+	notice := ""
+	if utterance, _ := request["utteranceId"].(string); op == "work" && ledger.WorkAction(action) == ledger.WorkTakeover && strings.TrimSpace(utterance) == "" {
+		itemID, _ := request["itemId"].(string)
+		if notice, err = d.takeoverScope(caller, itemID); err != nil {
+			return nil, err
+		}
+	}
 	key, err := input.key("agenthail_ledger_write")
 	if err != nil {
 		return nil, err
@@ -63,7 +71,7 @@ func (d *Daemon) mcpLedgerWrite(ctx context.Context, caller *mcpCaller, input mc
 	if refusal != nil {
 		return nil, refusal
 	}
-	action, _ := request["action"].(string)
+	d.noticeAfter(ctx, caller, notice, nil)
 	if op == "work" && ledger.WorkAction(action) == ledger.WorkClaim {
 		result = withToolGuidance(result)
 	}
