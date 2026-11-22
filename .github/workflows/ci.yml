@@ -414,39 +414,11 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
-  installer:
-    needs: gate
-    if: ${{ needs.gate.outputs.full == 'true' }}
-    runs-on: macos-26
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: sidecar/package-lock.json
-      - uses: actions/cache@v5
-        with:
-          path: ~/Library/Caches/agenthail-build/node-v*.tar.gz
-          key: agenthail-node-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-node.sh') }}
-          restore-keys: agenthail-node-${{ runner.os }}-${{ runner.arch }}-
-      - name: Shipped Node download test
-        run: PATH="$(dirname "$(command -v node)"):/opt/homebrew/bin:/usr/bin:/bin" scripts/test-fetch-node.sh
-      - name: Install and upgrade test
-        run: |
-          scripts/test-pkg-component-plist.sh
-          scripts/test-install-upgrade.sh
-
   package:
     needs: gate
     if: ${{ needs.gate.outputs.full == 'true' }}
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
         with:
@@ -479,6 +451,18 @@ jobs:
           path: dist/Agenthail-v0.0.0-ci-arm64.pkg
           if-no-files-found: error
           retention-days: 3
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sidecar/package-lock.json
+      - name: Shipped Node download test
+        run: PATH="$(dirname "$(command -v node)"):/opt/homebrew/bin:/usr/bin:/bin" scripts/test-fetch-node.sh
+      # Runs before the system-wide package install so its scratch-home installs start clean.
+      - name: Install and upgrade test
+        run: |
+          scripts/test-pkg-component-plist.sh
+          scripts/test-install-upgrade.sh
       - name: Verify main window layout at narrow widths
         run: |
           pkgutil --expand-full dist/Agenthail-v0.0.0-ci-arm64.pkg "$RUNNER_TEMP/layout-pkg"
