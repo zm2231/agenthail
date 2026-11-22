@@ -319,7 +319,7 @@ func TestARemoteIdentityIsWokenBySignedWebhooksThatCarryOnlyACount(t *testing.T)
 	w.quiet(t, "after the burst was told", 300*time.Millisecond)
 
 	history := f.eventHistory(t)
-	if !strings.Contains(history, "subscribed") || !strings.Contains(history, "delivered") || strings.Contains(history, "receiver-credential") || strings.Contains(history, strings.TrimPrefix(w.secret, "whsec_")) || strings.Contains(history, "private") {
+	if !strings.Contains(history, "events/list by @scout => listed inbox.unread") || !strings.Contains(history, "events/subscribe by @scout inbox.unread to "+w.url+"/hooks/kat => subscribed "+subscribed.ID+"; verification passed: HTTP 200") || !strings.Contains(history, "; verified within 24h0m0s") || !strings.Contains(history, "delivered") || strings.Contains(history, "receiver-credential") || strings.Contains(history, strings.TrimPrefix(w.secret, "whsec_")) || strings.Contains(history, "private") {
 		t.Fatalf("history:\n%s", history)
 	}
 
@@ -330,6 +330,9 @@ func TestARemoteIdentityIsWokenBySignedWebhooksThatCarryOnlyACount(t *testing.T)
 	}
 	f.deliver(t, "after unsubscribing")
 	w.quiet(t, "after unsubscribing", 500*time.Millisecond)
+	if history := f.eventHistory(t); !strings.Contains(history, "events/unsubscribe by @scout inbox.unread to "+w.url+"/hooks/kat => unsubscribed "+subscribed.ID) || !strings.Contains(history, "=> no subscription "+subscribed.ID) {
+		t.Fatalf("history:\n%s", history)
+	}
 }
 
 func TestAWebhookIsRetriedWithItsEventIDAndA410EndsTheSubscription(t *testing.T) {
@@ -479,8 +482,25 @@ func TestEventSubscribeRefusesCallbacksItCannotSafelyReach(t *testing.T) {
 	if code, data := rpcError(t, err); code != codeCallbackEndpoint || data["reason"] != "challenge_failed" {
 		t.Fatalf("a wrong challenge: code=%d data=%v", code, data)
 	}
-	if history := f.eventHistory(t); !strings.Contains(history, "refused: challenge_failed") {
-		t.Fatalf("history:\n%s", history)
+	w.answer(func(webhookCall) (int, string) { return http.StatusNotFound, "" })
+	if _, err := subscribe(t.Context(), session, w.url+"/missing?token=receiver-credential", w.secret, ""); err == nil {
+		t.Fatal("an endpoint that answered 404 subscribed")
+	}
+	history := f.eventHistory(t)
+	for _, line := range []string{
+		"events/subscribe by @scout inbox.unread to https://10.0.0.7/hook => refused: invalid params: delivery.url must reach a public address",
+		"events/subscribe by @scout inbox.unread to https://example.com/hook => refused: invalid params: delivery.url must not carry credentials",
+		"=> refused: invalid params: delivery.secret must be whsec_",
+		"/hook => refused: verification failed: blocked_address",
+		w.url + "/hook => refused: verification failed: challenge_failed (HTTP 200)",
+		w.url + "/missing => refused: verification failed: http_4xx (HTTP 404)",
+	} {
+		if !strings.Contains(history, line) {
+			t.Fatalf("no %q in history:\n%s", line, history)
+		}
+	}
+	if strings.Contains(history, "pass@") || strings.Contains(history, "receiver-credential") || strings.Contains(history, strings.TrimPrefix(w.secret, "whsec_")) {
+		t.Fatalf("history kept a credential:\n%s", history)
 	}
 }
 
@@ -586,5 +606,66 @@ func TestStoppingDeliveriesReturnsWhileEveryEndpointHangs(t *testing.T) {
 	case <-stopped:
 	case <-time.After(5 * time.Second):
 		t.Fatal("stopping the delivery loop hung behind deliveries in flight")
+	}
+}
+
+type rawEventParams struct {
+	mcp.ParamsBase
+	body string
+}
+
+func (p *rawEventParams) MarshalJSON() ([]byte, error) { return []byte(p.body), nil }
+
+func TestEveryEventCallIsRecordedEvenWhenItsParamsAreMalformedAndNoCredentialIsKept(t *testing.T) {
+	f, w, _ := eventsFixture(t)
+	session := f.eventsSession(t)
+	for _, method := range []string{"events/list", "events/subscribe", "events/unsubscribe"} {
+		_, err := mcp.CallCustomMethod[*rawEventParams, *eventsUnsubscribeResult](t.Context(), session, method, &rawEventParams{body: `[]`})
+		if code, _ := rpcError(t, err); code != jsonrpc.CodeInvalidParams {
+			t.Fatalf("%s with array params: code %d", method, code)
+		}
+		if history := f.eventHistory(t); !strings.Contains(history, method+" by @scout => refused: invalid params: they do not decode") {
+			t.Fatalf("%s with array params left no record:\n%s", method, history)
+		}
+	}
+	missing := map[string]string{"events/list": "=> listed inbox.unread", "events/subscribe": "an unknown event => refused: invalid params: no such event", "events/unsubscribe": "an unknown event => refused: invalid params: no such event"}
+	for method, line := range missing {
+		for _, body := range []string{"", "null"} {
+			before := strings.Count(f.eventHistory(t), method+" by @scout "+line)
+			var params *rawEventParams
+			if body != "" {
+				params = &rawEventParams{body: body}
+			}
+			var err error
+			if method == "events/list" {
+				_, err = mcp.CallCustomMethod[*rawEventParams, *eventsListResult](t.Context(), session, method, params)
+			} else {
+				_, err = mcp.CallCustomMethod[*rawEventParams, *eventsUnsubscribeResult](t.Context(), session, method, params)
+			}
+			if (method == "events/list") != (err == nil) {
+				t.Fatalf("%s with params %q: err=%v", method, body, err)
+			}
+			if after := strings.Count(f.eventHistory(t), method+" by @scout "+line); after != before+1 {
+				t.Fatalf("%s with params %q: %d new records:\n%s", method, body, after-before, f.eventHistory(t))
+			}
+		}
+	}
+	leaky := []string{w.secret, "https://user:pass@example.com/?token=receiver-credential#frag"}
+	for _, name := range leaky {
+		if _, err := mcp.CallCustomMethod[*eventsSubscribeParams, *eventsSubscribeResult](t.Context(), session, "events/subscribe", &eventsSubscribeParams{Name: name, Delivery: eventDelivery{Mode: "webhook", URL: w.url + "/hook", Secret: w.secret}}); err == nil {
+			t.Fatalf("an unknown event %q subscribed", name)
+		}
+		if _, err := mcp.CallCustomMethod[*eventsUnsubscribeParams, *eventsUnsubscribeResult](t.Context(), session, "events/unsubscribe", &eventsUnsubscribeParams{Name: name, Delivery: eventDelivery{Mode: "webhook", URL: w.url + "/hook"}}); err == nil {
+			t.Fatalf("an unknown event %q unsubscribed", name)
+		}
+	}
+	history := f.eventHistory(t)
+	if strings.Count(history, "an unknown event to "+w.url+"/hook => refused: invalid params: no such event") != 4 {
+		t.Fatalf("history:\n%s", history)
+	}
+	for _, kept := range []string{strings.TrimPrefix(w.secret, "whsec_"), "pass@", "receiver-credential", "frag"} {
+		if strings.Contains(history, kept) || strings.Contains(f.log.String(), kept) {
+			t.Fatalf("%q was kept:\n%s\n%s", kept, history, f.log.String())
+		}
 	}
 }
