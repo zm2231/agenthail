@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -43,6 +44,10 @@ func TestAThirdHostReachesAMovedSessionOnItsNewHostOnceTheHostItLeftSaysWhere(t 
 		})
 	}
 
+	held := &snapshotHold{release: make(chan struct{})}
+	releaseHandovers := sync.OnceFunc(func() { close(held.release) })
+	t.Cleanup(releaseHandovers)
+
 	t.Run("from the host it left announcing the move, with that host then gone", func(t *testing.T) {
 		testkit.Eventually(t, "the third host to record the session on its new host", 15*time.Second, ownedBy(targetID))
 		countsOne(t)
@@ -70,8 +75,8 @@ func TestAThirdHostReachesAMovedSessionOnItsNewHostOnceTheHostItLeftSaysWhere(t 
 	})
 
 	t.Run("from a row of the new host that arrived before the move was announced", func(t *testing.T) {
-		// The refused row starts a signed-handover claim that could land after the next subtest resets ownership.
-		target.gate.handoversDown.Store(true)
+		// A refused row starts a signed-handover claim that, landing late, would hand over a session a later subtest reset.
+		target.gate.handovers.Store(held)
 		db := openSweepDB(t, third.reg.Path())
 		if _, err := db.Exec(`UPDATE sessions SET host_id=? WHERE id=?`, sourceID, session.ID); err != nil {
 			t.Fatal(err)
@@ -108,7 +113,6 @@ func TestAThirdHostReachesAMovedSessionOnItsNewHostOnceTheHostItLeftSaysWhere(t 
 	})
 
 	t.Run("from the new host serving the signed handover, with the host it left gone", func(t *testing.T) {
-		target.gate.handoversDown.Store(false)
 		testkit.Eventually(t, "the new host to hold the signed handover", 15*time.Second, func() bool {
 			served, err := target.reg.ServedHandovers(session.ID)
 			return err == nil && len(served) == 1
@@ -128,6 +132,7 @@ func TestAThirdHostReachesAMovedSessionOnItsNewHostOnceTheHostItLeftSaysWhere(t 
 		if err := third.daemon.mirrorOrHide(to, row, true); !errors.As(err, &owned) || owned.HostID != sourceID {
 			t.Fatalf("the new host's row answered %v, want it refused as the old host's", err)
 		}
+		releaseHandovers()
 		testkit.Eventually(t, "the signed handover to record the session on its new host", 15*time.Second, ownedBy(targetID))
 		countsOne(t)
 		testkit.Eventually(t, "the new host's row to be listed", 15*time.Second, func() bool {
