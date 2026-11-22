@@ -26,13 +26,18 @@ func triggerScript(t *testing.T, body string) string {
 
 func configureTriggers(t *testing.T, d *Daemon, body string) error {
 	t.Helper()
+	writeTriggers(t, body)
+	return d.reloadTriggers()
+}
+
+func writeTriggers(t *testing.T, body string) {
+	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(TriggersConfigPath()), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(TriggersConfigPath(), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return d.reloadTriggers()
 }
 
 func finishTriggerTurn(d *Daemon, fake *daemonSurface, session *surface.Session, turnID string) {
@@ -175,10 +180,8 @@ func TestTriggerRunsSurviveARestartWithoutRunningTwice(t *testing.T) {
 	}
 	d.background.stop()
 
+	writeTriggers(t, config)
 	restarted := newTestDaemon(t, r, []surface.Surface{fake})
-	if err := configureTriggers(t, restarted, config); err != nil {
-		t.Fatal(err)
-	}
 	restarted.startTriggers()
 	runs := waitForTriggerRuns(t, r, "log", 2)
 	states := map[string]string{}
