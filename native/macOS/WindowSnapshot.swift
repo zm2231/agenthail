@@ -60,9 +60,9 @@ enum WindowSnapshot {
 
     /// A snapshot taken right after a ui.conf change must show it, background image included.
     static func catchUp(to rev: String?, model: AgenthailModel, api: AgenthailAPI, budget: SnapshotBudget) async {
-        guard let rev, !rev.isEmpty, model.interface.config.rev != rev else { return }
-        model.interface.load(from: api)
-        await budget.wait { model.interface.config.rev == rev }
+        guard let rev, !rev.isEmpty else { return }
+        if model.interface.config.rev != rev { model.interface.load(from: api) }
+        await budget.wait { model.interface.config.rev == rev && model.interface.settled }
     }
 
     static func capture(_ request: SnapshotRequest, model: AgenthailModel, voice: VoiceController, budget: SnapshotBudget) async -> Result<Data, WindowImage.Failure> {

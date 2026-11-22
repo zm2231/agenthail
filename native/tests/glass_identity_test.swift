@@ -52,7 +52,7 @@ struct GlassIdentityTest {
         art.values["background"] = .text("image: art/a-dark.jpg")
         art.values["background.light"] = .text("image: art/a-light.jpg")
         art.values["glass.gutter"] = .number(8)
-        let wallpapers = ["art/a-dark.jpg": WallpaperImage(id: "art/a-dark.jpg", image: image()), "art/a-light.jpg": WallpaperImage(id: "art/a-light.jpg", image: image())]
+        let wallpapers = [true: WallpaperImage(id: "art/a-dark.jpg", image: image()), false: WallpaperImage(id: "art/a-light.jpg", image: image())]
 
         let modifiers: [(String, Bool, (Probe) -> AnyView)] = [
             ("floatingGlass", true, { AnyView($0.floatingGlass(.gray, in: RoundedRectangle(cornerRadius: 8))) }),

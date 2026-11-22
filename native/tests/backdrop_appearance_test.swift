@@ -60,7 +60,7 @@ struct BackdropAppearanceTest {
         pictures.values["background"] = .text("image: art/a-dark.jpg")
         pictures.values["background.light"] = .text("image: art/a-light.jpg")
         let lightOnly = WallpaperImage(id: "art/a-light.jpg", image: solid(red: true))
-        backdrop.configure(pictures, wallpapers: ["art/a-light.jpg": lightOnly])
+        backdrop.configure(pictures, wallpapers: [false: lightOnly])
         check(backdrop.active, "a light window with its picture loaded shows a backdrop")
         window.appearance = NSAppearance(named: .darkAqua)
         backdrop.windowChanged(window)

@@ -7,6 +7,9 @@ final class InterfaceStore: ObservableObject {
     @Published private(set) var config = UIConfig.defaults
     /// Decoded images for the dark and light backgrounds, by path.
     @Published private(set) var wallpapers: [String: WallpaperImage] = [:]
+    @Published private(set) var fallbacks: [Bool: WallpaperImage] = [:]
+    /// False while the current config's images are still loading.
+    @Published private(set) var settled = true
     @Published private(set) var problem: String?
     @Published private(set) var history: [UIChangeEntry] = []
     private var base = UIConfig.defaults
@@ -18,14 +21,25 @@ final class InterfaceStore: ObservableObject {
 
     static var device: String { Host.current().localizedName ?? "" }
 
+    var drawn: [Bool: WallpaperImage] {
+        var drawn: [Bool: WallpaperImage] = [:]
+        for dark in [true, false] {
+            guard case .image(let path) = config.background(dark: dark) else { continue }
+            drawn[dark] = wallpapers[path] ?? fallbacks[dark]
+        }
+        return drawn
+    }
+
     func load(from api: AgenthailAPI) {
         loadTask?.cancel()
+        generation += 1
+        let current = generation
         loadTask = Task {
             do {
                 let loaded = try await api.uiConfig(device: Self.device, kind: "mac")
-                if Task.isCancelled { return }
-                let problem = await adopt(loaded, api: api)
-                if Task.isCancelled { return }
+                if Task.isCancelled || current != generation { return }
+                let problem = await adopt(loaded, api: api, generation: current)
+                if Task.isCancelled || current != generation { return }
                 self.problem = problem
             } catch {
                 if Task.isCancelled || error.isCancellation { return }
@@ -52,8 +66,11 @@ final class InterfaceStore: ObservableObject {
         do {
             let loaded = try await api.changeUI(change, device: Self.device)
             loadTask?.cancel()
+            generation += 1
+            let current = generation
             overlay = [:]
-            problem = await adopt(loaded, api: api)
+            let problem = await adopt(loaded, api: api, generation: current)
+            if current == generation { self.problem = problem }
             await loadHistory(api: api)
             return nil
         } catch {
@@ -67,46 +84,44 @@ final class InterfaceStore: ObservableObject {
         if let entries = try? await api.uiLog(limit: 20) { history = entries }
     }
 
-    private func adopt(_ loaded: UIConfig, api: AgenthailAPI) async -> String? {
-        generation += 1
-        let current = generation
+    private func adopt(_ loaded: UIConfig, api: AgenthailAPI, generation current: Int) async -> String? {
         let signpost = Self.signposter.makeSignpostID()
         let interval = Self.signposter.beginInterval("Appearance load", id: signpost)
         defer { Self.signposter.endInterval("Appearance load", interval) }
         let active = Self.prefersDark(loaded)
-        var next: [String: WallpaperImage] = [:]
-        for dark in [active, !active] {
-            guard case .image(let path) = loaded.background(dark: dark), next[path] == nil else { continue }
-            if let real = wallpapers.values.first(where: { $0.id == path }) {
-                next[path] = real
-            } else if case .image(let shown) = base.background(dark: dark), let image = wallpapers[shown] {
-                next[path] = image
-            }
+        var next: [Bool: WallpaperImage] = [:]
+        for dark in [true, false] {
+            guard case .image(let path) = loaded.background(dark: dark), wallpapers[path] == nil else { continue }
+            next[dark] = drawn[dark]
         }
-        if next != wallpapers { wallpapers = next }
+        let kept = wallpapers.filter { loaded.imagePaths.contains($0.key) }
+        if kept != wallpapers { wallpapers = kept }
+        if next != fallbacks { fallbacks = next }
         base = loaded
+        settled = false
         publish()
         Self.signposter.emitEvent("Config applied", id: signpost)
         var problem: String?
         let maxPixels = Int(NSScreen.screens.map { max($0.frame.width, $0.frame.height) * $0.backingScaleFactor }.max() ?? 2880)
-        for path in Self.fetchOrder(loaded, dark: active) where wallpapers[path]?.id != path {
+        for path in Self.fetchOrder(loaded, dark: active) where wallpapers[path] == nil {
             do {
                 let data = try await api.uiBackground(path: path)
                 let decoded = await Task.detached(operation: { WallpaperImage.decode(data, id: path, maxPixels: maxPixels) }).value
-                guard current == generation else { return problem }
+                guard current == generation, !Task.isCancelled else { return problem }
                 guard let decoded else {
                     problem = "The background image \(path) can't be read."
                     continue
                 }
-                guard base.imagePaths.contains(path) else { continue }
                 wallpapers[path] = decoded
+                for dark in [true, false] where loaded.background(dark: dark) == .image(path: path) { fallbacks[dark] = nil }
                 let side = loaded.background(dark: active) == .image(path: path) ? "active" : "inactive"
                 Self.signposter.emitEvent("Wallpaper applied", id: signpost, "\(side, privacy: .public)")
             } catch {
-                if current != generation || error.isCancellation { return problem }
+                if current != generation || Task.isCancelled || error.isCancellation { return problem }
                 problem = AgenthailAPIError.userMessage(error)
             }
         }
+        if current == generation { settled = true }
         return problem
     }
 

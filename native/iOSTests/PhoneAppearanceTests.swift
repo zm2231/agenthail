@@ -39,8 +39,13 @@ final class PhoneAppearanceTests: XCTestCase {
     }
 
     private func relaunched(expecting count: Int) async throws -> PhoneAppearance {
+        try await relaunched { $0.wallpapers.count >= count }
+    }
+
+    private func relaunched(until done: (PhoneAppearance) -> Bool) async throws -> PhoneAppearance {
         let appearance = PhoneAppearance(cache: cache)
-        for _ in 0..<200 where appearance.wallpapers.count < count { try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<200 where !done(appearance) { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(done(appearance), "the cached images came back")
         return appearance
     }
 
@@ -76,11 +81,11 @@ final class PhoneAppearanceTests: XCTestCase {
 
         XCTAssertEqual(appearance.config.rev, "two", "the new settings apply even though their image can't be read")
         XCTAssertEqual(appearance.problem, "The background image backgrounds/broken.png can't be read.")
-        XCTAssertEqual(appearance.wallpapers["backgrounds/broken.png"]?.id, "backgrounds/sea.png", "the last good image stays")
+        XCTAssertEqual(appearance.image(dark: true)?.id, "backgrounds/sea.png", "the last good image stays")
         XCTAssertTrue(appearance.active)
-        let relaunched = try await relaunched(expecting: 1)
+        let relaunched = try await relaunched { $0.image(dark: true) != nil }
         XCTAssertEqual(relaunched.config.rev, "two")
-        XCTAssertEqual(relaunched.wallpapers["backgrounds/broken.png"]?.id, "backgrounds/sea.png", "the last good image comes back after a relaunch")
+        XCTAssertEqual(relaunched.image(dark: true)?.id, "backgrounds/sea.png", "the last good image comes back after a relaunch")
     }
 
     func testAnUnreadableLightImageStillLetsTheNewLookThrough() async throws {
@@ -97,7 +102,7 @@ final class PhoneAppearanceTests: XCTestCase {
         XCTAssertEqual(appearance.config.paneOpacity, 0.45)
         XCTAssertEqual(appearance.problem, "The background image art/field-light.jpg can't be read.")
         XCTAssertEqual(appearance.wallpapers["art/field-dark.jpg"]?.id, "art/field-dark.jpg")
-        XCTAssertEqual(appearance.wallpapers["art/field-light.jpg"]?.id, "art/field-dark.jpg", "the light side keeps the image it last showed")
+        XCTAssertEqual(appearance.image(dark: false)?.id, "art/field-dark.jpg", "the light side keeps the image it last showed")
         guard case .image(let image) = appearance.spec(key(.list)).wallpaper else { return XCTFail("the readable dark image still shows") }
         XCTAssertEqual(image.id, "art/field-dark.jpg")
 
@@ -386,6 +391,39 @@ final class PhoneAppearanceTests: XCTestCase {
         try await load(appearance) { appearance.wallpapers["art/dune.jpg"]?.id == "art/dune.jpg" }
         guard case .image(let landed) = appearance.spec(light).wallpaper else { return XCTFail("the light image never showed") }
         XCTAssertEqual(landed.id, "art/dune.jpg")
+    }
+
+    func testEachAppearanceKeepsItsOwnImageWhenBothMoveToOneNewImage() async throws {
+        UIConfigURLProtocol.state.body = #"{"rev":"one","values":{"background":"image: art/night.jpg","background.light":"image: art/day.jpg"},"chosen":{},"overrides":{},"problems":[]}"#
+        UIConfigURLProtocol.state.image = Self.png
+        let appearance = PhoneAppearance(cache: cache)
+        try await load(appearance) { appearance.wallpapers.count == 2 }
+
+        UIConfigURLProtocol.state.body = #"{"rev":"two","values":{"background":"image: art/both.jpg"},"chosen":{},"overrides":{},"problems":[]}"#
+        UIConfigURLProtocol.state.images = ["art/both.jpg": Data("not an image".utf8)]
+        try await load(appearance) { appearance.problem != nil }
+        XCTAssertEqual(appearance.config.rev, "two")
+        XCTAssertEqual(appearance.image(dark: true)?.id, "art/night.jpg", "dark keeps its own image")
+        XCTAssertEqual(appearance.image(dark: false)?.id, "art/day.jpg", "light keeps its own image")
+        let relaunched = try await relaunched { $0.image(dark: true) != nil && $0.image(dark: false) != nil }
+        XCTAssertEqual(relaunched.image(dark: true)?.id, "art/night.jpg")
+        XCTAssertEqual(relaunched.image(dark: false)?.id, "art/day.jpg")
+    }
+
+    func testANewImageArrivingDuringLaunchKeepsTheCachedImageUntilItLands() async throws {
+        UIConfigURLProtocol.state.body = #"{"rev":"one","values":{"theme":"dark","background":"image: art/sea.jpg"},"chosen":{},"overrides":{},"problems":[]}"#
+        UIConfigURLProtocol.state.image = Self.png
+        let first = PhoneAppearance(cache: cache)
+        try await load(first) { first.wallpapers["art/sea.jpg"] != nil }
+
+        UIConfigURLProtocol.state.body = #"{"rev":"two","values":{"theme":"dark","background":"image: art/broken.jpg"},"chosen":{},"overrides":{},"problems":[]}"#
+        UIConfigURLProtocol.state.images = ["art/broken.jpg": Data("not an image".utf8)]
+        let launched = PhoneAppearance(cache: cache)
+        try await load(launched) { launched.problem != nil && launched.image(dark: true) != nil }
+        XCTAssertEqual(launched.config.rev, "two")
+        XCTAssertEqual(launched.image(dark: true)?.id, "art/sea.jpg", "the cached image stays while the new one can't be shown")
+        let again = try await relaunched { $0.image(dark: true) != nil }
+        XCTAssertEqual(again.image(dark: true)?.id, "art/sea.jpg", "and it survives another relaunch")
     }
 
     func testAnImageFromAnOlderLoadIsIgnored() async throws {

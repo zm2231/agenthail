@@ -70,7 +70,8 @@ struct AppearanceLoadTest {
         let api = AgenthailAPI(baseURL: URL(string: "http://appearance.test")!, token: "t", session: URLSession(configuration: configuration))
         let image = png()
         AppearanceDaemon.lock.withLock {
-            AppearanceDaemon.images = ["art/slow-dark.jpg": image, "art/slow-light.jpg": image, "art/sea.jpg": image, "art/dune.jpg": image, "art/old.jpg": image, "art/new.jpg": image]
+            AppearanceDaemon.images = ["art/slow-dark.jpg": image, "art/slow-light.jpg": image, "art/sea.jpg": image, "art/dune.jpg": image, "art/old.jpg": image, "art/new.jpg": image,
+                                       "art/night.jpg": image, "art/day.jpg": image, "art/both.jpg": Data("not an image".utf8), "art/slow.jpg": image, "art/bad.jpg": Data("not an image".utf8)]
         }
         serve(#"{"rev":"two","values":{"theme":"dark","glass.opacity":0.45,"background":"image: art/slow-dark.jpg","background.light":"image: art/slow-light.jpg"},"chosen":{},"overrides":{},"problems":[]}"#, delays: ["art/slow-dark.jpg": 0.5, "art/slow-light.jpg": 2])
         let store = InterfaceStore()
@@ -97,9 +98,29 @@ struct AppearanceLoadTest {
         serve(#"{"rev":"two","values":{"theme":"light","background":"image: art/sea.jpg","background.light":"image: art/dune.jpg"},"chosen":{},"overrides":{},"problems":[]}"#, delays: ["art/dune.jpg": 1])
         switching.load(from: api)
         await wait { switching.config.rev == "two" }
-        check(switching.config.rev == "two" && switching.wallpapers["art/dune.jpg"]?.id == "art/sea.jpg", "the light side keeps the last image while its own loads")
-        await wait { switching.wallpapers["art/dune.jpg"]?.id == "art/dune.jpg" }
-        check(switching.wallpapers["art/dune.jpg"]?.id == "art/dune.jpg", "the light image shows once it lands")
+        check(switching.config.rev == "two" && switching.drawn[false]?.id == "art/sea.jpg", "the light side keeps the last image while its own loads")
+        check(!switching.settled, "a snapshot waits while the light image loads")
+        await wait { switching.drawn[false]?.id == "art/dune.jpg" }
+        check(switching.drawn[false]?.id == "art/dune.jpg" && switching.settled, "the light image shows once it lands and the load settles")
+
+        let shared = InterfaceStore()
+        serve(#"{"rev":"one","values":{"background":"image: art/night.jpg","background.light":"image: art/day.jpg"},"chosen":{},"overrides":{},"problems":[]}"#)
+        shared.load(from: api)
+        await wait { shared.wallpapers.count == 2 }
+        serve(#"{"rev":"two","values":{"background":"image: art/both.jpg"},"chosen":{},"overrides":{},"problems":[]}"#)
+        shared.load(from: api)
+        await wait { shared.problem != nil }
+        check(shared.config.rev == "two" && shared.drawn[true]?.id == "art/night.jpg" && shared.drawn[false]?.id == "art/day.jpg", "each appearance keeps its own image when both move to one that fails: \(shared.drawn.mapValues(\.id))")
+
+        let overlap = InterfaceStore()
+        serve(#"{"rev":"one","values":{"theme":"dark","background":"image: art/slow.jpg"},"chosen":{},"overrides":{},"problems":[]}"#, delays: ["art/slow.jpg": 1.5])
+        overlap.load(from: api)
+        await wait { overlap.config.rev == "one" }
+        serve(#"{"rev":"two","values":{"theme":"dark","background":"image: art/bad.jpg"},"chosen":{},"overrides":{},"problems":[]}"#)
+        _ = await overlap.change(UIChange(action: "set", set: ["background = image: art/bad.jpg"], message: "bad"), api: api)
+        check(overlap.problem == "The background image art/bad.jpg can't be read.", "the change reports its own failed image: \(overlap.problem ?? "none")")
+        try? await Task.sleep(for: .seconds(2))
+        check(overlap.wallpapers["art/slow.jpg"] == nil && overlap.problem == "The background image art/bad.jpg can't be read.", "the superseded load lands neither its image nor its problem")
 
         let stale = InterfaceStore()
         serve(#"{"rev":"one","values":{"theme":"dark","background":"image: art/old.jpg"},"chosen":{},"overrides":{},"problems":[]}"#, delays: ["art/old.jpg": 1.5])

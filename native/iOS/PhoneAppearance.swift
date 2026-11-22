@@ -36,6 +36,8 @@ final class PhoneAppearance: ObservableObject {
 
     @Published private(set) var config = UIConfig.defaults
     @Published private(set) var wallpapers: [String: WallpaperImage] = [:]
+    @Published private(set) var fallbacks: [Bool: WallpaperImage] = [:]
+    private var launchSources: [Bool: String] = [:]
     @Published private(set) var rendered: [Key: BackdropImage] = [:]
     @Published private(set) var layered: [Key: BackdropLayers] = [:]
     @Published private(set) var extremes: [Key: Float] = [:]
@@ -55,25 +57,45 @@ final class PhoneAppearance: ObservableObject {
            let saved = try? JSONDecoder().decode(UIConfig.self, from: data) {
             config = saved
             let shown = (try? JSONDecoder().decode([String: String].self, from: Data(contentsOf: cache.appendingPathComponent("shown.json")))) ?? [:]
-            let sources = saved.imagePaths.map { ($0, shown[$0] ?? $0) }
+            for dark in [true, false] {
+                guard case .image(let path) = saved.background(dark: dark) else { continue }
+                launchSources[dark] = shown[Self.side(dark)] ?? path
+            }
+            let sources = Set(launchSources.values)
             let maxPixels = Self.maxPixels
             Task { [weak self] in
                 let decoded = await Task.detached {
-                    sources.compactMap { path, source -> (String, WallpaperImage)? in
+                    Dictionary(uniqueKeysWithValues: sources.compactMap { source -> (String, WallpaperImage)? in
                         guard let data = try? Data(contentsOf: cache.appendingPathComponent(Self.wallpaperFile(source))),
                               let image = WallpaperImage.decode(data, id: source, maxPixels: maxPixels) else { return nil }
-                        return (path, image)
-                    }
+                        return (source, image)
+                    })
                 }.value
-                guard let self else { return }
-                var filled = false
-                for (path, image) in decoded where self.wallpapers[path] == nil && self.config.imagePaths.contains(path) {
-                    self.wallpapers[path] = image
-                    filled = true
-                }
-                if filled { self.forgetRenders() }
+                self?.restore(decoded)
             }
         }
+    }
+
+    private func restore(_ decoded: [String: WallpaperImage]) {
+        for (dark, source) in launchSources {
+            guard let image = decoded[source], case .image(let path) = config.background(dark: dark), wallpapers[path] == nil else { continue }
+            if source == path {
+                wallpapers[path] = image
+                fallbacks[dark] = nil
+            } else if fallbacks[dark] == nil {
+                fallbacks[dark] = image
+            }
+        }
+        launchSources = [:]
+        forgetRenders()
+        save(config, wallpapers: [:])
+    }
+
+    nonisolated private static func side(_ dark: Bool) -> String { dark ? "dark" : "light" }
+
+    func image(dark: Bool) -> WallpaperImage? {
+        guard case .image(let path) = config.background(dark: dark) else { return nil }
+        return wallpapers[path] ?? fallbacks[dark]
     }
 
     private static var maxPixels: Int {
@@ -145,7 +167,7 @@ final class PhoneAppearance: ObservableObject {
                 if textScaleWrite == nil { chosenTextScale = nil }
                 var unreadable: [String] = []
                 let active = Self.prefersDark(loaded)
-                for path in Self.fetchOrder(loaded, dark: active) where wallpapers[path]?.id != path {
+                for path in Self.fetchOrder(loaded, dark: active) where wallpapers[path] == nil {
                     let data: Data
                     do {
                         data = try await api.uiBackground(path: path)
@@ -165,6 +187,7 @@ final class PhoneAppearance: ObservableObject {
                     let side = loaded.background(dark: active) == .image(path: path) ? "active" : "inactive"
                     Self.signposter.emitEvent("Wallpaper applied", id: signpost, "\(side, privacy: .public)")
                 }
+                guard generation == loadGeneration else { return }
                 problem = unreadable.isEmpty ? nil : "The background image \(unreadable.joined(separator: ", ")) can't be read."
             } catch {
                 if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled { return }
@@ -188,19 +211,16 @@ final class PhoneAppearance: ObservableObject {
     }
 
     private func adopt(_ loaded: UIConfig) {
-        let active = Self.prefersDark(loaded)
-        var next: [String: WallpaperImage] = [:]
-        for dark in [active, !active] {
-            guard case .image(let path) = loaded.background(dark: dark), next[path] == nil else { continue }
-            if let real = wallpapers.values.first(where: { $0.id == path }) {
-                next[path] = real
-            } else if case .image(let shown) = config.background(dark: dark), let image = wallpapers[shown] {
-                next[path] = image
-            }
+        var next: [Bool: WallpaperImage] = [:]
+        for dark in [true, false] {
+            guard case .image(let path) = loaded.background(dark: dark), wallpapers[path] == nil else { continue }
+            next[dark] = image(dark: dark)
         }
-        guard loaded != config || next != wallpapers else { return }
+        let kept = wallpapers.filter { loaded.imagePaths.contains($0.key) }
+        guard loaded != config || kept != wallpapers || next != fallbacks else { return }
         config = loaded
-        wallpapers = next
+        wallpapers = kept
+        fallbacks = next
         forgetRenders()
         save(loaded, wallpapers: [:])
     }
@@ -208,6 +228,7 @@ final class PhoneAppearance: ObservableObject {
     private func land(_ image: WallpaperImage, for path: String, data: Data) {
         guard config.imagePaths.contains(path) else { return }
         wallpapers[path] = image
+        for dark in [true, false] where config.background(dark: dark) == .image(path: path) { fallbacks[dark] = nil }
         forgetRenders()
         save(config, wallpapers: [path: data])
     }
@@ -215,6 +236,7 @@ final class PhoneAppearance: ObservableObject {
     func preview(_ config: UIConfig, wallpapers: [WallpaperImage] = []) {
         self.config = config
         self.wallpapers = Dictionary(wallpapers.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        fallbacks = [:]
         forgetRenders()
     }
 
@@ -230,8 +252,12 @@ final class PhoneAppearance: ObservableObject {
         guard let cache else { return }
         let files = FileManager.default
         try? files.createDirectory(at: cache, withIntermediateDirectories: true)
-        let shown = Dictionary(config.imagePaths.compactMap { path in wallpapers[path].map { (path, $0.id) } }, uniquingKeysWith: { first, _ in first })
-        let kept = Set((config.imagePaths + shown.values).map(Self.wallpaperFile))
+        var shown: [String: String] = [:]
+        for dark in [true, false] {
+            guard case .image(let path) = config.background(dark: dark) else { continue }
+            shown[Self.side(dark)] = wallpapers[path] != nil ? path : fallbacks[dark]?.id ?? launchSources[dark] ?? path
+        }
+        let kept = Set((config.imagePaths + shown.values + launchSources.values).map(Self.wallpaperFile))
         for file in (try? files.contentsOfDirectory(at: cache, includingPropertiesForKeys: nil)) ?? [] {
             let name = file.lastPathComponent
             if file.pathExtension == "png" || name.hasSuffix(".facts.json") || (name.hasPrefix("wallpaper") && !kept.contains(name)) {
@@ -242,7 +268,7 @@ final class PhoneAppearance: ObservableObject {
             try? data.write(to: cache.appendingPathComponent(Self.wallpaperFile(path)), options: .atomic)
         }
         try? JSONEncoder().encode(config).write(to: cache.appendingPathComponent("ui.json"), options: .atomic)
-        try? JSONEncoder().encode(shown.filter { $0.key != $0.value }).write(to: cache.appendingPathComponent("shown.json"), options: .atomic)
+        try? JSONEncoder().encode(shown).write(to: cache.appendingPathComponent("shown.json"), options: .atomic)
     }
 
     nonisolated private static func wallpaperFile(_ path: String) -> String {
@@ -250,7 +276,7 @@ final class PhoneAppearance: ObservableObject {
     }
 
     private func wallpaperID(dark: Bool) -> String {
-        if case .image(let path) = config.background(dark: dark) { return wallpapers[path]?.id ?? "missing:" + path }
+        if case .image(let path) = config.background(dark: dark) { return image(dark: dark)?.id ?? "missing:" + path }
         return ""
     }
 
@@ -417,7 +443,7 @@ final class PhoneAppearance: ObservableObject {
         func rgb(_ c: UIConfig.RGBColor) -> BackdropRGB { BackdropRGB(Float(c.red), Float(c.green), Float(c.blue)) }
         switch config.background(dark: dark) {
         case .none, .desktop: return nil
-        case .image(let path): return wallpapers[path].map { .image($0) }
+        case .image: return image(dark: dark).map { .image($0) }
         case .linear(let angle, let stops): return .linear(angle: Float(angle), stops: stops.map { BackdropStop(color: rgb($0.color), location: Float($0.location)) })
         case .mesh(let columns, let rows, let colors): return .mesh(columns: columns, rows: rows, colors: colors.map(rgb))
         }
@@ -525,6 +551,7 @@ private struct PhoneBackdropBody<Content: View>: View {
             .task(id: keys) { request() }
             .onChange(of: appearance.config) { request() }
             .onChange(of: appearance.wallpapers) { request() }
+            .onChange(of: appearance.fallbacks) { request() }
     }
 }
 
