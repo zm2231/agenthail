@@ -271,6 +271,8 @@ func (b Broadcaster) Send(ctx context.Context, target Target, message, label, so
 // project resolves and delivers to its own. A member is pinned or used within
 // the active window, whether or not its process is still up, since a send
 // resumes it. Coordinators are reached even when idle past the window.
+// One-off runs are not members: a task child until its task settles, and a
+// delegated run (a Codex exec run or a sub-agent) always.
 func (b Broadcaster) members(target Target, now time.Time) ([]string, []registry.CoordinatorSpec, error) {
 	if target.ProjectID == "" {
 		members, err := b.Registry.ChannelMembers(target.Channel)
@@ -299,10 +301,17 @@ func (b Broadcaster) members(target Target, now time.Time) ([]string, []registry
 	if err != nil {
 		return nil, nil, err
 	}
+	tasks, err := b.Registry.RunningTaskChildren()
+	if err != nil {
+		return nil, nil, err
+	}
 	var members []string
 	for _, record := range snapshot.Sessions {
 		item, ok := sessionProject(record)
 		if !ok || item.ID != target.ProjectID || record.HostID != "" || coordinated[record.Session.ID] {
+			continue
+		}
+		if _, task := tasks[record.Session.ID]; task || record.Session.Delegated() {
 			continue
 		}
 		if marks[record.Session.ID].PinnedAt.IsZero() && !surface.RecentlyUsed(record.Session, now) {

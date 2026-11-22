@@ -256,8 +256,10 @@ A project channel has no stored members, and each host decides its own.
 catalog: every local row whose project `id` is the project's, that is not
 archived and is pinned, working or was used within `surface.ActiveWindow`,
 whether or not its process is still up (delivery resumes one that ended; the
-catalog marks such a row stale, which does not exclude it), plus the
-project's coordinators on this host, which `internal/coordinator` starts or
+catalog marks such a row stale, which does not exclude it), and is not a
+one-off run: a task child (`agenthail_create` with `task`) until its task
+settles, or a delegated run (a Codex exec run or a sub-agent) at all; plus
+the project's coordinators on this host, which `internal/coordinator` starts or
 resumes. `internal/broadcast` holds that resolution and delivery; only the
 daemon runs it, and the CLI posts the action.
 
