@@ -129,9 +129,9 @@ func (d *Daemon) askPersonToGrant(sessionID, kind, id, mountName string, key *pr
 			return actionFailed(http.StatusForbidden, "ask_the_person", "Only the person can do this. They were already asked ("+askID+").")
 		}
 	}
-	title := fmt.Sprintf("%s asks you to approve %s", d.resolveDisplay(session.ID), id)
+	title := "Approve " + id
 	if kind == "key" {
-		title = fmt.Sprintf("%s asks you to name a key for %s", d.resolveDisplay(session.ID), id)
+		title = "Name a key for " + id
 	}
 	ask, err := d.Registry.RaiseAsk(registry.Ask{SessionID: session.ID, Origin: registry.AskOriginExtensionGrant, Title: clipText(title, registry.MaxAskTitle), Questions: []registry.AskQuestion{{
 		Question:    clipText(question, registry.MaxAskQuestion),

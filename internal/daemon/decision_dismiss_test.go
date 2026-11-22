@@ -455,7 +455,7 @@ func TestDismissingAnApprovalDeniesItAndTellsTheAsker(t *testing.T) {
 	if exists, _ := f.r.ChannelExists("dismissed"); exists {
 		t.Fatal("a dismissed approval ran")
 	}
-	if notes := notesTo(t, f.r, f.worker.ID, "[agenthail] The person d"); len(notes) != 1 || notes[0] != "[agenthail] The person denied: Create channel #dismissed." {
+	if notes := notesTo(t, f.r, f.worker.ID, "[agenthail] The person d"); len(notes) != 1 || notes[0] != "[agenthail] The person denied: Create channel #dismissed (ask "+askID+")." {
 		t.Fatalf("notes to the asker = %q, want only the denial", notes)
 	}
 }

@@ -47,6 +47,19 @@ final class AskCardUITests: XCTestCase {
         XCTAssertTrue(first.waitForExistence(timeout: 5), "the older ask is still there")
     }
 
+    func testAClippedApprovalShowsItsWholeTextWhenOpened() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-ask", "--preview-clipped-approval", "--preview-theme", "dark"]
+        app.launch()
+        let heading = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "@builder asks: Make its project's coordinator")).firstMatch
+        XCTAssertTrue(heading.waitForExistence(timeout: 10), "the clipped approval shows")
+        let detail = app.staticTexts["pager-detail"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 5), "the opened approval shows its whole text")
+        XCTAssertEqual(detail.label, "Make its project's coordinator as @release-train-coordinator-for-the-fieldnotes-search-and-ranking-overhaul, renaming it from @fieldnotes-search-indexing-and-ranking-overhaul-lead-for-the-winter-release, the session demo. Why: the release needs one lead", "both names show whole")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Allow once'")).firstMatch.exists, "the opened approval can be answered")
+        attach(app, "dark clipped approval")
+    }
+
     private func answer(theme: String) {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-ask", "--preview-theme", theme]

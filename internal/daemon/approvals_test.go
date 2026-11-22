@@ -113,7 +113,7 @@ func TestAnAgentAsksThePersonForARefusedActionAndItRunsOnceWhenAllowed(t *testin
 	if reply := f.respond(t, thePerson, askID, registry.ApprovalAllow); reply.Status != http.StatusConflict {
 		t.Fatalf("a second answer answered %d %s, want it stale", reply.Status, reply.Body)
 	}
-	if got := noticesTo(t, f.r, f.worker.ID, "The person allowed: Create channel #release. It ran"); got != 1 {
+	if got := noticesTo(t, f.r, f.worker.ID, "The person allowed: Create channel #release (ask "+askID+"). It ran"); got != 1 {
 		t.Fatalf("the agent was told %d times, want once", got)
 	}
 	stored, _, err := f.r.Approval(askID)
@@ -131,8 +131,79 @@ func TestADeniedApprovalRunsNothingAndTellsTheAgent(t *testing.T) {
 	if exists, _ := f.r.ChannelExists("denied"); exists {
 		t.Fatal("a denied action ran")
 	}
-	if got := noticesTo(t, f.r, f.worker.ID, "The person denied: Create channel #denied"); got != 1 {
+	if got := noticesTo(t, f.r, f.worker.ID, "The person denied: Create channel #denied (ask "+askID+")."); got != 1 {
 		t.Fatalf("the agent was told %d times, want once", got)
+	}
+	again := f.askPerson(t, `{"action":"channel-create","channel":"denied"}`)
+	if reply := f.respond(t, thePerson, again, registry.ApprovalDeny); again == askID || reply.Status != http.StatusOK {
+		t.Fatalf("the second ask %s answered %d %s", again, reply.Status, reply.Body)
+	}
+	if got := noticesTo(t, f.r, f.worker.ID, "The person denied: Create channel #denied (ask "+again+")."); got != 1 {
+		t.Fatalf("the second denial reached the agent %d times, want once and apart from the first", got)
+	}
+}
+
+func TestAnApprovalToSetACoordinatorNamesTheNameItGivesAndTheNameItReplaces(t *testing.T) {
+	f := newApprovalFixture(t)
+	question := func(body string) string {
+		ask, found, err := f.r.Ask(f.askPerson(t, body))
+		if err != nil || !found || len(ask.Questions) != 1 {
+			t.Fatalf("the ask for %s is %+v (%v)", body, ask, err)
+		}
+		return ask.Questions[0].Question
+	}
+	if got := question(`{"action":"coordinator-set","sessionId":"` + f.lead.ID + `","name":"vera","replace":true}`); !strings.HasPrefix(got, "Make its project's coordinator as @vera, renaming it from @widget-lead, the session ") {
+		t.Fatalf("renaming the lead asks %q", got)
+	}
+	if got := question(`{"action":"coordinator-set","sessionId":"` + f.worker.ID + `","replace":true}`); !strings.HasPrefix(got, "Make its project's coordinator as @widget-lead the session ") || strings.Contains(got, "renaming") {
+		t.Fatalf("a set without a name asks %q, want the project's default name", got)
+	}
+	long := surface.Session{ID: "long-named", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle, Name: strings.Repeat("a long session title ", 12), Cwd: f.worker.Cwd, LastActive: time.Now()}
+	if err := f.r.RecordObservedSession(long); err != nil {
+		t.Fatal(err)
+	}
+	if got := question(`{"action":"coordinator-set","sessionId":"long-named","name":"scribe","replace":true}`); got != "Make its project's coordinator as @scribe the session long-named. Why: the release needs it" {
+		t.Fatalf("a long-named session's set asks %q, want the name before the cut", got)
+	}
+	longName := strings.Repeat("n", 80)
+	if _, err := f.r.SetCoordinator(registry.CoordinatorSpec{ProjectID: "elsewhere", ProjectRoot: "/elsewhere", Name: longName, Surface: string(surface.KindClaude), Cwd: "/elsewhere"}, registry.CoordinatorChange{SessionID: "long-named", ChangedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	renameID := f.askPerson(t, `{"action":"coordinator-set","sessionId":"long-named","name":"`+strings.Repeat("m", 80)+`","replace":true}`)
+	response := httptest.NewRecorder()
+	f.d.requestsHandler(response, httptest.NewRequest(http.MethodGet, "/api/v1/requests?sessionId="+f.worker.ID, nil))
+	var open struct {
+		Requests []struct {
+			ID        string                  `json:"id"`
+			Questions []surface.Question      `json:"questions"`
+			Actions   []surface.RequestAction `json:"actions"`
+		} `json:"requests"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &open) != nil {
+		t.Fatalf("requests answered %d %s", response.Code, response.Body)
+	}
+	var rename surface.Question
+	renameButtons, shortWithButtons := -1, 0
+	for _, request := range open.Requests {
+		switch {
+		case request.ID == renameID && len(request.Questions) == 1:
+			rename, renameButtons = request.Questions[0], len(request.Actions)
+		case len(request.Actions) > 0:
+			shortWithButtons++
+		}
+	}
+	if renameButtons != 0 || shortWithButtons == 0 {
+		t.Fatalf("the clipped rename offers %d notification buttons and %d short approvals offer any, want none for the rename so it is answered only once opened", renameButtons, shortWithButtons)
+	}
+	want := "Make its project's coordinator as @" + strings.Repeat("m", 80) + ", renaming it from @" + longName + ", the session long-named. Why: the release needs it"
+	if !strings.HasPrefix(rename.Question, "Make its project's coordinator as @"+strings.Repeat("m", 80)) || len([]rune(rename.Question)) > registry.MaxAskQuestion || rename.Detail != want {
+		t.Fatalf("renaming between two 80-character names shows %q with detail %q, want the new name in the label and both names whole in the detail", rename.Question, rename.Detail)
+	}
+	if got := question(`{"action":"coordinator-new","surface":"claude","cwd":"/work/widget"}`); !strings.HasPrefix(got, "Start a new claude coordinator with its project's default name for /work/widget. Why: ") {
+		t.Fatalf("a new coordinator without a name asks %q", got)
+	}
+	if got := question(`{"action":"coordinator-new","surface":"claude","cwd":"/work/widget","name":"@scout"}`); !strings.HasPrefix(got, "Start a new claude coordinator as @scout for /work/widget. Why: ") {
+		t.Fatalf("a named new coordinator asks %q", got)
 	}
 }
 
@@ -269,7 +340,7 @@ func TestAnApprovalIsTitledWithTheNameTheAskingRowShows(t *testing.T) {
 	}
 	askID := f.askPerson(t, `{"action":"channel-create","channel":"named"}`)
 	ask, _, err := f.r.Ask(askID)
-	if err != nil || ask.Title != "@builder asks: Create channel #named" {
+	if err != nil || ask.Title != "Create channel #named" {
 		t.Fatalf("the approval is titled %q (%v), want the row's @builder", ask.Title, err)
 	}
 }

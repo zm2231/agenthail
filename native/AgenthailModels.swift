@@ -2385,6 +2385,7 @@ struct SessionRequest: Decodable, Hashable, Identifiable {
         let options: [Option]
         var suggested: Int? = nil
         var links: [Link]? = nil
+        var detail: String? = nil
     }
 
     struct Action: Decodable, Hashable {

@@ -140,7 +140,7 @@ struct ExtensionEntriesTest {
         check(ExtensionSections.shown([apps, empty, State(apps: false, failed: true, pending: false)]) == [0, 2], "an empty paired host hides and a failed one shows")
         func asking(_ id: String, ask: String?, open: [String]? = nil) -> SessionState {
             var row = SessionState(id: id, surface: "claude", name: id, alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
-            row.ask = ask.map { SessionAsk(id: $0, title: "builder asks you to approve board", routedTo: "person", open: open) }
+            row.ask = ask.map { SessionAsk(id: $0, title: "Approve board", routedTo: "person", open: open) }
             return row
         }
         check(ExtensionCatalog.asksChanged(from: [asking("builder", ask: "older", open: ["older"])], to: [asking("builder", ask: "older", open: ["older", "grant"])]), "a grant ask behind an older ask rereads the Apps lists")
