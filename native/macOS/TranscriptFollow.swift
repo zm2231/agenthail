@@ -29,8 +29,8 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     @State private var placedLeadingRow: String?
     @State private var layout = Layout()
 
-    static var bottomSlack: CGFloat { 70 }
-    static var readerReach: CGFloat { 4 }
+    static var bottomSlack: CGFloat { TranscriptFollowing.bottomSlack }
+    static var readerReach: CGFloat { TranscriptFollowing.readerReach }
     /// Longer than a jump's animation. A scroll moved mid-animation can leave the phase animating for good.
     static var animationLimit: Duration { .milliseconds(500) }
 
@@ -56,7 +56,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             .onScrollPhaseChange { old, new in
                 phase = new
                 if new == .idle, old == .interacting || old == .decelerating, let geometry = layout.geometry {
-                    following = Self.atEnd(geometry)
+                    following = TranscriptFollowing.next(following, .init(distance: TranscriptEnd(geometry).distance, scrollEnded: true))
                 }
                 if new == .interacting || new == .decelerating { layout.releaseHold() }
                 // A reader who scrolls while an older page loads is held where they come to rest.
@@ -101,13 +101,13 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                     return
                 }
                 if settleAnchor(anchorStep(new, inserted: inserted), in: new) { return }
+                let pass = TranscriptFollowing.Pass(distance: TranscriptEnd(new).distance, resized: resized, resizedThisTurn: layout.resized, resting: resting,
+                                                    animating: animating, inserted: inserted, offsetMoved: new.contentOffset.y - old.contentOffset.y)
+                defer { following = TranscriptFollowing.next(following, pass) }
                 if !resized {
                     if following, resting, layout.resized, !Self.atBottom(new) {
                         // Layout that moves the offset in the same pass as a resize, as a lazy stack re-measuring rows does, is not the reader leaving the bottom.
                         settle { $0.scrollTo(edge: .bottom) }
-                    } else if !animating {
-                        // A jump's animation passes through offsets short of the bottom; they are not the reader leaving it.
-                        following = following ? Self.atBottom(new) : Self.atEnd(new)
                     }
                 } else if following, phase == .idle || phase == .animating, !Self.atBottom(new) {
                     settle { $0.scrollTo(edge: .bottom) }
@@ -118,9 +118,6 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                     layout.holdFromEnd(distance, content: new.contentSize.height)
                     let target = max(new.contentSize.height - distance, 0)
                     settleHold { $0.scrollTo(y: Self.scrollY(target, in: new)) }
-                } else if !following, resting, Self.atEnd(new) {
-                    // Content that shrank to the reader's position, or now fits, leaves nothing to jump to.
-                    following = true
                 }
             }
             .environment(\.holdTranscriptPlace, HoldTranscriptPlace(hold: holdPlace))
