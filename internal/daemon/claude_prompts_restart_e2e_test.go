@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -106,7 +107,7 @@ func (a *terminalAsker) ask(n int) <-chan hookResult {
 				time.Sleep(20 * time.Millisecond)
 				continue
 			}
-			var response ClaudePermissionResponse
+			var response daemonapi.ClaudePermissionResponse
 			_ = json.Unmarshal(body, &response)
 			result := hookResult{status: status, body: string(body)}
 			if response.Decision != nil {

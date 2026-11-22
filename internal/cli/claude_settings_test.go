@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/tidwall/gjson"
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -190,11 +190,11 @@ func TestCompactSettingsShowWhyIdleSessionsUnderEachRootWereNotCompacted(t *test
 	if err := os.Symlink(work, linked); err != nil {
 		t.Fatal(err)
 	}
-	var holds []daemon.IdleCompactionHold
+	var holds []daemonapi.IdleCompactionHold
 	for i := range 7 {
-		holds = append(holds, daemon.IdleCompactionHold{SessionID: fmt.Sprintf("s-%d", i), Session: fmt.Sprintf("@work-%d", i), Root: linked, ContextTokens: 250000, Reason: "the session is busy, not idle", At: time.Now().Add(time.Duration(i-10) * time.Minute)})
+		holds = append(holds, daemonapi.IdleCompactionHold{SessionID: fmt.Sprintf("s-%d", i), Session: fmt.Sprintf("@work-%d", i), Root: linked, ContextTokens: 250000, Reason: "the session is busy, not idle", At: time.Now().Add(time.Duration(i-10) * time.Minute)})
 	}
-	holds = append(holds, daemon.IdleCompactionHold{SessionID: "s-primary", Root: primary, ContextTokens: 300000, Reason: "a background task is running", At: time.Now()})
+	holds = append(holds, daemonapi.IdleCompactionHold{SessionID: "s-primary", Root: primary, ContextTokens: 300000, Reason: "a background task is running", At: time.Now()})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/claude/compact-settings" {
 			http.NotFound(w, r)

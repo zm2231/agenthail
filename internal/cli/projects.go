@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 )
 
 const projectUsage = `usage: agenthail project list [--all] [--json]
@@ -343,7 +343,7 @@ func resolveProject(projects []projectRow, selector string) (projectRow, error) 
 }
 
 func (a *App) gatedProjectAction(ctx context.Context, client *daemonAPIClient, payload map[string]any, answer any) error {
-	if err := a.personAction(ctx, daemon.PersonActionAPI, payload); err != nil {
+	if err := a.personAction(ctx, daemonapi.PersonActionAPI, payload); err != nil {
 		return err
 	}
 	return projectAction(ctx, client, payload, answer)

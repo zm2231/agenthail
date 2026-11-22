@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/coordinator"
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sessionstream"
@@ -95,9 +95,9 @@ func (a *App) cmdSend(args []string) error {
 		return a.sendRemote(ctx, remote, scopeProjectID, message, args, timeout)
 	}
 	spec, coordinated := coord.Of(sess.ID)
-	var allowed *daemon.ScopeReply
+	var allowed *daemonapi.ScopeReply
 	if coordinated {
-		allowed, err = a.agentScope(ctx, daemon.ScopeRequest{Action: "lead-send", Project: spec.ProjectID, Mode: sendMode(args)})
+		allowed, err = a.agentScope(ctx, daemonapi.ScopeRequest{Action: "lead-send", Project: spec.ProjectID, Mode: sendMode(args)})
 	} else {
 		allowed, err = a.payloadScope(ctx, "send", map[string]any{"action": "send", "sessionId": sess.ID, "message": message, "busyDelivery": "queue", "noQueue": hasFlag(args, "--no-queue")})
 	}

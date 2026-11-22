@@ -15,15 +15,9 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/nodehost"
-)
-
-var DebugProfiles = []string{"heap", "allocs", "goroutine"}
-
-const (
-	DefaultCPUProfileSeconds = 30
-	MaxCPUProfileSeconds     = 300
 )
 
 // startDebugSocket serves the runtime profiles on a Unix socket only the
@@ -107,7 +101,7 @@ func debugProfileHandler() http.Handler {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		}
 	})
-	for _, name := range DebugProfiles {
+	for _, name := range daemonapi.DebugProfiles {
 		mux.HandleFunc("GET /profiles/"+name, func(w http.ResponseWriter, _ *http.Request) {
 			if name == "heap" {
 				runtime.GC()
@@ -126,11 +120,11 @@ func debugProfileHandler() http.Handler {
 // when the client goes away. The write deadline is moved past the sampling
 // so the profile can still be sent; only one runs at a time.
 func serveCPUProfile(w http.ResponseWriter, r *http.Request) {
-	seconds := DefaultCPUProfileSeconds
+	seconds := daemonapi.DefaultCPUProfileSeconds
 	if raw := r.URL.Query().Get("seconds"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 1 || parsed > MaxCPUProfileSeconds {
-			writeAPIError(w, http.StatusBadRequest, "invalid_seconds", fmt.Sprintf("seconds must be between 1 and %d", MaxCPUProfileSeconds))
+		if err != nil || parsed < 1 || parsed > daemonapi.MaxCPUProfileSeconds {
+			writeAPIError(w, http.StatusBadRequest, "invalid_seconds", fmt.Sprintf("seconds must be between 1 and %d", daemonapi.MaxCPUProfileSeconds))
 			return
 		}
 		seconds = parsed

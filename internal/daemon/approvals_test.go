@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/broadcast"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
@@ -52,7 +53,7 @@ func newApprovalFixture(t *testing.T) approvalFixture {
 
 func (f approvalFixture) askPerson(t *testing.T, body string) string {
 	t.Helper()
-	answer := askScope(t, f.d, ScopeRequest{SessionID: f.worker.ID, Action: "operator", Payload: scopePayload(PersonActionAPI, body), AskPerson: true, Reason: "the release needs it"}, "127.0.0.1:50000")
+	answer := askScope(t, f.d, daemonapi.ScopeRequest{SessionID: f.worker.ID, Action: "operator", Payload: scopePayload(daemonapi.PersonActionAPI, body), AskPerson: true, Reason: "the release needs it"}, "127.0.0.1:50000")
 	if answer.status != http.StatusOK || answer.reply.AskID == "" {
 		t.Fatalf("asking the person answered %d %s", answer.status, answer.body)
 	}
@@ -69,7 +70,7 @@ var thePerson = principal{ID: "phone", Kind: principalDevice, HostName: "phone"}
 
 func TestAnAgentAsksThePersonForARefusedActionAndItRunsOnceWhenAllowed(t *testing.T) {
 	f := newApprovalFixture(t)
-	refused := askScope(t, f.d, ScopeRequest{SessionID: f.worker.ID, Action: "operator", Payload: scopePayload(PersonActionAPI, `{"action":"channel-create","channel":"release"}`)}, "127.0.0.1:50000")
+	refused := askScope(t, f.d, daemonapi.ScopeRequest{SessionID: f.worker.ID, Action: "operator", Payload: scopePayload(daemonapi.PersonActionAPI, `{"action":"channel-create","channel":"release"}`)}, "127.0.0.1:50000")
 	if refused.status != http.StatusForbidden || refused.rule != "person_only" || !strings.Contains(string(refused.body), "--ask-person") {
 		t.Fatalf("the refusal is %d %s, want one that says how to ask the person", refused.status, refused.body)
 	}
@@ -181,7 +182,7 @@ func TestACoordinatorRunsItsOwnProjectsChangesWithoutAsking(t *testing.T) {
 		{"the lead clears its project's coordinator", f.lead.ID, `{"action":"coordinator-clear","projectId":"` + project.ID + `"}`, http.StatusOK},
 	}
 	for _, c := range cases {
-		answer := askScope(t, f.d, ScopeRequest{SessionID: c.caller, Action: "operator", Payload: scopePayload(PersonActionAPI, c.body)}, "127.0.0.1:50000")
+		answer := askScope(t, f.d, daemonapi.ScopeRequest{SessionID: c.caller, Action: "operator", Payload: scopePayload(daemonapi.PersonActionAPI, c.body)}, "127.0.0.1:50000")
 		if answer.status != c.status {
 			t.Errorf("%s: %d %s, want %d", c.name, answer.status, answer.body, c.status)
 		}
@@ -232,7 +233,7 @@ func TestAnApprovalShowsWhileItsSessionsProviderCannotBeRead(t *testing.T) {
 func TestACoordinatorClearsOnlyTheQueuedMessagesItsProjectSent(t *testing.T) {
 	f := newApprovalFixture(t)
 	clear := func(senders string) int {
-		return askScope(t, f.d, ScopeRequest{SessionID: f.lead.ID, Action: "operator", Payload: scopePayload(PersonActionAPI, `{"action":"queue-clear","sessionId":"`+f.worker.ID+`","senders":`+senders+`}`)}, "127.0.0.1:50000").status
+		return askScope(t, f.d, daemonapi.ScopeRequest{SessionID: f.lead.ID, Action: "operator", Payload: scopePayload(daemonapi.PersonActionAPI, `{"action":"queue-clear","sessionId":"`+f.worker.ID+`","senders":`+senders+`}`)}, "127.0.0.1:50000").status
 	}
 	outsider := surface.Session{ID: "outsider", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Cwd: t.TempDir(), LastActive: time.Now()}
 	if err := f.r.RecordObservedSession(outsider); err != nil {

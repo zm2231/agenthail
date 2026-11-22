@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/notify"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -16,7 +16,7 @@ type pushHealth struct {
 }
 
 func pushHealthOf(r *registry.Registry, now time.Time) (pushHealth, error) {
-	health := pushHealth{RelayConfigured: daemon.PushRelayURL() != "", Devices: []registry.PushStatus{}, Problems: []string{}}
+	health := pushHealth{RelayConfigured: notify.PushRelayURL() != "", Devices: []registry.PushStatus{}, Problems: []string{}}
 	devices, err := r.PushStatuses(now.Add(-pushArrivalGrace))
 	if err != nil {
 		return health, err

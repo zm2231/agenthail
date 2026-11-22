@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -402,7 +403,7 @@ func TestAForwardedChangeIsRecordedOnTheOwningHostWithWhoMadeIt(t *testing.T) {
 			t.Fatalf("%s status=%d body=%s", model, response.Code, response.Body.String())
 		}
 	}
-	claimCLI := http.Header{ActionActorHeader: []string{CLIActor}}
+	claimCLI := http.Header{daemonapi.ActionActorHeader: []string{daemonapi.CLIActor}}
 	change("from-cli", claimCLI, true)
 	change("from-dashboard", nil, true)
 	change("cookie-claims-cli", claimCLI, false)
@@ -424,7 +425,7 @@ func TestAForwardedChangeIsRecordedOnTheOwningHostWithWhoMadeIt(t *testing.T) {
 	phone := deviceToken(t, remote.reg, "Spare phone", "read", "control")
 	claimed := httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(`{"action":"model","sessionId":"remote-a","model":"phone"}`))
 	claimed.Header.Set("Authorization", "Bearer "+phone)
-	claimed.Header.Set(ActionActorHeader, CLIActor)
+	claimed.Header.Set(daemonapi.ActionActorHeader, daemonapi.CLIActor)
 	response := httptest.NewRecorder()
 	remote.handler.ServeHTTP(response, claimed)
 	if response.Code != http.StatusOK {

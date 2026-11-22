@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -16,7 +17,7 @@ func TestATaskFoldsUnderItsStarterApartFromItsWorkers(t *testing.T) {
 	f.add("lead", "", "main")
 	f.add("worker", "lead", "main")
 	f.add("running", "lead", "main", task, func(r *dashboardSession) { r.Status = surface.StatusBusy })
-	f.add("asking", "lead", "main", task, func(r *dashboardSession) { r.Attention = &SessionAttention{Kind: AttentionAsk} })
+	f.add("asking", "lead", "main", task, func(r *dashboardSession) { r.Attention = &daemonapi.SessionAttention{Kind: AttentionAsk} })
 	f.add("done", "lead", "main", task)
 	f.add("task-of-task", "running", "main", task)
 	plan := f.plan(SessionViewFilters{})

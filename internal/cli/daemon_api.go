@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/hosts"
 )
@@ -115,14 +115,14 @@ func (c *daemonAPIClient) getJSON(ctx context.Context, path string, query url.Va
 // daemon can hold and replay it toward a paired host without applying it
 // twice.
 func (c *daemonAPIClient) action(ctx context.Context, payload map[string]any) ([]byte, int, error) {
-	header := http.Header{"Idempotency-Key": []string{"cli-" + uuid.NewString()}, daemon.ActionActorHeader: []string{daemon.CLIActor}}
+	header := http.Header{"Idempotency-Key": []string{"cli-" + uuid.NewString()}, daemonapi.ActionActorHeader: []string{daemonapi.CLIActor}}
 	return c.call(ctx, http.MethodPost, "/api/v1/actions", nil, payload, header)
 }
 
 // actionReceipt is action keeping the body of a refusal, whose fields can
 // carry a partial outcome.
 func (c *daemonAPIClient) actionReceipt(ctx context.Context, payload map[string]any) ([]byte, int, error) {
-	header := http.Header{"Idempotency-Key": []string{"cli-" + uuid.NewString()}, daemon.ActionActorHeader: []string{daemon.CLIActor}}
+	header := http.Header{"Idempotency-Key": []string{"cli-" + uuid.NewString()}, daemonapi.ActionActorHeader: []string{daemonapi.CLIActor}}
 	response, err := c.do(ctx, http.MethodPost, "/api/v1/actions", nil, payload, header)
 	if err != nil {
 		return nil, 0, err

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -17,7 +18,7 @@ func (d *Daemon) forwardHostAction(ctx context.Context, p principal, key string,
 	if key == "" {
 		key = "fwd-" + uuid.NewString()
 	}
-	header := http.Header{actionIdempotencyHeader: []string{key}, ActionActorHeader: []string{p.actor()}}
+	header := http.Header{actionIdempotencyHeader: []string{key}, daemonapi.ActionActorHeader: []string{p.actor()}}
 	response, err := host.client.Do(ctx, http.MethodPost, "/api/v1/actions", nil, body, header)
 	if err == nil {
 		answer, readErr := readHostAnswer(host, response)

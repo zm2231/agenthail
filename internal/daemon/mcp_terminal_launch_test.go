@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -47,7 +48,7 @@ func (f *terminalLaunchFixture) launch(t *testing.T, agent string) *surface.Laun
 
 func (f *terminalLaunchFixture) claim(t *testing.T, ref, threadID string) int {
 	t.Helper()
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, f.server.URL+MCPClaimPath, strings.NewReader(fmt.Sprintf(`{"ref":%q,"threadId":%q}`, ref, threadID)))
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, f.server.URL+daemonapi.MCPClaimPath, strings.NewReader(fmt.Sprintf(`{"ref":%q,"threadId":%q}`, ref, threadID)))
 	if err != nil {
 		t.Fatal(err)
 	}

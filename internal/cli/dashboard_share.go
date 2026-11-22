@@ -12,9 +12,9 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/dashconfig"
+	"github.com/zm2231/agenthail/internal/extension"
 	"github.com/zm2231/agenthail/internal/tailscale"
 )
 
@@ -175,7 +175,7 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 		} else if home, homeErr := os.UserHomeDir(); homeErr != nil {
 			err = homeErr
 		} else {
-			err = daemon.WithdrawMountRoutes(home, run, node.Self.DNSName)
+			err = extension.WithdrawMountRoutes(home, run, node.Self.DNSName)
 		}
 		if err != nil {
 			return err

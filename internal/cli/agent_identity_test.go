@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/agentinbox"
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -27,7 +27,7 @@ func TestAnAgentIdentitySendsWithTheCLIsReachAndReadsItsInbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	scoped := 0
-	app.scopeOverride = func(daemon.ScopeRequest) (*daemon.ScopeReply, error) {
+	app.scopeOverride = func(daemonapi.ScopeRequest) (*daemonapi.ScopeReply, error) {
 		scoped++
 		return nil, errors.New("an identity's send was checked as an agent session's")
 	}
@@ -110,7 +110,7 @@ func TestARemovedIdentityCannotSendAsItself(t *testing.T) {
 	if err := r.RecordObservedSession(fake.sessions["target"]); err != nil {
 		t.Fatal(err)
 	}
-	app.scopeOverride = func(daemon.ScopeRequest) (*daemon.ScopeReply, error) {
+	app.scopeOverride = func(daemonapi.ScopeRequest) (*daemonapi.ScopeReply, error) {
 		return nil, errors.New("the daemon scope check ran")
 	}
 	identity, err := r.AddAgentIdentity("kat")

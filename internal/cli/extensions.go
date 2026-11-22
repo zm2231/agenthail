@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -335,7 +335,7 @@ func (a *App) buildExtension(ctx context.Context, client *daemonAPIClient, messa
 	if agent != "claude" && agent != "codex" {
 		return errors.New("--agent is claude or codex")
 	}
-	data, _, err := client.call(ctx, http.MethodPost, "/api/v1/extensions/build", nil, map[string]any{"message": message, "surface": agent, "sessionId": caller}, http.Header{"Idempotency-Key": []string{"cli-" + uuid.NewString()}, daemon.ActionActorHeader: []string{daemon.CLIActor}})
+	data, _, err := client.call(ctx, http.MethodPost, "/api/v1/extensions/build", nil, map[string]any{"message": message, "surface": agent, "sessionId": caller}, http.Header{"Idempotency-Key": []string{"cli-" + uuid.NewString()}, daemonapi.ActionActorHeader: []string{daemonapi.CLIActor}})
 	if err != nil {
 		return err
 	}

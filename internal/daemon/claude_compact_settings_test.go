@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -94,10 +95,10 @@ func TestAnIdleCompactionHoldIsListedUnderTheConfiguredRootItCameFromWithTheSess
 	if err := r.SetAlias("planner", from.ID); err != nil {
 		t.Fatal(err)
 	}
-	d.idleHolds.record(IdleCompactionHold{SessionID: from.ID, Root: linked, ContextTokens: 250000, Reason: "a background task is running"}, func(IdleCompactionHold) {})
+	d.idleHolds.record(daemonapi.IdleCompactionHold{SessionID: from.ID, Root: linked, ContextTokens: 250000, Reason: "a background task is running"}, func(daemonapi.IdleCompactionHold) {})
 	response := serveDashboardRequest(dashboardRouter(d), http.MethodGet, "/api/claude/compact-settings", "")
 	var body struct {
-		Holds []IdleCompactionHold `json:"idleCompactionHolds"`
+		Holds []daemonapi.IdleCompactionHold `json:"idleCompactionHolds"`
 	}
 	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil || len(body.Holds) != 1 {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())

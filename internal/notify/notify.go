@@ -1,4 +1,4 @@
-package daemon
+package notify
 
 import (
 	"context"
@@ -16,11 +16,11 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-type NotificationConfig struct {
+type Config struct {
 	Enabled bool `json:"enabled"`
 }
 
-type NotificationStatus struct {
+type Status struct {
 	Enabled       bool   `json:"enabled"`
 	Available     bool   `json:"available"`
 	Authorization string `json:"authorization"`
@@ -30,74 +30,74 @@ type NotificationStatus struct {
 	Error         string `json:"error,omitempty"`
 }
 
-func NotificationConfigPath() string {
+func ConfigPath() string {
 	return filepath.Join(filepath.Dir(daemonctl.PidFilePath()), "notifications.json")
 }
 
-func LoadNotificationConfig() (NotificationConfig, error) {
-	data, err := os.ReadFile(NotificationConfigPath())
+func LoadConfig() (Config, error) {
+	data, err := os.ReadFile(ConfigPath())
 	if os.IsNotExist(err) {
-		return NotificationConfig{}, nil
+		return Config{}, nil
 	}
 	if err != nil {
-		return NotificationConfig{}, fmt.Errorf("read notification config: %w", err)
+		return Config{}, fmt.Errorf("read notification config: %w", err)
 	}
-	var config NotificationConfig
+	var config Config
 	if err := json.Unmarshal(data, &config); err != nil {
-		return NotificationConfig{}, fmt.Errorf("parse notification config: %w", err)
+		return Config{}, fmt.Errorf("parse notification config: %w", err)
 	}
 	return config, nil
 }
 
-func SaveNotificationConfig(config NotificationConfig) error {
+func SaveConfig(config Config) error {
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return err
 	}
-	directory := filepath.Dir(NotificationConfigPath())
+	directory := filepath.Dir(ConfigPath())
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		return fmt.Errorf("create notification config directory: %w", err)
 	}
-	if err := atomicfile.WriteSynced(NotificationConfigPath(), append(data, '\n'), 0600); err != nil {
+	if err := atomicfile.WriteSynced(ConfigPath(), append(data, '\n'), 0600); err != nil {
 		return fmt.Errorf("write notification config: %w", err)
 	}
 	return nil
 }
 
-func GetNotificationStatus() NotificationStatus {
-	config, err := LoadNotificationConfig()
+func CurrentStatus() Status {
+	config, err := LoadConfig()
 	if err != nil {
-		return NotificationStatus{Error: err.Error()}
+		return Status{Error: err.Error()}
 	}
 	status := nativeNotificationStatus("status", 5*time.Second)
 	status.Enabled = config.Enabled && status.Authorized
 	return status
 }
 
-func EnableNotifications() (NotificationStatus, error) {
+func Enable() (Status, error) {
 	status := nativeNotificationStatus("request", 125*time.Second)
 	if status.Error != "" {
 		return status, fmt.Errorf("enable desktop notifications: %s", status.Error)
 	}
 	if !status.Authorized {
 		status.Enabled = false
-		if err := SaveNotificationConfig(NotificationConfig{}); err != nil {
+		if err := SaveConfig(Config{}); err != nil {
 			return status, err
 		}
 		return status, fmt.Errorf("desktop notifications are %s; allow Agenthail in System Settings", status.Authorization)
 	}
 	status.Enabled = true
-	if err := SaveNotificationConfig(NotificationConfig{Enabled: true}); err != nil {
+	if err := SaveConfig(Config{Enabled: true}); err != nil {
 		return status, err
 	}
 	return status, nil
 }
 
-func DisableNotifications() error {
-	return SaveNotificationConfig(NotificationConfig{})
+func Disable() error {
+	return SaveConfig(Config{})
 }
 
-func OpenNotificationSettings() error {
+func OpenSettings() error {
 	_, err := runNotificationHelper(5*time.Second, "settings")
 	return err
 }
@@ -111,7 +111,7 @@ func Notify(title, message, sessionID, identifier string) error {
 // NotifyRequest is Notify for a session's open request, with the buttons that
 // answer it from the notification when it has any.
 func NotifyRequest(title, message, sessionID, identifier, requestID string, actions []surface.RequestAction) error {
-	config, err := LoadNotificationConfig()
+	config, err := LoadConfig()
 	if err != nil {
 		return err
 	}
@@ -126,8 +126,8 @@ func NotifyRequest(title, message, sessionID, identifier, requestID string, acti
 	}
 	args := []string{
 		"send",
-		"--title", boundedNotificationText(title, 120),
-		"--message", boundedNotificationText(message, 1200),
+		"--title", BoundedText(title, 120),
+		"--message", BoundedText(message, 1200),
 		"--identifier", identifier,
 	}
 	if sessionID != "" {
@@ -147,13 +147,13 @@ func NotifyRequest(title, message, sessionID, identifier, requestID string, acti
 	return err
 }
 
-// WithdrawNotification removes a delivered desktop notification, such as one
+// Withdraw removes a delivered desktop notification, such as one
 // for a question that was answered elsewhere.
-func WithdrawNotification(identifier string) error {
+func Withdraw(identifier string) error {
 	if runtime.GOOS != "darwin" || identifier == "" {
 		return nil
 	}
-	config, err := LoadNotificationConfig()
+	config, err := LoadConfig()
 	if err != nil || !config.Enabled {
 		return err
 	}
@@ -161,17 +161,17 @@ func WithdrawNotification(identifier string) error {
 	return err
 }
 
-func nativeNotificationStatus(command string, timeout time.Duration) NotificationStatus {
+func nativeNotificationStatus(command string, timeout time.Duration) Status {
 	if runtime.GOOS != "darwin" {
-		return NotificationStatus{Authorization: "unsupported", Error: "desktop notifications currently support macOS only"}
+		return Status{Authorization: "unsupported", Error: "desktop notifications currently support macOS only"}
 	}
 	output, err := runNotificationHelper(timeout, command)
 	if err != nil {
-		return NotificationStatus{Authorization: "unavailable", Error: err.Error()}
+		return Status{Authorization: "unavailable", Error: err.Error()}
 	}
-	var status NotificationStatus
+	var status Status
 	if err := json.Unmarshal(output, &status); err != nil {
-		return NotificationStatus{Authorization: "unavailable", Error: fmt.Sprintf("parse native notification status: %s", err)}
+		return Status{Authorization: "unavailable", Error: fmt.Sprintf("parse native notification status: %s", err)}
 	}
 	return status
 }
@@ -220,11 +220,20 @@ func isExecutableFile(path string) bool {
 	return err == nil && !info.IsDir() && info.Mode()&0111 != 0
 }
 
-func boundedNotificationText(value string, limit int) string {
+func BoundedText(value string, limit int) string {
 	value = strings.Join(strings.Fields(value), " ")
 	runes := []rune(value)
 	if len(runes) <= limit {
 		return value
 	}
 	return strings.TrimSpace(string(runes[:limit-1])) + "…"
+}
+
+var bundledPushRelayURL string
+
+func PushRelayURL() string {
+	if value := strings.TrimSpace(os.Getenv("AGENTHAIL_PUSH_RELAY_URL")); value != "" {
+		return strings.TrimRight(value, "/")
+	}
+	return strings.TrimRight(strings.TrimSpace(bundledPushRelayURL), "/")
 }

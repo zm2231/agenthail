@@ -419,7 +419,7 @@ func TestMountsAreOnTheTailnetOnlyWhileRemoteAccessIsOnAndOnlyTheirOwnRoutesAreR
 	}
 
 	setRemote(true)
-	if fake.route(port) != mountTarget(port) || !f.mount(t).Published {
+	if fake.route(port) != extension.MountTarget(port) || !f.mount(t).Published {
 		t.Fatalf("remote access on: route %q, view %+v", fake.route(port), f.mount(t))
 	}
 	if response, _ := f.call(t, port, mountCall{path: "/", host: tailnetHost, cookie: true}); response.StatusCode != http.StatusOK {
@@ -477,7 +477,7 @@ func TestRemoteAccessOffWithNoDaemonRunningWithdrawsTheMountsItPublished(t *test
 	}
 	f.d.extensions.mounts.close()
 
-	if err := WithdrawMountRoutes(f.home, fake.run, fakeTailnetName); err != nil {
+	if err := extension.WithdrawMountRoutes(f.home, fake.run, fakeTailnetName); err != nil {
 		t.Fatal(err)
 	}
 	if fake.route(port) != "" {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -397,7 +398,7 @@ func (a *App) runCoordinatorChange(ctx context.Context, payload map[string]any, 
 	if err != nil {
 		return err
 	}
-	if err := a.personAction(ctx, daemon.PersonActionAPI, payload); err != nil {
+	if err := a.personAction(ctx, daemonapi.PersonActionAPI, payload); err != nil {
 		return err
 	}
 	answer, err := coordinatorAction(ctx, client, payload)
@@ -439,7 +440,7 @@ func (a *App) coordinatorClear(path string, jsonOut bool) error {
 	if session := a.callerSession(); session != nil {
 		payload["sourceSessionId"] = session.ID
 	}
-	if err := a.personAction(ctx, daemon.PersonActionAPI, payload); err != nil {
+	if err := a.personAction(ctx, daemonapi.PersonActionAPI, payload); err != nil {
 		return err
 	}
 	answer, err := coordinatorAction(ctx, client, payload)
@@ -464,7 +465,7 @@ func (a *App) sendToNamedCoordinator(ctx context.Context, spec registry.Coordina
 	if spec.HostID == "" && (hasFlag(args, "--stream") || hasFlag(args, "--reply")) {
 		return fmt.Errorf("the coordinator has no conversation yet; send without --stream or --reply, then read it with 'agenthail last'")
 	}
-	if _, err := a.agentScope(ctx, daemon.ScopeRequest{Action: "lead-send", Project: spec.ProjectID, Mode: sendMode(args)}); err != nil {
+	if _, err := a.agentScope(ctx, daemonapi.ScopeRequest{Action: "lead-send", Project: spec.ProjectID, Mode: sendMode(args)}); err != nil {
 		return err
 	}
 	source, err := a.sourceSessionID(ctx, flagVal(args, "--from"))

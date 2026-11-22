@@ -63,13 +63,7 @@ func routePatterns(t *testing.T) []string {
 			stack = append(stack, node)
 			switch node := node.(type) {
 			case *ast.ValueSpec:
-				for i, name := range node.Names {
-					if i < len(node.Values) {
-						if lit, ok := node.Values[i].(*ast.BasicLit); ok && lit.Kind == token.STRING {
-							consts[name.Name], _ = strconv.Unquote(lit.Value)
-						}
-					}
-				}
+				readStringConsts(node, "", consts)
 			case *ast.CallExpr:
 				params := map[string]bool{}
 				for _, enclosing := range stack {
@@ -89,6 +83,25 @@ func routePatterns(t *testing.T) []string {
 					}
 				}
 				calls = append(calls, registration{call: node, params: params, at: fset.Position(node.Pos())})
+			}
+			return true
+		})
+	}
+	apiSources, err := filepath.Glob("../daemonapi/*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range apiSources {
+		if strings.HasSuffix(source, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, source, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			if spec, ok := node.(*ast.ValueSpec); ok {
+				readStringConsts(spec, "daemonapi.", consts)
 			}
 			return true
 		})
@@ -120,11 +133,28 @@ func routePatterns(t *testing.T) []string {
 			if found.params[arg.Name] {
 				continue
 			}
+		case *ast.SelectorExpr:
+			if pkg, ok := arg.X.(*ast.Ident); ok {
+				if pattern, ok := consts[pkg.Name+"."+arg.Sel.Name]; ok {
+					patterns = append(patterns, pattern)
+					continue
+				}
+			}
 		}
 		t.Fatalf("%s registers a route whose pattern this test cannot read; give it a literal or a string constant", found.at)
 	}
 	slices.Sort(patterns)
 	return slices.Compact(patterns)
+}
+
+func readStringConsts(spec *ast.ValueSpec, prefix string, into map[string]string) {
+	for i, name := range spec.Names {
+		if i < len(spec.Values) {
+			if lit, ok := spec.Values[i].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+				into[prefix+name.Name], _ = strconv.Unquote(lit.Value)
+			}
+		}
+	}
 }
 
 func getPaths(patterns []string, values map[string]string) []string {

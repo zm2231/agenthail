@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
@@ -61,7 +61,7 @@ func (a *App) claimMCPCredential(ref, threadID string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	body, status, err := client.call(ctx, http.MethodPost, daemon.MCPClaimPath, nil, map[string]string{"ref": ref, "threadId": threadID}, nil)
+	body, status, err := client.call(ctx, http.MethodPost, daemonapi.MCPClaimPath, nil, map[string]string{"ref": ref, "threadId": threadID}, nil)
 	if err != nil {
 		return err
 	}

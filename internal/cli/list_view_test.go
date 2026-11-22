@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/workspace"
 )
@@ -110,7 +111,7 @@ func TestListFormatsDisplayInstantsInLocalTime(t *testing.T) {
 	t.Setenv("LC_ALL", "C")
 	t.Setenv("TZ", "Etc/GMT-2")
 	at := time.Date(2026, 10, 25, 12, 30, 0, 0, time.UTC)
-	got, err := renderDisplayDetail(daemon.SessionDisplay{Detail: "Automatic resume scheduled", ResumesAt: &at})
+	got, err := renderDisplayDetail(daemonapi.SessionDisplay{Detail: "Automatic resume scheduled", ResumesAt: &at})
 	if err != nil || !strings.Contains(got, "10/25/26 14:30:00") || strings.Contains(got, "UTC") {
 		t.Fatalf("detail=%q err=%v", got, err)
 	}

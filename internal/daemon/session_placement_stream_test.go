@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -84,7 +85,7 @@ func TestAPresentedUpsertCarriesTheRowsDisplayAndAttention(t *testing.T) {
 	for _, test := range []struct {
 		row  dashboardSession
 		kind string
-	}{{waiting, "request"}, {replaced, AttentionReplacedRequest}, {remote, "request"}} {
+	}{{waiting, "request"}, {replaced, daemonapi.AttentionReplacedRequest}, {remote, "request"}} {
 		payload, err := json.Marshal(map[string]any{"session": test.row})
 		if err != nil {
 			t.Fatal(err)

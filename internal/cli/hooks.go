@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudehooks"
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/surface/codexsurface"
@@ -137,7 +137,7 @@ func (a *App) cmdHook(args []string) error {
 // claudePromptHookUnheldLimit. A call that failed within claudePromptHookHeld
 // never counts as held, so a daemon that crashes as it starts cannot extend it.
 func holdClaudePrompt(ctx context.Context, client *daemonAPIClient, input io.Reader, parent int, serviceLoaded func() bool) *claudesurface.ClaudePromptDecision {
-	var request daemon.ClaudePermissionRequest
+	var request daemonapi.ClaudePermissionRequest
 	if err := json.NewDecoder(io.LimitReader(input, claudeHookInputLimit)).Decode(&request.Prompt); err != nil {
 		return nil
 	}
@@ -172,7 +172,7 @@ func holdClaudePrompt(ctx context.Context, client *daemonAPIClient, input io.Rea
 		case <-time.After(claudePromptHookRetry):
 		}
 	}
-	var response daemon.ClaudePermissionResponse
+	var response daemonapi.ClaudePermissionResponse
 	if json.Unmarshal(body, &response) != nil {
 		return nil
 	}

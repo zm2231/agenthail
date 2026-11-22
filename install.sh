@@ -200,7 +200,7 @@ elif [ -d "$REPO_DIR/cmd/agenthail" ]; then
 	fi
 	BUILD_LDFLAGS="-s -w -X main.version=$BUILD_VERSION -X main.revision=$BUILD_REVISION -X main.builtAt=$BUILD_AT"
 	if [ -n "${AGENTHAIL_PUSH_RELAY_URL:-}" ]; then
-		BUILD_LDFLAGS="$BUILD_LDFLAGS -X github.com/zm2231/agenthail/internal/daemon.bundledPushRelayURL=$AGENTHAIL_PUSH_RELAY_URL"
+		BUILD_LDFLAGS="$BUILD_LDFLAGS -X github.com/zm2231/agenthail/internal/notify.bundledPushRelayURL=$AGENTHAIL_PUSH_RELAY_URL"
 	fi
 	go build -trimpath \
 		-ldflags="$BUILD_LDFLAGS" \

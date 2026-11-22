@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/daemonctl"
 )
 
@@ -23,14 +23,14 @@ func (a *App) cmdDebug(args []string) error {
 	if len(args) < 2 || strings.HasPrefix(args[1], "-") {
 		return errors.New(debugUsage)
 	}
-	seconds := daemon.DefaultCPUProfileSeconds
+	seconds := daemonapi.DefaultCPUProfileSeconds
 	switch {
 	case args[0] == "heap" && len(args) == 2:
 	case args[0] == "cpu" && len(args) == 2:
 	case args[0] == "cpu" && len(args) == 3:
 		parsed, err := strconv.Atoi(args[2])
-		if err != nil || parsed < 1 || parsed > daemon.MaxCPUProfileSeconds {
-			return fmt.Errorf("seconds must be between 1 and %d", daemon.MaxCPUProfileSeconds)
+		if err != nil || parsed < 1 || parsed > daemonapi.MaxCPUProfileSeconds {
+			return fmt.Errorf("seconds must be between 1 and %d", daemonapi.MaxCPUProfileSeconds)
 		}
 		seconds = parsed
 	default:
@@ -65,7 +65,7 @@ func (a *App) cmdDebug(args []string) error {
 		return fmt.Errorf("memory statistics: %w", err)
 	}
 	fmt.Println(path)
-	for _, name := range daemon.DebugProfiles {
+	for _, name := range daemonapi.DebugProfiles {
 		path := filepath.Join(dir, fmt.Sprintf("%s-%s.pb.gz", name, stamp))
 		if err := fetchDebugFile(client, "profiles/"+name, path, 2*time.Minute); err != nil {
 			return fmt.Errorf("%s profile: %w", name, err)

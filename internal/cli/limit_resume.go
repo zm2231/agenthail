@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 )
@@ -26,7 +26,7 @@ func (a *App) cmdLimitResume(args []string) error {
 			return err
 		}
 		defer cancel()
-		if err := a.personAction(ctx, daemon.PersonActionSettings, payload); err != nil {
+		if err := a.personAction(ctx, daemonapi.PersonActionSettings, payload); err != nil {
 			return err
 		}
 		config, err := dashconfig.Load()

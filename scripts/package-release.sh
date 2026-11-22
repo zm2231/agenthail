@@ -37,7 +37,7 @@ mkdir -p "$STAGE"
 
 LDFLAGS="-s -w -X main.version=$VERSION -X main.revision=$REVISION -X main.builtAt=$BUILT_AT"
 if [ -n "${AGENTHAIL_PUSH_RELAY_URL:-}" ]; then
-	LDFLAGS="$LDFLAGS -X github.com/zm2231/agenthail/internal/daemon.bundledPushRelayURL=$AGENTHAIL_PUSH_RELAY_URL"
+	LDFLAGS="$LDFLAGS -X github.com/zm2231/agenthail/internal/notify.bundledPushRelayURL=$AGENTHAIL_PUSH_RELAY_URL"
 fi
 if [ -n "${AGENTHAIL_UPDATE_RELEASE_URL:-}" ]; then
 	LDFLAGS="$LDFLAGS -X github.com/zm2231/agenthail/internal/cli.latestReleaseURL=$AGENTHAIL_UPDATE_RELEASE_URL"

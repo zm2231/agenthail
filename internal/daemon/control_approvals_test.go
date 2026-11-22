@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -122,11 +123,11 @@ func TestTheCLIAsksWithTheBodyTheDaemonRebuildsNotTheOneItSent(t *testing.T) {
 	f := newApprovalFixture(t)
 	outsider := f.outsider(t)
 	crafted := `{"action":"send","sessionId":"outsider","message":"ship it","noQueue":true,"sourceSessionId":"to","author":"person","scopeProjectId":"elsewhere","relayHops":2}`
-	refused := askScope(t, f.d, ScopeRequest{SessionID: f.worker.ID, Action: "send", Target: outsider.ID, Payload: scopePayload(PersonActionAPI, crafted)}, "127.0.0.1:50000")
+	refused := askScope(t, f.d, daemonapi.ScopeRequest{SessionID: f.worker.ID, Action: "send", Target: outsider.ID, Payload: scopePayload(daemonapi.PersonActionAPI, crafted)}, "127.0.0.1:50000")
 	if refused.status != http.StatusForbidden || !strings.Contains(string(refused.body), "--ask-person") || !strings.Contains(string(refused.body), `"approvable":true`) {
 		t.Fatalf("the CLI's cross-project send was answered %d %s, want an approvable refusal that says how to ask", refused.status, refused.body)
 	}
-	asked := askScope(t, f.d, ScopeRequest{SessionID: f.worker.ID, Action: "send", Target: outsider.ID, Payload: scopePayload(PersonActionAPI, crafted), AskPerson: true, Reason: "release"}, "127.0.0.1:50000")
+	asked := askScope(t, f.d, daemonapi.ScopeRequest{SessionID: f.worker.ID, Action: "send", Target: outsider.ID, Payload: scopePayload(daemonapi.PersonActionAPI, crafted), AskPerson: true, Reason: "release"}, "127.0.0.1:50000")
 	if asked.status != http.StatusOK || asked.reply.AskID == "" {
 		t.Fatalf("asking answered %d %s", asked.status, asked.body)
 	}

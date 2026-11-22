@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-const MCPClaimPath = "/api/v1/mcp/claim"
-
 type mcpClaimRequest struct {
 	Ref      string `json:"ref"`
 	ThreadID string `json:"threadId"`

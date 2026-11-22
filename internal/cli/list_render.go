@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 )
 
 func renderListView(state daemon.SessionViewSnapshot, wide bool) error {
 	count := state.View.Counts[state.View.Scope]
 	var buffer bytes.Buffer
-	fmt.Fprintf(&buffer, "%s: %s, %s\n", state.View.Scope, daemon.CountText(count.Families, "conversation"), daemon.CountText(count.Sessions, "session"))
+	fmt.Fprintf(&buffer, "%s: %s, %s\n", state.View.Scope, daemonapi.CountText(count.Families, "conversation"), daemonapi.CountText(count.Sessions, "session"))
 	writer := tabwriter.NewWriter(&buffer, 0, 4, 2, ' ', 0)
 	heading := "PROJECT"
 	if wide {
@@ -86,7 +87,7 @@ func listCell(value string) string {
 	return strings.NewReplacer("\t", " ", "\n", " ", "\r", " ").Replace(value)
 }
 
-func renderDisplayDetail(display daemon.SessionDisplay) (string, error) {
+func renderDisplayDetail(display daemonapi.SessionDisplay) (string, error) {
 	parts := []string{display.Detail}
 	for _, instant := range []struct {
 		label string

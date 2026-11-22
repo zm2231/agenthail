@@ -46,7 +46,7 @@ mkdir -p "$payload" "$root/Applications" "$root/usr/local/bin"
 
 ldflags="-s -w -X main.version=$version -X main.revision=$revision -X main.builtAt=$built_at"
 if [ -n "${AGENTHAIL_PUSH_RELAY_URL:-}" ]; then
-	ldflags="$ldflags -X github.com/zm2231/agenthail/internal/daemon.bundledPushRelayURL=$AGENTHAIL_PUSH_RELAY_URL"
+	ldflags="$ldflags -X github.com/zm2231/agenthail/internal/notify.bundledPushRelayURL=$AGENTHAIL_PUSH_RELAY_URL"
 fi
 if [ -n "${AGENTHAIL_INSTALLER_TEAM_ID:-}" ]; then
 	ldflags="$ldflags -X github.com/zm2231/agenthail/internal/cli.expectedInstallerTeamID=$AGENTHAIL_INSTALLER_TEAM_ID"

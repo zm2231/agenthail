@@ -36,7 +36,7 @@ if [ -z "$CLI_SOURCE" ]; then
 	CLI_BUILT_AT="$(date -u -r "$(git -C "$ROOT" show -s --format=%ct HEAD 2>/dev/null || date +%s)" '+%Y-%m-%dT%H:%M:%SZ')"
 	LDFLAGS="-X main.version=$CLI_VERSION -X main.revision=$APP_REVISION -X main.builtAt=$CLI_BUILT_AT"
 	if [ -n "${AGENTHAIL_PUSH_RELAY_URL:-}" ]; then
-		LDFLAGS="$LDFLAGS -X github.com/zm2231/agenthail/internal/daemon.bundledPushRelayURL=$AGENTHAIL_PUSH_RELAY_URL"
+		LDFLAGS="$LDFLAGS -X github.com/zm2231/agenthail/internal/notify.bundledPushRelayURL=$AGENTHAIL_PUSH_RELAY_URL"
 	fi
 	(cd "$ROOT" && CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" go build -trimpath -ldflags "$LDFLAGS" -o "$CLI_SOURCE" ./cmd/agenthail)
 fi

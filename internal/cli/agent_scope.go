@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -82,12 +82,12 @@ func (a *App) answerScope(ctx context.Context, sess *surface.Session, remote *re
 	} else if sess != nil {
 		target = sess.ID
 	}
-	_, err := a.agentScope(ctx, daemon.ScopeRequest{Action: "answer", Target: target, Mode: decision})
+	_, err := a.agentScope(ctx, daemonapi.ScopeRequest{Action: "answer", Target: target, Mode: decision})
 	return err
 }
 
 func (a *App) controlScopeOf(ctx context.Context, target string) error {
-	_, err := a.agentScope(ctx, daemon.ScopeRequest{Action: "control", Target: target})
+	_, err := a.agentScope(ctx, daemonapi.ScopeRequest{Action: "control", Target: target})
 	return err
 }
 
@@ -119,7 +119,7 @@ func (a *App) personAction(ctx context.Context, api string, payload map[string]a
 	if err != nil {
 		return err
 	}
-	reply, err := a.agentScope(ctx, daemon.ScopeRequest{Action: "operator", Payload: &daemon.PersonAction{API: api, Body: body}, AskPerson: a.askPerson, Reason: a.askReason})
+	reply, err := a.agentScope(ctx, daemonapi.ScopeRequest{Action: "operator", Payload: &daemonapi.PersonAction{API: api, Body: body}, AskPerson: a.askPerson, Reason: a.askReason})
 	if err != nil {
 		return err
 	}
@@ -136,7 +136,7 @@ func (a *App) sendAgentNotices() {
 	a.agentNotices = nil
 	for _, notice := range notices {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		if _, err := a.agentScope(ctx, daemon.ScopeRequest{Action: "notice", Notice: notice}); err != nil {
+		if _, err := a.agentScope(ctx, daemonapi.ScopeRequest{Action: "notice", Notice: notice}); err != nil {
 			fmt.Fprintf(os.Stderr, "agenthail: telling the person what this did failed: %s\n", err)
 		}
 		cancel()
@@ -145,7 +145,7 @@ func (a *App) sendAgentNotices() {
 
 // payloadScope checks a send or control from the body it would run, so a
 // cross-project refusal can be asked of the person with --ask-person.
-func (a *App) payloadScope(ctx context.Context, action string, payload map[string]any) (*daemon.ScopeReply, error) {
+func (a *App) payloadScope(ctx context.Context, action string, payload map[string]any) (*daemonapi.ScopeReply, error) {
 	if !a.agentEnvironment() {
 		return nil, nil
 	}
@@ -154,7 +154,7 @@ func (a *App) payloadScope(ctx context.Context, action string, payload map[strin
 		return nil, err
 	}
 	target, _ := payload["sessionId"].(string)
-	reply, err := a.agentScope(ctx, daemon.ScopeRequest{Action: action, Target: target, Payload: &daemon.PersonAction{API: daemon.PersonActionAPI, Body: body}, AskPerson: a.askPerson, Reason: a.askReason})
+	reply, err := a.agentScope(ctx, daemonapi.ScopeRequest{Action: action, Target: target, Payload: &daemonapi.PersonAction{API: daemonapi.PersonActionAPI, Body: body}, AskPerson: a.askPerson, Reason: a.askReason})
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +177,7 @@ func (a *App) agentCreate(ctx context.Context, payload map[string]any) ([]byte, 
 	if err != nil {
 		return nil, 0, errAgentScopeDaemonDown
 	}
-	response, err := client.do(ctx, http.MethodPost, daemon.ScopePath, nil, daemon.ScopeRequest{SessionID: caller, Action: "create", Create: encoded}, nil)
+	response, err := client.do(ctx, http.MethodPost, daemonapi.ScopePath, nil, daemonapi.ScopeRequest{SessionID: caller, Action: "create", Create: encoded}, nil)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -193,7 +193,7 @@ func (a *App) agentCreate(ctx context.Context, payload map[string]any) ([]byte, 
 }
 
 // A person's own terminal has no agent identity, so --from there keeps the person's reach.
-func (a *App) agentScope(ctx context.Context, request daemon.ScopeRequest) (*daemon.ScopeReply, error) {
+func (a *App) agentScope(ctx context.Context, request daemonapi.ScopeRequest) (*daemonapi.ScopeReply, error) {
 	if !a.agentEnvironment() {
 		return nil, nil
 	}
@@ -209,7 +209,7 @@ func (a *App) agentScope(ctx context.Context, request daemon.ScopeRequest) (*dae
 	if err != nil {
 		return nil, errAgentScopeDaemonDown
 	}
-	response, err := client.do(ctx, http.MethodPost, daemon.ScopePath, nil, request, nil)
+	response, err := client.do(ctx, http.MethodPost, daemonapi.ScopePath, nil, request, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +219,7 @@ func (a *App) agentScope(ctx context.Context, request daemon.ScopeRequest) (*dae
 		return nil, err
 	}
 	if response.StatusCode == http.StatusOK {
-		var reply daemon.ScopeReply
+		var reply daemonapi.ScopeReply
 		if err := json.Unmarshal(body, &reply); err != nil {
 			return nil, fmt.Errorf("read the daemon's scope answer: %w", err)
 		}

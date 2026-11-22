@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
@@ -37,7 +38,7 @@ func TestAPromptHeldOnAHostReachesItsPhoneThroughTheRelayWhileItsPairedHostIsDow
 	})
 
 	prompt := `{"session_id":"conversation-question","tool_name":"AskUserQuestion","tool_input":` + pickABranch + `}`
-	answered := make(chan ClaudePermissionResponse, 1)
+	answered := make(chan daemonapi.ClaudePermissionResponse, 1)
 	go func() {
 		_, response := h.postPrompt(prompt, q.process.PID)
 		answered <- response

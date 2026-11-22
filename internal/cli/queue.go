@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -72,7 +73,7 @@ func (a *App) cmdQueue(args []string) error {
 		if item, err := a.registry().QueueItem(id, a.adapters()); err == nil && item.Status == "dead" {
 			return fmt.Errorf("queue item #%d failed; answer its ask instead: agenthail ask list", id)
 		}
-		if err := a.personAction(context.Background(), daemon.PersonActionAPI, map[string]any{"action": "queue-cancel", "queueId": id}); err != nil {
+		if err := a.personAction(context.Background(), daemonapi.PersonActionAPI, map[string]any{"action": "queue-cancel", "queueId": id}); err != nil {
 			return err
 		}
 		if _, err := a.registry().CancelMessage(id); err != nil {
@@ -98,7 +99,7 @@ func (a *App) cmdQueue(args []string) error {
 			senders = append([]string{}, senders...)
 			payload["senders"] = senders
 		}
-		if err := a.personAction(context.Background(), daemon.PersonActionAPI, payload); err != nil {
+		if err := a.personAction(context.Background(), daemonapi.PersonActionAPI, payload); err != nil {
 			return err
 		}
 		count, err := a.registry().CancelMessagesForSession(sessionID, senders)
@@ -117,11 +118,11 @@ func (a *App) cmdQueue(args []string) error {
 	if err != nil {
 		return fmt.Errorf("%w\n%s", err, queueUsage)
 	}
-	scope := daemon.ScopeRequest{Action: "send", Mode: "queue"}
+	scope := daemonapi.ScopeRequest{Action: "send", Mode: "queue"}
 	if remote != nil {
 		scope.Target = remote.ID
 	} else if spec, coordinated := a.coordinator().Of(sess.ID); coordinated {
-		scope = daemon.ScopeRequest{Action: "lead-send", Mode: "queue", Project: spec.ProjectID}
+		scope = daemonapi.ScopeRequest{Action: "lead-send", Mode: "queue", Project: spec.ProjectID}
 	} else {
 		scope.Target = sess.ID
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/claudesurface"
@@ -157,14 +158,14 @@ func TestAReplacedLeadsRowSaysWhenItHeldTheName(t *testing.T) {
 
 func TestAReplacedLeadsRequestIsShownApartAndDoesNotNeedThePerson(t *testing.T) {
 	waiting := &surface.Waiting{ID: "request-1", Kind: surface.WaitingApproval}
-	display := &SessionDisplay{Kind: "waiting", Detail: "Answer in Agenthail"}
+	display := &daemonapi.SessionDisplay{Kind: "waiting", Detail: "Answer in Agenthail"}
 	lead := dashboardSession{ID: "lead", Display: display, WaitingOn: waiting}
 	replaced := dashboardSession{ID: "old", Display: display, WaitingOn: waiting, ReplacedLead: []registry.CoordinatorTenure{{Name: "work-lead"}}}
 	if attention := rowAttention(lead); attention == nil || attention.Kind != "request" {
 		t.Fatalf("lead attention=%+v", attention)
 	}
 	replaced.Attention = rowAttention(replaced)
-	if replaced.Attention == nil || replaced.Attention.Kind != AttentionReplacedRequest {
+	if replaced.Attention == nil || replaced.Attention.Kind != daemonapi.AttentionReplacedRequest {
 		t.Fatalf("replaced lead attention=%+v", replaced.Attention)
 	}
 	plan := sessionViewPlan{rows: map[string]*dashboardSession{"old": &replaced}}

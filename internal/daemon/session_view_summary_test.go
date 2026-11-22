@@ -3,12 +3,13 @@ package daemon
 import (
 	"testing"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func TestAFamilyWaitingOnThePersonCountsOnlyAsNeedingThem(t *testing.T) {
 	busy := dashboardSession{ID: "busy", Status: surface.StatusBusy}
-	asking := dashboardSession{ID: "asking", Status: surface.StatusBusy, Attention: &SessionAttention{Kind: "ask"}}
+	asking := dashboardSession{ID: "asking", Status: surface.StatusBusy, Attention: &daemonapi.SessionAttention{Kind: "ask"}}
 	worker := dashboardSession{ID: "worker", Status: surface.StatusBusy}
 	idle := dashboardSession{ID: "idle", Status: surface.StatusIdle, QueueCount: 2}
 	plan := sessionViewPlan{rows: map[string]*dashboardSession{"busy": &busy, "asking": &asking, "worker": &worker, "idle": &idle}}

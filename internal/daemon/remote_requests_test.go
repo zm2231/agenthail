@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -118,10 +119,10 @@ func TestALeadAnswersItsWorkersPromptOnAPairedHostFromTheCLI(t *testing.T) {
 	l := leadOnTheOtherHost(t)
 	ask := l.prompt(t, "prompt-1")
 	const local = "127.0.0.1:50000"
-	if answer := askScope(t, l.vps.daemon, ScopeRequest{SessionID: "vps-a", Action: "answer", Target: l.workerQ, Mode: "allow"}, local); answer.status != http.StatusOK || answer.reply.TargetID != l.workerQ {
+	if answer := askScope(t, l.vps.daemon, daemonapi.ScopeRequest{SessionID: "vps-a", Action: "answer", Target: l.workerQ, Mode: "allow"}, local); answer.status != http.StatusOK || answer.reply.TargetID != l.workerQ {
 		t.Fatalf("the lead's answer scope: status=%d reply=%+v body=%s", answer.status, answer.reply, answer.body)
 	}
-	if answer := askScope(t, l.vps.daemon, ScopeRequest{SessionID: "vps-a", Action: "answer", Target: l.workerQ, Mode: "always"}, local); answer.code != "exceeds_ceiling" {
+	if answer := askScope(t, l.vps.daemon, daemonapi.ScopeRequest{SessionID: "vps-a", Action: "answer", Target: l.workerQ, Mode: "always"}, local); answer.code != "exceeds_ceiling" {
 		t.Fatalf("always allow from the lead: status=%d code=%q, want exceeds_ceiling", answer.status, answer.code)
 	}
 	respond := func(source string) *httptest.ResponseRecorder {
