@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -27,10 +28,19 @@ type RemoteIdentity struct {
 	CreatedAt  time.Time `json:"createdAt"`
 	LastSeen   time.Time `json:"lastSeen,omitzero"`
 	TokenHash  string    `json:"-"`
+	// AccessChecked is whether Access settings are set, without which the stored binding is not checked.
+	AccessChecked bool `json:"accessChecked"`
 }
 
-// Binding is what a request must carry besides the token; a stored Access binding is checked only while Access settings are set.
-func (r RemoteIdentity) Binding(accessSet bool) string {
+func (r RemoteIdentity) MarshalJSON() ([]byte, error) {
+	type plain RemoteIdentity
+	return json.Marshal(struct {
+		plain
+		Binding string `json:"binding"`
+	}{plain(r), r.Binding()})
+}
+
+func (r RemoteIdentity) Binding() string {
 	stored := ""
 	switch {
 	case r.ClientID != "":
@@ -41,7 +51,7 @@ func (r RemoteIdentity) Binding(accessSet bool) string {
 	switch {
 	case stored == "":
 		return "token only"
-	case accessSet:
+	case r.AccessChecked:
 		return stored
 	}
 	return "token only (no Access settings, so its " + stored + " binding is not checked)"
@@ -118,12 +128,12 @@ func (r *Registry) UnbindRemoteIdentity(name string) error {
 	return nil
 }
 
-const remoteIdentitySelect = `SELECT i.name,i.identity_id,r.access_client_id,r.access_email,r.created_at_ms,r.last_seen_at_ms,r.token_hash FROM identity_remote r JOIN agent_identities i ON i.identity_id=r.identity_id`
+const remoteIdentitySelect = `SELECT i.name,i.identity_id,r.access_client_id,r.access_email,r.created_at_ms,r.last_seen_at_ms,r.token_hash,EXISTS(SELECT 1 FROM mcp_access WHERE id=1) FROM identity_remote r JOIN agent_identities i ON i.identity_id=r.identity_id`
 
 func scanRemoteIdentity(row rowScanner) (RemoteIdentity, error) {
 	var remote RemoteIdentity
 	var created, seen int64
-	if err := row.Scan(&remote.Name, &remote.IdentityID, &remote.ClientID, &remote.Email, &created, &seen, &remote.TokenHash); err != nil {
+	if err := row.Scan(&remote.Name, &remote.IdentityID, &remote.ClientID, &remote.Email, &created, &seen, &remote.TokenHash, &remote.AccessChecked); err != nil {
 		return RemoteIdentity{}, err
 	}
 	remote.CreatedAt = time.UnixMilli(created).UTC()

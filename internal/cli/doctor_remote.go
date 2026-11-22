@@ -77,7 +77,7 @@ func (h remoteMCPHealth) String() string {
 		lines = append(lines, fmt.Sprintf("remote mcp: Access and token (team %s, audience %s), %s", h.Team, h.AUD, keys))
 	}
 	for _, identity := range h.Identities {
-		lines = append(lines, fmt.Sprintf("  @%s: %s, last seen %s, %d unread", identity.Name, identity.Binding(h.Mode == "access+token"), lastSeen(identity.LastSeen), h.Unread[identity.Name]))
+		lines = append(lines, fmt.Sprintf("  @%s: %s, last seen %s, %d unread", identity.Name, identity.Binding(), lastSeen(identity.LastSeen), h.Unread[identity.Name]))
 	}
 	for _, problem := range h.Problems {
 		lines = append(lines, "  problem: "+problem)
