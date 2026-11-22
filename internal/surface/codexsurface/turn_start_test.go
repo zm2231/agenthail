@@ -2,9 +2,12 @@ package codexsurface
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 type listedTurnClient struct{ turns []any }
@@ -39,6 +42,32 @@ func TestAStartCodexNeverShowedUnderWayHoldsReloadsOnlyUntilItsTurnIsListedDone(
 	}
 	if c.turnStarts.pending("t") {
 		t.Fatal("the start stayed recorded after its turn was listed done")
+	}
+}
+
+type unreadableThreadClient struct {
+	listedTurnClient
+	message string
+}
+
+func (c unreadableThreadClient) Request(ctx context.Context, method string, params map[string]any, wait time.Duration) (map[string]any, error) {
+	if method == "thread/read" {
+		return nil, &codexRPCError{Method: method, Code: -32603, Message: c.message}
+	}
+	return c.listedTurnClient.Request(ctx, method, params, wait)
+}
+
+func TestAReloadWhileAFirstTurnsRolloutIsStillEmptyReportsTheThreadWorking(t *testing.T) {
+	c := &Codex{}
+	rollout := "/codex/sessions/2026/11/22/rollout-2026-11-22T12-49-45-01a2034e-31c3-7d12-884f-73224cd87e33.jsonl"
+	empty := unreadableThreadClient{message: "failed to read thread: thread-store internal error: failed to read session metadata " + rollout + ": rollout at " + rollout + " is empty"}
+	undone := false
+	if err := c.reloadThread(context.Background(), empty, &surface.Session{ID: "t"}, func() error { undone = true; return nil }); !errors.Is(err, surface.ErrInvalidTurnSetting) || !undone {
+		t.Fatalf("a reload over an empty rollout returned %v, undone=%v", err, undone)
+	}
+	broken := unreadableThreadClient{message: "failed to read thread: thread-store internal error: failed to read session metadata " + rollout + ": rollout at " + rollout + " has no session metadata"}
+	if busy, err := c.turnInFlight(context.Background(), broken, "t"); err == nil || busy {
+		t.Fatalf("another thread/read failure read as a turn starting: busy=%v err=%v", busy, err)
 	}
 }
 

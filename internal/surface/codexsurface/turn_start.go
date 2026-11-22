@@ -224,6 +224,9 @@ func awaitTurnUnderway(ctx context.Context, client codexClient, threadID string,
 // turn.
 func (c *Codex) turnInFlight(ctx context.Context, client codexClient, threadID string) (bool, error) {
 	response, err := client.Request(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": false}, 5*time.Second)
+	if codexRolloutNotWrittenYet(err) {
+		return true, nil
+	}
 	if err != nil {
 		return false, fmt.Errorf("thread/read: %w", err)
 	}
