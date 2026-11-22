@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/workspace"
@@ -57,9 +56,26 @@ func TestListRendersDaemonPagesAndMembers(t *testing.T) {
 		t.Fatal(human)
 	}
 	raw, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all", "--json"}) })
-	var state daemon.SessionViewSnapshot
-	if err != nil || json.Unmarshal([]byte(raw), &state) != nil || len(state.Sessions) != 3 || state.Sessions[1].ID != "child" || state.NextCursor != "" || calls != 6 {
+	var state struct {
+		View struct {
+			CatalogHostID string `json:"catalogHostId"`
+			Families      []struct {
+				Members []struct {
+					Pinned bool `json:"pinned"`
+				} `json:"members"`
+			} `json:"families"`
+		} `json:"view"`
+		Sessions []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"sessions"`
+		NextCursor *string `json:"nextCursor"`
+	}
+	if err != nil || json.Unmarshal([]byte(raw), &state) != nil || len(state.Sessions) != 3 || state.Sessions[1].ID != "child" || state.NextCursor != nil || calls != 6 {
 		t.Fatalf("output=%s calls=%d err=%v", raw, calls, err)
+	}
+	if state.Sessions[0].Status != "idle" || state.View.CatalogHostID != "host" || len(state.View.Families) != 2 || !state.View.Families[0].Members[1].Pinned {
+		t.Fatalf("list --json dropped daemon fields it does not render: %s", raw)
 	}
 }
 

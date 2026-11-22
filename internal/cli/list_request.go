@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/url"
 
-	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/workspace"
 )
 
@@ -55,11 +54,11 @@ func (a *App) cmdList(args []string) error {
 	return renderListView(state, hasFlag(args, "--wide"))
 }
 
-func readListView(ctx context.Context, client *daemonAPIClient, query url.Values) (daemon.SessionViewSnapshot, error) {
-	var result daemon.SessionViewSnapshot
+func readListView(ctx context.Context, client *daemonAPIClient, query url.Values) (listSnapshot, error) {
+	var result listSnapshot
 	seen := map[string]bool{}
 	for {
-		var page daemon.SessionViewSnapshot
+		var page listSnapshot
 		if err := client.getJSON(ctx, "/api/v1/snapshot", query, &page); err != nil {
 			return result, err
 		}
@@ -114,7 +113,7 @@ func readListView(ctx context.Context, client *daemonAPIClient, query url.Values
 		n := min(len(missing), 200)
 		query["sessionId"] = missing[:n]
 		query.Set("revision", result.View.Revision)
-		var page daemon.SessionViewSnapshot
+		var page listSnapshot
 		if err := client.getJSON(ctx, "/api/v1/snapshot", query, &page); err != nil {
 			return result, err
 		}

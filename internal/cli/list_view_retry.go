@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/url"
 
-	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/hosts"
 )
 
@@ -13,16 +12,16 @@ const listViewAttempts = 3
 
 var errListViewChanged = errors.New("catalog changed while listing; retry the command")
 
-func readListViewConsistent(ctx context.Context, client *daemonAPIClient, query url.Values) (daemon.SessionViewSnapshot, error) {
+func readListViewConsistent(ctx context.Context, client *daemonAPIClient, query url.Values) (listSnapshot, error) {
 	var err error
 	for range listViewAttempts {
-		var state daemon.SessionViewSnapshot
+		var state listSnapshot
 		state, err = readListView(ctx, client, cloneQuery(query))
 		if err == nil || !listViewChanged(err) {
 			return state, err
 		}
 	}
-	return daemon.SessionViewSnapshot{}, err
+	return listSnapshot{}, err
 }
 
 func listViewChanged(err error) bool {

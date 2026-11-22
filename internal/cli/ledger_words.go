@@ -1,15 +1,21 @@
 package cli
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
-	"github.com/zm2231/agenthail/internal/daemon"
-	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 )
 
-func (a *App) ledgerWords(store *ledger.Store, args []string, ref string) error {
+var errWordsNeedDaemon = errors.New("captured words are read through the Agenthail daemon, which is not running; start it with: agenthail daemon start")
+
+func (a *App) ledgerWords(args []string, ref string) error {
 	around := 0
 	if raw := flagVal(args, "--context"); raw != "" {
 		n, err := strconv.Atoi(raw)
@@ -22,8 +28,23 @@ func (a *App) ledgerWords(store *ledger.Store, args []string, ref string) error 
 	if err != nil {
 		return err
 	}
-	words, err := daemon.ReadWords(a.registry(), store, key, ref, around)
+	if !a.daemonIsRunning() {
+		return errWordsNeedDaemon
+	}
+	client, err := a.daemonAPI()
 	if err != nil {
+		return err
+	}
+	query := url.Values{"projectKey": {key}, "view": {"words"}, "id": {ref}, "context": {strconv.Itoa(around)}}
+	data, status, err := client.call(context.Background(), http.MethodGet, "/api/v1/ledger", query, nil, nil)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return actionError(data)
+	}
+	var words daemonapi.Words
+	if err := json.Unmarshal(data, &words); err != nil {
 		return err
 	}
 	if hasFlag(args, "--json") {
