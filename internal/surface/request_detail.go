@@ -6,9 +6,45 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 const detailChangeLines = 12
+
+const summaryLimit = 160
+
+// Summary is an approval in one line: the command a shell runs, the path an
+// edit changes and its size, or the address a fetch reaches. It is empty when
+// the request does not fit one line, so a client asks the person to read the
+// whole request rather than approve it from the line.
+func (r Request) Summary() string {
+	if r.Kind != WaitingApproval || len(r.Input) == 0 {
+		return ""
+	}
+	var input map[string]any
+	if json.Unmarshal(r.Input, &input) != nil {
+		return ""
+	}
+	text := func(key string) string {
+		value, _ := input[key].(string)
+		return strings.TrimSpace(value)
+	}
+	line := ""
+	switch r.Tool {
+	case "Bash":
+		line = text("command")
+	case "Edit", "MultiEdit", "Write", "NotebookEdit":
+		if text("file_path") != "" || text("notebook_path") != "" {
+			line, _, _ = strings.Cut(r.Detail(), "\n")
+		}
+	case "WebFetch":
+		line = text("url")
+	}
+	if line == "" || strings.ContainsAny(line, "\r\n") || utf8.RuneCountInString(line) > summaryLimit {
+		return ""
+	}
+	return line
+}
 
 // Detail is what a request asks to do, written for someone deciding whether
 // to allow it: the command for a shell, the path and a summary of the change

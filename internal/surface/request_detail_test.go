@@ -44,3 +44,30 @@ func TestARequestsDetailSaysWhatItAsksToDo(t *testing.T) {
 		t.Fatalf("a question has its own text, not a detail: %q", detail)
 	}
 }
+
+func TestAnApprovalIsSummarisedInOneLineOnlyWhenItFits(t *testing.T) {
+	input := func(value any) json.RawMessage {
+		encoded, _ := json.Marshal(value)
+		return encoded
+	}
+	for _, c := range []struct {
+		name    string
+		request Request
+		want    string
+	}{
+		{"a one-line command", Request{Kind: WaitingApproval, Tool: "Bash", Input: input(map[string]any{"command": "go test ./...", "cwd": "/repo"})}, "go test ./..."},
+		{"a command on several lines", Request{Kind: WaitingApproval, Tool: "Bash", Input: input(map[string]any{"command": "cd /repo\nrm -rf build"})}, ""},
+		{"a command too long for a line", Request{Kind: WaitingApproval, Tool: "Bash", Input: input(map[string]any{"command": strings.Repeat("x", summaryLimit+1)})}, ""},
+		{"an edit's path and size", Request{Kind: WaitingApproval, Tool: "Edit", Input: input(map[string]any{"file_path": "/repo/a.go", "old_string": "x := 1\n", "new_string": "x := 2\ny := 3\n"})}, "/repo/a.go: +2 -1 lines"},
+		{"a fetch's address", Request{Kind: WaitingApproval, Tool: "WebFetch", Input: input(map[string]any{"url": "https://example.com/pricing", "prompt": "summarize"})}, "https://example.com/pricing"},
+		{"a file change that names no file", Request{Kind: WaitingApproval, Tool: "Edit", Title: "Codex wants to change files", BlockedPath: "/repo"}, ""},
+		{"any other tool", Request{Kind: WaitingApproval, Tool: "mcp__x__deploy", Input: input(map[string]any{"env": "prod"})}, ""},
+		{"a question", Request{Kind: WaitingQuestion, Tool: "Bash", Input: input(map[string]any{"command": "ls"})}, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.request.Summary(); got != c.want {
+				t.Fatalf("summary %q, want %q", got, c.want)
+			}
+		})
+	}
+}

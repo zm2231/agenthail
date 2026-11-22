@@ -9,7 +9,9 @@ import { renderSessions, sessionBatchSize } from "./sessions.js";
 import { selectSession } from "./session-selection.js";
 import { openVoice } from "./voice.js";
 import { cancelCodexSearch } from "./session-search.js";
-import { action } from "./actions.js";
+import { action, postAction } from "./actions.js";
+import { answerInPlace, nowDecision } from "./project-now-answer.js";
+import { refreshDecisions } from "./inbox.js";
 import { takeBackQueued } from "./queue-take-back.js";
 import { renderLeadReplacements } from "./overview.js";
 import { ensureSessionOrder, load } from "./dashboard-state.js";
@@ -127,6 +129,15 @@ export function bindConversationEvents() {
     if (projectEarlier) {
       app.projectEarlier = projectEarlier.dataset.projectEarlier;
       return syncProjectPane();
+    }
+    const nowAnswer = event.target.closest("[data-now-respond], [data-now-accept]");
+    if (nowAnswer) {
+      const decision = nowDecision(nowAnswer);
+      if (!decision) return syncProjectPane();
+      if (await answerInPlace(nowAnswer.dataset.sessionId, nowAnswer.dataset.requestId, decision, postAction)) toast("Answered.");
+      syncProjectPane();
+      app.decisionsKey = undefined;
+      return refreshDecisions();
     }
     const projectResume = event.target.closest("[data-project-resume]");
     if (projectResume) {

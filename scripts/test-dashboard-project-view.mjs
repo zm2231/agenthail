@@ -94,6 +94,12 @@ assert.equal(run("rowTime")({ ...sessions[1], activity: { busySince: at(25) } },
 assert.equal(run("rowTime")(sessions[1], now), "now", "a running row without a start shows now, never its last activity");
 assert.equal(run("rowTime")(sessions[3], now), "2h", "an idle row shows its last activity");
 assert.match(html, /<span class="project-row-time">2h<\/span>/);
+projectListing.rows.set("photos", { ...sessions[3], waitingOn: { kind: "approval", id: "p", answerable: true } });
+context.app.decisions = { decisions: [{ group: "waiting", sessionId: "photos", answerable: true, reason: "Needs approval", requests: [{ id: "p", kind: "approval", tool: "Bash", summary: "make photos", detail: "make photos" }] }], leadHandling: [], unreachable: [], outdated: [] };
+html = run("renderProjectView(app.state.projects[0])");
+assert.match(html, /data-session="photos"[\s\S]*?<\/div><div class="project-now-answer"><p class="project-now-ask"><span class="project-now-tool">Bash<\/span><code>make photos<\/code>[\s\S]*?>Allow</, "a waiting Now row offers its approval in place, saying what it allows");
+projectListing.rows.set("photos", sessions[3]);
+delete context.app.decisions;
 
 const waiting = { ...sessions[1], id: "asking", name: "asking", waitingOn: { kind: "question", id: "q", answerable: true }, lastActive: at(4), activity: { busySince: at(90) } };
 const unreachable = { ...sessions[1], id: "buildbox::far", name: "far", host: { ...buildbox, state: "unreachable" }, lastActive: at(7), activity: { busySince: at(90) } };

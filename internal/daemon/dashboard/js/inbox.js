@@ -6,6 +6,7 @@ import { decisionGroups, decisionKey, decisionsKey, loadDecisions } from "./deci
 import { currentStops, renderInboxScope } from "./decision-card.js";
 import { renderTiles } from "./project-tiles-view.js";
 import { renderOverviewLine } from "./overview-line.js";
+import { refreshShownProject } from "./project-pane.js";
 
 export async function refreshDecisions(loader = loadDecisions) {
   const key = decisionsKey();
@@ -26,6 +27,7 @@ export async function refreshDecisions(loader = loadDecisions) {
       renderInbox();
       renderTiles();
       renderOverviewLine();
+      refreshShownProject();
       if (app.scope === "inbox") renderInboxScope();
     } else {
       app.decisionsDropped = true;

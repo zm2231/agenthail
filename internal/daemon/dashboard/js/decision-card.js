@@ -4,37 +4,17 @@ import { escape, timeAgo } from "./format.js";
 import { displayName } from "./session-labels.js";
 import { postAction } from "./actions.js";
 import { toast } from "./feedback.js";
-import { decisionGroups, decisionKey } from "./decisions.js";
+import { answeredMark as mark, decisionGroups, decisionKey, recommended, shownDecisions } from "./decisions.js";
+
+export { recommended, shownDecisions };
 import { inboxStops } from "./inbox-stops.js";
 import { renderQuestionCard } from "./question-pager.js";
 import { bindQuestionPager } from "./question-pager-events.js";
 
 export const decisionCard = { question: "decision-question", respond: "decision-respond" };
-const mark = (sessionId, requestId) => `${sessionId}\u0001${requestId}`;
-
-export function recommended(request) {
-  if (!request || !["question", "ask"].includes(request.kind) || !request.questions?.length) return null;
-  const choices = [];
-  for (const question of request.questions) {
-    const option = Number.isInteger(question.suggested) ? question.options?.[question.suggested] : null;
-    if (!option?.id) return null;
-    choices.push(option.id);
-  }
-  return { choices };
-}
 
 export function acceptsRecommended(event) {
   return event.key === "Enter" && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey;
-}
-
-export function shownDecisions() {
-  const decisions = app.decisions?.decisions || [];
-  const answered = app.decisionsAnswered || new Set();
-  return decisions.flatMap((item) => {
-    if (!item.requests?.length) return [item];
-    const requests = item.requests.filter((request) => !answered.has(mark(item.sessionId, request.id)));
-    return requests.length ? [{ ...item, requests }] : [];
-  });
 }
 
 export function currentStops() {
