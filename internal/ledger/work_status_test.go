@@ -1,6 +1,7 @@
 package ledger_test
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -85,7 +86,16 @@ func TestAHeldParentListsItsUnfinishedChildrenAndWhoHoldsThem(t *testing.T) {
 	}
 	row := status.Holding[0]
 	want := []ledger.StatusChild{{ID: "widget-W2", Text: "schema", State: ledger.WorkOpen}, {ID: "widget-W3", Text: "index", State: ledger.WorkInProgress, Assignee: "other"}}
-	if !slices.Equal(row.Children, want) || row.ChildrenFinished != 1 {
-		t.Fatalf("children %+v, %d finished; want %+v and 1", row.Children, row.ChildrenFinished, want)
+	if row.Children == nil || !slices.Equal(row.Children.Unfinished, want) || row.Children.Finished != 1 {
+		t.Fatalf("children %+v; want %+v and 1 finished", row.Children, want)
+	}
+
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkReopen, ItemID: "widget-W4"})
+	encoded, err := json.Marshal(board(t, s).SessionStatus("s1").Holding[0])
+	if err != nil || !strings.Contains(string(encoded), `"finished":0`) {
+		t.Fatalf("a parent with no finished child must still say so: %s %v", encoded, err)
+	}
+	if rows, _ := json.Marshal(board(t, s).SessionStatus("other").Holding[0]); strings.Contains(string(rows), `"children"`) {
+		t.Fatalf("an item with no children carries a children entry: %s", rows)
 	}
 }

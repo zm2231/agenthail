@@ -64,9 +64,9 @@ func printStatus(s ledger.SessionStatus) {
 		if h := row.Handoff; h != nil && len(h.Remaining) > 0 {
 			line += "\n    handed over as remaining: " + strings.Join(h.Remaining, "; ")
 		}
-		if total := len(row.Children) + row.ChildrenFinished; total > 0 {
-			line += fmt.Sprintf("\n    children, %d of %d finished", row.ChildrenFinished, total)
-			for _, child := range row.Children {
+		if c := row.Children; c != nil {
+			line += fmt.Sprintf("\n    children, %d of %d finished", c.Finished, c.Finished+len(c.Unfinished))
+			for _, child := range c.Unfinished {
 				line += fmt.Sprintf("\n      %s [%s] %s", child.ID, child.State, child.Text)
 				if child.Assignee != "" {
 					line += " assignee=" + child.Assignee
