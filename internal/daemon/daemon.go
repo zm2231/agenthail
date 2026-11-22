@@ -61,6 +61,7 @@ type Daemon struct {
 	idleHolds            idleCompactionHolds
 	idleWake             chan struct{}
 	retiringDecisions    retiringDecisions
+	unnamedCallers       unnamedCallers
 	errorMu              sync.Mutex
 	observeErrors        map[string]observedError
 	ui                   *uiState

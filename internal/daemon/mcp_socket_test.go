@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -51,6 +52,11 @@ type relayedSession struct {
 
 func startRelayedSession(t *testing.T, root, sessionID string) *relayedSession {
 	t.Helper()
+	return startRelayedSessionAs(t, root, func(s *relayedSession) { s.write(t, sessionID) })
+}
+
+func startRelayedSessionAs(t *testing.T, root string, record func(*relayedSession)) *relayedSession {
+	t.Helper()
 	ready := filepath.Join(t.TempDir(), "ready")
 	process := exec.Command("sh", "-c", `"$0" -test.run='^TestMCPStdioRelayHelper$'; :`, os.Args[0])
 	process.Env = append(os.Environ(), "AGENTHAIL_TEST_RELAY_READY="+ready, "AGENTHAIL_TEST_RELAY_SOCKET="+daemonctl.MCPSocketPath())
@@ -71,7 +77,7 @@ func startRelayedSession(t *testing.T, root, sessionID string) *relayedSession {
 		_ = process.Wait()
 	})
 	session := &relayedSession{record: filepath.Join(root, "sessions", strconv.Itoa(process.Process.Pid)+".json"), process: process, listChanged: make(chan struct{}, 1)}
-	session.write(t, sessionID)
+	record(session)
 	if err := os.WriteFile(ready, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -249,25 +255,68 @@ func TestASessionStartedWhileTheDaemonIsDownGetsItsToolsWhenItComesUp(t *testing
 	}
 }
 
-func TestAProcessThatIsNoSessionGetsNoTools(t *testing.T) {
+func TestAProcessThatIsNoSessionIsToldWhyItGetsNoTools(t *testing.T) {
 	_, reg, root, _ := mcpSocketDaemon(t)
 	registerClaude(t, reg, "claude-one")
 	stranger := socketClient(t)
-	listed, err := stranger.ListTools(context.Background(), nil)
-	if err != nil || len(listed.Tools) != 0 {
-		t.Fatalf("a process with no session among its ancestors listed %d tools (%v)", len(listed.Tools), err)
+	if listed, err := stranger.ListTools(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "no Claude or Codex session is among the calling process's parents") {
+		t.Fatalf("a process with no session among its ancestors listed %v (%v)", listed, err)
 	}
 	if result, err := stranger.CallTool(context.Background(), &mcp.CallToolParams{Name: "agenthail_whoami"}); err == nil && !result.IsError {
 		t.Fatalf("a process with no session called a tool: %+v", result)
 	}
 	parent := &relayedSession{record: filepath.Join(root, "sessions", strconv.Itoa(os.Getppid())+".json")}
 	parent.writeFor(t, os.Getppid(), "claude-one", false)
-	if listed, err := socketClient(t).ListTools(context.Background(), nil); err != nil || len(listed.Tools) != 0 {
-		t.Fatalf("a record its process did not write gave %d tools (%v)", len(listed.Tools), err)
+	if listed, err := socketClient(t).ListTools(context.Background(), nil); err == nil {
+		t.Fatalf("a record its process did not write gave %d tools", len(listed.Tools))
 	}
 	parent.writeFor(t, os.Getppid(), "claude-one", true)
 	if listed, err := socketClient(t).ListTools(context.Background(), nil); err != nil || len(listed.Tools) == 0 {
-		t.Fatalf("the parent's own record gave %d tools (%v)", len(listed.Tools), err)
+		t.Fatalf("the parent's own record gave %v (%v)", listed, err)
+	}
+}
+
+func TestASessionWhoseRecordCannotBeReadIsToldWhy(t *testing.T) {
+	_, reg, root, _ := mcpSocketDaemon(t)
+	registerClaude(t, reg, "claude-one")
+	record := filepath.Join(root, "sessions", strconv.Itoa(os.Getppid())+".json")
+	if err := os.MkdirAll(filepath.Dir(record), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(record, []byte(`{"pid":`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("the session record %s of Claude process %d cannot be read", record, os.Getppid())
+	if listed, err := socketClient(t).ListTools(context.Background(), nil); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("listed %v (%v), want an error saying %q", listed, err, want)
+	}
+	if _, err := socketClient(t).CallTool(context.Background(), &mcp.CallToolParams{Name: "agenthail_whoami"}); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("call err=%v, want it to say %q", err, want)
+	}
+}
+
+func TestARelayedSessionWhoseRecordCouldNotBeReadGetsItsToolsOnceItReads(t *testing.T) {
+	_, reg, root, _ := mcpSocketDaemon(t)
+	registerClaude(t, reg, "claude-one")
+	session := startRelayedSessionAs(t, root, func(s *relayedSession) {
+		if err := os.MkdirAll(filepath.Dir(s.record), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(s.record, []byte(`{"pid":`), 0600); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if n := session.toolCount(t); n != 0 {
+		t.Fatalf("an unnamed session listed %d tools", n)
+	}
+	session.write(t, "claude-one")
+	select {
+	case <-session.listChanged:
+	case <-time.After(15 * time.Second):
+		t.Fatal("the session was never told its tools changed once its record read")
+	}
+	if id, ok := session.whoami(t); !ok || id != "claude-one" {
+		t.Fatalf("whoami = %q, %v", id, ok)
 	}
 }
 

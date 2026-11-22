@@ -5,9 +5,11 @@ package mcpstdio
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -53,12 +55,18 @@ type relay struct {
 // session connected reach it through tools/list_changed.
 func (r *relay) register(ctx context.Context) bool {
 	transport := &mcp.StreamableClientTransport{Endpoint: "http://agenthail/mcp", HTTPClient: socketClient(r.socket), DisableStandaloneSSE: true}
+	reported := ""
 	for wait := firstRetry; ; wait = min(wait*2, lastRetry) {
-		if daemon, tools, err := r.list(ctx, transport); err == nil {
+		daemon, tools, err := r.list(ctx, transport)
+		if err == nil {
 			for _, tool := range tools {
 				r.server.AddTool(tool, forward(daemon, tool.Name))
 			}
 			return true
+		}
+		if err.Error() != reported && ctx.Err() == nil {
+			reported = err.Error()
+			fmt.Fprintf(os.Stderr, "agenthail: no tools yet: %s\n", reported)
 		}
 		select {
 		case <-ctx.Done():
