@@ -86,6 +86,9 @@ func (a *App) cmdIdentity(args []string) error {
 			line := fmt.Sprintf("@%-20s unread=%d total=%d since %s", identity.Name, identity.Unread, identity.Total, identity.CreatedAt.Local().Format(time.DateTime))
 			if remote, ok := remoteByName[identity.Name]; ok {
 				line += "  remote: " + remote.Binding() + ", last seen " + lastSeen(remote.LastSeen)
+				if remote.OAuth {
+					line += ", OAuth sign-in on"
+				}
 			}
 			if clients := clientsOf[identity.Name]; len(clients) > 0 {
 				line += "  oauth: " + strings.Join(clients, ", ")
@@ -98,7 +101,7 @@ func (a *App) cmdIdentity(args []string) error {
 	case "access":
 		return identityAccess(reg, positional, args, jsonOut)
 	case "oauth":
-		return identityOAuth(reg, positional, args, jsonOut)
+		return a.identityOAuth(reg, positional, args, jsonOut)
 	}
 	return errors.New(identityUsage)
 }

@@ -166,12 +166,12 @@ func (r *Registry) IssueOAuthGrant(identityID, clientID string, life OAuthLifeti
 		return OAuthTokens{}, err
 	}
 	defer tx.Rollback()
-	var remote int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM identity_remote WHERE identity_id=?`, identityID).Scan(&remote); err != nil {
+	var enabled int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM identity_oauth WHERE identity_id=?`, identityID).Scan(&enabled); err != nil {
 		return OAuthTokens{}, err
 	}
-	if remote == 0 {
-		return OAuthTokens{}, errors.New("this identity has no remote access")
+	if enabled == 0 {
+		return OAuthTokens{}, errors.New("this identity is not enabled for OAuth sign-in")
 	}
 	result, err := tx.Exec(`UPDATE oauth_clients SET approved_at_ms=CASE WHEN approved_at_ms=0 THEN ? ELSE approved_at_ms END WHERE client_id=?`, now.UnixMilli(), clientID)
 	if err != nil {
@@ -253,6 +253,44 @@ func (r *Registry) OAuthGrantByAccess(token string) (OAuthGrant, time.Time, erro
 func (r *Registry) TouchOAuthGrant(id string, now time.Time) error {
 	_, err := r.db.Exec(`UPDATE identity_oauth_grants SET last_seen_at_ms=? WHERE grant_id=? AND last_seen_at_ms<?`, now.UnixMilli(), id, now.Add(-time.Minute).UnixMilli())
 	return err
+}
+
+// SetIdentityOAuth turns OAuth sign-in on or off for an identity with remote
+// access; off revokes its grants and reports how many.
+func (r *Registry) SetIdentityOAuth(name string, on bool) (int, error) {
+	name = strings.TrimPrefix(name, "@")
+	tx, err := r.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	id, err := agentIdentityIDTx(tx, name)
+	if err != nil {
+		return 0, err
+	}
+	var remote int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM identity_remote WHERE identity_id=?`, id).Scan(&remote); err != nil {
+		return 0, err
+	}
+	if remote == 0 {
+		return 0, fmt.Errorf("@%s has no remote access; turn it on first with: agenthail identity remote %s", name, name)
+	}
+	if on {
+		_, err := tx.Exec(`INSERT INTO identity_oauth(identity_id,enabled_at_ms) VALUES(?,?) ON CONFLICT(identity_id) DO NOTHING`, id, r.now().UnixMilli())
+		if err != nil {
+			return 0, err
+		}
+		return 0, tx.Commit()
+	}
+	if _, err := tx.Exec(`DELETE FROM identity_oauth WHERE identity_id=?`, id); err != nil {
+		return 0, err
+	}
+	result, err := tx.Exec(`DELETE FROM identity_oauth_grants WHERE identity_id=?`, id)
+	if err != nil {
+		return 0, err
+	}
+	revoked, _ := result.RowsAffected()
+	return int(revoked), tx.Commit()
 }
 
 func (r *Registry) OAuthGrants() ([]OAuthGrant, error) {

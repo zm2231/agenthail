@@ -20,11 +20,16 @@ import (
 
 func localSocketPost(t *testing.T, request daemonapi.AgentRoleRequest) (int, string) {
 	t.Helper()
+	return localSocketPostTo(t, "/api/v1/agents", request)
+}
+
+func localSocketPostTo(t *testing.T, path string, request any) (int, string) {
+	t.Helper()
 	client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", daemonctl.LocalSocketPath())
 	}}}
 	body, _ := json.Marshal(request)
-	response, err := client.Post("http://agenthail/api/v1/agents", "application/json", bytes.NewReader(body))
+	response, err := client.Post("http://agenthail"+path, "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,6 +78,42 @@ func TestAnAgentCannotRaiseItsOwnRoleWhileThePersonsTerminalCan(t *testing.T) {
 	}
 	if records, err := reg.AgentRoles(); err != nil || len(records) != 0 {
 		t.Fatalf("a refused write left roles %v (%v)", records, err)
+	}
+}
+
+func TestAnAgentCannotTurnOnOAuthSignInWhileThePersonsTerminalCan(t *testing.T) {
+	d, reg, root, _ := mcpSocketDaemon(t)
+	stop, err := d.startLocalSocket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(stop)
+	registerClaude(t, reg, "claude-one")
+	if _, err := reg.AddAgentIdentity("scout"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := reg.BindRemoteIdentity("scout", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	enabled := func() bool {
+		t.Helper()
+		remote, err := reg.RemoteIdentityNamed("scout")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return remote.OAuth
+	}
+	enable := daemonapi.IdentityOAuthRequest{Identity: "scout", Enabled: true}
+	if status, body := localSocketPostTo(t, daemonapi.IdentityOAuthPath, enable); status != http.StatusOK || !enabled() {
+		t.Fatalf("the person's terminal turned OAuth sign-in on: %d %s, enabled=%v", status, body, enabled())
+	}
+	if status, body := localSocketPostTo(t, daemonapi.IdentityOAuthPath, daemonapi.IdentityOAuthRequest{Identity: "scout"}); status != http.StatusOK || enabled() {
+		t.Fatalf("the person's terminal turned OAuth sign-in off: %d %s, enabled=%v", status, body, enabled())
+	}
+	agent := &relayedSession{record: filepath.Join(root, "sessions", strconv.Itoa(os.Getppid())+".json")}
+	agent.writeFor(t, os.Getppid(), "claude-one", true)
+	if status, body := localSocketPostTo(t, daemonapi.IdentityOAuthPath, enable); status != http.StatusForbidden || enabled() {
+		t.Fatalf("a command inside session claude-one turned OAuth sign-in on: %d %s, enabled=%v", status, body, enabled())
 	}
 }
 

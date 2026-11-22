@@ -26,6 +26,9 @@ func TestThePersonTurnsOAuthOnListsItsGrantsAndRevokesOne(t *testing.T) {
 	if _, _, err := r.BindRemoteIdentity("scout", "", ""); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := r.SetIdentityOAuth("scout", true); err != nil {
+		t.Fatal(err)
+	}
 	client, err := r.RegisterOAuthClient("Kat", []string{"https://kat.example/cb"}, 64, time.Hour)
 	if err != nil {
 		t.Fatal(err)

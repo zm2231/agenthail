@@ -42,6 +42,9 @@ func newOAuthFixture(t *testing.T) *oauthFixture {
 	if err := f.r.SetOAuthIssuer(f.issuer); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := f.r.SetIdentityOAuth("scout", true); err != nil {
+		t.Fatal(err)
+	}
 	tunnel := headerTransport{"X-Forwarded-For": "203.0.113.9"}
 	f.client = &http.Client{Transport: tunnel}
 	f.browser = &http.Client{Transport: tunnel, CheckRedirect: func(r *http.Request, _ []*http.Request) error {
@@ -299,24 +302,37 @@ func TestAClientThePersonDeclinesGetsNoToken(t *testing.T) {
 	}
 }
 
-func TestAnUnknownIdentityGetsTheSamePageAndNoAsk(t *testing.T) {
-	f := newOAuthFixture(t)
-	client, err := f.r.RegisterOAuthClient("Kat", []string{oauthTestCallback}, 64, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	form := url.Values{"identity": {"nobody"}, "response_type": {"code"}, "client_id": {client.ID}, "redirect_uri": {oauthTestCallback}, "code_challenge": {"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"}, "code_challenge_method": {"S256"}}
-	response, err := f.browser.PostForm(f.issuer+mcpoauth.AuthorizePath, form)
-	if err != nil {
-		t.Fatal(err)
-	}
-	page, _ := io.ReadAll(response.Body)
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK || matchCodeOnPage.FindStringSubmatch(string(page)) == nil {
-		t.Fatalf("status=%d page=%s", response.StatusCode, page)
-	}
-	if open, err := f.r.OpenAsks(); err != nil || len(open) != 0 {
-		t.Fatalf("an unknown identity raised asks: %+v err=%v", open, err)
+func TestAnIdentityThatMayNotSignInGetsTheSamePageAndNoAsk(t *testing.T) {
+	for _, tc := range []struct {
+		name, identity string
+		setup          func(*oauthFixture) error
+	}{
+		{"an unknown name", "nobody", func(*oauthFixture) error { return nil }},
+		{"remote access on but OAuth sign-in off", "scout", func(f *oauthFixture) error { _, err := f.r.SetIdentityOAuth("scout", false); return err }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newOAuthFixture(t)
+			if err := tc.setup(f); err != nil {
+				t.Fatal(err)
+			}
+			client, err := f.r.RegisterOAuthClient("Kat", []string{oauthTestCallback}, 64, time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			form := url.Values{"identity": {tc.identity}, "response_type": {"code"}, "client_id": {client.ID}, "redirect_uri": {oauthTestCallback}, "code_challenge": {"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"}, "code_challenge_method": {"S256"}}
+			response, err := f.browser.PostForm(f.issuer+mcpoauth.AuthorizePath, form)
+			if err != nil {
+				t.Fatal(err)
+			}
+			page, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != http.StatusOK || matchCodeOnPage.FindStringSubmatch(string(page)) == nil {
+				t.Fatalf("status=%d page=%s", response.StatusCode, page)
+			}
+			if open, err := f.r.OpenAsks(); err != nil || len(open) != 0 {
+				t.Fatalf("an identity that may not sign in raised asks: %+v err=%v", open, err)
+			}
+		})
 	}
 }
 

@@ -594,6 +594,12 @@ CREATE TABLE hosts (
 	catalog_retired_clock INTEGER NOT NULL DEFAULT -1
 );
 
+-- table identity_oauth
+CREATE TABLE identity_oauth (
+	identity_id TEXT PRIMARY KEY REFERENCES identity_remote(identity_id) ON DELETE CASCADE,
+	enabled_at_ms INTEGER NOT NULL
+);
+
 -- table identity_oauth_grants
 CREATE TABLE identity_oauth_grants (
 	grant_id TEXT PRIMARY KEY,

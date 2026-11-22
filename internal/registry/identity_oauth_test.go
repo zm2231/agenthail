@@ -18,6 +18,9 @@ func oauthFixture(t *testing.T) (*Registry, AgentIdentity, OAuthClient) {
 	if _, _, err := r.BindRemoteIdentity("scout", "", ""); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := r.SetIdentityOAuth("scout", true); err != nil {
+		t.Fatal(err)
+	}
 	if err := r.SetOAuthIssuer("https://agent.example.com"); err != nil {
 		t.Fatal(err)
 	}
@@ -75,6 +78,7 @@ func TestAGrantEndsWithRemoteAccessOrTheIssuerButNotWithATokenRotation(t *testin
 		{"remote token rotated", false, func(r *Registry) error { _, _, err := r.RotateRemoteIdentity("scout"); return err }},
 		{"same issuer set again", false, func(r *Registry) error { return r.SetOAuthIssuer("https://agent.example.com") }},
 		{"remote access turned off", true, func(r *Registry) error { return r.UnbindRemoteIdentity("scout") }},
+		{"OAuth sign-in turned off", true, func(r *Registry) error { _, err := r.SetIdentityOAuth("scout", false); return err }},
 		{"identity removed", true, func(r *Registry) error { return r.RemoveAgentIdentity("scout") }},
 		{"issuer changed", true, func(r *Registry) error { return r.SetOAuthIssuer("https://other.example.com") }},
 		{"issuer cleared", true, func(r *Registry) error { return r.ClearOAuthIssuer() }},

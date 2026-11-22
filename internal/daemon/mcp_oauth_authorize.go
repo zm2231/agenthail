@@ -105,10 +105,10 @@ func (m *remoteMCP) oauthAsk(w http.ResponseWriter, r *http.Request, req mcpoaut
 			}
 		}
 	})
-	if remote, err := d.Registry.RemoteIdentityNamed(name); err == nil {
+	if remote, err := d.Registry.RemoteIdentityNamed(name); err == nil && remote.OAuth {
 		m.raiseOAuthAsk(id, pending, remote)
 	} else {
-		d.recordOAuth("", "authorize "+oauthClientLabel(client.Name, client.ID, mcpoauth.RedirectHost(req.RedirectURI))+" as @"+clip(name, 40), "no identity with remote access by that name")
+		d.recordOAuth("", "authorize "+oauthClientLabel(client.Name, client.ID, mcpoauth.RedirectHost(req.RedirectURI))+" as @"+clip(name, 40), "no identity enabled for OAuth sign-in by that name")
 	}
 	http.Redirect(w, r, mcpoauth.AuthorizePath+"?pending="+url.QueryEscape(id), http.StatusSeeOther)
 }

@@ -1040,6 +1040,10 @@ CREATE TABLE IF NOT EXISTS identity_oauth_grants (
 	last_seen_at_ms INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS identity_oauth_grants_client ON identity_oauth_grants(client_id);
+CREATE TABLE IF NOT EXISTS identity_oauth (
+	identity_id TEXT PRIMARY KEY REFERENCES identity_remote(identity_id) ON DELETE CASCADE,
+	enabled_at_ms INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS oauth_spent_refresh (
 	refresh_hash TEXT PRIMARY KEY,
 	grant_id TEXT NOT NULL REFERENCES identity_oauth_grants(grant_id) ON DELETE CASCADE,

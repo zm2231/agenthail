@@ -126,14 +126,18 @@ Subscriptions are rows of `mcp_event_subscriptions` (schema 125). The secret is 
 
 ### OAuth for URL-only clients
 
-A client that takes only a URL, such as a connected-apps form, signs in with OAuth 2.1 as the MCP authorization spec describes. The person turns it on with the public origin the client reaches the daemon at:
+A client that takes only a URL, such as a connected-apps form, signs in with OAuth 2.1 as the MCP authorization spec describes. The person turns it on with the public origin the client reaches the daemon at, and then for each identity an app may sign in as:
 
 ```
 agenthail identity oauth set --url https://agent.example.com
-agenthail identity oauth            # status and grants
+agenthail identity oauth enable <name>    # this identity may sign in over OAuth
+agenthail identity oauth disable <name>   # it may not; revokes its grants
+agenthail identity oauth                  # status and grants
 agenthail identity oauth revoke <grant>
-agenthail identity oauth off        # revokes every grant
+agenthail identity oauth off              # revokes every grant
 ```
+
+OAuth sign-in is off for every identity until the person enables it, and only for an identity with remote access (`identity_oauth`, removed with that access). Enabling and disabling are the person's alone, like role changes: the CLI sends them over the daemon's local socket, which refuses a command run inside an agent session and tells the person, and the dashboard API takes them only from a paired device or a paired host acting for the person. Each is recorded in history as `mcp-oauth` and told to the person. `identity list` and `doctor` show `OAuth sign-in on` for an enabled identity, and its JSON carries `oauth`.
 
 The origin must be https, or http on a loopback host, with no path. OAuth is served whether or not Access settings are set. A client like this cannot carry an Access credential, so an `aho_` request needs none; the person's approval of each grant on their devices stands in for it. An `ahr_` request still needs its Access credential while Access settings are set, and it is refused on any route that skips Access. So with Access, OAuth clients reach the daemon at an origin that has no Access application in front of it (for example a second hostname routed to the same daemon), and that origin is the one given to `identity oauth set`, while `ahr_` clients keep the hostname behind Access.
 
@@ -151,14 +155,14 @@ The daemon serves, all without a credential:
 The approve flow:
 
 1. The page checks the client, an exact redirect URI (a loopback one may name any port), an S256 challenge and, if given, the resource. An unknown client or redirect is shown on the page and never sent back; any other error goes back to the redirect URI.
-2. The person names the identity on the page. If it has remote access, the daemon raises a person ask on that identity, announced to paired phones and browsers like any other ask, naming the client, the host it returns to, the identity's role and a six-digit code. The page shows the same code, so the person approves only the request in front of them. An unknown name gets the same page and no ask, so the page tells no one which identities exist. At most 8 approvals wait at once, each for 10 minutes.
+2. The person names the identity on the page. If OAuth sign-in is on for it, the daemon raises a person ask on that identity, announced to paired phones and browsers like any other ask, naming the client, the host it returns to, the identity's role and a six-digit code. The page shows the same code, so the person approves only the request in front of them. An unknown name, or an identity OAuth sign-in is off for, gets the same page and no ask, so the page tells no one which identities exist or may sign in. A grant is issued only for an identity OAuth sign-in is on for. At most 8 approvals wait at once, each for 10 minutes.
 3. Approving sends the browser back with a single-use code that lasts a minute and is bound to the client, redirect URI, challenge and identity. Declining, or no answer in time, sends `access_denied`. Approvals wait in memory, so the daemon withdraws any left open when it starts.
 4. The token endpoint checks the client, redirect URI and verifier, then issues an access token `aho_...` (an hour) and a refresh token `ahf_...` (30 days). A code presented twice revokes the grant it produced.
 5. Each refresh replaces both tokens. A refresh token presented after it was replaced revokes the grant, since a copy exists.
 
 Only SHA-256 hashes of the tokens are stored (`identity_oauth_grants`, with `oauth_clients` and `oauth_spent_refresh`). An `aho_` bearer maps to its identity like `ahr_`: the same tools, the identity's role (as the approve ask shows), push notices and inbox contract, recorded in history as `mcp-remote` with `via oauth <client>`. To connect a narrower app, the person assigns the identity the built-in `connected-app` role (`agenthail roles assign connected-app --identity <name>`), which reads and queues messages to a coordinator and cannot spawn or control, see [mcp.md](mcp.md); the approve ask then names it. An event subscription made with it belongs to the grant, so a refresh or the identity's `ahr_` rotation keeps it and revoking the grant deletes it.
 
-A grant ends when it is revoked from the CLI or by its client, when its refresh token expires, when a reused code or refresh token revokes it, when the identity's remote access is turned off or the identity removed, or when the origin changes or OAuth is turned off. Rotating the `ahr_` token keeps it. Deleting a grant raises the credential epoch, which retires every remote session.
+A grant ends when it is revoked from the CLI or by its client, when its refresh token expires, when a reused code or refresh token revokes it, when OAuth sign-in or remote access is turned off for the identity or the identity removed, or when the origin changes or OAuth is turned off. Rotating the `ahr_` token keeps it. Deleting a grant raises the credential epoch, which retires every remote session.
 
 History records registration, each approval asked, approved, declined or expired, token issue, refresh, and every revocation and its cause as `mcp-oauth`, with no token, code or verifier.
 

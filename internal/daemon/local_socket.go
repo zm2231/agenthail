@@ -36,6 +36,7 @@ func (d *Daemon) startLocalSocket() (func(), error) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/agents", d.localAgentRolesHandler)
+	mux.HandleFunc(daemonapi.IdentityOAuthPath, d.localIdentityOAuthHandler)
 	server := &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -91,22 +92,46 @@ func (d *Daemon) agentProcessSession(ctx context.Context, pid int) string {
 	return ancestorSession(pid, localAncestors, owns)
 }
 
-func (d *Daemon) localAgentRolesHandler(w http.ResponseWriter, r *http.Request) {
+type personOnlyWrite struct {
+	title, tried, rule, event string
+}
+
+var (
+	roleWrite  = personOnlyWrite{title: "Agent role change refused", tried: "tried to change agent roles", rule: "Agent roles are the person's to change", event: "agent.role.refused"}
+	oauthWrite = personOnlyWrite{title: "OAuth sign-in change refused", tried: "tried to change which identities may sign in over OAuth", rule: "Which identities may sign in over OAuth is the person's to change", event: "identity.oauth.refused"}
+)
+
+// fromThePerson reports whether a local socket request may make write: a GET
+// passes once the caller is named, a POST only from outside every agent session.
+func (d *Daemon) fromThePerson(w http.ResponseWriter, r *http.Request, write personOnlyWrite) bool {
 	peer, ok := r.Context().Value(mcpPeerKey{}).(peerproc.Peer)
 	if !ok || peer.PID == 0 || peer.UID != os.Getuid() {
 		writeAPIError(w, http.StatusForbidden, "person_only", "Agenthail could not name the process calling it.")
-		return
+		return false
 	}
-	if r.Method == http.MethodPost {
-		if session := d.agentProcessSession(r.Context(), peer.PID); session == unnamedSession {
-			d.tellPerson(r.Context(), "Agent role change refused", "A command run inside an agent session Agenthail could not name tried to change agent roles.", "", "agent.role.refused")
-			writeAPIError(w, http.StatusForbidden, "person_only", "Agent roles are the person's to change, and this command runs inside an agent session Agenthail could not name: a Claude process among its parents has a session record that cannot be read. Run it from a terminal of your own.")
-			return
-		} else if session != "" {
-			d.tellPerson(r.Context(), "Agent role change refused", "A command run inside session "+d.resolveDisplay(session)+" tried to change agent roles.", session, "agent.role.refused")
-			writeAPIError(w, http.StatusForbidden, "person_only", "Agent roles are the person's to change, and this command runs inside session "+session+". Run it from a terminal of your own.")
-			return
-		}
+	if r.Method != http.MethodPost {
+		return true
 	}
-	d.serveAgentRoles(w, r, daemonapi.CLIActor)
+	if session := d.agentProcessSession(r.Context(), peer.PID); session == unnamedSession {
+		d.tellPerson(r.Context(), write.title, "A command run inside an agent session Agenthail could not name "+write.tried+".", "", write.event)
+		writeAPIError(w, http.StatusForbidden, "person_only", write.rule+", and this command runs inside an agent session Agenthail could not name: a Claude process among its parents has a session record that cannot be read. Run it from a terminal of your own.")
+		return false
+	} else if session != "" {
+		d.tellPerson(r.Context(), write.title, "A command run inside session "+d.resolveDisplay(session)+" "+write.tried+".", session, write.event)
+		writeAPIError(w, http.StatusForbidden, "person_only", write.rule+", and this command runs inside session "+session+". Run it from a terminal of your own.")
+		return false
+	}
+	return true
+}
+
+func (d *Daemon) localAgentRolesHandler(w http.ResponseWriter, r *http.Request) {
+	if d.fromThePerson(w, r, roleWrite) {
+		d.serveAgentRoles(w, r, daemonapi.CLIActor)
+	}
+}
+
+func (d *Daemon) localIdentityOAuthHandler(w http.ResponseWriter, r *http.Request) {
+	if d.fromThePerson(w, r, oauthWrite) {
+		d.serveIdentityOAuth(w, r, daemonapi.CLIActor)
+	}
 }

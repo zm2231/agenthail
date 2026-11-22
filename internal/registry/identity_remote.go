@@ -28,6 +28,7 @@ type RemoteIdentity struct {
 	CreatedAt  time.Time `json:"createdAt"`
 	LastSeen   time.Time `json:"lastSeen,omitzero"`
 	TokenHash  string    `json:"-"`
+	OAuth      bool      `json:"oauth"`
 	// AccessChecked is whether Access settings are set, without which the stored binding is not checked.
 	AccessChecked bool `json:"accessChecked"`
 }
@@ -128,12 +129,12 @@ func (r *Registry) UnbindRemoteIdentity(name string) error {
 	return nil
 }
 
-const remoteIdentitySelect = `SELECT i.name,i.identity_id,r.access_client_id,r.access_email,r.created_at_ms,r.last_seen_at_ms,r.token_hash,EXISTS(SELECT 1 FROM mcp_access WHERE id=1) FROM identity_remote r JOIN agent_identities i ON i.identity_id=r.identity_id`
+const remoteIdentitySelect = `SELECT i.name,i.identity_id,r.access_client_id,r.access_email,r.created_at_ms,r.last_seen_at_ms,r.token_hash,EXISTS(SELECT 1 FROM identity_oauth o WHERE o.identity_id=r.identity_id),EXISTS(SELECT 1 FROM mcp_access WHERE id=1) FROM identity_remote r JOIN agent_identities i ON i.identity_id=r.identity_id`
 
 func scanRemoteIdentity(row rowScanner) (RemoteIdentity, error) {
 	var remote RemoteIdentity
 	var created, seen int64
-	if err := row.Scan(&remote.Name, &remote.IdentityID, &remote.ClientID, &remote.Email, &created, &seen, &remote.TokenHash, &remote.AccessChecked); err != nil {
+	if err := row.Scan(&remote.Name, &remote.IdentityID, &remote.ClientID, &remote.Email, &created, &seen, &remote.TokenHash, &remote.OAuth, &remote.AccessChecked); err != nil {
 		return RemoteIdentity{}, err
 	}
 	remote.CreatedAt = time.UnixMilli(created).UTC()

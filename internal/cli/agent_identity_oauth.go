@@ -1,15 +1,19 @@
 package cli
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/mcpoauth"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
-const identityOAuthUsage = "usage: agenthail identity oauth [set --url <public origin> | off | list | revoke <grant>] [--json]"
+const identityOAuthUsage = "usage: agenthail identity oauth [set --url <public origin> | off | list | revoke <grant> | enable <name> | disable <name>] [--json]"
 
 type oauthStatus struct {
 	Issuer string                `json:"issuer,omitempty"`
@@ -27,7 +31,7 @@ func oauthStatusOf(reg *registry.Registry) (oauthStatus, error) {
 	return status, err
 }
 
-func identityOAuth(reg *registry.Registry, positional, args []string, jsonOut bool) error {
+func (a *App) identityOAuth(reg *registry.Registry, positional, args []string, jsonOut bool) error {
 	action := "list"
 	if len(positional) > 1 {
 		action = positional[1]
@@ -45,6 +49,8 @@ func identityOAuth(reg *registry.Registry, positional, args []string, jsonOut bo
 		if err := reg.ClearOAuthIssuer(); err != nil {
 			return err
 		}
+	case (action == "enable" || action == "disable") && len(positional) == 3:
+		return a.setIdentityOAuth(positional[2], action == "enable", jsonOut)
 	case action == "revoke" && len(positional) == 3:
 		grant, err := reg.RevokeOAuthGrant(positional[2])
 		if err != nil {
@@ -81,4 +87,31 @@ func (s oauthStatus) String() string {
 		text += fmt.Sprintf("\n  %s  @%s to %s, since %s, last seen %s", grant.ID, grant.Identity, grant.ClientName, grant.CreatedAt.Local().Format(time.DateTime), lastSeen(grant.LastSeen))
 	}
 	return text
+}
+
+// setIdentityOAuth goes through the daemon's local socket, which takes it only from the person's own terminal.
+func (a *App) setIdentityOAuth(name string, on bool, jsonOut bool) error {
+	client, err := a.localDaemonAPI()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), rolesTimeout)
+	defer cancel()
+	body, _, err := client.call(ctx, http.MethodPost, daemonapi.IdentityOAuthPath, nil, daemonapi.IdentityOAuthRequest{Identity: name, Enabled: on}, nil)
+	if err != nil {
+		return err
+	}
+	var result daemonapi.IdentityOAuthResult
+	if err := json.Unmarshal(body, &result); err != nil {
+		return err
+	}
+	if jsonOut {
+		return emit(result)
+	}
+	if on {
+		fmt.Printf("@%s may now sign in over OAuth; you approve each sign-in on your devices\n", result.Identity)
+	} else {
+		fmt.Printf("@%s may no longer sign in over OAuth; revoked %d grant(s)\n", result.Identity, result.Revoked)
+	}
+	return nil
 }
