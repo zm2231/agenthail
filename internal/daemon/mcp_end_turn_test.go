@@ -34,3 +34,28 @@ func TestEndTurnTellsTheModelToWriteItsReplyNextWithNoMoreToolCalls(t *testing.T
 		}
 	})
 }
+
+func TestEndTurnShowsTheAgentTheCutHeadlineAndWhatItNamesWithoutRefusingIt(t *testing.T) {
+	f := newAskFixture(t)
+	long := "PR #1180 passed review round 3 and the full gate is running before the push goes up to the lead"
+	f.turn(t, f.from, "turn-1", func() {
+		out, refused := callMCP(t, f.person, "agenthail_end_turn", map[string]any{"headline": long})
+		if refused {
+			t.Fatalf("a headline with a PR number was refused: %v", out)
+		}
+		shown := viewRow(t, f.d, f.from.ID).EndTurn.Headline
+		then, _ := out["then"].(string)
+		for _, want := range []string{`"` + shown + `"`, "names a PR or issue number (#1180)", "names a review round (round 3)", "is 95 characters", "replace it", "write your reply", "no more tools"} {
+			if !strings.Contains(then, want) {
+				t.Errorf("end_turn result %q does not say %q", then, want)
+			}
+		}
+		out, _ = callMCP(t, f.person, "agenthail_end_turn", map[string]any{"headline": "The duplicate session fix is ready; waiting on tests"})
+		if then, _ := out["then"].(string); then != endTurnThen {
+			t.Errorf("a plain headline got %q", then)
+		}
+	})
+	if end := viewRow(t, f.d, f.from.ID).EndTurn; end == nil || end.Headline != "The duplicate session fix is ready; waiting on tests" {
+		t.Fatalf("the replacing headline is not the one shown: %+v", end)
+	}
+}
