@@ -154,13 +154,13 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting, ListingR
     @ObservationIgnored private var subagentFailedUnreachable: Set<String> = []
 
     // HostConnection and the catalog are not observed; views read the parts rebuild() derives from them.
-    @ObservationIgnored private var connections: [String: HostConnection] = [:]
-    private var hostOrder: [String] = []
+    @ObservationIgnored private(set) var connections: [String: HostConnection] = [:]
+    private(set) var hostOrder: [String] = []
     private(set) var extensionCatalogs: [String: ExtensionCatalog] = [:]
     private(set) var tileOrder: TileOrderStore?
     @ObservationIgnored private var tileStores: [String: TileOrderStore] = [:]
-    @ObservationIgnored private var catalog = HostCatalog()
-    private var routing = HostCatalog.Routing()
+    @ObservationIgnored private(set) var catalog = HostCatalog()
+    private(set) var routing = HostCatalog.Routing()
     private(set) var isPaired = false
     private(set) var showsHostNames = false
     private(set) var usageReaders: [AgenthailAPI] = []
@@ -467,14 +467,14 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting, ListingR
         return (connection, route)
     }
 
-    private func resolveServer(_ sessionID: String) throws -> (connection: HostConnection, route: SessionRoute) {
+    func resolveServer(_ sessionID: String) throws -> (connection: HostConnection, route: SessionRoute) {
         guard let route = catalog.route(for: sessionID), let connection = connections[route.hostID] else {
             throw AgenthailAPIError.unavailable(unreachableMessage(for: sessionID))
         }
         return (connection, route)
     }
 
-    private func reach(_ hostID: String?) throws -> (api: AgenthailAPI, target: HostTarget) {
+    func reach(_ hostID: String?) throws -> (api: AgenthailAPI, target: HostTarget) {
         guard let hostID = hostID ?? hostOrder.first(where: { catalog.target(forHost: $0) != nil }) else {
             throw AgenthailAPIError.unavailable("Connect to your computer first.")
         }
@@ -588,64 +588,6 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting, ListingR
 
     func subagents(of sessionID: String) -> [SessionState] {
         SessionFamilies.children(of: sessionID, listed: (subagentIDs[sessionID] ?? []).compactMap(session), fetched: fetchedSubagents.children(of: sessionID))
-    }
-
-    private func inboxHosts() throws -> [InboxPage.Host] {
-        let direct = hostOrder.compactMap { connections[$0] }.filter(\.shownReachable).map { InboxPage.Host(id: $0.id, name: $0.name, api: $0.api) }
-        let remote = catalog.hosts.compactMap { host -> InboxPage.Host? in
-            guard let target = catalog.target(forHost: host.id), let peer = target.remote, let connection = connections[target.hostID] else { return nil }
-            return InboxPage.Host(id: host.id, name: host.name, api: connection.api, remote: peer)
-        }
-        let hosts = direct + remote
-        guard !hosts.isEmpty else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
-        return hosts
-    }
-
-    func inboxPage(before cursors: [String: Int64]? = nil, partial: (@MainActor (InboxPage) -> Void)? = nil) async throws -> InboxPage {
-        try await InboxPage.load(from: inboxHosts(), before: cursors, partial: partial)
-    }
-
-    func loadDecisions() async -> DecisionInbox {
-        guard let hosts = try? inboxHosts() else { return DecisionInbox() }
-        var inbox = await DecisionInbox.load(from: hosts)
-        let older = hostOrder.compactMap { connections[$0] }.filter { $0.snapshot != nil && $0.snapshot?.decisionsRev == nil }.map(\.name)
-        inbox.outdated = Array(Set(inbox.outdated + older)).sorted()
-        return inbox
-    }
-
-    func dismissDecision(_ item: DecisionItem) async -> String? {
-        guard decisionFeed.startDismissing(item.id) else { return nil }
-        var failure: String?
-        do {
-            for dismissal in DecisionInbox.dismissals(of: item) {
-                do {
-                    if dismissal.workItem != nil, let reporter = try inboxHosts().first(where: { $0.id == dismissal.host }) {
-                        try await reporter.api.dismissDecision(sessionID: DecisionInbox.localised(item.sessionId, own: reporter.id), workItem: dismissal.workItem, requestID: nil, host: reporter.remote ?? "")
-                    } else {
-                        let (api, route) = try resolve(item.sessionId)
-                        try await api.dismissDecision(sessionID: route.sessionID, workItem: dismissal.workItem, requestID: dismissal.requestID)
-                    }
-                } catch where DecisionInbox.settled(error) {}
-            }
-        } catch {
-            failure = AgenthailAPIError.userMessage(error)
-        }
-        decisionFeed.finishDismissing(item.id, failure: failure)
-        decisionFeed.reload()
-        return failure
-    }
-
-    func replyToParked(_ item: DecisionItem, words: String) async -> String? {
-        do {
-            let (api, route) = try resolve(item.sessionId)
-            let wire = try api.instructionWire(sessionID: route.sessionID, message: DecisionInbox.reply(words, for: item), author: "person", attachments: [], idempotencyKey: UUID().uuidString)
-            _ = try await api.send(wire)
-            decisionFeed.replied(item.id, to: sessionName(item.sessionId))
-            await refreshSession(item.sessionId)
-            return nil
-        } catch {
-            return AgenthailAPIError.userMessage(error)
-        }
     }
 
     func answerDecision(_ request: SessionRequest, sessionID: String, decision: RequestDecision) async -> DecisionAnswer {
@@ -812,155 +754,6 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting, ListingR
         let known = Set((snapshot?.sessions ?? []).map(\.id))
         let qualified = item.hostID.map { HostCatalog.qualify($0, item.sessionId) }
         return rekeys.resolve(qualified.flatMap { known.contains($0) ? $0 : nil } ?? item.sessionId)
-    }
-
-    func addProject(path: String, title: String?, host: String?) async -> ProjectChange {
-        await projectChange(refreshing: host) {
-            let (api, target) = try self.reach(host)
-            let (project, created) = try await api.addProject(path: path, title: title, host: target.remote)
-            let name = project?.displayName ?? "This folder"
-            return created ? "Added project \(name)." : "\(name) is already a project."
-        }
-    }
-
-    func addFolder(of session: SessionState) async -> ProjectChange {
-        await projectChange(refreshing: nil) {
-            let (connection, _) = try self.resolveServer(session.id)
-            let owner = HostCatalog.owner(of: session.id)
-            let (project, created) = try await connection.api.addProject(path: session.cwd ?? "", host: owner == connection.id ? nil : owner)
-            let name = project?.displayName ?? "This folder"
-            return created ? "Added project \(name)." : "\(name) is already a project."
-        }
-    }
-
-    func makeLead(_ sessionID: String, replace: Bool) async -> ProjectChange {
-        await projectChange(refreshing: nil) {
-            let (api, route) = try self.resolve(sessionID)
-            let lead = try await api.makeLead(sessionID: route.sessionID, replace: replace)
-            return "@\(lead.name) leads \(lead.projectRoot)."
-        }
-    }
-
-    func renameProject(_ project: ListedProject, to title: String) async -> ProjectChange {
-        let owners = project.state.checkouts.filter { $0.added == true }.map { ProjectRouting.owner($0.host, of: project) }
-        return await projectChange(refreshing: nil) {
-            try await self.eachOwner(of: owners, in: project, done: "Renamed to \(title).") { api, projectID in
-                try await api.renameProject(projectID, title: title)
-            }
-        }
-    }
-
-    func removeProject(_ projectID: String, of project: ListedProject) async -> ProjectChange {
-        let owner = HostCatalog.owner(of: projectID) ?? project.hostID
-        return await projectChange(refreshing: nil) {
-            let (api, target) = try self.reach(owner)
-            try await api.projectAction("project-remove", projectID: target.remote == nil ? ProjectRouting.local(projectID, of: owner) : projectID)
-            return "Project removed."
-        }
-    }
-
-    func projectToolsRoute(_ project: ListedProject) -> (host: String, projectID: String)? {
-        ProjectToolsRoute.target(project) { host in self.connections[host] != nil && self.catalog.target(forHost: host)?.takesSettings == true }
-    }
-
-    func setProjectTools(_ project: ListedProject, on: Bool) async -> ProjectChange {
-        await projectChange(refreshing: nil) {
-            guard let route = self.projectToolsRoute(project) else { throw AgenthailAPIError.unavailable("The computer that has \(project.state.displayName) can't be reached.") }
-            let (api, _) = try self.reach(route.host)
-            try await api.projectSetting(projectID: route.projectID, setting: "mcp", value: on ? "on" : "off")
-            return ProjectMenu.toolsChanged(project.state.displayName, on: on)
-        }
-    }
-
-    func clearLead(of project: ListedProject) async -> ProjectChange {
-        let owners = project.state.leads.map { ProjectRouting.owner($0.host, of: project) }
-        return await projectChange(refreshing: nil) {
-            try await self.eachOwner(of: owners, in: project, done: "\(project.state.displayName) has no lead now.") { api, projectID in
-                try await api.clearLead(projectID: projectID)
-            }
-        }
-    }
-
-    func brief(_ project: ListedProject, lead: ProjectState.Lead, idempotencyKey: String) async throws -> String {
-        let (api, target) = try reach(ProjectRouting.owner(lead.host, of: project))
-        let projectID = target.remote.map { $0 + HostCatalog.separator + project.state.id } ?? project.state.id
-        let reply = try await api.projectBrief(projectID: projectID, idempotencyKey: idempotencyKey)
-        _ = await connection(target.hostID)?.refresh(fresh: true)
-        return ProjectBrief.notice(reply, lead: lead.name)
-    }
-
-    func startLead(of project: ListedProject, in checkout: ProjectState.Checkout, surface: String, name: String, replace: Bool) async -> ProjectChange {
-        await projectChange(refreshing: nil) {
-            let (api, target) = try self.reach(ProjectRouting.owner(checkout.host, of: project))
-            let lead = try await api.startLead(surface: surface, folder: checkout.rootPath, host: target.remote, name: name, replace: replace)
-            return "@\(lead.name) leads \(project.state.displayName); its first message starts it."
-        }
-    }
-
-    private func eachOwner(of owners: [String], in project: ListedProject, done: String, _ action: (AgenthailAPI, String) async throws -> Void) async throws -> String {
-        var routes: [(owner: String, target: HostTarget)] = []
-        var unreached: [String] = []
-        for owner in owners.isEmpty ? [project.hostID] : owners where !routes.contains(where: { $0.owner == owner }) && !unreached.contains(owner) {
-            guard let target = catalog.target(forHost: owner) else { unreached.append(owner); continue }
-            routes.append((owner, target))
-        }
-        func send(_ route: (owner: String, target: HostTarget)) async throws {
-            guard let api = connections[route.target.hostID]?.api else { throw AgenthailAPIError.unavailable("\(hostName(route.owner)) can't be reached.") }
-            try await action(api, route.target.remote.map { $0 + HostCatalog.separator + project.state.id } ?? project.state.id)
-        }
-        if unreached.isEmpty, routes.count == 1 {
-            try await send(routes[0])
-            return done
-        }
-        var failures = unreached.map { "\(hostName($0)) can't be reached" }
-        var succeeded = false
-        for route in routes {
-            do {
-                try await send(route)
-                succeeded = true
-            } catch {
-                failures.append("\(hostName(route.owner)): \(AgenthailAPIError.userMessage(error))")
-            }
-        }
-        guard !failures.isEmpty else { return done }
-        throw AgenthailAPIError.unavailable((succeeded ? done + " Not changed on " : "Not changed on ") + failures.joined(separator: "; ") + ".")
-    }
-
-    private func hostName(_ hostID: String) -> String {
-        connections[hostID]?.name ?? catalog.hosts.first { $0.id == hostID }?.name ?? hostID
-    }
-
-    func listed(_ state: ProjectState) -> ListedProject? {
-        projects.values.first { $0.state == state }
-    }
-
-    func canAddFolder(_ session: SessionState) -> Bool {
-        ProjectMenu.canAddFolder(session) && routing.route(for: session.id) != nil
-    }
-
-    func canMakeLead(_ session: SessionState) -> Bool {
-        guard ProjectMenu.canMakeLead(session, projects: []), routing.route(for: session.id) != nil else { return false }
-        return !projects.values.contains { listed in
-            listed.state.leads.contains { lead in
-                guard let sessionID = lead.sessionId else { return false }
-                return HostCatalog.qualify(ProjectRouting.owner(lead.host, of: listed), sessionID) == session.id
-            }
-        }
-    }
-
-    func settle(_ change: ProjectChange) {
-        operationError = change.error
-    }
-
-    func creationHost(for checkout: ProjectState.Checkout, of project: ListedProject) -> String {
-        ProjectRouting.owner(checkout.host, of: project)
-    }
-
-    private func projectChange(refreshing hostID: String?, _ body: () async throws -> String) async -> ProjectChange {
-        let change = await ProjectChange.run(body)
-        if let hostID, connections[hostID] != nil { await refresh(host: hostID) } else { _ = await refresh(fresh: true) }
-        change.announce(in: projectNotice)
-        return change
     }
 
     func sessionOptions(host: String?) async throws -> SessionCreationOptions {
@@ -1239,7 +1032,7 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting, ListingR
         await HostRefresh.all(hostOrder.compactMap { connections[$0] }, fresh: fresh, within: hostRefreshWait)
     }
 
-    private func refresh(host hostID: String) async {
+    func refresh(host hostID: String) async {
         _ = await connections[hostID]?.refresh(fresh: true)
     }
 
@@ -1735,43 +1528,6 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting, ListingR
         } catch {
             operationError = error.localizedDescription
         }
-    }
-
-    func setProjectArchived(_ projectID: String, _ archived: Bool) async {
-        let action = archived ? "project-archive" : "project-unarchive"
-        do {
-            guard let owner = HostCatalog.owner(of: projectID) else {
-                try await setRepositoryArchived(projectID, action: action)
-                operationError = nil
-                return
-            }
-            let (api, target) = try reach(owner)
-            let id = target.remote == nil ? String(projectID.dropFirst(owner.count + HostCatalog.separator.count)) : projectID
-            try await api.projectAction(action, projectID: id)
-            operationError = nil
-            await refresh(host: target.hostID)
-        } catch {
-            operationError = error.localizedDescription
-        }
-    }
-
-    // A repository project has one id on every computer; each computer that
-    // serves one of its sessions archives its own checkout.
-    private func setRepositoryArchived(_ projectID: String, action: String) async throws {
-        let servers = Set((snapshot?.sessions ?? []).filter { $0.project?.id == projectID }.compactMap { catalog.server(of: $0.id) })
-        let reachable = hostOrder.filter { servers.contains($0) && connections[$0]?.shownReachable == true }
-        guard !reachable.isEmpty else { throw AgenthailAPIError.unavailable("Connect to your computer first.") }
-        var failures: [String] = []
-        for hostID in reachable {
-            guard let connection = connections[hostID] else { continue }
-            do {
-                try await connection.api.projectAction(action, projectID: projectID)
-            } catch {
-                failures.append("\(connection.name): \(AgenthailAPIError.userMessage(error))")
-            }
-            await refresh(host: hostID)
-        }
-        if !failures.isEmpty { throw AgenthailAPIError.unavailable(failures.joined(separator: "\n")) }
     }
 
     func removeHost(_ hostID: String) {
