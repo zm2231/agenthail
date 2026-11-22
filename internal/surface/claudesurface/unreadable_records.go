@@ -1,6 +1,7 @@
 package claudesurface
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -52,6 +53,27 @@ func (c *Claude) unreadableRecords() []unreadableRecord {
 func refuseUnknownHolders(conversation string, unreadable []unreadableRecord) error {
 	first := unreadable[0]
 	return surface.DeliveryUnavailable(fmt.Errorf("%w: Claude process %d runs but its session record %s cannot be read, so it may hold conversation %s; Agenthail does not open a second copy in the Claude host until the record reads", surface.ErrDeliveryHeld, first.pid, first.path, conversation))
+}
+
+// awaitReadableRecords holds a move or adoption until every live process record reads, since an unreadable one may be another holder.
+func (c *Claude) awaitReadableRecords(ctx context.Context, conversation string, wait time.Duration) error {
+	deadline := time.Now().Add(wait)
+	for {
+		unreadable := c.unreadableRecords()
+		if len(unreadable) == 0 {
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			first := unreadable[0]
+			reason := fmt.Sprintf("Claude process %d may hold it, but its session record %s cannot be read yet", first.pid, first.path)
+			return surface.DeliveryTerminal(&surface.AdoptBusyError{Session: conversation, Reason: reason}, surface.DeliveryInvalidRequest)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(claudeAdoptPollEvery):
+		}
+	}
 }
 
 func (c *Claude) UnreadableRecord(pid int) (string, bool) {

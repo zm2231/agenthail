@@ -63,6 +63,9 @@ func (c *Claude) PrepareMove(ctx context.Context, sess *surface.Session, request
 	if root == "" {
 		return nil, fmt.Errorf("Claude conversation %s has no transcript in any config root", conversation)
 	}
+	if err := c.awaitReadableRecords(ctx, conversation, request.Wait); err != nil {
+		return nil, err
+	}
 	_, records, err := c.records()
 	if err != nil {
 		return nil, err
