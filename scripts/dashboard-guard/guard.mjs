@@ -4,7 +4,7 @@ import { launch } from "./browser.mjs";
 import { brightLuminance, decode, QUANTIZATION, worstContrast } from "./contrast.mjs";
 import { describeRequests, trackRequests } from "./requests.mjs";
 import { collectText, HIDE_TEXT } from "./text.mjs";
-import { onStep, openView, settle, step, VIEWS } from "./views.mjs";
+import { awaited, onStep, openView, settle, step, VIEWS } from "./views.mjs";
 
 const themes = JSON.parse(process.env.AGENTHAIL_GUARD_DASHBOARDS);
 const shots = process.env.AGENTHAIL_GUARD_SHOTS;
@@ -177,11 +177,18 @@ const started = Date.now();
 const { browser, close, abandon } = await launch();
 const pageState = (page) =>
   Promise.race([
-    page.evaluate(async () => {
+    page.evaluate(async (selector) => {
       const html = document.documentElement;
       const frame = await Promise.race([new Promise((resolve) => requestAnimationFrame(() => resolve("fires"))), new Promise((resolve) => setTimeout(() => resolve("none in 2 s"), 2000))]);
-      return JSON.stringify({ url: location.href, ready: document.readyState, uiSettled: html.hasAttribute("data-ui-settled"), status: document.querySelector("#daemon-status")?.textContent ?? null, visibility: document.visibilityState, frame, toastHidden: document.querySelector("#toast")?.hidden ?? null });
-    }),
+      const describe = (element) => element && `${element.localName}${element.id ? `#${element.id}` : ""}${[...element.classList].map((name) => `.${name}`).join("")}`;
+      const target = selector && document.querySelector(selector);
+      const style = target && getComputedStyle(target);
+      const box = target?.getBoundingClientRect();
+      const wait = selector && (target ? { selector, exists: true, visible: !["hidden", "collapse"].includes(style.visibility) && box.width > 0 && box.height > 0, display: style.display, visibility: style.visibility, size: `${box.width}x${box.height}`, hidden: target.hidden ?? null } : { selector, exists: false });
+      const focus = document.activeElement;
+      const focused = { element: describe(focus), value: typeof focus?.value === "string" ? focus.value.slice(0, 40) : null };
+      return JSON.stringify({ url: location.href, ready: document.readyState, uiSettled: html.hasAttribute("data-ui-settled"), status: document.querySelector("#daemon-status")?.textContent ?? null, visibility: document.visibilityState, frame, toastHidden: document.querySelector("#toast")?.hidden ?? null, wait, focused });
+    }, awaited(page)),
     new Promise((resolve) => setTimeout(() => resolve("did not answer in 30 s"), 30_000)),
   ]).catch((error) => `unreadable: ${error.message}`);
 
