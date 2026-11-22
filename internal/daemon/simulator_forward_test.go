@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/simhost"
 	"github.com/zm2231/agenthail/internal/testkit"
@@ -108,13 +109,13 @@ func TestOnlyAPairedHostForwardsSimulatorCalls(t *testing.T) {
 
 func TestSimulatorHostChoiceIsConfig(t *testing.T) {
 	f := simulatorsOnTwoHosts(t)
-	if err := SaveDashboardConfig(DashboardConfig{SimulatorHost: "elsewhere"}); err != nil {
+	if err := dashconfig.Save(dashconfig.Config{SimulatorHost: "elsewhere"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.linux.daemon.forwardSimulator(context.Background(), "local-a", simhost.Request{Action: "list"}); refusalOf(err) != "unavailable" || !strings.Contains(err.Error(), "elsewhere") {
 		t.Fatalf("a simulatorHost that names no paired host = %v", err)
 	}
-	if err := SaveDashboardConfig(DashboardConfig{SimulatorHost: "mac"}); err != nil {
+	if err := dashconfig.Save(dashconfig.Config{SimulatorHost: "mac"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.linux.daemon.forwardSimulator(context.Background(), "local-a", simhost.Request{Action: "list"}); err != nil {
@@ -133,13 +134,13 @@ func refusalOf(err error) string {
 func TestArchivingReleasesEveryMacTheSessionCalled(t *testing.T) {
 	f := simulatorsOnHosts(t, "mac", "studio")
 	ctx := context.Background()
-	if err := SaveDashboardConfig(DashboardConfig{SimulatorHost: "mac"}); err != nil {
+	if err := dashconfig.Save(dashconfig.Config{SimulatorHost: "mac"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.linux.daemon.forwardSimulator(ctx, "local-a", simhost.Request{Action: "acquire", Kind: "iphone"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := SaveDashboardConfig(DashboardConfig{SimulatorHost: "studio"}); err != nil {
+	if err := dashconfig.Save(dashconfig.Config{SimulatorHost: "studio"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.linux.daemon.forwardSimulator(ctx, "local-a", simhost.Request{Action: "acquire", Kind: "iphone"}); err != nil {
@@ -193,10 +194,10 @@ func TestAMacThatGainsAXeBecomesSelectableWithoutReconnecting(t *testing.T) {
 
 func TestAnUnreadableConfigPicksNoMac(t *testing.T) {
 	f := simulatorsOnTwoHosts(t)
-	if err := os.MkdirAll(filepath.Dir(DashboardConfigPath()), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dashconfig.Path()), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(DashboardConfigPath(), []byte("{not json"), 0o600); err != nil {
+	if err := os.WriteFile(dashconfig.Path(), []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, err := f.linux.daemon.forwardSimulator(context.Background(), "local-a", simhost.Request{Action: "list"})

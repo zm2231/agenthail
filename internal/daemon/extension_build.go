@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/extension"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -50,7 +51,7 @@ func (d *Daemon) apiExtensionBuildHandler(w http.ResponseWriter, r *http.Request
 		writeAPIError(w, http.StatusBadRequest, "invalid", "The builder is claude or codex.")
 		return
 	}
-	decision := AgentAllow
+	decision := dashconfig.AgentAllow
 	agent := strings.TrimSpace(request.SessionID)
 	if agent != "" {
 		caller, err := d.scopeCaller(agent)
@@ -59,7 +60,7 @@ func (d *Daemon) apiExtensionBuildHandler(w http.ResponseWriter, r *http.Request
 			return
 		}
 		if !caller.has("control.all") {
-			if decision = d.agentPolicy().Decision("extension-build"); decision == AgentAsk {
+			if decision = d.agentPolicy().Decision("extension-build"); decision == dashconfig.AgentAsk {
 				writeScopeRefusal(w, scopeRefusal("extension-build", "person_only", "Starting an extension builder is for the person here; to work on an extension yourself, edit ~/.agenthail/extensions and read its AGENTS.md."))
 				return
 			}
@@ -80,7 +81,7 @@ func (d *Daemon) apiExtensionBuildHandler(w http.ResponseWriter, r *http.Request
 		key = "extension-build-" + uuid.NewString()
 	}
 	reply := d.performAction(r.Context(), principalFromRequest(r), actionFormatAPIv1, body, key)
-	if decision == AgentNotify && reply.Status >= http.StatusOK && reply.Status < http.StatusMultipleChoices {
+	if decision == dashconfig.AgentNotify && reply.Status >= http.StatusOK && reply.Status < http.StatusMultipleChoices {
 		d.notifyAgentAction(r.Context(), agent, "Started an extension builder: "+clipText(message, 200))
 	}
 	reply.write(w)

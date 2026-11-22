@@ -16,7 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonctl"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/poll"
 	"github.com/zm2231/agenthail/internal/registry"
 )
@@ -70,7 +71,7 @@ func defaultRestartDaemon(binary string) error {
 }
 
 func defaultDaemonExpected() bool {
-	if _, running := daemon.IsRunning(); running {
+	if _, running := daemonctl.IsRunning(); running {
 		return true
 	}
 	return newDaemonService("linux").Loaded()
@@ -85,13 +86,13 @@ func defaultDaemonHealthy() error {
 // waitForDaemonAPI gives a daemon limit to start and then limit from its
 // first running pid to answer, so a slow start does not eat its answer time.
 func waitForDaemonAPI(limit time.Duration) error {
-	config, err := daemon.LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		return err
 	}
 	token := ""
 	if config.Enabled {
-		data, err := os.ReadFile(daemon.DashboardTokenPath())
+		data, err := os.ReadFile(dashconfig.TokenPath())
 		if err != nil {
 			return fmt.Errorf("read dashboard token: %w", err)
 		}
@@ -105,7 +106,7 @@ func waitForDaemonAPI(limit time.Duration) error {
 		if origin := cmp.Or(runningSince, started); time.Since(origin) >= limit {
 			return false, lastErr
 		}
-		if _, running := daemon.IsRunning(); !running {
+		if _, running := daemonctl.IsRunning(); !running {
 			stableSince = time.Time{}
 			lastErr = errors.New("daemon is not running")
 		} else if runningSince = cmp.Or(runningSince, time.Now()); !config.Enabled {

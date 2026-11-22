@@ -15,7 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonctl"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -40,7 +41,7 @@ func newDashboardLoginFixture(t *testing.T) *dashboardLoginFixture {
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(daemon.DashboardTokenPath(), []byte(dashboardTestSecret), 0o600); err != nil {
+	if err := os.WriteFile(dashconfig.TokenPath(), []byte(dashboardTestSecret), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	fixture := &dashboardLoginFixture{app: &App{daemonService: &fakeService{loaded: true}}}
@@ -71,7 +72,7 @@ func newDashboardLoginFixture(t *testing.T) *dashboardLoginFixture {
 	}))
 	t.Cleanup(server.Close)
 	listen := strings.TrimPrefix(server.URL, "http://")
-	if err := daemon.SaveDashboardConfig(daemon.DashboardConfig{Enabled: true, Listen: listen, CodexRecentHours: 5}); err != nil {
+	if err := dashconfig.Save(dashconfig.Config{Enabled: true, Listen: listen, CodexRecentHours: 5}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -83,7 +84,7 @@ func newDashboardLoginFixture(t *testing.T) *dashboardLoginFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = syscall.Kill(process.Process.Pid, syscall.SIGKILL); _ = process.Wait() })
-	if err := os.WriteFile(daemon.PidFilePath(), []byte(strconv.Itoa(process.Process.Pid)), 0o600); err != nil {
+	if err := os.WriteFile(daemonctl.PidFilePath(), []byte(strconv.Itoa(process.Process.Pid)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	fixture.opened = filepath.Join(bin, "opened")
@@ -150,11 +151,11 @@ func TestDashboardTokenRotateReplacesTheToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rotate: %v\n%s", err, output)
 	}
-	token, err := os.ReadFile(daemon.DashboardTokenPath())
+	token, err := os.ReadFile(dashconfig.TokenPath())
 	if err != nil {
 		t.Fatal(err)
 	}
-	info, err := os.Stat(daemon.DashboardTokenPath())
+	info, err := os.Stat(dashconfig.TokenPath())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/tailscale"
 )
 
@@ -25,7 +25,7 @@ func TestDashboardQRIsPrivate(t *testing.T) {
 }
 
 func TestDashboardRemoteEnabledRequiresHTTPS(t *testing.T) {
-	config := daemon.DashboardConfig{Enabled: true}
+	config := dashconfig.Config{Enabled: true}
 	var serve tailscale.Serve
 	if err := json.Unmarshal([]byte(`{"Web":{"agent.tailnet.ts.net:7412":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:7412"}}}}}`), &serve); err != nil {
 		t.Fatal(err)

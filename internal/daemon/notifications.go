@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/atomicfile"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -30,7 +31,7 @@ type NotificationStatus struct {
 }
 
 func NotificationConfigPath() string {
-	return filepath.Join(filepath.Dir(PidFilePath()), "notifications.json")
+	return filepath.Join(filepath.Dir(daemonctl.PidFilePath()), "notifications.json")
 }
 
 func LoadNotificationConfig() (NotificationConfig, error) {

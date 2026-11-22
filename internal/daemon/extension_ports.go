@@ -6,6 +6,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/zm2231/agenthail/internal/dashconfig"
 )
 
 const (
@@ -20,7 +22,7 @@ func (d *Daemon) configureExtensionPorts() {
 		return
 	}
 	dashboardPort := 0
-	if config, err := LoadDashboardConfig(); err == nil {
+	if config, err := dashconfig.Load(); err == nil {
 		if _, port, err := net.SplitHostPort(config.Listen); err == nil {
 			dashboardPort, _ = strconv.Atoi(port)
 		}

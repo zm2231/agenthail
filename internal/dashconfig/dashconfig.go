@@ -1,4 +1,4 @@
-package daemon
+package dashconfig
 
 import (
 	"crypto/rand"
@@ -9,25 +9,27 @@ import (
 	"os"
 	"path/filepath"
 
+	qrcode "github.com/skip2/go-qrcode"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 )
 
-const StandardDashboardListen = "127.0.0.1:7412"
+const StandardListen = "127.0.0.1:7412"
 
-// DefaultDashboardListen moves only in tests, which must not reach a person's own Agenthail.
-var DefaultDashboardListen = StandardDashboardListen
+// DefaultListen moves only in tests, which must not reach a person's own Agenthail.
+var DefaultListen = StandardListen
 
 const (
 	defaultCodexRecentHours = 5
 	maximumCodexRecentHours = 168
 )
 
-type DashboardConfig struct {
+type Config struct {
 	Enabled          bool                `json:"enabled"`
 	Listen           string              `json:"listen"`
 	CodexRecentHours int                 `json:"codexRecentHours"`
 	BusyDelivery     deliverypolicy.Mode `json:"busyDelivery"`
-	RemoteAccess     RemoteAccessConfig  `json:"remoteAccess"`
+	RemoteAccess     RemoteAccess        `json:"remoteAccess"`
 	// ResumeAfterLimit turns off resuming sessions a usage limit stopped
 	// when it is false; unset leaves it on.
 	ResumeAfterLimit *bool `json:"resumeAfterLimit,omitempty"`
@@ -48,58 +50,58 @@ type DashboardConfig struct {
 
 // ResumesAfterLimit reports whether sessions a usage limit stopped resume
 // when it resets.
-func (c DashboardConfig) ResumesAfterLimit() bool {
+func (c Config) ResumesAfterLimit() bool {
 	return c.ResumeAfterLimit == nil || *c.ResumeAfterLimit
 }
 
 // MovesAfterLimit reports whether a session a usage limit stopped moves to a
 // proxy root with room before its own reset.
-func (c DashboardConfig) MovesAfterLimit() bool {
+func (c Config) MovesAfterLimit() bool {
 	return c.MoveAfterLimit == nil || *c.MoveAfterLimit
 }
 
-func DashboardConfigPath() string {
-	return filepath.Join(filepath.Dir(PidFilePath()), "dashboard.json")
+func Path() string {
+	return filepath.Join(filepath.Dir(daemonctl.PidFilePath()), "dashboard.json")
 }
-func DashboardTokenPath() string {
-	return filepath.Join(filepath.Dir(PidFilePath()), "dashboard.token")
+func TokenPath() string {
+	return filepath.Join(filepath.Dir(daemonctl.PidFilePath()), "dashboard.token")
 }
 
-func LoadDashboardConfig() (DashboardConfig, error) {
-	data, err := os.ReadFile(DashboardConfigPath())
+func Load() (Config, error) {
+	data, err := os.ReadFile(Path())
 	if os.IsNotExist(err) {
-		return DashboardConfig{Listen: DefaultDashboardListen, CodexRecentHours: defaultCodexRecentHours, BusyDelivery: deliverypolicy.Queue, RemoteAccess: normalizeRemoteAccessConfig(RemoteAccessConfig{})}, nil
+		return Config{Listen: DefaultListen, CodexRecentHours: defaultCodexRecentHours, BusyDelivery: deliverypolicy.Queue, RemoteAccess: NormalizeRemoteAccess(RemoteAccess{})}, nil
 	}
 	if err != nil {
-		return DashboardConfig{}, fmt.Errorf("read dashboard config: %w", err)
+		return Config{}, fmt.Errorf("read dashboard config: %w", err)
 	}
-	var config DashboardConfig
+	var config Config
 	if err := json.Unmarshal(data, &config); err != nil {
-		return DashboardConfig{}, fmt.Errorf("parse dashboard config: %w", err)
+		return Config{}, fmt.Errorf("parse dashboard config: %w", err)
 	}
 	if config.Listen == "" {
-		config.Listen = DefaultDashboardListen
+		config.Listen = DefaultListen
 	}
 	if config.CodexRecentHours == 0 {
 		config.CodexRecentHours = defaultCodexRecentHours
 	}
 	config.BusyDelivery, err = deliverypolicy.Normalize(string(config.BusyDelivery))
 	if err != nil {
-		return DashboardConfig{}, err
+		return Config{}, err
 	}
-	config.RemoteAccess = normalizeRemoteAccessConfig(config.RemoteAccess)
+	config.RemoteAccess = NormalizeRemoteAccess(config.RemoteAccess)
 	if err := validateCodexRecentHours(config.CodexRecentHours); err != nil {
-		return DashboardConfig{}, err
+		return Config{}, err
 	}
 	if err := validateDashboardListen(config.Listen); err != nil {
-		return DashboardConfig{}, err
+		return Config{}, err
 	}
 	return config, nil
 }
 
-func SaveDashboardConfig(config DashboardConfig) error {
+func Save(config Config) error {
 	if config.Listen == "" {
-		config.Listen = DefaultDashboardListen
+		config.Listen = DefaultListen
 	}
 	if config.CodexRecentHours == 0 {
 		config.CodexRecentHours = defaultCodexRecentHours
@@ -109,7 +111,7 @@ func SaveDashboardConfig(config DashboardConfig) error {
 	if err != nil {
 		return err
 	}
-	config.RemoteAccess = normalizeRemoteAccessConfig(config.RemoteAccess)
+	config.RemoteAccess = NormalizeRemoteAccess(config.RemoteAccess)
 	if err := validateCodexRecentHours(config.CodexRecentHours); err != nil {
 		return err
 	}
@@ -120,10 +122,10 @@ func SaveDashboardConfig(config DashboardConfig) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(DashboardConfigPath()), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(Path()), 0700); err != nil {
 		return fmt.Errorf("create dashboard config directory: %w", err)
 	}
-	return os.WriteFile(DashboardConfigPath(), append(data, '\n'), 0600)
+	return os.WriteFile(Path(), append(data, '\n'), 0600)
 }
 
 func validateCodexRecentHours(hours int) error {
@@ -133,14 +135,14 @@ func validateCodexRecentHours(hours int) error {
 	return nil
 }
 
-// DashboardBaseURL is the dashboard's address. It carries no token: a browser
+// BaseURL is the dashboard's address. It carries no token: a browser
 // signs in with a login link from 'agenthail dashboard'.
-func DashboardBaseURL(config DashboardConfig) string {
+func BaseURL(config Config) string {
 	return "http://" + config.Listen + "/"
 }
 
-func dashboardToken() (string, error) {
-	data, err := os.ReadFile(DashboardTokenPath())
+func Token() (string, error) {
+	data, err := os.ReadFile(TokenPath())
 	if err == nil && len(data) >= 32 {
 		return string(data), nil
 	}
@@ -150,9 +152,9 @@ func dashboardToken() (string, error) {
 	return writeNewDashboardToken()
 }
 
-// RotateDashboardToken replaces the token the local CLI and the Mac app use.
+// RotateToken replaces the token the local CLI and the Mac app use.
 // The running daemon reads it at start, so it takes effect on restart.
-func RotateDashboardToken() error {
+func RotateToken() error {
 	_, err := writeNewDashboardToken()
 	return err
 }
@@ -163,7 +165,7 @@ func writeNewDashboardToken() (string, error) {
 		return "", fmt.Errorf("generate dashboard token: %w", err)
 	}
 	token := hex.EncodeToString(raw)
-	path := DashboardTokenPath()
+	path := TokenPath()
 	temporary, err := os.CreateTemp(filepath.Dir(path), ".dashboard.token-*")
 	if err != nil {
 		return "", fmt.Errorf("write dashboard token: %w", err)
@@ -192,4 +194,46 @@ func validateDashboardListen(listen string) error {
 		return fmt.Errorf("dashboard only accepts a loopback listener; use Tailscale Serve for remote access")
 	}
 	return nil
+}
+
+type ClaudeSettings struct {
+	DefaultRoot string `json:"defaultRoot,omitempty"`
+}
+
+func (c Config) ClaudeDefaultRoot() string {
+	if c.Claude == nil {
+		return ""
+	}
+	return c.Claude.DefaultRoot
+}
+
+func (c *Config) SetClaudeDefaultRoot(name string) {
+	if name == "" {
+		c.Claude = nil
+		return
+	}
+	c.Claude = &ClaudeSettings{DefaultRoot: name}
+}
+
+const DefaultRemoteAccessPort = 7412
+
+type RemoteAccess struct {
+	Enabled       bool   `json:"enabled"`
+	Provider      string `json:"provider"`
+	Port          int    `json:"port"`
+	TailscalePath string `json:"tailscalePath,omitempty"`
+}
+
+func NormalizeRemoteAccess(config RemoteAccess) RemoteAccess {
+	if config.Provider == "" {
+		config.Provider = "tailscale"
+	}
+	if config.Port == 0 {
+		config.Port = DefaultRemoteAccessPort
+	}
+	return config
+}
+
+func RemoteAccessQR(value string) ([]byte, error) {
+	return qrcode.Encode(value, qrcode.Medium, 512)
 }

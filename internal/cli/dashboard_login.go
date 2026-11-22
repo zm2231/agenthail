@@ -8,7 +8,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonctl"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 )
 
 type dashboardLoginLink struct {
@@ -53,10 +54,10 @@ func (a *App) cmdDashboardToken(positional []string) error {
 	if len(positional) != 1 || positional[0] != "rotate" {
 		return fmt.Errorf("usage: agenthail dashboard token rotate")
 	}
-	if err := daemon.RotateDashboardToken(); err != nil {
+	if err := dashconfig.RotateToken(); err != nil {
 		return err
 	}
-	if _, running := daemon.IsRunning(); !running {
+	if _, running := daemonctl.IsRunning(); !running {
 		fmt.Println("dashboard token rotated")
 		return nil
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -31,7 +32,7 @@ func steerImageFixture(t *testing.T, takesImages bool) (*Daemon, *imageSteerSurf
 	adapter.caps.SteerImages = takesImages
 	steering := &imageSteerSurface{imageSurface: adapter}
 	d.Surfaces = []surface.Surface{steering}
-	if err := SaveDashboardConfig(DashboardConfig{BusyDelivery: deliverypolicy.Steer}); err != nil {
+	if err := dashconfig.Save(dashconfig.Config{BusyDelivery: deliverypolicy.Steer}); err != nil {
 		t.Fatal(err)
 	}
 	d.Registry.SetBusyPolicy(d.busyPolicy)

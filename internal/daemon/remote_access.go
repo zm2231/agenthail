@@ -3,11 +3,9 @@ package daemon
 import (
 	"fmt"
 
-	qrcode "github.com/skip2/go-qrcode"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/tailscale"
 )
-
-const DefaultRemoteAccessPort = 7412
 
 var remoteTailscale = func(explicit string) (tailscale.Runner, string, error) {
 	path, err := tailscale.Executable(explicit)
@@ -15,13 +13,6 @@ var remoteTailscale = func(explicit string) (tailscale.Runner, string, error) {
 		return nil, "", err
 	}
 	return tailscale.Command(path), path, nil
-}
-
-type RemoteAccessConfig struct {
-	Enabled       bool   `json:"enabled"`
-	Provider      string `json:"provider"`
-	Port          int    `json:"port"`
-	TailscalePath string `json:"tailscalePath,omitempty"`
 }
 
 type RemoteAccessStatus struct {
@@ -35,18 +26,8 @@ type RemoteAccessStatus struct {
 	Error    string `json:"error,omitempty"`
 }
 
-func normalizeRemoteAccessConfig(config RemoteAccessConfig) RemoteAccessConfig {
-	if config.Provider == "" {
-		config.Provider = "tailscale"
-	}
-	if config.Port == 0 {
-		config.Port = DefaultRemoteAccessPort
-	}
-	return config
-}
-
-func RemoteAccessStatusForConfig(config DashboardConfig) RemoteAccessStatus {
-	remote := normalizeRemoteAccessConfig(config.RemoteAccess)
+func RemoteAccessStatusForConfig(config dashconfig.Config) RemoteAccessStatus {
+	remote := dashconfig.NormalizeRemoteAccess(config.RemoteAccess)
 	result := RemoteAccessStatus{Desired: remote.Enabled, Provider: remote.Provider, Port: remote.Port}
 	run, _, err := remoteTailscale(remote.TailscalePath)
 	if err != nil {
@@ -82,8 +63,8 @@ func RemoteAccessStatusForConfig(config DashboardConfig) RemoteAccessStatus {
 	return result
 }
 
-func EnableRemoteAccess(config DashboardConfig) (DashboardConfig, RemoteAccessStatus, error) {
-	config.RemoteAccess = normalizeRemoteAccessConfig(config.RemoteAccess)
+func EnableRemoteAccess(config dashconfig.Config) (dashconfig.Config, RemoteAccessStatus, error) {
+	config.RemoteAccess = dashconfig.NormalizeRemoteAccess(config.RemoteAccess)
 	run, path, err := remoteTailscale(config.RemoteAccess.TailscalePath)
 	if err != nil {
 		return config, RemoteAccessStatus{}, err
@@ -101,7 +82,7 @@ func EnableRemoteAccess(config DashboardConfig) (DashboardConfig, RemoteAccessSt
 	}
 	config.RemoteAccess.Enabled = true
 	config.RemoteAccess.TailscalePath = path
-	if err := SaveDashboardConfig(config); err != nil {
+	if err := dashconfig.Save(config); err != nil {
 		return config, RemoteAccessStatus{}, err
 	}
 	result := RemoteAccessStatusForConfig(config)
@@ -111,8 +92,8 @@ func EnableRemoteAccess(config DashboardConfig) (DashboardConfig, RemoteAccessSt
 	return config, result, nil
 }
 
-func DisableRemoteAccess(config DashboardConfig) (DashboardConfig, error) {
-	config.RemoteAccess = normalizeRemoteAccessConfig(config.RemoteAccess)
+func DisableRemoteAccess(config dashconfig.Config) (dashconfig.Config, error) {
+	config.RemoteAccess = dashconfig.NormalizeRemoteAccess(config.RemoteAccess)
 	run, _, err := remoteTailscale(config.RemoteAccess.TailscalePath)
 	if err != nil {
 		return config, err
@@ -129,9 +110,5 @@ func DisableRemoteAccess(config DashboardConfig) (DashboardConfig, error) {
 		return config, err
 	}
 	config.RemoteAccess.Enabled = false
-	return config, SaveDashboardConfig(config)
-}
-
-func RemoteAccessQR(value string) ([]byte, error) {
-	return qrcode.Encode(value, qrcode.Medium, 512)
+	return config, dashconfig.Save(config)
 }

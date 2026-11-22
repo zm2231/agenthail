@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/hosts"
 )
 
@@ -24,14 +25,14 @@ type daemonAPIClient struct {
 }
 
 func daemonEndpoint() (string, string, error) {
-	config, err := daemon.LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		return "", "", err
 	}
 	if !config.Enabled {
 		return "", "", errors.New("dashboard is disabled")
 	}
-	tokenBytes, err := os.ReadFile(daemon.DashboardTokenPath())
+	tokenBytes, err := os.ReadFile(dashconfig.TokenPath())
 	if err != nil {
 		return "", "", fmt.Errorf("read dashboard token: %w", err)
 	}

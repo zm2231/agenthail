@@ -16,6 +16,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/zm2231/agenthail/internal/codextest"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
@@ -119,7 +120,7 @@ func TestARealCodexThreadCallsTheToolsAsItselfThroughTheStdioRelay(t *testing.T)
 		t.Fatal(err)
 	}
 	model := &whoamiModel{}
-	relay := fmt.Sprintf("[mcp_servers.agenthail]\ncommand = %q\nargs = [\"-test.run=^TestMCPStdioRelayHelper$\"]\ndefault_tools_approval_mode = \"approve\"\nenv = { AGENTHAIL_TEST_RELAY_READY = %q, AGENTHAIL_TEST_RELAY_SOCKET = %q }\n", os.Args[0], ready, MCPSocketPath())
+	relay := fmt.Sprintf("[mcp_servers.agenthail]\ncommand = %q\nargs = [\"-test.run=^TestMCPStdioRelayHelper$\"]\ndefault_tools_approval_mode = \"approve\"\nenv = { AGENTHAIL_TEST_RELAY_READY = %q, AGENTHAIL_TEST_RELAY_SOCKET = %q }\n", os.Args[0], ready, daemonctl.MCPSocketPath())
 	real := codextest.StartRealWith(t, model, relay)
 	stop()
 	d.Surfaces = append(d.Surfaces, codexsurface.NewCodexIn(codexsurface.CodexHome{Codex: real.CodexHome, State: filepath.Join(real.Home, ".agenthail")}, ""))

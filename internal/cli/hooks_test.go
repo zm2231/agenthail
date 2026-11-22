@@ -20,7 +20,7 @@ import (
 
 	"github.com/tidwall/gjson"
 	"github.com/zm2231/agenthail/internal/claudehooks"
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 )
@@ -234,10 +234,10 @@ func stoppedDaemonClient(t *testing.T) *daemonAPIClient {
 	}
 	listen := listener.Addr().String()
 	listener.Close()
-	if err := daemon.SaveDashboardConfig(daemon.DashboardConfig{Enabled: true, Listen: listen}); err != nil {
+	if err := dashconfig.Save(dashconfig.Config{Enabled: true, Listen: listen}); err != nil {
 		t.Fatal(err)
 	}
-	if err := daemon.RotateDashboardToken(); err != nil {
+	if err := dashconfig.RotateToken(); err != nil {
 		t.Fatal(err)
 	}
 	client, err := newDaemonAPIClient()

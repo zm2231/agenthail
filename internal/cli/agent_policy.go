@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"text/tabwriter"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 )
 
 const agentPolicyUsage = `usage: agenthail agent-policy [list] [--json] | set <action> allow|notify|ask | reset <action> | limit depth|running <n>`
@@ -20,7 +20,7 @@ func (a *App) cmdAgentPolicy(args []string) error {
 	if a.agentEnvironment() {
 		return errors.New("the agent policy is the person's to change; an agent may read it with 'agenthail agent-policy'")
 	}
-	config, err := daemon.LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		return err
 	}
@@ -41,14 +41,14 @@ func (a *App) cmdAgentPolicy(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := daemon.SaveDashboardConfig(config); err != nil {
+	if err := dashconfig.Save(config); err != nil {
 		return err
 	}
 	return a.listAgentPolicy(false)
 }
 
 func (a *App) listAgentPolicy(asJSON bool) error {
-	config, err := daemon.LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		return err
 	}

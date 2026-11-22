@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -27,7 +27,7 @@ func (a *App) cmdRegistry(args []string) error {
 	if !registry.ValidBackupKey(key) {
 		return errors.New(registryUsage)
 	}
-	release, err := daemon.HoldDaemonLock()
+	release, err := daemonctl.HoldLock()
 	if err != nil {
 		return fmt.Errorf("the daemon is running or starting; run 'agenthail daemon stop' first: %w", err)
 	}

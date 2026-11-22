@@ -16,7 +16,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	_ "modernc.org/sqlite"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
@@ -28,10 +28,10 @@ func TestMain(m *testing.M) {
 		os.Exit(testkit.RunAwayFromLiveDashboard(func() int {
 			main()
 			return 0
-		}, daemon.StandardDashboardListen, &daemon.DefaultDashboardListen))
+		}, dashconfig.StandardListen, &dashconfig.DefaultListen))
 	}
 	os.Exit(testkit.RunInOwnHome(func() int {
-		return testkit.RunAwayFromLiveDashboard(m.Run, daemon.StandardDashboardListen, &daemon.DefaultDashboardListen)
+		return testkit.RunAwayFromLiveDashboard(m.Run, dashconfig.StandardListen, &dashconfig.DefaultListen)
 	}))
 }
 

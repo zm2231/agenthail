@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/simhost"
 )
@@ -142,14 +143,14 @@ func simulatorTimeout(simulatorAction string) time.Duration {
 }
 
 func (d *Daemon) simulatorDeviceHost(ctx context.Context) (*pairedHost, error) {
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
-		return nil, &mcpRefusal{Code: "unavailable", Message: fmt.Sprintf("%s can't be read, so the simulator host it may name is unknown: %v", DashboardConfigPath(), err)}
+		return nil, &mcpRefusal{Code: "unavailable", Message: fmt.Sprintf("%s can't be read, so the simulator host it may name is unknown: %v", dashconfig.Path(), err)}
 	}
 	if name := strings.TrimSpace(config.SimulatorHost); name != "" {
 		host, found := d.pairedHost(name)
 		if !found {
-			return nil, &mcpRefusal{Code: "unavailable", Message: fmt.Sprintf("simulatorHost in %s names %s, which is not a paired host.", DashboardConfigPath(), name)}
+			return nil, &mcpRefusal{Code: "unavailable", Message: fmt.Sprintf("simulatorHost in %s names %s, which is not a paired host.", dashconfig.Path(), name)}
 		}
 		return host, nil
 	}
@@ -186,7 +187,7 @@ func (d *Daemon) simulatorDeviceHost(ctx context.Context) (*pairedHost, error) {
 		for _, host := range capable {
 			names = append(names, host.record.Name)
 		}
-		return nil, &mcpRefusal{Code: "unavailable", Message: fmt.Sprintf("Several paired Macs run simulators (%s); the person picks one with simulatorHost in %s.", strings.Join(names, ", "), DashboardConfigPath())}
+		return nil, &mcpRefusal{Code: "unavailable", Message: fmt.Sprintf("Several paired Macs run simulators (%s); the person picks one with simulatorHost in %s.", strings.Join(names, ", "), dashconfig.Path())}
 	}
 }
 

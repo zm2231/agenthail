@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/extension"
 	"github.com/zm2231/agenthail/internal/proxyacct"
 	"github.com/zm2231/agenthail/internal/tailscale"
@@ -150,11 +151,11 @@ func (d *Daemon) syncExtensionMounts() error {
 	if err != nil {
 		return fmt.Errorf("read mount ports: %w", err)
 	}
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		return err
 	}
-	remote := normalizeRemoteAccessConfig(config.RemoteAccess)
+	remote := dashconfig.NormalizeRemoteAccess(config.RemoteAccess)
 
 	declared := map[string]bool{}
 	keepAll := map[string]bool{}
@@ -335,7 +336,7 @@ func listenFreeMountPort(ports map[string]extension.MountPort) (net.Listener, er
 
 // A mount that is not served, or any mount while remote access is off, has
 // its route removed; a removed mount keeps its port until that succeeds.
-func (d *Daemon) publishMounts(remote RemoteAccessConfig, ports map[string]extension.MountPort, needName bool) (string, map[string]string) {
+func (d *Daemon) publishMounts(remote dashconfig.RemoteAccess, ports map[string]extension.MountPort, needName bool) (string, map[string]string) {
 	errs := map[string]string{}
 	var work []string
 	for key, assigned := range ports {

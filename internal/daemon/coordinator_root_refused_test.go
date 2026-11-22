@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/broadcast"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -23,17 +24,17 @@ func TestASendToAGoneLeadQueuesUntilTheSettingsFileIsFixedThenDelivers(t *testin
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
 			f := newCoordinatorFixture(t)
-			writeUsageFixture(t, map[string]string{DashboardConfigPath(): test.content})
+			writeUsageFixture(t, map[string]string{dashconfig.Path(): test.content})
 			code, body := f.send(t, "lead-unreadable", goneCoordinator, "sent while the setting is broken")
 			detail := receiptField(body, "detail")
-			if code != http.StatusOK || !strings.HasPrefix(detail, "Queued for") || !strings.Contains(detail, DashboardConfigPath()) || !strings.Contains(detail, test.says) {
+			if code != http.StatusOK || !strings.HasPrefix(detail, "Queued for") || !strings.Contains(detail, dashconfig.Path()) || !strings.Contains(detail, test.says) {
 				t.Fatalf("the send says it is queued and why: status=%d body=%v", code, body)
 			}
 			f.daemon.scanAndRelay(context.Background())
 			if f.r.QueueCount(goneCoordinator) != 1 || f.started(t) != 0 || f.current(t) != goneCoordinator {
 				t.Fatalf("the message waits and no lead starts: queued=%d started=%d current=%s", f.r.QueueCount(goneCoordinator), f.started(t), f.current(t))
 			}
-			writeUsageFixture(t, map[string]string{DashboardConfigPath(): `{}`})
+			writeUsageFixture(t, map[string]string{dashconfig.Path(): `{}`})
 			rows, err := f.r.ListQueue(false, f.daemon.adapters())
 			if err != nil || len(rows) != 1 || rows[0].Status != "pending" || rows[0].Attempts != 0 {
 				t.Fatalf("waiting spends no attempts: rows=%+v err=%v", rows, err)
@@ -67,7 +68,7 @@ func TestAChannelMessageToAGoneLeadQueuesWhileTheSettingsFileCannotBeRead(t *tes
 	if err := f.r.AddToChannel("team", goneCoordinator); err != nil {
 		t.Fatal(err)
 	}
-	writeUsageFixture(t, map[string]string{DashboardConfigPath(): brokenSettings})
+	writeUsageFixture(t, map[string]string{dashconfig.Path(): brokenSettings})
 	code, body := f.channelSend(t, "channel-unreadable", "team", "", "standup")
 	if code != http.StatusOK || !strings.Contains(body, broadcast.OutcomeQueued) || f.started(t) != 0 || f.r.QueueCount(goneCoordinator) != 1 {
 		t.Fatalf("status=%d body=%s started=%d queued=%d", code, body, f.started(t), f.r.QueueCount(goneCoordinator))
@@ -77,16 +78,16 @@ func TestAChannelMessageToAGoneLeadQueuesWhileTheSettingsFileCannotBeRead(t *tes
 func TestSendsThatCannotQueueAreRefusedWhileTheSettingsFileCannotBeRead(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	f := newCoordinatorFixture(t)
-	writeUsageFixture(t, map[string]string{DashboardConfigPath(): brokenSettings})
+	writeUsageFixture(t, map[string]string{dashconfig.Path(): brokenSettings})
 	code, body := f.sendToLead(t, "lead-no-queue", map[string]any{"message": "urgent", "noQueue": true})
-	if code == http.StatusOK || !strings.Contains(fmt.Sprint(body), DashboardConfigPath()) || f.started(t) != 0 || f.r.QueueCount(goneCoordinator) != 0 {
+	if code == http.StatusOK || !strings.Contains(fmt.Sprint(body), dashconfig.Path()) || f.started(t) != 0 || f.r.QueueCount(goneCoordinator) != 0 {
 		t.Fatalf("a no-queue send is refused: status=%d body=%v started=%d queued=%d", code, body, f.started(t), f.r.QueueCount(goneCoordinator))
 	}
 	if _, err := f.r.SetCoordinator(registry.CoordinatorSpec{ProjectID: "project-fixture", ProjectRoot: f.host.Cwd, Name: "fixture-lead", Surface: string(surface.KindClaude), Cwd: f.host.Cwd}, registry.CoordinatorChange{Replace: true}); err != nil {
 		t.Fatal(err)
 	}
 	code, body = f.sendToLead(t, "lead-first", map[string]any{"message": "first task"})
-	if code == http.StatusOK || !strings.Contains(fmt.Sprint(body), DashboardConfigPath()) || f.started(t) != 0 {
+	if code == http.StatusOK || !strings.Contains(fmt.Sprint(body), dashconfig.Path()) || f.started(t) != 0 {
 		t.Fatalf("a lead with no conversation has nowhere to hold the message: status=%d body=%v started=%d", code, body, f.started(t))
 	}
 }
@@ -94,7 +95,7 @@ func TestSendsThatCannotQueueAreRefusedWhileTheSettingsFileCannotBeRead(t *testi
 func TestAQueuedMessageForAGoneLeadWaitsWhileTheDefaultRootCannotBeRead(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	f := newCoordinatorFixture(t)
-	writeUsageFixture(t, map[string]string{DashboardConfigPath(): `{"codexRecentHours":9999}`})
+	writeUsageFixture(t, map[string]string{dashconfig.Path(): `{"codexRecentHours":9999}`})
 	if err := f.r.QueueMessage(goneCoordinator, "held for the coordinator"); err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +125,7 @@ func TestAQueuedMessageForAGoneLeadWaitsWhileTheDefaultRootCannotBeRead(t *testi
 	if err != nil || len(rows) != 1 || rows[0].Status != "pending" || rows[0].Attempts != 0 {
 		t.Fatalf("the message must wait, not spend its attempts: rows=%+v err=%v", rows, err)
 	}
-	writeUsageFixture(t, map[string]string{DashboardConfigPath(): `{}`})
+	writeUsageFixture(t, map[string]string{dashconfig.Path(): `{}`})
 	attempt(now.Add(30 * 24 * time.Hour))
 	if current := f.current(t); current == goneCoordinator || f.started(t) != 1 {
 		t.Fatalf("the message starts the lead once the setting reads: current=%s started=%d", current, f.started(t))

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 )
 
@@ -45,7 +46,7 @@ func TestABrokenSettingsFileDoesNotStopTheQueue(t *testing.T) {
 	if count := strings.Count(logged.String(), "busy delivery setting unreadable"); count != 1 {
 		t.Fatalf("logged %d times: %s", count, logged.String())
 	}
-	if !strings.Contains(logged.String(), DashboardConfigPath()) {
+	if !strings.Contains(logged.String(), dashconfig.Path()) {
 		t.Fatalf("log did not name the file: %s", logged.String())
 	}
 	if err := os.WriteFile(path, []byte(`{"busyDelivery":"steer"}`), 0600); err != nil {

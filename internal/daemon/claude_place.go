@@ -6,15 +6,16 @@ import (
 	"slices"
 
 	"github.com/zm2231/agenthail/internal/claudepick"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func (d *Daemon) placeClaudeSession(creator, previous string) (claudepick.Pick, error) {
 	origin := claudepick.Origin{CreatorTranscript: d.sessionTranscript(creator), PreviousTranscript: d.sessionTranscript(previous)}
 	return claudepick.Place(d.claudeConfigRoots(), origin, func() (string, error) {
-		config, err := LoadDashboardConfig()
+		config, err := dashconfig.Load()
 		if err != nil {
-			return "", fmt.Errorf("the settings file %s cannot be read, so the default Claude root is not known: %w", DashboardConfigPath(), err)
+			return "", fmt.Errorf("the settings file %s cannot be read, so the default Claude root is not known: %w", dashconfig.Path(), err)
 		}
 		return config.ClaudeDefaultRoot(), nil
 	})

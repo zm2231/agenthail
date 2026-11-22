@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/poll"
 	"howett.net/plist"
 )
@@ -97,7 +97,7 @@ func (launchdService) Stop() error {
 	if homebrewDaemonManaged() {
 		return fmt.Errorf("daemon is managed by Homebrew; use 'brew services stop agenthail'")
 	}
-	pid, ok := daemon.IsRunning()
+	pid, ok := daemonctl.IsRunning()
 	if !ok {
 		fmt.Println("daemon not running")
 		return nil
@@ -105,7 +105,7 @@ func (launchdService) Stop() error {
 	if job, loaded := launchdServiceJob(daemonLaunchdLabel); loaded && job.pid == pid {
 		return fmt.Errorf("daemon is supervised by launchd; use 'agenthail daemon uninstall' to stop and remove the service")
 	}
-	if err := daemon.Stop(); err != nil {
+	if err := daemonctl.Stop(); err != nil {
 		return err
 	}
 	fmt.Printf("daemon stopped (was pid %d)\n", pid)
@@ -122,8 +122,8 @@ func (s launchdService) Restart() error {
 	if daemonServiceLoaded() {
 		return restartLaunchdDaemon(daemonLaunchdLabel)
 	}
-	if _, running := daemon.IsRunning(); running {
-		if err := daemon.Stop(); err != nil {
+	if _, running := daemonctl.IsRunning(); running {
+		if err := daemonctl.Stop(); err != nil {
 			return err
 		}
 	}
@@ -180,8 +180,8 @@ func (launchdService) Install() error {
 	_ = poll.Until(ctx, 100*time.Millisecond, func() (bool, error) {
 		return !launchdLabelLoaded(daemonLaunchdLabel), nil
 	})
-	if _, running := daemon.IsRunning(); running {
-		if err := daemon.Stop(); err != nil {
+	if _, running := daemonctl.IsRunning(); running {
+		if err := daemonctl.Stop(); err != nil {
 			return fmt.Errorf("stop existing daemon: %w", err)
 		}
 	}
@@ -189,7 +189,7 @@ func (launchdService) Install() error {
 	if err != nil {
 		return fmt.Errorf("locate agenthail binary: %w", err)
 	}
-	logPath := daemon.LogFilePath()
+	logPath := daemonctl.LogFilePath()
 	if err := rotateLogFile(logPath, daemonLogMaxBytes); err != nil {
 		return fmt.Errorf("rotate daemon log: %w", err)
 	}
@@ -246,7 +246,7 @@ func (launchdService) Uninstall() error {
 }
 
 func restartLaunchdDaemon(label string) error {
-	before, _ := daemon.IsRunning()
+	before, _ := daemonctl.IsRunning()
 	target := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
 	if output, err := exec.Command("launchctl", "kickstart", "-k", target).CombinedOutput(); err != nil {
 		return fmt.Errorf("restart launchd service: %w (%s)", err, strings.TrimSpace(string(output)))

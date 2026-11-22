@@ -14,7 +14,8 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonctl"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -58,9 +59,9 @@ func newFakeSystemctl(t *testing.T) (*fakeSystemctl, *systemdService) {
 	// Install enables the dashboard at the default address; this stands in for what the real daemon would serve there.
 	dashboard := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	t.Cleanup(dashboard.Close)
-	previousListen := daemon.DefaultDashboardListen
-	daemon.DefaultDashboardListen = dashboard.Listener.Addr().String()
-	t.Cleanup(func() { daemon.DefaultDashboardListen = previousListen })
+	previousListen := dashconfig.DefaultListen
+	dashconfig.DefaultListen = dashboard.Listener.Addr().String()
+	t.Cleanup(func() { dashconfig.DefaultListen = previousListen })
 	bin := filepath.Join(t.TempDir(), "agenthail")
 	script := "#!/bin/sh\nmkdir -p \"$HOME/.agenthail\"\necho $$ > \"$HOME/.agenthail/daemon.pid\"\ntrap 'exit 0' TERM\n" + testkit.WhileTestRuns("0.05")
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
@@ -229,7 +230,7 @@ func TestSystemdInstallWritesUnitStartsDaemonAndEnablesLinger(t *testing.T) {
 	if !fake.linger || !strings.Contains(output, "linger: on") || !strings.Contains(output, "installed and started systemd user service") {
 		t.Fatalf("linger=%v output=%s", fake.linger, output)
 	}
-	config, err := daemon.LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil || !config.Enabled {
 		t.Fatalf("dashboard config=%+v err=%v", config, err)
 	}
@@ -271,12 +272,12 @@ func TestSystemdLifecycleCommandsUseTheUserUnit(t *testing.T) {
 	if _, err := captureStdout(t, service.Install); err != nil {
 		t.Fatal(err)
 	}
-	firstPID, _ := daemon.IsRunning()
+	firstPID, _ := daemonctl.IsRunning()
 	output, err := captureStdout(t, service.Restart)
 	if err != nil {
 		t.Fatalf("restart: %v", err)
 	}
-	secondPID, running := daemon.IsRunning()
+	secondPID, running := daemonctl.IsRunning()
 	if !running || secondPID == firstPID || !strings.Contains(output, "daemon restarted") {
 		t.Fatalf("first=%d second=%d output=%s", firstPID, secondPID, output)
 	}
@@ -287,7 +288,7 @@ func TestSystemdLifecycleCommandsUseTheUserUnit(t *testing.T) {
 	if err != nil || !strings.Contains(output, "agents it started keep running") {
 		t.Fatalf("stop err=%v output=%s", err, output)
 	}
-	if _, running := daemon.IsRunning(); running {
+	if _, running := daemonctl.IsRunning(); running {
 		t.Fatal("daemon still running after stop")
 	}
 	if _, err := captureStdout(t, service.Start); err != nil {
@@ -444,7 +445,7 @@ func TestSystemdLifecycleRefusesUnsupervisedFallbackWhenManagerIsUnreachable(t *
 		if err == nil || !strings.Contains(err.Error(), "agenthail.service is installed but the systemd user manager is unreachable") || !strings.Contains(err.Error(), "loginctl enable-linger agent") {
 			t.Fatalf("%s err=%v output=%s", name, err, output)
 		}
-		if _, running := daemon.IsRunning(); running {
+		if _, running := daemonctl.IsRunning(); running {
 			t.Fatalf("%s started an unsupervised daemon", name)
 		}
 	}

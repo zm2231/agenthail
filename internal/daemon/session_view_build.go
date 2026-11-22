@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -22,7 +23,7 @@ type sessionViewCacheKey struct {
 	epoch            string
 }
 
-func (d *Daemon) sessionViewCacheKeyFor(request sessionViewRequest, catalog registry.CatalogPresentationKey, config DashboardConfig) sessionViewCacheKey {
+func (d *Daemon) sessionViewCacheKeyFor(request sessionViewRequest, catalog registry.CatalogPresentationKey, config dashconfig.Config) sessionViewCacheKey {
 	return sessionViewCacheKey{scope: request.Scope, filters: request.Filters, catalog: catalog, codexRecentHours: config.CodexRecentHours, host: d.localHost(), epoch: d.presentation.epoch}
 }
 
@@ -42,7 +43,7 @@ func (b *sessionViewBuild) fresh(key sessionViewCacheKey, now time.Time) bool {
 }
 
 func (d *Daemon) cachedSessionView(ctx context.Context, request sessionViewRequest, now time.Time) (*sessionViewBuild, error) {
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +73,7 @@ func (d *Daemon) cachedSessionView(ctx context.Context, request sessionViewReque
 	return build, nil
 }
 
-func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewRequest, config DashboardConfig, key sessionViewCacheKey, now time.Time) (*sessionViewBuild, error) {
+func (d *Daemon) buildSessionView(ctx context.Context, request sessionViewRequest, config dashconfig.Config, key sessionViewCacheKey, now time.Time) (*sessionViewBuild, error) {
 	presenter, err := d.rowPresenter(now)
 	if err != nil {
 		return nil, err

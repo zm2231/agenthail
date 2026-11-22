@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -70,7 +71,7 @@ func (d *Daemon) resumeAfterLimitEnabled() bool {
 	if d.limitResumeEnabled != nil {
 		return d.limitResumeEnabled()
 	}
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		d.log.Printf("read resume after limit setting: %s", err)
 		return true

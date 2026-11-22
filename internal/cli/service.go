@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/codexconfig"
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/poll"
 )
 
@@ -79,14 +79,14 @@ func serviceEnvironment() map[string]string {
 var unsupervisedDaemonExecutable = os.Executable
 
 func startUnsupervisedDaemon() error {
-	if pid, ok := daemon.IsRunning(); ok {
+	if pid, ok := daemonctl.IsRunning(); ok {
 		return fmt.Errorf("daemon already running (pid %d)", pid)
 	}
 	exe, err := unsupervisedDaemonExecutable()
 	if err != nil {
 		return fmt.Errorf("locate agenthail binary: %w", err)
 	}
-	logPath := daemon.LogFilePath()
+	logPath := daemonctl.LogFilePath()
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("open log: %w", err)
@@ -117,12 +117,12 @@ func startUnsupervisedDaemon() error {
 }
 
 func stopUnsupervisedDaemon() error {
-	pid, ok := daemon.IsRunning()
+	pid, ok := daemonctl.IsRunning()
 	if !ok {
 		fmt.Println("daemon not running")
 		return nil
 	}
-	if err := daemon.Stop(); err != nil {
+	if err := daemonctl.Stop(); err != nil {
 		return err
 	}
 	fmt.Printf("daemon stopped (was pid %d)\n", pid)
@@ -130,8 +130,8 @@ func stopUnsupervisedDaemon() error {
 }
 
 func restartUnsupervisedDaemon() error {
-	if _, running := daemon.IsRunning(); running {
-		if err := daemon.Stop(); err != nil {
+	if _, running := daemonctl.IsRunning(); running {
+		if err := daemonctl.Stop(); err != nil {
 			return err
 		}
 	}
@@ -143,7 +143,7 @@ func waitForDaemonPID(previous int, timeout time.Duration) (int, bool) {
 	defer cancel()
 	pid := 0
 	_ = poll.Until(ctx, 50*time.Millisecond, func() (bool, error) {
-		if runningPID, running := daemon.IsRunning(); running && runningPID != previous {
+		if runningPID, running := daemonctl.IsRunning(); running && runningPID != previous {
 			pid = runningPID
 			return true, nil
 		}

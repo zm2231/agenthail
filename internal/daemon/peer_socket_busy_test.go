@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
@@ -45,7 +46,7 @@ func busyClaude(t *testing.T, socket bool) (*registry.Registry, *claudetest.Fixt
 
 func TestRelayToABusyClaudeSessionRidesItsPeerSocketAtOnce(t *testing.T) {
 	store, process, session := busyClaude(t, true)
-	if err := SaveDashboardConfig(DashboardConfig{BusyDelivery: "queue"}); err != nil {
+	if err := dashconfig.Save(dashconfig.Config{BusyDelivery: "queue"}); err != nil {
 		t.Fatal(err)
 	}
 	manager := claudetest.ListenPeerManager(t, process.Home)
@@ -67,7 +68,7 @@ func TestRelayToABusyClaudeSessionRidesItsPeerSocketAtOnce(t *testing.T) {
 
 func TestQueuedMessageToABusyRemoteControlClaudeSteersUnderTheSteerPolicy(t *testing.T) {
 	store, process, session := busyClaude(t, false)
-	if err := SaveDashboardConfig(DashboardConfig{BusyDelivery: "steer"}); err != nil {
+	if err := dashconfig.Save(dashconfig.Config{BusyDelivery: "steer"}); err != nil {
 		t.Fatal(err)
 	}
 	claude := &recordingClaude{Claude: claudesurface.NewClaude(nil, process.Home)}
@@ -92,7 +93,7 @@ func TestRelayToABusyCodexSessionFollowsTheLivePolicy(t *testing.T) {
 	for _, policy := range []deliverypolicy.Mode{deliverypolicy.Queue, deliverypolicy.Steer} {
 		t.Run(string(policy), func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
-			if err := SaveDashboardConfig(DashboardConfig{BusyDelivery: policy}); err != nil {
+			if err := dashconfig.Save(dashconfig.Config{BusyDelivery: policy}); err != nil {
 				t.Fatal(err)
 			}
 			d, r, fake, from, to := daemonFixture(t)
@@ -124,7 +125,7 @@ func TestRelayToABusyCodexSessionFollowsTheLivePolicy(t *testing.T) {
 
 func TestARelayFromASessionThatDoesNotOverseeItsTargetNeverSteersIt(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	if err := SaveDashboardConfig(DashboardConfig{BusyDelivery: deliverypolicy.Steer}); err != nil {
+	if err := dashconfig.Save(dashconfig.Config{BusyDelivery: deliverypolicy.Steer}); err != nil {
 		t.Fatal(err)
 	}
 	d, r, fake, from, to := daemonFixture(t)
@@ -147,7 +148,7 @@ func TestARelayFromASessionThatDoesNotOverseeItsTargetNeverSteersIt(t *testing.T
 
 func TestQueuedMessagesToABusyBridgedPeerNeverSteerUnderTheSteerPolicy(t *testing.T) {
 	store, process, session := busyClaude(t, true)
-	if err := SaveDashboardConfig(DashboardConfig{BusyDelivery: "steer"}); err != nil {
+	if err := dashconfig.Save(dashconfig.Config{BusyDelivery: "steer"}); err != nil {
 		t.Fatal(err)
 	}
 	claude := &recordingClaude{Claude: claudesurface.NewClaude(nil, process.Home)}

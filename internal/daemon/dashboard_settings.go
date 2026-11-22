@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 )
 
@@ -20,7 +21,7 @@ func (d *Daemon) person() (dashboardPerson, error) {
 }
 
 func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request) {
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -67,19 +68,19 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		if request.BusyDelivery != "" {
 			config.BusyDelivery = deliverypolicy.Mode(request.BusyDelivery)
 		}
-		if err = SaveDashboardConfig(config); err == nil {
+		if err = dashconfig.Save(config); err == nil {
 			d.publishCatalogPresence()
 		}
 	case "resume-after-limit":
 		config.ResumeAfterLimit = &request.ResumeAfterLimit
-		err = SaveDashboardConfig(config)
+		err = dashconfig.Save(config)
 	case "move-after-limit":
 		config.MoveAfterLimit = &request.MoveAfterLimit
-		err = SaveDashboardConfig(config)
+		err = dashconfig.Save(config)
 	case "claude-default-root":
 		if err = d.knownClaudeRoot(request.ClaudeDefaultRoot); err == nil {
 			config.SetClaudeDefaultRoot(request.ClaudeDefaultRoot)
-			err = SaveDashboardConfig(config)
+			err = dashconfig.Save(config)
 		}
 	case "person-name":
 		err = d.Registry.SetPersonName(request.PersonName)
@@ -120,7 +121,7 @@ func (d *Daemon) dashboardRemoteQRHandler(w http.ResponseWriter, r *http.Request
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	image, err := RemoteAccessQR(link.URL)
+	image, err := dashconfig.RemoteAccessQR(link.URL)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -94,14 +95,14 @@ func TestAPhoneReadsAndSetsNotificationPreferencesAndAnUnknownOneIsRefused(t *te
 	if code, _ := preferencesCall(t, d, phone, http.MethodPut, `{"id":"leadCompletionsOnly"}`); code != http.StatusBadRequest {
 		t.Fatalf("a preference without a value answered %d", code)
 	}
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil || len(config.NotificationPreferences) != 1 || config.NotificationPreferences[notificationPreferenceLeadCompletionsOnly] {
 		t.Fatalf("stored overrides %+v err=%v", config.NotificationPreferences, err)
 	}
 	if code, rows := preferencesCall(t, d, phone, http.MethodPut, `{"id":"leadCompletionsOnly","value":true}`); code != http.StatusOK || !rows[0].Value {
 		t.Fatalf("turning it back on answered %d %+v", code, rows)
 	}
-	if config, err := LoadDashboardConfig(); err != nil || len(config.NotificationPreferences) != 0 {
+	if config, err := dashconfig.Load(); err != nil || len(config.NotificationPreferences) != 0 {
 		t.Fatalf("a preference set back to its default is still stored: %+v err=%v", config.NotificationPreferences, err)
 	}
 }

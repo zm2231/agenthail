@@ -16,6 +16,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/signin"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -365,7 +366,7 @@ func TestObservationPersistsRefreshedCodexTransport(t *testing.T) {
 
 func TestBusySteerRelayUsesDurableQueueUntilOutbox(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	if err := SaveDashboardConfig(DashboardConfig{BusyDelivery: "steer"}); err != nil {
+	if err := dashconfig.Save(dashconfig.Config{BusyDelivery: "steer"}); err != nil {
 		t.Fatal(err)
 	}
 	d, r, fake, from, to := daemonFixture(t)

@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -15,7 +15,7 @@ import (
 const queuedWithoutDaemon = "warning: daemon is not running; queued message will not be delivered until you start it (agenthail daemon start)"
 
 var daemonRunning = func() bool {
-	_, ok := daemon.IsRunning()
+	_, ok := daemonctl.IsRunning()
 	return ok
 }
 

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -28,12 +29,12 @@ func (a *App) cmdLimitResume(args []string) error {
 		if err := a.personAction(ctx, daemon.PersonActionSettings, payload); err != nil {
 			return err
 		}
-		config, err := daemon.LoadDashboardConfig()
+		config, err := dashconfig.Load()
 		if err != nil {
 			return err
 		}
 		config.ResumeAfterLimit = &enabled
-		if err := daemon.SaveDashboardConfig(config); err != nil {
+		if err := dashconfig.Save(config); err != nil {
 			return err
 		}
 		if enabled {

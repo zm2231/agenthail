@@ -26,7 +26,7 @@ Anyone who can already read your home directory can already read these cookies f
 
 When enabled, it is constrained in four ways:
 
-- It only accepts a loopback listener. A non-loopback address is rejected at config validation, so you cannot point it at `0.0.0.0` even on purpose (`internal/daemon/dashboard_config.go`). The default is `127.0.0.1:7412`.
+- It only accepts a loopback listener. A non-loopback address is rejected at config validation, so you cannot point it at `0.0.0.0` even on purpose (`internal/dashconfig/dashconfig.go`). The default is `127.0.0.1:7412`.
 - Every request needs a per-install access token, compared in constant time (`crypto/subtle`). Without it you get a `401`.
 - The session cookie is `HttpOnly` and `SameSite=Strict`. Its value is the token itself, so treat it as one; rotating the token revokes every saved device.
 - Any request that is not `GET` or `HEAD` must also pass a same-origin check, so a page in another tab cannot drive your agents.

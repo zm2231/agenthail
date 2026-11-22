@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -258,7 +259,7 @@ func plainDuration(window time.Duration) string {
 }
 
 func (d *Daemon) permissionEscalateAfter() time.Duration {
-	config, err := LoadDashboardConfig()
+	config, err := dashconfig.Load()
 	if err != nil || config.AskPermissionEscalateMinutes <= 0 {
 		return defaultPermissionAskEscalate
 	}

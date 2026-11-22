@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/broadcast"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -64,9 +65,9 @@ func (d *Daemon) personActionScope(ctx context.Context, caller *mcpCaller, actio
 	}
 	if d.leadActsOnOwn(ctx, caller, action.API, request) {
 		switch d.agentPolicy().Decision(agentPolicyActionOf(request)) {
-		case AgentAllow:
+		case dashconfig.AgentAllow:
 			return "", nil
-		case AgentNotify:
+		case dashconfig.AgentNotify:
 			return d.agentNotices.hold(caller.session.ID, description, time.Now()), nil
 		}
 	}

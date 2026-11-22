@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -43,7 +44,7 @@ func newProjectScopeFixture(t *testing.T) projectScopeFixture {
 		if err != nil || project == nil {
 			t.Fatalf("resolve %s: %v %v", session.Cwd, project, err)
 		}
-		if !d.publishCatalogSession(context.Background(), fake, session, nil, catalogIdentity{Project: project}, "", 0, nil, false, DashboardConfig{}, view, time.Now().UTC(), nil, nil) {
+		if !d.publishCatalogSession(context.Background(), fake, session, nil, catalogIdentity{Project: project}, "", 0, nil, false, dashconfig.Config{}, view, time.Now().UTC(), nil, nil) {
 			t.Fatalf("%s was not published", session.ID)
 		}
 	}
