@@ -178,6 +178,11 @@ func migrateTx(tx *sql.Tx) error {
 	if err := ensureColumn(tx, "launcher_pending", "creator", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
+	for _, column := range []string{"item_id", "item_from"} {
+		if err := ensureColumn(tx, "session_prs", column, `TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
 	for _, column := range []string{"send_route", "bridge"} {
 		if err := ensureColumn(tx, "delivery_history", column, `TEXT NOT NULL DEFAULT ''`); err != nil {
 			return err

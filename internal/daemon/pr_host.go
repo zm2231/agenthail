@@ -49,24 +49,46 @@ func (d *Daemon) changePRs(write func(*registry.Registry) (bool, error)) (bool, 
 	return changed, err
 }
 
-func (h prHost) LogHeldWork(sessionID, line string) {
+func (h prHost) held(sessionID string) []heldWork {
 	d := h.d
 	session, err := d.Registry.Session(sessionID)
 	if err != nil {
-		return
+		return nil
 	}
 	held, err := d.heldWork(*session)
 	if err != nil {
 		d.log.Printf("held work for %s: %s", d.resolveDisplay(sessionID), err)
-		return
+		return nil
 	}
-	for _, h := range held {
-		if h.projectID == "" || slices.ContainsFunc(h.item.Timeline, func(e ledger.WorkEntry) bool { return e.Text == line && e.Source == ledger.WorkSourcePRWatcher }) {
+	return held
+}
+
+func (h prHost) OnlyActiveItem(sessionID string) string {
+	active := ""
+	for _, held := range h.held(sessionID) {
+		if held.item.State != ledger.WorkInProgress {
 			continue
 		}
-		req := ledger.WorkRequest{ProjectKey: h.key, SessionID: sessionID, Action: ledger.WorkLog, ItemID: h.item.ID, Text: line, LogType: "progress", Source: ledger.WorkSourcePRWatcher}
+		if active != "" {
+			return ""
+		}
+		active = held.item.ID
+	}
+	return active
+}
+
+func (h prHost) LogItem(sessionID, itemID, line string) {
+	if itemID == "" {
+		return
+	}
+	d := h.d
+	for _, held := range h.held(sessionID) {
+		if held.item.ID != itemID || held.projectID == "" || slices.ContainsFunc(held.item.Timeline, func(e ledger.WorkEntry) bool { return e.Text == line && e.Source == ledger.WorkSourcePRItem }) {
+			continue
+		}
+		req := ledger.WorkRequest{ProjectKey: held.key, SessionID: sessionID, Action: ledger.WorkLog, ItemID: itemID, Text: line, LogType: "progress", Source: ledger.WorkSourcePRItem}
 		if _, err := d.ledgerStore().Work(req, time.Now()); err != nil {
-			d.log.Printf("log %q to %s: %s", line, h.item.ID, err)
+			d.log.Printf("log %q to %s: %s", line, itemID, err)
 		}
 	}
 }

@@ -7,6 +7,7 @@ type mcpPRInput struct {
 	Action  string `json:"action" jsonschema:"link, unlink, watch or unwatch."`
 	PR      string `json:"pr" jsonschema:"A pull request URL, or its number."`
 	Repo    string `json:"repo,omitempty" jsonschema:"owner/name, for a number outside your folder's repository."`
+	Item    string `json:"item,omitempty" jsonschema:"link: the work item it is for; default your one item in progress."`
 	Session string `json:"session,omitempty" jsonschema:"A session you spawned or lead; default yourself."`
 }
 
@@ -19,5 +20,5 @@ func (d *Daemon) mcpPR(ctx context.Context, caller *mcpCaller, input mcpPRInput)
 		}
 		target = controlled.ID
 	}
-	return d.mcpAction(ctx, caller, "agenthail_pr", input.mcpWrite, dashboardActionRequest{Action: "pr", SessionID: target, Op: input.Action, PR: input.PR, Repo: input.Repo})
+	return d.mcpAction(ctx, caller, "agenthail_pr", input.mcpWrite, dashboardActionRequest{Action: "pr", SessionID: target, Op: input.Action, PR: input.PR, Repo: input.Repo, Item: input.Item})
 }

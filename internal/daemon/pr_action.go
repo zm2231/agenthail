@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -28,6 +29,12 @@ func (d *Daemon) doPR(ctx context.Context, p principal, session *surface.Session
 	default:
 		return actionResult{}, invalidRequest("op must be link, unlink, watch or unwatch")
 	}
+	if request.Item != "" && request.Op != "link" {
+		return actionResult{}, invalidRequest("item names the work a pull request is for; only link takes it")
+	}
+	if request.Item != "" && !d.sessionHoldsItem(*session, request.Item) {
+		return actionResult{}, invalidRequest(fmt.Sprintf("%s does not hold work item %s", d.resolveDisplay(session.ID), request.Item))
+	}
 	ref, err := d.resolvePRRef(ctx, session, request.PR, request.Repo)
 	if err != nil {
 		return actionResult{}, err
@@ -39,7 +46,7 @@ func (d *Daemon) doPR(ctx context.Context, p principal, session *surface.Session
 		if err != nil {
 			return actionResult{}, githubFailure(ref, err)
 		}
-		if err := d.prs.Link(registry.SessionPR{SessionID: session.ID, Repo: repo, Number: ref.Number, URL: pr.URL, Source: prSource(p), Title: pr.Title, State: pr.State, HeadSHA: pr.HeadSHA}, true); err != nil {
+		if err := d.prs.Link(registry.SessionPR{SessionID: session.ID, Repo: repo, Number: ref.Number, URL: pr.URL, Source: prSource(p), Title: pr.Title, State: pr.State, HeadSHA: pr.HeadSHA, ItemID: request.Item}, true); err != nil {
 			return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 		}
 	case "unlink":
@@ -72,6 +79,11 @@ func (d *Daemon) doPR(ctx context.Context, p principal, session *surface.Session
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 	}
 	return actionOK(map[string]any{"ok": true, "sessionId": session.ID, "prs": d.prs.Views(prs)}), nil
+}
+
+func (d *Daemon) sessionHoldsItem(session surface.Session, itemID string) bool {
+	held, err := d.heldWork(session)
+	return err == nil && slices.ContainsFunc(held, func(h heldWork) bool { return h.item.ID == itemID })
 }
 
 func githubFailure(ref github.Ref, err error) error {

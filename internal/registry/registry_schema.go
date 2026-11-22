@@ -640,6 +640,8 @@ CREATE TABLE IF NOT EXISTS session_prs (
 	read_failures INTEGER NOT NULL DEFAULT 0,
 	last_read_at_ms INTEGER NOT NULL DEFAULT 0,
 	linked_at_ms INTEGER NOT NULL,
+	item_id TEXT NOT NULL DEFAULT '',
+	item_from TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, repo, number)
 );
 CREATE INDEX IF NOT EXISTS session_prs_watched ON session_prs(repo) WHERE watch=1 AND unlinked=0;

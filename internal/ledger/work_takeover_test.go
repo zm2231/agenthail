@@ -61,7 +61,10 @@ func TestAGoneHoldersItemIsDoneOnlyByAMergedPRTheWatcherLogged(t *testing.T) {
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkLog, ItemID: "widget-W1", SessionID: holder, Text: "PR merged: " + url})
 	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkTakeover, ItemID: "widget-W1", Reason: "merged, holder gone", Takeover: takeover(ledger.TakeoverDone, ledger.HolderGone)}, "no \"PR merged:\" line from the PR watcher")
 
-	work(t, s, ledger.WorkRequest{Action: ledger.WorkLog, ItemID: "widget-W1", SessionID: holder, Text: "PR merged: " + url, Source: ledger.WorkSourcePRWatcher})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkLog, ItemID: "widget-W1", SessionID: holder, Text: "PR merged: " + url, Source: "pr-watcher"})
+	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkTakeover, ItemID: "widget-W1", Reason: "merged, holder gone", Takeover: takeover(ledger.TakeoverDone, ledger.HolderGone)}, "no \"PR merged:\" line from the PR watcher")
+
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkLog, ItemID: "widget-W1", SessionID: holder, Text: "PR merged: " + url, Source: ledger.WorkSourcePRItem})
 	done := work(t, s, ledger.WorkRequest{Action: ledger.WorkTakeover, ItemID: "widget-W1", Reason: "merged, holder gone", Takeover: takeover(ledger.TakeoverDone, ledger.HolderGone)})
 	if done.Item.State != ledger.WorkDone || done.Item.Assignee != holder {
 		t.Fatalf("done = %+v", done.Item)

@@ -18,6 +18,7 @@ type dashboardActionRequest struct {
 	Op              string                     `json:"op"`
 	PR              string                     `json:"pr"`
 	Repo            string                     `json:"repo"`
+	Item            string                     `json:"item"`
 	Agent           string                     `json:"agent"`
 	PermissionMode  string                     `json:"permissionMode"`
 	ConfigRoot      string                     `json:"configRoot"`
