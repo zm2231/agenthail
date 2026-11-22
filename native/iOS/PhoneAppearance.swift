@@ -195,7 +195,7 @@ final class PhoneAppearance: ObservableObject {
                     Self.signposter.emitEvent("Wallpaper applied", id: signpost, "\(side, privacy: .public)")
                 }
                 guard generation == loadGeneration else { return }
-                problem = unreadable.isEmpty ? nil : "The background image \(unreadable.joined(separator: ", ")) can't be read."
+                problem = Self.unreadableProblem(unreadable)
             } catch {
                 if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled { return }
                 problem = AgenthailAPIError.userMessage(error)
@@ -248,7 +248,12 @@ final class PhoneAppearance: ObservableObject {
         self.config = config
         self.wallpapers = Dictionary(wallpapers.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         fallbacks = [:]
+        problem = Self.unreadableProblem(config.imagePaths.filter { self.wallpapers[$0] == nil })
         forgetRenders()
+    }
+
+    static func unreadableProblem(_ paths: [String]) -> String? {
+        paths.isEmpty ? nil : "The background image \(paths.joined(separator: ", ")) can't be read."
     }
 
     private func forgetRenders() {

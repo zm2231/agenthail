@@ -163,6 +163,14 @@ final class PhoneAppearanceTests: XCTestCase {
         XCTAssertTrue(relaunched.active)
     }
 
+    func testAPreviewReportsAnImageItCouldNotReadAndClearsItAfter() throws {
+        let appearance = PhoneAppearance(cache: nil)
+        appearance.preview(try config(["background": "image: backgrounds/missing.jpg"]))
+        XCTAssertEqual(appearance.problem, "The background image backgrounds/missing.jpg can't be read.")
+        appearance.preview(try config(["background": "mesh: 2x2, #102030, #203040, #304050, #405060"]))
+        XCTAssertNil(appearance.problem)
+    }
+
     func testABackgroundWithoutATextureLineDrawsNoTexture() throws {
         let appearance = PhoneAppearance(cache: nil)
         appearance.preview(try config(["background": "mesh: 2x2, #102030, #203040, #304050, #405060"]))
