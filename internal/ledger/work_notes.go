@@ -89,6 +89,13 @@ func (b *Board) WorkItem(id string) (WorkItem, bool) {
 	return item.snapshot(), true
 }
 
+func (h *Handoff) clone() *Handoff {
+	out := *h
+	out.Done, out.Remaining = slices.Clone(h.Done), slices.Clone(h.Remaining)
+	out.Decisions, out.Uncertain = slices.Clone(h.Decisions), slices.Clone(h.Uncertain)
+	return &out
+}
+
 func (item *WorkItem) snapshot() WorkItem {
 	out := *item
 	out.DependsOn = slices.Clone(item.DependsOn)
@@ -96,10 +103,7 @@ func (item *WorkItem) snapshot() WorkItem {
 	out.Labels = slices.Clone(item.Labels)
 	out.Timeline = slices.Clone(item.Timeline)
 	if item.Handoff != nil {
-		h := *item.Handoff
-		h.Done, h.Remaining = slices.Clone(h.Done), slices.Clone(h.Remaining)
-		h.Decisions, h.Uncertain = slices.Clone(h.Decisions), slices.Clone(h.Uncertain)
-		out.Handoff = &h
+		out.Handoff = item.Handoff.clone()
 	}
 	if item.Park != nil {
 		park := item.Park.clone()

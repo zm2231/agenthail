@@ -23,6 +23,8 @@ func TestASessionsStatusSortsItsWorkAndNamesARejection(t *testing.T) {
 		work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: id})
 	}
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkLog, ItemID: "widget-W1", Text: "chose sqlite", LogType: "decision"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkHandoff, ItemID: "widget-W1", Handoff: ledger.Handoff{Remaining: []string{"the migration"}}})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W1"})
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkBlock, ItemID: "widget-W2", Reason: "waiting on the schema review"})
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkSubmit, ItemID: "widget-W3"})
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkReject, ItemID: "widget-W3", SessionID: "reviewer", Reason: "no tests for the empty query"})
@@ -45,6 +47,10 @@ func TestASessionsStatusSortsItsWorkAndNamesARejection(t *testing.T) {
 	}
 	if status.Holding[0].LastLog == nil || status.Holding[0].LastLog.Text != "chose sqlite" || status.Waiting[0].Reason != "waiting on the schema review" {
 		t.Fatalf("holding %+v waiting %+v", status.Holding[0], status.Waiting[0])
+	}
+	status.Holding[0].Handoff.Remaining[0] = "changed by a reader"
+	if item, _ := board(t, s).WorkItem("widget-W1"); item.Handoff == nil || item.Handoff.Remaining[0] != "the migration" {
+		t.Fatalf("a status row shares the board's handoff: %+v", item.Handoff)
 	}
 
 	held := board(t, s).HeldBy("s1")

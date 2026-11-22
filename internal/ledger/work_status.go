@@ -105,8 +105,7 @@ func (b *Board) statusRow(item *WorkItem) StatusRow {
 		row.LastLog = &clipped
 	}
 	if item.Handoff != nil {
-		handoff := *item.Handoff
-		row.Handoff = &handoff
+		row.Handoff = item.Handoff.clone()
 	}
 	return row
 }

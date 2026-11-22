@@ -15,7 +15,7 @@ import (
 
 type mcpLedgerInput struct {
 	View    string `json:"view,omitempty" jsonschema:"board (capture, sync, counts, goals and the newest provisional words; the default), goals, asks, decisions, questions, work, ready (the next work, ranked), backlog (parked work, ready first), triage (unowned work idle 14 days), item (one work item or ask with its context, by id), status (your work and what to take next, or the session id names), or words (one captured message with its context, by utterance id)"`
-	ID      string `json:"id,omitempty" jsonschema:"the work item, work action or ask id for item; the utterance id for words"`
+	ID      string `json:"id,omitempty" jsonschema:"the work item, work action or ask id for item; the utterance id for words; the session for status, you by default"`
 	Context int    `json:"context,omitempty" jsonschema:"words: also this many turns before and after it, 0 to 5, read on the capturing host"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"entries per page, 1 to 100 (ready: 1 to 50); default 25"`
 	Cursor  string `json:"cursor,omitempty" jsonschema:"nextCursor from a previous call"`
