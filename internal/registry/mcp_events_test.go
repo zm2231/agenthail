@@ -47,9 +47,6 @@ func TestADeliveryBegunBeforeARefreshCannotUndoIt(t *testing.T) {
 	if fresh.ID != old.ID || fresh.Generation == old.Generation {
 		t.Fatalf("old=%+v fresh=%+v, want the same id under a new generation", old, fresh)
 	}
-	if err := r.DeferEvent(old.ID, old.Generation, time.Now().Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
 	for range 3 {
 		if _, err := r.EventFailed(old.ID, old.Generation, 3); err != nil {
 			t.Fatal(err)
@@ -67,7 +64,13 @@ func TestADeliveryBegunBeforeARefreshCannotUndoIt(t *testing.T) {
 	}
 	due, err := r.DueEvents(time.Now(), time.Hour)
 	if err != nil || len(due) != 1 || due[0].ID != fresh.ID {
-		t.Fatalf("due=%+v err=%v, want the fresh subscription despite a stale deferral", due, err)
+		t.Fatalf("due=%+v err=%v, want the fresh subscription despite stale failures", due, err)
+	}
+	if err := r.DeferEvent(old.ID, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if due, err := r.DueEvents(time.Now(), time.Hour); err != nil || len(due) != 0 {
+		t.Fatalf("due=%+v err=%v, want the endpoint's Retry-After to hold the refreshed subscription", due, err)
 	}
 }
 
@@ -111,5 +114,34 @@ func TestAnUpgradeKeepsAnEventSubscriptionThatWasSetToExpire(t *testing.T) {
 	var refused *UnknownMigrationsError
 	if _, err := Open(path); !errors.As(err, &refused) || !strings.Contains(err.Error(), "2026-11-21-event-subscriptions-never-expire") {
 		t.Fatalf("a build without the migration opened the upgraded registry: %v", err)
+	}
+}
+
+func TestASubscriptionToldAfterTheDueListWasReadIsNoLongerDue(t *testing.T) {
+	r, subscribe := eventSubscriber(t)
+	sub, err := subscribe(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, uuid := range []string{"a", "b"} {
+		if _, _, err := r.StoreInboxMessage(InboxMessage{Identity: sub.IdentityID, UUID: uuid, Message: uuid}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	listed, err := r.DueEvents(time.Now(), time.Hour)
+	if err != nil || len(listed) != 1 || listed[0].Unread != 2 {
+		t.Fatalf("due=%+v err=%v", listed, err)
+	}
+	if err := r.EventDelivered(sub.ID, sub.Generation, listed[0].Newest); err != nil {
+		t.Fatal(err)
+	}
+	if due, still, err := r.DueEvent(sub.ID, time.Now(), time.Hour); err != nil || still {
+		t.Fatalf("after the delivery: %+v due=%v err=%v, want it told", due, still, err)
+	}
+	if _, _, err := r.StoreInboxMessage(InboxMessage{Identity: sub.IdentityID, UUID: "c", Message: "c"}); err != nil {
+		t.Fatal(err)
+	}
+	if due, still, err := r.DueEvent(sub.ID, time.Now(), time.Hour); err != nil || !still || due.Unread != 3 {
+		t.Fatalf("after new mail: %+v due=%v err=%v, want 3 unread", due, still, err)
 	}
 }

@@ -50,6 +50,9 @@ func (d *Daemon) runEventDeliveries(ctx context.Context) {
 		if err != nil {
 			d.logRuntimeError("event deliveries", err)
 		}
+		if m.afterDueRead != nil {
+			m.afterDueRead()
+		}
 		mu.Lock()
 		for _, event := range due {
 			if inFlight[event.ID] || len(inFlight) >= eventDeliveries {
@@ -59,7 +62,7 @@ func (d *Daemon) runEventDeliveries(ctx context.Context) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				m.deliverEvent(ctx, event)
+				m.deliverEvent(ctx, event.ID)
 				mu.Lock()
 				delete(inFlight, event.ID)
 				mu.Unlock()
@@ -81,7 +84,15 @@ func retryable(status int) bool {
 	return status == 0 || status == http.StatusRequestTimeout || status == http.StatusTooEarly || status == http.StatusTooManyRequests || status >= 500
 }
 
-func (m *remoteMCP) deliverEvent(ctx context.Context, event registry.DueEvent) {
+func (m *remoteMCP) deliverEvent(ctx context.Context, id string) {
+	event, due, err := m.d.Registry.DueEvent(id, time.Now(), m.eventTrialEvery)
+	if err != nil {
+		m.d.logRuntimeError("event deliveries", err)
+		return
+	}
+	if !due {
+		return
+	}
 	occurrence := eventOccurrence{EventID: "evt_" + uuid.NewString(), Name: event.Name, Timestamp: time.Now().UTC().Format(time.RFC3339), Data: map[string]int{"unread": event.Unread}}
 	body, err := json.Marshal(occurrence)
 	if err != nil {
@@ -143,7 +154,7 @@ func (m *remoteMCP) deliverEvent(ctx context.Context, event registry.DueEvent) {
 				continue
 			}
 			until := time.Now().Add(reply.retryAfter)
-			if err := m.d.Registry.DeferEvent(sub.ID, sub.Generation, until); err != nil {
+			if err := m.d.Registry.DeferEvent(sub.ID, until); err != nil {
 				m.d.logRuntimeError("event deliveries", err)
 			}
 			m.recordEvent(sub.IdentityID, sub.URL, fmt.Sprintf("deferred %s until %s, as the endpoint asked: %s", occurrence.EventID, until.UTC().Format(time.RFC3339), reason))
