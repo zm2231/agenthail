@@ -15,6 +15,7 @@ type remoteMCPHealth struct {
 	Keys       registry.AccessKeys       `json:"keys"`
 	Identities []registry.RemoteIdentity `json:"identities"`
 	Unread     map[string]int            `json:"unread"`
+	OAuth      oauthStatus               `json:"oauth"`
 	Problems   []string                  `json:"problems"`
 }
 
@@ -26,6 +27,12 @@ func remoteMCPHealthOf(r *registry.Registry, now time.Time) (remoteMCPHealth, er
 	}
 	if health.Identities, err = r.RemoteIdentities(); err != nil {
 		return health, err
+	}
+	if health.OAuth, err = oauthStatusOf(r); err != nil {
+		return health, err
+	}
+	if health.OAuth.Blocked != "" {
+		health.Problems = append(health.Problems, "OAuth is set to "+health.OAuth.Issuer+", but "+health.OAuth.Blocked)
 	}
 	for _, identity := range health.Identities {
 		if unread, err := r.UnreadInbox(identity.Name); err == nil {
@@ -68,7 +75,11 @@ func (h remoteMCPHealth) String() string {
 	case "off":
 		lines = append(lines, "remote mcp: off (no identity has remote access)")
 	case "token only":
-		lines = append(lines, "remote mcp: token only (no Access settings); publish only /mcp to it")
+		published := "/mcp"
+		if h.OAuth.Served {
+			published = "/mcp and the OAuth paths"
+		}
+		lines = append(lines, "remote mcp: token only (no Access settings); publish only "+published+" to it")
 	default:
 		keys := "keys never read"
 		if !h.Keys.ReadAt.IsZero() {
@@ -78,6 +89,9 @@ func (h remoteMCPHealth) String() string {
 	}
 	for _, identity := range h.Identities {
 		lines = append(lines, fmt.Sprintf("  @%s: %s, last seen %s, %d unread", identity.Name, identity.Binding(), lastSeen(identity.LastSeen), h.Unread[identity.Name]))
+	}
+	if h.OAuth.Served {
+		lines = append(lines, "  "+strings.ReplaceAll(h.OAuth.String(), "\n", "\n  "))
 	}
 	for _, problem := range h.Problems {
 		lines = append(lines, "  problem: "+problem)

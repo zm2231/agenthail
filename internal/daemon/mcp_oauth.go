@@ -19,8 +19,6 @@ const (
 	oauthAuthorizationLife  = 10 * time.Minute
 	oauthCodeLife           = time.Minute
 	oauthOpenAuthorizations = 8
-	// oauthPastAccess admits OAuth clients, which cannot carry an Access credential, when Access settings are set.
-	oauthPastAccess = false
 )
 
 var oauthLife = registry.OAuthLifetimes{Access: time.Hour, Refresh: 30 * 24 * time.Hour}
@@ -44,7 +42,7 @@ func (d *Daemon) oauthIssuer() string {
 	if !on {
 		return ""
 	}
-	if !oauthPastAccess {
+	if !mcpoauth.PastAccess {
 		_, _, access, err := d.Registry.AccessSettings()
 		if err != nil || access {
 			return ""

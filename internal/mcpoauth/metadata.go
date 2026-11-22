@@ -18,6 +18,9 @@ const (
 	RevokePath            = "/oauth/revoke"
 )
 
+// PastAccess admits OAuth clients, which cannot carry an Access credential, while Access settings are set.
+const PastAccess = false
+
 var Paths = []string{ProtectedResourcePath, ProtectedResourcePath + ResourcePath, AuthServerPath, AuthorizePath, TokenPath, RegisterPath, RevokePath}
 
 func ResourceMetadataURL(issuer string) string { return issuer + ProtectedResourcePath + ResourcePath }

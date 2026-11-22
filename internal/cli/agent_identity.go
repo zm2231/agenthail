@@ -13,7 +13,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const identityUsage = "usage: agenthail identity <add <name>|rm <name>|list|remote <name> ...|access ...> [--json]"
+const identityUsage = "usage: agenthail identity <add <name>|rm <name>|list|remote <name> ...|access ...|oauth ...> [--json]"
 
 func (a *App) cmdIdentity(args []string) error {
 	positional := stripFlags(args)
@@ -67,8 +67,16 @@ func (a *App) cmdIdentity(args []string) error {
 		for _, remote := range remotes {
 			remoteByName[remote.Name] = remote
 		}
+		grants, err := reg.OAuthGrants()
+		if err != nil {
+			return err
+		}
+		clientsOf := map[string][]string{}
+		for _, grant := range grants {
+			clientsOf[grant.Identity] = append(clientsOf[grant.Identity], grant.ClientName)
+		}
 		if jsonOut {
-			return emit(map[string]any{"identities": identities, "remote": remotes})
+			return emit(map[string]any{"identities": identities, "remote": remotes, "oauthGrants": grants})
 		}
 		if len(identities) == 0 {
 			fmt.Println("(no identities; add one with: agenthail identity add <name>)")
@@ -79,6 +87,9 @@ func (a *App) cmdIdentity(args []string) error {
 			if remote, ok := remoteByName[identity.Name]; ok {
 				line += "  remote: " + remote.Binding() + ", last seen " + lastSeen(remote.LastSeen)
 			}
+			if clients := clientsOf[identity.Name]; len(clients) > 0 {
+				line += "  oauth: " + strings.Join(clients, ", ")
+			}
 			fmt.Println(line)
 		}
 		return nil
@@ -86,6 +97,8 @@ func (a *App) cmdIdentity(args []string) error {
 		return a.identityRemote(reg, positional, args, jsonOut)
 	case "access":
 		return identityAccess(reg, positional, args, jsonOut)
+	case "oauth":
+		return identityOAuth(reg, positional, args, jsonOut)
 	}
 	return errors.New(identityUsage)
 }
