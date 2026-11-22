@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import os
 
 @MainActor
 final class InterfaceStore: ObservableObject {
@@ -12,6 +13,8 @@ final class InterfaceStore: ObservableObject {
     private var overlay: [String: UIConfig.Value] = [:]
     private var loadTask: Task<Void, Never>?
     private var textScaleWrite: Task<Void, Never>?
+    private var generation = 0
+    private static let signposter = OSSignposter(subsystem: "com.agenthail.app", category: "Appearance")
 
     static var device: String { Host.current().localizedName ?? "" }
 
@@ -65,29 +68,60 @@ final class InterfaceStore: ObservableObject {
     }
 
     private func adopt(_ loaded: UIConfig, api: AgenthailAPI) async -> String? {
-        var problem: String?
-        var images: [String: WallpaperImage] = [:]
-        let maxPixels = Int(NSScreen.screens.map { max($0.frame.width, $0.frame.height) * $0.backingScaleFactor }.max() ?? 2880)
-        for path in loaded.imagePaths {
-            if let kept = wallpapers[path] {
-                images[path] = kept
-                continue
+        generation += 1
+        let current = generation
+        let signpost = Self.signposter.makeSignpostID()
+        let interval = Self.signposter.beginInterval("Appearance load", id: signpost)
+        defer { Self.signposter.endInterval("Appearance load", interval) }
+        let active = Self.prefersDark(loaded)
+        var next: [String: WallpaperImage] = [:]
+        for dark in [active, !active] {
+            guard case .image(let path) = loaded.background(dark: dark), next[path] == nil else { continue }
+            if let real = wallpapers.values.first(where: { $0.id == path }) {
+                next[path] = real
+            } else if case .image(let shown) = base.background(dark: dark), let image = wallpapers[shown] {
+                next[path] = image
             }
+        }
+        if next != wallpapers { wallpapers = next }
+        base = loaded
+        publish()
+        Self.signposter.emitEvent("Config applied", id: signpost)
+        var problem: String?
+        let maxPixels = Int(NSScreen.screens.map { max($0.frame.width, $0.frame.height) * $0.backingScaleFactor }.max() ?? 2880)
+        for path in Self.fetchOrder(loaded, dark: active) where wallpapers[path]?.id != path {
             do {
                 let data = try await api.uiBackground(path: path)
-                if let decoded = await Task.detached(operation: { WallpaperImage.decode(data, id: path, maxPixels: maxPixels) }).value {
-                    images[path] = decoded
-                } else {
+                let decoded = await Task.detached(operation: { WallpaperImage.decode(data, id: path, maxPixels: maxPixels) }).value
+                guard current == generation else { return problem }
+                guard let decoded else {
                     problem = "The background image \(path) can't be read."
+                    continue
                 }
+                guard base.imagePaths.contains(path) else { continue }
+                wallpapers[path] = decoded
+                let side = loaded.background(dark: active) == .image(path: path) ? "active" : "inactive"
+                Self.signposter.emitEvent("Wallpaper applied", id: signpost, "\(side, privacy: .public)")
             } catch {
+                if current != generation || error.isCancellation { return problem }
                 problem = AgenthailAPIError.userMessage(error)
             }
         }
-        if images != wallpapers { wallpapers = images }
-        base = loaded
-        publish()
         return problem
+    }
+
+    static func prefersDark(_ config: UIConfig) -> Bool {
+        switch config.theme {
+        case "dark": return true
+        case "light": return false
+        default: return NSApp?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        }
+    }
+
+    static func fetchOrder(_ config: UIConfig, dark: Bool) -> [String] {
+        var paths: [String] = []
+        for case .image(let path) in [config.background(dark: dark), config.background(dark: !dark)] where !paths.contains(path) { paths.append(path) }
+        return paths
     }
 
     private func publish() {

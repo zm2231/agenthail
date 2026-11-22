@@ -28,6 +28,17 @@ struct AppearanceSettings: View {
     var body: some View {
         Form {
             UIConfigProblems(problems: config.problems)
+            if let problem = interface.problem {
+                Section {
+                    Label {
+                        Text(problem)
+                            .textSelection(.enabled)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundStyle(DesktopPalette.text2)
+                    }
+                }
+            }
             Section {
                 Picker("Apply changes to", selection: $draft.scope) {
                     Text("All devices").tag(AppearanceDraft.Scope.everywhere)

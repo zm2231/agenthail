@@ -1,4 +1,5 @@
 import CryptoKit
+import os
 import SwiftUI
 import UIKit
 
@@ -43,7 +44,9 @@ final class PhoneAppearance: ObservableObject {
     private var recent: [Key] = []
     private static let keptRenders = 6
     private var loadTask: Task<Void, Never>?
+    private var loadGeneration = 0
     private let cache: URL?
+    private static let signposter = OSSignposter(subsystem: "com.agenthail.ios", category: "Appearance")
 
     init(cache: URL? = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("appearance", isDirectory: true)) {
         self.cache = cache
@@ -51,10 +54,24 @@ final class PhoneAppearance: ObservableObject {
         if let cache, let data = try? Data(contentsOf: cache.appendingPathComponent("ui.json")),
            let saved = try? JSONDecoder().decode(UIConfig.self, from: data) {
             config = saved
-            for path in saved.imagePaths {
-                if let image = try? Data(contentsOf: cache.appendingPathComponent(Self.wallpaperFile(path))) {
-                    wallpapers[path] = WallpaperImage.decode(image, id: path, maxPixels: Self.maxPixels)
+            let shown = (try? JSONDecoder().decode([String: String].self, from: Data(contentsOf: cache.appendingPathComponent("shown.json")))) ?? [:]
+            let sources = saved.imagePaths.map { ($0, shown[$0] ?? $0) }
+            let maxPixels = Self.maxPixels
+            Task { [weak self] in
+                let decoded = await Task.detached {
+                    sources.compactMap { path, source -> (String, WallpaperImage)? in
+                        guard let data = try? Data(contentsOf: cache.appendingPathComponent(Self.wallpaperFile(source))),
+                              let image = WallpaperImage.decode(data, id: source, maxPixels: maxPixels) else { return nil }
+                        return (path, image)
+                    }
+                }.value
+                guard let self else { return }
+                var filled = false
+                for (path, image) in decoded where self.wallpapers[path] == nil && self.config.imagePaths.contains(path) {
+                    self.wallpapers[path] = image
+                    filled = true
                 }
+                if filled { self.forgetRenders() }
             }
         }
     }
@@ -114,18 +131,21 @@ final class PhoneAppearance: ObservableObject {
 
     func load(from api: AgenthailAPI) {
         loadTask?.cancel()
+        loadGeneration += 1
+        let generation = loadGeneration
         loadTask = Task {
+            let signpost = Self.signposter.makeSignpostID()
+            let interval = Self.signposter.beginInterval("Appearance load", id: signpost)
+            defer { Self.signposter.endInterval("Appearance load", interval) }
             do {
                 let loaded = try await api.uiConfig(device: UIDevice.current.name, kind: Self.deviceKind)
-                if Task.isCancelled { return }
-                var wallpapers: [String: WallpaperImage] = [:]
-                var fetched: [String: Data] = [:]
+                if Task.isCancelled || generation != loadGeneration { return }
+                adopt(loaded)
+                Self.signposter.emitEvent("Config applied", id: signpost)
+                if textScaleWrite == nil { chosenTextScale = nil }
                 var unreadable: [String] = []
-                for path in loaded.imagePaths {
-                    if let kept = self.wallpapers[path] {
-                        wallpapers[path] = kept
-                        continue
-                    }
+                let active = Self.prefersDark(loaded)
+                for path in Self.fetchOrder(loaded, dark: active) where wallpapers[path]?.id != path {
                     let data: Data
                     do {
                         data = try await api.uiBackground(path: path)
@@ -136,32 +156,60 @@ final class PhoneAppearance: ObservableObject {
                     }
                     let maxPixels = Self.maxPixels
                     let image = await Task.detached { WallpaperImage.decode(data, id: path, maxPixels: maxPixels) }.value
-                    if Task.isCancelled { return }
+                    if Task.isCancelled || generation != loadGeneration { return }
                     guard let image else {
                         unreadable.append(path)
                         continue
                     }
-                    wallpapers[path] = image
-                    fetched[path] = data
+                    land(image, for: path, data: data)
+                    let side = loaded.background(dark: active) == .image(path: path) ? "active" : "inactive"
+                    Self.signposter.emitEvent("Wallpaper applied", id: signpost, "\(side, privacy: .public)")
                 }
-                let unreadableProblem = unreadable.isEmpty ? nil : "The background image \(unreadable.joined(separator: ", ")) can't be read."
-                if !unreadable.isEmpty, wallpapers.isEmpty {
-                    self.problem = unreadableProblem
-                    return
-                }
-                if loaded != config || wallpapers != self.wallpapers {
-                    config = loaded
-                    self.wallpapers = wallpapers
-                    forgetRenders()
-                    save(loaded, wallpapers: fetched)
-                }
-                if textScaleWrite == nil { chosenTextScale = nil }
-                problem = unreadableProblem
+                problem = unreadable.isEmpty ? nil : "The background image \(unreadable.joined(separator: ", ")) can't be read."
             } catch {
                 if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled { return }
                 problem = AgenthailAPIError.userMessage(error)
             }
         }
+    }
+
+    static func prefersDark(_ config: UIConfig) -> Bool {
+        switch config.theme {
+        case "dark": return true
+        case "light": return false
+        default: return UITraitCollection.current.userInterfaceStyle == .dark
+        }
+    }
+
+    static func fetchOrder(_ config: UIConfig, dark: Bool) -> [String] {
+        var paths: [String] = []
+        for case .image(let path) in [config.background(dark: dark), config.background(dark: !dark)] where !paths.contains(path) { paths.append(path) }
+        return paths
+    }
+
+    private func adopt(_ loaded: UIConfig) {
+        let active = Self.prefersDark(loaded)
+        var next: [String: WallpaperImage] = [:]
+        for dark in [active, !active] {
+            guard case .image(let path) = loaded.background(dark: dark), next[path] == nil else { continue }
+            if let real = wallpapers.values.first(where: { $0.id == path }) {
+                next[path] = real
+            } else if case .image(let shown) = config.background(dark: dark), let image = wallpapers[shown] {
+                next[path] = image
+            }
+        }
+        guard loaded != config || next != wallpapers else { return }
+        config = loaded
+        wallpapers = next
+        forgetRenders()
+        save(loaded, wallpapers: [:])
+    }
+
+    private func land(_ image: WallpaperImage, for path: String, data: Data) {
+        guard config.imagePaths.contains(path) else { return }
+        wallpapers[path] = image
+        forgetRenders()
+        save(config, wallpapers: [path: data])
     }
 
     func preview(_ config: UIConfig, wallpapers: [WallpaperImage] = []) {
@@ -182,7 +230,8 @@ final class PhoneAppearance: ObservableObject {
         guard let cache else { return }
         let files = FileManager.default
         try? files.createDirectory(at: cache, withIntermediateDirectories: true)
-        let kept = Set(config.imagePaths.map(Self.wallpaperFile))
+        let shown = Dictionary(config.imagePaths.compactMap { path in wallpapers[path].map { (path, $0.id) } }, uniquingKeysWith: { first, _ in first })
+        let kept = Set((config.imagePaths + shown.values).map(Self.wallpaperFile))
         for file in (try? files.contentsOfDirectory(at: cache, includingPropertiesForKeys: nil)) ?? [] {
             let name = file.lastPathComponent
             if file.pathExtension == "png" || name.hasSuffix(".facts.json") || (name.hasPrefix("wallpaper") && !kept.contains(name)) {
@@ -193,14 +242,15 @@ final class PhoneAppearance: ObservableObject {
             try? data.write(to: cache.appendingPathComponent(Self.wallpaperFile(path)), options: .atomic)
         }
         try? JSONEncoder().encode(config).write(to: cache.appendingPathComponent("ui.json"), options: .atomic)
+        try? JSONEncoder().encode(shown.filter { $0.key != $0.value }).write(to: cache.appendingPathComponent("shown.json"), options: .atomic)
     }
 
-    private static func wallpaperFile(_ path: String) -> String {
+    nonisolated private static func wallpaperFile(_ path: String) -> String {
         "wallpaper-" + SHA256.hash(data: Data(path.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     private func wallpaperID(dark: Bool) -> String {
-        if case .image(let path) = config.background(dark: dark) { return wallpapers[path] == nil ? "missing:" + path : path }
+        if case .image(let path) = config.background(dark: dark) { return wallpapers[path]?.id ?? "missing:" + path }
         return ""
     }
 
@@ -583,6 +633,12 @@ struct PhoneTextSizeSection: View {
     }
 
     var body: some View {
+        if let problem = appearance.problem {
+            Section("Appearance") {
+                Label(problem, systemImage: "exclamationmark.triangle")
+                    .accessibilityIdentifier("appearance-problem")
+            }
+        }
         Section {
             Stepper(value: Binding(get: { appearance.textScale }, set: { model.setTextScale($0) }), in: 0.8...1.6, step: 0.1) {
                 LabeledContent("Text size", value: "\(Int((appearance.textScale * 100).rounded()))%")
