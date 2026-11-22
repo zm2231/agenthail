@@ -77,6 +77,14 @@
         #expect(wide.table > 200)
       }
 
+      @Test func wideningTheSameTableFollowsTheNewColumnWidth() throws {
+        let widened = measure(.wholeWords, width: 200) { $0.width = 760 }
+        let wide = measure(.wholeWords, width: 760)
+
+        #expect(widened.settled == wide.settled)
+        #expect(widened.table <= 760)
+      }
+
       @Test func aLargerFontOrALongerWordWidensTheSameTable() throws {
         let larger = measure(.wholeWords, width: 200) { $0.fontSize = 26 }
         let freshLarger = measure(.wholeWords, width: 200, fontSize: 26)
