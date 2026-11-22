@@ -6,7 +6,12 @@ import (
 	"path/filepath"
 )
 
-const DefaultIdleCompactionMinTokens = 200_000
+const (
+	DefaultIdleCompactionMinTokens = 200_000
+	DefaultPreLimitPercent         = 90
+	minPreLimitPercent             = 50
+	maxPreLimitPercent             = 97
+)
 
 // IdleCompaction is Agenthail's own compaction of an idle Claude session under
 // a config root, kept in the Agenthail config because Claude's own
@@ -14,11 +19,13 @@ const DefaultIdleCompactionMinTokens = 200_000
 type IdleCompaction struct {
 	Enabled          bool  `json:"enabled"`
 	MinContextTokens int64 `json:"minContextTokens"`
+	PreLimitPercent  int   `json:"preLimitPercent"`
 }
 
 type idleCompactionEntry struct {
 	Enabled          *bool  `json:"enabled,omitempty"`
 	MinContextTokens *int64 `json:"minContextTokens,omitempty"`
+	PreLimitPercent  *int   `json:"preLimitPercent,omitempty"`
 }
 
 const idleCompactionKey = "claudeIdleCompaction"
@@ -28,7 +35,7 @@ func ReadIdleCompaction(home, root string) (IdleCompaction, error) {
 	if err != nil {
 		return IdleCompaction{}, err
 	}
-	settings := IdleCompaction{Enabled: true, MinContextTokens: DefaultIdleCompactionMinTokens}
+	settings := IdleCompaction{Enabled: true, MinContextTokens: DefaultIdleCompactionMinTokens, PreLimitPercent: DefaultPreLimitPercent}
 	if key, ok := idleCompactionEntryKey(entries, root); ok {
 		entry := entries[key]
 		if entry.Enabled != nil {
@@ -37,15 +44,18 @@ func ReadIdleCompaction(home, root string) (IdleCompaction, error) {
 		if entry.MinContextTokens != nil {
 			settings.MinContextTokens = *entry.MinContextTokens
 		}
+		if entry.PreLimitPercent != nil {
+			settings.PreLimitPercent = *entry.PreLimitPercent
+		}
 	}
 	return settings, nil
 }
 
-func writeIdleCompaction(home, root string, enabled *bool, minTokens *int64) error {
-	if enabled == nil && minTokens == nil {
+func writeIdleCompaction(home, root string, change ClaudeCompactChange) error {
+	if change.AgenthailIdle == nil && change.AgenthailIdleMinTokens == nil && change.AgenthailPreLimitPercent == nil {
 		return nil
 	}
-	if err := validIdleCompactionMinTokens(minTokens); err != nil {
+	if err := validIdleCompaction(change); err != nil {
 		return err
 	}
 	config, err := ReadAgenthailConfig(home)
@@ -64,11 +74,14 @@ func writeIdleCompaction(home, root string, enabled *bool, minTokens *int64) err
 		key = filepath.Clean(root)
 	}
 	entry := entries[key]
-	if enabled != nil {
-		entry.Enabled = enabled
+	if change.AgenthailIdle != nil {
+		entry.Enabled = change.AgenthailIdle
 	}
-	if minTokens != nil {
-		entry.MinContextTokens = minTokens
+	if change.AgenthailIdleMinTokens != nil {
+		entry.MinContextTokens = change.AgenthailIdleMinTokens
+	}
+	if change.AgenthailPreLimitPercent != nil {
+		entry.PreLimitPercent = change.AgenthailPreLimitPercent
 	}
 	entries[key] = entry
 	raw, err := json.Marshal(entries)
@@ -79,9 +92,12 @@ func writeIdleCompaction(home, root string, enabled *bool, minTokens *int64) err
 	return WriteAgenthailConfig(home, config)
 }
 
-func validIdleCompactionMinTokens(minTokens *int64) error {
-	if minTokens != nil && (*minTokens < ClaudeAutoCompactMinTokens || *minTokens > ClaudeAutoCompactMaxTokens) {
+func validIdleCompaction(change ClaudeCompactChange) error {
+	if minTokens := change.AgenthailIdleMinTokens; minTokens != nil && (*minTokens < ClaudeAutoCompactMinTokens || *minTokens > ClaudeAutoCompactMaxTokens) {
 		return fmt.Errorf("the idle compaction threshold must be a token count from %d to %d; got %d", ClaudeAutoCompactMinTokens, ClaudeAutoCompactMaxTokens, *minTokens)
+	}
+	if percent := change.AgenthailPreLimitPercent; percent != nil && *percent != 0 && (*percent < minPreLimitPercent || *percent > maxPreLimitPercent) {
+		return fmt.Errorf("compaction before a usage limit starts at a percent from %d to %d, or 0 for off; got %d", minPreLimitPercent, maxPreLimitPercent, *percent)
 	}
 	return nil
 }
@@ -101,7 +117,7 @@ func parseIdleCompaction(home string, config map[string]json.RawMessage) (map[st
 	}
 	var entries map[string]idleCompactionEntry
 	if err := json.Unmarshal(raw, &entries); err != nil {
-		return nil, fmt.Errorf("Agenthail config %s: %s must map each Claude config root to {\"enabled\", \"minContextTokens\"}", AgenthailConfigPath(home), idleCompactionKey)
+		return nil, fmt.Errorf("Agenthail config %s: %s must map each Claude config root to {\"enabled\", \"minContextTokens\", \"preLimitPercent\"}", AgenthailConfigPath(home), idleCompactionKey)
 	}
 	return entries, nil
 }

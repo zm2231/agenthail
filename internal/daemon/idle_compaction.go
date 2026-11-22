@@ -69,9 +69,11 @@ type idleLook struct {
 // session that shows one but is held, such as one still marked busy, ended,
 // or under a root at its usage limit, has the first hold recorded once per
 // request. A usage limit anywhere under a config root holds the root's
-// sessions, since the compact would be refused too; being near the limit does
-// not. A session a retiring Claude host runs is kept there while it could
-// still be compacted and released otherwise.
+// sessions, since the compact would be refused too. Under a root near its
+// limit, one warm session at a time compacts before the 50 minutes, largest
+// first, when the cache would expire before the reset. A session a retiring
+// Claude host runs is kept there while it could still be compacted and
+// released otherwise.
 func (d *Daemon) compactIdle(ctx context.Context, now time.Time, read map[string]idleTranscript) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -91,6 +93,7 @@ func (d *Daemon) compactIdle(ctx context.Context, now time.Time, read map[string
 	retiring := d.leavingClaudeSessions(ctx)
 	settings := map[string]surface.IdleCompaction{}
 	seen, listed, decided := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	preLimit := d.newPreLimitPass(sessions, now)
 	for i := range sessions {
 		if ctx.Err() != nil {
 			return
@@ -111,12 +114,21 @@ func (d *Daemon) compactIdle(ctx context.Context, now time.Time, read map[string
 		}
 		state := look.state
 		idle := now.Sub(state.LastRequestAt)
-		if idle < idleCompactionAfter || !idleCompactionWorthy(state, look.settings) {
+		if !idleCompactionWorthy(state, look.settings) {
 			continue
 		}
 		hold := "the session has ended"
 		if !session.Ended {
 			hold = idleCompactionHold(session, look.settings, refused[look.root], surface.EffectiveCapabilities(look.adapter, session).Compact)
+		}
+		if idle < idleCompactionAfter {
+			if hold == "" {
+				preLimit.add(look.root, preLimitCandidate{session: session, look: look})
+			}
+			continue
+		}
+		if hold == "" {
+			hold = preLimit.hold(look.root, look.settings)
 		}
 		if hold == "" {
 			outcome, err := d.Registry.QueueIdleCompaction(session.ID, state.LastRequestAt)
@@ -126,6 +138,7 @@ func (d *Daemon) compactIdle(ctx context.Context, now time.Time, read map[string
 			}
 			switch outcome {
 			case registry.IdleCompactionQueued:
+				preLimit.queued(look.root)
 				d.log.Printf("queued idle compaction for %s at %d tokens, idle %s", d.resolveDisplay(session.ID), state.ContextTokens, idle.Round(time.Minute))
 				continue
 			case registry.IdleCompactionAttempted:
@@ -137,6 +150,7 @@ func (d *Daemon) compactIdle(ctx context.Context, now time.Time, read map[string
 			d.log.Printf("idle compaction held for %s at %d tokens, idle %s: %s", d.resolveDisplay(held.SessionID), held.ContextTokens, idle.Round(time.Minute), held.Reason)
 		})
 	}
+	preLimit.run()
 	for id, host := range retiring {
 		if !decided[id] {
 			d.decideRetiring(ctx, host, &surface.Session{ID: id}, idleLook{why: "Agenthail has no transcript for it"}, false)

@@ -121,7 +121,11 @@ own idle compaction for the root, kept in `~/.agenthail/config.json`: about 50
 minutes after a Claude session's last request, while its one-hour prompt cache
 is still warm, the daemon queues a `/compact` for a session with at least that
 many context tokens (200000 by default) and nothing queued or running, unless
-the root's account is at a usage limit. It applies to running sessions at once.
+the root's account is at a usage limit. `--agenthail-prelimit <percent|off>`
+(90 by default) compacts sooner when the root nears its usage limit: once its
+5-hour or weekly window, or its proxy's fill, reaches that percent, the largest
+such session whose cache would expire before the reset compacts first, one at
+a time. It applies to running sessions at once.
 Under each root, the read also lists the latest sessions the daemon found due
 but did not compact, and why (`not compacted: <session> at <tokens> tokens,
 <when>: <reason>`); `--json` has them as `idleCompactionHolds`. The roots are those of the machine the command runs on; each host's settings

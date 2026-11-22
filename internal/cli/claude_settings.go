@@ -10,7 +10,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const claudeSettingsUsage = "usage: agenthail claude settings compact [--root <path|name>] [--model <model>] [<tokens|auto|unset>] [--enabled on|off] [--idle on|off] [--agenthail-idle on|off] [--agenthail-idle-min <tokens>] [--json]"
+const claudeSettingsUsage = "usage: agenthail claude settings compact [--root <path|name>] [--model <model>] [<tokens|auto|unset>] [--enabled on|off] [--idle on|off] [--agenthail-idle on|off] [--agenthail-idle-min <tokens>] [--agenthail-prelimit <percent|off>] [--json]"
 
 func (a *App) cmdClaude(args []string) error {
 	positional := stripFlags(args)
@@ -45,6 +45,17 @@ func (a *App) cmdClaude(args []string) error {
 			return fmt.Errorf("--agenthail-idle-min takes a token count\n%s", claudeSettingsUsage)
 		}
 		change.AgenthailIdleMinTokens = &tokens
+	}
+	if hasFlag(args, "--agenthail-prelimit") {
+		value := flagVal(args, "--agenthail-prelimit")
+		percent, err := strconv.Atoi(value)
+		if value == "off" {
+			percent, err = 0, nil
+		}
+		if err != nil {
+			return fmt.Errorf("--agenthail-prelimit takes a percent or off\n%s", claudeSettingsUsage)
+		}
+		change.AgenthailPreLimitPercent = &percent
 	}
 	changing := change.Changes()
 	var roots []string
@@ -113,8 +124,11 @@ func describeClaudeCompactSettings(settings surface.ClaudeCompactSettings) strin
 	}
 	lines = append(lines, "  autoCompactEnabled: "+describeClaudeSettingBool(settings.AutoCompactEnabled), "  idleCompaction: "+describeClaudeSettingBool(settings.IdleCompaction))
 	agenthailIdle := "off"
-	if settings.AgenthailIdle.Enabled {
-		agenthailIdle = fmt.Sprintf("on, from %d tokens", settings.AgenthailIdle.MinContextTokens)
+	if idle := settings.AgenthailIdle; idle.Enabled {
+		agenthailIdle = fmt.Sprintf("on, from %d tokens; before a usage limit: off", idle.MinContextTokens)
+		if idle.PreLimitPercent > 0 {
+			agenthailIdle = fmt.Sprintf("on, from %d tokens; before a usage limit: from %d%%", idle.MinContextTokens, idle.PreLimitPercent)
+		}
 	}
 	lines = append(lines, "  Agenthail idle compaction: "+agenthailIdle)
 	names := make([]string, 0, len(settings.Overrides))
