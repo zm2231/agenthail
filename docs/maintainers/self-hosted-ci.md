@@ -1,6 +1,6 @@
 # Self-hosted CI runners
 
-Pull requests from branches in this repository run `verify` and `ios` on self-hosted Mac runners labelled `agenthail`, and `package` and `installer` in disposable macOS virtual machines labelled `agenthail-vm`. Pull requests from forks run all of these jobs on GitHub-hosted runners. `ios-release` always runs on a GitHub-hosted runner: for a branch in this repository it signs, archives and exports the iPhone app and its notification service with the release credentials, without uploading, and that makes a temporary signing keychain the runner's default.
+Pull requests from branches in this repository run `verify` and `ios` on self-hosted Mac runners labelled `agenthail`; pull requests from forks run them on GitHub-hosted runners. `package` and `installer` run on GitHub-hosted `macos-26` runners for every pull request and push. They install the package system-wide with `sudo`, register a LaunchAgent and launch the app, which a disposable hosted runner allows, and they do not compete with `verify` for the self-hosted runners' CPU. `ios-release` always runs on a GitHub-hosted runner: for a branch in this repository it signs, archives and exports the iPhone app and its notification service with the release credentials, without uploading, and that makes a temporary signing keychain the runner's default.
 
 A push to `main` runs the full jobs on these runners, with `ios` when iOS inputs changed since the previous push and without `ios-release`. Every push to `main` runs to the end, even when later merges arrive while it runs, so each commit gets its own result: it shows which merge broke something, and a release can reuse the result at the commit it tags. On a pull request a newer push still replaces the earlier run. Pull requests don't have to be up to date with `main` to merge, so the run on `main` is what tests changes together; check it before tagging a release.
 
@@ -75,7 +75,9 @@ The self-hosted `ios` jobs check this setting first with `scripts/ci-crash-dialo
 
 ## Disposable VM runners
 
-`package` and `installer` install the package system-wide with `sudo`, register a LaunchAgent and launch the app, so they run in a macOS virtual machine that is created for one job and deleted afterwards. The host is never modified. macOS allows two macOS virtual machines per host, so there are at most two slots.
+No job uses these runners. When `package` and `installer` ran in them, the two VMs averaged 3.4 of the host's 14 cores and held 16 GB of its memory while `verify` ran beside them, and their jobs waited a median 18 minutes for a slot. `ci/vm` stays so the jobs can move back by setting their `runs-on` to `[self-hosted, macOS, ARM64, agenthail-vm]` and starting the supervisor again.
+
+In a VM, `package` and `installer` install the package system-wide with `sudo`, register a LaunchAgent and launch the app inside a macOS virtual machine that is created for one job and deleted afterwards. The host is never modified. macOS allows two macOS virtual machines per host, so there are at most two slots.
 
 The VMs use [Tart](https://tart.run) with Softnet networking. Softnet blocks private address ranges except the VM gateway, which is the host, so the supervisor also blocks `192.168.0.0/16`, and the image resolves DNS through public resolvers instead of the gateway. The guest reaches the internet but not the host, the local network or the tailnet.
 
