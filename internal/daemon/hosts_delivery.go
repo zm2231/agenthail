@@ -23,9 +23,9 @@ func (d *Daemon) forwardHostAction(ctx context.Context, p principal, key string,
 	if err == nil {
 		answer, readErr := readHostAnswer(host, response)
 		if readErr == nil {
-			if to := movedTo(answer); to != "" && !redirectedAfterMove(ctx) {
+			if to, seq := movedTo(answer); to != "" && !redirectedAfterMove(ctx) {
 				if sessionID, _ := request["sessionId"].(string); sessionID != "" && d.ownedBy(host, sessionID) {
-					defer d.handOverHostSession(host, sessionID, to)
+					defer d.handOverHostSession(host, sessionID, to, seq)
 				}
 				if next, found := d.pairedHost(to); found && next != host {
 					if transitErr := d.hostTransit(ctx, next); transitErr == nil {

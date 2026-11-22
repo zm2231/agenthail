@@ -72,8 +72,8 @@ func (d *Daemon) replayHostHeldAction(ctx context.Context, host *pairedHost, ite
 		unconfirmed()
 	case answer.status == http.StatusOK || answer.status == http.StatusConflict && reply.Error.Code == "conflict":
 		d.settleHostHeldAction(host, item, registry.HostActionDone, string(answer.payload))
-	case movedTo(answer) != "":
-		d.redirectHostHeldAction(host, item, movedTo(answer), reply.Error.Message)
+	case movedToHost(answer) != "":
+		d.redirectHostHeldAction(host, item, movedToHost(answer), reply.Error.Message)
 	default:
 		message := reply.Error.Message
 		if message == "" {

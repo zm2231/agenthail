@@ -194,9 +194,14 @@ connection:
 - the source's catalog stream removes the session with `movedToHost`;
 - the source's snapshot lists the sessions it moved out, with where each
   went, for a host that reconnects after a gap;
-- the source answers `moved` to a send the third host made to it directly.
+- the source answers `moved` to a send the third host made to it directly;
+- the target serves the source's signed handover (see below), for when the
+  source is gone.
 
-A `moved` answer the third host got from any other host changes nothing.
+Each of the source's words carries `handoverSeq`, the number of host
+handovers the conversation has had, and the third host keeps the highest it
+has seen. A `moved` answer the third host got from any other host changes
+nothing.
 Once the third host records the target, its held sends for the session go
 there, and it reaches the session with the source gone. It keeps the
 target's row it refused while the source still owned the session, and lists
@@ -205,10 +210,73 @@ forgets them when that host's catalog is reloaded, and drops them when the
 host is unpaired.
 
 If the third host misses all of these, for example because it was cut off
-from the source for the whole move and the source never returns, it keeps
-the session under the source. `agenthail doctor` names the sessions held for
-a host that has not answered for a day, and removing that host
-(`agenthail hosts remove <host>`) releases them.
+from the source for the whole move, the source never returns and the target
+never got the signed handover, it keeps the session under the source.
+`agenthail doctor` names the sessions held for a host that has not answered
+for a day, and removing that host (`agenthail hosts remove <host>`) releases
+them.
+
+### Signed handover
+
+The source signs the handover with its host key (see
+[hosts](hosts.md#identity)) in the transaction that makes its move `done`.
+The signed statement is these lines, joined by newlines:
+
+```
+agenthail handover v1
+<conversation>
+<source host id>
+<target host id>
+<move id>
+<handoverSeq>
+<key id>
+<signed at, Unix milliseconds>
+```
+
+`handoverSeq` is one more than the count the source held for the
+conversation; the source declares it in the move's manifest, and the target
+and the source each record it when the move lands. The source sends the
+signed handover to the target with `POST /api/v1/session-move/handover`
+right after the flip, and again each time the target reconnects, until the
+target answers. The target keeps it only for a move it records `resumed`
+from that source with the same `handoverSeq`. It keeps it after the
+handovers the source declared in the move's manifest, which are the ones the
+source was serving, so each host holds the chain of signed handovers that
+brought the session to it (its 16 newest). It serves that chain at `GET
+/api/v1/session-handover?sessionId=` (`{"handovers": [...]}`, oldest first),
+to a paired host's token, while the session runs there and arrived by its
+latest move in.
+
+A third host that refuses the target's row because the source owns the
+session asks the target for its chain, at most once a minute per row. It
+follows the chain from the owner it holds: each step it takes must leave the
+host it holds at that point, carry a higher `handoverSeq` than the count it
+holds, and check against that host's key with that id, published while the
+key was the signing key and not revoked. It takes the session over only if
+the steps end at the host serving the chain, so a third host that missed
+several moves catches up in one go, as long as it is paired with every host
+on the way.
+
+Once the source has signed, it never owns the session again:
+
+| Source state | Edge | Signs |
+| --- | --- | --- |
+| `preparing` | to `sent` once the files are archived, or `failed` when the target refuses | no |
+| `sent` | to `done` when the target answers `resumed` (status, transfer or a refused abort) | yes, in the same transaction |
+| `sent` | to `failed` only after the target records `aborted` | no |
+| `done` | none; no state follows | |
+
+| Target state | Edge | Takes a handover |
+| --- | --- | --- |
+| `prepared` | to `received` on transfer, or `aborted` | no |
+| `received` | to `resumed` on the take, or `aborted` | no |
+| `resumed` | none; an abort is refused | yes |
+| `aborted` | none | no |
+
+The source signs only on `resumed`, which the target cannot leave, and only
+in the step to `done`, which the source cannot leave. A signature for a move
+the target aborted therefore cannot be made by a working source, and if one
+were, the target would refuse it and never serve it.
 
 On the target, every request must come from a paired host's token, which has
 the `control` and `host` scopes. The token names the source; the request body

@@ -26,8 +26,10 @@ const hostsUsage = `usage: agenthail hosts [list] [--json]
        agenthail hosts add <pairing-link> [--address <host-tailscale-ip>] [--name <name>]
        agenthail hosts remove <host>
        agenthail hosts name [new-name]
+       agenthail hosts rotate-key [--revoke]
 
-Paired hosts are other Agenthail daemons, reached over Tailscale. Target their sessions as host::target.`
+Paired hosts are other Agenthail daemons, reached over Tailscale. Target their sessions as host::target.
+rotate-key makes a new key for signing session handovers; --revoke also disowns what the old key signed.`
 
 type hostRef = targets.Host
 
@@ -598,6 +600,29 @@ func (a *App) cmdHosts(args []string) error {
 			return errors.New(hostsUsage)
 		}
 		fmt.Printf("%s (%s)\n", self.Host.Name, self.Host.ID)
+		return nil
+	case "rotate-key":
+		if len(positional) != 0 {
+			return errors.New(hostsUsage)
+		}
+		revoke := hasFlag(args, "--revoke")
+		var rotated struct {
+			Key struct {
+				KeyID string `json:"keyId"`
+			} `json:"key"`
+		}
+		data, _, err := client.call(ctx, http.MethodPost, "/api/v1/host/signing-key", nil, map[string]bool{"revoke": revoke}, nil)
+		if err != nil {
+			return fmt.Errorf("rotate signing key: %w", err)
+		}
+		if err := json.Unmarshal(data, &rotated); err != nil {
+			return err
+		}
+		if revoke {
+			fmt.Printf("new signing key %s; the old key is revoked, so paired hosts no longer accept handovers it signed\n", rotated.Key.KeyID)
+		} else {
+			fmt.Printf("new signing key %s; paired hosts still accept handovers the old key signed\n", rotated.Key.KeyID)
+		}
 		return nil
 	}
 	return fmt.Errorf("unknown hosts command %q\n%s", sub, hostsUsage)

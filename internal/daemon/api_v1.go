@@ -95,17 +95,18 @@ const (
 )
 
 type apiVersionResponse struct {
-	Protocol          int    `json:"protocol"`
-	MinimumProtocol   int    `json:"minimumProtocol"`
-	MaximumProtocol   int    `json:"maximumProtocol"`
-	MinimumFederation int    `json:"minimumFederation"`
-	MaximumFederation int    `json:"maximumFederation"`
-	Authentication    string `json:"authentication"`
-	EventTransport    string `json:"eventTransport"`
-	PushRelayURL      string `json:"pushRelayUrl"`
-	HostID            string `json:"hostId"`
-	HostName          string `json:"hostName"`
-	Simulators        *bool  `json:"simulators,omitempty"`
+	Protocol          int                `json:"protocol"`
+	MinimumProtocol   int                `json:"minimumProtocol"`
+	MaximumProtocol   int                `json:"maximumProtocol"`
+	MinimumFederation int                `json:"minimumFederation"`
+	MaximumFederation int                `json:"maximumFederation"`
+	Authentication    string             `json:"authentication"`
+	EventTransport    string             `json:"eventTransport"`
+	PushRelayURL      string             `json:"pushRelayUrl"`
+	HostID            string             `json:"hostId"`
+	HostName          string             `json:"hostName"`
+	Simulators        *bool              `json:"simulators,omitempty"`
+	SigningKeys       []hosts.SigningKey `json:"signingKeys,omitempty"`
 	buildinfo.Identity
 }
 
@@ -219,7 +220,11 @@ func (d *Daemon) apiVersionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := d.hostIdentity()
-	writeDashboardJSON(w, http.StatusOK, apiVersionResponse{Protocol: apiProtocolVersion, MinimumProtocol: apiProtocolMinimum, MaximumProtocol: apiProtocolVersion, MinimumFederation: hosts.FederationVersion, MaximumFederation: hosts.FederationVersion, Authentication: "bearer", EventTransport: "sse", PushRelayURL: notify.PushRelayURL(), HostID: identity.ID, HostName: identity.Name, Simulators: d.knownSimulators(), Identity: d.build})
+	keys, err := d.Registry.HostKeys()
+	if err != nil {
+		d.log.Printf("read host signing keys: %s", err)
+	}
+	writeDashboardJSON(w, http.StatusOK, apiVersionResponse{SigningKeys: keys, Protocol: apiProtocolVersion, MinimumProtocol: apiProtocolMinimum, MaximumProtocol: apiProtocolVersion, MinimumFederation: hosts.FederationVersion, MaximumFederation: hosts.FederationVersion, Authentication: "bearer", EventTransport: "sse", PushRelayURL: notify.PushRelayURL(), HostID: identity.ID, HostName: identity.Name, Simulators: d.knownSimulators(), Identity: d.build})
 }
 
 func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {

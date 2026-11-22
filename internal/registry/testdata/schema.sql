@@ -5,6 +5,8 @@
 -- migration 2026-11-22-held-work-moves-session-views
 -- migration 2026-11-22-indexed-delivery-asks-gate
 -- migration 2026-11-22-pending-launch-creator
+-- migration 2026-11-22-signing-keys-for-hosts
+-- migration 2026-11-22-signing-keys-sign-handovers
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -558,6 +560,16 @@ CREATE TABLE host_queue_dirty (
 	session_id TEXT PRIMARY KEY
 ) WITHOUT ROWID;
 
+-- table host_signing_keys
+CREATE TABLE host_signing_keys (
+	key_id TEXT PRIMARY KEY,
+	public_key BLOB NOT NULL,
+	private_key BLOB,
+	created_at_ms INTEGER NOT NULL,
+	retired_at_ms INTEGER NOT NULL DEFAULT 0,
+	revoked_at_ms INTEGER NOT NULL DEFAULT 0
+);
+
 -- table hosts
 CREATE TABLE hosts (
 	host_id TEXT PRIMARY KEY,
@@ -753,6 +765,17 @@ CREATE TABLE paired_devices (
 	last_seen_at TEXT NOT NULL DEFAULT '',
 	revoked_at TEXT NOT NULL DEFAULT '',
 	browser INTEGER NOT NULL DEFAULT 0
+);
+
+-- table peer_host_keys
+CREATE TABLE peer_host_keys (
+	host_id TEXT NOT NULL,
+	key_id TEXT NOT NULL,
+	public_key BLOB NOT NULL,
+	created_at_ms INTEGER NOT NULL,
+	retired_at_ms INTEGER NOT NULL DEFAULT 0,
+	revoked_at_ms INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY(host_id,key_id)
 );
 
 -- table peer_relay_sockets
@@ -1038,7 +1061,10 @@ CREATE TABLE session_moves (
 	detail TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL,
-	outcome_unknown_at TEXT NOT NULL DEFAULT ''
+	outcome_unknown_at TEXT NOT NULL DEFAULT '',
+	handover_seq INTEGER NOT NULL DEFAULT 0,
+	handover BLOB NOT NULL DEFAULT '',
+	handover_delivered_at_ms INTEGER NOT NULL DEFAULT 0
 );
 
 -- table session_origins
@@ -1124,7 +1150,8 @@ CREATE TABLE sessions (
 	snoozed_at_ms INTEGER NOT NULL DEFAULT 0, snoozed_until_ms INTEGER NOT NULL DEFAULT 0, snooze_wake TEXT NOT NULL DEFAULT '',
 	ended INTEGER NOT NULL DEFAULT 0,
 	entrypoint TEXT NOT NULL DEFAULT '',
-	pid_identity TEXT NOT NULL DEFAULT ''
+	pid_identity TEXT NOT NULL DEFAULT '',
+	handover_seq INTEGER NOT NULL DEFAULT 0
 );
 
 -- table signin_bindings

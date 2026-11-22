@@ -403,7 +403,7 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 		if to := n.gate.movedTo.Load(); to != nil && r.URL.Path == "/api/v1/actions" {
 			identity, _ := n.reg.HostIdentity()
 			w.Header().Set(hosts.ResponseHeader, identity.ID)
-			writeActionResult(w, actionResult{}, movedRefusal("moved-away", *to, *to))
+			writeActionResult(w, actionResult{}, n.daemon.movedRefusal("moved-away", *to, *to))
 			return
 		}
 		if hold := n.gate.actions.Load(); hold != nil && r.URL.Path == "/api/v1/actions" {

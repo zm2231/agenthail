@@ -14,6 +14,25 @@ The default name is the short hostname. `agenthail hosts name <name>` renames
 it. `GET /api/v1/version` reports both, so a peer can tell it reached the host
 it paired with.
 
+Each daemon also has an ed25519 signing key, made with its identity and kept
+in the registry (`host_signing_keys`, private key included). `GET
+/api/v1/version` lists its public keys in `signingKeys`, each with `keyId`
+(the first 16 bytes of the key's SHA-256, in hex), `createdAt`, and
+`retiredAt` and `revokedAt` once set. A daemon records the keys a paired host
+publishes about itself (`peer_host_keys`) each time it connects to that host,
+over that host's own connection, and again when the host's catalog stream
+carries `host.keys`. `agenthail hosts rotate-key` retires the key, deletes its
+private half and makes a new one; the retired public key stays published, so
+what it signed still checks. `--revoke` also revokes the old key, and a peer
+then refuses everything it signed. Unpairing a host forgets its keys. The key
+signs only handovers of moved sessions (see
+[host-move](host-move.md#signed-handover)).
+
+A copy of the registry carries the private key. Before running a daemon on a
+copy, delete the rows of `host_signing_keys` along with `hosts`,
+`paired_devices` and the other pairing rows; the daemon makes a new key on
+start.
+
 `GET /api/v1/version` also names the build the daemon runs: `version`,
 `revision` (the commit) and `modified` (built from a tree with uncommitted
 changes). Release builds stamp all three. A daemon reports each paired host's

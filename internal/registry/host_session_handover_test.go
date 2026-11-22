@@ -22,10 +22,10 @@ func TestOnlyTheHostASessionIsRecordedUnderCanHandItToAnother(t *testing.T) {
 		return host
 	}
 
-	if handed, err := r.HandOverHostSession(arrivalPeer, moveConversation, arrivalPeer+"::"+moveConversation, arrivalHome); err != nil || handed || owner() != arrivalSource {
+	if handed, err := r.HandOverHostSession(arrivalPeer, moveConversation, arrivalPeer+"::"+moveConversation, arrivalHome, 1); err != nil || handed || owner() != arrivalSource {
 		t.Fatalf("a host the session is not recorded under handed it over: handed=%v err=%v owner=%s", handed, err, owner())
 	}
-	if handed, err := r.HandOverHostSession(arrivalSource, moveConversation, arrivalSource+"::"+moveConversation, "h0000000000ff"); err != nil || handed || owner() != arrivalSource {
+	if handed, err := r.HandOverHostSession(arrivalSource, moveConversation, arrivalSource+"::"+moveConversation, "h0000000000ff", 1); err != nil || handed || owner() != arrivalSource {
 		t.Fatalf("the session was handed to a host that is not paired: handed=%v err=%v owner=%s", handed, err, owner())
 	}
 	var owned SessionOwnedError
@@ -33,7 +33,7 @@ func TestOnlyTheHostASessionIsRecordedUnderCanHandItToAnother(t *testing.T) {
 		t.Fatalf("another host's row for the session answered %v, want it refused as %s's", err, arrivalSource)
 	}
 
-	if handed, err := r.HandOverHostSession(arrivalSource, moveConversation, arrivalSource+"::"+moveConversation, arrivalPeer); err != nil || !handed || owner() != arrivalPeer {
+	if handed, err := r.HandOverHostSession(arrivalSource, moveConversation, arrivalSource+"::"+moveConversation, arrivalPeer, 1); err != nil || !handed || owner() != arrivalPeer {
 		t.Fatalf("the owner's handover answered handed=%v err=%v owner=%s", handed, err, owner())
 	}
 	mirror(t, r, arrivalPeer, moveConversation)

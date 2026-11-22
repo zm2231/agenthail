@@ -45,6 +45,8 @@ type moveManifest struct {
 	Origin         *moveOrigin         `json:"origin,omitempty"`
 	registry.MoveCarry
 	ClaudeProject *moveClaudeProject `json:"claudeProject,omitempty"`
+	HandoverSeq   uint64             `json:"handoverSeq,omitempty"`
+	Handovers     []hosts.Handover   `json:"handovers,omitempty"`
 }
 
 // moveClaudeProject is the project's Claude settings a moving conversation
@@ -220,7 +222,15 @@ func (d *Daemon) moveSession(ctx context.Context, request sessionMoveRequest) (s
 	if err != nil {
 		return sessionMoveResult{}, err
 	}
-	manifest := moveManifest{ID: uuid.NewString(), Conversation: session.ID, SourceHost: d.hostIdentity().ID, Surface: session.Surface, Checkout: checkout, Alias: alias, PinnedAt: pinnedAt, Title: out.Title, Model: out.Model, PermissionMode: out.PermissionMode, Size: out.Size, SHA256: out.SHA256, PartsSize: out.PartsSize, State: out.State, Root: request.Root, Origin: origin, MoveCarry: carry}
+	handovers, err := d.Registry.HandoverSeq(session.ID)
+	if err != nil {
+		return sessionMoveResult{}, err
+	}
+	chain, err := d.Registry.ServedHandovers(session.ID)
+	if err != nil {
+		return sessionMoveResult{}, err
+	}
+	manifest := moveManifest{HandoverSeq: handovers + 1, Handovers: hosts.TrimHandovers(chain), ID: uuid.NewString(), Conversation: session.ID, SourceHost: d.hostIdentity().ID, Surface: session.Surface, Checkout: checkout, Alias: alias, PinnedAt: pinnedAt, Title: out.Title, Model: out.Model, PermissionMode: out.PermissionMode, Size: out.Size, SHA256: out.SHA256, PartsSize: out.PartsSize, State: out.State, Root: request.Root, Origin: origin, MoveCarry: carry}
 	if len(out.ProjectSettings) > 0 {
 		manifest.ClaudeProject = &moveClaudeProject{Settings: out.ProjectSettings, WithoutCredentials: out.SettingsWithoutCredentials}
 	}
@@ -426,6 +436,7 @@ func (d *Daemon) completeMoveOut(ctx context.Context, host *pairedHost, moveID s
 	d.invalidateDashboard()
 	d.requestCatalogDiscovery()
 	go d.drainHostDeliveries(context.WithoutCancel(ctx), host)
+	go d.deliverHandovers(context.WithoutCancel(ctx), host)
 	return nil
 }
 
@@ -543,6 +554,7 @@ func (d *Daemon) resumeHostMoves(ctx context.Context, host *pairedHost) {
 			d.logRuntimeError("move "+move.ID, err)
 		}
 	}
+	d.deliverHandovers(ctx, host)
 }
 
 func (d *Daemon) registerMoveAPI(mux *http.ServeMux, dashboard *dashboardServer) {
@@ -551,6 +563,8 @@ func (d *Daemon) registerMoveAPI(mux *http.ServeMux, dashboard *dashboardServer)
 	mux.HandleFunc("/api/v1/session-move/prepare", d.apiV1Guard(dashboard, "control", d.hostOnly(d.apiMovePrepareHandler)))
 	mux.HandleFunc("/api/v1/session-move/transfer", d.apiV1Guard(dashboard, "control", d.hostOnly(d.apiMoveTransferHandler)))
 	mux.HandleFunc("/api/v1/session-move/abort", d.apiV1Guard(dashboard, "control", d.hostOnly(d.apiMoveAbortHandler)))
+	mux.HandleFunc("/api/v1/session-move/handover", d.apiV1Guard(dashboard, "control", d.hostOnly(d.apiMoveHandoverHandler)))
+	mux.HandleFunc("/api/v1/session-handover", d.apiV1Guard(dashboard, "read", d.hostOnly(d.apiSessionHandoverHandler)))
 }
 
 func (d *Daemon) apiSessionMovesHandler(w http.ResponseWriter, r *http.Request) {

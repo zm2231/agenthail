@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 	snoozed_at_ms INTEGER NOT NULL DEFAULT 0, snoozed_until_ms INTEGER NOT NULL DEFAULT 0, snooze_wake TEXT NOT NULL DEFAULT '',
 	ended INTEGER NOT NULL DEFAULT 0,
 	entrypoint TEXT NOT NULL DEFAULT '',
-	pid_identity TEXT NOT NULL DEFAULT ''
+	pid_identity TEXT NOT NULL DEFAULT '',
+	handover_seq INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS coordinators (
 	project_id TEXT NOT NULL,
@@ -560,6 +561,23 @@ CREATE TABLE IF NOT EXISTS hosts (
 	catalog_seq INTEGER NOT NULL DEFAULT 0,
 	catalog_retired_clock INTEGER NOT NULL DEFAULT -1
 );
+CREATE TABLE IF NOT EXISTS host_signing_keys (
+	key_id TEXT PRIMARY KEY,
+	public_key BLOB NOT NULL,
+	private_key BLOB,
+	created_at_ms INTEGER NOT NULL,
+	retired_at_ms INTEGER NOT NULL DEFAULT 0,
+	revoked_at_ms INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS peer_host_keys (
+	host_id TEXT NOT NULL,
+	key_id TEXT NOT NULL,
+	public_key BLOB NOT NULL,
+	created_at_ms INTEGER NOT NULL,
+	retired_at_ms INTEGER NOT NULL DEFAULT 0,
+	revoked_at_ms INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY(host_id,key_id)
+);
 CREATE TABLE IF NOT EXISTS tasks (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	parent_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -797,7 +815,10 @@ CREATE TABLE IF NOT EXISTS session_moves (
 	detail TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL,
-	outcome_unknown_at TEXT NOT NULL DEFAULT ''
+	outcome_unknown_at TEXT NOT NULL DEFAULT '',
+	handover_seq INTEGER NOT NULL DEFAULT 0,
+	handover BLOB NOT NULL DEFAULT '',
+	handover_delivered_at_ms INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS session_moves_conversation ON session_moves(conversation, role, state);
 CREATE TABLE IF NOT EXISTS ledger_events (

@@ -151,6 +151,9 @@ func migrateTx(tx *sql.Tx) error {
 	if err := ensureHostIdentity(tx); err != nil {
 		return err
 	}
+	if err := ensureHostSigningKey(tx, time.Now()); err != nil {
+		return err
+	}
 	if err := ensureColumn(tx, "routes", "once_only", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
@@ -194,8 +197,15 @@ func migrateTx(tx *sql.Tx) error {
 	if err := allowMovedCoordinatorHistory(tx); err != nil {
 		return err
 	}
-	if err := ensureColumn(tx, "session_moves", "outcome_unknown_at", `TEXT NOT NULL DEFAULT ''`); err != nil {
-		return err
+	for _, column := range []struct{ name, decl string }{
+		{"outcome_unknown_at", `TEXT NOT NULL DEFAULT ''`},
+		{"handover_seq", `INTEGER NOT NULL DEFAULT 0`},
+		{"handover", `BLOB NOT NULL DEFAULT ''`},
+		{"handover_delivered_at_ms", `INTEGER NOT NULL DEFAULT 0`},
+	} {
+		if err := ensureColumn(tx, "session_moves", column.name, column.decl); err != nil {
+			return err
+		}
 	}
 	if err := ensureColumn(tx, "coordinators", "moved_from", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
@@ -258,6 +268,7 @@ func migrateTx(tx *sql.Tx) error {
 		{"ended", `INTEGER NOT NULL DEFAULT 0`},
 		{"entrypoint", `TEXT NOT NULL DEFAULT ''`},
 		{"pid_identity", `TEXT NOT NULL DEFAULT ''`},
+		{"handover_seq", `INTEGER NOT NULL DEFAULT 0`},
 	} {
 		if err := ensureColumn(tx, "sessions", column.name, column.decl); err != nil {
 			return err

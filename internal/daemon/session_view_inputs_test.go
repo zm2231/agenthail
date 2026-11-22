@@ -46,6 +46,7 @@ var notSessionViewInputs = map[string]string{
 	"agent_role_assignments":  "an assignment picks the role a caller acts under at each call; no session view shows it",
 	"project_settings":        "a project's settings reach the dashboard's project rows and the MCP socket, which reads them at each request; no session view shows them",
 	"project_tiles":           "the person's tile order reaches only the snapshot's tileOrder, which arranges project tiles; no session view shows it",
+	"peer_host_keys":          "a paired host's published keys check a signed handover, which moves a session's owner; the session view reads the owner, not the keys",
 	"host_held_actions":       "a held channel leg belongs to a paired host, not a session; it reaches a session view only as the host's deliveries",
 	"approvals":               "only answering an approval and its audit read the stored action; a session view shows the approval as its row in asks",
 	"decision_dismissals":     "the Inbox's dismissed stopped cards, read only by the decisions page; no session view shows them",

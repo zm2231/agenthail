@@ -34,6 +34,7 @@ type SessionMove struct {
 	State        string          `json:"state"`
 	Manifest     json.RawMessage `json:"manifest,omitempty"`
 	Detail       string          `json:"detail,omitempty"`
+	HandoverSeq  uint64          `json:"handoverSeq,omitempty"`
 	CreatedAt    time.Time       `json:"createdAt"`
 	UpdatedAt    time.Time       `json:"updatedAt"`
 }
@@ -55,7 +56,7 @@ func scanSessionMove(row rowScanner) (SessionMove, error) {
 	var move SessionMove
 	var manifest []byte
 	var created, updated string
-	if err := row.Scan(&move.ID, &move.Conversation, &move.PeerHost, &move.Role, &move.State, &manifest, &move.Detail, &created, &updated); err != nil {
+	if err := row.Scan(&move.ID, &move.Conversation, &move.PeerHost, &move.Role, &move.State, &manifest, &move.Detail, &move.HandoverSeq, &created, &updated); err != nil {
 		return SessionMove{}, err
 	}
 	if len(manifest) > 0 {
@@ -66,7 +67,24 @@ func scanSessionMove(row rowScanner) (SessionMove, error) {
 	return move, nil
 }
 
-const sessionMoveColumns = `id,conversation,peer_host,role,state,manifest,detail,created_at,updated_at`
+const sessionMoveColumns = `id,conversation,peer_host,role,state,manifest,detail,handover_seq,created_at,updated_at`
+
+func manifestHandoverSeq(manifest []byte) uint64 {
+	var declared struct {
+		HandoverSeq uint64 `json:"handoverSeq"`
+	}
+	_ = json.Unmarshal(manifest, &declared)
+	return declared.HandoverSeq
+}
+
+func (r *Registry) HandoverSeq(conversation string) (uint64, error) {
+	var seq uint64
+	err := r.read.QueryRow(`SELECT handover_seq FROM sessions WHERE id=?`, conversation).Scan(&seq)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return seq, err
+}
 
 func (r *Registry) SessionMove(id string) (SessionMove, error) {
 	move, err := scanSessionMove(r.read.QueryRow(`SELECT `+sessionMoveColumns+` FROM session_moves WHERE id=?`, id))
@@ -151,7 +169,7 @@ func (r *Registry) BeginMoveOut(id, conversation, peerHost string, manifest []by
 		}
 	}
 	stamp := formatTimestamp(r.now())
-	if _, err := tx.Exec(`INSERT INTO session_moves(id,conversation,peer_host,role,state,manifest,created_at,updated_at) VALUES(?,?,?,'out',?,?,?,?)`, id, conversation, peerHost, MovePreparing, manifest, stamp, stamp); err != nil {
+	if _, err := tx.Exec(`INSERT INTO session_moves(id,conversation,peer_host,role,state,manifest,handover_seq,created_at,updated_at) VALUES(?,?,?,'out',?,?,?,?,?)`, id, conversation, peerHost, MovePreparing, manifest, manifestHandoverSeq(manifest), stamp, stamp); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -242,7 +260,7 @@ func (r *Registry) PrepareMoveIn(id, conversation, sourceHost string, manifest [
 	if open {
 		return SessionMove{}, fmt.Errorf("another move of %s has not finished here", conversation)
 	}
-	if _, err := tx.Exec(`INSERT INTO session_moves(id,conversation,peer_host,role,state,manifest,created_at,updated_at) VALUES(?,?,?,'in',?,?,?,?)`, id, conversation, sourceHost, MovePrepared, manifest, stamp, stamp); err != nil {
+	if _, err := tx.Exec(`INSERT INTO session_moves(id,conversation,peer_host,role,state,manifest,handover_seq,created_at,updated_at) VALUES(?,?,?,'in',?,?,?,?,?)`, id, conversation, sourceHost, MovePrepared, manifest, manifestHandoverSeq(manifest), stamp, stamp); err != nil {
 		return SessionMove{}, err
 	}
 	move, err := scanSessionMove(tx.QueryRow(`SELECT `+sessionMoveColumns+` FROM session_moves WHERE id=?`, id))
@@ -343,7 +361,7 @@ func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alia
 	if err := registerSessionTx(tx, session); err != nil {
 		return nil, err
 	}
-	if _, err := tx.Exec(`UPDATE sessions SET pinned_at_ms=? WHERE id=?`, milliOrZero(pinnedAt), session.ID); err != nil {
+	if _, err := tx.Exec(`UPDATE sessions SET pinned_at_ms=?,handover_seq=MAX(handover_seq,?) WHERE id=?`, milliOrZero(pinnedAt), move.HandoverSeq, session.ID); err != nil {
 		return nil, err
 	}
 	if alias != "" {
@@ -508,7 +526,7 @@ func (r *Registry) completeMoveOutTx(move SessionMove, items []MovedQueueItem, h
 	var events []CatalogEvent
 	var observedAt string
 	if err := tx.QueryRow(`SELECT observed_at FROM catalog_sessions WHERE session_id=?`, move.Conversation).Scan(&observedAt); err == nil {
-		payload, _ := json.Marshal(map[string]string{"sessionId": move.Conversation, "reason": "moved_to_host", "movedToHost": move.PeerHost})
+		payload, _ := json.Marshal(map[string]any{"sessionId": move.Conversation, "reason": "moved_to_host", "movedToHost": move.PeerHost, "handoverSeq": move.HandoverSeq})
 		event, created, err := appendCatalogEventTx(tx, CatalogEvent{DedupeKey: "session.removed:" + move.Conversation + ":move:" + move.ID, Type: "session.removed", EntityID: move.Conversation, Payload: payload})
 		if err != nil {
 			return nil, false, err
@@ -531,7 +549,10 @@ func (r *Registry) completeMoveOutTx(move SessionMove, items []MovedQueueItem, h
 	if err := dropMovedRelaysTx(tx, move.Conversation); err != nil {
 		return nil, false, err
 	}
-	if _, err := tx.Exec(`UPDATE sessions SET host_id=?,pid=0,pid_identity='',transcript='',has_local=0,bridge='',pinned_at_ms=0,updated_at=datetime('now') WHERE id=? AND host_id=''`, move.PeerHost, move.Conversation); err != nil {
+	if _, err := tx.Exec(`UPDATE sessions SET host_id=?,pid=0,pid_identity='',transcript='',has_local=0,bridge='',pinned_at_ms=0,handover_seq=MAX(handover_seq,?),updated_at=datetime('now') WHERE id=? AND host_id=''`, move.PeerHost, move.HandoverSeq, move.Conversation); err != nil {
+		return nil, false, err
+	}
+	if err := signHandoverTx(tx, move, r.now()); err != nil {
 		return nil, false, err
 	}
 	if _, err := tx.Exec(`DELETE FROM aliases WHERE session_id=?`, move.Conversation); err != nil {
