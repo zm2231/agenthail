@@ -33,7 +33,7 @@ func TestASessionWithAgenthailsToolsIsTaughtTheToolsAndATerminalOneTheCLI(t *tes
 		t.Fatal(err)
 	}
 	hosted := helpAgentAs(t, app, "planner-conversation")
-	if !strings.Contains(hosted, `agenthail_end_turn {"headline":"<the outcome, for the person>"}`) {
+	if !strings.Contains(hosted, `agenthail_end_turn {"headline":"<what changed for the person, under 80 characters>"}`) {
 		t.Fatalf("a session on the server Agenthail gave it is not told to end its turns:\n%s", hosted)
 	}
 	for _, want := range []string{
@@ -139,7 +139,7 @@ func TestAConversationTheClaudeHostOpenedWithoutItsAgenthailServerIsTaughtTheCLI
 	if absent := card(t, "absent"); !strings.Contains(absent, `agenthail send <@alias|session-id> "<message>"`) || strings.Contains(absent, "agenthail_") {
 		t.Fatalf("a conversation without its agenthail server is taught tools it does not have:\n%s", absent)
 	}
-	if attached := card(t, "attached"); !strings.Contains(attached, `agenthail_end_turn {"headline":"<the outcome, for the person>"}`) {
+	if attached := card(t, "attached"); !strings.Contains(attached, `agenthail_end_turn {"headline":"<what changed for the person, under 80 characters>"}`) {
 		t.Fatalf("a conversation with its agenthail server is not taught its tools:\n%s", attached)
 	}
 }

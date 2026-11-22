@@ -47,7 +47,7 @@ A row opens when the turn's `UserPromptSubmit` hook runs (Claude host, and Codex
 | `turn_id` | the runtime's active turn at the call, when the observer had seen it |
 | `completed_turn_id` | the runtime's turn id, bound at completion |
 | `needs` | `you` or `nothing` |
-| `headline` | one line, at most 80 characters |
+| `headline` | one line, kept up to 1000 characters and cut to 80 where shown |
 | `asks_json` | `[{question, options:[{label, does}], suggested, links:[{title, url}]}]` |
 | `next_json` | follow-ups, at most 3 |
 | `source` | `tool` |
@@ -96,13 +96,13 @@ A session with none of these rows looks exactly as it does today; adopted termin
 ### `agenthail_end_turn` (MCP, always loaded)
 
 ```
-headline  string, at most 80        sidebar and push line
-next      at most 3 strings, each at most 160
+headline  string, cut to 80 where shown   sidebar and push line
+next      up to 3 strings, each cut to 160 where shown
 ```
 
 **Order.** The agent calls the tool when the turn's work is done and then writes its reply as its final message, with no tool call after it; a successful result says so. Claude Opus 5.5 returns text written between tool calls as a progress-update `thinking` block holding only a summary of that text, so a reply written before the call would reach the transcript as a Thought rather than as the reply. Only the text after a turn's last tool call is kept verbatim.
 
-Refused, with a message the agent can act on: a blank, multi-line or long headline; more than 3 next items; a second call in one turn. A turn that needs a decision raises an ask first ([asks.md](asks.md)); the ask, not the end of turn, puts the session in Needs you.
+Only a blank headline is refused. Line breaks fold into spaces, next items past 3 are dropped, and a second call in the same turn replaces the first headline. When the headline runs past 80 characters, or names a PR or issue number, a work item id, a review round or a commit hash, the result's `then` gives the text as the person will see it, names each thing that matched, and asks the agent to call again with the outcome in plain words. The call is never refused for these. A turn that needs a decision raises an ask first ([asks.md](asks.md)); the ask, not the end of turn, puts the session in Needs you.
 
 **Skipped call and spoken questions.** Nothing holds or prompts a turn that ends without `agenthail_end_turn`: the turn judge reads its state from the reply, and the row shows no headline. A reply that asks the person something no ask carries is judged waiting on the person and pushes Needs you ([turn judge](turn-judge.md#the-push)). Agenthail installs no `Stop` hook. A `Stop` hook an earlier install wrote goes away without the person doing anything: the daemon, when it starts (as after an update), removes from every Claude config root's `settings.json` and from Codex any agenthail hook this binary no longer writes, and installs nothing; `agenthail hooks install` and `uninstall`, and their `codex` forms, remove them too. Until then `agenthail hook stop` reads its input and exits 0 with no output, so an old hook neither errors nor holds a turn. The daemon starts Codex for this only when its `hooks.json` or `config.toml` names such a hook, and leaves every other hook where it is, so Codex keeps trusting them.
 

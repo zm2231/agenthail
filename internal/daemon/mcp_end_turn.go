@@ -10,7 +10,7 @@ import (
 )
 
 type mcpEndTurnInput struct {
-	Headline string   `json:"headline" jsonschema:"One line for the person; a long one is cut where it is shown."`
+	Headline string   `json:"headline" jsonschema:"One line for the person, at most 80 characters; a longer one is cut."`
 	Next     []string `json:"next,omitempty" jsonschema:"Up to 3 follow-ups."`
 }
 
@@ -30,7 +30,11 @@ func (d *Daemon) mcpEndTurn(ctx context.Context, caller *mcpCaller, input mcpEnd
 	}
 	d.requestCatalogDiscovery()
 	d.publishEvent("state.changed", session.ID, map[string]string{"source": "end-turn"})
-	return map[string]any{"ok": true, "then": endTurnThen}, nil
+	then := endTurnThen
+	if note := headlineFeedback(headline); note != "" {
+		then = note
+	}
+	return map[string]any{"ok": true, "then": then}, nil
 }
 
 const endTurnThen = "Turn recorded. Now write your reply to the person as your final message, and call no more tools."
