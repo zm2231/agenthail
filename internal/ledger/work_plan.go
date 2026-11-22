@@ -162,13 +162,14 @@ func (b *Board) planWorkAdd(req WorkRequest, ids *idIssuer) (EventType, any, str
 		if err != nil {
 			return "", nil, "", err
 		}
+		if req.ClauseID != "" || fields.From != "" {
+			return "", nil, "", refuse("a child takes its parent's clause, or is found in its parent; give --parent without --clause or --found-in")
+		}
 		fields.Parent = parent.ID
-		if req.ClauseID == "" && fields.From == "" {
-			if parent.ClauseID != "" && b.liveClause(parent.ClauseID, req.ProjectKey) == nil {
-				req.ClauseID = parent.ClauseID
-			} else {
-				fields.From = parent.ID
-			}
+		if parent.ClauseID != "" && b.liveClause(parent.ClauseID, req.ProjectKey) == nil {
+			req.ClauseID = parent.ClauseID
+		} else {
+			fields.From = parent.ID
 		}
 	}
 	id, err := ids.next(EventWorkItem, "W")

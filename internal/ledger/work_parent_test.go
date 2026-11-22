@@ -29,6 +29,8 @@ func TestAParentWaitsOnItsChildrenAndNamesTheOpenOnes(t *testing.T) {
 	if first.Item.ClauseID != "widget-C1" || first.Item.Parent != "widget-W1" || first.Readback != "intent ledger: +widget-W2 on widget-C1, a child of widget-W1" {
 		t.Fatalf("a child is added on its parent's clause: %+v %q", first.Item, first.Readback)
 	}
+	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkAdd, Text: "elsewhere", ClauseID: "widget-C1", Fields: ledger.WorkFields{Parent: "widget-W1"}}, "give --parent without --clause or --found-in")
+	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkAdd, Text: "elsewhere", Fields: ledger.WorkFields{Parent: "widget-W1", From: "widget-W2"}}, "give --parent without --clause or --found-in")
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkAdd, Text: "index", Fields: ledger.WorkFields{Parent: "widget-W1"}})
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W2"})
 

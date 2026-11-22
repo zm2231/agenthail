@@ -243,7 +243,7 @@ When a project's coordinator gets a prompt, the session-context hook (`UserPromp
 
 ### Sub-items
 
-An item can be a step of a bigger one. `ledger add "<text>" --parent <item>` adds it under that item, on the parent's clause, or as work found in the parent when the parent is found work or its clause is no longer in scope. `ledger edit <item> --parent <other>` moves an item under another, and `--no-parent` takes it out. The parent is the item's `parent` field (on `work_item` when it is added, on `work_item.edit` when it moves), and each item lists its `children`, so it replicates like any other field.
+An item can be a step of a bigger one. `ledger add "<text>" --parent <item>` adds it under that item, on the parent's clause, or as work found in the parent when the parent is found work or its clause is no longer in scope. It takes no `--clause` or `--found-in` of its own. `ledger edit <item> --parent <other>` moves an item under another, keeping the clause or origin it already had, and `--no-parent` takes it out. The parent is the item's `parent` field (on `work_item` when it is added, on `work_item.edit` when it moves), and each item lists its `children`, so it replicates like any other field.
 
 A parent waits on its children as it waits on its dependencies:
 
