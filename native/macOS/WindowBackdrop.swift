@@ -145,7 +145,11 @@ final class WindowBackdrop: ObservableObject {
 
     var current: Bool { !active || (rendered != nil && spec() == rendered) }
 
-    func shows(_ config: UIConfig) -> Bool { self.config == config && current }
+    func shows(_ config: UIConfig, wallpapers: [Bool: WallpaperImage]) -> Bool {
+        self.config == config && self.wallpapers[dark] == wallpapers[dark] && current
+    }
+
+    func shows(_ interface: InterfaceStore) -> Bool { shows(interface.config, wallpapers: interface.drawn) }
 
     private func paneStyles() -> [BackdropRole: BackdropSpec.PaneStyle] {
         [

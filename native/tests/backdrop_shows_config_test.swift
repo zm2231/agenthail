@@ -20,7 +20,7 @@ struct BackdropShowsConfigTest {
         }
         func waitForRender(_ backdrop: WindowBackdrop, _ config: UIConfig) {
             let deadline = Date().addingTimeInterval(60)
-            while !backdrop.shows(config), Date() < deadline {
+            while !backdrop.shows(config, wallpapers: [:]), Date() < deadline {
                 RunLoop.main.run(until: Date().addingTimeInterval(0.02))
             }
         }
@@ -33,22 +33,25 @@ struct BackdropShowsConfigTest {
         window.contentView = NSView(frame: CGRect(x: 0, y: 0, width: 96, height: 48))
         window.appearance = NSAppearance(named: .darkAqua)
         backdrop.windowChanged(window)
-        check(!backdrop.shows(first), "a backdrop that has not rendered does not show its config")
+        check(!backdrop.shows(first, wallpapers: [:]), "a backdrop that has not rendered does not show its config")
         waitForRender(backdrop, first)
-        check(backdrop.shows(first), "the rendered backdrop shows its config")
+        check(backdrop.shows(first, wallpapers: [:]), "the rendered backdrop shows its config")
+        let context = CGContext(data: nil, width: 4, height: 4, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let landed = [true: WallpaperImage(id: "art/landed.jpg", image: context.makeImage()!)]
+        check(!backdrop.shows(first, wallpapers: landed), "a backdrop not yet given a landed image does not show it")
 
         check(backdrop.current, "the backdrop is current for the config it was given")
-        check(!backdrop.shows(second), "a backdrop not yet given the new config does not show it")
+        check(!backdrop.shows(second, wallpapers: [:]), "a backdrop not yet given the new config does not show it")
 
         backdrop.configure(second, wallpapers: [:])
-        check(!backdrop.shows(second), "a newly given config shows only once rendered")
+        check(!backdrop.shows(second, wallpapers: [:]), "a newly given config shows only once rendered")
         waitForRender(backdrop, second)
-        check(backdrop.shows(second), "the backdrop shows the new config after rendering")
+        check(backdrop.shows(second, wallpapers: [:]), "the backdrop shows the new config after rendering")
 
         var plain = UIConfig()
         plain.values["background"] = .text("none")
         backdrop.configure(plain, wallpapers: [:])
-        check(backdrop.shows(plain), "a config without a background has nothing to wait for")
+        check(backdrop.shows(plain, wallpapers: [:]), "a config without a background has nothing to wait for")
 
         if failures > 0 { exit(1) }
         print("ok")

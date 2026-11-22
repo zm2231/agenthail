@@ -71,9 +71,11 @@ enum WindowSnapshot {
 
     static func capture(_ request: SnapshotRequest, model: AgenthailModel, voice: VoiceController, budget: SnapshotBudget) async -> Result<Data, WindowImage.Failure> {
         let size = request.width.flatMap { width in request.height.map { CGSize(width: width, height: $0) } }
+        let strict = !(request.rev ?? "").isEmpty
         if request.session == nil, size == nil, (request.view ?? "").isEmpty, let window = model.mainWindow, window.isVisible, !window.isMiniaturized {
-            if model.mainBackdrop?.shows(model.interface.config) == false {
-                await budget.wait { model.mainBackdrop?.shows(model.interface.config) != false }
+            if model.mainBackdrop?.shows(model.interface) == false {
+                await budget.wait { model.mainBackdrop?.shows(model.interface) != false }
+                if strict, model.mainBackdrop?.shows(model.interface) == false { return .failure(.undrawn) }
                 await budget.pause(settle)
             }
             let live = WindowImage.png(of: window)
@@ -85,10 +87,10 @@ enum WindowSnapshot {
         if let tab = views.settings {
             return await settings(tab: tab, size: size ?? defaultSize, model: model, budget: budget)
         }
-        return await offscreen(session: session, project: project, views: views, size: size ?? model.mainWindow?.frame.size ?? defaultSize, model: model, voice: voice, budget: budget)
+        return await offscreen(session: session, project: project, views: views, size: size ?? model.mainWindow?.frame.size ?? defaultSize, model: model, voice: voice, budget: budget, strict: strict)
     }
 
-    static func offscreen(session: String?, project: String? = nil, views: SnapshotViews = SnapshotViews(nil), size: CGSize, model: AgenthailModel, voice: VoiceController, budget: SnapshotBudget) async -> Result<Data, WindowImage.Failure> {
+    static func offscreen(session: String?, project: String? = nil, views: SnapshotViews = SnapshotViews(nil), size: CGSize, model: AgenthailModel, voice: VoiceController, budget: SnapshotBudget, strict: Bool = false) async -> Result<Data, WindowImage.Failure> {
         guard WindowImage.system != nil else { return .failure(.unavailable) }
         let pane = model.openPane()
         defer { model.closePane(pane) }
@@ -122,8 +124,9 @@ enum WindowSnapshot {
         }
         await budget.wait {
             let detail = resolved == nil || pane.detail?.session.id == resolved || pane.detailLoadError != nil
-            return detail && probe.backdrop?.shows(model.interface.config) == true
+            return detail && probe.backdrop?.shows(model.interface) == true
         }
+        if strict, probe.backdrop?.shows(model.interface) != true { return .failure(.undrawn) }
         await budget.pause(settle)
         return WindowImage.png(of: window)
     }

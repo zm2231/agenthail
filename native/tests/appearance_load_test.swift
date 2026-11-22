@@ -9,6 +9,7 @@ final class AppearanceDaemon: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var body = ""
     nonisolated(unsafe) static var images: [String: Data] = [:]
     nonisolated(unsafe) static var delays: [String: Double] = [:]
+    nonisolated(unsafe) static var answers: [String: String] = [:]
 
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "appearance.test" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -16,11 +17,32 @@ final class AppearanceDaemon: URLProtocol, @unchecked Sendable {
 
     override func startLoading() {
         let url = request.url!
+        if url.path.hasPrefix("/api/v1/ui/snapshot/") {
+            let body = Self.body(of: request)
+            let error = (try? JSONSerialization.jsonObject(with: body) as? [String: Any])?["error"] as? String
+            Self.lock.withLock { Self.answers[url.lastPathComponent] = error ?? "png" }
+            return send(Data("{}".utf8), type: "application/json")
+        }
         guard url.path == "/api/v1/ui/background" else { return send(Data(Self.lock.withLock { Self.body }.utf8), type: "application/json") }
         let path = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "path" }?.value ?? ""
         let (image, delay) = Self.lock.withLock { (Self.images[path] ?? Data(), Self.delays[path] ?? 0) }
         let request = self
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) { request.send(image, type: "image/png") }
+    }
+
+    static func body(of request: URLRequest) -> Data {
+        if let data = request.httpBody { return data }
+        guard let stream = request.httpBodyStream else { return Data() }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count <= 0 { break }
+            data.append(buffer, count: count)
+        }
+        return data
     }
 
     private func send(_ data: Data, type: String) {
@@ -161,6 +183,24 @@ struct AppearanceLoadTest {
         await wait { ready.config.rev == "one" && ready.settled && ready.wallpapers["art/ready.jpg"] != nil }
         check(ready.snapshotProblem(for: "one") == nil, "a snapshot proceeds once the image shows")
         check(ready.snapshotProblem(for: "two") != nil, "a snapshot of a revision that hasn't arrived reports it")
+
+        let shown = InterfaceStore()
+        serve(#"{"rev":"mesh","values":{"theme":"dark","background":"mesh: 2x2, #F0E0D0, #203040, #E0F0C0, #401020"},"chosen":{},"overrides":{},"problems":[]}"#)
+        shown.load(from: api)
+        await wait { shown.config.rev == "mesh" && shown.settled }
+        let window = NSWindow(contentRect: CGRect(x: -20000, y: -20000, width: 96, height: 48), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = NSView(frame: CGRect(x: 0, y: 0, width: 96, height: 48))
+        window.appearance = NSAppearance(named: .darkAqua)
+        let backdrop = WindowBackdrop()
+        backdrop.configure(UIConfig(), wallpapers: [:])
+        backdrop.windowChanged(window)
+        let budget = SnapshotBudget(deadlineMs: 2300)
+        await budget.wait { backdrop.shows(shown) }
+        check(!backdrop.shows(shown), "a snapshot whose backdrop never draws the store's config is still not drawn when its budget runs out")
+        backdrop.configure(shown.config, wallpapers: shown.drawn)
+        check(!backdrop.shows(shown), "a backdrop given the config shows it only once rendered")
+        await wait(30) { backdrop.shows(shown) }
+        check(backdrop.shows(shown), "the backdrop shows the store's config once rendered")
         print("appearance load: ok")
     }
 }
