@@ -899,30 +899,31 @@ struct TranscriptFollowTest {
         feed.rows = (0..<300).map { Row(id: "Ap\($0)", lines: $0 % 5 == 0 && $0 < 280 ? 60 : 1) }
         spin(0.6)
         move(scroll, to: 0)
-        move(scroll, to: 2000)
-        expect(!feed.following, "a reader near the top of a long transcript is not following")
+        move(scroll, to: bottomOffset(scroll) - 12000)
+        expect(!feed.following, "a reader well above the end of a long transcript is not following")
         let flips = feed.flips
+        let height = scroll.contentView.bounds.height
         var gestures = 0
-        while gap(scroll) > 2600, gestures < 80 {
+        while gap(scroll) > 1, gestures < 150 {
             gestures += 1
-            guard let reference = readerTops.inView(from: offset(scroll), to: offset(scroll) + scroll.contentView.bounds.height) else {
-                return expect(false, "a row is in view on the way to the end, \(geometry(scroll))")
+            let top = offset(scroll)
+            guard let reference = feed.rows.compactMap({ row in readerTops.top(row.id).map { (row.id, $0) } }).filter({ $0.1 < top + height }).max(by: { $0.1 < $1.1 }) else {
+                return expect(false, "a row is laid out in view on the way to the end, \(geometry(scroll))")
             }
-            let before = reference.top - offset(scroll)
-            let sent = wheelGesture(scroll, by: 1200)
-            let after = readerTops.top(reference.id).map { $0 - offset(scroll) }
-            expect(after.map { abs($0 - (before - sent)) < 2 } ?? true, "the reader's row moves with their scroll on the way to the end: \(reference.id) at \(Int(before)) moved to \(after.map { String(Int($0)) } ?? "gone") for a \(Int(sent)) pt scroll, gesture \(gestures), following flipped \(feed.flips - flips) times")
-            expect(feed.flips == flips, "following stays off until the reader reaches the end, flipped \(feed.flips - flips) times by gesture \(gestures) with \(Int(gap(scroll))) pt left; \(geometry(scroll))")
+            let before = reference.1 - top
+            let sent = wheelGesture(scroll, by: 400)
+            guard let after = readerTops.top(reference.0).map({ $0 - offset(scroll) }) else {
+                return expect(false, "the reader's row \(reference.0) is still laid out after a \(Int(sent)) pt scroll, gesture \(gestures)")
+            }
+            expect(abs(after - (before - sent)) < 2, "the reader's row moves with their scroll on the way to the end: \(reference.0) at \(Int(before)) moved to \(Int(after)) for a \(Int(sent)) pt scroll, gesture \(gestures), following flipped \(feed.flips - flips) times")
+            if gap(scroll) > TranscriptFollow<String>.readerReach {
+                expect(feed.flips == flips, "following stays off until the reader reaches the end, flipped \(feed.flips - flips) times by gesture \(gestures) with \(Int(gap(scroll))) pt left; \(geometry(scroll))")
+            }
         }
-        expect(gestures > 5, "the approach took several gestures, \(gestures)")
-        var tries = 0
-        while gap(scroll) > 1, tries < 12 {
-            tries += 1
-            _ = wheelGesture(scroll, by: 1200)
-        }
+        expect(gestures > 10, "the approach took many gestures, \(gestures)")
         spin(1.5)
-        expect(feed.following && abs(gap(scroll)) < 2, "a reader who scrolls to the end of a mixed transcript is following there, after \(tries) gestures; \(geometry(scroll))")
-        expect(feed.flips - flips == 1, "following turned on once, at the end, flipped \(feed.flips - flips) times over \(tries) gestures")
+        expect(feed.following && abs(gap(scroll)) < 2, "a reader who scrolls to the end of a mixed transcript is following there, after \(gestures) gestures; \(geometry(scroll))")
+        expect(feed.flips - flips == 1, "following turned on once, at the end, flipped \(feed.flips - flips) times over \(gestures) gestures")
     }
 
     // One phased gesture, measured by how far the offset moved, so a re-estimate the gesture triggers is not corrected away by another.
