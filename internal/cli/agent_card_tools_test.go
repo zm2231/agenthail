@@ -14,7 +14,7 @@ func TestASessionWithAgenthailsToolsIsTaughtTheToolsAndATerminalOneTheCLI(t *tes
 	app, _, _ := cardFixture(t)
 
 	terminal := helpAgentAs(t, app, "planner-conversation")
-	for _, want := range []string{`agenthail send <@alias|session-id> "<message>"`, "agenthail thread create", "agenthail whoami --json always has the current answer"} {
+	for _, want := range []string{`agenthail send <@alias|session-id> "<message>"`, "agenthail thread create", "agenthail whoami --json always has the current answer", "agenthail ledger ready", "agenthail ledger start|log|review <item>"} {
 		if !strings.Contains(terminal, want) {
 			t.Fatalf("the terminal card does not say %q:\n%s", want, terminal)
 		}
@@ -41,6 +41,8 @@ func TestASessionWithAgenthailsToolsIsTaughtTheToolsAndATerminalOneTheCLI(t *tes
 		`agenthail_create {"surface":"claude|codex"`,
 		`agenthail_wait {"tasks":["<taskId>"]}`,
 		`agenthail_channel_send {"channel":"#project-card"`,
+		`agenthail_ledger_read {"view":"ready"}`,
+		`agenthail_ledger_write {"op":"work","request":{"action":"claim|log|submit","itemId":"<item>"}}`,
 		"agenthail_whoami always has the current answer",
 	} {
 		if !strings.Contains(hosted, want) {

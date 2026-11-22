@@ -52,10 +52,14 @@ var cardLines = []cardLine{
 		when: func(in CardInput) bool { return in.Project != "" },
 		arg:  func(in CardInput) string { return in.Project },
 	},
+	{use: "find the project's next work item", cli: "agenthail ledger ready", mcp: `agenthail_ledger_read {"view":"ready"}`, when: inProject},
+	{use: "claim it, log to it as you go, submit it when done", cli: "agenthail ledger start|log|review <item>", mcp: `agenthail_ledger_write {"op":"work","request":{"action":"claim|log|submit","itemId":"<item>"}}`, when: inProject},
 	{use: "start a helper session", cli: `agenthail thread create <claude|codex> "<task>" --alias <name>`, mcp: `agenthail_create {"surface":"claude|codex","cwd":"<folder>","message":"<task>","alias":"<name>","task":true}`},
 	{use: "wait for a helper's result", mcp: `agenthail_wait {"tasks":["<taskId>"]}`},
 	{use: "check who you are now", cli: "agenthail whoami --json", mcp: "agenthail_whoami"},
 }
+
+func inProject(in CardInput) bool { return in.Project != "" }
 
 func CardLines(in CardInput) []Line {
 	var out []Line

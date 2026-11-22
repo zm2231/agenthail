@@ -1,6 +1,6 @@
 # Desktop parity: web dashboard vs Mac app
 
-Goal (epic td-5f222f): the Mac app does everything the web dashboard does, so the web views can retire (td-5dc917) while the API stays.
+Goal (ledger `agenthail-W29`, imported from td `td-5f222f`): the Mac app does everything the web dashboard does. Retiring the web views (`agenthail-W30`, from `td-5dc917`) is on hold: the web dashboard is now the extensions shell, so its views move into extensions instead, and the API stays.
 
 Audited against `main` at 7734690. Web sources: `internal/daemon/dashboard/index.html` and `internal/daemon/dashboard/app.js`. Mac sources live in `native/macOS/` plus the shared `native/*.swift` files compiled into the `AgenthailMac` target (`native/Package.swift`). The installed app was also inspected read-only through its accessibility tree.
 
@@ -36,7 +36,7 @@ Status: **present** means the Mac covers the behavior; **partial** means part of
 | Decided | 1 |
 | n/a | 1 |
 
-Open gaps are tracked as td stories under td-5f222f (listed at the end). Each one blocks td-5dc917.
+The gap stories listed at the end (`td-0ec020`, `td-ea7bbf`, `td-006fa3` and `td-98d5f4`) were all closed in td before its issues were imported into the ledger, so they have no ledger items; anything still open is tracked under `agenthail-W29`.
 
 ## Overview and global
 
@@ -71,7 +71,7 @@ Open gaps are tracked as td stories under td-5f222f (listed at the end). Each on
 | Conversation load failure | app.js:984-987 | GET /api/session | present | macOS/DesktopWindow.swift:764-770 |
 | Show more | index.html:209-216; app.js:619-621, 1893-1896 | GET /api/state (paged client-side) | present (per project) | macOS/DesktopWindow.swift:166-175 |
 | Session row: presence label, surface, queued count, shared badge | app.js:595-601 | GET /api/state | partial | macOS/DesktopWindow.swift:432-473 shows a status dot, subagents, shared badge and age, but no queued count, surface name or presence label (Working, Queued, Open, Recent) |
-| New conversation form: surface, launcher, name, folder, model, approvals, Claude agent, worktree, permission mode, effort, mode, service tier, output schema, first message | index.html:118-168; app.js:1765-1877 | GET /api/state `surfaces`; GET /api/models; GET /api/v1/session-options; POST /api/action `session-create`, `notion-create` | partial on main | main has agent, launcher, folder and message only (native/AgenthailModel.swift:269-277). The full form is PR #39 (`feat/mac-parity-launch`, native/macOS/NewSessionSheet.swift:55-240 there), tracked by td-0ec020 |
+| New conversation form: surface, launcher, name, folder, model, approvals, Claude agent, worktree, permission mode, effort, mode, service tier, output schema, first message | index.html:118-168; app.js:1765-1877 | GET /api/state `surfaces`; GET /api/models; GET /api/v1/session-options; POST /api/action `session-create`, `notion-create` | partial on main | main has agent, launcher, folder and message only (native/AgenthailModel.swift:269-277). The full form is PR #39 (`feat/mac-parity-launch`, native/macOS/NewSessionSheet.swift:55-240 there) |
 | Chat header: surface, title, status, queued count, last active, model | app.js:427-432, 952-954, 1111 | GET /api/state (status, queueCount, lastActive); GET /api/session `model` | partial | macOS/DesktopWindow.swift:615-672 shows title, alias, status, surface, model and context, but no queued count or last active |
 | Open session in its host | app.js:1080-1081 | GET /api/state `runtime.focusable`; POST /api/action `session-focus` | present | macOS/DesktopWindow.swift:647-652; native/AgenthailModel.swift:319-321 |
 | Stop, Steer, Compact | app.js:1082-1091, 1443-1459 | GET /api/session `capabilities`; POST /api/action `interrupt`, `steer`, `compact` | present | macOS/DesktopWindow.swift:1268-1283, 1711-1715; macOS/SessionPane.swift:251-253, 350-352 |
@@ -118,9 +118,11 @@ Open gaps are tracked as td stories under td-5f222f (listed at the end). Each on
 
 ## Gap stories
 
+All closed.
+
 | Story | Covers |
 | --- | --- |
-| td-0ec020 (existing, PR #39) | New-session form |
-| td-ea7bbf | Needs attention reason and requested action; delivery queue reason, last error, status-correct Retry and Cancel; inspector status labels |
-| td-006fa3 | Audit route and full content |
-| td-98d5f4 | Manual refresh; surface card click-to-filter; session row queued count, surface and presence label; header queued count and last active; long assistant reply collapse; exchange count and filter summary; Operations tab counts; timeline item details; empty states for transcript, channels and handoffs; reconnect guidance on network errors |
+| `td-0ec020`, new-session form (PR #39) | New-session form |
+| `td-ea7bbf`, attention and queue | Needs attention reason and requested action; delivery queue reason, last error, status-correct Retry and Cancel; inspector status labels |
+| `td-006fa3`, audit | Audit route and full content |
+| `td-98d5f4`, polish | Manual refresh; surface card click-to-filter; session row queued count, surface and presence label; header queued count and last active; long assistant reply collapse; exchange count and filter summary; Operations tab counts; timeline item details; empty states for transcript, channels and handoffs; reconnect guidance on network errors |
