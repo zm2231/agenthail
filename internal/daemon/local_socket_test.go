@@ -20,11 +20,16 @@ import (
 
 func localSocketPost(t *testing.T, request daemonapi.AgentRoleRequest) (int, string) {
 	t.Helper()
+	return localSocketPostTo(t, "/api/v1/agents", request)
+}
+
+func localSocketPostTo(t *testing.T, path string, request any) (int, string) {
+	t.Helper()
 	client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", daemonctl.LocalSocketPath())
 	}}}
 	body, _ := json.Marshal(request)
-	response, err := client.Post("http://agenthail/api/v1/agents", "application/json", bytes.NewReader(body))
+	response, err := client.Post("http://agenthail"+path, "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,5 +135,35 @@ func TestEachRoleCarriesTheDefaultItsReachGivesEveryAction(t *testing.T) {
 				t.Fatalf("%s %s: the default shown is %q but an agent gets %q", role.Name, action.Name, role.EffectiveDefaults[action.Name], role.Decisions[action.Name])
 			}
 		}
+	}
+}
+
+func TestAnAgentCannotChangeAnIdentitysSendModeWhileThePersonsTerminalCan(t *testing.T) {
+	d, reg, root, _ := mcpSocketDaemon(t)
+	stop, err := d.startLocalSocket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(stop)
+	registerClaude(t, reg, "claude-one")
+	scout, err := reg.AddAgentIdentity("scout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mode := func() string {
+		t.Helper()
+		mode, err := reg.IdentitySendMode(scout.SessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return mode
+	}
+	if status, body := localSocketPostTo(t, daemonapi.IdentitySettingsPath, daemonapi.IdentitySettingsRequest{Identity: "scout", SendMode: registry.SendModeNow}); status != http.StatusOK || mode() != registry.SendModeNow {
+		t.Fatalf("the person's terminal set scout to send now: %d %s, mode=%s", status, body, mode())
+	}
+	agent := &relayedSession{record: filepath.Join(root, "sessions", strconv.Itoa(os.Getppid())+".json")}
+	agent.writeFor(t, os.Getppid(), "claude-one", true)
+	if status, body := localSocketPostTo(t, daemonapi.IdentitySettingsPath, daemonapi.IdentitySettingsRequest{Identity: "scout", SendMode: registry.SendModeQueue}); status != http.StatusForbidden || mode() != registry.SendModeNow {
+		t.Fatalf("a command inside session claude-one changed scout's send mode: %d %s, mode=%s", status, body, mode())
 	}
 }

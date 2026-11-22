@@ -39,6 +39,19 @@ An identity has the reach of the Agenthail CLI: the CLI does not check it as an 
 
 In the other direction, any agent may send an identity a queued message, from any project, on this host or a paired one. An identity belongs to no project, so the project reach that limits an agent session (`mcpControlTarget` here, `mcpRemoteTarget` for a paired host's session) admits it, `remoteSendScope` names no project for it, and the owning host's `sendScope` lets it through even when an older sender names a project. A send now (`mode: now`) to an identity on a paired host is refused like any send now across hosts.
 
+### Default send mode
+
+An `agenthail_send` with no `mode` is queued. The person can make an identity's sends with no mode go now instead:
+
+```bash
+agenthail identity set <name> --send-mode now    # steer a busy session where the role allows
+agenthail identity set <name> --send-mode queue  # the default
+```
+
+The setting is a row of `identity_settings`, removed with the identity. Like role changes, only the person can change it: the CLI sends it over the daemon's local socket, which refuses a command run inside an agent session, and the dashboard API (`POST /api/v1/identity-settings`) takes it only from a paired device or a paired host acting for the person. Each change is recorded in history as `identity-settings` and told to the person, and `identity list` shows `sends now by default`.
+
+An explicit `mode` always wins. A send the default made `now` is checked as `now` is: the caller's role decides whether it may steer the target. If that check refuses it, the send is retried as queued, with no ask, and the tool's result carries a `notice` saying so. A retry with the same `clientRequestId` replays both attempts alike. The default applies to `agenthail_send` from MCP, the only way an identity's role is known. A CLI send with `--from` stays queued unless it asks otherwise.
+
 ## Across paired hosts
 
 The pairing carries an identity both ways with no new path (see [paired hosts](hosts.md)):

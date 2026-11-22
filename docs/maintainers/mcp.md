@@ -160,7 +160,7 @@ A Claude subagent shares its session's credential, so inside a subagent Claude i
 | --- | --- | --- |
 | `agenthail_projects` | The projects on this host and its paired hosts with their coordinators; `conflict` marks a project with coordinators on two hosts | any session |
 | `agenthail_history` | Delivery history (`view: history`, optionally one `sessionId`) or the delivery queue (`view: queue`), newest first and paged with `before` | `read.all` |
-| `agenthail_send` | A message to a session (`target`) or a project's coordinator (`project`, starting its conversation if it has none). `mode: queue` (default) or `now` | control scope; see below |
+| `agenthail_send` | A message to a session (`target`) or a project's coordinator (`project`, starting its conversation if it has none). `mode: queue` or `now`; with no mode, queue, or now for an identity the person set to send now, which falls back to queued with a `notice` where now is refused (see [agent-identities.md](agent-identities.md#default-send-mode)) | control scope; see below |
 | `agenthail_steer`, `agenthail_interrupt` | Steer or interrupt a running turn | control scope, down only |
 | `agenthail_goal` | Set, edit, clear, pause or resume a Codex session's goal, or change its token budget | control scope, down only |
 | `agenthail_answer` | Answer an open request by its ask id: allow or deny a permission request (`always` keeps allowing with the rule the request offers), answer an agent's ask, or pass either on with `escalate` | Only the session the request is routed to, or the voice operator (`control.all`) for the person; a permission request also needs `requests.answer`, and `always` needs `control.all` |

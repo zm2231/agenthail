@@ -54,6 +54,7 @@ var notSessionViewInputs = map[string]string{
 	"agent_inbox":             "an identity's messages, read only by agenthail inbox and the inbox adapter's tail; no session view shows them",
 	"identity_remote":         "an identity's remote token hash and Access binding, read only by the remote MCP verifier, agenthail identity and doctor",
 	"mcp_access":              "the Cloudflare Access team and audience, read only by the remote MCP verifier, agenthail identity access and doctor",
+	"identity_settings":       "an identity's default send mode, read only when it sends and by agenthail identity",
 	"mcp_remote_epoch":        "a counter of remote credential changes, read only by the remote MCP notifier and verifier",
 	"mcp_event_subscriptions": "a remote identity's webhook subscriptions, read only by the remote MCP event methods and the webhook delivery loop",
 }
