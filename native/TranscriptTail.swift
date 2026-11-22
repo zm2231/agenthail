@@ -32,8 +32,9 @@ struct TranscriptTail: Equatable {
     }
 
     /// Unbuilt lazy rows sit at estimated places, so at the end the eager rows reach the top of the view.
-    mutating func cover(_ ids: [String], in transcript: String, rows: [String: CGRect], visible: CGRect) -> Bool {
-        guard transcript == self.transcript, visible.height > 0 else { return false }
+    /// Moving a row out of the lazy stack makes it re-estimate every unbuilt row above, so the tail grows only while the reader is at rest.
+    mutating func cover(_ ids: [String], in transcript: String, rows: [String: CGRect], visible: CGRect, resting: Bool = true) -> Bool {
+        guard resting, transcript == self.transcript, visible.height > 0 else { return false }
         let start = split(ids, in: transcript)
         guard start > 0, ids.count - start < Self.cap, let newest = ids.last.flatMap({ rows[$0] }), newest.minY < visible.maxY,
               let top = rows[ids[start]], top.minY > visible.minY else { return false }
@@ -99,6 +100,7 @@ final class TranscriptTailLayout {
     var tail = TranscriptTail()
     var rows: [String: CGRect] = [:]
     var visible: CGRect = .zero
+    var scrolling = false
     var newest: String?
     var end: CGRect?
     var rescale = TranscriptRescale()

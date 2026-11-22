@@ -109,6 +109,10 @@ struct Transcript: View {
         .transcriptFollow(feed.transcript, leadingRow: feed.rows.first?.id, hasRow: { id in feed.merged.contains(id) || feed.rows.contains { $0.id == id } }, rows: readerTops, position: $position, following: $following)
         .safeAreaInset(edge: .top, spacing: 0) { Color.gray.frame(height: feed.header) }
         .safeAreaInset(edge: .bottom, spacing: 0) { Color.gray.frame(height: feed.inset) }
+        .onScrollPhaseChange { _, new in
+            layout.scrolling = new == .interacting || new == .decelerating
+            if !layout.scrolling { cover(ids) }
+        }
         .onChange(of: following) {
             feed.following = following
             feed.flips += 1
@@ -124,7 +128,7 @@ struct Transcript: View {
 extension Transcript {
     // As the desktop transcript does: while following, rows join the eager tail until its top reaches the top of the view.
     private func cover(_ ids: [String]) {
-        guard feed.usesTail, feed.covers, following, layout.tail.cover(ids, in: feed.transcript, rows: layout.rows, visible: layout.visible) else { return }
+        guard feed.usesTail, feed.covers, following, layout.tail.cover(ids, in: feed.transcript, rows: layout.rows, visible: layout.visible, resting: !layout.scrolling) else { return }
         tailRevision &+= 1
     }
 }
@@ -907,7 +911,7 @@ struct TranscriptFollowTest {
             let before = reference.top - offset(scroll)
             let sent = wheelGesture(scroll, by: 1200)
             let after = readerTops.top(reference.id).map { $0 - offset(scroll) }
-            expect(after.map { abs($0 - (before - 1200)) < 2 } ?? true, "the reader's row moves with their scroll on the way to the end: \(reference.id) at \(Int(before)) moved to \(after.map { String(Int($0)) } ?? "gone") for a 1200 pt scroll (offset moved \(Int(sent))), gesture \(gestures), following flipped \(feed.flips - flips) times")
+            expect(after.map { abs($0 - (before - sent)) < 2 } ?? true, "the reader's row moves with their scroll on the way to the end: \(reference.id) at \(Int(before)) moved to \(after.map { String(Int($0)) } ?? "gone") for a \(Int(sent)) pt scroll, gesture \(gestures), following flipped \(feed.flips - flips) times")
             expect(feed.flips == flips, "following stays off until the reader reaches the end, flipped \(feed.flips - flips) times by gesture \(gestures) with \(Int(gap(scroll))) pt left; \(geometry(scroll))")
         }
         expect(gestures > 5, "the approach took several gestures, \(gestures)")

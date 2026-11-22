@@ -114,6 +114,10 @@ struct TranscriptTailTest {
         let top = CGRect(x: 0, y: 0, width: 600, height: 650)
         expect(!away.cover(ids, in: "a", rows: rows(0..<100), visible: top), "a view that does not reach the newest row leaves the tail alone")
         expect(!away.cover(ids, in: "a", rows: [:], visible: end), "unmeasured rows leave the tail alone")
+        var scrolling = TranscriptTail()
+        scrolling.update(ids, in: "a", rows: [:], visible: visible, following: true)
+        expect(!scrolling.cover(ids, in: "a", rows: rows(0..<100), visible: end, resting: false), "a reader mid-scroll leaves the tail alone, so the lazy stack does not re-estimate under them")
+        expect(scrolling.cover(ids, in: "a", rows: rows(0..<100), visible: end), "the same view grows the tail once the reader comes to rest")
 
         let view = CGRect(x: 0, y: 1_000, width: 600, height: 600)
         expect(!TranscriptTail.latestHidden(CGRect(x: 0, y: 1_400, width: 600, height: 150), in: view, following: false), "the newest row in view hides the button whatever the follow state")

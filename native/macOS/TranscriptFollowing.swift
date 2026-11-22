@@ -22,6 +22,7 @@ enum TranscriptFollowing {
         }
         if following, pass.resting, pass.resizedThisTurn, pass.distance >= bottomSlack { return following }
         if pass.animating { return following }
-        return following ? pass.distance < bottomSlack : pass.distance < readerReach
+        // The end moves when the lazy stack re-estimates rows it has not built; only the reader's own move away from it stops them following.
+        return following ? !(pass.offsetMoved < 0 && pass.distance >= bottomSlack) : pass.distance < readerReach
     }
 }
