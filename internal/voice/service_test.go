@@ -1169,8 +1169,8 @@ func TestRealtimeSettingsUseAudioOnlyTargetUpdatesAndNoCredentials(t *testing.T)
 		}
 	}
 	initial := p["initialItems"].([]map[string]any)
-	if text, _ := initial[0]["text"].(string); len(initial) != 1 || initial[0]["role"] != "developer" || !strings.Contains(text, "Agenthail orchestrator") {
-		t.Fatalf("orchestrator calls need their developer instructions: %v", initial)
+	if text, _ := initial[0]["text"].(string); len(initial) != 1 || initial[0]["role"] != "developer" || !strings.Contains(text, "must be handed to the operator thread. Never answer one yourself") || !strings.Contains(text, "You have no tools") || strings.Contains(text, "directly with the user") {
+		t.Fatalf("an orchestrator call must tell the realtime model to hand every request to the operator thread: %v", initial)
 	}
 	if _, ok := p["prompt"]; ok || p["includeStartupContext"] != true {
 		t.Fatalf("an orchestrator call replaced Codex's realtime prompt: %v", p)

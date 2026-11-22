@@ -245,6 +245,7 @@ The peer submits the offer after `setLocalDescription`; ICE gathering may contin
 while signaling proceeds. A network that does not report `complete` gathering is
 not treated as a failed call before the host receives the offer.
 The native start request uses realtime `v3` and audio output; an orchestrator call includes startup context and a session-bound call does not.
+An orchestrator call keeps Codex's realtime prompt, which hands requests to the operator thread, and starts with one developer item that agrees with it: the realtime model has no tools and cannot see sessions, work or files, so every question about them and every request to act must be handed to the operator thread and never answered from memory. While it waits it says it is asking the operator, never that it is looking something up. The realtime model alone decides to hand off; Agenthail forwards nothing on an orchestrator call.
 It does not enable the legacy Codex response-handoff route: the realtime session
 is the audio plane, while the selected session remains the only coding target. A
 matching native `started` notification binds the call;
