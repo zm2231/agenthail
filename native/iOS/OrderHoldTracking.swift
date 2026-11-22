@@ -27,20 +27,20 @@ struct OrderHoldTracking: ViewModifier {
     private func update() {
         release?.cancel()
         if touching || scrolling {
-            model.holdOrder(true)
+            model.sessionListing.holdOrder(true)
             return
         }
         release = Task { @MainActor in
             try? await Task.sleep(for: linger)
             guard !Task.isCancelled else { return }
-            model.holdOrder(false)
+            model.sessionListing.holdOrder(false)
         }
     }
 
     private func releaseNow() {
         release?.cancel()
         scrolling = false
-        model.holdOrder(false)
+        model.sessionListing.holdOrder(false)
     }
 }
 

@@ -306,6 +306,7 @@
 		B12D492363D7E4F7303F208E /* GoalControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90BFC09972C560C1C9AA777 /* GoalControls.swift */; };
 		B147229E8905810BC3358C1E /* ProjectTiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 508E34C35C83775314D08D60 /* ProjectTiles.swift */; };
 		B17380EB7395EF8908A98299 /* IOSTimeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9172F0498A76D9CBAE855480 /* IOSTimeline.swift */; };
+		B17D16FCBE4F80E822C82060 /* SessionListing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E38976B43E87C156466CD00 /* SessionListing.swift */; };
 		B19ACB113169610BA194899A /* PhoneAgentRoles.swift in Sources */ = {isa = PBXBuildFile; fileRef = FECD6C334D421CDDA49782B7 /* PhoneAgentRoles.swift */; };
 		B2AFCA70BEC767703A948C78 /* EventStreamReopenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B76B455BCDD0569784FF79E1 /* EventStreamReopenTests.swift */; };
 		B3E018AD1B6B7B3CEA61698F /* TranscriptLinksUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22BD00C7767B2BF60A76534B /* TranscriptLinksUITests.swift */; };
@@ -629,6 +630,7 @@
 		5C035A3EB2A2C85859469507 /* TranscriptScrim.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptScrim.swift; sourceTree = "<group>"; };
 		5C1C645CF17EE9F78BDC9846 /* BodyRuns.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyRuns.swift; sourceTree = "<group>"; };
 		5D444E15414A7F8270923641 /* TransientNotice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransientNotice.swift; sourceTree = "<group>"; };
+		5E38976B43E87C156466CD00 /* SessionListing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionListing.swift; sourceTree = "<group>"; };
 		5E80B314FC553489CC8B6E80 /* PaletteTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaletteTokens.swift; sourceTree = "<group>"; };
 		5EB73667A631B4855B108997 /* AgenthailAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgenthailAPI.swift; sourceTree = "<group>"; };
 		5EF90B599AF784E13FE2A316 /* ComposerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerStore.swift; sourceTree = "<group>"; };
@@ -1046,6 +1048,7 @@
 				0F97182BB6B3E031BAE4D18C /* SessionControls.swift */,
 				836598CAF0AF568C68FD23C5 /* SessionCreation.swift */,
 				71ABFF321D6A090191C0C9C1 /* SessionListChrome.swift */,
+				5E38976B43E87C156466CD00 /* SessionListing.swift */,
 				A8CB58E4596119C3F2DD95AA /* SessionListRow.swift */,
 				1722437B034BE8680998C613 /* SessionOperationsPreview.swift */,
 				4297F79B0E285D005AC6D64C /* SessionPreview.swift */,
@@ -1795,6 +1798,7 @@
 				CB910CF054E9E1262EBBE1F2 /* SessionHandle.swift in Sources */,
 				D4B4B613E7DC1D43939370FC /* SessionListChrome.swift in Sources */,
 				4798E2D17E6B930C15C32F57 /* SessionListRow.swift in Sources */,
+				B17D16FCBE4F80E822C82060 /* SessionListing.swift in Sources */,
 				D584EBD8D6D262F6F643491A /* SessionMoves.swift in Sources */,
 				08E5F0CAB166A694C27B6448 /* SessionNames.swift in Sources */,
 				5135702F898F581BDA01AD18 /* SessionOperationControllers.swift in Sources */,

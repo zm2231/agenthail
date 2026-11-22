@@ -22,7 +22,7 @@ struct PairedHostStatus: Identifiable, Equatable {
 
 @MainActor
 @Observable
-final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting {
+final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting, ListingRouting {
     static let voiceHostKey = "voiceHost"
     @ObservationIgnored var hostRefreshWait: Duration = HostRefresh.wait
     @ObservationIgnored let agentRoles = AgentRolesStore()
@@ -36,7 +36,7 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting {
                 if let parent = row.subagent?.parentId { ids[parent, default: []].append(row.id) }
             }
             sessionAttention = SessionAttention.of(snapshot?.sessions ?? [])
-            rederiveTree()
+            sessionListing.rederive()
             if let snapshot {
                 HolderPins.shared.prune(to: snapshot.sessions)
                 let picks = HolderPins.shared.all
@@ -58,19 +58,6 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting {
     private var subagentIDs: [String: [String]] = [:]
     private var daemon: DaemonState?
     private(set) var sessionAttention: [String: SessionAttention] = [:]
-    @ObservationIgnored private var listedTree: (key: ListKey, list: SessionList)?
-    var scope = SessionFilter.recent {
-        didSet { readListing() }
-    }
-    var refinement = SessionRefinement() {
-        didSet { readListing() }
-    }
-    private(set) var listRevision: UInt64 = 0
-    @ObservationIgnored private var orderHold = OrderHold()
-    @ObservationIgnored private var heldList: ScopePage.View?
-    @ObservationIgnored private var heldKey: ListKey?
-    @ObservationIgnored private var heldCells: [String: SessionCell] = [:]
-    @ObservationIgnored private var shownOrder: [ScopePage.View?] = []
     @ObservationIgnored private var detailStorage: SessionDetail?
     private var detailRevision: UInt64 = 0
     @ObservationIgnored let timelineCells = TimelineCells()
@@ -136,6 +123,7 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting {
     @ObservationIgnored private var sessionRequestID = UUID()
     private(set) var rekeys = SessionRekeys()
     @ObservationIgnored private(set) lazy var composerSession = ComposerSession(router: self)
+    @ObservationIgnored private(set) lazy var sessionListing = SessionListing(router: self)
     private struct CreationRequestIdentity: Equatable {
         let surface: String
         let message: String
@@ -176,7 +164,6 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting {
     private(set) var isPaired = false
     private(set) var showsHostNames = false
     private(set) var usageReaders: [AgenthailAPI] = []
-    private(set) var listing = ListingState()
     private(set) var decisionsKey = ""
     private(set) var queue: [QueueState] = []
     private(set) var leadReplacements: [LeadReplacement] = []
@@ -347,11 +334,7 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting {
                 leadReplacements: catalog.leadReplacements)
             if snapshot?.hasSamePresentation(as: merged) != true { snapshot = merged }
         }
-        let order = orderSignature
-        if order != shownOrder {
-            shownOrder = order
-            rederiveTree()
-        }
+        sessionListing.hostsChanged()
         store.carry(rekeys)
         hosts = ordered.map { connection in
             PairedHostStatus(id: connection.id, name: connection.name, address: connection.credential.endpoint.host ?? "",
@@ -404,7 +387,7 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting {
         showsHostNames = Set(sessions.compactMap(\.host?.id)).count > 1 || hostOrder.count > 1
         let readers = ordered.filter(\.reachable).map(\.api)
         if !usageReaders.elementsEqual(readers, by: ===) { usageReaders = readers }
-        readListing()
+        sessionListing.read()
         syncTileOrder(ordered.first)
         let reached = catalog.hosts.map { host in "\(host.id):\(host.state):\(catalog.target(forHost: host.id).map { "\($0.hostID)>\($0.remote ?? "")" } ?? "none")" }
         decisionsKey = (ordered.map { "\($0.id):\($0.shownReachable):\($0.snapshot?.decisionsRev ?? "older")" } + reached).joined(separator: ",")
@@ -415,7 +398,7 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting {
         usageSessions = sessions.filter { $0.archived != true && ($0.isWorking || $0.current) }
         hostGroups = Dictionary(ordered.compactMap { host in host.snapshot.map { (host.id, HostGroups(channels: $0.channels, relays: $0.relays)) } }, uniquingKeysWith: { first, _ in first })
         sessionProjects = Dictionary(sessions.compactMap { row in row.project.map { (row.id, $0.id) } }, uniquingKeysWith: { first, _ in first })
-        projectSessionIDs = inDaemonOrder(sessions).reduce(into: [:]) { ids, row in
+        projectSessionIDs = sessionListing.inDaemonOrder(sessions).reduce(into: [:]) { ids, row in
             if let project = row.project?.id { ids[project, default: []].append(row.id) }
         }
     }
@@ -1257,45 +1240,9 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting {
         _ = await connections[hostID]?.refresh(fresh: true)
     }
 
-    private var listedHosts: [HostConnection] { hostOrder.compactMap { connections[$0] } }
+    var listedHosts: [HostConnection] { hostOrder.compactMap { connections[$0] } }
 
-    nonisolated static func listRequest(_ scope: SessionFilter, _ refinement: SessionRefinement) -> ScopeRequest? {
-        guard refinement.isActive || scope != .recent else { return nil }
-        return ScopeRequest(scope: scope.viewScope, surface: refinement.surface, status: refinement.status?.rawValue)
-    }
-
-    var listRequest: ScopeRequest? { Self.listRequest(scope, refinement) }
-
-    private func readListing() {
-        listing = ListingState.read(listedHosts, request: listRequest, projects: projects, earlier: earlierTargets)
-    }
-
-    func listMore() async {
-        await SessionScopes.readMore(SessionScopes.targets(listRequest, on: listedHosts))
-    }
-
-    var canListMore: Bool { listing.more }
-
-    private func earlierTargets(_ project: ListedProject) -> [ScopeTarget] {
-        let request = ScopeRequest(scope: "all", projectID: project.state.id)
-        let shared = project.state.id.hasPrefix(HostCatalog.repositoryPrefix)
-        let direct = shared ? project.servers + project.state.checkouts.map { ProjectRouting.owner($0.host, of: project) } : []
-        var seen: Set<String> = []
-        return ([project.hostID] + direct).compactMap { hostID in
-            guard seen.insert(hostID).inserted, let host = connections[hostID] else { return nil }
-            return ScopeTarget(host: host, request: request)
-        }
-    }
-
-    func listEarlier(_ project: ListedProject) async { await SessionScopes.readMore(earlierTargets(project)) }
-
-    func hasEarlier(_ project: ListedProject) -> Bool { listing.earlier.contains(ProjectContents.key(of: project)) }
-
-    func earlierPlace(_ project: ListedProject) -> [String] {
-        earlierTargets(project).map { "\($0.host.pages.listings[$0.request]?.cursor ?? "")|\($0.host.pages.hasMore($0.request))" }
-    }
-
-    var listingError: String? { listing.error }
+    func listedHost(_ hostID: String) -> HostConnection? { connections[hostID] }
 
     func projectSessions(_ project: ListedProject) -> [SessionState] {
         let ids = projectSessionIDs[ProjectContents.key(of: project)] ?? []
@@ -1303,122 +1250,9 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting {
         return (lead.map { ids.contains($0) ? ids : ids + [$0] } ?? ids).compactMap(session)
     }
 
-    func searchScope(_ query: String) async {
-        let request = ScopeRequest(scope: scope.viewScope, surface: refinement.surface, status: refinement.status?.rawValue)
-        await SessionScopes.search(query.trimmingCharacters(in: .whitespacesAndNewlines), in: request, on: listedHosts)
-    }
-
     func mentionSessions(for sessionID: String, query: String) async -> [SessionState]? {
         guard let host = server(for: sessionID), let rows = try? await host.mentions(query) else { return nil }
         return rows.map { HostCatalog.merge($0, servedBy: host.id, ownerName: { id in self.catalog.hosts.first { $0.id == id }?.name }, reachable: true).row }
-    }
-
-    struct ListKey: Equatable {
-        let scope: SessionFilter
-        let refinement: SessionRefinement
-        let search: String
-
-        var request: ScopeRequest? { AgenthailIOSModel.listRequest(scope, refinement) }
-    }
-
-    struct SessionList: Equatable {
-        var tree: SessionTree
-        var counts: [SessionFilter: Int]
-        var surfaces: [String]
-    }
-
-    // Families hold session cells, so a change inside one session leaves the tree equal.
-    func sessionTree(search: String) -> SessionTree { sessionList(search: search).tree }
-
-    func sessionList(search: String) -> SessionList {
-        _ = listRevision
-        let key = ListKey(scope: scope, refinement: refinement, search: search)
-        if let listed = listedTree, listed.key == key { return listed.list }
-        let list = buildList(key)
-        listedTree = (key, list)
-        return list
-    }
-
-    private func rederiveTree() {
-        let key = listedTree?.key ?? ListKey(scope: scope, refinement: refinement, search: "")
-        let list = buildList(key)
-        if let listed = listedTree, listed.list == list { return }
-        listedTree = (key, list)
-        listRevision &+= 1
-    }
-
-    private func buildList(_ key: ListKey) -> SessionList {
-        if orderHold.held, heldKey != key { orderHold.release() }
-        let rows = Dictionary((snapshot?.sessions ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let shown = orderHold.shown(list: listOrder(key), current: currentOrder, rows: rows)
-        heldList = shown.list
-        let tree = SessionTree.ordered(list: shown.list, current: shown.current, rows: shown.rows, attention: sessionAttention, cells: treeCells(shown.rows))
-        let counted = key.refinement.isActive ? key.request.flatMap { request in joinedOrder { $0.view(request) } } : currentOrder
-        let counts = Dictionary(uniqueKeysWithValues: SessionFilter.allCases.map { ($0, counted?.counts[$0.viewScope]?.families ?? 0) })
-        let listed = (counted ?? currentOrder)?.surfaces.map(\.surface) ?? []
-        let configured = listedHosts.flatMap { $0.snapshot?.surfaces.map(\.name) ?? [] }
-        let surfaces = Set(listed + configured + [key.refinement.surface].compactMap { $0 }).sorted()
-        return SessionList(tree: tree, counts: counts, surfaces: surfaces)
-    }
-
-    private func treeCells(_ rows: [String: SessionState]) -> [String: SessionCell] {
-        var all = cells.byID
-        guard orderHold.held else {
-            heldCells = [:]
-            return all
-        }
-        for (id, row) in rows where all[id] == nil {
-            let cell = heldCells[id] ?? SessionCell(row)
-            heldCells[id] = cell
-            all[id] = cell
-        }
-        return all
-    }
-
-    private var orderHosts: [HostConnection] { listedHosts.filter(\.shownReachable) + listedHosts.filter { !$0.shownReachable } }
-
-    private func joinedOrder(_ pick: (HostConnection) -> ScopePage.View?) -> ScopePage.View? {
-        ScopePage.View.joined(orderHosts.compactMap { host in pick(host)?.renamed { HostCatalog.qualify(host.id, $0) } })
-    }
-
-    var currentOrder: ScopePage.View? { joinedOrder(\.currentView) }
-
-    /// Sessions in the daemon's order: Current first, then each loaded listing; others keep their place after.
-    private func inDaemonOrder(_ sessions: [SessionState]) -> [SessionState] {
-        var order: [String: Int] = [:]
-        let listings = listedHosts.flatMap { host in host.reader.requests.sorted().compactMap { host.view($0)?.renamed { HostCatalog.qualify(host.id, $0) } } }
-        for member in ([currentOrder].compactMap { $0 } + listings).flatMap({ $0.families.flatMap(\.members) }) where order[member.id] == nil {
-            order[member.id] = order.count
-        }
-        return sessions.enumerated().sorted { lhs, rhs in
-            let (left, right) = (order[lhs.element.id] ?? Int.max, order[rhs.element.id] ?? Int.max)
-            return left != right ? left < right : lhs.offset < rhs.offset
-        }.map(\.element)
-    }
-
-    private var orderSignature: [ScopePage.View?] {
-        listedHosts.flatMap { host in [host.currentView, host.reader.foundView] + host.reader.requests.sorted().map(host.view) }
-    }
-
-    func searchPending(_ search: String) -> Bool { listing.searchPending(search) }
-
-    func listOrder(_ key: ListKey) -> ScopePage.View? {
-        if !key.search.isEmpty { return joinedOrder { $0.reader.foundView } }
-        guard let request = key.request else { return currentOrder }
-        return joinedOrder { $0.view(request) }
-    }
-
-    /// Keeps the list's order while a finger is on it; rows still update in place.
-    func holdOrder(_ holding: Bool) {
-        guard holding != orderHold.held else { return }
-        if holding {
-            let rows = Dictionary((snapshot?.sessions ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            orderHold.hold(list: heldList, current: currentOrder, rows: rows)
-            heldKey = listedTree?.key
-        } else {
-            orderHold.release()
-            rederiveTree()
-        }
     }
 
     func loadSession(_ id: String) async {

@@ -6,25 +6,25 @@ struct IOSSessionFilterMenu: View {
 
     var body: some View {
         Menu {
-            Picker("Status", selection: $model.refinement.status) {
+            Picker("Status", selection: Bindable(model.sessionListing).refinement.status) {
                 Text("All statuses").tag(SessionStatusFilter?.none)
                 ForEach(SessionStatusFilter.allCases) { Text($0.label).tag(Optional($0)) }
             }
             .pickerStyle(.inline)
-            Picker("Surface", selection: $model.refinement.surface) {
+            Picker("Surface", selection: Bindable(model.sessionListing).refinement.surface) {
                 Text("All surfaces").tag(String?.none)
                 ForEach(surfaces, id: \.self) { Text(SessionRefinement.surfaceLabel($0)).tag(Optional($0)) }
             }
             .pickerStyle(.inline)
-            if model.refinement.isActive {
+            if model.sessionListing.refinement.isActive {
                 Divider()
-                Button("Clear Filters", systemImage: "xmark.circle") { model.refinement = SessionRefinement() }
+                Button("Clear Filters", systemImage: "xmark.circle") { model.sessionListing.refinement = SessionRefinement() }
             }
         } label: {
-            Image(systemName: model.refinement.isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+            Image(systemName: model.sessionListing.refinement.isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
         }
         .accessibilityLabel("Filter sessions")
-        .accessibilityValue(model.refinement.isActive ? "Filtered" : "")
+        .accessibilityValue(model.sessionListing.refinement.isActive ? "Filtered" : "")
         .accessibilityIdentifier("filter-menu")
     }
 }
@@ -33,14 +33,14 @@ struct IOSSessionFilterChips: View {
     var model: AgenthailIOSModel
 
     var body: some View {
-        let refinement = model.refinement
+        let refinement = model.sessionListing.refinement
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 if let status = refinement.status {
-                    chip(status.label, id: "status") { model.refinement.status = nil }
+                    chip(status.label, id: "status") { model.sessionListing.refinement.status = nil }
                 }
                 if let surface = refinement.surface {
-                    chip(SessionRefinement.surfaceLabel(surface), id: "surface") { model.refinement.surface = nil }
+                    chip(SessionRefinement.surfaceLabel(surface), id: "surface") { model.sessionListing.refinement.surface = nil }
                 }
             }
             .padding(.vertical, 2)

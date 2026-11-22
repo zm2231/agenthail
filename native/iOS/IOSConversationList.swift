@@ -15,10 +15,10 @@ struct ConversationListView: View {
     @StateObject private var usage = UsageFeed()
     @ScaledMetric(relativeTo: .body) private var titleInset: CGFloat = 53
 
-    private var scope: SessionFilter { model.scope }
+    private var scope: SessionFilter { model.sessionListing.scope }
 
     private func projectsWithoutSessions(_ tree: SessionTree) -> [ListedProject] {
-        guard (scope == .recent || scope == .all) && search.isEmpty && !model.refinement.isActive else { return [] }
+        guard (scope == .recent || scope == .all) && search.isEmpty && !model.sessionListing.refinement.isActive else { return [] }
         let listed = Set(tree.projects.compactMap(\.identity?.id))
         return model.projectOrder.filter { !listed.contains($0) }.compactMap { model.projects[$0] }.filter { $0.state.archived != true }
     }
@@ -27,7 +27,7 @@ struct ConversationListView: View {
 #if DEBUG
         let _ = BodyRuns.hit("ConversationListView")
 #endif
-        let list = model.sessionList(search: search)
+        let list = model.sessionListing.sessionList(search: search)
         let tree = list.tree
         let families = tree.projects.flatMap { $0.checkouts.flatMap(\.families) }
         List {
@@ -37,11 +37,11 @@ struct ConversationListView: View {
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
             }
-            SessionScopeChips(scope: $model.scope, counts: list.counts)
+            SessionScopeChips(scope: Bindable(model.sessionListing).scope, counts: list.counts)
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
-            if model.refinement.isActive {
+            if model.sessionListing.refinement.isActive {
                 IOSSessionFilterChips(model: model)
                     .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0))
                     .listRowSeparator(.hidden)
@@ -101,27 +101,27 @@ struct ConversationListView: View {
                     }
                 }
             }
-            let listingMore = search.isEmpty && model.canListMore
-            if let error = model.listingError, model.listRequest != nil {
-                Button { Task { await model.listMore() } } label: {
+            let listingMore = search.isEmpty && model.sessionListing.canListMore
+            if let error = model.sessionListing.listingError, model.sessionListing.listRequest != nil {
+                Button { Task { await model.sessionListing.listMore() } } label: {
                     Label(error, systemImage: "arrow.clockwise").font(.footnote).foregroundStyle(PhonePalette.muted)
                 }
                 .accessibilityIdentifier("list-more-retry")
             } else if listingMore {
                 ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
-                    .task(id: "\(String(describing: model.listRequest))|\(model.sessionCount)") { await model.listMore() }
+                    .task(id: "\(String(describing: model.sessionListing.listRequest))|\(model.sessionCount)") { await model.sessionListing.listMore() }
                     .accessibilityIdentifier("list-more")
             }
-            if families.isEmpty && model.searchPending(search) {
+            if families.isEmpty && model.sessionListing.searchPending(search) {
                 Text("Searching")
                     .font(.footnote)
                     .foregroundStyle(PhonePalette.muted)
                     .listRowBackground(Color.clear)
-            } else if families.isEmpty && model.refinement.isActive && !model.searching && !listingMore {
+            } else if families.isEmpty && model.sessionListing.refinement.isActive && !model.searching && !listingMore {
                 ContentUnavailableView {
                     Label("No sessions match these filters.", systemImage: "line.3.horizontal.decrease.circle")
                 } actions: {
-                    Button("Clear Filters") { model.refinement = SessionRefinement() }
+                    Button("Clear Filters") { model.sessionListing.refinement = SessionRefinement() }
                         .buttonStyle(.bordered)
                         .accessibilityIdentifier("clear-filters")
                 }
@@ -158,9 +158,9 @@ struct ConversationListView: View {
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $search, prompt: "Search sessions")
         .task(id: search) { await model.searchSessions(search) }
-        .task(id: "\(scope.rawValue)\u{0}\(String(describing: model.refinement))\u{0}\(search)") {
+        .task(id: "\(scope.rawValue)\u{0}\(String(describing: model.sessionListing.refinement))\u{0}\(search)") {
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
-            await model.searchScope(search)
+            await model.sessionListing.searchScope(search)
         }
         .task(id: model.usageReaders.map(ObjectIdentifier.init)) { await usage.run(model.usageReaders) }
         .toolbar {
@@ -246,7 +246,7 @@ struct ConversationListView: View {
     }
 
     private func row(_ source: SessionListRow.Source, id: String, snippet: String? = nil, reason: String? = nil, identifierPrefix: String = "session-") -> SessionListRow {
-        SessionListRow(model: model, source: source, needsYou: model.sessionTree(search: search).attention[id] != nil, selected: selectedID == id,
+        SessionListRow(model: model, source: source, needsYou: model.sessionListing.sessionTree(search: search).attention[id] != nil, selected: selectedID == id,
                        snippet: snippet, reason: reason, identifierPrefix: identifierPrefix, open: openSession)
     }
 }
