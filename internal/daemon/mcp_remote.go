@@ -78,6 +78,9 @@ func (d *Daemon) remoteMCP() *remoteMCP {
 		stream := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return m.server }, &mcp.StreamableHTTPOptions{EventStore: mcp.NewMemoryEventStore(nil), SessionTimeout: cmp.Or(d.remoteIdle, remoteSessionIdle)})
 		bearer := auth.RequireBearerToken(m.verify, &auth.RequireBearerTokenOptions{})
 		m.handler = bearerChallenge(bearer(http.NewCrossOriginProtection().Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if refuseTunnelHost(w, r) {
+				return
+			}
 			m.admitMu.Lock()
 			if m.stopped.Load() {
 				m.admitMu.Unlock()

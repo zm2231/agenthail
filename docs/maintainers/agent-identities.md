@@ -126,6 +126,20 @@ Subscriptions are rows of `mcp_event_subscriptions` (schema 125). The secret is 
 
 Cloudflare's side (the Access application, its service token, the tunnel and DNS) is set up in Cloudflare; the daemon only checks what arrives.
 
+The daemon listens on loopback (`127.0.0.1:7412` by default) and, like the MCP SDK's DNS rebinding check, refuses a request there whose `Host` is not a loopback name. A tunnel forwards the public hostname as `Host`, so its rule for `/mcp` must rewrite `Host` to the daemon's listen address. With Cloudflare Tunnel, set `originRequest.httpHostHeader` on that ingress rule:
+
+```yaml
+ingress:
+  - hostname: agent.example.com
+    path: ^/mcp$
+    service: http://127.0.0.1:7412
+    originRequest:
+      httpHostHeader: 127.0.0.1:7412
+  - service: http_status:404
+```
+
+Without the rewrite every request gets 403 `Forbidden: invalid Host header "agent.example.com"`, followed by the listen address and the `httpHostHeader` value to set.
+
 ## Known gaps
 
 - The Mac and iPhone apps and the web dashboard do not show identities or their inboxes. Messages from one show its name like any agent's.
