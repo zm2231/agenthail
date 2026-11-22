@@ -656,7 +656,7 @@ func TestASessionsDetailNamesTheRoleItActsUnderAndWhatItReplaced(t *testing.T) {
 	if got := role("from"); got["name"] != agentroles.Worker || got["label"] != agentroles.Worker || got["replaces"] != nil {
 		t.Fatalf("an unassigned session's role reads %v", got)
 	}
-	for _, request := range []AgentRoleRequest{
+	for _, request := range []daemonapi.AgentRoleRequest{
 		{Op: "put", Name: "reviewer", Role: agentroles.Role{Reach: agentroles.ReachProject}},
 		{Op: "assign", Name: "reviewer", Kind: registry.AssignSession, Target: "from"},
 	} {
@@ -709,7 +709,7 @@ func TestARemoteIdentitysDetailShowsTheRoleARemoteCallerActsUnderAsWhoamiDoes(t 
 		}
 	}
 	agree(agentroles.Remote)
-	for _, request := range []AgentRoleRequest{
+	for _, request := range []daemonapi.AgentRoleRequest{
 		{Op: "put", Name: "reviewer", Role: agentroles.Role{Reach: agentroles.ReachProject}},
 		{Op: "assign", Name: "reviewer", Kind: registry.AssignIdentity, Target: "scout"},
 	} {
