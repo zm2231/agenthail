@@ -27,6 +27,7 @@ let package = Package(
                 "StatusRefreshPolicy.swift",
                 "SnapshotRefreshPolicy.swift",
                 "AgenthailModels.swift",
+                "HeldWorkLine.swift",
                 "LaunchSettings.swift",
                 "SessionTurnSettings.swift",
                 "PersonMessageNote.swift",

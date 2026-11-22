@@ -296,6 +296,13 @@ struct SessionPreview: View {
             asking[0]["capabilities"] = askingCapabilities
             snapshot["sessions"] = asking
         }
+        if ProcessInfo.processInfo.arguments.contains("--preview-held-work") {
+            var holding = snapshot["sessions"] as! [[String: Any]]
+            holding[0]["heldWork"] = [["itemId": "app-W7", "text": "Fix the login redirect", "state": "in_progress", "projectKey": "repo:github.com/demo/fieldnotes", "log": ["type": "decision", "text": "Kept the old token format so signed-in phones stay signed in", "at": "2026-09-12T04:00:00Z"]],
+                                      ["itemId": "app-W9", "text": "Document the login flow", "state": "blocked"]]
+            holding[1]["heldWork"] = [["itemId": "app-W12", "text": "Speed up the release build", "state": "in_review"]]
+            snapshot["sessions"] = holding
+        }
         if ProcessInfo.processInfo.arguments.contains("--preview-groups") {
             snapshot["channels"] = [["name": "release", "members": ["demo", "codex-demo"], "memberDetails": [["id": "demo", "display": "@demo"], ["id": "codex-demo", "display": "@codex-demo"]]]]
             snapshot["relays"] = [["id": 7, "from": "demo", "to": "codex-demo", "pattern": "ready for review", "once": false, "active": true, "handoff": "turn_finished", "pendingCount": 0, "fireCount": 3, "lastFiredAt": "2026-09-12T03:58:00Z"]]

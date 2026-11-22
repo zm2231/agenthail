@@ -13,6 +13,7 @@ final class RenderCounts {
 final class Selection: ObservableObject {
     @Published var selected = "a"
     @Published var unrelated = 0
+    @Published var heldLog: String?
 }
 
 struct ProbeRow: View, @MainActor Equatable {
@@ -35,7 +36,8 @@ struct ProbeList: View {
     var body: some View {
         let _ = selection.unrelated
         VStack {
-            ForEach(sessions) { session in
+            ForEach(sessions) { base in
+                let session = SidebarRowTest.holding(base, log: base.id == "c" ? selection.heldLog : nil)
                 ProbeRow(state: SidebarRowState(session: session, title: session.name, selected: selection.selected == session.id), renders: renders)
                     .equatable()
             }
@@ -48,6 +50,13 @@ struct SidebarRowTest {
     static func session(_ id: String, name: String? = nil, archived: Bool? = nil) -> SessionState {
         var row = SessionState(id: id, surface: "claude", name: name ?? id, alias: nil, status: "idle", lastActive: "2026-11-06T08:00:00Z", queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(respond: true), readOnly: false, readOnlyReason: "")
         row.archived = archived
+        return row
+    }
+
+    static func holding(_ session: SessionState, log: String?) -> SessionState {
+        guard let log else { return session }
+        var row = session
+        row.heldWork = [HeldWork(itemId: "app-W7", text: "fix the login", state: "in_progress", log: HeldWorkLog(type: "progress", text: log, at: nil))]
         return row
     }
 
@@ -68,6 +77,7 @@ struct SidebarRowTest {
             ("lead", SidebarRowState(session: session("a"), title: "a", canMakeLead: true)),
             ("session", SidebarRowState(session: session("a", archived: true), title: "a")),
             ("family", SidebarRowState(session: session("a"), title: "a", family: SessionFamily(root: session("a"), members: [], workingSubagents: 1))),
+            ("held work", SidebarRowState(session: holding(session("a"), log: "started"), title: "a")),
         ]
         for (name, other) in changed { check(base != other, "a \(name) change re-renders the row") }
 
@@ -101,6 +111,15 @@ struct SidebarRowTest {
         selection.selected = "e"
         settle()
         check(renders.counts == ["a": 1, "e": 1], "a selection change redraws only the two rows whose selection changed: \(renders.counts)")
+        renders.counts = [:]
+        selection.heldLog = "started on the login form"
+        settle()
+        check(renders.counts == ["c": 1], "a session gaining held work redraws only its row: \(renders.counts)")
+        renders.counts = [:]
+        selection.heldLog = "kept the old token"
+        settle()
+        check(renders.counts == ["c": 1], "a new log line on held work redraws only its row: \(renders.counts)")
+        check(base != SidebarRowState(session: holding(session("a"), log: "one"), title: "a") && SidebarRowState(session: holding(session("a"), log: "one"), title: "a") != SidebarRowState(session: holding(session("a"), log: "two"), title: "a"), "each log line makes the row unequal")
 
         let model = AgenthailModel(connecting: false)
         let pane = model.openPane()

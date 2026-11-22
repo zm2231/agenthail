@@ -47,6 +47,7 @@ SOURCES=(
   AgenthailModelBroadcast.swift
   ScopeTreeCache.swift
   AgenthailModels.swift
+  HeldWorkLine.swift
   ComposerAttachment.swift
   ComposerStore.swift
   PendingSend.swift
