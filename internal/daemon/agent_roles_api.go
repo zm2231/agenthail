@@ -14,52 +14,15 @@ import (
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/agentroles"
-
 	"github.com/zm2231/agenthail/internal/agenttools"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
 var roleNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}$`)
 
-type AgentRoleView struct {
-	Name        string            `json:"name"`
-	BuiltIn     bool              `json:"builtIn"`
-	Edited      bool              `json:"edited"`
-	Description string            `json:"description"`
-	Reach       string            `json:"reach"`
-	Decisions   map[string]string `json:"decisions"`
-	// Definition is the role as stored, which a change edits and puts back.
-	Definition agentroles.Role `json:"definition"`
-	Tools      []string        `json:"tools"`
-	AllTools   bool            `json:"allTools"`
-	Depth      int             `json:"depth"`
-	Running    int             `json:"running"`
-}
-
-type AgentActionView struct {
-	Name       string `json:"name"`
-	Default    string `json:"default"`
-	Detail     string `json:"detail"`
-	OwnProject bool   `json:"ownProject"`
-}
-
-type AgentRolesView struct {
-	Roles       []AgentRoleView           `json:"roles"`
-	Assignments []AgentRoleAssignmentView `json:"assignments"`
-	Actions     []AgentActionView         `json:"actions"`
-	Tools       []string                  `json:"tools"`
-}
-
-type AgentRoleAssignmentView struct {
-	Kind   string `json:"kind"`
-	Target string `json:"target"`
-	Role   string `json:"role"`
-	// Stale says why the assignment gives no session its role, if it does not.
-	Stale string `json:"stale,omitempty"`
-}
-
-func (r resolvedRole) view() AgentRoleView {
-	view := AgentRoleView{Name: r.Name, BuiltIn: r.BuiltIn, Edited: r.Edited, Description: r.Description, Reach: r.Reach, Decisions: map[string]string{}, Definition: r.Role.Normalized(), AllTools: r.Tools == nil, Depth: r.DepthLimit(), Running: r.RunningLimit()}
+func (r resolvedRole) view() daemonapi.AgentRoleView {
+	view := daemonapi.AgentRoleView{Name: r.Name, BuiltIn: r.BuiltIn, Edited: r.Edited, Description: r.Description, Reach: r.Reach, Decisions: map[string]string{}, Definition: r.Role.Normalized(), AllTools: r.Tools == nil, Depth: r.DepthLimit(), Running: r.RunningLimit()}
 	for _, action := range agentroles.Actions {
 		view.Decisions[action.Name] = r.Decision(action.Name)
 	}
@@ -71,12 +34,12 @@ func (r resolvedRole) view() AgentRoleView {
 	return view
 }
 
-func (d *Daemon) agentRolesView() (AgentRolesView, error) {
+func (d *Daemon) agentRolesView() (daemonapi.AgentRolesView, error) {
 	roles, err := d.agentRoles()
 	if err != nil {
-		return AgentRolesView{}, err
+		return daemonapi.AgentRolesView{}, err
 	}
-	view := AgentRolesView{Roles: make([]AgentRoleView, 0, len(roles))}
+	view := daemonapi.AgentRolesView{Roles: make([]daemonapi.AgentRoleView, 0, len(roles))}
 	for _, role := range roles {
 		view.Roles = append(view.Roles, role.view())
 	}
@@ -88,29 +51,15 @@ func (d *Daemon) agentRolesView() (AgentRolesView, error) {
 		return a.Name < b.Name
 	})
 	if view.Assignments, err = d.agentRoleAssignmentsView(roles); err != nil {
-		return AgentRolesView{}, err
+		return daemonapi.AgentRolesView{}, err
 	}
 	for _, action := range agentroles.Actions {
-		view.Actions = append(view.Actions, AgentActionView(action))
+		view.Actions = append(view.Actions, daemonapi.AgentActionView(action))
 	}
 	for _, tool := range agenttools.Tools {
 		view.Tools = append(view.Tools, tool.Name)
 	}
 	return view, nil
-}
-
-type AgentRoleRequest struct {
-	// Op is put, which writes the whole role; delete, which removes a role
-	// the person made or returns a built-in one to how Agenthail ships it;
-	// assign, which gives the role Name to what Kind and Target name; or
-	// unassign, which takes that assignment away.
-	Op   string          `json:"op"`
-	Name string          `json:"name"`
-	Role agentroles.Role `json:"role"`
-	// Kind is session, identity or alias. A session's Target may be its id
-	// or its alias, and is stored as its conversation id.
-	Kind   string `json:"kind,omitempty"`
-	Target string `json:"target,omitempty"`
 }
 
 // agentRolesHandler serves the dashboard API, where a write is taken only from
@@ -130,7 +79,7 @@ func (d *Daemon) serveAgentRoles(w http.ResponseWriter, r *http.Request, actor s
 	switch r.Method {
 	case http.MethodGet:
 	case http.MethodPost:
-		var request AgentRoleRequest
+		var request daemonapi.AgentRoleRequest
 		if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&request); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "send an op, a name and, for put, a role")
 			return
@@ -153,7 +102,7 @@ func (d *Daemon) serveAgentRoles(w http.ResponseWriter, r *http.Request, actor s
 
 // changeAgentRole writes the person's change and tells them who made it, so
 // a change that did not come from them is seen.
-func (d *Daemon) changeAgentRole(ctx context.Context, actor string, request AgentRoleRequest) error {
+func (d *Daemon) changeAgentRole(ctx context.Context, actor string, request daemonapi.AgentRoleRequest) error {
 	name := strings.TrimSpace(request.Name)
 	_, builtIn := agentroles.BuiltIn[name]
 	switch request.Op {
@@ -211,17 +160,17 @@ func (d *Daemon) adoptAgentRoles(records []registry.AgentRoleRecord) error {
 	return nil
 }
 
-func (d *Daemon) agentRoleAssignmentsView(roles map[string]resolvedRole) ([]AgentRoleAssignmentView, error) {
+func (d *Daemon) agentRoleAssignmentsView(roles map[string]resolvedRole) ([]daemonapi.AgentRoleAssignmentView, error) {
 	records, err := d.Registry.AgentRoleAssignments()
 	if err != nil {
 		return nil, err
 	}
-	views := []AgentRoleAssignmentView{}
+	views := []daemonapi.AgentRoleAssignmentView{}
 	for _, record := range records {
 		if record.Deleted {
 			continue
 		}
-		view := AgentRoleAssignmentView{Kind: record.Kind, Target: record.Target, Role: record.Role}
+		view := daemonapi.AgentRoleAssignmentView{Kind: record.Kind, Target: record.Target, Role: record.Role}
 		if _, exists := roles[record.Role]; !exists {
 			view.Stale = "no role " + record.Role
 		} else if record.Kind == registry.AssignSession {
@@ -239,7 +188,7 @@ func (d *Daemon) agentRoleAssignmentsView(roles map[string]resolvedRole) ([]Agen
 	return views, nil
 }
 
-func (d *Daemon) changeAgentRoleAssignment(ctx context.Context, actor string, request AgentRoleRequest) error {
+func (d *Daemon) changeAgentRoleAssignment(ctx context.Context, actor string, request daemonapi.AgentRoleRequest) error {
 	kind, target := request.Kind, strings.TrimPrefix(strings.TrimSpace(request.Target), "@")
 	if target == "" {
 		return fmt.Errorf("name the session, identity or alias to %s", request.Op)

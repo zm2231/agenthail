@@ -13,11 +13,12 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/agentroles"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
-func localSocketPost(t *testing.T, request AgentRoleRequest) (int, string) {
+func localSocketPost(t *testing.T, request daemonapi.AgentRoleRequest) (int, string) {
 	t.Helper()
 	client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", daemonctl.LocalSocketPath())
@@ -49,16 +50,16 @@ func TestAnAgentCannotRaiseItsOwnRoleWhileThePersonsTerminalCan(t *testing.T) {
 		}
 		return d.callerRole(record, false).Name
 	}
-	raise := AgentRoleRequest{Op: "assign", Name: agentroles.Operator, Kind: registry.AssignSession, Target: "claude-one"}
+	raise := daemonapi.AgentRoleRequest{Op: "assign", Name: agentroles.Operator, Kind: registry.AssignSession, Target: "claude-one"}
 	if status, body := localSocketPost(t, raise); status != http.StatusOK || roleOf() != agentroles.Operator {
 		t.Fatalf("a process outside every session assigned a role: %d %s, the session holds %s", status, body, roleOf())
 	}
-	if status, body := localSocketPost(t, AgentRoleRequest{Op: "unassign", Kind: registry.AssignSession, Target: "claude-one"}); status != http.StatusOK {
+	if status, body := localSocketPost(t, daemonapi.AgentRoleRequest{Op: "unassign", Kind: registry.AssignSession, Target: "claude-one"}); status != http.StatusOK {
 		t.Fatalf("unassign answered %d %s", status, body)
 	}
 	agent := &relayedSession{record: filepath.Join(root, "sessions", strconv.Itoa(os.Getppid())+".json")}
 	agent.writeFor(t, os.Getppid(), "claude-one", true)
-	for _, request := range []AgentRoleRequest{
+	for _, request := range []daemonapi.AgentRoleRequest{
 		raise,
 		{Op: "unassign", Kind: registry.AssignSession, Target: "claude-one"},
 		{Op: "put", Name: agentroles.Worker, Role: agentroles.Role{Reach: agentroles.ReachAll}},
@@ -90,7 +91,7 @@ func TestAnAgentWhoseClaudeRecordIsTornCannotChangeRoles(t *testing.T) {
 	if err := os.WriteFile(record, []byte(`{"pid":`+strconv.Itoa(os.Getppid())+`,"sessionId":"claude-o`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	raise := AgentRoleRequest{Op: "assign", Name: agentroles.Operator, Kind: registry.AssignSession, Target: "claude-one"}
+	raise := daemonapi.AgentRoleRequest{Op: "assign", Name: agentroles.Operator, Kind: registry.AssignSession, Target: "claude-one"}
 	if status, body := localSocketPost(t, raise); status != http.StatusForbidden || !strings.Contains(body, "could not name") {
 		t.Fatalf("a command below a Claude process whose record is torn got %d %s", status, body)
 	}

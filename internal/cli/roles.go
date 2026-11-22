@@ -14,7 +14,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/agentroles"
 
-	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 )
 
 const rolesUsage = `usage: agenthail roles [list] [--json] | show <role> [--json]
@@ -71,7 +71,7 @@ func (a *App) cmdRoles(args []string) error {
 		case verb == "reset" && !role.BuiltIn:
 			return fmt.Errorf("%s is a role you made; 'agenthail roles delete %s' removes it", role.Name, role.Name)
 		}
-		return a.postRole(daemon.AgentRoleRequest{Op: "delete", Name: role.Name})
+		return a.postRole(daemonapi.AgentRoleRequest{Op: "delete", Name: role.Name})
 	}
 	if len(rest) < 2 {
 		return errors.New(rolesUsage)
@@ -148,35 +148,35 @@ func editRole(role agentroles.Role, verb string, args []string, tools []string) 
 	return role, nil
 }
 
-func roleNamed(view daemon.AgentRolesView, name string) (daemon.AgentRoleView, bool) {
+func roleNamed(view daemonapi.AgentRolesView, name string) (daemonapi.AgentRoleView, bool) {
 	for _, role := range view.Roles {
 		if role.Name == name {
 			return role, true
 		}
 	}
-	return daemon.AgentRoleView{}, false
+	return daemonapi.AgentRoleView{}, false
 }
 
-func (a *App) fetchRoles() (daemon.AgentRolesView, error) {
+func (a *App) fetchRoles() (daemonapi.AgentRolesView, error) {
 	client, err := a.localDaemonAPI()
 	if err != nil {
-		return daemon.AgentRolesView{}, err
+		return daemonapi.AgentRolesView{}, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), rolesTimeout)
 	defer cancel()
-	var view daemon.AgentRolesView
+	var view daemonapi.AgentRolesView
 	err = client.getJSON(ctx, "/api/v1/agents", nil, &view)
 	return view, err
 }
 
 func (a *App) putRole(name string, role agentroles.Role) error {
-	if err := a.postRole(daemon.AgentRoleRequest{Op: "put", Name: name, Role: role}); err != nil {
+	if err := a.postRole(daemonapi.AgentRoleRequest{Op: "put", Name: name, Role: role}); err != nil {
 		return err
 	}
 	return a.showRole(name, false)
 }
 
-func (a *App) postRole(request daemon.AgentRoleRequest) error {
+func (a *App) postRole(request daemonapi.AgentRoleRequest) error {
 	client, err := a.localDaemonAPI()
 	if err != nil {
 		return err
@@ -202,7 +202,7 @@ func (a *App) assignRole(verb string, rest, args []string) error {
 	if kind == "" || (verb == "assign") != (len(rest) == 1) {
 		return errors.New(rolesUsage)
 	}
-	request := daemon.AgentRoleRequest{Op: verb, Kind: kind, Target: target}
+	request := daemonapi.AgentRoleRequest{Op: verb, Kind: kind, Target: target}
 	if verb == "assign" {
 		request.Name = rest[0]
 	}
@@ -244,7 +244,7 @@ func (a *App) listRoles(asJSON bool) error {
 	return out.Flush()
 }
 
-func roleKind(role daemon.AgentRoleView) string {
+func roleKind(role daemonapi.AgentRoleView) string {
 	switch {
 	case role.BuiltIn && role.Edited:
 		return "built in, changed"

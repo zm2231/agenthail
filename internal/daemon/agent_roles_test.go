@@ -478,11 +478,11 @@ func TestAPersonsRolesAndAssignmentsReachEveryPairedHostAndResolveAlikeThere(t *
 		}
 		return nil
 	}
-	put := AgentRoleRequest{Op: "put", Name: agentroles.Lead, Role: agentroles.Role{Reach: agentroles.ReachProject, Actions: map[string]string{"project-archive": agentroles.Ask}, Running: 4}}
+	put := daemonapi.AgentRoleRequest{Op: "put", Name: agentroles.Lead, Role: agentroles.Role{Reach: agentroles.ReachProject, Actions: map[string]string{"project-archive": agentroles.Ask}, Running: 4}}
 	if response := laptop.request(t, http.MethodPost, "/api/v1/agents", put); response.Code != http.StatusForbidden {
 		t.Fatalf("a write with the dashboard token, which any local process can read, answered %d %s", response.Code, response.Body)
 	}
-	change := func(node *federationNode, request AgentRoleRequest) {
+	change := func(node *federationNode, request daemonapi.AgentRoleRequest) {
 		t.Helper()
 		if err := node.daemon.changeAgentRole(context.Background(), daemonapi.CLIActor, request); err != nil {
 			t.Fatal(err)
@@ -499,8 +499,8 @@ func TestAPersonsRolesAndAssignmentsReachEveryPairedHostAndResolveAlikeThere(t *
 		role := leadOn(server)
 		return role.Decision("project-archive") == agentroles.Ask && role.RunningLimit() == 4
 	})
-	change(laptop, AgentRoleRequest{Op: "put", Name: "reviewer", Role: agentroles.Role{Reach: agentroles.ReachDescendants}})
-	change(laptop, AgentRoleRequest{Op: "assign", Name: "reviewer", Kind: registry.AssignAlias, Target: "@builder"})
+	change(laptop, daemonapi.AgentRoleRequest{Op: "put", Name: "reviewer", Role: agentroles.Role{Reach: agentroles.ReachDescendants}})
+	change(laptop, daemonapi.AgentRoleRequest{Op: "assign", Name: "reviewer", Kind: registry.AssignAlias, Target: "@builder"})
 	builderOn := func(node *federationNode) resolvedRole {
 		return node.daemon.callerRole(registry.CallerRecord{Alias: "builder", Roles: registry.SessionRoles{Lead: true}}, false)
 	}
@@ -508,14 +508,14 @@ func TestAPersonsRolesAndAssignmentsReachEveryPairedHostAndResolveAlikeThere(t *
 		role := builderOn(server)
 		return role.Name == "reviewer" && role.label() == "lead (replaced by reviewer)"
 	})
-	change(server, AgentRoleRequest{Op: "delete", Name: "reviewer"})
+	change(server, daemonapi.AgentRoleRequest{Op: "delete", Name: "reviewer"})
 	for _, node := range []*federationNode{server, laptop} {
 		testkit.Eventually(t, "an assignment to a deleted role is passed over on every host", 10*time.Second, func() bool {
 			view, err := node.daemon.agentRolesView()
 			return err == nil && builderOn(node).Name == agentroles.Lead && len(view.Assignments) == 1 && view.Assignments[0].Stale == "no role reviewer"
 		})
 	}
-	change(server, AgentRoleRequest{Op: "delete", Name: agentroles.Lead})
+	change(server, daemonapi.AgentRoleRequest{Op: "delete", Name: agentroles.Lead})
 	testkit.Eventually(t, "the laptop takes the server's reset", 10*time.Second, func() bool {
 		role := leadOn(laptop)
 		return role.Decision("project-archive") == agentroles.Notify && role.RunningLimit() == 8 && !role.Edited
@@ -530,14 +530,14 @@ func TestAnAssignmentGoesToTheSessionItsBranchesItsIdentityThenItsAlias(t *testi
 			t.Fatal(err)
 		}
 	}
-	change := func(request AgentRoleRequest) {
+	change := func(request daemonapi.AgentRoleRequest) {
 		t.Helper()
 		if err := d.changeAgentRole(context.Background(), daemonapi.CLIActor, request); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for _, name := range []string{"by-alias", "by-identity", "by-parent", "by-session"} {
-		change(AgentRoleRequest{Op: "put", Name: name, Role: agentroles.Role{Reach: agentroles.ReachDescendants}})
+		change(daemonapi.AgentRoleRequest{Op: "put", Name: name, Role: agentroles.Role{Reach: agentroles.ReachDescendants}})
 	}
 	caller := registry.CallerRecord{Session: surface.Session{ID: "child"}, Identity: "scout", Alias: "scout", Roles: registry.SessionRoles{Lead: true}}
 	holds := func(want, label string) {
@@ -548,22 +548,22 @@ func TestAnAssignmentGoesToTheSessionItsBranchesItsIdentityThenItsAlias(t *testi
 		}
 	}
 	holds(agentroles.Lead, agentroles.Lead)
-	change(AgentRoleRequest{Op: "assign", Name: "by-alias", Kind: registry.AssignAlias, Target: "scout"})
+	change(daemonapi.AgentRoleRequest{Op: "assign", Name: "by-alias", Kind: registry.AssignAlias, Target: "scout"})
 	holds("by-alias", "lead (replaced by by-alias)")
-	change(AgentRoleRequest{Op: "assign", Name: "by-identity", Kind: registry.AssignIdentity, Target: "scout"})
+	change(daemonapi.AgentRoleRequest{Op: "assign", Name: "by-identity", Kind: registry.AssignIdentity, Target: "scout"})
 	holds("by-identity", "lead (replaced by by-identity)")
-	change(AgentRoleRequest{Op: "assign", Name: "by-parent", Kind: registry.AssignSession, Target: "parent"})
+	change(daemonapi.AgentRoleRequest{Op: "assign", Name: "by-parent", Kind: registry.AssignSession, Target: "parent"})
 	holds("by-parent", "lead (replaced by by-parent)")
-	change(AgentRoleRequest{Op: "assign", Name: "by-session", Kind: registry.AssignSession, Target: "child"})
+	change(daemonapi.AgentRoleRequest{Op: "assign", Name: "by-session", Kind: registry.AssignSession, Target: "child"})
 	holds("by-session", "lead (replaced by by-session)")
-	change(AgentRoleRequest{Op: "delete", Name: "by-session"})
+	change(daemonapi.AgentRoleRequest{Op: "delete", Name: "by-session"})
 	holds("by-parent", "lead (replaced by by-parent)")
-	change(AgentRoleRequest{Op: "unassign", Kind: registry.AssignSession, Target: "parent"})
+	change(daemonapi.AgentRoleRequest{Op: "unassign", Kind: registry.AssignSession, Target: "parent"})
 	holds("by-identity", "lead (replaced by by-identity)")
 	if err := r.ArchiveSession("parent", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	change(AgentRoleRequest{Op: "assign", Name: "by-alias", Kind: registry.AssignSession, Target: "parent"})
+	change(daemonapi.AgentRoleRequest{Op: "assign", Name: "by-alias", Kind: registry.AssignSession, Target: "parent"})
 	view, err := d.agentRolesView()
 	if err != nil {
 		t.Fatal(err)
