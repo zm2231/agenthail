@@ -1,6 +1,8 @@
+import fs from "node:fs";
 import path from "node:path";
 import { launch } from "./browser.mjs";
 import { brightLuminance, decode, QUANTIZATION, worstContrast } from "./contrast.mjs";
+import { describeRequests, trackRequests } from "./requests.mjs";
 import { collectText, HIDE_TEXT } from "./text.mjs";
 import { onStep, openView, settle, step, VIEWS } from "./views.mjs";
 
@@ -11,6 +13,7 @@ const SIZES = { wide: [1440, 900], phone: [390, 844] };
 const STALL_LIMIT_MS = 3 * 60_000;
 const progress = new Map(Object.keys(themes).map((theme) => [theme, { last: Date.now(), longest: 0, doing: "starting", pages: {} }]));
 const steps = new Map();
+const requests = new Map();
 onStep((page, name) => steps.set(page, name));
 
 function working(theme, label) {
@@ -35,6 +38,7 @@ async function signedIn(browser, dashboard) {
   await context.setCookie({ name, value, url: dashboard.url });
   const page = await context.newPage();
   page.setDefaultTimeout(0);
+  requests.set(page, { url: dashboard.url, pending: await trackRequests(page) });
   return page;
 }
 
@@ -181,11 +185,12 @@ if (deadline) {
 }
 const pageState = (page) =>
   Promise.race([
-    page.evaluate(() => {
+    page.evaluate(async () => {
       const html = document.documentElement;
-      return JSON.stringify({ url: location.href, ready: document.readyState, uiSettled: html.hasAttribute("data-ui-settled"), toastHidden: document.querySelector("#toast")?.hidden ?? null });
+      const frame = await Promise.race([new Promise((resolve) => requestAnimationFrame(() => resolve("fires"))), new Promise((resolve) => setTimeout(() => resolve("none in 2 s"), 2000))]);
+      return JSON.stringify({ url: location.href, ready: document.readyState, uiSettled: html.hasAttribute("data-ui-settled"), status: document.querySelector("#daemon-status")?.textContent ?? null, visibility: document.visibilityState, frame, toastHidden: document.querySelector("#toast")?.hidden ?? null });
     }),
-    new Promise((resolve) => setTimeout(() => resolve("did not answer in 5 s"), 5000)),
+    new Promise((resolve) => setTimeout(() => resolve("did not answer in 30 s"), 30_000)),
   ]).catch((error) => `unreadable: ${error.message}`);
 
 let stopping = false;
@@ -195,7 +200,15 @@ setInterval(async () => {
   if (!stalled || stopping) return;
   stopping = true;
   console.log(`readability guard: ${stalled[0]} finished nothing in ${STALL_LIMIT_MS / 1000} s, stuck on ${stalled[1].doing}`);
-  for (const [key, page] of Object.entries(stalled[1].pages)) console.log(`readability guard: ${stalled[0]} ${key} page at ${steps.get(page) ?? "no step"}, ${await pageState(page)}`);
+  const stuck = [];
+  for (const [key, page] of Object.entries(stalled[1].pages)) {
+    const { url, pending } = requests.get(page);
+    const entries = pending();
+    console.log(`readability guard: ${stalled[0]} ${key} page at ${steps.get(page) ?? "no step"}, ${await pageState(page)}`);
+    console.log(`readability guard: ${stalled[0]} ${key} page requests: ${describeRequests(entries)}`);
+    stuck.push(...entries.map((entry) => ({ dashboard: url, id: entry.id, path: entry.path })));
+  }
+  if (process.env.AGENTHAIL_GUARD_STALL_FILE) fs.writeFileSync(process.env.AGENTHAIL_GUARD_STALL_FILE, JSON.stringify(stuck));
   abandon();
   process.exit(1);
 }, 1000).unref();

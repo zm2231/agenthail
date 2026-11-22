@@ -29,10 +29,17 @@ func TestDashboardTextIsReadableOverEveryBackground(t *testing.T) {
 	}
 	t.Setenv("HOME", t.TempDir())
 	themes := map[string]map[string]readabilityDashboard{}
+	servers := map[string]*guardRequests{}
+	serve := func(seed func(*testing.T, *registry.Registry, *followingSurface)) readabilityDashboard {
+		requests := &guardRequests{}
+		dashboard := serveReadabilityDashboard(t, seed, requests)
+		servers[dashboard.URL] = requests
+		return dashboard
+	}
 	for _, theme := range []string{"dark", "light"} {
 		themes[theme] = map[string]readabilityDashboard{
-			"full":  serveReadabilityDashboard(t, seedReadabilityFixture),
-			"empty": serveReadabilityDashboard(t, func(*testing.T, *registry.Registry, *followingSurface) {}),
+			"full":  serve(seedReadabilityFixture),
+			"empty": serve(func(*testing.T, *registry.Registry, *followingSurface) {}),
 		}
 	}
 	dashboards, err := json.Marshal(themes)
@@ -40,7 +47,8 @@ func TestDashboardTextIsReadableOverEveryBackground(t *testing.T) {
 		t.Fatal(err)
 	}
 	guard := exec.CommandContext(t.Context(), "node", filepath.Join("..", "..", "scripts", "dashboard-guard", "guard.mjs"))
-	guard.Env = append(os.Environ(), "AGENTHAIL_GUARD_DASHBOARDS="+string(dashboards))
+	stalled := filepath.Join(t.TempDir(), "stalled.json")
+	guard.Env = append(os.Environ(), "AGENTHAIL_GUARD_DASHBOARDS="+string(dashboards), "AGENTHAIL_GUARD_STALL_FILE="+stalled)
 	// A test that runs out of time panics without cancelling its context, so
 	// the guard is told to end itself, and its browser, a minute earlier.
 	if deadline, ok := t.Deadline(); ok {
@@ -51,6 +59,7 @@ func TestDashboardTextIsReadableOverEveryBackground(t *testing.T) {
 	guard.Stdout = os.Stdout
 	guard.Stderr = os.Stderr
 	if err := guard.Run(); err != nil {
+		reportStalledRequests(stalled, servers)
 		t.Fatalf("readability guard: %v", err)
 	}
 }
@@ -75,7 +84,7 @@ func (f *followingSurface) Stream(ctx context.Context, session *surface.Session,
 	return ctx.Err()
 }
 
-func serveReadabilityDashboard(t *testing.T, seed func(*testing.T, *registry.Registry, *followingSurface)) readabilityDashboard {
+func serveReadabilityDashboard(t *testing.T, seed func(*testing.T, *registry.Registry, *followingSurface), requests *guardRequests) readabilityDashboard {
 	t.Helper()
 	store, err := registry.Open(registrytest.Path(t))
 	if err != nil {
@@ -99,7 +108,7 @@ func serveReadabilityDashboard(t *testing.T, seed func(*testing.T, *registry.Reg
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: dashboardTestToken}))
+	server := httptest.NewServer(requests.wrap(d.dashboardHandler(&dashboardServer{token: dashboardTestToken})))
 	t.Cleanup(server.Close)
 	return readabilityDashboard{URL: server.URL, Cookie: cookie.Name + "=" + cookie.Value, Token: dashboardTestToken}
 }
