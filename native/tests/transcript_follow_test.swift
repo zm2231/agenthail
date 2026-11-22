@@ -927,14 +927,46 @@ struct TranscriptFollowTest {
 
         // A reply streaming into the last row, and a table in it settling taller, must not leave the end out of view even for a frame.
         var worst: CGFloat = 0
-        for growth in 0..<30 {
+        func grow(_ lines: Int) {
             let last = feed.rows.count - 1
-            feed.rows[last] = Row(id: feed.rows[last].id, lines: feed.rows[last].lines + (growth % 5 == 4 ? 20 : 3))
-            spin(0.02)
+            let before = scroll.documentView?.frame.height ?? 0
+            feed.rows[last] = Row(id: feed.rows[last].id, lines: feed.rows[last].lines + lines)
+            // The lazy stack can re-estimate unbuilt rows in the same layout, so the document may end up shorter; any change means it was laid out.
+            waitUntil { (scroll.documentView?.frame.height ?? 0) != before }
+            expect((scroll.documentView?.frame.height ?? 0) != before, "the last row's growth was laid out, document stayed \(before)")
+            spin(0.016)
+        }
+        for growth in 0..<30 {
+            grow(growth % 5 == 4 ? 20 : 3)
             worst = max(worst, gap(scroll))
         }
         spin(0.4)
-        expect(worst < 2 && feed.following, "a following reader stays at the end while the last row grows, at most \(Int(worst)) pt short; \(geometry(scroll))")
+        expect(worst < 2 && feed.following && abs(gap(scroll)) < 2, "a following reader stays at the end while the last row grows, at most \(Int(worst)) pt short a frame after each growth; \(geometry(scroll))")
+
+        readerScroll(scroll, to: offset(scroll) - 40)
+        spin(0.4)
+        expect(!feed.following, "a reader who scrolls 40 pt up from the end stops following")
+        func readerRow() -> (id: String, screen: CGFloat)? {
+            let top = offset(scroll)
+            return feed.rows.compactMap { row in readerTops.top(row.id).map { (row.id, $0 - top) } }.filter { $0.1 < scroll.contentView.bounds.height }.max { $0.1 < $1.1 }
+        }
+        func place(_ id: String) -> CGFloat { readerTops.top(id).map { $0 - offset(scroll) } ?? .infinity }
+        guard let nudged = readerRow() else { return expect(false, "a row is laid out in view after scrolling up from the end, \(geometry(scroll))") }
+        for _ in 0..<5 { grow(3) }
+        spin(0.4)
+        expect(!feed.following && abs(place(nudged.id) - nudged.screen) < 1, "a reader who scrolled up from a pinned end keeps their place as the last row grows, \(nudged.id) at \(Int(nudged.screen)) moved to \(place(nudged.id))")
+
+        NotificationCenter.default.post(name: .jumpToLatest, object: nil)
+        spin(1.0)
+        expectBottom(scroll, "jump to latest returns to the end of the mixed transcript")
+        expect(feed.following, "jump to latest follows again")
+        scroll.pageUp(nil)
+        spin(1.0)
+        expect(!feed.following && gap(scroll) > 100, "a reader who pages up from the end stops following, gap \(Int(gap(scroll)))")
+        guard let paged = readerRow() else { return expect(false, "a row is laid out in view after paging up, \(geometry(scroll))") }
+        for _ in 0..<5 { grow(3) }
+        spin(0.4)
+        expect(!feed.following && abs(place(paged.id) - paged.screen) < 1, "a reader who paged up from the end keeps their place as the last row grows, \(paged.id) at \(Int(paged.screen)) moved to \(place(paged.id))")
     }
 
     // One phased gesture, measured by how far the offset moved, so a re-estimate the gesture triggers is not corrected away by another.

@@ -54,10 +54,13 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             .defaultScrollAnchor(.bottom, for: .initialOffset)
             .onScrollPhaseChange { old, new in
                 phase = new
-                if old == .idle, new == .interacting || new == .decelerating { layout.gestureStart = layout.geometry?.contentOffset.y }
-                if new == .idle, old == .interacting || old == .decelerating, let geometry = layout.geometry {
+                // Keyboard paging and scrollbar clicks animate; a jump to the end does too, but moves toward it.
+                if old == .idle, new != .idle { layout.gestureStart = layout.geometry?.contentOffset.y }
+                if new == .idle, old != .idle, let geometry = layout.geometry {
                     let moved = layout.gestureStart.map { geometry.contentOffset.y - $0 } ?? 0
+                    let wasFollowing = following
                     following = TranscriptFollowing.next(following, .init(distance: TranscriptEnd(geometry).distance, scrollEnded: true, offsetMoved: moved))
+                    if wasFollowing, !following { position.scrollTo(y: Self.scrollY(geometry.contentOffset.y, in: geometry)) }
                     layout.gestureStart = nil
                 }
                 if new == .interacting || new == .decelerating { layout.releaseHold() }
