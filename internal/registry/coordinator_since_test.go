@@ -10,7 +10,7 @@ import (
 func TestCoordinatorSinceFollowsEachAssignmentAndHandover(t *testing.T) {
 	r := openTestRegistry(t)
 	root := t.TempDir()
-	if err := r.AddProject(ProjectRecord{ID: "proj", WorkspaceRoot: root, Title: "proj", Key: "proj-key"}); err != nil {
+	if _, err := r.AddProject(ProjectRecord{ID: "proj", WorkspaceRoot: root, Title: "proj", Key: "proj-key"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"first", "second"} {

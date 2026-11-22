@@ -68,7 +68,7 @@ func newCoordinatorCLI(t *testing.T) *coordinatorCLI {
 // @<name>-lead.
 func (c *coordinatorCLI) project(t *testing.T, id, dir, name string) {
 	t.Helper()
-	if err := c.r.AddProject(registry.ProjectRecord{ID: id, WorkspaceRoot: mustEvalSymlinks(t, dir), Title: name, Added: true}); err != nil {
+	if _, err := c.r.AddProject(registry.ProjectRecord{ID: id, WorkspaceRoot: mustEvalSymlinks(t, dir), Title: name, Added: true}, ""); err != nil {
 		t.Fatal(err)
 	}
 }

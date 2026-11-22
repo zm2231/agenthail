@@ -48,7 +48,7 @@ func newCodexCaptain(t *testing.T) *mcpCodexFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := fixture.registry.AddProject(registry.ProjectRecord{ID: "p-codex", WorkspaceRoot: root, Title: "Codex", CreatedAt: time.Now()}); err != nil {
+	if _, err := fixture.registry.AddProject(registry.ProjectRecord{ID: "p-codex", WorkspaceRoot: root, Title: "Codex", CreatedAt: time.Now()}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if code, body := fixture.action(t, map[string]any{"action": "coordinator-new", "surface": "codex", "cwd": cwd, "name": "captain"}); code != http.StatusOK {
@@ -93,7 +93,7 @@ func TestALoadedCodexThreadThatBecomesLeadControlsItsProjectOnItsNextCall(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := fixture.registry.AddProject(registry.ProjectRecord{ID: "p-codex", WorkspaceRoot: root, Title: "Codex", CreatedAt: time.Now()}); err != nil {
+	if _, err := fixture.registry.AddProject(registry.ProjectRecord{ID: "p-codex", WorkspaceRoot: root, Title: "Codex", CreatedAt: time.Now()}, ""); err != nil {
 		t.Fatal(err)
 	}
 	_, created := fixture.action(t, map[string]any{"action": "session-create", "surface": "codex", "message": "First", "cwd": cwd})

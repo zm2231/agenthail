@@ -95,7 +95,7 @@ func TestALeadWithNoConversationStartsWithItsModelAndFolder(t *testing.T) {
 func TestACodexLeadStartsOnItsFirstMessage(t *testing.T) {
 	f := newHeadlessCodexFixture(t, unreachableDesktop)
 	cwd := t.TempDir()
-	if err := f.registry.AddProject(registry.ProjectRecord{ID: "project-codex", WorkspaceRoot: cwd, Title: "fixture", Added: true}); err != nil {
+	if _, err := f.registry.AddProject(registry.ProjectRecord{ID: "project-codex", WorkspaceRoot: cwd, Title: "fixture", Added: true}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.registry.SetCoordinator(registry.CoordinatorSpec{ProjectID: "project-codex", ProjectRoot: cwd, Name: "fixture-lead", Surface: string(surface.KindCodex), Cwd: cwd}, registry.CoordinatorChange{}); err != nil {

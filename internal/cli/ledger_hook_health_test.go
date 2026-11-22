@@ -28,7 +28,7 @@ func TestDoctorAndBoardNameAMissingPromptHookOnceTheLedgerCaptures(t *testing.T)
 	}
 	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
 	dir := t.TempDir()
-	if err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: "hook-key"}); err != nil {
+	if _, err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: "hook-key"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)
@@ -119,7 +119,7 @@ func TestACoordinatorAloneMakesThePromptHookMatter(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	_, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
 	dir := t.TempDir()
-	if err := store.AddProject(registry.ProjectRecord{ID: "proj-c", WorkspaceRoot: dir, Title: "proj-c", Key: "coord-key"}); err != nil {
+	if _, err := store.AddProject(registry.ProjectRecord{ID: "proj-c", WorkspaceRoot: dir, Title: "proj-c", Key: "coord-key"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if problems, err := ledgerPromptHookProblems(context.Background(), store); err != nil || len(problems) != 0 {
@@ -148,7 +148,7 @@ func TestAnUnresolvedFolderKeepsTheProblemAndFailsDoctor(t *testing.T) {
 	root := filepath.Join(home, ".claude")
 	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
 	dir := t.TempDir()
-	if err := store.AddProject(registry.ProjectRecord{ID: "proj-u", WorkspaceRoot: dir, Title: "proj-u", Key: "unresolved-key"}); err != nil {
+	if _, err := store.AddProject(registry.ProjectRecord{ID: "proj-u", WorkspaceRoot: dir, Title: "proj-u", Key: "unresolved-key"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)
@@ -220,7 +220,7 @@ func TestADeadlineOnTheSessionScanKeepsTheProblemAndFailsDoctor(t *testing.T) {
 	root := filepath.Join(home, ".claude")
 	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
 	dir := t.TempDir()
-	if err := store.AddProject(registry.ProjectRecord{ID: "proj-d", WorkspaceRoot: dir, Title: "proj-d", Key: "deadline-key"}); err != nil {
+	if _, err := store.AddProject(registry.ProjectRecord{ID: "proj-d", WorkspaceRoot: dir, Title: "proj-d", Key: "deadline-key"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := ledger.NewStore(store.WriteDB(), store.ReadDB()).Enable("deadline-key", ledger.AttachEachPrompt); err != nil {

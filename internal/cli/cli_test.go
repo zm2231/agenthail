@@ -532,7 +532,7 @@ func TestQueueListFiltersByTargetMineAndWorkspaceAncestry(t *testing.T) {
 		{ID: "nested", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: "/work/root/nested"},
 		{ID: "other", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: "/work/other"},
 	}
-	if err := r.AddProject(registry.ProjectRecord{ID: "p-root", WorkspaceRoot: "/work/root", Title: "root"}); err != nil {
+	if _, err := r.AddProject(registry.ProjectRecord{ID: "p-root", WorkspaceRoot: "/work/root", Title: "root"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	for _, session := range sessions {

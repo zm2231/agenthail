@@ -62,7 +62,7 @@ type ledgerProject struct {
 func addLedgerProject(t *testing.T, r *registry.Registry, id, key string) ledgerProject {
 	t.Helper()
 	dir := t.TempDir()
-	if err := r.AddProject(registry.ProjectRecord{ID: id, WorkspaceRoot: dir, Title: id, Key: key}); err != nil {
+	if _, err := r.AddProject(registry.ProjectRecord{ID: id, WorkspaceRoot: dir, Title: id, Key: key}, ""); err != nil {
 		t.Fatal(err)
 	}
 	return ledgerProject{dir: dir, key: key, store: ledger.NewStore(r.WriteDB(), r.ReadDB())}

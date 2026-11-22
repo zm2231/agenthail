@@ -19,7 +19,7 @@ func wordsFixture(t *testing.T, handler http.HandlerFunc) *App {
 	t.Helper()
 	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude})
 	dir := t.TempDir()
-	if err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: wordsKey}); err != nil {
+	if _, err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: wordsKey}, ""); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)

@@ -461,9 +461,12 @@ func (d *Daemon) doProjectAction(ctx context.Context, _ principal, request proje
 	case "project-add":
 		project, created, err := d.addProject(ctx, request.Path, request.Title)
 		var missing *folderNotFoundError
+		var handOver registry.ProjectHandOverError
 		switch {
 		case errors.As(err, &missing):
 			return actionResult{}, actionFailed(http.StatusBadRequest, "folder_not_found", err.Error())
+		case errors.As(err, &handOver):
+			return actionResult{}, actionFailed(http.StatusConflict, "project_state_conflict", err.Error())
 		case err != nil:
 			return actionResult{}, invalidRequest(err.Error())
 		default:
@@ -491,7 +494,7 @@ func (d *Daemon) doProjectAction(ctx context.Context, _ principal, request proje
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
 	}
 	if request.Action == "project-remove" {
-		return d.removeProject(request.ProjectID, targets)
+		return d.removeProject(ctx, request.ProjectID, targets)
 	}
 	var checkouts []map[string]any
 	failed, changed := false, false
@@ -663,7 +666,7 @@ func (d *Daemon) projectNotListed(projectID string) string {
 
 // removeProject removes one added project of this host. Its sessions move to
 // the next project that contains them on the following catalog pass.
-func (d *Daemon) removeProject(projectID string, targets []registry.ProjectRecord) (actionResult, error) {
+func (d *Daemon) removeProject(ctx context.Context, projectID string, targets []registry.ProjectRecord) (actionResult, error) {
 	var added []registry.ProjectRecord
 	for _, target := range targets {
 		if target.Added {
@@ -684,9 +687,19 @@ func (d *Daemon) removeProject(projectID string, targets []registry.ProjectRecor
 		}
 		return actionResult{}, actionFailed(http.StatusConflict, "project_ambiguous", "project "+projectID+" names several added folders on this host: "+strings.Join(roots, ", ")+"; remove one by its id")
 	}
-	if err := d.Registry.RemoveProject(added[0].ID); err != nil {
+	fallback := ""
+	if repository, _, err := projectresolve.ResolveCatalogRepository(ctx, added[0].WorkspaceRoot, nil); err == nil {
+		fallback = implicitProjectID(repository, added[0].WorkspaceRoot)
+	}
+	outcome, err := d.Registry.RemoveProject(added[0].ID, fallback)
+	var handOver registry.ProjectHandOverError
+	switch {
+	case errors.As(err, &handOver):
+		return actionResult{}, actionFailed(http.StatusConflict, "project_state_conflict", err.Error())
+	case err != nil:
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
 	}
+	d.projectMovesApplied([]registry.ProjectMoveOutcome{outcome})
 	d.requestCatalogDiscovery()
 	return actionOK(map[string]any{"ok": true, "projectId": added[0].ID, "rootPath": added[0].WorkspaceRoot}), nil
 }
@@ -804,7 +817,11 @@ func (d *Daemon) addProject(ctx context.Context, path, title string) (projectres
 	} else if kept {
 		record.ID = id
 	}
-	err = d.Registry.AddProject(record)
+	supersedes := ""
+	if inRepository {
+		supersedes = implicitProjectID(repository, record.WorkspaceRoot)
+	}
+	outcome, err := d.Registry.AddProject(record, supersedes)
 	var taken *registry.WorkspaceTakenError
 	if errors.As(err, &taken) {
 		records, err := d.Registry.ListProjects()
@@ -821,8 +838,21 @@ func (d *Daemon) addProject(ctx context.Context, path, title string) (projectres
 	if err != nil {
 		return projectresolve.CatalogProject{}, false, err
 	}
+	d.projectMovesApplied([]registry.ProjectMoveOutcome{outcome})
 	d.requestCatalogDiscovery()
 	return *projectresolve.AddedCatalogProject(record, inRepository), true, nil
+}
+
+// implicitProjectID is the project a repository's main checkout has when no
+// added project claims it.
+func implicitProjectID(repository projectresolve.CatalogRepository, root string) string {
+	if repository.MainRoot != root {
+		return ""
+	}
+	if key := repository.Key(root); key != "" {
+		return key
+	}
+	return projectresolve.CatalogImplicitProjectID(root)
 }
 
 // folderNotFoundError refuses to add a folder its host does not have.

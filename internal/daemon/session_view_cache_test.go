@@ -55,7 +55,7 @@ func TestASessionViewBuiltAcrossALeadChangeIsNotReused(t *testing.T) {
 	d, reg, fake, _, _, cwd := baseFixture(t)
 	ctx := context.Background()
 	here := registry.ProjectRecord{ID: "project-here", WorkspaceRoot: cwd, Title: "here", Added: true, CreatedAt: time.Now()}
-	if err := reg.AddProject(here); err != nil {
+	if _, err := reg.AddProject(here, ""); err != nil {
 		t.Fatal(err)
 	}
 	old := surface.Session{ID: "old", Name: "old", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Cwd: cwd, LastActive: time.Now().Add(-72 * time.Hour)}

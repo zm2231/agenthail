@@ -19,7 +19,7 @@ func TestLedgerStatusShowsTheCallersWorkOrANamedSessions(t *testing.T) {
 	}
 	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude, sessions: sessions})
 	const key = "repo:github.com/acme/widget"
-	if err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: key}); err != nil {
+	if _, err := store.AddProject(registry.ProjectRecord{ID: "proj", WorkspaceRoot: dir, Title: "proj", Key: key}, ""); err != nil {
 		t.Fatal(err)
 	}
 	for _, s := range sessions {

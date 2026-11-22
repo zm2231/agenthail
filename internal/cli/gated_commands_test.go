@@ -52,7 +52,7 @@ func newGatedFixture(t *testing.T) gatedFixture {
 		}
 	}
 	for _, lead := range []struct{ project, root, session string }{{widgetProject, widget, "widget-lead"}, {gadgetProject, gadget, "gadget-lead"}} {
-		if err := r.AddProject(registry.ProjectRecord{ID: lead.project, WorkspaceRoot: lead.root, Title: strings.TrimPrefix(lead.project, "project-"), Added: true}); err != nil {
+		if _, err := r.AddProject(registry.ProjectRecord{ID: lead.project, WorkspaceRoot: lead.root, Title: strings.TrimPrefix(lead.project, "project-"), Added: true}, ""); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: lead.project, ProjectRoot: lead.root, Name: lead.session, Surface: string(surface.KindCodex), Cwd: lead.root}, registry.CoordinatorChange{SessionID: lead.session, ChangedBy: "fixture"}); err != nil {
@@ -69,7 +69,7 @@ func (f gatedFixture) folder() string {
 
 func (f gatedFixture) addedFolder() string {
 	folder := f.folder()
-	if err := f.r.AddProject(registry.ProjectRecord{ID: "project-" + filepath.Base(folder), WorkspaceRoot: folder, Title: "folder " + filepath.Base(folder), Added: true}); err != nil {
+	if _, err := f.r.AddProject(registry.ProjectRecord{ID: "project-" + filepath.Base(folder), WorkspaceRoot: folder, Title: "folder " + filepath.Base(folder), Added: true}, ""); err != nil {
 		f.t.Fatal(err)
 	}
 	return folder
@@ -136,6 +136,7 @@ var gatedCommands = []struct {
 	}, refused, runs, refused},
 	{"coordinator-new", func(f gatedFixture) []string { return []string{"coordinator", "new", "codex", "--cwd", f.widget} }, refused, admitted, refused},
 	{"coordinator-clear", func(f gatedFixture) []string { return []string{"coordinator", "clear", "--cwd", f.widget} }, refused, runs, refused},
+	{"coordinator-clear", func(gatedFixture) []string { return []string{"coordinator", "clear", "--name", "widget-lead"} }, refused, runs, refused},
 	{"resume-after-limit", func(gatedFixture) []string { return []string{"limit-resume", "off"} }, refused, refused, refused},
 	{"relay-add", func(gatedFixture) []string { return []string{"relay", "add", "worker", "widget-other"} }, refused, runs, refused},
 	{"relay-remove", func(f gatedFixture) []string { return []string{"relay", "rm", f.relay()} }, refused, runs, refused},

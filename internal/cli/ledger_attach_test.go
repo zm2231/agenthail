@@ -24,7 +24,7 @@ func ledgerWriteFixtureFor(t *testing.T, project registry.ProjectRecord, respond
 	s1 := surface.Session{ID: "s1", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: dir, Status: surface.StatusIdle}
 	app, store := cliFixture(t, &cliSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{"s1": s1}})
 	project.WorkspaceRoot = dir
-	if err := store.AddProject(project); err != nil {
+	if _, err := store.AddProject(project, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.RecordObservedSession(s1); err != nil {
