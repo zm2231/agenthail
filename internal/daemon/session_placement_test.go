@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -43,10 +44,10 @@ var placementInputMutations = []placementMutation{
 	{"CurrentReason", func(r *dashboardSession, _ time.Time) { r.Current, r.CurrentReason = true, "queued" }},
 	{"Archived", func(r *dashboardSession, _ time.Time) { r.Archived = true }},
 	{"Project", func(r *dashboardSession, _ time.Time) {
-		r.Project = &CatalogProject{ID: "p-delta", DisplayName: "delta"}
+		r.Project = &projectresolve.CatalogProject{ID: "p-delta", DisplayName: "delta"}
 	}},
 	{"Checkout", func(r *dashboardSession, _ time.Time) {
-		r.Checkout = &catalogCheckout{ID: "c-2", Path: "/w", Branch: "topic"}
+		r.Checkout = &projectresolve.CatalogCheckout{ID: "c-2", Path: "/w", Branch: "topic"}
 	}},
 	{"Subagent", func(r *dashboardSession, _ time.Time) { r.Subagent = &surface.Subagent{ParentID: "s01", RootID: "s01"} }},
 	{"Subagent", func(r *dashboardSession, _ time.Time) {

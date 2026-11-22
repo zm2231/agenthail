@@ -61,7 +61,7 @@ func TestCoordinatorSetRefusesATakeoverAndNamesWhoChangedIt(t *testing.T) {
 
 func TestCoordinatorSetRunsOnTheConversationsHostInBothDirections(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	upstream := catalogTestRepo(t)
+	upstream := testkit.GitRepo(t)
 	laptop := newFederationNode(t, "laptop-a")
 	vps := newFederationNode(t, "vps-a", "vps-b")
 	moveSessions(t, laptop, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "laptop-gadget")), "src"))
@@ -130,7 +130,7 @@ func TestCoordinatorSetRunsOnTheConversationsHostInBothDirections(t *testing.T) 
 
 func TestReplacingAPeerCoordinatorIsRefusedWhileItsHostIsUnreachable(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	upstream := catalogTestRepo(t)
+	upstream := testkit.GitRepo(t)
 	laptop := newFederationNode(t, "laptop-a")
 	vps := newFederationNode(t, "vps-a")
 	moveSessions(t, laptop, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "laptop-gadget")), "src"))
@@ -180,7 +180,7 @@ func TestReplacingAPeerCoordinatorIsRefusedWhileItsHostIsUnreachable(t *testing.
 
 func TestANameClaimedWhileAPeerClearsItsCoordinatorCannotStrandTheProject(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	upstream := catalogTestRepo(t)
+	upstream := testkit.GitRepo(t)
 	laptop := newFederationNode(t, "laptop-a", "laptop-other")
 	vps := newFederationNode(t, "vps-a")
 	moveSessions(t, laptop, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "laptop-gadget")), "src"))
@@ -231,7 +231,7 @@ func TestARefusedReplaceRestoresTheLocalCoordinatorOrKeepsTheNewOne(t *testing.T
 	for _, renamed := range []bool{false, true} {
 		t.Run(map[bool]string{false: "restores, and the new coordinator's session keeps its name meanwhile", true: "keeps the new one when the old name moved"}[renamed], func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
-			upstream := catalogTestRepo(t)
+			upstream := testkit.GitRepo(t)
 			laptop := newFederationNode(t, "laptop-a", "laptop-other", "laptop-third")
 			vps := newFederationNode(t, "vps-a")
 			cwd := filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "laptop-gadget")), "src")

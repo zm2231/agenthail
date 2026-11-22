@@ -4,17 +4,19 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/projectresolve"
 )
 
 func TestCatalogProjectsAreListedByNameNotActivity(t *testing.T) {
 	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
 	local := dashboardHost{ID: "here", Name: "here", State: "connected"}
 	row := func(id, project, name string, ago time.Duration) dashboardSession {
-		return dashboardSession{ID: id, Project: &CatalogProject{ID: project, LocalID: project, DisplayName: name}, LastActive: now.Add(-ago)}
+		return dashboardSession{ID: id, Project: &projectresolve.CatalogProject{ID: project, LocalID: project, DisplayName: name}, LastActive: now.Add(-ago)}
 	}
 	listed := func(rows ...dashboardSession) []string {
 		var names []string
-		for _, project := range catalogProjects(rows, nil, nil, projectLinkSet{}, nil, local, func(string) dashboardHost { return local }) {
+		for _, project := range catalogProjects(rows, nil, nil, projectresolve.ProjectLinkSet{}, nil, local, func(string) dashboardHost { return local }) {
 			names = append(names, project.DisplayName)
 		}
 		return names

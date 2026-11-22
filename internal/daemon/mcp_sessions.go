@@ -9,6 +9,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 )
 
 const mcpPageBudget = mcpOutputLimit - 1<<10
@@ -82,7 +83,7 @@ func (d *Daemon) mcpSessionView(visible visibleSession) mcpSessionView {
 		return mcpSessionView{ID: session.ID, Alias: alias, Name: session.Name, Surface: string(session.Surface), Status: string(session.Status), Cwd: session.Cwd, Project: projectView(project)}
 	}
 	view := mcpSessionView{ID: hosts.Qualify(visible.host.HostID, session.ID), Alias: visible.host.Alias, Name: session.Name, Surface: string(session.Surface), Status: string(session.Status), Cwd: session.Cwd, Host: &dashboardHost{ID: visible.host.HostID}}
-	var project CatalogProject
+	var project projectresolve.CatalogProject
 	if len(visible.host.Project) > 0 && json.Unmarshal(visible.host.Project, &project) == nil && project.ID != "" {
 		view.Project = projectView(&project)
 	}

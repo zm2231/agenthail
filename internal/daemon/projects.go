@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/project"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/workspace"
@@ -168,20 +169,20 @@ func catalogViewArchive(row *dashboardSession, view catalogViewState) (bool, boo
 // project's coordinator on each host that has one; more than one is a
 // conflict.
 type dashboardProject struct {
-	ID           string                        `json:"id"`
-	DisplayName  string                        `json:"displayName"`
-	Kind         string                        `json:"kind"`
-	Key          string                        `json:"key,omitempty"`
-	Repository   *project.Repository           `json:"repository,omitempty"`
-	Checkouts    []dashboardProjectCheckout    `json:"checkouts"`
-	Coordinators []dashboardProjectCoordinator `json:"coordinators"`
-	LastActive   time.Time                     `json:"lastActive,omitempty"`
-	SessionCount int                           `json:"sessionCount"`
-	Archived     bool                          `json:"archived"`
-	Linked       []CatalogProjectRef           `json:"linked,omitempty"`
+	ID           string                             `json:"id"`
+	DisplayName  string                             `json:"displayName"`
+	Kind         string                             `json:"kind"`
+	Key          string                             `json:"key,omitempty"`
+	Repository   *project.Repository                `json:"repository,omitempty"`
+	Checkouts    []dashboardProjectCheckout         `json:"checkouts"`
+	Coordinators []dashboardProjectCoordinator      `json:"coordinators"`
+	LastActive   time.Time                          `json:"lastActive,omitempty"`
+	SessionCount int                                `json:"sessionCount"`
+	Archived     bool                               `json:"archived"`
+	Linked       []projectresolve.CatalogProjectRef `json:"linked,omitempty"`
 	// LinkHeld is why this host keeps the project apart although a link joins it into another.
-	LinkHeld    string              `json:"linkHeld,omitempty"`
-	SameHistory []CatalogProjectRef `json:"sameHistory,omitempty"`
+	LinkHeld    string                             `json:"linkHeld,omitempty"`
+	SameHistory []projectresolve.CatalogProjectRef `json:"sameHistory,omitempty"`
 	// MCP is "off" when terminal sessions of the project get no Agenthail tools.
 	MCP string `json:"mcp"`
 }
@@ -199,13 +200,13 @@ type dashboardProjectCoordinator struct {
 }
 
 type dashboardProjectCheckout struct {
-	Host         dashboardHost      `json:"host"`
-	ProjectID    string             `json:"projectId"`
-	RootPath     string             `json:"rootPath"`
-	Added        bool               `json:"added"`
-	SessionCount int                `json:"sessionCount"`
-	Archived     bool               `json:"archived"`
-	LinkedFrom   *CatalogProjectRef `json:"linkedFrom,omitempty"`
+	Host         dashboardHost                     `json:"host"`
+	ProjectID    string                            `json:"projectId"`
+	RootPath     string                            `json:"rootPath"`
+	Added        bool                              `json:"added"`
+	SessionCount int                               `json:"sessionCount"`
+	Archived     bool                              `json:"archived"`
+	LinkedFrom   *projectresolve.CatalogProjectRef `json:"linkedFrom,omitempty"`
 }
 
 // catalogScopes lists the session scopes every client renders. A scope counts
@@ -283,16 +284,16 @@ func catalogScopeCounts(rows []dashboardSession) map[string]int {
 // this host shows. A coordinator whose folder this host now lists under
 // another project, after its repository's origin changed, belongs to no
 // listed project; 'coordinator list' marks it.
-func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, coordinators []registry.CoordinatorSpec, links projectLinkSet, archived map[string]time.Time, local dashboardHost, hostRef func(string) dashboardHost) []dashboardProject {
+func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, coordinators []registry.CoordinatorSpec, links projectresolve.ProjectLinkSet, archived map[string]time.Time, local dashboardHost, hostRef func(string) dashboardHost) []dashboardProject {
 	byID := map[string]*dashboardProject{}
 	order := []string{}
 	named := map[string]bool{}
 	roots := map[string][]string{}
-	entry := func(found *CatalogProject) *dashboardProject {
-		found = links.apply(found)
+	entry := func(found *projectresolve.CatalogProject) *dashboardProject {
+		found = links.Apply(found)
 		project, ok := byID[found.ID]
 		if !ok {
-			project = &dashboardProject{ID: found.ID, DisplayName: found.DisplayName, Kind: found.Kind, Key: found.Key, LinkHeld: links.held[found.ID]}
+			project = &dashboardProject{ID: found.ID, DisplayName: found.DisplayName, Kind: found.Kind, Key: found.Key, LinkHeld: links.Held[found.ID]}
 			byID[found.ID] = project
 			order = append(order, found.ID)
 		}
@@ -303,18 +304,18 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 			named[found.ID] = true
 			project.DisplayName, project.Kind, project.Key, project.Repository = found.DisplayName, found.Kind, found.Key, found.Repository
 		}
-		if found.LinkedFrom != nil && !slices.ContainsFunc(project.Linked, func(ref CatalogProjectRef) bool { return ref.ID == found.LinkedFrom.ID }) {
+		if found.LinkedFrom != nil && !slices.ContainsFunc(project.Linked, func(ref projectresolve.CatalogProjectRef) bool { return ref.ID == found.LinkedFrom.ID }) {
 			project.Linked = append(project.Linked, *found.LinkedFrom)
 		}
 		return project
 	}
-	checkout := func(project *dashboardProject, host dashboardHost, found *CatalogProject) *dashboardProjectCheckout {
+	checkout := func(project *dashboardProject, host dashboardHost, found *projectresolve.CatalogProject) *dashboardProjectCheckout {
 		for index := range project.Checkouts {
 			if project.Checkouts[index].Host.ID == host.ID && project.Checkouts[index].ProjectID == found.LocalID {
 				return &project.Checkouts[index]
 			}
 		}
-		found = links.apply(found)
+		found = links.Apply(found)
 		project.Checkouts = append(project.Checkouts, dashboardProjectCheckout{Host: host, ProjectID: found.LocalID, RootPath: found.RootPath, Added: found.Added, Archived: found.Archived, LinkedFrom: found.LinkedFrom})
 		return &project.Checkouts[len(project.Checkouts)-1]
 	}
@@ -341,7 +342,7 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 		if !record.Added {
 			continue
 		}
-		found := addedCatalogProject(record, false)
+		found := projectresolve.AddedCatalogProject(record, false)
 		found.Archived = !record.ArchivedAt.IsZero()
 		project := entry(found)
 		checkout(project, local, found)
@@ -358,7 +359,7 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 		if spec.HostID != "" {
 			continue
 		}
-		if _, listed := byID[links.idOf(spec.ProjectID)]; listed || localRoots[spec.ProjectRoot] {
+		if _, listed := byID[links.IdOf(spec.ProjectID)]; listed || localRoots[spec.ProjectRoot] {
 			continue
 		}
 		found := coordinatorCatalogProject(spec)
@@ -366,7 +367,7 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 		checkout(entry(found), local, found)
 	}
 	for _, spec := range coordinators {
-		project, listed := byID[links.idOf(spec.ProjectID)]
+		project, listed := byID[links.IdOf(spec.ProjectID)]
 		if !listed {
 			continue
 		}
@@ -415,8 +416,8 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 // coordinatorCatalogProject is the project of this host's coordinator spec
 // when no session or added project names it. Added projects are always
 // listed, so it is a repository's project, rooted at its main checkout.
-func coordinatorCatalogProject(spec registry.CoordinatorSpec) *CatalogProject {
-	found := &CatalogProject{ID: spec.ProjectID, LocalID: catalogImplicitProjectID(spec.ProjectRoot), DisplayName: catalogProjectName(spec.ProjectRoot), RootPath: spec.ProjectRoot, Kind: catalogProjectGit}
+func coordinatorCatalogProject(spec registry.CoordinatorSpec) *projectresolve.CatalogProject {
+	found := &projectresolve.CatalogProject{ID: spec.ProjectID, LocalID: projectresolve.CatalogImplicitProjectID(spec.ProjectRoot), DisplayName: projectresolve.CatalogProjectName(spec.ProjectRoot), RootPath: spec.ProjectRoot, Kind: projectresolve.CatalogProjectGit}
 	if found.ID != found.LocalID {
 		found.Key = found.ID
 	}
@@ -599,7 +600,7 @@ func (d *Daemon) localProjectCheckouts(projectID string) ([]registry.ProjectReco
 		return nil, err
 	}
 	for _, raw := range raws {
-		var found CatalogProject
+		var found projectresolve.CatalogProject
 		if json.Unmarshal(raw, &found) != nil || found.LocalID == "" || seen[found.LocalID] {
 			continue
 		}
@@ -763,37 +764,37 @@ func (d *Daemon) doSessionArchive(action, sessionID string) (actionResult, error
 // worktree is added at the same place in the main checkout, so the project
 // holds that folder in every worktree. A folder already added answers with
 // its project, unchanged, and created false.
-func (d *Daemon) addProject(ctx context.Context, path, title string) (CatalogProject, bool, error) {
+func (d *Daemon) addProject(ctx context.Context, path, title string) (projectresolve.CatalogProject, bool, error) {
 	path, err := workspace.NormalizeCWD(path)
 	if err != nil || path == "" {
-		return CatalogProject{}, false, fmt.Errorf("a folder path is required")
+		return projectresolve.CatalogProject{}, false, fmt.Errorf("a folder path is required")
 	}
 	if info, err := os.Stat(path); err != nil || !info.IsDir() {
-		return CatalogProject{}, false, &folderNotFoundError{path: path, host: d.hostIdentity().Name}
+		return projectresolve.CatalogProject{}, false, &folderNotFoundError{path: path, host: d.hostIdentity().Name}
 	}
-	if path, err = canonicalCatalogPath(path); err != nil {
-		return CatalogProject{}, false, err
+	if path, err = projectresolve.CanonicalCatalogPath(path); err != nil {
+		return projectresolve.CatalogProject{}, false, err
 	}
 	record := registry.ProjectRecord{ID: "p-" + uuid.NewString(), WorkspaceRoot: path, Title: strings.TrimSpace(title), CreatedAt: time.Now().UTC()}
 	if len(record.Title) > projectTitleLimit {
-		return CatalogProject{}, false, fmt.Errorf("a project name is 1 to %d characters", projectTitleLimit)
+		return projectresolve.CatalogProject{}, false, fmt.Errorf("a project name is 1 to %d characters", projectTitleLimit)
 	}
-	repository, notRepository, err := resolveCatalogRepository(ctx, path, nil)
+	repository, notRepository, err := projectresolve.ResolveCatalogRepository(ctx, path, nil)
 	inRepository := err == nil
 	switch {
 	case inRepository:
-		record.WorkspaceRoot = repository.translate(path)
-		if record.Key = repository.key(record.WorkspaceRoot); record.Key != "" {
-			record.Repository, _ = json.Marshal(repository.repository)
+		record.WorkspaceRoot = repository.Translate(path)
+		if record.Key = repository.Key(record.WorkspaceRoot); record.Key != "" {
+			record.Repository, _ = json.Marshal(repository.Repository)
 		}
 	case !notRepository:
-		return CatalogProject{}, false, fmt.Errorf("read repository for %s: %w", path, err)
+		return projectresolve.CatalogProject{}, false, fmt.Errorf("read repository for %s: %w", path, err)
 	}
 	if record.Title == "" {
 		record.Title = filepath.Base(record.WorkspaceRoot)
 	}
 	if id, kept, err := d.Registry.RemovedProjectLedger(record.WorkspaceRoot); err != nil {
-		return CatalogProject{}, false, err
+		return projectresolve.CatalogProject{}, false, err
 	} else if kept {
 		record.ID = id
 	}
@@ -802,20 +803,20 @@ func (d *Daemon) addProject(ctx context.Context, path, title string) (CatalogPro
 	if errors.As(err, &taken) {
 		records, err := d.Registry.ListProjects()
 		if err != nil {
-			return CatalogProject{}, false, err
+			return projectresolve.CatalogProject{}, false, err
 		}
 		for _, existing := range records {
 			if existing.ID == taken.ProjectID {
-				return *addedCatalogProject(existing, inRepository), false, nil
+				return *projectresolve.AddedCatalogProject(existing, inRepository), false, nil
 			}
 		}
-		return CatalogProject{}, false, taken
+		return projectresolve.CatalogProject{}, false, taken
 	}
 	if err != nil {
-		return CatalogProject{}, false, err
+		return projectresolve.CatalogProject{}, false, err
 	}
 	d.requestCatalogDiscovery()
-	return *addedCatalogProject(record, inRepository), true, nil
+	return *projectresolve.AddedCatalogProject(record, inRepository), true, nil
 }
 
 // folderNotFoundError refuses to add a folder its host does not have.
@@ -828,35 +829,6 @@ func (e *folderNotFoundError) Error() string {
 	return fmt.Sprintf("%s is not a folder on %s", e.path, e.host)
 }
 
-// ResolvePathProject finds the project a session working in path belongs
-// to, resolved the way the catalog resolves sessions. It is nil when no
-// project holds the folder.
-func ResolvePathProject(ctx context.Context, reg *registry.Registry, path string) (*CatalogProject, error) {
-	path, err := catalogSessionPath(path)
-	if err != nil || path == "" {
-		return nil, fmt.Errorf("a folder path is required")
-	}
-	records, err := reg.ListProjects()
-	if err != nil {
-		return nil, err
-	}
-	added := records[:0]
-	for _, record := range records {
-		if record.Added {
-			added = append(added, record)
-		}
-	}
-	links, err := loadProjectLinks(reg)
-	if err != nil {
-		return nil, err
-	}
-	identity, _, transient := resolveCatalogIdentity(ctx, path, added, links, nil)
-	if transient {
-		return nil, fmt.Errorf("resolve the project of %s: %s", path, identity.Problem)
-	}
-	return identity.Project, nil
-}
-
 // refreshProjectRepositories keeps each added project's key current with its
 // repository's remote.
 func (d *Daemon) refreshProjectRepositories(ctx context.Context, records []registry.ProjectRecord, now time.Time) {
@@ -865,7 +837,7 @@ func (d *Daemon) refreshProjectRepositories(ctx context.Context, records []regis
 		if !record.Added {
 			continue
 		}
-		key, repository, ok := d.catalogIdentities.rootRepository(ctx, record.WorkspaceRoot, now)
+		key, repository, ok := d.catalogIdentities.RootRepository(ctx, record.WorkspaceRoot, now)
 		if ok && key != "" {
 			d.observeRepositoryKey(record.WorkspaceRoot, key)
 		}

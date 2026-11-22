@@ -13,6 +13,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/broadcast"
 	"github.com/zm2231/agenthail/internal/dashconfig"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -85,7 +86,7 @@ func TestAnAgentStartsASessionOnAPairedComputerWithinItsCeilingAndThePersonIsTol
 	local.daemon.notifyDesktop = person.notify
 	boundedSpawner(t, local.reg, "spawner", "edits")
 	const local127 = "127.0.0.1:50000"
-	work, err := canonicalCatalogPath(t.TempDir())
+	work, err := projectresolve.CanonicalCatalogPath(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

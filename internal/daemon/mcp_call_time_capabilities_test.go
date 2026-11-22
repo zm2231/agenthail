@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -43,7 +44,7 @@ func newCodexCaptain(t *testing.T) *mcpCodexFixture {
 	t.Helper()
 	fixture := newMCPCodexFixture(t)
 	cwd := t.TempDir()
-	root, err := canonicalCatalogPath(cwd)
+	root, err := projectresolve.CanonicalCatalogPath(cwd)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +89,7 @@ func TestBecomingAndLeavingCoordinatorChangesTheSameTokensNextCall(t *testing.T)
 func TestALoadedCodexThreadThatBecomesLeadControlsItsProjectOnItsNextCall(t *testing.T) {
 	fixture := newMCPCodexFixture(t)
 	cwd := t.TempDir()
-	root, err := canonicalCatalogPath(cwd)
+	root, err := projectresolve.CanonicalCatalogPath(cwd)
 	if err != nil {
 		t.Fatal(err)
 	}

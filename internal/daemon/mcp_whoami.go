@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -56,7 +57,7 @@ func credentialView(credential registry.SessionCredential) map[string]string {
 	}
 }
 
-func projectView(project *CatalogProject) *mcpProjectView {
+func projectView(project *projectresolve.CatalogProject) *mcpProjectView {
 	if project == nil {
 		return nil
 	}

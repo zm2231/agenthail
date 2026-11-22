@@ -1,4 +1,4 @@
-package daemon
+package projectresolve
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func TestADaemonGitStatusTakesNoIndexLock(t *testing.T) {
@@ -14,9 +16,9 @@ func TestADaemonGitStatusTakesNoIndexLock(t *testing.T) {
 	if err := os.WriteFile(file, []byte("notes\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, repo, "init", "-q")
-	gitRun(t, repo, "add", "notes.txt")
-	gitRun(t, repo, "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-q", "-m", "notes")
+	testkit.Git(t, repo, "init", "-q")
+	testkit.Git(t, repo, "add", "notes.txt")
+	testkit.Git(t, repo, "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-q", "-m", "notes")
 	later := time.Now().Add(time.Hour)
 	if err := os.Chtimes(file, later, later); err != nil {
 		t.Fatal(err)
@@ -27,7 +29,7 @@ func TestADaemonGitStatusTakesNoIndexLock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := catalogGit(context.Background(), repo, "status", "--porcelain=v1", "-z", "--untracked-files=normal"); err != nil {
+	if _, err := CatalogGit(context.Background(), repo, "status", "--porcelain=v1", "-z", "--untracked-files=normal"); err != nil {
 		t.Fatal(err)
 	}
 	after, err := os.Stat(index)

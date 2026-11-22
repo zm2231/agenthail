@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -46,7 +47,7 @@ func (d *Daemon) mobileQueueHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if projectID != "" {
-		projects, err := CatalogSessionProjects(d.Registry)
+		projects, err := projectresolve.CatalogSessionProjects(d.Registry)
 		if err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", "Queued instructions are unavailable.")
 			return
@@ -69,8 +70,8 @@ func (d *Daemon) queueProject(w http.ResponseWriter, r *http.Request) (string, b
 	if !query.Has("cwd") {
 		return query.Get("projectId"), true
 	}
-	projectID, err := ProjectHolding(r.Context(), d.Registry, query.Get("cwd"))
-	if errors.Is(err, ErrNoProject) {
+	projectID, err := projectresolve.ProjectHolding(r.Context(), d.Registry, query.Get("cwd"))
+	if errors.Is(err, projectresolve.ErrNoProject) {
 		writeAPIError(w, http.StatusNotFound, "not_found", err.Error())
 		return "", false
 	}

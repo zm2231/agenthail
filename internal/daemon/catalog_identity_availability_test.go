@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func failingGitStatus(t *testing.T) {
@@ -48,7 +50,7 @@ func snapshotSession(t *testing.T, handler http.Handler, id string) dashboardSes
 
 func TestASessionWhoseRepositoryStatusFailsStaysAvailableAndSendable(t *testing.T) {
 	d, r, fake, from, _ := daemonFixture(t)
-	repo := catalogTestRepo(t)
+	repo := testkit.GitRepo(t)
 	from.Cwd = repo
 	if err := r.RecordObservedSession(from); err != nil {
 		t.Fatal(err)

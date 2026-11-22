@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -93,7 +94,7 @@ func withoutCapture(events []ledger.Event) []ledger.Event {
 // makeCoordinator makes the session lead the project at p.dir the way 'agenthail coordinator' does, under the project's ID.
 func makeCoordinator(t *testing.T, r *registry.Registry, p ledgerProject, sessionID string) {
 	t.Helper()
-	project, err := ResolvePathProject(context.Background(), r, p.dir)
+	project, err := projectresolve.ResolvePathProject(context.Background(), r, p.dir)
 	if err != nil || project == nil {
 		t.Fatalf("project of %s: %v %v", p.dir, project, err)
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/broadcast"
 	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/dashconfig"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -88,7 +89,7 @@ func (d *Daemon) leadActsOnOwn(ctx context.Context, caller *mcpCaller, api strin
 		if request.Host != "" || strings.TrimSpace(request.Path) == "" {
 			return false
 		}
-		found, err := ResolvePathProject(ctx, d.Registry, request.Path)
+		found, err := projectresolve.ResolvePathProject(ctx, d.Registry, request.Path)
 		return err == nil && found == nil
 	case "project-rename", "project-setting", "project-archive", "project-unarchive", "project-remove", "coordinator-clear":
 		return d.ownProject(caller, request.ProjectID)
@@ -108,7 +109,7 @@ func (d *Daemon) leadActsOnOwn(ctx context.Context, caller *mcpCaller, api strin
 		if request.Host != "" || where == "" {
 			return false
 		}
-		found, err := ResolvePathProject(ctx, d.Registry, where)
+		found, err := projectresolve.ResolvePathProject(ctx, d.Registry, where)
 		return err == nil && found != nil && found.ID == caller.project.ID
 	case "relay-add":
 		return d.sessionsInProject(caller, request.FromID, request.ToID)
@@ -213,7 +214,7 @@ func (d *Daemon) describePersonAction(api string, request personActionRequest) (
 	if err != nil {
 		return "", err
 	}
-	project := func(id string) string { return projectIDName(strings.TrimSpace(id), records) }
+	project := func(id string) string { return projectresolve.ProjectIDName(strings.TrimSpace(id), records) }
 	session := func(ref string) string {
 		ref = strings.TrimSpace(ref)
 		if id, err := d.Registry.ResolveTarget(ref); err == nil {

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -102,7 +103,7 @@ func (d *Daemon) launchProjects() ([]launchProject, error) {
 		if record.HostID != "" || record.Session.Subagent != nil {
 			continue
 		}
-		var project CatalogProject
+		var project projectresolve.CatalogProject
 		if json.Unmarshal(record.Project, &project) != nil || project.LocalID == "" || project.RootPath == "" {
 			continue
 		}
@@ -122,7 +123,7 @@ func (d *Daemon) launchProjects() ([]launchProject, error) {
 		if _, found := byID[record.ID]; found || !record.Added || !record.ArchivedAt.IsZero() {
 			continue
 		}
-		added := addedCatalogProject(record, false)
+		added := projectresolve.AddedCatalogProject(record, false)
 		byID[record.ID] = &candidate{project: launchProject{ID: added.LocalID, DisplayName: added.DisplayName, RootPath: added.RootPath, Kind: added.Kind, Added: true}}
 	}
 	coordinators, err := d.Registry.LocalCoordinators()
@@ -184,7 +185,7 @@ func (d *Daemon) launchFolders() ([]string, error) {
 		if _, archived := archive.Sessions[record.Session.ID]; archived {
 			continue
 		}
-		var project *CatalogProject
+		var project *projectresolve.CatalogProject
 		if json.Unmarshal(record.Project, &project) == nil && project != nil && project.ID != "" {
 			continue
 		}

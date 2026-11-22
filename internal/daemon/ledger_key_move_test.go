@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 type remoteMoveFixture struct {
@@ -28,8 +30,8 @@ func newRemoteMoveFixture(t *testing.T, added bool) remoteMoveFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.Close() })
-	repo := catalogTestRepo(t)
-	gitRun(t, repo, "remote", "add", "origin", "https://github.com/example/notes.git")
+	repo := testkit.GitRepo(t)
+	testkit.Git(t, repo, "remote", "add", "origin", "https://github.com/example/notes.git")
 	session := surface.Session{ID: "worker", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: repo, Status: surface.StatusIdle}
 	fake := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{session.ID: session}, observations: map[string]*surface.TurnObservation{}, accepted: true}
 	d := newTestDaemon(t, r, []surface.Surface{fake})
@@ -50,7 +52,7 @@ func newRemoteMoveFixture(t *testing.T, added bool) remoteMoveFixture {
 
 func (f remoteMoveFixture) setRemote(t *testing.T, url string) {
 	t.Helper()
-	gitRun(t, f.repo, "remote", "set-url", "origin", url)
+	testkit.Git(t, f.repo, "remote", "set-url", "origin", url)
 	f.d.discoverCatalog(context.Background())
 }
 
@@ -107,7 +109,7 @@ func TestARemoteChangeCarriesTheProjectsLeadAndLinks(t *testing.T) {
 	if lead, err := f.r.Coordinator(after); err != nil || lead.Name != "notes-lead" {
 		t.Fatalf("the lead did not move with the project: %+v %v", lead, err)
 	}
-	if project, err := ResolvePathProject(context.Background(), f.r, joined); err != nil || project.ID != after {
+	if project, err := projectresolve.ResolvePathProject(context.Background(), f.r, joined); err != nil || project.ID != after {
 		t.Fatalf("the linked project resolves as %+v %v, want %s", project, err, after)
 	}
 	links, err := f.r.ProjectLinks()

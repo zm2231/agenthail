@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/zm2231/agenthail/internal/daemonapi"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -59,7 +60,7 @@ func (d *Daemon) loadLeadDirectory() (leadDirectory, error) {
 	return directory, nil
 }
 
-func (l leadDirectory) leadOf(project *CatalogProject) (leadRef, bool) {
+func (l leadDirectory) leadOf(project *projectresolve.CatalogProject) (leadRef, bool) {
 	if project == nil {
 		return leadRef{}, false
 	}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -54,7 +55,7 @@ func newMCPAnswerFixture(t *testing.T) *mcpAnswerFixture {
 	base := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true, caps: surface.Capabilities{Send: true, Model: true, PermissionMode: true, Compact: true}}
 	fake := &answeringSurface{daemonSurface: base, open: map[string][]surface.Request{}, answered: map[string]surface.Decision{}}
 	d := newTestDaemon(t, r, []surface.Surface{fake})
-	root, err := canonicalCatalogPath(t.TempDir())
+	root, err := projectresolve.CanonicalCatalogPath(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

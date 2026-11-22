@@ -18,6 +18,7 @@ import (
 
 	"github.com/junegunn/fzf/src/algo"
 	"github.com/junegunn/fzf/src/util"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 )
 
 const (
@@ -134,7 +135,7 @@ func buildSessionFileList(ctx context.Context, cwd string, now time.Time) *sessi
 }
 
 func gitIndexPath(ctx context.Context, cwd string) string {
-	out, err := gitCommand(ctx, cwd, "rev-parse", "--git-path", "index").Output()
+	out, err := projectresolve.GitCommand(ctx, cwd, "rev-parse", "--git-path", "index").Output()
 	if err != nil {
 		return ""
 	}
@@ -157,10 +158,10 @@ func modTime(name string) time.Time {
 }
 
 func listGitFiles(ctx context.Context, cwd string) (*sessionFileList, bool) {
-	if err := gitCommand(ctx, cwd, "rev-parse", "--is-inside-work-tree").Run(); err != nil {
+	if err := projectresolve.GitCommand(ctx, cwd, "rev-parse", "--is-inside-work-tree").Run(); err != nil {
 		return nil, false
 	}
-	cmd := gitCommand(ctx, cwd, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+	cmd := projectresolve.GitCommand(ctx, cwd, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, false

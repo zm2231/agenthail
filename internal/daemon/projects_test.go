@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
@@ -21,9 +22,9 @@ import (
 func projectsFixture(t *testing.T) (*Daemon, *registry.Registry, *daemonSurface, string) {
 	t.Helper()
 	d, r, fake, from, to := daemonFixture(t)
-	repo := catalogTestRepo(t)
+	repo := testkit.GitRepo(t)
 	worktree := filepath.Join(repo, ".worktrees", "task-c3")
-	gitRun(t, repo, "worktree", "add", "-b", "feature/c3", worktree)
+	testkit.Git(t, repo, "worktree", "add", "-b", "feature/c3", worktree)
 	idle := time.Now().Add(-30 * time.Hour).UTC().Truncate(time.Millisecond)
 	from.Cwd, from.LastActive = repo, idle
 	to.Cwd, to.LastActive = worktree, idle
@@ -193,9 +194,9 @@ func TestAddingAFolderProjectClaimsItsSessions(t *testing.T) {
 		t.Fatalf("add: %d %s", response.Code, response.Body)
 	}
 	var added struct {
-		Project CatalogProject `json:"project"`
+		Project projectresolve.CatalogProject `json:"project"`
 	}
-	if err := json.Unmarshal(response.Body.Bytes(), &added); err != nil || added.Project.Kind != catalogProjectFolder || added.Project.DisplayName != "notes" {
+	if err := json.Unmarshal(response.Body.Bytes(), &added); err != nil || added.Project.Kind != projectresolve.CatalogProjectFolder || added.Project.DisplayName != "notes" {
 		t.Fatalf("added=%+v err=%v", added, err)
 	}
 	select {
@@ -219,18 +220,18 @@ func TestAddingAFolderProjectClaimsItsSessions(t *testing.T) {
 
 func TestAWorktreeSessionLandsInTheDeepestAddedProject(t *testing.T) {
 	d, r, fake, _, _ := daemonFixture(t)
-	repo := catalogTestRepo(t)
-	gitRun(t, repo, "remote", "add", "origin", "https://github.com/example/merchantry.git")
+	repo := testkit.GitRepo(t)
+	testkit.Git(t, repo, "remote", "add", "origin", "https://github.com/example/merchantry.git")
 	if err := os.MkdirAll(filepath.Join(repo, "apps", "web", "src"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repo, "apps", "web", "src", "index.ts"), []byte("export {}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, repo, "add", "apps")
-	gitRun(t, repo, "commit", "-m", "web")
+	testkit.Git(t, repo, "add", "apps")
+	testkit.Git(t, repo, "commit", "-m", "web")
 	worktree := filepath.Join(repo, ".worktrees", "task-f6")
-	gitRun(t, repo, "worktree", "add", "-b", "feature/f6", worktree)
+	testkit.Git(t, repo, "worktree", "add", "-b", "feature/f6", worktree)
 	for id, cwd := range map[string]string{"from": filepath.Join(worktree, "apps", "web", "src"), "to": worktree} {
 		session := fake.sessions[id]
 		session.Cwd = cwd
@@ -247,7 +248,7 @@ func TestAWorktreeSessionLandsInTheDeepestAddedProject(t *testing.T) {
 	}
 	web := add(filepath.Join(worktree, "apps", "web"))
 	var added struct {
-		Project CatalogProject `json:"project"`
+		Project projectresolve.CatalogProject `json:"project"`
 	}
 	if web.Code != http.StatusOK || json.Unmarshal(web.Body.Bytes(), &added) != nil {
 		t.Fatalf("add web: %d %s", web.Code, web.Body)
@@ -256,13 +257,13 @@ func TestAWorktreeSessionLandsInTheDeepestAddedProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if added.Project.RootPath != filepath.Join(canonicalRepo, "apps", "web") || added.Project.ID != "repo:github.com/example/merchantry::apps/web" || added.Project.Kind != catalogProjectGit || added.Project.DisplayName != "web" {
+	if added.Project.RootPath != filepath.Join(canonicalRepo, "apps", "web") || added.Project.ID != "repo:github.com/example/merchantry::apps/web" || added.Project.Kind != projectresolve.CatalogProjectGit || added.Project.DisplayName != "web" {
 		t.Fatalf("a worktree folder was not added at the main checkout: %+v", added.Project)
 	}
 	again := add(filepath.Join(repo, "apps", "web"))
 	var existing struct {
-		Project CatalogProject `json:"project"`
-		Created bool           `json:"created"`
+		Project projectresolve.CatalogProject `json:"project"`
+		Created bool                          `json:"created"`
 	}
 	if again.Code != http.StatusOK || json.Unmarshal(again.Body.Bytes(), &existing) != nil || existing.Created || existing.Project.LocalID != added.Project.LocalID || existing.Project.ID != added.Project.ID {
 		t.Fatalf("duplicate add: %d %s", again.Code, again.Body)
@@ -312,7 +313,7 @@ func TestFederationProjectsStayOnTheirHostAndArchiveRoutesThere(t *testing.T) {
 	cwd := remote.fake.sessions["remote-a"].Cwd
 	added := remote.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "project-add", "path": cwd})
 	var answer struct {
-		Project CatalogProject `json:"project"`
+		Project projectresolve.CatalogProject `json:"project"`
 	}
 	if added.Code != http.StatusOK || json.Unmarshal(added.Body.Bytes(), &answer) != nil {
 		t.Fatalf("add status=%d body=%s", added.Code, added.Body.String())
@@ -351,8 +352,8 @@ func TestFederationProjectsStayOnTheirHostAndArchiveRoutesThere(t *testing.T) {
 
 func cloneAt(t *testing.T, origin, path string) string {
 	t.Helper()
-	gitRun(t, origin, "clone", "--quiet", origin, path)
-	gitRun(t, path, "remote", "set-url", "origin", "https://github.com/example/gadget.git")
+	testkit.Git(t, origin, "clone", "--quiet", origin, path)
+	testkit.Git(t, path, "remote", "set-url", "origin", "https://github.com/example/gadget.git")
 	if err := os.MkdirAll(filepath.Join(path, "src"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -373,14 +374,14 @@ func moveSessions(t *testing.T, node *federationNode, cwd string) {
 
 func TestFederationMergesOneRepositoryAcrossHostsAndArchivesItPerHost(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	upstream := catalogTestRepo(t)
+	upstream := testkit.GitRepo(t)
 	remote := newFederationNode(t, "remote-a", "remote-b")
 	moveSessions(t, remote, filepath.Join(cloneAt(t, upstream, filepath.Join(t.TempDir(), "vps-gadget")), "src"))
 	remote.serve(t, nil)
 	local := newFederationNode(t, "local-a")
 	localRoot := cloneAt(t, upstream, filepath.Join(t.TempDir(), "laptop-gadget"))
 	worktree := filepath.Join(localRoot, ".worktrees", "task-e5")
-	gitRun(t, localRoot, "worktree", "add", "-b", "feature/e5", worktree)
+	testkit.Git(t, localRoot, "worktree", "add", "-b", "feature/e5", worktree)
 	moveSessions(t, local, filepath.Join(worktree, "src"))
 	local.start(t, testRoots(remote.server))
 	record := local.pair(t, remote, "vps")
@@ -457,14 +458,14 @@ func TestFederationMergesOneRepositoryAcrossHostsAndArchivesItPerHost(t *testing
 
 func TestTheCatalogAndPathResolutionAgreeRightAfterOriginChanges(t *testing.T) {
 	d, r, fake, repo := projectsFixture(t)
-	gitRun(t, repo, "remote", "add", "origin", "https://github.com/example/widget.git")
+	testkit.Git(t, repo, "remote", "add", "origin", "https://github.com/example/widget.git")
 	d.discoverCatalog(context.Background())
 	if id := storedProjection(t, r, "from").Project.ID; id != "repo:github.com/example/widget" {
 		t.Fatalf("before: %s", id)
 	}
-	gitRun(t, repo, "remote", "set-url", "origin", "git@github.com:another-owner/widget-renamed.git")
+	testkit.Git(t, repo, "remote", "set-url", "origin", "git@github.com:another-owner/widget-renamed.git")
 	d.discoverCatalog(context.Background())
-	resolved, err := ResolvePathProject(context.Background(), r, repo)
+	resolved, err := projectresolve.ResolvePathProject(context.Background(), r, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -485,7 +486,7 @@ func TestTheCatalogAndPathResolutionAgreeRightAfterOriginChanges(t *testing.T) {
 	if id := storedProjection(t, r, "from").Project.ID; id != "repo:github.com/another-owner/widget-renamed::src" {
 		t.Fatalf("added project before: %s", id)
 	}
-	gitRun(t, repo, "remote", "set-url", "origin", "https://github.com/example/widget.git")
+	testkit.Git(t, repo, "remote", "set-url", "origin", "https://github.com/example/widget.git")
 	d.discoverCatalog(context.Background())
 	records, err := r.ListProjects()
 	if err != nil {
@@ -498,11 +499,11 @@ func TestTheCatalogAndPathResolutionAgreeRightAfterOriginChanges(t *testing.T) {
 
 func TestEveryProjectSurfaceNamesItsCoordinatorsOnEveryHost(t *testing.T) {
 	d, r, fake, from, to := daemonFixture(t)
-	repo, err := filepath.EvalSymlinks(catalogTestRepo(t))
+	repo, err := filepath.EvalSymlinks(testkit.GitRepo(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, repo, "remote", "add", "origin", "https://github.com/example/widget.git")
+	testkit.Git(t, repo, "remote", "add", "origin", "https://github.com/example/widget.git")
 	from.Cwd, to.Cwd = repo, repo
 	for _, session := range []surface.Session{from, to} {
 		fake.sessions[session.ID] = session
@@ -592,7 +593,7 @@ func TestEveryProjectSurfaceNamesItsCoordinatorsOnEveryHost(t *testing.T) {
 		t.Fatalf("conflicting coordinators=%+v", leads)
 	}
 
-	gitRun(t, repo, "remote", "set-url", "origin", "https://github.com/example/widget-renamed.git")
+	testkit.Git(t, repo, "remote", "set-url", "origin", "https://github.com/example/widget-renamed.git")
 	d.discoverCatalog(context.Background())
 	byID = projects()
 	renamed, found := byID["repo:github.com/example/widget-renamed"]
@@ -616,7 +617,7 @@ func TestEveryProjectSurfaceNamesItsCoordinatorsOnEveryHost(t *testing.T) {
 
 func TestAnAddedProjectsCoordinatorStaysOneProjectAfterTheOriginChanges(t *testing.T) {
 	d, r, fake, repo := projectsFixture(t)
-	gitRun(t, repo, "remote", "add", "origin", "https://github.com/example/widget.git")
+	testkit.Git(t, repo, "remote", "add", "origin", "https://github.com/example/widget.git")
 	// The project is reached through a symlink, as every macOS temp path is
 	// through /var.
 	linked := filepath.Join(t.TempDir(), "linked")
@@ -641,7 +642,7 @@ func TestAnAddedProjectsCoordinatorStaysOneProjectAfterTheOriginChanges(t *testi
 	if response := runDashboardAction(t, d, `{"action":"coordinator-set","sessionId":"from","name":"widget-lead"}`); response.Code != http.StatusOK {
 		t.Fatalf("set coordinator: %d %s", response.Code, response.Body)
 	}
-	gitRun(t, repo, "remote", "set-url", "origin", "https://github.com/example/widget-renamed.git")
+	testkit.Git(t, repo, "remote", "set-url", "origin", "https://github.com/example/widget-renamed.git")
 	d.discoverCatalog(context.Background())
 	state, err := d.dashboardState(context.Background())
 	if err != nil {

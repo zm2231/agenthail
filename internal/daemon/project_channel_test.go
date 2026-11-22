@@ -18,8 +18,8 @@ import (
 
 func widgetRepo(t *testing.T, origin string) string {
 	t.Helper()
-	repo := catalogTestRepo(t)
-	gitRun(t, repo, "remote", "add", "origin", origin)
+	repo := testkit.GitRepo(t)
+	testkit.Git(t, repo, "remote", "add", "origin", origin)
 	return repo
 }
 

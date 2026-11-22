@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 type localStatusSurface struct {
@@ -504,87 +504,6 @@ func TestUnchangedDiscoveryPassWritesNoSessionRows(t *testing.T) {
 	}
 }
 
-func TestCatalogIdentityResolvesPathWithNewline(t *testing.T) {
-	for _, name := range []string{"line\nbreak", "\nleading", "trailing\n"} {
-		repo := filepath.Join(t.TempDir(), name)
-		if err := os.Mkdir(repo, 0700); err != nil {
-			t.Fatal(err)
-		}
-		gitRun(t, repo, "init", "-b", "main")
-		identity := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: repo}, time.Now(), noStoredProject)
-		if identity.Problem != "" || identity.Project == nil || identity.Project.RootPath != identity.Checkout.Path || filepath.Base(identity.Checkout.Path) != name {
-			t.Fatalf("%q: identity=%+v", name, identity)
-		}
-	}
-}
-
-func TestCatalogIdentityCacheReusesResolvedCheckout(t *testing.T) {
-	repo := t.TempDir()
-	gitRun(t, repo, "init", "-b", "main")
-	gitRun(t, repo, "config", "user.email", "test@example.com")
-	gitRun(t, repo, "config", "user.name", "Test")
-	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("base\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	gitRun(t, repo, "add", "README.md")
-	gitRun(t, repo, "commit", "-m", "base")
-	settleGitFiles(t, repo)
-	calls := countGitCalls(t)
-	cache := newCatalogIdentityCache()
-	now := time.Now()
-	session := surface.Session{Cwd: repo}
-
-	first := cache.identity(context.Background(), session, now, noStoredProject)
-	resolved := calls()
-	if resolved == 0 || first.Checkout.Branch != "main" || first.Checkout.Dirty {
-		t.Fatalf("calls=%d identity=%+v", resolved, first.Checkout)
-	}
-	if again := cache.identity(context.Background(), session, now.Add(time.Minute), noStoredProject); again != first || calls() != resolved {
-		t.Fatalf("cached lookup ran %d git commands", calls()-resolved)
-	}
-
-	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("edited\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if edited := cache.identity(context.Background(), session, now.Add(time.Minute), noStoredProject); edited.Checkout.Dirty || calls() != resolved {
-		t.Fatalf("working tree edit re-resolved before expiry: dirty=%v calls=%d", edited.Checkout.Dirty, calls()-resolved)
-	}
-	if expired := cache.identity(context.Background(), session, now.Add(catalogIdentityTTL), noStoredProject); expired.Checkout.Dirty {
-		t.Fatalf("expired entry was not served while it refreshes: %+v", expired.Checkout)
-	}
-	cache.wait()
-	if refreshed := cache.identity(context.Background(), session, now.Add(catalogIdentityTTL), noStoredProject); !refreshed.Checkout.Dirty || calls() == resolved {
-		t.Fatalf("expired entry was not refreshed: %+v", refreshed.Checkout)
-	}
-
-	gitRun(t, repo, "checkout", "-q", "-b", "feature/cache")
-	switched := calls()
-	cache.identity(context.Background(), session, now.Add(catalogIdentityTTL), noStoredProject)
-	cache.wait()
-	if branch := cache.identity(context.Background(), session, now.Add(catalogIdentityTTL), noStoredProject); branch.Checkout.Branch != "feature/cache" || calls() == switched {
-		t.Fatalf("branch switch did not invalidate: %+v", branch.Checkout)
-	}
-}
-
-func countGitCalls(t *testing.T) func() int {
-	t.Helper()
-	real, err := exec.LookPath("git")
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	logPath := filepath.Join(dir, "calls")
-	script := fmt.Sprintf("#!/bin/sh\necho x >> %q\nexec %q \"$@\"\n", logPath, real)
-	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return func() int {
-		raw, _ := os.ReadFile(logPath)
-		return strings.Count(string(raw), "\n")
-	}
-}
-
 // activityStatusSurface dates a working session by its status file's last
 // write, as the provider surfaces date one by its transcript.
 type activityStatusSurface struct{ *localStatusSurface }
@@ -997,26 +916,14 @@ func TestAWaitPublishedOnAWorkingRowDropsItsActivity(t *testing.T) {
 	}
 }
 
-// rewriteKeepingTime writes content over path and puts its modification time
-// back to at, as a same-size rewrite inside one timestamp tick leaves it.
-func rewriteKeepingTime(t *testing.T, path, content string, at time.Time) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(path, at, at); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestAStatusRewrittenAtTheSameSizeInTheTickOfItsLastReadIsPublished(t *testing.T) {
 	d, store, source := localStatusFixture(t)
 	d.discoverCatalog(context.Background())
 	tick := time.Now().Add(time.Minute)
-	rewriteKeepingTime(t, source.statusPath("from"), string(surface.StatusIdle)+"\n", tick)
+	testkit.RewriteKeepingTime(t, source.statusPath("from"), string(surface.StatusIdle)+"\n", tick)
 	d.refreshCatalogStatus(context.Background())
 	after := latestCatalogSeq(t, store)
-	rewriteKeepingTime(t, source.statusPath("from"), string(surface.StatusBusy)+"\n", tick)
+	testkit.RewriteKeepingTime(t, source.statusPath("from"), string(surface.StatusBusy)+"\n", tick)
 	d.refreshCatalogStatus(context.Background())
 	if statuses := catalogStatusEvents(t, store, after, "from"); len(statuses) != 1 || statuses[0] != string(surface.StatusBusy) {
 		t.Fatalf("events=%v, want the rewritten status published", statuses)

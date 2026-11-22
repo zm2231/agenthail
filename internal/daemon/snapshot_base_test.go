@@ -14,13 +14,14 @@ import (
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func baseFixture(t *testing.T) (*Daemon, *registry.Registry, *daemonSurface, *dashboardServer, http.Handler, string) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	d, reg, fake, _, _ := daemonFixture(t)
-	cwd := catalogTestRepo(t)
+	cwd := testkit.GitRepo(t)
 	for _, id := range []string{"from", "to"} {
 		session := fake.sessions[id]
 		session.Cwd = cwd

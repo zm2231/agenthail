@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -252,7 +253,7 @@ func (d *Daemon) apiLedgerBacklogLineHandler(w http.ResponseWriter, r *http.Requ
 	writeDashboardJSON(w, http.StatusOK, backlogLineResponse{Line: d.backlogReadyLine(r.Context(), session.ID, project, time.Now())})
 }
 
-func (d *Daemon) backlogReadyLine(ctx context.Context, sessionID string, project *CatalogProject, now time.Time) string {
+func (d *Daemon) backlogReadyLine(ctx context.Context, sessionID string, project *projectresolve.CatalogProject, now time.Time) string {
 	spec, coordinates, err := d.Registry.CoordinatorOfSession(sessionID)
 	if err != nil || !coordinates || spec.ProjectRoot == "" {
 		return ""
@@ -339,11 +340,11 @@ func (d *Daemon) parkedDecisionsNow(rows []dashboardSession) []decisionItem {
 	return d.parkedDecisions(rows, time.Now())
 }
 
-func (d *Daemon) coordinatedLedgerKey(ctx context.Context, project *CatalogProject, spec registry.CoordinatorSpec) (string, error) {
+func (d *Daemon) coordinatedLedgerKey(ctx context.Context, project *projectresolve.CatalogProject, spec registry.CoordinatorSpec) (string, error) {
 	if project != nil && (project.ID == spec.ProjectID || project.LocalID == spec.ProjectID) {
-		return LedgerKey(d.Registry, project)
+		return projectresolve.LedgerKey(d.Registry, project)
 	}
-	return ResolvePathLedgerKey(ctx, d.Registry, spec.ProjectRoot)
+	return projectresolve.ResolvePathLedgerKey(ctx, d.Registry, spec.ProjectRoot)
 }
 
 // pruneAskStates keeps a report its boards do not name yet for two resend intervals, since a park can arrive by replay after its ask state.

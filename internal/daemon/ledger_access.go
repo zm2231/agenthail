@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -22,7 +23,7 @@ func (d *Daemon) ledgerTargets(store *ledger.Store, session surface.Session) ([]
 		if err != nil {
 			return nil, ledgerAccess{}, err
 		}
-		key, err := LedgerKey(d.Registry, project)
+		key, err := projectresolve.LedgerKey(d.Registry, project)
 		if err != nil {
 			return nil, ledgerAccess{}, err
 		}

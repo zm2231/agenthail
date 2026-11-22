@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/dashconfig"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -48,7 +49,7 @@ func (d *Daemon) mcpCreateScope(caller *mcpCaller, kind surface.SurfaceKind, mod
 	if !filepath.IsAbs(strings.TrimSpace(rawCwd)) {
 		return childStart{}, "", refuse("invalid", "cwd must be an absolute folder.")
 	}
-	cwd, err := canonicalCatalogPath(strings.TrimSpace(rawCwd))
+	cwd, err := projectresolve.CanonicalCatalogPath(strings.TrimSpace(rawCwd))
 	if err != nil {
 		return childStart{}, "", refuse("invalid", fmt.Sprintf("cwd: %s", err))
 	}

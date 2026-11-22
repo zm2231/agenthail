@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -24,7 +23,7 @@ const (
 func cloneWithOrigin(t *testing.T, origin, path, url string) string {
 	t.Helper()
 	cloneAt(t, origin, path)
-	gitRun(t, path, "remote", "set-url", "origin", url)
+	testkit.Git(t, path, "remote", "set-url", "origin", url)
 	return path
 }
 
@@ -48,7 +47,7 @@ func linkAction(t *testing.T, node *federationNode, body map[string]string) {
 func linkedFederation(t *testing.T) (laptop, server *federationNode) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	origin := catalogTestRepo(t)
+	origin := testkit.GitRepo(t)
 	server = newFederationNode(t, "server-a")
 	moveSessions(t, server, cloneWithOrigin(t, origin, filepath.Join(t.TempDir(), "fork"), "https://github.com/example/fork.git"))
 	server.serve(t, nil)
@@ -220,33 +219,6 @@ func TestAHostHoldsALinkWhileTheForkHasALeadThereAndReleasesItWhenTheLeadIsClear
 	testkit.Eventually(t, "clearing the lead releases the link and moves the fork's history", 15*time.Second, func() bool {
 		return linkHonoured(t, server) && len(leadHistory(t, server, forkProject)) == 0 && slices.Equal(leadHistory(t, server, upstreamProject), []string{"set:server-fork-lead", "cleared:server-fork-lead"})
 	})
-}
-
-func TestARepositoryGainsItsRootCommitWithItsFirstCommit(t *testing.T) {
-	repo := filepath.Join(t.TempDir(), "fresh")
-	gitRun(t, t.TempDir(), "init", "-b", "main", repo)
-	gitRun(t, repo, "config", "user.email", "test@example.com")
-	gitRun(t, repo, "config", "user.name", "Test")
-	repositories := &catalogRepositoryCache{entries: map[string]catalogRepositoryEntry{}}
-	resolve := func() []string {
-		identity, _, transient := resolveCatalogIdentity(context.Background(), repo, nil, projectLinkSet{}, repositories)
-		if transient || identity.Project == nil {
-			t.Fatalf("identity=%+v transient=%v", identity, transient)
-		}
-		return identity.Project.RootCommits
-	}
-	if roots := resolve(); len(roots) != 0 {
-		t.Fatalf("a repository without commits has roots %v", roots)
-	}
-	gitRun(t, repo, "commit", "--allow-empty", "-m", "first")
-	head, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	root := strings.TrimSpace(string(head))
-	if roots := resolve(); len(roots) != 1 || roots[0] != root {
-		t.Fatalf("after the first commit roots=%v want [%s]", roots, root)
-	}
 }
 
 func TestALinkRefusesToStrandAProjectsLeadAndNamesTheWayRound(t *testing.T) {

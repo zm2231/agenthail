@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -112,7 +112,7 @@ func ledgerProjectKey(a *App) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return daemon.ResolvePathLedgerKey(context.Background(), a.registry(), cwd)
+	return projectresolve.ResolvePathLedgerKey(context.Background(), a.registry(), cwd)
 }
 
 func (a *App) ledgerBoard(store *ledger.Store, args []string) error {

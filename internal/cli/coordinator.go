@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/coordinator"
-	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -73,7 +73,7 @@ func (a *App) cmdCoordinator(args []string) error {
 
 // projectAt resolves the project containing a folder the user typed, the
 // working directory when path is empty.
-func (a *App) projectAt(path string) (*daemon.CatalogProject, error) {
+func (a *App) projectAt(path string) (*projectresolve.CatalogProject, error) {
 	cwd, err := resolveThreadCwd(path)
 	if err != nil {
 		return nil, err
@@ -84,10 +84,10 @@ func (a *App) projectAt(path string) (*daemon.CatalogProject, error) {
 // projectOf resolves the project of a session's folder, which may no longer
 // exist: a removed worktree stays in its repository's project. A coordinator
 // belongs to a project, so a folder outside every project has none.
-func (a *App) projectOf(cwd string) (*daemon.CatalogProject, error) {
+func (a *App) projectOf(cwd string) (*projectresolve.CatalogProject, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	found, err := daemon.ResolvePathProject(ctx, a.registry(), cwd)
+	found, err := projectresolve.ResolvePathProject(ctx, a.registry(), cwd)
 	if err != nil {
 		return nil, fmt.Errorf("find the project of %s: %w", cwd, err)
 	}
@@ -119,7 +119,7 @@ func (a *App) expandLead(target string) (string, error) {
 // session's folder, else the working directory. Two hosts' coordinators of
 // one project are a conflict to resolve, never a pick.
 func (a *App) callerLead() (registry.CoordinatorSpec, error) {
-	var found *daemon.CatalogProject
+	var found *projectresolve.CatalogProject
 	var err error
 	if session := a.callerSession(); session != nil && session.Cwd != "" {
 		found, err = a.projectOf(session.Cwd)

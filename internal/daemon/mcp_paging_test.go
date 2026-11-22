@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -73,7 +74,7 @@ func TestMCPNegotiatesOnlyThePinnedRevisions(t *testing.T) {
 func recordedSession(t *testing.T, r *registry.Registry, project ledgerProject, id string) surface.Session {
 	t.Helper()
 	session := project.session(t, r, id)
-	found, err := ResolvePathProject(context.Background(), r, session.Cwd)
+	found, err := projectresolve.ResolvePathProject(context.Background(), r, session.Cwd)
 	if err != nil {
 		t.Fatal(err)
 	}

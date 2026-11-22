@@ -1,4 +1,4 @@
-package daemon
+package projectresolve
 
 import (
 	"context"
@@ -23,11 +23,11 @@ import (
 )
 
 const (
-	catalogProjectGit    = "git"
-	catalogProjectFolder = "folder"
+	CatalogProjectGit    = "git"
+	CatalogProjectFolder = "folder"
 )
 
-// catalogProject is the project a session belongs to. ID is Key when the
+// CatalogProject is the project a session belongs to. ID is Key when the
 // project has one, so every host's checkout of it is one project; otherwise
 // it is LocalID, this host's own id for it.
 type CatalogProject struct {
@@ -51,7 +51,7 @@ type CatalogProjectRef struct {
 	DisplayName string `json:"displayName"`
 }
 
-type catalogCheckout struct {
+type CatalogCheckout struct {
 	ID           string `json:"id"`
 	Path         string `json:"path"`
 	Branch       string `json:"branch,omitempty"`
@@ -60,9 +60,9 @@ type catalogCheckout struct {
 	Dirty        bool   `json:"dirty"`
 }
 
-type catalogIdentity struct {
+type CatalogIdentity struct {
 	Project  *CatalogProject
-	Checkout catalogCheckout
+	Checkout CatalogCheckout
 	Problem  string
 }
 
@@ -71,33 +71,33 @@ type catalogIdentity struct {
 // tree edits that touch neither show up in Dirty once the entry expires.
 const catalogIdentityTTL = 2 * time.Minute
 
-const catalogIdentityGitTimeout = 3 * time.Second
+const CatalogIdentityGitTimeout = 3 * time.Second
 
 // catalogIdentityRefreshes bounds the git work re-resolving expired
 // identities in the background at once.
 const catalogIdentityRefreshes = 4
 
-// catalogIdentityCache resolves each workspace path once, then serves it
+// CatalogIdentityCache resolves each workspace path once, then serves it
 // while at most one background refresh per path re-reads an entry that
 // expired or whose HEAD or index changed. A discovery pass runs git only for
 // a path it has never seen or whose repository config changed.
-type catalogIdentityCache struct {
+type CatalogIdentityCache struct {
 	mu      sync.Mutex
 	entries map[string]catalogIdentityEntry
 	// known keeps the last resolved project per path past the TTL, so a git
 	// failure that is not "not a repository" never moves a session.
 	known        map[string]*CatalogProject
 	projects     []registry.ProjectRecord
-	links        projectLinkSet
+	links        ProjectLinkSet
 	generation   uint64
-	repositories *catalogRepositoryCache
+	repositories *CatalogRepositoryCache
 	roots        map[string]catalogRootEntry
 	refreshing   map[string]struct{}
 	slots        chan struct{}
 	inflight     sync.WaitGroup
-	// changed runs after a background refresh changed a path's identity.
-	changed     func()
-	observeRoot func(root, key string)
+	// Changed runs after a background refresh changed a path's identity.
+	Changed     func()
+	ObserveRoot func(root, key string)
 }
 
 type catalogRootEntry struct {
@@ -109,7 +109,7 @@ type catalogRootEntry struct {
 }
 
 type catalogIdentityEntry struct {
-	identity catalogIdentity
+	identity CatalogIdentity
 	gitDirs  catalogGitDirs
 	gitStamp string
 	// configStamp fingerprints the repository config alone: a remote change
@@ -119,16 +119,16 @@ type catalogIdentityEntry struct {
 	usedAt      time.Time
 }
 
-func newCatalogIdentityCache() *catalogIdentityCache {
-	return &catalogIdentityCache{entries: map[string]catalogIdentityEntry{}, known: map[string]*CatalogProject{}, repositories: &catalogRepositoryCache{entries: map[string]catalogRepositoryEntry{}}, roots: map[string]catalogRootEntry{}, refreshing: map[string]struct{}{}, slots: make(chan struct{}, catalogIdentityRefreshes)}
+func NewCatalogIdentityCache() *CatalogIdentityCache {
+	return &CatalogIdentityCache{entries: map[string]catalogIdentityEntry{}, known: map[string]*CatalogProject{}, repositories: &CatalogRepositoryCache{entries: map[string]catalogRepositoryEntry{}}, roots: map[string]catalogRootEntry{}, refreshing: map[string]struct{}{}, slots: make(chan struct{}, catalogIdentityRefreshes)}
 }
 
-// wait returns once no background refresh is running.
-func (c *catalogIdentityCache) wait() { c.inflight.Wait() }
+// Wait returns once no background refresh is running.
+func (c *CatalogIdentityCache) Wait() { c.inflight.Wait() }
 
-// setProjects replaces the added projects. A changed set drops the cached
+// SetProjects replaces the added projects. A changed set drops the cached
 // identities, since a path may now belong to another project.
-func (c *catalogIdentityCache) setProjects(records []registry.ProjectRecord) {
+func (c *CatalogIdentityCache) SetProjects(records []registry.ProjectRecord) {
 	added := make([]registry.ProjectRecord, 0, len(records))
 	for _, record := range records {
 		if record.Added {
@@ -147,7 +147,7 @@ func (c *catalogIdentityCache) setProjects(records []registry.ProjectRecord) {
 	c.entries = map[string]catalogIdentityEntry{}
 }
 
-func (c *catalogIdentityCache) setLinks(links projectLinkSet) {
+func (c *CatalogIdentityCache) SetLinks(links ProjectLinkSet) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.links.equal(links) {
@@ -160,26 +160,26 @@ func (c *catalogIdentityCache) setLinks(links projectLinkSet) {
 	c.known = map[string]*CatalogProject{}
 }
 
-// rootRepository reads the key and repository of an added project's folder.
+// RootRepository reads the key and repository of an added project's folder.
 // ok is false when git failed for a reason other than the folder being
 // outside a repository, so the stored key is kept.
-func (c *catalogIdentityCache) rootRepository(ctx context.Context, root string, now time.Time) (key string, repository []byte, ok bool) {
+func (c *CatalogIdentityCache) RootRepository(ctx context.Context, root string, now time.Time) (key string, repository []byte, ok bool) {
 	c.mu.Lock()
 	entry, found := c.roots[root]
 	c.mu.Unlock()
 	if found && now.Sub(entry.resolvedAt) < catalogIdentityTTL && catalogGitStamp(entry.gitDirs) == entry.gitStamp {
 		return entry.key, entry.repository, true
 	}
-	resolved, notRepository, err := resolveCatalogRepository(ctx, root, c.repositories)
+	resolved, notRepository, err := ResolveCatalogRepository(ctx, root, c.repositories)
 	if err != nil && !notRepository {
 		return "", nil, false
 	}
 	var dirs catalogGitDirs
 	if err == nil {
 		dirs.common = resolved.commonDir
-		key = resolved.key(root)
+		key = resolved.Key(root)
 		if key != "" {
-			repository, _ = json.Marshal(resolved.repository)
+			repository, _ = json.Marshal(resolved.Repository)
 		}
 	}
 	c.mu.Lock()
@@ -188,13 +188,13 @@ func (c *catalogIdentityCache) rootRepository(ctx context.Context, root string, 
 	return key, repository, true
 }
 
-// identity resolves a session's project and checkout. prior reads the project
+// Identity resolves a session's project and checkout. prior reads the project
 // last stored for the session; it is used when git fails and this cache has
 // never resolved the path.
-func (c *catalogIdentityCache) identity(ctx context.Context, session surface.Session, now time.Time, prior func() *CatalogProject) catalogIdentity {
+func (c *CatalogIdentityCache) Identity(ctx context.Context, session surface.Session, now time.Time, prior func() *CatalogProject) CatalogIdentity {
 	path, err := catalogSessionPath(session.Cwd)
 	if err != nil || path == "" {
-		return catalogIdentity{Project: prior(), Problem: "workspace path is unavailable"}
+		return CatalogIdentity{Project: prior(), Problem: "workspace path is unavailable"}
 	}
 	c.mu.Lock()
 	entry, found := c.entries[path]
@@ -215,15 +215,15 @@ func (c *catalogIdentityCache) identity(ctx context.Context, session surface.Ses
 // resolve reads path's identity with git and caches it, a failed read too,
 // so a workspace whose git fails is retried once per TTL rather than on
 // every discovery pass.
-func (c *catalogIdentityCache) resolve(ctx context.Context, path string, now time.Time, prior func() *CatalogProject) catalogIdentity {
+func (c *CatalogIdentityCache) resolve(ctx context.Context, path string, now time.Time, prior func() *CatalogProject) CatalogIdentity {
 	c.mu.Lock()
 	projects, links, generation := c.projects, c.links, c.generation
 	c.mu.Unlock()
 	identity, gitDirs, transient := resolveUnlinkedCatalogIdentity(ctx, path, projects, c.repositories)
-	if project := identity.Project; !transient && project != nil && !project.Added && project.Key != "" && c.observeRoot != nil {
-		c.observeRoot(project.RootPath, project.Key)
+	if project := identity.Project; !transient && project != nil && !project.Added && project.Key != "" && c.ObserveRoot != nil {
+		c.ObserveRoot(project.RootPath, project.Key)
 	}
-	identity.Project = links.apply(identity.Project)
+	identity.Project = links.Apply(identity.Project)
 	if transient {
 		c.mu.Lock()
 		known, found := c.known[path]
@@ -248,7 +248,7 @@ func (c *catalogIdentityCache) resolve(ctx context.Context, path string, now tim
 
 // refreshLater re-resolves path in the background unless a refresh of it is
 // already running or every refresh slot is taken; a later pass retries.
-func (c *catalogIdentityCache) refreshLater(ctx context.Context, path string, now time.Time, prior func() *CatalogProject) {
+func (c *CatalogIdentityCache) refreshLater(ctx context.Context, path string, now time.Time, prior func() *CatalogProject) {
 	c.mu.Lock()
 	if _, running := c.refreshing[path]; running {
 		c.mu.Unlock()
@@ -270,7 +270,7 @@ func (c *catalogIdentityCache) refreshLater(ctx context.Context, path string, no
 		c.mu.Lock()
 		delete(c.refreshing, path)
 		<-c.slots
-		changed := c.changed
+		changed := c.Changed
 		c.mu.Unlock()
 		if changed != nil && !reflect.DeepEqual(before, after) {
 			changed()
@@ -278,8 +278,8 @@ func (c *catalogIdentityCache) refreshLater(ctx context.Context, path string, no
 	}()
 }
 
-// prune forgets the paths no listed session asked for within the TTL.
-func (c *catalogIdentityCache) prune(now time.Time) {
+// Prune forgets the paths no listed session asked for within the TTL.
+func (c *CatalogIdentityCache) Prune(now time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for path, entry := range c.entries {
@@ -335,16 +335,16 @@ func catalogConfigStamp(dirs catalogGitDirs) string {
 // the same place in the repository's main checkout, so a linked worktree's
 // session finds the projects added in the main checkout. Without one, a
 // repository is an implicit project at its main checkout.
-func resolveCatalogIdentity(ctx context.Context, path string, projects []registry.ProjectRecord, links projectLinkSet, repositories *catalogRepositoryCache) (catalogIdentity, catalogGitDirs, bool) {
+func resolveCatalogIdentity(ctx context.Context, path string, projects []registry.ProjectRecord, links ProjectLinkSet, repositories *CatalogRepositoryCache) (CatalogIdentity, catalogGitDirs, bool) {
 	identity, dirs, transient := resolveUnlinkedCatalogIdentity(ctx, path, projects, repositories)
-	identity.Project = links.apply(identity.Project)
+	identity.Project = links.Apply(identity.Project)
 	return identity, dirs, transient
 }
 
-func resolveUnlinkedCatalogIdentity(ctx context.Context, path string, projects []registry.ProjectRecord, repositories *catalogRepositoryCache) (catalogIdentity, catalogGitDirs, bool) {
-	identity := catalogIdentity{Checkout: catalogCheckout{ID: catalogPathID("checkout", path), Path: path}}
+func resolveUnlinkedCatalogIdentity(ctx context.Context, path string, projects []registry.ProjectRecord, repositories *CatalogRepositoryCache) (CatalogIdentity, catalogGitDirs, bool) {
+	identity := CatalogIdentity{Checkout: CatalogCheckout{ID: catalogPathID("checkout", path), Path: path}}
 	existing := nearestExistingDirectory(path)
-	repository, notRepository, err := resolveCatalogRepository(ctx, existing, repositories)
+	repository, notRepository, err := ResolveCatalogRepository(ctx, existing, repositories)
 	if err != nil && !notRepository {
 		identity.Problem = "repository identity is unavailable"
 		return identity, catalogGitDirs{}, true
@@ -352,22 +352,22 @@ func resolveUnlinkedCatalogIdentity(ctx context.Context, path string, projects [
 	inRepository := err == nil
 	candidates := []string{path}
 	if inRepository {
-		candidates = append(candidates, repository.translate(path))
+		candidates = append(candidates, repository.Translate(path))
 	}
 	if added := deepestCatalogProject(projects, candidates); added != nil {
-		identity.Project = addedCatalogProject(*added, inRepository && catalogWithin(repository.mainRoot, added.WorkspaceRoot))
+		identity.Project = AddedCatalogProject(*added, inRepository && catalogWithin(repository.MainRoot, added.WorkspaceRoot))
 	} else if inRepository {
 		identity.Project = repository.implicitProject()
 	}
 	if !inRepository {
 		return identity, catalogGitDirs{}, false
 	}
-	if existing != path || repository.bare {
+	if existing != path || repository.Bare {
 		return identity, catalogGitDirs{common: repository.commonDir}, false
 	}
-	identity.Checkout.Path = repository.toplevel
-	identity.Checkout.ID = catalogPathID("checkout", repository.toplevel)
-	checkoutCtx, cancel := context.WithTimeout(ctx, catalogIdentityGitTimeout)
+	identity.Checkout.Path = repository.Toplevel
+	identity.Checkout.ID = catalogPathID("checkout", repository.Toplevel)
+	checkoutCtx, cancel := context.WithTimeout(ctx, CatalogIdentityGitTimeout)
 	defer cancel()
 	if reason := resolveCatalogCheckout(checkoutCtx, &identity.Checkout); reason != "" {
 		identity.Problem = reason
@@ -375,48 +375,48 @@ func resolveUnlinkedCatalogIdentity(ctx context.Context, path string, projects [
 	return identity, catalogGitDirs{checkout: repository.gitDir, common: repository.commonDir}, false
 }
 
-type catalogRepository struct {
-	bare        bool
-	toplevel    string
+type CatalogRepository struct {
+	Bare        bool
+	Toplevel    string
 	commonDir   string
 	gitDir      string
-	mainRoot    string
-	repository  *project.Repository
+	MainRoot    string
+	Repository  *project.Repository
 	rootCommits []string
 }
 
-// translate maps a folder in this checkout to the same folder in the main
+// Translate maps a folder in this checkout to the same folder in the main
 // checkout.
-func (repository catalogRepository) translate(path string) string {
-	if !catalogWithin(repository.toplevel, path) {
+func (repository CatalogRepository) Translate(path string) string {
+	if !catalogWithin(repository.Toplevel, path) {
 		return path
 	}
-	rel, err := filepath.Rel(repository.toplevel, path)
+	rel, err := filepath.Rel(repository.Toplevel, path)
 	if err != nil {
 		return path
 	}
-	return filepath.Join(repository.mainRoot, rel)
+	return filepath.Join(repository.MainRoot, rel)
 }
 
-// key names root, a folder in the main checkout, on every host. A repository
+// Key names root, a folder in the main checkout, on every host. A repository
 // without a remote has no key.
-func (repository catalogRepository) key(root string) string {
-	if repository.repository == nil || !catalogWithin(repository.mainRoot, root) {
+func (repository CatalogRepository) Key(root string) string {
+	if repository.Repository == nil || !catalogWithin(repository.MainRoot, root) {
 		return ""
 	}
-	rel, err := filepath.Rel(repository.mainRoot, root)
+	rel, err := filepath.Rel(repository.MainRoot, root)
 	if err != nil {
 		return ""
 	}
-	return project.Key(repository.repository.CanonicalKey, filepath.ToSlash(rel))
+	return project.Key(repository.Repository.CanonicalKey, filepath.ToSlash(rel))
 }
 
-func (repository catalogRepository) implicitProject() *CatalogProject {
-	name := catalogProjectName(repository.mainRoot)
-	if repository.repository != nil {
-		name = repository.repository.Name
+func (repository CatalogRepository) implicitProject() *CatalogProject {
+	name := CatalogProjectName(repository.MainRoot)
+	if repository.Repository != nil {
+		name = repository.Repository.Name
 	}
-	found := &CatalogProject{LocalID: catalogImplicitProjectID(repository.mainRoot), DisplayName: name, RootPath: repository.mainRoot, Kind: catalogProjectGit, Key: repository.key(repository.mainRoot), Repository: repository.repository, RootCommits: repository.rootCommits}
+	found := &CatalogProject{LocalID: CatalogImplicitProjectID(repository.MainRoot), DisplayName: name, RootPath: repository.MainRoot, Kind: CatalogProjectGit, Key: repository.Key(repository.MainRoot), Repository: repository.Repository, RootCommits: repository.rootCommits}
 	found.ID = found.LocalID
 	if found.Key != "" {
 		found.ID = found.Key
@@ -424,12 +424,12 @@ func (repository catalogRepository) implicitProject() *CatalogProject {
 	return found
 }
 
-func catalogImplicitProjectID(mainRoot string) string { return "implicit:" + mainRoot }
+func CatalogImplicitProjectID(mainRoot string) string { return "implicit:" + mainRoot }
 
-func addedCatalogProject(record registry.ProjectRecord, inRepository bool) *CatalogProject {
-	found := &CatalogProject{ID: record.ID, LocalID: record.ID, DisplayName: record.Title, RootPath: record.WorkspaceRoot, Kind: catalogProjectFolder, Added: true}
+func AddedCatalogProject(record registry.ProjectRecord, inRepository bool) *CatalogProject {
+	found := &CatalogProject{ID: record.ID, LocalID: record.ID, DisplayName: record.Title, RootPath: record.WorkspaceRoot, Kind: CatalogProjectFolder, Added: true}
 	if inRepository {
-		found.Kind = catalogProjectGit
+		found.Kind = CatalogProjectGit
 	}
 	if record.Key != "" {
 		found.ID, found.Key = record.Key, record.Key
@@ -458,10 +458,10 @@ func catalogWithin(root, path string) bool {
 	return err == nil && within
 }
 
-// catalogRepositoryCache holds each repository's identity by its common
+// CatalogRepositoryCache holds each repository's identity by its common
 // directory until the repository's config changes. A nil cache reads every
 // time.
-type catalogRepositoryCache struct {
+type CatalogRepositoryCache struct {
 	mu      sync.Mutex
 	entries map[string]catalogRepositoryEntry
 }
@@ -474,7 +474,7 @@ type catalogRepositoryEntry struct {
 
 // A repository without commits yet is read again next time, so its first
 // commit's root is found without waiting for a config change.
-func (repositories *catalogRepositoryCache) repository(ctx context.Context, commonDir string) (*project.Repository, []string, error) {
+func (repositories *CatalogRepositoryCache) repository(ctx context.Context, commonDir string) (*project.Repository, []string, error) {
 	stamp := "missing"
 	if info, err := os.Stat(filepath.Join(commonDir, "config")); err == nil {
 		stamp = surface.SettledStamp(info, time.Now())
@@ -501,7 +501,7 @@ func (repositories *catalogRepositoryCache) repository(ctx context.Context, comm
 }
 
 func readCatalogRootCommits(ctx context.Context, commonDir string) []string {
-	output, err := catalogGit(ctx, commonDir, "rev-list", "--max-parents=0", "HEAD")
+	output, err := CatalogGit(ctx, commonDir, "rev-list", "--max-parents=0", "HEAD")
 	if err != nil {
 		return nil
 	}
@@ -513,7 +513,7 @@ func readCatalogRootCommits(ctx context.Context, commonDir string) []string {
 // readCatalogRepository reads the remote that names the repository: origin,
 // else the first remote by name. It is nil when no remote names one.
 func readCatalogRepository(ctx context.Context, commonDir string) (*project.Repository, error) {
-	output, err := catalogGit(ctx, commonDir, "config", "--null", "--get-regexp", `^remote\..*\.url$`)
+	output, err := CatalogGit(ctx, commonDir, "config", "--null", "--get-regexp", `^remote\..*\.url$`)
 	if err != nil {
 		if isCatalogNoMatch(err) {
 			return nil, nil
@@ -552,25 +552,25 @@ func nearestExistingDirectory(path string) string {
 	}
 }
 
-// resolveCatalogRepository reads the checkout root, the shared repository
+// ResolveCatalogRepository reads the checkout root, the shared repository
 // directory and the checkout's own git directory. Each is its own git call
 // because a path may contain a newline. The main root is the main
 // checkout: the parent of a ".git" common directory, the checkout itself
 // when it owns its git directory (a submodule), and the common directory of
 // a bare repository.
-func resolveCatalogRepository(ctx context.Context, path string, repositories *catalogRepositoryCache) (repository catalogRepository, notRepository bool, err error) {
-	gitCtx, cancel := context.WithTimeout(ctx, catalogIdentityGitTimeout)
+func ResolveCatalogRepository(ctx context.Context, path string, repositories *CatalogRepositoryCache) (repository CatalogRepository, notRepository bool, err error) {
+	gitCtx, cancel := context.WithTimeout(ctx, CatalogIdentityGitTimeout)
 	defer cancel()
-	toplevel, err := catalogGit(gitCtx, path, "rev-parse", "--show-toplevel")
+	toplevel, err := CatalogGit(gitCtx, path, "rev-parse", "--show-toplevel")
 	if err != nil && isCatalogBare(gitCtx, path, err) {
-		repository.bare = true
-		toplevel, err = catalogGit(gitCtx, path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		repository.Bare = true
+		toplevel, err = CatalogGit(gitCtx, path, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	}
 	if err != nil {
-		return catalogRepository{}, isCatalogNonGit(err), err
+		return CatalogRepository{}, isCatalogNonGit(err), err
 	}
-	if repository.toplevel, err = canonicalCatalogPath(toplevel); err != nil {
-		return catalogRepository{}, false, err
+	if repository.Toplevel, err = CanonicalCatalogPath(toplevel); err != nil {
+		return CatalogRepository{}, false, err
 	}
 	for _, read := range []struct {
 		target *string
@@ -579,44 +579,44 @@ func resolveCatalogRepository(ctx context.Context, path string, repositories *ca
 		{&repository.commonDir, []string{"rev-parse", "--path-format=absolute", "--git-common-dir"}},
 		{&repository.gitDir, []string{"rev-parse", "--absolute-git-dir"}},
 	} {
-		value, err := catalogGit(gitCtx, repository.toplevel, read.args...)
+		value, err := CatalogGit(gitCtx, repository.Toplevel, read.args...)
 		if err != nil {
-			return catalogRepository{}, false, err
+			return CatalogRepository{}, false, err
 		}
-		if *read.target, err = canonicalCatalogPath(value); err != nil {
-			return catalogRepository{}, false, err
+		if *read.target, err = CanonicalCatalogPath(value); err != nil {
+			return CatalogRepository{}, false, err
 		}
 	}
 	switch {
 	case filepath.Base(repository.commonDir) == ".git":
-		repository.mainRoot = filepath.Dir(repository.commonDir)
+		repository.MainRoot = filepath.Dir(repository.commonDir)
 	case repository.gitDir == repository.commonDir:
-		repository.mainRoot = repository.toplevel
+		repository.MainRoot = repository.Toplevel
 	default:
-		repository.mainRoot = repository.commonDir
+		repository.MainRoot = repository.commonDir
 	}
-	if repository.repository, repository.rootCommits, err = repositories.repository(gitCtx, repository.commonDir); err != nil {
-		return catalogRepository{}, false, err
+	if repository.Repository, repository.rootCommits, err = repositories.repository(gitCtx, repository.commonDir); err != nil {
+		return CatalogRepository{}, false, err
 	}
 	return repository, false, nil
 }
 
-func resolveCatalogCheckout(ctx context.Context, checkout *catalogCheckout) string {
+func resolveCatalogCheckout(ctx context.Context, checkout *CatalogCheckout) string {
 	root := checkout.Path
-	branch, err := catalogGit(ctx, root, "symbolic-ref", "--quiet", "--short", "HEAD")
+	branch, err := CatalogGit(ctx, root, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err == nil {
 		checkout.Branch = branch
-		if upstream, upstreamErr := catalogGit(ctx, root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); upstreamErr == nil {
+		if upstream, upstreamErr := CatalogGit(ctx, root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); upstreamErr == nil {
 			checkout.IsMain = strings.TrimPrefix(upstream, "origin/") == branch
 		} else {
 			checkout.IsMain = branch == "main" || branch == "master"
 		}
-	} else if head, headErr := catalogGit(ctx, root, "rev-parse", "HEAD"); headErr == nil {
+	} else if head, headErr := CatalogGit(ctx, root, "rev-parse", "HEAD"); headErr == nil {
 		checkout.DetachedHead = head
 	} else {
 		return "repository head is unavailable"
 	}
-	porcelain, err := catalogGit(ctx, root, "status", "--porcelain=v1", "-z", "--untracked-files=normal")
+	porcelain, err := CatalogGit(ctx, root, "status", "--porcelain=v1", "-z", "--untracked-files=normal")
 	if err != nil {
 		return "repository status is unavailable"
 	}
@@ -624,7 +624,7 @@ func resolveCatalogCheckout(ctx context.Context, checkout *catalogCheckout) stri
 	return ""
 }
 
-func catalogProjectName(root string) string {
+func CatalogProjectName(root string) string {
 	name := filepath.Base(root)
 	if trimmed := strings.TrimSuffix(name, ".git"); trimmed != "" {
 		return trimmed
@@ -632,8 +632,8 @@ func catalogProjectName(root string) string {
 	return name
 }
 
-func catalogGit(ctx context.Context, dir string, args ...string) (string, error) {
-	command := gitCommand(ctx, dir, args...)
+func CatalogGit(ctx context.Context, dir string, args ...string) (string, error) {
+	command := GitCommand(ctx, dir, args...)
 	var stderr strings.Builder
 	command.Stderr = &stderr
 	output, err := command.Output()
@@ -668,7 +668,7 @@ func catalogSessionPath(cwd string) (string, error) {
 	return filepath.Join(resolved, rest), nil
 }
 
-func canonicalCatalogPath(path string) (string, error) {
+func CanonicalCatalogPath(path string) (string, error) {
 	if path == "" {
 		return "", fmt.Errorf("empty path")
 	}
@@ -715,7 +715,7 @@ func isCatalogBare(ctx context.Context, path string, err error) bool {
 	if !errors.As(err, &gitErr) || !strings.Contains(gitErr.stderr, "must be run in a work tree") {
 		return false
 	}
-	bare, bareErr := catalogGit(ctx, path, "rev-parse", "--is-bare-repository")
+	bare, bareErr := CatalogGit(ctx, path, "rev-parse", "--is-bare-repository")
 	return bareErr == nil && bare == "true"
 }
 

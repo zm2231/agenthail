@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -26,7 +27,7 @@ func withFolder(name string) paritySetup {
 func withAddedProject(t *testing.T, d *Daemon, r *registry.Registry) {
 	t.Helper()
 	withFolder("project")(t, d, r)
-	root, err := canonicalCatalogPath(parityFolder("project"))
+	root, err := projectresolve.CanonicalCatalogPath(parityFolder("project"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +39,7 @@ func withAddedProject(t *testing.T, d *Daemon, r *registry.Registry) {
 func withCoordinator(t *testing.T, d *Daemon, r *registry.Registry) {
 	t.Helper()
 	withAddedProject(t, d, r)
-	root, _ := canonicalCatalogPath(parityFolder("project"))
+	root, _ := projectresolve.CanonicalCatalogPath(parityFolder("project"))
 	spec := registry.CoordinatorSpec{ProjectID: "p-parity", ProjectRoot: root, Name: "parity-lead", Surface: "codex", Cwd: root}
 	if _, _, err := r.ReplaceCoordinator(spec, registry.CoordinatorChange{ChangedBy: "setup"}); err != nil {
 		t.Fatal(err)
@@ -52,7 +53,7 @@ func withSessionInProject(t *testing.T, d *Daemon, r *registry.Registry) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.Cwd, _ = canonicalCatalogPath(parityFolder("project"))
+	session.Cwd, _ = projectresolve.CanonicalCatalogPath(parityFolder("project"))
 	if err := r.RecordObservedSession(*session); err != nil {
 		t.Fatal(err)
 	}
