@@ -82,6 +82,9 @@ func (d *Daemon) mcpSendIn(ctx context.Context, caller *mcpCaller, input mcpSend
 	if err != nil {
 		return d.mcpAskOnRefusal(ctx, caller, err, input.mcpAskPerson, dashboardActionRequest{Action: "send", Message: input.Message, BusyDelivery: busyDelivery})
 	}
+	if reach == reachSteer {
+		ctx = surface.WithSteerAdmitted(ctx, caller.session.ID)
+	}
 	result, err := d.mcpAction(ctx, caller, "agenthail_send", input.mcpWrite, dashboardActionRequest{Action: "send", SessionID: target.ID, Message: input.Message, SourceSessionID: caller.session.ID, BusyDelivery: busyDelivery})
 	d.noticeAfter(ctx, caller, notice, err)
 	if err != nil {

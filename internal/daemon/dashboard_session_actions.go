@@ -120,7 +120,7 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 			}
 			return d.doHostRelay(ctx, session, request.Message, request.SourceSessionID, request.BusyDelivery, request.RelayHops, request.SentAt)
 		}
-		options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, PersonName: request.PersonName, Uploads: attached, SentAt: request.SentAt}
+		options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author, PersonName: request.PersonName, Uploads: attached, SentAt: request.SentAt, SteerAdmitted: surface.SteerAdmitted(ctx, request.SourceSessionID)}
 		sender := coordinator.Sender{Service: d.coordinator()}
 		deliver := sender.DeliverWithOptions
 		if request.NoQueue {

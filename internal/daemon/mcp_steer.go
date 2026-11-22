@@ -3,6 +3,8 @@ package daemon
 import (
 	"context"
 	"strings"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 type mcpSteerInput struct {
@@ -20,6 +22,7 @@ func (d *Daemon) mcpSteer(ctx context.Context, caller *mcpCaller, input mcpSteer
 	if err != nil {
 		return d.mcpAskOnRefusal(ctx, caller, err, input.mcpAskPerson, dashboardActionRequest{Action: "steer", Message: input.Message})
 	}
+	ctx = surface.WithSteerAdmitted(ctx, caller.session.ID)
 	result, err := d.mcpAction(ctx, caller, "agenthail_steer", input.mcpWrite, dashboardActionRequest{Action: "steer", SessionID: target.ID, Message: input.Message, SourceSessionID: caller.session.ID})
 	d.noticeAfter(ctx, caller, notice, err)
 	return result, err

@@ -334,7 +334,7 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 	}
 	sourceID := surface.SendOptions{SourceSessionID: surface.SourceSessionID(ctx), Author: author}.Sender()
 	options := surface.SendOptions{SourceSessionID: sourceID, Author: author, PersonName: surface.PersonName(ctx)}
-	if !d.MaySteer(sourceID, author, *session) {
+	if !surface.SteerAdmitted(ctx, sourceID) && !d.MaySteer(sourceID, author, *session) {
 		options.BusyDelivery = string(deliverypolicy.Queue)
 		receipt, err := d.DeliverWithOptions(ctx, adapter, session, message, "", options)
 		if err == nil {
@@ -677,7 +677,7 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 	}
 	steerText, steerImages, canSteer := surface.SteerParts(adapter, session, surface.WithSentAge(message, options.SentAt, time.Now()), options)
 	options.SteersUploads = canSteer && busyMode == deliverypolicy.Steer
-	steerable := busyMode == deliverypolicy.Steer && canSteer && surface.EffectiveCapabilities(adapter, session).Steer && d.MaySteer(options.SourceSessionID, options.Author, *session)
+	steerable := busyMode == deliverypolicy.Steer && canSteer && surface.EffectiveCapabilities(adapter, session).Steer && (options.SteerAdmitted || d.MaySteer(options.SourceSessionID, options.Author, *session))
 	if steerable && observation == nil {
 		observed, observeErr := adapter.Observe(ctx, session)
 		if observeErr != nil {
