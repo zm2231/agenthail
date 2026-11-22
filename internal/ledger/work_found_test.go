@@ -49,7 +49,7 @@ func TestFoundWorkStaysOutOfThePersonsIntentUntilLinked(t *testing.T) {
 	if got := clauseWork(t, s, "widget-C1"); !slices.Equal(got, []string{"widget-W1", "widget-W2"}) {
 		t.Fatalf("linked work is not under the clause: %v", got)
 	}
-	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkLink, ItemID: "widget-W2", ClauseID: "widget-C1"}, "only found work is linked")
+	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkLink, ItemID: "widget-W2", ClauseID: "widget-C1"}, "already hangs off widget-C1")
 	ctx, _ = board(t, s).WorkContext("widget-W2")
 	if ctx.Clause == nil || ctx.Clause.Text != "build search" || len(ctx.Clause.Words) != 1 || ctx.Clause.Words[0].Text != "build search" || ctx.Clause.Goal != "Search" {
 		t.Fatalf("linked item context does not carry the person's words: %+v", ctx.Clause)
@@ -187,4 +187,100 @@ func TestEditingWorkKeepsWhatChanged(t *testing.T) {
 	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkEdit, ItemID: "widget-W1"}, "edit needs at least one")
 	bad := "P9"
 	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkEdit, ItemID: "widget-W1", Change: ledger.WorkChange{Priority: &bad}}, "unknown priority")
+}
+
+func TestWorkLinkedToTheWrongClauseMovesWithAReason(t *testing.T) {
+	s := newStore(t)
+	capture(t, s, project, "claude-prompt:1", "build search and rank the results")
+	g := goal(t, s, "Search")
+	attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:1", As: ledger.AsNewAsk, To: g, Clauses: []string{"build search", "rank the results"}})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkAdd, ClauseID: "widget-C1", Text: "tune the ranking weights"})
+	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkLink, ItemID: "widget-W1", ClauseID: "widget-C2"}, "moving it needs --reason")
+	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkLink, ItemID: "widget-W1", ClauseID: "widget-C1", Reason: "again"}, "already hangs off widget-C1")
+	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkLink, ItemID: "widget-W1", ClauseID: "widget-C9", Reason: "typo"}, "is not a clause")
+	moved := work(t, s, ledger.WorkRequest{Action: ledger.WorkLink, ItemID: "widget-W1", ClauseID: "widget-C2", Reason: "ranking, not search"})
+	if !strings.HasSuffix(moved.Readback, "widget-W1 moved from widget-C1 to widget-C2; widget-C1 now has no work") {
+		t.Fatalf("a move that empties a clause does not say so: %q", moved.Readback)
+	}
+	if from, to := clauseWork(t, s, "widget-C1"), clauseWork(t, s, "widget-C2"); len(from) != 0 || !slices.Equal(to, []string{"widget-W1"}) {
+		t.Fatalf("after the move widget-C1 has %v and widget-C2 has %v", from, to)
+	}
+	item, _ := board(t, s).WorkItem("widget-W1")
+	last := item.Timeline[len(item.Timeline)-1]
+	if item.ClauseID != "widget-C2" || last.Kind != "link" || last.Text != "moved from widget-C1 to widget-C2: ranking, not search" {
+		t.Fatalf("moved item = %s, last entry %+v", item.ClauseID, last)
+	}
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkAdd, ClauseID: "widget-C2", Text: "add the index"})
+	if back := work(t, s, ledger.WorkRequest{Action: ledger.WorkLink, ItemID: "widget-W2", ClauseID: "widget-C1", Reason: "search, not ranking"}); !strings.HasSuffix(back.Readback, "widget-W2 moved from widget-C2 to widget-C1") {
+		t.Fatalf("a move that leaves work behind = %q", back.Readback)
+	}
+}
+
+func TestFoundWorkMovedOffRetractedWordsStaysOnItsNewClause(t *testing.T) {
+	s := newStore(t)
+	g := searchAsk(t, s)
+	capture(t, s, project, "claude-prompt:2", "rank the results")
+	attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsNewAsk, To: g, Clauses: []string{"rank the results"}})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkAdd, Text: "tune the ranking weights"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkLink, ItemID: "widget-W1", ClauseID: "widget-C1"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkLink, ItemID: "widget-W1", ClauseID: "widget-C2", Reason: "ranking, not search"})
+	if done, err := s.ReclassifyUtterance(project, "claude-prompt:1", "scheduled", time.Now()); err != nil || !done {
+		t.Fatalf("reclassify: %v %v", done, err)
+	}
+	if item, ok := board(t, s).WorkItem("widget-W1"); !ok || item.ClauseID != "widget-C2" || !slices.Equal(clauseWork(t, s, "widget-C2"), []string{"widget-W1"}) {
+		t.Fatalf("moved work left its new clause when the old one went: %q %v", item.ClauseID, ok)
+	}
+}
+
+func TestWorkMovedOntoRetractedWordsIsFoundAgainNotBackOnItsOldClause(t *testing.T) {
+	s := newStore(t)
+	g := searchAsk(t, s)
+	capture(t, s, project, "claude-prompt:2", "rank the results")
+	attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsNewAsk, To: g, Clauses: []string{"rank the results"}})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkAdd, Text: "tune the ranking weights"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkLink, ItemID: "widget-W1", ClauseID: "widget-C1"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkLink, ItemID: "widget-W1", ClauseID: "widget-C2", Reason: "ranking, not search"})
+	if done, err := s.ReclassifyUtterance(project, "claude-prompt:2", "scheduled", time.Now()); err != nil || !done {
+		t.Fatalf("reclassify: %v %v", done, err)
+	}
+	if item, ok := board(t, s).WorkItem("widget-W1"); !ok || item.ClauseID != "" || len(clauseWork(t, s, "widget-C1")) != 0 {
+		t.Fatalf("work moved off widget-C1 went back to it when widget-C2 was retracted: %q %v %v", item.ClauseID, ok, clauseWork(t, s, "widget-C1"))
+	}
+}
+
+// A moved item is anchored to the clause it moved to: retracting the words of
+// the clause it was created under keeps it, and retracting the clause it moved
+// to leaves it found, never back on the clause it moved off.
+func TestRetractingAClauseAfterAMoveKeepsTheWorkAnchoredWhereItMoved(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		retract []string
+		clause  string
+		underC2 []string
+	}{
+		{"the old clause", []string{"claude-prompt:1"}, "widget-C2", []string{"widget-W1"}},
+		{"the new clause", []string{"claude-prompt:2"}, "", nil},
+		{"both clauses", []string{"claude-prompt:1", "claude-prompt:2"}, "", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStore(t)
+			g := searchAsk(t, s)
+			capture(t, s, project, "claude-prompt:2", "rank the results")
+			attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsNewAsk, To: g, Clauses: []string{"rank the results"}})
+			work(t, s, ledger.WorkRequest{Action: ledger.WorkAdd, ClauseID: "widget-C1", Text: "tune the ranking weights"})
+			work(t, s, ledger.WorkRequest{Action: ledger.WorkLink, ItemID: "widget-W1", ClauseID: "widget-C2", Reason: "ranking, not search"})
+			for _, ref := range tc.retract {
+				if done, err := s.ReclassifyUtterance(project, ref, "scheduled", time.Now()); err != nil || !done {
+					t.Fatalf("reclassify %s: %v %v", ref, done, err)
+				}
+			}
+			item, ok := board(t, s).WorkItem("widget-W1")
+			if !ok {
+				t.Fatal("the moved work was dropped")
+			}
+			if item.ClauseID != tc.clause || len(clauseWork(t, s, "widget-C1")) != 0 || !slices.Equal(clauseWork(t, s, "widget-C2"), tc.underC2) {
+				t.Fatalf("moved work hangs off %q; under widget-C1 %v, under widget-C2 %v", item.ClauseID, clauseWork(t, s, "widget-C1"), clauseWork(t, s, "widget-C2"))
+			}
+		})
+	}
 }

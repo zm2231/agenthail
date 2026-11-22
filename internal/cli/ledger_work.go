@@ -22,7 +22,7 @@ const ledgerWorkUsage = `usage: agenthail ledger work [list] [--state <s,...>] [
        (work create and work new are short for work add)
        agenthail ledger work edit <item_id> [--text "..."] [--type ...] [--priority ...] [--description "..."] [--acceptance "..."] [--label ...] [--unlabel ...]
                                           [--parent <item_id> | --no-parent]   (or work update)
-       agenthail ledger work link <item_id> <clause_id>
+       agenthail ledger work link <item_id> <clause_id> [--reason "..."]   (--reason moves an item off the clause it hangs off)
        agenthail ledger work comment <item_id> "<text>"
        agenthail ledger work log <item_id> "<text>" [--type progress|blocker|decision|hypothesis|tried|result]
        agenthail ledger work <claim|block|unblock|submit|reopen|restore> <item_id> [--reason "..."]
