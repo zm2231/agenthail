@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/prwatch"
 	"github.com/zm2231/agenthail/internal/github"
 	"github.com/zm2231/agenthail/internal/registry"
 )
@@ -28,8 +29,8 @@ func newWatchRig(t *testing.T) *watchRig {
 
 func (w *watchRig) tick() {
 	w.t.Helper()
-	w.now = w.now.Add(prSweepEvery)
-	if err := w.d.watchPRs(w.t.Context(), w.now); err != nil {
+	w.now = w.now.Add(prwatch.SweepEvery)
+	if err := w.d.prs.Watch(w.t.Context(), w.now); err != nil {
 		w.t.Fatal(err)
 	}
 }
@@ -68,22 +69,22 @@ func TestCommentsWakeUntilTenInARowThenTheWatchStopsUntilRewatched(t *testing.T)
 		w.fake.setStatus(status)
 		w.tick()
 	}
-	for i := 1; i <= prCommentWakeLimit; i++ {
+	for i := 1; i <= prwatch.CommentWakeLimit; i++ {
 		comment(i)
 		wakes := wakesFor(t, w.d.Registry, "to")
 		if len(wakes) != i || !strings.Contains(wakes[i-1], "pat commented.") && !strings.Contains(wakes[i-1], "pat commented;") {
 			t.Fatalf("after comment %d wakes = %q", i, wakes)
 		}
-		if i < prCommentWakeLimit && !w.watching() {
+		if i < prwatch.CommentWakeLimit && !w.watching() {
 			t.Fatalf("the watch stopped after %d comment wakes", i)
 		}
 	}
 	if wakes := wakesFor(t, w.d.Registry, "to"); w.watching() || !strings.Contains(wakes[len(wakes)-1], "watch stopped") {
-		t.Fatalf("after %d comment wakes: watching=%t last=%q", prCommentWakeLimit, w.watching(), wakes[len(wakes)-1])
+		t.Fatalf("after %d comment wakes: watching=%t last=%q", prwatch.CommentWakeLimit, w.watching(), wakes[len(wakes)-1])
 	}
 
 	w.personSets("watch")
-	comment(prCommentWakeLimit + 1)
+	comment(prwatch.CommentWakeLimit + 1)
 	if !w.watching() {
 		t.Fatal("a re-watched pull request stopped on its next comment")
 	}
@@ -139,8 +140,8 @@ func TestAReadThatMissesAPullRequestDuringARewatchCountsNothing(t *testing.T) {
 		w.tick()
 	}
 	pr, _, _ := w.d.Registry.SessionPR("to", acmeApp.String(), 42)
-	if pr.ReadFailures != 0 || w.d.prProblem(pr) != "" {
-		t.Fatalf("reads begun before each re-watch counted failures=%d problem=%q", pr.ReadFailures, w.d.prProblem(pr))
+	if pr.ReadFailures != 0 || w.d.prs.Problem(pr) != "" {
+		t.Fatalf("reads begun before each re-watch counted failures=%d problem=%q", pr.ReadFailures, w.d.prs.Problem(pr))
 	}
 }
 
@@ -166,13 +167,13 @@ func TestAPullRequestGitHubStopsReturningShowsItsProblem(t *testing.T) {
 		t.Fatal("the read that made the problem visible did not republish the catalog")
 	}
 	prs, _ := w.d.Registry.PRsForSession("to")
-	if views := w.d.prViews(prs); !strings.Contains(views[0].Problem, "has not returned") {
+	if views := w.d.prs.Views(prs); !strings.Contains(views[0].Problem, "has not returned") {
 		t.Fatalf("views = %+v", views)
 	}
 	w.fake.setStatus(openStatus(w.ref, "aaaaaaa1111"))
 	w.tick()
 	prs, _ = w.d.Registry.PRsForSession("to")
-	if views := w.d.prViews(prs); views[0].Problem != "" || !drain() {
+	if views := w.d.prs.Views(prs); views[0].Problem != "" || !drain() {
 		t.Fatalf("a returned pull request kept its problem or was not republished: %+v", views)
 	}
 }

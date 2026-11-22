@@ -1,4 +1,4 @@
-package daemon
+package prwatch
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	prSweepEvery   = 2 * time.Minute
+	SweepEvery     = 2 * time.Minute
 	prSweepTimeout = time.Minute
 )
 
@@ -20,8 +20,10 @@ type branchWork struct {
 	branch github.Branch
 }
 
-func (d *Daemon) runPRSweeps(ctx context.Context) {
-	ticker := time.NewTicker(prSweepEvery)
+// Run links worktree branches to their pull requests and watches the linked
+// ones, every two minutes until ctx ends.
+func (w *Watcher) Run(ctx context.Context) {
+	ticker := time.NewTicker(SweepEvery)
 	defer ticker.Stop()
 	lastFailure := ""
 	for {
@@ -31,23 +33,25 @@ func (d *Daemon) runPRSweeps(ctx context.Context) {
 		case <-ticker.C:
 		}
 		failure := ""
-		if err := d.linkBranchPRs(ctx); err != nil {
+		if err := w.LinkBranches(ctx); err != nil {
 			failure = "linking worktree branches: " + err.Error()
 		}
-		if err := d.watchPRs(ctx, time.Now()); err != nil {
+		if err := w.Watch(ctx, time.Now()); err != nil {
 			failure = strings.TrimPrefix(failure+"; watching: "+err.Error(), "; ")
 		}
 		if failure != lastFailure && failure != "" {
-			d.log.Printf("pull requests: %s", failure)
+			w.log.Printf("pull requests: %s", failure)
 		}
 		lastFailure = failure
 	}
 }
 
-func (d *Daemon) linkBranchPRs(ctx context.Context) error {
+// LinkBranches links each worktree branch to the pull requests opened from it
+// since the worktree was made.
+func (w *Watcher) LinkBranches(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, prSweepTimeout)
 	defer cancel()
-	records, err := d.Registry.SessionWork()
+	records, err := w.store.SessionWork()
 	if err != nil {
 		return err
 	}
@@ -60,7 +64,7 @@ func (d *Daemon) linkBranchPRs(ctx context.Context) error {
 		if !ok {
 			continue
 		}
-		known, err := d.Registry.SessionHasPRIn(record.SessionID, repo.String())
+		known, err := w.store.SessionHasPRIn(record.SessionID, repo.String())
 		if err != nil {
 			return err
 		}
@@ -75,7 +79,7 @@ func (d *Daemon) linkBranchPRs(ctx context.Context) error {
 	for _, item := range work {
 		branches = append(branches, item.branch)
 	}
-	found, err := d.github.BranchPullRequests(ctx, branches)
+	found, err := w.host.GitHub().BranchPullRequests(ctx, branches)
 	if err != nil {
 		return err
 	}
@@ -84,7 +88,7 @@ func (d *Daemon) linkBranchPRs(ctx context.Context) error {
 			if pr.CreatedAt.Before(item.record.CreatedAt) {
 				continue
 			}
-			if err := d.linkPR(registry.SessionPR{SessionID: item.record.SessionID, Repo: pr.Repo.String(), Number: pr.Number, URL: pr.URL, Source: registry.PRSourceBranch, Title: pr.Title, State: pr.State, HeadSHA: pr.HeadSHA}, false); err != nil {
+			if err := w.Link(registry.SessionPR{SessionID: item.record.SessionID, Repo: pr.Repo.String(), Number: pr.Number, URL: pr.URL, Source: registry.PRSourceBranch, Title: pr.Title, State: pr.State, HeadSHA: pr.HeadSHA}, false); err != nil {
 				return err
 			}
 		}

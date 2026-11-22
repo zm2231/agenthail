@@ -15,53 +15,6 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-type prView struct {
-	Repo      string `json:"repo"`
-	Number    int    `json:"number"`
-	URL       string `json:"url"`
-	Source    string `json:"source"`
-	Watch     bool   `json:"watch"`
-	Title     string `json:"title,omitempty"`
-	State     string `json:"state,omitempty"`
-	HeadSHA   string `json:"headSha,omitempty"`
-	Mergeable string `json:"mergeable,omitempty"`
-	Review    string `json:"review,omitempty"`
-	Checks    string `json:"checks,omitempty"`
-	Problem   string `json:"problem,omitempty"`
-}
-
-func (d *Daemon) changePRs(write func(*registry.Registry) (bool, error)) (bool, error) {
-	changed, err := write(d.Registry)
-	if err == nil && changed {
-		d.requestCatalogDiscovery()
-	}
-	return changed, err
-}
-
-func (d *Daemon) prViews(prs []registry.SessionPR) []prView {
-	views := make([]prView, 0, len(prs))
-	for _, pr := range prs {
-		views = append(views, prView{Repo: pr.Repo, Number: pr.Number, URL: pr.URL, Source: pr.Source, Watch: pr.Watch, Title: pr.Title, State: pr.State, HeadSHA: pr.HeadSHA,
-			Mergeable: pr.Mergeable, Review: pr.Review, Checks: pr.Checks, Problem: d.prProblem(pr)})
-	}
-	return views
-}
-
-func (d *Daemon) prProblem(pr registry.SessionPR) string {
-	if !pr.Watch {
-		return ""
-	}
-	if repo, ok := github.ParseRepo(pr.Repo); ok {
-		if problem := d.prWatch.problem(repo.Host); problem != "" {
-			return problem
-		}
-	}
-	if pr.ReadFailures >= registry.PRReadFailureLimit {
-		return "GitHub has not returned this pull request on the last few reads"
-	}
-	return ""
-}
-
 func prSource(p principal) string {
 	if p.Kind == principalSession || p.Claimed == daemonapi.CLIActor && p.DashboardBearer {
 		return registry.PRSourceAgent
@@ -86,7 +39,7 @@ func (d *Daemon) doPR(ctx context.Context, p principal, session *surface.Session
 		if err != nil {
 			return actionResult{}, githubFailure(ref, err)
 		}
-		if err := d.linkPR(registry.SessionPR{SessionID: session.ID, Repo: repo, Number: ref.Number, URL: pr.URL, Source: prSource(p), Title: pr.Title, State: pr.State, HeadSHA: pr.HeadSHA}, true); err != nil {
+		if err := d.prs.Link(registry.SessionPR{SessionID: session.ID, Repo: repo, Number: ref.Number, URL: pr.URL, Source: prSource(p), Title: pr.Title, State: pr.State, HeadSHA: pr.HeadSHA}, true); err != nil {
 			return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 		}
 	case "unlink":
@@ -118,7 +71,7 @@ func (d *Daemon) doPR(ctx context.Context, p principal, session *surface.Session
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 	}
-	return actionOK(map[string]any{"ok": true, "sessionId": session.ID, "prs": d.prViews(prs)}), nil
+	return actionOK(map[string]any{"ok": true, "sessionId": session.ID, "prs": d.prs.Views(prs)}), nil
 }
 
 func githubFailure(ref github.Ref, err error) error {

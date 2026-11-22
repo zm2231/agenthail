@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -31,7 +30,7 @@ func TestWorktreeBranchesLinkTheirPullRequestsInOneRequest(t *testing.T) {
 	fake := &fakeGitHub{branches: map[github.Branch][]github.PullRequest{{Repo: acmeApp, Head: "ah/x"}: {opened, stale}}}
 	d.github = fake
 
-	if err := d.linkBranchPRs(t.Context()); err != nil {
+	if err := d.prs.LinkBranches(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if len(fake.branchReads) != 1 || len(fake.branchReads[0]) != 2 {
@@ -45,7 +44,7 @@ func TestWorktreeBranchesLinkTheirPullRequestsInOneRequest(t *testing.T) {
 	if _, err := r.UnlinkPR("to", "github.com/acme/app", 7); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.linkBranchPRs(t.Context()); err != nil {
+	if err := d.prs.LinkBranches(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if prs, _ := r.PRsForSession("to"); len(prs) != 0 {
@@ -56,53 +55,23 @@ func TestWorktreeBranchesLinkTheirPullRequestsInOneRequest(t *testing.T) {
 	}
 
 	fake.err = &github.UnavailableError{Reason: "gh is not signed in to github.com; run gh auth login"}
-	if err := d.linkBranchPRs(t.Context()); err == nil {
+	if err := d.prs.LinkBranches(t.Context()); err == nil {
 		t.Fatal("a sweep without a gh sign-in reported success")
 	}
 }
 
-func TestCreatedPullRequestsComeFromShellCallsWhoseOutputPrintsThem(t *testing.T) {
-	d, _, _, _, _ := daemonFixture(t)
-	url := "https://github.com/acme/app/pull/42"
-	items := []surface.TimelineItem{
-		{Kind: "toolCall", Title: "Bash", CallID: "c1", Text: "{\n  \"command\": \"git push -u origin HEAD && gh pr create --fill\",\n  \"description\": \"Open the pull request\"\n}"},
-		{Kind: "toolResult", CallID: "c1", Text: url + "\n"},
-		{Kind: "toolCall", Title: "exec_command", CallID: "c2", Text: `{"cmd":"gh pr create --fill","workdir":"/w"}`},
-		{Kind: "toolResult", CallID: "c2", Status: "error", Text: "https://github.com/acme/app/pull/43\n"},
-		{Kind: "toolCall", Title: "exec_command", CallID: "c3", Text: `{"cmd":"gh pr create -B next --fill","workdir":"/w"}`},
-		{Kind: "toolResult", CallID: "c3", Text: "https://github.com/acme/app/pull/44\n"},
-		{Kind: "toolCall", Title: "Write", CallID: "c4", Text: `{"file_path":"notes.md","content":"gh pr create"}`},
-		{Kind: "toolResult", CallID: "c4", Text: "https://github.com/acme/app/pull/45\n"},
-	}
-	var numbers []int
-	for _, ref := range d.createdPRs("to", items) {
-		numbers = append(numbers, ref.Number)
-	}
-	if !slices.Equal(numbers, []int{42, 44}) {
-		t.Fatalf("created = %v, want the Claude and Codex shell calls that succeeded", numbers)
-	}
-}
-
-func TestACreatedPullRequestIsFoundPastAClippedCommandAndOutput(t *testing.T) {
+func TestAClippedTimelineItemReadsItsFullBodyFromTheJournal(t *testing.T) {
 	d, r, _, _, _ := daemonFixture(t)
-	body := func(ref, text string) {
-		t.Helper()
-		entry := registry.SessionJournalEntry{SessionID: "to", Kind: "toolResult", ProviderKey: ref, Payload: []byte(`{}`), BodyRef: ref, FullBody: []byte(text), ObservedAt: time.Now()}
-		if _, _, err := r.AppendSessionJournalEntry(entry, registry.SessionJournalRetention{Count: 100, Bytes: 8 << 20}); err != nil {
-			t.Fatal(err)
-		}
+	full := strings.Repeat("remote: building\n", 20000) + "https://github.com/acme/app/pull/42\n"
+	entry := registry.SessionJournalEntry{SessionID: "to", Kind: "toolResult", ProviderKey: "result-body", Payload: []byte(`{}`), BodyRef: "result-body", FullBody: []byte(full), ObservedAt: time.Now()}
+	if _, _, err := r.AppendSessionJournalEntry(entry, registry.SessionJournalRetention{Count: 100, Bytes: 8 << 20}); err != nil {
+		t.Fatal(err)
 	}
-	notes := strings.Repeat("a long release note line\n", 1200)
-	command := `{"command":"cat > body.md <<'EOF'\n` + strings.ReplaceAll(notes, "\n", `\n`) + `EOF\ngh pr create -F body.md --fill"}`
-	output := strings.Repeat("remote: building\n", 20000) + "https://github.com/acme/app/pull/42\n"
-	body("call-body", command)
-	body("result-body", output)
-	items := []surface.TimelineItem{
-		{Kind: "toolCall", Title: "Bash", CallID: "c1", Text: command[:16<<10], Truncated: true, BodyRef: "call-body"},
-		{Kind: "toolResult", CallID: "c1", Text: output[:16<<10], Truncated: true, BodyRef: "result-body"},
+	host := prHost{d}
+	if got := host.TimelineText("to", surface.TimelineItem{Text: full[:16<<10], Truncated: true, BodyRef: "result-body"}); got != full {
+		t.Fatalf("clipped item read %d bytes, want the full %d", len(got), len(full))
 	}
-	refs := d.createdPRs("to", items)
-	if len(refs) != 1 || refs[0].Number != 42 {
-		t.Fatalf("created = %+v, want the pull request printed after %d bytes", refs, len(output))
+	if got := host.TimelineText("to", surface.TimelineItem{Text: "whole", Truncated: true, BodyRef: "missing"}); got != "whole" {
+		t.Fatalf("an item whose body is gone reads %q, want its own text", got)
 	}
 }

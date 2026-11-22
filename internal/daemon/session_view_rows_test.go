@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/prwatch"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -68,7 +69,7 @@ func assertPresentationMatchesMergePatch(t *testing.T, store *registry.Registry)
 		t.Fatalf("rows=%d want=%d", len(read.Rows), len(want))
 	}
 	for _, record := range read.Rows {
-		row, err := presentationRow(record, cache.rows[record.ID], (&Daemon{}).prViews)
+		row, err := presentationRow(record, cache.rows[record.ID], prwatch.New(nil, nil, nil).Views)
 		if err != nil {
 			t.Fatal(err)
 		}

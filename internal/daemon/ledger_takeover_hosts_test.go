@@ -44,7 +44,7 @@ func TestATakeoverAcrossHostsAsksTheHoldersHostAndFinishesOnTheWatchersMergedLin
 		return out
 	}
 	owner.gate.proxyDown.Store(true)
-	mac.daemon.logToHeldWork("local-a", "PR merged: "+url)
+	prHost{mac.daemon}.LogHeldWork("local-a", "PR merged: "+url)
 	if got := sources(); len(got) != 1 {
 		t.Fatalf("the owner took the watcher's log while down: sources %q", got)
 	}

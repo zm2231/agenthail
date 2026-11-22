@@ -162,7 +162,7 @@ func TestAnOpenWorkPageHearsWhenItsHoldersOrPRsChangeButNotOtherPRs(t *testing.T
 	item := work(t, store, ledger.WorkRequest{ProjectKey: key, SessionID: "s-idle", Action: ledger.WorkAdd, Text: "Fix the flaky index test"})
 	work(t, store, ledger.WorkRequest{ProjectKey: key, SessionID: "s-idle", Action: ledger.WorkClaim, ItemID: item.ID})
 	shown := "https://github.com/acme/widget/pull/7"
-	if err := d.linkPR(registry.SessionPR{SessionID: "s-idle", Repo: "acme/widget", Number: 7, URL: shown, Source: "test", Watch: true}, true); err != nil {
+	if err := d.prs.Link(registry.SessionPR{SessionID: "s-idle", Repo: "acme/widget", Number: 7, URL: shown, Source: "test", Watch: true}, true); err != nil {
 		t.Fatal(err)
 	}
 	d.discoverCatalog(ctx)
@@ -292,7 +292,7 @@ func TestAWorkPageHearsABoardChangeThatLandsWhileItsWatchStarts(t *testing.T) {
 	store := d.ledgerStore()
 	item := work(t, store, ledger.WorkRequest{ProjectKey: key, SessionID: "s-idle", Action: ledger.WorkAdd, Text: "Fix the flaky index test"})
 	work(t, store, ledger.WorkRequest{ProjectKey: key, SessionID: "s-idle", Action: ledger.WorkClaim, ItemID: item.ID})
-	if err := d.linkPR(registry.SessionPR{SessionID: "s-idle", Repo: "acme/widget", Number: 7, URL: "https://github.com/acme/widget/pull/7", Source: "test", Watch: true}, true); err != nil {
+	if err := d.prs.Link(registry.SessionPR{SessionID: "s-idle", Repo: "acme/widget", Number: 7, URL: "https://github.com/acme/widget/pull/7", Source: "test", Watch: true}, true); err != nil {
 		t.Fatal(err)
 	}
 	d.discoverCatalog(ctx)

@@ -307,7 +307,7 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 		d.queueExtensionTurn(extensionTurnEvent{kind: extensionTurnEnd, sessionID: session.ID, turnID: observation.CompletedTurnID})
 		if d.agenthailStarted(*session) {
 			observed := *session
-			d.background.start(func(ctx context.Context) { d.linkCreatedPRs(ctx, adapter, observed) })
+			d.background.start(func(ctx context.Context) { d.prs.LinkCreated(ctx, adapter, observed) })
 		}
 	}
 	if completed {

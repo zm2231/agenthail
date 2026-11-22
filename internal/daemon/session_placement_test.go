@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/prwatch"
 	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -101,7 +102,7 @@ var placementIgnoredMutations = map[string]func(*dashboardSession, time.Time){
 		r.Worktree = &workView{Path: "/w/.worktrees/ah-x", State: "active"}
 	},
 	"PRs": func(r *dashboardSession, _ time.Time) {
-		r.PRs = []prView{{Repo: "github.com/acme/app", Number: 1}}
+		r.PRs = []prwatch.View{{Repo: "github.com/acme/app", Number: 1}}
 	},
 	"HeldWork": func(r *dashboardSession, _ time.Time) {
 		r.HeldWork = []heldWorkRow{{ItemID: "app-W1", Text: "fix the login", State: "in_progress"}}
