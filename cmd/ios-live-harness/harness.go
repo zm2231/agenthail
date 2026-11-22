@@ -193,18 +193,34 @@ type hostStatus struct {
 //	GET  /hosts/{i}/turn/ask     whether that prompt was answered, and the decision
 //	POST /hosts/{i}/stop    stop host i's daemon
 //	POST /hosts/{i}/start   start host i's daemon again on the same port
+//	POST /reset             end every host's turn and start every stopped host
 func (h *harness) controlHandler(ctx context.Context) http.Handler {
 	mux := http.NewServeMux()
 	status := func(host *host) hostStatus {
 		return hostStatus{Index: host.index, Name: host.name, Endpoint: host.endpoint(), Running: host.running()}
 	}
-	mux.HandleFunc("GET /hosts", func(w http.ResponseWriter, r *http.Request) {
+	statuses := func() []hostStatus {
 		out := make([]hostStatus, 0, len(h.hosts))
 		for _, host := range h.hosts {
 			out = append(out, status(host))
 		}
-		writeJSON(w, http.StatusOK, out)
+		return out
+	}
+	mux.HandleFunc("GET /hosts", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, statuses())
 	})
+	held := func(w http.ResponseWriter, run func()) {
+		h.mu.Lock()
+		if h.closing {
+			h.mu.Unlock()
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "the harness is shutting down"})
+			return
+		}
+		h.ops.Add(1)
+		h.mu.Unlock()
+		defer h.ops.Done()
+		run()
+	}
 	withHost := func(run func(http.ResponseWriter, *host)) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			i, err := strconv.Atoi(r.PathValue("i"))
@@ -212,18 +228,26 @@ func (h *harness) controlHandler(ctx context.Context) http.Handler {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such host"})
 				return
 			}
-			h.mu.Lock()
-			if h.closing {
-				h.mu.Unlock()
-				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "the harness is shutting down"})
-				return
-			}
-			h.ops.Add(1)
-			h.mu.Unlock()
-			defer h.ops.Done()
-			run(w, h.hosts[i])
+			held(w, func() { run(w, h.hosts[i]) })
 		}
 	}
+	mux.HandleFunc("POST /reset", func(w http.ResponseWriter, r *http.Request) {
+		held(w, func() {
+			// Hosts start at once, so a reset takes at most one host's start limit.
+			errs := make([]error, len(h.hosts))
+			var started sync.WaitGroup
+			for i, host := range h.hosts {
+				host.endTurn()
+				started.Go(func() { errs[i] = host.start(ctx) })
+			}
+			started.Wait()
+			if err := errors.Join(errs...); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, statuses())
+		})
+	})
 	mux.HandleFunc("POST /hosts/{i}/link", withHost(func(w http.ResponseWriter, host *host) {
 		link, err := host.pairingLink()
 		if err != nil {

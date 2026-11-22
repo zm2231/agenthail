@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   ios-live:
-    if: github.repository == 'zm2231/agenthail' && github.ref == 'refs/heads/main'
+    if: github.repository == 'zm2231/agenthail' && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
     runs-on: [self-hosted, macOS, ARM64, agenthail, agenthail-ios]
     timeout-minutes: 60
     outputs:
@@ -92,7 +92,7 @@ jobs:
 
   report:
     needs: ios-live
-    if: always() && needs.ios-live.result != 'skipped'
+    if: always() && needs.ios-live.result != 'skipped' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

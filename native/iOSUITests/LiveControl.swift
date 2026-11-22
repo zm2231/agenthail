@@ -7,6 +7,8 @@ struct LiveControl {
     init() throws {
         let value = try XCTUnwrap(ProcessInfo.processInfo.environment["AGENTHAIL_LIVE_CONTROL"], "run under cmd/ios-live-harness, which sets AGENTHAIL_LIVE_CONTROL")
         base = try XCTUnwrap(URL(string: value))
+        // One harness serves every test, so each starts with both hosts up and no turn open, whatever the last one left.
+        _ = try post("reset", timeout: 90)
     }
 
     func pairingLink(host: Int) throws -> String {
@@ -46,8 +48,8 @@ struct LiveControl {
         return (object["decision"] as? [String: Any])?["behavior"] as? String
     }
 
-    private func post(_ path: String, body: Data? = nil, method: String = "POST") throws -> Data {
-        var request = URLRequest(url: base.appendingPathComponent(path), timeoutInterval: 30)
+    private func post(_ path: String, body: Data? = nil, method: String = "POST", timeout: TimeInterval = 30) throws -> Data {
+        var request = URLRequest(url: base.appendingPathComponent(path), timeoutInterval: timeout)
         request.httpMethod = method
         request.httpBody = body
         let reply = Reply()
@@ -61,7 +63,7 @@ struct LiveControl {
             }
             reply.done.signal()
         }.resume()
-        _ = reply.done.wait(timeout: .now() + 35)
+        _ = reply.done.wait(timeout: .now() + timeout + 5)
         return try reply.result.get()
     }
 }
