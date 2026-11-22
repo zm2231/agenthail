@@ -57,6 +57,7 @@ var notSessionViewInputs = map[string]string{
 	"mcp_oauth":               "the public origin OAuth is served under, read only by the OAuth endpoints, the remote MCP verifier, agenthail identity oauth and doctor",
 	"oauth_clients":           "OAuth clients' names and redirect URIs, read only by the OAuth endpoints and agenthail identity oauth",
 	"identity_oauth_grants":   "an identity's OAuth token hashes, read only by the OAuth endpoints, the remote MCP verifier and agenthail identity",
+	"identity_oauth":          "which identities may sign in over OAuth, read only by the OAuth endpoints, agenthail identity and doctor",
 	"oauth_spent_refresh":     "replaced refresh token hashes, read only by the OAuth token endpoint to catch a reused one",
 	"mcp_remote_epoch":        "a counter of remote credential changes, read only by the remote MCP notifier and verifier",
 	"mcp_event_subscriptions": "a remote identity's webhook subscriptions, read only by the remote MCP event methods and the webhook delivery loop",
