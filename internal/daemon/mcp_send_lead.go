@@ -7,14 +7,19 @@ import (
 	"github.com/zm2231/agenthail/internal/agentroles"
 
 	"github.com/zm2231/agenthail/internal/broadcast"
+	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func (d *Daemon) mcpSendToLead(ctx context.Context, caller *mcpCaller, input mcpSendInput) (any, error) {
+func (d *Daemon) mcpSendToLead(ctx context.Context, caller *mcpCaller, input mcpSendInput, busyDelivery string) (any, error) {
 	project, notice, refusal := d.mcpLeadScope(caller, input.Project, input.Mode)
 	if refusal != nil {
 		return nil, refusal
 	}
-	result, err := d.mcpAction(ctx, caller, "agenthail_send", input.mcpWrite, dashboardActionRequest{Action: "coordinator-send", Project: project.ID, Message: input.Message, SourceSessionID: caller.session.ID})
+	if input.Mode == registry.SendModeNow {
+		ctx = surface.WithSteerAdmitted(ctx, caller.session.ID)
+	}
+	result, err := d.mcpAction(ctx, caller, "agenthail_send", input.mcpWrite, dashboardActionRequest{Action: "coordinator-send", Project: project.ID, Message: input.Message, SourceSessionID: caller.session.ID, BusyDelivery: busyDelivery})
 	d.noticeAfter(ctx, caller, notice, err)
 	return result, err
 }

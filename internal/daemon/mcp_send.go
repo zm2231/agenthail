@@ -17,6 +17,7 @@ type mcpSendInput struct {
 	Message string `json:"message"`
 	Mode    string `json:"mode,omitempty" jsonschema:"queue: delivered when the session is idle. now: steers a busy session where it can, otherwise queues; only for sessions you control. Omitted, it is queue, or now for an identity the person set to send now, which falls back to queue where now is refused."`
 	mcpAskPerson
+	chosen string
 }
 
 func (d *Daemon) mcpSend(ctx context.Context, caller *mcpCaller, input mcpSendInput) (any, error) {
@@ -30,6 +31,7 @@ func (d *Daemon) mcpSend(ctx context.Context, caller *mcpCaller, input mcpSendIn
 	if (strings.TrimSpace(input.Target) == "") == (strings.TrimSpace(input.Project) == "") {
 		return nil, refuse("invalid", "Give exactly one of target or project.")
 	}
+	input.chosen = input.Mode
 	if input.Mode != "" {
 		return d.mcpSendIn(ctx, caller, input, true)
 	}
@@ -41,12 +43,13 @@ func (d *Daemon) mcpSend(ctx context.Context, caller *mcpCaller, input mcpSendIn
 	if mode != registry.SendModeNow {
 		return d.mcpSendIn(ctx, caller, input, true)
 	}
+	input.chosen = mode
 	result, err := d.mcpSendIn(ctx, caller, input, false)
 	var refusal *mcpRefusal
-	if !errors.As(err, &refusal) {
+	if !errors.As(err, &refusal) || !nowRefused(refusal) {
 		return result, err
 	}
-	input.Mode = registry.SendModeQueue
+	input.Mode, input.chosen = registry.SendModeQueue, ""
 	if input.ClientRequestID != "" {
 		input.ClientRequestID += ":queued"
 	}
@@ -54,6 +57,11 @@ func (d *Daemon) mcpSend(ctx context.Context, caller *mcpCaller, input mcpSendIn
 		return nil, err
 	}
 	return withSendNotice(result, "Queued: your identity sends now by default, but this one could not: "+refusal.Message)
+}
+
+// Only a refusal of the steer itself falls back; a failed delivery is returned as it is.
+func nowRefused(refusal *mcpRefusal) bool {
+	return refusal.Code == "out_of_scope" || refusal.actionCode == "out_of_scope" || refusal.actionCode == "host_unreachable"
 }
 
 func (d *Daemon) callerSendMode(caller *mcpCaller) (string, error) {
@@ -65,7 +73,7 @@ func (d *Daemon) callerSendMode(caller *mcpCaller) (string, error) {
 
 func (d *Daemon) mcpSendIn(ctx context.Context, caller *mcpCaller, input mcpSendInput, askable bool) (any, error) {
 	if strings.TrimSpace(input.Project) != "" {
-		return d.mcpSendToLead(ctx, caller, input)
+		return d.mcpSendToLead(ctx, caller, input, busyDeliveryFor(input.chosen))
 	}
 	busyDelivery := "queue"
 	if input.Mode == registry.SendModeNow {
@@ -91,6 +99,16 @@ func (d *Daemon) mcpSendIn(ctx context.Context, caller *mcpCaller, input mcpSend
 		return nil, err
 	}
 	return json.RawMessage(result), nil
+}
+
+func busyDeliveryFor(mode string) string {
+	switch mode {
+	case registry.SendModeNow:
+		return "steer"
+	case registry.SendModeQueue:
+		return "queue"
+	}
+	return ""
 }
 
 func withSendNotice(result any, notice string) (any, error) {

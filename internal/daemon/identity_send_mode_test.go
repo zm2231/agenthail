@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -156,5 +157,58 @@ func TestAnIdentitysDefaultNowFallsBackToQueuedWhereItsRoleMayNotSteer(t *testin
 	}
 	if got := slices.DeleteFunc(slices.Clone(fake.sent), func(m string) bool { return !strings.Contains(m, "now by default") }); len(got) != 1 {
 		t.Fatalf("the retry delivered again: %q", got)
+	}
+}
+
+func TestAnIdentitysSendToABusyCoordinatorFollowsItsMode(t *testing.T) {
+	d, r, fake, from, to := daemonFixture(t)
+	fake.caps = surface.Capabilities{Send: true, Steer: true}
+	fake.rejectBusy = true
+	widget := widgetRepo(t, "https://github.com/example/widget.git")
+	from.Cwd, to.Cwd = widget, widget
+	to.Status = surface.StatusBusy
+	for _, session := range []surface.Session{from, to} {
+		session.LastActive = time.Now()
+		fake.sessions[session.ID] = session
+		if err := r.RecordObservedSession(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"}
+	d.discoverCatalog(context.Background())
+	project, err := broadcast.FindProject(r, "widget")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: project.ID, ProjectRoot: widget, Name: "widget-lead", Surface: string(surface.KindCodex), Cwd: widget}, registry.CoordinatorChange{SessionID: to.ID, ChangedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	kat := remoteIdentityClient(t, mcpServer(t, d).URL, bindRemoteIdentity(t, r, "kat"))
+	if _, err := d.setIdentitySettings(context.Background(), daemonapi.CLIActor, daemonapi.IdentitySettingsRequest{Identity: "kat", SendMode: registry.SendModeNow}); err != nil {
+		t.Fatal(err)
+	}
+
+	if out, refused := callMCP(t, kat, "agenthail_send", map[string]any{"project": "widget", "message": "lead by default"}); refused {
+		t.Fatalf("kat's send to the coordinator with no mode: %v", out)
+	}
+	if out, refused := callMCP(t, kat, "agenthail_send", map[string]any{"project": "widget", "message": "lead says queue", "mode": "queue"}); refused {
+		t.Fatalf("kat's queued send to the coordinator: %v", out)
+	}
+	if !slices.Contains(fake.steeredAs, "[from @kat] lead by default") || slices.ContainsFunc(fake.steered, func(m string) bool { return strings.Contains(m, "lead says queue") }) {
+		t.Fatalf("only kat's send with no mode should steer the coordinator: steered=%q", fake.steeredAs)
+	}
+}
+
+func TestAnIdentitysDefaultNowThatFailsToDeliverIsNotRetriedAsQueued(t *testing.T) {
+	d, r, fake, _, to := daemonFixture(t)
+	fake.caps = surface.Capabilities{Send: true, Steer: true}
+	fake.sendErr = errors.New("the app server went away")
+	kat := remoteIdentityClient(t, mcpServer(t, d).URL, bindRemoteIdentity(t, r, "kat"))
+	if _, err := d.setIdentitySettings(context.Background(), daemonapi.CLIActor, daemonapi.IdentitySettingsRequest{Identity: "kat", SendMode: registry.SendModeNow}); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := callMCP(t, kat, "agenthail_send", map[string]any{"target": to.ID, "message": "fails once"})
+	if out["notice"] != nil || len(fake.sent) != 1 {
+		t.Fatalf("a failed delivery was retried as queued: %v, sent=%q", out, fake.sent)
 	}
 }

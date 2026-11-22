@@ -24,6 +24,7 @@ type mcpRefusal struct {
 	Retryable    bool           `json:"retryable"`
 	Detail       map[string]any `json:"detail,omitempty"`
 	target       string
+	actionCode   string
 	audited      bool
 	crossProject bool
 }
