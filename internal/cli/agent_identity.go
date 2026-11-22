@@ -142,7 +142,7 @@ func (a *App) identityRemote(reg *registry.Registry, positional, args []string, 
 	if remote.ClientID != "" || remote.Email != "" {
 		fmt.Println("Through Cloudflare Access, also send the service token's CF-Access-Client-Id and CF-Access-Client-Secret.")
 	}
-	if _, _, configured, err := reg.AccessSettings(); err == nil && !configured {
+	if !remote.AccessChecked {
 		fmt.Println("No Access settings are set, so the token alone gets in; set them with: agenthail identity access set --team <team> --aud <tag>")
 	}
 	return nil
