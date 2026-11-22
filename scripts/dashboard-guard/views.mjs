@@ -1,18 +1,26 @@
+const waits = new WeakMap();
+
+export const awaited = (page) => waits.get(page) ?? null;
+
+const waitFor = (page, selector, options) => (waits.set(page, selector), page.waitForSelector(selector, options));
+
+const waitOn = (page, selector, predicate) => (waits.set(page, selector), page.waitForFunction(predicate));
+
 const press = async (page, selector) => {
-  await page.waitForSelector(selector, { visible: true });
+  await waitFor(page, selector, { visible: true });
   await page.$eval(selector, (element) => element.click());
 };
 
 const operations = (tab) => async (page) => {
   await press(page, `[data-operations-tab="${tab}"]`);
-  await page.waitForSelector(`[data-operations-tab="${tab}"].active`);
+  await waitFor(page, `[data-operations-tab="${tab}"].active`);
 };
 
 const openSession = async (page) => {
   await press(page, '#session-list [data-session="review"]');
-  await page.waitForFunction(() => document.querySelector("#chat-body")?.textContent.includes("contrast target"));
-  await page.waitForSelector("#background-panel .background-card", { visible: true });
-  await page.waitForSelector("#request-panel:not([hidden])", { visible: true });
+  await waitOn(page, "#chat-body", () => document.querySelector("#chat-body")?.textContent.includes("contrast target"));
+  await waitFor(page, "#background-panel .background-card", { visible: true });
+  await waitFor(page, "#request-panel:not([hidden])", { visible: true });
 };
 
 const typeFresh = async (page, selector, text) => {
@@ -25,12 +33,12 @@ const typeFresh = async (page, selector, text) => {
 
 const projects = async (page) => {
   await press(page, '[data-inbox-mode="projects"]');
-  await page.waitForSelector("[data-project-new]", { visible: true });
+  await waitFor(page, "[data-project-new]", { visible: true });
 };
 
 const opened = (trigger, shown) => async (page) => {
   await trigger(page);
-  await page.waitForSelector(shown, { visible: true });
+  await waitFor(page, shown, { visible: true });
 };
 
 export const VIEWS = [
@@ -66,11 +74,11 @@ export function onStep(listener) {
 export async function openView(page, dashboard, view) {
   await step(page, "open blank", () => page.goto("about:blank"));
   await step(page, "open load", () => page.goto(`${dashboard.url}/#${view.hash}`, { waitUntil: "load" }));
-  await step(page, "open connect", () => page.waitForFunction(() => document.querySelector("#daemon-status")?.textContent !== "Connecting"));
+  await step(page, "open connect", () => waitOn(page, "#daemon-status", () => document.querySelector("#daemon-status")?.textContent !== "Connecting"));
   await step(page, "open no transitions", () => page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; }" }));
-  if (LOADED[view.dashboard]) await step(page, "open loaded", () => page.waitForSelector(LOADED[view.dashboard]));
+  if (LOADED[view.dashboard]) await step(page, "open loaded", () => waitFor(page, LOADED[view.dashboard]));
   if (view.act) await step(page, "open act", () => view.act(page));
-  if (view.ready) await step(page, "open ready", () => page.waitForSelector(view.ready, { visible: true }));
+  if (view.ready) await step(page, "open ready", () => waitFor(page, view.ready, { visible: true }));
   await settle(page);
 }
 
@@ -78,6 +86,7 @@ const frames = () => new Promise((resolve) => requestAnimationFrame(() => reques
 
 export async function step(page, name, run) {
   reached(page, name);
+  waits.delete(page);
   try {
     return await run();
   } catch (error) {
@@ -111,7 +120,7 @@ export async function settle(page) {
   let previous = null;
   for (let pass = 1; pass <= SETTLE_PASSES; pass++) {
     await step(page, "settle frames", () => page.evaluate(frames));
-    await step(page, "settle ui", () => page.waitForSelector("html[data-ui-settled]"));
+    await step(page, "settle ui", () => waitFor(page, "html[data-ui-settled]"));
     await step(page, "settle fonts", () => page.evaluate(() => document.fonts.ready.then(() => {})));
     await step(page, "settle backdrop", () => page.evaluate(backdropDecoded));
     await step(page, "settle animations", () =>
