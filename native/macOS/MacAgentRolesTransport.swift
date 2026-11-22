@@ -11,7 +11,7 @@ struct MacAgentRolesTransport: AgentRolesTransport {
             return AgentRolesRead(view: try await socket.json("GET", "/api/v1/agents"), readOnlyReason: nil)
         } catch LocalSocketError.noSocket {
             guard let api else { throw LocalSocketError.noSocket }
-            return AgentRolesRead(view: try await api.agentRoles(), readOnlyReason: Self.readOnlyReason)
+            return AgentRolesRead(view: try await AgentRolesAPITransport(api: api).read().view, readOnlyReason: Self.readOnlyReason)
         }
     }
 

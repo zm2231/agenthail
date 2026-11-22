@@ -21,16 +21,22 @@ struct AgentRolesTest {
         check(worker.definition.tools == nil && reviewer.definition.tools == ["agenthail_read"] && decoded.assignments[0].stale == "no such session" && decoded.assignments[1].stale == nil, "the view decodes tools null, lists and stale reasons")
 
         check(AgentRoleFacts.effectiveDefault(archive, in: worker) == "ask", "a role's effective default comes from the daemon")
-        check(AgentRoleFacts.effectiveDefault(archive, in: reviewer) == "notify", "without effective defaults the action's default stands")
+        check(AgentRoleFacts.effectiveDefault(remote, in: reviewer) == "notify", "without effective defaults, an action the role leaves unset defaults to what the role gets")
+        check(AgentRoleFacts.effectiveDefault(archive, in: reviewer) == "notify", "without effective defaults, an action the role sets falls back to the action's default")
+        check(AgentRoleFacts.defaultTitle(archive, in: worker, reach: "descendants") == "Default (Ask)" && AgentRoleFacts.defaultTitle(archive, in: worker, reach: "project") == "Default", "a draft at another reach names no default it cannot know")
 
         var draft = AgentRoleDraft(reviewer)
         check(!draft.changed && draft.decision("project-archive") == .ask && draft.decision("session-create-remote") == nil, "a draft starts as the stored role, changed only where it differs")
-        draft.setDecision(.notify, for: remote, effectiveDefault: "notify")
-        check(!draft.changed && draft.definition.actions?["session-create-remote"] == nil, "choosing the default value stores no change")
-        draft.setDecision(.allow, for: remote, effectiveDefault: "notify")
+        draft.setDecision(.notify, for: remote)
+        check(draft.changed && draft.decision("session-create-remote") == .notify, "an explicit choice is kept even when it may equal the default")
+        draft.setDecision(.allow, for: remote)
         check(draft.changed && draft.decision("session-create-remote") == .allow, "a different decision is a change")
-        draft.setDecision(nil, for: archive, effectiveDefault: "notify")
+        draft.setDecision(nil, for: archive)
         check(draft.definition.actions == ["session-create-remote": "allow"], "Default removes the change: \(String(describing: draft.definition.actions))")
+        var moved = reviewer.definition
+        moved.description = "changed elsewhere"
+        let external = try JSONDecoder().decode(AgentRoleView.self, from: JSONEncoder().encode(EncodableRole(reviewer, definition: moved)))
+        check(draft.conflicts(with: external) && !draft.conflicts(with: reviewer) && !AgentRoleDraft(external).conflicts(with: external), "a dirty draft notices the role changed under it")
         check(draft.depth == 2 && draft.running == AgentRoleFacts.defaultRunning, "limits read their value or the default")
         draft.depth = AgentRoleFacts.defaultDepth
         check(draft.definition.depth == nil, "a limit at its default stores none")
@@ -64,6 +70,16 @@ struct AgentRolesTest {
         let role2 = try JSONDecoder().decode(SessionRole.self, from: Data(#"{"name":"reviewer","reach":"project","source":"assigned to this session","replaces":"worker","label":"worker (replaced by reviewer)"}"#.utf8))
         check(role2.label == "worker (replaced by reviewer)" && role2.replaces == "worker", "a session's role decodes its label")
 
+        let caps = Capabilities(send: true, stream: true, reply: true, goal: false, compact: false, model: true, interrupt: true, steer: true)
+        let row = try JSONSerialization.jsonObject(with: JSONEncoder().encode(SessionState(id: "s1", surface: "claude", name: "s1", alias: nil, status: "idle", lastActive: "2026-11-21T00:00:00Z", queueCount: 0, open: true, current: true, currentReason: nil, capabilities: caps, readOnly: nil, readOnlyReason: nil, cwd: "/repo", project: nil))) as! [String: Any]
+        var detailJSON: [String: Any] = ["session": row, "exchanges": [], "capabilities": row["capabilities"]!, "readOnly": false, "readOnlyReason": ""]
+        let bareDetail = try JSONDecoder().decode(SessionDetail.self, from: JSONSerialization.data(withJSONObject: detailJSON))
+        check(bareDetail.role == nil && AgentRoleFacts.sessionRoleRow(bareDetail.role) == nil, "a detail without a role shows no Role row")
+        detailJSON["role"] = ["name": "reviewer", "reach": "project", "source": "assigned to this session", "replaces": "worker", "label": "worker (replaced by reviewer)"]
+        let roleDetail = try JSONDecoder().decode(SessionDetail.self, from: JSONSerialization.data(withJSONObject: detailJSON))
+        let shown = AgentRoleFacts.sessionRoleRow(roleDetail.role)
+        check(shown?.value == "worker (replaced by reviewer)" && shown?.help == "assigned to this session", "a detail with a role shows its label, and why it holds it: \(String(describing: shown))")
+
         let event = try JSONDecoder().decode(AgenthailEvent.self, from: Data(#"{"id":4,"type":"settings.updated","timestamp":"t","data":{"source":"agent-roles"}}"#.utf8))
         let other = try JSONDecoder().decode(AgenthailEvent.self, from: Data(#"{"id":5,"type":"settings.updated","timestamp":"t","data":{"source":"notifications"}}"#.utf8))
         let bare = try JSONDecoder().decode(AgenthailEvent.self, from: Data(#"{"id":6,"type":"state.changed","timestamp":"t","data":{"source":"agent-roles"}}"#.utf8))
@@ -72,6 +88,20 @@ struct AgentRolesTest {
 
         try await store(decoded)
         print("ok")
+    }
+
+    struct EncodableRole: Encodable {
+        let role: AgentRoleView
+        let definition: AgentRoleDefinition
+        init(_ role: AgentRoleView, definition: AgentRoleDefinition) { self.role = role; self.definition = definition }
+        enum Keys: String, CodingKey { case name, builtIn, edited, description, reach, decisions, definition, tools, allTools, depth, running }
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: Keys.self)
+            try c.encode(role.name, forKey: .name); try c.encode(role.builtIn, forKey: .builtIn); try c.encode(role.edited, forKey: .edited)
+            try c.encode(role.description, forKey: .description); try c.encode(role.reach, forKey: .reach); try c.encode(role.decisions, forKey: .decisions)
+            try c.encode(definition, forKey: .definition); try c.encode(role.tools, forKey: .tools); try c.encode(role.allTools, forKey: .allTools)
+            try c.encode(role.depth, forKey: .depth); try c.encode(role.running, forKey: .running)
+        }
     }
 
     final class StubTransport: AgentRolesTransport, @unchecked Sendable {
@@ -127,6 +157,61 @@ struct AgentRolesTest {
 
         store.attach(transport, hostID: "h2", hostName: "laptop")
         check(store.view == nil && store.hostName == "laptop", "moving to another computer drops the old roles")
+
+        try await raceAcrossComputers(view)
+        try await failedLoadDoesNotRefetch(view)
+    }
+
+    final class HeldTransport: AgentRolesTransport, @unchecked Sendable {
+        let view: AgentRolesView
+        var held: [CheckedContinuation<Void, Never>] = []
+        init(_ view: AgentRolesView) { self.view = view }
+        func read() async throws -> AgentRolesRead {
+            await withCheckedContinuation { held.append($0) }
+            return AgentRolesRead(view: view, readOnlyReason: nil)
+        }
+        func write(_ request: AgentRoleRequest) async throws -> AgentRolesView {
+            await withCheckedContinuation { held.append($0) }
+            throw AgenthailAPIError.request(400, "refused on the old computer")
+        }
+        func release() { held.forEach { $0.resume() }; held = [] }
+    }
+
+    static func raceAcrossComputers(_ view: AgentRolesView) async throws {
+        let store = AgentRolesStore()
+        let slowA = HeldTransport(view)
+        store.attach(slowA, hostID: "a", hostName: "A")
+        let loadA = Task { await store.load() }
+        await settle()
+        let writeA = Task { await store.send(.delete("reviewer")) }
+        await settle()
+        var onlyB = view
+        onlyB.roles = [view.roles[0]]
+        let b = StubTransport(onlyB)
+        store.attach(b, hostID: "b", hostName: "B")
+        await store.load()
+        check(store.view?.roles.count == 1 && !store.busy, "B loads while A's requests are held")
+        slowA.release()
+        _ = await loadA.value
+        let wrote = await writeA.value
+        check(!wrote && store.view?.roles.count == 1 && store.saveError == nil && store.loadError == nil && store.hostName == "B" && !store.busy, "A's late answers never land on B: \(String(describing: store.saveError))")
+    }
+
+    final class CountingFail: AgentRolesTransport, @unchecked Sendable {
+        var reads = 0
+        func read() async throws -> AgentRolesRead { reads += 1; throw AgentRolesTimeout(seconds: 5) }
+        func write(_ request: AgentRoleRequest) async throws -> AgentRolesView { throw AgentRolesTimeout(seconds: 5) }
+    }
+
+    static func failedLoadDoesNotRefetch(_ view: AgentRolesView) async throws {
+        let failing = CountingFail()
+        let store = AgentRolesStore()
+        store.attach(failing, hostID: "h", hostName: "H")
+        await store.load()
+        check(store.loadError == "Agenthail did not answer within 5 seconds. Try again in a moment." && failing.reads == 1, "a failed load says why: \(store.loadError ?? "nil")")
+        store.receive(type: "settings.updated", source: "agent-roles", hostID: "h")
+        await settle()
+        check(failing.reads == 1, "a failed first load does not refetch on events")
     }
 
     static func settle() async {

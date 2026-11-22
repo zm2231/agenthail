@@ -88,6 +88,21 @@ struct LocalSocketHTTPTest {
         let sent = await store.send(.delete("reviewer"))
         check(!sent && store.saveError == MacAgentRolesTransport.readOnlyReason, "a write without the socket says to update the daemon")
         tcp.stop()
+
+        let silent = try TCPStub(body: nil)
+        let silentPort = await silent.ready()
+        let quiet = AgentRolesAPITransport(api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(silentPort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
+        for write in [false, true] {
+            let started = Date()
+            do {
+                if write { _ = try await quiet.write(.delete("reviewer")) } else { _ = try await quiet.read() }
+                check(false, "a silent computer times out")
+            } catch let error as AgentRolesTimeout {
+                let took = Date().timeIntervalSince(started)
+                check(error.seconds == AgentRolesAPITransport.timeout && took < Double(AgentRolesAPITransport.timeout) + 3 && error.localizedDescription.contains("did not answer within 5 seconds"), "a silent computer ends in a clear timeout within a few seconds (write: \(write), took \(took))")
+            }
+        }
+        silent.stop()
     }
 
     nonisolated static func reply(_ status: String, _ body: String) -> String {
@@ -171,12 +186,13 @@ struct LocalSocketHTTPTest {
         private let listener: NWListener
         private var connections: [NWConnection] = []
 
-        init(body: String) throws {
+        init(body: String?) throws {
             listener = try NWListener(using: .tcp, on: .any)
             listener.newConnectionHandler = { [self] connection in
                 connections.append(connection)
                 connection.start(queue: .main)
                 connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { _, _, _, _ in
+                    guard let body else { return }
                     connection.send(content: Data(LocalSocketHTTPTest.reply("200 OK", body).utf8), completion: .contentProcessed { _ in })
                 }
             }

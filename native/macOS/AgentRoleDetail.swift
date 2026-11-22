@@ -22,8 +22,11 @@ struct AgentRoleDetail: View {
         VStack(spacing: 0) {
             Form {
                 Section {
-                    TextField("Description", text: Binding(get: { draft.definition.description ?? "" }, set: { draft.definition.description = $0 }), axis: .vertical)
-                        .lineLimit(1...3)
+                    TextField("Description", text: Binding(get: { draft.definition.description ?? "" }, set: { draft.definition.description = $0 }), prompt: Text("What this role is for"), axis: .vertical)
+                        .labelsHidden()
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(1...4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     Picker("Reach", selection: $draft.definition.reach) {
                         ForEach(AgentRoleFacts.reaches, id: \.id) { Text($0.title).tag($0.id) }
                     }
@@ -32,7 +35,7 @@ struct AgentRoleDetail: View {
                 }
                 Section("Actions") {
                     ForEach(view.actions) { action in
-                        AgentDecisionRow(action: action, effectiveDefault: AgentRoleFacts.effectiveDefault(action, in: role), draft: $draft)
+                        AgentDecisionRow(action: action, defaultTitle: AgentRoleFacts.defaultTitle(action, in: role, reach: draft.definition.reach), draft: $draft)
                     }
                 }
                 Section("Limits") {
@@ -62,7 +65,7 @@ struct AgentRoleDetail: View {
             if !draft.changed { draft = AgentRoleDraft(updated) }
         }
         .confirmationDialog(role.builtIn ? "Reset \(role.name) to how Agenthail ships it?" : "Delete \(role.name)?", isPresented: $confirmingRemove) {
-            Button(role.builtIn ? "Reset" : "Delete", role: .destructive) { Task { await store.send(.delete(role.name)) } }
+            Button(role.builtIn ? "Reset" : "Delete", role: .destructive) { Task { await remove() } }
         } message: {
             Text(role.builtIn ? "Its actions, tools and limits go back to their defaults." : "Sessions assigned this role go back to their usual role.")
         }
@@ -70,6 +73,12 @@ struct AgentRoleDetail: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: DesktopSpace.s) {
+            if draft.conflicts(with: role) {
+                Label("\(role.name) changed elsewhere while you edited it. Save replaces that change; Revert shows it.", systemImage: "arrow.triangle.2.circlepath")
+                    .foregroundStyle(DesktopPalette.text2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("agent-role-conflict")
+            }
             if let error = store.saveError {
                 Label(error, systemImage: "exclamationmark.triangle")
                     .foregroundStyle(DesktopPalette.failed)
@@ -92,12 +101,16 @@ struct AgentRoleDetail: View {
             } else {
                 Button("Delete") { confirmingRemove = true }.disabled(locked)
             }
-            Button("Revert") { draft.revert(); store.clearSaveError() }.disabled(!draft.changed)
+            Button("Revert") { draft = AgentRoleDraft(role); store.clearSaveError() }.disabled(!draft.changed)
             Button("Save") { Task { await save() } }
                 .keyboardShortcut(.defaultAction)
                 .disabled(locked || !draft.changed)
                 .accessibilityIdentifier("agent-role-save")
         }
+    }
+
+    private func remove() async {
+        if await store.send(.delete(role.name)), let reset = store.view?.role(role.name) { draft = AgentRoleDraft(reset) }
     }
 
     private func save() async {
@@ -111,13 +124,13 @@ struct AgentRoleDetail: View {
 
 private struct AgentDecisionRow: View {
     let action: AgentActionView
-    let effectiveDefault: String
+    let defaultTitle: String
     @Binding var draft: AgentRoleDraft
 
     var body: some View {
         let chosen = draft.decision(action.name)
-        Picker(selection: Binding(get: { chosen }, set: { draft.setDecision($0, for: action, effectiveDefault: effectiveDefault) })) {
-            Text("Default (\(effectiveDefault.capitalized))").tag(nil as AgentDecision?)
+        Picker(selection: Binding(get: { chosen }, set: { draft.setDecision($0, for: action) })) {
+            Text(defaultTitle).tag(nil as AgentDecision?)
             ForEach(AgentDecision.allCases, id: \.self) { Text($0.title).tag(Optional($0)) }
         } label: {
             HStack(spacing: DesktopSpace.xs) {

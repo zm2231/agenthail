@@ -116,7 +116,14 @@ enum AgentRoleFacts {
     static func reachTitle(_ reach: String) -> String { reaches.first { $0.id == reach }?.title ?? reach }
 
     static func effectiveDefault(_ action: AgentActionView, in role: AgentRoleView?) -> String {
-        role?.effectiveDefaults?[action.name] ?? action.default
+        if let known = role?.effectiveDefaults?[action.name] { return known }
+        if let role, role.definition.actions?[action.name] == nil, let decided = role.decisions[action.name] { return decided }
+        return action.default
+    }
+
+    static func defaultTitle(_ action: AgentActionView, in role: AgentRoleView, reach: String) -> String {
+        guard reach == role.reach else { return "Default" }
+        return "Default (\(effectiveDefault(action, in: role).capitalized))"
     }
 
     static func nameHint(_ name: String, taken: [String]) -> String? {
@@ -127,6 +134,11 @@ enum AgentRoleFacts {
             return "Lowercase letters, digits and dashes, starting with a letter."
         }
         return nil
+    }
+
+    static func sessionRoleRow(_ role: SessionRole?) -> (value: String, help: String)? {
+        guard let role, !role.label.isEmpty else { return nil }
+        return (role.label, role.source ?? "")
     }
 
     static func assignmentLine(_ assignment: AgentRoleAssignment, sessionName: (String) -> String?) -> String {
@@ -160,15 +172,13 @@ struct AgentRoleDraft: Equatable, Sendable {
         definition.actions?[action].flatMap(AgentDecision.init(rawValue:))
     }
 
-    mutating func setDecision(_ decision: AgentDecision?, for action: AgentActionView, effectiveDefault: String) {
+    mutating func setDecision(_ decision: AgentDecision?, for action: AgentActionView) {
         var actions = definition.actions ?? [:]
-        if let decision, decision.rawValue != effectiveDefault {
-            actions[action.name] = decision.rawValue
-        } else {
-            actions[action.name] = nil
-        }
+        actions[action.name] = decision?.rawValue
         definition.actions = actions.isEmpty ? nil : actions
     }
+
+    func conflicts(with role: AgentRoleView) -> Bool { changed && base != role.definition }
 
     var depth: Int {
         get { definition.depth.flatMap { $0 > 0 ? $0 : nil } ?? AgentRoleFacts.defaultDepth }

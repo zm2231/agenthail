@@ -33,6 +33,11 @@ struct IOSAgentRoleScreen: View {
             if let error = store.saveError {
                 Text(error).foregroundStyle(PhonePalette.failed).textSelection(.enabled).accessibilityIdentifier("agent-role-error")
             }
+            if current.conflicts(with: role) {
+                Text("\(role.name) changed on \(store.hostName ?? "the computer") while you edited it. Save replaces that change; Revert shows it.")
+                    .foregroundStyle(PhonePalette.muted)
+                    .accessibilityIdentifier("agent-role-conflict")
+            }
             Section {
                 TextField("Description", text: Binding(get: { current.definition.description ?? "" }, set: { binding.wrappedValue.definition.description = $0 }), axis: .vertical)
                     .lineLimit(1...4)
@@ -45,7 +50,7 @@ struct IOSAgentRoleScreen: View {
             .disabled(!store.editable)
             Section("Actions") {
                 ForEach(view.actions) { action in
-                    IOSAgentDecisionRow(action: action, effectiveDefault: AgentRoleFacts.effectiveDefault(action, in: role), draft: binding)
+                    IOSAgentDecisionRow(action: action, defaultTitle: AgentRoleFacts.defaultTitle(action, in: role, reach: current.definition.reach), draft: binding)
                 }
             }
             .disabled(!store.editable)
@@ -93,7 +98,9 @@ struct IOSAgentRoleScreen: View {
         .confirmationDialog(role.builtIn ? "Reset \(role.name)?" : "Delete \(role.name)?", isPresented: $confirmingRemove, titleVisibility: .visible) {
             Button(role.builtIn ? "Reset" : "Delete", role: .destructive) {
                 Task {
-                    if await store.send(.delete(role.name)), !role.builtIn { dismiss() }
+                    if await store.send(.delete(role.name)) {
+                        if role.builtIn { draft = nil } else { dismiss() }
+                    }
                 }
             }
         } message: {
@@ -120,22 +127,31 @@ struct IOSAgentRoleScreen: View {
 
 private struct IOSAgentDecisionRow: View {
     let action: AgentActionView
-    let effectiveDefault: String
+    let defaultTitle: String
     @Binding var draft: AgentRoleDraft
 
     var body: some View {
         let chosen = draft.decision(action.name)
-        Picker(selection: Binding(get: { chosen }, set: { draft.setDecision($0, for: action, effectiveDefault: effectiveDefault) })) {
-            Text("Default (\(effectiveDefault.capitalized))").tag(nil as AgentDecision?)
-            ForEach(AgentDecision.allCases, id: \.self) { Text($0.title).tag(Optional($0)) }
-        } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(action.detail)
-                if chosen != nil {
-                    Text("Changed").font(.footnote).foregroundStyle(PhonePalette.accentText)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(action.detail)
+            Menu {
+                Picker(action.detail, selection: Binding(get: { chosen }, set: { draft.setDecision($0, for: action) })) {
+                    Text(defaultTitle).tag(nil as AgentDecision?)
+                    ForEach(AgentDecision.allCases, id: \.self) { Text($0.title).tag(Optional($0)) }
                 }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(chosen?.title ?? defaultTitle)
+                    Image(systemName: "chevron.up.chevron.down").imageScale(.small)
+                }
+                .font(.callout)
+            }
+            .accessibilityValue(chosen != nil ? "Changed" : "")
+            .accessibilityIdentifier("agent-decision-" + action.name)
+            if chosen != nil {
+                Text("Changed").font(.footnote).foregroundStyle(PhonePalette.accentText)
             }
         }
-        .accessibilityIdentifier("agent-decision-" + action.name)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

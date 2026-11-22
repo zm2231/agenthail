@@ -5,6 +5,9 @@ final class AgentRolesUITests: XCTestCase {
     private func launch(_ theme: String, settings: Bool = true) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session"] + (settings ? ["--preview-app"] : []) + ["--preview-roles", "--preview-theme", ProcessInfo.processInfo.environment["AGENTHAIL_UI_THEME"] ?? theme]
+        if let size = ProcessInfo.processInfo.environment["AGENTHAIL_UI_CONTENT_SIZE"] {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", size]
+        }
         app.launch()
         guard settings else { return app }
         app.tab("Settings").tapWhenReady()
@@ -35,15 +38,15 @@ final class AgentRolesUITests: XCTestCase {
         XCTAssertTrue(decision.waitForExistence(timeout: 5))
         shoot(app, "role detail")
         decision.tapWhenReady()
-        app.buttons["Ask"].tapWhenReady()
-        XCTAssertTrue(app.staticTexts["Changed"].waitForExistence(timeout: 5), "a changed decision is marked")
+        app.buttons["Allow"].tapWhenReady()
+        XCTAssertTrue(decision.waitForLabel(containing: "Changed"), "a changed decision is marked: \(decision.label)")
         let save = app.buttons["agent-role-save"]
         XCTAssertTrue(save.isEnabled)
         save.tap()
         let saved = NSPredicate(format: "isEnabled == false")
         expectation(for: saved, evaluatedWith: save)
         waitForExpectations(timeout: 5)
-        XCTAssertTrue(decision.label.contains("Ask"), decision.label)
+        XCTAssertTrue(decision.label.contains("Allow"), decision.label)
         shoot(app, "decision saved")
     }
 
@@ -73,5 +76,16 @@ final class AgentRolesUITests: XCTestCase {
         XCTAssertTrue(role.waitForExistence(timeout: 5), "session details show the role")
         XCTAssertTrue(role.label.contains("worker (replaced by reviewer)") || (role.value as? String)?.contains("worker (replaced by reviewer)") == true || app.staticTexts["worker (replaced by reviewer)"].exists, "the role reads as its label: \(role.label)")
         shoot(app, "session role")
+    }
+}
+
+private extension XCUIElement {
+    func waitForLabel(containing text: String, timeout: TimeInterval = 5) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if label.contains(text) || (value as? String)?.contains(text) == true { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        return label.contains(text) || (value as? String)?.contains(text) == true
     }
 }

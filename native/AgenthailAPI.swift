@@ -653,12 +653,12 @@ final class AgenthailAPI: @unchecked Sendable {
         try await post("/api/v1/claude/compact-settings", body: body)
     }
 
-    func agentRoles() async throws -> AgentRolesView {
-        try await get("/api/v1/agents")
+    func agentRoles(timeout: TimeInterval = 25) async throws -> AgentRolesView {
+        try await request("/api/v1/agents", method: "GET", body: nil, timeout: timeout)
     }
 
-    func changeAgentRole(_ request: AgentRoleRequest) async throws -> AgentRolesView {
-        try await requestEncoded("/api/v1/agents", method: "POST", body: request)
+    func changeAgentRole(_ request: AgentRoleRequest, timeout: TimeInterval = 25) async throws -> AgentRolesView {
+        try await requestEncoded("/api/v1/agents", method: "POST", body: request, timeout: timeout)
     }
 
     func pairingStatus(id: String) async throws -> PairingStatusResponse {
