@@ -2,13 +2,15 @@
 set -euo pipefail
 gate="$(cd "$(dirname "$0")" && pwd)/ci-needs-passed.sh"
 check() {
-	local want="$1" results="$2"
-	if "$gate" "$results" >/dev/null 2>&1; then got=pass; else got=fail; fi
-	[ "$got" = "$want" ] || { echo "FAIL: $results gave $got, want $want" >&2; exit 1; }
+	local want="$1" needs="$2" skip="${3:-[]}"
+	if "$gate" "$needs" "$skip" >/dev/null 2>&1; then got=pass; else got=fail; fi
+	[ "$got" = "$want" ] || { echo "FAIL: $needs skipping $skip gave $got, want $want" >&2; exit 1; }
 }
-check pass '["success","success"]'
-check fail '["success","skipped"]'
-check fail '["cancelled","success"]'
-check fail '["success","failure"]'
-check fail '[]'
+check pass '{"a":{"result":"success"},"b":{"result":"success"}}'
+check fail '{"a":{"result":"success"},"b":{"result":"skipped"}}'
+check pass '{"a":{"result":"success"},"b":{"result":"skipped"}}' '["b"]'
+check fail '{"a":{"result":"skipped"},"b":{"result":"skipped"}}' '["b"]'
+check fail '{"a":{"result":"success"},"b":{"result":"failure"}}' '["b"]'
+check fail '{"a":{"result":"cancelled"},"b":{"result":"success"}}'
+check fail '{}'
 echo "ci-needs-passed tests passed"
