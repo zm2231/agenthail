@@ -21,19 +21,21 @@ const (
 	Ask    = "ask"
 )
 
-// A role's reach is which sessions it acts on beyond its own: the ones it
-// started, every one in its project, or every one.
+// A role's reach is which sessions it acts on beyond its own: none, so it
+// starts none either, the ones it started, every one in its project, or every one.
 const (
+	ReachSelf        = "self"
 	ReachDescendants = "descendants"
 	ReachProject     = "project"
 	ReachAll         = "all"
 )
 
 const (
-	Worker   = "worker"
-	Lead     = "lead"
-	Operator = "operator"
-	Remote   = "remote"
+	Worker       = "worker"
+	Lead         = "lead"
+	Operator     = "operator"
+	Remote       = "remote"
+	ConnectedApp = "connected-app"
 )
 
 const (
@@ -103,12 +105,19 @@ var BuiltIn = map[string]Role{
 	Lead:     {Description: "A project's coordinator: it manages its own project and its sessions.", Reach: ReachProject},
 	Operator: {Description: "The person's voice operator: it acts for the person everywhere.", Reach: ReachAll},
 	Remote:   {Description: "An agent identity that reaches this computer from elsewhere: it acts for the person everywhere.", Reach: ReachAll},
+	ConnectedApp: {
+		Description: "An app connected to an agent identity: it reads what the identity may read and sends queued messages to a project's coordinator, nothing more.",
+		Reach:       ReachSelf,
+		Actions:     map[string]string{"cross-project-message": Ask, "cross-project-steer": Ask},
+		Tools:       []string{"agenthail_whoami", "agenthail_capabilities", "agenthail_sessions", "agenthail_projects", "agenthail_read", "agenthail_wait", "agenthail_send"},
+	},
 }
 
-// BaseCapabilities are what every role holds.
+// BaseCapabilities are what every role holds, less spawn and control at reach self.
 var BaseCapabilities = []string{"read.self", "read.project", "spawn", "control.descendants", "requests.answer", "ledger.read", "ledger.write", "browser.drive", "simulator.drive"}
 
 var reachCapabilities = map[string][]string{
+	ReachSelf:        nil,
 	ReachDescendants: nil,
 	ReachProject:     {"control.project"},
 	ReachAll:         {"control.all", "read.all"},
@@ -137,7 +146,7 @@ func ActionNames() []string {
 }
 
 func (r Role) DefaultDecision(action Action) string {
-	if action.OwnProject && r.Reach == ReachDescendants {
+	if action.OwnProject && (r.Reach == ReachSelf || r.Reach == ReachDescendants) {
 		return Ask
 	}
 	return action.Default
@@ -175,13 +184,17 @@ func (r Role) Sees(tool string) bool {
 }
 
 func (r Role) Capabilities() []string {
-	return append(slices.Clone(BaseCapabilities), reachCapabilities[r.Reach]...)
+	capabilities := append(slices.Clone(BaseCapabilities), reachCapabilities[r.Reach]...)
+	if r.Reach == ReachSelf {
+		capabilities = slices.DeleteFunc(capabilities, func(capability string) bool { return capability == "spawn" || capability == "control.descendants" })
+	}
+	return capabilities
 }
 
 // Validate reports the first thing wrong with a role the person wrote.
 func (r Role) Validate() error {
 	if _, ok := reachCapabilities[r.Reach]; !ok {
-		return fmt.Errorf("a role's reach is descendants, project or all, not %q", r.Reach)
+		return fmt.Errorf("a role's reach is self, descendants, project or all, not %q", r.Reach)
 	}
 	for name, decision := range r.Actions {
 		if _, known := ActionNamed(name); !known {

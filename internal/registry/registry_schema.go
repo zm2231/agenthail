@@ -1006,7 +1006,7 @@ CREATE TABLE IF NOT EXISTS mcp_event_subscriptions (
 );
 DROP TRIGGER IF EXISTS mcp_event_subscriptions_credentials_changed;
 CREATE TRIGGER mcp_event_subscriptions_credentials_changed AFTER UPDATE OF token_hash,access_client_id,access_email ON identity_remote
-BEGIN DELETE FROM mcp_event_subscriptions WHERE identity_id=NEW.identity_id; END;
+BEGIN DELETE FROM mcp_event_subscriptions WHERE identity_id=NEW.identity_id AND token_hash NOT LIKE 'oauth:%'; END;
 DROP TRIGGER IF EXISTS mcp_event_subscriptions_access_added;
 CREATE TRIGGER mcp_event_subscriptions_access_added AFTER INSERT ON mcp_access
 BEGIN DELETE FROM mcp_event_subscriptions; END;
@@ -1016,4 +1016,50 @@ BEGIN DELETE FROM mcp_event_subscriptions; END;
 DROP TRIGGER IF EXISTS mcp_event_subscriptions_access_removed;
 CREATE TRIGGER mcp_event_subscriptions_access_removed AFTER DELETE ON mcp_access
 BEGIN DELETE FROM mcp_event_subscriptions; END;
+CREATE TABLE IF NOT EXISTS mcp_oauth (
+	id INTEGER PRIMARY KEY CHECK (id=1),
+	issuer TEXT NOT NULL,
+	changed_at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS oauth_clients (
+	client_id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	redirect_uris TEXT NOT NULL,
+	created_at_ms INTEGER NOT NULL,
+	approved_at_ms INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS identity_oauth_grants (
+	grant_id TEXT PRIMARY KEY,
+	identity_id TEXT NOT NULL REFERENCES identity_remote(identity_id) ON DELETE CASCADE,
+	client_id TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,
+	access_hash TEXT NOT NULL UNIQUE,
+	access_expires_at_ms INTEGER NOT NULL,
+	refresh_hash TEXT NOT NULL UNIQUE,
+	refresh_expires_at_ms INTEGER NOT NULL,
+	created_at_ms INTEGER NOT NULL,
+	last_seen_at_ms INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS identity_oauth_grants_client ON identity_oauth_grants(client_id);
+CREATE TABLE IF NOT EXISTS identity_oauth (
+	identity_id TEXT PRIMARY KEY REFERENCES identity_remote(identity_id) ON DELETE CASCADE,
+	enabled_at_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS oauth_spent_refresh (
+	refresh_hash TEXT PRIMARY KEY,
+	grant_id TEXT NOT NULL REFERENCES identity_oauth_grants(grant_id) ON DELETE CASCADE,
+	spent_at_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS oauth_spent_refresh_grant ON oauth_spent_refresh(grant_id);
+DROP TRIGGER IF EXISTS identity_oauth_grants_removed;
+CREATE TRIGGER identity_oauth_grants_removed AFTER DELETE ON identity_oauth_grants
+BEGIN
+	UPDATE mcp_remote_epoch SET epoch=epoch+1 WHERE id=1;
+	DELETE FROM mcp_event_subscriptions WHERE token_hash='oauth:'||OLD.grant_id;
+END;
+DROP TRIGGER IF EXISTS mcp_oauth_issuer_changed;
+CREATE TRIGGER mcp_oauth_issuer_changed AFTER UPDATE OF issuer ON mcp_oauth
+BEGIN DELETE FROM oauth_clients; END;
+DROP TRIGGER IF EXISTS mcp_oauth_issuer_removed;
+CREATE TRIGGER mcp_oauth_issuer_removed AFTER DELETE ON mcp_oauth
+BEGIN DELETE FROM oauth_clients; END;
 `

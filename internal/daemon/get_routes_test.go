@@ -87,9 +87,13 @@ func routePatterns(t *testing.T) []string {
 			return true
 		})
 	}
-	apiSources, err := filepath.Glob("../daemonapi/*.go")
-	if err != nil {
-		t.Fatal(err)
+	var apiSources []string
+	for _, pkg := range []string{"daemonapi", "mcpoauth"} {
+		found, err := filepath.Glob("../" + pkg + "/*.go")
+		if err != nil {
+			t.Fatal(err)
+		}
+		apiSources = append(apiSources, found...)
 	}
 	for _, source := range apiSources {
 		if strings.HasSuffix(source, "_test.go") {
@@ -101,7 +105,7 @@ func routePatterns(t *testing.T) []string {
 		}
 		ast.Inspect(file, func(node ast.Node) bool {
 			if spec, ok := node.(*ast.ValueSpec); ok {
-				readStringConsts(spec, "daemonapi.", consts)
+				readStringConsts(spec, filepath.Base(filepath.Dir(source))+".", consts)
 			}
 			return true
 		})

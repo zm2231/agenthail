@@ -109,7 +109,7 @@ struct AgentRoleRequest: Encodable, Equatable, Sendable {
 }
 
 enum AgentRoleFacts {
-    static let reaches: [(id: String, title: String)] = [("descendants", "Sessions it started"), ("project", "Its project"), ("all", "Every session")]
+    static let reaches: [(id: String, title: String)] = [("self", "Only itself"), ("descendants", "Sessions it started"), ("project", "Its project"), ("all", "Every session")]
     static let defaultDepth = 3
     static let defaultRunning = 8
 

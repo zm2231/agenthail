@@ -111,6 +111,10 @@ func (d *Daemon) callerRole(record registry.CallerRecord, remote bool) resolvedR
 	if implicit == agentroles.Worker && startedOutside(record) {
 		source = "a session Agenthail did not start"
 	}
+	return d.resolveRole(record, implicit, source)
+}
+
+func (d *Daemon) resolveRole(record registry.CallerRecord, implicit, source string) resolvedRole {
 	all, err := d.agentRoles()
 	if err != nil {
 		d.log.Printf("read agent roles: %s", err)

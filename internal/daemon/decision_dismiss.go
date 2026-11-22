@@ -140,6 +140,9 @@ func (d *Daemon) dismissRequest(ctx context.Context, p principal, sessionID, req
 	case registry.AskOriginApproval:
 		_, err := d.answerApproval(ctx, ask, surface.Response{Choices: []string{registry.ApprovalDeny}}, p, registry.AskToPerson)
 		return err
+	case registry.AskOriginOAuthGrant:
+		_, err := d.answerOAuthGrant(ask, surface.Response{Choices: []string{oauthDecline}}, p, registry.AskToPerson)
+		return err
 	}
 	remote, err := d.remotePersonParks(ask.ID)
 	if err != nil {

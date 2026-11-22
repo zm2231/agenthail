@@ -121,6 +121,7 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/api/settings/remote-qr", dashboard.guard(d.dashboardRemoteQRHandler))
 	d.registerAPIV1(mux, dashboard)
 	mux.Handle("/mcp", d.mcpHandler())
+	d.registerOAuth(mux)
 	mux.Handle(extensionFetchPath, d.extensionFetchHandler())
 	mux.Handle(extensionBadgePath, d.extensionBadgeHandler())
 	return d.dashboardHeaders(accessPathGuard(mux))
