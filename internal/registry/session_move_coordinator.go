@@ -138,7 +138,7 @@ func insertMovedCoordinatorTx(tx *sql.Tx, conversation, alias, from string, lead
 	return err
 }
 
-func dropMovedCoordinatorTx(tx *sql.Tx, conversation string, now time.Time) error {
+func dropMovedCoordinatorTx(tx *sql.Tx, conversation, movedTo string, now time.Time) error {
 	lead, err := movedCoordinator(tx, conversation)
 	if err != nil || lead == nil {
 		return err
@@ -151,9 +151,73 @@ func dropMovedCoordinatorTx(tx *sql.Tx, conversation string, now time.Time) erro
 	if err := recordCoordinatorHistoryTx(tx, lead.ProjectID, "moved", lead.Name, "", lead.Name, conversation, "", now); err != nil {
 		return err
 	}
-	payload, _ := json.Marshal(map[string]string{"projectId": lead.ProjectID})
+	payload, _ := json.Marshal(map[string]string{"projectId": lead.ProjectID, "movedToHost": movedTo})
 	_, _, err = appendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("coordinator.removed:%s:%d", lead.ProjectID, now.UnixNano()), Type: "coordinator.removed", EntityID: lead.ProjectID, Payload: payload})
 	return err
+}
+
+// HandOverHostCoordinator keeps a moving lead listed until its new host lists it, never over that host's own rows.
+func (r *Registry) HandOverHostCoordinator(fromHostID, toHostID, projectID string) error {
+	if fromHostID == "" || toHostID == "" {
+		return fmt.Errorf("a mirrored coordinator needs its host")
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := handOverHostCoordinatorTx(tx, fromHostID, toHostID, projectID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func handOverHostCoordinatorTx(tx *sql.Tx, fromHostID, toHostID, projectID string) error {
+	var sessionID string
+	err := tx.QueryRow(`SELECT c.session_id FROM coordinators c WHERE c.host_id=? AND c.project_id=? AND NOT EXISTS(SELECT 1 FROM coordinators t WHERE t.host_id=? AND (t.project_id=c.project_id OR t.name=c.name))`, fromHostID, projectID, toHostID).Scan(&sessionID)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		_, err = tx.Exec(`DELETE FROM coordinators WHERE host_id=? AND project_id=?`, fromHostID, projectID)
+	case err == nil:
+		_, conversation, _ := hosts.Split(sessionID)
+		_, err = tx.Exec(`UPDATE coordinators SET host_id=?,session_id=?,moved_from=? WHERE host_id=? AND project_id=?`, toHostID, hosts.Qualify(toHostID, conversation), fromHostID, fromHostID, projectID)
+	}
+	return err
+}
+
+func handOverMovedCoordinatorsTx(tx *sql.Tx, hostID string, entries []CoordinatorEntry, movedTo map[string]string) error {
+	if len(movedTo) == 0 {
+		return nil
+	}
+	listed := map[string]bool{}
+	for _, entry := range entries {
+		listed[entry.ProjectID] = true
+	}
+	rows, err := tx.Query(`SELECT project_id,session_id FROM coordinators WHERE host_id=?`, hostID)
+	if err != nil {
+		return err
+	}
+	handovers := map[string]string{}
+	for rows.Next() {
+		var projectID, sessionID string
+		if err := rows.Scan(&projectID, &sessionID); err != nil {
+			rows.Close()
+			return err
+		}
+		_, conversation, _ := hosts.Split(sessionID)
+		if to := movedTo[conversation]; to != "" && to != hostID && !listed[projectID] {
+			handovers[projectID] = to
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for projectID, to := range handovers {
+		if err := handOverHostCoordinatorTx(tx, hostID, to, projectID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Registry) MovingOut(session string) (bool, error) {

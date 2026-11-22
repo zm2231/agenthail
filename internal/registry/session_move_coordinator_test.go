@@ -171,6 +171,90 @@ func TestAThirdHostListsOneLeadForAMovingConversation(t *testing.T) {
 	}
 }
 
+func TestAThirdHostKeepsALeadItHearsLeaveUntilItsNewHostListsIt(t *testing.T) {
+	const target, gadget = "h00dd44ee55ff", "repo:github.com/example/gadget"
+	at := time.UnixMilli(1_700_000_000_000).UTC()
+	third := func(t *testing.T) *Registry {
+		t.Helper()
+		r := openTestRegistry(t)
+		for id, name := range map[string]string{leadSource: "source", target: "target"} {
+			if _, err := r.AddHost(PairedHost{ID: id, Name: name, Endpoint: "https://" + name + ".example.ts.net:7412", Address: "100.64.0.9", Token: "ahd_" + name}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := r.PutHostCoordinator(leadSource, CoordinatorEntry{ProjectID: leadProject, ProjectRoot: "/src/widget", Name: leadName, Surface: "claude", SessionID: leadSource + "::" + moveConversation, ChangedAt: at}); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+
+	r := third(t)
+	if err := r.HandOverHostCoordinator(leadSource, target, leadProject); err != nil {
+		t.Fatal(err)
+	}
+	if leads, err := r.ProjectCoordinators(leadProject); err != nil || len(leads) != 1 || leads[0].HostID != target || leads[0].SessionID != target+"::"+moveConversation {
+		t.Fatalf("listed %+v err=%v, want the lead on its new host", leads, err)
+	}
+
+	r = third(t)
+	if err := r.PutHostCoordinator(target, CoordinatorEntry{ProjectID: gadget, ProjectRoot: "/target/gadget", Name: leadName, Surface: "claude", SessionID: target + "::gadget-lead", ChangedAt: at.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.HandOverHostCoordinator(leadSource, target, leadProject); err != nil {
+		t.Fatal(err)
+	}
+	if leads, err := r.ProjectCoordinators(leadProject); err != nil || len(leads) != 0 {
+		t.Fatalf("listed %+v err=%v over the new host's own @%s, want the old row dropped", leads, err, leadName)
+	}
+	if own, err := r.ProjectCoordinators(gadget); err != nil || len(own) != 1 || own[0].SessionID != target+"::gadget-lead" {
+		t.Fatalf("the new host's own @%s is %+v err=%v, want it kept", leadName, own, err)
+	}
+}
+
+func TestAHostReadAfreshMidMoveKeepsItsMovingLeadListedOnItsNewHost(t *testing.T) {
+	const target = "h00dd44ee55ff"
+	at := time.UnixMilli(1_700_000_000_000).UTC()
+	lead := CoordinatorEntry{ProjectID: leadProject, ProjectRoot: "/src/widget", Name: leadName, Surface: "claude", SessionID: leadSource + "::" + moveConversation, ChangedAt: at}
+	third := func(t *testing.T) *Registry {
+		t.Helper()
+		r := openTestRegistry(t)
+		for id, name := range map[string]string{leadSource: "source", target: "target"} {
+			if _, err := r.AddHost(PairedHost{ID: id, Name: name, Endpoint: "https://" + name + ".example.ts.net:7412", Address: "100.64.0.9", Token: "ahd_" + name}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := r.PutHostCoordinator(leadSource, lead); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	moved := map[string]string{moveConversation: target}
+
+	r := third(t)
+	if err := r.ReplaceHostCoordinators(leadSource, nil, moved); err != nil {
+		t.Fatal(err)
+	}
+	if leads, err := r.ProjectCoordinators(leadProject); err != nil || len(leads) != 1 || leads[0].HostID != target || leads[0].SessionID != target+"::"+moveConversation {
+		t.Fatalf("listed %+v err=%v, want the lead on its new host", leads, err)
+	}
+
+	r = third(t)
+	if err := r.ReplaceHostCoordinators(leadSource, []CoordinatorEntry{lead}, moved); err != nil {
+		t.Fatal(err)
+	}
+	if leads, err := r.ProjectCoordinators(leadProject); err != nil || len(leads) != 1 || leads[0].HostID != leadSource {
+		t.Fatalf("listed %+v err=%v, want the lead its host still lists left there", leads, err)
+	}
+
+	r = third(t)
+	if err := r.ReplaceHostCoordinators(leadSource, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if leads, err := r.ProjectCoordinators(leadProject); err != nil || len(leads) != 0 {
+		t.Fatalf("listed %+v err=%v, want a lead its host dropped without a move gone", leads, err)
+	}
+}
+
 func TestAnUpgradedRegistryKeepsItsLeadHistoryAndRecordsAMovedLead(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
 	old, err := Open(path)

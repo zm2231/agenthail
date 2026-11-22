@@ -567,7 +567,8 @@ func publishSessionCoordinatorTx(tx *sql.Tx, sessionID string) error {
 
 // ReplaceHostCoordinators makes entries the whole mirror of a paired host's
 // coordinators. Each entry's project id is already as this host names it.
-func (r *Registry) ReplaceHostCoordinators(hostID string, entries []CoordinatorEntry) error {
+// A host read afresh mid-move drops its moving lead; movedTo keeps it listed on its new host.
+func (r *Registry) ReplaceHostCoordinators(hostID string, entries []CoordinatorEntry, movedTo map[string]string) error {
 	if hostID == "" {
 		return fmt.Errorf("a mirrored coordinator needs its host")
 	}
@@ -576,6 +577,9 @@ func (r *Registry) ReplaceHostCoordinators(hostID string, entries []CoordinatorE
 		return err
 	}
 	defer tx.Rollback()
+	if err := handOverMovedCoordinatorsTx(tx, hostID, entries, movedTo); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`DELETE FROM coordinators WHERE host_id=?`, hostID); err != nil {
 		return err
 	}

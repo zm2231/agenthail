@@ -138,7 +138,7 @@ func TestAPairedHostsCoordinatorHoldsItsProjectAndNameUntilTheHostIsRemoved(t *t
 		t.Fatal(err)
 	}
 	remote := CoordinatorEntry{ProjectID: "repo:github.com/example/widget", ProjectRoot: "/home/dev/widget", Name: "widget-lead", Surface: "codex", SessionID: "thread-1", ChangedBy: hostID + "::thread-1", ChangedAt: time.UnixMilli(1_700_000_000_000)}
-	if err := r.ReplaceHostCoordinators(hostID, []CoordinatorEntry{remote}); err != nil {
+	if err := r.ReplaceHostCoordinators(hostID, []CoordinatorEntry{remote}, nil); err != nil {
 		t.Fatal(err)
 	}
 	spec := CoordinatorSpec{ProjectID: remote.ProjectID, ProjectRoot: "/work/widget", Name: "laptop-lead", Surface: "claude", Cwd: "/work/widget"}

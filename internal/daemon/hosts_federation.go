@@ -658,7 +658,13 @@ func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, e
 			coordinators = append(coordinators, entry)
 		}
 	}
-	if err := d.Registry.ReplaceHostCoordinators(host.record.ID, coordinators); err != nil {
+	movedTo := map[string]string{}
+	for _, moved := range snapshot.MovedOut {
+		if to, found := d.pairedHost(moved.MovedToHost); found && to != host {
+			movedTo[moved.SessionID] = to.record.ID
+		}
+	}
+	if err := d.Registry.ReplaceHostCoordinators(host.record.ID, coordinators, movedTo); err != nil {
 		return 0, localMirror(err)
 	}
 	if _, err := d.adoptProjectMoves(snapshot.ProjectMoves); err != nil {
@@ -788,12 +794,16 @@ func (d *Daemon) applyHostCatalogEvent(host *pairedHost, envelope catalogStreamE
 		}
 	case "coordinator.removed":
 		var payload struct {
-			ProjectID string `json:"projectId"`
+			ProjectID   string `json:"projectId"`
+			MovedToHost string `json:"movedToHost"`
 		}
 		if err := json.Unmarshal(envelope.Data, &payload); err != nil {
 			return err
 		}
 		if entry, ok := mirroredCoordinator(host.record.ID, registry.CoordinatorEntry{ProjectID: payload.ProjectID, Name: "-"}); ok {
+			if to, found := d.pairedHost(payload.MovedToHost); found && to != host {
+				return d.Registry.HandOverHostCoordinator(host.record.ID, to.record.ID, entry.ProjectID)
+			}
 			return d.Registry.RemoveHostCoordinator(host.record.ID, entry.ProjectID)
 		}
 	case "project.linked":
