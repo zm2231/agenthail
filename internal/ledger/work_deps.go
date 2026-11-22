@@ -113,3 +113,12 @@ func (b *Board) blockedOnOthers(c Clause, sessionID string) bool {
 	}
 	return waiting
 }
+
+func (b *Board) OpenDependencies(id string) []string {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if item := b.workItems[id]; item != nil {
+		return b.openDeps(item)
+	}
+	return nil
+}

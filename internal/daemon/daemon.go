@@ -123,6 +123,7 @@ type Daemon struct {
 	heldWorkRows      heldWorkCache
 	ledger            *ledger.Store
 	ledgerHub         *ledgerChangeHub
+	ledgerBoards      ledgerBoardWatch
 	ledgerSync        ledgerSyncHealth
 	backlog           backlogWatch
 	ledgerClaims      ledgerClaims

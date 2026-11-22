@@ -128,21 +128,23 @@ func TestTheWorkPageShowsAProjectsWorkByStateWithWhoHoldsItAndWhatItIsFor(t *tes
 		return strings.Join(out, ",")
 	}
 	for state, want := range map[ledger.WorkState]string{
-		ledger.WorkInProgress: building.ID,
-		ledger.WorkInReview:   reviewed.ID,
-		ledger.WorkBlocked:    blocked.ID,
-		ledger.WorkOpen:       urgent.ID + "," + next.ID,
-		ledger.WorkParked:     later.ID,
+		ledger.WorkOpen:   urgent.ID + "," + next.ID,
+		ledger.WorkParked: later.ID,
 	} {
 		if got := ids(view.Work[string(state)]); got != want {
 			t.Errorf("%s shows %q, want %q", state, got, want)
 		}
 	}
-	row := view.Work[string(ledger.WorkInProgress)][0]
-	if row.Title != "Build the order index" || row.What != "Index orders by customer and date" || row.For != "find old orders fast" || row.Holder != "@builder" || row.Priority != "P1" || row.Type != "feature" || row.Since.IsZero() {
-		t.Errorf("an item in progress reads %+v", row)
+	for lane, want := range map[string]string{laneIdle: building.ID, laneReview: reviewed.ID, laneBlocked: blocked.ID} {
+		if got := ids(view.Board[lane]); got != want {
+			t.Errorf("the %s lane shows %q, want %q", lane, got, want)
+		}
 	}
-	if row := view.Work[string(ledger.WorkBlocked)][0]; row.Note != "the host has no disk yet" || row.Holder != "" {
+	row := view.Board[laneIdle][0]
+	if row.Title != "Build the order index" || row.What != "Index orders by customer and date" || row.For != "find old orders fast" || row.Holder != "@builder" || row.Priority != "P1" || row.Type != "feature" || row.Since.IsZero() || row.Flight.HolderState != holderIdle {
+		t.Errorf("an item in progress reads %+v %+v", row, row.Flight)
+	}
+	if row := view.Board[laneBlocked][0]; row.Note != "the host has no disk yet" || row.Holder != "" {
 		t.Errorf("a blocked item reads %+v", row)
 	}
 	if row := view.Work[string(ledger.WorkParked)][0]; row.Parked == nil || row.Parked.Kind != "later" || row.Parked.Why != "after the index ships" {
@@ -163,8 +165,8 @@ func TestTheWorkPageShowsAProjectsWorkByStateWithWhoHoldsItAndWhatItIsFor(t *tes
 		t.Fatalf("the repository's project id reads %d %+v", byKey.StatusCode, keyed)
 	}
 	work(t, store, ledger.WorkRequest{ProjectKey: p.key, SessionID: "s2", Action: ledger.WorkClaim, ItemID: next.ID})
-	if changed, view := ledgerPageRead(t, base, "proj-widget", "test-token", etag); changed.StatusCode != http.StatusOK || len(view.Work[string(ledger.WorkInProgress)]) != 2 || ids(view.Work[string(ledger.WorkOpen)]) != urgent.ID {
-		t.Fatalf("after a claim the page answered %d with %+v", changed.StatusCode, view.Work)
+	if changed, view := ledgerPageRead(t, base, "proj-widget", "test-token", etag); changed.StatusCode != http.StatusOK || len(view.Board[laneIdle]) != 2 || ids(view.Work[string(ledger.WorkOpen)]) != urgent.ID {
+		t.Fatalf("after a claim the page answered %d with %+v %+v", changed.StatusCode, view.Board, view.Work)
 	}
 }
 

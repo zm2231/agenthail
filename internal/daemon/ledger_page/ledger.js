@@ -1,4 +1,5 @@
 import { readable, shownRows, shortList } from "./ledger-text.js";
+import { lanes, holderWord, prChip, prName, prWords, laneSince } from "./ledger-board.js";
 
 const project = new URLSearchParams(location.search).get("project") || "";
 const root = document.getElementById("work");
@@ -17,16 +18,13 @@ function plain(text) {
 
 function learnTitles() {
   titles = new Map();
-  const rows = [...Object.values(view.work).flat(), ...(view.ready || []), ...view.done, ...view.waiting.map((wait) => wait.work).filter(Boolean)];
+  const rows = [...Object.values(view.board).flat(), ...Object.values(view.work).flat(), ...(view.ready || []), ...view.done, ...view.waiting.map((wait) => wait.work).filter(Boolean)];
   for (const row of rows) if (row.id && row.title) titles.set(row.id, row.title);
 }
 let reading = false;
 let again = false;
 
 const sections = [
-  ["in_progress", "In progress"],
-  ["in_review", "In review"],
-  ["blocked", "Blocked"],
   ["open", "Up next"],
   ["parked", "Set aside"],
 ];
@@ -63,13 +61,77 @@ function chip(className, text) {
   return text ? node("span", `chip ${className}`, text) : null;
 }
 
-function rowChips(row) {
+function rowChips(row, since = row.since) {
   return [
     chip("holder", row.holder),
     priorityWords[row.priority] && chip(`priority ${row.priority.toLowerCase()}`, priorityWords[row.priority]),
     row.type && row.type !== "task" && chip("type", row.type),
-    chip("since", ago(row.since)),
+    chip("since", ago(since)),
   ];
+}
+
+function holderChip(row) {
+  const word = holderWord(row.flight);
+  if (!row.holder) return null;
+  const element = node("span", `chip holder ${row.flight?.holderState || ""}`, row.holder);
+  if (word) element.title = `${row.holder} is ${word}`;
+  return element;
+}
+
+function boardChips(lane, row) {
+  const pr = prChip(row.flight);
+  const chips = rowChips(row, laneSince(lane, row));
+  chips[0] = holderChip(row);
+  if (pr) chips.splice(1, 0, chip(`pr ${pr.tone}`, pr.text));
+  return chips;
+}
+
+function link(className, href, text) {
+  const element = node("a", className, text);
+  element.href = href;
+  element.target = "_blank";
+  element.rel = "noopener";
+  return element;
+}
+
+function prLine(pr) {
+  const element = node("div", "pr-line");
+  element.append(pr.url.startsWith("https://") ? link("", pr.url, prName(pr)) : node("span", "", prName(pr)));
+  const words = [pr.title && plain(pr.title), prWords(pr)].filter(Boolean).join(" · ");
+  if (words) element.append(document.createTextNode(` ${words}`));
+  return element;
+}
+
+function boardRow(lane, row) {
+  const flight = row.flight || {};
+  const holder = holderWord(flight);
+  const waits = (flight.waitsOn || []).map((id) => (titles.has(id) ? `“${plain(titles.get(id))}”` : "another item"));
+  const latest = flight.lastLog && plain(flight.lastLog.text);
+  return itemLines(`board:${row.id}`, row.title, boardChips(lane, row), [
+    ...(flight.asks || []).map((ask) => line("ask", `Asks you: ${ask.title}`)),
+    line("what", row.what),
+    purpose(row),
+    ...(flight.prs || []).map(prLine),
+    row.note && line("note", `Blocked: ${row.note}`),
+    waits.length ? node("div", "note", `Waits on ${waits.join(", ")}`) : null,
+    latest ? node("div", "latest", `Latest: ${latest}${flight.lastLog.at ? ` (${ago(flight.lastLog.at)})` : ""}`) : null,
+    row.holder && holder ? line("for", `${row.holder} is ${holder}`) : null,
+  ]);
+}
+
+function laneSummary() {
+  const nav = node("nav", "lanes");
+  nav.setAttribute("aria-label", "Work in flight");
+  for (const [lane, title] of lanes) {
+    const count = (view.board[lane] || []).length + (lane === "you" ? view.waiting.length : 0);
+    if (!count) continue;
+    const jump = link(`lane-chip ${lane}`, `#lane-${lane}`, title);
+    jump.removeAttribute("target");
+    jump.removeAttribute("rel");
+    jump.append(node("span", "count", String(count)));
+    nav.append(jump);
+  }
+  return nav.childElementCount ? nav : null;
 }
 
 function line(className, text) {
@@ -117,7 +179,6 @@ function workRow(scope, row, extra = []) {
 }
 
 function rowFor(state, row) {
-  if (state === "blocked") return workRow(state, row, [row.note && line("note", `Blocked: ${row.note}`)]);
   if (state === "parked" && row.parked) {
     const why = [parkedAs[row.parked.kind] || "Set aside", row.parked.why].filter(Boolean).join(": ");
     const revisit = row.parked.revisit ? ` (look again ${day(row.parked.revisit)})` : "";
@@ -153,6 +214,7 @@ function heading(title, count) {
 
 function section(key, title, rows, build) {
   const block = node("section", key.replace("_", "-"));
+  block.id = `lane-${key}`;
   block.append(heading(title, rows.length), ...list(key, rows, build));
   return block;
 }
@@ -194,12 +256,26 @@ function render() {
   if (!view) return;
   learnTitles();
   const parts = [];
-  if (view.ready?.length) parts.push(section("ready", "Ready to pick up", view.ready, readyRow));
-  if (view.waiting.length) {
-    const block = section("waiting", "Waiting on you", view.waiting, waitingRow);
-    block.append(node("p", "note", "Answer these in Needs you."));
-    parts.push(block);
+  const summary = laneSummary();
+  if (summary) parts.push(summary);
+  for (const [lane, title] of lanes) {
+    const rows = view.board[lane] || [];
+    if (lane === "you") {
+      const waiting = [...rows.map((row) => ({ row })), ...view.waiting.map((wait) => ({ wait }))];
+      if (!waiting.length) continue;
+      const block = section("you", title, waiting, (entry) => (entry.row ? boardRow(lane, entry.row) : waitingRow(entry.wait)));
+      block.classList.add("waiting", "lane");
+      block.append(node("p", "note", "Answer these in Needs you."));
+      parts.push(block);
+      continue;
+    }
+    if (rows.length) {
+      const block = section(lane, title, rows, (row) => boardRow(lane, row));
+      block.classList.add("lane");
+      parts.push(block);
+    }
   }
+  if (view.ready?.length) parts.push(section("ready", "Ready to pick up", view.ready, readyRow));
   for (const [state, title] of sections) {
     const rows = view.work[state] || [];
     if (rows.length) parts.push(section(state, title, rows, (row) => rowFor(state, row)));

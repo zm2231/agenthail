@@ -27,11 +27,12 @@ const (
 //go:embed ledger_page
 var ledgerPageFiles embed.FS
 
-var ledgerPageStates = []ledger.WorkState{ledger.WorkInProgress, ledger.WorkInReview, ledger.WorkBlocked, ledger.WorkOpen, ledger.WorkParked}
+var ledgerPageStates = []ledger.WorkState{ledger.WorkOpen, ledger.WorkParked}
 
 type ledgerPageView struct {
 	Project string                     `json:"project"`
 	Key     string                     `json:"key,omitempty"`
+	Board   map[string][]ledgerPageRow `json:"board"`
 	Work    map[string][]ledgerPageRow `json:"work"`
 	Ready   []ledgerPageRow            `json:"ready"`
 	Waiting []ledgerPageWait           `json:"waiting"`
@@ -50,6 +51,7 @@ type ledgerPageRow struct {
 	Note     string            `json:"note,omitempty"`
 	Reviewer string            `json:"reviewer,omitempty"`
 	Parked   *ledgerPageParked `json:"parked,omitempty"`
+	Flight   *ledgerPageFlight `json:"flight,omitempty"`
 }
 
 type ledgerPageParked struct {
@@ -142,22 +144,10 @@ func (d *Daemon) ledgerPageDataHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "project is required.")
 		return
 	}
-	key, err := d.ledgerPageKey(projectID)
+	view, err := d.projectLedgerPage(projectID)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "ledger_unavailable", err.Error())
 		return
-	}
-	view := ledgerPageView{Project: projectID, Key: key, Work: map[string][]ledgerPageRow{}, Ready: []ledgerPageRow{}, Waiting: []ledgerPageWait{}, Done: []ledgerPageRow{}}
-	for _, state := range ledgerPageStates {
-		view.Work[string(state)] = []ledgerPageRow{}
-	}
-	if key != "" {
-		board, err := d.ledgerStore().Board(key)
-		if err != nil {
-			writeAPIError(w, http.StatusInternalServerError, "ledger_unavailable", err.Error())
-			return
-		}
-		d.fillLedgerPage(&view, board, time.Now())
 	}
 	body, err := apitime.Marshal(view)
 	if err != nil {
@@ -173,6 +163,28 @@ func (d *Daemon) ledgerPageDataHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(body)
+}
+
+func (d *Daemon) projectLedgerPage(projectID string) (ledgerPageView, error) {
+	key, err := d.ledgerPageKey(projectID)
+	if err != nil {
+		return ledgerPageView{}, err
+	}
+	view := ledgerPageView{Project: projectID, Key: key, Board: map[string][]ledgerPageRow{}, Work: map[string][]ledgerPageRow{}, Ready: []ledgerPageRow{}, Waiting: []ledgerPageWait{}, Done: []ledgerPageRow{}}
+	for _, lane := range ledgerBoardLanes {
+		view.Board[lane] = []ledgerPageRow{}
+	}
+	for _, state := range ledgerPageStates {
+		view.Work[string(state)] = []ledgerPageRow{}
+	}
+	if key != "" {
+		board, err := d.ledgerStore().Board(key)
+		if err != nil {
+			return ledgerPageView{}, err
+		}
+		d.fillLedgerPage(&view, board, time.Now())
+	}
+	return view, nil
 }
 
 func (d *Daemon) fillLedgerPage(view *ledgerPageView, board *ledger.Board, now time.Time) {
@@ -194,6 +206,7 @@ func (d *Daemon) fillLedgerPage(view *ledgerPageView, board *ledger.Board, now t
 		}
 		return out
 	}
+	reads := d.ledgerBoardReads()
 	ready := map[string]string{}
 	for _, entry := range board.Backlog(ledger.BacklogQuery{Ready: true}, now, ledger.Readings{Usage: d.cachedLedgerUsage(now), Asks: d.ledgerAskReader()}) {
 		ready[entry.Item.ID] = entry.Why
@@ -206,10 +219,13 @@ func (d *Daemon) fillLedgerPage(view *ledgerPageView, board *ledger.Board, now t
 				r.Note, r.Reviewer = firstLine(item.Reason), name(item.Reviewer)
 				done = append(done, r)
 			}
-		case ledger.WorkBlocked:
+		case ledger.WorkInProgress, ledger.WorkInReview, ledger.WorkBlocked:
 			r := row(item)
-			r.Note = firstLine(item.Reason)
-			view.Work[string(item.State)] = append(view.Work[string(item.State)], r)
+			if item.State == ledger.WorkBlocked {
+				r.Note = firstLine(item.Reason)
+			}
+			r.Flight = reads.flight(board, item)
+			view.Board[r.Flight.Lane] = append(view.Board[r.Flight.Lane], r)
 		case ledger.WorkParked:
 			r := row(item)
 			if item.Park == nil {
@@ -227,7 +243,7 @@ func (d *Daemon) fillLedgerPage(view *ledgerPageView, board *ledger.Board, now t
 			}
 			r.Parked = &ledgerPageParked{Kind: string(item.Park.Kind), Why: firstLine(item.Park.Why), Revisit: item.Park.Revisit}
 			view.Work[string(item.State)] = append(view.Work[string(item.State)], r)
-		case ledger.WorkInProgress, ledger.WorkInReview, ledger.WorkOpen:
+		case ledger.WorkOpen:
 			view.Work[string(item.State)] = append(view.Work[string(item.State)], row(item))
 		}
 	}
@@ -236,6 +252,9 @@ func (d *Daemon) fillLedgerPage(view *ledgerPageView, board *ledger.Board, now t
 			slices.SortStableFunc(rows, byPriorityThenID)
 			continue
 		}
+		slices.SortStableFunc(rows, newestFirst)
+	}
+	for _, rows := range view.Board {
 		slices.SortStableFunc(rows, newestFirst)
 	}
 	slices.SortStableFunc(view.Ready, func(a, b ledgerPageRow) int { return ledger.CompareIDs(a.ID, b.ID) })
@@ -315,18 +334,41 @@ func (d *Daemon) ledgerPageEventsHandler(w http.ResponseWriter, r *http.Request)
 		key = registry.LedgerProjectKey(projectID)
 	}
 	hub := d.ledgerChanges()
-	id, wake, cancel := hub.subscribe(key)
+	id, ledgerWake, cancel := hub.subscribe(key)
 	defer cancel()
+	boardWake, unwatch := d.watchLedgerBoard(projectID)
+	defer unwatch()
 	sse.Open(w)
 	if sse.Flush(w) != nil {
 		return
 	}
+	ctx := r.Context()
+	wake := make(chan string, 1)
+	go func() {
+		for {
+			var version string
+			select {
+			case <-ctx.Done():
+				return
+			case <-ledgerWake:
+			case version = <-boardWake:
+			}
+			select {
+			case wake <- version:
+			default:
+			}
+		}
+	}()
 	authorized := func() bool { return d.apiEventStreamAuthorized(r) }
-	sse.Follow(r.Context(), w, wake, func(_ struct{}, open bool) bool {
+	sse.Follow(ctx, w, wake, func(boardVersion string, open bool) bool {
 		if !open || !authorized() {
 			return false
 		}
-		for _, change := range hub.take(id) {
+		changes := hub.take(id)
+		if len(changes) == 0 && boardVersion != "" {
+			changes = []ledgerChange{{ProjectKey: key, Version: boardVersion}}
+		}
+		for _, change := range changes {
 			writeLedgerChange(w, change)
 		}
 		return sse.Flush(w) == nil

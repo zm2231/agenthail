@@ -367,14 +367,28 @@ GET /api/v1/ledger/events                                   # ledger.changed, on
 
 ## The Work page
 
-Each project's view in the dashboard has a Work section: the project's ledger as the person reads it, without the ledger's own terms. It lists set-aside work that can come back now, with why (its revisit date came, usage is back, the person answered), the same items the backlog lists as ready and a coordinator is told of; then what is waiting on the person (open questions, and work parked on a question for them); then work in progress, in review, blocked, up next and set aside, each with its title, the first line of its description, the words of the person's it serves, and who holds it by alias. Below that, the last 20 items done in 30 days, with who checked each. Answering stays in Needs you. The page is read-only and follows the ledger's changes as they land.
+Each project's view in the dashboard has a Work section: the project's ledger as the person reads it, without the ledger's own terms. It opens with a board of the work in flight. Each item in progress, in review or blocked sits in exactly one lane, the first that matches:
+
+| Lane | When |
+|------|------|
+| Waiting on you | its holder has an open ask routed to the person |
+| CI failing | a PR the item's log names is open and its checks fail |
+| Waiting on CI | such a PR is open and its checks are still running |
+| In review | the item is in review |
+| Blocked | the item is blocked, or waits on an item not yet done |
+| Working now | its holder session is busy |
+| Held, not running | anything else |
+
+The Waiting on you lane also lists work parked on a question for the person. A card shows the item's title, its holder by alias with whether that session is working, idle or ended, its PR with checks and review, and how long it has been in its state (for an ask, since the ask was raised). Opened, it shows the asks, every PR with a link, why it is blocked or what it waits on, and the newest line of its log. An item is tied to a PR only by the `PR opened: <url>` line its holder's PR link writes to the item's log; a PR is never guessed from sharing a holder. Since any holder can write any log line, a URL counts only when this host has that PR linked, so a PR linked on a paired host shows on that host's page. Checks and review are this host's last read of the PR.
+
+Below the board come set-aside work that can come back now, with why (its revisit date came, usage is back, the person answered), the same items the backlog lists as ready and a coordinator is told of; then up next and set aside, each with its title, the first line of its description, the words of the person's it serves, and who holds it by alias. Last, the 20 most recent items done in 30 days, with who checked each. Answering stays in Needs you. The page is read-only. It follows the ledger's changes as they land, and a holder going busy or idle, a PR's checks or review, or an ask changing what the board shows, read at most once a second.
 
 The daemon builds the page in and serves it on its own local port, the way an extension's page is served, so the apps can show the same page inside a project. `GET /api/v1/extensions` names that port under `builtIn.ledger` (`port`, `entry`, `published`); it is not listed among the extensions, and no extension folder can be named `ledger`. On that port:
 
 ```
 GET /?project=<project id>                 # the page
-GET /ledger?project=<project id>           # what it shows, as JSON, with an ETag
-GET /events?project=<project id>           # ledger.changed for that project only
+GET /ledger?project=<project id>           # what it shows, as JSON, with an ETag; held items under board.<lane> with their flight
+GET /events?project=<project id>           # ledger.changed for that project only, also when its board changes
 ```
 
 The project id is any id the project list names the project by: a repository project's key, an added project's id, or one of its checkouts' `projectId` (`implicit:<folder>`, bare or with its host's id and `::` in front). The daemon looks a checkout's id up in the sessions it has seen there, on this host or a paired one, and finds the ledger the way sessions in that project do. A project with no ledger yet reads as an empty list. Like an extension page, the port answers only for this machine's own names, and asks for `read` scope. `GET /api/v1/extensions?host=<paired host>` gives a paired host's Work page a local port of this daemon's, as it does that host's extension pages, so a Mac can show the Work tab of a project on a server.
