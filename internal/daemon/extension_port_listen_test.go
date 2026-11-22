@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"log"
-	"net"
 	"os"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/extension"
 	"github.com/zm2231/agenthail/internal/nodehost"
@@ -44,24 +44,27 @@ func TestDaemonsOnOneComputerTakeTheirOwnPortsAndKeepThemAcrossARestart(t *testi
 		t.Fatalf("pages on %d and %d, want a port of each daemon's own", pageA.Port, pageB.Port)
 	}
 
-	a.extensions.mounts.close()
-	held, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(pageA.Port)))
-	if err != nil {
-		t.Fatal(err)
-	}
 	restarted, logged := pageDaemon(t, homeA)
 	for range 2 {
 		page := ledgerPageState(t, restarted)
 		if want := "port " + strconv.Itoa(pageA.Port) + " is in use by pid " + strconv.Itoa(os.Getpid()) + " ("; page.Port != pageA.Port || !strings.HasPrefix(page.Error, want) {
-			t.Fatalf("while another process holds its port the page is %+v, want port %d and an error starting %q", page, pageA.Port, want)
+			t.Fatalf("while another daemon holds its port the page is %+v, want port %d and an error starting %q", page, pageA.Port, want)
 		}
 	}
 	if got := strings.Count(logged.String(), "is held by pid "+strconv.Itoa(os.Getpid())); got != 1 {
 		t.Fatalf("the holder was logged %d times, want once:\n%s", got, logged.String())
 	}
-	held.Close()
-	if page := ledgerPageState(t, restarted); page.Port != pageA.Port || page.Error != "" {
-		t.Fatalf("once its port is free the page is %+v, want it back on %d", page, pageA.Port)
+	a.extensions.mounts.close()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		page := ledgerPageState(t, restarted)
+		if page.Port == pageA.Port && page.Error == "" {
+			break
+		}
+		if page.Port != pageA.Port || time.Now().After(deadline) {
+			t.Fatalf("once its port is free the page is %+v, want it back on %d", page, pageA.Port)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
