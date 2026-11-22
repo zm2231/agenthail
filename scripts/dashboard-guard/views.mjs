@@ -4,6 +4,8 @@ export const awaited = (page) => waits.get(page) ?? null;
 
 const waitFor = (page, selector, options) => (waits.set(page, selector), page.waitForSelector(selector, options));
 
+const waitOn = (page, selector, predicate) => (waits.set(page, selector), page.waitForFunction(predicate));
+
 const press = async (page, selector) => {
   await waitFor(page, selector, { visible: true });
   await page.$eval(selector, (element) => element.click());
@@ -16,8 +18,7 @@ const operations = (tab) => async (page) => {
 
 const openSession = async (page) => {
   await press(page, '#session-list [data-session="review"]');
-  waits.set(page, "#chat-body");
-  await page.waitForFunction(() => document.querySelector("#chat-body")?.textContent.includes("contrast target"));
+  await waitOn(page, "#chat-body", () => document.querySelector("#chat-body")?.textContent.includes("contrast target"));
   await waitFor(page, "#background-panel .background-card", { visible: true });
   await waitFor(page, "#request-panel:not([hidden])", { visible: true });
 };
@@ -73,7 +74,7 @@ export function onStep(listener) {
 export async function openView(page, dashboard, view) {
   await step(page, "open blank", () => page.goto("about:blank"));
   await step(page, "open load", () => page.goto(`${dashboard.url}/#${view.hash}`, { waitUntil: "load" }));
-  await step(page, "open connect", () => page.waitForFunction(() => document.querySelector("#daemon-status")?.textContent !== "Connecting"));
+  await step(page, "open connect", () => waitOn(page, "#daemon-status", () => document.querySelector("#daemon-status")?.textContent !== "Connecting"));
   await step(page, "open no transitions", () => page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; }" }));
   if (LOADED[view.dashboard]) await step(page, "open loaded", () => waitFor(page, LOADED[view.dashboard]));
   if (view.act) await step(page, "open act", () => view.act(page));
