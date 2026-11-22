@@ -688,8 +688,13 @@ func (d *Daemon) removeProject(ctx context.Context, projectID string, targets []
 		return actionResult{}, actionFailed(http.StatusConflict, "project_ambiguous", "project "+projectID+" names several added folders on this host: "+strings.Join(roots, ", ")+"; remove one by its id")
 	}
 	fallback := ""
-	if repository, _, err := projectresolve.ResolveCatalogRepository(ctx, added[0].WorkspaceRoot, nil); err == nil {
+	repository, notRepository, err := projectresolve.ResolveCatalogRepository(ctx, added[0].WorkspaceRoot, nil, projectAddGitTimeout)
+	switch {
+	case err == nil:
 		fallback = implicitProjectID(repository, added[0].WorkspaceRoot)
+	case notRepository || folderGone(added[0].WorkspaceRoot):
+	default:
+		return actionResult{}, invalidRequest("read repository for " + added[0].WorkspaceRoot + ": " + err.Error() + "; the project is still added")
 	}
 	outcome, err := d.Registry.RemoveProject(added[0].ID, fallback)
 	var handOver registry.ProjectHandOverError
@@ -702,6 +707,11 @@ func (d *Daemon) removeProject(ctx context.Context, projectID string, targets []
 	d.projectMovesApplied([]registry.ProjectMoveOutcome{outcome})
 	d.requestCatalogDiscovery()
 	return actionOK(map[string]any{"ok": true, "projectId": added[0].ID, "rootPath": added[0].WorkspaceRoot}), nil
+}
+
+func folderGone(path string) bool {
+	_, err := os.Stat(path)
+	return errors.Is(err, os.ErrNotExist)
 }
 
 // forwardProjectAction runs a project action on a paired host. A refusal is
@@ -783,6 +793,9 @@ func (d *Daemon) doSessionArchive(action, sessionID string) (actionResult, error
 // worktree is added at the same place in the main checkout, so the project
 // holds that folder in every worktree. A folder already added answers with
 // its project, unchanged, and created false.
+// The person waits on an add, so it may take longer than a discovery pass.
+var projectAddGitTimeout = 30 * time.Second
+
 func (d *Daemon) addProject(ctx context.Context, path, title string) (projectresolve.CatalogProject, bool, error) {
 	path, err := workspace.NormalizeCWD(path)
 	if err != nil || path == "" {
@@ -798,7 +811,7 @@ func (d *Daemon) addProject(ctx context.Context, path, title string) (projectres
 	if len(record.Title) > projectTitleLimit {
 		return projectresolve.CatalogProject{}, false, fmt.Errorf("a project name is 1 to %d characters", projectTitleLimit)
 	}
-	repository, notRepository, err := projectresolve.ResolveCatalogRepository(ctx, path, nil)
+	repository, notRepository, err := projectresolve.ResolveCatalogRepository(ctx, path, nil, projectAddGitTimeout)
 	inRepository := err == nil
 	switch {
 	case inRepository:

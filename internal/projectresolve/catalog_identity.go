@@ -170,7 +170,7 @@ func (c *CatalogIdentityCache) RootRepository(ctx context.Context, root string, 
 	if found && now.Sub(entry.resolvedAt) < catalogIdentityTTL && catalogConfigStamp(entry.gitDirs) == entry.gitStamp {
 		return entry.key, entry.repository, true
 	}
-	resolved, notRepository, err := ResolveCatalogRepository(ctx, root, c.repositories)
+	resolved, notRepository, err := ResolveCatalogRepository(ctx, root, c.repositories, CatalogIdentityGitTimeout)
 	if err != nil && !notRepository {
 		return "", nil, false
 	}
@@ -402,7 +402,7 @@ func resolveCatalogIdentity(ctx context.Context, path string, projects []registr
 func resolveUnlinkedCatalogIdentity(ctx context.Context, path string, projects []registry.ProjectRecord, repositories *CatalogRepositoryCache) (CatalogIdentity, catalogGitDirs, bool) {
 	identity := CatalogIdentity{Checkout: CatalogCheckout{ID: catalogPathID("checkout", path), Path: path}}
 	existing := nearestExistingDirectory(path)
-	repository, notRepository, err := ResolveCatalogRepository(ctx, existing, repositories)
+	repository, notRepository, err := ResolveCatalogRepository(ctx, existing, repositories, CatalogIdentityGitTimeout)
 	if err != nil && !notRepository {
 		identity.Problem = "repository identity is unavailable"
 		return identity, catalogGitDirs{}, true
@@ -549,7 +549,10 @@ func (repositories *CatalogRepositoryCache) repository(ctx context.Context, comm
 	if err != nil {
 		return nil, nil, err
 	}
-	roots := readCatalogRootCommits(ctx, commonDir)
+	roots, err := readCatalogRootCommits(ctx, commonDir)
+	if err != nil {
+		return nil, nil, err
+	}
 	if repositories != nil {
 		repositories.mu.Lock()
 		repositories.entries[commonDir] = catalogRepositoryEntry{repository: repository, rootCommits: roots, stamp: stamp}
@@ -558,14 +561,18 @@ func (repositories *CatalogRepositoryCache) repository(ctx context.Context, comm
 	return repository, roots, nil
 }
 
-func readCatalogRootCommits(ctx context.Context, commonDir string) []string {
+// A repository without commits has no roots; running out of time is an error.
+func readCatalogRootCommits(ctx context.Context, commonDir string) ([]string, error) {
 	output, err := CatalogGit(ctx, commonDir, "rev-list", "--max-parents=0", "HEAD")
 	if err != nil {
-		return nil
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		return nil, nil
 	}
 	roots := strings.Fields(output)
 	slices.Sort(roots)
-	return roots
+	return roots, nil
 }
 
 // readCatalogRepository reads the remote that names the repository: origin,
@@ -616,13 +623,25 @@ func nearestExistingDirectory(path string) string {
 // checkout: the parent of a ".git" common directory, the checkout itself
 // when it owns its git directory (a submodule), and the common directory of
 // a bare repository.
-func ResolveCatalogRepository(ctx context.Context, path string, repositories *CatalogRepositoryCache) (repository CatalogRepository, notRepository bool, err error) {
-	gitCtx, cancel := context.WithTimeout(ctx, CatalogIdentityGitTimeout)
+func ResolveCatalogRepository(ctx context.Context, path string, repositories *CatalogRepositoryCache, budget time.Duration) (repository CatalogRepository, notRepository bool, err error) {
+	gitCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
+	defer func() {
+		var gitErr *catalogGitError
+		if err != nil && ctx.Err() == nil && errors.Is(gitCtx.Err(), context.DeadlineExceeded) && errors.As(err, &gitErr) {
+			err = &CatalogGitTimeoutError{Path: path, Budget: budget, Step: strings.Join(gitErr.args, " ")}
+		}
+	}()
 	toplevel, err := CatalogGit(gitCtx, path, "rev-parse", "--show-toplevel")
-	if err != nil && isCatalogBare(gitCtx, path, err) {
-		repository.Bare = true
-		toplevel, err = CatalogGit(gitCtx, path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		bare, bareErr := isCatalogBare(gitCtx, path, err)
+		switch {
+		case bareErr != nil:
+			err = bareErr
+		case bare:
+			repository.Bare = true
+			toplevel, err = CatalogGit(gitCtx, path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		}
 	}
 	if err != nil {
 		return CatalogRepository{}, isCatalogNonGit(err), err
@@ -750,6 +769,18 @@ func catalogPathID(prefix, path string) string {
 	return prefix + "-" + hex.EncodeToString(digest[:12])
 }
 
+// CatalogGitTimeoutError is a repository lookup that ran out of time, which
+// git itself reports only as being killed.
+type CatalogGitTimeoutError struct {
+	Path   string
+	Budget time.Duration
+	Step   string
+}
+
+func (e *CatalogGitTimeoutError) Error() string {
+	return fmt.Sprintf("git took longer than %s reading %s (git %s)", e.Budget, e.Path, e.Step)
+}
+
 type catalogGitError struct {
 	args   []string
 	stderr string
@@ -773,13 +804,16 @@ func isCatalogNoMatch(err error) bool {
 // isCatalogBare reports that git refused --show-toplevel because path is in
 // a bare repository, which has no work tree; its common directory stands in
 // for the checkout root.
-func isCatalogBare(ctx context.Context, path string, err error) bool {
+func isCatalogBare(ctx context.Context, path string, err error) (bool, error) {
 	var gitErr *catalogGitError
 	if !errors.As(err, &gitErr) || !strings.Contains(gitErr.stderr, "must be run in a work tree") {
-		return false
+		return false, nil
 	}
 	bare, bareErr := CatalogGit(ctx, path, "rev-parse", "--is-bare-repository")
-	return bareErr == nil && bare == "true"
+	if bareErr != nil && ctx.Err() != nil {
+		return false, bareErr
+	}
+	return bareErr == nil && bare == "true", nil
 }
 
 // isCatalogNonGit reports git's answer that the folder is outside any

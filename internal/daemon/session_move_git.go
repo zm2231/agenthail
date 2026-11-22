@@ -32,7 +32,7 @@ type moveCheckout struct {
 func sourceCheckout(ctx context.Context, cwd string) (moveCheckout, error) {
 	ctx, cancel := context.WithTimeout(ctx, moveGitTimeout)
 	defer cancel()
-	repository, notRepository, err := projectresolve.ResolveCatalogRepository(ctx, cwd, nil)
+	repository, notRepository, err := projectresolve.ResolveCatalogRepository(ctx, cwd, nil, moveGitTimeout)
 	if notRepository {
 		return moveCheckout{}, fmt.Errorf("%s is not in a git repository; only a session in a repository with a remote can move", cwd)
 	}
@@ -122,9 +122,7 @@ func (d *Daemon) repositoryCheckouts(ctx context.Context, canonical string) ([]s
 		if info, err := os.Stat(candidate); err != nil || !info.IsDir() {
 			continue
 		}
-		gitCtx, cancel := context.WithTimeout(ctx, projectresolve.CatalogIdentityGitTimeout)
-		repository, _, err := projectresolve.ResolveCatalogRepository(gitCtx, candidate, nil)
-		cancel()
+		repository, _, err := projectresolve.ResolveCatalogRepository(ctx, candidate, nil, projectresolve.CatalogIdentityGitTimeout)
 		if err != nil || repository.Bare || repository.Repository == nil || repository.Repository.CanonicalKey != canonical {
 			continue
 		}
