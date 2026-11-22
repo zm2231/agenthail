@@ -45,6 +45,7 @@ struct ClaudeCompactSettings: View {
             ClaudeCompactToggle(title: "Idle compaction", value: $store.draft.idle)
             ClaudeCompactToggle(title: "Agenthail idle compaction", value: $store.draft.agenthailIdle)
             TextField("From context size", text: $store.draft.minTokens, prompt: Text("tokens, 200000 by default"))
+            TextField("Before a usage limit, from", text: $store.draft.preLimit, prompt: Text("percent, 90 by default, or off"))
             HStack {
                 if let problem = store.draft.problem ?? store.saveError {
                     Text(problem).foregroundStyle(DesktopPalette.failed).textSelection(.enabled)
@@ -86,6 +87,9 @@ private struct ClaudeCompactRootFacts: View {
         LabeledContent("Autocompact", value: ClaudeCompactFacts.toggle(root.autoCompactEnabled))
         LabeledContent("Idle compaction", value: ClaudeCompactFacts.toggle(root.idleCompaction))
         LabeledContent("Agenthail idle compaction", value: ClaudeCompactFacts.agenthailIdle(root.agenthailIdleCompaction))
+        if let preLimit = ClaudeCompactFacts.preLimit(root.agenthailIdleCompaction) {
+            LabeledContent("Before a usage limit", value: preLimit)
+        }
         ForEach(ClaudeCompactFacts.overrideLines(root), id: \.self) { line in
             Text(line)
                 .font(.system(size: DesktopType.secondary))

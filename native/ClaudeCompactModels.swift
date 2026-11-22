@@ -9,6 +9,7 @@ struct ClaudeCompactWindow: Decodable, Equatable {
 struct ClaudeIdleCompaction: Decodable, Equatable {
     let enabled: Bool
     let minContextTokens: Int64
+    var preLimitPercent: Int?
 }
 
 struct ClaudeCompactRoot: Decodable, Identifiable, Equatable {
