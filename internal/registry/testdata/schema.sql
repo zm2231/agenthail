@@ -7,6 +7,7 @@
 -- migration 2026-11-22-pending-launch-creator
 -- migration 2026-11-22-signing-keys-for-hosts
 -- migration 2026-11-22-signing-keys-sign-handovers
+-- migration 2026-11-22-work-item-for-session-prs
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -1100,6 +1101,8 @@ CREATE TABLE session_prs (
 	read_failures INTEGER NOT NULL DEFAULT 0,
 	last_read_at_ms INTEGER NOT NULL DEFAULT 0,
 	linked_at_ms INTEGER NOT NULL,
+	item_id TEXT NOT NULL DEFAULT '',
+	item_from TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, repo, number)
 );
 
@@ -1594,7 +1597,7 @@ BEGIN
 END;
 
 -- trigger catalog_presentation_version_session_prs_update
-CREATE TRIGGER catalog_presentation_version_session_prs_update AFTER UPDATE OF session_id,repo,number,url,source,unlinked,watch,title,state,head_sha,mergeable,review,checks,read_failures,linked_at_ms ON session_prs WHEN (NEW.unlinked=0 OR OLD.unlinked=0) AND (NEW.session_id IS NOT OLD.session_id OR NEW.repo IS NOT OLD.repo OR NEW.number IS NOT OLD.number OR NEW.url IS NOT OLD.url OR NEW.source IS NOT OLD.source OR NEW.unlinked IS NOT OLD.unlinked OR NEW.watch IS NOT OLD.watch OR NEW.title IS NOT OLD.title OR NEW.state IS NOT OLD.state OR NEW.head_sha IS NOT OLD.head_sha OR NEW.mergeable IS NOT OLD.mergeable OR NEW.review IS NOT OLD.review OR NEW.checks IS NOT OLD.checks OR (NEW.read_failures>=3) IS NOT (OLD.read_failures>=3) OR NEW.linked_at_ms IS NOT OLD.linked_at_ms)
+CREATE TRIGGER catalog_presentation_version_session_prs_update AFTER UPDATE OF session_id,repo,number,url,source,unlinked,watch,title,state,head_sha,mergeable,review,checks,read_failures,linked_at_ms,item_id,item_from ON session_prs WHEN (NEW.unlinked=0 OR OLD.unlinked=0) AND (NEW.session_id IS NOT OLD.session_id OR NEW.repo IS NOT OLD.repo OR NEW.number IS NOT OLD.number OR NEW.url IS NOT OLD.url OR NEW.source IS NOT OLD.source OR NEW.unlinked IS NOT OLD.unlinked OR NEW.watch IS NOT OLD.watch OR NEW.title IS NOT OLD.title OR NEW.state IS NOT OLD.state OR NEW.head_sha IS NOT OLD.head_sha OR NEW.mergeable IS NOT OLD.mergeable OR NEW.review IS NOT OLD.review OR NEW.checks IS NOT OLD.checks OR (NEW.read_failures>=3) IS NOT (OLD.read_failures>=3) OR NEW.linked_at_ms IS NOT OLD.linked_at_ms OR NEW.item_id IS NOT OLD.item_id OR NEW.item_from IS NOT OLD.item_from)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;

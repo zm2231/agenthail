@@ -18,6 +18,12 @@ const (
 	PRSourcePerson  = "person"
 )
 
+// Where a linked pull request's work item came from.
+const (
+	PRItemNamed          = "named"
+	PRItemOnlyInProgress = "only-in-progress"
+)
+
 type SessionPR struct {
 	SessionID  string
 	Repo       string
@@ -33,6 +39,10 @@ type SessionPR struct {
 	Checks     string
 	LastReadAt time.Time
 	LinkedAt   time.Time
+	// ItemID is the one work item the pull request is for, or empty when
+	// none was named and the session had no single item in progress.
+	ItemID   string
+	ItemFrom string
 
 	FailedChecks   []string
 	PassedHead     string
@@ -90,19 +100,35 @@ func jsonList(values []string) (string, error) {
 // LinkPR records a pull request for a session. An explicit link restores one
 // that was unlinked; a found one (created or branch) never does, so the
 // person's unlink holds. False when the session already had it linked.
+// A restored link keeps its item unless the new link names one.
 func (r *Registry) LinkPR(link SessionPR, explicit bool, at time.Time) (bool, error) {
-	result, err := r.db.Exec(`INSERT INTO session_prs(session_id,repo,number,url,source,title,state,head_sha,linked_at_ms) VALUES(?,?,?,?,?,?,?,?,?)
+	result, err := r.db.Exec(`INSERT INTO session_prs(session_id,repo,number,url,source,title,state,head_sha,linked_at_ms,item_id,item_from) VALUES(?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(session_id,repo,number) DO UPDATE SET unlinked=0,watch=1,wakes=wakes+1,comment_wakes=0,source=excluded.source,url=excluded.url,linked_at_ms=excluded.linked_at_ms,
+	item_from=CASE WHEN excluded.item_id<>'' THEN excluded.item_from ELSE item_from END,
+	item_id=CASE WHEN excluded.item_id<>'' THEN excluded.item_id ELSE item_id END,
 	title=CASE WHEN excluded.title<>'' THEN excluded.title ELSE title END,
 	state=CASE WHEN excluded.state<>'' THEN excluded.state ELSE state END,
 	head_sha=CASE WHEN excluded.head_sha<>'' THEN excluded.head_sha ELSE head_sha END
 WHERE unlinked=1 AND ?`,
-		link.SessionID, link.Repo, link.Number, link.URL, link.Source, link.Title, link.State, link.HeadSHA, at.UnixMilli(), explicit)
+		link.SessionID, link.Repo, link.Number, link.URL, link.Source, link.Title, link.State, link.HeadSHA, at.UnixMilli(), link.ItemID, link.ItemFrom, explicit)
 	if err != nil {
 		return false, err
 	}
 	linked, err := result.RowsAffected()
 	return linked == 1, err
+}
+
+// SetPRItem names the work item a linked pull request is for. False when the
+// pull request is not linked or already names that item by name. It moves
+// wakes, so a read begun for the old item is dropped and never logs to it.
+func (r *Registry) SetPRItem(sessionID, repo string, number int, itemID string) (bool, error) {
+	result, err := r.db.Exec(`UPDATE session_prs SET item_id=?1,item_from=?2,wakes=wakes+1 WHERE session_id=?3 AND repo=?4 AND number=?5 AND unlinked=0 AND (item_id<>?1 OR item_from<>?2)`,
+		itemID, PRItemNamed, sessionID, repo, number)
+	if err != nil {
+		return false, err
+	}
+	changed, err := result.RowsAffected()
+	return changed == 1, err
 }
 
 // UnlinkPR hides a session's pull request and stops watching it; the row
@@ -161,10 +187,10 @@ func (r *Registry) SessionHasPRIn(sessionID, repo string) (bool, error) {
 
 // presentationPRColumns are the session_prs columns a session row shows or
 // orders by; changing one moves the presentation version.
-const presentationPRColumns = "session_id,repo,number,url,source,unlinked,watch,title,state,head_sha,mergeable,review,checks,read_failures,linked_at_ms"
+const presentationPRColumns = "session_id,repo,number,url,source,unlinked,watch,title,state,head_sha,mergeable,review,checks,read_failures,linked_at_ms,item_id,item_from"
 
 func presentationPRs(ctx context.Context, tx *sql.Tx) (map[string][]SessionPR, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT session_id,repo,number,url,source,watch,title,state,head_sha,mergeable,review,checks,CASE WHEN read_failures>=? THEN read_failures ELSE 0 END FROM session_prs WHERE unlinked=0 ORDER BY linked_at_ms,repo,number`, PRReadFailureLimit)
+	rows, err := tx.QueryContext(ctx, `SELECT session_id,repo,number,url,source,watch,title,state,head_sha,mergeable,review,checks,CASE WHEN read_failures>=? THEN read_failures ELSE 0 END,item_id,item_from FROM session_prs WHERE unlinked=0 ORDER BY linked_at_ms,repo,number`, PRReadFailureLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +198,7 @@ func presentationPRs(ctx context.Context, tx *sql.Tx) (map[string][]SessionPR, e
 	out := map[string][]SessionPR{}
 	for rows.Next() {
 		var pr SessionPR
-		if err := rows.Scan(&pr.SessionID, &pr.Repo, &pr.Number, &pr.URL, &pr.Source, &pr.Watch, &pr.Title, &pr.State, &pr.HeadSHA, &pr.Mergeable, &pr.Review, &pr.Checks, &pr.ReadFailures); err != nil {
+		if err := rows.Scan(&pr.SessionID, &pr.Repo, &pr.Number, &pr.URL, &pr.Source, &pr.Watch, &pr.Title, &pr.State, &pr.HeadSHA, &pr.Mergeable, &pr.Review, &pr.Checks, &pr.ReadFailures, &pr.ItemID, &pr.ItemFrom); err != nil {
 			return nil, err
 		}
 		out[pr.SessionID] = append(out[pr.SessionID], pr)
@@ -182,7 +208,7 @@ func presentationPRs(ctx context.Context, tx *sql.Tx) (map[string][]SessionPR, e
 
 func (r *Registry) sessionPRs(where string, args ...any) ([]SessionPR, error) {
 	rows, err := r.read.Query(`SELECT session_id,repo,number,url,source,watch,title,state,head_sha,mergeable,review,checks,last_read_at_ms,linked_at_ms,
-	failed_checks,passed_head,conflict_head,remarks_through_ms,remark_ids,wakes,comment_wakes,read_failures FROM session_prs `+where+` ORDER BY linked_at_ms,repo,number`, args...)
+	failed_checks,passed_head,conflict_head,remarks_through_ms,remark_ids,wakes,comment_wakes,read_failures,item_id,item_from FROM session_prs `+where+` ORDER BY linked_at_ms,repo,number`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +219,7 @@ func (r *Registry) sessionPRs(where string, args ...any) ([]SessionPR, error) {
 		var read, linked, through int64
 		var failed, remarks string
 		if err := rows.Scan(&pr.SessionID, &pr.Repo, &pr.Number, &pr.URL, &pr.Source, &pr.Watch, &pr.Title, &pr.State, &pr.HeadSHA, &pr.Mergeable, &pr.Review, &pr.Checks, &read, &linked,
-			&failed, &pr.PassedHead, &pr.ConflictHead, &through, &remarks, &pr.Wakes, &pr.CommentWakes, &pr.ReadFailures); err != nil {
+			&failed, &pr.PassedHead, &pr.ConflictHead, &through, &remarks, &pr.Wakes, &pr.CommentWakes, &pr.ReadFailures, &pr.ItemID, &pr.ItemFrom); err != nil {
 			return nil, err
 		}
 		for raw, list := range map[string]*[]string{failed: &pr.FailedChecks, remarks: &pr.RemarkIDs} {

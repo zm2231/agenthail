@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const prUsage = `usage: agenthail pr <link|unlink|watch|unwatch> <url|number> [--repo <owner/name>] [--session <target>] [--json]`
+const prUsage = `usage: agenthail pr <link|unlink|watch|unwatch> <url|number> [--repo <owner/name>] [--item <work item>] [--session <target>] [--json]`
 
 type prAnswer struct {
 	OK        bool   `json:"ok"`
@@ -45,6 +45,9 @@ func (a *App) cmdPR(args []string) error {
 	request := map[string]any{"action": "pr", "sessionId": id, "op": positional[0], "pr": positional[1]}
 	if repo := flagVal(args, "--repo"); repo != "" {
 		request["repo"] = repo
+	}
+	if item := flagVal(args, "--item"); item != "" {
+		request["item"] = item
 	}
 	var answer prAnswer
 	if err := projectAction(ctx, client, request, &answer); err != nil {

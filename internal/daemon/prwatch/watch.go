@@ -40,9 +40,12 @@ type Host interface {
 	// RowsChanged republishes session rows whose pull request problem changed.
 	RowsChanged()
 	Display(sessionID string) string
-	// LogHeldWork logs a line to the work the session holds, marked as written
-	// by the PR watcher, a source no request can set.
-	LogHeldWork(sessionID, line string)
+	// LogItem logs a line to one work item the session holds, marked as
+	// written by the PR watcher, a source no request can set.
+	LogItem(sessionID, itemID, line string)
+	// OnlyActiveItem is the session's one work item in progress, or empty when
+	// it has none or several.
+	OnlyActiveItem(sessionID string) string
 	SettleWork(sessionID, reason string)
 	LatestTimeline(ctx context.Context, session *surface.Session, adapter surface.Surface, timeout time.Duration) ([]surface.TimelineItem, error)
 	// TimelineText is an item's whole text, read from its stored body when the
@@ -177,7 +180,7 @@ func (w *Watcher) Watch(ctx context.Context, now time.Time) error {
 				w.wake(verdict.row, verdict.reasons)
 			}
 			if line := outcomeLine(row, verdict.row); line != "" {
-				w.host.LogHeldWork(row.SessionID, line)
+				w.host.LogItem(row.SessionID, row.ItemID, line)
 			}
 			if verdict.merged {
 				w.settleMerged(row.SessionID, status.HeadRef)

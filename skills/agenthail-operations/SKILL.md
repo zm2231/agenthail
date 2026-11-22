@@ -579,7 +579,11 @@ With Agenthail's tools, the same calls are `agenthail_ledger_read`
 a log also takes `text` and `logType`). Claim before you work, so two
 sessions do not pick up the same item. Log as you go: each decision and why,
 blockers, the PR when you open it, test and review results, and what is left.
-The next session on the item reads only its log. Submit only claimed work;
+The next session on the item reads only its log. A linked PR is logged to
+one item: the one you name with `agenthail pr link <pr> --item <item>` (or
+`item` on `agenthail_pr`), else your only item in progress, else none. When
+you hold more than one item in progress, link each PR with its item, or its
+merge is recorded nowhere. Submit only claimed work;
 the reviewer, usually your coordinator, moves it to done. Work that will not
 be done is closed with a reason (`agenthail ledger close <item> --reason
 "obsolete: ..."`), and work that must wait is parked with why.

@@ -30,8 +30,9 @@ const (
 	HolderUnknown  = "unknown"
 )
 
-// WorkSourcePRWatcher marks the logs the daemon's PR watcher writes.
-const WorkSourcePRWatcher = "pr-watcher"
+// WorkSourcePRItem marks the logs the daemon's PR watcher writes to the one
+// item a pull request was linked for; only these prove the item merged.
+const WorkSourcePRItem = "pr-item"
 
 const prMergedPrefix = "PR merged: "
 
@@ -103,7 +104,7 @@ func (b *Board) planWorkTakeover(req WorkRequest) (EventType, any, string, error
 func mergedPR(item *WorkItem) string {
 	for i := len(item.Timeline) - 1; i >= 0; i-- {
 		e := item.Timeline[i]
-		if e.Kind == "log" && e.Source == WorkSourcePRWatcher && strings.HasPrefix(e.Text, prMergedPrefix) {
+		if e.Kind == "log" && e.Source == WorkSourcePRItem && strings.HasPrefix(e.Text, prMergedPrefix) {
 			return strings.TrimPrefix(e.Text, prMergedPrefix)
 		}
 	}

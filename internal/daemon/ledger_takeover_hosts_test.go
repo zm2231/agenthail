@@ -22,7 +22,7 @@ func TestATakeoverAcrossHostsAsksTheHoldersHostAndFinishesOnTheWatchersMergedLin
 	mustLedger(t, owner, "/api/v1/ledger/work", ledger.WorkRequest{ProjectKey: widgetKey, SessionID: "remote-b", Action: ledger.WorkClaim, ItemID: "widget-W2"}, nil)
 
 	url := "https://github.com/example/widget/pull/7"
-	typed := map[string]any{"projectKey": widgetKey, "sessionId": "local-a", "action": "log", "itemId": "widget-W1", "text": "PR merged: " + url, "source": ledger.WorkSourcePRWatcher}
+	typed := map[string]any{"projectKey": widgetKey, "sessionId": "local-a", "action": "log", "itemId": "widget-W1", "text": "PR merged: " + url, "source": ledger.WorkSourcePRItem}
 	if code, body := ledgerRequest(t, mac, "/api/v1/ledger/work", typed); code == 200 || !strings.Contains(body, "source") {
 		t.Fatalf("a typed log claiming the watcher as its source = %d %s", code, body)
 	}
@@ -44,7 +44,7 @@ func TestATakeoverAcrossHostsAsksTheHoldersHostAndFinishesOnTheWatchersMergedLin
 		return out
 	}
 	owner.gate.proxyDown.Store(true)
-	prHost{mac.daemon}.LogHeldWork("local-a", "PR merged: "+url)
+	prHost{mac.daemon}.LogItem("local-a", "widget-W1", "PR merged: "+url)
 	if got := sources(); len(got) != 1 {
 		t.Fatalf("the owner took the watcher's log while down: sources %q", got)
 	}
@@ -52,14 +52,14 @@ func TestATakeoverAcrossHostsAsksTheHoldersHostAndFinishesOnTheWatchersMergedLin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pending) != 1 || pending[0].Type != ledger.EventWorkLog || !strings.Contains(string(pending[0].Payload), ledger.WorkSourcePRWatcher) {
+	if len(pending) != 1 || pending[0].Type != ledger.EventWorkLog || !strings.Contains(string(pending[0].Payload), ledger.WorkSourcePRItem) {
 		t.Fatalf("the mac keeps %+v to replay; want the watcher's log, stored", pending)
 	}
 	owner.gate.proxyDown.Store(false)
 	testkit.Eventually(t, "the watcher's log replays to the owner once it is back", 30*time.Second, func() bool {
 		return len(sources()) == 2
 	})
-	if got := sources(); got[0] != "" || got[1] != ledger.WorkSourcePRWatcher {
+	if got := sources(); got[0] != "" || got[1] != ledger.WorkSourcePRItem {
 		t.Fatalf("the owner holds logs from sources %q; want a typed one and the watcher's", got)
 	}
 

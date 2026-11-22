@@ -19,13 +19,17 @@ type View struct {
 	Review    string `json:"review,omitempty"`
 	Checks    string `json:"checks,omitempty"`
 	Problem   string `json:"problem,omitempty"`
+	// Item is the work item the pull request is logged to; ItemFrom says
+	// whether the link named it or it was the session's only item in progress.
+	Item     string `json:"item,omitempty"`
+	ItemFrom string `json:"itemFrom,omitempty"`
 }
 
 func (w *Watcher) Views(prs []registry.SessionPR) []View {
 	views := make([]View, 0, len(prs))
 	for _, pr := range prs {
 		views = append(views, View{Repo: pr.Repo, Number: pr.Number, URL: pr.URL, Source: pr.Source, Watch: pr.Watch, Title: pr.Title, State: pr.State, HeadSHA: pr.HeadSHA,
-			Mergeable: pr.Mergeable, Review: pr.Review, Checks: pr.Checks, Problem: w.Problem(pr)})
+			Mergeable: pr.Mergeable, Review: pr.Review, Checks: pr.Checks, Problem: w.Problem(pr), Item: pr.ItemID, ItemFrom: pr.ItemFrom})
 	}
 	return views
 }
