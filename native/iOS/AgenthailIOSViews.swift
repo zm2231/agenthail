@@ -2023,6 +2023,9 @@ struct IOSSessionRow: View {
             } else if kind == .working, let activity = session.activity {
                 PhoneWorkingNote(activity: activity)
             }
+            if let held = HeldWorkLine.of(session) {
+                PhoneHeldWorkLine(line: held).accessibilityIdentifier("session-held-work-" + session.id)
+            }
             if session.queueCount > 0 || session.isReadOnly || (family?.workingSubagents ?? 0) > 0 || (family?.workers?.count ?? 0) > 0 || !session.sharedHolders.isEmpty {
                 layout {
                     if let family, family.workingSubagents > 0 {

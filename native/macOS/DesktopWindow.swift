@@ -510,12 +510,15 @@ struct SessionRowView: View {
             VStack(alignment: .leading, spacing: 2) {
                 titleLine(kind: kind)
                 detailLine(kind: kind)
+                if let held = HeldWorkLine.of(session) {
+                    HeldWorkRowLine(line: held)
+                }
             }
         }
         .font(.system(size: DesktopType.body))
         .padding(.leading, 6)
         .accessibilityElement(children: .combine)
-        .accessibilityValue(needsYou ? "Needs you · \(SessionFacts.rowDetail(session))" : SessionFacts.rowDetail(session))
+        .accessibilityValue(([needsYou ? "Needs you" : nil, SessionFacts.rowDetail(session), HeldWorkLine.of(session)?.spoken].compactMap { $0 }).joined(separator: " · "))
         .help(SessionFacts.rowDetail(session))
     }
 

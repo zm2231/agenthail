@@ -37,6 +37,7 @@ targets:
           touch "$DERIVED_FILE_DIR/debug-local-networking.stamp"
     sources:
       - path: AgenthailModels.swift
+      - path: HeldWorkLine.swift
       - path: LaunchSettings.swift
       - path: SessionTurnSettings.swift
       - path: PersonMessageNote.swift
