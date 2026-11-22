@@ -26,14 +26,26 @@ jobs:
       pull-requests: read
     outputs:
       full: ${{ steps.full.outputs.full }}
+      package: ${{ steps.package.outputs.package }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - id: full
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ github.head_ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: scripts/ci-full-gate.sh
+      - id: package
+        name: Decide whether the package inputs changed
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          STACKED: ${{ github.event.pull_request.stack != null }}
+          STACK_BASE_REF: ${{ github.event.pull_request.stack.base.ref }}
+        run: scripts/ci-package-inputs.sh
 
   verify:
     needs: gate
@@ -167,6 +179,7 @@ jobs:
           scripts/test-ci-concurrently.sh
           scripts/test-ci-full-label.sh
           scripts/test-ci-go-select.sh
+          scripts/test-ci-package-inputs.sh
           scripts/test-ci-failure-issue.sh
           scripts/test-ios-ui-tests.sh
           scripts/ios-ui-tests.sh check
@@ -464,7 +477,7 @@ jobs:
 
   package:
     needs: gate
-    if: ${{ needs.gate.outputs.full == 'true' }}
+    if: ${{ needs.gate.outputs.full == 'true' && needs.gate.outputs.package == 'true' }}
     runs-on: macos-26
     timeout-minutes: 60
     steps:
