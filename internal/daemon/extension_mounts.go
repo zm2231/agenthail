@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,7 +23,7 @@ import (
 const extensionMountSyncEvery = 10 * time.Second
 
 var (
-	extensionPortBase  = defaultExtensionPortBase
+	extensionPortBase  = 0
 	extensionPortCount = 200
 )
 
@@ -222,6 +221,10 @@ func (d *Daemon) syncExtensionMounts() error {
 			continue
 		}
 		if served == nil {
+			if d.extensionPortsOff {
+				errs[key] = extensionPortsOffError
+				continue
+			}
 			var err error
 			if served, err = d.listenMount(key, ports); err != nil {
 				errs[key] = err.Error()
@@ -282,21 +285,17 @@ func (d *Daemon) syncExtensionMounts() error {
 
 func (d *Daemon) listenMount(key string, ports map[string]extension.MountPort) (*servedMount, error) {
 	id, name, _ := strings.Cut(key, "/")
-	var listener net.Listener
-	assigned, ok := ports[key]
-	if ok {
-		var err error
-		if listener, err = net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(assigned.Port))); err != nil {
-			return nil, fmt.Errorf("port %d: %w", assigned.Port, err)
-		}
-	} else {
-		var err error
-		if listener, err = listenFreeMountPort(ports); err != nil {
-			return nil, err
-		}
-		assigned = extension.MountPort{Port: listener.Addr().(*net.TCPAddr).Port}
-		ports[key] = assigned
+	taken := map[int]bool{}
+	for _, assigned := range ports {
+		taken[assigned.Port] = true
 	}
+	assigned := ports[key]
+	listener, port, err := d.listenExtensionPort(key, assigned.Port, extensionPortBase, extensionPortCount, taken)
+	if err != nil {
+		return nil, err
+	}
+	assigned.Port = port
+	ports[key] = assigned
 	ctx, cancel := context.WithCancel(context.Background())
 	served := &servedMount{id: id, name: name, port: assigned.Port, cancel: cancel}
 	served.server = &http.Server{
@@ -313,25 +312,6 @@ func (d *Daemon) listenMount(key string, ports map[string]extension.MountPort) (
 		}
 	}()
 	return served, nil
-}
-
-func listenFreeMountPort(ports map[string]extension.MountPort) (net.Listener, error) {
-	if extensionPortBase == 0 {
-		return net.Listen("tcp", "127.0.0.1:0")
-	}
-	taken := map[int]bool{}
-	for _, assigned := range ports {
-		taken[assigned.Port] = true
-	}
-	for port := extensionPortBase; port < extensionPortBase+extensionPortCount; port++ {
-		if taken[port] {
-			continue
-		}
-		if listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port))); err == nil {
-			return listener, nil
-		}
-	}
-	return nil, fmt.Errorf("no free port from %d to %d", extensionPortBase, extensionPortBase+extensionPortCount-1)
 }
 
 // A mount that is not served, or any mount while remote access is off, has

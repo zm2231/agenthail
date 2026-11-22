@@ -25,9 +25,6 @@ import (
 func ledgerPageDaemon(t *testing.T) (*Daemon, ledgerProject, http.Handler, string) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	previous := extensionPortBase
-	extensionPortBase = 0
-	t.Cleanup(func() { extensionPortBase = previous })
 	d, r, handler := ledgerDaemon(t)
 	home := extensionTestHome(t)
 	d.SetExtensionHost(home, func() (nodehost.Launch, error) {

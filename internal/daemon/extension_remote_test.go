@@ -119,9 +119,6 @@ type remoteExtensionFixture struct {
 func newRemoteExtensionFixture(t *testing.T) *remoteExtensionFixture {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	previous := remoteExtensionPortBase
-	remoteExtensionPortBase = 0
-	t.Cleanup(func() { remoteExtensionPortBase = previous })
 	f := &remoteExtensionFixture{}
 	f.remote = newFederationNode(t, "remote-a")
 	f.board, f.notes = startRemoteApp(t, f.remote, "board"), startRemoteApp(t, f.remote, "notes")
@@ -379,7 +376,7 @@ func TestAFullRemotePoolRefusesTheEntryAndKeepsTheOthers(t *testing.T) {
 	remoteExtensionPortBase = free.Addr().(*net.TCPAddr).Port
 	_ = free.Close()
 	remoteExtensionPortCount = 1
-	t.Cleanup(func() { remoteExtensionPortCount = 200 })
+	t.Cleanup(func() { remoteExtensionPortBase, remoteExtensionPortCount = 0, 200 })
 	view := f.view(t)
 	page, mount := view.Extensions[0].Page, view.Extensions[1].Mounts[0]
 	served := 0
@@ -586,9 +583,6 @@ func TestAPairedHostCannotPointOneEntrysPortAtAnother(t *testing.T) {
 
 func TestAPairedHostsKeyedMountGetsItsKeyThroughTheLocalPortAndNoOtherBearerCrosses(t *testing.T) {
 	f := newRemoteExtensionFixture(t)
-	previous := extensionPortBase
-	extensionPortBase = 0
-	t.Cleanup(func() { extensionPortBase = previous })
 	upstream, seen := startUpstream(t)
 	remote := f.remote.daemon
 	home := t.TempDir()

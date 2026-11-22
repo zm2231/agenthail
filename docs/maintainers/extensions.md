@@ -138,8 +138,8 @@ the dashboard. The dashboard's own pages still refuse every frame.
 
 ## The page's own origin
 
-Each extension with a page gets a port of its own on `127.0.0.1`, from the
-pool mounts use (7420 to 7619), kept in
+Each extension with a page gets a port of its own on `127.0.0.1`, assigned
+the way a mount's is (below), kept in
 `~/.agenthail/extensions-data/mounts.json` under the extension's id while it
 has a page. Ports are origins, so the browser keeps a page from reading
 another extension's routes, the dashboard's API, or a mount. The dashboard's
@@ -149,12 +149,34 @@ like a mount's. The extensions view gives each page as `{port, entry,
 published}`, the shape of a mount, so the dashboard and the apps build both
 URLs the same way and refuse an unpublished one over https.
 
-`AGENTHAIL_EXTENSION_PORT_BASE` moves this pool and
-`AGENTHAIL_REMOTE_EXTENSION_PORT_BASE` moves the pool for paired hosts'
-entries (7620 to 7819, below). Each pool keeps its 200 ports. The daemon reads
-both when it starts and falls back to the default, with a log line, for a
-value that is not a number, does not fit between 1024 and 65535, covers the
-dashboard's port, or overlaps the other pool.
+### Which port
+
+A page, a mount or a paired host's entry gets its port the first time it is
+served, and keeps it: the daemon records it and binds the same port after every
+restart, so the origin, and whatever the browser keeps for it, stays put. The
+dashboard and the apps build each URL from the port the extensions view gives,
+so they follow any change.
+
+- **First assignment.** The system picks a free port, so every daemon on one
+  computer, including scratch and test daemons, gets ports no other listener
+  holds. Ports recorded earlier are kept.
+- **A pinned pool.** `AGENTHAIL_EXTENSION_PORT_BASE` makes this daemon take the
+  first free port of 200 from that base for pages and mounts, and
+  `AGENTHAIL_REMOTE_EXTENSION_PORT_BASE` does the same for paired hosts'
+  entries, for a firewall or tailnet rule that names ports. The daemon reads
+  both when it starts. For a value that is not a number, does not fit between
+  1024 and 65535, covers the dashboard's port, or overlaps the other pool, it
+  logs why and lets the system pick.
+- **A recorded port in use.** When another process holds a recorded port,
+  the page or mount shows `port <n> is in use by pid <pid> (<command>)`, the
+  log names the holder once, and the daemon binds the port on its next sync
+  (every 10 seconds) once it is free. A port the system assigned comes from
+  the range outgoing connections also use, so after a restart a short-lived
+  connection can hold it for a moment.
+- **Off.** `AGENTHAIL_EXTENSION_PORTS=off` serves no page, mount or paired
+  host's entry, records no port, and gives each one the error
+  `extension ports are off on this daemon`. Use it for a scratch or test
+  daemon, which then listens on nothing but its dashboard.
 
 The port serves only its own extension:
 
@@ -201,8 +223,8 @@ a paired host's pages and mounts for it.
 
 - `GET /api/v1/extensions?host=<id or name>` reads the host's list with the
   pairing and gives each page and mount, and each built-in page under
-  `builtIn` such as the Work page, a port of this daemon's own, on
-  `127.0.0.1` from the second pool (7620 to 7819). It is kept in
+  `builtIn` such as the Work page, a port of this daemon's own on
+  `127.0.0.1`, assigned as above. It is kept in
   `~/.agenthail/extensions-data/remote-ports.json` under
   `<host>/<extension>`, `<host>/<extension>/mount/<name>` or
   `<host>/<built-in id>`. `published` is
@@ -286,8 +308,8 @@ keeps its own origin and paths and needs no change:
 
 A mount serves nothing until the person approves it, and approval covers the
 upstream it names: pointing the mount at another upstream waits for a new
-approval. Each approved mount listens on `127.0.0.1` on a port from 7420 to
-7619 that it keeps while the extension declares it, recorded in
+approval. Each approved mount listens on `127.0.0.1` on a port of its own
+([which port](#which-port)) that it keeps while the extension declares it, recorded in
 `~/.agenthail/extensions-data/mounts.json`. While remote access is on, the
 daemon publishes each mount's port in Tailscale Serve at
 `https://<machine>.<tailnet>.ts.net:<port>`, and removes it when remote access

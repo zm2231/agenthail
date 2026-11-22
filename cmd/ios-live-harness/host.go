@@ -119,6 +119,7 @@ func (h *host) env() []string {
 		"AGENTHAIL_CLAUDE_SOCKET_DIR=" + h.dir("sockets"),
 		"AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT=" + strconv.Itoa(h.trap),
 		"AGENTHAIL_PUSH_RELAY_URL=http://" + trap,
+		"AGENTHAIL_EXTENSION_PORTS=off",
 		"LANG=en_US.UTF-8",
 	}
 }

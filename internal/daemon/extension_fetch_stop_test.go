@@ -37,9 +37,6 @@ func TestAnExtensionFetchStopsWhenItsSignalDoes(t *testing.T) {
 
 	manifest := fmt.Sprintf(`{"label": "Fixture", "mounts": [{"name": "app", "label": "App", "upstream": %q, "entry": "/"}]}`, upstream.URL)
 	f := startExtensionFixtureWith(t, map[string]string{"extension.json": manifest, "server.ts": fetchStopServer})
-	previous := extensionPortBase
-	extensionPortBase = 0
-	t.Cleanup(func() { extensionPortBase = previous })
 	t.Cleanup(f.d.extensions.mounts.close)
 	if err := f.d.approveExtension("fixture"); err != nil {
 		t.Fatal(err)

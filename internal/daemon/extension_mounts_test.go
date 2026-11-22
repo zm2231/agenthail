@@ -102,9 +102,6 @@ func startMountFixture(t *testing.T) *mountFixture {
 	t.Helper()
 	d, reg, _, dashboard, handler, _ := baseFixture(t)
 	dashboard.listen = "127.0.0.1:7412"
-	previous := extensionPortBase
-	extensionPortBase = 0
-	t.Cleanup(func() { extensionPortBase = previous })
 	home := t.TempDir()
 	d.SetExtensionHost(home, func() (nodehost.Launch, error) {
 		return nodehost.Launch{}, errors.New("this test runs no extension host")
