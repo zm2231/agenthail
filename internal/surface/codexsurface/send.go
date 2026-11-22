@@ -46,6 +46,7 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 		"threadId": sess.ID,
 		"input":    codexUserInput(message, options.Images),
 	}
+	setCodexClientMessageID(ctx, params)
 	if err := applyCodexTurnOptions(options.Model, options.TurnOptions, params); err != nil {
 		return nil, surface.DeliveryUnavailable(err)
 	}
@@ -62,6 +63,13 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 		}
 	}
 	return &surface.SendResult{UUID: turnID, Accepted: true}, nil
+}
+
+// setCodexClientMessageID tags the turn's user message with the delivery's id, which Codex keeps in the rollout as clientId.
+func setCodexClientMessageID(ctx context.Context, params map[string]any) {
+	if id := surface.MessageUUID(ctx); id != "" {
+		params["clientUserMessageId"] = id
+	}
 }
 
 // NativeImages is true on every route: each Codex transport speaks the

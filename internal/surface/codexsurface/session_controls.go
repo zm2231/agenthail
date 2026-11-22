@@ -88,11 +88,13 @@ func (c *Codex) SteerWithImages(ctx context.Context, sess *surface.Session, mess
 	if turnID == "" {
 		return surface.DeliveryUnavailable(fmt.Errorf("%w (use 'send' instead)", surface.ErrNothingToSteer))
 	}
-	if _, err := conn.Request(ctx, "turn/steer", map[string]any{
+	params := map[string]any{
 		"threadId":       sess.ID,
 		"expectedTurnId": turnID,
 		"input":          codexUserInput(message, images),
-	}, 5*time.Second); err != nil {
+	}
+	setCodexClientMessageID(ctx, params)
+	if _, err := conn.Request(ctx, "turn/steer", params, 5*time.Second); err != nil {
 		return codexOperationOutcome(fmt.Errorf("turn/steer: %w", err))
 	}
 	return nil

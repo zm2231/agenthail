@@ -134,6 +134,7 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 		"threadId": threadID,
 		"input":    []map[string]any{{"type": "text", "text": message}},
 	}
+	setCodexClientMessageID(ctx, turnParams)
 	if err := applyCodexTurnOptions(options.Model, options.TurnOptions, turnParams); err != nil {
 		return session, nil, err
 	}
