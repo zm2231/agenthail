@@ -416,7 +416,7 @@ func TestALaunchFoundAfterItsStartRecordsWhoStartedIt(t *testing.T) {
 	if err != nil || !recorded || origin.Via != registry.OriginAgent || origin.CreatorID != spawner.ID {
 		t.Fatalf("origin=%+v recorded=%v err=%v", origin, recorded, err)
 	}
-	if d.startedOutside(found) {
-		t.Fatal("a session Agenthail launched counts as started outside it")
+	if caller, err := r.Caller(found.ID); err != nil || startedOutside(caller) {
+		t.Fatalf("a session Agenthail launched counts as started outside it (err=%v)", err)
 	}
 }

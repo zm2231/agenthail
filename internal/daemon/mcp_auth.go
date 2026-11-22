@@ -186,7 +186,7 @@ func (d *Daemon) sessionRunning(session *surface.Session) bool {
 
 // The CLI in a session's shell gets this same caller, so the two cannot disagree.
 func (d *Daemon) agentCaller(record registry.CallerRecord) (*mcpCaller, error) {
-	caller := &mcpCaller{session: record.Session, ceiling: record.Ceiling, outside: d.startedOutside(record.Session)}
+	caller := &mcpCaller{session: record.Session, ceiling: record.Ceiling, outside: startedOutside(record)}
 	caller.actAs(d.callerRole(record, false))
 	if !record.Recorded {
 		caller.project, _ = d.sessionProject(record.Session)

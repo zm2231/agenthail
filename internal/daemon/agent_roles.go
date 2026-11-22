@@ -5,7 +5,6 @@ import (
 
 	"github.com/zm2231/agenthail/internal/agentroles"
 	"github.com/zm2231/agenthail/internal/registry"
-	"github.com/zm2231/agenthail/internal/surface"
 )
 
 // resolvedRole is the role a caller acts under, with where it came from.
@@ -98,13 +97,8 @@ func implicitRole(roles registry.SessionRoles, remote bool) (string, string) {
 	return agentroles.Worker, "the default"
 }
 
-// A session the person started in a terminal or a desktop app has no origin, since Agenthail never started it.
-func (d *Daemon) startedOutside(session surface.Session) bool {
-	if session.ID == "" || session.Delegated() {
-		return false
-	}
-	_, found, err := d.Registry.SessionOrigin(session.ID)
-	return err == nil && !found
+func startedOutside(record registry.CallerRecord) bool {
+	return record.Session.ID != "" && !record.Session.Delegated() && !record.Originated
 }
 
 // callerRole resolves in a fixed order: an assignment to the session or to a
@@ -114,7 +108,7 @@ func (d *Daemon) startedOutside(session surface.Session) bool {
 // roles and assignments have synced.
 func (d *Daemon) callerRole(record registry.CallerRecord, remote bool) resolvedRole {
 	implicit, source := implicitRole(record.Roles, remote)
-	if implicit == agentroles.Worker && d.startedOutside(record.Session) {
+	if implicit == agentroles.Worker && startedOutside(record) {
 		source = "a session Agenthail did not start"
 	}
 	all, err := d.agentRoles()

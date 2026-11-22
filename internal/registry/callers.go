@@ -17,6 +17,8 @@ type CallerRecord struct {
 	// Recorded is false until discovery has stored the session's project.
 	Recorded bool
 	Project  json.RawMessage
+	// Originated is true for a session Agenthail started, which records where it came from.
+	Originated bool
 }
 
 var callerSelect = sessionSelect(`s.status`) + `,COALESCE((SELECT a.name FROM aliases a WHERE a.session_id=s.id),''),COALESCE((SELECT i.name FROM agent_identities i WHERE i.identity_id=s.id),''),s.host_id,
@@ -25,14 +27,15 @@ var callerSelect = sessionSelect(`s.status`) + `,COALESCE((SELECT a.name FROM al
 	s.id IN (` + voiceOperatorSessions + `),
 	COALESCE((SELECT c.ceiling FROM session_ceilings c WHERE c.session_id=s.id), '{}'),
 	cs.session_id IS NOT NULL,
-	COALESCE(cs.host_project, X'')
+	COALESCE(cs.host_project, X''),
+	EXISTS(SELECT 1 FROM session_origins o WHERE o.session_id=s.id)
 	FROM sessions s` + sessionJoins + ` WHERE s.id=?`
 
 func (r *Registry) Caller(sessionID string) (CallerRecord, error) {
 	var record CallerRecord
 	var columns sessionScan
 	var ceiling string
-	targets := append(columns.targets(), &record.Alias, &record.Identity, &record.HostID, &record.Archived, &record.Roles.Lead, &record.Roles.Operator, &ceiling, &record.Recorded, &record.Project)
+	targets := append(columns.targets(), &record.Alias, &record.Identity, &record.HostID, &record.Archived, &record.Roles.Lead, &record.Roles.Operator, &ceiling, &record.Recorded, &record.Project, &record.Originated)
 	if err := r.callers.QueryRow(callerSelect, sessionID).Scan(targets...); err != nil {
 		return CallerRecord{}, err
 	}
