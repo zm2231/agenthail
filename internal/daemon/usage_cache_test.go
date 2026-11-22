@@ -5,12 +5,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/usage"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/browsercookie"
@@ -73,29 +73,29 @@ func TestUsageKeepsTheLastReadingWhenClaudeAIFails(t *testing.T) {
 	root := surface.ClaudeConfigRoot{Name: "default", Root: "/r", Primary: true, SignedInAs: &surface.ClaudeLogin{Email: "a@example.com", AccountID: "a"}}
 	d := &Daemon{}
 	now := time.Now()
-	poll := func(n int) usageSet {
-		return d.claudeUsageSet(context.Background(), reader, root, now.Add(time.Duration(n)*claudeUsageTTL))
+	poll := func(n int) usage.Set {
+		return d.claudeUsageSet(context.Background(), reader, root, now.Add(time.Duration(n)*usage.ClaudeTTL))
 	}
 	first := poll(0)
 	if len(first.Meters) != 1 || first.Problem != "" {
 		t.Fatalf("first read: %+v", first)
 	}
-	for n := 1; n < claudeUsageFailuresHeld; n++ {
+	for n := 1; n < usage.FailuresHeld; n++ {
 		if held := poll(n); len(held.Meters) != 1 || held.Problem != "" || !held.AsOf.Equal(first.AsOf) {
 			t.Fatalf("failed refresh %d keeps the last meters and their time, without an error: %+v", n, held)
 		}
 	}
-	shown := poll(claudeUsageFailuresHeld)
+	shown := poll(usage.FailuresHeld)
 	if len(shown.Meters) != 1 || shown.Problem != failed.problem || !shown.AsOf.Equal(first.AsOf) {
-		t.Fatalf("a failure lasting %d refreshes says why and keeps the last meters: %+v", claudeUsageFailuresHeld, shown)
+		t.Fatalf("a failure lasting %d refreshes says why and keeps the last meters: %+v", usage.FailuresHeld, shown)
 	}
-	if again := poll(claudeUsageFailuresHeld + 1); again.Problem != "" || len(again.Meters) != 1 {
+	if again := poll(usage.FailuresHeld + 1); again.Problem != "" || len(again.Meters) != 1 {
 		t.Fatalf("a good read clears the error: %+v", again)
 	}
 	other := root
 	other.SignedInAs = &surface.ClaudeLogin{Email: "b@example.com", AccountID: "b"}
 	reader.answers = append(reader.answers, failed)
-	if third := d.claudeUsageSet(context.Background(), reader, other, now.Add(10*claudeUsageTTL)); len(third.Meters) != 0 || third.Problem != failed.problem {
+	if third := d.claudeUsageSet(context.Background(), reader, other, now.Add(10*usage.ClaudeTTL)); len(third.Meters) != 0 || third.Problem != failed.problem {
 		t.Fatalf("a login with no reading yet shows its error at once and never the previous login's usage: %+v", third)
 	}
 }
@@ -135,93 +135,6 @@ func TestUsageNamesHowARootWithoutAClaudeAILoginSignsIn(t *testing.T) {
 	if reader.calls != 0 {
 		t.Fatalf("a root without a claude.ai login never asks claude.ai: %d calls", reader.calls)
 	}
-}
-
-func TestAScopedWeeklyMeterIsLabelledByItsModel(t *testing.T) {
-	now := time.Now()
-	usage := &surface.Usage{FetchedAt: now, Limits: []surface.UsageWindow{{Kind: "weekly_scoped", Scope: "Fable", Percent: 40}, {Kind: "weekly_scoped", Percent: 10}}}
-	meters := usageMeters("claude", usage, now)
-	if len(meters) != 2 || meters[0].Label != "Claude week, Fable" || meters[0].Scope != "Fable" || meters[1].Label != "Claude week, one model" {
-		t.Fatalf("scoped meters: %+v", meters)
-	}
-}
-
-func TestACancelledPollDoesNotFailTheReadAnotherPollWaitsOn(t *testing.T) {
-	reader := &blockingRootReader{started: make(chan struct{}), release: make(chan struct{})}
-	root := surface.ClaudeConfigRoot{Root: "/r", SignedInAs: &surface.ClaudeLogin{AccountID: "a"}}
-	var cache claudeUsageCache
-	now := time.Now()
-	first, cancel := context.WithCancel(context.Background())
-	firstDone := make(chan error, 1)
-	go func() {
-		_, _, _, err := cache.read(first, reader, root, now)
-		firstDone <- err
-	}()
-	<-reader.started
-	secondDone := make(chan *surface.Usage, 1)
-	go func() {
-		_, usage, _, _ := cache.read(context.Background(), reader, root, now)
-		secondDone <- usage
-	}()
-	cancel()
-	close(reader.release)
-	if err := <-firstDone; err != nil {
-		t.Fatalf("the read outlives the poll that started it: %v", err)
-	}
-	if usage := <-secondDone; usage == nil || len(usage.Limits) != 1 {
-		t.Fatalf("the waiting poll gets the finished reading: %+v", usage)
-	}
-	if got := reader.calls.Load(); got != 1 {
-		t.Fatalf("claude.ai read %d times, want 1", got)
-	}
-}
-
-func TestABurstOfStartsRefreshesAStaleReadingOnce(t *testing.T) {
-	var cache claudeUsageCache
-	reader := &blockingRootReader{started: make(chan struct{}), release: make(chan struct{})}
-	root := surface.ClaudeConfigRoot{Root: "/r", SignedInAs: &surface.ClaudeLogin{AccountID: "a"}}
-	before := runtime.NumGoroutine()
-	for range 100 {
-		if usage := cache.cached(reader, root, time.Now()); usage != nil {
-			t.Fatalf("a cold cache has no reading yet: %+v", usage)
-		}
-	}
-	<-reader.started
-	if grew := runtime.NumGoroutine() - before; grew > 3 {
-		t.Fatalf("100 starts queued %d refreshes behind one claude.ai read", grew)
-	}
-	close(reader.release)
-	deadline := time.Now().Add(5 * time.Second)
-	for cache.entry(root.Root).refreshing.Load() {
-		if time.Now().After(deadline) {
-			t.Fatal("the refresh did not finish")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if usage := cache.cached(reader, root, time.Now()); usage == nil || reader.calls.Load() != 1 {
-		t.Fatalf("the next start reads the refreshed snapshot: usage=%+v reads=%d", usage, reader.calls.Load())
-	}
-}
-
-type blockingRootReader struct {
-	started chan struct{}
-	release chan struct{}
-	calls   atomic.Int32
-}
-
-func (r *blockingRootReader) ClaudeConfigRoots(context.Context) ([]surface.ClaudeConfigRoot, error) {
-	return nil, nil
-}
-
-func (r *blockingRootReader) ClaudeConfigRoot(ctx context.Context, path string) (surface.ClaudeConfigRoot, error) {
-	if r.calls.Add(1) == 1 {
-		close(r.started)
-	}
-	<-r.release
-	if err := ctx.Err(); err != nil {
-		return surface.ClaudeConfigRoot{}, err
-	}
-	return surface.ClaudeConfigRoot{Root: path, Usage: &surface.Usage{Limits: []surface.UsageWindow{{Kind: "session", Percent: 30}}}}, nil
 }
 
 type scriptedRootAnswer struct {

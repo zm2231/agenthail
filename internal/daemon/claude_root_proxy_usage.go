@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/usage"
 	"github.com/zm2231/agenthail/internal/proxyacct"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -22,8 +23,8 @@ func (d *Daemon) readProxyAccounts(ctx context.Context, name string, now time.Ti
 		if config.Name != name {
 			continue
 		}
-		if reading := d.proxyUsage.read(ctx, config, now); reading.err == nil {
-			return reading.accounts, true
+		if reading := d.proxyUsage.Read(ctx, config, now); reading.Err == nil {
+			return reading.Accounts, true
 		}
 		return nil, false
 	}
@@ -52,25 +53,25 @@ func (d *Daemon) proxyRootUsage(ctx context.Context, root surface.ClaudeConfigRo
 		answer["usageProblem"] = "the " + root.Proxy + " proxy reports no Claude account"
 		return answer
 	}
-	usage := &surface.Usage{FetchedAt: now}
+	reading := &surface.Usage{FetchedAt: now}
 	for _, window := range next.Windows {
 		if !window.ResetsAt.IsZero() && !now.Before(window.ResetsAt) {
 			continue
 		}
 		switch window.Kind {
 		case proxyacct.WindowSession:
-			usage.Limits = append(usage.Limits, surface.UsageWindow{Kind: "session", Percent: window.Percent, ResetsAt: window.ResetsAt})
+			reading.Limits = append(reading.Limits, surface.UsageWindow{Kind: "session", Percent: window.Percent, ResetsAt: window.ResetsAt})
 		case proxyacct.WindowWeek:
-			usage.Limits = append(usage.Limits, surface.UsageWindow{Kind: "weekly_all", Percent: window.Percent, ResetsAt: window.ResetsAt})
+			reading.Limits = append(reading.Limits, surface.UsageWindow{Kind: "weekly_all", Percent: window.Percent, ResetsAt: window.ResetsAt})
 		}
 	}
-	answer["usage"], answer["best"] = usage, next.Label
+	answer["usage"], answer["best"] = reading, next.Label
 	if route.Full {
 		answer["full"] = true
 		answer["usageProblem"] = "every " + root.Proxy + " account is near its limit"
 		if route.FreesAt.After(now) {
 			answer["fullUntil"] = route.FreesAt
-			answer["usageProblem"] = "every " + root.Proxy + " account is near its limit; the first frees up in " + proxyWait(route.FreesAt.Sub(now))
+			answer["usageProblem"] = "every " + root.Proxy + " account is near its limit; the first frees up in " + usage.ProxyWait(route.FreesAt.Sub(now))
 		}
 	}
 	return answer

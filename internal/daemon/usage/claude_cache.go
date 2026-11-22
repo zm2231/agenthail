@@ -1,4 +1,4 @@
-package daemon
+package usage
 
 import (
 	"context"
@@ -9,12 +9,20 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const claudeUsageTTL = time.Minute
+const ClaudeTTL = time.Minute
+
+// ClaudeRootTimeout bounds one root's live usage read, which a
+// new-session form fills in after it has shown the roots.
+const ClaudeRootTimeout = 5 * time.Second
 
 // A failed read behind a good one stays quiet this many refreshes in a row.
-const claudeUsageFailuresHeld = 3
+const FailuresHeld = 3
 
-type claudeUsageCache struct {
+type ClaudeRootReader interface {
+	ClaudeConfigRoot(ctx context.Context, path string) (surface.ClaudeConfigRoot, error)
+}
+
+type ClaudeCache struct {
 	mu      sync.Mutex
 	entries map[string]*claudeUsageEntry
 }
@@ -37,7 +45,7 @@ type claudeUsageSnapshot struct {
 	usage  *surface.Usage
 }
 
-func (c *claudeUsageCache) entry(root string) *claudeUsageEntry {
+func (c *ClaudeCache) entry(root string) *claudeUsageEntry {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.entries == nil {
@@ -51,8 +59,8 @@ func (c *claudeUsageCache) entry(root string) *claudeUsageEntry {
 	return entry
 }
 
-// The entry lock is held across the read so concurrent polls share one claude.ai call.
-func (c *claudeUsageCache) read(ctx context.Context, reader claudeConfigRootReader, root surface.ClaudeConfigRoot, now time.Time) (surface.ClaudeConfigRoot, *surface.Usage, int, error) {
+// The entry lock is held across the Read so concurrent polls share one claude.ai call.
+func (c *ClaudeCache) Read(ctx context.Context, reader ClaudeRootReader, root surface.ClaudeConfigRoot, now time.Time) (surface.ClaudeConfigRoot, *surface.Usage, int, error) {
 	entry := c.entry(root.Root)
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
@@ -60,8 +68,8 @@ func (c *claudeUsageCache) read(ctx context.Context, reader claudeConfigRootRead
 	if entry.login != login {
 		entry.login, entry.readAt, entry.live, entry.err, entry.lastGot, entry.failures = login, time.Time{}, surface.ClaudeConfigRoot{}, nil, nil, 0
 	}
-	if entry.readAt.IsZero() || now.Sub(entry.readAt) >= claudeUsageTTL {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), claudeRootUsageTimeout)
+	if entry.readAt.IsZero() || now.Sub(entry.readAt) >= ClaudeTTL {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ClaudeRootTimeout)
 		entry.live, entry.err = reader.ClaudeConfigRoot(ctx, root.Root)
 		cancel()
 		entry.readAt = now
@@ -76,14 +84,14 @@ func (c *claudeUsageCache) read(ctx context.Context, reader claudeConfigRootRead
 }
 
 // Never waits on claude.ai; a missing or stale reading refreshes in the background.
-func (c *claudeUsageCache) cached(reader claudeConfigRootReader, root surface.ClaudeConfigRoot, now time.Time) *surface.Usage {
+func (c *ClaudeCache) Cached(reader ClaudeRootReader, root surface.ClaudeConfigRoot, now time.Time) *surface.Usage {
 	entry := c.entry(root.Root)
 	snapshot := entry.last.Load()
 	current := snapshot != nil && snapshot.login == claudeLoginKey(root)
-	if (!current || now.Sub(snapshot.readAt) >= claudeUsageTTL) && entry.refreshing.CompareAndSwap(false, true) {
+	if (!current || now.Sub(snapshot.readAt) >= ClaudeTTL) && entry.refreshing.CompareAndSwap(false, true) {
 		go func() {
 			defer entry.refreshing.Store(false)
-			c.read(context.Background(), reader, root, time.Now())
+			c.Read(context.Background(), reader, root, time.Now())
 		}()
 	}
 	if !current {
@@ -91,6 +99,8 @@ func (c *claudeUsageCache) cached(reader claudeConfigRootReader, root surface.Cl
 	}
 	return snapshot.usage
 }
+
+func (c *ClaudeCache) HasReading(root string) bool { return c.entry(root).last.Load() != nil }
 
 func claudeLoginKey(root surface.ClaudeConfigRoot) string {
 	if root.SignedInAs == nil {

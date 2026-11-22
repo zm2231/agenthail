@@ -9,13 +9,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/usage"
 	"github.com/zm2231/agenthail/internal/hosts"
 )
 
 // A host's answer includes its own claude.ai reads.
-const remoteUsageTimeout = claudeRootUsageTimeout + time.Second
+const remoteUsageTimeout = usage.ClaudeRootTimeout + time.Second
 
-func (d *Daemon) remoteUsageSets(ctx context.Context) []usageSet {
+func (d *Daemon) remoteUsageSets(ctx context.Context) []usage.Set {
 	connected := []*pairedHost{}
 	for _, host := range d.pairedHosts() {
 		if state, _ := host.status(); state == hostStateConnected {
@@ -23,7 +24,7 @@ func (d *Daemon) remoteUsageSets(ctx context.Context) []usageSet {
 		}
 	}
 	sort.Slice(connected, func(i, j int) bool { return connected[i].record.Name < connected[j].record.Name })
-	results := make([][]usageSet, len(connected))
+	results := make([][]usage.Set, len(connected))
 	var wait sync.WaitGroup
 	for i, host := range connected {
 		wait.Go(func() { results[i] = hostUsageSets(ctx, host) })
@@ -32,15 +33,15 @@ func (d *Daemon) remoteUsageSets(ctx context.Context) []usageSet {
 	return slices.Concat(results...)
 }
 
-func hostUsageSets(ctx context.Context, host *pairedHost) []usageSet {
+func hostUsageSets(ctx context.Context, host *pairedHost) []usage.Set {
 	ctx, cancel := context.WithTimeout(ctx, remoteUsageTimeout)
 	defer cancel()
 	name, id := host.record.Name, host.record.ID
 	var body struct {
-		Sets []usageSet `json:"sets"`
+		Sets []usage.Set `json:"sets"`
 	}
 	if err := host.client.GetJSON(ctx, "/api/v1/usage", url.Values{"scope": {"local"}}, &body); err != nil {
-		return []usageSet{{Host: name, HostID: id, Problem: hostUsageProblem(name, err)}}
+		return []usage.Set{{Host: name, HostID: id, Problem: hostUsageProblem(name, err)}}
 	}
 	for i := range body.Sets {
 		body.Sets[i].Host, body.Sets[i].HostID, body.Sets[i].Local = name, id, false

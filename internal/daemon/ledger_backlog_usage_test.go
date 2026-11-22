@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/usage"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 )
@@ -13,9 +14,9 @@ import (
 func TestAParkedItemReadsTheHeadroomOfTheProviderRootAndHostItNamed(t *testing.T) {
 	now := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
 	reset := now.Add(2 * time.Hour)
-	full := []usageMeter{{Kind: "session", Percent: 97, ResetsAt: reset}, {Kind: "weekly", Percent: 40, ResetsAt: now.Add(72 * time.Hour)}}
-	roomy := []usageMeter{{Kind: "session", Percent: 20, ResetsAt: reset}}
-	sets := []usageSet{
+	full := []usage.Meter{{Kind: "session", Percent: 97, ResetsAt: reset}, {Kind: "weekly", Percent: 40, ResetsAt: now.Add(72 * time.Hour)}}
+	roomy := []usage.Meter{{Kind: "session", Percent: 20, ResetsAt: reset}}
+	sets := []usage.Set{
 		{Provider: "claude", Name: "default", Root: "/home/me/.claude", Primary: true, HostID: "here", Meters: full},
 		{Provider: "claude", Name: "bb", Root: "/home/me/.claude-bb", HostID: "here", Meters: roomy},
 		{Provider: "codex", HostID: "here", Meters: full},
@@ -84,8 +85,8 @@ func unlimited(string) (registry.LimitResume, bool) { return registry.LimitResum
 func TestAUsageParkDefaultsToTheRootTheParkedSessionRanOutOn(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	stopped := now.Add(4 * time.Hour)
-	sets := []usageSet{
-		{Provider: "claude", Name: "default", Root: "/home/me/.claude", Primary: true, HostID: "here", Meters: []usageMeter{{Kind: "session", Percent: 10}}},
+	sets := []usage.Set{
+		{Provider: "claude", Name: "default", Root: "/home/me/.claude", Primary: true, HostID: "here", Meters: []usage.Meter{{Kind: "session", Percent: 10}}},
 		{Provider: "claude", Name: "bb", Root: "/home/me/.claude-bb", HostID: "here"},
 	}
 	limited := func(session string) (registry.LimitResume, bool) {
@@ -102,7 +103,7 @@ func TestAUsageParkDefaultsToTheRootTheParkedSessionRanOutOn(t *testing.T) {
 		body, _ := json.Marshal(ledger.WorkRequest{SessionID: session, ForSession: forSession, Action: ledger.WorkPark, ItemID: "widget-W1",
 			Park: &ledger.Park{Kind: ledger.ParkUsage, Usage: &ledger.ParkUsageTarget{Provider: "claude"}}})
 		var req ledger.WorkRequest
-		if err := json.Unmarshal(stampUsageParkFrom(body, "here", func() []usageSet { return sets }, limited, now), &req); err != nil {
+		if err := json.Unmarshal(stampUsageParkFrom(body, "here", func() []usage.Set { return sets }, limited, now), &req); err != nil {
 			t.Fatal(err)
 		}
 		return *req.Park.Usage
@@ -120,7 +121,7 @@ func TestAUsageParkDefaultsToTheRootTheParkedSessionRanOutOn(t *testing.T) {
 
 func TestAnAgedReadingIsNoReading(t *testing.T) {
 	now := time.Now()
-	sets := []usageSet{{Provider: "codex", Meters: []usageMeter{{Kind: "session", Percent: 5, Aged: true}}}}
+	sets := []usage.Set{{Provider: "codex", Meters: []usage.Meter{{Kind: "session", Percent: 5, Aged: true}}}}
 	if got := parkHeadroom(sets, ledger.ParkUsageTarget{Provider: "codex"}, now); got.Known {
 		t.Fatalf("an aged reading = %+v", got)
 	}
@@ -129,12 +130,12 @@ func TestAnAgedReadingIsNoReading(t *testing.T) {
 func TestAUsageParkRecordsTheHostRootAndResetFromTheParkingHostsReading(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	reset := now.Add(90 * time.Minute)
-	sets := []usageSet{
-		{Provider: "claude", Name: "default", Root: "/home/me/.claude", Primary: true, HostID: "here", Meters: []usageMeter{{Kind: "session", Percent: 95, ResetsAt: reset}}},
-		{Provider: "codex", HostID: "here", Meters: []usageMeter{{Kind: "session", Percent: 10, ResetsAt: reset}}},
+	sets := []usage.Set{
+		{Provider: "claude", Name: "default", Root: "/home/me/.claude", Primary: true, HostID: "here", Meters: []usage.Meter{{Kind: "session", Percent: 95, ResetsAt: reset}}},
+		{Provider: "codex", HostID: "here", Meters: []usage.Meter{{Kind: "session", Percent: 10, ResetsAt: reset}}},
 	}
 	reads := 0
-	local := func() []usageSet { reads++; return sets }
+	local := func() []usage.Set { reads++; return sets }
 	park := func(target ledger.ParkUsageTarget) ledger.ParkUsageTarget {
 		t.Helper()
 		body, _ := json.Marshal(ledger.WorkRequest{ProjectKey: "k", SessionID: "worker", Action: ledger.WorkPark, ItemID: "widget-W1", Reason: "kept",
@@ -180,10 +181,10 @@ func TestAUsageItemWithNoLiveReadingComesBackAfterItsRecordedReset(t *testing.T)
 	item := addWork(t, store, p.key, "long sweep")
 	now := time.Now().Truncate(time.Second)
 	reset := now.Add(time.Hour)
-	sets := []usageSet{{Provider: "claude", Name: "default", Primary: true, HostID: "here", Meters: []usageMeter{{Kind: "weekly", Percent: 99, ResetsAt: reset}}}}
+	sets := []usage.Set{{Provider: "claude", Name: "default", Primary: true, HostID: "here", Meters: []usage.Meter{{Kind: "weekly", Percent: 99, ResetsAt: reset}}}}
 	body, _ := json.Marshal(ledger.WorkRequest{ProjectKey: p.key, SessionID: "worker", Action: ledger.WorkPark, ItemID: item.ID, Park: &ledger.Park{Kind: ledger.ParkUsage, Usage: &ledger.ParkUsageTarget{Provider: "claude"}}})
 	var req ledger.WorkRequest
-	if err := json.Unmarshal(stampUsageParkFrom(body, "here", func() []usageSet { return sets }, unlimited, now), &req); err != nil {
+	if err := json.Unmarshal(stampUsageParkFrom(body, "here", func() []usage.Set { return sets }, unlimited, now), &req); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.Work(req, now); err != nil {

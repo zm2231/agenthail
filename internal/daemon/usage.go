@@ -9,63 +9,41 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/usage"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 )
-
-// A set with no provider is a host that could not answer.
-type usageSet struct {
-	Host        string       `json:"host"`
-	HostID      string       `json:"hostId"`
-	Local       bool         `json:"local"`
-	Provider    string       `json:"provider,omitempty"`
-	Name        string       `json:"name,omitempty"`
-	Account     string       `json:"account,omitempty"`
-	Login       string       `json:"login,omitempty"`
-	LoginSource string       `json:"loginSource,omitempty"`
-	Root        string       `json:"root,omitempty"`
-	Primary     bool         `json:"primary,omitempty"`
-	Meters      []usageMeter `json:"meters"`
-	AsOf        time.Time    `json:"asOf,omitzero"`
-	Problem     string       `json:"problem,omitempty"`
-	Detail      string       `json:"problemDetail,omitempty"`
-
-	Proxy        *usageProxy    `json:"proxy,omitempty"`
-	Accounts     []usageAccount `json:"accounts,omitempty"`
-	ProxyProblem string         `json:"proxyProblem,omitempty"`
-	Routing      *usageRouting  `json:"routing,omitempty"`
-}
 
 func (d *Daemon) usageHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
 		return
 	}
-	var sets, remote []usageSet
+	var sets, remote []usage.Set
 	var wait sync.WaitGroup
 	wait.Go(func() { sets = d.localUsageSets(r.Context(), time.Now()) })
 	if _, fromHost := requestingHost(r.Context()); !fromHost && r.URL.Query().Get("scope") != "local" {
 		wait.Go(func() { remote = d.remoteUsageSets(r.Context()) })
 	}
 	wait.Wait()
-	sets = mergeProxySets(append(sets, remote...))
+	sets = usage.MergeProxySets(append(sets, remote...))
 	for i := range sets {
 		if sets[i].Meters == nil {
-			sets[i].Meters = []usageMeter{}
+			sets[i].Meters = []usage.Meter{}
 		}
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"sets": sets})
 }
 
-func (d *Daemon) localUsageSets(ctx context.Context, now time.Time) []usageSet {
-	var claude, proxies []usageSet
-	var codex *usageSet
+func (d *Daemon) localUsageSets(ctx context.Context, now time.Time) []usage.Set {
+	var claude, proxies []usage.Set
+	var codex *usage.Set
 	var wait sync.WaitGroup
 	wait.Go(func() { claude = d.claudeUsageSets(ctx, now) })
 	wait.Go(func() { codex = d.codexUsageSet(ctx, now) })
 	wait.Go(func() { proxies = d.proxyUsageSets(now) })
 	wait.Wait()
-	sets := []usageSet{}
+	sets := []usage.Set{}
 	if len(claude) > 0 {
 		sets = append(sets, claude[0])
 	}
@@ -83,13 +61,13 @@ func (d *Daemon) localUsageSets(ctx context.Context, now time.Time) []usageSet {
 	return sets
 }
 
-func (d *Daemon) claudeUsageSets(ctx context.Context, now time.Time) []usageSet {
+func (d *Daemon) claudeUsageSets(ctx context.Context, now time.Time) []usage.Set {
 	reader, ok := d.adapters().ForSurface(surface.KindClaude).(claudeConfigRootReader)
 	if !ok {
 		return nil
 	}
 	roots := d.currentClaudeConfigRoots()
-	sets := make([]usageSet, len(roots))
+	sets := make([]usage.Set, len(roots))
 	var wait sync.WaitGroup
 	for i, root := range roots {
 		wait.Go(func() { sets[i] = d.claudeUsageSet(ctx, reader, root, now) })
@@ -99,19 +77,8 @@ func (d *Daemon) claudeUsageSets(ctx context.Context, now time.Time) []usageSet 
 	return sets
 }
 
-func claudeNoUsageProblem(login, source string) (problem, detail string, ok bool) {
-	switch login {
-	case surface.ClaudeLoginAPIKey:
-		uses := surface.ClaudeLoginPhrase(source)
-		return "Signed in with " + uses + "; no usage reported.", "claude.ai reports usage only for a claude.ai login, and this config root uses " + uses + ".", true
-	case surface.ClaudeLoginSignedOut:
-		return "Not signed in; no usage reported.", "This config root holds no login. Run /login in a Claude session that uses it to sign in.", true
-	}
-	return "", "", false
-}
-
-func (d *Daemon) claudeUsageSet(ctx context.Context, reader claudeConfigRootReader, root surface.ClaudeConfigRoot, now time.Time) usageSet {
-	set := usageSet{Provider: "claude", Name: root.Name, Root: root.Root, Primary: root.Primary}
+func (d *Daemon) claudeUsageSet(ctx context.Context, reader claudeConfigRootReader, root surface.ClaudeConfigRoot, now time.Time) usage.Set {
+	set := usage.Set{Provider: "claude", Name: root.Name, Root: root.Root, Primary: root.Primary}
 	if root.SignedInAs != nil {
 		set.Account = root.SignedInAs.Email
 	}
@@ -126,17 +93,17 @@ func (d *Daemon) claudeUsageSet(ctx context.Context, reader claudeConfigRootRead
 		set.Proxy = d.rootProxy(root.Proxy)
 		return set
 	}
-	if problem, detail, ok := claudeNoUsageProblem(set.Login, set.LoginSource); ok {
+	if problem, detail, ok := usage.ClaudeNoUsageProblem(set.Login, set.LoginSource); ok {
 		set.Problem, set.Detail = problem, detail
 		return set
 	}
-	live, usage, failures, err := d.claudeUsage.read(ctx, reader, root, now)
-	if usage != nil {
-		set.AsOf = usage.FetchedAt
+	live, got, failures, err := d.claudeUsage.Read(ctx, reader, root, now)
+	if got != nil {
+		set.AsOf = got.FetchedAt
 	}
-	set.Meters = usageMeters("claude", usage, now)
+	set.Meters = usage.Meters("claude", got, now)
 	switch {
-	case usage != nil && failures < claudeUsageFailuresHeld:
+	case got != nil && failures < usage.FailuresHeld:
 	case err != nil:
 		set.Problem = err.Error()
 	case live.UsageProblem != "":
@@ -147,21 +114,21 @@ func (d *Daemon) claudeUsageSet(ctx context.Context, reader claudeConfigRootRead
 	return set
 }
 
-func (d *Daemon) codexUsageSet(ctx context.Context, now time.Time) *usageSet {
+func (d *Daemon) codexUsageSet(ctx context.Context, now time.Time) *usage.Set {
 	reader, ok := d.adapters().ForSurface(surface.KindCodex).(codexUsageReader)
 	if !ok || !d.surfaceHealthy(surface.KindCodex) {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, codexUsageTimeout)
 	defer cancel()
-	usage, err := reader.Usage(ctx)
+	read, err := reader.Usage(ctx)
 	switch {
 	case errors.Is(err, codexsurface.ErrNoCodexUsage):
 		return nil
 	case err != nil:
-		return &usageSet{Provider: "codex", Problem: err.Error()}
+		return &usage.Set{Provider: "codex", Problem: err.Error()}
 	}
-	return &usageSet{Provider: "codex", Meters: usageMeters("codex", usage, now)}
+	return &usage.Set{Provider: "codex", Meters: usage.Meters("codex", read, now)}
 }
 
 func (d *Daemon) surfaceHealthy(kind surface.SurfaceKind) bool {

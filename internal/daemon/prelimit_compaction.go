@@ -5,6 +5,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/usage"
 	"github.com/zm2231/agenthail/internal/proxyacct"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -139,7 +140,7 @@ func (d *Daemon) rootLimits(now time.Time) func(root string) (rootLimit, bool) {
 			}
 			if reading := view.readings[root.Proxy]; reading != nil {
 				limit.window = "proxy " + root.Proxy
-				limit.percent, limit.resetsAt, ok = proxyacct.Fill(reading.accounts, now)
+				limit.percent, limit.resetsAt, ok = proxyacct.Fill(reading.Accounts, now)
 			}
 		case found:
 			for _, set := range d.claudeCachedUsageSets([]surface.ClaudeConfigRoot{root}, now) {
@@ -151,7 +152,7 @@ func (d *Daemon) rootLimits(now time.Time) func(root string) (rootLimit, bool) {
 	}
 }
 
-func bindingWindow(meters []usageMeter, now time.Time) (rootLimit, bool) {
+func bindingWindow(meters []usage.Meter, now time.Time) (rootLimit, bool) {
 	var limit rootLimit
 	ok := false
 	for _, meter := range meters {

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/usage"
 	"github.com/zm2231/agenthail/internal/proxyacct"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -44,7 +45,7 @@ func (d *Daemon) proxyPreferHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sets := d.proxySetsEverywhere(r.Context(), time.Now())
-	index := slices.IndexFunc(sets, func(set usageSet) bool {
+	index := slices.IndexFunc(sets, func(set usage.Set) bool {
 		return set.Provider == "proxy" && set.Proxy != nil && set.Proxy.ID == request.Proxy
 	})
 	if index < 0 {
@@ -52,7 +53,7 @@ func (d *Daemon) proxyPreferHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	set := sets[index]
-	if set.ProxyProblem != "" && set.ProxyProblem != proxyReadingProblem {
+	if set.ProxyProblem != "" && set.ProxyProblem != usage.ReadingProblem {
 		writeAPIError(w, http.StatusConflict, "proxy_unreadable", set.Problem+" Changing its preference needs a host that can read it.")
 		return
 	}
@@ -82,16 +83,16 @@ func (d *Daemon) proxyPreferHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		plan.Warnings = append(plan.Warnings, "Running sessions could not be listed: "+err.Error())
 	}
-	plan.confirm()
+	plan.SetConfirm()
 	writeDashboardJSON(w, http.StatusOK, plan)
 }
 
-func readProxyPreferRequest(w http.ResponseWriter, r *http.Request) (proxyPreferRequest, []byte, bool) {
-	var request proxyPreferRequest
+func readProxyPreferRequest(w http.ResponseWriter, r *http.Request) (usage.PreferRequest, []byte, bool) {
+	var request usage.PreferRequest
 	switch r.Method {
 	case http.MethodGet:
 		query := r.URL.Query()
-		request = proxyPreferRequest{Proxy: query.Get("proxy"), Account: query.Get("account"), Set: query.Get("set"), Now: query.Get("now") == "true" || query.Get("now") == "1"}
+		request = usage.PreferRequest{Proxy: query.Get("proxy"), Account: query.Get("account"), Set: query.Get("set"), Now: query.Get("now") == "true" || query.Get("now") == "1"}
 		return request, nil, true
 	case http.MethodPost:
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, apiRequestBodyLimit))
@@ -109,12 +110,12 @@ func readProxyPreferRequest(w http.ResponseWriter, r *http.Request) (proxyPrefer
 	return request, nil, false
 }
 
-func (d *Daemon) proxyPreferPlanFrom(w http.ResponseWriter, r *http.Request, host *pairedHost, request proxyPreferRequest) (proxyPreferPlan, bool) {
+func (d *Daemon) proxyPreferPlanFrom(w http.ResponseWriter, r *http.Request, host *pairedHost, request usage.PreferRequest) (usage.PreferPlan, bool) {
 	if host == nil {
 		config, ok := d.localProxyConfig(request.Proxy)
 		if !ok {
 			writeAPIError(w, http.StatusNotFound, "no_proxy", fmt.Sprintf("No proxy %q on this host.", request.Proxy))
-			return proxyPreferPlan{}, false
+			return usage.PreferPlan{}, false
 		}
 		plan, err := d.proxyPreferPlanHere(r.Context(), config, request)
 		if err != nil {
@@ -127,14 +128,14 @@ func (d *Daemon) proxyPreferPlanFrom(w http.ResponseWriter, r *http.Request, hos
 	response, err := host.client.Do(r.Context(), http.MethodGet, "/api/v1/proxies/prefer", query, nil, nil)
 	if err != nil {
 		writeHostReadError(w, host, err)
-		return proxyPreferPlan{}, false
+		return usage.PreferPlan{}, false
 	}
 	answer, err := readHostAnswer(host, response)
 	if err != nil {
 		writeHostError(w, host, err)
-		return proxyPreferPlan{}, false
+		return usage.PreferPlan{}, false
 	}
-	var plan proxyPreferPlan
+	var plan usage.PreferPlan
 	if answer.status != http.StatusOK || json.Unmarshal(answer.payload, &plan) != nil {
 		answer.write(w)
 		return plan, false
@@ -142,7 +143,7 @@ func (d *Daemon) proxyPreferPlanFrom(w http.ResponseWriter, r *http.Request, hos
 	return plan, true
 }
 
-func (d *Daemon) proxyPreferHere(w http.ResponseWriter, r *http.Request, request proxyPreferRequest) {
+func (d *Daemon) proxyPreferHere(w http.ResponseWriter, r *http.Request, request usage.PreferRequest) {
 	config, ok := d.localProxyConfig(request.Proxy)
 	if !ok {
 		writeAPIError(w, http.StatusNotFound, "no_proxy", fmt.Sprintf("No proxy %q on this host.", request.Proxy))
@@ -150,10 +151,10 @@ func (d *Daemon) proxyPreferHere(w http.ResponseWriter, r *http.Request, request
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), proxyPreferTimeout)
 	defer cancel()
-	entry := d.proxyUsage.entry(config)
+	entry := d.proxyUsage.Entry(config)
 	if r.Method == http.MethodPost {
-		entry.writing.Lock()
-		defer entry.writing.Unlock()
+		entry.Writing.Lock()
+		defer entry.Writing.Unlock()
 	}
 	plan, err := d.proxyPreferPlanHere(ctx, config, request)
 	if err != nil {
@@ -173,7 +174,7 @@ func (d *Daemon) proxyPreferHere(w http.ResponseWriter, r *http.Request, request
 		return
 	}
 	done, err := d.applyProxyPrefer(ctx, config, entry, plan)
-	d.proxyUsage.fresh(ctx, config)
+	d.proxyUsage.Fresh(ctx, config)
 	if err != nil {
 		d.log.Printf("proxy %s: %s %s now=%v failed: %s", config.Name, plan.Set, plan.Account.Label, plan.Now, err)
 		writeAPIErrorWith(w, http.StatusBadGateway, "proxy_write_failed", err.Error(), map[string]any{"done": done})
@@ -183,13 +184,13 @@ func (d *Daemon) proxyPreferHere(w http.ResponseWriter, r *http.Request, request
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"done": done, "message": strings.Join(done, "; ") + "."})
 }
 
-func (d *Daemon) proxyPreferPlanHere(ctx context.Context, config proxyacct.Config, request proxyPreferRequest) (proxyPreferPlan, error) {
-	reading := d.proxyUsage.fresh(ctx, config)
-	if reading.err != nil {
-		problem, _ := proxyProblemText(config, reading.err)
-		return proxyPreferPlan{}, &proxyPlanError{http.StatusConflict, string(proxyacct.ProblemOf(reading.err)), problem}
+func (d *Daemon) proxyPreferPlanHere(ctx context.Context, config proxyacct.Config, request usage.PreferRequest) (usage.PreferPlan, error) {
+	reading := d.proxyUsage.Fresh(ctx, config)
+	if reading.Err != nil {
+		problem, _ := usage.ProxyProblemText(config, reading.Err)
+		return usage.PreferPlan{}, &usage.PlanError{Status: http.StatusConflict, Code: string(proxyacct.ProblemOf(reading.Err)), Err: problem}
 	}
-	plan, err := planProxyPrefer(reading.accounts, request)
+	plan, err := usage.PlanPrefer(reading.Accounts, request)
 	if err != nil {
 		return plan, err
 	}
@@ -198,9 +199,9 @@ func (d *Daemon) proxyPreferPlanHere(ctx context.Context, config proxyacct.Confi
 }
 
 func writeProxyPlanError(w http.ResponseWriter, err error) {
-	var planErr *proxyPlanError
+	var planErr *usage.PlanError
 	if errors.As(err, &planErr) {
-		writeAPIError(w, planErr.status, planErr.code, planErr.err)
+		writeAPIError(w, planErr.Status, planErr.Code, planErr.Err)
 		return
 	}
 	writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())

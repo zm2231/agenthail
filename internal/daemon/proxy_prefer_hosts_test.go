@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/usage"
 	"github.com/zm2231/agenthail/internal/proxyacct/proxyaccttest"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
@@ -33,23 +34,23 @@ func TestAPreferenceChangeRunsOnTheHostThatReadsTheProxy(t *testing.T) {
 	testkit.Eventually(t, "laptop mirrors vps", 10*time.Second, func() bool {
 		return len(sessionsOf(laptop.snapshot(t), record.ID)) == 1
 	})
-	var usage usageBody
-	if err := json.Unmarshal(vps.request(t, http.MethodGet, "/api/v1/usage?scope=local", nil).Body.Bytes(), &usage); err != nil {
+	var body usageBody
+	if err := json.Unmarshal(vps.request(t, http.MethodGet, "/api/v1/usage?scope=local", nil).Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
 	id := ""
-	for _, set := range usage.Sets {
+	for _, set := range body.Sets {
 		if set.Provider == "proxy" && set.Proxy != nil {
 			id = set.Proxy.ID
 		}
 	}
-	query := url.Values{"proxy": {id}, "account": {"claude-spare.json"}, "set": {preferOn}}
+	query := url.Values{"proxy": {id}, "account": {"claude-spare.json"}, "set": {usage.PreferOn}}
 	preview := laptop.request(t, http.MethodGet, "/api/v1/proxies/prefer?"+query.Encode(), nil)
-	var plan proxyPreferPlan
+	var plan usage.PreferPlan
 	if preview.Code != http.StatusOK || json.Unmarshal(preview.Body.Bytes(), &plan) != nil || plan.Host != vps.daemon.localHost().Name || len(plan.Changes) != 1 {
 		t.Fatalf("the preview comes from the host that reads the proxy: %d %s", preview.Code, preview.Body)
 	}
-	applied := laptop.request(t, http.MethodPost, "/api/v1/proxies/prefer", proxyPreferRequest{Proxy: id, Account: "claude-spare.json", Set: preferOn, PlanID: plan.PlanID})
+	applied := laptop.request(t, http.MethodPost, "/api/v1/proxies/prefer", usage.PreferRequest{Proxy: id, Account: "claude-spare.json", Set: usage.PreferOn, PlanID: plan.PlanID})
 	if applied.Code != http.StatusOK {
 		t.Fatalf("%d %s", applied.Code, applied.Body)
 	}

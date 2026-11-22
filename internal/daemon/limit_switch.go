@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/usage"
 	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/proxyacct"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -31,11 +32,11 @@ func (d *Daemon) moveAfterLimitEnabled() bool {
 // nothing to any proxy.
 type proxyView struct {
 	roots    []surface.ClaudeConfigRoot
-	readings map[string]*proxyReading
+	readings map[string]*usage.ProxyReading
 }
 
 func (d *Daemon) readProxyView(now time.Time) proxyView {
-	view := proxyView{roots: d.currentClaudeConfigRoots(), readings: map[string]*proxyReading{}}
+	view := proxyView{roots: d.currentClaudeConfigRoots(), readings: map[string]*usage.ProxyReading{}}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return view
@@ -45,7 +46,7 @@ func (d *Daemon) readProxyView(now time.Time) proxyView {
 		return view
 	}
 	for _, config := range configs {
-		if reading := d.proxyUsage.cached(config, now); reading != nil && reading.err == nil {
+		if reading := d.proxyUsage.Cached(config, now); reading != nil && reading.Err == nil {
 			view.readings[config.Name] = reading
 		}
 	}
@@ -61,10 +62,10 @@ func (v proxyView) room(name string, fable bool, now time.Time) bool {
 	if reading == nil {
 		return false
 	}
-	if _, full := proxyacct.Full(reading.accounts, now, fable); full {
+	if _, full := proxyacct.Full(reading.Accounts, now, fable); full {
 		return false
 	}
-	_, ok := proxyacct.Pick(reading.accounts, "claude", now, fable)
+	_, ok := proxyacct.Pick(reading.Accounts, "claude", now, fable)
 	return ok
 }
 
@@ -76,7 +77,7 @@ func (v proxyView) freesAt(name string, fable bool, now time.Time) time.Time {
 	if reading == nil {
 		return time.Time{}
 	}
-	if frees, full := proxyacct.Full(reading.accounts, now, fable); full && frees.After(now) {
+	if frees, full := proxyacct.Full(reading.Accounts, now, fable); full && frees.After(now) {
 		return frees
 	}
 	return time.Time{}
