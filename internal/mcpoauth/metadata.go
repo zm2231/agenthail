@@ -22,7 +22,7 @@ const (
 // PastAccess admits OAuth clients, which cannot carry an Access credential, while Access settings are set.
 const PastAccess = false
 
-// NarrowRole gives an OAuth client the connected-app role instead of the identity's remote role.
+// NarrowRole starts an OAuth client at the connected-app role unless the person assigned its identity a role.
 const NarrowRole = false
 
 var Paths = []string{ProtectedResourcePath, ResourceMetadataPath, AuthServerPath, AuthorizePath, TokenPath, RegisterPath, RevokePath}

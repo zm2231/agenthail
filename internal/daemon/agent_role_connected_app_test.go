@@ -100,3 +100,30 @@ func TestAConnectedAppReadsAndQueuesToACoordinatorButCannotControlOrSpawn(t *tes
 		t.Fatalf("delivered: %q", fake.sent)
 	}
 }
+
+func TestUnderTheNarrowSwitchAnAppStartsAtConnectedAppUntilThePersonAssignsItsIdentityARole(t *testing.T) {
+	d, r, _, _, _ := daemonFixture(t)
+	identity, err := r.AddAgentIdentity("scout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.BindRemoteIdentity("scout", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	role := func(narrow bool) string {
+		record, err := r.Caller(identity.SessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d.oauthRole(record, narrow).Name
+	}
+	if wide, narrow := role(false), role(true); wide != agentroles.Remote || narrow != agentroles.ConnectedApp {
+		t.Fatalf("unassigned: off %s, on %s", wide, narrow)
+	}
+	if err := d.changeAgentRole(context.Background(), daemonapi.CLIActor, daemonapi.AgentRoleRequest{Op: "assign", Name: agentroles.Remote, Kind: registry.AssignIdentity, Target: "scout"}); err != nil {
+		t.Fatal(err)
+	}
+	if narrow := role(true); narrow != agentroles.Remote {
+		t.Fatalf("the person assigned @scout remote, but its app holds %s", narrow)
+	}
+}

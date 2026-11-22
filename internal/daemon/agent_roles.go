@@ -116,21 +116,16 @@ func (d *Daemon) callerRole(record registry.CallerRecord, remote bool) resolvedR
 }
 
 func (d *Daemon) oauthCallerRole(record registry.CallerRecord) resolvedRole {
-	if !mcpoauth.NarrowRole {
-		return d.callerRole(record, true)
-	}
-	return d.connectedAppRole()
+	return d.oauthRole(record, mcpoauth.NarrowRole)
 }
 
-// connectedAppRole reads no assignment, so no identity's role widens what an app may do.
-func (d *Daemon) connectedAppRole() resolvedRole {
-	all, err := d.agentRoles()
-	if err != nil {
-		d.log.Printf("read agent roles: %s", err)
+// oauthRole under narrow starts an app at connected-app, which only a role the
+// person assigned to its identity raises.
+func (d *Daemon) oauthRole(record registry.CallerRecord, narrow bool) resolvedRole {
+	if !narrow {
+		return d.callerRole(record, true)
 	}
-	role := all[agentroles.ConnectedApp]
-	role.Source = "an app connected over OAuth"
-	return role
+	return d.resolveRole(record, agentroles.ConnectedApp, "an app connected over OAuth")
 }
 
 func (d *Daemon) resolveRole(record registry.CallerRecord, implicit, source string) resolvedRole {
