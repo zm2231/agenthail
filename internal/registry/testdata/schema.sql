@@ -3,6 +3,7 @@
 -- migration 2026-11-21-roles-for-agents
 -- migration 2026-11-22-agent-role-assignments
 -- migration 2026-11-22-held-work-moves-session-views
+-- migration 2026-11-22-indexed-delivery-asks-gate
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -51,6 +52,9 @@ CREATE UNIQUE INDEX delivery_intents_provider_key
 CREATE INDEX delivery_intents_sender_status
 	ON delivery_intents(sender_session_id, status, id DESC);
 
+-- index delivery_intents_sent_failure
+CREATE INDEX delivery_intents_sent_failure ON delivery_intents(id) WHERE status='sent' AND failure!='';
+
 -- index delivery_intents_status_updated
 CREATE INDEX delivery_intents_status_updated
 	ON delivery_intents(status, updated_at);
@@ -88,6 +92,9 @@ CREATE UNIQUE INDEX ledger_events_ref ON ledger_events(project_key, ref) WHERE r
 
 -- index ledger_grants_session
 CREATE INDEX ledger_grants_session ON ledger_grants(session_id);
+
+-- index message_queue_dead
+CREATE INDEX message_queue_dead ON message_queue(dead_at_ms) WHERE status='dead';
 
 -- index message_queue_delivery_key
 CREATE UNIQUE INDEX message_queue_delivery_key

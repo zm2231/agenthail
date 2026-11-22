@@ -534,6 +534,13 @@ func migrateTx(tx *sql.Tx) error {
 			return err
 		}
 	}
+	// The delivery ask sync names these indexes, and moving delivery problems to asks runs it.
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS message_queue_dead ON message_queue(dead_at_ms) WHERE status='dead'`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(deliveryIntentsSentFailureIndex); err != nil {
+		return err
+	}
 	if err := moveDeliveryProblemsToAsks(tx); err != nil {
 		return err
 	}

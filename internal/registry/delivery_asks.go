@@ -236,10 +236,12 @@ func deliveryProblems(ctx context.Context, tx *sql.Tx, now time.Time) ([]deliver
 	return problems, rows.Err()
 }
 
+const deliveryIntentsSentFailureIndex = `CREATE INDEX IF NOT EXISTS delivery_intents_sent_failure ON delivery_intents(id) WHERE status='sent' AND failure!=''`
+
 const deliveryAsksInPlay = `SELECT EXISTS(SELECT 1 FROM delivery_intents WHERE status='held')
-	OR EXISTS(SELECT 1 FROM delivery_intents WHERE status='sent' AND failure!='')
-	OR EXISTS(SELECT 1 FROM delivery_intents WHERE status='failed' AND updated_at>=datetime('now','-1 day'))
-	OR EXISTS(SELECT 1 FROM message_queue WHERE status='dead' AND dead_at_ms>?1)
+	OR EXISTS(SELECT 1 FROM delivery_intents INDEXED BY delivery_intents_sent_failure WHERE status='sent' AND failure!='')
+	OR EXISTS(SELECT 1 FROM delivery_intents di WHERE di.status='failed' AND di.updated_at>=datetime('now','-1 day') AND NOT (` + settledDeliveryFailure + `))
+	OR EXISTS(SELECT 1 FROM message_queue INDEXED BY message_queue_dead WHERE status='dead' AND dead_at_ms>?1)
 	OR EXISTS(SELECT 1 FROM message_queue WHERE ` + queueRefusedRow + `)
 	OR EXISTS(SELECT 1 FROM message_queue WHERE ` + queueLateRow + `)
 	OR EXISTS(SELECT 1 FROM asks WHERE origin='delivery' AND state='open')`

@@ -191,6 +191,7 @@ func moveDeliveryProblemsToAsks(tx *sql.Tx) error {
 			`DROP TABLE delivery_intents_dismissable`,
 			schema,
 			`CREATE UNIQUE INDEX IF NOT EXISTS delivery_intents_uuid ON delivery_intents(uuid)`,
+			deliveryIntentsSentFailureIndex,
 		} {
 			if _, err := tx.Exec(step); err != nil {
 				return err
