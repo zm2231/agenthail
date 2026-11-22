@@ -20,6 +20,7 @@ import (
 type daemonService interface {
 	Name() string
 	Loaded() bool
+	Supervises() bool
 	Check() error
 	Install() error
 	Uninstall() error
@@ -87,6 +88,9 @@ func startUnsupervisedDaemon() error {
 		return fmt.Errorf("locate agenthail binary: %w", err)
 	}
 	logPath := daemonctl.LogFilePath()
+	if err := os.MkdirAll(filepath.Dir(logPath), 0700); err != nil {
+		return err
+	}
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("open log: %w", err)
@@ -219,6 +223,7 @@ func (s unsupportedService) err() error {
 
 func (s unsupportedService) Name() string               { return "" }
 func (s unsupportedService) Loaded() bool               { return false }
+func (s unsupportedService) Supervises() bool           { return false }
 func (s unsupportedService) Check() error               { return nil }
 func (s unsupportedService) Install() error             { return s.err() }
 func (s unsupportedService) Uninstall() error           { return s.err() }
