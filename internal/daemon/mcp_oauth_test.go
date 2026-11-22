@@ -409,8 +409,8 @@ func TestACodeUsedTwiceLeavesNoLiveGrantEvenWhenBothUsesRace(t *testing.T) {
 				results <- outcome{response.StatusCode, body}
 			}()
 		}
-		for range 2 {
-			got := <-results
+		both := []outcome{<-results, <-results}
+		for _, got := range both {
 			if got.status != http.StatusOK {
 				continue
 			}
