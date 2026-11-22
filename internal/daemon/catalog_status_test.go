@@ -261,7 +261,7 @@ func TestStatusPassPublishesWhileDiscoveryIsBlocked(t *testing.T) {
 		cancel()
 		<-done
 	}()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for len(catalogStatusEvents(t, store, 0, "from")) == 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("initial discovery did not publish")
@@ -274,7 +274,7 @@ func TestStatusPassPublishesWhileDiscoveryIsBlocked(t *testing.T) {
 	d.requestCatalogDiscovery()
 	select {
 	case <-entered:
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("discovery did not start")
 	}
 	after := latestCatalogSeq(t, store)

@@ -156,7 +156,7 @@ func codexTurnsNotListedYet(err error) bool {
 	return false
 }
 
-// codexRolloutNotWrittenYet reports a thread/read of a thread whose first turn created its rollout file but has not written to it.
+// codexRolloutNotWrittenYet matches codex-cli 0.163.0's thread/read of a rollout its first turn created but has not yet given a session metadata line.
 func codexRolloutNotWrittenYet(err error) bool {
 	var rpc *codexRPCError
 	if !errors.As(err, &rpc) || rpc.Code != -32603 {
