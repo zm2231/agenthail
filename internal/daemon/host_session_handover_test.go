@@ -117,6 +117,15 @@ func TestAThirdHostReachesAMovedSessionOnItsNewHostOnceTheHostItLeftSaysWhere(t 
 			served, err := target.reg.ServedHandovers(session.ID)
 			return err == nil && len(served) == 1
 		})
+		// A snapshot of the host it left still in flight would hand the session over again after the reset below.
+		parked := &snapshotHold{release: make(chan struct{})}
+		source.gate.streamHold.Store(parked)
+		t.Cleanup(func() {
+			source.gate.streamHold.Store(nil)
+			close(parked.release)
+		})
+		source.gate.endStreams()
+		testkit.Eventually(t, "the hosts following the host it left to finish reading it", 15*time.Second, func() bool { return parked.waiting.Load() >= 2 })
 		source.gate.proxyDown.Store(true)
 		t.Cleanup(func() { source.gate.proxyDown.Store(false) })
 		db := openSweepDB(t, third.reg.Path())

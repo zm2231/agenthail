@@ -246,15 +246,22 @@ type actionGate struct {
 	movedTo atomic.Pointer[string]
 	// handovers holds every signed-handover request until released.
 	handovers atomic.Pointer[snapshotHold]
+	// streamHold parks every new catalog stream until released.
+	streamHold atomic.Pointer[snapshotHold]
 }
 
 // failSnapshots ends every catalog stream, including one that has not
 // answered yet, and refuses snapshots and new streams until snapshotsDown is
 // cleared.
 func (g *actionGate) failSnapshots() {
+	g.snapshotsDown.Store(true)
+	g.endStreams()
+}
+
+// endStreams ends every catalog stream open now; followers open new ones.
+func (g *actionGate) endStreams() {
 	g.cutMu.Lock()
 	defer g.cutMu.Unlock()
-	g.snapshotsDown.Store(true)
 	if g.cut != nil {
 		close(g.cut)
 	}
@@ -367,6 +374,11 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 			return
 		}
 		if r.URL.Path == "/api/v1/catalog-events" {
+			if hold := n.gate.streamHold.Load(); hold != nil {
+				hold.waiting.Add(1)
+				<-hold.release
+				return
+			}
 			if before := n.gate.beforeGap.Swap(nil); before != nil {
 				(*before)()
 				n.gate.gaps.Add(1)
