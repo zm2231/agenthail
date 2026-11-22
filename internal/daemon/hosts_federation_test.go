@@ -244,6 +244,8 @@ type actionGate struct {
 	gaps      atomic.Int32
 	// movedTo, when set, answers every action as moved to that host.
 	movedTo atomic.Pointer[string]
+	// handoversDown refuses to serve signed handovers.
+	handoversDown atomic.Bool
 }
 
 // failSnapshots ends every catalog stream, including one that has not
@@ -389,6 +391,10 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 				}
 			}()
 			r = r.WithContext(ctx)
+		}
+		if r.URL.Path == "/api/v1/session-handover" && n.gate.handoversDown.Load() {
+			http.Error(w, "bad gateway", http.StatusBadGateway)
+			return
 		}
 		if r.URL.Path == "/api/v1/snapshot" {
 			if n.gate.snapshotsDown.Load() {

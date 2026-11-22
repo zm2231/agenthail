@@ -70,6 +70,8 @@ func TestAThirdHostReachesAMovedSessionOnItsNewHostOnceTheHostItLeftSaysWhere(t 
 	})
 
 	t.Run("from a row of the new host that arrived before the move was announced", func(t *testing.T) {
+		// The refused row starts a signed-handover claim that could land after the next subtest resets ownership.
+		target.gate.handoversDown.Store(true)
 		db := openSweepDB(t, third.reg.Path())
 		if _, err := db.Exec(`UPDATE sessions SET host_id=? WHERE id=?`, sourceID, session.ID); err != nil {
 			t.Fatal(err)
@@ -106,6 +108,7 @@ func TestAThirdHostReachesAMovedSessionOnItsNewHostOnceTheHostItLeftSaysWhere(t 
 	})
 
 	t.Run("from the new host serving the signed handover, with the host it left gone", func(t *testing.T) {
+		target.gate.handoversDown.Store(false)
 		testkit.Eventually(t, "the new host to hold the signed handover", 15*time.Second, func() bool {
 			served, err := target.reg.ServedHandovers(session.ID)
 			return err == nil && len(served) == 1
