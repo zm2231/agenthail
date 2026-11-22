@@ -162,3 +162,4 @@ Because only the top runs the expensive jobs, three rules apply:
 1. Merge a whole stack at once. GitHub lets a lower pull request merge on its own once the pull requests below it pass, but their expensive jobs were skipped, so that code would reach `main` without them.
 2. After removing or closing the top pull request, push a commit to the new top before merging (`git commit --allow-empty` is enough). Its last run was below the top and skipped the expensive jobs. Re-running that run does not help: a re-run replays the original event, including the old stack position.
 3. Stacks are a GitHub preview. If the `stack` field disappears from the event, every pull request runs every job.
+
