@@ -80,31 +80,42 @@ func printDashboardRemote(result dashboardShareResult, asJSON, copied bool) erro
 	return nil
 }
 
-func (a *App) ensureDashboardReady() (dashconfig.Config, error) {
+func (a *App) ensureDashboardReady() (dashconfig.Config, bool, error) {
 	config, err := dashconfig.Load()
 	if err != nil {
-		return dashconfig.Config{}, err
+		return dashconfig.Config{}, false, err
 	}
-	changed := !config.Enabled
-	if changed {
+	enabled := !config.Enabled
+	if enabled {
 		config.Enabled = true
 		if err := dashconfig.Save(config); err != nil {
-			return dashconfig.Config{}, err
+			return dashconfig.Config{}, false, err
 		}
 	}
-	if !a.isDaemonServiceLoaded() {
-		if err := a.daemonInstallService(); err != nil {
-			return dashconfig.Config{}, err
-		}
-	} else if changed || !dashboardDaemonRunning() {
-		if err := a.restartDaemonForDashboard(); err != nil {
-			return dashconfig.Config{}, err
-		}
+	if err := a.serveDashboard(enabled); err != nil {
+		return dashconfig.Config{}, enabled, err
 	}
 	if err := waitForDashboard(config.Listen, 15*time.Second); err != nil {
-		return dashconfig.Config{}, err
+		return dashconfig.Config{}, enabled, err
 	}
-	return config, nil
+	return config, enabled, nil
+}
+
+// An unsupervised daemon stays unsupervised.
+func (a *App) serveDashboard(enabled bool) error {
+	service := a.service()
+	running := dashboardDaemonRunning()
+	switch {
+	case service.Loaded() || running:
+		if enabled || !running {
+			return a.restartDaemonForDashboard()
+		}
+		return nil
+	case service.Supervises():
+		return a.daemonInstallService()
+	default:
+		return service.Start()
+	}
 }
 
 // The daemon publishes extension mounts beside the dashboard, so it has to
@@ -221,15 +232,23 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 	default:
 		return fmt.Errorf("usage: agenthail dashboard remote [status|off] [--no-open] [--json] [--tailscale <path>]")
 	}
-	config, err := a.ensureDashboardReady()
-	if err != nil {
-		return err
+	config, enabled, err := a.ensureDashboardReady()
+	if err == nil {
+		err = a.publishDashboardRemote(run, node.Self.DNSName, path, config, args)
 	}
+	if err != nil && enabled {
+		return fmt.Errorf("%w\nthe dashboard is now enabled in %s; once that is fixed, run 'agenthail dashboard remote' again to finish", err, dashconfig.Path())
+	}
+	return err
+}
+
+func (a *App) publishDashboardRemote(run tailscale.Runner, dnsName, path string, config dashconfig.Config, args []string) error {
+	asJSON := hasFlag(args, "--json")
 	target, err := tailscale.Target(config.Listen)
 	if err != nil {
 		return err
 	}
-	if err := tailscale.Publish(run, node.Self.DNSName, target, dashconfig.DefaultRemoteAccessPort); err != nil {
+	if err := tailscale.Publish(run, dnsName, target, dashconfig.DefaultRemoteAccessPort); err != nil {
 		return err
 	}
 	config.RemoteAccess = dashconfig.RemoteAccess{Enabled: true, Provider: "tailscale", Port: dashconfig.DefaultRemoteAccessPort, TailscalePath: path}
@@ -243,7 +262,7 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 	if err != nil {
 		return err
 	}
-	result := dashboardShareResult{URL: link.URL, ExpiresAt: link.ExpiresAt, QRPath: dashboardShareQRPath(), DNSName: node.Self.DNSName, Port: dashconfig.DefaultRemoteAccessPort}
+	result := dashboardShareResult{URL: link.URL, ExpiresAt: link.ExpiresAt, QRPath: dashboardShareQRPath(), DNSName: dnsName, Port: dashconfig.DefaultRemoteAccessPort}
 	if err := writeDashboardQR(result.URL, result.QRPath); err != nil {
 		return err
 	}

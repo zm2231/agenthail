@@ -32,7 +32,7 @@ func daemonEndpoint() (string, string, error) {
 		return "", "", err
 	}
 	if !config.Enabled {
-		return "", "", errors.New("dashboard is disabled")
+		return "", "", errors.New("the dashboard is disabled; turn it on with: agenthail dashboard enable")
 	}
 	tokenBytes, err := os.ReadFile(dashconfig.TokenPath())
 	if err != nil {

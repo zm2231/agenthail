@@ -74,6 +74,8 @@ func (s *systemdService) managerProblem() *serviceProblem {
 	}
 }
 
+func (s *systemdService) Supervises() bool { return s.managerProblem() == nil }
+
 func (s *systemdService) Loaded() bool {
 	_, err := os.Stat(s.unitPath)
 	return err == nil

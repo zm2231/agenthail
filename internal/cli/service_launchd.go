@@ -30,6 +30,7 @@ func (launchdService) Loaded() bool {
 }
 
 func (launchdService) Check() error          { return nil }
+func (launchdService) Supervises() bool      { return true }
 func (launchdService) StatusLines() []string { return nil }
 func (launchdService) Problems() []serviceProblem {
 	return packageProblems(packageInstall{daemon: packagedDaemon, bare: packageBareDaemon, launcher: packageLauncher, launchAgent: daemonServicePath()})

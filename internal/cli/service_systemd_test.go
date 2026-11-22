@@ -20,12 +20,14 @@ import (
 )
 
 type fakeService struct {
-	loaded   bool
-	problems []serviceProblem
+	loaded     bool
+	supervises bool
+	problems   []serviceProblem
 }
 
 func (f *fakeService) Name() string               { return "fake" }
 func (f *fakeService) Loaded() bool               { return f.loaded }
+func (f *fakeService) Supervises() bool           { return f.supervises }
 func (f *fakeService) Check() error               { return nil }
 func (f *fakeService) Install() error             { return nil }
 func (f *fakeService) Uninstall() error           { return nil }
