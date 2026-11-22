@@ -35,6 +35,7 @@ type daemonSurface struct {
 	nilResult      bool
 	sent           []string
 	steered        []string
+	steeredAs      []string
 	models         []string
 	modelOptions   []surface.ModelOption
 	listCalls      atomic.Int32
@@ -314,8 +315,9 @@ func (f *daemonSurface) Models(context.Context) ([]surface.ModelOption, error) {
 	return f.modelOptions, nil
 }
 func (*daemonSurface) Interrupt(context.Context, *surface.Session) error { return nil }
-func (f *daemonSurface) Steer(_ context.Context, _ *surface.Session, message string) error {
+func (f *daemonSurface) Steer(ctx context.Context, _ *surface.Session, message string) error {
 	f.steered = append(f.steered, message)
+	f.steeredAs = append(f.steeredAs, surface.LabelSender(ctx, message))
 	return nil
 }
 func (f *daemonSurface) Capabilities() surface.Capabilities { return f.caps }

@@ -8,6 +8,7 @@
 -- migration 2026-11-22-signing-keys-for-hosts
 -- migration 2026-11-22-signing-keys-sign-handovers
 -- migration 2026-11-22-work-item-for-session-prs
+-- migration 2026-11-24-send-mode-for-identities
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -595,6 +596,13 @@ CREATE TABLE identity_remote (
 	access_email TEXT NOT NULL DEFAULT '',
 	created_at_ms INTEGER NOT NULL,
 	last_seen_at_ms INTEGER NOT NULL DEFAULT 0
+);
+
+-- table identity_settings
+CREATE TABLE identity_settings (
+	identity_id TEXT PRIMARY KEY REFERENCES agent_identities(identity_id) ON DELETE CASCADE,
+	send_mode TEXT NOT NULL CHECK (send_mode IN ('now','queue')),
+	changed_at_ms INTEGER NOT NULL
 );
 
 -- table idle_compactions

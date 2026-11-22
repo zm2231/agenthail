@@ -128,6 +128,9 @@ Identity:
   identity access [set --team <team> --aud <tag> | clear]
                                 The Cloudflare Access application remote identities come through; without one,
                                 a remote identity's token alone gets in
+  identity set <name> --send-mode now|queue
+                                How the identity's sends with no mode go: now steers a busy session where its
+                                role allows and queues where not; queue (the default) waits until it is idle
   inbox [<name>] [--all] [--peek] [--limit <n>] [--wait <duration>] [--json]
                                 Print an identity's unread messages oldest first and mark them read;
                                 --wait blocks until one arrives (exit 1 on timeout), --peek leaves them unread

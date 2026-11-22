@@ -105,6 +105,7 @@ type coordinatorRequest struct {
 	PersonName      string
 	TurnOptions     surface.TurnOptions
 	NoQueue         bool
+	BusyDelivery    string
 }
 
 // coordinatorAction sets or clears a coordinator on the host that owns it.
@@ -216,7 +217,7 @@ func (d *Daemon) sendToCoordinator(ctx context.Context, request coordinatorReque
 	}
 	ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()
-	options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, Author: request.Author, PersonName: request.PersonName, TurnOptions: request.TurnOptions}
+	options := surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, Author: request.Author, PersonName: request.PersonName, TurnOptions: request.TurnOptions, BusyDelivery: request.BusyDelivery, SteerAdmitted: surface.SteerAdmitted(ctx, request.SourceSessionID)}
 	reply := coordinatorSendReply{OK: true, Ref: d.coordinator().Ref(spec)}
 	if brief && spec.HostID == "" {
 		if request.Message, reply.Since, err = d.briefRequest(spec, request.SourceSessionID); err != nil {

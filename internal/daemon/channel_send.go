@@ -87,6 +87,9 @@ func (d *Daemon) sendToPeerCoordinator(ctx context.Context, spec registry.Coordi
 	if options.SourceSessionID != "" {
 		request["sourceSessionId"] = options.SourceSessionID
 	}
+	if options.BusyDelivery != "" {
+		request["busyDelivery"] = options.BusyDelivery
+	}
 	if _, err := d.routeSource(ctx, request, host); err != nil {
 		return peerCoordinatorAnswer{}, err
 	}

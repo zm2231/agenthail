@@ -38,7 +38,7 @@ func TestASendToAProjectReachesItsLeadOnAPairedHostWithTheSendersOptions(t *test
 	}
 	gadgetLeadOnRemote(t, local, remote, "remote-a")
 
-	reply := sendAsPerson(local.daemon, `{"action":"coordinator-send","project":"gadget","message":"ship it","author":"person","personName":"Someone Else","model":"gpt-x"}`)
+	reply := sendAsPerson(local.daemon, `{"action":"coordinator-send","project":"gadget","message":"ship it","author":"person","personName":"Someone Else","model":"gpt-x","busyDelivery":"queue"}`)
 	var answer coordinatorSendReply
 	if reply.Status != http.StatusOK || json.Unmarshal(reply.Body, &answer) != nil || answer.Ref != "vps::@gadget-lead" || answer.Result == nil || answer.Started {
 		t.Fatalf("send to the gadget lead: %d %s", reply.Status, reply.Body)
@@ -49,8 +49,8 @@ func TestASendToAProjectReachesItsLeadOnAPairedHostWithTheSendersOptions(t *test
 		t.Fatalf("the paired host delivered nothing: %q", remote.fake.messages)
 	}
 	got, person := remote.fake.options[len(remote.fake.options)-1], remote.fake.persons[len(remote.fake.persons)-1]
-	if got.Model != "gpt-x" || got.Author != surface.AuthorPerson || person != "Ada at her Mac" {
-		t.Fatalf("the paired host delivered with %+v as %q, want the sender's model, the person as author, and the name their own host has for them", got, person)
+	if got.Model != "gpt-x" || got.Author != surface.AuthorPerson || got.BusyDelivery != "queue" || person != "Ada at her Mac" {
+		t.Fatalf("the paired host delivered with %+v as %q, want the sender's model and busy delivery, the person as author, and the name their own host has for them", got, person)
 	}
 }
 

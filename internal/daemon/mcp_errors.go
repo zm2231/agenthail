@@ -17,7 +17,7 @@ func mcpRefusalFor(err error) *mcpRefusal {
 		return &mcpRefusal{Code: "refused", Message: err.Error(), Retryable: true}
 	}
 	mapped, _ := mcpCodeFor(failure.Status, failure.Code)
-	mapped.Message = failure.Message
+	mapped.Message, mapped.actionCode = failure.Message, failure.Code
 	if mapped.Detail == nil && len(failure.Extra) > 0 {
 		mapped.Detail = map[string]any{}
 	}

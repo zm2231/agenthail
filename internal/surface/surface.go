@@ -729,6 +729,8 @@ type SendOptions struct {
 	// SentAt is when the sender sent a message that reaches this host later,
 	// as one a paired host held while this host was unreachable; zero is now.
 	SentAt time.Time `json:"-"`
+	// SteerAdmitted is set in process when a scope check let the sender steer the target.
+	SteerAdmitted bool `json:"-"`
 }
 
 // HoldsForQueue reports whether the send carries parts no steer can deliver,
@@ -845,6 +847,22 @@ func Sender(ctx context.Context) (Session, bool) {
 	}
 	sender, ok := ctx.Value(senderContextKey{}).(Session)
 	return sender, ok
+}
+
+type steerAdmittedContextKey struct{}
+
+// WithSteerAdmitted carries that a scope check already let sourceID steer
+// this action's target; it never leaves the process.
+func WithSteerAdmitted(ctx context.Context, sourceID string) context.Context {
+	return context.WithValue(ctx, steerAdmittedContextKey{}, sourceID)
+}
+
+func SteerAdmitted(ctx context.Context, sourceID string) bool {
+	if ctx == nil || sourceID == "" {
+		return false
+	}
+	admitted, _ := ctx.Value(steerAdmittedContextKey{}).(string)
+	return admitted == sourceID
 }
 
 type personNameContextKey struct{}

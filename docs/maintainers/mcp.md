@@ -160,7 +160,7 @@ A Claude subagent shares its session's credential, so inside a subagent Claude i
 | --- | --- | --- |
 | `agenthail_projects` | The projects on this host and its paired hosts with their coordinators; `conflict` marks a project with coordinators on two hosts | any session |
 | `agenthail_history` | Delivery history (`view: history`, optionally one `sessionId`) or the delivery queue (`view: queue`), newest first and paged with `before` | `read.all` |
-| `agenthail_send` | A message to a session (`target`) or a project's coordinator (`project`, starting its conversation if it has none). `mode: queue` (default) or `now` | control scope; see below |
+| `agenthail_send` | A message to a session (`target`) or a project's coordinator (`project`, starting its conversation if it has none). `mode: queue` or `now`; with no mode, queue, or now for an identity the person set to send now, which falls back to queued with a `notice` where now is refused (see [agent-identities.md](agent-identities.md#default-send-mode)) | control scope; see below |
 | `agenthail_steer`, `agenthail_interrupt` | Steer or interrupt a running turn | control scope, down only |
 | `agenthail_goal` | Set, edit, clear, pause or resume a Codex session's goal, or change its token budget | control scope, down only |
 | `agenthail_answer` | Answer an open request by its ask id: allow or deny a permission request (`always` keeps allowing with the rule the request offers), answer an agent's ask, or pass either on with `escalate` | Only the session the request is routed to, or the voice operator (`control.all`) for the person; a permission request also needs `requests.answer`, and `always` needs `control.all` |
@@ -236,7 +236,7 @@ A local target is then decided in this order:
 
 That refusal, and a paired host's `different_project` for a queued send, are the ones the person can lift for one action: `agenthail_send`, `agenthail_steer`, `agenthail_interrupt` and `agenthail_archive` mark them `detail.approvable: true`, and with `askPerson: true` and a `reason` raise an approval instead of refusing (`control_approvals.go`), answering `{"asked": true, "requestId": ...}`. Every other refusal stays as it is: control flowing up, a session in the caller's own project it neither spawned nor leads, a write across hosts other than a queued send. Other tools that resolve with `mcpControlTarget` are not approvable.
 
-`agenthail_send` with `project` reaches any project's coordinator as a queued message, so a project's coordinator is reachable by project from every session. `mode: now` needs `control.all`: to the caller's own coordinator it is refused as control flowing up, and to another project's with `out_of_scope`, `detail.rule: different_project`.
+`agenthail_send` with `project` reaches any project's coordinator, so a project's coordinator is reachable by project from every session. With no mode, a busy coordinator is steered only by the sender the delivery rule lets steer it (its starter), and otherwise the message waits; `mode: queue` always waits. `mode: now` needs `control.all`: to the caller's own coordinator it is refused as control flowing up, and to another project's with `out_of_scope`, `detail.rule: different_project`. Once admitted, it steers a busy coordinator on this host (see [session-operations.md](session-operations.md)).
 
 ### The CLI from an agent's shell
 
