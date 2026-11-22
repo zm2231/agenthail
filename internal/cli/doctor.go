@@ -164,7 +164,7 @@ func (a *App) cmdDoctor(args []string) error {
 		claudeHookStates[root] = state
 		off, err := surface.ClaudeRootMCPOff(home, root)
 		if err == nil {
-			state, err = claudeMCPState(claudeMCPConfig{root: root, path: surface.ClaudeGlobalConfigPath(home, root), off: off}, surface.RelayExecutable())
+			state, err = claudeMCPState(claudeMCPConfig{root: root, path: surface.ClaudeGlobalConfigPath(home, root), off: off}, relayExecutable())
 		}
 		if err != nil {
 			state = "unknown: " + err.Error()
@@ -189,7 +189,7 @@ func (a *App) cmdDoctor(args []string) error {
 		codexMCP = "unknown: " + err.Error()
 	} else {
 		callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		if codexMCP, err = codexMCPState(callCtx, codexsurface.CodexHomeFromEnv(), off, surface.RelayExecutable()); err != nil {
+		if codexMCP, err = codexMCPState(callCtx, codexsurface.CodexHomeFromEnv(), off, relayExecutable()); err != nil {
 			codexMCP = "unknown: " + err.Error()
 		}
 		cancel()

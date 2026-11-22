@@ -17,6 +17,8 @@ import (
 
 const mcpUsage = "usage: agenthail mcp stdio|install|uninstall|status"
 
+var relayExecutable = surface.RelayExecutable
+
 func (a *App) cmdMCP(args []string) error {
 	if len(args) != 1 {
 		return errors.New(mcpUsage)
@@ -63,7 +65,7 @@ func claudeMCPAt(action string, optOut bool) error {
 	if err != nil {
 		return err
 	}
-	executable := surface.RelayExecutable()
+	executable := relayExecutable()
 	home, _ := os.UserHomeDir()
 	var failed []error
 	for _, config := range configs {
@@ -75,18 +77,17 @@ func claudeMCPAt(action string, optOut bool) error {
 		switch action {
 		case "install":
 			var cleared, changed bool
-			if optOut {
-				cleared, err = surface.SetClaudeRootMCP(home, config.root, true)
-			}
 			switch {
-			case err != nil:
-			case config.off && !cleared:
+			case config.off && !optOut:
 				if changed, err = claudemcp.UninstallAt(config.path); err == nil {
 					line = map[bool]string{true: "removed, since claudeConfigDirs turns it off for this root", false: "off for this root in claudeConfigDirs"}[changed]
 				}
 			default:
 				if changed, err = claudemcp.InstallAt(config.path, executable); err == nil {
 					line = map[bool]string{true: "installed", false: "already installed"}[changed]
+					if optOut {
+						cleared, err = surface.SetClaudeRootMCP(home, config.root, true)
+					}
 				}
 			}
 			if cleared {
@@ -146,17 +147,13 @@ func codexMCPAt(action string, optOut bool) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	executable := surface.RelayExecutable()
+	executable := relayExecutable()
 	var line string
 	switch action {
 	case "install":
 		var cleared, changed bool
-		if optOut && executable != "" {
-			cleared, err = surface.SetCodexMCP(userHome, true)
-		}
 		switch {
-		case err != nil:
-		case off && !cleared && !optOut:
+		case off && !optOut:
 			if changed, err = codexsurface.UninstallCodexRelay(ctx, home); err == nil {
 				line = map[bool]string{true: "removed, since codexMCP turns it off", false: "off in codexMCP"}[changed]
 			}
@@ -165,6 +162,9 @@ func codexMCPAt(action string, optOut bool) error {
 		default:
 			if changed, err = codexsurface.InstallCodexRelay(ctx, home, executable); err == nil {
 				line = map[bool]string{true: "installed", false: "already installed"}[changed]
+				if optOut {
+					cleared, err = surface.SetCodexMCP(userHome, true)
+				}
 			}
 		}
 		if cleared {
