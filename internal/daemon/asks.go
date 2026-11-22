@@ -137,7 +137,7 @@ func askRequest(ask registry.Ask) surface.Request {
 		}
 		questions = append(questions, question)
 	}
-	return surface.Request{ID: ask.ID, Kind: surface.WaitingAsk, Title: ask.Title, Questions: questions, OptionsOnly: ask.Origin == registry.AskOriginDelivery || ask.Origin == registry.AskOriginExtensionGrant || ask.Origin == registry.AskOriginApproval || ask.Origin == registry.AskOriginOAuthGrant, CreatedAt: ask.CreatedAt, Deadline: ask.Deadline}.WithOptionIDs()
+	return surface.Request{ID: ask.ID, Kind: surface.WaitingAsk, Title: ask.Title, Questions: questions, OptionsOnly: ask.Origin == registry.AskOriginDelivery || ask.Origin == registry.AskOriginExtensionGrant || ask.Origin == registry.AskOriginApproval, CreatedAt: ask.CreatedAt, Deadline: ask.Deadline}.WithOptionIDs()
 }
 
 // askHearer is who an ask goes to first: its project's lead, else its
@@ -538,8 +538,6 @@ func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session
 		return d.answerExtensionGrant(ctx, ask, response, p, by)
 	case registry.AskOriginApproval:
 		return d.answerApproval(ctx, ask, response, p, by)
-	case registry.AskOriginOAuthGrant:
-		return d.answerOAuthGrant(ask, response, p, by)
 	case registry.AskOriginExtensionChange:
 		d.withdrawExtensionChangeAsk(ask)
 		return actionResult{}, staleRequest()

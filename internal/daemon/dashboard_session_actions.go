@@ -70,7 +70,7 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		return d.doPR(ctx, p, session, request)
 	}
 	if request.Action == "respond" {
-		if ask, found, err := d.Registry.Ask(strings.TrimSpace(request.RequestID)); err == nil && found && (ask.Origin == registry.AskOriginDelivery || ask.Origin == registry.AskOriginLedger || ask.Origin == registry.AskOriginApproval || ask.Origin == registry.AskOriginExtensionGrant || ask.Origin == registry.AskOriginOAuthGrant) {
+		if ask, found, err := d.Registry.Ask(strings.TrimSpace(request.RequestID)); err == nil && found && (ask.Origin == registry.AskOriginDelivery || ask.Origin == registry.AskOriginLedger || ask.Origin == registry.AskOriginApproval || ask.Origin == registry.AskOriginExtensionGrant) {
 			return d.answerAsk(ctx, nil, session, ask.ID, request.Decision, p, request.SourceSessionID, "")
 		}
 	}
