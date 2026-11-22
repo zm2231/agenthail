@@ -70,8 +70,14 @@ func TestAConnectedAppReadsAndQueuesToACoordinatorButCannotControlOrSpawn(t *tes
 	if !slices.Equal(seen, want) {
 		t.Fatalf("a connected app sees %v, want %v", seen, want)
 	}
-	if out, refused := callMCP(t, app, "agenthail_whoami", nil); refused || out["role"].(map[string]any)["name"] != agentroles.ConnectedApp {
+	out, refused := callMCP(t, app, "agenthail_whoami", nil)
+	if refused || out["role"].(map[string]any)["name"] != agentroles.ConnectedApp {
 		t.Fatalf("whoami: %v", out)
+	}
+	for _, capability := range out["capabilities"].([]any) {
+		if capability == "spawn" || strings.HasPrefix(capability.(string), "control.") {
+			t.Fatalf("a connected app holds %s: %v", capability, out["capabilities"])
+		}
 	}
 	if out, refused := callMCP(t, app, "agenthail_read", map[string]any{}); refused {
 		t.Fatalf("reading its own inbox was refused: %v", out)
@@ -88,7 +94,9 @@ func TestAConnectedAppReadsAndQueuesToACoordinatorButCannotControlOrSpawn(t *tes
 	if out, refused := callMCP(t, app, "agenthail_send", map[string]any{"project": "widget", "message": "queued for the lead", "clientRequestId": "queued"}); refused {
 		t.Fatalf("a connected app could not queue to the coordinator: %v", out)
 	}
-	if !slices.ContainsFunc(fake.sent, func(message string) bool { return strings.Contains(message, "queued for the lead") }) || slices.ContainsFunc(fake.sent, func(message string) bool { return strings.Contains(message, "direct") || strings.Contains(message, "steer the lead") }) {
+	if !slices.ContainsFunc(fake.sent, func(message string) bool { return strings.Contains(message, "queued for the lead") }) || slices.ContainsFunc(fake.sent, func(message string) bool {
+		return strings.Contains(message, "direct") || strings.Contains(message, "steer the lead")
+	}) {
 		t.Fatalf("delivered: %q", fake.sent)
 	}
 }

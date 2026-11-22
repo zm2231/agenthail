@@ -76,7 +76,7 @@ Session commands:
   roles show <role> [--json]    What a role may do on its own, do and tell you, or must ask you; its tools and limits
   roles set <role> <action> allow|notify|ask|default
                                  Change one action for a role
-  roles reach <role> descendants|project|all
+  roles reach <role> self|descendants|project|all
                                  Which sessions a role acts on beyond its own
   roles limit <role> depth|running <n>
                                  How deep its sessions nest and how many it runs; 0 is the default
