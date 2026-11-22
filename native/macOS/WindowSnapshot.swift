@@ -86,7 +86,7 @@ enum WindowSnapshot {
         let views = SnapshotViews(request.view)
         let project = views.project ?? (request.session == nil ? model.mainPane.shownProjectID : nil)
         if let tab = views.settings {
-            return await settings(tab: tab, size: size ?? defaultSize, model: model, budget: budget)
+            return await settings(tab: tab, size: size ?? defaultSize, model: model, budget: budget, rev: rev)
         }
         return await offscreen(session: session, project: project, views: views, size: size ?? model.mainWindow?.frame.size ?? defaultSize, model: model, voice: voice, budget: budget, rev: rev)
     }
@@ -132,7 +132,7 @@ enum WindowSnapshot {
         return WindowImage.png(of: window)
     }
 
-    static func settings(tab: Int, size: CGSize, model: AgenthailModel, budget: SnapshotBudget) async -> Result<Data, WindowImage.Failure> {
+    static func settings(tab: Int, size: CGSize, model: AgenthailModel, budget: SnapshotBudget, rev: String? = nil) async -> Result<Data, WindowImage.Failure> {
         guard WindowImage.system != nil else { return .failure(.unavailable) }
         let window = SnapshotWindow(contentRect: CGRect(origin: SnapshotWindow.hidden, size: size), styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -146,6 +146,7 @@ enum WindowSnapshot {
             window.close()
         }
         await budget.pause(.seconds(2))
+        if let failure = model.interface.revisionFailure(for: rev) { return .failure(failure) }
         return WindowImage.png(of: window)
     }
 

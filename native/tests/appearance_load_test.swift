@@ -209,6 +209,7 @@ struct AppearanceLoadTest {
         shown.load(from: api)
         await wait { shown.config.rev == "later" }
         check(shown.captureFailure(for: "mesh", backdrop: backdrop) == .changed, "a capture fails once a later revision replaces the requested one")
+        check(shown.revisionFailure(for: "mesh") == .changed && shown.revisionFailure(for: "later") == nil && shown.revisionFailure(for: nil) == nil, "a Settings capture fails only when a later revision replaced the requested one")
         print("appearance load: ok")
     }
 }

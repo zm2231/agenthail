@@ -58,9 +58,14 @@ final class InterfaceStore: ObservableObject {
 
     func captureFailure(for rev: String?, backdrop: WindowBackdrop?) -> WindowImage.Failure? {
         guard let rev, !rev.isEmpty else { return nil }
-        guard config.rev == rev else { return .changed }
+        if let failure = revisionFailure(for: rev) { return failure }
         guard snapshotProblem(for: rev) == nil, backdrop?.shows(self) == true else { return .undrawn }
         return nil
+    }
+
+    func revisionFailure(for rev: String?) -> WindowImage.Failure? {
+        guard let rev, !rev.isEmpty, config.rev != rev else { return nil }
+        return .changed
     }
 
     /// Shows a value at once, before it is written, while a slider moves.
