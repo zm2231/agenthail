@@ -89,14 +89,14 @@ func (d *Daemon) sessionProject(session surface.Session) (*projectresolve.Catalo
 
 // recordedProject is the project discovery last recorded for the session;
 // found is false before discovery has recorded it.
-func (d *Daemon) recordedProject(session surface.Session) (project *projectresolve.CatalogProject, found bool, err error) {
-	raw, found, err := d.Registry.CatalogSessionProject(session.ID)
+func (d *Daemon) recordedProject(sessionID string) (project *projectresolve.CatalogProject, found bool, err error) {
+	raw, found, err := d.Registry.CatalogSessionProject(sessionID)
 	if err != nil || !found {
 		return nil, found, err
 	}
 	project, err = decodeRecordedProject(raw)
 	if err != nil {
-		return nil, true, fmt.Errorf("read the stored project of %s: %w", session.ID, err)
+		return nil, true, fmt.Errorf("read the stored project of %s: %w", sessionID, err)
 	}
 	return project, true, nil
 }

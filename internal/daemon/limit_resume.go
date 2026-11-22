@@ -90,14 +90,12 @@ func (d *Daemon) limitResumeSwitch() func(sessionID string) bool {
 			return answer
 		}
 		answer := hostSetting
-		if session, err := d.Registry.Session(sessionID); err == nil {
-			if project, _, err := d.recordedProject(*session); err == nil && project != nil {
-				switch value, _ := d.Registry.ProjectSettingValue(project.ID, registry.ProjectSettingLimitResume); value {
-				case registry.ProjectLimitResumeOn:
-					answer = true
-				case registry.ProjectLimitResumeOff:
-					answer = false
-				}
+		if project, _, err := d.recordedProject(sessionID); err == nil && project != nil {
+			switch value, _ := d.Registry.ProjectSettingValue(project.ID, registry.ProjectSettingLimitResume); value {
+			case registry.ProjectLimitResumeOn:
+				answer = true
+			case registry.ProjectLimitResumeOff:
+				answer = false
 			}
 		}
 		answers[sessionID] = answer
