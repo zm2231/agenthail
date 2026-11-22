@@ -177,6 +177,7 @@ type federationNode struct {
 	server  *httptest.Server
 	address string
 	cancel  context.CancelFunc
+	serving context.CancelCauseFunc
 	gate    *actionGate
 }
 
@@ -523,6 +524,9 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 		n.handler.ServeHTTP(w, r)
 	})
 	server := httptest.NewUnstartedServer(gated)
+	serving, stopServing := context.WithCancelCause(context.Background())
+	server.Config.BaseContext = func(net.Listener) context.Context { return serving }
+	n.serving = stopServing
 	if listener != nil {
 		server.Listener.Close()
 		server.Listener = listener
@@ -533,7 +537,9 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 	t.Cleanup(n.stop)
 }
 
+// Close waits for active requests, so a stream a mirror reopens mid-stop must end with its context.
 func (n *federationNode) stop() {
+	n.serving(errDaemonStopping)
 	n.server.CloseClientConnections()
 	n.server.Close()
 }
