@@ -423,3 +423,38 @@ func TestACodeUsedTwiceLeavesNoLiveGrantEvenWhenBothUsesRace(t *testing.T) {
 		}
 	}
 }
+
+func TestApprovalsThatExpireUnansweredFreeTheirPlaceAndWithdrawTheirAsks(t *testing.T) {
+	f := newOAuthFixture(t)
+	client, err := f.r.RegisterOAuthClient("Kat", []string{oauthTestCallback}, 64, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	submit := func() int {
+		form := url.Values{"identity": {"scout"}, "response_type": {"code"}, "client_id": {client.ID}, "redirect_uri": {oauthTestCallback}, "code_challenge": {"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"}, "code_challenge_method": {"S256"}}
+		response, err := f.browser.PostForm(f.issuer+mcpoauth.AuthorizePath, form)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		return response.StatusCode
+	}
+	for range oauthOpenAuthorizations {
+		if status := submit(); status != http.StatusOK {
+			t.Fatalf("an approval within the limit got %d", status)
+		}
+	}
+	if status := submit(); status != http.StatusTooManyRequests {
+		t.Fatalf("a ninth open approval got %d", status)
+	}
+	m := f.d.remoteMCP()
+	m.oauth.mu.Lock()
+	m.sweepOAuthLocked(time.Now().Add(oauthAuthorizationLife + time.Second))
+	m.oauth.mu.Unlock()
+	if open, err := f.r.OpenAsks(); err != nil || len(open) != 0 {
+		t.Fatalf("expired approvals left asks open: %d err=%v", len(open), err)
+	}
+	if status := submit(); status != http.StatusOK {
+		t.Fatalf("expired approvals still hold their places: %d", status)
+	}
+}

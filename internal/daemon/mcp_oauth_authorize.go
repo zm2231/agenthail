@@ -86,7 +86,7 @@ func (m *remoteMCP) oauthAsk(w http.ResponseWriter, r *http.Request, req mcpoaut
 	s := m.oauth
 	s.mu.Lock()
 	m.sweepOAuthLocked(time.Now())
-	if len(s.pending) >= oauthOpenAuthorizations {
+	if m.openOAuthApprovalsLocked() >= oauthOpenAuthorizations {
 		s.mu.Unlock()
 		mcpoauth.MessagePage{Title: "Too many requests are waiting", Text: "Try again in a few minutes."}.Write(w, http.StatusTooManyRequests)
 		return
@@ -94,12 +94,15 @@ func (m *remoteMCP) oauthAsk(w http.ResponseWriter, r *http.Request, req mcpoaut
 	s.pending[id] = pending
 	s.mu.Unlock()
 	d.background.start(func(ctx context.Context) {
-		select {
-		case <-time.After(time.Until(pending.expires.Add(oauthCodeLife))):
-			s.mu.Lock()
-			m.sweepOAuthLocked(time.Now())
-			s.mu.Unlock()
-		case <-ctx.Done():
+		for _, at := range []time.Time{pending.expires, pending.expires.Add(oauthCodeLife)} {
+			select {
+			case <-time.After(time.Until(at)):
+				s.mu.Lock()
+				m.sweepOAuthLocked(time.Now())
+				s.mu.Unlock()
+			case <-ctx.Done():
+				return
+			}
 		}
 	})
 	if remote, err := d.Registry.RemoteIdentityNamed(name); err == nil {
@@ -177,6 +180,16 @@ func (m *remoteMCP) oauthWait(w http.ResponseWriter, r *http.Request, issuer, id
 		s.mu.Unlock()
 		mcpoauth.WaitingPage{Client: pending.client.Name, Identity: pending.identity, Code: pending.match, Refresh: mcpoauth.AuthorizePath + "?pending=" + url.QueryEscape(id)}.Write(w)
 	}
+}
+
+func (m *remoteMCP) openOAuthApprovalsLocked() int {
+	open := 0
+	for _, pending := range m.oauth.pending {
+		if pending.decision == "" {
+			open++
+		}
+	}
+	return open
 }
 
 func (m *remoteMCP) sweepOAuthLocked(now time.Time) {
