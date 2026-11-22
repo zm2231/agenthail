@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
@@ -132,10 +133,17 @@ func (f *orphanFixture) delegateAndHear(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	turns := f.host.Turns(t, orphanConversation)
+	turns := f.heardTurn(t)
 	if f.resumes(t) != 1 || len(turns) != 1 || turnOrigin(t, turns[0]) != "human" || manager.Count("hello") != 0 || !strings.Contains(service.View("phone").Message, "Woke orphan") || failed(service.View("phone")) {
 		t.Fatalf("resumes=%d turns=%+v peer=%d message=%q", f.resumes(t), turns, manager.Count("hello"), service.View("phone").Message)
 	}
+}
+
+// The fake CLI records the turn just after the transcript line the reply is spoken from.
+func (f *orphanFixture) heardTurn(t *testing.T) []claudehosttest.Turn {
+	t.Helper()
+	testkit.Eventually(t, "the turn record", 5*time.Second, func() bool { return len(f.host.Turns(t, orphanConversation)) > 0 })
+	return f.host.Turns(t, orphanConversation)
 }
 
 func TestVoiceDelegationToEndedBackgroundJobResumesItInTheHostAndSpeaksTheReply(t *testing.T) {
@@ -160,7 +168,7 @@ func TestVoiceDelegationToAHostSessionIsAPersonsTurnAndSpeaksTheReply(t *testing
 	service, call := connectVoice(t, f, "orphan")
 	delegate(t, service, "hello")
 	testkit.Eventually(t, "the spoken reply", 15*time.Second, func() bool { return call.said("echo:hello") })
-	turns := f.host.Turns(t, orphanConversation)
+	turns := f.heardTurn(t)
 	if f.resumes(t) != 1 || len(turns) != 1 || turnOrigin(t, turns[0]) != "human" || failed(service.View("phone")) {
 		t.Fatalf("resumes=%d turns=%+v message=%q", f.resumes(t), turns, service.View("phone").Message)
 	}
