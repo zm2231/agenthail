@@ -192,6 +192,21 @@ func TestIdentityRemoteShowsItsTokenOnceAndDoctorReportsTheMode(t *testing.T) {
 	if health, _ := remoteMCPHealthOf(r, time.Now()); len(health.Problems) != 0 {
 		t.Fatalf("problems=%v", health.Problems)
 	}
+	if listed := run("identity", "list"); !strings.Contains(listed, "remote: service token id-1,") {
+		t.Fatalf("identity list behind Access: %q", listed)
+	}
+	run("identity", "access", "clear")
+	unchecked := "token only (no Access settings, so its service token id-1 binding is not checked)"
+	if listed := run("identity", "list"); !strings.Contains(listed, "remote: "+unchecked) {
+		t.Fatalf("identity list after access clear: %q", listed)
+	}
+	if health, _ := remoteMCPHealthOf(r, time.Now()); !strings.Contains(health.String(), "@scout: "+unchecked) {
+		t.Fatalf("health after access clear=%s", health)
+	}
+	run("identity", "access", "set", "--team", "example-team", "--aud", "tag")
+	if listed := run("identity", "list"); !strings.Contains(listed, "remote: service token id-1,") {
+		t.Fatalf("identity list once Access is set again: %q", listed)
+	}
 	if _, err := captureStdout(t, func() error {
 		return app.Run([]string{"identity", "remote", "scout", "--access-client-id", "a", "--access-email", "b@example.com"})
 	}); err == nil {

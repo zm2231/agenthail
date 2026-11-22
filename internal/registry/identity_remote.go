@@ -29,14 +29,22 @@ type RemoteIdentity struct {
 	TokenHash  string    `json:"-"`
 }
 
-func (r RemoteIdentity) Binding() string {
+// Binding is what a request must carry besides the token; a stored Access binding is checked only while Access settings are set.
+func (r RemoteIdentity) Binding(accessSet bool) string {
+	stored := ""
 	switch {
 	case r.ClientID != "":
-		return "service token " + r.ClientID
+		stored = "service token " + r.ClientID
 	case r.Email != "":
-		return "email " + r.Email
+		stored = "email " + r.Email
 	}
-	return "token only"
+	switch {
+	case stored == "":
+		return "token only"
+	case accessSet:
+		return stored
+	}
+	return "token only (no Access settings, so its " + stored + " binding is not checked)"
 }
 
 func remoteTokenHash(token string) string {

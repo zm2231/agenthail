@@ -63,6 +63,10 @@ func (a *App) cmdIdentity(args []string) error {
 		if err != nil {
 			return err
 		}
+		_, _, accessSet, err := reg.AccessSettings()
+		if err != nil {
+			return err
+		}
 		remoteByName := map[string]registry.RemoteIdentity{}
 		for _, remote := range remotes {
 			remoteByName[remote.Name] = remote
@@ -77,7 +81,7 @@ func (a *App) cmdIdentity(args []string) error {
 		for _, identity := range identities {
 			line := fmt.Sprintf("@%-20s unread=%d total=%d since %s", identity.Name, identity.Unread, identity.Total, identity.CreatedAt.Local().Format(time.DateTime))
 			if remote, ok := remoteByName[identity.Name]; ok {
-				line += "  remote: " + remote.Binding() + ", last seen " + lastSeen(remote.LastSeen)
+				line += "  remote: " + remote.Binding(accessSet) + ", last seen " + lastSeen(remote.LastSeen)
 			}
 			fmt.Println(line)
 		}
@@ -133,16 +137,20 @@ func (a *App) identityRemote(reg *registry.Registry, positional, args []string, 
 	if err != nil {
 		return err
 	}
-	if jsonOut {
-		return emit(map[string]any{"identity": name, "binding": remote.Binding(), "token": token})
+	_, _, accessSet, err := reg.AccessSettings()
+	if err != nil {
+		return err
 	}
-	fmt.Printf("@%s can now call this daemon's /mcp from another machine (%s).\n", name, remote.Binding())
+	if jsonOut {
+		return emit(map[string]any{"identity": name, "binding": remote.Binding(accessSet), "token": token})
+	}
+	fmt.Printf("@%s can now call this daemon's /mcp from another machine (%s).\n", name, remote.Binding(accessSet))
 	fmt.Printf("Its token, shown only now; any earlier one stops working:\n\n  %s\n\n", token)
 	fmt.Println("Send it as Authorization: Bearer <token> on every request.")
 	if remote.ClientID != "" || remote.Email != "" {
 		fmt.Println("Through Cloudflare Access, also send the service token's CF-Access-Client-Id and CF-Access-Client-Secret.")
 	}
-	if _, _, configured, err := reg.AccessSettings(); err == nil && !configured {
+	if !accessSet {
 		fmt.Println("No Access settings are set, so the token alone gets in; set them with: agenthail identity access set --team <team> --aud <tag>")
 	}
 	return nil
