@@ -50,6 +50,9 @@ func (d *Daemon) runEventDeliveries(ctx context.Context) {
 		if err != nil {
 			d.logRuntimeError("event deliveries", err)
 		}
+		if m.afterDueRead != nil {
+			m.afterDueRead()
+		}
 		mu.Lock()
 		for _, event := range due {
 			if inFlight[event.ID] || len(inFlight) >= eventDeliveries {

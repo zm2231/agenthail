@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -333,6 +334,52 @@ func TestARemoteIdentityIsWokenBySignedWebhooksThatCarryOnlyACount(t *testing.T)
 	if history := f.eventHistory(t); !strings.Contains(history, "events/unsubscribe by @scout inbox.unread to "+w.url+"/hooks/kat => unsubscribed "+subscribed.ID) || !strings.Contains(history, "=> no subscription "+subscribed.ID) {
 		t.Fatalf("history:\n%s", history)
 	}
+}
+
+func TestADeliveryThatFinishesAfterTheDueReadIsNotSentAgain(t *testing.T) {
+	f, w, start := eventsFixture(t)
+	session := f.eventsSession(t)
+	if _, err := subscribe(t.Context(), session, w.url+"/hook", w.secret, ""); err != nil {
+		t.Fatal(err)
+	}
+	w.next(t, "the verification handshake")
+	m := f.d.remoteMCP()
+	var armed atomic.Bool
+	listed := make(chan struct{})
+	m.afterDueRead = func() {
+		if !armed.CompareAndSwap(true, false) {
+			return
+		}
+		select {
+		case <-m.eventWake:
+		default:
+		}
+		close(listed)
+		<-m.eventWake
+	}
+	w.mu.Lock()
+	w.gate = make(chan struct{})
+	gate := w.gate
+	w.mu.Unlock()
+	start()
+	f.deliver(t, "one")
+	select {
+	case <-w.gated:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no event reached the gate")
+	}
+	armed.Store(true)
+	m.pokeEvents()
+	select {
+	case <-listed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the loop did not read the due events while the delivery was held")
+	}
+	close(gate)
+	if told := w.next(t, "the held event"); told.body["data"].(map[string]any)["unread"] != float64(1) {
+		t.Fatalf("held event=%v", told.body)
+	}
+	w.quiet(t, "after the delivery finished behind a stale due read", 500*time.Millisecond)
 }
 
 func TestAWebhookIsRetriedWithItsEventIDAndA410EndsTheSubscription(t *testing.T) {

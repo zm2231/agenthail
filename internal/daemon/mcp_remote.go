@@ -55,6 +55,8 @@ type remoteMCP struct {
 	afterEpoch   func()
 
 	eventWake chan struct{}
+	// afterDueRead runs between the delivery loop's due read and its in-flight check, for tests.
+	afterDueRead func()
 	// webhookClient, eventRetries and eventTrialEvery are replaced by tests.
 	webhookClient   *http.Client
 	eventRetries    []time.Duration
