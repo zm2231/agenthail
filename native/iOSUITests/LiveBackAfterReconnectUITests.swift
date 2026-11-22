@@ -9,10 +9,9 @@ final class LiveBackAfterReconnectUITests: XCTestCase {
     func testBackReturnsToAnOverflowingSessionsListAfterAnAlertInterruptsTheOpen() throws {
         let control = try LiveControl()
         var alerts = 0
-        addUIInterruptionMonitor(withDescription: "app alert") { alert in
+        monitorLiveAlerts { alert in
             alerts += 1
             alert.buttons.firstMatch.tap()
-            return true
         }
         let app = launchForLiveHosts(["--live-test-alert-on-connect"])
         let downHost = try pairLiveHost(0, control: control, in: app)

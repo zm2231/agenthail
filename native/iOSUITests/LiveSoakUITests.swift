@@ -9,7 +9,7 @@ final class LiveSoakUITests: XCTestCase {
     func testTheAppStaysUpWithOneHostDownThroughListsStreamingInboxAndReconnects() throws {
         let control = try LiveControl()
         let seconds = Double(ProcessInfo.processInfo.environment["AGENTHAIL_SOAK_SECONDS"] ?? "") ?? 300
-        addUIInterruptionMonitor(withDescription: "app alert") { [weak self] alert in
+        monitorLiveAlerts { [weak self] alert in
             let texts = alert.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " | ")
             print("ios-soak: alert: \(texts)")
             let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -17,7 +17,6 @@ final class LiveSoakUITests: XCTestCase {
             shot.lifetime = .keepAlways
             self?.add(shot)
             alert.buttons.firstMatch.tap()
-            return true
         }
         let app = launchForLiveHosts()
         let downHost = try pairLiveHost(0, control: control, in: app)

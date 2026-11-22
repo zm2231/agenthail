@@ -9,22 +9,23 @@ final class LivePushSetupUITests: XCTestCase {
     func testAPushSetupThatKeepsFailingOnReconnectStaysOutOfTheWayAndShowsInSettings() throws {
         let control = try LiveControl()
         var appAlerts: [String] = []
-        addUIInterruptionMonitor(withDescription: "alerts") { alert in
+        monitorLiveAlerts { alert in
             if alert.label == "Agenthail" {
                 appAlerts.append(alert.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " | "))
-                alert.buttons.firstMatch.tap()
-            } else if alert.buttons["Allow"].exists {
-                alert.buttons["Allow"].tap()
-            } else {
-                alert.buttons.firstMatch.tap()
             }
-            return true
+            alert.buttons.firstMatch.tap()
         }
         let app = launchForLiveHosts()
         _ = try pairLiveHost(0, control: control, in: app)
         let host = try pairLiveHost(1, control: control, in: app)
         let row = liveRow("Check the release notes", host: host, in: app).firstMatch
         requireLive(reveal(row, in: app, timeout: 30), "the host's conversation is listed", app)
+        app.tab("Settings").tapWhenReady(timeout: 20)
+        let status = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Status, ")).firstMatch
+        for _ in 0..<8 where !status.exists { app.swipeUp() }
+        requireLive(status.exists, "Settings shows the notification status", app)
+        requireLive(status.label != "Status, Not allowed", "notifications were denied before this test, so no host can fail to set them up", app)
+        app.tab("Sessions").tapWhenReady(timeout: 20)
 
         for cycle in 1...2 {
             XCUIDevice.shared.press(.home)
