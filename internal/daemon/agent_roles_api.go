@@ -22,9 +22,10 @@ import (
 var roleNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}$`)
 
 func (r resolvedRole) view() daemonapi.AgentRoleView {
-	view := daemonapi.AgentRoleView{Name: r.Name, BuiltIn: r.BuiltIn, Edited: r.Edited, Description: r.Description, Reach: r.Reach, Decisions: map[string]string{}, Definition: r.Role.Normalized(), AllTools: r.Tools == nil, Depth: r.DepthLimit(), Running: r.RunningLimit()}
+	view := daemonapi.AgentRoleView{Name: r.Name, BuiltIn: r.BuiltIn, Edited: r.Edited, Description: r.Description, Reach: r.Reach, Decisions: map[string]string{}, EffectiveDefaults: map[string]string{}, Definition: r.Role.Normalized(), AllTools: r.Tools == nil, Depth: r.DepthLimit(), Running: r.RunningLimit()}
 	for _, action := range agentroles.Actions {
 		view.Decisions[action.Name] = r.Decision(action.Name)
+		view.EffectiveDefaults[action.Name] = r.DefaultDecision(action)
 	}
 	for _, tool := range agenttools.Tools {
 		if r.Sees(tool.Name) {

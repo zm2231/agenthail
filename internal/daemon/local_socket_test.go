@@ -99,3 +99,36 @@ func TestAnAgentWhoseClaudeRecordIsTornCannotChangeRoles(t *testing.T) {
 		t.Fatalf("a refused write left assignments %v (%v)", assignments, err)
 	}
 }
+
+func TestEachRoleCarriesTheDefaultItsReachGivesEveryAction(t *testing.T) {
+	d, _, _, _ := mcpSocketDaemon(t)
+	stop, err := d.startLocalSocket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(stop)
+	put := daemonapi.AgentRoleRequest{Op: "put", Name: "narrow", Role: agentroles.Role{Reach: agentroles.ReachDescendants, Actions: map[string]string{"project-rename": agentroles.Notify}}}
+	status, body := localSocketPost(t, put)
+	var view daemonapi.AgentRolesView
+	if status != http.StatusOK || json.Unmarshal([]byte(body), &view) != nil {
+		t.Fatalf("put answered %d %s", status, body)
+	}
+	roles := map[string]daemonapi.AgentRoleView{}
+	for _, role := range view.Roles {
+		roles[role.Name] = role
+	}
+	narrow, lead := roles["narrow"], roles[agentroles.Lead]
+	if narrow.EffectiveDefaults["project-rename"] != agentroles.Ask || narrow.Decisions["project-rename"] != agentroles.Notify {
+		t.Fatalf("a role without project reach: default %q, decision %q", narrow.EffectiveDefaults["project-rename"], narrow.Decisions["project-rename"])
+	}
+	if lead.EffectiveDefaults["project-rename"] != agentroles.Allow || narrow.EffectiveDefaults["session-create-remote"] != agentroles.Notify {
+		t.Fatalf("lead default %q, narrow remote-start default %q", lead.EffectiveDefaults["project-rename"], narrow.EffectiveDefaults["session-create-remote"])
+	}
+	for _, role := range view.Roles {
+		for _, action := range agentroles.Actions {
+			if _, set := role.Definition.Actions[action.Name]; !set && role.EffectiveDefaults[action.Name] != role.Decisions[action.Name] {
+				t.Fatalf("%s %s: the default shown is %q but an agent gets %q", role.Name, action.Name, role.EffectiveDefaults[action.Name], role.Decisions[action.Name])
+			}
+		}
+	}
+}

@@ -9,6 +9,9 @@ type AgentRoleView struct {
 	Description string            `json:"description"`
 	Reach       string            `json:"reach"`
 	Decisions   map[string]string `json:"decisions"`
+	// EffectiveDefaults is each action's decision when the role sets none,
+	// which depends on its reach.
+	EffectiveDefaults map[string]string `json:"effectiveDefaults"`
 	// Definition is the role as stored, which a change edits and puts back.
 	Definition agentroles.Role `json:"definition"`
 	Tools      []string        `json:"tools"`
