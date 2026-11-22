@@ -150,15 +150,28 @@ type DueEvent struct {
 // The join on token_hash ends delivery the moment the identity's credentials change.
 const liveEventFrom = ` FROM mcp_event_subscriptions s JOIN identity_remote r ON r.identity_id=s.identity_id AND r.token_hash=s.token_hash`
 
+const dueEventsQuery = `SELECT ` + eventSubscriptionColumns + `,u.newest,u.unread` + liveEventFrom + `
+		JOIN (SELECT identity_id,MAX(id) newest,COUNT(*) unread FROM agent_inbox WHERE read_at_ms=0 GROUP BY identity_id) u ON u.identity_id=s.identity_id AND u.newest>s.notified_through` +
+	` WHERE (s.suspended_at_ms=0 OR s.suspended_at_ms<=?2) AND s.deferred_until_ms<=?1`
+
+func scanDueEvent(row rowScanner) (DueEvent, error) {
+	var due DueEvent
+	sub, err := scanEventSubscription(row, &due.Newest, &due.Unread)
+	due.EventSubscription = sub
+	return due, err
+}
+
 func (r *Registry) DueEvents(now time.Time, trialEvery time.Duration) ([]DueEvent, error) {
-	return queryRows(r.read, []DueEvent{}, func(row rowScanner) (DueEvent, error) {
-		var due DueEvent
-		sub, err := scanEventSubscription(row, &due.Newest, &due.Unread)
-		due.EventSubscription = sub
-		return due, err
-	}, `SELECT `+eventSubscriptionColumns+`,u.newest,u.unread`+liveEventFrom+`
-		JOIN (SELECT identity_id,MAX(id) newest,COUNT(*) unread FROM agent_inbox WHERE read_at_ms=0 GROUP BY identity_id) u ON u.identity_id=s.identity_id AND u.newest>s.notified_through`+
-		` WHERE (s.suspended_at_ms=0 OR s.suspended_at_ms<=?2) AND s.deferred_until_ms<=?1 ORDER BY s.id`, now.UnixMilli(), now.Add(-trialEvery).UnixMilli())
+	return queryRows(r.read, []DueEvent{}, scanDueEvent, dueEventsQuery+` ORDER BY s.id`, now.UnixMilli(), now.Add(-trialEvery).UnixMilli())
+}
+
+// DueEvent rereads one subscription, since a delivery that finished after a DueEvents read already told that mail.
+func (r *Registry) DueEvent(id string, now time.Time, trialEvery time.Duration) (DueEvent, bool, error) {
+	due, err := scanDueEvent(r.read.QueryRow(dueEventsQuery+` AND s.id=?3`, now.UnixMilli(), now.Add(-trialEvery).UnixMilli(), id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return DueEvent{}, false, nil
+	}
+	return due, err == nil, err
 }
 
 func (r *Registry) LiveEventSubscription(id string) (EventSubscription, bool, error) {

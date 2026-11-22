@@ -113,3 +113,32 @@ func TestAnUpgradeKeepsAnEventSubscriptionThatWasSetToExpire(t *testing.T) {
 		t.Fatalf("a build without the migration opened the upgraded registry: %v", err)
 	}
 }
+
+func TestASubscriptionToldAfterTheDueListWasReadIsNoLongerDue(t *testing.T) {
+	r, subscribe := eventSubscriber(t)
+	sub, err := subscribe(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, uuid := range []string{"a", "b"} {
+		if _, _, err := r.StoreInboxMessage(InboxMessage{Identity: sub.IdentityID, UUID: uuid, Message: uuid}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	listed, err := r.DueEvents(time.Now(), time.Hour)
+	if err != nil || len(listed) != 1 || listed[0].Unread != 2 {
+		t.Fatalf("due=%+v err=%v", listed, err)
+	}
+	if err := r.EventDelivered(sub.ID, sub.Generation, listed[0].Newest); err != nil {
+		t.Fatal(err)
+	}
+	if due, still, err := r.DueEvent(sub.ID, time.Now(), time.Hour); err != nil || still {
+		t.Fatalf("after the delivery: %+v due=%v err=%v, want it told", due, still, err)
+	}
+	if _, _, err := r.StoreInboxMessage(InboxMessage{Identity: sub.IdentityID, UUID: "c", Message: "c"}); err != nil {
+		t.Fatal(err)
+	}
+	if due, still, err := r.DueEvent(sub.ID, time.Now(), time.Hour); err != nil || !still || due.Unread != 3 {
+		t.Fatalf("after new mail: %+v due=%v err=%v, want 3 unread", due, still, err)
+	}
+}

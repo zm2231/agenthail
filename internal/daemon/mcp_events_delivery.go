@@ -59,7 +59,7 @@ func (d *Daemon) runEventDeliveries(ctx context.Context) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				m.deliverEvent(ctx, event)
+				m.deliverEvent(ctx, event.ID)
 				mu.Lock()
 				delete(inFlight, event.ID)
 				mu.Unlock()
@@ -81,7 +81,15 @@ func retryable(status int) bool {
 	return status == 0 || status == http.StatusRequestTimeout || status == http.StatusTooEarly || status == http.StatusTooManyRequests || status >= 500
 }
 
-func (m *remoteMCP) deliverEvent(ctx context.Context, event registry.DueEvent) {
+func (m *remoteMCP) deliverEvent(ctx context.Context, id string) {
+	event, due, err := m.d.Registry.DueEvent(id, time.Now(), m.eventTrialEvery)
+	if err != nil {
+		m.d.logRuntimeError("event deliveries", err)
+		return
+	}
+	if !due {
+		return
+	}
 	occurrence := eventOccurrence{EventID: "evt_" + uuid.NewString(), Name: event.Name, Timestamp: time.Now().UTC().Format(time.RFC3339), Data: map[string]int{"unread": event.Unread}}
 	body, err := json.Marshal(occurrence)
 	if err != nil {
