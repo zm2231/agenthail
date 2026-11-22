@@ -19,9 +19,9 @@ final class TurnSettingsFlowTests: XCTestCase {
         XCTAssertEqual(change["value"] as? String, "high")
         try await waitUntil { model.selectedDetail?.turnSettings?.setting(TurnSetting.effort)?.value == "high" }
 
-        model.composer = "Use the new effort"
-        model.send(to: fixture.session)
-        try await waitUntil { model.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 2 }
+        model.composerSession.composer = "Use the new effort"
+        model.composerSession.send(to: fixture.session)
+        try await waitUntil { model.composerSession.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 2 }
         let send = TurnSettingsFlowProtocol.state.actions[1]
         XCTAssertEqual(send["action"] as? String, "send")
         XCTAssertNil(send["effort"])
@@ -35,10 +35,10 @@ final class TurnSettingsFlowTests: XCTestCase {
         let model = makeModel()
         model.selectedSessionID = fixture.session.id
         model.selectedDetail = fixture.detail
-        model.composer = "Queue this instruction"
+        model.composerSession.composer = "Queue this instruction"
 
-        model.send(to: fixture.session)
-        try await waitUntil { model.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 1 }
+        model.composerSession.send(to: fixture.session)
+        try await waitUntil { model.composerSession.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 1 }
 
         XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["action"] as? String, "send")
         XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["message"] as? String, "Queue this instruction")
@@ -101,21 +101,21 @@ final class TurnSettingsFlowTests: XCTestCase {
         let model = makeModel()
         model.selectedSessionID = fixture.session.id
         model.selectedDetail = fixture.detail
-        model.composer = "Retry this normally"
+        model.composerSession.composer = "Retry this normally"
 
-        model.send(to: fixture.session)
-        try await waitUntil { model.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 1 }
+        model.composerSession.send(to: fixture.session)
+        try await waitUntil { model.composerSession.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 1 }
 
-        XCTAssertTrue(model.composer.contains("Retry this normally"))
+        XCTAssertTrue(model.composerSession.composer.contains("Retry this normally"))
 
-        model.send(to: fixture.session)
-        try await waitUntil { model.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 2 }
+        model.composerSession.send(to: fixture.session)
+        try await waitUntil { model.composerSession.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 2 }
         XCTAssertNotEqual(TurnSettingsFlowProtocol.state.actionIdempotencyKeys[0], TurnSettingsFlowProtocol.state.actionIdempotencyKeys[1], "the daemon replays a refusal under its key, so a retry needs a new one")
         XCTAssertEqual(model.deliveryStatus[fixture.session.id], "Couldn’t complete request. Draft kept.")
 
-        model.composer = "Edited retry"
-        model.send(to: fixture.session)
-        try await waitUntil { model.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 3 }
+        model.composerSession.composer = "Edited retry"
+        model.composerSession.send(to: fixture.session)
+        try await waitUntil { model.composerSession.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 3 }
         XCTAssertNotEqual(TurnSettingsFlowProtocol.state.actionIdempotencyKeys[1], TurnSettingsFlowProtocol.state.actionIdempotencyKeys[2])
         XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[2]["message"] as? String, "Edited retry")
     }
@@ -141,10 +141,10 @@ final class TurnSettingsFlowTests: XCTestCase {
         let model = makeModel()
         model.selectedSessionID = fixture.session.id
         model.selectedDetail = fixture.detail
-        model.composer = "Steer over Remote Control"
+        model.composerSession.composer = "Steer over Remote Control"
 
-        model.send(to: fixture.session)
-        try await waitUntil { model.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 1 }
+        model.composerSession.send(to: fixture.session)
+        try await waitUntil { model.composerSession.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 1 }
 
         XCTAssertEqual(model.deliveryStatus[fixture.session.id], "Steer sent to fixture.")
     }
@@ -156,10 +156,10 @@ final class TurnSettingsFlowTests: XCTestCase {
         let model = makeModel()
         model.selectedSessionID = fixture.session.id
         model.selectedDetail = fixture.detail
-        model.composer = "Send over a peer transport"
+        model.composerSession.composer = "Send over a peer transport"
 
-        model.send(to: fixture.session)
-        try await waitUntil { model.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 1 }
+        model.composerSession.send(to: fixture.session)
+        try await waitUntil { model.composerSession.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 1 }
 
         XCTAssertEqual(model.deliveryStatus[fixture.session.id], "Sent")
     }

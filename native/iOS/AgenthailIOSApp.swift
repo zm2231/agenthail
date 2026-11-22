@@ -175,7 +175,7 @@ struct AgenthailIOSApp: App {
                     Task.detached { await PushReceipts.flush() }
                 }
                 if phase == .background {
-                    model.saveComposerState()
+                    model.composerSession.saveComposerState()
                     ConnectionDrops.shared.backgrounded()
                     wasInBackground = true
                 } else if phase == .active, wasInBackground {

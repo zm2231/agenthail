@@ -34,7 +34,7 @@ struct SessionPreview: View {
         session = model.snapshot?.sessions.first(where: { $0.id == detail.session.id }) ?? detail.sessionState(open: false)
         model.selectedSessionID = session.id
         model.selectedDetail = detail
-        if capture == nil { model.composer = "Keep the regression check with the fix." }
+        if capture == nil { model.composerSession.composer = "Keep the regression check with the fix." }
         if ProcessInfo.processInfo.arguments.contains("--preview-delivery") {
             model.deliveryStatus[session.id] = "Queued for the agent"
         }

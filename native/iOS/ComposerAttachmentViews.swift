@@ -57,14 +57,14 @@ struct ComposerAttachmentMenu: View {
                 problem = problem ?? .unreadable(name)
             }
         }
-        model.addAttachments(images, problem: problem)
+        model.composerSession.addAttachments(images, problem: problem)
     }
 
     private func addImage(_ data: Data, name: String) {
         if let image = ComposerAttachments.image(data, name: name) {
-            model.addAttachments([image])
+            model.composerSession.addAttachments([image])
         } else {
-            model.addAttachments([], problem: .unreadable(name))
+            model.composerSession.addAttachments([], problem: .unreadable(name))
         }
     }
 
@@ -80,7 +80,7 @@ struct ComposerAttachmentMenu: View {
                 problem = problem ?? error
             }
         }
-        model.addAttachments(files, problem: problem)
+        model.composerSession.addAttachments(files, problem: problem)
     }
 }
 
@@ -90,13 +90,13 @@ struct ComposerAttachmentStrip: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(model.composerAttachments) { attachment in
+                ForEach(model.composerSession.composerAttachments) { attachment in
                     ZStack(alignment: .topTrailing) {
                         thumbnail(attachment)
                             .frame(width: 64, height: 64)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                             .accessibilityLabel(attachment.isImage ? "Image \(attachment.name)" : "File \(attachment.name)")
-                        Button { model.removeAttachment(attachment.id) } label: {
+                        Button { model.composerSession.removeAttachment(attachment.id) } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 20))
                                 .symbolRenderingMode(.palette)

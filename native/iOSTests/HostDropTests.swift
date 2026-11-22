@@ -272,11 +272,11 @@ final class HostDropTests: XCTestCase {
         let session = try XCTUnwrap(model.snapshot?.sessions.first)
         XCTAssertEqual(session.host?.state, "connected")
         XCTAssertNil(model.connectionState(for: session.id).error, "the held computer raises no banner")
-        model.composer = "Keep the regression test"
-        model.send(to: session)
-        for _ in 0..<200 where model.pendingSends[session.id]?.first?.unconfirmed != true { try await Task.sleep(for: .milliseconds(10)) }
+        model.composerSession.composer = "Keep the regression test"
+        model.composerSession.send(to: session)
+        for _ in 0..<200 where model.composerSession.pendingSends[session.id]?.first?.unconfirmed != true { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(model.deliveryStatus[session.id], "Not confirmed yet · retrying")
-        XCTAssertEqual(model.composer, "", "it may have arrived, so it waits instead of coming back")
+        XCTAssertEqual(model.composerSession.composer, "", "it may have arrived, so it waits instead of coming back")
     }
 
     func testTheInboxAsksAComputerHeldThroughTheGraceAndReportsItsOwnError() async throws {
