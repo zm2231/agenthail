@@ -1,8 +1,6 @@
 module github.com/zm2231/agenthail
 
-go 1.26.0
-
-toolchain go1.26.5
+go 1.26.6
 
 require (
 	code.dny.dev/ssrf v0.3.0
