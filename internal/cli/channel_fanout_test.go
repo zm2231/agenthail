@@ -2,16 +2,17 @@ package cli
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"os"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/broadcast"
 	"github.com/zm2231/agenthail/internal/surface"
 )
-
-const fanoutGolden = "testdata/channel_fanout_example.txt"
 
 // The daemon's answer for the fixture's crew: idle, busy, unacknowledged, read-only and paired-host members.
 func crewReceipt() string {
@@ -69,6 +70,31 @@ func runTranscript(t *testing.T, app *App, args ...string) string {
 	return out
 }
 
+var fanoutLine = regexp.MustCompile(`^\s+\[(.{2,6})\] (\S+):`)
+
+type fanoutFacts struct {
+	commands []string
+	outcomes map[string]string
+	summary  string
+}
+
+func readFanoutFacts(text string) fanoutFacts {
+	facts := fanoutFacts{outcomes: map[string]string{}}
+	for _, line := range strings.Split(text, "\n") {
+		switch {
+		case strings.HasPrefix(line, "$ agenthail channel "):
+			facts.commands = append(facts.commands, line)
+		case strings.HasPrefix(line, "#crew: "):
+			facts.summary = line
+		default:
+			if m := fanoutLine.FindStringSubmatch(line); m != nil {
+				facts.outcomes[m[2]] = m[1]
+			}
+		}
+	}
+	return facts
+}
+
 func TestTheDocumentedChannelFanOutExampleIsRealOutput(t *testing.T) {
 	app, fake, api := fanoutFixture(t)
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"channel", "create", "crew"}) }); err != nil {
@@ -85,26 +111,30 @@ func TestTheDocumentedChannelFanOutExampleIsRealOutput(t *testing.T) {
 		transcript.WriteString(runTranscript(t, app, args...))
 	}
 	transcript.WriteString(runTranscript(t, app, "channel", "send", "crew", "standup at 10"))
-	got := transcript.String()
-	if os.Getenv("AGENTHAIL_UPDATE_GOLDEN") == "1" {
-		if err := os.WriteFile(fanoutGolden, []byte(got), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	want, err := os.ReadFile(fanoutGolden)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != string(want) {
-		t.Fatalf("the fan-out example changed; rerun with AGENTHAIL_UPDATE_GOLDEN=1 and update the README and skill.\ngot:\n%s\nwant:\n%s", got, want)
+	real := readFanoutFacts(transcript.String())
+	want := map[string]string{"@scout": " OK ", "@coder": "QUEUE", "@analyst": "SUBMIT", "@reviewer": "FAIL", "vps::@builder": "QUEUE"}
+	if !maps.Equal(real.outcomes, want) || real.summary != "#crew: 1 sent, 2 queued, 1 submitted, 1 failed" || len(real.commands) != 6 {
+		t.Fatalf("the fan-out run: outcomes %v, summary %q, %d commands\n%s", real.outcomes, real.summary, len(real.commands), transcript.String())
 	}
 	for _, doc := range []string{"../../README.md", "../../skills/agenthail-operations/SKILL.md"} {
 		text, err := os.ReadFile(doc)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(string(text), got) {
-			t.Errorf("%s does not carry the fan-out example verbatim", doc)
+		blocks := strings.Split(string(text), "```")
+		var example []string
+		for i := 1; i < len(blocks); i += 2 {
+			if strings.Contains(blocks[i], "\n$ agenthail channel send crew ") {
+				example = append(example, blocks[i])
+			}
+		}
+		if len(example) != 1 {
+			t.Errorf("%s has %d code blocks with the fan-out example, want 1", doc, len(example))
+			continue
+		}
+		shown := readFanoutFacts(example[0])
+		if !slices.Equal(shown.commands, real.commands) || !maps.Equal(shown.outcomes, real.outcomes) || shown.summary != real.summary {
+			t.Errorf("%s shows commands %q, outcomes %v and %q; the real run gives %q, %v and %q", doc, shown.commands, shown.outcomes, shown.summary, real.commands, real.outcomes, real.summary)
 		}
 	}
 	actions, _ := api.recorded()

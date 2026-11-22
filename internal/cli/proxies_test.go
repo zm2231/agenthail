@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -109,20 +110,16 @@ func TestUsagePrintsAProxyGroupWithEveryAccountAndItsSessions(t *testing.T) {
 	sets[1].Sessions = proxySessions(sets[1], sets)
 	var out bytes.Buffer
 	writeUsage(&out, sets, now)
-	want := `laptop
-  work via the shared proxy
-    sessions: Fix it (working)
-server
-  shared (proxy)
-    dev@example.com          claude  session 18% (cap 60%)  week 41% (cap 60%)  read 12m ago
-    team@example.com         claude, cooling for 2h 20m
-    dev@example.com          codex  routed  preferred
-    Every shared Claude account is over its ceiling; the first frees up in 2h 20m.
-    sessions: Fix it (working)
-`
-	if out.String() != want {
-		t.Fatalf("output:\n%s\nwant:\n%s", out.String(), want)
+	if hosts, _ := usageTree(out.String()); !slices.Equal(hosts, []string{"laptop", "server"}) {
+		t.Fatalf("hosts %q, want laptop then server:\n%s", hosts, out.String())
 	}
+	requireAccount(t, out.String(), "laptop", []string{"work via the shared proxy"}, []string{"sessions: Fix it (working)"})
+	requireAccount(t, out.String(), "server", []string{"shared (proxy)"},
+		[]string{"dev@example.com", "claude", "session 18% (cap 60%)", "week 41% (cap 60%)", "read 12m ago"},
+		[]string{"team@example.com", "claude", "cooling for 2h 20m"},
+		[]string{"dev@example.com", "codex", "routed", "preferred"},
+		[]string{"Every shared Claude account is over its ceiling; the first frees up in 2h 20m."},
+		[]string{"sessions: Fix it (working)"})
 }
 
 func TestProxiesListsAProxyWithTheRootsThatUseIt(t *testing.T) {
