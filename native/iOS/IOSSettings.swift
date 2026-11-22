@@ -92,26 +92,26 @@ struct SettingsView: View {
                 TurnNoticeSettingsSection()
                 PhoneTextSizeSection(model: model)
                 Section("Notifications") {
-                    LabeledContent("Status", value: model.notificationStatus)
-                    if model.notificationStatus == "Enabling" {
+                    LabeledContent("Status", value: model.push.notificationStatus)
+                    if model.push.notificationStatus == "Enabling" {
                         Label { Text("Setting up notifications…") } icon: { ProgressView() }
                             .accessibilityIdentifier("notifications-setting-up")
-                    } else if model.notificationStatus == "Enabled" {
-                        Button("Turn off notifications", role: .destructive) { model.turnOffNotifications() }
-                    } else if model.notificationStatus == "Not allowed" {
-                        Button("Open iOS Settings") { model.openNotificationSettings() }
-                    } else if model.notificationStatus == "Setup failed" {
-                        Button("Retry notification setup") { model.requestNotifications() }
+                    } else if model.push.notificationStatus == "Enabled" {
+                        Button("Turn off notifications", role: .destructive) { model.push.turnOffNotifications() }
+                    } else if model.push.notificationStatus == "Not allowed" {
+                        Button("Open iOS Settings") { model.push.openNotificationSettings() }
+                    } else if model.push.notificationStatus == "Setup failed" {
+                        Button("Retry notification setup") { model.push.requestNotifications() }
                     } else {
-                        Button("Enable notifications") { model.requestNotifications() }
+                        Button("Enable notifications") { model.push.requestNotifications() }
                     }
-                    ForEach(model.notificationProblems, id: \.self) { problem in
+                    ForEach(model.push.notificationProblems, id: \.self) { problem in
                         Text(problem).font(.footnote).foregroundStyle(PhonePalette.failed)
                             .accessibilityIdentifier("notifications-problem")
                     }
                     Text("Your computers send an alert when an agent finishes or fails.").font(.footnote).foregroundStyle(PhonePalette.muted)
-                    ForEach(model.notificationPreferences) { preference in
-                        Toggle(isOn: Binding(get: { preference.value }, set: { model.setNotificationPreference(preference.id, to: $0) })) {
+                    ForEach(model.push.notificationPreferences) { preference in
+                        Toggle(isOn: Binding(get: { preference.value }, set: { model.push.setNotificationPreference(preference.id, to: $0) })) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(preference.title)
                                 Text(preference.detail).font(.footnote).foregroundStyle(PhonePalette.muted)
@@ -119,11 +119,11 @@ struct SettingsView: View {
                         }
                         .accessibilityIdentifier("notification-preference-\(preference.id)")
                     }
-                    if let problem = model.notificationPreferenceProblem {
+                    if let problem = model.push.notificationPreferenceProblem {
                         Text(problem).font(.footnote).foregroundStyle(PhonePalette.failed)
                     }
                 }
-                .task { await model.loadNotificationPreferences() }
+                .task { await model.push.loadNotificationPreferences() }
             }
             .listRowBackground(GlassRowBackground(selected: false))
         }

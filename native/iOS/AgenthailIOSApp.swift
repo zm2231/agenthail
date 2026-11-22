@@ -163,10 +163,10 @@ struct AgenthailIOSApp: App {
         AgenthailIOSRoot(model: model)
             .onOpenURL { model.handlePairingURL($0) }
             .onReceive(NotificationCenter.default.publisher(for: .agenthailPushToken)) { notification in
-                if let token = notification.object as? String { model.registerPushToken(token) }
+                if let token = notification.object as? String { model.push.registerPushToken(token) }
             }
             .onReceive(NotificationCenter.default.publisher(for: .agenthailPushRegistrationFailed)) { notification in
-                model.pushRegistrationFailed(notification.object as? String ?? "This device could not register for notifications.")
+                model.push.pushRegistrationFailed(notification.object as? String ?? "This device could not register for notifications.")
             }
             .onChange(of: scenePhase) { _, phase in
                 model.setAppActive(phase == .active)

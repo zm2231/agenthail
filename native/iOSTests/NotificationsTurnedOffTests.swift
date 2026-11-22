@@ -20,7 +20,7 @@ final class NotificationsTurnedOffTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         try pairMac()
         let first = AgenthailIOSModel(autoConnect: false, session: session(), drops: nil, notificationDefaults: defaults)
-        first.turnOffNotifications()
+        first.push.turnOffNotifications()
         for _ in 0..<200 where !PushRecordingProtocol.log.contains("DELETE /api/v1/device/push") {
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -30,10 +30,10 @@ final class NotificationsTurnedOffTests: XCTestCase {
         let relaunched = AgenthailIOSModel(autoConnect: false, session: session(), drops: nil, notificationDefaults: defaults)
         defer { relaunched.forgetHost("hmac") }
         try await connect(relaunched)
-        relaunched.registerPushToken("a1b2c3")
-        XCTAssertEqual(relaunched.notificationStatus, "Not enabled", "a device token does not start setup")
+        relaunched.push.registerPushToken("a1b2c3")
+        XCTAssertEqual(relaunched.push.notificationStatus, "Not enabled", "a device token does not start setup")
         relaunched.setAppActive(true)
-        XCTAssertEqual(relaunched.notificationStatus, "Not enabled", "coming back to the app does not start setup")
+        XCTAssertEqual(relaunched.push.notificationStatus, "Not enabled", "coming back to the app does not start setup")
         for _ in 0..<200 where !PushRecordingProtocol.log.contains("POST /v1/attest/challenge") {
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -48,8 +48,8 @@ final class NotificationsTurnedOffTests: XCTestCase {
         let model = AgenthailIOSModel(autoConnect: false, session: session(), drops: nil, notificationDefaults: defaults)
         defer { model.forgetHost("hmac") }
         try await connect(model)
-        model.registerPushToken("a1b2c3")
-        XCTAssertEqual(model.notificationStatus, "Enabling", "a device token starts setup at once")
+        model.push.registerPushToken("a1b2c3")
+        XCTAssertEqual(model.push.notificationStatus, "Enabling", "a device token starts setup at once")
         for _ in 0..<200 where !PushRecordingProtocol.log.contains("POST /v1/attest/challenge") {
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -73,7 +73,7 @@ final class NotificationsTurnedOffTests: XCTestCase {
     }
 }
 
-private final class PushRecordingProtocol: URLProtocol, @unchecked Sendable {
+final class PushRecordingProtocol: URLProtocol, @unchecked Sendable {
     final class Log: @unchecked Sendable {
         private let lock = NSLock()
         private var lines: [String] = []
@@ -84,6 +84,7 @@ private final class PushRecordingProtocol: URLProtocol, @unchecked Sendable {
     }
 
     static let log = Log()
+    nonisolated(unsafe) static var challengeStatus = 404
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
@@ -103,6 +104,8 @@ private final class PushRecordingProtocol: URLProtocol, @unchecked Sendable {
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         case "/api/v1/device/push":
             respond(200, "{}")
+        case "/v1/attest/challenge":
+            respond(Self.challengeStatus, #"{"error":"relay"}"#)
         default:
             respond(404, #"{"error":"not here"}"#)
         }
