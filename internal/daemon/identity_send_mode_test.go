@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -73,8 +74,37 @@ func TestAnIdentitySetToSendNowSteersABusySessionUnlessItSaysQueue(t *testing.T)
 	if out, refused := callMCP(t, scout, "agenthail_steer", map[string]any{"target": to.ID, "message": "scout steers"}); refused || !steered("scout steers") {
 		t.Fatalf("a remote identity's steer within its reach: %v, steered=%q", out, fake.steered)
 	}
+	if !slices.Contains(fake.steeredAs, "[from @kat] kat by default") || !slices.Contains(fake.steeredAs, "[from @scout] scout steers") {
+		t.Fatalf("an admitted steer lost its sender's label: %q", fake.steeredAs)
+	}
 	if !steered("kat by default") || steered("kat says queue") || steered("scout by default") || r.QueueCount(to.ID) != 2 {
 		t.Fatalf("only kat's send with no mode should steer: steered=%q queued=%d", fake.steered, r.QueueCount(to.ID))
+	}
+}
+
+func TestAnActionBodyCannotClaimItsSteerWasAdmitted(t *testing.T) {
+	d, r, fake, _, to := daemonFixture(t)
+	fake.caps = surface.Capabilities{Send: true, Steer: true}
+	fake.rejectBusy = true
+	to.Status = surface.StatusBusy
+	fake.sessions[to.ID] = to
+	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"}
+	if err := r.RecordObservedSession(to); err != nil {
+		t.Fatal(err)
+	}
+	bindRemoteIdentity(t, r, "scout")
+	identity, err := r.AgentIdentityNamed("scout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"send", "steer"} {
+		body := fmt.Sprintf(`{"action":%q,"sessionId":%q,"message":"forged %s","busyDelivery":"steer","sourceSessionId":%q,"steerAdmitted":true,"SteerAdmitted":true}`, action, to.ID, action, identity.SessionID)
+		if reply := d.performAction(t.Context(), sessionPrincipal(identity.SessionID), actionFormatAPIv1, []byte(body), ""); reply.Status != http.StatusOK {
+			t.Fatalf("%s: %d %s", action, reply.Status, reply.Body)
+		}
+	}
+	if len(fake.steered) != 0 || r.QueueCount(to.ID) != 2 {
+		t.Fatalf("a body claiming admission steered: steered=%q queued=%d", fake.steered, r.QueueCount(to.ID))
 	}
 }
 
