@@ -16,12 +16,19 @@ func TestDescribeNamesTheProcessListeningOnAPort(t *testing.T) {
 		t.Fatal(err)
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
-	got := Describe(port)
-	if want := "pid " + strconv.Itoa(os.Getpid()) + " ("; !strings.HasPrefix(got, want) {
-		t.Fatalf("Describe(%d) = %q, want it to start with %q", port, got, want)
+	self := "pid " + strconv.Itoa(os.Getpid()) + " ("
+	if got := Describe(port); !strings.HasPrefix(got, self) {
+		t.Fatalf("Describe(%d) = %q, want it to start with %q", port, got, self)
 	}
 	listener.Close()
-	if got := Describe(port); got != "" {
-		t.Fatalf("Describe(%d) after close = %q, want nothing", port, got)
+	// Another process may take the freed ephemeral port at once.
+	holders, err := Find(port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range holders {
+		if h.PID == os.Getpid() {
+			t.Fatalf("Find(%d) after close = %v, still names this process", port, holders)
+		}
 	}
 }
