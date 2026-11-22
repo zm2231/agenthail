@@ -52,11 +52,13 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
         content
             .scrollPosition($position)
             .defaultScrollAnchor(.bottom, for: .initialOffset)
-            .defaultScrollAnchor(following && !rescaling ? .bottom : nil, for: .sizeChanges)
             .onScrollPhaseChange { old, new in
                 phase = new
+                if old == .idle, new == .interacting || new == .decelerating { layout.gestureStart = layout.geometry?.contentOffset.y }
                 if new == .idle, old == .interacting || old == .decelerating, let geometry = layout.geometry {
-                    following = TranscriptFollowing.next(following, .init(distance: TranscriptEnd(geometry).distance, scrollEnded: true))
+                    let moved = layout.gestureStart.map { geometry.contentOffset.y - $0 } ?? 0
+                    following = TranscriptFollowing.next(following, .init(distance: TranscriptEnd(geometry).distance, scrollEnded: true, offsetMoved: moved))
+                    layout.gestureStart = nil
                 }
                 if new == .interacting || new == .decelerating { layout.releaseHold() }
                 // A reader who scrolls while an older page loads is held where they come to rest.
@@ -102,15 +104,20 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 }
                 if settleAnchor(anchorStep(new, inserted: inserted), in: new) { return }
                 let pass = TranscriptFollowing.Pass(distance: TranscriptEnd(new).distance, resized: resized, resizedThisTurn: layout.resized, resting: resting,
-                                                    animating: animating, inserted: inserted, offsetMoved: new.contentOffset.y - old.contentOffset.y)
-                defer { following = TranscriptFollowing.next(following, pass) }
+                                                    animating: animating, inserted: inserted, offsetMoved: new.contentOffset.y - old.contentOffset.y,
+                                                    reset: new.contentOffset.y <= -new.contentInsets.top + 0.5, overshot: TranscriptEnd(old).distance < -0.5)
+                let wasFollowing = following
+                following = TranscriptFollowing.next(following, pass)
+                // A pin left the position at the bottom edge; once the reader leaves, it holds where they are so it is not applied again.
+                if wasFollowing, !following { position.scrollTo(y: Self.scrollY(new.contentOffset.y, in: new)) }
                 if !resized {
                     if following, resting, layout.resized, !Self.atBottom(new) {
                         // Layout that moves the offset in the same pass as a resize, as a lazy stack re-measuring rows does, is not the reader leaving the bottom.
                         settle { $0.scrollTo(edge: .bottom) }
                     }
-                } else if following, phase == .idle || phase == .animating, !Self.atBottom(new) {
-                    settle { $0.scrollTo(edge: .bottom) }
+                } else if following, !rescaling, phase == .idle || phase == .animating, TranscriptEnd(new).distance > 0.5 {
+                    // With no size-change anchor, a following reader is kept at the end here, in the pass that grew the content.
+                    position.scrollTo(edge: .bottom)
                 } else if !following, inserted, resting, layout.holdingRow {
                     // Rows below the reader that were never laid out are re-estimated as a page arrives, so the end moves; the held row does not.
                 } else if !following, inserted, resting {
@@ -280,6 +287,7 @@ private final class Layout {
     let clip = TranscriptClip()
     var lastGrowth: CGFloat?
     var animationStart: ContinuousClock.Instant?
+    var gestureStart: CGFloat?
     private var resizedTurn: Int?
     private var fromEnd: (distance: CGFloat, until: ContinuousClock.Instant, content: CGFloat, landing: Bool)?
     let row = TranscriptRowHold()

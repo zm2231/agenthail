@@ -58,7 +58,17 @@ struct TranscriptFollowingTest {
         expect(grown, "content that grows below a following reader does not stop them following")
         expect(!TranscriptFollowing.next(false, pass(133000, 134567, after: 132000)), "a reader short of the end does not start following")
         expect(TranscriptFollowing.next(false, pass(133733, 134567, after: 133000)), "a reader who reaches the end starts following")
-        expect(!TranscriptFollowing.next(true, pass(133000, 134567, scrollEnded: true)), "a reader who ends a scroll short of the end does not follow")
+        expect(!TranscriptFollowing.next(false, pass(133000, 134567, scrollEnded: true)), "a reader who ends a scroll short of the end does not start following")
+        // The same reader in a second recorded run: following turned on at an estimated end, the stack above re-estimated as the
+        // scroll view's bottom anchor came on, and the gesture then ended thousands of points short of the new end.
+        var ended = TranscriptFollowing.next(false, pass(101637, 102471, after: 100945))
+        ended = TranscriptFollowing.next(ended, pass(101637, 139287, after: 101637, resized: true))
+        ended = TranscriptFollowing.next(ended, pass(102145, 139287, after: 101637))
+        ended = TranscriptFollowing.next(ended, TranscriptFollowing.Pass(distance: 139287 - 124545 - visible, scrollEnded: true, offsetMoved: 124545 - 98545))
+        expect(ended, "a gesture that carried a following reader toward the end leaves them following, however far the end moved under them")
+        expect(!TranscriptFollowing.next(true, TranscriptFollowing.Pass(distance: 400, scrollEnded: true, offsetMoved: -400)), "a gesture that carried a following reader away from the end stops them following")
+        expect(!TranscriptFollowing.next(true, TranscriptFollowing.Pass(distance: 40, scrollEnded: true, offsetMoved: -40)), "a gesture that carries a following reader up short of the end stops them following, however little")
+
         var moved = true
         moved = TranscriptFollowing.next(moved, pass(130000, 134567, after: 129000))
         expect(moved, "a scroll the app makes toward the end, as a jump to latest or a scroll to the bottom does, does not stop a reader following")
@@ -68,6 +78,13 @@ struct TranscriptFollowingTest {
         animated.resting = true
         animated.resizedThisTurn = true
         expect(TranscriptFollowing.next(true, animated), "an offset the lazy stack moves in the turn it resizes does not stop a reader following")
+        expect(!TranscriptFollowing.next(true, pass(132000, 134567, after: 132400, resized: true)), "a reader who scrolls up in the pass that also grows the content stops following")
+        var replaced = TranscriptFollowing.Pass(distance: 6502, resized: true, resizedThisTurn: true, offsetMoved: -6072)
+        replaced.reset = true
+        expect(TranscriptFollowing.next(true, replaced), "rows replaced under a following reader, which puts the offset back at the top, leave them following")
+        var pulledBack = TranscriptFollowing.Pass(distance: 81, resized: true, resizedThisTurn: true, offsetMoved: -413)
+        pulledBack.overshot = true
+        expect(TranscriptFollowing.next(true, pulledBack), "a view pulled back to an end that moved up under it leaves a following reader following")
         var shrunk = true
         shrunk = TranscriptFollowing.next(shrunk, pass(133733, 133967, after: 133733, resized: true))
         shrunk = TranscriptFollowing.next(shrunk, pass(133133, 133967, after: 133733))

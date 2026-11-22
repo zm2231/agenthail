@@ -924,6 +924,17 @@ struct TranscriptFollowTest {
         spin(1.5)
         expect(feed.following && abs(gap(scroll)) < 2, "a reader who scrolls to the end of a mixed transcript is following there, after \(gestures) gestures; \(geometry(scroll))")
         expect(feed.flips - flips == 1, "following turned on once, at the end, flipped \(feed.flips - flips) times over \(gestures) gestures")
+
+        // A reply streaming into the last row, and a table in it settling taller, must not leave the end out of view even for a frame.
+        var worst: CGFloat = 0
+        for growth in 0..<30 {
+            let last = feed.rows.count - 1
+            feed.rows[last] = Row(id: feed.rows[last].id, lines: feed.rows[last].lines + (growth % 5 == 4 ? 20 : 3))
+            spin(0.02)
+            worst = max(worst, gap(scroll))
+        }
+        spin(0.4)
+        expect(worst < 2 && feed.following, "a following reader stays at the end while the last row grows, at most \(Int(worst)) pt short; \(geometry(scroll))")
     }
 
     // One phased gesture, measured by how far the offset moved, so a re-estimate the gesture triggers is not corrected away by another.
