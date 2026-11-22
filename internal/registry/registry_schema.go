@@ -889,6 +889,15 @@ CREATE TABLE IF NOT EXISTS agent_roles (
 	changed_at_ms INTEGER NOT NULL,
 	origin_host TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS agent_role_assignments (
+	kind TEXT NOT NULL,
+	target TEXT NOT NULL,
+	role TEXT NOT NULL,
+	deleted INTEGER NOT NULL DEFAULT 0,
+	changed_at_ms INTEGER NOT NULL,
+	origin_host TEXT NOT NULL,
+	PRIMARY KEY (kind, target)
+);
 CREATE TABLE IF NOT EXISTS project_tiles (
 	id INTEGER PRIMARY KEY CHECK (id=1),
 	order_json TEXT NOT NULL,

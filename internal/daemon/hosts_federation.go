@@ -542,18 +542,19 @@ func hostUnavailableReason(name, state, detail string) string {
 }
 
 type remoteSnapshot struct {
-	HostEpoch    string                      `json:"hostEpoch"`
-	CatalogSeq   uint64                      `json:"catalogSeq"`
-	Sessions     []dashboardSession          `json:"sessions"`
-	RetiredClock *int64                      `json:"retiredClock"`
-	RetiredIDs   []string                    `json:"retiredIds"`
-	Coordinators []registry.CoordinatorEntry `json:"coordinators"`
-	OwnDecisions string                      `json:"ownDecisionsRev"`
-	ProjectLinks []registry.ProjectLink      `json:"projectLinks"`
-	ProjectMoves []registry.ProjectMove      `json:"projectMoves"`
-	Settings     []registry.ProjectSetting   `json:"projectSettings"`
-	AgentRoles   []registry.AgentRoleRecord  `json:"agentRoles"`
-	MovedOut     []registry.MovedSession     `json:"movedSessions"`
+	HostEpoch    string                         `json:"hostEpoch"`
+	CatalogSeq   uint64                         `json:"catalogSeq"`
+	Sessions     []dashboardSession             `json:"sessions"`
+	RetiredClock *int64                         `json:"retiredClock"`
+	RetiredIDs   []string                       `json:"retiredIds"`
+	Coordinators []registry.CoordinatorEntry    `json:"coordinators"`
+	OwnDecisions string                         `json:"ownDecisionsRev"`
+	ProjectLinks []registry.ProjectLink         `json:"projectLinks"`
+	ProjectMoves []registry.ProjectMove         `json:"projectMoves"`
+	Settings     []registry.ProjectSetting      `json:"projectSettings"`
+	AgentRoles   []registry.AgentRoleRecord     `json:"agentRoles"`
+	Assignments  []registry.AgentRoleAssignment `json:"agentRoleAssignments"`
+	MovedOut     []registry.MovedSession        `json:"movedSessions"`
 }
 
 func (d *Daemon) mirrorHostOnce(ctx context.Context, host *pairedHost, outage *hostOutage) (bool, error) {
@@ -678,6 +679,9 @@ func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, e
 		return 0, localMirror(err)
 	}
 	if err := d.adoptAgentRoles(snapshot.AgentRoles); err != nil {
+		return 0, localMirror(err)
+	}
+	if err := d.adoptAgentRoleAssignments(snapshot.Assignments); err != nil {
 		return 0, localMirror(err)
 	}
 	for _, moved := range snapshot.MovedOut {
@@ -828,6 +832,12 @@ func (d *Daemon) applyHostCatalogEvent(host *pairedHost, envelope catalogStreamE
 			return err
 		}
 		return d.adoptAgentRoles([]registry.AgentRoleRecord{record})
+	case "agent.role.assignment":
+		var record registry.AgentRoleAssignment
+		if err := json.Unmarshal(envelope.Data, &record); err != nil {
+			return err
+		}
+		return d.adoptAgentRoleAssignments([]registry.AgentRoleAssignment{record})
 	case "project.moved":
 		var move registry.ProjectMove
 		if err := json.Unmarshal(envelope.Data, &move); err != nil {

@@ -231,7 +231,7 @@ func (d *Daemon) remoteCaller(info *auth.TokenInfo) (*mcpCaller, error) {
 	if err != nil {
 		return nil, err
 	}
-	caller.actAs(d.callerRole(record.Roles, true))
+	caller.actAs(d.callerRole(record, true))
 	caller.remote, _ = info.Extra[tokenInfoBinding].(string)
 	return caller, nil
 }

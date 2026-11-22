@@ -16,6 +16,9 @@ type resolvedRole struct {
 	agentroles.Role
 	// Source says why the caller holds the role.
 	Source string
+	// Replaces names the role the caller holds by what it is, when an
+	// assignment gave it another.
+	Replaces string
 }
 
 // A caller without a role, an extension, leaves every action to the person
@@ -43,6 +46,13 @@ func (r *resolvedRole) RunningLimit() int {
 
 func (r *resolvedRole) Sees(tool string) bool {
 	return r == nil || r.Role.Sees(tool)
+}
+
+func (r *resolvedRole) label() string {
+	if r.Replaces == "" {
+		return r.Name
+	}
+	return r.Replaces + " (replaced by " + r.Name + ")"
 }
 
 // agentRoles reads every role: the built-ins as the person left them and
@@ -87,13 +97,82 @@ func implicitRole(roles registry.SessionRoles, remote bool) (string, string) {
 	return agentroles.Worker, "the default"
 }
 
-func (d *Daemon) callerRole(roles registry.SessionRoles, remote bool) resolvedRole {
-	name, source := implicitRole(roles, remote)
+// callerRole resolves in a fixed order: an assignment to the session or to a
+// conversation it was branched from, then to its identity, then to its alias,
+// and last the role it holds by what it is. An assignment naming a role that
+// no longer exists is passed over, which every host does alike once their
+// roles and assignments have synced.
+func (d *Daemon) callerRole(record registry.CallerRecord, remote bool) resolvedRole {
+	implicit, source := implicitRole(record.Roles, remote)
 	all, err := d.agentRoles()
 	if err != nil {
 		d.log.Printf("read agent roles: %s", err)
 	}
-	role := all[name]
+	role := all[implicit]
 	role.Source = source
-	return role
+	assignments, err := d.Registry.AgentRoleAssignments()
+	if err != nil {
+		d.log.Printf("read agent role assignments: %s", err)
+		return role
+	}
+	var chain []string
+	if record.Session.ID != "" {
+		if chain, err = d.Registry.ForkChain(record.Session.ID); err != nil {
+			d.log.Printf("read the branches of %s: %s", record.Session.ID, err)
+			chain = []string{record.Session.ID}
+		}
+	}
+	assigned, found := assignedRole(assignments, all, chain, record.Identity, record.Alias)
+	if !found {
+		return role
+	}
+	if assigned.Name != implicit {
+		assigned.Replaces = implicit
+	}
+	return assigned
+}
+
+type assignmentKey struct{ kind, target string }
+
+// assignedRole is the first live assignment in resolution order whose role exists.
+func assignedRole(assignments []registry.AgentRoleAssignment, roles map[string]resolvedRole, chain []string, identity, alias string) (resolvedRole, bool) {
+	live := map[assignmentKey]string{}
+	for _, assignment := range assignments {
+		if !assignment.Deleted {
+			live[assignmentKey{assignment.Kind, assignment.Target}] = assignment.Role
+		}
+	}
+	var order []assignmentKey
+	for _, id := range chain {
+		order = append(order, assignmentKey{registry.AssignSession, id})
+	}
+	if identity != "" {
+		order = append(order, assignmentKey{registry.AssignIdentity, identity})
+	}
+	if alias != "" {
+		order = append(order, assignmentKey{registry.AssignAlias, alias})
+	}
+	for i, key := range order {
+		name, ok := live[key]
+		if !ok {
+			continue
+		}
+		role, exists := roles[name]
+		if !exists {
+			continue
+		}
+		role.Source = assignmentSource(key, i > 0 && key.kind == registry.AssignSession)
+		return role, true
+	}
+	return resolvedRole{}, false
+}
+
+func assignmentSource(key assignmentKey, branched bool) string {
+	switch {
+	case branched:
+		return "assigned to " + key.target + ", which this session was branched from"
+	case key.kind == registry.AssignSession:
+		return "assigned to this session"
+	}
+	return "assigned to " + key.kind + " @" + key.target
 }

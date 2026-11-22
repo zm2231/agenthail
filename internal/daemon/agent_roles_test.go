@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -411,7 +412,7 @@ func TestTheBuiltInRolesGiveEveryAgentTheAccessItHadBeforeRoles(t *testing.T) {
 	}
 
 	for column, flags := range []registry.SessionRoles{{}, {Lead: true}} {
-		role := d.callerRole(flags, false)
+		role := d.callerRole(registry.CallerRecord{Roles: flags}, false)
 		for action, before := range decisionsBeforeRoles {
 			if got := role.Decision(action); got != before[column] {
 				t.Errorf("%s decides %s %s; before roles it was %s", role.Name, action, got, before[column])
@@ -423,7 +424,7 @@ func TestTheBuiltInRolesGiveEveryAgentTheAccessItHadBeforeRoles(t *testing.T) {
 	}
 	for _, flags := range []registry.SessionRoles{{}, {Lead: true}, {Operator: true}} {
 		for _, remote := range []bool{false, true} {
-			role := d.callerRole(flags, remote)
+			role := d.callerRole(registry.CallerRecord{Roles: flags}, remote)
 			if role.DepthLimit() != 3 || role.RunningLimit() != 8 {
 				t.Errorf("%s nests %d deep and runs %d; before roles every agent had 3 and 8", role.Name, role.DepthLimit(), role.RunningLimit())
 			}
@@ -468,7 +469,7 @@ func TestARoleThatHidesAToolLeavesItOutOfTheListAndRefusesIt(t *testing.T) {
 	}
 }
 
-func TestAPersonsRoleChangeReachesEveryPairedHostAndAResetFollows(t *testing.T) {
+func TestAPersonsRolesAndAssignmentsReachEveryPairedHostAndResolveAlikeThere(t *testing.T) {
 	laptop, server := linkedFederation(t)
 	var told []string
 	laptop.daemon.notifyDesktop = func(title, message, _, _, _ string, _ []surface.RequestAction) error {
@@ -478,26 +479,102 @@ func TestAPersonsRoleChangeReachesEveryPairedHostAndAResetFollows(t *testing.T) 
 		return nil
 	}
 	put := AgentRoleRequest{Op: "put", Name: agentroles.Lead, Role: agentroles.Role{Reach: agentroles.ReachProject, Actions: map[string]string{"project-archive": agentroles.Ask}, Running: 4}}
-	if response := laptop.request(t, http.MethodPost, "/api/v1/agents", put); response.Code != http.StatusOK {
-		t.Fatalf("the person's change answered %d %s", response.Code, response.Body)
+	if response := laptop.request(t, http.MethodPost, "/api/v1/agents", put); response.Code != http.StatusForbidden {
+		t.Fatalf("a write with the dashboard token, which any local process can read, answered %d %s", response.Code, response.Body)
 	}
-	if len(told) != 1 || told[0] != "the dashboard changed the lead role." {
+	change := func(node *federationNode, request AgentRoleRequest) {
+		t.Helper()
+		if err := node.daemon.changeAgentRole(context.Background(), daemonapi.CLIActor, request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	change(laptop, put)
+	if len(told) != 1 || told[0] != "the CLI changed the lead role." {
 		t.Fatalf("the person was told %q", told)
 	}
 	leadOn := func(node *federationNode) resolvedRole {
-		return node.daemon.callerRole(registry.SessionRoles{Lead: true}, false)
+		return node.daemon.callerRole(registry.CallerRecord{Roles: registry.SessionRoles{Lead: true}}, false)
 	}
 	testkit.Eventually(t, "the server takes the laptop's lead role", 10*time.Second, func() bool {
 		role := leadOn(server)
 		return role.Decision("project-archive") == agentroles.Ask && role.RunningLimit() == 4
 	})
-	if response := server.request(t, http.MethodPost, "/api/v1/agents", AgentRoleRequest{Op: "delete", Name: agentroles.Lead}); response.Code != http.StatusOK {
-		t.Fatalf("the reset answered %d %s", response.Code, response.Body)
+	change(laptop, AgentRoleRequest{Op: "put", Name: "reviewer", Role: agentroles.Role{Reach: agentroles.ReachDescendants}})
+	change(laptop, AgentRoleRequest{Op: "assign", Name: "reviewer", Kind: registry.AssignAlias, Target: "@builder"})
+	builderOn := func(node *federationNode) resolvedRole {
+		return node.daemon.callerRole(registry.CallerRecord{Alias: "builder", Roles: registry.SessionRoles{Lead: true}}, false)
 	}
+	testkit.Eventually(t, "the server gives @builder the laptop's assignment", 10*time.Second, func() bool {
+		role := builderOn(server)
+		return role.Name == "reviewer" && role.label() == "lead (replaced by reviewer)"
+	})
+	change(server, AgentRoleRequest{Op: "delete", Name: "reviewer"})
+	for _, node := range []*federationNode{server, laptop} {
+		testkit.Eventually(t, "an assignment to a deleted role is passed over on every host", 10*time.Second, func() bool {
+			view, err := node.daemon.agentRolesView()
+			return err == nil && builderOn(node).Name == agentroles.Lead && len(view.Assignments) == 1 && view.Assignments[0].Stale == "no role reviewer"
+		})
+	}
+	change(server, AgentRoleRequest{Op: "delete", Name: agentroles.Lead})
 	testkit.Eventually(t, "the laptop takes the server's reset", 10*time.Second, func() bool {
 		role := leadOn(laptop)
 		return role.Decision("project-archive") == agentroles.Notify && role.RunningLimit() == 8 && !role.Edited
 	})
+}
+
+func TestAnAssignmentGoesToTheSessionItsBranchesItsIdentityThenItsAlias(t *testing.T) {
+	d, r, _, _, _ := daemonFixture(t)
+	for _, session := range []surface.Session{{ID: "parent"}, {ID: "child", ForkedFrom: "parent"}} {
+		session.Surface, session.RuntimeKind, session.Status = surface.KindClaude, surface.RuntimeClaudeCLI, surface.StatusIdle
+		if err := r.RecordObservedSession(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	change := func(request AgentRoleRequest) {
+		t.Helper()
+		if err := d.changeAgentRole(context.Background(), daemonapi.CLIActor, request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"by-alias", "by-identity", "by-parent", "by-session"} {
+		change(AgentRoleRequest{Op: "put", Name: name, Role: agentroles.Role{Reach: agentroles.ReachDescendants}})
+	}
+	caller := registry.CallerRecord{Session: surface.Session{ID: "child"}, Identity: "scout", Alias: "scout", Roles: registry.SessionRoles{Lead: true}}
+	holds := func(want, label string) {
+		t.Helper()
+		role := d.callerRole(caller, false)
+		if role.Name != want || role.label() != label {
+			t.Fatalf("the caller holds %s (%q, %s), want %s (%q)", role.Name, role.label(), role.Source, want, label)
+		}
+	}
+	holds(agentroles.Lead, agentroles.Lead)
+	change(AgentRoleRequest{Op: "assign", Name: "by-alias", Kind: registry.AssignAlias, Target: "scout"})
+	holds("by-alias", "lead (replaced by by-alias)")
+	change(AgentRoleRequest{Op: "assign", Name: "by-identity", Kind: registry.AssignIdentity, Target: "scout"})
+	holds("by-identity", "lead (replaced by by-identity)")
+	change(AgentRoleRequest{Op: "assign", Name: "by-parent", Kind: registry.AssignSession, Target: "parent"})
+	holds("by-parent", "lead (replaced by by-parent)")
+	change(AgentRoleRequest{Op: "assign", Name: "by-session", Kind: registry.AssignSession, Target: "child"})
+	holds("by-session", "lead (replaced by by-session)")
+	change(AgentRoleRequest{Op: "delete", Name: "by-session"})
+	holds("by-parent", "lead (replaced by by-parent)")
+	change(AgentRoleRequest{Op: "unassign", Kind: registry.AssignSession, Target: "parent"})
+	holds("by-identity", "lead (replaced by by-identity)")
+	if err := r.ArchiveSession("parent", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	change(AgentRoleRequest{Op: "assign", Name: "by-alias", Kind: registry.AssignSession, Target: "parent"})
+	view, err := d.agentRolesView()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := map[string]string{}
+	for _, assignment := range view.Assignments {
+		stale[assignment.Kind+":"+assignment.Target] = assignment.Stale
+	}
+	if stale["session:child"] != "no role by-session" || stale["session:parent"] != "the session is archived" || stale["identity:scout"] != "" {
+		t.Fatalf("the assignments read as %v", stale)
+	}
 }
 
 func TestThePersonsStoredAgentPolicyBecomesTheRolesItAppliedTo(t *testing.T) {
@@ -522,15 +599,15 @@ func TestThePersonsStoredAgentPolicyBecomesTheRolesItAppliedTo(t *testing.T) {
 		t.Errorf("the person was told %q", told)
 	}
 	for _, flags := range []registry.SessionRoles{{}, {Lead: true}, {Operator: true}} {
-		role := d.callerRole(flags, false)
+		role := d.callerRole(registry.CallerRecord{Roles: flags}, false)
 		if role.Decision("cross-project-steer") != agentroles.Allow || role.RunningLimit() != 5 {
 			t.Errorf("%s steers %s and runs %d", role.Name, role.Decision("cross-project-steer"), role.RunningLimit())
 		}
 	}
-	if lead := d.callerRole(registry.SessionRoles{Lead: true}, false); lead.Decision("project-archive") != agentroles.Ask {
+	if lead := d.callerRole(registry.CallerRecord{Roles: registry.SessionRoles{Lead: true}}, false); lead.Decision("project-archive") != agentroles.Ask {
 		t.Errorf("the lead archives with %s", lead.Decision("project-archive"))
 	}
-	if worker := d.callerRole(registry.SessionRoles{}, false); worker.Actions["project-archive"] != "" {
+	if worker := d.callerRole(registry.CallerRecord{Roles: registry.SessionRoles{}}, false); worker.Actions["project-archive"] != "" {
 		t.Errorf("a worker took a lead's choice: %v", worker.Actions)
 	}
 	data, err := os.ReadFile(dashconfig.Path())

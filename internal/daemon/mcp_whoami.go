@@ -49,16 +49,19 @@ func (d *Daemon) mcpWhoami(_ context.Context, caller *mcpCaller, _ struct{}) (an
 }
 
 type mcpRoleView struct {
-	Name   string `json:"name"`
-	Reach  string `json:"reach"`
-	Source string `json:"source"`
+	Name     string `json:"name"`
+	Reach    string `json:"reach"`
+	Source   string `json:"source"`
+	Replaces string `json:"replaces,omitempty"`
+	// Label is how the person reads it: "lead (replaced by reviewer)".
+	Label string `json:"label"`
 }
 
 func roleView(role *resolvedRole) *mcpRoleView {
 	if role == nil {
 		return nil
 	}
-	return &mcpRoleView{Name: role.Name, Reach: role.Reach, Source: role.Source}
+	return &mcpRoleView{Name: role.Name, Reach: role.Reach, Source: role.Source, Replaces: role.Replaces, Label: role.label()}
 }
 
 // A caller the socket named by its process holds no credential.

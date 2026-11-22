@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/agentroles"
-	"github.com/zm2231/agenthail/internal/daemonapi"
 
 	"github.com/zm2231/agenthail/internal/daemon"
 )
@@ -23,7 +22,9 @@ const rolesUsage = `usage: agenthail roles [list] [--json] | show <role> [--json
        agenthail roles set <role> <action> allow|notify|ask|default
        agenthail roles reach <role> descendants|project|all
        agenthail roles limit <role> depth|running <n>
-       agenthail roles tools <role> all | +<tool> -<tool> ...`
+       agenthail roles tools <role> all | +<tool> -<tool> ...
+       agenthail roles assign <role> --session <@alias|id> | --identity <name> | --alias <name>
+       agenthail roles unassign --session <@alias|id> | --identity <name> | --alias <name>`
 
 const rolesTimeout = 10 * time.Second
 
@@ -36,8 +37,8 @@ func (a *App) cmdRoles(args []string) error {
 	if positional[0] == "show" && len(positional) == 2 {
 		return a.showRole(positional[1], asJSON)
 	}
-	if a.agentEnvironment() {
-		return errors.New("roles are the person's to change; an agent may read them with 'agenthail roles' and 'agenthail roles show <role>'")
+	if (positional[0] == "assign" || positional[0] == "unassign") && len(positional) <= 2 {
+		return a.assignRole(positional[0], positional[1:], args)
 	}
 	view, err := a.fetchRoles()
 	if err != nil {
@@ -157,7 +158,7 @@ func roleNamed(view daemon.AgentRolesView, name string) (daemon.AgentRoleView, b
 }
 
 func (a *App) fetchRoles() (daemon.AgentRolesView, error) {
-	client, err := a.daemonAPI()
+	client, err := a.localDaemonAPI()
 	if err != nil {
 		return daemon.AgentRolesView{}, err
 	}
@@ -176,14 +177,39 @@ func (a *App) putRole(name string, role agentroles.Role) error {
 }
 
 func (a *App) postRole(request daemon.AgentRoleRequest) error {
-	client, err := a.daemonAPI()
+	client, err := a.localDaemonAPI()
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), rolesTimeout)
 	defer cancel()
-	_, _, err = client.call(ctx, http.MethodPost, "/api/v1/agents", nil, request, http.Header{daemonapi.ActionActorHeader: []string{daemonapi.CLIActor}})
+	_, _, err = client.call(ctx, http.MethodPost, "/api/v1/agents", nil, request, nil)
 	return err
+}
+
+// assignRole reads "assign <role> --session|--identity|--alias <target>" or
+// "unassign --session|--identity|--alias <target>".
+func (a *App) assignRole(verb string, rest, args []string) error {
+	var kind, target string
+	for _, candidate := range []string{"session", "identity", "alias"} {
+		if value := flagVal(args, "--"+candidate); value != "" {
+			if kind != "" {
+				return errors.New("name one of --session, --identity or --alias")
+			}
+			kind, target = candidate, value
+		}
+	}
+	if kind == "" || (verb == "assign") != (len(rest) == 1) {
+		return errors.New(rolesUsage)
+	}
+	request := daemon.AgentRoleRequest{Op: verb, Kind: kind, Target: target}
+	if verb == "assign" {
+		request.Name = rest[0]
+	}
+	if err := a.postRole(request); err != nil {
+		return err
+	}
+	return a.listRoles(false)
 }
 
 func (a *App) listRoles(asJSON bool) error {
@@ -198,6 +224,22 @@ func (a *App) listRoles(asJSON bool) error {
 	fmt.Fprintln(out, "ROLE\tREACH\tKIND\tDESCRIPTION")
 	for _, role := range view.Roles {
 		fmt.Fprintf(out, "%s\t%s\t%s\t%s\n", role.Name, role.Reach, roleKind(role), role.Description)
+	}
+	if err := out.Flush(); err != nil {
+		return err
+	}
+	if len(view.Assignments) == 0 {
+		return nil
+	}
+	fmt.Println()
+	out = tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(out, "ASSIGNED TO\tROLE\tSTALE")
+	for _, assignment := range view.Assignments {
+		target := assignment.Kind + " " + assignment.Target
+		if assignment.Kind != "session" {
+			target = assignment.Kind + " @" + assignment.Target
+		}
+		fmt.Fprintf(out, "%s\t%s\t%s\n", target, assignment.Role, assignment.Stale)
 	}
 	return out.Flush()
 }

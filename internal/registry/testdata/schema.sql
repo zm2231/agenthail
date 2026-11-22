@@ -1,6 +1,7 @@
 -- registry schema
 -- migration 2026-11-21-event-subscriptions-never-expire
 -- migration 2026-11-21-roles-for-agents
+-- migration 2026-11-22-agent-role-assignments
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -197,6 +198,17 @@ CREATE TABLE agent_inbox (
 	received_at_ms INTEGER NOT NULL,
 	read_at_ms INTEGER NOT NULL DEFAULT 0,
 	delivered_at_ms INTEGER NOT NULL DEFAULT 0
+);
+
+-- table agent_role_assignments
+CREATE TABLE agent_role_assignments (
+	kind TEXT NOT NULL,
+	target TEXT NOT NULL,
+	role TEXT NOT NULL,
+	deleted INTEGER NOT NULL DEFAULT 0,
+	changed_at_ms INTEGER NOT NULL,
+	origin_host TEXT NOT NULL,
+	PRIMARY KEY (kind, target)
 );
 
 -- table agent_roles
