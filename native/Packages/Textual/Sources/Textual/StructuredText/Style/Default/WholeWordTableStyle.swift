@@ -34,24 +34,51 @@ extension StructuredText {
 /// Scrolls a table horizontally only when its cells, each kept as wide as its longest word, cannot
 /// fit the container.
 struct WholeWordTable<Content: View>: View {
+  @State private var offered = OfferedWidth()
   @ViewBuilder let content: Content
 
   var body: some View {
-    Overflow {
-      ContainerWidth {
-        Color.clear
-          .frame(height: 0)
-          .containerRelativeFrame(.horizontal)
-        content
+    OfferedWidthReader(offered: offered) {
+      Overflow {
+        ContainerWidth(offered: offered) {
+          Color.clear
+            .frame(height: 0)
+            .containerRelativeFrame(.horizontal)
+          content
+        }
       }
     }
     .textual.tableCellsKeepWords()
   }
 }
 
+/// The width offered to the table from outside its horizontal scroll view, which lays the table
+/// out inside the same layout call, so the table reads it before its scroll view has a size.
+final class OfferedWidth {
+  var value: CGFloat?
+}
+
+private struct OfferedWidthReader: Layout {
+  let offered: OfferedWidth
+
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    guard let subview = subviews.first else { return .zero }
+    offered.value = proposal.width
+    return subview.sizeThatFits(proposal)
+  }
+
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    guard let subview = subviews.first else { return }
+    offered.value = bounds.width
+    subview.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+  }
+}
+
 /// Lays the table out at its container's width, which the first subview reports even inside a
 /// horizontal scroll view, or at its narrowest whole-word width when that is wider.
 private struct ContainerWidth: Layout {
+  let offered: OfferedWidth
+
   struct Extent {
     var narrowest: CGFloat
     var widest: CGFloat
@@ -77,7 +104,7 @@ private struct ContainerWidth: Layout {
   }
 
   private func table(_ subviews: Subviews, cache: inout Extent?) -> ProposedViewSize {
-    let container = subviews[0].sizeThatFits(.unspecified).width
+    let container = offered.value.flatMap { $0 > 0 && $0.isFinite ? $0 : nil } ?? subviews[0].sizeThatFits(.unspecified).width
     let extent =
       cache
       ?? Extent(
