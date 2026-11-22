@@ -139,10 +139,10 @@ func claudeSettingsBool(data []byte, key string) *bool {
 // The Agenthail fields change Agenthail's own idle compaction, which takes
 // effect on its next check, running sessions included.
 type ClaudeCompactChange struct {
-	Model                  string
-	Window                 string
-	Enabled                *bool
-	Idle                   *bool
+	Model                    string
+	Window                   string
+	Enabled                  *bool
+	Idle                     *bool
 	AgenthailIdle            *bool
 	AgenthailIdleMinTokens   *int64
 	AgenthailPreLimitPercent *int
