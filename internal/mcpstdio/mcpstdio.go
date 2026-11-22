@@ -10,8 +10,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -30,6 +32,7 @@ func Run(ctx context.Context, socket, version string, in io.ReadCloser, out io.W
 		Capabilities: &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{ListChanged: true}},
 	})
 	relay := &relay{server: server, client: mcp.NewClient(&mcp.Implementation{Name: "agenthail-stdio", Version: version}, nil), socket: socket}
+	server.AddReceivingMiddleware(relay.holdPartialTools)
 	relayCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	startCtx, started := context.WithTimeout(relayCtx, startWait)
@@ -49,6 +52,21 @@ type relay struct {
 	server *mcp.Server
 	client *mcp.Client
 	socket string
+	loaded atomic.Bool
+}
+
+// Each AddTool can announce a change on its own, so a session that refetches mid-registration would see only some tools.
+func (r *relay) holdPartialTools(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, request mcp.Request) (mcp.Result, error) {
+		switch {
+		case r.loaded.Load():
+		case method == "tools/list":
+			return &mcp.ListToolsResult{Tools: []*mcp.Tool{}}, nil
+		case method == "tools/call":
+			return nil, &jsonrpc.Error{Code: jsonrpc.CodeInvalidRequest, Message: "Agenthail's tools are still loading"}
+		}
+		return next(ctx, method, request)
+	}
 }
 
 // register adds the daemon's tools once it answers. Tools added after the
@@ -61,6 +79,10 @@ func (r *relay) register(ctx context.Context) bool {
 		if err == nil {
 			for _, tool := range tools {
 				r.server.AddTool(tool, forward(daemon, tool.Name))
+			}
+			r.loaded.Store(true)
+			if len(tools) > 0 {
+				r.server.AddTool(tools[0], forward(daemon, tools[0].Name))
 			}
 			return true
 		}
