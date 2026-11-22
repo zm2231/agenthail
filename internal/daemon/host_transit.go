@@ -32,11 +32,16 @@ func (d *Daemon) movedFromHere(ctx context.Context, target *pairedHost, request 
 	if err != nil || to != target.record.ID {
 		return err
 	}
-	return movedRefusal(sessionID, target.record.ID, target.record.Name)
+	return d.movedRefusal(sessionID, target.record.ID, target.record.Name)
 }
 
-func movedRefusal(sessionID, hostID, hostName string) error {
-	return &actionError{Status: http.StatusConflict, Code: movedCode, Message: fmt.Sprintf("session %s moved to host %s; send it there", sessionID, hostName), Extra: map[string]any{movedToHostField: hostID}}
+// The count stops a replayed older signed handover.
+func (d *Daemon) movedRefusal(sessionID, hostID, hostName string) error {
+	seq, err := d.Registry.HandoverSeq(sessionID)
+	if err != nil {
+		return err
+	}
+	return &actionError{Status: http.StatusConflict, Code: movedCode, Message: fmt.Sprintf("session %s moved to host %s; send it there", sessionID, hostName), Extra: map[string]any{movedToHostField: hostID, handoverSeqField: seq}}
 }
 
 func (d *Daemon) coordinatorMovedRefusal(name, hostID string) error {
@@ -69,28 +74,33 @@ func (d *Daemon) movedAnswer(err error) error {
 	if host, found := d.pairedHost(moved.HostID); found {
 		name = host.record.Name
 	}
-	return movedRefusal(moved.SessionID, moved.HostID, name)
+	return d.movedRefusal(moved.SessionID, moved.HostID, name)
 }
 
 const (
 	movedCode        = "moved"
 	movedToHostField = "movedToHost"
+	handoverSeqField = "handoverSeq"
 )
 
-// movedTo is the host a paired host's answer says the session moved to, when
-// that answer is a moved refusal.
-func movedTo(answer hostAnswer) string {
+func movedTo(answer hostAnswer) (string, uint64) {
 	if answer.status != http.StatusConflict {
-		return ""
+		return "", 0
 	}
 	var refusal struct {
 		Error struct {
 			Code string `json:"code"`
 		} `json:"error"`
 		MovedToHost string `json:"movedToHost"`
+		HandoverSeq uint64 `json:"handoverSeq"`
 	}
 	if json.Unmarshal(answer.payload, &refusal) != nil || refusal.Error.Code != movedCode {
-		return ""
+		return "", 0
 	}
-	return refusal.MovedToHost
+	return refusal.MovedToHost, refusal.HandoverSeq
+}
+
+func movedToHost(answer hostAnswer) string {
+	to, _ := movedTo(answer)
+	return to
 }

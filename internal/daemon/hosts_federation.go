@@ -87,6 +87,7 @@ type pairedHost struct {
 	// guarded by mu. Only the mirror loop writes it.
 	hidden  map[string]dashboardSession
 	refused map[string]dashboardSession
+	claimed map[string]time.Time
 }
 
 func newFederation() *federation {
@@ -563,6 +564,9 @@ func (d *Daemon) mirrorHostOnce(ctx context.Context, host *pairedHost, outage *h
 		return false, err
 	}
 	host.setBuild(version.Identity)
+	if err := d.Registry.RecordPeerHostKeys(host.record.ID, version.SigningKeys); err != nil {
+		d.log.Printf("record %s's signing keys: %s", host.record.Name, err)
+	}
 	if version.Simulators != nil {
 		host.setSimulators(*version.Simulators)
 	}
@@ -685,7 +689,7 @@ func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, e
 		return 0, localMirror(err)
 	}
 	for _, moved := range snapshot.MovedOut {
-		d.handOverHostSession(host, moved.SessionID, moved.MovedToHost)
+		d.handOverHostSession(host, moved.SessionID, moved.MovedToHost, moved.HandoverSeq)
 	}
 	host.epoch = snapshot.HostEpoch
 	if err := d.Registry.RecordHostCatalogCursor(host.record.ID, snapshot.HostEpoch, snapshot.CatalogSeq); err != nil {
@@ -770,6 +774,7 @@ func (d *Daemon) applyHostCatalogEvent(host *pairedHost, envelope catalogStreamE
 		var payload struct {
 			SessionID   string `json:"sessionId"`
 			MovedToHost string `json:"movedToHost"`
+			HandoverSeq uint64 `json:"handoverSeq"`
 		}
 		if err := json.Unmarshal(envelope.Data, &payload); err != nil {
 			return err
@@ -778,11 +783,19 @@ func (d *Daemon) applyHostCatalogEvent(host *pairedHost, envelope catalogStreamE
 			return nil
 		}
 		host.dropRefused(payload.SessionID)
-		if payload.MovedToHost != "" && d.handOverHostSession(host, payload.SessionID, payload.MovedToHost) {
+		if payload.MovedToHost != "" && d.handOverHostSession(host, payload.SessionID, payload.MovedToHost, payload.HandoverSeq) {
 			return nil
 		}
 		host.setHidden(payload.SessionID, nil)
 		return d.removeHostRow(host.record.ID, payload.SessionID, "removed_by_host")
+	case "host.keys":
+		var payload struct {
+			Keys []hosts.SigningKey `json:"keys"`
+		}
+		if err := json.Unmarshal(envelope.Data, &payload); err != nil {
+			return err
+		}
+		return localMirror(d.Registry.RecordPeerHostKeys(host.record.ID, payload.Keys))
 	case "session.queue":
 		var payload struct {
 			SessionID  string `json:"sessionId"`
@@ -906,6 +919,9 @@ func (d *Daemon) mirrorOrHide(host *pairedHost, row dashboardSession, live bool)
 	}
 	if errors.As(err, &owned) && owned.HostID != host.record.ID {
 		host.keepRefused(row)
+		if host.claimDue(row.ID, time.Now()) {
+			go d.claimSignedHandover(host, row.ID)
+		}
 	}
 	if err == nil {
 		host.setHidden(row.ID, nil)
@@ -1118,7 +1134,7 @@ func (d *Daemon) replayHostDelivery(ctx context.Context, host *pairedHost, item 
 	var moved hosts.StatusError
 	if errors.As(answer.readErr, &moved) && moved.Code == movedCode {
 		if owner := host; d.ownedBy(owner, item.SessionID) {
-			defer d.handOverHostSession(owner, item.SessionID, moved.MovedToHost)
+			defer d.handOverHostSession(owner, item.SessionID, moved.MovedToHost, moved.HandoverSeq)
 		}
 		if next, found := d.pairedHost(moved.MovedToHost); found && next != host {
 			host, answer = next, d.postHostDelivery(ctx, next, item)

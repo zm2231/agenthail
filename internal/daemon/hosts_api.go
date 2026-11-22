@@ -16,6 +16,7 @@ type hostView struct {
 
 func (d *Daemon) registerHostAPI(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/host", d.apiV1Guard(dashboard, "read", d.apiHostSelfHandler))
+	mux.HandleFunc("/api/v1/host/signing-key", d.apiV1Guard(dashboard, "read", d.apiHostSigningKeyHandler))
 	mux.HandleFunc("/api/v1/hosts", d.apiV1Guard(dashboard, "read", d.apiHostsHandler))
 	mux.HandleFunc("/api/v1/resolve", d.apiV1Guard(dashboard, "read", d.apiResolveHandler))
 }

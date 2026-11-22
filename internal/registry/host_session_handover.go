@@ -11,19 +11,20 @@ import (
 type MovedSession struct {
 	SessionID   string `json:"sessionId"`
 	MovedToHost string `json:"movedToHost"`
+	HandoverSeq uint64 `json:"handoverSeq"`
 }
 
 func (r *Registry) MovedOutSessions() ([]MovedSession, error) {
 	return queryRows(r.read, []MovedSession{}, func(row rowScanner) (MovedSession, error) {
 		var moved MovedSession
-		return moved, row.Scan(&moved.SessionID, &moved.MovedToHost)
-	}, `SELECT m.conversation,m.peer_host FROM session_moves m JOIN sessions s ON s.id=m.conversation
+		return moved, row.Scan(&moved.SessionID, &moved.MovedToHost, &moved.HandoverSeq)
+	}, `SELECT m.conversation,m.peer_host,m.handover_seq FROM session_moves m JOIN sessions s ON s.id=m.conversation
 		WHERE m.role='out' AND m.state=? AND s.host_id<>''
 		AND m.rowid=(SELECT o.rowid FROM session_moves o WHERE o.conversation=m.conversation AND o.role='out' AND o.state=? ORDER BY o.updated_at DESC, o.rowid DESC LIMIT 1)
 		ORDER BY m.conversation`, MoveDone, MoveDone)
 }
 
-func (r *Registry) HandOverHostSession(from, sessionID, entityID, to string) (bool, error) {
+func (r *Registry) HandOverHostSession(from, sessionID, entityID, to string, seq uint64) (bool, error) {
 	if from == "" || to == "" || from == to {
 		return false, nil
 	}
@@ -40,6 +41,10 @@ func (r *Registry) HandOverHostSession(from, sessionID, entityID, to string) (bo
 	if err != nil {
 		return false, err
 	}
+	return r.handOverTx(tx, from, sessionID, entityID, to, seq)
+}
+
+func (r *Registry) handOverTx(tx *sql.Tx, from, sessionID, entityID, to string, seq uint64) (bool, error) {
 	var fromName, toName string
 	if err := tx.QueryRow(`SELECT name FROM hosts WHERE host_id=?`, from).Scan(&fromName); err != nil {
 		return false, ignoreNoRows(err)
@@ -57,7 +62,7 @@ func (r *Registry) HandOverHostSession(from, sessionID, entityID, to string) (bo
 			return false, err
 		}
 	}
-	if _, err := tx.Exec(`UPDATE sessions SET host_id=?,updated_at=datetime('now') WHERE id=? AND host_id=?`, to, sessionID, from); err != nil {
+	if _, err := tx.Exec(`UPDATE sessions SET host_id=?,handover_seq=MAX(handover_seq,?),updated_at=datetime('now') WHERE id=? AND host_id=?`, to, seq, sessionID, from); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {

@@ -103,6 +103,7 @@ type StatusError struct {
 	Code        string
 	Message     string
 	MovedToHost string
+	HandoverSeq uint64
 	Candidates  []string
 }
 
@@ -295,11 +296,12 @@ func ReadResponse(response *http.Response) ([]byte, error) {
 			Message string `json:"message"`
 		} `json:"error"`
 		MovedToHost string   `json:"movedToHost"`
+		HandoverSeq uint64   `json:"handoverSeq"`
 		Candidates  []string `json:"candidates"`
 	}
 	statusErr := StatusError{Status: response.StatusCode}
 	if json.Unmarshal(body, &envelope) == nil && envelope.Error.Message != "" {
-		statusErr.Code, statusErr.Message, statusErr.MovedToHost, statusErr.Candidates = envelope.Error.Code, envelope.Error.Message, envelope.MovedToHost, envelope.Candidates
+		statusErr.Code, statusErr.Message, statusErr.MovedToHost, statusErr.HandoverSeq, statusErr.Candidates = envelope.Error.Code, envelope.Error.Message, envelope.MovedToHost, envelope.HandoverSeq, envelope.Candidates
 	} else {
 		statusErr.Message = strings.TrimSpace(string(body))
 	}
@@ -331,7 +333,8 @@ type Version struct {
 	HostID            string `json:"hostId"`
 	HostName          string `json:"hostName"`
 	// Simulators is nil until the host has finished its first look.
-	Simulators *bool `json:"simulators,omitempty"`
+	Simulators  *bool        `json:"simulators,omitempty"`
+	SigningKeys []SigningKey `json:"signingKeys,omitempty"`
 	buildinfo.Identity
 }
 
