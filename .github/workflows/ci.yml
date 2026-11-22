@@ -331,15 +331,28 @@ jobs:
         run: scripts/fetch-node.sh
       - name: Race tests, one shard of internal/daemon
         # No workflow race-instruments sqlite's generated C; plain go test -race does.
+        # Its tests run one at a time and mostly wait, so two processes share the runner.
+        env:
+          PROCESSES: 2
         run: |
-          pattern="$(go run ./scripts/go-test-shard -seconds scripts/go-test-shard/seconds/internal-daemon.tsv ${{ matrix.shard }} ${{ strategy.job-total }} ./internal/daemon -race)"
-          AGENTHAIL_BROWSER_TEST_BROWSERS="$HOME/.cache/agenthail-build/playwright" go test ./internal/daemon -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -count=1 -timeout 25m -run "$pattern"
+          go test -c -o "$RUNNER_TEMP/daemon.test" ./internal/daemon -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false'
+          shards=$((${{ strategy.job-total }} * PROCESSES))
+          set --
+          for part in $(seq 0 $((PROCESSES - 1))); do
+            shard=$((${{ matrix.shard }} * PROCESSES + part))
+            go run ./scripts/go-test-shard -seconds scripts/go-test-shard/seconds/internal-daemon.tsv "$shard" "$shards" ./internal/daemon -race > "$RUNNER_TEMP/shard-$shard"
+            set -- "$@" "internal/daemon shard $shard of $shards" "cd internal/daemon && AGENTHAIL_BROWSER_TEST_BROWSERS='$HOME/.cache/agenthail-build/playwright' '$RUNNER_TEMP/daemon.test' -test.run \"\$(cat '$RUNNER_TEMP/shard-$shard')\" -test.count=1 -test.timeout 25m"
+          done
+          scripts/ci-concurrently.sh "$@"
       - name: The shards together hold every internal/daemon test go test lists
         if: matrix.shard == 0
+        env:
+          PROCESSES: 2
         run: |
-          AGENTHAIL_BROWSER_TEST_BROWSERS="$HOME/.cache/agenthail-build/playwright" go test ./internal/daemon -race -gcflags='modernc.org/...=-d=checkptr=0 -race=false' -list '.*' | grep -E '^(Test|Example|Fuzz)' | sort > "$RUNNER_TEMP/listed"
-          for shard in $(seq 0 $((${{ strategy.job-total }} - 1))); do
-            go run ./scripts/go-test-shard -names -seconds scripts/go-test-shard/seconds/internal-daemon.tsv "$shard" ${{ strategy.job-total }} ./internal/daemon -race
+          "$RUNNER_TEMP/daemon.test" -test.list '.*' | grep -E '^(Test|Example|Fuzz)' | sort > "$RUNNER_TEMP/listed"
+          shards=$((${{ strategy.job-total }} * PROCESSES))
+          for shard in $(seq 0 $((shards - 1))); do
+            go run ./scripts/go-test-shard -names -seconds scripts/go-test-shard/seconds/internal-daemon.tsv "$shard" "$shards" ./internal/daemon -race
           done | sort > "$RUNNER_TEMP/sharded"
           diff "$RUNNER_TEMP/listed" "$RUNNER_TEMP/sharded"
 
