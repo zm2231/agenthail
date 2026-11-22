@@ -233,12 +233,17 @@ func (h *harness) controlHandler(ctx context.Context) http.Handler {
 	}
 	mux.HandleFunc("POST /reset", func(w http.ResponseWriter, r *http.Request) {
 		held(w, func() {
-			for _, host := range h.hosts {
+			// Hosts start at once, so a reset takes at most one host's start limit.
+			errs := make([]error, len(h.hosts))
+			var started sync.WaitGroup
+			for i, host := range h.hosts {
 				host.endTurn()
-				if err := host.start(ctx); err != nil {
-					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-					return
-				}
+				started.Go(func() { errs[i] = host.start(ctx) })
+			}
+			started.Wait()
+			if err := errors.Join(errs...); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
 			}
 			writeJSON(w, http.StatusOK, statuses())
 		})
