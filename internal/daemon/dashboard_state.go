@@ -260,7 +260,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		if observedAt.IsZero() {
 			observedAt = now.UTC()
 		}
-		entry := d.catalogSessionProjection(adapter, session, identity, observedAt, aliasByID[session.ID], counts[session.ID], limits[session.ID], false, leads[session.ID], config)
+		entry := d.catalogSessionProjection(adapter, session, identity, observedAt, aliasByID[session.ID], counts[session.ID], limits[session.ID], false, leads[session.ID], config, 0)
 		entry.StartedBy, entry.Task = starters[session.ID], taskChildren[session.ID]
 		if work, found := works[session.ID]; found {
 			entry.Worktree = newWorkView(work)

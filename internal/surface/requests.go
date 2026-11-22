@@ -139,3 +139,18 @@ type Responder interface {
 	Requests(ctx context.Context, session *Session) (RequestState, error)
 	Respond(ctx context.Context, session *Session, requestID string, decision Decision) (string, error)
 }
+
+// OpenRequestsWaiting is the wait a session's open requests make, oldest
+// first: the oldest names it, and every request keeps its own start.
+func OpenRequestsWaiting(requests []Request) *Waiting {
+	if len(requests) == 0 {
+		return nil
+	}
+	oldest := requests[0]
+	waiting := &Waiting{Kind: oldest.Kind, ID: oldest.ID, Since: oldest.CreatedAt, Answerable: true, Open: make([]string, 0, len(requests)), OpenSince: make(map[string]time.Time, len(requests))}
+	for _, request := range requests {
+		waiting.Open = append(waiting.Open, request.ID)
+		waiting.OpenSince[request.ID] = request.CreatedAt
+	}
+	return waiting
+}

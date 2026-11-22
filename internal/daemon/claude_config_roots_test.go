@@ -70,11 +70,11 @@ func TestClaudeConfigRootsReachSessionOptionsCreationAndTheSessionRow(t *testing
 	}
 
 	transcript := filepath.Join(second, "projects", "-work", receipt.Session.ID+".jsonl")
-	row := d.catalogSessionProjection(d.Surfaces[0], surface.Session{ID: receipt.Session.ID, Surface: surface.KindClaude, Transcript: transcript}, projectresolve.CatalogIdentity{}, receipt.Session.LastActive, "", 0, nil, false, false, dashconfig.Config{})
+	row := d.catalogSessionProjection(d.Surfaces[0], surface.Session{ID: receipt.Session.ID, Surface: surface.KindClaude, Transcript: transcript}, projectresolve.CatalogIdentity{}, receipt.Session.LastActive, "", 0, nil, false, false, dashconfig.Config{}, 0)
 	if row.ClaudeConfigRoot == nil || row.ClaudeConfigRoot.Name != "work" || row.ClaudeConfigRoot.SignedInAs != "work@example.com" || row.ClaudeConfigRoot.Root != second {
 		t.Fatalf("row config root=%+v", row.ClaudeConfigRoot)
 	}
-	codex := d.catalogSessionProjection(d.Surfaces[0], surface.Session{ID: "c", Surface: surface.KindCodex, Transcript: transcript}, projectresolve.CatalogIdentity{}, receipt.Session.LastActive, "", 0, nil, false, false, dashconfig.Config{})
+	codex := d.catalogSessionProjection(d.Surfaces[0], surface.Session{ID: "c", Surface: surface.KindCodex, Transcript: transcript}, projectresolve.CatalogIdentity{}, receipt.Session.LastActive, "", 0, nil, false, false, dashconfig.Config{}, 0)
 	if codex.ClaudeConfigRoot != nil {
 		t.Fatalf("a Codex row carries a Claude config root: %+v", codex.ClaudeConfigRoot)
 	}

@@ -40,6 +40,37 @@ func (r *Registry) openPermissionAsks(ctx context.Context, q askQuerier, session
 	return queryAsks(ctx, q, `WHERE session_id=? AND origin=? AND state=? ORDER BY created_at_ms, id`, sessionID, AskOriginPermission, AskOpen)
 }
 
+// TurnWaited is how long a session waited on the person within the turn
+// that started at start: the union of its closed permission waits that began
+// in that turn, so overlapping waits count once.
+func (r *Registry) TurnWaited(sessionID string, start time.Time) (time.Duration, error) {
+	rows, err := r.read.Query(`SELECT created_at_ms,answered_at_ms FROM asks WHERE session_id=? AND created_at_ms>=? AND origin=? AND answered_at_ms>0 ORDER BY created_at_ms`,
+		sessionID, start.UnixMilli(), AskOriginPermission)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var waited time.Duration
+	var from, to int64
+	for rows.Next() {
+		var opened, answered int64
+		if err := rows.Scan(&opened, &answered); err != nil {
+			return 0, err
+		}
+		if answered <= opened {
+			continue
+		}
+		if opened > to {
+			waited += time.Duration(to-from) * time.Millisecond
+			from, to = opened, answered
+		} else if answered > to {
+			to = answered
+		}
+	}
+	waited += time.Duration(to-from) * time.Millisecond
+	return waited, rows.Err()
+}
+
 // NeedsRoute reports whether waits holds an answerable wait that has no ask yet, the only case SyncWaits routes.
 func (r *Registry) NeedsRoute(sessionID string, waits []Wait) (bool, error) {
 	for _, wait := range waits {

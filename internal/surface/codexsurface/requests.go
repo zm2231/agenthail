@@ -63,12 +63,11 @@ func (c *Codex) preciseWait(ctx context.Context, client codexClient, sess *surfa
 	if err != nil || len(open) == 0 {
 		return flagged
 	}
-	oldest := open[0].request
-	ids := make([]string, 0, len(open))
+	requests := make([]surface.Request, 0, len(open))
 	for _, request := range open {
-		ids = append(ids, request.request.ID)
+		requests = append(requests, request.request)
 	}
-	return &surface.Waiting{Kind: oldest.Kind, ID: oldest.ID, Since: oldest.CreatedAt, Answerable: true, Open: ids}
+	return surface.OpenRequestsWaiting(requests)
 }
 
 // codexOpenRequests subscribes client to the thread and returns the requests

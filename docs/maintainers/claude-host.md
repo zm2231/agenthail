@@ -267,13 +267,21 @@ its reset time, and the transcript notice names it too.
 
 ## Activity of a working turn
 
-A working session also carries `activity{busySince, lastProgressAt,
-tool{name, startedAt}, noProcess}` on the session and the dashboard projection,
-which federates it to paired hosts. It never changes the session's status and
-nothing acts on it; it lets a client say how long a working turn has been
-quiet.
+A working session also carries `activity{busySince, turnStartedAt,
+lastProgressAt, tool{name, startedAt}, noProcess}` on the session and the dashboard projection,
+which federates it to paired hosts. It never changes the session's status;
+it lets a client say how long a working turn has been quiet, and a snooze
+until the turn finishes reads its turn start.
 
-`busySince` is when the open turn started. `lastProgressAt` is its newest
+`busySince` is when the open turn started, moved later by the time the turn
+spent waiting on the person, so the clients' Working timer counts only time
+worked: a turn that worked an hour, waited three hours on a question, then
+worked ten minutes reads 1h 10m. The waits are the turn's permission asks
+(questions, approvals, dialogs) that opened after it started and have
+closed, counted once where they overlap; the daemon reads them when it
+publishes the row, and a full listing reuses the published row. `turnStartedAt` keeps when the turn began, which a
+snooze until the turn finishes compares against, so answering a question
+does not wake it. `lastProgressAt` is its newest
 transcript record, or the session record's `statusUpdatedAt` when that is
 later. `tool` is the turn's newest tool call without a result yet, so a long
 build reads as running Bash since it started rather than as stuck. A session

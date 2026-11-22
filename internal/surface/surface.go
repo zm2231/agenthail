@@ -51,6 +51,9 @@ type Waiting struct {
 	Since      time.Time   `json:"since,omitzero"`
 	Answerable bool        `json:"answerable"`
 	Open       []string    `json:"open,omitempty"`
+	// OpenSince is when each open request began, by id, for a wait read
+	// from its provider in this process.
+	OpenSince map[string]time.Time `json:"-"`
 }
 
 // BackgroundTasks is work a session started that runs on after its turn ends:
@@ -119,18 +122,32 @@ func (l *UsageLimit) Lifted(now time.Time) bool {
 }
 
 // Activity is how a working session's turn is going: when it started, when
-// it last wrote anything, and the tool it is running. NoProcess marks a turn
+// it last wrote anything, and the tool it is running. A published row's
+// BusySince leaves out the time the turn waited on the person, so a client's
+// elapsed time from it is time worked; TurnStartedAt then keeps when the
+// turn began. NoProcess marks a turn
 // its transcript leaves open with no Claude process or session record behind
 // it. Clients use it to say how long a session has been quiet; it never
 // changes the session's status.
 type Activity struct {
 	BusySince      time.Time    `json:"busySince,omitzero"`
+	TurnStartedAt  time.Time    `json:"turnStartedAt,omitzero"`
 	LastProgressAt time.Time    `json:"lastProgressAt,omitzero"`
 	Tool           *RunningTool `json:"tool,omitempty"`
 	NoProcess      bool         `json:"noProcess,omitempty"`
 	// Claude stays busy after its reply while Stop hooks run.
 	FinishingSince time.Time `json:"finishingSince,omitzero"`
 	EndedAt        time.Time `json:"-"`
+}
+
+func (a *Activity) TurnStart() time.Time {
+	if a == nil {
+		return time.Time{}
+	}
+	if !a.TurnStartedAt.IsZero() {
+		return a.TurnStartedAt
+	}
+	return a.BusySince
 }
 
 const FinishingGrace = 2 * time.Second

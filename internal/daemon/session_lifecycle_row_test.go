@@ -38,7 +38,7 @@ func TestSessionRowReportsTheLifecycleItsRuntimeSupports(t *testing.T) {
 		{surface.RuntimeClaudeBackground, "", map[string]bool{"status": true, "logs": true, "stop": true, "resume": true, "adopt": true}},
 	} {
 		runtime, want := tc.runtime, tc.want
-		row := d.catalogSessionProjection(adapter, surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: runtime, Transport: "uds", Transcript: tc.transcript, HasLocal: tc.transcript != ""}, projectresolve.CatalogIdentity{}, time.Now(), "", 0, nil, false, false, dashconfig.Config{})
+		row := d.catalogSessionProjection(adapter, surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: runtime, Transport: "uds", Transcript: tc.transcript, HasLocal: tc.transcript != ""}, projectresolve.CatalogIdentity{}, time.Now(), "", 0, nil, false, false, dashconfig.Config{}, 0)
 		data, err := json.Marshal(row)
 		if err != nil {
 			t.Fatal(err)

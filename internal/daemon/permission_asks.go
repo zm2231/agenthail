@@ -29,7 +29,7 @@ func waitsOf(waiting *surface.Waiting) []registry.Wait {
 	waits := []registry.Wait{oldest}
 	for _, ref := range waiting.Open {
 		if ref != waiting.ID {
-			waits = append(waits, registry.Wait{Ref: ref, Answerable: true})
+			waits = append(waits, registry.Wait{Ref: ref, Since: waiting.OpenSince[ref], Answerable: true})
 		}
 	}
 	return waits
