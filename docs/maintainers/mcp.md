@@ -236,7 +236,7 @@ A local target is then decided in this order:
 
 That refusal, and a paired host's `different_project` for a queued send, are the ones the person can lift for one action: `agenthail_send`, `agenthail_steer`, `agenthail_interrupt` and `agenthail_archive` mark them `detail.approvable: true`, and with `askPerson: true` and a `reason` raise an approval instead of refusing (`control_approvals.go`), answering `{"asked": true, "requestId": ...}`. Every other refusal stays as it is: control flowing up, a session in the caller's own project it neither spawned nor leads, a write across hosts other than a queued send. Other tools that resolve with `mcpControlTarget` are not approvable.
 
-`agenthail_send` with `project` reaches any project's coordinator as a queued message, so a project's coordinator is reachable by project from every session. `mode: now` needs `control.all`: to the caller's own coordinator it is refused as control flowing up, and to another project's with `out_of_scope`, `detail.rule: different_project`.
+`agenthail_send` with `project` reaches any project's coordinator, so a project's coordinator is reachable by project from every session. With no mode, a busy coordinator is steered only by the sender the delivery rule lets steer it (its starter), and otherwise the message waits; `mode: queue` always waits. `mode: now` needs `control.all`: to the caller's own coordinator it is refused as control flowing up, and to another project's with `out_of_scope`, `detail.rule: different_project`. Once admitted, it steers a busy coordinator on this host (see [session-operations.md](session-operations.md)).
 
 ### The CLI from an agent's shell
 

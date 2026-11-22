@@ -183,18 +183,30 @@ func TestAnIdentitysSendToABusyCoordinatorFollowsItsMode(t *testing.T) {
 	if _, err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: project.ID, ProjectRoot: widget, Name: "widget-lead", Surface: string(surface.KindCodex), Cwd: widget}, registry.CoordinatorChange{SessionID: to.ID, ChangedBy: "fixture"}); err != nil {
 		t.Fatal(err)
 	}
-	kat := remoteIdentityClient(t, mcpServer(t, d).URL, bindRemoteIdentity(t, r, "kat"))
+	server := mcpServer(t, d)
+	katToken, scoutToken := bindRemoteIdentity(t, r, "kat"), bindRemoteIdentity(t, r, "scout")
+	kat, scout := remoteIdentityClient(t, server.URL, katToken), remoteIdentityClient(t, server.URL, scoutToken)
 	if _, err := d.setIdentitySettings(context.Background(), daemonapi.CLIActor, daemonapi.IdentitySettingsRequest{Identity: "kat", SendMode: registry.SendModeNow}); err != nil {
 		t.Fatal(err)
 	}
+	starter, err := r.AgentIdentityNamed("scout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RecordSessionOrigin(registry.OriginOf(to.ID, starter.SessionID)); err != nil {
+		t.Fatal(err)
+	}
 
+	if out, refused := callMCP(t, scout, "agenthail_send", map[string]any{"project": "widget", "message": "starter says queue", "mode": "queue"}); refused {
+		t.Fatalf("the starter's queued send to the coordinator: %v", out)
+	}
 	if out, refused := callMCP(t, kat, "agenthail_send", map[string]any{"project": "widget", "message": "lead by default"}); refused {
 		t.Fatalf("kat's send to the coordinator with no mode: %v", out)
 	}
 	if out, refused := callMCP(t, kat, "agenthail_send", map[string]any{"project": "widget", "message": "lead says queue", "mode": "queue"}); refused {
 		t.Fatalf("kat's queued send to the coordinator: %v", out)
 	}
-	if !slices.Contains(fake.steeredAs, "[from @kat] lead by default") || slices.ContainsFunc(fake.steered, func(m string) bool { return strings.Contains(m, "lead says queue") }) {
+	if !slices.Contains(fake.steeredAs, "[from @kat] lead by default") || slices.ContainsFunc(fake.steered, func(m string) bool { return strings.Contains(m, "says queue") }) {
 		t.Fatalf("only kat's send with no mode should steer the coordinator: steered=%q", fake.steeredAs)
 	}
 }

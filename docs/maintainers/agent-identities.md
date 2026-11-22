@@ -50,7 +50,7 @@ agenthail identity set <name> --send-mode queue  # the default
 
 The setting is a row of `identity_settings`, removed with the identity. Like role changes, only the person can change it: the CLI sends it over the daemon's local socket, which refuses a command run inside an agent session, and the dashboard API (`POST /api/v1/identity-settings`) takes it only from a paired device or a paired host acting for the person. Each change is recorded in history as `identity-settings` and told to the person, and `identity list` shows `sends now by default`.
 
-An explicit `mode` always wins. A send the default made `now` is checked as `now` is: the caller's role decides whether it may steer the target. If that check refuses it, the send is retried as queued, with no ask, and the tool's result carries a `notice` saying so. A retry with the same `clientRequestId` replays both attempts alike. The default applies to `agenthail_send` from MCP, the only way an identity's role is known. A CLI send with `--from` stays queued unless it asks otherwise.
+An explicit `mode` always wins. A send the default made `now` is checked as `now` is: the caller's role decides whether it may steer the target. If that check refuses it, or the owning host refuses it or cannot be reached, the send is retried as queued, with no ask, and the tool's result carries a `notice` saying so. Any other failure, such as a delivery that fails, is returned as it is and not retried. A retry with the same `clientRequestId` replays both attempts alike. The default applies to `agenthail_send` from MCP, the only way an identity's role is known. A CLI send with `--from` stays queued unless it asks otherwise.
 
 ## Across paired hosts
 
