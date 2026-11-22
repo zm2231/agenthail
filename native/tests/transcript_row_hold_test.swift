@@ -163,6 +163,16 @@ struct TranscriptRowHoldTest {
         let rebased = shrinkingStep(1050, 2000)
         expect(rebased == .scroll(1080), "the next move is measured from where that correction landed, step \(rebased)")
 
+        let reversed = TranscriptRowAnchor()
+        var reversedTop: CGFloat = 1200
+        let reversedStep = { (upper: CGFloat) in reversed.pass(offset: 1000, range: -44...upper, top: { _ in reversedTop }, leading: { ("r1", reversedTop, reversedTop - 1000) }) }
+        _ = reversedStep(5000)
+        reversedTop = 1300
+        expect(reversedStep(5000) == .scroll(1100), "a move queues a correction")
+        reversedTop = 1200
+        let undoneAtEnd = reversedStep(1000)
+        expect(undoneAtEnd == .cancel, "a move undone as the range shrinks to the offset drops the correction rather than scrolling back past the row, step \(undoneAtEnd)")
+
         let tall = TranscriptRowAnchor()
         var tallTop: CGFloat = 32000
         let tallStep = { tall.pass(offset: 34537, range: -44...99999, top: { _ in tallTop }, leading: { ("r9", tallTop, tallTop - 34537) }) }

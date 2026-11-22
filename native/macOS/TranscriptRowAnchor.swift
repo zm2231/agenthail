@@ -22,13 +22,13 @@ final class TranscriptRowAnchor {
 
     /// `leading` is the row in view with its top and where the reader saw it; mid-resize, as they saw it before the resize.
     func pass(offset: CGFloat, range: ClosedRange<CGFloat>, top: (String) -> CGFloat?, leading: () -> (id: String, top: CGFloat, screen: CGFloat)?) -> Step {
-        // A correction clamped by a range that shrank lands short of its target, and the reader is where it landed.
-        if let pending, abs(offset - min(max(pending, range.lowerBound), range.upperBound)) <= 1 {
-            self.pending = nil
-            if let row { self.row?.screen = row.top - offset }
-        }
         let dropped = row.flatMap({ top($0.id) }) == nil && pick(leading)
         guard let row, let now = top(row.id) else { return dropped ? .cancel : .none }
+        // A correction clamped by a range that shrank lands short of its target; only a row that has not moved since shows where it landed.
+        if let pending, abs(now - row.top) < 1, abs(offset - min(max(pending, range.lowerBound), range.upperBound)) <= 1 {
+            self.pending = nil
+            self.row?.screen = row.top - offset
+        }
         guard abs(now - row.top) >= 1 else {
             if pending == nil, abs(now - offset - row.screen) >= 1 { pick(leading) }
             return dropped ? .cancel : .none
