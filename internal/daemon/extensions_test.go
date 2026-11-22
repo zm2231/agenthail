@@ -140,9 +140,6 @@ func startExtensionDaemon(t *testing.T, home string, opts extensionDaemonOptions
 	if opts.log != nil {
 		d.log = log.New(opts.log, "", 0)
 	}
-	previous := extensionPortBase
-	extensionPortBase = 0
-	t.Cleanup(func() { extensionPortBase = previous })
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	dashboard.listen = strings.TrimPrefix(server.URL, "http://")

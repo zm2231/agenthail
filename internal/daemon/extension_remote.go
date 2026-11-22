@@ -15,7 +15,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,7 +26,7 @@ import (
 )
 
 var (
-	remoteExtensionPortBase  = defaultRemoteExtensionPortBase
+	remoteExtensionPortBase  = 0
 	remoteExtensionPortCount = 200
 )
 
@@ -122,34 +121,15 @@ func (r *remoteExtensions) savePortsLocked() error {
 	return atomicfile.Write(path, append(data, '\n'), 0o600)
 }
 
-func (r *remoteExtensions) listenLocked(key string) (net.Listener, int, error) {
-	if port, ok := r.ports[key]; ok {
-		listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
-		if err != nil {
-			return nil, 0, fmt.Errorf("port %d: %w", port, err)
-		}
-		return listener, port, nil
-	}
-	if remoteExtensionPortBase == 0 {
-		listener, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			return nil, 0, err
-		}
-		return listener, listener.Addr().(*net.TCPAddr).Port, nil
-	}
+const remoteHolderPrefix = "remote "
+
+func (d *Daemon) listenRemoteLocked(key string) (net.Listener, int, error) {
+	r := d.remoteExtensions
 	taken := map[int]bool{}
 	for _, port := range r.ports {
 		taken[port] = true
 	}
-	for port := remoteExtensionPortBase; port < remoteExtensionPortBase+remoteExtensionPortCount; port++ {
-		if taken[port] {
-			continue
-		}
-		if listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port))); err == nil {
-			return listener, port, nil
-		}
-	}
-	return nil, 0, fmt.Errorf("no free port from %d to %d", remoteExtensionPortBase, remoteExtensionPortBase+remoteExtensionPortCount-1)
+	return d.listenExtensionPort(remoteHolderPrefix+key, r.ports[key], remoteExtensionPortBase, remoteExtensionPortCount, taken)
 }
 
 // A listed key keeps its port while unservable, so its origin survives.
@@ -173,7 +153,10 @@ func (d *Daemon) shareRemoteExtensions(host *pairedHost, view extensionsView) (e
 		}
 		f := r.forwarders[key]
 		if f == nil {
-			listener, port, err := r.listenLocked(key)
+			if d.extensionPortsOff {
+				return 0, extensionPortsOffError
+			}
+			listener, port, err := d.listenRemoteLocked(key)
 			if err != nil {
 				return 0, err.Error()
 			}
@@ -238,7 +221,7 @@ func (d *Daemon) shareRemoteExtensions(host *pairedHost, view extensionsView) (e
 	view.BuiltIn = builtIn
 	for key := range r.ports {
 		if strings.HasPrefix(key, hostID+"/") && !listed[key] {
-			r.dropLocked(key)
+			d.dropRemoteLocked(key)
 			changed = true
 		}
 	}
@@ -250,7 +233,9 @@ func (d *Daemon) shareRemoteExtensions(host *pairedHost, view extensionsView) (e
 	return view, nil
 }
 
-func (r *remoteExtensions) dropLocked(key string) {
+func (d *Daemon) dropRemoteLocked(key string) {
+	r := d.remoteExtensions
+	d.extensionPortHolders.clear(remoteHolderPrefix + key)
 	if f := r.forwarders[key]; f != nil {
 		f.close()
 		delete(r.forwarders, key)
@@ -270,7 +255,7 @@ func (d *Daemon) forgetRemoteExtensions(hostID string) {
 	changed := false
 	for key := range r.ports {
 		if strings.HasPrefix(key, hostID+"/") {
-			r.dropLocked(key)
+			d.dropRemoteLocked(key)
 			changed = true
 		}
 	}

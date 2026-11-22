@@ -33,6 +33,7 @@ The daemon runs as `agenthail daemon-run` in the foreground. No install, service
 | `AGENTHAIL_CLAUDE_SOCKET_DIR` | `<dir>/sockets` |
 | `AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT` | the trap port |
 | `AGENTHAIL_PUSH_RELAY_URL` | `http://127.0.0.1:<the trap port>` |
+| `AGENTHAIL_EXTENSION_PORTS` | `off`, so the daemon serves no extension page or mount and listens only on its dashboard port |
 | `LANG` | `en_US.UTF-8` |
 
 `<dir>/bin` holds links to `git`, `kill`, `ps` and `sleep`, the commands the daemon runs by name, and a copy of the harness named `claude`. No real Claude or Codex CLI is on it, so a host cannot find the machine's own.
