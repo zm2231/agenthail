@@ -31,6 +31,15 @@ extension XCTestCase {
         return hostID
     }
 
+    // iOS asks for notifications once per install, and a denial would carry into every later live test.
+    func monitorLiveAlerts(_ appAlert: @escaping (XCUIElement) -> Void) {
+        addUIInterruptionMonitor(withDescription: "live alerts") { alert in
+            let allow = alert.buttons["Allow"]
+            if allow.exists { allow.tap() } else { appAlert(alert) }
+            return true
+        }
+    }
+
     func liveRow(_ title: String, host hostID: String, in app: XCUIApplication) -> XCUIElementQuery {
         app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "session-\(hostID)::", title))
     }

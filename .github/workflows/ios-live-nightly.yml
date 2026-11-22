@@ -47,6 +47,7 @@ jobs:
           xcrun simctl boot "$udid" 2>/dev/null || true
           xcrun simctl bootstatus "$udid" -b
           scripts/ios-ci-keychain-reset.sh "$udid"
+          xcrun simctl uninstall "$udid" com.agenthail.ios || true
       - name: Build for simulator tests
         run: xcodebuild build-for-testing -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED"
       - name: Live host tests
