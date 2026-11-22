@@ -15,7 +15,7 @@ import (
 type mcpLedgerWriteInput struct {
 	mcpWrite
 	Op      string         `json:"op" jsonschema:"attach, clause, question or work: the same operations as agenthail ledger attach, clause, question and work."`
-	Request map[string]any `json:"request" jsonschema:"The operation's fields, as the CLI sends them; your project and session are filled in for you. Unknown keys are refused. A work add nests type, priority, description, acceptance, labels, from and parent under fields (fields.type); an edit nests text, type, priority, description, acceptance, addLabels, removeLabels and parent (an empty parent takes the item out from under its own) under change; action undep with dependsOn drops a dependency; a park nests kind (usage, idea, later, person) and its fields under park, as the CLI sends them. attach also takes fragments, a list of attaches recorded in one call, each on its own."`
+	Request map[string]any `json:"request" jsonschema:"The operation's fields, as the CLI sends them; your project and session are filled in for you. Unknown keys are refused. A work add nests type, priority, description, acceptance, labels, from and parent under fields (fields.type); an edit nests text, type, priority, description, acceptance, addLabels, removeLabels and parent (empty to clear) under change; undep drops a dependsOn; a park nests kind (usage, idea, later, person) and its fields under park, as the CLI sends them. attach also takes fragments, a list of attaches recorded in one call, each on its own."`
 }
 
 func (d *Daemon) mcpLedgerWrite(ctx context.Context, caller *mcpCaller, input mcpLedgerWriteInput) (any, error) {
