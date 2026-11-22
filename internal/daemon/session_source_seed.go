@@ -181,7 +181,9 @@ func (s *sessionSource) loadSeed() error {
 		if _, continues := s.adapter.(surface.TranscriptContinuer); continues {
 			return s.catchUpLocalTranscript(ctx, trustedIdentity, "")
 		}
-		return fmt.Errorf("Codex local transcript was replaced before catch-up: %w", errTranscriptReplaced)
+		if read.TranscriptOffsetSet {
+			return fmt.Errorf("%s transcript was replaced before catch-up: %w", s.session.Surface, errTranscriptReplaced)
+		}
 	}
 	if read.TranscriptOffsetSet {
 		s.session.TranscriptOffset = read.TranscriptOffset
@@ -198,7 +200,7 @@ func (s *sessionSource) loadSeed() error {
 			return err
 		}
 		if held {
-			return fmt.Errorf("the session's local transcript is unavailable")
+			return fmt.Errorf("%s transcript is unavailable", s.session.Surface)
 		}
 	}
 	s.session.TranscriptFromStart = !read.TranscriptOffsetSet
