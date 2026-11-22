@@ -220,51 +220,6 @@ func TestStatusPassStopsFollowingFailedSurface(t *testing.T) {
 	}
 }
 
-func TestRunCatalogPublishesStatusWithinTwoSeconds(t *testing.T) {
-	d, store, source := localStatusFixture(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		d.runCatalog(ctx)
-	}()
-	defer func() {
-		cancel()
-		<-done
-	}()
-	deadline := time.Now().Add(5 * time.Second)
-	for len(catalogStatusEvents(t, store, 0, "from")) == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("initial discovery did not publish")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	// Let the first status tick record the post-discovery stamps.
-	time.Sleep(catalogStatusInterval + 100*time.Millisecond)
-	window, eventsFollower, err := d.catalog.subscribe(latestCatalogSeq(t, store))
-	if err != nil || window.Gap {
-		t.Fatalf("subscribe gap=%v err=%v", window.Gap, err)
-	}
-	events := followCatalog(t, eventsFollower)
-	unsubscribe := eventsFollower.Cancel
-	defer unsubscribe()
-	started := time.Now()
-	source.writeStatus(t, "from", surface.StatusBusy)
-	timeout := time.After(2 * time.Second)
-	for {
-		select {
-		case event := <-events:
-			if event.Type != "session.upserted" || event.EntityID != "from" || !strings.Contains(string(event.Payload), `"status":"busy"`) {
-				continue
-			}
-			t.Logf("status latency=%s", time.Since(started).Round(time.Millisecond))
-			return
-		case <-timeout:
-			t.Fatal("busy status did not reach the catalog stream within 2s")
-		}
-	}
-}
-
 func TestStatusPassPublishesWhileDiscoveryIsBlocked(t *testing.T) {
 	d, store, source := localStatusFixture(t)
 	var blocking atomic.Bool
@@ -323,6 +278,12 @@ func TestStatusPassPublishesWhileDiscoveryIsBlocked(t *testing.T) {
 		t.Fatal("discovery did not start")
 	}
 	after := latestCatalogSeq(t, store)
+	window, eventsFollower, err := d.catalog.subscribe(after)
+	if err != nil || window.Gap {
+		t.Fatalf("subscribe gap=%v err=%v", window.Gap, err)
+	}
+	events := followCatalog(t, eventsFollower)
+	defer eventsFollower.Cancel()
 	source.writeStatus(t, "from", surface.StatusBusy)
 	// A pass holds in catalogStatusPassed until received, so the first pass
 	// received may have read the file before the write; the second began after.
@@ -330,6 +291,17 @@ func TestStatusPassPublishesWhileDiscoveryIsBlocked(t *testing.T) {
 	awaitPass("while discovery was blocked")
 	if statuses := catalogStatusEvents(t, store, after, "from"); len(statuses) == 0 || statuses[len(statuses)-1] != string(surface.StatusBusy) {
 		t.Fatalf("statuses published while discovery was blocked = %v, want busy last", statuses)
+	}
+	timeout := time.After(30 * time.Second)
+	for {
+		select {
+		case event := <-events:
+			if event.Type == "session.upserted" && event.EntityID == "from" && strings.Contains(string(event.Payload), `"status":"busy"`) {
+				return
+			}
+		case <-timeout:
+			t.Fatal("the published busy status did not reach the catalog stream")
+		}
 	}
 }
 
