@@ -299,3 +299,14 @@ func ClaudeHostLaunch(home, version string) (claudehost.Launch, error) {
 	launch.Agenthail = surface.AgenthailExecutable()
 	return launch, nil
 }
+
+// HostedProcessSession names the conversation a Claude host runs as the
+// process pid, including one an earlier host started.
+func (c *Claude) HostedProcessSession(ctx context.Context, pid int) string {
+	for id, hosted := range c.host.listing(ctx) {
+		if hosted == pid {
+			return id
+		}
+	}
+	return ""
+}

@@ -84,6 +84,10 @@ Session commands:
                                  Which agenthail tools a role sees
   roles create <name> [<from-role>] | delete <role> | reset <role>
                                  Make a role from another (worker by default), remove it, or return a built-in one to how it ships
+  roles assign <role> --session <@alias|id> | --identity <name> | --alias <name>
+                                 Give one agent a role in place of the one it holds by what it is
+  roles unassign --session <@alias|id> | --identity <name> | --alias <name>
+                                 Take an assigned role back; roles change only from your own terminal
 
 Delivery (send, queue, steer):
   idle target                   send delivers now; queue holds it for the daemon; steer has no turn to reach and says

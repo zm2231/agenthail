@@ -87,6 +87,19 @@ func TestAHostSessionIsListedOnTheHostRuntimeWithItsNativeSocket(t *testing.T) {
 	}
 }
 
+func TestTheClaudeProcessAHostRunsIsNamedAsItsSession(t *testing.T) {
+	c, fixture := hostedClaude(t)
+	client := fixture.Start(t)
+	id := uuid.NewString()
+	opened := fixture.Open(t, client, id)
+	if got := c.HostedProcessSession(context.Background(), opened.PID); got != id {
+		t.Fatalf("the host's Claude process %d is named %q, want %s", opened.PID, got, id)
+	}
+	if got := c.HostedProcessSession(context.Background(), os.Getpid()); got != "" {
+		t.Fatalf("a process no host started is named %q", got)
+	}
+}
+
 func TestAPersonsTurnToAHostSessionCarriesTheIntentUUIDAndRunsOnce(t *testing.T) {
 	c, fixture := hostedClaude(t)
 	c.localOnly = true

@@ -9,6 +9,7 @@ import (
 type CallerRecord struct {
 	Session  surface.Session
 	Alias    string
+	Identity string
 	HostID   string
 	Archived bool
 	Roles    SessionRoles
@@ -18,7 +19,7 @@ type CallerRecord struct {
 	Project  json.RawMessage
 }
 
-var callerSelect = sessionSelect(`s.status`) + `,COALESCE((SELECT a.name FROM aliases a WHERE a.session_id=s.id),''),s.host_id,
+var callerSelect = sessionSelect(`s.status`) + `,COALESCE((SELECT a.name FROM aliases a WHERE a.session_id=s.id),''),COALESCE((SELECT i.name FROM agent_identities i WHERE i.identity_id=s.id),''),s.host_id,
 	EXISTS(SELECT 1 FROM session_archive a WHERE a.session_id=s.id),
 	s.id IN (` + localLeadSessions + `),
 	s.id IN (` + voiceOperatorSessions + `),
@@ -31,7 +32,7 @@ func (r *Registry) Caller(sessionID string) (CallerRecord, error) {
 	var record CallerRecord
 	var columns sessionScan
 	var ceiling string
-	targets := append(columns.targets(), &record.Alias, &record.HostID, &record.Archived, &record.Roles.Lead, &record.Roles.Operator, &ceiling, &record.Recorded, &record.Project)
+	targets := append(columns.targets(), &record.Alias, &record.Identity, &record.HostID, &record.Archived, &record.Roles.Lead, &record.Roles.Operator, &ceiling, &record.Recorded, &record.Project)
 	if err := r.callers.QueryRow(callerSelect, sessionID).Scan(targets...); err != nil {
 		return CallerRecord{}, err
 	}

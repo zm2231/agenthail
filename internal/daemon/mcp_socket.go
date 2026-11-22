@@ -212,9 +212,13 @@ func (d *Daemon) codexParentThreads(pid int) []string {
 	if err != nil || parent <= 1 {
 		return nil
 	}
+	return d.processThreads(parent)
+}
+
+func (d *Daemon) processThreads(pid int) []string {
 	for _, adapter := range d.Surfaces {
 		if owner, ok := adapter.(processThreads); ok {
-			if threads := owner.ProcessThreads(parent); len(threads) > 0 {
+			if threads := owner.ProcessThreads(pid); len(threads) > 0 {
 				return threads
 			}
 		}
@@ -292,26 +296,57 @@ func mcpRequestThread(request mcpSocketRequest) (method, thread string, err erro
 func (d *Daemon) processSession(pid int) (string, string) {
 	why := "no Claude or Codex session is among the calling process's parents"
 	unreadable := false
-	for range mcpSocketAncestors {
+	id := ancestorSession(pid, mcpSocketAncestors, func(pid int) string {
+		if id := d.claudeProcessSession(pid); id != "" {
+			return id
+		}
+		if path, found := d.unreadableRecord(pid); found && !unreadable {
+			why, unreadable = fmt.Sprintf("the session record %s of Claude process %d cannot be read", path, pid), true
+		}
+		return ""
+	})
+	if id != "" {
+		return id, ""
+	}
+	return "", why
+}
+
+// ancestorSession walks up from pid's parent, through at most limit
+// processes, to the first that owns names a session.
+func ancestorSession(pid, limit int, owns func(pid int) string) string {
+	for range limit {
 		parent, err := peerproc.Parent(pid)
 		if err != nil || parent <= 1 {
-			break
+			return ""
 		}
 		pid = parent
-		for _, adapter := range d.Surfaces {
-			if owner, ok := adapter.(processSessions); ok {
-				if id := owner.ProcessSession(pid); id != "" {
-					return id, ""
-				}
-			}
-			if records, ok := adapter.(processRecords); ok && !unreadable {
-				if path, found := records.UnreadableRecord(pid); found {
-					why, unreadable = fmt.Sprintf("the session record %s of Claude process %d cannot be read", path, pid), true
-				}
+		if id := owns(pid); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+func (d *Daemon) claudeProcessSession(pid int) string {
+	for _, adapter := range d.Surfaces {
+		if owner, ok := adapter.(processSessions); ok {
+			if id := owner.ProcessSession(pid); id != "" {
+				return id
 			}
 		}
 	}
-	return "", why
+	return ""
+}
+
+func (d *Daemon) unreadableRecord(pid int) (string, bool) {
+	for _, adapter := range d.Surfaces {
+		if records, ok := adapter.(processRecords); ok {
+			if path, found := records.UnreadableRecord(pid); found {
+				return path, true
+			}
+		}
+	}
+	return "", false
 }
 
 // awaitLocalSession waits for discovery to register a session that has just

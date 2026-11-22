@@ -59,6 +59,13 @@ func MCPSocketPath() string {
 	return filepath.Join(home, ".agenthail", "mcp.sock")
 }
 
+// LocalSocketPath is where the daemon serves what only the person may do,
+// naming each caller by its process.
+func LocalSocketPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".agenthail", "local.sock")
+}
+
 func DebugSocketPath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".agenthail", "debug.sock")

@@ -94,43 +94,44 @@ type dashboardPerson struct {
 }
 
 type dashboardState struct {
-	UpdatedAt          time.Time                   `json:"updatedAt"`
-	EventCursor        uint64                      `json:"eventCursor"`
-	HostEpoch          string                      `json:"hostEpoch"`
-	CatalogSeq         uint64                      `json:"catalogSeq"`
-	Daemon             map[string]any              `json:"daemon"`
-	Surfaces           []dashboardSurface          `json:"surfaces"`
-	Sessions           []dashboardSession          `json:"sessions"`
-	RetiredClock       *int64                      `json:"retiredClock,omitempty"`
-	RetiredIDs         []string                    `json:"retiredIds,omitempty"`
-	TotalSessions      int                         `json:"totalSessions"`
-	Counts             map[string]int              `json:"counts,omitempty"`
-	Projects           []dashboardProject          `json:"projects,omitempty"`
-	NextCursor         string                      `json:"nextCursor,omitempty"`
-	Queue              []dashboardQueue            `json:"queue"`
-	Channels           []dashboardChannel          `json:"channels"`
-	Relays             []dashboardRelay            `json:"relays"`
-	History            []dashboardHistory          `json:"history"`
-	CodexRecentHours   int                         `json:"codexRecentHours"`
-	BusyDelivery       string                      `json:"busyDelivery"`
-	Signin             []signin.Status             `json:"signin"`
-	Rekeyed            map[string]string           `json:"rekeyed,omitempty"`
-	Coordinators       []registry.CoordinatorEntry `json:"coordinators"`
-	ProjectLinks       []registry.ProjectLink      `json:"projectLinks"`
-	ProjectMoves       []registry.ProjectMove      `json:"projectMoves"`
-	ProjectSettings    []registry.ProjectSetting   `json:"projectSettings"`
-	AgentRoles         []registry.AgentRoleRecord  `json:"agentRoles"`
-	TileOrder          registry.TileOrder          `json:"tileOrder"`
-	MovedSessions      []registry.MovedSession     `json:"movedSessions,omitempty"`
-	LeadReplacements   []dashboardLeadReplacement  `json:"leadReplacements"`
-	Person             dashboardPerson             `json:"person"`
-	DecisionsRev       string                      `json:"decisionsRev"`
-	OwnDecisionsRev    string                      `json:"ownDecisionsRev"`
-	catalogPageApplied bool
-	catalogPageFilter  string
-	catalogPageOffset  int
-	catalogPageLimit   int
-	catalogPageHasMore bool
+	UpdatedAt            time.Time                      `json:"updatedAt"`
+	EventCursor          uint64                         `json:"eventCursor"`
+	HostEpoch            string                         `json:"hostEpoch"`
+	CatalogSeq           uint64                         `json:"catalogSeq"`
+	Daemon               map[string]any                 `json:"daemon"`
+	Surfaces             []dashboardSurface             `json:"surfaces"`
+	Sessions             []dashboardSession             `json:"sessions"`
+	RetiredClock         *int64                         `json:"retiredClock,omitempty"`
+	RetiredIDs           []string                       `json:"retiredIds,omitempty"`
+	TotalSessions        int                            `json:"totalSessions"`
+	Counts               map[string]int                 `json:"counts,omitempty"`
+	Projects             []dashboardProject             `json:"projects,omitempty"`
+	NextCursor           string                         `json:"nextCursor,omitempty"`
+	Queue                []dashboardQueue               `json:"queue"`
+	Channels             []dashboardChannel             `json:"channels"`
+	Relays               []dashboardRelay               `json:"relays"`
+	History              []dashboardHistory             `json:"history"`
+	CodexRecentHours     int                            `json:"codexRecentHours"`
+	BusyDelivery         string                         `json:"busyDelivery"`
+	Signin               []signin.Status                `json:"signin"`
+	Rekeyed              map[string]string              `json:"rekeyed,omitempty"`
+	Coordinators         []registry.CoordinatorEntry    `json:"coordinators"`
+	ProjectLinks         []registry.ProjectLink         `json:"projectLinks"`
+	ProjectMoves         []registry.ProjectMove         `json:"projectMoves"`
+	ProjectSettings      []registry.ProjectSetting      `json:"projectSettings"`
+	AgentRoles           []registry.AgentRoleRecord     `json:"agentRoles"`
+	AgentRoleAssignments []registry.AgentRoleAssignment `json:"agentRoleAssignments"`
+	TileOrder            registry.TileOrder             `json:"tileOrder"`
+	MovedSessions        []registry.MovedSession        `json:"movedSessions,omitempty"`
+	LeadReplacements     []dashboardLeadReplacement     `json:"leadReplacements"`
+	Person               dashboardPerson                `json:"person"`
+	DecisionsRev         string                         `json:"decisionsRev"`
+	OwnDecisionsRev      string                         `json:"ownDecisionsRev"`
+	catalogPageApplied   bool
+	catalogPageFilter    string
+	catalogPageOffset    int
+	catalogPageLimit     int
+	catalogPageHasMore   bool
 }
 
 type dashboardQueue struct {

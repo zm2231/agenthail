@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/daemonapi"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/hosts"
 )
@@ -61,6 +63,25 @@ func (a *App) daemonAPI() (*daemonAPIClient, error) {
 	return newDaemonAPIClient()
 }
 
+// localDaemonAPI reaches the daemon on its local socket, where it names the
+// calling process and refuses the person's writes from inside a session.
+func (a *App) localDaemonAPI() (*daemonAPIClient, error) {
+	if !a.daemonIsRunning() {
+		return nil, errors.New("the daemon is not running; start it with: agenthail daemon start")
+	}
+	if a.daemonAPIOverride != nil {
+		return a.daemonAPIOverride()
+	}
+	path := daemonctl.LocalSocketPath()
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("the daemon serves no local socket at %s; a daemon from an older build has none, so update Agenthail and restart the daemon", path)
+	}
+	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", path)
+	}}
+	return &daemonAPIClient{baseURL: "http://agenthail", httpClient: &http.Client{Transport: transport}}, nil
+}
+
 func (c *daemonAPIClient) call(ctx context.Context, method, path string, query url.Values, payload any, header http.Header) ([]byte, int, error) {
 	response, err := c.do(ctx, method, path, query, payload, header)
 	if err != nil {
@@ -95,7 +116,9 @@ func (c *daemonAPIClient) do(ctx context.Context, method, path string, query url
 	if payload != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	request.Header.Set("Authorization", "Bearer "+c.token)
+	if c.token != "" {
+		request.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	response, err := c.httpClient.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("reach the local daemon: %w", err)

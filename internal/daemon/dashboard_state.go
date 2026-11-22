@@ -135,6 +135,9 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if state.AgentRoles, err = d.Registry.AgentRoles(); err != nil {
 		return dashboardState{}, fmt.Errorf("read agent roles: %w", err)
 	}
+	if state.AgentRoleAssignments, err = d.Registry.AgentRoleAssignments(); err != nil {
+		return dashboardState{}, fmt.Errorf("read agent role assignments: %w", err)
+	}
 	if state.TileOrder, err = d.Registry.TileOrder(); err != nil {
 		return dashboardState{}, fmt.Errorf("read the tile order: %w", err)
 	}
