@@ -7,8 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/agentroles"
+
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -88,7 +89,7 @@ func TestAChildsQueuedSendReachesItsSpawnerAsTheChild(t *testing.T) {
 
 func TestWhileThePersonKeepsMessagesToOtherProjectsASessionCannotMessageOneOutsideItsProject(t *testing.T) {
 	f := newMCPWriteFixture(t)
-	setAgentDecision(t, "cross-project-message", dashconfig.AgentAsk)
+	setRoleDecision(t, f.r, agentroles.Worker, "cross-project-message", agentroles.Ask)
 	stranger := surface.Session{ID: "stranger", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
 	if err := f.r.RecordObservedSession(stranger); err != nil {
 		t.Fatal(err)

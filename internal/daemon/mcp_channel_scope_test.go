@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/agentroles"
+
 	"github.com/zm2231/agenthail/internal/broadcast"
 	"github.com/zm2231/agenthail/internal/daemonapi"
-	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -75,7 +76,7 @@ func TestAnAgentPostsOnlyToItsOwnProjectsChannel(t *testing.T) {
 	if out, refused := callMCP(t, foreign, "agenthail_send", map[string]any{"project": "widget", "message": "from gadget to the widget lead", "mode": "now", "clientRequestId": "lead-now"}); refused || leadMessages() != 2 || len(told.told()) != 1 {
 		t.Fatalf("another project's agent sending now to its coordinator: %v sent=%d told=%q", out, leadMessages(), told.told())
 	}
-	setAgentDecision(t, "cross-project-steer", dashconfig.AgentAsk)
+	setRoleDecision(t, d.Registry, agentroles.Worker, "cross-project-steer", agentroles.Ask)
 	out, refused = callMCP(t, foreign, "agenthail_send", map[string]any{"project": "widget", "message": "from gadget to the widget lead", "mode": "now", "clientRequestId": "lead-now-kept"})
 	detail, _ = out["detail"].(map[string]any)
 	if !refused || out["code"] != "out_of_scope" || detail["rule"] != "different_project" || leadMessages() != 2 {

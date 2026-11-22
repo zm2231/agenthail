@@ -72,11 +72,18 @@ Session commands:
   limit-resume resume <target>  Resume a stopped session now
   limit-resume cancel <target>  Do not resume a stopped session for its current stop
   limit-resume on|off           Resume stopped sessions once their limit resets (default on)
-  agent-policy [list] [--json]  Show what agents may do on their own, do and tell you, or must ask you
-  agent-policy set <action> allow|notify|ask
-                                 Change one action; reset <action> goes back to its default
-  agent-policy limit depth|running <n>
-                                 How deep sessions nest and how many each agent runs; 0 is the default
+  roles [list] [--json]         The roles agents act under: worker, lead, operator, remote and yours
+  roles show <role> [--json]    What a role may do on its own, do and tell you, or must ask you; its tools and limits
+  roles set <role> <action> allow|notify|ask|default
+                                 Change one action for a role
+  roles reach <role> descendants|project|all
+                                 Which sessions a role acts on beyond its own
+  roles limit <role> depth|running <n>
+                                 How deep its sessions nest and how many it runs; 0 is the default
+  roles tools <role> all | +<tool> -<tool> ...
+                                 Which agenthail tools a role sees
+  roles create <name> [<from-role>] | delete <role> | reset <role>
+                                 Make a role from another (worker by default), remove it, or return a built-in one to how it ships
 
 Delivery (send, queue, steer):
   idle target                   send delivers now; queue holds it for the daemon; steer has no turn to reach and says

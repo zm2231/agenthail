@@ -77,6 +77,37 @@ func (d *Daemon) registerMCPTools(server *mcp.Server) {
 		}
 		register(server, mcpTool(tool))
 	}
+	server.AddReceivingMiddleware(d.roleToolList)
+}
+
+// roleToolList leaves out of a tool list the agenthail tools the caller's
+// role does not see; callMCPTool refuses them too.
+func (d *Daemon) roleToolList(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		result, err := next(ctx, method, req)
+		list, ok := result.(*mcp.ListToolsResult)
+		if err != nil || !ok {
+			return result, err
+		}
+		caller := mcpCallerFrom(ctx)
+		if _, info := remoteName(req.GetExtra()); caller == nil && info != nil {
+			if caller, err = d.remoteCaller(info); err != nil {
+				return nil, err
+			}
+		}
+		if caller == nil || caller.role == nil || caller.role.Tools == nil {
+			return result, nil
+		}
+		seen := make([]*mcp.Tool, 0, len(list.Tools))
+		for _, tool := range list.Tools {
+			if _, agenthail := agenttools.Lookup(tool.Name); !agenthail || caller.role.Sees(tool.Name) {
+				seen = append(seen, tool)
+			}
+		}
+		filtered := *list
+		filtered.Tools = seen
+		return &filtered, nil
+	}
 }
 
 const mcpAlwaysLoadMeta = "anthropic/alwaysLoad"
@@ -159,6 +190,10 @@ func callMCPTool[In any](d *Daemon, ctx context.Context, caller *mcpCaller, tool
 	}
 	if _, allowed := extensionTools[tool]; caller.extension != "" && !allowed {
 		refusal := &mcpRefusal{Code: "not_for_extensions", Message: tool + " belongs to agent sessions; extensions cannot call it."}
+		return mcpRefused(refusal), refusal, nil
+	}
+	if !caller.role.Sees(tool) {
+		refusal := &mcpRefusal{Code: "capability_missing", Message: tool + " is not among the tools your role, " + caller.role.Name + ", sees.", Detail: map[string]any{"rule": "role_tools", "role": caller.role.Name}}
 		return mcpRefused(refusal), refusal, nil
 	}
 	_, waits := any(input).(mcpOwnTimeout)

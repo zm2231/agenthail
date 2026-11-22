@@ -129,7 +129,7 @@ func (d *Daemon) agentConfigRoot(caller *mcpCaller, choice string) (string, erro
 	if err != nil {
 		return "", refuse("invalid", err.Error())
 	}
-	if caller.has("control.all") || d.mcpIsProjectLead(caller, caller.session.ID) {
+	if caller.has("control.all") || caller.has("control.project") {
 		return root, nil
 	}
 	if own := surface.ClaudeSessionConfigRoot(d.claudeConfigRoots(), caller.session.Transcript); own != nil && own.Root == root {

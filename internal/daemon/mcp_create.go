@@ -8,8 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/zm2231/agenthail/internal/agentroles"
+
 	"github.com/google/uuid"
-	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -75,7 +76,7 @@ func (d *Daemon) depthRefusal(caller *mcpCaller) error {
 	if err != nil {
 		return err
 	}
-	if limit := d.agentPolicy().DepthLimit(); len(ancestors)+1 > limit {
+	if limit := caller.role.DepthLimit(); len(ancestors)+1 > limit {
 		return &mcpRefusal{Code: "depth_limit", Message: fmt.Sprintf("Sessions nest at most %d deep below the one a person started; hand this work back to your spawner instead.", limit), Detail: map[string]any{"limit": limit}}
 	}
 	return nil
@@ -86,7 +87,7 @@ func (d *Daemon) mcpChildrenRefusal(caller *mcpCaller) error {
 	if err != nil {
 		return err
 	}
-	if limit := d.agentPolicy().RunningLimit(); len(running) >= limit {
+	if limit := caller.role.RunningLimit(); len(running) >= limit {
 		return &mcpRefusal{Code: "children_limit", Message: fmt.Sprintf("You already have %d sessions running; wait for one to finish.", len(running)), Retryable: true, Detail: map[string]any{"limit": limit}}
 	}
 	return nil
@@ -129,7 +130,7 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 			PermissionMode: start.permissionMode, Approval: start.approval, Alias: strings.TrimSpace(input.Alias), Ceiling: start.ceiling.encode(),
 			Isolation: isolation, Worktree: strings.TrimSpace(input.Branch), Base: strings.TrimSpace(input.Base),
 		})
-		if err == nil && decision == dashconfig.AgentNotify {
+		if err == nil && decision == agentroles.Notify {
 			d.notifyAgentAction(ctx, caller.session.ID, remoteCreateWords(kind, host, cwd))
 		}
 		return result, err
@@ -165,8 +166,8 @@ func (d *Daemon) remoteCreateScope(caller *mcpCaller, host string, kind surface.
 	if _, paired := d.pairedHost(host); !paired {
 		return childStart{}, "", "", refuse("invalid", fmt.Sprintf("No paired computer is named %q.", host))
 	}
-	decision := d.agentPolicy().Decision("session-create-remote")
-	if decision == dashconfig.AgentAsk && !caller.has("control.all") {
+	decision := caller.role.Decision("session-create-remote")
+	if decision == agentroles.Ask && !caller.has("control.all") {
 		return childStart{}, "", "", scopeRefusal(about, "other_host", "Starting a session on another computer is for the person here; ask your coordinator or the person to start it.")
 	}
 	cwd := strings.TrimSpace(rawCwd)
@@ -226,7 +227,7 @@ func (d *Daemon) agentCreateOnHost(ctx context.Context, caller *mcpCaller, host 
 		return actionReply{}, err
 	}
 	reply := d.performAction(ctx, sessionPrincipal(caller.session.ID), actionFormatAPIv1, body, "cli-create-"+uuid.NewString())
-	if decision == dashconfig.AgentNotify && reply.Status >= 200 && reply.Status < 300 {
+	if decision == agentroles.Notify && reply.Status >= 200 && reply.Status < 300 {
 		d.notifyAgentAction(ctx, caller.session.ID, remoteCreateWords(kind, host, cwd))
 	}
 	return reply, nil

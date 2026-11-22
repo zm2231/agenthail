@@ -5,7 +5,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/zm2231/agenthail/internal/dashconfig"
+	"github.com/zm2231/agenthail/internal/agentroles"
+
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -141,8 +142,8 @@ func (d *Daemon) crossProjectReach(caller *mcpCaller, session *surface.Session, 
 		}
 		action, what = "cross-project-steer", "Steered, interrupted or sent now to "
 	}
-	decision := d.agentPolicy().Decision(action)
-	if decision == dashconfig.AgentAsk {
+	decision := caller.role.Decision(action)
+	if decision == agentroles.Ask {
 		return "", false, nil
 	}
 	if reach == reachSteer {
@@ -155,7 +156,7 @@ func (d *Daemon) crossProjectReach(caller *mcpCaller, session *surface.Session, 
 		}
 		return "", false, err
 	}
-	if decision == dashconfig.AgentNotify {
+	if decision == agentroles.Notify {
 		return what + d.resolveDisplay(session.ID) + " in another project", true, nil
 	}
 	return "", true, nil

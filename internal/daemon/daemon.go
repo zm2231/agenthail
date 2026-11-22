@@ -384,6 +384,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 	d.logStarted()
 	d.retireStrayHooksAtStart(home)
+	if err := d.foldAgentPolicy(); err != nil {
+		d.log.Printf("warn: fold the agent policy into roles: %s", err)
+	}
 	d.configureExtensionPorts()
 	if recovered, err := d.Registry.RecoverInflight(time.Now().Add(-time.Minute)); err != nil {
 		d.log.Printf("warn: recover inflight queue: %s", err)

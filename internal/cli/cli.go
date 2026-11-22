@@ -210,8 +210,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdQueue(rest)
 	case "limit-resume":
 		return a.cmdLimitResume(rest)
-	case "agent-policy":
-		return a.cmdAgentPolicy(rest)
+	case "roles":
+		return a.cmdRoles(rest)
 	case "history":
 		return a.cmdHistory(rest)
 	case "thread":

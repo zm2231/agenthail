@@ -9,8 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/agentroles"
 	"github.com/zm2231/agenthail/internal/daemonapi"
-	"github.com/zm2231/agenthail/internal/dashconfig"
+
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -38,7 +39,7 @@ func (f approvalFixture) workerCaller(t *testing.T) *mcpCaller {
 
 func TestAnAgentAsksThePersonToMessageAnotherProjectsSessionAndTheMessageIsItsOwn(t *testing.T) {
 	f := newApprovalFixture(t)
-	setAgentDecision(t, "cross-project-message", dashconfig.AgentAsk)
+	setRoleDecision(t, f.d.Registry, agentroles.Worker, "cross-project-message", agentroles.Ask)
 	outsider := f.outsider(t)
 	caller := f.workerCaller(t)
 	send := mcpSendInput{mcpWrite: mcpWrite{ClientRequestID: "cross-1"}, Target: outsider.ID, Message: "the gadget API changed; rebuild against v2"}
@@ -118,9 +119,9 @@ func TestOnlyACrossProjectRefusalCanBeAskedFor(t *testing.T) {
 }
 
 func TestTheCLIAsksWithTheBodyTheDaemonRebuildsNotTheOneItSent(t *testing.T) {
-	setAgentDecision(t, "cross-project-message", dashconfig.AgentAsk)
-	setAgentDecision(t, "cross-project-steer", dashconfig.AgentAsk)
 	f := newApprovalFixture(t)
+	setRoleDecision(t, f.d.Registry, agentroles.Worker, "cross-project-message", agentroles.Ask)
+	setRoleDecision(t, f.d.Registry, agentroles.Worker, "cross-project-steer", agentroles.Ask)
 	outsider := f.outsider(t)
 	crafted := `{"action":"send","sessionId":"outsider","message":"ship it","noQueue":true,"sourceSessionId":"to","author":"person","scopeProjectId":"elsewhere","relayHops":2}`
 	refused := askScope(t, f.d, daemonapi.ScopeRequest{SessionID: f.worker.ID, Action: "send", Target: outsider.ID, Payload: scopePayload(daemonapi.PersonActionAPI, crafted)}, "127.0.0.1:50000")

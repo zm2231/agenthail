@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/agentroles"
+
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -149,7 +151,7 @@ func TestMCPWhoamiNamesTheCallingSession(t *testing.T) {
 		t.Fatalf("whoami=%v refused=%v", whoami, refused)
 	}
 	capabilities, _ := whoami["capabilities"].([]any)
-	if len(capabilities) != len(defaultSessionCapabilities) {
+	if len(capabilities) != len(agentroles.BaseCapabilities) {
 		t.Fatalf("capabilities=%v", capabilities)
 	}
 	if strings.Contains(logged.String(), token) {
