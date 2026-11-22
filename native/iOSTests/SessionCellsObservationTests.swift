@@ -25,7 +25,7 @@ final class SessionCellsObservationTests: XCTestCase {
 
     @MainActor
     private func familyIDs(_ model: AgenthailIOSModel) -> [String] {
-        model.sessionTree(search: "").projects.flatMap { $0.checkouts.flatMap(\.families) }.map(\.id)
+        model.sessionListing.sessionTree(search: "").projects.flatMap { $0.checkouts.flatMap(\.families) }.map(\.id)
     }
 
     @MainActor
@@ -34,10 +34,10 @@ final class SessionCellsObservationTests: XCTestCase {
         XCTAssertEqual(familyIDs(model), ["computer::a", "computer::b"])
         let changed = ObservationProbe { _ = model.session("computer::a") }
         let other = ObservationProbe { _ = model.session("computer::b") }
-        let list = ObservationProbe { _ = model.sessionTree(search: "") }
+        let list = ObservationProbe { _ = model.sessionListing.sessionTree(search: "") }
         let parts = ObservationProbe {
             _ = model.queue
-            _ = model.listing
+            _ = model.sessionListing.listing
             _ = model.sessionCount
             _ = model.usageSessions
             _ = model.waitingSessions
@@ -48,7 +48,7 @@ final class SessionCellsObservationTests: XCTestCase {
             _ = model.hosts
             _ = model.decisionsKey
         }
-        let revision = model.listRevision
+        let revision = model.sessionListing.listRevision
 
         try XCTUnwrap(model.connection("computer")).updateSnapshot { snapshot in
             snapshot.sessions[0].queueCount = 2
@@ -59,19 +59,19 @@ final class SessionCellsObservationTests: XCTestCase {
         XCTAssertFalse(other.changed(), "another session's readers are not")
         XCTAssertFalse(list.changed(), "the list tree is not")
         XCTAssertFalse(parts.changed(), "the list's other parts are not")
-        XCTAssertEqual(model.listRevision, revision)
+        XCTAssertEqual(model.sessionListing.listRevision, revision)
     }
 
     @MainActor
     func testAStructuralChangeRederivesTheTreeOnce() {
         let model = makeModel(["a", "b"])
-        let list = ObservationProbe { _ = model.sessionTree(search: "") }
-        let revision = model.listRevision
+        let list = ObservationProbe { _ = model.sessionListing.sessionTree(search: "") }
+        let revision = model.sessionListing.listRevision
 
         model.setHostSnapshot(HostCatalogTests.snapshot(["a", "b", "c"].map(Self.row)), view: Self.view(["a", "b", "c"]))
 
         XCTAssertTrue(list.changed())
-        XCTAssertEqual(model.listRevision, revision + 1, "the snapshot and the order changed in one rebuild, and the tree was published once")
+        XCTAssertEqual(model.sessionListing.listRevision, revision + 1, "the snapshot and the order changed in one rebuild, and the tree was published once")
         XCTAssertEqual(familyIDs(model), ["computer::a", "computer::b", "computer::c"])
     }
 }

@@ -9,7 +9,7 @@ struct IOSNowButton: View {
 #if DEBUG
         let _ = BodyRuns.hit("IOSNowButton")
 #endif
-        let crew = LeadCrew.crew(of: sessionID, in: model.sessionTree(search: ""))
+        let crew = LeadCrew.crew(of: sessionID, in: model.sessionListing.sessionTree(search: ""))
         if !crew.isEmpty {
             let waiting = LeadCrew.needsYou(crew)
             Button { showing = true } label: {
@@ -45,7 +45,7 @@ struct PhoneHappeningNow: View {
 #if DEBUG
         let _ = BodyRuns.hit("PhoneHappeningNow")
 #endif
-        let crew = LeadCrew.ordered(LeadCrew.crew(of: session.id, in: model.sessionTree(search: "")))
+        let crew = LeadCrew.ordered(LeadCrew.crew(of: session.id, in: model.sessionListing.sessionTree(search: "")))
         let steps = LeadCrew.stepsThisTurn(items)
         NavigationStack {
             List {

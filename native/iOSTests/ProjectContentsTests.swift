@@ -103,13 +103,13 @@ final class ProjectContentsTests: XCTestCase {
         _ = await model.refresh(fresh: true)
         let listed = try XCTUnwrap(model.projects[Self.projectID])
         XCTAssertEqual(ProjectContents.build(listed, sessions: model.snapshot?.sessions ?? [], now: Self.weekLater).leadSession?.id, "one::lead-session")
-        XCTAssertTrue(model.hasEarlier(listed))
+        XCTAssertTrue(model.sessionListing.hasEarlier(listed))
 
-        await model.listEarlier(listed)
-        await model.listEarlier(listed)
+        await model.sessionListing.listEarlier(listed)
+        await model.sessionListing.listEarlier(listed)
 
         XCTAssertEqual(ProjectContents.build(listed, sessions: model.snapshot?.sessions ?? [], now: Self.weekLater).earlier.map(\.id), ["one::old", "one::older"])
-        XCTAssertFalse(model.hasEarlier(listed))
+        XCTAssertFalse(model.sessionListing.hasEarlier(listed))
         let reads = ScopeServer.state.requests("one").filter { $0.contains("scope=all") }
         XCTAssertEqual(reads.count, 2)
         XCTAssertTrue(reads.allSatisfy { $0.contains("projectId=\(Self.projectID)") }, "Earlier was not read by the project's id: \(reads)")
@@ -137,9 +137,9 @@ final class ProjectContentsTests: XCTestCase {
         _ = await model.refresh(fresh: true)
         let listed = try XCTUnwrap(model.projects[Self.projectID])
         XCTAssertEqual(listed.hostID, "one")
-        XCTAssertTrue(model.hasEarlier(listed))
+        XCTAssertTrue(model.sessionListing.hasEarlier(listed))
 
-        await model.listEarlier(listed)
+        await model.sessionListing.listEarlier(listed)
 
         XCTAssertEqual(Set(ProjectContents.build(listed, sessions: model.snapshot?.sessions ?? [], now: Self.weekLater).earlier.map(\.id)), ["hpeer::far", "two::near"])
         for host in ["one", "two"] {

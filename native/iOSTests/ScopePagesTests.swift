@@ -24,18 +24,18 @@ final class ScopePagesTests: XCTestCase {
     }
 
     private func listed(_ filter: SessionFilter, search: String = "") -> Set<String> {
-        model.scope = filter
-        return Set(model.sessionTree(search: search).projects.flatMap { $0.checkouts.flatMap { $0.families.flatMap { $0.sessions.map(\.id) } } })
+        model.sessionListing.scope = filter
+        return Set(model.sessionListing.sessionTree(search: search).projects.flatMap { $0.checkouts.flatMap { $0.families.flatMap { $0.sessions.map(\.id) } } })
     }
 
     private func more(_ filter: SessionFilter) async {
-        model.scope = filter
-        await model.listMore()
+        model.sessionListing.scope = filter
+        await model.sessionListing.listMore()
     }
 
     private func canMore(_ filter: SessionFilter) -> Bool {
-        model.scope = filter
-        return model.canListMore
+        model.sessionListing.scope = filter
+        return model.sessionListing.canListMore
     }
 
     private func catalog(_ type: String, seq: UInt64, _ data: String) throws -> CatalogStreamEvent {
@@ -111,6 +111,30 @@ final class ScopePagesTests: XCTestCase {
         XCTAssertFalse(canMore(.all))
     }
 
+    func testAPageStillLoadingWhenItsModelGoesAwayDoesNotCrash() async throws {
+        ScopeServer.state.set("one", current: [], scopes: ["all": [[ScopeServer.row("a")]]])
+        try AgenthailIOSTests.pair("one", "https://one.tailnet.ts.net")
+        var owner: AgenthailIOSModel? = AgenthailIOSModel(autoConnect: false, session: FixtureScope.open(self).session([ScopeServer.self]), drops: .isolated())
+        _ = await owner?.refresh(fresh: true)
+        let listing = try XCTUnwrap(owner?.sessionListing)
+        listing.scope = .all
+        ScopeServer.state.slowPages("one", seconds: 2)
+        var finished = false
+        let read = Task {
+            await listing.listMore()
+            finished = true
+        }
+        let deadline = Date().addingTimeInterval(2)
+        while !ScopeServer.state.requests("one").contains(where: { $0.contains("scope=all") }), Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(ScopeServer.state.requests("one").contains { $0.contains("scope=all") }, "the page was asked for")
+        weak var gone = owner
+        owner = nil
+        XCTAssertNil(gone, "a page read in flight does not keep the model")
+        XCTAssertFalse(finished, "the model was checked while the page was still loading")
+        await read.value
+        XCTAssertEqual(listing.sessionTree(search: "").projects.count, 0, "a listing without its model lists nothing")
+    }
+
     func testAnArchivedSessionLeavesTheLoadedPages() async throws {
         ScopeServer.state.set("one", current: [ScopeServer.row("live")], scopes: ["all": [[ScopeServer.row("live"), ScopeServer.row("old"), ScopeServer.row("kept")]]])
         let model = try await connect(["one"])
@@ -180,16 +204,16 @@ final class ScopePagesTests: XCTestCase {
     func testAnOlderSearchAnswerDoesNotReplaceANewerOne() async throws {
         ScopeServer.state.set("one", current: [], scopes: [:], searches: ["ze": ([ScopeServer.row("slow", name: "zeal")], .milliseconds(800)), "zet": ([ScopeServer.row("fast", name: "zeta")], .zero)])
         let model = try await connect(["one"])
-        model.scope = .all
-        let older = Task { await self.model.searchScope("ze") }
+        model.sessionListing.scope = .all
+        let older = Task { await self.model.sessionListing.searchScope("ze") }
         try await Task.sleep(for: .milliseconds(100))
-        await model.searchScope("zet")
+        await model.sessionListing.searchScope("zet")
         XCTAssertEqual(listed(.all, search: "zet"), ["one::fast"])
         _ = await older.value
         XCTAssertEqual(model.connection("one")?.pages.found.map(\.id), ["fast"], "an older search answer replaced the newer one")
         XCTAssertTrue(ScopeServer.state.requests("one").contains { $0.contains("scope=all") && $0.contains("q=zet") })
 
-        await model.searchScope("")
+        await model.sessionListing.searchScope("")
         XCTAssertEqual(model.connection("one")?.pages.found.count, 0)
     }
 
@@ -198,8 +222,8 @@ final class ScopePagesTests: XCTestCase {
         onBranch["checkout"] = ["id": "c-login", "path": "/w/app/.worktrees/login", "branch": "fix-login", "isMain": false, "dirty": false]
         ScopeServer.state.set("one", current: [], scopes: [:], searches: ["fix-login": ([onBranch], .zero)])
         let model = try await connect(["one"])
-        model.scope = .all
-        await model.searchScope("fix-login")
+        model.sessionListing.scope = .all
+        await model.sessionListing.searchScope("fix-login")
         XCTAssertEqual(listed(.all, search: "fix-login"), ["one::b"], "a session named for something else is found by its branch")
         XCTAssertTrue(ScopeServer.state.requests("one").contains { $0.contains("scope=all") && $0.contains("q=fix-login") })
     }
@@ -245,10 +269,10 @@ final class ScopePagesTests: XCTestCase {
     }
 
     func testOnlyUnfilteredRecentStaysOnTheStreamedCurrentView() {
-        XCTAssertNil(AgenthailIOSModel.listRequest(.recent, SessionRefinement()))
-        XCTAssertEqual(AgenthailIOSModel.listRequest(.all, SessionRefinement()), ScopeRequest(scope: "all"))
-        XCTAssertEqual(AgenthailIOSModel.listRequest(.recent, SessionRefinement(status: .working)), ScopeRequest(scope: "current", status: "working"))
-        XCTAssertEqual(AgenthailIOSModel.listRequest(.archived, SessionRefinement(surface: "codex")), ScopeRequest(scope: "archived", surface: "codex"))
+        XCTAssertNil(SessionListing.listRequest(.recent, SessionRefinement()))
+        XCTAssertEqual(SessionListing.listRequest(.all, SessionRefinement()), ScopeRequest(scope: "all"))
+        XCTAssertEqual(SessionListing.listRequest(.recent, SessionRefinement(status: .working)), ScopeRequest(scope: "current", status: "working"))
+        XCTAssertEqual(SessionListing.listRequest(.archived, SessionRefinement(surface: "codex")), ScopeRequest(scope: "archived", surface: "codex"))
     }
 
     func testAFilterIsReadFromEveryComputerAndCountsEveryScope() async throws {
@@ -262,29 +286,29 @@ final class ScopePagesTests: XCTestCase {
         ScopeServer.state.set("one", current: [idle], scopes: ["current": [[busy]]])
         ScopeServer.state.set("two", current: [], scopes: ["current": [[far]]])
         let model = try await connect(["one", "two"])
-        model.refinement = SessionRefinement(status: .working)
-        XCTAssertTrue(model.canListMore, "a filtered Recent waits for its first page")
-        await model.listMore()
+        model.sessionListing.refinement = SessionRefinement(status: .working)
+        XCTAssertTrue(model.sessionListing.canListMore, "a filtered Recent waits for its first page")
+        await model.sessionListing.listMore()
         XCTAssertEqual(listed(.recent), ["one::busy", "two::far"])
         for host in ["one", "two"] {
             XCTAssertTrue(ScopeServer.state.requests(host).contains { $0.contains("scope=current") && $0.contains("status=working") }, "\(host): \(ScopeServer.state.requests(host))")
         }
-        let counts = model.sessionList(search: "").counts
+        let counts = model.sessionListing.sessionList(search: "").counts
         XCTAssertEqual(counts[.recent], 2, "the chip counts come from the filtered view on both computers")
         XCTAssertEqual(counts[.running], 2)
         XCTAssertEqual(counts[.archived], 0)
 
-        model.refinement = SessionRefinement()
+        model.sessionListing.refinement = SessionRefinement()
         XCTAssertEqual(listed(.recent), ["one::idle"], "clearing the filter returns to the streamed Current view")
-        XCTAssertEqual(model.sessionList(search: "").counts[.recent], 1)
+        XCTAssertEqual(model.sessionListing.sessionList(search: "").counts[.recent], 1)
     }
 
     func testASelectedSurfaceNoComputerListsStaysChoosable() async throws {
         ScopeServer.state.set("one", current: [ScopeServer.row("a")], scopes: [:])
         let model = try await connect(["one"])
-        model.refinement = SessionRefinement(surface: "gone")
-        XCTAssertTrue(model.sessionList(search: "").surfaces.contains("gone"), "a filter on a surface that went away was dropped from the menu")
-        XCTAssertTrue(model.refinement.isActive)
+        model.sessionListing.refinement = SessionRefinement(surface: "gone")
+        XCTAssertTrue(model.sessionListing.sessionList(search: "").surfaces.contains("gone"), "a filter on a surface that went away was dropped from the menu")
+        XCTAssertTrue(model.sessionListing.refinement.isActive)
     }
 
     func testAMentionFindsASessionOutsideTheCurrentOnes() async throws {
