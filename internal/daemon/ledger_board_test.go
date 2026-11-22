@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"strconv"
 	"testing"
 	"time"
@@ -131,4 +132,82 @@ func TestTheWorkBoardPutsEachHeldItemInTheFirstLaneThatMatches(t *testing.T) {
 	if waits := flights[waiting.ID].WaitsOn; len(waits) != 1 || waits[0] != running.ID {
 		t.Errorf("the waiting item waits on %v", waits)
 	}
+}
+
+func TestAnOpenWorkPageHearsWhenItsHoldersOrPRsChangeButNotOtherPRs(t *testing.T) {
+	shortLedgerChangeWait(t)
+	wait := ledgerBoardWait
+	ledgerBoardWait = 50 * time.Millisecond
+	t.Cleanup(func() { ledgerBoardWait = wait })
+	d, p, _, base := ledgerPageDaemon(t)
+	r := d.Registry
+	fake := d.Surfaces[0].(*daemonSurface)
+	holder := surface.Session{ID: "s-idle", Surface: fake.Name(), Cwd: p.dir, Status: surface.StatusIdle, LastActive: time.Now()}
+	fake.sessions[holder.ID] = holder
+	ctx := context.Background()
+	d.discoverCatalog(ctx)
+	key, err := d.ledgerPageTarget("proj-widget")
+	if err != nil || key == "" {
+		t.Fatalf("the page reads the ledger of %q, %v", key, err)
+	}
+	shown := boardPR(t, r, "s-idle", 7, "pending")
+	boardPR(t, r, "s-idle", 8, "pending")
+	store := d.ledgerStore()
+	item := work(t, store, ledger.WorkRequest{ProjectKey: key, SessionID: "s-idle", Action: ledger.WorkAdd, Text: "Fix the flaky index test"})
+	work(t, store, ledger.WorkRequest{ProjectKey: key, SessionID: "s-idle", Action: ledger.WorkClaim, ItemID: item.ID})
+	work(t, store, ledger.WorkRequest{ProjectKey: key, SessionID: "s-idle", Action: ledger.WorkLog, ItemID: item.ID, Text: "PR opened: " + shown})
+	d.discoverCatalog(ctx)
+	events := openWorkPageEvents(t, base, "proj-widget")
+	drain := func() {
+		for {
+			select {
+			case <-events:
+			case <-time.After(5 * ledgerChangeWait):
+				return
+			}
+		}
+	}
+	drain()
+	reread := func(number int, checks string) {
+		t.Helper()
+		row, _, err := r.SessionPR("s-idle", "acme/widget", number)
+		if err != nil {
+			t.Fatal(err)
+		}
+		next := row
+		next.Checks = checks
+		if _, err := d.changePRs(func(r *registry.Registry) (bool, error) { return r.RecordPRRead(next, row.Wakes, time.Now()) }); err != nil {
+			t.Fatal(err)
+		}
+		d.discoverCatalog(ctx)
+	}
+
+	reread(8, "failing")
+	select {
+	case change := <-events:
+		t.Fatalf("the page heard %+v for a PR no item on it names", change)
+	case <-time.After(5 * ledgerBoardWait):
+	}
+	heard := func(what, lane string) {
+		t.Helper()
+		select {
+		case change := <-events:
+			if change.ProjectKey != key || change.Version == "" {
+				t.Fatalf("after %s the page heard %+v", what, change)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("the page heard nothing after %s", what)
+		}
+		if _, view := ledgerPageRead(t, base, "proj-widget", "test-token", ""); len(view.Board[lane]) != 1 {
+			t.Fatalf("after %s the board reads %+v", what, view.Board)
+		}
+	}
+	reread(7, "failing")
+	heard("the checks of a PR it shows failed", laneCIFailing)
+	reread(7, "passing")
+	heard("the checks passed", laneIdle)
+	holder.Status = surface.StatusBusy
+	fake.sessions[holder.ID] = holder
+	d.discoverCatalog(ctx)
+	heard("its holder went busy", laneRunning)
 }

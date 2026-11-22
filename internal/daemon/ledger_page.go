@@ -144,25 +144,10 @@ func (d *Daemon) ledgerPageDataHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "project is required.")
 		return
 	}
-	key, err := d.ledgerPageKey(projectID)
+	view, err := d.projectLedgerPage(projectID)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "ledger_unavailable", err.Error())
 		return
-	}
-	view := ledgerPageView{Project: projectID, Key: key, Board: map[string][]ledgerPageRow{}, Work: map[string][]ledgerPageRow{}, Ready: []ledgerPageRow{}, Waiting: []ledgerPageWait{}, Done: []ledgerPageRow{}}
-	for _, lane := range ledgerBoardLanes {
-		view.Board[lane] = []ledgerPageRow{}
-	}
-	for _, state := range ledgerPageStates {
-		view.Work[string(state)] = []ledgerPageRow{}
-	}
-	if key != "" {
-		board, err := d.ledgerStore().Board(key)
-		if err != nil {
-			writeAPIError(w, http.StatusInternalServerError, "ledger_unavailable", err.Error())
-			return
-		}
-		d.fillLedgerPage(&view, board, time.Now())
 	}
 	body, err := apitime.Marshal(view)
 	if err != nil {
@@ -178,6 +163,28 @@ func (d *Daemon) ledgerPageDataHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(body)
+}
+
+func (d *Daemon) projectLedgerPage(projectID string) (ledgerPageView, error) {
+	key, err := d.ledgerPageKey(projectID)
+	if err != nil {
+		return ledgerPageView{}, err
+	}
+	view := ledgerPageView{Project: projectID, Key: key, Board: map[string][]ledgerPageRow{}, Work: map[string][]ledgerPageRow{}, Ready: []ledgerPageRow{}, Waiting: []ledgerPageWait{}, Done: []ledgerPageRow{}}
+	for _, lane := range ledgerBoardLanes {
+		view.Board[lane] = []ledgerPageRow{}
+	}
+	for _, state := range ledgerPageStates {
+		view.Work[string(state)] = []ledgerPageRow{}
+	}
+	if key != "" {
+		board, err := d.ledgerStore().Board(key)
+		if err != nil {
+			return ledgerPageView{}, err
+		}
+		d.fillLedgerPage(&view, board, time.Now())
+	}
+	return view, nil
 }
 
 func (d *Daemon) fillLedgerPage(view *ledgerPageView, board *ledger.Board, now time.Time) {
@@ -327,18 +334,40 @@ func (d *Daemon) ledgerPageEventsHandler(w http.ResponseWriter, r *http.Request)
 		key = registry.LedgerProjectKey(projectID)
 	}
 	hub := d.ledgerChanges()
-	id, wake, cancel := hub.subscribe(key)
+	id, ledgerWake, cancel := hub.subscribe(key)
 	defer cancel()
 	sse.Open(w)
 	if sse.Flush(w) != nil {
 		return
 	}
+	ctx := r.Context()
+	boardWake := d.ledgerBoardChanges(ctx, projectID)
+	wake := make(chan string, 1)
+	go func() {
+		for {
+			var version string
+			select {
+			case <-ctx.Done():
+				return
+			case <-ledgerWake:
+			case version = <-boardWake:
+			}
+			select {
+			case wake <- version:
+			default:
+			}
+		}
+	}()
 	authorized := func() bool { return d.apiEventStreamAuthorized(r) }
-	sse.Follow(r.Context(), w, wake, func(_ struct{}, open bool) bool {
+	sse.Follow(ctx, w, wake, func(boardVersion string, open bool) bool {
 		if !open || !authorized() {
 			return false
 		}
-		for _, change := range hub.take(id) {
+		changes := hub.take(id)
+		if len(changes) == 0 && boardVersion != "" {
+			changes = []ledgerChange{{ProjectKey: key, Version: boardVersion}}
+		}
+		for _, change := range changes {
 			writeLedgerChange(w, change)
 		}
 		return sse.Flush(w) == nil

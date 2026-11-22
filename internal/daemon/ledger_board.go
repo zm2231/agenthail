@@ -1,10 +1,12 @@
 package daemon
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -29,12 +31,13 @@ const (
 	prClosedLog = "PR closed unmerged: "
 )
 
+var ledgerBoardWait = time.Second
+
 var ledgerBoardLanes = []string{laneYou, laneCIFailing, laneCIPending, laneReview, laneRunning, laneBlocked, laneIdle}
 
 type ledgerPageFlight struct {
 	Lane        string          `json:"lane"`
 	HolderState string          `json:"holderState,omitempty"`
-	HolderSince time.Time       `json:"holderSince,omitzero"`
 	PRs         []ledgerPagePR  `json:"prs,omitempty"`
 	Asks        []ledgerPageAsk `json:"asks,omitempty"`
 	LastLog     *ledgerPageLog  `json:"lastLog,omitempty"`
@@ -109,7 +112,7 @@ func (r *ledgerBoardReads) flight(board *ledger.Board, item ledger.WorkItem) *le
 	if item.Assignee != "" {
 		flight.HolderState = holderUnknown
 		if session := r.session(item.Assignee); session != nil {
-			flight.HolderState, flight.HolderSince = holderState(*session), session.LastActive
+			flight.HolderState = holderState(*session)
 		}
 		for _, ask := range r.asks[item.Assignee] {
 			flight.Asks = append(flight.Asks, ledgerPageAsk{ID: ask.ID, Title: firstLine(ask.Title), Since: ask.CreatedAt})
@@ -196,4 +199,55 @@ func itemPRs(item ledger.WorkItem, watched map[string]registry.SessionPR) []ledg
 		prs = append(prs, pr)
 	}
 	return prs
+}
+
+func (d *Daemon) ledgerBoardChanges(ctx context.Context, projectID string) <-chan string {
+	changed := make(chan string, 1)
+	_, latest, err := d.Registry.CatalogState()
+	if err != nil {
+		d.logRuntimeError("ledger-page:catalog", err)
+		return changed
+	}
+	_, follower, err := d.catalog.subscribe(latest)
+	if err != nil {
+		d.logRuntimeError("ledger-page:catalog", err)
+		return changed
+	}
+	go func() {
+		defer follower.Cancel()
+		shown := d.ledgerBoardVersion(projectID)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-follower.Wake:
+			}
+			if version := d.ledgerBoardVersion(projectID); version != shown {
+				shown = version
+				select {
+				case <-changed:
+				default:
+				}
+				changed <- version
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(ledgerBoardWait):
+			}
+		}
+	}()
+	return changed
+}
+
+func (d *Daemon) ledgerBoardVersion(projectID string) string {
+	view, err := d.projectLedgerPage(projectID)
+	if err != nil {
+		return ""
+	}
+	body, err := apitime.Marshal(view.Board)
+	if err != nil {
+		return ""
+	}
+	return ledgerETag(body)
 }
