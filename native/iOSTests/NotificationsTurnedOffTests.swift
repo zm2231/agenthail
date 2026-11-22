@@ -1,3 +1,4 @@
+import UserNotifications
 import XCTest
 @testable import Agenthail
 
@@ -19,7 +20,7 @@ final class NotificationsTurnedOffTests: XCTestCase {
     func testTurningNotificationsOffSurvivesARelaunchAndAReconnect() async throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         try pairMac()
-        let first = AgenthailIOSModel(autoConnect: false, session: session(), drops: nil, notificationDefaults: defaults)
+        let first = AgenthailIOSModel(autoConnect: false, session: session(), drops: nil, notificationDefaults: defaults, notificationAuthorization: { .authorized })
         first.push.turnOffNotifications()
         for _ in 0..<200 where !PushRecordingProtocol.log.contains("DELETE /api/v1/device/push") {
             try await Task.sleep(for: .milliseconds(10))
@@ -27,7 +28,7 @@ final class NotificationsTurnedOffTests: XCTestCase {
         XCTAssertTrue(PushRecordingProtocol.log.contains("DELETE /api/v1/device/push"), "turning off removes the computer's push target")
         PushRecordingProtocol.log.reset()
 
-        let relaunched = AgenthailIOSModel(autoConnect: false, session: session(), drops: nil, notificationDefaults: defaults)
+        let relaunched = AgenthailIOSModel(autoConnect: false, session: session(), drops: nil, notificationDefaults: defaults, notificationAuthorization: { .authorized })
         defer { relaunched.forgetHost("hmac") }
         try await connect(relaunched)
         relaunched.push.registerPushToken("a1b2c3")
@@ -45,7 +46,7 @@ final class NotificationsTurnedOffTests: XCTestCase {
     func testWithoutTurningOffAConnectedComputerStartsSetup() async throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         try pairMac()
-        let model = AgenthailIOSModel(autoConnect: false, session: session(), drops: nil, notificationDefaults: defaults)
+        let model = AgenthailIOSModel(autoConnect: false, session: session(), drops: nil, notificationDefaults: defaults, notificationAuthorization: { .authorized })
         defer { model.forgetHost("hmac") }
         try await connect(model)
         model.push.registerPushToken("a1b2c3")

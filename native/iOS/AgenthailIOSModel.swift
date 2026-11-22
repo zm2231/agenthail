@@ -216,7 +216,8 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting {
     @ObservationIgnored private var inactiveSince: Date?
     @ObservationIgnored var tailnetUp: () -> Bool = { Tailnet.isUp() }
     @ObservationIgnored private let notificationDefaults: UserDefaults
-    @ObservationIgnored private(set) lazy var push = PushRegistrar(defaults: notificationDefaults, session: networkSession, connection: { [weak self] in self?.connections[$0] }, order: { [weak self] in self?.hostOrder ?? [] }, changed: { [weak self] in self?.rebuild() })
+    @ObservationIgnored private let notificationAuthorization: () async -> UNAuthorizationStatus
+    @ObservationIgnored private(set) lazy var push = PushRegistrar(defaults: notificationDefaults, session: networkSession, connection: { [weak self] in self?.connections[$0] }, order: { [weak self] in self?.hostOrder ?? [] }, changed: { [weak self] in self?.rebuild() }, authorization: notificationAuthorization)
     private let networkSession: URLSession
     private let connectionDrops: ConnectionDrops?
     private let automaticallyConnect: Bool
@@ -234,9 +235,10 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting {
         return session(qualified)?.displayName ?? id
     }
 
-    init(autoConnect: Bool = true, session: URLSession = .shared, drops: ConnectionDrops? = .shared, composerStore: ComposerStore? = nil, notificationDefaults: UserDefaults = .standard, onScreen: OnScreenSessions = OnScreenSessions()) {
+    init(autoConnect: Bool = true, session: URLSession = .shared, drops: ConnectionDrops? = .shared, composerStore: ComposerStore? = nil, notificationDefaults: UserDefaults = .standard, notificationAuthorization: @escaping () async -> UNAuthorizationStatus = PushRegistrar.systemAuthorization, onScreen: OnScreenSessions = OnScreenSessions()) {
         self.onScreen = onScreen
         self.notificationDefaults = notificationDefaults
+        self.notificationAuthorization = notificationAuthorization
         networkSession = session
         connectionDrops = drops
         automaticallyConnect = autoConnect
@@ -255,6 +257,7 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting {
     init(api: AgenthailAPI, paired: Bool = false, hostID: String = "computer", hostName: String = "computer", composerStore: ComposerStore? = nil) {
         onScreen = OnScreenSessions()
         notificationDefaults = .standard
+        notificationAuthorization = PushRegistrar.systemAuthorization
         networkSession = .shared
         connectionDrops = nil
         automaticallyConnect = false

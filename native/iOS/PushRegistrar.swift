@@ -32,14 +32,20 @@ final class PushRegistrar {
     @ObservationIgnored private let hostConnection: (String) -> HostConnection?
     @ObservationIgnored private let order: () -> [String]
     @ObservationIgnored private let changed: () -> Void
+    @ObservationIgnored private let authorization: () async -> UNAuthorizationStatus
     private var hostOrder: [String] { order() }
 
-    init(defaults: UserDefaults, session: URLSession, connection: @escaping (String) -> HostConnection?, order: @escaping () -> [String], changed: @escaping () -> Void) {
+    nonisolated static func systemAuthorization() async -> UNAuthorizationStatus {
+        await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+    }
+
+    init(defaults: UserDefaults, session: URLSession, connection: @escaping (String) -> HostConnection?, order: @escaping () -> [String], changed: @escaping () -> Void, authorization: @escaping () async -> UNAuthorizationStatus = PushRegistrar.systemAuthorization) {
         notificationDefaults = defaults
         networkSession = session
         hostConnection = connection
         self.order = order
         self.changed = changed
+        self.authorization = authorization
     }
 
     func status(for hostID: String) -> String { pushStatus[hostID] ?? "Not enabled" }
@@ -118,30 +124,24 @@ final class PushRegistrar {
     }
 
     func refreshNotificationRegistration() {
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            let authorization = settings.authorizationStatus.rawValue
-            Task { @MainActor in
-                switch UNAuthorizationStatus(rawValue: authorization) {
-                case .authorized, .provisional, .ephemeral:
-                    UIApplication.shared.registerForRemoteNotifications()
-                case .denied:
-                    await self.disableNotifications(status: "Not allowed")
-                default:
-                    await self.disableNotifications(status: "Not enabled")
-                }
+        Task { @MainActor in
+            switch await authorization() {
+            case .authorized, .provisional, .ephemeral:
+                UIApplication.shared.registerForRemoteNotifications()
+            case .denied:
+                await self.disableNotifications(status: "Not allowed")
+            default:
+                await self.disableNotifications(status: "Not enabled")
             }
         }
     }
 
     func showNotificationAuthorization() {
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            let authorization = settings.authorizationStatus.rawValue
-            Task { @MainActor in
-                switch UNAuthorizationStatus(rawValue: authorization) {
-                case .denied: self.notificationStatus = "Not allowed"
-                case .notDetermined: self.notificationStatus = "Not enabled"
-                default: break
-                }
+        Task { @MainActor in
+            switch await authorization() {
+            case .denied: self.notificationStatus = "Not allowed"
+            case .notDetermined: self.notificationStatus = "Not enabled"
+            default: break
             }
         }
     }
