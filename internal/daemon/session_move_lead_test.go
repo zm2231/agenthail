@@ -356,6 +356,43 @@ func TestASendToAProjectFromAHostThatHearsItsLeadLeaveBeforeItHearsItArriveReach
 	}
 }
 
+func TestASendToAProjectFromAHostThatReadsTheLeadsFormerHostAfreshMidMoveReachesTheLead(t *testing.T) {
+	staleA, staleB := &staleCatalog{}, &staleCatalog{}
+	a, b, c := moveMesh(t, map[string]func(http.Handler) http.Handler{"a": staleA.wrap, "b": staleB.wrap})
+	project, session, _ := leadOn(t, a, b, c)
+	claudetest.ListenPeerManager(t, a.host.Home)
+	onB := claudetest.ListenPeerManager(t, b.host.Home)
+	unfreeze := func() { staleA.frozen.Store(false); staleB.frozen.Store(false) }
+	t.Cleanup(unfreeze)
+
+	staleA.frozen.Store(true)
+	staleB.frozen.Store(true)
+	if _, err := a.daemon.moveSession(context.Background(), sessionMoveRequest{SessionID: session.ID, Host: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	formerHost, found := c.daemon.pairedHost(mustHostID(t, a.federationNode))
+	if !found {
+		t.Fatal("the third host has no pairing with the lead's former host")
+	}
+	if _, err := c.daemon.reconcileHost(context.Background(), formerHost); err != nil {
+		t.Fatal(err)
+	}
+	if rows := leadRows(c, project.ID); rows[formerHost.record.ID] {
+		t.Fatalf("the third host still lists the lead on its former host after reading it afresh: %v", rows)
+	}
+	reply := sendAsPerson(c.daemon, fmt.Sprintf(`{"action":"coordinator-send","project":%q,"message":"to the lead read afresh."}`, project.ID))
+	unfreeze()
+	if reply.Status != http.StatusOK {
+		t.Fatalf("a send to the project whose lead's former host was read afresh answered %d: %s", reply.Status, reply.Body)
+	}
+	testkit.Eventually(t, "the send to reach the lead on its new host", 15*time.Second, func() bool {
+		return onB.Containing("to the lead read afresh.") >= 1
+	})
+	if got := onB.Containing("to the lead read afresh."); got != 1 {
+		t.Fatalf("the send reached the moved lead %d times", got)
+	}
+}
+
 func TestATargetThatCannotTakeTheLeadLeavesTheLeadWhereItWas(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", "")

@@ -81,7 +81,7 @@ func TestLeadPathOnAPairedHostIsResolvedThere(t *testing.T) {
 		}
 	}
 	t.Chdir(repo)
-	if err := reg.ReplaceHostCoordinators(vpsHostID, []registry.CoordinatorEntry{{ProjectID: "repo:github.com/example/widget", ProjectRoot: "/home/remote/widget", Name: "widget-lead", Surface: "codex", SessionID: "remote-1"}}); err != nil {
+	if err := reg.ReplaceHostCoordinators(vpsHostID, []registry.CoordinatorEntry{{ProjectID: "repo:github.com/example/widget", ProjectRoot: "/home/remote/widget", Name: "widget-lead", Surface: "codex", SessionID: "remote-1"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	ada := vpsBuilder

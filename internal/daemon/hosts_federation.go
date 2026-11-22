@@ -658,7 +658,13 @@ func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, e
 			coordinators = append(coordinators, entry)
 		}
 	}
-	if err := d.Registry.ReplaceHostCoordinators(host.record.ID, coordinators); err != nil {
+	movedTo := map[string]string{}
+	for _, moved := range snapshot.MovedOut {
+		if to, found := d.pairedHost(moved.MovedToHost); found && to != host {
+			movedTo[moved.SessionID] = to.record.ID
+		}
+	}
+	if err := d.Registry.ReplaceHostCoordinators(host.record.ID, coordinators, movedTo); err != nil {
 		return 0, localMirror(err)
 	}
 	if _, err := d.adoptProjectMoves(snapshot.ProjectMoves); err != nil {

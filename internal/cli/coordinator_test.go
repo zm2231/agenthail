@@ -456,7 +456,7 @@ func TestLeadOnAPairedHostIsReachedThroughThatHost(t *testing.T) {
 	for _, key := range []string{"AGENTHAIL_SESSION_ID", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID"} {
 		t.Setenv(key, "")
 	}
-	if err := reg.ReplaceHostCoordinators(vpsHostID, []registry.CoordinatorEntry{{ProjectID: "repo:github.com/example/widget", ProjectRoot: "/home/remote/widget", Name: "widget-lead", Surface: "codex"}}); err != nil {
+	if err := reg.ReplaceHostCoordinators(vpsHostID, []registry.CoordinatorEntry{{ProjectID: "repo:github.com/example/widget", ProjectRoot: "/home/remote/widget", Name: "widget-lead", Surface: "codex"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	api.responses = map[string]string{"coordinator-send": `{"ok":true,"started":true,"result":{"evidence":"delivered","status":"sent","detail":"Started coordinator @widget-lead."}}`}
