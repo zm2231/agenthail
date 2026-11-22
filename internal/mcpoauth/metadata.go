@@ -11,6 +11,7 @@ import (
 const (
 	ResourcePath          = "/mcp"
 	ProtectedResourcePath = "/.well-known/oauth-protected-resource"
+	ResourceMetadataPath  = "/.well-known/oauth-protected-resource/mcp"
 	AuthServerPath        = "/.well-known/oauth-authorization-server"
 	AuthorizePath         = "/oauth/authorize"
 	TokenPath             = "/oauth/token"
@@ -21,9 +22,9 @@ const (
 // PastAccess admits OAuth clients, which cannot carry an Access credential, while Access settings are set.
 const PastAccess = false
 
-var Paths = []string{ProtectedResourcePath, ProtectedResourcePath + ResourcePath, AuthServerPath, AuthorizePath, TokenPath, RegisterPath, RevokePath}
+var Paths = []string{ProtectedResourcePath, ResourceMetadataPath, AuthServerPath, AuthorizePath, TokenPath, RegisterPath, RevokePath}
 
-func ResourceMetadataURL(issuer string) string { return issuer + ProtectedResourcePath + ResourcePath }
+func ResourceMetadataURL(issuer string) string { return issuer + ResourceMetadataPath }
 
 func Resource(issuer string) string { return issuer + ResourcePath }
 

@@ -87,7 +87,7 @@ func (d *Daemon) registerOAuth(mux *http.ServeMux) {
 		mcpoauth.WriteJSON(w, http.StatusOK, mcpoauth.ProtectedResource(issuer))
 	})
 	mux.Handle(mcpoauth.ProtectedResourcePath, resource)
-	mux.Handle(mcpoauth.ProtectedResourcePath+mcpoauth.ResourcePath, resource)
+	mux.Handle(mcpoauth.ResourceMetadataPath, resource)
 	mux.Handle(mcpoauth.AuthServerPath, api(http.MethodGet, func(w http.ResponseWriter, _ *http.Request, issuer string) {
 		mcpoauth.WriteJSON(w, http.StatusOK, mcpoauth.AuthorizationServer(issuer))
 	}))
