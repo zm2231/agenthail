@@ -73,7 +73,7 @@ func claudeRecordLive(record map[string]any) bool {
 		actual, err := procstart.Ticks(int(pid))
 		return err == nil && actual == started
 	}
-	actual, err := processStartTime(int(pid))
+	actual, err := processStarts.startTime(int(pid), time.Now())
 	return err == nil && sameClaudeProcessStart(transcript.String(record, "version"), started, actual.UTC().Format(psStartLayout))
 }
 
