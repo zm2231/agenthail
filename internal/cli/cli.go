@@ -44,6 +44,7 @@ type App struct {
 	daemonSessionStreamReader func() (sessionStreamReader, error)
 	daemonAPIOverride         func() (*daemonAPIClient, error)
 	scopeOverride             func(daemonapi.ScopeRequest) (*daemonapi.ScopeReply, error)
+	forwarded                 forwardedAction
 	askPerson                 bool
 	askReason                 string
 	agentNotices              []string

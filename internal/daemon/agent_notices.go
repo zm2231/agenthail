@@ -19,8 +19,32 @@ type agentNotices struct {
 
 type agentNotice struct {
 	callerID string
-	what     string
+	what     agentAction
 	expires  time.Time
+}
+
+// For a steer, notSteered is what to say when the session's host delivered
+// it as a message, and unknown what to say when that host did not say.
+// target is set when the action was not known as the notice was held, so
+// the action the CLI then ran words it.
+type agentAction struct {
+	done       string
+	notSteered string
+	unknown    string
+	target     string
+}
+
+func (a agentAction) told(notSteered *bool, ran string) string {
+	if a.target != "" && ran != "" {
+		return remoteActionWords(ran, a.target).told(notSteered, "")
+	}
+	switch {
+	case notSteered == nil && a.unknown != "":
+		return a.unknown
+	case notSteered != nil && *notSteered && a.notSteered != "":
+		return a.notSteered
+	}
+	return a.done
 }
 
 // A caller holds at most agentNoticesPerCaller unredeemed notices; a
@@ -30,7 +54,7 @@ const (
 	agentNoticesPerCaller = 16
 )
 
-func (n *agentNotices) hold(callerID, what string, now time.Time) string {
+func (n *agentNotices) hold(callerID string, what agentAction, now time.Time) string {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if n.pending == nil {
@@ -56,12 +80,12 @@ func (n *agentNotices) hold(callerID, what string, now time.Time) string {
 	return token
 }
 
-func (n *agentNotices) take(token, callerID string, now time.Time) (string, bool) {
+func (n *agentNotices) take(token, callerID string, now time.Time) (agentAction, bool) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	notice, found := n.pending[token]
 	if !found || notice.callerID != callerID || now.After(notice.expires) {
-		return "", false
+		return agentAction{}, false
 	}
 	delete(n.pending, token)
 	return notice.what, true
@@ -69,6 +93,13 @@ func (n *agentNotices) take(token, callerID string, now time.Time) (string, bool
 
 func (d *Daemon) holdAgentNotice(caller *mcpCaller, what string) string {
 	if what == "" {
+		return ""
+	}
+	return d.holdAgentAction(caller, agentAction{done: what})
+}
+
+func (d *Daemon) holdAgentAction(caller *mcpCaller, what agentAction) string {
+	if what.done == "" {
 		return ""
 	}
 	return d.agentNotices.hold(caller.session.ID, what, time.Now())

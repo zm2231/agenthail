@@ -35,6 +35,8 @@ const agentIdentityPrefix = "agent:"
 // The host id keeps two machines' identities of the same name apart once paired.
 func AgentIdentityID(hostID, name string) string { return agentIdentityPrefix + hostID + ":" + name }
 
+func IsAgentIdentityID(id string) bool { return strings.HasPrefix(id, agentIdentityPrefix) }
+
 func IsAgentIdentity(session *Session) bool {
 	return session != nil && session.RuntimeKind == RuntimeAgentInbox
 }

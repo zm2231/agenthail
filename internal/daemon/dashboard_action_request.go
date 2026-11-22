@@ -61,6 +61,7 @@ type dashboardActionRequest struct {
 	ProjectID       string                     `json:"projectId"`
 	SourceProjectID string                     `json:"sourceProjectId"`
 	ScopeProjectID  string                     `json:"scopeProjectId"`
+	ScopeRank       string                     `json:"scopeRank"`
 	ExceptHosts     []string                   `json:"exceptHosts"`
 	Project         string                     `json:"project"`
 	Path            string                     `json:"path"`
