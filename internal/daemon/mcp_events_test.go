@@ -336,54 +336,70 @@ func TestARemoteIdentityIsWokenBySignedWebhooksThatCarryOnlyACount(t *testing.T)
 	}
 }
 
-func TestADeliveryThatFinishesAfterTheDueReadIsNotSentAgain(t *testing.T) {
-	f, w, start := eventsFixture(t)
-	session := f.eventsSession(t)
-	if _, err := subscribe(t.Context(), session, w.url+"/hook", w.secret, ""); err != nil {
-		t.Fatal(err)
+func TestADeliveryThatEndsAfterTheDueReadIsNotSentAgain(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		answer func(*webhookReceiver)
+	}{
+		{"told", func(*webhookReceiver) {}},
+		{"deferred an hour by Retry-After", func(w *webhookReceiver) {
+			w.answer(func(webhookCall) (int, string) { return http.StatusServiceUnavailable, "" })
+			w.mu.Lock()
+			w.header = http.Header{"Retry-After": {"3600"}}
+			w.mu.Unlock()
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, w, start := eventsFixture(t)
+			session := f.eventsSession(t)
+			if _, err := subscribe(t.Context(), session, w.url+"/hook", w.secret, ""); err != nil {
+				t.Fatal(err)
+			}
+			w.next(t, "the verification handshake")
+			tc.answer(w)
+			m := f.d.remoteMCP()
+			var armed atomic.Bool
+			listed, drain, drained := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			m.afterDueRead = func() {
+				if !armed.CompareAndSwap(true, false) {
+					return
+				}
+				close(listed)
+				<-drain
+				select {
+				case <-m.eventWake:
+				default:
+				}
+				close(drained)
+				<-m.eventWake
+			}
+			w.mu.Lock()
+			w.gate = make(chan struct{})
+			gate := w.gate
+			w.mu.Unlock()
+			start()
+			f.deliver(t, "one")
+			select {
+			case <-w.gated:
+			case <-time.After(10 * time.Second):
+				t.Fatal("no event reached the gate")
+			}
+			armed.Store(true)
+			m.pokeEvents()
+			select {
+			case <-listed:
+			case <-time.After(10 * time.Second):
+				t.Fatal("the loop did not read the due events while the delivery was held")
+			}
+			close(drain)
+			<-drained
+			close(gate)
+			if held := w.next(t, "the held event"); held.body["data"].(map[string]any)["unread"] != float64(1) {
+				t.Fatalf("held event=%v", held.body)
+			}
+			w.quiet(t, "after the delivery ended behind a stale due read", 500*time.Millisecond)
+		})
 	}
-	w.next(t, "the verification handshake")
-	m := f.d.remoteMCP()
-	var armed atomic.Bool
-	listed, drain, drained := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	m.afterDueRead = func() {
-		if !armed.CompareAndSwap(true, false) {
-			return
-		}
-		close(listed)
-		<-drain
-		select {
-		case <-m.eventWake:
-		default:
-		}
-		close(drained)
-		<-m.eventWake
-	}
-	w.mu.Lock()
-	w.gate = make(chan struct{})
-	gate := w.gate
-	w.mu.Unlock()
-	start()
-	f.deliver(t, "one")
-	select {
-	case <-w.gated:
-	case <-time.After(10 * time.Second):
-		t.Fatal("no event reached the gate")
-	}
-	armed.Store(true)
-	m.pokeEvents()
-	select {
-	case <-listed:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the loop did not read the due events while the delivery was held")
-	}
-	close(drain)
-	<-drained
-	close(gate)
-	if told := w.next(t, "the held event"); told.body["data"].(map[string]any)["unread"] != float64(1) {
-		t.Fatalf("held event=%v", told.body)
-	}
-	w.quiet(t, "after the delivery finished behind a stale due read", 500*time.Millisecond)
 }
 
 func TestAWebhookIsRetriedWithItsEventIDAndA410EndsTheSubscription(t *testing.T) {
