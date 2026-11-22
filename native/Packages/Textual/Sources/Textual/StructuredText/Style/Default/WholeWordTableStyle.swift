@@ -34,11 +34,12 @@ extension StructuredText {
 /// Scrolls a table horizontally only when its cells, each kept as wide as its longest word, cannot
 /// fit the container.
 struct WholeWordTable<Content: View>: View {
+  @Environment(\.tableWidthHint) private var hint
   @ViewBuilder let content: Content
 
   var body: some View {
     Overflow {
-      ContainerWidth {
+      ContainerWidth(hint: hint) {
         Color.clear
           .frame(height: 0)
           .containerRelativeFrame(.horizontal)
@@ -52,6 +53,8 @@ struct WholeWordTable<Content: View>: View {
 /// Lays the table out at its container's width, which the first subview reports even inside a
 /// horizontal scroll view, or at its narrowest whole-word width when that is wider.
 private struct ContainerWidth: Layout {
+  let hint: CGFloat?
+
   struct Extent {
     var narrowest: CGFloat
     var widest: CGFloat
@@ -77,7 +80,8 @@ private struct ContainerWidth: Layout {
   }
 
   private func table(_ subviews: Subviews, cache: inout Extent?) -> ProposedViewSize {
-    let container = subviews[0].sizeThatFits(.unspecified).width
+    let measured = subviews[0].sizeThatFits(.unspecified).width
+    let container = hint.map { min($0, measured) } ?? measured
     let extent =
       cache
       ?? Extent(

@@ -76,6 +76,7 @@ extension StructuredText {
 
 extension EnvironmentValues {
   @Entry var tableCellsKeepWords = false
+  @Entry var tableWidthHint: CGFloat? = nil
 }
 
 /// Lays out its second subview no narrower than the first, a copy of the text with one word per

@@ -1,4 +1,5 @@
 import SwiftUI
+import Textual
 
 struct TranscriptBlockView: View, @MainActor Equatable {
     let block: TranscriptBlock
@@ -37,6 +38,7 @@ struct TranscriptBlockView: View, @MainActor Equatable {
             AgentFoldRow(id: block.id, entry: entry)
         case .tools(let items):
             ToolRunView(id: block.id, items: items)
+                .textual.tableWidthHint(nil)
                 .padding(.trailing, -overhang)
         default:
             VStack(alignment: .leading, spacing: DesktopSpace.xs) {

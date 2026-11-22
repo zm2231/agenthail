@@ -182,6 +182,12 @@ extension TextualNamespace where Base: View {
     base.environment(\.tableCellsKeepWords, keep)
   }
 
+  /// Gives whole-word tables the width they will be laid out in. A table's own scroll view has no
+  /// size on its first layout, so without this it measures the nearest sized container instead.
+  public func tableWidthHint(_ width: CGFloat?) -> some View {
+    base.environment(\.tableWidthHint, width)
+  }
+
   /// Controls how content that overflows horizontally behaves in ``Overflow``.
   ///
   /// Use ``OverflowMode/wrap`` to wrap content to the available width, or
