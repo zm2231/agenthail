@@ -608,3 +608,42 @@ func TestStoppingDeliveriesReturnsWhileEveryEndpointHangs(t *testing.T) {
 		t.Fatal("stopping the delivery loop hung behind deliveries in flight")
 	}
 }
+
+type rawEventParams struct {
+	mcp.ParamsBase
+	body string
+}
+
+func (p *rawEventParams) MarshalJSON() ([]byte, error) { return []byte(p.body), nil }
+
+func TestEveryEventCallIsRecordedEvenWhenItsParamsAreMalformedAndNoCredentialIsKept(t *testing.T) {
+	f, w, _ := eventsFixture(t)
+	session := f.eventsSession(t)
+	for _, method := range []string{"events/list", "events/subscribe", "events/unsubscribe"} {
+		_, err := mcp.CallCustomMethod[*rawEventParams, *eventsUnsubscribeResult](t.Context(), session, method, &rawEventParams{body: `[]`})
+		if code, _ := rpcError(t, err); code != jsonrpc.CodeInvalidParams {
+			t.Fatalf("%s with array params: code %d", method, code)
+		}
+		if history := f.eventHistory(t); !strings.Contains(history, method+" by @scout => refused: invalid params: they do not decode") {
+			t.Fatalf("%s with array params left no record:\n%s", method, history)
+		}
+	}
+	leaky := []string{w.secret, "https://user:pass@example.com/?token=receiver-credential#frag"}
+	for _, name := range leaky {
+		if _, err := mcp.CallCustomMethod[*eventsSubscribeParams, *eventsSubscribeResult](t.Context(), session, "events/subscribe", &eventsSubscribeParams{Name: name, Delivery: eventDelivery{Mode: "webhook", URL: w.url + "/hook", Secret: w.secret}}); err == nil {
+			t.Fatalf("an unknown event %q subscribed", name)
+		}
+		if _, err := mcp.CallCustomMethod[*eventsUnsubscribeParams, *eventsUnsubscribeResult](t.Context(), session, "events/unsubscribe", &eventsUnsubscribeParams{Name: name, Delivery: eventDelivery{Mode: "webhook", URL: w.url + "/hook"}}); err == nil {
+			t.Fatalf("an unknown event %q unsubscribed", name)
+		}
+	}
+	history := f.eventHistory(t)
+	if strings.Count(history, "an unknown event to "+w.url+"/hook => refused: invalid params: no event has that name") != 4 {
+		t.Fatalf("history:\n%s", history)
+	}
+	for _, kept := range []string{strings.TrimPrefix(w.secret, "whsec_"), "pass@", "receiver-credential", "frag"} {
+		if strings.Contains(history, kept) || strings.Contains(f.log.String(), kept) {
+			t.Fatalf("%q was kept:\n%s\n%s", kept, history, f.log.String())
+		}
+	}
+}
