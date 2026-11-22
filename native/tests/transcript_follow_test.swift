@@ -378,6 +378,7 @@ struct TranscriptFollowTest {
         nearTheEnd(scroll, feed)
         returnMidStream(scroll, feed)
         heldSelection(scroll, feed)
+        readerRowStays(scroll, feed)
 
         feed.transcript = "U"
         feed.rows = rows("U", 200)
@@ -804,6 +805,68 @@ struct TranscriptFollowTest {
         expectBottom(scroll, "streaming on after returning stays followed")
         expect(feed.following, "following resumes after jump to latest")
         expect(feed.eager < 30, "after returning, the tail is the end's rows, eager \(feed.eager)")
+    }
+
+    // Scrolling through a long transcript builds rows unevenly, so rows above the reader are measured again when the stream grows.
+    @MainActor
+    private static func readerRowStays(_ scroll: NSScrollView, _ feed: Feed) {
+        func place(_ id: String) -> CGFloat { readerTops.top(id).map { $0 - offset(scroll) } ?? .infinity }
+        func inView() -> [String] {
+            feed.rows.filter { (0..<600).contains(place($0.id)) }.map(\.id)
+        }
+        feed.transcript = "Ra"
+        feed.rows = rows("Ra", 400)
+        spin(0.6)
+        move(scroll, to: 0)
+        while gap(scroll) > 2500 { readerScroll(scroll, to: offset(scroll) + 2000) }
+        NotificationCenter.default.post(name: .jumpToLatest, object: nil)
+        spin(1.0)
+        readerScroll(scroll, to: offset(scroll) - 150)
+        expect(!feed.following, "a reader just above the end of a long transcript is not following")
+        waitUntil { !inView().isEmpty }
+        guard let anchor = inView().first else { return expect(false, "a row is in view above the end, \(geometry(scroll))") }
+        let placed = place(anchor)
+        let contentTop = readerTops.top(anchor) ?? 0
+        var worst: CGFloat = 0
+        var shifted: CGFloat = 0
+        guard let anchorIndex = feed.rows.firstIndex(where: { $0.id == anchor }),
+              let above = feed.rows[..<anchorIndex].lastIndex(where: { readerTops.top($0.id) != nil })
+        else { return expect(false, "a laid-out row sits above the reader's row, \(geometry(scroll))") }
+        for index in 0..<40 {
+            feed.rows += rows("Rs\(index)-", 1)
+            if index % 8 == 0 { feed.rows[above] = Row(id: feed.rows[above].id, lines: feed.rows[above].lines + 1) }
+            spin(0.05)
+            worst = max(worst, abs(place(anchor) - placed))
+            shifted = max(shifted, abs((readerTops.top(anchor) ?? contentTop) - contentTop))
+        }
+        spin(0.4)
+        expect(shifted >= 10, "a row above the reader that grows while the stream runs moves the reader's row in the content, so there is something to hold, moved \(shifted)")
+        expect(abs(place(anchor) - placed) < 1 && worst < 2, "the reader's row stays put while the stream grows below it and a row above it grows, \(anchor) at \(placed) moved to \(place(anchor)), at most \(worst)")
+        expect(!feed.following, "a reader above the end keeps not following while rows stream")
+
+        waitUntil { inView().count >= 2 }
+        guard let crossing = inView().first(where: { shownOpen[$0] != true }), let crossingTop = readerTops.top(crossing),
+              let index = feed.rows.firstIndex(where: { $0.id == crossing }), index + 1 < feed.rows.count
+        else { return expect(false, "two short rows are in view above the end, \(inView()) \(geometry(scroll))") }
+        let next = feed.rows[index + 1].id
+        readerScroll(scroll, to: crossingTop + 10)
+        waitUntil { place(next).isFinite }
+        let readerAt = place(next)
+        let grown = feed.rows.firstIndex { $0.id == crossing }!
+        feed.rows[grown] = Row(id: crossing, lines: feed.rows[grown].lines + 8)
+        spin(0.6)
+        expect(abs(place(next) - readerAt) < 1, "a row across the top of the view that grows leaves the reader's row below it in place, \(next) at \(readerAt) moved to \(place(next))")
+
+
+        NotificationCenter.default.post(name: .jumpToLatest, object: nil)
+        spin(1.0)
+        for index in 0..<20 {
+            feed.rows += rows("Rf\(index)-", 1 + index % 5)
+            spin(0.05)
+        }
+        spin(0.5)
+        expectBottom(scroll, "a following reader stays at the end of a long transcript while rows above are measured again")
+        expect(feed.following, "a following reader keeps following")
     }
 
     @MainActor
