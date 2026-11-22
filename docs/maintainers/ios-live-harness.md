@@ -124,6 +124,6 @@ go build -o "$T/ios-live-harness" ./cmd/ios-live-harness
 
 ## Nightly run
 
-`iOS live nightly` runs every night on the self-hosted Mac, and on `workflow_dispatch`, from `main` only. It builds both binaries, resets the keychain of the runner's own simulator, `Agenthail CI <runner name>`, and runs the `live` tier under the harness. `scripts/ios-ci-keychain-reset.sh` refuses unless it runs in a self-hosted GitHub Actions job and the simulator is that runner's own, so it never resets a simulator a person uses.
+`iOS live nightly` runs every night on the self-hosted Mac from `main`, and on `workflow_dispatch` from any branch, so a change can be proved live before it merges. It builds both binaries, resets the keychain of the runner's own simulator, `Agenthail CI <runner name>`, and runs the `live` tier under the harness. `scripts/ios-ci-keychain-reset.sh` refuses unless it runs in a self-hosted GitHub Actions job and the simulator is that runner's own, so it never resets a simulator a person uses.
 
-A failed run opens the issue `Nightly iOS live tests are failing`, labelled `nightly-ios-live` and assigned to the repository owner, or comments on it if it is open. The report names the failing test, quotes the harness's lines and links the run and its results; the next passing run closes the issue.
+A failed run on `main` opens the issue `Nightly iOS live tests are failing`, labelled `nightly-ios-live` and assigned to the repository owner, or comments on it if it is open. The report names the failing test, quotes the harness's lines and links the run and its results; the next passing run on `main` closes the issue. A run on another branch leaves the issue alone.
