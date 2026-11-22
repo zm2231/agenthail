@@ -101,33 +101,39 @@ func waitGone(pid int) error {
 }
 
 func TestResetEndsALeftoverTurnAndStartsAStoppedHost(t *testing.T) {
-	h := newTestHarness(t)
+	h, err := newHarness(os.Args[0], 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(h.cleanup)
 	ctx := context.Background()
 	if err := h.start(ctx, "127.0.0.1:0"); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(h.shutdown)
 	handler := h.controlHandler(ctx)
-	host := h.hosts[0]
+	stopped, turned := h.hosts[0], h.hosts[1]
 
-	control(t, handler, "/hosts/0/turn/start", `{"text":"Soak turn"}`)
-	control(t, handler, "/hosts/0/turn/finish", `{"text":"Done."}`)
-	pid, record := host.turn.process.Process.Pid, host.turn.record
-	if stopped := post(handler, "/hosts/0/stop", ""); stopped.Code != http.StatusOK || host.running() {
-		t.Fatalf("stop answered %d, running=%v", stopped.Code, host.running())
+	control(t, handler, "/hosts/1/turn/start", `{"text":"Soak turn"}`)
+	control(t, handler, "/hosts/1/turn/finish", `{"text":"Done."}`)
+	pid, record, socket := turned.turn.process.Process.Pid, turned.turn.record, turned.turn.socket.Addr().String()
+	if answer := post(handler, "/hosts/0/stop", ""); answer.Code != http.StatusOK || stopped.running() {
+		t.Fatalf("stop answered %d, running=%v", answer.Code, stopped.running())
 	}
 
 	if reset := post(handler, "/reset", ""); reset.Code != http.StatusOK {
 		t.Fatalf("reset answered %d: %s", reset.Code, reset.Body)
 	}
-	if !host.running() {
-		t.Fatal("reset left the stopped host down")
+	if !stopped.running() || !turned.running() {
+		t.Fatalf("after reset host 0 running=%v, host 1 running=%v; want both up", stopped.running(), turned.running())
 	}
-	if _, err := os.Stat(record); !os.IsNotExist(err) {
-		t.Fatalf("the leftover turn's session record outlived the reset: %v", err)
+	for _, path := range []string{record, socket} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("%s outlived the reset: %v", path, err)
+		}
 	}
 	if err := waitGone(pid); err != nil {
 		t.Fatal(err)
 	}
-	control(t, handler, "/hosts/0/turn/start", `{"text":"Outage turn"}`)
+	control(t, handler, "/hosts/1/turn/start", `{"text":"Outage turn"}`)
 }
