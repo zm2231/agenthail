@@ -16,7 +16,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func remoteIdentityClient(t *testing.T, d *Daemon, r *registry.Registry, server string, name string) *mcp.ClientSession {
+func bindRemoteIdentity(t *testing.T, r *registry.Registry, name string) string {
 	t.Helper()
 	if _, err := r.AddAgentIdentity(name); err != nil {
 		t.Fatal(err)
@@ -25,8 +25,14 @@ func remoteIdentityClient(t *testing.T, d *Daemon, r *registry.Registry, server 
 	if err != nil {
 		t.Fatal(err)
 	}
+	return token
+}
+
+// Binding raises the remote epoch, which retires connected clients, so connect only after every bind.
+func remoteIdentityClient(t *testing.T, server, token string) *mcp.ClientSession {
+	t.Helper()
 	transport := &mcp.StreamableClientTransport{Endpoint: server + "/mcp", HTTPClient: &http.Client{Transport: headerTransport{"Authorization": "Bearer " + token}}, MaxRetries: -1, DisableStandaloneSSE: true}
-	client, err := mcp.NewClient(&mcp.Implementation{Name: name, Version: "1"}, nil).Connect(t.Context(), transport, nil)
+	client, err := mcp.NewClient(&mcp.Implementation{Name: "identity", Version: "1"}, nil).Connect(t.Context(), transport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,8 +51,8 @@ func TestAnIdentitySetToSendNowSteersABusySessionUnlessItSaysQueue(t *testing.T)
 		t.Fatal(err)
 	}
 	server := mcpServer(t, d)
-	kat := remoteIdentityClient(t, d, r, server.URL, "kat")
-	scout := remoteIdentityClient(t, d, r, server.URL, "scout")
+	katToken, scoutToken := bindRemoteIdentity(t, r, "kat"), bindRemoteIdentity(t, r, "scout")
+	kat, scout := remoteIdentityClient(t, server.URL, katToken), remoteIdentityClient(t, server.URL, scoutToken)
 	if _, err := d.setIdentitySettings(context.Background(), daemonapi.CLIActor, daemonapi.IdentitySettingsRequest{Identity: "kat", SendMode: registry.SendModeNow}); err != nil {
 		t.Fatal(err)
 	}
@@ -63,6 +69,9 @@ func TestAnIdentitySetToSendNowSteersABusySessionUnlessItSaysQueue(t *testing.T)
 	d.drainSteerMessageQueue(t.Context(), fake, &to)
 	steered := func(text string) bool {
 		return slices.ContainsFunc(fake.steered, func(m string) bool { return strings.Contains(m, text) })
+	}
+	if out, refused := callMCP(t, scout, "agenthail_steer", map[string]any{"target": to.ID, "message": "scout steers"}); refused || !steered("scout steers") {
+		t.Fatalf("a remote identity's steer within its reach: %v, steered=%q", out, fake.steered)
 	}
 	if !steered("kat by default") || steered("kat says queue") || steered("scout by default") || r.QueueCount(to.ID) != 2 {
 		t.Fatalf("only kat's send with no mode should steer: steered=%q queued=%d", fake.steered, r.QueueCount(to.ID))
@@ -88,7 +97,7 @@ func TestAnIdentitysDefaultNowFallsBackToQueuedWhereItsRoleMayNotSteer(t *testin
 	if _, err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: project.ID, ProjectRoot: widget, Name: "widget-lead", Surface: string(surface.KindClaude), Cwd: widget}, registry.CoordinatorChange{SessionID: to.ID, ChangedBy: "fixture"}); err != nil {
 		t.Fatal(err)
 	}
-	app := remoteIdentityClient(t, d, r, mcpServer(t, d).URL, "kat")
+	app := remoteIdentityClient(t, mcpServer(t, d).URL, bindRemoteIdentity(t, r, "kat"))
 	for _, change := range []daemonapi.AgentRoleRequest{
 		{Op: "put", Name: "asks-to-steer", Role: agentroles.Role{Reach: agentroles.ReachDescendants, Actions: map[string]string{"cross-project-steer": agentroles.Ask}}},
 		{Op: "assign", Name: "asks-to-steer", Kind: registry.AssignIdentity, Target: "kat"},
