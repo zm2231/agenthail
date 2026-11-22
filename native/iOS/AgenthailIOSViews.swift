@@ -1643,6 +1643,7 @@ struct SessionInspector: View {
                     LabeledContent("Agent", value: detail.session.surface.capitalized)
                     LabeledContent("Status", value: SessionDisplayKind.label(liveSession, waitingPlace: detail.waitingPlace, limit: detail.limitLabel))
                     if let value = detail.model { LabeledContent("Model", value: value) }
+                    if let role = AgentRoleFacts.sessionRoleRow(detail.role) { LabeledContent("Role", value: role.value).accessibilityIdentifier("session-role") }
                     if let configRoot = liveSession.claudeConfigRoot { LabeledContent("Config folder", value: configRoot.summary) }
                     if liveSession.canAdopt { Button("Open in Agenthail", systemImage: "arrow.down.app") { adopting = true } }
                     if let value = detail.session.cwd, !value.isEmpty { LabeledContent("Workspace", value: value).textSelection(.enabled) }
@@ -2156,6 +2157,7 @@ struct SettingsView: View {
                         Text("Talk to orchestrator calls this computer.")
                     }
                 }
+                AgentsSettingsSection(model: model)
                 TurnNoticeSettingsSection()
                 PhoneTextSizeSection(model: model)
                 Section("Notifications") {

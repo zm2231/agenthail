@@ -137,6 +137,7 @@ final class AgenthailModel {
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var refreshOrder = RefreshOrder()
     @ObservationIgnored private(set) var pendingRefresh = EventRefresh()
+    @ObservationIgnored let agentRoles = AgentRolesStore()
     @ObservationIgnored private var statusRefreshTask: Task<Void, Never>?
     @ObservationIgnored private(set) var lastEventID: UInt64 = 0
     private(set) var catalogPosition = CatalogPosition(epoch: nil, cursor: 0)
@@ -1513,6 +1514,7 @@ final class AgenthailModel {
         if let entityID = event.entityId {
             panes.forEach { $0.sessionChanged(entityID) }
         }
+        agentRoles.receive(type: event.type, source: event.source)
         pendingRefresh.merge(EventRefresh(for: event.type, auditing: operationsVisible))
         guard !pendingRefresh.isEmpty else { return }
         refreshTask?.cancel()

@@ -33,6 +33,8 @@ SOURCES=(
   SentFiles.swift
   TransientNotice.swift
   ClaudeCompactModels.swift
+  AgentRoles.swift
+  AgentRolesStore.swift
   KeptDelivery.swift
   InboxMessage.swift
   Decisions.swift
@@ -196,6 +198,8 @@ SOURCES=(
   macOS/ClaudeCompact.swift
   macOS/ClaudeCompactDraft.swift
   macOS/ClaudeCompactStore.swift
+  macOS/LocalSocketHTTP.swift
+  macOS/MacAgentRolesTransport.swift
   macOS/PairingProgress.swift
   macOS/ProjectHeaderFacts.swift
   ProjectBroadcast.swift

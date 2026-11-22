@@ -1,0 +1,91 @@
+import XCTest
+
+@MainActor
+final class AgentRolesUITests: XCTestCase {
+    private func launch(_ theme: String, settings: Bool = true) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session"] + (settings ? ["--preview-app"] : []) + ["--preview-roles", "--preview-theme", ProcessInfo.processInfo.environment["AGENTHAIL_UI_THEME"] ?? theme]
+        if let size = ProcessInfo.processInfo.environment["AGENTHAIL_UI_CONTENT_SIZE"] {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", size]
+        }
+        app.launch()
+        guard settings else { return app }
+        app.tab("Settings").tapWhenReady()
+        let section = app.buttons["agent-roles"]
+        for _ in 0..<6 where !section.isHittable { app.swipeUp() }
+        shoot(app, "settings agents section")
+        return app
+    }
+
+    private func open(_ app: XCUIApplication, _ id: String) {
+        let link = app.buttons[id]
+        for _ in 0..<6 where !link.isHittable { app.swipeUp() }
+        link.tapWhenReady()
+    }
+
+    private func shoot(_ app: XCUIApplication, _ name: String) {
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = name
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
+    func testEditingADecisionMarksItChangedAndSaves() {
+        let app = launch("dark")
+        open(app, "agent-roles")
+        app.buttons["agent-role-reviewer"].tapWhenReady()
+        let decision = app.buttons["agent-decision-session-create-remote"]
+        XCTAssertTrue(decision.waitForExistence(timeout: 5))
+        shoot(app, "role detail")
+        decision.tapWhenReady()
+        app.buttons["Allow"].tapWhenReady()
+        XCTAssertTrue(decision.waitForLabel(containing: "Changed"), "a changed decision is marked: \(decision.label)")
+        let save = app.buttons["agent-role-save"]
+        XCTAssertTrue(save.isEnabled)
+        save.tap()
+        let saved = NSPredicate(format: "isEnabled == false")
+        expectation(for: saved, evaluatedWith: save)
+        waitForExpectations(timeout: 5)
+        XCTAssertTrue(decision.label.contains("Allow"), decision.label)
+        shoot(app, "decision saved")
+    }
+
+    func testAddingAnAssignmentListsIt() {
+        let app = launch("light")
+        open(app, "agent-assignments")
+        XCTAssertTrue(app.staticTexts["Applies to no session: no such session"].waitForExistence(timeout: 5), "a stale assignment says why")
+        shoot(app, "assignments")
+        app.buttons["agent-assign-open"].tapWhenReady()
+        app.buttons["Identity"].tapWhenReady()
+        let target = app.textFields["agent-assign-target"]
+        target.tapWhenReady()
+        target.typeText("release-bot")
+        app.buttons["agent-assign-role"].tapWhenReady()
+        app.buttons["lead"].tapWhenReady()
+        shoot(app, "assign sheet")
+        app.buttons["agent-assign"].tapWhenReady()
+        XCTAssertTrue(app.descendants(matching: .any)["agent-assignment-release-bot"].waitForExistence(timeout: 5), "the new assignment is listed")
+        shoot(app, "assignment added")
+    }
+
+    func testSessionDetailsNameTheRoleItActsUnder() {
+        let app = launch("dark", settings: false)
+        app.buttons["Session menu"].tapWhenReady()
+        app.buttons["Session details"].tapWhenReady()
+        let role = app.descendants(matching: .any)["session-role"]
+        XCTAssertTrue(role.waitForExistence(timeout: 5), "session details show the role")
+        XCTAssertTrue(role.label.contains("worker (replaced by reviewer)") || (role.value as? String)?.contains("worker (replaced by reviewer)") == true || app.staticTexts["worker (replaced by reviewer)"].exists, "the role reads as its label: \(role.label)")
+        shoot(app, "session role")
+    }
+}
+
+private extension XCUIElement {
+    func waitForLabel(containing text: String, timeout: TimeInterval = 5) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if label.contains(text) || (value as? String)?.contains(text) == true { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        return label.contains(text) || (value as? String)?.contains(text) == true
+    }
+}

@@ -165,8 +165,9 @@ struct SessionPreview: View {
     nonisolated static var previewDetailJSON: String { previewDetail(arguments: ProcessInfo.processInfo.arguments) }
 
     nonisolated static func previewDetail(arguments: [String]) -> String {
-        guard arguments.contains("--preview-unreachable") || arguments.contains("--preview-questions") || arguments.contains("--preview-limit-move") || arguments.contains("--preview-terminal-question") || SessionOperationsPreview.enabled else { return basePreviewDetailJSON }
+        guard arguments.contains("--preview-unreachable") || arguments.contains("--preview-questions") || arguments.contains("--preview-limit-move") || arguments.contains("--preview-terminal-question") || SessionOperationsPreview.enabled || arguments.contains("--preview-roles") else { return basePreviewDetailJSON }
         var detail = try! JSONSerialization.jsonObject(with: Data(basePreviewDetailJSON.utf8)) as! [String: Any]
+        if arguments.contains("--preview-roles") { detail["role"] = AgentRolesPreview.sessionRole }
         if SessionOperationsPreview.enabled { SessionOperationsPreview.apply(detail: &detail) }
         if arguments.contains("--preview-terminal-question") {
             var session = detail["session"] as! [String: Any]
@@ -564,6 +565,10 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
             status = captured == nil ? 503 : 200
         } else {
         switch request.url?.path {
+        case "/api/v1/agents" where AgentRolesPreview.enabled:
+            let reply = AgentRolesPreview.respond(request.httpMethod, sentAction)
+            status = reply.status
+            body = reply.body
         case "/api/v1/session-options": body = #"{"surfaces":[{"id":"claude","workspace":true},{"id":"codex","workspace":true},{"id":"notion","workspace":false}],"projects":[{"id":"p-fieldnotes","displayName":"fieldnotes","rootPath":"/Users/demo/projects/fieldnotes","kind":"git"}],"claudeConfigRoots":[{"name":"default","root":"/Users/demo/.claude","primary":true,"signedInAs":{"email":"demo@example.com"}},{"name":"team","root":"/Users/demo/.team/.claude","primary":false,"signedInAs":{"email":"team@example.com"}},{"name":"shared","root":"/Users/demo/.shared/.claude","primary":false,"login":"proxy","proxy":"shared"}]}"#
         case "/api/v1/session-options/claude-pick":
             body = #"{"pick":{"root":"/Users/demo/.team/.claude","name":"team","account":"team@example.com","reason":"your default root for new sessions"}}"#

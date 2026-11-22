@@ -2109,6 +2109,9 @@ struct DetailsTab: View {
                         }
                     }
                 }
+                if let role = AgentRoleFacts.sessionRoleRow(pane.detail?.role) {
+                    detailRow("Role", role.value).help(role.help)
+                }
                 if let project = session.project?.displayName { detailRow("Project", project) }
                 if let branch = session.checkout?.branch ?? session.checkout?.detachedHead { detailRow("Branch", branch, monospaced: true) }
                 if let path = session.checkout?.path ?? session.cwd { InspectorPathRow(label: "Checkout", path: path) }
