@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
 const (
-	KeptDirty    = "dirty"
-	KeptIgnored  = "ignored"
-	KeptUnpushed = "unpushed"
+	KeptDirty       = "dirty"
+	KeptIgnored     = "ignored"
+	KeptIgnoredMany = "ignored-many"
+	KeptUnpushed    = "unpushed"
 )
 
 type Record struct {
@@ -28,11 +30,16 @@ type Outcome struct {
 	IgnoredPaths []string
 }
 
+// Options.RemoveIgnored names the ignored files the person agreed to delete
+// with the worktree. Clean removes it only while they are exactly the ignored
+// files that would keep it.
 type Options struct {
-	ForceIgnored bool
+	RemoveIgnored []string
 }
 
-const keptPathLimit = 5
+// KeptPathLimit is how many ignored files a kept worktree names. Past it the
+// worktree is kept as KeptIgnoredMany and only a person at a terminal removes it.
+const KeptPathLimit = 50
 
 // Clean removes a worktree and its branch when nothing in them is lost: no
 // changed or untracked files, no ignored files outside regenerable folders,
@@ -95,22 +102,35 @@ func Clean(ctx context.Context, record Record, options Options) (Outcome, error)
 }
 
 func statusKept(status string, options Options) Outcome {
-	var kept Outcome
+	var paths []string
+	count := 0
 	for _, entry := range strings.Split(status, "\x00") {
 		path, ignored := strings.CutPrefix(entry, "!! ")
 		switch {
 		case entry == "":
 		case !ignored:
 			return Outcome{KeptReason: KeptDirty}
-		case options.ForceIgnored || Regenerable(path):
+		case Regenerable(path):
 		default:
-			kept.KeptReason = KeptIgnored
-			if len(kept.IgnoredPaths) < keptPathLimit {
-				kept.IgnoredPaths = append(kept.IgnoredPaths, path)
+			count++
+			if len(paths) < KeptPathLimit {
+				paths = append(paths, path)
 			}
 		}
 	}
-	return kept
+	switch {
+	case count == 0:
+		return Outcome{}
+	case count > KeptPathLimit:
+		return Outcome{KeptReason: KeptIgnoredMany, IgnoredPaths: paths}
+	case sameSet(paths, options.RemoveIgnored):
+		return Outcome{}
+	}
+	return Outcome{KeptReason: KeptIgnored, IgnoredPaths: paths}
+}
+
+func sameSet(paths, named []string) bool {
+	return slices.Equal(slices.Compact(slices.Sorted(slices.Values(paths))), slices.Compact(slices.Sorted(slices.Values(named))))
 }
 
 func tipSafe(ctx context.Context, record Record, tip string) (bool, error) {

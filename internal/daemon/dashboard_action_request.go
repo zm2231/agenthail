@@ -14,7 +14,7 @@ type dashboardActionRequest struct {
 	Worktree        string                     `json:"worktree"`
 	Isolation       string                     `json:"isolation"`
 	Base            string                     `json:"base"`
-	ForceIgnored    bool                       `json:"forceIgnored"`
+	RemoveIgnored   []string                   `json:"removeIgnored"`
 	Op              string                     `json:"op"`
 	PR              string                     `json:"pr"`
 	Repo            string                     `json:"repo"`

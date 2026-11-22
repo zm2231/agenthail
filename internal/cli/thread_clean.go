@@ -4,7 +4,7 @@ import (
 	"fmt"
 )
 
-const threadCleanUsage = `usage: agenthail thread clean <target> [--force-ignored] [--json]`
+const threadCleanUsage = `usage: agenthail thread clean <target> [--remove-ignored <path>]... [--json]`
 
 type threadCleanAnswer struct {
 	OK       bool `json:"ok"`
@@ -14,6 +14,10 @@ type threadCleanAnswer struct {
 		Cleanup       string   `json:"cleanup"`
 		CleanupReason string   `json:"cleanupReason"`
 		KeptPaths     []string `json:"keptPaths,omitempty"`
+		Hint          *struct {
+			Reason  string `json:"reason"`
+			Command string `json:"command"`
+		} `json:"hint,omitempty"`
 	} `json:"worktree"`
 }
 
@@ -46,8 +50,8 @@ func (a *App) cmdThreadClean(args []string) error {
 	}
 	var answer threadCleanAnswer
 	request := map[string]any{"action": "work-clean", "sessionId": id}
-	if hasFlag(args, "--force-ignored") {
-		request["forceIgnored"] = true
+	if paths := flagVals(args, "--remove-ignored"); len(paths) > 0 {
+		request["removeIgnored"] = paths
 	}
 	if err := projectAction(ctx, client, request, &answer); err != nil {
 		return err
@@ -59,29 +63,22 @@ func (a *App) cmdThreadClean(args []string) error {
 	case "removed":
 		fmt.Printf("removed %s and branch %s\n", answer.Worktree.Path, answer.Worktree.Branch)
 	case "kept":
-		fmt.Printf("kept %s: %s\n", answer.Worktree.Path, cleanupReasonText(answer.Worktree.CleanupReason))
+		reason := answer.Worktree.CleanupReason
+		if hint := answer.Worktree.Hint; hint != nil {
+			reason = hint.Reason
+		}
+		fmt.Printf("kept %s: %s\n", answer.Worktree.Path, reason)
 		for _, path := range answer.Worktree.KeptPaths {
 			fmt.Printf("  %s\n", path)
 		}
+		if hint := answer.Worktree.Hint; hint != nil && hint.Command != "" {
+			fmt.Printf("see it with: %s\n", hint.Command)
+		}
 		if answer.Worktree.CleanupReason == "ignored" {
-			fmt.Println("run again with --force-ignored to remove it anyway")
+			fmt.Println("to delete exactly these files with it, run again naming each with --remove-ignored <path>")
 		}
 	default:
 		fmt.Printf("%s: cleanup %s\n", answer.Worktree.Path, answer.Worktree.Cleanup)
 	}
 	return nil
-}
-
-func cleanupReasonText(reason string) string {
-	switch reason {
-	case "dirty":
-		return "it has changes that are not committed"
-	case "ignored":
-		return "it holds ignored files outside build and package folders"
-	case "unpushed":
-		return "its branch has commits that are on no remote and not merged"
-	case "running":
-		return "its session is still working; it is cleaned once the turn ends"
-	}
-	return reason
 }

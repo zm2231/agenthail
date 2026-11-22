@@ -143,6 +143,7 @@ jobs:
           node scripts/test-dashboard-live-order.mjs
           node scripts/test-dashboard-project-now.mjs
           node scripts/test-dashboard-project-now-answer.mjs
+          node scripts/test-dashboard-project-merged.mjs
           node scripts/test-dashboard-project-tiles.mjs
           node scripts/test-dashboard-tile-order.mjs
           node scripts/test-dashboard-decision-card.mjs

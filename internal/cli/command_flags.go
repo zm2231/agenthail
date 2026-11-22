@@ -32,8 +32,22 @@ func flagVal(args []string, flag string) string {
 	return ""
 }
 
+func flagVals(args []string, flag string) []string {
+	var values []string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--" {
+			break
+		}
+		if args[i] == flag && i+1 < len(args) {
+			values = append(values, args[i+1])
+			i++
+		}
+	}
+	return values
+}
+
 func stripFlags(args []string) []string {
-	valueFlags := map[string]bool{"--until": true, "--request": true, "--reason": true, "--answers": true, "--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--identity": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--max-bytes": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true, "--label": true, "--project": true, "--instructions": true, "--permission-mode": true, "--wait": true, "--root": true, "--enabled": true, "--idle": true, "--to": true, "--remote-control": true, "--key-file": true, "--key-env": true, "--keychain-service": true, "--keychain-account": true, "--repo": true, "--session": true, "--trigger": true, "--limit": true, "--input": true, "--agent": true, "--access-client-id": true, "--access-email": true, "--team": true, "--aud": true, "--prune": true}
+	valueFlags := map[string]bool{"--until": true, "--request": true, "--reason": true, "--answers": true, "--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--identity": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--max-bytes": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true, "--label": true, "--project": true, "--instructions": true, "--permission-mode": true, "--wait": true, "--root": true, "--enabled": true, "--idle": true, "--to": true, "--remote-control": true, "--key-file": true, "--key-env": true, "--keychain-service": true, "--keychain-account": true, "--repo": true, "--session": true, "--trigger": true, "--limit": true, "--input": true, "--agent": true, "--access-client-id": true, "--access-email": true, "--team": true, "--aud": true, "--prune": true, "--remove-ignored": true}
 	var out []string
 	positionalOnly := false
 	for i := 0; i < len(args); i++ {
@@ -58,8 +72,9 @@ func stripFlags(args []string) []string {
 }
 
 type flagSpec struct {
-	values map[string]bool
-	bools  map[string]bool
+	values  map[string]bool
+	bools   map[string]bool
+	repeats map[string]bool
 }
 
 func (spec flagSpec) accepted() string {
@@ -83,7 +98,7 @@ func commandFlagSpec(command string, args []string) (flagSpec, bool) {
 		"send":  {values: surface.SendValueFlags, bools: surface.SendBoolFlags},
 		"reply": {values: map[string]bool{"--before": true, "--timeout": true, "--max-bytes": true}, bools: map[string]bool{"--json": true, "--report": true}}, "last": {values: map[string]bool{"--before": true, "--timeout": true, "--max-bytes": true}, bools: map[string]bool{"--full": true, "--json": true, "--report": true}}, "tail": {values: map[string]bool{"--before": true, "--timeout": true, "--max-bytes": true}, bools: map[string]bool{"--full": true, "--json": true, "--report": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
-		"thread":  {values: map[string]bool{"--message": true, "--from": true, "--cwd": true, "--alias": true, "--identity": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--branch": true, "--base": true, "--agent": true, "--permission-mode": true, "--root": true, "--host": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--wait": true, "--until": true}, bools: map[string]bool{"--json": true, "--help": true, "--stop-terminal": true, "--worktree": true, "--force-ignored": true, "--until-finished": true}},
+		"thread":  {values: map[string]bool{"--message": true, "--from": true, "--cwd": true, "--alias": true, "--identity": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--branch": true, "--base": true, "--agent": true, "--permission-mode": true, "--root": true, "--host": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--wait": true, "--until": true, "--remove-ignored": true}, bools: map[string]bool{"--json": true, "--help": true, "--stop-terminal": true, "--worktree": true, "--until-finished": true}, repeats: map[string]bool{"--remove-ignored": true}},
 		"pr":      {values: map[string]bool{"--repo": true, "--session": true}, bools: map[string]bool{"--json": true}},
 		"channel": {},
 		"project": {values: map[string]bool{"--host": true, "--name": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}}, "projects": {values: map[string]bool{"--host": true, "--name": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}},
@@ -146,7 +161,7 @@ func validateCommandFlags(command string, args []string) error {
 		if !strings.HasPrefix(arg, "--") {
 			continue
 		}
-		if seen[arg] {
+		if seen[arg] && !spec.repeats[arg] {
 			return fmt.Errorf("flag %s may only be specified once", arg)
 		}
 		seen[arg] = true

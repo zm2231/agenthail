@@ -7,6 +7,7 @@ import { projectNow } from "./project-now.js";
 import { renderInlineAnswer } from "./project-now-answer.js";
 import { hostDown, presenceLabel, unavailable } from "./presence.js";
 import { leadSessionID } from "./project-tiles.js";
+import { mergedWorktree, renderMergedWorktree } from "./project-merged.js";
 
 const knownSince = Date.UTC(2000, 0, 1);
 const activity = (session) => {
@@ -40,6 +41,7 @@ export function projectContents(project) {
     leadSession: leadID ? app.state.sessions.find((session) => session.id === leadID) || null : null,
     now: projectNow(members.filter((session) => sessionRunning(session) || session.current), new Set((project.checkouts || []).map((checkout) => checkout.host.id)).size),
     earlier: members.filter((session) => !session.current && !sessionRunning(session)),
+    merged: members.filter(mergedWorktree),
   };
 }
 
@@ -126,6 +128,7 @@ export function renderProjectView(project) {
   const showEarlier = app.projectEarlier === project.id;
   const left = [
     card(contents.now.count ? `Now · ${contents.now.count}` : "Now", nowRows(contents.now), showEarlier ? "" : `<button class="link-button" type="button" data-project-earlier="${id}">Show earlier</button>`),
+    contents.merged.length ? card(`Merged · ${contents.merged.length}`, rows(contents.merged, "", renderMergedWorktree)) : "",
     showEarlier ? card("Earlier", rows(contents.earlier, "No earlier sessions")) : "",
   ].join("");
   return `<header class="project-view-header"><h1>${escape(project.displayName)}</h1><span class="project-note">${count} ${count === 1 ? "session" : "sessions"}${computers > 1 ? ` on ${computers} computers` : ""}</span><div class="project-actions">${contents.lead ? `<button class="soft-button" type="button" data-project-brief="${id}">Catch me up</button>` : ""}<button class="soft-button" type="button" data-project-lead="${id}">${contents.lead ? "Change lead…" : "New lead…"}</button>${firstCheckout >= 0 ? `<button class="primary-button" type="button" data-project-start="${id}" data-checkout="${firstCheckout}">New session</button>` : ""}</div></header><div class="project-view-columns"><div class="project-view-main">${left}</div><div class="project-view-side">${leadCard(project, contents)}${folders(project)}</div></div>`;
