@@ -46,7 +46,7 @@ func TestThePersonTurnsOAuthOnListsItsGrantsAndRevokesOne(t *testing.T) {
 	if err := r.SetAccessSettings("example-team", "aud"); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := run(); err != nil || !strings.Contains(out, "OAuth stays off") {
+	if out, err := run(); err != nil || !strings.Contains(out, "OAuth: on at") {
 		t.Fatalf("with Access settings set: out=%q err=%v", out, err)
 	}
 }

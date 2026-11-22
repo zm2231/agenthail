@@ -31,9 +31,6 @@ func remoteMCPHealthOf(r *registry.Registry, now time.Time) (remoteMCPHealth, er
 	if health.OAuth, err = oauthStatusOf(r); err != nil {
 		return health, err
 	}
-	if health.OAuth.Blocked != "" {
-		health.Problems = append(health.Problems, "OAuth is set to "+health.OAuth.Issuer+", but "+health.OAuth.Blocked)
-	}
 	for _, identity := range health.Identities {
 		if unread, err := r.UnreadInbox(identity.Name); err == nil {
 			health.Unread[identity.Name] = unread
@@ -76,7 +73,7 @@ func (h remoteMCPHealth) String() string {
 		lines = append(lines, "remote mcp: off (no identity has remote access)")
 	case "token only":
 		published := "/mcp"
-		if h.OAuth.Served {
+		if h.OAuth.Issuer != "" {
 			published = "/mcp and the OAuth paths"
 		}
 		lines = append(lines, "remote mcp: token only (no Access settings); publish only "+published+" to it")
@@ -90,7 +87,7 @@ func (h remoteMCPHealth) String() string {
 	for _, identity := range h.Identities {
 		lines = append(lines, fmt.Sprintf("  @%s: %s, last seen %s, %d unread", identity.Name, identity.Binding(), lastSeen(identity.LastSeen), h.Unread[identity.Name]))
 	}
-	if h.OAuth.Served {
+	if h.OAuth.Issuer != "" {
 		lines = append(lines, "  "+strings.ReplaceAll(h.OAuth.String(), "\n", "\n  "))
 	}
 	for _, problem := range h.Problems {

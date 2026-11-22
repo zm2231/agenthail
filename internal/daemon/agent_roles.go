@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 
 	"github.com/zm2231/agenthail/internal/agentroles"
-	"github.com/zm2231/agenthail/internal/mcpoauth"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -113,19 +112,6 @@ func (d *Daemon) callerRole(record registry.CallerRecord, remote bool) resolvedR
 		source = "a session Agenthail did not start"
 	}
 	return d.resolveRole(record, implicit, source)
-}
-
-func (d *Daemon) oauthCallerRole(record registry.CallerRecord) resolvedRole {
-	return d.oauthRole(record, mcpoauth.NarrowRole)
-}
-
-// oauthRole under narrow starts an app at connected-app, which only a role the
-// person assigned to its identity raises.
-func (d *Daemon) oauthRole(record registry.CallerRecord, narrow bool) resolvedRole {
-	if !narrow {
-		return d.callerRole(record, true)
-	}
-	return d.resolveRole(record, agentroles.ConnectedApp, "an app connected over OAuth")
 }
 
 func (d *Daemon) resolveRole(record registry.CallerRecord, implicit, source string) resolvedRole {

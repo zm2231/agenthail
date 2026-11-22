@@ -135,7 +135,7 @@ agenthail identity oauth revoke <grant>
 agenthail identity oauth off        # revokes every grant
 ```
 
-The origin must be https, or http on a loopback host, with no path. While Access settings are set, OAuth stays off: a client like this cannot carry an Access credential, and admitting it past Access is one switch (`mcpoauth.PastAccess`) that is off. `agenthail doctor` reports that as a problem.
+The origin must be https, or http on a loopback host, with no path. OAuth is served whether or not Access settings are set. A client like this cannot carry an Access credential, so an `aho_` request needs none; the person's approval of each grant on their devices stands in for it. An `ahr_` request still needs its Access credential while Access settings are set, and it is refused on any route that skips Access. So with Access, OAuth clients reach the daemon at an origin that has no Access application in front of it (for example a second hostname routed to the same daemon), and that origin is the one given to `identity oauth set`, while `ahr_` clients keep the hostname behind Access.
 
 The daemon serves, all without a credential:
 
@@ -156,7 +156,7 @@ The approve flow:
 4. The token endpoint checks the client, redirect URI and verifier, then issues an access token `aho_...` (an hour) and a refresh token `ahf_...` (30 days). A code presented twice revokes the grant it produced.
 5. Each refresh replaces both tokens. A refresh token presented after it was replaced revokes the grant, since a copy exists.
 
-Only SHA-256 hashes of the tokens are stored (`identity_oauth_grants`, with `oauth_clients` and `oauth_spent_refresh`). An `aho_` bearer maps to its identity like `ahr_`: the same tools, the identity's role (as the approve ask shows), push notices and inbox contract, recorded in history as `mcp-remote` with `via oauth <client>`. The switch `mcpoauth.NarrowRole` is off; when it is on, an app starts at the built-in `connected-app` role instead of `remote`, and a role the person assigned (to the identity, its session or its alias, resolved as usual) replaces it, see [mcp.md](mcp.md). An event subscription made with it belongs to the grant, so a refresh or the identity's `ahr_` rotation keeps it and revoking the grant deletes it.
+Only SHA-256 hashes of the tokens are stored (`identity_oauth_grants`, with `oauth_clients` and `oauth_spent_refresh`). An `aho_` bearer maps to its identity like `ahr_`: the same tools, the identity's role (as the approve ask shows), push notices and inbox contract, recorded in history as `mcp-remote` with `via oauth <client>`. To connect a narrower app, the person assigns the identity the built-in `connected-app` role (`agenthail roles assign connected-app --identity <name>`), which reads and queues messages to a coordinator and cannot spawn or control, see [mcp.md](mcp.md); the approve ask then names it. An event subscription made with it belongs to the grant, so a refresh or the identity's `ahr_` rotation keeps it and revoking the grant deletes it.
 
 A grant ends when it is revoked from the CLI or by its client, when its refresh token expires, when a reused code or refresh token revokes it, when the identity's remote access is turned off or the identity removed, or when the origin changes or OAuth is turned off. Rotating the `ahr_` token keeps it. Deleting a grant raises the credential epoch, which retires every remote session.
 

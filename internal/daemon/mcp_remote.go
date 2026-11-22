@@ -26,7 +26,6 @@ const (
 	tokenInfoBinding    = "agenthail.binding"
 	tokenInfoEpoch      = "agenthail.epoch"
 	tokenInfoTokenHash  = "agenthail.token_hash"
-	tokenInfoOAuth      = "agenthail.oauth"
 	remoteInboxURIStart = "agenthail://inbox/"
 )
 
@@ -251,7 +250,7 @@ func (m *remoteMCP) verifyOAuth(token string, r *http.Request, epoch int64, refu
 	if err := d.Registry.TouchOAuthGrant(grant.ID, time.Now()); err != nil {
 		d.logRuntimeError("oauth grant last seen", err)
 	}
-	return &auth.TokenInfo{UserID: grant.IdentityID, Expiration: expires, Extra: map[string]any{tokenInfoRemote: grant.Identity, tokenInfoBinding: "oauth " + grant.ClientName, tokenInfoEpoch: epoch, tokenInfoTokenHash: grant.Credential(), tokenInfoOAuth: true}}, nil
+	return &auth.TokenInfo{UserID: grant.IdentityID, Expiration: expires, Extra: map[string]any{tokenInfoRemote: grant.Identity, tokenInfoBinding: "oauth " + grant.ClientName, tokenInfoEpoch: epoch, tokenInfoTokenHash: grant.Credential()}}, nil
 }
 
 // An identity acts under the remote role, which by default has the person's
@@ -272,11 +271,7 @@ func (d *Daemon) remoteCaller(info *auth.TokenInfo) (*mcpCaller, error) {
 	if err != nil {
 		return nil, err
 	}
-	if oauth, _ := info.Extra[tokenInfoOAuth].(bool); oauth {
-		caller.actAs(d.oauthCallerRole(record))
-	} else {
-		caller.actAs(d.callerRole(record, true))
-	}
+	caller.actAs(d.callerRole(record, true))
 	caller.remote, _ = info.Extra[tokenInfoBinding].(string)
 	return caller, nil
 }

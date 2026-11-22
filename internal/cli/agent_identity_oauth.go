@@ -12,10 +12,8 @@ import (
 const identityOAuthUsage = "usage: agenthail identity oauth [set --url <public origin> | off | list | revoke <grant>] [--json]"
 
 type oauthStatus struct {
-	Issuer  string                `json:"issuer,omitempty"`
-	Served  bool                  `json:"served"`
-	Blocked string                `json:"blocked,omitempty"`
-	Grants  []registry.OAuthGrant `json:"grants"`
+	Issuer string                `json:"issuer,omitempty"`
+	Grants []registry.OAuthGrant `json:"grants"`
 }
 
 func oauthStatusOf(reg *registry.Registry) (oauthStatus, error) {
@@ -25,12 +23,6 @@ func oauthStatusOf(reg *registry.Registry) (oauthStatus, error) {
 		return status, err
 	}
 	status.Issuer = issuer
-	if _, _, access, err := reg.AccessSettings(); err != nil {
-		return status, err
-	} else if access && !mcpoauth.PastAccess {
-		status.Blocked = "Access settings are set, and an OAuth client cannot carry an Access credential, so OAuth stays off"
-	}
-	status.Served = status.Blocked == ""
 	status.Grants, err = reg.OAuthGrants()
 	return status, err
 }
@@ -85,9 +77,6 @@ func (s oauthStatus) String() string {
 		return "OAuth: off. Turn it on with: agenthail identity oauth set --url https://<public host>"
 	}
 	text := fmt.Sprintf("OAuth: on at %s. Give a client %s; you approve each one on your devices.", s.Issuer, mcpoauth.Resource(s.Issuer))
-	if s.Blocked != "" {
-		text = fmt.Sprintf("OAuth: set to %s, but %s.", s.Issuer, s.Blocked)
-	}
 	for _, grant := range s.Grants {
 		text += fmt.Sprintf("\n  %s  @%s to %s, since %s, last seen %s", grant.ID, grant.Identity, grant.ClientName, grant.CreatedAt.Local().Format(time.DateTime), lastSeen(grant.LastSeen))
 	}

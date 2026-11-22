@@ -42,12 +42,6 @@ func (d *Daemon) oauthIssuer() string {
 	if !on {
 		return ""
 	}
-	if !mcpoauth.PastAccess {
-		_, _, access, err := d.Registry.AccessSettings()
-		if err != nil || access {
-			return ""
-		}
-	}
 	return issuer
 }
 

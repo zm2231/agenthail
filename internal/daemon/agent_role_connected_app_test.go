@@ -101,7 +101,7 @@ func TestAConnectedAppReadsAndQueuesToACoordinatorButCannotControlOrSpawn(t *tes
 	}
 }
 
-func TestUnderTheNarrowSwitchAnAppStartsAtConnectedAppUntilThePersonAssignsItsIdentityARole(t *testing.T) {
+func TestAnAppHoldsItsIdentitysRoleAndTheApproveAskNamesIt(t *testing.T) {
 	d, r, _, _, _ := daemonFixture(t)
 	identity, err := r.AddAgentIdentity("scout")
 	if err != nil {
@@ -110,20 +110,13 @@ func TestUnderTheNarrowSwitchAnAppStartsAtConnectedAppUntilThePersonAssignsItsId
 	if _, _, err := r.BindRemoteIdentity("scout", "", ""); err != nil {
 		t.Fatal(err)
 	}
-	role := func(narrow bool) string {
-		record, err := r.Caller(identity.SessionID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return d.oauthRole(record, narrow).Name
+	if role := d.remoteRoleName(identity.SessionID); role != agentroles.Remote {
+		t.Fatalf("unassigned, an app holds %s", role)
 	}
-	if wide, narrow := role(false), role(true); wide != agentroles.Remote || narrow != agentroles.ConnectedApp {
-		t.Fatalf("unassigned: off %s, on %s", wide, narrow)
-	}
-	if err := d.changeAgentRole(context.Background(), daemonapi.CLIActor, daemonapi.AgentRoleRequest{Op: "assign", Name: agentroles.Remote, Kind: registry.AssignIdentity, Target: "scout"}); err != nil {
+	if err := d.changeAgentRole(context.Background(), daemonapi.CLIActor, daemonapi.AgentRoleRequest{Op: "assign", Name: agentroles.ConnectedApp, Kind: registry.AssignIdentity, Target: "scout"}); err != nil {
 		t.Fatal(err)
 	}
-	if narrow := role(true); narrow != agentroles.Remote {
-		t.Fatalf("the person assigned @scout remote, but its app holds %s", narrow)
+	if role := d.remoteRoleName(identity.SessionID); role != agentroles.ConnectedApp {
+		t.Fatalf("the person assigned @scout connected-app, but its app holds %s", role)
 	}
 }

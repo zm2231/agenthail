@@ -292,7 +292,7 @@ func (d *Daemon) remoteRoleName(identityID string) string {
 	if err != nil {
 		return "remote"
 	}
-	return d.oauthCallerRole(record).Name
+	return d.callerRole(record, true).Name
 }
 
 func matchCode() string {

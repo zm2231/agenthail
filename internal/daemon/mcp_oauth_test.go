@@ -197,6 +197,23 @@ func TestAURLOnlyClientConnectsAsTheIdentityThePersonApproves(t *testing.T) {
 	}
 }
 
+func TestWithAccessSetAnAppStillConnectsOverOAuthAndARemoteTokenStillNeedsAccess(t *testing.T) {
+	f := newOAuthFixture(t)
+	f.access(t)
+	f.deliver(t, "past Access")
+	session, err := f.connect(t, f.handler(t, oauthApprove))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "agenthail_read", Arguments: map[string]any{}})
+	if err != nil || result.IsError || !strings.Contains(fmt.Sprint(result.Content[0]), "past Access") {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if status, _ := f.probe(t, f.remoteFixture.token); status != http.StatusUnauthorized {
+		t.Fatalf("an ahr_ token without an Access credential got %d", status)
+	}
+}
+
 func (f *oauthFixture) history(t *testing.T) string {
 	t.Helper()
 	entries, err := f.r.ListHistory(200, "")
