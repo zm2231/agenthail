@@ -155,6 +155,22 @@ func (s *relayedSession) whoami(t *testing.T) (string, error) {
 	return whoami.SessionID, nil
 }
 
+// awaitTools refetches the tools on each change notice, as Claude does: the relay announces each tool as it adds it and lists none until all are in.
+func (s *relayedSession) awaitTools(t *testing.T, when string) {
+	t.Helper()
+	deadline := time.After(15 * time.Second)
+	for {
+		select {
+		case <-s.listChanged:
+			if s.toolCount(t) > 0 {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("the session never listed its tools %s", when)
+		}
+	}
+}
+
 func (s *relayedSession) toolCount(t *testing.T) int {
 	t.Helper()
 	listed, err := s.client.ListTools(context.Background(), nil)
@@ -254,11 +270,7 @@ func TestASessionStartedWhileTheDaemonIsDownGetsItsToolsWhenItComesUp(t *testing
 		t.Fatal(err)
 	}
 	t.Cleanup(restarted)
-	select {
-	case <-session.listChanged:
-	case <-time.After(15 * time.Second):
-		t.Fatal("the session was never told its tools changed")
-	}
+	session.awaitTools(t, "once the daemon came up")
 	if id, err := session.whoami(t); err != nil || id != "claude-one" {
 		t.Fatalf("whoami = %q, %v", id, err)
 	}
@@ -319,11 +331,7 @@ func TestARelayedSessionWhoseRecordCouldNotBeReadGetsItsToolsOnceItReads(t *test
 		t.Fatalf("an unnamed session listed %d tools", n)
 	}
 	session.write(t, "claude-one")
-	select {
-	case <-session.listChanged:
-	case <-time.After(15 * time.Second):
-		t.Fatal("the session was never told its tools changed once its record read")
-	}
+	session.awaitTools(t, "once its record read")
 	if id, err := session.whoami(t); err != nil || id != "claude-one" {
 		t.Fatalf("whoami = %q, %v", id, err)
 	}
