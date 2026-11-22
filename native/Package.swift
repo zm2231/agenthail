@@ -39,6 +39,8 @@ let package = Package(
                 "SentFiles.swift",
                 "TransientNotice.swift",
                 "ClaudeCompactModels.swift",
+                "AgentRoles.swift",
+                "AgentRolesStore.swift",
                 "KeptDelivery.swift",
                 "QueueSteer.swift",
                 "InboxMessage.swift",

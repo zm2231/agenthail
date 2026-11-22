@@ -49,6 +49,8 @@ targets:
       - path: SentFiles.swift
       - path: TransientNotice.swift
       - path: ClaudeCompactModels.swift
+      - path: AgentRoles.swift
+      - path: AgentRolesStore.swift
       - path: KeptDelivery.swift
       - path: QueueSteer.swift
       - path: InboxMessage.swift

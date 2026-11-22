@@ -13,6 +13,7 @@ protocol HostConnectionDelegate: AnyObject {
     func hostConnected(_ host: HostConnection)
     func hostAppearanceChanged(_ host: HostConnection)
     func hostExtensionsChanged(_ host: HostConnection)
+    func hostAgentRolesChanged(_ host: HostConnection)
 }
 
 @MainActor
@@ -374,6 +375,7 @@ final class HostConnection {
         if let entity = event.entityId { delegate?.host(self, receivedEventFor: entity) }
         if event.type == "ui.changed" { delegate?.hostAppearanceChanged(self) }
         if ExtensionCatalog.refreshes(for: event.type) { delegate?.hostExtensionsChanged(self) }
+        if AgentRolesRefresh.refetches(type: event.type, source: event.source) { delegate?.hostAgentRolesChanged(self) }
         guard SnapshotRefreshPolicy.refreshes(for: event.type) else { return }
         eventRefreshTask?.cancel()
         eventRefreshTask = Task { [weak self] in

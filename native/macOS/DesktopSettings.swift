@@ -35,6 +35,11 @@ struct DesktopSettings: View {
                 .tabItem { Label("Delivery", systemImage: "arrow.triangle.branch") }.tag(4)
             ClaudeCompactSettings(model: model)
                 .tabItem { Label("Claude", systemImage: "rectangle.compress.vertical") }.tag(5)
+            SettingsPages(pages: [
+                ("Roles", AnyView(AgentRolesSettings(model: model))),
+                ("Assignments", AnyView(AgentAssignmentsSettings(model: model))),
+            ])
+                .tabItem { Label("Agents", systemImage: "person.2") }.tag(6)
         }
         .frame(width: 700, height: 520)
         .task { await model.loadOperations() }

@@ -1664,6 +1664,8 @@ struct SessionDetail: Decodable {
     let transcriptTruncated: Bool?
     let transcriptOriginalBytes: Int?
     let transcriptReturnedBytes: Int?
+    var role: SessionRole?
+    var remoteRole: SessionRole?
 
     var waitingPlace: WaitingPlace? {
         session.waitingOn.map { WaitingPlace($0, runtimeKind: session.runtimeKind, lifecycle: readOnly ? SessionLifecycle() : capabilities.lifecycle) }
@@ -2036,9 +2038,14 @@ struct AgenthailEvent: Decodable {
     let timestamp: String
     let entityId: String?
     let snapshot: SnapshotRequest?
+    var source: String? = nil
 
     private enum CodingKeys: String, CodingKey {
         case id, type, timestamp, entityId, data
+    }
+
+    private struct EventSource: Decodable {
+        let source: String?
     }
 
     init(id: UInt64, type: String, timestamp: String, entityId: String?, snapshot: SnapshotRequest? = nil) {
@@ -2056,6 +2063,7 @@ struct AgenthailEvent: Decodable {
         timestamp = try container.decode(String.self, forKey: .timestamp)
         entityId = try container.decodeIfPresent(String.self, forKey: .entityId)
         snapshot = type == "ui.snapshot.requested" ? try container.decodeIfPresent(SnapshotRequest.self, forKey: .data) : nil
+        source = type == "settings.updated" ? (try? container.decodeIfPresent(EventSource.self, forKey: .data))?.source : nil
     }
 }
 

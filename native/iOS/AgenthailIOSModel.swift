@@ -25,6 +25,7 @@ struct PairedHostStatus: Identifiable, Equatable {
 final class AgenthailIOSModel: HostConnectionDelegate {
     static let voiceHostKey = "voiceHost"
     @ObservationIgnored var hostRefreshWait: Duration = HostRefresh.wait
+    @ObservationIgnored let agentRoles = AgentRolesStore()
 
     private(set) var snapshot: DashboardSnapshot? {
         didSet {

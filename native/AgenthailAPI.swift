@@ -653,6 +653,14 @@ final class AgenthailAPI: @unchecked Sendable {
         try await post("/api/v1/claude/compact-settings", body: body)
     }
 
+    func agentRoles() async throws -> AgentRolesView {
+        try await get("/api/v1/agents")
+    }
+
+    func changeAgentRole(_ request: AgentRoleRequest) async throws -> AgentRolesView {
+        try await requestEncoded("/api/v1/agents", method: "POST", body: request)
+    }
+
     func pairingStatus(id: String) async throws -> PairingStatusResponse {
         var components = URLComponents()
         components.path = "/api/v1/pairings"
