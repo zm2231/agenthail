@@ -43,32 +43,59 @@ func spawnRefusal(caller *mcpCaller, kind surface.SurfaceKind) *mcpRefusal {
 	return nil
 }
 
-func (d *Daemon) mcpCreateScope(caller *mcpCaller, kind surface.SurfaceKind, mode, rawCwd string) (childStart, string, error) {
+func (d *Daemon) mcpCreateScope(caller *mcpCaller, kind surface.SurfaceKind, mode, rawCwd string) (childStart, string, string, error) {
 	if refusal := spawnRefusal(caller, kind); refusal != nil {
-		return childStart{}, "", refusal.about("new:" + string(kind))
+		return childStart{}, "", "", refusal.about("new:" + string(kind))
 	}
 	if !filepath.IsAbs(strings.TrimSpace(rawCwd)) {
-		return childStart{}, "", refuse("invalid", "cwd must be an absolute folder.")
+		return childStart{}, "", "", refuse("invalid", "cwd must be an absolute folder.")
 	}
 	cwd, err := projectresolve.CanonicalCatalogPath(strings.TrimSpace(rawCwd))
 	if err != nil {
-		return childStart{}, "", refuse("invalid", fmt.Sprintf("cwd: %s", err))
+		return childStart{}, "", "", refuse("invalid", fmt.Sprintf("cwd: %s", err))
 	}
 	ceiling, err := parseCeiling(caller.ceiling)
 	if err != nil {
-		return childStart{}, "", err
+		return childStart{}, "", "", err
 	}
+	about := "new:" + string(kind) + ":" + cwd
 	start, err := childCeiling(ceiling, kind, strings.TrimSpace(mode), cwd)
 	if refusal, ok := err.(*mcpRefusal); ok {
-		return childStart{}, "", refusal.about("new:" + string(kind) + ":" + cwd)
+		return childStart{}, "", "", refusal.about(about)
 	}
 	if err != nil {
-		return childStart{}, "", err
+		return childStart{}, "", "", err
+	}
+	notice, err := fullModeNotice(caller, start, kind, "", cwd, about)
+	if err != nil {
+		return childStart{}, "", "", err
 	}
 	if err := d.depthRefusal(caller); err != nil {
-		return childStart{}, "", err
+		return childStart{}, "", "", err
 	}
-	return start, cwd, nil
+	return start, cwd, notice, nil
+}
+
+// A session the person started outside Agenthail has no ceiling, so a child it starts in the highest mode is the person's to hear about.
+func fullModeNotice(caller *mcpCaller, start childStart, kind surface.SurfaceKind, host, cwd, about string) (string, error) {
+	if !caller.outside || start.ceiling.Permission != "full" {
+		return "", nil
+	}
+	mode := start.permissionMode
+	if kind == surface.KindCodex {
+		mode = start.approval
+	}
+	where := cwd
+	if host != "" {
+		where = cwd + " on " + host
+	}
+	switch caller.role.Decision("session-create-full") {
+	case agentroles.Ask:
+		return "", scopeRefusal(about, "full_mode", fmt.Sprintf("Starting a session in %s mode is for the person here; start it in a lower mode, or ask the person to start it.", mode))
+	case agentroles.Notify:
+		return fmt.Sprintf("Started a %s session in %s mode in %s", kind, mode, where), nil
+	}
+	return "", nil
 }
 
 func (d *Daemon) depthRefusal(caller *mcpCaller) error {
@@ -121,7 +148,7 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 		if input.Task {
 			return nil, refuse("invalid", "A session on another computer cannot be a task.")
 		}
-		start, cwd, decision, err := d.remoteCreateScope(caller, host, kind, input.PermissionMode, input.Cwd)
+		start, cwd, notices, err := d.remoteCreateScope(caller, host, kind, input.PermissionMode, input.Cwd)
 		if err != nil {
 			return nil, err
 		}
@@ -130,12 +157,12 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 			PermissionMode: start.permissionMode, Approval: start.approval, Alias: strings.TrimSpace(input.Alias), Ceiling: start.ceiling.encode(),
 			Isolation: isolation, Worktree: strings.TrimSpace(input.Branch), Base: strings.TrimSpace(input.Base),
 		})
-		if err == nil && decision == agentroles.Notify {
-			d.notifyAgentAction(ctx, caller.session.ID, remoteCreateWords(kind, host, cwd))
+		for _, notice := range notices {
+			d.noticeAfter(ctx, caller, notice, err)
 		}
 		return result, err
 	}
-	start, cwd, err := d.mcpCreateScope(caller, kind, input.PermissionMode, input.Cwd)
+	start, cwd, notice, err := d.mcpCreateScope(caller, kind, input.PermissionMode, input.Cwd)
 	if err != nil {
 		return nil, err
 	}
@@ -144,53 +171,66 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 	if err := d.mcpChildrenRefusal(caller); err != nil {
 		return nil, err
 	}
-	return d.mcpAction(ctx, caller, "agenthail_create", input.mcpWrite, dashboardActionRequest{
+	result, err := d.mcpAction(ctx, caller, "agenthail_create", input.mcpWrite, dashboardActionRequest{
 		Action: "session-create", Surface: string(kind), Cwd: cwd, Message: input.Message, Model: strings.TrimSpace(input.Model),
 		PermissionMode: start.permissionMode, Approval: start.approval, Alias: strings.TrimSpace(input.Alias),
 		SourceSessionID: caller.session.ID, Ceiling: start.ceiling.encode(), Task: input.Task,
 		Isolation: isolation, Worktree: strings.TrimSpace(input.Branch), Base: strings.TrimSpace(input.Base),
 	})
+	d.noticeAfter(ctx, caller, notice, err)
+	return result, err
 }
 
 // remoteCreateScope bounds a session an agent starts on a paired computer:
 // the caller's permission ceiling holds there, and the folder it starts in
 // is its only root, since the caller's folders are on this computer.
-func (d *Daemon) remoteCreateScope(caller *mcpCaller, host string, kind surface.SurfaceKind, mode, rawCwd string) (childStart, string, string, error) {
+func (d *Daemon) remoteCreateScope(caller *mcpCaller, host string, kind surface.SurfaceKind, mode, rawCwd string) (childStart, string, []string, error) {
 	about := "new:" + string(kind) + "@" + host
 	if refusal := spawnRefusal(caller, kind); refusal != nil {
-		return childStart{}, "", "", refusal.about(about)
+		return childStart{}, "", nil, refusal.about(about)
 	}
 	if kind != surface.KindClaude && kind != surface.KindCodex {
-		return childStart{}, "", "", refuse("invalid", "surface is claude or codex.")
+		return childStart{}, "", nil, refuse("invalid", "surface is claude or codex.")
 	}
 	if _, paired := d.pairedHost(host); !paired {
-		return childStart{}, "", "", refuse("invalid", fmt.Sprintf("No paired computer is named %q.", host))
+		return childStart{}, "", nil, refuse("invalid", fmt.Sprintf("No paired computer is named %q.", host))
 	}
 	decision := caller.role.Decision("session-create-remote")
 	if decision == agentroles.Ask && !caller.has("control.all") {
-		return childStart{}, "", "", scopeRefusal(about, "other_host", "Starting a session on another computer is for the person here; ask your coordinator or the person to start it.")
+		return childStart{}, "", nil, scopeRefusal(about, "other_host", "Starting a session on another computer is for the person here; ask your coordinator or the person to start it.")
 	}
 	cwd := strings.TrimSpace(rawCwd)
 	if !strings.HasPrefix(cwd, "/") {
-		return childStart{}, "", "", refuse("invalid", "cwd must be an absolute folder on that computer.")
+		return childStart{}, "", nil, refuse("invalid", "cwd must be an absolute folder on that computer.")
 	}
 	cwd = path.Clean(cwd)
 	ceiling, err := parseCeiling(caller.ceiling)
 	if err != nil {
-		return childStart{}, "", "", err
+		return childStart{}, "", nil, err
 	}
 	ceiling.Roots = nil
 	start, err := childCeiling(ceiling, kind, strings.TrimSpace(mode), cwd)
 	if refusal, ok := err.(*mcpRefusal); ok {
-		return childStart{}, "", "", refusal.about(about)
+		return childStart{}, "", nil, refusal.about(about)
 	}
 	if err != nil {
-		return childStart{}, "", "", err
+		return childStart{}, "", nil, err
+	}
+	full, err := fullModeNotice(caller, start, kind, host, cwd, about)
+	if err != nil {
+		return childStart{}, "", nil, err
 	}
 	if err := d.depthRefusal(caller); err != nil {
-		return childStart{}, "", "", err
+		return childStart{}, "", nil, err
 	}
-	return start, cwd, decision, nil
+	var notices []string
+	if decision == agentroles.Notify {
+		notices = append(notices, remoteCreateWords(kind, host, cwd))
+	}
+	if full != "" {
+		notices = append(notices, full)
+	}
+	return start, cwd, notices, nil
 }
 
 func remoteCreateWords(kind surface.SurfaceKind, host, cwd string) string {
@@ -212,7 +252,7 @@ func (d *Daemon) agentCreateOnHost(ctx context.Context, caller *mcpCaller, host 
 	if kind == surface.KindCodex {
 		mode = asked.Approval
 	}
-	start, cwd, decision, err := d.remoteCreateScope(caller, host, kind, mode, asked.Cwd)
+	start, cwd, notices, err := d.remoteCreateScope(caller, host, kind, mode, asked.Cwd)
 	if err != nil {
 		return actionReply{}, err
 	}
@@ -227,8 +267,10 @@ func (d *Daemon) agentCreateOnHost(ctx context.Context, caller *mcpCaller, host 
 		return actionReply{}, err
 	}
 	reply := d.performAction(ctx, sessionPrincipal(caller.session.ID), actionFormatAPIv1, body, "cli-create-"+uuid.NewString())
-	if decision == agentroles.Notify && reply.Status >= 200 && reply.Status < 300 {
-		d.notifyAgentAction(ctx, caller.session.ID, remoteCreateWords(kind, host, cwd))
+	if reply.Status >= 200 && reply.Status < 300 {
+		for _, notice := range notices {
+			d.notifyAgentAction(ctx, caller.session.ID, notice)
+		}
 	}
 	return reply, nil
 }

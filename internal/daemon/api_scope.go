@@ -98,7 +98,7 @@ func (d *Daemon) agentCreate(ctx context.Context, caller *mcpCaller, payload jso
 	if kind == surface.KindCodex {
 		mode = request.Approval
 	}
-	start, cwd, err := d.mcpCreateScope(caller, kind, mode, request.Cwd)
+	start, cwd, notice, err := d.mcpCreateScope(caller, kind, mode, request.Cwd)
 	if err != nil {
 		return actionReply{}, err
 	}
@@ -113,7 +113,11 @@ func (d *Daemon) agentCreate(ctx context.Context, caller *mcpCaller, payload jso
 	if err != nil {
 		return actionReply{}, err
 	}
-	return d.performAction(ctx, sessionPrincipal(caller.session.ID), actionFormatAPIv1, body, "cli-create-"+uuid.NewString()), nil
+	reply := d.performAction(ctx, sessionPrincipal(caller.session.ID), actionFormatAPIv1, body, "cli-create-"+uuid.NewString())
+	if notice != "" && reply.Status >= 200 && reply.Status < 300 {
+		d.notifyAgentAction(ctx, caller.session.ID, notice)
+	}
+	return reply, nil
 }
 
 func (d *Daemon) agentConfigRoot(caller *mcpCaller, choice string) (string, error) {

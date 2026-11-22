@@ -204,7 +204,7 @@ Background service:
   debug cpu <dir> [seconds]     Sample the daemon's CPU for [seconds] (default 30, at most 300) and write the profile to <dir>
   mcp stdio                     Serve the Agenthail tools to the Claude session that runs it, as that session
   mcp install                   Give every Claude session on this machine the Agenthail tools, in each Claude config root
-  mcp uninstall|status
+  mcp uninstall|status          The daemon puts the server back while it runs; claudeConfigDirs "mcp": false or codexMCP false keeps it out
 
 Claude hooks (answer terminal Claude prompts from Agenthail; tell each session who it is):
   hooks install                 Add Agenthail's hooks to every Claude config root
