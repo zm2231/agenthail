@@ -49,7 +49,8 @@ func snoozeHolds(row dashboardSession, now time.Time) bool {
 		if !rowRunning(row) {
 			return false
 		}
-		return row.Activity == nil || row.Activity.BusySince.IsZero() || !row.Activity.BusySince.Truncate(time.Millisecond).After(snooze.SnoozedAt)
+		start := row.Activity.TurnStart()
+		return start.IsZero() || !start.Truncate(time.Millisecond).After(snooze.SnoozedAt)
 	}
 	return false
 }

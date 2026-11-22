@@ -467,3 +467,42 @@ func TestAPromptHeldAfterARestartDoesNotReuseAnEarlierRequestID(t *testing.T) {
 		t.Fatalf("the daemon that held the prompt after a restart reused request %s, which clients cache by", ids[0])
 	}
 }
+
+func TestEachHeldPromptKeepsItsOwnStartInTheSessionsWait(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home := t.TempDir()
+	writeClaudeRecord(t, home, map[string]any{"kind": "interactive", "entrypoint": "cli", "status": "waiting", "waitingFor": "input needed", "statusUpdatedAt": time.Now().UnixMilli()})
+	claude := NewClaude(nil, home)
+	session := terminalSession(t)
+	_, cancelQuestion := holdInBackground(claude, ClaudePermissionPrompt{SessionID: "conversation", ToolName: "AskUserQuestion", ToolInput: json.RawMessage(pickAColor), PID: os.Getpid()})
+	defer cancelQuestion()
+	awaitRequests(t, claude, session)
+	time.Sleep(20 * time.Millisecond)
+	_, cancelCommand := holdInBackground(claude, ClaudePermissionPrompt{SessionID: "conversation", ToolName: "Bash", ToolInput: json.RawMessage(`{"command":"ls"}`), PID: os.Getpid()})
+	defer cancelCommand()
+	var requests []surface.Request
+	deadline := time.Now().Add(5 * time.Second)
+	for len(requests) < 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("the second prompt was never held")
+		}
+		time.Sleep(10 * time.Millisecond)
+		state, err := claude.Requests(context.Background(), session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		requests = state.Requests
+	}
+	if !requests[1].CreatedAt.After(requests[0].CreatedAt) {
+		t.Fatalf("the prompts started together: %s and %s", requests[0].CreatedAt, requests[1].CreatedAt)
+	}
+	waiting := claude.prompts.waiting("conversation")
+	if waiting == nil || len(waiting.Open) != 2 {
+		t.Fatalf("waiting=%+v", waiting)
+	}
+	for _, request := range requests {
+		if since := waiting.OpenSince[request.ID]; !since.Equal(request.CreatedAt) {
+			t.Errorf("prompt %s waits since %s, want %s", request.ID, since, request.CreatedAt)
+		}
+	}
+}

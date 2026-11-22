@@ -7,7 +7,7 @@ import (
 const layout = "2006-01-02T15:04:05.000000000Z"
 
 var fields = map[string]struct{}{
-	"at": {}, "askedAt": {}, "archivedAt": {}, "busySince": {}, "capturedAt": {}, "changedAt": {}, "completedAt": {}, "connectedAt": {}, "createdAt": {}, "deliveredAt": {}, "expiresAt": {}, "fetchedAt": {}, "lastActive": {}, "lastCompactedAt": {}, "lastFiredAt": {}, "lastProgressAt": {}, "lastSeenAt": {}, "observedAt": {}, "queuedAt": {}, "refusedAt": {}, "registeredAt": {}, "rekeyedAt": {}, "resolvedAt": {}, "resetsAt": {}, "revokedAt": {}, "setAt": {}, "settledAt": {}, "since": {}, "startedAt": {}, "timestamp": {}, "until": {}, "updatedAt": {},
+	"at": {}, "askedAt": {}, "archivedAt": {}, "busySince": {}, "capturedAt": {}, "changedAt": {}, "completedAt": {}, "connectedAt": {}, "createdAt": {}, "deliveredAt": {}, "expiresAt": {}, "fetchedAt": {}, "lastActive": {}, "lastCompactedAt": {}, "lastFiredAt": {}, "lastProgressAt": {}, "lastSeenAt": {}, "observedAt": {}, "queuedAt": {}, "refusedAt": {}, "registeredAt": {}, "rekeyedAt": {}, "resolvedAt": {}, "resetsAt": {}, "revokedAt": {}, "setAt": {}, "settledAt": {}, "since": {}, "startedAt": {}, "timestamp": {}, "turnStartedAt": {}, "until": {}, "updatedAt": {},
 	"archived_at": {}, "captured_at": {}, "completed_at": {}, "created_at": {}, "delivered_at": {}, "expires_at": {}, "last_seen_at": {}, "observed_at": {}, "queued_at": {}, "resets_at": {}, "revoked_at": {}, "timestamp_at": {}, "ts": {}, "updated_at": {},
 }
 

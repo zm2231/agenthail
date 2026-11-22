@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -24,10 +25,12 @@ func (c *Claude) hostWaiting(ctx context.Context, sess *surface.Session) (*surfa
 	}
 	oldest := listed.Requests[0]
 	open := make([]string, 0, len(listed.Requests))
+	since := make(map[string]time.Time, len(listed.Requests))
 	for _, request := range listed.Requests {
 		open = append(open, request.RequestID)
+		since[request.RequestID] = request.CreatedAt.UTC()
 	}
-	return &surface.Waiting{Kind: claudeRequestKind(oldest.Kind), ID: oldest.RequestID, Since: oldest.CreatedAt.UTC(), Answerable: true, Open: open}, true
+	return &surface.Waiting{Kind: claudeRequestKind(oldest.Kind), ID: oldest.RequestID, Since: oldest.CreatedAt.UTC(), Answerable: true, Open: open, OpenSince: since}, true
 }
 
 // Requests lists the open requests of a session the host runs, oldest first,

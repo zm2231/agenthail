@@ -446,16 +446,11 @@ func (p *claudePrompts) any(sessionID string) bool {
 func (p *claudePrompts) waiting(sessionID string) *surface.Waiting {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	open := p.open[sessionID]
-	if len(open) == 0 {
-		return nil
+	requests := make([]surface.Request, 0, len(p.open[sessionID]))
+	for _, held := range p.open[sessionID] {
+		requests = append(requests, held.request)
 	}
-	oldest := open[0].request
-	ids := make([]string, 0, len(open))
-	for _, held := range open {
-		ids = append(ids, held.request.ID)
-	}
-	return &surface.Waiting{Kind: oldest.Kind, ID: oldest.ID, Since: oldest.CreatedAt, Answerable: true, Open: ids}
+	return surface.OpenRequestsWaiting(requests)
 }
 
 func (p *claudePrompts) requests(sessionID string) []surface.Request {
