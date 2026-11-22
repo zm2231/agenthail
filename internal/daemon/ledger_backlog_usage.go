@@ -8,17 +8,18 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudepick"
+	"github.com/zm2231/agenthail/internal/daemon/usage"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
 func (d *Daemon) ledgerUsageReader(ctx context.Context, now time.Time) ledger.UsageReader {
-	local := sync.OnceValue(func() []usageSet { return d.localUsageSets(ctx, now) })
-	remote := sync.OnceValue(func() []usageSet { return d.remoteUsageSets(ctx) })
+	local := sync.OnceValue(func() []usage.Set { return d.localUsageSets(ctx, now) })
+	remote := sync.OnceValue(func() []usage.Set { return d.remoteUsageSets(ctx) })
 	return usageReaderOver(local, remote, d.localHost().ID, now)
 }
 
-func parkUsageSet(sets []usageSet, target ledger.ParkUsageTarget) (usageSet, bool) {
+func parkUsageSet(sets []usage.Set, target ledger.ParkUsageTarget) (usage.Set, bool) {
 	for _, set := range sets {
 		if set.Provider != target.Provider || set.Problem != "" || (target.HostID != "" && set.HostID != target.HostID) {
 			continue
@@ -28,15 +29,15 @@ func parkUsageSet(sets []usageSet, target ledger.ParkUsageTarget) (usageSet, boo
 		}
 		return set, true
 	}
-	return usageSet{}, false
+	return usage.Set{}, false
 }
 
-func parkHeadroom(sets []usageSet, target ledger.ParkUsageTarget, now time.Time) ledger.Headroom {
+func parkHeadroom(sets []usage.Set, target ledger.ParkUsageTarget, now time.Time) ledger.Headroom {
 	set, ok := parkUsageSet(sets, target)
-	if !ok || slices.ContainsFunc(set.Meters, func(m usageMeter) bool { return m.Aged }) {
+	if !ok || slices.ContainsFunc(set.Meters, func(m usage.Meter) bool { return m.Aged }) {
 		return ledger.Headroom{}
 	}
-	read, room, frees := claudepick.Headroom(limitMoveCandidates([]usageSet{set}, now)[0])
+	read, room, frees := claudepick.Headroom(limitMoveCandidates([]usage.Set{set}, now)[0])
 	return ledger.Headroom{Known: read, Room: room, Frees: frees}
 }
 
@@ -52,10 +53,10 @@ func (d *Daemon) stampPark(ctx context.Context, path string, body []byte, now ti
 		stop, ok, err := d.Registry.LimitResumeFor(session)
 		return stop, ok && err == nil
 	}
-	return stampUsageParkFrom(body, d.localHost().ID, func() []usageSet { return d.localUsageSets(ctx, now) }, limited, now)
+	return stampUsageParkFrom(body, d.localHost().ID, func() []usage.Set { return d.localUsageSets(ctx, now) }, limited, now)
 }
 
-func stampUsageParkFrom(body []byte, here string, local func() []usageSet, limited func(session string) (registry.LimitResume, bool), now time.Time) []byte {
+func stampUsageParkFrom(body []byte, here string, local func() []usage.Set, limited func(session string) (registry.LimitResume, bool), now time.Time) []byte {
 	var req ledger.WorkRequest
 	if json.Unmarshal(body, &req) != nil || req.Action != ledger.WorkPark || req.Park == nil || req.Park.Kind != ledger.ParkUsage || req.Park.Usage == nil {
 		return body
@@ -84,7 +85,7 @@ func stampUsageParkFrom(body []byte, here string, local func() []usageSet, limit
 		target.Root = set.Name
 	}
 	if ok && target.ResetsAt.IsZero() {
-		if room := parkHeadroom([]usageSet{set}, target, now); room.Known && !room.Room {
+		if room := parkHeadroom([]usage.Set{set}, target, now); room.Known && !room.Room {
 			target.ResetsAt = room.Frees
 		}
 	}

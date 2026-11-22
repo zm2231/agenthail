@@ -62,8 +62,8 @@ func awaitProxyReading(t *testing.T, d *Daemon) {
 	}
 	for _, config := range configs {
 		testkit.Eventually(t, "the "+config.Name+" proxy's accounts", 10*time.Second, func() bool {
-			reading := d.proxyUsage.cached(config, time.Now())
-			return reading != nil && reading.err == nil
+			reading := d.proxyUsage.Cached(config, time.Now())
+			return reading != nil && reading.Err == nil
 		})
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/claudepick"
+	"github.com/zm2231/agenthail/internal/daemon/usage"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 	"github.com/zm2231/agenthail/internal/signin"
@@ -83,7 +84,7 @@ func readClaudeUsage(t *testing.T, d *Daemon) {
 	d.claudeCachedUsageSets(roots, time.Now())
 	testkit.Eventually(t, "the usage readings", 10*time.Second, func() bool {
 		for _, root := range roots {
-			if root.Proxy == "" && d.claudeUsage.entry(root.Root).last.Load() == nil {
+			if root.Proxy == "" && !d.claudeUsage.HasReading(root.Root) {
 				return false
 			}
 		}
@@ -131,12 +132,12 @@ func TestAStoppedSessionIsOfferedTheAccountWithRoomAndMovesThere(t *testing.T) {
 
 func TestAModelScopedWeekNeverHidesAFullWeekFromTheOffer(t *testing.T) {
 	now := time.Now()
-	meter := func(kind string, percent float64) usageMeter {
-		return usageMeter{Provider: "claude", Kind: kind, Percent: percent, ResetsAt: now.Add(time.Hour)}
+	meter := func(kind string, percent float64) usage.Meter {
+		return usage.Meter{Provider: "claude", Kind: kind, Percent: percent, ResetsAt: now.Add(time.Hour)}
 	}
-	sets := []usageSet{
-		{Provider: "claude", Name: "default", Root: "/home/dev/.claude", Primary: true, Login: surface.ClaudeLoginClaudeAI, Meters: []usageMeter{meter("session", 100)}},
-		{Provider: "claude", Name: "team", Root: "/home/dev/.team/.claude", Login: surface.ClaudeLoginClaudeAI, Meters: []usageMeter{meter("session", 18), meter("weekly_all", 92), meter("weekly_scoped", 40)}},
+	sets := []usage.Set{
+		{Provider: "claude", Name: "default", Root: "/home/dev/.claude", Primary: true, Login: surface.ClaudeLoginClaudeAI, Meters: []usage.Meter{meter("session", 100)}},
+		{Provider: "claude", Name: "team", Root: "/home/dev/.team/.claude", Login: surface.ClaudeLoginClaudeAI, Meters: []usage.Meter{meter("session", 18), meter("weekly_all", 92), meter("weekly_scoped", 40)}},
 	}
 	candidates := limitMoveCandidates(sets, now)
 	if pick, ok := claudepick.MoveTarget(candidates, "/home/dev/.claude"); ok {

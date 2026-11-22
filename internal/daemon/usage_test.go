@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/usage"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/browsercookie"
@@ -16,7 +17,7 @@ import (
 )
 
 type usageBody struct {
-	Sets []usageSet `json:"sets"`
+	Sets []usage.Set `json:"sets"`
 }
 
 func TestUsageGivesEachClaudeAccountItsOwnSetPrimaryFirst(t *testing.T) {

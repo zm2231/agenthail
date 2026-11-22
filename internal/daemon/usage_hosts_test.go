@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/usage"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -21,7 +22,7 @@ func TestUsageIncludesEveryConnectedHostAndSkipsCodexWhenItIsDown(t *testing.T) 
 	remote.fake.usage = &surface.Usage{FetchedAt: fetched, Limits: []surface.UsageWindow{{Kind: "weekly", Percent: 19, ResetsAt: fetched.Add(72 * time.Hour)}}}
 	remote.fake.mu.Unlock()
 
-	read := func(node *federationNode, path string) []usageSet {
+	read := func(node *federationNode, path string) []usage.Set {
 		response := node.request(t, http.MethodGet, path, nil)
 		var body usageBody
 		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
@@ -29,7 +30,7 @@ func TestUsageIncludesEveryConnectedHostAndSkipsCodexWhenItIsDown(t *testing.T) 
 		}
 		return body.Sets
 	}
-	remoteCodex := func(sets []usageSet) *usageSet {
+	remoteCodex := func(sets []usage.Set) *usage.Set {
 		for i, set := range sets {
 			if set.HostID == record.ID && set.Provider == "codex" {
 				return &sets[i]

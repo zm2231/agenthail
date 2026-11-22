@@ -96,7 +96,7 @@ func (f *preLimitFixture) readUsage() {
 	f.t.Helper()
 	for _, root := range f.d.currentClaudeConfigRoots() {
 		if root.Proxy == "" {
-			f.d.claudeUsage.read(context.Background(), f.fake, root, f.now)
+			f.d.claudeUsage.Read(context.Background(), f.fake, root, f.now)
 		}
 	}
 }

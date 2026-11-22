@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/usage"
 	"github.com/zm2231/agenthail/internal/proxyacct"
 	"github.com/zm2231/agenthail/internal/proxyacct/proxyaccttest"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -138,12 +139,10 @@ func TestARefusedKeySaysHowToFixIt(t *testing.T) {
 }
 
 func TestASlowKeyCommandGetsItsWholeTimeToRead(t *testing.T) {
-	request, keyRead := proxyRequestTimeout, proxyKeyReadLimit
-	proxyRequestTimeout, proxyKeyReadLimit = 4*time.Second, 4*time.Second
-	t.Cleanup(func() { proxyRequestTimeout, proxyKeyReadLimit = request, keyRead })
 	// Key plus accounts read take 6 s: inside their own 8 s, over a shared 4 s.
 	slow := `sleep 3; printf '%s\n' "$0"`
 	f := newProxyUsageFixture(t, `,"management":{"command":["/bin/sh","-c","`+strings.ReplaceAll(slow, `"`, `\"`)+`","`+proxyaccttest.Key+`"]}`)
+	f.daemon.proxyUsage.RequestTimeout, f.daemon.proxyUsage.KeyReadLimit = 4*time.Second, 4*time.Second
 	f.proxy.SlowHealth.Store(int64(1500 * time.Millisecond))
 	f.proxy.SlowRead.Store(int64(3 * time.Second))
 	body, raw := f.usage(t)
@@ -154,13 +153,13 @@ func TestASlowKeyCommandGetsItsWholeTimeToRead(t *testing.T) {
 }
 
 func TestAProxySharedByHostsShowsOnceFromAHostThatCanReadIt(t *testing.T) {
-	shared := &usageProxy{Name: "shared", ID: "http://proxy.example:8317"}
-	sets := mergeProxySets([]usageSet{
+	shared := &usage.Proxy{Name: "shared", ID: "http://proxy.example:8317"}
+	sets := usage.MergeProxySets([]usage.Set{
 		{Host: "laptop", Provider: "claude", Name: "default"},
 		{Host: "laptop", Provider: "proxy", Name: "shared", Proxy: shared, ProxyProblem: string(proxyacct.KeyMissing), Problem: "no key"},
-		{Host: "server", Provider: "proxy", Name: "shared", Proxy: shared, Accounts: []usageAccount{{Label: "dev@example.com"}}},
-		{Host: "server", Provider: "proxy", Name: "local", Proxy: &usageProxy{Name: "local", ID: "http://loopback:8317@server"}, ProxyProblem: string(proxyacct.KeyMissing)},
-		{Host: "other", Provider: "proxy", Name: "local", Proxy: &usageProxy{Name: "local", ID: "http://loopback:8317@other"}, ProxyProblem: string(proxyacct.KeyMissing)},
+		{Host: "server", Provider: "proxy", Name: "shared", Proxy: shared, Accounts: []usage.Account{{Label: "dev@example.com"}}},
+		{Host: "server", Provider: "proxy", Name: "local", Proxy: &usage.Proxy{Name: "local", ID: "http://loopback:8317@server"}, ProxyProblem: string(proxyacct.KeyMissing)},
+		{Host: "other", Provider: "proxy", Name: "local", Proxy: &usage.Proxy{Name: "local", ID: "http://loopback:8317@other"}, ProxyProblem: string(proxyacct.KeyMissing)},
 	})
 	if len(sets) != 4 || sets[1].Host != "server" || len(sets[1].Accounts) != 1 || sets[1].Problem != "" {
 		t.Fatalf("sets=%+v", sets)

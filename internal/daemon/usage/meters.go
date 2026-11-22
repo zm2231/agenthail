@@ -1,4 +1,4 @@
-package daemon
+package usage
 
 import (
 	"strconv"
@@ -11,7 +11,7 @@ import (
 // Codex rollouts only update while Codex runs, so an older reading shows its age.
 const usageAgedAfter = time.Hour
 
-type usageMeter struct {
+type Meter struct {
 	Provider string    `json:"provider"`
 	Kind     string    `json:"kind"`
 	Label    string    `json:"label"`
@@ -25,11 +25,11 @@ type usageMeter struct {
 	Ceiling  float64   `json:"ceiling,omitempty"`
 }
 
-func usageMeters(provider string, usage *surface.Usage, now time.Time) []usageMeter {
+func Meters(provider string, usage *surface.Usage, now time.Time) []Meter {
 	if usage == nil {
 		return nil
 	}
-	var meters []usageMeter
+	var meters []Meter
 	for _, limit := range usage.Limits {
 		if limit.Kind == "weekly_scoped" && limit.Percent <= 0 {
 			continue
@@ -41,7 +41,7 @@ func usageMeters(provider string, usage *surface.Usage, now time.Time) []usageMe
 		if known && now.Sub(usage.FetchedAt) > window {
 			continue
 		}
-		meter := usageMeter{
+		meter := Meter{
 			Provider: provider,
 			Kind:     limit.Kind,
 			Label:    usageLabel(provider, limit.Kind, limit.Scope),

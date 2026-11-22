@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/usage"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -46,10 +47,6 @@ type claudeConfigRootReader interface {
 	ClaudeConfigRoot(ctx context.Context, path string) (surface.ClaudeConfigRoot, error)
 }
 
-// claudeRootUsageTimeout bounds one root's live usage read, which a
-// new-session form fills in after it has shown the roots.
-const claudeRootUsageTimeout = 5 * time.Second
-
 // liveClaudeConfigRoots adds each root's sign-in profile and current usage,
 // which only the Claude surface can read from claude.ai.
 func (d *Daemon) liveClaudeConfigRoots(ctx context.Context) []surface.ClaudeConfigRoot {
@@ -89,7 +86,7 @@ func (d *Daemon) claudeRootUsageHandler(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusServiceUnavailable, "claude_unavailable", "Claude is not available on this host.")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), claudeRootUsageTimeout)
+	ctx, cancel := context.WithTimeout(r.Context(), usage.ClaudeRootTimeout)
 	defer cancel()
 	root, err := reader.ClaudeConfigRoot(ctx, path)
 	if err != nil {

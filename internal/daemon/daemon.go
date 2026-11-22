@@ -11,10 +11,13 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/zm2231/agenthail/internal/browserhost"
 	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/daemon/prwatch"
+	"github.com/zm2231/agenthail/internal/daemon/usage"
 	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/filewake"
 	"github.com/zm2231/agenthail/internal/github"
@@ -25,7 +28,6 @@ import (
 	"github.com/zm2231/agenthail/internal/simhost"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/uploads"
-	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -54,8 +56,8 @@ type Daemon struct {
 	claudeConfigRootsMu  sync.Mutex
 	claudeConfigRootsAt  time.Time
 	claudeConfigRootList []surface.ClaudeConfigRoot
-	claudeUsage          claudeUsageCache
-	proxyUsage           proxyUsageCache
+	claudeUsage          usage.ClaudeCache
+	proxyUsage           usage.ProxyCache
 	coordinatorMu        sync.Mutex
 	pollInterval         time.Duration
 	Surfaces             []surface.Surface

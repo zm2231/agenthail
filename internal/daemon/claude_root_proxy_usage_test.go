@@ -135,15 +135,15 @@ func TestACachedProxyReadNeverWaitsOnTheProxy(t *testing.T) {
 	if err != nil || len(configs) != 1 {
 		t.Fatalf("configs=%+v err=%v", configs, err)
 	}
-	if reading := f.daemon.proxyUsage.cached(configs[0], time.Now()); reading != nil {
+	if reading := f.daemon.proxyUsage.Cached(configs[0], time.Now()); reading != nil {
 		t.Fatalf("with no reading yet the reader goes on without one: %+v", reading)
 	}
 	deadline := time.Now().Add(5 * time.Second)
-	for f.daemon.proxyUsage.cached(configs[0], time.Now()) == nil && time.Now().Before(deadline) {
+	for f.daemon.proxyUsage.Cached(configs[0], time.Now()) == nil && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	reading := f.daemon.proxyUsage.cached(configs[0], time.Now())
-	if reading == nil || reading.err != nil || len(reading.accounts) != 2 {
+	reading := f.daemon.proxyUsage.Cached(configs[0], time.Now())
+	if reading == nil || reading.Err != nil || len(reading.Accounts) != 2 {
 		t.Fatalf("the background read fills the next reader: %+v", reading)
 	}
 	if attempts := f.proxy.Attempts.Load(); attempts != 1 {

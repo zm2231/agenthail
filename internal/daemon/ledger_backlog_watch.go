@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon/usage"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -25,8 +26,8 @@ const (
 type backlogWatch struct {
 	mu     sync.Mutex
 	ready  map[string][]string
-	local  []usageSet
-	remote []usageSet
+	local  []usage.Set
+	remote []usage.Set
 	asks   map[string]map[string]askReport
 	sent   map[string]sentAsks
 }
@@ -41,7 +42,7 @@ type sentAsks struct {
 	at     time.Time
 }
 
-func usageReaderOver(local, remote func() []usageSet, here string, now time.Time) ledger.UsageReader {
+func usageReaderOver(local, remote func() []usage.Set, here string, now time.Time) ledger.UsageReader {
 	return func(target ledger.ParkUsageTarget) ledger.Headroom {
 		sets := remote
 		if target.HostID == "" || target.HostID == here {
@@ -55,7 +56,7 @@ func (d *Daemon) cachedLedgerUsage(now time.Time) ledger.UsageReader {
 	d.backlog.mu.Lock()
 	local, remote := d.backlog.local, d.backlog.remote
 	d.backlog.mu.Unlock()
-	return usageReaderOver(func() []usageSet { return local }, func() []usageSet { return remote }, d.localHost().ID, now)
+	return usageReaderOver(func() []usage.Set { return local }, func() []usage.Set { return remote }, d.localHost().ID, now)
 }
 
 func (d *Daemon) ledgerAskReader() ledger.AskReader {
@@ -188,8 +189,8 @@ func (d *Daemon) sweepLedgerBacklog(ctx context.Context, now time.Time) {
 		return
 	}
 	var read struct{ local, remote bool }
-	local := sync.OnceValue(func() []usageSet { read.local = true; return d.localUsageSets(ctx, now) })
-	remote := sync.OnceValue(func() []usageSet { read.remote = true; return d.remoteUsageSets(ctx) })
+	local := sync.OnceValue(func() []usage.Set { read.local = true; return d.localUsageSets(ctx, now) })
+	remote := sync.OnceValue(func() []usage.Set { read.remote = true; return d.remoteUsageSets(ctx) })
 	d.sendAskStates(ctx, store, keys, time.Now())
 	d.pruneAskStates(store, keys, now)
 	readings := ledger.Readings{Usage: usageReaderOver(local, remote, d.localHost().ID, now), Asks: d.ledgerAskReader()}
