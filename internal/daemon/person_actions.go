@@ -60,7 +60,7 @@ func (d *Daemon) personActionScope(ctx context.Context, caller *mcpCaller, actio
 		case agentroles.Allow:
 			return "", nil
 		case agentroles.Notify:
-			return d.agentNotices.hold(caller.session.ID, description, time.Now()), nil
+			return d.agentNotices.hold(caller.session.ID, agentAction{done: description}, time.Now()), nil
 		}
 	}
 	return "", &mcpRefusal{Code: "capability_missing", Message: description + " is for the person. To ask them to allow it, run the same command again with --ask-person --reason \"<why you need it>\"; their answer arrives as your next message.",

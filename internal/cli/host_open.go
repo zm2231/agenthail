@@ -25,7 +25,7 @@ func (a *App) throughDaemon(sess *surface.Session) (*remoteTarget, error) {
 	return &remoteTarget{ID: sess.ID, Surface: sess.Surface, Name: sess.Name, Alias: alias, Host: targets.Host{ID: host.ID, Name: host.Name}, Exact: true}, nil
 }
 
-func (a *App) sendThroughDaemon(ctx context.Context, sess *surface.Session, message string, options surface.SendOptions, scopeProjectID string, noQueue bool) (*delivery.Receipt, error) {
+func (a *App) sendThroughDaemon(ctx context.Context, sess *surface.Session, message string, options surface.SendOptions, noQueue bool) (*delivery.Receipt, error) {
 	target, err := a.throughDaemon(sess)
 	if err != nil {
 		return nil, err
@@ -40,9 +40,6 @@ func (a *App) sendThroughDaemon(ctx context.Context, sess *surface.Session, mess
 	}
 	if options.Model != "" {
 		payload["model"] = options.Model
-	}
-	if scopeProjectID != "" {
-		payload["scopeProjectId"] = scopeProjectID
 	}
 	if noQueue {
 		payload["noQueue"] = true

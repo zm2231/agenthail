@@ -29,6 +29,11 @@ type Receipt struct {
 	Notice     string                   `json:"notice,omitempty"`
 	// DeliveredAs is unset on a queued receipt: its route is chosen at delivery.
 	DeliveredAs surface.PersonMessage `json:"deliveredAs,omitempty"`
+	// NotSteered is set on every steer's receipt: true when this host
+	// delivered it as a message because the sender is not one it lets steer
+	// the session. A receipt without it is not a steer's, or came from a host
+	// too old to say.
+	NotSteered *bool `json:"notSteered,omitempty"`
 	// Started marks a conversation started to take the message.
 	Started bool `json:"started,omitempty"`
 	// MovedTo names the session that took a message the addressed session
@@ -334,9 +339,19 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 		receipt, err := d.DeliverWithOptions(ctx, adapter, session, message, "", options)
 		if err == nil {
 			receipt.Detail = fmt.Sprintf("Sent as a message, not a steer: only the person, the lead of %s or the session that started it can steer it.", d.display(session))
+			demoted := true
+			receipt.NotSteered = &demoted
 		}
 		return receipt, err
 	}
+	receipt, err := d.steerAllowed(ctx, adapter, session, message, author, target, sourceID, options)
+	if receipt != nil {
+		receipt.NotSteered = new(bool)
+	}
+	return receipt, err
+}
+
+func (d Dispatcher) steerAllowed(ctx context.Context, adapter surface.Surface, session *surface.Session, message string, author surface.Author, target, sourceID string, options surface.SendOptions) (*Receipt, error) {
 	d.RefreshRoute(ctx, adapter, session)
 	peer := surface.RouteFor(adapter, session, options.RouteAuthor()) == surface.RoutePeer
 	if d.Registry != nil {

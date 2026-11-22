@@ -136,7 +136,7 @@ func (a *App) sendAgentNotices() {
 	a.agentNotices = nil
 	for _, notice := range notices {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		if _, err := a.agentScope(ctx, daemonapi.ScopeRequest{Action: "notice", Notice: notice}); err != nil {
+		if _, err := a.agentScope(ctx, daemonapi.ScopeRequest{Action: "notice", Notice: notice, NotSteered: a.forwarded.notSteered, Ran: a.forwarded.ran}); err != nil {
 			fmt.Fprintf(os.Stderr, "agenthail: telling the person what this did failed: %s\n", err)
 		}
 		cancel()
@@ -202,9 +202,26 @@ func (a *App) agentScope(ctx context.Context, request daemonapi.ScopeRequest) (*
 		return nil, err
 	}
 	request.SessionID = caller
+	ask := a.askScope
 	if a.scopeOverride != nil {
-		return a.scopeOverride(request)
+		ask = func(_ context.Context, request daemonapi.ScopeRequest) (*daemonapi.ScopeReply, error) {
+			return a.scopeOverride(request)
+		}
 	}
+	reply, err := ask(ctx, request)
+	if err != nil || reply == nil {
+		return reply, err
+	}
+	if reply.Notice != "" {
+		a.agentNotices = append(a.agentNotices, reply.Notice)
+	}
+	if reply.ScopeProjectID != "" {
+		a.forwarded = forwardedAction{limits: reply}
+	}
+	return reply, nil
+}
+
+func (a *App) askScope(ctx context.Context, request daemonapi.ScopeRequest) (*daemonapi.ScopeReply, error) {
 	client, err := a.daemonAPI()
 	if err != nil {
 		return nil, errAgentScopeDaemonDown
@@ -222,9 +239,6 @@ func (a *App) agentScope(ctx context.Context, request daemonapi.ScopeRequest) (*
 		var reply daemonapi.ScopeReply
 		if err := json.Unmarshal(body, &reply); err != nil {
 			return nil, fmt.Errorf("read the daemon's scope answer: %w", err)
-		}
-		if reply.Notice != "" {
-			a.agentNotices = append(a.agentNotices, reply.Notice)
 		}
 		return &reply, nil
 	}

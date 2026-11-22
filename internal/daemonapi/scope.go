@@ -19,12 +19,19 @@ type ScopeRequest struct {
 	Reason         string          `json:"reason,omitempty"`
 	Create         json.RawMessage `json:"create,omitempty"`
 	Notice         string          `json:"notice,omitempty"`
+	// NotSteered is the notSteered of the reply to the action the notice is
+	// for, unset when that reply had none.
+	NotSteered *bool `json:"notSteered,omitempty"`
+	// Ran is the action the command ran on the scoped target, for a notice
+	// held before the command named it.
+	Ran string `json:"ran,omitempty"`
 }
 
 type ScopeReply struct {
 	TargetID       string `json:"targetId,omitempty"`
 	ProjectID      string `json:"projectId,omitempty"`
 	ScopeProjectID string `json:"scopeProjectId,omitempty"`
+	ScopeRank      string `json:"scopeRank,omitempty"`
 	AskID          string `json:"askId,omitempty"`
 	Notice         string `json:"notice,omitempty"`
 }

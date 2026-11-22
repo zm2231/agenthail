@@ -42,6 +42,9 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 	if daemonOwned, err := d.Registry.StartedByDaemon(session.ID); err != nil || daemonOwned && !daemonSessionAction(request.Action) {
 		return actionResult{}, actionFailed(http.StatusConflict, "daemon_session", fmt.Sprint(errors.Join(err, registry.ErrDaemonSession)))
 	}
+	if err := d.forwardedScope(*session, request); err != nil {
+		return actionResult{}, err
+	}
 	switch request.Action {
 	case "limit-resume", "limit-resume-cancel":
 		return d.doLimitResume(session.ID, request.Action == "limit-resume")
@@ -109,9 +112,6 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 			return actionResult{}, invalidRequest("this session cannot take attached files")
 		}
 		if err := checkMessageAuthor(d, request); err != nil {
-			return actionResult{}, err
-		}
-		if err := d.sendScope(*session, request.ScopeProjectID); err != nil {
 			return actionResult{}, err
 		}
 		if request.RelayHops != 0 {

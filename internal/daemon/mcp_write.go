@@ -36,12 +36,28 @@ func (d *Daemon) mcpActionAs(ctx context.Context, caller *mcpCaller, p principal
 		return nil, err
 	}
 	request.Author = ""
+	var limits forwardedLimits
+	if p.Kind == principalSession && request.SessionID != "" && request.Action != "respond" {
+		if limits, err = d.forwardScope(caller, request.SessionID, request.Action, reachOf(request)); err != nil {
+			return nil, err
+		}
+		request.ScopeProjectID, request.ScopeRank = limits.project, limits.rank
+	}
 	body, err := json.Marshal(request)
 	if err != nil {
 		return nil, err
 	}
 	reply := d.performAction(ctx, p, actionFormatAPIv1, body, key)
 	result, refusal := mcpActionOutcome(reply)
+	if refusal == nil {
+		var outcome struct {
+			Result struct {
+				NotSteered *bool `json:"notSteered"`
+			} `json:"result"`
+		}
+		_ = json.Unmarshal(result, &outcome)
+		d.noticeAfter(ctx, caller, limits.notice.told(outcome.Result.NotSteered, ""), nil)
+	}
 	d.recordMCPWrite(caller, tool, mcpAuditTarget(request), write.ClientRequestID, refusal)
 	if refusal != nil {
 		refusal.audited = true

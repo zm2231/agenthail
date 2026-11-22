@@ -136,9 +136,7 @@ func (d *Daemon) controlPayloadScope(ctx context.Context, caller *mcpCaller, req
 	target, notice, err := d.mcpReachTarget(ctx, caller, body.SessionID, reachOf(body))
 	if err == nil {
 		reply := daemonapi.ScopeReply{TargetID: target.ID, Notice: d.holdAgentNotice(caller, notice)}
-		if body.Action == "send" {
-			reply.ScopeProjectID, err = d.remoteSendScope(caller, target)
-		}
+		err = d.scopeReply(caller, &reply, target.ID, body.Action, reachOf(body))
 		return reply, err
 	}
 	refusal, ok := approvableControl(err)

@@ -73,7 +73,7 @@ func (d *Daemon) reachTarget(ctx context.Context, caller *mcpCaller, ref string,
 		return nil, mcpTargetRefusal(err)
 	}
 	if remote != nil {
-		return d.mcpRemoteTarget(caller, ref, *remote, upward)
+		return d.mcpRemoteTarget(caller, ref, *remote, reach)
 	}
 	if session.ID == caller.session.ID {
 		return nil, refuse("invalid", "That is your own session.")

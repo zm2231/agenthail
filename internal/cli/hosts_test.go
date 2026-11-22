@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -436,5 +437,54 @@ func TestSendReachesTheSessionNamedInAPeerMessagesFromSession(t *testing.T) {
 	actions, _ := api.recorded()
 	if len(actions) != 1 || actions[0]["sessionId"] != vpsBuilder.ID || actions[0]["message"] != "to the remote one" {
 		t.Fatalf("actions=%v", actions)
+	}
+}
+
+func TestAnAgentsControlOfAPairedHostsSessionCarriesTheLimitsItsScopeCheckNamed(t *testing.T) {
+	app, reg, _, api := federatedCLIFixture(t, true)
+	if err := reg.RecordObservedSession(surface.Session{ID: "lead", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_SESSION_ID", "lead")
+	var notices []daemonapi.ScopeRequest
+	app.scopeOverride = func(request daemonapi.ScopeRequest) (*daemonapi.ScopeReply, error) {
+		if request.Action == "notice" {
+			notices = append(notices, request)
+			return &daemonapi.ScopeReply{}, nil
+		}
+		return &daemonapi.ScopeReply{TargetID: vpsBuilder.ID, ScopeProjectID: "repo:github.com/example/widget", ScopeRank: "edits", Notice: "told-once-it-ran"}, nil
+	}
+	sent := api.response
+	api.response = `{"ok":true,"result":{"evidence":"delivered","status":"sent","sessionId":"` + vpsBuilder.ID + `","notSteered":true,"detail":"Sent as a message, not a steer"}}`
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"steer", "vps::@builder", "turn left"}) }); err != nil {
+		t.Fatal(err)
+	}
+	api.response = `{"ok":true,"result":{"evidence":"delivered","status":"sent","sessionId":"` + vpsBuilder.ID + `","notSteered":false}}`
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"steer", "vps::@builder", "turn right"}) }); err != nil {
+		t.Fatal(err)
+	}
+	api.response = sent
+	if err := app.Run([]string{"interrupt", "vps::@builder"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"goal", "vps::@builder", "set", "finish", "it"}) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(notices) != 4 || notices[0].NotSteered == nil || !*notices[0].NotSteered || notices[1].NotSteered == nil || *notices[1].NotSteered || notices[2].NotSteered != nil {
+		t.Fatalf("notices=%+v, want the paired host's answer for each: delivered as a message, steered, and none for an interrupt", notices)
+	}
+	for i, ran := range []string{"steer", "steer", "interrupt", "goal-set"} {
+		if notices[i].Ran != ran {
+			t.Fatalf("notice %d ran %q, want %q", i, notices[i].Ran, ran)
+		}
+	}
+	actions, _ := api.recorded()
+	if len(actions) != 4 {
+		t.Fatalf("actions=%v", actions)
+	}
+	for _, action := range actions {
+		if action["scopeProjectId"] != "repo:github.com/example/widget" || action["scopeRank"] != "edits" {
+			t.Fatalf("%v went to the paired host without the limits its owner checks", action)
+		}
 	}
 }

@@ -84,29 +84,19 @@ func (a *App) cmdSend(args []string) error {
 		return fmt.Errorf("%s is an agent identity: a message to it waits in its inbox and nothing replies here, so --reply and --stream have nothing to wait for. Send without them; its agent answers by sending to you", target)
 	}
 	if remote != nil {
-		scope, err := a.payloadScope(ctx, "send", map[string]any{"action": "send", "sessionId": remote.ID, "message": message, "busyDelivery": "queue", "noQueue": hasFlag(args, "--no-queue")})
-		if err != nil {
+		if _, err := a.payloadScope(ctx, "send", map[string]any{"action": "send", "sessionId": remote.ID, "message": message, "busyDelivery": "queue", "noQueue": hasFlag(args, "--no-queue")}); err != nil {
 			return err
 		}
-		scopeProjectID := ""
-		if scope != nil {
-			scopeProjectID = scope.ScopeProjectID
-		}
-		return a.sendRemote(ctx, remote, scopeProjectID, message, args, timeout)
+		return a.sendRemote(ctx, remote, message, args, timeout)
 	}
 	spec, coordinated := coord.Of(sess.ID)
-	var allowed *daemonapi.ScopeReply
 	if coordinated {
-		allowed, err = a.agentScope(ctx, daemonapi.ScopeRequest{Action: "lead-send", Project: spec.ProjectID, Mode: sendMode(args)})
+		_, err = a.agentScope(ctx, daemonapi.ScopeRequest{Action: "lead-send", Project: spec.ProjectID, Mode: sendMode(args)})
 	} else {
-		allowed, err = a.payloadScope(ctx, "send", map[string]any{"action": "send", "sessionId": sess.ID, "message": message, "busyDelivery": "queue", "noQueue": hasFlag(args, "--no-queue")})
+		_, err = a.payloadScope(ctx, "send", map[string]any{"action": "send", "sessionId": sess.ID, "message": message, "busyDelivery": "queue", "noQueue": hasFlag(args, "--no-queue")})
 	}
 	if err != nil {
 		return err
-	}
-	scopeProjectID := ""
-	if allowed != nil {
-		scopeProjectID = allowed.ScopeProjectID
 	}
 	route, unreadable := coord.RouteOf(ctx, sess.ID, coordinator.FromAgent("", source))
 	if unreadable != nil && (!surface.IsDeliveryUnavailable(unreadable) || hasFlag(args, "--no-queue")) {
@@ -210,7 +200,7 @@ func (a *App) cmdSend(args []string) error {
 		receipt, err = dispatcher.DeliverWithOptions(ctx, surf, sess, message, "", options)
 	}
 	if errors.Is(err, surface.ErrOpenIsTheDaemons) {
-		receipt, err = a.sendThroughDaemon(ctx, sess, message, options, scopeProjectID, hasFlag(args, "--no-queue"))
+		receipt, err = a.sendThroughDaemon(ctx, sess, message, options, hasFlag(args, "--no-queue"))
 	}
 	if err != nil {
 		if syntheticNotion && errors.Is(err, delivery.ErrTargetBusy) {

@@ -165,9 +165,11 @@ func (d *Daemon) agentScope(r *http.Request, caller *mcpCaller, request daemonap
 			return daemonapi.ScopeReply{}, err
 		}
 		reply := daemonapi.ScopeReply{TargetID: target.ID, Notice: d.holdAgentNotice(caller, notice)}
+		action := ""
 		if request.Action == "send" {
-			reply.ScopeProjectID, err = d.remoteSendScope(caller, target)
+			action = "send"
 		}
+		err = d.scopeReply(caller, &reply, target.ID, action, reach)
 		return reply, err
 	case "answer":
 		return d.answerScope(r.Context(), caller, request.Target, mode)
@@ -208,7 +210,7 @@ func (d *Daemon) agentScope(r *http.Request, caller *mcpCaller, request daemonap
 		return daemonapi.ScopeReply{ProjectID: own, Notice: d.holdAgentNotice(caller, notice)}, nil
 	case "notice":
 		if what, found := d.agentNotices.take(strings.TrimSpace(request.Notice), caller.session.ID, time.Now()); found {
-			d.notifyAgentAction(r.Context(), caller.session.ID, what)
+			d.notifyAgentAction(r.Context(), caller.session.ID, what.told(request.NotSteered, strings.TrimSpace(request.Ran)))
 		}
 		return daemonapi.ScopeReply{}, nil
 	case "operator":

@@ -24,6 +24,16 @@ type daemonAPIClient struct {
 	baseURL    string
 	token      string
 	httpClient *http.Client
+	forward    *forwardedAction
+}
+
+// forwardedAction is the target an agent's scope check named, the limits
+// the host that owns it checks, and whether that host delivered a steer to
+// it as a message, which the notice the command sends afterwards says.
+type forwardedAction struct {
+	limits     *daemonapi.ScopeReply
+	notSteered *bool
+	ran        string
 }
 
 func daemonEndpoint() (string, string, error) {
@@ -57,10 +67,15 @@ func (a *App) daemonAPI() (*daemonAPIClient, error) {
 	if !a.daemonIsRunning() {
 		return nil, errors.New("the daemon is not running; start it with: agenthail daemon start")
 	}
+	open := newDaemonAPIClient
 	if a.daemonAPIOverride != nil {
-		return a.daemonAPIOverride()
+		open = a.daemonAPIOverride
 	}
-	return newDaemonAPIClient()
+	client, err := open()
+	if client != nil {
+		client.forward = &a.forwarded
+	}
+	return client, err
 }
 
 // localDaemonAPI reaches the daemon on its local socket, where it names the
@@ -138,13 +153,19 @@ func (c *daemonAPIClient) getJSON(ctx context.Context, path string, query url.Va
 // daemon can hold and replay it toward a paired host without applying it
 // twice.
 func (c *daemonAPIClient) action(ctx context.Context, payload map[string]any) ([]byte, int, error) {
+	scoped := c.scope(payload)
 	header := http.Header{"Idempotency-Key": []string{"cli-" + uuid.NewString()}, daemonapi.ActionActorHeader: []string{daemonapi.CLIActor}}
-	return c.call(ctx, http.MethodPost, "/api/v1/actions", nil, payload, header)
+	data, status, err := c.call(ctx, http.MethodPost, "/api/v1/actions", nil, payload, header)
+	if scoped && err == nil {
+		c.recordOutcome(data)
+	}
+	return data, status, err
 }
 
 // actionReceipt is action keeping the body of a refusal, whose fields can
 // carry a partial outcome.
 func (c *daemonAPIClient) actionReceipt(ctx context.Context, payload map[string]any) ([]byte, int, error) {
+	scoped := c.scope(payload)
 	header := http.Header{"Idempotency-Key": []string{"cli-" + uuid.NewString()}, daemonapi.ActionActorHeader: []string{daemonapi.CLIActor}}
 	response, err := c.do(ctx, http.MethodPost, "/api/v1/actions", nil, payload, header)
 	if err != nil {
@@ -152,5 +173,37 @@ func (c *daemonAPIClient) actionReceipt(ctx context.Context, payload map[string]
 	}
 	defer response.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(response.Body, 32<<20))
+	if scoped && err == nil && response.StatusCode < 300 {
+		c.recordOutcome(data)
+	}
 	return data, response.StatusCode, err
+}
+
+// scope carries the limits the daemon named for this command's target on
+// the action for that target, so the host that owns it checks them.
+func (c *daemonAPIClient) scope(payload map[string]any) bool {
+	if c.forward == nil {
+		return false
+	}
+	limits := c.forward.limits
+	if target, _ := payload["sessionId"].(string); limits == nil || target != limits.TargetID || payload["scopeProjectId"] != nil {
+		return false
+	}
+	payload["scopeProjectId"] = limits.ScopeProjectID
+	if limits.ScopeRank != "" {
+		payload["scopeRank"] = limits.ScopeRank
+	}
+	c.forward.ran, _ = payload["action"].(string)
+	return true
+}
+
+func (c *daemonAPIClient) recordOutcome(data []byte) {
+	var reply struct {
+		Result struct {
+			NotSteered *bool `json:"notSteered"`
+		} `json:"result"`
+	}
+	if json.Unmarshal(data, &reply) == nil {
+		c.forward.notSteered = reply.Result.NotSteered
+	}
 }
