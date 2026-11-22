@@ -64,7 +64,7 @@ func TestAPendingLaunchIsForgottenOnlyAfterItsRetention(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "", reservation, surface.Location{Workspace: name}, launchedAt, launchedAt.Add(pendingLaunchLifetime)); err != nil {
+		if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "", "", reservation, surface.Location{Workspace: name}, launchedAt, launchedAt.Add(pendingLaunchLifetime)); err != nil {
 			t.Fatal(err)
 		}
 	}

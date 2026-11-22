@@ -388,6 +388,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 	d.logStarted()
 	d.retireStrayHooksAtStart(home)
+	d.keepMCPRelaysAtStart(home)
 	if err := d.foldAgentPolicy(); err != nil {
 		d.log.Printf("warn: fold the agent policy into roles: %s", err)
 	}

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudemcp"
@@ -18,6 +17,8 @@ import (
 
 const mcpUsage = "usage: agenthail mcp stdio|install|uninstall|status"
 
+var relayExecutable = surface.RelayExecutable
+
 func (a *App) cmdMCP(args []string) error {
 	if len(args) != 1 {
 		return errors.New(mcpUsage)
@@ -26,7 +27,7 @@ func (a *App) cmdMCP(args []string) error {
 	case "stdio":
 		return mcpstdio.Run(context.Background(), daemonctl.MCPSocketPath(), a.Version, os.Stdin, os.Stdout)
 	case "install", "uninstall", "status":
-		return errors.Join(claudeMCPAt(args[0]), codexMCPAt(args[0]))
+		return errors.Join(claudeMCPAt(args[0], true), codexMCPAt(args[0], true))
 	}
 	return errors.New(mcpUsage)
 }
@@ -58,39 +59,56 @@ func claudeMCPConfigs() ([]claudeMCPConfig, error) {
 	return configs, nil
 }
 
-// claudeMCPAt acts on every root, so one root's broken config does not keep
-// the others from their tools.
-func claudeMCPAt(action string) error {
+// One root's broken config never keeps the others from their tools, and only the person's own install or uninstall changes the opt-out, so an upgrade keeps it.
+func claudeMCPAt(action string, optOut bool) error {
 	configs, err := claudeMCPConfigs()
 	if err != nil {
 		return err
 	}
 	executable := relayExecutable()
+	home, _ := os.UserHomeDir()
 	var failed []error
 	for _, config := range configs {
-		if executable == "" && action != "uninstall" && !config.off {
+		if executable == "" && (action == "install" && (optOut || !config.off) || action == "status" && !config.off) {
 			failed = append(failed, fmt.Errorf("%s: run this from the installed agenthail binary; Claude runs the binary that wrote its MCP server", config.path))
 			continue
 		}
 		var line string
 		switch action {
 		case "install":
-			var changed bool
-			if config.off {
+			var cleared, changed bool
+			switch {
+			case config.off && !optOut:
 				if changed, err = claudemcp.UninstallAt(config.path); err == nil {
 					line = map[bool]string{true: "removed, since claudeConfigDirs turns it off for this root", false: "off for this root in claudeConfigDirs"}[changed]
 				}
-			} else if changed, err = claudemcp.InstallAt(config.path, executable); err == nil {
-				line = map[bool]string{true: "installed", false: "already installed"}[changed]
+			default:
+				if changed, err = claudemcp.InstallAt(config.path, executable); err == nil {
+					line = map[bool]string{true: "installed", false: "already installed"}[changed]
+					if optOut {
+						cleared, err = surface.SetClaudeRootMCP(home, config.root, true)
+					}
+				}
+			}
+			if cleared {
+				line += fmt.Sprintf(`; removed "mcp": false for %s from %s`, config.root, surface.AgenthailConfigPath(home))
 			}
 		case "uninstall":
-			var changed bool
+			var changed, set bool
 			if changed, err = claudemcp.UninstallAt(config.path); err == nil {
 				line = map[bool]string{true: "removed", false: "not installed"}[changed]
+				if optOut {
+					set, err = surface.SetClaudeRootMCP(home, config.root, false)
+				}
+			}
+			if set {
+				line += fmt.Sprintf(`; set "mcp": false for %s in %s, so the daemon does not add it back; agenthail mcp install turns it back on`, config.root, surface.AgenthailConfigPath(home))
 			}
 		case "status":
-			if line, err = claudeMCPState(config, executable); line == claudemcp.Outdated || line == claudemcp.Missing || line == claudemcp.Dangling || line == claudeMCPOffInstalled {
+			if line, err = claudeMCPState(config, executable); line == claudemcp.Outdated || line == claudemcp.Missing || line == claudemcp.Dangling {
 				line += "; run: agenthail mcp install"
+			} else if line == claudeMCPOffInstalled {
+				line += "; run: agenthail mcp uninstall"
 			}
 		}
 		if err != nil {
@@ -113,22 +131,7 @@ func claudeMCPState(config claudeMCPConfig, executable string) (string, error) {
 	return claudeMCPOffInstalled, nil
 }
 
-// Homebrew deletes a version's Cellar directory on upgrade; its opt link
-// follows the installed version.
-func relayExecutable() string {
-	executable := surface.AgenthailExecutable()
-	marker := strings.Index(executable, "/Cellar/agenthail/")
-	if marker <= 0 {
-		return executable
-	}
-	linked := filepath.Join(executable[:marker], "opt", "agenthail", "bin", "agenthail")
-	if _, err := os.Stat(linked); err == nil {
-		return linked
-	}
-	return executable
-}
-
-func codexMCPAt(action string) error {
+func codexMCPAt(action string, optOut bool) error {
 	home := codexsurface.CodexHomeFromEnv()
 	label := "codex " + filepath.Join(home.Codex, "config.toml")
 	if !codexsurface.CodexSetUp(home) {
@@ -148,24 +151,41 @@ func codexMCPAt(action string) error {
 	var line string
 	switch action {
 	case "install":
-		var changed bool
-		if off {
+		var cleared, changed bool
+		switch {
+		case off && !optOut:
 			if changed, err = codexsurface.UninstallCodexRelay(ctx, home); err == nil {
 				line = map[bool]string{true: "removed, since codexMCP turns it off", false: "off in codexMCP"}[changed]
 			}
-		} else if executable == "" {
+		case executable == "":
 			err = fmt.Errorf("%s: run this from the installed agenthail binary; Codex runs the binary that wrote its MCP server", label)
-		} else if changed, err = codexsurface.InstallCodexRelay(ctx, home, executable); err == nil {
-			line = map[bool]string{true: "installed", false: "already installed"}[changed]
+		default:
+			if changed, err = codexsurface.InstallCodexRelay(ctx, home, executable); err == nil {
+				line = map[bool]string{true: "installed", false: "already installed"}[changed]
+				if optOut {
+					cleared, err = surface.SetCodexMCP(userHome, true)
+				}
+			}
+		}
+		if cleared {
+			line += fmt.Sprintf("; removed codexMCP false from %s", surface.AgenthailConfigPath(userHome))
 		}
 	case "uninstall":
-		var changed bool
+		var changed, set bool
 		if changed, err = codexsurface.UninstallCodexRelay(ctx, home); err == nil {
 			line = map[bool]string{true: "removed", false: "not installed"}[changed]
+			if optOut {
+				set, err = surface.SetCodexMCP(userHome, false)
+			}
+		}
+		if set {
+			line += fmt.Sprintf("; set codexMCP false in %s, so the daemon does not add it back; agenthail mcp install turns it back on", surface.AgenthailConfigPath(userHome))
 		}
 	case "status":
-		if line, err = codexMCPState(ctx, home, off, executable); line == codexsurface.CodexRelayOutdated || line == codexsurface.CodexRelayMissing || line == codexsurface.CodexRelayDangling || line == claudeMCPOffInstalled {
+		if line, err = codexMCPState(ctx, home, off, executable); line == codexsurface.CodexRelayOutdated || line == codexsurface.CodexRelayMissing || line == codexsurface.CodexRelayDangling {
 			line += "; run: agenthail mcp install"
+		} else if line == claudeMCPOffInstalled {
+			line += "; run: agenthail mcp uninstall"
 		}
 	}
 	if err != nil {

@@ -4,6 +4,7 @@
 -- migration 2026-11-22-agent-role-assignments
 -- migration 2026-11-22-held-work-moves-session-views
 -- migration 2026-11-22-indexed-delivery-asks-gate
+-- migration 2026-11-22-pending-launch-creator
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -603,6 +604,7 @@ CREATE TABLE launcher_pending (
 	token TEXT NOT NULL DEFAULT '',
 	expires_at_ms INTEGER NOT NULL DEFAULT 0,
 	location BLOB NOT NULL,
+	creator TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

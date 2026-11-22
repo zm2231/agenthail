@@ -14,6 +14,7 @@ type PendingLaunch struct {
 	Launcher   string
 	Agent      surface.SurfaceKind
 	Cwd, Name  string
+	Creator    string
 	Alias      AliasReservation
 	Location   surface.Location
 	LaunchedAt time.Time
@@ -21,7 +22,7 @@ type PendingLaunch struct {
 }
 
 // RecordPendingLaunch extends the name's reservation to the launch's expiry.
-func (r *Registry) RecordPendingLaunch(launcher string, agent surface.SurfaceKind, cwd, name string, alias AliasReservation, location surface.Location, launchedAt, expires time.Time) (int64, error) {
+func (r *Registry) RecordPendingLaunch(launcher string, agent surface.SurfaceKind, cwd, name, creator string, alias AliasReservation, location surface.Location, launchedAt, expires time.Time) (int64, error) {
 	b, err := json.Marshal(location)
 	if err != nil {
 		return 0, err
@@ -31,7 +32,7 @@ func (r *Registry) RecordPendingLaunch(launcher string, agent surface.SurfaceKin
 		return 0, err
 	}
 	defer tx.Rollback()
-	result, err := tx.Exec(`INSERT INTO launcher_pending(launcher,agent,cwd,name,alias,token,expires_at_ms,location,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, launcher, string(agent), cwd, name, alias.Name, alias.Token, expires.UnixMilli(), b, formatSQLiteTimestamp(launchedAt))
+	result, err := tx.Exec(`INSERT INTO launcher_pending(launcher,agent,cwd,name,creator,alias,token,expires_at_ms,location,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, launcher, string(agent), cwd, name, creator, alias.Name, alias.Token, expires.UnixMilli(), b, formatSQLiteTimestamp(launchedAt))
 	if err != nil {
 		return 0, err
 	}
@@ -53,7 +54,7 @@ func (r *Registry) PendingLaunches() ([]PendingLaunch, error) {
 		var launcher, agent, launched string
 		var expires int64
 		var location []byte
-		if err := row.Scan(&item.ID, &launcher, &agent, &item.Cwd, &item.Name, &item.Alias.Name, &item.Alias.Token, &expires, &location, &launched); err != nil {
+		if err := row.Scan(&item.ID, &launcher, &agent, &item.Cwd, &item.Name, &item.Creator, &item.Alias.Name, &item.Alias.Token, &expires, &location, &launched); err != nil {
 			return item, err
 		}
 		item.Launcher = launcher
@@ -62,7 +63,7 @@ func (r *Registry) PendingLaunches() ([]PendingLaunch, error) {
 		item.Alias.Until = item.ExpiresAt
 		item.LaunchedAt, _ = parseSQLiteTimestamp(launched)
 		return item, json.Unmarshal(location, &item.Location)
-	}, `SELECT id,launcher,agent,cwd,name,alias,token,expires_at_ms,location,created_at FROM launcher_pending ORDER BY id`)
+	}, `SELECT id,launcher,agent,cwd,name,creator,alias,token,expires_at_ms,location,created_at FROM launcher_pending ORDER BY id`)
 }
 
 func (r *Registry) DropPendingLaunch(item PendingLaunch) error {
@@ -98,6 +99,9 @@ func (r *Registry) RecordObservedSessionAndDeletePending(s surface.Session, item
 		return false, fmt.Errorf("pending launch %d was not found", item.ID)
 	}
 	if err := registerSessionTx(tx, s); err != nil {
+		return false, err
+	}
+	if err := recordSessionOriginTx(tx, OriginOf(s.ID, item.Creator)); err != nil {
 		return false, err
 	}
 	named = item.Alias.Name != ""

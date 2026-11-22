@@ -368,7 +368,7 @@ func (a *App) cmdDoctor(args []string) error {
 			switch state := claudeMCPStates[root]; state {
 			case claudemcp.Installed, claudeMCPOff:
 			case claudeMCPOffInstalled:
-				fmt.Printf("  agenthail MCP server: claudeConfigDirs turns it off for this root, but its entry is still there; run: agenthail mcp install\n")
+				fmt.Printf("  agenthail MCP server: claudeConfigDirs turns it off for this root, but its entry is still there; the daemon takes it out, or run: agenthail mcp uninstall\n")
 			case claudemcp.Missing, claudemcp.Outdated:
 				fmt.Printf("  agenthail MCP server: %s; sessions started outside Agenthail don't have its tools until you run: agenthail mcp install\n", state)
 			case claudemcp.Dangling:
@@ -462,7 +462,7 @@ func (a *App) cmdDoctor(args []string) error {
 		switch codexMCP {
 		case "", codexsurface.CodexRelayInstalled, claudeMCPOff:
 		case claudeMCPOffInstalled:
-			fmt.Printf("codex MCP server: codexMCP turns it off, but its entry is still there; run: agenthail mcp install\n")
+			fmt.Printf("codex MCP server: codexMCP turns it off, but its entry is still there; the daemon takes it out, or run: agenthail mcp uninstall\n")
 		case codexsurface.CodexRelayMissing, codexsurface.CodexRelayOutdated:
 			fmt.Printf("codex MCP server: %s; Codex sessions started outside Agenthail don't have its tools until you run: agenthail mcp install\n", codexMCP)
 		case codexsurface.CodexRelayDangling:

@@ -201,7 +201,7 @@ func (d *Daemon) launchSession(ctx context.Context, request dashboardActionReque
 		if location == nil || *location == (surface.Location{}) {
 			return d.acceptedLaunch(request.Launcher, location, detail, untracked(alias))
 		}
-		if _, err := d.Registry.RecordPendingLaunch(request.Launcher, surface.SurfaceKind(request.Surface), cwd, request.Name, reservation, *location, launchedAt, launchedAt.Add(pendingLaunchLifetime)); err != nil {
+		if _, err := d.Registry.RecordPendingLaunch(request.Launcher, surface.SurfaceKind(request.Surface), cwd, request.Name, creator, reservation, *location, launchedAt, launchedAt.Add(pendingLaunchLifetime)); err != nil {
 			failure := fmt.Sprintf("persist pending correlation: %s", err)
 			if detail != "" {
 				failure = detail + "; " + failure

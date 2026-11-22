@@ -226,10 +226,10 @@ func (a *App) daemonInstallService() error {
 	if err := a.service().Install(); err != nil {
 		return err
 	}
-	if err := claudeMCPAt("install"); err != nil {
+	if err := claudeMCPAt("install", false); err != nil {
 		fmt.Printf("Claude sessions started outside Agenthail lack its tools until this is fixed and agenthail mcp install runs: %s\n", err)
 	}
-	if err := codexMCPAt("install"); err != nil {
+	if err := codexMCPAt("install", false); err != nil {
 		fmt.Printf("Codex sessions started outside Agenthail lack its tools until this is fixed and agenthail mcp install runs: %s\n", err)
 	}
 	return nil
@@ -239,10 +239,10 @@ func (a *App) daemonUninstallService() error {
 	if err := a.service().Uninstall(); err != nil {
 		return err
 	}
-	if err := claudeMCPAt("uninstall"); err != nil {
+	if err := claudeMCPAt("uninstall", false); err != nil {
 		fmt.Printf("Claude may show a failed agenthail MCP server until it is removed with agenthail mcp uninstall: %s\n", err)
 	}
-	if err := codexMCPAt("uninstall"); err != nil {
+	if err := codexMCPAt("uninstall", false); err != nil {
 		fmt.Printf("Codex may show a failed %s MCP server until it is removed with agenthail mcp uninstall: %s\n", codexsurface.CodexRelayServerName, err)
 	}
 	return nil

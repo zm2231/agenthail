@@ -347,6 +347,7 @@ var decisionsBeforeRoles = map[string][2]string{
 	"limit-resume":          {agentroles.Ask, agentroles.Notify},
 	"cross-project-message": {agentroles.Allow, agentroles.Allow},
 	"cross-project-steer":   {agentroles.Notify, agentroles.Notify},
+	"session-create-full":   {agentroles.Notify, agentroles.Notify},
 }
 
 func listedTools(t *testing.T, session *mcp.ClientSession) []string {

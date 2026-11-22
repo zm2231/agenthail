@@ -90,6 +90,7 @@ var Actions = []Action{
 	{"limit-resume", Notify, "Turn resuming its own project's sessions a usage limit stopped on or off", true},
 	{"cross-project-message", Allow, "Send a queued message to a session in another project on this computer", false},
 	{"cross-project-steer", Notify, "Steer, interrupt or send now to a session in another project on this computer, or to its coordinator, within its ceiling", false},
+	{"session-create-full", Notify, "From a session the person started outside Agenthail, start one in bypassPermissions or never-approval mode", false},
 }
 
 // BuiltIn gives each agent what it could do before roles: any session is a

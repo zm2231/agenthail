@@ -22,7 +22,7 @@ func TestALaunchFoundAfterItsNameWasTakenIsRegisteredWithoutIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Build", name, surface.Location{Workspace: "workspace-1"}, launchedAt, expires); err != nil {
+	if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Build", "", name, surface.Location{Workspace: "workspace-1"}, launchedAt, expires); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.RecordObservedSession(surface.Session{ID: "owner", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
@@ -65,7 +65,7 @@ func TestRegisterSessionAndDeletePendingKeepsIntentOnRegistrationFailure(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	pendingID, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Build", name, surface.Location{Workspace: "workspace-1"}, time.Now(), time.Now().Add(time.Hour))
+	pendingID, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Build", "", name, surface.Location{Workspace: "workspace-1"}, time.Now(), time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
