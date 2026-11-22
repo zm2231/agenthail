@@ -557,6 +557,33 @@ When you dispatch work to another agent, ask it to end its final message with a
 completion report (below). When you finish work someone dispatched to you, end
 your final message, and your report to `@lead`, with one.
 
+## Work In The Ledger
+
+A project's work items live in its ledger (docs/ledger.md), not in another
+tracker. Before you start on something, find it there; when you finish, say
+so there.
+
+```bash
+agenthail ledger ready                      # the next items nobody holds, ranked
+agenthail ledger search <words>...          # find an item by its words, or by its old td id
+agenthail ledger work <item>                # everything about one item: fields, clause, timeline, log
+agenthail ledger start <item>               # claim it; waits for what it depends on
+agenthail ledger log <item> "..." --type decision|blocker|result|progress
+agenthail ledger review <item>              # submit it for review once its work has merged or shipped
+agenthail ledger add "<text>" --found-in <item>   # record work you found while doing another item
+```
+
+With Agenthail's tools, the same calls are `agenthail_ledger_read`
+(`{"view":"ready"}`, `{"view":"item","id":"<item>"}`) and
+`agenthail_ledger_write` (`{"op":"work","request":{"action":"claim|log|submit","itemId":"<item>"}}`;
+a log also takes `text` and `logType`). Claim before you work, so two
+sessions do not pick up the same item. Log as you go: each decision and why,
+blockers, the PR when you open it, test and review results, and what is left.
+The next session on the item reads only its log. Submit only claimed work;
+the reviewer, usually your coordinator, moves it to done. Work that will not
+be done is closed with a reason (`agenthail ledger close <item> --reason
+"obsolete: ..."`), and work that must wait is parked with why.
+
 ## Projects
 
 ```bash
