@@ -213,7 +213,8 @@ func (r *Registry) EventFailed(id, generation string, suspendAfter int) (bool, e
 	return failures == suspendAfter, tx.Commit()
 }
 
-func (r *Registry) DeferEvent(id, generation string, until time.Time) error {
-	_, err := r.db.Exec(`UPDATE mcp_event_subscriptions SET deferred_until_ms=? WHERE id=? AND generation=?`, until.UnixMilli(), id, generation)
+// DeferEvent takes no generation: the hold is the endpoint's, so it outlives a refresh that raced its write.
+func (r *Registry) DeferEvent(id string, until time.Time) error {
+	_, err := r.db.Exec(`UPDATE mcp_event_subscriptions SET deferred_until_ms=MAX(deferred_until_ms,?) WHERE id=?`, until.UnixMilli(), id)
 	return err
 }

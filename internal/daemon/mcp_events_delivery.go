@@ -154,7 +154,7 @@ func (m *remoteMCP) deliverEvent(ctx context.Context, id string) {
 				continue
 			}
 			until := time.Now().Add(reply.retryAfter)
-			if err := m.d.Registry.DeferEvent(sub.ID, sub.Generation, until); err != nil {
+			if err := m.d.Registry.DeferEvent(sub.ID, until); err != nil {
 				m.d.logRuntimeError("event deliveries", err)
 			}
 			m.recordEvent(sub.IdentityID, sub.URL, fmt.Sprintf("deferred %s until %s, as the endpoint asked: %s", occurrence.EventID, until.UTC().Format(time.RFC3339), reason))

@@ -495,6 +495,34 @@ func TestAWebhookDeferredLongerThanARetryHoldsItsSubscriptionUntilThen(t *testin
 	}
 }
 
+func TestARetryAfterAnsweredAcrossARefreshStillHoldsTheSubscription(t *testing.T) {
+	f, w, start := eventsFixture(t)
+	session := f.eventsSession(t)
+	if _, err := subscribe(t.Context(), session, w.url+"/hook", w.secret, ""); err != nil {
+		t.Fatal(err)
+	}
+	w.next(t, "the verification handshake")
+	w.answer(func(webhookCall) (int, string) { return http.StatusServiceUnavailable, "" })
+	w.mu.Lock()
+	w.header = http.Header{"Retry-After": {"3600"}}
+	w.gate = make(chan struct{})
+	gate := w.gate
+	w.mu.Unlock()
+	start()
+	f.deliver(t, "one")
+	select {
+	case <-w.gated:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no event reached the gate")
+	}
+	if _, err := subscribe(t.Context(), session, w.url+"/hook", w.secret, ""); err != nil {
+		t.Fatal(err)
+	}
+	close(gate)
+	w.next(t, "the attempt answered with an hour's Retry-After")
+	w.quiet(t, "after a refresh that raced the Retry-After", 500*time.Millisecond)
+}
+
 func TestASubscriptionSuspendedForFailingIsRetriedOnATrialAndRecovers(t *testing.T) {
 	f, w, start := eventsFixture(t)
 	f.d.remoteMCP().eventRetries = []time.Duration{0}

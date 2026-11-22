@@ -47,9 +47,6 @@ func TestADeliveryBegunBeforeARefreshCannotUndoIt(t *testing.T) {
 	if fresh.ID != old.ID || fresh.Generation == old.Generation {
 		t.Fatalf("old=%+v fresh=%+v, want the same id under a new generation", old, fresh)
 	}
-	if err := r.DeferEvent(old.ID, old.Generation, time.Now().Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
 	for range 3 {
 		if _, err := r.EventFailed(old.ID, old.Generation, 3); err != nil {
 			t.Fatal(err)
@@ -67,7 +64,13 @@ func TestADeliveryBegunBeforeARefreshCannotUndoIt(t *testing.T) {
 	}
 	due, err := r.DueEvents(time.Now(), time.Hour)
 	if err != nil || len(due) != 1 || due[0].ID != fresh.ID {
-		t.Fatalf("due=%+v err=%v, want the fresh subscription despite a stale deferral", due, err)
+		t.Fatalf("due=%+v err=%v, want the fresh subscription despite stale failures", due, err)
+	}
+	if err := r.DeferEvent(old.ID, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if due, err := r.DueEvents(time.Now(), time.Hour); err != nil || len(due) != 0 {
+		t.Fatalf("due=%+v err=%v, want the endpoint's Retry-After to hold the refreshed subscription", due, err)
 	}
 }
 
