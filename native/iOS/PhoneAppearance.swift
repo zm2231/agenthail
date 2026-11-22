@@ -50,7 +50,10 @@ final class PhoneAppearance: ObservableObject {
     private let cache: URL?
     private static let signposter = OSSignposter(subsystem: "com.agenthail.ios", category: "Appearance")
 
-    init(cache: URL? = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("appearance", isDirectory: true)) {
+    typealias CacheDecoder = @Sendable (URL, Set<String>, Int) async -> [String: WallpaperImage]
+
+    init(cache: URL? = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("appearance", isDirectory: true),
+         decodeCache: @escaping CacheDecoder = PhoneAppearance.decodeCache) {
         self.cache = cache
         if let cache { RenderStamp.prune(cache) }
         if let cache, let data = try? Data(contentsOf: cache.appendingPathComponent("ui.json")),
@@ -64,16 +67,20 @@ final class PhoneAppearance: ObservableObject {
             let sources = Set(launchSources.values)
             let maxPixels = Self.maxPixels
             Task { [weak self] in
-                let decoded = await Task.detached {
-                    Dictionary(uniqueKeysWithValues: sources.compactMap { source -> (String, WallpaperImage)? in
-                        guard let data = try? Data(contentsOf: cache.appendingPathComponent(Self.wallpaperFile(source))),
-                              let image = WallpaperImage.decode(data, id: source, maxPixels: maxPixels) else { return nil }
-                        return (source, image)
-                    })
-                }.value
+                let decoded = await decodeCache(cache, sources, maxPixels)
                 self?.restore(decoded)
             }
         }
+    }
+
+    nonisolated static func decodeCache(_ cache: URL, _ sources: Set<String>, _ maxPixels: Int) async -> [String: WallpaperImage] {
+        await Task.detached {
+            Dictionary(uniqueKeysWithValues: sources.compactMap { source -> (String, WallpaperImage)? in
+                guard let data = try? Data(contentsOf: cache.appendingPathComponent(Self.wallpaperFile(source))),
+                      let image = WallpaperImage.decode(data, id: source, maxPixels: maxPixels) else { return nil }
+                return (source, image)
+            })
+        }.value
     }
 
     private func restore(_ decoded: [String: WallpaperImage]) {
@@ -213,7 +220,11 @@ final class PhoneAppearance: ObservableObject {
     private func adopt(_ loaded: UIConfig) {
         var next: [Bool: WallpaperImage] = [:]
         for dark in [true, false] {
-            guard case .image(let path) = loaded.background(dark: dark), wallpapers[path] == nil else { continue }
+            guard case .image(let path) = loaded.background(dark: dark) else {
+                launchSources[dark] = nil
+                continue
+            }
+            guard wallpapers[path] == nil else { continue }
             next[dark] = image(dark: dark)
         }
         let kept = wallpapers.filter { loaded.imagePaths.contains($0.key) }

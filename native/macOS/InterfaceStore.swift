@@ -42,10 +42,18 @@ final class InterfaceStore: ObservableObject {
                 if Task.isCancelled || current != generation { return }
                 self.problem = problem
             } catch {
-                if Task.isCancelled || error.isCancellation { return }
+                if Task.isCancelled || error.isCancellation || current != generation { return }
+                settled = true
                 problem = AgenthailAPIError.userMessage(error)
             }
         }
+    }
+
+    func snapshotProblem(for rev: String) -> String? {
+        guard config.rev == rev else { return "The appearance change \(rev) didn't arrive in time." }
+        guard settled else { return "The background image didn't load in time." }
+        guard config.imagePaths.allSatisfy({ wallpapers[$0] != nil }) else { return problem ?? "The background image couldn't be shown." }
+        return nil
     }
 
     /// Shows a value at once, before it is written, while a slider moves.
@@ -70,7 +78,7 @@ final class InterfaceStore: ObservableObject {
             let current = generation
             overlay = [:]
             let problem = await adopt(loaded, api: api, generation: current)
-            if current == generation { self.problem = problem }
+            if current == generation, !Task.isCancelled { self.problem = problem }
             await loadHistory(api: api)
             return nil
         } catch {
@@ -87,7 +95,10 @@ final class InterfaceStore: ObservableObject {
     private func adopt(_ loaded: UIConfig, api: AgenthailAPI, generation current: Int) async -> String? {
         let signpost = Self.signposter.makeSignpostID()
         let interval = Self.signposter.beginInterval("Appearance load", id: signpost)
-        defer { Self.signposter.endInterval("Appearance load", interval) }
+        defer {
+            Self.signposter.endInterval("Appearance load", interval)
+            if current == generation { settled = true }
+        }
         let active = Self.prefersDark(loaded)
         var next: [Bool: WallpaperImage] = [:]
         for dark in [true, false] {
@@ -121,7 +132,6 @@ final class InterfaceStore: ObservableObject {
                 problem = AgenthailAPIError.userMessage(error)
             }
         }
-        if current == generation { settled = true }
         return problem
     }
 

@@ -44,7 +44,10 @@ enum WindowSnapshot {
         let budget = SnapshotBudget(deadlineMs: request.deadlineMs)
         running[request.id] = Task { @MainActor in
             defer { running[request.id] = nil }
-            await catchUp(to: request.rev, model: model, api: api, budget: budget)
+            if let reason = await catchUp(to: request.rev, model: model, api: api, budget: budget) {
+                if !Task.isCancelled { try? await api.failSnapshot(id: request.id, reason: reason) }
+                return
+            }
             let result = await capture(request, model: model, voice: voice, budget: budget)
             if Task.isCancelled { return }
             switch result {
@@ -59,10 +62,11 @@ enum WindowSnapshot {
     }
 
     /// A snapshot taken right after a ui.conf change must show it, background image included.
-    static func catchUp(to rev: String?, model: AgenthailModel, api: AgenthailAPI, budget: SnapshotBudget) async {
-        guard let rev, !rev.isEmpty else { return }
+    static func catchUp(to rev: String?, model: AgenthailModel, api: AgenthailAPI, budget: SnapshotBudget) async -> String? {
+        guard let rev, !rev.isEmpty else { return nil }
         if model.interface.config.rev != rev { model.interface.load(from: api) }
         await budget.wait { model.interface.config.rev == rev && model.interface.settled }
+        return model.interface.snapshotProblem(for: rev)
     }
 
     static func capture(_ request: SnapshotRequest, model: AgenthailModel, voice: VoiceController, budget: SnapshotBudget) async -> Result<Data, WindowImage.Failure> {

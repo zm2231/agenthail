@@ -418,12 +418,42 @@ final class PhoneAppearanceTests: XCTestCase {
 
         UIConfigURLProtocol.state.body = #"{"rev":"two","values":{"theme":"dark","background":"image: art/broken.jpg"},"chosen":{},"overrides":{},"problems":[]}"#
         UIConfigURLProtocol.state.images = ["art/broken.jpg": Data("not an image".utf8)]
-        let launched = PhoneAppearance(cache: cache)
-        try await load(launched) { launched.problem != nil && launched.image(dark: true) != nil }
-        XCTAssertEqual(launched.config.rev, "two")
-        XCTAssertEqual(launched.image(dark: true)?.id, "art/sea.jpg", "the cached image stays while the new one can't be shown")
+        let gate = DecodeGate()
+        let launched = PhoneAppearance(cache: cache) { cache, sources, pixels in
+            await gate.wait()
+            return await PhoneAppearance.decodeCache(cache, sources, pixels)
+        }
+        try await load(launched) { launched.problem != nil }
+        XCTAssertEqual(launched.config.rev, "two", "the new settings apply while the cache is still decoding")
+        await gate.open()
+        for _ in 0..<200 where launched.image(dark: true) == nil { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(launched.image(dark: true)?.id, "art/sea.jpg", "the cached image becomes the fallback once decoded")
         let again = try await relaunched { $0.image(dark: true) != nil }
         XCTAssertEqual(again.image(dark: true)?.id, "art/sea.jpg", "and it survives another relaunch")
+    }
+
+    func testAnImageClearedDuringLaunchDoesNotComeBack() async throws {
+        UIConfigURLProtocol.state.body = #"{"rev":"one","values":{"theme":"dark","background":"image: art/sea.jpg"},"chosen":{},"overrides":{},"problems":[]}"#
+        UIConfigURLProtocol.state.image = Self.png
+        let first = PhoneAppearance(cache: cache)
+        try await load(first) { first.wallpapers["art/sea.jpg"] != nil }
+
+        let gate = DecodeGate()
+        let launched = PhoneAppearance(cache: cache) { cache, sources, pixels in
+            await gate.wait()
+            return await PhoneAppearance.decodeCache(cache, sources, pixels)
+        }
+        UIConfigURLProtocol.state.body = #"{"rev":"two","values":{"theme":"dark","background":"none"},"chosen":{},"overrides":{},"problems":[]}"#
+        try await load(launched) { launched.config.rev == "two" }
+        UIConfigURLProtocol.state.body = #"{"rev":"three","values":{"theme":"dark","background":"image: art/broken.jpg"},"chosen":{},"overrides":{},"problems":[]}"#
+        UIConfigURLProtocol.state.images = ["art/broken.jpg": Data("not an image".utf8)]
+        try await load(launched) { launched.problem != nil }
+        await gate.open()
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertNil(launched.image(dark: true), "an image a later config cleared never returns as a fallback")
+        let again = PhoneAppearance(cache: cache)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertNil(again.image(dark: true), "nor is it kept for the next launch")
     }
 
     func testAnImageFromAnOlderLoadIsIgnored() async throws {
@@ -517,4 +547,20 @@ private final class RefusingUIProtocol: URLProtocol, @unchecked Sendable {
         }
     }
     override func stopLoading() {}
+}
+
+private actor DecodeGate {
+    private var opened = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !opened else { return }
+        await withCheckedContinuation { waiting.append($0) }
+    }
+
+    func open() {
+        opened = true
+        for waiter in waiting { waiter.resume() }
+        waiting = []
+    }
 }

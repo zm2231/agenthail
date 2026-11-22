@@ -71,7 +71,8 @@ struct AppearanceLoadTest {
         let image = png()
         AppearanceDaemon.lock.withLock {
             AppearanceDaemon.images = ["art/slow-dark.jpg": image, "art/slow-light.jpg": image, "art/sea.jpg": image, "art/dune.jpg": image, "art/old.jpg": image, "art/new.jpg": image,
-                                       "art/night.jpg": image, "art/day.jpg": image, "art/both.jpg": Data("not an image".utf8), "art/slow.jpg": image, "art/bad.jpg": Data("not an image".utf8)]
+                                       "art/night.jpg": image, "art/day.jpg": image, "art/both.jpg": Data("not an image".utf8), "art/slow.jpg": image, "art/bad.jpg": Data("not an image".utf8),
+                                       "art/held.jpg": Data("not an image".utf8), "art/first.jpg": image, "art/ready.jpg": image]
         }
         serve(#"{"rev":"two","values":{"theme":"dark","glass.opacity":0.45,"background":"image: art/slow-dark.jpg","background.light":"image: art/slow-light.jpg"},"chosen":{},"overrides":{},"problems":[]}"#, delays: ["art/slow-dark.jpg": 0.5, "art/slow-light.jpg": 2])
         let store = InterfaceStore()
@@ -131,6 +132,35 @@ struct AppearanceLoadTest {
         await wait { stale.wallpapers["art/new.jpg"]?.id == "art/new.jpg" }
         try? await Task.sleep(for: .seconds(2))
         check(stale.config.rev == "two" && Array(stale.wallpapers.keys) == ["art/new.jpg"], "an older load's late image never lands: \(stale.wallpapers.keys)")
+        check(overlap.snapshotProblem(for: "two") != nil, "a snapshot of a revision whose image failed reports a problem instead of a fallback")
+
+        let cancelled = InterfaceStore()
+        serve(#"{"rev":"one","values":{"theme":"dark","background":"image: art/held.jpg"},"chosen":{},"overrides":{},"problems":[]}"#, delays: ["art/held.jpg": 1])
+        let pending = Task { await cancelled.change(UIChange(action: "set", set: ["background = image: art/held.jpg"], message: "held"), api: api) }
+        await wait { cancelled.config.rev == "one" }
+        check(!cancelled.settled && cancelled.snapshotProblem(for: "one") != nil, "a snapshot waits while the image is held")
+        pending.cancel()
+        _ = await pending.value
+        try? await Task.sleep(for: .seconds(1.5))
+        check(cancelled.problem == nil && cancelled.wallpapers.isEmpty, "a cancelled change publishes neither a problem nor an image: \(cancelled.problem ?? "none")")
+        check(cancelled.settled, "a cancelled change does not leave snapshots waiting")
+
+        let racing = InterfaceStore()
+        serve(#"{"rev":"one","values":{"theme":"dark","background":"image: art/first.jpg"},"chosen":{},"overrides":{},"problems":[]}"#, delays: ["art/first.jpg": 1])
+        let earlier = Task { await racing.change(UIChange(action: "set", set: ["background = image: art/first.jpg"], message: "first"), api: api) }
+        await wait { racing.config.rev == "one" }
+        serve(#"{"rev":"two","values":{"theme":"dark","background":"image: art/bad.jpg"},"chosen":{},"overrides":{},"problems":[]}"#)
+        _ = await racing.change(UIChange(action: "set", set: ["background = image: art/bad.jpg"], message: "second"), api: api)
+        _ = await earlier.value
+        try? await Task.sleep(for: .seconds(1.5))
+        check(racing.problem == "The background image art/bad.jpg can't be read." && racing.wallpapers["art/first.jpg"] == nil, "only the newer change publishes: \(racing.problem ?? "none") \(racing.wallpapers.keys)")
+
+        let ready = InterfaceStore()
+        serve(#"{"rev":"one","values":{"theme":"dark","background":"image: art/ready.jpg"},"chosen":{},"overrides":{},"problems":[]}"#)
+        ready.load(from: api)
+        await wait { ready.config.rev == "one" && ready.settled && ready.wallpapers["art/ready.jpg"] != nil }
+        check(ready.snapshotProblem(for: "one") == nil, "a snapshot proceeds once the image shows")
+        check(ready.snapshotProblem(for: "two") != nil, "a snapshot of a revision that hasn't arrived reports it")
         print("appearance load: ok")
     }
 }
