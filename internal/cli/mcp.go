@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudemcp"
@@ -65,7 +64,7 @@ func claudeMCPAt(action string) error {
 	if err != nil {
 		return err
 	}
-	executable := relayExecutable()
+	executable := surface.RelayExecutable()
 	var failed []error
 	for _, config := range configs {
 		if executable == "" && action != "uninstall" && !config.off {
@@ -113,21 +112,6 @@ func claudeMCPState(config claudeMCPConfig, executable string) (string, error) {
 	return claudeMCPOffInstalled, nil
 }
 
-// Homebrew deletes a version's Cellar directory on upgrade; its opt link
-// follows the installed version.
-func relayExecutable() string {
-	executable := surface.AgenthailExecutable()
-	marker := strings.Index(executable, "/Cellar/agenthail/")
-	if marker <= 0 {
-		return executable
-	}
-	linked := filepath.Join(executable[:marker], "opt", "agenthail", "bin", "agenthail")
-	if _, err := os.Stat(linked); err == nil {
-		return linked
-	}
-	return executable
-}
-
 func codexMCPAt(action string) error {
 	home := codexsurface.CodexHomeFromEnv()
 	label := "codex " + filepath.Join(home.Codex, "config.toml")
@@ -144,7 +128,7 @@ func codexMCPAt(action string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	executable := relayExecutable()
+	executable := surface.RelayExecutable()
 	var line string
 	switch action {
 	case "install":

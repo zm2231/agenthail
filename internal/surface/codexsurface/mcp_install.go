@@ -92,6 +92,42 @@ func InstallCodexRelay(ctx context.Context, home CodexHome, executable string) (
 	})
 }
 
+func codexRelayAsWritten(server map[string]any) bool {
+	command, _ := server["command"].(string)
+	return ownsCodexRelay(server) && codexJSON(server) == codexJSON(codexRelayEntry(command))
+}
+
+func codexRelayReconcile(user map[string]any, executable string, off bool) (any, bool) {
+	server := codexRelayServer(user)
+	switch {
+	case off:
+		return nil, server != nil && codexRelayAsWritten(server)
+	case server == nil:
+		return codexRelayEntry(executable), true
+	case codexRelayAsWritten(server) && codexRelayState(user, executable) != CodexRelayInstalled:
+		return codexRelayEntry(executable), true
+	}
+	return nil, false
+}
+
+// ReconcileCodexRelay adds a missing relay, and updates or, when off, removes one only while it is exactly as install wrote it. It reads config.toml first, so an app-server starts only for a write.
+func ReconcileCodexRelay(ctx context.Context, home CodexHome, executable string, off bool) (bool, error) {
+	if !CodexSetUp(home) {
+		return false, nil
+	}
+	var user map[string]any
+	if _, err := toml.DecodeFile(filepath.Join(home.Codex, "config.toml"), &user); err != nil && !os.IsNotExist(err) {
+		return false, err
+	}
+	if _, write := codexRelayReconcile(user, executable, off); !write {
+		return false, nil
+	}
+	return editCodexRelay(ctx, home, func(user map[string]any) (any, bool, error) {
+		value, write := codexRelayReconcile(user, executable, off)
+		return value, write, nil
+	})
+}
+
 func UninstallCodexRelay(ctx context.Context, home CodexHome) (bool, error) {
 	if !CodexSetUp(home) {
 		return false, nil

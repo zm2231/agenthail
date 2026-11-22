@@ -60,6 +60,28 @@ func state(data []byte, executable string) string {
 	return Installed
 }
 
+func asWritten(server gjson.Result) bool {
+	return owns(server) && sameJSON(server.Raw, entry(server.Get("command").String()))
+}
+
+// ReconcileAt adds a missing entry, and updates or, when off, removes one only while it is exactly as install wrote it.
+func ReconcileAt(path, executable string, off bool) (bool, error) {
+	return update(path, func(data []byte) ([]byte, error) {
+		server := gjson.GetBytes(data, key)
+		switch {
+		case off && server.Exists() && asWritten(server):
+			return sjson.DeleteBytes(data, key)
+		case off:
+			return data, nil
+		case !server.Exists():
+			return sjson.SetRawBytes(data, key, entry(executable))
+		case asWritten(server) && state(data, executable) != Installed:
+			return sjson.SetRawBytes(data, key, entry(executable))
+		}
+		return data, nil
+	})
+}
+
 func sameJSON(a string, b []byte) bool {
 	var left, right bytes.Buffer
 	return json.Compact(&left, []byte(a)) == nil && json.Compact(&right, b) == nil && bytes.Equal(left.Bytes(), right.Bytes())
