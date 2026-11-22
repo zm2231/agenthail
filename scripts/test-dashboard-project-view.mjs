@@ -89,6 +89,11 @@ projects[0].coordinators[0].replaced = { id: 3, name: "release-lead", sessionId:
 html = run("renderProjectView(app.state.projects[0])");
 assert.match(html, /data-project-lead-replaced>Replaced [^<]+ by the daemon: conversation gone no longer exists</, "the lead card says when, by whom and why it was replaced");
 delete projects[0].coordinators[0].replaced;
+assert.doesNotMatch(html, /Merged ·/, "a project with no merged worktree shows no Merged card");
+projectListing.rows.set("old", { ...sessions[5], worktree: { path: "/work/fieldnotes/.worktrees/old", branch: "fix/old", state: "settled", settledReason: "merged", cleanup: "pending" } });
+html = run("renderProjectView(app.state.projects[0])");
+assert.match(html, /<h2>Merged · 1<\/h2>.*data-session="old".*<code>fix\/old<\/code>.*data-work-clean="old"[^>]*>Remove<\/button>/s, "a session whose worktree merged and is still on disk is listed with Remove, even when idle");
+projectListing.rows.set("old", sessions[5]);
 
 assert.equal(run("rowTime")({ ...sessions[1], activity: { busySince: at(25) } }, now), "25m", "a running row shows how long its turn has run");
 assert.equal(run("rowTime")(sessions[1], now), "now", "a running row without a start shows now, never its last activity");

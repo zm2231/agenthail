@@ -12,6 +12,7 @@ import { cancelCodexSearch } from "./session-search.js";
 import { action, postAction } from "./actions.js";
 import { answerInPlace, nowDecision } from "./project-now-answer.js";
 import { refreshDecisions } from "./inbox.js";
+import { cleanWorktree } from "./project-merged.js";
 import { takeBackQueued } from "./queue-take-back.js";
 import { renderLeadReplacements } from "./overview.js";
 import { ensureSessionOrder, load } from "./dashboard-state.js";
@@ -138,6 +139,18 @@ export function bindConversationEvents() {
       syncProjectPane();
       app.decisionsKey = undefined;
       return refreshDecisions();
+    }
+    const workConfirm = event.target.closest("[data-work-confirm], [data-work-confirm-cancel]");
+    if (workConfirm) {
+      app.worktreeConfirm = workConfirm.dataset.workConfirm || null;
+      return syncProjectPane();
+    }
+    const workClean = event.target.closest("[data-work-clean], [data-work-remove-ignored]");
+    if (workClean) {
+      const sessionId = workClean.dataset.workClean || workClean.dataset.workRemoveIgnored;
+      const outcome = await cleanWorktree(sessionId, workClean.dataset.paths ? JSON.parse(workClean.dataset.paths) : [], postAction);
+      if (outcome) toast(outcome);
+      return syncProjectPane();
     }
     const projectResume = event.target.closest("[data-project-resume]");
     if (projectResume) {

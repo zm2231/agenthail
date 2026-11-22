@@ -63,7 +63,7 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 	case "session-wake":
 		return d.doSessionWake(session.ID)
 	case "work-clean":
-		return d.doWorkClean(ctx, p, session.ID, worktree.Options{ForceIgnored: request.ForceIgnored})
+		return d.doWorkClean(ctx, p, session.ID, worktree.Options{RemoveIgnored: request.RemoveIgnored})
 	case "alias":
 		return d.doSessionAlias(session, request.Alias)
 	case "pr":

@@ -3,8 +3,10 @@ package worktree
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -129,7 +131,7 @@ func TestAWorktreeForASessionThatNeverStartedIsTakenBack(t *testing.T) {
 func TestIgnoredFilesAndCommitsOffTheBranchKeepTheWorktree(t *testing.T) {
 	checkout := repository(t)
 	ignored := made(t, Spec{Cwd: checkout, Branch: "ah/ignored"})
-	if err := os.WriteFile(filepath.Join(checkout, ".git", "info", "exclude"), []byte("/.worktrees/\nlocal.env\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(checkout, ".git", "info", "exclude"), []byte("/.worktrees/\n*.env\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(ignored.WorktreePath, "local.env"), []byte("TOKEN=x\n"), 0o644); err != nil {
@@ -141,8 +143,30 @@ func TestIgnoredFilesAndCommitsOffTheBranchKeepTheWorktree(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(ignored.WorktreePath, "local.env")); err != nil {
 		t.Fatalf("the ignored file was removed: %v", err)
 	}
-	if outcome, err := Clean(context.Background(), record(ignored), Options{ForceIgnored: true}); err != nil || !outcome.Removed {
-		t.Fatalf("the person forcing past ignored files: %+v err=%v", outcome, err)
+	if err := os.WriteFile(filepath.Join(ignored.WorktreePath, "second.env"), []byte("TOKEN=y\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if outcome, err := Clean(context.Background(), record(ignored), Options{RemoveIgnored: []string{"local.env"}}); err != nil || outcome.Removed || outcome.KeptReason != KeptIgnored || !slices.Equal(outcome.IgnoredPaths, []string{"local.env", "second.env"}) {
+		t.Fatalf("an ignored file the person was not shown must keep the worktree and be named: %+v err=%v", outcome, err)
+	}
+	if _, err := os.Stat(filepath.Join(ignored.WorktreePath, "second.env")); err != nil {
+		t.Fatalf("an ignored file the person did not confirm was removed: %v", err)
+	}
+	if outcome, err := Clean(context.Background(), record(ignored), Options{RemoveIgnored: []string{"second.env", "local.env", "second.env"}}); err != nil || !outcome.Removed {
+		t.Fatalf("the person removing exactly the ignored files they were shown: %+v err=%v", outcome, err)
+	}
+
+	crowded := made(t, Spec{Cwd: checkout, Branch: "ah/crowded"})
+	var all []string
+	for i := range KeptPathLimit + 1 {
+		name := fmt.Sprintf("k%02d.env", i)
+		all = append(all, name)
+		if err := os.WriteFile(filepath.Join(crowded.WorktreePath, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if outcome, err := Clean(context.Background(), record(crowded), Options{RemoveIgnored: all}); err != nil || outcome.Removed || outcome.KeptReason != KeptIgnoredMany || len(outcome.IgnoredPaths) != KeptPathLimit {
+		t.Fatalf("more ignored files than can be named are never removed from a list: %+v err=%v", outcome, err)
 	}
 
 	built := made(t, Spec{Cwd: checkout, Branch: "ah/built"})

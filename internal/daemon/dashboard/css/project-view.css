@@ -222,3 +222,35 @@ button.project-name:hover,
   gap: 8px;
   margin-top: 0;
 }
+.project-worktree {
+  display: grid;
+  gap: 6px;
+  margin: 2px 0 10px 18px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--good);
+  border-radius: 0 10px 10px 0;
+  background: var(--raised);
+}
+.project-worktree p {
+  margin: 0;
+}
+.project-worktree-branch code,
+.project-worktree-command,
+.project-worktree-paths code {
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.project-worktree-command {
+  color: var(--muted);
+  user-select: all;
+}
+.project-worktree-paths {
+  max-height: 200px;
+  margin: 0;
+  padding-left: 18px;
+  overflow: auto;
+}
+.project-worktree .project-actions {
+  margin-top: 0;
+}

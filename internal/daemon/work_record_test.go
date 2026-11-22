@@ -129,7 +129,7 @@ func TestAPersonCleaningASessionsWorktreeKeepsUncommittedChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, answer := workAction(t, d, map[string]any{"action": "work-clean", "sessionId": "started"})
-	if cleaned, _ := answer["worktree"].(map[string]any); code != http.StatusOK || cleaned["cleanup"] != registry.WorkCleanupKept || cleaned["cleanupReason"] != worktree.KeptDirty {
+	if cleaned, _ := answer["worktree"].(map[string]any); code != http.StatusOK || cleaned["cleanup"] != registry.WorkCleanupKept || cleaned["cleanupReason"] != worktree.KeptDirty || fmt.Sprint(cleaned["hint"]) != fmt.Sprintf("map[command:git -C %s status reason:It has changes that are not committed.]", path) {
 		t.Fatal(code, answer)
 	}
 	if work := workOf(t, reg, "started"); work.SettledReason != registry.WorkSettledPerson {
@@ -151,7 +151,10 @@ func TestAPersonCleaningASessionsWorktreeKeepsUncommittedChanges(t *testing.T) {
 	if work := workOf(t, reg, "started"); len(work.KeptPaths) != 1 || work.KeptPaths[0] != "local.env" {
 		t.Fatalf("kept paths not recorded: %+v", work)
 	}
-	if code, answer := workAction(t, d, map[string]any{"action": "work-clean", "sessionId": "started", "forceIgnored": true}); code != http.StatusOK || answer["worktree"].(map[string]any)["cleanup"] != registry.WorkCleanupRemoved {
+	if code, answer := workAction(t, d, map[string]any{"action": "work-clean", "sessionId": "started", "removeIgnored": []string{"other.env"}}); code != http.StatusOK || answer["worktree"].(map[string]any)["cleanup"] != registry.WorkCleanupKept {
+		t.Fatalf("removing past ignored files the person did not name: %d %v", code, answer)
+	}
+	if code, answer := workAction(t, d, map[string]any{"action": "work-clean", "sessionId": "started", "removeIgnored": []string{"local.env"}}); code != http.StatusOK || answer["worktree"].(map[string]any)["cleanup"] != registry.WorkCleanupRemoved {
 		t.Fatal(code, answer)
 	}
 }
