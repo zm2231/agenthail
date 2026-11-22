@@ -49,24 +49,19 @@ func (c *Claude) AdoptSession(ctx context.Context, sess *surface.Session, reques
 	if root == "" {
 		return nil, surface.DeliveryTerminal(fmt.Errorf("Claude conversation %s has no transcript in any config root", conversation), surface.DeliveryTargetMissing)
 	}
-	_, records, err := c.records()
-	if err != nil {
-		return nil, surface.DeliveryUnavailable(err)
+	holder, err := c.soleHolder(ctx, conversation, root)
+	if err != nil || (holder != nil && holder.hosted) {
+		return hostedUnchanged(sess, holder, err)
 	}
-	if holders := holderRecords(records, conversation); len(holders) > 1 {
-		return nil, refuseSharedAdoption(conversation, holders)
-	}
-	holder, err := c.adoptHolder(ctx, conversation, root)
-	if err != nil {
+	if err := c.awaitReadableRecords(ctx, conversation, request.Wait); err != nil {
 		return nil, err
 	}
-	result := &surface.AdoptResult{}
-	if holder != nil && holder.hosted {
-		session := *sess
-		adoptClaudeProcess(&session, &holder.session)
-		result.Session, result.Unchanged = &session, true
-		return result, nil
+	// A holder whose record was torn during the first count reads now.
+	holder, err = c.soleHolder(ctx, conversation, root)
+	if err != nil || (holder != nil && holder.hosted) {
+		return hostedUnchanged(sess, holder, err)
 	}
+	result := &surface.AdoptResult{}
 	if holder != nil {
 		if result.Stopped, err = c.quiesce(ctx, conversation, root, holder, request); err != nil {
 			return nil, err
@@ -90,6 +85,26 @@ func (c *Claude) AdoptSession(ctx context.Context, sess *surface.Session, reques
 		return nil, err
 	}
 	return result, nil
+}
+
+func (c *Claude) soleHolder(ctx context.Context, conversation, root string) (*claudeAdoptHolder, error) {
+	_, records, err := c.records()
+	if err != nil {
+		return nil, surface.DeliveryUnavailable(err)
+	}
+	if holders := holderRecords(records, conversation); len(holders) > 1 {
+		return nil, refuseSharedAdoption(conversation, holders)
+	}
+	return c.adoptHolder(ctx, conversation, root)
+}
+
+func hostedUnchanged(sess *surface.Session, holder *claudeAdoptHolder, err error) (*surface.AdoptResult, error) {
+	if err != nil {
+		return nil, err
+	}
+	session := *sess
+	adoptClaudeProcess(&session, &holder.session)
+	return &surface.AdoptResult{Session: &session, Unchanged: true}, nil
 }
 
 type claudeAdoptHolder struct {
