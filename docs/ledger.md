@@ -204,7 +204,7 @@ Two kinds of notes attach to an item:
 
 `agenthail ledger status` (or `ledger current`) is where a session stands, in one read:
 
-- the items it holds, each with its newest log line and any handoff's remaining work;
+- the items it holds, each with its newest log line, any handoff's remaining work, and its unfinished children with who holds them;
 - items a reviewer sent back to it, with who rejected them and why, until it submits them again;
 - items it holds that are blocked or wait on unfinished dependencies;
 - what it submitted that waits for review;

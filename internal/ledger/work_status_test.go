@@ -1,6 +1,7 @@
 package ledger_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -64,5 +65,27 @@ func TestASessionsStatusSortsItsWorkAndNamesARejection(t *testing.T) {
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkSubmit, ItemID: "widget-W3"})
 	if status := board(t, s).SessionStatus("s1"); len(status.Rejected) != 0 || statusIDs(status.InReview) != "widget-W3,widget-W4" {
 		t.Fatalf("after resubmitting: rejected %v, in review %v", statusIDs(status.Rejected), statusIDs(status.InReview))
+	}
+}
+
+func TestAHeldParentListsItsUnfinishedChildrenAndWhoHoldsThem(t *testing.T) {
+	s := newStore(t)
+	searchAsk(t, s)
+	items(t, s, "search")
+	for _, text := range []string{"schema", "index", "endpoint"} {
+		work(t, s, ledger.WorkRequest{Action: ledger.WorkAdd, Text: text, Fields: ledger.WorkFields{Parent: "widget-W1"}})
+	}
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W1"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W3", SessionID: "other"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkClose, ItemID: "widget-W4", Reason: "obsolete"})
+
+	status := board(t, s).SessionStatus("s1")
+	if statusIDs(status.Holding) != "widget-W1" {
+		t.Fatalf("holding %q, want the parent", statusIDs(status.Holding))
+	}
+	row := status.Holding[0]
+	want := []ledger.StatusChild{{ID: "widget-W2", Text: "schema", State: ledger.WorkOpen}, {ID: "widget-W3", Text: "index", State: ledger.WorkInProgress, Assignee: "other"}}
+	if !slices.Equal(row.Children, want) || row.ChildrenFinished != 1 {
+		t.Fatalf("children %+v, %d finished; want %+v and 1", row.Children, row.ChildrenFinished, want)
 	}
 }

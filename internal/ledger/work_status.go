@@ -11,17 +11,26 @@ const (
 )
 
 type StatusRow struct {
-	ID         string     `json:"id"`
-	Text       string     `json:"text"`
-	State      WorkState  `json:"state"`
-	Priority   string     `json:"priority"`
-	Assignee   string     `json:"assignee,omitempty"`
-	LastLog    *WorkEntry `json:"lastLog,omitempty"`
-	Handoff    *Handoff   `json:"handoff,omitempty"`
-	RejectedBy string     `json:"rejectedBy,omitempty"`
-	Rejection  string     `json:"rejection,omitempty"`
-	Reason     string     `json:"reason,omitempty"`
-	WaitsOn    []string   `json:"waitsOn,omitempty"`
+	ID               string        `json:"id"`
+	Text             string        `json:"text"`
+	State            WorkState     `json:"state"`
+	Priority         string        `json:"priority"`
+	Assignee         string        `json:"assignee,omitempty"`
+	LastLog          *WorkEntry    `json:"lastLog,omitempty"`
+	Handoff          *Handoff      `json:"handoff,omitempty"`
+	RejectedBy       string        `json:"rejectedBy,omitempty"`
+	Rejection        string        `json:"rejection,omitempty"`
+	Reason           string        `json:"reason,omitempty"`
+	WaitsOn          []string      `json:"waitsOn,omitempty"`
+	Children         []StatusChild `json:"children,omitempty"`
+	ChildrenFinished int           `json:"childrenFinished,omitempty"`
+}
+
+type StatusChild struct {
+	ID       string    `json:"id"`
+	Text     string    `json:"text"`
+	State    WorkState `json:"state"`
+	Assignee string    `json:"assignee,omitempty"`
 }
 
 // SessionStatus is one session's place in the work: what it holds and in what shape, what it handed in,
@@ -107,5 +116,9 @@ func (b *Board) statusRow(item *WorkItem) StatusRow {
 	if item.Handoff != nil {
 		row.Handoff = item.Handoff.clone()
 	}
+	for _, child := range b.openChildren(item) {
+		row.Children = append(row.Children, StatusChild{ID: child.ID, Text: clipText(child.Text, readTextClip), State: child.State, Assignee: child.Assignee})
+	}
+	row.ChildrenFinished = len(item.Children) - len(row.Children)
 	return row
 }

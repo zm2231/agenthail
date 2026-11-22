@@ -41,6 +41,8 @@ func TestLedgerStatusShowsTheCallersWorkOrANamedSessions(t *testing.T) {
 		{SessionID: "s1", Action: ledger.WorkClaim, ItemID: "widget-W2"},
 		{SessionID: "s1", Action: ledger.WorkSubmit, ItemID: "widget-W2"},
 		{SessionID: "s2", Action: ledger.WorkReject, ItemID: "widget-W2", Reason: "no test for an empty query"},
+		{SessionID: "s3", Action: ledger.WorkAdd, Text: "tune the tokenizer", Fields: ledger.WorkFields{Parent: "widget-W1"}},
+		{SessionID: "s3", Action: ledger.WorkClaim, ItemID: "widget-W4"},
 	} {
 		req.ProjectKey = key
 		if _, err := ls.Work(req, time.Now()); err != nil {
@@ -60,7 +62,7 @@ func TestLedgerStatusShowsTheCallersWorkOrANamedSessions(t *testing.T) {
 		"status of s1",
 		"rejected, back to you:\n  widget-W2 [in_progress] P2 wire the endpoint\n    no log yet\n    s2 sent it back: no test for an empty query",
 		"holding:\n  widget-W1 [in_progress] P2 add the index\n    last log (progress, ",
-		"): fts5 builds in 2s",
+		"): fts5 builds in 2s\n    children, 0 of 1 finished\n      widget-W4 [in_progress] tune the tokenizer assignee=s3\n",
 		"ready to take next:\n  widget-W3 [open] P2 write the docs",
 	} {
 		if !strings.Contains(text, want) {
