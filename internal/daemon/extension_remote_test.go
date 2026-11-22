@@ -666,3 +666,13 @@ func TestAPairedHostsKeyedMountGetsItsKeyThroughTheLocalPortAndNoOtherBearerCros
 		}
 	}
 }
+
+func TestAPairedHostsEntriesGetNoPortWhileExtensionPortsAreOff(t *testing.T) {
+	f := newRemoteExtensionFixture(t)
+	f.local.daemon.extensionPortsOff = true
+	view := f.view(t)
+	page, mount := view.Extensions[0].Page, view.Extensions[1].Mounts[0]
+	if page.Port != 0 || page.Error != extensionPortsOffError || mount.Port != 0 || mount.Error != extensionPortsOffError {
+		t.Fatalf("with extension ports off a paired host's entries are page %+v mount %+v", page, mount)
+	}
+}

@@ -239,6 +239,9 @@ func (d *Daemon) syncExtensionMounts() error {
 	}
 	needName := remote.Enabled && len(m.served) > 0 && m.dnsName == ""
 	m.mu.Unlock()
+	d.extensionPortHolders.prune(func(key string) bool {
+		return !strings.HasPrefix(key, remoteHolderPrefix) && desired[key] == nil
+	})
 
 	dnsName, publishErrs := d.publishMounts(remote, ports, needName)
 	for key, message := range publishErrs {

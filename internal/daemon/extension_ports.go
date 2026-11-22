@@ -106,6 +106,16 @@ func (p *portHolders) clear(key string) {
 	delete(p.logged, key)
 }
 
+func (p *portHolders) prune(gone func(key string) bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for key := range p.logged {
+		if gone(key) {
+			delete(p.logged, key)
+		}
+	}
+}
+
 // listenExtensionPort binds key's recorded port, or with none a new port:
 // the first free one of a pinned pool, else one the system assigns. A recorded
 // port another process holds is retried on the next sync; the error names the

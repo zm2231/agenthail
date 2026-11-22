@@ -121,13 +121,15 @@ func (r *remoteExtensions) savePortsLocked() error {
 	return atomicfile.Write(path, append(data, '\n'), 0o600)
 }
 
+const remoteHolderPrefix = "remote "
+
 func (d *Daemon) listenRemoteLocked(key string) (net.Listener, int, error) {
 	r := d.remoteExtensions
 	taken := map[int]bool{}
 	for _, port := range r.ports {
 		taken[port] = true
 	}
-	return d.listenExtensionPort("remote "+key, r.ports[key], remoteExtensionPortBase, remoteExtensionPortCount, taken)
+	return d.listenExtensionPort(remoteHolderPrefix+key, r.ports[key], remoteExtensionPortBase, remoteExtensionPortCount, taken)
 }
 
 // A listed key keeps its port while unservable, so its origin survives.
@@ -219,7 +221,7 @@ func (d *Daemon) shareRemoteExtensions(host *pairedHost, view extensionsView) (e
 	view.BuiltIn = builtIn
 	for key := range r.ports {
 		if strings.HasPrefix(key, hostID+"/") && !listed[key] {
-			r.dropLocked(key)
+			d.dropRemoteLocked(key)
 			changed = true
 		}
 	}
@@ -231,7 +233,9 @@ func (d *Daemon) shareRemoteExtensions(host *pairedHost, view extensionsView) (e
 	return view, nil
 }
 
-func (r *remoteExtensions) dropLocked(key string) {
+func (d *Daemon) dropRemoteLocked(key string) {
+	r := d.remoteExtensions
+	d.extensionPortHolders.clear(remoteHolderPrefix + key)
 	if f := r.forwarders[key]; f != nil {
 		f.close()
 		delete(r.forwarders, key)
@@ -251,7 +255,7 @@ func (d *Daemon) forgetRemoteExtensions(hostID string) {
 	changed := false
 	for key := range r.ports {
 		if strings.HasPrefix(key, hostID+"/") {
-			r.dropLocked(key)
+			d.dropRemoteLocked(key)
 			changed = true
 		}
 	}
