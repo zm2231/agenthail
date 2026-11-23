@@ -1857,7 +1857,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"archived\":true,\"ok\":true,\"sessionId\":\"to\"}\n"
+    "body": "{\"archived\":true,\"ok\":true,\"run\":{\"stopped\":false},\"sessionId\":\"to\"}\n"
   },
   "api/action session-create": {
     "status": 400,
@@ -4497,7 +4497,7 @@
         "application/json; charset=utf-8"
       ]
     },
-    "body": "{\"archived\":true,\"ok\":true,\"sessionId\":\"to\"}\n"
+    "body": "{\"archived\":true,\"ok\":true,\"run\":{\"stopped\":false},\"sessionId\":\"to\"}\n"
   },
   "api/v1/actions session-create": {
     "status": 400,
