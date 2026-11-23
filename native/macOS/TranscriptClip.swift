@@ -3,7 +3,38 @@ import SwiftUI
 
 @MainActor
 final class TranscriptClip {
-    fileprivate weak var scroll: NSScrollView?
+    fileprivate weak var scroll: NSScrollView? {
+        didSet { if scroll !== oldValue { watch() } }
+    }
+    // Runs before AppKit moves the clip, so no layout pass can pin the reader back first.
+    var readerLeaves: (@MainActor () -> Void)?
+    private var monitor: EventMonitor?
+
+    private func watch() {
+        monitor = scroll == nil ? nil : EventMonitor { [weak self] event in
+            guard let self, self.movesAway(event) else { return }
+            self.readerLeaves?()
+        }
+    }
+
+    func movesAway(_ event: NSEvent) -> Bool {
+        guard let scroll, let window = scroll.window, event.window == nil || event.window === window else { return false }
+        switch event.type {
+        case .scrollWheel:
+            // An event with no window carries its location on screen.
+            let point = event.window == nil ? event.locationInWindow : window.convertPoint(toScreen: event.locationInWindow)
+            return event.scrollingDeltaY > 0 && window.convertToScreen(scroll.convert(scroll.bounds, to: nil)).contains(point)
+        case .keyDown:
+            // The transcript never takes focus itself; paging keys reach it when nothing else in the window has focus.
+            guard window.firstResponder === window || (window.firstResponder as? NSView).map({ $0 === scroll || $0.isDescendant(of: scroll) }) == true else { return false }
+            return [115, 116].contains(event.keyCode)
+        case .leftMouseDown:
+            guard event.window === window, let scroller = scroll.verticalScroller, !scroller.isHidden else { return false }
+            return scroller.bounds.contains(scroller.convert(event.locationInWindow, from: nil))
+        default:
+            return false
+        }
+    }
 
     var distanceToEnd: CGFloat? {
         guard let scroll, let document = scroll.documentView else { return nil }
@@ -48,5 +79,21 @@ struct TranscriptClipAnchor: NSViewRepresentable {
         }
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
+private final class EventMonitor {
+    private var token: Any?
+
+    @MainActor
+    init(_ handle: @escaping @MainActor (NSEvent) -> Void) {
+        token = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .keyDown, .leftMouseDown]) { event in
+            MainActor.assumeIsolated { handle(event) }
+            return event
+        }
+    }
+
+    deinit {
+        if let token { NSEvent.removeMonitor(token) }
     }
 }

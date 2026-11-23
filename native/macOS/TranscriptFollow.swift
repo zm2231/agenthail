@@ -112,11 +112,14 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 let wasFollowing = following
                 following = TranscriptFollowing.next(following, pass)
                 // A pin left the position at the bottom edge; once the reader leaves, it holds where they are so it is not applied again.
-                if wasFollowing, !following { position.scrollTo(y: Self.scrollY(new.contentOffset.y, in: new)) }
+                if !following, wasFollowing || layout.leftByInput {
+                    layout.leftByInput = false
+                    position.scrollTo(y: Self.scrollY(new.contentOffset.y, in: new))
+                }
                 if !resized {
                     if following, resting, layout.resized, !Self.atBottom(new) {
                         // Layout that moves the offset in the same pass as a resize, as a lazy stack re-measuring rows does, is not the reader leaving the bottom.
-                        settle { $0.scrollTo(edge: .bottom) }
+                        pinToEnd()
                     }
                 } else if following, !rescaling, phase == .idle || phase == .animating, TranscriptEnd(new).distance > 0.5 {
                     // With no size-change anchor, a following reader is kept at the end here, in the pass that grew the content.
@@ -140,6 +143,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             })
             .onAppear {
                 rows?.moved = { rowMoved($0) }
+                layout.clip.readerLeaves = { readerLeaves() }
                 rows?.holdingOlder = { holdOlderPlace(fresh: true) }
             }
             .onDisappear { layout.cancelCheck() }
@@ -236,10 +240,23 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
         if let geometry = layout.geometry { position.scrollTo(y: Self.scrollY(geometry.contentOffset.y, in: geometry)) }
     }
 
+    private func readerLeaves() {
+        guard following else { return }
+        following = false
+        layout.leftByInput = true
+    }
+
+    // A reader who scrolled away after a pin was queued keeps their place.
+    private func pinToEnd() {
+        settle { position in
+            if following { position.scrollTo(edge: .bottom) }
+        }
+    }
+
     // Updates during an animation are ignored, so one that comes to rest short of the bottom is checked once it has.
     private func returnToBottom() {
         guard following, let geometry = layout.geometry, !Self.atBottom(geometry) else { return }
-        settle { $0.scrollTo(edge: .bottom) }
+        pinToEnd()
     }
 
     // The geometry action can skip a stream's last change; false asks again once the scroll rests.
@@ -251,7 +268,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             if resting { layout.checkDeferred = true }
             return false
         case .scroll:
-            settle { $0.scrollTo(edge: .bottom) }
+            pinToEnd()
             return true
         case .clip:
             layout.clip.scrollToEnd()
@@ -291,6 +308,7 @@ private final class Layout {
     var lastGrowth: CGFloat?
     var animationStart: ContinuousClock.Instant?
     var gestureStart: CGFloat?
+    var leftByInput = false
     private var resizedTurn: Int?
     private var fromEnd: (distance: CGFloat, until: ContinuousClock.Instant, content: CGFloat, landing: Bool)?
     let row = TranscriptRowHold()

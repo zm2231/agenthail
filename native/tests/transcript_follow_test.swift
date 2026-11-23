@@ -653,21 +653,25 @@ struct TranscriptFollowTest {
         expectBottom(scroll, "rows streamed under a tall header stay followed")
 
         feed.header = 44
-        feed.transcript = "S"
-        feed.rows = rows("S", 60)
-        spin(0.6)
-        for index in 0..<10 {
-            feed.rows += rows("Sa\(index)-", 1)
-            spin(0.05)
+        for input in ReaderInput.allCases {
+            feed.transcript = "S\(input)"
+            feed.rows = rows("S\(input)", 60)
+            spin(0.6)
+            for index in 0..<10 {
+                feed.rows += rows("Sa\(input)\(index)-", 1)
+                spin(0.05)
+            }
+            let start = offset(scroll)
+            readerInput(scroll, input)
+            let readerPlace = offset(scroll)
+            expect(start - readerPlace > 100, "a reader's \(input) moved them up while rows stream, from \(start) to \(readerPlace)")
+            for index in 0..<20 {
+                feed.rows += rows("Sb\(input)\(index)-", 1)
+                spin(0.05)
+            }
+            spin(0.6)
+            expect(!feed.following && abs(offset(scroll) - readerPlace) < 1, "a reader who scrolls up with \(input) while rows stream stays put, offset \(readerPlace) became \(offset(scroll))")
         }
-        move(scroll, to: offset(scroll) - 400)
-        let readerPlace = offset(scroll)
-        for index in 0..<20 {
-            feed.rows += rows("Sb\(index)-", 1)
-            spin(0.05)
-        }
-        spin(0.6)
-        expect(!feed.following && abs(offset(scroll) - readerPlace) < 1, "a reader who scrolls up while rows stream stays put, offset \(readerPlace) became \(offset(scroll))")
 
         // Inside a main-queue block the main queue cannot run another, as on a machine too busy to drain it between passes.
         feed.transcript = "Q"
@@ -681,7 +685,7 @@ struct TranscriptFollowTest {
                 spin(0.05)
             }
             let start = offset(scroll)
-            move(scroll, to: start - 400)
+            readerInput(scroll, .wheel)
             busyPlace = offset(scroll)
             expect(start - busyPlace > 300, "the reader scrolled up from \(start) to \(busyPlace) while the main queue was busy")
             for index in 0..<10 {
@@ -692,7 +696,7 @@ struct TranscriptFollowTest {
         }
         while !busyDone { spin(0.05) }
         spin(0.6)
-        expect(!feed.following && abs(offset(scroll) - busyPlace) < 1, "a reader who scrolls up while rows stream stays put when the main queue is busy, offset \(busyPlace) became \(offset(scroll))")
+        expect(!feed.following && abs(offset(scroll) - busyPlace) < 1, "a reader who scrolls up while rows stream stays put when the main queue is busy, offset \(busyPlace) became \(offset(scroll)), following \(feed.following)")
 
         feed.transcript = "N"
         feed.rows = rows("N", 60)
@@ -967,6 +971,55 @@ struct TranscriptFollowTest {
         for _ in 0..<5 { grow(3) }
         spin(0.4)
         expect(!feed.following && abs(place(paged.id) - paged.screen) < 1, "a reader who paged up from the end keeps their place as the last row grows, \(paged.id) at \(Int(paged.screen)) moved to \(place(paged.id))")
+    }
+
+    enum ReaderInput: CaseIterable { case wheel, pageUp, scroller }
+
+    // Sent through the application, where AppKit runs event monitors, and to the handling view only if the hidden window was not routed it.
+    @MainActor
+    private static func readerInput(_ scroll: NSScrollView, _ input: ReaderInput) {
+        guard let window = scroll.window, let content = window.contentView else { return expect(false, "the transcript is in a window") }
+        switch input {
+        case .wheel:
+            let center = scroll.convert(NSPoint(x: scroll.bounds.midX, y: scroll.bounds.midY), to: nil)
+            guard let target = content.hitTest(content.convert(center, from: nil)) else { return expect(false, "the transcript is under the pointer") }
+            let screen = window.convertPoint(toScreen: center)
+            let flipped = (NSScreen.screens.first?.frame.height ?? 0) - screen.y
+            for (phase, delta) in [(Int64(1), Int32(0)), (2, 400), (4, 0)] {
+                let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: delta, wheel2: 0, wheel3: 0)!
+                event.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+                event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+                event.location = CGPoint(x: screen.x, y: flipped)
+                let wheel = NSEvent(cgEvent: event)!
+                let before = offset(scroll)
+                NSApp.sendEvent(wheel)
+                if offset(scroll) == before { target.scrollWheel(with: wheel) }
+                spin(0.016)
+            }
+        case .pageUp:
+            window.makeFirstResponder(nil)
+            let key = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                       context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 116)!
+            let before = offset(scroll)
+            NSApp.sendEvent(key)
+            if offset(scroll) == before { scroll.pageUp(nil) }
+        case .scroller:
+            guard let scroller = scroll.verticalScroller else { return expect(false, "the transcript has a scroller") }
+            let knob = scroller.rect(for: .knob)
+            let grab = scroller.convert(NSPoint(x: knob.midX, y: knob.midY), to: nil)
+            let drag = scroller.convert(NSPoint(x: knob.midX, y: knob.midY - 40), to: nil)
+            func mouse(_ type: NSEvent.EventType, _ point: NSPoint) -> NSEvent {
+                NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                   context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            }
+            NSApp.postEvent(mouse(.leftMouseDragged, drag), atStart: false)
+            NSApp.postEvent(mouse(.leftMouseUp, drag), atStart: false)
+            let down = mouse(.leftMouseDown, grab)
+            let before = offset(scroll)
+            NSApp.sendEvent(down)
+            if offset(scroll) == before { scroller.mouseDown(with: down) }
+        }
+        spin(0.4)
     }
 
     // One phased gesture, measured by how far the offset moved, so a re-estimate the gesture triggers is not corrected away by another.

@@ -15,6 +15,58 @@ struct TranscriptClipTest {
         override var isFlipped: Bool { true }
     }
 
+    static func readerInput() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+        window.alphaValue = 0
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+        scroll.hasVerticalScroller = true
+        scroll.scrollerStyle = .legacy
+        let document = Document(frame: NSRect(x: 0, y: 0, width: 400, height: 2000))
+        scroll.documentView = document
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
+        container.addSubview(scroll)
+        window.contentView = container
+        let clip = TranscriptClip()
+        let anchor = TranscriptClipAnchor.AnchorView(frame: .zero)
+        anchor.clip = clip
+        document.addSubview(anchor)
+        anchor.register()
+
+        func key(_ code: UInt16) -> NSEvent {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                             characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: code)!
+        }
+        window.makeFirstResponder(nil)
+        check(clip.movesAway(key(116)), "Page Up with nothing focused moves the transcript away from the end")
+        check(clip.movesAway(key(115)), "Home with nothing focused moves the transcript away from the end")
+        check(!clip.movesAway(key(121)), "Page Down does not move away from the end")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+        container.addSubview(field)
+        check(window.makeFirstResponder(field), "the field takes focus")
+        check(!clip.movesAway(key(116)), "Page Up typed into another field leaves the transcript alone")
+        window.makeFirstResponder(nil)
+
+        func wheel(_ delta: Int32, at point: NSPoint) -> NSEvent {
+            let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: delta, wheel2: 0, wheel3: 0)!
+            let screen = window.convertPoint(toScreen: point)
+            event.location = CGPoint(x: screen.x, y: (NSScreen.screens.first?.frame.height ?? 0) - screen.y)
+            return NSEvent(cgEvent: event)!
+        }
+        check(clip.movesAway(wheel(40, at: NSPoint(x: 200, y: 300))), "a wheel scroll up over the transcript moves it away from the end")
+        check(!clip.movesAway(wheel(-40, at: NSPoint(x: 200, y: 300))), "a wheel scroll down over the transcript does not")
+        check(!clip.movesAway(wheel(40, at: NSPoint(x: 200, y: 900))), "a wheel scroll outside the transcript does not")
+
+        func press(_ point: NSPoint) -> NSEvent {
+            NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                               eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        guard let scroller = scroll.verticalScroller else { return check(false, "the scroll view has a scroller") }
+        let onScroller = scroller.convert(NSPoint(x: scroller.bounds.midX, y: scroller.bounds.midY), to: nil)
+        check(clip.movesAway(press(onScroller)), "a press on the scroller moves the transcript away from the end")
+        check(!clip.movesAway(press(NSPoint(x: 100, y: 300))), "a press on the rows does not")
+        check(!TranscriptClip().movesAway(key(116)), "a clip with no transcript takes no input")
+    }
+
     static func main() {
         let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
         scroll.automaticallyAdjustsContentInsets = false
@@ -45,6 +97,7 @@ struct TranscriptClipTest {
         other.documentView?.addSubview(anchor)
         anchor.register()
         check(abs((clip.distanceToEnd ?? 0) - (900 - other.contentView.bounds.maxY)) < 0.5, "an anchor moved into another transcript reads that transcript's clip")
+        readerInput()
         print("ok   transcript_clip_test")
     }
 }
