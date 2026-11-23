@@ -188,3 +188,16 @@ func runtimeName(runtime surface.RuntimeKind, kind surface.SurfaceKind) string {
 	}
 	return string(kind)
 }
+
+// CodexGuide goes in the developer instructions of a Codex thread Agenthail
+// opens with its agenthail server. Codex rebuilds those after compacting, so
+// the guide outlasts it; who the session is changes and comes with its turns.
+func CodexGuide() string {
+	var b strings.Builder
+	b.WriteString(guide(true))
+	b.WriteString("\nYour Agenthail tools:\n")
+	for _, line := range agenttools.CardLines(agenttools.CardInput{Tools: agenttools.GivenTools}) {
+		fmt.Fprintf(&b, "  %s: %s\n", line.Use, line.Line)
+	}
+	return b.String()
+}

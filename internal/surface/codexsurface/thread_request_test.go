@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/agentcard"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
@@ -28,6 +30,8 @@ func (c *scriptedThreadClient) Request(_ context.Context, method string, params 
 	switch method {
 	case codexThreadStart, codexThreadFork:
 		return map[string]any{"result": map[string]any{"thread": map[string]any{"id": "new-thread"}}}, nil
+	case "config/read":
+		return map[string]any{"result": map[string]any{"config": map[string]any{"developer_instructions": "Answer in French."}}}, nil
 	case "thread/loaded/list":
 		if c.loaded {
 			return map[string]any{"result": map[string]any{"data": []any{"t"}}}, nil
@@ -80,10 +84,20 @@ func TestStartAndForkCarryAPendingCredential(t *testing.T) {
 		c.SetMCPCredentials(credentials)
 		client := &scriptedThreadClient{}
 		_, err := c.codexThreadRequest(context.Background(), client, method, nil, map[string]any{"cwd": "/w"}, time.Second)
-		if err != nil || bearerOf(client.calls[0].params) != "Bearer ahs_pending" || client.calls[0].params["cwd"] != "/w" {
-			t.Fatalf("%s: err=%v, the call did not carry the pending bearer and its own params", method, err)
+		if err != nil || !slices.Equal(client.methods(), []string{"config/read", method}) {
+			t.Fatalf("%s: err=%v calls=%v", method, err, client.methods())
 		}
-		config, _ := client.calls[0].params["config"].(map[string]any)
+		if client.calls[0].params["cwd"] != "/w" {
+			t.Fatalf("%s: read the person's instructions for %v, not the thread's folder", method, client.calls[0].params)
+		}
+		open := client.calls[1].params
+		if bearerOf(open) != "Bearer ahs_pending" || open["cwd"] != "/w" {
+			t.Fatalf("%s: the call did not carry the pending bearer and its own params", method)
+		}
+		if instructions, _ := open["developerInstructions"].(string); !strings.HasPrefix(instructions, "Answer in French.\n\n") || !strings.Contains(instructions, agentcard.CodexGuide()) {
+			t.Fatalf("%s: developerInstructions %q, want the person's own followed by the Agenthail guide", method, instructions)
+		}
+		config, _ := open["config"].(map[string]any)
 		servers, _ := config["mcp_servers"].(map[string]any)
 		if server, _ := servers[surface.MCPServerName].(map[string]any); server["default_tools_approval_mode"] != "approve" {
 			t.Fatalf("%s: the agenthail tools would wait for approval", method)
@@ -102,7 +116,7 @@ func TestResumeCarriesTheLiveTokenTheDaemonHolds(t *testing.T) {
 	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if got := client.methods(); len(got) != 2 || bearerOf(client.calls[1].params) != "Bearer ahs_live" {
+	if got := client.methods(); !slices.Equal(got, []string{"thread/loaded/list", "config/read", codexThreadResume}) || bearerOf(client.calls[2].params) != "Bearer ahs_live" {
 		t.Fatalf("calls=%v", got)
 	}
 }
@@ -150,7 +164,7 @@ func TestAThreadThatUnloadedBeforeResumeIsReattachedWithARotatedToken(t *testing
 	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"thread/loaded/list", codexThreadResume, "mcpServerStatus/list", "thread/read", "thread/unsubscribe", codexThreadResume, "mcpServerStatus/list"}
+	want := []string{"thread/loaded/list", codexThreadResume, "mcpServerStatus/list", "thread/read", "thread/unsubscribe", "config/read", codexThreadResume, "mcpServerStatus/list"}
 	got := client.methods()
 	if len(got) != len(want) {
 		t.Fatalf("calls=%v", got)
@@ -160,7 +174,7 @@ func TestAThreadThatUnloadedBeforeResumeIsReattachedWithARotatedToken(t *testing
 			t.Fatalf("calls=%v", got)
 		}
 	}
-	if credentials.Rotations != 1 || bearerOf(client.calls[5].params) != "Bearer ahs_rotated" || len(credentials.UnattachedErrors) != 0 {
+	if credentials.Rotations != 1 || bearerOf(client.calls[6].params) != "Bearer ahs_rotated" || len(credentials.UnattachedErrors) != 0 {
 		t.Fatalf("rotations=%d unattached=%v, the re-attach did not carry the rotated bearer", credentials.Rotations, credentials.UnattachedErrors)
 	}
 }
@@ -173,11 +187,11 @@ func TestALoadedThreadWhoseCredentialPassedItsLimitIsReloadedWithANewToken(t *te
 	if _, err := c.codexThreadRequest(context.Background(), client, codexThreadResume, &surface.Session{ID: "t"}, map[string]any{"threadId": "t"}, time.Second); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"thread/loaded/list", codexThreadResume, "thread/read", "thread/turns/list", "thread/unsubscribe", codexThreadResume, "mcpServerStatus/list"}
+	want := []string{"thread/loaded/list", codexThreadResume, "thread/read", "thread/turns/list", "thread/unsubscribe", "config/read", codexThreadResume, "mcpServerStatus/list"}
 	if got := client.methods(); !slices.Equal(got, want) {
 		t.Fatalf("calls=%v", got)
 	}
-	if credentials.Rotations != 1 || bearerOf(client.calls[5].params) != "Bearer ahs_rotated" || len(credentials.UnattachedErrors) != 0 {
+	if credentials.Rotations != 1 || bearerOf(client.calls[6].params) != "Bearer ahs_rotated" || len(credentials.UnattachedErrors) != 0 {
 		t.Fatalf("rotations=%d unattached=%v, the expired token stayed attached", credentials.Rotations, credentials.UnattachedErrors)
 	}
 }
