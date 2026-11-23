@@ -42,6 +42,7 @@ func (d *Daemon) mcpActionAs(ctx context.Context, caller *mcpCaller, p principal
 			return nil, err
 		}
 		request.ScopeProjectID, request.ScopeRank = limits.project, limits.rank
+		request.ScopeOverseen, request.ScopeControl = limits.overseen, limits.control
 	}
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -54,9 +55,12 @@ func (d *Daemon) mcpActionAs(ctx context.Context, caller *mcpCaller, p principal
 			Result struct {
 				NotSteered *bool `json:"notSteered"`
 			} `json:"result"`
+			ControlDecision string `json:"controlDecision"`
 		}
 		_ = json.Unmarshal(result, &outcome)
-		d.noticeAfter(ctx, caller, limits.notice.told(outcome.Result.NotSteered, ""), nil)
+		if notifies(outcome.ControlDecision) {
+			d.noticeAfter(ctx, caller, limits.notice.told(outcome.Result.NotSteered, ""), nil)
+		}
 	}
 	d.recordMCPWrite(caller, tool, mcpAuditTarget(request), write.ClientRequestID, refusal)
 	if refusal != nil {

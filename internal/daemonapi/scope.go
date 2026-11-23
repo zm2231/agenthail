@@ -25,6 +25,9 @@ type ScopeRequest struct {
 	// Ran is the action the command ran on the scoped target, for a notice
 	// held before the command named it.
 	Ran string `json:"ran,omitempty"`
+	// ControlDecision is the decision the owning host reported applying to
+	// the action, unset when that host did not report one.
+	ControlDecision string `json:"controlDecision,omitempty"`
 }
 
 type ScopeReply struct {
@@ -32,6 +35,8 @@ type ScopeReply struct {
 	ProjectID      string `json:"projectId,omitempty"`
 	ScopeProjectID string `json:"scopeProjectId,omitempty"`
 	ScopeRank      string `json:"scopeRank,omitempty"`
+	ScopeOverseen  string `json:"scopeOverseen,omitempty"`
+	ScopeControl   string `json:"scopeControl,omitempty"`
 	AskID          string `json:"askId,omitempty"`
 	Notice         string `json:"notice,omitempty"`
 }

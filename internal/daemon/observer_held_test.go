@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -203,4 +204,58 @@ func TestALaterTurnTakesOverAHeldCompletion(t *testing.T) {
 	d.observeSession(t.Context(), fake, &from)
 	expectNotification(t, received, "turn-2")
 	expectNoNotification(t, received, "the superseded turn also notified")
+}
+
+func TestAHeldTurnOnlyOtherAgentsStartedStaysQuietWhenThePersonTurnedThatOff(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	d, r, fake, from, to := daemonFixture(t)
+	received := pushNotifications(t, r)
+	running := &surface.BackgroundTasks{Running: true, Source: surface.BackgroundSourceTranscript, Tasks: []surface.BackgroundTask{{ID: "call-build", Kind: surface.BackgroundShell}}}
+	source := backgroundSourceSurface{daemonSurface: fake, background: running}
+	holdAgentTurn := func(turnID string) {
+		t.Helper()
+		fake.turnID = turnID
+		if _, err := d.dispatcher().DeliverWithOptions(t.Context(), fake, &from, "build it", "", surface.SendOptions{SourceSessionID: to.ID}); err != nil {
+			t.Fatal(err)
+		}
+		fake.observeErr = nil
+		source.background = running
+		for _, observation := range []*surface.TurnObservation{
+			{Status: surface.StatusIdle},
+			{Status: surface.StatusBusy, ActiveTurnID: turnID},
+			{Status: surface.StatusIdle, CompletedTurnID: turnID, Reply: &surface.ReplyResult{Done: true}, BackgroundTasks: running},
+		} {
+			fake.observations["from"] = observation
+			d.observeSession(t.Context(), source, &from)
+		}
+		if state, _, err := r.RuntimeState("from"); err != nil || state.HeldCompletionTurnID != turnID {
+			t.Fatalf("turn %s is not held: state=%+v err=%v", turnID, state, err)
+		}
+	}
+	if err := dashconfig.Save(dashconfig.Config{NotificationPreferences: map[string]bool{notificationPreferenceAgentStartedTurns: false}}); err != nil {
+		t.Fatal(err)
+	}
+
+	holdAgentTurn("turn-1")
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-1", Reply: &surface.ReplyResult{Done: true}}
+	d.observeSession(t.Context(), source, &from)
+	expectNoNotification(t, received, "a held turn another agent started notified when its work stopped")
+
+	holdAgentTurn("turn-2")
+	fake.observeErr = errors.New("Codex is unavailable")
+	source.background = nil
+	d.observeSession(t.Context(), source, &from)
+	expectNoNotification(t, received, "an unobserved held turn another agent started notified")
+	if state, _, err := r.RuntimeState("from"); err != nil || state.HeldCompletionTurnID != "" {
+		t.Fatalf("the unobserved hold was not released: state=%+v err=%v", state, err)
+	}
+
+	if err := dashconfig.Save(dashconfig.Config{}); err != nil {
+		t.Fatal(err)
+	}
+	holdAgentTurn("turn-3")
+	fake.observeErr = errors.New("Codex is unavailable")
+	source.background = nil
+	d.observeSession(t.Context(), source, &from)
+	expectNotification(t, received, "turn-3")
 }

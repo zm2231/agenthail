@@ -273,6 +273,11 @@ func (a *App) controlRemote(ctx context.Context, remote *remoteTarget, action, v
 	if action == "model" {
 		payload["model"] = value
 	}
+	if action == "interrupt" {
+		if source, err := a.sourceSessionID(ctx, ""); err == nil && source != "" {
+			payload["sourceSessionId"] = source
+		}
+	}
 	data, err := a.remoteAction(ctx, remote, action, payload)
 	if err != nil {
 		return err

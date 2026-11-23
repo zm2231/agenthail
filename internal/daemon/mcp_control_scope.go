@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/agentroles"
+	"github.com/zm2231/agenthail/internal/hosts"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -51,7 +52,11 @@ func (d *Daemon) mcpReachTarget(ctx context.Context, caller *mcpCaller, ref stri
 		if err != nil {
 			return nil, "", err
 		}
-		return session, "", nil
+		notice, err := d.overseenControl(caller, session, reach)
+		if err != nil {
+			return nil, "", err
+		}
+		return session, notice, nil
 	}
 	notice, admitted, crossErr := d.crossProjectReach(caller, session, reach)
 	if crossErr != nil {
@@ -61,6 +66,23 @@ func (d *Daemon) mcpReachTarget(ctx context.Context, caller *mcpCaller, ref stri
 		return nil, "", err
 	}
 	return session, notice, nil
+}
+
+// A session on a paired host is decided by that host, which knows its starter.
+func (d *Daemon) overseenControl(caller *mcpCaller, session *surface.Session, reach controlReach) (string, error) {
+	if reach != reachSteer || caller.role == nil {
+		return "", nil
+	}
+	if _, _, remote := hosts.Split(session.ID); remote || !d.oversees(caller.session.ID, *session) {
+		return "", nil
+	}
+	switch caller.role.Decision(overseenControl) {
+	case agentroles.Ask:
+		return "", overseenRefusal(session.ID, d.resolveDisplay(session.ID))
+	case agentroles.Notify:
+		return "Steered, interrupted or sent now to " + d.resolveDisplay(session.ID), nil
+	}
+	return "", nil
 }
 
 func (d *Daemon) reachTarget(ctx context.Context, caller *mcpCaller, ref string, reach controlReach) (*surface.Session, error) {

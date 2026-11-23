@@ -214,7 +214,7 @@ func (d *Daemon) agentScope(r *http.Request, caller *mcpCaller, request daemonap
 		}
 		return daemonapi.ScopeReply{ProjectID: key, Notice: d.holdAgentNotice(caller, notice)}, nil
 	case "notice":
-		if what, found := d.agentNotices.take(strings.TrimSpace(request.Notice), caller.session.ID, time.Now()); found {
+		if what, found := d.agentNotices.take(strings.TrimSpace(request.Notice), caller.session.ID, time.Now()); found && notifies(request.ControlDecision) {
 			d.notifyAgentAction(r.Context(), caller.session.ID, what.told(request.NotSteered, strings.TrimSpace(request.Ran)))
 		}
 		return daemonapi.ScopeReply{}, nil

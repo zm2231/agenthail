@@ -5,17 +5,37 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/zm2231/agenthail/internal/agentroles"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
 // forwardedScope checks an agent's action that a paired host sent here for a
 // session in the agent's own project. The sending host admitted it from its
 // mirror; this host knows the session's project, whether it is archived and
-// its permission rank, so it decides again.
-func (d *Daemon) forwardedScope(session surface.Session, request dashboardActionRequest) error {
+// its permission rank, so it decides again. It also knows whether the caller
+// started or leads the session, so it picks which of the caller's two
+// decisions applies and returns it.
+func (d *Daemon) forwardedScope(session surface.Session, request dashboardActionRequest) (string, error) {
 	if request.ScopeProjectID == "" || surface.IsAgentIdentity(&session) {
-		return nil
+		return "", nil
 	}
+	if err := d.forwardedLimits(session, request); err != nil {
+		return "", err
+	}
+	decision := request.ScopeControl
+	if decision == "" {
+		return "", nil
+	}
+	if reachOf(request) == reachSteer && d.oversees(request.SourceSessionID, session) {
+		decision = request.ScopeOverseen
+	}
+	if decision == agentroles.Ask {
+		return "", scopeFailure("not_queued", fmt.Sprintf("the caller's role leaves this action on %s to the person", session.ID))
+	}
+	return decision, nil
+}
+
+func (d *Daemon) forwardedLimits(session surface.Session, request dashboardActionRequest) error {
 	if project := d.resolveProject(session); project != request.ScopeProjectID {
 		return scopeFailure("different_project", fmt.Sprintf("%s is not in the caller's project %s; across hosts an agent reaches only sessions in its own project", session.ID, request.ScopeProjectID))
 	}

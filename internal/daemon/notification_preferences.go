@@ -6,9 +6,13 @@ import (
 	"net/http"
 
 	"github.com/zm2231/agenthail/internal/dashconfig"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const notificationPreferenceLeadCompletionsOnly = "leadCompletionsOnly"
+const (
+	notificationPreferenceLeadCompletionsOnly = "leadCompletionsOnly"
+	notificationPreferenceAgentStartedTurns   = "agentStartedTurns"
+)
 
 type notificationPreference struct {
 	ID      string `json:"id"`
@@ -21,6 +25,7 @@ type notificationPreference struct {
 // A new preference is one more row here; both apps draw whatever rows the daemon returns.
 var notificationPreferences = []notificationPreference{
 	{ID: notificationPreferenceLeadCompletionsOnly, Title: "Only the lead's completions in projects with a lead", Detail: "Other agents in a project with a lead stay quiet when they finish. Questions, permission requests and Needs you always come through.", Default: true},
+	{ID: notificationPreferenceAgentStartedTurns, Title: "Turns other agents start", Detail: "Tell me when an agent finishes a turn that only other agents' messages started. Questions, permission requests and Needs you always come through.", Default: true},
 }
 
 func notificationPreferenceRows(config dashconfig.Config) []notificationPreference {
@@ -64,6 +69,31 @@ func (d *Daemon) completionQuietedForLead(sessionID string) bool {
 	}
 	lead, ok := leads.leadOf(project)
 	return ok && lead.sessionID != sessionID
+}
+
+// turnStartedByAgents reports whether every input of a turn came from another
+// agent: the person, a terminal and the Agenthail CLI start turns that need
+// the person, and an input with no delivery on record may be any of them.
+func (d *Daemon) turnStartedByAgents(sessionID string, inputs []string) bool {
+	if len(inputs) == 0 {
+		return false
+	}
+	senders, err := d.Registry.DeliverySenders(sessionID, inputs)
+	if err != nil {
+		d.log.Printf("read who started the turn of %s: %s", d.resolveDisplay(sessionID), err)
+		return false
+	}
+	for _, input := range inputs {
+		sender, found := senders[input]
+		if !found || sender == surface.PersonSessionID || sender == surface.CLISessionID {
+			return false
+		}
+	}
+	return true
+}
+
+func (d *Daemon) completionQuietedForAgents(entry *pendingTurnPush) bool {
+	return entry.agentStarted && !d.notificationPreference(notificationPreferenceAgentStartedTurns)
 }
 
 func (d *Daemon) notificationPreferencesHandler(w http.ResponseWriter, r *http.Request) {

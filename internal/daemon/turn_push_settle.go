@@ -33,6 +33,9 @@ type pendingTurnPush struct {
 	paused bool
 	gen    int
 	timer  *time.Timer
+	// agentStarted holds while every turn the push covers was started by
+	// other agents alone.
+	agentStarted bool
 }
 
 func (entry *pendingTurnPush) pause() {
@@ -90,7 +93,7 @@ func (d *Daemon) turnJudgmentQueued(sessionID, turnID string) {
 // A session pushes once per burst of turns: a turn's finished push waits for its verdict, or for the session to go idle, and a newer turn of the session takes its place.
 func (d *Daemon) scheduleTurnPush(sessionID, turnID string, notice turnCompletedNotice) {
 	p := d.turnPushes
-	entry := &pendingTurnPush{turnID: turnID, notice: notice}
+	entry := &pendingTurnPush{turnID: turnID, notice: notice, agentStarted: notice.agentStarted}
 	p.mu.Lock()
 	answered := p.verdict(sessionID, turnID) == verdictNeedsYou
 	for marked, state := range p.verdicts[sessionID] {
@@ -101,6 +104,7 @@ func (d *Daemon) scheduleTurnPush(sessionID, turnID string, notice turnCompleted
 	if prior := p.pending[sessionID]; prior != nil {
 		p.remove(sessionID, prior)
 		entry.turns = append(entry.turns, prior.turns...)
+		entry.agentStarted = entry.agentStarted && prior.agentStarted
 	}
 	entry.turns = append(entry.turns, turnID)
 	if answered {
@@ -159,6 +163,10 @@ func (d *Daemon) sendSettledTurnPush(sessionID string, entry *pendingTurnPush, r
 		d.logSettledPush(sessionID, entry.turns, reason, "turn.completed suppressed=lead-only")
 		return
 	}
+	if d.completionQuietedForAgents(entry) {
+		d.logSettledPush(sessionID, entry.turns, reason, "turn.completed suppressed=agent-started")
+		return
+	}
 	d.logSettledPush(sessionID, entry.turns, reason, "turn.completed")
 	d.recordTurnNotice(sessionID, entry.turnID, entry.notice)
 	d.notifyTurnCompleted(entry.notice, sessionID, entry.turnID)
@@ -179,6 +187,10 @@ func (d *Daemon) flushTurnPushes() {
 	for sessionID, entry := range held {
 		if d.completionQuietedForLead(sessionID) {
 			d.logSettledPush(sessionID, entry.turns, settledOnShutdown, "turn.completed suppressed=lead-only")
+			continue
+		}
+		if d.completionQuietedForAgents(entry) {
+			d.logSettledPush(sessionID, entry.turns, settledOnShutdown, "turn.completed suppressed=agent-started")
 			continue
 		}
 		d.logSettledPush(sessionID, entry.turns, settledOnShutdown, "turn.completed")

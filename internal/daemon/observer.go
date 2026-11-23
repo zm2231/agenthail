@@ -216,14 +216,7 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 	completionChanged := found && !completionPredatesActiveDelivery && observation.CompletedTurnID != "" && observation.CompletedTurnID != previous.CompletedTurnID
 	if completionChanged {
 		if observation.Reply != nil && observation.Reply.Done && observation.Reply.Error == "" {
-			var providerKeys []string
-			switch session.Surface {
-			case surface.KindCodex:
-				providerKeys = []string{observation.CompletedTurnID}
-			case surface.KindClaude:
-				providerKeys = observation.InputTurnIDs
-			}
-			for _, providerKey := range providerKeys {
+			for _, providerKey := range turnInputs(session.Surface, observation.CompletedTurnID, observation.InputTurnIDs) {
 				if providerKey == "" {
 					continue
 				}
@@ -288,6 +281,9 @@ func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surf
 	notice := turnCompletedNotice{title: notificationTitle, desktop: notificationBody, mobile: notificationBody, outcome: notificationOutcome}
 	if notice.desktop != "" && observation.Reply.Error == "" {
 		notice = d.endTurnNotifications(session, observation.CompletedTurnID, notice.title, notice.desktop)
+	}
+	if notice.desktop != "" {
+		notice.agentStarted = d.turnStartedByAgents(session.ID, turnInputs(session.Surface, observation.CompletedTurnID, observation.InputTurnIDs))
 	}
 	if held != previous.HeldCompletionTurnID {
 		if err := d.Registry.HoldCompletion(session.ID, held); err != nil {
@@ -407,6 +403,18 @@ func (d *Daemon) setSessionSourceHold(session *surface.Session, active bool, hol
 		return
 	}
 	d.holdSessionSource(session, adapter, holder)
+}
+
+// turnInputs are the provider keys of what a completed turn read, as a
+// delivery records them: a Codex turn's id, or each Claude input.
+func turnInputs(kind surface.SurfaceKind, completedTurnID string, inputs []string) []string {
+	switch kind {
+	case surface.KindCodex:
+		return []string{completedTurnID}
+	case surface.KindClaude:
+		return inputs
+	}
+	return nil
 }
 
 func completionNotificationEligible(state registry.RuntimeState, observedActive bool) bool {

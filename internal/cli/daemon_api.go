@@ -31,9 +31,10 @@ type daemonAPIClient struct {
 // the host that owns it checks, and whether that host delivered a steer to
 // it as a message, which the notice the command sends afterwards says.
 type forwardedAction struct {
-	limits     *daemonapi.ScopeReply
-	notSteered *bool
-	ran        string
+	limits          *daemonapi.ScopeReply
+	notSteered      *bool
+	controlDecision string
+	ran             string
 }
 
 func daemonEndpoint() (string, string, error) {
@@ -193,6 +194,9 @@ func (c *daemonAPIClient) scope(payload map[string]any) bool {
 	if limits.ScopeRank != "" {
 		payload["scopeRank"] = limits.ScopeRank
 	}
+	if limits.ScopeControl != "" {
+		payload["scopeOverseen"], payload["scopeControl"] = limits.ScopeOverseen, limits.ScopeControl
+	}
 	c.forward.ran, _ = payload["action"].(string)
 	return true
 }
@@ -202,8 +206,9 @@ func (c *daemonAPIClient) recordOutcome(data []byte) {
 		Result struct {
 			NotSteered *bool `json:"notSteered"`
 		} `json:"result"`
+		ControlDecision string `json:"controlDecision"`
 	}
 	if json.Unmarshal(data, &reply) == nil {
-		c.forward.notSteered = reply.Result.NotSteered
+		c.forward.notSteered, c.forward.controlDecision = reply.Result.NotSteered, reply.ControlDecision
 	}
 }

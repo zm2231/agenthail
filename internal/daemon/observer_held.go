@@ -52,6 +52,7 @@ func (d *Daemon) releaseUnobservedHold(ctx context.Context, adapter surface.Surf
 		var noticed *turnCompletedNotice
 		if !session.Delegated() {
 			notice := d.endTurnNotifications(session, turnID, d.sessionPushTag(session), "Finished")
+			notice.agentStarted = d.turnStartedByAgents(session.ID, turnInputs(session.Surface, turnID, nil))
 			noticed = &notice
 		}
 		switch {

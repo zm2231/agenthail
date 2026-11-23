@@ -136,7 +136,7 @@ func (a *App) sendAgentNotices() {
 	a.agentNotices = nil
 	for _, notice := range notices {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		if _, err := a.agentScope(ctx, daemonapi.ScopeRequest{Action: "notice", Notice: notice, NotSteered: a.forwarded.notSteered, Ran: a.forwarded.ran}); err != nil {
+		if _, err := a.agentScope(ctx, daemonapi.ScopeRequest{Action: "notice", Notice: notice, NotSteered: a.forwarded.notSteered, Ran: a.forwarded.ran, ControlDecision: a.forwarded.controlDecision}); err != nil {
 			fmt.Fprintf(os.Stderr, "agenthail: telling the person what this did failed: %s\n", err)
 		}
 		cancel()

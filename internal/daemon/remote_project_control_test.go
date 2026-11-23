@@ -12,7 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/hosts"
 )
 
-func TestALeadControlsItsProjectsSessionOnAPairedHostAndThePersonIsTold(t *testing.T) {
+func TestALeadControlsItsProjectsSessionOnAPairedHostAndThePersonIsToldOfAllButItsSteers(t *testing.T) {
 	h := newHostTargets(t, true)
 	person := &toldPerson{}
 	h.local.daemon.notifyDesktop = person.notify
@@ -30,8 +30,7 @@ func TestALeadControlsItsProjectsSessionOnAPairedHostAndThePersonIsTold(t *testi
 	if named, err := h.remote.reg.LookupAlias("tester"); err != nil || named != "remote-c" {
 		t.Fatalf("the paired host's alias: %q %v", named, err)
 	}
-	told := person.told()
-	if len(told) != 3 || !strings.Contains(told[0], "a message (that computer does not know this session as its lead, so it could not steer)") || !strings.Contains(told[0], "Sent @builder on vps") || !strings.Contains(told[2], "Ran alias on") {
+	if told := person.told(); len(told) != 1 || !strings.Contains(told[0], "Ran alias on") {
 		t.Fatalf("the person was told %q", told)
 	}
 
@@ -39,12 +38,13 @@ func TestALeadControlsItsProjectsSessionOnAPairedHostAndThePersonIsTold(t *testi
 	refusedFor(t, out, refused, "out_of_scope", "not_queued")
 
 	setRoleDecision(t, h.local.reg, agentroles.Lead, "remote-project-control", agentroles.Ask)
-	out, refused = callMCP(t, h.caller, "agenthail_steer", map[string]any{"target": "vps::@tester", "message": "the person's to allow", "clientRequestId": "steer-3"})
+	out, refused = callMCP(t, h.caller, "agenthail_alias", map[string]any{"target": "vps::@tester", "name": "kept", "clientRequestId": "alias-2"})
 	refusedFor(t, out, refused, "out_of_scope", "not_queued")
-	for _, message := range []string{"outside the project", "the person's to allow"} {
-		if h.reached(message) {
-			t.Fatalf("a refused steer reached the paired host: %q", message)
-		}
+	if h.reached("outside the project") {
+		t.Fatal("a refused steer reached the paired host")
+	}
+	if named, err := h.remote.reg.LookupAlias("kept"); err == nil && named != "" {
+		t.Fatalf("a refused alias reached the paired host: %q", named)
 	}
 }
 
@@ -95,6 +95,7 @@ func TestTheNoticeForASteerOnAPairedHostSaysOnlyWhatThatHostReported(t *testing.
 	h := newHostTargets(t, true)
 	person := &toldPerson{}
 	h.local.daemon.notifyDesktop = person.notify
+	setRoleDecision(t, h.local.reg, agentroles.Lead, "overseen-control", agentroles.Notify)
 	target := hosts.Qualify(h.record.ID, "remote-c")
 	steered, demoted := false, true
 	for _, outcome := range []*bool{&steered, &demoted, nil} {
