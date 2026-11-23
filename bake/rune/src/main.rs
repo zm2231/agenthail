@@ -380,4 +380,54 @@ mod tests {
         assert!(lines >= 3);
         assert_eq!(copied, selected);
     }
+
+    #[test]
+    fn select_all_and_offscreen_copy_reach_the_whole_transcript() {
+        let Ok(_) = std::env::var("BAKE_REPLAY") else { return };
+        let spec = AppSpec::<App> { poll: Some(poll), on_key: Some(on_key), ..AppSpec::new("Bake: Rune", (1100.0, 820.0), init, view) };
+        let mut rt = rune::App::new(spec).headless_runtime((1100.0, 820.0), Env { system_dark: true, scale: 1.0 });
+        let clipboard = rune::clipboard::memory();
+        rt.use_clipboard(&clipboard);
+        for _ in 0..(60 * 9) {
+            rt.frame(1.0 / 60.0);
+        }
+        let (x, y) = rt
+            .elements()
+            .into_iter()
+            .filter(|e| e.role == "text" && e.rect[1] > 60.0 && e.rect[1] < 300.0 && e.rect[0] < 100.0 && e.rect[2] > 300.0)
+            .map(|e| (e.rect[0] + 4.0, e.rect[1] + 6.0))
+            .next()
+            .unwrap();
+        rt.pointer_move(x, y);
+        rt.pointer_down(x, y);
+        rt.frame(1.0 / 60.0);
+        rt.pointer_move(x + 40.0, y + 300.0);
+        rt.frame(1.0 / 60.0);
+        rt.pointer_up(x + 40.0, y + 300.0);
+        rt.frame(1.0 / 60.0);
+        let picked = rt.selected_text().unwrap_or_default();
+        for _ in 0..40 {
+            rt.key(KeyEvent { key: Key::PageUp, mods: Mods::default() });
+            rt.frame(1.0 / 60.0);
+        }
+        for _ in 0..30 {
+            rt.frame(1.0 / 60.0);
+        }
+        rt.key(KeyEvent { key: Key::Command('c'), mods: Mods { cmd: true, ..Mods::default() } });
+        for _ in 0..3 {
+            rt.frame(1.0 / 60.0);
+        }
+        let after_scroll: String = clipboard.text().map(|t| t.as_str().to_owned()).unwrap_or_default();
+        println!("offscreen copy: selected {} chars before scrolling away, copied {} chars after 40 page ups (equal: {})", picked.len(), after_scroll.len(), picked == after_scroll);
+        rt.key(KeyEvent { key: Key::Command('a'), mods: Mods { cmd: true, ..Mods::default() } });
+        rt.frame(1.0 / 60.0);
+        rt.key(KeyEvent { key: Key::Command('c'), mods: Mods { cmd: true, ..Mods::default() } });
+        for _ in 0..3 {
+            rt.frame(1.0 / 60.0);
+        }
+        let all: String = clipboard.text().map(|t| t.as_str().to_owned()).unwrap_or_default();
+        let first = all.contains("Prompt 0:");
+        let last = all.contains("Live prompt");
+        println!("select all: copied {} chars; has first prompt {first}, has live prompt {last}", all.len());
+    }
 }
