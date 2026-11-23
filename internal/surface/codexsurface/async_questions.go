@@ -105,7 +105,7 @@ func codexQuestions(ctx context.Context, conn codexClient, threadID string) (*su
 			found.Open = append(found.Open, question)
 		}
 	}
-	found.Superseded = len(entries) == codexQuestionWindow && codexTypedAfterTurn(typedIn, oldestTurn)
+	found.Superseded = codexTypedAfterTurn(typedIn, oldestTurn)
 	slices.Reverse(found.Open)
 	return found, nil
 }
