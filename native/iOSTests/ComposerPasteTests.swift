@@ -248,4 +248,45 @@ final class ComposerPasteTests: XCTestCase {
         view.text = "ends with a return\n"
         XCTAssertGreaterThan(view.fittingHeight(width: 320, lines: 1 ... 6), one + 1)
     }
+
+    func testTheComposerKeepsPromptPunctuationAsTyped() {
+        let view = makeTextView()
+        XCTAssertEqual(view.autocorrectionType, .no)
+        XCTAssertEqual(view.smartDashesType, .no)
+        XCTAssertEqual(view.smartQuotesType, .no)
+        XCTAssertEqual(view.smartInsertDeleteType, .no)
+        XCTAssertEqual(view.inlinePredictionType, .no)
+        let typed = "--json FILE... \"double\" 'single' a -- b"
+        view.insertText(typed)
+        XCTAssertEqual(Array(view.draftText.utf8), Array(typed.utf8), "the sent draft is byte for byte what was typed")
+    }
+
+    func testSwiftUIFieldsThatSendToAgentsEditAsPlainText() {
+        let host = UIHostingController(rootView: VStack {
+            TextField("Answer", text: .constant(""), axis: .vertical)
+            TextField("Message everyone", text: .constant(""))
+            TextEditor(text: .constant(""))
+        })
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first!
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 400)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        self.window = window
+        host.view.layoutIfNeeded()
+
+        func inputs(in view: UIView) -> [any PlainTextTraits] {
+            view.subviews.flatMap { sub -> [any PlainTextTraits] in
+                if let input = sub as? any PlainTextTraits { return [input] }
+                return inputs(in: sub)
+            }
+        }
+        let found = inputs(in: host.view)
+        XCTAssertEqual(found.count, 3, "each SwiftUI field is backed by a UIKit text input: \(found.map { type(of: $0) })")
+        for input in found {
+            XCTAssertTrue(input.becomeFirstResponder(), "\(type(of: input)) takes focus")
+            XCTAssertTrue(PlainTextInput.isPlain(input), "\(type(of: input)) edits without autocorrection, smart punctuation or inline predictions")
+            input.resignFirstResponder()
+        }
+    }
 }

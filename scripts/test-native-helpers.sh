@@ -168,6 +168,7 @@ SOURCES=(
   macOS/CatalogPosition.swift
   macOS/ComposerKeys.swift
   macOS/ComposerNSTextView.swift
+  macOS/PlainTextInput.swift
   macOS/ComposerTextView.swift
   macOS/PasteToken.swift
   macOS/ComposerPaste.swift

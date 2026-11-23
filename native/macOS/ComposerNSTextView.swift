@@ -45,10 +45,7 @@ final class ComposerNSTextView: NSTextView {
         view.autoresizingMask = [.width]
         view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         view.isContinuousSpellCheckingEnabled = true
-        view.isAutomaticSpellingCorrectionEnabled = NSSpellChecker.isAutomaticSpellingCorrectionEnabled
-        view.isAutomaticTextReplacementEnabled = NSSpellChecker.isAutomaticTextReplacementEnabled
-        view.isAutomaticQuoteSubstitutionEnabled = NSSpellChecker.isAutomaticQuoteSubstitutionEnabled
-        view.isAutomaticDashSubstitutionEnabled = NSSpellChecker.isAutomaticDashSubstitutionEnabled
+        PlainTextInput.configure(view)
         view.isAutomaticTextCompletionEnabled = NSSpellChecker.isAutomaticTextCompletionEnabled
         view.writingToolsBehavior = .complete
         view.allowedWritingToolsResultOptions = [.plainText]

@@ -653,6 +653,7 @@ private final class AgenthailInstanceLock {
 
 @main
 private enum AgenthailMain {
+    @MainActor
     static func main() {
         let arguments = Array(CommandLine.arguments.dropFirst())
         if !arguments.isEmpty {
@@ -665,6 +666,7 @@ private enum AgenthailMain {
             return
         }
         Task.detached(priority: .utility) { SentFileCache.standard.prune() }
+        PlainTextInput.install()
         withExtendedLifetime(instanceLock) {
             AgenthailMenuBarApp.main()
         }
