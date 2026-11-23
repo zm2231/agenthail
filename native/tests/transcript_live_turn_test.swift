@@ -232,10 +232,10 @@ struct TranscriptLiveTurnTest {
             for _ in 0..<6 { turn.add("out", 20, to: feed) }
             turn.add("reply", 4, to: feed)
             spin(0.6)
-            for _ in 0..<10 where tops.top(run) == nil { move(scroll, to: max(offset(scroll) - 600, 0)) }
+            for _ in 0..<10 where tops.top(run) == nil { drag(scroll, to: max(offset(scroll) - 600, 0)) }
             guard let runTop = tops.top(run) else { expect(false, "round \(round): the tool run is laid out once the reader scrolls back to it"); continue }
-            move(scroll, to: runTop - 120)
-            expect(!feed.following, "round \(round): a reader scrolled back to the tool run is not following")
+            drag(scroll, to: runTop - 120)
+            guard !feed.following else { expect(false, "round \(round): a reader scrolled back to the tool run is not following"); continue }
             guard let index = feed.rows.firstIndex(where: { $0.id == run }),
                   let reader = feed.rows[(index + 1)...].first(where: { tops.top($0.id).map { $0 > offset(scroll) + 150 } == true })?.id,
                   let start = tops.top(reader) else { expect(false, "round \(round): a row below the tool run is in view"); continue }
@@ -244,8 +244,8 @@ struct TranscriptLiveTurnTest {
             spin(0.1)
             expect(feed.phase == .interacting, "round \(round): a live scroll puts the transcript in its interacting phase, got \(feed.phase)")
             func check() {
-                let moved = abs((tops.top(reader) ?? .infinity) - offset(scroll) - placed)
-                if moved > worst.moved { worst = (reader, moved) }
+                let moved = tops.top(reader).map { abs($0 - offset(scroll) - placed) } ?? .infinity
+                if moved > worst.moved { worst = ("\(reader) in round \(round), following \(feed.following), phase \(feed.phase)", moved) }
                 if let wrong = misdrawn(hosting, feed) { found.append(wrong) }
             }
             for _ in 0..<2 {
@@ -263,7 +263,7 @@ struct TranscriptLiveTurnTest {
             }
             NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
             spin(0.4)
-            move(scroll, to: scroll.documentView?.frame.height ?? 0)
+            drag(scroll, to: scroll.documentView?.frame.height ?? 0)
         }
         expect(worst.moved < 2, "a reader's row holds its place on screen while they scroll and the tool run above it folds and moves, \(worst.row) moved \(worst.moved)")
         expect(found.isEmpty, "a scrolling reader sees the rows in view drawn once each and in order while a live turn runs: \(found.joined(separator: "; "))")
@@ -328,6 +328,19 @@ struct TranscriptLiveTurnTest {
     static func move(_ scroll: NSScrollView, to y: CGFloat) {
         scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
         scroll.reflectScrolledClipView(scroll.contentView)
+        spin(0.4)
+    }
+
+    // A reader's own scroll, so the transcript sees its phases and stops following, as a wheel or trackpad would.
+    @MainActor
+    static func drag(_ scroll: NSScrollView, to y: CGFloat) {
+        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+        spin(0.05)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        NotificationCenter.default.post(name: NSScrollView.didLiveScrollNotification, object: scroll)
+        spin(0.05)
+        NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
         spin(0.4)
     }
 
