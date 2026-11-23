@@ -47,6 +47,7 @@ pub struct App {
     pub send_status: String,
     pub palette: Option<TextEdit>,
     pub palette_ix: usize,
+    pub palette_order: Vec<String>,
     pub items: HashMap<String, WorkItem>,
     pub boards: HashMap<String, Vec<BoardRow>>,
     client: Option<Client>,
@@ -90,6 +91,7 @@ fn init() -> App {
         send_status: String::new(),
         palette: None,
         palette_ix: 0,
+        palette_order: Vec::new(),
         items: HashMap::new(),
         boards: HashMap::new(),
         client: None,
@@ -310,10 +312,22 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed
 }
 
-fn on_key(s: &mut App, key: &KeyEvent, _: &mut Tx) -> bool {
+pub fn open_palette(s: &mut App, tx: &mut Tx) {
+    let mut edit = TextEdit::new("");
+    edit.focused = true;
+    s.palette = Some(edit);
+    s.palette_ix = 0;
+    s.palette_order = ui::ordered(s).into_iter().map(|x| x.id.clone()).collect();
+    tx.focus("palette-input", false);
+}
+
+fn on_key(s: &mut App, key: &KeyEvent, tx: &mut Tx) -> bool {
     if key.is_command('k') {
-        s.palette = if s.palette.is_some() { None } else { Some(TextEdit::new("")) };
-        s.palette_ix = 0;
+        if s.palette.is_some() {
+            s.palette = None;
+        } else {
+            open_palette(s, tx);
+        }
         return true;
     }
     if key.is_command('j') {

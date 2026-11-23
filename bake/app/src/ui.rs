@@ -7,6 +7,15 @@ use rune::{Color, Cx, El, ScrollSpec, Tx, col, el, row, text, text_input};
 use crate::theme::{BODY, BODY_BOLD, HEADING, LABEL, META, META_BOLD, TITLE, accent, attention, done, side};
 use crate::{App, Screen, open_project, select, send, session, transcript};
 
+pub fn palette_matches<'a>(s: &'a App, query: &str) -> Vec<&'a Session> {
+    s.palette_order
+        .iter()
+        .filter_map(|id| session(s, id))
+        .filter(|x| query.is_empty() || x.title().to_lowercase().contains(query) || x.project_name().to_lowercase().contains(query) || x.summary().to_lowercase().contains(query))
+        .take(10)
+        .collect()
+}
+
 pub fn ordered(s: &App) -> Vec<&Session> {
     let mut list: Vec<&Session> = s.sessions.iter().filter(|x| x.visible(s.now)).collect();
     list.sort_by(|a, b| a.state(s.now).cmp(&b.state(s.now)).then(b.last_active.cmp(&a.last_active)));
@@ -98,7 +107,7 @@ fn sidebar(s: &App) -> El {
                 .radius(8.0)
                 .fill(t.card)
                 .key("search")
-                .on_press(|s: &mut App| s.palette = Some(rune::TextEdit::new("")))
+                .on_press_tx(|s: &mut App, tx: &mut Tx| crate::open_palette(s, tx))
                 .child(text("Jump to a session").font(META).color(t.text_secondary))
                 .child(spacer())
                 .child(text("⌘K").font(META).color(t.text_secondary.alpha(0.6))),
@@ -281,9 +290,16 @@ fn session_screen(s: &App) -> El {
     if x.state(s.now) == State::NeedsYou {
         center = center.child(waiting_card(x));
     }
-    let status = s.panes.get(&id).map(|p| p.status.clone()).unwrap_or_default();
-    center = center.child(col().w_full().h(1.0).fill(t.separator)).child(transcript::view(s, &id)).child(composer(s, x));
-    let _ = status;
+    center = center.child(col().w_full().h(1.0).fill(t.separator));
+    let empty = s.panes.get(&id).is_none_or(|p| p.blocks.is_empty());
+    if empty {
+        let status = s.panes.get(&id).map(|p| p.status.clone()).unwrap_or_default();
+        let note = if matches!(status.as_str(), "" | "loading" | "live") { "Loading the transcript…".to_string() } else { status };
+        center = center.child(col().w_full().grow(1.0).items_center().pt(60.0).child(text(note).font(META).color(t.text_secondary)));
+    } else {
+        center = center.child(transcript::view(s, &id));
+    }
+    center = center.child(composer(s, x));
     row().grow(1.0).h_full().child(center).child(rail(s, x))
 }
 
@@ -348,27 +364,32 @@ fn project_screen(s: &App, key: &str) -> El {
 fn palette(s: &App, edit: &rune::TextEdit) -> El {
     let t = tok::theme(true);
     let query = edit.text.to_lowercase();
-    let matches: Vec<&Session> = ordered(s)
-        .into_iter()
-        .filter(|x| query.is_empty() || x.title().to_lowercase().contains(&query) || x.project_name().to_lowercase().contains(&query) || x.summary().to_lowercase().contains(&query))
-        .take(10)
-        .collect();
+    let matches = palette_matches(s, &query);
     let pick = s.palette_ix.min(matches.len().saturating_sub(1));
     let input = text_input(edit, BODY)
         .key("palette-input")
         .w_full()
         .color(t.text)
-        .autofocus()
         .placeholder("Jump to a session, project or question", t.text_secondary.alpha(0.6))
         .on_edit(|s: &mut App| s.palette.as_mut().expect("palette open"))
+        .on_input_key(|s: &mut App, key: &rune::KeyEvent, _: &mut Tx| match key.key {
+            rune::Key::Down => {
+                s.palette_ix += 1;
+                true
+            }
+            rune::Key::Up => {
+                s.palette_ix = s.palette_ix.saturating_sub(1);
+                true
+            }
+            rune::Key::Escape => {
+                s.palette = None;
+                true
+            }
+            _ => false,
+        })
         .on_submit(|s: &mut App, _: &mut Tx| {
             let query = s.palette.as_ref().map(|e| e.text.to_lowercase()).unwrap_or_default();
-            let found: Vec<String> = ordered(s)
-                .into_iter()
-                .filter(|x| query.is_empty() || x.title().to_lowercase().contains(&query) || x.project_name().to_lowercase().contains(&query) || x.summary().to_lowercase().contains(&query))
-                .take(10)
-                .map(|x| x.id.clone())
-                .collect();
+            let found: Vec<String> = palette_matches(s, &query).into_iter().map(|x| x.id.clone()).collect();
             if let Some(id) = found.get(s.palette_ix.min(found.len().saturating_sub(1))).cloned() {
                 s.palette = None;
                 select(s, &id);
@@ -389,8 +410,8 @@ fn palette(s: &App, edit: &rune::TextEdit) -> El {
                 select(s, &id);
             })
             .child(text(g).font(BODY).color(color))
-            .child(text(x.title()).font(BODY_BOLD).color(t.text))
-            .child(text(x.project_name()).font(META).color(t.text_secondary))
+            .child(text(x.title()).font(BODY_BOLD).color(t.text).truncate().max_w(300.0))
+            .child(text(x.project_name()).font(META).color(t.text_secondary).truncate().max_w(160.0))
             .child(text(x.summary()).font(META).color(t.text_secondary.alpha(0.7)).truncate().grow(1.0));
         if i == pick {
             r = r.fill(accent().alpha(0.18));

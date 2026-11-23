@@ -5,7 +5,7 @@ use feed::blocks::{AgentEntry, Block, Kind, Work};
 use feed::summary::Entry;
 use feed::wire::{Outcome, Rebuild, Sse, Wire};
 use rune::tok;
-use rune::{El, GrowthSpec, ScrollSpec, TextStyle, col, memo, row, text};
+use rune::{El, GrowthSpec, ScrollSpec, col, memo, row, text};
 use rune_kit::MarkdownStyle;
 use rune_kit::markdown::Markdown;
 
@@ -230,8 +230,4 @@ pub fn view(s: &App, id: &str) -> El {
         },
     );
     col().key(format!("transcript-{id}")).w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: true }).child(stack)
-}
-
-pub fn style() -> TextStyle {
-    META
 }

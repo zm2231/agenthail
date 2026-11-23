@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use serde::Deserialize;
 use serde_json::Value;
 use time::OffsetDateTime;
@@ -320,8 +320,7 @@ fn enc(value: &str) -> String {
 
 impl Client {
     pub fn from_env() -> Result<Self> {
-        let base = std::env::var("AGENTHAIL_API_URL").context("AGENTHAIL_API_URL is not set")?;
-        let token = std::env::var("AGENTHAIL_API_TOKEN").context("AGENTHAIL_API_TOKEN is not set")?;
+        let (base, token) = crate::daemon()?;
         let agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(5)).timeout(Duration::from_secs(30)).build();
         Ok(Self { base: base.trim_end_matches('/').into(), token, agent })
     }

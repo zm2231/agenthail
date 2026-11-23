@@ -34,8 +34,7 @@ pub struct Live {
 
 impl Live {
     pub fn from_env(session: String) -> Result<Self> {
-        let base = std::env::var("AGENTHAIL_API_URL").context("AGENTHAIL_API_URL is not set")?;
-        let token = std::env::var("AGENTHAIL_API_TOKEN").context("AGENTHAIL_API_TOKEN is not set")?;
+        let (base, token) = crate::daemon()?;
         Ok(Self { base: base.trim_end_matches('/').into(), token, session })
     }
 
