@@ -12,8 +12,9 @@ type mcpBriefInput struct {
 }
 
 func (d *Daemon) mcpBrief(ctx context.Context, caller *mcpCaller, input mcpBriefInput) (any, error) {
-	if !caller.has("control.all") {
-		return nil, refuse("capability_missing", "A brief is the person's request, for the voice operator; write to your lead with agenthail_send.")
+	notice, err := roleGate(caller, "brief", "Asked a lead to brief the person", "A brief is the person's request; write to your lead with agenthail_send.")
+	if err != nil {
+		return nil, err
 	}
 	name := input.Project
 	if name == "" && caller.project != nil {
@@ -23,5 +24,7 @@ func (d *Daemon) mcpBrief(ctx context.Context, caller *mcpCaller, input mcpBrief
 	if err != nil {
 		return nil, refuse("not_found", err.Error())
 	}
-	return d.mcpAction(ctx, caller, "agenthail_brief", input.mcpWrite, dashboardActionRequest{Action: "coordinator-brief", Project: project.ID, SourceSessionID: caller.session.ID})
+	result, err := d.mcpAction(ctx, caller, "agenthail_brief", input.mcpWrite, dashboardActionRequest{Action: "coordinator-brief", Project: project.ID, SourceSessionID: caller.session.ID})
+	d.noticeAfter(ctx, caller, notice, err)
+	return result, err
 }

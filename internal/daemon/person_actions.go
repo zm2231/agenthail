@@ -52,19 +52,35 @@ func (d *Daemon) personActionScope(ctx context.Context, caller *mcpCaller, actio
 	if err != nil {
 		return "", err
 	}
-	if caller.has("control.all") {
-		return "", nil
-	}
+	decide := anyActionOf(action.API, request)
 	if d.leadActsOnOwn(ctx, caller, action.API, request) {
-		switch caller.role.Decision(agentActionOf(request)) {
-		case agentroles.Allow:
-			return "", nil
-		case agentroles.Notify:
-			return d.agentNotices.hold(caller.session.ID, agentAction{done: description}, time.Now()), nil
-		}
+		decide = agentActionOf(request)
+	}
+	switch caller.role.Decision(decide) {
+	case agentroles.Allow:
+		return "", nil
+	case agentroles.Notify:
+		return d.agentNotices.hold(caller.session.ID, agentAction{done: description}, time.Now()), nil
 	}
 	return "", &mcpRefusal{Code: "capability_missing", Message: description + " is for the person. To ask them to allow it, run the same command again with --ask-person --reason \"<why you need it>\"; their answer arrives as your next message.",
 		Detail: map[string]any{"rule": "person_only", "approvable": true}}
+}
+
+func anyActionOf(api string, request personActionRequest) string {
+	if api == daemonapi.PersonActionSettings {
+		return "host-setting"
+	}
+	switch {
+	case strings.HasPrefix(request.Action, "coordinator-"):
+		return "coordinator-any"
+	case strings.HasPrefix(request.Action, "relay-"):
+		return "relay-any"
+	case strings.HasPrefix(request.Action, "channel-"):
+		return "channel-any"
+	case strings.HasPrefix(request.Action, "queue-"):
+		return "queue-any"
+	}
+	return "project-any"
 }
 
 func agentActionOf(request personActionRequest) string {

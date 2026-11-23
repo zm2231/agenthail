@@ -16,8 +16,9 @@ type mcpHistoryInput struct {
 }
 
 func (d *Daemon) mcpHistory(ctx context.Context, caller *mcpCaller, input mcpHistoryInput) (any, error) {
-	if !caller.has("read.all") {
-		return nil, refuse("capability_missing", "Delivery history and the queue span every session; reading them is for the voice operator.")
+	notice, err := roleGate(caller, "history-read", "Read the delivery history", "Delivery history and the queue span every session; reading them is for the person.")
+	if err != nil {
+		return nil, err
 	}
 	limit, err := pageLimit(input.Limit, 20, 50)
 	if err != nil {
@@ -49,5 +50,6 @@ func (d *Daemon) mcpHistory(ctx context.Context, caller *mcpCaller, input mcpHis
 	if refusal != nil {
 		return nil, refusal
 	}
+	d.noticeAfter(ctx, caller, notice, nil)
 	return json.RawMessage(result), nil
 }

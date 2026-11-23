@@ -52,6 +52,18 @@ func (r *resolvedRole) ReachesLedger(projectID string) bool {
 	return r != nil && r.Role.ReachesLedger(projectID)
 }
 
+// roleGate refuses an action the caller's role leaves to the person and,
+// when the role says notify, returns what to tell the person once it has run.
+func roleGate(caller *mcpCaller, action, what, refusal string) (string, error) {
+	switch caller.role.Decision(action) {
+	case agentroles.Ask:
+		return "", &mcpRefusal{Code: "capability_missing", Message: refusal + " Your role leaves it to the person; they can change that with agenthail roles.", Detail: map[string]any{"rule": "role_action", "action": action}}
+	case agentroles.Notify:
+		return what, nil
+	}
+	return "", nil
+}
+
 func (r *resolvedRole) label() string {
 	if r.Replaces == "" {
 		return r.Name

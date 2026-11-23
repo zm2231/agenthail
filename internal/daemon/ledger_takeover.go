@@ -121,9 +121,6 @@ func remoteHolderVerdict(ctx context.Context, candidates []*pairedHost, id strin
 // own project's ledger; the person's words, passed as an utterance, decide
 // instead and are checked by the ledger.
 func (d *Daemon) takeoverScope(caller *mcpCaller, itemID string) (string, error) {
-	if caller.has("control.all") {
-		return "", nil
-	}
 	switch caller.role.Decision("work-takeover") {
 	case agentroles.Allow:
 		return "", nil
