@@ -17,7 +17,7 @@ Session commands:
   thread fork <target>         Fork a Codex conversation
   thread <status|stop|resume|logs> <target>  Manage a Claude session (logs: claude-bg jobs)
   thread settings <target>     Show the model, effort, permission and config root a session runs with
-  thread <archive|unarchive> <target>  Hide a session until it is active again
+  thread <archive|unarchive> <target>  Stop and hide a session until it is active again
   thread adopt <target>        Open a terminal Claude session in Agenthail
   thread queue <target> <list|add|update|delete|reorder|start>  Manage Codex native input
   pr <link|unlink|watch|unwatch> <url|number> [--repo <owner/name>] [--session <target>] [--json]

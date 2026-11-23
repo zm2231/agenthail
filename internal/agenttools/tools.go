@@ -28,7 +28,7 @@ var Tools = []Tool{
 	{Name: "agenthail_channel_send", Description: "Post a message to a channel or project, delivered to its members as from you."},
 	{Name: "agenthail_coordinator", Description: "Set or clear a project's coordinator."},
 	{Name: "agenthail_brief", Description: "Ask a project's lead to catch the person up on everything since the person last wrote to it or its project."},
-	{Name: "agenthail_archive", Description: "Archive, or restore, a session you spawned or, as coordinator, lead."},
+	{Name: "agenthail_archive", Description: "Archive, or restore, a session you spawned or, as coordinator, lead. Archiving stops its run."},
 	{Name: "agenthail_history", Subagents: true, Description: "Delivery history, or the queue of instructions waiting to be delivered, newest first and paged."},
 	{Name: "agenthail_ledger_write", Description: "Record in an intent ledger, your project's or one your role reaches: attach, clause, question or work, with the fields the CLI's ledger commands take. Recorded as your session."},
 	{Name: "agenthail_create", AlwaysLoad: true, Description: "Start a Claude or Codex session with a first message, here or on a paired computer. It is bounded by your own ceiling: no higher permission mode and no folder outside yours. The person sets how deep sessions nest and how many you run at once."},
