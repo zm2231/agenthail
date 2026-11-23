@@ -41,7 +41,7 @@ In the other direction, any agent may send an identity a queued message, from an
 
 ### Default send mode
 
-An `agenthail_send` with no `mode` is queued. The person can make an identity's sends with no mode go now instead:
+An `agenthail_send` with no `mode` goes now to a session the caller started or leads, so a lead's answer reaches a busy worker in its current turn. This is the delivery rule's `coordinator.Oversees`: the session's starter or its project's coordinator. For a session on a paired host, this host knows only that the caller coordinates the session's project. The owning host decides again when it delivers, and sends the message as a plain message if it does not know the caller as the session's lead. Such a steer tells the person nothing. If it is refused, the send is queued and its result carries a `notice` saying why. Every other send with no mode is queued. The person can make an identity's sends with no mode go now instead:
 
 ```bash
 agenthail identity set <name> --send-mode now    # steer a busy session where the role allows
