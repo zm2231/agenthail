@@ -143,6 +143,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             .environment(\.transcriptClip, layout.clip)
             .environment(\.revealRow, RowAction(owner: String(describing: transcript)) { top in
                 following = false
+                layout.input = nil
                 layout.releaseHold()
                 layout.revealed = RevealedRow(top: top)
                 position.scrollTo(y: top.wrappedValue)
@@ -243,6 +244,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     // A scroll position still at the bottom edge keeps the bottom in place as content grows, even when not following.
     private func holdPlace() {
         following = false
+        layout.input = nil
         layout.releaseHold()
         if let geometry = layout.geometry { position.scrollTo(y: Self.scrollY(geometry.contentOffset.y, in: geometry)) }
     }
@@ -265,10 +267,10 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     private func settleInput(_ id: UUID) async {
         while let input = layout.input, input.id == id {
             try? await Task.sleep(for: Self.inputLimit)
-            guard let input = layout.input, input.id == id, let geometry = layout.geometry else { return }
+            guard let input = layout.input, input.id == id, !following, let geometry = layout.geometry else { return }
             let quiet = input.last.duration(to: .now) >= Self.inputLimit
             let gesture = phase == .interacting || phase == .decelerating
-            guard quiet, !gesture || input.started.duration(to: .now) >= Self.inputCap else { continue }
+            guard quiet && !gesture || input.started.duration(to: .now) >= Self.inputCap else { continue }
             layout.input = nil
             following = abs(geometry.contentOffset.y - input.start) < 0.5 || Self.atEnd(geometry)
             if following { pinToEnd() }
