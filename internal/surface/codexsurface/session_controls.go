@@ -99,3 +99,52 @@ func (c *Codex) SteerWithImages(ctx context.Context, sess *surface.Session, mess
 	}
 	return nil
 }
+
+// StopRun ends a thread's run in Codex's app-server daemon, which is shared,
+// so the thread is interrupted and left without Agenthail's subscriptions for
+// Codex to unload rather than its process stopped. A thread the Codex app has
+// loaded is the app's.
+func (c *Codex) StopRun(ctx context.Context, sess *surface.Session) (surface.RunStop, error) {
+	release, err := c.home.acquireThreadWrite(ctx, sess.ID)
+	if err != nil {
+		return surface.RunStop{}, surface.DeliveryUnavailable(err)
+	}
+	defer release()
+	runtimes := c.openRuntimes(ctx)
+	if err := runtimes.ownershipUnknown(); err != nil {
+		runtimes.Close()
+		return surface.RunStop{}, surface.DeliveryUnavailable(err)
+	}
+	switch {
+	case runtimes.desktopLoaded[sess.ID]:
+		runtimes.Close()
+		return surface.RunStop{NotStopped: "it runs in the Codex app"}, nil
+	case !runtimes.managedLoaded[sess.ID]:
+		runtimes.Close()
+		return surface.RunStop{}, nil
+	}
+	client := runtimes.managed
+	runtimes.release(client)
+	defer client.Close()
+	turnID, err := c.activeTurnID(ctx, client, sess.ID, "")
+	if err != nil {
+		return surface.RunStop{}, surface.DeliveryUnavailable(err)
+	}
+	if turnID != "" {
+		if _, err := client.Request(ctx, "turn/interrupt", map[string]any{"threadId": sess.ID, "turnId": turnID}, 5*time.Second); err != nil {
+			return surface.RunStop{}, fmt.Errorf("turn/interrupt: %w", err)
+		}
+	}
+	unlock := c.subscriptions.exclusive(sess.ID)
+	defer unlock()
+	for _, follower := range c.subscriptions.clients(sess.ID) {
+		c.subscriptions.remove(sess.ID, follower)
+		if _, err := follower.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": sess.ID}, 5*time.Second); err != nil {
+			_ = follower.Close()
+		}
+	}
+	if _, err := client.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": sess.ID}, 5*time.Second); err != nil {
+		return surface.RunStop{}, fmt.Errorf("thread/unsubscribe: %w", err)
+	}
+	return surface.RunStop{Stopped: true}, nil
+}

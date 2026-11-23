@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -43,6 +44,8 @@ type federatedSurface struct {
 	open      map[string][]surface.Request
 	answered  map[string]surface.Decision
 	stopped   int
+	stops     []string
+	stopErr   error
 }
 
 func (f *federatedSurface) Interrupt(context.Context, *surface.Session) error {
@@ -56,6 +59,22 @@ func (f *federatedSurface) interrupts() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.stopped
+}
+
+func (s *federatedSurface) StopRun(_ context.Context, session *surface.Session) (surface.RunStop, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopErr != nil {
+		return surface.RunStop{}, s.stopErr
+	}
+	s.stops = append(s.stops, session.ID)
+	return surface.RunStop{Stopped: true}, nil
+}
+
+func (s *federatedSurface) stoppedRuns() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.stops)
 }
 
 func (s *federatedSurface) Requests(_ context.Context, session *surface.Session) (surface.RequestState, error) {

@@ -140,8 +140,8 @@ func TestAnAgentsTabOutlivesItsTurnStaysPrivateAndClosesWhenTheSessionIsArchived
 		t.Fatalf("status after open = %+v", status)
 	}
 
-	if _, err := f.d.doSessionArchive("session-archive", "from"); err != nil {
-		t.Fatal(err)
+	if response := runDashboardAction(t, f.d, `{"action":"session-archive","sessionId":"from"}`); response.Code != http.StatusOK {
+		t.Fatalf("archive = %d %s", response.Code, response.Body)
 	}
 	eventually(t, "archiving closes the session's tabs", func() bool {
 		var listed map[string]any

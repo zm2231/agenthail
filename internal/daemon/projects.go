@@ -759,12 +759,17 @@ func (d *Daemon) archiveSession(sessionID string, at time.Time) error {
 	return nil
 }
 
-func (d *Daemon) doSessionArchive(action, sessionID string) (actionResult, error) {
+func (d *Daemon) doSessionArchive(ctx context.Context, action string, session *surface.Session) (actionResult, error) {
+	sessionID := session.ID
+	var run surface.RunStop
 	var err error
 	if action == "session-archive" {
 		task, found, taskErr := d.Registry.TaskForChild(sessionID)
 		if taskErr != nil {
 			return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", taskErr.Error())
+		}
+		if run, err = d.stopRun(ctx, session); err != nil {
+			return actionResult{}, actionFailed(http.StatusBadGateway, "stop_failed", fmt.Sprintf("%s was not archived because its run could not be stopped: %s", sessionID, err))
 		}
 		err = d.archiveSession(sessionID, time.Now().UTC())
 		if err == nil && found && task.State == registry.TaskRunning {
@@ -786,7 +791,32 @@ func (d *Daemon) doSessionArchive(action, sessionID string) (actionResult, error
 	// A catalog pass that read the archive state before this change may still
 	// publish its rows; the pass this requests runs after it and settles them.
 	d.requestCatalogDiscovery()
-	return actionOK(map[string]any{"ok": true, "sessionId": sessionID, "archived": action == "session-archive"}), nil
+	answer := map[string]any{"ok": true, "sessionId": sessionID, "archived": action == "session-archive"}
+	if action == "session-archive" {
+		answer["run"] = run
+	}
+	return actionOK(answer), nil
+}
+
+// stopRun runs before the archive is written: a session still working is
+// unarchived by the next catalog pass, so an archive that left it running
+// would not hold.
+func (d *Daemon) stopRun(ctx context.Context, session *surface.Session) (surface.RunStop, error) {
+	adapter, err := d.adapters().For(session)
+	if err != nil {
+		return surface.RunStop{}, nil
+	}
+	stopper, ok := adapter.(surface.RunStopper)
+	if !ok {
+		return surface.RunStop{}, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+	defer cancel()
+	run, err := stopper.StopRun(ctx, session)
+	if err == nil && run.Stopped {
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "session-operation", SessionID: session.ID, Result: "session-archive: stopped its run"})
+	}
+	return run, err
 }
 
 // addProject adds a folder as a project of this host. A folder in a linked

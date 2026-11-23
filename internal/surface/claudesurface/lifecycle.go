@@ -294,7 +294,38 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 		}
 		return map[string]any{"id": record.ID, "sessionId": record.SessionID, "action": action, "output": string(output)}, nil
 	}
-	return nil, fmt.Errorf("session is not a Claude background agent")
+	return nil, errNotBackground
+}
+
+var errNotBackground = errors.New("session is not a Claude background agent")
+
+// StopRun leaves a conversation that runs in a terminal running: that process
+// is the person's, not Agenthail's.
+func (c *Claude) StopRun(ctx context.Context, session *surface.Session) (surface.RunStop, error) {
+	switch session.RuntimeKind {
+	case surface.RuntimeClaudeHost:
+		err := c.host.client.Close(ctx, session.ID)
+		if claudehost.IsCode(err, "not_open") {
+			return surface.RunStop{}, nil
+		}
+		if err != nil {
+			return surface.RunStop{}, claudeHostDeliveryError(err)
+		}
+		return surface.RunStop{Stopped: true}, nil
+	case surface.RuntimeClaudeBackground:
+		_, err := c.SessionAction(ctx, session, "stop")
+		if errors.Is(err, errNotBackground) {
+			return surface.RunStop{}, nil
+		}
+		if err != nil {
+			return surface.RunStop{}, err
+		}
+		return surface.RunStop{Stopped: true}, nil
+	}
+	if session.Ended || session.PID <= 0 {
+		return surface.RunStop{}, nil
+	}
+	return surface.RunStop{NotStopped: "it runs in a terminal outside Agenthail"}, nil
 }
 
 // hostSessionAction runs a lifecycle action on a session the Claude host
