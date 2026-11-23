@@ -161,3 +161,31 @@ func TestATurnOnlyOtherAgentsStartedPushesUnlessThePersonTurnsThatOff(t *testing
 		t.Fatalf("an agent's turn that left the person an ask recorded %+v", notices[worker.ID])
 	}
 }
+
+func TestABurstPushesWhenAnyOfItsTurnsWasNotStartedByAgents(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	d, r, _, _, worker := daemonFixture(t)
+	pushes := newPushRecorder(t, r)
+	if code, _ := preferencesCall(t, d, dashboardTestToken, http.MethodPut, `{"id":"agentStartedTurns","value":false}`); code != http.StatusOK {
+		t.Fatalf("turning agent-started turns off answered %d", code)
+	}
+	finished := turnCompletedNotice{title: "@worker", desktop: "Finished", mobile: "Finished", outcome: turnOutcomeFinished}
+	byAgents := finished
+	byAgents.agentStarted = true
+
+	d.turnJudgmentQueued(worker.ID, "agent-1")
+	d.scheduleTurnPush(worker.ID, "agent-1", byAgents)
+	d.scheduleTurnPush(worker.ID, "person-1", finished)
+	d.background.wait()
+	if count := pushes.count("turn.completed"); count != 1 {
+		t.Fatalf("a burst with a turn the person started pushed %d times", count)
+	}
+
+	d.turnJudgmentQueued(worker.ID, "agent-2")
+	d.scheduleTurnPush(worker.ID, "agent-2", byAgents)
+	d.scheduleTurnPush(worker.ID, "agent-3", byAgents)
+	d.background.wait()
+	if count := pushes.count("turn.completed"); count != 1 {
+		t.Fatalf("a burst only other agents started pushed: %d in all", count)
+	}
+}
