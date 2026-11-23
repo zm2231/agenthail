@@ -53,7 +53,7 @@ func (d *Daemon) mcpSend(ctx context.Context, caller *mcpCaller, input mcpSendIn
 	if err != nil {
 		return nil, err
 	}
-	input.ClientRequestID = ""
+	input.heldAbove = true
 	return d.mcpOnce(ctx, caller, key, input, func() (any, error) {
 		return d.mcpSendNowElseQueue(ctx, caller, input, why)
 	})

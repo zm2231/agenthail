@@ -12,11 +12,14 @@ import (
 
 type mcpWrite struct {
 	ClientRequestID string `json:"clientRequestId,omitempty" jsonschema:"Optional. Send one to make a retry safe: repeating it replays the first result instead of acting twice."`
+	// heldAbove marks an action inside a write whose one outcome mcpOnce
+	// keeps under the id, which the action still names in its audit entry.
+	heldAbove bool
 }
 
 func (w mcpWrite) key(tool string) (string, error) {
 	id := strings.TrimSpace(w.ClientRequestID)
-	if id == "" {
+	if id == "" || w.heldAbove {
 		return "", nil
 	}
 	key := tool + ":" + id

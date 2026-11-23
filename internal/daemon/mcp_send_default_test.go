@@ -135,11 +135,15 @@ func TestARetriedDefaultSteerTheOwningHostRefusedReplaysItsQueuedResult(t *testi
 	if refused || !strings.Contains(notice, "but this one could not") || h.reached("steer:") {
 		t.Fatalf("a default steer the owning host refuses: refused=%v out=%v delivered=%q", refused, first, h.remote.fake.delivered())
 	}
+	audited := len(mcpAudits(t, h.local.reg))
 	again, refused := callMCP(t, h.caller, "agenthail_send", args)
 	if refused || mustJSONString(t, again) != mustJSONString(t, first) {
 		t.Fatalf("the retry answered %v, want the first answer %v", again, first)
 	}
 	if queued := h.remote.reg.QueueCount("remote-c"); queued != 1 || h.reached("steer:") {
 		t.Fatalf("the retry acted again: queued=%d delivered=%q", queued, h.remote.fake.delivered())
+	}
+	if audits := mcpAudits(t, h.local.reg); len(audits) != audited || !strings.Contains(audits[len(audits)-1].Message, "answer-1") {
+		t.Fatalf("audits after the retry=%+v, want the first call's %d naming answer-1", audits, audited)
 	}
 }
