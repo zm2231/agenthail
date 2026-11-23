@@ -29,10 +29,12 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     @State private var placedLeadingRow: String?
     @State private var layout = Layout()
 
-    static var bottomSlack: CGFloat { 70 }
-    static var readerReach: CGFloat { 4 }
+    static var bottomSlack: CGFloat { TranscriptFollowing.bottomSlack }
+    static var readerReach: CGFloat { TranscriptFollowing.readerReach }
     /// Longer than a jump's animation. A scroll moved mid-animation can leave the phase animating for good.
     static var animationLimit: Duration { .milliseconds(500) }
+    static var inputLimit: Duration { .milliseconds(400) }
+    static var inputCap: Duration { .seconds(10) }
 
     /// `scrollTo(y:)` measures from below the top inset, such as the conversation header; content offsets include it.
     static func scrollY(_ offset: CGFloat, in geometry: ScrollGeometry) -> CGFloat {
@@ -52,11 +54,17 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
         content
             .scrollPosition($position)
             .defaultScrollAnchor(.bottom, for: .initialOffset)
-            .defaultScrollAnchor(following && !rescaling ? .bottom : nil, for: .sizeChanges)
             .onScrollPhaseChange { old, new in
                 phase = new
-                if new == .idle, old == .interacting || old == .decelerating, let geometry = layout.geometry {
-                    following = Self.atEnd(geometry)
+                // Keyboard paging and scrollbar clicks animate; a jump to the end does too, but moves toward it.
+                if old == .idle, new != .idle { layout.gestureStart = layout.geometry?.contentOffset.y }
+                if new == .idle, old != .idle { layout.input = nil }
+                if new == .idle, old != .idle, let geometry = layout.geometry {
+                    let moved = layout.gestureStart.map { geometry.contentOffset.y - $0 } ?? 0
+                    let wasFollowing = following
+                    following = TranscriptFollowing.next(following, .init(distance: TranscriptEnd(geometry).distance, scrollEnded: true, offsetMoved: moved))
+                    if wasFollowing, !following { position.scrollTo(y: Self.scrollY(geometry.contentOffset.y, in: geometry)) }
+                    layout.gestureStart = nil
                 }
                 if new == .interacting || new == .decelerating { layout.releaseHold() }
                 // A reader who scrolls while an older page loads is held where they come to rest.
@@ -101,16 +109,28 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                     return
                 }
                 if settleAnchor(anchorStep(new, inserted: inserted), in: new) { return }
+                let pass = TranscriptFollowing.Pass(distance: TranscriptEnd(new).distance, resized: resized, resizedThisTurn: layout.resized, resting: resting,
+                                                    animating: animating, inserted: inserted, offsetMoved: new.contentOffset.y - old.contentOffset.y,
+                                                    reset: new.contentOffset.y <= -new.contentInsets.top + 0.5, overshot: TranscriptEnd(old).distance < -0.5)
+                let wasFollowing = following
+                // Jump to latest during an input wins over it.
+                if following { layout.input = nil }
+                // A reader's input holds following off until it ends, and while a gesture runs only its end turns following on.
+                let gesture = phase == .interacting || phase == .decelerating
+                following = layout.input == nil && (following || !gesture) && TranscriptFollowing.next(following, pass)
+                // A pin left the position at the bottom edge; once the reader leaves, it holds where they are so it is not applied again.
+                if !following, wasFollowing || layout.leftByInput {
+                    layout.leftByInput = false
+                    position.scrollTo(y: Self.scrollY(new.contentOffset.y, in: new))
+                }
                 if !resized {
                     if following, resting, layout.resized, !Self.atBottom(new) {
                         // Layout that moves the offset in the same pass as a resize, as a lazy stack re-measuring rows does, is not the reader leaving the bottom.
-                        settle { $0.scrollTo(edge: .bottom) }
-                    } else if !animating {
-                        // A jump's animation passes through offsets short of the bottom; they are not the reader leaving it.
-                        following = following ? Self.atBottom(new) : Self.atEnd(new)
+                        pinToEnd()
                     }
-                } else if following, phase == .idle || phase == .animating, !Self.atBottom(new) {
-                    settle { $0.scrollTo(edge: .bottom) }
+                } else if following, !rescaling, phase == .idle || phase == .animating, TranscriptEnd(new).distance > 0.5 {
+                    // With no size-change anchor, a following reader is kept at the end here, in the pass that grew the content.
+                    position.scrollTo(edge: .bottom)
                 } else if !following, inserted, resting, layout.holdingRow {
                     // Rows below the reader that were never laid out are re-estimated as a page arrives, so the end moves; the held row does not.
                 } else if !following, inserted, resting {
@@ -118,21 +138,20 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                     layout.holdFromEnd(distance, content: new.contentSize.height)
                     let target = max(new.contentSize.height - distance, 0)
                     settleHold { $0.scrollTo(y: Self.scrollY(target, in: new)) }
-                } else if !following, resting, Self.atEnd(new) {
-                    // Content that shrank to the reader's position, or now fits, leaves nothing to jump to.
-                    following = true
                 }
             }
             .environment(\.holdTranscriptPlace, HoldTranscriptPlace(hold: holdPlace))
             .environment(\.transcriptClip, layout.clip)
             .environment(\.revealRow, RowAction(owner: String(describing: transcript)) { top in
                 following = false
+                layout.input = nil
                 layout.releaseHold()
                 layout.revealed = RevealedRow(top: top)
                 position.scrollTo(y: top.wrappedValue)
             })
             .onAppear {
                 rows?.moved = { rowMoved($0) }
+                layout.clip.readerLeaves = { readerLeaves() }
                 rows?.holdingOlder = { holdOlderPlace(fresh: true) }
             }
             .onDisappear { layout.cancelCheck() }
@@ -145,6 +164,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             }
             .onChange(of: transcript) {
                 generation &+= 1
+                layout.input = nil
                 layout.forgetOlder()
                 layout.cancelCheck()
                 layout.lastGrowth = nil
@@ -225,14 +245,51 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     // A scroll position still at the bottom edge keeps the bottom in place as content grows, even when not following.
     private func holdPlace() {
         following = false
+        layout.input = nil
         layout.releaseHold()
         if let geometry = layout.geometry { position.scrollTo(y: Self.scrollY(geometry.contentOffset.y, in: geometry)) }
+    }
+
+    private func readerLeaves() {
+        let now = ContinuousClock.now
+        if layout.input != nil, !following {
+            layout.input?.last = now
+            return
+        }
+        guard following, let start = layout.geometry?.contentOffset.y else { return }
+        following = false
+        layout.leftByInput = true
+        let input = ReaderScroll(start: start, last: now)
+        layout.input = input
+        Task { @MainActor in await settleInput(input.id) }
+    }
+
+    // Each input renews the hold; it ends with its scroll phase, or once input stops outside a gesture, and never outlives the cap.
+    private func settleInput(_ id: UUID) async {
+        while let input = layout.input, input.id == id {
+            try? await Task.sleep(for: Self.inputLimit)
+            guard let input = layout.input, input.id == id, !following, let geometry = layout.geometry else { return }
+            let quiet = input.last.duration(to: .now) >= Self.inputLimit
+            let gesture = phase == .interacting || phase == .decelerating
+            guard quiet && !gesture || input.started.duration(to: .now) >= Self.inputCap else { continue }
+            layout.input = nil
+            guard !gesture else { return }
+            following = abs(geometry.contentOffset.y - input.start) < 0.5 || Self.atEnd(geometry)
+            if following { pinToEnd() }
+        }
+    }
+
+    // A reader who scrolled away after a pin was queued keeps their place.
+    private func pinToEnd() {
+        settle { position in
+            if following { position.scrollTo(edge: .bottom) }
+        }
     }
 
     // Updates during an animation are ignored, so one that comes to rest short of the bottom is checked once it has.
     private func returnToBottom() {
         guard following, let geometry = layout.geometry, !Self.atBottom(geometry) else { return }
-        settle { $0.scrollTo(edge: .bottom) }
+        pinToEnd()
     }
 
     // The geometry action can skip a stream's last change; false asks again once the scroll rests.
@@ -244,7 +301,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             if resting { layout.checkDeferred = true }
             return false
         case .scroll:
-            settle { $0.scrollTo(edge: .bottom) }
+            pinToEnd()
             return true
         case .clip:
             layout.clip.scrollToEnd()
@@ -273,6 +330,13 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     }
 }
 
+private struct ReaderScroll {
+    let id = UUID()
+    let start: CGFloat
+    let started = ContinuousClock.now
+    var last: ContinuousClock.Instant
+}
+
 /// The latest scroll geometry, when an animated scroll began, and whether the layout pass now running resized the transcript.
 /// A reference, so updating it does not redraw the transcript.
 @MainActor
@@ -283,6 +347,9 @@ private final class Layout {
     let clip = TranscriptClip()
     var lastGrowth: CGFloat?
     var animationStart: ContinuousClock.Instant?
+    var gestureStart: CGFloat?
+    var leftByInput = false
+    var input: ReaderScroll?
     private var resizedTurn: Int?
     private var fromEnd: (distance: CGFloat, until: ContinuousClock.Instant, content: CGFloat, landing: Bool)?
     let row = TranscriptRowHold()

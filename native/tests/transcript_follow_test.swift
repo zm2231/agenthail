@@ -19,10 +19,12 @@ final class Feed: ObservableObject {
     @Published var header: CGFloat = 44
     var merged: Set<String> = []
     @Published var usesTail = false
+    var covers = false
     var following = true
     let hold = TranscriptSelectionHold()
     var eager = 0
     var crossed = 0
+    var flips = 0
 }
 
 @MainActor var renders: [String: Int] = [:]
@@ -51,9 +53,11 @@ struct Transcript: View {
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var following = true
     @State private var layout = TranscriptTailLayout()
+    @State private var tailRevision = 0
 
     var body: some View {
         let ids = feed.rows.map(\.id)
+        let _ = tailRevision
         let split = feed.usesTail ? layout.tail.split(ids, in: feed.transcript) : ids.count
         let _ = feed.eager = ids.count - split
         let _ = feed.crossed = max(feed.crossed, layout.tail.crossed)
@@ -70,7 +74,10 @@ struct Transcript: View {
                     ForEach(feed.rows.dropFirst(split)) { row in
                         RowView(row: row)
                             .padding(.top, 20)
-                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TranscriptRows.contentSpace)) } action: { layout.rows[row.id] = $0 }
+                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TranscriptRows.contentSpace)) } action: {
+                                layout.rows[row.id] = $0
+                                cover(ids)
+                            }
                             .onDisappear { layout.rows[row.id] = nil }
                             .reportsTop(row.id, to: readerTops)
                     }
@@ -93,7 +100,7 @@ struct Transcript: View {
             seenGeometry.append(String(format: "%.3f offset %.0f content %.0f visible maxY %.0f insets %.0f/%.0f end %.0f", Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 100), geometry.contentOffset.y, geometry.contentSize.height, geometry.visibleRect.maxY, geometry.contentInsets.top, geometry.contentInsets.bottom, geometry.contentSize.height - (geometry.visibleRect.maxY - geometry.contentInsets.bottom)))
             if seenGeometry.count > 12 { seenGeometry.removeFirst() }
             return true
-        } action: { _, _ in }
+        } action: { _, _ in cover(ids) }
         .onChange(of: "\(feed.transcript)|\(ids.count)|\(ids.last ?? "")", initial: true) {
             guard feed.usesTail else { return }
             layout.tail.update(ids, in: feed.transcript, rows: layout.rows, visible: layout.visible, following: following) { feed.hold.held(over: $0, buttons: 0) }
@@ -102,14 +109,27 @@ struct Transcript: View {
         .transcriptFollow(feed.transcript, leadingRow: feed.rows.first?.id, hasRow: { id in feed.merged.contains(id) || feed.rows.contains { $0.id == id } }, rows: readerTops, position: $position, following: $following)
         .safeAreaInset(edge: .top, spacing: 0) { Color.gray.frame(height: feed.header) }
         .safeAreaInset(edge: .bottom, spacing: 0) { Color.gray.frame(height: feed.inset) }
+        .onScrollPhaseChange { _, new in
+            layout.scrolling = new == .interacting || new == .decelerating
+            if !layout.scrolling { cover(ids) }
+        }
         .onChange(of: following) {
             feed.following = following
+            feed.flips += 1
             seenGeometry.append(String(format: "%.3f following %@", Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 100), following ? "on" : "off"))
             if seenGeometry.count > 12 { seenGeometry.removeFirst() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .jumpToLatest)) { _ in
             scrollToLatest($position, following: $following, latest: feed.rows.last?.id)
         }
+    }
+}
+
+extension Transcript {
+    // As the desktop transcript does: while following, rows join the eager tail until its top reaches the top of the view.
+    private func cover(_ ids: [String]) {
+        guard feed.usesTail, feed.covers, following, layout.tail.cover(ids, in: feed.transcript, rows: layout.rows, visible: layout.visible, resting: !layout.scrolling) else { return }
+        tailRevision &+= 1
     }
 }
 
@@ -379,6 +399,7 @@ struct TranscriptFollowTest {
         returnMidStream(scroll, feed)
         heldSelection(scroll, feed)
         readerRowStays(scroll, feed)
+        approachTheEnd(scroll, feed)
 
         feed.transcript = "U"
         feed.rows = rows("U", 200)
@@ -632,21 +653,60 @@ struct TranscriptFollowTest {
         expectBottom(scroll, "rows streamed under a tall header stay followed")
 
         feed.header = 44
-        feed.transcript = "S"
-        feed.rows = rows("S", 60)
+        for input in ReaderInput.allCases {
+            feed.transcript = "S\(input)"
+            feed.rows = rows("S\(input)", 60)
+            spin(0.6)
+            for index in 0..<10 {
+                feed.rows += rows("Sa\(input)\(index)-", 1)
+                spin(0.05)
+            }
+            let start = offset(scroll)
+            readerInput(scroll, input)
+            let readerPlace = offset(scroll)
+            expect(start - readerPlace > 100, "a reader's \(input) moved them up while rows stream, from \(start) to \(readerPlace)")
+            for index in 0..<20 {
+                feed.rows += rows("Sb\(input)\(index)-", 1)
+                spin(0.05)
+            }
+            spin(0.6)
+            expect(!feed.following && abs(offset(scroll) - readerPlace) < 1, "a reader who scrolls up with \(input) while rows stream stays put, offset \(readerPlace) became \(offset(scroll))")
+        }
+
+        feed.transcript = "P"
+        feed.rows = rows("P", 60)
         spin(0.6)
+        expect(feed.following, "a fresh transcript follows before a press on its scroller")
+        readerInput(scroll, .press)
+        for index in 0..<5 {
+            feed.rows += rows("Pa\(index)-", 1)
+            spin(0.1)
+        }
+        spin(0.4)
+        expect(feed.following && abs(gap(scroll)) < 2, "a press on the scroller that moves nothing keeps following, \(Int(gap(scroll))) pt short; \(geometry(scroll))")
+
+        feed.transcript = "T"
+        feed.rows = rows("T", 60)
+        spin(0.6)
+        let nudgeStart = offset(scroll)
+        var streamed = 0
+        let stream = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { _ in
+            MainActor.assumeIsolated {
+                feed.rows += rows("Tn\(streamed)-", 1)
+                streamed += 1
+            }
+        }
+        readerInput(scroll, .nudge)
+        stream.invalidate()
+        let nudged = offset(scroll)
+        expect(streamed > 3, "rows streamed while the reader stepped up, \(streamed)")
+        expect(nudgeStart - nudged > 10, "a reader's small steps moved them up, from \(nudgeStart) to \(nudged)")
         for index in 0..<10 {
-            feed.rows += rows("Sa\(index)-", 1)
-            spin(0.05)
-        }
-        move(scroll, to: offset(scroll) - 400)
-        let readerPlace = offset(scroll)
-        for index in 0..<20 {
-            feed.rows += rows("Sb\(index)-", 1)
+            feed.rows += rows("Ta\(index)-", 1)
             spin(0.05)
         }
         spin(0.6)
-        expect(!feed.following && abs(offset(scroll) - readerPlace) < 1, "a reader who scrolls up while rows stream stays put, offset \(readerPlace) became \(offset(scroll))")
+        expect(!feed.following && abs(offset(scroll) - nudged) < 1, "a reader who scrolls up in steps under the reach stays put as rows stream, offset \(nudged) became \(offset(scroll))")
 
         // Inside a main-queue block the main queue cannot run another, as on a machine too busy to drain it between passes.
         feed.transcript = "Q"
@@ -660,7 +720,7 @@ struct TranscriptFollowTest {
                 spin(0.05)
             }
             let start = offset(scroll)
-            move(scroll, to: start - 400)
+            readerInput(scroll, .wheel)
             busyPlace = offset(scroll)
             expect(start - busyPlace > 300, "the reader scrolled up from \(start) to \(busyPlace) while the main queue was busy")
             for index in 0..<10 {
@@ -671,7 +731,7 @@ struct TranscriptFollowTest {
         }
         while !busyDone { spin(0.05) }
         spin(0.6)
-        expect(!feed.following && abs(offset(scroll) - busyPlace) < 1, "a reader who scrolls up while rows stream stays put when the main queue is busy, offset \(busyPlace) became \(offset(scroll))")
+        expect(!feed.following && abs(offset(scroll) - busyPlace) < 1, "a reader who scrolls up while rows stream stays put when the main queue is busy, offset \(busyPlace) became \(offset(scroll)), following \(feed.following)")
 
         feed.transcript = "N"
         feed.rows = rows("N", 60)
@@ -867,6 +927,170 @@ struct TranscriptFollowTest {
         spin(0.5)
         expectBottom(scroll, "a following reader stays at the end of a long transcript while rows above are measured again")
         expect(feed.following, "a following reader keeps following")
+    }
+
+    // Rows of very different heights leave the lazy stack's estimate of the rows it has not built far off, and it redoes that estimate whenever a row joins the eager tail.
+    @MainActor
+    private static func approachTheEnd(_ scroll: NSScrollView, _ feed: Feed) {
+        feed.covers = true
+        defer { feed.covers = false }
+        feed.transcript = "Ap"
+        feed.rows = (0..<300).map { Row(id: "Ap\($0)", lines: $0 % 5 == 0 && $0 < 280 ? 60 : 1) }
+        spin(0.6)
+        move(scroll, to: 0)
+        move(scroll, to: bottomOffset(scroll) - 12000)
+        expect(!feed.following, "a reader well above the end of a long transcript is not following")
+        let flips = feed.flips
+        let height = scroll.contentView.bounds.height
+        var gestures = 0
+        while gap(scroll) > 1, gestures < 150 {
+            gestures += 1
+            let top = offset(scroll)
+            guard let reference = feed.rows.compactMap({ row in readerTops.top(row.id).map { (row.id, $0) } }).filter({ $0.1 < top + height }).max(by: { $0.1 < $1.1 }) else {
+                return expect(false, "a row is laid out in view on the way to the end, \(geometry(scroll))")
+            }
+            let before = reference.1 - top
+            let sent = wheelGesture(scroll, by: 400)
+            guard let after = readerTops.top(reference.0).map({ $0 - offset(scroll) }) else {
+                return expect(false, "the reader's row \(reference.0) is still laid out after a \(Int(sent)) pt scroll, gesture \(gestures)")
+            }
+            expect(abs(after - (before - sent)) < 2, "the reader's row moves with their scroll on the way to the end: \(reference.0) at \(Int(before)) moved to \(Int(after)) for a \(Int(sent)) pt scroll, gesture \(gestures), following flipped \(feed.flips - flips) times")
+            if gap(scroll) > TranscriptFollow<String>.readerReach {
+                expect(feed.flips == flips, "following stays off until the reader reaches the end, flipped \(feed.flips - flips) times by gesture \(gestures) with \(Int(gap(scroll))) pt left; \(geometry(scroll))")
+            }
+        }
+        expect(gestures > 10, "the approach took many gestures, \(gestures)")
+        spin(1.5)
+        expect(feed.following && abs(gap(scroll)) < 2, "a reader who scrolls to the end of a mixed transcript is following there, after \(gestures) gestures; \(geometry(scroll))")
+        expect(feed.flips - flips == 1, "following turned on once, at the end, flipped \(feed.flips - flips) times over \(gestures) gestures")
+
+        // A reply streaming into the last row, and a table in it settling taller, must not leave the end out of view even for a frame.
+        var worst: CGFloat = 0
+        func grow(_ lines: Int) {
+            let last = feed.rows.count - 1
+            let before = scroll.documentView?.frame.height ?? 0
+            feed.rows[last] = Row(id: feed.rows[last].id, lines: feed.rows[last].lines + lines)
+            // The lazy stack can re-estimate unbuilt rows in the same layout, so the document may end up shorter; any change means it was laid out.
+            waitUntil { (scroll.documentView?.frame.height ?? 0) != before }
+            expect((scroll.documentView?.frame.height ?? 0) != before, "the last row's growth was laid out, document stayed \(before)")
+            spin(0.016)
+        }
+        for growth in 0..<30 {
+            grow(growth % 5 == 4 ? 20 : 3)
+            worst = max(worst, gap(scroll))
+        }
+        spin(0.4)
+        expect(worst < 2 && feed.following && abs(gap(scroll)) < 2, "a following reader stays at the end while the last row grows, at most \(Int(worst)) pt short a frame after each growth; \(geometry(scroll))")
+
+        readerScroll(scroll, to: offset(scroll) - 40)
+        spin(0.4)
+        expect(!feed.following, "a reader who scrolls 40 pt up from the end stops following")
+        func readerRow() -> (id: String, screen: CGFloat)? {
+            let top = offset(scroll)
+            return feed.rows.compactMap { row in readerTops.top(row.id).map { (row.id, $0 - top) } }.filter { $0.1 < scroll.contentView.bounds.height }.max { $0.1 < $1.1 }
+        }
+        func place(_ id: String) -> CGFloat { readerTops.top(id).map { $0 - offset(scroll) } ?? .infinity }
+        guard let nudged = readerRow() else { return expect(false, "a row is laid out in view after scrolling up from the end, \(geometry(scroll))") }
+        for _ in 0..<5 { grow(3) }
+        spin(0.4)
+        expect(!feed.following && abs(place(nudged.id) - nudged.screen) < 1, "a reader who scrolled up from a pinned end keeps their place as the last row grows, \(nudged.id) at \(Int(nudged.screen)) moved to \(place(nudged.id))")
+
+        NotificationCenter.default.post(name: .jumpToLatest, object: nil)
+        spin(1.0)
+        expectBottom(scroll, "jump to latest returns to the end of the mixed transcript")
+        expect(feed.following, "jump to latest follows again")
+        scroll.pageUp(nil)
+        spin(1.0)
+        expect(!feed.following && gap(scroll) > 100, "a reader who pages up from the end stops following, gap \(Int(gap(scroll)))")
+        guard let paged = readerRow() else { return expect(false, "a row is laid out in view after paging up, \(geometry(scroll))") }
+        for _ in 0..<5 { grow(3) }
+        spin(0.4)
+        expect(!feed.following && abs(place(paged.id) - paged.screen) < 1, "a reader who paged up from the end keeps their place as the last row grows, \(paged.id) at \(Int(paged.screen)) moved to \(place(paged.id))")
+    }
+
+    enum ReaderInput: CaseIterable {
+        case wheel, pageUp, scroller
+        static var allCases: [ReaderInput] { [.wheel, .pageUp, .scroller] }
+        case press, nudge
+    }
+
+    @MainActor
+    private static func clip(in view: NSView) -> TranscriptClip? {
+        (view as? TranscriptClipAnchor.AnchorView)?.clip ?? view.subviews.lazy.compactMap { clip(in: $0) }.first
+    }
+
+    // Sent through the application, where AppKit runs event monitors, and to the handling view only if the hidden window was not routed it.
+    // A wheel event built here has no window, so it is handed to the transcript's monitor as AppKit would route it to this window.
+    @MainActor
+    private static func readerInput(_ scroll: NSScrollView, _ input: ReaderInput) {
+        guard let window = scroll.window, let content = window.contentView else { return expect(false, "the transcript is in a window") }
+        switch input {
+        case .wheel, .nudge:
+            let center = scroll.convert(NSPoint(x: scroll.bounds.midX, y: scroll.bounds.midY), to: nil)
+            guard let target = content.hitTest(content.convert(center, from: nil)) else { return expect(false, "the transcript is under the pointer") }
+            let screen = window.convertPoint(toScreen: center)
+            let flipped = (NSScreen.screens.first?.frame.height ?? 0) - screen.y
+            let steps: [(Int64, Int32)] = input == .nudge ? [(1, 0)] + Array(repeating: (2, 1), count: 40) + [(4, 0)] : [(1, 0), (2, 400), (4, 0)]
+            for (phase, delta) in steps {
+                let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: delta, wheel2: 0, wheel3: 0)!
+                event.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+                event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+                event.location = CGPoint(x: screen.x, y: flipped)
+                let wheel = NSEvent(cgEvent: event)!
+                clip(in: content)?.receive(wheel, in: window)
+                target.scrollWheel(with: wheel)
+                spin(input == .nudge ? 0.03 : 0.016)
+            }
+        case .pageUp:
+            window.makeFirstResponder(scroll.verticalScroller)
+            let key = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                       context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 116)!
+            let before = offset(scroll)
+            NSApp.sendEvent(key)
+            if offset(scroll) == before { scroll.pageUp(nil) }
+        case .scroller, .press:
+            guard let scroller = scroll.verticalScroller else { return expect(false, "the transcript has a scroller") }
+            let knob = scroller.rect(for: .knob)
+            let grab = scroller.convert(NSPoint(x: knob.midX, y: knob.midY), to: nil)
+            let drag = scroller.convert(NSPoint(x: knob.midX, y: knob.midY - (input == .press ? 0 : 40)), to: nil)
+            func mouse(_ type: NSEvent.EventType, _ point: NSPoint) -> NSEvent {
+                NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                   context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            }
+            NSApp.postEvent(mouse(.leftMouseDragged, drag), atStart: false)
+            NSApp.postEvent(mouse(.leftMouseUp, drag), atStart: false)
+            let down = mouse(.leftMouseDown, grab)
+            let before = offset(scroll)
+            NSApp.sendEvent(down)
+            if offset(scroll) == before { scroller.mouseDown(with: down) }
+        }
+        spin(0.4)
+    }
+
+    // One phased gesture, measured by how far the offset moved, so a re-estimate the gesture triggers is not corrected away by another.
+    @MainActor
+    private static func wheelGesture(_ scroll: NSScrollView, by dy: CGFloat) -> CGFloat {
+        guard let window = scroll.window, let content = window.contentView else { expect(false, "the transcript is in a window"); return 0 }
+        let center = scroll.convert(NSPoint(x: scroll.bounds.midX, y: scroll.bounds.midY), to: nil)
+        guard let target = content.hitTest(content.convert(center, from: nil)) else { expect(false, "the transcript is under the pointer"); return 0 }
+        func wheel(_ phase: Int64, _ delta: Int32) -> NSEvent {
+            let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: delta, wheel2: 0, wheel3: 0)!
+            event.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+            event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+            return NSEvent(cgEvent: event)!
+        }
+        let start = offset(scroll)
+        target.scrollWheel(with: wheel(1, 0))
+        var sent: CGFloat = 0
+        while sent < dy {
+            let part = min(dy - sent, 400)
+            target.scrollWheel(with: wheel(2, -Int32(part)))
+            sent += part
+            spin(0.016)
+        }
+        target.scrollWheel(with: wheel(4, 0))
+        spin(0.4)
+        return offset(scroll) - start
     }
 
     @MainActor

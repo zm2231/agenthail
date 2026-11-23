@@ -958,6 +958,10 @@ struct TranscriptView: View {
             tailLayout.visible = visible
             showLatest()
         }
+        .onScrollPhaseChange { _, new in
+            tailLayout.scrolling = new == .interacting || new == .decelerating
+            if !tailLayout.scrolling { coverView(ids) }
+        }
         .onChange(of: following) { showLatest() }
         .onChange(of: TailInputs(session: session.id, newest: ids.last, count: ids.count), initial: true) {
             tailLayout.newest = ids.last
@@ -1076,7 +1080,7 @@ struct TranscriptView: View {
     }
 
     private func coverView(_ ids: [String]) {
-        guard following, tailLayout.tail.cover(ids, in: session.id, rows: tailLayout.rows, visible: tailLayout.visible) else { return }
+        guard following, tailLayout.tail.cover(ids, in: session.id, rows: tailLayout.rows, visible: tailLayout.visible, resting: !tailLayout.scrolling) else { return }
         tailRevision &+= 1
     }
 
