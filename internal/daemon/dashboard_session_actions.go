@@ -42,7 +42,8 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 	if daemonOwned, err := d.Registry.StartedByDaemon(session.ID); err != nil || daemonOwned && !daemonSessionAction(request.Action) {
 		return actionResult{}, actionFailed(http.StatusConflict, "daemon_session", fmt.Sprint(errors.Join(err, registry.ErrDaemonSession)))
 	}
-	if err := d.forwardedScope(*session, request); err != nil {
+	controlDecision, err := d.forwardedScope(*session, request)
+	if err != nil {
 		return actionResult{}, err
 	}
 	switch request.Action {
@@ -267,7 +268,11 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		}
 		return actionResult{}, d.sendFailed(http.StatusBadGateway, "bad_gateway", err)
 	}
-	return actionOK(map[string]any{"ok": true, "result": result}), nil
+	body := map[string]any{"ok": true, "result": result}
+	if controlDecision != "" {
+		body["controlDecision"] = controlDecision
+	}
+	return actionOK(body), nil
 }
 
 func checkMessageAuthor(d *Daemon, request dashboardActionRequest) error {

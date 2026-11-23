@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/agentroles"
 )
 
 // agentNotices holds what to tell the person once an agent's action that
@@ -89,6 +90,12 @@ func (n *agentNotices) take(token, callerID string, now time.Time) (agentAction,
 	}
 	delete(n.pending, token)
 	return notice.what, true
+}
+
+// notifies reports whether the decision a session's host applied to an
+// action tells the person; a host too old to report one leaves it unset.
+func notifies(decision string) bool {
+	return decision != agentroles.Allow
 }
 
 func (d *Daemon) holdAgentNotice(caller *mcpCaller, what string) string {

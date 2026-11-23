@@ -94,7 +94,7 @@ func (d *Daemon) mcpRemoteTarget(caller *mcpCaller, ref string, remote targets.R
 		if spawner {
 			return nil, scopeRefusal(remote.ID, "down_only", mcpDownOnly)
 		}
-		return remoteProjectControl(caller, remote)
+		return d.remoteProjectControl(caller, remote, reach)
 	}
 	if caller.has("control.all") || remote.Surface == surface.KindAgent {
 		return remote.Session(), nil
@@ -115,7 +115,11 @@ func (d *Daemon) mcpRemoteTarget(caller *mcpCaller, ref string, remote targets.R
 	return remote.Session(), nil
 }
 
-func remoteProjectControl(caller *mcpCaller, remote targets.Remote) (*surface.Session, error) {
+// A coordinator oversees every session in its project, so this host knows
+// which decision its steer, send now or interrupt falls under. Whether the
+// caller started the session only the owning host knows; that host picks
+// between the two decisions forwardScope forwards.
+func (d *Daemon) remoteProjectControl(caller *mcpCaller, remote targets.Remote, reach controlReach) (*surface.Session, error) {
 	queuedOnly := scopeRefusal(remote.ID, "not_queued", fmt.Sprintf("%s runs on host %s; across hosts you may only send a queued message, unless it is in your own project and you are its coordinator.", remote.Label(), remote.Host.Name))
 	if caller.extension != "" || !caller.has("control.project") || caller.project == nil || remote.Surface == surface.KindAgent || remote.Project != caller.project.ID {
 		return nil, queuedOnly
@@ -123,10 +127,25 @@ func remoteProjectControl(caller *mcpCaller, remote targets.Remote) (*surface.Se
 	if remote.Archived {
 		return nil, scopeRefusal(remote.ID, "archived", fmt.Sprintf("%s on host %s is archived.", remote.Label(), remote.Host.Name))
 	}
-	if caller.role.Decision("remote-project-control") != agentroles.Ask {
+	if reach == reachSteer && d.mcpIsProjectLead(caller, caller.session.ID) {
+		if caller.role.Decision(overseenControl) == agentroles.Ask {
+			return nil, overseenRefusal(remote.ID, remote.Label())
+		}
+		return remote.Session(), nil
+	}
+	if caller.role.Decision(remoteProjectControlAction) != agentroles.Ask {
 		return remote.Session(), nil
 	}
 	return nil, scopeRefusal(remote.ID, "not_queued", fmt.Sprintf("%s runs on host %s; your role leaves controlling sessions on another computer to the person, so you may only send it a queued message.", remote.Label(), remote.Host.Name))
+}
+
+const (
+	overseenControl            = "overseen-control"
+	remoteProjectControlAction = "remote-project-control"
+)
+
+func overseenRefusal(targetID, label string) error {
+	return scopeRefusal(targetID, "not_queued", fmt.Sprintf("Your role leaves steering, interrupting or sending now to %s, a session you started or lead, to the person, so you may only send it a queued message.", label))
 }
 
 func (d *Daemon) remoteSpawner(caller *mcpCaller, ref string) (bool, error) {
@@ -144,7 +163,12 @@ func (d *Daemon) remoteSpawner(caller *mcpCaller, ref string) (bool, error) {
 type forwardedLimits struct {
 	project string
 	rank    string
-	notice  agentAction
+	// overseen and control are the caller's decisions for a session it
+	// started or leads and for any other session in its project; the owning
+	// host knows which applies and reports the one it used.
+	overseen string
+	control  string
+	notice   agentAction
 }
 
 // forwardScope names what the owning host checks before it acts on a remote
@@ -170,7 +194,14 @@ func (d *Daemon) forwardScope(caller *mcpCaller, targetID, action string, reach 
 		return forwardedLimits{}, err
 	}
 	limits := forwardedLimits{project: caller.project.ID, rank: ceiling.Permission}
-	if caller.role != nil && caller.role.Decision("remote-project-control") == agentroles.Notify {
+	if caller.role == nil {
+		return limits, nil
+	}
+	limits.overseen, limits.control = caller.role.Decision(overseenControl), caller.role.Decision(remoteProjectControlAction)
+	if reach == reachSteer && d.mcpIsProjectLead(caller, caller.session.ID) {
+		limits.control = limits.overseen
+	}
+	if limits.overseen == agentroles.Notify || limits.control == agentroles.Notify {
 		limits.notice = d.remoteControlNotice(targetID, action)
 	}
 	return limits, nil
@@ -215,6 +246,7 @@ func (d *Daemon) scopeReply(caller *mcpCaller, reply *daemonapi.ScopeReply, targ
 		return err
 	}
 	reply.ScopeProjectID, reply.ScopeRank = limits.project, limits.rank
+	reply.ScopeOverseen, reply.ScopeControl = limits.overseen, limits.control
 	if reply.Notice == "" {
 		reply.Notice = d.holdAgentAction(caller, limits.notice)
 	}
