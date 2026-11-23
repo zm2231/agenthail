@@ -122,7 +122,11 @@ func runSorter(t *testing.T, d *Daemon) (stop func()) {
 }
 
 func TestAfterARestartOwedMessagesAreSortedOldestFirstAcrossProjects(t *testing.T) {
-	stub := &sorterStub{answer: fileTo("new")}
+	slowly := func(message string) (int, string) {
+		time.Sleep(300 * time.Millisecond)
+		return fileTo("new")(message)
+	}
+	stub := &sorterStub{answer: slowly}
 	d, r, handler, p, _ := sorterFixture(t, stub)
 	early := addLedgerProject(t, r, "proj-a", "a-sorter-key")
 	if err := early.store.Enable(early.key, ledger.AttachEachPrompt); err != nil {
@@ -135,11 +139,13 @@ func TestAfterARestartOwedMessagesAreSortedOldestFirstAcrossProjects(t *testing.
 	ledgerPost(t, handler, ledgerCaptureRequest{SessionID: early.session(t, r, "claude-earlier-key").ID, PromptID: "newer", Prompt: "the newer message"})
 	restarted := newTestDaemon(t, r, []surface.Surface{&daemonSurface{sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true}})
 	restarted.sorter.http = d.sorter.http
-	runSorter(t, restarted)
+	stopRestarted := runSorter(t, restarted)
 	eventually(t, "both owed messages to be asked about", func() bool { return len(stub.asks()) == 2 })
 	if asked := stub.asks(); asked[0].Message != "the older message" || asked[1].Message != "the newer message" {
 		t.Fatalf("asked %q then %q, want the older message first whatever its project", asked[0].Message, asked[1].Message)
 	}
+	eventually(t, "both answers to be recorded", func() bool { return !owesSort(t, p) && !owesSort(t, early) })
+	stopRestarted()
 	again := newTestDaemon(t, r, []surface.Surface{&daemonSurface{sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true}})
 	again.sorter.http = d.sorter.http
 	runSorter(t, again)
@@ -281,6 +287,15 @@ func TestARestartDuringAnOutageSortsWhatWasOwedOnceTheSorterIsBack(t *testing.T)
 	if h := restarted.sorterHealth(); h.Failures != 0 {
 		t.Fatalf("health after recovery = %+v", h)
 	}
+}
+
+func owesSort(t *testing.T, p ledgerProject) bool {
+	t.Helper()
+	owed, err := p.store.LocalProvisionalSince(p.key, time.Now().Add(-sorterRecovery))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(owed) > 0
 }
 
 func sortedGoal(t *testing.T, p ledgerProject, ref string) string {
