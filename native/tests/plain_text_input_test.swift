@@ -20,6 +20,7 @@ struct AgentBoundFields: View {
 }
 
 @main
+@MainActor
 struct PlainTextInputTest {
     static let typed = "--json FILE... \"double\" 'single' a -- b (c) -> d"
     static var failed = false
@@ -31,7 +32,6 @@ struct PlainTextInputTest {
         }
     }
 
-    @MainActor
     static func main() {
         _ = NSApplication.shared
         let domain = Bundle.main.bundleIdentifier ?? ProcessInfo.processInfo.processName
@@ -97,7 +97,6 @@ struct PlainTextInputTest {
         print("plain text input: ok")
     }
 
-    @MainActor
     static func sendsAsTyped(_ view: NSTextView, _ name: String) {
         check(!view.isAutomaticDashSubstitutionEnabled, "\(name) has smart dashes off")
         check(!view.isAutomaticQuoteSubstitutionEnabled, "\(name) has smart quotes off")
@@ -109,7 +108,6 @@ struct PlainTextInputTest {
         check(Array(view.string.utf8) == Array(typed.utf8), "\(name) keeps the typed text byte for byte: \(view.string.debugDescription)")
     }
 
-    @MainActor
     static func descendants(of view: NSView) -> [NSView] {
         view.subviews.flatMap { [$0] + descendants(of: $0) }
     }
