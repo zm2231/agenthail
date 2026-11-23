@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -229,5 +230,124 @@ func TestTwoRevertsReadAsOneHistoryAndReportOnlyTheTrustedRolloutsRevertedTurn(t
 	}
 	if got, want := messageTexts(dropped), []string{"reverted question", "reverted answer"}; !slices.Equal(got, want) {
 		t.Fatalf("dropped=%q, want %q", got, want)
+	}
+}
+
+type cachedRolloutCopy struct {
+	size int64
+	used time.Duration
+}
+
+// seedRolloutCache fills the decompressed rollout cache with sparse copies
+// of the given sizes, last used the given time ago.
+func seedRolloutCache(t *testing.T, seeded ...cachedRolloutCopy) (string, []string) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	cacheRoot, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(cacheRoot, "agenthail", "codex-rollouts")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	var copies []string
+	for index, seed := range seeded {
+		path := filepath.Join(dir, fmt.Sprintf("copy-%d.jsonl", index))
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Truncate(path, seed.size); err != nil {
+			t.Fatal(err)
+		}
+		used := now.Add(-seed.used)
+		if err := os.Chtimes(path, used, used); err != nil {
+			t.Fatal(err)
+		}
+		copies = append(copies, path)
+	}
+	return dir, copies
+}
+
+// readCompressedRollout reads a new compressed rollout through the cache and
+// finishes the read, returning the copy it wrote.
+func readCompressedRollout(t *testing.T) string {
+	t.Helper()
+	plain := []byte(`{"type":"session_meta","payload":{"id":"thread"}}` + "\n")
+	encoder, err := zstd.NewWriter(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(t.TempDir(), "rollout.jsonl.zst")
+	if err := os.WriteFile(source, encoder.EncodeAll(plain, nil), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	readable, release, err := codexReadableRollout(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(readable)
+	release()
+	if err != nil || string(got) != string(plain) {
+		t.Fatalf("readable copy=%q err=%v, want the decompressed rollout", got, err)
+	}
+	return readable
+}
+
+func rolloutCacheEntries(t *testing.T, dir string) ([]string, int64) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kept []string
+	total := int64(0)
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			t.Fatal(err)
+		}
+		kept = append(kept, filepath.Join(dir, entry.Name()))
+		total += info.Size()
+	}
+	return kept, total
+}
+
+func TestDecompressedRolloutCacheEvictsLeastRecentlyUsedCopiesPastItsSizeCap(t *testing.T) {
+	third := codexRolloutCacheBytes / 3
+	dir, copies := seedRolloutCache(t, cachedRolloutCopy{third, 4 * time.Hour}, cachedRolloutCopy{third, 3 * time.Hour}, cachedRolloutCopy{third, 2 * time.Hour}, cachedRolloutCopy{third, time.Hour})
+	readable := readCompressedRollout(t)
+	kept, total := rolloutCacheEntries(t, dir)
+	if total > codexRolloutCacheBytes {
+		t.Fatalf("cache holds %d bytes, over its %d byte cap", total, codexRolloutCacheBytes)
+	}
+	want := []string{copies[2], copies[3], readable}
+	slices.Sort(want)
+	if !slices.Equal(kept, want) {
+		t.Fatalf("kept %q, want the two most recently used copies and the new one %q", kept, want)
+	}
+}
+
+func TestDecompressedRolloutCacheNeverEvictsACopyAReadHoldsAndShrinksBackOnRelease(t *testing.T) {
+	most := codexRolloutCacheBytes * 3 / 5
+	dir, copies := seedRolloutCache(t, cachedRolloutCopy{most, 4 * time.Hour}, cachedRolloutCopy{most, 3 * time.Hour}, cachedRolloutCopy{codexRolloutCacheBytes / 10, 2 * time.Hour})
+	releaseOldest := codexRolloutCopies.hold(copies[0])
+	releaseNext := codexRolloutCopies.hold(copies[1])
+	defer releaseNext()
+	readCompressedRollout(t)
+	for _, held := range copies[:2] {
+		if _, err := os.Stat(held); err != nil {
+			t.Fatalf("a copy a read holds was evicted: %v", err)
+		}
+	}
+	releaseOldest()
+	kept, total := rolloutCacheEntries(t, dir)
+	if total > codexRolloutCacheBytes {
+		t.Fatalf("cache holds %d bytes once the oldest copy's read finished, over its %d byte cap: %q", total, codexRolloutCacheBytes, kept)
+	}
+	if !slices.Contains(kept, copies[1]) || slices.Contains(kept, copies[0]) {
+		t.Fatalf("kept %q, want the released oldest copy evicted and the held one %q kept", kept, copies[1])
 	}
 }

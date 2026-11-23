@@ -26,7 +26,7 @@ type codexThreadSettings struct {
 var codexModeOptions = []surface.TurnSettingOption{{ID: "default", Label: "Default"}, {ID: "plan", Label: "Plan"}}
 
 func (c *Codex) TurnSettings(ctx context.Context, sess *surface.Session) ([]surface.TurnSetting, error) {
-	current, _ := readCodexThreadSettings(ctx, c.home.transcriptPath(sess))
+	current, _ := readCodexThreadSettings(ctx, c.home.existingRollout(sess))
 	if current.Model == "" {
 		model, err := c.Model(ctx, sess, "")
 		if err != nil {
@@ -156,11 +156,10 @@ func readNewestCodexSettings(ctx context.Context, rollout string, candidate func
 	if rollout == "" {
 		return codexThreadSettings{}, false
 	}
-	path, err := codexReadableRollout(rollout)
-	if err != nil {
-		return codexThreadSettings{}, false
+	if strings.HasSuffix(rollout, ".zst") {
+		return scanCodexSettings(ctx, rollout, candidate, read)
 	}
-	file, err := os.Open(path)
+	file, err := os.Open(rollout)
 	if err != nil {
 		return codexThreadSettings{}, false
 	}
@@ -182,6 +181,33 @@ func readNewestCodexSettings(ctx context.Context, rollout string, candidate func
 		}
 	})
 	return settings, ok
+}
+
+func scanCodexSettings(ctx context.Context, rollout string, candidate func([]byte) bool, read func(map[string]any) (codexThreadSettings, bool)) (codexThreadSettings, bool) {
+	stream, err := openCodexRollout(rollout)
+	if err != nil {
+		return codexThreadSettings{}, false
+	}
+	defer stream.Close()
+	var newest codexThreadSettings
+	var found bool
+	err = transcript.ScanJSONL(ctx, stream, transcript.MaxRecordBytes, func(line []byte) error {
+		if !candidate(line) {
+			return nil
+		}
+		var record map[string]any
+		if transcript.DecodeShrunkRecord(line, &record) != nil {
+			return nil
+		}
+		if settings, ok := read(record); ok {
+			newest, found = settings, true
+		}
+		return nil
+	})
+	if err != nil {
+		return codexThreadSettings{}, false
+	}
+	return newest, found
 }
 
 func codexSettingsRecord(record map[string]any) (codexThreadSettings, bool) {

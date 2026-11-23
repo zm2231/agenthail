@@ -3,6 +3,7 @@ package codexsurface
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
@@ -50,7 +51,10 @@ func TestCodexSessionSettingsComeFromTheRolloutWithTheSandboxOfTheLastTurn(t *te
 
 func TestCodexSessionSettingsComeFromARolloutCodexCompressed(t *testing.T) {
 	_, codex, session := settingsThread(t, settingsModels)
-	plain := []byte(`{"type":"turn_context","payload":{"model":"gpt-sol","approval_policy":"never","sandbox_policy":{"type":"read-only"}}}` + "\n")
+	cache := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cache)
+	plain := []byte(`{"type":"turn_context","payload":{"model":"gpt-luna","approval_policy":"on-request","sandbox_policy":{"type":"workspace-write"}}}` + "\n" +
+		`{"type":"turn_context","payload":{"model":"gpt-sol","approval_policy":"never","sandbox_policy":{"type":"read-only"}}}` + "\n")
 	encoder, err := zstd.NewWriter(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -77,6 +81,9 @@ func TestCodexSessionSettingsComeFromARolloutCodexCompressed(t *testing.T) {
 	}
 	if len(turn) == 0 || turn[0].Value != "gpt-sol" {
 		t.Fatalf("turn settings from a compressed rollout = %+v", turn)
+	}
+	if copies, _ := filepath.Glob(filepath.Join(cache, "*", "*", "*")); len(copies) > 0 {
+		t.Fatalf("reading settings wrote decompressed copies %q", copies)
 	}
 }
 

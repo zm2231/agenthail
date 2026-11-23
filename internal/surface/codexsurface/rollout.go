@@ -6,9 +6,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
@@ -25,6 +28,8 @@ import (
 
 const (
 	codexRolloutLineageMax = 16
+	codexRolloutCacheAge   = 24 * time.Hour
+	codexRolloutCacheBytes = int64(2 << 30)
 )
 
 var errCodexRolloutLineage = errors.New("Codex rollout continuation could not be verified")
@@ -60,23 +65,36 @@ func readCodexRolloutHeader(path string) (codexRolloutHeader, int64, error) {
 	return header, end, nil
 }
 
-func (h CodexHome) rolloutLineage(current, threadID string) ([]codexRolloutSegment, error) {
-	var segments []codexRolloutSegment
+// The segments' copies are held until release is called; on an error
+// nothing is held.
+func (h CodexHome) rolloutLineage(current, threadID string) (segments []codexRolloutSegment, release func(), err error) {
+	var releases []func()
+	releaseAll := func() {
+		for _, held := range releases {
+			held()
+		}
+	}
+	defer func() {
+		if err != nil {
+			releaseAll()
+		}
+	}()
 	source, end := current, int64(-1)
 	for {
 		if len(segments) == codexRolloutLineageMax {
-			return nil, fmt.Errorf("%w: more than %d rollouts", errCodexRolloutLineage, codexRolloutLineageMax)
+			return nil, nil, fmt.Errorf("%w: more than %d rollouts", errCodexRolloutLineage, codexRolloutLineageMax)
 		}
-		path, err := codexReadableRollout(source)
+		path, held, err := codexReadableRollout(source)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+		releases = append(releases, held)
 		header, length, err := readCodexRolloutHeader(path)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if header.Payload.ID != threadID {
-			return nil, fmt.Errorf("%w: %s belongs to another thread", errCodexRolloutLineage, filepath.Base(source))
+			return nil, nil, fmt.Errorf("%w: %s belongs to another thread", errCodexRolloutLineage, filepath.Base(source))
 		}
 		base := header.Payload.HistoryBase
 		start := int64(0)
@@ -86,10 +104,10 @@ func (h CodexHome) rolloutLineage(current, threadID string) ([]codexRolloutSegme
 		if end >= 0 {
 			info, err := os.Stat(path)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if end < start || end > info.Size() {
-				return nil, fmt.Errorf("%w: history ends outside %s", errCodexRolloutLineage, filepath.Base(source))
+				return nil, nil, fmt.Errorf("%w: history ends outside %s", errCodexRolloutLineage, filepath.Base(source))
 			}
 		}
 		segments = append(segments, codexRolloutSegment{source: source, path: path, start: start, end: end})
@@ -98,14 +116,14 @@ func (h CodexHome) rolloutLineage(current, threadID string) ([]codexRolloutSegme
 		}
 		previous, err := h.findRollout(base.RolloutID, threadID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		source, end = previous, base.EndByteOffset
 	}
 	for left, right := 0, len(segments)-1; left < right; left, right = left+1, right-1 {
 		segments[left], segments[right] = segments[right], segments[left]
 	}
-	return segments, nil
+	return segments, releaseAll, nil
 }
 
 // Rollout ids are UUIDv7, so a rollout's id dates its folder.
@@ -151,55 +169,163 @@ func codexRolloutDays(at time.Time) []string {
 
 // Codex compresses rollouts untouched for a week. history_base offsets
 // address the decompressed bytes, so a compressed rollout is read from a
-// decompressed copy.
-func codexReadableRollout(source string) (string, error) {
+// decompressed copy. The copy is held until release is called, and eviction
+// never removes a held copy.
+func codexReadableRollout(source string) (string, func(), error) {
 	if !strings.HasSuffix(source, ".zst") {
-		return source, nil
+		return source, func() {}, nil
 	}
 	info, err := os.Stat(source)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	cacheRoot, err := os.UserCacheDir()
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	dir := filepath.Join(cacheRoot, "agenthail", "codex-rollouts")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	key := sha256.Sum256([]byte(source + "\x00" + surface.Stamp(info).String()))
 	path := filepath.Join(dir, hex.EncodeToString(key[:16])+".jsonl")
+	release := codexRolloutCopies.hold(path)
 	if _, err := os.Stat(path); err == nil {
 		now := time.Now()
 		_ = os.Chtimes(path, now, now)
-		return path, nil
+		return path, release, nil
 	}
-	pruneCodexRolloutCache(dir)
+	if err := decompressCodexRollout(source, path); err != nil {
+		release()
+		return "", nil, err
+	}
+	return path, release, nil
+}
+
+func decompressCodexRollout(source, path string) error {
 	compressed, err := os.Open(source)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer compressed.Close()
 	decoder, err := zstd.NewReader(compressed)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer decoder.Close()
 	if err := atomicfile.WriteFrom(path, decoder, 0600); err != nil {
-		return "", fmt.Errorf("decompress Codex rollout: %w", err)
+		return fmt.Errorf("decompress Codex rollout: %w", err)
 	}
-	return path, nil
+	return nil
 }
 
-func pruneCodexRolloutCache(dir string) {
+type codexRolloutStream struct {
+	*zstd.Decoder
+	file *os.File
+}
+
+func (s codexRolloutStream) Close() error {
+	s.Decoder.Close()
+	return s.file.Close()
+}
+
+func openCodexRollout(source string) (io.ReadCloser, error) {
+	file, err := os.Open(source)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.HasSuffix(source, ".zst") {
+		return file, nil
+	}
+	decoder, err := zstd.NewReader(file)
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	return codexRolloutStream{Decoder: decoder, file: file}, nil
+}
+
+func readCodexRolloutFirstLine(source string, value any) error {
+	stream, err := openCodexRollout(source)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+	_, err = transcript.DecodeFirstJSONL(stream, value)
+	return err
+}
+
+type codexRolloutCopySet struct {
+	mu   sync.Mutex
+	held map[string]int
+}
+
+var codexRolloutCopies = &codexRolloutCopySet{held: map[string]int{}}
+
+// Releasing the last hold prunes the cache, so a copy that pushed it past
+// the cap goes once no read needs it.
+func (s *codexRolloutCopySet) hold(path string) func() {
+	s.mu.Lock()
+	s.held[path]++
+	s.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.mu.Lock()
+			if s.held[path]--; s.held[path] <= 0 {
+				delete(s.held, path)
+			}
+			s.mu.Unlock()
+			s.prune(filepath.Dir(path))
+		})
+	}
+}
+
+// Copies are touched on use, so the oldest modification time is the least
+// recently used. A held copy is never removed: the cache exceeds its cap
+// only by copies open reads need. A temporary file another write is still
+// filling starts with a dot and is left to the age limit.
+func (s *codexRolloutCopySet) prune(dir string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
+	type cached struct {
+		path string
+		size int64
+		used time.Time
+	}
+	var copies []cached
+	total := int64(0)
 	for _, entry := range entries {
-		if info, err := entry.Info(); err == nil && time.Since(info.ModTime()) > 24*time.Hour {
-			_ = os.Remove(filepath.Join(dir, entry.Name()))
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		if s.held[path] > 0 {
+			total += info.Size()
+			continue
+		}
+		if time.Since(info.ModTime()) > codexRolloutCacheAge {
+			_ = os.Remove(path)
+			continue
+		}
+		if strings.HasPrefix(entry.Name(), ".") || !info.Mode().IsRegular() {
+			continue
+		}
+		copies = append(copies, cached{path: path, size: info.Size(), used: info.ModTime()})
+		total += info.Size()
+	}
+	sort.Slice(copies, func(i, j int) bool { return copies[i].used.Before(copies[j].used) })
+	for _, old := range copies {
+		if total <= codexRolloutCacheBytes {
+			return
+		}
+		if os.Remove(old.path) == nil {
+			total -= old.size
 		}
 	}
 }
@@ -215,7 +341,7 @@ func readCodexTranscriptPage(ctx context.Context, home CodexHome, path, threadID
 	if err != nil || header.Payload.HistoryBase == nil {
 		return transcript.ReadPage(ctx, path, codexTranscript{}, before, limit)
 	}
-	segments, err := home.rolloutLineage(path, threadID)
+	segments, release, err := home.rolloutLineage(path, threadID)
 	if err != nil {
 		page, pageErr := transcript.ReadPage(ctx, path, codexTranscript{}, before, limit)
 		if pageErr != nil {
@@ -224,6 +350,7 @@ func readCodexTranscriptPage(ctx context.Context, home CodexHome, path, threadID
 		page.Warning = "Activity from before this conversation was rewound is unavailable."
 		return page, nil
 	}
+	defer release()
 	last := len(segments) - 1
 	info, err := os.Stat(path)
 	if err != nil {
@@ -315,10 +442,11 @@ func (c *Codex) TranscriptContinuation(ctx context.Context, session *surface.Ses
 	if trustedPath != "" && current == trustedPath+".zst" {
 		return nil, true, nil
 	}
-	segments, err := c.home.rolloutLineage(current, session.ID)
+	segments, release, err := c.home.rolloutLineage(current, session.ID)
 	if err != nil {
 		return nil, false, nil
 	}
+	defer release()
 	for index := len(segments) - 2; index >= 0; index-- {
 		segment := segments[index]
 		matched := trustedPath != "" && (segment.source == trustedPath || segment.source == trustedPath+".zst")

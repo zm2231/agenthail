@@ -208,7 +208,7 @@ func codexRPCTurnMetadata(turn codexTurn) *surface.TurnMetadata {
 // codexRolloutTurnMetadata reads what the rollout recorded about a finished
 // turn, or nil when the rollout has not recorded the turn's end.
 func codexRolloutTurnMetadata(ctx context.Context, path, turnID string) *surface.TurnMetadata {
-	if path == "" || turnID == "" {
+	if path == "" || turnID == "" || codexCompressed(path) {
 		return nil
 	}
 	file, err := os.Open(path)

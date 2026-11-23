@@ -73,17 +73,9 @@ func (c *Codex) rolloutUsage(ctx context.Context, path string) *surface.Usage {
 	if cached != nil && identity != "" && cached.identity == identity && cached.size == info.Size() {
 		return cached.usage
 	}
-	readable, _, err := statReadableRollout(path)
+	usage, err := readRolloutUsage(ctx, path)
 	if err != nil {
 		return nil
-	}
-	lines, _, err := transcript.ReadRecentJSONLLines(ctx, readable, 0, codexUsageTailBytes, transcript.MaxRecordBytes)
-	if err != nil {
-		return nil
-	}
-	var usage *surface.Usage
-	for index := len(lines) - 1; index >= 0 && usage == nil; index-- {
-		usage = codexLineUsage(lines[index])
 	}
 	c.usageMu.Lock()
 	if c.usageReads == nil {
@@ -98,6 +90,34 @@ func (c *Codex) rolloutUsage(ctx context.Context, path string) *surface.Usage {
 	c.usageReads[path] = &codexUsageRead{identity: identity, size: info.Size(), usage: usage}
 	c.usageMu.Unlock()
 	return usage
+}
+
+func readRolloutUsage(ctx context.Context, path string) (*surface.Usage, error) {
+	if codexCompressed(path) {
+		stream, err := openCodexRollout(path)
+		if err != nil {
+			return nil, err
+		}
+		defer stream.Close()
+		var usage *surface.Usage
+		err = transcript.ScanJSONL(ctx, stream, transcript.MaxRecordBytes, func(line []byte) error {
+			if read := codexLineUsage(line); read != nil {
+				usage = read
+			}
+			return nil
+		})
+		return usage, err
+	}
+	lines, _, err := transcript.ReadRecentJSONLLines(ctx, path, 0, codexUsageTailBytes, transcript.MaxRecordBytes)
+	if err != nil {
+		return nil, err
+	}
+	for index := len(lines) - 1; index >= 0; index-- {
+		if usage := codexLineUsage(lines[index]); usage != nil {
+			return usage, nil
+		}
+	}
+	return nil, nil
 }
 
 func codexLineUsage(line []byte) *surface.Usage {

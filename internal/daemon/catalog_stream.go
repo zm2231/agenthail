@@ -692,6 +692,14 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 		d.catalogSelected(session.ID)
 	}
 	stored := d.storedListing(session.ID)
+	if session.SettledTranscript {
+		if session.Plan == nil {
+			session.Plan = stored.Plan
+		}
+		if session.TurnStop == nil {
+			session.TurnStop = stored.TurnStop
+		}
+	}
 	leads, err := d.Registry.LocalLeadSessions()
 	if err != nil {
 		return false
@@ -1122,11 +1130,14 @@ type catalogStoredListing struct {
 	HiddenSubagents     *surface.SubagentRollup `json:"hiddenSubagents"`
 	LiveHiddenSubagents *surface.SubagentRollup `json:"liveHiddenSubagents"`
 	Listed              bool                    `json:"listed"`
+	Plan                *surface.Plan           `json:"plan"`
+	TurnStop            *surface.TurnStop       `json:"turnStop"`
 }
 
 // storedListing carries a row's place in the session list and its hidden
 // subagent count forward when discovery republishes it; the presence pass
-// recomputes both from the listing.
+// recomputes both from the listing. A settled transcript's plan and turn stop
+// come from it too, since nothing rereads them.
 func (d *Daemon) storedListing(id string) catalogStoredListing {
 	var stored catalogStoredListing
 	fingerprint, found, err := d.Registry.CatalogProjectionFingerprint(id)

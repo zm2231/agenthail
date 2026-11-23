@@ -196,10 +196,11 @@ func (c *Codex) PrepareMove(ctx context.Context, sess *surface.Session, _ surfac
 	if !found {
 		return nil, fmt.Errorf("Codex thread %s has no rollout under %s", sess.ID, c.home.sessionsDir())
 	}
-	lineage, err := c.home.rolloutLineage(current, sess.ID)
+	lineage, releaseLineage, err := c.home.rolloutLineage(current, sess.ID)
 	if err != nil {
 		return nil, surface.MoveRefusal{Reason: fmt.Sprintf("its history continues a rollout it cannot carry (%v); a forked thread cannot move yet", err)}
 	}
+	releaseLineage()
 	for _, segment := range lineage {
 		if _, found := ownedRollout(owned, segment.source); !found {
 			return nil, surface.MoveRefusal{Reason: fmt.Sprintf("its history continues %s, outside this thread's rollouts", filepath.Base(segment.source))}

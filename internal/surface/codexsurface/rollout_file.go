@@ -37,39 +37,61 @@ func (h CodexHome) rolloutFile(sess *surface.Session) string {
 	return sess.Transcript
 }
 
-func (h CodexHome) transcriptPath(sess *surface.Session) string {
-	path, _, err := h.statTranscript(sess)
-	if err != nil {
-		return ""
-	}
-	return path
+// Codex compresses a rollout only once it has gone a week untouched, so a
+// compressed rollout is settled: it holds no live turn, plan or background
+// work worth decompressing it for outside a read of the conversation.
+func codexCompressed(path string) bool {
+	return strings.HasSuffix(path, ".zst")
 }
 
-func (h CodexHome) statTranscript(sess *surface.Session) (string, os.FileInfo, error) {
-	return statReadableRollout(h.rolloutFile(sess))
-}
-
-// A decompressed copy is touched on use and recreated when pruned, so it reports the rollout's time and identity.
-func statReadableRollout(source string) (string, os.FileInfo, error) {
-	if source == "" {
+func (h CodexHome) statRollout(sess *surface.Session) (string, os.FileInfo, error) {
+	path := h.rolloutFile(sess)
+	if path == "" {
 		return "", nil, os.ErrNotExist
-	}
-	sourceInfo, err := os.Stat(source)
-	if err != nil {
-		return "", nil, err
-	}
-	if !strings.HasSuffix(source, ".zst") {
-		return source, sourceInfo, nil
-	}
-	path, err := codexReadableRollout(source)
-	if err != nil {
-		return "", nil, fmt.Errorf("read compressed Codex rollout %s: %w", filepath.Base(source), err)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", nil, err
 	}
-	return path, compressedRolloutInfo{FileInfo: info, source: sourceInfo}, nil
+	return path, info, nil
+}
+
+func (h CodexHome) existingRollout(sess *surface.Session) string {
+	path := h.rolloutFile(sess)
+	if path == "" || !transcript.FileExists(path) {
+		return ""
+	}
+	return path
+}
+
+func (h CodexHome) statTranscript(sess *surface.Session) (string, os.FileInfo, func(), error) {
+	return statReadableRollout(h.rolloutFile(sess))
+}
+
+// A decompressed copy is touched on use and recreated when pruned, so it
+// reports the rollout's time and identity. release is never nil.
+func statReadableRollout(source string) (string, os.FileInfo, func(), error) {
+	none := func() {}
+	if source == "" {
+		return "", nil, none, os.ErrNotExist
+	}
+	sourceInfo, err := os.Stat(source)
+	if err != nil {
+		return "", nil, none, err
+	}
+	if !strings.HasSuffix(source, ".zst") {
+		return source, sourceInfo, none, nil
+	}
+	path, release, err := codexReadableRollout(source)
+	if err != nil {
+		return "", nil, none, fmt.Errorf("read compressed Codex rollout %s: %w", filepath.Base(source), err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		release()
+		return "", nil, none, err
+	}
+	return path, compressedRolloutInfo{FileInfo: info, source: sourceInfo}, release, nil
 }
 
 type compressedRolloutInfo struct {
@@ -81,6 +103,5 @@ func (i compressedRolloutInfo) ModTime() time.Time { return i.source.ModTime() }
 func (i compressedRolloutInfo) Sys() any           { return i.source.Sys() }
 
 func (c *Codex) TranscriptOnDisk(sess *surface.Session) bool {
-	_, _, err := c.home.statTranscript(sess)
-	return err == nil
+	return c.home.existingRollout(sess) != ""
 }

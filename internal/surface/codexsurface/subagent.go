@@ -82,11 +82,7 @@ func (c *codexRolloutSubagentCache) read(path string) (*surface.Subagent, error)
 	if found {
 		return cached, nil
 	}
-	readable, err := codexReadableRollout(path)
-	if err != nil {
-		return nil, err
-	}
-	subagent, err := readCodexRolloutSubagent(readable)
+	subagent, err := readCodexRolloutSubagent(path)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +107,7 @@ type codexSessionMetaLine struct {
 // "subAgent".
 func readCodexRolloutSubagent(path string) (*surface.Subagent, error) {
 	var meta codexSessionMetaLine
-	if _, err := transcript.ReadFirstJSONL(path, &meta); err != nil {
+	if err := readCodexRolloutFirstLine(path, &meta); err != nil {
 		return nil, fmt.Errorf("parse Codex rollout %s session_meta: %w", path, err)
 	}
 	if meta.Type != "session_meta" {

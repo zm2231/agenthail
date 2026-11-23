@@ -8,7 +8,7 @@ import (
 
 func (c *Codex) SessionSettings(ctx context.Context, sess *surface.Session) (surface.RuntimeSettings, error) {
 	var settings surface.RuntimeSettings
-	rollout := c.home.transcriptPath(sess)
+	rollout := c.home.existingRollout(sess)
 	current, ok := readCodexThreadSettings(ctx, rollout)
 	if !ok {
 		why := "the thread's rollout has no turn yet"

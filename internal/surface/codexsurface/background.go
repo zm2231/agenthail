@@ -18,8 +18,8 @@ type codexBackgroundState struct {
 }
 
 func (c *Codex) Background(ctx context.Context, session surface.Session) *surface.BackgroundTasks {
-	path, info, err := c.home.statTranscript(&session)
-	if err != nil {
+	path, info, err := c.home.statRollout(&session)
+	if err != nil || codexCompressed(path) {
 		return nil
 	}
 	return c.codexBackground(ctx, session.ID, path, info)

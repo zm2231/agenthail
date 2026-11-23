@@ -45,12 +45,15 @@ type codexContextRecord struct {
 }
 
 func (c *Codex) ContextUsage(ctx context.Context, sess *surface.Session) (*surface.ContextUsage, error) {
-	path, info, err := c.home.statTranscript(sess)
+	path, info, err := c.home.statRollout(sess)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
 		}
 		return nil, err
+	}
+	if codexCompressed(path) {
+		return nil, nil
 	}
 	c.contextMu.Lock()
 	defer c.contextMu.Unlock()
@@ -178,7 +181,7 @@ func (c *Codex) applyContextEvent(sess *surface.Session, event codexEvent, curre
 	if !ok {
 		return nil, false
 	}
-	path := c.home.transcriptPath(sess)
+	path := c.home.existingRollout(sess)
 	if path == "" {
 		return usage, true
 	}

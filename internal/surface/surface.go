@@ -286,6 +286,10 @@ type Session struct {
 	Holders         []Holder          `json:"holders,omitempty"`
 	ReadState       *ReadState        `json:"readState,omitempty"`
 	HolderPID       int               `json:"-"`
+	// SettledTranscript means the surface did not read the transcript for
+	// Plan and TurnStop because it can no longer change, so the catalog keeps
+	// the values it last stored.
+	SettledTranscript bool `json:"-"`
 	// PIDIdentity names the process behind PID by its start, so a later
 	// process given the same pid is told apart from it. Empty when it could
 	// not be read.

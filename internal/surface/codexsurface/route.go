@@ -166,7 +166,7 @@ func codexRolloutOriginator(path string) string {
 			Originator string `json:"originator"`
 		} `json:"payload"`
 	}
-	if _, err := transcript.ReadFirstJSONL(path, &record); err != nil || record.Type != "session_meta" {
+	if err := readCodexRolloutFirstLine(path, &record); err != nil || record.Type != "session_meta" {
 		return ""
 	}
 	return record.Payload.Originator
@@ -182,7 +182,7 @@ func (c *Codex) resolveRoute(ctx context.Context, runtimes *codexRuntimes, sess 
 		}
 	}
 	if originator == "" {
-		originator = codexRolloutOriginator(c.home.transcriptPath(sess))
+		originator = codexRolloutOriginator(c.home.existingRollout(sess))
 	}
 	setCodexTransport(sess, runtimes.route(sess.ID, originator))
 }
