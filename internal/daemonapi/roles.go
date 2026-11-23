@@ -29,6 +29,7 @@ type AgentActionView struct {
 	Default    string `json:"default"`
 	Detail     string `json:"detail"`
 	OwnProject bool   `json:"ownProject"`
+	AllReach   string `json:"allReach,omitempty"`
 }
 
 type AgentRolesView struct {

@@ -16,8 +16,9 @@ type mcpChannelInput struct {
 var mcpChannelActions = map[string]string{"create": "channel-create", "delete": "channel-delete", "rename": "channel-rename", "add": "channel-add", "remove": "channel-remove"}
 
 func (d *Daemon) mcpChannel(ctx context.Context, caller *mcpCaller, input mcpChannelInput) (any, error) {
-	if !caller.has("control.all") {
-		return nil, refuse("capability_missing", "Channels span projects; managing them is for the person's voice operator. Post to one with agenthail_channel_send.")
+	notice, err := roleGate(caller, "channel-any", "Changed a channel", "Channels span projects; managing them is for the person. Post to one with agenthail_channel_send.")
+	if err != nil {
+		return nil, err
 	}
 	verb := strings.TrimSpace(input.Action)
 	if verb == "list" {
@@ -42,5 +43,7 @@ func (d *Daemon) mcpChannel(ctx context.Context, caller *mcpCaller, input mcpCha
 		}
 		request.TargetID = target.ID
 	}
-	return d.mcpAction(ctx, caller, "agenthail_channel", input.mcpWrite, request)
+	result, err := d.mcpAction(ctx, caller, "agenthail_channel", input.mcpWrite, request)
+	d.noticeAfter(ctx, caller, notice, err)
+	return result, err
 }

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"github.com/zm2231/agenthail/internal/agentroles"
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -65,7 +66,7 @@ func (d *Daemon) mcpPermissionWithinCeiling(caller *mcpCaller, target *surface.S
 	if !ok {
 		return refuse("invalid", fmt.Sprintf("Unknown Claude permission mode %q.", mode))
 	}
-	if caller.has("control.all") {
+	if caller.role.Decision("mode-raise") != agentroles.Ask {
 		return nil
 	}
 	raw, err := d.Registry.SessionCeiling(target.ID)

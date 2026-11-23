@@ -17,22 +17,28 @@ type mcpCoordinatorInput struct {
 }
 
 func (d *Daemon) mcpCoordinator(ctx context.Context, caller *mcpCaller, input mcpCoordinatorInput) (any, error) {
-	if !caller.has("control.all") {
-		return nil, refuse("capability_missing", "Choosing a project's coordinator is for the person and the voice operator.")
+	notice, err := roleGate(caller, "coordinator-any", "Changed a project's coordinator", "Choosing a project's coordinator is for the person.")
+	if err != nil {
+		return nil, err
 	}
+	var request dashboardActionRequest
 	switch strings.TrimSpace(input.Action) {
 	case "set":
 		target, err := d.mcpResolveSession(input.Target)
 		if err != nil {
 			return nil, err
 		}
-		return d.mcpAction(ctx, caller, "agenthail_coordinator", input.mcpWrite, dashboardActionRequest{Action: "coordinator-set", SessionID: target.ID, Name: strings.TrimPrefix(strings.TrimSpace(input.Name), "@"), Replace: input.Replace})
+		request = dashboardActionRequest{Action: "coordinator-set", SessionID: target.ID, Name: strings.TrimPrefix(strings.TrimSpace(input.Name), "@"), Replace: input.Replace}
 	case "clear":
 		project, err := broadcast.FindProject(d.Registry, input.Project)
 		if err != nil {
 			return nil, refuse("not_found", err.Error())
 		}
-		return d.mcpAction(ctx, caller, "agenthail_coordinator", input.mcpWrite, dashboardActionRequest{Action: "coordinator-clear", ProjectID: project.ID})
+		request = dashboardActionRequest{Action: "coordinator-clear", ProjectID: project.ID}
+	default:
+		return nil, refuse("invalid", "action is set or clear.")
 	}
-	return nil, refuse("invalid", "action is set or clear.")
+	result, err := d.mcpAction(ctx, caller, "agenthail_coordinator", input.mcpWrite, request)
+	d.noticeAfter(ctx, caller, notice, err)
+	return result, err
 }

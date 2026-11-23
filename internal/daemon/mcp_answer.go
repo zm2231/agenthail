@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/zm2231/agenthail/internal/agentroles"
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/registry"
@@ -40,17 +41,23 @@ func (d *Daemon) mcpAnswer(ctx context.Context, caller *mcpCaller, input mcpAnsw
 	if !found {
 		return d.mcpAnswerOnHost(ctx, caller, input, askID, choice, response)
 	}
+	decision := caller.role.Decision("answer-for-person")
+	forPerson := decision != agentroles.Ask
 	if ask.Origin == registry.AskOriginPermission && choice != askEscalate {
 		if !caller.has("requests.answer") {
 			return nil, refuse("capability_missing", "This session may not answer requests.")
 		}
-		if choice == "always" && !caller.has("control.all") {
-			return nil, (&mcpRefusal{Code: "exceeds_ceiling", Message: "Always allow adds a lasting rule that can raise the session's permission mode; allow this one request instead.", Detail: map[string]any{"axis": "permission"}}).about(ask.SessionID)
+		if choice == "always" && !forPerson {
+			return nil, (&mcpRefusal{Code: "exceeds_ceiling", Message: "Always allow adds a lasting rule that can raise the session's permission mode; allow this one request instead.", Detail: map[string]any{"axis": "permission", "action": "answer-for-person"}}).about(ask.SessionID)
 		}
 	}
 	p := sessionPrincipal(caller.session.ID)
-	p.ForPerson = caller.has("control.all")
-	return d.mcpActionAs(ctx, caller, p, "agenthail_answer", input.mcpWrite, dashboardActionRequest{Action: "respond", SessionID: ask.SessionID, RequestID: askID, Decision: response})
+	p.ForPerson = forPerson
+	result, err := d.mcpActionAs(ctx, caller, p, "agenthail_answer", input.mcpWrite, dashboardActionRequest{Action: "respond", SessionID: ask.SessionID, RequestID: askID, Decision: response})
+	if decision == agentroles.Notify {
+		d.noticeAfter(ctx, caller, "Answered "+d.resolveDisplay(ask.SessionID)+"'s request as the person", err)
+	}
+	return result, err
 }
 
 func (d *Daemon) mcpAnswerOnHost(ctx context.Context, caller *mcpCaller, input mcpAnswerInput, askID, choice string, response surface.Response) (any, error) {
@@ -72,8 +79,8 @@ func (d *Daemon) mcpAnswerOnHost(ctx context.Context, caller *mcpCaller, input m
 	if choice != askEscalate && !caller.has("requests.answer") {
 		return nil, refuse("capability_missing", "This session may not answer requests.")
 	}
-	if choice == "always" && !caller.has("control.all") {
-		return nil, (&mcpRefusal{Code: "exceeds_ceiling", Message: "Always allow adds a lasting rule that can raise the session's permission mode; allow this one request instead.", Detail: map[string]any{"axis": "permission"}}).about(remote.ID)
+	if choice == "always" && caller.role.Decision("answer-for-person") == agentroles.Ask {
+		return nil, (&mcpRefusal{Code: "exceeds_ceiling", Message: "Always allow adds a lasting rule that can raise the session's permission mode; allow this one request instead.", Detail: map[string]any{"axis": "permission", "action": "answer-for-person"}}).about(remote.ID)
 	}
 	return d.mcpActionAs(ctx, caller, sessionPrincipal(caller.session.ID), "agenthail_answer", input.mcpWrite, dashboardActionRequest{Action: "respond", SessionID: remote.ID, RequestID: askID, Decision: response, SourceSessionID: caller.session.ID})
 }

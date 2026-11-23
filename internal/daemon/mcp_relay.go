@@ -17,9 +17,11 @@ type mcpRelayInput struct {
 }
 
 func (d *Daemon) mcpRelay(ctx context.Context, caller *mcpCaller, input mcpRelayInput) (any, error) {
-	if !caller.has("control.all") {
-		return nil, refuse("capability_missing", "Relays route one session's replies into another; setting them up is for the person's voice operator.")
+	notice, err := roleGate(caller, "relay-any", "Changed a relay", "Relays route one session's replies into another; setting them up is for the person.")
+	if err != nil {
+		return nil, err
 	}
+	var request dashboardActionRequest
 	switch strings.TrimSpace(input.Action) {
 	case "list":
 		routes, err := d.Registry.ListRoutes()
@@ -36,12 +38,16 @@ func (d *Daemon) mcpRelay(ctx context.Context, caller *mcpCaller, input mcpRelay
 		if err != nil {
 			return nil, err
 		}
-		return d.mcpAction(ctx, caller, "agenthail_relay", input.mcpWrite, dashboardActionRequest{Action: "relay-add", FromID: from.ID, ToID: to.ID, Pattern: input.Pattern, Once: input.Once, Handoff: strings.TrimSpace(input.When)})
+		request = dashboardActionRequest{Action: "relay-add", FromID: from.ID, ToID: to.ID, Pattern: input.Pattern, Once: input.Once, Handoff: strings.TrimSpace(input.When)}
 	case "remove":
 		if input.RelayID <= 0 {
 			return nil, refuse("invalid", "relayId is required to remove a relay.")
 		}
-		return d.mcpAction(ctx, caller, "agenthail_relay", input.mcpWrite, dashboardActionRequest{Action: "relay-remove", RelayID: input.RelayID})
+		request = dashboardActionRequest{Action: "relay-remove", RelayID: input.RelayID}
+	default:
+		return nil, refuse("invalid", "action is add, remove or list.")
 	}
-	return nil, refuse("invalid", "action is add, remove or list.")
+	result, err := d.mcpAction(ctx, caller, "agenthail_relay", input.mcpWrite, request)
+	d.noticeAfter(ctx, caller, notice, err)
+	return result, err
 }

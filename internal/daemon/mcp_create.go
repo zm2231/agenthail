@@ -17,7 +17,7 @@ import (
 
 type mcpCreateInput struct {
 	mcpWrite
-	Surface        string `json:"surface" jsonschema:"claude, codex, or notion (a Notion AI thread; for the person's voice operator only)."`
+	Surface        string `json:"surface" jsonschema:"claude, codex, or notion (a Notion AI thread, if your role may start one)."`
 	Cwd            string `json:"cwd,omitempty" jsonschema:"Claude and Codex: absolute folder the session works in; it must be inside the folders you may work in."`
 	Message        string `json:"message" jsonschema:"The session's first message."`
 	Model          string `json:"model,omitempty"`
@@ -35,8 +35,8 @@ func spawnRefusal(caller *mcpCaller, kind surface.SurfaceKind) *mcpRefusal {
 	switch {
 	case !caller.has("spawn"):
 		return refuse("capability_missing", "This session may not start sessions.")
-	case kind == surface.KindNotion && !caller.has("control.all"):
-		return &mcpRefusal{Code: "exceeds_ceiling", Message: "A Notion thread works in the person's Notion workspace, outside any ceiling; starting one is for the person's voice operator.", Detail: map[string]any{"axis": "surface"}}
+	case kind == surface.KindNotion && caller.role.Decision("notion-create") == agentroles.Ask:
+		return &mcpRefusal{Code: "exceeds_ceiling", Message: "A Notion thread works in the person's Notion workspace, outside any ceiling; your role leaves starting one to the person.", Detail: map[string]any{"axis": "surface", "action": "notion-create"}}
 	case kind != surface.KindClaude && kind != surface.KindCodex && kind != surface.KindNotion:
 		return refuse("invalid", "surface is claude, codex or notion.")
 	}
@@ -135,7 +135,11 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 		return nil, refusal.about("new:" + string(kind))
 	}
 	if kind == surface.KindNotion {
-		return d.mcpAction(ctx, caller, "agenthail_create", input.mcpWrite, dashboardActionRequest{Action: "notion-create", Message: input.Message, Model: strings.TrimSpace(input.Model), Alias: strings.TrimSpace(input.Alias)})
+		result, err := d.mcpAction(ctx, caller, "agenthail_create", input.mcpWrite, dashboardActionRequest{Action: "notion-create", Message: input.Message, Model: strings.TrimSpace(input.Model), Alias: strings.TrimSpace(input.Alias)})
+		if caller.role.Decision("notion-create") == agentroles.Notify {
+			d.noticeAfter(ctx, caller, "Started a Notion thread", err)
+		}
+		return result, err
 	}
 	isolation := strings.TrimSpace(input.Isolation)
 	if isolation != "" && isolation != isolationWorktree {
@@ -196,7 +200,7 @@ func (d *Daemon) remoteCreateScope(caller *mcpCaller, host string, kind surface.
 		return childStart{}, "", nil, refuse("invalid", fmt.Sprintf("No paired computer is named %q.", host))
 	}
 	decision := caller.role.Decision("session-create-remote")
-	if decision == agentroles.Ask && !caller.has("control.all") {
+	if decision == agentroles.Ask {
 		return childStart{}, "", nil, scopeRefusal(about, "other_host", "Starting a session on another computer is for the person here; ask your coordinator or the person to start it.")
 	}
 	cwd := strings.TrimSpace(rawCwd)

@@ -66,39 +66,57 @@ type Action struct {
 	// OwnProject marks an action on the caller's own project, which a role
 	// without project reach asks for whatever its default.
 	OwnProject bool `json:"ownProject"`
+	// AllReach is the default for a role that reaches every session, when it
+	// differs from Default.
+	AllReach string `json:"allReach,omitempty"`
+}
+
+func forPerson(name, detail string) Action {
+	return Action{Name: name, Default: Ask, Detail: detail, AllReach: Allow}
 }
 
 // A new action is one more row here. Actions outside this list, such as
-// approving extensions or answering for the person, stay the person's.
+// approving extensions or changing roles, stay the person's.
 var Actions = []Action{
-	{"session-create-remote", Notify, "Start a session on a paired computer", false},
-	{"extension-build", Notify, "Start an extension builder", false},
-	{"project-add", Allow, "Add a folder on this computer that is in no project", true},
-	{"project-rename", Allow, "Rename its own project", true},
-	{"project-link", Allow, "Link a project into its own", true},
-	{"project-unlink", Allow, "Unlink a project from its own", true},
-	{"project-setting", Allow, "Turn its own project's tools on or off", true},
-	{"project-archive", Notify, "Archive its own project", true},
-	{"project-unarchive", Allow, "Unarchive its own project", true},
-	{"project-remove", Notify, "Remove its own project from Agenthail; the files stay", true},
-	{"coordinator-set", Allow, "Make a session in its own project the lead", true},
-	{"coordinator-new", Allow, "Start a new lead for its own project", true},
-	{"coordinator-clear", Notify, "Clear its own project's lead", true},
-	{"relay-add", Allow, "Relay replies between sessions in its own project", true},
-	{"relay-remove", Allow, "Remove such a relay", true},
-	{"queue-cancel", Allow, "Cancel a queued message in its own project", true},
-	{"queue-clear", Allow, "Clear queued messages in its own project", true},
-	{"channel-create", Allow, "Create a channel", true},
-	{"channel-rename", Allow, "Rename a channel whose sessions are all in its project", true},
-	{"channel-add", Allow, "Add a session in its project to a channel whose sessions are all in its project", true},
-	{"channel-remove", Allow, "Remove a session from a channel whose sessions are all in its project", true},
-	{"channel-delete", Notify, "Delete a channel whose sessions are all in its project", true},
-	{"work-takeover", Notify, "Take over a work item in its own project whose holder is archived or gone: release it, submit it, or mark it done once its PR merged", true},
-	{"limit-resume", Notify, "Turn resuming its own project's sessions a usage limit stopped on or off", true},
-	{"remote-project-control", Notify, "Steer, interrupt or change a session in its own project on a paired computer, within its ceiling", true},
-	{"cross-project-message", Allow, "Send a queued message to a session in another project on this computer", false},
-	{"cross-project-steer", Notify, "Steer, interrupt or send now to a session in another project on this computer, or to its coordinator, within its ceiling", false},
-	{"session-create-full", Notify, "From a session the person started outside Agenthail, start one in bypassPermissions or never-approval mode", false},
+	{Name: "session-create-remote", Default: Notify, Detail: "Start a session on a paired computer"},
+	{Name: "extension-build", Default: Notify, Detail: "Start an extension builder", AllReach: Allow},
+	{Name: "project-add", Default: Allow, Detail: "Add a folder on this computer that is in no project", OwnProject: true},
+	{Name: "project-rename", Default: Allow, Detail: "Rename its own project", OwnProject: true},
+	{Name: "project-link", Default: Allow, Detail: "Link a project into its own", OwnProject: true},
+	{Name: "project-unlink", Default: Allow, Detail: "Unlink a project from its own", OwnProject: true},
+	{Name: "project-setting", Default: Allow, Detail: "Turn its own project's tools on or off", OwnProject: true},
+	{Name: "project-archive", Default: Notify, Detail: "Archive its own project", OwnProject: true},
+	{Name: "project-unarchive", Default: Allow, Detail: "Unarchive its own project", OwnProject: true},
+	{Name: "project-remove", Default: Notify, Detail: "Remove its own project from Agenthail; the files stay", OwnProject: true},
+	{Name: "coordinator-set", Default: Allow, Detail: "Make a session in its own project the lead", OwnProject: true},
+	{Name: "coordinator-new", Default: Allow, Detail: "Start a new lead for its own project", OwnProject: true},
+	{Name: "coordinator-clear", Default: Notify, Detail: "Clear its own project's lead", OwnProject: true},
+	{Name: "relay-add", Default: Allow, Detail: "Relay replies between sessions in its own project", OwnProject: true},
+	{Name: "relay-remove", Default: Allow, Detail: "Remove such a relay", OwnProject: true},
+	{Name: "queue-cancel", Default: Allow, Detail: "Cancel a queued message in its own project", OwnProject: true},
+	{Name: "queue-clear", Default: Allow, Detail: "Clear queued messages in its own project", OwnProject: true},
+	{Name: "channel-create", Default: Allow, Detail: "Create a channel", OwnProject: true},
+	{Name: "channel-rename", Default: Allow, Detail: "Rename a channel whose sessions are all in its project", OwnProject: true},
+	{Name: "channel-add", Default: Allow, Detail: "Add a session in its project to a channel whose sessions are all in its project", OwnProject: true},
+	{Name: "channel-remove", Default: Allow, Detail: "Remove a session from a channel whose sessions are all in its project", OwnProject: true},
+	{Name: "channel-delete", Default: Notify, Detail: "Delete a channel whose sessions are all in its project", OwnProject: true},
+	{Name: "work-takeover", Default: Notify, Detail: "Take over a work item in its own project whose holder is archived or gone: release it, submit it, or mark it done once its PR merged", OwnProject: true, AllReach: Allow},
+	{Name: "limit-resume", Default: Notify, Detail: "Turn resuming its own project's sessions a usage limit stopped on or off", OwnProject: true},
+	{Name: "remote-project-control", Default: Notify, Detail: "Steer, interrupt or change a session in its own project on a paired computer, within its ceiling", OwnProject: true},
+	{Name: "cross-project-message", Default: Allow, Detail: "Send a queued message to a session in another project on this computer"},
+	{Name: "cross-project-steer", Default: Notify, Detail: "Steer, interrupt or send now to a session in another project on this computer, or to its coordinator, within its ceiling"},
+	{Name: "session-create-full", Default: Notify, Detail: "From a session the person started outside Agenthail, start one in bypassPermissions or never-approval mode"},
+	forPerson("project-any", "Add, change, archive or remove any project, on any computer"),
+	forPerson("coordinator-any", "Set, start or clear the lead of any project"),
+	forPerson("relay-any", "Relay replies between any two sessions, or remove any relay"),
+	forPerson("channel-any", "Create, change or delete any channel"),
+	forPerson("queue-any", "Cancel or clear queued messages to any session"),
+	forPerson("history-read", "Read the delivery history and queue of every session"),
+	forPerson("brief", "Ask a project's lead to catch the person up"),
+	forPerson("notion-create", "Start a Notion thread in the person's workspace"),
+	forPerson("answer-for-person", "Answer requests as the person, including always-allow rules"),
+	forPerson("mode-raise", "Set a session's permission mode above its ceiling"),
+	forPerson("host-setting", "Turn this computer's resuming after a usage limit on or off"),
 }
 
 // BuiltIn gives each agent what it could do before roles: any session is a
@@ -143,7 +161,10 @@ func ActionNames() []string {
 }
 
 func (r Role) DefaultDecision(action Action) string {
-	if action.OwnProject && r.Reach == ReachDescendants {
+	switch {
+	case r.Reach == ReachAll && action.AllReach != "":
+		return action.AllReach
+	case action.OwnProject && r.Reach == ReachDescendants:
 		return Ask
 	}
 	return action.Default

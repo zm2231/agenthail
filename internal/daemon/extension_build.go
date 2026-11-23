@@ -60,11 +60,9 @@ func (d *Daemon) apiExtensionBuildHandler(w http.ResponseWriter, r *http.Request
 			writeScopeRefusal(w, mcpRefusalFor(err))
 			return
 		}
-		if !caller.has("control.all") {
-			if decision = caller.role.Decision("extension-build"); decision == agentroles.Ask {
-				writeScopeRefusal(w, scopeRefusal("extension-build", "person_only", "Starting an extension builder is for the person here; to work on an extension yourself, edit ~/.agenthail/extensions and read its AGENTS.md."))
-				return
-			}
+		if decision = caller.role.Decision("extension-build"); decision == agentroles.Ask {
+			writeScopeRefusal(w, scopeRefusal("extension-build", "person_only", "Starting an extension builder is for the person here; to work on an extension yourself, edit ~/.agenthail/extensions and read its AGENTS.md."))
+			return
 		}
 	}
 	workspace, err := d.prepareExtensionWorkspace()

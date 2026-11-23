@@ -13,8 +13,9 @@ type mcpQueueInput struct {
 }
 
 func (d *Daemon) mcpQueue(ctx context.Context, caller *mcpCaller, input mcpQueueInput) (any, error) {
-	if !caller.has("control.all") {
-		return nil, refuse("capability_missing", "The delivery queue spans every session; managing it is for the person's voice operator.")
+	notice, err := roleGate(caller, "queue-any", "Changed the delivery queue", "The delivery queue spans every session; managing it is for the person.")
+	if err != nil {
+		return nil, err
 	}
 	request := dashboardActionRequest{QueueID: input.QueueID}
 	switch strings.TrimSpace(input.Action) {
@@ -32,5 +33,7 @@ func (d *Daemon) mcpQueue(ctx context.Context, caller *mcpCaller, input mcpQueue
 	default:
 		return nil, refuse("invalid", "action is cancel or clear.")
 	}
-	return d.mcpAction(ctx, caller, "agenthail_queue", input.mcpWrite, request)
+	result, err := d.mcpAction(ctx, caller, "agenthail_queue", input.mcpWrite, request)
+	d.noticeAfter(ctx, caller, notice, err)
+	return result, err
 }

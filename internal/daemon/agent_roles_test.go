@@ -350,6 +350,17 @@ var decisionsBeforeRoles = map[string][2]string{
 	"cross-project-message":  {agentroles.Allow, agentroles.Allow},
 	"cross-project-steer":    {agentroles.Notify, agentroles.Notify},
 	"session-create-full":    {agentroles.Notify, agentroles.Notify},
+	"project-any":            {agentroles.Ask, agentroles.Ask},
+	"coordinator-any":        {agentroles.Ask, agentroles.Ask},
+	"relay-any":              {agentroles.Ask, agentroles.Ask},
+	"channel-any":            {agentroles.Ask, agentroles.Ask},
+	"queue-any":              {agentroles.Ask, agentroles.Ask},
+	"history-read":           {agentroles.Ask, agentroles.Ask},
+	"brief":                  {agentroles.Ask, agentroles.Ask},
+	"notion-create":          {agentroles.Ask, agentroles.Ask},
+	"answer-for-person":      {agentroles.Ask, agentroles.Ask},
+	"mode-raise":             {agentroles.Ask, agentroles.Ask},
+	"host-setting":           {agentroles.Ask, agentroles.Ask},
 }
 
 func listedTools(t *testing.T, session *mcp.ClientSession) []string {

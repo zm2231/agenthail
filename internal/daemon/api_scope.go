@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/zm2231/agenthail/internal/agentroles"
 	"net/http"
 	"os"
 	"strings"
@@ -278,8 +279,8 @@ func (d *Daemon) answerScope(ctx context.Context, caller *mcpCaller, ref, decisi
 	if !caller.has("requests.answer") {
 		return daemonapi.ScopeReply{}, refuse("capability_missing", "This session may not answer requests.")
 	}
-	if decision == "always" && !caller.has("control.all") {
-		return daemonapi.ScopeReply{}, (&mcpRefusal{Code: "exceeds_ceiling", Message: "Always allow adds a lasting rule that can raise the session's permission mode; allow this one request instead.", Detail: map[string]any{"axis": "permission"}}).about(remote.ID)
+	if decision == "always" && caller.role.Decision("answer-for-person") == agentroles.Ask {
+		return daemonapi.ScopeReply{}, (&mcpRefusal{Code: "exceeds_ceiling", Message: "Always allow adds a lasting rule that can raise the session's permission mode; allow this one request instead.", Detail: map[string]any{"axis": "permission", "action": "answer-for-person"}}).about(remote.ID)
 	}
 	return daemonapi.ScopeReply{TargetID: remote.ID}, nil
 }
