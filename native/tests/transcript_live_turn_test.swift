@@ -5,7 +5,6 @@ import SwiftUI
 struct Row: Identifiable, Equatable {
     let id: String
     var lines: Int
-    var index = 0
 }
 
 @MainActor
@@ -18,14 +17,11 @@ final class Feed: ObservableObject {
     var phase: ScrollPhase = .idle
 }
 
-@MainActor var frames: [String: CGRect] = [:]
-@MainActor var live: Set<String> = []
-@MainActor var visible: CGRect = .zero
 @MainActor let tops = TranscriptRowTops()
 @MainActor let memory = TranscriptRowMemory()
 
 func rows(_ prefix: String, _ count: Int) -> [Row] {
-    (0..<count).map { Row(id: "\(prefix)\($0)", lines: 1 + ($0 * 7) % 9, index: $0) }
+    (0..<count).map { Row(id: "\(prefix)\($0)", lines: 1 + ($0 * 7) % 9) }
 }
 
 // The desktop transcript's layout: settled rows in a lazy stack, the newest in an eager stack below it.
@@ -38,6 +34,7 @@ struct Transcript: View {
 
     var body: some View {
         let ids = feed.rows.map(\.id)
+        let order = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($1, $0) })
         let _ = tailRevision
         let split = layout.tail.split(ids, in: feed.transcript)
         let _ = feed.split = split
@@ -45,12 +42,12 @@ struct Transcript: View {
             VStack(alignment: .leading, spacing: 0) {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(feed.rows.prefix(split)) { row in
-                        RowView(row: row).padding(.top, 14).reportsTop(row.id, to: tops)
+                        RowView(row: row, index: order[row.id] ?? 0).padding(.top, 14).reportsTop(row.id, to: tops)
                     }
                 }
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(feed.rows.dropFirst(split)) { row in
-                        RowView(row: row).padding(.top, 14)
+                        RowView(row: row, index: order[row.id] ?? 0).padding(.top, 14)
                             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TranscriptRows.contentSpace)) } action: {
                                 layout.rows[row.id] = $0
                                 cover(ids)
@@ -67,7 +64,6 @@ struct Transcript: View {
         }
         .onScrollGeometryChange(for: CGRect.self) { $0.visibleRect } action: { _, rect in
             layout.visible = rect
-            visible = rect
             cover(ids)
         }
         .onScrollPhaseChange { _, new in
@@ -91,21 +87,86 @@ struct Transcript: View {
     }
 }
 
+// Each row paints its place in the transcript into its background, so the colors down the view are the order rows were drawn in.
 struct RowView: View {
     let row: Row
+    let index: Int
 
     var body: some View {
         Text(String(repeating: "transcript line\n", count: row.lines) + row.id)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.sRGB, red: Double(row.index % 64 * 4) / 255, green: Double(row.index / 64 % 64 * 4) / 255, blue: 200 / 255))
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TranscriptRows.contentSpace)) } action: { frames[row.id] = $0 }
-            .onAppear { live.insert(row.id) }
-            .onDisappear { live.remove(row.id) }
+            .background(Color(.sRGB, red: Double(index % 64 * 4) / 255, green: Double(index / 64 % 64 * 4) / 255, blue: 200 / 255))
+    }
+}
+
+// An agent's live turn: tool calls that show a line each until the third folds the run to one summary line, command output,
+// messages from other agents, a steered message landing before the reply, the run moving to just before the turn's latest reply
+// as Focus places it, a streaming reply, and the queue tray changing the bottom inset.
+@MainActor
+struct LiveTurn {
+    var generator: SplitMix
+    var next = 0
+    var run: (id: String, calls: Int)?
+
+    let prefix: String
+
+    init(seed: UInt64) {
+        generator = SplitMix(seed: seed)
+        prefix = "t\(seed)-"
+    }
+
+    mutating func step(_ feed: Feed) {
+        func add(_ kind: String, _ lines: Int) -> String {
+            next += 1
+            let id = "\(prefix)\(kind)\(next)"
+            feed.rows.append(Row(id: id, lines: lines))
+            return id
+        }
+        switch generator.next() % 12 {
+        case 0..<3:
+            if let current = run, let index = feed.rows.firstIndex(where: { $0.id == current.id }) {
+                let calls = current.calls + 1
+                run = (current.id, calls)
+                feed.rows[index].lines = calls <= 2 ? calls : 1
+            } else {
+                run = (add("run", 1), 1)
+            }
+        case 3:
+            _ = add("out", 3 + Int(generator.next() % 22))
+        case 4:
+            _ = add("peer", 1)
+        case 5:
+            _ = add("reply", 2 + Int(generator.next() % 7))
+            run = nil
+        case 6, 7:
+            feed.rows[feed.rows.count - 1].lines += 1 + Int(generator.next() % 3)
+        case 8:
+            if let current = run, let index = feed.rows.firstIndex(where: { $0.id == current.id }), index < feed.rows.count - 2 {
+                let moved = feed.rows.remove(at: index)
+                feed.rows.insert(moved, at: feed.rows.count - 1)
+            }
+        case 9:
+            next += 1
+            feed.rows.insert(Row(id: "\(prefix)steer\(next)", lines: 1), at: feed.rows.count - 1)
+        default:
+            feed.inset = feed.inset == 100 ? 170 : 100
+        }
+    }
+}
+
+struct SplitMix {
+    var seed: UInt64
+    mutating func next() -> UInt64 {
+        seed &+= 0x9E37_79B9_7F4A_7C15
+        var z = seed
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
     }
 }
 
 @main
-struct TranscriptRowResizeTest {
+struct TranscriptLiveTurnTest {
     @MainActor
     static func main() {
         _ = NSApplication.shared
@@ -118,77 +179,72 @@ struct TranscriptRowResizeTest {
         spin(0.2)
         let scroll = scrollView(in: hosting)!
 
-        feed.rows = rows("A", 300)
+        feed.transcript = "F"
+        feed.rows = rows("F", 400)
         spin(0.8)
-        resizeAbove(scroll, feed, "a row above the reader that grows and folds while they scroll leaves the reader's row where it was")
+        following(hosting, feed)
 
-        feed.transcript = "S"
-        feed.rows = rows("S", 400)
+        feed.transcript = "R"
+        feed.rows = rows("R", 400)
         spin(0.8)
-        stream(scroll, hosting, feed)
+        reading(scroll, hosting, feed)
 
         print(failures == 0 ? "ok" : "\(failures) failures")
         exit(failures == 0 ? 0 : 1)
     }
 
-    // A tool run across the top of the view gains a call line, then folds to one summary line at its third call, while the reader scrolls.
+    // A reader following the end of a long transcript while the live turn runs.
     @MainActor
-    static func resizeAbove(_ scroll: NSScrollView, _ feed: Feed, _ message: String) {
-        move(scroll, to: (scroll.documentView?.frame.height ?? 0) / 2)
-        spin(0.6)
-        let top = offset(scroll)
-        let laid = feed.rows.indices.filter { live.contains(feed.rows[$0].id) && frames[feed.rows[$0].id] != nil }
-        guard let reader = laid.first(where: { frames[feed.rows[$0].id]!.minY >= top + 200 }),
-              let above = laid.last(where: { $0 < reader && frames[feed.rows[$0].id]!.minY < top }) else {
-            return expect(false, "\(message): a laid-out row across the top of the view and one below it, offset \(top)")
-        }
-        let readerID = feed.rows[reader].id
-        let before = frames[readerID]!.minY - offset(scroll)
-        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
-        spin(0.1)
-        expect(feed.phase == .interacting, "\(message): the live scroll puts the transcript in its interacting phase, got \(feed.phase)")
-        feed.rows[above].lines += 2
-        spin(0.2)
-        feed.rows[above].lines = 1
-        spin(0.4)
-        let after = frames[readerID].map { $0.minY - offset(scroll) } ?? .infinity
-        NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
-        spin(0.4)
-        expect(abs(after - before) < 2, "\(message): \(readerID) was \(before) from the top of the view, became \(after) (phase \(feed.phase))")
-    }
-
-    // A following reader at the end of a long transcript while rows stream in, the last row grows, and a queued message changes the bottom inset.
-    @MainActor
-    static func stream(_ scroll: NSScrollView, _ hosting: NSView, _ feed: Feed) {
-        var generator = SplitMix(seed: 589)
-        var next = 0
+    static func following(_ hosting: NSView, _ feed: Feed) {
+        var turn = LiveTurn(seed: 589)
         var found: [String] = []
-        for _ in 0..<300 {
-            switch generator.next() % 10 {
-            case 0..<5:
-                next += 1
-                feed.rows.append(Row(id: "Sn\(next)", lines: 1 + Int(generator.next() % 14), index: feed.rows.count))
-            case 5..<8:
-                feed.rows[feed.rows.count - 1].lines += 1 + Int(generator.next() % 3)
-            case 8:
-                feed.inset = feed.inset == 100 ? 170 : 100
-            default:
-                for _ in 0..<(2 + Int(generator.next() % 5)) {
-                    next += 1
-                    feed.rows.append(Row(id: "Sn\(next)", lines: 1 + Int(generator.next() % 14), index: feed.rows.count))
-                }
-            }
-            spin(0.02 + Double(generator.next() % 200) / 1000)
+        for _ in 0..<300 where found.count < 3 {
+            turn.step(feed)
+            spin(0.02 + Double(turn.generator.next() % 200) / 1000)
             if misdrawn(hosting, feed) != nil {
                 spin(0.4)
                 if let still = misdrawn(hosting, feed) { found.append(still) }
             }
-            if found.count >= 3 { break }
         }
-        expect(found.isEmpty, "rows in view are drawn once each and in order while a long transcript streams: \(found.joined(separator: "; "))")
+        expect(found.isEmpty, "a following reader sees the rows in view drawn once each and in order while a live turn runs: \(found.joined(separator: "; "))")
     }
 
-    // Each row paints its index into its background, so the column of colors down the view is the order rows were drawn in.
+    // A reader holding a scroll just above the end while the live turn changes rows above and below their row.
+    @MainActor
+    static func reading(_ scroll: NSScrollView, _ hosting: NSView, _ feed: Feed) {
+        var turn = LiveTurn(seed: 1259)
+        for _ in 0..<12 {
+            turn.step(feed)
+            spin(0.1)
+        }
+        spin(0.4)
+        var worst: (row: String, moved: CGFloat) = ("", 0)
+        var found: [String] = []
+        for round in 0..<8 where found.count < 3 {
+            move(scroll, to: offset(scroll) - 300)
+            let height = scroll.contentView.bounds.height
+            guard let reader = feed.rows.dropLast(3).last(where: { !$0.id.hasPrefix(turn.prefix + "run") && tops.top($0.id).map { $0 > offset(scroll) + 80 && $0 < offset(scroll) + height - 200 } == true })?.id else {
+                expect(false, "round \(round): a row is in view above the live turn, offset \(offset(scroll))")
+                continue
+            }
+            let placed = tops.top(reader)! - offset(scroll)
+            NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+            spin(0.1)
+            expect(feed.phase == .interacting, "round \(round): a live scroll puts the transcript in its interacting phase, got \(feed.phase)")
+            for _ in 0..<10 {
+                turn.step(feed)
+                spin(0.02 + Double(turn.generator.next() % 150) / 1000)
+                let moved = abs((tops.top(reader) ?? .infinity) - offset(scroll) - placed)
+                if moved > worst.moved { worst = (reader, moved) }
+                if let wrong = misdrawn(hosting, feed) { found.append(wrong) }
+            }
+            NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+            spin(0.4)
+        }
+        expect(worst.moved < 2, "a reader's row holds its place on screen while they scroll and the live turn changes rows around it, \(worst.row) moved \(worst.moved)")
+        expect(found.isEmpty, "a scrolling reader sees the rows in view drawn once each and in order while a live turn runs: \(found.joined(separator: "; "))")
+    }
+
     @MainActor
     static func drawn(_ view: NSView, top: CGFloat, bottom: CGFloat) -> [Int] {
         view.layoutSubtreeIfNeeded()
@@ -214,7 +270,6 @@ struct TranscriptRowResizeTest {
         return falls * 2 > runs.count ? runs.reversed() : runs
     }
 
-    // Rows in view are drawn once each, in transcript order, with none hidden under another.
     @MainActor
     static func misdrawn(_ view: NSView, _ feed: Feed) -> String? {
         let runs = drawn(view, top: 50, bottom: feed.inset + 6)
@@ -225,17 +280,6 @@ struct TranscriptRowResizeTest {
             return "\(name(a)) (\(side(a))) then \(name(b)) (\(side(b))) down the view, drawn \(runs.map(name)), split \(feed.split)/\(feed.rows.count)"
         }
         return nil
-    }
-
-    struct SplitMix {
-        var seed: UInt64
-        mutating func next() -> UInt64 {
-            seed &+= 0x9E37_79B9_7F4A_7C15
-            var z = seed
-            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
-            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
-            return z ^ (z >> 31)
-        }
     }
 
     @MainActor static var failures = 0
@@ -261,7 +305,7 @@ struct TranscriptRowResizeTest {
     static func move(_ scroll: NSScrollView, to y: CGFloat) {
         scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
         scroll.reflectScrolledClipView(scroll.contentView)
-        spin(0.3)
+        spin(0.4)
     }
 
     @MainActor
