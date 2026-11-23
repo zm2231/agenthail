@@ -115,36 +115,45 @@ struct LiveTurn {
         prefix = "t\(seed)-"
     }
 
-    mutating func step(_ feed: Feed) {
-        func add(_ kind: String, _ lines: Int) -> String {
-            next += 1
-            let id = "\(prefix)\(kind)\(next)"
-            feed.rows.append(Row(id: id, lines: lines))
-            return id
+    @discardableResult
+    mutating func add(_ kind: String, _ lines: Int, to feed: Feed) -> String {
+        next += 1
+        let id = "\(prefix)\(kind)\(next)"
+        feed.rows.append(Row(id: id, lines: lines))
+        return id
+    }
+
+    mutating func call(_ feed: Feed) {
+        if let current = run, let index = feed.rows.firstIndex(where: { $0.id == current.id }) {
+            let calls = current.calls + 1
+            run = (current.id, calls)
+            feed.rows[index].lines = calls <= 2 ? calls : 1
+        } else {
+            run = (add("run", 1, to: feed), 1)
         }
+    }
+
+    func relocate(_ feed: Feed) {
+        guard let current = run, let index = feed.rows.firstIndex(where: { $0.id == current.id }), index < feed.rows.count - 2 else { return }
+        let moved = feed.rows.remove(at: index)
+        feed.rows.insert(moved, at: feed.rows.count - 1)
+    }
+
+    mutating func step(_ feed: Feed) {
         switch generator.next() % 12 {
         case 0..<3:
-            if let current = run, let index = feed.rows.firstIndex(where: { $0.id == current.id }) {
-                let calls = current.calls + 1
-                run = (current.id, calls)
-                feed.rows[index].lines = calls <= 2 ? calls : 1
-            } else {
-                run = (add("run", 1), 1)
-            }
+            call(feed)
         case 3:
-            _ = add("out", 3 + Int(generator.next() % 22))
+            add("out", 3 + Int(generator.next() % 22), to: feed)
         case 4:
-            _ = add("peer", 1)
+            add("peer", 1, to: feed)
         case 5:
-            _ = add("reply", 2 + Int(generator.next() % 7))
+            add("reply", 2 + Int(generator.next() % 7), to: feed)
             run = nil
         case 6, 7:
             feed.rows[feed.rows.count - 1].lines += 1 + Int(generator.next() % 3)
         case 8:
-            if let current = run, let index = feed.rows.firstIndex(where: { $0.id == current.id }), index < feed.rows.count - 2 {
-                let moved = feed.rows.remove(at: index)
-                feed.rows.insert(moved, at: feed.rows.count - 1)
-            }
+            relocate(feed)
         case 9:
             next += 1
             feed.rows.insert(Row(id: "\(prefix)steer\(next)", lines: 1), at: feed.rows.count - 1)
@@ -209,45 +218,59 @@ struct TranscriptLiveTurnTest {
         expect(found.isEmpty, "a following reader sees the rows in view drawn once each and in order while a live turn runs: \(found.joined(separator: "; "))")
     }
 
-    // A reader holding a scroll just above the end while the live turn changes rows above and below their row.
+    // A reader scrolled back to a turn's tool run while the turn goes on: its calls fold, it moves to before the latest reply, and rows keep arriving below.
     @MainActor
     static func reading(_ scroll: NSScrollView, _ hosting: NSView, _ feed: Feed) {
         var turn = LiveTurn(seed: 1259)
-        for _ in 0..<12 {
-            turn.step(feed)
-            spin(0.1)
-        }
-        spin(0.4)
         var worst: (row: String, moved: CGFloat) = ("", 0)
         var found: [String] = []
-        for round in 0..<8 where found.count < 3 {
-            move(scroll, to: offset(scroll) - 300)
-            let height = scroll.contentView.bounds.height
-            guard let reader = feed.rows.dropLast(3).last(where: { !$0.id.hasPrefix(turn.prefix + "run") && tops.top($0.id).map { $0 > offset(scroll) + 80 && $0 < offset(scroll) + height - 200 } == true })?.id else {
-                expect(false, "round \(round): a row is in view above the live turn, offset \(offset(scroll))")
-                continue
-            }
-            let placed = tops.top(reader)! - offset(scroll)
+        for round in 0..<6 where found.count < 3 {
+            turn.add("reply", 3, to: feed)
+            turn.run = nil
+            turn.call(feed)
+            guard let run = turn.run?.id else { return expect(false, "round \(round): the turn has a tool run") }
+            for _ in 0..<6 { turn.add("out", 20, to: feed) }
+            turn.add("reply", 4, to: feed)
+            spin(0.6)
+            for _ in 0..<10 where tops.top(run) == nil { move(scroll, to: max(offset(scroll) - 600, 0)) }
+            guard let runTop = tops.top(run) else { expect(false, "round \(round): the tool run is laid out once the reader scrolls back to it"); continue }
+            move(scroll, to: runTop - 120)
+            expect(!feed.following, "round \(round): a reader scrolled back to the tool run is not following")
+            guard let index = feed.rows.firstIndex(where: { $0.id == run }),
+                  let reader = feed.rows[(index + 1)...].first(where: { tops.top($0.id).map { $0 > offset(scroll) + 150 } == true })?.id,
+                  let start = tops.top(reader) else { expect(false, "round \(round): a row below the tool run is in view"); continue }
+            let placed = start - offset(scroll)
             NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
             spin(0.1)
             expect(feed.phase == .interacting, "round \(round): a live scroll puts the transcript in its interacting phase, got \(feed.phase)")
-            for _ in 0..<10 {
-                turn.step(feed)
-                spin(0.02 + Double(turn.generator.next() % 150) / 1000)
+            func check() {
                 let moved = abs((tops.top(reader) ?? .infinity) - offset(scroll) - placed)
                 if moved > worst.moved { worst = (reader, moved) }
                 if let wrong = misdrawn(hosting, feed) { found.append(wrong) }
             }
+            for _ in 0..<2 {
+                turn.call(feed)
+                spin(0.15)
+                check()
+            }
+            turn.relocate(feed)
+            spin(0.15)
+            check()
+            for _ in 0..<8 {
+                turn.step(feed)
+                spin(0.02 + Double(turn.generator.next() % 150) / 1000)
+                check()
+            }
             NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
             spin(0.4)
+            move(scroll, to: scroll.documentView?.frame.height ?? 0)
         }
-        expect(worst.moved < 2, "a reader's row holds its place on screen while they scroll and the live turn changes rows around it, \(worst.row) moved \(worst.moved)")
+        expect(worst.moved < 2, "a reader's row holds its place on screen while they scroll and the tool run above it folds and moves, \(worst.row) moved \(worst.moved)")
         expect(found.isEmpty, "a scrolling reader sees the rows in view drawn once each and in order while a live turn runs: \(found.joined(separator: "; "))")
     }
 
     @MainActor
     static func drawn(_ view: NSView, top: CGFloat, bottom: CGFloat) -> [Int] {
-        view.layoutSubtreeIfNeeded()
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds),
               let space = CGColorSpace(name: CGColorSpace.sRGB) else { return [] }
         view.cacheDisplay(in: view.bounds, to: rep)

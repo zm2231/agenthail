@@ -243,7 +243,6 @@ struct TranscriptLayoutProbe {
 
     @MainActor
     static func drawn(_ view: NSView, top: CGFloat, bottom: CGFloat) -> [Int] {
-        view.layoutSubtreeIfNeeded()
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds),
               let space = CGColorSpace(name: CGColorSpace.sRGB) else { return [] }
         view.cacheDisplay(in: view.bounds, to: rep)
