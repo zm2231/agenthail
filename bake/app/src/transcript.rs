@@ -4,13 +4,13 @@ use feed::Transcript;
 use feed::blocks::{AgentEntry, Block, Kind, Work};
 use feed::summary::Entry;
 use feed::wire::{Outcome, Rebuild, Sse, Wire};
-use rune::tok;
-use rune::{El, GrowthSpec, ScrollSpec, col, memo, row, text};
+use rune::{Color, El, GrowthSpec, ScrollSpec, col, el, icon, memo, row, text};
 use rune_kit::MarkdownStyle;
 use rune_kit::markdown::Markdown;
 
 use crate::App;
-use crate::theme::{META, META_BOLD, accent, failed};
+use crate::icons;
+use crate::theme::{self, BODY_BOLD, META, META_BOLD, accent, failed, faint, line, muted, wash};
 
 pub struct Replay {
     lines: Vec<(f64, String)>,
@@ -107,23 +107,26 @@ fn markdown(body: &str) -> El {
 }
 
 fn entry_el(entry: &Entry) -> El {
-    let t = tok::theme(true);
-    let dim = t.text_secondary.alpha(0.7);
-    match entry {
-        Entry::Call { call, results } => {
-            let mut line = row()
-                .gap(8.0)
-                .pl(18.0)
-                .child(text(call.title.clone()).font(META_BOLD).color(t.text_secondary))
-                .child(text(first_line(&call.text, 140)).font(META).color(dim).truncate());
-            if results.iter().any(feed::summary::is_failure) {
-                line = line.child(text("failed").font(META).color(failed()));
-            }
-            line
-        }
-        Entry::Output(item) => row().pl(18.0).child(text(first_line(&item.text, 140)).font(META).color(dim).truncate()),
-        Entry::Reasoning(item) => row().pl(18.0).child(text(first_line(&item.text, 160)).font(META).color(dim).truncate()),
+    let (glyph, title, detail, failure) = match entry {
+        Entry::Call { call, results } => (&icons::TERMINAL, call.title.clone(), first_line(&call.text, 140), results.iter().any(feed::summary::is_failure)),
+        Entry::Output(item) => (&icons::CORNER, "Output".to_string(), first_line(&item.text, 140), false),
+        Entry::Reasoning(item) => (&icons::SPARKLES, "Thinking".to_string(), first_line(&item.text, 160), false),
+    };
+    let mut line_el = row()
+        .w_full()
+        .gap(8.0)
+        .items_center()
+        .px(10.0)
+        .py(5.0)
+        .radius(7.0)
+        .hover(wash())
+        .child(icon(glyph, 13.0).color(if failure { failed() } else { faint() }))
+        .child(text(title).font(META_BOLD).color(muted()))
+        .child(text(detail).font(META).color(faint()).truncate().grow(1.0).min_w(0.0));
+    if failure {
+        line_el = line_el.child(row().px(6.0).py(1.0).radius(5.0).fill(failed().alpha(0.15)).child(text("failed").font(META_BOLD).color(failed())));
     }
+    line_el
 }
 
 fn toggle(id: String) -> impl Fn(&mut App) + 'static {
@@ -140,15 +143,28 @@ fn toggle(id: String) -> impl Fn(&mut App) + 'static {
 }
 
 fn work_el(id: &str, work: &Work, open: bool) -> El {
-    let t = tok::theme(true);
     let shown = open || !work.folds;
-    let header = if work.live { format!("Working · {}", work.label) } else { format!("{} · {}", work.line, work.label) };
-    let color = if work.live { accent() } else { t.text_secondary };
+    let label = if work.live { format!("Working · {}", work.label) } else { format!("{} · {}", work.line, work.label) };
+    let tint = if work.live { accent() } else { muted() };
+    let lead = if work.live {
+        el().size(7.0, 7.0).radius(4.0).fill(accent()).shadow(0.0, 8.0, accent().alpha(0.9))
+    } else {
+        icon(&icons::TERMINAL, 13.0).color(faint())
+    };
     let head = row()
         .key(format!("work-{id}"))
         .gap(8.0)
-        .child(text(if shown && work.folds { "▾" } else { "▸" }).font(META).color(color))
-        .child(text(header).font(META).color(color))
+        .items_center()
+        .px(10.0)
+        .py(6.0)
+        .radius(9.0)
+        .fill(if work.live { accent().alpha(0.08) } else { wash() })
+        .border(1.0, if work.live { accent().alpha(0.22) } else { line() })
+        .hover(Color::WHITE.alpha(0.09))
+        .press_scale(0.98)
+        .child(lead)
+        .child(text(label).font(META).color(tint))
+        .child(icon(if shown && work.folds { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, 12.0).color(faint()))
         .on_press(toggle(id.to_string()));
     let entries: Vec<&Entry> = if shown {
         work.entries.iter().collect()
@@ -157,26 +173,91 @@ fn work_el(id: &str, work: &Work, open: bool) -> El {
     } else {
         Vec::new()
     };
-    col().w_full().gap(3.0).child(head).children(entries.into_iter().map(entry_el))
+    let mut c = col().w_full().gap(4.0).items_start().child(head);
+    if !entries.is_empty() {
+        c = c.child(
+            col()
+                .w_full()
+                .ml(14.0)
+                .pl(8.0)
+                .border_sides([0.0, 0.0, 0.0, 1.5], line())
+                .gap(1.0)
+                .children(entries.into_iter().map(entry_el)),
+        );
+    }
+    c
+}
+
+pub fn avatar(name: &str, size: f32) -> El {
+    let hue = theme::hue_for(name);
+    let letter: String = name.trim_start_matches('@').chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_default();
+    col()
+        .size(size, size)
+        .radius(size / 2.0)
+        .items_center()
+        .justify_center()
+        .linear_gradient(135.0, [(0.0, rune::oklch(0.62, 0.14, hue)), (1.0, rune::oklch(0.45, 0.14, hue + 40.0))])
+        .child(text(letter).font(rune::TextStyle::new(size * 0.45, 700.0)).color(Color::WHITE))
 }
 
 fn agent_el(entry: &AgentEntry) -> El {
-    let t = tok::theme(true);
-    let lead = if entry.agent.is_incoming() { format!("From {}", entry.agent.chip()) } else { format!("To {}", entry.agent.chip()) };
+    let incoming = entry.agent.is_incoming();
+    let chip = entry.agent.chip();
     row()
-        .gap(8.0)
-        .child(text(lead).font(META_BOLD).color(t.text_secondary))
-        .child(text(first_line(&entry.agent.summary, 200)).font(META).color(t.text_secondary.alpha(0.7)).truncate())
+        .w_full()
+        .gap(10.0)
+        .items_start()
+        .px(12.0)
+        .py(9.0)
+        .radius(12.0)
+        .fill(wash())
+        .border(1.0, line())
+        .child(avatar(&chip, 22.0))
+        .child(
+            col()
+                .grow(1.0)
+                .min_w(0.0)
+                .gap(2.0)
+                .child(
+                    row()
+                        .gap(6.0)
+                        .items_center()
+                        .child(icon(if incoming { &icons::CORNER } else { &icons::ARROW_RIGHT }, 11.0).color(faint()))
+                        .child(text(if incoming { format!("From {chip}") } else { format!("To {chip}") }).font(META_BOLD).color(muted())),
+                )
+                .child(text(first_line(&entry.agent.summary, 220)).font(META).color(faint()).wrap().max_lines(2)),
+        )
 }
 
 fn block_el(block: &Block, open: bool, gap: f32, last: bool) -> El {
-    let t = tok::theme(true);
     let body = match &block.kind {
-        Kind::User(body) => col().w_full().items_end().child(col().max_w(560.0).fill(t.card).radius(14.0).px(14.0).py(9.0).child(markdown(body))),
+        Kind::User(body) if body.trim_start().starts_with("<hook_prompt") => {
+            let inner = body.split_once('>').map(|(_, rest)| rest).unwrap_or(body).replace("</hook_prompt>", "");
+            row()
+                .w_full()
+                .gap(8.0)
+                .items_start()
+                .px(12.0)
+                .py(8.0)
+                .radius(10.0)
+                .border(1.0, line())
+                .child(icon(&icons::BOLT, 12.0).color(faint()).mt(2.0))
+                .child(col().grow(1.0).min_w(0.0).gap(2.0).child(text("Hook").font(META_BOLD).color(muted())).child(text(first_line(&inner, 400)).font(META).color(faint()).wrap().max_lines(3)))
+        }
+        Kind::User(body) => col().w_full().items_end().child(
+            col()
+                .max_w(560.0)
+                .corners([18.0, 18.0, 6.0, 18.0])
+                .linear_gradient(160.0, [(0.0, rune::oklch(0.33, 0.06, 268.0)), (1.0, rune::oklch(0.27, 0.05, 275.0))])
+                .border(1.0, Color::WHITE.alpha(0.08))
+                .px(15.0)
+                .py(10.0)
+                .child(markdown(body)),
+        ),
         Kind::Assistant(body) => {
-            let mut c = col().w_full().gap(4.0).child(markdown(body));
+            let mut c = col().w_full().gap(6.0).child(markdown(body));
             if let Some(took) = &block.finished {
-                c = c.child(text(format!("Took {took}")).font(META).color(t.text_secondary));
+                c = c.child(row().gap(5.0).items_center().child(icon(&icons::CLOCK, 11.0).color(faint())).child(text(format!("Took {took}")).font(META).color(faint())));
             }
             c
         }
@@ -185,35 +266,44 @@ fn block_el(block: &Block, open: bool, gap: f32, last: bool) -> El {
         Kind::AgentFold { label, members, .. } => {
             let head = row()
                 .key(format!("fold-{}", block.id))
-                .child(text(format!("{} {label}", if open { "▾" } else { "▸" })).font(META).color(t.text_secondary))
+                .gap(8.0)
+                .items_center()
+                .px(10.0)
+                .py(6.0)
+                .radius(9.0)
+                .fill(wash())
+                .hover(Color::WHITE.alpha(0.09))
+                .child(icon(&icons::MESSAGE, 13.0).color(faint()))
+                .child(text(label.clone()).font(META).color(muted()))
+                .child(icon(if open { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, 12.0).color(faint()))
                 .on_press(toggle(block.id.clone()));
-            let mut c = col().w_full().gap(4.0).child(head);
+            let mut c = col().w_full().gap(6.0).items_start().child(head);
             if open {
                 c = c.children(members.iter().map(agent_el));
             }
             c
         }
-        Kind::Annotation(note) | Kind::Notice(note) => col().child(text(note.clone()).font(META).color(t.text_secondary).wrap()),
-        Kind::Instructions(_) => col().child(text("Instructions").font(META).color(t.text_secondary)),
-        Kind::Unknown { title, .. } => col().child(text(title.clone()).font(META).color(t.text_secondary)),
+        Kind::Annotation(note) | Kind::Notice(note) => row().gap(6.0).child(text(note.clone()).font(META).color(faint()).wrap()),
+        Kind::Instructions(_) => row().gap(6.0).items_center().child(icon(&icons::LAYERS, 12.0).color(faint())).child(text("Instructions").font(META).color(faint())),
+        Kind::Unknown { title, .. } => col().child(text(title.clone()).font(META).color(faint())),
     };
-    let row = col().w_full().max_w(760.0).px(28.0).pt(gap).child(body);
-    if last { row.streaming(true) } else { row }
+    let row_el = col().w_full().max_w(780.0).px(36.0).pt(gap).child(body);
+    if last { row_el.streaming(true) } else { row_el }
 }
 
 fn gap_for(blocks: &[Block], ix: usize) -> f32 {
     match ix.checked_sub(1).and_then(|i| blocks.get(i)) {
-        None => 12.0,
-        Some(_) if blocks[ix].is_message_in() => 22.0,
-        Some(p) if p.is_message_in() => 12.0,
-        Some(_) => 8.0,
+        None => 20.0,
+        Some(_) if blocks[ix].is_message_in() => 26.0,
+        Some(p) if p.is_message_in() => 16.0,
+        Some(_) => 10.0,
     }
 }
 
 pub fn view(s: &App, id: &str) -> El {
     let count = s.panes.get(id).map(|p| p.blocks.len()).unwrap_or(0);
     let key = id.to_string();
-    let stack = col().key(format!("rows-{id}")).w_full().growth(GrowthSpec::default()).selection_group(true).pb(16.0).virtual_rows(
+    let stack = col().key(format!("rows-{id}")).w_full().items_center().growth(GrowthSpec::default()).selection_group(true).pb(130.0).virtual_rows(
         count,
         60.0,
         {
@@ -231,3 +321,17 @@ pub fn view(s: &App, id: &str) -> El {
     );
     col().key(format!("transcript-{id}")).w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: true }).child(stack)
 }
+
+pub fn loading(note: String) -> El {
+    col()
+        .w_full()
+        .grow(1.0)
+        .items_center()
+        .justify_center()
+        .gap(12.0)
+        .child(rune_kit::Loader::new().size(22.0).color(accent()).build(theme::kit()))
+        .child(text(note).font(BODY_BOLD).color(faint()))
+        .child(el().h(80.0))
+}
+
+pub use avatar as session_avatar;

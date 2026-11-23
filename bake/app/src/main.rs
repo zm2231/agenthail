@@ -1,3 +1,4 @@
+mod icons;
 mod theme;
 mod transcript;
 mod ui;
@@ -6,9 +7,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
-use feed::catalog::{BoardRow, Client, Session, Snapshot, State, WorkItem};
+use feed::catalog::{BoardRow, Client, Session, Snapshot, WorkItem};
 use feed::source::{Live, Message};
-use rune::{AppSpec, Key, KeyEvent, TextEdit, Tx};
+use rune::{AppSpec, Chrome, Key, KeyEvent, TextEdit, Tx, WindowOptions};
 use time::OffsetDateTime;
 
 use crate::transcript::{Pane, Replay};
@@ -332,16 +333,7 @@ fn on_key(s: &mut App, key: &KeyEvent, tx: &mut Tx) -> bool {
         return true;
     }
     if key.is_command('j') {
-        let next = ui::ordered(s)
-            .into_iter()
-            .filter(|x| x.state(s.now) == State::NeedsYou)
-            .map(|x| x.id.clone())
-            .skip_while(|id| Some(id) != s.selected.as_ref())
-            .nth(1)
-            .or_else(|| ui::ordered(s).into_iter().find(|x| x.state(s.now) == State::NeedsYou).map(|x| x.id.clone()));
-        if let Some(id) = next {
-            select(s, &id);
-        }
+        ui::next_waiting(s);
         return true;
     }
     if key.is_command('1') {
@@ -369,5 +361,9 @@ fn on_key(s: &mut App, key: &KeyEvent, tx: &mut Tx) -> bool {
 }
 
 fn main() {
-    rune::run(AppSpec::<App> { poll: Some(poll), on_key: Some(on_key), ..AppSpec::new("Agenthail", (1380.0, 880.0), init, ui::view) });
+    rune::App::new(AppSpec::<App> { poll: Some(poll), on_key: Some(on_key), min_size: Some((1100.0, 640.0)), ..AppSpec::new("Agenthail", (1440.0, 900.0), init, ui::view) })
+        .chrome(Chrome { full_size_content: true, traffic_lights: Some((20.0, 20.0)), drag_regions: true })
+        .window_options(WindowOptions { transparent: true, resizable: true, visible: true, ..Default::default() })
+        .srgb_blend(true)
+        .run();
 }

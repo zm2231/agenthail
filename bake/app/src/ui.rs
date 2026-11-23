@@ -1,18 +1,22 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use feed::catalog::{self, PHASES, Session, State};
-use rune::tok;
-use rune::{Color, Cx, El, ScrollSpec, Tx, col, el, row, text, text_input};
+use feed::catalog::{self, BoardRow, PHASES, Session, State};
+use rune::{Color, Cx, El, Icon, ScrollSpec, SystemMaterial, TextStyle, Transition, Tx, col, el, icon, row, text, text_input};
+use rune_kit::{Button, ButtonVariant, Keybind, KeybindVariant};
 
-use crate::theme::{BODY, BODY_BOLD, HEADING, LABEL, META, META_BOLD, TITLE, accent, attention, done, side};
-use crate::{App, Screen, open_project, select, send, session, transcript};
+use crate::icons;
+use crate::theme::{
+    self, BODY, BODY_BOLD, HEADING, HERO, LABEL, META, META_BOLD, NUMBER, SPRING, TITLE, accent, accent_deep, attention, card, done, failed, faint, line, muted, raised, wash,
+};
+use crate::transcript::{self, session_avatar};
+use crate::{App, Screen, open_palette, open_project, select, send, session};
 
 pub fn palette_matches<'a>(s: &'a App, query: &str) -> Vec<&'a Session> {
     s.palette_order
         .iter()
         .filter_map(|id| session(s, id))
         .filter(|x| query.is_empty() || x.title().to_lowercase().contains(query) || x.project_name().to_lowercase().contains(query) || x.summary().to_lowercase().contains(query))
-        .take(10)
+        .take(9)
         .collect()
 }
 
@@ -22,104 +26,211 @@ pub fn ordered(s: &App) -> Vec<&Session> {
     list
 }
 
-fn glyph(state: State) -> (&'static str, Color) {
-    let t = tok::theme(true);
-    match state {
-        State::NeedsYou => ("●", attention()),
-        State::Working => ("◐", accent()),
-        State::Done => ("✓", done()),
-        State::Idle => ("○", t.text_secondary.alpha(0.6)),
+pub fn next_waiting(s: &mut App) {
+    let waiting: Vec<String> = ordered(s).into_iter().filter(|x| x.state(s.now) == State::NeedsYou).map(|x| x.id.clone()).collect();
+    let next = waiting.iter().skip_while(|id| Some(*id) != s.selected.as_ref()).nth(1).or(waiting.first()).cloned();
+    if let Some(id) = next {
+        select(s, &id);
     }
 }
 
-fn label(text_value: &str) -> El {
-    let t = tok::theme(true);
-    text(text_value.to_uppercase()).font(LABEL).color(t.text_secondary.alpha(0.8))
+fn state_color(state: State) -> Color {
+    match state {
+        State::NeedsYou => attention(),
+        State::Working => accent(),
+        State::Done => done(),
+        State::Idle => faint(),
+    }
+}
+
+fn state_icon(state: State) -> &'static Icon {
+    match state {
+        State::NeedsYou => &icons::HAND,
+        State::Working => &icons::BOLT,
+        State::Done => &icons::CHECK_CIRCLE,
+        State::Idle => &icons::CLOCK,
+    }
 }
 
 fn spacer() -> El {
     el().grow(1.0)
 }
 
+fn label(value: &str) -> El {
+    text(value.to_uppercase()).font(LABEL).color(faint())
+}
+
+fn chip(glyph: &'static Icon, value: impl Into<String>) -> El {
+    row()
+        .gap(5.0)
+        .items_center()
+        .px(8.0)
+        .py(3.0)
+        .radius(7.0)
+        .fill(wash())
+        .border(1.0, line())
+        .child(icon(glyph, 12.0).color(faint()))
+        .child(text(value.into()).font(META).color(muted()).truncate().max_w(220.0))
+}
+
+fn pill(glyph: &'static Icon, value: impl Into<String>, color: Color) -> El {
+    row()
+        .gap(5.0)
+        .items_center()
+        .px(10.0)
+        .py(5.0)
+        .radius(20.0)
+        .fill(color.alpha(0.14))
+        .border(1.0, color.alpha(0.30))
+        .child(icon(glyph, 12.0).color(color))
+        .child(text(value.into()).font(META_BOLD).color(color))
+}
+
+fn keys(k: &[&str]) -> El {
+    Keybind::new(k).variant(KeybindVariant::Ghost).build(theme::kit())
+}
+
+fn status_mark(state: State) -> El {
+    let color = state_color(state);
+    let dot = el().size(10.0, 10.0).radius(5.0).fill(color).border(2.0, theme::card_deep());
+    if state == State::NeedsYou { dot.shadow(0.0, 8.0, color.alpha(0.8)) } else { dot }
+}
+
+fn avatar_with_state(name: &str, state: State, size: f32) -> El {
+    col().size(size, size).child(session_avatar(name, size)).child(status_mark(state).absolute(size - 9.0, size - 9.0))
+}
+
 fn session_row(s: &App, x: &Session) -> El {
-    let t = tok::theme(true);
     let state = x.state(s.now);
-    let (g, color) = glyph(state);
     let selected = s.selected.as_deref() == Some(x.id.as_str()) && s.screen == Screen::Session;
     let id = x.id.clone();
     let branch = x.checkout.branch.clone().unwrap_or_default();
     let place = if branch.is_empty() { format!("{} · {}", x.project_name(), x.host.name) } else { format!("{} · {}", x.project_name(), branch) };
-    let summary_color = if state == State::NeedsYou { attention() } else { t.text_secondary };
-    let mut card = col()
+    let summary_color = if state == State::NeedsYou { attention() } else { muted() };
+    let trailing = if state == State::Working {
+        row().gap(5.0).items_center().child(el().size(6.0, 6.0).radius(3.0).fill(accent()).shadow(0.0, 7.0, accent().alpha(0.9))).child(text("live").font(META).color(accent()))
+    } else {
+        text(catalog::ago(&x.last_active, s.now)).font(META).color(faint())
+    };
+    let mut card_el = row()
         .key(format!("row-{}", x.id))
         .w_full()
-        .px(12.0)
-        .py(8.0)
-        .gap(3.0)
-        .radius(8.0)
+        .gap(10.0)
+        .items_start()
+        .px(10.0)
+        .py(9.0)
+        .radius(12.0)
+        .hover(Color::WHITE.alpha(0.06))
+        .press_scale(0.985)
+        .motion(SPRING)
         .on_press(move |s: &mut App| select(s, &id))
+        .child(avatar_with_state(&x.title(), state, 30.0))
         .child(
-            row()
-                .w_full()
-                .gap(8.0)
-                .child(text(g).font(BODY).color(color))
-                .child(text(x.title()).font(BODY_BOLD).color(t.text).truncate().grow(1.0))
-                .child(text(catalog::ago(&x.last_active, s.now)).font(META).color(t.text_secondary)),
-        )
-        .child(text(place).font(META).color(t.text_secondary.alpha(0.75)).truncate().pl(20.0))
-        .child(text(x.summary()).font(META).color(summary_color).wrap().max_lines(2).pl(20.0));
+            col()
+                .grow(1.0)
+                .min_w(0.0)
+                .gap(2.0)
+                .child(row().w_full().gap(6.0).items_center().child(text(x.title()).font(BODY_BOLD).color(theme::text()).truncate().grow(1.0).min_w(0.0)).child(trailing))
+                .child(row().gap(4.0).items_center().child(icon(&icons::BRANCH, 11.0).color(faint())).child(text(place).font(META).color(faint()).truncate().min_w(0.0)))
+                .child(text(x.summary()).font(META).color(summary_color).wrap().max_lines(2).pt(2.0)),
+        );
     if selected {
-        card = card.fill(t.card);
+        card_el = card_el.fill(Color::WHITE.alpha(0.11)).border(1.0, Color::WHITE.alpha(0.10)).shadow(4.0, 14.0, Color::BLACK.alpha(0.25));
     }
-    card
+    card_el
 }
 
-fn group(title: &str, count: usize, rows: Vec<El>, project: Option<String>) -> El {
-    let t = tok::theme(true);
-    let mut head = row().w_full().px(12.0).pt(14.0).pb(4.0).gap(6.0).child(label(title)).child(text(count.to_string()).font(LABEL).color(t.text_secondary.alpha(0.6))).child(spacer());
+fn group(title: &str, count: usize, glyph: &'static Icon, color: Color, rows: Vec<El>, project: Option<String>) -> El {
+    let mut head = row()
+        .w_full()
+        .px(10.0)
+        .pt(16.0)
+        .pb(6.0)
+        .gap(7.0)
+        .items_center()
+        .child(icon(glyph, 12.0).color(color))
+        .child(label(title))
+        .child(row().px(6.0).py(1.0).radius(8.0).fill(wash()).child(text(count.to_string()).font(LABEL).color(muted())))
+        .child(spacer());
     if let Some(key) = project {
-        head = head.key(format!("project-{key}")).on_press(move |s: &mut App| open_project(s, &key)).child(text("Overview ›").font(META).color(accent()));
+        head = head
+            .key(format!("project-{key}"))
+            .on_press(move |s: &mut App| open_project(s, &key))
+            .child(row().gap(3.0).items_center().px(6.0).py(2.0).radius(6.0).hover(wash()).child(text("Overview").font(META).color(accent())).child(icon(&icons::CHEVRON_RIGHT, 11.0).color(accent())));
     }
-    col().w_full().child(head).children(rows)
+    col().w_full().child(head).child(col().w_full().gap(2.0).children(rows))
+}
+
+fn segmented(s: &App) -> El {
+    let option = |title: &'static str, glyph: &'static Icon, on: bool, project: bool| {
+        let mut o = row()
+            .key(format!("seg-{title}"))
+            .grow(1.0)
+            .gap(6.0)
+            .items_center()
+            .justify_center()
+            .py(5.0)
+            .radius(7.0)
+            .motion(SPRING)
+            .on_press(move |s: &mut App| s.by_project = project)
+            .child(icon(glyph, 12.0).color(if on { theme::text() } else { faint() }))
+            .child(text(title).font(META_BOLD).color(if on { theme::text() } else { faint() }));
+        if on {
+            o = o.fill(Color::WHITE.alpha(0.13)).shadow(1.0, 4.0, Color::BLACK.alpha(0.3));
+        }
+        o
+    };
+    row()
+        .w_full()
+        .padding(3.0)
+        .radius(10.0)
+        .fill(Color::BLACK.alpha(0.18))
+        .child(option("Attention", &icons::INBOX, !s.by_project, false))
+        .child(option("Projects", &icons::FOLDER, s.by_project, true))
+}
+
+fn stat(glyph: &'static Icon, count: usize, title: &str, color: Color) -> El {
+    row()
+        .grow(1.0)
+        .gap(8.0)
+        .items_center()
+        .px(10.0)
+        .py(8.0)
+        .radius(10.0)
+        .fill(color.alpha(0.10))
+        .border(1.0, color.alpha(0.18))
+        .child(col().size(24.0, 24.0).radius(7.0).items_center().justify_center().fill(color.alpha(0.18)).child(icon(glyph, 13.0).color(color)))
+        .child(col().child(text(count.to_string()).font(TITLE).color(theme::text())).child(text(title.to_string()).font(META).color(muted())))
 }
 
 fn sidebar(s: &App) -> El {
-    let t = tok::theme(true);
     let list = ordered(s);
     let needs = list.iter().filter(|x| x.state(s.now) == State::NeedsYou).count();
     let working = list.iter().filter(|x| x.state(s.now) == State::Working).count();
-    let mode = if s.by_project { "By project" } else { "By state" };
+    let search = row()
+        .key("search")
+        .w_full()
+        .gap(8.0)
+        .items_center()
+        .px(10.0)
+        .py(7.0)
+        .radius(10.0)
+        .fill(Color::BLACK.alpha(0.20))
+        .border(1.0, Color::WHITE.alpha(0.07))
+        .hover(Color::BLACK.alpha(0.28))
+        .on_press_tx(|s: &mut App, tx: &mut Tx| open_palette(s, tx))
+        .child(icon(&icons::SEARCH, 14.0).color(muted()))
+        .child(text("Jump to a session").font(META).color(muted()))
+        .child(spacer())
+        .child(keys(&["⌘", "K"]));
     let header = col()
         .w_full()
-        .px(14.0)
-        .pt(38.0)
-        .pb(10.0)
-        .gap(8.0)
-        .child(row().w_full().child(text("Agenthail").font(TITLE).color(t.text)).child(spacer()).child(
-            text(mode).font(META).color(accent()).key("mode").on_press(|s: &mut App| s.by_project = !s.by_project),
-        ))
-        .child(
-            row()
-                .w_full()
-                .gap(8.0)
-                .px(10.0)
-                .py(6.0)
-                .radius(8.0)
-                .fill(t.card)
-                .key("search")
-                .on_press_tx(|s: &mut App, tx: &mut Tx| crate::open_palette(s, tx))
-                .child(text("Jump to a session").font(META).color(t.text_secondary))
-                .child(spacer())
-                .child(text("⌘K").font(META).color(t.text_secondary.alpha(0.6))),
-        )
-        .child(
-            row()
-                .gap(12.0)
-                .child(text(format!("● {needs} need you")).font(META_BOLD).color(if needs > 0 { attention() } else { t.text_secondary }))
-                .child(text(format!("◐ {working} working")).font(META).color(accent()))
-                .child(spacer())
-                .child(text("⌘J next").font(META).color(t.text_secondary.alpha(0.6))),
-        );
+        .px(12.0)
+        .gap(10.0)
+        .child(el().w_full().h(40.0).window_drag())
+        .child(search)
+        .child(row().w_full().gap(8.0).child(stat(&icons::HAND, needs, "need you", attention())).child(stat(&icons::BOLT, working, "working", accent())))
+        .child(segmented(s));
     let mut groups: Vec<El> = Vec::new();
     if s.by_project {
         let mut by: BTreeMap<String, (String, Vec<&Session>)> = BTreeMap::new();
@@ -130,127 +241,245 @@ fn sidebar(s: &App) -> El {
         projects.sort_by_key(|(_, _, v)| v.iter().map(|x| x.state(s.now)).min());
         for (name, key, rows) in projects {
             let count = rows.len();
-            groups.push(group(&name, count, rows.into_iter().map(|x| session_row(s, x)).collect(), (!key.is_empty()).then_some(key)));
+            let top = rows.iter().map(|x| x.state(s.now)).min().unwrap_or(State::Idle);
+            groups.push(group(&name, count, &icons::FOLDER, state_color(top), rows.into_iter().map(|x| session_row(s, x)).collect(), (!key.is_empty()).then_some(key)));
         }
     } else {
         for state in [State::NeedsYou, State::Working, State::Done, State::Idle] {
             let rows: Vec<El> = list.iter().filter(|x| x.state(s.now) == state).map(|x| session_row(s, x)).collect();
             if !rows.is_empty() {
-                groups.push(group(state.label(), rows.len(), rows, None));
+                groups.push(group(state.label(), rows.len(), state_icon(state), state_color(state), rows, None));
             }
         }
     }
-    let scroller = col().key("sidebar-list").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(col().w_full().px(6.0).pb(12.0).children(groups));
-    let footer = row().w_full().px(14.0).py(8.0).child(text(s.status.clone()).font(META).color(t.text_secondary.alpha(0.6)));
-    col().w(300.0).h_full().fill(side()).child(header).child(scroller).child(footer)
-}
-
-fn pill(value: &str, color: Color) -> El {
-    row().px(8.0).py(3.0).radius(10.0).fill(color.alpha(0.16)).child(text(value.to_string()).font(META_BOLD).color(color))
-}
-
-fn session_header(s: &App, x: &Session) -> El {
-    let t = tok::theme(true);
-    let state = x.state(s.now);
-    let (_, color) = glyph(state);
-    let label_value = if state == State::NeedsYou || x.display.label.is_empty() { state.label().to_string() } else { x.display.label.clone() };
-    let branch = x.checkout.branch.clone().unwrap_or_else(|| "no branch".into());
-    col()
+    let scroller = col().key("sidebar-list").w_full().grow(1.0).min_h(0.0).clip_fade(0.0, 10.0, 0.0, 18.0).scroll(ScrollSpec { stick_bottom: false }).child(col().w_full().px(6.0).pb(16.0).children(groups));
+    let live = s.status == "live";
+    let footer = row()
         .w_full()
-        .px(28.0)
-        .pt(30.0)
-        .pb(12.0)
-        .gap(6.0)
-        .child(row().w_full().gap(10.0).child(text(x.title()).font(HEADING).color(t.text)).child(pill(&label_value, color)).child(spacer()).child(text(format!("{} · {}", x.surface, x.host.name)).font(META).color(t.text_secondary)))
-        .child(text(format!("{} · {}{}", x.project_name(), branch, if x.checkout.dirty { " · uncommitted changes" } else { "" })).font(META).color(t.text_secondary))
-}
-
-fn waiting_card(x: &Session) -> El {
-    let t = tok::theme(true);
-    let question = x.attention.as_ref().map(|a| a.reason.clone()).filter(|r| !r.is_empty()).unwrap_or_else(|| x.summary());
-    let card = col()
-        .w_full()
-        .max_w(760.0)
         .px(16.0)
-        .py(12.0)
+        .py(10.0)
         .gap(6.0)
-        .radius(12.0)
-        .fill(attention().alpha(0.10))
-        .border(1.0, attention().alpha(0.35))
-        .child(label("Waiting on you"))
-        .child(text(question).font(BODY_BOLD).color(t.text).wrap())
-        .child(text("Reply in the box below, or press ⌘J for the next session that needs you.").font(META).color(t.text_secondary));
-    col().w_full().px(28.0).pb(8.0).child(card)
+        .items_center()
+        .child(el().size(6.0, 6.0).radius(3.0).fill(if live { done() } else { attention() }))
+        .child(text(if live { "Connected".to_string() } else { s.status.clone() }).font(META).color(faint()).truncate());
+    col().w(300.0).h_full().child(header).child(scroller).child(footer)
+}
+
+fn header(s: &App, x: &Session) -> El {
+    let state = x.state(s.now);
+    let label_value = if state == State::NeedsYou || x.display.label.is_empty() { state.label().to_string() } else { x.display.label.clone() };
+    let mut chips = row().gap(6.0).items_center().child(chip(&icons::FOLDER, x.project_name()));
+    if let Some(branch) = &x.checkout.branch {
+        chips = chips.child(chip(&icons::BRANCH, branch.clone()));
+    }
+    chips = chips.child(chip(&icons::SERVER, x.host.name.clone())).child(chip(&icons::SPARKLES, x.surface.clone()));
+    if x.checkout.dirty {
+        chips = chips.child(row().gap(5.0).items_center().px(8.0).py(3.0).radius(7.0).fill(attention().alpha(0.10)).child(el().size(6.0, 6.0).radius(3.0).fill(attention())).child(text("uncommitted").font(META).color(attention())));
+    }
+    row()
+        .w_full()
+        .gap(14.0)
+        .items_center()
+        .px(32.0)
+        .pt(22.0)
+        .pb(16.0)
+        .window_drag()
+        .child(avatar_with_state(&x.title(), state, 40.0))
+        .child(col().grow(1.0).min_w(0.0).gap(7.0).child(text(x.title()).font(HEADING).color(theme::text()).truncate()).child(chips))
+        .child(pill(state_icon(state), label_value, state_color(state)))
+}
+
+fn asked_in_transcript(s: &App, x: &Session) -> Option<String> {
+    let pane = s.panes.get(&x.id)?;
+    let body = pane.blocks.iter().rev().find_map(|b| match &b.kind {
+        feed::Kind::Assistant(body) => Some(body.clone()),
+        _ => None,
+    })?;
+    let paragraphs: Vec<&str> = body.split("\n\n").map(str::trim).filter(|p| !p.is_empty()).collect();
+    let pick = paragraphs.iter().rev().find(|p| p.contains('?')).or(paragraphs.last())?;
+    let plain: String = pick.replace("**", "").replace('`', "");
+    Some(if plain.chars().count() > 320 { format!("{}…", plain.chars().take(320).collect::<String>()) } else { plain })
+}
+
+fn waiting_card(s: &App, x: &Session) -> El {
+    let reason = x.attention.as_ref().map(|a| a.reason.clone()).filter(|r| !r.is_empty());
+    let summary = Some(x.summary()).filter(|t| t != "Needs you" && !t.is_empty());
+    let question = reason.or_else(|| asked_in_transcript(s, x)).or(summary).unwrap_or_else(|| "This session is waiting for you.".into());
+    let reply = Button::new("Reply").variant(ButtonVariant::Submit).icon(&icons::CORNER).build(theme::kit()).key("waiting-reply").on_press_tx(|_: &mut App, tx: &mut Tx| tx.focus("composer", true));
+    let next = Button::new("Next waiting").variant(ButtonVariant::Ghost).icon(&icons::ARROW_RIGHT).build(theme::kit()).key("waiting-next").on_press(next_waiting);
+    let card_el = row()
+        .w_full()
+        .max_w(780.0)
+        .gap(14.0)
+        .items_start()
+        .px(18.0)
+        .py(16.0)
+        .radius(16.0)
+        .linear_gradient(135.0, [(0.0, attention().alpha(0.16)), (1.0, attention().alpha(0.04))])
+        .border_gradient(1.0, attention().alpha(0.55), attention().alpha(0.12))
+        .shadow(8.0, 28.0, attention().alpha(0.10))
+        .transition(Transition::scale(0.97))
+        .child(col().size(34.0, 34.0).radius(10.0).items_center().justify_center().fill(attention().alpha(0.18)).child(icon(&icons::HAND, 17.0).color(attention())))
+        .child(
+            col()
+                .grow(1.0)
+                .min_w(0.0)
+                .gap(6.0)
+                .child(text("WAITING ON YOU").font(LABEL).color(attention()))
+                .child(text(question).font(TITLE).color(theme::text()).wrap())
+                .child(row().gap(8.0).pt(6.0).items_center().child(reply).child(next).child(spacer()).child(keys(&["⌘", "J"]))),
+        );
+    col().w_full().items_center().px(32.0).pb(12.0).child(card_el)
 }
 
 fn composer(s: &App, x: &Session) -> El {
-    let t = tok::theme(true);
     let input = text_input(&s.composer, BODY)
         .key("composer")
         .w_full()
-        .min_h(44.0)
-        .color(t.text)
-        .placeholder(format!("Message {}", x.title()), t.text_secondary.alpha(0.6))
+        .min_h(26.0)
+        .color(theme::text())
+        .placeholder(format!("Message {}", x.title()), faint())
         .on_edit(|s: &mut App| &mut s.composer)
         .on_submit(|s: &mut App, tx: &mut Tx| send(s, tx));
+    let ready = !s.composer.text.trim().is_empty();
+    let send_button = col()
+        .key("send")
+        .size(30.0, 30.0)
+        .radius(15.0)
+        .items_center()
+        .justify_center()
+        .linear_gradient(150.0, [(0.0, if ready { accent() } else { raised() }), (1.0, if ready { accent_deep() } else { raised() })])
+        .shadow(2.0, 10.0, if ready { accent().alpha(0.45) } else { Color::TRANSPARENT })
+        .press_scale(0.92)
+        .motion(SPRING)
+        .on_press_tx(|s: &mut App, tx: &mut Tx| send(s, tx))
+        .child(icon(&icons::ARROW_UP, 15.0).color(if ready { Color::WHITE } else { faint() }));
+    let status = if s.send_status.is_empty() { text("Return to send · Shift-Return for a new line").font(META).color(faint()) } else { text(s.send_status.clone()).font(META).color(muted()) };
+    let box_el = col()
+        .w_full()
+        .max_w(780.0)
+        .radius(18.0)
+        .backdrop_blur(22.0)
+        .fill(card().alpha(0.78))
+        .border(1.0, Color::WHITE.alpha(0.10))
+        .shadow(10.0, 34.0, Color::BLACK.alpha(0.45))
+        .child(col().w_full().px(16.0).pt(13.0).pb(4.0).child(input))
+        .child(row().w_full().px(10.0).pb(10.0).gap(8.0).items_center().child(chip(&icons::SPARKLES, x.surface.clone())).child(status).child(spacer()).child(send_button));
+    col().w_full().items_center().px(28.0).pb(18.0).mt(-120.0).child(box_el)
+}
+
+fn session_screen(s: &App) -> El {
+    let Some(id) = s.selected.clone() else { return transcript::loading("Pick a session".into()) };
+    let Some(x) = session(s, &id) else { return transcript::loading("Loading sessions…".into()) };
+    let mut center = col().grow(1.0).h_full().min_w(0.0).child(header(s, x));
+    if x.state(s.now) == State::NeedsYou {
+        center = center.child(waiting_card(s, x));
+    }
+    center = center.child(el().w_full().h(1.0).fill(line()));
+    let empty = s.panes.get(&id).is_none_or(|p| p.blocks.is_empty());
+    if empty {
+        let status = s.panes.get(&id).map(|p| p.status.clone()).unwrap_or_default();
+        let note = if matches!(status.as_str(), "" | "loading" | "live") { "Loading the transcript…".to_string() } else { status };
+        center = center.child(transcript::loading(note));
+    } else {
+        center = center.child(transcript::view(s, &id));
+    }
+    center.child(composer(s, x))
+}
+
+fn rail_section(title: &str, glyph: &'static Icon, body: El) -> El {
     col()
         .w_full()
-        .px(20.0)
-        .pb(16.0)
-        .pt(6.0)
-        .gap(4.0)
-        .child(col().w_full().px(12.0).py(8.0).radius(12.0).fill(t.card).border(1.0, t.card_border).child(input))
-        .child(row().w_full().px(6.0).child(text(s.send_status.clone()).font(META).color(t.text_secondary)).child(spacer()).child(text("Return sends · Shift-Return new line").font(META).color(t.text_secondary.alpha(0.6))))
+        .gap(8.0)
+        .pt(14.0)
+        .child(row().gap(6.0).items_center().px(4.0).child(icon(glyph, 12.0).color(faint())).child(label(title)))
+        .child(col().w_full().px(12.0).py(12.0).radius(14.0).fill(Color::BLACK.alpha(0.20)).border(1.0, Color::WHITE.alpha(0.07)).child(body))
 }
 
-fn phase_strip(state: &str) -> El {
-    let t = tok::theme(true);
+fn phase_stepper(state: &str) -> El {
     let current = catalog::phase(state);
-    row().gap(4.0).children(PHASES.iter().enumerate().map(|(i, name)| {
-        let (fg, bg) = if i == current { (t.text, accent().alpha(0.28)) } else if i < current { (t.text_secondary, t.card) } else { (t.text_secondary.alpha(0.5), t.bg) };
-        row().px(7.0).py(3.0).radius(6.0).fill(bg).child(text(name.to_string()).font(META).color(fg))
-    }))
+    let mut nodes = row().w_full().items_center();
+    for i in 0..PHASES.len() {
+        let reached = i <= current;
+        let size = if i == current { 12.0 } else { 8.0 };
+        let mut dot = el().size(size, size).radius(size / 2.0).fill(if reached { accent() } else { Color::WHITE.alpha(0.15) });
+        if i == current {
+            dot = dot.shadow(0.0, 10.0, accent().alpha(0.8)).border(2.0, Color::WHITE.alpha(0.9));
+        }
+        nodes = nodes.child(dot);
+        if i + 1 < PHASES.len() {
+            nodes = nodes.child(el().grow(1.0).h(2.0).radius(1.0).fill(if i < current { accent().alpha(0.7) } else { Color::WHITE.alpha(0.10) }));
+        }
+    }
+    let names = row().w_full().children(PHASES.iter().enumerate().map(|(i, name)| {
+        let t = text(name.to_string()).font(META).color(if i == current { theme::text() } else { faint() });
+        let cell = col().grow(1.0);
+        match i {
+            0 => cell.items_start().child(t),
+            n if n + 1 == PHASES.len() => cell.items_end().child(t),
+            _ => cell.items_center().child(t),
+        }
+    }));
+    col().w_full().gap(6.0).child(nodes).child(names)
 }
 
-fn section(title: &str, body: El) -> El {
-    col().w_full().gap(8.0).pt(16.0).child(label(title)).child(body)
+fn note(title: &str, color: Color, body: String) -> El {
+    row()
+        .w_full()
+        .gap(10.0)
+        .child(el().w(3.0).radius(2.0).fill(color).self_stretch())
+        .child(col().grow(1.0).min_w(0.0).gap(3.0).child(text(title.to_string()).font(META_BOLD).color(color)).child(text(body).font(META).color(muted()).wrap().max_lines(6)))
+}
+
+fn priority(p: &str) -> El {
+    let color = match p {
+        "P0" => failed(),
+        "P1" => attention(),
+        "P2" => accent(),
+        _ => faint(),
+    };
+    row().px(6.0).py(2.0).radius(6.0).fill(color.alpha(0.15)).child(text(p.to_string()).font(META_BOLD).color(color))
 }
 
 fn rail(s: &App, x: &Session) -> El {
-    let t = tok::theme(true);
     let mut parts: Vec<El> = Vec::new();
     if let Some(work) = x.held_work.first() {
         let item = s.items.get(&work.item_id);
         let state = item.map(|i| i.state.clone()).unwrap_or_else(|| work.state.clone());
-        let mut body = col()
-            .w_full()
-            .gap(8.0)
-            .child(text(format!("{} · {}", work.item_id, item.map(|i| format!("{} {}", i.priority, i.kind)).unwrap_or_default())).font(META).color(t.text_secondary))
-            .child(text(work.text.clone()).font(BODY_BOLD).color(t.text).wrap())
-            .child(phase_strip(&state));
-        if let Some(i) = item.filter(|i| !i.acceptance.is_empty()) {
-            body = body.child(col().gap(3.0).child(text("Expected").font(META_BOLD).color(done())).child(text(i.acceptance.clone()).font(META).color(t.text_secondary).wrap().max_lines(6)));
-        }
-        let latest = item.and_then(|i| i.timeline.iter().rev().find(|e| e.kind == "log").and_then(|e| e.text.clone()));
-        if let Some(observed) = latest {
-            body = body.child(col().gap(3.0).child(text("Latest").font(META_BOLD).color(accent())).child(text(observed).font(META).color(t.text_secondary).wrap().max_lines(6)));
-        }
-        parts.push(section("Work", body));
+        let mut tags = row().gap(6.0).items_center().child(row().px(7.0).py(2.0).radius(6.0).fill(wash()).child(text(work.item_id.clone()).font(META).color(muted())));
         if let Some(i) = item {
-            let entries = i.timeline.iter().rev().take(7).map(|e| {
+            tags = tags.child(priority(&i.priority)).child(text(i.kind.clone()).font(META).color(faint()));
+        }
+        let mut body = col().w_full().gap(12.0).child(tags).child(text(work.text.clone()).font(BODY_BOLD).color(theme::text()).wrap()).child(phase_stepper(&state));
+        if let Some(i) = item.filter(|i| !i.acceptance.is_empty()) {
+            body = body.child(note("Expected", done(), i.acceptance.clone()));
+        }
+        if let Some(latest) = item.and_then(|i| i.timeline.iter().rev().find(|e| e.kind == "log").and_then(|e| e.text.clone())) {
+            body = body.child(note("Latest", accent(), latest));
+        }
+        parts.push(rail_section("Work", &icons::TARGET, body));
+        if let Some(i) = item {
+            let entries: Vec<_> = i.timeline.iter().rev().take(6).collect();
+            let count = entries.len();
+            let list = col().w_full().children(entries.into_iter().enumerate().map(|(n, e)| {
                 let what = match (&e.kind[..], &e.state) {
                     ("state", Some(st)) => format!("Moved to {}", st.replace('_', " ")),
                     ("created", _) => "Created".to_string(),
                     _ => e.text.clone().unwrap_or_default(),
                 };
+                let rail_line = col()
+                    .w(10.0)
+                    .items_center()
+                    .self_stretch()
+                    .child(el().size(8.0, 8.0).radius(4.0).mt(5.0).fill(if n == 0 { accent() } else { Color::WHITE.alpha(0.25) }))
+                    .child(el().w(1.5).grow(1.0).fill(if n + 1 < count { Color::WHITE.alpha(0.10) } else { Color::TRANSPARENT }));
                 row()
                     .w_full()
-                    .gap(8.0)
-                    .child(text("•").font(META).color(t.text_secondary))
-                    .child(text(what).font(META).color(t.text).truncate().grow(1.0))
-                    .child(text(catalog::ago(&e.at, s.now)).font(META).color(t.text_secondary))
-            });
-            parts.push(section("Timeline", col().w_full().gap(6.0).children(entries)));
+                    .gap(10.0)
+                    .child(rail_line)
+                    .child(col().grow(1.0).min_w(0.0).pb(10.0).gap(1.0).child(text(what).font(META).color(theme::text()).wrap().max_lines(2)).child(text(catalog::ago(&e.at, s.now)).font(META).color(faint())))
+            }));
+            parts.push(rail_section("Timeline", &icons::ACTIVITY, list));
         }
     }
     if let Some(plan) = &x.plan {
@@ -259,118 +488,152 @@ fn rail(s: &App, x: &Session) -> El {
             .w_full()
             .h(6.0)
             .radius(3.0)
-            .fill(t.card)
-            .child(el().w(248.0 * plan.done as f32 / total).h(6.0).radius(3.0).fill(done()));
-        parts.push(section("Progress", col().w_full().gap(6.0).child(text(format!("{} of {} tasks done", plan.done, plan.total)).font(META).color(t.text)).child(bar)));
+            .fill(Color::WHITE.alpha(0.10))
+            .child(el().w(240.0 * plan.done as f32 / total).h(6.0).radius(3.0).linear_gradient(0.0, [(0.0, done()), (1.0, accent())]).motion(SPRING));
+        parts.push(rail_section("Progress", &icons::LIST, col().w_full().gap(8.0).child(text(format!("{} of {} tasks done", plan.done, plan.total)).font(META).color(theme::text())).child(bar)));
     }
     if !x.prs.is_empty() {
-        parts.push(section(
+        parts.push(rail_section(
             "Pull requests",
-            col().w_full().gap(6.0).children(x.prs.iter().map(|p| row().w_full().gap(8.0).child(text(format!("#{}", p.number)).font(META_BOLD).color(accent())).child(text(p.title.clone()).font(META).color(t.text).truncate()))),
+            &icons::PULL,
+            col().w_full().gap(8.0).children(x.prs.iter().map(|p| {
+                row().w_full().gap(8.0).items_center().child(icon(&icons::PULL, 13.0).color(done())).child(text(format!("#{}", p.number)).font(META_BOLD).color(accent())).child(text(p.title.clone()).font(META).color(theme::text()).truncate().min_w(0.0))
+            })),
         ));
     }
-    let facts = [
-        ("Agent", x.surface.clone()),
-        ("Host", x.host.name.clone()),
-        ("Branch", x.checkout.branch.clone().unwrap_or_else(|| "none".into())),
-        ("Queued", x.queue_count.to_string()),
+    let facts: [(&'static Icon, &str, String); 4] = [
+        (&icons::SPARKLES, "Agent", x.surface.clone()),
+        (&icons::SERVER, "Host", x.host.name.clone()),
+        (&icons::BRANCH, "Branch", x.checkout.branch.clone().unwrap_or_else(|| "none".into())),
+        (&icons::INBOX, "Queued", x.queue_count.to_string()),
     ];
-    parts.push(section(
+    parts.push(rail_section(
         "Session",
-        col().w_full().gap(5.0).children(facts.into_iter().map(|(k, v)| row().w_full().child(text(k).font(META).color(t.text_secondary)).child(spacer()).child(text(v).font(META).color(t.text).truncate()))),
+        &icons::LAYERS,
+        col().w_full().gap(9.0).children(facts.into_iter().map(|(g, k, v)| {
+            row().w_full().gap(8.0).items_center().child(icon(g, 12.0).color(faint())).child(text(k.to_string()).font(META).color(muted())).child(spacer()).child(text(v).font(META_BOLD).color(theme::text()).truncate().max_w(150.0))
+        })),
     ));
-    col().key("rail").w(320.0).h_full().fill(side()).px(16.0).pt(30.0).scroll(ScrollSpec { stick_bottom: false }).children(parts)
+    col().key("rail").w(300.0).h_full().px(12.0).child(el().w_full().h(36.0).window_drag()).child(col().w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(col().w_full().pb(16.0).children(parts)))
 }
 
-fn session_screen(s: &App) -> El {
-    let t = tok::theme(true);
-    let Some(id) = s.selected.clone() else { return col().grow(1.0).h_full().child(text("No session selected").color(t.text_secondary)) };
-    let Some(x) = session(s, &id) else { return col().grow(1.0).h_full() };
-    let mut center = col().grow(1.0).h_full().min_w(0.0).child(session_header(s, x));
-    if x.state(s.now) == State::NeedsYou {
-        center = center.child(waiting_card(x));
-    }
-    center = center.child(col().w_full().h(1.0).fill(t.separator));
-    let empty = s.panes.get(&id).is_none_or(|p| p.blocks.is_empty());
-    if empty {
-        let status = s.panes.get(&id).map(|p| p.status.clone()).unwrap_or_default();
-        let note = if matches!(status.as_str(), "" | "loading" | "live") { "Loading the transcript…".to_string() } else { status };
-        center = center.child(col().w_full().grow(1.0).items_center().pt(60.0).child(text(note).font(META).color(t.text_secondary)));
-    } else {
-        center = center.child(transcript::view(s, &id));
-    }
-    center = center.child(composer(s, x));
-    row().grow(1.0).h_full().child(center).child(rail(s, x))
-}
-
-fn board_row(s: &App, r: &catalog::BoardRow) -> El {
-    let t = tok::theme(true);
+fn board_row(s: &App, r: &BoardRow) -> El {
     let holder = s.sessions.iter().find(|x| x.held_work.iter().any(|w| w.item_id == r.id)).map(|x| (x.id.clone(), x.title(), x.state(s.now)));
-    let mut line = row()
+    let mut line_el = row()
         .w_full()
         .gap(10.0)
-        .px(12.0)
-        .py(8.0)
-        .radius(8.0)
-        .fill(t.card)
-        .child(text(r.text.clone()).font(BODY).color(t.text).truncate().grow(1.0))
-        .child(text(format!("{} {}", r.priority, r.kind)).font(META).color(t.text_secondary));
+        .items_center()
+        .px(14.0)
+        .py(10.0)
+        .radius(12.0)
+        .fill(wash())
+        .border(1.0, line())
+        .hover(Color::WHITE.alpha(0.08))
+        .child(priority(&r.priority))
+        .child(text(r.text.clone()).font(BODY).color(theme::text()).truncate().grow(1.0).min_w(0.0))
+        .child(text(r.kind.clone()).font(META).color(faint()));
     if let Some((id, title, state)) = holder {
-        let (g, color) = glyph(state);
-        line = line.key(format!("board-{}", r.id)).on_press(move |s: &mut App| select(s, &id)).child(text(format!("{g} {title}")).font(META_BOLD).color(color));
+        line_el = line_el
+            .key(format!("board-{}", r.id))
+            .press_scale(0.99)
+            .on_press(move |s: &mut App| select(s, &id))
+            .child(row().gap(6.0).items_center().child(avatar_with_state(&title, state, 20.0)).child(text(title).font(META_BOLD).color(state_color(state))));
     }
-    line
+    line_el
+}
+
+fn tile(glyph: &'static Icon, count: usize, title: &str, color: Color) -> El {
+    col()
+        .grow(1.0)
+        .gap(10.0)
+        .padding(16.0)
+        .radius(16.0)
+        .linear_gradient(150.0, [(0.0, color.alpha(0.12)), (1.0, color.alpha(0.03))])
+        .border(1.0, color.alpha(0.20))
+        .child(col().size(30.0, 30.0).radius(9.0).items_center().justify_center().fill(color.alpha(0.18)).child(icon(glyph, 16.0).color(color)))
+        .child(col().child(text(count.to_string()).font(NUMBER).color(theme::text())).child(text(title.to_string()).font(META).color(muted())))
+}
+
+fn section(title: &str, glyph: &'static Icon, body: El) -> El {
+    col().w_full().gap(10.0).pt(26.0).child(row().gap(7.0).items_center().child(icon(glyph, 13.0).color(faint())).child(label(title))).child(body)
 }
 
 fn project_screen(s: &App, key: &str) -> El {
-    let t = tok::theme(true);
     let sessions: Vec<&Session> = ordered(s).into_iter().filter(|x| x.project_key() == key).collect();
     let name = sessions.first().map(|x| x.project_name()).unwrap_or_else(|| key.to_string());
     let needs: Vec<&Session> = sessions.iter().copied().filter(|x| x.state(s.now) == State::NeedsYou).collect();
-    let mut body = col().w_full().max_w(900.0).px(32.0).pt(34.0).pb(32.0).gap(6.0).child(text(name).font(HEADING).color(t.text)).child(text(format!("{} sessions · {} need you", sessions.len(), needs.len())).font(META).color(t.text_secondary));
-    let cards = needs.iter().map(|x| {
-        let id = x.id.clone();
-        col()
-            .key(format!("needs-{}", x.id))
-            .w_full()
-            .px(14.0)
-            .py(10.0)
-            .gap(4.0)
-            .radius(10.0)
-            .fill(attention().alpha(0.10))
-            .border(1.0, attention().alpha(0.3))
-            .on_press(move |s: &mut App| select(s, &id))
-            .child(row().w_full().child(text(x.title()).font(BODY_BOLD).color(t.text)).child(spacer()).child(text("Open ›").font(META).color(accent())))
-            .child(text(x.summary()).font(META).color(t.text_secondary).wrap().max_lines(3))
-    });
-    body = body.child(section(&format!("Needs your attention · {}", needs.len()), col().w_full().gap(8.0).children(cards)));
-    let active = sessions.iter().filter(|x| x.state(s.now) == State::Working).map(|x| session_row(s, x));
-    body = body.child(section("Working now", col().w_full().gap(2.0).children(active)));
-    match s.boards.get(key) {
+    let working: Vec<&Session> = sessions.iter().copied().filter(|x| x.state(s.now) == State::Working).collect();
+    let hosts = sessions.iter().map(|x| x.host.name.clone()).collect::<BTreeSet<_>>().len();
+    let board = s.boards.get(key);
+    let count_of = |states: &[&str]| board.map(|rows| rows.iter().filter(|r| states.contains(&r.state.as_str())).count()).unwrap_or(0);
+    let tiles = row()
+        .w_full()
+        .gap(12.0)
+        .child(tile(&icons::HAND, needs.len(), "need you", attention()))
+        .child(tile(&icons::BOLT, working.len(), "working now", accent()))
+        .child(tile(&icons::PULL, count_of(&["in_review"]), "in review", done()))
+        .child(tile(&icons::LAYERS, count_of(&["open", "ready"]), "ready to start", muted()));
+    let hero = row()
+        .w_full()
+        .gap(14.0)
+        .items_center()
+        .window_drag()
+        .child(session_avatar(&name, 46.0))
+        .child(col().gap(2.0).child(text(name.clone()).font(HERO).color(theme::text())).child(text(format!("{} sessions on {} hosts", sessions.len(), hosts)).font(META).color(muted())));
+    let mut body = col().w_full().max_w(980.0).px(36.0).pt(30.0).pb(40.0).child(hero).child(el().h(20.0)).child(tiles);
+    if !needs.is_empty() {
+        let cards = needs.iter().map(|x| {
+            let id = x.id.clone();
+            row()
+                .key(format!("needs-{}", x.id))
+                .w_full()
+                .gap(12.0)
+                .items_start()
+                .px(16.0)
+                .py(14.0)
+                .radius(14.0)
+                .linear_gradient(135.0, [(0.0, attention().alpha(0.12)), (1.0, attention().alpha(0.03))])
+                .border(1.0, attention().alpha(0.28))
+                .press_scale(0.99)
+                .on_press(move |s: &mut App| select(s, &id))
+                .child(avatar_with_state(&x.title(), State::NeedsYou, 30.0))
+                .child(col().grow(1.0).min_w(0.0).gap(4.0).child(text(x.title()).font(BODY_BOLD).color(theme::text())).child(text(x.summary()).font(META).color(muted()).wrap().max_lines(3)))
+                .child(icon(&icons::CHEVRON_RIGHT, 14.0).color(attention()))
+        });
+        body = body.child(section("Needs your attention", &icons::HAND, col().w_full().gap(8.0).children(cards)));
+    }
+    if !working.is_empty() {
+        body = body.child(section("Working now", &icons::BOLT, col().w_full().padding(6.0).radius(16.0).fill(Color::WHITE.alpha(0.025)).border(1.0, line()).children(working.iter().map(|x| session_row(s, x)))));
+    }
+    match board {
         Some(rows) => {
-            for (title, states) in [("In review", &["in_review"][..]), ("In progress", &["in_progress"][..]), ("Ready to start", &["open", "ready"][..])] {
+            for (title, glyph, states) in [("In review", &icons::PULL, &["in_review"][..]), ("In progress", &icons::ACTIVITY, &["in_progress"][..]), ("Ready to start", &icons::LAYERS, &["open", "ready"][..])] {
                 let picked: Vec<El> = rows.iter().filter(|r| states.contains(&r.state.as_str())).take(12).map(|r| board_row(s, r)).collect();
                 if !picked.is_empty() {
-                    let count = picked.len();
-                    body = body.child(section(&format!("{title} · {count}"), col().w_full().gap(6.0).children(picked)));
+                    body = body.child(section(title, glyph, col().w_full().gap(6.0).children(picked)));
                 }
             }
         }
-        None => body = body.child(section("Work", text("Reading this project's ledger…").font(META).color(t.text_secondary))),
+        None => {
+            body = body.child(section(
+                "Work",
+                &icons::LAYERS,
+                row().gap(10.0).items_center().child(el().size(7.0, 7.0).radius(4.0).fill(accent())).child(text("Reading this project's ledger…").font(META).color(faint())),
+            ))
+        }
     }
-    col().key(format!("project-page-{key}")).grow(1.0).h_full().scroll(ScrollSpec { stick_bottom: false }).child(body)
+    col().key(format!("project-page-{key}")).w_full().grow(1.0).min_h(0.0).items_center().scroll(ScrollSpec { stick_bottom: false }).child(body)
 }
 
 fn palette(s: &App, edit: &rune::TextEdit) -> El {
-    let t = tok::theme(true);
     let query = edit.text.to_lowercase();
     let matches = palette_matches(s, &query);
     let pick = s.palette_ix.min(matches.len().saturating_sub(1));
-    let input = text_input(edit, BODY)
+    let input = text_input(edit, TextStyle::new(17.0, 450.0))
         .key("palette-input")
-        .w_full()
-        .color(t.text)
-        .placeholder("Jump to a session, project or question", t.text_secondary.alpha(0.6))
+        .grow(1.0)
+        .color(theme::text())
+        .placeholder("Jump to a session, project or question", faint())
         .on_edit(|s: &mut App| s.palette.as_mut().expect("palette open"))
         .on_input_key(|s: &mut App, key: &rune::KeyEvent, _: &mut Tx| match key.key {
             rune::Key::Down => {
@@ -396,51 +659,93 @@ fn palette(s: &App, edit: &rune::TextEdit) -> El {
             }
         });
     let rows = matches.iter().enumerate().map(|(i, x)| {
-        let (g, color) = glyph(x.state(s.now));
+        let state = x.state(s.now);
         let id = x.id.clone();
         let mut r = row()
             .key(format!("pick-{}", x.id))
             .w_full()
-            .gap(10.0)
+            .gap(12.0)
+            .items_center()
             .px(12.0)
-            .py(7.0)
-            .radius(8.0)
+            .py(8.0)
+            .radius(10.0)
+            .motion(SPRING)
+            .hover(Color::WHITE.alpha(0.05))
             .on_press(move |s: &mut App| {
                 s.palette = None;
                 select(s, &id);
             })
-            .child(text(g).font(BODY).color(color))
-            .child(text(x.title()).font(BODY_BOLD).color(t.text).truncate().max_w(300.0))
-            .child(text(x.project_name()).font(META).color(t.text_secondary).truncate().max_w(160.0))
-            .child(text(x.summary()).font(META).color(t.text_secondary.alpha(0.7)).truncate().grow(1.0));
+            .child(avatar_with_state(&x.title(), state, 28.0))
+            .child(
+                col()
+                    .grow(1.0)
+                    .min_w(0.0)
+                    .gap(1.0)
+                    .child(row().gap(8.0).items_center().child(text(x.title()).font(BODY_BOLD).color(theme::text()).truncate().max_w(320.0)).child(text(x.project_name()).font(META).color(faint()).truncate().max_w(160.0)))
+                    .child(text(x.summary()).font(META).color(muted()).truncate()),
+            );
         if i == pick {
-            r = r.fill(accent().alpha(0.18));
+            r = r.fill(accent().alpha(0.20)).border(1.0, accent().alpha(0.35)).child(keys(&["↵"]));
         }
         r
     });
-    col()
-        .w(640.0)
-        .mt(70.0)
-        .px(10.0)
-        .py(10.0)
-        .gap(4.0)
-        .radius(14.0)
-        .fill(t.card)
-        .border(1.0, t.card_border)
-        .child(col().w_full().px(8.0).py(6.0).child(input))
-        .child(col().w_full().h(1.0).fill(t.separator))
-        .children(rows)
+    let footer = row()
+        .w_full()
+        .gap(14.0)
+        .items_center()
+        .px(14.0)
+        .py(9.0)
+        .border_sides([1.0, 0.0, 0.0, 0.0], line())
+        .child(row().gap(5.0).items_center().child(keys(&["↑", "↓"])).child(text("move").font(META).color(faint())))
+        .child(row().gap(5.0).items_center().child(keys(&["↵"])).child(text("open").font(META).color(faint())))
+        .child(row().gap(5.0).items_center().child(keys(&["esc"])).child(text("close").font(META).color(faint())))
+        .child(spacer())
+        .child(text(format!("{} sessions", s.palette_order.len())).font(META).color(faint()));
+    let card_el = col()
+        .w(660.0)
+        .radius(20.0)
+        .backdrop_blur(30.0)
+        .fill(card().alpha(0.80))
+        .border(1.0, Color::WHITE.alpha(0.12))
+        .shadow(24.0, 60.0, Color::BLACK.alpha(0.55))
+        .transition(Transition::scale(0.96))
+        .child(row().w_full().gap(12.0).items_center().px(18.0).py(15.0).child(icon(&icons::SEARCH, 18.0).color(muted())).child(input))
+        .child(el().w_full().h(1.0).fill(line()))
+        .child(col().w_full().padding(6.0).gap(2.0).children(rows))
+        .child(footer);
+    col().absolute(0.0, 0.0).w_full().h_full().items_center().pt(96.0).backdrop_blur(4.0).fill(Color::BLACK.alpha(0.32)).transition(Transition::opacity()).child(card_el)
 }
 
 pub fn view(s: &App, _: &mut Cx<App>) -> El {
-    let t = tok::theme(true);
     let main = match &s.screen {
         Screen::Session => session_screen(s),
         Screen::Project(key) => project_screen(s, key),
     };
-    let body = row().w_full().h_full().fill(t.bg).child(sidebar(s)).child(col().w(1.0).h_full().fill(t.separator)).child(main);
-    match &s.palette {
-        Some(edit) => col().w_full().h_full().fill(t.bg).child(row().w_full().h_full().child(col().w_full().h_full().items_center().fill(t.bg.alpha(0.6)).child(palette(s, edit)))),
-        None => body,
+    let content = col()
+        .grow(1.0)
+        .h_full()
+        .min_w(0.0)
+        .my(8.0)
+        .radius(16.0)
+        .continuous_corners()
+        .fill(card())
+        .border(1.0, Color::WHITE.alpha(0.08))
+        .shadow(10.0, 40.0, Color::BLACK.alpha(0.40))
+        .clip_rounded(16.0)
+        .child(main);
+    let mut body = row().w_full().h_full().child(sidebar(s)).child(content);
+    match (&s.screen, s.selected.as_deref().and_then(|id| session(s, id))) {
+        (Screen::Session, Some(x)) => body = body.child(rail(s, x)),
+        _ => body = body.child(el().w(8.0)),
     }
+    let mut root = col()
+        .w_full()
+        .h_full()
+        .child(el().absolute(0.0, 0.0).w_full().h_full().system_material(SystemMaterial::Glass).fill(theme::card_deep()))
+        .child(el().absolute(0.0, 0.0).w_full().h_full().fill(theme::glass_tint()))
+        .child(body);
+    if let Some(edit) = &s.palette {
+        root = root.child(palette(s, edit));
+    }
+    root
 }
