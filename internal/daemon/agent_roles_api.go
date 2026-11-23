@@ -22,7 +22,7 @@ import (
 var roleNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}$`)
 
 func (r resolvedRole) view() daemonapi.AgentRoleView {
-	view := daemonapi.AgentRoleView{Name: r.Name, BuiltIn: r.BuiltIn, Edited: r.Edited, Description: r.Description, Reach: r.Reach, Decisions: map[string]string{}, EffectiveDefaults: map[string]string{}, Definition: r.Role.Normalized(), AllTools: r.Tools == nil, Depth: r.DepthLimit(), Running: r.RunningLimit()}
+	view := daemonapi.AgentRoleView{Name: r.Name, BuiltIn: r.BuiltIn, Edited: r.Edited, Description: r.Description, Reach: r.Reach, Decisions: map[string]string{}, EffectiveDefaults: map[string]string{}, Definition: r.Role.Normalized(), AllTools: r.Tools == nil, Ledgers: []string{}, AllLedgers: r.AllLedgers(), Depth: r.DepthLimit(), Running: r.RunningLimit()}
 	for _, action := range agentroles.Actions {
 		view.Decisions[action.Name] = r.Decision(action.Name)
 		view.EffectiveDefaults[action.Name] = r.DefaultDecision(action)
@@ -32,7 +32,34 @@ func (r resolvedRole) view() daemonapi.AgentRoleView {
 			view.Tools = append(view.Tools, tool.Name)
 		}
 	}
+	if !view.AllLedgers {
+		view.Ledgers = append(view.Ledgers, r.Role.Ledgers...)
+	}
 	return view
+}
+
+func (d *Daemon) agentIdentityRoles() ([]daemonapi.AgentIdentityRoleView, error) {
+	identities, err := d.Registry.AgentIdentities()
+	if err != nil {
+		return nil, err
+	}
+	remotes, err := d.Registry.RemoteIdentities()
+	if err != nil {
+		return nil, err
+	}
+	remote := map[string]bool{}
+	for _, identity := range remotes {
+		remote[identity.Name] = true
+	}
+	views := make([]daemonapi.AgentIdentityRoleView, 0, len(identities))
+	for _, identity := range identities {
+		record, err := d.Registry.Caller(identity.SessionID)
+		if err != nil {
+			return nil, fmt.Errorf("read @%s: %w", identity.Name, err)
+		}
+		views = append(views, daemonapi.AgentIdentityRoleView{Name: identity.Name, Role: d.callerRole(record, remote[identity.Name]).Name})
+	}
+	return views, nil
 }
 
 func (d *Daemon) agentRolesView() (daemonapi.AgentRolesView, error) {
@@ -59,6 +86,9 @@ func (d *Daemon) agentRolesView() (daemonapi.AgentRolesView, error) {
 	}
 	for _, tool := range agenttools.Tools {
 		view.Tools = append(view.Tools, tool.Name)
+	}
+	if view.Identities, err = d.agentIdentityRoles(); err != nil {
+		return daemonapi.AgentRolesView{}, err
 	}
 	return view, nil
 }
