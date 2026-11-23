@@ -96,7 +96,7 @@ func (d *Daemon) roleToolList(next mcp.MethodHandler) mcp.MethodHandler {
 				return nil, err
 			}
 		}
-		if caller == nil || caller.role == nil || caller.role.Tools == nil {
+		if caller == nil || caller.role == nil {
 			return result, nil
 		}
 		seen := make([]*mcp.Tool, 0, len(list.Tools))
@@ -193,7 +193,7 @@ func callMCPTool[In any](d *Daemon, ctx context.Context, caller *mcpCaller, tool
 		refusal := &mcpRefusal{Code: "not_for_extensions", Message: tool + " belongs to agent sessions; extensions cannot call it."}
 		return mcpRefused(refusal), refusal, nil
 	}
-	if !caller.role.Sees(tool) {
+	if !caller.role.Lists(tool) {
 		refusal := &mcpRefusal{Code: "capability_missing", Message: tool + " is not among the tools your role, " + caller.role.Name + ", sees.", Detail: map[string]any{"rule": "role_tools", "role": caller.role.Name}}
 		return mcpRefused(refusal), refusal, nil
 	}

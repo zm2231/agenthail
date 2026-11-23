@@ -62,6 +62,40 @@ func (d *Daemon) agentIdentityRoles() ([]daemonapi.AgentIdentityRoleView, error)
 	return views, nil
 }
 
+// explainAgentRole resolves an agent identity by name first, as a remote
+// caller reaching it would, then a session by alias or id.
+func (d *Daemon) explainAgentRole(target string) (daemonapi.AgentRoleExplanation, error) {
+	name := strings.TrimPrefix(target, "@")
+	identities, err := d.Registry.AgentIdentities()
+	if err != nil {
+		return daemonapi.AgentRoleExplanation{}, err
+	}
+	for _, identity := range identities {
+		if identity.Name != name {
+			continue
+		}
+		record, err := d.Registry.Caller(identity.SessionID)
+		if err != nil {
+			return daemonapi.AgentRoleExplanation{}, fmt.Errorf("read @%s: %w", name, err)
+		}
+		_, remoteErr := d.Registry.RemoteIdentityNamed(name)
+		return explanation("@"+name, d.callerRole(record, remoteErr == nil)), nil
+	}
+	id, err := d.Registry.ResolveTarget(target)
+	if err != nil {
+		return daemonapi.AgentRoleExplanation{}, fmt.Errorf("no session or agent identity is named %s", target)
+	}
+	record, err := d.Registry.Caller(id)
+	if err != nil {
+		return daemonapi.AgentRoleExplanation{}, fmt.Errorf("read %s: %w", target, err)
+	}
+	return explanation(id, d.callerRole(record, false)), nil
+}
+
+func explanation(target string, role resolvedRole) daemonapi.AgentRoleExplanation {
+	return daemonapi.AgentRoleExplanation{Target: target, Role: role.view(), Source: role.Source, Replaces: role.Replaces}
+}
+
 func (d *Daemon) agentRolesView() (daemonapi.AgentRolesView, error) {
 	roles, err := d.agentRoles()
 	if err != nil {
@@ -109,6 +143,15 @@ func (d *Daemon) agentRolesHandler(w http.ResponseWriter, r *http.Request) {
 func (d *Daemon) serveAgentRoles(w http.ResponseWriter, r *http.Request, actor string) {
 	switch r.Method {
 	case http.MethodGet:
+		if target := strings.TrimSpace(r.URL.Query().Get("explain")); target != "" {
+			explained, err := d.explainAgentRole(target)
+			if err != nil {
+				writeAPIError(w, http.StatusNotFound, "not_found", err.Error())
+				return
+			}
+			writeDashboardJSON(w, http.StatusOK, explained)
+			return
+		}
 	case http.MethodPost:
 		var request daemonapi.AgentRoleRequest
 		if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&request); err != nil {

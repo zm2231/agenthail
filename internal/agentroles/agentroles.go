@@ -44,8 +44,8 @@ const (
 const LedgersAll = "all"
 
 // Role holds only the decisions that differ from each action's default for
-// the role's reach. Tools null means every agenthail tool, and an empty list
-// none; a limit of 0 is the default. Ledgers names the projects whose ledgers
+// the role's reach. Tools null means every agenthail tool the role may use,
+// and an empty list none; a limit of 0 is the default. Ledgers names the projects whose ledgers
 // the role reads and writes besides its own, by project id or LedgersAll;
 // null is the default for its reach, every project for reach all and none
 // for the others.
@@ -198,7 +198,29 @@ func (r Role) RunningLimit() int {
 	return r.Running
 }
 
+// toolActions names the tools whose every use is one action, so a role that
+// leaves that action to the person does not see the tool unless it lists it.
+var toolActions = map[string]string{
+	"agenthail_coordinator": "coordinator-any",
+	"agenthail_brief":       "brief",
+	"agenthail_history":     "history-read",
+	"agenthail_queue":       "queue-any",
+	"agenthail_relay":       "relay-any",
+	"agenthail_channel":     "channel-any",
+}
+
 func (r Role) Sees(tool string) bool {
+	if r.Tools != nil {
+		return slices.Contains(r.Tools, tool)
+	}
+	action, gated := toolActions[tool]
+	return !gated || r.Decision(action) != Ask
+}
+
+// Lists is whether the person left the tool on the role's list. A tool only
+// hidden by a decision stays callable, so its own check refuses it after a
+// retried write has replayed.
+func (r Role) Lists(tool string) bool {
 	return r.Tools == nil || slices.Contains(r.Tools, tool)
 }
 
@@ -248,8 +270,9 @@ func (r Role) Validate() error {
 	return nil
 }
 
-// Normalized drops decisions equal to the role's defaults and a tool list
-// naming every tool, so a stored role holds only what the person changed.
+// Normalized drops decisions equal to the role's defaults, so a stored role
+// holds only what the person changed. A tool list naming every tool stays a
+// list: unlike null, it shows the tools the role's decisions would hide.
 func (r Role) Normalized() Role {
 	actions := map[string]string{}
 	for name, decision := range r.Actions {
@@ -266,9 +289,6 @@ func (r Role) Normalized() Role {
 		tools := slices.Clone(r.Tools)
 		sort.Strings(tools)
 		r.Tools = slices.Compact(tools)
-		if len(r.Tools) == len(agenttools.Tools) {
-			r.Tools = nil
-		}
 	}
 	if r.Ledgers != nil {
 		ledgers := slices.Clone(r.Ledgers)

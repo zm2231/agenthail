@@ -48,6 +48,10 @@ func (r *resolvedRole) Sees(tool string) bool {
 	return r == nil || r.Role.Sees(tool)
 }
 
+func (r *resolvedRole) Lists(tool string) bool {
+	return r == nil || r.Role.Lists(tool)
+}
+
 func (r *resolvedRole) ReachesLedger(projectID string) bool {
 	return r != nil && r.Role.ReachesLedger(projectID)
 }

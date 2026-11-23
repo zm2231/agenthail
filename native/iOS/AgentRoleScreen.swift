@@ -63,8 +63,10 @@ struct IOSAgentRoleScreen: View {
             }
             .disabled(!store.editable)
             Section("Agenthail tools") {
-                Toggle("Every tool", isOn: Binding(get: { current.allTools }, set: { binding.wrappedValue.setAllTools($0, every: view.tools) }))
-                if !current.allTools {
+                Toggle("Default tools", isOn: Binding(get: { current.defaultTools }, set: { binding.wrappedValue.setDefaultTools($0, seen: role.tools ?? view.tools) }))
+                if current.defaultTools {
+                    Text(AgentRoleFacts.defaultToolsHint).font(.footnote).foregroundStyle(.secondary)
+                } else {
                     ForEach(view.tools, id: \.self) { tool in
                         Toggle(tool, isOn: Binding(get: { current.sees(tool) }, set: { binding.wrappedValue.setTool(tool, shown: $0, every: view.tools) }))
                             .font(.callout.monospaced())

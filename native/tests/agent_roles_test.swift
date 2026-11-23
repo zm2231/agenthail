@@ -48,11 +48,13 @@ struct AgentRolesTest {
         draft.depth = AgentRoleFacts.defaultDepth
         check(draft.definition.depth == nil, "a limit at its default stores none")
         draft.setTool("agenthail_send", shown: true, every: decoded.tools)
-        check(draft.allTools && draft.definition.tools == nil, "showing the last hidden tool is every tool")
+        check(!draft.defaultTools && draft.definition.tools == decoded.tools, "showing the last hidden tool lists every tool, which differs from the default")
         draft.setTool("agenthail_read", shown: false, every: decoded.tools)
         check(draft.definition.tools == ["agenthail_send"] && !draft.sees("agenthail_read"), "hiding a tool lists the rest")
-        draft.setAllTools(false, every: decoded.tools)
-        check(draft.definition.tools == decoded.tools, "turning off every tool starts from the full list")
+        draft.setDefaultTools(true, seen: reviewer.tools ?? decoded.tools)
+        check(draft.defaultTools && draft.definition.tools == nil, "default tools stores no list")
+        draft.setDefaultTools(false, seen: worker.tools ?? decoded.tools)
+        check(draft.definition.tools == worker.tools, "leaving the default starts from the tools the role sees now")
 
         let put = try JSONSerialization.jsonObject(with: JSONEncoder().encode(draft.request)) as! [String: Any]
         let role = put["role"] as! [String: Any]
