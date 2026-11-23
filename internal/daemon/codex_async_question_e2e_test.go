@@ -262,6 +262,20 @@ func TestACodexQuestionAnsweredByWhatThePersonTypesInCodexLeavesNeedsYou(t *test
 	})
 }
 
+func TestACodexQuestionPastTheItemsReadIsSettledByWhatThePersonTypedSince(t *testing.T) {
+	q := newCodexQuestionHarness(t)
+	id := q.create(t, "Plan the notes command")
+	q.items.set(id, recordedQuestionItem())
+	q.lifecycle.Daemon().CompleteTurn(id, recordedQuestionTitle)
+	askID := q.h.awaitQuestionDecision(t, id).Requests[0].ID
+
+	q.items.set(id, userMessageItem("typed", "Use the filename."))
+	testkit.Eventually(t, "the question older than the items read to leave Needs you", 10*time.Second, func() bool {
+		ask, found, err := q.store.Ask(askID)
+		return err == nil && found && ask.State == registry.AskWithdrawn
+	})
+}
+
 func TestACodexQuestionAnsweredInPartInCodexStaysOpenUntilEveryQuestionIs(t *testing.T) {
 	q := newCodexQuestionHarness(t)
 	id := q.create(t, "Plan the storage move")
