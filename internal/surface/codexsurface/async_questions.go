@@ -59,8 +59,10 @@ const codexQuestionWindow = 100
 
 // codexQuestions reads the thread's newest items, across turns: the model
 // may ask and keep working. A reply envelope answers the questions it names,
-// one index at a time as Codex's own clients answer them; any other message
-// from the person answers every question asked before it.
+// one index at a time as Codex's own clients answer them. Any other message
+// from the person answers every question asked in an earlier turn: Codex
+// takes the turn it starts as the answer. A steer into the turn that asked
+// is about something else and answers nothing.
 func codexQuestions(ctx context.Context, conn codexClient, threadID string) (*surface.ProviderQuestions, error) {
 	response, err := conn.Request(ctx, "thread/items/list", map[string]any{
 		"threadId":      threadID,
@@ -74,15 +76,19 @@ func codexQuestions(ctx context.Context, conn codexClient, threadID string) (*su
 	entries, _ := result["data"].([]any)
 	found := &surface.ProviderQuestions{}
 	replied := map[string]codexReplied{}
+	var typedIn []string
+	oldestTurn := ""
 	for _, raw := range entries {
 		entry, _ := raw.(map[string]any)
 		item, _ := entry["item"].(map[string]any)
+		turn := transcript.String(entry, "turnId")
+		oldestTurn = turn
 		switch item["type"] {
 		case "userMessage":
 			text := codexItemText(item)
 			replies, envelope := codexReplies(text)
-			if !envelope && !codexFromAnotherSender(text) {
-				found.Superseded = true
+			if !envelope && !codexFromAnotherSender(text) && turn != "" {
+				typedIn = append(typedIn, turn)
 			}
 			for itemID, reply := range replies {
 				replied[itemID] = replied[itemID].with(reply)
@@ -92,15 +98,25 @@ func codexQuestions(ctx context.Context, conn codexClient, threadID string) (*su
 			if !ok {
 				continue
 			}
-			if found.Superseded || replied[transcript.String(item, "id")].covers(len(question.Questions)) {
+			if codexTypedAfterTurn(typedIn, turn) || replied[transcript.String(item, "id")].covers(len(question.Questions)) {
 				found.Answered = append(found.Answered, question.Ref)
 				continue
 			}
 			found.Open = append(found.Open, question)
 		}
 	}
+	found.Superseded = len(entries) == codexQuestionWindow && codexTypedAfterTurn(typedIn, oldestTurn)
 	slices.Reverse(found.Open)
 	return found, nil
+}
+
+// codexTypedAfterTurn reports whether the person typed in a turn other than
+// turn; read newest first, every such turn came after it.
+func codexTypedAfterTurn(typedIn []string, turn string) bool {
+	if turn == "" {
+		return false
+	}
+	return slices.ContainsFunc(typedIn, func(typed string) bool { return typed != turn })
 }
 
 // codexFromAnotherSender reports a message Agenthail labeled as another

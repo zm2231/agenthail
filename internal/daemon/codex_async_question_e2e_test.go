@@ -79,12 +79,19 @@ type codexThreadItems struct {
 	entries  []any
 }
 
-func (i *codexThreadItems) set(threadID string, newestFirst ...map[string]any) {
+type threadItem struct {
+	turn string
+	item map[string]any
+}
+
+func inTurn(turn string, item map[string]any) threadItem { return threadItem{turn: turn, item: item} }
+
+func (i *codexThreadItems) set(threadID string, newestFirst ...threadItem) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	i.threadID, i.entries = threadID, nil
-	for _, item := range newestFirst {
-		i.entries = append(i.entries, map[string]any{"turnId": "turn-1", "item": item})
+	for _, entry := range newestFirst {
+		i.entries = append(i.entries, map[string]any{"turnId": entry.turn, "item": entry.item})
 	}
 }
 
@@ -214,7 +221,7 @@ func (q codexQuestionHarness) respond(t *testing.T, sessionID string, body map[s
 func TestACodexAsyncQuestionWaitsOnThePersonAndItsAnswerReachesCodexAsAReply(t *testing.T) {
 	q := newCodexQuestionHarness(t)
 	id := q.create(t, "Plan the notes command")
-	q.items.set(id, recordedQuestionItem())
+	q.items.set(id, inTurn("turn-1", recordedQuestionItem()))
 	q.lifecycle.Daemon().CompleteTurn(id, recordedQuestionTitle)
 
 	card := q.h.awaitQuestionDecision(t, id)
@@ -238,20 +245,21 @@ func TestACodexAsyncQuestionWaitsOnThePersonAndItsAnswerReachesCodexAsAReply(t *
 	testkit.Eventually(t, "the decision to leave the feed", 10*time.Second, func() bool { return len(q.h.questionDecisions(id)) == 0 })
 }
 
-func TestACodexQuestionAnsweredByWhatThePersonTypesInCodexLeavesNeedsYou(t *testing.T) {
+func TestACodexQuestionIsSettledByTheTurnThePersonStartsAfterItButNotByASteer(t *testing.T) {
 	q := newCodexQuestionHarness(t)
 	id := q.create(t, "Plan the notes command")
-	q.items.set(id, recordedQuestionItem())
+	asked := inTurn("turn-1", recordedQuestionItem())
+	q.items.set(id, asked)
 	q.lifecycle.Daemon().CompleteTurn(id, recordedQuestionTitle)
 	askID := q.h.awaitQuestionDecision(t, id).Requests[0].ID
 
-	q.items.set(id, userMessageItem("notice", "[agenthail] Your message to @docs was delivered."), recordedQuestionItem())
+	q.items.set(id, inTurn("turn-2", userMessageItem("notice", "[agenthail] Your message to @docs was delivered.")), inTurn("turn-1", userMessageItem("steer", "Also keep the README short.")), asked)
 	time.Sleep(300 * time.Millisecond)
 	if ask, _, _ := q.store.Ask(askID); ask.State != registry.AskOpen {
-		t.Fatalf("an Agenthail notice settled the person's question: %s", ask.State)
+		t.Fatalf("a steer into the asking turn or an Agenthail notice settled the person's question: %s", ask.State)
 	}
 
-	q.items.set(id, userMessageItem("typed", "Option 1: use the filename, as you recommended."), recordedQuestionItem())
+	q.items.set(id, inTurn("turn-3", userMessageItem("typed", "Option 1: use the filename, as you recommended.")), inTurn("turn-1", userMessageItem("steer", "Also keep the README short.")), asked)
 	testkit.Eventually(t, "the question the person answered in Codex to leave Needs you", 10*time.Second, func() bool {
 		ask, found, err := q.store.Ask(askID)
 		if err != nil || !found || ask.State != registry.AskWithdrawn || len(q.h.questionDecisions(id)) != 0 {
@@ -262,14 +270,24 @@ func TestACodexQuestionAnsweredByWhatThePersonTypesInCodexLeavesNeedsYou(t *test
 	})
 }
 
-func TestACodexQuestionPastTheItemsReadIsSettledByWhatThePersonTypedSince(t *testing.T) {
+func TestACodexQuestionPastTheItemsReadIsSettledByATurnThePersonStartedSince(t *testing.T) {
 	q := newCodexQuestionHarness(t)
 	id := q.create(t, "Plan the notes command")
-	q.items.set(id, recordedQuestionItem())
+	q.items.set(id, inTurn("turn-1", recordedQuestionItem()))
 	q.lifecycle.Daemon().CompleteTurn(id, recordedQuestionTitle)
 	askID := q.h.awaitQuestionDecision(t, id).Requests[0].ID
 
-	q.items.set(id, userMessageItem("typed", "Use the filename."))
+	work := []threadItem{inTurn("turn-1", userMessageItem("steer", "Keep going."))}
+	for i := len(work); i < 100; i++ {
+		work = append(work, inTurn("turn-1", map[string]any{"type": "agentMessage", "id": fmt.Sprintf("work-%d", i), "text": "Working."}))
+	}
+	q.items.set(id, work...)
+	time.Sleep(300 * time.Millisecond)
+	if ask, _, _ := q.store.Ask(askID); ask.State != registry.AskOpen {
+		t.Fatalf("a steer in the turn that scrolled the question out settled it: %s", ask.State)
+	}
+
+	q.items.set(id, append([]threadItem{inTurn("turn-2", userMessageItem("typed", "Use the filename."))}, work[:99]...)...)
 	testkit.Eventually(t, "the question older than the items read to leave Needs you", 10*time.Second, func() bool {
 		ask, found, err := q.store.Ask(askID)
 		return err == nil && found && ask.State == registry.AskWithdrawn
@@ -279,19 +297,19 @@ func TestACodexQuestionPastTheItemsReadIsSettledByWhatThePersonTypedSince(t *tes
 func TestACodexQuestionAnsweredInPartInCodexStaysOpenUntilEveryQuestionIs(t *testing.T) {
 	q := newCodexQuestionHarness(t)
 	id := q.create(t, "Plan the storage move")
-	q.items.set(id, twoQuestionItem("call_q2"))
+	q.items.set(id, inTurn("turn-1", twoQuestionItem("call_q2")))
 	q.lifecycle.Daemon().CompleteTurn(id, twoQuestionDatabase)
 	askID := q.h.awaitQuestionDecision(t, id).Requests[0].ID
 
 	first := codexReplyFor("call_q2", codexAnswer{0, twoQuestionDatabase, "Postgres"})
-	q.items.set(id, userMessageItem("reply-0", first), twoQuestionItem("call_q2"))
+	q.items.set(id, inTurn("turn-1", userMessageItem("reply-0", first)), inTurn("turn-1", twoQuestionItem("call_q2")))
 	time.Sleep(300 * time.Millisecond)
 	if ask, _, _ := q.store.Ask(askID); ask.State != registry.AskOpen {
 		t.Fatalf("an answer to the first question settled both: %s", ask.State)
 	}
 
 	second := codexReplyFor("call_q2", codexAnswer{1, "What should the migration be called?", "add_notes_title"})
-	q.items.set(id, userMessageItem("reply-1", second), userMessageItem("reply-0", first), twoQuestionItem("call_q2"))
+	q.items.set(id, inTurn("turn-1", userMessageItem("reply-1", second)), inTurn("turn-1", userMessageItem("reply-0", first)), inTurn("turn-1", twoQuestionItem("call_q2")))
 	testkit.Eventually(t, "both answers to settle the question", 10*time.Second, func() bool {
 		ask, found, err := q.store.Ask(askID)
 		return err == nil && found && ask.State == registry.AskWithdrawn
@@ -301,7 +319,7 @@ func TestACodexQuestionAnsweredInPartInCodexStaysOpenUntilEveryQuestionIs(t *tes
 func TestAnswersToCodexQuestionsAskedMidTurnSteerTheRunningTurnInOneReply(t *testing.T) {
 	q := newCodexQuestionHarness(t)
 	id := q.create(t, "Plan the storage move")
-	q.items.set(id, twoQuestionItem("call_q2"))
+	q.items.set(id, inTurn("turn-1", twoQuestionItem("call_q2")))
 	q.lifecycle.Daemon().Notify("thread/status/changed", map[string]any{"threadId": id, "status": map[string]any{"type": "active", "activeFlags": []any{}}})
 	request := q.h.awaitQuestionDecision(t, id).Requests[0]
 	if len(request.Questions) != 2 || request.Questions[1].Question == longQuestionTitle {
@@ -326,7 +344,7 @@ func TestALeadsAnswerToAWorkersCodexQuestionReachesCodexAsAPlainReply(t *testing
 	q := newCodexQuestionHarness(t)
 	lead := q.create(t, "Lead the notes work")
 	worker := q.createBy(t, lead, "Plan the notes command")
-	q.items.set(worker, recordedQuestionItem())
+	q.items.set(worker, inTurn("turn-1", recordedQuestionItem()))
 	q.lifecycle.Daemon().CompleteTurn(worker, recordedQuestionTitle)
 	var askID string
 	testkit.Eventually(t, "the worker's question to reach its lead", 10*time.Second, func() bool {

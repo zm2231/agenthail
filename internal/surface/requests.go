@@ -151,8 +151,9 @@ type ProviderQuestion struct {
 
 // ProviderQuestions is what a read of a session's newest history found:
 // the questions still open, the refs of questions answered since they were
-// asked, and whether the person wrote anything that was not an answer to a
-// question, which settles every question asked before it.
+// asked, and whether the person started a turn with something that was not
+// an answer after the oldest turn read, which settles every question asked
+// before the read.
 type ProviderQuestions struct {
 	Open       []ProviderQuestion
 	Answered   []string
