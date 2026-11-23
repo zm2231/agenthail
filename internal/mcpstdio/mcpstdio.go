@@ -15,6 +15,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/zm2231/agenthail/internal/agenttools"
 )
 
 const (
@@ -30,6 +31,7 @@ var startWait = 8 * time.Second
 func Run(ctx context.Context, socket, version string, in io.ReadCloser, out io.WriteCloser) error {
 	server := mcp.NewServer(&mcp.Implementation{Name: "agenthail", Version: version}, &mcp.ServerOptions{
 		Capabilities: &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{ListChanged: true}},
+		Instructions: agenttools.ServerInstructions,
 	})
 	relay := &relay{server: server, client: mcp.NewClient(&mcp.Implementation{Name: "agenthail-stdio", Version: version}, nil), socket: socket}
 	server.AddReceivingMiddleware(relay.holdPartialTools)
