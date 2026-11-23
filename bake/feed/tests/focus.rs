@@ -169,3 +169,16 @@ fn incremental_tail_matches_full_rebuild() {
     }
     assert!(checks > 100, "checks {checks}");
 }
+
+#[test]
+fn snapshot_fixture_parses_and_classifies() {
+    let Ok(text) = std::fs::read_to_string("/Volumes/4/caches/agenthail-v2-fixtures/snapshot.json") else { return };
+    let snap: feed::catalog::Snapshot = serde_json::from_str(&text).unwrap();
+    let now = feed::catalog::parse_time("2026-11-23T23:30:00Z").unwrap();
+    let mut counts = std::collections::HashMap::new();
+    for s in snap.sessions.iter().filter(|s| s.visible(now)) {
+        *counts.entry(s.state(now)).or_insert(0) += 1;
+    }
+    println!("{counts:?} of {}", snap.sessions.len());
+    assert!(snap.sessions.len() > 10);
+}

@@ -1,4 +1,5 @@
 pub mod blocks;
+pub mod catalog;
 pub mod focus;
 pub mod item;
 pub mod source;

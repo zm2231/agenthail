@@ -1,0 +1,378 @@
+use std::time::Duration;
+
+use anyhow::{Context, Result, anyhow};
+use serde::Deserialize;
+use serde_json::Value;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Named {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub display_name: String,
+    #[serde(default)]
+    pub state: String,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Display {
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub detail: String,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Attention {
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub reason: String,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Headline {
+    #[serde(default)]
+    pub headline: String,
+    #[serde(default)]
+    pub outcome: String,
+    #[serde(default)]
+    pub at: Option<String>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Checkout {
+    #[serde(default)]
+    pub branch: Option<String>,
+    #[serde(default)]
+    pub dirty: bool,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HeldWork {
+    #[serde(default)]
+    pub item_id: String,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub state: String,
+    #[serde(default)]
+    pub project_key: String,
+    #[serde(default)]
+    pub log: Option<Value>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Plan {
+    #[serde(default)]
+    pub done: u32,
+    #[serde(default)]
+    pub total: u32,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Pr {
+    #[serde(default)]
+    pub number: u64,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub url: String,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnState {
+    #[serde(default)]
+    pub state: String,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Session {
+    pub id: String,
+    #[serde(default)]
+    pub surface: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub alias: Option<String>,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub last_active: String,
+    #[serde(default)]
+    pub open: bool,
+    #[serde(default)]
+    pub current: bool,
+    #[serde(default)]
+    pub archived: bool,
+    #[serde(default)]
+    pub display: Display,
+    #[serde(default)]
+    pub attention: Option<Attention>,
+    #[serde(default)]
+    pub turn_state: Option<TurnState>,
+    #[serde(default)]
+    pub turn_completion: Option<Headline>,
+    #[serde(default)]
+    pub end_turn: Option<Headline>,
+    #[serde(default)]
+    pub project: Option<Named>,
+    #[serde(default)]
+    pub host: Named,
+    #[serde(default)]
+    pub checkout: Checkout,
+    #[serde(default)]
+    pub held_work: Vec<HeldWork>,
+    #[serde(default)]
+    pub plan: Option<Plan>,
+    #[serde(default)]
+    pub prs: Vec<Pr>,
+    #[serde(default)]
+    pub queue_count: i64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum State {
+    NeedsYou,
+    Working,
+    Done,
+    Idle,
+}
+
+impl State {
+    pub fn label(self) -> &'static str {
+        match self {
+            State::NeedsYou => "Needs you",
+            State::Working => "Working",
+            State::Done => "Done",
+            State::Idle => "Idle",
+        }
+    }
+}
+
+pub fn parse_time(ts: &str) -> Option<OffsetDateTime> {
+    OffsetDateTime::parse(ts, &Rfc3339).ok()
+}
+
+pub fn ago(ts: &str, now: OffsetDateTime) -> String {
+    let Some(at) = parse_time(ts) else { return String::new() };
+    let seconds = (now - at).whole_seconds().max(0);
+    match seconds {
+        0..=59 => "now".into(),
+        60..=3599 => format!("{}m", seconds / 60),
+        3600..=86399 => format!("{}h", seconds / 3600),
+        _ => format!("{}d", seconds / 86400),
+    }
+}
+
+impl Session {
+    pub fn title(&self) -> String {
+        match &self.alias {
+            Some(alias) if !alias.is_empty() => format!("@{alias}"),
+            _ => self.name.clone(),
+        }
+    }
+
+    pub fn project_name(&self) -> String {
+        self.project.as_ref().map(|p| if p.display_name.is_empty() { p.name.clone() } else { p.display_name.clone() }).unwrap_or_else(|| "No project".into())
+    }
+
+    pub fn project_key(&self) -> String {
+        self.project.as_ref().map(|p| p.id.clone()).unwrap_or_default()
+    }
+
+    pub fn state(&self, now: OffsetDateTime) -> State {
+        let waiting = self.attention.is_some()
+            || self.turn_state.as_ref().is_some_and(|t| t.state == "waiting_person")
+            || matches!(self.display.kind.as_str(), "waiting_person" | "needs_you" | "ask");
+        if waiting {
+            return State::NeedsYou;
+        }
+        if self.status == "busy" || matches!(self.display.kind.as_str(), "working" | "finishing" | "starting") {
+            return State::Working;
+        }
+        let recent = parse_time(&self.last_active).is_some_and(|t| (now - t).whole_hours() < 3);
+        let finished = self.turn_completion.as_ref().or(self.end_turn.as_ref()).is_some();
+        if recent && finished { State::Done } else { State::Idle }
+    }
+
+    pub fn summary(&self) -> String {
+        if let Some(a) = &self.attention {
+            if !a.reason.is_empty() {
+                return a.reason.clone();
+            }
+        }
+        if self.status == "busy" && !self.display.detail.is_empty() {
+            return self.display.detail.clone();
+        }
+        for h in [&self.end_turn, &self.turn_completion].into_iter().flatten() {
+            if !h.headline.is_empty() {
+                return h.headline.clone();
+            }
+        }
+        self.held_work.first().map(|w| w.text.clone()).unwrap_or_else(|| self.display.label.clone())
+    }
+
+    pub fn visible(&self, now: OffsetDateTime) -> bool {
+        if self.archived {
+            return false;
+        }
+        let state = self.state(now);
+        let recent = parse_time(&self.last_active).is_some_and(|t| (now - t).whole_hours() < 24);
+        matches!(state, State::NeedsYou | State::Working) || (recent && (self.open || self.current || self.alias.is_some()))
+    }
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Snapshot {
+    #[serde(default)]
+    pub sessions: Vec<Session>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineEntry {
+    #[serde(default)]
+    pub at: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub text: Option<String>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkItem {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub state: String,
+    #[serde(default)]
+    pub priority: String,
+    #[serde(rename = "type", default)]
+    pub kind: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub acceptance: String,
+    #[serde(default)]
+    pub timeline: Vec<TimelineEntry>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardRow {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub state: String,
+    #[serde(default)]
+    pub priority: String,
+    #[serde(rename = "type", default)]
+    pub kind: String,
+}
+
+pub fn phase(state: &str) -> usize {
+    match state {
+        "open" | "ready" => 0,
+        "in_progress" => 1,
+        "in_review" => 2,
+        "done" | "closed" => 4,
+        _ => 0,
+    }
+}
+
+pub const PHASES: [&str; 5] = ["Plan", "Build", "Review", "Merge", "Done"];
+
+#[derive(Clone)]
+pub struct Client {
+    base: String,
+    token: String,
+    agent: ureq::Agent,
+}
+
+fn enc(value: &str) -> String {
+    url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
+}
+
+impl Client {
+    pub fn from_env() -> Result<Self> {
+        let base = std::env::var("AGENTHAIL_API_URL").context("AGENTHAIL_API_URL is not set")?;
+        let token = std::env::var("AGENTHAIL_API_TOKEN").context("AGENTHAIL_API_TOKEN is not set")?;
+        let agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(5)).timeout(Duration::from_secs(30)).build();
+        Ok(Self { base: base.trim_end_matches('/').into(), token, agent })
+    }
+
+    fn get(&self, path: &str) -> Result<Value> {
+        let response = self
+            .agent
+            .get(&format!("{}{path}", self.base))
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .set("Accept", "application/json")
+            .call()
+            .map_err(|e| anyhow!(e.to_string()))?;
+        Ok(response.into_json()?)
+    }
+
+    pub fn snapshot(&self) -> Result<Snapshot> {
+        Ok(serde_json::from_value(self.get("/api/v1/snapshot")?)?)
+    }
+
+    pub fn work_item(&self, project: &str, id: &str) -> Result<WorkItem> {
+        let value = self.get(&format!("/api/v1/ledger?projectKey={}&view=item&id={}", enc(project), enc(id)))?;
+        Ok(serde_json::from_value(value["item"]["item"].clone())?)
+    }
+
+    pub fn board(&self, project: &str) -> Result<Vec<BoardRow>> {
+        let mut rows = Vec::new();
+        let mut cursor: Option<String> = None;
+        for _ in 0..20 {
+            let mut path = format!("/api/v1/ledger?projectKey={}&view=work&limit=100", enc(project));
+            if let Some(c) = &cursor {
+                path.push_str(&format!("&cursor={}", enc(c)));
+            }
+            let value = self.get(&path)?;
+            let page: Vec<BoardRow> = serde_json::from_value(value["work"].clone()).unwrap_or_default();
+            rows.extend(page);
+            cursor = value["nextCursor"].as_str().filter(|c| !c.is_empty()).map(String::from);
+            if cursor.is_none() {
+                break;
+            }
+        }
+        Ok(rows)
+    }
+
+    pub fn send(&self, session: &str, message: &str) -> Result<()> {
+        let key = format!("bake-{}-{}", session, OffsetDateTime::now_utc().unix_timestamp_nanos());
+        self.agent
+            .post(&format!("{}/api/v1/actions", self.base))
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .set("Idempotency-Key", &key)
+            .send_json(serde_json::json!({"action": "send", "sessionId": session, "message": message}))
+            .map_err(|e| anyhow!(e.to_string()))?;
+        Ok(())
+    }
+}
