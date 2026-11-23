@@ -113,6 +113,7 @@ type turnCompletedNotice struct {
 	title, desktop, mobile, requestID, outcome string
 	actions                                    []surface.RequestAction
 	quiet                                      bool
+	agentStarted                               bool
 }
 
 // A turn that leaves an ask open for the person needs them; the ask was announced when it reached them, so the completion stays quiet.

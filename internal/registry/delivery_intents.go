@@ -303,6 +303,25 @@ func (r *Registry) DeliveryIntentUUIDForQueue(queueID int64) (string, error) {
 	return id, err
 }
 
+// DeliverySenders names the sender of each input the target took that a
+// delivery recorded; an input nobody sent through Agenthail is left out.
+func (r *Registry) DeliverySenders(targetSessionID string, providerKeys []string) (map[string]string, error) {
+	senders := map[string]string{}
+	for _, key := range providerKeys {
+		if key == "" {
+			continue
+		}
+		intent, found, err := deliveryIntentByProviderKey(r.read, targetSessionID, key)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			senders[key] = intent.SenderSessionID
+		}
+	}
+	return senders, nil
+}
+
 func (r *Registry) ReconcileDeliveryIntent(targetSessionID, providerKey string) (bool, error) {
 	if strings.TrimSpace(targetSessionID) == "" || strings.TrimSpace(providerKey) == "" {
 		return false, fmt.Errorf("delivery reconciliation requires target and provider key")
