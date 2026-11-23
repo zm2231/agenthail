@@ -302,10 +302,14 @@ func TestACodexQuestionAnsweredInPartInCodexStaysOpenUntilEveryQuestionIs(t *tes
 	askID := q.h.awaitQuestionDecision(t, id).Requests[0].ID
 
 	first := codexReplyFor("call_q2", codexAnswer{0, twoQuestionDatabase, "Postgres"})
-	q.items.set(id, inTurn("turn-1", userMessageItem("reply-0", first)), inTurn("turn-1", twoQuestionItem("call_q2")))
+	unread := []string{
+		strings.Replace(codexReplyFor("call_q2", codexAnswer{1, "x", "y"}), `\"call_q2\",1]`, `\"call_q2\",1.0]`, 1),
+		strings.Replace(codexReplyFor("call_q2", codexAnswer{1, "x", "y"}), `"answer":"y",`, "", 1),
+	}
+	q.items.set(id, inTurn("turn-1", userMessageItem("unread-1", unread[1])), inTurn("turn-1", userMessageItem("unread-0", unread[0])), inTurn("turn-1", userMessageItem("reply-0", first)), inTurn("turn-1", twoQuestionItem("call_q2")))
 	time.Sleep(300 * time.Millisecond)
 	if ask, _, _ := q.store.Ask(askID); ask.State != registry.AskOpen {
-		t.Fatalf("an answer to the first question settled both: %s", ask.State)
+		t.Fatalf("an answer to the first question and replies Codex does not read settled both: %s", ask.State)
 	}
 
 	second := codexReplyFor("call_q2", codexAnswer{1, "What should the migration be called?", "add_notes_title"})
