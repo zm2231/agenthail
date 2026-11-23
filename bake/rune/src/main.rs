@@ -151,7 +151,7 @@ fn first_line(text: &str, max: usize) -> String {
 }
 
 fn markdown(body: &str) -> El {
-    Markdown::new(body.to_string()).selectable(true).render(&MarkdownStyle::neutral(true))
+    Markdown::new(body.to_string()).selectable(true).render(&MarkdownStyle::neutral(true)).selection_group(false)
 }
 
 fn entry_el(entry: &Entry) -> El {
@@ -376,7 +376,8 @@ mod tests {
         let copied: String = clipboard.text().map(|t| t.as_str().to_owned()).unwrap_or_default();
         let lines = selected.lines().filter(|l| !l.trim().is_empty()).count();
         println!("selection: {} chars, {} lines, copied {} chars; starts {:?}", selected.len(), lines, copied.len(), selected.chars().take(60).collect::<String>());
-        assert!(lines >= 1);
+        std::fs::write("/Volumes/4/caches/agenthail-v2-fixtures/rune-selection.txt", &selected).ok();
+        assert!(lines >= 3);
         assert_eq!(copied, selected);
     }
 }
