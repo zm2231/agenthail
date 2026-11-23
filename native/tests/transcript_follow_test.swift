@@ -31,6 +31,7 @@ final class Feed: ObservableObject {
 @MainActor var appears: [String: Int] = [:]
 @MainActor var shownOpen: [String: Bool] = [:]
 @MainActor var rowTops: [String: CGFloat] = [:]
+@MainActor var rowHeights: [String: CGFloat] = [:]
 @MainActor var seenGeometry: [String] = []
 @MainActor var reported: (offset: CGFloat, content: CGFloat)?
 @MainActor var live: Set<String> = []
@@ -146,6 +147,7 @@ struct RowView: View {
         Text(String(repeating: "transcript line\n", count: row.lines + (expanded ? 30 : 0)) + row.id)
             .frame(maxWidth: .infinity, alignment: .leading)
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(TranscriptRows.contentSpace)).minY } action: { rowTops[row.id] = $0 }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowHeights[row.id] = $0 }
             .onAppear {
                 appears[row.id, default: 0] += 1
                 live.insert(row.id)
@@ -968,11 +970,16 @@ struct TranscriptFollowTest {
         var worst: CGFloat = 0
         func grow(_ lines: Int) {
             let last = feed.rows.count - 1
-            let before = scroll.documentView?.frame.height ?? 0
-            feed.rows[last] = Row(id: feed.rows[last].id, lines: feed.rows[last].lines + lines)
-            // The lazy stack can re-estimate unbuilt rows in the same layout, so the document may end up shorter; any change means it was laid out.
-            waitUntil { (scroll.documentView?.frame.height ?? 0) != before }
-            expect((scroll.documentView?.frame.height ?? 0) != before, "the last row's growth was laid out, document stayed \(before)")
+            let id = feed.rows[last].id
+            let before = rowHeights[id]
+            feed.rows[last] = Row(id: id, lines: feed.rows[last].lines + lines)
+            // The lazy stack can re-estimate unbuilt rows in the same layout by as much as the row grew, so only the row's own height shows the growth was laid out.
+            func laidOut() -> Bool {
+                guard let height = rowHeights[id], let before, height > before, let content = reported?.content else { return false }
+                return scroll.documentView?.frame.height == content
+            }
+            waitUntil(laidOut)
+            expect(laidOut(), "the last row's growth was laid out and reached the document, \(id) \(String(describing: before)) became \(String(describing: rowHeights[id])), document \(scroll.documentView?.frame.height ?? 0) reported \(String(describing: reported?.content))")
             spin(0.016)
         }
         for growth in 0..<30 {
