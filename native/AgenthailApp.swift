@@ -665,6 +665,7 @@ private enum AgenthailMain {
             return
         }
         Task.detached(priority: .utility) { SentFileCache.standard.prune() }
+        PlainTextInput.install()
         withExtendedLifetime(instanceLock) {
             AgenthailMenuBarApp.main()
         }

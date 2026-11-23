@@ -96,6 +96,7 @@ final class ComposerUITextView: UITextView {
         view.backgroundColor = .clear
         view.textContainerInset = .zero
         view.textContainer.lineFragmentPadding = 0
+        PlainTextInput.configure(view)
         view.placeholderLabel.font = view.font
         view.placeholderLabel.adjustsFontForContentSizeCategory = true
         view.placeholderLabel.textColor = UIColor { $0.userInterfaceStyle == .light ? .secondaryLabel : .placeholderText }
@@ -252,3 +253,49 @@ final class IOSComposerEditor {
         textView.selectedRange = NSRange(location: min(caret, (textView.text as NSString).length), length: 0)
     }
 }
+
+// Prompts carry code and commands, so text sent to an agent must arrive as
+// typed. SwiftUI fields give no access to their text views, so each one is
+// made plain when it starts editing; the keyboard reloads to take the traits.
+@MainActor
+final class PlainTextInput: NSObject {
+    private static let shared = PlainTextInput()
+
+    static func install() {
+        let center = NotificationCenter.default
+        center.removeObserver(shared)
+        center.addObserver(shared, selector: #selector(beganEditing(_:)), name: UITextView.textDidBeginEditingNotification, object: nil)
+        center.addObserver(shared, selector: #selector(beganEditing(_:)), name: UITextField.textDidBeginEditingNotification, object: nil)
+    }
+
+    static func isPlain(_ input: some PlainTextTraits) -> Bool {
+        input.autocorrectionType == .no && input.smartDashesType == .no && input.smartQuotesType == .no
+            && input.smartInsertDeleteType == .no && input.inlinePredictionType == .no
+    }
+
+    static func configure(_ input: some PlainTextTraits) {
+        input.autocorrectionType = .no
+        input.smartDashesType = .no
+        input.smartQuotesType = .no
+        input.smartInsertDeleteType = .no
+        input.inlinePredictionType = .no
+    }
+
+    @objc private func beganEditing(_ note: Notification) {
+        guard let input = note.object as? any PlainTextTraits, !Self.isPlain(input) else { return }
+        Self.configure(input)
+        input.reloadInputViews()
+    }
+}
+
+@MainActor
+protocol PlainTextTraits: UIResponder {
+    var autocorrectionType: UITextAutocorrectionType { get set }
+    var smartDashesType: UITextSmartDashesType { get set }
+    var smartQuotesType: UITextSmartQuotesType { get set }
+    var smartInsertDeleteType: UITextSmartInsertDeleteType { get set }
+    var inlinePredictionType: UITextInlinePredictionType { get set }
+}
+
+extension UITextView: PlainTextTraits {}
+extension UITextField: PlainTextTraits {}
