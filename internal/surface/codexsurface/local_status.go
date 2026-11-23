@@ -19,14 +19,18 @@ func (c *Codex) reconcileLocalStatus(ctx context.Context, session *surface.Sessi
 	if source == "" {
 		return
 	}
-	path, info, err := statReadableRollout(source)
+	info, err := os.Stat(source)
 	if err != nil {
 		session.Transcript = ""
 		return
 	}
 	session.Transcript = source
 	session.HasLocal = true
-	c.applyCodexTranscriptStatus(ctx, session, path, info)
+	if codexCompressed(source) {
+		session.SettledTranscript = true
+		return
+	}
+	c.applyCodexTranscriptStatus(ctx, session, source, info)
 }
 
 // applyCodexTranscriptStatus lets the transcript's latest task lifecycle
@@ -68,9 +72,12 @@ func (c *Codex) LocalStatus(ctx context.Context, session surface.Session) (surfa
 	if session.Transcript == "" {
 		return session, nil
 	}
-	path, info, err := c.home.statTranscript(&session)
+	path, info, err := c.home.statRollout(&session)
 	if err != nil {
 		return session, err
+	}
+	if codexCompressed(path) {
+		return session, nil
 	}
 	c.applyCodexTranscriptStatus(ctx, &session, path, info)
 	return session, nil

@@ -16,7 +16,8 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 	if source == "" {
 		return fmt.Errorf("Codex local transcript is unavailable")
 	}
-	path, fileInfo, err := statReadableRollout(source)
+	path, fileInfo, release, err := statReadableRollout(source)
+	defer func() { release() }()
 	if err != nil {
 		return fmt.Errorf("Codex local transcript is unavailable: %v: %w", err, surface.ErrTranscriptUnavailable)
 	}
@@ -50,7 +51,9 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 	currentTurnID := session.CodexCurrentTurnID
 	for first := true; first || time.Now().Before(deadline); first = false {
 		currentSource := c.home.rolloutFile(session)
-		currentPath, currentInfo, statErr := statReadableRollout(currentSource)
+		currentPath, currentInfo, currentRelease, statErr := statReadableRollout(currentSource)
+		release()
+		release = currentRelease
 		if statErr != nil || currentInfo == nil {
 			return fmt.Errorf("Codex transcript changed during stream: %w", surface.ErrTranscriptUnavailable)
 		}

@@ -55,7 +55,8 @@ func latestRPCReply(session *surface.Session, exchanges []surface.Exchange, thre
 // ReadSession uses the local transcript for Desktop content and the managed app-server for
 // managed exchanges; timeline items always come from the local transcript.
 func (c *Codex) ReadSession(ctx context.Context, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
-	path, info, err := c.home.statTranscript(session)
+	path, info, release, err := c.home.statTranscript(session)
+	defer release()
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}

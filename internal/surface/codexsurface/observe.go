@@ -46,8 +46,8 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 	observation = dropUnconfirmedTurn(thread, observation)
 	observation.Unheld = unheld && observation.Status != surface.StatusBusy
 	observation.WaitingOn = c.preciseWait(ctx, conn, sess, observation.WaitingOn)
-	path, info, err := c.home.statTranscript(sess)
-	if err == nil {
+	path, info, err := c.home.statRollout(sess)
+	if err == nil && !codexCompressed(path) {
 		observation.Plan = c.plan(ctx, path, info)
 	} else {
 		path, info = "", nil
@@ -162,8 +162,14 @@ func (c *Codex) unheld(ctx context.Context, runtimes *codexRuntimes, sess *surfa
 	} else if runtimes.managedLoaded == nil || runtimes.managedLoaded[sess.ID] {
 		return false
 	}
-	path, info, err := c.home.statTranscript(sess)
-	if err != nil || now.Sub(info.ModTime()) <= codexQuietAfter || codexTurnOpen(path, info, now) {
+	path, info, err := c.home.statRollout(sess)
+	if err != nil || now.Sub(info.ModTime()) <= codexQuietAfter {
+		return false
+	}
+	if codexCompressed(path) {
+		return true
+	}
+	if codexTurnOpen(path, info, now) {
 		return false
 	}
 	return !surface.BackgroundRunning(c.transcriptBackground(ctx, path, info))

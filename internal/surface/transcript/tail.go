@@ -33,7 +33,11 @@ func ReadFirstJSONL(path string, value any) (int64, error) {
 		return 0, err
 	}
 	defer file.Close()
-	reader := bufio.NewReaderSize(file, 64*1024)
+	return DecodeFirstJSONL(file, value)
+}
+
+func DecodeFirstJSONL(source io.Reader, value any) (int64, error) {
+	reader := bufio.NewReaderSize(source, 64*1024)
 	var line []byte
 	for {
 		part, readErr := reader.ReadSlice('\n')
@@ -165,11 +169,22 @@ func ScanAppendedJSONL(ctx context.Context, path string, offset int64, limit int
 	return scanJSONL(ctx, file, offset, limit, false, visit)
 }
 
+// ScanJSONL visits every line of a JSONL stream, the last one even without
+// its newline.
+func ScanJSONL(ctx context.Context, source io.Reader, limit int, visit func([]byte) error) error {
+	_, err := scanJSONLFrom(ctx, source, 0, limit, true, visit)
+	return err
+}
+
 func scanJSONL(ctx context.Context, file *os.File, offset int64, limit int, final bool, visit func([]byte) error) (int64, error) {
 	if _, err := file.Seek(offset, io.SeekStart); err != nil {
 		return offset, err
 	}
-	reader := bufio.NewReaderSize(file, 64*1024)
+	return scanJSONLFrom(ctx, file, offset, limit, final, visit)
+}
+
+func scanJSONLFrom(ctx context.Context, source io.Reader, offset int64, limit int, final bool, visit func([]byte) error) (int64, error) {
+	reader := bufio.NewReaderSize(source, 64*1024)
 	current := offset
 	for {
 		if err := ctx.Err(); err != nil {
