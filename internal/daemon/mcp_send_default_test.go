@@ -57,3 +57,32 @@ func TestASendWithNoModeToABusySessionTheSenderDoesNotLeadQueues(t *testing.T) {
 		t.Fatalf("an unrelated send steered: steered=%q queued=%d", fake.steered, r.QueueCount(to.ID))
 	}
 }
+
+func TestALeadsSendWithNoModeSteersItsBusyWorkerOnAPairedHostWithoutTellingThePerson(t *testing.T) {
+	h := newHostTargets(t, true)
+	person := &toldPerson{}
+	h.local.daemon.notifyDesktop = person.notify
+	lead := surface.UnrepliableSender(mustHostID(t, h.local), "local-a", "").ID
+	if err := h.remote.reg.EnsureSender(lead); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.remote.reg.RecordSessionOrigin(registry.OriginOf("remote-c", lead)); err != nil {
+		t.Fatal(err)
+	}
+	h.remote.fake.mu.Lock()
+	h.remote.fake.rejectBusy = true
+	worker := h.remote.fake.sessions["remote-c"]
+	worker.Status = surface.StatusBusy
+	h.remote.fake.sessions["remote-c"] = worker
+	h.remote.fake.mu.Unlock()
+
+	if out, refused := h.send(t, "vps::@builder", "the answer is left", nil); refused || out["notice"] != nil || !h.reached("steer:") {
+		t.Fatalf("a lead's send with no mode to its busy worker on the paired host: refused=%v out=%v delivered=%q", refused, out, h.remote.fake.delivered())
+	}
+	if out, refused := h.send(t, "vps::@builder", "later, please", map[string]any{"mode": "queue"}); refused || h.reached("steer:" + "later") {
+		t.Fatalf("a lead's queued send steered: refused=%v out=%v delivered=%q", refused, out, h.remote.fake.delivered())
+	}
+	if told := person.told(); len(told) != 0 {
+		t.Fatalf("a steer Agenthail chose told the person %q", told)
+	}
+}
