@@ -6,7 +6,7 @@ import (
 )
 
 // AskOriginsOnRows are the ask origins a session's row shows, and so the Inbox built from rows.
-var AskOriginsOnRows = []string{AskOriginAgent, AskOriginDelivery, AskOriginLedger, AskOriginApproval, AskOriginExtensionGrant}
+var AskOriginsOnRows = []string{AskOriginAgent, AskOriginQuestion, AskOriginDelivery, AskOriginLedger, AskOriginApproval, AskOriginExtensionGrant}
 
 var AskOriginsOffRows = map[string]string{
 	AskOriginPermission:      "it mirrors the provider's own wait, which the row already shows as waitingOn",

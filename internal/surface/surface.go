@@ -1065,6 +1065,9 @@ type TurnObservation struct {
 	// Unheld reports that no runtime that could run the session holds it and it has been quiet, so no turn of it is running.
 	Unheld bool         `json:"-"`
 	Reply  *ReplyResult `json:"reply,omitempty"`
+	// Questions is what the session's own question tool asked and what was
+	// answered, from its newest items; nil when they were not read.
+	Questions *ProviderQuestions `json:"-"`
 }
 
 // UsageLimitReader reads what a session's transcript alone says about its

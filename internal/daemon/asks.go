@@ -548,6 +548,15 @@ func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session
 		return actionResult{}, invalidRequest(err.Error())
 	}
 	message := composeAskAnswer(request.Questions, decision)
+	if ask.Origin == registry.AskOriginQuestion {
+		replier, ok := adapter.(surface.QuestionReplier)
+		if !ok {
+			return actionResult{}, conflict("this session's provider takes no answer to its question")
+		}
+		if message, err = replier.QuestionReply(ask.Ref, request.Questions, decision); err != nil {
+			return actionResult{}, invalidRequest(err.Error())
+		}
+	}
 	if message == "" {
 		return actionResult{}, invalidRequest("answer at least one question or write a note")
 	}

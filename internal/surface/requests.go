@@ -141,6 +141,29 @@ type Responder interface {
 	Respond(ctx context.Context, session *Session, requestID string, decision Decision) (string, error)
 }
 
+// A ProviderQuestion is a question a provider's own tool put to the person
+// without holding a request open: the provider goes on, and the answer
+// reaches it as a later message. Ref names it the same on every observation.
+type ProviderQuestion struct {
+	Ref       string
+	Questions []Question
+}
+
+// ProviderQuestions is what a read of a session's newest history found:
+// questions asked and not yet answered there, and the refs of questions
+// answered there, whichever client answered them.
+type ProviderQuestions struct {
+	Open     []ProviderQuestion
+	Answered []string
+}
+
+// QuestionReplier is implemented by an adapter whose observations report
+// ProviderQuestions. QuestionReply is the message that answers the question
+// ref names, in the form the provider reads as that answer.
+type QuestionReplier interface {
+	QuestionReply(ref string, questions []Question, decision Decision) (string, error)
+}
+
 // OpenRequestsWaiting is the wait a session's open requests make, oldest
 // first: the oldest names it, and every request keeps its own start.
 func OpenRequestsWaiting(requests []Request) *Waiting {
