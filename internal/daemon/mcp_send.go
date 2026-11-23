@@ -42,7 +42,6 @@ func (d *Daemon) mcpSend(ctx context.Context, caller *mcpCaller, input mcpSendIn
 	why := "your identity sends now by default"
 	if mode != registry.SendModeNow && d.leadsTarget(ctx, caller, input.Target) {
 		mode, why = registry.SendModeNow, "a send to a session you started or lead goes now by default"
-		ctx = withoutAgentNotice(ctx)
 	}
 	input.Mode = mode
 	if mode != registry.SendModeNow {

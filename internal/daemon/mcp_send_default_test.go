@@ -96,7 +96,7 @@ func TestALeadsSendWithNoModeSteersItsBusyWorkerOnAPairedHostWithoutTellingThePe
 
 func TestALeadsDefaultSteerItsRoleRefusesQueuesAndSaysSoOnlyToTheLead(t *testing.T) {
 	h, person := pairedBusyWorker(t)
-	setRoleDecision(t, h.local.reg, agentroles.Lead, "remote-project-control", agentroles.Ask)
+	setRoleDecision(t, h.local.reg, agentroles.Lead, "overseen-control", agentroles.Ask)
 
 	out, refused := h.send(t, "vps::@builder", "the answer is left", nil)
 	notice, _ := out["notice"].(string)
@@ -113,7 +113,7 @@ func TestALeadsDefaultSteerItsRoleRefusesQueuesAndSaysSoOnlyToTheLead(t *testing
 
 func TestARefusedDefaultSteerWithTheLongestClientRequestIDStillQueues(t *testing.T) {
 	h, _ := pairedBusyWorker(t)
-	setRoleDecision(t, h.local.reg, agentroles.Lead, "remote-project-control", agentroles.Ask)
+	setRoleDecision(t, h.local.reg, agentroles.Lead, "overseen-control", agentroles.Ask)
 	longest := strings.Repeat("k", registry.ActionReceiptKeyLimit-len("agenthail_send:"))
 
 	out, refused := callMCP(t, h.caller, "agenthail_send", map[string]any{"target": "vps::@builder", "message": "the answer is left", "clientRequestId": longest})
@@ -145,5 +145,17 @@ func TestARetriedDefaultSteerTheOwningHostRefusedReplaysItsQueuedResult(t *testi
 	}
 	if audits := mcpAudits(t, h.local.reg); len(audits) != audited || !strings.Contains(audits[len(audits)-1].Message, "answer-1") {
 		t.Fatalf("audits after the retry=%+v, want the first call's %d naming answer-1", audits, audited)
+	}
+}
+
+func TestALeadsDefaultSteerTellsThePersonWhenTheirRoleSaysNotify(t *testing.T) {
+	h, person := pairedBusyWorker(t)
+	setRoleDecision(t, h.local.reg, agentroles.Lead, "overseen-control", agentroles.Notify)
+
+	if out, refused := h.send(t, "vps::@builder", "the answer is left", nil); refused || !h.reached("steer:") {
+		t.Fatalf("a lead's default steer under notify: refused=%v out=%v delivered=%q", refused, out, h.remote.fake.delivered())
+	}
+	if told := person.told(); len(told) != 1 || !strings.Contains(told[0], "@builder on vps") {
+		t.Fatalf("the person was told %q, want one notice of the steer", told)
 	}
 }
