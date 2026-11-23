@@ -16,6 +16,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/dashconfig"
+	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -570,6 +571,9 @@ func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session
 	options := surface.SendOptions{Author: surface.AuthorPerson, PersonName: personName}
 	if by != registry.AskToPerson {
 		options = surface.SendOptions{SourceSessionID: by}
+	}
+	if ask.Origin == registry.AskOriginQuestion {
+		options.BusyDelivery = string(deliverypolicy.Steer)
 	}
 	receipt, deliveryErr := coordinator.Sender{Service: d.coordinator()}.DeliverWithOptions(ctx, adapter, session, message, "", options)
 	defer d.publishAsk(session.ID)

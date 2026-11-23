@@ -177,3 +177,37 @@ func TestACodexAsyncQuestionAnsweredInCodexLeavesNeedsYou(t *testing.T) {
 		return err == nil && found && ask.State == registry.AskWithdrawn && len(h.questionDecisions(id)) == 0
 	})
 }
+
+func TestAnAnswerToACodexQuestionAskedMidTurnSteersTheRunningTurn(t *testing.T) {
+	h, lifecycle, items, _, id := startCodexQuestionSession(t)
+	items.set("turn-1", codexAsyncQuestionItem("call_q1"))
+	lifecycle.Daemon().Notify("thread/status/changed", map[string]any{"threadId": id, "status": map[string]any{"type": "active", "activeFlags": []any{}}})
+	var card questionDecision
+	testkit.Eventually(t, "the question asked mid-turn to be a decision", 10*time.Second, func() bool {
+		found := h.questionDecisions(id)
+		if len(found) != 1 || len(found[0].Requests) != 1 {
+			return false
+		}
+		card = found[0]
+		return true
+	})
+
+	starts := len(lifecycle.Daemon().Calls("turn/start"))
+	request := card.Requests[0]
+	status, payload := h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "respond", "sessionId": id, "requestId": request.ID, "decision": map[string]any{"answers": map[string]string{request.Questions[0].Question: "MySQL, for now"}}})
+	if status != http.StatusOK {
+		t.Fatalf("respond status=%d body=%s", status, payload)
+	}
+	steers := lifecycle.Daemon().Calls("turn/steer")
+	if len(steers) != 1 || len(lifecycle.Daemon().Calls("turn/start")) != starts {
+		t.Fatalf("the answer made %d steers and %d new turns, want one steer", len(steers), len(lifecycle.Daemon().Calls("turn/start"))-starts)
+	}
+	input, _ := steers[0]["input"].([]any)
+	first, _ := input[0].(map[string]any)
+	want := "<send_user_message_question_reply>\n" +
+		`[{"answer":"MySQL, for now","question":"Which database should the service use?","questionItemId":"[\"request_user_input_async\",\"call_q1\",0]"}]` +
+		"\n</send_user_message_question_reply>"
+	if first["text"] != want {
+		t.Fatalf("the running turn was steered with %v, want %q", input, want)
+	}
+}
