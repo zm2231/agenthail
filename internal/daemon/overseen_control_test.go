@@ -136,3 +136,43 @@ func TestAnAgentSteersASessionItStartedOnThisHostAsItsRoleDecides(t *testing.T) 
 		t.Fatalf("a queued message is not overseen control: %+v", queued)
 	}
 }
+
+func TestAnInterruptOnAPairedHostFollowsTheDecisionForASessionTheCallerStarted(t *testing.T) {
+	h := newHostTargets(t, false)
+	person := &toldPerson{}
+	h.local.daemon.notifyDesktop = person.notify
+	changeRole(t, h.local.reg, agentroles.Worker, func(role *agentroles.Role) { role.Reach = agentroles.ReachProject })
+	creator, err := h.remote.reg.EnsureUnrepliableSender(mustHostID(t, h.local), "local-a", "local-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.remote.reg.RecordSessionOrigin(registry.OriginOf("remote-c", creator)); err != nil {
+		t.Fatal(err)
+	}
+	interrupt := func(key string) (map[string]any, bool) {
+		return callMCP(t, h.caller, "agenthail_interrupt", map[string]any{"target": "vps::@builder", "clientRequestId": key})
+	}
+
+	if out, refused := interrupt("allowed"); refused || h.remote.fake.interrupts() != 1 {
+		t.Fatalf("interrupting a session it started: refused=%v out=%v interrupts=%d", refused, out, h.remote.fake.interrupts())
+	}
+	if told := person.told(); len(told) != 0 {
+		t.Fatalf("the person was told about an interrupt overseen-control allows: %q", told)
+	}
+
+	setRoleDecision(t, h.local.reg, agentroles.Worker, "overseen-control", agentroles.Notify)
+	if out, refused := interrupt("told"); refused || h.remote.fake.interrupts() != 2 {
+		t.Fatalf("an interrupt the person hears about: refused=%v out=%v", refused, out)
+	}
+	if told := person.told(); len(told) != 1 || !strings.Contains(told[0], "Interrupted @builder on vps") {
+		t.Fatalf("with overseen-control notify the person was told %q", told)
+	}
+
+	setRoleDecision(t, h.local.reg, agentroles.Worker, "overseen-control", agentroles.Ask)
+	if out, refused := interrupt("kept"); !refused || h.remote.fake.interrupts() != 2 {
+		t.Fatalf("an interrupt the role leaves to the person: refused=%v out=%v interrupts=%d", refused, out, h.remote.fake.interrupts())
+	}
+	if told := person.told(); len(told) != 1 {
+		t.Fatalf("the person was told %q", told)
+	}
+}

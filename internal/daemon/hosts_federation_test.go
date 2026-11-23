@@ -42,6 +42,20 @@ type federatedSurface struct {
 	subagents []surface.ClaudeSubagentLink
 	open      map[string][]surface.Request
 	answered  map[string]surface.Decision
+	stopped   int
+}
+
+func (f *federatedSurface) Interrupt(context.Context, *surface.Session) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stopped++
+	return nil
+}
+
+func (f *federatedSurface) interrupts() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.stopped
 }
 
 func (s *federatedSurface) Requests(_ context.Context, session *surface.Session) (surface.RequestState, error) {
