@@ -257,8 +257,10 @@ asked for, then hides it (`doSessionArchive`, `surface.RunStopper`):
 
 - a session in the Claude host is closed, and a Claude background job stopped;
 - a Codex thread in Codex's app-server daemon has its running turn
-  interrupted and every Agenthail subscription dropped, so Codex unloads it.
-  The daemon is shared, so no process is stopped;
+  interrupted. The daemon is shared, so no process is stopped. Every Agenthail
+  subscription to the thread is dropped so Codex can unload it; a client that
+  still shows the session follows it again, which keeps the idle thread loaded
+  but starts no turn;
 - a Claude session in a terminal or a thread the Codex app has loaded is not
   Agenthail's to stop: it is hidden and left running.
 

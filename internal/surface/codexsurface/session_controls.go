@@ -101,8 +101,9 @@ func (c *Codex) SteerWithImages(ctx context.Context, sess *surface.Session, mess
 }
 
 // StopRun ends a thread's run in Codex's app-server daemon, which is shared,
-// so the thread is interrupted and left without Agenthail's subscriptions for
-// Codex to unload rather than its process stopped. A thread the Codex app has
+// by interrupting its turn rather than stopping the process. Dropping
+// Agenthail's subscriptions lets Codex unload the idle thread; a viewer that
+// follows it again keeps it loaded but runs nothing. A thread the Codex app has
 // loaded is the app's.
 func (c *Codex) StopRun(ctx context.Context, sess *surface.Session) (surface.RunStop, error) {
 	release, err := c.home.acquireThreadWrite(ctx, sess.ID)
