@@ -15,7 +15,7 @@ type mcpSendInput struct {
 	Target  string `json:"target,omitempty" jsonschema:"A session id or @alias. Give exactly one of target or project."`
 	Project string `json:"project,omitempty" jsonschema:"A project name or id, as agenthail_projects lists it, to reach its coordinator (starting its conversation if it has none)."`
 	Message string `json:"message"`
-	Mode    string `json:"mode,omitempty" jsonschema:"queue: delivered when the session is idle. now: steers a busy session where it can, otherwise queues; only for sessions you control. With no mode, now to a session you started or lead, and from an identity the person set to send now; queue otherwise. A default now that is refused is queued, with a notice."`
+	Mode    string `json:"mode,omitempty" jsonschema:"queue: delivered when the session is idle. now: steers a busy session where it can, otherwise queues; only for sessions you control. No mode is now to a session you started or lead or from an identity set to send now, else queue."`
 	mcpAskPerson
 	chosen string
 }
