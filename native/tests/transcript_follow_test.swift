@@ -1030,7 +1030,7 @@ struct TranscriptFollowTest {
             guard let target = content.hitTest(content.convert(center, from: nil)) else { return expect(false, "the transcript is under the pointer") }
             let screen = window.convertPoint(toScreen: center)
             let flipped = (NSScreen.screens.first?.frame.height ?? 0) - screen.y
-            let steps: [(Int64, Int32)] = input == .nudge ? [(1, 0)] + Array(repeating: (2, 2), count: 10) + [(4, 0)] : [(1, 0), (2, 400), (4, 0)]
+            let steps: [(Int64, Int32)] = input == .nudge ? [(1, 0)] + Array(repeating: (2, 1), count: 40) + [(4, 0)] : [(1, 0), (2, 400), (4, 0)]
             for (phase, delta) in steps {
                 let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: delta, wheel2: 0, wheel3: 0)!
                 event.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
@@ -1039,7 +1039,7 @@ struct TranscriptFollowTest {
                 let wheel = NSEvent(cgEvent: event)!
                 clip(in: content)?.receive(wheel, in: window)
                 target.scrollWheel(with: wheel)
-                spin(0.016)
+                spin(input == .nudge ? 0.03 : 0.016)
             }
         case .pageUp:
             window.makeFirstResponder(scroll.verticalScroller)
