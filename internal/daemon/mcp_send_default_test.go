@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"github.com/zm2231/agenthail/internal/agentroles"
 	"slices"
 	"strings"
 	"testing"
@@ -58,7 +59,8 @@ func TestASendWithNoModeToABusySessionTheSenderDoesNotLeadQueues(t *testing.T) {
 	}
 }
 
-func TestALeadsSendWithNoModeSteersItsBusyWorkerOnAPairedHostWithoutTellingThePerson(t *testing.T) {
+func pairedBusyWorker(t *testing.T) (hostTargets, *toldPerson) {
+	t.Helper()
 	h := newHostTargets(t, true)
 	person := &toldPerson{}
 	h.local.daemon.notifyDesktop = person.notify
@@ -75,14 +77,36 @@ func TestALeadsSendWithNoModeSteersItsBusyWorkerOnAPairedHostWithoutTellingThePe
 	worker.Status = surface.StatusBusy
 	h.remote.fake.sessions["remote-c"] = worker
 	h.remote.fake.mu.Unlock()
+	return h, person
+}
+
+func TestALeadsSendWithNoModeSteersItsBusyWorkerOnAPairedHostWithoutTellingThePerson(t *testing.T) {
+	h, person := pairedBusyWorker(t)
 
 	if out, refused := h.send(t, "vps::@builder", "the answer is left", nil); refused || out["notice"] != nil || !h.reached("steer:") {
 		t.Fatalf("a lead's send with no mode to its busy worker on the paired host: refused=%v out=%v delivered=%q", refused, out, h.remote.fake.delivered())
 	}
-	if out, refused := h.send(t, "vps::@builder", "later, please", map[string]any{"mode": "queue"}); refused || h.reached("steer:" + "later") {
+	if out, refused := h.send(t, "vps::@builder", "later, please", map[string]any{"mode": "queue"}); refused || h.reached("steer:"+"later") {
 		t.Fatalf("a lead's queued send steered: refused=%v out=%v delivered=%q", refused, out, h.remote.fake.delivered())
 	}
 	if told := person.told(); len(told) != 0 {
 		t.Fatalf("a steer Agenthail chose told the person %q", told)
+	}
+}
+
+func TestALeadsDefaultSteerItsRoleRefusesQueuesAndSaysSoOnlyToTheLead(t *testing.T) {
+	h, person := pairedBusyWorker(t)
+	setRoleDecision(t, h.local.reg, agentroles.Lead, "remote-project-control", agentroles.Ask)
+
+	out, refused := h.send(t, "vps::@builder", "the answer is left", nil)
+	notice, _ := out["notice"].(string)
+	if refused || !strings.HasPrefix(notice, "Queued: a send to a session you started or lead goes now by default, but this one could not") {
+		t.Fatalf("a default steer the lead's role refuses: refused=%v out=%v", refused, out)
+	}
+	if h.reached("steer:") {
+		t.Fatalf("a refused default steer steered: %q", h.remote.fake.delivered())
+	}
+	if told := person.told(); len(told) != 0 {
+		t.Fatalf("a refused default steer told the person %q", told)
 	}
 }
