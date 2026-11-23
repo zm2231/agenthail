@@ -112,7 +112,18 @@ func (d *Daemon) holdAgentAction(caller *mcpCaller, what agentAction) string {
 	return d.agentNotices.hold(caller.session.ID, what, time.Now())
 }
 
+type withoutAgentNoticeKey struct{}
+
+// withoutAgentNotice marks an action the person did not need telling about:
+// a steer Agenthail chose for a send that named no mode.
+func withoutAgentNotice(ctx context.Context) context.Context {
+	return context.WithValue(ctx, withoutAgentNoticeKey{}, true)
+}
+
 func (d *Daemon) noticeAfter(ctx context.Context, caller *mcpCaller, what string, err error) {
+	if quiet, _ := ctx.Value(withoutAgentNoticeKey{}).(bool); quiet {
+		return
+	}
 	if what != "" && err == nil {
 		d.notifyAgentAction(ctx, caller.session.ID, what)
 	}

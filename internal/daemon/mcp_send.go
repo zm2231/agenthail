@@ -39,6 +39,11 @@ func (d *Daemon) mcpSend(ctx context.Context, caller *mcpCaller, input mcpSendIn
 	if err != nil {
 		return nil, err
 	}
+	why := "your identity sends now by default"
+	if mode != registry.SendModeNow && d.leadsTarget(ctx, caller, input.Target) {
+		mode, why = registry.SendModeNow, "a send to a session you started or lead goes now by default"
+		ctx = withoutAgentNotice(ctx)
+	}
 	input.Mode = mode
 	if mode != registry.SendModeNow {
 		return d.mcpSendIn(ctx, caller, input, true)
@@ -56,7 +61,24 @@ func (d *Daemon) mcpSend(ctx context.Context, caller *mcpCaller, input mcpSendIn
 	if result, err = d.mcpSendIn(ctx, caller, input, true); err != nil {
 		return nil, err
 	}
-	return withSendNotice(result, "Queued: your identity sends now by default, but this one could not: "+refusal.Message)
+	return withSendNotice(result, "Queued: "+why+", but this one could not: "+refusal.Message)
+}
+
+// leadsTarget reports whether the caller started or leads the target, the
+// sessions delivery lets it steer. A paired host's session is decided by
+// that host; this one knows only that the caller coordinates its project.
+func (d *Daemon) leadsTarget(ctx context.Context, caller *mcpCaller, ref string) bool {
+	if strings.TrimSpace(ref) == "" {
+		return false
+	}
+	session, remote, err := d.mcpTargets(caller).Resolve(ctx, strings.TrimSpace(ref))
+	if err != nil {
+		return false
+	}
+	if remote != nil {
+		return remote.Exact && caller.project != nil && remote.Project == caller.project.ID && d.mcpIsProjectLead(caller, caller.session.ID)
+	}
+	return d.oversees(caller.session.ID, *session)
 }
 
 // Only a refusal of the steer itself falls back; a failed delivery is returned as it is.
