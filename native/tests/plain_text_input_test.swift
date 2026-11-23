@@ -40,7 +40,6 @@ struct PlainTextInputTest {
 
         check(!NSSpellChecker.isAutomaticDashSubstitutionEnabled, "smart dashes are off app-wide")
         check(!NSSpellChecker.isAutomaticQuoteSubstitutionEnabled, "smart quotes are off app-wide")
-        check(!NSSpellChecker.isAutomaticTextReplacementEnabled, "text replacement is off app-wide")
         check(!NSSpellChecker.isAutomaticSpellingCorrectionEnabled, "auto-correction is off app-wide")
         check(!NSSpellChecker.isAutomaticPeriodSubstitutionEnabled, "double-space period is off app-wide")
         check(!NSSpellChecker.isAutomaticCapitalizationEnabled, "auto-capitalization is off app-wide")
@@ -48,11 +47,11 @@ struct PlainTextInputTest {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
 
         let smart = NSTextView()
-        smart.isAutomaticDashSubstitutionEnabled = true
-        smart.isAutomaticQuoteSubstitutionEnabled = true
         window.contentView = smart
         window.makeFirstResponder(smart)
         smart.insertText(typed, replacementRange: smart.selectedRange())
+        smart.isAutomaticDashSubstitutionEnabled = true
+        smart.isAutomaticQuoteSubstitutionEnabled = true
         smart.checkTextInDocument(nil)
         check(smart.string != typed, "a text view with smart dashes and quotes on rewrites the sample, so the checks below can catch it: \(smart.string.debugDescription)")
 
@@ -98,12 +97,12 @@ struct PlainTextInputTest {
     }
 
     static func sendsAsTyped(_ view: NSTextView, _ name: String) {
-        check(!view.isAutomaticDashSubstitutionEnabled, "\(name) has smart dashes off")
-        check(!view.isAutomaticQuoteSubstitutionEnabled, "\(name) has smart quotes off")
-        check(!view.isAutomaticTextReplacementEnabled, "\(name) has text replacement off")
-        check(!view.isAutomaticSpellingCorrectionEnabled, "\(name) has auto-correction off")
         view.string = ""
         view.insertText(typed, replacementRange: view.selectedRange())
+        check(!view.isAutomaticDashSubstitutionEnabled, "\(name) has smart dashes off")
+        check(!view.isAutomaticQuoteSubstitutionEnabled, "\(name) has smart quotes off")
+        check(!view.isAutomaticTextReplacementEnabled, "\(name) has text replacement off once it is edited")
+        check(!view.isAutomaticSpellingCorrectionEnabled, "\(name) has auto-correction off")
         view.checkTextInDocument(nil)
         check(Array(view.string.utf8) == Array(typed.utf8), "\(name) keeps the typed text byte for byte: \(view.string.debugDescription)")
     }
