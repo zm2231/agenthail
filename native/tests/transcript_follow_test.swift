@@ -673,6 +673,41 @@ struct TranscriptFollowTest {
             expect(!feed.following && abs(offset(scroll) - readerPlace) < 1, "a reader who scrolls up with \(input) while rows stream stays put, offset \(readerPlace) became \(offset(scroll))")
         }
 
+        feed.transcript = "P"
+        feed.rows = rows("P", 60)
+        spin(0.6)
+        expect(feed.following, "a fresh transcript follows before a press on its scroller")
+        readerInput(scroll, .press)
+        for index in 0..<5 {
+            feed.rows += rows("Pa\(index)-", 1)
+            spin(0.1)
+        }
+        spin(0.4)
+        expect(feed.following && abs(gap(scroll)) < 2, "a press on the scroller that moves nothing keeps following, \(Int(gap(scroll))) pt short; \(geometry(scroll))")
+
+        feed.transcript = "T"
+        feed.rows = rows("T", 60)
+        spin(0.6)
+        let nudgeStart = offset(scroll)
+        var streamed = 0
+        let stream = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { _ in
+            MainActor.assumeIsolated {
+                feed.rows += rows("Tn\(streamed)-", 1)
+                streamed += 1
+            }
+        }
+        readerInput(scroll, .nudge)
+        stream.invalidate()
+        let nudged = offset(scroll)
+        expect(streamed > 3, "rows streamed while the reader stepped up, \(streamed)")
+        expect(nudgeStart - nudged > 10, "a reader's small steps moved them up, from \(nudgeStart) to \(nudged)")
+        for index in 0..<10 {
+            feed.rows += rows("Ta\(index)-", 1)
+            spin(0.05)
+        }
+        spin(0.6)
+        expect(!feed.following && abs(offset(scroll) - nudged) < 1, "a reader who scrolls up in steps under the reach stays put as rows stream, offset \(nudged) became \(offset(scroll))")
+
         // Inside a main-queue block the main queue cannot run another, as on a machine too busy to drain it between passes.
         feed.transcript = "Q"
         feed.rows = rows("Q", 60)
@@ -973,41 +1008,51 @@ struct TranscriptFollowTest {
         expect(!feed.following && abs(place(paged.id) - paged.screen) < 1, "a reader who paged up from the end keeps their place as the last row grows, \(paged.id) at \(Int(paged.screen)) moved to \(place(paged.id))")
     }
 
-    enum ReaderInput: CaseIterable { case wheel, pageUp, scroller }
+    enum ReaderInput: CaseIterable {
+        case wheel, pageUp, scroller
+        static var allCases: [ReaderInput] { [.wheel, .pageUp, .scroller] }
+        case press, nudge
+    }
+
+    @MainActor
+    private static func clip(in view: NSView) -> TranscriptClip? {
+        (view as? TranscriptClipAnchor.AnchorView)?.clip ?? view.subviews.lazy.compactMap { clip(in: $0) }.first
+    }
 
     // Sent through the application, where AppKit runs event monitors, and to the handling view only if the hidden window was not routed it.
+    // A wheel event built here has no window, so it is handed to the transcript's monitor as AppKit would route it to this window.
     @MainActor
     private static func readerInput(_ scroll: NSScrollView, _ input: ReaderInput) {
         guard let window = scroll.window, let content = window.contentView else { return expect(false, "the transcript is in a window") }
         switch input {
-        case .wheel:
+        case .wheel, .nudge:
             let center = scroll.convert(NSPoint(x: scroll.bounds.midX, y: scroll.bounds.midY), to: nil)
             guard let target = content.hitTest(content.convert(center, from: nil)) else { return expect(false, "the transcript is under the pointer") }
             let screen = window.convertPoint(toScreen: center)
             let flipped = (NSScreen.screens.first?.frame.height ?? 0) - screen.y
-            for (phase, delta) in [(Int64(1), Int32(0)), (2, 400), (4, 0)] {
+            let steps: [(Int64, Int32)] = input == .nudge ? [(1, 0)] + Array(repeating: (2, 2), count: 10) + [(4, 0)] : [(1, 0), (2, 400), (4, 0)]
+            for (phase, delta) in steps {
                 let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: delta, wheel2: 0, wheel3: 0)!
                 event.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
                 event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
                 event.location = CGPoint(x: screen.x, y: flipped)
                 let wheel = NSEvent(cgEvent: event)!
-                let before = offset(scroll)
-                NSApp.sendEvent(wheel)
-                if offset(scroll) == before { target.scrollWheel(with: wheel) }
+                clip(in: content)?.receive(wheel, in: window)
+                target.scrollWheel(with: wheel)
                 spin(0.016)
             }
         case .pageUp:
-            window.makeFirstResponder(nil)
+            window.makeFirstResponder(scroll.verticalScroller)
             let key = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
                                        context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 116)!
             let before = offset(scroll)
             NSApp.sendEvent(key)
             if offset(scroll) == before { scroll.pageUp(nil) }
-        case .scroller:
+        case .scroller, .press:
             guard let scroller = scroll.verticalScroller else { return expect(false, "the transcript has a scroller") }
             let knob = scroller.rect(for: .knob)
             let grab = scroller.convert(NSPoint(x: knob.midX, y: knob.midY), to: nil)
-            let drag = scroller.convert(NSPoint(x: knob.midX, y: knob.midY - 40), to: nil)
+            let drag = scroller.convert(NSPoint(x: knob.midX, y: knob.midY - (input == .press ? 0 : 40)), to: nil)
             func mouse(_ type: NSEvent.EventType, _ point: NSPoint) -> NSEvent {
                 NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
                                    context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!

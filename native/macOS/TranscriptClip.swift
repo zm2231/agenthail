@@ -12,24 +12,26 @@ final class TranscriptClip {
 
     private func watch() {
         monitor = scroll == nil ? nil : EventMonitor { [weak self] event in
-            guard let self, self.movesAway(event) else { return }
-            self.readerLeaves?()
+            guard let self, let window = event.window else { return }
+            self.receive(event, in: window)
         }
     }
 
-    func movesAway(_ event: NSEvent) -> Bool {
-        guard let scroll, let window = scroll.window, event.window == nil || event.window === window else { return false }
+    func receive(_ event: NSEvent, in window: NSWindow) {
+        if movesAway(event, in: window) { readerLeaves?() }
+    }
+
+    func movesAway(_ event: NSEvent, in window: NSWindow) -> Bool {
+        guard let scroll, scroll.window === window else { return false }
+        let point = scroll.convert(event.locationInWindow, from: nil)
         switch event.type {
         case .scrollWheel:
-            // An event with no window carries its location on screen.
-            let point = event.window == nil ? event.locationInWindow : window.convertPoint(toScreen: event.locationInWindow)
-            return event.scrollingDeltaY > 0 && window.convertToScreen(scroll.convert(scroll.bounds, to: nil)).contains(point)
+            return event.scrollingDeltaY > 0 && scroll.bounds.contains(point) && window.contentView?.hitTest(event.locationInWindow).map { $0 === scroll || $0.isDescendant(of: scroll) } == true
         case .keyDown:
-            // The transcript never takes focus itself; paging keys reach it when nothing else in the window has focus.
-            guard window.firstResponder === window || (window.firstResponder as? NSView).map({ $0 === scroll || $0.isDescendant(of: scroll) }) == true else { return false }
+            guard let responder = window.firstResponder as? NSView, responder === scroll || responder.isDescendant(of: scroll) else { return false }
             return [115, 116].contains(event.keyCode)
         case .leftMouseDown:
-            guard event.window === window, let scroller = scroll.verticalScroller, !scroller.isHidden else { return false }
+            guard let scroller = scroll.verticalScroller, !scroller.isHidden else { return false }
             return scroller.bounds.contains(scroller.convert(event.locationInWindow, from: nil))
         default:
             return false

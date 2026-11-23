@@ -15,7 +15,7 @@ struct TranscriptClipTest {
         override var isFlipped: Bool { true }
     }
 
-    static func readerInput() {
+    static func transcript() -> (NSWindow, NSScrollView, TranscriptClip) {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
         window.alphaValue = 0
         let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
@@ -31,20 +31,27 @@ struct TranscriptClipTest {
         anchor.clip = clip
         document.addSubview(anchor)
         anchor.register()
+        return (window, scroll, clip)
+    }
+
+    static func readerInput() {
+        let (window, scroll, clip) = transcript()
+        let (other, _, otherClip) = transcript()
 
         func key(_ code: UInt16) -> NSEvent {
             NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil,
                              characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: code)!
         }
-        window.makeFirstResponder(nil)
-        check(clip.movesAway(key(116)), "Page Up with nothing focused moves the transcript away from the end")
-        check(clip.movesAway(key(115)), "Home with nothing focused moves the transcript away from the end")
-        check(!clip.movesAway(key(121)), "Page Down does not move away from the end")
+        check(window.makeFirstResponder(scroll.verticalScroller), "the scroller takes focus")
+        check(clip.movesAway(key(116), in: window), "Page Up with the transcript focused moves it away from the end")
+        check(clip.movesAway(key(115), in: window), "Home with the transcript focused moves it away from the end")
+        check(!clip.movesAway(key(121), in: window), "Page Down does not move away from the end")
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
-        container.addSubview(field)
+        window.contentView?.addSubview(field)
         check(window.makeFirstResponder(field), "the field takes focus")
-        check(!clip.movesAway(key(116)), "Page Up typed into another field leaves the transcript alone")
+        check(!clip.movesAway(key(116), in: window), "Page Up typed into another field leaves the transcript alone")
         window.makeFirstResponder(nil)
+        check(!clip.movesAway(key(116), in: window), "Page Up with nothing focused reaches no transcript")
 
         func wheel(_ delta: Int32, at point: NSPoint) -> NSEvent {
             let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: delta, wheel2: 0, wheel3: 0)!
@@ -52,9 +59,11 @@ struct TranscriptClipTest {
             event.location = CGPoint(x: screen.x, y: (NSScreen.screens.first?.frame.height ?? 0) - screen.y)
             return NSEvent(cgEvent: event)!
         }
-        check(clip.movesAway(wheel(40, at: NSPoint(x: 200, y: 300))), "a wheel scroll up over the transcript moves it away from the end")
-        check(!clip.movesAway(wheel(-40, at: NSPoint(x: 200, y: 300))), "a wheel scroll down over the transcript does not")
-        check(!clip.movesAway(wheel(40, at: NSPoint(x: 200, y: 900))), "a wheel scroll outside the transcript does not")
+        check(clip.movesAway(wheel(40, at: NSPoint(x: 200, y: 300)), in: window), "a wheel scroll up over the transcript moves it away from the end")
+        check(!clip.movesAway(wheel(-40, at: NSPoint(x: 200, y: 300)), in: window), "a wheel scroll down over the transcript does not")
+        check(!clip.movesAway(wheel(40, at: NSPoint(x: 200, y: 900)), in: window), "a wheel scroll outside the transcript does not")
+        check(!otherClip.movesAway(wheel(40, at: NSPoint(x: 200, y: 300)), in: window), "a wheel scroll routed to one window leaves an overlapping window's transcript alone")
+        check(!clip.movesAway(wheel(40, at: NSPoint(x: 200, y: 300)), in: other), "a wheel scroll routed to another window leaves this transcript alone")
 
         func press(_ point: NSPoint) -> NSEvent {
             NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil,
@@ -62,9 +71,9 @@ struct TranscriptClipTest {
         }
         guard let scroller = scroll.verticalScroller else { return check(false, "the scroll view has a scroller") }
         let onScroller = scroller.convert(NSPoint(x: scroller.bounds.midX, y: scroller.bounds.midY), to: nil)
-        check(clip.movesAway(press(onScroller)), "a press on the scroller moves the transcript away from the end")
-        check(!clip.movesAway(press(NSPoint(x: 100, y: 300))), "a press on the rows does not")
-        check(!TranscriptClip().movesAway(key(116)), "a clip with no transcript takes no input")
+        check(clip.movesAway(press(onScroller), in: window), "a press on the scroller moves the transcript away from the end")
+        check(!clip.movesAway(press(NSPoint(x: 100, y: 300)), in: window), "a press on the rows does not")
+        check(!TranscriptClip().movesAway(key(116), in: window), "a clip with no transcript takes no input")
     }
 
     static func main() {

@@ -33,6 +33,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     static var readerReach: CGFloat { TranscriptFollowing.readerReach }
     /// Longer than a jump's animation. A scroll moved mid-animation can leave the phase animating for good.
     static var animationLimit: Duration { .milliseconds(500) }
+    static var inputLimit: Duration { .milliseconds(400) }
 
     /// `scrollTo(y:)` measures from below the top inset, such as the conversation header; content offsets include it.
     static func scrollY(_ offset: CGFloat, in geometry: ScrollGeometry) -> CGFloat {
@@ -55,7 +56,11 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             .onScrollPhaseChange { old, new in
                 phase = new
                 // Keyboard paging and scrollbar clicks animate; a jump to the end does too, but moves toward it.
-                if old == .idle, new != .idle { layout.gestureStart = layout.geometry?.contentOffset.y }
+                if old == .idle, new != .idle {
+                    layout.gestureStart = layout.geometry?.contentOffset.y
+                    layout.input?.phased = true
+                }
+                if new == .idle, old != .idle { layout.input = nil }
                 if new == .idle, old != .idle, let geometry = layout.geometry {
                     let moved = layout.gestureStart.map { geometry.contentOffset.y - $0 } ?? 0
                     let wasFollowing = following
@@ -110,7 +115,8 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                                                     animating: animating, inserted: inserted, offsetMoved: new.contentOffset.y - old.contentOffset.y,
                                                     reset: new.contentOffset.y <= -new.contentInsets.top + 0.5, overshot: TranscriptEnd(old).distance < -0.5)
                 let wasFollowing = following
-                following = TranscriptFollowing.next(following, pass)
+                // A reader's input holds following off until it ends, however near the end its first steps leave them.
+                following = layout.input == nil && TranscriptFollowing.next(following, pass)
                 // A pin left the position at the bottom edge; once the reader leaves, it holds where they are so it is not applied again.
                 if !following, wasFollowing || layout.leftByInput {
                     layout.leftByInput = false
@@ -241,9 +247,18 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     }
 
     private func readerLeaves() {
-        guard following else { return }
+        guard following, let start = layout.geometry?.contentOffset.y else { return }
         following = false
         layout.leftByInput = true
+        let input = ReaderScroll(start: start)
+        layout.input = input
+        // Input that starts no scroll phase, such as a press on the scroller that moves nothing, is settled once it has had time to move.
+        Task { @MainActor in
+            try? await Task.sleep(for: Self.inputLimit)
+            guard layout.input?.id == input.id, layout.input?.phased == false, let geometry = layout.geometry else { return }
+            layout.input = nil
+            following = abs(geometry.contentOffset.y - start) < 0.5 || Self.atEnd(geometry)
+        }
     }
 
     // A reader who scrolled away after a pin was queued keeps their place.
@@ -297,6 +312,12 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
     }
 }
 
+private struct ReaderScroll {
+    let id = UUID()
+    let start: CGFloat
+    var phased = false
+}
+
 /// The latest scroll geometry, when an animated scroll began, and whether the layout pass now running resized the transcript.
 /// A reference, so updating it does not redraw the transcript.
 @MainActor
@@ -309,6 +330,7 @@ private final class Layout {
     var animationStart: ContinuousClock.Instant?
     var gestureStart: CGFloat?
     var leftByInput = false
+    var input: ReaderScroll?
     private var resizedTurn: Int?
     private var fromEnd: (distance: CGFloat, until: ContinuousClock.Instant, content: CGFloat, landing: Bool)?
     let row = TranscriptRowHold()
