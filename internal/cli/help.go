@@ -82,6 +82,9 @@ Session commands:
                                  How deep its sessions nest and how many it runs; 0 is the default
   roles tools <role> all | +<tool> -<tool> ...
                                  Which agenthail tools a role sees
+  roles ledgers <role> all | own | default | +<project> -<project> ...
+                                 Which projects' ledgers a role reads and writes besides its own; default
+                                 is every project for reach all and none for the others
   roles create <name> [<from-role>] | delete <role> | reset <role>
                                  Make a role from another (worker by default), remove it, or return a built-in one to how it ships
   roles assign <role> --session <@alias|id> | --identity <name> | --alias <name>
@@ -120,7 +123,7 @@ Identity:
   identity add <name>           Give an agent outside Agenthail a durable @name to send as and receive at;
                                 send as it with AGENTHAIL_SESSION_ID=<name> or --from <name>
   identity rm <name>            Remove the identity and its inbox
-  identity list [--json]        Show identities with their unread counts and remote access
+  identity list [--json]        Show identities with their unread counts, remote access, role and ledgers
   identity remote <name> [--access-client-id <id> | --access-email <email>]
                                 Let the identity call this daemon's /mcp from another machine; prints its token once
   identity remote <name> --rotate | --off

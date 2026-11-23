@@ -16,8 +16,12 @@ type AgentRoleView struct {
 	Definition agentroles.Role `json:"definition"`
 	Tools      []string        `json:"tools"`
 	AllTools   bool            `json:"allTools"`
-	Depth      int             `json:"depth"`
-	Running    int             `json:"running"`
+	// Ledgers are the project ids whose ledgers the role reaches besides
+	// its own; AllLedgers is every project's.
+	Ledgers    []string `json:"ledgers"`
+	AllLedgers bool     `json:"allLedgers"`
+	Depth      int      `json:"depth"`
+	Running    int      `json:"running"`
 }
 
 type AgentActionView struct {
@@ -32,6 +36,14 @@ type AgentRolesView struct {
 	Assignments []AgentRoleAssignmentView `json:"assignments"`
 	Actions     []AgentActionView         `json:"actions"`
 	Tools       []string                  `json:"tools"`
+	Identities  []AgentIdentityRoleView   `json:"identities"`
+}
+
+// AgentIdentityRoleView is the role an agent identity acts under: the remote
+// role's when it has remote access, else the one its local sends get.
+type AgentIdentityRoleView struct {
+	Name string `json:"name"`
+	Role string `json:"role"`
 }
 
 type AgentRoleAssignmentView struct {

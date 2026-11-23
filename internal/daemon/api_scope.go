@@ -187,27 +187,31 @@ func (d *Daemon) agentScope(r *http.Request, caller *mcpCaller, request daemonap
 		}
 		return daemonapi.ScopeReply{}, nil
 	case "ledger":
-		if caller.has("control.all") {
-			return daemonapi.ScopeReply{}, nil
-		}
 		if !caller.has("ledger.write") {
 			return daemonapi.ScopeReply{}, refuse("capability_missing", "Writing the ledger needs ledger.write.")
 		}
+		key := strings.TrimSpace(request.Project)
 		own, err := projectresolve.LedgerKey(d.Registry, caller.project)
 		if err != nil {
 			return daemonapi.ScopeReply{}, err
 		}
-		if own == "" || own != strings.TrimSpace(request.Project) {
-			return daemonapi.ScopeReply{}, scopeRefusal("project:"+strings.TrimSpace(request.Project), "different_project", "You may write only your own project's ledger; run the command in your own project's folder, or ask that project's coordinator.")
+		if key == "" || key != own {
+			granted, err := d.ledgerGranted(caller, key)
+			if err != nil {
+				return daemonapi.ScopeReply{}, err
+			}
+			if !granted {
+				return daemonapi.ScopeReply{}, scopeRefusal("project:"+key, "different_project", "Your role reaches only your own project's ledger; run the command in your own project's folder, or the person widens your role with agenthail roles ledgers.")
+			}
 		}
 		if request.Mode != string(ledger.WorkTakeover) {
-			return daemonapi.ScopeReply{ProjectID: own}, nil
+			return daemonapi.ScopeReply{ProjectID: key}, nil
 		}
 		notice, err := d.takeoverScope(caller, strings.TrimSpace(request.Target))
 		if err != nil {
 			return daemonapi.ScopeReply{}, err
 		}
-		return daemonapi.ScopeReply{ProjectID: own, Notice: d.holdAgentNotice(caller, notice)}, nil
+		return daemonapi.ScopeReply{ProjectID: key, Notice: d.holdAgentNotice(caller, notice)}, nil
 	case "notice":
 		if what, found := d.agentNotices.take(strings.TrimSpace(request.Notice), caller.session.ID, time.Now()); found {
 			d.notifyAgentAction(r.Context(), caller.session.ID, what.told(request.NotSteered, strings.TrimSpace(request.Ran)))

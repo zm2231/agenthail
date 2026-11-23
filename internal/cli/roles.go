@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/agentroles"
+	"github.com/zm2231/agenthail/internal/broadcast"
 
 	"github.com/zm2231/agenthail/internal/daemonapi"
 )
@@ -23,6 +24,7 @@ const rolesUsage = `usage: agenthail roles [list] [--json] | show <role> [--json
        agenthail roles reach <role> descendants|project|all
        agenthail roles limit <role> depth|running <n>
        agenthail roles tools <role> all | +<tool> -<tool> ...
+       agenthail roles ledgers <role> all | own | default | +<project> -<project> ...
        agenthail roles assign <role> --session <@alias|id> | --identity <name> | --alias <name>
        agenthail roles unassign --session <@alias|id> | --identity <name> | --alias <name>`
 
@@ -79,6 +81,13 @@ func (a *App) cmdRoles(args []string) error {
 	current, found := roleNamed(view, rest[0])
 	if !found {
 		return fmt.Errorf("no role named %s", rest[0])
+	}
+	if verb == "ledgers" {
+		role, err := editLedgers(current.Definition, rest[1:], a.projectID)
+		if err != nil {
+			return err
+		}
+		return a.putRole(current.Name, role)
 	}
 	role, err := editRole(current.Definition, verb, rest[1:], view.Tools)
 	if err != nil {
@@ -145,6 +154,58 @@ func editRole(role agentroles.Role, verb string, args []string, tools []string) 
 	default:
 		return role, errors.New(rolesUsage)
 	}
+	return role, nil
+}
+
+func (a *App) projectID(name string) (string, error) {
+	project, err := broadcast.FindProject(a.registry(), name)
+	return project.ID, err
+}
+
+// editLedgers drops a project that no longer resolves by the id it was
+// stored under, so a removed project can still be taken off the list.
+func editLedgers(role agentroles.Role, args []string, projectID func(string) (string, error)) (agentroles.Role, error) {
+	if len(args) == 1 {
+		switch args[0] {
+		case agentroles.LedgersAll:
+			role.Ledgers = []string{agentroles.LedgersAll}
+			return role, nil
+		case "own":
+			role.Ledgers = []string{}
+			return role, nil
+		case "default":
+			role.Ledgers = nil
+			return role, nil
+		}
+	}
+	if role.AllLedgers() {
+		return role, errors.New("the role reaches every project's ledger; set 'own' first, then add projects")
+	}
+	ledgers := slices.Clone(role.Ledgers)
+	if ledgers == nil {
+		ledgers = []string{}
+	}
+	for _, change := range args {
+		name := strings.TrimLeft(change, "+-")
+		if name == "" || change[0] != '+' && change[0] != '-' {
+			return role, fmt.Errorf("a ledger change is +<project> or -<project>, not %q", change)
+		}
+		id, err := projectID(name)
+		if err != nil && (change[0] == '+' || !slices.Contains(ledgers, name)) {
+			return role, err
+		}
+		if err != nil {
+			id = name
+		}
+		if change[0] == '+' {
+			if !slices.Contains(ledgers, id) {
+				ledgers = append(ledgers, id)
+			}
+			continue
+		}
+		ledgers = slices.DeleteFunc(ledgers, func(project string) bool { return project == id })
+	}
+	role.Ledgers = ledgers
 	return role, nil
 }
 
@@ -244,6 +305,16 @@ func (a *App) listRoles(asJSON bool) error {
 	return out.Flush()
 }
 
+func ledgerReach(role daemonapi.AgentRoleView) string {
+	if role.AllLedgers {
+		return "every project's"
+	}
+	if len(role.Ledgers) == 0 {
+		return "its own project's"
+	}
+	return "its own project's and " + strings.Join(role.Ledgers, ", ")
+}
+
 func roleKind(role daemonapi.AgentRoleView) string {
 	switch {
 	case role.BuiltIn && role.Edited:
@@ -285,6 +356,7 @@ func (a *App) showRole(name string, asJSON bool) error {
 	} else {
 		fmt.Printf("tools: %s\n", strings.Join(role.Tools, ", "))
 	}
+	fmt.Println("ledgers: " + ledgerReach(role))
 	fmt.Printf("sessions it starts nest at most %d deep; it runs at most %d at once\n", role.Depth, role.Running)
 	return nil
 }

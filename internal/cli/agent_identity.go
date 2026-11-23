@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/cfaccess"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -67,8 +68,19 @@ func (a *App) cmdIdentity(args []string) error {
 		for _, remote := range remotes {
 			remoteByName[remote.Name] = remote
 		}
+		roles, rolesErr := a.fetchRoles()
+		roleOf := map[string]daemonapi.AgentRoleView{}
+		for _, identity := range roles.Identities {
+			if role, found := roleNamed(roles, identity.Role); found {
+				roleOf[identity.Name] = role
+			}
+		}
 		if jsonOut {
-			return emit(map[string]any{"identities": identities, "remote": remotes})
+			out := map[string]any{"identities": identities, "remote": remotes}
+			if rolesErr == nil {
+				out["roles"] = roles.Identities
+			}
+			return emit(out)
 		}
 		if len(identities) == 0 {
 			fmt.Println("(no identities; add one with: agenthail identity add <name>)")
@@ -76,6 +88,9 @@ func (a *App) cmdIdentity(args []string) error {
 		}
 		for _, identity := range identities {
 			line := fmt.Sprintf("@%-20s unread=%d total=%d since %s", identity.Name, identity.Unread, identity.Total, identity.CreatedAt.Local().Format(time.DateTime))
+			if role, ok := roleOf[identity.Name]; ok {
+				line += "  role: " + role.Name + ", ledgers: " + ledgerReach(role)
+			}
 			if remote, ok := remoteByName[identity.Name]; ok {
 				line += "  remote: " + remote.Binding() + ", last seen " + lastSeen(remote.LastSeen)
 			}
@@ -83,6 +98,9 @@ func (a *App) cmdIdentity(args []string) error {
 				line += "  sends now by default"
 			}
 			fmt.Println(line)
+		}
+		if rolesErr != nil {
+			fmt.Printf("(roles not shown: %s)\n", rolesErr)
 		}
 		return nil
 	case "remote":

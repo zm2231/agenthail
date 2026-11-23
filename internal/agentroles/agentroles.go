@@ -41,14 +41,20 @@ const (
 	DefaultRunning = 8
 )
 
+const LedgersAll = "all"
+
 // Role holds only the decisions that differ from each action's default for
 // the role's reach. Tools null means every agenthail tool, and an empty list
-// none; a limit of 0 is the default.
+// none; a limit of 0 is the default. Ledgers names the projects whose ledgers
+// the role reads and writes besides its own, by project id or LedgersAll;
+// null is the default for its reach, every project for reach all and none
+// for the others.
 type Role struct {
 	Description string            `json:"description,omitempty"`
 	Reach       string            `json:"reach"`
 	Actions     map[string]string `json:"actions,omitempty"`
 	Tools       []string          `json:"tools"`
+	Ledgers     []string          `json:"ledgers"`
 	Depth       int               `json:"depth,omitempty"`
 	Running     int               `json:"running,omitempty"`
 }
@@ -174,6 +180,19 @@ func (r Role) Sees(tool string) bool {
 	return r.Tools == nil || slices.Contains(r.Tools, tool)
 }
 
+func (r Role) AllLedgers() bool {
+	if r.Ledgers == nil {
+		return r.Reach == ReachAll
+	}
+	return slices.Contains(r.Ledgers, LedgersAll)
+}
+
+// ReachesLedger is whether the role reads and writes the ledger of the
+// project with this id when it is not the caller's own.
+func (r Role) ReachesLedger(projectID string) bool {
+	return r.AllLedgers() || slices.Contains(r.Ledgers, projectID)
+}
+
 func (r Role) Capabilities() []string {
 	return append(slices.Clone(BaseCapabilities), reachCapabilities[r.Reach]...)
 }
@@ -194,6 +213,11 @@ func (r Role) Validate() error {
 	for _, tool := range r.Tools {
 		if _, known := agenttools.Lookup(tool); !known {
 			return fmt.Errorf("no agenthail tool is named %q", tool)
+		}
+	}
+	for _, project := range r.Ledgers {
+		if strings.TrimSpace(project) == "" {
+			return fmt.Errorf("a role's ledgers are project ids or %q, not an empty name", LedgersAll)
 		}
 	}
 	if r.Depth < 0 || r.Running < 0 {
@@ -222,6 +246,14 @@ func (r Role) Normalized() Role {
 		r.Tools = slices.Compact(tools)
 		if len(r.Tools) == len(agenttools.Tools) {
 			r.Tools = nil
+		}
+	}
+	if r.Ledgers != nil {
+		ledgers := slices.Clone(r.Ledgers)
+		sort.Strings(ledgers)
+		r.Ledgers = slices.Compact(ledgers)
+		if slices.Contains(r.Ledgers, LedgersAll) {
+			r.Ledgers = []string{LedgersAll}
 		}
 	}
 	return r

@@ -257,7 +257,7 @@ func (d *Daemon) recordRemoteCall(caller *mcpCaller, tool string, refusal *mcpRe
 	if refusal != nil {
 		outcome, target = refusal.Code, refusal.target
 	}
-	if err := d.Registry.RecordHistory(registry.HistoryEntry{Kind: "mcp-remote", SessionID: target, SourceSessionID: caller.session.ID, Message: tool + " via " + caller.remote, Result: outcome}); err != nil {
+	if err := d.Registry.RecordHistory(registry.HistoryEntry{Kind: "mcp-remote", SessionID: target, SourceSessionID: caller.session.ID, Message: strings.TrimSpace(tool+" "+caller.remoteChange) + " via " + caller.remote, Result: outcome}); err != nil {
 		d.logRuntimeError("remote mcp audit", err)
 	}
 }

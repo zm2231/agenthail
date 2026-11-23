@@ -10,7 +10,6 @@ import (
 	"github.com/zm2231/agenthail/internal/apitime"
 	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/ledger"
-	"github.com/zm2231/agenthail/internal/projectresolve"
 )
 
 type mcpLedgerInput struct {
@@ -19,18 +18,16 @@ type mcpLedgerInput struct {
 	Context int    `json:"context,omitempty" jsonschema:"words: also this many turns before and after it, 0 to 5, read on the capturing host"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"entries per page, 1 to 100 (ready: 1 to 50); default 25"`
 	Cursor  string `json:"cursor,omitempty" jsonschema:"nextCursor from a previous call"`
+	Project string `json:"project,omitempty" jsonschema:"a project by name or id, as agenthail_projects lists them; yours by default, required when you are in none"`
 }
 
 func (d *Daemon) mcpLedgerRead(_ context.Context, caller *mcpCaller, input mcpLedgerInput) (any, error) {
 	if !caller.has("ledger.read") {
 		return nil, refuse("capability_missing", "Reading the ledger needs ledger.read.")
 	}
-	key, err := projectresolve.LedgerKey(d.Registry, caller.project)
+	key, err := d.callerLedgerKey(caller, input.Project)
 	if err != nil {
 		return nil, err
-	}
-	if key == "" {
-		return nil, refuse("invalid", "Your session is not in a project with a ledger; the person adds one with agenthail project add.")
 	}
 	if input.View == "words" {
 		return d.mcpLedgerWords(key, input)

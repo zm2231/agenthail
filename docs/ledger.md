@@ -341,7 +341,7 @@ The digest covers, for each event in owner order:
 
 ## Reading the ledger from another program
 
-Sessions read the ledger with the `agenthail_ledger_read` MCP tool. Other clients use the daemon's HTTP API, which answers from the same code, so the two always agree.
+Sessions read the ledger with the `agenthail_ledger_read` MCP tool, their own project's unless they name another in `project` that their role reaches; a remote agent identity, which is in no project, always names one (see [Ledger reach](maintainers/mcp.md#ledger-reach)). Other clients use the daemon's HTTP API, which answers from the same code, so the two always agree.
 
 ```
 GET /api/v1/ledger?projectKey=<key>                         # the board

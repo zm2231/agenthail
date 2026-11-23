@@ -26,6 +26,8 @@ type mcpCaller struct {
 	extension    string
 	// remote is how a remote identity got in: its Access binding, or "token only".
 	remote string
+	// remoteChange says what a remote identity's call changed, for its history entry.
+	remoteChange string
 	// role is nil for an extension, which no agent action is open to.
 	role    *resolvedRole
 	outside bool
