@@ -76,8 +76,11 @@ impl TranscriptView {
         }
     }
 
-    pub fn feed(&mut self, seq: u64, events: Vec<feed::wire::Event>, cx: &mut Context<Self>) -> bool {
-        let changed = self.transcript.apply(seq, events);
+    pub fn feed(&mut self, batches: Vec<(u64, Vec<feed::wire::Event>)>, cx: &mut Context<Self>) -> bool {
+        let mut changed = false;
+        for (seq, events) in batches {
+            changed |= self.transcript.apply(seq, events);
+        }
         if changed {
             self.rebuild();
             cx.notify();
@@ -203,14 +206,19 @@ impl TranscriptView {
     }
 
     fn rebuild(&mut self) {
-        let next = self.transcript.blocks(self.focus_mode);
-        let same = self.blocks.iter().zip(next.iter()).take_while(|(a, b)| a == b).count();
-        let old_len = self.blocks.len();
-        self.blocks = next;
-        if same == old_len && same == self.blocks.len() {
+        let Some((start, tail)) = self.transcript.tail(self.focus_mode) else { return };
+        let start = start.min(self.blocks.len());
+        let old = &self.blocks[start..];
+        let same = old.iter().zip(tail.iter()).take_while(|(a, b)| a == b).count();
+        if same == old.len() && same == tail.len() {
             return;
         }
-        self.list.splice(same..old_len, self.blocks.len() - same);
+        let suffix = old[same..].iter().rev().zip(tail[same..].iter().rev()).take_while(|(a, b)| a == b).count();
+        let old_len = self.blocks.len();
+        let count = tail.len() - same - suffix;
+        self.blocks.truncate(start);
+        self.blocks.extend(tail);
+        self.list.splice(start + same..old_len - suffix, count);
     }
 
     fn toggle(&mut self, id: String, cx: &mut Context<Self>) {
@@ -440,10 +448,10 @@ impl Render for TranscriptView {
 impl TranscriptView {
     fn toggle_focus(&mut self, cx: &mut Context<Self>) {
         self.focus_mode = !self.focus_mode;
-        self.blocks.clear();
-        let next = self.transcript.blocks(self.focus_mode);
-        self.list.reset(next.len());
-        self.blocks = next;
+        if let Some((_, all)) = self.transcript.tail(self.focus_mode) {
+            self.list.reset(all.len());
+            self.blocks = all;
+        }
         cx.notify();
     }
 }

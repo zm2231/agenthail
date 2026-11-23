@@ -46,6 +46,8 @@ fn main() {
             snaps: list(&args, "--snaps"),
             trees: list(&args, "--trees"),
             out: value("--out").unwrap_or_else(|| ".".into()),
+            select_at: value("--select-at").and_then(|s| s.parse().ok()),
+            pageup_at: value("--pageup-at").and_then(|s| s.parse().ok()),
         });
         return;
     }

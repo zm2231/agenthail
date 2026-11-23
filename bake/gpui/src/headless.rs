@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use feed::wire::{Outcome, Rebuild, Sse, Wire};
-use gpui::{AppContext as _, HeadlessAppContext, px, size};
+use gpui::{AppContext as _, HeadlessAppContext, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PlatformInput, point, px, size};
 
 use crate::view::TranscriptView;
 
@@ -14,6 +14,8 @@ pub struct Plan {
     pub snaps: Vec<f64>,
     pub trees: Vec<f64>,
     pub out: String,
+    pub select_at: Option<f64>,
+    pub pageup_at: Option<f64>,
 }
 
 struct Assets;
@@ -62,11 +64,15 @@ pub fn run(plan: Plan) {
     let mut changed_ms: Vec<f64> = Vec::new();
     let mut idle_ms: Vec<f64> = Vec::new();
     let mut scrolled = false;
+    let mut selected = false;
+    let mut paged = false;
     let mut snaps = plan.snaps.clone();
     let mut trees = plan.trees.clone();
     for frame in 0..=frames {
         let t = frame as f64 / 60.0;
+        let start = Instant::now();
         let mut changed = false;
+        let mut batches = Vec::new();
         while let Some((ts, line)) = lines.get(next) {
             if (ts - first) / plan.speed > t {
                 break;
@@ -75,8 +81,11 @@ pub fn run(plan: Plan) {
             let Some(json) = sse.line(line) else { continue };
             let Ok(wire) = serde_json::from_str::<Wire>(&json) else { continue };
             if let Outcome::Events(seq, events) = rebuild.apply(wire) {
-                changed |= cx.update(|cx| view.update(cx, |v, cx| v.feed(seq, events, cx)));
+                batches.push((seq, events));
             }
+        }
+        if !batches.is_empty() {
+            changed |= cx.update(|cx| view.update(cx, |v, cx| v.feed(batches, cx)));
         }
         if let Some(at) = plan.scroll_at {
             if !scrolled && t >= at {
@@ -85,8 +94,46 @@ pub fn run(plan: Plan) {
                 cx.update(|cx| view.update(cx, |v, cx| v.scroll_up(900.0, cx)));
             }
         }
+        if let Some(at) = plan.select_at {
+            if !selected && t >= at {
+                selected = true;
+                let rows_before = cx.update(|cx| view.read(cx).visible());
+                cx.update_window(any, |_, window, cx| {
+                    let down = point(px(60.), px(120.));
+                    let up = point(px(900.), px(700.));
+                    window.dispatch_event(PlatformInput::MouseDown(MouseDownEvent { button: MouseButton::Left, position: down, modifiers: Modifiers::default(), click_count: 1, first_mouse: false }), cx);
+                    window.draw(cx).clear(cx);
+                    for k in 1..=12 {
+                        let f = k as f32 / 12.0;
+                        let p = point(px(60. + 840. * f), px(120. + 580. * f));
+                        window.dispatch_event(PlatformInput::MouseMove(MouseMoveEvent { position: p, pressed_button: Some(MouseButton::Left), modifiers: Modifiers::default() }), cx);
+                        window.draw(cx).clear(cx);
+                    }
+                    window.dispatch_event(PlatformInput::MouseUp(MouseUpEvent { button: MouseButton::Left, position: up, modifiers: Modifiers::default(), click_count: 1 }), cx);
+                    window.draw(cx).clear(cx);
+                    let text = gpui_base::TextSelection::selected_text(window, cx);
+                    let paragraphs = text.split("\n").filter(|l| !l.trim().is_empty()).count();
+                    println!("gpui selection: {} chars, {} non-empty lines, {} visible blocks; starts {:?}", text.len(), paragraphs, rows_before.len(), text.chars().take(60).collect::<String>());
+                    let _ = std::fs::write(format!("{}/gpui-selection.txt", plan.out), &text);
+                })
+                .expect("select");
+            }
+        }
+        if let Some(at) = plan.pageup_at {
+            if !paged && t >= at {
+                paged = true;
+                let before = cx.update(|cx| view.read(cx).visible());
+                cx.update_window(any, |_, window, cx| {
+                    window.dispatch_action(Box::new(crate::view::PageUp), cx);
+                    window.draw(cx).clear(cx);
+                })
+                .expect("page up");
+                let after = cx.update(|cx| view.read(cx).visible());
+                let first = |rows: &Vec<(String, f32)>| rows.first().map(|r| r.0.clone()).unwrap_or_default();
+                println!("gpui page up: first visible {} -> {} ({} rows before, {} after)", first(&before), first(&after), before.len(), after.len());
+            }
+        }
         cx.run_until_parked();
-        let start = Instant::now();
         cx.update_window(any, |_, window, cx| {
             window.draw(cx).clear(cx);
         })

@@ -29,7 +29,6 @@ struct App {
     transcript: Transcript,
     blocks: Vec<Block>,
     revs: Vec<u64>,
-    seen: HashMap<String, (Block, u64)>,
     counter: u64,
     open: HashSet<String>,
     focus: bool,
@@ -59,7 +58,6 @@ fn init() -> App {
         transcript: Transcript::default(),
         blocks: Vec::new(),
         revs: Vec::new(),
-        seen: HashMap::new(),
         counter: 0,
         open: HashSet::new(),
         focus: true,
@@ -68,7 +66,7 @@ fn init() -> App {
         status: "connecting".into(),
         applied: 0,
     };
-    if let Some(path) = value("--replay") {
+    if let Some(path) = value("--replay").or_else(|| std::env::var("BAKE_REPLAY").ok()) {
         let speed = value("--speed").and_then(|s| s.parse().ok()).unwrap_or(1.0);
         app.replay = Some(load_replay(&path, speed));
         app.status = "replay".into();
@@ -88,23 +86,24 @@ fn init() -> App {
 }
 
 fn rebuild(s: &mut App) {
-    let next = s.transcript.blocks(s.focus);
-    let mut revs = Vec::with_capacity(next.len());
-    let mut seen = HashMap::with_capacity(next.len());
-    for block in &next {
-        let rev = match s.seen.get(&block.id) {
-            Some((old, rev)) if old == block => *rev,
+    let Some((start, tail)) = s.transcript.tail(s.focus) else { return };
+    let start = start.min(s.blocks.len());
+    let previous: HashMap<&str, usize> = s.blocks[start..].iter().enumerate().map(|(i, b)| (b.id.as_str(), start + i)).collect();
+    let mut revs = Vec::with_capacity(tail.len());
+    for block in &tail {
+        let rev = match previous.get(block.id.as_str()) {
+            Some(&i) if s.blocks[i] == *block => s.revs[i],
             _ => {
                 s.counter += 1;
                 s.counter
             }
         };
         revs.push(rev);
-        seen.insert(block.id.clone(), (block.clone(), rev));
     }
-    s.blocks = next;
-    s.revs = revs;
-    s.seen = seen;
+    s.blocks.truncate(start);
+    s.revs.truncate(start);
+    s.blocks.extend(tail);
+    s.revs.extend(revs);
 }
 
 fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
@@ -295,7 +294,8 @@ fn view(s: &App, _: &mut Cx<App>) -> El {
 fn on_key(s: &mut App, key: &KeyEvent, _: &mut Tx) -> bool {
     if key.is_command('f') && key.mods.shift {
         s.focus = !s.focus;
-        s.seen.clear();
+        s.blocks.clear();
+        s.revs.clear();
         rebuild(s);
         return true;
     }
@@ -304,4 +304,79 @@ fn on_key(s: &mut App, key: &KeyEvent, _: &mut Tx) -> bool {
 
 fn main() {
     rune::run(AppSpec::<App> { poll: Some(poll), on_key: Some(on_key), ..AppSpec::new("Bake: Rune", (1100.0, 820.0), init, view) });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rune::{Env, Key, KeyEvent, Mods, Runtime};
+
+    fn keyed_tops(rt: &Runtime<App>) -> Vec<(f32, String)> {
+        let mut rows: Vec<(f32, String)> = rt
+            .elements()
+            .into_iter()
+            .filter_map(|e| {
+                let key = e.key.clone()?;
+                (key.starts_with("item:") || key.starts_with("tools:")).then(|| (e.rect[1], key))
+            })
+            .filter(|(y, _)| *y >= 40.0 && *y < 820.0)
+            .collect();
+        rows.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        rows
+    }
+
+    #[test]
+    fn selection_spans_messages_and_page_up_moves() {
+        let Ok(path) = std::env::var("BAKE_REPLAY") else { return };
+        assert!(std::path::Path::new(&path).exists());
+        let spec = AppSpec::<App> { poll: Some(poll), on_key: Some(on_key), ..AppSpec::new("Bake: Rune", (1100.0, 820.0), init, view) };
+        let mut rt = rune::App::new(spec).headless_runtime((1100.0, 820.0), Env { system_dark: true, scale: 1.0 });
+        let clipboard = rune::clipboard::memory();
+        rt.use_clipboard(&clipboard);
+        for _ in 0..(60 * 12) {
+            rt.frame(1.0 / 60.0);
+        }
+        let before = keyed_tops(&rt);
+        rt.key(KeyEvent { key: Key::PageUp, mods: Mods::default() });
+        for _ in 0..30 {
+            rt.frame(1.0 / 60.0);
+        }
+        let after = keyed_tops(&rt);
+        println!("page up: first {:?} -> {:?}", before.first(), after.first());
+        assert_ne!(before.first().map(|r| r.1.clone()), after.first().map(|r| r.1.clone()));
+        let (x, y) = rt
+            .elements()
+            .into_iter()
+            .filter(|e| e.role == "text" && e.rect[1] > 60.0 && e.rect[1] < 300.0 && e.rect[0] < 100.0 && e.rect[2] > 300.0)
+            .map(|e| (e.rect[0] + 4.0, e.rect[1] + 6.0))
+            .next()
+            .unwrap_or((60.0, 120.0));
+        let (ex, ey) = rt
+            .elements()
+            .into_iter()
+            .filter(|e| e.role == "text" && e.rect[1] > y + 200.0 && e.rect[1] < 790.0)
+            .map(|e| (e.rect[0] + 30.0, e.rect[1] + 6.0))
+            .fold((x, y), |acc, p| if p.1 > acc.1 { p } else { acc });
+        println!("drag {x},{y} -> {ex},{ey}");
+        rt.pointer_move(x, y);
+        rt.pointer_down(x, y);
+        rt.frame(1.0 / 60.0);
+        for k in 1..=20 {
+            let f = k as f32 / 20.0;
+            rt.pointer_move(x + (ex - x) * f, y + (ey - y) * f);
+            rt.frame(1.0 / 60.0);
+        }
+        rt.pointer_up(ex, ey);
+        rt.frame(1.0 / 60.0);
+        let selected = rt.selected_text().unwrap_or_default();
+        rt.key(KeyEvent { key: Key::Command('c'), mods: Mods { cmd: true, ..Mods::default() } });
+        for _ in 0..3 {
+            rt.frame(1.0 / 60.0);
+        }
+        let copied: String = clipboard.text().map(|t| t.as_str().to_owned()).unwrap_or_default();
+        let lines = selected.lines().filter(|l| !l.trim().is_empty()).count();
+        println!("selection: {} chars, {} lines, copied {} chars; starts {:?}", selected.len(), lines, copied.len(), selected.chars().take(60).collect::<String>());
+        assert!(lines >= 1);
+        assert_eq!(copied, selected);
+    }
 }

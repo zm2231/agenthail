@@ -468,6 +468,7 @@ dependencies = [
  "anyhow",
  "async-channel",
  "feed",
+ "gpui-base",
  "gpui-component",
  "gpui-pre",
  "gpui-pre-platform",

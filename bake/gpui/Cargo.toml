@@ -13,6 +13,7 @@ path = "src/main.rs"
 feed = { path = "../feed" }
 gpui = { package = "gpui-pre", version = "=0.3.9", features = ["test-support"] }
 gpui-component = "=0.8.0"
+gpui-base = "=0.8.0"
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.9", features = ["font-kit", "runtime_shaders", "test-support", "bench-support"] }
 anyhow = "1"
 async-channel = "2"

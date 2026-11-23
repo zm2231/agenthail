@@ -143,3 +143,29 @@ fn recorded_session_replays_into_blocks() {
     assert!(blocks.iter().any(|b| matches!(b.kind, Kind::Work(_))));
     assert!(blocks.iter().any(|b| matches!(b.kind, Kind::User(_))));
 }
+
+#[test]
+fn incremental_tail_matches_full_rebuild() {
+    let path = std::env::var("FEED_SYNTH").unwrap_or_else(|_| "/Volumes/4/caches/agenthail-v2-fixtures/synth60.tsv".into());
+    let Ok(text) = std::fs::read_to_string(&path) else { return };
+    let mut sse = feed::wire::Sse::default();
+    let mut rebuild = feed::wire::Rebuild::default();
+    let mut transcript = feed::Transcript::default();
+    let mut shown: Vec<feed::Block> = Vec::new();
+    let mut checks = 0;
+    for line in text.lines() {
+        let Some((_, rest)) = line.split_once('\t') else { continue };
+        let Some(json) = sse.line(rest) else { continue };
+        let Ok(wire) = serde_json::from_str::<feed::wire::Wire>(&json) else { continue };
+        if let feed::wire::Outcome::Events(seq, events) = rebuild.apply(wire) {
+            transcript.apply(seq, events);
+            if let Some((start, tail)) = transcript.tail(true) {
+                shown.truncate(start);
+                shown.extend(tail);
+            }
+            assert_eq!(shown, transcript.blocks(true), "diverged after seq {seq}");
+            checks += 1;
+        }
+    }
+    assert!(checks > 100, "checks {checks}");
+}
