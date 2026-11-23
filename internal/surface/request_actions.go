@@ -62,7 +62,8 @@ func (r Request) Actions() []RequestAction {
 		return append(actions, RequestAction{ID: "reply", Title: "Deny with message…"})
 	}
 	question, ok := r.WithOptionIDs().singleChoice()
-	if !ok {
+	// A question shown clipped is answered only once opened to its whole text.
+	if !ok || question.Detail != "" {
 		return nil
 	}
 	actions := make([]RequestAction, 0, maxQuestionOptions+1)

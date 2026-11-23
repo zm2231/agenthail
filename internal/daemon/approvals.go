@@ -40,7 +40,7 @@ func (d *Daemon) answerApproval(ctx context.Context, ask registry.Ask, response 
 	d.sendWithdraws()
 	if choice == registry.ApprovalDeny {
 		d.log.Printf("approval %s: denied by %s: %s", ask.ID, p.actor(), approval.Description)
-		d.tellApprovalAsker(approval, "[agenthail] The person denied: "+approval.Description+".", "denied")
+		d.tellApprovalAsker(approval, "[agenthail] The person denied: "+askedFor(approval)+".", "denied")
 		return actionOK(map[string]any{"ok": true, "result": map[string]any{"requestId": ask.ID, "outcome": "denied"}}), nil
 	}
 	reply := d.runApproval(ctx, p, approval)
@@ -52,9 +52,9 @@ func (d *Daemon) answerApproval(ctx context.Context, ask registry.Ask, response 
 		d.log.Printf("approval %s: record the run: %s", ask.ID, err)
 	}
 	d.log.Printf("approval %s: allowed by %s, %s: %s (%d)", ask.ID, p.actor(), status, approval.Description, reply.Status)
-	message := "[agenthail] The person allowed: " + approval.Description + ". It ran: " + summary
+	message := "[agenthail] The person allowed: " + askedFor(approval) + ". It ran: " + summary
 	if status == registry.ApprovalFailed {
-		message = "[agenthail] The person allowed: " + approval.Description + ". It failed: " + summary
+		message = "[agenthail] The person allowed: " + askedFor(approval) + ". It failed: " + summary
 	}
 	d.tellApprovalAsker(approval, message, status)
 	return actionOK(map[string]any{"ok": true, "result": map[string]any{"requestId": ask.ID, "outcome": status, "status": reply.Status, "body": json.RawMessage(approvalBody(reply))}}), nil
@@ -110,7 +110,7 @@ func (d *Daemon) expireApprovals(now time.Time) {
 		d.withdrawAsk(ask.ID)
 		if approval, found, err := d.Registry.Approval(ask.ID); err == nil && found {
 			d.log.Printf("approval %s: expired unanswered: %s", ask.ID, approval.Description)
-			d.tellApprovalAsker(approval, "[agenthail] The person did not answer within a day, so this was not done: "+approval.Description+". Ask again if you still need it.", registry.ApprovalExpired)
+			d.tellApprovalAsker(approval, "[agenthail] The person did not answer within a day, so this was not done: "+askedFor(approval)+". Ask again if you still need it.", registry.ApprovalExpired)
 		}
 		d.publishAsk(ask.SessionID)
 	}
@@ -129,6 +129,11 @@ func (d *Daemon) settleUnranApprovals() {
 			d.log.Printf("approval %s: record not run: %s", approval.AskID, err)
 			continue
 		}
-		d.tellApprovalAsker(approval, "[agenthail] The person allowed: "+approval.Description+", but Agenthail restarted before it ran, so it was not done. Ask again if you still need it.", registry.ApprovalNotRun)
+		d.tellApprovalAsker(approval, "[agenthail] The person allowed: "+askedFor(approval)+", but Agenthail restarted before it ran, so it was not done. Ask again if you still need it.", registry.ApprovalNotRun)
 	}
+}
+
+// askedFor names the ask, so two results of the same action read as two.
+func askedFor(approval registry.Approval) string {
+	return approval.Description + " (ask " + approval.AskID + ")"
 }

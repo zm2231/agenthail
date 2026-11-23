@@ -33,6 +33,7 @@ const (
 	MaxAskQuestion = 160
 	MaxAskLabel    = 40
 	MaxAskDoes     = 90
+	MaxAskDetail   = 2000
 )
 
 type AskOption struct {
@@ -51,6 +52,7 @@ type AskQuestion struct {
 	Options     []AskOption `json:"options"`
 	Recommended string      `json:"recommended,omitempty"`
 	Links       []AskLink   `json:"links,omitempty"`
+	Detail      string      `json:"detail,omitempty"`
 }
 
 type AskHop struct {

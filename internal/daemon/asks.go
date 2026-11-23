@@ -124,7 +124,7 @@ func askQuestions(input askInput) []registry.AskQuestion {
 func askRequest(ask registry.Ask) surface.Request {
 	questions := make([]surface.Question, 0, len(ask.Questions))
 	for _, in := range ask.Questions {
-		question := surface.Question{Question: in.Question, Options: make([]surface.QuestionOption, 0, len(in.Options))}
+		question := surface.Question{Question: in.Question, Detail: in.Detail, Options: make([]surface.QuestionOption, 0, len(in.Options))}
 		for i, option := range in.Options {
 			question.Options = append(question.Options, surface.QuestionOption{ID: option.ID, Label: option.Label, Description: option.Does})
 			if option.ID == in.Recommended {

@@ -3200,6 +3200,11 @@ a.attached-file {
 .pager-links a {
   color: var(--accent);
 }
+.pager-detail {
+  color: var(--quiet);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
 .request-actions {
   display: flex;
   flex-wrap: wrap;

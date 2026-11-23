@@ -8,7 +8,16 @@ enum AskPreview {
     static let requestID = "ask-447a922cae82"
 
     nonisolated static var requestsJSON: String {
-        answered ? #"{"permissionMode":"","requests":[]}"# : #"{"permissionMode":"","requests":[{"id":"\#(requestID)","kind":"ask","tool":"","title":"Ready to ship","prompt":"Ready to ship","questions":[{"question":"Deploy it now?","header":"","multiSelect":false,"options":[{"id":"o0","label":"Deploy","description":"Ship the build that passed review"},{"id":"o1","label":"Wait","description":"hold until Monday"}],"suggested":0,"links":[{"title":"Runbook","url":"https://example.com/runbook"}]}],"actions":[{"id":"o0","title":"Deploy"},{"id":"o1","title":"Wait"},{"id":"reply","title":"Reply…"}],"alwaysAllow":false,"createdAt":"2026-09-12T04:03:00Z"}\#(second)]}"#
+        if ProcessInfo.processInfo.arguments.contains("--preview-clipped-approval") { return clippedApprovalJSON }
+        return answered ? #"{"permissionMode":"","requests":[]}"# : #"{"permissionMode":"","requests":[{"id":"\#(requestID)","kind":"ask","tool":"","title":"Ready to ship","prompt":"Ready to ship","questions":[{"question":"Deploy it now?","header":"","multiSelect":false,"options":[{"id":"o0","label":"Deploy","description":"Ship the build that passed review"},{"id":"o1","label":"Wait","description":"hold until Monday"}],"suggested":0,"links":[{"title":"Runbook","url":"https://example.com/runbook"}]}],"actions":[{"id":"o0","title":"Deploy"},{"id":"o1","title":"Wait"},{"id":"reply","title":"Reply…"}],"alwaysAllow":false,"createdAt":"2026-09-12T04:03:00Z"}\#(second)]}"#
+    }
+
+    static let clippedDetail = "Make its project's coordinator as @release-train-coordinator-for-the-fieldnotes-search-and-ranking-overhaul, renaming it from @fieldnotes-search-indexing-and-ranking-overhaul-lead-for-the-winter-release, the session demo. Why: the release needs one lead"
+
+    nonisolated private static var clippedApprovalJSON: String {
+        let question: [String: Any] = ["question": String(clippedDetail.prefix(159)) + "…", "detail": clippedDetail, "header": "", "multiSelect": false, "options": [["id": "allow", "label": "Allow once", "description": ""], ["id": "deny", "label": "Deny", "description": ""]]]
+        let request: [String: Any] = ["id": requestID, "kind": "ask", "tool": "", "title": "Make its project's coordinator as @release-train-coordinator…", "prompt": "Make its project's coordinator as @release-train-coordinator…", "questions": [question], "optionsOnly": true, "alwaysAllow": false, "createdAt": "2026-09-12T04:03:00Z"]
+        return String(data: try! JSONSerialization.data(withJSONObject: ["permissionMode": "", "requests": [request]]), encoding: .utf8)!
     }
 
     nonisolated private static var second: String {

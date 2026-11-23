@@ -131,7 +131,7 @@ export function renderPage(pager) {
     const suggested = question.suggested === index ? ' <small class="pager-suggested">Recommended</small>' : "";
     return `<button type="button" class="pager-option" data-pager-pick="${index}" role="${question.multiSelect ? "checkbox" : "radio"}" aria-checked="${picked}"><kbd aria-hidden="true">${index < 9 ? index + 1 : ""}</kbd><span aria-hidden="true">${question.multiSelect ? (picked ? "☑" : "☐") : (picked ? "◉" : "○")}</span><span><span>${escape(option.label)}${suggested}</span>${option.description ? `<small>${escape(option.description)}</small>` : ""}</span></button>`;
   }).join("");
-  return `${header}<p class="pager-question">${escape(question.question)}</p>${links(question)}${options}${pager.optionsOnly ? "" : `<label><span>Other</span><input type="text" data-pager-other placeholder="Your own answer" value="${escape(pager.typed[pager.step] || "")}"></label>`}${isSingle(pager) ? noteField(pager) : ""}`;
+  return `${header}<p class="pager-question">${escape(question.question)}</p>${question.detail ? `<p class="pager-detail">${escape(question.detail)}</p>` : ""}${links(question)}${options}${pager.optionsOnly ? "" : `<label><span>Other</span><input type="text" data-pager-other placeholder="Your own answer" value="${escape(pager.typed[pager.step] || "")}"></label>`}${isSingle(pager) ? noteField(pager) : ""}`;
 }
 
 export function renderActions(pager, requestId, respondAttribute = "request-respond") {

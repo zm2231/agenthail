@@ -49,6 +49,7 @@ type Question struct {
 	Options     []QuestionOption `json:"options"`
 	Suggested   *int             `json:"suggested,omitempty"`
 	Links       []QuestionLink   `json:"links,omitempty"`
+	Detail      string           `json:"detail,omitempty"`
 }
 
 type QuestionLink struct {

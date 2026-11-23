@@ -201,6 +201,9 @@ func (d *Daemon) relayEnds(id int64) (string, string, bool) {
 
 // The person reads this, not the agent's words, so an agent cannot label one
 // action as another. An action it cannot word cannot be asked for.
+// A long session title is not who the session is; its id is, and fits.
+const sessionLabelLimit = 40
+
 func (d *Daemon) describePersonAction(api string, request personActionRequest) (string, error) {
 	if api == daemonapi.PersonActionSettings {
 		if request.Action == "resume-after-limit" {
@@ -221,7 +224,10 @@ func (d *Daemon) describePersonAction(api string, request personActionRequest) (
 		if id, err := d.Registry.ResolveTarget(ref); err == nil {
 			ref = id
 		}
-		return d.rowNameOr(ref, ref)
+		if name := d.rowNameOr(ref, ref); len([]rune(name)) <= sessionLabelLimit {
+			return name
+		}
+		return ref
 	}
 	onHost := ""
 	if request.Host != "" {
@@ -246,13 +252,25 @@ func (d *Daemon) describePersonAction(api string, request personActionRequest) (
 	case "project-setting":
 		return fmt.Sprintf("Set %s to %s for project %s", request.Setting, request.Value, project(request.ProjectID)), nil
 	case "coordinator-set":
-		return "Make " + session(request.SessionID) + onHost + " its project's coordinator", nil
+		id := strings.TrimSpace(request.SessionID)
+		if resolved, err := d.Registry.ResolveTarget(id); err == nil {
+			id = resolved
+		}
+		var project *projectresolve.CatalogProject
+		if request.Host == "" {
+			project, _, _ = d.recordedProject(id)
+		}
+		name := coordinatorLabelName(request.Name, project)
+		if old, err := d.Registry.ReverseAlias(id); err == nil && old != "" && request.Host == "" && strings.HasPrefix(name, " as @") && name != " as @"+old {
+			name += ", renaming it from @" + old + ","
+		}
+		return "Make its project's coordinator" + name + " the session " + session(request.SessionID) + onHost, nil
 	case "coordinator-new":
 		where := strings.TrimSpace(request.Cwd)
 		if where == "" {
 			where = strings.TrimSpace(request.Path)
 		}
-		return fmt.Sprintf("Start a new %s coordinator for the project at %s%s", request.Surface, where, onHost), nil
+		return fmt.Sprintf("Start a new %s coordinator%s for %s%s", request.Surface, coordinatorLabelName(request.Name, nil), where, onHost), nil
 	case "coordinator-clear":
 		return "Clear the coordinator of project " + project(request.ProjectID), nil
 	case "relay-add":
@@ -301,10 +319,6 @@ func (d *Daemon) describePersonAction(api string, request personActionRequest) (
 	return "", refuse("invalid", "the action "+request.Action+" cannot be asked for.")
 }
 
-func (d *Daemon) rowName(sessionID string) string {
-	return d.rowNameOr(sessionID, "An agent")
-}
-
 func (d *Daemon) rowNameOr(sessionID, unknown string) string {
 	alias, name, err := d.Registry.SessionLabel(sessionID)
 	switch {
@@ -340,9 +354,10 @@ func (d *Daemon) askPersonToAllow(ctx context.Context, caller *mcpCaller, action
 	}
 	now := time.Now()
 	ask, raised, err := d.Registry.RaiseApproval(registry.Ask{
-		Title: clipText(fmt.Sprintf("%s asks: %s", d.rowName(caller.session.ID), description), registry.MaxAskTitle),
+		Title: clipText(description, registry.MaxAskTitle),
 		Questions: []registry.AskQuestion{{
 			Question: clipText(question, registry.MaxAskQuestion),
+			Detail:   fullText(question, registry.MaxAskQuestion, registry.MaxAskDetail),
 			Options:  []registry.AskOption{{ID: registry.ApprovalAllow, Label: "Allow once"}, {ID: registry.ApprovalDeny, Label: "Deny"}},
 		}},
 	}, registry.Approval{SessionID: caller.session.ID, API: action.API, Payload: body, Description: description, Reason: reason, ExpiresAt: now.Add(approvalLifetime)}, now)
@@ -358,4 +373,24 @@ func (d *Daemon) askPersonToAllow(ctx context.Context, caller *mcpCaller, action
 		d.publishAsk(ask.SessionID)
 	}
 	return ask, nil
+}
+
+// The person approves the name a coordinator change gives, not only the session.
+func coordinatorLabelName(requested string, project *projectresolve.CatalogProject) string {
+	name := strings.TrimPrefix(strings.TrimSpace(requested), "@")
+	if name == "" && project != nil {
+		name = DefaultCoordinatorName(project.DisplayName)
+	}
+	if name == "" {
+		return " with its project's default name"
+	}
+	return " as @" + name
+}
+
+// fullText is text kept whole for the person to open when its label is clipped.
+func fullText(text string, shown, limit int) string {
+	if len([]rune(text)) <= shown {
+		return ""
+	}
+	return clipText(text, limit)
 }

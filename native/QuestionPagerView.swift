@@ -95,6 +95,11 @@ struct QuestionPagerView: View {
                 Text(question.header).font(.caption).foregroundStyle(RoleStyle(.muted))
             }
             Text(question.question).font(.body.weight(.medium))
+            if let detail = question.detail, !detail.isEmpty {
+                Text(detail).font(.footnote).foregroundStyle(RoleStyle(.muted))
+                    .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                    .accessibilityIdentifier("pager-detail")
+            }
             if let links = question.links {
                 PagerLinks(links: links, accent: accent)
             }
