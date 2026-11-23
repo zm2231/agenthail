@@ -370,7 +370,7 @@ impl Client {
             .post(&format!("{}/api/v1/actions", self.base))
             .set("Authorization", &format!("Bearer {}", self.token))
             .set("Idempotency-Key", &key)
-            .send_json(serde_json::json!({"action": "send", "sessionId": session, "message": message}))
+            .send_json(serde_json::json!({"action": "send", "sessionId": session, "message": message, "author": "person"}))
             .map_err(|e| anyhow!(e.to_string()))?;
         Ok(())
     }

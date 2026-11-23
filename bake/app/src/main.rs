@@ -149,6 +149,7 @@ pub fn select(s: &mut App, id: &str) {
     s.selected = Some(id.to_string());
     s.screen = Screen::Session;
     s.composer = TextEdit::new("");
+    s.composer.focused = true;
     s.send_status.clear();
     s.lru.retain(|x| x != id);
     s.lru.push(id.to_string());
