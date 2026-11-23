@@ -1,11 +1,11 @@
 package daemon
 
 import (
-	"github.com/zm2231/agenthail/internal/agentroles"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/zm2231/agenthail/internal/agentroles"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -108,5 +108,38 @@ func TestALeadsDefaultSteerItsRoleRefusesQueuesAndSaysSoOnlyToTheLead(t *testing
 	}
 	if told := person.told(); len(told) != 0 {
 		t.Fatalf("a refused default steer told the person %q", told)
+	}
+}
+
+func TestARefusedDefaultSteerWithTheLongestClientRequestIDStillQueues(t *testing.T) {
+	h, _ := pairedBusyWorker(t)
+	setRoleDecision(t, h.local.reg, agentroles.Lead, "remote-project-control", agentroles.Ask)
+	longest := strings.Repeat("k", registry.ActionReceiptKeyLimit-len("agenthail_send:"))
+
+	out, refused := callMCP(t, h.caller, "agenthail_send", map[string]any{"target": "vps::@builder", "message": "the answer is left", "clientRequestId": longest})
+	notice, _ := out["notice"].(string)
+	if refused || !strings.HasPrefix(notice, "Queued: a send to a session you started or lead goes now by default") || h.remote.reg.QueueCount("remote-c") != 1 {
+		t.Fatalf("a refused default steer with the longest clientRequestId: refused=%v out=%v", refused, out)
+	}
+}
+
+func TestARetriedDefaultSteerTheOwningHostRefusedReplaysItsQueuedResult(t *testing.T) {
+	h, _ := pairedBusyWorker(t)
+	if _, err := h.local.reg.WriteDB().Exec(`INSERT INTO session_ceilings(session_id,ceiling) VALUES('local-a','{"permission":"edits"}')`); err != nil {
+		t.Fatal(err)
+	}
+	args := map[string]any{"target": "vps::@builder", "message": "the answer is left", "clientRequestId": "answer-1"}
+
+	first, refused := callMCP(t, h.caller, "agenthail_send", args)
+	notice, _ := first["notice"].(string)
+	if refused || !strings.Contains(notice, "but this one could not") || h.reached("steer:") {
+		t.Fatalf("a default steer the owning host refuses: refused=%v out=%v delivered=%q", refused, first, h.remote.fake.delivered())
+	}
+	again, refused := callMCP(t, h.caller, "agenthail_send", args)
+	if refused || mustJSONString(t, again) != mustJSONString(t, first) {
+		t.Fatalf("the retry answered %v, want the first answer %v", again, first)
+	}
+	if queued := h.remote.reg.QueueCount("remote-c"); queued != 1 || h.reached("steer:") {
+		t.Fatalf("the retry acted again: queued=%d delivered=%q", queued, h.remote.fake.delivered())
 	}
 }

@@ -49,15 +49,23 @@ func (d *Daemon) mcpSend(ctx context.Context, caller *mcpCaller, input mcpSendIn
 		return d.mcpSendIn(ctx, caller, input, true)
 	}
 	input.chosen = mode
+	key, err := input.key("agenthail_send")
+	if err != nil {
+		return nil, err
+	}
+	input.ClientRequestID = ""
+	return d.mcpOnce(ctx, caller, key, input, func() (any, error) {
+		return d.mcpSendNowElseQueue(ctx, caller, input, why)
+	})
+}
+
+func (d *Daemon) mcpSendNowElseQueue(ctx context.Context, caller *mcpCaller, input mcpSendInput, why string) (any, error) {
 	result, err := d.mcpSendIn(ctx, caller, input, false)
 	var refusal *mcpRefusal
 	if !errors.As(err, &refusal) || !nowRefused(refusal) {
 		return result, err
 	}
 	input.Mode, input.chosen = registry.SendModeQueue, ""
-	if input.ClientRequestID != "" {
-		input.ClientRequestID += ":queued"
-	}
 	if result, err = d.mcpSendIn(ctx, caller, input, true); err != nil {
 		return nil, err
 	}
