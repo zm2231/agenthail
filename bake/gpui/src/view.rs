@@ -57,6 +57,55 @@ fn start(source: Source) -> async_channel::Receiver<(Instant, Message)> {
 }
 
 impl TranscriptView {
+    pub fn manual(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let list = ListState::new(0, ListAlignment::Bottom, px(1200.));
+        list.set_follow_mode(FollowMode::Tail);
+        let focus = cx.focus_handle();
+        window.focus(&focus, cx);
+        Self {
+            transcript: Transcript::default(),
+            blocks: Vec::new(),
+            focus_mode: true,
+            open: HashSet::new(),
+            list,
+            focus,
+            status: "headless".into(),
+            pending_paint: None,
+            metrics: Metrics::new(),
+            finished: false,
+        }
+    }
+
+    pub fn feed(&mut self, seq: u64, events: Vec<feed::wire::Event>, cx: &mut Context<Self>) -> bool {
+        let changed = self.transcript.apply(seq, events);
+        if changed {
+            self.rebuild();
+            cx.notify();
+        }
+        changed
+    }
+
+    pub fn scroll_up(&mut self, distance: f32, cx: &mut Context<Self>) {
+        self.list.scroll_by(px(-distance));
+        self.list.pause_following_tail();
+        cx.notify();
+    }
+
+    pub fn visible(&self) -> Vec<(String, f32)> {
+        let viewport = self.list.viewport_bounds();
+        let top = self.list.logical_scroll_top().item_ix.min(self.blocks.len());
+        let from = top.saturating_sub(80);
+        let to = (top + 80).min(self.blocks.len());
+        (from..to)
+            .filter_map(|ix| {
+                let b = self.list.bounds_for_item(ix)?;
+                let y = f32::from(b.origin.y - viewport.origin.y);
+                let bottom = y + f32::from(b.size.height);
+                (bottom > 0.0 && y < f32::from(viewport.size.height)).then(|| (self.blocks[ix].id.clone(), y))
+            })
+            .collect()
+    }
+
     pub fn new(source: Source, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let list = ListState::new(0, ListAlignment::Bottom, px(1200.));
         list.set_follow_mode(FollowMode::Tail);
@@ -75,6 +124,41 @@ impl TranscriptView {
             }
         })
         .detach();
+        let env_secs = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<f64>().ok());
+        if let Some(at) = env_secs("BAKE_SCROLL_AT") {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(std::time::Duration::from_secs_f64(at)).await;
+                let _ = this.update(cx, |this, cx| {
+                    let height = this.list.viewport_bounds().size.height;
+                    this.list.scroll_by(-height * 1.5);
+                    this.list.pause_following_tail();
+                    cx.notify();
+                });
+                loop {
+                    cx.background_executor().timer(std::time::Duration::from_secs(2)).await;
+                    let alive = this.update(cx, |this, _| {
+                        let top = this.list.logical_scroll_top();
+                        let y = this.list.bounds_for_item(top.item_ix).map(|b| f32::from(b.origin.y)).unwrap_or(f32::NAN);
+                        let id = this.blocks.get(top.item_ix).map(|b| b.id.clone()).unwrap_or_default();
+                        this.metrics.note(&format!("anchor\t{}\t{}\t{:.1}\t{:.1}\tblocks={}", top.item_ix, id, f32::from(top.offset_in_item), y, this.blocks.len()));
+                    });
+                    if alive.is_err() {
+                        return;
+                    }
+                }
+            })
+            .detach();
+        }
+        if let Some(at) = env_secs("BAKE_QUIT_AT") {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(std::time::Duration::from_secs_f64(at)).await;
+                let _ = this.update(cx, |this, cx| {
+                    eprintln!("{}", this.metrics.summary("gpui"));
+                    cx.quit();
+                });
+            })
+            .detach();
+        }
         Self {
             transcript: Transcript::default(),
             blocks: Vec::new(),

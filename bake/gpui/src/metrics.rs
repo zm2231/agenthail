@@ -31,6 +31,12 @@ impl Metrics {
         }
     }
 
+    pub fn note(&mut self, line: &str) {
+        if let Some(log) = &mut self.log {
+            let _ = writeln!(log, "{:.3}\t{line}", self.started.elapsed().as_secs_f64());
+        }
+    }
+
     pub fn summary(&mut self, label: &str) -> String {
         let mut sorted = self.latencies.clone();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());

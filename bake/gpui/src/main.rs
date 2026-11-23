@@ -1,3 +1,4 @@
+mod headless;
 mod metrics;
 mod palette;
 mod view;
@@ -25,7 +26,29 @@ fn parse_args() -> Source {
     std::process::exit(2);
 }
 
+fn list(args: &[String], flag: &str) -> Vec<f64> {
+    args.iter()
+        .position(|a| a == flag)
+        .and_then(|i| args.get(i + 1))
+        .map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect())
+        .unwrap_or_default()
+}
+
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--headless") {
+        let value = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
+        headless::run(headless::Plan {
+            replay: value("--replay").expect("--replay"),
+            speed: value("--speed").and_then(|s| s.parse().ok()).unwrap_or(10.0),
+            seconds: value("--seconds").and_then(|s| s.parse().ok()).unwrap_or(40.0),
+            scroll_at: value("--scroll-at").and_then(|s| s.parse().ok()),
+            snaps: list(&args, "--snaps"),
+            trees: list(&args, "--trees"),
+            out: value("--out").unwrap_or_else(|| ".".into()),
+        });
+        return;
+    }
     let source = parse_args();
     gpui::Application::with_platform(gpui_platform::current_platform(false)).run(move |cx: &mut App| {
         gpui_component::init(cx);
