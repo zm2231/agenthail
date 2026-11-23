@@ -5,6 +5,7 @@ import SwiftUI
 struct Row: Identifiable, Equatable {
     let id: String
     var lines: Int
+    var index = 0
 }
 
 @MainActor
@@ -24,7 +25,7 @@ final class Feed: ObservableObject {
 @MainActor let memory = TranscriptRowMemory()
 
 func rows(_ prefix: String, _ count: Int) -> [Row] {
-    (0..<count).map { Row(id: "\(prefix)\($0)", lines: 1 + ($0 * 7) % 9) }
+    (0..<count).map { Row(id: "\(prefix)\($0)", lines: 1 + ($0 * 7) % 9, index: $0) }
 }
 
 // The desktop transcript's layout: settled rows in a lazy stack, the newest in an eager stack below it.
@@ -96,6 +97,7 @@ struct RowView: View {
     var body: some View {
         Text(String(repeating: "transcript line\n", count: row.lines) + row.id)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.sRGB, red: Double(row.index % 64 * 4) / 255, green: Double(row.index / 64 % 64 * 4) / 255, blue: 200 / 255))
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TranscriptRows.contentSpace)) } action: { frames[row.id] = $0 }
             .onAppear { live.insert(row.id) }
             .onDisappear { live.remove(row.id) }
@@ -123,7 +125,7 @@ struct TranscriptRowResizeTest {
         feed.transcript = "S"
         feed.rows = rows("S", 400)
         spin(0.8)
-        stream(scroll, feed)
+        stream(scroll, hosting, feed)
 
         print(failures == 0 ? "ok" : "\(failures) failures")
         exit(failures == 0 ? 0 : 1)
@@ -157,7 +159,7 @@ struct TranscriptRowResizeTest {
 
     // A following reader at the end of a long transcript while rows stream in, the last row grows, and a queued message changes the bottom inset.
     @MainActor
-    static func stream(_ scroll: NSScrollView, _ feed: Feed) {
+    static func stream(_ scroll: NSScrollView, _ hosting: NSView, _ feed: Feed) {
         var generator = SplitMix(seed: 589)
         var next = 0
         var found: [String] = []
@@ -165,7 +167,7 @@ struct TranscriptRowResizeTest {
             switch generator.next() % 10 {
             case 0..<5:
                 next += 1
-                feed.rows.append(Row(id: "Sn\(next)", lines: 1 + Int(generator.next() % 14)))
+                feed.rows.append(Row(id: "Sn\(next)", lines: 1 + Int(generator.next() % 14), index: feed.rows.count))
             case 5..<8:
                 feed.rows[feed.rows.count - 1].lines += 1 + Int(generator.next() % 3)
             case 8:
@@ -173,27 +175,54 @@ struct TranscriptRowResizeTest {
             default:
                 for _ in 0..<(2 + Int(generator.next() % 5)) {
                     next += 1
-                    feed.rows.append(Row(id: "Sn\(next)", lines: 1 + Int(generator.next() % 14)))
+                    feed.rows.append(Row(id: "Sn\(next)", lines: 1 + Int(generator.next() % 14), index: feed.rows.count))
                 }
             }
             spin(0.02 + Double(generator.next() % 200) / 1000)
-            if overlap(feed) != nil {
+            if misdrawn(hosting, feed) != nil {
                 spin(0.4)
-                if let still = overlap(feed) { found.append(still) }
+                if let still = misdrawn(hosting, feed) { found.append(still) }
             }
             if found.count >= 3 { break }
         }
-        expect(found.isEmpty, "no two laid-out rows overlap while a long transcript streams: \(found.joined(separator: "; "))")
+        expect(found.isEmpty, "rows in view are drawn once each and in order while a long transcript streams: \(found.joined(separator: "; "))")
     }
 
+    // Each row paints its index into its background, so the column of colors down the view is the order rows were drawn in.
     @MainActor
-    static func overlap(_ feed: Feed) -> String? {
-        let shown = feed.rows.enumerated().filter { live.contains($0.element.id) && frames[$0.element.id] != nil }
-        for (a, b) in zip(shown, shown.dropFirst()) {
-            let fa = frames[a.element.id]!, fb = frames[b.element.id]!
-            guard fa.maxY > visible.minY, fb.minY < visible.maxY, fb.minY < fa.maxY - 1 else { continue }
-            let side = { (index: Int) in index < feed.split ? "lazy" : "eager" }
-            return "\(a.element.id) (\(side(a.offset)) \(Int(fa.minY))-\(Int(fa.maxY))) under \(b.element.id) (\(side(b.offset)) \(Int(fb.minY))-\(Int(fb.maxY))), split \(feed.split)/\(feed.rows.count), view \(Int(visible.minY))-\(Int(visible.maxY))"
+    static func drawn(_ view: NSView, top: CGFloat, bottom: CGFloat) -> [Int] {
+        view.layoutSubtreeIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds),
+              let space = CGColorSpace(name: CGColorSpace.sRGB) else { return [] }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let image = rep.cgImage,
+              let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                                      space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let data = context.data else { return [] }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        let scale = CGFloat(image.height) / view.bounds.height
+        let x = Int((view.bounds.width - 32) * scale)
+        var runs: [Int] = []
+        for line in Int(top * scale)..<(image.height - Int(bottom * scale)) {
+            let at = (line * image.width + x) * 4
+            let r = Int(data.load(fromByteOffset: at, as: UInt8.self)), g = Int(data.load(fromByteOffset: at + 1, as: UInt8.self)), b = Int(data.load(fromByteOffset: at + 2, as: UInt8.self))
+            guard abs(b - 200) <= 3 else { continue }
+            let index = (r + 2) / 4 + 64 * ((g + 2) / 4)
+            if runs.last != index { runs.append(index) }
+        }
+        let falls = zip(runs, runs.dropFirst()).filter { $0 > $1 }.count
+        return falls * 2 > runs.count ? runs.reversed() : runs
+    }
+
+    // Rows in view are drawn once each, in transcript order, with none hidden under another.
+    @MainActor
+    static func misdrawn(_ view: NSView, _ feed: Feed) -> String? {
+        let runs = drawn(view, top: 50, bottom: feed.inset + 6)
+        guard !runs.isEmpty else { return "nothing drawn" }
+        for (a, b) in zip(runs, runs.dropFirst()) where b != a + 1 {
+            let name = { (i: Int) in i < feed.rows.count ? feed.rows[i].id : "?\(i)" }
+            let side = { (i: Int) in i < feed.split ? "lazy" : "eager" }
+            return "\(name(a)) (\(side(a))) then \(name(b)) (\(side(b))) down the view, drawn \(runs.map(name)), split \(feed.split)/\(feed.rows.count)"
         }
         return nil
     }
