@@ -115,8 +115,9 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
                 let wasFollowing = following
                 // Jump to latest during an input wins over it.
                 if following { layout.input = nil }
-                // A reader's input holds following off until it ends, however near the end its first steps leave them.
-                following = layout.input == nil && TranscriptFollowing.next(following, pass)
+                // A reader's input holds following off until it ends, and while a gesture runs only its end turns following on.
+                let gesture = phase == .interacting || phase == .decelerating
+                following = layout.input == nil && (following || !gesture) && TranscriptFollowing.next(following, pass)
                 // A pin left the position at the bottom edge; once the reader leaves, it holds where they are so it is not applied again.
                 if !following, wasFollowing || layout.leftByInput {
                     layout.leftByInput = false
