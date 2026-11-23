@@ -173,9 +173,9 @@ func TestABurstPushesWhenAnyOfItsTurnsWasNotStartedByAgents(t *testing.T) {
 	byAgents := finished
 	byAgents.agentStarted = true
 
-	d.turnJudgmentQueued(worker.ID, "agent-1")
-	d.scheduleTurnPush(worker.ID, "agent-1", byAgents)
+	d.turnJudgmentQueued(worker.ID, "person-1")
 	d.scheduleTurnPush(worker.ID, "person-1", finished)
+	d.scheduleTurnPush(worker.ID, "agent-1", byAgents)
 	d.background.wait()
 	if count := pushes.count("turn.completed"); count != 1 {
 		t.Fatalf("a burst with a turn the person started pushed %d times", count)
