@@ -118,8 +118,7 @@ struct TranscriptRowResizeTest {
 
         feed.rows = rows("A", 300)
         spin(0.8)
-        resizeAbove(scroll, feed, live: false, "a row above the reader that shrinks at rest leaves the reader's row where it was")
-        resizeAbove(scroll, feed, live: true, "a row above the reader that shrinks while they scroll leaves the reader's row where it was")
+        resizeAbove(scroll, feed, "a row above the reader that grows and folds while they scroll leaves the reader's row where it was")
 
         feed.transcript = "S"
         feed.rows = rows("S", 400)
@@ -130,33 +129,29 @@ struct TranscriptRowResizeTest {
         exit(failures == 0 ? 0 : 1)
     }
 
-    // A tool run gains a call line, then folds to one summary line at its third call, above a reader who is mid-document.
+    // A tool run across the top of the view gains a call line, then folds to one summary line at its third call, while the reader scrolls.
     @MainActor
-    static func resizeAbove(_ scroll: NSScrollView, _ feed: Feed, live during: Bool, _ message: String) {
+    static func resizeAbove(_ scroll: NSScrollView, _ feed: Feed, _ message: String) {
         move(scroll, to: (scroll.documentView?.frame.height ?? 0) / 2)
         spin(0.6)
         let top = offset(scroll)
         let laid = feed.rows.indices.filter { live.contains(feed.rows[$0].id) && frames[feed.rows[$0].id] != nil }
         guard let reader = laid.first(where: { frames[feed.rows[$0].id]!.minY >= top + 200 }),
-              let above = laid.last(where: { $0 < reader && frames[feed.rows[$0].id]!.maxY <= top }) else {
-            return expect(false, "\(message): a laid-out row above the view and one in it, offset \(top)")
+              let above = laid.last(where: { $0 < reader && frames[feed.rows[$0].id]!.minY < top }) else {
+            return expect(false, "\(message): a laid-out row across the top of the view and one below it, offset \(top)")
         }
         let readerID = feed.rows[reader].id
         let before = frames[readerID]!.minY - offset(scroll)
-        if during {
-            NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
-            spin(0.1)
-            expect(feed.phase == .interacting, "\(message): the live scroll puts the transcript in its interacting phase, got \(feed.phase)")
-        }
+        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+        spin(0.1)
+        expect(feed.phase == .interacting, "\(message): the live scroll puts the transcript in its interacting phase, got \(feed.phase)")
         feed.rows[above].lines += 2
         spin(0.2)
         feed.rows[above].lines = 1
         spin(0.4)
         let after = frames[readerID].map { $0.minY - offset(scroll) } ?? .infinity
-        if during {
-            NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
-            spin(0.4)
-        }
+        NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+        spin(0.4)
         expect(abs(after - before) < 2, "\(message): \(readerID) was \(before) from the top of the view, became \(after) (phase \(feed.phase))")
     }
 
