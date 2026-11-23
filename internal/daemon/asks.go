@@ -573,6 +573,9 @@ func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session
 		options = surface.SendOptions{SourceSessionID: by}
 	}
 	if ask.Origin == registry.AskOriginQuestion {
+		if by != registry.AskToPerson {
+			options = surface.SendOptions{SourceSessionID: surface.SystemSessionID}
+		}
 		options.BusyDelivery = string(deliverypolicy.Steer)
 	}
 	receipt, deliveryErr := coordinator.Sender{Service: d.coordinator()}.DeliverWithOptions(ctx, adapter, session, message, "", options)

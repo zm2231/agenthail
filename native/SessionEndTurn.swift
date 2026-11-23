@@ -18,6 +18,7 @@ struct SessionTurnState: Codable, Hashable {
 
 struct SessionAsk: Codable, Hashable {
     var id: String
+    var origin: String? = nil
     var title: String
     var routedTo: String
     var askedAt: String? = nil
@@ -25,6 +26,9 @@ struct SessionAsk: Codable, Hashable {
     var open: [String]? = nil
 
     var waitsOnPerson: Bool { !id.isEmpty && routedTo == "person" && (answeredAt ?? "").isEmpty }
+
+    /// A question the session's own tool asked holds it on the person the way a provider prompt does, though the provider holds nothing open.
+    var holdsSession: Bool { origin == "question" && waitsOnPerson }
 }
 
 extension SessionState {

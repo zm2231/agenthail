@@ -34,8 +34,8 @@ func codexAsyncQuestion(threadID string, item map[string]any) (surface.ProviderQ
 	question := surface.ProviderQuestion{Ref: threadID + ":" + itemID}
 	for _, raw := range asList(item["questions"]) {
 		entry, _ := raw.(map[string]any)
-		title := strings.TrimSpace(transcript.String(entry, "title"))
-		if title == "" {
+		title := transcript.String(entry, "title")
+		if strings.TrimSpace(title) == "" {
 			return surface.ProviderQuestion{}, false
 		}
 		asked := surface.Question{Question: title}
@@ -58,7 +58,9 @@ func codexAsyncQuestion(threadID string, item map[string]any) (surface.ProviderQ
 const codexQuestionWindow = 100
 
 // codexQuestions reads the thread's newest items, across turns: the model
-// may ask and keep working, and an answer may come from any client.
+// may ask and keep working. A reply envelope answers the questions it names,
+// one index at a time as Codex's own clients answer them; any other message
+// from the person answers every question asked before it.
 func codexQuestions(ctx context.Context, conn codexClient, threadID string) (*surface.ProviderQuestions, error) {
 	response, err := conn.Request(ctx, "thread/items/list", map[string]any{
 		"threadId":      threadID,
@@ -71,33 +73,75 @@ func codexQuestions(ctx context.Context, conn codexClient, threadID string) (*su
 	result, _ := response["result"].(map[string]any)
 	entries, _ := result["data"].([]any)
 	found := &surface.ProviderQuestions{}
-	answered := map[string]bool{}
+	replied := map[string]codexReplied{}
 	for _, raw := range entries {
 		entry, _ := raw.(map[string]any)
 		item, _ := entry["item"].(map[string]any)
 		switch item["type"] {
 		case "userMessage":
-			for _, itemID := range codexRepliedItems(codexItemText(item)) {
-				ref := threadID + ":" + itemID
-				if !answered[ref] {
-					answered[ref] = true
-					found.Answered = append(found.Answered, ref)
-				}
+			text := codexItemText(item)
+			replies, envelope := codexReplies(text)
+			if !envelope && !codexFromAnotherSender(text) {
+				found.Superseded = true
+			}
+			for itemID, reply := range replies {
+				replied[itemID] = replied[itemID].with(reply)
 			}
 		case "agentMessage":
-			if question, ok := codexAsyncQuestion(threadID, item); ok && !answered[question.Ref] {
-				found.Open = append(found.Open, question)
+			question, ok := codexAsyncQuestion(threadID, item)
+			if !ok {
+				continue
 			}
+			if found.Superseded || replied[transcript.String(item, "id")].covers(len(question.Questions)) {
+				found.Answered = append(found.Answered, question.Ref)
+				continue
+			}
+			found.Open = append(found.Open, question)
 		}
 	}
 	slices.Reverse(found.Open)
 	return found, nil
 }
 
-// codexRepliedItems are the question items a user message answers. Codex
-// names each question by its tool, item and index; an older client named
-// the item alone.
-func codexRepliedItems(text string) []string {
+// codexFromAnotherSender reports a message Agenthail labeled as another
+// session's or its own, which answers nothing the session asked the person.
+func codexFromAnotherSender(text string) bool {
+	return strings.HasPrefix(text, "[from ") || strings.HasPrefix(text, "[agenthail]")
+}
+
+// codexReplied is what replies answered of one question item: the indexes
+// named, or the whole item when an older client named the item alone.
+type codexReplied struct {
+	whole   bool
+	indexes map[int]bool
+}
+
+func (r codexReplied) with(other codexReplied) codexReplied {
+	merged := codexReplied{whole: r.whole || other.whole, indexes: map[int]bool{}}
+	for index := range r.indexes {
+		merged.indexes[index] = true
+	}
+	for index := range other.indexes {
+		merged.indexes[index] = true
+	}
+	return merged
+}
+
+func (r codexReplied) covers(questions int) bool {
+	if r.whole {
+		return true
+	}
+	for index := range questions {
+		if !r.indexes[index] {
+			return false
+		}
+	}
+	return questions > 0
+}
+
+// codexReplies reads a user message as Codex's clients do: an envelope, on
+// its own or after the IDE context prefix, answers the questions it names.
+func codexReplies(text string) (map[string]codexReplied, bool) {
 	text = strings.TrimSpace(text)
 	const ideContext, ideRequest = "# Context from my IDE setup:\n", "\n## My request for Codex:\n"
 	if at := strings.LastIndex(text, ideRequest); at >= 0 && strings.HasPrefix(text, ideContext) {
@@ -105,40 +149,50 @@ func codexRepliedItems(text string) []string {
 	}
 	body, found := strings.CutPrefix(text, codexQuestionReplyOpen)
 	if !found {
-		return nil
+		return nil, false
 	}
-	body, _, found = strings.Cut(body, codexQuestionReplyClose)
+	body, found = strings.CutSuffix(body, codexQuestionReplyClose)
 	if !found {
-		return nil
+		return nil, false
 	}
 	type reply struct {
 		QuestionItemID string `json:"questionItemId"`
+		Question       string `json:"question"`
+		Answer         string `json:"answer"`
 	}
 	var replies []reply
 	if err := json.Unmarshal([]byte(body), &replies); err != nil {
 		var one reply
 		if json.Unmarshal([]byte(body), &one) != nil {
-			return nil
+			return nil, false
 		}
 		replies = []reply{one}
 	}
-	var items []string
+	if len(replies) == 0 {
+		return nil, false
+	}
+	answered := map[string]codexReplied{}
 	for _, reply := range replies {
-		itemID := reply.QuestionItemID
 		var named []any
-		if json.Unmarshal([]byte(itemID), &named) == nil && len(named) == 3 && named[0] == codexAsyncQuestionTool {
-			itemID, _ = named[1].(string)
+		if json.Unmarshal([]byte(reply.QuestionItemID), &named) == nil && len(named) == 3 && named[0] == codexAsyncQuestionTool {
+			itemID, _ := named[1].(string)
+			index, ok := named[2].(float64)
+			if itemID != "" && ok {
+				answered[itemID] = answered[itemID].with(codexReplied{indexes: map[int]bool{int(index): true}})
+			}
+			continue
 		}
-		if itemID != "" && !slices.Contains(items, itemID) {
-			items = append(items, itemID)
+		if reply.QuestionItemID != "" {
+			answered[reply.QuestionItemID] = answered[reply.QuestionItemID].with(codexReplied{whole: true})
 		}
 	}
-	return items
+	return answered, true
 }
 
 // QuestionReply is the message Codex reads as the answers to the async
-// question ref names: one reply per answered question, naming it by the id
-// Codex gives it, with any note after the envelope.
+// question ref names: one reply per question, naming it by the id Codex
+// gives it, all in one envelope. Every question needs an answer, and a note
+// goes with the last one, since Codex reads nothing outside the envelope.
 func (c *Codex) QuestionReply(ref string, questions []surface.Question, decision surface.Decision) (string, error) {
 	_, itemID, found := strings.Cut(ref, ":")
 	if !found || itemID == "" {
@@ -149,34 +203,33 @@ func (c *Codex) QuestionReply(ref string, questions []surface.Question, decision
 		Question       string `json:"question"`
 		QuestionItemID string `json:"questionItemId"`
 	}
-	var replies []reply
+	replies := make([]reply, 0, len(questions))
 	for index, question := range questions {
 		answer := strings.TrimSpace(decision.Answers[question.Question])
 		if answer == "" {
-			continue
+			return "", fmt.Errorf("answer %q too", question.Question)
 		}
 		id, err := codexReplyJSON([]any{codexAsyncQuestionTool, itemID, index})
 		if err != nil {
 			return "", err
 		}
-		replies = append(replies, reply{Answer: answer, Question: codexReplyTitle(question.Question), QuestionItemID: id})
-	}
-	note := strings.TrimSpace(decision.Message)
-	if len(replies) == 0 {
-		if note == "" {
-			return "", errors.New("answer at least one question or write a note")
+		title := question.Question
+		if question.Detail != "" {
+			title = question.Detail
 		}
-		return note, nil
+		replies = append(replies, reply{Answer: answer, Question: codexReplyTitle(title), QuestionItemID: id})
+	}
+	if len(replies) == 0 {
+		return "", errors.New("this question has nothing to answer")
+	}
+	if note := strings.TrimSpace(decision.Message); note != "" {
+		replies[len(replies)-1].Answer += "\n\n" + note
 	}
 	body, err := codexReplyJSON(replies)
 	if err != nil {
 		return "", err
 	}
-	message := codexQuestionReplyOpen + "\n" + body + "\n" + codexQuestionReplyClose
-	if note != "" {
-		message += "\n\n" + note
-	}
-	return message, nil
+	return codexQuestionReplyOpen + "\n" + body + "\n" + codexQuestionReplyClose, nil
 }
 
 // codexReplyTitle bounds a question's title the way Codex does before

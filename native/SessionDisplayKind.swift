@@ -59,6 +59,7 @@ enum SessionDisplayKind: String, CaseIterable, Identifiable {
         }
         if session.waitingOn != nil { return .waiting }
         if session.status == "busy" { return .working }
+        if session.ask?.holdsSession == true { return .waiting }
         if let resume = session.limitResume, resume.state != "released" { return .limited }
         if let limit = session.usageLimit, !lifted(limit, now: now) { return .limited }
         if session.turnStop != nil { return .stopped }

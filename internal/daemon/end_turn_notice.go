@@ -90,6 +90,7 @@ func (d *Daemon) sessionPushTag(session *surface.Session) string {
 
 type dashboardAsk struct {
 	ID         string    `json:"id"`
+	Origin     string    `json:"origin,omitempty"`
 	Title      string    `json:"title"`
 	RoutedTo   string    `json:"routedTo"`
 	AskedAt    time.Time `json:"askedAt"`
@@ -102,7 +103,7 @@ func askRow(ask *registry.Ask) *dashboardAsk {
 	if ask == nil {
 		return nil
 	}
-	return &dashboardAsk{ID: ask.ID, Title: ask.Title, RoutedTo: ask.RoutedTo, AskedAt: ask.CreatedAt, AnsweredAt: ask.AnsweredAt, Deadline: ask.Deadline, Open: ask.Open}
+	return &dashboardAsk{ID: ask.ID, Origin: ask.Origin, Title: ask.Title, RoutedTo: ask.RoutedTo, AskedAt: ask.CreatedAt, AnsweredAt: ask.AnsweredAt, Deadline: ask.Deadline, Open: ask.Open}
 }
 
 func (ask *dashboardAsk) asksPerson() bool {

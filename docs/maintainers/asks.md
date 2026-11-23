@@ -106,12 +106,12 @@ Some providers ask through a tool that holds nothing open. Codex's `request_user
 </send_user_message_question_reply>
 ```
 
-Such a question is an ask of origin `question` on the session's row; `ref` is `<thread>:<item>` and stays internal.
+Such a question is an ask of origin `question` on the session's row; `ref` is `<thread>:<item>` and stays internal. One item asking several questions is one ask with several questions.
 
-- The daemon raises it when an observation finds the question among the thread's newest 100 items (`thread/items/list`, newest first, across turns), routed like an agent's ask. A question is raised once: an ask answered, withdrawn or dismissed is not raised again.
-- It shows like an agent's ask: the card, the inbox, `turnState` `waiting_person`, and an `ask.opened` push. The turn that asked stays quiet.
-- Answering it composes that envelope, one entry per answered question, with any note after it. The envelope is delivered as the answerer's message; a turn still running takes it as a steer, where the answerer may steer, as Codex's own clients do.
-- A reply envelope seen in the thread from any other client withdraws the ask.
+- The daemon raises it when an observation finds the question among the thread's newest 100 items (`thread/items/list`, newest first, across turns), routed like an agent's ask. A question is raised once: an ask answered, withdrawn or dismissed is not raised again. While it is open the session stays on the observer's watch list, so an idle thread is still read.
+- It shows like an agent's ask: the card, the inbox, `turnState` `waiting_person`, the header "Waiting on you" while the person holds it, and an `ask.opened` push. The turn that asked stays quiet.
+- Answering it needs every question answered. It composes one envelope, one entry per question, each echoing the question's full text cut to 512 bytes with line breaks as spaces, and folds any note into the last answer so the message stays a bare envelope Codex parses. The person's answer is delivered as the person's message; a lead's is delivered unlabeled, since a `[from …]` prefix would break the envelope. A turn still running takes it as a steer, as Codex's own clients do.
+- The ask is withdrawn when the thread shows every question answered by an envelope from another client, or when the person writes anything else after the question: Codex reads that message as the answer. Messages Agenthail or another agent wrote (`[agenthail]`, `[from …]`) do not count.
 
 ## A question asked only in the reply
 

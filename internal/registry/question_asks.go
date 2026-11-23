@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -34,26 +35,33 @@ func (r *Registry) QuestionAskNeedsRoute(sessionID string, open []surface.Provid
 	return false, nil
 }
 
-// SyncQuestionAsks raises one ask, routed to routedTo, for each question
-// with no ask yet, and withdraws the open asks whose question was answered
-// elsewhere. A question is raised once: an ask answered, withdrawn or
-// dismissed is not raised again.
+// SyncQuestionAsks raises one ask, routed to routedTo, for each open
+// question with no ask yet, and withdraws an open ask whose question was
+// answered, or superseded by the person writing something else. A question
+// is raised once: an ask answered, withdrawn or dismissed is not raised
+// again.
 func (r *Registry) SyncQuestionAsks(sessionID string, found surface.ProviderQuestions, routedTo string, now time.Time) (QuestionSync, error) {
 	var sync QuestionSync
+	ctx := context.Background()
+	known, err := r.questionAskRefs(ctx, r.read, sessionID)
+	if err != nil || !questionAsksChange(known, found, routedTo) {
+		return sync, err
+	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return sync, err
 	}
 	defer tx.Rollback()
-	ctx := context.Background()
-	known, err := r.questionAskRefs(ctx, tx, sessionID)
-	if err != nil {
+	if known, err = r.questionAskRefs(ctx, tx, sessionID); err != nil {
 		return sync, err
 	}
+	open := make(map[string]bool, len(found.Open))
+	for _, question := range found.Open {
+		open[question.Ref] = true
+	}
 	at := time.UnixMilli(now.UnixMilli()).UTC()
-	for _, ref := range found.Answered {
-		ask, asked := known[ref]
-		if !asked || ask.State != AskOpen {
+	for ref, ask := range known {
+		if ask.State != AskOpen || !questionSettled(ref, found, open) {
 			continue
 		}
 		if _, err := tx.Exec(`UPDATE asks SET state=?,answered_at_ms=? WHERE id=? AND state=?`, AskWithdrawn, at.UnixMilli(), ask.ID, AskOpen); err != nil {
@@ -74,6 +82,28 @@ func (r *Registry) SyncQuestionAsks(sessionID string, found surface.ProviderQues
 		sync.Opened = append(sync.Opened, ask)
 	}
 	return sync, tx.Commit()
+}
+
+func questionAsksChange(known map[string]Ask, found surface.ProviderQuestions, routedTo string) bool {
+	open := make(map[string]bool, len(found.Open))
+	for _, question := range found.Open {
+		open[question.Ref] = true
+		if _, asked := known[question.Ref]; !asked && routedTo != "" {
+			return true
+		}
+	}
+	for ref, ask := range known {
+		if ask.State == AskOpen && questionSettled(ref, found, open) {
+			return true
+		}
+	}
+	return false
+}
+
+// questionSettled reports whether the history read settles the question ref
+// names: answered within it, or asked before something else the person wrote.
+func questionSettled(ref string, found surface.ProviderQuestions, open map[string]bool) bool {
+	return !open[ref] && (found.Superseded || slices.Contains(found.Answered, ref))
 }
 
 func (r *Registry) questionAskRefs(ctx context.Context, q askQuerier, sessionID string) (map[string]Ask, error) {

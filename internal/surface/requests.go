@@ -150,11 +150,13 @@ type ProviderQuestion struct {
 }
 
 // ProviderQuestions is what a read of a session's newest history found:
-// questions asked and not yet answered there, and the refs of questions
-// answered there, whichever client answered them.
+// the questions still open, the refs of questions answered since they were
+// asked, and whether the person wrote anything that was not an answer to a
+// question, which settles every question asked before it.
 type ProviderQuestions struct {
-	Open     []ProviderQuestion
-	Answered []string
+	Open       []ProviderQuestion
+	Answered   []string
+	Superseded bool
 }
 
 // QuestionReplier is implemented by an adapter whose observations report

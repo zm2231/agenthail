@@ -9,9 +9,10 @@ import (
 
 // syncQuestions makes the session's question asks follow what its provider's
 // history shows: a new question raises an ask routed like an agent's own, and
-// a question answered in the provider's own client withdraws its ask.
+// a question answered or superseded in the provider's history withdraws its
+// ask.
 func (d *Daemon) syncQuestions(session surface.Session, found surface.ProviderQuestions) {
-	if len(found.Open)+len(found.Answered) == 0 {
+	if len(found.Open)+len(found.Answered) == 0 && !found.Superseded {
 		return
 	}
 	routedTo, hearer, routed := "", noticeRecipient{}, false
