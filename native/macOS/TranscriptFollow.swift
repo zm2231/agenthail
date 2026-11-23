@@ -251,7 +251,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
 
     private func readerLeaves() {
         let now = ContinuousClock.now
-        if layout.input != nil {
+        if layout.input != nil, !following {
             layout.input?.last = now
             return
         }
@@ -272,6 +272,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
             let gesture = phase == .interacting || phase == .decelerating
             guard quiet && !gesture || input.started.duration(to: .now) >= Self.inputCap else { continue }
             layout.input = nil
+            guard !gesture else { return }
             following = abs(geometry.contentOffset.y - input.start) < 0.5 || Self.atEnd(geometry)
             if following { pinToEnd() }
         }
