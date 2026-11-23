@@ -49,9 +49,11 @@ struct PlainTextInputTest {
         let smart = NSTextView()
         window.contentView = smart
         window.makeFirstResponder(smart)
-        smart.insertText(typed, replacementRange: smart.selectedRange())
+        smart.insertText("x", replacementRange: smart.selectedRange())
         smart.isAutomaticDashSubstitutionEnabled = true
         smart.isAutomaticQuoteSubstitutionEnabled = true
+        smart.string = ""
+        smart.insertText(typed, replacementRange: smart.selectedRange())
         smart.checkTextInDocument(nil)
         check(smart.string != typed, "a text view with smart dashes and quotes on rewrites the sample, so the checks below can catch it: \(smart.string.debugDescription)")
 
