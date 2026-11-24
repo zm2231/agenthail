@@ -15,29 +15,7 @@ final class ComposerLongPasteUITests: XCTestCase {
                 let name = "\(theme) \(shape)"
                 XCUIDevice.shared.orientation = orientation
                 let app = XCUIApplication()
-                app.launchArguments = ["--preview-session", "--preview-theme", theme]
-                app.launch()
-                let input = app.textViews["composer-input"]
-                XCTAssertTrue(input.waitForExistence(timeout: 10))
-                for _ in 0 ..< 3 where !app.keyboards.firstMatch.exists {
-                    input.tapWhenReady(timeout: 10)
-                    _ = app.keyboards.firstMatch.waitForExistence(timeout: 3)
-                }
-                XCTAssertTrue(app.keyboards.firstMatch.exists, "\(name): the composer takes the keyboard")
-                input.press(forDuration: 1.2)
-                menu(app, "Select All").tap()
-                input.typeText(XCUIKeyboardKey.delete.rawValue)
-                XCTAssertEqual(input.value as? String ?? "", "", "\(name): the preview draft is cleared")
-                UIPasteboard.general.string = pasted
-                input.press(forDuration: 1.2)
-                let paste = menu(app, "Paste")
-                XCTAssertTrue(paste.waitForExistence(timeout: 5), "\(name): the edit menu offers Paste")
-                paste.tap()
-                XCTAssertTrue(until { !(input.value as? String ?? "").isEmpty }, "\(name): the paste lands in the composer")
-                if !until(2, { focused(input) }) {
-                    input.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
-                }
-                XCTAssertTrue(until { focused(input) }, "\(name): the composer keeps the keyboard after the paste")
+                let input = pasteIntoEmptyComposer(app, theme: theme, pasted: pasted, name: name)
                 app.typeText("Would this be useful for us?")
                 let screen = app.windows.firstMatch.frame
                 XCTAssertLessThan(input.frame.height, screen.height * 0.4, "\(name): the paste stays one token, not fifteen lines")
@@ -52,6 +30,51 @@ final class ComposerLongPasteUITests: XCTestCase {
                 app.terminate()
             }
         }
+    }
+
+    func testKeysTypedAfterAPasteTokenFollowItAsTyped() {
+        let pasted = (1 ... 15).map { "\($0). A step of the release plan that someone pasted in" }.joined(separator: "\n")
+        let typed = " then run --json FILE... a -- b"
+        let app = XCUIApplication()
+        let input = pasteIntoEmptyComposer(app, theme: "dark", pasted: pasted, name: "dark narrow")
+        let before = input.value as? String ?? ""
+        app.typeText(typed)
+        let after = input.value as? String ?? ""
+        attach(app, "typed after the token")
+        XCTAssertTrue(after.hasPrefix(before), "the token stays first: \(after)")
+        XCTAssertEqual(String(after.dropFirst(before.count)), typed, "every key lands after the token, punctuation as typed")
+        app.terminate()
+    }
+
+    private func pasteIntoEmptyComposer(_ app: XCUIApplication, theme: String, pasted: String, name: String) -> XCUIElement {
+        app.launchArguments = ["--preview-session", "--preview-theme", theme]
+        app.launch()
+        let input = app.textViews["composer-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        for _ in 0 ..< 3 where !app.keyboards.firstMatch.exists {
+            input.tapWhenReady(timeout: 10)
+            _ = app.keyboards.firstMatch.waitForExistence(timeout: 3)
+        }
+        XCTAssertTrue(app.keyboards.firstMatch.exists, "\(name): the composer takes the keyboard")
+        input.press(forDuration: 1.2)
+        menu(app, "Select All").tap()
+        input.typeText(XCUIKeyboardKey.delete.rawValue)
+        XCTAssertEqual(input.value as? String ?? "", "", "\(name): the preview draft is cleared")
+        UIPasteboard.general.string = pasted
+        input.press(forDuration: 1.2)
+        let paste = menu(app, "Paste")
+        XCTAssertTrue(paste.waitForExistence(timeout: 5), "\(name): the edit menu offers Paste")
+        paste.tap()
+        XCTAssertTrue(until { !(input.value as? String ?? "").isEmpty }, "\(name): the paste lands in the composer")
+        let banner = XCUIApplication(bundleIdentifier: "com.apple.springboard").descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS[c] %@", "pasted from")).firstMatch
+        let bannerShown = banner.waitForExistence(timeout: 2)
+        XCTAssertTrue(banner.waitForNonExistence(timeout: 15), "\(name): the pasted-from banner goes away (seen: \(bannerShown))")
+        if !until(2, { focused(input) }) {
+            input.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
+        }
+        XCTAssertTrue(until { focused(input) }, "\(name): the composer keeps the keyboard after the paste")
+        return input
     }
 
     private func focused(_ element: XCUIElement) -> Bool {
