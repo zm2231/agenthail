@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
@@ -34,16 +33,24 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 		}
 	}
 	s.mu.Lock()
-	providerKey := event.ProviderKey
-	if strings.HasPrefix(providerKey, "renderer:") {
-		providerKey = s.epoch + ":" + providerKey
-	}
-	if event.Cursor > 0 && providerKey != "" && event.Cursor <= s.appendCursors[providerKey] {
+	payload, bodyKey, unknownBase := s.normalizeLocked(event)
+	if unknownBase != "" {
 		s.mu.Unlock()
-		return
+		stored, err := s.storedBody(unknownBase)
+		if err != nil {
+			s.mu.Lock()
+			s.appendFailed = true
+			s.mu.Unlock()
+			s.appendSourceError(fmt.Errorf("session journal append failed: %w", err))
+			return
+		}
+		s.mu.Lock()
+		if stored != nil && s.appendBodies.get(unknownBase) == nil {
+			s.appendBodies.put(unknownBase, stored)
+		}
+		payload, bodyKey, _ = s.normalizeLocked(event)
 	}
-	payload, bodyKey := s.normalizeLocked(event)
-	previous := s.appendBodies[bodyKey]
+	previous := s.appendBodies.get(bodyKey)
 	s.mu.Unlock()
 	var written *streamedBody
 	var changed bool
@@ -60,23 +67,34 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 		s.appendSourceError(fmt.Errorf("session journal append failed: %w", err))
 		return
 	}
-	s.mu.Lock()
 	if bodyKey != "" {
-		s.appendBodies[bodyKey] = written
+		s.mu.Lock()
+		s.appendBodies.put(bodyKey, written)
+		s.mu.Unlock()
 	}
-	if event.Cursor > 0 && providerKey != "" && event.Cursor > s.appendCursors[providerKey] {
-		if s.appendCursors == nil {
-			s.appendCursors = map[string]uint64{}
-		}
-		s.appendCursors[providerKey] = event.Cursor
-	}
-	s.mu.Unlock()
 	if changed {
 		s.wakeFollowers()
 	}
 	if s.manager.prompts != nil {
 		s.manager.prompts(s.session, payload)
 	}
+}
+
+// storedBody reads back the text the journal holds for an item, for an append
+// to an item whose text the source no longer keeps.
+func (s *sessionSource) storedBody(providerKey string) (*streamedBody, error) {
+	entry, found, err := s.manager.registry.SessionJournalEntryByProviderKey(s.session.ID, providerKey)
+	if err != nil || !found {
+		return nil, err
+	}
+	var payload sessionJournalPayload
+	if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+		return nil, err
+	}
+	if payload.BodyRef != "" {
+		return knownBody(string(entry.FullBody), payload.BodyRef), nil
+	}
+	return knownBody(payload.Body, ""), nil
 }
 
 func (s *sessionSource) persist(payload sessionJournalPayload) (registry.SessionJournalEntry, bool, error) {

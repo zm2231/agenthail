@@ -19,17 +19,6 @@ var (
 )
 
 func (s *sessionSource) run() {
-	provider, localTranscript := s.adapter.(surface.LocalTranscriptProvider)
-	if !localTranscript || !provider.RequiresLocalTranscript(&s.session) {
-		if reader, ok := s.adapter.(surface.StreamCursorReader); ok {
-			if cursor, err := reader.StreamCursor(s.ctx, &s.session); err == nil {
-				s.streamCursor = cursor
-				s.streamCursorSet = true
-			} else if !errors.Is(err, surface.ErrUnsupported) && s.ctx.Err() == nil {
-				s.streamCursorErr = fmt.Errorf("session stream cursor unavailable: %w", err)
-			}
-		}
-	}
 	defer func() {
 		s.closeFollowers()
 		s.remove()
@@ -39,11 +28,6 @@ func (s *sessionSource) run() {
 	seedErr := s.seedJournal()
 	s.setSeedErr(seedErr)
 	close(s.seeded)
-	if s.streamCursorErr != nil {
-		s.appendSourceError(s.streamCursorErr)
-		<-s.ctx.Done()
-		return
-	}
 	for delay := sessionSeedRetryDelay; seedErr != nil; delay = min(2*delay, sessionSeedRetryMaxDelay) {
 		if !s.wait(delay) {
 			return
@@ -75,8 +59,6 @@ func (s *sessionSource) run() {
 			continue
 		}
 		followDelay = sessionSeedRetryDelay
-		current.StreamCursor = s.streamCursor
-		current.StreamCursorSet = s.streamCursorSet
 		current.TranscriptOffset = s.session.TranscriptOffset
 		current.TranscriptOffsetSet = s.session.TranscriptOffsetSet
 		current.TranscriptIdentity = s.session.TranscriptIdentity

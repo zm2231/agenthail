@@ -25,30 +25,26 @@ type sessionSourceManager struct {
 }
 
 type sessionSource struct {
-	started         chan struct{}
-	startErr        error
-	seeded          chan struct{}
-	done            chan struct{}
-	seedErr         error
-	manager         *sessionSourceManager
-	session         surface.Session
-	adapter         surface.Surface
-	epoch           string
-	ctx             context.Context
-	cancel          context.CancelFunc
-	mu              sync.Mutex
-	providerMu      sync.Mutex
-	followers       map[uint64]chan struct{}
-	nextID          uint64
-	holders         map[string]int
-	appendBodies    map[string]*streamedBody
-	appendCursors   map[string]uint64
-	streamCursor    uint64
-	streamCursorSet bool
-	streamCursorErr error
-	anonymous       uint64
-	sourceVersion   uint64
-	appendFailed    bool
+	started       chan struct{}
+	startErr      error
+	seeded        chan struct{}
+	done          chan struct{}
+	seedErr       error
+	manager       *sessionSourceManager
+	session       surface.Session
+	adapter       surface.Surface
+	epoch         string
+	ctx           context.Context
+	cancel        context.CancelFunc
+	mu            sync.Mutex
+	providerMu    sync.Mutex
+	followers     map[uint64]chan struct{}
+	nextID        uint64
+	holders       map[string]int
+	appendBodies  sourceBodies
+	anonymous     uint64
+	sourceVersion uint64
+	appendFailed  bool
 }
 
 func newSessionSourceManager(store *registry.Registry) *sessionSourceManager {
@@ -125,7 +121,7 @@ func (m *sessionSourceManager) acquire(ctx context.Context, session *surface.Ses
 		start := false
 		if source == nil {
 			sourceCtx, cancel := context.WithCancel(context.Background())
-			source = &sessionSource{manager: m, session: *session, adapter: adapter, ctx: sourceCtx, cancel: cancel, started: make(chan struct{}), seeded: make(chan struct{}), done: make(chan struct{}), followers: map[uint64]chan struct{}{}, holders: map[string]int{}, appendBodies: map[string]*streamedBody{}, appendCursors: map[string]uint64{}}
+			source = &sessionSource{manager: m, session: *session, adapter: adapter, ctx: sourceCtx, cancel: cancel, started: make(chan struct{}), seeded: make(chan struct{}), done: make(chan struct{}), followers: map[uint64]chan struct{}{}, holders: map[string]int{}}
 			m.sources[session.ID] = source
 			m.running.Add(1)
 			start = true

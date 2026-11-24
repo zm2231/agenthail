@@ -63,7 +63,7 @@ func (s *sessionSource) restartJournal(read *surface.SessionReadResult, items []
 	bodies := map[string]string{}
 	for _, event := range events {
 		s.mu.Lock()
-		payload, bodyKey := s.normalizeLocked(event)
+		payload, bodyKey, _ := s.normalizeLocked(event)
 		s.mu.Unlock()
 		entry, err := sessionJournalEntry(s.session.ID, payload)
 		if err != nil {
@@ -95,7 +95,7 @@ func (s *sessionSource) restartJournal(read *surface.SessionReadResult, items []
 	s.session.TranscriptIdentity = read.TranscriptIdentity
 	s.mu.Lock()
 	for key, body := range bodies {
-		s.appendBodies[key] = knownBody(body, "")
+		s.appendBodies.put(key, knownBody(body, ""))
 	}
 	s.mu.Unlock()
 	if len(restarted) > 0 {
@@ -197,7 +197,7 @@ func (s *sessionSource) rederiveJournal(ctx context.Context) error {
 	var notPerson []sessionJournalPayload
 	for _, item := range items {
 		s.mu.Lock()
-		payload, bodyKey := s.normalizeLocked(seedEvent(s.session.Surface, item))
+		payload, bodyKey, _ := s.normalizeLocked(seedEvent(s.session.Surface, item))
 		s.mu.Unlock()
 		entry, err := sessionJournalEntry(s.session.ID, payload)
 		if err != nil {
@@ -221,7 +221,7 @@ func (s *sessionSource) rederiveJournal(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	for key, body := range bodies {
-		s.appendBodies[key] = knownBody(body, "")
+		s.appendBodies.put(key, knownBody(body, ""))
 	}
 	s.mu.Unlock()
 	if len(replaced) > 0 {
