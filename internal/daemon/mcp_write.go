@@ -12,11 +12,14 @@ import (
 
 type mcpWrite struct {
 	ClientRequestID string `json:"clientRequestId,omitempty" jsonschema:"Optional. Send one to make a retry safe: repeating it replays the first result instead of acting twice."`
+	// heldAbove marks an action inside a write whose one outcome mcpOnce
+	// keeps under the id, which the action still names in its audit entry.
+	heldAbove bool
 }
 
 func (w mcpWrite) key(tool string) (string, error) {
 	id := strings.TrimSpace(w.ClientRequestID)
-	if id == "" {
+	if id == "" || w.heldAbove {
 		return "", nil
 	}
 	key := tool + ":" + id
@@ -91,6 +94,10 @@ func mcpActionOutcome(reply actionReply) (json.RawMessage, *mcpRefusal) {
 	}
 	if reply.Status < http.StatusMultipleChoices {
 		return json.RawMessage(reply.Body), nil
+	}
+	var stored mcpStoredRefusal
+	if reply.Status == http.StatusUnprocessableEntity && json.Unmarshal(reply.Body, &stored) == nil && stored.Refusal != nil {
+		return nil, stored.Refusal
 	}
 	var failure struct {
 		Error struct{ Code, Message string } `json:"error"`

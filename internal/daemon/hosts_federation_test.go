@@ -127,7 +127,16 @@ func (f *federatedSurface) delivered() []string {
 	return append([]string(nil), f.messages...)
 }
 
-func (f *federatedSurface) Send(ctx context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
+func (f *federatedSurface) refusesBusy(session *surface.Session) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.rejectBusy && f.sessions[session.ID].Status == surface.StatusBusy
+}
+
+func (f *federatedSurface) Send(ctx context.Context, session *surface.Session, message string) (*surface.SendResult, error) {
+	if f.refusesBusy(session) {
+		return &surface.SendResult{Accepted: false}, nil
+	}
 	f.mu.Lock()
 	f.sources = append(f.sources, surface.SourceSessionID(ctx))
 	f.persons = append(f.persons, surface.PersonName(ctx))
@@ -136,7 +145,10 @@ func (f *federatedSurface) Send(ctx context.Context, _ *surface.Session, message
 	return &surface.SendResult{UUID: "remote-turn", Accepted: true}, nil
 }
 
-func (f *federatedSurface) SendWithOptions(ctx context.Context, _ *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
+func (f *federatedSurface) SendWithOptions(ctx context.Context, session *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
+	if f.refusesBusy(session) {
+		return &surface.SendResult{Accepted: false}, nil
+	}
 	f.mu.Lock()
 	f.sources = append(f.sources, surface.SourceSessionID(ctx))
 	f.persons = append(f.persons, surface.PersonName(ctx))

@@ -15,7 +15,7 @@ type mcpSendInput struct {
 	Target  string `json:"target,omitempty" jsonschema:"A session id or @alias. Give exactly one of target or project."`
 	Project string `json:"project,omitempty" jsonschema:"A project name or id, as agenthail_projects lists it, to reach its coordinator (starting its conversation if it has none)."`
 	Message string `json:"message"`
-	Mode    string `json:"mode,omitempty" jsonschema:"queue (default): delivered when the session is idle. now: steers a busy session where it can, otherwise queues; only for sessions you control. An identity the person set to send now defaults to now, queued where refused."`
+	Mode    string `json:"mode,omitempty" jsonschema:"queue: delivered when the session is idle. now: steers a busy session where it can, otherwise queues; only for sessions you control. Omitted: now to a session you started or lead or from an identity set to send now, else queue; a refused default now queues with a notice."`
 	mcpAskPerson
 	chosen string
 }
@@ -39,24 +39,53 @@ func (d *Daemon) mcpSend(ctx context.Context, caller *mcpCaller, input mcpSendIn
 	if err != nil {
 		return nil, err
 	}
+	why := "your identity sends now by default"
+	if mode != registry.SendModeNow && d.leadsTarget(ctx, caller, input.Target) {
+		mode, why = registry.SendModeNow, "a send to a session you started or lead goes now by default"
+	}
 	input.Mode = mode
 	if mode != registry.SendModeNow {
 		return d.mcpSendIn(ctx, caller, input, true)
 	}
 	input.chosen = mode
+	key, err := input.key("agenthail_send")
+	if err != nil {
+		return nil, err
+	}
+	input.heldAbove = true
+	return d.mcpOnce(ctx, caller, key, input, func() (any, error) {
+		return d.mcpSendNowElseQueue(ctx, caller, input, why)
+	})
+}
+
+func (d *Daemon) mcpSendNowElseQueue(ctx context.Context, caller *mcpCaller, input mcpSendInput, why string) (any, error) {
 	result, err := d.mcpSendIn(ctx, caller, input, false)
 	var refusal *mcpRefusal
 	if !errors.As(err, &refusal) || !nowRefused(refusal) {
 		return result, err
 	}
 	input.Mode, input.chosen = registry.SendModeQueue, ""
-	if input.ClientRequestID != "" {
-		input.ClientRequestID += ":queued"
-	}
 	if result, err = d.mcpSendIn(ctx, caller, input, true); err != nil {
 		return nil, err
 	}
-	return withSendNotice(result, "Queued: your identity sends now by default, but this one could not: "+refusal.Message)
+	return withSendNotice(result, "Queued: "+why+", but this one could not: "+refusal.Message)
+}
+
+// leadsTarget reports whether the caller started or leads the target, the
+// sessions delivery lets it steer. A paired host's session is decided by
+// that host; this one knows only that the caller coordinates its project.
+func (d *Daemon) leadsTarget(ctx context.Context, caller *mcpCaller, ref string) bool {
+	if strings.TrimSpace(ref) == "" {
+		return false
+	}
+	session, remote, err := d.mcpTargets(caller).Resolve(ctx, strings.TrimSpace(ref))
+	if err != nil {
+		return false
+	}
+	if remote != nil {
+		return remote.Exact && caller.project != nil && remote.Project == caller.project.ID && d.mcpIsProjectLead(caller, caller.session.ID)
+	}
+	return d.oversees(caller.session.ID, *session)
 }
 
 // Only a refusal of the steer itself falls back; a failed delivery is returned as it is.
