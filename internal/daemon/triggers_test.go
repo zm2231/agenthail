@@ -328,8 +328,9 @@ func TestOnlyTheLocalCLICanTestRetryOrReloadTriggers(t *testing.T) {
 	if err := os.Remove(flag); err != nil {
 		t.Fatalf("the test run did not touch the file: %v", err)
 	}
+	// The drain that ran the test can still be live and finish the retry before the response is read.
 	var retried registry.TriggerRun
-	if code := cli.do(http.MethodPost, "/api/v1/triggers", fmt.Sprintf(`{"action":"retry","runId":%d}`, tested.ID), &retried); code != http.StatusOK || retried.State != registry.TriggerPending {
+	if code := cli.do(http.MethodPost, "/api/v1/triggers", fmt.Sprintf(`{"action":"retry","runId":%d}`, tested.ID), &retried); code != http.StatusOK || retried.ID != tested.ID {
 		t.Fatalf("code=%d run=%+v", code, retried)
 	}
 	deadline := time.Now().Add(10 * time.Second)
