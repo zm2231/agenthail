@@ -85,10 +85,15 @@ final class SessionEditSheetTests: XCTestCase {
         model.selectedDetail = grown
         XCTAssertNotNil(poll { list.contentSize.height > before ? true : nil }, "the details gain their context rows under the open sheet")
         XCTAssertGreaterThan(list.contentSize.height, 2 * list.bounds.height, "the details are taller than two screens")
-        let top = scroll(list, toBottom: false)
-        let bottom = scroll(list, toBottom: true)
-        _ = scroll(list, toBottom: false)
-        XCTAssertTrue(top.isDisjoint(with: bottom), "no row is on screen at both ends, so every row, the editing controls included, left the screen and came back")
+        let shown = try XCTUnwrap(stride(from: lowest(list), through: highest(list), by: list.bounds.height / 3).first { offset in
+            scroll(list, to: offset)
+            return showsEditingControls(list)
+        }, "the Name conversation row comes on screen")
+        let away = shown - lowest(list) > highest(list) - shown ? lowest(list) : highest(list)
+        scroll(list, to: away)
+        XCTAssertFalse(showsEditingControls(list), "the Name conversation row leaves the screen")
+        scroll(list, to: shown)
+        XCTAssertTrue(showsEditingControls(list), "the Name conversation row comes back")
 
         XCTAssertNotNil(host.presentedViewController, "the rename sheet stays open")
         XCTAssertEqual(text(of: textInput(in: host.presentedViewController?.view)), "keepme", "the typed name survives")
@@ -104,15 +109,31 @@ final class SessionEditSheetTests: XCTestCase {
         return read()
     }
 
-    private func scroll(_ list: UICollectionView, toBottom: Bool) -> Set<IndexPath> {
-        let inset = list.adjustedContentInset
-        let y = toBottom ? list.contentSize.height - list.bounds.height + inset.bottom : -inset.top
-        list.setContentOffset(CGPoint(x: 0, y: y), animated: false)
+    private func lowest(_ list: UICollectionView) -> CGFloat { -list.adjustedContentInset.top }
+
+    private func highest(_ list: UICollectionView) -> CGFloat {
+        list.contentSize.height - list.bounds.height + list.adjustedContentInset.bottom
+    }
+
+    private func scroll(_ list: UICollectionView, to offset: CGFloat) {
+        list.setContentOffset(CGPoint(x: 0, y: offset), animated: false)
         for _ in 0..<5 {
             RunLoop.main.run(until: Date().addingTimeInterval(0.05))
             list.layoutIfNeeded()
         }
-        return Set(list.indexPathsForVisibleItems)
+    }
+
+    private func showsEditingControls(_ list: UICollectionView) -> Bool {
+        list.visibleCells.contains { cell in
+            cell.frame.intersects(list.bounds) && labels(cell).contains { $0.contains("Name conversation") }
+        }
+    }
+
+    private func labels(_ object: NSObject) -> [String] {
+        var found = [object.accessibilityLabel].compactMap { $0 }
+        for case let child as NSObject in object.accessibilityElements ?? [] { found += labels(child) }
+        if let view = object as? UIView { for child in view.subviews { found += labels(child) } }
+        return found
     }
 
     private func textInput(in view: UIView?) -> (UIView & UIKeyInput)? {
