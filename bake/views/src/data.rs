@@ -606,7 +606,7 @@ impl Data {
                         let body = t.text.clone().unwrap_or_default();
                         let l = lower(&body);
                         let ci = l.contains("ci run") || l.contains("ci ") || l.contains("test run") || l.contains("suite");
-                        if ci && w.state != "done" && l.contains(" failed") && !["not from", "since fixed", "cause", "passed"].iter().any(|w| l.contains(w)) {
+                        if ci && w.state != "done" && l.contains(" failed") && !["not from", "since fixed", "cause", "passed", "invalid"].iter().any(|w| l.contains(w)) {
                             lines.push(Line { kind: Happened::Failed, text, detail: first_sentence(&plain(&body), 120), at: t.at.clone(), target });
                         }
                     }
