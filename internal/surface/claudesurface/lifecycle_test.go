@@ -251,3 +251,26 @@ func TestClaudeModelCatalogInAFolderThatIsGoneSaysSo(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestStopRunEndsAHostedClaudeAndLeavesATerminalOneRunning(t *testing.T) {
+	host := claudehosttest.New(t, "")
+	claudetest.New(t)
+	host.Start(t)
+	c := surfacetest.InDaemon(NewClaude(nil, host.Home))
+	session, _, err := c.StartSession(context.Background(), surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listedSession(t, c, session.ID)
+	if run, err := c.StopRun(context.Background(), session); err != nil || !run.Stopped {
+		t.Fatalf("run=%+v err=%v, want the hosted session stopped", run, err)
+	}
+	testkit.Eventually(t, "the hosted Claude to exit", 15*time.Second, func() bool { return !claudehosttest.Alive(session.PID) })
+	if run, err := c.StopRun(context.Background(), session); err != nil || run != (surface.RunStop{}) {
+		t.Fatalf("run=%+v err=%v, want nothing left to stop", run, err)
+	}
+	terminal := &surface.Session{ID: "terminal-claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: os.Getpid()}
+	if run, err := c.StopRun(context.Background(), terminal); err != nil || run.Stopped || run.NotStopped == "" {
+		t.Fatalf("run=%+v err=%v, want a terminal session left running and named", run, err)
+	}
+}

@@ -251,9 +251,26 @@ have sessions.
 ## Archive
 
 `session-archive` and `session-unarchive` take `sessionId`;
-`project-archive` and `project-unarchive` take `projectId`. Archiving only
-hides: it never stops, interrupts or deletes a session, and queued delivery
-continues. A session is archived when it or its project is.
+`project-archive` and `project-unarchive` take `projectId`. Archiving a
+session first stops its run on the host that owns it, wherever the archive was
+asked for, then hides it (`doSessionArchive`, `surface.RunStopper`):
+
+- a session in the Claude host is closed, and a Claude background job stopped;
+- a Codex thread in Codex's app-server daemon has its running turn
+  interrupted. The daemon is shared, so no process is stopped. Every Agenthail
+  subscription to the thread is dropped so Codex can unload it; a client that
+  still shows the session follows it again, which keeps the idle thread loaded
+  but starts no turn;
+- a Claude session in a terminal or a thread the Codex app has loaded is not
+  Agenthail's to stop: it is hidden and left running.
+
+The reply's `run` says what happened: `stopped` when a run was ended, and
+`notStopped` naming a run left going. If the stop fails, the archive is
+refused (`502 stop_failed`) and the session stays listed, since a session still
+working would be unarchived by the next catalog pass. The conversation is
+kept, and queued delivery continues: a message delivered to an archived
+session resumes it, which unarchives it. Archiving a project hides it and does
+not stop its sessions. A session is archived when it or its project is.
 
 New activity unarchives the session and its project: a turn after the
 archive, work in progress, a queued item, or an open attention item. Nothing

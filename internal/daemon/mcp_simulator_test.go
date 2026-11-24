@@ -123,8 +123,8 @@ func TestSimulatorToolLeasesADeviceToOneSessionAndArchivingReleasesIt(t *testing
 	if syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == nil {
 		t.Fatal("the lease does not hold the shared simulator lock")
 	}
-	if _, err := f.d.doSessionArchive("session-archive", f.parentID); err != nil {
-		t.Fatal(err)
+	if response := runDashboardAction(t, f.d, `{"action":"session-archive","sessionId":"`+f.parentID+`"}`); response.Code != 200 {
+		t.Fatalf("archive = %d %s", response.Code, response.Body)
 	}
 	eventually(t, "archiving releases the session's simulator", func() bool {
 		return syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == nil

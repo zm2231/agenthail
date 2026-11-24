@@ -53,6 +53,17 @@ var LifecycleOperations = []string{"status", "stop", "resume", "logs"}
 type SessionLifecycle interface {
 	SessionAction(context.Context, *Session, string) (map[string]any, error)
 }
+
+type RunStopper interface {
+	StopRun(context.Context, *Session) (RunStop, error)
+}
+
+// NotStopped names a run outside Agenthail (a terminal, the Codex app) that
+// may still be working; neither field set means nothing was running.
+type RunStop struct {
+	Stopped    bool   `json:"stopped"`
+	NotStopped string `json:"notStopped,omitempty"`
+}
 type NativeQueueRequest struct {
 	Action   string   `json:"queueAction"`
 	Message  string   `json:"message,omitempty"`
