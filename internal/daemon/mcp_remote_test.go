@@ -316,7 +316,7 @@ func TestARemoteIdentityGetsTheLocalTools(t *testing.T) {
 		return out
 	}
 	remote := names(f.connect(t, map[string]string{"Authorization": "Bearer " + f.token}, nil))
-	local := names(mcpSession(t, f.server, issueMCPToken(t, f.d, *from)))
+	local := names(asOperator(t, f.d, f.server, from.ID))
 	if !slices.Equal(remote, local) {
 		t.Fatalf("remote tools %v, local tools %v", remote, local)
 	}

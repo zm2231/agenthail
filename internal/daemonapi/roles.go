@@ -24,6 +24,16 @@ type AgentRoleView struct {
 	Running    int      `json:"running"`
 }
 
+// AgentRoleExplanation is the role a session or agent identity acts under
+// and why: Source names the assignment or what the caller is, and Replaces
+// the role it would hold by what it is when an assignment gave it another.
+type AgentRoleExplanation struct {
+	Target   string        `json:"target"`
+	Role     AgentRoleView `json:"role"`
+	Source   string        `json:"source"`
+	Replaces string        `json:"replaces,omitempty"`
+}
+
 type AgentActionView struct {
 	Name       string `json:"name"`
 	Default    string `json:"default"`

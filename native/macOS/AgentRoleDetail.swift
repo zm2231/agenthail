@@ -47,8 +47,10 @@ struct AgentRoleDetail: View {
                     }
                 }
                 Section("Agenthail tools") {
-                    Toggle("Every tool", isOn: Binding(get: { draft.allTools }, set: { draft.setAllTools($0, every: view.tools) }))
-                    if !draft.allTools {
+                    Toggle("Default tools", isOn: Binding(get: { draft.defaultTools }, set: { draft.setDefaultTools($0, seen: role.tools ?? view.tools) }))
+                    if draft.defaultTools {
+                        Text(AgentRoleFacts.defaultToolsHint).font(.system(size: DesktopType.secondary)).foregroundStyle(DesktopPalette.text2)
+                    } else {
                         ForEach(view.tools, id: \.self) { tool in
                             Toggle(tool, isOn: Binding(get: { draft.sees(tool) }, set: { draft.setTool(tool, shown: $0, every: view.tools) }))
                                 .font(.system(size: DesktopType.secondary, design: .monospaced))

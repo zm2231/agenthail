@@ -43,3 +43,18 @@ func TestRolesLedgersNamesProjectsByNameAndStoresTheirIDs(t *testing.T) {
 		t.Fatalf("default on a reach-all role = %v, %v", role.Ledgers, err)
 	}
 }
+
+func TestRolesToolsChangesTheToolsTheRoleSeesNow(t *testing.T) {
+	every := []string{"agenthail_queue", "agenthail_send", "agenthail_sessions", "agenthail_whoami"}
+	seen := []string{"agenthail_send", "agenthail_sessions", "agenthail_whoami"}
+	worker := agentroles.BuiltIn[agentroles.Worker]
+	if role, err := editRole(worker, "tools", []string{"-agenthail_sessions"}, every, seen); err != nil || !slices.Equal(role.Tools, []string{"agenthail_send", "agenthail_whoami"}) {
+		t.Fatalf("taking one tool from a default role = %v, %v", role.Tools, err)
+	}
+	if role, err := editRole(worker, "tools", []string{"all"}, every, seen); err != nil || !slices.Equal(role.Tools, every) || role.Normalized().Tools == nil {
+		t.Fatalf("all = %v, %v", role.Tools, err)
+	}
+	if role, err := editRole(agentroles.Role{Reach: agentroles.ReachDescendants, Tools: []string{"agenthail_send"}}, "tools", []string{"default"}, every, seen); err != nil || role.Tools != nil {
+		t.Fatalf("default = %v, %v", role.Tools, err)
+	}
+}

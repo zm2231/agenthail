@@ -74,14 +74,17 @@ Session commands:
   limit-resume on|off           Resume stopped sessions once their limit resets (default on)
   roles [list] [--json]         The roles agents act under: worker, lead, operator, remote and yours
   roles show <role> [--json]    What a role may do on its own, do and tell you, or must ask you; its tools and limits
+  roles explain <@alias|session-id|identity> [--json]
+                                 The role a session or agent identity acts under, why, and what it decides
   roles set <role> <action> allow|notify|ask|default
                                  Change one action for a role
   roles reach <role> descendants|project|all
                                  Which sessions a role acts on beyond its own
   roles limit <role> depth|running <n>
                                  How deep its sessions nest and how many it runs; 0 is the default
-  roles tools <role> all | +<tool> -<tool> ...
-                                 Which agenthail tools a role sees
+  roles tools <role> default | all | +<tool> -<tool> ...
+                                 Which agenthail tools a role sees; default leaves out the ones whose
+                                 only action it leaves to you
   roles ledgers <role> all | own | default | +<project> -<project> ...
                                  Which projects' ledgers a role reads and writes besides its own; default
                                  is every project for reach all and none for the others

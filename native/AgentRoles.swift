@@ -112,6 +112,7 @@ enum AgentRoleFacts {
     static let reaches: [(id: String, title: String)] = [("descendants", "Sessions it started"), ("project", "Its project"), ("all", "Every session")]
     static let defaultDepth = 3
     static let defaultRunning = 8
+    static let defaultToolsHint = "Every tool except those whose only action this role leaves to you."
 
     static func reachTitle(_ reach: String) -> String { reaches.first { $0.id == reach }?.title ?? reach }
 
@@ -196,18 +197,18 @@ struct AgentRoleDraft: Equatable, Sendable {
         set { definition.running = newValue == AgentRoleFacts.defaultRunning ? nil : newValue }
     }
 
-    var allTools: Bool { definition.tools == nil }
+    var defaultTools: Bool { definition.tools == nil }
 
     func sees(_ tool: String) -> Bool { definition.tools?.contains(tool) ?? true }
 
-    mutating func setAllTools(_ all: Bool, every: [String]) {
-        definition.tools = all ? nil : every
+    mutating func setDefaultTools(_ on: Bool, seen: [String]) {
+        definition.tools = on ? nil : seen
     }
 
     mutating func setTool(_ tool: String, shown: Bool, every: [String]) {
         var tools = Set(definition.tools ?? every)
         if shown { tools.insert(tool) } else { tools.remove(tool) }
-        definition.tools = tools.count == every.count && Set(every) == tools ? nil : every.filter(tools.contains)
+        definition.tools = every.filter(tools.contains)
     }
 
     mutating func revert() { definition = base }

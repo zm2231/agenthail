@@ -313,6 +313,10 @@ func TestARolesRunningLimitBoundsAnAgentsStarts(t *testing.T) {
 	}
 }
 
+// operatorOnlyTools were refused to every agent but the operator before roles,
+// so the other built-in roles do not see them.
+var operatorOnlyTools = []string{"agenthail_brief", "agenthail_channel", "agenthail_coordinator", "agenthail_history", "agenthail_queue", "agenthail_relay"}
+
 var capabilitiesBeforeRoles = map[string][]string{
 	agentroles.Worker:   {"read.self", "read.project", "spawn", "control.descendants", "requests.answer", "ledger.read", "ledger.write", "browser.drive", "simulator.drive"},
 	agentroles.Lead:     {"read.self", "read.project", "spawn", "control.descendants", "requests.answer", "ledger.read", "ledger.write", "browser.drive", "simulator.drive", "control.project"},
@@ -424,8 +428,12 @@ func TestTheBuiltInRolesGiveEveryAgentTheAccessItHadBeforeRoles(t *testing.T) {
 		if role, _ := whoami["role"].(map[string]any); role["name"] != name {
 			t.Errorf("a %s's whoami names its role %v", name, whoami["role"])
 		}
-		if tools := listedTools(t, session); !slices.Equal(tools, everyTool) {
-			t.Errorf("a %s sees %v; before roles every agent saw %v", name, tools, everyTool)
+		want := everyTool
+		if name != agentroles.Operator {
+			want = slices.DeleteFunc(slices.Clone(everyTool), func(tool string) bool { return slices.Contains(operatorOnlyTools, tool) })
+		}
+		if tools := listedTools(t, session); !slices.Equal(tools, want) {
+			t.Errorf("a %s sees %v; it may use %v", name, tools, want)
 		}
 	}
 

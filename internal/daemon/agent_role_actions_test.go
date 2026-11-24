@@ -1,15 +1,23 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zm2231/agenthail/internal/agentroles"
+	"github.com/zm2231/agenthail/internal/agenttools"
 	"github.com/zm2231/agenthail/internal/daemonapi"
+	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -287,5 +295,111 @@ func TestAnOperatorTakesOverWorkQuietlyUnlessItsRoleAsks(t *testing.T) {
 	setRoleDecision(t, f.r, agentroles.Operator, "work-takeover", agentroles.Ask)
 	if refused := takeover(); refused.code != "capability_missing" || refused.rule != "person_only" {
 		t.Fatalf("an operator whose role asks: %+v", refused)
+	}
+}
+
+func TestARoleSeesOnlyTheToolsForThePersonItMayUseAndAListedOneStaysListed(t *testing.T) {
+	f := newMCPWriteFixture(t)
+	server := mcpServer(t, f.d)
+	if tools := listedTools(t, f.parent); slices.Contains(tools, "agenthail_queue") || !slices.Contains(tools, "agenthail_send") {
+		t.Fatalf("a worker sees %v", tools)
+	}
+	if out, refused := callMCP(t, f.parent, "agenthail_queue", map[string]any{"action": "clear", "target": "to", "clientRequestId": "hidden"}); !refusedByRole(out, refused, "queue-any") {
+		t.Fatalf("calling a hidden tool: refused=%v %v", refused, out)
+	}
+	grantRole(t, f.r, "to", "queue-any", agentroles.Notify)
+	if tools := listedTools(t, f.child); !slices.Contains(tools, "agenthail_queue") || slices.Contains(tools, "agenthail_relay") {
+		t.Fatalf("a role given queue-any sees %v", tools)
+	}
+	changeRole(t, f.r, agentroles.Worker, func(role *agentroles.Role) {
+		role.Tools = []string{"agenthail_relay", "agenthail_whoami"}
+	})
+	operator := asOperator(t, f.d, server, "from")
+	if tools := listedTools(t, operator); !slices.Contains(tools, "agenthail_relay") || !slices.Contains(tools, "agenthail_queue") {
+		t.Fatalf("the operator sees %v", tools)
+	}
+	plain := surface.Session{ID: "plain", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Cwd: t.TempDir()}
+	if err := f.r.RecordObservedSession(plain); err != nil {
+		t.Fatal(err)
+	}
+	worker := mcpSession(t, server, issueMCPToken(t, f.d, plain))
+	if tools := listedTools(t, worker); !slices.Equal(tools, []string{"agenthail_relay", "agenthail_whoami"}) {
+		t.Fatalf("a worker whose role lists its tools sees %v", tools)
+	}
+
+	every := agentroles.Role{Reach: agentroles.ReachDescendants}
+	for _, tool := range agenttools.Tools {
+		every.Tools = append(every.Tools, tool.Name)
+	}
+	if err := f.d.changeAgentRole(t.Context(), daemonapi.CLIActor, daemonapi.AgentRoleRequest{Op: "put", Name: agentroles.Worker, Role: every}); err != nil {
+		t.Fatal(err)
+	}
+	if tools := listedTools(t, worker); !slices.Contains(tools, "agenthail_queue") {
+		t.Fatalf("a worker whose role lists every tool sees %v", tools)
+	}
+}
+
+func TestExplainingARoleNamesTheRoleWhyAndWhatItDecides(t *testing.T) {
+	f := newMCPWriteFixture(t)
+	grantRole(t, f.r, "to", "queue-any", agentroles.Notify)
+	explain := func(target string) (int, daemonapi.AgentRoleExplanation) {
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/agents?explain="+url.QueryEscape(target), nil)
+		recorder := httptest.NewRecorder()
+		f.d.serveAgentRoles(recorder, request, daemonapi.CLIActor)
+		var explained daemonapi.AgentRoleExplanation
+		_ = json.Unmarshal(recorder.Body.Bytes(), &explained)
+		return recorder.Code, explained
+	}
+	status, explained := explain("to")
+	if status != http.StatusOK || explained.Role.Name != "steward" || explained.Source != "assigned to this session" || explained.Replaces != agentroles.Worker {
+		t.Fatalf("explaining an assigned session: %d %+v", status, explained)
+	}
+	if explained.Role.Decisions["queue-any"] != agentroles.Notify || !slices.Contains(explained.Role.Tools, "agenthail_queue") {
+		t.Fatalf("the explained role decides %v and sees %v", explained.Role.Decisions, explained.Role.Tools)
+	}
+	if status, explained := explain("from"); status != http.StatusOK || explained.Role.Name != agentroles.Worker || explained.Replaces != "" {
+		t.Fatalf("explaining a worker: %d %+v", status, explained)
+	}
+
+	remote := newRemoteFixture(t, "")
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/agents?explain=@scout", nil)
+	recorder := httptest.NewRecorder()
+	remote.d.serveAgentRoles(recorder, request, daemonapi.CLIActor)
+	var identity daemonapi.AgentRoleExplanation
+	if err := json.Unmarshal(recorder.Body.Bytes(), &identity); err != nil || identity.Role.Name != agentroles.Remote || identity.Target != "@scout" {
+		t.Fatalf("explaining a remote identity: %d %s", recorder.Code, recorder.Body)
+	}
+}
+
+func TestThePersonsTerminalExplainsASessionsRoleOverTheLocalSocket(t *testing.T) {
+	d, reg, _, _ := mcpSocketDaemon(t)
+	stop, err := d.startLocalSocket()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(stop)
+	registerClaude(t, reg, "claude-one")
+	if status, body := localSocketPost(t, daemonapi.AgentRoleRequest{Op: "assign", Name: agentroles.Lead, Kind: registry.AssignSession, Target: "claude-one"}); status != http.StatusOK {
+		t.Fatalf("assign answered %d %s", status, body)
+	}
+	get := func(target string) (int, string) {
+		client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", daemonctl.LocalSocketPath())
+		}}}
+		response, err := client.Get("http://agenthail/api/v1/agents?explain=" + url.QueryEscape(target))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, _ := io.ReadAll(response.Body)
+		return response.StatusCode, string(body)
+	}
+	status, body := get("claude-one")
+	var explained daemonapi.AgentRoleExplanation
+	if err := json.Unmarshal([]byte(body), &explained); status != http.StatusOK || err != nil || explained.Role.Name != agentroles.Lead || explained.Source != "assigned to this session" {
+		t.Fatalf("explaining an assigned session: %d %s", status, body)
+	}
+	if status, body := get("nobody-by-that-name"); status != http.StatusNotFound {
+		t.Fatalf("explaining an unknown target answered %d %s", status, body)
 	}
 }

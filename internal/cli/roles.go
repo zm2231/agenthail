@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"slices"
 	"strconv"
@@ -18,12 +19,12 @@ import (
 	"github.com/zm2231/agenthail/internal/daemonapi"
 )
 
-const rolesUsage = `usage: agenthail roles [list] [--json] | show <role> [--json]
+const rolesUsage = `usage: agenthail roles [list] [--json] | show <role> [--json] | explain <@alias|session-id|identity> [--json]
        agenthail roles create <name> [<from-role>] | delete <role> | reset <role>
        agenthail roles set <role> <action> allow|notify|ask|default
        agenthail roles reach <role> descendants|project|all
        agenthail roles limit <role> depth|running <n>
-       agenthail roles tools <role> all | +<tool> -<tool> ...
+       agenthail roles tools <role> default | all | +<tool> -<tool> ...
        agenthail roles ledgers <role> all | own | default | +<project> -<project> ...
        agenthail roles assign <role> --session <@alias|id> | --identity <name> | --alias <name>
        agenthail roles unassign --session <@alias|id> | --identity <name> | --alias <name>`
@@ -38,6 +39,9 @@ func (a *App) cmdRoles(args []string) error {
 	}
 	if positional[0] == "show" && len(positional) == 2 {
 		return a.showRole(positional[1], asJSON)
+	}
+	if positional[0] == "explain" && len(positional) == 2 {
+		return a.explainRole(positional[1], asJSON)
 	}
 	if (positional[0] == "assign" || positional[0] == "unassign") && len(positional) <= 2 {
 		return a.assignRole(positional[0], positional[1:], args)
@@ -89,14 +93,16 @@ func (a *App) cmdRoles(args []string) error {
 		}
 		return a.putRole(current.Name, role)
 	}
-	role, err := editRole(current.Definition, verb, rest[1:], view.Tools)
+	role, err := editRole(current.Definition, verb, rest[1:], view.Tools, current.Tools)
 	if err != nil {
 		return err
 	}
 	return a.putRole(current.Name, role)
 }
 
-func editRole(role agentroles.Role, verb string, args []string, tools []string) (agentroles.Role, error) {
+// editRole changes a tool list from the tools the role sees now, so taking
+// one away does not show the ones its decisions hide.
+func editRole(role agentroles.Role, verb string, args []string, tools, seen []string) (agentroles.Role, error) {
 	switch {
 	case verb == "set" && len(args) == 2:
 		actions := map[string]string{}
@@ -124,13 +130,12 @@ func editRole(role agentroles.Role, verb string, args []string, tools []string) 
 		default:
 			return role, errors.New("the limits are depth and running")
 		}
-	case verb == "tools" && len(args) == 1 && args[0] == "all":
+	case verb == "tools" && len(args) == 1 && args[0] == "default":
 		role.Tools = nil
+	case verb == "tools" && len(args) == 1 && args[0] == "all":
+		role.Tools = slices.Clone(tools)
 	case verb == "tools":
-		seen := role.Tools
-		if seen == nil {
-			seen = slices.Clone(tools)
-		}
+		seen := slices.Clone(seen)
 		for _, change := range args {
 			name := strings.TrimLeft(change, "+-")
 			if name == "" {
@@ -338,21 +343,50 @@ func (a *App) showRole(name string, asJSON bool) error {
 		return emit(role)
 	}
 	fmt.Printf("%s (%s): %s\n", role.Name, roleKind(role), role.Description)
+	return printRole(view.Actions, role)
+}
+
+func (a *App) explainRole(target string, asJSON bool) error {
+	client, err := a.localDaemonAPI()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), rolesTimeout)
+	defer cancel()
+	var explained daemonapi.AgentRoleExplanation
+	if err := client.getJSON(ctx, "/api/v1/agents", url.Values{"explain": {target}}, &explained); err != nil {
+		return err
+	}
+	if asJSON {
+		return emit(explained)
+	}
+	view, err := a.fetchRoles()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s acts as %s (%s): %s\n", explained.Target, explained.Role.Name, roleKind(explained.Role), explained.Source)
+	if explained.Replaces != "" {
+		fmt.Printf("without that it would act as %s\n", explained.Replaces)
+	}
+	return printRole(view.Actions, explained.Role)
+}
+
+func printRole(actions []daemonapi.AgentActionView, role daemonapi.AgentRoleView) error {
 	fmt.Printf("reach: %s\n", role.Reach)
 	out := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(out, "ACTION\tDECISION\tWHAT")
-	for _, action := range view.Actions {
-		decision := role.Decisions[action.Name]
+	fmt.Fprintln(out, "ACTION\tDECISION\tSOURCE\tWHAT")
+	for _, action := range actions {
+		source := "default for reach " + role.Reach
 		if _, changed := role.Definition.Actions[action.Name]; changed {
-			decision += " (changed)"
+			source = "changed"
 		}
-		fmt.Fprintf(out, "%s\t%s\t%s\n", action.Name, decision, action.Detail)
+		fmt.Fprintf(out, "%s\t%s\t%s\t%s\n", action.Name, role.Decisions[action.Name], source, action.Detail)
 	}
 	if err := out.Flush(); err != nil {
 		return err
 	}
 	if role.AllTools {
-		fmt.Println("tools: all")
+		fmt.Printf("tools (default, every one it may use): %s\n", strings.Join(role.Tools, ", "))
 	} else {
 		fmt.Printf("tools: %s\n", strings.Join(role.Tools, ", "))
 	}
