@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
@@ -12,8 +13,13 @@ const (
 	surfaceOperationTimeout = 20 * time.Second
 )
 
-func (d *Daemon) scanAndRelay(ctx context.Context) {
-	defer d.publishCatalogPresence()
+// planScan reads what a scan needs and queues a job for each watched session
+// it observes, without waiting for them. The channel it returns closes once
+// they have all finished; the catalog's presence is published then.
+func (d *Daemon) planScan(ctx context.Context) <-chan struct{} {
+	jobs := &scanJobs{finished: make(chan struct{}), publish: d.publishCatalogPresence}
+	jobs.start()
+	defer jobs.done()
 	d.syncDeliveryAsks()
 	if err := d.catalog.flushCommitted(); err != nil {
 		d.log.Printf("publish committed catalog events: %s", err)
@@ -21,7 +27,7 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 	watched, err := d.Registry.WatchedSessions()
 	if err != nil {
 		d.log.Printf("scan watched sessions: %s", err)
-		return
+		return jobs.finished
 	}
 	needsClaudeRefresh := false
 	for _, session := range watched {
@@ -37,18 +43,18 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 	queueCounts, err := d.Registry.QueueCounts()
 	if err != nil {
 		d.log.Printf("scan queue counts: %s", err)
-		return
+		return jobs.finished
 	}
 	taskChildren, err := d.Registry.RunningTaskChildren()
 	if err != nil {
 		d.log.Printf("scan running tasks: %s", err)
-		return
+		return jobs.finished
 	}
 	d.taskGoals.retain(taskChildren)
 	d.retainTaskRequestsRead(taskChildren)
 	d.deliverTaskWakes()
 	d.pruneObservationFailures(watched)
-	scan := relayScan{}
+	scan := &relayScan{}
 	for _, watchedSession := range watched {
 		gone, isTask := taskChildren[watchedSession.ID]
 		if watchedSession.Surface == surface.KindClaude && !claudeRefreshed && !isTask && !d.onlyClosesATurn(watchedSession, queueCounts[watchedSession.ID]) {
@@ -74,30 +80,59 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 			d.log.Printf("watched session %s: %s", d.resolveDisplay(session.ID), adapterErr)
 			continue
 		}
-		if stopper, ok := adapter.(surface.RuntimeStopper); ok && queueCounts[session.ID] > 0 && stopper.RuntimeStopped(ctx, session) {
-			d.drainMessageQueue(ctx, adapter, session)
-			continue
+		queued := queueCounts[session.ID]
+		jobs.start()
+		if !d.observeJobs.add(session.Surface, observeJob{ctx: ctx, session: session.ID, done: jobs.done, run: func(ctx context.Context) {
+			d.scanSession(ctx, scan, adapter, session, watchedSession, queued, gone, isTask)
+		}}) {
+			jobs.done()
 		}
-		// An exited or offline Claude or Codex session stays a delivery target,
-		// since a send resumes it; it is observed only to drain its queue, unless
-		// a turn the daemon started is still open on it. An offline one may have
-		// no PID left to tell whether its process exited.
-		inactive := claudeProcessExited(session) || relayTargetInactive(session)
-		resumes := session.Surface == surface.KindClaude || session.Surface == surface.KindCodex
-		if !isTask && !watchedSession.Armed && !watchedSession.OpenTurnOnly && inactive && (!resumes || queueCounts[session.ID] == 0) {
-			d.syncRelaysObserved(ctx, scan, adapter, session, observeOnce(adapter, session, observeAdapter))
-			continue
-		}
-		if queueCounts[session.ID] == 0 && !d.observationAllowed(session.ID) {
-			if gone {
-				d.settleGoneTask(session)
-			}
-			continue
-		}
-		d.observeInScan(ctx, scan, adapter, session, !watchedSession.OpenTurnOnly)
+	}
+	return jobs.finished
+}
+
+// scanSession is one watched session's part of a scan, run as its own job.
+func (d *Daemon) scanSession(ctx context.Context, scan *relayScan, adapter surface.Surface, session *surface.Session, watched registry.WatchedSession, queued int, gone, isTask bool) {
+	if stopper, ok := adapter.(surface.RuntimeStopper); ok && queued > 0 && stopper.RuntimeStopped(ctx, session) {
+		d.drainMessageQueue(ctx, adapter, session)
+		return
+	}
+	// An exited or offline Claude or Codex session stays a delivery target,
+	// since a send resumes it; it is observed only to drain its queue, unless
+	// a turn the daemon started is still open on it. An offline one may have
+	// no PID left to tell whether its process exited.
+	inactive := claudeProcessExited(session) || relayTargetInactive(session)
+	resumes := session.Surface == surface.KindClaude || session.Surface == surface.KindCodex
+	if !isTask && !watched.Armed && !watched.OpenTurnOnly && inactive && (!resumes || queued == 0) {
+		d.syncRelaysObserved(ctx, scan, adapter, session, observeOnce(adapter, session, observeAdapter))
+		return
+	}
+	if queued == 0 && !d.observationAllowed(session.ID) {
 		if gone {
 			d.settleGoneTask(session)
 		}
+		return
+	}
+	d.observeInScan(ctx, scan, adapter, session, !watched.OpenTurnOnly)
+	if gone {
+		d.settleGoneTask(session)
+	}
+}
+
+// scanJobs counts a scan's plan and its jobs; when the last finishes it
+// publishes the catalog's presence and closes finished.
+type scanJobs struct {
+	remaining atomic.Int64
+	finished  chan struct{}
+	publish   func()
+}
+
+func (j *scanJobs) start() { j.remaining.Add(1) }
+
+func (j *scanJobs) done() {
+	if j.remaining.Add(-1) == 0 {
+		j.publish()
+		close(j.finished)
 	}
 }
 
@@ -163,7 +198,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 }
 
 // A session watched only to see its turn end is not armed when seen busy, so a turn it started itself pushes nothing.
-func (d *Daemon) observeInScan(ctx context.Context, scan relayScan, adapter surface.Surface, session *surface.Session, arm bool) {
+func (d *Daemon) observeInScan(ctx context.Context, scan *relayScan, adapter surface.Surface, session *surface.Session, arm bool) {
 	read := *session
 	observed := observeOnce(adapter, session, d.observeTurn)
 	observation, err := observed.get(ctx)

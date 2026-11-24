@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sync"
 	"syscall"
 	"time"
 
@@ -106,16 +107,24 @@ func backgroundHold(ctx context.Context, observed *sessionObservation, from *sur
 }
 
 // relayScan is one scan's relay reads: each adapter that reads many sessions'
-// completions in one pass gives the scan a single reader. A nil scan reads
-// through the adapter itself.
-type relayScan map[surface.CompletionScanner]surface.CompletionReader
+// completions in one pass gives the scan a single reader, shared by the
+// scan's jobs. A nil scan reads through the adapter itself.
+type relayScan struct {
+	mu      sync.Mutex
+	readers map[surface.CompletionScanner]surface.CompletionReader
+}
 
-func (s relayScan) reader(adapter surface.Surface) (surface.CompletionReader, bool) {
+func (s *relayScan) reader(adapter surface.Surface) (surface.CompletionReader, bool) {
 	if scanner, ok := adapter.(surface.CompletionScanner); ok && s != nil {
-		if s[scanner] == nil {
-			s[scanner] = scanner.CompletionScan()
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.readers == nil {
+			s.readers = map[surface.CompletionScanner]surface.CompletionReader{}
 		}
-		return s[scanner], true
+		if s.readers[scanner] == nil {
+			s.readers[scanner] = scanner.CompletionScan()
+		}
+		return s.readers[scanner], true
 	}
 	reader, ok := adapter.(surface.CompletionReader)
 	return reader, ok
@@ -125,7 +134,7 @@ func (d *Daemon) syncRelays(ctx context.Context, adapter surface.Surface, sessio
 	d.syncRelaysObserved(ctx, nil, adapter, session, observeOnce(adapter, session, observeAdapter))
 }
 
-func (d *Daemon) syncRelaysObserved(ctx context.Context, scan relayScan, adapter surface.Surface, session *surface.Session, observed *sessionObservation) {
+func (d *Daemon) syncRelaysObserved(ctx context.Context, scan *relayScan, adapter surface.Surface, session *surface.Session, observed *sessionObservation) {
 	active, err := d.activeRelaysFrom(session.ID)
 	if err != nil {
 		d.log.Printf("list relays: %s", err)
@@ -151,7 +160,7 @@ func (d *Daemon) activeRelaysFrom(session string) ([]registry.RouteRow, error) {
 	return active, nil
 }
 
-func (d *Daemon) captureRelays(ctx context.Context, scan relayScan, adapter surface.Surface, session *surface.Session) error {
+func (d *Daemon) captureRelays(ctx context.Context, scan *relayScan, adapter surface.Surface, session *surface.Session) error {
 	reader, ok := scan.reader(adapter)
 	if !ok {
 		return fmt.Errorf("source does not support replayable completions")

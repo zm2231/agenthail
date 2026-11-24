@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -53,3 +54,6 @@ func newTestSourceManager(t testing.TB, r *registry.Registry) *sessionSourceMana
 	t.Cleanup(manager.shutdown)
 	return manager
 }
+
+// scanAndRelay runs a scan and waits for every session it observes.
+func (d *Daemon) scanAndRelay(ctx context.Context) { <-d.planScan(ctx) }

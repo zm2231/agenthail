@@ -15,7 +15,8 @@ type CompletionReader interface {
 // CompletionScanner reads the completions of many sessions in one pass, such
 // as one relay scan. The reader it returns may resolve every session's
 // transcript from one listing, so it suits a single pass and not a wait for a
-// transcript that has yet to appear.
+// transcript that has yet to appear. The pass reads different sessions
+// through the one reader at the same time, so it must be safe for that.
 type CompletionScanner interface {
 	CompletionScan() CompletionReader
 }
