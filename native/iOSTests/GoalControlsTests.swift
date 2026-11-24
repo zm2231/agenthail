@@ -92,17 +92,19 @@ final class SessionEditSheetTests: XCTestCase {
         let before = list.contentSize.height
         model.selectedDetail = grown
         XCTAssertNotNil(poll { list.contentSize.height > before ? true : nil }, "the details gain their context rows under the open sheet (height \(before) -> \(list.contentSize.height), list in window: \(list.window != nil))")
-        var visited: [String] = []
-        let shown = try XCTUnwrap(stride(from: lowest(list), through: highest(list), by: list.bounds.height / 3).first { offset in
-            scroll(list, to: offset)
-            visited.append("\(Int(offset)): \(list.visibleCells.count) cells \(list.visibleCells.flatMap(labels).prefix(3))")
-            return showsEditingControls(list)
-        }, "the Name conversation row comes on screen; seen \(visited)")
-        let away = shown - lowest(list) > highest(list) - shown ? lowest(list) : highest(list)
-        scroll(list, to: away)
-        XCTAssertFalse(showsEditingControls(list), "the Name conversation row leaves the screen (at \(away) of \(highest(list)))")
-        scroll(list, to: shown)
-        XCTAssertTrue(showsEditingControls(list), "the Name conversation row comes back")
+        let rows = Set((0..<list.numberOfSections).flatMap { section in
+            (0..<list.numberOfItems(inSection: section)).map { IndexPath(item: $0, section: section) }
+        })
+        let down = Array(stride(from: lowest(list), to: highest(list), by: list.bounds.height / 3)) + [highest(list)]
+        scroll(list, to: lowest(list))
+        let top = Set(list.indexPathsForVisibleItems)
+        scroll(list, to: highest(list))
+        let bottom = Set(list.indexPathsForVisibleItems)
+        XCTAssertFalse(top.isEmpty || bottom.isEmpty, "rows show at both ends")
+        XCTAssertTrue(top.isDisjoint(with: bottom), "no row shows at both ends, so each one is off screen at one of them: top \(top.sorted()), bottom \(bottom.sorted())")
+        XCTAssertEqual(sweep(list, down), rows, "every row, Name conversation included, comes on screen going down")
+        XCTAssertEqual(sweep(list, down.reversed()), rows, "and going back up")
+        XCTAssertEqual(sweep(list, down), rows, "and going down again")
 
         XCTAssertNotNil(host.presentedViewController, "the rename sheet stays open")
         XCTAssertEqual(text(of: textInput(in: host.presentedViewController?.view)), "keepme", "the typed name survives")
@@ -132,17 +134,11 @@ final class SessionEditSheetTests: XCTestCase {
         }
     }
 
-    private func showsEditingControls(_ list: UICollectionView) -> Bool {
-        list.visibleCells.contains { cell in
-            cell.frame.intersects(list.bounds) && labels(cell).contains { $0.contains("Name conversation") }
+    private func sweep(_ list: UICollectionView, _ offsets: [CGFloat]) -> Set<IndexPath> {
+        offsets.reduce(into: Set<IndexPath>()) { seen, offset in
+            scroll(list, to: offset)
+            seen.formUnion(list.indexPathsForVisibleItems)
         }
-    }
-
-    private func labels(_ object: NSObject) -> [String] {
-        var found = [object.accessibilityLabel].compactMap { $0 }
-        for case let child as NSObject in object.accessibilityElements ?? [] { found += labels(child) }
-        if let view = object as? UIView { for child in view.subviews { found += labels(child) } }
-        return found
     }
 
     private func textInput(in view: UIView?) -> (UIView & UIKeyInput)? {
