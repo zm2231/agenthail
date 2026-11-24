@@ -172,7 +172,7 @@ func TestACodexThreadAgenthailStartsKnowsItRunsInAgenthailAndAsksThePersonThroug
 	before := model.count()
 	action(map[string]any{"action": "send", "sessionId": id, "message": "Ask again."})
 	testkit.Eventually(t, "the second turn's model request", 60*time.Second, func() bool { return model.count() > before })
-	if again := model.request(before); strings.Count(again, `[Agenthail] You are @notes`) != 1 {
-		t.Fatalf("the second turn's request carries the card %d times, want once from the first turn", strings.Count(again, `[Agenthail] You are @notes`))
+	if told := strings.Count(model.request(before), "You are @notes"); told != 1 {
+		t.Fatalf("the second turn's request tells the thread who it is %d times, want once, from the first turn's card", told)
 	}
 }
