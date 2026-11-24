@@ -96,7 +96,7 @@ final class PhoneAppearanceTests: XCTestCase {
 
         UIConfigURLProtocol.state.body = #"{"rev":"two","values":{"theme":"dark","glass.opacity":0.45,"background":"image: art/field-dark.jpg","background.light":"image: art/field-light.jpg"},"chosen":{},"overrides":{},"problems":[]}"#
         UIConfigURLProtocol.state.images = ["art/field-light.jpg": Data("not an image".utf8)]
-        try await load(appearance) { appearance.config.rev == "two" }
+        try await load(appearance) { appearance.config.rev == "two" && appearance.problem != nil }
 
         XCTAssertEqual(appearance.colorScheme, .dark)
         XCTAssertEqual(appearance.config.paneOpacity, 0.45)
@@ -111,7 +111,7 @@ final class PhoneAppearanceTests: XCTestCase {
         let fallback = appearance.file(light)
 
         UIConfigURLProtocol.state.images = [:]
-        try await load(appearance) { appearance.wallpapers["art/field-light.jpg"]?.id == "art/field-light.jpg" }
+        try await load(appearance) { appearance.wallpapers["art/field-light.jpg"]?.id == "art/field-light.jpg" && appearance.problem == nil }
         XCTAssertNil(appearance.problem, "the next load fetches the image again")
         XCTAssertNotEqual(appearance.file(light), fallback, "a render drawn without the image never stands in for one drawn with it")
     }
