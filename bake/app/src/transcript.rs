@@ -144,7 +144,13 @@ fn toggle(id: String) -> impl Fn(&mut App) + 'static {
 
 fn work_el(id: &str, work: &Work, open: bool) -> El {
     let shown = open || !work.folds;
-    let label = if work.live { format!("Working · {}", work.label) } else { format!("{} · {}", work.line, work.label) };
+    let label = if work.live {
+        format!("Working · {}", work.label)
+    } else if work.line == work.label || work.label == "Thought" && work.line.ends_with("Thought") {
+        work.line.clone()
+    } else {
+        format!("{} · {}", work.line, work.label)
+    };
     let tint = if work.live { accent() } else { muted() };
     let lead = if work.live {
         el().size(7.0, 7.0).radius(4.0).fill(accent()).shadow(0.0, 8.0, accent().alpha(0.9))

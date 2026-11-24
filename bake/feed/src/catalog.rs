@@ -189,12 +189,23 @@ impl Session {
     pub fn title(&self) -> String {
         match &self.alias {
             Some(alias) if !alias.is_empty() => format!("@{alias}"),
+            _ if self.name.trim_start().starts_with('<') || self.name.trim().is_empty() => "Untitled session".into(),
             _ => self.name.clone(),
         }
     }
 
     pub fn project_name(&self) -> String {
         self.project.as_ref().map(|p| if p.display_name.is_empty() { p.name.clone() } else { p.display_name.clone() }).unwrap_or_else(|| "No project".into())
+    }
+
+    pub fn primary_work(&self, pick: Option<&str>) -> Option<&HeldWork> {
+        let rank = |w: &HeldWork| match w.state.as_str() {
+            "in_progress" => 0,
+            "in_review" => 1,
+            "blocked" => 2,
+            _ => 3,
+        };
+        pick.and_then(|id| self.held_work.iter().find(|w| w.item_id == id)).or_else(|| self.held_work.iter().min_by_key(|w| rank(w)))
     }
 
     pub fn checkout_path(&self) -> Option<String> {
@@ -243,7 +254,8 @@ impl Session {
         }
         let state = self.state(now);
         let recent = parse_time(&self.last_active).is_some_and(|t| (now - t).whole_hours() < 24);
-        matches!(state, State::NeedsYou | State::Working) || (recent && (self.open || self.current || self.alias.is_some()))
+        let closed = self.display.label == "Closed";
+        matches!(state, State::NeedsYou | State::Working) || (recent && !closed && (self.open || self.current || self.alias.is_some()))
     }
 }
 

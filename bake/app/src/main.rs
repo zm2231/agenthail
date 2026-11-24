@@ -63,6 +63,7 @@ pub struct App {
     pub answering: Option<String>,
     pub answered: HashSet<String>,
     pub tab: Tab,
+    pub work_pick: HashMap<String, String>,
     pub diff: rune_kit::diff::DiffState,
     pub diff_key: (String, usize),
     client: Option<Client>,
@@ -113,6 +114,7 @@ fn init() -> App {
         answering: None,
         answered: HashSet::new(),
         tab: Tab::Conversation,
+        work_pick: HashMap::new(),
         diff: rune_kit::diff::DiffState::new(Vec::new()),
         diff_key: (String::new(), usize::MAX),
         client: None,
@@ -199,7 +201,7 @@ pub fn select(s: &mut App, id: &str) {
         let old = s.lru.remove(0);
         s.panes.remove(&old);
     }
-    if let Some(work) = session(s, id).and_then(|x| x.held_work.first().cloned()) {
+    if let Some(work) = session(s, id).and_then(|x| x.primary_work(s.work_pick.get(id).map(String::as_str)).cloned()) {
         fetch_item(s, &work.project_key, &work.item_id);
     }
     fetch_requests(s, id);
@@ -229,6 +231,14 @@ pub fn answer_request(s: &mut App, request: &str, choices: Vec<String>) {
         let result = client.respond(&id, &request, choices).map_err(|e| e.to_string());
         let _ = out.send(Bg::Answered(id, result));
     });
+}
+
+pub fn pick_work(s: &mut App, item: &str) {
+    let Some(id) = s.selected.clone() else { return };
+    s.work_pick.insert(id.clone(), item.to_string());
+    if let Some(work) = session(s, &id).and_then(|x| x.held_work.iter().find(|w| w.item_id == item).cloned()) {
+        fetch_item(s, &work.project_key, &work.item_id);
+    }
 }
 
 pub fn session_edits(s: &App, id: &str) -> Vec<feed::edits::Edit> {
@@ -352,7 +362,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 }
                 if let Some(id) = s.selected.clone() {
                     fetch_requests(s, &id);
-                    if let Some(work) = session(s, &id).and_then(|x| x.held_work.first().cloned()) {
+                    if let Some(work) = session(s, &id).and_then(|x| x.primary_work(s.work_pick.get(&id).map(String::as_str)).cloned()) {
                         fetch_item(s, &work.project_key, &work.item_id);
                     }
                 }

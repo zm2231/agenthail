@@ -9,15 +9,53 @@ use crate::theme::{
     self, BODY, BODY_BOLD, HEADING, HERO, LABEL, META, META_BOLD, NUMBER, SPRING, TITLE, accent, accent_deep, attention, card, done, failed, faint, line, muted, raised, wash,
 };
 use crate::transcript::{self, session_avatar};
-use crate::{App, Screen, Tab, answer_request, session_edits, short_path, show_changes, open_palette, open_project, select, send, send_text, session};
+use crate::{App, Screen, Tab, answer_request, pick_work, session_edits, short_path, show_changes, open_palette, open_project, select, send, send_text, session};
 
-pub fn palette_matches<'a>(s: &'a App, query: &str) -> Vec<&'a Session> {
-    s.palette_order
-        .iter()
-        .filter_map(|id| session(s, id))
-        .filter(|x| query.is_empty() || x.title().to_lowercase().contains(query) || x.project_name().to_lowercase().contains(query) || x.summary().to_lowercase().contains(query))
-        .take(9)
-        .collect()
+pub enum Hit<'a> {
+    Project { key: String, name: String, count: usize, top: State },
+    Session(&'a Session),
+}
+
+pub fn palette_matches<'a>(s: &'a App, query: &str) -> Vec<Hit<'a>> {
+    let mut hits: Vec<Hit> = Vec::new();
+    if !query.is_empty() {
+        let mut projects: BTreeMap<String, (String, usize, State)> = BTreeMap::new();
+        for x in s.sessions.iter().filter(|x| !x.archived && !x.project_key().is_empty()) {
+            let name = x.project_name();
+            if name.to_lowercase().contains(query) {
+                let e = projects.entry(name).or_insert((x.project_key(), 0, State::Idle));
+                if x.visible(s.now) {
+                    e.1 += 1;
+                    e.2 = e.2.min(x.state(s.now));
+                }
+            }
+        }
+        let mut list: Vec<_> = projects.into_iter().collect();
+        list.sort_by_key(|(name, (_, count, _))| (!name.to_lowercase().starts_with(query), std::cmp::Reverse(*count)));
+        hits.extend(list.into_iter().take(3).map(|(name, (key, count, top))| Hit::Project { key, name, count, top }));
+    }
+    let room = 9 - hits.len();
+    hits.extend(
+        s.palette_order
+            .iter()
+            .filter_map(|id| session(s, id))
+            .filter(|x| query.is_empty() || x.title().to_lowercase().contains(query) || x.project_name().to_lowercase().contains(query) || x.summary().to_lowercase().contains(query))
+            .take(room)
+            .map(Hit::Session),
+    );
+    hits
+}
+
+fn activate(s: &mut App, query: &str) {
+    let target = match palette_matches(s, query).into_iter().nth(s.palette_ix) {
+        Some(Hit::Project { key, .. }) => Some((true, key)),
+        Some(Hit::Session(x)) => Some((false, x.id.clone())),
+        None => None,
+    };
+    if let Some((project, key)) = target {
+        s.palette = None;
+        if project { open_project(s, &key) } else { select(s, &key) }
+    }
 }
 
 pub fn ordered(s: &App) -> Vec<&Session> {
@@ -102,7 +140,7 @@ fn avatar_with_state(name: &str, state: State, size: f32) -> El {
 
 fn session_row(s: &App, x: &Session) -> El {
     let state = x.state(s.now);
-    let selected = s.selected.as_deref() == Some(x.id.as_str()) && s.screen == Screen::Session;
+    let selected = s.selected.as_deref() == Some(x.id.as_str());
     let id = x.id.clone();
     let branch = x.checkout.branch.clone().unwrap_or_default();
     let place = if branch.is_empty() { format!("{} · {}", x.project_name(), x.host.name) } else { format!("{} · {}", x.project_name(), branch) };
@@ -242,7 +280,8 @@ fn sidebar(s: &App) -> El {
             by.entry(x.project_name()).or_insert_with(|| (x.project_key(), Vec::new())).1.push(x);
         }
         let mut projects: Vec<(String, String, Vec<&Session>)> = by.into_iter().map(|(n, (k, v))| (n, k, v)).collect();
-        projects.sort_by_key(|(_, _, v)| v.iter().map(|x| x.state(s.now)).min());
+        let current = s.selected.as_deref().and_then(|id| session(s, id)).map(|x| x.project_key()).filter(|k| !k.is_empty());
+        projects.sort_by_key(|(_, key, v)| (key.is_empty(), current.as_deref() != Some(key.as_str()), v.iter().map(|x| x.state(s.now)).min(), std::cmp::Reverse(v.len())));
         for (name, key, rows) in projects {
             let count = rows.len();
             let top = rows.iter().map(|x| x.state(s.now)).min().unwrap_or(State::Idle);
@@ -669,7 +708,7 @@ fn note(title: &str, color: Color, body: String) -> El {
         .w_full()
         .gap(10.0)
         .child(el().w(3.0).radius(2.0).fill(color).self_stretch())
-        .child(col().grow(1.0).min_w(0.0).gap(3.0).child(text(title.to_string()).font(META_BOLD).color(color)).child(text(body).font(META).color(muted()).wrap().max_lines(6)))
+        .child(col().grow(1.0).min_w(0.0).gap(3.0).child(text(title.to_string()).font(META_BOLD).color(color)).child(text(body).font(META).color(muted()).wrap_anywhere().max_lines(6)))
 }
 
 fn priority(p: &str) -> El {
@@ -684,19 +723,45 @@ fn priority(p: &str) -> El {
 
 fn rail(s: &App, x: &Session) -> El {
     let mut parts: Vec<El> = Vec::new();
-    if let Some(work) = x.held_work.first() {
+    if let Some(work) = x.primary_work(s.work_pick.get(&x.id).map(String::as_str)) {
         let item = s.items.get(&work.item_id);
         let state = item.map(|i| i.state.clone()).unwrap_or_else(|| work.state.clone());
         let mut tags = row().gap(6.0).items_center().child(row().px(7.0).py(2.0).radius(6.0).fill(wash()).child(text(work.item_id.clone()).font(META).color(muted())));
         if let Some(i) = item {
             tags = tags.child(priority(&i.priority)).child(text(i.kind.clone()).font(META).color(faint()));
         }
-        let mut body = col().w_full().gap(12.0).child(tags).child(text(work.text.clone()).font(BODY_BOLD).color(theme::text()).wrap()).child(phase_stepper(&state));
+        let mut body = col().w_full().gap(12.0).child(tags).child(text(work.text.clone()).font(BODY_BOLD).color(theme::text()).wrap_anywhere()).child(phase_stepper(&state));
         if let Some(i) = item.filter(|i| !i.acceptance.is_empty()) {
             body = body.child(note("Expected", done(), i.acceptance.clone()));
         }
         if let Some(latest) = item.and_then(|i| i.timeline.iter().rev().find(|e| e.kind == "log").and_then(|e| e.text.clone())) {
             body = body.child(note("Latest", accent(), latest));
+        }
+        let others: Vec<_> = x.held_work.iter().filter(|w| w.item_id != work.item_id).collect();
+        if !others.is_empty() {
+            body = body.child(
+                col()
+                    .w_full()
+                    .gap(2.0)
+                    .pt(2.0)
+                    .child(text(format!("ALSO HOLDS {}", others.len())).font(LABEL).color(faint()).pb(2.0))
+                    .children(others.into_iter().take(6).map(|w| {
+                        let item = w.item_id.clone();
+                        row()
+                            .key(format!("held-{}", w.item_id))
+                            .w_full()
+                            .gap(8.0)
+                            .items_center()
+                            .px(6.0)
+                            .py(5.0)
+                            .radius(7.0)
+                            .hover(Color::WHITE.alpha(0.06))
+                            .on_press(move |s: &mut App| pick_work(s, &item))
+                            .child(text(w.item_id.rsplit('-').next().unwrap_or(&w.item_id).to_string()).font(META_BOLD).color(muted()))
+                            .child(text(w.text.clone()).font(META).color(theme::text()).truncate().grow(1.0).min_w(0.0))
+                            .child(text(w.state.replace('_', " ")).font(META).color(faint()))
+                    })),
+            );
         }
         parts.push(rail_section("Work", &icons::TARGET, body));
         if let Some(i) = item {
@@ -899,6 +964,7 @@ fn palette(s: &App, edit: &rune::TextEdit) -> El {
     let query = edit.text.to_lowercase();
     let matches = palette_matches(s, &query);
     let pick = s.palette_ix.min(matches.len().saturating_sub(1));
+    let sessions_found = matches.iter().filter(|h| matches!(h, Hit::Session(_))).count();
     let input = text_input(edit, TextStyle::new(17.0, 450.0))
         .key("palette-input")
         .grow(1.0)
@@ -922,13 +988,44 @@ fn palette(s: &App, edit: &rune::TextEdit) -> El {
         })
         .on_submit(|s: &mut App, _: &mut Tx| {
             let query = s.palette.as_ref().map(|e| e.text.to_lowercase()).unwrap_or_default();
-            let found: Vec<String> = palette_matches(s, &query).into_iter().map(|x| x.id.clone()).collect();
-            if let Some(id) = found.get(s.palette_ix.min(found.len().saturating_sub(1))).cloned() {
-                s.palette = None;
-                select(s, &id);
-            }
+            let len = palette_matches(s, &query).len();
+            s.palette_ix = s.palette_ix.min(len.saturating_sub(1));
+            activate(s, &query);
         });
-    let rows = matches.iter().enumerate().map(|(i, x)| {
+    let rows = matches.iter().enumerate().map(|(i, hit)| {
+        let x = match hit {
+            Hit::Session(x) => *x,
+            Hit::Project { key, name, count, top } => {
+                let key = key.clone();
+                let mut r = row()
+                    .key(format!("pick-project-{key}"))
+                    .w_full()
+                    .gap(12.0)
+                    .items_center()
+                    .px(12.0)
+                    .py(8.0)
+                    .radius(10.0)
+                    .motion(SPRING)
+                    .hover(Color::WHITE.alpha(0.05))
+                    .on_press(move |s: &mut App| {
+                        s.palette = None;
+                        open_project(s, &key);
+                    })
+                    .child(col().size(28.0, 28.0).radius(8.0).items_center().justify_center().fill(wash()).child(icon(&icons::FOLDER, 14.0).color(state_color(*top))))
+                    .child(
+                        col()
+                            .grow(1.0)
+                            .min_w(0.0)
+                            .gap(1.0)
+                            .child(row().gap(8.0).items_center().child(text(name.clone()).font(BODY_BOLD).color(theme::text()).truncate()).child(text("Project").font(META).color(faint())))
+                            .child(text(if *count == 1 { "1 active session".to_string() } else { format!("{count} active sessions") }).font(META).color(muted())),
+                    );
+                if i == pick {
+                    r = r.fill(accent().alpha(0.20)).border(1.0, accent().alpha(0.35)).child(keys(&["↵"]));
+                }
+                return r;
+            }
+        };
         let state = x.state(s.now);
         let id = x.id.clone();
         let mut r = row()
@@ -970,7 +1067,7 @@ fn palette(s: &App, edit: &rune::TextEdit) -> El {
         .child(row().gap(5.0).items_center().child(keys(&["↵"])).child(text("open").font(META).color(faint())))
         .child(row().gap(5.0).items_center().child(keys(&["esc"])).child(text("close").font(META).color(faint())))
         .child(spacer())
-        .child(text(format!("{} sessions", s.palette_order.len())).font(META).color(faint()));
+        .child(text(if query.is_empty() { format!("{} sessions", s.palette_order.len()) } else { format!("{sessions_found} sessions") }).font(META).color(faint()));
     let card_el = col()
         .w(660.0)
         .radius(20.0)
