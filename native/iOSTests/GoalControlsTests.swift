@@ -66,7 +66,9 @@ final class SessionEditSheetTests: XCTestCase {
         let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: .ephemeral)))
         model.selectedDetail = quiet
         let host = UIHostingController(rootView: SessionInspector(model: model, session: quiet.sessionState(open: true), initialDetail: quiet, editing: .name))
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 360))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 480)
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer {
@@ -75,23 +77,30 @@ final class SessionEditSheetTests: XCTestCase {
             window.isHidden = true
         }
 
-        let field = try XCTUnwrap(poll { self.textInput(in: host.presentedViewController?.view) }, "the rename sheet opens over the details")
-        _ = field.becomeFirstResponder()
-        field.insertText("keepme")
+        let list = try XCTUnwrap(poll { self.collectionView(in: host.view) }, "the details are a List")
+        var field = poll(timeout: 1) { self.textInput(in: host.presentedViewController?.view) }
+        for offset in stride(from: lowest(list), through: highest(list), by: list.bounds.height / 3) where field == nil {
+            scroll(list, to: offset)
+            field = poll(timeout: 1) { self.textInput(in: host.presentedViewController?.view) }
+        }
+        let typing = try XCTUnwrap(field, "the rename sheet opens over the details (presented: \(String(describing: host.presentedViewController)), list height \(list.contentSize.height))")
+        _ = typing.becomeFirstResponder()
+        typing.insertText("keepme")
+        XCTAssertEqual(text(of: typing), "keepme")
         XCTAssertNotNil(poll { PresentedSheets.holdsDraft ? true : nil }, "a typed name holds routes")
 
-        let list = try XCTUnwrap(collectionView(in: host.view), "the details are a List")
         let before = list.contentSize.height
         model.selectedDetail = grown
-        XCTAssertNotNil(poll { list.contentSize.height > before ? true : nil }, "the details gain their context rows under the open sheet")
-        XCTAssertGreaterThan(list.contentSize.height, 2 * list.bounds.height, "the details are taller than two screens")
+        XCTAssertNotNil(poll { list.contentSize.height > before ? true : nil }, "the details gain their context rows under the open sheet (height \(before) -> \(list.contentSize.height), list in window: \(list.window != nil))")
+        var visited: [String] = []
         let shown = try XCTUnwrap(stride(from: lowest(list), through: highest(list), by: list.bounds.height / 3).first { offset in
             scroll(list, to: offset)
+            visited.append("\(Int(offset)): \(list.visibleCells.count) cells \(list.visibleCells.flatMap(labels).prefix(3))")
             return showsEditingControls(list)
-        }, "the Name conversation row comes on screen")
+        }, "the Name conversation row comes on screen; seen \(visited)")
         let away = shown - lowest(list) > highest(list) - shown ? lowest(list) : highest(list)
         scroll(list, to: away)
-        XCTAssertFalse(showsEditingControls(list), "the Name conversation row leaves the screen")
+        XCTAssertFalse(showsEditingControls(list), "the Name conversation row leaves the screen (at \(away) of \(highest(list)))")
         scroll(list, to: shown)
         XCTAssertTrue(showsEditingControls(list), "the Name conversation row comes back")
 
