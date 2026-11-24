@@ -60,10 +60,10 @@ final class VoiceOperatorUITests: XCTestCase {
         XCTAssertLessThan(request.frame.minY, tools.frame.minY)
         // Expanded activity can open below the call controls; bring the row
         // above them before tapping it.
-        let controls = app.buttons["Start voice call"]
-        for _ in 0..<4 where tools.frame.maxY > controls.frame.minY { app.scrollViews.firstMatch.swipeUp() }
+        let controls = app.descendants(matching: .any)["voice-controls"].firstMatch
+        tools.scrollAbove(controls, swiping: app.scrollViews.firstMatch)
         XCTAssertLessThan(tools.frame.maxY, controls.frame.minY)
-        tools.tapWhenReady()
+        tools.tapWhenStill()
         XCTAssertTrue(app.buttons["collapse-tool-3"].waitForExistence(timeout: 5))
     }
 

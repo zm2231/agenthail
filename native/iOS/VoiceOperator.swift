@@ -151,7 +151,7 @@ struct AgenthailVoiceOperatorSheet: View {
                 // The button floats above the controls so showing it never
                 // changes the inset, which would move the transcript and
                 // flip whether it is at the latest activity.
-                controls.overlay(alignment: .top) {
+                controls.accessibilityElement(children: .contain).accessibilityIdentifier("voice-controls").overlay(alignment: .top) {
                     if !atLatest {
                         Button {
                             followingLatest = true
