@@ -135,7 +135,7 @@ func (d *Daemon) controlPayloadScope(ctx context.Context, caller *mcpCaller, req
 	}
 	target, notice, err := d.mcpReachTarget(ctx, caller, body.SessionID, reachOf(body))
 	if err == nil {
-		reply := daemonapi.ScopeReply{TargetID: target.ID, Notice: d.holdAgentNotice(caller, notice)}
+		reply := daemonapi.ScopeReply{TargetID: target.ID, Notice: d.holdAgentAction(caller, notice)}
 		err = d.scopeReply(caller, &reply, target.ID, body.Action, reachOf(body))
 		return reply, err
 	}

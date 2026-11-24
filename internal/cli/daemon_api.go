@@ -32,6 +32,7 @@ type daemonAPIClient struct {
 // it as a message, which the notice the command sends afterwards says.
 type forwardedAction struct {
 	limits          *daemonapi.ScopeReply
+	source          string
 	notSteered      *bool
 	controlDecision string
 	ran             string
@@ -190,14 +191,20 @@ func (c *daemonAPIClient) scope(payload map[string]any) bool {
 	if target, _ := payload["sessionId"].(string); limits == nil || target != limits.TargetID || payload["scopeProjectId"] != nil {
 		return false
 	}
+	c.forward.ran, _ = payload["action"].(string)
+	if limits.ScopeProjectID == "" {
+		return false
+	}
 	payload["scopeProjectId"] = limits.ScopeProjectID
 	if limits.ScopeRank != "" {
 		payload["scopeRank"] = limits.ScopeRank
 	}
 	if limits.ScopeControl != "" {
 		payload["scopeOverseen"], payload["scopeControl"] = limits.ScopeOverseen, limits.ScopeControl
+		if source, _ := payload["sourceSessionId"].(string); source == "" && c.forward.source != "" {
+			payload["sourceSessionId"] = c.forward.source
+		}
 	}
-	c.forward.ran, _ = payload["action"].(string)
 	return true
 }
 

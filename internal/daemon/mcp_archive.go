@@ -14,9 +14,9 @@ func (d *Daemon) mcpArchive(ctx context.Context, caller *mcpCaller, input mcpArc
 	if input.Restore {
 		action = "session-unarchive"
 	}
-	target, err := d.mcpControlTarget(ctx, caller, input.Target)
+	target, notice, err := d.mcpControlTarget(ctx, caller, input.Target)
 	if err != nil {
 		return d.mcpAskOnRefusal(ctx, caller, err, input.mcpAskPerson, dashboardActionRequest{Action: action})
 	}
-	return d.mcpAction(ctx, caller, "agenthail_archive", input.mcpWrite, dashboardActionRequest{Action: action, SessionID: target.ID})
+	return d.mcpControlAction(ctx, caller, "agenthail_archive", input.mcpWrite, dashboardActionRequest{Action: action, SessionID: target.ID}, notice)
 }

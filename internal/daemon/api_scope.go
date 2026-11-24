@@ -165,7 +165,7 @@ func (d *Daemon) agentScope(r *http.Request, caller *mcpCaller, request daemonap
 		if err != nil {
 			return daemonapi.ScopeReply{}, err
 		}
-		reply := daemonapi.ScopeReply{TargetID: target.ID, Notice: d.holdAgentNotice(caller, notice)}
+		reply := daemonapi.ScopeReply{TargetID: target.ID, Notice: d.holdAgentAction(caller, notice)}
 		action := ""
 		if request.Action == "send" {
 			action = "send"
@@ -267,7 +267,7 @@ func (d *Daemon) answerScope(ctx context.Context, caller *mcpCaller, ref, decisi
 		return daemonapi.ScopeReply{}, mcpTargetRefusal(err)
 	}
 	if remote == nil {
-		target, err := d.mcpControlTarget(ctx, caller, ref)
+		target, err := d.reachTarget(ctx, caller, ref, reachSession)
 		if err != nil {
 			return daemonapi.ScopeReply{}, err
 		}

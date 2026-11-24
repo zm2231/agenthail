@@ -14,6 +14,6 @@ func (d *Daemon) mcpInterrupt(ctx context.Context, caller *mcpCaller, input mcpI
 		return d.mcpAskOnRefusal(ctx, caller, err, input.mcpAskPerson, dashboardActionRequest{Action: "interrupt"})
 	}
 	result, err := d.mcpAction(ctx, caller, "agenthail_interrupt", input.mcpWrite, dashboardActionRequest{Action: "interrupt", SessionID: target.ID, SourceSessionID: caller.session.ID})
-	d.noticeAfter(ctx, caller, notice, err)
+	d.noticeAfter(ctx, caller, notice.told(nil, ""), err)
 	return result, err
 }

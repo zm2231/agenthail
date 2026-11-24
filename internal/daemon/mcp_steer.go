@@ -24,6 +24,6 @@ func (d *Daemon) mcpSteer(ctx context.Context, caller *mcpCaller, input mcpSteer
 	}
 	ctx = surface.WithSteerAdmitted(ctx, caller.session.ID)
 	result, err := d.mcpAction(ctx, caller, "agenthail_steer", input.mcpWrite, dashboardActionRequest{Action: "steer", SessionID: target.ID, Message: input.Message, SourceSessionID: caller.session.ID})
-	d.noticeAfter(ctx, caller, notice, err)
+	d.noticeAfter(ctx, caller, notice.told(nil, ""), err)
 	return result, err
 }

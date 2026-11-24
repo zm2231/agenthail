@@ -116,9 +116,9 @@ func (d *Daemon) mcpRemoteTarget(caller *mcpCaller, ref string, remote targets.R
 }
 
 // A coordinator oversees every session in its project, so this host knows
-// which decision its steer, send now or interrupt falls under. Whether the
-// caller started the session only the owning host knows; that host picks
-// between the two decisions forwardScope forwards.
+// its overseen-control decides. Whether any other caller started the
+// session only the owning host knows, so this host admits it when either
+// decision might, and that host picks between the two forwardScope forwards.
 func (d *Daemon) remoteProjectControl(caller *mcpCaller, remote targets.Remote, reach controlReach) (*surface.Session, error) {
 	queuedOnly := scopeRefusal(remote.ID, "not_queued", fmt.Sprintf("%s runs on host %s; across hosts you may only send a queued message, unless it is in your own project and you are its coordinator.", remote.Label(), remote.Host.Name))
 	if caller.extension != "" || !caller.has("control.project") || caller.project == nil || remote.Surface == surface.KindAgent || remote.Project != caller.project.ID {
@@ -127,13 +127,14 @@ func (d *Daemon) remoteProjectControl(caller *mcpCaller, remote targets.Remote, 
 	if remote.Archived {
 		return nil, scopeRefusal(remote.ID, "archived", fmt.Sprintf("%s on host %s is archived.", remote.Label(), remote.Host.Name))
 	}
-	if reach == reachSteer && d.mcpIsProjectLead(caller, caller.session.ID) {
-		if caller.role.Decision(overseenControl) == agentroles.Ask {
-			return nil, overseenRefusal(remote.ID, remote.Label())
+	overseen := caller.role.Decision(overseenControl)
+	if d.mcpIsProjectLead(caller, caller.session.ID) {
+		if overseen == agentroles.Ask {
+			return nil, overseenRefusal(remote.ID, remote.Label(), reach)
 		}
 		return remote.Session(), nil
 	}
-	if caller.role.Decision(remoteProjectControlAction) != agentroles.Ask {
+	if overseen != agentroles.Ask || caller.role.Decision(remoteProjectControlAction) != agentroles.Ask {
 		return remote.Session(), nil
 	}
 	return nil, scopeRefusal(remote.ID, "not_queued", fmt.Sprintf("%s runs on host %s; your role leaves controlling sessions on another computer to the person, so you may only send it a queued message.", remote.Label(), remote.Host.Name))
@@ -144,8 +145,12 @@ const (
 	remoteProjectControlAction = "remote-project-control"
 )
 
-func overseenRefusal(targetID, label string) error {
-	return scopeRefusal(targetID, "not_queued", fmt.Sprintf("Your role leaves steering, interrupting or sending now to %s, a session you started or lead, to the person, so you may only send it a queued message.", label))
+func overseenRefusal(targetID, label string, reach controlReach) error {
+	what := "steering, interrupting or sending now to"
+	if reach == reachSession {
+		what = "changing"
+	}
+	return scopeRefusal(targetID, "not_queued", fmt.Sprintf("Your role leaves %s %s, a session you started or lead, to the person, so you may only send it a queued message.", what, label))
 }
 
 func (d *Daemon) remoteSpawner(caller *mcpCaller, ref string) (bool, error) {
@@ -198,7 +203,7 @@ func (d *Daemon) forwardScope(caller *mcpCaller, targetID, action string, reach 
 		return limits, nil
 	}
 	limits.overseen, limits.control = caller.role.Decision(overseenControl), caller.role.Decision(remoteProjectControlAction)
-	if reach == reachSteer && d.mcpIsProjectLead(caller, caller.session.ID) {
+	if d.mcpIsProjectLead(caller, caller.session.ID) {
 		limits.control = limits.overseen
 	}
 	if limits.overseen == agentroles.Notify || limits.control == agentroles.Notify {
@@ -217,10 +222,31 @@ func (d *Daemon) remoteControlNotice(targetID, action string) agentAction {
 	if matches, err := d.Registry.MatchHostSessions(host, id); err == nil && len(matches) == 1 && matches[0].Alias != "" {
 		target = "@" + matches[0].Alias + " on " + where
 	}
-	return remoteActionWords(action, target)
+	return actionWords(action, target)
 }
 
-func remoteActionWords(action, target string) agentAction {
+var sessionActionWords = map[string]string{
+	"session-archive":   "Archived ",
+	"session-unarchive": "Restored ",
+	"alias":             "Renamed ",
+	"session-pin":       "Pinned ",
+	"session-unpin":     "Unpinned ",
+	"session-snooze":    "Snoozed ",
+	"session-wake":      "Woke ",
+	"goal-set":          "Set the goal of ",
+	"goal-edit":         "Edited the goal of ",
+	"goal-clear":        "Cleared the goal of ",
+	"goal-pause":        "Paused the goal of ",
+	"goal-resume":       "Resumed the goal of ",
+	"goal-budget":       "Set the goal budget of ",
+	"model":             "Changed the model of ",
+	"permission-mode":   "Changed the permission mode of ",
+	"effort":            "Changed the effort of ",
+	"compact":           "Compacted ",
+	"pr":                "Changed the pull requests of ",
+}
+
+func actionWords(action, target string) agentAction {
 	switch action {
 	case "steer":
 		return agentAction{
@@ -234,6 +260,9 @@ func remoteActionWords(action, target string) agentAction {
 		return agentAction{done: "Interrupted " + target}
 	case "":
 		return agentAction{done: "Controlled " + target, target: target}
+	}
+	if verb, found := sessionActionWords[action]; found {
+		return agentAction{done: verb + target}
 	}
 	return agentAction{done: "Ran " + action + " on " + target}
 }

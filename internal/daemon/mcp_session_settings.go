@@ -37,7 +37,7 @@ func (d *Daemon) mcpSessionSettings(ctx context.Context, caller *mcpCaller, inpu
 	if action != "compact" && value == "" {
 		return nil, refuse("invalid", "value is required for "+input.Setting+".")
 	}
-	target, err := d.mcpControlTarget(ctx, caller, input.Target)
+	target, notice, err := d.mcpControlTarget(ctx, caller, input.Target)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func (d *Daemon) mcpSessionSettings(ctx context.Context, caller *mcpCaller, inpu
 	case "effort":
 		request.Message = value
 	}
-	return d.mcpAction(ctx, caller, "agenthail_session_settings", input.mcpWrite, request)
+	return d.mcpControlAction(ctx, caller, "agenthail_session_settings", input.mcpWrite, request, notice)
 }
 
 func (d *Daemon) mcpPermissionWithinCeiling(caller *mcpCaller, target *surface.Session, mode string) error {

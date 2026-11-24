@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -174,5 +176,136 @@ func TestAnInterruptOnAPairedHostFollowsTheDecisionForASessionTheCallerStarted(t
 	}
 	if told := person.told(); len(told) != 1 {
 		t.Fatalf("the person was told %q", told)
+	}
+}
+
+func TestALeadChangingItsOwnWorkerOnAPairedHostFollowsOverseenControl(t *testing.T) {
+	h := newHostTargets(t, true)
+	person := &toldPerson{}
+	h.local.daemon.notifyDesktop = person.notify
+	change := func(tool, key string, args map[string]any) (map[string]any, bool) {
+		args["clientRequestId"] = key
+		return callMCP(t, h.caller, tool, args)
+	}
+	pin := func(sessionID string) map[string]any { return h.pinAsTheCLIDoes(t, "local-a", sessionID) }
+
+	if out, refused := change("agenthail_archive", "archive-quiet", map[string]any{"target": "vps::@builder"}); refused || out["controlDecision"] != agentroles.Allow {
+		t.Fatalf("a lead archiving its own worker: refused=%v out=%v", refused, out)
+	}
+	if out, refused := change("agenthail_alias", "alias-quiet", map[string]any{"target": "vps::remote-a", "name": "helper"}); refused || out["controlDecision"] != agentroles.Allow {
+		t.Fatalf("a lead renaming its own worker: refused=%v out=%v", refused, out)
+	}
+	if named, err := h.remote.reg.LookupAlias("helper"); err != nil || named != "remote-a" {
+		t.Fatalf("the paired host's alias: %q %v", named, err)
+	}
+	if answer := pin("remote-a"); answer["controlDecision"] != agentroles.Allow {
+		t.Fatalf("a lead pinning its own worker: %v", answer)
+	}
+	if told := person.told(); len(told) != 0 {
+		t.Fatalf("the person was told %q of a lead changing its own workers", told)
+	}
+
+	setRoleDecision(t, h.local.reg, agentroles.Lead, "overseen-control", agentroles.Notify)
+	setRoleDecision(t, h.local.reg, agentroles.Lead, "remote-project-control", agentroles.Allow)
+	if out, refused := change("agenthail_alias", "alias-told", map[string]any{"target": "vps::@helper", "name": "reviewer"}); refused || out["controlDecision"] != agentroles.Notify {
+		t.Fatalf("a rename the person hears about: refused=%v out=%v", refused, out)
+	}
+	if told := person.told(); len(told) != 1 || !strings.Contains(told[0], "Renamed ") || !strings.Contains(told[0], " on vps") {
+		t.Fatalf("with overseen-control notify the person was told %q", told)
+	}
+	if answer := pin("remote-a"); answer["controlDecision"] != agentroles.Notify {
+		t.Fatalf("a pin under overseen-control notify: %v", answer)
+	}
+
+	setRoleDecision(t, h.local.reg, agentroles.Lead, "overseen-control", agentroles.Ask)
+	out, refused := change("agenthail_archive", "archive-kept", map[string]any{"target": "vps::remote-a"})
+	refusedFor(t, out, refused, "out_of_scope", "not_queued")
+	if archived, err := h.remote.reg.SessionArchived("remote-a"); err != nil || archived {
+		t.Fatalf("archived=%v err=%v, want an archive the role leaves to the person kept off the paired host", archived, err)
+	}
+}
+
+func TestRemoteProjectControlStillDecidesChangesToSessionsTheCallerDoesNotOversee(t *testing.T) {
+	h := newHostTargets(t, false)
+	person := &toldPerson{}
+	h.local.daemon.notifyDesktop = person.notify
+	changeRole(t, h.local.reg, agentroles.Worker, func(role *agentroles.Role) { role.Reach = agentroles.ReachProject })
+	creator, err := h.remote.reg.EnsureUnrepliableSender(mustHostID(t, h.local), "local-a", "local-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.remote.reg.RecordSessionOrigin(registry.OriginOf("remote-c", creator)); err != nil {
+		t.Fatal(err)
+	}
+	rename := func(target, name string) (map[string]any, bool) {
+		return callMCP(t, h.caller, "agenthail_alias", map[string]any{"target": target, "name": name, "clientRequestId": "alias-" + name})
+	}
+
+	if out, refused := rename("vps::@builder", "started"); refused || out["controlDecision"] != agentroles.Allow {
+		t.Fatalf("renaming a session it started: refused=%v out=%v", refused, out)
+	}
+	if answer := h.pinAsTheCLIDoes(t, "local-a", "remote-a"); answer["controlDecision"] != agentroles.Notify {
+		t.Fatalf("pinning a session in its project it neither started nor leads: %v", answer)
+	}
+
+	setRoleDecision(t, h.local.reg, agentroles.Worker, "remote-project-control", agentroles.Ask)
+	if out, refused := rename("vps::@started", "still-mine"); refused || out["controlDecision"] != agentroles.Allow {
+		t.Fatalf("remote-project-control ask stopped renaming a session the caller started: refused=%v out=%v", refused, out)
+	}
+	if out, refused := callMCP(t, h.caller, "agenthail_archive", map[string]any{"target": "vps::remote-a", "clientRequestId": "archive-not-mine"}); !refused || !strings.Contains(fmt.Sprint(out["message"]), "leaves this action") {
+		t.Fatalf("archiving a session the caller does not oversee under remote-project-control ask: refused=%v out=%v", refused, out)
+	}
+	if archived, err := h.remote.reg.SessionArchived("remote-a"); err != nil || archived {
+		t.Fatalf("archived=%v err=%v, want an archive remote-project-control leaves to the person kept off the paired host", archived, err)
+	}
+}
+
+func (h hostTargets) pinAsTheCLIDoes(t *testing.T, caller, sessionID string) map[string]any {
+	t.Helper()
+	target := hosts.Qualify(h.record.ID, sessionID)
+	scope := askScope(t, h.local.daemon, daemonapi.ScopeRequest{SessionID: caller, Action: "control", Target: target}, "127.0.0.1:50000")
+	if scope.status != http.StatusOK {
+		t.Fatalf("the scope check to pin %s: %+v body=%s", sessionID, scope, scope.body)
+	}
+	response := h.local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{
+		"action": "session-pin", "sessionId": target, "sourceSessionId": caller,
+		"scopeProjectId": scope.reply.ScopeProjectID, "scopeRank": scope.reply.ScopeRank,
+		"scopeOverseen": scope.reply.ScopeOverseen, "scopeControl": scope.reply.ScopeControl,
+	})
+	var answer map[string]any
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &answer) != nil {
+		t.Fatalf("pinning %s on the paired host: status=%d body=%s", sessionID, response.Code, response.Body.String())
+	}
+	return answer
+}
+
+func TestAnAgentChangesASessionItStartedOnThisHostAsItsRoleDecides(t *testing.T) {
+	f := newMCPWriteFixture(t)
+	person := &toldPerson{}
+	f.d.notifyDesktop = person.notify
+	rename := func(name string) (map[string]any, bool) {
+		return callMCP(t, f.parent, "agenthail_alias", map[string]any{"target": "to", "name": name, "clientRequestId": "alias-" + name})
+	}
+
+	if out, refused := rename("quiet"); refused {
+		t.Fatalf("renaming a session it started: %v", out)
+	}
+	if told := person.told(); len(told) != 0 {
+		t.Fatalf("the person was told %q", told)
+	}
+
+	setRoleDecision(t, f.r, agentroles.Worker, "overseen-control", agentroles.Notify)
+	if out, refused := rename("told"); refused {
+		t.Fatalf("a rename the person hears about: %v", out)
+	}
+	if told := person.told(); len(told) != 1 || !strings.Contains(told[0], "Renamed @quiet") {
+		t.Fatalf("with overseen-control notify the person was told %q", told)
+	}
+
+	setRoleDecision(t, f.r, agentroles.Worker, "overseen-control", agentroles.Ask)
+	out, refused := callMCP(t, f.parent, "agenthail_archive", map[string]any{"target": "to", "clientRequestId": "archive-kept"})
+	refusedFor(t, out, refused, "out_of_scope", "not_queued")
+	if archived, err := f.r.SessionArchived("to"); err != nil || archived {
+		t.Fatalf("archived=%v err=%v, want an archive the role leaves to the person refused", archived, err)
 	}
 }

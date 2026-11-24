@@ -46,6 +46,9 @@ func (d *Daemon) mcpActionAs(ctx context.Context, caller *mcpCaller, p principal
 		}
 		request.ScopeProjectID, request.ScopeRank = limits.project, limits.rank
 		request.ScopeOverseen, request.ScopeControl = limits.overseen, limits.control
+		if limits.control != "" && request.SourceSessionID == "" {
+			request.SourceSessionID = caller.session.ID
+		}
 	}
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -71,6 +74,12 @@ func (d *Daemon) mcpActionAs(ctx context.Context, caller *mcpCaller, p principal
 		return nil, refusal
 	}
 	return result, nil
+}
+
+func (d *Daemon) mcpControlAction(ctx context.Context, caller *mcpCaller, tool string, write mcpWrite, request dashboardActionRequest, notice agentAction) (json.RawMessage, error) {
+	result, err := d.mcpAction(ctx, caller, tool, write, request)
+	d.noticeAfter(ctx, caller, notice.told(nil, request.Action), err)
+	return result, err
 }
 
 func mcpActionOutcome(reply actionReply) (json.RawMessage, *mcpRefusal) {

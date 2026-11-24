@@ -38,51 +38,53 @@ const (
 	reachSession
 )
 
-func (d *Daemon) mcpControlTarget(ctx context.Context, caller *mcpCaller, ref string) (*surface.Session, error) {
-	session, _, err := d.mcpReachTarget(ctx, caller, ref, reachSession)
-	return session, err
+func (d *Daemon) mcpControlTarget(ctx context.Context, caller *mcpCaller, ref string) (*surface.Session, agentAction, error) {
+	return d.mcpReachTarget(ctx, caller, ref, reachSession)
 }
 
-// mcpReachTarget resolves a target the caller may message or steer. A
-// target in another project the person's policy admits comes with what to
-// tell the person once the action has run.
-func (d *Daemon) mcpReachTarget(ctx context.Context, caller *mcpCaller, ref string, reach controlReach) (*surface.Session, string, error) {
+// mcpReachTarget resolves a target the caller may message, steer or act on.
+// A target the person's policy admits comes with what to tell the person
+// once the action has run.
+func (d *Daemon) mcpReachTarget(ctx context.Context, caller *mcpCaller, ref string, reach controlReach) (*surface.Session, agentAction, error) {
 	session, err := d.reachTarget(ctx, caller, ref, reach)
 	if _, refusedAcross := approvableControl(err); !refusedAcross || session == nil {
 		if err != nil {
-			return nil, "", err
+			return nil, agentAction{}, err
 		}
 		notice, err := d.overseenControl(caller, session, reach)
 		if err != nil {
-			return nil, "", err
+			return nil, agentAction{}, err
 		}
 		return session, notice, nil
 	}
 	notice, admitted, crossErr := d.crossProjectReach(caller, session, reach)
 	if crossErr != nil {
-		return nil, "", crossErr
+		return nil, agentAction{}, crossErr
 	}
 	if !admitted {
-		return nil, "", err
+		return nil, agentAction{}, err
 	}
-	return session, notice, nil
+	return session, agentAction{done: notice}, nil
 }
 
 // A session on a paired host is decided by that host, which knows its starter.
-func (d *Daemon) overseenControl(caller *mcpCaller, session *surface.Session, reach controlReach) (string, error) {
-	if reach != reachSteer || caller.role == nil {
-		return "", nil
+func (d *Daemon) overseenControl(caller *mcpCaller, session *surface.Session, reach controlReach) (agentAction, error) {
+	if reach == reachQueued || caller.role == nil {
+		return agentAction{}, nil
 	}
 	if _, _, remote := hosts.Split(session.ID); remote || !d.oversees(caller.session.ID, *session) {
-		return "", nil
+		return agentAction{}, nil
 	}
 	switch caller.role.Decision(overseenControl) {
 	case agentroles.Ask:
-		return "", overseenRefusal(session.ID, d.resolveDisplay(session.ID))
+		return agentAction{}, overseenRefusal(session.ID, d.resolveDisplay(session.ID), reach)
 	case agentroles.Notify:
-		return "Steered, interrupted or sent now to " + d.resolveDisplay(session.ID), nil
+		if reach == reachSteer {
+			return agentAction{done: "Steered, interrupted or sent now to " + d.resolveDisplay(session.ID)}, nil
+		}
+		return actionWords("", d.resolveDisplay(session.ID)), nil
 	}
-	return "", nil
+	return agentAction{}, nil
 }
 
 func (d *Daemon) reachTarget(ctx context.Context, caller *mcpCaller, ref string, reach controlReach) (*surface.Session, error) {

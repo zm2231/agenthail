@@ -37,7 +37,7 @@ type agentAction struct {
 
 func (a agentAction) told(notSteered *bool, ran string) string {
 	if a.target != "" && ran != "" {
-		return remoteActionWords(ran, a.target).told(notSteered, "")
+		return actionWords(ran, a.target).told(notSteered, "")
 	}
 	switch {
 	case notSteered == nil && a.unknown != "":
