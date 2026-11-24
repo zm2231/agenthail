@@ -1641,6 +1641,7 @@ struct SessionDetail: Decodable {
     var alias: String?
     var limitResume: LimitResumeState?
     var attention: RowAttention?
+    var ask: SessionAsk?
     /// Present only when the timeline cannot be shown; otherwise the
     /// conversation is the timeline's items and exchangeCount counts it.
     let exchanges: [ExchangeState]?

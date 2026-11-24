@@ -235,6 +235,9 @@ func TestACodexAsyncQuestionWaitsOnThePersonAndItsAnswerReachesCodexAsAReply(t *
 		return row != nil && row.Ask != nil && row.Ask.ID == request.ID && row.TurnState != nil && row.TurnState.State == turnWaitingPerson &&
 			row.Display != nil && row.Display.Kind == "waiting" && row.Display.Label == "Waiting on you"
 	})
+	if ask := q.h.detailAsk(id); ask == nil || ask.ID != request.ID || ask.Origin != registry.AskOriginQuestion {
+		t.Fatalf("the session's detail shows ask %+v, want the question", ask)
+	}
 
 	starts := len(q.inputs("turn/start", id))
 	q.respond(t, id, map[string]any{"requestId": request.ID, "decision": map[string]any{"choices": []string{request.Questions[0].Options[0].ID}}})
