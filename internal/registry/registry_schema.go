@@ -191,6 +191,7 @@ CREATE TABLE IF NOT EXISTS session_context (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	fingerprint TEXT NOT NULL,
 	start_key TEXT NOT NULL DEFAULT '',
+	context_key TEXT NOT NULL DEFAULT '',
 	delivered_at_ms INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS launcher_pending (

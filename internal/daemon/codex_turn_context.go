@@ -7,6 +7,7 @@ import (
 	"github.com/zm2231/agenthail/internal/agentcard"
 	"github.com/zm2231/agenthail/internal/agenttools"
 	"github.com/zm2231/agenthail/internal/projectresolve"
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sessiontools"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/codexsurface"
@@ -22,26 +23,51 @@ func attachCodexTurnContext(d *Daemon, adapters []surface.Surface) {
 	}
 }
 
-// codexTurnContext gives a Codex thread on the agenthail server Agenthail
-// gave it what the session-context hook gives a Claude session: its card
-// the first time, then one line whenever the card changes. The hook leaves
-// such threads to the daemon, so the two never both tell one.
-func (d *Daemon) codexTurnContext(ctx context.Context, session surface.Session) (string, func()) {
+// Codex records a turn's context only when its key holds a new value, and
+// forgets it on a turn that omits it; 0.171.0 and later put what it still
+// holds back after compacting the thread. So every turn Agenthail starts
+// carries the card, which Codex records once. An older app-server drops the
+// card when it compacts the thread yet still holds it, so after a
+// compaction the card moves to the other key, which Codex records again.
+var codexContextKeys = [2]string{"agenthail", "agenthail_card"}
+
+func otherCodexContextKey(key string) string {
+	if key == codexContextKeys[0] {
+		return codexContextKeys[1]
+	}
+	return codexContextKeys[0]
+}
+
+// codexTurnContext gives every turn of a Codex thread on the agenthail
+// server Agenthail gave it the card the session-context hook gives a Claude
+// session. The hook leaves such threads to the daemon, so the two never
+// both tell one. The time recorded is the thread's last turn that carried
+// the card, so a turn reads only the turns since for a compaction.
+func (d *Daemon) codexTurnContext(ctx context.Context, session surface.Session, compactedSince func(time.Time) (bool, error)) (string, string, func()) {
 	card, err := d.cardSources().For(ctx, session)
 	if err != nil || !card.EndsTurns {
-		return "", nil
+		return "", "", nil
 	}
-	fingerprint := card.Fingerprint()
-	given, found, err := d.Registry.ContextFingerprint(session.ID)
-	if err != nil || found && given == fingerprint {
-		return "", nil
+	given, found, err := d.Registry.ContextGiven(session.ID)
+	if err != nil {
+		return "", "", nil
 	}
-	text := agentcard.Render(card)
-	if found {
-		text = agentcard.RenderChange(card)
+	key := given.Key
+	switch {
+	case !found || key == "":
+		key = codexContextKeys[0]
+	case compactedSince != nil:
+		compacted, err := compactedSince(given.At)
+		if err != nil {
+			d.log.Printf("read whether %s compacted since its card: %s", session.ID, err)
+		}
+		if compacted {
+			key = otherCodexContextKey(key)
+		}
 	}
-	return text, func() {
-		if _, err := d.Registry.ClaimContextChange(session.ID, fingerprint, time.Now()); err != nil {
+	sent := registry.GivenContext{Fingerprint: card.Fingerprint(), Key: key, At: time.Now()}
+	return key, agentcard.Render(card), func() {
+		if err := d.Registry.RecordContextGiven(session.ID, sent); err != nil {
 			d.log.Printf("record the Agenthail context given to %s: %s", session.ID, err)
 		}
 	}

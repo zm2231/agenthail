@@ -50,12 +50,28 @@ func (r *Registry) ClaimContextChange(sessionID, fingerprint string, now time.Ti
 	return ContextChanged, nil
 }
 
-// ContextFingerprint is the fingerprint of the card last given to the
-// session; found is false when it was never given one.
-func (r *Registry) ContextFingerprint(sessionID string) (fingerprint string, found bool, err error) {
-	err = r.db.QueryRow(`SELECT fingerprint FROM session_context WHERE session_id=?`, sessionID).Scan(&fingerprint)
+// GivenContext is the card last given to a session: its fingerprint, the
+// key Codex holds it under, and when it was last known to be in the
+// session's context.
+type GivenContext struct {
+	Fingerprint string
+	Key         string
+	At          time.Time
+}
+
+func (r *Registry) ContextGiven(sessionID string) (GivenContext, bool, error) {
+	var given GivenContext
+	var ms int64
+	err := r.db.QueryRow(`SELECT fingerprint,context_key,delivered_at_ms FROM session_context WHERE session_id=?`, sessionID).Scan(&given.Fingerprint, &given.Key, &ms)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
+		return GivenContext{}, false, nil
 	}
-	return fingerprint, err == nil, err
+	given.At = time.UnixMilli(ms)
+	return given, err == nil, err
+}
+
+func (r *Registry) RecordContextGiven(sessionID string, given GivenContext) error {
+	_, err := r.db.Exec(`INSERT INTO session_context(session_id,fingerprint,context_key,delivered_at_ms) VALUES(?,?,?,?)
+		ON CONFLICT(session_id) DO UPDATE SET fingerprint=excluded.fingerprint,context_key=excluded.context_key,delivered_at_ms=excluded.delivered_at_ms`, sessionID, given.Fingerprint, given.Key, given.At.UnixMilli())
+	return err
 }

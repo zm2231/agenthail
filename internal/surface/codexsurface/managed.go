@@ -51,6 +51,8 @@ type managedCodexClient struct {
 	closed        chan struct{}
 	notified      chan struct{}
 	server        *codexServer
+	version       [3]int
+	versionKnown  bool
 }
 
 const managedNotificationLimit = 1000
@@ -108,13 +110,16 @@ func (h CodexHome) dialManaged(ctx context.Context) (*managedCodexClient, error)
 	}
 	client := newManagedCodexClient(ws)
 	client.server = &codexServer{path: socketPath, info: info}
-	if _, err := client.Request(ctx, "initialize", map[string]any{
+	initialized, err := client.Request(ctx, "initialize", map[string]any{
 		"clientInfo":   map[string]any{"name": "agenthail", "version": "1"},
 		"capabilities": map[string]any{"experimentalApi": true},
-	}, 5*time.Second); err != nil {
+	}, 5*time.Second)
+	if err != nil {
 		_ = client.Close()
 		return nil, err
 	}
+	result, _ := initialized["result"].(map[string]any)
+	client.version, client.versionKnown = codexVersionOf(transcript.String(result, "userAgent"))
 	if err := client.notify("initialized", map[string]any{}); err != nil {
 		_ = client.Close()
 		return nil, err

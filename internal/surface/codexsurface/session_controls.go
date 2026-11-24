@@ -94,8 +94,10 @@ func (c *Codex) SteerWithImages(ctx context.Context, sess *surface.Session, mess
 		"input":          codexUserInput(message, images),
 	}
 	setCodexClientMessageID(ctx, params)
+	delivered := c.withTurnContext(ctx, conn, *sess, params)
 	if _, err := conn.Request(ctx, "turn/steer", params, 5*time.Second); err != nil {
 		return codexOperationOutcome(fmt.Errorf("turn/steer: %w", err))
 	}
+	delivered()
 	return nil
 }

@@ -96,7 +96,7 @@ func TestTheHookLeavesTheCardOfACodexThreadOnItsGivenServerToTheDaemon(t *testin
 			t.Fatalf("the hook gave the thread its card, which the daemon gives with its turns:\n%s", text)
 		}
 	}
-	if _, found, err := app.Registry.ContextFingerprint("thread-new"); err != nil || found {
+	if _, found, err := app.Registry.ContextGiven("thread-new"); err != nil || found {
 		t.Fatalf("the hook recorded a card given (found=%v err=%v)", found, err)
 	}
 }
