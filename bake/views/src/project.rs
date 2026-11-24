@@ -213,7 +213,7 @@ pub fn board(s: &App, cx: &mut Cx<App>, key: &str, layer: &mut Vec<El>) -> El {
     }
     let count = |kind| lines.iter().filter(|l| l.kind == kind).count();
     use crate::data::Happened::*;
-    let summary = format!("{} shipped · {} waiting on you · {} moved · {} said, last {:.0} hours", count(Shipped), count(Waiting), count(Moved), count(Said), crate::now::WINDOW);
+    let summary = format!("{} shipped · {} waiting on you · {} failed · {} moved · {} said, last {:.0} hours", count(Shipped), count(Waiting), count(Failed), count(Moved), count(Said), crate::now::WINDOW);
     let titles = ["Waiting on you", "Now", "Up next", "Shipped"];
     let mut board = row().w_full().gap(12.0).items_start();
     for (i, title) in titles.iter().enumerate() {
