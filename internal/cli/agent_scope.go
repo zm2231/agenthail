@@ -215,8 +215,8 @@ func (a *App) agentScope(ctx context.Context, request daemonapi.ScopeRequest) (*
 	if reply.Notice != "" {
 		a.agentNotices = append(a.agentNotices, reply.Notice)
 	}
-	if reply.ScopeProjectID != "" {
-		a.forwarded = forwardedAction{limits: reply}
+	if reply.TargetID != "" {
+		a.forwarded = forwardedAction{limits: reply, source: caller}
 	}
 	return reply, nil
 }

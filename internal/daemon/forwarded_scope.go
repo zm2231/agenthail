@@ -26,7 +26,7 @@ func (d *Daemon) forwardedScope(session surface.Session, request dashboardAction
 	if decision == "" {
 		return "", nil
 	}
-	if reachOf(request) == reachSteer && d.oversees(request.SourceSessionID, session) {
+	if d.oversees(request.SourceSessionID, session) {
 		decision = request.ScopeOverseen
 	}
 	if decision == agentroles.Ask {

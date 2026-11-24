@@ -12,7 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/hosts"
 )
 
-func TestALeadControlsItsProjectsSessionOnAPairedHostAndThePersonIsToldOfAllButItsSteers(t *testing.T) {
+func TestALeadControlsItsProjectsSessionOnAPairedHostWithinItsProjectOnly(t *testing.T) {
 	h := newHostTargets(t, true)
 	person := &toldPerson{}
 	h.local.daemon.notifyDesktop = person.notify
@@ -30,14 +30,14 @@ func TestALeadControlsItsProjectsSessionOnAPairedHostAndThePersonIsToldOfAllButI
 	if named, err := h.remote.reg.LookupAlias("tester"); err != nil || named != "remote-c" {
 		t.Fatalf("the paired host's alias: %q %v", named, err)
 	}
-	if told := person.told(); len(told) != 1 || !strings.Contains(told[0], "Ran alias on") {
-		t.Fatalf("the person was told %q", told)
+	if told := person.told(); len(told) != 0 {
+		t.Fatalf("the person was told %q of a lead changing a session it leads", told)
 	}
 
 	out, refused = callMCP(t, h.caller, "agenthail_steer", map[string]any{"target": "vps::remote-b", "message": "outside the project", "clientRequestId": "steer-2"})
 	refusedFor(t, out, refused, "out_of_scope", "not_queued")
 
-	setRoleDecision(t, h.local.reg, agentroles.Lead, "remote-project-control", agentroles.Ask)
+	setRoleDecision(t, h.local.reg, agentroles.Lead, "overseen-control", agentroles.Ask)
 	out, refused = callMCP(t, h.caller, "agenthail_alias", map[string]any{"target": "vps::@tester", "name": "kept", "clientRequestId": "alias-2"})
 	refusedFor(t, out, refused, "out_of_scope", "not_queued")
 	if h.reached("outside the project") {
@@ -52,7 +52,7 @@ func TestTheCLIsScopeCheckNamesTheLimitsTheOwningHostChecks(t *testing.T) {
 	h := newHostTargets(t, true)
 	target := hosts.Qualify(h.record.ID, "remote-c")
 	answer := askScope(t, h.local.daemon, daemonapi.ScopeRequest{SessionID: "local-a", Action: "control", Target: target}, "127.0.0.1:50000")
-	if answer.status != http.StatusOK || answer.reply.TargetID != target || answer.reply.ScopeProjectID != widgetProject || answer.reply.Notice == "" {
+	if answer.status != http.StatusOK || answer.reply.TargetID != target || answer.reply.ScopeProjectID != widgetProject || answer.reply.ScopeOverseen != agentroles.Allow || answer.reply.ScopeControl != agentroles.Allow {
 		t.Fatalf("a lead's scope check for its project's session on the paired host: %+v body=%s", answer, answer.body)
 	}
 }
@@ -112,7 +112,7 @@ func TestTheNoticeForASteerOnAPairedHostSaysOnlyWhatThatHostReported(t *testing.
 		"Steered @builder on vps",
 		"Sent @builder on vps a message (that computer does not know this session as its lead, so it could not steer)",
 		"Sent @builder on vps a steer (that computer runs an older Agenthail, so it may have arrived as a message)",
-		"Ran goal-set on @builder on vps",
+		"Set the goal of @builder on vps",
 	}
 	if len(told) != len(want) {
 		t.Fatalf("the person was told %q", told)

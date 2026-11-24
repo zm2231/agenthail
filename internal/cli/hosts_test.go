@@ -440,6 +440,33 @@ func TestSendReachesTheSessionNamedInAPeerMessagesFromSession(t *testing.T) {
 	}
 }
 
+func TestAnAgentPinningAPairedHostsSessionNamesItselfSoThatHostCanTellItStartedIt(t *testing.T) {
+	app, reg, _, api := federatedCLIFixture(t, true)
+	if err := reg.RecordObservedSession(surface.Session{ID: "lead", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_SESSION_ID", "lead")
+	var notices []daemonapi.ScopeRequest
+	app.scopeOverride = func(request daemonapi.ScopeRequest) (*daemonapi.ScopeReply, error) {
+		if request.Action == "notice" {
+			notices = append(notices, request)
+			return &daemonapi.ScopeReply{}, nil
+		}
+		return &daemonapi.ScopeReply{TargetID: vpsBuilder.ID, ScopeProjectID: "repo:github.com/example/widget", ScopeRank: "edits", ScopeOverseen: "notify", ScopeControl: "notify", Notice: "told-once-it-ran"}, nil
+	}
+	api.response = `{"ok":true,"result":{"ok":true},"controlDecision":"notify"}`
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"thread", "pin", "vps::@builder"}) }); err != nil {
+		t.Fatal(err)
+	}
+	actions, _ := api.recorded()
+	if len(actions) != 1 || actions[0]["action"] != "session-pin" || actions[0]["sourceSessionId"] != "lead" || actions[0]["scopeOverseen"] != "notify" {
+		t.Fatalf("actions=%v, want the pin to name its caller with both decisions", actions)
+	}
+	if len(notices) != 1 || notices[0].Ran != "session-pin" || notices[0].ControlDecision != "notify" {
+		t.Fatalf("notices=%+v, want one naming the pin and the decision the paired host applied", notices)
+	}
+}
+
 func TestAnAgentsControlOfAPairedHostsSessionCarriesTheLimitsItsScopeCheckNamed(t *testing.T) {
 	app, reg, _, api := federatedCLIFixture(t, true)
 	if err := reg.RecordObservedSession(surface.Session{ID: "lead", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}); err != nil {

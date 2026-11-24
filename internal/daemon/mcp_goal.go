@@ -24,12 +24,12 @@ func (d *Daemon) mcpGoal(ctx context.Context, caller *mcpCaller, input mcpGoalIn
 	if (action == "goal-set" || action == "goal-edit") && strings.TrimSpace(input.Text) == "" {
 		return nil, refuse("invalid", "text is required to set or edit a goal.")
 	}
-	target, err := d.mcpControlTarget(ctx, caller, input.Target)
+	target, notice, err := d.mcpControlTarget(ctx, caller, input.Target)
 	if err != nil {
 		return nil, err
 	}
 	if target.Surface != surface.KindCodex {
 		return nil, refuse("unsupported_surface", "Goals are a Codex feature; that session is "+string(target.Surface)+".")
 	}
-	return d.mcpAction(ctx, caller, "agenthail_goal", input.mcpWrite, dashboardActionRequest{Action: action, SessionID: target.ID, Message: input.Text})
+	return d.mcpControlAction(ctx, caller, "agenthail_goal", input.mcpWrite, dashboardActionRequest{Action: action, SessionID: target.ID, Message: input.Text}, notice)
 }

@@ -123,7 +123,7 @@ func (d *Daemon) mcpSendIn(ctx context.Context, caller *mcpCaller, input mcpSend
 		ctx = surface.WithSteerAdmitted(ctx, caller.session.ID)
 	}
 	result, err := d.mcpAction(ctx, caller, "agenthail_send", input.mcpWrite, dashboardActionRequest{Action: "send", SessionID: target.ID, Message: input.Message, SourceSessionID: caller.session.ID, BusyDelivery: busyDelivery})
-	d.noticeAfter(ctx, caller, notice, err)
+	d.noticeAfter(ctx, caller, notice.told(nil, ""), err)
 	if err != nil {
 		return nil, err
 	}

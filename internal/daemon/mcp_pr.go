@@ -13,12 +13,13 @@ type mcpPRInput struct {
 
 func (d *Daemon) mcpPR(ctx context.Context, caller *mcpCaller, input mcpPRInput) (any, error) {
 	target := caller.session.ID
+	var notice agentAction
 	if input.Session != "" {
-		controlled, err := d.mcpControlTarget(ctx, caller, input.Session)
+		controlled, told, err := d.mcpControlTarget(ctx, caller, input.Session)
 		if err != nil {
 			return nil, err
 		}
-		target = controlled.ID
+		target, notice = controlled.ID, told
 	}
-	return d.mcpAction(ctx, caller, "agenthail_pr", input.mcpWrite, dashboardActionRequest{Action: "pr", SessionID: target, Op: input.Action, PR: input.PR, Repo: input.Repo, Item: input.Item})
+	return d.mcpControlAction(ctx, caller, "agenthail_pr", input.mcpWrite, dashboardActionRequest{Action: "pr", SessionID: target, Op: input.Action, PR: input.PR, Repo: input.Repo, Item: input.Item}, notice)
 }
