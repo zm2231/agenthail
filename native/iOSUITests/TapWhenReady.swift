@@ -55,6 +55,11 @@ extension XCUIElement {
         return false
     }
 
+    // A scroll view's frame runs under its bottom controls, so a row behind them still reads as hittable.
+    func scrollAbove(_ cover: XCUIElement, swiping surface: XCUIElement, attempts: Int = 4) {
+        for _ in 0..<attempts where frame.maxY > cover.frame.minY { surface.swipeUp() }
+    }
+
     // A row under the pinned status bar or the composer still reads as hittable.
     func scrollIntoMiddle(of scrollView: XCUIElement, attempts: Int = 6) {
         var last = CGFloat.infinity

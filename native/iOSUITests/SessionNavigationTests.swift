@@ -159,12 +159,16 @@ final class SessionNavigationTests: XCTestCase {
         app.buttons["voice-entry"].tapWhenReady()
         let call = app.navigationBars["Talk to orchestrator"]
         XCTAssertTrue(call.waitForExistence(timeout: 5))
+        let controls = app.descendants(matching: .any)["voice-controls"].firstMatch
         let activity = app.descendants(matching: .any)["voice-activity"].firstMatch
-        for _ in 0..<4 where !activity.isHittable { app.swipeUp() }
-        activity.tapWhenReady()
+        XCTAssertTrue(activity.waitForExistence(timeout: 5) && controls.exists)
+        activity.scrollAbove(controls, swiping: app)
+        activity.tapWhenStill()
         let timeline = app.buttons["Open full timeline"].firstMatch
-        for _ in 0..<4 where !timeline.isHittable { app.swipeUp() }
-        timeline.tapWhenReady()
+        XCTAssertTrue(timeline.waitForExistence(timeout: 5))
+        timeline.scrollAbove(controls, swiping: app)
+        XCTAssertLessThan(timeline.frame.maxY, controls.frame.minY, "Open full timeline is clear of the call controls")
+        timeline.tapWhenStill()
         XCTAssertTrue(app.textViews["composer-input"].waitForExistence(timeout: 10), "Open full timeline opened the session")
         XCTAssertTrue(call.waitForNonExistence(timeout: 5), "the call sheet closed, so the session is not behind it")
         XCTAssertFalse(app.buttons["Back to Voice"].exists, "the session opens in the app, not in a second sheet")
