@@ -83,6 +83,9 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 	case kind == surface.KindCodex && card.EndsTurns:
 		// The daemon gives a Codex thread on the server it gave it its
 		// card with the turns it starts.
+		if hook.Event == claudehooks.Start.Event {
+			ledgerContext = a.ledgerStartContext(ctx, session.ID, card.MCP)
+		}
 	case hook.Event == claudehooks.Start.Event:
 		claimed, err := store.ClaimSessionStart(session.ID, fmt.Sprintf("%s:%d", hook.Source, parent), card.Fingerprint(), now)
 		if err == nil && claimed {
