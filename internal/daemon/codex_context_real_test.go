@@ -140,8 +140,8 @@ func TestACodexThreadAgenthailStartsKnowsItRunsInAgenthailAndAsksThePersonThroug
 	})
 	first := model.request(0)
 	listed := strings.Contains(first, "mcp__agenthail")
-	described := strings.Contains(first, `mcp__agenthail: Agenthail connects you to the person who runs you`) ||
-		strings.Contains(first, `"name":"mcp__agenthail","description":"Agenthail connects you to the person who runs you`)
+	described := strings.Contains(first, `mcp__agenthail: Agenthail connects you to the person and to other agent sessions`) ||
+		strings.Contains(first, `"name":"mcp__agenthail","description":"Agenthail connects you to the person and to other agent sessions`)
 	if listed && !described {
 		t.Errorf("the model's first request lists mcp__agenthail without the description its server sends")
 	}
