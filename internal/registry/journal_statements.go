@@ -11,8 +11,8 @@ const (
 	journalByProviderKeySQL     = `SELECT session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref,payload_codec FROM session_journal WHERE session_id=? AND provider_key=? AND provider_key!=''`
 	journalUpdateRowSQL         = `UPDATE session_journal SET payload_codec=0,seq=?,kind=?,payload=?,observed_at=?,bytes=?,body_ref=?,payload_role=? WHERE session_id=? AND seq=?`
 	journalInsertRowSQL         = `INSERT INTO session_journal(session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref,payload_role) VALUES(?,?,?,?,?,?,?,?,?,?)`
-	journalStateAdvanceSQL      = `UPDATE session_journal_state SET next_seq=?,retained_bytes=retained_bytes+? WHERE session_id=?`
-	journalRetainedSQL          = `SELECT (SELECT COUNT(*) FROM session_journal WHERE session_id=?),retained_bytes FROM session_journal_state WHERE session_id=?`
+	journalStateAdvanceSQL      = `UPDATE session_journal_state SET next_seq=?,retained_bytes=retained_bytes+?,retained_rows=retained_rows+? WHERE session_id=?`
+	journalRetainedSQL          = `SELECT retained_rows,retained_bytes FROM session_journal_state WHERE session_id=?`
 	journalBodySQL              = `SELECT body FROM session_journal_bodies WHERE session_id=? AND ref=?`
 	journalBodyTailSQL          = `SELECT chunk FROM session_journal_body_tail WHERE ref=? ORDER BY start`
 	journalBodyClearTailSQL     = `DELETE FROM session_journal_body_tail WHERE session_id=? AND ref=?`

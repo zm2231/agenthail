@@ -210,7 +210,7 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 			if err := storeSessionJournalBody(tx, input); err != nil {
 				return SessionJournalEntry{}, false, err
 			}
-			if _, err := tx.Exec(journalStateAdvanceSQL, input.Seq, input.Bytes-existing.Bytes, input.SessionID); err != nil {
+			if _, err := tx.Exec(journalStateAdvanceSQL, input.Seq, input.Bytes-existing.Bytes, 0, input.SessionID); err != nil {
 				return SessionJournalEntry{}, false, err
 			}
 			if err := trimSessionJournal(tx, input.SessionID, retention); err != nil {
@@ -226,7 +226,7 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 	if err := storeSessionJournalBody(tx, input); err != nil {
 		return SessionJournalEntry{}, false, err
 	}
-	if _, err := tx.Exec(journalStateAdvanceSQL, input.Seq, input.Bytes, input.SessionID); err != nil {
+	if _, err := tx.Exec(journalStateAdvanceSQL, input.Seq, input.Bytes, 1, input.SessionID); err != nil {
 		return SessionJournalEntry{}, false, err
 	}
 	if err := trimSessionJournal(tx, input.SessionID, retention); err != nil {
@@ -313,12 +313,13 @@ func scanSessionJournalEntry(row rowScanner) (SessionJournalEntry, error) {
 }
 
 // trimSessionJournal drops the oldest entries until the journal fits its
-// retention. Every writer keeps retained_bytes equal to the bytes of the
-// session's rows in the same transaction, so a trim reads only the rows it
-// drops rather than summing the whole journal.
+// retention. Every writer keeps retained_rows and retained_bytes equal to the
+// number and bytes of the session's rows in the same transaction, so a trim
+// reads only the rows it drops rather than counting or summing the whole
+// journal.
 func trimSessionJournal(tx journalWriter, sessionID string, retention SessionJournalRetention) error {
 	var count, bytes int
-	if err := tx.QueryRow(journalRetainedSQL, sessionID, sessionID).Scan(&count, &bytes); err != nil {
+	if err := tx.QueryRow(journalRetainedSQL, sessionID).Scan(&count, &bytes); err != nil {
 		return err
 	}
 	if count <= retention.Count && bytes <= retention.Bytes {
@@ -355,7 +356,7 @@ func trimSessionJournal(tx journalWriter, sessionID string, retention SessionJou
 	if _, err := tx.Exec(`DELETE FROM session_journal WHERE session_id=? AND position<=?`, sessionID, prunedPosition); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE session_journal_state SET pruned_before=MAX(pruned_before,?),pruned_seq=MAX(pruned_seq,?),retained_bytes=? WHERE session_id=?`, prunedPosition, prunedSeq, bytes, sessionID); err != nil {
+	if _, err := tx.Exec(`UPDATE session_journal_state SET pruned_before=MAX(pruned_before,?),pruned_seq=MAX(pruned_seq,?),retained_rows=?,retained_bytes=? WHERE session_id=?`, prunedPosition, prunedSeq, count, bytes, sessionID); err != nil {
 		return err
 	}
 	if !prunedBody {
@@ -493,7 +494,7 @@ func (r *Registry) replaceSessionJournal(sessionID string, entries []SessionJour
 	}
 	// Every row up to the previous newest is gone: a stream cursor at that
 	// newest receives the rebuilt rows, and an older one reports a gap.
-	if _, err := tx.Exec(`UPDATE session_journal_state SET next_seq=?,derived_version=?,retained_bytes=?,pruned_seq=MAX(pruned_seq,?) WHERE session_id=?`, next, derivation, retained, previous, sessionID); err != nil {
+	if _, err := tx.Exec(`UPDATE session_journal_state SET next_seq=?,derived_version=?,retained_rows=?,retained_bytes=?,pruned_seq=MAX(pruned_seq,?) WHERE session_id=?`, next, derivation, len(entries), retained, previous, sessionID); err != nil {
 		return nil, err
 	}
 	if historyBefore != nil {

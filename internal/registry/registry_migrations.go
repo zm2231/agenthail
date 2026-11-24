@@ -166,6 +166,9 @@ func migrateTx(tx *sql.Tx) error {
 	if err := ensureColumn(tx, "session_journal_state", "swept_seq", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
+	if err := ensureColumn(tx, "session_journal_state", "retained_rows", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
 	if err := ensureColumn(tx, "session_journal", "payload_codec", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}

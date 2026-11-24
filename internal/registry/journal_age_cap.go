@@ -53,7 +53,7 @@ func (r *Registry) DropStaleJournal(stale StaleJournal, before time.Time) (bool,
 			return false, err
 		}
 	}
-	if _, err := tx.Exec(`UPDATE session_journal_state SET retained_bytes=0,next_seq=next_seq+1,pruned_seq=next_seq+1,pruned_before=0,history_before=-1,
+	if _, err := tx.Exec(`UPDATE session_journal_state SET retained_rows=0,retained_bytes=0,next_seq=next_seq+1,pruned_seq=next_seq+1,pruned_before=0,history_before=-1,
 		seed_status=?,seed_seq=0,seed_identity='',transcript_checkpoint='',derived_version=0 WHERE session_id=?`, SessionJournalSeedUnknown, stale.SessionID); err != nil {
 		return false, err
 	}

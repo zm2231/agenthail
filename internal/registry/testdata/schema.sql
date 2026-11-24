@@ -10,6 +10,7 @@
 -- migration 2026-11-22-work-item-for-session-prs
 -- migration 2026-11-24-send-mode-for-identities
 -- migration 2026-11-24-session-context-key
+-- migration 2026-11-24-tracked-journal-rows
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -1049,6 +1050,7 @@ CREATE TABLE session_journal_state (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	next_seq INTEGER NOT NULL DEFAULT 0,
 	retained_bytes INTEGER NOT NULL DEFAULT 0,
+	retained_rows INTEGER NOT NULL DEFAULT 0,
 	source_epoch TEXT NOT NULL DEFAULT '',
 	pruned_before INTEGER NOT NULL DEFAULT 0,
 	pruned_seq INTEGER NOT NULL DEFAULT 0,
