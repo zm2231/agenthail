@@ -182,3 +182,13 @@ fn snapshot_fixture_parses_and_classifies() {
     println!("{counts:?} of {}", snap.sessions.len());
     assert!(snap.sessions.len() > 10);
 }
+
+#[test]
+fn numbered_options_come_from_the_question_list() {
+    let body = "For notes without a `# Title`, which should the CLI show?\n\n1. **Filename — recommended**, e.g. `shopping.md`, so each note is identifiable.\n2. `(untitled)`, explicitly marking the missing title.\n\nI'll wait for your choice.";
+    let options = feed::catalog::numbered_options(body);
+    assert_eq!(options.len(), 2);
+    assert!(options[0].starts_with("Filename — recommended"));
+    assert!(options[1].starts_with("(untitled)"));
+    assert!(feed::catalog::numbered_options("Just prose, no list.").is_empty());
+}

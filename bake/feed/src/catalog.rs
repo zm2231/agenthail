@@ -307,6 +307,82 @@ pub fn phase(state: &str) -> usize {
 
 pub const PHASES: [&str; 5] = ["Plan", "Build", "Review", "Merge", "Done"];
 
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestOption {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestQuestion {
+    #[serde(default)]
+    pub question: String,
+    #[serde(default)]
+    pub header: String,
+    #[serde(default)]
+    pub multi_select: bool,
+    #[serde(default)]
+    pub options: Vec<RequestOption>,
+    #[serde(default)]
+    pub suggested: Option<usize>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestAction {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenRequest {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub tool: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub questions: Option<Vec<RequestQuestion>>,
+    #[serde(default)]
+    pub actions: Vec<RequestAction>,
+}
+
+pub fn numbered_options(body: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut expect = 1;
+    for line in body.lines() {
+        let t = line.trim();
+        let digits: String = t.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let rest = &t[digits.len()..];
+        if !digits.is_empty() && (rest.starts_with(". ") || rest.starts_with(") ")) && digits.parse::<usize>().ok() == Some(expect) {
+            let label = rest[2..].replace("**", "").replace('`', "");
+            found.push(label.trim().to_string());
+            expect += 1;
+        } else if expect > 1 && !t.is_empty() && !line.starts_with(' ') {
+            if found.len() >= 2 {
+                break;
+            }
+            found.clear();
+            expect = 1;
+        }
+    }
+    if found.len() >= 2 && found.len() <= 6 { found } else { Vec::new() }
+}
+
 #[derive(Clone)]
 pub struct Client {
     base: String,
@@ -362,6 +438,22 @@ impl Client {
             }
         }
         Ok(rows)
+    }
+
+    pub fn requests(&self, session: &str) -> Result<Vec<OpenRequest>> {
+        let value = self.get(&format!("/api/v1/requests?sessionId={}", enc(session)))?;
+        Ok(serde_json::from_value(value["requests"].clone()).unwrap_or_default())
+    }
+
+    pub fn respond(&self, session: &str, request: &str, choices: Vec<String>) -> Result<()> {
+        let key = format!("bake-respond-{}-{}", request, OffsetDateTime::now_utc().unix_timestamp_nanos());
+        self.agent
+            .post(&format!("{}/api/v1/actions", self.base))
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .set("Idempotency-Key", &key)
+            .send_json(serde_json::json!({"action": "respond", "sessionId": session, "requestId": request, "decision": {"choices": choices}}))
+            .map_err(|e| anyhow!(e.to_string()))?;
+        Ok(())
     }
 
     pub fn send(&self, session: &str, message: &str) -> Result<()> {

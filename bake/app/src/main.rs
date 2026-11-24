@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
-use feed::catalog::{BoardRow, Client, Session, Snapshot, WorkItem};
+use feed::catalog::{BoardRow, Client, OpenRequest, Session, Snapshot, WorkItem};
 use feed::source::{Live, Message};
 use rune::{AppSpec, Chrome, Key, KeyEvent, TextEdit, Tx, WindowOptions};
 use time::OffsetDateTime;
@@ -19,6 +19,8 @@ pub enum Bg {
     Item(String, WorkItem),
     Board(String, Vec<BoardRow>),
     Sent(String, Result<(), String>),
+    Requests(String, Vec<OpenRequest>),
+    Answered(String, Result<(), String>),
     Error(String),
 }
 
@@ -51,6 +53,9 @@ pub struct App {
     pub palette_order: Vec<String>,
     pub items: HashMap<String, WorkItem>,
     pub boards: HashMap<String, Vec<BoardRow>>,
+    pub requests: HashMap<String, Vec<OpenRequest>>,
+    pub answering: Option<String>,
+    pub answered: HashSet<String>,
     client: Option<Client>,
     fixtures: Option<Fixtures>,
     inbox: Receiver<Bg>,
@@ -95,6 +100,9 @@ fn init() -> App {
         palette_order: Vec::new(),
         items: HashMap::new(),
         boards: HashMap::new(),
+        requests: HashMap::new(),
+        answering: None,
+        answered: HashSet::new(),
         client: None,
         fixtures: None,
         inbox,
@@ -178,6 +186,38 @@ pub fn select(s: &mut App, id: &str) {
     if let Some(work) = session(s, id).and_then(|x| x.held_work.first().cloned()) {
         fetch_item(s, &work.project_key, &work.item_id);
     }
+    fetch_requests(s, id);
+}
+
+fn fetch_requests(s: &mut App, id: &str) {
+    if let Some(client) = s.client.clone() {
+        let (tx, id) = (s.outbox.clone(), id.to_string());
+        std::thread::spawn(move || {
+            if let Ok(requests) = client.requests(&id) {
+                let _ = tx.send(Bg::Requests(id, requests));
+            }
+        });
+    }
+}
+
+pub fn answer_request(s: &mut App, request: &str, choices: Vec<String>) {
+    let Some(id) = s.selected.clone() else { return };
+    let Some(client) = s.client.clone() else {
+        s.send_status = "Fixture mode: not sent".into();
+        return;
+    };
+    s.answering = Some(request.to_string());
+    s.send_status = "Answering…".into();
+    let (out, request) = (s.outbox.clone(), request.to_string());
+    std::thread::spawn(move || {
+        let result = client.respond(&id, &request, choices).map_err(|e| e.to_string());
+        let _ = out.send(Bg::Answered(id, result));
+    });
+}
+
+pub fn send_text(s: &mut App, message: String, tx: &mut Tx) {
+    s.composer = TextEdit::new(message.as_str());
+    send(s, tx);
 }
 
 fn fetch_item(s: &mut App, project: &str, item: &str) {
@@ -256,6 +296,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Snapshot(sessions) => {
                 s.sessions = sessions;
                 s.now = OffsetDateTime::now_utc();
+                let now = s.now;
+                let still: HashSet<String> = s.sessions.iter().filter(|x| x.state(now) == feed::catalog::State::NeedsYou).map(|x| x.id.clone()).collect();
+                s.answered.retain(|id| still.contains(id));
                 s.status = "live".into();
                 if s.selected.is_none() {
                     if let Some(id) = ui::ordered(s).first().map(|x| x.id.clone()) {
@@ -263,6 +306,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                     }
                 }
                 if let Some(id) = s.selected.clone() {
+                    fetch_requests(s, &id);
                     if let Some(work) = session(s, &id).and_then(|x| x.held_work.first().cloned()) {
                         fetch_item(s, &work.project_key, &work.item_id);
                     }
@@ -279,6 +323,20 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                     Ok(()) => "Sent".into(),
                     Err(error) => format!("Not sent: {error}"),
                 };
+            }
+            Bg::Requests(id, requests) => {
+                s.requests.insert(id, requests);
+            }
+            Bg::Answered(id, result) => {
+                s.answering = None;
+                if result.is_ok() {
+                    s.answered.insert(id.clone());
+                }
+                s.send_status = match result {
+                    Ok(()) => "Answered".into(),
+                    Err(error) => format!("Not answered: {error}"),
+                };
+                fetch_requests(s, &id);
             }
             Bg::Error(error) => s.status = format!("daemon: {error}"),
         }
