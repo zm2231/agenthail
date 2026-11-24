@@ -103,7 +103,7 @@ final class SessionEditSheetTests: XCTestCase {
         XCTAssertFalse(top.isEmpty || bottom.isEmpty, "rows show at both ends")
         XCTAssertTrue(top.isDisjoint(with: bottom), "no row shows at both ends, so each one is off screen at one of them: top \(top.sorted()), bottom \(bottom.sorted())")
         XCTAssertEqual(sweep(list, down), rows, "every row, Name conversation included, comes on screen going down")
-        XCTAssertEqual(sweep(list, down.reversed()), rows, "and going back up")
+        XCTAssertEqual(sweep(list, Array(down.reversed())), rows, "and going back up")
         XCTAssertEqual(sweep(list, down), rows, "and going down again")
 
         XCTAssertNotNil(host.presentedViewController, "the rename sheet stays open")
