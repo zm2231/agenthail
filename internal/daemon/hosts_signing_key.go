@@ -26,5 +26,8 @@ func (d *Daemon) apiHostSigningKeyHandler(w http.ResponseWriter, r *http.Request
 		writeAPIError(w, http.StatusInternalServerError, "rotate_failed", err.Error())
 		return
 	}
+	if err := d.catalog.flushCommitted(); err != nil {
+		d.log.Printf("publish rotated host key: %s", err)
+	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"key": key, "revoked": request.Revoke})
 }

@@ -21,7 +21,7 @@ func TestASettledTranscriptKeepsTheRowsLastPlanAndTurnStop(t *testing.T) {
 	}
 	publish := func(session surface.Session) catalogStoredListing {
 		t.Helper()
-		if !d.publishCatalogSession(context.Background(), fake, session, nil, projectresolve.CatalogIdentity{}, "", 0, nil, false, dashconfig.Config{}, view, time.Now().UTC(), nil, nil) {
+		if !d.publishCatalogSession(context.Background(), fake, session, nil, projectresolve.CatalogIdentity{}, "", 0, nil, false, dashconfig.Config{}, view, nil, time.Now().UTC(), nil, nil) {
 			t.Fatalf("%s was not published", session.ID)
 		}
 		return d.storedListing(session.ID)

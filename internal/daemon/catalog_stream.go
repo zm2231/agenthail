@@ -81,10 +81,20 @@ func (h *catalogHub) publish(event registry.CatalogEvent) (registry.CatalogEvent
 }
 
 func (h *catalogHub) publishSession(state registry.CatalogSessionState, event registry.CatalogEvent) (registry.CatalogEvent, bool, error) {
+	return h.recordSession(state, event, true)
+}
+
+// publishPassSession records a row of a discovery pass, which flushes once
+// when it ends, so a row that appends nothing does not reread the journal.
+func (h *catalogHub) publishPassSession(state registry.CatalogSessionState, event registry.CatalogEvent) (registry.CatalogEvent, bool, error) {
+	return h.recordSession(state, event, false)
+}
+
+func (h *catalogHub) recordSession(state registry.CatalogSessionState, event registry.CatalogEvent, flush bool) (registry.CatalogEvent, bool, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	persisted, created, err := h.registry.RecordCatalogSession(state, event)
-	if err != nil {
+	if err != nil || !flush && !created {
 		return persisted, created, err
 	}
 	if err := h.flushCommittedLocked(); err != nil {
@@ -469,6 +479,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 		openSessions := surface.OpenSessions(ctx, adapter, sessions)
 		listedReads := listedReadStates(sessions, view)
 		source, _ := adapter.(surface.LocalStatusSource)
+		rows := newCatalogRowSource(sessions)
 		for _, session := range sessions {
 			if session.Runtime == nil {
 				session.Runtime = &surface.Runtime{Launcher: surface.LauncherExternal, Focusable: false}
@@ -490,7 +501,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 			}
 			// The entry changes with the row, under the session's waiting
 			// lock, so a status publish lands wholly before or after both.
-			d.publishCatalogSession(ctx, adapter, session, nil, identity, alias, counts[session.ID], limits[session.ID], open, config, view, observedAt, nil, func(committed bool) {
+			d.publishCatalogSession(ctx, adapter, session, nil, identity, alias, counts[session.ID], limits[session.ID], open, config, view, rows, observedAt, nil, func(committed bool) {
 				d.catalogLiveMu.Lock()
 				defer d.catalogLiveMu.Unlock()
 				if committed && live != nil {
@@ -500,6 +511,9 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 				}
 			})
 		}
+		if err := d.catalog.flushCommitted(); err != nil {
+			d.log.Printf("publish committed catalog events: %s", err)
+		}
 		d.recordReadStates(listedReads, listedAt)
 		d.forgetCatalogLive(adapter.Name(), seen)
 		d.followLiveSessions(adapter.Name(), sessions, openSessions, complete)
@@ -507,7 +521,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 		if keeper, keeps := adapter.(surface.EndedConversations); keeps && complete {
 			recordErr = d.discoverEndedSessions(ctx, adapter, keeper, seen, hidden, observedAt, func(session surface.Session, read *surface.Session, identity projectresolve.CatalogIdentity) bool {
 				restore := &registry.SessionUpdate{From: *read, Owns: registry.SessionActivityFields | registry.SessionProcessFields, Guard: registry.AllSessionFields}
-				return d.publishCatalogSession(ctx, adapter, session, restore, identity, aliasByID[session.ID], counts[session.ID], limits[session.ID], false, config, view, observedAt, nil, nil)
+				return d.publishCatalogSession(ctx, adapter, session, restore, identity, aliasByID[session.ID], counts[session.ID], limits[session.ID], false, config, view, nil, observedAt, nil, nil)
 			})
 		} else {
 			recordErr = d.catalog.recordDiscovery(adapter.Name(), seen, observedAt, complete)
@@ -648,7 +662,7 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 		// drop the entry between them.
 		check := func() bool { return current(entry, func(*catalogLiveSession) {}) }
 		status := registry.OwnedSessionUpdate(entry.session, registry.SessionActivityFields)
-		d.publishCatalogSession(ctx, live.adapter, refreshed, &status, live.identity, live.alias, counts[entry.id], limits[entry.id], live.open, *config, view, time.Now().UTC(), check, func(committed bool) {
+		d.publishCatalogSession(ctx, live.adapter, refreshed, &status, live.identity, live.alias, counts[entry.id], limits[entry.id], live.open, *config, view, nil, time.Now().UTC(), check, func(committed bool) {
 			current(entry, func(live *catalogLiveSession) {
 				if committed {
 					live.session = refreshed
@@ -669,7 +683,7 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 // Under the session's waiting lock, check, when set, runs before the row is
 // written and stops the write when it fails, and done, when set, runs last
 // with whether the row committed.
-func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surface, session surface.Session, update *registry.SessionUpdate, identity projectresolve.CatalogIdentity, alias string, queueCount int, limitResume *dashboardLimitResume, open bool, config dashconfig.Config, view catalogViewState, observedAt time.Time, check func() bool, done func(committed bool)) (committed bool) {
+func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surface, session surface.Session, update *registry.SessionUpdate, identity projectresolve.CatalogIdentity, alias string, queueCount int, limitResume *dashboardLimitResume, open bool, config dashconfig.Config, view catalogViewState, rows *catalogRowSource, observedAt time.Time, check func() bool, done func(committed bool)) (committed bool) {
 	defer d.lockWaiting(session.ID)()
 	if done != nil {
 		defer func() { done(committed) }()
@@ -700,46 +714,23 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 			session.TurnStop = stored.TurnStop
 		}
 	}
-	leads, err := d.Registry.LocalLeadSessions()
+	meta, err := rows.row(d.Registry, session.ID)
 	if err != nil {
 		return false
 	}
-	starter, err := d.Registry.AgentStarter(session.ID)
-	if err != nil {
-		return false
-	}
-	_, task, err := d.Registry.TaskForChild(session.ID)
-	if err != nil {
-		return false
-	}
-	registered, err := d.Registry.SessionRegisteredAt(session.ID)
-	if err != nil {
-		return false
-	}
+	registered := meta.RegisteredAt
 	if registered.IsZero() {
 		registered = observedAt.UTC().Truncate(time.Second)
 	}
-	work, hasWork, err := d.Registry.WorkForSession(session.ID)
-	if err != nil {
-		return false
-	}
-	prs, err := d.Registry.PRsForSession(session.ID)
-	if err != nil {
-		return false
-	}
-	move, err := d.Registry.UnfinishedMoveOut(session.ID)
-	if err != nil {
-		return false
-	}
 	waited := d.turnWaited(session)
 	for attempt := 0; attempt < 3; attempt++ {
-		row := d.catalogSessionProjection(adapter, session, identity, observedAt, alias, queueCount, limitResume, open, leads[session.ID], config, waited)
-		row.RegisteredAt, row.StartedBy, row.Task, row.Move = registered, starter, task, moveRow(move)
-		if hasWork {
-			row.Worktree = newWorkView(work)
+		row := d.catalogSessionProjection(adapter, session, identity, observedAt, alias, queueCount, limitResume, open, meta.Lead, config, waited)
+		row.RegisteredAt, row.StartedBy, row.Task, row.Move = registered, meta.StartedBy, meta.Task, moveRow(meta.Move)
+		if meta.HasWork {
+			row.Worktree = newWorkView(meta.Work)
 		}
-		if len(prs) > 0 {
-			row.PRs = d.prs.Views(prs)
+		if len(meta.PRs) > 0 {
+			row.PRs = d.prs.Views(meta.PRs)
 		}
 		row.HiddenSubagents, row.LiveHiddenSubagents, row.Listed = stored.HiddenSubagents, stored.LiveHiddenSubagents, stored.Listed
 		row.Subagents = addSubagentRollups(row.ObservedSubagents, stored.LiveHiddenSubagents)
@@ -758,7 +749,11 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 			return false
 		}
 		key := "session.upserted:" + session.ID
-		_, _, publishErr := d.catalog.publishSession(registry.CatalogSessionState{Session: session, Project: project, Checkout: checkout, ObservedAt: observedAt, ProjectionFingerprint: string(fingerprint), Update: update}, registry.CatalogEvent{DedupeKey: key, Type: "session.upserted", EntityID: session.ID, Payload: payload})
+		record := d.catalog.publishSession
+		if rows != nil {
+			record = d.catalog.publishPassSession
+		}
+		_, _, publishErr := record(registry.CatalogSessionState{Session: session, Project: project, Checkout: checkout, ObservedAt: observedAt, ProjectionFingerprint: string(fingerprint), Update: update}, registry.CatalogEvent{DedupeKey: key, Type: "session.upserted", EntityID: session.ID, Payload: payload})
 		if publishErr == nil {
 			if session.TurnStop != nil {
 				stopped := session
