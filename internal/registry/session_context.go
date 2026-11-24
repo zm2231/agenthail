@@ -1,6 +1,10 @@
 package registry
 
-import "time"
+import (
+	"database/sql"
+	"errors"
+	"time"
+)
 
 // sessionStartWindow is how long one start of a session stays claimed.
 // Claude runs every configured copy of a hook at once, so the copies of one
@@ -44,4 +48,14 @@ func (r *Registry) ClaimContextChange(sessionID, fingerprint string, now time.Ti
 		return ContextCurrent, err
 	}
 	return ContextChanged, nil
+}
+
+// ContextFingerprint is the fingerprint of the card last given to the
+// session; found is false when it was never given one.
+func (r *Registry) ContextFingerprint(sessionID string) (fingerprint string, found bool, err error) {
+	err = r.db.QueryRow(`SELECT fingerprint FROM session_context WHERE session_id=?`, sessionID).Scan(&fingerprint)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return fingerprint, err == nil, err
 }

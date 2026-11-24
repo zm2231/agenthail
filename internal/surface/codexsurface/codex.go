@@ -36,6 +36,7 @@ type Codex struct {
 	terminals       codexTerminals
 	surface.MCPAttachment
 	codexConfigAttachment
+	turnContextAttachment
 	subscriptions codexSubscriptions
 	turnStarts    codexTurnStarts
 	moves         codexMovesHeld

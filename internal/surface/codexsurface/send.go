@@ -50,10 +50,12 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 	if err := applyCodexTurnOptions(options.Model, options.TurnOptions, params); err != nil {
 		return nil, surface.DeliveryUnavailable(err)
 	}
+	delivered := c.withTurnContext(ctx, conn, *sess, params)
 	resp, err := c.startTurn(ctx, conn, sess.ID, "turn/start", params, 10*time.Second)
 	if err != nil {
 		return nil, codexOperationOutcome(fmt.Errorf("turn/start: %w", err))
 	}
+	delivered()
 	turnID := sess.ID
 	if result, _ := resp["result"].(map[string]any); result != nil {
 		if turn, _ := result["turn"].(map[string]any); turn != nil && transcript.String(turn, "id") != "" {

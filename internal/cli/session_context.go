@@ -79,13 +79,17 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 	}
 	text := ""
 	var ledgerContext string
-	if hook.Event == claudehooks.Start.Event {
+	switch {
+	case kind == surface.KindCodex && card.EndsTurns:
+		// The daemon gives a Codex thread on the server it gave it its
+		// card with the turns it starts.
+	case hook.Event == claudehooks.Start.Event:
 		claimed, err := store.ClaimSessionStart(session.ID, fmt.Sprintf("%s:%d", hook.Source, parent), card.Fingerprint(), now)
 		if err == nil && claimed {
 			text = agentcard.Render(card)
 			ledgerContext = a.ledgerStartContext(ctx, session.ID, card.MCP)
 		}
-	} else {
+	default:
 		change, err := store.ClaimContextChange(session.ID, card.Fingerprint(), now)
 		switch {
 		case err != nil:
