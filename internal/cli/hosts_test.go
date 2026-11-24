@@ -467,6 +467,37 @@ func TestAnAgentPinningAPairedHostsSessionNamesItselfSoThatHostCanTellItStartedI
 	}
 }
 
+func TestAnAgentPinningASessionOnThisHostNamesThePinInItsNoticeAndAddsNoLimits(t *testing.T) {
+	app, reg, fake, api := federatedCLIFixture(t, true)
+	for _, id := range []string{"lead", "worker"} {
+		session := surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}
+		fake.sessions[id] = session
+		if err := reg.RecordObservedSession(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("AGENTHAIL_SESSION_ID", "lead")
+	var notices []daemonapi.ScopeRequest
+	app.scopeOverride = func(request daemonapi.ScopeRequest) (*daemonapi.ScopeReply, error) {
+		if request.Action == "notice" {
+			notices = append(notices, request)
+			return &daemonapi.ScopeReply{}, nil
+		}
+		return &daemonapi.ScopeReply{TargetID: "worker", Notice: "told-once-it-ran"}, nil
+	}
+	api.response = `{"ok":true,"result":{"ok":true}}`
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"thread", "pin", "worker"}) }); err != nil {
+		t.Fatal(err)
+	}
+	actions, _ := api.recorded()
+	if len(actions) != 1 || actions[0]["sessionId"] != "worker" || actions[0]["scopeProjectId"] != nil || actions[0]["sourceSessionId"] != nil {
+		t.Fatalf("actions=%v, want a local pin with no forwarded limits", actions)
+	}
+	if len(notices) != 1 || notices[0].Ran != "session-pin" || notices[0].ControlDecision != "" {
+		t.Fatalf("notices=%+v, want one naming the pin", notices)
+	}
+}
+
 func TestAnAgentsControlOfAPairedHostsSessionCarriesTheLimitsItsScopeCheckNamed(t *testing.T) {
 	app, reg, _, api := federatedCLIFixture(t, true)
 	if err := reg.RecordObservedSession(surface.Session{ID: "lead", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}); err != nil {
