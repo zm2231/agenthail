@@ -41,6 +41,7 @@ func TestAnArchiveOnAPairedHostTellsThePersonOnlyWhenTheLeadsRoleSaysTo(t *testi
 	h := newHostTargets(t, true)
 	person := &toldPerson{}
 	h.local.daemon.notifyDesktop = person.notify
+	setRoleDecision(t, h.local.reg, agentroles.Lead, "overseen-control", agentroles.Notify)
 	setRoleDecision(t, h.local.reg, agentroles.Lead, "remote-project-control", agentroles.Allow)
 	if out, refused := callMCP(t, h.caller, "agenthail_archive", map[string]any{"target": "vps::@builder", "clientRequestId": "archive-quiet"}); refused {
 		t.Fatalf("archive refused: %v", out)
