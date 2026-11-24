@@ -680,7 +680,7 @@ func TestAQueueConflictRereadsTheStopReleasedWithItsNotice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !f.d.publishCatalogSession(context.Background(), f.fake, f.fake.sessions["worker"], nil, projectresolve.CatalogIdentity{}, "", 0, stale["worker"], false, dashconfig.Config{}, view, time.Now().UTC(), nil, nil) {
+	if !f.d.publishCatalogSession(context.Background(), f.fake, f.fake.sessions["worker"], nil, projectresolve.CatalogIdentity{}, "", 0, stale["worker"], false, dashconfig.Config{}, view, nil, time.Now().UTC(), nil, nil) {
 		t.Fatal("the session was not published")
 	}
 	window, err := f.r.CatalogEventsAfter(0, 50)
@@ -722,7 +722,7 @@ func TestTheNextPresencePassRepairsAStopPublishedBeforeACancel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !f.d.publishCatalogSession(context.Background(), f.fake, f.fake.sessions["worker"], nil, projectresolve.CatalogIdentity{}, "", 0, stale["worker"], false, dashconfig.Config{}, view, time.Now().UTC(), nil, nil) {
+	if !f.d.publishCatalogSession(context.Background(), f.fake, f.fake.sessions["worker"], nil, projectresolve.CatalogIdentity{}, "", 0, stale["worker"], false, dashconfig.Config{}, view, nil, time.Now().UTC(), nil, nil) {
 		t.Fatal("the session was not published")
 	}
 	latest := func() *dashboardLimitResume {

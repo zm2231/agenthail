@@ -207,7 +207,11 @@ func presentationPRs(ctx context.Context, tx *sql.Tx) (map[string][]SessionPR, e
 }
 
 func (r *Registry) sessionPRs(where string, args ...any) ([]SessionPR, error) {
-	rows, err := r.read.Query(`SELECT session_id,repo,number,url,source,watch,title,state,head_sha,mergeable,review,checks,last_read_at_ms,linked_at_ms,
+	return querySessionPRs(r.read, where, args...)
+}
+
+func querySessionPRs(q rowQuerier, where string, args ...any) ([]SessionPR, error) {
+	rows, err := q.Query(`SELECT session_id,repo,number,url,source,watch,title,state,head_sha,mergeable,review,checks,last_read_at_ms,linked_at_ms,
 	failed_checks,passed_head,conflict_head,remarks_through_ms,remark_ids,wakes,comment_wakes,read_failures,item_id,item_from FROM session_prs `+where+` ORDER BY linked_at_ms,repo,number`, args...)
 	if err != nil {
 		return nil, err

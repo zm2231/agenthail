@@ -45,7 +45,7 @@ func newProjectScopeFixture(t *testing.T) projectScopeFixture {
 		if err != nil || project == nil {
 			t.Fatalf("resolve %s: %v %v", session.Cwd, project, err)
 		}
-		if !d.publishCatalogSession(context.Background(), fake, session, nil, projectresolve.CatalogIdentity{Project: project}, "", 0, nil, false, dashconfig.Config{}, view, time.Now().UTC(), nil, nil) {
+		if !d.publishCatalogSession(context.Background(), fake, session, nil, projectresolve.CatalogIdentity{Project: project}, "", 0, nil, false, dashconfig.Config{}, view, nil, time.Now().UTC(), nil, nil) {
 			t.Fatalf("%s was not published", session.ID)
 		}
 	}

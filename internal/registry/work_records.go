@@ -180,7 +180,11 @@ func decodeKeptPaths(kept string) ([]string, error) {
 }
 
 func (r *Registry) workRecords(where string, args ...any) ([]WorkRecord, error) {
-	rows, err := r.read.Query(`SELECT worktree_path,session_id,repo_root,branch,base_ref,base_commit,state,settled_reason,cleanup,cleanup_reason,kept_paths,created_at_ms,settled_at_ms FROM work_records `+where+` ORDER BY created_at_ms`, args...)
+	return queryWorkRecords(r.read, where, args...)
+}
+
+func queryWorkRecords(q rowQuerier, where string, args ...any) ([]WorkRecord, error) {
+	rows, err := q.Query(`SELECT worktree_path,session_id,repo_root,branch,base_ref,base_commit,state,settled_reason,cleanup,cleanup_reason,kept_paths,created_at_ms,settled_at_ms FROM work_records `+where+` ORDER BY created_at_ms`, args...)
 	if err != nil {
 		return nil, err
 	}
