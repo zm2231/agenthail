@@ -192,3 +192,22 @@ fn numbered_options_come_from_the_question_list() {
     assert!(options[1].starts_with("(untitled)"));
     assert!(feed::catalog::numbered_options("Just prose, no list.").is_empty());
 }
+
+#[test]
+fn edits_come_from_edit_and_patch_calls() {
+    use feed::item::Item;
+    let mk = |id: &str, title: &str, text: &str| Item { id: id.into(), kind: "toolCall".into(), title: title.into(), text: text.into(), ..Default::default() };
+    let items = vec![
+        mk("a", "Edit", r#"{"file_path":"/r/a.rs","old_string":"x = 1","new_string":"x = 2"}"#),
+        mk("b", "Write", r#"{"file_path":"/r/new.md","content":"hello\n"}"#),
+        mk("c", "apply_patch", "*** Begin Patch\n*** Update File: src/b.go\n@@\n keep\n-old line\n+new line\n*** End Patch"),
+        mk("d", "Bash", r#"{"command":"ls"}"#),
+    ];
+    let e = feed::edits::edits(&items);
+    assert_eq!(e.len(), 3, "{e:?}");
+    assert_eq!(e[0].new, "x = 2");
+    assert!(e[1].created);
+    assert_eq!(e[2].path, "src/b.go");
+    assert_eq!(e[2].old, "keep\nold line\n");
+    assert_eq!(e[2].new, "keep\nnew line\n");
+}

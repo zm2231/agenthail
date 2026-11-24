@@ -24,6 +24,12 @@ pub enum Bg {
     Error(String),
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum Tab {
+    Conversation,
+    Changes,
+}
+
 #[derive(Clone, PartialEq)]
 pub enum Screen {
     Session,
@@ -56,6 +62,9 @@ pub struct App {
     pub requests: HashMap<String, Vec<OpenRequest>>,
     pub answering: Option<String>,
     pub answered: HashSet<String>,
+    pub tab: Tab,
+    pub diff: rune_kit::diff::DiffState,
+    pub diff_key: (String, usize),
     client: Option<Client>,
     fixtures: Option<Fixtures>,
     inbox: Receiver<Bg>,
@@ -103,6 +112,9 @@ fn init() -> App {
         requests: HashMap::new(),
         answering: None,
         answered: HashSet::new(),
+        tab: Tab::Conversation,
+        diff: rune_kit::diff::DiffState::new(Vec::new()),
+        diff_key: (String::new(), usize::MAX),
         client: None,
         fixtures: None,
         inbox,
@@ -144,6 +156,9 @@ fn init() -> App {
     if let Some(id) = first {
         select(&mut app, &id);
     }
+    if arg("--tab").as_deref() == Some("changes") {
+        app.tab = Tab::Changes;
+    }
     if let Some(project) = arg("--project") {
         open_project(&mut app, &project);
     }
@@ -157,6 +172,7 @@ pub fn session<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
 pub fn select(s: &mut App, id: &str) {
     s.selected = Some(id.to_string());
     s.screen = Screen::Session;
+    s.tab = Tab::Conversation;
     s.composer = TextEdit::new("");
     s.composer.focused = true;
     s.send_status.clear();
@@ -213,6 +229,35 @@ pub fn answer_request(s: &mut App, request: &str, choices: Vec<String>) {
         let result = client.respond(&id, &request, choices).map_err(|e| e.to_string());
         let _ = out.send(Bg::Answered(id, result));
     });
+}
+
+pub fn session_edits(s: &App, id: &str) -> Vec<feed::edits::Edit> {
+    s.panes.get(id).map(|p| feed::edits::edits(p.transcript.items())).unwrap_or_default()
+}
+
+pub fn short_path(s: &App, id: &str, path: &str) -> String {
+    let cwd = session(s, id).and_then(|x| x.checkout_path()).unwrap_or_default();
+    if let Some(rel) = path.strip_prefix(&format!("{cwd}/")) {
+        return rel.to_string();
+    }
+    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+    if parts.len() > 4 { format!("…/{}", parts[parts.len() - 4..].join("/")) } else { path.to_string() }
+}
+
+pub fn refresh_diff(s: &mut App) {
+    let Some(id) = s.selected.clone() else { return };
+    let edits = session_edits(s, &id);
+    if s.diff_key == (id.clone(), edits.len()) {
+        return;
+    }
+    let files = edits.iter().rev().map(|e| rune_kit::diff::FileDiff::from_texts(short_path(s, &id, &e.path), &e.old, &e.new)).collect();
+    s.diff.set_files(files);
+    s.diff_key = (id, edits.len());
+}
+
+pub fn show_changes(s: &mut App) {
+    s.tab = Tab::Changes;
+    refresh_diff(s);
 }
 
 pub fn send_text(s: &mut App, message: String, tx: &mut Tx) {
@@ -368,6 +413,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         }
     }
     s.counter = counter;
+    if s.tab == Tab::Changes && (changed || s.diff_key.0 != s.selected.clone().unwrap_or_default()) {
+        refresh_diff(s);
+    }
     tx.wake_after(Duration::from_millis(if busy { 16 } else { 250 }));
     changed
 }

@@ -54,6 +54,8 @@ pub struct Headline {
 #[serde(rename_all = "camelCase")]
 pub struct Checkout {
     #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
     pub branch: Option<String>,
     #[serde(default)]
     pub dirty: bool,
@@ -145,6 +147,8 @@ pub struct Session {
     pub prs: Vec<Pr>,
     #[serde(default)]
     pub queue_count: i64,
+    #[serde(default)]
+    pub cwd: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -191,6 +195,10 @@ impl Session {
 
     pub fn project_name(&self) -> String {
         self.project.as_ref().map(|p| if p.display_name.is_empty() { p.name.clone() } else { p.display_name.clone() }).unwrap_or_else(|| "No project".into())
+    }
+
+    pub fn checkout_path(&self) -> Option<String> {
+        self.checkout.path.clone().or_else(|| self.cwd.clone())
     }
 
     pub fn project_key(&self) -> String {

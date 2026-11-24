@@ -9,7 +9,7 @@ use crate::theme::{
     self, BODY, BODY_BOLD, HEADING, HERO, LABEL, META, META_BOLD, NUMBER, SPRING, TITLE, accent, accent_deep, attention, card, done, failed, faint, line, muted, raised, wash,
 };
 use crate::transcript::{self, session_avatar};
-use crate::{App, Screen, answer_request, open_palette, open_project, select, send, send_text, session};
+use crate::{App, Screen, Tab, answer_request, session_edits, short_path, show_changes, open_palette, open_project, select, send, send_text, session};
 
 pub fn palette_matches<'a>(s: &'a App, query: &str) -> Vec<&'a Session> {
     s.palette_order
@@ -515,6 +515,96 @@ fn composer(s: &App, x: &Session) -> El {
     col().w_full().items_center().px(28.0).pb(18.0).mt(-120.0).child(box_el)
 }
 
+fn counts(diff: &rune_kit::diff::FileDiff) -> (usize, usize) {
+    let mut added = 0;
+    let mut removed = 0;
+    for hunk in &diff.hunks {
+        for line in &hunk.lines {
+            match line.kind {
+                rune_kit::diff::LineKind::Added => added += 1,
+                rune_kit::diff::LineKind::Removed => removed += 1,
+                rune_kit::diff::LineKind::Context => {}
+            }
+        }
+    }
+    (added, removed)
+}
+
+struct FileTotal {
+    path: String,
+    added: usize,
+    removed: usize,
+    edits: usize,
+}
+
+fn file_totals(s: &App, id: &str) -> Vec<FileTotal> {
+    let mut out: Vec<FileTotal> = Vec::new();
+    for e in session_edits(s, id) {
+        let path = short_path(s, id, &e.path);
+        let (a, r) = counts(&rune_kit::diff::FileDiff::from_texts(path.clone(), &e.old, &e.new));
+        match out.iter_mut().find(|f| f.path == path) {
+            Some(f) => {
+                f.added += a;
+                f.removed += r;
+                f.edits += 1;
+            }
+            None => out.push(FileTotal { path, added: a, removed: r, edits: 1 }),
+        }
+    }
+    out
+}
+
+fn tabs(s: &App, id: &str) -> El {
+    let files = file_totals(s, id).len();
+    let tab = |key: &'static str, glyph: &'static Icon, title: String, on: bool| {
+        let mut t = row()
+            .key(key)
+            .gap(6.0)
+            .items_center()
+            .px(11.0)
+            .py(5.0)
+            .radius(8.0)
+            .motion(SPRING)
+            .hover(Color::WHITE.alpha(0.06))
+            .child(icon(glyph, 13.0).color(if on { theme::text() } else { faint() }))
+            .child(text(title).font(META_BOLD).color(if on { theme::text() } else { faint() }));
+        if on {
+            t = t.fill(Color::WHITE.alpha(0.10)).border(1.0, Color::WHITE.alpha(0.08));
+        }
+        t
+    };
+    row()
+        .w_full()
+        .gap(4.0)
+        .px(28.0)
+        .pb(10.0)
+        .child(tab("tab-conversation", &icons::MESSAGE, "Conversation".into(), s.tab == Tab::Conversation).on_press(|s: &mut App| s.tab = Tab::Conversation))
+        .child(tab("tab-changes", &icons::BRANCH, if files == 0 { "Changes".into() } else { format!("Changes · {files} files") }, s.tab == Tab::Changes).on_press(show_changes))
+}
+
+fn changes_view(s: &App, id: &str) -> El {
+    if session_edits(s, id).is_empty() {
+        return col()
+            .w_full()
+            .grow(1.0)
+            .items_center()
+            .justify_center()
+            .gap(10.0)
+            .child(col().size(44.0, 44.0).radius(14.0).items_center().justify_center().fill(wash()).child(icon(&icons::BRANCH, 20.0).color(faint())))
+            .child(text("No file edits in this conversation yet").font(BODY_BOLD).color(muted()))
+            .child(text("Edits the agent makes show here as diffs, newest first.").font(META).color(faint()))
+            .child(el().h(80.0));
+    }
+    col()
+        .w_full()
+        .grow(1.0)
+        .min_h(0.0)
+        .px(20.0)
+        .pt(10.0)
+        .pb(120.0)
+        .child(rune_kit::diff::DiffView::new(|s: &App| &s.diff, |s: &mut App| &mut s.diff).key("diff").build(s, theme::kit()))
+}
+
 fn session_screen(s: &App) -> El {
     let Some(id) = s.selected.clone() else { return transcript::loading("Pick a session".into()) };
     let Some(x) = session(s, &id) else { return transcript::loading("Loading sessions…".into()) };
@@ -524,9 +614,11 @@ fn session_screen(s: &App) -> El {
     } else if s.answered.contains(&x.id) {
         center = center.child(col().w_full().items_center().px(32.0).pb(12.0).child(pill(&icons::CHECK_CIRCLE, "Answer sent, waiting for the agent", done())));
     }
-    center = center.child(el().w_full().h(1.0).fill(line()));
+    center = center.child(tabs(s, &id)).child(el().w_full().h(1.0).fill(line()));
     let empty = s.panes.get(&id).is_none_or(|p| p.blocks.is_empty());
-    if empty {
+    if s.tab == Tab::Changes && !empty {
+        center = center.child(changes_view(s, &id));
+    } else if empty {
         let status = s.panes.get(&id).map(|p| p.status.clone()).unwrap_or_default();
         let note = if matches!(status.as_str(), "" | "loading" | "live") { "Loading the transcript…".to_string() } else { status };
         center = center.child(transcript::loading(note));
@@ -630,6 +722,35 @@ fn rail(s: &App, x: &Session) -> El {
             }));
             parts.push(rail_section("Timeline", &icons::ACTIVITY, list));
         }
+    }
+    let files = file_totals(s, &x.id);
+    if !files.is_empty() {
+        let total_add: usize = files.iter().map(|f| f.added).sum();
+        let total_del: usize = files.iter().map(|f| f.removed).sum();
+        let list = col()
+            .w_full()
+            .gap(2.0)
+            .child(row().w_full().pb(6.0).gap(8.0).items_center().child(text(format!("{} files", files.len())).font(META_BOLD).color(theme::text())).child(spacer()).child(text(format!("+{total_add}")).font(META_BOLD).color(done())).child(text(format!("−{total_del}")).font(META_BOLD).color(failed())))
+            .children(files.iter().take(8).map(|f| {
+                let name = f.path.rsplit('/').next().unwrap_or(&f.path).to_string();
+                row()
+                    .key(format!("file-{}", f.path))
+                    .w_full()
+                    .gap(8.0)
+                    .items_center()
+                    .px(6.0)
+                    .py(5.0)
+                    .radius(7.0)
+                    .hover(Color::WHITE.alpha(0.06))
+                    .on_press(show_changes)
+                    .child(icon(&icons::LAYERS, 12.0).color(faint()))
+                    .child(col().grow(1.0).min_w(0.0).child(text(name).font(META_BOLD).color(theme::text()).truncate()).child(text(f.path.clone()).font(META).color(faint()).truncate()))
+                    .child(text(format!("+{}", f.added)).font(META).color(done()))
+                    .child(text(format!("−{}", f.removed)).font(META).color(failed()))
+                    .children((f.edits > 1).then(|| text(format!("×{}", f.edits)).font(META).color(faint())))
+            }))
+            .children((files.len() > 8).then(|| text(format!("and {} more", files.len() - 8)).font(META).color(faint()).pt(4.0)));
+        parts.push(rail_section("Changes", &icons::BRANCH, list));
     }
     if let Some(plan) = &x.plan {
         let total = plan.total.max(1) as f32;
