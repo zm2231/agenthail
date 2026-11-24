@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -103,7 +105,7 @@ type codexContextAction func(body map[string]any) map[string]any
 
 // codexContextDaemon runs a daemon with its agenthail MCP server over a real
 // Codex app-server whose model is model.
-func codexContextDaemon(t *testing.T, model http.Handler) (*registry.Registry, *codextest.Real, string, codexContextAction) {
+func codexContextDaemon(t *testing.T, model http.Handler) (*Daemon, *codextest.Real, string, codexContextAction) {
 	t.Helper()
 	real := codextest.StartRealWith(t, model, "[model_providers.mock.capabilities]\nremote_compaction = \"v2\"\n")
 	codex := codexsurface.NewCodexIn(codexsurface.CodexHome{Codex: real.CodexHome, State: filepath.Join(real.Home, ".agenthail")}, "")
@@ -121,7 +123,7 @@ func codexContextDaemon(t *testing.T, model http.Handler) (*registry.Registry, *
 		t.Fatal(err)
 	}
 	router := dashboardRouter(d)
-	return reg, real, cwd, func(body map[string]any) map[string]any {
+	return d, real, cwd, func(body map[string]any) map[string]any {
 		data, _ := json.Marshal(body)
 		response := serveDashboardRequest(router, http.MethodPost, "/api/action", string(data))
 		var decoded map[string]any
@@ -203,9 +205,47 @@ func TestACodexThreadKeepsItsCardOnceAcrossEachCompaction(t *testing.T) {
 	}
 }
 
+// A turn that cannot read whether an older Codex compacted the thread must
+// not hide a compaction from the next turn that can.
+func TestACodexTurnThatCannotReadTheThreadsCompactionsLeavesThemToTheNext(t *testing.T) {
+	model := &replyingModel{}
+	d, real, cwd, action := codexContextDaemon(t, model)
+	created := action(map[string]any{"action": "session-create", "surface": "codex", "message": "Start the notes app.", "cwd": cwd, "alias": "notes", "model": deferringModel})
+	id, _ := created["session"].(map[string]any)["id"].(string)
+	awaitCodexTurns(t, dialAppServer(t, real.Socket()), id, 1)
+	first, found, err := d.Registry.ContextGiven(id)
+	if err != nil || !found {
+		t.Fatalf("the first turn recorded no card: %v", err)
+	}
+	session, err := d.Registry.Session(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	_, text, delivered := d.codexTurnContext(ctx, *session, func(time.Time) (bool, error) {
+		return false, errors.New("thread/turns/list timed out")
+	})
+	if text == "" || delivered == nil {
+		t.Fatalf("a turn that cannot read the thread's compactions goes without its card")
+	}
+	delivered()
+	var since time.Time
+	key, _, _ := d.codexTurnContext(ctx, *session, func(at time.Time) (bool, error) {
+		since = at
+		return true, nil
+	})
+	if !since.Equal(first.At) {
+		t.Fatalf("the next turn reads compactions since %v, want since the card the first turn carried at %v", since, first.At)
+	}
+	if key == first.Key {
+		t.Fatalf("after a compaction the card stays under %q, which Codex already holds", key)
+	}
+}
+
 func TestACodexThreadAgenthailStartsKnowsItRunsInAgenthailAndAsksThePersonThroughIt(t *testing.T) {
 	model := &askingModel{}
-	reg, real, cwd, action := codexContextDaemon(t, model)
+	d, real, cwd, action := codexContextDaemon(t, model)
+	reg := d.Registry
 	created := action(map[string]any{"action": "session-create", "surface": "codex", "message": "Ask me which database to use.", "cwd": cwd, "alias": "notes", "model": deferringModel})
 	session, _ := created["session"].(map[string]any)
 	id, _ := session["id"].(string)

@@ -42,7 +42,8 @@ func otherCodexContextKey(key string) string {
 // server Agenthail gave it the card the session-context hook gives a Claude
 // session. The hook leaves such threads to the daemon, so the two never
 // both tell one. The time recorded is the thread's last turn that carried
-// the card, so a turn reads only the turns since for a compaction.
+// the card, so a turn reads only the turns since for a compaction; a turn
+// that could not read them keeps the earlier time for the next one.
 func (d *Daemon) codexTurnContext(ctx context.Context, session surface.Session, compactedSince func(time.Time) (bool, error)) (string, string, func()) {
 	card, err := d.cardSources().For(ctx, session)
 	if err != nil || !card.EndsTurns {
@@ -52,21 +53,21 @@ func (d *Daemon) codexTurnContext(ctx context.Context, session surface.Session, 
 	if err != nil {
 		return "", "", nil
 	}
-	key := given.Key
+	sent := registry.GivenContext{Fingerprint: card.Fingerprint(), Key: given.Key, At: time.Now()}
 	switch {
-	case !found || key == "":
-		key = codexContextKeys[0]
+	case !found || given.Key == "":
+		sent.Key = codexContextKeys[0]
 	case compactedSince != nil:
 		compacted, err := compactedSince(given.At)
-		if err != nil {
+		switch {
+		case err != nil:
 			d.log.Printf("read whether %s compacted since its card: %s", session.ID, err)
-		}
-		if compacted {
-			key = otherCodexContextKey(key)
+			sent.At = given.At
+		case compacted:
+			sent.Key = otherCodexContextKey(given.Key)
 		}
 	}
-	sent := registry.GivenContext{Fingerprint: card.Fingerprint(), Key: key, At: time.Now()}
-	return key, agentcard.Render(card), func() {
+	return sent.Key, agentcard.Render(card), func() {
 		if err := d.Registry.RecordContextGiven(session.ID, sent); err != nil {
 			d.log.Printf("record the Agenthail context given to %s: %s", session.ID, err)
 		}
