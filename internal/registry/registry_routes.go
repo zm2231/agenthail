@@ -102,6 +102,7 @@ const watchedForWork = `
 	UNION SELECT session_id FROM session_runtime WHERE held_completion_turn_id<>''
 	UNION SELECT session_id FROM session_runtime WHERE notification_armed=1
 	UNION SELECT child_session_id FROM tasks WHERE state='running'
+	UNION SELECT session_id FROM asks WHERE origin='` + AskOriginQuestion + `' AND state='open'
 	UNION SELECT target_session_id FROM delivery_intents WHERE ` + awaitingTurnRow + ` AND accepted_at_ms>=?`
 
 const watchedForTurnEnd = `

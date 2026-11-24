@@ -720,8 +720,8 @@ func TestQueuedPeerMessageReachesARunningOrWaitingClaudeTurnOverItsSocket(t *tes
 	}
 }
 
-// detailWaiting is what /api/session reports the session waiting on.
-func (h *runningDaemon) detailWaiting(id string) *surface.Waiting {
+// detail is the session's /api/session payload.
+func (h *runningDaemon) detail(id string) []byte {
 	h.t.Helper()
 	request, err := http.NewRequest(http.MethodGet, h.server.URL+"/api/session?id="+url.QueryEscape(id), nil)
 	if err != nil {
@@ -741,16 +741,33 @@ func (h *runningDaemon) detailWaiting(id string) *surface.Waiting {
 	if response.StatusCode != http.StatusOK {
 		h.t.Fatalf("session status=%d body=%s", response.StatusCode, payload)
 	}
+	return payload
+}
+
+// detailWaiting is what /api/session reports the session waiting on.
+func (h *runningDaemon) detailWaiting(id string) *surface.Waiting {
+	h.t.Helper()
 	var decoded struct {
 		Session struct {
-			Status    surface.SessionStatus `json:"status"`
-			WaitingOn *surface.Waiting      `json:"waitingOn"`
+			WaitingOn *surface.Waiting `json:"waitingOn"`
 		} `json:"session"`
 	}
-	if err := json.Unmarshal(payload, &decoded); err != nil {
+	if err := json.Unmarshal(h.detail(id), &decoded); err != nil {
 		h.t.Fatal(err)
 	}
 	return decoded.Session.WaitingOn
+}
+
+// detailAsk is the ask /api/session shows beside the session.
+func (h *runningDaemon) detailAsk(id string) *dashboardAsk {
+	h.t.Helper()
+	var decoded struct {
+		Ask *dashboardAsk `json:"ask"`
+	}
+	if err := json.Unmarshal(h.detail(id), &decoded); err != nil {
+		h.t.Fatal(err)
+	}
+	return decoded.Ask
 }
 
 func TestSessionDetailShowsTheQuestionTheCatalogShows(t *testing.T) {

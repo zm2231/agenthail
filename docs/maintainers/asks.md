@@ -96,6 +96,23 @@ An agent refused an action that is the person's (`detail.rule: person_only`, `de
 - An approval is answered within 24 hours or expires (`state` `expired`); the agent is told it was not done.
 - An allowed body the daemon had not run when it stopped is never run later: at start it is recorded `not_run` and the agent is told to ask again.
 
+## Provider questions
+
+Some providers ask through a tool that holds nothing open. Codex's `request_user_input_async` returns `{"accepted":true}` at once, records its questions on an agent message delivered `async`, and lets the turn go on or end. The answer reaches Codex as a later user message in its reply envelope:
+
+```
+<send_user_message_question_reply>
+[{"answer":"Keep both","question":"Which database should the service use?","questionItemId":"[\"request_user_input_async\",\"call_q1\",0]"}]
+</send_user_message_question_reply>
+```
+
+Such a question is an ask of origin `question` on the session's row; `ref` is `<thread>:<item>` and stays internal. One item asking several questions is one ask with several questions.
+
+- The daemon raises it when an observation finds the question among the thread's newest 100 items (`thread/items/list`, newest first, across turns), routed like an agent's ask. A question is raised once: an ask answered, withdrawn or dismissed is not raised again. While it is open the session stays on the observer's watch list, so an idle thread is still read.
+- It shows like an agent's ask: the card, the inbox, the ask on the row and on the session detail, `turnState` `waiting_person`, the header "Waiting on you" while the person holds it, and an `ask.opened` push. The turn that asked stays quiet.
+- Answering it needs every question answered. It composes one envelope, one entry per question, each echoing the question's full text cut to 512 bytes with line breaks as spaces, and folds any note into the last answer so the message stays a bare envelope Codex parses. The person's answer is delivered as the person's message; a lead's is delivered unlabeled, since a `[from …]` prefix would break the envelope. A turn still running takes it as a steer, as Codex's own clients do.
+- The ask is withdrawn when the thread shows every question answered by a reply envelope from another client, or when the person starts a later turn with anything else: Codex takes that turn as the answer. A reply counts only as Codex's parser reads it: complete, naming the exact question id. A steer into the turn that asked leaves the ask open, and so do messages Agenthail or another agent wrote (`[agenthail]`, `[from …]`).
+
 ## A question asked only in the reply
 
 Nothing holds a turn whose reply asks the person something no ask carries. The turn judge reads that reply as waiting on the person, and the turn pushes Needs you ([turn judge](turn-judge.md#the-push)).

@@ -15,6 +15,7 @@ extension SessionDetail {
         state.limitResume = limitResume
         state.activity = session.activity
         state.attention = attention
+        state.ask = ask
         state.host = host
         return state
     }
@@ -25,6 +26,7 @@ extension SessionDetail {
         row.status = live.status
         (row.cwd, row.transport, row.runtime, row.runtimeKind) = (live.cwd, live.transport, live.runtime, live.runtimeKind)
         (row.waitingOn, row.backgroundTasks, row.usageLimit, row.turnStop, row.limitResume, row.activity) = (live.waitingOn, live.backgroundTasks, live.usageLimit, live.turnStop, live.limitResume, live.activity)
+        row.ask = live.ask
         return row
     }
 

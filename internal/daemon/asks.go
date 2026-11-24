@@ -16,6 +16,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/dashconfig"
+	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -548,6 +549,15 @@ func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session
 		return actionResult{}, invalidRequest(err.Error())
 	}
 	message := composeAskAnswer(request.Questions, decision)
+	if ask.Origin == registry.AskOriginQuestion {
+		replier, ok := adapter.(surface.QuestionReplier)
+		if !ok {
+			return actionResult{}, conflict("this session's provider takes no answer to its question")
+		}
+		if message, err = replier.QuestionReply(ask.Ref, request.Questions, decision); err != nil {
+			return actionResult{}, invalidRequest(err.Error())
+		}
+	}
 	if message == "" {
 		return actionResult{}, invalidRequest("answer at least one question or write a note")
 	}
@@ -561,6 +571,12 @@ func (d *Daemon) answerAsk(ctx context.Context, adapter surface.Surface, session
 	options := surface.SendOptions{Author: surface.AuthorPerson, PersonName: personName}
 	if by != registry.AskToPerson {
 		options = surface.SendOptions{SourceSessionID: by}
+	}
+	if ask.Origin == registry.AskOriginQuestion {
+		if by != registry.AskToPerson {
+			options = surface.SendOptions{SourceSessionID: surface.SystemSessionID}
+		}
+		options.BusyDelivery = string(deliverypolicy.Steer)
 	}
 	receipt, deliveryErr := coordinator.Sender{Service: d.coordinator()}.DeliverWithOptions(ctx, adapter, session, message, "", options)
 	defer d.publishAsk(session.ID)

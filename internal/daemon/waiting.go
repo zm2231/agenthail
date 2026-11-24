@@ -128,6 +128,9 @@ func (d *Daemon) observeTurnLocked(ctx context.Context, adapter surface.Surface,
 	if err != nil || observation == nil {
 		return observation, false, err
 	}
+	if _, replies := adapter.(surface.QuestionReplier); replies && observation.Questions != nil {
+		d.syncQuestions(*session, *observation.Questions)
+	}
 	if observation.WaitingUnknown {
 		observation.WaitingOn = d.recordedWaiting(*session)
 		return observation, false, nil

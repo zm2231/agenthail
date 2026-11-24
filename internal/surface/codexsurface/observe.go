@@ -53,6 +53,9 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 		path, info = "", nil
 	}
 	observation.BackgroundTasks = c.codexBackground(ctx, sess.ID, path, info)
+	if questions, err := codexQuestions(ctx, conn, sess.ID); err == nil {
+		observation.Questions = questions
+	}
 	return observation, nil
 }
 

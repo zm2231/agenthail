@@ -65,6 +65,9 @@ func sessionDisplayState(row dashboardSession, now time.Time) daemonapi.SessionD
 		}
 		return display
 	}
+	if ask := row.Ask; ask.asksPerson() && ask.Origin == registry.AskOriginQuestion {
+		return daemonapi.SessionDisplay{Kind: "waiting", Label: "Waiting on you", Detail: "Answer in Agenthail", WaitingPlace: "agenthail"}
+	}
 	if stop := row.LimitResume; stop != nil && stop.State != registry.LimitResumeReleased {
 		display := daemonapi.SessionDisplay{Kind: "limited", Label: "Usage limit"}
 		switch stop.State {

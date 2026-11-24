@@ -106,7 +106,16 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 		writeAPIError(w, http.StatusInternalServerError, "registry_error", attentionErr.Error())
 		return
 	}
-	response := map[string]any{"session": session, "attention": attention, "alias": alias, "limitResume": d.limitResumeRow(session.ID), "exchangeCount": len(sessionRead.Exchanges), "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "readSource": sessionRead.Source, "transcriptTruncated": sessionRead.Truncated}
+	ask, asked, askErr := d.Registry.RowAsk(session.ID)
+	if askErr != nil {
+		writeAPIError(w, http.StatusInternalServerError, "registry_error", askErr.Error())
+		return
+	}
+	var askShown *dashboardAsk
+	if asked {
+		askShown = askRow(&ask)
+	}
+	response := map[string]any{"session": session, "attention": attention, "alias": alias, "limitResume": d.limitResumeRow(session.ID), "ask": askShown, "exchangeCount": len(sessionRead.Exchanges), "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "readSource": sessionRead.Source, "transcriptTruncated": sessionRead.Truncated}
 	if timeline := r.URL.Query().Get("timeline") == "1"; !timeline || sessionRead.UnavailableReason != "" {
 		exchanges, transcript := truncateSessionExchanges(sessionRead.Exchanges)
 		response["exchanges"] = exchanges
