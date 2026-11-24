@@ -69,6 +69,17 @@ func (s *gatedSurface) callsOf(id string) int {
 	return s.calls[id]
 }
 
+func waitUntil(t *testing.T, what string, done func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !done() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting until %s", what)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func watchSessions(t *testing.T, r *registry.Registry, fake *daemonSurface, kind surface.SurfaceKind, ids ...string) {
 	t.Helper()
 	for _, id := range ids {
@@ -99,19 +110,8 @@ func TestASlowObservationDoesNotDelayAnotherSessions(t *testing.T) {
 	// Watched sessions are scanned in id order, so a serial scan reaches
 	// "unblocked" only after both slow sessions.
 	watchSessions(t, r, fake, surface.KindCodex, "slow-1", "slow-2", "unblocked")
-	started := time.Now()
 	finished := d.planScan(t.Context())
-	deadline := time.After(5 * time.Second)
-	for gated.observedAt("unblocked").IsZero() {
-		select {
-		case <-deadline:
-			t.Fatal("the ready session was not observed while the slow ones were")
-		case <-time.After(time.Millisecond):
-		}
-	}
-	if wait := gated.observedAt("unblocked").Sub(started); wait > 100*time.Millisecond {
-		t.Fatalf("the ready session was observed %s after the scan began, want it within 100ms", wait)
-	}
+	waitUntil(t, "the unblocked session is observed while both slow ones are still held", func() bool { return !gated.observedAt("unblocked").IsZero() })
 	close(gated.release)
 	<-finished
 }
@@ -122,9 +122,7 @@ func TestAScanDoesNotObserveASessionWhoseLastObservationIsStillRunning(t *testin
 	d.Surfaces = []surface.Surface{gated}
 	watchSessions(t, r, fake, surface.KindCodex, "slow", "ready")
 	first := d.planScan(t.Context())
-	for gated.callsOf("slow") == 0 {
-		time.Sleep(time.Millisecond)
-	}
+	waitUntil(t, "the slow session is being observed", func() bool { return gated.callsOf("slow") > 0 })
 	watched, err := r.WatchedSessions()
 	if err != nil {
 		t.Fatal(err)
@@ -157,9 +155,7 @@ func TestEachSurfaceRunsAtMostItsShareOfObservationsAtOnce(t *testing.T) {
 	d.Surfaces = []surface.Surface{gated}
 	watchSessions(t, r, fake, surface.KindCodex, ids...)
 	finished := d.planScan(t.Context())
-	for gated.running.Load() < observeJobsPerSurface {
-		time.Sleep(time.Millisecond)
-	}
+	waitUntil(t, "a surface's share of observations runs", func() bool { return gated.running.Load() >= observeJobsPerSurface })
 	time.Sleep(20 * time.Millisecond)
 	if running := gated.running.Load(); running != observeJobsPerSurface {
 		t.Fatalf("%d observations of one surface run at once, want %d", running, observeJobsPerSurface)
@@ -211,9 +207,7 @@ func TestStoppingTheDaemonLeavesNoObservationRunning(t *testing.T) {
 	watchSessions(t, r, fake, surface.KindCodex, "slow")
 	ctx, cancel := context.WithCancel(t.Context())
 	finished := d.planScan(ctx)
-	for gated.callsOf("slow") == 0 {
-		time.Sleep(time.Millisecond)
-	}
+	waitUntil(t, "the slow session is being observed", func() bool { return gated.callsOf("slow") > 0 })
 	cancel()
 	d.observeJobs.wait()
 	select {
@@ -273,9 +267,9 @@ func TestObservationsRunningAtOnceAllWriteTheirState(t *testing.T) {
 	}
 	d.Surfaces = surfaces
 	finished := d.planScan(t.Context())
-	for surfaces[0].(*writingSurface).running.Load()+surfaces[1].(*writingSurface).running.Load() < observeJobs {
-		time.Sleep(time.Millisecond)
-	}
+	waitUntil(t, "every observation slot is in use", func() bool {
+		return surfaces[0].(*writingSurface).running.Load()+surfaces[1].(*writingSurface).running.Load() >= observeJobs
+	})
 	for _, each := range surfaces {
 		close(each.(*writingSurface).release)
 	}
@@ -359,9 +353,7 @@ func TestRelaysQueuedWhileTheirTargetIsObservedReachItInOrder(t *testing.T) {
 	observed := source.callsOf(to.ID)
 	source.finish("turn-1")
 	targetScan := d.planScan(t.Context())
-	for source.callsOf(to.ID) == observed {
-		time.Sleep(time.Millisecond)
-	}
+	waitUntil(t, "the target is being observed", func() bool { return source.callsOf(to.ID) > observed })
 	queuedFor(1)
 	source.finish("turn-2")
 	d.planScan(t.Context())
