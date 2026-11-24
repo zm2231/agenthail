@@ -1,0 +1,30 @@
+[package]
+name = "agenthail-views"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "MIT"
+
+[[bin]]
+name = "agenthail-views"
+path = "src/main.rs"
+
+[dependencies]
+feed = { path = "../feed" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+time = { version = "0.3", features = ["parsing", "formatting"] }
+rune = { git = "https://github.com/anomalyco/rune", rev = "927eaaf0c978f682e4c7eb3435226da5c217fbe4", features = ["tooling"] }
+rune-kit = { git = "https://github.com/anomalyco/rune", rev = "927eaaf0c978f682e4c7eb3435226da5c217fbe4", features = ["markdown"] }
+rune-theme-opencode = { git = "https://github.com/anomalyco/rune", rev = "927eaaf0c978f682e4c7eb3435226da5c217fbe4" }
+
+[patch.crates-io]
+winit = { git = "https://github.com/anomalyco/rune", rev = "927eaaf0c978f682e4c7eb3435226da5c217fbe4" }
+sctk-adwaita = { git = "https://github.com/anomalyco/rune", rev = "927eaaf0c978f682e4c7eb3435226da5c217fbe4" }
+parley_engine = { git = "https://github.com/anomalyco/rune", rev = "927eaaf0c978f682e4c7eb3435226da5c217fbe4" }
+wgpu-hal = { git = "https://github.com/anomalyco/rune", rev = "927eaaf0c978f682e4c7eb3435226da5c217fbe4" }
+accesskit_windows = { git = "https://github.com/anomalyco/rune", rev = "927eaaf0c978f682e4c7eb3435226da5c217fbe4" }
+accesskit_macos = { git = "https://github.com/anomalyco/rune", rev = "927eaaf0c978f682e4c7eb3435226da5c217fbe4" }
+
+[profile.release]
+debug = false
