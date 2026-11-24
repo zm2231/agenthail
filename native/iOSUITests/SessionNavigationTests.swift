@@ -174,6 +174,29 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertFalse(app.buttons["Back to Voice"].exists, "the session opens in the app, not in a second sheet")
     }
 
+    func testSessionDetailsGrowingUnderARenameKeepsItsTypedName() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-details-grow-on-draft"]
+        app.launch()
+        app.buttons["session-computer::demo"].tapWhenReady()
+        app.buttons["session-summary"].tapWhenReady()
+        let rename = app.buttons["Name conversation"]
+        for _ in 0..<4 where !rename.isHittable { app.swipeUp() }
+        rename.tapWhenReady()
+        let field = app.descendants(matching: .any)["rename-session-name"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("keepme")
+        let renaming = app.navigationBars["Name conversation"]
+        let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: renaming)
+        XCTAssertEqual(XCTWaiter().wait(for: [closed], timeout: 3), .timedOut, "the rename sheet stayed open while the details under it grew")
+        XCTAssertTrue((field.value as? String ?? "").contains("keepme"), "the typed name survived: \(String(describing: field.value))")
+        renaming.buttons["Cancel"].tapWhenReady()
+        let grown = app.staticTexts["Used tokens"]
+        for _ in 0..<4 where !grown.waitForExistence(timeout: 1) { app.swipeDown() }
+        XCTAssertTrue(grown.exists, "the details grew while the rename was open")
+    }
+
     func testANotificationDoesNotCloseARenameWithATypedNameAndClosingItShowsTheSession() {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-app", "--preview-route-on-draft"]

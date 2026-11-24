@@ -102,6 +102,13 @@ struct SessionPreview: View {
                     try? await Task.sleep(for: .seconds(1))
                     PhoneRoute.shared.open(OpenedNotification(session: session, turn: nil))
                 }
+                .task {
+                    guard ProcessInfo.processInfo.arguments.contains("--preview-details-grow-on-draft") else { return }
+                    while !PresentedSheets.holdsDraft && !Task.isCancelled { try? await Task.sleep(for: .milliseconds(200)) }
+                    guard var grown = model.selectedDetail else { return }
+                    grown.context = try? JSONDecoder().decode(ContextState.self, from: Data(#"{"usedTokens":86400,"contextWindow":200000,"cumulativeTokens":312000,"compacting":false,"compactionCount":1,"reclaimedTokens":42000,"inputTokens":83000,"cachedInputTokens":60000,"outputTokens":3400,"reasoningOutputTokens":1200}"#.utf8))
+                    model.selectedDetail = grown
+                }
         } else if ProcessInfo.processInfo.arguments.contains("--preview-new") {
             NewSessionSheet(model: model)
         } else if ProcessInfo.processInfo.arguments.contains("--preview-inspector") {
