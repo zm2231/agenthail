@@ -9,24 +9,34 @@ use crate::data::{plain, short_id};
 use crate::ui::{self, BODY, BODY_MED, HEAD, META, META_MED, TITLE, base, kit, strong, weak};
 use crate::{App, Screen, go};
 
-fn proof_row(i: usize, expected: &str, observed: &str, passed: Option<bool>) -> El {
+fn phase_badge(phase: usize) -> El {
+    let k = kit();
+    let color = if phase == 4 { k.c.warning.icon } else if phase == 5 { k.c.success.icon } else { k.c.text_accent };
+    ui::pill(&icons::STATUS, crate::data::PHASES[phase.min(5)], color)
+}
+
+fn tile(i: usize, expected: &str, observed: &str, passed: Option<bool>) -> El {
     let k = kit();
     let (label, glyph, color) = match passed {
         Some(true) => ("Passed", &icons::CIRCLE_CHECK, k.c.success.icon),
         Some(false) => ("Failed", &icons::CIRCLE_X, k.c.danger.icon),
         None => ("Not run", &icons::DASH, k.c.text_weak),
     };
-    row()
-        .key(format!("proof-{i}"))
-        .w_full()
-        .gap(16.0)
-        .items_start()
-        .px(16.0)
-        .py(12.0)
-        .border_sides([if i == 0 { 0.0 } else { 1.0 }, 0.0, 0.0, 0.0], ui::rule())
-        .child(text(expected.to_string()).font(BODY).color(strong()).wrap().grow(1.0).w(1.0))
-        .child(text(observed.to_string()).font(BODY).color(if passed.is_some() { base() } else { weak() }).wrap().grow(1.0).w(1.0))
-        .child(row().w(96.0).justify_end().child(ui::pill(glyph, label, color)))
+    let section = |t: &str| text(t.to_uppercase()).font(rune::TextStyle::new(10.5, 600.0)).color(weak());
+    col()
+        .key(format!("tile-{i}"))
+        .w(380.0)
+        .grow(1.0)
+        .gap(8.0)
+        .padding(14.0)
+        .radius(12.0)
+        .fill(k.c.surface_base)
+        .border(1.0, if passed.is_none() { ui::rule() } else { color.alpha(0.3) })
+        .child(row().w_full().items_center().child(text(format!("Check {}", i + 1)).font(META_MED).color(base())).child(ui::spacer()).child(ui::pill(glyph, label, color)))
+        .child(section("Expected"))
+        .child(text(expected.to_string()).font(BODY).color(strong()).wrap())
+        .child(section("Observed").mt(4.0))
+        .child(text(observed.to_string()).font(META.lh(18.0)).color(if passed.is_some() { base() } else { weak() }).wrap())
 }
 
 pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
@@ -35,6 +45,8 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
     let project = s.d.project(&w.project).map(|p| p.name.clone()).unwrap_or_default();
     let phase = s.d.phase(w);
     let pr = s.d.pr(w);
+    let commit = s.d.commit(w);
+    let revision = commit.clone().map(|c| c.chars().take(9).collect::<String>()).unwrap_or_else(|| "the latest revision".into());
     let steps = s.d.proof(w);
     let unchecked = s.d.unchecked(w);
     let passed = steps.iter().filter(|p| p.passed == Some(true)).count();
@@ -43,7 +55,16 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
     let goal = col()
         .w_full()
         .gap(8.0)
-        .child(row().gap(8.0).items_center().child(ui::label("Goal")).child(ui::id_label(&short_id(&w.id))).child(ui::chip(&icons::TASK, &format!("{} · {}", w.priority, w.kind))))
+        .child({
+            let mut r = row().gap(8.0).items_center().child(phase_badge(phase)).child(ui::id_label(&short_id(&w.id))).child(ui::chip(&icons::TASK, &format!("{} · {}", w.priority, w.kind)));
+            if let Some(c) = &commit {
+                r = r.child(ui::chip(&icons::BRANCH, c));
+            }
+            if let Some(n) = &pr {
+                r = r.child(ui::chip(&icons::GITHUB, &format!("PR #{n}")));
+            }
+            r
+        })
         .child(text(plain(&w.text)).font(TITLE.lh(30.0)).color(strong()).wrap())
         .child(text(plain(&w.description)).font(BODY).color(base()).wrap().max_lines(3));
 
@@ -59,7 +80,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
             .gap(14.0)
             .padding(20.0)
             .child(row().gap(8.0).items_center().child(ui::pill(&icons::CHECKLIST, "Waiting on you", k.c.warning.icon)).child(text(format!("submitted {} ago", s.d.ago(&w.timeline.iter().rev().find(|t| t.state.as_deref() == Some("in_review")).map(|t| t.at.clone()).unwrap_or_default()))).font(META).color(weak())))
-            .child(text("Does this do what was asked?".to_string()).font(HEAD.lh(22.0)).color(strong()))
+            .child(text("Does this revision do what was agreed?".to_string()).font(HEAD.lh(22.0)).color(strong()))
             .child(
                 col()
                     .w_full()
@@ -74,37 +95,47 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
                     .w_full()
                     .gap(8.0)
                     .items_center()
-                    .child(Button::new("Approve outcome").variant(ButtonVariant::Contrast).shortcut("A").on_press(|s: &mut App| crate::act(s, "Approved outcome")).build(k))
+                    .child(Button::new(format!("Approve outcome for {revision}")).variant(ButtonVariant::Contrast).shortcut("A").on_press(|s: &mut App| crate::act(s, "Approved outcome")).build(k))
                     .child(ui::ghost_keys(&["A"]))
                     .child(Button::new("Ask for changes").variant(ButtonVariant::Outline).shortcut("C").on_press(|s: &mut App| crate::act(s, "Ask for changes")).build(k))
                     .child(ui::ghost_keys(&["C"])),
             )
             .child(links)
-            .child(row().gap(6.0).items_center().child(icon(&icons::INFO, 13.0).color(weak())).child(text("Approving accepts the outcome. Merging is a separate step the lead takes after.".to_string()).font(META).color(weak())));
+            .child(row().gap(6.0).items_center().child(icon(&icons::INFO, 13.0).color(weak())).child(text(format!("Approval covers {revision} only. A new commit asks again. Merging is a separate step.").to_string()).font(META).color(weak())));
         col().w_full().radius(14.0).fill(k.c.surface_raised).border(1.0, k.c.warning.icon.alpha(0.4)).child(c)
     } else {
         ui::card(col().w_full().padding(16.0).gap(8.0).child(text(format!("{}'s move. Nothing waits on you yet.", s.d.whose_move(w))).font(BODY_MED).color(strong())).child(links))
     };
 
-    let mut table = col().w_full().child(
-        row()
-            .w_full()
-            .gap(16.0)
-            .px(16.0)
-            .py(10.0)
-            .fill(k.c.surface_raised)
-            .child(text("Expected".to_string()).font(META_MED).color(weak()).grow(1.0).w(1.0))
-            .child(text("Observed".to_string()).font(META_MED).color(weak()).grow(1.0).w(1.0))
-            .child(text("Result".to_string()).font(META_MED).color(weak()).w(96.0)),
-    );
+    let first_result = w.timeline.iter().rev().find(|t| t.kind == "log" && t.log_type.as_deref() == Some("result")).and_then(|t| t.text.clone()).unwrap_or_default();
+    let brief_rows = [
+        ("What was asked", plain(w.acceptance.split(": ").next().unwrap_or(&w.acceptance))),
+        ("What was built", crate::data::clip_words(&plain(&first_result), 150)),
+        ("Before you approve", format!("{passed} of {} checks have a recorded pass. {} raised after it was submitted.", steps.len(), if unchecked.is_empty() { "Nothing was".to_string() } else { format!("{} thing{} {}", unchecked.len(), if unchecked.len() == 1 { "" } else { "s" }, if unchecked.len() == 1 { "was" } else { "were" }) })),
+    ];
+    let mut brief = col().w_full().gap(2.0).padding(8.0);
+    for (i, (t, b)) in brief_rows.iter().enumerate() {
+        brief = brief.child(
+            row()
+                .w_full()
+                .gap(14.0)
+                .items_start()
+                .padding(10.0)
+                .radius(8.0)
+                .child(text(format!("{}", i + 1)).font(META_MED).color(weak()).w(14.0))
+                .child(col().grow(1.0).w(1.0).gap(3.0).child(text(t.to_uppercase()).font(rune::TextStyle::new(11.0, 600.0)).color(k.c.text_accent)).child(text(b.clone()).font(BODY).color(strong()).wrap())),
+        );
+    }
+    let brief = col().w_full().gap(10.0).child(ui::section_head("Review brief", None, Some(text("read this before the evidence".to_string()).font(META).color(weak())))).child(ui::card(brief));
+    let mut tiles = row().w_full().gap(12.0).flex_wrap().items_stretch();
     for (i, p) in steps.iter().enumerate() {
-        table = table.child(proof_row(i, &p.expected, &p.observed, p.passed));
+        tiles = tiles.child(tile(i, &p.expected, &p.observed, p.passed));
     }
     let proof = col()
         .w_full()
         .gap(10.0)
-        .child(ui::section_head("Proof", None, Some(text(format!("{passed} passed · {not_run} not run · from the workers' logged results")).font(META).color(weak()))))
-        .child(col().w_full().radius(12.0).fill(k.c.surface_base).border(1.0, ui::rule()).child(table));
+        .child(ui::section_head("Evidence", Some(steps.len()), Some(text(format!("{passed} passed · {not_run} not run · from the workers' logged results")).font(META).color(weak()))))
+        .child(tiles);
 
     let mut gaps = col().w_full().gap(8.0).child(ui::section_head("What wasn't checked", Some(unchecked.len() + not_run), None));
     for p in steps.iter().filter(|p| p.passed.is_none()) {
@@ -127,6 +158,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
         .child(goal)
         .child(ui::card(col().w_full().padding(18.0).child(ui::stepper(phase, &s.d.whose_move(w)))))
         .child(waiting)
+        .child(brief)
         .child(proof)
         .child(gaps);
     let main = col().key(format!("work-{id}")).w_full().h_full().items_center().scroll(ScrollSpec { stick_bottom: false }).child(body);

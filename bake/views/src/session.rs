@@ -13,6 +13,7 @@ use crate::ui::{self, BODY, BODY_MED, META, META_MED, base, kit, strong, weak};
 use crate::{App, Screen, go};
 
 enum Block<'a> {
+    Ask(&'a Item),
     User(&'a Item),
     Peer(&'a Item),
     Said(&'a Item),
@@ -24,6 +25,13 @@ fn blocks(items: &[Item]) -> Vec<Block<'_>> {
     let mut run: Vec<&Item> = Vec::new();
     for i in items {
         let tool = matches!(i.kind.as_str(), "toolCall" | "toolResult" | "reasoning" | "command" | "tool");
+        if i.kind == "toolCall" && i.title == "AskUserQuestion" {
+            if !run.is_empty() {
+                out.push(Block::Run(std::mem::take(&mut run)));
+            }
+            out.push(Block::Ask(i));
+            continue;
+        }
         if tool {
             run.push(i);
             continue;
@@ -47,13 +55,6 @@ fn blocks(items: &[Item]) -> Vec<Block<'_>> {
     out
 }
 
-fn arg_line(call: &Item) -> String {
-    let v: serde_json::Value = serde_json::from_str(&call.text).unwrap_or_default();
-    let pick = ["description", "command", "file_path", "path", "pattern", "headline", "target", "message", "query"].iter().find_map(|k| v.get(*k).and_then(|x| x.as_str()).map(String::from));
-    let line = pick.unwrap_or_else(|| call.text.clone());
-    line.lines().next().unwrap_or("").chars().take(140).collect()
-}
-
 fn tool_name(t: &str) -> String {
     match feed::summary::mcp_parts(t) {
         Some((_, tool)) => tool.replace("agenthail_", "").replace('_', " "),
@@ -61,33 +62,142 @@ fn tool_name(t: &str) -> String {
     }
 }
 
-fn run_line(items: &[&Item]) -> String {
+fn base_name(p: &str) -> String {
+    p.rsplit('/').next().unwrap_or(p).to_string()
+}
+
+fn call_arg(call: &Item, keys: &[&str]) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(&call.text).ok()?;
+    keys.iter().find_map(|k| v.get(*k).and_then(|x| x.as_str()).map(String::from))
+}
+
+fn verb(call: &Item) -> String {
+    let t = call.title.as_str();
+    let file = || call_arg(call, &["file_path", "path", "notebook_path"]).map(|p| base_name(&p)).unwrap_or_else(|| "a file".into());
+    match t {
+        "Read" | "read_file" | "NotebookRead" => format!("Reading {}", file()),
+        "Edit" | "MultiEdit" | "Write" | "NotebookEdit" | "apply_patch" => format!("Editing {}", file()),
+        "Grep" | "Glob" | "LS" | "ToolSearch" => format!("Searching for {}", call_arg(call, &["pattern", "query"]).unwrap_or_else(|| "files".into())),
+        "WebFetch" | "WebSearch" => "Looking something up on the web".into(),
+        "Agent" | "Task" => "Starting a helper".into(),
+        "Bash" | "exec_command" | "shell" => format!("Running {}", call_arg(call, &["description"]).map(|d| d.to_lowercase()).or_else(|| call_arg(call, &["command"]).map(|c| c.lines().next().unwrap_or("").chars().take(60).collect())).unwrap_or_else(|| "a command".into())),
+        _ => format!("Using {}", tool_name(t)),
+    }
+}
+
+struct Changes {
+    files: Vec<String>,
+    add: usize,
+    del: usize,
+}
+
+fn changes(items: &[&Item]) -> Changes {
     let owned: Vec<Item> = items.iter().map(|i| (*i).clone()).collect();
-    let steps = owned.iter().filter(|i| feed::summary::is_call(i)).count();
-    let times: Vec<OffsetDateTime> = owned.iter().filter_map(|i| i.timestamp.as_deref().and_then(feed::catalog::parse_time)).collect();
-    let span = match (times.iter().min(), times.iter().max()) {
-        (Some(a), Some(b)) if b > a => Some(feed::summary::span((*b - *a).as_seconds_f64())),
-        _ => None,
-    };
     let edits = feed::edits::edits(&owned);
-    let files: HashSet<&str> = edits.iter().map(|e| e.path.as_str()).collect();
+    let mut files: Vec<String> = Vec::new();
     let (mut add, mut del) = (0usize, 0usize);
     for e in &edits {
+        if !files.contains(&e.path) {
+            files.push(e.path.clone());
+        }
         let old: HashSet<&str> = e.old.lines().collect();
         let new: HashSet<&str> = e.new.lines().collect();
         add += e.new.lines().filter(|l| !old.contains(l)).count();
         del += e.old.lines().filter(|l| !new.contains(l)).count();
     }
+    Changes { files, add, del }
+}
+
+fn run_line(items: &[&Item]) -> String {
+    let calls: Vec<&&Item> = items.iter().filter(|i| feed::summary::is_call(i)).collect();
+    let times: Vec<OffsetDateTime> = items.iter().filter_map(|i| i.timestamp.as_deref().and_then(feed::catalog::parse_time)).collect();
+    let span = match (times.iter().min(), times.iter().max()) {
+        (Some(a), Some(b)) if b > a => Some(feed::summary::span((*b - *a).as_seconds_f64())),
+        _ => None,
+    };
+    let count = |names: &[&str]| calls.iter().filter(|c| names.contains(&c.title.as_str())).count();
+    let explored = count(&["Read", "read_file", "NotebookRead", "Grep", "Glob", "LS", "ToolSearch", "WebFetch", "WebSearch"]);
+    let ran = count(&["Bash", "exec_command", "shell", "BashOutput"]);
+    let ch = changes(items);
+    let other = calls.len() - explored - ran - count(&["Edit", "MultiEdit", "Write", "NotebookEdit", "apply_patch"]);
     let mut parts = Vec::new();
-    parts.push(match span {
+    if explored > 0 {
+        parts.push(if explored == 1 { "explored 1 file".to_string() } else { format!("explored {explored} files") });
+    }
+    if ran > 0 {
+        parts.push(if ran == 1 { "ran 1 command".to_string() } else { format!("ran {ran} commands") });
+    }
+    if !ch.files.is_empty() {
+        parts.push(format!("edited {} {} +{} −{}", ch.files.len(), if ch.files.len() == 1 { "file" } else { "files" }, ch.add, ch.del));
+    }
+    if other > 0 {
+        parts.push(if other == 1 { "used 1 tool".to_string() } else { format!("used {other} tools") });
+    }
+    let head = match span {
         Some(sp) => format!("Worked {sp}"),
         None => "Worked".into(),
-    });
-    parts.push(if steps == 1 { "1 step".into() } else { format!("{steps} steps") });
-    if !files.is_empty() {
-        parts.push(format!("{} {} +{add} −{del}", files.len(), if files.len() == 1 { "file" } else { "files" }));
+    };
+    if parts.is_empty() { head } else { format!("{head} · {}", parts.join(", ")) }
+}
+
+fn changes_card(ch: &Changes) -> El {
+    let k = kit();
+    let mut files = row().gap(6.0).flex_wrap();
+    for f in ch.files.iter().take(5) {
+        files = files.child(ui::chip(&icons::FILE_DOCUMENT, &base_name(f)));
     }
-    parts.join(" · ")
+    col()
+        .w_full()
+        .gap(10.0)
+        .padding(14.0)
+        .radius(12.0)
+        .fill(k.c.surface_base)
+        .border(1.0, ui::rule())
+        .child(
+            row()
+                .w_full()
+                .gap(10.0)
+                .items_center()
+                .child(icon(&icons::CODE_LINES, 15.0).color(k.c.icon_base))
+                .child(text(format!("{} {}", ch.files.len(), if ch.files.len() == 1 { "file" } else { "files" })).font(BODY_MED).color(strong()))
+                .child(text(format!("+{}", ch.add)).font(META_MED).color(k.c.success.icon))
+                .child(text(format!("−{}", ch.del)).font(META_MED).color(k.c.danger.icon))
+                .child(ui::spacer())
+                .child(rune_kit::Button::new("Open PR").variant(rune_kit::ButtonVariant::Ghost).control_size(rune_kit::ControlSize::Small).icon(&icons::GITHUB).on_press(|s: &mut App| crate::act(s, "Open PR")).build(k))
+                .child(rune_kit::Button::new("Open in px0").variant(rune_kit::ButtonVariant::Ghost).control_size(rune_kit::ControlSize::Small).icon(&icons::ARROW_UP_RIGHT).on_press(|s: &mut App| crate::act(s, "Open in px0")).build(k)),
+        )
+        .child(files)
+}
+
+fn ask_block(s: &App, call: &Item) -> El {
+    let k = kit();
+    let id = call.call_id.clone();
+    let session = s.d.transcripts.iter().find(|(_, v)| v.iter().any(|i| i.call_id == id && i.kind == "toolCall")).map(|(k, _)| k.clone()).unwrap_or_default();
+    let ask = s.d.asks(&session).into_iter().find(|a| a.at == call.timestamp.clone().unwrap_or_default());
+    let Some(a) = ask else { return col() };
+    let picked: Vec<String> = a
+        .answer
+        .as_deref()
+        .map(|t| a.options.iter().filter(|o| t.contains(&format!("\"{}", o.label))).map(|o| o.label.clone()).collect())
+        .unwrap_or_default();
+    let mut c = col()
+        .w_full()
+        .gap(8.0)
+        .padding(14.0)
+        .child(row().gap(8.0).items_center().child(ui::pill(&icons::HELP, "Question", k.c.info.icon)).child(text(a.header.clone()).font(META).color(weak())).child(ui::spacer()).child(text(if a.answer.is_some() { "Answered" } else { "Waiting on you" }.to_string()).font(META_MED).color(if a.answer.is_some() { k.c.success.icon } else { k.c.warning.icon })))
+        .child(text(a.question.clone()).font(BODY_MED).color(strong()).wrap());
+    for o in &a.options {
+        let chosen = picked.contains(&o.label);
+        c = c.child(
+            row()
+                .gap(8.0)
+                .items_center()
+                .child(icon(if chosen { &icons::CIRCLE_CHECK } else { &icons::DASH }, 13.0).color(if chosen { k.c.success.icon } else { weak() }))
+                .child(text(o.label.clone()).font(if chosen { META_MED } else { META }).color(if chosen { strong() } else { base() }))
+                .child(if o.recommended { text("Recommended".to_string()).font(META).color(k.c.text_accent) } else { col() }),
+        );
+    }
+    col().w_full().radius(12.0).fill(k.c.surface_base).border(1.0, ui::rule()).child(c)
 }
 
 fn run_block(s: &App, key: String, items: &[&Item], last: bool, busy: bool) -> El {
@@ -118,8 +228,7 @@ fn run_block(s: &App, key: String, items: &[&Item], last: bool, busy: bool) -> E
                     .w_full()
                     .gap(10.0)
                     .items_center()
-                    .child(text(tool_name(&call.title)).font(META_MED).color(base()).w(110.0).truncate())
-                    .child(text(arg_line(call)).font(META.mono()).color(weak()).truncate().shrink()),
+                    .child(text(verb(call)).font(META).color(base()).truncate().shrink()),
             );
         }
         c = c.child(list);
@@ -137,8 +246,7 @@ fn run_block(s: &App, key: String, items: &[&Item], last: bool, busy: bool) -> E
                     .fill(k.c.surface_base)
                     .border(1.0, ui::rule())
                     .child(Spinner::new().size(12.0).build(k))
-                    .child(text(format!("Running {}", tool_name(&call.title))).font(META_MED).color(k.c.text_accent))
-                    .child(text(arg_line(call)).font(META.mono()).color(base()).truncate().shrink()),
+                    .child(text(verb(call)).font(META_MED).color(k.c.text_accent).truncate().shrink()),
             );
         } else {
             c = c.child(row().gap(8.0).items_center().child(Spinner::new().size(12.0).build(k)).child(text("Thinking".to_string()).font(META_MED).color(k.c.text_accent)));
@@ -163,8 +271,20 @@ pub fn transcript(s: &App, id: &str, max_blocks: usize) -> El {
     if items.is_empty() {
         c = c.child(text("No transcript in the snapshot for this session.".to_string()).font(BODY).color(weak()));
     }
+    let root = s.d.session(id).and_then(|x| x.checkout_path()).unwrap_or_default();
+    let mut pending: Option<Changes> = None;
     for (i, b) in all.iter().enumerate().skip(start) {
+        if let Block::Run(items) = b {
+            let mut ch = changes(items);
+            if !root.is_empty() {
+                ch.files.retain(|f| f.starts_with(&root));
+            }
+            if !ch.files.is_empty() {
+                pending = Some(ch);
+            }
+        }
         let el = match b {
+            Block::Ask(call) => ask_block(s, call),
             Block::User(m) => row().w_full().justify_end().child(
                 col()
                     .max_w(560.0)
@@ -185,7 +305,13 @@ pub fn transcript(s: &App, id: &str, max_blocks: usize) -> El {
                     .child(row().gap(6.0).items_center().child(icon(&icons::SPEECH_BUBBLE, 12.0).color(weak())).child(text(format!("From {from}")).font(META_MED).color(weak())))
                     .child(text(clip(&plain(&body), 300)).font(META).color(base()).wrap())
             }
-            Block::Said(m) => col().w_full().child(Markdown::new(plain(&m.text)).build(k)),
+            Block::Said(m) => {
+                let mut c = col().w_full().gap(12.0).child(Markdown::new(plain(&m.text)).build(k));
+                if let Some(ch) = pending.take() {
+                    c = c.child(changes_card(&ch));
+                }
+                c
+            }
             Block::Run(items) => run_block(s, format!("run-{id}-{i}"), items, i + 1 == n, busy),
         };
         c = c.child(el.key(format!("b-{i}")));
@@ -295,16 +421,33 @@ fn fact(name: &str, value: &str) -> El {
 pub fn timeline(s: &App, w: &crate::data::Work, max: usize) -> El {
     let k = kit();
     let mut c = col().w_full().gap(0.0);
-    let entries: Vec<_> = w.timeline.iter().rev().filter(|t| t.kind != "dep" && t.kind != "imported").take(max).collect();
+    let mut back = Vec::new();
+    let mut prev = 0usize;
+    for t in &w.timeline {
+        let mut b = false;
+        if t.kind == "state" {
+            let p = match t.state.as_deref() {
+                Some("in_progress") => 1,
+                Some("in_review") => 4,
+                Some("done") | Some("closed") => 5,
+                _ => 0,
+            };
+            b = p < prev;
+            prev = p;
+        }
+        back.push(b);
+    }
+    let entries: Vec<(&crate::data::Entry, bool)> = w.timeline.iter().zip(back).rev().filter(|(t, _)| t.kind != "dep" && t.kind != "imported").take(max).collect();
     let n = entries.len();
-    for (i, t) in entries.iter().enumerate() {
+    for (i, (t, moved_back)) in entries.iter().enumerate() {
         let what = match (t.kind.as_str(), t.state.as_deref()) {
+            ("state", Some(st)) if *moved_back => format!("Moved back to {}", state_word(st)),
             ("state", Some(st)) => format!("Moved to {}", state_word(st)),
             ("created", _) => "Created".into(),
-            ("comment", _) => format!("Comment: {}", t.text.as_deref().unwrap_or("")),
+            ("comment", _) => format!("Note: {}", t.text.as_deref().unwrap_or("")),
             _ => t.text.clone().unwrap_or_default(),
         };
-        let dot = el().size(7.0, 7.0).radius(3.5).fill(if t.kind == "state" { k.c.text_accent } else { k.c.border_strong });
+        let dot = el().size(7.0, 7.0).radius(3.5).fill(if *moved_back { k.c.warning.icon } else if t.kind == "state" { k.c.text_accent } else if t.kind == "comment" { k.c.info.icon } else { k.c.border_strong });
         let rail = col().w(7.0).h_full().items_center().child(dot.mt(5.0)).child(el().w(1.0).grow(1.0).fill(if i + 1 < n { ui::rule() } else { rune::Color::TRANSPARENT }));
         c = c.child(
             row()

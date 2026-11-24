@@ -69,6 +69,47 @@ pub struct Work {
     pub project: String,
 }
 
+#[derive(Deserialize, Clone, Default, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Meter {
+    #[serde(default)]
+    pub provider: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub percent: Option<f64>,
+    #[serde(default)]
+    pub resets_at: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Deserialize, Clone, Default, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Host {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub state: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct AskOption {
+    pub label: String,
+    pub detail: String,
+    pub recommended: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct Ask {
+    pub session: String,
+    pub header: String,
+    pub question: String,
+    pub options: Vec<AskOption>,
+    pub at: String,
+    pub answer: Option<String>,
+}
+
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct Origin {
@@ -96,6 +137,10 @@ struct Raw {
     ledgers: HashMap<String, Vec<Work>>,
     #[serde(default)]
     transcripts: HashMap<String, Vec<Item>>,
+    #[serde(default)]
+    usage: Vec<Meter>,
+    #[serde(default)]
+    hosts: Vec<Host>,
 }
 
 pub struct Project {
@@ -113,6 +158,7 @@ pub enum NeedKind {
     Approval,
     Check,
     CiFailing,
+    Finished,
 }
 
 impl NeedKind {
@@ -122,6 +168,26 @@ impl NeedKind {
             NeedKind::Approval => "Approval",
             NeedKind::Check => "Check the proof",
             NeedKind::CiFailing => "CI failing",
+            NeedKind::Finished => "Just finished",
+        }
+    }
+
+    pub fn rank(self) -> u8 {
+        match self {
+            NeedKind::Question => 0,
+            NeedKind::Approval | NeedKind::Check => 1,
+            NeedKind::CiFailing => 2,
+            NeedKind::Finished => 3,
+        }
+    }
+
+    pub fn wanted(self) -> &'static str {
+        match self {
+            NeedKind::Question => "Answer one question",
+            NeedKind::Approval => "Give the go-ahead",
+            NeedKind::Check => "Check the proof",
+            NeedKind::CiFailing => "Fix or rerun CI",
+            NeedKind::Finished => "Read what it did",
         }
     }
 
@@ -131,6 +197,7 @@ impl NeedKind {
             NeedKind::Approval => "Wants your go-ahead",
             NeedKind::Check => "Does this do what was asked?",
             NeedKind::CiFailing => "Checks are failing on the PR",
+            NeedKind::Finished => "Finished a turn in the last few minutes",
         }
     }
 
@@ -140,6 +207,7 @@ impl NeedKind {
             NeedKind::Approval => "Approve",
             NeedKind::Check => "Approve",
             NeedKind::CiFailing => "See the failure",
+            NeedKind::Finished => "Open",
         }
     }
 }
@@ -209,6 +277,9 @@ pub struct Data {
     pub transcripts: HashMap<String, Vec<Item>>,
     pub person: HashMap<String, String>,
     pub spawned: HashSet<String>,
+    pub started_by: HashMap<String, String>,
+    pub usage: Vec<Meter>,
+    pub hosts: Vec<Host>,
     names: HashMap<String, String>,
 }
 
@@ -236,7 +307,8 @@ impl Data {
     pub fn load(json: &str) -> Data {
         let raw: Raw = serde_json::from_str(json).unwrap_or_default();
         let origins: Origins = serde_json::from_str(json).unwrap_or_default();
-        let spawned = origins.sessions.into_iter().filter(|o| o.started_by.as_deref().is_some_and(|b| !b.is_empty())).map(|o| o.id).collect();
+        let started_by: HashMap<String, String> = origins.sessions.into_iter().filter_map(|o| o.started_by.filter(|b| !b.is_empty()).map(|b| (o.id, b))).collect();
+        let spawned = started_by.keys().cloned().collect();
         let now = parse_time(&raw.updated_at).unwrap_or_else(OffsetDateTime::now_utc);
         let mut names = HashMap::new();
         for s in &raw.sessions {
@@ -274,7 +346,7 @@ impl Data {
                 person.insert(sid.clone(), at);
             }
         }
-        Data { now, sessions: raw.sessions, projects, work, transcripts: raw.transcripts, person, spawned, names }
+        Data { now, sessions: raw.sessions, projects, work, transcripts: raw.transcripts, person, spawned, started_by, usage: raw.usage, hosts: raw.hosts, names }
     }
 
     pub fn session(&self, id: &str) -> Option<&Session> {
@@ -321,12 +393,90 @@ impl Data {
     }
 
     pub fn headline(s: &Session) -> Option<(String, String)> {
-        for h in [&s.turn_completion, &s.end_turn].into_iter().flatten() {
-            if !h.headline.is_empty() {
-                return Some((h.headline.clone(), h.at.clone().unwrap_or_else(|| s.last_active.clone())));
+        [&s.turn_completion, &s.end_turn]
+            .into_iter()
+            .flatten()
+            .filter(|h| !h.headline.is_empty())
+            .map(|h| (h.headline.clone(), h.at.clone().unwrap_or_else(|| s.last_active.clone())))
+            .max_by(|a, b| a.1.cmp(&b.1))
+    }
+
+    pub fn flagged(s: &Session) -> bool {
+        let latest = [&s.turn_completion, &s.end_turn].into_iter().flatten().filter(|h| !h.headline.is_empty()).max_by(|a, b| a.at.cmp(&b.at));
+        latest.is_some_and(|h| h.outcome == "needs_you") || s.attention.is_some()
+    }
+
+    pub fn crew(&self, lead: &str) -> Vec<&Session> {
+        let mut list: Vec<&Session> = self.sessions.iter().filter(|s| self.started_by.get(&s.id).map(String::as_str) == Some(lead) && !s.archived && self.hours(&s.last_active) < 24.0).collect();
+        list.sort_by(|a, b| b.last_active.cmp(&a.last_active));
+        list
+    }
+
+    pub fn asks(&self, session: &str) -> Vec<Ask> {
+        let Some(items) = self.transcripts.get(session) else { return Vec::new() };
+        let mut out = Vec::new();
+        for (i, call) in items.iter().enumerate() {
+            if call.kind != "toolCall" || call.title != "AskUserQuestion" {
+                continue;
+            }
+            let v: serde_json::Value = serde_json::from_str(&call.text).unwrap_or_default();
+            let answer = items[i + 1..].iter().find(|r| r.kind == "toolResult" && r.call_id == call.call_id).map(|r| r.text.clone());
+            for q in v["questions"].as_array().cloned().unwrap_or_default() {
+                let options = q["options"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|o| {
+                        let label = o["label"].as_str().unwrap_or("").to_string();
+                        let recommended = label.contains("(Recommended)");
+                        AskOption { label: label.replace(" (Recommended)", ""), detail: plain(o["description"].as_str().unwrap_or("")), recommended }
+                    })
+                    .collect();
+                out.push(Ask {
+                    session: session.to_string(),
+                    header: q["header"].as_str().unwrap_or("").to_string(),
+                    question: plain(q["question"].as_str().unwrap_or("")),
+                    options,
+                    at: call.timestamp.clone().unwrap_or_default(),
+                    answer: answer.clone(),
+                });
+            }
+        }
+        out
+    }
+
+    pub fn last_ask(&self) -> Option<Ask> {
+        self.transcripts.keys().flat_map(|sid| self.asks(sid)).filter(|a| a.options.iter().any(|o| o.recommended)).max_by(|a, b| a.at.cmp(&b.at))
+    }
+
+    pub fn commit(&self, w: &Work) -> Option<String> {
+        for t in w.timeline.iter().rev().filter(|t| t.kind == "log") {
+            for word in t.text.as_deref().unwrap_or("").split(|c: char| !c.is_ascii_alphanumeric()) {
+                if (7..=12).contains(&word.len()) && word.chars().all(|c| c.is_ascii_hexdigit()) && word.chars().any(|c| c.is_ascii_digit()) && word.chars().any(|c| c.is_ascii_alphabetic()) {
+                    return Some(word.to_string());
+                }
             }
         }
         None
+    }
+
+    pub fn moves(&self, w: &Work) -> Vec<(usize, bool)> {
+        let mut prev = 0usize;
+        let mut out = Vec::new();
+        for t in &w.timeline {
+            if t.kind == "state" {
+                let p = match t.state.as_deref() {
+                    Some("in_progress") => 1,
+                    Some("in_review") => 4,
+                    Some("done") | Some("closed") => 5,
+                    _ => 0,
+                };
+                out.push((p, p < prev));
+                prev = p;
+            }
+        }
+        out
     }
 
     pub fn gist(&self, s: &Session) -> String {
@@ -348,12 +498,20 @@ impl Data {
         for s in &self.sessions {
             let Some((headline, at)) = Data::headline(s) else { continue };
             let h = lower(&headline);
-            let flagged = s.turn_completion.as_ref().is_some_and(|t| t.outcome == "needs_you") || s.attention.is_some();
+            let flagged = Data::flagged(s);
             let waiting = ["waiting on you", "waiting on your", "ready to publish", "standing by for", "your call", "your ok", "needs your", "asked which"].iter().any(|w| h.contains(w));
-            if !(flagged || (waiting && self.hours(&at) < 24.0)) || s.project.is_none() {
+            let finished = !flagged && !waiting && s.turn_completion.as_ref().is_some_and(|t| t.outcome == "finished") && self.hours(&at) * 60.0 <= 3.0;
+            if s.project.is_none() || (self.spawned.contains(&s.id) && !flagged) {
                 continue;
             }
-            let kind = if ["ok to push", "publish", "merge", "push the", "approve", "release"].iter().any(|w| h.contains(w)) { NeedKind::Approval } else { NeedKind::Question };
+            if finished {
+                out.push(Need { kind: NeedKind::Finished, project: s.project_name(), project_key: s.project_key(), title: plain(&headline), who: self.title(s), at, target: Target::Session(s.id.clone()), label: None });
+                continue;
+            }
+            if !(flagged || (waiting && self.hours(&at) < 24.0)) {
+                continue;
+            }
+            let kind = if ["ok to push", "your ok", "publish", "merge", "push the", "approv", "release", "going live", "go live", "sign-off", "sign off"].iter().any(|w| h.contains(w)) { NeedKind::Approval } else { NeedKind::Question };
             seen.insert(s.id.clone());
             out.push(Need {
                 kind,
@@ -389,7 +547,7 @@ impl Data {
                 label: Some(short_id(&w.id)),
             });
         }
-        out.sort_by(|a, b| b.at.cmp(&a.at));
+        out.sort_by(|a, b| a.kind.rank().cmp(&b.kind.rank()).then(a.at.cmp(&b.at)));
         out
     }
 
@@ -628,7 +786,7 @@ pub fn clip_words(t: &str, max: usize) -> String {
         }
         out.push_str(w);
     }
-    format!("{out}…")
+    format!("{}…", out.trim_end_matches([',', ' ']))
 }
 
 fn capital(t: &str) -> String {

@@ -39,6 +39,9 @@ pub struct App {
     pub to_lead: bool,
     pub to_open: bool,
     pub notice: Option<String>,
+    pub ask: Option<data::Ask>,
+    pub ask_pick: Option<usize>,
+    pub replayed: bool,
 }
 
 fn arg(name: &str) -> Option<String> {
@@ -49,8 +52,16 @@ fn arg(name: &str) -> Option<String> {
 fn init() -> App {
     let json = arg("--fixture").and_then(|p| std::fs::read_to_string(p).ok());
     let d = Data::load(json.as_deref().unwrap_or(data::FIXTURE));
-    let needs = d.needs();
+    let mut needs = d.needs();
+    let replay = !rune::extra_args().iter().any(|a| a == "--no-replay");
+    let ask = if replay { d.last_ask() } else { None };
+    if let Some(a) = &ask {
+        if let Some(x) = d.session(&a.session) {
+            needs.push(Need { kind: data::NeedKind::Question, project: x.project_name(), project_key: x.project_key(), title: a.question.clone(), who: d.title(x), at: a.at.clone(), target: Target::Session(a.session.clone()), label: None });
+        }
+    }
     let hands_on = d.hands_on().iter().map(|s| s.id.clone()).collect();
+    needs.sort_by(|a, b| a.kind.rank().cmp(&b.kind.rank()).then(a.at.cmp(&b.at)));
     let mut app = App {
         d,
         needs,
@@ -69,6 +80,9 @@ fn init() -> App {
         to_lead: true,
         to_open: false,
         notice: None,
+        replayed: ask.is_some(),
+        ask,
+        ask_pick: None,
     };
     let view = arg("--view").unwrap_or_else(|| "now-b".into());
     match view.as_str() {

@@ -20,7 +20,7 @@ def token():
 
 
 TOKEN = token()
-OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), "..", "fixture", "data.json")
+OUT = os.path.join(os.path.dirname(__file__), "..", "fixture", "data.json")
 
 
 def get(path, timeout=30):
@@ -136,10 +136,35 @@ def main():
     keep["ledgers"] = ledgers
     keep["requests"] = requests
     keep["transcripts"] = transcripts
+    keep["usage"] = [
+        {"host": st.get("host"), "provider": m.get("provider"), "label": m.get("label"), "percent": m.get("percent"), "resetsAt": m.get("resetsAt"), "severity": m.get("severity"), "primary": st.get("primary", False), "name": st.get("name")}
+        for st in get("/api/v1/usage").get("sets", [])
+        for m in st.get("meters", [])
+    ]
+    hv = get("/api/v1/hosts")
+    keep["hosts"] = [{"name": hv["host"]["name"], "state": hv["host"]["state"]}] + [{"name": x["name"], "state": x["state"], "sessionCount": x.get("sessionCount")} for x in hv.get("hosts", [])]
     os.makedirs(os.path.dirname(os.path.abspath(OUT)), exist_ok=True)
     with open(OUT, "w") as f:
         json.dump(keep, f)
     print(OUT, len(sessions), "sessions", len(ledgers), "ledgers", sum(map(len, ledgers.values())), "items", len(requests), "with requests", len(transcripts), "transcripts")
 
 
-main()
+
+def add_transcripts(ids):
+    with open(OUT) as f:
+        data = json.load(f)
+    for sid in ids:
+        items = transcript(sid)
+        for it in items:
+            if it.get("kind") in ("toolResult", "reasoning") and len(it.get("text", "")) > 1200:
+                it["text"] = it["text"][:1200]
+        data.setdefault("transcripts", {})[sid] = items[-160:]
+        print(sid, len(items), "items")
+    with open(OUT, "w") as f:
+        json.dump(data, f)
+
+
+if len(sys.argv) > 2 and sys.argv[1] == "--add-transcript":
+    add_transcripts(sys.argv[2:])
+else:
+    main()

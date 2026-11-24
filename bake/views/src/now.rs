@@ -153,6 +153,9 @@ pub fn moving_row(s: &App, i: usize, id: &str) -> El {
 fn focus_card(s: &App) -> El {
     let k = kit();
     let Some(n) = s.needs.get(s.need_ix) else { return col() };
+    if let Some(a) = s.ask.as_ref().filter(|a| n.kind == crate::data::NeedKind::Question && n.target == crate::data::Target::Session(a.session.clone())) {
+        return ui::question_card(s, a, false);
+    }
     let total = s.needs.len();
     let head = row()
         .w_full()
@@ -229,7 +232,10 @@ pub fn brief(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
         .child(text(format!("{} need you · {} shipped · {} still moving · last {WINDOW:.0} hours across {} projects", s.needs.len(), shipped, moving.len(), digests.len())).font(BODY).color(base()));
     let mut needs = col().w_full().gap(2.0).padding(6.0);
     for (i, n) in s.needs.iter().enumerate() {
-        needs = needs.child(ui::need_row(s, i, n, i == s.need_ix));
+        match s.ask.as_ref().filter(|a| n.kind == crate::data::NeedKind::Question && n.target == crate::data::Target::Session(a.session.clone())) {
+            Some(a) => needs = needs.child(col().w_full().pb(6.0).child(ui::question_card(s, a, true))),
+            None => needs = needs.child(ui::need_row(s, i, n, i == s.need_ix)),
+        }
     }
     let mut c = col()
         .w_full()

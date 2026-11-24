@@ -71,6 +71,68 @@ fn group(s: &App, title: &str, items: &[&Work], max: usize, empty: &str) -> El {
     c
 }
 
+fn crew_panel(s: &App, lead: Option<&str>) -> El {
+    let k = kit();
+    let crew = lead.map(|l| s.d.crew(l)).unwrap_or_default();
+    let mut c = col().w_full().gap(6.0).child(ui::section_head("Crew", Some(crew.len()), Some(text("started by the lead".to_string()).font(META).color(weak()))));
+    if crew.is_empty() {
+        c = c.child(text("The lead has no workers running today.".to_string()).font(META).color(weak()));
+    }
+    for (i, x) in crew.iter().take(5).enumerate() {
+        let id = x.id.clone();
+        let busy = matches!(x.display.kind.as_str(), "working" | "finishing" | "starting");
+        let status = if busy { rune_kit::Spinner::new().size(11.0).build(k) } else { rune::icon(&icons::CIRCLE_CHECK, 12.0).color(weak()) };
+        c = c.child(
+            row()
+                .key(format!("crew-{i}"))
+                .w_full()
+                .gap(10.0)
+                .items_start()
+                .px(8.0)
+                .py(7.0)
+                .radius(8.0)
+                .hover(k.c.surface_raised_hover)
+                .on_press(move |s: &mut App| go(s, Screen::Session(id.clone())))
+                .child(row().pt(3.0).child(status))
+                .child(
+                    col()
+                        .grow(1.0)
+                        .shrink()
+                        .min_w(0.0)
+                        .gap(2.0)
+                        .child(row().gap(6.0).items_center().child(text(ui::short_title(&s.d.title(x), 30)).font(META_MED).color(strong()).truncate().shrink()).child(ui::spacer()).child(text(s.d.ago(&x.last_active)).font(META).color(weak())))
+                        .child(text(s.d.gist(x)).font(META).color(base()).max_lines(2).wrap()),
+                ),
+        );
+    }
+    c
+}
+
+fn waiting_line(s: &App, lead: &str) -> El {
+    let k = kit();
+    let Some(x) = s.d.session(lead) else { return col() };
+    let crew = s.d.crew(lead);
+    let busy: Vec<String> = crew.iter().filter(|c| matches!(c.display.kind.as_str(), "working" | "finishing" | "starting")).map(|c| s.d.title(c)).collect();
+    let (label, who) = if x.display.label.starts_with("Waiting on") {
+        ("Waiting on".to_string(), x.display.label.trim_start_matches("Waiting on").trim().to_string())
+    } else if !busy.is_empty() {
+        ("Crew at work:".to_string(), busy.join(", "))
+    } else {
+        return col();
+    };
+    row()
+        .w_full()
+        .max_w(780.0)
+        .px(28.0)
+        .pb(8.0)
+        .gap(6.0)
+        .justify_center()
+        .items_center()
+        .child(rune_kit::Spinner::new().size(11.0).build(k))
+        .child(text(label).font(META).color(weak()))
+        .child(text(who).font(META_MED).color(k.c.text_accent).truncate().shrink())
+}
+
 pub fn lead(s: &App, cx: &mut Cx<App>, key: &str, layer: &mut Vec<El>) -> El {
     let Some(p) = s.d.project(key) else { return col() };
     let cols = s.d.board(key);
@@ -86,9 +148,10 @@ pub fn lead(s: &App, cx: &mut Cx<App>, key: &str, layer: &mut Vec<El>) -> El {
                 .px(14.0)
                 .pt(14.0)
                 .pb(24.0)
-                .child(group(s, "Waiting on you", &cols[0], 4, "Nothing waits on you here."))
-                .child(group(s, "Now", &cols[1], 4, "Nothing is being built."))
-                .child(group(s, "Up next", &cols[2], 4, "The queue is empty.")),
+                .child(crew_panel(s, p.lead.as_deref()))
+                .child(group(s, "Waiting on you", &cols[0], 3, "Nothing waits on you here."))
+                .child(group(s, "Now", &cols[1], 3, "Nothing is being built."))
+                .child(group(s, "Up next", &cols[2], 3, "The queue is empty.")),
         );
     let main = match &p.lead {
         Some(lead) => {
@@ -109,6 +172,7 @@ pub fn lead(s: &App, cx: &mut Cx<App>, key: &str, layer: &mut Vec<El>) -> El {
                 .items_center()
                 .child(head)
                 .child(crate::session::transcript(s, lead, 22))
+                .child(waiting_line(s, lead))
                 .child(crate::session::composer(s, &format!("Tell {}…", p.lead_name), None, layer))
         }
         None => col().w_full().h_full().center().child(text("This project has no lead yet.".to_string()).font(BODY_MED).color(weak())),
