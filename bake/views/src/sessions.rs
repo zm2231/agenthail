@@ -71,7 +71,7 @@ fn keep(s: &App, x: &Session) -> bool {
 pub fn status_line(s: &App, x: &Session) -> (String, Color, bool) {
     let k = kit();
     if let Some(n) = need_of(s, x) {
-        return (format!("{}: {}", n.kind.wanted(), ui::short_title(&n.title, 90)), ui::kind_color(n.kind), false);
+        return (format!("{}: {}", n.kind.wanted(), ui::short_title(&n.title, 90)), ui::needs_color(), false);
     }
     if busy(x) {
         let verb = crate::session::live_verb(s, &x.id).unwrap_or_else(|| if x.display.detail.is_empty() { "Working".into() } else { x.display.detail.clone() });
@@ -82,8 +82,8 @@ pub fn status_line(s: &App, x: &Session) -> (String, Color, bool) {
 
 fn state_dot(s: &App, x: &Session) -> El {
     let k = kit();
-    let color = if let Some(n) = need_of(s, x) {
-        ui::kind_color(n.kind)
+    let color = if need_of(s, x).is_some() {
+        ui::needs_color()
     } else if busy(x) {
         k.c.text_accent
     } else if x.state(s.d.now) == State::Done {
@@ -241,7 +241,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, layer: &mut Vec<El>) -> El {
             .child(text(name.clone()).font(HEAD).color(strong()))
             .child(Badge::new(rows.len().to_string()).variant(BadgeVariant::Subtle).build(k));
         if needs > 0 {
-            head = head.child(text(format!("{needs} need you")).font(META_MED).color(ui::kind_color(NeedKind::Check)));
+            head = head.child(text(format!("{needs} need you")).font(META_MED).color(ui::needs_color()));
         }
         if working > 0 {
             head = head.child(text(format!("{working} working")).font(META_MED).color(k.c.text_accent));

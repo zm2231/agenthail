@@ -73,6 +73,10 @@ pub fn kind_color(kind: NeedKind) -> Color {
     }
 }
 
+pub fn needs_color() -> Color {
+    kit().c.warning.icon
+}
+
 pub fn kind_icon(kind: NeedKind) -> &'static Icon {
     match kind {
         NeedKind::Question => &icons::SPEECH_BUBBLE,
@@ -341,7 +345,7 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -
                 .height(44.0)
                 .avatar(avatar(&n.project, 18.0))
                 .subtitle(n.kind.wanted())
-                .subtitle_color(kind_color(n.kind))
+                .subtitle_color(needs_color())
                 .selected(sel)
                 .on_select(move |s: &mut App, _| open_target(s, &t))
                 .build(k)
