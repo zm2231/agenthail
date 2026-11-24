@@ -352,19 +352,6 @@ func TestSeedMergesMetadataChangesIntoAuthoritativeRow(t *testing.T) {
 	}
 }
 
-func TestSkippedSeedKeepsAuthoritativeAppendPrefix(t *testing.T) {
-	_, reg, fake, from, _ := daemonFixture(t)
-	writer := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "first", followers: map[uint64]chan struct{}{}}
-	writer.append(surface.StreamEvent{ID: "item", ProviderKey: "timeline:item", Version: 11, Operation: "upsert", Final: true, Kind: "message", Role: "assistant", Text: "hello world"})
-	restarted := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "second", followers: map[uint64]chan struct{}{}}
-	restarted.appendSeedItems([]surface.TimelineItem{{ID: "item", Kind: "message", Role: "assistant", Text: "hello", Truncated: true}})
-	restarted.append(surface.StreamEvent{ID: "item", ProviderKey: "timeline:item", Operation: "append", Kind: "message", Role: "assistant", Text: "!"})
-	rows := journalPayloads(t, reg, from.ID)
-	if len(rows) != 1 || rows[0].Body != "hello world!" {
-		t.Fatalf("append prefix lost: %+v", rows)
-	}
-}
-
 func TestCatalogQueueProjectionReconcilesAfterStaleDiscoveryWrite(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	d, reg, _, _, to := daemonFixture(t)

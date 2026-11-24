@@ -1192,9 +1192,6 @@ func (e StreamEvent) FailureReason() string {
 }
 
 func StreamEventDelta(event StreamEvent, previous string) string {
-	if event.Operation == "append" {
-		return event.Text
-	}
 	if strings.HasPrefix(event.Text, previous) {
 		return strings.TrimPrefix(event.Text, previous)
 	}

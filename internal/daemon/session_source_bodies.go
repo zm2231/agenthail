@@ -2,10 +2,11 @@ package daemon
 
 import "container/list"
 
-// sessionSourceBodyBytes bounds the item text a source keeps to extend its
-// next append. A body it no longer keeps is read back from the journal row
-// when the item is appended to again, so the bound only trades memory for that
-// read; the most recently written body is always kept.
+// sessionSourceBodyBytes bounds the item text a source keeps so that a growing
+// item's next version writes only its new tail to the stored body. An item
+// whose text the source no longer keeps writes its whole body again, so the
+// bound only trades memory for that write; the most recently written body is
+// always kept.
 const sessionSourceBodyBytes = sessionJournalRetentionBytes / 4
 
 type sourceBodies struct {

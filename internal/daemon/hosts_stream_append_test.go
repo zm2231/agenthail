@@ -38,7 +38,7 @@ func TestTwoClientsJoiningAReplyAtDifferentTimesThroughAPairedHostBothRebuildIt(
 	send := func(text string) {
 		version := uint64(want.Len() + 1)
 		want.WriteString(text)
-		source.append(surface.StreamEvent{ID: key, ProviderKey: key, Version: version, Operation: "append", TurnID: "turn-1", Kind: "text", Role: "assistant", Text: text})
+		source.append(surface.StreamEvent{ID: key, ProviderKey: key, Version: version, Operation: "upsert", TurnID: "turn-1", Kind: "text", Role: "assistant", Text: want.String()})
 	}
 	for index := 0; want.Len() < 2*sessionStreamBodyBytes; index++ {
 		send(fmt.Sprintf("relayed %d é ", index))

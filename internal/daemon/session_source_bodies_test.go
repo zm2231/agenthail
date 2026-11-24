@@ -16,19 +16,19 @@ func fillSourceBodies(source *sessionSource, items int) {
 	}
 }
 
-// Item text kept to extend later appends grew with every item a session
+// Item text a source kept for its growing items grew with every item a session
 // streamed: 16 MiB for 4,096 finished 4 KiB items, twice what the journal
 // itself retains.
 func TestASourceKeepsNoMoreItemTextThanItsBound(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "bodies", followers: map[uint64]chan struct{}{}}
 	fillSourceBodies(source, 4096)
-	if source.appendBodies.bytes > sessionSourceBodyBytes {
-		t.Fatalf("source keeps %d bytes of item text, want at most %d", source.appendBodies.bytes, sessionSourceBodyBytes)
+	if source.streamedBodies.bytes > sessionSourceBodyBytes {
+		t.Fatalf("source keeps %d bytes of item text, want at most %d", source.streamedBodies.bytes, sessionSourceBodyBytes)
 	}
 }
 
-func TestAnAppendToAnItemWhoseTextTheSourceDroppedExtendsTheJournaledText(t *testing.T) {
+func TestAGrowingItemWhoseTextTheSourceDroppedIsJournaledWhole(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		text string
@@ -41,11 +41,11 @@ func TestAnAppendToAnItemWhoseTextTheSourceDroppedExtendsTheJournaledText(t *tes
 			source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "bodies", followers: map[uint64]chan struct{}{}}
 			source.append(surface.StreamEvent{ProviderKey: "late", Kind: "text", Role: "assistant", Operation: "upsert", Text: tc.text})
 			fillSourceBodies(source, 2*sessionSourceBodyBytes/4096)
-			if source.appendBodies.get("late") != nil {
+			if source.streamedBodies.get("late") != nil {
 				t.Fatal("fixture did not push the item's text out of the source")
 			}
-			source.append(surface.StreamEvent{ProviderKey: "late", Kind: "text", Role: "assistant", Operation: "append", Text: "und weiter ✓"})
 			want := tc.text + "und weiter ✓"
+			source.append(surface.StreamEvent{ProviderKey: "late", Kind: "text", Role: "assistant", Operation: "upsert", Text: want})
 			if _, sourceErrors := journalRows(t, reg, from.ID); len(sourceErrors) != 0 {
 				t.Fatalf("source errors: %q", sourceErrors)
 			}

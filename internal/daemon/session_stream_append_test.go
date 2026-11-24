@@ -119,7 +119,7 @@ func TestAReplyPastTheInlineBodyKeepsGrowingOnEveryStreamClient(t *testing.T) {
 	send := func(text string, final bool) {
 		version := uint64(want.Len() + 1)
 		want.WriteString(text)
-		adapter.events <- surface.StreamEvent{ID: key, ProviderKey: key, Version: version, Operation: "append", Final: final, TurnID: "turn-1", Kind: "text", Role: "assistant", Text: text}
+		adapter.events <- surface.StreamEvent{ID: key, ProviderKey: key, Version: version, Operation: "upsert", Final: final, TurnID: "turn-1", Kind: "text", Role: "assistant", Text: want.String()}
 	}
 	for index := 0; want.Len() < 2*sessionStreamBodyBytes; index++ {
 		send(fmt.Sprintf("delta %d é ", index), false)

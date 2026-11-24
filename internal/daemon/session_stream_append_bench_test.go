@@ -26,12 +26,12 @@ func BenchmarkStreamingReplyAppends(b *testing.B) {
 				b.Fatal(err)
 			}
 			source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(b, r), session: session, epoch: "bench", followers: map[uint64]chan struct{}{}}
-			chunk := strings.Repeat("w", delta)
+			full := strings.Repeat("w", reply)
 			events := reply / delta
 			for turn := 0; b.Loop(); turn++ {
 				key := fmt.Sprintf("turn-%d:text", turn)
 				for index := 0; index < events; index++ {
-					source.append(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(index + 1), Operation: "append", TurnID: fmt.Sprint(turn), Kind: "text", Role: "assistant", Text: chunk})
+					source.append(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(index + 1), Operation: "upsert", TurnID: fmt.Sprint(turn), Kind: "text", Role: "assistant", Text: full[:(index+1)*delta]})
 				}
 			}
 			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*events), "ns/event")
@@ -54,7 +54,7 @@ func BenchmarkStreamingReplyWire(b *testing.B) {
 			}
 			source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(b, r), session: session, epoch: "wire", followers: map[uint64]chan struct{}{}}
 			d := &Daemon{Registry: r}
-			chunk := strings.Repeat("w", delta)
+			full := strings.Repeat("w", reply)
 			events := reply / delta
 			wire := 0
 			for turn := 0; b.Loop(); turn++ {
@@ -65,7 +65,7 @@ func BenchmarkStreamingReplyWire(b *testing.B) {
 				var watermark uint64
 				key := fmt.Sprintf("turn-%d:text", turn)
 				for index := 0; index < events; index++ {
-					source.append(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(index + 1), Operation: "append", TurnID: fmt.Sprint(turn), Kind: "text", Role: "assistant", Text: chunk})
+					source.append(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(index + 1), Operation: "upsert", TurnID: fmt.Sprint(turn), Kind: "text", Role: "assistant", Text: full[:(index+1)*delta]})
 					if _, err := readSessionJournalAfter(r, session.ID, &watermark, func(entry registry.SessionJournalEntry) bool { return stream.write(entry) == nil }); err != nil {
 						b.Fatal(err)
 					}

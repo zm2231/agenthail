@@ -25,26 +25,26 @@ type sessionSourceManager struct {
 }
 
 type sessionSource struct {
-	started       chan struct{}
-	startErr      error
-	seeded        chan struct{}
-	done          chan struct{}
-	seedErr       error
-	manager       *sessionSourceManager
-	session       surface.Session
-	adapter       surface.Surface
-	epoch         string
-	ctx           context.Context
-	cancel        context.CancelFunc
-	mu            sync.Mutex
-	providerMu    sync.Mutex
-	followers     map[uint64]chan struct{}
-	nextID        uint64
-	holders       map[string]int
-	appendBodies  sourceBodies
-	anonymous     uint64
-	sourceVersion uint64
-	appendFailed  bool
+	started        chan struct{}
+	startErr       error
+	seeded         chan struct{}
+	done           chan struct{}
+	seedErr        error
+	manager        *sessionSourceManager
+	session        surface.Session
+	adapter        surface.Surface
+	epoch          string
+	ctx            context.Context
+	cancel         context.CancelFunc
+	mu             sync.Mutex
+	providerMu     sync.Mutex
+	followers      map[uint64]chan struct{}
+	nextID         uint64
+	holders        map[string]int
+	streamedBodies sourceBodies
+	anonymous      uint64
+	sourceVersion  uint64
+	appendFailed   bool
 }
 
 func newSessionSourceManager(store *registry.Registry) *sessionSourceManager {

@@ -942,7 +942,7 @@ func TestSessionSourceSharesOneUpstreamAndJournalsNormalizedEvents(t *testing.T)
 	if calls := adapter.calls.Load(); calls != 1 {
 		t.Fatalf("upstream stream calls=%d", calls)
 	}
-	adapter.events <- surface.StreamEvent{ID: "m1", ProviderKey: "m1", Version: 4, Operation: "append", TurnID: "t1", Kind: "text", Text: "test"}
+	adapter.events <- surface.StreamEvent{ID: "m1", ProviderKey: "m1", Version: 4, Operation: "upsert", TurnID: "t1", Kind: "text", Text: "test"}
 	for _, subscription := range []sessionSourceSubscription{first, second, third} {
 		select {
 		case entry := <-followJournal(t, manager, from.ID, subscription):
@@ -1040,7 +1040,7 @@ func TestPrepareStreamFollowsABurstItsConsumerIsSlowToRead(t *testing.T) {
 	}
 }
 
-func TestSessionSourceAccumulatesStableProviderAppendIntoOneJournalEntry(t *testing.T) {
+func TestSessionSourceKeepsOneJournalEntryForAGrowingProviderItem(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 2)}
 	adapter.caps.Stream = true
@@ -1056,8 +1056,8 @@ func TestSessionSourceAccumulatesStableProviderAppendIntoOneJournalEntry(t *test
 	case <-time.After(time.Second):
 		t.Fatal("source did not start")
 	}
-	adapter.events <- surface.StreamEvent{ID: "managed:turn-1:text", ProviderKey: "managed:turn-1:text", Version: 3, Operation: "append", TurnID: "turn-1", Kind: "text", Text: "hel"}
-	adapter.events <- surface.StreamEvent{ID: "managed:turn-1:text", ProviderKey: "managed:turn-1:text", Version: 5, Operation: "append", TurnID: "turn-1", Kind: "text", Text: "lo"}
+	adapter.events <- surface.StreamEvent{ID: "managed:turn-1:text", ProviderKey: "managed:turn-1:text", Version: 3, Operation: "upsert", TurnID: "turn-1", Kind: "text", Text: "hel"}
+	adapter.events <- surface.StreamEvent{ID: "managed:turn-1:text", ProviderKey: "managed:turn-1:text", Version: 5, Operation: "upsert", TurnID: "turn-1", Kind: "text", Text: "hello"}
 	deadline := time.After(time.Second)
 	for accumulated := false; !accumulated; {
 		select {
@@ -1081,8 +1081,8 @@ func TestSessionSourceAssignsIdentityToProviderEventsWithoutOne(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	manager := newTestSourceManager(t, registry)
 	source := &sessionSource{ctx: context.Background(), manager: manager, session: from, adapter: fake, epoch: "epoch"}
-	first, _, _ := source.normalizeLocked(surface.StreamEvent{Kind: "event", Text: "one"})
-	second, _, _ := source.normalizeLocked(surface.StreamEvent{Kind: "event", Text: "two"})
+	first, _ := source.normalizeLocked(surface.StreamEvent{Kind: "event", Text: "one"})
+	second, _ := source.normalizeLocked(surface.StreamEvent{Kind: "event", Text: "two"})
 	if first.ItemID == "" || first.ProviderKey == "" || second.ItemID == "" || first.ItemID == second.ItemID {
 		t.Fatalf("first=%+v second=%+v", first, second)
 	}
@@ -1121,12 +1121,12 @@ func TestSessionSourceNormalizesGoalUpdatesAndClears(t *testing.T) {
 	manager := newTestSourceManager(t, registry)
 	source := &sessionSource{ctx: context.Background(), manager: manager, session: from, adapter: fake, epoch: "epoch"}
 	budget := int64(500)
-	updated, _, _ := source.normalizeLocked(surface.StreamEvent{ID: "goal:1", ProviderKey: "goal:1", Kind: "goal", Operation: "replace", Goal: &surface.GoalState{Objective: "verify", Status: surface.GoalStatusPaused, TimeUsedSeconds: 12, TokensUsed: 34, TokenBudget: &budget}})
+	updated, _ := source.normalizeLocked(surface.StreamEvent{ID: "goal:1", ProviderKey: "goal:1", Kind: "goal", Operation: "replace", Goal: &surface.GoalState{Objective: "verify", Status: surface.GoalStatusPaused, TimeUsedSeconds: 12, TokensUsed: 34, TokenBudget: &budget}})
 	encoded, err := json.Marshal(updated)
 	if err != nil || updated.Goal == nil || updated.Goal.Status != surface.GoalStatusPaused || *updated.Goal.TokenBudget != 500 || !strings.Contains(string(encoded), `"goal"`) {
 		t.Fatalf("updated=%+v encoded=%s err=%v", updated, encoded, err)
 	}
-	cleared, _, _ := source.normalizeLocked(surface.StreamEvent{ID: "goal:2", ProviderKey: "goal:2", Kind: "goal", Operation: "replace"})
+	cleared, _ := source.normalizeLocked(surface.StreamEvent{ID: "goal:2", ProviderKey: "goal:2", Kind: "goal", Operation: "replace"})
 	clearedJSON, err := json.Marshal(cleared)
 	if err != nil || !strings.Contains(string(clearedJSON), `"goal":null`) {
 		t.Fatalf("cleared=%+v json=%s err=%v", cleared, clearedJSON, err)
@@ -1196,41 +1196,6 @@ func TestSessionSourceSeedOverlapDoesNotRepublishOrAdvanceJournal(t *testing.T) 
 	changed, err := registry.SessionJournalAfter(from.ID, 0, 10)
 	if err != nil || changed.LatestSeq != seeded.LatestSeq+1 || len(changed.Entries) != 1 {
 		t.Fatalf("changed=%+v err=%v", changed, err)
-	}
-}
-
-func TestSessionSourceSeedHandoffPreservesPrefix(t *testing.T) {
-	_, reg, fake, from, _ := daemonFixture(t)
-	adapter := &sourceCountingSurface{
-		daemonSurface: fake,
-		items: []surface.TimelineItem{{
-			ID:        "codex:turn-1:assistant:item-1",
-			Kind:      "text",
-			Role:      "assistant",
-			Text:      "ha",
-			Timestamp: "2026-10-04T00:00:00Z",
-		}},
-	}
-	source := &sessionSource{manager: newTestSourceManager(t, reg), session: from, adapter: adapter, epoch: "epoch", ctx: context.Background(), followers: map[uint64]chan struct{}{}}
-	source.seedJournal()
-
-	for _, event := range []surface.StreamEvent{
-		{ID: "codex:turn-1:assistant:item-1", ProviderKey: "codex:turn-1:assistant:item-1", Version: 2, Operation: "append", Kind: "text", Role: "assistant", Text: "ha"},
-		{ID: "codex:turn-1:assistant:item-1", ProviderKey: "codex:turn-1:assistant:item-1", Version: 2, Operation: "append", Kind: "text", Role: "assistant", Text: "ha"},
-	} {
-		source.append(event)
-	}
-
-	page, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
-	if err != nil || len(page.Entries) != 1 {
-		t.Fatalf("page=%+v err=%v", page, err)
-	}
-	var payload sessionJournalPayload
-	if err := json.Unmarshal(page.Entries[0].Payload, &payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload.ProviderKey != "codex:turn-1:assistant:item-1" || payload.Body != "hahaha" || payload.Version != 2 {
-		t.Fatalf("payload=%+v", payload)
 	}
 }
 
@@ -1459,7 +1424,7 @@ func TestAUsageLimitNoticeKeepsItsResetTimeThroughTheJournal(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, registry), session: from, adapter: fake, epoch: "epoch"}
 	notice := surface.TimelineItem{ID: "n", Kind: "notice", Title: "Usage limit reached", Text: "You've hit your session limit", Status: surface.TimelineUsageLimit, ResetsAt: "2026-10-21T11:00:00Z"}
-	payload, _, _ := source.normalizeLocked(seedEvent(surface.KindClaude, notice))
+	payload, _ := source.normalizeLocked(seedEvent(surface.KindClaude, notice))
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatal(err)

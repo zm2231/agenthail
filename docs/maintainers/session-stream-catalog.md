@@ -107,7 +107,7 @@ numbers. A mutation of an existing provider key receives a new session
 sequence, so a reconnect after its prior version replays the latest value.
 
 Each session event has `itemId`, optional `providerKey`, mutation `version`,
-operation (`append`, `upsert`, `remove`, or `phase`), `kind`, optional `turnId`
+operation (`upsert`, `remove`, or `phase`), `kind`, optional `turnId`
 and `ts`, bounded `body`, `truncated`, optional `truncationReason`, and optional `bodyRef`. A body
 reference is opaque, bound to the authenticated session, range-limited and
 expires with journal retention; it never names a host path. A source failure
@@ -154,7 +154,7 @@ reconnect then receives `stream_gap`. The following shapes are canonical:
 
 ```json
 {"stream":"catalog","seq":41,"type":"session.upserted","data":{"session":{"id":"s1","surface":"codex","name":"Build","status":"busy","lastActive":"2026-10-03T12:00:00Z","project":{"id":"project-1","displayName":"agenthail","rootPath":"/repo","kind":"git"},"checkout":{"id":"checkout-1","path":"/repo/.worktrees/api","branch":"feat/api","isMain":false,"dirty":true},"freshness":{"generation":7,"observedAt":"2026-10-03T12:00:00Z","stale":false}}}}
-{"stream":"session","sessionId":"s1","seq":9,"type":"item","data":{"itemId":"m1","providerKey":"m1","version":6,"op":"append","kind":"text","turnId":"u1","ts":"2026-10-03T12:00:02Z","body":"answer","truncated":false}}
+{"stream":"session","sessionId":"s1","seq":9,"type":"item","data":{"itemId":"m1","providerKey":"m1","version":6,"op":"upsert","kind":"text","turnId":"u1","ts":"2026-10-03T12:00:02Z","body":"answer","truncated":false}}
 ```
 
 ## Session source lifecycle
