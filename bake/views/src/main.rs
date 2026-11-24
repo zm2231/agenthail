@@ -3,6 +3,7 @@ mod jump;
 mod now;
 mod project;
 mod session;
+mod sessions;
 mod ui;
 mod work;
 
@@ -19,6 +20,7 @@ pub enum Screen {
     Session(String),
     Project(String),
     Work(String),
+    Sessions,
 }
 
 pub struct App {
@@ -42,6 +44,10 @@ pub struct App {
     pub ask: Option<data::Ask>,
     pub ask_pick: Option<usize>,
     pub replayed: bool,
+    pub sessions_filter: usize,
+    pub sessions_project: Option<String>,
+    pub sessions_project_open: bool,
+    pub sessions_query: TextEdit,
 }
 
 fn arg(name: &str) -> Option<String> {
@@ -83,6 +89,10 @@ fn init() -> App {
         replayed: ask.is_some(),
         ask,
         ask_pick: None,
+        sessions_filter: 0,
+        sessions_project: None,
+        sessions_project_open: false,
+        sessions_query: TextEdit::new(""),
     };
     let view = arg("--view").unwrap_or_else(|| "now-b".into());
     match view.as_str() {
@@ -96,6 +106,11 @@ fn init() -> App {
             app.board = view == "project-b";
             let key = arg("--project").or_else(|| app.d.projects.first().map(|p| p.key.clone())).unwrap_or_default();
             app.screen = Screen::Project(key);
+        }
+        "sessions" => app.screen = Screen::Sessions,
+        "sessions-working" => {
+            app.screen = Screen::Sessions;
+            app.sessions_filter = 1;
         }
         "work" => app.screen = Screen::Work(arg("--item").unwrap_or_else(|| "agenthail-W595".into())),
         "jump" => {
@@ -167,6 +182,10 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             return jump::key(s, ev, tx);
         }
         s.jump = None;
+    }
+    if ev.is_command('s') && ev.mods.shift {
+        go(s, Screen::Sessions);
+        return true;
     }
     if ev.is_command('j') {
         next_need(s);
@@ -282,6 +301,7 @@ fn view(s: &App, cx: &mut Cx<App>) -> El {
             }
         }
         Screen::Work(id) => work::view(s, cx, id, &mut layer),
+        Screen::Sessions => sessions::view(s, cx, &mut layer),
     };
     if s.jump.is_some() {
         jump::view(s, &mut layer);

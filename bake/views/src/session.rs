@@ -71,6 +71,16 @@ fn call_arg(call: &Item, keys: &[&str]) -> Option<String> {
     keys.iter().find_map(|k| v.get(*k).and_then(|x| x.as_str()).map(String::from))
 }
 
+pub fn live_verb(s: &App, id: &str) -> Option<String> {
+    let items = s.d.transcripts.get(id)?;
+    let last = items.iter().rev().find(|i| feed::summary::is_call(i) || i.kind == "toolResult" || (i.kind == "message" && i.role_is("assistant")))?;
+    if !feed::summary::is_call(last) {
+        return None;
+    }
+    let answered = items.iter().any(|r| r.kind == "toolResult" && r.call_id.is_some() && r.call_id == last.call_id);
+    (!answered).then(|| verb(last))
+}
+
 fn verb(call: &Item) -> String {
     let t = call.title.as_str();
     let file = || call_arg(call, &["file_path", "path", "notebook_path"]).map(|p| base_name(&p)).unwrap_or_else(|| "a file".into());

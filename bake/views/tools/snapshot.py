@@ -78,7 +78,7 @@ def transcript(sid, seconds=6.0):
 def main():
     snap = get("/api/v1/snapshot")
     now = datetime.datetime.fromisoformat(snap["updatedAt"].replace("Z", "+00:00")[:26] + "+00:00")
-    sessions = [s for s in snap["sessions"] if not s.get("archived")]
+    sessions = snap["sessions"]
 
     def age_h(s):
         try:

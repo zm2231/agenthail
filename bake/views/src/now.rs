@@ -207,6 +207,7 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
     for (i, id) in s.hands_on.iter().enumerate() {
         rail = rail.child(hands_on_card(s, i, id));
     }
+    rail = rail.child(ui::sessions_block(s, true).mt(14.0));
     let skip: Vec<&str> = s.hands_on.iter().map(String::as_str).collect();
     let moving = s.d.moving(&skip);
     rail = rail.child(ui::section_head("What's moving", Some(moving.len()), None).mt(14.0));
@@ -229,7 +230,7 @@ pub fn brief(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
         .w_full()
         .gap(6.0)
         .child(row().w_full().items_center().child(text("Since you left".to_string()).font(TITLE).color(strong())).child(ui::spacer()).child(variant(s)))
-        .child(text(format!("{} need you · {} shipped · {} still moving · last {WINDOW:.0} hours across {} projects", s.needs.len(), shipped, moving.len(), digests.len())).font(BODY).color(base()));
+        .child(text(format!("{} need you · {} shipped · {} working · last {WINDOW:.0} hours across {} projects", s.needs.len(), shipped, s.d.sessions.iter().filter(|x| !x.archived && crate::sessions::busy(x)).count(), digests.len())).font(BODY).color(base()));
     let mut needs = col().w_full().gap(2.0).padding(6.0);
     for (i, n) in s.needs.iter().enumerate() {
         match s.ask.as_ref().filter(|a| n.kind == crate::data::NeedKind::Question && n.target == crate::data::Target::Session(a.session.clone())) {
@@ -245,6 +246,7 @@ pub fn brief(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
         .pt(26.0)
         .pb(48.0)
         .child(intro)
+        .child(ui::sessions_block(s, false))
         .child(ui::section_head("Needs you", Some(s.needs.len()), Some(row().gap(6.0).items_center().child(text("Next".to_string()).font(META).color(weak())).child(ui::ghost_keys(&["⌘J"])))).mt(10.0))
         .child(ui::card(needs))
         .child(ui::section_head("By project", None, Some(text("From the ledger and each session's last word".to_string()).font(META).color(weak()))).mt(10.0));

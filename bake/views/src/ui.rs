@@ -278,7 +278,11 @@ pub fn needs_button(s: &App) -> El {
 pub fn strip(s: &App, current: Option<&str>) -> El {
     let k = kit();
     let mut r = row().gap(4.0).items_center().flex_wrap();
-    for (i, id) in s.hands_on.iter().enumerate() {
+    let mut ids: Vec<String> = s.hands_on.clone();
+    if let Some(c) = current.filter(|c| !ids.iter().any(|x| x == c)) {
+        ids.push(c.to_string());
+    }
+    for (i, id) in ids.iter().enumerate() {
         let Some(x) = s.d.session(id) else { continue };
         let on = current == Some(id.as_str());
         let busy = matches!(x.display.kind.as_str(), "working" | "finishing" | "starting");
@@ -297,7 +301,11 @@ pub fn strip(s: &App, current: Option<&str>) -> El {
         if busy {
             tab = tab.child(Spinner::new().size(11.0).build(k));
         }
-        tab = tab.child(ghost_keys(&[format!("⌘{}", i + 1).as_str()]));
+        if i < s.hands_on.len() {
+            tab = tab.child(ghost_keys(&[format!("⌘{}", i + 1).as_str()]));
+        } else {
+            tab = tab.child(text("viewing".to_string()).font(META).color(weak()));
+        }
         tab = if on { tab.fill(k.c.surface_raised_hover).border(1.0, rule()) } else { tab.hover(k.c.surface_raised_hover) };
         r = r.child(tab);
     }
@@ -312,7 +320,15 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -
     let k = kit();
     let home = SidebarRow::new("Now").icon(&icons::DOT_GRID).detail("⌘0").height(32.0).selected(matches!(s.screen, Screen::Now)).on_select(|s: &mut App, _| go(s, Screen::Now)).build(k).key("home");
     let search = SidebarRow::new("Jump to").icon(&icons::MAGNIFYING_GLASS).detail("⌘K").height(32.0).on_select(|s: &mut App, _| crate::open_jump(s, "")).build(k).key("jump");
-    let mut sb = Sidebar::new().label("Navigation").inset(0.0).header_gap(2.0).header_padding(0.0, 12.0).row_gap(2.0).header(home).header(search);
+    let all = SidebarRow::new("Sessions")
+        .icon(&icons::BULLET_LIST)
+        .detail("⌘⇧S")
+        .height(32.0)
+        .selected(matches!(s.screen, Screen::Sessions))
+        .on_select(|s: &mut App, _| go(s, Screen::Sessions))
+        .build(k)
+        .key("sessions");
+    let mut sb = Sidebar::new().label("Navigation").inset(0.0).header_gap(2.0).header_padding(0.0, 12.0).row_gap(2.0).header(home).header(search).header(all);
     let mut needs = SidebarSection::new("Needs you").key("sec-needs").count(s.needs.len());
     for (i, n) in s.needs.iter().take(6).enumerate() {
         let t = n.target.clone();
@@ -371,6 +387,19 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -
             }
             sec = sec.row(row_.build(k).key(format!("s-{id}")));
         }
+        let pname = p.name.clone();
+        sec = sec.row(
+            SidebarRow::new("All sessions")
+                .icon(&icons::ARROW_RIGHT)
+                .height(30.0)
+                .detail(format!("{}", p.sessions.len()))
+                .on_select(move |s: &mut App, _| {
+                    s.sessions_project = Some(pname.clone());
+                    go(s, Screen::Sessions);
+                })
+                .build(k)
+                .key(format!("all-{}", p.key)),
+        );
         sb = sb.section(sec);
     }
     let mut others = SidebarSection::new("Projects").key("sec-projects").count(s.d.projects.len());
@@ -538,4 +567,53 @@ pub fn crumb(parts: &[(&str, bool)]) -> El {
         r = r.child(text(p.to_string()).font(if *strong_ { BODY_MED } else { BODY }).color(if *strong_ { strong() } else { weak() }).truncate().max_w(380.0));
     }
     r
+}
+
+pub fn sessions_block(s: &App, compact: bool) -> El {
+    let k = kit();
+    let mut by: Vec<(String, usize)> = Vec::new();
+    for x in s.d.sessions.iter().filter(|x| !x.archived && crate::sessions::busy(x)) {
+        let name = if x.project.is_some() { x.project_name() } else { "No project".into() };
+        match by.iter_mut().find(|b| b.0 == name) {
+            Some(b) => b.1 += 1,
+            None => by.push((name, 1)),
+        }
+    }
+    by.sort_by(|a, b| b.1.cmp(&a.1));
+    let total: usize = by.iter().map(|b| b.1).sum();
+    let listed = s.d.sessions.iter().filter(|x| !x.archived && !crate::sessions::hidden(x)).count();
+    let open = Button::new("All sessions").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).icon(&icons::ARROW_RIGHT).shortcut("⌘⇧S").on_press(|s: &mut App| go(s, Screen::Sessions)).build(k);
+    let mut chips = row().gap(6.0).flex_wrap().items_center();
+    for (name, n) in &by {
+        let pname = name.clone();
+        chips = chips.child(
+            row()
+                .gap(6.0)
+                .items_center()
+                .px(8.0)
+                .py(4.0)
+                .radius(7.0)
+                .fill(k.c.surface_base)
+                .border(1.0, rule())
+                .hover(k.c.surface_raised_hover)
+                .on_press(move |s: &mut App| {
+                    s.sessions_project = if pname == "No project" { None } else { Some(pname.clone()) };
+                    s.sessions_filter = 1;
+                    go(s, Screen::Sessions);
+                })
+                .child(avatar(name, 14.0))
+                .child(text(name.clone()).font(META).color(base()))
+                .child(text(n.to_string()).font(META_MED).color(k.c.text_accent)),
+        );
+    }
+    let head = row()
+        .w_full()
+        .gap(8.0)
+        .items_center()
+        .child(text("Sessions".to_string()).font(HEAD).color(strong()))
+        .child(text(format!("{total} working of {listed}")).font(META).color(weak()))
+        .child(spacer())
+        .child(open);
+    let c = col().w_full().gap(8.0).child(head).child(chips);
+    if compact { c } else { card(c.padding(14.0)) }
 }

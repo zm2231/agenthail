@@ -13,4 +13,6 @@ snap 05-project-B --view project-b --project repo:github.com/zm2231/agenthail
 snap 06-work --view work --item agenthail-W595
 snap 07-jump --view jump
 snap 08-session-ask --view session --session c1fafaa9-b321-4c5e-8895-dd8ad83cd9a3
+snap 09-sessions --view sessions
+snap 10-sessions-working --view sessions-working
 ls "$out"
