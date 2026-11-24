@@ -1,49 +1,75 @@
 import SwiftUI
 
+enum SessionEdit: String, Identifiable {
+    case name, goal, budget
+    var id: String { rawValue }
+}
+
 struct SessionEditingControls: View {
     var model: AgenthailIOSModel
     let detail: SessionDetail
-    @State private var editingGoal = false
-    @State private var editingBudget = false
-    @State private var editingName = false
-    @State private var text = ""
-    @State private var budgetText = ""
+    let edit: (SessionEdit) -> Void
     @State private var error: String?
     var body: some View {
         Section("Organize conversation") {
-            // The sheet sits on one row: on the Section it is copied to every row and none presents.
-            Button("Name conversation", systemImage: "pencil") { editingName = true }
-                .sheet(isPresented: Binding(get: { editingGoal || editingName || editingBudget }, set: { if !$0 { editingGoal = false; editingName = false; editingBudget = false } })) {
-                    if editingName {
-                        IOSNameSessionSheet(model: model, sessionID: detail.session.id, alias: detail.alias) { editingName = false }
-                    } else {
-                        editor.holdsDraft(editingBudget ? budgetText != (detail.goal?.tokenBudget.map(String.init) ?? "") : text != (detail.goal?.objective ?? ""))
-                    }
-                }
+            Button("Name conversation", systemImage: "pencil") { edit(.name) }
             let goal = GoalControls(detail)
             if goal.offers(.setGoal) || goal.offers(.editGoal) {
-                Button(goal.offers(.editGoal) ? "Edit goal" : "Set goal", systemImage: "target") { text = detail.goal?.objective ?? ""; editingGoal = true }
+                Button(goal.offers(.editGoal) ? "Edit goal" : "Set goal", systemImage: "target") { edit(.goal) }
             }
             if goal.offers(.clearGoal) { Button("Clear goal", role: .destructive) { Task { await save("goal-clear") } } }
             if goal.offers(.pause) { Button("Pause goal", systemImage: "pause.fill") { Task { await save("goal-pause") } } }
             if goal.offers(.resume) { Button("Resume goal", systemImage: "play.fill") { Task { await save("goal-resume") } } }
             if goal.offers(.setBudget) || goal.offers(.editBudget) {
-                Button(goal.offers(.editBudget) ? "Edit token budget" : "Set token budget", systemImage: "gauge.with.dots.needle.67percent") {
-                    budgetText = detail.goal?.tokenBudget.map(String.init) ?? ""
-                    editingBudget = true
-                }
+                Button(goal.offers(.editBudget) ? "Edit token budget" : "Set token budget", systemImage: "gauge.with.dots.needle.67percent") { edit(.budget) }
             }
-            if goal.offers(.clearBudget) { Button("Clear token budget", role: .destructive) { Task { await save("goal-budget", text: "") } } }
+            if goal.offers(.clearBudget) { Button("Clear token budget", role: .destructive) { Task { await save("goal-budget") } } }
             if let error { Text(error).font(.footnote).foregroundStyle(PhonePalette.failed) }
         }
         .disabled(model.pendingControls.contains(detail.session.id))
     }
 
-    private var editor: some View {
+    private func save(_ action: String) async {
+        error = nil
+        do { try await model.editSession(id: detail.session.id, action: action) }
+        catch { self.error = error.localizedDescription }
+    }
+}
+
+struct SessionGoalSheet: View {
+    var model: AgenthailIOSModel
+    let detail: SessionDetail
+    let budget: Bool
+    let close: () -> Void
+    @State private var text: String
+    @State private var error: String?
+
+    init(model: AgenthailIOSModel, detail: SessionDetail, budget: Bool, close: @escaping () -> Void) {
+        self.model = model
+        self.detail = detail
+        self.budget = budget
+        self.close = close
+        _text = State(initialValue: Self.saved(detail, budget: budget))
+    }
+
+    private static func saved(_ detail: SessionDetail, budget: Bool) -> String {
+        budget ? detail.goal?.tokenBudget.map(String.init) ?? "" : detail.goal?.objective ?? ""
+    }
+
+    private var pending: Bool { model.pendingControls.contains(detail.session.id) }
+    private var action: String {
+        if budget { return "goal-budget" }
+        return detail.goal?.objective.isEmpty == false ? "goal-edit" : "goal-set"
+    }
+    private var canSave: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View { content.holdsDraft(text != Self.saved(detail, budget: budget)) }
+
+    private var content: some View {
         NavigationStack {
             Form {
-                if editingBudget {
-                    TextField("Token budget", text: $budgetText).keyboardType(.numberPad)
+                if budget {
+                    TextField("Token budget", text: $text).keyboardType(.numberPad)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                     Text("Use Clear token budget to remove the current limit.").font(.footnote)
                 } else {
@@ -52,29 +78,26 @@ struct SessionEditingControls: View {
                 }
                 if let error { Text(error).foregroundStyle(PhonePalette.failed) }
             }
-            .navigationTitle(editingBudget ? "Token budget" : "Edit goal")
+            .navigationTitle(budget ? "Token budget" : "Edit goal")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingGoal = false; editingBudget = false }.disabled(model.pendingControls.contains(detail.session.id)) }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { close() }.disabled(pending) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { Task { await save(sheetAction, text: sheetText) } }
-                        .disabled(!canSave || model.pendingControls.contains(detail.session.id))
+                    Button("Save") { Task { await save() } }
+                        .disabled(!canSave || pending)
                 }
-            }.interactiveDismissDisabled(model.pendingControls.contains(detail.session.id))
+            }
+            .interactiveDismissDisabled(pending)
         }
     }
-    private var sheetAction: String {
-        if editingBudget { return "goal-budget" }
-        return detail.goal?.objective.isEmpty == false ? "goal-edit" : "goal-set"
-    }
-    private var sheetText: String { editingBudget ? budgetText : text }
-    private var canSave: Bool {
-        !(editingBudget ? budgetText : text).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
 
-    private func save(_ action: String, text: String? = nil) async {
+    private func save() async {
         error = nil
-        do { try await model.editSession(id: detail.session.id, action: action, text: text ?? self.text); editingGoal = false; editingBudget = false }
-        catch { self.error = error.localizedDescription }
+        do {
+            try await model.editSession(id: detail.session.id, action: action, text: text)
+            close()
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 }
 

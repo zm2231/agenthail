@@ -64,8 +64,17 @@ struct SessionInspector: View {
     @State private var renamingClaude = false
     @State private var movingTo: LimitResumeState.MoveOffer?
     @State private var movingHost = false
+    // Not on the List rows: a row the List rebuilds takes its sheet's typed draft with it.
+    @State private var editing: SessionEdit?
     @State private var claudeName = ""
     @State private var adopting = false
+
+    init(model: AgenthailIOSModel, session: SessionState, initialDetail: SessionDetail, editing: SessionEdit? = nil) {
+        self.model = model
+        self.session = session
+        self.initialDetail = initialDetail
+        _editing = State(initialValue: editing)
+    }
     private var detail: SessionDetail {
         guard let liveDetail = model.selectedDetail, liveDetail.session.id == session.id else { return initialDetail }
         return liveDetail
@@ -117,7 +126,7 @@ struct SessionInspector: View {
                         IOSCompactSettingRows(model: model, sessionID: session.id, settings: compact)
                     }
                 }
-                SessionEditingControls(model: model, detail: detail)
+                SessionEditingControls(model: model, detail: detail) { editing = $0 }
                 if let goal = detail.goal.map(GoalFacts.init) {
                     Section("Goal") {
                         if let objective = goal.objective { Text(objective).textSelection(.enabled) }
@@ -292,6 +301,13 @@ struct SessionInspector: View {
             }
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .sheet(isPresented: $movingHost) { IOSMoveSessionSheet(model: model, session: liveSession) { dismiss() } }
+            .sheet(item: $editing) { edit in
+                switch edit {
+                case .name: IOSNameSessionSheet(model: model, sessionID: detail.session.id, alias: detail.alias) { editing = nil }
+                case .goal: SessionGoalSheet(model: model, detail: detail, budget: false) { editing = nil }
+                case .budget: SessionGoalSheet(model: model, detail: detail, budget: true) { editing = nil }
+                }
+            }
             .sheet(isPresented: $adopting) { IOSAdoptSessionSheet(model: model, session: model.routedSession(liveSession) ?? liveSession, sessionID: liveSession.id) }
             .task(id: SubagentFetchKey(liveSession, revision: model.fetchedSubagents.revision(session.id))) { await model.loadSubagents(of: liveSession) }
             .sheet(isPresented: $showingModels) {
