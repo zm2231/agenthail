@@ -80,9 +80,10 @@ final class SessionEditSheetTests: XCTestCase {
         field.insertText("keepme")
         XCTAssertNotNil(poll { PresentedSheets.holdsDraft ? true : nil }, "a typed name holds routes")
 
-        model.selectedDetail = grown
         let list = try XCTUnwrap(collectionView(in: host.view), "the details are a List")
-        _ = poll { list.contentSize.height > list.bounds.height ? true : nil }
+        let before = list.contentSize.height
+        model.selectedDetail = grown
+        XCTAssertNotNil(poll { list.contentSize.height > before ? true : nil }, "the details gain their context rows under the open sheet")
         list.setContentOffset(CGPoint(x: 0, y: -list.adjustedContentInset.top), animated: false)
         _ = poll { nil as Bool? }
 

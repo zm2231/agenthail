@@ -1,8 +1,8 @@
 import SwiftUI
 
-enum SessionEdit: Identifiable {
+enum SessionEdit: String, Identifiable {
     case name, goal, budget
-    var id: Self { self }
+    var id: String { rawValue }
 }
 
 struct SessionEditingControls: View {
