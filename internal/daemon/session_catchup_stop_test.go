@@ -130,14 +130,14 @@ func TestARederiveTheDaemonStopsDuringLeavesTheJournalForTheNextStart(t *testing
 	earlierDerivationJournal(t, r, from.ID)
 	inner := &rederiveSurface{daemonSurface: fake, items: transcriptItems()}
 	sourceCtx, stop := context.WithCancel(context.Background())
-	stopped := &sessionSource{manager: newTestSourceManager(t, r), session: from, adapter: &stoppingRederive{rederiveSurface: inner, stop: stop}, epoch: "stopped", ctx: sourceCtx, appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
+	stopped := &sessionSource{manager: newTestSourceManager(t, r), session: from, adapter: &stoppingRederive{rederiveSurface: inner, stop: stop}, epoch: "stopped", ctx: sourceCtx, followers: map[uint64]chan struct{}{}}
 	if err := stopped.loadSeed(); !errors.Is(err, context.Canceled) || inner.calls != 1 {
 		t.Fatalf("a rederive stopped after its read returned err=%v after %d reads", err, inner.calls)
 	}
 	if turn := journalTurnOf(t, r, from.ID, "100-aaaaaa-0"); turn != "" {
 		t.Fatalf("a stopped rederive rewrote the journal: the first reply is in turn %q", turn)
 	}
-	next := &sessionSource{manager: newTestSourceManager(t, r), session: from, adapter: inner, epoch: "next", ctx: context.Background(), appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
+	next := &sessionSource{manager: newTestSourceManager(t, r), session: from, adapter: inner, epoch: "next", ctx: context.Background(), followers: map[uint64]chan struct{}{}}
 	if err := next.loadSeed(); err != nil || inner.calls != 2 {
 		t.Fatalf("the next start did not rederive: err=%v reads=%d", err, inner.calls)
 	}

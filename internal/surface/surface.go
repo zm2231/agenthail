@@ -295,8 +295,6 @@ type Session struct {
 	// not be read.
 	PIDIdentity           string            `json:"-"`
 	HolderStart           string            `json:"-"`
-	StreamCursor          uint64            `json:"-"`
-	StreamCursorSet       bool              `json:"-"`
 	TranscriptOffset      int64             `json:"-"`
 	TranscriptOffsetSet   bool              `json:"-"`
 	TranscriptIdentity    string            `json:"-"`
@@ -466,10 +464,6 @@ type SessionSearcher interface {
 
 type ReadinessChecker interface {
 	Ready(ctx context.Context) error
-}
-
-type StreamCursorReader interface {
-	StreamCursor(context.Context, *Session) (uint64, error)
 }
 
 type LocalTranscriptProvider interface {
@@ -1133,7 +1127,6 @@ type StreamEvent struct {
 	TruncationReason string           `json:"truncationReason,omitempty"`
 	ID               string           `json:"id,omitempty"`
 	ProviderKey      string           `json:"providerKey,omitempty"`
-	Cursor           uint64           `json:"cursor,omitempty"`
 	Version          uint64           `json:"version,omitempty"`
 	Operation        string           `json:"operation,omitempty"`
 	Final            bool             `json:"final,omitempty"`

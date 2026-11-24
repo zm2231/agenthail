@@ -21,7 +21,7 @@ func TestAReplyStreamedPastTheInlineBodyReadsBackWhole(t *testing.T) {
 	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
-	source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, r), session: session, epoch: "long", appendBodies: map[string]*streamedBody{}, followers: map[uint64]chan struct{}{}}
+	source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, r), session: session, epoch: "long", followers: map[uint64]chan struct{}{}}
 	const key = "turn-1:text"
 	var want strings.Builder
 	for index := 0; want.Len() < 3*sessionStreamBodyBytes; index++ {

@@ -66,7 +66,7 @@ func requireJournalFailureEvidence(t *testing.T, reg *registry.Registry, session
 	}
 }
 
-func TestJournalAppendFailureDoesNotAdvanceCursor(t *testing.T) {
+func TestAnEventWhoseJournalAppendFailedIsWrittenWhenReplayed(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		text string
@@ -76,9 +76,9 @@ func TestJournalAppendFailureDoesNotAdvanceCursor(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, reg, fake, from, _ := daemonFixture(t)
-			source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "cursor", appendBodies: map[string]*streamedBody{}, appendCursors: map[string]uint64{}}
+			source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "cursor"}
 			allow := rejectJournalWrites(t, reg, "cursor-key")
-			event := surface.StreamEvent{ID: "cursor-key", ProviderKey: "cursor-key", Cursor: 1, Operation: "upsert", Kind: "message", Role: "assistant", Text: tc.text}
+			event := surface.StreamEvent{ID: "cursor-key", ProviderKey: "cursor-key", Operation: "upsert", Kind: "message", Role: "assistant", Text: tc.text}
 			source.append(event)
 			rows, _ := journalRows(t, reg, from.ID)
 			if _, ok := rows["cursor-key"]; ok {
@@ -89,7 +89,7 @@ func TestJournalAppendFailureDoesNotAdvanceCursor(t *testing.T) {
 			rows, sourceErrors := journalRows(t, reg, from.ID)
 			row, ok := rows["cursor-key"]
 			if !ok {
-				t.Fatalf("replayed cursor was dropped after failed append: %+v", rows)
+				t.Fatalf("replayed event was dropped after failed append: %+v", rows)
 			}
 			if len(tc.text) > sessionStreamBodyBytes {
 				if row.BodyRef == "" || !row.Truncated {
@@ -109,7 +109,7 @@ func TestJournalAppendFailureDoesNotAdvanceCursor(t *testing.T) {
 
 func TestJournalAppendDeltaFailureDoesNotCorruptAccumulatedBody(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "delta", appendBodies: map[string]*streamedBody{}, appendCursors: map[string]uint64{}}
+	source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "delta"}
 	source.append(surface.StreamEvent{ID: "delta-key", ProviderKey: "delta-key", Kind: "message", Role: "assistant", Text: "Hello"})
 	allow := rejectJournalWrites(t, reg, "delta-key")
 	source.append(surface.StreamEvent{ID: "delta-key", ProviderKey: "delta-key", Kind: "message", Role: "assistant", Text: " world"})
@@ -128,7 +128,7 @@ func TestJournalAppendDeltaFailureDoesNotCorruptAccumulatedBody(t *testing.T) {
 
 func TestJournalUpsertFailureKeepsPersistedBodyForLaterDeltas(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "upsert", appendBodies: map[string]*streamedBody{}, appendCursors: map[string]uint64{}}
+	source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "upsert"}
 	source.append(surface.StreamEvent{ID: "upsert-key", ProviderKey: "upsert-key", Operation: "upsert", Kind: "message", Role: "assistant", Text: "draft"})
 	allow := rejectJournalWrites(t, reg, "upsert-key")
 	source.append(surface.StreamEvent{ID: "upsert-key", ProviderKey: "upsert-key", Operation: "upsert", Kind: "message", Role: "assistant", Text: "rejected rewrite"})
@@ -143,7 +143,7 @@ func TestJournalUpsertFailureKeepsPersistedBodyForLaterDeltas(t *testing.T) {
 
 func TestJournalSeedFailureThenLiveHandoffDoesNotDuplicate(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "handoff", appendBodies: map[string]*streamedBody{}, appendCursors: map[string]uint64{}}
+	source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "handoff"}
 	allow := rejectJournalWrites(t, reg, "timeline:reply")
 	source.appendSeedItems([]surface.TimelineItem{{ID: "reply", Kind: "message", Role: "assistant", Text: "seeded"}})
 	rows, _ := journalRows(t, reg, from.ID)
@@ -168,7 +168,7 @@ type replayingStreamSurface struct {
 }
 
 func (s *replayingStreamSurface) Stream(ctx context.Context, _ *surface.Session, _ string, onEvent func(surface.StreamEvent), _ time.Duration) error {
-	onEvent(surface.StreamEvent{ID: "replayed", ProviderKey: "replayed", Cursor: 1, Operation: "upsert", Kind: "message", Role: "assistant", Text: "must persist"})
+	onEvent(surface.StreamEvent{ID: "replayed", ProviderKey: "replayed", Operation: "upsert", Kind: "message", Role: "assistant", Text: "must persist"})
 	if s.calls.Add(1) == 1 {
 		select {
 		case <-s.replay:
