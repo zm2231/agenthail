@@ -66,7 +66,7 @@ final class SessionEditSheetTests: XCTestCase {
         let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: .ephemeral)))
         model.selectedDetail = quiet
         let host = UIHostingController(rootView: SessionInspector(model: model, session: quiet.sessionState(open: true), initialDetail: quiet, editing: .name))
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 360))
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer {
@@ -84,8 +84,11 @@ final class SessionEditSheetTests: XCTestCase {
         let before = list.contentSize.height
         model.selectedDetail = grown
         XCTAssertNotNil(poll { list.contentSize.height > before ? true : nil }, "the details gain their context rows under the open sheet")
-        list.setContentOffset(CGPoint(x: 0, y: -list.adjustedContentInset.top), animated: false)
-        _ = poll { nil as Bool? }
+        XCTAssertGreaterThan(list.contentSize.height, 2 * list.bounds.height, "the details are taller than two screens")
+        let top = scroll(list, toBottom: false)
+        let bottom = scroll(list, toBottom: true)
+        _ = scroll(list, toBottom: false)
+        XCTAssertTrue(top.isDisjoint(with: bottom), "no row is on screen at both ends, so every row, the editing controls included, left the screen and came back")
 
         XCTAssertNotNil(host.presentedViewController, "the rename sheet stays open")
         XCTAssertEqual(text(of: textInput(in: host.presentedViewController?.view)), "keepme", "the typed name survives")
@@ -99,6 +102,17 @@ final class SessionEditSheetTests: XCTestCase {
             RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         } while Date() < deadline
         return read()
+    }
+
+    private func scroll(_ list: UICollectionView, toBottom: Bool) -> Set<IndexPath> {
+        let inset = list.adjustedContentInset
+        let y = toBottom ? list.contentSize.height - list.bounds.height + inset.bottom : -inset.top
+        list.setContentOffset(CGPoint(x: 0, y: y), animated: false)
+        for _ in 0..<5 {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            list.layoutIfNeeded()
+        }
+        return Set(list.indexPathsForVisibleItems)
     }
 
     private func textInput(in view: UIView?) -> (UIView & UIKeyInput)? {
