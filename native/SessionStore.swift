@@ -191,6 +191,7 @@ final class SessionStore: ObservableObject {
         detail.session.backgroundTasks = session.backgroundTasks
         detail.session.usageLimit = session.usageLimit
         detail.session.turnStop = session.turnStop
+        detail.ask = session.ask
         detail.capabilities = session.capabilities
         if let readOnly = session.readOnly {
             detail.readOnly = readOnly

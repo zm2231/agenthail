@@ -7,6 +7,7 @@ struct SessionDisplayVectorsTest {
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("scripts/fixtures/session-display-vectors.json")
 
+    @MainActor
     static func main() throws {
         let vectors = try JSONSerialization.jsonObject(with: Data(contentsOf: fixture)) as! [String: Any]
         let now = TimestampParser.date(vectors["now"] as! String)!
@@ -43,6 +44,14 @@ struct SessionDisplayVectorsTest {
                 let detail = try JSONDecoder().decode(SessionDetail.self, from: JSONSerialization.data(withJSONObject: detailFields))
                 let fromDetail = SessionDisplayKind.of(detail.sessionState(open: true), now: now)
                 if fromDetail.rawValue != want { failures.append("\(name): a session known only by its detail says \(fromDetail.rawValue), not \(want)") }
+                var stale = detailFields
+                stale["ask"] = ["id": "ask-stale", "origin": "question", "title": "Which port?", "routedTo": "person"]
+                var reread = try JSONDecoder().decode(SessionDetail.self, from: JSONSerialization.data(withJSONObject: stale))
+                reread.liveState = detail.liveState
+                let fromReread = SessionDisplayKind.of(reread.sessionState(open: true), now: now)
+                if fromReread.rawValue != want { failures.append("\(name): a detail reread over a stale question says \(fromReread.rawValue), not \(want)") }
+                let warmed = SessionDisplayKind.of(SessionStore.live(reread, session).sessionState(open: true), now: now)
+                if warmed.rawValue != want { failures.append("\(name): a cached detail warmed from its row says \(warmed.rawValue), not \(want)") }
             }
         }
         guard failures.isEmpty else {

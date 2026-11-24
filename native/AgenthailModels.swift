@@ -1678,12 +1678,14 @@ struct SessionDetail: Decodable {
         get {
             SessionLiveState(name: session.name, alias: alias, status: session.status, lastActive: session.lastActive, cwd: session.cwd, transport: session.transport,
                              runtime: session.runtime, runtimeKind: session.runtimeKind, capabilities: capabilities, readOnly: readOnly, readOnlyReason: readOnlyReason,
-                             waitingOn: session.waitingOn, backgroundTasks: session.backgroundTasks, usageLimit: session.usageLimit, turnStop: session.turnStop, limitResume: limitResume, activity: session.activity)
+                             waitingOn: session.waitingOn, backgroundTasks: session.backgroundTasks, usageLimit: session.usageLimit, turnStop: session.turnStop, limitResume: limitResume, activity: session.activity,
+                             ask: ask)
         }
         set {
             (session.name, alias, session.status, session.lastActive, session.cwd, session.transport) = (newValue.name, newValue.alias, newValue.status, newValue.lastActive, newValue.cwd, newValue.transport)
             (session.runtime, session.runtimeKind, capabilities, readOnly, readOnlyReason) = (newValue.runtime, newValue.runtimeKind, newValue.capabilities, newValue.readOnly, newValue.readOnlyReason)
             (session.waitingOn, session.backgroundTasks, session.usageLimit, session.turnStop, limitResume, session.activity) = (newValue.waitingOn, newValue.backgroundTasks, newValue.usageLimit, newValue.turnStop, newValue.limitResume, newValue.activity)
+            ask = newValue.ask
         }
     }
 }
@@ -1708,20 +1710,22 @@ struct SessionLiveState: Equatable {
     var turnStop: TurnStopState?
     var limitResume: LimitResumeState?
     var activity: SessionActivity?
+    var ask: SessionAsk?
 
     init(name: String, alias: String?, status: String, lastActive: String, cwd: String?, transport: String?, runtime: SessionRuntime?, runtimeKind: String?,
          capabilities: Capabilities, readOnly: Bool, readOnlyReason: String, waitingOn: WaitingState?, backgroundTasks: BackgroundTasks?, usageLimit: UsageLimitState?,
-         turnStop: TurnStopState? = nil, limitResume: LimitResumeState?, activity: SessionActivity? = nil) {
+         turnStop: TurnStopState? = nil, limitResume: LimitResumeState?, activity: SessionActivity? = nil, ask: SessionAsk? = nil) {
         (self.name, self.alias, self.status, self.lastActive, self.cwd, self.transport, self.runtime) = (name, alias, status, lastActive, cwd, transport, runtime)
         (self.runtimeKind, self.capabilities, self.readOnly, self.readOnlyReason) = (runtimeKind, capabilities, readOnly, readOnlyReason)
         (self.waitingOn, self.backgroundTasks, self.usageLimit, self.turnStop, self.limitResume, self.activity) = (waitingOn, backgroundTasks, usageLimit, turnStop, limitResume, activity)
+        self.ask = ask
     }
 
     /// The snapshot's state. A snapshot without lastActive keeps the one loaded.
     init(_ live: SessionState, lastActive loaded: String) {
         self.init(name: live.name, alias: live.alias, status: live.status, lastActive: live.lastActive ?? loaded, cwd: live.cwd, transport: live.transport,
                   runtime: live.runtime, runtimeKind: live.runtimeKind, capabilities: live.capabilities, readOnly: live.isReadOnly, readOnlyReason: live.readOnlyReason ?? "",
-                  waitingOn: live.waitingOn, backgroundTasks: live.backgroundTasks, usageLimit: live.usageLimit, turnStop: live.turnStop, limitResume: live.limitResume, activity: live.activity)
+                  waitingOn: live.waitingOn, backgroundTasks: live.backgroundTasks, usageLimit: live.usageLimit, turnStop: live.turnStop, limitResume: live.limitResume, activity: live.activity, ask: live.ask)
     }
 }
 
