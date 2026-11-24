@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/agentcard"
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
@@ -54,6 +55,28 @@ func (m *askingModel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		send(map[string]any{"type": "response.output_item.done", "item": map[string]any{"type": "function_call", "id": "fc_" + id, "call_id": "call_" + id, "namespace": "mcp__agenthail", "name": "agenthail_ask", "arguments": string(arguments)}})
 	}
 	send(map[string]any{"type": "response.completed", "response": map[string]any{"id": id, "usage": map[string]any{"input_tokens": 10, "output_tokens": 1, "total_tokens": 11, "input_tokens_details": map[string]any{"cached_tokens": 0}, "output_tokens_details": map[string]any{"reasoning_tokens": 0}}}})
+}
+
+func developerTexts(request string) []string {
+	var decoded struct {
+		Input []struct {
+			Role    string `json:"role"`
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"input"`
+	}
+	_ = json.Unmarshal([]byte(request), &decoded)
+	var texts []string
+	for _, item := range decoded.Input {
+		if item.Role != "developer" {
+			continue
+		}
+		for _, content := range item.Content {
+			texts = append(texts, content.Text)
+		}
+	}
+	return texts
 }
 
 func (m *askingModel) request(index int) string {
@@ -122,13 +145,17 @@ func TestACodexThreadAgenthailStartsKnowsItRunsInAgenthailAndAsksThePersonThroug
 	if listed && !described {
 		t.Errorf("the model's first request lists mcp__agenthail without the description its server sends")
 	}
-	for what, want := range map[string]string{
-		"the Agenthail guide in its developer instructions": `You run inside Agenthail, which connects you to the person`,
-		"its card, naming it":                               `[Agenthail] You are @notes`,
-	} {
-		if !strings.Contains(first, want) {
-			t.Errorf("the model's first request lacks %s (%q)", what, want)
-		}
+	guided, carded := false, false
+	for _, text := range developerTexts(first) {
+		card := strings.Contains(text, "[Agenthail] You are @notes")
+		guided = guided || !card && strings.Contains(text, agentcard.CodexGuide())
+		carded = carded || card
+	}
+	if !guided {
+		t.Errorf("the model's first request has no developer instructions carrying the Agenthail guide")
+	}
+	if !carded {
+		t.Errorf("the model's first request has no developer message with the thread's card")
 	}
 	if t.Failed() {
 		t.FailNow()
