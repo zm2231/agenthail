@@ -68,6 +68,13 @@ struct SessionInspector: View {
     @State private var editing: SessionEdit?
     @State private var claudeName = ""
     @State private var adopting = false
+
+    init(model: AgenthailIOSModel, session: SessionState, initialDetail: SessionDetail, editing: SessionEdit? = nil) {
+        self.model = model
+        self.session = session
+        self.initialDetail = initialDetail
+        _editing = State(initialValue: editing)
+    }
     private var detail: SessionDetail {
         guard let liveDetail = model.selectedDetail, liveDetail.session.id == session.id else { return initialDetail }
         return liveDetail

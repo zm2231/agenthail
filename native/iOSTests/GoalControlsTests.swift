@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import Agenthail
 
@@ -51,5 +52,69 @@ final class GoalControlsTests: XCTestCase {
     func testAReadOnlySessionOrOneWithoutGoalsOffersNothing() throws {
         XCTAssertEqual(GoalControls(try detail(goal: goal("active"), goalStatus: true, readOnly: true)).controls, [])
         XCTAssertEqual(GoalControls(try detail(goal: goal("active"), goalStatus: true, goalSet: false)).controls, [])
+    }
+}
+
+@MainActor
+final class SessionEditSheetTests: XCTestCase {
+    func testATypedRenameSurvivesTheDetailsGrowingAndScrollingUnderIt() throws {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(SessionPreview.detailJSON.utf8)) as? [String: Any])
+        let context = object.removeValue(forKey: "context")
+        let quiet = try JSONDecoder().decode(SessionDetail.self, from: JSONSerialization.data(withJSONObject: object))
+        object["context"] = context
+        let grown = try JSONDecoder().decode(SessionDetail.self, from: JSONSerialization.data(withJSONObject: object))
+        let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: .ephemeral)))
+        model.selectedDetail = quiet
+        let host = UIHostingController(rootView: SessionInspector(model: model, session: quiet.sessionState(open: true), initialDetail: quiet, editing: .name))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            host.dismiss(animated: false)
+            _ = poll { PresentedSheets.holdsDraft ? nil : true }
+            window.isHidden = true
+        }
+
+        let field = try XCTUnwrap(poll { self.textInput(in: host.presentedViewController?.view) }, "the rename sheet opens over the details")
+        _ = field.becomeFirstResponder()
+        field.insertText("keepme")
+        XCTAssertNotNil(poll { PresentedSheets.holdsDraft ? true : nil }, "a typed name holds routes")
+
+        model.selectedDetail = grown
+        let list = try XCTUnwrap(collectionView(in: host.view), "the details are a List")
+        _ = poll { list.contentSize.height > list.bounds.height ? true : nil }
+        list.setContentOffset(CGPoint(x: 0, y: -list.adjustedContentInset.top), animated: false)
+        _ = poll { nil as Bool? }
+
+        XCTAssertNotNil(host.presentedViewController, "the rename sheet stays open")
+        XCTAssertEqual(text(of: textInput(in: host.presentedViewController?.view)), "keepme", "the typed name survives")
+        XCTAssertTrue(PresentedSheets.holdsDraft, "the typed name still holds routes")
+    }
+
+    private func poll<T>(timeout: TimeInterval = 2, _ read: () -> T?) -> T? {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let value = read() { return value }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        } while Date() < deadline
+        return read()
+    }
+
+    private func textInput(in view: UIView?) -> (UIView & UIKeyInput)? {
+        guard let view else { return nil }
+        if let input = view as? UITextView { return input }
+        if let input = view as? UITextField { return input }
+        for child in view.subviews { if let input = textInput(in: child) { return input } }
+        return nil
+    }
+
+    private func collectionView(in view: UIView) -> UICollectionView? {
+        if let list = view as? UICollectionView { return list }
+        for child in view.subviews { if let list = collectionView(in: child) { return list } }
+        return nil
+    }
+
+    private func text(of input: (UIView & UIKeyInput)?) -> String? {
+        (input as? UITextView)?.text ?? (input as? UITextField)?.text
     }
 }
