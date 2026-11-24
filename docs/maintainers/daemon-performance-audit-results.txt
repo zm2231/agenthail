@@ -1,0 +1,235 @@
+Agenthail daemon performance audit
+Base: b8c2c250b3b35afd20dfe5090fe6ae1b3460abe2
+Environment: Apple M4 Pro; Go 1.26.6 darwin/arm64; Darwin 27.0.0
+Command: go test -tags perfaudit ./internal/registry ./internal/daemon -run '^TestAudit' -v -bench '^BenchmarkAudit' -benchtime=300ms -count=3 -benchmem
+Exit code: 0
+
+BenchmarkAuditQueueHistory/index_false uses the existing shipped partial index.
+index_true adds a candidate index in the temporary test DB only.
+BenchmarkAuditJournalRetentionRead/with_count_false is a control that omits counting; it is not a production replacement.
+
+=== RUN   TestAuditQueuePlans
+    performance_audit_test.go:165: indexed=false plan=SEARCH message_queue USING INDEX message_queue_open (session_id=?)
+    performance_audit_test.go:165: indexed=false plan=SCAN message_queue USING INDEX message_queue_open
+    performance_audit_test.go:165: indexed=true plan=SEARCH message_queue USING COVERING INDEX audit_queue_active (session_id=? AND status=?)
+    performance_audit_test.go:165: indexed=true plan=SCAN message_queue USING COVERING INDEX audit_queue_active
+--- PASS: TestAuditQueuePlans (0.04s)
+=== RUN   TestAuditQueuePlans
+    performance_audit_test.go:165: indexed=false plan=SEARCH message_queue USING INDEX message_queue_open (session_id=?)
+    performance_audit_test.go:165: indexed=false plan=SCAN message_queue USING INDEX message_queue_open
+    performance_audit_test.go:165: indexed=true plan=SEARCH message_queue USING COVERING INDEX audit_queue_active (session_id=? AND status=?)
+    performance_audit_test.go:165: indexed=true plan=SCAN message_queue USING COVERING INDEX audit_queue_active
+--- PASS: TestAuditQueuePlans (0.01s)
+=== RUN   TestAuditQueuePlans
+    performance_audit_test.go:165: indexed=false plan=SEARCH message_queue USING INDEX message_queue_open (session_id=?)
+    performance_audit_test.go:165: indexed=false plan=SCAN message_queue USING INDEX message_queue_open
+    performance_audit_test.go:165: indexed=true plan=SEARCH message_queue USING COVERING INDEX audit_queue_active (session_id=? AND status=?)
+    performance_audit_test.go:165: indexed=true plan=SCAN message_queue USING COVERING INDEX audit_queue_active
+--- PASS: TestAuditQueuePlans (0.01s)
+goos: darwin
+goarch: arm64
+pkg: github.com/zm2231/agenthail/internal/registry
+cpu: Apple M4 Pro
+BenchmarkAuditJournalUpdate
+BenchmarkAuditJournalUpdate/rows_1
+BenchmarkAuditJournalUpdate/rows_1-14    	    8384	     45294 ns/op	    8821 B/op	     216 allocs/op
+BenchmarkAuditJournalUpdate/rows_1-14    	    7338	     44253 ns/op	    8817 B/op	     216 allocs/op
+BenchmarkAuditJournalUpdate/rows_1-14    	    6590	     45998 ns/op	    8820 B/op	     216 allocs/op
+BenchmarkAuditJournalUpdate/rows_256
+BenchmarkAuditJournalUpdate/rows_256-14  	    5893	     58468 ns/op	    8848 B/op	     220 allocs/op
+BenchmarkAuditJournalUpdate/rows_256-14  	    6114	     58543 ns/op	    8849 B/op	     220 allocs/op
+BenchmarkAuditJournalUpdate/rows_256-14  	    6586	     59286 ns/op	    8848 B/op	     220 allocs/op
+BenchmarkAuditJournalUpdate/rows_2048
+BenchmarkAuditJournalUpdate/rows_2048-14 	    2581	    141164 ns/op	    8848 B/op	     220 allocs/op
+BenchmarkAuditJournalUpdate/rows_2048-14 	    2694	    137756 ns/op	    8850 B/op	     220 allocs/op
+BenchmarkAuditJournalUpdate/rows_2048-14 	    2719	    139685 ns/op	    8849 B/op	     220 allocs/op
+BenchmarkAuditCatalogUnchanged
+BenchmarkAuditCatalogUnchanged-14        	    2949	    124060 ns/op	    7868 B/op	     104 allocs/op
+BenchmarkAuditCatalogUnchanged-14        	    2996	    122564 ns/op	    7868 B/op	     104 allocs/op
+BenchmarkAuditCatalogUnchanged-14        	    2859	    128502 ns/op	    7868 B/op	     104 allocs/op
+BenchmarkAuditQueueHistory
+BenchmarkAuditQueueHistory/history_0/index_false
+BenchmarkAuditQueueHistory/history_0/index_false/QueueCount
+BenchmarkAuditQueueHistory/history_0/index_false/QueueCount-14         	   59212	      6027 ns/op	     536 B/op	      17 allocs/op
+BenchmarkAuditQueueHistory/history_0/index_false/QueueCount-14         	   60008	      5996 ns/op	     536 B/op	      17 allocs/op
+BenchmarkAuditQueueHistory/history_0/index_false/QueueCount-14         	   58723	      5961 ns/op	     536 B/op	      17 allocs/op
+BenchmarkAuditQueueHistory/history_0/index_false/QueueCounts
+BenchmarkAuditQueueHistory/history_0/index_false/QueueCounts-14        	   53332	      6672 ns/op	     792 B/op	      20 allocs/op
+BenchmarkAuditQueueHistory/history_0/index_false/QueueCounts-14        	   53442	      6881 ns/op	     792 B/op	      20 allocs/op
+BenchmarkAuditQueueHistory/history_0/index_false/QueueCounts-14        	   52353	      6673 ns/op	     792 B/op	      20 allocs/op
+BenchmarkAuditQueueHistory/history_0/index_true
+BenchmarkAuditQueueHistory/history_0/index_true/QueueCount
+BenchmarkAuditQueueHistory/history_0/index_true/QueueCount-14          	   43347	      8315 ns/op	     536 B/op	      17 allocs/op
+BenchmarkAuditQueueHistory/history_0/index_true/QueueCount-14          	   44486	      8224 ns/op	     536 B/op	      17 allocs/op
+BenchmarkAuditQueueHistory/history_0/index_true/QueueCount-14          	   43730	      8329 ns/op	     536 B/op	      17 allocs/op
+BenchmarkAuditQueueHistory/history_0/index_true/QueueCounts
+BenchmarkAuditQueueHistory/history_0/index_true/QueueCounts-14         	   52837	      6821 ns/op	     792 B/op	      20 allocs/op
+BenchmarkAuditQueueHistory/history_0/index_true/QueueCounts-14         	   53407	      6858 ns/op	     792 B/op	      20 allocs/op
+BenchmarkAuditQueueHistory/history_0/index_true/QueueCounts-14         	   52723	      6876 ns/op	     792 B/op	      20 allocs/op
+BenchmarkAuditQueueHistory/history_10000/index_false
+BenchmarkAuditQueueHistory/history_10000/index_false/QueueCount
+BenchmarkAuditQueueHistory/history_10000/index_false/QueueCount-14     	   62400	      5902 ns/op	     536 B/op	      17 allocs/op
+BenchmarkAuditQueueHistory/history_10000/index_false/QueueCount-14     	   61148	      5740 ns/op	     536 B/op	      17 allocs/op
+BenchmarkAuditQueueHistory/history_10000/index_false/QueueCount-14     	   62594	      5668 ns/op	     536 B/op	      17 allocs/op
+BenchmarkAuditQueueHistory/history_10000/index_false/QueueCounts
+BenchmarkAuditQueueHistory/history_10000/index_false/QueueCounts-14    	   54687	      6768 ns/op	     792 B/op	      20 allocs/op
+BenchmarkAuditQueueHistory/history_10000/index_false/QueueCounts-14    	   52678	      6795 ns/op	     792 B/op	      20 allocs/op
+BenchmarkAuditQueueHistory/history_10000/index_false/QueueCounts-14    	   53740	      7013 ns/op	     792 B/op	      20 allocs/op
+BenchmarkAuditQueueHistory/history_10000/index_true
+BenchmarkAuditQueueHistory/history_10000/index_true/QueueCount
+BenchmarkAuditQueueHistory/history_10000/index_true/QueueCount-14      	   41532	      8991 ns/op	     536 B/op	      17 allocs/op
+BenchmarkAuditQueueHistory/history_10000/index_true/QueueCount-14      	   43815	      8294 ns/op	     536 B/op	      17 allocs/op
+BenchmarkAuditQueueHistory/history_10000/index_true/QueueCount-14      	   43326	      8352 ns/op	     536 B/op	      17 allocs/op
+BenchmarkAuditQueueHistory/history_10000/index_true/QueueCounts
+BenchmarkAuditQueueHistory/history_10000/index_true/QueueCounts-14     	   52342	      7050 ns/op	     792 B/op	      20 allocs/op
+BenchmarkAuditQueueHistory/history_10000/index_true/QueueCounts-14     	   53050	      6866 ns/op	     792 B/op	      20 allocs/op
+BenchmarkAuditQueueHistory/history_10000/index_true/QueueCounts-14     	   52298	      6922 ns/op	     792 B/op	      20 allocs/op
+BenchmarkAuditQueueHistory/history_50000/index_false
+BenchmarkAuditQueueHistory/history_50000/index_false/QueueCount
+BenchmarkAuditQueueHistory/history_50000/index_false/QueueCount-14     	   61406	      5845 ns/op	     536 B/op	      17 allocs/op
+BenchmarkAuditQueueHistory/history_50000/index_false/QueueCount-14     	   61738	      5775 ns/op	     536 B/op	      17 allocs/op
+BenchmarkAuditQueueHistory/history_50000/index_false/QueueCount-14     	   64041	      5739 ns/op	     536 B/op	      17 allocs/op
+BenchmarkAuditQueueHistory/history_50000/index_false/QueueCounts
+BenchmarkAuditQueueHistory/history_50000/index_false/QueueCounts-14    	   46554	      6779 ns/op	     792 B/op	      20 allocs/op
+BenchmarkAuditQueueHistory/history_50000/index_false/QueueCounts-14    	   52737	      7020 ns/op	     792 B/op	      20 allocs/op
+BenchmarkAuditQueueHistory/history_50000/index_false/QueueCounts-14    	   53439	      6760 ns/op	     792 B/op	      20 allocs/op
+BenchmarkAuditQueueHistory/history_50000/index_true
+BenchmarkAuditQueueHistory/history_50000/index_true/QueueCount
+BenchmarkAuditQueueHistory/history_50000/index_true/QueueCount-14      	   41574	      8521 ns/op	     536 B/op	      17 allocs/op
+BenchmarkAuditQueueHistory/history_50000/index_true/QueueCount-14      	   42952	      8235 ns/op	     536 B/op	      17 allocs/op
+BenchmarkAuditQueueHistory/history_50000/index_true/QueueCount-14      	   43677	      8318 ns/op	     536 B/op	      17 allocs/op
+BenchmarkAuditQueueHistory/history_50000/index_true/QueueCounts
+BenchmarkAuditQueueHistory/history_50000/index_true/QueueCounts-14     	   50728	      7063 ns/op	     792 B/op	      20 allocs/op
+BenchmarkAuditQueueHistory/history_50000/index_true/QueueCounts-14     	   54117	      6965 ns/op	     792 B/op	      20 allocs/op
+BenchmarkAuditQueueHistory/history_50000/index_true/QueueCounts-14     	   52450	      6796 ns/op	     792 B/op	      20 allocs/op
+BenchmarkAuditJournalRetentionRead
+BenchmarkAuditJournalRetentionRead/rows_1
+BenchmarkAuditJournalRetentionRead/rows_1/with_count_true
+BenchmarkAuditJournalRetentionRead/rows_1/with_count_true-14           	  145383	      2496 ns/op	     720 B/op	      20 allocs/op
+BenchmarkAuditJournalRetentionRead/rows_1/with_count_true-14           	  146818	      2513 ns/op	     720 B/op	      20 allocs/op
+BenchmarkAuditJournalRetentionRead/rows_1/with_count_true-14           	  147092	      2462 ns/op	     720 B/op	      20 allocs/op
+BenchmarkAuditJournalRetentionRead/rows_1/with_count_false
+BenchmarkAuditJournalRetentionRead/rows_1/with_count_false-14          	  158178	      2300 ns/op	     656 B/op	      19 allocs/op
+BenchmarkAuditJournalRetentionRead/rows_1/with_count_false-14          	  163096	      2253 ns/op	     656 B/op	      19 allocs/op
+BenchmarkAuditJournalRetentionRead/rows_1/with_count_false-14          	  161956	      2224 ns/op	     656 B/op	      19 allocs/op
+BenchmarkAuditJournalRetentionRead/rows_256
+BenchmarkAuditJournalRetentionRead/rows_256/with_count_true
+BenchmarkAuditJournalRetentionRead/rows_256/with_count_true-14         	   25905	     13835 ns/op	     736 B/op	      24 allocs/op
+BenchmarkAuditJournalRetentionRead/rows_256/with_count_true-14         	   25994	     13840 ns/op	     736 B/op	      24 allocs/op
+BenchmarkAuditJournalRetentionRead/rows_256/with_count_true-14         	   26295	     13686 ns/op	     736 B/op	      24 allocs/op
+BenchmarkAuditJournalRetentionRead/rows_256/with_count_false
+BenchmarkAuditJournalRetentionRead/rows_256/with_count_false-14        	  166052	      2254 ns/op	     656 B/op	      21 allocs/op
+BenchmarkAuditJournalRetentionRead/rows_256/with_count_false-14        	  161625	      2263 ns/op	     656 B/op	      21 allocs/op
+BenchmarkAuditJournalRetentionRead/rows_256/with_count_false-14        	  154782	      2225 ns/op	     656 B/op	      21 allocs/op
+BenchmarkAuditJournalRetentionRead/rows_2048
+BenchmarkAuditJournalRetentionRead/rows_2048/with_count_true
+BenchmarkAuditJournalRetentionRead/rows_2048/with_count_true-14        	    3931	     93496 ns/op	     752 B/op	      24 allocs/op
+BenchmarkAuditJournalRetentionRead/rows_2048/with_count_true-14        	    3901	     91887 ns/op	     752 B/op	      24 allocs/op
+BenchmarkAuditJournalRetentionRead/rows_2048/with_count_true-14        	    3868	     91146 ns/op	     752 B/op	      24 allocs/op
+BenchmarkAuditJournalRetentionRead/rows_2048/with_count_false
+BenchmarkAuditJournalRetentionRead/rows_2048/with_count_false-14       	  161652	      2318 ns/op	     672 B/op	      21 allocs/op
+BenchmarkAuditJournalRetentionRead/rows_2048/with_count_false-14       	  153151	      2369 ns/op	     672 B/op	      21 allocs/op
+BenchmarkAuditJournalRetentionRead/rows_2048/with_count_false-14       	  164871	      2264 ns/op	     672 B/op	      21 allocs/op
+PASS
+ok  	github.com/zm2231/agenthail/internal/registry	32.766s
+=== RUN   TestAuditSourceCacheRetention
+    performance_audit_test.go:42: events=4096 cache_keys=4096 cache_body_bytes=16777216 cursor_keys=4096 journal_byte_budget=8388608 first_item_retained=false
+--- PASS: TestAuditSourceCacheRetention (1.07s)
+=== RUN   TestAuditObservationHeadOfLine
+[daemon] 2026/11/23 22:41:03 observe from: synthetic slow provider
+    performance_audit_test.go:81: slow_provider_delay=250ms unrelated_session_first_observed_after=252.3215ms
+--- PASS: TestAuditObservationHeadOfLine (0.30s)
+=== RUN   TestAuditSourceCacheRetention
+    performance_audit_test.go:42: events=4096 cache_keys=4096 cache_body_bytes=16777216 cursor_keys=4096 journal_byte_budget=8388608 first_item_retained=false
+--- PASS: TestAuditSourceCacheRetention (0.96s)
+=== RUN   TestAuditObservationHeadOfLine
+[daemon] 2026/11/23 22:41:04 observe from: synthetic slow provider
+    performance_audit_test.go:81: slow_provider_delay=250ms unrelated_session_first_observed_after=252.071292ms
+--- PASS: TestAuditObservationHeadOfLine (0.27s)
+=== RUN   TestAuditSourceCacheRetention
+    performance_audit_test.go:42: events=4096 cache_keys=4096 cache_body_bytes=16777216 cursor_keys=4096 journal_byte_budget=8388608 first_item_retained=false
+--- PASS: TestAuditSourceCacheRetention (0.94s)
+=== RUN   TestAuditObservationHeadOfLine
+[daemon] 2026/11/23 22:41:05 observe from: synthetic slow provider
+    performance_audit_test.go:81: slow_provider_delay=250ms unrelated_session_first_observed_after=252.663459ms
+--- PASS: TestAuditObservationHeadOfLine (0.27s)
+goos: darwin
+goarch: arm64
+pkg: github.com/zm2231/agenthail/internal/daemon
+cpu: Apple M4 Pro
+BenchmarkAuditCatalogPublish
+BenchmarkAuditCatalogPublish/sessions_1
+BenchmarkAuditCatalogPublish/sessions_1-14         	    1275	    272335 ns/op	   31057 B/op	     461 allocs/op
+BenchmarkAuditCatalogPublish/sessions_1-14         	    1285	    271999 ns/op	   31057 B/op	     461 allocs/op
+BenchmarkAuditCatalogPublish/sessions_1-14         	    1282	    275830 ns/op	   31060 B/op	     461 allocs/op
+BenchmarkAuditCatalogPublish/sessions_100
+BenchmarkAuditCatalogPublish/sessions_100-14       	      12	  28337594 ns/op	 3107400 B/op	   46101 allocs/op
+BenchmarkAuditCatalogPublish/sessions_100-14       	      12	  28231531 ns/op	 3106546 B/op	   46100 allocs/op
+BenchmarkAuditCatalogPublish/sessions_100-14       	      12	  28462330 ns/op	 3108278 B/op	   46105 allocs/op
+BenchmarkAuditCatalogPublish/sessions_1000
+BenchmarkAuditCatalogPublish/sessions_1000-14      	       2	 284325479 ns/op	31083912 B/op	  462736 allocs/op
+BenchmarkAuditCatalogPublish/sessions_1000-14      	       2	 287862646 ns/op	31079108 B/op	  462727 allocs/op
+BenchmarkAuditCatalogPublish/sessions_1000-14      	       2	 283122084 ns/op	31084932 B/op	  462750 allocs/op
+PASS
+ok  	github.com/zm2231/agenthail/internal/daemon	18.568s
+
+Race verification
+Command: go test -tags perfaudit -race ./internal/registry ./internal/daemon -run '^(TestAudit|TestSessionJournal|TestSessionSource|TestAReplyStreamedPastTheInlineBodyReadsBackWhole)' -count=1 -timeout=3m
+Exit code: 0
+ok  	github.com/zm2231/agenthail/internal/registry	4.791s
+ok  	github.com/zm2231/agenthail/internal/daemon	39.880s
+
+Catalog invariant verification after adding before/after event-watermark assertions outside the benchmark timer
+Command: go test -tags perfaudit ./internal/daemon -run '^$' -bench '^BenchmarkAuditCatalogPublish$' -benchtime=1x -count=1
+Exit code: 0
+Timing is not used in the report because the index rebuild was active during this verification.
+goos: darwin
+goarch: arm64
+pkg: github.com/zm2231/agenthail/internal/daemon
+cpu: Apple M4 Pro
+BenchmarkAuditCatalogPublish/sessions_1-14         	       1	    465708 ns/op	   34584 B/op	     500 allocs/op
+BenchmarkAuditCatalogPublish/sessions_100-14       	       1	  29256416 ns/op	 3113144 B/op	   46141 allocs/op
+BenchmarkAuditCatalogPublish/sessions_1000-14      	       1	 296757875 ns/op	31154208 B/op	  462956 allocs/op
+PASS
+ok  	github.com/zm2231/agenthail/internal/daemon	2.277s
+
+Exploratory catalog profile
+Command: go test ./internal/daemon -run '^$' -bench '^BenchmarkAuditCatalogPublish/sessions_1000$' -benchtime=3s -count=1 -benchmem -cpuprofile /tmp/agenthail-daemon-audit-20261124-catalog.cpu -memprofile /tmp/agenthail-daemon-audit-20261124-catalog.mem -o /tmp/agenthail-daemon-audit-20261124-daemon.test
+Exit code: 0
+This run preceded the opt-in build tag. Use -tags perfaudit to reproduce from the committed harness.
+goos: darwin
+goarch: arm64
+pkg: github.com/zm2231/agenthail/internal/daemon
+cpu: Apple M4 Pro
+BenchmarkAuditCatalogPublish/sessions_1000-14         	      12	 297623302 ns/op	31097173 B/op	  462812 allocs/op
+PASS
+ok  	github.com/zm2231/agenthail/internal/daemon	7.261s
+File: agenthail-daemon-audit-20261124-daemon.test
+Type: alloc_space
+Time: 2026-11-23 22:37:11 EST
+Showing nodes accounting for 373.76MB, 74.41% of 502.31MB total
+Dropped 126 nodes (cum <= 2.51MB)
+Showing top 15 nodes out of 121
+      flat  flat%   sum%        cum   cum%
+   62.51MB 12.44% 12.44%   118.62MB 23.61%  modernc.org/sqlite.newRows
+   56.11MB 11.17% 23.61%    56.11MB 11.17%  modernc.org/libc.GoString (inline)
+   43.03MB  8.57% 32.18%   477.28MB 95.02%  github.com/zm2231/agenthail/internal/daemon.(*Daemon).publishCatalogSession
+   36.01MB  7.17% 39.35%   194.63MB 38.75%  database/sql.(*DB).queryDC
+   30.53MB  6.08% 45.43%    47.53MB  9.46%  encoding/json.Marshal
+   25.02MB  4.98% 50.41%    25.02MB  4.98%  modernc.org/sqlite.(*conn).columnText
+   22.50MB  4.48% 54.89%    51.02MB 10.16%  database/sql.(*Rows).nextLocked
+   16.51MB  3.29% 58.17%    16.51MB  3.29%  database/sql.driverArgsConnLocked
+   15.51MB  3.09% 61.26%   126.65MB 25.21%  github.com/zm2231/agenthail/internal/registry.(*Registry).catalogSessionUnchanged
+   15.51MB  3.09% 64.35%    16.01MB  3.19%  encoding/json.(*decodeState).objectInterface
+   11.51MB  2.29% 66.64%    11.51MB  2.29%  encoding/json.(*RawMessage).UnmarshalJSON
+   11.51MB  2.29% 68.93%    11.51MB  2.29%  github.com/zm2231/agenthail/internal/daemon.(*Daemon).catalogSessionProjection
+    9.51MB  1.89% 70.83%    36.52MB  7.27%  github.com/zm2231/agenthail/internal/daemon.(*Daemon).storedListing
+    9.50MB  1.89% 72.72%     9.50MB  1.89%  modernc.org/sqlite.(*conn).bind
+    8.50MB  1.69% 74.41%     8.50MB  1.69%  database/sql.(*Rows).close
+
+Pre-commit graph review
+Tool: gitnexus detect_changes(scope=all, repo=agenthail-daemon-audit, worktree=/Volumes/4/GitHub/agenthail/.worktrees/daemon-performance-audit)
+Repeated check: changed_count=21; changed_files=4; risk_level=critical; partial/truncated flags absent.
+The added auditSlowSurface struct had an empty ID in the aggregate. Separate context() returned only TestAuditObservationHeadOfLine as a caller.
+Normal go list -json ./internal/daemon ./internal/registry: performance_audit_test.go is in IgnoredGoFiles for both packages, absent from GoFiles and TestGoFiles.
+Report file links resolved; git diff --cached --check passed.
