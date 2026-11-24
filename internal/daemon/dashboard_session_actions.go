@@ -46,29 +46,8 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 	if err != nil {
 		return actionResult{}, err
 	}
-	switch request.Action {
-	case "limit-resume", "limit-resume-cancel":
-		return d.doLimitResume(session.ID, request.Action == "limit-resume")
-	case "limit-move":
-		return d.doLimitMove(ctx, session.ID, request.ConfigRoot, request.StopTerminal)
-	case "session-focus":
-		return d.doSessionFocus(ctx, session)
-	case "session-archive", "session-unarchive":
-		return d.doSessionArchive(ctx, request.Action, session)
-	case "session-pin", "session-unpin":
-		return d.doSessionPin(request.Action == "session-pin", session.ID)
-	case "session-read", "session-unread":
-		return d.doSessionReadState(ctx, p, session, request.Action == "session-unread", request.Revision)
-	case "session-snooze":
-		return d.doSessionSnooze(session, request.Until, request.Wake)
-	case "session-wake":
-		return d.doSessionWake(session.ID)
-	case "work-clean":
-		return d.doWorkClean(ctx, p, session.ID, worktree.Options{RemoveIgnored: request.RemoveIgnored})
-	case "alias":
-		return d.doSessionAlias(session, request.Alias)
-	case "pr":
-		return d.doPR(ctx, p, session, request)
+	if result, handled, err := d.doSessionDirectAction(ctx, p, session, request); handled {
+		return withControlDecision(result, controlDecision), err
 	}
 	if request.Action == "respond" {
 		if ask, found, err := d.Registry.Ask(strings.TrimSpace(request.RequestID)); err == nil && found && (ask.Origin == registry.AskOriginDelivery || ask.Origin == registry.AskOriginLedger || ask.Origin == registry.AskOriginApproval || ask.Origin == registry.AskOriginExtensionGrant) {
@@ -268,11 +247,46 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		}
 		return actionResult{}, d.sendFailed(http.StatusBadGateway, "bad_gateway", err)
 	}
-	body := map[string]any{"ok": true, "result": result}
-	if controlDecision != "" {
-		body["controlDecision"] = controlDecision
+	return withControlDecision(actionOK(map[string]any{"ok": true, "result": result}), controlDecision), nil
+}
+
+func (d *Daemon) doSessionDirectAction(ctx context.Context, p principal, session *surface.Session, request dashboardActionRequest) (actionResult, bool, error) {
+	var result actionResult
+	var err error
+	switch request.Action {
+	case "limit-resume", "limit-resume-cancel":
+		result, err = d.doLimitResume(session.ID, request.Action == "limit-resume")
+	case "limit-move":
+		result, err = d.doLimitMove(ctx, session.ID, request.ConfigRoot, request.StopTerminal)
+	case "session-focus":
+		result, err = d.doSessionFocus(ctx, session)
+	case "session-archive", "session-unarchive":
+		result, err = d.doSessionArchive(ctx, request.Action, session)
+	case "session-pin", "session-unpin":
+		result, err = d.doSessionPin(request.Action == "session-pin", session.ID)
+	case "session-read", "session-unread":
+		result, err = d.doSessionReadState(ctx, p, session, request.Action == "session-unread", request.Revision)
+	case "session-snooze":
+		result, err = d.doSessionSnooze(session, request.Until, request.Wake)
+	case "session-wake":
+		result, err = d.doSessionWake(session.ID)
+	case "work-clean":
+		result, err = d.doWorkClean(ctx, p, session.ID, worktree.Options{RemoveIgnored: request.RemoveIgnored})
+	case "alias":
+		result, err = d.doSessionAlias(session, request.Alias)
+	case "pr":
+		result, err = d.doPR(ctx, p, session, request)
+	default:
+		return actionResult{}, false, nil
 	}
-	return actionOK(body), nil
+	return result, true, err
+}
+
+func withControlDecision(result actionResult, decision string) actionResult {
+	if body, ok := result.Body.(map[string]any); ok && decision != "" {
+		body["controlDecision"] = decision
+	}
+	return result
 }
 
 func checkMessageAuthor(d *Daemon, request dashboardActionRequest) error {

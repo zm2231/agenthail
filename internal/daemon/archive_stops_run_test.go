@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/zm2231/agenthail/internal/agentroles"
 )
 
 func TestALeadArchivingItsWorkerOnAPairedHostStopsTheWorkersRun(t *testing.T) {
@@ -32,5 +34,28 @@ func TestAnArchiveWhoseRunCannotBeStoppedIsRefusedAndLeavesTheSessionUnarchived(
 	}
 	if archived, err := h.remote.reg.SessionArchived("remote-c"); err != nil || archived {
 		t.Fatalf("archived=%v err=%v, want the session left unarchived", archived, err)
+	}
+}
+
+func TestAnArchiveOnAPairedHostTellsThePersonOnlyWhenTheLeadsRoleSaysTo(t *testing.T) {
+	h := newHostTargets(t, true)
+	person := &toldPerson{}
+	h.local.daemon.notifyDesktop = person.notify
+	setRoleDecision(t, h.local.reg, agentroles.Lead, "remote-project-control", agentroles.Allow)
+	if out, refused := callMCP(t, h.caller, "agenthail_archive", map[string]any{"target": "vps::@builder", "clientRequestId": "archive-quiet"}); refused {
+		t.Fatalf("archive refused: %v", out)
+	}
+	if told := person.told(); len(told) != 0 {
+		t.Fatalf("the person was told %q of an archive the role allows quietly", told)
+	}
+	setRoleDecision(t, h.local.reg, agentroles.Lead, "remote-project-control", agentroles.Notify)
+	if out, refused := callMCP(t, h.caller, "agenthail_archive", map[string]any{"target": "vps::remote-a", "clientRequestId": "archive-told"}); refused {
+		t.Fatalf("archive refused: %v", out)
+	}
+	if told := person.told(); len(told) != 1 {
+		t.Fatalf("the person was told %q, want one notice of the archive", told)
+	}
+	if got := h.remote.fake.stoppedRuns(); !slices.Equal(got, []string{"remote-c", "remote-a"}) {
+		t.Fatalf("stopped runs = %v, want both archived sessions stopped", got)
 	}
 }
