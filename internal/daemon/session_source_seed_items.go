@@ -97,7 +97,7 @@ func (s *sessionSource) mergeSeedIntoAuthoritativeRow(providerKey, operation str
 	}
 	if body != "" && item.Kind != "done" {
 		s.mu.Lock()
-		s.appendBodies.put(providerKey, knownBody(body, payload.BodyRef))
+		s.streamedBodies.put(providerKey, knownBody(body, payload.BodyRef))
 		s.mu.Unlock()
 	}
 	merged := payload

@@ -45,7 +45,7 @@ type sessionJournalPayload struct {
 	text             []byte
 }
 
-func (s *sessionSource) normalizeLocked(event surface.StreamEvent) (payload sessionJournalPayload, bodyKey, unknownBase string) {
+func (s *sessionSource) normalizeLocked(event surface.StreamEvent) (payload sessionJournalPayload, bodyKey string) {
 	providerKey := event.ProviderKey
 	if strings.HasPrefix(providerKey, "renderer:") {
 		providerKey = s.epoch + ":" + providerKey
@@ -61,8 +61,7 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) (payload sess
 	if itemID == "" {
 		itemID = providerKey
 	}
-	anonymous := itemID == ""
-	if anonymous {
+	if itemID == "" {
 		s.anonymous++
 		itemID = fmt.Sprintf("%s:anonymous:%d", s.epoch, s.anonymous)
 		providerKey = itemID
@@ -75,34 +74,19 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) (payload sess
 	}
 	op := event.Operation
 	if op == "" {
-		op = "append"
+		op = "upsert"
 	}
 	body := event.Text
+	var text []byte
 	if providerKey != "" && !strings.HasPrefix(event.ProviderKey, "renderer:") && op == "upsert" && body != "" {
 		bodyKey = providerKey
-	}
-	var text []byte
-	if op == "append" && providerKey != "" && !strings.HasPrefix(event.ProviderKey, "renderer:") {
-		if previous := s.appendBodies.get(providerKey); previous != nil {
-			text = previous.text
-		} else if !anonymous {
-			unknownBase = providerKey
-		}
-		text = append(text, body...)
-		body = ""
-		if len(text) <= sessionStreamBodyBytes {
-			body = string(text)
-		}
-		bodyKey = providerKey
-		op = "upsert"
-	} else if bodyKey != "" {
 		text = []byte(body)
 	}
 	at := event.Timestamp
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, MessageID: event.MessageID, PromptID: event.PromptID, TurnStart: event.TurnStart, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Origin: event.Origin, Sender: event.Sender, Title: event.Title, Status: event.Status, Phase: event.Phase, ResetsAt: event.ResetsAt, Context: event.Context, Goal: event.Goal, Commands: commandsOf(event.Commands), Unavailable: unavailableOf(event.Commands), Attachment: event.Attachment, Files: event.Files, Truncated: event.Truncated, TruncationReason: event.TruncationReason, Turn: s.manager.publishedTurn(s.session.ID, event.Turn), text: text}, bodyKey, unknownBase
+	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, MessageID: event.MessageID, PromptID: event.PromptID, TurnStart: event.TurnStart, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Origin: event.Origin, Sender: event.Sender, Title: event.Title, Status: event.Status, Phase: event.Phase, ResetsAt: event.ResetsAt, Context: event.Context, Goal: event.Goal, Commands: commandsOf(event.Commands), Unavailable: unavailableOf(event.Commands), Attachment: event.Attachment, Files: event.Files, Truncated: event.Truncated, TruncationReason: event.TruncationReason, Turn: s.manager.publishedTurn(s.session.ID, event.Turn), text: text}, bodyKey
 }
 
 // publishedTurn is the turn as clients see it: a compaction this daemon's

@@ -39,7 +39,7 @@ func TestAPISessionStreamReplaysJournalWithoutNewProviderRead(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("source did not start")
 	}
-	adapter.events <- surface.StreamEvent{ID: "m1", ProviderKey: "m1", Version: 1, Operation: "append", Kind: "text", Text: "ready"}
+	adapter.events <- surface.StreamEvent{ID: "m1", ProviderKey: "m1", Version: 1, Operation: "upsert", Kind: "text", Text: "ready"}
 	select {
 	case <-firstEntries:
 	case <-time.After(time.Second):

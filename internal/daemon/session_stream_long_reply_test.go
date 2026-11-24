@@ -27,7 +27,7 @@ func TestAReplyStreamedPastTheInlineBodyReadsBackWhole(t *testing.T) {
 	for index := 0; want.Len() < 3*sessionStreamBodyBytes; index++ {
 		delta := fmt.Sprintf("delta %d é ", index)
 		want.WriteString(delta)
-		source.append(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(index + 1), Operation: "append", TurnID: "turn-1", Kind: "text", Role: "assistant", Text: delta})
+		source.append(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(index + 1), Operation: "upsert", TurnID: "turn-1", Kind: "text", Role: "assistant", Text: want.String()})
 	}
 	check := func(label string) {
 		t.Helper()

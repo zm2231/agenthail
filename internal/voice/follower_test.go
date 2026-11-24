@@ -93,11 +93,7 @@ func (j *targetJournal) replay(session surface.Session, turnID, prompt string) {
 		if id == "" {
 			id = "item-" + turnID
 		}
-		if e.Operation == "append" {
-			bodies[id] += e.Text
-		} else {
-			bodies[id] = e.Text
-		}
+		bodies[id] = e.Text
 		versions[id]++
 		if e.Version > 0 {
 			versions[id] = e.Version

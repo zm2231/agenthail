@@ -806,7 +806,7 @@ func TestSendDirectStreamDisplaysNormalizedClaudeTimelineAndFailsTerminal(t *tes
 	}
 }
 
-func TestSendDirectStreamPreservesAppendThenAuthoritativeFinal(t *testing.T) {
+func TestSendDirectStreamPrintsAGrowingItemOnceThenItsAuthoritativeFinal(t *testing.T) {
 	session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 	fake := &cliSurface{
 		kind:       surface.KindCodex,
@@ -814,8 +814,8 @@ func TestSendDirectStreamPreservesAppendThenAuthoritativeFinal(t *testing.T) {
 		caps:       surface.Capabilities{Send: true, Stream: true},
 		sendResult: &surface.SendResult{UUID: "turn-a", Accepted: true},
 		streamEvents: []surface.StreamEvent{
-			{ID: "managed:turn-a:text", Operation: "append", Version: 3, Kind: "text", Text: "hel"},
-			{ID: "managed:turn-a:text", Operation: "append", Version: 5, Kind: "text", Text: "lo"},
+			{ID: "managed:turn-a:text", Operation: "upsert", Version: 3, Kind: "text", Text: "hel"},
+			{ID: "managed:turn-a:text", Operation: "upsert", Version: 5, Kind: "text", Text: "hello"},
 			{ID: "managed:turn-a:text", Operation: "upsert", Version: 11, Final: true, Kind: "message", Role: "assistant", Text: "hello final"},
 			{Kind: "done"},
 		},

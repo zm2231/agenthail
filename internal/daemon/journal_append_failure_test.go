@@ -107,60 +107,6 @@ func TestAnEventWhoseJournalAppendFailedIsWrittenWhenReplayed(t *testing.T) {
 	}
 }
 
-func TestJournalAppendDeltaFailureDoesNotCorruptAccumulatedBody(t *testing.T) {
-	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "delta"}
-	source.append(surface.StreamEvent{ID: "delta-key", ProviderKey: "delta-key", Kind: "message", Role: "assistant", Text: "Hello"})
-	allow := rejectJournalWrites(t, reg, "delta-key")
-	source.append(surface.StreamEvent{ID: "delta-key", ProviderKey: "delta-key", Kind: "message", Role: "assistant", Text: " world"})
-	rows, _ := journalRows(t, reg, from.ID)
-	if rows["delta-key"].Body != "Hello" {
-		t.Fatalf("rejected delta changed the journal row: %+v", rows["delta-key"])
-	}
-	allow()
-	source.append(surface.StreamEvent{ID: "delta-key", ProviderKey: "delta-key", Kind: "message", Role: "assistant", Text: " world"})
-	rows, sourceErrors := journalRows(t, reg, from.ID)
-	if rows["delta-key"].Body != "Hello world" {
-		t.Fatalf("retried delta body=%q", rows["delta-key"].Body)
-	}
-	requireJournalFailureEvidence(t, reg, from.ID, sourceErrors)
-}
-
-func TestJournalUpsertFailureKeepsPersistedBodyForLaterDeltas(t *testing.T) {
-	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "upsert"}
-	source.append(surface.StreamEvent{ID: "upsert-key", ProviderKey: "upsert-key", Operation: "upsert", Kind: "message", Role: "assistant", Text: "draft"})
-	allow := rejectJournalWrites(t, reg, "upsert-key")
-	source.append(surface.StreamEvent{ID: "upsert-key", ProviderKey: "upsert-key", Operation: "upsert", Kind: "message", Role: "assistant", Text: "rejected rewrite"})
-	allow()
-	source.append(surface.StreamEvent{ID: "upsert-key", ProviderKey: "upsert-key", Kind: "message", Role: "assistant", Text: " continued"})
-	rows, sourceErrors := journalRows(t, reg, from.ID)
-	if rows["upsert-key"].Body != "draft continued" {
-		t.Fatalf("delta built on an unpersisted upsert: body=%q", rows["upsert-key"].Body)
-	}
-	requireJournalFailureEvidence(t, reg, from.ID, sourceErrors)
-}
-
-func TestJournalSeedFailureThenLiveHandoffDoesNotDuplicate(t *testing.T) {
-	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{ctx: context.Background(), manager: newTestSourceManager(t, reg), session: from, adapter: fake, epoch: "handoff"}
-	allow := rejectJournalWrites(t, reg, "timeline:reply")
-	source.appendSeedItems([]surface.TimelineItem{{ID: "reply", Kind: "message", Role: "assistant", Text: "seeded"}})
-	rows, _ := journalRows(t, reg, from.ID)
-	if _, ok := rows["timeline:reply"]; ok {
-		t.Fatalf("rejected seed row was persisted: %+v", rows)
-	}
-	source.append(surface.StreamEvent{ID: "reply", ProviderKey: "timeline:reply", Kind: "message", Role: "assistant", Text: " live"})
-	allow()
-	source.appendSeedItems([]surface.TimelineItem{{ID: "reply", Kind: "message", Role: "assistant", Text: "seeded"}})
-	source.append(surface.StreamEvent{ID: "reply", ProviderKey: "timeline:reply", Kind: "message", Role: "assistant", Text: " live"})
-	rows, sourceErrors := journalRows(t, reg, from.ID)
-	if rows["timeline:reply"].Body != "seeded live" {
-		t.Fatalf("seed/live handoff body=%q", rows["timeline:reply"].Body)
-	}
-	requireJournalFailureEvidence(t, reg, from.ID, sourceErrors)
-}
-
 type replayingStreamSurface struct {
 	*flakySeedSurface
 	replay chan struct{}

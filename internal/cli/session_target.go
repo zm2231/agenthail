@@ -266,10 +266,6 @@ func directStreamEventDelta(event surface.StreamEvent, bodies map[string]string,
 	}
 	versions[key] = event.Version
 	previous := bodies[key]
-	if event.Operation == "append" {
-		bodies[key] = previous + event.Text
-		return event.Text
-	}
 	bodies[key] = event.Text
 	return surface.StreamEventDelta(event, previous)
 }

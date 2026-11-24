@@ -33,24 +33,8 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 		}
 	}
 	s.mu.Lock()
-	payload, bodyKey, unknownBase := s.normalizeLocked(event)
-	if unknownBase != "" {
-		s.mu.Unlock()
-		stored, err := s.storedBody(unknownBase)
-		if err != nil {
-			s.mu.Lock()
-			s.appendFailed = true
-			s.mu.Unlock()
-			s.appendSourceError(fmt.Errorf("session journal append failed: %w", err))
-			return
-		}
-		s.mu.Lock()
-		if stored != nil && s.appendBodies.get(unknownBase) == nil {
-			s.appendBodies.put(unknownBase, stored)
-		}
-		payload, bodyKey, _ = s.normalizeLocked(event)
-	}
-	previous := s.appendBodies.get(bodyKey)
+	payload, bodyKey := s.normalizeLocked(event)
+	previous := s.streamedBodies.get(bodyKey)
 	s.mu.Unlock()
 	var written *streamedBody
 	var changed bool
@@ -69,7 +53,7 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 	}
 	if bodyKey != "" {
 		s.mu.Lock()
-		s.appendBodies.put(bodyKey, written)
+		s.streamedBodies.put(bodyKey, written)
 		s.mu.Unlock()
 	}
 	if changed {
@@ -78,23 +62,6 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 	if s.manager.prompts != nil {
 		s.manager.prompts(s.session, payload)
 	}
-}
-
-// storedBody reads back the text the journal holds for an item, for an append
-// to an item whose text the source no longer keeps.
-func (s *sessionSource) storedBody(providerKey string) (*streamedBody, error) {
-	entry, found, err := s.manager.registry.SessionJournalEntryByProviderKey(s.session.ID, providerKey)
-	if err != nil || !found {
-		return nil, err
-	}
-	var payload sessionJournalPayload
-	if err := json.Unmarshal(entry.Payload, &payload); err != nil {
-		return nil, err
-	}
-	if payload.BodyRef != "" {
-		return knownBody(string(entry.FullBody), payload.BodyRef), nil
-	}
-	return knownBody(payload.Body, ""), nil
 }
 
 func (s *sessionSource) persist(payload sessionJournalPayload) (registry.SessionJournalEntry, bool, error) {

@@ -897,7 +897,7 @@ func TestDirectDelegationNormalizesClaudeMessagesPerItem(t *testing.T) {
 	target.stream = func(callback func(surface.StreamEvent)) {
 		callback(surface.StreamEvent{ID: "user", Role: "user", Kind: "message", Text: "do not speak"})
 		callback(surface.StreamEvent{ID: "call", Role: "assistant", Kind: "toolCall", Text: "Read x"})
-		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Operation: "append", Version: 4, Kind: "text", Text: "part"})
+		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Operation: "upsert", Version: 4, Kind: "text", Text: "part"})
 		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Operation: "upsert", Version: 13, Final: true, Kind: "message", Text: "part complete"})
 		callback(surface.StreamEvent{ID: "second", Role: "assistant", Final: true, Kind: "message", Text: "second answer"})
 		callback(surface.StreamEvent{Kind: "done"})
