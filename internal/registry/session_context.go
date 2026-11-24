@@ -1,6 +1,10 @@
 package registry
 
-import "time"
+import (
+	"database/sql"
+	"errors"
+	"time"
+)
 
 // sessionStartWindow is how long one start of a session stays claimed.
 // Claude runs every configured copy of a hook at once, so the copies of one
@@ -44,4 +48,30 @@ func (r *Registry) ClaimContextChange(sessionID, fingerprint string, now time.Ti
 		return ContextCurrent, err
 	}
 	return ContextChanged, nil
+}
+
+// GivenContext is the card last given to a session: its fingerprint, the
+// key Codex holds it under, and when it was last known to be in the
+// session's context.
+type GivenContext struct {
+	Fingerprint string
+	Key         string
+	At          time.Time
+}
+
+func (r *Registry) ContextGiven(sessionID string) (GivenContext, bool, error) {
+	var given GivenContext
+	var ms int64
+	err := r.db.QueryRow(`SELECT fingerprint,context_key,delivered_at_ms FROM session_context WHERE session_id=?`, sessionID).Scan(&given.Fingerprint, &given.Key, &ms)
+	if errors.Is(err, sql.ErrNoRows) {
+		return GivenContext{}, false, nil
+	}
+	given.At = time.UnixMilli(ms)
+	return given, err == nil, err
+}
+
+func (r *Registry) RecordContextGiven(sessionID string, given GivenContext) error {
+	_, err := r.db.Exec(`INSERT INTO session_context(session_id,fingerprint,context_key,delivered_at_ms) VALUES(?,?,?,?)
+		ON CONFLICT(session_id) DO UPDATE SET fingerprint=excluded.fingerprint,context_key=excluded.context_key,delivered_at_ms=excluded.delivered_at_ms`, sessionID, given.Fingerprint, given.Key, given.At.UnixMilli())
+	return err
 }

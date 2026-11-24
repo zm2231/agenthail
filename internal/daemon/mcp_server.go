@@ -66,7 +66,7 @@ func (d *Daemon) newMCPServer() *mcp.Server {
 }
 
 func (d *Daemon) newBareMCPServer() *mcp.Server {
-	return mcp.NewServer(&mcp.Implementation{Name: "agenthail", Version: d.build.Version}, &mcp.ServerOptions{SupportedProtocolVersions: mcpProtocolVersions})
+	return mcp.NewServer(&mcp.Implementation{Name: "agenthail", Version: d.build.Version}, &mcp.ServerOptions{SupportedProtocolVersions: mcpProtocolVersions, Instructions: agenttools.ServerInstructions})
 }
 
 func (d *Daemon) registerMCPTools(server *mcp.Server) {

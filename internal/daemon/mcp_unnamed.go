@@ -8,6 +8,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/zm2231/agenthail/internal/agenttools"
 )
 
 // An empty tool list would stop the relay asking; an error keeps it asking.
@@ -15,6 +16,7 @@ func (d *Daemon) newUnnamedMCPServer() *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "agenthail", Version: d.build.Version}, &mcp.ServerOptions{
 		SupportedProtocolVersions: mcpProtocolVersions,
 		Capabilities:              &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{}},
+		Instructions:              agenttools.ServerInstructions,
 	})
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, request mcp.Request) (mcp.Result, error) {

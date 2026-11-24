@@ -265,6 +265,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 	if reg != nil {
 		reg.SetBusyPolicy(d.busyPolicy)
 		attachCodexConfigStore(reg, surfaces)
+		attachCodexTurnContext(d, surfaces)
 	}
 	for _, adapter := range surfaces {
 		if opener, ok := adapter.(interface {

@@ -141,10 +141,12 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 	if err := applyCodexLaunchSettings(ctx, client, session, options.Model, options.LaunchSettings, turnParams); err != nil {
 		return session, nil, err
 	}
+	delivered := c.withTurnContext(ctx, client, *session, turnParams)
 	turnResponse, err := c.startTurn(ctx, client, threadID, "turn/start", turnParams, 10*time.Second)
 	if err != nil {
 		return session, nil, codexOperationOutcome(fmt.Errorf("turn/start: %w", err))
 	}
+	delivered()
 	turnID := threadID
 	if turnResult, _ := turnResponse["result"].(map[string]any); turnResult != nil {
 		if turn, _ := turnResult["turn"].(map[string]any); transcript.String(turn, "id") != "" {

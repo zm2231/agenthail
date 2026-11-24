@@ -9,6 +9,7 @@
 -- migration 2026-11-22-signing-keys-sign-handovers
 -- migration 2026-11-22-work-item-for-session-prs
 -- migration 2026-11-24-send-mode-for-identities
+-- migration 2026-11-24-session-context-key
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -988,6 +989,7 @@ CREATE TABLE session_context (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	fingerprint TEXT NOT NULL,
 	start_key TEXT NOT NULL DEFAULT '',
+	context_key TEXT NOT NULL DEFAULT '',
 	delivered_at_ms INTEGER NOT NULL
 );
 

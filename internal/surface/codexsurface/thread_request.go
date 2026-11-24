@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/agentcard"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
@@ -27,8 +29,40 @@ func mcpServerConfig(url, token string) map[string]any {
 	}}
 }
 
-func withMCPConfig(params map[string]any, url, token string) map[string]any {
-	return withConfig(params, mcpServerConfig(url, token))
+// withAgenthail gives an open its agenthail server and the Agenthail guide.
+// developerInstructions replaces the person's own developer_instructions
+// for the thread, so theirs, or the caller's, come first.
+func withAgenthail(ctx context.Context, client codexClient, session *surface.Session, params map[string]any, url, token string) (map[string]any, error) {
+	params = withConfig(params, mcpServerConfig(url, token))
+	own, _ := params["developerInstructions"].(string)
+	if own == "" {
+		var err error
+		if own, err = personsDeveloperInstructions(ctx, client, session, params); err != nil {
+			return nil, err
+		}
+	}
+	instructions := agentcard.CodexGuide()
+	if own = strings.TrimSpace(own); own != "" {
+		instructions = own + "\n\n" + instructions
+	}
+	params["developerInstructions"] = instructions
+	return params, nil
+}
+
+func personsDeveloperInstructions(ctx context.Context, client codexClient, session *surface.Session, params map[string]any) (string, error) {
+	read := map[string]any{}
+	if cwd, _ := params["cwd"].(string); cwd != "" {
+		read["cwd"] = cwd
+	} else if session != nil && session.Cwd != "" {
+		read["cwd"] = session.Cwd
+	}
+	response, err := client.Request(ctx, "config/read", read, 10*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("read the person's developer instructions: %w", err)
+	}
+	result, _ := response["result"].(map[string]any)
+	config, _ := result["config"].(map[string]any)
+	return transcript.String(config, "developer_instructions"), nil
 }
 
 // The only sender of thread/start|resume|fork; a new thread's token is minted unbound and claimed once Codex returns its id.
@@ -57,7 +91,11 @@ func (c *Codex) codexThreadRequest(ctx context.Context, client codexClient, meth
 		if err != nil {
 			return nil, fmt.Errorf("issue the new thread's credential: %w", err)
 		}
-		response, err := client.Request(ctx, method, withMCPConfig(params, credentials.URL(), token), wait)
+		params, err := withAgenthail(ctx, client, session, params, credentials.URL(), token)
+		if err != nil {
+			return nil, err
+		}
+		response, err := client.Request(ctx, method, params, wait)
 		if err != nil {
 			return response, err
 		}
@@ -145,7 +183,11 @@ func (c *Codex) withOverrides(session *surface.Session, params map[string]any) (
 // A loaded thread ignores a resume's config, so only a reload replaces a token it holds.
 func (c *Codex) resumeWithCredential(ctx context.Context, client codexClient, credentials surface.MCPCredentials, session *surface.Session, params map[string]any, wait time.Duration) (map[string]any, error) {
 	if token, ok := credentials.Live(session.ID); ok {
-		return client.Request(ctx, codexThreadResume, withMCPConfig(params, credentials.URL(), token), wait)
+		params, err := withAgenthail(ctx, client, session, params, credentials.URL(), token)
+		if err != nil {
+			return nil, err
+		}
+		return client.Request(ctx, codexThreadResume, params, wait)
 	}
 	return c.resumeKeepingMCP(ctx, client, credentials, session, params, params, wait)
 }
@@ -193,7 +235,11 @@ func (c *Codex) reattachMCP(ctx context.Context, client codexClient, credentials
 	if _, err := client.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": threadID}, 5*time.Second); err != nil {
 		return nil, fmt.Errorf("thread/unsubscribe: %w", err)
 	}
-	response, err := client.Request(ctx, codexThreadResume, withMCPConfig(params, credentials.URL(), token), wait)
+	params, err = withAgenthail(ctx, client, &surface.Session{ID: threadID}, params, credentials.URL(), token)
+	if err != nil {
+		return nil, err
+	}
+	response, err := client.Request(ctx, codexThreadResume, params, wait)
 	if err != nil {
 		return nil, fmt.Errorf("thread/resume with the credential: %w", err)
 	}
