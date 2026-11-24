@@ -96,18 +96,20 @@ func TestASlowObservationDoesNotDelayAnotherSessions(t *testing.T) {
 	d, r, fake, _, _ := daemonFixture(t)
 	gated := newGatedSurface(fake, "slow-1", "slow-2")
 	d.Surfaces = []surface.Surface{gated}
-	watchSessions(t, r, fake, surface.KindCodex, "slow-1", "slow-2", "ready")
+	// Watched sessions are scanned in id order, so a serial scan reaches
+	// "unblocked" only after both slow sessions.
+	watchSessions(t, r, fake, surface.KindCodex, "slow-1", "slow-2", "unblocked")
 	started := time.Now()
 	finished := d.planScan(t.Context())
 	deadline := time.After(5 * time.Second)
-	for gated.observedAt("ready").IsZero() {
+	for gated.observedAt("unblocked").IsZero() {
 		select {
 		case <-deadline:
 			t.Fatal("the ready session was not observed while the slow ones were")
 		case <-time.After(time.Millisecond):
 		}
 	}
-	if wait := gated.observedAt("ready").Sub(started); wait > 100*time.Millisecond {
+	if wait := gated.observedAt("unblocked").Sub(started); wait > 100*time.Millisecond {
 		t.Fatalf("the ready session was observed %s after the scan began, want it within 100ms", wait)
 	}
 	close(gated.release)
