@@ -7,7 +7,7 @@ import time
 import urllib.parse
 import urllib.request
 
-KEEP = {"id", "surface", "name", "alias", "status", "lastActive", "open", "current", "archived", "display", "attention", "turnState", "turnCompletion", "endTurn", "project", "host", "checkout", "heldWork", "plan", "prs", "queueCount", "startedBy"}
+KEEP = {"id", "surface", "name", "alias", "status", "lastActive", "open", "current", "archived", "display", "attention", "turnState", "turnCompletion", "endTurn", "project", "host", "checkout", "heldWork", "plan", "prs", "queueCount", "startedBy", "subagent", "delegated"}
 
 BASE = os.environ.get("AGENTHAIL_API_URL", "http://127.0.0.1:7412").rstrip("/")
 

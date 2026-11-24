@@ -320,7 +320,7 @@ pub fn transcript(s: &App, id: &str, max_blocks: usize) -> El {
         let detail = s.d.session(id).map(|x| x.display.detail.clone()).filter(|d| !d.is_empty()).unwrap_or_else(|| "Working on the next step".into());
         c = c.child(row().key("live").gap(8.0).items_center().child(Spinner::new().size(12.0).build(k)).child(text(detail).font(META_MED).color(k.c.text_accent)));
     }
-    col().key(format!("transcript-{id}")).w_full().grow(1.0).min_h(0.0).items_center().scroll(ScrollSpec { stick_bottom: true }).child(c)
+    col().key(format!("transcript-{id}")).w_full().grow(1.0).min_h(0.0).mt(10.0).items_center().clip_fade(0.0, 28.0, 0.0, 0.0).scroll(ScrollSpec { stick_bottom: true }).child(c)
 }
 
 pub fn composer(s: &App, placeholder: &str, to: Option<(String, String)>, layer: &mut Vec<El>) -> El {

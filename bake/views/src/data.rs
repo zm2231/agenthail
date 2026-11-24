@@ -116,6 +116,10 @@ struct Origin {
     id: String,
     #[serde(default)]
     started_by: Option<String>,
+    #[serde(default)]
+    subagent: Option<serde_json::Value>,
+    #[serde(default)]
+    delegated: Option<bool>,
 }
 
 #[derive(Deserialize, Default)]
@@ -307,6 +311,7 @@ impl Data {
     pub fn load(json: &str) -> Data {
         let raw: Raw = serde_json::from_str(json).unwrap_or_default();
         let origins: Origins = serde_json::from_str(json).unwrap_or_default();
+        let helpers: HashSet<String> = origins.sessions.iter().filter(|o| o.subagent.is_some() || o.delegated == Some(true)).map(|o| o.id.clone()).collect();
         let started_by: HashMap<String, String> = origins.sessions.into_iter().filter_map(|o| o.started_by.filter(|b| !b.is_empty()).map(|b| (o.id, b))).collect();
         let spawned = started_by.keys().cloned().collect();
         let now = parse_time(&raw.updated_at).unwrap_or_else(OffsetDateTime::now_utc);
@@ -342,7 +347,11 @@ impl Data {
         projects.sort_by(|a, b| b.last_active.cmp(&a.last_active));
         let mut person = HashMap::new();
         for (sid, items) in &raw.transcripts {
-            if let Some(at) = items.iter().rev().find(|i| i.kind == "message" && i.role_is("user")).and_then(|i| i.timestamp.clone()) {
+            if helpers.contains(sid) || started_by.contains_key(sid) {
+                continue;
+            }
+            let said: Vec<&Item> = items.iter().filter(|i| i.kind == "message" && i.role_is("user")).filter(|i| !i.text.trim_start().starts_with("<cross-session-message") && !i.text.trim_start().starts_with("[from ")).collect();
+            if let Some(at) = said.iter().skip(1).last().and_then(|i| i.timestamp.clone()) {
                 person.insert(sid.clone(), at);
             }
         }
@@ -371,7 +380,7 @@ impl Data {
         if actor.contains(' ') {
             return actor.to_string();
         }
-        "a past worker".into()
+        "a worker that has ended".into()
     }
 
     pub fn hours(&self, at: &str) -> f64 {
@@ -524,14 +533,9 @@ impl Data {
                 label: None,
             });
         }
-        for w in self.work.values() {
-            if w.state != "in_review" {
-                continue;
-            }
+        let keys: HashSet<&str> = self.work.values().map(|w| w.project.as_str()).collect();
+        for w in keys.into_iter().flat_map(|k| self.waiting_on_you(k)) {
             let at = w.timeline.iter().rev().find(|t| t.state.as_deref() == Some("in_review")).map(|t| t.at.clone()).unwrap_or_default();
-            if self.hours(&at) > 48.0 {
-                continue;
-            }
             let failing = w.timeline.iter().rev().find(|t| t.text.as_deref().is_some_and(|x| !x.is_empty())).and_then(|t| t.text.as_deref()).is_some_and(|x| {
                 let x = lower(x);
                 x.contains("ci") && (x.contains("failed") || x.contains("failing")) && !["passed", "cause", "fixed", "merged"].iter().any(|w| x.contains(w))
@@ -567,12 +571,7 @@ impl Data {
         let mut list: Vec<&Session> = self
             .sessions
             .iter()
-            .filter(|s| !s.archived && s.project.is_some() && !self.spawned.contains(&s.id) && s.display.label != "Closed")
-            .filter(|s| {
-                let typed = self.person.get(&s.id).is_some_and(|at| self.hours(at) < 0.5);
-                let opened = s.open && !self.spawned.contains(&s.id) && s.display.label != "Closed" && self.hours(&s.last_active) < 0.5;
-                typed || opened
-            })
+            .filter(|s| !s.archived && self.person.get(&s.id).is_some_and(|at| self.hours(at) <= 0.5))
             .collect();
         list.sort_by(|a, b| self.hours(&b.last_active).partial_cmp(&self.hours(&a.last_active)).unwrap_or(std::cmp::Ordering::Equal).reverse());
         list.truncate(5);
@@ -601,7 +600,7 @@ impl Data {
                 let target = Target::Work(w.id.clone());
                 match (t.kind.as_str(), t.state.as_deref()) {
                     ("state", Some("done")) => lines.push(Line { kind: Happened::Shipped, text, detail: String::new(), at: t.at.clone(), target }),
-                    ("state", Some("in_review")) if w.state == "in_review" => lines.push(Line { kind: Happened::Waiting, text, detail: "Check the proof".into(), at: t.at.clone(), target }),
+                    ("state", Some("in_review")) => {}
                     ("state", Some("in_progress")) => lines.push(Line { kind: Happened::Moved, text, detail: format!("Started by {}", self.name_of(&t.actor)), at: t.at.clone(), target }),
                     ("log", _) => {
                         let body = t.text.clone().unwrap_or_default();
@@ -614,6 +613,10 @@ impl Data {
                     _ => {}
                 }
             }
+        }
+        for w in self.waiting_on_you(&project.key) {
+            let at = w.timeline.iter().rev().find(|t| t.state.as_deref() == Some("in_review")).map(|t| t.at.clone()).unwrap_or_default();
+            lines.push(Line { kind: Happened::Waiting, text: plain(&w.text), detail: "Check the proof".into(), at, target: Target::Work(w.id.clone()) });
         }
         for sid in &project.sessions {
             let Some(s) = self.session(sid) else { continue };
@@ -733,18 +736,27 @@ impl Data {
         s.held_work.iter().filter(|h| h.item_id != except).filter_map(|h| self.work.get(&h.item_id)).collect()
     }
 
+    pub fn waiting_on_you(&self, project: &str) -> Vec<&Work> {
+        self.work
+            .values()
+            .filter(|w| w.project == project && w.state == "in_review")
+            .filter(|w| self.hours(&w.timeline.iter().rev().find(|t| t.state.as_deref() == Some("in_review")).map(|t| t.at.clone()).unwrap_or_default()) <= 48.0)
+            .collect()
+    }
+
     pub fn board(&self, project: &str) -> [Vec<&Work>; 4] {
         let mut cols: [Vec<&Work>; 4] = Default::default();
         for w in self.work.values().filter(|w| w.project == project) {
             let last = w.timeline.last().map(|t| t.at.clone()).unwrap_or_default();
             match w.state.as_str() {
-                "in_review" if self.hours(&w.timeline.iter().rev().find(|t| t.state.as_deref() == Some("in_review")).map(|t| t.at.clone()).unwrap_or_default()) <= 48.0 => cols[0].push(w),
+                "in_review" => {}
                 "in_progress" => cols[1].push(w),
                 "open" | "ready" => cols[2].push(w),
                 "done" if self.hours(&last) < 24.0 => cols[3].push(w),
                 _ => {}
             }
         }
+        cols[0] = self.waiting_on_you(project);
         let rank = |w: &Work| w.priority.trim_start_matches('P').parse::<u8>().unwrap_or(9);
         for c in cols.iter_mut() {
             c.sort_by(|a, b| {
