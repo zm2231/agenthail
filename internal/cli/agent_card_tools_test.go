@@ -67,7 +67,7 @@ func TestASessionWithAgenthailsToolsIsTaughtTheToolsAndATerminalOneTheCLI(t *tes
 	}
 }
 
-func TestANewCodexThreadsFirstPromptGetsItsToolCard(t *testing.T) {
+func TestTheHookLeavesTheCardOfACodexThreadOnItsGivenServerToTheDaemon(t *testing.T) {
 	app, starter, cwd := cardFixture(t)
 	serveCreates(t, app)
 	pending, err := app.Registry.IssuePendingCredential(nil, time.Now(), time.Minute)
@@ -77,23 +77,27 @@ func TestANewCodexThreadsFirstPromptGetsItsToolCard(t *testing.T) {
 	if claimed, err := app.Registry.ClaimPendingCredential(pending.Ref, "thread-new", time.Now()); err != nil || !claimed {
 		t.Fatalf("claimed=%v err=%v", claimed, err)
 	}
-	var firstPrompt map[string]any
+	var hooked []map[string]any
 	starter.ready = true
 	starter.during = func() {
-		hook := `{"session_id":"thread-new","hook_event_name":"UserPromptSubmit","prompt":"Build it"}`
-		firstPrompt = app.sessionContext(strings.NewReader(hook), "codex", 0, time.Now())
+		for _, event := range []string{"SessionStart", "UserPromptSubmit"} {
+			hook := `{"session_id":"thread-new","hook_event_name":"` + event + `","source":"startup","prompt":"Build it"}`
+			hooked = append(hooked, app.sessionContext(strings.NewReader(hook), "codex", 0, time.Now()))
+		}
 	}
 	if _, err := captureStdout(t, func() error {
 		return app.Run([]string{"thread", "create", "codex", "Build it", "--cwd", cwd, "--alias", "builder", "--from", "@planner", "--json"})
 	}); err != nil {
 		t.Fatal(err)
 	}
-	output, _ := firstPrompt["hookSpecificOutput"].(map[string]any)
-	text, _ := output["additionalContext"].(string)
-	for _, want := range []string{"You are @builder", "@planner started you", `agenthail_send {"target":"@planner","message":"<result>"}`} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("the first prompt's context does not say %q:\n%s", want, text)
+	for _, output := range hooked {
+		context, _ := output["hookSpecificOutput"].(map[string]any)
+		if text, _ := context["additionalContext"].(string); strings.Contains(text, "You are @builder") {
+			t.Fatalf("the hook gave the thread its card, which the daemon gives with its turns:\n%s", text)
 		}
+	}
+	if _, found, err := app.Registry.ContextFingerprint("thread-new"); err != nil || found {
+		t.Fatalf("the hook recorded a card given (found=%v err=%v)", found, err)
 	}
 }
 
