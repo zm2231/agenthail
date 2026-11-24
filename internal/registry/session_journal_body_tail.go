@@ -60,7 +60,7 @@ func (r *Registry) AppendSessionJournalBody(input SessionJournalEntry, from int,
 	if _, err := tx.Exec(journalUpdateAppendedRowSQL, input.Seq, input.Kind, input.Payload, formatTimestamp(input.ObservedAt), input.Bytes, journalRole(input.Kind, input.Payload), input.SessionID, existing.Seq); err != nil {
 		return SessionJournalEntry{}, err
 	}
-	if _, err := tx.Exec(journalStateAdvanceSQL, input.Seq, input.Bytes-existing.Bytes, input.SessionID); err != nil {
+	if _, err := tx.Exec(journalStateAdvanceSQL, input.Seq, input.Bytes-existing.Bytes, 0, input.SessionID); err != nil {
 		return SessionJournalEntry{}, err
 	}
 	if err := trimSessionJournal(tx, input.SessionID, retention); err != nil {

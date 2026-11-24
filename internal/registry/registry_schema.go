@@ -415,6 +415,7 @@ CREATE TABLE IF NOT EXISTS session_journal_state (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	next_seq INTEGER NOT NULL DEFAULT 0,
 	retained_bytes INTEGER NOT NULL DEFAULT 0,
+	retained_rows INTEGER NOT NULL DEFAULT 0,
 	source_epoch TEXT NOT NULL DEFAULT '',
 	pruned_before INTEGER NOT NULL DEFAULT 0,
 	pruned_seq INTEGER NOT NULL DEFAULT 0,
