@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -71,8 +73,11 @@ func watchSessions(t *testing.T, r *registry.Registry, fake *daemonSurface, kind
 	t.Helper()
 	for _, id := range ids {
 		session := surface.Session{ID: id, Surface: kind, Status: surface.StatusIdle}
-		if kind == surface.KindCodex {
+		switch kind {
+		case surface.KindCodex:
 			session.RuntimeKind, session.Source, session.Transport = surface.RuntimeCodexDesktop, "vscode", "desktop"
+		case surface.KindNotion:
+			session.RuntimeKind = surface.RuntimeNotionWeb
 		}
 		if err := r.RecordObservedSession(session); err != nil {
 			t.Fatal(err)
@@ -219,5 +224,163 @@ func TestStoppingTheDaemonLeavesNoObservationRunning(t *testing.T) {
 	}
 	if pending := d.observeJobs.sessions(); pending != 0 {
 		t.Fatalf("%d sessions still hold a job after the daemon stopped", pending)
+	}
+}
+
+// writingSurface writes a journal row each time it observes a session and
+// reports a newly finished turn, so every job writes runtime state, a turn
+// completion and the journal while the others do.
+type writingSurface struct {
+	*gatedSurface
+	r *registry.Registry
+}
+
+func (s *writingSurface) Observe(ctx context.Context, session *surface.Session) (*surface.TurnObservation, error) {
+	if _, err := s.gatedSurface.Observe(ctx, session); err != nil {
+		return nil, err
+	}
+	turn := "turn-0"
+	entry, err := sessionJournalEntry(session.ID, sessionJournalPayload{ItemID: turn, ProviderKey: turn, Op: "upsert", Kind: "text", Role: "assistant", Body: "finished " + turn, TS: time.Now().UTC().Format(time.RFC3339Nano)})
+	if err != nil {
+		return nil, err
+	}
+	if _, _, err := s.r.AppendSessionJournalEntry(entry, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes}); err != nil {
+		return nil, err
+	}
+	return &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: turn, CompletedAt: time.Now(), Reply: &surface.ReplyResult{Done: true, Text: "finished " + turn}}, nil
+}
+
+func TestObservationsRunningAtOnceAllWriteTheirState(t *testing.T) {
+	d, r, codex, _, _ := daemonFixture(t)
+	notion := &daemonSurface{kind: surface.KindNotion, sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true}
+	var surfaces []surface.Surface
+	var ids []string
+	for _, fake := range []*daemonSurface{codex, notion} {
+		gated := newGatedSurface(fake)
+		writing := &writingSurface{gatedSurface: gated, r: r}
+		surfaces = append(surfaces, writing)
+		for index := range 2 * observeJobsPerSurface {
+			id := fmt.Sprintf("%s-%d", fake.Name(), index)
+			ids = append(ids, id)
+			gated.gated[id] = true
+			watchSessions(t, r, fake, fake.Name(), id)
+			if err := r.SaveRuntimeState(id, surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-earlier"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	d.Surfaces = surfaces
+	finished := d.planScan(t.Context())
+	for surfaces[0].(*writingSurface).running.Load()+surfaces[1].(*writingSurface).running.Load() < observeJobs {
+		time.Sleep(time.Millisecond)
+	}
+	for _, each := range surfaces {
+		close(each.(*writingSurface).release)
+	}
+	<-finished
+	for _, id := range ids {
+		state, found, err := r.RuntimeState(id)
+		if err != nil || !found || state.CompletedTurnID != "turn-0" {
+			t.Fatalf("%s runtime state=%+v found=%v err=%v, want its finished turn saved", id, state, found, err)
+		}
+		if _, found, err := r.SessionJournalEntryByProviderKey(id, "turn-0"); err != nil || !found {
+			t.Fatalf("%s journal row found=%v err=%v", id, found, err)
+		}
+	}
+}
+
+// relaySourceSurface finishes the source's turns as the test sets them and
+// reads their completions under its own lock, while the target's
+// observation is gated.
+type relaySourceSurface struct {
+	*gatedSurface
+	source string
+	turnMu sync.Mutex
+	turn   string
+}
+
+func (s *relaySourceSurface) finish(turn string) {
+	s.turnMu.Lock()
+	defer s.turnMu.Unlock()
+	s.turn = turn
+}
+
+func (s *relaySourceSurface) finished() *surface.TurnObservation {
+	s.turnMu.Lock()
+	defer s.turnMu.Unlock()
+	return &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: s.turn, Reply: &surface.ReplyResult{Text: "reply " + s.turn, Done: true}}
+}
+
+func (s *relaySourceSurface) Observe(ctx context.Context, session *surface.Session) (*surface.TurnObservation, error) {
+	if session.ID == s.source {
+		return s.finished(), nil
+	}
+	return s.gatedSurface.Observe(ctx, session)
+}
+
+func (s *relaySourceSurface) ReadCompletions(_ context.Context, session *surface.Session, cursor string) (surface.CompletionBatch, error) {
+	observation := s.finished()
+	encoded, _ := json.Marshal(observation.CompletedTurnID)
+	batch := surface.CompletionBatch{Cursor: string(encoded)}
+	if cursor != "" && cursor != string(encoded) && session.ID == s.source {
+		batch.Events = []surface.Completion{{CompletedAt: time.Now(), ID: observation.CompletedTurnID, Text: observation.Reply.Text}}
+	}
+	return batch, nil
+}
+
+func TestRelaysQueuedWhileTheirTargetIsObservedReachItInOrder(t *testing.T) {
+	d, r, fake, from, to := daemonFixture(t)
+	source := &relaySourceSurface{gatedSurface: newGatedSurface(fake), source: from.ID, turn: "turn-0"}
+	d.Surfaces = []surface.Surface{source}
+	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {
+		t.Fatal(err)
+	}
+	<-d.planScan(t.Context())
+	source.gated[to.ID] = true
+	queuedFor := func(count int) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			counts, err := r.QueueCounts()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if counts[to.ID] >= count {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%d messages queued for the target, want %d", counts[to.ID], count)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	observed := source.callsOf(to.ID)
+	source.finish("turn-1")
+	targetScan := d.planScan(t.Context())
+	for source.callsOf(to.ID) == observed {
+		time.Sleep(time.Millisecond)
+	}
+	queuedFor(1)
+	source.finish("turn-2")
+	d.planScan(t.Context())
+	queuedFor(2)
+	if calls := source.callsOf(to.ID); calls != observed+1 {
+		t.Fatalf("the target was observed %d more times while its observation ran, want once", calls-observed)
+	}
+	close(source.release)
+	<-targetScan
+	for range 5 {
+		<-d.planScan(t.Context())
+	}
+	var replies []string
+	for _, message := range fake.sentMessages() {
+		for _, turn := range []string{"turn-1", "turn-2"} {
+			if strings.Contains(message, "reply "+turn) {
+				replies = append(replies, turn)
+			}
+		}
+	}
+	if !slices.Equal(replies, []string{"turn-1", "turn-2"}) {
+		t.Fatalf("the target received the source's replies as %v, want turn-1 then turn-2 once each", replies)
 	}
 }
