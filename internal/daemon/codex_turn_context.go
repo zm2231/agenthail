@@ -43,7 +43,8 @@ func otherCodexContextKey(key string) string {
 // session. The hook leaves such threads to the daemon, so the two never
 // both tell one. The time recorded is the thread's last turn that carried
 // the card, so a turn reads only the turns since for a compaction; a turn
-// that could not read them keeps the earlier time for the next one.
+// that could not read them keeps the earlier time for the next one. A
+// changed card is a new value Codex records anyway, so it needs no read.
 func (d *Daemon) codexTurnContext(ctx context.Context, session surface.Session, compactedSince func(time.Time) (bool, error)) (string, string, func()) {
 	card, err := d.cardSources().For(ctx, session)
 	if err != nil || !card.EndsTurns {
@@ -57,6 +58,7 @@ func (d *Daemon) codexTurnContext(ctx context.Context, session surface.Session, 
 	switch {
 	case !found || given.Key == "":
 		sent.Key = codexContextKeys[0]
+	case given.Fingerprint != sent.Fingerprint:
 	case compactedSince != nil:
 		compacted, err := compactedSince(given.At)
 		switch {

@@ -242,6 +242,40 @@ func TestACodexTurnThatCannotReadTheThreadsCompactionsLeavesThemToTheNext(t *tes
 	}
 }
 
+// Codex records a changed card whatever it held, so a compaction before it
+// must not move the card to the other key and record it twice.
+func TestAChangedCodexCardKeepsItsKeyWhateverTheThreadCompacted(t *testing.T) {
+	model := &replyingModel{}
+	d, real, cwd, action := codexContextDaemon(t, model)
+	created := action(map[string]any{"action": "session-create", "surface": "codex", "message": "Start the notes app.", "cwd": cwd, "alias": "notes", "model": deferringModel})
+	id, _ := created["session"].(map[string]any)["id"].(string)
+	awaitCodexTurns(t, dialAppServer(t, real.Socket()), id, 1)
+	first, _, err := d.Registry.ContextGiven(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := first
+	stale.Fingerprint = "an earlier card"
+	if err := d.Registry.RecordContextGiven(id, stale); err != nil {
+		t.Fatal(err)
+	}
+	session, err := d.Registry.Session(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, text, delivered := d.codexTurnContext(context.Background(), *session, func(time.Time) (bool, error) {
+		return true, errors.New("thread/turns/list timed out")
+	})
+	if text == "" || key != first.Key {
+		t.Fatalf("the changed card goes under %q, want %q, the key Codex records it under", key, first.Key)
+	}
+	delivered()
+	after, _, err := d.Registry.ContextGiven(id)
+	if err != nil || !after.At.After(first.At) {
+		t.Fatalf("the changed card is recorded as given at %v, want after %v: %v", after.At, first.At, err)
+	}
+}
+
 func TestACodexThreadAgenthailStartsKnowsItRunsInAgenthailAndAsksThePersonThroughIt(t *testing.T) {
 	model := &askingModel{}
 	d, real, cwd, action := codexContextDaemon(t, model)
