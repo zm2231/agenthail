@@ -196,6 +196,7 @@ type Daemon struct {
 	// liveSources names the surface of each session the catalog holds a
 	// source for because its process is live.
 	liveSources map[string]surface.SurfaceKind
+	observeJobs *observeJobQueue
 }
 
 func (d *Daemon) SetLaunchers(launchers []surface.Launcher) {
@@ -242,6 +243,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		sources:           newSessionSourceManager(reg),
 		sourceHolds:       map[string]map[string]func(){},
 		liveSources:       map[string]surface.SurfaceKind{},
+		observeJobs:       newObserveJobQueue(),
 		catalogLive:       map[string]*catalogLiveSession{},
 		catalogIdentities: projectresolve.NewCatalogIdentityCache(),
 		catalogEnded:      newCatalogEnded(),
@@ -464,10 +466,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}()
 	observerTicker := time.NewTicker(d.pollInterval)
 	defer observerTicker.Stop()
-	d.scanAndRelay(ctx)
+	d.planScan(ctx)
 	for {
 		select {
 		case <-ctx.Done():
+			d.observeJobs.wait()
 			d.flushTurnPushes()
 			d.background.stop()
 			<-catalogDone
@@ -480,9 +483,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 			d.log.Printf("stopping")
 			return nil
 		case <-observerTicker.C:
-			d.scanAndRelay(ctx)
+			d.planScan(ctx)
 		case <-d.observerNudge:
-			d.scanAndRelay(ctx)
+			d.planScan(ctx)
 		}
 	}
 }

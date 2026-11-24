@@ -9,7 +9,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,6 +29,7 @@ import (
 )
 
 type daemonSurface struct {
+	mu             sync.Mutex
 	kind           surface.SurfaceKind
 	sessions       map[string]surface.Session
 	observations   map[string]*surface.TurnObservation
@@ -222,7 +225,9 @@ func (f *daemonSurface) Send(_ context.Context, session *surface.Session, messag
 	if f.rejectBusy && session.Status == surface.StatusBusy {
 		return &surface.SendResult{Accepted: false}, nil
 	}
+	f.mu.Lock()
 	f.sent = append(f.sent, message)
+	f.mu.Unlock()
 	if f.nilResult {
 		return nil, nil
 	}
@@ -239,7 +244,9 @@ func (f *daemonSurface) SendWithOptions(_ context.Context, session *surface.Sess
 	if f.rejectBusy && session.Status == surface.StatusBusy {
 		return &surface.SendResult{Accepted: false}, nil
 	}
+	f.mu.Lock()
 	f.sent = append(f.sent, message)
+	f.mu.Unlock()
 	if f.nilResult {
 		return nil, nil
 	}
@@ -316,9 +323,17 @@ func (f *daemonSurface) Models(context.Context) ([]surface.ModelOption, error) {
 }
 func (*daemonSurface) Interrupt(context.Context, *surface.Session) error { return nil }
 func (f *daemonSurface) Steer(ctx context.Context, _ *surface.Session, message string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.steered = append(f.steered, message)
 	f.steeredAs = append(f.steeredAs, surface.LabelSender(ctx, message))
 	return nil
+}
+
+func (f *daemonSurface) sentMessages() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.sent)
 }
 func (f *daemonSurface) Capabilities() surface.Capabilities { return f.caps }
 func (f *daemonSurface) ContextUsage(context.Context, *surface.Session) (*surface.ContextUsage, error) {
