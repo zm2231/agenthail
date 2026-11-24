@@ -69,6 +69,13 @@ func (s *gatedSurface) callsOf(id string) int {
 	return s.calls[id]
 }
 
+func (q *observeJobQueue) holds(session string) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	_, found := q.pending[session]
+	return found
+}
+
 func waitUntil(t *testing.T, what string, done func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
@@ -355,6 +362,7 @@ func TestRelaysQueuedWhileTheirTargetIsObservedReachItInOrder(t *testing.T) {
 	targetScan := d.planScan(t.Context())
 	waitUntil(t, "the target is being observed", func() bool { return source.callsOf(to.ID) > observed })
 	queuedFor(1)
+	waitUntil(t, "the source's job has finished", func() bool { return !d.observeJobs.holds(from.ID) })
 	source.finish("turn-2")
 	d.planScan(t.Context())
 	queuedFor(2)
