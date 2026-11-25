@@ -16,8 +16,11 @@ type ProjectRecord struct {
 	Added         bool
 	Key           string
 	Repository    []byte
-	CreatedAt     time.Time
-	ArchivedAt    time.Time
+	// Worktree marks an added linked worktree root: a project of its own on
+	// this host, whose folders are never read as the main checkout's.
+	Worktree   bool
+	CreatedAt  time.Time
+	ArchivedAt time.Time
 }
 
 type ArchiveState struct {
@@ -60,8 +63,8 @@ func (r *Registry) AddProject(project ProjectRecord, supersedes string) (Project
 	case !errors.Is(err, sql.ErrNoRows):
 		return ProjectMoveOutcome{}, err
 	}
-	if _, err := tx.Exec(`INSERT INTO projects(id,workspace_root,title,added,project_key,repository,created_at_ms,archived_at_ms) VALUES(?,?,?,1,?,?,?,?)`,
-		project.ID, project.WorkspaceRoot, project.Title, project.Key, append([]byte{}, project.Repository...), project.CreatedAt.UnixMilli(), archivedAt); err != nil {
+	if _, err := tx.Exec(`INSERT INTO projects(id,workspace_root,title,added,project_key,repository,created_at_ms,archived_at_ms,worktree) VALUES(?,?,?,1,?,?,?,?,?)`,
+		project.ID, project.WorkspaceRoot, project.Title, project.Key, append([]byte{}, project.Repository...), project.CreatedAt.UnixMilli(), archivedAt, project.Worktree); err != nil {
 		return ProjectMoveOutcome{}, err
 	}
 	if _, err := tx.Exec(`DELETE FROM removed_project_ledgers WHERE workspace_root=? AND project_id=?`, project.WorkspaceRoot, project.ID); err != nil {
@@ -148,16 +151,17 @@ func (r *Registry) SetProjectRepository(id, key string, repository []byte) error
 }
 
 func (r *Registry) ListProjects() ([]ProjectRecord, error) {
-	rows, err := r.read.Query(`SELECT id,workspace_root,title,added,project_key,repository,created_at_ms,archived_at_ms FROM projects ORDER BY title,workspace_root`)
+	rows, err := r.read.Query(`SELECT id,workspace_root,title,added,project_key,repository,created_at_ms,archived_at_ms,worktree FROM projects ORDER BY title,workspace_root`)
 	if err != nil {
 		return nil, err
 	}
 	return appendRows([]ProjectRecord{}, rows, func(row rowScanner) (ProjectRecord, error) {
 		var project ProjectRecord
-		var added int
+		var added, worktree int
 		var createdAt, archivedAt int64
-		err := row.Scan(&project.ID, &project.WorkspaceRoot, &project.Title, &added, &project.Key, &project.Repository, &createdAt, &archivedAt)
+		err := row.Scan(&project.ID, &project.WorkspaceRoot, &project.Title, &added, &project.Key, &project.Repository, &createdAt, &archivedAt, &worktree)
 		project.Added = added == 1
+		project.Worktree = worktree == 1
 		project.CreatedAt = time.UnixMilli(createdAt).UTC()
 		if archivedAt > 0 {
 			project.ArchivedAt = time.UnixMilli(archivedAt).UTC()

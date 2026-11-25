@@ -25,7 +25,15 @@ const projectUsage = `usage: agenthail project list [--all] [--json]
 A project is a folder you add, and it may be a folder inside a repository. A
 session belongs to the deepest added project that holds its folder, reading a
 worktree as its main checkout. A repository with no added project around the
-session is a project of its own. Projects in the same place of a repository
+session is a project of its own.
+
+Adding the root of a linked worktree makes that worktree a project of its own
+on this host, with its own lead and ledger: sessions in it, and in worktrees
+inside it, belong to it, while worktrees nobody added still belong to their
+main checkout's project. It has no key, so on a paired host it is this host's
+project, and a session started on another host for its work, such as a
+worker, lands in the repository's project there, with that project's lead and
+ledger. Removing it returns its sessions to the repository's project. Projects in the same place of a repository
 with a remote are one project on every paired host. Archiving hides a project
 and its sessions until it is unarchived or one of its sessions shows new
 activity; removing an added project moves its sessions to the next project

@@ -688,13 +688,21 @@ func (d *Daemon) removeProject(ctx context.Context, projectID string, targets []
 		return actionResult{}, actionFailed(http.StatusConflict, "project_ambiguous", "project "+projectID+" names several added folders on this host: "+strings.Join(roots, ", ")+"; remove one by its id")
 	}
 	fallback := ""
-	repository, notRepository, err := projectresolve.ResolveCatalogRepository(ctx, added[0].WorkspaceRoot, nil, projectAddGitTimeout)
-	switch {
-	case err == nil:
-		fallback = implicitProjectID(repository, added[0].WorkspaceRoot)
-	case notRepository || folderGone(added[0].WorkspaceRoot):
-	default:
-		return actionResult{}, invalidRequest("read repository for " + added[0].WorkspaceRoot + ": " + err.Error() + "; the project is still added")
+	records, err := d.Registry.ListProjects()
+	if err != nil {
+		return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
+	}
+	// A worktree project, or a folder inside one, hands nothing to the
+	// repository's project, which keeps a lead and ledger of its own.
+	if !added[0].Worktree && !insideWorktreeProject(records, added[0].WorkspaceRoot) {
+		repository, notRepository, err := projectresolve.ResolveCatalogRepository(ctx, added[0].WorkspaceRoot, nil, projectAddGitTimeout)
+		switch {
+		case err == nil:
+			fallback = implicitProjectID(repository, added[0].WorkspaceRoot)
+		case notRepository || folderGone(added[0].WorkspaceRoot):
+		default:
+			return actionResult{}, invalidRequest("read repository for " + added[0].WorkspaceRoot + ": " + err.Error() + "; the project is still added")
+		}
 	}
 	outcome, err := d.Registry.RemoveProject(added[0].ID, fallback)
 	var handOver registry.ProjectHandOverError
@@ -843,34 +851,38 @@ func (d *Daemon) addProject(ctx context.Context, path, title string) (projectres
 	}
 	repository, notRepository, err := projectresolve.ResolveCatalogRepository(ctx, path, nil, projectAddGitTimeout)
 	inRepository := err == nil
+	if !inRepository && !notRepository {
+		return projectresolve.CatalogProject{}, false, fmt.Errorf("read repository for %s: %w", path, err)
+	}
+	records, err := d.Registry.ListProjects()
+	if err != nil {
+		return projectresolve.CatalogProject{}, false, err
+	}
+	// supersedes is the implicit project whose lead and archive state the
+	// added project takes over. A worktree project, or a folder inside one,
+	// splits off part of its repository's project and takes over nothing.
+	supersedes := ""
 	switch {
-	case inRepository:
+	case inRepository && repository.LinkedWorktreeRoot(path):
+		record.Worktree = true
+	case inRepository && !insideWorktreeProject(records, path):
 		record.WorkspaceRoot = repository.Translate(path)
 		if record.Key = repository.Key(record.WorkspaceRoot); record.Key != "" {
 			record.Repository, _ = json.Marshal(repository.Repository)
 		}
-	case !notRepository:
-		return projectresolve.CatalogProject{}, false, fmt.Errorf("read repository for %s: %w", path, err)
+		supersedes = implicitProjectID(repository, record.WorkspaceRoot)
 	}
 	if record.Title == "" {
 		record.Title = filepath.Base(record.WorkspaceRoot)
 	}
-	if id, kept, err := d.Registry.RemovedProjectLedger(record.WorkspaceRoot); err != nil {
+	if id, kept, err := d.keptProjectID(records, record.WorkspaceRoot); err != nil {
 		return projectresolve.CatalogProject{}, false, err
 	} else if kept {
 		record.ID = id
 	}
-	supersedes := ""
-	if inRepository {
-		supersedes = implicitProjectID(repository, record.WorkspaceRoot)
-	}
 	outcome, err := d.Registry.AddProject(record, supersedes)
 	var taken *registry.WorkspaceTakenError
 	if errors.As(err, &taken) {
-		records, err := d.Registry.ListProjects()
-		if err != nil {
-			return projectresolve.CatalogProject{}, false, err
-		}
 		for _, existing := range records {
 			if existing.ID == taken.ProjectID {
 				return *projectresolve.AddedCatalogProject(existing, inRepository), false, nil
@@ -884,6 +896,30 @@ func (d *Daemon) addProject(ctx context.Context, path, title string) (projectres
 	d.projectMovesApplied([]registry.ProjectMoveOutcome{outcome})
 	d.requestCatalogDiscovery()
 	return *projectresolve.AddedCatalogProject(record, inRepository), true, nil
+}
+
+func insideWorktreeProject(records []registry.ProjectRecord, path string) bool {
+	return projectresolve.WorktreeProjectHolding(records, path) != nil
+}
+
+// keptProjectID is the id of a project removed from root that still keeps
+// something under it: its ledger, or this host's lead set for that folder.
+// Adding the folder again takes that id back, so the project returns with
+// both.
+func (d *Daemon) keptProjectID(records []registry.ProjectRecord, root string) (string, bool, error) {
+	if id, kept, err := d.Registry.RemovedProjectLedger(root); err != nil || kept {
+		return id, kept, err
+	}
+	coordinators, err := d.Registry.LocalCoordinators()
+	if err != nil {
+		return "", false, err
+	}
+	for _, spec := range coordinators {
+		if spec.ProjectRoot == root && strings.HasPrefix(spec.ProjectID, "p-") && !slices.ContainsFunc(records, func(record registry.ProjectRecord) bool { return record.ID == spec.ProjectID }) {
+			return spec.ProjectID, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 // implicitProjectID is the project a repository's main checkout has when no
@@ -913,7 +949,7 @@ func (e *folderNotFoundError) Error() string {
 func (d *Daemon) refreshProjectRepositories(ctx context.Context, records []registry.ProjectRecord, now time.Time) {
 	for index := range records {
 		record := &records[index]
-		if !record.Added {
+		if !record.Added || record.Worktree || insideWorktreeProject(records, record.WorkspaceRoot) {
 			continue
 		}
 		key, repository, ok := d.catalogIdentities.RootRepository(ctx, record.WorkspaceRoot, now)

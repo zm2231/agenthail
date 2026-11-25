@@ -127,7 +127,16 @@ session starts in. The worktree is still made with the repository's
 
 The hand-made worktree sweep also searches each worktree project's
 `.worktrees` folder, and never removes a worktree that is the root of an added
-project, whichever folder it sits in.
+project, whichever folder it sits in. Automatic cleanup of a worktree
+Agenthail recorded keeps it as `project` while its folder is added as a
+project, and removes it once the project is removed; the person's own
+`work-clean` still removes it.
+
+A worktree made for a session in a worktree project is recorded with the
+worktree project's root as its checkout, so cleanup finds it in that
+checkout's `.worktrees`. The worktree project is used only when it is a
+checkout of the same repository as the session's folder; a separate
+repository inside it gets its worktree under its own main checkout.
 
 Moving a session to another host makes its worktree under the destination's
 main checkout, as today: a worktree project is this host's, so the destination
