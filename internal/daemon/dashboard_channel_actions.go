@@ -80,10 +80,23 @@ func (d *Daemon) doChannelSend(ctx context.Context, _ principal, request dashboa
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", sendErr.Error())
 	}
 	result.Recipients = append(result.Recipients, remote...)
-	if target.ProjectID != "" && len(result.Recipients) == 0 && len(legs) == 0 {
-		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", fmt.Sprintf("#%s has no members other than the sender", target.Name))
+	if target.ProjectID != "" && result.Reached() == 0 && len(legs) == 0 {
+		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", d.noMembers(target, result))
 	}
 	return d.channelReply(result, legs, request.ExceptHosts)
+}
+
+func (d *Daemon) noMembers(target broadcast.Target, result broadcast.Result) string {
+	var skipped []string
+	for _, recipient := range result.Recipients {
+		if recipient.Outcome == broadcast.OutcomeSkipped {
+			skipped = append(skipped, d.resolveDisplay(recipient.SessionID)+" ("+recipient.Detail+")")
+		}
+	}
+	if len(skipped) == 0 {
+		return fmt.Sprintf("#%s has no members other than the sender", target.Name)
+	}
+	return fmt.Sprintf("#%s has no reachable members other than the sender; skipped %s", target.Name, strings.Join(skipped, ", "))
 }
 
 func (d *Daemon) channelSender(request dashboardActionRequest) (string, string, error) {

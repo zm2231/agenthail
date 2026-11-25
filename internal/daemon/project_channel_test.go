@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -187,7 +190,7 @@ func TestAChannelNameAProjectAnswersToIsRefused(t *testing.T) {
 	if archived := runDashboardAction(t, d, `{"action":"session-archive","sessionId":"to"}`); archived.Code != http.StatusOK {
 		t.Fatalf("archive: %d %s", archived.Code, archived.Body)
 	}
-	if empty := runDashboardAction(t, d, `{"action":"channel-send","channel":"widget","message":"again","sourceSessionId":"from"}`); empty.Code != http.StatusBadRequest || !strings.Contains(empty.Body.String(), "#widget has no members other than the sender") {
+	if empty := runDashboardAction(t, d, `{"action":"channel-send","channel":"widget","message":"again","sourceSessionId":"from"}`); empty.Code != http.StatusBadRequest || !strings.Contains(empty.Body.String(), "#widget has no reachable members other than the sender; skipped "+d.resolveDisplay("to")+" (archived)") {
 		t.Fatalf("send with only an archived member: %d %s", empty.Code, empty.Body)
 	}
 }
@@ -274,24 +277,28 @@ func TestThePersonsChannelPostReachesAnotherHostAsThePersonWithTheirName(t *test
 	}
 }
 
-func TestAProjectChannelReachesPinnedAndRecentlyUsedConversationsWhoseProcessEnded(t *testing.T) {
+func TestAProjectPostReachesLiveConversationsAndSkipsOnesItCannotReach(t *testing.T) {
 	local, _, _ := widgetOnTwoHosts(t)
 	repo := local.fake.sessions["local-a"].Cwd
-	for _, id := range []string{"ended-recent", "ended-pinned", "ended-old", "ended-archived"} {
-		lastActive := time.Now().Add(-time.Hour)
-		if id == "ended-pinned" || id == "ended-old" {
+	removed := widgetRepo(t, "https://github.com/example/widget.git")
+	for _, id := range []string{"live", "ended", "ended-pinned", "ended-old", "archived", "folder-gone"} {
+		cwd, lastActive := repo, time.Now().Add(-time.Hour)
+		switch id {
+		case "ended-pinned", "ended-old":
 			lastActive = time.Now().Add(-72 * time.Hour)
+		case "folder-gone":
+			cwd = removed
 		}
-		moveSession(t, local, id, repo, lastActive)
+		moveSession(t, local, id, cwd, lastActive)
 	}
 	if _, err := local.reg.PinSession("ended-pinned", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if err := local.reg.ArchiveSession("ended-archived", time.Now()); err != nil {
+	if err := local.reg.ArchiveSession("archived", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	local.daemon.discoverCatalog(context.Background())
-	for _, id := range []string{"ended-recent", "ended-pinned", "ended-old", "ended-archived"} {
+	for _, id := range []string{"ended", "ended-pinned", "ended-old"} {
 		delete(local.fake.sessions, id)
 	}
 	ended := func() bool {
@@ -300,8 +307,8 @@ func TestAProjectChannelReachesPinnedAndRecentlyUsedConversationsWhoseProcessEnd
 			t.Fatal(err)
 		}
 		for _, record := range snapshot.Sessions {
-			if record.Session.ID == "ended-recent" {
-				return record.Freshness.Stale && record.Session.Status == surface.StatusOffline
+			if record.Session.ID == "ended" {
+				return record.Session.Status == surface.StatusOffline
 			}
 		}
 		return false
@@ -313,27 +320,66 @@ func TestAProjectChannelReachesPinnedAndRecentlyUsedConversationsWhoseProcessEnd
 		local.daemon.discoverCatalog(context.Background())
 	}
 	if !ended() {
-		t.Fatal("a conversation discovery no longer lists did not read as ended: offline and stale")
+		t.Fatal("a conversation discovery no longer lists did not read as ended")
 	}
-	before := len(local.fake.delivered())
-	response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "#widget", "message": "release notes", "sourceSessionId": "local-a"})
-	var answer struct {
-		Recipients []broadcast.Recipient `json:"recipients"`
+	if err := os.RemoveAll(removed); err != nil {
+		t.Fatal(err)
 	}
-	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &answer) != nil {
-		t.Fatalf("send status=%d body=%s", response.Code, response.Body)
+
+	post := func() (*httptest.ResponseRecorder, map[string]broadcast.Recipient, int) {
+		t.Helper()
+		before := len(local.fake.delivered())
+		response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "#widget", "message": "release notes", "sourceSessionId": "local-a"})
+		var answer struct {
+			Recipients []broadcast.Recipient `json:"recipients"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &answer); err != nil {
+			t.Fatalf("send status=%d body=%s", response.Code, response.Body)
+		}
+		members := map[string]broadcast.Recipient{}
+		for _, recipient := range answer.Recipients {
+			if recipient.HostID == "" && recipient.Coordinator == "" {
+				members[recipient.SessionID] = recipient
+			}
+		}
+		return response, members, len(local.fake.delivered()) - before
 	}
-	reached := map[string]string{}
-	for _, recipient := range answer.Recipients {
-		if recipient.HostID == "" && recipient.Coordinator == "" {
-			reached[recipient.SessionID] = recipient.Outcome
+	response, members, delivered := post()
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"skipped":4`) {
+		t.Fatalf("a post every reachable member got: status=%d body=%s", response.Code, response.Body)
+	}
+	want := map[string]broadcast.Recipient{
+		"live":         {SessionID: "live", Outcome: broadcast.OutcomeSent, Detail: members["live"].Detail},
+		"ended":        {SessionID: "ended", Outcome: broadcast.OutcomeSkipped, Detail: "ended"},
+		"ended-pinned": {SessionID: "ended-pinned", Outcome: broadcast.OutcomeSkipped, Detail: "ended"},
+		"archived":     {SessionID: "archived", Outcome: broadcast.OutcomeSkipped, Detail: "archived"},
+		"folder-gone":  {SessionID: "folder-gone", Outcome: broadcast.OutcomeSkipped, Detail: "its folder " + removed + " is gone"},
+	}
+	if len(members) != len(want) {
+		t.Fatalf("this host's members %+v, want %+v", members, want)
+	}
+	for id, recipient := range want {
+		if members[id] != recipient {
+			t.Fatalf("member %s = %+v, want %+v", id, members[id], recipient)
 		}
 	}
-	if len(reached) != 2 || reached["ended-recent"] != broadcast.OutcomeSent || reached["ended-pinned"] != broadcast.OutcomeSent {
-		t.Fatalf("this host's members reached %v, want the recently used and the pinned conversation once each: %+v", reached, answer.Recipients)
+	if delivered != 2 {
+		t.Fatalf("this host delivered %d messages, want its coordinator and the live member only", delivered)
 	}
-	if delivered := len(local.fake.delivered()) - before; delivered != 3 {
-		t.Fatalf("this host delivered %d messages, want its coordinator and two members", delivered)
+	if err := local.reg.SyncDeliveryAsks(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if asks, err := local.reg.OpenAsks(); err != nil || slices.ContainsFunc(asks, func(ask registry.Ask) bool { return ask.Origin == "delivery" }) {
+		t.Fatalf("a post that skipped members raised a delivery ask: %+v %v", asks, err)
+	}
+
+	local.fake.failSends(surface.DeliveryTerminal(errors.New("model rejected")))
+	response, members, _ = post()
+	if response.Code != http.StatusConflict || members["live"].Outcome != broadcast.OutcomeFailed || members["ended"].Outcome != broadcast.OutcomeSkipped {
+		t.Fatalf("a failure to a reachable member: status=%d members=%+v", response.Code, members)
+	}
+	if message := response.Body.String(); !strings.Contains(message, local.daemon.resolveDisplay("live")+" failed: ") || strings.Contains(message, local.daemon.resolveDisplay("ended")+" failed") {
+		t.Fatalf("the failure names the wrong members: %s", message)
 	}
 }
 
