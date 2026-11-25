@@ -22,6 +22,7 @@ A test that runs a host whose packages are missing fails at once and names the `
 - [Linux daemon: systemd service, updates and doctor](linux-daemon.md)
 - [Daemon runtime profiles: capturing heap, allocs and goroutines](debug-profiles.md)
 - [Claude session host](claude-host.md)
+- [ACP agents: one runtime for agents that speak the Agent Client Protocol](acp-agents.md)
 - [Browser host: Chromium on first use, supervision and status](browser-host.md)
 - [Simulator host: shared iOS simulators, leases and actions](simulator-host.md)
 - [Extensions: pages, actions, jobs and the extension host](extensions.md)
