@@ -80,28 +80,45 @@ func (c *Conn) Err() error {
 }
 
 func (c *Conn) Request(ctx context.Context, method string, params, result any) error {
+	pending, err := c.Send(method, params)
+	if err != nil {
+		return err
+	}
+	return pending.Wait(ctx, result)
+}
+
+type Pending struct {
+	conn *Conn
+	id   string
+	wait chan reply
+}
+
+func (c *Conn) Send(method string, params any) (*Pending, error) {
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return nil, err
+	}
 	c.mu.Lock()
 	if c.err != nil {
 		err := c.err
 		c.mu.Unlock()
-		return err
+		return nil, err
 	}
 	c.next++
 	id := strconv.FormatInt(c.next, 10)
 	wait := make(chan reply, 1)
 	c.waiting[id] = wait
 	c.mu.Unlock()
-	raw, err := json.Marshal(params)
-	if err != nil {
-		c.forget(id)
-		return err
-	}
 	if err := c.write(message{JSONRPC: "2.0", ID: json.RawMessage(id), Method: method, Params: raw}); err != nil {
 		c.forget(id)
-		return err
+		return nil, err
 	}
+	return &Pending{conn: c, id: id, wait: wait}, nil
+}
+
+func (p *Pending) Wait(ctx context.Context, result any) error {
 	select {
-	case got := <-wait:
+	case got := <-p.wait:
 		if got.err != nil {
 			return got.err
 		}
@@ -110,7 +127,7 @@ func (c *Conn) Request(ctx context.Context, method string, params, result any) e
 		}
 		return json.Unmarshal(got.result, result)
 	case <-ctx.Done():
-		c.forget(id)
+		p.conn.forget(p.id)
 		return ctx.Err()
 	}
 }
