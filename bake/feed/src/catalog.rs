@@ -325,6 +325,23 @@ pub fn phase(state: &str) -> usize {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct RespondError {
+    pub message: String,
+    pub maybe_delivered: bool,
+}
+
+impl RespondError {
+    pub fn from_status(code: u16, body: &str) -> Self {
+        let message = serde_json::from_str::<Value>(body)
+            .ok()
+            .and_then(|v| v["error"]["message"].as_str().map(str::to_string))
+            .unwrap_or_else(|| format!("status code {code}"));
+        let maybe_delivered = code == 502 && message.starts_with("the answer may have reached");
+        RespondError { message, maybe_delivered }
+    }
+}
+
 pub const PHASES: [&str; 5] = ["Plan", "Build", "Review", "Merge", "Done"];
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -465,15 +482,19 @@ impl Client {
         Ok(serde_json::from_value(value["requests"].clone()).unwrap_or_default())
     }
 
-    pub fn respond(&self, session: &str, request: &str, choices: Vec<String>) -> Result<()> {
+    pub fn respond(&self, session: &str, request: &str, choices: Vec<String>) -> std::result::Result<(), RespondError> {
         let key = format!("bake-respond-{}-{}", request, OffsetDateTime::now_utc().unix_timestamp_nanos());
-        self.agent
+        match self
+            .agent
             .post(&format!("{}/api/v1/actions", self.base))
             .set("Authorization", &format!("Bearer {}", self.token))
             .set("Idempotency-Key", &key)
             .send_json(serde_json::json!({"action": "respond", "sessionId": session, "requestId": request, "decision": {"choices": choices}}))
-            .map_err(|e| anyhow!(e.to_string()))?;
-        Ok(())
+        {
+            Ok(_) => Ok(()),
+            Err(ureq::Error::Status(code, response)) => Err(RespondError::from_status(code, &response.into_string().unwrap_or_default())),
+            Err(error) => Err(RespondError { message: error.to_string(), maybe_delivered: false }),
+        }
     }
 
     pub fn send(&self, session: &str, message: &str) -> Result<()> {
@@ -485,5 +506,27 @@ impl Client {
             .send_json(serde_json::json!({"action": "send", "sessionId": session, "message": message, "author": "person"}))
             .map_err(|e| anyhow!(e.to_string()))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod respond_error_tests {
+    use super::RespondError;
+
+    #[test]
+    fn a_maybe_delivered_answer_is_not_offered_again() {
+        let e = RespondError::from_status(502, r#"{"error":{"code":"bad_gateway","message":"the answer may have reached the session, so it is not sent again: timeout"}}"#);
+        assert!(e.maybe_delivered);
+        assert!(e.message.starts_with("the answer may have reached"));
+    }
+
+    #[test]
+    fn a_released_answer_can_be_given_again() {
+        let e = RespondError::from_status(502, r#"{"error":{"code":"bad_gateway","message":"session ended"}}"#);
+        assert!(!e.maybe_delivered);
+        let stale = RespondError::from_status(409, r#"{"error":{"code":"stale","message":"this request was already answered or has expired"}}"#);
+        assert!(!stale.maybe_delivered);
+        assert_eq!(stale.message, "this request was already answered or has expired");
+        assert_eq!(RespondError::from_status(500, "not json").message, "status code 500");
     }
 }

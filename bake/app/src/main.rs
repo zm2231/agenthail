@@ -20,7 +20,7 @@ pub enum Bg {
     Board(String, Vec<BoardRow>),
     Sent(String, Result<(), String>),
     Requests(String, Vec<OpenRequest>),
-    Answered(String, Result<(), String>),
+    Answered(String, String, Result<(), feed::catalog::RespondError>),
     Error(String),
 }
 
@@ -62,6 +62,7 @@ pub struct App {
     pub requests: HashMap<String, Vec<OpenRequest>>,
     pub answering: Option<String>,
     pub answered: HashSet<String>,
+    pub settled: HashSet<String>,
     pub tab: Tab,
     pub work_pick: HashMap<String, String>,
     pub diff: rune_kit::diff::DiffState,
@@ -113,6 +114,7 @@ fn init() -> App {
         requests: HashMap::new(),
         answering: None,
         answered: HashSet::new(),
+        settled: HashSet::new(),
         tab: Tab::Conversation,
         work_pick: HashMap::new(),
         diff: rune_kit::diff::DiffState::new(Vec::new()),
@@ -208,11 +210,18 @@ pub fn select(s: &mut App, id: &str) {
 }
 
 fn fetch_requests(s: &mut App, id: &str) {
+    fetch_requests_at(s, id, &[0]);
+}
+
+fn fetch_requests_at(s: &mut App, id: &str, delays_ms: &'static [u64]) {
     if let Some(client) = s.client.clone() {
         let (tx, id) = (s.outbox.clone(), id.to_string());
         std::thread::spawn(move || {
-            if let Ok(requests) = client.requests(&id) {
-                let _ = tx.send(Bg::Requests(id, requests));
+            for delay in delays_ms {
+                std::thread::sleep(std::time::Duration::from_millis(*delay));
+                if let Ok(requests) = client.requests(&id) {
+                    let _ = tx.send(Bg::Requests(id.clone(), requests));
+                }
             }
         });
     }
@@ -224,12 +233,16 @@ pub fn answer_request(s: &mut App, request: &str, choices: Vec<String>) {
         s.send_status = "Fixture mode: not sent".into();
         return;
     };
+    if s.answering.is_some() || s.settled.contains(request) {
+        return;
+    }
     s.answering = Some(request.to_string());
+    s.settled.insert(request.to_string());
     s.send_status = "Answering…".into();
     let (out, request) = (s.outbox.clone(), request.to_string());
     std::thread::spawn(move || {
-        let result = client.respond(&id, &request, choices).map_err(|e| e.to_string());
-        let _ = out.send(Bg::Answered(id, result));
+        let result = client.respond(&id, &request, choices);
+        let _ = out.send(Bg::Answered(id, request, result));
     });
 }
 
@@ -382,16 +395,23 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Requests(id, requests) => {
                 s.requests.insert(id, requests);
             }
-            Bg::Answered(id, result) => {
+            Bg::Answered(id, request, result) => {
                 s.answering = None;
-                if result.is_ok() {
-                    s.answered.insert(id.clone());
-                }
                 s.send_status = match result {
-                    Ok(()) => "Answered".into(),
-                    Err(error) => format!("Not answered: {error}"),
+                    Ok(()) => {
+                        s.answered.insert(id.clone());
+                        "Answered".into()
+                    }
+                    Err(error) if error.maybe_delivered => {
+                        s.answered.insert(id.clone());
+                        format!("Sent, not confirmed: {}", error.message)
+                    }
+                    Err(error) => {
+                        s.settled.remove(&request);
+                        format!("Not answered: {}", error.message)
+                    }
                 };
-                fetch_requests(s, &id);
+                fetch_requests_at(s, &id, &[0, 2000, 6000]);
             }
             Bg::Error(error) => s.status = format!("daemon: {error}"),
         }

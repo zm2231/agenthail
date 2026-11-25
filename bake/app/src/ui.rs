@@ -373,7 +373,7 @@ fn split_option(label: &str) -> (String, String) {
 }
 
 fn waiting_choices(s: &App, x: &Session) -> (Option<String>, Vec<Choice>, bool) {
-    if let Some(request) = s.requests.get(&x.id).and_then(|r| r.first()) {
+    if let Some(request) = s.requests.get(&x.id).and_then(|r| r.iter().find(|r| !s.settled.contains(&r.id))) {
         if let Some(q) = request.questions.as_ref().and_then(|q| q.first()).filter(|q| !q.multi_select && !q.options.is_empty()) {
             let choices = q
                 .options
