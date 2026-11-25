@@ -19,7 +19,7 @@ pub enum Bg {
     Item(String, WorkItem),
     Board(String, Vec<BoardRow>),
     Sent(String, Result<(), String>),
-    Requests(String, Vec<OpenRequest>),
+    Requests(String, Vec<OpenRequest>, std::time::Instant),
     Answered(String, String, Result<(), feed::catalog::RespondError>),
     Error(String),
 }
@@ -171,11 +171,15 @@ fn init() -> App {
     app
 }
 
-const SETTLE_GRACE: std::time::Duration = std::time::Duration::from_secs(8);
+const SETTLE_GRACE: std::time::Duration = std::time::Duration::from_secs(6);
 
 impl App {
     pub fn is_settled(&self, request: &str) -> bool {
-        self.settled.get(request).is_some_and(|at| at.elapsed() < SETTLE_GRACE)
+        self.settled.contains_key(request)
+    }
+
+    fn reopen_undelivered(&mut self, requests: &[OpenRequest], fetched_at: std::time::Instant) {
+        self.settled.retain(|id, answered_at| !(requests.iter().any(|r| &r.id == id) && fetched_at >= *answered_at + SETTLE_GRACE));
     }
 }
 
@@ -226,11 +230,14 @@ fn fetch_requests(s: &mut App, id: &str) {
 fn fetch_requests_at(s: &mut App, id: &str, delays_ms: &'static [u64]) {
     if let Some(client) = s.client.clone() {
         let (tx, id) = (s.outbox.clone(), id.to_string());
+        let start = std::time::Instant::now();
         std::thread::spawn(move || {
-            for delay in delays_ms {
-                std::thread::sleep(std::time::Duration::from_millis(*delay));
+            for at in delays_ms {
+                let due = start + std::time::Duration::from_millis(*at);
+                std::thread::sleep(due.saturating_duration_since(std::time::Instant::now()));
+                let fetched_at = std::time::Instant::now();
                 if let Ok(requests) = client.requests(&id) {
-                    let _ = tx.send(Bg::Requests(id.clone(), requests));
+                    let _ = tx.send(Bg::Requests(id.clone(), requests, fetched_at));
                 }
             }
         });
@@ -402,14 +409,21 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                     Err(error) => format!("Not sent: {error}"),
                 };
             }
-            Bg::Requests(id, requests) => {
+            Bg::Requests(id, requests, fetched_at) => {
+                s.reopen_undelivered(&requests, fetched_at);
                 s.requests.insert(id, requests);
             }
             Bg::Answered(id, request, result) => {
                 s.answering = None;
                 let status = match result {
-                    Ok(()) => "Answered".to_string(),
-                    Err(error) if error.maybe_delivered => format!("Sent, not confirmed: {}", error.message),
+                    Ok(()) => {
+                        s.answered.insert(id.clone());
+                        "Answered".to_string()
+                    }
+                    Err(error) if error.maybe_delivered => {
+                        s.answered.insert(id.clone());
+                        format!("Sent, not confirmed: {}", error.message)
+                    }
                     Err(error) => {
                         s.settled.remove(&request);
                         format!("Not answered: {}", error.message)
