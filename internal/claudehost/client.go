@@ -49,6 +49,12 @@ func IsCode(err error, code string) bool {
 	return errors.As(err, &hostErr) && hostErr.Code == code
 }
 
+// IsUnknownMethod reports a host that predates the method it was asked.
+func IsUnknownMethod(err error) bool {
+	var hostErr *Error
+	return errors.As(err, &hostErr) && hostErr.Code == "invalid" && strings.HasPrefix(hostErr.Message, "unknown method")
+}
+
 // OutcomeUnknownError means the request was written but no answer arrived,
 // so the host may or may not have acted on it.
 type OutcomeUnknownError struct{ Err error }
@@ -116,8 +122,7 @@ type Session struct {
 	// predates them leaves it nil.
 	Tasks        []Task `json:"tasks"`
 	TaskTurnOwed bool   `json:"taskTurnOwed"`
-	// Commands are what a person can run in the session, as Claude last
-	// listed them; nil until Claude has.
+	// Commands are listed only by hosts that predate SessionCommands.
 	Commands []Command `json:"commands"`
 }
 
@@ -398,6 +403,22 @@ func (c Client) Respond(ctx context.Context, sessionID, requestID string, decisi
 	}
 	err := c.sessionCall(ctx, "respond", map[string]any{"sessionId": sessionID, "requestId": requestID, "decision": decision}, &out)
 	return out.Outcome, err
+}
+
+// Session is one session as the host that runs it lists it now, without its
+// commands.
+func (c Client) Session(ctx context.Context, sessionID string) (Session, error) {
+	var out Session
+	return out, c.sessionCall(ctx, "session", map[string]string{"sessionId": sessionID}, &out)
+}
+
+// SessionCommands is what a person can run in the session, as Claude last
+// listed them; nil until Claude has.
+func (c Client) SessionCommands(ctx context.Context, sessionID string) ([]Command, error) {
+	var out struct {
+		Commands []Command `json:"commands"`
+	}
+	return out.Commands, c.sessionCall(ctx, "sessionCommands", map[string]string{"sessionId": sessionID}, &out)
 }
 
 func (c Client) SetModel(ctx context.Context, sessionID, model string) (Session, error) {

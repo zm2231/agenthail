@@ -1849,7 +1849,8 @@ test('a session lists the commands a person can run, one per name, and follows w
   const c = new Client(f.socket);
   await c.call('subscribe');
   const id = randomUUID();
-  const opened = await c.call('open', { sessionId: id, cwd: f.cwd });
+  await c.call('open', { sessionId: id, cwd: f.cwd });
+  const opened = await c.call('sessionCommands', { sessionId: id });
   assert.deepEqual(opened.commands.map((x) => [x.name, x.description]), [
     ['review', 'Review a pull request'],
     ['compact', 'Compact the conversation'],
@@ -1862,8 +1863,11 @@ test('a session lists the commands a person can run, one per name, and follows w
   const changed = await c.event((e) => e.sessionId === id && e.kind === 'commands' && e.commands.some((x) => x.name === 'found-later'), 5000);
   assert.ok(!changed.commands.some((x) => x.name === 'statusline'), 'a terminal-only command is not offered');
   await c.event(turnResult(id, turn));
+  assert.deepEqual((await c.call('sessionCommands', { sessionId: id })).commands, changed.commands);
   const listed = (await c.call('list')).sessions.find((s) => s.sessionId === id);
-  assert.deepEqual(listed.commands, changed.commands);
+  assert.equal(listed.commands, undefined, 'the listing leaves the commands out, so it stays small');
+  assert.deepEqual(await c.call('session', { sessionId: id }), listed);
+  await assert.rejects(c.call('session', { sessionId: randomUUID() }), /not open/);
   c.close();
 });
 

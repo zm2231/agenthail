@@ -17,8 +17,14 @@ func (c *Claude) Commands(ctx context.Context, sess *surface.Session) (*surface.
 		return &surface.RuntimeCommands{Commands: []surface.RuntimeCommand{}, Unavailable: claudeCommandsUnavailable}, nil
 	}
 	if claudeHosted(sess) {
-		if listed, ok := c.host.session(ctx, sess.ID, sess.PID); ok && listed.Commands != nil {
-			return claudeRuntimeCommands(listed.Commands), nil
+		commands, err := c.host.client.SessionCommands(ctx, sess.ID)
+		if claudehost.IsUnknownMethod(err) {
+			if listed, ok := c.host.session(ctx, sess.ID, sess.PID); ok {
+				commands = listed.Commands
+			}
+		}
+		if commands != nil {
+			return claudeRuntimeCommands(commands), nil
 		}
 	}
 	if sess.Cwd == "" || c.host == nil {

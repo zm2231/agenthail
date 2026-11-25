@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -21,7 +22,7 @@ import (
 
 const (
 	claudeHostListTTL       = time.Second
-	claudeHostListTimeout   = 500 * time.Millisecond
+	claudeHostListTimeout   = 2 * time.Second
 	claudeHostSilentOpenTTL = 5 * time.Second
 )
 
@@ -153,6 +154,31 @@ func logClaudeHostListing(partial bool, took time.Duration, err error, unanswere
 	default:
 		log.Printf("Claude host: %s did not answer the session listing (%s); sessions last listed keep their requests for %s", strings.Join(unanswered, ", "), took, claudeHostSilentOpenTTL)
 	}
+}
+
+// store keeps a session as its host just listed it alone.
+func (h *claudeHost) store(listed claudehost.Session) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.sessions == nil {
+		return
+	}
+	h.sessions[listed.SessionID] = listed.PID
+	h.open[listed.SessionID] = listed
+	h.openListed[listed.SessionID] = time.Now()
+}
+
+// answered drops a request its host took an answer to from the cached
+// listing, so a listing a slow host misses cannot bring it back.
+func (h *claudeHost) answered(conversation, requestID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	session, ok := h.open[conversation]
+	if !ok {
+		return
+	}
+	session.Requests = slices.DeleteFunc(slices.Clone(session.Requests), func(request claudehost.Request) bool { return request.RequestID == requestID })
+	h.open[conversation] = session
 }
 
 // unanswered reports whether a host did not answer the last listing.
