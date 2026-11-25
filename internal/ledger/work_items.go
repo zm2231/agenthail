@@ -164,7 +164,7 @@ func (b *Board) applyWorkItem(event Event) error {
 			item.Park = &park
 		}
 		item.Timeline[0].At = h.CreatedAt
-		item.Timeline = append(append(item.Timeline, h.Timeline...),
+		item.Timeline = append(append(item.Timeline, importedTimeline(h.Timeline)...),
 			WorkEntry{At: event.CreatedAt, Actor: event.ActorSessionID, Kind: "imported", Text: "from " + p.ImportedFrom, State: h.State})
 	}
 	item.refreshPhase()

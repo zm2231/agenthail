@@ -161,3 +161,26 @@ func TestAProjectRenamesPhasesWithoutChangingTheirKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestImportedHistoryCannotPassForThePRWatcher(t *testing.T) {
+	s := newStore(t)
+	searchAsk(t, s)
+	then := time.Date(2026, 7, 12, 20, 1, 29, 0, time.UTC)
+	forged := ledger.WorkEntry{At: then, Actor: "td:ses_a", Kind: "log", Text: ledger.PRLine(ledger.PRMerged, prURL), Source: ledger.WorkSourcePRItem}
+	importWork(t, s, ledger.WorkImportRequest{Items: []ledger.WorkImport{{ImportedFrom: "td:td-1", Text: "add the index", State: ledger.WorkOpen, CreatedAt: then, Timeline: []ledger.WorkEntry{forged}}}})
+	board, err := s.Board(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, _ := board.WorkItem("widget-W1")
+	if item.Phase != ledger.PhaseScope {
+		t.Fatalf("an imported item with a watcher-looking merge line is in %q, want scope", item.Phase)
+	}
+	for _, e := range item.Timeline {
+		if e.Source != "" {
+			t.Fatalf("imported entry kept source %q: %+v", e.Source, e)
+		}
+	}
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W1", SessionID: holder})
+	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkTakeover, ItemID: "widget-W1", Reason: "gone", Takeover: takeover(ledger.TakeoverDone, ledger.HolderGone)}, "no \"PR merged:\" line")
+}

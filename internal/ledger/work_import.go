@@ -235,7 +235,16 @@ func importPayload(in WorkImport, origin, session string) (WorkItemPayload, erro
 		createdBy = session
 	}
 	return WorkItemPayload{Text: text, CreatedBy: createdBy, WorkFields: fields, ImportedFrom: origin,
-		History: &WorkHistory{State: state, Reason: strings.TrimSpace(in.Reason), Reviewer: in.Reviewer, Handoff: in.Handoff, Park: park, CreatedAt: in.CreatedAt, Timeline: in.Timeline}}, nil
+		History: &WorkHistory{State: state, Reason: strings.TrimSpace(in.Reason), Reviewer: in.Reviewer, Handoff: in.Handoff, Park: park, CreatedAt: in.CreatedAt, Timeline: importedTimeline(in.Timeline)}}, nil
+}
+
+// importedTimeline drops each entry's source: a source marks a log the daemon wrote on this ledger, which history from elsewhere never is.
+func importedTimeline(timeline []WorkEntry) []WorkEntry {
+	out := slices.Clone(timeline)
+	for i := range out {
+		out[i].Source = ""
+	}
+	return out
 }
 
 func reachesThrough(waitsOn func(string) []string, from, to string) bool {
