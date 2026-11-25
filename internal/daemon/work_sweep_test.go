@@ -94,3 +94,38 @@ func TestTheSweepRemovesHandMadeWorktreesOnlyOnceTheirPullRequestMergedAndNoOpen
 		t.Fatal("a later sweep removed a worktree it must keep")
 	}
 }
+
+func TestTheSweepSearchesAWorktreeProjectAndNeverRemovesAnAddedProjectsFolder(t *testing.T) {
+	checkout := pushedCheckout(t)
+	d, _, _, _, _ := daemonFixture(t)
+	addFolderProject(t, d, checkout)
+	gitIn(t, checkout, "remote", "add", "github", "https://github.com/acme/app.git")
+	fake := &fakeGitHub{branches: map[github.Branch][]github.PullRequest{}}
+	d.github = fake
+	merged := func(holder, branch string, number int) string {
+		t.Helper()
+		path := filepath.Join(holder, worktree.Dir, worktree.Slug(branch))
+		gitIn(t, checkout, "worktree", "add", "--quiet", "-b", branch, path)
+		gitIn(t, checkout, "config", "branch."+branch+".remote", "github")
+		if err := os.WriteFile(filepath.Join(path, "app", worktree.Slug(branch)+".go"), []byte("package main\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitIn(t, path, "add", ".")
+		gitIn(t, path, "commit", "--quiet", "-m", branch)
+		head := gitIn(t, path, "rev-parse", "HEAD")
+		gitIn(t, checkout, "merge", "--quiet", "--squash", branch)
+		gitIn(t, checkout, "commit", "--quiet", "-m", "squash "+branch)
+		fake.branches[github.Branch{Repo: acmeApp, Head: branch}] = []github.PullRequest{{Ref: github.Ref{Repo: acmeApp, Number: number}, URL: github.Ref{Repo: acmeApp, Number: number}.URL(), State: "merged", HeadSHA: head, HeadRef: branch, BaseRef: "main"}}
+		return path
+	}
+	project := merged(checkout, "v2/cockpit", 1)
+	addFolderProject(t, d, project)
+	inside := merged(project, "v2/inside", 2)
+	d.sweepHandMadeWorktrees(t.Context())
+	if _, err := os.Stat(project); err != nil {
+		t.Fatalf("the sweep removed a worktree added as a project: %v", err)
+	}
+	if _, err := os.Stat(inside); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the sweep left the merged worktree inside the worktree project: %v", err)
+	}
+}

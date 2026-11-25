@@ -42,7 +42,7 @@ func newWorktreeProjectFixture(t *testing.T) worktreeProjectFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := worktreeProjectFixture{d: d, r: r, fake: fake, repo: repo, v2: filepath.Join(filepath.Dir(repo), "merchantry-v2")}
+	f := worktreeProjectFixture{d: d, r: r, fake: fake, repo: repo, v2: filepath.Join(filepath.Dir(repo), "v2")}
 	testkit.Git(t, repo, "worktree", "add", "-b", "v2/cockpit", f.v2)
 	f.worker = filepath.Join(repo, ".worktrees", "fix-a")
 	testkit.Git(t, repo, "worktree", "add", "-b", "fix/a", f.worker)
@@ -104,7 +104,7 @@ func TestAnAddedWorktreeIsAProjectOfItsOwnWhileWorktreesNobodyAddedStayInTheRepo
 	}
 
 	v2 := f.add(t, f.v2)
-	if !strings.HasPrefix(v2.ID, "p-") || v2.Key != "" || v2.RootPath != f.v2 || v2.Kind != projectresolve.CatalogProjectGit || v2.DisplayName != "merchantry-v2" {
+	if !strings.HasPrefix(v2.ID, "p-") || v2.Key != "" || v2.RootPath != f.v2 || v2.Kind != projectresolve.CatalogProjectGit || v2.DisplayName != "v2" {
 		t.Fatalf("the added worktree is %+v, want a keyless project at %s", v2, f.v2)
 	}
 	if again := f.add(t, f.v2); again.ID != v2.ID {
