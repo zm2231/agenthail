@@ -332,6 +332,12 @@ pub struct RespondError {
 }
 
 impl RespondError {
+    pub fn from_send_status(code: u16, body: &str) -> Self {
+        let mut error = Self::from_status(code, body);
+        error.maybe_delivered = matches!(code, 502 | 504);
+        error
+    }
+
     pub fn from_status(code: u16, body: &str) -> Self {
         let message = serde_json::from_str::<Value>(body)
             .ok()
@@ -497,15 +503,19 @@ impl Client {
         }
     }
 
-    pub fn send(&self, session: &str, message: &str) -> Result<()> {
+    pub fn send(&self, session: &str, message: &str) -> std::result::Result<(), RespondError> {
         let key = format!("bake-{}-{}", session, OffsetDateTime::now_utc().unix_timestamp_nanos());
-        self.agent
+        match self
+            .agent
             .post(&format!("{}/api/v1/actions", self.base))
             .set("Authorization", &format!("Bearer {}", self.token))
             .set("Idempotency-Key", &key)
             .send_json(serde_json::json!({"action": "send", "sessionId": session, "message": message, "author": "person"}))
-            .map_err(|e| anyhow!(e.to_string()))?;
-        Ok(())
+        {
+            Ok(_) => Ok(()),
+            Err(ureq::Error::Status(code, response)) => Err(RespondError::from_send_status(code, &response.into_string().unwrap_or_default())),
+            Err(error) => Err(RespondError { message: error.to_string(), maybe_delivered: true }),
+        }
     }
 }
 
@@ -528,5 +538,11 @@ mod respond_error_tests {
         assert!(!stale.maybe_delivered);
         assert_eq!(stale.message, "this request was already answered or has expired");
         assert_eq!(RespondError::from_status(500, "not json").message, "status code 500");
+    }
+
+    #[test]
+    fn a_send_lost_at_the_gateway_is_unconfirmed() {
+        assert!(RespondError::from_send_status(504, "").maybe_delivered);
+        assert!(!RespondError::from_send_status(503, r#"{"error":{"code":"unavailable","message":"down"}}"#).maybe_delivered);
     }
 }

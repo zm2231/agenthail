@@ -18,7 +18,7 @@ pub enum Bg {
     Snapshot(Vec<Session>),
     Item(String, WorkItem),
     Board(String, Vec<BoardRow>),
-    Sent(String, Result<(), String>),
+    Sent(String, Result<(), feed::catalog::RespondError>),
     Requests(String, Vec<OpenRequest>, std::time::Instant),
     Answered(String, String, Result<(), feed::catalog::RespondError>),
     Error(String),
@@ -243,7 +243,9 @@ fn fetch_requests_at(s: &mut App, id: &str, delays_ms: &'static [u64]) {
 }
 
 pub fn draft_reply(s: &mut App, reply: &str) {
-    s.composer = TextEdit::new(reply);
+    let draft = s.composer.text.trim_end();
+    let text = if draft.is_empty() { reply.to_string() } else { format!("{draft}\n{reply}") };
+    s.composer = TextEdit::new(text.as_str());
     s.composer.focused = true;
 }
 
@@ -366,7 +368,7 @@ pub fn send(s: &mut App, tx: &mut Tx) {
             s.send_status = "Sending…".into();
             let out = s.outbox.clone();
             std::thread::spawn(move || {
-                let result = client.send(&id, &message).map_err(|e| e.to_string());
+                let result = client.send(&id, &message);
                 let _ = out.send(Bg::Sent(id, result));
             });
         }
@@ -403,11 +405,16 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Board(key, rows) => {
                 s.boards.insert(key, rows);
             }
-            Bg::Sent(_, result) => {
-                s.send_status = match result {
-                    Ok(()) => "Sent".into(),
-                    Err(error) => format!("Not sent: {error}"),
+            Bg::Sent(id, result) => {
+                let status = match result {
+                    Ok(()) => "Sent".to_string(),
+                    Err(error) if error.maybe_delivered => format!("Sent, not confirmed: {}", error.message),
+                    Err(error) => format!("Not sent: {}", error.message),
                 };
+                if s.selected.as_deref() == Some(id.as_str()) {
+                    s.send_status = status.clone();
+                }
+                s.answer_status.insert(id, status);
             }
             Bg::Requests(id, requests, fetched_at) => {
                 s.reopen_undelivered(&requests, fetched_at);
