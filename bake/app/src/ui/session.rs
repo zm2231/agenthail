@@ -159,7 +159,13 @@ pub(crate) fn session_screen(s: &App) -> El {
     if open || (x.state(s.now) == State::NeedsYou && !sent) {
         center = center.child(waiting_card(s, x));
     } else if sent {
-        center = center.child(col().w_full().items_center().px(32.0).pb(12.0).child(pill(&icons::CHECK_CIRCLE, "Answer sent, waiting for the agent", done())));
+        let in_flight = s.answering.as_ref().is_some_and(|r| s.requests.get(&x.id).is_some_and(|list| list.iter().any(|q| &q.id == r)));
+        let (glyph, label, color) = match (in_flight, s.answer_status.get(&x.id)) {
+            (true, _) => (&icons::CLOCK, "Sending your answer…", muted()),
+            (_, Some(status)) if status.starts_with("Sent, not confirmed") => (&icons::CLOCK, "Answer sent, not confirmed yet", attention()),
+            _ => (&icons::CHECK_CIRCLE, "Answer sent, waiting for the agent", done()),
+        };
+        center = center.child(col().w_full().items_center().px(32.0).pb(12.0).child(pill(glyph, label, color)));
     }
     center = center.child(tabs(s, &id)).child(el().w_full().h(1.0).fill(line()));
     let empty = s.panes.get(&id).is_none_or(|p| p.blocks.is_empty());

@@ -63,6 +63,8 @@ pub struct App {
     pub answering: Option<String>,
     pub settled: HashMap<String, Option<std::time::Instant>>,
     pub answer_status: HashMap<String, String>,
+    pub sending: HashSet<String>,
+    pub requests_at: HashMap<String, std::time::Instant>,
     pub tab: Tab,
     pub work_pick: HashMap<String, String>,
     pub diff: rune_kit::diff::DiffState,
@@ -115,6 +117,8 @@ fn init() -> App {
         answering: None,
         settled: HashMap::new(),
         answer_status: HashMap::new(),
+        sending: HashSet::new(),
+        requests_at: HashMap::new(),
         tab: Tab::Conversation,
         work_pick: HashMap::new(),
         diff: rune_kit::diff::DiffState::new(Vec::new()),
@@ -359,13 +363,14 @@ pub fn open_project(s: &mut App, key: &str) {
 pub fn send(s: &mut App, tx: &mut Tx) {
     let message = s.composer.text.trim().to_string();
     let Some(id) = s.selected.clone() else { return };
-    if message.is_empty() {
+    if message.is_empty() || s.sending.contains(&id) {
         return;
     }
     s.composer = TextEdit::new("");
     match s.client.clone() {
         Some(client) => {
             s.send_status = "Sending…".into();
+            s.sending.insert(id.clone());
             let out = s.outbox.clone();
             std::thread::spawn(move || {
                 let result = client.send(&id, &message);
@@ -406,6 +411,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 s.boards.insert(key, rows);
             }
             Bg::Sent(id, result) => {
+                s.sending.remove(&id);
                 let status = match result {
                     Ok(()) => "Sent".to_string(),
                     Err(error) if error.maybe_delivered => format!("Sent, not confirmed: {}", error.message),
@@ -417,6 +423,10 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 s.answer_status.insert(id, status);
             }
             Bg::Requests(id, requests, fetched_at) => {
+                if s.requests_at.get(&id).is_some_and(|newest| *newest > fetched_at) {
+                    continue;
+                }
+                s.requests_at.insert(id.clone(), fetched_at);
                 s.reopen_undelivered(&requests, fetched_at);
                 s.requests.insert(id, requests);
             }

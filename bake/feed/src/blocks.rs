@@ -254,4 +254,3 @@ fn fold_agents(blocks: Vec<Block>) -> Vec<Block> {
     close(&mut out, &mut run);
     out
 }
-
