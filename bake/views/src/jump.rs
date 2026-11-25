@@ -2,7 +2,7 @@ use rune::{Color, El, Key, KeyEvent, TextStyle, Tx, col, icon, row, text, text_i
 use rune_theme_opencode::icons;
 
 use crate::data::{Target, plain, short_id};
-use crate::ui::{self, BODY_MED, META, META_MED, base, kit, strong, weak};
+use crate::ui::{self, BODY_MED, META, META_MED, kit, strong, weak};
 use crate::{App, open_target};
 
 pub struct Hit {
@@ -132,7 +132,7 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
             .radius(8.0)
             .on_press(move |s: &mut App| open_target(s, &t))
             .child(ui::avatar(&h.avatar, 22.0))
-            .child(col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(text(h.title.clone()).font(BODY_MED).color(strong()).truncate()).child(text(h.status.clone()).font(META).color(base()).truncate()))
+            .child(col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(text(h.title.clone()).font(BODY_MED).color(strong()).truncate()).child(text(h.status.clone()).font(META).color(weak()).truncate()))
             .child(text(h.badge.clone()).font(META).color(weak()));
         if active {
             r = r.fill(k.c.surface_raised_hover).child(icon(&icons::ENTER, 14.0).color(k.c.icon_base));

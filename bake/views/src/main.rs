@@ -10,7 +10,7 @@ mod work;
 
 use std::collections::{HashMap, HashSet};
 
-use rune::{AppSpec, Chrome, Cx, El, Key, KeyEvent, TextEdit, Tx};
+use rune::{AppSpec, Chrome, Cx, El, Key, KeyEvent, TextEdit, Tx, WindowOptions};
 use rune_kit::shell::{self, PaneState};
 
 use crate::data::{Data, Need, Target};
@@ -44,6 +44,7 @@ pub struct App {
     pub composer: TextEdit,
     pub need_ix: usize,
     pub open_folds: HashSet<String>,
+    pub open_lanes: HashSet<String>,
     pub to_lead: bool,
     pub to_open: bool,
     pub notice: Option<String>,
@@ -94,6 +95,7 @@ fn init() -> App {
         composer: TextEdit::new(""),
         need_ix: 0,
         open_folds: HashSet::new(),
+        open_lanes: HashSet::new(),
         to_lead: true,
         to_open: false,
         notice: None,
@@ -332,6 +334,7 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
 }
 
 fn view(s: &App, cx: &mut Cx<App>) -> El {
+    ui::set_dark(cx.system_dark());
     let mut layer = Vec::new();
     let body = match &s.screen {
         Screen::Now => {
@@ -359,7 +362,7 @@ fn view(s: &App, cx: &mut Cx<App>) -> El {
         layer.push(ui::notice(n));
     }
     layout::save(s);
-    rune_kit::root(body, layer)
+    rune_kit::root(ui::backdrop(body), layer)
 }
 
 fn main() {
@@ -372,5 +375,6 @@ fn main() {
         ..AppSpec::new("Agenthail", (1280.0, 800.0), init, view)
     })
     .chrome(chrome)
+    .window_options(WindowOptions { transparent: true, resizable: true, visible: true, ..Default::default() })
     .run();
 }

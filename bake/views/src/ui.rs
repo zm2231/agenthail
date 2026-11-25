@@ -14,8 +14,50 @@ pub const META: TextStyle = TextStyle::new(12.5, 440.0);
 pub const META_MED: TextStyle = TextStyle::new(12.5, 560.0);
 pub const LABEL: TextStyle = TextStyle::new(11.0, 600.0);
 
+static DARK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn set_dark(dark: bool) {
+    DARK.store(dark, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn dark() -> bool {
+    DARK.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 pub fn kit() -> &'static Kit {
-    rune_theme_opencode::kit(true)
+    static GLASS: std::sync::OnceLock<Kit> = std::sync::OnceLock::new();
+    if !dark() {
+        return rune_theme_opencode::kit(false);
+    }
+    GLASS.get_or_init(|| {
+        let mut k = rune_theme_opencode::kit(true).clone();
+        k.c.bg_deep = Color::TRANSPARENT;
+        k.c.border_muted = Color::WHITE.alpha(0.09);
+        k
+    })
+}
+
+pub fn glass_tint() -> Color {
+    oklch(0.13, 0.012, 275.0).alpha(0.58)
+}
+
+pub fn card_deep() -> Color {
+    oklch(0.16, 0.008, 275.0)
+}
+
+pub fn edge() -> Color {
+    if dark() { Color::WHITE.alpha(0.07) } else { kit().c.border_weak }
+}
+
+pub fn backdrop(body: El) -> El {
+    if !dark() {
+        return el().w_full().h_full().fill(kit().c.bg_deep).child(body);
+    }
+    el().w_full()
+        .h_full()
+        .child(el().absolute(0.0, 0.0).w_full().h_full().system_material(rune::SystemMaterial::Glass).fill(card_deep()))
+        .child(el().absolute(0.0, 0.0).w_full().h_full().fill(glass_tint()))
+        .child(body)
 }
 
 pub fn strong() -> Color {
@@ -48,6 +90,17 @@ pub fn avatar(name: &str, size: f32) -> El {
         .center()
         .fill(oklch(0.52, 0.13, hue(clean)))
         .child(text(initial).font(TextStyle::new(size * 0.62, 640.0)).color(Color::WHITE))
+}
+
+pub fn fit_words(t: &str, max: usize) -> String {
+    t.split(' ')
+        .map(|w| if w.chars().count() > max { format!("{}…", w.chars().take(max.saturating_sub(1)).collect::<String>()) } else { w.to_string() })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+pub fn title_text(t: &str, max_word: usize, lines: usize) -> El {
+    text(fit_words(t, max_word)).wrap().max_lines(lines)
 }
 
 pub fn spacer() -> El {
@@ -111,7 +164,7 @@ pub fn chip(glyph: &'static Icon, value: &str) -> El {
         .py(4.0)
         .radius(7.0)
         .fill(kit().c.surface_base)
-        .border(1.0, rule())
+        .border(1.0, edge())
         .child(icon(glyph, 13.0).color(kit().c.icon_base))
         .child(text(value.to_string()).font(META_MED).color(base()))
 }
@@ -186,7 +239,7 @@ pub fn mini_phase(phase: usize) -> El {
         };
         r = r.child(el().size(if i == phase { 14.0 } else { 8.0 }, 4.0).radius(2.0).fill(color));
     }
-    r.child(text(PHASES[phase.min(5)].to_string()).font(META_MED).color(base()).ml(6.0))
+    r.child(text(PHASES[phase.min(5)].to_string()).font(META).color(weak()).ml(6.0))
 }
 
 pub fn section_head(title: &str, count: Option<usize>, trailing: Option<El>) -> El {
@@ -203,7 +256,7 @@ pub fn section_head(title: &str, count: Option<usize>, trailing: Option<El>) -> 
 
 pub fn card(content: El) -> El {
     let k = kit();
-    col().w_full().radius(12.0).fill(k.c.surface_base).border(1.0, rule()).child(content)
+    col().w_full().radius(12.0).fill(k.c.surface_base).border(1.0, edge()).child(content)
 }
 
 pub fn notice(message: &str) -> El {
@@ -244,7 +297,7 @@ pub fn need_row(s: &App, i: usize, n: &Need, focused: bool) -> El {
     if let Some(l) = &n.label {
         meta = meta.child(id_label(l));
     }
-    let body = col().grow(1.0).shrink().min_w(0.0).gap(6.0).child(text(n.title.clone()).font(BODY_MED).color(strong()).max_lines(2).wrap()).child(meta);
+    let body = col().grow(1.0).shrink().min_w(0.0).gap(6.0).child(title_text(&n.title, 48, 2).font(BODY_MED).color(strong())).child(meta);
     let mut r = row()
         .key(format!("need-{i}"))
         .w_full()
@@ -310,7 +363,7 @@ pub fn strip(s: &App, current: Option<&str>) -> El {
         } else {
             tab = tab.child(text("viewing".to_string()).font(META).color(weak()));
         }
-        tab = if on { tab.fill(k.c.surface_raised_hover).border(1.0, rule()) } else { tab.hover(k.c.surface_raised_hover) };
+        tab = if on { tab.fill(k.c.surface_raised_hover).border(1.0, edge()) } else { tab.hover(k.c.surface_raised_hover) };
         r = r.child(tab);
     }
     r
@@ -352,7 +405,9 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -
                 .key(format!("need-{i}")),
         );
     }
-    sb = sb.section(needs);
+    if !matches!(s.screen, Screen::Now) {
+        sb = sb.section(needs);
+    }
     let mut order: Vec<&crate::data::Project> = s.d.projects.iter().collect();
     if let Some(cp) = current_project {
         order.sort_by_key(|p| p.key != cp);
@@ -485,7 +540,7 @@ pub fn pane_strip(i: usize, glyph: &'static Icon, count: Option<(usize, Color)>)
         .pt(14.0)
         .radius(10.0)
         .fill(k.c.surface_base)
-        .border(1.0, rule())
+        .border(1.0, edge())
         .hover(k.c.surface_raised_hover)
         .on_press(move |s: &mut App| crate::layout::expand_pane(s, i))
         .child(icon(glyph, 15.0).color(k.c.icon_base));
@@ -598,7 +653,7 @@ pub fn question_card(s: &App, ask: &crate::data::Ask, compact: bool) -> El {
         }
         let mut body = col().grow(1.0).shrink().min_w(0.0).gap(4.0).child(title);
         if !o.detail.is_empty() {
-            body = body.child(text(o.detail.clone()).font(META.lh(18.0)).color(base()).wrap().max_lines(if compact { 2 } else { 3 }));
+            body = body.child(text(o.detail.clone()).font(META.lh(18.0)).color(weak()).wrap().max_lines(if compact { 2 } else { 3 }));
         }
         let mut opt = row()
             .key(format!("opt-{i}"))
@@ -669,7 +724,7 @@ pub fn sessions_block(s: &App, compact: bool) -> El {
                 .py(4.0)
                 .radius(7.0)
                 .fill(k.c.surface_base)
-                .border(1.0, rule())
+                .border(1.0, edge())
                 .hover(k.c.surface_raised_hover)
                 .on_press(move |s: &mut App| {
                     s.sessions_project = if pname == "No project" { None } else { Some(pname.clone()) };

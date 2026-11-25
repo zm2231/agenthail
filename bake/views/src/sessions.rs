@@ -141,7 +141,7 @@ pub fn session_row(s: &App, x: &Session, depth: u8, selected: bool) -> El {
                 .child(row().gap(4.0).items_center().child(icon(&icons::BRANCH, 11.0).color(weak())).child(text(place.join(" · ")).font(META).color(weak()).truncate().shrink()))
                 .child(status),
         );
-    r = if selected { r.fill(k.c.surface_raised_hover).border(1.0, ui::rule()) } else { r.hover(k.c.surface_raised_hover) };
+    r = if selected { r.fill(k.c.surface_raised_hover).border(1.0, ui::edge()) } else { r.hover(k.c.surface_raised_hover) };
     r
 }
 
@@ -196,7 +196,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, layer: &mut Vec<El>) -> El {
         .py(6.0)
         .radius(8.0)
         .fill(k.c.surface_base)
-        .border(1.0, ui::rule())
+        .border(1.0, ui::edge())
         .child(icon(&icons::MAGNIFYING_GLASS, 14.0).color(k.c.icon_base))
         .child(
             text_input(&s.sessions_query, TextStyle::new(13.0, 440.0).lh(18.0))

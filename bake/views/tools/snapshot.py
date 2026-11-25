@@ -143,11 +143,41 @@ def main():
     ]
     hv = get("/api/v1/hosts")
     keep["hosts"] = [{"name": hv["host"]["name"], "state": hv["host"]["state"]}] + [{"name": x["name"], "state": x["state"], "sessionCount": x.get("sessionCount")} for x in hv.get("hosts", [])]
+    keep["actors"] = actors(keep)
     os.makedirs(os.path.dirname(os.path.abspath(OUT)), exist_ok=True)
     with open(OUT, "w") as f:
         json.dump(keep, f)
     print(OUT, len(sessions), "sessions", len(ledgers), "ledgers", sum(map(len, ledgers.values())), "items", len(requests), "with requests", len(transcripts), "transcripts")
 
+
+
+def actors(data):
+    known = {x["id"] for x in data["sessions"]}
+    wanted = set()
+    for items in data["ledgers"].values():
+        for it in items:
+            for t in it.get("timeline", []):
+                a = t.get("actor") or ""
+                if a and a not in known and " " not in a and not a.startswith("td:"):
+                    wanted.add(a)
+    out = {}
+    for a in sorted(wanted):
+        try:
+            v = get(f"/api/v1/session?id={enc(a)}")
+        except (OSError, ValueError):
+            continue
+        x = v.get("session") or {}
+        out[a] = {"alias": v.get("alias"), "name": x.get("name"), "surface": x.get("surface")}
+    return out
+
+
+def add_actors():
+    with open(OUT) as f:
+        data = json.load(f)
+    data["actors"] = actors(data)
+    print(len(data["actors"]), "actors")
+    with open(OUT, "w") as f:
+        json.dump(data, f)
 
 
 def add_transcripts(ids):
@@ -164,7 +194,9 @@ def add_transcripts(ids):
         json.dump(data, f)
 
 
-if len(sys.argv) > 2 and sys.argv[1] == "--add-transcript":
+if len(sys.argv) > 1 and sys.argv[1] == "--add-actors":
+    add_actors()
+elif len(sys.argv) > 2 and sys.argv[1] == "--add-transcript":
     add_transcripts(sys.argv[2:])
 else:
     main()

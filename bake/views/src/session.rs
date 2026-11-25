@@ -162,7 +162,7 @@ fn changes_card(ch: &Changes) -> El {
         .padding(14.0)
         .radius(12.0)
         .fill(k.c.surface_base)
-        .border(1.0, ui::rule())
+        .border(1.0, ui::edge())
         .child(
             row()
                 .w_full()
@@ -207,7 +207,7 @@ fn ask_block(s: &App, call: &Item) -> El {
                 .child(if o.recommended { text("Recommended".to_string()).font(META).color(k.c.text_accent) } else { col() }),
         );
     }
-    col().w_full().radius(12.0).fill(k.c.surface_base).border(1.0, ui::rule()).child(c)
+    col().w_full().radius(12.0).fill(k.c.surface_base).border(1.0, ui::edge()).child(c)
 }
 
 fn run_block(s: &App, key: String, items: &[&Item], last: bool, busy: bool) -> El {
@@ -254,7 +254,7 @@ fn run_block(s: &App, key: String, items: &[&Item], last: bool, busy: bool) -> E
                     .py(7.0)
                     .radius(8.0)
                     .fill(k.c.surface_base)
-                    .border(1.0, ui::rule())
+                    .border(1.0, ui::edge())
                     .child(Spinner::new().size(12.0).build(k))
                     .child(text(verb(call)).font(META_MED).color(k.c.text_accent).truncate().shrink()),
             );
@@ -370,7 +370,7 @@ pub fn composer(s: &App, placeholder: &str, to: Option<(String, String)>, layer:
         .max_w(780.0)
         .px(28.0)
         .pb(16.0)
-        .child(col().w_full().gap(8.0).padding(12.0).radius(14.0).fill(k.c.surface_raised).border(1.0, ui::rule()).child(input).child(controls))
+        .child(col().w_full().gap(8.0).padding(12.0).radius(14.0).fill(k.c.surface_raised).border(1.0, ui::edge()).child(input).child(controls))
 }
 
 pub fn work_rail(s: &App, id: &str) -> El {
@@ -383,7 +383,7 @@ pub fn work_rail(s: &App, id: &str) -> El {
             let item = w.id.clone();
             c = c
                 .child(row().w_full().items_center().child(ui::label("On this work")).child(ui::spacer()).child(ui::id_label(&crate::data::short_id(&w.id))))
-                .child(text(plain(&w.text)).font(BODY_MED).color(strong()).wrap_anywhere().max_lines(4))
+                .child(ui::title_text(&plain(&w.text), 30, 2).font(BODY_MED).color(strong()))
                 .child(ui::stepper(s.d.phase(w), &s.d.whose_move(w)).mt(4.0));
             let mut chips = row().gap(6.0).flex_wrap();
             if let Some(pr) = s.d.pr(w) {

@@ -119,7 +119,7 @@ pub fn hands_on_card(s: &App, i: usize, id: &str) -> El {
                 .child(ui::spacer())
                 .child(ui::ghost_keys(&[format!("⌘{}", i + 1).as_str()])),
         )
-        .child(text(if s.d.gist(x) == x.display.label { "No summary yet".to_string() } else { s.d.gist(x) }).font(META).color(base()).max_lines(2).wrap())
+        .child(text(if s.d.gist(x) == x.display.label { "No summary yet".to_string() } else { s.d.gist(x) }).font(META).color(weak()).max_lines(2).wrap())
         .child(row().w_full().items_center().child(status).child(ui::spacer()).child(text(x.project_name()).font(META).color(weak())));
     ui::card(c).key(format!("hands-{i}")).on_press(move |s: &mut App| go(s, Screen::Session(idc.clone())))
 }
@@ -147,7 +147,7 @@ pub fn moving_row(s: &App, i: usize, id: &str) -> El {
                 .min_w(0.0)
                 .gap(2.0)
                 .child(row().gap(6.0).items_center().child(text(ui::short_title(&s.d.title(x), 34)).font(META_MED).color(strong()).truncate().shrink()).child(text(x.project_name()).font(META).color(weak())))
-                .child(text(crate::data::plain(&what)).font(META).color(base()).max_lines(2).wrap()),
+                .child(text(crate::data::plain(&what)).font(META).color(weak()).max_lines(2).wrap()),
         )
 }
 

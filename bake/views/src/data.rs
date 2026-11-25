@@ -145,6 +145,18 @@ struct Raw {
     usage: Vec<Meter>,
     #[serde(default)]
     hosts: Vec<Host>,
+    #[serde(default)]
+    actors: HashMap<String, Actor>,
+}
+
+#[derive(Deserialize, Default)]
+struct Actor {
+    #[serde(default)]
+    alias: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    surface: Option<String>,
 }
 
 pub struct Project {
@@ -319,6 +331,10 @@ impl Data {
         for s in &raw.sessions {
             names.insert(s.id.clone(), title_of(s, &raw.ledgers));
         }
+        for (id, a) in &raw.actors {
+            let named = a.alias.as_deref().filter(|x| !x.is_empty()).map(|x| format!("@{x}")).or_else(|| a.name.clone().filter(|x| !x.is_empty()));
+            names.insert(id.clone(), named.unwrap_or_else(|| kind_and_id(a.surface.as_deref(), id)));
+        }
         let mut work = HashMap::new();
         for (key, rows) in raw.ledgers {
             for mut w in rows {
@@ -380,7 +396,7 @@ impl Data {
         if actor.contains(' ') {
             return actor.to_string();
         }
-        "a worker that has ended".into()
+        kind_and_id(None, actor)
     }
 
     pub fn hours(&self, at: &str) -> f64 {
@@ -808,4 +824,15 @@ fn capital(t: &str) -> String {
 
 pub fn short_id(id: &str) -> String {
     id.rsplit('-').next().unwrap_or(id).to_string()
+}
+
+fn kind_and_id(surface: Option<&str>, id: &str) -> String {
+    let short: String = id.trim_start_matches("td:").trim_start_matches("ses_").chars().take(6).collect();
+    let kind = match surface {
+        Some("claude") => "Claude",
+        Some("codex") => "Codex",
+        Some("notion") => "Notion",
+        _ => "Session",
+    };
+    format!("{kind} {short}")
 }

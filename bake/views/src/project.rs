@@ -43,10 +43,10 @@ pub fn work_card(s: &App, w: &Work, compact: bool) -> El {
         .padding(12.0)
         .radius(10.0)
         .fill(k.c.surface_base)
-        .border(1.0, if phase == 4 { k.c.warning.icon.alpha(0.35) } else { ui::rule() })
+        .border(1.0, if phase == 4 { k.c.warning.icon.alpha(0.35) } else { ui::edge() })
         .hover(k.c.surface_raised_hover)
         .on_press(move |s: &mut App| go(s, Screen::Work(id.clone())))
-        .child(text(plain(&w.text)).font(BODY_MED.lh(19.0)).color(strong()).wrap_anywhere().max_lines(if compact { 2 } else { 3 }));
+        .child(ui::title_text(&plain(&w.text), if compact { 26 } else { 22 }, 2).font(BODY_MED.lh(19.0)).color(strong()));
     c = c.child(ui::mini_phase(phase));
     let last = w.timeline.last().map(|t| s.d.ago(&t.at)).unwrap_or_default();
     c.child(
@@ -54,25 +54,56 @@ pub fn work_card(s: &App, w: &Work, compact: bool) -> El {
             .w_full()
             .gap(6.0)
             .items_center()
-            .child(text(who).font(META_MED).color(if phase == 4 { k.c.warning.icon } else { base() }).truncate().shrink())
+            .child(text(who).font(if phase == 4 { META_MED } else { META }).color(if phase == 4 { ui::needs_color() } else { weak() }).truncate().shrink())
             .child(ui::spacer())
             .child(text(last).font(META).color(weak()))
             .child(ui::id_label(&short_id(&w.id))),
     )
 }
 
-fn group(s: &App, title: &str, items: &[&Work], max: usize, empty: &str) -> El {
+pub const LANE_CAP: usize = 5;
+
+fn lane_more(s: &App, lane: String, total: usize) -> Option<El> {
+    if total <= LANE_CAP {
+        return None;
+    }
+    let k = kit();
+    let open = s.open_lanes.contains(&lane);
+    let label = if open { "Show fewer".to_string() } else { format!("{} more", total - LANE_CAP) };
+    Some(
+        row()
+            .key(format!("more-{lane}"))
+            .w_full()
+            .gap(6.0)
+            .items_center()
+            .px(10.0)
+            .py(8.0)
+            .radius(8.0)
+            .hover(k.c.surface_raised_hover)
+            .on_press(move |s: &mut App| {
+                if !s.open_lanes.remove(&lane) {
+                    s.open_lanes.insert(lane.clone());
+                }
+            })
+            .child(rune::icon(if open { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, 12.0).color(weak()))
+            .child(text(label).font(META_MED).color(weak())),
+    )
+}
+
+fn lane_items<'a>(s: &App, lane: &str, items: &'a [&'a Work]) -> &'a [&'a Work] {
+    if s.open_lanes.contains(lane) { items } else { &items[..items.len().min(LANE_CAP)] }
+}
+
+fn group(s: &App, key: &str, title: &str, items: &[&Work], empty: &str) -> El {
+    let lane = format!("{key}/{title}");
     let mut c = col().w_full().gap(8.0).child(ui::section_head(title, Some(items.len()), None));
     if items.is_empty() {
         c = c.child(text(empty.to_string()).font(META).color(weak()));
     }
-    for w in items.iter().take(max) {
+    for w in lane_items(s, &lane, items) {
         c = c.child(work_card(s, w, true));
     }
-    if items.len() > max {
-        c = c.child(text(format!("{} more", items.len() - max)).font(META).color(weak()));
-    }
-    c
+    c.children(lane_more(s, lane, items.len()))
 }
 
 fn crew_panel(s: &App, lead: Option<&str>) -> El {
@@ -105,7 +136,7 @@ fn crew_panel(s: &App, lead: Option<&str>) -> El {
                         .min_w(0.0)
                         .gap(2.0)
                         .child(row().gap(6.0).items_center().child(text(ui::short_title(&s.d.title(x), 30)).font(META_MED).color(strong()).truncate().shrink()).child(ui::spacer()).child(text(s.d.ago(&x.last_active)).font(META).color(weak())))
-                        .child(text(s.d.gist(x)).font(META).color(base()).max_lines(2).wrap()),
+                        .child(text(s.d.gist(x)).font(META).color(weak()).max_lines(2).wrap()),
                 ),
         );
     }
@@ -153,9 +184,9 @@ pub fn lead(s: &App, cx: &mut Cx<App>, key: &str, layer: &mut Vec<El>) -> El {
                 .pt(14.0)
                 .pb(24.0)
                 .child(crew_panel(s, p.lead.as_deref()))
-                .child(group(s, "Waiting on you", &cols[0], 3, "Nothing waits on you here."))
-                .child(group(s, "Now", &cols[1], 3, "Nothing is being built."))
-                .child(group(s, "Up next", &cols[2], 3, "The queue is empty.")),
+                .child(group(s, key, "Waiting on you", &cols[0], "Nothing waits on you here."))
+                .child(group(s, key, "Now", &cols[1], "Nothing is being built."))
+                .child(group(s, key, "Up next", &cols[2], "The queue is empty.")),
         );
     let main = match &p.lead {
         Some(lead) => {
@@ -208,11 +239,11 @@ pub fn board(s: &App, cx: &mut Cx<App>, key: &str, layer: &mut Vec<El>) -> El {
                 .padding(10.0)
                 .radius(10.0)
                 .fill(k.c.surface_base)
-                .border(1.0, ui::rule())
+                .border(1.0, ui::edge())
                 .hover(k.c.surface_raised_hover)
                 .on_press(move |s: &mut App| crate::open_target(s, &t))
                 .child(row().gap(6.0).items_center().child(rune::icon(glyph, 13.0).color(color)).child(text(l.kind.label().to_string()).font(META_MED).color(color)).child(ui::spacer()).child(text(s.d.ago(&l.at)).font(META).color(weak())))
-                .child(text(l.text.clone()).font(META).color(strong()).wrap_anywhere().max_lines(2)),
+                .child(ui::title_text(&l.text, 24, 2).font(META).color(strong())),
         );
     }
     let count = |kind| lines.iter().filter(|l| l.kind == kind).count();
@@ -231,12 +262,11 @@ pub fn board(s: &App, cx: &mut Cx<App>, key: &str, layer: &mut Vec<El>) -> El {
                 .child(text(title.to_string()).font(META_MED).color(if i == 0 { k.c.warning.icon } else { base() }))
                 .child(Badge::new(items.len().to_string()).variant(BadgeVariant::Subtle).build(k)),
         );
-        for w in items.iter().take(6) {
+        let lane = format!("{key}/{title}");
+        for w in lane_items(s, &lane, items) {
             c = c.child(work_card(s, w, false));
         }
-        if items.len() > 6 {
-            c = c.child(text(format!("{} more", items.len() - 6)).font(META).color(weak()).pl(4.0));
-        }
+        c = c.children(lane_more(s, lane, items.len()));
         if items.is_empty() {
             c = c.child(text("Empty".to_string()).font(META).color(weak()).pl(4.0));
         }
