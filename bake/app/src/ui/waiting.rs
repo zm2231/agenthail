@@ -94,7 +94,10 @@ fn pick_el(request: &str, qi: usize, siblings: Vec<String>, option: &feed::catal
     }
     let (request, id) = (request.to_string(), option.id.clone());
     el = el.on_press(move |s: &mut App| {
-        s.typed.remove(&format!("{request}|{qi}"));
+        let was_typed = s.typed.remove(&format!("{request}|{qi}")).is_some_and(|t| !t.text.trim().is_empty());
+        if was_typed {
+            s.picks.entry(request.clone()).or_default().retain(|p| !siblings.contains(p));
+        }
         toggle_pick(s, &request, &siblings, &id, multi)
     });
     el
