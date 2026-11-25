@@ -42,13 +42,17 @@ func (c *Claude) Requests(ctx context.Context, sess *surface.Session) (surface.R
 		state.Requests = c.prompts.requests(sess.ID)
 		return state, nil
 	}
-	listed, err := c.host.client.Session(ctx, sess.ID)
+	readCtx, cancel := context.WithTimeout(ctx, claudeHostListTimeout)
+	listed, err := c.host.client.Session(readCtx, sess.ID)
+	cancel()
 	switch {
 	case claudehost.IsCode(err, "not_open"), claudehost.IsCode(err, "held"), errors.Is(err, claudehost.ErrNotRunning):
+		c.host.forget()
 		return state, nil
 	case err != nil:
 		return state, fmt.Errorf("the Claude host running session %s did not answer: %w", sess.ID, err)
 	case listed.PID != sess.PID:
+		c.host.forget()
 		return state, nil
 	}
 	c.host.store(listed)
