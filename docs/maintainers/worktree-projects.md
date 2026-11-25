@@ -13,17 +13,26 @@ off.
 
 ## What counts as a worktree project
 
-`project-add` on a folder whose path is the root of a linked worktree (git's
-`--show-toplevel` for the folder is the folder itself, and its git directory
-is not the common directory) adds that folder as it is, without translating it
-to the main checkout. Every other add is unchanged:
+`project-add` on a folder that is the root of a linked worktree of a
+repository with a main checkout adds that folder as it is, without translating
+it to the main checkout. All three must hold:
+
+1. git's `--show-toplevel` for the folder is the folder itself;
+2. its git directory is not the common directory (a linked worktree, not the
+   main checkout or a submodule);
+3. the common directory is not a bare repository: `core.bare` in the common
+   directory's config is not true. `ResolveCatalogRepository` reads this
+   into a new `CommonBare` field; its existing `Bare` only says whether the
+   folder itself is inside the bare directory.
+
+Every other add is unchanged:
 
 - a folder below a worktree's root is translated to the main checkout as
   today, unless it lies inside a worktree project (below);
 - the main checkout, a submodule and a folder outside Git are unchanged;
-- a worktree of a bare repository is translated as today. A bare repository
-  has no main checkout, so every one of its worktrees is a peer and the
-  repository's project is the one that holds them.
+- a worktree of a bare repository is translated as today (condition 3). A
+  bare repository has no main checkout, so every one of its worktrees is a
+  peer and the repository's project is the one that holds them.
 
 The record is an added project like any other (`p-<uuid>`, title defaulting to
 the folder's name) with a new `worktree` flag on its `projects` row, stored by
@@ -113,9 +122,12 @@ has no such project and the session lands in the repository's project there.
   including sessions that were in the repository's project. Nothing is
   stopped or changed; their rows show the new project.
 - The repository's project keeps its lead, ledger, settings, links and archive
-  state. The add hands nothing over (`AddProject` gets no superseded project),
-  because the worktree project does not replace the repository's project; it
-  splits off part of it.
+  state. The add hands nothing over, because the worktree project does not
+  replace the repository's project; it splits off part of it. `addProject`
+  passes `AddProject` an empty superseded project for a worktree project. This
+  is what `implicitProjectID` already answers for any root that is not the
+  main checkout, and the implementation names it explicitly rather than
+  relying on that.
 - The worktree project starts with no lead and no ledger. `@lead` from its
   sessions has no lead to reach until one is set with `coordinator-set`.
   A session that leads the repository's project and happens to work in the
@@ -133,7 +145,11 @@ has no such project and the session lands in the repository's project there.
 - Its ledger stays under its id and comes back when the folder is added again
   (`removed_project_ledgers`), as for a removed subfolder project today.
 - Its lead is not handed to the repository's project, which has its own lead
-  and would refuse the hand-over. The lead stays with the removed id, and the
+  and would refuse the hand-over. `removeProject` passes `RemoveProject` an
+  empty fallback for a worktree project, so `handOverProjectTx` moves nothing
+  and removal succeeds whether or not the repository's project has a lead
+  (the same empty fallback `implicitProjectID` already gives any root that is
+  not the main checkout). The lead stays with the removed id, and the
   project stays listed while that lead is set, as for any removed added folder
   with a lead.
 - Adding the folder again takes back the id its ledger or lead is kept under:
@@ -156,8 +172,11 @@ Through the daemon's actions on a real repository with linked worktrees:
   in the worktree project;
 - the worktree project's lead and ledger are its own; the repository's lead is
   unchanged by the add;
-- removing it returns its sessions to the repository's project, and adding it
-  again takes back its lead;
+- removing it while both it and the repository's project have a lead
+  succeeds, leaves both leads under their own ids, returns its sessions to the
+  repository's project, and adding it again takes back its id and lead;
+- adding either worktree root of a bare repository with two worktrees answers
+  with the repository's project;
 - a session started with its own worktree from inside the worktree project
   gets a worktree under it and belongs to it;
 - the sweep never removes an added worktree project's folder;
