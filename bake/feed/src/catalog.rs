@@ -394,6 +394,16 @@ pub struct RequestLink {
     pub url: String,
 }
 
+pub fn suggests(suggested: Option<usize>, index: usize, label: &str) -> bool {
+    match suggested {
+        Some(pick) => pick == index,
+        None => {
+            let label = label.trim().to_lowercase();
+            label.ends_with("(recommended)") || label.ends_with("— recommended")
+        }
+    }
+}
+
 impl RequestLink {
     pub fn is_web(&self) -> bool {
         self.url.starts_with("https://") || self.url.starts_with("http://")
@@ -512,14 +522,14 @@ impl Client {
         Ok(serde_json::from_value(value["requests"].clone()).unwrap_or_default())
     }
 
-    pub fn respond(&self, session: &str, request: &str, choices: Vec<String>) -> std::result::Result<(), RespondError> {
+    pub fn respond(&self, session: &str, request: &str, choices: Vec<String>, answers: std::collections::BTreeMap<String, String>) -> std::result::Result<(), RespondError> {
         let key = format!("bake-respond-{}-{}", request, OffsetDateTime::now_utc().unix_timestamp_nanos());
         match self
             .agent
             .post(&format!("{}/api/v1/actions", self.base))
             .set("Authorization", &format!("Bearer {}", self.token))
             .set("Idempotency-Key", &key)
-            .send_json(serde_json::json!({"action": "respond", "sessionId": session, "requestId": request, "decision": {"choices": choices}}))
+            .send_json(serde_json::json!({"action": "respond", "sessionId": session, "requestId": request, "decision": {"choices": choices, "answers": answers}}))
         {
             Ok(_) => Ok(()),
             Err(ureq::Error::Status(code, response)) => Err(RespondError::from_status(code, &response.into_string().unwrap_or_default())),
@@ -562,6 +572,16 @@ mod respond_error_tests {
         assert!(!stale.maybe_delivered);
         assert_eq!(stale.message, "this request was already answered or has expired");
         assert_eq!(RespondError::from_status(500, "not json").message, "status code 500");
+    }
+
+    #[test]
+    fn only_the_named_suggestion_is_recommended() {
+        use super::suggests;
+        assert!(suggests(Some(1), 1, "Blue"));
+        assert!(!suggests(Some(1), 0, "Red (Recommended)"));
+        assert!(suggests(None, 0, "Red (Recommended)"));
+        assert!(!suggests(None, 0, "Not recommended"));
+        assert!(!suggests(None, 0, "Recommended reading list"));
     }
 
     #[test]

@@ -101,7 +101,23 @@ fn compound_el(s: &App, request: &feed::catalog::OpenRequest, busy: bool) -> El 
     let picks = s.picks.get(&request.id).cloned().unwrap_or_default();
     let questions = request.questions.clone().unwrap_or_default();
     let mut list = col().w_full().gap(12.0).pt(4.0);
-    for q in &questions {
+    let typed_for = |qi: usize| s.typed.get(&format!("{}|{qi}", request.id)).map(|t| t.text.trim().to_string()).unwrap_or_default();
+    for (qi, q) in questions.iter().enumerate() {
+        let key = format!("{}|{qi}", request.id);
+        let empty = rune::TextEdit::new("");
+        let edit = s.typed.get(&key).unwrap_or(&empty);
+        let lens = key.clone();
+        let other = text_input(edit, META)
+            .key(format!("other-{key}"))
+            .w_full()
+            .px(12.0)
+            .py(8.0)
+            .radius(10.0)
+            .fill(Color::WHITE.alpha(0.04))
+            .border(1.0, Color::WHITE.alpha(0.10))
+            .color(theme::text())
+            .placeholder("Or answer in your own words", faint())
+            .on_edit(move |s: &mut App| s.typed.entry(lens.clone()).or_insert_with(|| rune::TextEdit::new("")));
         let siblings: Vec<String> = q.options.iter().map(|o| o.id.clone()).collect();
         let hint = if q.multi_select { "Pick any" } else { "Pick one" };
         list = list.child(
@@ -111,15 +127,25 @@ fn compound_el(s: &App, request: &feed::catalog::OpenRequest, busy: bool) -> El 
                 .child(row().gap(8.0).items_center().child(text(q.question.clone()).font(BODY_BOLD).color(theme::text()).wrap()).child(text(hint).font(META).color(faint())))
                 .children(question_context(q))
                 .children(q.options.iter().enumerate().map(|(i, o)| {
-                    let recommended = q.suggested == Some(i) || o.label.to_lowercase().contains("recommended");
+                    let recommended = feed::catalog::suggests(q.suggested, i, &o.label);
                     pick_el(&request.id, siblings.clone(), o, q.multi_select, picks.contains(&o.id), recommended, busy)
-                })),
+                }))
+                .child(other),
         );
     }
-    let ready = !busy && questions.iter().all(|q| q.options.iter().any(|o| picks.contains(&o.id)));
-    let (id, chosen) = (request.id.clone(), picks.clone());
+    let mut chosen = picks.clone();
+    let mut answers = std::collections::BTreeMap::new();
+    for (qi, q) in questions.iter().enumerate() {
+        let own = typed_for(qi);
+        if !own.is_empty() {
+            chosen.retain(|p| !q.options.iter().any(|o| &o.id == p));
+            answers.insert(q.question.clone(), own);
+        }
+    }
+    let ready = !busy && questions.iter().enumerate().all(|(qi, q)| !typed_for(qi).is_empty() || q.options.iter().any(|o| picks.contains(&o.id)));
+    let id = request.id.clone();
     let submit = Button::new("Send answers").variant(if ready { ButtonVariant::Submit } else { ButtonVariant::Neutral }).icon(&icons::ARROW_UP).build(theme::kit()).key("pick-submit");
-    let submit = if ready { submit.on_press(move |s: &mut App| answer_request(s, &id, chosen.clone())) } else { submit.opacity(0.5) };
+    let submit = if ready { submit.on_press(move |s: &mut App| answer_request(s, &id, chosen.clone(), answers.clone())) } else { submit.opacity(0.5) };
     list.child(row().child(submit))
 }
 
@@ -138,7 +164,7 @@ pub(crate) fn waiting_choices(s: &App, x: &Session) -> (Option<String>, Vec<Choi
                 .map(|(i, o)| Choice {
                     label: o.label.replace(" (Recommended)", "").replace(" (recommended)", ""),
                     detail: o.description.clone(),
-                    recommended: q.suggested == Some(i) || o.label.to_lowercase().contains("recommended"),
+                    recommended: feed::catalog::suggests(q.suggested, i, &o.label),
                     request: Some((request.id.clone(), vec![o.id.clone()])),
                     reply: String::new(),
                 })
@@ -170,7 +196,7 @@ pub(crate) fn waiting_choices(s: &App, x: &Session) -> (Option<String>, Vec<Choi
                     let (head, tail) = split_option(label);
                     let tail = tail.trim_start_matches("recommended").trim_start_matches(',').trim().to_string();
                     Choice {
-                        recommended: label.to_lowercase().contains("recommended"),
+                        recommended: { let l = label.to_lowercase(); l.contains("recommended") && !l.contains("not recommended") },
                         reply: format!("Option {}: {}", i + 1, head),
                         label: head.replace(" — recommended", "").replace(" (recommended)", ""),
                         detail: tail,
@@ -216,7 +242,7 @@ pub(crate) fn choice_el(i: usize, c: Choice, busy: bool) -> El {
         return card_el.opacity(0.5);
     }
     match c.request {
-        Some((request, choices)) => card_el.on_press(move |s: &mut App| answer_request(s, &request, choices.clone())),
+        Some((request, choices)) => card_el.on_press(move |s: &mut App| answer_request(s, &request, choices.clone(), Default::default())),
         None => {
             let reply = c.reply.clone();
             card_el.on_press(move |s: &mut App| draft_reply(s, &reply))

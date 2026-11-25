@@ -65,6 +65,7 @@ pub struct App {
     pub answer_status: HashMap<String, String>,
     pub status_line: HashMap<String, String>,
     pub picks: HashMap<String, Vec<String>>,
+    pub typed: HashMap<String, TextEdit>,
     pub sending: HashSet<String>,
     pub requests_at: HashMap<String, std::time::Instant>,
     pub tab: Tab,
@@ -121,6 +122,7 @@ fn init() -> App {
         answer_status: HashMap::new(),
         status_line: HashMap::new(),
         picks: HashMap::new(),
+        typed: HashMap::new(),
         sending: HashSet::new(),
         requests_at: HashMap::new(),
         tab: Tab::Conversation,
@@ -275,7 +277,7 @@ pub fn draft_reply(s: &mut App, reply: &str) {
     s.composer.focused = true;
 }
 
-pub fn answer_request(s: &mut App, request: &str, choices: Vec<String>) {
+pub fn answer_request(s: &mut App, request: &str, choices: Vec<String>, answers: std::collections::BTreeMap<String, String>) {
     let Some(id) = s.selected.clone() else { return };
     let Some(client) = s.client.clone() else {
         s.send_status = "Fixture mode: not sent".into();
@@ -291,7 +293,7 @@ pub fn answer_request(s: &mut App, request: &str, choices: Vec<String>) {
     }
     let (out, request) = (s.outbox.clone(), request.to_string());
     std::thread::spawn(move || {
-        let result = client.respond(&id, &request, choices);
+        let result = client.respond(&id, &request, choices, answers);
         let _ = out.send(Bg::Answered(id, request, result));
     });
 }
