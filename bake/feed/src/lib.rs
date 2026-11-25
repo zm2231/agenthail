@@ -1,4 +1,5 @@
 pub mod blocks;
+pub mod question;
 pub mod catalog;
 pub mod edits;
 pub mod focus;

@@ -6,6 +6,7 @@ pub(crate) struct Choice {
     recommended: bool,
     request: Option<(String, Vec<String>)>,
     reply: String,
+    sources: Vec<String>,
 }
 
 pub(crate) fn plain(text: &str, max: usize) -> String {
@@ -13,9 +14,16 @@ pub(crate) fn plain(text: &str, max: usize) -> String {
     if t.chars().count() > max { format!("{}…", t.chars().take(max).collect::<String>()) } else { t }
 }
 
-pub(crate) fn recent_answers(s: &App, x: &Session) -> Vec<String> {
-    let Some(pane) = s.panes.get(&x.id) else { return Vec::new() };
-    feed::blocks::unanswered_assistant(&pane.blocks, 2)
+pub(crate) fn text_question(s: &App, x: &Session) -> Vec<(String, String)> {
+    s.panes.get(&x.id).map(|p| feed::question::open_question(p.transcript.items(), 2)).unwrap_or_default()
+}
+
+pub(crate) fn text_answered(s: &App, x: &Session) -> bool {
+    text_question(s, x).iter().any(|(id, _)| s.answered.contains(id))
+}
+
+pub(crate) fn recent_answers(s: &App, x: &Session) -> Vec<(String, String)> {
+    if text_answered(s, x) { Vec::new() } else { text_question(s, x) }
 }
 
 pub(crate) fn question_in(body: &str) -> Option<String> {
@@ -53,6 +61,7 @@ pub(crate) fn waiting_choices(s: &App, x: &Session) -> (Option<String>, Vec<Choi
                     recommended: q.suggested == Some(i) || o.label.to_lowercase().contains("recommended"),
                     request: Some((request.id.clone(), vec![o.id.clone()])),
                     reply: String::new(),
+                    sources: Vec::new(),
                 })
                 .collect();
             return (Some(q.question.clone()), choices, true);
@@ -65,11 +74,14 @@ pub(crate) fn waiting_choices(s: &App, x: &Session) -> (Option<String>, Vec<Choi
         let title = request.title.clone().or(request.description.clone()).unwrap_or_else(|| format!("{} wants to use {}", x.title(), request.tool));
         let choices = actions
             .into_iter()
-            .map(|(id, label)| Choice { recommended: id == "allow", label, detail: String::new(), request: Some((request.id.clone(), vec![id])), reply: String::new() })
+            .map(|(id, label)| Choice { recommended: id == "allow", label, detail: String::new(), request: Some((request.id.clone(), vec![id])), reply: String::new(), sources: Vec::new() })
             .collect();
         return (Some(title), choices, true);
     }
-    for body in recent_answers(s, x) {
+    let recent = recent_answers(s, x);
+    let sources: Vec<String> = recent.iter().map(|(id, _)| id.clone()).collect();
+    for (_, body) in &recent {
+        let body = body.clone();
         let options = feed::catalog::numbered_options(&body);
         if !options.is_empty() {
             let question = body.split("\n\n").map(str::trim).find(|p| p.contains('?') && feed::catalog::numbered_options(p).is_empty()).map(|p| plain(p, 320));
@@ -85,13 +97,14 @@ pub(crate) fn waiting_choices(s: &App, x: &Session) -> (Option<String>, Vec<Choi
                         label: head.replace(" — recommended", "").replace(" (recommended)", ""),
                         detail: tail,
                         request: None,
+                        sources: sources.clone(),
                     }
                 })
                 .collect();
             return (question, choices, false);
         }
     }
-    (recent_answers(s, x).first().and_then(|b| question_in(b)), Vec::new(), false)
+    (recent.first().and_then(|(_, b)| question_in(b)), Vec::new(), false)
 }
 
 pub(crate) fn choice_el(i: usize, c: Choice, busy: bool) -> El {
@@ -128,11 +141,12 @@ pub(crate) fn choice_el(i: usize, c: Choice, busy: bool) -> El {
     match c.request {
         Some((request, choices)) => card_el.on_press(move |s: &mut App| answer_request(s, &request, choices.clone())),
         None => {
-            let reply = c.reply.clone();
+            let (reply, sources) = (c.reply.clone(), c.sources.clone());
             card_el.on_press_tx(move |s: &mut App, tx: &mut Tx| {
                 send_text(s, reply.clone(), tx);
+                s.answered.extend(sources.iter().cloned());
                 if let Some(id) = s.selected.clone() {
-                    s.answered.insert(id);
+                    s.pending_text.insert(id, sources.clone());
                 }
             })
         }

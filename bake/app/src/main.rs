@@ -62,6 +62,7 @@ pub struct App {
     pub requests: HashMap<String, Vec<OpenRequest>>,
     pub answering: Option<String>,
     pub answered: HashSet<String>,
+    pub pending_text: HashMap<String, Vec<String>>,
     pub settled: HashMap<String, Option<std::time::Instant>>,
     pub answer_status: HashMap<String, String>,
     pub tab: Tab,
@@ -115,6 +116,7 @@ fn init() -> App {
         requests: HashMap::new(),
         answering: None,
         answered: HashSet::new(),
+        pending_text: HashMap::new(),
         settled: HashMap::new(),
         answer_status: HashMap::new(),
         tab: Tab::Conversation,
@@ -241,6 +243,13 @@ fn fetch_requests_at(s: &mut App, id: &str, delays_ms: &'static [u64]) {
                 }
             }
         });
+    }
+}
+
+fn mark_question_answered(s: &mut App, id: &str) {
+    if let Some(pane) = s.panes.get(id) {
+        let ids: Vec<String> = feed::question::open_question(pane.transcript.items(), 2).into_iter().map(|(id, _)| id).collect();
+        s.answered.extend(ids);
     }
 }
 
@@ -381,9 +390,6 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Snapshot(sessions) => {
                 s.sessions = sessions;
                 s.now = OffsetDateTime::now_utc();
-                let now = s.now;
-                let still: HashSet<String> = s.sessions.iter().filter(|x| x.state(now) == feed::catalog::State::NeedsYou).map(|x| x.id.clone()).collect();
-                s.answered.retain(|id| still.contains(id));
                 s.status = "live".into();
                 if s.selected.is_none() {
                     if let Some(id) = ui::ordered(s).first().map(|x| x.id.clone()) {
@@ -403,10 +409,16 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Board(key, rows) => {
                 s.boards.insert(key, rows);
             }
-            Bg::Sent(_, result) => {
+            Bg::Sent(id, result) => {
+                let pending = s.pending_text.remove(&id).unwrap_or_default();
                 s.send_status = match result {
                     Ok(()) => "Sent".into(),
-                    Err(error) => format!("Not sent: {error}"),
+                    Err(error) => {
+                        for source in pending {
+                            s.answered.remove(&source);
+                        }
+                        format!("Not sent: {error}")
+                    }
                 };
             }
             Bg::Requests(id, requests, fetched_at) => {
@@ -420,11 +432,11 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 }
                 let status = match result {
                     Ok(()) => {
-                        s.answered.insert(id.clone());
+                        mark_question_answered(s, &id);
                         "Answered".to_string()
                     }
                     Err(error) if error.maybe_delivered => {
-                        s.answered.insert(id.clone());
+                        mark_question_answered(s, &id);
                         format!("Sent, not confirmed: {}", error.message)
                     }
                     Err(error) => {
