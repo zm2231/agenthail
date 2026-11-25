@@ -281,7 +281,7 @@ func TestAProjectPostReachesLiveConversationsAndSkipsOnesItCannotReach(t *testin
 	local, _, _ := widgetOnTwoHosts(t)
 	repo := local.fake.sessions["local-a"].Cwd
 	removed := widgetRepo(t, "https://github.com/example/widget.git")
-	for _, id := range []string{"live", "ended", "ended-pinned", "ended-old", "archived", "folder-gone"} {
+	for _, id := range []string{"live", "ended", "ended-pinned", "ended-old", "archived", "folder-gone", "unloaded"} {
 		cwd, lastActive := repo, time.Now().Add(-time.Hour)
 		switch id {
 		case "ended-pinned", "ended-old":
@@ -290,6 +290,12 @@ func TestAProjectPostReachesLiveConversationsAndSkipsOnesItCannotReach(t *testin
 			cwd = removed
 		}
 		moveSession(t, local, id, cwd, lastActive)
+	}
+	unloaded := local.fake.sessions["unloaded"]
+	unloaded.Status, unloaded.Ended = surface.StatusNotLoaded, true
+	local.fake.sessions["unloaded"] = unloaded
+	if err := local.reg.RecordObservedSession(unloaded); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := local.reg.PinSession("ended-pinned", time.Now()); err != nil {
 		t.Fatal(err)
@@ -345,7 +351,7 @@ func TestAProjectPostReachesLiveConversationsAndSkipsOnesItCannotReach(t *testin
 		return response, members, len(local.fake.delivered()) - before
 	}
 	response, members, delivered := post()
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"skipped":4`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"skipped":5`) {
 		t.Fatalf("a post every reachable member got: status=%d body=%s", response.Code, response.Body)
 	}
 	want := map[string]broadcast.Recipient{
@@ -353,6 +359,7 @@ func TestAProjectPostReachesLiveConversationsAndSkipsOnesItCannotReach(t *testin
 		"ended":        {SessionID: "ended", Outcome: broadcast.OutcomeSkipped, Detail: "ended"},
 		"ended-pinned": {SessionID: "ended-pinned", Outcome: broadcast.OutcomeSkipped, Detail: "ended"},
 		"archived":     {SessionID: "archived", Outcome: broadcast.OutcomeSkipped, Detail: "archived"},
+		"unloaded":     {SessionID: "unloaded", Outcome: broadcast.OutcomeSkipped, Detail: "ended"},
 		"folder-gone":  {SessionID: "folder-gone", Outcome: broadcast.OutcomeSkipped, Detail: "its folder " + removed + " is gone"},
 	}
 	if len(members) != len(want) {
@@ -380,6 +387,32 @@ func TestAProjectPostReachesLiveConversationsAndSkipsOnesItCannotReach(t *testin
 	}
 	if message := response.Body.String(); !strings.Contains(message, local.daemon.resolveDisplay("live")+" failed: ") || strings.Contains(message, local.daemon.resolveDisplay("ended")+" failed") {
 		t.Fatalf("the failure names the wrong members: %s", message)
+	}
+}
+
+func TestAProjectPostWhoseOnlyMembersAnotherHostSkippedIsRefused(t *testing.T) {
+	local, remote, _ := pairedFederationWith(t, func(*federation) {})
+	repo := widgetRepo(t, "https://github.com/example/gadget.git")
+	moveSession(t, remote, "gadget-worker", repo, time.Now())
+	remote.daemon.discoverCatalog(context.Background())
+	local.daemon.discoverCatalog(context.Background())
+	testkit.Eventually(t, "the paired host's conversation mirrored in the project", 10*time.Second, func() bool {
+		for _, project := range local.snapshot(t).Projects {
+			if project.ID == "repo:github.com/example/gadget" {
+				return project.SessionCount >= 1
+			}
+		}
+		return false
+	})
+	if err := os.RemoveAll(repo); err != nil {
+		t.Fatal(err)
+	}
+	response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "#gadget", "message": "release notes"})
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "#gadget has no reachable members other than the sender; skipped ") || !strings.Contains(response.Body.String(), repo+" is gone") {
+		t.Fatalf("a post every member of which was skipped: status=%d body=%s", response.Code, response.Body)
+	}
+	if delivered := remote.fake.delivered(); len(delivered) != 0 {
+		t.Fatalf("the paired host delivered %q", delivered)
 	}
 }
 

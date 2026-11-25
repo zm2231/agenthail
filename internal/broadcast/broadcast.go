@@ -353,7 +353,7 @@ func unreachable(record registry.CatalogSessionState, item Project, archive regi
 			return fmt.Sprintf("its folder %s is gone", cwd)
 		}
 	}
-	if record.Session.Status == surface.StatusOffline {
+	if record.Session.Ended || record.Session.Status == surface.StatusOffline {
 		return "ended"
 	}
 	return ""

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -80,7 +81,7 @@ func (d *Daemon) doChannelSend(ctx context.Context, _ principal, request dashboa
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", sendErr.Error())
 	}
 	result.Recipients = append(result.Recipients, remote...)
-	if target.ProjectID != "" && result.Reached() == 0 && len(legs) == 0 {
+	if target.ProjectID != "" && result.Reached() == 0 && !slices.ContainsFunc(legs, func(leg channelHostLeg) bool { return leg.State != channelLegReached }) {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", d.noMembers(target, result))
 	}
 	return d.channelReply(result, legs, request.ExceptHosts)
