@@ -30,6 +30,8 @@ var workCloseReasons = []string{"duplicate", "wontfix", "obsolete"}
 
 const maxWorkFieldRunes = 8000
 
+const maxWorkTitleRunes = 80
+
 // WorkFields describe a work item. From names the item or clause it was found from.
 type WorkFields struct {
 	Type        WorkType `json:"type,omitempty"`
@@ -94,6 +96,17 @@ func fieldLength(name, value string) error {
 		return refuse("a work item's %s is at most %d characters; put the rest in a file and point to it", name, maxWorkFieldRunes)
 	}
 	return nil
+}
+
+func workTitle(text string) (string, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", refuse("a work item needs its text")
+	}
+	if n := utf8.RuneCountInString(text); n > maxWorkTitleRunes {
+		return "", refuse("a work item's title is at most %d characters (this one is %d); keep it to what the work is and put the rest in the description", maxWorkTitleRunes, n)
+	}
+	return text, nil
 }
 
 func normalLabels(labels []string) []string {
@@ -168,9 +181,9 @@ func (b *Board) planWorkEdit(req WorkRequest) (EventType, any, string, error) {
 	c := req.Change
 	var changed []string
 	if c.Text != nil {
-		text := strings.TrimSpace(*c.Text)
-		if text == "" {
-			return "", nil, "", refuse("a work item needs its text")
+		text, err := workTitle(*c.Text)
+		if err != nil {
+			return "", nil, "", err
 		}
 		c.Text, changed = &text, append(changed, "text")
 	}
