@@ -29,7 +29,12 @@ The daemon owns the host. Every 30 seconds, and once at startup, it calls
    `subscribe` for its sessions to a client of a later protocol, and a resume
    of a conversation it still runs returns its process. `logs` came later
    without a protocol change; a host shipped before it answers `invalid`,
-   which the daemon reports as a host that predates session logs.
+   which the daemon reports as a host that predates session logs. `session`
+   and `sessionCommands` came later the same way: `list` leaves each
+   session's commands out, so it stays a few kilobytes however many skills a
+   session has, and the daemon reads one session's open requests or commands
+   from the host that runs it. A host that answers `unknown method` is read
+   through `list`, which still carries its commands.
 3. If nothing answers, take an exclusive `flock` on
    `~/.agenthail/claude-host/lock`. If another process holds it, a host is
    starting: wait for its `hello`.
@@ -221,7 +226,13 @@ after that. A request no host holds cannot be answered. That covers a session
 whose process exited, one not open in any host, and one whose Claude runs on
 without a host. Answering it is `stale`.
 
-The daemon derives what a session waits on from the hosts' listings. A
+The daemon derives what a session waits on from the hosts' listings, read at
+most once a second under a 2 s deadline. Under a load average of 77-218,
+listings that carried every session's commands (about 100 KB a session) took
+up to 1.6 s, while a call with a small answer took at most 170 ms. Answering a
+request reads that session's requests from its own host instead, so a host
+that misses a listing cannot fail the answer, and a request the host took an
+answer to leaves the cached listing at once. A
 `stale` answer makes it observe the turn again, which withdraws the request's
 permission ask and clears the catalog row's `waiting_on`. The Mac, iOS
 and web clients drop the card on a `409` before reading the requests again.
