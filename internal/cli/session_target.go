@@ -96,7 +96,16 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 		if adapter == nil {
 			return nil, nil, fmt.Errorf("unknown surface %q", kindText)
 		}
-		session, live, err := a.resolveSession(ctx, kind, adapter, selector, selector)
+		lookup := selector
+		if kind == surface.KindCodex && a.registry() != nil && !surface.NoTarget(selector) {
+			sid, err := a.registry().ResolveSurfaceTarget(kind, selector)
+			if err == nil {
+				lookup = sid
+			} else if !errors.Is(err, sql.ErrNoRows) {
+				return nil, nil, fmt.Errorf("%s target: %w", kind, err)
+			}
+		}
+		session, live, err := a.resolveSession(ctx, kind, adapter, lookup, selector)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s target: %w", kind, err)
 		}

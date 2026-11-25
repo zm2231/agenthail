@@ -153,7 +153,7 @@ func (a *App) remoteMatches(ctx context.Context, hostID, target string) ([]remot
 			return nil, targets.AmbiguousError{Message: fmt.Sprintf("ambiguous target %q: %s", target, strings.Join(answer.Ambiguous, "; "))}
 		}
 		if len(answer.Errors) > 0 {
-			return nil, fmt.Errorf("ambiguous target %q: %s", target, strings.Join(answer.Errors, "; "))
+			return nil, fmt.Errorf("resolve target %q: %s", target, strings.Join(answer.Errors, "; "))
 		}
 		return answer.Matches, nil
 	}

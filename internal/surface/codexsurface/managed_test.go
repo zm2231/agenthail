@@ -154,7 +154,7 @@ func TestCodexSearchFallsBackToManagedRuntime(t *testing.T) {
 	defer server.Close()
 	codex := surfacetest.InDaemon(NewCodex(""))
 	codex.desktopURL = server.URL
-	results, err := codex.SearchSessions(context.Background(), "managed", 10)
+	results, err := codex.SearchSessions(context.Background(), "managed", 10, nil)
 	if err != nil || len(results) != 1 || results[0].Session.Transport != codexTransportManaged {
 		t.Fatalf("results=%+v err=%v", results, err)
 	}
@@ -267,7 +267,7 @@ func managedDiscovery(method string, _ map[string]any) map[string]any {
 		return map[string]any{"data": []any{managedThreadID}}
 	case "thread/read":
 		return map[string]any{"thread": thread}
-	case "thread/search":
+	case "thread/search", "thread/search/stream":
 		return map[string]any{"data": []any{map[string]any{"thread": thread}}}
 	}
 	return nil

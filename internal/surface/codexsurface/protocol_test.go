@@ -80,16 +80,22 @@ func TestCodexDesktopDiscoveryNeverBootstrapsManagedRuntime(t *testing.T) {
 	}
 }
 
-func TestCodexResolveExactNameUsesHistorySearch(t *testing.T) {
+func TestCodexResolveExactNameListsThreadsWithoutHistorySearch(t *testing.T) {
 	bridge := startDesktopBridge(t, func(method string) string {
-		if method == "thread/search" {
-			return `{"result":{"data":[{"thread":{"id":"thread-1","name":"Q","cwd":"/tmp","source":"vscode","status":{"type":"idle"}},"snippet":"test"}]}}`
+		if method == "thread/loaded/list" {
+			return `{"result":{"data":[]}}`
+		}
+		if method == "thread/list" {
+			return `{"result":{"data":[{"id":"thread-1","name":"Q","cwd":"/tmp","source":"vscode","status":{"type":"idle"}}]}}`
 		}
 		return ""
 	})
 	session, err := surfacetest.InDaemon(NewCodex(bridge.URL)).Resolve(context.Background(), "Q")
-	if err != nil || session == nil || session.ID != "thread-1" || session.Transport != codexTransportDesktop || countMethod(bridge.Methods(), "thread/search") != 1 {
+	if err != nil || session == nil || session.ID != "thread-1" || session.Transport != codexTransportDesktop || countMethod(bridge.Methods(), "thread/search") != 0 {
 		t.Fatalf("session=%+v methods=%v err=%v", session, bridge.Methods(), err)
+	}
+	if strings.Contains(bridge.Request("thread/list"), "searchTerm") {
+		t.Fatalf("thread/list used the case-sensitive title filter: %s", bridge.Request("thread/list"))
 	}
 }
 
@@ -219,8 +225,11 @@ func TestCodexObserveReadsThroughDesktopWhenTheDaemonIsStopped(t *testing.T) {
 
 func TestCodexResolveRejectsDuplicateExactNamesAcrossPages(t *testing.T) {
 	bridge := startDesktopBridge(t, func(method string) string {
-		if method == "thread/search" {
-			return `{"result":{"data":[{"thread":{"id":"thread-1","name":"duplicate","cwd":"/one"}},{"thread":{"id":"thread-2","name":"DUPLICATE","cwd":"/two"}}]}}`
+		if method == "thread/loaded/list" {
+			return `{"result":{"data":[]}}`
+		}
+		if method == "thread/list" {
+			return `{"result":{"data":[{"id":"thread-1","name":"duplicate","cwd":"/one"},{"id":"thread-2","name":"DUPLICATE","cwd":"/two"}]}}`
 		}
 		return ""
 	})

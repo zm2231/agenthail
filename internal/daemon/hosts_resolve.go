@@ -36,6 +36,8 @@ type resolveResponse struct {
 	Ambiguous []string `json:"ambiguous,omitempty"`
 }
 
+var apiResolveTimeout = 10 * time.Second
+
 func (d *Daemon) apiResolveHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
@@ -46,7 +48,7 @@ func (d *Daemon) apiResolveHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "A target is required.")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), apiResolveTimeout)
 	defer cancel()
 	if r.URL.Query().Get("scope") == "remote" {
 		if _, fromHost := requestingHost(r.Context()); fromHost {
@@ -112,6 +114,9 @@ func (d *Daemon) resolveLocal(ctx context.Context, target string) ([]resolveMatc
 	for _, adapter := range d.Surfaces {
 		session, resolveErr := adapter.Resolve(ctx, lookup)
 		if resolveErr != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, fmt.Errorf("resolve %q did not finish: %w", target, ctxErr)
+			}
 			continue
 		}
 		alias, _ := d.Registry.ReverseAlias(session.ID)
@@ -149,13 +154,17 @@ func (d *Daemon) resolveRemote(ctx context.Context, candidates []*pairedHost, ta
 				continue
 			}
 			var status hosts.StatusError
-			if errors.As(err, &status) && status.Status == http.StatusConflict {
+			if errors.As(err, &status) && (status.Status == http.StatusConflict || status.Code == "resolve_failed") {
 				line := fmt.Sprintf("%s: %s", host.record.Name, status.Message)
 				if status.Code == "ambiguous_target" && len(status.Candidates) > 0 {
 					result.Ambiguous = append(result.Ambiguous, line)
 				} else {
 					result.Errors = append(result.Errors, line)
 				}
+				continue
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("%s: resolving %q did not finish: %v", host.record.Name, target, ctxErr))
 				continue
 			}
 		}

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -32,7 +31,7 @@ func (d *Daemon) dashboardSearchHandler(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusNotImplemented, "request_failed", "Codex history search is unavailable")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), surface.SessionSearchBudget)
 	defer cancel()
 	stored, err := d.Registry.SearchSessions(surface.KindCodex, query, 20)
 	if err != nil {
@@ -43,7 +42,7 @@ func (d *Daemon) dashboardSearchHandler(w http.ResponseWriter, r *http.Request) 
 	for _, session := range stored {
 		results = append(results, surface.SessionSearchResult{Session: session, Snippet: "Saved by Agenthail"})
 	}
-	remote, remoteErr := searcher.SearchSessions(ctx, query, 20)
+	remote, remoteErr := searcher.SearchSessions(ctx, query, 20, nil)
 	remoteError := ""
 	if remoteErr != nil {
 		if errors.Is(remoteErr, surface.ErrUnsupported) {

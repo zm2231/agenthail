@@ -259,6 +259,9 @@ func (d *Daemon) serve(ws *websocket.Conn) {
 			response = map[string]any{"id": id, "error": result["error"]}
 		}
 		conn.write(response)
+		if result["closeAfterReply"] == true {
+			return
+		}
 		if !failed && method == "thread/readState/update" {
 			threadID, _ := params["threadId"].(string)
 			d.Notify("thread/readState/changed", map[string]any{"threadId": threadID, "readState": result["readState"]})

@@ -563,7 +563,7 @@ final class AgenthailAPI: @unchecked Sendable {
         components.path = "/api/v1/search"
         components.queryItems = [URLQueryItem(name: "surface", value: "codex"), URLQueryItem(name: "q", value: query)]
         guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
-        return try await get(path)
+        return try await request(path, method: "GET", body: nil, timeout: 40)
     }
 
     func prompts(sessionID: String? = nil, query: String = "", before: String? = nil, limit: Int = 50, host: String? = nil) async throws -> PromptsPage {

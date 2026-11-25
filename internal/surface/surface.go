@@ -458,8 +458,12 @@ type SessionSearchResult struct {
 	Snippet string  `json:"snippet,omitempty"`
 }
 
+// Codex reads every saved conversation per query: 5-9 s on 8 GB of history.
+const SessionSearchBudget = 30 * time.Second
+
+// found receives matches as they arrive; the returned results are authoritative.
 type SessionSearcher interface {
-	SearchSessions(ctx context.Context, query string, limit int) ([]SessionSearchResult, error)
+	SearchSessions(ctx context.Context, query string, limit int, found func(SessionSearchResult)) ([]SessionSearchResult, error)
 }
 
 type ReadinessChecker interface {

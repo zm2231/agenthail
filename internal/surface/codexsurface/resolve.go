@@ -14,15 +14,14 @@ func (c *Codex) Resolve(ctx context.Context, target string) (*surface.Session, e
 	if surface.LooksLikeUUID(target) {
 		return c.resolveID(ctx, target)
 	}
-	results, err := c.SearchSessions(ctx, target, 20)
+	sessions, err := c.resolveCandidates(ctx)
 	if err != nil {
 		return nil, err
 	}
 	lower := strings.ToLower(target)
 	var matches []surface.Session
 	var exactMatches []surface.Session
-	for _, result := range results {
-		session := result.Session
+	for _, session := range sessions {
 		if strings.EqualFold(session.Name, target) {
 			exactMatches = append(exactMatches, session)
 			continue
@@ -83,7 +82,41 @@ func (c *Codex) readThreadObject(ctx context.Context, conn codexClient, id strin
 	return thread, nil
 }
 
-func (c *Codex) SearchSessions(ctx context.Context, query string, limit int) ([]surface.SessionSearchResult, error) {
+// Codex's title filter is case-sensitive and ignores cwd and ID, so the resolver matches every addressable thread itself.
+func (c *Codex) resolveCandidates(ctx context.Context) ([]surface.Session, error) {
+	runtimes := c.openRuntimes(ctx)
+	defer runtimes.Close()
+	clients := runtimes.readers()
+	if len(clients) == 0 {
+		return nil, runtimes.unavailable()
+	}
+	var err error
+	for _, client := range clients {
+		var sessions []surface.Session
+		if sessions, err = c.listAddressable(ctx, client, runtimes); err == nil {
+			return sessions, nil
+		}
+	}
+	return nil, err
+}
+
+func (c *Codex) listAddressable(ctx context.Context, client codexClient, runtimes *codexRuntimes) ([]surface.Session, error) {
+	params := codexThreadListParams(codexSweepPageLimit)
+	var all []surface.Session
+	for {
+		page, next, err := c.listPageCursor(ctx, client, params, runtimes)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+		if next == "" || next == params["cursor"] {
+			return all, nil
+		}
+		params["cursor"] = next
+	}
+}
+
+func (c *Codex) SearchSessions(ctx context.Context, query string, limit int, found func(surface.SessionSearchResult)) ([]surface.SessionSearchResult, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, fmt.Errorf("Codex history search requires a query")
@@ -93,7 +126,12 @@ func (c *Codex) SearchSessions(ctx context.Context, query string, limit int) ([]
 	}
 	runtimes := c.openRuntimes(ctx)
 	defer runtimes.Close()
-	clients := runtimes.readers()
+	var clients []codexClient
+	for _, client := range []codexClient{runtimes.managed, runtimes.desktop} {
+		if client != nil {
+			clients = append(clients, client)
+		}
+	}
 	if len(clients) == 0 {
 		return nil, runtimes.unavailable()
 	}
@@ -104,16 +142,26 @@ func (c *Codex) SearchSessions(ctx context.Context, query string, limit int) ([]
 		"sortDirection": "desc",
 		"archived":      false,
 	}
+	seen := map[string]bool{}
+	partial := func(entry map[string]any) {
+		if result, ok := runtimes.searchResult(entry); ok && found != nil && !seen[result.Session.ID] {
+			seen[result.Session.ID] = true
+			found(result)
+		}
+	}
 	var response map[string]any
 	var err error
 	for _, client := range clients {
-		if response, err = client.Request(ctx, "thread/search", params, 5*time.Second); err == nil {
+		if response, err = searchHistory(ctx, client, params, partial); err == nil || ctx.Err() != nil {
 			break
 		}
 	}
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "method not found") || strings.Contains(err.Error(), "-32601") {
+		if codexMethodMissing(err) {
 			return nil, surface.ErrUnsupported
+		}
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("Codex history search did not finish in time: %w", ctx.Err())
 		}
 		return nil, fmt.Errorf("Codex history search: %w", err)
 	}
@@ -122,15 +170,67 @@ func (c *Codex) SearchSessions(ctx context.Context, query string, limit int) ([]
 	output := make([]surface.SessionSearchResult, 0, len(values))
 	for _, value := range values {
 		entry, _ := value.(map[string]any)
-		thread, _ := entry["thread"].(map[string]any)
-		if thread == nil {
-			thread = entry
+		if result, ok := runtimes.searchResult(entry); ok {
+			output = append(output, result)
 		}
-		session := runtimes.session(thread)
-		if session.ID == "" {
-			continue
-		}
-		output = append(output, surface.SessionSearchResult{Session: session, Snippet: transcript.String(entry, "snippet")})
 	}
 	return output, nil
+}
+
+// The connection carries only this search, so every partial on it is this search's.
+func searchHistory(ctx context.Context, client codexClient, params map[string]any, partial func(map[string]any)) (map[string]any, error) {
+	notifier, streams := client.(codexNotifier)
+	if !streams {
+		return client.Request(ctx, "thread/search", params, surface.SessionSearchBudget)
+	}
+	type reply struct {
+		response map[string]any
+		err      error
+	}
+	done := make(chan reply, 1)
+	go func() {
+		response, err := client.Request(ctx, "thread/search/stream", params, surface.SessionSearchBudget)
+		done <- reply{response, err}
+	}()
+	drain := func() {
+		for _, event := range notifier.DrainNotifications() {
+			if event.Method != "thread/search/partial" {
+				continue
+			}
+			entries, _ := event.Params["data"].([]any)
+			for _, entry := range entries {
+				if value, ok := entry.(map[string]any); ok {
+					partial(value)
+				}
+			}
+		}
+	}
+	for {
+		select {
+		case <-notifier.Notified():
+			drain()
+		case result := <-done:
+			drain()
+			if result.err != nil && codexMethodMissing(result.err) && ctx.Err() == nil {
+				return client.Request(ctx, "thread/search", params, surface.SessionSearchBudget)
+			}
+			return result.response, result.err
+		}
+	}
+}
+
+func codexMethodMissing(err error) bool {
+	return strings.Contains(strings.ToLower(err.Error()), "method not found") || strings.Contains(err.Error(), "-32601")
+}
+
+func (r *codexRuntimes) searchResult(entry map[string]any) (surface.SessionSearchResult, bool) {
+	thread, _ := entry["thread"].(map[string]any)
+	if thread == nil {
+		thread = entry
+	}
+	session := r.session(thread)
+	if session.ID == "" {
+		return surface.SessionSearchResult{}, false
+	}
+	return surface.SessionSearchResult{Session: session, Snippet: transcript.String(entry, "snippet")}, true
 }

@@ -26,11 +26,20 @@ func (a *App) cmdSearch(args []string) error {
 	if !ok {
 		return fmt.Errorf("Codex history search is unavailable")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), surface.SessionSearchBudget)
 	defer cancel()
 	query := strings.Join(positional[1:], " ")
 	if len([]rune(strings.TrimSpace(query))) < 3 {
 		return fmt.Errorf("Codex history search requires at least 3 characters")
+	}
+	asJSON := hasFlag(args, "--json")
+	printed := map[string]bool{}
+	show := func(result surface.SessionSearchResult) {
+		if asJSON || printed[result.Session.ID] {
+			return
+		}
+		printed[result.Session.ID] = true
+		fmt.Printf("%s  %s  %s\n", result.Session.ID, result.Session.Name, result.Snippet)
 	}
 	results := make([]surface.SessionSearchResult, 0)
 	if a.registry() != nil {
@@ -42,7 +51,10 @@ func (a *App) cmdSearch(args []string) error {
 			results = append(results, surface.SessionSearchResult{Session: session, Snippet: "Saved by Agenthail"})
 		}
 	}
-	remote, err := searcher.SearchSessions(ctx, query, 20)
+	for _, result := range results {
+		show(result)
+	}
+	remote, err := searcher.SearchSessions(ctx, query, 20, show)
 	remoteError := ""
 	if err != nil {
 		if errors.Is(err, surface.ErrUnsupported) {
@@ -60,18 +72,17 @@ func (a *App) cmdSearch(args []string) error {
 			}
 		}
 	}
-	if hasFlag(args, "--json") {
+	if asJSON {
 		return emit(map[string]any{"results": results, "remoteError": remoteError})
+	}
+	for _, result := range results {
+		show(result)
 	}
 	if remoteError != "" {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", remoteError)
 	}
-	if len(results) == 0 {
+	if len(printed) == 0 {
 		fmt.Println("no Codex conversations matched")
-		return nil
-	}
-	for _, result := range results {
-		fmt.Printf("%s  %s  %s\n", result.Session.ID, result.Session.Name, result.Snippet)
 	}
 	return nil
 }
