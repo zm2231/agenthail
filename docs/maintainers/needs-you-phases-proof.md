@@ -51,31 +51,31 @@ Defaults:
 - An ask may carry a default for a single-question ask: `default`, an option index, and `defaultAfterMinutes` (15 to 10,080). Both or neither.
 - No default is the normal case: the ask waits for an answer, however long. An agent leaves the default out whenever no option is safe to take without the person.
 - A default whose option label or description reads as an outward act (sending, merging, deploying, paying, deleting: the same word list ledger questions use) is refused: `"an outward default; leave default out so the person answers"`.
-- At the deadline an open ask with a default expires (`state` `expired`, as ledger questions do today), and the session gets one message: `[agenthail] No answer by <time>; the default applies: <option label>.` The item's question is resolved as defaulted.
+- At the deadline an open ask with a default expires (`state` `expired`), and the session gets one message: `[agenthail] No answer by <time>; the default applies: <option label>.` The item's question is resolved as defaulted. This differs on purpose from the person's ledger questions, where only a default declared to keep breadth applies itself and any other waits for the person's ack: those decide what the person asked for, while an ask on held work decides how the agent proceeds, and the agent chose to offer the default.
 
-The ledger question:
+The question on the item:
 
-- The ledger gains a question kind `decision` and a work item target. A `decision` question is created only by the daemon, for a linked ask. Its payload adds:
+- Two new ledger event types carry it, `work_item.question` and `work_item.question.resolved`. They are new types rather than a new kind of the existing `question` event, so a host that does not know them skips them: an older host never mirrors one into a person ask of its own. Only the daemon writes them, for a linked ask. The question payload:
 
   | Field | Meaning |
   |---|---|
+  | `questionId` | issued by the project's ledger owner, like every other ledger id (the type is added to the id-issuing types, so replay protects it) |
   | `itemId` | the work item it is on |
   | `askId`, `askHostId` | the ask that carries it, and the host that holds that ask |
-  | `prompts` | the ask's questions: text, options (label, does), recommended option, links |
+  | `title`, `prompts` | the ask's title and questions: text, options (label, does), recommended option, links |
   | `defaultOption`, `deadlineMs` | the default option index and when it applies, or absent |
 
-  `text` is the ask's title. `recommendation` is the recommended option's label of the first question, or empty. A `decision` question needs no recommendation and no default.
-- `ledger question --to <item>` also accepts a work item for the person's own scope, framing and outward questions. Those keep today's rules: the person answers, through the ledger ask.
-- The ledger's ask reconciler skips questions that carry `askId`: they already have their ask, so the person never sees one question twice.
-- `question.resolved` gains `by` (`person`, or the session id of the lead that answered) and `withdrawn` (the agent withdrew the ask). The answer text is the message the session received. Only `scope`, `framing` and `outward` questions require the person's words; a `decision` question records whoever the ask was answered by, since a lead may answer its worker.
+- The resolution payload: `questionId`, `answer` (the message the session received), `by` (`person`, or the session id of the lead that answered), and `outcome` (`answered`, `defaulted` or `withdrawn`). A lead may answer its worker, so this question does not require the person's words; the person's intent questions keep requiring them.
+- `ledger question --to <item>` also accepts a work item for the person's own scope, framing and outward questions. Those stay `question` events with today's rules: the person answers, through the ledger ask.
 
 Keeping the ask and the question in step:
 
-- The asks table holds the truth about routing and answering. The ledger question follows it. Each ask row gains `work_item`, `ledger_key` and `ledger_question`.
-- Raising writes the ask row first, then the question. When the project's ledger is kept by a paired host that cannot be reached, the ask still goes out: the session is not held up by the ledger. A reconciler, run whenever an ask changes and every 30 seconds, writes the missing question for any linked ask with no `ledger_question`, and the resolution for any closed ask whose question is still open. Both writes are idempotent: the question id is stored on the ask row in the same transaction that confirms the ledger write, and a resolution for a question already resolved is a no-op.
+- The asks table holds the truth about routing and answering. The item's question follows it. Each ask row gains `work_item`, `ledger_key` and `ledger_question`.
+- Every write about one ask carries a ref derived from the ask: `item-question:<askHostId>:<askId>` for the question and `item-question-resolved:<askHostId>:<askId>` for its resolution, stored as the ledger event's `ref`. The ledger already keeps refs unique per project (`ledger_events_ref`) and inserts a repeated ref as a no-op. The owner, given a ref it already holds, returns the question id it issued the first time instead of issuing another.
+- Raising writes the ask row first, then sends the question to the project's ledger, through its owner when a paired host keeps it. When the owner cannot be reached, or its reply is lost after it committed, the ask still goes out: the session is not held up by the ledger. A reconciler, run whenever an ask changes and every 30 seconds, sends the question again for any linked ask with no `ledger_question`, and the resolution for any closed ask whose question is still open. Because both carry the same ref every time, a retry after an unknown result yields the one question the owner already holds, and its id is then stored on the ask row.
 - When the item stops being the session's (handed off, parked, taken over, submitted, done) while its ask is open, the ask stays open and stays linked. The item shows the open question; whoever holds the item next sees it.
 
-What the person and other sessions see on the item: an open `decision` question puts `person` in the item's `waitsOn`, puts the item in the board lane `you`, and shows on the item page as the question with its options and recommendation. The board lane `you` is set from the item's own open questions and no longer from every open ask of its holder, so a session holding two items marks only the one it asked about. A plain ask from a holder with no linked item still marks all of its items, as today.
+What the person and other sessions see on the item: an open question on the item puts `person` in the item's `waitsOn`, puts the item in the board lane `you`, and shows on the item page as the question with its options and recommendation. The board lane `you` is set from the item's own open questions and no longer from every open ask of its holder, so a session holding two items marks only the one it asked about. A plain ask from a holder with no linked item still marks all of its items, as today.
 
 Answering the ask (by the person, from any surface, or by the lead) unblocks the session as today and resolves the item's question in the same write path.
 
@@ -111,8 +111,8 @@ The wait ends when the session's next turn starts, whoever starts it, or when th
 
 | Field | Meaning |
 |---|---|
-| `key` | unique within the page and stable while the item stays: `ask:<askId>`, `request:<sessionId>`, `turn:<sessionId>:<turnId>`, `parked:<workItem>`, `review:<workItem>`, `stopped:<sessionId>` |
-| `workItem`, `workTitle` | the work item it concerns, when there is one (today only on `parked`) |
+| `key` | unique within the page and stable while the item stays: `ask:<askId>`, `request:<sessionId>`, `turn:<sessionId>:<turnId>`, `parked:<ledgerKey>:<workItem>`, `review:<ledgerKey>:<workItem>`, `stopped:<sessionId>`. Work item ids are unique only within one ledger (two projects whose keys end in the same name can both have a first item with the same id), so every key built from a work item names its ledger |
+| `workItem`, `workTitle`, `ledgerKey` | the work item it concerns and the ledger that holds it, when there is one (today only `workItem` and `workTitle`, only on `parked`) |
 | `phase` | that item's phase key (part 2), when there is one |
 
 Clients key items by `key`, replacing the `sessionId` + `workItem` pair.
@@ -128,7 +128,7 @@ An ask linked to an item (1a) stays kind `ask` in its usual group and gains `wor
 
 Review from the list:
 
-- A new person-only action `work-review`, `{"workItem", "decision": "approve" | "reject", "note"}`, posted to `/api/v1/actions` with an `Idempotency-Key`. Any session, one acting for the person included, is refused `403 forbidden`.
+- A new person-only action `work-review`, `{"ledgerKey", "workItem", "decision": "approve" | "reject", "note"}`, posted to `/api/v1/actions` with an `Idempotency-Key`. Any session, one acting for the person included, is refused `403 forbidden`.
 - The ledger takes a review only with the person's words. The daemon records the person's decision (`Approved.` or `Sent back.`, then the note) as an utterance captured by `ask`, said to the item's assignee, exactly as an answer to a ledger question is recorded today, then writes the approve or reject with that utterance. A reject needs a note.
 - Approving records the review; it does not merge anything. Merging stays a decision about the pull request.
 - An item the ledger has already moved out of review is `409 stale`.
@@ -178,7 +178,7 @@ What this gives for the cases the work-first view depends on:
 
 Phase is derived, never stored. The board fold in `internal/ledger` already replays every event in order on every host. It gains per-item marks, kept the way the review state is kept (`work_review.go`): the sequence of the last move into `in_progress`, of the newest `PR opened` line, of the newest Verify mark, and whether a `PR merged` line exists. `WorkItem` gains `phase` and `phaseSince` (when the item entered its current phase), filled in when the board is read. Because the fold is deterministic, every host that holds the ledger computes the same phase.
 
-The PR lines stay the text the watcher writes today: they are already the contract `mergedPR` in takeover and `itemPRs` in the board read. Only lines with source `pr-item` count, which the daemon alone writes. The prefixes move into one parser in `internal/ledger` that takeover, the board page and the phase all use, replacing the two copies of the prefixes in `internal/ledger/work_takeover.go` and `internal/daemon/ledger_board.go`. Existing ledgers keep their meaning and need no migration.
+The PR lines stay the text the watcher writes today: they are already the contract `mergedPR` in takeover and `itemPRs` in the board read. Only lines with source `pr-item` count. A session cannot set that source: a work request's `Source` is not read from its JSON, and only the PR watcher sets it. A paired host can replay any event, this one included, but a paired host is already trusted with every ledger event, the person's captured words and approvals among them; replay is accepted only from a paired host (`hostOnly`), and takeover's `--then done` already rests on the same line. So the phase adds no new trust boundary. Making replicated events verifiable per host would be a change to ledger sync as a whole, not to phases. The prefixes move into one parser in `internal/ledger` that takeover, the board page and the phase all use, replacing the two copies of the prefixes in `internal/ledger/work_takeover.go` and `internal/daemon/ledger_board.go`. Existing ledgers keep their meaning and need no migration.
 
 ### The Verify mark
 
@@ -216,10 +216,12 @@ An item holds at most 30 steps. Files are referenced by link, never stored in th
 
 ### Writing
 
-- A new ledger event `work_item.proof`, `{itemId, step}`. Without `step.id` it adds a step; with one it replaces that step's fields. `{itemId, remove: "<id>"}` removes one.
+- A new ledger event `work_item.proof`. Every proof write goes to the project's ledger owner, as every work write does (`/api/v1/ledger/work` is routed to the owner), and the owner plans it against its own board under the board lock. So the owner alone allocates step ids and enforces the 30-step cap, and every host applies the owner's events in the owner's order and ends with the same proof.
+- Each write is one operation: `add` (a new step, id issued by the owner; the type is added to the id-issuing types so replay protects the ids), `replace` (every field of one step) or `remove` (one step). `replace` and `remove` carry `base`, the step's `version` as the writer last read it; the owner refuses a stale base with `409 conflict` and the current step, so two concurrent edits never silently overwrite each other. Each step's `version` is the owner sequence of its last write.
+- Each write carries an operation id from the writer (the MCP tool and the CLI make one per call), stored as the event's `ref`: `proof:<itemId>:<operationId>`. A retry after an unknown result is a no-op that returns the step as the first write left it, so an add is never doubled.
 - Only the item's holder writes proof, while the item is `in_progress`, `blocked` or `in_review` (the holder can still correct a step after submitting). A reviewer comments instead.
-- CLI: `agenthail ledger proof <item> --title "..." --expected "..." [--observed "..."] [--outcome pass|fail|pending] [--revision <sha>] [--link <title>=<url>]... [--step <id>]`, and `agenthail ledger proof <item> --remove <id>`.
-- MCP: `agenthail_ledger_write {"op": "work", "request": {"action": "proof", "itemId", "proof": {...}}}`.
+- CLI: `agenthail ledger proof <item> --title "..." --expected "..." [--observed "..."] [--outcome pass|fail|pending] [--revision <sha>] [--link <title>=<url>]...` adds; `--step <id> --base <version>` replaces; `--remove <id> --base <version>` removes.
+- MCP: `agenthail_ledger_write {"op": "work", "request": {"action": "proof", "itemId", "proof": {"op": "add" | "replace" | "remove", "step": {...}, "base": <version>, "operationId": "..."}}}`.
 
 ### Reading
 
@@ -233,13 +235,13 @@ An item holds at most 30 steps. Files are referenced by link, never stored in th
 |---|---|---|
 | `asks.work_item`, `asks.ledger_key`, `asks.ledger_question` | registry | one dated named migration adding the three columns, empty by default. Existing asks stay unlinked; they close as they do today. |
 | `turn_ends.waiting_person` | registry | the same migration adds the column, empty by default. No past turn waits. |
-| question kind `decision`, work item target, payload fields `itemId`, `askId`, `askHostId`, `prompts`, `defaultOption`; `question.resolved` fields `by`, `withdrawn` | ledger events | none: new fields on new events. Existing questions read as before. |
+| `work_item.question` and `work_item.question.resolved` events; `question` accepts a work item as its target | ledger events | none: new event types, which older hosts skip. Existing questions read as before. |
 | log type `verify` | ledger events | none |
 | `phase_labels` event | ledger events | none; a project without one uses the defaults |
-| `work_item.proof` event | ledger events | none |
+| `work_item.proof` event, id-issuing | ledger events | none |
 | phase | derived | none: existing ledgers get a phase from their own history the first time a board is read, including items done long ago and items taken over |
 
-Paired hosts update together. A host that does not know a new event type skips it when building its board, as the board fold already skips unknown types, so it shows no phase labels or proof until it updates. A write of a new kind sent to a project ledger kept by an older host is refused by that host with its error; there is no fallback path.
+Paired hosts update together. Every addition to the ledger is a new event type or a new log type, never a new meaning for an existing event, because an older host reads an existing event its own way. A host that does not know a new event type skips it when building its board, as the board fold already skips unknown types, so it shows no phase labels, proof or item questions until it updates; a `verify` log shows there as an ordinary log. A write of a new kind sent to a project ledger kept by an older host is refused by that host with its error; there is no fallback path.
 
 ## API, MCP and CLI summary
 
@@ -268,8 +270,8 @@ The tool budget test pins the always-loaded tool JSON. The two end-turn fields a
 
 Through public boundaries only:
 
-- Ledger: a phase for each rule above from event sequences, including sent back after Verify, a second PR after Verify, PRs closed unmerged, takeover with each `--then`, and an item with a merged PR whose holder ended; a log line naming a PR without source `pr-item` changes nothing; labels rename without changing keys; proof add, replace, remove, holder-only, limits, and stale after a send-back.
-- Daemon: an ask from a session holding one item shows on that item with its options and recommendation, appears once in `/api/v1/decisions` with the item, and answering it delivers to the session and resolves the item's question; the same with the ledger kept by an unreachable paired host, resolved once it is back; a lead's answer is recorded with the lead as `by`; a default applies at its deadline and an outward default is refused; end-turn `waitingOn` shows as a `turn` item, pushes once, and leaves when the next turn starts; a worker's wait goes under "Handled by a lead"; an `in_review` item appears as `review` and `work-review` approves it with the person's words and refuses a session.
+- Ledger: a phase for each rule above from event sequences, including sent back after Verify, a second PR after Verify, PRs closed unmerged, takeover with each `--then`, and an item with a merged PR whose holder ended; a log line naming a PR without source `pr-item` changes nothing; labels rename without changing keys; proof add, replace, remove, holder-only, the cap, stale after a send-back, a stale `base` refused, a repeated operation id applied once, and two replicas replaying the same owner events ending with the same proof; a repeated item-question ref yields the first question's id.
+- Daemon: an ask from a session holding one item shows on that item with its options and recommendation, appears once in `/api/v1/decisions` with the item, and answering it delivers to the session and resolves the item's question; the same with the ledger kept by an unreachable paired host, and with the owner's reply lost after it committed, ending with exactly one question, resolved once the owner is back; a host without the new event types raises no ask of its own for an item question; two ledgers with the same item id give two distinct Needs-you keys; a lead's answer is recorded with the lead as `by`; a default applies at its deadline and an outward default is refused; end-turn `waitingOn` shows as a `turn` item, pushes once, and leaves when the next turn starts; a worker's wait goes under "Handled by a lead"; an `in_review` item appears as `review` and `work-review` approves it with the person's words and refuses a session.
 - The existing decisions, ledger question and parked tests keep passing unchanged except where an item's key changes.
 
 ## Not in this design
