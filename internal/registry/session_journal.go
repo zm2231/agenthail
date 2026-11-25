@@ -152,6 +152,14 @@ func (r *Registry) LowerSessionJournalHistoryBoundary(sessionID string, before i
 }
 
 func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retention SessionJournalRetention) (SessionJournalEntry, bool, error) {
+	return r.appendSessionJournalEntry(input, retention, false)
+}
+
+func (r *Registry) AppendSessionJournalSourceError(input SessionJournalEntry, retention SessionJournalRetention) (SessionJournalEntry, bool, error) {
+	return r.appendSessionJournalEntry(input, retention, true)
+}
+
+func (r *Registry) appendSessionJournalEntry(input SessionJournalEntry, retention SessionJournalRetention, sourceError bool) (SessionJournalEntry, bool, error) {
 	if strings.TrimSpace(input.SessionID) == "" || strings.TrimSpace(input.Kind) == "" {
 		return SessionJournalEntry{}, false, fmt.Errorf("session journal entry requires session and kind")
 	}
@@ -176,6 +184,15 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 	defer tx.Rollback()
 	if _, err := tx.Exec(journalStateEnsureSQL, input.SessionID); err != nil {
 		return SessionJournalEntry{}, false, err
+	}
+	if sourceError {
+		replaced, err := replaceRepeatedSourceError(tx, input, retention)
+		if err != nil || replaced.Seq > 0 {
+			if err != nil {
+				return SessionJournalEntry{}, false, err
+			}
+			return replaced, true, tx.Commit()
+		}
 	}
 	var next int64
 	if err := tx.QueryRow(journalNextSeqSQL, input.SessionID).Scan(&next); err != nil {
@@ -233,6 +250,49 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 		return SessionJournalEntry{}, false, err
 	}
 	return input, true, tx.Commit()
+}
+
+// A failure repeating the last row takes its place under a new sequence: followers are woken and the journal does not grow.
+func replaceRepeatedSourceError(tx journalWriter, input SessionJournalEntry, retention SessionJournalRetention) (SessionJournalEntry, error) {
+	newest, err := scanSessionJournalEntry(tx.QueryRow(`SELECT session_id,seq,position,kind,provider_key,payload,observed_at,bytes,body_ref,payload_codec FROM session_journal WHERE session_id=? ORDER BY seq DESC LIMIT 1`, input.SessionID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return SessionJournalEntry{}, nil
+	}
+	if err != nil || newest.Kind != input.Kind || newest.BodyRef != "" || input.BodyRef != "" {
+		return SessionJournalEntry{}, err
+	}
+	var lastPosition int64
+	if err := tx.QueryRow(`SELECT MAX(position) FROM session_journal WHERE session_id=?`, input.SessionID).Scan(&lastPosition); err != nil || uint64(lastPosition) != newest.Position {
+		return SessionJournalEntry{}, err
+	}
+	var previous, next map[string]any
+	if json.Unmarshal(newest.Payload, &previous) != nil || json.Unmarshal(input.Payload, &next) != nil {
+		return SessionJournalEntry{}, nil
+	}
+	for _, key := range []string{"itemId", "providerKey", "version", "ts"} {
+		delete(previous, key)
+		delete(next, key)
+	}
+	if !reflect.DeepEqual(previous, next) {
+		return SessionJournalEntry{}, nil
+	}
+	if input.ProviderKey != newest.ProviderKey && input.ProviderKey != "" {
+		if _, found, err := sessionJournalByProviderKey(tx, input.SessionID, input.ProviderKey); err != nil || found {
+			return SessionJournalEntry{}, err
+		}
+	}
+	var current int64
+	if err := tx.QueryRow(journalNextSeqSQL, input.SessionID).Scan(&current); err != nil {
+		return SessionJournalEntry{}, err
+	}
+	input.Seq, input.Position = uint64(current+1), newest.Position
+	if _, err := tx.Exec(`UPDATE session_journal SET payload_codec=0,seq=?,provider_key=?,payload=?,observed_at=?,bytes=?,payload_role=? WHERE session_id=? AND seq=?`, input.Seq, input.ProviderKey, input.Payload, formatTimestamp(input.ObservedAt), input.Bytes, journalRole(input.Kind, input.Payload), input.SessionID, newest.Seq); err != nil {
+		return SessionJournalEntry{}, err
+	}
+	if _, err := tx.Exec(journalStateAdvanceSQL, input.Seq, input.Bytes-newest.Bytes, 0, input.SessionID); err != nil {
+		return SessionJournalEntry{}, err
+	}
+	return input, trimSessionJournal(tx, input.SessionID, retention)
 }
 
 func sameSessionJournalContent(existing, input SessionJournalEntry, existingBody []byte, existingBodyFound bool) bool {
