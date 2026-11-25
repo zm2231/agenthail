@@ -4,9 +4,12 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -21,6 +24,7 @@ import (
 type fakeHost struct {
 	mu    sync.Mutex
 	reply map[string]func() any
+	asked map[string]int
 }
 
 func (f *fakeHost) set(method string, reply func() any) {
@@ -29,23 +33,33 @@ func (f *fakeHost) set(method string, reply func() any) {
 	f.reply[method] = reply
 }
 
-func startFakeHost(t *testing.T) (string, *fakeHost) {
+func fakeHome(t *testing.T) string {
 	t.Helper()
 	home, err := os.MkdirTemp("", "ah-silent-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(home) })
-	socket := claudehost.SocketPath(home)
-	if err := os.MkdirAll(filepath.Dir(socket), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(claudehost.SocketPath(home)), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	return home
+}
+
+func startFakeHost(t *testing.T) (string, *fakeHost) {
+	t.Helper()
+	home := fakeHome(t)
+	return home, serveFakeHost(t, claudehost.SocketPath(home))
+}
+
+func serveFakeHost(t *testing.T, socket string) *fakeHost {
+	t.Helper()
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = listener.Close() })
-	host := &fakeHost{reply: map[string]func() any{}}
+	host := &fakeHost{reply: map[string]func() any{}, asked: map[string]int{}}
 	go func() {
 		for {
 			conn, err := listener.Accept()
@@ -63,6 +77,7 @@ func startFakeHost(t *testing.T) (string, *fakeHost) {
 				}
 				_ = json.Unmarshal(line, &request)
 				host.mu.Lock()
+				host.asked[request.Method]++
 				reply := host.reply[request.Method]
 				host.mu.Unlock()
 				var answer any
@@ -78,7 +93,13 @@ func startFakeHost(t *testing.T) (string, *fakeHost) {
 			}()
 		}
 	}()
-	return home, host
+	return host
+}
+
+func (f *fakeHost) count(method string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.asked[method]
 }
 
 func hostResult(result any) func() any {
@@ -86,40 +107,72 @@ func hostResult(result any) func() any {
 }
 
 func hostError(code, message string) func() any {
-	return func() any { return map[string]any{"id": 1, "error": map[string]string{"code": code, "message": message}} }
+	return func() any {
+		return map[string]any{"id": 1, "error": map[string]string{"code": code, "message": message}}
+	}
 }
 
 func TestARequestIsAnsweredWhileTheListingOfEveryHostIsTooSlow(t *testing.T) {
 	home, host := startFakeHost(t)
 	session := surface.Session{ID: "slow-listing", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: os.Getpid()}
-	var open atomic.Bool
-	open.Store(true)
-	listed := func() any {
-		listing := claudehost.Session{SessionID: session.ID, PID: session.PID, PermissionMode: "default"}
-		if open.Load() {
-			listing.Requests = []claudehost.Request{{RequestID: "r1", Kind: "question", CreatedAt: time.Now()}}
-		}
-		return map[string]any{"id": 1, "result": listing}
-	}
-	host.set("session", listed)
-	host.set("respond", func() any {
-		open.Store(false)
-		return map[string]any{"id": 1, "result": map[string]string{"outcome": "answered"}}
-	})
+	asked := claudehost.Session{SessionID: session.ID, PID: session.PID, PermissionMode: "default", Requests: []claudehost.Request{{RequestID: "r1", Kind: "question", CreatedAt: time.Now()}}}
+	host.set("list", hostResult(claudehost.Listing{Sessions: []claudehost.Session{asked}}))
 	claude := NewClaude(nil, home)
 	ctx := context.Background()
-	state, err := claude.Requests(ctx, &session)
-	if err != nil || len(state.Requests) != 1 || state.Requests[0].ID != "r1" || state.PermissionMode != "default" {
-		t.Fatalf("requests while the listing does not answer = %+v, %v; want r1", state, err)
+	if waiting, known := claude.hostWaiting(ctx, &session); !known || waiting == nil || waiting.ID != "r1" {
+		t.Fatalf("waiting while the host lists = %+v (known %v); want r1", waiting, known)
 	}
+	host.set("list", nil)
+	claude.host.forget()
+	listing := make(chan struct{})
+	go func() {
+		defer close(listing)
+		claude.host.listing(ctx)
+	}()
+	testkitWait(t, func() bool { return host.count("list") == 2 })
+	held := make(chan struct{})
+	host.set("session", func() any {
+		<-held
+		return map[string]any{"id": 1, "result": asked}
+	})
+	host.set("respond", hostResult(map[string]string{"outcome": "answered"}))
+	read := make(chan error, 1)
+	readStarted := time.Now()
+	go func() {
+		state, err := claude.Requests(ctx, &session)
+		if err == nil && (len(state.Requests) != 1 || state.Requests[0].ID != "r1") {
+			err = errors.New("the held read did not list r1")
+		}
+		read <- err
+	}()
+	testkitWait(t, func() bool { return host.count("session") == 1 })
 	if outcome, err := claude.Respond(ctx, &session, "r1", surface.Decision{Behavior: "allow"}); err != nil || outcome != "answered" {
-		t.Fatalf("respond = %q, %v; want answered", outcome, err)
+		t.Fatalf("respond while the listing hangs = %q, %v; want answered", outcome, err)
 	}
+	close(held)
+	if err := <-read; err != nil {
+		t.Fatalf("requests while the listing hangs: %v", err)
+	}
+	if took := time.Since(readStarted); took >= claudeHostListTimeout {
+		t.Fatalf("the read and the answer took %s, waiting on the listing", took)
+	}
+	select {
+	case <-listing:
+		t.Fatal("the listing ended before the answer; the check proves nothing")
+	default:
+	}
+	<-listing
 	if waiting, known := claude.hostWaiting(ctx, &session); known && waiting != nil {
-		t.Fatalf("waiting after the answer while the listing does not answer = %+v; want none", waiting)
+		t.Fatalf("waiting after the answer = %+v; a read from before the answer brought r1 back", waiting)
 	}
-	if state, err := claude.Requests(ctx, &session); err != nil || len(state.Requests) != 0 {
-		t.Fatalf("requests after the answer = %+v, %v; want none", state, err)
+}
+
+func testkitWait(t *testing.T, done func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); !done(); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out")
+		}
 	}
 }
 
@@ -132,27 +185,56 @@ func TestARequestOfASessionNoHostRunsIsNone(t *testing.T) {
 	}
 }
 
-func TestARequestListedByAnOlderHostThatWentSilentIsServedOnlyBriefly(t *testing.T) {
-	home, host := startFakeHost(t)
-	session := surface.Session{ID: "silent-session", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: os.Getpid()}
-	host.set("session", hostError("invalid", "unknown method: session"))
-	host.set("list", hostResult(claudehost.Listing{Sessions: []claudehost.Session{{SessionID: session.ID, PID: session.PID, Requests: []claudehost.Request{{RequestID: "r1", Kind: "permission", CreatedAt: time.Now()}}}}}))
+func TestARequestOnAnOlderRetiringHostIsAnsweredWithoutListingEveryHost(t *testing.T) {
+	home := fakeHome(t)
+	socket := claudehost.SocketPath(home)
+	current := serveFakeHost(t, socket)
+	older := serveFakeHost(t, strings.TrimSuffix(socket, ".sock")+"."+strconv.Itoa(os.Getpid())+".sock")
+	silent := serveFakeHost(t, strings.TrimSuffix(socket, ".sock")+"."+strconv.Itoa(os.Getppid())+".sock")
+	session := surface.Session{ID: "older-session", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: os.Getpid()}
+	notOpen := hostError("not_open", "Claude session older-session is not open in the host")
+	for _, host := range []*fakeHost{current, silent} {
+		for _, method := range []string{"session", "sessionCommands", "respond"} {
+			host.set(method, notOpen)
+		}
+	}
+	var open atomic.Bool
+	open.Store(true)
+	older.set("session", hostError("invalid", "unknown method: session"))
+	older.set("sessionCommands", hostError("invalid", "unknown method: sessionCommands"))
+	older.set("list", func() any {
+		listed := claudehost.Session{SessionID: session.ID, PID: session.PID, PermissionMode: "default", Commands: []claudehost.Command{{Name: "review"}}}
+		if open.Load() {
+			listed.Requests = []claudehost.Request{{RequestID: "r1", Kind: "question", CreatedAt: time.Now()}}
+		}
+		return map[string]any{"id": 1, "result": claudehost.Listing{Sessions: []claudehost.Session{listed}, Draining: true}}
+	})
+	older.set("respond", func() any {
+		open.Store(false)
+		return map[string]any{"id": 1, "result": map[string]string{"outcome": "answered"}}
+	})
 	claude := NewClaude(nil, home)
-	ctx := context.Background()
-	requests := func() ([]surface.Request, error) {
-		state, err := claude.Requests(ctx, &session)
-		return state.Requests, err
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	started := time.Now()
+	state, err := claude.Requests(ctx, &session)
+	if err != nil || len(state.Requests) != 1 || state.Requests[0].ID != "r1" {
+		t.Fatalf("requests on the older host = %+v, %v; want r1", state, err)
 	}
-	if got, err := requests(); err != nil || len(got) != 1 || got[0].ID != "r1" {
-		t.Fatalf("requests while the host answers = %+v, %v; want r1", got, err)
+	if outcome, err := claude.Respond(ctx, &session, "r1", surface.Decision{Behavior: "allow"}); err != nil || outcome != "answered" {
+		t.Fatalf("respond = %q, %v; want answered", outcome, err)
 	}
-	host.set("list", nil)
-	if got, err := requests(); err != nil || len(got) != 1 || got[0].ID != "r1" {
-		t.Fatalf("requests just after the host went silent = %+v, %v; want r1", got, err)
+	if state, err := claude.Requests(ctx, &session); err != nil || len(state.Requests) != 0 {
+		t.Fatalf("requests after the answer = %+v, %v; want none", state, err)
 	}
-	time.Sleep(claudeHostSilentOpenTTL)
-	if got, err := requests(); err == nil {
-		t.Fatalf("requests long after the host went silent = %+v, want an error", got)
+	if took := time.Since(started); took > time.Second {
+		t.Fatalf("answering took %s; it waited on a host that does not run the session", took)
+	}
+	if current.count("list") != 0 || silent.count("list") != 0 {
+		t.Fatalf("listings asked of hosts that do not run the session: current %d, other retiring %d", current.count("list"), silent.count("list"))
+	}
+	if commands, err := claude.Commands(ctx, &session); err != nil || len(commands.Commands) != 1 || commands.Commands[0].Insert != "/review" {
+		t.Fatalf("commands of the older host's session = %+v, %v; want /review", commands, err)
 	}
 }
 

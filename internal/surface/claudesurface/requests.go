@@ -42,10 +42,9 @@ func (c *Claude) Requests(ctx context.Context, sess *surface.Session) (surface.R
 		state.Requests = c.prompts.requests(sess.ID)
 		return state, nil
 	}
+	readAt := time.Now()
 	listed, err := c.host.client.Session(ctx, sess.ID)
 	switch {
-	case claudehost.IsUnknownMethod(err):
-		return c.listedRequests(ctx, sess)
 	case claudehost.IsCode(err, "not_open"), claudehost.IsCode(err, "held"), errors.Is(err, claudehost.ErrNotRunning):
 		return state, nil
 	case err != nil:
@@ -53,22 +52,7 @@ func (c *Claude) Requests(ctx context.Context, sess *surface.Session) (surface.R
 	case listed.PID != sess.PID:
 		return state, nil
 	}
-	c.host.store(listed)
-	return requestState(listed), nil
-}
-
-// listedRequests reads the requests from a fresh listing of every host. While
-// a host does not answer, a session it may run has requests no one can read,
-// which is an error rather than none.
-func (c *Claude) listedRequests(ctx context.Context, sess *surface.Session) (surface.RequestState, error) {
-	c.host.forget()
-	listed, ok := c.host.session(ctx, sess.ID, sess.PID)
-	if !c.host.requestsKnown(sess.ID, sess.PID) || !ok && c.host.unanswered() {
-		return surface.RequestState{Requests: []surface.Request{}}, fmt.Errorf("the Claude host running session %s did not answer", sess.ID)
-	}
-	if !ok {
-		return surface.RequestState{Requests: []surface.Request{}}, nil
-	}
+	c.host.store(listed, readAt)
 	return requestState(listed), nil
 }
 

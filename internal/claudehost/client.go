@@ -123,7 +123,7 @@ type Session struct {
 	Tasks        []Task `json:"tasks"`
 	TaskTurnOwed bool   `json:"taskTurnOwed"`
 	// Commands are listed only by hosts that predate SessionCommands.
-	Commands []Command `json:"commands"`
+	Commands []Command `json:"commands,omitempty"`
 }
 
 // Command is a slash command or skill Claude runs when a person's message
@@ -409,7 +409,7 @@ func (c Client) Respond(ctx context.Context, sessionID, requestID string, decisi
 // commands.
 func (c Client) Session(ctx context.Context, sessionID string) (Session, error) {
 	var out Session
-	return out, c.sessionCall(ctx, "session", map[string]string{"sessionId": sessionID}, &out)
+	return out, c.ownSessionCall(ctx, sessionID, "session", &out)
 }
 
 // SessionCommands is what a person can run in the session, as Claude last
@@ -418,7 +418,51 @@ func (c Client) SessionCommands(ctx context.Context, sessionID string) ([]Comman
 	var out struct {
 		Commands []Command `json:"commands"`
 	}
-	return out.Commands, c.sessionCall(ctx, "sessionCommands", map[string]string{"sessionId": sessionID}, &out)
+	return out.Commands, c.ownSessionCall(ctx, sessionID, "sessionCommands", &out)
+}
+
+// ownSessionCall routes a read of one session like sessionCall. A host that
+// predates the method is read from its own listing alone, never every host's.
+func (c Client) ownSessionCall(ctx context.Context, sessionID, method string, out any) error {
+	read := func(ctx context.Context, host Client) (json.RawMessage, error) {
+		var result json.RawMessage
+		err := host.call(ctx, method, map[string]string{"sessionId": sessionID}, &result)
+		if IsUnknownMethod(err) {
+			return host.fromOwnListing(ctx, sessionID, method)
+		}
+		return result, err
+	}
+	result, err := read(ctx, c)
+	if IsCode(err, "not_open") || IsCode(err, "held") || errors.Is(err, ErrNotRunning) {
+		result, err = c.onRetiring(ctx, err, read)
+	}
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(result, out)
+}
+
+func (c Client) fromOwnListing(ctx context.Context, sessionID, method string) (json.RawMessage, error) {
+	listing, err := c.Own(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, session := range listing.Sessions {
+		if session.SessionID != sessionID {
+			continue
+		}
+		if method == "sessionCommands" {
+			return json.Marshal(map[string][]Command{"commands": session.Commands})
+		}
+		session.Commands = nil
+		return json.Marshal(session)
+	}
+	for _, orphan := range listing.Orphans {
+		if orphan.SessionID == sessionID {
+			return nil, &Error{Code: "held", Message: fmt.Sprintf("Claude process %d from an earlier host still runs this session", orphan.PID)}
+		}
+	}
+	return nil, &Error{Code: "not_open", Message: fmt.Sprintf("Claude session %s is not open in the host", sessionID)}
 }
 
 func (c Client) SetModel(ctx context.Context, sessionID, model string) (Session, error) {
