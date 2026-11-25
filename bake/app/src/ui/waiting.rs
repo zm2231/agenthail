@@ -73,7 +73,7 @@ pub(crate) fn question_context(q: &feed::catalog::RequestQuestion) -> Option<El>
     )
 }
 
-fn pick_el(request: &str, siblings: Vec<String>, option: &feed::catalog::RequestOption, multi: bool, picked: bool, recommended: bool, busy: bool) -> El {
+fn pick_el(request: &str, qi: usize, siblings: Vec<String>, option: &feed::catalog::RequestOption, multi: bool, picked: bool, recommended: bool, busy: bool) -> El {
     let label = option.label.replace(" (Recommended)", "").replace(" (recommended)", "");
     let mut el = row()
         .key(format!("pick-{}", option.id))
@@ -93,7 +93,10 @@ fn pick_el(request: &str, siblings: Vec<String>, option: &feed::catalog::Request
         return el.opacity(0.5);
     }
     let (request, id) = (request.to_string(), option.id.clone());
-    el = el.on_press(move |s: &mut App| toggle_pick(s, &request, &siblings, &id, multi));
+    el = el.on_press(move |s: &mut App| {
+        s.typed.remove(&format!("{request}|{qi}"));
+        toggle_pick(s, &request, &siblings, &id, multi)
+    });
     el
 }
 
@@ -128,7 +131,7 @@ fn compound_el(s: &App, request: &feed::catalog::OpenRequest, busy: bool) -> El 
                 .children(question_context(q))
                 .children(q.options.iter().enumerate().map(|(i, o)| {
                     let recommended = feed::catalog::suggests(q.suggested, i, &o.label);
-                    pick_el(&request.id, siblings.clone(), o, q.multi_select, picks.contains(&o.id), recommended, busy)
+                    pick_el(&request.id, qi, siblings.clone(), o, q.multi_select, picks.contains(&o.id) && typed_for(qi).is_empty(), recommended, busy)
                 }))
                 .child(other),
         );
@@ -142,7 +145,9 @@ fn compound_el(s: &App, request: &feed::catalog::OpenRequest, busy: bool) -> El 
             answers.insert(q.question.clone(), own);
         }
     }
-    let ready = !busy && questions.iter().enumerate().all(|(qi, q)| !typed_for(qi).is_empty() || q.options.iter().any(|o| picks.contains(&o.id)));
+    let answered = |qi: usize, q: &feed::catalog::RequestQuestion| !typed_for(qi).is_empty() || q.options.iter().any(|o| picks.contains(&o.id));
+    let partial_ok = request.kind == "ask";
+    let ready = !busy && if partial_ok { questions.iter().enumerate().any(|(qi, q)| answered(qi, q)) } else { questions.iter().enumerate().all(|(qi, q)| answered(qi, q)) };
     let id = request.id.clone();
     let submit = Button::new("Send answers").variant(if ready { ButtonVariant::Submit } else { ButtonVariant::Neutral }).icon(&icons::ARROW_UP).build(theme::kit()).key("pick-submit");
     let submit = if ready { submit.on_press(move |s: &mut App| answer_request(s, &id, chosen.clone(), answers.clone())) } else { submit.opacity(0.5) };
@@ -196,7 +201,7 @@ pub(crate) fn waiting_choices(s: &App, x: &Session) -> (Option<String>, Vec<Choi
                     let (head, tail) = split_option(label);
                     let tail = tail.trim_start_matches("recommended").trim_start_matches(',').trim().to_string();
                     Choice {
-                        recommended: { let l = label.to_lowercase(); l.contains("recommended") && !l.contains("not recommended") },
+                        recommended: feed::catalog::suggests(None, i, label),
                         reply: format!("Option {}: {}", i + 1, head),
                         label: head.replace(" — recommended", "").replace(" (recommended)", ""),
                         detail: tail,

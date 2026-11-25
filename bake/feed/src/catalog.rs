@@ -399,7 +399,7 @@ pub fn suggests(suggested: Option<usize>, index: usize, label: &str) -> bool {
         Some(pick) => pick == index,
         None => {
             let label = label.trim().to_lowercase();
-            label.ends_with("(recommended)") || label.ends_with("— recommended")
+            label.ends_with("(recommended)") || label.ends_with("— recommended") || label.ends_with("- recommended") || label.contains("(recommended)")
         }
     }
 }
@@ -582,6 +582,9 @@ mod respond_error_tests {
         assert!(suggests(None, 0, "Red (Recommended)"));
         assert!(!suggests(None, 0, "Not recommended"));
         assert!(!suggests(None, 0, "Recommended reading list"));
+        assert!(!suggests(None, 0, "No longer recommended"));
+        assert!(suggests(None, 0, "Banana (recommended), ripest"));
+        assert!(suggests(None, 0, "Banana — recommended"));
     }
 
     #[test]
