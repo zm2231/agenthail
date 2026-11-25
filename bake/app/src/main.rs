@@ -62,7 +62,7 @@ pub struct App {
     pub requests: HashMap<String, Vec<OpenRequest>>,
     pub answering: Option<String>,
     pub answered: HashSet<String>,
-    pub settled: HashMap<String, std::time::Instant>,
+    pub settled: HashMap<String, Option<std::time::Instant>>,
     pub answer_status: HashMap<String, String>,
     pub tab: Tab,
     pub work_pick: HashMap<String, String>,
@@ -179,7 +179,7 @@ impl App {
     }
 
     fn reopen_undelivered(&mut self, requests: &[OpenRequest], fetched_at: std::time::Instant) {
-        self.settled.retain(|id, answered_at| !(requests.iter().any(|r| &r.id == id) && fetched_at >= *answered_at + SETTLE_GRACE));
+        self.settled.retain(|id, done_at| !(requests.iter().any(|r| &r.id == id) && done_at.is_some_and(|at| fetched_at >= at + SETTLE_GRACE)));
     }
 }
 
@@ -254,7 +254,7 @@ pub fn answer_request(s: &mut App, request: &str, choices: Vec<String>) {
         return;
     }
     s.answering = Some(request.to_string());
-    s.settled.insert(request.to_string(), std::time::Instant::now());
+    s.settled.insert(request.to_string(), None);
     s.send_status = "Answering…".into();
     let (out, request) = (s.outbox.clone(), request.to_string());
     std::thread::spawn(move || {
@@ -415,6 +415,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             }
             Bg::Answered(id, request, result) => {
                 s.answering = None;
+                if let Some(done_at) = s.settled.get_mut(&request) {
+                    *done_at = Some(std::time::Instant::now());
+                }
                 let status = match result {
                     Ok(()) => {
                         s.answered.insert(id.clone());
