@@ -120,11 +120,12 @@ func TestTheSweepSearchesAWorktreeProjectAndNeverRemovesAnAddedProjectsFolder(t 
 	}
 	project := merged(checkout, "v2/cockpit", 1)
 	addFolderProject(t, d, project)
-	inside := merged(project, "v2/inside", 2)
 	d.sweepHandMadeWorktrees(t.Context())
 	if _, err := os.Stat(project); err != nil {
 		t.Fatalf("the sweep removed a worktree added as a project: %v", err)
 	}
+	inside := merged(project, "v2/inside", 2)
+	d.sweepHandMadeWorktrees(t.Context())
 	if _, err := os.Stat(inside); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the sweep left the merged worktree inside the worktree project: %v", err)
 	}

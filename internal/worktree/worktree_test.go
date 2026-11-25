@@ -297,3 +297,24 @@ func TestListNamesTheBranchWorktreesInTheWorktreesFolder(t *testing.T) {
 		t.Fatalf("main checkout %q err=%v", root, err)
 	}
 }
+
+func TestAWorktreeGoesInItsHolderOnlyWhenTheHolderIsACheckoutOfTheSameRepository(t *testing.T) {
+	checkout := repository(t)
+	resolved, _ := filepath.EvalSymlinks(checkout)
+	holder := filepath.Join(filepath.Dir(resolved), "long-lived")
+	run(t, checkout, "worktree", "add", "--quiet", "-b", "long-lived", holder)
+	plan := made(t, Spec{Cwd: filepath.Join(holder, "app"), Name: "@builder", Holder: holder})
+	if plan.RepoRoot != holder || plan.WorktreePath != filepath.Join(holder, Dir, "ah-builder") || plan.BaseRef != "long-lived" {
+		t.Fatalf("plan %+v, want a worktree under %s", plan, holder)
+	}
+	if outcome, err := cleanOf(record(plan)); err != nil || !outcome.Removed {
+		t.Fatalf("cleaning the worktree made in the holder: %+v %v", outcome, err)
+	}
+
+	other := repository(t)
+	plan = made(t, Spec{Cwd: filepath.Join(other, "app"), Name: "@visitor", Holder: holder})
+	otherResolved, _ := filepath.EvalSymlinks(other)
+	if plan.RepoRoot != otherResolved || plan.WorktreePath != filepath.Join(otherResolved, Dir, "ah-visitor") {
+		t.Fatalf("a holder of another repository took the worktree: %+v", plan)
+	}
+}
