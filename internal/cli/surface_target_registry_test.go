@@ -22,15 +22,17 @@ func TestASurfaceTargetResolvesFromTheRegistryBeforeAskingTheSurface(t *testing.
 }
 
 func TestNotionNewStillCreatesWhenACatalogedNameContainsNew(t *testing.T) {
-	existing := surface.Session{ID: "notion-existing", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Name: "new project", Status: surface.StatusIdle}
-	synthetic := surface.Session{ID: "new", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb}
-	fake := &cliSurface{kind: surface.KindNotion, sessions: map[string]surface.Session{"new": synthetic}}
-	app, registry := cliFixture(t, fake)
-	if err := registry.RecordObservedSession(existing); err != nil {
-		t.Fatal(err)
-	}
-	resolved, _, err := app.resolveLocalTarget(context.Background(), "notion:new")
-	if err != nil || resolved == nil || resolved.ID != "new" {
-		t.Fatalf("session=%+v err=%v", resolved, err)
+	existing := surface.Session{ID: "notion-existing", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Name: "new:project draft", Status: surface.StatusIdle}
+	for _, selector := range []string{"new", "new:project"} {
+		synthetic := surface.Session{ID: selector, Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb}
+		fake := &cliSurface{kind: surface.KindNotion, sessions: map[string]surface.Session{selector: synthetic}}
+		app, registry := cliFixture(t, fake)
+		if err := registry.RecordObservedSession(existing); err != nil {
+			t.Fatal(err)
+		}
+		resolved, _, err := app.resolveLocalTarget(context.Background(), "notion:"+selector)
+		if err != nil || resolved == nil || resolved.ID != selector {
+			t.Fatalf("selector=%q session=%+v err=%v", selector, resolved, err)
+		}
 	}
 }
