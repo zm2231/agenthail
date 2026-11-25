@@ -94,6 +94,23 @@ So on a paired host:
   separate project. Links between keyless projects stay on their host, so the
   two cannot be joined across hosts.
 
+A session started on another host for the worktree project's work, such as a
+worker the worktree project's lead starts on a paired Linux host, works in a
+checkout of that host. It lands in the repository's project there, not in the
+worktree project. What the person sees:
+
+- the worker's row shows the repository's project, on its own host;
+- its `@lead` is the repository project's lead, and its ledger calls name the
+  repository's ledger, so the items it claims or files are the repository's;
+- the notices Agenthail sends about it go to the repository project's
+  lead when that project has one, and to the session that started it only
+  when it has none (`PromptHearer`); a task result it reports still returns
+  to the session that started it.
+
+To keep such work in the worktree project, start the worker on the host that
+has the worktree, or add a worktree of the other host as a project there and
+set its own lead.
+
 The repository key refresh (`refreshProjectRepositories`) skips worktree
 projects, so one never gains a key from the folder's remote, including a
 worktree inside the main checkout's `.worktrees`, whose path would otherwise
