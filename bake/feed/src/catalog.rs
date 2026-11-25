@@ -149,6 +149,12 @@ pub struct Session {
     pub queue_count: i64,
     #[serde(default)]
     pub cwd: Option<String>,
+    #[serde(default)]
+    pub started_by: Option<String>,
+    #[serde(default)]
+    pub subagent: Option<Value>,
+    #[serde(default)]
+    pub delegated: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

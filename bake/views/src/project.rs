@@ -3,6 +3,11 @@ use rune_kit::shell::Toolbar;
 use rune_kit::{Badge, BadgeVariant, Button, ButtonVariant, ControlSize, SegmentedControl};
 use rune_theme_opencode::icons;
 
+use feed::derive::board::{LANES, fold};
+use feed::derive::digest::{HAPPENED, count, pick};
+use feed::derive::phase::{CHECK, SHIP, phase};
+use feed::derive::sessions::busy;
+
 use crate::data::{Work, plain, short_id};
 use crate::ui::{self, BODY_MED, HEAD, META, META_MED, base, kit, strong, weak};
 use crate::{App, Screen, go};
@@ -29,11 +34,11 @@ fn toolbar(s: &App, key: &str) -> Toolbar {
 pub fn work_card(s: &App, w: &Work, compact: bool) -> El {
     let k = kit();
     let id = w.id.clone();
-    let phase = s.d.phase(w);
+    let phase = phase(w);
     let whose = s.d.whose_move(w);
     let who = match phase {
-        4 => "Your move".to_string(),
-        5 => "Shipped".to_string(),
+        CHECK => "Your move".to_string(),
+        SHIP => "Shipped".to_string(),
         _ => format!("{}'s move", ui::short_title(&whose, 22)),
     };
     let mut c = col()
@@ -43,7 +48,7 @@ pub fn work_card(s: &App, w: &Work, compact: bool) -> El {
         .padding(12.0)
         .radius(10.0)
         .fill(k.c.surface_base)
-        .border(1.0, if phase == 4 { k.c.warning.icon.alpha(0.35) } else { ui::edge() })
+        .border(1.0, if phase == CHECK { k.c.warning.icon.alpha(0.35) } else { ui::edge() })
         .hover(k.c.surface_raised_hover)
         .on_press(move |s: &mut App| go(s, Screen::Work(id.clone())))
         .child(ui::title_fit(s, &format!("card-{}-{compact}", w.id), &plain(&w.text), BODY_MED.lh(19.0), strong(), 2));
@@ -54,24 +59,25 @@ pub fn work_card(s: &App, w: &Work, compact: bool) -> El {
             .w_full()
             .gap(6.0)
             .items_center()
-            .child(text(who).font(if phase == 4 { META_MED } else { META }).color(if phase == 4 { ui::needs_color() } else { weak() }).truncate().shrink())
+            .child(text(who).font(if phase == CHECK { META_MED } else { META }).color(if phase == CHECK { ui::needs_color() } else { weak() }).truncate().shrink())
             .child(ui::spacer())
             .child(text(last).font(META).color(weak()))
             .child(ui::id_label(&short_id(&w.id))),
     )
 }
 
-pub const LANE_CAP: usize = 5;
-
-fn lane_more(s: &App, lane: String, total: usize) -> Option<El> {
-    if total <= LANE_CAP {
-        return None;
-    }
-    let k = kit();
+fn lane(s: &App, key: &str, title: &str, items: &[&Work], compact: bool) -> (Vec<El>, Option<El>) {
+    let lane = format!("{key}/{title}");
     let open = s.open_lanes.contains(&lane);
-    let label = if open { "Show fewer".to_string() } else { format!("{} more", total - LANE_CAP) };
-    Some(
-        row()
+    let f = fold(items, open);
+    let cards = f.shown.iter().map(|w| work_card(s, w, compact)).collect();
+    (cards, f.foldable.then(|| lane_more(lane, open, f.hidden)))
+}
+
+fn lane_more(lane: String, open: bool, hidden: usize) -> El {
+    let k = kit();
+    let label = if open { "Show fewer".to_string() } else { format!("{hidden} more") };
+    row()
             .key(format!("more-{lane}"))
             .w_full()
             .gap(6.0)
@@ -86,24 +92,16 @@ fn lane_more(s: &App, lane: String, total: usize) -> Option<El> {
                 }
             })
             .child(rune::icon(if open { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, 12.0).color(weak()))
-            .child(text(label).font(META_MED).color(weak())),
-    )
-}
-
-fn lane_items<'a>(s: &App, lane: &str, items: &'a [&'a Work]) -> &'a [&'a Work] {
-    if s.open_lanes.contains(lane) { items } else { &items[..items.len().min(LANE_CAP)] }
+            .child(text(label).font(META_MED).color(weak()))
 }
 
 fn group(s: &App, key: &str, title: &str, items: &[&Work], empty: &str) -> El {
-    let lane = format!("{key}/{title}");
     let mut c = col().w_full().gap(8.0).child(ui::section_head(title, Some(items.len()), None));
     if items.is_empty() {
         c = c.child(text(empty.to_string()).font(META).color(weak()));
     }
-    for w in lane_items(s, &lane, items) {
-        c = c.child(work_card(s, w, true));
-    }
-    c.children(lane_more(s, lane, items.len()))
+    let (cards, more) = lane(s, key, title, items, true);
+    c.children(cards).children(more)
 }
 
 fn crew_panel(s: &App, lead: Option<&str>) -> El {
@@ -115,8 +113,7 @@ fn crew_panel(s: &App, lead: Option<&str>) -> El {
     }
     for (i, x) in crew.iter().take(5).enumerate() {
         let id = x.id.clone();
-        let busy = matches!(x.display.kind.as_str(), "working" | "finishing" | "starting");
-        let status = if busy { rune_kit::Spinner::new().size(11.0).build(k) } else { rune::icon(&icons::CIRCLE_CHECK, 12.0).color(weak()) };
+        let status = if busy(x) { rune_kit::Spinner::new().size(11.0).build(k) } else { rune::icon(&icons::CIRCLE_CHECK, 12.0).color(weak()) };
         c = c.child(
             row()
                 .key(format!("crew-{i}"))
@@ -147,7 +144,7 @@ fn waiting_line(s: &App, lead: &str) -> El {
     let k = kit();
     let Some(x) = s.d.session(lead) else { return col() };
     let crew = s.d.crew(lead);
-    let busy: Vec<String> = crew.iter().filter(|c| matches!(c.display.kind.as_str(), "working" | "finishing" | "starting")).map(|c| s.d.title(c)).collect();
+    let busy: Vec<String> = crew.iter().filter(|c| busy(c)).map(|c| s.d.title(c)).collect();
     let (label, who) = if x.display.label.starts_with("Waiting on") {
         ("Waiting on".to_string(), x.display.label.trim_start_matches("Waiting on").trim().to_string())
     } else if !busy.is_empty() {
@@ -170,7 +167,7 @@ fn waiting_line(s: &App, lead: &str) -> El {
 
 pub fn lead(s: &App, cx: &mut Cx<App>, key: &str, layer: &mut Vec<El>) -> El {
     let Some(p) = s.d.project(key) else { return col() };
-    let cols = s.d.board(key);
+    let cols = s.d.board(key).lanes;
     let panel = col()
         .key("work-panel")
         .w_full()
@@ -184,9 +181,9 @@ pub fn lead(s: &App, cx: &mut Cx<App>, key: &str, layer: &mut Vec<El>) -> El {
                 .pt(14.0)
                 .pb(24.0)
                 .child(crew_panel(s, p.lead.as_deref()))
-                .child(group(s, key, "Waiting on you", &cols[0], "Nothing waits on you here."))
-                .child(group(s, key, "Now", &cols[1], "Nothing is being built."))
-                .child(group(s, key, "Up next", &cols[2], "The queue is empty.")),
+                .child(group(s, key, LANES[0], &cols[0], "Nothing waits on you here."))
+                .child(group(s, key, LANES[1], &cols[1], "Nothing is being built."))
+                .child(group(s, key, LANES[2], &cols[2], "The queue is empty.")),
         );
     let main = match &p.lead {
         Some(lead) => {
@@ -218,16 +215,10 @@ pub fn lead(s: &App, cx: &mut Cx<App>, key: &str, layer: &mut Vec<El>) -> El {
 pub fn board(s: &App, cx: &mut Cx<App>, key: &str, layer: &mut Vec<El>) -> El {
     let k = kit();
     let Some(p) = s.d.project(key) else { return col() };
-    let cols = s.d.board(key);
+    let cols = s.d.board(key).lanes;
     let lines = s.d.digest(p, crate::now::WINDOW);
     let mut since = row().w_full().gap(8.0).items_stretch();
-    let mut picked: Vec<&crate::data::Line> = Vec::new();
-    for kind in [crate::data::Happened::Shipped, crate::data::Happened::Waiting, crate::data::Happened::Failed, crate::data::Happened::Moved, crate::data::Happened::Said] {
-        if let Some(l) = lines.iter().find(|l| l.kind == kind) {
-            picked.push(l);
-        }
-    }
-    for (i, l) in picked.iter().enumerate() {
+    for (i, l) in pick(&lines, 1).iter().enumerate() {
         let (glyph, color) = ui::happened_style(l.kind);
         let t = l.target.clone();
         since = since.child(
@@ -246,12 +237,10 @@ pub fn board(s: &App, cx: &mut Cx<App>, key: &str, layer: &mut Vec<El>) -> El {
                 .child(ui::title_fit(s, &format!("since-{i}"), &l.text, META, strong(), 2)),
         );
     }
-    let count = |kind| lines.iter().filter(|l| l.kind == kind).count();
-    use crate::data::Happened::*;
-    let summary = format!("{} shipped · {} waiting on you · {} failed · {} moved · {} said, last {:.0} hours", count(Shipped), count(Waiting), count(Failed), count(Moved), count(Said), crate::now::WINDOW);
-    let titles = ["Waiting on you", "Now", "Up next", "Shipped"];
+    let counts: Vec<String> = HAPPENED.iter().map(|k| format!("{} {}", count(&lines, *k), k.word())).collect();
+    let summary = format!("{}, last {:.0} hours", counts.join(" · "), crate::now::WINDOW);
     let mut board = row().w_full().gap(12.0).items_start();
-    for (i, title) in titles.iter().enumerate() {
+    for (i, title) in LANES.iter().enumerate() {
         let items = &cols[i];
         let mut c = col().grow(1.0).w(1.0).min_w(0.0).gap(8.0).child(
             row()
@@ -262,11 +251,8 @@ pub fn board(s: &App, cx: &mut Cx<App>, key: &str, layer: &mut Vec<El>) -> El {
                 .child(text(title.to_string()).font(META_MED).color(if i == 0 { k.c.warning.icon } else { base() }))
                 .child(Badge::new(items.len().to_string()).variant(BadgeVariant::Subtle).build(k)),
         );
-        let lane = format!("{key}/{title}");
-        for w in lane_items(s, &lane, items) {
-            c = c.child(work_card(s, w, false));
-        }
-        c = c.children(lane_more(s, lane, items.len()));
+        let (cards, more) = lane(s, key, title, items, false);
+        c = c.children(cards).children(more);
         if items.is_empty() {
             c = c.child(text("Empty".to_string()).font(META).color(weak()).pl(4.0));
         }

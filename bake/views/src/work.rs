@@ -5,14 +5,18 @@ use rune_kit::shell::Toolbar;
 use rune_kit::{Button, ButtonVariant};
 use rune_theme_opencode::icons;
 
-use crate::data::{plain, short_id};
+use feed::derive::phase::{CHECK, SHIP, phase};
+use feed::derive::proof::proof;
+use feed::derive::work::{commit, pr, unchecked};
+
+use crate::data::{PHASES, plain, short_id};
 use crate::ui::{self, BODY, BODY_MED, HEAD, META, META_MED, TITLE, base, kit, strong, weak};
 use crate::{App, Screen, go};
 
 fn phase_badge(phase: usize) -> El {
     let k = kit();
-    let color = if phase == 4 { k.c.warning.icon } else if phase == 5 { k.c.success.icon } else { k.c.text_accent };
-    ui::pill(&icons::STATUS, crate::data::PHASES[phase.min(5)], color)
+    let color = if phase == CHECK { k.c.warning.icon } else if phase == SHIP { k.c.success.icon } else { k.c.text_accent };
+    ui::pill(&icons::STATUS, PHASES[phase.min(SHIP)], color)
 }
 
 fn tile(i: usize, expected: &str, observed: &str, passed: Option<bool>) -> El {
@@ -43,12 +47,12 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
     let k = kit();
     let Some(w) = s.d.work.get(id) else { return col() };
     let project = s.d.project(&w.project).map(|p| p.name.clone()).unwrap_or_default();
-    let phase = s.d.phase(w);
-    let pr = s.d.pr(w);
-    let commit = s.d.commit(w);
+    let phase = phase(w);
+    let pr = pr(w);
+    let commit = commit(w);
     let revision = commit.clone().map(|c| c.chars().take(9).collect::<String>()).unwrap_or_else(|| "the latest revision".into());
-    let steps = s.d.proof(w);
-    let unchecked = s.d.unchecked(w);
+    let steps = proof(w);
+    let unchecked = unchecked(w);
     let passed = steps.iter().filter(|p| p.passed == Some(true)).count();
     let not_run = steps.iter().filter(|p| p.passed.is_none()).count();
 
@@ -74,12 +78,12 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
     }
     links = links.child(Button::new("Open in px0").variant(ButtonVariant::Ghost).icon(&icons::ARROW_UP_RIGHT).on_press(|s: &mut App| crate::act(s, "Open in px0")).build(k));
 
-    let waiting = if phase == 4 {
+    let waiting = if phase == CHECK {
         let c = col()
             .w_full()
             .gap(14.0)
             .padding(20.0)
-            .child(row().gap(8.0).items_center().child(ui::pill(&icons::CHECKLIST, "Waiting on you", k.c.warning.icon)).child(text(format!("submitted {} ago", s.d.ago(&w.timeline.iter().rev().find(|t| t.state.as_deref() == Some("in_review")).map(|t| t.at.clone()).unwrap_or_default()))).font(META).color(weak())))
+            .child(row().gap(8.0).items_center().child(ui::pill(&icons::CHECKLIST, "Waiting on you", k.c.warning.icon)).child(text(format!("submitted {} ago", s.d.ago(&w.submitted_at()))).font(META).color(weak())))
             .child(text("Does this revision do what was agreed?".to_string()).font(HEAD.lh(22.0)).color(strong()))
             .child(
                 col()
