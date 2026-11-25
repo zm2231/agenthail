@@ -1,8 +1,5 @@
 # ACP agents
 
-Status: design. Nothing here is built yet; this page becomes the description
-of what was built when it lands.
-
 Agenthail will host agents that speak the Agent Client Protocol (ACP, JSON-RPC
 2.0 over stdio, protocol version 1) through one runtime written in Go. An
 agent is a config entry: an id, a label and the command that starts its ACP
@@ -333,7 +330,7 @@ Normalization, one record per timeline item, upserted by id:
 
 | ACP update | Timeline item |
 |---|---|
-| prompt sent by Agenthail | `message`, role `user`, id `<turn>:user`, with the sender as other user records carry it |
+| prompt sent by Agenthail | `message`, role `user`, id `<turn>:user`, the text as sent; a sending agent's envelope is read when the item is presented, as for Codex |
 | `user_message_chunk` (only on a rebuilding replay) | `message`, role `user` |
 | `agent_message_chunk` | `message`, role `assistant`; consecutive chunks in a turn are one item, id `<turn>:a<n>`, upserted as text grows |
 | `agent_thought_chunk` | `reasoning`, id `<turn>:r<n>`, same coalescing |
@@ -391,32 +388,19 @@ agent sends during a load is live and is handled as any other.
 
 The file is created, with its identity record, before the session's row
 exists (see Create), so every session Agenthail lists has one. Replay never
-writes it: replay lacks what only Agenthail recorded (the sender of each
+writes it: replay lacks what only Agenthail recorded (the message id of each
 prompt, turn ids and outcomes, notices), so it cannot stand in for the file.
 A listed session whose file is gone (someone deleted it) is not reopened: a
 send fails with an error naming the file, raised as the existing "Message not
 delivered" problem, and the session view keeps the rows its journal holds,
 with the error shown above them. The session source reports a failed seed as
-a `source-error` row keyed by its source's epoch
-(`internal/daemon/session_source_seed.go:95`), so each new source for a
-session whose seed keeps failing adds a row, and those rows count against the
-same retention as the conversation. A session keeps at most one: a
-new failure deletes the session's previous `source-error` row and appends
-its own at the end of the journal, in one registry transaction, with a
-version one above the deleted row's, so the version rises across source
-instances. Deleting rather than upserting matters because an upserted row
-keeps its original place (`internal/registry/session_journal.go:187`) and the
-page reader treats a source error followed by later items as recovered
-(`internal/daemon/session_page_read.go:87`): the current failure must be the
-newest row. A persistent failure therefore holds one row and can never push
-the conversation out of the journal. The deletion raises the journal's removed-sequence
-mark, as a trim does, so a follower whose cursor is still behind the deleted
-row gets `stream_gap` and reloads a page, which shows the current error and
-the retained conversation. That costs a follower that far behind one reload
-per failure and loses nothing; the transaction keeps the retained count,
-bytes and mark consistent. This holds for every surface; a Claude
-or Codex session whose transcript is gone gets the same. The conversation is still in the agent, and a new session can carry on from
-it.
+a `source-error` row (`internal/daemon/session_source_seed.go`). A failure
+identical to the session's newest row takes that row's place under a new
+sequence (`AppendSessionJournalSourceError` in
+`internal/registry/session_journal.go`), so a persistent failure holds one row
+and never pushes the conversation out of the journal, for every surface: a
+Claude or Codex session whose transcript is gone gets the same. The
+conversation is still in the agent, and a new session can carry on from it.
 
 ## Turns and status
 
@@ -562,8 +546,11 @@ none.
 - The registry needs no migration. A row's `surface` is the agent id,
   `runtime_kind` `acp:<id>`, `transport` `acp`, `source` `agenthail`.
 - `GET /api/v1/session-options` lists each ACP agent with `label`,
-  `workspace: true`, `connected` (the command resolves and the host is up),
-  and the `modes` and `models` its sessions listed, from their records.
+  `workspace: true`, `connected` (the command resolves), and the `modes` and
+  `models` its newest session listed, from its record. The adapter is a model
+  lister, so `/api/models?surface=<id>` serves the same models with their
+  names; an agent reports none until one of its sessions has opened.
+- The dashboard state's surfaces carry the adapter's `label`.
 
 ## Native apps and dashboard
 
@@ -572,20 +559,25 @@ render, so the session view and the queue need no change. What does:
 
 - The dashboard's approval card (`internal/daemon/dashboard/js/requests.js`)
   and decision card (`decision-card.js`) draw their own Allow and Deny
-  controls. They keep their layout and handlers and leave out Allow when the
-  request's `actions` has no `allow`, so a request with `NoAllow` shows no
-  Allow. The native card already renders `actions`
+  controls. They keep their layout and handlers and leave out Allow and
+  Always allow when the request has `noAllow`, and the project's Now row
+  opens such a request instead of offering Allow in place. The native card already renders `actions`
   (`native/RequestCard.swift`), as do notifications and the MCP requests view.
 - The new-session form takes its agents from `session-options.surfaces` with
   their `label`, instead of a fixed list: `native/macOS/NewSessionDraft.swift`
-  (`["claude", "codex", "notion"]`), `native/iOS/SessionCreation.swift`, the
-  project sheets on both, and the dashboard's `start-form.js`. Mode and model
-  pickers for an ACP agent come from the options it listed.
+  (`["claude", "codex", "notion"]`), `native/iOS/SessionCreation.swift` and
+  the dashboard's `start-form.js`. An ACP agent's mode picker lists the
+  `modes` from `session-options`; its model picker is the existing one, fed
+  by `/api/models`. The project sheets' lead picker stays Claude and Codex,
+  since a coordinator does.
 - `native/AgenthailAPI.swift` `creationBody` sends `session-create` for any
-  surface but Notion, with only the generic fields for an ACP agent.
-- Labels use `session-options` before falling back to the capitalized
-  surface (`SessionStyle.agentName`, the Mac's equivalents, the dashboard's
-  `format.js`). The default glyph (`terminal`) stays.
+  surface but Notion; for an ACP agent it sends the generic fields and the
+  chosen mode as `permissionMode`.
+- The new-session pickers name an agent by its `label` from
+  `session-options`. Elsewhere the apps fall back to the capitalized surface
+  (`SessionStyle.agentName`), which for an id like `devin` is its name. The
+  dashboard's `format.js` learns labels from the surfaces it is sent, and
+  draws an ACP agent's glyph as its label's first letter.
 - Tool calls render by their title and status. ACP titles are already
   sentences ("Ran sleep", "Wrote created.txt"), so no tool names are mapped.
 
