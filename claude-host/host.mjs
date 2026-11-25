@@ -390,13 +390,10 @@ class Session {
     writeSettings();
   }
 
-  // listedSeq orders two snapshots of a session from this host: the later
-  // one carries the same or a higher event sequence.
   describe() {
     return {
       sessionId: this.id,
       pid: this.pid,
-      listedSeq: seq,
       cwd: this.cwd,
       state: this.state,
       openedAt: this.openedAt,

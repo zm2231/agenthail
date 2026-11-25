@@ -235,7 +235,9 @@ minutes at a load average of 7-377 on a Mac, and at most 24 ms at 85-174 on a
 32-core Linux machine. Answering a request reads that session's requests from
 its own host instead, so a host that misses a listing cannot fail the answer,
 and a request the host took an answer to leaves the cached listing at once
-and is kept out of any listing read before the answer. A
+and is kept out of any listing read before the answer. Only listings write
+the cache. When a host misses one, the sessions it may run keep their last
+listing for 5 s; a session listed by a host that answered stays known. A
 `stale` answer makes it observe the turn again, which withdraws the request's
 permission ask and clears the catalog row's `waiting_on`. The Mac, iOS
 and web clients drop the card on a `409` before reading the requests again.

@@ -1866,9 +1866,7 @@ test('a session lists the commands a person can run, one per name, and follows w
   assert.deepEqual((await c.call('sessionCommands', { sessionId: id })).commands, changed.commands);
   const listed = (await c.call('list')).sessions.find((s) => s.sessionId === id);
   assert.equal(listed.commands, undefined, 'the listing leaves the commands out, so it stays small');
-  const alone = await c.call('session', { sessionId: id });
-  assert.ok(alone.listedSeq >= listed.listedSeq, 'a later snapshot carries the same or a higher sequence');
-  assert.deepEqual({ ...alone, listedSeq: 0 }, { ...listed, listedSeq: 0 });
+  assert.deepEqual(await c.call('session', { sessionId: id }), listed);
   await assert.rejects(c.call('session', { sessionId: randomUUID() }), /not open/);
   c.close();
 });

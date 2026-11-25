@@ -55,7 +55,6 @@ func (c *Claude) Requests(ctx context.Context, sess *surface.Session) (surface.R
 		c.host.forget()
 		return state, nil
 	}
-	c.host.store(listed)
 	return requestState(listed), nil
 }
 

@@ -124,10 +124,6 @@ type Session struct {
 	TaskTurnOwed bool   `json:"taskTurnOwed"`
 	// Commands are listed only by hosts that predate SessionCommands.
 	Commands []Command `json:"commands,omitempty"`
-	// ListedSeq orders two snapshots of a session from one host; hosts that
-	// predate it leave it 0. ListedAt is when the host's answer arrived.
-	ListedSeq uint64    `json:"listedSeq"`
-	ListedAt  time.Time `json:"-"`
 }
 
 // Command is a slash command or skill Claude runs when a person's message
@@ -413,9 +409,7 @@ func (c Client) Respond(ctx context.Context, sessionID, requestID string, decisi
 // commands.
 func (c Client) Session(ctx context.Context, sessionID string) (Session, error) {
 	var out Session
-	err := c.ownSessionCall(ctx, sessionID, "session", &out)
-	out.ListedAt = time.Now()
-	return out, err
+	return out, c.ownSessionCall(ctx, sessionID, "session", &out)
 }
 
 // SessionCommands is what a person can run in the session, as Claude last
@@ -682,9 +676,6 @@ func (c Client) List(ctx context.Context) (Listing, error) {
 		go func() {
 			defer wg.Done()
 			errs[i] = host.call(ctx, "list", struct{}{}, &listings[i])
-			for j := range listings[i].Sessions {
-				listings[i].Sessions[j].ListedAt = time.Now()
-			}
 		}()
 	}
 	wg.Wait()

@@ -40,7 +40,10 @@ type claudeHost struct {
 	sessions   map[string]int
 	open       map[string]claudehost.Session
 	openListed map[string]time.Time
-	partial    bool
+	// unseen are sessions a partial listing kept from an earlier one, since
+	// the host that runs them may be the one that did not answer.
+	unseen  map[string]bool
+	partial bool
 	// taken are the requests a host took an answer to, by request id, so a
 	// snapshot read before the answer cannot bring them back.
 	taken map[string]time.Time
@@ -129,7 +132,7 @@ func (h *claudeHost) refresh(ctx context.Context) {
 		for _, session := range listing.Sessions {
 			sessions[session.SessionID] = session.PID
 			open[session.SessionID] = session
-			openListed[session.SessionID] = session.ListedAt
+			openListed[session.SessionID] = started
 		}
 		for _, orphan := range listing.Orphans {
 			sessions[orphan.SessionID] = orphan.PID
@@ -141,13 +144,7 @@ func (h *claudeHost) refresh(ctx context.Context) {
 	defer h.mu.Unlock()
 	previous, previousOpen, previousListed, wasPartial := h.sessions, h.open, h.openListed, h.partial
 	h.sessions, h.open, h.openListed, h.partial = sessions, open, openListed, partial
-	for id, session := range previousOpen {
-		if listed, ok := h.open[id]; ok && !replaces(listed, session) {
-			h.sessions[id] = session.PID
-			h.open[id] = session
-			h.openListed[id] = previousListed[id]
-		}
-	}
+	h.unseen = map[string]bool{}
 	if partial {
 		h.keepUnseen(previous, previousOpen, previousListed)
 	}
@@ -172,6 +169,7 @@ func (h *claudeHost) keepUnseen(previous map[string]int, previousOpen map[string
 		if session, ok := previousOpen[id]; ok && session.PID == pid {
 			h.open[id] = session
 			h.openListed[id] = previousListed[id]
+			h.unseen[id] = true
 		}
 	}
 }
@@ -190,31 +188,8 @@ func logClaudeHostListing(partial bool, took time.Duration, err error, unanswere
 	}
 }
 
-// store keeps a session as its host listed it alone, unless the cache holds
-// a later snapshot of it.
-func (h *claudeHost) store(listed claudehost.Session) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.sessions == nil {
-		return
-	}
-	if cached, ok := h.open[listed.SessionID]; ok && !replaces(listed, cached) {
-		return
-	}
-	h.sessions[listed.SessionID] = listed.PID
-	h.open[listed.SessionID] = h.withoutTaken(listed)
-	h.openListed[listed.SessionID] = listed.ListedAt
-}
-
-// replaces reports whether snapshot next may stand in for cached: another
-// process, or the same one at the same or a later event of its host. Hosts that
-// predate the sequence send 0, so the snapshot that arrived last stands.
-func replaces(next, cached claudehost.Session) bool {
-	return next.PID != cached.PID || next.ListedSeq >= cached.ListedSeq
-}
-
 // answered drops a request its host took an answer to from the cached
-// listing, now and from any snapshot stored after.
+// listing, now and from any listing read before the answer.
 func (h *claudeHost) answered(conversation, requestID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -258,7 +233,7 @@ func (h *claudeHost) requestsKnown(conversation string, pid int) bool {
 		return true
 	}
 	if session, ok := h.open[conversation]; ok && session.PID == pid {
-		return time.Since(h.openListed[conversation]) <= claudeHostSilentOpenTTL
+		return !h.unseen[conversation] || time.Since(h.openListed[conversation]) <= claudeHostSilentOpenTTL
 	}
 	return h.sessions[conversation] != pid
 }
