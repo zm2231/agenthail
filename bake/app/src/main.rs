@@ -64,6 +64,7 @@ pub struct App {
     pub settled: HashMap<String, Option<std::time::Instant>>,
     pub answer_status: HashMap<String, String>,
     pub status_line: HashMap<String, String>,
+    pub picks: HashMap<String, Vec<String>>,
     pub sending: HashSet<String>,
     pub requests_at: HashMap<String, std::time::Instant>,
     pub tab: Tab,
@@ -119,6 +120,7 @@ fn init() -> App {
         settled: HashMap::new(),
         answer_status: HashMap::new(),
         status_line: HashMap::new(),
+        picks: HashMap::new(),
         sending: HashSet::new(),
         requests_at: HashMap::new(),
         tab: Tab::Conversation,
@@ -246,6 +248,18 @@ fn fetch_requests_at(s: &mut App, id: &str, delays_ms: &'static [u64]) {
             }
         });
     }
+}
+
+pub fn toggle_pick(s: &mut App, request: &str, siblings: &[String], option: &str, multi: bool) {
+    let picks = s.picks.entry(request.to_string()).or_default();
+    if picks.iter().any(|p| p == option) {
+        picks.retain(|p| p != option);
+        return;
+    }
+    if !multi {
+        picks.retain(|p| !siblings.contains(p));
+    }
+    picks.push(option.to_string());
 }
 
 pub fn draft_reply(s: &mut App, reply: &str) {

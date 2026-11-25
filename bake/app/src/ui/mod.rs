@@ -9,7 +9,7 @@ use crate::theme::{
     self, BODY, BODY_BOLD, HEADING, HERO, LABEL, META, META_BOLD, NUMBER, SPRING, TITLE, accent, accent_deep, attention, card, done, failed, faint, line, muted, raised, wash,
 };
 use crate::transcript::{self, session_avatar};
-use crate::{App, Screen, Tab, answer_request, pick_work, session_edits, short_path, show_changes, open_palette, open_project, select, send, draft_reply, session};
+use crate::{App, Screen, Tab, answer_request, pick_work, session_edits, short_path, show_changes, open_palette, open_project, select, send, draft_reply, session, toggle_pick};
 
 mod palette;
 mod project;

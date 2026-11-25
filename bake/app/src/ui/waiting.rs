@@ -44,8 +44,62 @@ pub(crate) fn settled_request<'a>(s: &'a App, x: &Session) -> Option<&'a feed::c
     settled.max_by_key(|r| s.settled.get(&r.id).copied().flatten().map_or((1, None), |at| (0, Some(at))))
 }
 
+pub(crate) fn is_compound(request: &feed::catalog::OpenRequest) -> bool {
+    request.questions.as_ref().is_some_and(|qs| qs.len() > 1 || qs.iter().any(|q| q.multi_select))
+}
+
+fn pick_el(request: &str, siblings: Vec<String>, option: &feed::catalog::RequestOption, multi: bool, picked: bool, busy: bool) -> El {
+    let label = option.label.replace(" (Recommended)", "").replace(" (recommended)", "");
+    let mut el = row()
+        .key(format!("pick-{}", option.id))
+        .w_full()
+        .gap(10.0)
+        .items_center()
+        .px(12.0)
+        .py(8.0)
+        .radius(10.0)
+        .fill(if picked { attention().alpha(0.22) } else { Color::WHITE.alpha(0.05) })
+        .border(1.0, if picked { attention().alpha(0.6) } else { Color::WHITE.alpha(0.10) })
+        .hover(Color::WHITE.alpha(0.10))
+        .child(icon(if picked { &icons::CHECK_CIRCLE } else { &icons::TARGET }, 14.0).color(if picked { attention() } else { faint() }))
+        .child(col().grow(1.0).min_w(0.0).gap(2.0).child(text(label).font(BODY_BOLD).color(theme::text()).wrap()).children((!option.description.is_empty()).then(|| text(option.description.clone()).font(META).color(muted()).wrap().max_lines(2))));
+    if busy {
+        return el.opacity(0.5);
+    }
+    let (request, id) = (request.to_string(), option.id.clone());
+    el = el.on_press(move |s: &mut App| toggle_pick(s, &request, &siblings, &id, multi));
+    el
+}
+
+fn compound_el(s: &App, request: &feed::catalog::OpenRequest, busy: bool) -> El {
+    let picks = s.picks.get(&request.id).cloned().unwrap_or_default();
+    let questions = request.questions.clone().unwrap_or_default();
+    let mut list = col().w_full().gap(12.0).pt(4.0);
+    for q in &questions {
+        let siblings: Vec<String> = q.options.iter().map(|o| o.id.clone()).collect();
+        let hint = if q.multi_select { "Pick any" } else { "Pick one" };
+        list = list.child(
+            col()
+                .w_full()
+                .gap(6.0)
+                .child(row().gap(8.0).items_center().child(text(q.question.clone()).font(BODY_BOLD).color(theme::text()).wrap()).child(text(hint).font(META).color(faint())))
+                .children(q.options.iter().map(|o| pick_el(&request.id, siblings.clone(), o, q.multi_select, picks.contains(&o.id), busy))),
+        );
+    }
+    let ready = !busy && questions.iter().all(|q| q.options.iter().any(|o| picks.contains(&o.id)));
+    let (id, chosen) = (request.id.clone(), picks.clone());
+    let submit = Button::new("Send answers").variant(if ready { ButtonVariant::Submit } else { ButtonVariant::Neutral }).icon(&icons::ARROW_UP).build(theme::kit()).key("pick-submit");
+    let submit = if ready { submit.on_press(move |s: &mut App| answer_request(s, &id, chosen.clone())) } else { submit.opacity(0.5) };
+    list.child(row().child(submit))
+}
+
 pub(crate) fn waiting_choices(s: &App, x: &Session) -> (Option<String>, Vec<Choice>, bool) {
     if let Some(request) = open_request(s, x) {
+        if is_compound(request) {
+            let count = request.questions.as_ref().map_or(0, Vec::len);
+            let heading = if count > 1 { format!("The agent has {count} questions") } else { "The agent has a question".to_string() };
+            return (Some(heading), Vec::new(), true);
+        }
         if let Some(q) = request.questions.as_ref().and_then(|q| q.first()).filter(|q| !q.multi_select && !q.options.is_empty()) {
             let choices = q
                 .options
@@ -166,7 +220,9 @@ pub(crate) fn waiting_card(s: &App, x: &Session) -> El {
         .gap(8.0)
         .child(row().gap(8.0).items_center().child(text("WAITING ON YOU").font(LABEL).color(attention())).children(source.map(|t| text(t).font(META).color(faint()))))
         .child(text(question).font(TITLE).color(theme::text()).wrap());
-    if !choices.is_empty() {
+    if let Some(request) = open_request(s, x).filter(|r| is_compound(r)) {
+        body = body.child(compound_el(s, request, busy));
+    } else if !choices.is_empty() {
         body = body.child(col().w_full().gap(6.0).pt(4.0).children(choices.into_iter().enumerate().map(|(i, c)| choice_el(i, c, busy))));
     }
     body = body.child(row().gap(8.0).pt(4.0).items_center().child(reply).child(next).child(spacer()).child(keys(&["⌘", "J"])));
