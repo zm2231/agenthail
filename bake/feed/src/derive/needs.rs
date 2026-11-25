@@ -65,7 +65,7 @@ impl NeedKind {
     }
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Target {
     Session(String),
     Work(String),
@@ -105,7 +105,7 @@ pub fn flagged(s: &Session) -> bool {
 }
 
 pub fn sort(needs: &mut [Need]) {
-    needs.sort_by(|a, b| a.kind.rank().cmp(&b.kind.rank()).then(a.at.cmp(&b.at)).then(a.title.cmp(&b.title)));
+    needs.sort_by(|a, b| a.kind.rank().cmp(&b.kind.rank()).then(a.at.cmp(&b.at)).then(a.title.cmp(&b.title)).then(a.target.cmp(&b.target)));
 }
 
 pub fn need_of<'a>(needs: &'a [Need], session: &str, replayed: Option<&str>) -> Option<&'a Need> {

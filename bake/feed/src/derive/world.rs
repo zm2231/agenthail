@@ -185,7 +185,6 @@ impl World {
         self.projects.iter().find(|p| p.key == key)
     }
 
-    // Unparseable times count as long ago.
     pub fn hours(&self, at: &str) -> f64 {
         parse_time(at).map(|t| (self.now - t).as_seconds_f64() / 3600.0).unwrap_or(1e9)
     }

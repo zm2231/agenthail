@@ -87,3 +87,28 @@ fn an_ended_worker_is_named_by_its_alias() {
     assert_eq!(w.name_of("gone"), "@fixer");
     assert_eq!(w.name_of("nameless"), "Codex namele");
 }
+
+#[test]
+fn ties_resolve_the_same_way_on_every_load() {
+    let item = |id: &str, state: &str, at: &str| json!({"id": id, "text": "Same title", "state": state, "priority": "P1", "timeline": [{"at": at, "kind": "state", "state": state}]});
+    let mut rows = Vec::new();
+    for i in 0..6 {
+        rows.push(item(&format!("p-R{i}"), "ready", "2026-11-24T10:00:00Z"));
+        rows.push(item(&format!("p-V{i}"), "in_review", "2026-11-24T10:00:00Z"));
+        rows.push(item(&format!("p-D{i}"), "done", "2026-11-24T10:00:00Z"));
+    }
+    let snapshot = json!({"sessions": [session("s", json!({}))], "ledgers": {"p": rows}});
+    let order = || {
+        let w = world(snapshot.clone());
+        let p = w.project("p").unwrap().clone();
+        let needs: Vec<Target> = w.needs().into_iter().map(|n| n.target).collect();
+        let digest: Vec<Target> = w.digest(&p, WINDOW_HOURS).into_iter().map(|l| l.target).collect();
+        let next: Vec<String> = w.board("p").lanes[2].iter().map(|x| x.id.clone()).collect();
+        (needs, digest, next)
+    };
+    let first = order();
+    assert_eq!(first.2, (0..6).map(|i| format!("p-R{i}")).collect::<Vec<_>>());
+    for _ in 0..16 {
+        assert_eq!(order(), first);
+    }
+}

@@ -86,7 +86,7 @@ impl World {
             }
         }
         let mut seen = HashSet::new();
-        lines.sort_by(|a, b| a.kind.cmp(&b.kind).then(b.at.cmp(&a.at)).then(a.text.cmp(&b.text)));
+        lines.sort_by(|a, b| a.kind.cmp(&b.kind).then(b.at.cmp(&a.at)).then(a.text.cmp(&b.text)).then(a.target.cmp(&b.target)));
         lines.retain(|l| seen.insert((l.kind, l.text.clone())));
         lines
     }
