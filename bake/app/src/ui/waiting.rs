@@ -15,15 +15,7 @@ pub(crate) fn plain(text: &str, max: usize) -> String {
 
 pub(crate) fn recent_answers(s: &App, x: &Session) -> Vec<String> {
     let Some(pane) = s.panes.get(&x.id) else { return Vec::new() };
-    pane.blocks
-        .iter()
-        .rev()
-        .filter_map(|b| match &b.kind {
-            feed::Kind::Assistant(body) => Some(body.clone()),
-            _ => None,
-        })
-        .take(2)
-        .collect()
+    feed::blocks::unanswered_assistant(&pane.blocks, 2)
 }
 
 pub(crate) fn question_in(body: &str) -> Option<String> {

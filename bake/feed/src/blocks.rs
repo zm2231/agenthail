@@ -254,3 +254,35 @@ fn fold_agents(blocks: Vec<Block>) -> Vec<Block> {
     close(&mut out, &mut run);
     out
 }
+
+pub fn unanswered_assistant(blocks: &[Block], limit: usize) -> Vec<String> {
+    blocks
+        .iter()
+        .rev()
+        .filter(|b| !matches!(b.kind, Kind::Annotation(_) | Kind::Notice(_)))
+        .map_while(|b| match &b.kind {
+            Kind::Assistant(body) => Some(body.clone()),
+            _ => None,
+        })
+        .take(limit)
+        .collect()
+}
+
+#[cfg(test)]
+mod unanswered_tests {
+    use super::*;
+
+    fn block(kind: Kind) -> Block {
+        Block::new("b".into(), kind, None)
+    }
+
+    #[test]
+    fn options_followed_by_a_reply_or_more_work_are_not_offered() {
+        let asked = block(Kind::Assistant("1. Red\n2. Blue".into()));
+        assert_eq!(unanswered_assistant(&[asked.clone()], 2).len(), 1);
+        assert!(unanswered_assistant(&[asked.clone(), block(Kind::User("Option 1: Red".into()))], 2).is_empty());
+        let work = Work { items: vec![], entries: vec![], line: String::new(), label: String::new(), folds: false, live: false };
+        assert!(unanswered_assistant(&[asked.clone(), block(Kind::Work(work))], 2).is_empty());
+        assert_eq!(unanswered_assistant(&[asked.clone(), block(Kind::Notice("n".into())), block(Kind::Assistant("Which one?".into()))], 2).len(), 2);
+    }
+}
