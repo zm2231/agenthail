@@ -173,8 +173,9 @@ func TestARequestIsAnsweredWhileTheListingOfEveryHostIsTooSlow(t *testing.T) {
 func TestASessionReadStoredDuringAListingIsNotReplacedByIt(t *testing.T) {
 	home, host := startFakeHost(t)
 	session := surface.Session{ID: "read-during-listing", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: os.Getpid()}
-	quiet := claudehost.Session{SessionID: session.ID, PID: session.PID}
+	quiet := claudehost.Session{SessionID: session.ID, PID: session.PID, ListedSeq: 1}
 	asking := quiet
+	asking.ListedSeq = 2
 	asking.Requests = []claudehost.Request{{RequestID: "r1", Kind: "question", CreatedAt: time.Now()}}
 	host.set("list", hostResult(claudehost.Listing{Sessions: []claudehost.Session{quiet}}))
 	claude := NewClaude(nil, home)
@@ -212,6 +213,63 @@ func TestASessionReadStoredDuringAListingIsNotReplacedByIt(t *testing.T) {
 	<-listing
 	if waiting, known := claude.hostWaiting(ctx, &session); !known || waiting == nil || waiting.ID != "r1" {
 		t.Fatalf("waiting after a listing that started before the read was stored = %+v (known %v); want r1", waiting, known)
+	}
+}
+
+func TestAnOlderSessionReadThatArrivesLastDoesNotHideANewerOne(t *testing.T) {
+	home, host := startFakeHost(t)
+	session := surface.Session{ID: "overlapping-reads", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: os.Getpid()}
+	quiet := claudehost.Session{SessionID: session.ID, PID: session.PID, ListedSeq: 1}
+	asking := quiet
+	asking.ListedSeq = 2
+	asking.Requests = []claudehost.Request{{RequestID: "r1", Kind: "question", CreatedAt: time.Now()}}
+	host.set("list", hostResult(claudehost.Listing{Sessions: []claudehost.Session{quiet}}))
+	claude := NewClaude(nil, home)
+	ctx := context.Background()
+	claude.hostWaiting(ctx, &session)
+	older := make(chan struct{})
+	var reads atomic.Int32
+	host.set("session", func() any {
+		if reads.Add(1) == 1 {
+			<-older
+			return map[string]any{"id": 1, "result": quiet}
+		}
+		return map[string]any{"id": 1, "result": asking}
+	})
+	first := make(chan error, 1)
+	go func() {
+		_, err := claude.Requests(ctx, &session)
+		first <- err
+	}()
+	testkitWait(t, func() bool { return host.count("session") == 1 })
+	if state, err := claude.Requests(ctx, &session); err != nil || len(state.Requests) != 1 {
+		t.Fatalf("the newer read = %+v, %v; want r1", state, err)
+	}
+	close(older)
+	if err := <-first; err != nil {
+		t.Fatal(err)
+	}
+	if waiting, known := claude.hostWaiting(ctx, &session); !known || waiting == nil || waiting.ID != "r1" {
+		t.Fatalf("waiting after the older read arrived last = %+v (known %v); want r1", waiting, known)
+	}
+}
+
+func TestARequestListedByAHostThatAnsweredIsKnownWhileAnotherHostTimesOut(t *testing.T) {
+	home := fakeHome(t)
+	socket := claudehost.SocketPath(home)
+	current := serveFakeHost(t, socket)
+	silent := serveFakeHost(t, strings.TrimSuffix(socket, ".sock")+"."+strconv.Itoa(os.Getpid())+".sock")
+	session := surface.Session{ID: "answered-host", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: os.Getpid()}
+	current.set("list", hostResult(claudehost.Listing{Sessions: []claudehost.Session{{SessionID: session.ID, PID: session.PID, ListedSeq: 1, Requests: []claudehost.Request{{RequestID: "r1", Kind: "question", CreatedAt: time.Now()}}}}}))
+	silent.set("list", nil)
+	claude := NewClaude(nil, home)
+	started := time.Now()
+	waiting, known := claude.hostWaiting(context.Background(), &session)
+	if time.Since(started) < claudeHostListTimeout {
+		t.Fatalf("the listing ended after %s, before the silent host timed out; the check proves nothing", time.Since(started))
+	}
+	if !known || waiting == nil || waiting.ID != "r1" {
+		t.Fatalf("waiting = %+v (known %v); want r1 from the host that answered", waiting, known)
 	}
 }
 

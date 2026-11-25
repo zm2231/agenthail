@@ -129,7 +129,7 @@ func (h *claudeHost) refresh(ctx context.Context) {
 		for _, session := range listing.Sessions {
 			sessions[session.SessionID] = session.PID
 			open[session.SessionID] = session
-			openListed[session.SessionID] = started
+			openListed[session.SessionID] = session.ListedAt
 		}
 		for _, orphan := range listing.Orphans {
 			sessions[orphan.SessionID] = orphan.PID
@@ -141,11 +141,11 @@ func (h *claudeHost) refresh(ctx context.Context) {
 	defer h.mu.Unlock()
 	previous, previousOpen, previousListed, wasPartial := h.sessions, h.open, h.openListed, h.partial
 	h.sessions, h.open, h.openListed, h.partial = sessions, open, openListed, partial
-	for id, at := range previousListed {
-		if session, ok := previousOpen[id]; ok && at.After(started) {
+	for id, session := range previousOpen {
+		if listed, ok := h.open[id]; ok && !replaces(listed, session) {
 			h.sessions[id] = session.PID
 			h.open[id] = session
-			h.openListed[id] = at
+			h.openListed[id] = previousListed[id]
 		}
 	}
 	if partial {
@@ -190,18 +190,27 @@ func logClaudeHostListing(partial bool, took time.Duration, err error, unanswere
 	}
 }
 
-// store keeps a session as its host listed it alone, unless a read that
-// started after readAt has replaced it. It counts as listed when stored, so a
-// listing in flight keeps it.
-func (h *claudeHost) store(listed claudehost.Session, readAt time.Time) {
+// store keeps a session as its host listed it alone, unless the cache holds
+// a later snapshot of it.
+func (h *claudeHost) store(listed claudehost.Session) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.sessions == nil || h.openListed[listed.SessionID].After(readAt) {
+	if h.sessions == nil {
+		return
+	}
+	if cached, ok := h.open[listed.SessionID]; ok && !replaces(listed, cached) {
 		return
 	}
 	h.sessions[listed.SessionID] = listed.PID
 	h.open[listed.SessionID] = h.withoutTaken(listed)
-	h.openListed[listed.SessionID] = time.Now()
+	h.openListed[listed.SessionID] = listed.ListedAt
+}
+
+// replaces reports whether snapshot next may stand in for cached: another
+// process, or the same one at the same or a later event of its host. Hosts that
+// predate the sequence send 0, so the snapshot that arrived last stands.
+func replaces(next, cached claudehost.Session) bool {
+	return next.PID != cached.PID || next.ListedSeq >= cached.ListedSeq
 }
 
 // answered drops a request its host took an answer to from the cached

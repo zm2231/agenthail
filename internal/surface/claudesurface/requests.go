@@ -42,7 +42,6 @@ func (c *Claude) Requests(ctx context.Context, sess *surface.Session) (surface.R
 		state.Requests = c.prompts.requests(sess.ID)
 		return state, nil
 	}
-	readAt := time.Now()
 	listed, err := c.host.client.Session(ctx, sess.ID)
 	switch {
 	case claudehost.IsCode(err, "not_open"), claudehost.IsCode(err, "held"), errors.Is(err, claudehost.ErrNotRunning):
@@ -52,7 +51,7 @@ func (c *Claude) Requests(ctx context.Context, sess *surface.Session) (surface.R
 	case listed.PID != sess.PID:
 		return state, nil
 	}
-	c.host.store(listed, readAt)
+	c.host.store(listed)
 	return requestState(listed), nil
 }
 
