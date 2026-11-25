@@ -132,3 +132,34 @@ func TestLedgerWorkNestsItemsUnderParentsAndShowsTheTree(t *testing.T) {
 		t.Fatalf("show printed %q, err %v", out, err)
 	}
 }
+
+func TestLedgerWorkRefusesATitleOverEightyCharactersOnAddAndEdit(t *testing.T) {
+	var store *ledger.Store
+	app, _ := ledgerWriteFixture(t, func(_ string, body map[string]any) (int, any) {
+		data, _ := json.Marshal(body)
+		var req ledger.WorkRequest
+		if err := json.Unmarshal(data, &req); err != nil {
+			t.Fatal(err)
+		}
+		result, err := store.Work(req, time.Now())
+		if err != nil {
+			return http.StatusBadRequest, map[string]any{"error": map[string]any{"code": "invalid", "message": err.Error()}}
+		}
+		return http.StatusOK, result
+	})
+	store = ledger.NewStore(app.registry().WriteDB(), app.registry().ReadDB())
+	fits, long := strings.Repeat("é", 80), strings.Repeat("é", 81)
+	run := func(args ...string) error {
+		_, err := captureStdout(t, func() error { return app.cmdLedger(args) })
+		return err
+	}
+	if err := run("add", long); err == nil || !strings.Contains(err.Error(), "put the rest in the description") {
+		t.Fatalf("add of 81 characters: %v", err)
+	}
+	if err := run("add", fits); err != nil {
+		t.Fatalf("add of 80 characters: %v", err)
+	}
+	if err := run("work", "edit", "widget-W1", "--text", long); err == nil || !strings.Contains(err.Error(), "put the rest in the description") {
+		t.Fatalf("edit to 81 characters: %v", err)
+	}
+}

@@ -142,9 +142,9 @@ func (b *Board) planWorkAdd(req WorkRequest, ids *idIssuer) (EventType, any, str
 			return "", nil, "", err
 		}
 	}
-	text := strings.TrimSpace(req.Text)
-	if text == "" {
-		return "", nil, "", refuse("a work item needs its text")
+	text, err := workTitle(req.Text)
+	if err != nil {
+		return "", nil, "", err
 	}
 	fields, err := req.Fields.normalized()
 	if err != nil {
