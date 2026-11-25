@@ -266,7 +266,9 @@ pub fn answer_request(s: &mut App, request: &str, choices: Vec<String>) {
     }
     s.answering = Some(request.to_string());
     s.settled.insert(request.to_string(), None);
-    s.send_status = "Answering…".into();
+    if !s.sending.contains(&id) {
+        s.send_status = "Answering…".into();
+    }
     let (out, request) = (s.outbox.clone(), request.to_string());
     std::thread::spawn(move || {
         let result = client.respond(&id, &request, choices);

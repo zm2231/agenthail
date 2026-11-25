@@ -40,7 +40,8 @@ pub(crate) fn has_settled(s: &App, x: &Session) -> bool {
 }
 
 pub(crate) fn settled_request<'a>(s: &'a App, x: &Session) -> Option<&'a feed::catalog::OpenRequest> {
-    s.requests.get(&x.id).and_then(|r| r.iter().find(|r| s.is_settled(&r.id)))
+    let settled = s.requests.get(&x.id)?.iter().filter(|r| s.is_settled(&r.id));
+    settled.max_by_key(|r| s.settled.get(&r.id).copied().flatten().map_or((1, None), |at| (0, Some(at))))
 }
 
 pub(crate) fn waiting_choices(s: &App, x: &Session) -> (Option<String>, Vec<Choice>, bool) {
