@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use feed::Item;
+use feed::derive::sessions::busy;
 use rune::{Cx, El, ScrollSpec, col, el, icon, row, text, text_input};
 use rune_kit::markdown::Markdown;
 use rune_kit::shell::Toolbar;
@@ -271,7 +272,7 @@ fn clip(t: &str, n: usize) -> String {
 
 pub fn transcript(s: &App, id: &str, max_blocks: usize) -> El {
     let k = kit();
-    let busy = s.d.session(id).is_some_and(|x| matches!(x.display.kind.as_str(), "working" | "finishing" | "starting"));
+    let busy = s.d.session(id).is_some_and(busy);
     let empty: Vec<Item> = Vec::new();
     let items = s.d.transcripts.get(id).unwrap_or(&empty);
     let all = blocks(items);
@@ -384,9 +385,9 @@ pub fn work_rail(s: &App, id: &str) -> El {
             c = c
                 .child(row().w_full().items_center().child(ui::label("On this work")).child(ui::spacer()).child(ui::id_label(&crate::data::short_id(&w.id))))
                 .child(ui::title_fit(s, "rail-title", &plain(&w.text), BODY_MED, strong(), 2))
-                .child(ui::stepper(s.d.phase(w), &s.d.whose_move(w)).mt(4.0));
+                .child(ui::stepper(feed::derive::phase(w), &s.d.whose_move(w)).mt(4.0));
             let mut chips = row().gap(6.0).flex_wrap();
-            if let Some(pr) = s.d.pr(w) {
+            if let Some(pr) = feed::derive::work::pr(w) {
                 chips = chips.child(ui::chip(&icons::BRANCH, &format!("PR #{pr}")));
             }
             chips = chips.child(ui::chip(&icons::TASK, &format!("{} · {}", w.priority, w.kind)));
@@ -409,7 +410,7 @@ pub fn work_rail(s: &App, id: &str) -> El {
                             .items_center()
                             .py(4.0)
                             .on_press(move |s: &mut App| go(s, Screen::Work(aid.clone())))
-                            .child(ui::mini_phase(s.d.phase(a)))
+                            .child(ui::mini_phase(feed::derive::phase(a)))
                             .child(text(plain(&a.text)).font(META).color(base()).truncate().shrink()),
                     );
                 }
@@ -431,33 +432,11 @@ fn fact(name: &str, value: &str) -> El {
 pub fn timeline(s: &App, w: &crate::data::Work, max: usize) -> El {
     let k = kit();
     let mut c = col().w_full().gap(0.0);
-    let mut back = Vec::new();
-    let mut prev = 0usize;
-    for t in &w.timeline {
-        let mut b = false;
-        if t.kind == "state" {
-            let p = match t.state.as_deref() {
-                Some("in_progress") => 1,
-                Some("in_review") => 4,
-                Some("done") | Some("closed") => 5,
-                _ => 0,
-            };
-            b = p < prev;
-            prev = p;
-        }
-        back.push(b);
-    }
-    let entries: Vec<(&crate::data::Entry, bool)> = w.timeline.iter().zip(back).rev().filter(|(t, _)| t.kind != "dep" && t.kind != "imported").take(max).collect();
-    let n = entries.len();
-    for (i, (t, moved_back)) in entries.iter().enumerate() {
-        let what = match (t.kind.as_str(), t.state.as_deref()) {
-            ("state", Some(st)) if *moved_back => format!("Moved back to {}", state_word(st)),
-            ("state", Some(st)) => format!("Moved to {}", state_word(st)),
-            ("created", _) => "Created".into(),
-            ("comment", _) => format!("Note: {}", t.text.as_deref().unwrap_or("")),
-            _ => t.text.clone().unwrap_or_default(),
-        };
-        let dot = el().size(7.0, 7.0).radius(3.5).fill(if *moved_back { k.c.warning.icon } else if t.kind == "state" { k.c.text_accent } else if t.kind == "comment" { k.c.info.icon } else { k.c.border_strong });
+    let steps = feed::derive::timeline::timeline(w, max);
+    let n = steps.len();
+    for (i, step) in steps.iter().enumerate() {
+        let t = step.entry;
+        let dot = el().size(7.0, 7.0).radius(3.5).fill(if step.moved_back { k.c.warning.icon } else if t.kind == "state" { k.c.text_accent } else if t.kind == "comment" { k.c.info.icon } else { k.c.border_strong });
         let rail = col().w(7.0).h_full().items_center().child(dot.mt(5.0)).child(el().w(1.0).grow(1.0).fill(if i + 1 < n { ui::rule() } else { rune::Color::TRANSPARENT }));
         c = c.child(
             row()
@@ -473,24 +452,11 @@ pub fn timeline(s: &App, w: &crate::data::Work, max: usize) -> El {
                         .gap(2.0)
                         .pb(12.0)
                         .child(row().gap(6.0).child(text(s.d.name_of(&t.actor)).font(META_MED).color(base()).truncate().shrink()).child(text(s.d.ago(&t.at)).font(META).color(weak())))
-                        .child(text(clip(&plain(&what), 180)).font(META).color(weak()).wrap().max_lines(3)),
+                        .child(text(clip(&step.what, 180)).font(META).color(weak()).wrap().max_lines(3)),
                 ),
         );
     }
     c
-}
-
-pub fn state_word(st: &str) -> &'static str {
-    match st {
-        "in_progress" => "Build",
-        "in_review" => "Check",
-        "done" => "Shipped",
-        "open" | "ready" => "Up next",
-        "parked" => "Parked",
-        "blocked" => "Blocked",
-        "closed" => "Closed",
-        _ => "a new state",
-    }
 }
 
 pub fn lead_choice(s: &App, id: &str) -> Option<(String, String)> {

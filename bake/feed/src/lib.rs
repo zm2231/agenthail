@@ -1,6 +1,7 @@
 pub mod blocks;
 pub mod question;
 pub mod catalog;
+pub mod derive;
 pub mod edits;
 pub mod focus;
 pub mod item;

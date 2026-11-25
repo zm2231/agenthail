@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 use rune::{AppSpec, Chrome, Cx, El, Key, KeyEvent, TextEdit, Tx, WindowOptions};
 use rune_kit::shell::{self, PaneState};
 
-use crate::data::{Data, Need, Target};
+use crate::data::{Need, Target, World};
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Screen {
@@ -25,7 +25,7 @@ pub enum Screen {
 }
 
 pub struct App {
-    pub d: Data,
+    pub d: World,
     pub needs: Vec<Need>,
     pub hands_on: Vec<String>,
     pub screen: Screen,
@@ -65,17 +65,13 @@ fn arg(name: &str) -> Option<String> {
 
 fn init() -> App {
     let json = arg("--fixture").and_then(|p| std::fs::read_to_string(p).ok());
-    let d = Data::load(json.as_deref().unwrap_or(data::FIXTURE));
+    let d = World::from_json(json.as_deref().unwrap_or(data::FIXTURE)).unwrap_or_else(|_| World::new(Default::default()));
     let mut needs = d.needs();
     let replay = !rune::extra_args().iter().any(|a| a == "--no-replay");
     let ask = if replay { d.last_ask() } else { None };
-    if let Some(a) = &ask {
-        if let Some(x) = d.session(&a.session) {
-            needs.push(Need { kind: data::NeedKind::Question, project: x.project_name(), project_key: x.project_key(), title: a.question.clone(), who: d.title(x), at: a.at.clone(), target: Target::Session(a.session.clone()), label: None });
-        }
-    }
-    let hands_on = d.hands_on().iter().map(|s| s.id.clone()).collect();
-    needs.sort_by(|a, b| a.kind.rank().cmp(&b.kind.rank()).then(a.at.cmp(&b.at)));
+    needs.extend(ask.as_ref().and_then(|a| d.ask_need(a)));
+    feed::derive::needs::sort(&mut needs);
+    let hands_on = d.hands_on(&[]).iter().map(|s| s.id.clone()).collect();
     let mut app = App {
         d,
         needs,

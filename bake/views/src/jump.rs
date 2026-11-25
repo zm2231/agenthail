@@ -1,74 +1,14 @@
 use rune::{Color, El, Key, KeyEvent, TextStyle, Tx, col, icon, row, text, text_input};
 use rune_theme_opencode::icons;
 
-use crate::data::{Target, plain, short_id};
+use feed::derive::Hit;
+
 use crate::ui::{self, BODY_MED, META, META_MED, kit, strong, weak};
 use crate::{App, open_target};
 
-pub struct Hit {
-    pub group: &'static str,
-    pub title: String,
-    pub status: String,
-    pub badge: String,
-    pub avatar: String,
-    pub target: Target,
-}
-
 pub fn hits(s: &App) -> Vec<Hit> {
-    let q = s.jump.as_ref().map(|e| e.text.trim().to_lowercase()).unwrap_or_default();
-    let has = |t: &str| q.is_empty() || t.to_lowercase().contains(&q);
-    let mut out = Vec::new();
-    let mut projects = 0;
-    for p in &s.d.projects {
-        if !has(&p.name) || projects >= 3 {
-            continue;
-        }
-        projects += 1;
-        let needs = s.needs.iter().filter(|n| n.project_key == p.key).count();
-        let moving = p.sessions.iter().filter_map(|id| s.d.session(id)).filter(|x| matches!(x.display.kind.as_str(), "working" | "finishing" | "starting")).count();
-        let mut status = Vec::new();
-        if needs > 0 {
-            status.push(format!("{needs} need you"));
-        }
-        status.push(if moving > 0 { format!("{moving} moving") } else { "quiet".into() });
-        status.push(if p.lead.is_some() { format!("lead {}", p.lead_name) } else { "no lead yet".into() });
-        out.push(Hit { group: "Projects", title: p.name.clone(), status: status.join(" · "), badge: s.d.ago(&p.last_active), avatar: p.name.clone(), target: Target::Project(p.key.clone()) });
-    }
-    let mut work: Vec<&crate::data::Work> = s.d.work.values().filter(|w| matches!(w.state.as_str(), "in_progress" | "in_review")).filter(|w| has(&w.text) || has(&w.id)).collect();
-    work.sort_by(|a, b| s.d.phase(b).cmp(&s.d.phase(a)).then(b.timeline.last().map(|t| t.at.as_str()).cmp(&a.timeline.last().map(|t| t.at.as_str()))));
-    for w in work.into_iter().take(3) {
-        let phase = s.d.phase(w);
-        let whose = if phase == 4 { "your move".to_string() } else { format!("{}'s move", ui::short_title(&s.d.whose_move(w), 24)) };
-        let project = s.d.project(&w.project).map(|p| p.name.clone()).unwrap_or_default();
-        out.push(Hit {
-            group: "Work",
-            title: plain(&w.text),
-            status: format!("{} · {whose} · {project}", crate::data::PHASES[phase]),
-            badge: short_id(&w.id),
-            avatar: project,
-            target: Target::Work(w.id.clone()),
-        });
-    }
-    let mut sessions: Vec<&feed::catalog::Session> = s.hands_on.iter().filter_map(|id| s.d.session(id)).collect();
-    let mut rest: Vec<&feed::catalog::Session> = s.d.sessions.iter().filter(|x| x.project.is_some() && !s.hands_on.contains(&x.id)).collect();
-    rest.sort_by(|a, b| b.last_active.cmp(&a.last_active));
-    sessions.extend(rest);
-    for x in sessions.into_iter().filter(|x| has(&s.d.title(x)) || has(&x.project_name())).take(3) {
-        let busy = matches!(x.display.kind.as_str(), "working" | "finishing" | "starting");
-        out.push(Hit {
-            group: "Sessions",
-            title: s.d.title(x),
-            status: {
-                let gist = s.d.gist(x);
-                let state = if busy { "Working" } else { "Idle" };
-                if gist == x.display.label { state.to_string() } else { format!("{state} · {}", ui::short_title(&gist, 70)) }
-            },
-            badge: x.project_name(),
-            avatar: x.project_name(),
-            target: Target::Session(x.id.clone()),
-        });
-    }
-    out
+    let q = s.jump.as_ref().map(|e| e.text.as_str()).unwrap_or_default();
+    s.d.jump(q, &s.needs, &s.hands_on)
 }
 
 pub fn key(s: &mut App, ev: &KeyEvent, _tx: &mut Tx) -> bool {

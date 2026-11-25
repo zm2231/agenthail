@@ -3,11 +3,14 @@ use rune_kit::shell::Toolbar;
 use rune_kit::{Button, ButtonVariant, ControlSize, SegmentedControl, Spinner};
 use rune_theme_opencode::icons;
 
-use crate::data::{Line, Project};
+use feed::derive::digest::{HAPPENED, count, pick};
+use feed::derive::sessions::busy;
+
+use crate::data::{Happened, Line, Project};
 use crate::ui::{self, BODY, BODY_MED, HEAD, META, META_MED, TITLE, base, kit, strong, weak};
 use crate::{App, Screen, go, next_need, open_target};
 
-pub const WINDOW: f64 = 12.0;
+pub const WINDOW: f64 = feed::derive::WINDOW_HOURS;
 
 fn variant(s: &App) -> El {
     let seg = SegmentedControl::new(&["Three panes", "Brief"], Some(if s.now_brief { 1 } else { 0 }))
@@ -16,18 +19,6 @@ fn variant(s: &App) -> El {
         .on_pick(|s: &mut App, i, _| s.now_brief = i == 1)
         .build(kit());
     row().gap(6.0).items_center().child(seg).child(ui::ghost_keys(&["⌥⌘B"]))
-}
-
-pub fn digests(s: &App) -> Vec<(&Project, Vec<Line>)> {
-    let mut out: Vec<(&Project, Vec<Line>)> = s.d.projects.iter().map(|p| (p, s.d.digest(p, WINDOW))).filter(|(_, l)| !l.is_empty()).collect();
-    out.sort_by(|a, b| {
-        let la = a.1.iter().map(|l| l.at.as_str()).max().unwrap_or("");
-        let lb = b.1.iter().map(|l| l.at.as_str()).max().unwrap_or("");
-        let wa = a.1.iter().filter(|l| l.kind != crate::data::Happened::Said).count();
-        let wb = b.1.iter().filter(|l| l.kind != crate::data::Happened::Said).count();
-        wb.cmp(&wa).then(lb.cmp(la))
-    });
-    out
 }
 
 pub fn digest_line(s: &App, key: String, l: &Line) -> El {
@@ -62,15 +53,7 @@ pub fn digest_line(s: &App, key: String, l: &Line) -> El {
 pub fn digest_block(s: &App, p: &Project, lines: &[Line], max: usize) -> El {
     let k = kit();
     let key = p.key.clone();
-    let counts = |kind| lines.iter().filter(|l| l.kind == kind).count();
-    use crate::data::Happened::*;
-    let mut summary = Vec::new();
-    for (kind, word) in [(Shipped, "shipped"), (Waiting, "waiting on you"), (Failed, "failed"), (Moved, "moved"), (Said, "said")] {
-        let n = counts(kind);
-        if n > 0 {
-            summary.push(format!("{n} {word}"));
-        }
-    }
+    let summary: Vec<String> = HAPPENED.iter().map(|k| (count(lines, *k), k.word())).filter(|(n, _)| *n > 0).map(|(n, w)| format!("{n} {w}")).collect();
     let head = row()
         .w_full()
         .gap(10.0)
@@ -81,10 +64,7 @@ pub fn digest_block(s: &App, p: &Project, lines: &[Line], max: usize) -> El {
         .child(ui::spacer())
         .child(Button::new("Open project").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(move |s: &mut App| go(s, Screen::Project(key.clone()))).build(k));
     let mut c = col().w_full().gap(2.0).padding(14.0).child(head.mb(6.0));
-    let mut shown: Vec<&Line> = Vec::new();
-    for kind in [Shipped, Waiting, Failed, Moved, Said] {
-        shown.extend(lines.iter().filter(|l| l.kind == kind).take(2));
-    }
+    let mut shown = pick(lines, 2);
     shown.truncate(max);
     for (i, l) in shown.into_iter().enumerate() {
         c = c.child(digest_line(s, format!("d-{}-{i}", p.key), l));
@@ -98,7 +78,7 @@ pub fn digest_block(s: &App, p: &Project, lines: &[Line], max: usize) -> El {
 pub fn hands_on_card(s: &App, i: usize, id: &str) -> El {
     let k = kit();
     let Some(x) = s.d.session(id) else { return col() };
-    let busy = matches!(x.display.kind.as_str(), "working" | "finishing" | "starting");
+    let busy = busy(x);
     let idc = id.to_string();
     let status = if busy {
         row().gap(6.0).items_center().child(Spinner::new().size(11.0).build(k)).child(text("Working".to_string()).font(META_MED).color(k.c.text_accent))
@@ -202,7 +182,7 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
             .child(ui::section_head("Since you left", None, Some(text(format!("Last {WINDOW:.0} hours, from the records")).font(META).color(weak()))))
             .child(text("Each line opens what it is about.".to_string()).font(META).color(weak())),
     );
-    for (p, lines) in digests(s).iter().take(6) {
+    for (p, lines) in s.d.digests(WINDOW).iter().take(6) {
         centre = centre.child(digest_block(s, p, lines, 5));
     }
     let centre = col()
@@ -225,8 +205,7 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
         }
     }
     rail = rail.child(ui::sessions_block(s, !wide).mt(14.0));
-    let skip: Vec<&str> = s.hands_on.iter().map(String::as_str).collect();
-    let moving = s.d.moving(&skip);
+    let moving = s.d.moving(&s.hands_on);
     rail = rail.child(ui::section_head("What's moving", Some(moving.len()), None).mt(14.0));
     if moving.is_empty() {
         rail = rail.child(text("Nothing else is running.".to_string()).font(META).color(weak()));
@@ -264,15 +243,14 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
 }
 
 pub fn brief(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
-    let skip: Vec<&str> = s.hands_on.iter().map(String::as_str).collect();
-    let moving = s.d.moving(&skip);
-    let digests = digests(s);
-    let shipped: usize = digests.iter().map(|(_, l)| l.iter().filter(|x| x.kind == crate::data::Happened::Shipped).count()).sum();
+    let moving = s.d.moving(&s.hands_on);
+    let digests = s.d.digests(WINDOW);
+    let shipped: usize = digests.iter().map(|(_, l)| count(l, Happened::Shipped)).sum();
     let intro = col()
         .w_full()
         .gap(6.0)
         .child(text("Since you left".to_string()).font(TITLE).color(strong()))
-        .child(text(format!("{} need you · {} shipped · {} working · last {WINDOW:.0} hours across {} projects", s.needs.len(), shipped, s.d.sessions.iter().filter(|x| !x.archived && crate::sessions::busy(x)).count(), digests.len())).font(BODY).color(base()));
+        .child(text(format!("{} need you · {} shipped · {} working · last {WINDOW:.0} hours across {} projects", s.needs.len(), shipped, s.d.working(), digests.len())).font(BODY).color(base()));
     let mut needs = col().w_full().gap(2.0).padding(6.0);
     for (i, n) in s.needs.iter().enumerate() {
         match s.ask.as_ref().filter(|a| n.kind == crate::data::NeedKind::Question && n.target == crate::data::Target::Session(a.session.clone())) {

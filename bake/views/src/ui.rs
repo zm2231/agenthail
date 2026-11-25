@@ -1,6 +1,7 @@
 use rune::{Color, Cx, El, Icon, Spring, TextStyle, col, el, icon, oklch, row, text};
 use rune_kit::shell::{PaneMotion, RowStatus, Sidebar, SidebarRow, SidebarSection, SidebarToggle, SplitView, Toolbar};
 use rune_kit::{Badge, BadgeVariant, Button, ButtonVariant, ControlSize, Keybind, KeybindVariant, Kit, Spinner};
+use feed::derive::sessions::busy;
 use rune_theme_opencode::icons;
 
 use crate::data::{Happened, Need, NeedKind, PHASES, Target};
@@ -404,7 +405,7 @@ pub fn strip(s: &App, current: Option<&str>) -> El {
     for (i, id) in ids.iter().enumerate() {
         let Some(x) = s.d.session(id) else { continue };
         let on = current == Some(id.as_str());
-        let busy = matches!(x.display.kind.as_str(), "working" | "finishing" | "starting");
+        let busy = busy(x);
         let id2 = id.clone();
         let mut tab = row()
             .key(format!("tab-{i}"))
@@ -431,9 +432,7 @@ pub fn strip(s: &App, current: Option<&str>) -> El {
     r
 }
 
-pub fn short_title(t: &str, max: usize) -> String {
-    if t.chars().count() > max { format!("{}…", t.chars().take(max).collect::<String>().trim_end()) } else { t.to_string() }
-}
+pub use feed::derive::text::short_title;
 
 pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -> El {
     let k = kit();
@@ -476,19 +475,7 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -
     }
     for (pi, p) in order.iter().take(if current_project.is_some() { 1 } else { 0 }).enumerate() {
         let mut sec = SidebarSection::new(p.name.clone()).key(format!("sec-p{pi}")).count(p.sessions.len());
-        let mut order: Vec<(String, u8)> = Vec::new();
-        if let Some(lead) = &p.lead {
-            order.push((lead.clone(), 0));
-            for c in s.d.crew(lead) {
-                order.push((c.id.clone(), 1));
-            }
-        }
-        for id in &p.sessions {
-            if !order.iter().any(|(x, _)| x == id) {
-                order.push((id.clone(), 0));
-            }
-        }
-        for (id, depth) in order.iter().take(8) {
+        for (id, depth) in s.d.project_rows(p).iter().take(8) {
             let Some(x) = s.d.session(id) else { continue };
             let idc = id.clone();
             let lead = p.lead.as_deref() == Some(id.as_str());
@@ -500,7 +487,7 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -
                 .subtitle(if waiting { x.display.label.clone() } else if lead { format!("Lead · {}", short_title(&s.d.gist(x), 40)) } else { short_title(&s.d.gist(x), 48) })
                 .selected(selected == Some(id.as_str()))
                 .on_select(move |s: &mut App, _| go(s, Screen::Session(idc.clone())));
-            if matches!(x.display.kind.as_str(), "working" | "finishing" | "starting") {
+            if busy(x) {
                 row_ = row_.status(RowStatus::Busy);
             }
             if waiting {
@@ -671,7 +658,7 @@ pub fn status_bar(s: &App) -> El {
                 .child(text(until(s, m.resets_at.as_deref().unwrap_or(""))).font(META).color(weak())),
         );
     }
-    let working = s.d.sessions.iter().filter(|x| matches!(x.display.kind.as_str(), "working" | "finishing" | "starting")).count();
+    let working = s.d.working();
     r = r.child(spacer()).child(row().gap(6.0).items_center().child(Spinner::new().size(10.0).build(k)).child(text(format!("{working} working")).font(META).color(base())));
     for h in &s.d.hosts {
         let up = matches!(h.state.as_str(), "local" | "connected");
@@ -763,17 +750,9 @@ pub fn crumb(parts: &[(&str, bool)]) -> El {
 
 pub fn sessions_block(s: &App, compact: bool) -> El {
     let k = kit();
-    let mut by: Vec<(String, usize)> = Vec::new();
-    for x in s.d.sessions.iter().filter(|x| !x.archived && crate::sessions::busy(x)) {
-        let name = if x.project.is_some() { x.project_name() } else { "No project".into() };
-        match by.iter_mut().find(|b| b.0 == name) {
-            Some(b) => b.1 += 1,
-            None => by.push((name, 1)),
-        }
-    }
-    by.sort_by(|a, b| b.1.cmp(&a.1));
-    let total: usize = by.iter().map(|b| b.1).sum();
-    let listed = s.d.sessions.iter().filter(|x| !x.archived && !crate::sessions::hidden(x)).count();
+    let by = feed::derive::sessions::busy_by_group(&s.d.sessions);
+    let total = s.d.working();
+    let listed = s.d.listed();
     let open = Button::new("All sessions").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).icon(&icons::ARROW_RIGHT).shortcut("⌘⇧S").on_press(|s: &mut App| go(s, Screen::Sessions)).build(k);
     let mut chips = row().gap(6.0).flex_wrap().items_center();
     for (name, n) in &by {
