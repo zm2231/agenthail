@@ -172,7 +172,7 @@ func (f *daemonSurface) Resolve(_ context.Context, id string) (*surface.Session,
 	session = f.carried(session)
 	return &session, nil
 }
-func (f *daemonSurface) SearchSessions(context.Context, string, int) ([]surface.SessionSearchResult, error) {
+func (f *daemonSurface) SearchSessions(context.Context, string, int, func(surface.SessionSearchResult)) ([]surface.SessionSearchResult, error) {
 	return f.searchResults, f.searchErr
 }
 func (f *daemonSurface) Observe(_ context.Context, session *surface.Session) (*surface.TurnObservation, error) {

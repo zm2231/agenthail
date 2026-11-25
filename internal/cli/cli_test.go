@@ -44,6 +44,7 @@ type cliSurface struct {
 	tail          []surface.Exchange
 	streamEvents  []surface.StreamEvent
 	searchResults []surface.SessionSearchResult
+	searchFound   []surface.SessionSearchResult
 	compactCalls  int
 	goal          *surface.GoalState
 	resolveErr    error
@@ -115,7 +116,10 @@ func (f *cliSurface) Resolve(_ context.Context, target string) (*surface.Session
 	}
 	return &session, nil
 }
-func (f *cliSurface) SearchSessions(context.Context, string, int) ([]surface.SessionSearchResult, error) {
+func (f *cliSurface) SearchSessions(_ context.Context, _ string, _ int, found func(surface.SessionSearchResult)) ([]surface.SessionSearchResult, error) {
+	for _, result := range f.searchFound {
+		found(result)
+	}
 	return f.searchResults, nil
 }
 func (f *cliSurface) Observe(context.Context, *surface.Session) (*surface.TurnObservation, error) {
@@ -869,6 +873,17 @@ func TestSearchCodexPrintsAndRegistersHistoryHits(t *testing.T) {
 	}
 	if _, err := registry.Session("old"); err != nil {
 		t.Fatalf("search result was not retained: %v", err)
+	}
+}
+
+func TestSearchCodexPrintsEachMatchOnceAsItArrives(t *testing.T) {
+	early := surface.SessionSearchResult{Session: surface.Session{ID: "early", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "early match"}, Snippet: "first"}
+	late := surface.SessionSearchResult{Session: surface.Session{ID: "late", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "late match"}, Snippet: "second"}
+	fake := &cliSurface{kind: surface.KindCodex, searchFound: []surface.SessionSearchResult{early, early}, searchResults: []surface.SessionSearchResult{early, late}}
+	app, _ := cliFixture(t, fake)
+	output, err := captureStdout(t, func() error { return app.Run([]string{"search", "codex", "match"}) })
+	if err != nil || strings.Count(output, "early match") != 1 || strings.Count(output, "late match") != 1 || strings.Index(output, "early match") > strings.Index(output, "late match") {
+		t.Fatalf("output=%q err=%v", output, err)
 	}
 }
 
