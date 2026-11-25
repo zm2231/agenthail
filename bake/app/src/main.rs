@@ -445,11 +445,11 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                         format!("Not answered: {}", error.message)
                     }
                 };
-                if s.selected.as_deref() == Some(id.as_str()) {
+                if s.selected.as_deref() == Some(id.as_str()) && !s.sending.contains(&id) {
                     s.send_status = status.clone();
                 }
                 s.status_line.insert(id.clone(), status.clone());
-                s.answer_status.insert(id.clone(), status);
+                s.answer_status.insert(request.clone(), status);
                 fetch_requests_at(s, &id, &[0, 2000, 6000, 9000]);
             }
             Bg::Error(error) => s.status = format!("daemon: {error}"),

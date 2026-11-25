@@ -159,8 +159,9 @@ pub(crate) fn session_screen(s: &App) -> El {
     if open || (x.state(s.now) == State::NeedsYou && !sent) {
         center = center.child(waiting_card(s, x));
     } else if sent {
-        let in_flight = s.answering.as_ref().is_some_and(|r| s.requests.get(&x.id).is_some_and(|list| list.iter().any(|q| &q.id == r)));
-        let (glyph, label, color) = match (in_flight, s.answer_status.get(&x.id)) {
+        let request = settled_request(s, x).map(|r| r.id.clone()).unwrap_or_default();
+        let in_flight = s.answering.as_deref() == Some(request.as_str());
+        let (glyph, label, color) = match (in_flight, s.answer_status.get(&request)) {
             (true, _) => (&icons::CLOCK, "Sending your answer…", muted()),
             (_, Some(status)) if status.starts_with("Sent, not confirmed") => (&icons::CLOCK, "Answer sent, not confirmed yet", attention()),
             _ => (&icons::CHECK_CIRCLE, "Answer sent, waiting for the agent", done()),

@@ -36,7 +36,11 @@ pub(crate) fn open_request<'a>(s: &'a App, x: &Session) -> Option<&'a feed::cata
 }
 
 pub(crate) fn has_settled(s: &App, x: &Session) -> bool {
-    s.requests.get(&x.id).is_some_and(|r| r.iter().any(|r| s.is_settled(&r.id)))
+    settled_request(s, x).is_some()
+}
+
+pub(crate) fn settled_request<'a>(s: &'a App, x: &Session) -> Option<&'a feed::catalog::OpenRequest> {
+    s.requests.get(&x.id).and_then(|r| r.iter().find(|r| s.is_settled(&r.id)))
 }
 
 pub(crate) fn waiting_choices(s: &App, x: &Session) -> (Option<String>, Vec<Choice>, bool) {
