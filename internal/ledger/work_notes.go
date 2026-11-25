@@ -12,16 +12,17 @@ import (
 
 const maxWorkNoteRunes = 4000
 
-var WorkLogTypes = []string{"progress", "blocker", "decision", "hypothesis", "tried", "result"}
+var WorkLogTypes = []string{"progress", "blocker", "decision", "hypothesis", "tried", "result", LogVerify}
 
 type WorkEntry struct {
-	At      time.Time `json:"at"`
-	Actor   string    `json:"actor"`
-	Kind    string    `json:"kind"`
-	Text    string    `json:"text,omitempty"`
-	State   WorkState `json:"state,omitempty"`
-	LogType string    `json:"logType,omitempty"`
-	Source  string    `json:"source,omitempty"`
+	At       time.Time `json:"at"`
+	Actor    string    `json:"actor"`
+	Kind     string    `json:"kind"`
+	Text     string    `json:"text,omitempty"`
+	State    WorkState `json:"state,omitempty"`
+	LogType  string    `json:"logType,omitempty"`
+	Source   string    `json:"source,omitempty"`
+	Assignee string    `json:"assignee,omitempty"`
 }
 
 type WorkNotePayload struct {
@@ -78,6 +79,7 @@ func (b *Board) applyWorkNote(event Event) error {
 		kind = "log"
 	}
 	item.Timeline = append(item.Timeline, WorkEntry{At: event.CreatedAt, Actor: p.Actor, Kind: kind, Text: p.Text, LogType: p.LogType, Source: p.Source})
+	item.refreshPhase()
 	return nil
 }
 

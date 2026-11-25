@@ -37,6 +37,7 @@ type ledgerPageView struct {
 	Ready   []ledgerPageRow            `json:"ready"`
 	Waiting []ledgerPageWait           `json:"waiting"`
 	Done    []ledgerPageRow            `json:"done"`
+	Phases  map[ledger.Phase]string    `json:"phaseLabels"`
 }
 
 type ledgerPageRow struct {
@@ -46,6 +47,7 @@ type ledgerPageRow struct {
 	For      string            `json:"for,omitempty"`
 	Type     string            `json:"type,omitempty"`
 	Priority string            `json:"priority,omitempty"`
+	Phase    ledger.Phase      `json:"phase,omitempty"`
 	Holder   string            `json:"holder,omitempty"`
 	Since    time.Time         `json:"since,omitzero"`
 	Note     string            `json:"note,omitempty"`
@@ -170,7 +172,7 @@ func (d *Daemon) projectLedgerPage(projectID string) (ledgerPageView, error) {
 	if err != nil {
 		return ledgerPageView{}, err
 	}
-	view := ledgerPageView{Project: projectID, Key: key, Board: map[string][]ledgerPageRow{}, Work: map[string][]ledgerPageRow{}, Ready: []ledgerPageRow{}, Waiting: []ledgerPageWait{}, Done: []ledgerPageRow{}}
+	view := ledgerPageView{Project: projectID, Key: key, Board: map[string][]ledgerPageRow{}, Work: map[string][]ledgerPageRow{}, Ready: []ledgerPageRow{}, Waiting: []ledgerPageWait{}, Done: []ledgerPageRow{}, Phases: ledger.NewBoard().PhaseLabels()}
 	for _, lane := range ledgerBoardLanes {
 		view.Board[lane] = []ledgerPageRow{}
 	}
@@ -188,6 +190,7 @@ func (d *Daemon) projectLedgerPage(projectID string) (ledgerPageView, error) {
 }
 
 func (d *Daemon) fillLedgerPage(view *ledgerPageView, board *ledger.Board, now time.Time) {
+	view.Phases = board.PhaseLabels()
 	names := map[string]string{}
 	name := func(sessionID string) string {
 		if sessionID == "" {
@@ -200,7 +203,7 @@ func (d *Daemon) fillLedgerPage(view *ledgerPageView, board *ledger.Board, now t
 		return names[sessionID]
 	}
 	row := func(item ledger.WorkItem) ledgerPageRow {
-		out := ledgerPageRow{ID: item.ID, Title: item.Text, What: firstLine(item.Description), Type: string(item.Type), Priority: item.Priority, Holder: name(item.Assignee), Since: stateSince(item)}
+		out := ledgerPageRow{ID: item.ID, Title: item.Text, What: firstLine(item.Description), Type: string(item.Type), Priority: item.Priority, Phase: item.Phase, Holder: name(item.Assignee), Since: stateSince(item)}
 		if clause, ok := board.Clause(item.ClauseID); ok && clause.Text != item.Text {
 			out.For = firstLine(clause.Text)
 		}

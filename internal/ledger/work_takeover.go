@@ -34,8 +34,6 @@ const (
 // item a pull request was linked for; only these prove the item merged.
 const WorkSourcePRItem = "pr-item"
 
-const prMergedPrefix = "PR merged: "
-
 func (b *Board) planWorkTakeover(req WorkRequest) (EventType, any, string, error) {
 	item := b.workItems[req.ItemID]
 	if item == nil {
@@ -92,7 +90,7 @@ func (b *Board) planWorkTakeover(req WorkRequest) (EventType, any, string, error
 		}
 		taken.PR = mergedPR(item)
 		if taken.PR == "" {
-			return "", nil, "", refuse("%s has no %q line from the PR watcher; submit it for review instead", item.ID, strings.TrimSpace(prMergedPrefix))
+			return "", nil, "", refuse("%s has no %q line from the PR watcher; submit it for review instead", item.ID, strings.TrimSpace(PRLine(PRMerged, "")))
 		}
 		payload.ToState, payload.Assignee = WorkDone, item.Assignee
 	}
@@ -104,8 +102,11 @@ func (b *Board) planWorkTakeover(req WorkRequest) (EventType, any, string, error
 func mergedPR(item *WorkItem) string {
 	for i := len(item.Timeline) - 1; i >= 0; i-- {
 		e := item.Timeline[i]
-		if e.Kind == "log" && e.Source == WorkSourcePRItem && strings.HasPrefix(e.Text, prMergedPrefix) {
-			return strings.TrimPrefix(e.Text, prMergedPrefix)
+		if e.Kind != "log" || e.Source != WorkSourcePRItem {
+			continue
+		}
+		if mark, url, ok := ParsePRLine(e.Text); ok && mark == PRMerged {
+			return url
 		}
 	}
 	return ""
@@ -123,7 +124,7 @@ func takeoverText(t Takeover) string {
 	case TakeoverSubmit:
 		text += ", submitted for review"
 	case TakeoverDone:
-		text += ", done by " + prMergedPrefix + t.PR
+		text += ", done by " + PRLine(PRMerged, t.PR)
 	}
 	return text
 }

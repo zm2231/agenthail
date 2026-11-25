@@ -104,6 +104,7 @@ type Board struct {
 	questions          map[string]*Question
 	workItems          map[string]*WorkItem
 	projectDefaultCuts int
+	phaseLabels        map[Phase]string
 	gates              gateState
 	reviews            reviewState
 	checks             checkState
@@ -129,6 +130,7 @@ func NewBoard() *Board {
 
 func (b *Board) reset() {
 	b.goals = map[string]*Goal{}
+	b.phaseLabels = map[Phase]string{}
 	b.asks = map[string]*Ask{}
 	b.clauses = map[string]*Clause{}
 	b.decisions = map[string]*Decision{}
@@ -250,6 +252,8 @@ func (b *Board) dispatch(event Event) error {
 		err = b.applySorted(event.Payload)
 	case EventCapture:
 		err = b.applyCapture(event)
+	case EventPhaseLabels:
+		err = b.applyPhaseLabels(event.Payload)
 	}
 	return err
 }
