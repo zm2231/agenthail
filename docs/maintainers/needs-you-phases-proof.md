@@ -122,14 +122,21 @@ Two new kinds:
 | Kind | Group | When | Answer |
 |---|---|---|---|
 | `turn` | `waiting` | a session's last completed turn ended with `waitingOn`, no turn is running, and it is not routed to a lead (1b) | open the session and reply, or dismiss. `answerable` is false; `reason` is the `waitingOn` text; `since` is when the turn ended |
-| `review` | `review`, a new group after `waiting` | a work item is `in_review` in a ledger this host keeps | approve or send back (below). `answerable` is false. It carries `proof` (`{pass, fail, pending}` counts, part 3) and `prs` (the item's pull requests, as the board has them) |
+| `review` | `review`, a new group after `waiting` | a work item is `in_review` in a ledger this host keeps, and its review is the person's (routing below) | approve or send back (below). `answerable` is false. It carries `proof` (`{pass, fail, pending}` counts, part 3) and `prs` (the item's pull requests, as the board has them) |
 
 An ask linked to an item (1a) stays kind `ask` in its usual group and gains `workItem`, `workTitle` and `phase`.
+
+Who reviews:
+
+- A review is routed the way an ask is. In a project without a lead, a `review` entry goes to the person. In a project with a lead, the lead reviews, as it does today: the entry sits under "Handled by a lead" (`leadHandling`, with `workItem`, `ledgerKey` and the lead as `heldBy`) and does not count toward the person.
+- It moves to the person when the lead passes it on, or when the lead is gone (archived, ended, or not running, by the same test that decides whether a lead holds an ask today). A lead passes a review on with `agenthail ledger review-pass <item> --reason "..."`, MCP `agenthail_ledger_write {"op": "work", "request": {"action": "review-pass", "itemId", "reason"}}`. That writes a new event `work_item.review.passed` `{itemId, actor, reason}`, refused unless the item is `in_review` and the writer is the project's lead. The pass holds until the item leaves review; an item sent back and submitted again goes to the lead first again.
+- The entry is in the `review` group only once it is the person's. Its `reason` is the lead's reason when one passed it on.
 
 Review from the list:
 
 - A new person-only action `work-review`, `{"ledgerKey", "workItem", "decision": "approve" | "reject", "note"}`, posted to `/api/v1/actions` with an `Idempotency-Key`. Any session, one acting for the person included, is refused `403 forbidden`.
 - The ledger takes a review only with the person's words. The daemon records the person's decision (`Approved.` or `Sent back.`, then the note) as an utterance captured by `ask`, said to the item's assignee, exactly as an answer to a ledger question is recorded today, then writes the approve or reject with that utterance. A reject needs a note.
+- `work-review` is the person's path only. Leads and other sessions keep approving and sending back through the existing ledger review (`ledger approve`, `ledger reject`, `agenthail_ledger_write` work actions `approve` and `reject`), exactly as today; nothing about that path changes.
 - Approving records the review; it does not merge anything. Merging stays a decision about the pull request.
 - An item the ledger has already moved out of review is `409 stale`.
 
@@ -137,7 +144,7 @@ Dismissals: `turn` and `stopped` items are dismissed through the existing `dismi
 
 Revision: `ownDecisionsRevision` hashes the page as it does now, so the new kinds change the revision when they appear or go. The ledger change that moves an item into or out of review pokes the revision, as parking does today.
 
-Push: a `review` item pushes once when the item enters review, `"<title> is ready for your review"`, event `work.review`, collapse key per item. A `turn` item pushes as in 1b. Asks push as today.
+Push: a `review` item pushes once when it reaches the person (on entering review in a project without a lead, or when the lead passes it on or is gone), `"<title> is ready for your review"`, event `work.review`, collapse key per item. A `turn` item pushes as in 1b. Asks push as today.
 
 ## 2. Phases
 
@@ -239,6 +246,7 @@ An item holds at most 30 steps. Files are referenced by link, never stored in th
 | log type `verify` | ledger events | none |
 | `phase_labels` event | ledger events | none; a project without one uses the defaults |
 | `work_item.proof` event, id-issuing | ledger events | none |
+| `work_item.review.passed` event | ledger events | none |
 | phase | derived | none: existing ledgers get a phase from their own history the first time a board is read, including items done long ago and items taken over |
 
 Paired hosts update together. Every addition to the ledger is a new event type or a new log type, never a new meaning for an existing event, because an older host reads an existing event its own way. A host that does not know a new event type skips it when building its board, as the board fold already skips unknown types, so it shows no phase labels, proof or item questions until it updates; a `verify` log shows there as an ordinary log. A write of a new kind sent to a project ledger kept by an older host is refused by that host with its error; there is no fallback path.
@@ -249,9 +257,9 @@ Paired hosts update together. Every addition to the ledger is a new event type o
 |---|---|
 | `agenthail_ask` / `agenthail ask` | `item`, `default`, `defaultAfterMinutes`; the reply may carry `note` and `workItem` |
 | `agenthail_end_turn` | `waitingOn`, `item` |
-| `agenthail_ledger_write` | work actions `log` with `logType: "verify"` and `proof`; op `phases` |
+| `agenthail_ledger_write` | work actions `log` with `logType: "verify"`, `proof` and `review-pass`; op `phases` |
 | `agenthail_ledger_read` | `phase`, `phaseSince`, `proof`, `phaseLabels`, open `questions` on item and work views |
-| CLI | `ledger verify`, `ledger proof`, `ledger phases`; `ledger question --to <item>` |
+| CLI | `ledger verify`, `ledger proof`, `ledger phases`, `ledger review-pass`; `ledger question --to <item>` |
 | `GET /api/v1/decisions` | item `key`, `workItem`, `workTitle`, `phase`; kinds `turn` and `review`; group `review` |
 | `POST /api/v1/actions` | `work-review` (person only) |
 | `GET /api/v1/ledger`, board page data | `phase`, `phaseSince`, proof counts, open questions per item, `phaseLabels` |
@@ -271,7 +279,7 @@ The tool budget test pins the always-loaded tool JSON. The two end-turn fields a
 Through public boundaries only:
 
 - Ledger: a phase for each rule above from event sequences, including sent back after Verify, a second PR after Verify, PRs closed unmerged, takeover with each `--then`, and an item with a merged PR whose holder ended; a log line naming a PR without source `pr-item` changes nothing; labels rename without changing keys; proof add, replace, remove, holder-only, the cap, stale after a send-back, a stale `base` refused, a repeated operation id applied once, and two replicas replaying the same owner events ending with the same proof and the same step versions, even when their local event sequences differ, and a version read on a replica accepted as `base` by the owner; a repeated item-question ref yields the first question's id.
-- Daemon: an ask from a session holding one item shows on that item with its options and recommendation, appears once in `/api/v1/decisions` with the item, and answering it delivers to the session and resolves the item's question; the same with the ledger kept by an unreachable paired host, and with the owner's reply lost after it committed, ending with exactly one question, resolved once the owner is back; a host without the new event types raises no ask of its own for an item question; two ledgers with the same item id give two distinct Needs-you keys; a lead's answer is recorded with the lead as `by`; a default applies at its deadline and an outward default is refused; end-turn `waitingOn` shows as a `turn` item, pushes once, and leaves when the next turn starts; a worker's wait goes under "Handled by a lead"; an `in_review` item appears as `review` and `work-review` approves it with the person's words and refuses a session.
+- Daemon: an ask from a session holding one item shows on that item with its options and recommendation, appears once in `/api/v1/decisions` with the item, and answering it delivers to the session and resolves the item's question; the same with the ledger kept by an unreachable paired host, and with the owner's reply lost after it committed, ending with exactly one question, resolved once the owner is back; a host without the new event types raises no ask of its own for an item question; two ledgers with the same item id give two distinct Needs-you keys; a lead's answer is recorded with the lead as `by`; a default applies at its deadline and an outward default is refused; end-turn `waitingOn` shows as a `turn` item, pushes once, and leaves when the next turn starts; a worker's wait goes under "Handled by a lead"; in a project without a lead an `in_review` item appears as `review` and pushes once; in a project with a lead it appears under "Handled by a lead" without a push, and moves to `review` with one push when the lead passes it on or stops running; only the lead may pass it on; `work-review` approves with the person's words and refuses any session; a lead's `approve` and `reject` through the ledger work exactly as before and take the item off both lists.
 - The existing decisions, ledger question and parked tests keep passing unchanged except where an item's key changes.
 
 ## Not in this design
