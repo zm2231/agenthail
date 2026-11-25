@@ -32,6 +32,7 @@ type daemonSurface struct {
 	mu             sync.Mutex
 	kind           surface.SurfaceKind
 	sessions       map[string]surface.Session
+	resolveStalls  bool
 	observations   map[string]*surface.TurnObservation
 	accepted       bool
 	notice         string
@@ -164,7 +165,11 @@ func (f *daemonSurface) carried(session surface.Session) surface.Session {
 	}
 	return session
 }
-func (f *daemonSurface) Resolve(_ context.Context, id string) (*surface.Session, error) {
+func (f *daemonSurface) Resolve(ctx context.Context, id string) (*surface.Session, error) {
+	if f.resolveStalls {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	session, ok := f.sessions[id]
 	if !ok {
 		return nil, fmt.Errorf("not found")

@@ -2,7 +2,6 @@ package codexsurface
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,7 +14,7 @@ func (c *Codex) Resolve(ctx context.Context, target string) (*surface.Session, e
 	if surface.LooksLikeUUID(target) {
 		return c.resolveID(ctx, target)
 	}
-	sessions, err := c.resolveCandidates(ctx, target)
+	sessions, err := c.resolveCandidates(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -83,37 +82,8 @@ func (c *Codex) readThreadObject(ctx context.Context, conn codexClient, id strin
 	return thread, nil
 }
 
-// Only history search finds a cwd or ID prefix, and it takes seconds; an exact title skips it.
-func (c *Codex) resolveCandidates(ctx context.Context, target string) ([]surface.Session, error) {
-	titled, err := c.searchTitles(ctx, target)
-	if err != nil {
-		return nil, err
-	}
-	for _, session := range titled {
-		if strings.EqualFold(session.Name, target) {
-			return titled, nil
-		}
-	}
-	found, err := c.SearchSessions(ctx, target, 20, nil)
-	if err != nil && !errors.Is(err, surface.ErrUnsupported) {
-		return nil, err
-	}
-	seen := make(map[string]bool, len(titled)+len(found))
-	candidates := make([]surface.Session, 0, len(titled)+len(found))
-	for _, session := range titled {
-		seen[session.ID] = true
-		candidates = append(candidates, session)
-	}
-	for _, result := range found {
-		if !seen[result.Session.ID] {
-			seen[result.Session.ID] = true
-			candidates = append(candidates, result.Session)
-		}
-	}
-	return candidates, nil
-}
-
-func (c *Codex) searchTitles(ctx context.Context, target string) ([]surface.Session, error) {
+// Codex's title filter is case-sensitive and ignores cwd and ID, so the resolver matches every addressable thread itself.
+func (c *Codex) resolveCandidates(ctx context.Context) ([]surface.Session, error) {
 	runtimes := c.openRuntimes(ctx)
 	defer runtimes.Close()
 	clients := runtimes.readers()
@@ -123,28 +93,11 @@ func (c *Codex) searchTitles(ctx context.Context, target string) ([]surface.Sess
 	var err error
 	for _, client := range clients {
 		var sessions []surface.Session
-		if sessions, err = c.listTitles(ctx, client, target, runtimes); err == nil {
+		if sessions, err = c.listAll(ctx, client, runtimes); err == nil {
 			return sessions, nil
 		}
 	}
 	return nil, err
-}
-
-func (c *Codex) listTitles(ctx context.Context, client codexClient, target string, runtimes *codexRuntimes) ([]surface.Session, error) {
-	params := codexThreadListParams(codexSweepPageLimit)
-	params["searchTerm"] = target
-	var all []surface.Session
-	for {
-		page, next, err := c.listPageCursor(ctx, client, params, runtimes)
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, page...)
-		if next == "" || next == params["cursor"] {
-			return all, nil
-		}
-		params["cursor"] = next
-	}
 }
 
 func (c *Codex) SearchSessions(ctx context.Context, query string, limit int, found func(surface.SessionSearchResult)) ([]surface.SessionSearchResult, error) {

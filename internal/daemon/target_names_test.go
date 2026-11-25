@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -54,5 +55,20 @@ func TestResolveTellsAPairedHostWhichMatchesTheTargetIdentifies(t *testing.T) {
 		if err := json.Unmarshal(response.Body.Bytes(), &answer); err != nil || len(answer.Matches) != 1 || answer.Matches[0].Exact != exact {
 			t.Fatalf("target=%s status=%d body=%s, want one match with exact=%v", target, response.Code, response.Body.String(), exact)
 		}
+	}
+}
+
+func TestResolveThatRunsOutOfTimeIsAnErrorNotAMiss(t *testing.T) {
+	d, r, fake, _, _ := daemonFixture(t)
+	fake.resolveStalls = true
+	handler, token := dashboardRouter(d), pairedControlToken(t, r)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/resolve?target=uncatalogued", nil).WithContext(ctx)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }

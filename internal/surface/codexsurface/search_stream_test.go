@@ -101,23 +101,20 @@ func TestCodexSearchReportsALostConnection(t *testing.T) {
 	}
 }
 
-func titlePages(pages map[string][]any, search func() map[string]any) codextest.Responder {
+func threadPages(pages map[string][]any) codextest.Responder {
 	return func(method string, params map[string]any) map[string]any {
-		switch method {
-		case "thread/list":
-			cursor, _ := params["cursor"].(string)
-			next := ""
-			if cursor == "" && pages["p2"] != nil {
-				next = "p2"
-			}
-			return map[string]any{"data": pages[cursor], "nextCursor": next}
-		case "thread/search/stream":
-			if search != nil {
-				return search()
-			}
-			return map[string]any{"data": []any{}}
+		if method != "thread/list" {
+			return nil
 		}
-		return nil
+		if _, filtered := params["searchTerm"]; filtered {
+			return map[string]any{"error": map[string]any{"code": -32603, "message": "resolution must not use the case-sensitive title filter"}}
+		}
+		cursor, _ := params["cursor"].(string)
+		next := ""
+		if cursor == "" && pages["p2"] != nil {
+			next = "p2"
+		}
+		return map[string]any{"data": pages[cursor], "nextCursor": next}
 	}
 }
 
@@ -126,40 +123,45 @@ func titled(id, name, cwd string) map[string]any {
 }
 
 func TestCodexResolvePrefersAnExactTitleOnALaterPage(t *testing.T) {
-	daemon := startManagedCodex(t, titlePages(map[string][]any{
+	daemon := startManagedCodex(t, threadPages(map[string][]any{
 		"":   {titled("019f004a-0000-7000-8000-0000000000f1", "release notes draft", "/a")},
-		"p2": {titled("019f004a-0000-7000-8000-0000000000f2", "release notes", "/b")},
-	}, nil))
+		"p2": {titled("019f004a-0000-7000-8000-0000000000f2", "Release Notes", "/b")},
+	}))
 	session, err := isolatedManagedRuntime(t).Resolve(context.Background(), "release notes")
 	if err != nil || session == nil || session.ID != "019f004a-0000-7000-8000-0000000000f2" {
 		t.Fatalf("session=%+v err=%v", session, err)
 	}
 	if len(daemon.Calls("thread/search/stream"))+len(daemon.Calls("thread/search")) != 0 {
-		t.Fatal("an exact title still ran a history search")
+		t.Fatal("resolution ran a history search")
 	}
 }
 
-func TestCodexResolveRejectsAnExactTitleRepeatedOnALaterPage(t *testing.T) {
-	startManagedCodex(t, titlePages(map[string][]any{
-		"":   {titled("019f004a-0000-7000-8000-0000000000f3", "duplicate", "/one")},
-		"p2": {titled("019f004a-0000-7000-8000-0000000000f4", "DUPLICATE", "/two")},
-	}, nil))
-	session, err := isolatedManagedRuntime(t).Resolve(context.Background(), "duplicate")
-	if err == nil || session != nil || !strings.Contains(err.Error(), "0000000000f3") || !strings.Contains(err.Error(), "0000000000f4") {
-		t.Fatalf("session=%+v err=%v", session, err)
+func TestCodexResolveRejectsTitlesThatDifferOnlyByCase(t *testing.T) {
+	for _, target := range []string{"duplicate", "DUPLICATE"} {
+		startManagedCodex(t, threadPages(map[string][]any{
+			"":   {titled("019f004a-0000-7000-8000-0000000000f3", "duplicate", "/one")},
+			"p2": {titled("019f004a-0000-7000-8000-0000000000f4", "DUPLICATE", "/two")},
+		}))
+		session, err := isolatedManagedRuntime(t).Resolve(context.Background(), target)
+		if err == nil || session != nil || !strings.Contains(err.Error(), "0000000000f3") || !strings.Contains(err.Error(), "0000000000f4") {
+			t.Fatalf("target=%q session=%+v err=%v", target, session, err)
+		}
 	}
 }
 
-func TestCodexResolveStillFindsAConversationByCwdOrIDPrefix(t *testing.T) {
+func TestCodexResolveFindsAConversationByCwdOrIDPrefixWithoutHistorySearch(t *testing.T) {
 	const id = "019f004a-0000-7000-8000-0000000000f5"
-	search := func() map[string]any {
-		return map[string]any{"data": []any{searchEntry(id, "unrelated title", "/work/fieldnotes")}}
-	}
 	for _, target := range []string{"fieldnotes", "019f004a-0000-7000-8000-0000000000f"} {
-		startManagedCodex(t, titlePages(map[string][]any{"": {}}, search))
+		daemon := startManagedCodex(t, threadPages(map[string][]any{
+			"":   {titled("019f004a-0000-7000-8000-0000000000a1", "other", "/elsewhere")},
+			"p2": {titled(id, "unrelated title", "/work/fieldnotes")},
+		}))
 		session, err := isolatedManagedRuntime(t).Resolve(context.Background(), target)
 		if err != nil || session == nil || session.ID != id {
 			t.Fatalf("target=%q session=%+v err=%v", target, session, err)
+		}
+		if len(daemon.Calls("thread/search/stream"))+len(daemon.Calls("thread/search")) != 0 {
+			t.Fatalf("target=%q ran a history search", target)
 		}
 	}
 }

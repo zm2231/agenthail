@@ -112,6 +112,9 @@ func (d *Daemon) resolveLocal(ctx context.Context, target string) ([]resolveMatc
 	for _, adapter := range d.Surfaces {
 		session, resolveErr := adapter.Resolve(ctx, lookup)
 		if resolveErr != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, fmt.Errorf("resolve %q did not finish: %w", target, ctxErr)
+			}
 			continue
 		}
 		alias, _ := d.Registry.ReverseAlias(session.ID)

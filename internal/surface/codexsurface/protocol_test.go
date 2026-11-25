@@ -80,8 +80,11 @@ func TestCodexDesktopDiscoveryNeverBootstrapsManagedRuntime(t *testing.T) {
 	}
 }
 
-func TestCodexResolveExactNameUsesTitleSearch(t *testing.T) {
+func TestCodexResolveExactNameListsThreadsWithoutHistorySearch(t *testing.T) {
 	bridge := startDesktopBridge(t, func(method string) string {
+		if method == "thread/loaded/list" {
+			return `{"result":{"data":[]}}`
+		}
 		if method == "thread/list" {
 			return `{"result":{"data":[{"id":"thread-1","name":"Q","cwd":"/tmp","source":"vscode","status":{"type":"idle"}}]}}`
 		}
@@ -91,8 +94,8 @@ func TestCodexResolveExactNameUsesTitleSearch(t *testing.T) {
 	if err != nil || session == nil || session.ID != "thread-1" || session.Transport != codexTransportDesktop || countMethod(bridge.Methods(), "thread/search") != 0 {
 		t.Fatalf("session=%+v methods=%v err=%v", session, bridge.Methods(), err)
 	}
-	if !strings.Contains(bridge.Request("thread/list"), `"searchTerm":"Q"`) {
-		t.Fatalf("thread/list did not filter by title: %s", bridge.Request("thread/list"))
+	if strings.Contains(bridge.Request("thread/list"), "searchTerm") {
+		t.Fatalf("thread/list used the case-sensitive title filter: %s", bridge.Request("thread/list"))
 	}
 }
 
@@ -222,6 +225,9 @@ func TestCodexObserveReadsThroughDesktopWhenTheDaemonIsStopped(t *testing.T) {
 
 func TestCodexResolveRejectsDuplicateExactNamesAcrossPages(t *testing.T) {
 	bridge := startDesktopBridge(t, func(method string) string {
+		if method == "thread/loaded/list" {
+			return `{"result":{"data":[]}}`
+		}
 		if method == "thread/list" {
 			return `{"result":{"data":[{"id":"thread-1","name":"duplicate","cwd":"/one"},{"id":"thread-2","name":"DUPLICATE","cwd":"/two"}]}}`
 		}
