@@ -97,7 +97,7 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 			return nil, nil, fmt.Errorf("unknown surface %q", kindText)
 		}
 		lookup := selector
-		if a.registry() != nil && !surface.NoTarget(selector) {
+		if kind == surface.KindCodex && a.registry() != nil && !surface.NoTarget(selector) {
 			sid, err := a.registry().ResolveSurfaceTarget(kind, selector)
 			if err == nil {
 				lookup = sid

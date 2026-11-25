@@ -20,3 +20,17 @@ func TestASurfaceTargetResolvesFromTheRegistryBeforeAskingTheSurface(t *testing.
 		t.Fatalf("session=%+v err=%v", resolved, err)
 	}
 }
+
+func TestNotionNewStillCreatesWhenACatalogedNameContainsNew(t *testing.T) {
+	existing := surface.Session{ID: "notion-existing", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Name: "new project", Status: surface.StatusIdle}
+	synthetic := surface.Session{ID: "new", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb}
+	fake := &cliSurface{kind: surface.KindNotion, sessions: map[string]surface.Session{"new": synthetic}}
+	app, registry := cliFixture(t, fake)
+	if err := registry.RecordObservedSession(existing); err != nil {
+		t.Fatal(err)
+	}
+	resolved, _, err := app.resolveLocalTarget(context.Background(), "notion:new")
+	if err != nil || resolved == nil || resolved.ID != "new" {
+		t.Fatalf("session=%+v err=%v", resolved, err)
+	}
+}
