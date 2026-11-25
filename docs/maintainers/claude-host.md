@@ -227,12 +227,15 @@ whose process exited, one not open in any host, and one whose Claude runs on
 without a host. Answering it is `stale`.
 
 The daemon derives what a session waits on from the hosts' listings, read at
-most once a second under a 2 s deadline. Under a load average of 77-218,
-listings that carried every session's commands (about 100 KB a session) took
-up to 1.6 s, while a call with a small answer took at most 170 ms. Answering a
-request reads that session's requests from its own host instead, so a host
-that misses a listing cannot fail the answer, and a request the host took an
-answer to leaves the cached listing at once. A
+most once a second under a 5 s deadline, without holding the cache while it
+waits. Listings that carried every session's commands (about 100 KB a
+session) took up to 1.6 s at a load average of 77-218. Without them, 14
+sessions list in about 6 KB: p50 0.5 ms, p99 49 ms and at most 3.4 s over ten
+minutes at a load average of 7-377 on a Mac, and at most 24 ms at 85-174 on a
+32-core Linux machine. Answering a request reads that session's requests from
+its own host instead, so a host that misses a listing cannot fail the answer,
+and a request the host took an answer to leaves the cached listing at once
+and is kept out of any listing read before the answer. A
 `stale` answer makes it observe the turn again, which withdraws the request's
 permission ask and clears the catalog row's `waiting_on`. The Mac, iOS
 and web clients drop the card on a `409` before reading the requests again.

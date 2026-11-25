@@ -22,7 +22,7 @@ import (
 
 const (
 	claudeHostListTTL       = time.Second
-	claudeHostListTimeout   = 2 * time.Second
+	claudeHostListTimeout   = 5 * time.Second
 	claudeHostSilentOpenTTL = 5 * time.Second
 	claudeHostTakenTTL      = 10 * time.Minute
 )
@@ -190,8 +190,9 @@ func logClaudeHostListing(partial bool, took time.Duration, err error, unanswere
 	}
 }
 
-// store keeps a session as its host listed it alone at readAt, unless a
-// later read has replaced it.
+// store keeps a session as its host listed it alone, unless a read that
+// started after readAt has replaced it. It counts as listed when stored, so a
+// listing in flight keeps it.
 func (h *claudeHost) store(listed claudehost.Session, readAt time.Time) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -200,7 +201,7 @@ func (h *claudeHost) store(listed claudehost.Session, readAt time.Time) {
 	}
 	h.sessions[listed.SessionID] = listed.PID
 	h.open[listed.SessionID] = h.withoutTaken(listed)
-	h.openListed[listed.SessionID] = readAt
+	h.openListed[listed.SessionID] = time.Now()
 }
 
 // answered drops a request its host took an answer to from the cached

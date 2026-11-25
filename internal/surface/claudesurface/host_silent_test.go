@@ -162,8 +162,87 @@ func TestARequestIsAnsweredWhileTheListingOfEveryHostIsTooSlow(t *testing.T) {
 	default:
 	}
 	<-listing
-	if waiting, known := claude.hostWaiting(ctx, &session); known && waiting != nil {
-		t.Fatalf("waiting after the answer = %+v; a read from before the answer brought r1 back", waiting)
+	claude.host.mu.Lock()
+	cached, ok := claude.host.open[session.ID]
+	claude.host.mu.Unlock()
+	if !ok || len(cached.Requests) != 0 {
+		t.Fatalf("cached session after the answer = %+v (listed %v); want it kept without r1", cached, ok)
+	}
+}
+
+func TestASessionReadStoredDuringAListingIsNotReplacedByIt(t *testing.T) {
+	home, host := startFakeHost(t)
+	session := surface.Session{ID: "read-during-listing", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: os.Getpid()}
+	quiet := claudehost.Session{SessionID: session.ID, PID: session.PID}
+	asking := quiet
+	asking.Requests = []claudehost.Request{{RequestID: "r1", Kind: "question", CreatedAt: time.Now()}}
+	host.set("list", hostResult(claudehost.Listing{Sessions: []claudehost.Session{quiet}}))
+	claude := NewClaude(nil, home)
+	ctx := context.Background()
+	if waiting, known := claude.hostWaiting(ctx, &session); !known || waiting != nil {
+		t.Fatalf("waiting before the request = %+v (known %v); want none", waiting, known)
+	}
+	readHeld, listHeld := make(chan struct{}), make(chan struct{})
+	host.set("session", func() any {
+		<-readHeld
+		return map[string]any{"id": 1, "result": asking}
+	})
+	read := make(chan error, 1)
+	go func() {
+		_, err := claude.Requests(ctx, &session)
+		read <- err
+	}()
+	testkitWait(t, func() bool { return host.count("session") == 1 })
+	host.set("list", func() any {
+		<-listHeld
+		return map[string]any{"id": 1, "result": claudehost.Listing{Sessions: []claudehost.Session{quiet}}}
+	})
+	claude.host.forget()
+	listing := make(chan struct{})
+	go func() {
+		defer close(listing)
+		claude.host.listing(ctx)
+	}()
+	testkitWait(t, func() bool { return host.count("list") == 2 })
+	close(readHeld)
+	if err := <-read; err != nil {
+		t.Fatal(err)
+	}
+	close(listHeld)
+	<-listing
+	if waiting, known := claude.hostWaiting(ctx, &session); !known || waiting == nil || waiting.ID != "r1" {
+		t.Fatalf("waiting after a listing that started before the read was stored = %+v (known %v); want r1", waiting, known)
+	}
+}
+
+func TestAnOlderHostThatDoesNotRunTheSessionCannotAnswerForIt(t *testing.T) {
+	home := fakeHome(t)
+	socket := claudehost.SocketPath(home)
+	current := serveFakeHost(t, socket)
+	older := serveFakeHost(t, strings.TrimSuffix(socket, ".sock")+"."+strconv.Itoa(os.Getpid())+".sock")
+	owner := serveFakeHost(t, strings.TrimSuffix(socket, ".sock")+"."+strconv.Itoa(os.Getppid())+".sock")
+	session := surface.Session{ID: "newer-owner", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, PID: os.Getpid()}
+	current.set("session", hostError("not_open", "not open"))
+	current.set("sessionCommands", hostError("not_open", "not open"))
+	older.set("session", hostError("invalid", "unknown method: session"))
+	older.set("sessionCommands", hostError("invalid", "unknown method: sessionCommands"))
+	older.set("list", hostResult(claudehost.Listing{Draining: true}))
+	later := func(reply func() any) func() any {
+		return func() any {
+			time.Sleep(100 * time.Millisecond)
+			return reply()
+		}
+	}
+	owner.set("session", later(hostResult(claudehost.Session{SessionID: session.ID, PID: session.PID, Requests: []claudehost.Request{{RequestID: "r1", Kind: "question", CreatedAt: time.Now()}}})))
+	owner.set("sessionCommands", later(hostResult(map[string][]claudehost.Command{"commands": {{Name: "owned"}}})))
+	claude := NewClaude(nil, home)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if state, err := claude.Requests(ctx, &session); err != nil || len(state.Requests) != 1 || state.Requests[0].ID != "r1" {
+		t.Fatalf("requests = %+v, %v; want the owner's r1", state, err)
+	}
+	if commands, err := claude.Commands(ctx, &session); err != nil || len(commands.Commands) != 1 || commands.Commands[0].Insert != "/owned" {
+		t.Fatalf("commands = %+v, %v; want the owner's /owned", commands, err)
 	}
 }
 

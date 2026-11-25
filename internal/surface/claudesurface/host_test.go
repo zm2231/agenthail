@@ -37,7 +37,7 @@ func listedSession(t *testing.T, c *Claude, id string) *surface.Session {
 	defer cancel()
 	var found *surface.Session
 	testkit.Eventually(t, "the session to be listed on the host runtime", 15*time.Second, func() bool {
-		c.host.listed = time.Time{}
+		c.host.forget()
 		sessions, err := c.List(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -386,7 +386,7 @@ func TestAHostSessionIsOpenWhileTheHostListsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	testkit.Eventually(t, "the host to stop listing the session", 15*time.Second, func() bool {
-		c.host.listed = time.Time{}
+		c.host.forget()
 		return !c.OpenSessions(context.Background(), []surface.Session{*sess})[id]
 	})
 }
