@@ -432,6 +432,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.superviseExtensions(ctx)
 	}()
 	go d.sweepUploads(ctx)
+	go trimCodexRolloutCache(ctx)
 	go d.sweepSimulatorLeases(ctx)
 	go d.runLimitResumes(ctx)
 	noticesDone := make(chan struct{})
