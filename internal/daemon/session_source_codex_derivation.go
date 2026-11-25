@@ -11,9 +11,19 @@ import (
 // app-server stream journaled are read again from it.
 const codexJournalDerivation = 2
 
-func (s *sessionSource) codexTranscriptJournal() bool {
-	provider, ok := s.adapter.(surface.LocalTranscriptProvider)
-	return ok && s.session.Surface == surface.KindCodex && provider.RequiresLocalTranscript(&s.session)
+func (s *sessionSource) localTranscriptJournal() (int, bool) {
+	return localJournalVersion(s.adapter, &s.session)
+}
+
+func localJournalVersion(adapter surface.Surface, session *surface.Session) (int, bool) {
+	provider, ok := adapter.(surface.LocalTranscriptProvider)
+	if !ok || !provider.RequiresLocalTranscript(session) {
+		return 0, false
+	}
+	if deriver, ok := adapter.(surface.JournalDeriver); ok {
+		return deriver.JournalDerivation(), true
+	}
+	return codexJournalDerivation, session.Surface == surface.KindCodex
 }
 
 // rebuildStaleCodexJournal reads a journal an older derivation wrote again
@@ -21,11 +31,12 @@ func (s *sessionSource) codexTranscriptJournal() bool {
 // before any catch-up, which would otherwise walk the rollout back to rows
 // the rebuild replaces.
 func (s *sessionSource) rebuildStaleCodexJournal(ctx context.Context) (bool, error) {
-	if !s.codexTranscriptJournal() {
+	current, local := s.localTranscriptJournal()
+	if !local {
 		return false, nil
 	}
 	version, err := s.manager.registry.SessionJournalDerivation(s.session.ID)
-	if err != nil || version >= codexJournalDerivation {
+	if err != nil || version >= current {
 		return false, err
 	}
 	s.providerMu.Lock()
@@ -35,7 +46,7 @@ func (s *sessionSource) rebuildStaleCodexJournal(ctx context.Context) (bool, err
 		return false, err
 	}
 	if read == nil {
-		return false, fmt.Errorf("Codex local transcript is unavailable")
+		return false, fmt.Errorf("%s local transcript is unavailable", s.session.Surface)
 	}
 	if !read.TranscriptOffsetSet {
 		held, err := s.journalHoldsTranscript()
@@ -43,12 +54,12 @@ func (s *sessionSource) rebuildStaleCodexJournal(ctx context.Context) (bool, err
 			return false, err
 		}
 		if held {
-			return false, fmt.Errorf("Codex local transcript is unavailable")
+			return false, fmt.Errorf("%s local transcript is unavailable", s.session.Surface)
 		}
-		return false, s.manager.registry.MarkSessionJournalDerivation(s.session.ID, codexJournalDerivation)
+		return false, s.manager.registry.MarkSessionJournalDerivation(s.session.ID, current)
 	}
 	if err := s.restartJournal(read, read.Items); err != nil {
 		return false, err
 	}
-	return true, s.manager.registry.MarkSessionJournalDerivation(s.session.ID, codexJournalDerivation)
+	return true, s.manager.registry.MarkSessionJournalDerivation(s.session.ID, current)
 }

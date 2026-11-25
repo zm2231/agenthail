@@ -7,11 +7,13 @@ import (
 	"os"
 	"runtime"
 
+	"github.com/zm2231/agenthail/internal/acphost"
 	"github.com/zm2231/agenthail/internal/agentinbox"
 	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/cli"
 	"github.com/zm2231/agenthail/internal/codexconfig"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface/acpsurface"
 	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/surface/codexsurface"
 	"github.com/zm2231/agenthail/internal/surface/notionsurface"
@@ -48,6 +50,13 @@ func main() {
 		return
 	}
 	home, _ := os.UserHomeDir()
+	if len(os.Args) == 2 && os.Args[1] == "acp-host" {
+		if err := acphost.Run(home, version+"+"+revision); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	app := &cli.App{
 		OpenRegistry: func(ctx context.Context) (*registry.Registry, error) {
 			return registry.OpenDefault(ctx, mayUpgradeRegistry(version))
@@ -70,6 +79,10 @@ func main() {
 		{Name: "claude", Surface: claude},
 		{Name: "codex", Surface: codex},
 		{Name: "agent", Surface: agentinbox.New(app.OpenedRegistry)},
+	}
+	agents, _ := acphost.LoadAgents(home)
+	for _, agent := range agents {
+		app.Surfaces = append(app.Surfaces, cli.SurfaceEntry{Name: agent.ID, Surface: acpsurface.New(home, agent)})
 	}
 	if helpers {
 		app.Surfaces = append(app.Surfaces, cli.SurfaceEntry{Name: "notion", Surface: notionsurface.NewNotion(

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/acphost"
 	"github.com/zm2231/agenthail/internal/browserhost"
 	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/cli"
@@ -25,6 +26,7 @@ func runDaemon(run cli.DaemonRun) error {
 	d.SetClaudeHost(&claudehost.Manager{Home: home, Launch: func() (claudehost.Launch, error) {
 		return claudesurface.ClaudeHostLaunch(home, run.HostVersion)
 	}})
+	d.SetACPHost(&acphost.Manager{Home: home, Version: run.HostVersion, Binary: os.Executable, Env: os.Environ()})
 	d.SetBrowserHost(&browserhost.Manager{Home: home, Launch: func() (browserhost.Launch, error) {
 		return browserhost.InstalledLaunch(run.HostVersion)
 	}})

@@ -108,3 +108,7 @@ func (a Agent) ModeRank(mode string) string {
 }
 
 func RankIndex(rank string) int { return slices.Index(ceilingRanks, rank) }
+
+func ValidAgentID(id string) bool {
+	return agentIDPattern.MatchString(id) && !slices.Contains(reservedIDs, id)
+}

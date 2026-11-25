@@ -53,7 +53,7 @@ type threadCreateRequest struct {
 
 const threadNameMargin = 30 * time.Second
 
-const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--cwd <path>] [--alias <name>] [--model <name>] [--approval <untrusted|on-request|never>] [--effort <level>] [--mode <plan|default>] [--service-tier <tier>] [--output-schema <file>] [--name <name>] [--worktree [--branch <name>] [--base <ref>]] [--agent <name>] [--permission-mode <mode>] [--root <name|dir>] [--host <host>] [--from <session>] [--timeout <duration>] [--json]
+const threadUsage = `usage: agenthail thread create <codex|claude|ACP agent> "message" [--cwd <path>] [--alias <name>] [--model <name>] [--approval <untrusted|on-request|never>] [--effort <level>] [--mode <plan|default>] [--service-tier <tier>] [--output-schema <file>] [--name <name>] [--worktree [--branch <name>] [--base <ref>]] [--agent <name>] [--permission-mode <mode>] [--root <name|dir>] [--host <host>] [--from <session>] [--timeout <duration>] [--json]
        agenthail thread fork <target> [--model <model>] [--last-turn <id>] [--alias <name>] [--from <session>] [--json]
        agenthail thread <status|stop|resume|logs> <target> [--json]
        agenthail thread settings <target> [--json]
@@ -154,8 +154,8 @@ func parseThreadCreateRequest(args []string) (threadCreateRequest, error) {
 		return threadCreateRequest{}, fmt.Errorf("%s", threadUsage)
 	}
 	request := threadCreateRequest{surface: surface.SurfaceKind(strings.ToLower(args[1])), jsonOut: hasFlag(args, "--json")}
-	if request.surface != surface.KindCodex && request.surface != surface.KindClaude {
-		return threadCreateRequest{}, fmt.Errorf("thread creation requires Codex or Claude")
+	if request.surface == surface.KindNotion || request.surface == surface.KindAgent || request.surface == "" {
+		return threadCreateRequest{}, fmt.Errorf("thread creation requires Codex, Claude or an ACP agent such as devin")
 	}
 	var positional []string
 	positionalOnly := false

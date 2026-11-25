@@ -32,7 +32,7 @@ func TestAChildIsBoundedByItsSpawnersCeiling(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			start, err := childCeiling(c.caller, c.kind, c.mode, c.cwd)
+			start, err := childCeiling(c.caller, c.kind, false, c.mode, c.cwd)
 			if c.refusal != "" {
 				refusal := mcpRefusalFor(err)
 				if err == nil || refusal.Code != c.refusal || c.axis != "" && refusal.Detail["axis"] != c.axis {

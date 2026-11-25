@@ -125,10 +125,14 @@ func TestHostRunsATurnAndRecordsIt(t *testing.T) {
 	}
 	items := h.items("fake", state.SessionID)
 	checks := map[string]func(surface.TimelineItem) bool{
-		turn + ":user":               func(i surface.TimelineItem) bool { return i.Role == "user" && strings.Contains(i.Text, "hello-world") },
-		turn + ":r1":                 func(i surface.TimelineItem) bool { return i.Kind == "reasoning" && i.Text == "thinking it over" },
-		turn + ":plan":               func(i surface.TimelineItem) bool { return i.Kind == "event" && strings.Contains(i.Text, "[completed] first step") },
-		turn + ":tool:call-1":        func(i surface.TimelineItem) bool { return i.Kind == "toolCall" && i.Status == "completed" && i.Title == "Ran echo" },
+		turn + ":user": func(i surface.TimelineItem) bool { return i.Role == "user" && strings.Contains(i.Text, "hello-world") },
+		turn + ":r1":   func(i surface.TimelineItem) bool { return i.Kind == "reasoning" && i.Text == "thinking it over" },
+		turn + ":plan": func(i surface.TimelineItem) bool {
+			return i.Kind == "event" && strings.Contains(i.Text, "[completed] first step")
+		},
+		turn + ":tool:call-1": func(i surface.TimelineItem) bool {
+			return i.Kind == "toolCall" && i.Status == "completed" && i.Title == "Ran echo"
+		},
 		turn + ":tool:call-1:result": func(i surface.TimelineItem) bool { return i.Kind == "toolResult" && i.Text == "hi" },
 		turn + ":a2":                 func(i surface.TimelineItem) bool { return i.Role == "assistant" && i.Text == "hello-world" },
 		turn + ":done":               func(i surface.TimelineItem) bool { return i.Kind == "done" && i.Status == "completed" },

@@ -28,7 +28,7 @@ func (d *Daemon) observedSurfaceHealth(kind surface.SurfaceKind) (dashboardSurfa
 }
 
 func (d *Daemon) dashboardSurfaceHealth(ctx context.Context, adapter surface.Surface, listErr error) dashboardSurface {
-	entry := dashboardSurface{Name: string(adapter.Name()), Connected: listErr == nil, Health: "healthy", Capabilities: adapter.Capabilities()}
+	entry := dashboardSurface{Name: string(adapter.Name()), Label: surfaceLabel(adapter), Connected: listErr == nil, Health: "healthy", Capabilities: adapter.Capabilities()}
 	if signin.IsOff(listErr) {
 		entry.Health = "signin_off"
 		entry.HealthDetail = listErr.Error()
@@ -87,4 +87,11 @@ func (d *Daemon) dashboardSurfaceHealth(ctx context.Context, adapter surface.Sur
 		}
 	}
 	return entry
+}
+
+func surfaceLabel(adapter surface.Surface) string {
+	if labeled, ok := adapter.(interface{ Label() string }); ok {
+		return labeled.Label()
+	}
+	return ""
 }

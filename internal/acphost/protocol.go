@@ -63,8 +63,6 @@ type SendParams struct {
 	SessionID  string          `json:"sessionId"`
 	Text       string          `json:"text"`
 	MessageID  string          `json:"messageId,omitempty"`
-	Origin     string          `json:"origin,omitempty"`
-	Sender     string          `json:"sender,omitempty"`
 	MCPServers []acp.MCPServer `json:"mcpServers,omitempty"`
 }
 

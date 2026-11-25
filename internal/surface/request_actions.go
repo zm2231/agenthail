@@ -45,8 +45,11 @@ func (r Request) Actions() []RequestAction {
 		return []RequestAction{decline}
 	}
 	if !r.asksQuestions() {
-		actions := []RequestAction{{ID: "allow", Title: "Allow"}}
-		if r.AlwaysAllow {
+		var actions []RequestAction
+		if !r.NoAllow {
+			actions = append(actions, RequestAction{ID: "allow", Title: "Allow"})
+		}
+		if r.AlwaysAllow && !r.NoAllow {
 			actions = append(actions, RequestAction{ID: "always", Title: "Always allow"})
 		}
 		actions = append(actions, RequestAction{ID: "deny", Title: "Deny"})

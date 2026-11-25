@@ -33,8 +33,9 @@ type Request struct {
 	// AlwaysDeny offers a rule that denies the request from now on, Stoppable
 	// a denial that also ends the turn, and NoReason says a denial carries no
 	// message to the agent. OptionsOnly takes only its options' ids, never
-	// typed text.
+	// typed text. NoAllow is an approval the provider offers no way to allow.
 	AlwaysDeny  bool      `json:"alwaysDeny,omitempty"`
+	NoAllow     bool      `json:"noAllow,omitempty"`
 	Stoppable   bool      `json:"stoppable,omitempty"`
 	NoReason    bool      `json:"noReason,omitempty"`
 	OptionsOnly bool      `json:"optionsOnly,omitempty"`

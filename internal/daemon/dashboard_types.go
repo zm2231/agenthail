@@ -13,6 +13,7 @@ import (
 
 type dashboardSurface struct {
 	Name         string                 `json:"name"`
+	Label        string                 `json:"label,omitempty"`
 	Connected    bool                   `json:"connected"`
 	Error        string                 `json:"error,omitempty"`
 	Health       string                 `json:"health"`

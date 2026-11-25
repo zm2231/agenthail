@@ -486,6 +486,12 @@ type TranscriptContinuer interface {
 	TranscriptContinuation(ctx context.Context, session *Session, trustedPath, trustedIdentity string) (dropped []TimelineItem, continues bool, err error)
 }
 
+// JournalDeriver is a local-transcript adapter that names the version of the
+// journal it derives, so a journal derived by an older version is rebuilt.
+type JournalDeriver interface {
+	JournalDerivation() int
+}
+
 // TranscriptItemReader is implemented by an adapter that can derive again,
 // from its transcript, every timeline item recorded at or after an offset.
 type TranscriptItemReader interface {

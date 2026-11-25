@@ -23,10 +23,12 @@ type Store struct{ Root string }
 
 func DefaultStore(home string) Store { return Store{Root: filepath.Join(home, ".agenthail", "acp")} }
 
-func (s Store) dir(agent string) string              { return filepath.Join(s.Root, agent) }
-func (s Store) RecordPath(agent, id string) string     { return filepath.Join(s.dir(agent), id+".json") }
-func (s Store) TranscriptPath(agent, id string) string { return filepath.Join(s.dir(agent), id+".jsonl") }
-func (s Store) lockPath(agent, id string) string       { return filepath.Join(s.dir(agent), id+".lock") }
+func (s Store) dir(agent string) string            { return filepath.Join(s.Root, agent) }
+func (s Store) RecordPath(agent, id string) string { return filepath.Join(s.dir(agent), id+".json") }
+func (s Store) TranscriptPath(agent, id string) string {
+	return filepath.Join(s.dir(agent), id+".jsonl")
+}
+func (s Store) lockPath(agent, id string) string { return filepath.Join(s.dir(agent), id+".lock") }
 
 func (s Store) WriteRecord(state State) error {
 	if err := os.MkdirAll(s.dir(state.Agent), 0o700); err != nil {

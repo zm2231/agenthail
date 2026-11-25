@@ -12,6 +12,7 @@ const (
 	LauncherTMUX           = "tmux"
 	LauncherClaudeBG       = "claude-bg"
 	LauncherCodexAppServer = "codex-app-server"
+	LauncherACP            = "acp"
 	LauncherClaudeSDK      = "claude-sdk"
 	LauncherExternal       = "external"
 )
@@ -129,6 +130,7 @@ type BackgroundStarterSource interface {
 // Direct callers that do not select a launcher continue to call StartSession.
 func NewLaunchers(surfaces []Surface) []Launcher {
 	launchers := []Launcher{newCMUX(), newTMUX()}
+	acp := agentsLauncher{id: LauncherACP, starters: map[SurfaceKind]SessionStarter{}}
 	for _, candidate := range surfaces {
 		starter, ok := candidate.(SessionStarter)
 		if !ok || candidate == nil {
@@ -142,7 +144,15 @@ func NewLaunchers(surfaces []Surface) []Launcher {
 			}
 		case KindCodex:
 			launchers = append(launchers, starterLauncher{id: LauncherCodexAppServer, agents: []SurfaceKind{KindCodex}, starter: starter})
+		default:
+			if IsACP(candidate) {
+				acp.agents = append(acp.agents, candidate.Name())
+				acp.starters[candidate.Name()] = starter
+			}
 		}
+	}
+	if len(acp.agents) > 0 {
+		launchers = append(launchers, acp)
 	}
 	launchers = append(launchers,
 		unavailableLauncher{id: LauncherExternal, detail: "external command policy is not configured"},
@@ -153,6 +163,44 @@ func NewLaunchers(surfaces []Surface) []Launcher {
 func contains(values []SurfaceKind, value SurfaceKind) bool {
 	for _, candidate := range values {
 		if strings.EqualFold(string(candidate), string(value)) {
+			return true
+		}
+	}
+	return false
+}
+
+type agentsLauncher struct {
+	id       string
+	agents   []SurfaceKind
+	starters map[SurfaceKind]SessionStarter
+}
+
+func (l agentsLauncher) ID() string                                            { return l.id }
+func (l agentsLauncher) Agents() []SurfaceKind                                 { return append([]SurfaceKind(nil), l.agents...) }
+func (l agentsLauncher) Locate(context.Context, []Session) map[string]Location { return nil }
+func (l agentsLauncher) SessionOptions() bool                                  { return true }
+func (l agentsLauncher) Available(context.Context) (bool, string) {
+	return true, "session starter is configured"
+}
+
+func (l agentsLauncher) Launch(ctx context.Context, request LaunchRequest) (LaunchResult, error) {
+	starter := l.starters[request.Surface]
+	if starter == nil {
+		return LaunchResult{}, fmt.Errorf("launcher %s does not support agent %q", l.id, request.Surface)
+	}
+	return starterLauncher{id: l.id, agents: []SurfaceKind{request.Surface}, starter: starter}.Launch(ctx, request)
+}
+
+const acpRuntimePrefix = "acp:"
+
+func IsACPRuntime(kind RuntimeKind) bool { return strings.HasPrefix(string(kind), acpRuntimePrefix) }
+
+func IsACP(adapter Surface) bool {
+	if adapter == nil {
+		return false
+	}
+	for _, kind := range adapter.RuntimeKinds() {
+		if IsACPRuntime(kind) {
 			return true
 		}
 	}

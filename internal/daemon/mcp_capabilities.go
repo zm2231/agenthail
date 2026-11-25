@@ -15,7 +15,7 @@ func (d *Daemon) mcpCapabilities(_ context.Context, caller *mcpCaller, _ struct{
 			continue
 		}
 		entry := map[string]any{"surface": string(adapter.Name()), "spawn": true}
-		if refusal := spawnRefusal(caller, adapter.Name()); refusal != nil {
+		if refusal := spawnRefusal(caller, adapter.Name(), d.isACPAgent(adapter.Name())); refusal != nil {
 			entry["spawn"], entry["reason"] = false, refusal.Message
 		}
 		surfaces = append(surfaces, entry)

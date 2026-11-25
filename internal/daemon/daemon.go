@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/zm2231/agenthail/internal/acphost"
 	"github.com/zm2231/agenthail/internal/browserhost"
 	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/claudehost"
@@ -148,6 +149,7 @@ type Daemon struct {
 	dashboard                atomic.Pointer[dashboardServer]
 	transportResolver        *SessionTransportResolver
 	claudeHost               *claudehost.Manager
+	acpHost                  *acphost.Manager
 	browserHost              *browserhost.Manager
 	simHost                  *simhost.Host
 	simStatusMu              sync.Mutex
@@ -420,6 +422,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 		defer close(hostDone)
 		d.superviseClaudeHost(ctx)
 	}()
+	acpHostDone := make(chan struct{})
+	go func() {
+		defer close(acpHostDone)
+		d.superviseACPHost(ctx)
+	}()
 	browserDone := make(chan struct{})
 	go func() {
 		defer close(browserDone)
@@ -476,6 +483,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 			d.background.stop()
 			<-catalogDone
 			<-hostDone
+			<-acpHostDone
 			<-browserDone
 			<-extensionsDone
 			<-uiDone

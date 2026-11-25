@@ -580,7 +580,7 @@ func (s *session) send(ctx context.Context, params SendParams) (SendResult, erro
 	if s.idle != nil {
 		s.idle.Stop()
 	}
-	s.norm.startTurn(turnID, surface.TimelineItem{Text: params.Text, MessageID: params.MessageID, Origin: params.Origin, Sender: params.Sender})
+	s.norm.startTurn(turnID, surface.TimelineItem{Text: params.Text, MessageID: params.MessageID})
 	s.state.Status, s.state.TurnID, s.state.LastActive = StatusBusy, turnID, time.Now().UTC()
 	s.saveLocked()
 	s.mu.Unlock()
