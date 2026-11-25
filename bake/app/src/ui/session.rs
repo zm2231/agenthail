@@ -154,9 +154,10 @@ pub(crate) fn session_screen(s: &App) -> El {
     let Some(id) = s.selected.clone() else { return transcript::loading("Pick a session".into()) };
     let Some(x) = session(s, &id) else { return transcript::loading("Loading sessions…".into()) };
     let mut center = col().grow(1.0).h_full().min_w(0.0).child(header(s, x));
-    if x.state(s.now) == State::NeedsYou && !s.answered.contains(&x.id) {
+    let open = open_request(s, x).is_some();
+    if open || (x.state(s.now) == State::NeedsYou && !s.answered.contains(&x.id) && !has_settled(s, x)) {
         center = center.child(waiting_card(s, x));
-    } else if s.answered.contains(&x.id) {
+    } else if s.answered.contains(&x.id) || has_settled(s, x) {
         center = center.child(col().w_full().items_center().px(32.0).pb(12.0).child(pill(&icons::CHECK_CIRCLE, "Answer sent, waiting for the agent", done())));
     }
     center = center.child(tabs(s, &id)).child(el().w_full().h(1.0).fill(line()));

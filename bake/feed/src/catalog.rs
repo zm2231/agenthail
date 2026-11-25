@@ -493,7 +493,7 @@ impl Client {
         {
             Ok(_) => Ok(()),
             Err(ureq::Error::Status(code, response)) => Err(RespondError::from_status(code, &response.into_string().unwrap_or_default())),
-            Err(error) => Err(RespondError { message: error.to_string(), maybe_delivered: false }),
+            Err(error) => Err(RespondError { message: error.to_string(), maybe_delivered: true }),
         }
     }
 

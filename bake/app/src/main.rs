@@ -62,7 +62,8 @@ pub struct App {
     pub requests: HashMap<String, Vec<OpenRequest>>,
     pub answering: Option<String>,
     pub answered: HashSet<String>,
-    pub settled: HashSet<String>,
+    pub settled: HashMap<String, std::time::Instant>,
+    pub answer_status: HashMap<String, String>,
     pub tab: Tab,
     pub work_pick: HashMap<String, String>,
     pub diff: rune_kit::diff::DiffState,
@@ -114,7 +115,8 @@ fn init() -> App {
         requests: HashMap::new(),
         answering: None,
         answered: HashSet::new(),
-        settled: HashSet::new(),
+        settled: HashMap::new(),
+        answer_status: HashMap::new(),
         tab: Tab::Conversation,
         work_pick: HashMap::new(),
         diff: rune_kit::diff::DiffState::new(Vec::new()),
@@ -169,6 +171,14 @@ fn init() -> App {
     app
 }
 
+const SETTLE_GRACE: std::time::Duration = std::time::Duration::from_secs(8);
+
+impl App {
+    pub fn is_settled(&self, request: &str) -> bool {
+        self.settled.get(request).is_some_and(|at| at.elapsed() < SETTLE_GRACE)
+    }
+}
+
 pub fn session<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
     s.sessions.iter().find(|x| x.id == id)
 }
@@ -179,7 +189,7 @@ pub fn select(s: &mut App, id: &str) {
     s.tab = Tab::Conversation;
     s.composer = TextEdit::new("");
     s.composer.focused = true;
-    s.send_status.clear();
+    s.send_status = s.answer_status.get(id).cloned().unwrap_or_default();
     s.lru.retain(|x| x != id);
     s.lru.push(id.to_string());
     if !s.panes.contains_key(id) {
@@ -233,11 +243,11 @@ pub fn answer_request(s: &mut App, request: &str, choices: Vec<String>) {
         s.send_status = "Fixture mode: not sent".into();
         return;
     };
-    if s.answering.is_some() || s.settled.contains(request) {
+    if s.answering.is_some() || s.is_settled(request) {
         return;
     }
     s.answering = Some(request.to_string());
-    s.settled.insert(request.to_string());
+    s.settled.insert(request.to_string(), std::time::Instant::now());
     s.send_status = "Answering…".into();
     let (out, request) = (s.outbox.clone(), request.to_string());
     std::thread::spawn(move || {
@@ -397,21 +407,19 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             }
             Bg::Answered(id, request, result) => {
                 s.answering = None;
-                s.send_status = match result {
-                    Ok(()) => {
-                        s.answered.insert(id.clone());
-                        "Answered".into()
-                    }
-                    Err(error) if error.maybe_delivered => {
-                        s.answered.insert(id.clone());
-                        format!("Sent, not confirmed: {}", error.message)
-                    }
+                let status = match result {
+                    Ok(()) => "Answered".to_string(),
+                    Err(error) if error.maybe_delivered => format!("Sent, not confirmed: {}", error.message),
                     Err(error) => {
                         s.settled.remove(&request);
                         format!("Not answered: {}", error.message)
                     }
                 };
-                fetch_requests_at(s, &id, &[0, 2000, 6000]);
+                if s.selected.as_deref() == Some(id.as_str()) {
+                    s.send_status = status.clone();
+                }
+                s.answer_status.insert(id.clone(), status);
+                fetch_requests_at(s, &id, &[0, 2000, 6000, 9000]);
             }
             Bg::Error(error) => s.status = format!("daemon: {error}"),
         }

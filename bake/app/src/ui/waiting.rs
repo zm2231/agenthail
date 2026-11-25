@@ -40,8 +40,16 @@ pub(crate) fn split_option(label: &str) -> (String, String) {
     }
 }
 
+pub(crate) fn open_request<'a>(s: &'a App, x: &Session) -> Option<&'a feed::catalog::OpenRequest> {
+    s.requests.get(&x.id).and_then(|r| r.iter().find(|r| !s.is_settled(&r.id)))
+}
+
+pub(crate) fn has_settled(s: &App, x: &Session) -> bool {
+    s.requests.get(&x.id).is_some_and(|r| r.iter().any(|r| s.is_settled(&r.id)))
+}
+
 pub(crate) fn waiting_choices(s: &App, x: &Session) -> (Option<String>, Vec<Choice>, bool) {
-    if let Some(request) = s.requests.get(&x.id).and_then(|r| r.iter().find(|r| !s.settled.contains(&r.id))) {
+    if let Some(request) = open_request(s, x) {
         if let Some(q) = request.questions.as_ref().and_then(|q| q.first()).filter(|q| !q.multi_select && !q.options.is_empty()) {
             let choices = q
                 .options
