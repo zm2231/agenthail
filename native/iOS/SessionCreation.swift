@@ -62,7 +62,7 @@ struct NewSessionSheet: View {
                     } else {
                         Section("Agent") {
                             Picker("Run with", selection: $selectedSurface.touching($baseline)) {
-                                ForEach(options.surfaces) { Text($0.id.capitalized).tag($0.id) }
+                                ForEach(options.surfaces) { Text($0.name).tag($0.id) }
                             }
                             Text(selectedSurface != "claude" ? "Uses the runtime configured on \(hostName)." : selectedLauncher?.id == "claude-bg" ? "Starts a Claude Code background job on \(hostName)." : "Starts a Claude session on \(hostName), run by Agenthail.").font(.footnote).foregroundStyle(PhonePalette.muted)
                         }
@@ -106,6 +106,14 @@ struct NewSessionSheet: View {
                             .accessibilityIdentifier("creation-model-picker")
                             if let modelError { Text(modelError).font(.footnote).foregroundStyle(PhonePalette.muted) }
                             Text("Uses the runtime’s existing permission settings. Requests requiring approval may need attention on \(hostName).").font(.footnote).foregroundStyle(PhonePalette.muted)
+                        }
+                        if let agent = options.surfaces.first(where: { $0.id == selectedSurface && $0.isACP }), let modes = agent.modes, !modes.isEmpty {
+                            Section("\(agent.name) options") {
+                                Picker("Mode", selection: $claude.permissionMode.touching($baseline)) {
+                                    Text("Agent default").tag("")
+                                    ForEach(modes, id: \.self) { Text($0).tag($0) }
+                                }
+                            }
                         }
                         if selectedSurface == "codex" {
                             LaunchSettingsView(settings: $launch.touching($baseline), modelOption: selectedModelOption, enabled: selectedLauncher?.isTerminal != true)

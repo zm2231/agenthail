@@ -1,6 +1,6 @@
 import { renderOverview } from "./overview.js";
 import { $ } from "./dom.js";
-import { escape } from "./format.js";
+import { escape, learnLabels } from "./format.js";
 import { renderSessions, renderSurfaceFilter } from "./sessions.js";
 import { renderStartSurfaceOptions } from "./start-form.js";
 import { renderOperations } from "./operations.js";
@@ -92,6 +92,7 @@ export async function load(fresh = false, selectDefault = true) {
       relays: state.relays || [],
       leadReplacements: state.leadReplacements || [],
     };
+    learnLabels(app.state.surfaces);
     catalogRead(catalogSeq);
     $("#daemon-presence").className = app.state.daemon?.running
       ? "daemon-presence online"

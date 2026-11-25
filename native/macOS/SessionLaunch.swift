@@ -81,8 +81,9 @@ struct SessionLaunchForm: Equatable {
 
     var usesFolder: Bool { agent != "notion" }
     var listsModels: Bool { agent != "notion" }
-    var setsEffort: Bool { listsModels && launcher?.isTerminal != true }
-    var setsLaunchOptions: Bool { setsEffort }
+    var isACP: Bool { !SessionCreationOptions.Surface.builtIn.contains(agent) }
+    var setsLaunchOptions: Bool { listsModels && launcher?.isTerminal != true }
+    var setsEffort: Bool { setsLaunchOptions && !isACP }
 
     var trimmedMessage: String { message.trimmingCharacters(in: .whitespacesAndNewlines) }
     var trimmedAlias: String {
@@ -129,7 +130,7 @@ struct SessionLaunchForm: Equatable {
         let schema = agent == "codex" && options ? try parsedOutputSchema.get() : nil
         let launch = agent == "codex" ? LaunchSettings(effort: effort.isEmpty ? nil : effort, mode: options ? LaunchSettings.Mode(rawValue: mode) : nil) : LaunchSettings()
         let codex = agent == "codex" && options ? CodexCreationSettings(approvalPolicy: approvalPolicy, serviceTier: serviceTier, outputSchema: schema) : CodexCreationSettings()
-        let claude = agent == "claude" ? ClaudeCreationSettings(worktree: options ? worktree.trimmingCharacters(in: .whitespaces) : "", agent: options ? claudeAgent.trimmingCharacters(in: .whitespaces) : "", effort: effort, permissionMode: options ? permissionMode : "", configRoot: configRoot) : ClaudeCreationSettings()
+        let claude = isACP ? ClaudeCreationSettings(permissionMode: options ? permissionMode : "") : agent == "claude" ? ClaudeCreationSettings(worktree: options ? worktree.trimmingCharacters(in: .whitespaces) : "", agent: options ? claudeAgent.trimmingCharacters(in: .whitespaces) : "", effort: effort, permissionMode: options ? permissionMode : "", configRoot: configRoot) : ClaudeCreationSettings()
         return try AgenthailAPI.creationBody(surface: agent, message: trimmedMessage, cwd: cwd, model: modelID, alias: trimmedAlias, launch: launch, codex: codex, claude: claude, launcher: launcher, host: host)
     }
 

@@ -69,4 +69,10 @@ assert.ok(scopeKeeps("all", "p") && scopeKeeps("p", "p") && !scopeKeeps("p", "q"
 assert.equal(after("inbox", { project: { id: "p" } }), "all", "opening a session leaves the Inbox");
 assert.equal(after("p", { project: { id: "p" } }), "p", "opening one of the project's sessions keeps its scope");
 assert.equal(after("p", { project: { id: "q" } }), "all", "a session from another project leaves the scope");
+const pane = () => { run("renderDecisionPane")(); return element("#decision-pane").innerHTML; };
+const approval = app.decisions.decisions[1].requests[0];
+approval.alwaysAllow = true;
+assert.ok(pane().includes('data-decision-respond="allow"') && pane().includes('data-decision-respond="always"'), "an approval offers Allow");
+approval.noAllow = true;
+assert.ok(!pane().includes('data-decision-respond="allow"') && !pane().includes('data-decision-respond="always"') && pane().includes('data-decision-respond="deny"'), "an approval the agent offers no allow for shows only Deny");
 console.log("dashboard decision card ok");

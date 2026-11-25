@@ -12,6 +12,7 @@ const decisions = [
   { group: "waiting", sessionId: "deploy", answerable: true, reason: "Needs approval", requests: [deploy] },
   { group: "waiting", sessionId: "index", answerable: true, reason: "Asks", requests: [color] },
   { group: "waiting", sessionId: "busy", answerable: true, reason: "Needs approval", requests: [bash, { ...deploy, id: "req-2" }] },
+  { group: "waiting", sessionId: "noallow", answerable: true, reason: "Needs approval", requests: [{ ...bash, id: "req-noallow", noAllow: true }] },
   { group: "waiting", sessionId: "remote", answerable: false, reason: "On a computer that isn't reachable" },
 ];
 const context = vm.createContext({
@@ -24,6 +25,7 @@ const offer = (id) => run("inlineAnswer")(waiting(id));
 const html = (id) => run("renderInlineAnswer")(waiting(id));
 
 assert.equal(offer("tests").kind, "allow", "an approval that fits one line is allowed in place");
+assert.equal(offer("noallow").kind, "answer", "an approval with no allow is opened, not allowed in place");
 assert.match(html("tests"), /<span class="project-now-tool">Bash<\/span><code>go test \.\/\.\.\.<\/code>/, "Allow says the tool and the command it runs");
 assert.match(html("tests"), /<details class="project-now-detail"><summary>Details<\/summary><pre>go test \.\/\.\.\.\n\(in \/work\/fieldnotes\)<\/pre><\/details>/, "the full request is one tap away");
 assert.match(html("tests"), /data-now-respond="allow"[^>]*data-request-id="req-bash"[^>]*>Allow<\/button>.*data-now-respond="deny"[^>]*>Deny<\/button>/s);

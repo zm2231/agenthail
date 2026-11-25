@@ -247,7 +247,16 @@ struct UsageReport: Decodable, Hashable {
 }
 
 struct SessionCreationOptions: Decodable {
-    struct Surface: Decodable, Identifiable { let id: String; let workspace: Bool; var connected: Bool? = nil }
+    struct Surface: Decodable, Identifiable {
+        static let builtIn = ["claude", "codex", "notion"]
+        let id: String
+        let workspace: Bool
+        var connected: Bool? = nil
+        var label: String? = nil
+        var modes: [String]? = nil
+        var name: String { label ?? id.capitalized }
+        var isACP: Bool { !Self.builtIn.contains(id) }
+    }
     var host: SessionHost? = nil
     let surfaces: [Surface]
     let projects: [LaunchProject]

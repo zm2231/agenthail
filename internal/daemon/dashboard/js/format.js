@@ -1,5 +1,9 @@
 export const labels = { claude: "Claude Code", codex: "Codex", notion: "Notion" };
 
+export function learnLabels(surfaces) {
+  for (const item of surfaces || []) if (item.label) labels[item.name || item.id] = item.label;
+}
+
 export const escape = (value) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -27,7 +31,7 @@ export const timeAgo = (value) => {
 };
 
 export function surfaceIcon(name) {
-  return name === "claude" ? "✦" : name === "codex" ? "◈" : "N";
+  return name === "claude" ? "✦" : name === "codex" ? "◈" : name === "notion" ? "N" : (labels[name] || name).charAt(0).toUpperCase();
 }
 
 export function clockTime(timestamp) {

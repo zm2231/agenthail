@@ -51,7 +51,7 @@ struct NewSessionView: View {
     @ViewBuilder private var options: some View {
         chip(agentLabel, symbol: "sparkle", help: accountHelp) {
             Picker("Agent", selection: Binding(get: { draft.form.agent }, set: { draft.form.switchAgent(to: $0) })) {
-                ForEach(draft.agents, id: \.self) { Text($0.capitalized).tag($0) }
+                ForEach(draft.agents, id: \.self) { Text(draft.agentName($0)).tag($0) }
             }
             .pickerStyle(.inline)
             if draft.claudeConfigRoots.count > 1 {
@@ -91,7 +91,7 @@ struct NewSessionView: View {
         if !draft.launchers.isEmpty, let launcher = draft.form.launcher {
             chip(launcher.label, symbol: "terminal", help: NewSessionLabels.launcherHelp(launcher)) { launcherPicker }
         }
-        NewSessionOptionsChip(form: $draft.form)
+        NewSessionOptionsChip(form: $draft.form, modes: draft.agentModes)
     }
 
     @ViewBuilder private var launcherPicker: some View {
@@ -221,7 +221,7 @@ struct NewSessionView: View {
     private var agentLabel: String {
         let chosen = draft.form.model.isEmpty ? nil : draft.agentModels.first { $0.id == draft.form.model }?.displayName ?? draft.form.model
         let account = NewSessionLabels.account(draft.claudeConfigRoots, choice: draft.form.configRoot, pick: draft.hosts.claudePick, host: draft.hostName)
-        return NewSessionLabels.agent(draft.form.agent, model: draft.form.listsModels ? chosen : nil, effort: draft.form.effort, account: account)
+        return NewSessionLabels.agent(draft.agentName(draft.form.agent), model: draft.form.listsModels ? chosen : nil, effort: draft.form.effort, account: account)
     }
 
     private var accountHelp: String {

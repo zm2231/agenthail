@@ -42,8 +42,15 @@ final class NewSessionDraft: ObservableObject {
     var agents: [String] {
         let supported = (hosts.options?.surfaces ?? []).map(\.id)
         if supported.isEmpty { return ["claude", "codex"] }
-        return ["claude", "codex", "notion"].filter(supported.contains)
+        let builtIn = SessionCreationOptions.Surface.builtIn
+        return builtIn.filter(supported.contains) + supported.filter { !builtIn.contains($0) }
     }
+
+    func agentName(_ id: String) -> String {
+        hosts.options?.surfaces.first { $0.id == id }?.name ?? id.capitalized
+    }
+
+    var agentModes: [String] { hosts.options?.surfaces.first { $0.id == form.agent }?.modes ?? [] }
 
     var claudeConfigRoots: [ClaudeConfigRootOption] { form.agent == "claude" ? hosts.claudeConfigRoots : [] }
     var startsOnThisMac: Bool { hosts.hostQuery == nil }
