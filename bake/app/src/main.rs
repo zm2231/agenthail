@@ -63,6 +63,7 @@ pub struct App {
     pub answering: Option<String>,
     pub settled: HashMap<String, Option<std::time::Instant>>,
     pub answer_status: HashMap<String, String>,
+    pub status_line: HashMap<String, String>,
     pub sending: HashSet<String>,
     pub requests_at: HashMap<String, std::time::Instant>,
     pub tab: Tab,
@@ -117,6 +118,7 @@ fn init() -> App {
         answering: None,
         settled: HashMap::new(),
         answer_status: HashMap::new(),
+        status_line: HashMap::new(),
         sending: HashSet::new(),
         requests_at: HashMap::new(),
         tab: Tab::Conversation,
@@ -195,7 +197,7 @@ pub fn select(s: &mut App, id: &str) {
     s.tab = Tab::Conversation;
     s.composer = TextEdit::new("");
     s.composer.focused = true;
-    s.send_status = s.answer_status.get(id).cloned().unwrap_or_default();
+    s.send_status = if s.sending.contains(id) { "Sending…".to_string() } else { s.status_line.get(id).cloned().unwrap_or_default() };
     s.lru.retain(|x| x != id);
     s.lru.push(id.to_string());
     if !s.panes.contains_key(id) {
@@ -420,7 +422,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 if s.selected.as_deref() == Some(id.as_str()) {
                     s.send_status = status.clone();
                 }
-                s.answer_status.insert(id, status);
+                s.status_line.insert(id, status);
             }
             Bg::Requests(id, requests, fetched_at) => {
                 if s.requests_at.get(&id).is_some_and(|newest| *newest > fetched_at) {
@@ -446,6 +448,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 if s.selected.as_deref() == Some(id.as_str()) {
                     s.send_status = status.clone();
                 }
+                s.status_line.insert(id.clone(), status.clone());
                 s.answer_status.insert(id.clone(), status);
                 fetch_requests_at(s, &id, &[0, 2000, 6000, 9000]);
             }
