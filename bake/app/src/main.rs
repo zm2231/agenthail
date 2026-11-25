@@ -61,8 +61,6 @@ pub struct App {
     pub boards: HashMap<String, Vec<BoardRow>>,
     pub requests: HashMap<String, Vec<OpenRequest>>,
     pub answering: Option<String>,
-    pub answered: HashSet<String>,
-    pub pending_text: HashMap<String, Vec<String>>,
     pub settled: HashMap<String, Option<std::time::Instant>>,
     pub answer_status: HashMap<String, String>,
     pub tab: Tab,
@@ -115,8 +113,6 @@ fn init() -> App {
         boards: HashMap::new(),
         requests: HashMap::new(),
         answering: None,
-        answered: HashSet::new(),
-        pending_text: HashMap::new(),
         settled: HashMap::new(),
         answer_status: HashMap::new(),
         tab: Tab::Conversation,
@@ -246,11 +242,9 @@ fn fetch_requests_at(s: &mut App, id: &str, delays_ms: &'static [u64]) {
     }
 }
 
-fn mark_question_answered(s: &mut App, id: &str) {
-    if let Some(pane) = s.panes.get(id) {
-        let ids: Vec<String> = feed::question::open_question(pane.transcript.items(), 2).into_iter().map(|(id, _)| id).collect();
-        s.answered.extend(ids);
-    }
+pub fn draft_reply(s: &mut App, reply: &str) {
+    s.composer = TextEdit::new(reply);
+    s.composer.focused = true;
 }
 
 pub fn answer_request(s: &mut App, request: &str, choices: Vec<String>) {
@@ -409,16 +403,10 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Board(key, rows) => {
                 s.boards.insert(key, rows);
             }
-            Bg::Sent(id, result) => {
-                let pending = s.pending_text.remove(&id).unwrap_or_default();
+            Bg::Sent(_, result) => {
                 s.send_status = match result {
                     Ok(()) => "Sent".into(),
-                    Err(error) => {
-                        for source in pending {
-                            s.answered.remove(&source);
-                        }
-                        format!("Not sent: {error}")
-                    }
+                    Err(error) => format!("Not sent: {error}"),
                 };
             }
             Bg::Requests(id, requests, fetched_at) => {
@@ -431,14 +419,8 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                     *done_at = Some(std::time::Instant::now());
                 }
                 let status = match result {
-                    Ok(()) => {
-                        mark_question_answered(s, &id);
-                        "Answered".to_string()
-                    }
-                    Err(error) if error.maybe_delivered => {
-                        mark_question_answered(s, &id);
-                        format!("Sent, not confirmed: {}", error.message)
-                    }
+                    Ok(()) => "Answered".to_string(),
+                    Err(error) if error.maybe_delivered => format!("Sent, not confirmed: {}", error.message),
                     Err(error) => {
                         s.settled.remove(&request);
                         format!("Not answered: {}", error.message)

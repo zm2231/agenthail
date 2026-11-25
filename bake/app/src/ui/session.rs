@@ -155,7 +155,7 @@ pub(crate) fn session_screen(s: &App) -> El {
     let Some(x) = session(s, &id) else { return transcript::loading("Loading sessions…".into()) };
     let mut center = col().grow(1.0).h_full().min_w(0.0).child(header(s, x));
     let open = open_request(s, x).is_some();
-    let sent = text_answered(s, x) || has_settled(s, x);
+    let sent = has_settled(s, x);
     if open || (x.state(s.now) == State::NeedsYou && !sent) {
         center = center.child(waiting_card(s, x));
     } else if sent {
