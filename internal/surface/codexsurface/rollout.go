@@ -179,11 +179,10 @@ func codexReadableRollout(source string) (string, func(), error) {
 	if err != nil {
 		return "", nil, err
 	}
-	cacheRoot, err := os.UserCacheDir()
+	dir, err := codexRolloutCacheDir()
 	if err != nil {
 		return "", nil, err
 	}
-	dir := filepath.Join(cacheRoot, "agenthail", "codex-rollouts")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", nil, err
 	}
@@ -200,6 +199,25 @@ func codexReadableRollout(source string) (string, func(), error) {
 		return "", nil, err
 	}
 	return path, release, nil
+}
+
+func codexRolloutCacheDir() (string, error) {
+	cacheRoot, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cacheRoot, "agenthail", "codex-rollouts"), nil
+}
+
+// TrimRolloutCache applies the cache's age limit and size cap to the copies
+// already on disk. Reads prune only when they release a copy, so a cache that
+// grew past its limits while no read ran shrinks only through this.
+func TrimRolloutCache() {
+	dir, err := codexRolloutCacheDir()
+	if err != nil {
+		return
+	}
+	codexRolloutCopies.prune(dir)
 }
 
 func decompressCodexRollout(source, path string) error {

@@ -351,3 +351,22 @@ func TestDecompressedRolloutCacheNeverEvictsACopyAReadHoldsAndShrinksBackOnRelea
 		t.Fatalf("kept %q, want the released oldest copy evicted and the held one %q kept", kept, copies[1])
 	}
 }
+
+func TestTrimRolloutCacheShrinksACacheAlreadyPastItsLimitsWithoutARead(t *testing.T) {
+	half := codexRolloutCacheBytes / 2
+	dir, copies := seedRolloutCache(t,
+		cachedRolloutCopy{1 << 20, codexRolloutCacheAge + time.Hour},
+		cachedRolloutCopy{half, 4 * time.Hour},
+		cachedRolloutCopy{half, 3 * time.Hour},
+		cachedRolloutCopy{half, 2 * time.Hour},
+		cachedRolloutCopy{half, time.Hour},
+	)
+	release := codexRolloutCopies.hold(copies[1])
+	defer release()
+	TrimRolloutCache()
+	kept, _ := rolloutCacheEntries(t, dir)
+	want := []string{copies[1], copies[4]}
+	if !slices.Equal(kept, want) {
+		t.Fatalf("kept %q, want the held copy and the most recently used copy that fits the cap beside it %q", kept, want)
+	}
+}
