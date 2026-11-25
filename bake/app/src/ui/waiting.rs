@@ -48,7 +48,32 @@ pub(crate) fn is_compound(request: &feed::catalog::OpenRequest) -> bool {
     request.questions.as_ref().is_some_and(|qs| qs.len() > 1 || qs.iter().any(|q| q.multi_select))
 }
 
-fn pick_el(request: &str, siblings: Vec<String>, option: &feed::catalog::RequestOption, multi: bool, picked: bool, busy: bool) -> El {
+pub(crate) fn question_context(q: &feed::catalog::RequestQuestion) -> Option<El> {
+    let links: Vec<&feed::catalog::RequestLink> = q.links.iter().filter(|l| l.is_web() && !l.title.trim().is_empty()).collect();
+    if q.detail.trim().is_empty() && links.is_empty() {
+        return None;
+    }
+    Some(
+        col()
+            .w_full()
+            .gap(4.0)
+            .children((!q.detail.trim().is_empty()).then(|| text(q.detail.trim().to_string()).font(META).color(muted()).wrap()))
+            .children((!links.is_empty()).then(|| {
+                row().gap(10.0).items_center().children(links.into_iter().enumerate().map(|(i, l)| {
+                    let url = l.url.clone();
+                    row()
+                        .key(format!("link-{i}-{}", l.url))
+                        .gap(4.0)
+                        .items_center()
+                        .child(icon(&icons::ARROW_RIGHT, 11.0).color(accent()))
+                        .child(text(l.title.clone()).font(META_BOLD).color(accent()))
+                        .on_press(move |_: &mut App| open_link(&url))
+                }))
+            })),
+    )
+}
+
+fn pick_el(request: &str, siblings: Vec<String>, option: &feed::catalog::RequestOption, multi: bool, picked: bool, recommended: bool, busy: bool) -> El {
     let label = option.label.replace(" (Recommended)", "").replace(" (recommended)", "");
     let mut el = row()
         .key(format!("pick-{}", option.id))
@@ -62,7 +87,8 @@ fn pick_el(request: &str, siblings: Vec<String>, option: &feed::catalog::Request
         .border(1.0, if picked { attention().alpha(0.6) } else { Color::WHITE.alpha(0.10) })
         .hover(Color::WHITE.alpha(0.10))
         .child(icon(if picked { &icons::CHECK_CIRCLE } else { &icons::TARGET }, 14.0).color(if picked { attention() } else { faint() }))
-        .child(col().grow(1.0).min_w(0.0).gap(2.0).child(text(label).font(BODY_BOLD).color(theme::text()).wrap()).children((!option.description.is_empty()).then(|| text(option.description.clone()).font(META).color(muted()).wrap().max_lines(2))));
+        .child(col().grow(1.0).min_w(0.0).gap(2.0).child(text(label).font(BODY_BOLD).color(theme::text()).wrap()).children((!option.description.is_empty()).then(|| text(option.description.clone()).font(META).color(muted()).wrap().max_lines(2))))
+        .children(recommended.then(|| row().px(7.0).py(2.0).radius(6.0).fill(attention().alpha(0.2)).child(text("Recommended").font(META_BOLD).color(attention()))));
     if busy {
         return el.opacity(0.5);
     }
@@ -83,7 +109,11 @@ fn compound_el(s: &App, request: &feed::catalog::OpenRequest, busy: bool) -> El 
                 .w_full()
                 .gap(6.0)
                 .child(row().gap(8.0).items_center().child(text(q.question.clone()).font(BODY_BOLD).color(theme::text()).wrap()).child(text(hint).font(META).color(faint())))
-                .children(q.options.iter().map(|o| pick_el(&request.id, siblings.clone(), o, q.multi_select, picks.contains(&o.id), busy))),
+                .children(question_context(q))
+                .children(q.options.iter().enumerate().map(|(i, o)| {
+                    let recommended = q.suggested == Some(i) || o.label.to_lowercase().contains("recommended");
+                    pick_el(&request.id, siblings.clone(), o, q.multi_select, picks.contains(&o.id), recommended, busy)
+                })),
         );
     }
     let ready = !busy && questions.iter().all(|q| q.options.iter().any(|o| picks.contains(&o.id)));
@@ -219,9 +249,10 @@ pub(crate) fn waiting_card(s: &App, x: &Session) -> El {
         .min_w(0.0)
         .gap(8.0)
         .child(row().gap(8.0).items_center().child(text("WAITING ON YOU").font(LABEL).color(attention())).children(source.map(|t| text(t).font(META).color(faint()))))
-        .child(text(question).font(TITLE).color(theme::text()).wrap());
+        .child(text(question).font(TITLE).color(theme::text()).wrap())
+        .children(open_request(s, x).filter(|r| !is_compound(r)).and_then(|r| r.questions.as_ref()?.first()).and_then(question_context));
     if let Some(request) = open_request(s, x).filter(|r| is_compound(r)) {
-        body = body.child(compound_el(s, request, busy));
+        body = body.child(col().key("compound-scroll").w_full().max_h(420.0).scroll(ScrollSpec { stick_bottom: false }).child(compound_el(s, request, busy)));
     } else if !choices.is_empty() {
         body = body.child(col().w_full().gap(6.0).pt(4.0).children(choices.into_iter().enumerate().map(|(i, c)| choice_el(i, c, busy))));
     }

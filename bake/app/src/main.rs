@@ -262,6 +262,12 @@ pub fn toggle_pick(s: &mut App, request: &str, siblings: &[String], option: &str
     picks.push(option.to_string());
 }
 
+pub fn open_link(url: &str) {
+    if url.starts_with("https://") || url.starts_with("http://") {
+        let _ = std::process::Command::new("open").arg(url).spawn();
+    }
+}
+
 pub fn draft_reply(s: &mut App, reply: &str) {
     let draft = s.composer.text.trim_end();
     let text = if draft.is_empty() { reply.to_string() } else { format!("{draft}\n{reply}") };

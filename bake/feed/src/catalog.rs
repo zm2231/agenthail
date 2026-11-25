@@ -380,6 +380,24 @@ pub struct RequestQuestion {
     pub options: Vec<RequestOption>,
     #[serde(default)]
     pub suggested: Option<usize>,
+    #[serde(default)]
+    pub links: Vec<RequestLink>,
+    #[serde(default)]
+    pub detail: String,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct RequestLink {
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub url: String,
+}
+
+impl RequestLink {
+    pub fn is_web(&self) -> bool {
+        self.url.starts_with("https://") || self.url.starts_with("http://")
+    }
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
