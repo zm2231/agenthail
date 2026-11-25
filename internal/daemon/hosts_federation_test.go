@@ -192,7 +192,11 @@ func (f *federatedSurface) List(context.Context) ([]surface.Session, error) {
 	return result, nil
 }
 
-func (f *federatedSurface) Resolve(_ context.Context, id string) (*surface.Session, error) {
+func (f *federatedSurface) Resolve(ctx context.Context, id string) (*surface.Session, error) {
+	if f.resolveStalls {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	session, ok := f.sessions[id]
@@ -1648,5 +1652,18 @@ func TestFederationPagesARemoteSessionsSubagentsAndPassesAnOlderHostsListThrough
 		if ids, total := read(query); !reflect.DeepEqual(ids, []string{"old-1", "old-2"}) || total != nil {
 			t.Fatalf("older host%s ids=%v total=%v, want its list unchanged and no total", query, ids, total)
 		}
+	}
+}
+
+func TestRemoteResolveThatRunsOutOfTimeIsAnErrorNotAMirroredMiss(t *testing.T) {
+	original := apiResolveTimeout
+	apiResolveTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { apiResolveTimeout = original })
+	local, remote, _ := pairedFederation(t)
+	remote.fake.resolveStalls = true
+	resolved := local.request(t, http.MethodGet, "/api/v1/resolve?scope=remote&target=uncatalogued-thread", nil)
+	var answer resolveResponse
+	if err := json.Unmarshal(resolved.Body.Bytes(), &answer); err != nil || len(answer.Errors) != 1 || len(answer.Matches) != 0 || !strings.Contains(answer.Errors[0], "vps") {
+		t.Fatalf("status=%d body=%s", resolved.Code, resolved.Body.String())
 	}
 }

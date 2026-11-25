@@ -223,13 +223,16 @@ func (c *managedCodexClient) requestOrdered(ctx context.Context, method string, 
 	}
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
-	select {
-	case reply := <-waiter:
+	answer := func(reply codexReply) (map[string]any, int64, error) {
 		if envelope, ok := reply.message["error"].(map[string]any); ok {
 			code, _ := envelope["code"].(float64)
 			return nil, reply.after, &codexRPCError{Method: method, Code: int(code), Message: transcript.String(envelope, "message"), Data: envelope["data"]}
 		}
 		return reply.message, reply.after, nil
+	}
+	select {
+	case reply := <-waiter:
+		return answer(reply)
 	case <-ctx.Done():
 		forget()
 		return nil, 0, ctx.Err()
@@ -237,6 +240,11 @@ func (c *managedCodexClient) requestOrdered(ctx context.Context, method string, 
 		forget()
 		return nil, 0, fmt.Errorf("%s: app-server request timed out after %s: %w", method, wait, os.ErrDeadlineExceeded)
 	case <-c.closed:
+		select {
+		case reply := <-waiter:
+			return answer(reply)
+		default:
+		}
 		c.mu.Lock()
 		err := c.err
 		c.mu.Unlock()

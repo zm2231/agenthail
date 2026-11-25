@@ -93,11 +93,27 @@ func (c *Codex) resolveCandidates(ctx context.Context) ([]surface.Session, error
 	var err error
 	for _, client := range clients {
 		var sessions []surface.Session
-		if sessions, err = c.listAll(ctx, client, runtimes); err == nil {
+		if sessions, err = c.listAddressable(ctx, client, runtimes); err == nil {
 			return sessions, nil
 		}
 	}
 	return nil, err
+}
+
+func (c *Codex) listAddressable(ctx context.Context, client codexClient, runtimes *codexRuntimes) ([]surface.Session, error) {
+	params := codexThreadListParams(codexSweepPageLimit)
+	var all []surface.Session
+	for {
+		page, next, err := c.listPageCursor(ctx, client, params, runtimes)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+		if next == "" || next == params["cursor"] {
+			return all, nil
+		}
+		params["cursor"] = next
+	}
 }
 
 func (c *Codex) SearchSessions(ctx context.Context, query string, limit int, found func(surface.SessionSearchResult)) ([]surface.SessionSearchResult, error) {

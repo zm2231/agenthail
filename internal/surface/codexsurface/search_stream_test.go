@@ -165,3 +165,41 @@ func TestCodexResolveFindsAConversationByCwdOrIDPrefixWithoutHistorySearch(t *te
 		}
 	}
 }
+
+func TestAReplyThatArrivesJustBeforeTheConnectionClosesIsKept(t *testing.T) {
+	home := startManagedCodex(t, func(method string, _ map[string]any) map[string]any {
+		if method == "thread/search" {
+			return map[string]any{"data": []any{}, "closeAfterReply": true}
+		}
+		return nil
+	}).Home
+	for i := 0; i < 200; i++ {
+		client, err := CodexHome{Codex: home, State: t.TempDir()}.dialManaged(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = client.Request(context.Background(), "thread/search", map[string]any{"searchTerm": "x"}, 5*time.Second)
+		_ = client.Close()
+		if err != nil {
+			t.Fatalf("attempt %d lost its reply: %v", i, err)
+		}
+	}
+}
+
+func TestCodexResolveDoesNotDependOnReadingLoadedThreads(t *testing.T) {
+	startManagedCodex(t, func(method string, params map[string]any) map[string]any {
+		switch method {
+		case "thread/loaded/list":
+			return map[string]any{"data": []any{"019f004a-0000-7000-8000-0000000000b9"}}
+		case "thread/read":
+			return map[string]any{"error": map[string]any{"code": -32603, "message": "synthetic read failure"}}
+		case "thread/list":
+			return map[string]any{"data": []any{titled("019f004a-0000-7000-8000-0000000000f6", "steady", "/work")}}
+		}
+		return nil
+	})
+	session, err := isolatedManagedRuntime(t).Resolve(context.Background(), "steady")
+	if err != nil || session == nil || session.ID != "019f004a-0000-7000-8000-0000000000f6" {
+		t.Fatalf("session=%+v err=%v", session, err)
+	}
+}

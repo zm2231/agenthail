@@ -48,7 +48,7 @@ func (d *Daemon) mcpTargets(caller *mcpCaller) targets.Resolver[*surface.Session
 				return nil, targets.AmbiguousError{Message: fmt.Sprintf("ambiguous target %q: %s", target, strings.Join(answer.Ambiguous, "; "))}
 			}
 			if len(answer.Errors) > 0 {
-				return nil, fmt.Errorf("ambiguous target %q: %s", target, strings.Join(answer.Errors, "; "))
+				return nil, fmt.Errorf("resolve target %q: %s", target, strings.Join(answer.Errors, "; "))
 			}
 			matches := make([]targets.Remote, 0, len(answer.Matches))
 			for _, match := range answer.Matches {
