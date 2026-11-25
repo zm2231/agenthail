@@ -92,15 +92,77 @@ pub fn avatar(name: &str, size: f32) -> El {
         .child(text(initial).font(TextStyle::new(size * 0.62, 640.0)).color(Color::WHITE))
 }
 
-pub fn fit_words(t: &str, max: usize) -> String {
-    t.split(' ')
-        .map(|w| if w.chars().count() > max { format!("{}…", w.chars().take(max.saturating_sub(1)).collect::<String>()) } else { w.to_string() })
-        .collect::<Vec<_>>()
-        .join(" ")
+fn cut_to(word: &str, style: TextStyle, width: f32) -> String {
+    let chars: Vec<char> = word.chars().collect();
+    let mut n = chars.len();
+    while n > 0 {
+        let t: String = chars[..n].iter().collect::<String>() + "…";
+        if rune::text::advance(&t, style) <= width {
+            return t;
+        }
+        n -= 1;
+    }
+    "…".into()
 }
 
-pub fn title_text(t: &str, max_word: usize, lines: usize) -> El {
-    text(fit_words(t, max_word)).wrap().max_lines(lines)
+pub fn fit_lines(t: &str, style: TextStyle, width: f32, max: usize) -> String {
+    let fits = |x: &str| rune::text::advance(x, style) <= width;
+    let mut lines: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut words = t.split_whitespace().peekable();
+    while let Some(w) = words.next() {
+        let next = if cur.is_empty() { w.to_string() } else { format!("{cur} {w}") };
+        if fits(&next) {
+            cur = next;
+            continue;
+        }
+        if !cur.is_empty() {
+            lines.push(std::mem::take(&mut cur));
+            if lines.len() == max {
+                let last = lines.pop().unwrap_or_default();
+                lines.push(end_line(&last, style, width));
+                return lines.join("\n");
+            }
+        }
+        if fits(w) {
+            cur = w.to_string();
+        } else {
+            lines.push(cut_to(w, style, width));
+            return lines.join("\n");
+        }
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    lines.join("\n")
+}
+
+fn end_line(line: &str, style: TextStyle, width: f32) -> String {
+    let mut words: Vec<&str> = line.split(' ').collect();
+    while !words.is_empty() {
+        let t = format!("{}…", words.join(" "));
+        if rune::text::advance(&t, style) <= width {
+            return t;
+        }
+        if words.len() == 1 {
+            return cut_to(words[0], style, width);
+        }
+        words.pop();
+    }
+    "…".into()
+}
+
+pub fn title_fit(s: &App, key: &str, t: &str, style: TextStyle, color: Color, lines: usize) -> El {
+    let k = key.to_string();
+    let body = match s.widths.get(key) {
+        Some(w) if *w > 8.0 => text(fit_lines(t, style, w - 1.0, lines)).font(style).color(color),
+        _ => text(t.to_string()).font(style).color(color).wrap_anywhere().max_lines(lines),
+    };
+    col().key(format!("fit-{key}")).w_full().min_w(0.0).shrink().on_layout(move |s: &mut App, r: [f32; 4]| {
+        if s.widths.get(&k).is_none_or(|w| (w - r[2]).abs() > 0.5) {
+            s.widths.insert(k.clone(), r[2]);
+        }
+    }).child(body)
 }
 
 pub fn spacer() -> El {
@@ -297,7 +359,7 @@ pub fn need_row(s: &App, i: usize, n: &Need, focused: bool) -> El {
     if let Some(l) = &n.label {
         meta = meta.child(id_label(l));
     }
-    let body = col().grow(1.0).shrink().min_w(0.0).gap(6.0).child(title_text(&n.title, 48, 2).font(BODY_MED).color(strong())).child(meta);
+    let body = col().grow(1.0).shrink().min_w(0.0).gap(6.0).child(title_fit(s, &format!("need-{}", n.title), &n.title, BODY_MED, strong(), 2)).child(meta);
     let mut r = row()
         .key(format!("need-{i}"))
         .w_full()

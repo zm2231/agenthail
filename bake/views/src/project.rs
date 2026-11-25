@@ -46,7 +46,7 @@ pub fn work_card(s: &App, w: &Work, compact: bool) -> El {
         .border(1.0, if phase == 4 { k.c.warning.icon.alpha(0.35) } else { ui::edge() })
         .hover(k.c.surface_raised_hover)
         .on_press(move |s: &mut App| go(s, Screen::Work(id.clone())))
-        .child(ui::title_text(&plain(&w.text), if compact { 26 } else { 22 }, 2).font(BODY_MED.lh(19.0)).color(strong()));
+        .child(ui::title_fit(s, &format!("card-{}-{compact}", w.id), &plain(&w.text), BODY_MED.lh(19.0), strong(), 2));
     c = c.child(ui::mini_phase(phase));
     let last = w.timeline.last().map(|t| s.d.ago(&t.at)).unwrap_or_default();
     c.child(
@@ -243,7 +243,7 @@ pub fn board(s: &App, cx: &mut Cx<App>, key: &str, layer: &mut Vec<El>) -> El {
                 .hover(k.c.surface_raised_hover)
                 .on_press(move |s: &mut App| crate::open_target(s, &t))
                 .child(row().gap(6.0).items_center().child(rune::icon(glyph, 13.0).color(color)).child(text(l.kind.label().to_string()).font(META_MED).color(color)).child(ui::spacer()).child(text(s.d.ago(&l.at)).font(META).color(weak())))
-                .child(ui::title_text(&l.text, 24, 2).font(META).color(strong())),
+                .child(ui::title_fit(s, &format!("since-{i}"), &l.text, META, strong(), 2)),
         );
     }
     let count = |kind| lines.iter().filter(|l| l.kind == kind).count();

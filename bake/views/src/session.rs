@@ -383,7 +383,7 @@ pub fn work_rail(s: &App, id: &str) -> El {
             let item = w.id.clone();
             c = c
                 .child(row().w_full().items_center().child(ui::label("On this work")).child(ui::spacer()).child(ui::id_label(&crate::data::short_id(&w.id))))
-                .child(ui::title_text(&plain(&w.text), 30, 2).font(BODY_MED).color(strong()))
+                .child(ui::title_fit(s, "rail-title", &plain(&w.text), BODY_MED, strong(), 2))
                 .child(ui::stepper(s.d.phase(w), &s.d.whose_move(w)).mt(4.0));
             let mut chips = row().gap(6.0).flex_wrap();
             if let Some(pr) = s.d.pr(w) {

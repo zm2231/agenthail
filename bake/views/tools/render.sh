@@ -3,7 +3,7 @@ set -eu
 bin=${BIN:-/Volumes/4/caches/agenthail-v2-target/release/agenthail-views}
 out=${1:-/Volumes/4/tmp/agenthail-collab/end-state}
 mkdir -p "$out"
-snap() { name=$1; shift; "$bin" --snap "$out/$name.png" --size 1280x800 --scale 2 --theme "${THEME:-dark}" "$@" >/dev/null; }
+snap() { name=$1; shift; "$bin" --snap "$out/$name.png" --frames 4 --size 1280x800 --scale 2 --theme "${THEME:-dark}" "$@" >/dev/null; }
 snap 01-now-panes --view now
 snap 01b-now-collapsed --view now-collapsed
 snap 01c-now-focused --view now-focused
