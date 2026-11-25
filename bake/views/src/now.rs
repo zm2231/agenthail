@@ -10,11 +10,12 @@ use crate::{App, Screen, go, next_need, open_target};
 pub const WINDOW: f64 = 12.0;
 
 fn variant(s: &App) -> El {
-    SegmentedControl::new(&["Three panes", "Brief"], Some(if s.now_b { 1 } else { 0 }))
+    let seg = SegmentedControl::new(&["Three panes", "Brief"], Some(if s.now_brief { 1 } else { 0 }))
         .label("Layout")
         .fit()
-        .on_pick(|s: &mut App, i, _| s.now_b = i == 1)
-        .build(kit())
+        .on_pick(|s: &mut App, i, _| s.now_brief = i == 1)
+        .build(kit());
+    row().gap(6.0).items_center().child(seg).child(ui::ghost_keys(&["⌥⌘B"]))
 }
 
 pub fn digests(s: &App) -> Vec<(&Project, Vec<Line>)> {
@@ -184,13 +185,15 @@ fn focus_card(s: &App) -> El {
 fn toolbar(s: &App, strip: bool) -> Toolbar {
     let mut t = Toolbar::new();
     t = if strip { t.leading(row().gap(12.0).items_center().child(text("Now".to_string()).font(BODY_MED).color(strong())).child(ui::strip(s, None))) } else { t.leading(ui::crumb(&[("Now", true)])) };
-    if strip {
-        return t.trailing(ui::needs_button(s));
-    }
     t.trailing(row().gap(10.0).items_center().child(variant(s)).child(ui::needs_button(s)))
 }
 
 pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
+    let k = kit();
+    let [side_c, centre_c, rail_c] = crate::layout::collapsed(s);
+    let side_in_split = !(centre_c && rail_c);
+    let rail_in_split = !rail_c && !centre_c;
+
     let mut centre = col().w_full().max_w(860.0).gap(16.0).px(28.0).pt(20.0).pb(40.0).child(focus_card(s)).child(
         col()
             .w_full()
@@ -202,12 +205,26 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
     for (p, lines) in digests(s).iter().take(6) {
         centre = centre.child(digest_block(s, p, lines, 5));
     }
-    let main = col().key("now-a").w_full().h_full().items_center().scroll(ScrollSpec { stick_bottom: false }).child(centre);
-    let mut rail = col().w_full().gap(10.0).px(14.0).pt(16.0).pb(24.0).child(ui::section_head("Hands-on", Some(s.hands_on.len()), Some(text("⌃Tab".to_string()).font(META).color(weak()))));
-    for (i, id) in s.hands_on.iter().enumerate() {
-        rail = rail.child(hands_on_card(s, i, id));
+    let centre = col()
+        .w_full()
+        .h_full()
+        .child(ui::pane_head(s, 1, crate::layout::PANES[1]))
+        .child(col().key("now-a").w_full().grow(1.0).min_h(0.0).items_center().scroll(ScrollSpec { stick_bottom: false }).child(centre));
+
+    let wide = centre_c;
+    let mut rail = col().w_full().max_w(if wide { 820.0 } else { 10000.0 }).gap(10.0).px(14.0).pt(16.0).pb(24.0).child(ui::section_head("Hands-on", Some(s.hands_on.len()), Some(text("⌃Tab".to_string()).font(META).color(weak()))));
+    if wide {
+        let mut grid = row().w_full().gap(10.0).flex_wrap().items_stretch();
+        for (i, id) in s.hands_on.iter().enumerate() {
+            grid = grid.child(col().w(300.0).grow(1.0).child(hands_on_card(s, i, id)));
+        }
+        rail = rail.child(grid);
+    } else {
+        for (i, id) in s.hands_on.iter().enumerate() {
+            rail = rail.child(hands_on_card(s, i, id));
+        }
     }
-    rail = rail.child(ui::sessions_block(s, true).mt(14.0));
+    rail = rail.child(ui::sessions_block(s, !wide).mt(14.0));
     let skip: Vec<&str> = s.hands_on.iter().map(String::as_str).collect();
     let moving = s.d.moving(&skip);
     rail = rail.child(ui::section_head("What's moving", Some(moving.len()), None).mt(14.0));
@@ -217,8 +234,33 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
     for (i, x) in moving.iter().take(6).enumerate() {
         rail = rail.child(moving_row(s, i, &x.id));
     }
-    let inspector = col().key("now-rail").w_full().h_full().scroll(ScrollSpec { stick_bottom: false }).child(rail);
-    ui::frame(cx, s, Some(ui::sidebar(s, None, None)), main, Some(inspector), toolbar(s, false))
+    let rail = col()
+        .w_full()
+        .h_full()
+        .child(ui::pane_head(s, 2, crate::layout::PANES[2]))
+        .child(col().key("now-rail").w_full().grow(1.0).min_h(0.0).items_center().scroll(ScrollSpec { stick_bottom: false }).child(rail));
+
+    let mut rail = Some(rail);
+    let mut main = row().w_full().h_full().gap(8.0);
+    let strip_wrap = |e: El| col().h_full().py(8.0).child(e);
+    if side_c {
+        main = main.child(strip_wrap(ui::pane_strip(0, &icons::SIDEBAR, Some((s.needs.len(), ui::needs_color())))).pl(8.0));
+    } else if !side_in_split {
+        main = main.child(col().grow(1.0).w(1.0).h_full().items_center().child(col().w_full().max_w(560.0).h_full().child(ui::pane_head(s, 0, crate::layout::PANES[0])).child(col().w_full().grow(1.0).min_h(0.0).px(10.0).pt(8.0).scroll(ScrollSpec { stick_bottom: false }).child(ui::sidebar(s, None, None)))));
+    }
+    if centre_c {
+        main = main.child(strip_wrap(ui::pane_strip(1, &icons::CHECKLIST, Some((s.needs.len(), ui::needs_color())))));
+    } else {
+        main = main.child(col().grow(1.0).w(1.0).h_full().child(centre));
+    }
+    if rail_c {
+        main = main.child(strip_wrap(ui::pane_strip(2, &icons::BULLET_LIST, Some((s.hands_on.len(), k.c.text_accent)))).pr(8.0));
+    } else if !rail_in_split {
+        main = main.child(col().grow(1.0).w(1.0).h_full().children(rail.take()));
+    }
+    let sidebar = side_in_split.then(|| ui::sidebar(s, None, None));
+    let inspector = rail.filter(|_| rail_in_split);
+    ui::frame_now(cx, s, sidebar, main, inspector, toolbar(s, false))
 }
 
 pub fn brief(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
@@ -229,7 +271,7 @@ pub fn brief(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
     let intro = col()
         .w_full()
         .gap(6.0)
-        .child(row().w_full().items_center().child(text("Since you left".to_string()).font(TITLE).color(strong())).child(ui::spacer()).child(variant(s)))
+        .child(text("Since you left".to_string()).font(TITLE).color(strong()))
         .child(text(format!("{} need you · {} shipped · {} working · last {WINDOW:.0} hours across {} projects", s.needs.len(), shipped, s.d.sessions.iter().filter(|x| !x.archived && crate::sessions::busy(x)).count(), digests.len())).font(BODY).color(base()));
     let mut needs = col().w_full().gap(2.0).padding(6.0);
     for (i, n) in s.needs.iter().enumerate() {

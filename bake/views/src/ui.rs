@@ -448,6 +448,77 @@ pub fn frame(cx: &mut Cx<App>, s: &App, sidebar: Option<El>, main: El, inspector
     col().w_full().h_full().child(col().w_full().grow(1.0).min_h(0.0).child(split)).child(status_bar(s))
 }
 
+pub fn frame_now(cx: &mut Cx<App>, s: &App, sidebar: Option<El>, main: El, inspector: Option<El>, toolbar: Toolbar) -> El {
+    let k = kit();
+    let mut v = SplitView::new(main);
+    if let Some(sb) = sidebar {
+        v = v.sidebar(&s.now_side, |s: &mut App| &mut s.now_side, sb).sidebar_toggle(SidebarToggle::new().size(ControlSize::Large).past_lights(16.0).edge(18.0).gap(4.0).in_header());
+    } else {
+        v = v.hide_sidebar_toggle();
+    }
+    if let Some(i) = inspector {
+        v = v.inspector(&s.now_rail, |s: &mut App| &mut s.now_rail, i);
+    }
+    let split = v
+        .toolbar(toolbar)
+        .titlebar_inset(cx.titlebar_inset())
+        .frame_inset(8.0)
+        .toolbar_in_panel()
+        .sidebar_padding(14.0, 10.0)
+        .pane_motion(PaneMotion::new().spring(Spring::new(0.3, 0.0)))
+        .reduced_motion(cx.is_reduced_motion())
+        .build(k);
+    col().w_full().h_full().child(col().w_full().grow(1.0).min_h(0.0).child(split)).child(status_bar(s))
+}
+
+pub fn pane_strip(i: usize, glyph: &'static Icon, count: Option<(usize, Color)>) -> El {
+    let k = kit();
+    let name = crate::layout::PANES[i];
+    let len = 140.0;
+    let label = el().w(16.0).h(len).child(text(name.to_string()).font(META_MED).color(base()).w(len).h(16.0).absolute(8.0 - len / 2.0, len / 2.0 - 8.0).rotate(std::f32::consts::FRAC_PI_2));
+    let mut c = col()
+        .key(format!("strip-{i}"))
+        .w(40.0)
+        .h_full()
+        .items_center()
+        .gap(10.0)
+        .pt(14.0)
+        .radius(10.0)
+        .fill(k.c.surface_base)
+        .border(1.0, rule())
+        .hover(k.c.surface_raised_hover)
+        .on_press(move |s: &mut App| crate::layout::expand_pane(s, i))
+        .child(icon(glyph, 15.0).color(k.c.icon_base));
+    if let Some((n, color)) = count {
+        c = c.child(row().min_w(20.0).h(18.0).px(5.0).radius(9.0).center().fill(color.alpha(0.18)).child(text(n.to_string()).font(LABEL).color(color)));
+    }
+    c.child(label).child(spacer()).child(ghost_keys(&[format!("⌥⌘{}", i + 1).as_str()]).pb(12.0))
+}
+
+pub fn pane_head(s: &App, i: usize, title: &str) -> El {
+    let k = kit();
+    let focused = s.now_focus.map(|(f, _)| f) == Some(i);
+    let focus = rune_kit::IconButton::new(if focused { &icons::COLLAPSE } else { &icons::EXPAND })
+        .variant(rune_kit::IconButtonVariant::GhostMuted)
+        .control_size(ControlSize::Small)
+        .label(if focused { "Restore panes" } else { "Focus this pane" })
+        .help(if focused { format!("Restore panes (⌥⇧⌘{} or esc)", i + 1) } else { format!("Focus this pane (⌥⇧⌘{})", i + 1) })
+        .on_press(move |s: &mut App| crate::layout::focus_pane(s, i))
+        .build(k);
+    let hide = rune_kit::IconButton::new(if i == 2 { &icons::CHEVRON_DOUBLE_RIGHT } else { &icons::MINUS })
+        .variant(rune_kit::IconButtonVariant::GhostMuted)
+        .control_size(ControlSize::Small)
+        .label("Collapse this pane")
+        .help(format!("Collapse to a strip (⌥⌘{})", i + 1))
+        .on_press(move |s: &mut App| crate::layout::toggle_pane(s, i))
+        .build(k);
+    let mut r = row().key(format!("pane-head-{i}")).w_full().h(36.0).px(14.0).gap(6.0).items_center().border_sides([0.0, 0.0, 1.0, 0.0], rule()).child(label(title));
+    if focused {
+        r = r.child(text("focused".to_string()).font(META).color(k.c.text_accent));
+    }
+    r.child(spacer()).child(focus).child(hide)
+}
+
 fn until(s: &App, at: &str) -> String {
     let h = -s.d.hours(at);
     if h <= 0.0 || h > 1e8 {

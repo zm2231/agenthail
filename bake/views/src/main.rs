@@ -1,5 +1,6 @@
 mod data;
 mod jump;
+mod layout;
 mod now;
 mod project;
 mod session;
@@ -7,7 +8,7 @@ mod sessions;
 mod ui;
 mod work;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use rune::{AppSpec, Chrome, Cx, El, Key, KeyEvent, TextEdit, Tx};
 use rune_kit::shell::{self, PaneState};
@@ -29,8 +30,13 @@ pub struct App {
     pub hands_on: Vec<String>,
     pub screen: Screen,
     pub back: Vec<Screen>,
-    pub now_b: bool,
-    pub board: bool,
+    pub now_brief: bool,
+    pub now_side: PaneState,
+    pub now_rail: PaneState,
+    pub now_centre_hidden: bool,
+    pub now_focus: Option<(usize, [bool; 3])>,
+    pub boards: HashMap<String, bool>,
+    pub persist: bool,
     pub sidebar: PaneState,
     pub inspector: PaneState,
     pub jump: Option<TextEdit>,
@@ -74,8 +80,13 @@ fn init() -> App {
         hands_on,
         screen: Screen::Now,
         back: Vec::new(),
-        now_b: false,
-        board: true,
+        now_brief: false,
+        now_side: PaneState::new(300.0).range(200.0, 480.0),
+        now_rail: PaneState::new(340.0).range(260.0, 520.0),
+        now_centre_hidden: false,
+        now_focus: None,
+        boards: HashMap::new(),
+        persist: false,
         sidebar: PaneState::new(300.0).range(200.0, 480.0),
         inspector: PaneState::new(340.0).range(260.0, 520.0),
         jump: None,
@@ -94,17 +105,25 @@ fn init() -> App {
         sessions_project_open: false,
         sessions_query: TextEdit::new(""),
     };
-    let view = arg("--view").unwrap_or_else(|| "now-b".into());
+    let Some(view) = arg("--view") else {
+        app.persist = !std::env::args().any(|a| a == "--snap" || a == "--tree");
+        if app.persist {
+            layout::load(&mut app);
+        }
+        return app;
+    };
     match view.as_str() {
-        "now-a" => app.now_b = false,
-        "now-b" => app.now_b = true,
+        "now" | "now-a" => {}
+        "now-collapsed" => layout::toggle_pane(&mut app, 2),
+        "now-focused" => layout::focus_pane(&mut app, 1),
+        "now-brief" | "now-b" => app.now_brief = true,
         "session" => {
             let id = arg("--session").or_else(|| app.hands_on.first().cloned()).unwrap_or_default();
             app.screen = Screen::Session(id);
         }
-        "project-a" | "project-b" => {
-            app.board = view == "project-b";
+        "project-a" | "project-b" | "project-chat" | "project-board" => {
             let key = arg("--project").or_else(|| app.d.projects.first().map(|p| p.key.clone())).unwrap_or_default();
+            app.boards.insert(key.clone(), matches!(view.as_str(), "project-b" | "project-board"));
             app.screen = Screen::Project(key);
         }
         "sessions" => app.screen = Screen::Sessions,
@@ -114,7 +133,7 @@ fn init() -> App {
         }
         "work" => app.screen = Screen::Work(arg("--item").unwrap_or_else(|| "agenthail-W595".into())),
         "jump" => {
-            app.now_b = true;
+            app.now_brief = true;
             open_jump(&mut app, arg("--query").as_deref().unwrap_or(""));
         }
         _ => {}
@@ -183,6 +202,26 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         }
         s.jump = None;
     }
+    if ev.mods.cmd && ev.mods.alt {
+        let base = tx.key_base().map(|c| c.to_ascii_lowercase());
+        match (&s.screen, base) {
+            (Screen::Now, Some(c @ ('1' | '2' | '3'))) => {
+                let i = c as usize - '1' as usize;
+                if ev.mods.shift { layout::focus_pane(s, i) } else { layout::toggle_pane(s, i) }
+                return true;
+            }
+            (Screen::Now, Some('b')) => {
+                s.now_brief = !s.now_brief;
+                return true;
+            }
+            (Screen::Project(key), Some('b')) => {
+                let key = key.clone();
+                layout::toggle_board(s, &key);
+                return true;
+            }
+            _ => {}
+        }
+    }
     if ev.is_command('s') && ev.mods.shift {
         go(s, Screen::Sessions);
         return true;
@@ -196,7 +235,7 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         return true;
     }
     for (i, c) in ['1', '2', '3', '4', '5'].iter().enumerate() {
-        if ev.is_command(*c) {
+        if ev.is_command(*c) && !ev.mods.alt {
             if let Some(id) = s.hands_on.get(i).cloned() {
                 go(s, Screen::Session(id));
             }
@@ -221,7 +260,11 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         return true;
     }
     if shell::is_sidebar_toggle(ev) {
-        s.sidebar.toggle();
+        if matches!(s.screen, Screen::Now) && !s.now_brief {
+            layout::toggle_pane(s, 0);
+        } else {
+            s.sidebar.toggle();
+        }
         return true;
     }
     if s.composer.focused {
@@ -229,6 +272,9 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     }
     match &ev.key {
         Key::Escape => {
+            if matches!(s.screen, Screen::Now) && !s.now_brief && layout::restore(s) {
+                return true;
+            }
             if let Some(prev) = s.back.pop() {
                 s.screen = prev;
             }
@@ -244,9 +290,12 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
                 true
             }
             "v" => {
-                match s.screen {
-                    Screen::Now => s.now_b = !s.now_b,
-                    Screen::Project(_) => s.board = !s.board,
+                match &s.screen {
+                    Screen::Now => s.now_brief = !s.now_brief,
+                    Screen::Project(key) => {
+                        let key = key.clone();
+                        layout::toggle_board(s, &key);
+                    }
                     _ => {}
                 }
                 true
@@ -286,7 +335,7 @@ fn view(s: &App, cx: &mut Cx<App>) -> El {
     let mut layer = Vec::new();
     let body = match &s.screen {
         Screen::Now => {
-            if s.now_b {
+            if s.now_brief {
                 now::brief(s, cx, &mut layer)
             } else {
                 now::panes(s, cx, &mut layer)
@@ -294,7 +343,7 @@ fn view(s: &App, cx: &mut Cx<App>) -> El {
         }
         Screen::Session(id) => session::view(s, cx, id, &mut layer),
         Screen::Project(key) => {
-            if s.board {
+            if layout::board_for(s, key) {
                 project::board(s, cx, key, &mut layer)
             } else {
                 project::lead(s, cx, key, &mut layer)
@@ -309,6 +358,7 @@ fn view(s: &App, cx: &mut Cx<App>) -> El {
     if let Some(n) = &s.notice {
         layer.push(ui::notice(n));
     }
+    layout::save(s);
     rune_kit::root(body, layer)
 }
 

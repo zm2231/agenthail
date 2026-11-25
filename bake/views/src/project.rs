@@ -7,19 +7,23 @@ use crate::data::{Work, plain, short_id};
 use crate::ui::{self, BODY_MED, HEAD, META, META_MED, base, kit, strong, weak};
 use crate::{App, Screen, go};
 
-fn variant(s: &App) -> El {
-    SegmentedControl::new(&["Lead chat", "Board"], Some(if s.board { 1 } else { 0 }))
-        .label("Layout")
+fn variant(s: &App, key: &str) -> El {
+    let k = key.to_string();
+    let seg = SegmentedControl::new(&["Lead chat", "Board"], Some(if crate::layout::board_for(s, key) { 1 } else { 0 }))
+        .label("Project view")
         .fit()
-        .on_pick(|s: &mut App, i, _| s.board = i == 1)
-        .build(kit())
+        .on_pick(move |s: &mut App, i, _| {
+            s.boards.insert(k.clone(), i == 1);
+        })
+        .build(kit());
+    row().gap(6.0).items_center().child(seg).child(ui::ghost_keys(&["⌥⌘B"]))
 }
 
 fn toolbar(s: &App, key: &str) -> Toolbar {
     let name = s.d.project(key).map(|p| p.name.clone()).unwrap_or_default();
     Toolbar::new()
         .leading(row().gap(14.0).items_center().child(ui::avatar(&name, 18.0)).child(ui::crumb(&[("Projects", false), (&name, true)])))
-        .trailing(row().gap(10.0).items_center().child(variant(s)).child(ui::needs_button(s)))
+        .trailing(row().gap(10.0).items_center().child(variant(s, key)).child(ui::needs_button(s)))
 }
 
 pub fn work_card(s: &App, w: &Work, compact: bool) -> El {
