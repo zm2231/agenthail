@@ -67,7 +67,7 @@ pub fn unlisted_note(inbox: Option<&Inbox>, w: &Work, name_of: impl Fn(&str) -> 
         return "This computer's decisions couldn't be read, so this review can't be found yet.".into();
     }
     if !inbox.notes.is_empty() && !crate::catalog::ledger_key(&w.project).starts_with("project:") {
-        return "Some computers didn't answer, so this review can't be found yet.".into();
+        return "Some computers' decisions couldn't be read, so this review can't be found yet.".into();
     }
     "This isn't in your reviews right now. It may have just been reviewed.".into()
 }
@@ -228,7 +228,7 @@ mod tests {
         read.notes.push("katbox isn't answering, so its decisions aren't shown.".into());
         assert_eq!(unlisted_note(Some(&read), &w, name), "This isn't in your reviews right now. It may have just been reviewed.");
         let repo = Work { project: "repo:github.com/o/r".into(), ..w.clone() };
-        assert_eq!(unlisted_note(Some(&read), &repo, name), "Some computers didn't answer, so this review can't be found yet.");
+        assert_eq!(unlisted_note(Some(&read), &repo, name), "Some computers' decisions couldn't be read, so this review can't be found yet.");
         read.notes.clear();
         assert_eq!(unlisted_note(Some(&read), &repo, name), "This isn't in your reviews right now. It may have just been reviewed.");
 

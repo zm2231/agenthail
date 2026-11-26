@@ -82,11 +82,13 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
     }
 
     let waiting = if phase == CHECK {
+        let held = listed.is_none().then(|| s.ov.inbox.inbox.as_ref().and_then(|i| feed::review::lead_of(&i.lead_handling, w))).flatten();
+        let heading = held.map(|h| format!("With {}", s.ov.d.name_of(&h.held_by))).unwrap_or_else(|| "Waiting on you".into());
         let c = col()
             .w_full()
             .gap(14.0)
             .padding(20.0)
-            .child(row().gap(8.0).items_center().child(ui::pill(&icons::CHECKLIST, "Waiting on you", k.c.warning.icon)).child(text(format!("submitted {} ago", s.ov.d.ago(&w.submitted_at()))).font(META).color(weak())))
+            .child(row().gap(8.0).items_center().child(ui::pill(&icons::CHECKLIST, &heading, if held.is_some() { k.c.text_accent } else { k.c.warning.icon })).child(text(format!("submitted {} ago", s.ov.d.ago(&w.submitted_at()))).font(META).color(weak())))
             .child(text("Does this revision do what was agreed?".to_string()).font(HEAD.lh(22.0)).color(strong()))
             .child(
                 col()
