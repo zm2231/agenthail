@@ -29,7 +29,8 @@ impl Problem {
             Problem::Refused => "Agenthail didn't accept this app",
             Problem::Incompatible(_) => "Agenthail needs an update",
             Problem::StartFailed(_) => "Agenthail didn't start",
-            Problem::NoToken | Problem::NotRunning(_) | Problem::Failed(_) => "Agenthail isn't running",
+            Problem::Failed(_) => "Can't reach Agenthail",
+            Problem::NoToken | Problem::NotRunning(_) => "Agenthail isn't running",
         }
     }
 
@@ -59,6 +60,26 @@ impl Problem {
 
     pub fn status(&self) -> String {
         format!("daemon: {}", self.title())
+    }
+
+    pub fn of(error: &str) -> Problem {
+        if error.contains("timed out") { Problem::Slow } else { Problem::Failed(error.into()) }
+    }
+
+    pub fn bar(&self, offline: Option<Duration>) -> String {
+        match (self, offline) {
+            (Problem::Slow | Problem::StartFailed(_), _) | (_, None) => self.title().into(),
+            (_, Some(for_)) => {
+                let m = for_.as_secs() / 60;
+                let age = match m {
+                    0 => "now".to_string(),
+                    1..=59 => format!("{m}m"),
+                    60..=1439 => format!("{}h", m / 60),
+                    _ => format!("{}d", m / 1440),
+                };
+                format!("Offline · as of {age}")
+            }
+        }
     }
 }
 
@@ -190,6 +211,24 @@ mod tests {
         let problem = client.probe().unwrap_err();
         assert_eq!(problem, Problem::Incompatible(4));
         assert_eq!(problem.start(), Some("Restart Agenthail"));
+    }
+
+    #[test]
+    fn a_failed_read_that_timed_out_is_slow() {
+        assert_eq!(Problem::of("http://127.0.0.1:7412/api/v1/snapshot: Network Error: timed out reading response"), Problem::Slow);
+        assert_eq!(Problem::of("Network Error: Unexpected EOF"), Problem::Failed("Network Error: Unexpected EOF".into()));
+        assert_eq!(Problem::Failed("x".into()).title(), "Can't reach Agenthail");
+    }
+
+    #[test]
+    fn the_bar_says_how_old_the_shown_data_is() {
+        let down = Problem::NotRunning("http://127.0.0.1:7412".into());
+        assert_eq!(down.bar(None), "Agenthail isn't running");
+        assert_eq!(down.bar(Some(Duration::from_secs(20))), "Offline · as of now");
+        assert_eq!(down.bar(Some(Duration::from_secs(5 * 60))), "Offline · as of 5m");
+        assert_eq!(down.bar(Some(Duration::from_secs(3 * 3600))), "Offline · as of 3h");
+        assert_eq!(Problem::Slow.bar(Some(Duration::from_secs(600))), "Waiting for Agenthail");
+        assert_eq!(Problem::StartFailed("boom".into()).bar(Some(Duration::from_secs(600))), "Agenthail didn't start");
     }
 
     #[test]

@@ -19,6 +19,7 @@ pub struct Link {
     pub problem: Option<Problem>,
     pub starting: bool,
     poke: Option<Sender<()>>,
+    as_of: Option<Instant>,
 }
 
 pub fn start(s: &mut App) {
@@ -50,7 +51,7 @@ fn attach(s: &mut App, client: Client) {
                     }
                     Err(error) => {
                         checked = None;
-                        Bg::Down(c.probe().err().unwrap_or_else(|| Problem::Failed(error.to_string())))
+                        Bg::Down(c.probe().err().unwrap_or_else(|| Problem::of(&error.to_string())))
                     }
                 },
             };
@@ -71,14 +72,14 @@ fn attach(s: &mut App, client: Client) {
 }
 
 pub fn down(s: &mut App, problem: Problem) {
-    let stuck = matches!(s.link.problem, Some(Problem::StartFailed(_))) && matches!(problem, Problem::NoToken | Problem::NotRunning(_));
-    if !stuck {
+    if !matches!(s.link.problem, Some(Problem::StartFailed(_))) {
         s.status = problem.status();
         s.link.problem = Some(problem);
     }
 }
 
 pub fn up(s: &mut App) {
+    s.link.as_of = Some(Instant::now());
     if !matches!(s.link.problem, Some(Problem::StartFailed(_))) {
         s.link.problem = None;
     }
@@ -172,7 +173,7 @@ pub fn bar(s: &App) -> Option<El> {
             .gap(6.0)
             .items_center()
             .child(el().size(6.0, 6.0).radius(3.0).fill(failed()))
-            .child(text(problem.title()).font(META).color(muted()))
+            .child(text(problem.bar(s.link.as_of.map(|at| at.elapsed()))).font(META).color(muted()))
             .child(actions(s, problem, ControlSize::Small))
             .help(problem.detail()),
     )
