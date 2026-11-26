@@ -15,6 +15,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <key>CFBundleExecutable</key><string>$name</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>NSHighResolutionCapable</key><true/>
+<key>NSMicrophoneUsageDescription</key><string>Agenthail uses the microphone when you talk to your agents.</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 </dict></plist>
 PLIST

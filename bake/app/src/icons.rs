@@ -45,3 +45,7 @@ lucide!(COPY, "ah-copy", r#"<rect x="8.5" y="8.5" width="12" height="12" rx="2"/
 lucide!(PENCIL, "ah-pencil", r#"<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7.5 18.5 3.5 19.5l1-4z"/><path d="m14.5 5.5 3 3"/>"#);
 lucide!(TRASH, "ah-trash", r#"<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4.5h6V7"/>"#);
 lucide!(GAUGE, "ah-gauge", r#"<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>"#);
+lucide!(PHONE, "ah-phone", r#"<path d="M5 4h3.5l1.8 4.5-2.3 1.4a11 11 0 0 0 6.1 6.1l1.4-2.3L20 15.5V19a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>"#);
+lucide!(PHONE_OFF, "ah-phone-off", r#"<path d="M10.7 13.3a11 11 0 0 0 3.4 2.7l1.4-2.3L20 15.5V19a2 2 0 0 1-2 2 16 16 0 0 1-9.6-4.4"/><path d="M5.6 13.4A16 16 0 0 1 3 6a2 2 0 0 1 2-2h3.5l1.8 4.5-2.3 1.4"/><path d="M21 3 3 21"/>"#);
+lucide!(MIC, "ah-mic", r#"<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/>"#);
+lucide!(MIC_OFF, "ah-mic-off", r#"<path d="M15 9.5V6a3 3 0 0 0-5.7-1.3"/><path d="M9 9v2a3 3 0 0 0 5 2.2"/><path d="M18.5 11a6.5 6.5 0 0 1-1 3.4M5.5 11a6.5 6.5 0 0 0 10.4 5.2"/><path d="M12 17.5V21"/><path d="M3 3l18 18"/>"#);

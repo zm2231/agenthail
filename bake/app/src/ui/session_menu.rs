@@ -186,6 +186,7 @@ fn verb(act: &Act) -> &'static str {
     match act {
         Act::Rename => "Renaming",
         Act::Terminal => "Opening the terminal",
+        Act::Call => "Calling",
         Act::Pr(_) => "Opening the pull request",
         Act::PrWatch(..) | Act::PrUnlink(_) | Act::PrLink => "Changing the pull request",
         Act::Pin(true) => "Pinning",
@@ -209,6 +210,10 @@ pub fn run(s: &mut App, id: &str, act: Act) {
         Act::PrLink => super::pr_link::start(s, id),
         Act::PrWatch(url, on) => super::pr_link::change(s, id, if on { feed::action::PrOp::Watch } else { feed::action::PrOp::Unwatch }, &url),
         Act::PrUnlink(url) => super::pr_link::change(s, id, feed::action::PrOp::Unlink, &url),
+        Act::Call => {
+            let name = super::gone::shown(s, id).map(|x| x.title()).unwrap_or_default();
+            crate::voice::open(id, &name);
+        }
         act => {
             if not_sent(s) || changing(s, id) || !super::gone::settled(s, id) || !s.menus.busy.insert((id.to_string(), "menu")) {
                 return;
@@ -227,7 +232,7 @@ pub fn run(s: &mut App, id: &str, act: Act) {
                     Act::Pin(on) => c.session_pin(&id, *on).map(|_| None),
                     Act::Read(read) => c.session_read(&id, &revision, *read),
                     Act::Archive(on) => c.session_archive(&id, *on).map(|_| None),
-                    Act::Rename | Act::Pr(_) | Act::PrWatch(..) | Act::PrUnlink(_) | Act::PrLink => Ok(None),
+                    Act::Rename | Act::Pr(_) | Act::PrWatch(..) | Act::PrUnlink(_) | Act::PrLink | Act::Call => Ok(None),
                 };
                 Some(Done::Acted(id, act, revision, result))
             });

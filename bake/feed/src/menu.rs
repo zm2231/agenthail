@@ -9,6 +9,7 @@ pub enum Act {
     PrWatch(String, bool),
     PrUnlink(String),
     PrLink,
+    Call,
     Pin(bool),
     Read(bool),
     Archive(bool),
@@ -119,6 +120,10 @@ impl Session {
         matches!(self.host.state.as_str(), "" | "local")
     }
 
+    pub fn callable(&self) -> bool {
+        matches!(self.surface.as_str(), "codex" | "claude")
+    }
+
     pub fn focusable(&self) -> bool {
         self.runtime.as_ref().is_some_and(|r| r.focusable)
     }
@@ -134,6 +139,14 @@ pub fn entries(x: &Session) -> Vec<Vec<Entry>> {
             terminal.note = Some(format!("Runs on {}", x.host.name));
         }
         open.push(terminal);
+    }
+    if x.callable() {
+        let mut call = Entry::on(Act::Call, "Call this session…");
+        if !x.local() {
+            call.enabled = false;
+            call.note = Some(format!("Runs on {}", x.host.name));
+        }
+        open.push(call);
     }
     for pr in x.prs.iter().filter(|p| !p.url.is_empty()) {
         let label = if x.prs.len() == 1 { "Open pull request".to_string() } else { format!("Open pull request #{}", pr.number) };
@@ -322,6 +335,19 @@ mod tests {
         let terminal = entries(&x).concat().into_iter().find(|e| e.act == Act::Terminal).unwrap();
         assert!(!terminal.enabled);
         assert_eq!(terminal.note.as_deref(), Some("Runs on forge"));
+    }
+
+    #[test]
+    fn a_codex_or_claude_session_on_this_computer_can_be_called() {
+        let mut x = session();
+        assert!(!entries(&x).concat().iter().any(|e| e.act == Act::Call));
+        x.surface = "claude".into();
+        let call = entries(&x).concat().into_iter().find(|e| e.act == Act::Call).unwrap();
+        assert_eq!((call.label.as_str(), call.enabled), ("Call this session…", true));
+        x.host = Named { name: "forge".into(), state: "connected".into(), ..Default::default() };
+        let call = entries(&x).concat().into_iter().find(|e| e.act == Act::Call).unwrap();
+        assert!(!call.enabled);
+        assert_eq!(call.note.as_deref(), Some("Runs on forge"));
     }
 
     #[test]

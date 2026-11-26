@@ -25,6 +25,7 @@ pub mod source;
 pub mod store;
 pub mod summary;
 pub mod version;
+pub mod voice;
 pub mod wire;
 
 pub use blocks::{Block, Kind};
