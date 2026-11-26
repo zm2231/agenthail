@@ -69,7 +69,7 @@ func (f hostTaskFixture) wait(t *testing.T) <-chan map[string]any {
 	t.Helper()
 	waited := make(chan map[string]any, 1)
 	go func() {
-		out, _ := callMCP(t, f.parent, "agenthail_wait", map[string]any{"tasks": []string{fmt.Sprint(f.taskID)}, "timeoutSec": 20})
+		out, _ := callMCP(t, f.parent, "agenthail_wait", map[string]any{"tasks": []string{fmt.Sprint(f.taskID)}, "timeoutSec": 25})
 		waited <- out
 	}()
 	return waited
@@ -83,8 +83,8 @@ func settledByWait(t *testing.T, waited <-chan map[string]any) {
 		if len(ready) != 1 || ready[0].(map[string]any)["type"] != "settled" {
 			t.Fatalf("wait=%v, want the remote settlement ready", out)
 		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("wait did not return")
+	case <-time.After(10 * time.Second):
+		t.Fatal("wait did not return when the task settled")
 	}
 }
 
