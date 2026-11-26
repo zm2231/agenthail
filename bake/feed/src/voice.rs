@@ -216,13 +216,31 @@ impl Client {
         parse(value)
     }
 
-    pub fn voice(&self, action: &Action) -> Result<State, String> {
-        let body = serde_json::to_value(action).map_err(|e| e.to_string())?;
+    pub fn voice(&self, action: &Action) -> Result<State, Failure> {
+        let body = serde_json::to_value(action).map_err(|e| Failure::from(e.to_string()))?;
         let value = self.post_json("/api/v1/voice", body).map_err(|e| match e.status {
-            0 => e.message,
-            status => failure(status, &e.reply.to_string()),
+            0 => Failure::from(e.message),
+            status => Failure { message: failure(status, &e.reply.to_string()), host: serde_json::from_value(e.reply["state"].clone()).ok() },
         })?;
-        parse(value)
+        parse(value).map_err(Failure::from)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Failure {
+    pub message: String,
+    pub host: Option<State>,
+}
+
+impl From<String> for Failure {
+    fn from(message: String) -> Failure {
+        Failure { message, host: None }
+    }
+}
+
+impl From<&str> for Failure {
+    fn from(message: &str) -> Failure {
+        Failure::from(message.to_string())
     }
 }
 
@@ -713,8 +731,12 @@ impl Call {
         self.closed
     }
 
-    pub fn reply(&mut self, job: Job, result: Result<State, String>, now: f64) -> Vec<Effect> {
+    pub fn reply(&mut self, job: Job, result: Result<State, Failure>, now: f64) -> Vec<Effect> {
         let current = job.generation == self.generation && !self.closed;
+        let (result, host) = match result {
+            Ok(next) => (Ok(next), None),
+            Err(failure) => (Err(failure.message), failure.host),
+        };
         match job.req {
             Req::Refresh => {
                 self.refreshing = false;
@@ -760,13 +782,20 @@ impl Call {
                         self.beat_due = Some(now);
                     }
                 }
-                Err(error) if current => {
+                Err(error) if current && host.as_ref().is_some_and(|h| h.attempt_id.as_deref() != Some(id.as_str())) => {
                     self.error = Some(error);
                     self.dialing = false;
                     self.attempt = None;
                     self.start_submitted = false;
                     self.out.push(Effect::PeerEnd);
                     self.fetch(Req::Abandon, Some(Action::new("stop").attempt(&id)));
+                }
+                Err(error) if current => {
+                    self.error = Some(error);
+                    if let Some(host) = host {
+                        self.state = Some(host);
+                    }
+                    self.end_call();
                 }
                 _ => {
                     let stale = Job { generation: self.generation, work: 0, req: Req::Abandon, action: Some(Action::new("stop").attempt(&id)) };

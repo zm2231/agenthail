@@ -12,7 +12,7 @@ use std::time::Duration;
 use feed::catalog::Client;
 #[cfg(target_os = "macos")]
 use feed::voice::Peer;
-use feed::voice::{Action, Call, Effect, Job, Req, State};
+use feed::voice::{Action, Call, Effect, Failure, Job, Req, State};
 use rune::{AppSpec, Chrome, MicPermission, NativeView, TextEdit, Tx, Voice, WindowHandle, WindowOptions, WindowSpec};
 
 thread_local! {
@@ -39,7 +39,7 @@ pub struct Win {
     peer: Result<Peer, String>,
     #[cfg(target_os = "macos")]
     web: Option<peer::Web>,
-    replies: (Sender<(Job, Result<State, String>)>, Receiver<(Job, Result<State, String>)>),
+    replies: (Sender<(Job, Result<State, Failure>)>, Receiver<(Job, Result<State, Failure>)>),
     heard: (Sender<(String, String)>, Receiver<(String, String)>),
     mic: (Sender<(String, bool)>, Receiver<(String, bool)>),
     gone: Arc<AtomicBool>,
@@ -103,7 +103,7 @@ impl Win {
         std::thread::spawn(move || {
             let result = match &job.action {
                 Some(action) => client.voice(action),
-                None => client.voice_state(),
+                None => client.voice_state().map_err(Failure::from),
             };
             if let Req::Start(attempt) = &job.req {
                 if gone.load(Ordering::SeqCst) {

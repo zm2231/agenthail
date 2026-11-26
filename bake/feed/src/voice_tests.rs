@@ -210,7 +210,7 @@ fn a_heartbeat_that_finds_the_host_stopping_hangs_up() {
 }
 
 #[test]
-fn a_start_that_answers_after_hangup_is_stopped() {
+fn a_start_that_answers_after_hangup_is_stopped_without_touching_the_hangup() {
     let mut call = ready();
     let id = dialed(&mut call);
     let start = only_job(&call.peer("offer", "v=0 offer", 0.0));
@@ -318,7 +318,8 @@ fn the_client_reads_state_posts_actions_and_reports_refusals() {
     assert_eq!(path, "/api/v1/voice");
     assert_eq!(body, json!({"action": "start", "attemptId": "a1", "sdp": "v=0 offer"}));
     let refused = client.voice(&Action { target_id: Some("x".into()), ..Action::new("select") }).unwrap_err();
-    assert_eq!(refused, "end the current audio call before selecting a different voice target");
+    assert_eq!(refused.message, "end the current audio call before selecting a different voice target");
+    assert_eq!(refused.host.map(|h| h.phase).as_deref(), Some("connected"), "a refusal carries the host's state");
     assert!(client.voice_state().unwrap_err().contains("voice protocol 2"));
 }
 
@@ -444,7 +445,8 @@ fn a_start_refused_because_another_window_called_first_leaves_this_window_free()
     let mut call = ready();
     let id = dialed(&mut call);
     let start = only_job(&call.peer("offer", "v=0", 0.0));
-    let after = call.reply(start, Err("end the current audio call before starting another".into()), 1.0);
+    let refusal = Failure { message: "end the current audio call before starting another".into(), host: Some(state(json!({"phase": "connected", "attemptId": "another-window"}))) };
+    let after = call.reply(start, Err(refusal), 1.0);
     assert!(after.contains(&Effect::PeerEnd));
     let cleanup = only_job(&after);
     assert_eq!((cleanup.req.clone(), cleanup.action.clone().unwrap().attempt_id), (Req::Abandon, Some(id)));
@@ -457,4 +459,29 @@ fn a_start_refused_because_another_window_called_first_leaves_this_window_free()
     let seen = refresh(&call.tick(3.0));
     call.reply(seen, Ok(state(json!({"phase": "ended", "attemptId": "another-window"}))), 3.0);
     assert!(call.can_call());
+}
+
+#[test]
+fn a_start_whose_outcome_is_unknown_keeps_a_hangup_that_can_be_retried() {
+    for host in [None, Some(state(json!({"phase": "unknown"})))] {
+        let mut call = ready();
+        let id = dialed(&mut call);
+        let start = only_job(&call.peer("offer", "v=0", 0.0));
+        let host = host.map(|mut h| {
+            h.attempt_id = Some(id.clone());
+            h
+        });
+        let after = call.reply(start, Err(Failure { message: "Codex refused the realtime start".into(), host }), 1.0);
+        assert!(after.contains(&Effect::PeerEnd));
+        let stop = only_job(&after);
+        assert_eq!((stop.req.clone(), stop.action.clone().unwrap().attempt_id), (Req::Stop, Some(id.clone())));
+        call.reply(stop, Err("timed out".into()), 2.0);
+        assert!(call.hangup_unconfirmed);
+        let seen = refresh(&call.tick(3.0));
+        call.reply(seen, Ok(state(json!({"phase": "unknown", "attemptId": id}))), 3.0);
+        assert!(!call.elsewhere(), "this window's own unknown call is never shown as another window's");
+        assert!(call.hangup_unconfirmed);
+        let again = only_job(&call.hangup());
+        assert_eq!(again.action.unwrap().attempt_id, Some(id));
+    }
 }
