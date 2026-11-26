@@ -317,7 +317,7 @@ pub struct Selected<'a> {
 }
 
 pub fn commands(query: &str, selected: Option<Selected>) -> Vec<CommandRow> {
-    let q = query.trim().to_lowercase();
+    let q = one_line(query).to_lowercase();
     let mut rows = vec![CommandRow { command: Command::NewSession, title: "New session".into(), shortcut: "⌘N" }];
     if let Some(x) = selected {
         if x.can_stop {
@@ -328,7 +328,18 @@ pub fn commands(query: &str, selected: Option<Selected>) -> Vec<CommandRow> {
     rows.push(CommandRow { command: Command::Refresh, title: "Refresh".into(), shortcut: "" });
     rows.push(CommandRow { command: Command::Activity, title: "Activity history".into(), shortcut: "" });
     rows.retain(|r| q.is_empty() || r.title.to_lowercase().contains(&q));
+    rows.sort_by_key(|r| !names(&r.title, &q));
     rows
+}
+
+fn names(title: &str, q: &str) -> bool {
+    let q = one_line(q).to_lowercase();
+    let title = one_line(title).to_lowercase();
+    !q.is_empty() && (title == q || title.strip_prefix(&q).is_some_and(|rest| rest.starts_with(' ')))
+}
+
+pub fn commands_lead(query: &str, rows: &[CommandRow]) -> bool {
+    rows.first().is_some_and(|r| names(&r.title, query))
 }
 
 #[cfg(test)]
@@ -482,5 +493,25 @@ mod tests {
         assert_eq!(working[0].title, "Stop @fixer");
         assert_eq!(commands("FIXER", Some(Selected { title: "@fixer", can_stop: true })).len(), 2);
         assert!(commands("zzz", None).is_empty());
+    }
+
+    #[test]
+    fn a_query_that_names_a_command_puts_it_first() {
+        for q in ["Activity history", "activity history", "  ACTIVITY   history ", "activity"] {
+            let rows = commands(q, None);
+            assert_eq!(rows[0].command, Command::Activity, "{q}");
+            assert!(commands_lead(q, &rows), "{q}");
+        }
+        let rows = commands("re", Some(Selected { title: "@fixer", can_stop: false }));
+        assert_eq!(rows.iter().map(|r| r.command).collect::<Vec<_>>(), [Command::Rename, Command::Refresh]);
+        assert!(!commands_lead("re", &rows));
+        let rows = commands("refresh", Some(Selected { title: "@refresher", can_stop: false }));
+        assert_eq!(rows.iter().map(|r| r.command).collect::<Vec<_>>(), [Command::Refresh, Command::Rename]);
+        assert!(commands_lead("refresh", &rows));
+        let rows = commands("history", None);
+        assert_eq!(rows[0].command, Command::Activity);
+        assert!(!commands_lead("history", &rows));
+        assert!(!commands_lead("", &commands("", None)));
+        assert!(!commands_lead("zzz", &[]));
     }
 }

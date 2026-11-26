@@ -2,7 +2,7 @@ use rune::{Color, El, Icon, Key, KeyEvent, ScrollSpec, TextStyle, Tx, col, icon,
 use rune_theme_opencode::icons;
 
 use feed::catalog::Session;
-use feed::search::{Command, Selected, commands, one_line};
+use feed::search::{Command, Selected, commands, commands_lead, one_line};
 
 use crate::icons as ah;
 use crate::over::search;
@@ -43,13 +43,14 @@ fn command_icon(c: Command) -> &'static Icon {
 
 fn entries(s: &App) -> Vec<Entry> {
     let q = s.ov.jump.as_ref().map(|e| e.text.as_str()).unwrap_or_default();
-    let mut out: Vec<Entry> = s.ov.d.jump(q, &s.ov.needs, &s.ov.hands_on).into_iter().map(|h| Entry { group: h.group, title: h.title, status: h.status, badge: h.badge, look: Look::Avatar(h.avatar), pick: Some(Pick::Target(h.target)) }).collect();
+    let hits = s.ov.d.jump(q, &s.ov.needs, &s.ov.hands_on).into_iter().map(|h| Entry { group: h.group, title: h.title, status: h.status, badge: h.badge, look: Look::Avatar(h.avatar), pick: Some(Pick::Target(h.target)) });
     let selected = search::selected(s);
     let title = selected.as_deref().map(|id| search::selected_title(s, id)).unwrap_or_default();
     let current = selected.as_deref().map(|id| Selected { title: &title, can_stop: search::can_stop(s, id) });
-    for c in commands(q, current) {
-        out.push(Entry { group: "Commands", title: c.title, status: String::new(), badge: c.shortcut.to_string(), look: Look::Icon(command_icon(c.command)), pick: Some(Pick::Command(c.command)) });
-    }
+    let rows = commands(q, current);
+    let lead = commands_lead(q, &rows);
+    let cmds = rows.into_iter().map(|c| Entry { group: "Commands", title: c.title, status: String::new(), badge: c.shortcut.to_string(), look: Look::Icon(command_icon(c.command)), pick: Some(Pick::Command(c.command)) });
+    let mut out: Vec<Entry> = if lead { cmds.chain(hits).collect() } else { hits.chain(cmds).collect() };
     if let Some(found) = search::codex_for(s) {
         let group = "Codex history";
         let note = |text: String| Entry { group, title: text, status: String::new(), badge: String::new(), look: Look::Icon(&ah::CLOCK), pick: None };
