@@ -46,8 +46,10 @@ func (r *Registry) MarkDeliveryStarted(sessionID, activeTurnID, completedTurnID 
 	return err
 }
 
+// SaveRuntimeState writes only a change: every scan saves each observed
+// session, and any write makes every reader drop its page cache.
 func (r *Registry) SaveRuntimeState(sessionID string, observation surface.TurnObservation) error {
-	_, err := r.db.Exec(`INSERT INTO session_runtime(session_id,last_status,active_turn_id,completed_turn_id,turn_observed,updated_at) VALUES(?,?,?,?,1,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET last_status=excluded.last_status,active_turn_id=excluded.active_turn_id,completed_turn_id=excluded.completed_turn_id,turn_observed=1,relay_hops=CASE WHEN excluded.completed_turn_id != session_runtime.completed_turn_id THEN 0 ELSE session_runtime.relay_hops END,updated_at=datetime('now')`, sessionID, string(observation.Status), observation.ActiveTurnID, observation.CompletedTurnID)
+	_, err := r.db.Exec(`INSERT INTO session_runtime(session_id,last_status,active_turn_id,completed_turn_id,turn_observed,updated_at) VALUES(?,?,?,?,1,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET last_status=excluded.last_status,active_turn_id=excluded.active_turn_id,completed_turn_id=excluded.completed_turn_id,turn_observed=1,relay_hops=CASE WHEN excluded.completed_turn_id != session_runtime.completed_turn_id THEN 0 ELSE session_runtime.relay_hops END,updated_at=datetime('now') WHERE session_runtime.turn_observed<>1 OR session_runtime.last_status IS NOT excluded.last_status OR session_runtime.active_turn_id IS NOT excluded.active_turn_id OR session_runtime.completed_turn_id IS NOT excluded.completed_turn_id`, sessionID, string(observation.Status), observation.ActiveTurnID, observation.CompletedTurnID)
 	return err
 }
 
