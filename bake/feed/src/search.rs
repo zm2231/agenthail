@@ -46,7 +46,8 @@ pub fn read_codex(value: &Value) -> Result<Codex, String> {
     let rows = value["results"].as_array().ok_or("Codex history search returned no results list")?;
     let mut hits = Vec::new();
     for row in rows {
-        let session: Session = serde_json::from_value(row["session"].clone()).map_err(|e| format!("Codex history search returned a session Agenthail can't read: {e}"))?;
+        let mut session: Session = serde_json::from_value(row["session"].clone()).map_err(|e| format!("Codex history search returned a session Agenthail can't read: {e}"))?;
+        session.name = one_line(&session.name);
         let snippet = one_line(row["snippet"].as_str().unwrap_or_default());
         hits.push(CodexHit { session, snippet });
     }
@@ -243,7 +244,7 @@ pub fn reread(detail: crate::gone::Detail, known: &Session) -> Recheck {
     }
     let mut row = known.clone();
     row.surface = fresh.surface;
-    row.name = fresh.name;
+    row.name = one_line(&fresh.name);
     row.status = fresh.status;
     row.last_active = fresh.last_active;
     row.cwd = fresh.cwd.or(row.cwd);
@@ -319,6 +320,8 @@ mod tests {
         assert_eq!(found.hits[0].snippet, "Saved by Agenthail");
         let multi = read_codex(&json!({"results": [{"session": {"id": "c2"}, "snippet": "first line\n\n  second\tline "}]})).unwrap();
         assert_eq!(multi.hits[0].snippet, "first line second line");
+        let named = read_codex(&json!({"results": [{"session": {"id": "c3", "name": "Port the export\nto the new schema"}}]})).unwrap();
+        assert_eq!(named.hits[0].session.title(), "Port the export to the new schema");
         assert_eq!(one_line(" Fix\nthe   importer "), "Fix the importer");
         assert!(found.hits[0].session.capabilities.lifecycle.resume);
         assert_eq!(found.note(1).unwrap(), "Only Agenthail's saved Codex conversations were searched: Codex history search is unavailable in this Codex version");
@@ -397,7 +400,7 @@ mod tests {
     fn a_recheck_takes_the_daemons_current_row_and_keeps_what_it_does_not_send() {
         use crate::gone::Detail;
         let known = Session { id: "c1".into(), name: "Old name".into(), alias: Some("old".into()), status: "working".into(), archived: true, pinned_at: Some("2026-11-26T09:00:00Z".into()), cwd: Some("/work/importer".into()), ..Session::default() };
-        let v = json!({"session": {"id": "c1", "surface": "codex", "name": "Fix the importer", "status": "idle", "lastActive": "2026-11-26T10:00:00Z"}, "alias": "fixer", "capabilities": {"interrupt": false, "steer": true, "lifecycle": {"resume": true}}, "readOnly": true});
+        let v = json!({"session": {"id": "c1", "surface": "codex", "name": "Fix the\nimporter", "status": "idle", "lastActive": "2026-11-26T10:00:00Z"}, "alias": "fixer", "capabilities": {"interrupt": false, "steer": true, "lifecycle": {"resume": true}}, "readOnly": true});
         let Recheck::Fresh(row) = reread(Detail::Found(v), &known) else { panic!("expected a fresh row") };
         assert_eq!((row.name.as_str(), row.status.as_str(), row.alias.as_deref()), ("Fix the importer", "idle", Some("fixer")));
         assert!(!row.capabilities.interrupt && row.capabilities.lifecycle.resume && row.read_only && row.archived);
