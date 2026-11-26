@@ -49,6 +49,8 @@ enum Done {
 
 pub struct Prefs {
     client: Option<Client>,
+    no_client: String,
+    pub draft_orphaned: bool,
     pub tab: usize,
     pub base: Option<Result<Base, Failure>>,
     pub settings: Option<Result<Settings, Failure>>,
@@ -130,9 +132,11 @@ fn fixtures() -> bool {
 
 fn init() -> Prefs {
     let (tx, rx) = channel();
-    let client = if fixtures() { None } else { Client::from_env().ok() };
+    let (client, no_client) = connect();
     Prefs {
         client,
+        no_client,
+        draft_orphaned: false,
         tab: 0,
         base: None,
         settings: None,
@@ -165,18 +169,28 @@ fn init() -> Prefs {
     }
 }
 
-pub fn unread() -> Failure {
-    Failure::new("Settings are read from the daemon; this run has no daemon connection.")
+fn connect() -> (Option<Client>, String) {
+    if fixtures() {
+        return (None, "Settings are read from the daemon; this run plays a recording and has no daemon connection.".into());
+    }
+    match Client::from_env() {
+        Ok(client) => (Some(client), String::new()),
+        Err(e) => (None, format!("Couldn't reach the daemon's sign-in: {e}")),
+    }
+}
+
+fn unread(s: &Prefs) -> Failure {
+    Failure::new(s.no_client.clone())
 }
 
 fn fetch(s: &mut Prefs, what: Read) {
     let Some(client) = s.client.clone() else {
         match what {
-            Read::Base => s.base = Some(Err(unread())),
-            Read::Settings => s.settings = Some(Err(unread())),
-            Read::Remote => s.remote = Some(Err(unread())),
-            Read::Compaction => s.compaction = Some(Err(unread())),
-            Read::Preferences => s.preferences = Some(Err(unread())),
+            Read::Base => s.base = Some(Err(unread(s))),
+            Read::Settings => s.settings = Some(Err(unread(s))),
+            Read::Remote => s.remote = Some(Err(unread(s))),
+            Read::Compaction => s.compaction = Some(Err(unread(s))),
+            Read::Preferences => s.preferences = Some(Err(unread(s))),
         }
         return;
     };
@@ -199,6 +213,9 @@ fn fetch(s: &mut Prefs, what: Read) {
 
 pub fn reload(s: &mut Prefs) {
     s.loaded = true;
+    if s.client.is_none() {
+        (s.client, s.no_client) = connect();
+    }
     if s.client.is_some() {
         s.settling.extend(ALL);
     }
@@ -210,7 +227,8 @@ pub fn reload(s: &mut Prefs) {
 pub fn write(s: &mut Prefs, key: impl Into<String>, section: Section, then: &'static [Read], job: impl FnOnce(&Client) -> Result<(), Failure> + Send + 'static) {
     let key = key.into();
     let Some(client) = s.client.clone() else {
-        s.notes.insert(section, unread());
+        let f = unread(s);
+        s.notes.insert(section, f);
         return;
     };
     if busy(s) {
@@ -279,8 +297,16 @@ fn seed_name(s: &mut Prefs) {
 
 fn settle_compaction(s: &mut Prefs) {
     let Some(Ok(c)) = &s.compaction else { return };
-    if !c.roots.iter().any(|r| r.root == s.draft.root) {
-        s.draft.root = c.roots.first().map(|r| r.root.clone()).unwrap_or_default();
+    if c.roots.iter().any(|r| r.root == s.draft.root) {
+        return;
+    }
+    let first = c.roots.first().map(|r| r.root.clone()).unwrap_or_default();
+    if s.draft.root.is_empty() && !s.draft_orphaned || !claude::draft(s).changes() {
+        s.draft.root = first;
+        s.draft_orphaned = false;
+    } else if !s.draft.root.is_empty() {
+        s.draft.root.clear();
+        s.draft_orphaned = true;
     }
 }
 

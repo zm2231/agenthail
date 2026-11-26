@@ -110,10 +110,14 @@ fn input(s: &Prefs, edit: &rune::TextEdit, label: &str, hint: &str, pick: for<'a
 
 fn change(s: &Prefs, c: &Compaction, layer: &mut Vec<El>) -> El {
     let choices = titles(s, c).into_iter().zip(&c.roots).map(|(t, r)| (t, r.root.clone())).collect();
-    let root = parts::select(s, "settings-compact-root", "Account folder", choices, &s.draft.root, busy(s), layer, |s, value| s.draft.root = value);
+    let root = parts::select(s, "settings-compact-root", "Account folder", choices, &s.draft.root, busy(s), layer, |s, value| {
+        s.draft.root = value;
+        s.draft_orphaned = false;
+    });
     let d = draft(s);
     let busy = busy(s);
     let status = match (d.problem(), s.notes.get(&Section::Compaction)) {
+        _ if s.draft_orphaned => text("The account folder this change was for is gone. Choose one to save it to.").font(META).color(failed()).wrap(),
         (Some(p), _) => text(p).font(META).color(failed()).wrap(),
         (None, Some(f)) => parts::failure(s, f),
         (None, None) if s.saved_notice => text("Saved.").font(META).color(muted()),
