@@ -18,6 +18,8 @@ pub struct Named {
     pub display_name: String,
     #[serde(default)]
     pub state: String,
+    #[serde(default)]
+    pub root_path: String,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -339,11 +341,13 @@ pub struct RespondError {
     pub message: String,
     pub code: String,
     pub maybe_delivered: bool,
+    pub reply: Value,
 }
 
 impl RespondError {
     pub fn from_status(action: &str, status: u16, body: &str) -> Self {
-        let error = serde_json::from_str::<Value>(body).ok().map(|v| v["error"].clone()).unwrap_or_default();
+        let reply = serde_json::from_str::<Value>(body).unwrap_or_default();
+        let error = reply["error"].clone();
         let code = error["code"].as_str().unwrap_or_default().to_string();
         let message = error["message"].as_str().map(str::to_string).unwrap_or_else(|| format!("status code {status}"));
         let released_answer = action == "respond" && code == "bad_gateway" && !message.starts_with("the answer may have reached");
@@ -352,13 +356,13 @@ impl RespondError {
             502 => !released_answer,
             _ => false,
         };
-        RespondError { message, code, maybe_delivered }
+        RespondError { message, code, maybe_delivered, reply }
     }
 
     fn from_transport(error: &ureq::Transport) -> Self {
         use ureq::ErrorKind::*;
         let unsent = matches!(error.kind(), InvalidUrl | UnknownScheme | Dns | InsecureRequestHttpsOnly | ConnectionFailed | InvalidProxyUrl | ProxyConnect | ProxyUnauthorized);
-        RespondError { message: error.to_string(), code: String::new(), maybe_delivered: !unsent }
+        RespondError { message: error.to_string(), code: String::new(), maybe_delivered: !unsent, reply: Value::Null }
     }
 }
 
@@ -593,7 +597,7 @@ impl Client {
 
 fn action_body(name: &str, payload: Value) -> std::result::Result<Value, RespondError> {
     let Value::Object(mut fields) = payload else {
-        return Err(RespondError { message: format!("the {name} payload is not a JSON object"), code: "invalid_request".into(), maybe_delivered: false });
+        return Err(RespondError { message: format!("the {name} payload is not a JSON object"), code: "invalid_request".into(), maybe_delivered: false, reply: Value::Null });
     };
     fields.insert("action".into(), Value::String(name.into()));
     Ok(Value::Object(fields))
