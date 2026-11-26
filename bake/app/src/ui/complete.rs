@@ -412,6 +412,9 @@ pub fn rekey(s: &mut App, old: &str, new: &str) {
             c.goal_keys.insert((new.to_string(), point.1), request);
         }
     }
+    if let Some(typed) = c.model_typed.remove(old) {
+        c.model_typed.insert(new.to_string(), typed);
+    }
     if c.goal_pending.remove(old) {
         c.goal_pending.insert(new.to_string());
     }
