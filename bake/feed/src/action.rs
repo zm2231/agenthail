@@ -114,7 +114,10 @@ impl Client {
     }
 
     pub fn pr(&self, session: &str, op: PrOp, pr: &str) -> Outcome<Vec<Pr>> {
-        let reply = self.action("pr", json!({"sessionId": session, "op": op.as_str(), "pr": pr}))?;
+        let reply = self.action("pr", json!({"sessionId": session, "op": op.as_str(), "pr": pr})).map_err(|mut error| {
+            error.maybe_delivered |= error.code == "internal_error";
+            error
+        })?;
         serde_json::from_value(reply["prs"].clone()).map_err(|e| RespondError {
             message: format!("the daemon's answer didn't list the session's pull requests: {e}"),
             code: "unreadable_reply".into(),
@@ -241,6 +244,7 @@ mod tests {
             (200, r#"{"ok":true,"sessionId":"s1","readState":{"revision":"r10"}}"#),
             (200, r#"{"ok":true,"sessionId":"s1","prs":[{"repo":"o/r","number":12,"url":"https://github.com/o/r/pull/12","watch":true,"checks":"failing"}]}"#),
             (200, r#"{"ok":true,"result":{"sessionId":"s2"}}"#),
+            (500, r#"{"error":{"code":"internal_error","message":"database is locked"}}"#),
             (200, r#"{"ok":true,"sessionId":"s1"}"#),
             (409, r#"{"error":{"code":"move_needs_consent","message":"a terminal runs this session"}}"#),
             (409, r#"{"error":{"code":"move_refused","message":"no other Claude account has room for this session now"}}"#),
@@ -252,6 +256,8 @@ mod tests {
         assert_eq!((prs[0].number, prs[0].watch, prs[0].checks.as_str()), (12, true, "failing"));
         let unread = client.pr("s1", PrOp::Link, "13").unwrap_err();
         assert!(unread.maybe_delivered && unread.code == "unreadable_reply", "{unread:?}");
+        let half = client.pr("s1", PrOp::Watch, "13").unwrap_err();
+        assert!(half.maybe_delivered, "the daemon changes the watch before it reads the list back: {half:?}");
         use crate::limit::Moved;
         assert_eq!(client.limit_move("s1", Some("/r/b"), false).unwrap(), Moved::Done);
         assert_eq!(client.limit_move("s1", Some("/r/b"), false).unwrap(), Moved::NeedsConsent("a terminal runs this session".into()));

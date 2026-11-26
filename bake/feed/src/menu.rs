@@ -180,9 +180,13 @@ fn pull_requests(x: &Session) -> Vec<Entry> {
     out
 }
 
+fn pr_number(asked: &str) -> Option<u64> {
+    let asked = asked.trim();
+    asked.strip_prefix('#').unwrap_or(asked).parse::<u64>().ok().filter(|n| *n > 0)
+}
+
 pub fn names_pr(asked: &str, pr: &crate::catalog::Pr) -> bool {
-    let asked = asked.trim().trim_start_matches('#');
-    if let Ok(number) = asked.parse::<u64>() {
+    if let Some(number) = pr_number(asked) {
         return pr.number == number;
     }
     pr_link(asked).is_some_and(|(repo, number)| pr.number == number && pr.repo.to_lowercase() == repo)
@@ -198,7 +202,12 @@ fn pr_link(asked: &str) -> Option<(String, u64)> {
     let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
     let [owner, name, "pull", number] = parts[..] else { return None };
     let number = number.parse::<u64>().ok().filter(|n| *n > 0)?;
-    Some((format!("{host}/{owner}/{}", name.trim_end_matches(".git")).to_lowercase(), number))
+    let name = name.strip_suffix(".git").unwrap_or(name);
+    let segment = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
+    if !segment(owner) || !segment(name) || name == "." || name == ".." {
+        return None;
+    }
+    Some((format!("{host}/{owner}/{name}").to_lowercase(), number))
 }
 
 fn decoded(path: &str) -> String {
@@ -222,12 +231,11 @@ fn decoded(path: &str) -> String {
 }
 
 pub fn pr_problem(text: &str) -> Option<&'static str> {
-    let text = text.trim().trim_start_matches('#');
-    if text.is_empty() {
+    let text = text.trim();
+    if text.is_empty() || text == "#" {
         return Some("Paste a pull request link, or its number.");
     }
-    let number = text.parse::<u64>().is_ok_and(|n| n > 0);
-    if number || pr_link(text).is_some() { None } else { Some("That isn't a pull request link or number.") }
+    if pr_number(text).is_some() || pr_link(text).is_some() { None } else { Some("That isn't a pull request link or number.") }
 }
 
 pub fn normalized(text: &str) -> String {
@@ -370,6 +378,9 @@ mod tests {
         assert_eq!(pr_problem("https://github.com/o/r/%70ull/34"), None);
         assert_eq!(pr_problem("https://github.com/o/r/issues/34"), Some("That isn't a pull request link or number."));
         assert_eq!(pr_problem("https://github.com/o/r/pull/0"), Some("That isn't a pull request link or number."));
+        for refused in ["##12", "https://github.com/o w/r/pull/3", "https://github.com/o/../pull/3", "https://github.com/o/r!/pull/3"] {
+            assert_eq!(pr_problem(refused), Some("That isn't a pull request link or number."), "{refused}");
+        }
         assert_eq!(pr_problem("0"), Some("That isn't a pull request link or number."));
         assert_eq!(pr_problem("fix it"), Some("That isn't a pull request link or number."));
     }
