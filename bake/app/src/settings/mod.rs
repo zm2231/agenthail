@@ -301,7 +301,7 @@ fn settle_compaction(s: &mut Prefs) {
         return;
     }
     let first = c.roots.first().map(|r| r.root.clone()).unwrap_or_default();
-    if s.draft.root.is_empty() && !s.draft_orphaned || !claude::draft(s).changes() {
+    if s.draft.root.is_empty() && !s.draft_orphaned || !claude::draft(s).touched() {
         s.draft.root = first;
         s.draft_orphaned = false;
     } else if !s.draft.root.is_empty() {

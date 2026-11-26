@@ -539,6 +539,10 @@ impl CompactDraft {
         !self.window.trim().is_empty() || self.enabled.is_some() || self.idle.is_some() || self.agenthail_idle.is_some() || !self.min_tokens.trim().is_empty() || !self.pre_limit.trim().is_empty()
     }
 
+    pub fn touched(&self) -> bool {
+        self.changes() || !self.model.trim().is_empty()
+    }
+
     pub fn pre_limit_percent(&self) -> Option<i64> {
         let text = self.pre_limit.trim().to_lowercase();
         if text == "off" {
@@ -707,7 +711,8 @@ mod tests {
     #[test]
     fn a_compaction_draft_checks_what_the_daemon_would_refuse() {
         let mut d = CompactDraft { root: "/r/a".into(), ..Default::default() };
-        assert!(!d.changes() && d.problem().is_none());
+        assert!(!d.changes() && !d.touched() && d.problem().is_none());
+        assert!(CompactDraft { model: "opus".into(), ..Default::default() }.touched());
         d.min_tokens = "abc".into();
         assert_eq!(d.problem(), Some("From context size must be a whole number of tokens."));
         d.min_tokens = "0".into();
