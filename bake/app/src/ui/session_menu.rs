@@ -302,6 +302,7 @@ pub fn rename_to(s: &mut App, id: &str, name: &str) {
     }
     start_rename(s, id);
     s.menus.rename_text = TextEdit::new(name);
+    s.menus.rename_text.focused = true;
     save_rename(s);
 }
 
@@ -468,6 +469,7 @@ fn settled(s: &mut App, done: Done) {
                     land(s, &id, Patch::Alias((!alias.is_empty()).then_some(alias)));
                     if current {
                         close_rename(s);
+                        s.composer.focused = true;
                     }
                 }
                 Err(error) if current => {

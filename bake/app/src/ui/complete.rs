@@ -628,7 +628,11 @@ pub fn search(s: &App, x: &Session) -> Option<El> {
         None => list = list.child(text("Searching…").font(META).color(faint()).px(10.0).py(4.0)),
         Some(Err(error)) => list = list.child(text(format!("Couldn't search what you sent: {error}")).font(META).color(failed()).px(10.0).py(4.0)),
         Some(Ok(found)) if found.is_empty() => {
-            let empty = if search.query.text.trim().is_empty() { "Nothing sent yet." } else { "No sent prompt matches." };
+            let empty = match (search.more, search.query.text.trim().is_empty()) {
+                (true, _) => "Nothing among the newest prompts. Type more to narrow the search.",
+                (false, true) => "Nothing sent yet.",
+                (false, false) => "No sent prompt matches.",
+            };
             list = list.child(text(empty).font(META).color(faint()).px(10.0).py(4.0));
         }
         Some(Ok(found)) => {
