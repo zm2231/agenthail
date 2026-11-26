@@ -38,6 +38,7 @@ pub struct Web {
     renew_at: Option<Instant>,
     checking: bool,
     checked_at: Option<Instant>,
+    verified: Option<String>,
     loaded: Option<String>,
     ready: Option<String>,
     loading_since: Option<Instant>,
@@ -63,6 +64,7 @@ impl Web {
             renew_at: None,
             checking: false,
             checked_at: None,
+            verified: None,
             loaded: None,
             ready: None,
             loading_since: None,
@@ -91,6 +93,8 @@ impl Web {
         self.signing = false;
         match result {
             Ok(cookie) => {
+                self.verified = Some(cookie.value.clone());
+                self.checked_at = Some(Instant::now());
                 self.cookie = Some(cookie);
                 self.cookie_set = false;
                 self.renew_at = None;
@@ -100,11 +104,17 @@ impl Web {
         }
     }
 
-    pub fn check_due(&mut self) -> Option<(String, WebSession)> {
-        if self.failed() || self.signing || self.checking || self.checked_at.is_some_and(|at| at.elapsed() < CHECK_EVERY) {
+    pub fn check_due(&mut self, want: Option<&str>) -> Option<(String, WebSession)> {
+        let want = want?;
+        if self.failed() || self.signing || self.checking {
             return None;
         }
-        let (page, cookie) = (self.loaded.clone()?, self.cookie.clone()?);
+        let cookie = self.cookie.clone()?;
+        let opening = self.loaded.as_deref() != Some(want) && self.verified.as_deref() != Some(cookie.value.as_str());
+        if !opening && self.checked_at.is_some_and(|at| at.elapsed() < CHECK_EVERY) {
+            return None;
+        }
+        let page = want.to_string();
         self.checking = true;
         self.checked_at = Some(Instant::now());
         Some((page, cookie))
@@ -112,9 +122,19 @@ impl Web {
 
     pub fn checked(&mut self, value: &str, known: Result<bool, String>) {
         self.checking = false;
-        if known == Ok(false) && self.cookie.as_ref().is_some_and(|c| c.value == value) {
+        if self.cookie.as_ref().is_none_or(|c| c.value != value) {
+            return;
+        }
+        if known == Ok(false) {
             self.cookie = None;
             self.renew_at = None;
+            self.verified = None;
+            if self.phase == Phase::Loading {
+                self.loaded = None;
+                self.ready = None;
+            }
+        } else {
+            self.verified = Some(value.to_string());
         }
     }
 
@@ -123,6 +143,7 @@ impl Web {
         self.cookie = None;
         self.cookie_set = false;
         self.renew_at = None;
+        self.verified = None;
         self.loaded = None;
         self.ready = None;
         self.committed = false;
@@ -229,6 +250,9 @@ impl Web {
             }
         }
         if self.loaded.as_deref() != Some(want) {
+            if self.verified.as_deref() != Some(cookie.value.as_str()) {
+                return Ok(false);
+            }
             *self.page.borrow_mut() = want.to_string();
             view.load_url(want).map_err(|e| format!("Couldn't open {want}: {e}"))?;
             self.loaded = Some(want.to_string());
@@ -431,24 +455,47 @@ mod tests {
         let page = "http://127.0.0.1:48200/";
         let mut web = Web::new();
         web.cookie = Some(session("2026-11-26T22:00:00Z"));
-        assert!(web.check_due().is_none(), "nothing to check before a page is open");
+        assert!(web.check_due(None).is_none(), "nothing to check before a page is chosen");
         web.loaded = Some(page.into());
         web.ready = Some(page.into());
         web.phase = Phase::Shown;
-        let (checked, cookie) = web.check_due().unwrap();
+        let (checked, cookie) = web.check_due(Some(page)).unwrap();
         assert_eq!(checked, page);
-        assert!(web.check_due().is_none(), "one check at a time");
+        assert!(web.check_due(Some(page)).is_none(), "one check at a time");
         web.checked("someone-else", Ok(false));
         assert!(web.cookie.is_some(), "an answer about an older cookie changes nothing");
         web.checked_at = None;
-        web.check_due().unwrap();
+        web.check_due(Some(page)).unwrap();
         web.checked(&cookie.value, Ok(false));
         assert!(web.cookie.is_none());
         assert!(web.sign_in_due(now()));
-        assert_eq!(web.loaded.as_deref(), Some(page));
+        assert_eq!(web.loaded.as_deref(), Some(page), "a page that already loaded stays");
         assert_eq!(web.phase, Phase::Shown);
         web.checked_at = None;
-        assert!(web.check_due().is_none(), "no check while signing in");
+        assert!(web.check_due(Some(page)).is_none(), "no check while signing in");
+    }
+
+    #[test]
+    fn a_new_page_opens_only_with_a_cookie_its_port_accepts() {
+        let (a, b) = ("http://127.0.0.1:48200/", "http://127.0.0.1:48300/");
+        let mut web = Web::new();
+        web.sign_in_due(now());
+        web.signed(Ok(session("2026-11-26T22:00:00Z")));
+        assert!(web.check_due(Some(a)).is_none(), "a cookie just minted needs no check");
+        web.loaded = Some(a.into());
+        web.ready = Some(a.into());
+        web.phase = Phase::Shown;
+        web.checked_at = Some(Instant::now());
+        web.verified = None;
+        let (port, cookie) = web.check_due(Some(b)).expect("opening another page checks first, whatever the timer says");
+        assert_eq!(port, b);
+        web.loaded = Some(b.into());
+        web.phase = Phase::Loading;
+        web.checked(&cookie.value, Ok(false));
+        assert!(web.loaded.is_none(), "a page still loading opens again after the new sign-in");
+        assert!(web.sign_in_due(now()));
+        web.signed(Ok(session("2026-11-26T23:00:00Z")));
+        assert_eq!(web.verified.as_deref(), Some("v"));
     }
 
     #[test]

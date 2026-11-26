@@ -223,9 +223,7 @@ pub fn drain(s: &mut App) -> bool {
             let _ = tx.send(Done::Signed(client.web_session().map_err(|e| e.message)));
         });
     }
-    if want.is_some()
-        && let Some((page, cookie)) = s.ov.ext.web.check_due()
-    {
+    if let Some((page, cookie)) = s.ov.ext.web.check_due(want.as_deref()) {
         let tx = s.ov.ext.tx.clone();
         std::thread::spawn(move || {
             let known = feed::extensions::session_known(&page, &cookie);
