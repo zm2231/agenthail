@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/hosts"
@@ -264,7 +265,14 @@ func (d *Daemon) joinFolder(ctx context.Context, path string, share projectShare
 
 // replicateJoinedLedger makes this host's ledger of the shared project a
 // replica of the one its project's host keeps, so the project has one ledger.
+// joinLedgerTimeout bounds the whole ledger handoff, claim through confirm,
+// because the join holds this host's project writes while it runs. A claim
+// cut short expires on the owner; a confirm cut short is finished by sync.
+const joinLedgerTimeout = 30 * time.Second
+
 func (d *Daemon) replicateJoinedLedger(ctx context.Context, share projectShare) error {
+	ctx, cancel := context.WithTimeout(ctx, joinLedgerTimeout)
+	defer cancel()
 	if share.LedgerOwner == "" || share.LedgerOwner == d.hostIdentity().ID {
 		return nil
 	}
