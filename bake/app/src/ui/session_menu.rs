@@ -187,6 +187,7 @@ fn fetch_models(s: &mut App, id: &str) {
     }
     s.menus.models_asked.insert(id.to_string(), Instant::now());
     let (id, seq) = (id.to_string(), s.menus.next());
+    s.menus.newest.insert((id.clone(), "models"), seq);
     spawn(s, Duration::ZERO, move |c| Some(Done::Models(id.clone(), seq, c.session_models(&surface, &id).map_err(|e| e.to_string()))));
 }
 
@@ -418,7 +419,7 @@ fn settled(s: &mut App, done: Done) {
                 }
             }
         }
-        Done::Models(id, seq, _) if !s.menus.fresh(&id, "models", seq) => {}
+        Done::Models(id, seq, _) if s.menus.newest.get(&(id.clone(), "models")) != Some(&seq) => {}
         Done::Models(id, _, Ok(models)) => {
             s.menus.models_error.remove(&id);
             s.menus.models.insert(id, models);
