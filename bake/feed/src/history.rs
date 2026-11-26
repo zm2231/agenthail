@@ -8,7 +8,7 @@ use crate::item::Item;
 
 pub const PAGE_EXCHANGES: usize = 50;
 pub const WALK_PAGES: usize = 8;
-pub const BODY_CAP: usize = 4 << 20;
+pub const BODY_CAP: usize = 8 << 20;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Page {
@@ -51,6 +51,9 @@ struct Timeline {
 fn read_page(value: &Value) -> Result<Page, Miss> {
     if let Some(error) = value["readError"].as_str().filter(|e| !e.is_empty()) {
         return Err(Miss::Failed(error.to_string()));
+    }
+    if value["catchingUp"].as_bool() == Some(true) {
+        return Err(Miss::Failed("the session is still catching up".into()));
     }
     let timeline: Timeline = serde_json::from_value(value["timeline"].clone()).map_err(|e| Miss::Failed(e.to_string()))?;
     if let Some(reason) = timeline.unavailable_reason.filter(|r| !r.is_empty()) {
@@ -112,21 +115,30 @@ impl Client {
     }
 
     pub fn full_body(&self, session: &str, body_ref: &str) -> Result<String, String> {
-        let mut body = String::new();
-        loop {
-            let path = format!("/api/v1/session-stream-body?id={}&ref={}&start={}", enc(session), enc(body_ref), body.len());
-            let value = self.get_reply(&path).map_err(|(code, text)| refusal(code, &text))?;
-            let chunk = value["body"].as_str().unwrap_or_default();
-            if !value["truncated"].as_bool().unwrap_or(false) {
-                body.push_str(chunk);
-                return Ok(body);
-            }
-            let whole = chunk.trim_end_matches('\u{FFFD}');
-            if whole.is_empty() || body.len() + whole.len() > BODY_CAP {
-                return Err("the full message is too large to show here".into());
-            }
-            body.push_str(whole);
+        collect_body(
+            |start| {
+                let path = format!("/api/v1/session-stream-body?id={}&ref={}&start={start}", enc(session), enc(body_ref));
+                let value = self.get_reply(&path).map_err(|(code, text)| refusal(code, &text))?;
+                Ok((value["body"].as_str().unwrap_or_default().to_string(), value["truncated"].as_bool().unwrap_or(false)))
+            },
+            BODY_CAP,
+        )
+    }
+}
+
+pub fn collect_body(mut fetch: impl FnMut(usize) -> Result<(String, bool), String>, cap: usize) -> Result<String, String> {
+    let mut body = String::new();
+    loop {
+        let (chunk, more) = fetch(body.len())?;
+        if !more {
+            body.push_str(&chunk);
+            return Ok(body);
         }
+        let whole = chunk.trim_end_matches('\u{FFFD}');
+        if whole.is_empty() || body.len() + whole.len() > cap {
+            return Err("it is larger than the daemon keeps".into());
+        }
+        body.push_str(whole);
     }
 }
 
@@ -191,6 +203,7 @@ mod tests {
             (200, r#"{"timeline":{"nextBefore":0,"items":[],"unavailableReason":"transcript unavailable"}}"#),
             (500, r#"{"error":{"code":"registry_error","message":"disk"}}"#),
             (200, r#"{"readError":"Session journal could not be read.","timeline":{"nextBefore":0,"items":[]}}"#),
+            (200, r#"{"catchingUp":true,"timeline":{"nextBefore":0,"items":[]}}"#),
         ]));
         let page = client.session_page("s 1", 0).unwrap();
         assert_eq!(seen.recv().unwrap().0, "/api/v1/session?id=s+1&timeline=1&limit=50");
@@ -201,6 +214,7 @@ mod tests {
         assert_eq!(client.session_page("s1", 3), Err(Miss::Failed("transcript unavailable".into())));
         assert_eq!(client.session_page("s1", 3), Err(Miss::Failed("disk".into())));
         assert_eq!(client.session_page("s1", 3), Err(Miss::Failed("Session journal could not be read.".into())));
+        assert_eq!(client.session_page("s1", 0), Err(Miss::Failed("the session is still catching up".into())));
     }
 
     #[test]
@@ -214,5 +228,21 @@ mod tests {
         assert_eq!(seen.recv().unwrap().0, "/api/v1/session-stream-body?id=s1&ref=body%2Fa&start=10");
         let (client, _seen) = daemon(replies(&[(404, r#"{"error":{"code":"body_unavailable","message":"The retained body is unavailable."}}"#)]));
         assert_eq!(client.full_body("s1", "x").unwrap_err(), "The retained body is unavailable.");
+    }
+
+    #[test]
+    fn a_body_stops_at_the_cap_the_daemon_keeps() {
+        assert_eq!(BODY_CAP, 8 << 20);
+        let mut starts = Vec::new();
+        let read = collect_body(
+            |start| {
+                starts.push(start);
+                Ok(("abcd".into(), start < 8))
+            },
+            16,
+        );
+        assert_eq!((read.unwrap(), starts), ("abcdabcdabcd".to_string(), vec![0, 4, 8]));
+        assert!(collect_body(|_| Ok(("abcdef".into(), true)), 16).is_err());
+        assert!(collect_body(|_| Ok(("\u{FFFD}".into(), true)), 16).is_err());
     }
 }

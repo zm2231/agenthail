@@ -62,18 +62,22 @@ pub(crate) fn take(s: &mut App, id: String, asked: u64, result: Result<Vec<Queue
     }
 }
 
+fn host(s: &App, id: &str) -> String {
+    session(s, id).map(|x| if x.host.id.is_empty() { x.host.name.clone() } else { x.host.id.clone() }).unwrap_or_default()
+}
+
 fn run(s: &mut App, id: &str, row: Queued, op: Op) {
     let Some(client) = s.client.clone() else { return };
-    if !s.queue_working.insert(row.id) {
+    let host = host(s, id);
+    if !s.queue_working.insert((host.clone(), row.id)) {
         return;
     }
     s.queue_note.remove(id);
     invalidate(s, id);
-    let host = session(s, id).map(|x| if x.host.id.is_empty() { x.host.name.clone() } else { x.host.id.clone() }).unwrap_or_default();
     let (out, id) = (s.outbox.clone(), id.to_string());
     std::thread::spawn(move || {
         let done = client.queue_op(op, &row, &host);
-        let _ = out.send(Bg::QueueDone(id, row.id, done));
+        let _ = out.send(Bg::QueueDone(id, (host, row.id), done));
     });
 }
 
@@ -86,8 +90,9 @@ fn hand_back(s: &mut App, id: &str, message: &str) {
     s.drafts.set(id, &merged);
 }
 
-pub(crate) fn done(s: &mut App, id: String, queue_id: i64, done: Done) {
-    s.queue_working.remove(&queue_id);
+pub(crate) fn done(s: &mut App, id: String, working: (String, i64), done: Done) {
+    s.queue_working.remove(&working);
+    let queue_id = working.1;
     let id = feed::composer::current(&s.rekeyed, &id).to_string();
     invalidate(s, &id);
     let drop_row = |s: &mut App| {
@@ -141,7 +146,7 @@ pub(crate) fn reserve(s: &App, id: &str) -> f32 {
 
 fn row_el(s: &App, x: &Session, item: &Queued) -> El {
     let k = theme::kit();
-    let working = s.queue_working.contains(&item.id);
+    let working = s.queue_working.contains(&(host(s, &x.id), item.id));
     let mut actions = row().gap(2.0).items_center();
     if crate::busy_now(s, &x.id) && x.capabilities.steer {
         let refusal = item.steer_refusal(&x.capabilities);
