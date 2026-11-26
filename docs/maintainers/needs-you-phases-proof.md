@@ -152,8 +152,8 @@ Push: a `review` item pushes once when it reaches the person (on entering review
 
 | Key | Default label | The item is here when |
 |---|---|---|
-| `scope` | Scope | nobody holds it: `open` without a holder, or `parked` |
-| `build` | Build | it has a holder (`in_progress`, `blocked`, or `open` after an unblock, which keeps the holder) and no open pull request |
+| `scope` | Scope | `open` or `parked`: nobody holds it. An unblocked item is `open` and ready for anyone to claim, as the ledger lists it, even though it keeps the name of its last holder |
+| `build` | Build | held (`in_progress` or `blocked`) and no open pull request |
 | `review` | Review | claimed, with a pull request the PR watcher logged as opened and not since closed unmerged |
 | `verify` | Verify | held, and the holder marked Verify after the newest pull request was opened, since the item last changed holder or was sent back from review |
 | `check` | Check | `in_review`: waiting on a reviewer, usually the person |
@@ -167,8 +167,8 @@ The rules, in this order, first match wins:
 2. `done`: `ship`.
 3. A `PR merged` line on the item: `ship`. This covers an item whose holder ended after the merge, before anyone marked it done.
 4. `in_review`: `check`.
-5. No holder, or `parked`: `scope`.
-6. A Verify mark newer than both the newest `PR opened` line and the item's last change of holder or return from review: `verify`. Blocking and unblocking keep it.
+5. `open` or `parked`: `scope`.
+6. A Verify mark newer than both the newest `PR opened` line and the item's last change of holder or return from review: `verify`. Blocking, unblocking and claiming it again by the same holder keep it.
 7. A pull request opened and not closed unmerged: `review`.
 8. Otherwise: `build`.
 
@@ -183,7 +183,7 @@ What this gives for the cases the work-first view depends on:
 
 ### Where it is computed
 
-Phase is derived, never stored in an event. Each time the board applies an event that touches an item (its creation, a state change, a log), it replays that item's own timeline and sets `phase` and `phaseSince` (when the item entered its current phase) on the item. The timeline is in the order the events were applied, which is the same on every host, so every host that holds the ledger computes the same phase. To tell an unblocked item that still has its holder from an unclaimed one, each state entry in the timeline records the holder after the change (`assignee`); imported history has no holder.
+Phase is derived, never stored in an event. Each time the board applies an event that touches an item (its creation, a state change, a log), it replays that item's own timeline and sets `phase` and `phaseSince` (when the item entered its current phase) on the item. The timeline is in the order the events were applied, which is the same on every host, so every host that holds the ledger computes the same phase. To tell a claim by the same holder after an unblock from a claim by a new one, each state entry in the timeline records the holder after the change (`assignee`); imported history has no holder.
 
 The PR lines stay the text the watcher writes today: they are already the contract `mergedPR` in takeover and `itemPRs` in the board read. Only lines with source `pr-item` count. A session cannot set that source: a work request's `Source` is not read from its JSON, and only the PR watcher sets it. A paired host can replay any event, this one included, but a paired host is already trusted with every ledger event, the person's captured words and approvals among them; replay is accepted only from a paired host (`hostOnly`), and takeover's `--then done` already rests on the same line. So the phase adds no new trust boundary. Making replicated events verifiable per host would be a change to ledger sync as a whole, not to phases. The prefixes move into one parser in `internal/ledger` that takeover, the board page and the phase all use, replacing the two copies of the prefixes in `internal/ledger/work_takeover.go` and `internal/daemon/ledger_board.go`. Existing ledgers keep their meaning and need no migration. The CLI shows the phase key at the end of an item's line (` phase=build`), after the existing fields, so the line's existing format is unchanged.
 

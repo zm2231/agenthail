@@ -124,7 +124,7 @@ func phaseOf(state WorkState, held, verified, merged, openPR bool) Phase {
 		return PhaseShip
 	case state == WorkInReview:
 		return PhaseCheck
-	case !held || state == WorkParked:
+	case !held || state == WorkOpen || state == WorkParked:
 		return PhaseScope
 	case verified:
 		return PhaseVerify

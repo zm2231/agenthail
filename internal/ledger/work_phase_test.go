@@ -60,7 +60,7 @@ func TestAnItemsPhaseFollowsItsWorkFromScopeToShip(t *testing.T) {
 	verifies(t, s, id)
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkBlock, ItemID: id, SessionID: holder, Reason: "waiting on CI"})
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkUnblock, ItemID: id, SessionID: holder})
-	wantPhase(t, s, id, ledger.PhaseVerify)
+	wantPhase(t, s, id, ledger.PhaseScope)
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: id, SessionID: holder})
 	wantPhase(t, s, id, ledger.PhaseVerify)
 
