@@ -553,7 +553,7 @@ pub fn send_to(s: &mut App, id: &str, tx: &mut Tx) {
 
 fn clear_sent(s: &mut App, id: &str, unsent: &Unsent) {
     let chips = s.attach.tray.chips(id).len();
-    let same = !s.attach.preparing.contains_key(id) && shown_text(s, id).trim() == unsent.text && chips == unsent.attachments.len() && s.attach.tray.ready(id).is_ok_and(|now| unsent.same(&unsent.text, &now));
+    let same = ui::attach::adding(s, id) == 0 && shown_text(s, id).trim() == unsent.text && chips == unsent.attachments.len() && s.attach.tray.ready(id).is_ok_and(|now| unsent.same(&unsent.text, &now));
     if !same {
         return;
     }
@@ -883,9 +883,7 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
         if let Some(receipts) = s.queued.remove(&old) {
             s.queued.entry(new.clone()).or_default().extend(receipts);
         }
-        if let Some(n) = s.attach.preparing.remove(&old) {
-            *s.attach.preparing.entry(new.clone()).or_default() += n;
-        }
+        ui::attach::rekey(s, &old, &new);
         move_key(&mut s.status_line, &old, &new);
         move_key(&mut s.busy_pick, &old, &new);
         move_key(&mut s.work_pick, &old, &new);

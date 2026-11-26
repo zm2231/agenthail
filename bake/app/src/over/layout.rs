@@ -90,7 +90,7 @@ fn encode(s: &App) -> String {
         "boards": boards,
         "looked": { "now": s.ov.looked_now, "projects": s.ov.looked },
         "drafts": s.drafts.to_json(),
-        "attachments": s.attach.tray.to_json(),
+        "attachments": crate::ui::attach::saved(s),
         "unsent": unsent(s),
         "queueTaking": feed::queue::Taking::to_json(&s.queue_taking),
     })

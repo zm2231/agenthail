@@ -369,6 +369,18 @@ impl Tray {
         )
     }
 
+    pub fn to_json_with(&self, adding: &[(String, String)]) -> Value {
+        let mut value = self.to_json();
+        for (id, name) in adding {
+            let entry = json!({"lost": {"name": name, "bytes": 0, "image": false}});
+            match value[id.as_str()].as_array_mut() {
+                Some(list) => list.push(entry),
+                None => value[id.as_str()] = json!([entry]),
+            }
+        }
+        value
+    }
+
     pub fn from_json(value: &Value) -> Tray {
         let mut tray = Tray::default();
         for (id, raw) in value.as_object().into_iter().flatten() {
@@ -699,6 +711,14 @@ mod tests {
         assert_eq!(back.ready("s1"), Err(Hold::Failed("a.txt".into())));
         let mut back = back;
         assert_eq!(back.retry(back.chips("s1")[0].local), None);
+    }
+
+    #[test]
+    fn files_still_being_added_come_back_asking_to_be_attached_again() {
+        let tray = Tray::default();
+        let back = Tray::from_json(&tray.to_json_with(&[("s1".into(), "photo.heic".into())]));
+        assert_eq!(back.chips("s1").iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["photo.heic"]);
+        assert_eq!(back.ready("s1"), Err(Hold::Failed("photo.heic".into())));
     }
 
     #[test]

@@ -20,7 +20,7 @@ const IMAGE_HEIGHT: f32 = 360.0;
 const PLACEHOLDER_RATIO: f32 = 220.0 / 140.0;
 
 pub enum Done {
-    Prepared(String, Vec<Result<Prepared, Problem>>),
+    Prepared(u64, Vec<Result<Prepared, Problem>>),
     Uploaded(u64, Result<attach::Upload, String>),
     Picture(String, Result<Vec<u8>, String>),
     Fetched(String, Then, Result<PathBuf, String>),
@@ -64,7 +64,8 @@ pub struct Attach {
     pub pictures: HashMap<String, Picture>,
     pub sent: HashMap<String, Sent>,
     pub thumbs: HashMap<u64, rune::Image>,
-    pub preparing: HashMap<String, usize>,
+    pub adding: HashMap<u64, (String, Vec<String>)>,
+    next_job: u64,
     pub menu: Option<Open>,
     pub dropping: bool,
     pub rev: u64,
@@ -128,11 +129,28 @@ fn target(s: &App) -> Option<String> {
 }
 
 pub fn has(s: &App, id: &str) -> bool {
-    s.attach.tray.has(id) || s.attach.preparing.get(id).is_some_and(|n| *n > 0)
+    s.attach.tray.has(id) || adding(s, id) > 0
+}
+
+pub fn adding(s: &App, id: &str) -> usize {
+    s.attach.adding.values().filter(|(at, _)| at == id).count()
+}
+
+pub fn saved(s: &App) -> serde_json::Value {
+    let names: Vec<(String, String)> = s.attach.adding.values().flat_map(|(id, names)| names.iter().map(move |n| (id.clone(), n.clone()))).collect();
+    s.attach.tray.to_json_with(&names)
+}
+
+pub fn rekey(s: &mut App, old: &str, new: &str) {
+    for (id, _) in s.attach.adding.values_mut() {
+        if id == old {
+            *id = new.to_string();
+        }
+    }
 }
 
 pub fn ready(s: &App, id: &str) -> Result<Vec<attach::Upload>, String> {
-    if s.attach.preparing.get(id).is_some_and(|n| *n > 0) {
+    if adding(s, id) > 0 {
         return Err(attach::Hold::Uploading.note());
     }
     s.attach.tray.ready(id).map_err(|hold| hold.note())
@@ -142,20 +160,24 @@ pub fn add_paths(s: &mut App, id: &str, paths: Vec<PathBuf>) {
     if paths.is_empty() {
         return;
     }
-    prepare(s, id, move || paths.iter().map(|p| attach::file(p)).collect());
+    let names = paths.iter().map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "file".into())).collect();
+    prepare(s, id, names, move || paths.iter().map(|p| attach::file(p)).collect());
 }
 
 fn add_picture(s: &mut App, id: &str, name: &str, png: Vec<u8>) {
     let name = name.to_string();
-    prepare(s, id, move || vec![attach::picture(&name, &png)]);
+    prepare(s, id, vec![name.clone()], move || vec![attach::picture(&name, &png)]);
 }
 
-fn prepare(s: &mut App, id: &str, work: impl FnOnce() -> Vec<Result<Prepared, Problem>> + Send + 'static) {
+fn prepare(s: &mut App, id: &str, names: Vec<String>, work: impl FnOnce() -> Vec<Result<Prepared, Problem>> + Send + 'static) {
     let id = feed::composer::current(&s.rekeyed, id).to_string();
-    *s.attach.preparing.entry(id.clone()).or_default() += 1;
+    s.attach.next_job += 1;
+    let job = s.attach.next_job;
+    s.attach.adding.insert(job, (id, names));
+    let _ = crate::over::layout::save_now(s);
     let out = s.outbox.clone();
     std::thread::spawn(move || {
-        let _ = out.send(Bg::Attach(Done::Prepared(id, work())));
+        let _ = out.send(Bg::Attach(Done::Prepared(job, work())));
     });
 }
 
@@ -235,12 +257,9 @@ pub fn retry_upload(s: &mut App, id: &str, local: u64) {
 pub fn done(s: &mut App, done: Done, tx: &mut Tx) {
     s.attach.rev += 1;
     match done {
-        Done::Prepared(id, files) => {
+        Done::Prepared(job, files) => {
+            let Some((id, _)) = s.attach.adding.remove(&job) else { return };
             let id = feed::composer::current(&s.rekeyed, &id).to_string();
-            if let Some(n) = s.attach.preparing.get_mut(&id) {
-                *n = n.saturating_sub(1);
-            }
-            s.attach.preparing.retain(|_, n| *n > 0);
             let mut problem = None;
             for file in files {
                 let prepared = match file {
@@ -267,6 +286,7 @@ pub fn done(s: &mut App, done: Done, tx: &mut Tx) {
             if let Some(problem) = problem {
                 crate::note(s, &id, problem.message());
             }
+            let _ = crate::over::layout::save_now(s);
         }
         Done::Uploaded(local, result) => s.attach.tray.uploaded(local, result),
         Done::Picture(id, result) => {
@@ -483,7 +503,7 @@ pub fn button(s: &App, id: &str) -> Option<El> {
 
 pub fn chips(s: &App, id: &str) -> Option<El> {
     let list = s.attach.tray.chips(id);
-    let preparing = s.attach.preparing.get(id).copied().unwrap_or_default();
+    let preparing = adding(s, id);
     if list.is_empty() && preparing == 0 {
         return None;
     }
