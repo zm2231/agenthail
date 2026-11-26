@@ -576,8 +576,11 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
     ui::attach::clear(s, id);
     ui::complete::sending(s, id);
     match s.unsent.take_same(id, &message, &attachments) {
-        Some(again) if again.reuses_key() => dispatch(s, id, again, true, tx),
-        _ => {
+        Some(again) if again.reuses_key() && busy.is_none_or(|b| again.busy == Some(b)) => dispatch(s, id, again, true, tx),
+        found => {
+            if let Some(again) = found.filter(|u| u.reuses_key()) {
+                s.unsent.add(id, again);
+            }
             let mut pending = fresh(s, id, message, attachments);
             pending.busy = busy.or(pending.busy);
             dispatch(s, id, pending, false, tx);

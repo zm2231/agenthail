@@ -53,7 +53,7 @@ pub struct Menus {
     newest: HashMap<(String, &'static str), u64>,
     rename_seq: u64,
     refreshed: Option<(String, Instant)>,
-    models_asked: HashSet<String>,
+    models_asked: HashMap<String, Instant>,
     pub models_error: HashMap<String, String>,
     tx: Sender<Done>,
     rx: Receiver<Done>,
@@ -81,7 +81,7 @@ impl Menus {
             newest: HashMap::new(),
             rename_seq: 0,
             refreshed: None,
-            models_asked: HashSet::new(),
+            models_asked: HashMap::new(),
             models_error: HashMap::new(),
             tx,
             rx,
@@ -162,7 +162,11 @@ pub fn load(s: &mut App, id: &str) {
 }
 
 pub fn ensure_models(s: &mut App, id: &str) {
-    if s.client.is_some() && !s.menus.models_asked.contains(id) {
+    let retry = match s.menus.models_asked.get(id) {
+        None => true,
+        Some(at) => s.menus.models_error.contains_key(id) && at.elapsed() >= REFRESH,
+    };
+    if s.client.is_some() && retry {
         fetch_models(s, id);
     }
 }
@@ -172,7 +176,7 @@ fn fetch_models(s: &mut App, id: &str) {
     if surface.is_empty() {
         return;
     }
-    s.menus.models_asked.insert(id.to_string());
+    s.menus.models_asked.insert(id.to_string(), Instant::now());
     let id = id.to_string();
     spawn(s, Duration::ZERO, move |c| Some(Done::Models(id.clone(), c.session_models(&surface, &id).map_err(|e| e.to_string()))));
 }
@@ -182,7 +186,7 @@ fn refresh_shown(s: &mut App) {
         return;
     }
     let Some(id) = s.selected.clone() else { return };
-    if !s.menus.models_asked.contains(&id) {
+    if !s.menus.models_asked.contains_key(&id) {
         fetch_models(s, &id);
     }
     let due = s.menus.refreshed.as_ref().is_none_or(|(shown, at)| *shown != id || at.elapsed() >= REFRESH);

@@ -274,7 +274,8 @@ pub fn pump(s: &mut App) -> bool {
             s.complete.files_asked = Some((seq, asked.clone(), query.clone()));
             spawn(s, move |c| Done::Files(seq, asked.clone(), query.clone(), c.session_files(&asked, &query)));
         }
-        _ => {}
+        Some(t) if t.trigger == Trigger::Mention => {}
+        _ => s.complete.files_asked = None,
     }
     if let Some(search) = s.complete.search.as_mut() {
         let wanted = (search.query.text.trim().to_string(), search.all);
@@ -339,6 +340,9 @@ pub fn rekey(s: &mut App, old: &str, new: &str) {
     if let Some(history) = c.history.remove(old) {
         c.history.insert(new.to_string(), history);
     }
+    if c.goal_pending.remove(old) {
+        c.goal_pending.insert(new.to_string());
+    }
     if let Some(seq) = c.prompts_asked.remove(old) {
         let newest = c.prompts_asked.entry(new.to_string()).or_insert(seq);
         *newest = (*newest).max(seq);
@@ -399,10 +403,16 @@ pub fn done(s: &mut App, done: Done) {
             }
         }
         Done::Goal(asked, typed, result) => {
-            s.complete.goal_pending.remove(&asked);
             let id = feed::composer::current(&s.rekeyed, &asked).to_string();
-            if result.as_ref().is_ok_and(|_| s.composer_for.as_deref() == Some(id.as_str()) && s.composer.text.trim() == typed) {
-                replace_composer(s, "");
+            s.complete.goal_pending.remove(&id);
+            if result.is_ok() {
+                if s.composer_for.as_deref() == Some(id.as_str()) {
+                    if s.composer.text.trim() == typed {
+                        replace_composer(s, "");
+                    }
+                } else if s.drafts.get(&id).trim() == typed {
+                    s.drafts.set(&id, "");
+                }
             }
             let line = match result {
                 Ok(()) => "Goal set".to_string(),
