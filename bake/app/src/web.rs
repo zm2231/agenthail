@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use feed::extensions::WebSession;
+use feed::extensions::{Probe, WebSession};
 use rune::NativeView;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -24,7 +24,10 @@ pub struct Web {
     pub phase: Phase,
     cookie: Option<WebSession>,
     cookie_set: bool,
-    pub signing: bool,
+    signing: bool,
+    probing: Option<String>,
+    cleared: Option<String>,
+    resigned: bool,
     loaded: Option<String>,
     page: Rc<RefCell<String>>,
     finished: (Sender<String>, Receiver<String>),
@@ -40,14 +43,23 @@ impl Web {
             cookie: None,
             cookie_set: false,
             signing: false,
+            probing: None,
+            cleared: None,
+            resigned: false,
             loaded: None,
             page: Rc::new(RefCell::new(String::new())),
             finished: channel(),
         }
     }
 
-    pub fn needs_sign_in(&self, now: OffsetDateTime) -> bool {
-        !self.signing && self.cookie.as_ref().is_none_or(|c| expiring(c, now))
+    fn failed(&self) -> bool {
+        matches!(self.phase, Phase::Failed(_))
+    }
+
+    pub fn sign_in_due(&mut self, now: OffsetDateTime) -> bool {
+        let due = !self.failed() && !self.signing && self.cookie.as_ref().is_none_or(|c| expiring(c, now));
+        self.signing |= due;
+        due
     }
 
     pub fn signed(&mut self, result: Result<WebSession, String>) {
@@ -61,10 +73,44 @@ impl Web {
         }
     }
 
+    pub fn probe_due(&mut self, want: Option<&str>) -> Option<(String, WebSession)> {
+        let want = want?;
+        if self.failed() || self.probing.is_some() || self.cleared.as_deref() == Some(want) {
+            return None;
+        }
+        let cookie = self.cookie.clone()?;
+        self.probing = Some(want.to_string());
+        if self.loaded.is_none() {
+            self.phase = Phase::Loading;
+        }
+        Some((want.to_string(), cookie))
+    }
+
+    pub fn probed(&mut self, page: String, result: Probe) {
+        if self.probing.as_deref() != Some(page.as_str()) {
+            return;
+        }
+        self.probing = None;
+        match result {
+            Probe::Open => {
+                self.cleared = Some(page);
+                self.resigned = false;
+            }
+            Probe::SignIn if !self.resigned => {
+                self.resigned = true;
+                self.cookie = None;
+            }
+            Probe::SignIn => self.phase = Phase::Failed("The page turned down this app's sign-in. Reload to try again.".into()),
+            Probe::Unreachable(error) => self.phase = Phase::Failed(format!("Couldn't reach the page: {error}")),
+        }
+    }
+
     pub fn reload(&mut self) {
-        if matches!(self.phase, Phase::Failed(_)) {
+        if self.failed() {
             self.phase = Phase::SigningIn;
+            self.cleared = None;
             self.loaded = None;
+            self.resigned = false;
             return;
         }
         #[cfg(target_os = "macos")]
@@ -77,14 +123,14 @@ impl Web {
 
     pub fn pump(&mut self, want: Option<&str>) -> bool {
         let mut changed = false;
-        while let Ok(url) = self.finished.1.try_recv() {
-            if self.loaded.as_deref() == Some(url.as_str()) || self.phase == Phase::Loading {
+        while self.finished.1.try_recv().is_ok() {
+            if self.phase == Phase::Loading {
                 self.phase = Phase::Shown;
                 changed = true;
             }
         }
         let Some(want) = want else { return changed };
-        if matches!(self.phase, Phase::Failed(_)) {
+        if self.failed() {
             return changed;
         }
         if self.slot.is_none() {
@@ -92,8 +138,9 @@ impl Web {
             return true;
         }
         let Some(cookie) = self.cookie.clone() else { return changed };
+        let cleared = self.cleared.as_deref() == Some(want);
         let in_window = self.slot.as_ref().is_some_and(NativeView::in_window);
-        match self.show(want, &cookie, in_window) {
+        match self.show(want, &cookie, cleared, in_window) {
             Ok(moved) => changed |= moved,
             Err(error) => {
                 self.phase = Phase::Failed(error);
@@ -104,35 +151,33 @@ impl Web {
     }
 
     #[cfg(target_os = "macos")]
-    fn show(&mut self, want: &str, cookie: &WebSession, in_window: bool) -> Result<bool, String> {
+    fn show(&mut self, want: &str, cookie: &WebSession, cleared: bool, in_window: bool) -> Result<bool, String> {
         if self.view.is_none() {
-            if !in_window {
+            if !in_window || !cleared {
                 return Ok(false);
             }
             let Some(slot) = &self.slot else { return Ok(false) };
             self.view = Some(build(slot, self.page.clone(), self.finished.0.clone())?);
         }
         let Some(view) = &self.view else { return Ok(false) };
-        let mut changed = false;
         if !self.cookie_set {
             view.set_cookie(&web_cookie(cookie, want)?).map_err(|e| format!("Couldn't hand the page its sign-in: {e}"))?;
             self.cookie_set = true;
-            self.loaded = None;
         }
-        if self.loaded.as_deref() != Some(want) {
+        if cleared && self.loaded.as_deref() != Some(want) {
             *self.page.borrow_mut() = want.to_string();
             view.load_url(want).map_err(|e| format!("Couldn't open {want}: {e}"))?;
             self.loaded = Some(want.to_string());
             self.phase = Phase::Loading;
-            changed = true;
+            return Ok(true);
         }
-        Ok(changed)
+        Ok(false)
     }
 
     #[cfg(not(target_os = "macos"))]
-    fn show(&mut self, _want: &str, _cookie: &WebSession, _in_window: bool) -> Result<bool, String> {
+    fn show(&mut self, _want: &str, _cookie: &WebSession, cleared: bool, _in_window: bool) -> Result<bool, String> {
         let _ = (&self.page, &self.finished.0, &self.cookie_set, &self.loaded);
-        Err("Pages open in the Mac app.".into())
+        if cleared { Err("Pages open in the Mac app.".into()) } else { Ok(false) }
     }
 }
 
@@ -188,11 +233,73 @@ mod tests {
         WebSession { name: "agenthail_web".into(), value: "v".into(), path: "/".into(), expires_at: expires_at.into(), scopes: vec![] }
     }
 
+    fn now() -> OffsetDateTime {
+        OffsetDateTime::parse("2026-11-26T10:00:00Z", &Rfc3339).unwrap()
+    }
+
     #[test]
     fn a_web_session_is_renewed_an_hour_before_it_ends() {
-        let now = OffsetDateTime::parse("2026-11-26T10:00:00Z", &Rfc3339).unwrap();
-        assert!(!expiring(&session("2026-11-26T12:00:00Z"), now));
-        assert!(expiring(&session("2026-11-26T10:30:00Z"), now));
-        assert!(expiring(&session("soon"), now));
+        assert!(!expiring(&session("2026-11-26T12:00:00Z"), now()));
+        assert!(expiring(&session("2026-11-26T10:30:00Z"), now()));
+        assert!(expiring(&session("soon"), now()));
+    }
+
+    #[test]
+    fn a_failed_sign_in_waits_for_reload_and_then_tries_again() {
+        let mut web = Web::new();
+        assert!(web.sign_in_due(now()));
+        assert!(!web.sign_in_due(now()), "one request at a time");
+        web.signed(Err("refused".into()));
+        assert!(matches!(web.phase, Phase::Failed(_)));
+        assert!(!web.sign_in_due(now()), "no retry loop after a failure");
+        web.reload();
+        assert_eq!(web.phase, Phase::SigningIn);
+        assert!(web.sign_in_due(now()));
+    }
+
+    #[test]
+    fn a_refused_cookie_is_replaced_once_then_reported() {
+        let page = "http://127.0.0.1:48200/";
+        let mut web = Web::new();
+        assert!(web.sign_in_due(now()));
+        web.signed(Ok(session("2026-11-26T22:00:00Z")));
+        let (url, _) = web.probe_due(Some(page)).unwrap();
+        assert!(web.probe_due(Some(page)).is_none(), "one probe at a time");
+        web.probed(url, Probe::SignIn);
+        assert!(web.sign_in_due(now()), "a refused cookie is minted again");
+        web.signed(Ok(session("2026-11-26T22:00:00Z")));
+        let (url, _) = web.probe_due(Some(page)).unwrap();
+        web.probed(url, Probe::SignIn);
+        assert!(matches!(web.phase, Phase::Failed(_)));
+        assert!(web.probe_due(Some(page)).is_none());
+    }
+
+    #[test]
+    fn an_open_page_is_probed_once_and_an_unreachable_one_fails() {
+        let page = "http://127.0.0.1:48200/";
+        let mut web = Web::new();
+        web.sign_in_due(now());
+        web.signed(Ok(session("2026-11-26T22:00:00Z")));
+        let (url, _) = web.probe_due(Some(page)).unwrap();
+        web.probed(url, Probe::Open);
+        assert!(web.probe_due(Some(page)).is_none());
+        let other = "http://127.0.0.1:48300/";
+        let (url, _) = web.probe_due(Some(other)).unwrap();
+        web.probed(url, Probe::Unreachable("connection refused".into()));
+        assert_eq!(web.phase, Phase::Failed("Couldn't reach the page: connection refused".into()));
+    }
+
+    #[test]
+    fn renewing_the_cookie_keeps_the_open_page() {
+        let page = "http://127.0.0.1:48200/";
+        let mut web = Web::new();
+        web.sign_in_due(now());
+        web.signed(Ok(session("2026-11-26T22:00:00Z")));
+        let (url, _) = web.probe_due(Some(page)).unwrap();
+        web.probed(url, Probe::Open);
+        web.loaded = Some(page.into());
+        web.signed(Ok(session("2026-11-27T22:00:00Z")));
+        assert_eq!(web.loaded.as_deref(), Some(page));
+        assert!(web.probe_due(Some(page)).is_none(), "the same page is not checked again");
     }
 }

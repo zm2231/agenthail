@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use feed::catalog::RespondError;
 use feed::create::Host;
-use feed::extensions::{Approval, Entry, Extension, Kind, List, Tone, WebSession, approval, entries, problems, status};
+use feed::extensions::{Approval, Entry, Extension, Kind, List, Probe, Tone, WebSession, approval, entries, problems, status};
 use rune::{Color, Cx, El, ScrollSpec, col, el, icon, row, text};
 use rune_kit::shell::Toolbar;
 use rune_kit::{Button, ButtonVariant, ControlSize, Spinner};
@@ -17,10 +17,11 @@ use crate::{App, Screen};
 const REFRESH: Duration = Duration::from_secs(20);
 
 pub enum Done {
-    Hosts(Result<Vec<Host>, String>),
-    Listed(String, Result<List, String>),
+    Hosts(u64, Result<Vec<Host>, String>),
+    Listed(u64, String, Result<List, String>),
     Acted(String, Result<List, RespondError>),
     Signed(Result<WebSession, String>),
+    Probed(String, Probe),
 }
 
 pub struct Catalog {
@@ -46,6 +47,7 @@ pub struct State {
     pub acting: Option<String>,
     pub web: Web,
     fetched_at: Option<Instant>,
+    generation: u64,
     tx: Sender<Done>,
     rx: Receiver<Done>,
 }
@@ -53,7 +55,7 @@ pub struct State {
 impl State {
     pub fn new() -> State {
         let (tx, rx) = channel();
-        State { catalogs: Vec::new(), hosts_error: None, settings: false, acting: None, web: Web::new(), fetched_at: None, tx, rx }
+        State { catalogs: Vec::new(), hosts_error: None, settings: false, acting: None, web: Web::new(), fetched_at: None, generation: 0, tx, rx }
     }
 }
 
@@ -65,11 +67,12 @@ pub fn refresh(s: &mut App) {
     let Some(client) = s.client.clone() else { return };
     s.ov.ext.settings = feed::extensions::holds_settings(&client);
     s.ov.ext.fetched_at = Some(Instant::now());
-    let tx = s.ov.ext.tx.clone();
+    s.ov.ext.generation += 1;
+    let (tx, generation) = (s.ov.ext.tx.clone(), s.ov.ext.generation);
     std::thread::spawn(move || {
         let hosts = client.hosts().map_err(|e| e.to_string());
         let reachable: Vec<Host> = hosts.as_ref().map(|h| h.iter().filter(|h| h.available()).cloned().collect()).unwrap_or_default();
-        if tx.send(Done::Hosts(hosts)).is_err() {
+        if tx.send(Done::Hosts(generation, hosts)).is_err() {
             return;
         }
         for host in reachable {
@@ -77,7 +80,7 @@ pub fn refresh(s: &mut App) {
             std::thread::spawn(move || {
                 let key = if host.is_local() { "local".to_string() } else { host.id.clone() };
                 let result = client.extensions((!host.is_local()).then_some(host.id.as_str())).map_err(|e| e.to_string());
-                let _ = tx.send(Done::Listed(key, result));
+                let _ = tx.send(Done::Listed(generation, key, result));
             });
         }
     });
@@ -109,7 +112,8 @@ fn reload_all(s: &mut App) {
 fn take(s: &mut App, done: Done) {
     let ext = &mut s.ov.ext;
     match done {
-        Done::Hosts(Ok(hosts)) => {
+        Done::Hosts(generation, _) | Done::Listed(generation, _, _) if generation != ext.generation => {}
+        Done::Hosts(_, Ok(hosts)) => {
             ext.hosts_error = None;
             let mut old: Vec<Catalog> = std::mem::take(&mut ext.catalogs);
             for host in hosts {
@@ -122,8 +126,8 @@ fn take(s: &mut App, done: Done) {
                 ext.catalogs.push(catalog);
             }
         }
-        Done::Hosts(Err(error)) => ext.hosts_error = Some(format!("Couldn't read the computers: {error}")),
-        Done::Listed(key, result) => {
+        Done::Hosts(_, Err(error)) => ext.hosts_error = Some(format!("Couldn't read the computers: {error}")),
+        Done::Listed(_, key, result) => {
             if let Some(catalog) = ext.catalogs.iter_mut().find(|c| c.key() == key) {
                 match result {
                     Ok(list) => {
@@ -138,6 +142,8 @@ fn take(s: &mut App, done: Done) {
             ext.acting = None;
             match result {
                 Ok(list) => {
+                    ext.generation += 1;
+                    ext.fetched_at = Some(Instant::now());
                     if let Some(local) = ext.catalogs.iter_mut().find(|c| c.host.is_local()) {
                         local.error = list.host_problem(&local.host.name);
                         local.list = Some(list);
@@ -147,7 +153,8 @@ fn take(s: &mut App, done: Done) {
                 Err(error) => s.ov.notice = Some(format!("{what} didn't work: {}", error.message)),
             }
         }
-        Done::Signed(result) => ext.web.signed(result.map_err(|e| e.to_string())),
+        Done::Signed(result) => ext.web.signed(result),
+        Done::Probed(page, result) => ext.web.probed(page, result),
     }
 }
 
@@ -174,14 +181,20 @@ pub fn drain(s: &mut App) -> bool {
         refresh(s);
     }
     let want = current_entry(s).and_then(|e| e.url);
-    if want.is_some()
-        && s.ov.ext.web.needs_sign_in(time::OffsetDateTime::now_utc())
-        && let Some(client) = s.client.clone()
+    if let Some(client) = s.client.clone()
+        && want.is_some()
+        && s.ov.ext.web.sign_in_due(time::OffsetDateTime::now_utc())
     {
-        s.ov.ext.web.signing = true;
         let tx = s.ov.ext.tx.clone();
         std::thread::spawn(move || {
             let _ = tx.send(Done::Signed(client.web_session().map_err(|e| e.message)));
+        });
+    }
+    if let Some((page, cookie)) = s.ov.ext.web.probe_due(want.as_deref()) {
+        let tx = s.ov.ext.tx.clone();
+        std::thread::spawn(move || {
+            let result = feed::extensions::probe(&page, &cookie);
+            let _ = tx.send(Done::Probed(page, result));
         });
     }
     changed | s.ov.ext.web.pump(want.as_deref())
@@ -197,7 +210,22 @@ pub fn arrived(s: &mut App) {
 }
 
 fn covered(s: &App) -> bool {
-    s.ov.jump.is_some() || s.ov.notice.is_some() || s.new_session.is_some() || s.ov.inbox.note.is_some()
+    let menus = &s.menus;
+    s.ov.jump.is_some()
+        || s.ov.notice.is_some()
+        || s.new_session.is_some()
+        || s.ov.inbox.note.is_some()
+        || menus.open.is_some()
+        || menus.chip.is_some()
+        || menus.confirm.is_some()
+        || menus.renaming.is_some()
+        || s.accounts.open
+        || s.accounts.planning.is_some()
+        || !s.limits.warnings.is_empty()
+        || s.limits.picking.is_some()
+        || s.limits.confirm.is_some()
+        || s.limits.consent.is_some()
+        || s.prs.linking.is_some()
 }
 
 pub fn open(s: &mut App, entry: &Entry) {
