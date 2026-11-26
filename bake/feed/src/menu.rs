@@ -87,6 +87,7 @@ impl Patch {
         match (self, other) {
             (Patch::Pinned(a), Patch::Pinned(b)) => a.is_some() == b.is_some(),
             (Patch::Read { receipt: a, .. }, Patch::Read { receipt: b, .. }) => a.revision == b.revision,
+            (Patch::Pr { pr: a, linked: x }, Patch::Pr { pr: b, linked: y }) => a.url == b.url && a.watch == b.watch && x == y,
             _ => self == other,
         }
     }

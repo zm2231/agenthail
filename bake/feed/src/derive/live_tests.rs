@@ -213,6 +213,24 @@ fn a_pull_request_change_holds_only_that_pull_request_until_the_daemon_shows_it(
 }
 
 #[test]
+fn the_same_pull_request_change_confirmed_twice_keeps_its_hold() {
+    use crate::catalog::Pr;
+    use crate::menu::Patch;
+    let pr = |checks: &str, watch: bool| Pr { number: 12, url: "https://github.com/o/r/pull/12".into(), watch, checks: checks.into(), ..Default::default() };
+    let row = |prs: Vec<Pr>| {
+        let mut x = session("a", "p", "2026-11-24T11:00:00Z", "idle");
+        x.prs = prs;
+        x
+    };
+    let mut ov = Overview::default();
+    assert!(ov.take_sessions("2026-11-24T12:00:00Z", vec![row(Vec::new())]));
+    assert!(ov.patch("a", Patch::Pr { pr: pr("pending", true), linked: true }, Instant::now()));
+    ov.patch("a", Patch::Pr { pr: pr("passing", true), linked: true }, Instant::now());
+    assert!(ov.take_sessions("2026-11-24T12:00:04Z", vec![row(Vec::new())]));
+    assert_eq!(ov.sessions()[0].prs.len(), 1, "a stale row still shows the linked pull request");
+}
+
+#[test]
 fn a_change_the_daemon_never_shows_gives_way() {
     use crate::menu::Patch;
     let mut ov = Overview::default();

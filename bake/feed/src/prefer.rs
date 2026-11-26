@@ -257,6 +257,17 @@ impl Plan {
     }
 }
 
+pub fn failure(error: &RespondError) -> String {
+    let done: Vec<&str> = error.reply["done"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    if !done.is_empty() {
+        return format!("{} Already changed: {}. Nothing was undone.", error.message.trim_end_matches('.').to_string() + ".", done.join("; "));
+    }
+    if error.maybe_delivered {
+        return format!("The change may have gone through: {}", error.message);
+    }
+    error.message.clone()
+}
+
 impl Client {
     pub fn usage_sets(&self) -> anyhow::Result<Vec<Set>> {
         Ok(serde_json::from_value::<Option<Vec<Set>>>(self.get_json("/api/v1/usage")?["sets"].clone())?.unwrap_or_default())
@@ -337,6 +348,14 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_change_says_what_already_changed_or_that_it_may_have() {
+        let partial = RespondError::from_status("/api/v1/proxies/prefer", 502, r#"{"error":{"code":"proxy_write_failed","message":"lead not changed: refused"},"done":["backup set to 10"]}"#);
+        assert_eq!(failure(&partial), "lead not changed: refused. Already changed: backup set to 10. Nothing was undone.");
+        let unknown = RespondError::from_status("/api/v1/proxies/prefer", 504, r#"{"error":{"code":"host_outcome_unknown","message":"Host forge did not answer"}}"#);
+        assert_eq!(failure(&unknown), "The change may have gone through: Host forge did not answer");
+    }
+
+    #[test]
     fn a_plan_reads_as_the_native_sheet_does() {
         let empty: Plan = serde_json::from_value(json!({"set": "on", "planId": "p2", "changes": null, "release": null, "hosts": [{"host": "mac", "roots": null, "sessions": null}], "warnings": null})).unwrap();
         assert_eq!(empty.affect_lines(), ["mac:  · no running sessions"]);
@@ -398,5 +417,6 @@ mod tests {
         assert_eq!(serde_json::from_str::<Value>(&body).unwrap(), json!({"proxy": "px", "account": "spare.json", "set": "only", "now": true, "planId": "p9"}));
         let stale = client.prefer_apply("px", "spare.json", Prefer::Only, true, "p9").unwrap_err();
         assert_eq!((stale.code.as_str(), stale.message.as_str()), ("plan_stale", "the proxy changed"));
+        assert_eq!(failure(&stale), "the proxy changed");
     }
 }

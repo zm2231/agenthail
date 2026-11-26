@@ -171,7 +171,7 @@ fn settled(s: &mut App, done: Done) {
                     }
                 }
                 Err(error) => {
-                    let (change, message) = (p.change.clone(), error.message);
+                    let (change, message) = (p.change.clone(), prefer::failure(&error));
                     preview(s, change);
                     if let Some(p) = s.accounts.planning.as_mut() {
                         p.result = Some(Err(format!("{message} Check the plan again before retrying.")));
