@@ -56,6 +56,8 @@ pub struct Prefs {
     watcher: Arc<AtomicU64>,
     rest_pending: bool,
     external: bool,
+    seen: u64,
+    reset_reread: bool,
     pub tab: usize,
     pub base: Option<Result<Base, Failure>>,
     pub settings: Option<Result<Settings, Failure>>,
@@ -115,7 +117,10 @@ pub fn keep(handle: AppHandle<Prefs>, window: WindowHandle) {
 pub fn open() {
     WINDOW.with(|w| {
         if let Some((handle, window)) = w.get() {
-            handle.update(|s: &mut Prefs, _| reload(s));
+            handle.update(|s: &mut Prefs, _| {
+                s.reset_reread = false;
+                reload(s);
+            });
             window.open();
             window.focus();
         }
@@ -144,6 +149,8 @@ fn init() -> Prefs {
         draft_orphaned: false,
         watcher: Arc::new(AtomicU64::new(0)),
         rest_pending: false,
+        seen: 0,
+        reset_reread: false,
         external: false,
         tab: 0,
         base: None,
@@ -240,7 +247,7 @@ fn read_rest(s: &mut Prefs) {
         return;
     }
     if let Some(Ok(b)) = &s.base {
-        watch(s, b.event_cursor);
+        watch(s, b.event_cursor.max(s.seen));
     }
     for what in &ALL[1..] {
         fetch(s, *what);
@@ -344,7 +351,8 @@ fn watch(s: &Prefs, from: u64) {
                 }
                 after = after.max(id);
                 if feed::prefs::rereads(kind) && handle.is_visible() {
-                    handle.update(|s: &mut Prefs, _| changed_elsewhere(s));
+                    let reset = kind == "stream.reset";
+                    handle.update(move |s: &mut Prefs, _| changed_elsewhere(s, id, reset));
                 }
                 true
             });
@@ -356,7 +364,16 @@ fn watch(s: &Prefs, from: u64) {
     });
 }
 
-fn changed_elsewhere(s: &mut Prefs) {
+fn changed_elsewhere(s: &mut Prefs, id: u64, reset: bool) {
+    if reset {
+        if std::mem::replace(&mut s.reset_reread, true) {
+            return;
+        }
+    } else if id <= s.seen {
+        return;
+    } else {
+        s.seen = id;
+    }
     if busy(s) {
         s.external = true;
     } else {
