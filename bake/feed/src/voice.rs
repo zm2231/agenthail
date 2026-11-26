@@ -400,6 +400,7 @@ pub struct Call {
     last_beat: f64,
     requested: Option<String>,
     transfer_from: Option<(u64, String)>,
+    peer_started: bool,
     asking_mic: bool,
     lost_at: Option<f64>,
     out: Vec<Effect>,
@@ -626,7 +627,7 @@ impl Call {
         self.error = Some(error);
         self.dialing = false;
         self.attempt = None;
-        self.out.push(Effect::PeerEnd);
+        self.end_peer();
         self.end_work(work);
     }
 
@@ -638,6 +639,7 @@ impl Call {
         let work = self.work;
         if granted {
             self.trail.mark(attempt, "microphone_granted", self.clock);
+            self.peer_started = true;
             self.out.push(Effect::PeerStart(attempt.to_string()));
             self.end_work(work);
         } else {
@@ -765,7 +767,7 @@ impl Call {
         self.channel_open = false;
         self.asking_mic = false;
         self.host_has_call = false;
-        self.out.push(Effect::PeerEnd);
+        self.end_peer();
         let local = self.attempt.take();
         if let Some(id) = &local {
             self.trail.end(id, cause, self.clock);
@@ -781,6 +783,12 @@ impl Call {
                 self.fetch(Req::Stop, Some(Action::new("stop").attempt(&id)));
             }
             _ => {}
+        }
+    }
+
+    fn end_peer(&mut self) {
+        if std::mem::take(&mut self.peer_started) {
+            self.out.push(Effect::PeerEnd);
         }
     }
 
@@ -931,7 +939,7 @@ impl Call {
                     self.dialing = false;
                     self.attempt = None;
                     self.start_submitted = false;
-                    self.out.push(Effect::PeerEnd);
+                    self.end_peer();
                     self.fetch(Req::Abandon, Some(Action::new("stop").attempt(&id)));
                 }
                 Err(error) if current => {
@@ -1090,7 +1098,7 @@ impl Call {
             self.dialing = false;
             self.attempt = None;
             if had_local {
-                self.out.push(Effect::PeerEnd);
+                self.end_peer();
             }
             self.beat_due = None;
             self.beating = None;

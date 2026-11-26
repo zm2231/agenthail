@@ -69,6 +69,15 @@ impl Trail {
         Ok(Trail { attempts, changed })
     }
 
+    pub fn merge(&mut self, saved: Trail) {
+        let mut attempts: Vec<Attempt> = saved.attempts.into_iter().filter(|a| !self.attempts.iter().any(|b| b.id == a.id)).collect();
+        attempts.append(&mut self.attempts);
+        let keep = attempts.len().saturating_sub(KEPT_CALLS);
+        attempts.drain(..keep);
+        self.attempts = attempts;
+        self.changed = true;
+    }
+
     pub fn save(&self) -> String {
         serde_json::to_string(&self.attempts).unwrap_or_else(|_| "[]".into())
     }

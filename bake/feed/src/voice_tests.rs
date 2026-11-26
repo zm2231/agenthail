@@ -137,7 +137,7 @@ fn a_denied_microphone_ends_the_attempt_before_any_start() {
     let prepare = only_job(&call.reply(select, Ok(state(json!({"phase": "ready"}))), 0.0));
     call.reply(prepare, Ok(state(json!({"phase": "ready"}))), 0.0);
     let id = call.attempt().unwrap().to_string();
-    assert_eq!(call.mic(&id, false), vec![Effect::PeerEnd]);
+    assert!(call.mic(&id, false).is_empty(), "no audio was started, so there is none to end");
     assert!(call.mic_denied);
     assert_eq!(call.error.as_deref(), Some(MIC_DENIED));
     assert!(!call.active() && call.can_call());
@@ -579,6 +579,38 @@ fn only_the_readiness_check_makes_a_reloaded_page_ready() {
     call.setup(Setup::Check);
     call.checked(true, 2.0);
     assert!(call.ready);
+}
+
+#[test]
+fn a_page_that_fails_its_check_without_a_call_ends_no_audio() {
+    let mut call = Call::new("");
+    call.peer("loading", "", 0.0);
+    call.setup(Setup::Check);
+    let effects = call.checked(false, 1.0);
+    assert!(!effects.contains(&Effect::PeerEnd), "ending audio would reload the page and check it again");
+    assert!(!call.ready);
+}
+
+#[test]
+fn calls_logged_while_the_saved_log_was_unreadable_join_it_once_it_reads() {
+    let mut saved = Trail::default();
+    for k in 0..19 {
+        saved.begin(&format!("old-{k}"), 0.0);
+        saved.end(&format!("old-{k}"), "local_hangup", 1.0);
+    }
+    let mut fresh = Trail::default();
+    fresh.begin("new-0", 0.0);
+    fresh.end("new-0", "local_hangup", 1.0);
+    fresh.begin("new-1", 2.0);
+    fresh.changed = false;
+    fresh.merge(saved);
+    let ids: Vec<_> = fresh.attempts.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(ids.len(), KEPT_CALLS);
+    assert_eq!(ids[0], "old-1");
+    assert_eq!(&ids[KEPT_CALLS - 2..], ["new-0", "new-1"]);
+    assert!(fresh.changed);
+    fresh.mark("new-1", "prepared", 3.0);
+    assert_eq!(fresh.last().unwrap().milestones, vec![("prepared".to_string(), 1.0)]);
 }
 
 fn dialed_routed(call: &mut Call) -> String {

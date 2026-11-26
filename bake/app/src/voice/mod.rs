@@ -21,7 +21,7 @@ thread_local! {
     static WINDOW: RefCell<Option<WindowHandle>> = const { RefCell::new(None) };
     static ROUTE: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
     static OPENED: RefCell<Option<String>> = const { RefCell::new(None) };
-    static UNSAVED: RefCell<Option<Trail>> = const { RefCell::new(None) };
+    static UNSAVED: RefCell<Option<(Trail, bool)>> = const { RefCell::new(None) };
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -68,10 +68,11 @@ impl Win {
             None => Err("Voice needs the Agenthail daemon. Start it, then open this window again.".into()),
         };
         let mut call = Call::new(target);
-        let unsaved = UNSAVED.with(|u| u.borrow_mut().take());
-        let loaded = unsaved.or_else(load_trail);
-        let keep_log = loaded.is_some();
-        call.trail = loaded.unwrap_or_default();
+        let (trail, keep_log) = UNSAVED.with(|u| u.borrow_mut().take()).unwrap_or_else(|| match load_trail() {
+            Some(trail) => (trail, true),
+            None => (Trail::default(), false),
+        });
+        call.trail = trail;
         if let Err(error) = &peer {
             eprintln!("voice: {error}");
             call.error = Some(error.clone());
@@ -283,9 +284,9 @@ fn closed(w: &mut Win, _: &mut Tx) {
     w.gone.store(true, Ordering::SeqCst);
     let effects = w.call.close();
     w.run(effects);
-    if w.call.trail.changed && w.keep_log && !save_trail(&w.call.trail) {
+    if w.call.trail.changed && !(w.keep_log && save_trail(&w.call.trail)) {
         let trail = std::mem::take(&mut w.call.trail);
-        UNSAVED.with(|u| *u.borrow_mut() = Some(trail));
+        UNSAVED.with(|u| *u.borrow_mut() = Some((trail, w.keep_log)));
     }
     #[cfg(target_os = "macos")]
     {
@@ -388,6 +389,15 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
     let effects = w.call.tick(t);
     changed |= effects.iter().any(|e| matches!(e, Effect::Note(_)));
     w.run(effects);
+    if w.call.trail.changed && !w.keep_log && t >= w.save_after {
+        match load_trail() {
+            Some(saved) => {
+                w.call.trail.merge(saved);
+                w.keep_log = true;
+            }
+            None => w.save_after = t + SAVE_RETRY_SECS,
+        }
+    }
     if w.call.trail.changed && w.keep_log && t >= w.save_after {
         if save_trail(&w.call.trail) {
             w.call.trail.changed = false;
