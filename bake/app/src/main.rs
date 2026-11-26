@@ -34,7 +34,7 @@ pub enum Bg {
     Answered(String, String, Result<(), feed::catalog::RespondError>),
     NewSession(ui::new_session::Loaded),
     Looked(String, u64, Result<feed::gone::Gone, String>),
-    Fixed(String, feed::gone::Fix, Result<(), feed::catalog::RespondError>),
+    Fixed(String, u64, feed::gone::Fix, Result<(), feed::catalog::RespondError>),
     Error(String),
 }
 
@@ -924,7 +924,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::NewSession(loaded) => ui::new_session::take(s, loaded),
             Bg::Error(error) => s.status = format!("daemon: {error}"),
             Bg::Looked(id, seq, result) => ui::gone::looked(s, &id, seq, result),
-            Bg::Fixed(id, fix, result) => ui::gone::fixed(s, &id, fix, result),
+            Bg::Fixed(id, seq, fix, result) => ui::gone::fixed(s, &id, seq, fix, result),
         }
     }
     let mut busy = false;

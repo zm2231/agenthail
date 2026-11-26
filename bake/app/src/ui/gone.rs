@@ -16,7 +16,7 @@ pub struct Missing {
     pub look: Look,
     asked: f64,
     asking: Option<u64>,
-    pub fixing: Option<Fix>,
+    pub fixing: Option<(Fix, u64)>,
     pub error: Option<String>,
 }
 
@@ -92,18 +92,19 @@ pub fn recheck(s: &mut App, id: &str) {
 fn fix(s: &mut App, fix: Fix) {
     let Some(client) = s.client.clone() else { return };
     let Some(m) = s.missing.as_mut().filter(|m| m.fixing.is_none()) else { return };
-    m.fixing = Some(fix);
+    let seq = LOOKUPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    m.fixing = Some((fix, seq));
     m.asking = None;
     m.error = None;
     let (id, tx) = (m.id.clone(), s.outbox.clone());
     std::thread::spawn(move || {
         let result = client.fix(&id, fix);
-        let _ = tx.send(Bg::Fixed(id, fix, result));
+        let _ = tx.send(Bg::Fixed(id, seq, fix, result));
     });
 }
 
-pub fn fixed(s: &mut App, id: &str, fix: Fix, result: Result<(), feed::catalog::RespondError>) {
-    let Some(m) = s.missing.as_mut().filter(|m| m.id == id) else { return };
+pub fn fixed(s: &mut App, id: &str, seq: u64, fix: Fix, result: Result<(), feed::catalog::RespondError>) {
+    let Some(m) = s.missing.as_mut().filter(|m| m.id == id && m.fixing.is_some_and(|(_, n)| n == seq)) else { return };
     m.fixing = None;
     m.asked = f64::NEG_INFINITY;
     if let Err(e) = result {

@@ -188,9 +188,14 @@ pub fn classify(id: &str, detail: &Detail, listing: Listing, known: Option<&Sess
     } else {
         Why::Unlisted
     };
+    let resume = match (&listed, detail) {
+        (Some(l), _) => l.capabilities.lifecycle.resume,
+        (None, Detail::Found(_)) => detail.resume(),
+        _ => row.capabilities.lifecycle.resume,
+    };
     let fix = match why {
         Why::Archived => Some(Fix::Unarchive),
-        _ if row.capabilities.lifecycle.resume || detail.resume() => Some(Fix::Resume),
+        _ if resume => Some(Fix::Resume),
         _ => None,
     };
     Ok(Gone { row, why, fix, exchanges: detail.exchanges(), read_error: match detail {
@@ -198,8 +203,6 @@ pub fn classify(id: &str, detail: &Detail, listing: Listing, known: Option<&Sess
         _ => detail.read_error(),
     }, history: detail.history() })
 }
-
-const PAGES: usize = 10;
 
 pub fn search_terms<'a>(rows: impl Iterator<Item = &'a Session>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
@@ -235,7 +238,7 @@ impl Client {
 
     fn listed(&self, id: &str, term: &str) -> Result<Option<Session>, String> {
         let mut cursor: Option<String> = None;
-        for _ in 0..PAGES {
+        loop {
             let mut path = format!("/api/v1/snapshot?q={}&limit=200", enc(term));
             if let Some(c) = &cursor {
                 path.push_str(&format!("&cursor={}", enc(c)));
@@ -244,12 +247,11 @@ impl Client {
             if let Some(row) = page["sessions"].as_array().into_iter().flatten().find(|r| r["id"] == id) {
                 return serde_json::from_value(row.clone()).map(Some).map_err(|e| e.to_string());
             }
-            match page["nextCursor"].as_str().filter(|c| !c.is_empty()) {
+            match page["nextCursor"].as_str().filter(|c| !c.is_empty() && cursor.as_deref() != Some(*c)) {
                 Some(c) => cursor = Some(c.to_string()),
                 None => return Ok(None),
             }
         }
-        Err(format!("more than {} pages match \"{term}\"", PAGES * 200))
     }
 
     pub fn fix(&self, id: &str, fix: Fix) -> Result<(), RespondError> {
@@ -404,6 +406,17 @@ mod tests {
         assert_eq!(g.why, Why::Archived);
         assert_eq!(g.read_error.as_deref(), Some("conflict"));
         assert_eq!(g.empty_note(), "Nothing could be read from this conversation.");
+    }
+
+    #[test]
+    fn resume_follows_the_freshest_answer() {
+        let known = row(json!({"id": "s1", "host": {"state": "local"}, "capabilities": {"lifecycle": {"resume": true}}}));
+        let now_no = Detail::Found(json!({"session": {}, "capabilities": {"lifecycle": {"resume": false}}}));
+        assert_eq!(classify("s1", &now_no, Listing::Absent, Some(&known)).unwrap().fix, None);
+        let listed_no = row(json!({"id": "s1", "host": {"name": "b", "state": "disconnected"}}));
+        assert_eq!(classify("s1", &Detail::Unreachable, Listing::Found(listed_no), Some(&known)).unwrap().fix, None);
+        let gone_host = row(json!({"id": "s1", "host": {"name": "b", "state": "disconnected"}, "capabilities": {"lifecycle": {"resume": true}}}));
+        assert_eq!(classify("s1", &Detail::Unreachable, Listing::Absent, Some(&gone_host)).unwrap().fix, Some(Fix::Resume));
     }
 
     #[test]
