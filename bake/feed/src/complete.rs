@@ -539,8 +539,11 @@ impl Client {
         if let Some(turn) = before {
             payload["fork"] = json!({"beforeTurnId": turn});
         }
-        let reply = self.action_keyed("session-fork", payload, key)?;
+        let reply = crate::catalog::confirmed(self.action_keyed("session-fork", payload, key)?)?;
         let id = reply["result"]["session"]["id"].as_str().unwrap_or_default();
+        if id.is_empty() {
+            return Err(RespondError { message: "the daemon didn't say which session it made".into(), code: "submitted".into(), maybe_delivered: true, answered: true, reply, status: 0 });
+        }
         Ok(match session.split_once("::") {
             Some((host, _)) if !id.is_empty() && !id.contains("::") => format!("{host}::{id}"),
             _ => id.to_string(),
@@ -783,5 +786,8 @@ mod tests {
         assert_eq!(seen.recv().unwrap().1, json!({"action": "session-fork", "sessionId": "s1"}));
         assert_eq!(client.goal_set("h::s1", "Ship the importer").unwrap(), crate::composer::Delivered::Sent);
         assert_eq!(seen.recv().unwrap().1, json!({"action": "goal-set", "sessionId": "h::s1", "message": "Ship the importer"}));
+        let (client, _seen) = daemon(replies(&[(202, r#"{"ok":true,"status":"submitted"}"#), (200, r#"{"ok":true,"result":{}}"#)]));
+        assert!(client.fork("s1", Some("t1"), "k3").unwrap_err().maybe_delivered, "a request still running isn't a fork yet");
+        assert!(client.fork("s1", Some("t1"), "k3").unwrap_err().maybe_delivered, "nor is a reply without a session");
     }
 }
