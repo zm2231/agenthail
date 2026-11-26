@@ -446,24 +446,8 @@ func TestAReopenedSessionIsSetBackWithinItsCeilingBeforeItsPrompt(t *testing.T) 
 	if state.Mode != "default" {
 		t.Fatalf("mode=%s", state.Mode)
 	}
-	s := h.host.heldSession(state.SessionID)
-	s.stopProcess()
-	path := filepath.Join(agent.Env["AGENTHAIL_ACPTEST_STATE"], state.AgentSessionID+".json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var saved map[string]any
-	if err := json.Unmarshal(data, &saved); err != nil {
-		t.Fatal(err)
-	}
-	saved["mode"] = "bypass"
-	if data, err = json.Marshal(saved); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	h.host.heldSession(state.SessionID).stopProcess()
+	path := reopenAbove(t, agent, state)
 	turn := h.send(state.SessionID, "reply:within")
 	done := h.waitFor(state.SessionID, func(s State) bool { return s.LastTurnID == turn })
 	if done.Mode != "default" {
@@ -503,5 +487,61 @@ func TestOneContestedSessionDoesNotHoldUpOpeningAnother(t *testing.T) {
 	}
 	if err := <-waited; !isCode(err, CodeHeld) {
 		t.Fatalf("a session another host keeps must report it is held: %v", err)
+	}
+}
+
+func reopenAbove(t *testing.T, agent Agent, state State) string {
+	t.Helper()
+	path := filepath.Join(agent.Env["AGENTHAIL_ACPTEST_STATE"], state.AgentSessionID+".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved map[string]any
+	if err := json.Unmarshal(data, &saved); err != nil {
+		t.Fatal(err)
+	}
+	saved["mode"] = "bypass"
+	if data, err = json.Marshal(saved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestAPersonsModeChoiceRepairsASessionThatReopenedTooHigh(t *testing.T) {
+	agent := fakeAgent(t, "fake")
+	agent.Modes["retired"] = "plan"
+	h := startHost(t, agent)
+	state := h.create("fake", "edits", "")
+	s := h.host.heldSession(state.SessionID)
+	s.stopProcess()
+	s.mu.Lock()
+	s.state.Mode = "retired"
+	s.mu.Unlock()
+	reopenAbove(t, agent, state)
+	changed, err := h.client.SetOption(context.Background(), OptionParams{SessionID: state.SessionID, Category: "mode", Value: "ask"})
+	if err != nil || changed.Mode != "ask" {
+		t.Fatalf("state=%+v err=%v", changed, err)
+	}
+}
+
+func TestRecoveryPicksAModeTheAgentStillOffers(t *testing.T) {
+	agent := fakeAgent(t, "fake")
+	agent.Modes["retired"] = "plan"
+	h := startHost(t, agent)
+	state := h.create("fake", "edits", "")
+	s := h.host.heldSession(state.SessionID)
+	s.stopProcess()
+	s.mu.Lock()
+	s.state.Mode = "retired"
+	s.mu.Unlock()
+	reopenAbove(t, agent, state)
+	turn := h.send(state.SessionID, "reply:recovered")
+	done := h.waitFor(state.SessionID, func(s State) bool { return s.LastTurnID == turn })
+	if done.Mode != "default" || done.LastStop != "end_turn" {
+		t.Fatalf("state=%+v", done)
 	}
 }

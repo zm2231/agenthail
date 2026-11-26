@@ -314,7 +314,11 @@ func (h *Host) act(ctx context.Context, call Call) (any, error) {
 		if err := s.closedError(); err != nil {
 			return nil, err
 		}
-		if err := s.ensureRunning(ctx, nil); err != nil {
+		preferred := ""
+		if p.Category == "mode" {
+			preferred = p.Value
+		}
+		if err := s.ensureRunning(ctx, nil, preferred); err != nil {
 			return nil, err
 		}
 		if err := s.setOption(ctx, p.Category, p.Value); err != nil {

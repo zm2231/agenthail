@@ -127,6 +127,11 @@ func (s *session) Request(ctx context.Context, method string, params json.RawMes
 	case <-ctx.Done():
 		s.mu.Lock()
 		delete(s.pending, request.ID)
+		select {
+		case answer := <-pending.answer:
+			answer.written <- errors.New("the agent's connection closed before the answer was written")
+		default:
+		}
 		s.mu.Unlock()
 		s.changed()
 		return acp.Cancelled(), nil
@@ -196,6 +201,18 @@ func (s *session) applyStateLocked(u acp.Update) string {
 	return ""
 }
 
+func (s *session) offeredWithinCeiling(modes ...string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	offered := s.modeIDsLocked()
+	for _, mode := range modes {
+		if mode != "" && slices.Contains(offered, mode) && !s.aboveCeilingLocked(mode) {
+			return mode
+		}
+	}
+	return ""
+}
+
 func (s *session) withinCeiling(mode string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -237,7 +254,7 @@ func (s *session) cancelRequestsLocked() {
 	}
 }
 
-func (s *session) ensureRunning(ctx context.Context, mcp []acp.MCPServer) error {
+func (s *session) ensureRunning(ctx context.Context, mcp []acp.MCPServer, preferred string) error {
 	s.mu.Lock()
 	running := s.conn != nil
 	agentSession, recorded := s.state.AgentSessionID, s.state.Mode
@@ -270,7 +287,7 @@ func (s *session) ensureRunning(ctx context.Context, mcp []acp.MCPServer) error 
 		return fmt.Errorf("load the %s session: %w", s.agent.DisplayName(), err)
 	}
 	if above {
-		target := recorded
+		target := s.offeredWithinCeiling(preferred, recorded)
 		if target == "" {
 			target, err = s.pickModeWithinCeiling()
 		}
@@ -616,7 +633,7 @@ func (s *session) send(ctx context.Context, params SendParams) (SendResult, erro
 	if busy {
 		return SendResult{}, callError(CodeBusy, "the session is running a turn")
 	}
-	if err := s.ensureRunning(ctx, params.MCPServers); err != nil {
+	if err := s.ensureRunning(ctx, params.MCPServers, ""); err != nil {
 		return SendResult{}, err
 	}
 	turnID := uuid.NewString()
@@ -727,35 +744,21 @@ func (s *session) respond(requestID, choice string) (RespondResult, error) {
 	delete(s.pending, requestID)
 	written := make(chan error, 1)
 	pending.answer <- permissionAnswer{result: answer, written: written}
-	conn := s.conn
 	s.mu.Unlock()
 	s.changed()
-	err := awaitWritten(written, conn)
 	if choice == "stop" {
-		_ = s.cancel()
+		go func() { _ = s.cancel() }()
 	}
+	err := awaitWritten(written)
 	if err != nil {
 		return RespondResult{}, callError(CodeFailed, "the answer did not reach %s: %v", s.agent.DisplayName(), err)
 	}
 	return RespondResult{Outcome: outcome}, nil
 }
 
-// awaitWritten has no deadline of its own: a write still pending is not a failure, and the caller's own timeout leaves the outcome unknown.
-func awaitWritten(written chan error, conn *acp.Conn) error {
-	if conn == nil {
-		return errNotRunning
-	}
-	select {
-	case err := <-written:
-		return err
-	case <-conn.Done():
-	}
-	select {
-	case err := <-written:
-		return err
-	case <-time.After(stopGrace):
-		return errors.New("the agent stopped before the answer was written")
-	}
+// awaitWritten has no deadline: a pending write resolves once the agent reads it or its process is gone, and the caller's own timeout leaves the outcome unknown.
+func awaitWritten(written chan error) error {
+	return <-written
 }
 
 func (s *session) quiet() bool {
