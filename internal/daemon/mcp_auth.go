@@ -113,15 +113,12 @@ var errCallerPermissions = errors.New("reading the session's permissions failed"
 // with no error is a Codex thread connecting before its token binds.
 func (d *Daemon) credentialCaller(token string) (*mcpCaller, error) {
 	credential, err := d.authenticateSession(token, time.Now())
-	if errors.Is(err, registry.ErrCredentialUnknown) {
+	if d.credentialRead != nil {
+		d.credentialRead()
+	}
+	if errors.Is(err, registry.ErrCredentialPending) {
 		// Codex connects during thread/start, before its token can bind; with no caller every tool call is refused.
-		live, liveErr := d.Registry.PendingCredentialLive(token, time.Now())
-		if liveErr == nil && live {
-			return nil, nil
-		}
-		if liveErr != nil {
-			err = liveErr
-		}
+		return nil, nil
 	}
 	if err != nil {
 		return nil, err

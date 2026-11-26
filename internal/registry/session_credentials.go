@@ -29,6 +29,7 @@ var (
 	ErrCredentialUnknown    = errors.New("unknown session credential")
 	ErrCredentialExpired    = errors.New("session credential expired")
 	ErrCredentialMaxExpired = errors.New("session credential reached its maximum lifetime")
+	ErrCredentialPending    = errors.New("session credential not yet bound to its thread")
 )
 
 type CredentialRevokedError struct{ Reason string }
@@ -173,6 +174,9 @@ func (r *Registry) authenticateSessionToken(token string, now time.Time, running
 		return SessionCredential{}, err
 	}
 	if row.SessionID == "" {
+		if row.revokedAt == 0 && row.pendingExpiresAt > now.UnixMilli() {
+			return SessionCredential{}, ErrCredentialPending
+		}
 		return SessionCredential{}, ErrCredentialUnknown
 	}
 	if row.revokedAt != 0 {
@@ -244,19 +248,20 @@ func endedReason(hostID string, archived int) string {
 	return ""
 }
 
-const credentialSelect = `SELECT id,session_id,created_at_ms,last_used_at_ms,idle_expires_at_ms,max_expires_at_ms,revoked_at_ms,revoked_reason FROM session_credentials`
+const credentialSelect = `SELECT id,session_id,created_at_ms,last_used_at_ms,idle_expires_at_ms,max_expires_at_ms,revoked_at_ms,revoked_reason,pending_expires_at_ms FROM session_credentials`
 
 type credentialRow struct {
 	SessionCredential
-	revokedAt     int64
-	revokedReason string
+	revokedAt        int64
+	revokedReason    string
+	pendingExpiresAt int64
 }
 
 func scanCredential(row *sql.Row) (credentialRow, error) {
 	var result credentialRow
 	var sessionID sql.NullString
 	var created, used, idle, max int64
-	if err := row.Scan(&result.ID, &sessionID, &created, &used, &idle, &max, &result.revokedAt, &result.revokedReason); err != nil {
+	if err := row.Scan(&result.ID, &sessionID, &created, &used, &idle, &max, &result.revokedAt, &result.revokedReason, &result.pendingExpiresAt); err != nil {
 		return credentialRow{}, err
 	}
 	result.SessionID = sessionID.String

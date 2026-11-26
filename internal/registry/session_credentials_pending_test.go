@@ -16,7 +16,7 @@ func TestPendingCredentialAuthenticatesOnlyOnceItsSessionRegisters(t *testing.T)
 	if err != nil || pending.Token == "" || pending.Ref == "" {
 		t.Fatalf("pending=%+v err=%v", pending, err)
 	}
-	if _, err := r.AuthenticateSessionToken(pending.Token, now); !errors.Is(err, ErrCredentialUnknown) {
+	if _, err := r.AuthenticateSessionToken(pending.Token, now); !errors.Is(err, ErrCredentialPending) {
 		t.Fatalf("unbound credential authenticated: %v", err)
 	}
 	if claimed, err := r.ClaimPendingCredential(pending.Ref, "thread", now); err != nil || !claimed {
@@ -25,14 +25,14 @@ func TestPendingCredentialAuthenticatesOnlyOnceItsSessionRegisters(t *testing.T)
 	if claimed, err := r.ClaimPendingCredential(pending.Ref, "other", now); err != nil || claimed {
 		t.Fatalf("second claim=%v err=%v", claimed, err)
 	}
-	if _, err := r.AuthenticateSessionToken(pending.Token, now); !errors.Is(err, ErrCredentialUnknown) {
+	if _, err := r.AuthenticateSessionToken(pending.Token, now); !errors.Is(err, ErrCredentialPending) {
 		t.Fatalf("claimed but unregistered credential authenticated: %v", err)
 	}
 	other := surface.Session{ID: "other", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}
 	if err := r.RecordObservedSession(other); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.AuthenticateSessionToken(pending.Token, now); !errors.Is(err, ErrCredentialUnknown) {
+	if _, err := r.AuthenticateSessionToken(pending.Token, now); !errors.Is(err, ErrCredentialPending) {
 		t.Fatalf("another session's registration bound the credential: %v", err)
 	}
 	thread := surface.Session{ID: "thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer}
