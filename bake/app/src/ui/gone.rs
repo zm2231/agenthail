@@ -84,6 +84,10 @@ pub fn looked(s: &mut App, id: &str, seq: u64, result: Result<Gone, String>) {
     };
 }
 
+pub fn settled(s: &App, id: &str) -> bool {
+    s.missing.as_ref().is_none_or(|m| m.id != id || m.fresh)
+}
+
 pub fn recheck(s: &mut App, id: &str) {
     if let Some(m) = s.missing.as_mut().filter(|m| m.id == id) {
         m.fresh = false;

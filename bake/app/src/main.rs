@@ -970,6 +970,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     if s.screen != Screen::Session {
         s.revealed = None;
     } else if s.revealed != s.selected
+        && s.ov.sidebar.is_open()
         && let Some(id) = s.selected.clone()
         && (s.ov.d.session(&id).is_some() || ui::gone::shown(s, &id).is_some())
     {
