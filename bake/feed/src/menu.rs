@@ -187,7 +187,7 @@ pub fn names_pr(asked: &str, pr: &crate::catalog::Pr) -> bool {
     }
     let Some((_, rest)) = asked.split_once("://") else { return false };
     let path = rest.split(['?', '#']).next().unwrap_or_default().trim_end_matches('/');
-    let parts: Vec<&str> = path.split('/').collect();
+    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
     let [host, owner, name, "pull", number] = parts[..] else { return false };
     let Ok(number) = number.parse::<u64>() else { return false };
     let host = host.rsplit('@').next().unwrap_or(host).split(':').next().unwrap_or(host);
@@ -325,7 +325,7 @@ mod tests {
     #[test]
     fn the_pull_request_the_daemon_linked_is_found_from_what_was_typed() {
         let pr = Pr { repo: "github.com/Owner/Repo".into(), number: 12, url: "https://github.com/Owner/Repo/pull/12".into(), ..Default::default() };
-        for asked in ["12", "#12", " https://github.com/owner/repo/pull/12 ", "https://github.com/Owner/Repo/pull/12/", "https://github.com/Owner/Repo/pull/12?w=1", "https://github.com/Owner/Repo/pull/12#discussion", "https://github.com/Owner/Repo.git/pull/12"] {
+        for asked in ["12", "#12", " https://github.com/owner/repo/pull/12 ", "https://github.com/Owner/Repo/pull/12/", "https://github.com/Owner/Repo/pull/12?w=1", "https://github.com/Owner/Repo/pull/12#discussion", "https://github.com/Owner/Repo.git/pull/12", "https://github.com//Owner/Repo/pull/12", "https://github.com/Owner/Repo//pull/12/"] {
             assert!(names_pr(asked, &pr), "{asked}");
         }
         for asked in ["13", "https://git.example.com/Owner/Repo/pull/12", "https://github.com/Owner/Other/pull/12", "https://github.com/Owner/Repo/pull/13", "https://github.com/Owner/Repo/issues/12", "fix"] {
