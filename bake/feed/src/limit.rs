@@ -115,7 +115,7 @@ pub struct Target {
 
 pub fn carry_usage(fresh: &mut [ConfigRoot], known: &[ConfigRoot]) {
     for root in fresh.iter_mut().filter(|r| r.usage.is_none() && !r.full) {
-        if let Some(old) = known.iter().find(|k| k.root == root.root) {
+        if let Some(old) = known.iter().find(|k| k.same_account(root)) {
             root.usage = old.usage.clone();
             root.best = old.best.clone();
             root.full = old.full;
@@ -124,17 +124,17 @@ pub fn carry_usage(fresh: &mut [ConfigRoot], known: &[ConfigRoot]) {
     }
 }
 
-pub fn targets(stop: &Stop, current: Option<&str>, roots: &[ConfigRoot]) -> Vec<Target> {
+pub fn targets(stop: &Stop, current: Option<&str>, roots: &[ConfigRoot], now: OffsetDateTime) -> Vec<Target> {
     let mut out = Vec::new();
     if let Some(offer) = &stop.offer {
         let known = roots.iter().find(|r| r.root == offer.root);
         let usage = known.and_then(ConfigRoot::usage_line);
         let detail = [offer.reason.clone().filter(|r| !r.is_empty()), usage].into_iter().flatten().collect::<Vec<_>>().join(" · ");
-        out.push(Target { root: offer.root.clone(), name: offer.name(), detail: (!detail.is_empty()).then_some(detail), full: known.is_some_and(|r| r.full), offered: true });
+        out.push(Target { root: offer.root.clone(), name: offer.name(), detail: (!detail.is_empty()).then_some(detail), full: known.is_some_and(|r| r.spent(now)), offered: true });
     }
     let offered = stop.offer.as_ref().map(|o| o.root.as_str());
     for root in roots.iter().filter(|r| r.selectable() && Some(r.root.as_str()) != current && Some(r.root.as_str()) != offered) {
-        out.push(Target { root: root.root.clone(), name: root.title(), detail: root.usage_line(), full: root.full, offered: false });
+        out.push(Target { root: root.root.clone(), name: root.title(), detail: root.usage_line(), full: root.spent(now), offered: false });
     }
     out
 }
@@ -228,8 +228,11 @@ mod tests {
         let mut full = root("c", "/r/c", Some("c@example.com"));
         full.full = true;
         let mut fresh = vec![root("c", "/r/c", Some("c@example.com")), root("d", "/r/d", Some("d@example.com"))];
-        carry_usage(&mut fresh, &[full]);
+        carry_usage(&mut fresh, &[full.clone()]);
         assert_eq!(fresh.iter().map(|r| r.full).collect::<Vec<_>>(), [true, false]);
+        let mut switched = vec![root("c", "/r/c", Some("other@example.com"))];
+        carry_usage(&mut switched, &[full]);
+        assert!(!switched[0].full, "another account signed in at the same root starts fresh");
     }
 
     #[test]
@@ -260,13 +263,17 @@ mod tests {
         let mut c = root("c", "/r/c", Some("c@example.com"));
         c.full = true;
         let roots = vec![root("a", "/r/a", Some("a@example.com")), b, c, root("x", "/r/x", None)];
-        let got = targets(&stop, Some("/r/a"), &roots);
+        let now = at("2026-11-26T10:00:00Z");
+        let got = targets(&stop, Some("/r/a"), &roots, now);
         assert_eq!(got.iter().map(|t| (t.root.as_str(), t.name.as_str(), t.offered, t.full)).collect::<Vec<_>>(), [("/r/b", "b@example.com", true, false), ("/r/c", "c", false, true)]);
         assert_eq!(got[0].detail.as_deref(), Some("most room · session 12%"));
         let mut spent = roots.clone();
         spent[1].full = true;
-        assert!(targets(&stop, Some("/r/a"), &spent)[0].full, "a suggested account that has run out can't be picked");
+        assert!(targets(&stop, Some("/r/a"), &spent, now)[0].full, "a suggested account that has run out can't be picked");
+        let mut exhausted = roots.clone();
+        exhausted[0].take_usage(serde_json::from_value(json!({"root": "/r/a", "usage": {"limits": [{"kind": "5h", "percent": 100, "resetsAt": "2026-11-26T11:00:00Z"}]}})).unwrap());
+        assert!(targets(&Stop { offer: None, ..stop.clone() }, None, &exhausted, now)[0].full, "a direct account at its limit can't be picked");
         let no_offer = Stop { offer: None, ..stop };
-        assert_eq!(targets(&no_offer, None, &roots).iter().map(|t| t.root.as_str()).collect::<Vec<_>>(), ["/r/a", "/r/b", "/r/c"]);
+        assert_eq!(targets(&no_offer, None, &roots, now).iter().map(|t| t.root.as_str()).collect::<Vec<_>>(), ["/r/a", "/r/b", "/r/c"]);
     }
 }

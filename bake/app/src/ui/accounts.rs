@@ -275,12 +275,18 @@ fn proxy_account(s: &App, group: &ProxyGroup, a: &ProxyAccount) -> El {
     }
     let mut c = col().w_full().gap(6.0).padding(10.0).radius(8.0).fill(Color::WHITE.alpha(0.04)).child(head);
     c = c.children(a.meters.iter().map(|m| meter_row(s, m)));
-    let toggle = if a.preferred { change(Prefer::Off) } else { change(Prefer::On) };
+    let on = a.set_to_prefer();
+    let toggle = if on { change(Prefer::Off) } else { change(Prefer::On) };
+    let help = if on && !a.preferred { "Preferred, but tied with another preferred account; turning it off changes only this account" } else { "Changes only this account's preference" };
     let mut actions = row().gap(8.0).items_center().child(
-        Button::new(if a.preferred { "Preferred ✓" } else { "Prefer" })
-            .variant(if a.preferred { ButtonVariant::Submit } else { ButtonVariant::Neutral })
+        Button::new(match (on, a.preferred) {
+            (true, true) => "Preferred ✓",
+            (true, false) => "Preferred, tied ✓",
+            _ => "Prefer",
+        })
+            .variant(if on { ButtonVariant::Submit } else { ButtonVariant::Neutral })
             .control_size(ControlSize::Small)
-            .help("Changes only this account's preference")
+            .help(help)
             .on_press(move |s: &mut App| preview(s, toggle.clone()))
             .build(k)
             .key(format!("prefer-{}-{}", group.proxy.id, a.id)),

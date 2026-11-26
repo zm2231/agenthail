@@ -141,6 +141,15 @@ impl ConfigRoot {
         self.full_until = usage.full_until;
     }
 
+    pub fn spent(&self, now: time::OffsetDateTime) -> bool {
+        let at_limit = |l: &Limit| l.percent >= 100.0 && l.resets_at.as_deref().and_then(crate::catalog::parse_time).is_none_or(|at| at > now);
+        self.full || self.usage.as_ref().is_some_and(|u| u.limits.iter().any(at_limit))
+    }
+
+    pub fn same_account(&self, other: &ConfigRoot) -> bool {
+        self.root == other.root && self.login == other.login && self.proxy == other.proxy && self.signed_in_as.as_ref().map(|l| &l.email) == other.signed_in_as.as_ref().map(|l| &l.email)
+    }
+
     pub fn take_reading(&mut self, usage: RootUsage) -> bool {
         let unread = usage.usage.is_none() && !usage.full && usage.usage_problem.as_deref().is_some_and(|p| !p.is_empty());
         if !unread {
@@ -683,6 +692,17 @@ mod tests {
         assert_eq!(roots.iter().map(ConfigRoot::selectable).collect::<Vec<_>>(), [true, true, false]);
         assert_eq!(roots.iter().map(ConfigRoot::reads_usage).collect::<Vec<_>>(), [true, true, false]);
         assert_eq!(options.projects[0].root_path, "/w/app");
+    }
+
+    #[test]
+    fn an_account_with_a_window_at_its_limit_is_spent_until_that_window_resets() {
+        let now = crate::catalog::parse_time("2026-11-26T10:00:00Z").unwrap();
+        let reading = |percent: f64, resets: Option<&str>| ConfigRoot { usage: Some(Usage { limits: vec![Limit { kind: "5h".into(), percent, resets_at: resets.map(String::from) }] }), ..Default::default() };
+        assert!(reading(100.0, Some("2026-11-26T11:00:00Z")).spent(now));
+        assert!(reading(100.0, None).spent(now));
+        assert!(!reading(100.0, Some("2026-11-26T09:00:00Z")).spent(now));
+        assert!(!reading(99.0, Some("2026-11-26T11:00:00Z")).spent(now));
+        assert!(ConfigRoot { full: true, ..Default::default() }.spent(now));
     }
 
     #[test]

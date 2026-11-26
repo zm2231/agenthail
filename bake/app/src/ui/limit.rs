@@ -265,7 +265,7 @@ pub(crate) fn card(s: &App, x: &Session, stop: &Stop) -> El {
             actions = actions.child(button("Don't resume", ButtonVariant::Ghost, busy).help("Keep the session stopped when its usage limit resets").on_press(move |s: &mut App| resume(s, &id, false)).build(k).key("limit-cancel"));
         }
         if let Some(offer) = stop.offer.as_ref().filter(|_| stop.waiting) {
-            let full = matches!(s.limits.roots.get(&host_key(x)), Some(Ok(roots)) if roots.iter().any(|r| r.root == offer.root && r.full));
+            let full = matches!(s.limits.roots.get(&host_key(x)), Some(Ok(roots)) if roots.iter().any(|r| r.root == offer.root && r.spent(s.now)));
             let target = Target { root: offer.root.clone(), name: offer.name(), detail: offer.reason.clone(), full, offered: true };
             let (id, since) = (x.id.clone(), stop.since.clone());
             let help = match &offer.reason {
@@ -357,7 +357,7 @@ fn picker(s: &App, id: &str, since: &str, layer: &mut Vec<El>) {
                 Some(Ok(roots)) => roots.as_slice(),
                 _ => &[],
             };
-            let list = targets(&stop, current, roots);
+            let list = targets(&stop, current, roots, s.now);
             if list.is_empty() {
                 body = body.child(text("No other Claude account is set up on this computer.").font(META).color(muted()).wrap());
             }

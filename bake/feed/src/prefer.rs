@@ -39,6 +39,8 @@ pub struct ProxyAccount {
     #[serde(default)]
     pub preferred: bool,
     #[serde(default)]
+    pub preference: f64,
+    #[serde(default)]
     pub routed: bool,
     #[serde(default)]
     pub set_on: Option<String>,
@@ -105,6 +107,12 @@ pub struct ProxyGroup {
     pub accounts: Vec<ProxyAccount>,
     pub problem: String,
     pub reading: bool,
+}
+
+impl ProxyAccount {
+    pub fn set_to_prefer(&self) -> bool {
+        self.preferred || self.preference >= 10.0
+    }
 }
 
 impl ProxyGroup {
@@ -329,6 +337,9 @@ mod tests {
         let [lead, _, gpt] = &groups[0].accounts[..] else { panic!() };
         assert!(lead.preferred && groups[0].has_peers(lead));
         assert!(!groups[0].has_peers(gpt));
+        let tied: ProxyAccount = serde_json::from_value(json!({"id": "b.json", "provider": "claude", "preference": 10, "preferred": false})).unwrap();
+        assert!(tied.set_to_prefer() && lead.set_to_prefer(), "a tie at the preferred value can still be turned off");
+        assert!(!groups[0].accounts[1].set_to_prefer());
         assert_eq!(accounts(&sets).iter().map(|s| s.title()).collect::<Vec<_>>(), ["a@example.com", "spare", "Codex"]);
     }
 
