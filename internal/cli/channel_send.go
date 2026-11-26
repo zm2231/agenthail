@@ -108,6 +108,13 @@ func (a *App) printChannelResult(receipt channelReceipt) {
 		summary += fmt.Sprintf(", %d skipped", skipped)
 	}
 	fmt.Println(summary)
+	switch receipt.Older {
+	case 0:
+	case 1:
+		fmt.Println("and 1 older session not reached")
+	default:
+		fmt.Printf("and %d older sessions not reached\n", receipt.Older)
+	}
 	if len(receipt.Unreachable) > 0 {
 		fmt.Printf("held for unreachable host(s): %s\n", strings.Join(receipt.Unreachable, ", "))
 	}

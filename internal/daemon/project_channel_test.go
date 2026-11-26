@@ -472,12 +472,13 @@ func TestAProjectPostWhoseOnlyMembersAnotherHostSkippedIsRefused(t *testing.T) {
 	}
 }
 
-func TestAProjectChannelSkipsOneOffRunsUntilATaskSettles(t *testing.T) {
+func TestAProjectPostReachesTaskWorkersAndAccountsForEverySessionLeftOut(t *testing.T) {
 	local, _, _ := widgetOnTwoHosts(t)
 	repo := local.fake.sessions["local-a"].Cwd
 	for _, id := range []string{"worker", "task-running", "task-settled", "exec-run", "spawned-agent"} {
 		moveSession(t, local, id, repo, time.Now())
 	}
+	moveSession(t, local, "stale", repo, time.Now().Add(-72*time.Hour))
 	exec := local.fake.sessions["exec-run"]
 	exec.Source = "exec"
 	local.fake.sessions["exec-run"] = exec
@@ -501,17 +502,28 @@ func TestAProjectChannelSkipsOneOffRunsUntilATaskSettles(t *testing.T) {
 	response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "#widget", "message": "release notes", "sourceSessionId": "local-a"})
 	var answer struct {
 		Recipients []broadcast.Recipient `json:"recipients"`
+		Older      int                   `json:"older"`
 	}
 	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &answer) != nil {
 		t.Fatalf("send status=%d body=%s", response.Code, response.Body)
 	}
-	reached := map[string]bool{}
+	outcomes := map[string]broadcast.Recipient{}
 	for _, recipient := range answer.Recipients {
 		if recipient.HostID == "" && recipient.Coordinator == "" {
-			reached[recipient.SessionID] = true
+			outcomes[recipient.SessionID] = recipient
 		}
 	}
-	if !reached["worker"] || !reached["task-settled"] || reached["task-running"] || reached["exec-run"] || reached["spawned-agent"] {
-		t.Fatalf("this host's members %v, want the worker and the settled task's session but no running task, exec run or sub-agent: %+v", reached, answer.Recipients)
+	for _, id := range []string{"worker", "task-running", "task-settled"} {
+		if outcomes[id].Outcome == "" || outcomes[id].Outcome == broadcast.OutcomeSkipped {
+			t.Fatalf("%s was not reached: %+v", id, answer.Recipients)
+		}
+	}
+	for _, id := range []string{"exec-run", "spawned-agent"} {
+		if outcomes[id].Outcome != broadcast.OutcomeSkipped || outcomes[id].Detail != "a delegated run" {
+			t.Fatalf("%s is not listed as a skipped delegated run: %+v", id, answer.Recipients)
+		}
+	}
+	if _, listed := outcomes["stale"]; listed || answer.Older != 2 {
+		t.Fatalf("older sessions: listed stale=%v, counted %d, want it unlisted and both hosts' older sessions counted", listed, answer.Older)
 	}
 }

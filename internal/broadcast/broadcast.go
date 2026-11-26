@@ -213,6 +213,7 @@ const (
 type Result struct {
 	Target     Target      `json:"target"`
 	Recipients []Recipient `json:"recipients"`
+	Older      int         `json:"older,omitempty"`
 }
 
 func (r Result) Count(outcome string) int {
@@ -234,7 +235,7 @@ func (r Result) Fields() map[string]any {
 	if recipients == nil {
 		recipients = []Recipient{}
 	}
-	return map[string]any{"target": r.Target, "recipients": recipients, "sent": r.Count(OutcomeSent), "queued": r.Count(OutcomeQueued), "submitted": r.Count(OutcomeSubmitted), "failed": r.Count(OutcomeFailed), "skipped": r.Count(OutcomeSkipped)}
+	return map[string]any{"target": r.Target, "recipients": recipients, "sent": r.Count(OutcomeSent), "queued": r.Count(OutcomeQueued), "submitted": r.Count(OutcomeSubmitted), "failed": r.Count(OutcomeFailed), "skipped": r.Count(OutcomeSkipped), "older": r.Older}
 }
 
 type Delivery interface {
@@ -256,10 +257,11 @@ func (b Broadcaster) Send(ctx context.Context, target Target, message, label, so
 		sourceSessionID = b.Coordinators.Canonical(sourceSessionID)
 	}
 	payload := fmt.Sprintf("[from %s via #%s] %s", label, target.Label(), message)
-	members, skipped, coordinators, err := b.members(target, time.Now())
+	members, skipped, coordinators, older, err := b.members(target, time.Now())
 	if err != nil {
 		return result, err
 	}
+	result.Older = older
 	members = slices.DeleteFunc(members, func(member string) bool { return sourceSessionID != "" && member == sourceSessionID })
 	skipped = slices.DeleteFunc(skipped, func(recipient Recipient) bool {
 		return sourceSessionID != "" && recipient.SessionID == sourceSessionID
@@ -282,20 +284,22 @@ func (b Broadcaster) Send(ctx context.Context, target Target, message, label, so
 
 // A project's members are this host's own: each paired host that holds the
 // project resolves and delivers to its own. A member is a live or idle
-// session, pinned or used within the active window. A post does not start
-// sessions: one in that window whose process ended, that is archived, or
-// whose folder is gone is skipped with the reason. Coordinators are reached
-// even when idle past the window or ended, since a send starts or resumes one.
-// One-off runs are not members: a task child until its task settles, and a
-// delegated run (a Codex exec run or a sub-agent) always. A stored channel's
-// own members are skipped by the same rule, except a coordinator.
-func (b Broadcaster) members(target Target, now time.Time) ([]string, []Recipient, []registry.CoordinatorSpec, error) {
+// session, pinned or used within the active window; the rest are counted as
+// older, not listed. A post does not start sessions: one in that window whose
+// process ended, that is archived, or whose folder is gone is skipped with the
+// reason. Coordinators are reached even when idle past the window or ended,
+// since a send starts or resumes one. A task child is a member like any
+// session; a delegated run (a Codex exec run or a sub-agent) in that window is
+// skipped with that reason. A stored channel's own members are skipped by the
+// same reachability rule, except a coordinator.
+func (b Broadcaster) members(target Target, now time.Time) ([]string, []Recipient, []registry.CoordinatorSpec, int, error) {
 	if target.ProjectID == "" {
-		return b.channelMembers(target.Channel)
+		members, skipped, coordinators, err := b.channelMembers(target.Channel)
+		return members, skipped, coordinators, 0, err
 	}
 	specs, err := b.Registry.ProjectCoordinators(target.ProjectID)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 	coordinators := slices.DeleteFunc(specs, func(spec registry.CoordinatorSpec) bool { return spec.HostID != "" })
 	coordinated := map[string]bool{}
@@ -306,34 +310,29 @@ func (b Broadcaster) members(target Target, now time.Time) ([]string, []Recipien
 	}
 	snapshot, err := b.Registry.CatalogSnapshot()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 	archive, err := b.Registry.ArchiveState()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 	marks, err := b.Registry.SessionMarks()
 	if err != nil {
-		return nil, nil, nil, err
-	}
-	tasks, err := b.Registry.RunningTaskChildren()
-	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 	var members []string
+	older := 0
 	var skipped []Recipient
 	for _, record := range snapshot.Sessions {
 		item, ok := sessionProject(record)
 		if !ok || item.ID != target.ProjectID || record.HostID != "" || coordinated[record.Session.ID] {
 			continue
 		}
-		if _, task := tasks[record.Session.ID]; task || record.Session.Delegated() {
-			continue
-		}
 		if marks[record.Session.ID].PinnedAt.IsZero() && !surface.RecentlyUsed(record.Session, now) {
+			older++
 			continue
 		}
-		if reason := unreachable(record, item, archive); reason != "" {
+		if reason := left(record, item, archive); reason != "" {
 			skipped = append(skipped, Recipient{SessionID: record.Session.ID, Outcome: OutcomeSkipped, Detail: reason})
 			continue
 		}
@@ -341,7 +340,7 @@ func (b Broadcaster) members(target Target, now time.Time) ([]string, []Recipien
 	}
 	sort.Strings(members)
 	sort.Slice(skipped, func(i, j int) bool { return skipped[i].SessionID < skipped[j].SessionID })
-	return members, skipped, coordinators, nil
+	return members, skipped, coordinators, older, nil
 }
 
 func (b Broadcaster) channelMembers(channel string) ([]string, []Recipient, []registry.CoordinatorSpec, error) {
@@ -387,6 +386,13 @@ func (b Broadcaster) channelMembers(channel string) ([]string, []Recipient, []re
 		members = append(members, member)
 	}
 	return members, skipped, nil, nil
+}
+
+func left(record registry.CatalogSessionState, item Project, archive registry.ArchiveState) string {
+	if record.Session.Delegated() {
+		return "a delegated run"
+	}
+	return unreachable(record, item, archive)
 }
 
 func unreachable(record registry.CatalogSessionState, item Project, archive registry.ArchiveState) string {
