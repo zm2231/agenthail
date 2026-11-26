@@ -426,7 +426,7 @@ fn footer(cx: &Cx, block: &Block) -> Option<El> {
     };
     let mut tools = row().gap(2.0).items_center().group_opacity(0.0, 1.0);
     tools = tools.child(action(format!("copy-{item}"), &icons::COPY, "Copy").on_press_tx(crate::history::copy(body.clone())));
-    let images = cx.pane.transcript.item(item).map_or(0, |i| feed::blocks::strip_image_markers(&i.text).1);
+    let images = cx.pane.transcript.images_with(item);
     if user && images > 0 {
         tools = tools.child(action(format!("edit-{item}"), &icons::PENCIL, "Edit").opacity(0.45).help("Edit would resend this message without its images"));
     } else if user {

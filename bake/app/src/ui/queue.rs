@@ -74,6 +74,9 @@ fn run(s: &mut App, id: &str, row: Queued, op: Op) {
     }
     s.queue_note.remove(id);
     if op != Op::Remove {
+        if let Some(open) = s.composer_for.clone() {
+            s.drafts.set(&open, &s.composer.text);
+        }
         s.queue_taking.push(Taking { session: id.to_string(), host: row.host.clone(), id: row.id, text: row.message.clone() });
         if let Err(error) = crate::over::layout::save_now(s) {
             s.queue_taking.retain(|t| (t.host.as_str(), t.id) != (row.host.as_str(), row.id));
