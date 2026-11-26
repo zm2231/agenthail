@@ -55,6 +55,8 @@ pub struct Win {
     clock: f64,
     save_after: f64,
     keep_log: bool,
+    #[cfg(target_os = "macos")]
+    loads: u64,
 }
 
 impl Win {
@@ -94,6 +96,8 @@ impl Win {
             clock: 0.0,
             save_after: 0.0,
             keep_log,
+            #[cfg(target_os = "macos")]
+            loads: 0,
         }
     }
 
@@ -337,11 +341,21 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
         }
         #[cfg(target_os = "macos")]
         if kind == peer::LOADED {
+            w.loads += 1;
             let effects = w.call.setup(Setup::Check);
             changed |= !effects.is_empty();
             w.run(effects);
             if let Some(web) = &w.web {
-                web.check(w.heard.0.clone());
+                web.check(w.heard.0.clone(), w.loads);
+            }
+            continue;
+        }
+        #[cfg(target_os = "macos")]
+        if kind == peer::CHECKED {
+            if call == w.loads.to_string() {
+                let effects = w.call.checked(value == "true", t);
+                changed |= !effects.is_empty();
+                w.run(effects);
             }
             continue;
         }
@@ -391,7 +405,7 @@ fn load_trail() -> Option<Trail> {
     match Trail::load(&saved) {
         Ok(trail) => Some(trail),
         Err(error) => {
-            let aside = path.with_extension("unreadable.json");
+            let aside = unused_aside(&path);
             match std::fs::rename(&path, &aside) {
                 Ok(()) => {
                     eprintln!("voice: the call log couldn't be read ({error}); it was moved to {}", aside.display());
@@ -404,6 +418,14 @@ fn load_trail() -> Option<Trail> {
             }
         }
     }
+}
+
+fn unused_aside(path: &std::path::Path) -> std::path::PathBuf {
+    let stamp = time::OffsetDateTime::now_utc().unix_timestamp();
+    (0..)
+        .map(|n| path.with_extension(if n == 0 { format!("unreadable-{stamp}.json") } else { format!("unreadable-{stamp}-{n}.json") }))
+        .find(|aside| !aside.exists())
+        .unwrap_or_else(|| path.with_extension("unreadable.json"))
 }
 
 fn save_trail(trail: &Trail) -> bool {

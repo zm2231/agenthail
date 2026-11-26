@@ -399,7 +399,7 @@ pub struct Call {
     beating: Option<String>,
     last_beat: f64,
     requested: Option<String>,
-    transfer_from: Option<String>,
+    transfer_from: Option<(u64, String)>,
     asking_mic: bool,
     lost_at: Option<f64>,
     out: Vec<Effect>,
@@ -478,6 +478,17 @@ impl Call {
 
     pub fn setup_stuck(&self) -> bool {
         !self.ready && self.setup_stuck
+    }
+
+    pub fn checked(&mut self, ok: bool, now: f64) -> Vec<Effect> {
+        if self.closed || self.ready || !self.setup.is_some_and(|(s, _)| s == Setup::Check) {
+            return Vec::new();
+        }
+        if ok {
+            self.peer("ready", "", now)
+        } else {
+            self.peer("unavailable", "The audio page didn't start. Check that Agenthail is running and up to date, then open this window again.", now)
+        }
     }
 
     pub fn setup(&mut self, stage: Setup) -> Vec<Effect> {
@@ -796,8 +807,9 @@ impl Call {
         if self.closed || self.working || !self.connected_call() {
             return Vec::new();
         }
-        self.transfer_from = Some(std::mem::replace(&mut self.target, target.trim().to_string()));
+        let from = std::mem::replace(&mut self.target, target.trim().to_string());
         self.begin_work();
+        self.transfer_from = Some((self.work, from));
         let to = Action { target_id: Some(self.target.clone()), ..Action::new("transfer") };
         self.fetch(Req::Transfer, Some(to));
         self.drain()
@@ -1002,9 +1014,8 @@ impl Call {
             }
             Req::Transfer | Req::Interrupt | Req::TargetInterrupt | Req::New => {
                 self.end_work(job.work);
-                if job.req == Req::Transfer {
-                    let from = self.transfer_from.take();
-                    if let (Err(_), Some(from)) = (&result, from) {
+                if job.req == Req::Transfer && self.transfer_from.as_ref().is_some_and(|(work, _)| *work == job.work) {
+                    if let Some((_, from)) = self.transfer_from.take().filter(|_| current && result.is_err()) {
                         self.target = from;
                     }
                 }

@@ -495,6 +495,63 @@ fn a_brief_shows_only_for_the_session_it_was_made_for() {
     assert_eq!((brief.exchanges, target.name.as_str()), (3, "Builder"));
 }
 
+#[test]
+fn a_transfer_reply_after_its_call_ended_leaves_the_next_route_alone() {
+    let mut call = ready();
+    connected(&mut call);
+    let to = only_job(&call.transfer("s-builder"));
+    call.hangup();
+    assert_eq!(call.target, "s-builder");
+    call.reply(to, Err("Agenthail couldn't reach that session.".into()), 1.0);
+    assert_eq!(call.target, "s-builder", "the route the window shows is the one the next call uses");
+}
+
+#[test]
+fn an_older_transfer_reply_does_not_undo_a_newer_one() {
+    let mut call = ready();
+    let id = connected(&mut call);
+    let first = only_job(&call.transfer("s-builder"));
+    call.reply(first.clone(), Ok(state(json!({"phase": "connected", "attemptId": id, "target": {"id": "s-builder", "name": "Builder"}}))), 1.0);
+    let second = only_job(&call.transfer("s-reviewer"));
+    call.reply(first, Err("late".into()), 1.0);
+    assert_eq!(call.target, "s-reviewer");
+    call.reply(second, Err("Agenthail couldn't reach that session.".into()), 2.0);
+    assert_eq!(call.target, "s-builder");
+}
+
+#[test]
+fn a_readiness_check_counts_only_while_the_page_is_being_checked() {
+    let mut call = Call::new("");
+    call.peer("loading", "", 0.0);
+    assert!(call.checked(true, 0.0).is_empty(), "no check was asked for yet");
+    call.setup(Setup::Check);
+    call.checked(true, 1.0);
+    assert!(call.ready);
+    assert!(call.checked(false, 2.0).is_empty(), "a late failed check can't undo a ready page");
+    assert!(call.ready && call.error.is_none());
+    let mut failing = Call::new("");
+    failing.peer("loading", "", 0.0);
+    failing.setup(Setup::Check);
+    failing.checked(false, 1.0);
+    assert!(failing.error.as_deref().unwrap().starts_with("The audio page didn't start"));
+}
+
+#[test]
+fn an_oversized_saved_log_is_trimmed_and_saved_again() {
+    let mut trail = Trail::default();
+    let attempts: Vec<_> = (0..30)
+        .map(|k| {
+            trail.begin(&format!("call-{k}"), 0.0);
+            trail.end(&format!("call-{k}"), "local_hangup", 1.0);
+            trail.attempts.last().unwrap().clone()
+        })
+        .collect();
+    let saved = serde_json::to_string(&attempts).unwrap();
+    let loaded = Trail::load(&saved).unwrap();
+    assert_eq!(loaded.attempts.len(), KEPT_CALLS);
+    assert!(loaded.changed);
+}
+
 fn dialed_routed(call: &mut Call) -> String {
     let select = only_job(&call.call());
     let prepare = only_job(&call.reply(select, Ok(state(json!({"phase": "ready"}))), 0.0));

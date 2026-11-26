@@ -10,6 +10,7 @@ use wry::{PageLoadEvent, PermissionKind, PermissionResponse, WebView, WebViewBui
 
 const BRIDGE: &str = "window.agenthailVoiceNotify = message => window.ipc.postMessage(JSON.stringify({...message, call: window.agenthailCall || \"\"}));";
 pub const LOADED: &str = "loaded";
+pub const CHECKED: &str = "checked";
 
 pub struct Web {
     view: WebView,
@@ -68,15 +69,10 @@ impl Web {
         Ok(Web { view })
     }
 
-    pub fn check(&self, heard: Sender<Heard>) {
+    pub fn check(&self, heard: Sender<Heard>, load: u64) {
         let asked = self.view.evaluate_script_with_callback("typeof window.agenthailVoice === 'object'", move |answer| {
             eprintln!("voice: readiness check answered {}", answer.trim());
-            let message = if answer.trim() == "true" {
-                (String::new(), "ready".to_string(), String::new())
-            } else {
-                (String::new(), "unavailable".to_string(), "The audio page didn't start. Check that Agenthail is running and up to date, then open this window again.".to_string())
-            };
-            let _ = heard.send(message);
+            let _ = heard.send((load.to_string(), CHECKED.into(), (answer.trim() == "true").to_string()));
         });
         if let Err(error) = asked {
             log_eval(&error.to_string());

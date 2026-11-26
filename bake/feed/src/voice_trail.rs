@@ -61,7 +61,7 @@ impl Trail {
         let mut attempts: Vec<Attempt> = serde_json::from_str(saved).map_err(|e| e.to_string())?;
         let keep = attempts.len().saturating_sub(KEPT_CALLS);
         attempts.drain(..keep);
-        let mut changed = false;
+        let mut changed = keep > 0;
         for attempt in attempts.iter_mut().filter(|a| a.cause.is_none()) {
             attempt.cause = Some(UNFINISHED.into());
             changed = true;
