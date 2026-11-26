@@ -3,7 +3,7 @@ use rune::{El, Tx, row};
 use rune_kit::{Button, ButtonVariant, ControlSize, RadioGroup, RadioItem, TextInput};
 
 use super::parts::{self, line, section};
-use super::{Prefs, Read, Section, saving, write};
+use super::{Prefs, Read, Section, busy, write};
 use crate::theme;
 
 const READ_ONLY: &str = "This app's sign-in doesn't include the settings permission, so these show read-only. Usage limit and Claude root settings need that permission to be read.";
@@ -18,7 +18,7 @@ fn save_name(s: &mut Prefs, current: &Person) {
 
 fn name_section(s: &Prefs, person: &Person, writable: bool) -> El {
     let k = theme::kit();
-    let busy = saving(s, "person-name");
+    let busy = busy(s);
     let current = person.clone();
     let input = TextInput::new(&s.name)
         .label("Your name")
@@ -55,7 +55,7 @@ fn name_section(s: &Prefs, person: &Person, writable: bool) -> El {
 
 fn delivery(s: &Prefs, busy: &str, hours: i64, writable: bool) -> El {
     let k = theme::kit();
-    let off = !writable || saving(s, "delivery");
+    let off = !writable || super::busy(s);
     let item = |label: &str, mode: &'static str| {
         RadioItem::new(label, busy == mode).disabled(off).on_select(move |s: &mut Prefs| {
             write(s, "delivery", Section::General, GENERAL, move |c| c.set_delivery(mode, hours));
@@ -72,7 +72,7 @@ fn delivery(s: &Prefs, busy: &str, hours: i64, writable: bool) -> El {
 fn recent(s: &Prefs, busy: &str, hours: i64, writable: bool, layer: &mut Vec<El>) -> El {
     let choices = prefs::codex_recent_choices(hours).into_iter().map(|h| (prefs::hours_label(h), h.to_string())).collect();
     let busy = busy.to_string();
-    let pick = parts::select(s, "settings-codex-recent", "Codex recent window", choices, &hours.to_string(), !writable || saving(s, "delivery"), layer, move |s, value| {
+    let pick = parts::select(s, "settings-codex-recent", "Codex recent window", choices, &hours.to_string(), !writable || super::busy(s), layer, move |s, value| {
         let Ok(h) = value.parse::<i64>() else { return };
         if h != hours {
             let busy = busy.clone();
@@ -85,10 +85,10 @@ fn recent(s: &Prefs, busy: &str, hours: i64, writable: bool, layer: &mut Vec<El>
 fn limits(s: &Prefs, d: &prefs::Dashboard, writable: bool) -> El {
     let resumes = d.resumes_after_limit();
     let moves = d.moves_after_limit();
-    let resume = parts::switch("resume-after-limit", "Resume sessions after a usage limit resets", resumes, !writable || saving(s, "resume"), move |s| {
+    let resume = parts::switch("resume-after-limit", "Resume sessions after a usage limit resets", resumes, !writable || busy(s), move |s| {
         write(s, "resume", Section::General, GENERAL, move |c| c.set_resume_after_limit(!resumes));
     });
-    let mv = parts::switch("move-after-limit", "Move stopped sessions to a proxy with room", moves, !writable || !resumes || saving(s, "move"), move |s| {
+    let mv = parts::switch("move-after-limit", "Move stopped sessions to a proxy with room", moves, !writable || !resumes || busy(s), move |s| {
         write(s, "move", Section::General, GENERAL, move |c| c.set_move_after_limit(!moves));
     });
     section(
@@ -106,7 +106,7 @@ fn default_root(s: &Prefs, settings: &prefs::Settings, layer: &mut Vec<El>) -> O
     choices.extend(settings.claude_roots.iter().map(|r| (r.clone(), r.clone())));
     let current = settings.claude_default_root.clone();
     let shown = current.clone();
-    let pick = parts::select(s, "settings-default-root", "Claude root for sessions you start", choices, &shown, saving(s, "default-root"), layer, move |s, value| {
+    let pick = parts::select(s, "settings-default-root", "Claude root for sessions you start", choices, &shown, busy(s), layer, move |s, value| {
         if value != current {
             write(s, "default-root", Section::General, GENERAL, move |c| c.set_claude_default_root(&value));
         }
@@ -125,17 +125,17 @@ pub fn page(s: &Prefs, layer: &mut Vec<El>) -> El {
     let writable = settings.is_some();
     match &s.settings {
         None => out = out.child(parts::reading("settings")),
-        Some(Err(f)) if f.denied && base.is_some() => out = out.child(parts::failure(&Failure { message: READ_ONLY.into(), ..f.clone() })),
-        Some(Err(f)) => out = out.child(parts::failure(f)),
+        Some(Err(f)) if f.denied && base.is_some() => out = out.child(parts::failure(s, &Failure { message: READ_ONLY.into(), scope: "", ..f.clone() })),
+        Some(Err(f)) => out = out.child(parts::failure(s, f)),
         Some(Ok(_)) => {}
     }
     if let Some(f) = s.notes.get(&Section::General) {
-        out = out.child(parts::failure(f));
+        out = out.child(parts::failure(s, f));
     }
     if let Some(Err(f)) = &s.base
         && settings.is_none()
     {
-        out = out.child(parts::failure(f));
+        out = out.child(parts::failure(s, f));
     }
     if let Some(person) = base.and_then(|b| b.person.as_ref()) {
         out = out.child(name_section(s, person, writable));

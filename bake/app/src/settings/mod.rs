@@ -55,7 +55,9 @@ pub struct Prefs {
     pub remote: Option<Result<RemoteControl, Failure>>,
     pub compaction: Option<Result<Compaction, Failure>>,
     pub preferences: Option<Result<Vec<Preference>, Failure>>,
-    pub saving: HashSet<String>,
+    writing: Option<String>,
+    settling: HashSet<Read>,
+    sent: Option<CompactDraft>,
     pub notes: HashMap<Section, Failure>,
     pub name: TextEdit,
     seeded: Option<Person>,
@@ -134,7 +136,9 @@ fn init() -> Prefs {
         remote: None,
         compaction: None,
         preferences: None,
-        saving: HashSet::new(),
+        writing: None,
+        settling: HashSet::new(),
+        sent: None,
         notes: HashMap::new(),
         name: TextEdit::new(""),
         seeded: None,
@@ -156,7 +160,7 @@ fn init() -> Prefs {
 }
 
 pub fn unread() -> Failure {
-    Failure { message: "Settings are read from the daemon; this run has no daemon connection.".into(), denied: false, uncertain: false }
+    Failure::new("Settings are read from the daemon; this run has no daemon connection.")
 }
 
 fn fetch(s: &mut Prefs, what: Read) {
@@ -200,9 +204,10 @@ pub fn write(s: &mut Prefs, key: impl Into<String>, section: Section, then: &'st
         s.notes.insert(section, unread());
         return;
     };
-    if !s.saving.insert(key.clone()) {
+    if busy(s) {
         return;
     }
+    s.writing = Some(key.clone());
     s.notes.remove(&section);
     if section == Section::Compaction {
         s.saved_notice = false;
@@ -219,7 +224,28 @@ pub fn write(s: &mut Prefs, key: impl Into<String>, section: Section, then: &'st
 }
 
 pub fn saving(s: &Prefs, key: &str) -> bool {
-    s.saving.contains(key)
+    s.writing.as_deref() == Some(key)
+}
+
+pub fn busy(s: &Prefs) -> bool {
+    s.writing.is_some() || !s.settling.is_empty()
+}
+
+pub fn send_compaction(s: &mut Prefs, sent: CompactDraft) {
+    if busy(s) || s.client.is_none() {
+        return;
+    }
+    let body = sent.body();
+    s.sent = Some(sent);
+    write(s, "compaction", Section::Compaction, &[Read::Compaction], move |c| c.save_compaction(body).map(drop));
+}
+
+pub fn explain(s: &Prefs, f: &Failure) -> Failure {
+    let token_works = matches!(&s.base, Some(Ok(_)));
+    if f.denied && token_works && !f.scope.is_empty() {
+        return Failure { message: feed::prefs::scope_message(f.scope).into(), ..f.clone() };
+    }
+    f.clone()
 }
 
 fn seed_name(s: &mut Prefs) {
@@ -246,6 +272,7 @@ fn take(s: &mut Prefs, done: Done) {
             if s.seq.get(&what) != Some(&seq) {
                 return;
             }
+            s.settling.remove(&what);
             match got {
                 Got::Base(r) => {
                     s.base = Some(r);
@@ -261,12 +288,17 @@ fn take(s: &mut Prefs, done: Done) {
             }
         }
         Done::Wrote(key, section, result, then) => {
-            s.saving.remove(&key);
+            if s.writing.as_deref() == Some(key.as_str()) {
+                s.writing = None;
+            }
+            let sent = if section == Section::Compaction { s.sent.take() } else { None };
             match result {
                 Ok(()) if section == Section::Compaction => {
-                    s.draft.saved();
-                    for edit in [&mut s.model, &mut s.window, &mut s.min_tokens, &mut s.pre_limit] {
-                        *edit = TextEdit::new("");
+                    if sent.as_ref() == Some(&claude::draft(s)) {
+                        s.draft.saved();
+                        for edit in [&mut s.model, &mut s.window, &mut s.min_tokens, &mut s.pre_limit] {
+                            *edit = TextEdit::new("");
+                        }
                     }
                     s.saved_notice = true;
                 }
@@ -276,6 +308,9 @@ fn take(s: &mut Prefs, done: Done) {
                 }
             }
             for what in then {
+                if s.client.is_some() {
+                    s.settling.insert(*what);
+                }
                 fetch(s, *what);
             }
         }

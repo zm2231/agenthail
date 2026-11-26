@@ -216,6 +216,7 @@ pub struct Preference {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Failure {
     pub message: String,
+    pub scope: &'static str,
     pub denied: bool,
     pub uncertain: bool,
 }
@@ -223,35 +224,45 @@ pub struct Failure {
 pub const NO_SETTINGS_SCOPE: &str = "This app's sign-in doesn't include the settings permission, so it can't read or change these here.";
 pub const NO_CONTROL_SCOPE: &str = "This app's sign-in doesn't include the control permission, so it can't read or change these here.";
 
-fn denied_for(scope: &str) -> String {
-    if scope == "control" { NO_CONTROL_SCOPE.into() } else { NO_SETTINGS_SCOPE.into() }
+pub fn scope_message(scope: &str) -> &'static str {
+    if scope == "control" { NO_CONTROL_SCOPE } else { NO_SETTINGS_SCOPE }
 }
 
-fn read_failure(scope: &str, status: u16, body: &str) -> Failure {
+fn refused(scope: &'static str) -> Failure {
+    Failure { message: format!("The daemon refused this app's sign-in here: it lacks the {scope} permission or is no longer valid."), scope, denied: true, uncertain: false }
+}
+
+impl Failure {
+    pub fn new(message: impl Into<String>) -> Failure {
+        Failure { message: message.into(), scope: "", denied: false, uncertain: false }
+    }
+}
+
+fn read_failure(scope: &'static str, status: u16, body: &str) -> Failure {
     if status == 401 || status == 403 {
-        return Failure { message: denied_for(scope), denied: true, uncertain: false };
+        return refused(scope);
     }
     let reply = serde_json::from_str::<Value>(body).unwrap_or_default();
     let message = reply["error"]["message"].as_str().map(str::to_string).unwrap_or_else(|| if status == 0 { body.to_string() } else { format!("status code {status}") });
-    Failure { message, denied: false, uncertain: false }
+    Failure::new(message)
 }
 
-fn write_failure(scope: &str, error: RespondError) -> Failure {
+fn write_failure(scope: &'static str, error: RespondError) -> Failure {
     if error.status == 401 || error.status == 403 {
-        return Failure { message: denied_for(scope), denied: true, uncertain: false };
+        return refused(scope);
     }
     let uncertain = error.maybe_delivered;
     let message = if uncertain { format!("The daemon didn't confirm the change ({}). What shows is what it reports now.", error.message) } else { error.message };
-    Failure { message, denied: false, uncertain }
+    Failure { uncertain, ..Failure::new(message) }
 }
 
-fn read<T: DeserializeOwned>(client: &Client, path: &str, scope: &str) -> Result<T, Failure> {
+fn read<T: DeserializeOwned>(client: &Client, path: &str, scope: &'static str) -> Result<T, Failure> {
     let value = client.get_reply(path).map_err(|(status, body)| read_failure(scope, status, &body))?;
-    serde_json::from_value(value).map_err(|e| Failure { message: format!("the daemon's reply couldn't be read: {e}"), denied: false, uncertain: false })
+    serde_json::from_value(value).map_err(|e| Failure::new(format!("the daemon's reply couldn't be read: {e}")))
 }
 
 fn reply<T: DeserializeOwned>(value: Value) -> Result<T, Failure> {
-    serde_json::from_value(value).map_err(|e| Failure { message: format!("the daemon's reply couldn't be read: {e}"), denied: false, uncertain: true })
+    serde_json::from_value(value).map_err(|e| Failure { uncertain: true, ..Failure::new(format!("the daemon's reply couldn't be read: {e}")) })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -744,9 +755,10 @@ mod tests {
         let conflict = r#"{"error":{"code":"conflict","message":"this install has no Claude Remote Control"}}"#;
         let (client, _rx) = daemon(replies(&[(401, unauthorized), (401, unauthorized), (403, unauthorized), (400, refused), (409, conflict), (504, r#"{"error":{"message":"timed out"}}"#)]));
         let read = client.settings().unwrap_err();
-        assert!(read.denied && read.message == NO_SETTINGS_SCOPE);
+        assert!(read.denied && read.scope == "settings" && read.message.contains("lacks the settings permission or is no longer valid"));
+        assert_eq!(scope_message(read.scope), NO_SETTINGS_SCOPE);
         let prefs = client.notification_preferences().unwrap_err();
-        assert!(prefs.denied && prefs.message == NO_CONTROL_SCOPE);
+        assert!(prefs.denied && scope_message(prefs.scope) == NO_CONTROL_SCOPE);
         assert!(client.set_resume_after_limit(true).unwrap_err().denied);
         let write = client.set_claude_default_root("nope").unwrap_err();
         assert_eq!((write.denied, write.uncertain, write.message.as_str()), (false, false, "unknown Claude root \"nope\""));

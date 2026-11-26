@@ -54,7 +54,8 @@ pub fn problem(value: impl Into<String>) -> El {
     row().w_full().px(14.0).py(10.0).child(text(value.into()).font(META).color(failed()).wrap().grow(1.0))
 }
 
-pub fn failure(f: &Failure) -> El {
+pub fn failure(s: &Prefs, f: &Failure) -> El {
+    let f = &super::explain(s, f);
     let color = if f.denied || f.uncertain { attention() } else { failed() };
     text(f.message.clone()).font(META).color(color).wrap().px(4.0)
 }
