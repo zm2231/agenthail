@@ -37,8 +37,15 @@ fn line(s: &App, i: usize, d: &Decision, shift: bool) -> El {
     if !d.holds_up.is_empty() {
         facts = facts.child(text(format!("Holds up {}", d.holds_up.len())).font(META_MED).color(ui::needs_color()));
     }
-    if !d.work_item.is_empty() {
+    if !d.work_item.is_empty() && d.covers.is_empty() {
         facts = facts.child(ui::id_label(&crate::over::short_id(&d.work_item)));
+    }
+    if !d.covers.is_empty() {
+        body = body.child(text(format!("Covers {} items", d.covers.len())).font(META_MED).color(base()));
+        for c in &d.covers {
+            let title = if c.work_title.is_empty() { c.reason_text() } else { c.work_title.clone() };
+            body = body.child(row().gap(6.0).items_center().child(ui::id_label(&crate::over::short_id(&c.work_item))).child(text(crate::over::plain(&title)).font(META).color(base()).truncate().shrink()));
+        }
     }
     for (q, answer) in d.recommended_lines() {
         body = body.child(row().gap(6.0).items_center().child(text(crate::over::plain(&q)).font(META).color(base()).truncate().shrink()).child(text("→".to_string()).font(META).color(weak())).child(text(answer).font(META_MED).color(strong())));
