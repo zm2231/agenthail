@@ -126,7 +126,7 @@ fn writer() -> &'static Sender<String> {
 }
 
 pub fn save(s: &App) {
-    if !s.ov.persist {
+    if !s.ov.persist || path().is_none() {
         return;
     }
     let now = encode(s);
