@@ -55,7 +55,7 @@ impl MenuBar {
 fn need_row(n: &Need) -> Row {
     let mut label = format!("{}  ·  {}", short_title(&n.title, LABEL_CHARS), short_title(&n.who, LABEL_CHARS / 2));
     if let Some(id) = &n.label {
-        label.push_str(&format!("  ·  {id}"));
+        label.push_str(&format!("  ·  {} {id}", n.project));
     }
     Row { label, target: n.target.clone() }
 }
@@ -168,7 +168,7 @@ mod tests {
         assert_eq!(bar.needs.len(), SHOWN);
         let titles: Vec<String> = bar.sections().into_iter().map(|(t, _)| t).collect();
         assert_eq!(titles, ["Needs you (7, 5 shown)", "Working"]);
-        assert_eq!(bar.needs[0].label, "Same title  ·  @worker  ·  W0");
+        assert_eq!(bar.needs[0].label, "Same title  ·  @worker  ·  P W0");
         assert_ne!(bar.needs[0].label, bar.needs[1].label);
         assert_eq!(badge(bar.needs_you), (7, "7 things need you".to_string()));
     }
