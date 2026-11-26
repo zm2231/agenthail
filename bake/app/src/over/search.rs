@@ -82,13 +82,18 @@ fn ask_codex(s: &mut App, q: String) {
 
 fn settle_codex(s: &mut App) -> bool {
     let Some(q) = jump_query(s) else {
-        s.ov.search.typed = None;
-        return false;
+        let st = &mut s.ov.search;
+        let had = st.codex.take().is_some();
+        st.typed = None;
+        return had;
     };
     let st = &mut s.ov.search;
     match &st.typed {
         Some((typed, _)) if *typed == q => {}
         _ => {
+            if st.codex.as_ref().is_some_and(|(asked, _, _)| *asked != q) {
+                st.codex = None;
+            }
             st.typed = Some((q, Instant::now()));
             return false;
         }

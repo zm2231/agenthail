@@ -57,6 +57,11 @@ fn load(s: &mut App, reset: bool) {
     p.generation = generation;
     p.asked = Some(f.clone());
     p.loading = true;
+    p.error = None;
+    if reset {
+        p.list = Activity { kinds: std::mem::take(&mut p.list.kinds), ..Activity::default() };
+        p.expanded.clear();
+    }
     let Some(client) = client else {
         p.loading = false;
         p.error = Some("Activity history needs a running Agenthail.".into());
@@ -66,6 +71,10 @@ fn load(s: &mut App, reset: bool) {
         let page = client.history(&f, before);
         let _ = tx.send((generation, reset, page));
     });
+}
+
+fn pending(p: &Panel) -> bool {
+    p.asked.as_ref() != Some(&filter(p))
 }
 
 fn settle(s: &mut App) -> bool {
@@ -224,14 +233,17 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
         .child(kinds)
         .child(ui::ghost_keys(&["esc"]));
     let mut list = col().w_full().gap(2.0).padding(8.0);
-    if p.list.items.is_empty() && !p.loading && p.error.is_none() {
+    if p.list.items.is_empty() && !p.loading && !pending(p) && p.error.is_none() {
         list = list.child(text("No activity matches these filters.".to_string()).font(META).color(weak()).px(12.0).py(10.0));
     }
-    for e in &p.list.items {
-        list = list.child(entry_row(s, e));
+    if !pending(p) {
+        for e in &p.list.items {
+            list = list.child(entry_row(s, e));
+        }
     }
     let mut foot = row().w_full().gap(12.0).items_center().px(16.0).py(10.0).border_sides([1.0, 0.0, 0.0, 0.0], ui::rule());
     let shown = match p.list.items.len() {
+        _ if pending(p) => "Searching…".to_string(),
         1 => "1 event shown".to_string(),
         n => format!("{n} events shown"),
     };
@@ -240,7 +252,7 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
         foot = foot.child(text(e.clone()).font(META).color(crate::theme::failed()).wrap().shrink());
     }
     foot = foot.child(ui::spacer());
-    if p.loading {
+    if p.loading || pending(p) {
         foot = foot.child(Spinner::new().build(k));
     } else if p.list.has_more {
         foot = foot.child(Button::new("Load more").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).build(k).key("activity-more").on_press(|s: &mut App| load(s, false)));
