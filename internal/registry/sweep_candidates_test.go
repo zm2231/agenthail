@@ -153,3 +153,38 @@ func watchedRows(t *testing.T, r *Registry, query string, args []any) []string {
 	}
 	return out
 }
+
+func TestSessionsUsingAFolderPickWhatTheFullListPicked(t *testing.T) {
+	r := openTestRegistry(t)
+	root := "/w/repo/.worktrees/task"
+	for _, s := range []struct{ id, host, cwd string }{
+		{"at-root", "", root},
+		{"inside", "", root + "/sub/dir"},
+		{"sibling", "", root + "-2"},
+		{"sibling-inside", "", root + "2/sub"},
+		{"parent", "", "/w/repo"},
+		{"owner", "", "/elsewhere"},
+		{"remote-inside", "h-other", root + "/sub"},
+		{"no-folder", "", ""},
+	} {
+		if _, err := r.db.Exec(`INSERT INTO sessions(id,surface,host_id,cwd,transcript) VALUES(?,?,?,?,?)`, s.id, "claude", s.host, s.cwd, "/t/"+s.id+".jsonl"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	all, err := r.ListSessions(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, owner := range []string{"", "owner"} {
+		using, err := r.ListSessionsUsing(root, owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := keep(all, func(s surface.Session) bool {
+			return s.ID == owner || s.Cwd == root || strings.HasPrefix(s.Cwd, root+"/")
+		})
+		if !reflect.DeepEqual(using, want) {
+			t.Fatalf("owner %q: got %v, want %v", owner, ids(using), ids(want))
+		}
+	}
+}

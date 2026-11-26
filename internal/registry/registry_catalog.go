@@ -3,6 +3,7 @@ package registry
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -148,6 +149,10 @@ func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
 
 func (r *Registry) ListSessionsActiveSince(since time.Time) ([]surface.Session, error) {
 	return r.listLocalSessions(` AND s.last_active_ms>=?`, ``, ceilUnixMilli(since))
+}
+
+func (r *Registry) ListSessionsUsing(root, id string) ([]surface.Session, error) {
+	return r.listLocalSessions(` AND (s.id=? OR s.cwd=? OR substr(s.cwd,1,length(?))=?)`, ``, id, root, root+string(filepath.Separator), root+string(filepath.Separator))
 }
 
 func (r *Registry) ListSessionsOf(kind surface.SurfaceKind) ([]surface.Session, error) {
