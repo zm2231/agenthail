@@ -275,7 +275,7 @@ func (d *Daemon) consumeRelays(ctx context.Context, adapter surface.Surface, fro
 						text = text[:maxRelayText] + "\n[relay text truncated by agenthail]"
 					}
 					if stopped != nil {
-						text = goalStopNote(d.answerTarget(from.ID), stopped) + "\n\n" + text
+						text = goalStopNote(d.noticeTarget(from.ID, target.ID), stopped) + "\n\n" + text
 					}
 					payload = fmt.Sprintf("[agenthail relay hops=%d id=%d turn=%s source=%s] %s", event.RelayHops+1, route.ID, event.CompletionID, d.resolveDisplay(from.ID), text)
 				}

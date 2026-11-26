@@ -37,7 +37,7 @@ func (d *Daemon) noticeTurnStop(session surface.Session) {
 	}
 	d.turnStopNoticeMu.Lock()
 	defer d.turnStopNoticeMu.Unlock()
-	message := turnStopNotice(d.resolveDisplay(session.ID), d.answerTarget(session.ID), stop)
+	message := turnStopNotice(d.resolveDisplay(session.ID), d.noticeTarget(session.ID, to.sessionID), stop)
 	if _, err := d.sendNotice(to, message, turnStopNoticeKey(session.ID, stop)); err != nil {
 		d.log.Printf("tell the %s that %s stopped: %s", to.role, d.resolveDisplay(session.ID), err)
 	}

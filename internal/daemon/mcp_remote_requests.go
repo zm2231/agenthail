@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -19,10 +20,10 @@ func (d *Daemon) mcpSessionOpenRequests(ctx context.Context, caller *mcpCaller, 
 		return "", openRequests{}, err
 	}
 	if remote != nil {
-		open, err := d.hostOpenRequests(ctx, remote.ID)
+		open, err := d.hostOpenRequests(ctx, remote.ID, caller.session.ID)
 		return remote.ID, open, err
 	}
-	open, err := d.openRequests(ctx, session)
+	open, err := d.readOpenRequests(ctx, session, true, caller.session.ID)
 	return session.ID, open, err
 }
 
@@ -78,14 +79,15 @@ func (d *Daemon) mcpRemoteReadable(caller *mcpCaller, ref string, remote targets
 }
 
 // hostOpenRequests asks the paired host that runs a session for its open
-// requests, each under the id of its ask there.
-func (d *Daemon) hostOpenRequests(ctx context.Context, qualifiedID string) (openRequests, error) {
+// requests, each under the id of its ask there, with the asks it routes to
+// reader, a session of this host.
+func (d *Daemon) hostOpenRequests(ctx context.Context, qualifiedID, reader string) (openRequests, error) {
 	var listed struct {
 		PermissionMode string            `json:"permissionMode"`
 		Requests       []openRequestView `json:"requests"`
 		ProviderError  string            `json:"providerError"`
 	}
-	if err := d.hostGet(ctx, qualifiedID, "/api/v1/requests", "sessionId", nil, &listed); err != nil {
+	if err := d.hostGet(ctx, qualifiedID, "/api/v1/requests", "sessionId", url.Values{"reader": {reader}}, &listed); err != nil {
 		return openRequests{}, err
 	}
 	return openRequests{requests: listed.Requests, permissionMode: listed.PermissionMode, providerError: listed.ProviderError}, nil
