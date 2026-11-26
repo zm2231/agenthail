@@ -161,6 +161,12 @@ pub fn load(s: &mut App, id: &str) {
     fetch_models(s, id);
 }
 
+pub fn ensure_models(s: &mut App, id: &str) {
+    if s.client.is_some() && !s.menus.models_asked.contains(id) {
+        fetch_models(s, id);
+    }
+}
+
 fn fetch_models(s: &mut App, id: &str) {
     let surface = session(s, id).map(|x| x.surface.clone()).unwrap_or_default();
     if surface.is_empty() {

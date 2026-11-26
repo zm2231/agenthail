@@ -41,6 +41,7 @@ pub struct Complete {
     history: HashMap<String, History>,
     recorded: HashMap<String, Vec<Prompt>>,
     prompts_asked: HashMap<String, u64>,
+    goal_pending: HashSet<String>,
     local: HashMap<String, Vec<(String, time::OffsetDateTime)>>,
     pub search: Option<Search>,
     seq: u64,
@@ -237,6 +238,11 @@ fn accept(s: &mut App, item: &Item) {
 }
 
 pub fn pump(s: &mut App) -> bool {
+    if s.screen != crate::Screen::Session
+        && let Some(id) = s.composer_for.clone()
+    {
+        super::session_menu::ensure_models(s, &id);
+    }
     if s.complete.search.as_ref().is_some_and(|q| s.composer_for.as_deref() != Some(q.session.as_str())) {
         s.complete.search = None;
     }
@@ -296,7 +302,7 @@ pub fn pump(s: &mut App) -> bool {
 pub fn refresh(s: &mut App, id: &str) {
     s.complete.seq += 1;
     let (seq, asked) = (s.complete.seq, id.to_string());
-    s.complete.prompts_asked.insert(asked.clone(), seq);
+    s.complete.prompts_asked.insert(feed::composer::current(&s.rekeyed, id).to_string(), seq);
     spawn(s, move |c| Done::Prompts(seq, asked.clone(), c.prompts(Some(&asked), "")));
 }
 
@@ -333,6 +339,10 @@ pub fn rekey(s: &mut App, old: &str, new: &str) {
     if let Some(history) = c.history.remove(old) {
         c.history.insert(new.to_string(), history);
     }
+    if let Some(seq) = c.prompts_asked.remove(old) {
+        let newest = c.prompts_asked.entry(new.to_string()).or_insert(seq);
+        *newest = (*newest).max(seq);
+    }
     c.commands.remove(old);
     c.commands_asked.remove(old);
     if c.session.as_deref() == Some(old) {
@@ -355,10 +365,10 @@ pub fn done(s: &mut App, done: Done) {
             }
         }
         Done::Prompts(seq, asked, result) => {
-            if s.complete.prompts_asked.get(&asked) != Some(&seq) {
+            let id = feed::composer::current(&s.rekeyed, &asked).to_string();
+            if s.complete.prompts_asked.get(&id) != Some(&seq) {
                 return;
             }
-            let id = feed::composer::current(&s.rekeyed, &asked).to_string();
             if let Ok(prompts) = result {
                 s.complete.recorded.insert(id.clone(), prompts);
                 rebuild(s, &id);
@@ -369,7 +379,7 @@ pub fn done(s: &mut App, done: Done) {
                 search.ix = 0;
                 match result {
                     Ok(found) => {
-                        search.results = Some(Ok(complete::distinct(found.prompts)));
+                        search.results = Some(Ok(if search.all { complete::distinct(found.prompts) } else { found.prompts }));
                         search.problems = found.problems;
                     }
                     Err(error) => search.results = Some(Err(error)),
@@ -388,8 +398,9 @@ pub fn done(s: &mut App, done: Done) {
                 Err(error) => s.ov.notice = Some(format!("Couldn't fork: {}", error.message)),
             }
         }
-        Done::Goal(id, typed, result) => {
-            let id = feed::composer::current(&s.rekeyed, &id).to_string();
+        Done::Goal(asked, typed, result) => {
+            s.complete.goal_pending.remove(&asked);
+            let id = feed::composer::current(&s.rekeyed, &asked).to_string();
             if result.as_ref().is_ok_and(|_| s.composer_for.as_deref() == Some(id.as_str()) && s.composer.text.trim() == typed) {
                 replace_composer(s, "");
             }
@@ -424,9 +435,13 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
         crate::note(s, id, "Wait for the message being sent, then steer.".into());
         return true;
     }
+    if s.client.is_none() {
+        crate::note(s, id, "Fixture mode: not sent".into());
+        return true;
+    }
     if command == Slash::Goal {
-        if s.client.is_none() {
-            crate::note(s, id, "Fixture mode: not sent".into());
+        if !s.complete.goal_pending.insert(id.to_string()) {
+            crate::note(s, id, "The goal is still being set.".into());
             return true;
         }
         let (asked, typed) = (id.to_string(), s.composer.text.trim().to_string());

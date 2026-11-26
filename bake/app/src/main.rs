@@ -614,9 +614,14 @@ pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
     if unsent.reuses_key() {
         dispatch(s, id, unsent, true, tx);
     } else {
-        let pending = fresh(s, id, unsent.text, unsent.attachments);
+        let mut pending = fresh(s, id, unsent.text, unsent.attachments);
+        pending.busy = steered(unsent.busy, pending.busy);
         dispatch(s, id, pending, false, tx);
     }
+}
+
+fn steered(was: Option<Busy>, now: Option<Busy>) -> Option<Busy> {
+    if was == Some(Busy::Steer) { was } else { now }
 }
 
 fn confirmed(s: &mut App, id: &str, ask: Confirm, needed: bool) -> bool {
@@ -650,6 +655,9 @@ pub fn put_back_unsent(s: &mut App, id: &str) {
     if unsent.maybe_delivered {
         note(s, id, "Put back. It may already have arrived.".into());
     }
+    if unsent.busy == Some(Busy::Steer) {
+        s.busy_pick.insert(id.to_string(), Busy::Steer);
+    }
     let merged = feed::composer::put_back(shown_text(s, id), &unsent.text);
     if s.composer_for.as_deref() == Some(id) {
         s.composer = TextEdit::new(merged.as_str());
@@ -680,7 +688,8 @@ pub fn send_as_new(s: &mut App, id: &str, tx: &mut Tx) {
     }
     clear_sent(s, id, &unsent);
     s.unsent.remove(id, &unsent.key);
-    let pending = fresh(s, id, unsent.text, unsent.attachments);
+    let mut pending = fresh(s, id, unsent.text, unsent.attachments);
+    pending.busy = steered(unsent.busy, pending.busy);
     dispatch(s, id, pending, false, tx);
 }
 
@@ -812,6 +821,9 @@ fn put_back(s: &mut App, id: &str, unsent: &Unsent) {
         return;
     }
     ui::attach::restore(s, id, unsent);
+    if unsent.busy == Some(Busy::Steer) {
+        s.busy_pick.insert(id.to_string(), Busy::Steer);
+    }
     let text = unsent.text.as_str();
     if s.composer_for.as_deref() == Some(id) {
         let focused = s.composer.focused;
