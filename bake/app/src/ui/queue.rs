@@ -176,8 +176,9 @@ pub(crate) fn recover(s: &mut App) {
 pub(crate) fn restore(s: &mut App, checked: Vec<Taking>, back: Vec<Taking>) {
     s.queue_taking.retain(|t| !checked.contains(t));
     for taking in back {
-        hand_back(s, &taking.session, &taking.text);
-        s.queue_note.insert(taking.session.clone(), "A queued message you were taking back or steering when the app closed is back in the composer; check the queue before sending.".into());
+        let session = feed::composer::current(&s.rekeyed, &taking.session).to_string();
+        hand_back(s, &session, &taking.text);
+        s.queue_note.insert(session, "A queued message you were taking back or steering when the app closed is back in the composer; check the queue before sending.".into());
     }
     crate::over::layout::save(s);
 }
