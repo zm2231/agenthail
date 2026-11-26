@@ -41,7 +41,8 @@ impl Setup {
 #[serde(rename_all = "camelCase")]
 pub struct Attempt {
     pub id: String,
-    pub started_at: i64,
+    #[serde(default)]
+    pub started_ms: i64,
     #[serde(default)]
     pub milestones: Vec<(String, f64)>,
     pub cause: Option<String>,
@@ -94,7 +95,7 @@ impl Trail {
         let own = std::mem::take(&mut self.own);
         let mut attempts: Vec<Attempt> = saved.attempts.into_iter().filter(|a| !own.contains(&a.id)).collect();
         attempts.extend(self.attempts.drain(..).filter(|a| own.contains(&a.id)));
-        attempts.sort_by_key(|a| a.started_at);
+        attempts.sort_by_key(|a| a.started_ms);
         self.attempts = attempts;
         self.own = own;
         self.close_orphans(&alive);
@@ -123,8 +124,8 @@ impl Trail {
     }
 
     pub fn begin(&mut self, id: &str, clock: f64) {
-        let started_at = OffsetDateTime::now_utc().unix_timestamp();
-        self.attempts.push(Attempt { id: id.into(), started_at, owner: self.pid, clock, ..Attempt::default() });
+        let started_ms = i64::try_from(OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000).unwrap_or(i64::MAX);
+        self.attempts.push(Attempt { id: id.into(), started_ms, owner: self.pid, clock, ..Attempt::default() });
         self.own.push(id.into());
         self.cap();
         self.changed = true;

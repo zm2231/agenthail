@@ -650,7 +650,7 @@ fn a_live_call_survives_twenty_newer_calls_from_another_owner() {
     let both = |pid: u32| pid == 1 || pid == 2;
     let mut mine = Trail::owned_by(1);
     mine.begin("mine-live", 0.0);
-    mine.attempts[0].started_at -= 3600;
+    mine.attempts[0].started_ms -= 3_600_000;
     let mut theirs = Trail::owned_by(2);
     for k in 0..KEPT_CALLS {
         theirs.begin(&format!("theirs-{k}"), 0.0);
@@ -669,7 +669,7 @@ fn a_live_call_survives_twenty_newer_calls_from_another_owner() {
 fn another_owner_saving_many_calls_never_evicts_a_running_owners_call() {
     let mut a = Trail::owned_by(1);
     a.begin("a-live", 0.0);
-    a.attempts[0].started_at -= 3600;
+    a.attempts[0].started_ms -= 3_600_000;
     let mut disk = a.save();
     let mut b = Trail::owned_by(2);
     for k in 0..KEPT_CALLS + 5 {
@@ -685,6 +685,25 @@ fn another_owner_saving_many_calls_never_evicts_a_running_owners_call() {
     let after = Trail::load(&disk, 3, |pid| pid == 2).unwrap();
     let cut = after.attempts.iter().find(|a| a.id == "a-live").unwrap();
     assert_eq!(cut.cause.as_deref(), Some(UNFINISHED), "once its app is gone the call is closed, not lost");
+}
+
+#[test]
+fn the_log_keeps_the_newest_calls_from_both_owners_within_one_second() {
+    let mut a = Trail::owned_by(1);
+    let mut b = Trail::owned_by(2);
+    for k in 0..15 {
+        for (trail, name) in [(&mut a, "a"), (&mut b, "b")] {
+            let id = format!("{name}-{k}");
+            trail.begin(&id, 0.0);
+            trail.end(&id, "local_hangup", 1.0);
+            trail.attempts.last_mut().unwrap().started_ms = 1_000_000 + k * 20 + i64::from(name == "b") * 10;
+        }
+    }
+    a.combine(Trail::parse(&b.save()).unwrap(), |_| true);
+    let ids: Vec<_> = a.attempts.iter().map(|x| x.id.as_str()).collect();
+    assert_eq!(ids.len(), KEPT_CALLS);
+    assert_eq!(ids[0], "a-5");
+    assert_eq!(ids[KEPT_CALLS - 1], "b-14");
 }
 
 #[test]
