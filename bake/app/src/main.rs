@@ -484,7 +484,7 @@ pub fn send_to(s: &mut App, id: &str, tx: &mut Tx) {
     }
     s.composer = TextEdit::new("");
     match s.unsent.take_same(id, &message) {
-        Some(again) if again.maybe_delivered => dispatch(s, id, again, true, tx),
+        Some(again) if again.reuses_key() => dispatch(s, id, Unsent { tries: again.tries + 1, ..again }, true, tx),
         _ => {
             let pending = fresh(s, id, message);
             dispatch(s, id, pending, false, tx);
@@ -504,8 +504,8 @@ pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
         s.drafts.set(id, "");
     }
     s.unsent.remove(id, &unsent.key);
-    if unsent.maybe_delivered {
-        dispatch(s, id, unsent, true, tx);
+    if unsent.reuses_key() {
+        dispatch(s, id, Unsent { tries: unsent.tries + 1, ..unsent }, true, tx);
     } else {
         let pending = fresh(s, id, unsent.text);
         dispatch(s, id, pending, false, tx);
@@ -519,9 +519,8 @@ pub fn put_back_unsent(s: &mut App, id: &str) {
     if s.composer_for.as_deref() == Some(id) {
         s.composer = TextEdit::new(merged.as_str());
         s.composer.focused = true;
-    } else {
-        s.drafts.set(id, &merged);
     }
+    s.drafts.set(id, &merged);
     over::layout::save(s);
 }
 
@@ -537,7 +536,7 @@ pub fn dismiss_unsent(s: &mut App, id: &str) {
 }
 
 fn fresh(s: &App, id: &str, text: String) -> Unsent {
-    Unsent { session: id.to_string(), text, key: feed::catalog::request_key(), busy: busy_delivery(s, id), maybe_delivered: true, error: "the app closed before the daemon answered".into() }
+    Unsent { session: id.to_string(), text, key: feed::catalog::request_key(), busy: busy_delivery(s, id), maybe_delivered: true, error: "the app closed before the daemon answered".into(), tries: 0 }
 }
 
 fn dispatch(s: &mut App, id: &str, pending: Unsent, resent: bool, tx: &mut Tx) {
@@ -550,8 +549,8 @@ fn dispatch(s: &mut App, id: &str, pending: Unsent, resent: bool, tx: &mut Tx) {
     if let Err(error) = over::layout::save_now(s) {
         settle(s, &id, &pending.key);
         put_back(s, &id, &pending.text);
-        let maybe_delivered = resent && pending.maybe_delivered;
-        s.unsent.add(&id, Unsent { maybe_delivered, error: format!("the message couldn't be saved first ({error})"), ..pending });
+        let (maybe_delivered, tries) = if resent { (pending.maybe_delivered, pending.tries.saturating_sub(1)) } else { (false, 0) };
+        s.unsent.add(&id, Unsent { maybe_delivered, tries, error: format!("the message couldn't be saved first ({error})"), ..pending });
         return;
     }
     tx.scroll_to_bottom(format!("transcript-{id}"));
