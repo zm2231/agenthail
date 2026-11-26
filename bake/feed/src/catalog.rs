@@ -592,7 +592,7 @@ pub fn numbered_options(body: &str) -> Vec<String> {
 pub struct Client {
     pub(crate) base: String,
     pub(crate) token: String,
-    agent: ureq::Agent,
+    pub(crate) agent: ureq::Agent,
 }
 
 pub(crate) fn enc(value: &str) -> String {

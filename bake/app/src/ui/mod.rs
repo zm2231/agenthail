@@ -14,6 +14,7 @@ pub mod attach;
 pub(crate) mod background;
 mod chips;
 pub mod complete;
+pub mod connect;
 pub mod gone;
 pub(crate) mod queue;
 pub mod limit;
@@ -99,9 +100,10 @@ pub(crate) fn avatar_with_state(name: &str, state: State, size: f32) -> El {
 
 pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let mut layer = Vec::new();
-    let body = match &s.screen {
-        Screen::Session => session_body(s, cx),
-        _ => crate::over::view(s, cx, &mut layer),
+    let body = match (connect::screen(s, cx), &s.screen) {
+        (Some(body), _) => body,
+        (None, Screen::Session) => session_body(s, cx),
+        (None, _) => crate::over::view(s, cx, &mut layer),
     };
     crate::over::overlays(s, &mut layer);
     session_menu::overlays(s, &mut layer);

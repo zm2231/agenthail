@@ -47,7 +47,7 @@ pub fn watch(s: &mut App) -> bool {
         if s.missing.as_ref().is_some_and(|m| m.id == id) {
             return false;
         }
-        let why = if s.fixtures.is_some() { "This session isn't in the recording.".to_string() } else { format!("Agenthail isn't connected: {}", s.status) };
+        let why = if s.fixtures.is_some() { "This session isn't in the recording.".to_string() } else { s.link.problem.as_ref().map_or_else(|| format!("Agenthail isn't connected: {}", s.status), |p| p.detail()) };
         s.missing = Some(not_found(id, why, s.clock));
         return true;
     };
