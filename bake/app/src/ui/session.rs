@@ -212,7 +212,10 @@ pub(crate) fn session_screen(s: &App) -> El {
     let mut center = col().grow(1.0).h_full().min_w(0.0).child(header(s, x));
     let open = open_request(s, x).is_some();
     let sent = has_settled(s, x);
-    if open || (x.state(s.now) == State::NeedsYou && !sent) {
+    let stop = x.limit(s.now);
+    if let Some(stop) = stop.as_ref().filter(|_| !open) {
+        center = center.child(super::limit::card(s, x, stop));
+    } else if open || (x.state(s.now) == State::NeedsYou && !sent) {
         center = center.child(waiting_card(s, x));
     } else if sent {
         let request = settled_request(s, x).map(|r| r.id.clone()).unwrap_or_default();

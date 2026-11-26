@@ -685,7 +685,7 @@ fn until(s: &App, at: &str) -> String {
 
 pub fn status_bar(s: &App) -> El {
     let k = kit();
-    let mut r = row().key("status-bar").w_full().h(30.0).px(16.0).gap(12.0).items_center().child(text("Used".to_string()).font(META).color(weak()));
+    let mut meters = row().key("usage-meters").h_full().gap(12.0).px(6.0).radius(6.0).items_center().hover(k.c.surface_raised_hover).label("Usage by account").on_press(crate::ui::accounts::open).child(text("Used".to_string()).font(META).color(weak()));
     for m in &s.ov.d.usage {
         let pct = m.percent.unwrap_or(0.0);
         let color = if pct >= 80.0 { k.c.danger.icon } else if pct >= 60.0 { k.c.warning.icon } else { base() };
@@ -695,7 +695,7 @@ pub fn status_bar(s: &App) -> El {
             _ => format!("{} {window}", m.provider.chars().next().map(|c| c.to_uppercase().collect::<String>() + &m.provider[1..]).unwrap_or_default()),
         };
         let bar = row().w(28.0).h(4.0).radius(2.0).fill(k.c.border_base).child(el().w((28.0 * pct / 100.0).clamp(2.0, 28.0) as f32).h(4.0).radius(2.0).fill(color));
-        r = r.child(
+        meters = meters.child(
             row()
                 .gap(6.0)
                 .items_center()
@@ -705,6 +705,7 @@ pub fn status_bar(s: &App) -> El {
                 .child(text(until(s, m.resets_at.as_deref().unwrap_or(""))).font(META).color(weak())),
         );
     }
+    let mut r = row().key("status-bar").w_full().h(30.0).px(10.0).gap(12.0).items_center().child(meters);
     let working = s.ov.d.working();
     r = r.child(spacer()).child(row().gap(6.0).items_center().child(Spinner::new().size(10.0).build(k)).child(text(format!("{working} working")).font(META).color(base())));
     for h in &s.ov.d.hosts {

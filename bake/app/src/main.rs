@@ -102,6 +102,9 @@ pub struct App {
     pub diff_key: (String, usize),
     pub ov: Over,
     pub menus: ui::session_menu::Menus,
+    pub limits: ui::limit::Limits,
+    pub accounts: ui::accounts::Accounts,
+    pub prs: ui::pr_link::Prs,
     pub new_session: Option<ui::new_session::Sheet>,
     revealed: Option<String>,
     client: Option<Client>,
@@ -191,6 +194,9 @@ fn init() -> App {
         diff_key: (String::new(), usize::MAX),
         ov: Over::new(live, recording.is_none()),
         menus: ui::session_menu::Menus::new(),
+        limits: ui::limit::Limits::new(),
+        accounts: ui::accounts::Accounts::new(),
+        prs: ui::pr_link::Prs::new(),
         new_session: None,
         revealed: None,
         client: None,
@@ -971,6 +977,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         s.revealed = Some(id);
     }
     changed |= ui::session_menu::drain(s);
+    changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s);
     switch_composer(s);
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &s.composer.text);
