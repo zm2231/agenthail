@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use feed::create::{self, Host, Launch, Launcher, ModelOption, Outcome, RootPick, RootUsage, SessionOptions};
 use rune::{El, Key, KeyEvent, TextEdit, Tx, col, row, text, text_input};
@@ -8,12 +9,22 @@ use crate::theme::{self, BODY, META, failed, faint, muted};
 use crate::{App, Bg, Screen, session};
 
 pub enum Loaded {
-    Hosts(Result<Vec<Host>, String>),
+    Hosts(u64, Result<Vec<Host>, String>),
     Options(u64, Result<SessionOptions, String>),
     Models(u64, String, Result<Vec<ModelOption>, String>),
     Pick(u64, RootPick),
     Usage(u64, RootUsage),
-    Created(Outcome),
+    Created(u64, Outcome),
+}
+
+fn ticket() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+enum Next {
+    Stay,
+    Open { session: String, notice: Option<String> },
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -35,6 +46,7 @@ enum Choice {
 }
 
 pub struct Sheet {
+    id: u64,
     launch: Launch,
     hosts: Vec<Host>,
     folder: TextEdit,
@@ -61,6 +73,7 @@ impl Sheet {
         let mut message = TextEdit::new("");
         message.focused = true;
         Sheet {
+            id: ticket(),
             launch: Launch { host: prefill.host.clone(), ..Default::default() },
             hosts: Vec::new(),
             folder: TextEdit::new(prefill.folder.as_str()),
@@ -180,7 +193,46 @@ impl Sheet {
     }
 
     fn can_start(&self) -> bool {
-        !self.starting && self.submitted.is_none() && self.options.is_some() && self.host_ready() && self.request().problem().is_none()
+        !self.starting && self.submitted.is_none() && self.existing.is_none() && self.options.is_some() && self.host_ready() && self.request().problem().is_none()
+    }
+
+    fn restart_loads(&mut self) -> u64 {
+        self.generation = ticket();
+        self.options = None;
+        self.models.clear();
+        self.pick = None;
+        self.load_error = None;
+        self.model_error = None;
+        self.generation
+    }
+
+    fn settle(&mut self, outcome: Outcome) -> Next {
+        self.starting = false;
+        match outcome {
+            Outcome::Started { session, note } => Next::Open { session, notice: (!note.is_empty()).then_some(note) },
+            Outcome::Unknown { session: Some(session), message } => Next::Open { session, notice: Some(message) },
+            Outcome::Submitted(note) => {
+                self.submitted = Some(note);
+                Next::Stay
+            }
+            Outcome::Halted { session, message } => {
+                self.error = Some(format!("The session started, but its first message failed: {message}"));
+                self.existing = Some(session);
+                Next::Stay
+            }
+            Outcome::Unknown { session: None, message } | Outcome::Failed(message) => {
+                self.error = Some(message);
+                Next::Stay
+            }
+        }
+    }
+
+    fn again(&mut self) {
+        self.submitted = None;
+        self.existing = None;
+        self.error = None;
+        self.message = TextEdit::new("");
+        self.message.focused = true;
     }
 }
 
@@ -211,11 +263,12 @@ pub fn open(s: &mut App, prefill: Prefill, tx: &mut Tx) {
     if s.client.is_none() {
         sheet.load_error = Some("Agenthail isn't connected, so nothing can start from here.".into());
     }
+    let id = sheet.id;
     s.new_session = Some(sheet);
     if let Some(client) = s.client.clone() {
         let out = s.outbox.clone();
         std::thread::spawn(move || {
-            let _ = out.send(Bg::NewSession(Loaded::Hosts(client.hosts().map_err(|e| e.to_string()))));
+            let _ = out.send(Bg::NewSession(Loaded::Hosts(id, client.hosts().map_err(|e| e.to_string()))));
         });
     }
     reload(s);
@@ -228,14 +281,9 @@ fn close(s: &mut App) {
 
 fn reload(s: &mut App) {
     let Some(sheet) = s.new_session.as_mut() else { return };
-    sheet.generation += 1;
-    sheet.options = None;
-    sheet.models.clear();
-    sheet.pick = None;
-    sheet.load_error = None;
-    sheet.model_error = None;
+    let generation = sheet.restart_loads();
     let Some(client) = s.client.clone() else { return };
-    let (out, generation, host) = (s.outbox.clone(), sheet.generation, sheet.launch.host.clone());
+    let (out, host) = (s.outbox.clone(), sheet.launch.host.clone());
     std::thread::spawn(move || {
         let _ = out.send(Bg::NewSession(Loaded::Options(generation, client.session_options(&host).map_err(|e| e.to_string()))));
     });
@@ -280,9 +328,12 @@ fn load_accounts(s: &mut App) {
 }
 
 pub fn take(s: &mut App, loaded: Loaded) {
+    if let Loaded::Created(id, outcome) = loaded {
+        return created(s, id, outcome);
+    }
     let Some(sheet) = s.new_session.as_mut() else { return };
     match loaded {
-        Loaded::Hosts(Ok(hosts)) => {
+        Loaded::Hosts(id, Ok(hosts)) if id == sheet.id => {
             sheet.hosts = hosts;
             if !sheet.host_ready() {
                 sheet.launch.host.clear();
@@ -290,7 +341,6 @@ pub fn take(s: &mut App, loaded: Loaded) {
                 reload(s);
             }
         }
-        Loaded::Hosts(Err(_)) => {}
         Loaded::Options(generation, result) if generation == sheet.generation => match result {
             Ok(options) => {
                 if options.surface(&sheet.launch.surface).is_none() {
@@ -323,34 +373,42 @@ pub fn take(s: &mut App, loaded: Loaded) {
                 root.take_usage(usage);
             }
         }
-        Loaded::Created(outcome) => created(s, outcome),
         _ => {}
     }
 }
 
-fn created(s: &mut App, outcome: Outcome) {
-    let Some(sheet) = s.new_session.as_mut() else { return };
-    sheet.starting = false;
-    match outcome {
-        Outcome::Started { session, note } => {
-            close(s);
-            if !note.is_empty() {
+fn created(s: &mut App, id: u64, outcome: Outcome) {
+    let next = match s.new_session.as_mut() {
+        Some(sheet) if sheet.id == id => sheet.settle(outcome),
+        _ => match outcome {
+            Outcome::Started { session, note } => Next::Open { session, notice: Some(if note.is_empty() { "The new session started.".into() } else { note }) },
+            Outcome::Unknown { session: Some(session), message } => Next::Open { session, notice: Some(message) },
+            Outcome::Submitted(note) => {
                 s.ov.notice = Some(note);
+                Next::Stay
             }
-            crate::over::open_session(s, &session);
-        }
-        Outcome::Unknown { session: Some(session), message } => {
+            Outcome::Halted { message, .. } => {
+                s.ov.notice = Some(format!("The new session started, but its first message failed: {message}"));
+                Next::Stay
+            }
+            Outcome::Unknown { session: None, message } => {
+                s.ov.notice = Some(message);
+                Next::Stay
+            }
+            Outcome::Failed(message) => {
+                s.ov.notice = Some(format!("The new session didn't start: {message}"));
+                Next::Stay
+            }
+        },
+    };
+    if let Next::Open { session, notice } = next {
+        if s.new_session.as_ref().is_some_and(|sheet| sheet.id == id) {
             close(s);
-            s.ov.notice = Some(message);
-            crate::over::open_session(s, &session);
         }
-        Outcome::Submitted(note) => sheet.submitted = Some(note),
-        Outcome::Halted { session, message } => {
-            sheet.error = Some(format!("The session started, but its first message failed: {message}"));
-            sheet.existing = Some(session);
+        crate::over::open_session(s, &session);
+        if notice.is_some() {
+            s.ov.notice = notice;
         }
-        Outcome::Unknown { session: None, message } => sheet.error = Some(message),
-        Outcome::Failed(message) => sheet.error = Some(message),
     }
 }
 
@@ -363,17 +421,15 @@ fn start(s: &mut App) {
     sheet.starting = true;
     sheet.error = None;
     sheet.existing = None;
-    let (out, launch) = (s.outbox.clone(), sheet.request());
+    let (out, launch, id) = (s.outbox.clone(), sheet.request(), sheet.id);
     std::thread::spawn(move || {
-        let _ = out.send(Bg::NewSession(Loaded::Created(client.create_session(&launch))));
+        let _ = out.send(Bg::NewSession(Loaded::Created(id, client.create_session(&launch))));
     });
 }
 
 fn start_another(s: &mut App, tx: &mut Tx) {
     if let Some(sheet) = s.new_session.as_mut() {
-        sheet.submitted = None;
-        sheet.message = TextEdit::new("");
-        sheet.message.focused = true;
+        sheet.again();
         tx.focus("new-session-message", false);
     }
 }
@@ -641,11 +697,14 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
         };
         foot = foot.child(text(hint).font(META).color(faint()).grow(1.0).shrink().truncate());
         if sheet.existing.is_some() {
-            foot = foot.child(Button::new("Open the session").variant(ButtonVariant::Ghost).on_press(open_existing).build(k));
+            foot = foot
+                .child(Button::new("Start another").variant(ButtonVariant::Ghost).on_press_tx(start_another).build(k))
+                .child(Button::new("Open the session").variant(ButtonVariant::Contrast).on_press(open_existing).build(k));
+        } else {
+            foot = foot
+                .child(Button::new("Cancel").variant(ButtonVariant::Ghost).on_press(close).build(k))
+                .child(Button::new(if sheet.starting { "Starting…" } else { "Start" }).variant(ButtonVariant::Contrast).shortcut("⌘↩").disabled(!sheet.can_start()).on_press(start).build(k));
         }
-        foot = foot
-            .child(Button::new("Cancel").variant(ButtonVariant::Ghost).on_press(close).build(k))
-            .child(Button::new(if sheet.starting { "Starting…" } else { "Start" }).variant(ButtonVariant::Contrast).shortcut("⌘↩").disabled(!sheet.can_start()).on_press(start).build(k));
     }
     body = body.child(foot);
 
@@ -656,4 +715,50 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
 fn capitalized(value: &str) -> String {
     let mut chars = value.chars();
     chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ready() -> Sheet {
+        let mut sheet = Sheet::new(Prefill { host: String::new(), folder: "/work/app".into() });
+        sheet.restart_loads();
+        sheet.options = Some(SessionOptions::default());
+        sheet.launch.surface = create::CLAUDE.into();
+        sheet.message = TextEdit::new("Fix the build");
+        sheet
+    }
+
+    #[test]
+    fn a_session_whose_first_message_failed_is_not_started_twice() {
+        let mut sheet = ready();
+        assert!(sheet.can_start());
+        assert!(matches!(sheet.settle(Outcome::Halted { session: "s1".into(), message: "model refused".into() }), Next::Stay));
+        assert_eq!(sheet.existing.as_deref(), Some("s1"));
+        assert!(!sheet.can_start(), "the session exists, so Start would make a second one");
+        sheet.again();
+        assert!(sheet.message.text.is_empty() && sheet.existing.is_none());
+    }
+
+    #[test]
+    fn a_refusal_keeps_the_form_and_a_start_opens_the_session() {
+        let mut sheet = ready();
+        assert!(matches!(sheet.settle(Outcome::Failed("cwd must be an absolute path".into())), Next::Stay));
+        assert_eq!(sheet.error.as_deref(), Some("cwd must be an absolute path"));
+        assert_eq!(sheet.message.text, "Fix the build");
+        assert!(sheet.can_start());
+        assert!(matches!(sheet.settle(Outcome::Started { session: "s2".into(), note: String::new() }), Next::Open { session, notice: None } if session == "s2"));
+    }
+
+    #[test]
+    fn a_reopened_sheet_never_shares_a_load_with_the_one_it_replaced() {
+        let mut closed = ready();
+        let old = closed.restart_loads();
+        let mut reopened = ready();
+        let current = reopened.restart_loads();
+        assert_ne!(closed.id, reopened.id);
+        assert_ne!(old, current);
+        assert_ne!(old, reopened.generation);
+    }
 }
