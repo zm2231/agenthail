@@ -131,7 +131,7 @@ fn note(s: &mut Prefs, section: Section, problem: Option<&'static str>) {
 }
 
 pub fn edited(s: &mut Prefs, section: Section) {
-    s.handoffs.problems.remove(&section);
+    note(s, section, None);
     if !s.notes.get(&section).is_some_and(refused) {
         s.notes.remove(&section);
     }

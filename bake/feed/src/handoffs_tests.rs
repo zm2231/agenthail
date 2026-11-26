@@ -86,15 +86,19 @@ fn session_search_offers_local_sessions_and_names_them_for_the_daemon() {
 
 #[test]
 fn an_unsettled_send_is_retried_under_its_own_key_only_while_unchanged() {
+    let maybe: Result<(), Failure> = Err(Failure { uncertain: true, ..Failure::new("timed out") });
+    let unsent: Result<(), Failure> = Err(Failure::new("connection refused"));
     let mut u = Unsettled::default();
     assert_ne!(u.key_for("ship", "hello"), u.key_for("ship", "hello"));
-    u.record("ship", "hello", "k1", true);
-    u.record("ops", "status", "k2", true);
-    u.record("ship", "other", "k3", false);
+    u.record("ship", "hello", "k1", &maybe);
+    u.record("ops", "status", "k2", &maybe);
+    u.record("ship", "other", "k3", &Ok(()));
     assert_eq!((u.key_for("ship", "hello"), u.key_for("ops", "status")), ("k1".to_string(), "k2".to_string()), "a later send elsewhere keeps an earlier open one");
+    u.record("ship", "hello", "k1", &unsent);
+    assert_eq!(u.key_for("ship", "hello"), "k1", "a retry that surely didn't go out keeps the first request");
     assert_ne!(u.key_for("ship", "hello again"), "k1");
     assert_ne!(u.key_for("ops", "hello"), "k1");
-    u.record("ship", "hello", "k1", false);
+    u.record("ship", "hello", "k1", &Ok(()));
     assert_ne!(u.key_for("ship", "hello"), "k1");
     let (client, _rx) = daemon(replies(&[(400, r#"{"error":{"code":"invalid_request","message":"no members"}}"#)]));
     let plain = client.channel_send("ship", "hello", "k4").unwrap_err();

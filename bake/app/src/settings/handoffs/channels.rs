@@ -35,7 +35,7 @@ fn send(s: &mut Prefs) {
     let key = open.lock().unwrap().key_for(&channel, &message);
     change(s, Section::Channels, format!("channel-send-{channel}"), move |c| {
         let result = c.channel_send(&channel, &message, &key);
-        open.lock().unwrap().record(&channel, &message, &key, result.as_ref().is_err_and(|f| f.uncertain));
+        open.lock().unwrap().record(&channel, &message, &key, &result);
         *out.lock().unwrap() = Some(format!("#{channel}: {}", result?.summary()));
         Ok(())
     });

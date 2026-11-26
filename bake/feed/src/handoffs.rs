@@ -277,12 +277,12 @@ impl Unsettled {
         self.0.get(&(channel.to_string(), message.to_string())).cloned().unwrap_or_else(request_key)
     }
 
-    pub fn record(&mut self, channel: &str, message: &str, key: &str, open: bool) {
+    pub fn record<T>(&mut self, channel: &str, message: &str, key: &str, result: &Result<T, Failure>) {
         let at = (channel.to_string(), message.to_string());
-        if open {
-            self.0.insert(at, key.to_string());
-        } else {
-            self.0.remove(&at);
+        match result {
+            Ok(_) => drop(self.0.remove(&at)),
+            Err(f) if f.uncertain => drop(self.0.insert(at, key.to_string())),
+            Err(_) => {}
         }
     }
 }
