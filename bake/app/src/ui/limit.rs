@@ -97,6 +97,12 @@ fn target_spent(s: &App, id: &str, root: &str) -> bool {
 }
 
 fn note(s: &mut App, id: &str, since: String, text: String, bad: bool) {
+    if bad {
+        s.limits.note.remove(id);
+        let title = session(s, id).map(|x| x.title()).unwrap_or_default();
+        s.limits.warnings.push(format!("{title}: {text}"));
+        return;
+    }
     s.limits.note.insert(id.to_string(), (text, bad, since));
 }
 
@@ -215,10 +221,7 @@ fn settled(s: &mut App, done: Done) {
                     note(s, &id, stop, format!("Moved to {}", target.name), false);
                 }
                 Ok(Moved::Done(Some(detail))) => {
-                    let title = session(s, &id).map(|x| x.title()).unwrap_or_default();
-                    let text = format!("Moved {title} to {}, but {detail}", target.name);
-                    s.limits.warnings.push(text.clone());
-                    note(s, &id, stop, text, true);
+                    note(s, &id, stop, format!("Moved to {}, but {detail}", target.name), true);
                 }
                 Ok(Moved::NeedsConsent(message)) => {
                     s.limits.note.remove(&id);
