@@ -501,11 +501,14 @@ func (r *Registry) UpdateCatalogSessionProjection(sessionID, priorFingerprint, n
 
 // ReidentifyCatalogSession moves a row to another project without observing
 // the session, so its freshness and misses stay as the last pass left them.
-func (r *Registry) ReidentifyCatalogSession(sessionID, priorFingerprint, nextFingerprint string, project, checkout json.RawMessage) (CatalogEvent, bool, error) {
+// It reports false, writing nothing, when the row's projection is no longer
+// priorFingerprint.
+func (r *Registry) ReidentifyCatalogSession(sessionID, priorFingerprint, nextFingerprint string, project, checkout json.RawMessage) (bool, error) {
 	if !json.Valid(project) || !json.Valid(checkout) {
-		return CatalogEvent{}, false, fmt.Errorf("catalog identity must be JSON")
+		return false, fmt.Errorf("catalog identity must be JSON")
 	}
-	return r.updateCatalogSessionProjection(sessionID, priorFingerprint, nextFingerprint, project, checkout)
+	event, _, err := r.updateCatalogSessionProjection(sessionID, priorFingerprint, nextFingerprint, project, checkout)
+	return event.Type != "", err
 }
 
 func (r *Registry) updateCatalogSessionProjection(sessionID, priorFingerprint, nextFingerprint string, project, checkout json.RawMessage) (CatalogEvent, bool, error) {

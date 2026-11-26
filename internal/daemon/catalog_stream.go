@@ -125,6 +125,16 @@ func (h *catalogHub) updateProjection(sessionID, priorFingerprint, nextFingerpri
 	return h.flushCommittedLocked()
 }
 
+func (h *catalogHub) reidentify(sessionID, priorFingerprint, nextFingerprint string, project, checkout json.RawMessage) (bool, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	written, err := h.registry.ReidentifyCatalogSession(sessionID, priorFingerprint, nextFingerprint, project, checkout)
+	if err != nil {
+		return false, err
+	}
+	return written, h.flushCommittedLocked()
+}
+
 func (h *catalogHub) recordDiscovery(kind surface.SurfaceKind, seen map[string]struct{}, observedAt time.Time, complete bool) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -534,7 +544,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 		}
 		d.publishSurfaceHealth(health, time.Now().UTC())
 	}
-	d.reidentifyCatalogRows(ctx)
+	d.requestCatalogReidentify()
 	d.catalogIdentities.Prune(time.Now())
 	d.publishUnarchivedProjects()
 	d.publishProjectMoves()

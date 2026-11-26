@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
@@ -411,5 +413,38 @@ func TestAJoinMovesSessionsThatEndedBeforeIt(t *testing.T) {
 		if !slices.Equal(named, []string{key}) {
 			t.Fatalf("%s names agenthail-v2 %v, want only %s", name, named, key)
 		}
+	}
+}
+
+func TestAnEndedSessionWhoseRepositoryIsGoneKeepsItsProject(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	node := newFederationNode(t)
+	repo := testkit.GitRepo(t)
+	node.fake.sessions["gone"] = surface.Session{ID: "gone", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "work gone", Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: filepath.Join(t.TempDir(), "gone.jsonl")}
+	moveSession(t, node, "gone", repo, time.Now().Add(-time.Hour))
+	discoverOn(node)
+	node.fake.end("gone")
+	for range catalogOmissionThreshold + 1 {
+		discoverOn(node)
+	}
+	before := projectresolve.StoredSessionProject(node.reg, "gone")
+	if before == nil || !strings.HasPrefix(before.ID, "implicit:") {
+		t.Fatalf("the ended session's project before = %+v, want its repository", before)
+	}
+	if err := os.RemoveAll(repo); err != nil {
+		t.Fatal(err)
+	}
+	response := node.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "project-add", "path": t.TempDir(), "title": "elsewhere"})
+	if response.Code != http.StatusOK {
+		t.Fatalf("project-add: %d %s", response.Code, response.Body.String())
+	}
+	discoverOn(node)
+	generation := node.daemon.catalogIdentities.Generation()
+	testkit.Eventually(t, "the sweep after the add", 10*time.Second, func() bool {
+		discoverOn(node)
+		return node.daemon.catalogReidentified.Load() == generation
+	})
+	if after := projectresolve.StoredSessionProject(node.reg, "gone"); after == nil || after.ID != before.ID {
+		t.Fatalf("the ended session's project after its repository went = %+v, want %s", after, before.ID)
 	}
 }

@@ -148,6 +148,7 @@ type Daemon struct {
 	// session's activity unarchived its project.
 	catalogProjectUnarchived atomic.Bool
 	catalogReidentified      atomic.Uint64
+	catalogReidentifying     atomic.Bool
 	sources                  *sessionSourceManager
 	sourceHoldMu             sync.Mutex
 	surfaceHealthMu          sync.Mutex
