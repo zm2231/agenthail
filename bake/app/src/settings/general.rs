@@ -1,10 +1,12 @@
-use feed::prefs::{self, Person};
+use feed::prefs::{self, Failure, Person};
 use rune::{El, Tx, row};
 use rune_kit::{Button, ButtonVariant, ControlSize, RadioGroup, RadioItem, TextInput};
 
 use super::parts::{self, line, section};
 use super::{Prefs, Read, Section, saving, write};
 use crate::theme;
+
+const READ_ONLY: &str = "This app's sign-in doesn't include the settings permission, so these show read-only. Usage limit and Claude root settings need that permission to be read.";
 
 const GENERAL: &[Read] = &[Read::Settings, Read::Base];
 
@@ -123,6 +125,7 @@ pub fn page(s: &Prefs, layer: &mut Vec<El>) -> El {
     let writable = settings.is_some();
     match &s.settings {
         None => out = out.child(parts::reading("settings")),
+        Some(Err(f)) if f.denied && base.is_some() => out = out.child(parts::failure(&Failure { message: READ_ONLY.into(), ..f.clone() })),
         Some(Err(f)) => out = out.child(parts::failure(f)),
         Some(Ok(_)) => {}
     }

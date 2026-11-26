@@ -50,7 +50,7 @@ fn holds(s: &Prefs, root: &CompactRoot, all: &[Hold]) -> Option<El> {
     for l in lines {
         c = c.child(text(l).font(META).color(muted()).wrap());
     }
-    Some(row().w_full().px(8.0).py(4.0).child(c.build(theme::kit()).w_full()))
+    Some(row().w_full().px(6.0).py(4.0).child(c.build(theme::kit()).w_full()))
 }
 
 fn root_card(s: &Prefs, root: &CompactRoot, all: &[Hold]) -> El {
