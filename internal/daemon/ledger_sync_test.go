@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/testkit"
@@ -18,7 +19,12 @@ const widgetKey = "repo:github.com/example/widget"
 
 func ledgerOnTwoHosts(t *testing.T) (mac, owner *federationNode, record registry.PairedHost) {
 	t.Helper()
-	mac, owner, record = widgetOnTwoHosts(t)
+	return ledgerOnTwoHostsBuilt(t, buildinfo.Identity{}, buildinfo.Identity{})
+}
+
+func ledgerOnTwoHostsBuilt(t *testing.T, macBuild, ownerBuild buildinfo.Identity) (mac, owner *federationNode, record registry.PairedHost) {
+	t.Helper()
+	mac, owner, record = widgetOnTwoHostsBuilt(t, func(*federation) {}, macBuild, ownerBuild)
 	if err := ledger.NewStore(mac.reg.WriteDB(), mac.reg.ReadDB()).Enable(widgetKey, ledger.AttachEachPrompt); err != nil {
 		t.Fatal(err)
 	}

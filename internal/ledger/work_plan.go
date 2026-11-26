@@ -18,6 +18,7 @@ var workTransitions = map[WorkAction]struct {
 	WorkReject:  {from: []WorkState{WorkInReview}, to: WorkInProgress},
 	WorkReopen:  {from: []WorkState{WorkDone, WorkClosed}, to: WorkOpen},
 	WorkHandoff: {from: []WorkState{WorkInProgress, WorkBlocked}, to: WorkOpen},
+	WorkRelease: {from: []WorkState{WorkInProgress, WorkBlocked}, to: WorkOpen},
 	WorkClose:   {from: []WorkState{WorkOpen, WorkInProgress, WorkBlocked, WorkInReview, WorkParked}, to: WorkClosed},
 	WorkDelete:  {from: []WorkState{WorkOpen, WorkInProgress, WorkBlocked, WorkInReview, WorkDone, WorkClosed, WorkParked}, to: WorkDeleted},
 	WorkPark:    {from: []WorkState{WorkOpen, WorkInProgress, WorkBlocked, WorkParked}, to: WorkParked},
@@ -46,7 +47,7 @@ func (b *Board) planWork(req WorkRequest, ids *idIssuer) (EventType, any, string
 	}
 	transition, ok := workTransitions[req.Action]
 	if !ok {
-		return "", nil, "", refuse("unknown work action %q; use add, claim, block, unblock, park, unpark, submit, approve, reject, review-pass, reopen, handoff, takeover, dep, undep, comment or log", req.Action)
+		return "", nil, "", refuse("unknown work action %q; use add, claim, block, unblock, park, unpark, submit, approve, reject, review-pass, reopen, handoff, release, takeover, dep, undep, comment or log", req.Action)
 	}
 	item := b.workItems[req.ItemID]
 	if item == nil {
@@ -105,6 +106,12 @@ func (b *Board) planWork(req WorkRequest, ids *idIssuer) (EventType, any, string
 		handoff.By = req.SessionID
 		payload.Handoff, payload.Assignee = &handoff, ""
 		readback = fmt.Sprintf("%s handed off by %s (%s), open for the next session", item.ID, req.SessionID, item.origin())
+	case WorkRelease:
+		if item.Assignee != req.SessionID {
+			return "", nil, "", refuse("%s is claimed by %s; only its assignee releases it", item.ID, item.Assignee)
+		}
+		payload.Assignee = ""
+		readback = fmt.Sprintf("%s released by %s (%s), open for the next session", item.ID, req.SessionID, item.origin())
 	case WorkClose:
 		word, evidence := closeReason(payload.Reason)
 		readAsDone := ""

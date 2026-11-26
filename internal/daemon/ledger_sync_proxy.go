@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/zm2231/agenthail/internal/hosts"
+	"github.com/zm2231/agenthail/internal/ledger"
 )
 
 const ledgerProxyAttempts = 3
@@ -62,6 +63,9 @@ func (d *Daemon) ledgerWriteRoute(next http.HandlerFunc) http.HandlerFunc {
 		}
 		if owner == "" {
 			next(w, r)
+			return
+		}
+		if shape, known := ledgerWriteShapes[r.URL.Path]; known && !decodeLedgerBody(w, body, shape()) {
 			return
 		}
 		if !d.knownLedgerSession(w, r, head.SessionID) || !d.knownLedgerProject(w, r, head.ProjectKey, head.SessionID) {
@@ -117,7 +121,11 @@ func (d *Daemon) writeAtLedgerOwner(ctx context.Context, ownerID, key, path stri
 	if _, err := d.syncLedgerProject(ctx, host, key); err != nil {
 		var outdated ledgerHostOutdated
 		if errors.As(err, &outdated) {
-			return fail(http.StatusServiceUnavailable, ledgerOwnerOutdatedCode, ledgerOwnerOutdatedMessage(key, name, outdated.refusal))
+			return fail(http.StatusServiceUnavailable, ledgerOwnerOutdatedCode, ledgerOwnerOutdatedMessage(key, outdated))
+		}
+		var refused ledgerKeyRefused
+		if errors.As(err, &refused) {
+			return fail(http.StatusBadRequest, ledgerUnknownKeyCode, refused.message)
 		}
 		return fail(http.StatusServiceUnavailable, "ledger_owner_unreachable", unreachable+" ("+err.Error()+")")
 	}
@@ -149,7 +157,10 @@ func (d *Daemon) writeAtLedgerOwner(ctx context.Context, ownerID, key, path stri
 		Error struct{ Code, Message string } `json:"error"`
 	}
 	if response.StatusCode == http.StatusBadRequest && json.Unmarshal(answer, &refusal) == nil && refusal.Error.Code == ledgerUnknownKeyCode {
-		return fail(http.StatusServiceUnavailable, ledgerOwnerOutdatedCode, ledgerOwnerOutdatedMessage(key, name, refusal.Error.Message))
+		if outdated, older := d.olderLedgerHost(host, refusal.Error.Message); older {
+			return fail(http.StatusServiceUnavailable, ledgerOwnerOutdatedCode, ledgerOwnerOutdatedMessage(key, outdated))
+		}
+		return fail(http.StatusBadRequest, ledgerUnknownKeyCode, fmt.Sprintf("The ledger for %s is kept on %s. %s", key, name, d.refusedLedgerKey(host, refusal.Error.Message)))
 	}
 	if response.StatusCode >= 200 && response.StatusCode < 300 {
 		host.ledgerMu.Lock()
@@ -160,6 +171,17 @@ func (d *Daemon) writeAtLedgerOwner(ctx context.Context, ownerID, key, path stri
 	return ledgerOwnerReply{status: response.StatusCode, contentType: response.Header.Get("Content-Type"), body: answer}, nil
 }
 
-func ledgerOwnerOutdatedMessage(key, owner, refusal string) string {
-	return fmt.Sprintf("The ledger for %s is kept on %s, which does not know what this host sent (%s); nothing was recorded. Update Agenthail on %s, then retry.", key, owner, refusal, owner)
+var ledgerWriteShapes = map[string]func() any{
+	"/api/v1/ledger/goal":     func() any { return &ledgerGoalRequest{} },
+	"/api/v1/ledger/attach":   func() any { return &ledgerAttachBody{} },
+	"/api/v1/ledger/question": func() any { return &ledger.QuestionRequest{} },
+	"/api/v1/ledger/work":     func() any { return &ledger.WorkRequest{} },
+	"/api/v1/ledger/phases":   func() any { return &ledger.PhaseLabelsRequest{} },
+	"/api/v1/ledger/import":   func() any { return &ledger.WorkImportRequest{} },
+	"/api/v1/ledger/clause":   func() any { return &ledger.ClauseRequest{} },
+	"/api/v1/ledger/check":    func() any { return &checkRequest{} },
+}
+
+func ledgerOwnerOutdatedMessage(key string, outdated ledgerHostOutdated) string {
+	return fmt.Sprintf("The ledger for %s is kept on %s, which runs %s, older than this host's %s, and does not know what this host sent (%s); nothing was recorded. Update Agenthail on %s, then retry.", key, outdated.host, outdated.theirs, outdated.ours, outdated.refusal, outdated.host)
 }

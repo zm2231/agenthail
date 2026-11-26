@@ -360,19 +360,28 @@ func (b *Board) applyWorkLink(event Event) error {
 	return nil
 }
 
+type nestedFields struct {
+	parent string
+	shape  any
+}
+
+var workNestedFields = map[WorkAction][]nestedFields{
+	WorkAdd:      {{"fields", WorkFields{}}},
+	WorkEdit:     {{"change", WorkChange{}}},
+	WorkHandoff:  {{"handoff", Handoff{}}},
+	WorkPark:     {{"park", Park{}}, {"handoff", Handoff{}}},
+	WorkTakeover: {{"takeover", Takeover{}}},
+	WorkProof:    {{"proof", ProofWrite{}}},
+}
+
 func (a WorkAction) NestedKey(key string) string {
-	var nested any
-	var parent string
-	switch a {
-	case WorkAdd:
-		nested, parent = WorkFields{}, "fields"
-	case WorkEdit:
-		nested, parent = WorkChange{}, "change"
-	default:
+	if jsonKey(reflect.TypeOf(WorkRequest{}), key) {
 		return ""
 	}
-	if !jsonKey(reflect.TypeOf(WorkRequest{}), key) && jsonKey(reflect.TypeOf(nested), key) {
-		return parent + "." + key
+	for _, nested := range workNestedFields[a] {
+		if jsonKey(reflect.TypeOf(nested.shape), key) {
+			return nested.parent + "." + key
+		}
 	}
 	return ""
 }

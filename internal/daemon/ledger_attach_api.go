@@ -50,9 +50,15 @@ func decodeLedgerWrite(w http.ResponseWriter, r *http.Request, into any) bool {
 		return false
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, apiRequestBodyLimit))
-	if err == nil {
-		err = decodeStrictJSON(body, into)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error())
+		return false
 	}
+	return decodeLedgerBody(w, body, into)
+}
+
+func decodeLedgerBody(w http.ResponseWriter, body []byte, into any) bool {
+	err := decodeStrictJSON(body, into)
 	if key, unknown := unknownJSONKey(err); unknown {
 		writeAPIError(w, http.StatusBadRequest, ledgerUnknownKeyCode, unknownLedgerKey(body, into, key))
 		return false

@@ -741,10 +741,17 @@ func pairedFederation(t *testing.T) (*federationNode, *federationNode, registry.
 // it pairs, and so before its per-host loops start.
 func pairedFederationWith(t *testing.T, configure func(*federation)) (*federationNode, *federationNode, registry.PairedHost) {
 	t.Helper()
+	return pairedFederationBuilt(t, configure, buildinfo.Identity{}, buildinfo.Identity{})
+}
+
+func pairedFederationBuilt(t *testing.T, configure func(*federation), localBuild, remoteBuild buildinfo.Identity) (*federationNode, *federationNode, registry.PairedHost) {
+	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	remote := newFederationNode(t, "remote-a", "remote-b")
+	remote.daemon.SetBuild(remoteBuild)
 	remote.serve(t, nil)
 	local := newFederationNode(t, "local-a")
+	local.daemon.SetBuild(localBuild)
 	local.daemon.federation.downGrace = 200 * time.Millisecond
 	configure(local.daemon.federation)
 	local.start(t, testRoots(remote.server))

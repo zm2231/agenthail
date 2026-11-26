@@ -26,7 +26,7 @@ const ledgerWorkUsage = `usage: agenthail ledger work [list] [--state <s,...>] [
        agenthail ledger work comment <item_id> "<text>"
        agenthail ledger work log <item_id> "<text>" [--type progress|blocker|decision|hypothesis|tried|result|verify]
        agenthail ledger work verify <item_id> "<what you are checking>"   (a verify log: building is over, the work is being checked)
-       agenthail ledger work <claim|block|unblock|submit|reopen|restore> <item_id> [--reason "..."]
+       agenthail ledger work <claim|block|unblock|submit|release|reopen|restore> <item_id> [--reason "..."]
        agenthail ledger work close <item_id> --reason "done: <what finished it>|duplicate|wontfix|obsolete ..."
        agenthail ledger work delete <item_id> [--reason "..."]
        agenthail ledger work <approve|reject> <item_id> [--utterance <the person's words>] [--reason "..."]
@@ -273,7 +273,7 @@ func (a *App) ledgerCriticalPath(store *ledger.Store, w ledgerWriteArgs) error {
 
 var workActions = map[ledger.WorkAction]bool{
 	ledger.WorkAdd: true, ledger.WorkClaim: true, ledger.WorkBlock: true, ledger.WorkUnblock: true, ledger.WorkSubmit: true,
-	ledger.WorkApprove: true, ledger.WorkReject: true, ledger.WorkReopen: true, ledger.WorkHandoff: true, ledger.WorkDep: true,
+	ledger.WorkApprove: true, ledger.WorkReject: true, ledger.WorkReopen: true, ledger.WorkHandoff: true, ledger.WorkRelease: true, ledger.WorkDep: true,
 	ledger.WorkComment: true, ledger.WorkLog: true, ledger.WorkEdit: true, ledger.WorkLink: true, ledger.WorkClose: true,
 	ledger.WorkDelete: true, ledger.WorkRestore: true, ledger.WorkPark: true, ledger.WorkUnpark: true, ledger.WorkTakeover: true, ledger.WorkReviewPass: true,
 }
