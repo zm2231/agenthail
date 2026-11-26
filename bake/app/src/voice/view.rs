@@ -8,6 +8,7 @@ use crate::icons;
 use crate::theme::{self, BODY, BODY_BOLD, META, META_BOLD, TITLE, accent, failed, faint, kit, line, muted, wash};
 
 pub fn view(w: &Win, _: &mut Cx<Win>) -> El {
+    super::trace("view", w);
     col()
         .w_full()
         .h_full()

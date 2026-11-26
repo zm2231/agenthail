@@ -252,6 +252,28 @@ pub fn open_timeline(id: &str) {
     OPENED.with(|o| *o.borrow_mut() = Some(id.to_string()));
 }
 
+thread_local! {
+    static TRACED: RefCell<Vec<(&'static str, String)>> = const { RefCell::new(Vec::new()) };
+}
+
+pub fn trace(from: &'static str, w: &Win) {
+    let seen = format!("state {:p}: {} / {}", w, w.call.title(), w.call.unavailable().unwrap_or_else(|| "can call".into()));
+    let fresh = TRACED.with_borrow_mut(|t| match t.iter_mut().find(|(f, _)| *f == from) {
+        Some((_, last)) if *last == seen => false,
+        Some((_, last)) => {
+            *last = seen.clone();
+            true
+        }
+        None => {
+            t.push((from, seen.clone()));
+            true
+        }
+    });
+    if fresh {
+        eprintln!("voice: {from} sees {seen}");
+    }
+}
+
 fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
     w.clock = t;
     let mut changed = false;
@@ -302,6 +324,7 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
         save_trail(&w.call.trail);
     }
     tx.wake_after(Duration::from_millis(100));
+    trace("poll", w);
     changed
 }
 
