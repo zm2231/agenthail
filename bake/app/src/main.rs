@@ -88,6 +88,7 @@ pub struct App {
     pub status: String,
     clock: f64,
     panes_moved: bool,
+    world_stale: bool,
     built_at: f64,
 }
 
@@ -165,6 +166,7 @@ fn init() -> App {
         status: "connecting".into(),
         clock: 0.0,
         panes_moved: false,
+        world_stale: false,
         built_at: 0.0,
     };
     if recording.is_some() {
@@ -280,6 +282,7 @@ fn rebuild(s: &mut App) {
     let panes: Vec<(&str, &[feed::Item])> = s.panes.iter().map(|(id, p)| (id.as_str(), p.transcript.items())).collect();
     s.ov.rebuild(&panes);
     s.panes_moved = false;
+    s.world_stale = false;
     s.built_at = s.clock;
 }
 
@@ -301,7 +304,7 @@ pub fn fetch_ledger(s: &mut App, project: &str) {
     if !s.ov.live.wants(project) {
         return;
     }
-    rebuild(s);
+    s.world_stale = true;
     let (tx, project, sessions, started) = (s.outbox.clone(), project.to_string(), s.sessions.clone(), std::time::Instant::now());
     std::thread::spawn(move || {
         let result = feed::derive::live::ledger(&client, &project, &sessions);
@@ -479,12 +482,13 @@ pub fn send_to(s: &mut App, id: &str, tx: &mut Tx) {
 fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     s.clock = t;
     let mut changed = false;
+    let mut arrived = false;
     while let Ok(message) = s.inbox.try_recv() {
         changed = true;
         match message {
             Bg::Snapshot(at, sessions) => {
                 if s.ov.live.take_sessions(&at, sessions) {
-                    rebuild(s);
+                    s.world_stale = true;
                     s.sessions = s.ov.live.sessions().to_vec();
                 }
                 s.now = OffsetDateTime::now_utc();
@@ -501,19 +505,19 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             }
             Bg::Overview(fetched) => {
                 s.ov.live.refresh(*fetched);
-                rebuild(s);
+                s.world_stale = true;
                 s.sessions = s.ov.live.sessions().to_vec();
                 fetch_tails(s);
-                over::arrive(s);
+                arrived = true;
             }
             Bg::Tail(id, last_active, result) => {
                 s.ov.live.take_tail(&id, last_active, result);
-                rebuild(s);
+                s.world_stale = true;
                 fetch_tails(s);
             }
             Bg::Ledger(project, started, result) => {
                 s.ov.live.take_ledger(&project, started, result);
-                rebuild(s);
+                s.world_stale = true;
             }
             Bg::OverviewError(error) => s.ov.notice = Some(format!("Couldn't refresh the overview: {error}")),
             Bg::Sent(id, result) => {
@@ -589,8 +593,12 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     }
     s.counter = counter;
     s.panes_moved |= panes_moved;
-    if s.panes_moved && s.clock - s.built_at >= PANE_REBUILD_SECS {
+    if s.world_stale || (s.panes_moved && s.clock - s.built_at >= PANE_REBUILD_SECS) {
         rebuild(s);
+        changed = true;
+    }
+    if arrived {
+        over::arrive(s);
     }
     if s.tab == Tab::Changes && (changed || s.diff_key.0 != s.selected.clone().unwrap_or_default()) {
         refresh_diff(s);
