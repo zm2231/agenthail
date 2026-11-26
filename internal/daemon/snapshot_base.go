@@ -26,6 +26,7 @@ type baseProject struct {
 	DisplayName  string                        `json:"displayName"`
 	Kind         string                        `json:"kind"`
 	Key          string                        `json:"key,omitempty"`
+	LedgerKey    string                        `json:"ledgerKey,omitempty"`
 	Repository   *project.Repository           `json:"repository,omitempty"`
 	Checkouts    []baseProjectCheckout         `json:"checkouts"`
 	Coordinators []dashboardProjectCoordinator `json:"coordinators"`
@@ -69,7 +70,7 @@ func newSnapshotBase(state dashboardState) snapshotBase {
 			checkouts = append(checkouts, baseProjectCheckout{Host: checkout.Host, ProjectID: checkout.ProjectID, RootPath: checkout.RootPath, Added: checkout.Added, Archived: checkout.Archived})
 		}
 		sort.Slice(checkouts, func(i, j int) bool { return checkouts[i].ProjectID < checkouts[j].ProjectID })
-		projects = append(projects, baseProject{ID: source.ID, DisplayName: source.DisplayName, Kind: source.Kind, Key: source.Key, Repository: source.Repository, Checkouts: checkouts, Coordinators: source.Coordinators, Archived: source.Archived, MCP: source.MCP})
+		projects = append(projects, baseProject{ID: source.ID, DisplayName: source.DisplayName, Kind: source.Kind, Key: source.Key, LedgerKey: source.LedgerKey, Repository: source.Repository, Checkouts: checkouts, Coordinators: source.Coordinators, Archived: source.Archived, MCP: source.MCP})
 	}
 	sort.Slice(projects, func(i, j int) bool { return projects[i].ID < projects[j].ID })
 	return snapshotBase{UpdatedAt: state.UpdatedAt, EventCursor: state.EventCursor, HostEpoch: state.HostEpoch, CatalogSeq: state.CatalogSeq, snapshotBaseContent: snapshotBaseContent{

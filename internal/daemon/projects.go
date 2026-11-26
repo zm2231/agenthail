@@ -179,6 +179,7 @@ type dashboardProject struct {
 	DisplayName  string                             `json:"displayName"`
 	Kind         string                             `json:"kind"`
 	Key          string                             `json:"key,omitempty"`
+	LedgerKey    string                             `json:"ledgerKey,omitempty"`
 	Repository   *project.Repository                `json:"repository,omitempty"`
 	Checkouts    []dashboardProjectCheckout         `json:"checkouts"`
 	Coordinators []dashboardProjectCoordinator      `json:"coordinators"`

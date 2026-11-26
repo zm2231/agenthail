@@ -360,6 +360,7 @@ GET /api/v1/ledger?projectKey=<key>&view=words&id=<utterance ref>&context=2
 GET /api/v1/ledger/events                                   # ledger.changed, one per project when it changes
 ```
 
+- **Projects.** `projectKey` takes a ledger key, or the `id` the snapshot lists a project under (`p-…`, `repo:…`, a checkout's local id), on this route and every ledger write. The daemon reads an id as that project's ledger, which is not always its repository key: an added project's ledger stays under `project:<id>` after it gains a repository. Each snapshot project carries that key as `ledgerKey`, and the answer's `projectKey` names it, so match `ledger.changed` events against it.
 - **Views.** `view` is one of:
   - `board`, the default: capture state, sync state, counts, parked work by kind with how many can come back (`backlog`), the first page of goals, and the newest five provisional words with their total (`provisional`), how many messages were filed automatically and overridden (`autoFiled`), and, when a sorter is configured, its health (`sorter`);
   - one list, paged: `goals`, `asks`, `decisions`, `questions` or `work`;

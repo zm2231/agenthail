@@ -1,14 +1,11 @@
 package daemon
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/broadcast"
-	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/projectresolve"
-	"github.com/zm2231/agenthail/internal/registry"
 )
 
 const ledgerProjectsNamed = 5
@@ -83,47 +80,13 @@ func (d *Daemon) ledgerProjectRequired(caller *mcpCaller) error {
 	return refuse("invalid", "You are not in a project; name one in project, by name or id: "+list+".")
 }
 
-// projectLedgerKey is the ledger of a project a session here is in, or one
-// added here. A project known only from a paired host carries no local
-// record, so its key follows from what it is: its repository's key, none for
-// an implicit folder, and for an added folder without one, its own id's.
 func (d *Daemon) projectLedgerKey(named broadcast.Project) (string, error) {
-	snapshot, err := d.Registry.CatalogSnapshot()
+	keys, err := d.projectLedgerKeys()
 	if err != nil {
 		return "", err
 	}
-	elsewhere := projectresolve.CatalogProject{ID: named.ID, DisplayName: named.DisplayName}
-	for _, record := range snapshot.Sessions {
-		var found projectresolve.CatalogProject
-		if len(record.Project) == 0 || json.Unmarshal(record.Project, &found) != nil || found.ID != named.ID {
-			continue
-		}
-		if record.HostID == "" {
-			return projectresolve.LedgerKey(d.Registry, &found)
-		}
-		if found.Key != "" {
-			elsewhere.Key = found.Key
-		}
-	}
-	records, err := d.Registry.ListProjects()
-	if err != nil {
-		return "", err
-	}
-	for _, record := range records {
-		if record.Added && (record.ID == named.ID || record.Key == named.ID) {
-			return projectresolve.LedgerKey(d.Registry, projectresolve.AddedCatalogProject(record, record.Key != ""))
-		}
-	}
-	switch {
-	case elsewhere.Key != "":
-	case hosts.ProjectKey(named.ID):
-		elsewhere.Key = named.ID
-	case strings.HasPrefix(named.ID, projectresolve.CatalogImplicitProjectID("")):
-		return "", nil
-	default:
-		elsewhere.Key = registry.LedgerProjectKey(named.ID)
-	}
-	return projectresolve.LedgerKey(d.Registry, &elsewhere)
+	key, _, err := keys.of(named.ID)
+	return key, err
 }
 
 // ledgerGranted is whether the caller's role reaches the ledger kept under

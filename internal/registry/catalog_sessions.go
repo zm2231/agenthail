@@ -771,6 +771,28 @@ func (r *Registry) CatalogCheckoutProject(localID string) (json.RawMessage, erro
 	return project, err
 }
 
+type CatalogProjectSighting struct {
+	Remote  bool
+	Project json.RawMessage
+}
+
+// CatalogProjectSightings is every project a session here or on a paired
+// host recorded, newest first.
+func (r *Registry) CatalogProjectSightings() ([]CatalogProjectSighting, error) {
+	rows, err := r.read.Query(`SELECT s.host_id<>'',cs.host_project FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id
+		WHERE json_valid(cs.host_project) ORDER BY cs.observed_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	return appendRows(nil, rows, func(row rowScanner) (CatalogProjectSighting, error) {
+		var sighting CatalogProjectSighting
+		var project []byte
+		err := row.Scan(&sighting.Remote, &project)
+		sighting.Project = project
+		return sighting, err
+	})
+}
+
 // CatalogLocalProjects reads each distinct project this host's sessions
 // recorded under projectID, matched by its id or its local id.
 func (r *Registry) CatalogLocalProjects(projectID string) ([]json.RawMessage, error) {
