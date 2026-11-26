@@ -955,7 +955,6 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     let mut counter = s.counter;
     let mut panes_moved = false;
     let mut caught: Vec<String> = Vec::new();
-    let mut paged: Vec<String> = Vec::new();
     for (id, pane) in s.panes.iter_mut() {
         let mut moved = false;
         if let Some(replay) = &mut pane.replay {
@@ -972,16 +971,15 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             for message in arrived {
                 match message {
                     Message::Batch(b) => {
-                        pane.last_batch = t;
+                        history::batch_arrived(pane, t);
                         moved |= pane.transcript.apply(b.seq, b.events);
                     }
                     Message::Status(status) => {
-                        if status == "live" {
-                            history::stream_arrived(pane, t);
-                            moved = true;
+                        if status == "live" && !pane.caught_up {
+                            pane.last_batch = pane.last_batch.min(t);
                         }
-                        if status.starts_with("reconnecting") && !pane.caught_up && pane.transcript.items().is_empty() && !paged.contains(id) {
-                            paged.push(id.clone());
+                        if status.starts_with("reconnecting") && !pane.caught_up && pane.transcript.items().is_empty() && !caught.contains(id) {
+                            caught.push(id.clone());
                         }
                         pane.status = status;
                     }
@@ -1002,9 +1000,6 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     s.panes_moved |= panes_moved;
     for id in caught {
         history::caught_up(s, &id);
-    }
-    for id in paged {
-        history::paged_first(s, &id);
     }
     if s.ov.live.stale() || (s.panes_moved && s.clock - s.built_at >= PANE_REBUILD_SECS) {
         rebuild(s);

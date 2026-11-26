@@ -63,16 +63,16 @@ fn read_page(value: &Value) -> Result<Page, Miss> {
     Ok(Page { items: timeline.items, next_before: timeline.next_before.max(0) })
 }
 
-pub fn walk(mut fetch: impl FnMut(i64) -> Result<Page, Miss>, from: i64, anchor: &[String], known: &HashSet<String>) -> Result<Older, Miss> {
+pub fn walk(mut fetch: impl FnMut(i64) -> Result<Page, Miss>, from: i64, oldest: Option<&str>, known: &HashSet<String>) -> Result<Older, Miss> {
     let fresh = |items: Vec<Item>| -> Vec<Item> { items.into_iter().filter(|i| !known.contains(&i.id)).collect() };
-    if anchor.is_empty() {
+    let Some(oldest) = oldest else {
         let page = fetch(from)?;
         return Ok(Older { items: fresh(page.items), next: page.next_before, anchored: true });
-    }
+    };
     let mut cursor = from;
     for _ in 0..WALK_PAGES {
         let mut page = fetch(cursor)?;
-        if let Some(at) = page.items.iter().position(|i| anchor.contains(&i.id)) {
+        if let Some(at) = page.items.iter().position(|i| i.id == oldest) {
             page.items.truncate(at);
             return Ok(Older { items: fresh(page.items), next: page.next_before, anchored: true });
         }
@@ -118,8 +118,8 @@ impl Client {
         }
     }
 
-    pub fn older(&self, session: &str, from: i64, anchor: &[String], known: &HashSet<String>) -> Result<Older, Miss> {
-        walk(|before| self.session_page(session, before), from, anchor, known)
+    pub fn older(&self, session: &str, from: i64, oldest: Option<&str>, known: &HashSet<String>) -> Result<Older, Miss> {
+        walk(|before| self.session_page(session, before), from, oldest, known)
     }
 
     pub fn full_body(&self, session: &str, body_ref: &str) -> Result<String, String> {
@@ -177,29 +177,28 @@ mod tests {
         older.items.iter().map(|i| i.id.as_str()).collect()
     }
 
-    fn anchor(ids: &[&str]) -> Vec<String> {
-        ids.iter().map(|s| s.to_string()).collect()
-    }
-
     #[test]
     fn the_first_walk_takes_only_rows_before_the_oldest_held_ones() {
         let history = vec![(0, vec!["x", "y"], 90), (90, vec!["a", "b", "c", "d"], 40), (40, vec!["older"], 0)];
-        let older = walk(pages(history.clone()), 0, &anchor(&["c", "d"]), &known(&["c", "d", "x"])).unwrap();
+        let older = walk(pages(history.clone()), 0, Some("c"), &known(&["c", "d", "x"])).unwrap();
         assert_eq!((ids(&older), older.next, older.anchored), (vec!["a", "b"], 40, true));
-        let after = walk(pages(history), 40, &[], &known(&["a", "b", "c"])).unwrap();
+        let after = walk(pages(history), 40, None, &known(&["a", "b", "c"])).unwrap();
         assert_eq!((ids(&after), after.next), (vec!["older"], 0));
+        let split = vec![(0, vec!["x", "c"], 50), (50, vec!["p", "a", "b"], 0)];
+        let across = walk(pages(split), 0, Some("a"), &known(&["a", "c"])).unwrap();
+        assert_eq!((ids(&across), across.next), (vec!["p"], 0));
     }
 
     #[test]
     fn newer_rows_a_stalled_replay_has_not_reached_are_never_put_in_front() {
         let history = vec![(0, vec!["n1", "n2"], 70), (70, vec!["m1", "a"], 0)];
-        let older = walk(pages(history), 0, &anchor(&["a"]), &known(&["a"])).unwrap();
+        let older = walk(pages(history), 0, Some("a"), &known(&["a"])).unwrap();
         assert_eq!((ids(&older), older.next), (vec!["m1"], 0));
     }
 
     #[test]
     fn a_walk_that_never_meets_the_held_rows_places_nothing() {
-        let unmet = walk(pages(vec![(0, vec!["n"], 0)]), 0, &anchor(&["a"]), &known(&["a"])).unwrap();
+        let unmet = walk(pages(vec![(0, vec!["n"], 0)]), 0, Some("a"), &known(&["a"])).unwrap();
         assert_eq!(unmet, Older { items: vec![], next: 0, anchored: false });
         let mut calls = 0;
         let far = walk(
@@ -208,14 +207,14 @@ mod tests {
                 Ok(Page { items: vec![item("n")], next_before: 7 })
             },
             0,
-            &anchor(&["a"]),
+            Some("a"),
             &known(&["a"]),
         )
         .unwrap();
         assert_eq!((calls, far.next, far.items.len(), far.anchored), (WALK_PAGES, 7, 0, false));
-        let empty = walk(pages(vec![(0, vec!["p", "q"], 5)]), 0, &[], &known(&[])).unwrap();
+        let empty = walk(pages(vec![(0, vec!["p", "q"], 5)]), 0, None, &known(&[])).unwrap();
         assert_eq!((ids(&empty), empty.next, empty.anchored), (vec!["p", "q"], 5, true));
-        assert_eq!(walk(|_| Err(Miss::Gone), 5, &[], &known(&[])), Err(Miss::Gone));
+        assert_eq!(walk(|_| Err(Miss::Gone), 5, None, &known(&[])), Err(Miss::Gone));
     }
 
     #[test]

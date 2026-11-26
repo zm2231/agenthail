@@ -4,29 +4,20 @@ use rune::{TextEdit, Tx};
 use crate::transcript::Pane;
 use crate::{App, Bg};
 
-const ANCHOR_ROWS: usize = 20;
 
-pub fn paged_first(s: &mut App, id: &str) {
-    if let Some(pane) = s.panes.get_mut(id) {
-        pane.paged_first = true;
-    }
-    caught_up(s, id);
-}
-
-pub fn stream_arrived(pane: &mut Pane, t: f64) {
+pub fn batch_arrived(pane: &mut Pane, t: f64) {
     if pane.paged_first {
         let (live, status) = (pane.live.take(), std::mem::take(&mut pane.status));
         *pane = Pane::new();
         (pane.live, pane.status) = (live, status);
     }
-    if !pane.caught_up {
-        pane.last_batch = pane.last_batch.min(t);
-    }
+    pane.last_batch = t;
 }
 
 pub fn caught_up(s: &mut App, id: &str) {
     let Some(pane) = s.panes.get_mut(id) else { return };
     pane.caught_up = true;
+    pane.paged_first = pane.transcript.items().is_empty();
     if pane.earlier.at_top || pane.blocks.is_empty() {
         load_older(s, id);
     }
@@ -52,11 +43,11 @@ pub fn load_older(s: &mut App, id: &str) -> bool {
         return false;
     }
     pane.earlier.loading = true;
-    let anchor: Vec<String> = if pane.earlier.anchored { Vec::new() } else { pane.transcript.items().iter().take(ANCHOR_ROWS).map(|i| i.id.clone()).collect() };
+    let oldest = if pane.earlier.anchored { None } else { pane.transcript.items().first().map(|i| i.id.clone()) };
     let (from, known, generation) = (pane.earlier.next.unwrap_or(0), pane.transcript.ids(), pane.generation);
     let (out, id) = (s.outbox.clone(), id.to_string());
     std::thread::spawn(move || {
-        let result = client.older(&id, from, &anchor, &known);
+        let result = client.older(&id, from, oldest.as_deref(), &known);
         let _ = out.send(Bg::Older(id, generation, result));
     });
     true
