@@ -435,24 +435,6 @@ pub fn page_host(page: &str) -> Option<String> {
     url::Url::parse(page).ok()?.host_str().map(|h| h.trim_start_matches('[').trim_end_matches(']').to_string())
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Probe {
-    Open,
-    SignIn,
-    Unreachable(String),
-}
-
-pub fn probe(page: &str, session: &WebSession) -> Probe {
-    let agent = ureq::AgentBuilder::new().timeout_connect(std::time::Duration::from_secs(5)).timeout(std::time::Duration::from_secs(15)).redirects(0).build();
-    match agent.get(page).set("Cookie", &format!("{}={}", session.name, session.value)).call() {
-        Ok(_) => Probe::Open,
-        Err(ureq::Error::Status(401 | 403, _)) => Probe::SignIn,
-        Err(ureq::Error::Status(code, _)) if code >= 500 => Probe::Unreachable(format!("it answered {code}")),
-        Err(ureq::Error::Status(_, _)) => Probe::Open,
-        Err(ureq::Error::Transport(error)) => Probe::Unreachable(error.to_string()),
-    }
-}
-
 pub fn holds_settings(client: &Client) -> bool {
     crate::dashboard_token().is_some_and(|token| token == client.token)
 }

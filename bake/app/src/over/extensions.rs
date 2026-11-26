@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use feed::catalog::RespondError;
 use feed::create::Host;
-use feed::extensions::{Approval, Entry, Extension, Kind, List, Probe, Tone, WebSession, approval, entries, problems, status};
+use feed::extensions::{Approval, Entry, Extension, Kind, List, Tone, WebSession, approval, entries, problems, status};
 use rune::{Color, Cx, El, ScrollSpec, col, el, icon, row, text};
 use rune_kit::shell::Toolbar;
 use rune_kit::{Button, ButtonVariant, ControlSize, Spinner};
@@ -22,7 +22,6 @@ pub enum Done {
     Listed(u64, String, Result<List, String>),
     Acted(String, Result<List, RespondError>),
     Signed(Result<WebSession, String>),
-    Probed(u64, Probe),
 }
 
 pub struct Catalog {
@@ -187,7 +186,6 @@ fn take(s: &mut App, done: Done) {
             }
         }
         Done::Signed(result) => ext.web.signed(result),
-        Done::Probed(seq, result) => ext.web.probed(seq, result),
     }
 }
 
@@ -202,8 +200,6 @@ fn find(s: &App, id: &str) -> Option<Entry> {
 }
 
 pub fn drain(s: &mut App) -> bool {
-    let selected = current_entry(s).and_then(|e| e.url);
-    s.ov.ext.web.select(selected.as_deref());
     let mut changed = false;
     while let Ok(done) = s.ov.ext.rx.try_recv() {
         take(s, done);
@@ -223,13 +219,6 @@ pub fn drain(s: &mut App) -> bool {
         let tx = s.ov.ext.tx.clone();
         std::thread::spawn(move || {
             let _ = tx.send(Done::Signed(client.web_session().map_err(|e| e.message)));
-        });
-    }
-    if let Some((seq, page, cookie)) = s.ov.ext.web.probe_due(want.as_deref()) {
-        let tx = s.ov.ext.tx.clone();
-        std::thread::spawn(move || {
-            let result = feed::extensions::probe(&page, &cookie);
-            let _ = tx.send(Done::Probed(seq, result));
         });
     }
     changed | s.ov.ext.web.pump(want.as_deref())
@@ -507,13 +496,14 @@ fn closed(title: &str, detail: String, session: Option<String>) -> El {
         .child(actions)
 }
 
-fn phase_note(phase: &Phase) -> Option<El> {
-    let label = match phase {
-        Phase::SigningIn => "Signing in…",
-        Phase::Loading => "Loading…",
+fn phase_note(web: &Web, host: &str) -> Option<El> {
+    let label = match web.phase {
+        _ if web.slow() => format!("Still loading. If it doesn't open, check that {host} is serving it, then Reload."),
+        Phase::SigningIn => "Signing in…".into(),
+        Phase::Loading => "Loading…".into(),
         _ => return None,
     };
-    Some(row().gap(6.0).items_center().child(Spinner::new().size(11.0).build(kit())).child(text(label.to_string()).font(META).color(weak())))
+    Some(row().gap(6.0).items_center().child(Spinner::new().size(11.0).build(kit())).child(text(label).font(META).color(weak()).truncate().max_w(420.0)))
 }
 
 fn page_tools(s: &App) -> El {
@@ -565,7 +555,7 @@ pub fn page(s: &App, cx: &mut Cx<App>, id: &str) -> El {
     let crumb = row().gap(8.0).items_center().child(row().on_press(|s: &mut App| go(s, Screen::Extensions)).child(ui::crumb(&[("Apps", false)]))).child(text("/".to_string()).font(BODY).color(weak())).child(text(label).font(BODY_MED).color(strong()).truncate().max_w(380.0)).child(text(host).font(META).color(weak()));
     let mut trailing = row().gap(10.0).items_center();
     if entry.as_ref().is_some_and(|e| e.url.is_some()) {
-        trailing = trailing.children(phase_note(&s.ov.ext.web.phase)).child(page_tools(s));
+        trailing = trailing.children(phase_note(&s.ov.ext.web, entry.as_ref().map_or("the computer", |e| e.host_name.as_str()))).child(page_tools(s));
     }
     let toolbar = Toolbar::new().leading(crumb).trailing(trailing.child(ui::needs_button(s)));
     ui::frame(cx, s, Some(ui::sidebar(s, None, None)), col().w_full().h_full().padding(6.0).child(main), None, toolbar)

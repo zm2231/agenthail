@@ -179,19 +179,3 @@ fn an_extension_grant_ask_is_answered_with_its_option_id() {
     assert_eq!(path, "/api/v1/actions");
     assert_eq!(body, json!({"action": "respond", "sessionId": "s-builder", "requestId": "ask-7", "decision": {"choices": ["approve"], "answers": {}}}));
 }
-
-#[test]
-fn a_probe_tells_a_refused_sign_in_from_an_unreachable_page() {
-    let session = WebSession { name: "agenthail_web".into(), value: "v1".into(), path: "/".into(), expires_at: String::new(), scopes: vec![] };
-    let (client, rx) = daemon(replies(&[(401, r#"{"error":{"code":"unauthorized","message":"no"}}"#), (200, "{}"), (404, "{}"), (502, "{}")]));
-    let page = format!("{}/index.html", client.origin());
-    assert_eq!(probe(&page, &session), Probe::SignIn);
-    assert_eq!(rx.recv().unwrap().0, "/index.html");
-    assert_eq!(probe(&page, &session), Probe::Open);
-    assert_eq!(probe(&page, &session), Probe::Open);
-    assert_eq!(probe(&page, &session), Probe::Unreachable("it answered 502".into()));
-    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let gone = format!("http://{}/", closed.local_addr().unwrap());
-    drop(closed);
-    assert!(matches!(probe(&gone, &session), Probe::Unreachable(_)));
-}
