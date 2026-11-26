@@ -39,7 +39,7 @@ impl MenuBar {
         let (working, recent): (Vec<&Session>, Vec<&Session>) = listed.into_iter().partition(|x| busy(x));
         MenuBar {
             needs_you: needs.len(),
-            needs: needs.iter().take(SHOWN).map(|n| Row { label: format!("{}  ·  {}", short_title(&n.who, LABEL_CHARS), n.kind.wanted()), target: n.target.clone() }).collect(),
+            needs: needs.iter().take(SHOWN).map(|n| Row { label: format!("{}  ·  {}", short_title(&n.title, LABEL_CHARS), short_title(&n.who, LABEL_CHARS / 2)), target: n.target.clone() }).collect(),
             working: working.into_iter().take(SHOWN).map(|x| row(w, x, false)).collect(),
             recent: recent.into_iter().take(SHOWN).map(|x| row(w, x, true)).collect(),
         }
@@ -50,15 +50,16 @@ impl MenuBar {
         [(needs, &self.needs[..]), ("Working".to_string(), &self.working[..]), ("Recent".to_string(), &self.recent[..])].into_iter().filter(|(_, rows)| !rows.is_empty()).collect()
     }
 
-    pub fn badge(&self) -> (u32, String) {
-        let count = u32::try_from(self.needs_you).unwrap_or(u32::MAX);
-        let said = match count {
-            0 => String::new(),
-            1 => "1 thing needs you".to_string(),
-            n => format!("{n} things need you"),
-        };
-        (count, said)
-    }
+}
+
+pub fn badge(needs_you: usize) -> (u32, String) {
+    let count = u32::try_from(needs_you).unwrap_or(u32::MAX);
+    let said = match count {
+        0 => String::new(),
+        1 => "1 thing needs you".to_string(),
+        n => format!("{n} things need you"),
+    };
+    (count, said)
 }
 
 fn row(w: &World, x: &Session, age: bool) -> Row {
@@ -129,7 +130,7 @@ mod tests {
         assert_eq!(ids(&bar.needs), ["open-session:asking"]);
         assert_eq!(ids(&bar.working), ["open-session:busy"]);
         assert_eq!(ids(&bar.recent), ["open-session:quiet"]);
-        assert_eq!(bar.needs[0].label, "asking  ·  Answer one question");
+        assert_eq!(bar.needs[0].label, "Which branch should I use?  ·  asking");
         assert_eq!(bar.working[0].label, "busy  ·  Claude");
         assert_eq!(bar.recent[0].label, "quiet  ·  Claude  ·  3h");
     }
@@ -159,13 +160,15 @@ mod tests {
         assert_eq!(bar.needs.len(), SHOWN);
         let titles: Vec<String> = bar.sections().into_iter().map(|(t, _)| t).collect();
         assert_eq!(titles, ["Needs you (7, 5 shown)", "Working"]);
-        assert_eq!(bar.badge(), (7, "7 things need you".to_string()));
+        assert_eq!(bar.needs[0].label, "Item 0  ·  @worker");
+        assert_ne!(bar.needs[0].label, bar.needs[1].label);
+        assert_eq!(badge(bar.needs_you), (7, "7 things need you".to_string()));
     }
 
     #[test]
     fn nothing_waiting_clears_the_badge() {
         let bar = MenuBar::build(&world(vec![session("quiet", json!({}))]), &[]);
-        assert_eq!(bar.badge(), (0, String::new()));
+        assert_eq!(badge(bar.needs_you), (0, String::new()));
         let titles: Vec<String> = bar.sections().into_iter().map(|(t, _)| t).collect();
         assert_eq!(titles, ["Recent"]);
     }

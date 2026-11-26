@@ -55,17 +55,19 @@ pub fn install(app: rune::App<App>) -> rune::App<App> {
     }
 }
 
-pub fn refresh(s: &mut App) {
-    let bar = MenuBar::build(&s.ov.d, &s.ov.needs);
-    let (count, said) = bar.badge();
+pub fn badge(s: &App) {
     WINDOW.with_borrow_mut(|w| {
-        if let Some((window, shown)) = w.as_mut()
-            && *shown != Some(count)
-        {
+        let Some((window, shown)) = w.as_mut() else { return };
+        let (count, said) = menubar::badge(s.ov.needs.len());
+        if *shown != Some(count) {
             window.set_taskbar(Taskbar::new().badge(count, said));
             *shown = Some(count);
         }
     });
+}
+
+pub fn refresh(s: &mut App) {
+    let bar = MenuBar::build(&s.ov.d, &s.ov.needs);
     let status = status(&s.status);
     if s.bar.shown.as_ref().is_some_and(|(b, st)| *b == bar && *st == status) {
         return;

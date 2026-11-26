@@ -1053,12 +1053,22 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     if changed || !s.bar.is_shown() {
         menubar::refresh(s);
     }
+    menubar::badge(s);
     tx.wake_after(Duration::from_millis(if busy { 16 } else { 250 }));
     changed
 }
 
 fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     ui::new_session::on_key(s, ev, tx) || over::on_key(s, ev, tx)
+}
+
+fn on_quit(s: &mut App, _: &mut Tx) {
+    if let Some(id) = s.composer_for.clone() {
+        s.drafts.set(&id, &s.composer.text);
+    }
+    if let Err(error) = over::layout::save_now(s) {
+        eprintln!("agenthail: couldn't save before quitting: {error}");
+    }
 }
 
 fn main() {
@@ -1072,6 +1082,7 @@ fn main() {
     })
         .chrome(Chrome { full_size_content: true, traffic_lights: Some((20.0, 20.0)), drag_regions: true })
         .window_options(WindowOptions { transparent: true, resizable: true, visible: true, ..Default::default() })
-        .srgb_blend(true);
+        .srgb_blend(true)
+        .on_quit(on_quit);
     menubar::install(app).run();
 }
