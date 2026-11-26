@@ -1,4 +1,5 @@
 mod claude;
+mod devices;
 mod general;
 mod notify;
 mod parts;
@@ -24,9 +25,10 @@ pub enum Read {
     Remote,
     Compaction,
     Preferences,
+    Devices,
 }
 
-const ALL: [Read; 5] = [Read::Base, Read::Settings, Read::Remote, Read::Compaction, Read::Preferences];
+const ALL: [Read; 6] = [Read::Base, Read::Settings, Read::Remote, Read::Compaction, Read::Preferences, Read::Devices];
 
 enum Got {
     Base(Result<Base, Failure>),
@@ -34,6 +36,7 @@ enum Got {
     Remote(Result<RemoteControl, Failure>),
     Compaction(Result<Compaction, Failure>),
     Preferences(Result<Vec<Preference>, Failure>),
+    Devices(Result<Vec<feed::devices::Device>, Failure>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -42,11 +45,13 @@ pub enum Section {
     Remote,
     Compaction,
     Notify,
+    Devices,
 }
 
 enum Done {
     Read(Read, u64, Got),
     Wrote(String, Section, Result<(), Failure>, &'static [Read]),
+    Devices(devices::Got),
 }
 
 pub struct Prefs {
@@ -66,6 +71,7 @@ pub struct Prefs {
     pub remote: Option<Result<RemoteControl, Failure>>,
     pub compaction: Option<Result<Compaction, Failure>>,
     pub preferences: Option<Result<Vec<Preference>, Failure>>,
+    pub dev: devices::Devices,
     writing: Option<String>,
     settling: HashSet<Read>,
     sent: Option<CompactDraft>,
@@ -121,6 +127,7 @@ pub fn open() {
         if let Some((handle, window)) = w.get() {
             handle.update(|s: &mut Prefs, _| {
                 s.rewatch = true;
+                devices::opened(s);
                 reload(s);
             });
             window.open();
@@ -162,6 +169,7 @@ fn init() -> Prefs {
         remote: None,
         compaction: None,
         preferences: None,
+        dev: devices::Devices::default(),
         writing: None,
         settling: HashSet::new(),
         sent: None,
@@ -210,6 +218,7 @@ fn fetch(s: &mut Prefs, what: Read) {
             Read::Remote => s.remote = Some(Err(unread(s))),
             Read::Compaction => s.compaction = Some(Err(unread(s))),
             Read::Preferences => s.preferences = Some(Err(unread(s))),
+            Read::Devices => s.dev.list = Some(Err(unread(s))),
         }
         return;
     };
@@ -225,6 +234,7 @@ fn fetch(s: &mut Prefs, what: Read) {
             Read::Remote => Got::Remote(client.remote_control()),
             Read::Compaction => Got::Compaction(client.compaction()),
             Read::Preferences => Got::Preferences(client.notification_preferences()),
+            Read::Devices => Got::Devices(client.devices()),
         };
         let _ = tx.send(Done::Read(what, seq, got));
     });
@@ -453,9 +463,15 @@ fn take_one(s: &mut Prefs, done: Done) {
                     s.preferences = Some(r);
                     d
                 }
+                Got::Devices(r) => {
+                    let d = denied(&r);
+                    s.dev.list = Some(r);
+                    d
+                }
             };
             refused(s, Some(what), refusal);
         }
+        Done::Devices(got) => devices::take(s, got),
         Done::Wrote(key, section, result, then) => {
             if s.writing.as_deref() == Some(key.as_str()) {
                 s.writing = None;
@@ -503,6 +519,7 @@ fn poll(s: &mut Prefs, _: f64, tx: &mut Tx) -> bool {
         take(s, done);
         changed = true;
     }
+    changed |= devices::poll(s, tx);
     if let Some(at) = s.retry_base
         && std::time::Instant::now() >= at
         && visible()
@@ -545,7 +562,7 @@ fn unfollowed(s: &Prefs) -> Option<El> {
     Some(col().w_full().items_center().pb(8.0).child(parts::failure(s, &note).w(parts::WIDTH)))
 }
 
-pub const TABS: [&str; 3] = ["General", "Claude", "Notifications"];
+pub const TABS: [&str; 4] = ["General", "Claude", "Notifications", "Devices"];
 
 pub fn view(s: &Prefs, _: &mut Cx<Prefs>) -> El {
     let k = theme::kit();
@@ -557,6 +574,7 @@ pub fn view(s: &Prefs, _: &mut Cx<Prefs>) -> El {
     let page = match s.tab {
         1 => claude::page(s, &mut layer),
         2 => notify::page(s),
+        3 => devices::page(s, &mut layer),
         _ => general::page(s, &mut layer),
     };
     let body = col()
