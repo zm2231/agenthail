@@ -68,8 +68,19 @@ func (d *Daemon) routeHostAction(ctx context.Context, p principal, raw []byte, k
 			request["sentAt"] = time.Now().UTC().Format(time.RFC3339Nano)
 		}
 	}
+	hostTask := false
+	if task, _ := request["task"].(bool); task && request["action"] == "session-create" {
+		if err := d.hostTaskParent(request); err != nil {
+			return replyWith(func(w http.ResponseWriter) { writeActionResult(w, actionResult{}, err) })
+		}
+		hostTask = true
+	}
 	body, _ := json.Marshal(request)
-	return d.forwardHostAction(ctx, p, key, host, request, body)
+	reply := d.forwardHostAction(ctx, p, key, host, request, body)
+	if hostTask {
+		reply = d.recordHostTask(host, request, reply)
+	}
+	return reply
 }
 
 func (d *Daemon) decodeAction(ctx context.Context, p principal, raw []byte, key string) actionReply {

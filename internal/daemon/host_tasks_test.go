@@ -2,12 +2,14 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
@@ -23,19 +25,31 @@ type hostTaskFixture struct {
 
 func startHostTask(t *testing.T) hostTaskFixture {
 	t.Helper()
+	return startHostTaskWith(t, func(t *testing.T, f hostTaskFixture) any {
+		out, refused := callMCP(t, f.parent, "agenthail_create", map[string]any{"surface": "codex", "host": "vps", "cwd": t.TempDir(), "message": "build the parser", "task": true, "clientRequestId": "remote-task"})
+		if refused {
+			t.Fatalf("create a task on the paired host: %v", out)
+		}
+		return out["taskId"]
+	})
+}
+
+func startHostTaskWith(t *testing.T, create func(*testing.T, hostTaskFixture) any) hostTaskFixture {
+	t.Helper()
 	local, remote, record := pairedFederation(t)
 	caller, err := local.reg.Session("local-a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent := mcpSession(t, mcpServer(t, local.daemon), issueMCPToken(t, local.daemon, *caller))
-	out, refused := callMCP(t, parent, "agenthail_create", map[string]any{"surface": "codex", "host": "vps", "cwd": t.TempDir(), "message": "build the parser", "task": true, "clientRequestId": "remote-task"})
-	if refused {
-		t.Fatalf("create a task on the paired host: %v", out)
-	}
-	taskID, _ := out["taskId"].(float64)
+	f := hostTaskFixture{local: local, remote: remote, record: record}
+	f.parent = mcpSession(t, mcpServer(t, local.daemon), issueMCPToken(t, local.daemon, *caller))
+	taskID, _ := create(t, f).(float64)
 	if taskID == 0 {
-		t.Fatalf("create answered without a taskId: %v", out)
+		t.Fatal("create answered without a taskId")
+	}
+	f.taskID = int64(taskID)
+	if task := f.localTask(t); task.ID != f.taskID || task.Parent != "local-a" || task.State != registry.TaskRunning {
+		t.Fatalf("task here=%+v, want task %d of local-a running", task, f.taskID)
 	}
 	held, found, err := remote.reg.TaskForChild("started")
 	if err != nil || !found || held.State != registry.TaskRunning {
@@ -45,8 +59,8 @@ func startHostTask(t *testing.T) hostTaskFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reporter := mcpSession(t, mcpServer(t, remote.daemon), issueMCPToken(t, remote.daemon, *child))
-	return hostTaskFixture{local: local, remote: remote, record: record, parent: parent, reporter: reporter, taskID: int64(taskID)}
+	f.reporter = mcpSession(t, mcpServer(t, remote.daemon), issueMCPToken(t, remote.daemon, *child))
+	return f
 }
 
 func (f hostTaskFixture) result(t *testing.T) map[string]any {
@@ -184,5 +198,34 @@ func TestArchivingATasksChildOnItsHostEndsTheWaitOfItsSpawner(t *testing.T) {
 	}
 	if running, _ := f.local.reg.RunningChildren("local-a"); len(running) != 0 {
 		t.Fatalf("running=%v, want the cancelled task's slot freed", running)
+	}
+}
+
+func TestAnAgentsShellStartsATaskOnAPairedHostThroughTheCLI(t *testing.T) {
+	f := startHostTaskWith(t, func(t *testing.T, f hostTaskFixture) any {
+		payload, _ := json.Marshal(map[string]any{"action": "session-create", "host": "vps", "surface": "codex", "message": "build the parser", "cwd": t.TempDir(), "sourceSessionId": "local-a", "task": true})
+		answer := askScope(t, f.local.daemon, daemonapi.ScopeRequest{SessionID: "local-a", Action: "create", Create: payload}, "127.0.0.1:50000")
+		var created map[string]any
+		if answer.status >= http.StatusMultipleChoices || json.Unmarshal(answer.body, &created) != nil {
+			t.Fatalf("create through the CLI's scope request: status=%d body=%s", answer.status, answer.body)
+		}
+		return created["taskId"]
+	})
+	waited := f.wait(t)
+	f.report(t, "built from the shell")
+	settledByWait(t, waited)
+	if out := f.result(t); out["state"] != registry.TaskDone || out["result"] != "built from the shell" {
+		t.Fatalf("result=%v, want the child's report", out)
+	}
+}
+
+func TestATaskOnAPairedHostNeedsASessionHereToStartIt(t *testing.T) {
+	local, remote, _ := pairedFederation(t)
+	response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "session-create", "host": "vps", "surface": "codex", "message": "orphan", "cwd": t.TempDir(), "task": true})
+	if response.Code < http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s, want a task with no starting session refused", response.Code, response.Body.String())
+	}
+	if _, err := remote.reg.Session("started"); err == nil {
+		t.Fatal("the paired host started a child for a task nothing here can wait on")
 	}
 }

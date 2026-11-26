@@ -375,6 +375,9 @@ func (a *App) createThreadThroughDaemon(hostText string, request threadCreateReq
 	if request.worktree {
 		fields["isolation"] = "worktree"
 	}
+	if request.task {
+		payload["task"] = true
+	}
 	for key, value := range fields {
 		if value != "" {
 			payload[key] = value
@@ -410,6 +413,7 @@ func (a *App) createThreadThroughDaemon(hostText string, request threadCreateReq
 		Result     *surface.SendResult `json:"result"`
 		Account    *claudepick.Pick    `json:"account"`
 		Worktree   *threadWorktree     `json:"worktree"`
+		TaskID     int64               `json:"taskId"`
 		Error      json.RawMessage     `json:"error"`
 	}
 	message, code := "", ""
@@ -424,7 +428,7 @@ func (a *App) createThreadThroughDaemon(hostText string, request threadCreateReq
 	} else {
 		message, code = createErrorText(response.Error), createErrorCode(response.Error)
 	}
-	output := threadCreateOutput{OK: err == nil && response.OK, Status: response.Status, Code: code, Accepted: response.Accepted, Retryable: response.Retryable, Detail: response.Detail, Warning: response.Warning, DeliveryID: response.DeliveryID, Session: response.Session, Delivery: response.Result, Alias: request.alias, Account: response.Account, Worktree: response.Worktree, Error: message}
+	output := threadCreateOutput{OK: err == nil && response.OK, Status: response.Status, Code: code, Accepted: response.Accepted, Retryable: response.Retryable, Detail: response.Detail, Warning: response.Warning, DeliveryID: response.DeliveryID, Session: response.Session, Delivery: response.Result, Alias: request.alias, Account: response.Account, Worktree: response.Worktree, TaskID: response.TaskID, Error: message}
 	output.Unknown = code == "create_unknown"
 	if !output.OK {
 		if output.Error == "" {
@@ -460,6 +464,9 @@ func (a *App) createThreadThroughDaemon(hostText string, request threadCreateReq
 		fmt.Printf("created %s in %s and started turn %s\n", label, output.Session.Cwd, output.Delivery.UUID)
 	default:
 		fmt.Printf("created %s in %s\n", label, output.Session.Cwd)
+	}
+	if output.TaskID != 0 {
+		fmt.Printf("task %d: wait on it with agenthail_wait or read it with agenthail_result\n", output.TaskID)
 	}
 	printThreadWorktree(output.Worktree)
 	printPickedAccount(output.Account)

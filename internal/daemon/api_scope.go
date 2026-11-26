@@ -90,7 +90,7 @@ func (d *Daemon) agentCreate(ctx context.Context, caller *mcpCaller, payload jso
 		ConfigRoot:  configRoot,
 		TurnOptions: asked.TurnOptions, LaunchSettings: asked.LaunchSettings,
 		Surface: asked.Surface, Cwd: asked.Cwd, Message: asked.Message, Model: asked.Model, Alias: asked.Alias, Name: asked.Name, Agent: asked.Agent,
-		PermissionMode: asked.PermissionMode, Approval: asked.Approval, Isolation: asked.Isolation, Worktree: asked.Worktree, Base: asked.Base,
+		PermissionMode: asked.PermissionMode, Approval: asked.Approval, Isolation: asked.Isolation, Worktree: asked.Worktree, Base: asked.Base, Task: asked.Task,
 	}
 	kind := surface.SurfaceKind(strings.TrimSpace(request.Surface))
 	if kind != surface.KindClaude && kind != surface.KindCodex {

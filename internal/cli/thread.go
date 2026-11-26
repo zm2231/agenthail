@@ -27,6 +27,7 @@ type threadCreateOutput struct {
 	Alias      string              `json:"alias,omitempty"`
 	Account    *claudepick.Pick    `json:"account,omitempty"`
 	Worktree   *threadWorktree     `json:"worktree,omitempty"`
+	TaskID     int64               `json:"taskId,omitempty"`
 	Error      string              `json:"error,omitempty"`
 }
 
@@ -46,6 +47,7 @@ type threadCreateRequest struct {
 	model    string
 	approval string
 	worktree bool
+	task     bool
 	branch   string
 	base     string
 	jsonOut  bool
@@ -53,7 +55,7 @@ type threadCreateRequest struct {
 
 const threadNameMargin = 30 * time.Second
 
-const threadUsage = `usage: agenthail thread create <codex|claude|ACP agent> "message" [--cwd <path>] [--alias <name>] [--model <name>] [--approval <untrusted|on-request|never>] [--effort <level>] [--mode <plan|default>] [--service-tier <tier>] [--output-schema <file>] [--name <name>] [--worktree [--branch <name>] [--base <ref>]] [--agent <name>] [--permission-mode <mode>] [--root <name|dir>] [--host <host>] [--from <session>] [--timeout <duration>] [--json]
+const threadUsage = `usage: agenthail thread create <codex|claude|ACP agent> "message" [--cwd <path>] [--alias <name>] [--model <name>] [--approval <untrusted|on-request|never>] [--effort <level>] [--mode <plan|default>] [--service-tier <tier>] [--output-schema <file>] [--name <name>] [--worktree [--branch <name>] [--base <ref>]] [--agent <name>] [--permission-mode <mode>] [--root <name|dir>] [--host <host>] [--from <session>] [--task] [--timeout <duration>] [--json]
        agenthail thread fork <target> [--model <model>] [--last-turn <id>] [--alias <name>] [--from <session>] [--json]
        agenthail thread <status|stop|resume|logs> <target> [--json]
        agenthail thread settings <target> [--json]
@@ -66,6 +68,7 @@ const threadUsage = `usage: agenthail thread create <codex|claude|ACP agent> "me
 
 Codex threads start on Codex Desktop when its bridge is reachable and on Codex's app-server daemon otherwise.
 --host starts the thread on a paired host; --cwd is then a path on that host.
+--task, from an agent's shell, records the thread as a task of the calling session, here or on the --host computer; the calling session waits on it with agenthail_wait and reads it with agenthail_result.
 --worktree starts the thread in a new git worktree beside the checkout, under .worktrees/, on a new branch (--branch, or ah/<alias>) from --base or the checkout's HEAD.
 settings shows the model, effort, permission and Claude config root a thread runs with, and where each was read from, without waking it.
 clean removes a thread's worktree and branch when nothing in them would be lost, and otherwise keeps them and says why. Reporting a task and archiving do the same. Ignored files in build and package folders (node_modules, build, dist, target and the like) never keep a worktree. A worktree kept for other ignored files lists them; --remove-ignored, once per listed file, deletes exactly those with it, and it is kept again if the ignored files have changed.`
@@ -172,7 +175,7 @@ func parseThreadCreateRequest(args []string) (threadCreateRequest, error) {
 		switch arg {
 		case "--message", "--cwd", "--alias", "--model", "--approval", "--timeout", "--effort", "--mode", "--service-tier", "--output-schema", "--name", "--branch", "--base", "--agent", "--permission-mode", "--root", "--host", "--from":
 			i++
-		case "--json", "--worktree":
+		case "--json", "--worktree", "--task":
 		default:
 			positional = append(positional, arg)
 		}
@@ -209,6 +212,7 @@ func parseThreadCreateRequest(args []string) (threadCreateRequest, error) {
 		return threadCreateRequest{}, fmt.Errorf("approval must be untrusted, on-request, or never")
 	}
 	request.worktree = hasFlag(args, "--worktree")
+	request.task = hasFlag(args, "--task")
 	request.branch = strings.TrimSpace(flagVal(args, "--branch"))
 	request.base = strings.TrimSpace(flagVal(args, "--base"))
 	if !request.worktree && (request.branch != "" || request.base != "") {

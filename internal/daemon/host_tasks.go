@@ -86,7 +86,37 @@ func (d *Daemon) apiHostTasksHandler(w http.ResponseWriter, r *http.Request) {
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"tasks": held})
 }
 
-func (d *Daemon) startHostTask(caller *mcpCaller, host *pairedHost, message string, result json.RawMessage) (json.RawMessage, error) {
+// recordHostTask answers with this host's taskId, whichever entry point asked.
+func (d *Daemon) recordHostTask(host *pairedHost, request map[string]any, reply actionReply) actionReply {
+	if reply.Status < http.StatusOK || reply.Status >= http.StatusMultipleChoices {
+		return reply
+	}
+	source, _ := request["sourceSessionId"].(string)
+	_, parent, _ := hosts.Split(source)
+	message, _ := request["message"].(string)
+	body, err := d.startHostTask(parent, host, message, reply.Body)
+	if err != nil {
+		return replyWith(func(w http.ResponseWriter) { writeActionResult(w, actionResult{}, err) })
+	}
+	reply.Body = body
+	return reply
+}
+
+// hostTaskParent refuses a task on a paired host before it starts unless a
+// session on this host started it, since the task is recorded here too.
+func (d *Daemon) hostTaskParent(request map[string]any) error {
+	source, _ := request["sourceSessionId"].(string)
+	hostID, parent, qualified := hosts.Split(source)
+	if !qualified || hostID != d.hostIdentity().ID {
+		return invalidRequest("a task needs the session on this computer that started it")
+	}
+	if owner, err := d.Registry.SessionHost(parent); err != nil || owner != "" {
+		return invalidRequest(fmt.Sprintf("%s is not a session on this computer, so it cannot start a task", parent))
+	}
+	return nil
+}
+
+func (d *Daemon) startHostTask(parent string, host *pairedHost, message string, result []byte) ([]byte, error) {
 	var started map[string]any
 	if err := json.Unmarshal(result, &started); err != nil {
 		return nil, err
@@ -107,11 +137,11 @@ func (d *Daemon) startHostTask(caller *mcpCaller, host *pairedHost, message stri
 		child.ID = raw
 	}
 	if reply.TaskID == 0 || child.ID == "" {
-		return nil, refuse("host_unsupported", fmt.Sprintf("%s started the session but did not record it as a task; it runs an older Agenthail, so update it to start tasks there.", host.record.Name))
+		return nil, actionFailed(http.StatusBadGateway, "host_unsupported", fmt.Sprintf("%s started the session but did not record it as a task; it runs an older Agenthail, so update it to start tasks there.", host.record.Name))
 	}
-	task, err := d.Registry.CreateHostTask(host.record.ID, caller.session.ID, child, message, time.Now())
+	task, err := d.Registry.CreateHostTask(host.record.ID, parent, child, message, time.Now())
 	if err != nil {
-		return nil, fmt.Errorf("%s started session %s, but its task could not be recorded here: %w; do not retry automatically", host.record.Name, child.ID, err)
+		return nil, actionFailed(http.StatusInternalServerError, "create_storage_failed", fmt.Sprintf("%s started session %s, but its task could not be recorded here: %s; do not retry automatically", host.record.Name, child.ID, err))
 	}
 	started["taskId"] = task.ID
 	return json.Marshal(started)
