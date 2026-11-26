@@ -12,6 +12,7 @@ import (
 
 	qrcode "github.com/skip2/go-qrcode"
 	"github.com/zm2231/agenthail/internal/agentswitch"
+	"github.com/zm2231/agenthail/internal/atomicfile"
 	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 )
@@ -199,23 +200,10 @@ func write(config *Config) error {
 	if err != nil {
 		return err
 	}
-	temp, err := os.CreateTemp(filepath.Dir(Path()), ".dashboard-*.json")
-	if err != nil {
+	if err := atomicfile.WriteSynced(Path(), append(data, '\n'), 0600); err != nil {
 		return fmt.Errorf("write dashboard config: %w", err)
 	}
-	defer os.Remove(temp.Name())
-	if err := temp.Chmod(0600); err != nil {
-		temp.Close()
-		return fmt.Errorf("write dashboard config: %w", err)
-	}
-	if _, err := temp.Write(append(data, '\n')); err != nil {
-		temp.Close()
-		return fmt.Errorf("write dashboard config: %w", err)
-	}
-	if err := temp.Close(); err != nil {
-		return fmt.Errorf("write dashboard config: %w", err)
-	}
-	return os.Rename(temp.Name(), Path())
+	return nil
 }
 
 // LoadAgentModes reads only the agent settings, so a mistake elsewhere in the
