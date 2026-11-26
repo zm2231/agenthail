@@ -198,9 +198,9 @@ pub fn tick(s: &mut App) -> bool {
     for step in steps {
         dirty |= step.dirty;
         withdrawn.extend(step.remove);
-        withdrawn.drain(..withdrawn.len().saturating_sub(WITHDRAWN_KEPT));
         let gone: Vec<&str> = withdrawn.iter().map(String::as_str).collect();
         rune_notify::remove(&gone);
+        withdrawn.drain(..withdrawn.len().saturating_sub(WITHDRAWN_KEPT));
         for n in &step.post {
             post(n);
         }
