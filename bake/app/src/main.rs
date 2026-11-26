@@ -600,7 +600,8 @@ fn fresh(s: &App, id: &str, text: String) -> Unsent {
 }
 
 pub fn send_busy(s: &App, id: &str) -> Option<Busy> {
-    busy_delivery(s, id).or_else(|| (busy_now(s, id) && s.busy_default == Some(Busy::Queue)).then_some(Busy::Queue))
+    let waiting = session(s, id).is_some_and(|x| feed::derive::sessions::busy(x) && x.state(s.now) == feed::catalog::State::NeedsYou);
+    busy_delivery(s, id).or_else(|| (waiting || busy_now(s, id) && s.busy_default == Some(Busy::Queue)).then_some(Busy::Queue))
 }
 
 fn dispatch(s: &mut App, id: &str, pending: Unsent, resent: bool, tx: &mut Tx) {
