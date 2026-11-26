@@ -86,6 +86,8 @@ pub struct App {
     outbox: Sender<Bg>,
     pub status: String,
     clock: f64,
+    panes_moved: bool,
+    built_at: f64,
 }
 
 fn args() -> Vec<String> {
@@ -161,6 +163,8 @@ fn init() -> App {
         outbox,
         status: "connecting".into(),
         clock: 0.0,
+        panes_moved: false,
+        built_at: 0.0,
     };
     if recording.is_some() {
         app.sessions = app.ov.d.sessions.clone();
@@ -214,6 +218,7 @@ fn init() -> App {
     app
 }
 
+const PANE_REBUILD_SECS: f64 = 1.0;
 const SETTLE_GRACE: std::time::Duration = std::time::Duration::from_secs(6);
 
 impl App {
@@ -273,6 +278,8 @@ pub fn load_pane(s: &mut App, id: &str) {
 fn rebuild(s: &mut App) {
     let panes: Vec<(&str, &[feed::Item])> = s.panes.iter().map(|(id, p)| (id.as_str(), p.transcript.items())).collect();
     s.ov.rebuild(&panes);
+    s.panes_moved = false;
+    s.built_at = s.clock;
 }
 
 fn fetch_tails(s: &mut App) {
@@ -551,6 +558,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     }
     let mut busy = false;
     let mut counter = s.counter;
+    let mut panes_moved = false;
     for pane in s.panes.values_mut() {
         let mut moved = false;
         if let Some(replay) = &mut pane.replay {
@@ -573,9 +581,14 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         if moved {
             pane.rebuild(&mut counter);
             changed = true;
+            panes_moved = true;
         }
     }
     s.counter = counter;
+    s.panes_moved |= panes_moved;
+    if s.panes_moved && s.clock - s.built_at >= PANE_REBUILD_SECS {
+        rebuild(s);
+    }
     if s.tab == Tab::Changes && (changed || s.diff_key.0 != s.selected.clone().unwrap_or_default()) {
         refresh_diff(s);
     }

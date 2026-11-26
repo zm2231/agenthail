@@ -13,7 +13,7 @@ pub const TAIL_ITEMS: usize = 160;
 const TAIL_HOURS: f64 = 24.0;
 const TAIL_SESSIONS: usize = 14;
 const LONG_TEXT: usize = 1200;
-const READ_BUDGET: Duration = Duration::from_secs(6);
+const READ_BUDGET: Duration = Duration::from_secs(15);
 
 pub fn trim(items: &[Item]) -> Vec<Item> {
     items[items.len().saturating_sub(TAIL_ITEMS)..]
