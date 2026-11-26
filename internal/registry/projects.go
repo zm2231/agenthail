@@ -148,9 +148,19 @@ func (r *Registry) SetProjectTitle(id, title string) error {
 	return nil
 }
 
+// SetProjectRepository answers sql.ErrNoRows when id is no longer an added
+// project whose key follows its repository: removed, or joined to a project.
 func (r *Registry) SetProjectRepository(id, key string, repository []byte) error {
-	_, err := r.db.Exec(`UPDATE projects SET project_key=?,repository=? WHERE id=? AND added=1 AND joined=0`, key, append([]byte{}, repository...), id)
-	return err
+	result, err := r.db.Exec(`UPDATE projects SET project_key=?,repository=? WHERE id=? AND added=1 AND joined=0`, key, append([]byte{}, repository...), id)
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil {
+		return err
+	} else if changed == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (r *Registry) ListProjects() ([]ProjectRecord, error) {

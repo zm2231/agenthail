@@ -1021,7 +1021,9 @@ func (d *Daemon) refreshProjectRepositories(ctx context.Context, records []regis
 		if !ok || (key == record.Key && bytes.Equal(repository, record.Repository)) {
 			continue
 		}
-		if err := d.Registry.SetProjectRepository(record.ID, key, repository); err != nil {
+		if err := d.Registry.SetProjectRepository(record.ID, key, repository); errors.Is(err, sql.ErrNoRows) {
+			continue
+		} else if err != nil {
 			d.log.Printf("project %s repository: %s", record.WorkspaceRoot, err)
 			continue
 		}

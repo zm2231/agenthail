@@ -177,12 +177,15 @@ func TestAFolderOnAnotherComputerJoinsAProjectWithOneKeyLeadAndLedger(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, record := range records {
-		if record.Joined {
-			if err := f.server.reg.SetProjectRepository(record.ID, "repo:github.com/example/other", nil); err != nil {
-				t.Fatal(err)
-			}
-		}
+	checkout := records[slices.IndexFunc(records, func(record registry.ProjectRecord) bool { return record.Joined })]
+	stale := checkout
+	stale.Joined, stale.Key, stale.Repository = false, "", nil
+	beforeJoin := []registry.ProjectRecord{stale}
+	testkit.Git(t, f.serverFolder, "remote", "set-url", "origin", "https://github.com/example/other.git")
+	f.server.daemon.refreshProjectRepositories(context.Background(), beforeJoin, time.Now())
+	testkit.Git(t, f.serverFolder, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "bundle"))
+	if beforeJoin[0].Key != "" {
+		t.Fatalf("a refresh read before the join gave the joined folder the key %q", beforeJoin[0].Key)
 	}
 	if records, err := f.server.reg.ListProjects(); err != nil || !slices.ContainsFunc(records, func(record registry.ProjectRecord) bool { return record.Joined && record.Key == key }) {
 		t.Fatalf("a repository refresh replaced the joined folder's key: %+v (%v)", records, err)
