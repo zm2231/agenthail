@@ -448,3 +448,49 @@ func TestAnEndedSessionWhoseRepositoryIsGoneKeepsItsProject(t *testing.T) {
 		t.Fatalf("the ended session's project after its repository went = %+v, want %s", after, before.ID)
 	}
 }
+
+func TestAFolderGitCannotReadKeepsEachEndedSessionsProject(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	node := newFederationNode(t)
+	repo := testkit.GitRepo(t)
+	for _, id := range []string{"first", "second"} {
+		node.fake.sessions[id] = surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "work " + id, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: filepath.Join(t.TempDir(), id+".jsonl")}
+		moveSession(t, node, id, repo, time.Now().Add(-time.Hour))
+	}
+	discoverOn(node)
+	node.fake.end("first")
+	node.fake.end("second")
+	for range catalogOmissionThreshold + 1 {
+		discoverOn(node)
+	}
+	other := []byte(`{"id":"p-other","localId":"p-other","displayName":"other","rootPath":"/elsewhere","kind":"folder","added":true}`)
+	fingerprint, _, err := node.reg.CatalogProjectionFingerprint("second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if written, err := node.reg.ReidentifyCatalogSession("second", fingerprint, strings.Replace(fingerprint, `"name":"work second"`, `"name":"work second "`, 1), other, json.RawMessage(`{}`)); err != nil || !written {
+		t.Fatalf("seed a second project: written=%v err=%v", written, err)
+	}
+	stored := map[string]string{"first": projectresolve.StoredSessionProject(node.reg, "first").ID, "second": "p-other"}
+	if err := os.WriteFile(filepath.Join(repo, ".git", "config"), []byte("[core\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	response := node.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "project-add", "path": t.TempDir(), "title": "elsewhere"})
+	if response.Code != http.StatusOK {
+		t.Fatalf("project-add: %d %s", response.Code, response.Body.String())
+	}
+	discoverOn(node)
+	generation := node.daemon.catalogIdentities.Generation()
+	for range 3 {
+		discoverOn(node)
+		node.daemon.background.wait()
+	}
+	for id, want := range stored {
+		if got := projectresolve.StoredSessionProject(node.reg, id); got == nil || got.ID != want {
+			t.Fatalf("%s's project while git cannot read its folder = %+v, want %s", id, got, want)
+		}
+	}
+	if node.daemon.catalogReidentified.Load() == generation {
+		t.Fatal("a sweep that could not read a folder counted as done")
+	}
+}

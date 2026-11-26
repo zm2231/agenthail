@@ -93,10 +93,16 @@ send:
 
 func (d *Daemon) reidentifyFolder(ctx context.Context, records []registry.CatalogSessionState, view catalogViewState) bool {
 	first := records[0]
+	if first.Session.Cwd == "" {
+		return true
+	}
 	identityCtx, cancel := context.WithTimeout(ctx, projectresolve.CatalogIdentityGitTimeout)
 	identity := d.catalogIdentities.Identity(identityCtx, first.Session, time.Now().UTC(), func() *projectresolve.CatalogProject { return d.storedCatalogProject(first.Session.ID) })
 	cancel()
 	if ctx.Err() != nil {
+		return false
+	}
+	if !identity.ProjectResolved() {
 		return false
 	}
 	if !replacesStoredProject(identity, first.Session.Cwd) {
@@ -124,12 +130,6 @@ func (d *Daemon) reidentifyFolder(ctx context.Context, records []registry.Catalo
 // surrounds it, so only an added project, which holds the path itself, is
 // evidence of where its session belongs.
 func replacesStoredProject(identity projectresolve.CatalogIdentity, cwd string) bool {
-	if identity.Problem != "" && identity.Project == nil {
-		return false
-	}
-	if cwd == "" {
-		return false
-	}
 	if _, err := os.Stat(cwd); err != nil {
 		return identity.Project != nil && identity.Project.Added
 	}
