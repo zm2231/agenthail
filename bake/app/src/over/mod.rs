@@ -13,7 +13,7 @@ use rune_kit::shell::{self, PaneState};
 
 pub use feed::derive::text::{clip_words, plain, short_id};
 pub use feed::derive::live::Overview;
-pub use feed::derive::{Happened, Line, Need, NeedKind, PHASES, Project, Target, Work, World};
+pub use feed::derive::{GROUPS, Group, Happened, Line, Need, NeedKind, PHASES, Project, Target, Work, World};
 
 use crate::{App, Screen};
 
@@ -29,6 +29,8 @@ pub struct Over {
     pub now_centre_hidden: bool,
     pub now_focus: Option<(usize, [bool; 3])>,
     pub boards: HashMap<String, bool>,
+    pub looked_now: Option<String>,
+    pub looked: HashMap<String, String>,
     pub persist: bool,
     pub sidebar: PaneState,
     pub inspector: PaneState,
@@ -47,8 +49,7 @@ pub struct Over {
 impl Over {
     pub fn new(live: Overview, persist: bool) -> Over {
         let d = live.world(&[]);
-        let mut needs = d.needs();
-        feed::derive::needs::sort(&mut needs);
+        let needs = d.needs();
         Over {
             hands_on: d.hands_on(&[]).iter().map(|x| x.id.clone()).collect(),
             needs,
@@ -61,6 +62,8 @@ impl Over {
             now_centre_hidden: false,
             now_focus: None,
             boards: HashMap::new(),
+            looked_now: None,
+            looked: HashMap::new(),
             persist,
             sidebar: PaneState::new(300.0).range(200.0, 480.0),
             inspector: PaneState::new(340.0).range(260.0, 520.0),
@@ -79,12 +82,38 @@ impl Over {
 
     pub fn rebuild(&mut self, panes: &[(&str, &[feed::Item])]) {
         let d = self.live.world(panes);
-        let mut needs = d.needs();
-        feed::derive::needs::sort(&mut needs);
+        let needs = d.needs();
         self.hands_on = d.hands_on(&[]).iter().map(|x| x.id.clone()).collect();
         self.need_ix = self.need_ix.min(needs.len().saturating_sub(1));
         self.needs = needs;
         self.d = d;
+        self.arrange();
+    }
+
+    pub fn arrange(&mut self) {
+        feed::derive::needs::arrange(&mut self.needs, self.looked_now.as_deref());
+    }
+
+    pub fn looked_at(&self, screen: &Screen) -> Option<&str> {
+        match screen {
+            Screen::Now => self.looked_now.as_deref(),
+            Screen::Project(key) => self.looked.get(key).map(String::as_str),
+            _ => None,
+        }
+    }
+}
+
+fn leave(s: &mut App) {
+    let Ok(at) = s.ov.d.now.format(&time::format_description::well_known::Rfc3339) else { return };
+    match &s.screen {
+        Screen::Now => {
+            s.ov.looked_now = Some(at);
+            s.ov.arrange();
+        }
+        Screen::Project(key) => {
+            s.ov.looked.insert(key.clone(), at);
+        }
+        _ => {}
     }
 }
 
@@ -111,6 +140,7 @@ pub fn arrive(s: &mut App) {
 
 pub fn go(s: &mut App, to: Screen) {
     if s.screen != to {
+        leave(s);
         let from = std::mem::replace(&mut s.screen, to);
         s.ov.back.push(from);
     }
@@ -122,6 +152,7 @@ pub fn go(s: &mut App, to: Screen) {
 
 pub fn open_session(s: &mut App, id: &str) {
     if s.screen != Screen::Session {
+        leave(s);
         s.ov.back.push(s.screen.clone());
     }
     s.ov.jump = None;
@@ -278,6 +309,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
                 return true;
             }
             if let Some(prev) = s.ov.back.pop() {
+                leave(s);
                 s.screen = prev;
                 s.composer = TextEdit::new("");
                 arrive(s);

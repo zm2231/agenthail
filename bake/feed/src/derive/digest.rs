@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 
-use super::needs::headline;
+use crate::catalog::parse_time;
+
+use super::needs::{headline, is_new};
 use super::text::{first_sentence, plain};
 use super::world::{Project, World};
 use super::needs::Target;
@@ -53,6 +55,10 @@ pub fn count(lines: &[Line], kind: Happened) -> usize {
     lines.iter().filter(|l| l.kind == kind).count()
 }
 
+pub fn cut<'a>(lines: Vec<&'a Line>, looked: Option<&str>) -> (Vec<&'a Line>, Vec<&'a Line>) {
+    lines.into_iter().partition(|l| is_new(&l.at, looked))
+}
+
 pub fn pick(lines: &[Line], per_kind: usize) -> Vec<&Line> {
     HAPPENED.iter().flat_map(|k| lines.iter().filter(move |l| l.kind == *k).take(per_kind)).collect()
 }
@@ -64,6 +70,10 @@ fn ci_failed(body: &str) -> bool {
 }
 
 impl World {
+    pub fn window(&self, looked: Option<&str>) -> f64 {
+        looked.filter(|t| parse_time(t).is_some()).map_or(WINDOW_HOURS, |t| self.hours(t).max(0.0))
+    }
+
     pub fn digest(&self, project: &Project, window_hours: f64) -> Vec<Line> {
         let mut lines = Vec::new();
         for w in self.work.values().filter(|w| w.project == project.key) {

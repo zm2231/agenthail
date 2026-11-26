@@ -4,11 +4,11 @@ use rune_kit::{Badge, BadgeVariant, Button, ButtonVariant, ControlSize, IconButt
 use rune_theme_opencode::icons;
 
 use feed::derive::board::{LANES, fold};
-use feed::derive::digest::{HAPPENED, count, pick};
+use feed::derive::digest::{HAPPENED, count, cut, pick};
 use feed::derive::phase::{CHECK, SHIP, phase};
 use feed::derive::sessions::busy;
 
-use crate::over::{Work, plain, short_id};
+use crate::over::{Line, Work, plain, short_id};
 use crate::over::ui::{self, BODY, BODY_MED, HEAD, META, META_MED, base, kit, strong, weak};
 use crate::over::go;
 use crate::{App, Screen};
@@ -224,29 +224,38 @@ pub fn board(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>) -> El {
     let k = kit();
     let Some(p) = s.ov.d.project(key) else { return col() };
     let cols = s.ov.d.board(key).lanes;
-    let lines = s.ov.d.digest(p, crate::over::now::WINDOW);
-    let mut since = row().w_full().gap(8.0).items_stretch();
-    for (i, l) in pick(&lines, 1).iter().enumerate() {
+    let looked = s.ov.looked.get(key).map(String::as_str);
+    let lines = s.ov.d.digest(p, s.ov.d.window(looked));
+    let card = |i: usize, l: &Line| {
         let (glyph, color) = ui::happened_style(l.kind);
         let t = l.target.clone();
-        since = since.child(
-            col()
-                .key(format!("since-{i}"))
-                .grow(1.0)
-                .w(1.0)
-                .gap(5.0)
-                .padding(10.0)
-                .radius(10.0)
-                .fill(k.c.surface_base)
-                .border(1.0, ui::edge())
-                .hover(k.c.surface_raised_hover)
-                .on_press(move |s: &mut App| crate::over::open_target(s, &t))
-                .child(row().gap(6.0).items_center().child(rune::icon(glyph, 13.0).color(color)).child(text(l.kind.label().to_string()).font(META_MED).color(color)).child(ui::spacer()).child(text(s.ov.d.ago(&l.at)).font(META).color(weak())))
-                .child(ui::title_fit(s, &format!("since-{i}"), &l.text, META, strong(), 2)),
-        );
+        col()
+            .key(format!("since-{i}"))
+            .grow(1.0)
+            .w(1.0)
+            .gap(5.0)
+            .padding(10.0)
+            .radius(10.0)
+            .fill(k.c.surface_base)
+            .border(1.0, ui::edge())
+            .hover(k.c.surface_raised_hover)
+            .on_press(move |s: &mut App| crate::over::open_target(s, &t))
+            .child(row().gap(6.0).items_center().child(rune::icon(glyph, 13.0).color(color)).child(text(l.kind.label().to_string()).font(META_MED).color(color)).child(ui::spacer()).child(text(s.ov.d.ago(&l.at)).font(META).color(weak())))
+            .child(ui::title_fit(s, &format!("since-{i}"), &l.text, META, strong(), 2))
+    };
+    let (new, old) = cut(pick(&lines, 1), looked);
+    let mut since = col().w_full().gap(8.0);
+    for (half, start) in [(&new, 0), (&old, new.len())] {
+        if half.is_empty() {
+            continue;
+        }
+        if start > 0 {
+            since = since.child(ui::new_divider("since-new".into()));
+        }
+        since = since.child(row().w_full().gap(8.0).items_stretch().children(half.iter().enumerate().map(|(i, l)| card(start + i, l))));
     }
     let counts: Vec<String> = HAPPENED.iter().map(|k| format!("{} {}", count(&lines, *k), k.word())).collect();
-    let summary = format!("{}, last {:.0} hours", counts.join(" · "), crate::over::now::WINDOW);
+    let summary = format!("{}, {}", counts.join(" · "), crate::over::now::since_note(s, looked).to_lowercase());
     let mut board = row().w_full().gap(12.0).items_start();
     for (i, title) in LANES.iter().enumerate() {
         let items = &cols[i];
