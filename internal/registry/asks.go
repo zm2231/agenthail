@@ -147,7 +147,7 @@ func (r *Registry) OpenAsks() ([]Ask, error) {
 }
 
 func (r *Registry) PendingItemQuestions() ([]Ask, error) {
-	return queryAsks(context.Background(), r.read, `WHERE work_item<>'' AND ledger_resolved_at_ms=0 AND (ledger_question='' OR state<>?) ORDER BY created_at_ms, id`, AskOpen)
+	return queryAsks(context.Background(), r.read, `WHERE origin=? AND work_item<>'' AND ledger_resolved_at_ms=0 AND (ledger_question='' OR state<>?) ORDER BY created_at_ms, id`, AskOriginAgent, AskOpen)
 }
 
 func (r *Registry) RecordItemQuestion(id, questionID string) error {

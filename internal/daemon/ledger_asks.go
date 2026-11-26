@@ -65,6 +65,7 @@ func (d *Daemon) syncLedgerAsks(key string) {
 		questions = append(questions, registry.LedgerQuestion{
 			ID: q.ID, OwnerSessionID: q.OwnerSessionID, Text: q.Text, Recommendation: q.Recommendation, DefaultAnswer: q.DefaultAnswer,
 			Deadline: time.UnixMilli(q.DeadlineMs), Answered: q.State == ledger.QuestionAnswered, Defaulted: q.State == ledger.QuestionDefaulted,
+			WorkItem: questionWorkItem(board, q),
 		})
 	}
 	closed, err := d.Registry.SyncLedgerAsks(key, questions, time.Now())
@@ -211,4 +212,11 @@ func (d *Daemon) applyLedgerAnswer(ctx context.Context, ask registry.Ask, key, q
 		status, code = http.StatusConflict, "conflict"
 	}
 	return "", actionFailed(status, code, failure.Error.Message)
+}
+
+func questionWorkItem(board *ledger.Board, q ledger.Question) string {
+	if _, ok := board.WorkItem(q.Target); ok {
+		return q.Target
+	}
+	return ""
 }

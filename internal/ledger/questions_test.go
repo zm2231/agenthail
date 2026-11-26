@@ -88,7 +88,7 @@ func TestAQuestionNeedsItsSafeguards(t *testing.T) {
 	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "how broad?", DefaultAnswer: "omit fuzzy matching", KeepsBreadth: true}, "cannot be declared --keeps-breadth")
 	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "which index?"}, "needs --default")
 	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "which index?", DefaultAnswer: "fts", DeadlineMs: asked.Add(-time.Minute).UnixMilli()}, "deadline in the future")
-	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C9", Text: "which index?", DefaultAnswer: "fts"}, "is not a goal, ask or clause")
+	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C9", Text: "which index?", DefaultAnswer: "fts"}, "is not a goal, ask, clause or work item")
 	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "which index?", DefaultAnswer: "fts", Kind: "vibes"}, "unknown --kind")
 	outward := askQuestion(t, s, ledger.QuestionRequest{To: "widget-G1", Text: "publish the index to the team?", Kind: ledger.QuestionOutward})
 	if outward.DefaultAnswer != ledger.OutwardDefault || outward.ID != "widget-Q1" {
@@ -224,5 +224,41 @@ func TestAnOutwardDefaultNeverActsAndEscalatesOnce(t *testing.T) {
 	}
 	if again := expire(t, s); len(again) != 0 {
 		t.Fatalf("escalated twice: %+v", again)
+	}
+}
+
+func TestAQuestionOnAWorkItemTakesItsGoalAndItsPendingDefaultIsAckedAfterTheItemIsDeleted(t *testing.T) {
+	s := newStore(t)
+	g := searchAsk(t, s)
+	capture(t, s, project, "claude-prompt:2", "ok, a smaller first version")
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkAdd, Text: "index the titles", ClauseID: "widget-C1"})
+	q := askQuestion(t, s, ledger.QuestionRequest{To: "widget-W1", Text: "how broad?", DefaultAnswer: "a smaller first version"})
+	if q.GoalID != g {
+		t.Fatalf("a question on an item under %s took goal %q", g, q.GoalID)
+	}
+	expire(t, s)
+	cuts := board(t, s).TargetCuts()
+	if len(cuts) != 1 || cuts[0].Target != "widget-W1" || cuts[0].Acked {
+		t.Fatalf("target cuts = %+v", cuts)
+	}
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkDelete, ItemID: "widget-W1"})
+	attach(t, s, ledger.AttachRequest{UtteranceID: "claude-prompt:2", As: ledger.AsReacts, To: cuts[0].ID, Ack: true})
+	if got := question(t, s, q.ID); got.State != ledger.QuestionAnswered {
+		t.Fatalf("the question after the ack on a deleted item = %+v", got)
+	}
+}
+
+func TestAQuestionOnAWorkItemGoesWithTheItemWhenItsWordsAreRetracted(t *testing.T) {
+	s := newStore(t)
+	searchAsk(t, s)
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkAdd, Text: "index the titles", ClauseID: "widget-C1"})
+	q := askQuestion(t, s, ledger.QuestionRequest{To: "widget-W1", Text: "how broad?", DefaultAnswer: "titles only"})
+	if done, err := s.ReclassifyUtterance(project, "claude-prompt:1", "scheduled", time.Now()); err != nil || !done {
+		t.Fatalf("reclassify: %v %v", done, err)
+	}
+	for _, open := range board(t, s).Questions() {
+		if open.ID == q.ID {
+			t.Fatalf("a question on a retracted item stayed: %+v", open)
+		}
 	}
 }

@@ -67,7 +67,7 @@ func (req QuestionRequest) question(now time.Time) (Question, error) {
 	case req.ProjectKey == "" || req.SessionID == "":
 		return Question{}, refuse("project and asking session are required")
 	case text == "" || req.To == "":
-		return Question{}, refuse("a question needs --to <goal|ask|clause|project> and its text")
+		return Question{}, refuse("a question needs --to <goal|ask|clause|item|project> and its text")
 	case rec == "":
 		return Question{}, refuse("a question needs --recommendation: the answer you suggest")
 	case req.DeadlineMs <= now.UnixMilli():
@@ -112,6 +112,15 @@ func (b *Board) targetGoal(target string) (string, error) {
 			return "", refuse("%s was rejected", target)
 		}
 		return b.clauseGoal(b.clauses[target]), nil
+	case b.workItems[target] != nil:
+		item := b.workItems[target]
+		if item.State == WorkDeleted {
+			return "", refuse("%s was deleted", target)
+		}
+		if c := b.clauses[item.ClauseID]; c != nil {
+			return b.clauseGoal(c), nil
+		}
+		return "", nil
 	}
-	return "", refuse("%q is not a goal, ask or clause in this project", target)
+	return "", refuse("%q is not a goal, ask, clause or work item in this project", target)
 }

@@ -172,3 +172,21 @@ func TestARegistryAtSchema92KeepsItsAsksAndCanExpireOne(t *testing.T) {
 		t.Fatalf("indexes=%v err=%v", indexes, err)
 	}
 }
+
+func TestAQuestionTheLedgerNoLongerHoldsWithdrawsItsAsk(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "asker")
+	deadline := time.Now().Add(time.Hour)
+	kept := LedgerQuestion{ID: "Q1", OwnerSessionID: "asker", Text: "Which?", Recommendation: "A", DefaultAnswer: "B", Deadline: deadline}
+	retracted := LedgerQuestion{ID: "Q2", OwnerSessionID: "asker", Text: "How broad?", Recommendation: "A", DefaultAnswer: "B", Deadline: deadline, WorkItem: "p-W1"}
+	if _, err := r.SyncLedgerAsks("p", []LedgerQuestion{kept, retracted}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	closed, err := r.SyncLedgerAsks("p", []LedgerQuestion{kept}, time.Now())
+	if err != nil || len(closed) != 1 || closed[0].Ref != "ledger:p:Q2" || closed[0].State != AskWithdrawn {
+		t.Fatalf("closed=%+v err=%v, want the retracted question's ask withdrawn", closed, err)
+	}
+	if asks := ledgerAsks(t, r); asks[0].State != AskOpen || asks[1].State != AskWithdrawn || asks[1].WorkItem != "p-W1" || asks[1].LedgerKey != "p" {
+		t.Fatalf("asks=%+v", asks)
+	}
+}

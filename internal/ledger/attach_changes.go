@@ -120,6 +120,10 @@ func (p *attachPlan) ackCut() error {
 	}
 	for _, t := range p.board.targetCuts {
 		if t.ID == p.req.To {
+			if q := p.board.questions[t.QuestionID]; q != nil {
+				p.goalID = q.GoalID
+				return p.recordAck(t.Cut, t.Target)
+			}
 			goalID, err := p.board.targetGoal(t.Target)
 			if err != nil {
 				return err
