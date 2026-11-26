@@ -19,6 +19,10 @@ mod waiting;
 use rail::*;
 use session::*;
 use sidebar::*;
+
+pub fn in_sidebar(s: &App, id: &str) -> bool {
+    ordered(s).iter().any(|x| x.id == id)
+}
 use waiting::*;
 
 pub(crate) fn state_color(state: State) -> Color {

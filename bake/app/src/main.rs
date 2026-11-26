@@ -543,11 +543,12 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     }
     if s.screen != Screen::Session {
         s.revealed = None;
-    } else if s.revealed != s.selected {
-        if let Some(id) = &s.selected {
-            tx.scroll_into_view_in("sidebar-list", format!("row-{id}"));
-        }
-        s.revealed = s.selected.clone();
+    } else if s.revealed != s.selected
+        && let Some(id) = s.selected.clone()
+        && ui::in_sidebar(s, &id)
+    {
+        tx.scroll_into_view_in("sidebar-list", format!("row-{id}"));
+        s.revealed = Some(id);
     }
     over::layout::save(s);
     tx.wake_after(Duration::from_millis(if busy { 16 } else { 250 }));
