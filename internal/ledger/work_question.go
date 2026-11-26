@@ -44,6 +44,8 @@ type ItemQuestion struct {
 	AskHostID  string               `json:"askHostId"`
 	Title      string               `json:"title"`
 	Prompts    []ItemQuestionPrompt `json:"prompts"`
+	Default    *int                 `json:"defaultOption,omitempty"`
+	DeadlineMs int64                `json:"deadlineMs,omitempty"`
 	AskedBy    string               `json:"askedBy"`
 	At         time.Time            `json:"at"`
 	Outcome    string               `json:"outcome,omitempty"`
@@ -61,6 +63,8 @@ type WorkQuestionPayload struct {
 	AskHostID  string               `json:"askHostId"`
 	Title      string               `json:"title"`
 	Prompts    []ItemQuestionPrompt `json:"prompts"`
+	Default    *int                 `json:"defaultOption,omitempty"`
+	DeadlineMs int64                `json:"deadlineMs,omitempty"`
 	Actor      string               `json:"actor"`
 }
 
@@ -79,6 +83,8 @@ type ItemQuestionRaise struct {
 	AskID      string               `json:"askId"`
 	Title      string               `json:"title"`
 	Prompts    []ItemQuestionPrompt `json:"prompts"`
+	Default    *int                 `json:"defaultOption,omitempty"`
+	DeadlineMs int64                `json:"deadlineMs,omitempty"`
 }
 
 type ItemQuestionResolve struct {
@@ -102,6 +108,9 @@ func itemQuestionResolvedRef(hostID, askID string) string {
 func (s *Store) RaiseItemQuestion(req ItemQuestionRaise, now time.Time) (string, error) {
 	if req.AskHostID == "" || req.AskID == "" || strings.TrimSpace(req.Title) == "" || len(req.Prompts) == 0 {
 		return "", refuse("an item question needs the ask's host and id, its title and its questions")
+	}
+	if (req.Default == nil) != (req.DeadlineMs == 0) || req.Default != nil && (len(req.Prompts) != 1 || *req.Default < 0 || *req.Default >= len(req.Prompts[0].Options)) {
+		return "", refuse("an item question's default is an option of its only question, with a deadline")
 	}
 	board, release, err := s.lockBoard(req.ProjectKey)
 	if err != nil {
@@ -136,7 +145,7 @@ func (s *Store) RaiseItemQuestion(req ItemQuestionRaise, now time.Time) (string,
 	if err != nil {
 		return "", err
 	}
-	data, err := json.Marshal(WorkQuestionPayload{QuestionID: id, ItemID: itemID, AskID: req.AskID, AskHostID: req.AskHostID, Title: oneLine(req.Title), Prompts: req.Prompts, Actor: req.SessionID})
+	data, err := json.Marshal(WorkQuestionPayload{QuestionID: id, ItemID: itemID, AskID: req.AskID, AskHostID: req.AskHostID, Title: oneLine(req.Title), Prompts: req.Prompts, Default: req.Default, DeadlineMs: req.DeadlineMs, Actor: req.SessionID})
 	if err != nil {
 		return "", err
 	}
@@ -221,7 +230,7 @@ func (b *Board) applyWorkQuestion(event Event) error {
 	if item == nil || slices.ContainsFunc(item.Questions, func(q ItemQuestion) bool { return q.ID == p.QuestionID }) {
 		return nil
 	}
-	item.Questions = append(item.Questions, ItemQuestion{ID: p.QuestionID, AskID: p.AskID, AskHostID: p.AskHostID, Title: p.Title, Prompts: p.Prompts, AskedBy: p.Actor, At: event.CreatedAt})
+	item.Questions = append(item.Questions, ItemQuestion{ID: p.QuestionID, AskID: p.AskID, AskHostID: p.AskHostID, Title: p.Title, Prompts: p.Prompts, Default: p.Default, DeadlineMs: p.DeadlineMs, AskedBy: p.Actor, At: event.CreatedAt})
 	return nil
 }
 

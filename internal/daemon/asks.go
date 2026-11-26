@@ -17,6 +17,7 @@ import (
 	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
+	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -40,10 +41,17 @@ type askQuestionInput struct {
 }
 
 type askInput struct {
-	Title     string             `json:"title"`
-	Questions []askQuestionInput `json:"questions"`
-	Item      string             `json:"item,omitempty"`
+	Title               string             `json:"title"`
+	Questions           []askQuestionInput `json:"questions"`
+	Item                string             `json:"item,omitempty"`
+	Default             *int               `json:"default,omitempty"`
+	DefaultAfterMinutes int                `json:"defaultAfterMinutes,omitempty"`
 }
+
+const (
+	minAskDefaultMinutes = 15
+	maxAskDefaultMinutes = 7 * 24 * 60
+)
 
 func isAskID(id string) bool { return strings.HasPrefix(id, askPrefix) }
 
@@ -105,6 +113,30 @@ func validAsk(input askInput) error {
 			}
 		}
 	}
+	return validAskDefault(input)
+}
+
+func validAskDefault(input askInput) error {
+	if input.Default == nil && input.DefaultAfterMinutes == 0 {
+		return nil
+	}
+	if input.Default == nil || input.DefaultAfterMinutes == 0 {
+		return errors.New("default and defaultAfterMinutes go together; give both or neither")
+	}
+	if len(input.Questions) != 1 {
+		return errors.New("only an ask with one question takes a default")
+	}
+	options := input.Questions[0].Options
+	if *input.Default < 0 || *input.Default >= len(options) {
+		return fmt.Errorf("default is an option index from 0 to %d", len(options)-1)
+	}
+	if input.DefaultAfterMinutes < minAskDefaultMinutes || input.DefaultAfterMinutes > maxAskDefaultMinutes {
+		return fmt.Errorf("defaultAfterMinutes is %d to %d", minAskDefaultMinutes, maxAskDefaultMinutes)
+	}
+	option := options[*input.Default]
+	if ledger.OutwardWord(option.Label) != "" || ledger.OutwardWord(option.Does) != "" {
+		return errors.New("an outward default; leave default out so the person answers")
+	}
 	return nil
 }
 
@@ -117,6 +149,9 @@ func askQuestions(input askInput) []registry.AskQuestion {
 		}
 		if in.Recommended != nil {
 			question.Recommended = question.Options[*in.Recommended].ID
+		}
+		if input.Default != nil {
+			question.Default = question.Options[*input.Default].ID
 		}
 		questions = append(questions, question)
 	}
@@ -182,12 +217,16 @@ func (d *Daemon) raiseAsk(session surface.Session, input askInput) (registry.Ask
 		}
 		return registry.Ask{}, "", errors.New(refusal.Message)
 	}
+	now := time.Now()
 	ask := registry.Ask{SessionID: session.ID, Origin: registry.AskOriginAgent, Title: strings.TrimSpace(input.Title), Questions: askQuestions(input), RoutedTo: registry.AskToPerson, WorkItem: work.item.ID, LedgerKey: work.key}
+	if input.Default != nil {
+		ask.Deadline = now.Add(time.Duration(input.DefaultAfterMinutes) * time.Minute)
+	}
 	hearer, routed := d.askHearer(session.ID)
 	if routed {
 		ask.RoutedTo = hearer.sessionID
 	}
-	ask, err := d.Registry.RaiseAsk(ask, time.Now())
+	ask, err := d.Registry.RaiseAsk(ask, now)
 	if err != nil {
 		return registry.Ask{}, "", err
 	}
@@ -324,6 +363,7 @@ func (d *Daemon) runAskSweeps(ctx context.Context) {
 func (d *Daemon) sweepAsks(now time.Time) {
 	d.sendWithdraws()
 	d.expireApprovals(now)
+	d.applyAskDefaults(now)
 	open, err := d.Registry.OpenAsks()
 	if err != nil {
 		d.log.Printf("read open asks: %s", err)

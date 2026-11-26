@@ -51,6 +51,7 @@ type AskQuestion struct {
 	Question    string      `json:"question"`
 	Options     []AskOption `json:"options"`
 	Recommended string      `json:"recommended,omitempty"`
+	Default     string      `json:"default,omitempty"`
 	Links       []AskLink   `json:"links,omitempty"`
 	Detail      string      `json:"detail,omitempty"`
 }
@@ -120,8 +121,13 @@ func (r *Registry) RaiseAsk(ask Ask, at time.Time) (Ask, error) {
 	if err != nil {
 		return Ask{}, err
 	}
-	_, err = r.db.Exec(`INSERT INTO asks(id,session_id,origin,title,questions_json,routed_to,routed_at_ms,route_json,state,created_at_ms,answerable,work_item,ledger_key) VALUES(?,?,?,?,?,?,?,?,?,?,1,?,?)`,
-		ask.ID, ask.SessionID, ask.Origin, ask.Title, string(questions), ask.RoutedTo, at.UnixMilli(), string(route), AskOpen, at.UnixMilli(), ask.WorkItem, ask.LedgerKey)
+	var deadline int64
+	if !ask.Deadline.IsZero() {
+		ask.Deadline = time.UnixMilli(ask.Deadline.UnixMilli()).UTC()
+		deadline = ask.Deadline.UnixMilli()
+	}
+	_, err = r.db.Exec(`INSERT INTO asks(id,session_id,origin,title,questions_json,routed_to,routed_at_ms,route_json,state,created_at_ms,answerable,work_item,ledger_key,deadline_ms) VALUES(?,?,?,?,?,?,?,?,?,?,1,?,?,?)`,
+		ask.ID, ask.SessionID, ask.Origin, ask.Title, string(questions), ask.RoutedTo, at.UnixMilli(), string(route), AskOpen, at.UnixMilli(), ask.WorkItem, ask.LedgerKey, deadline)
 	if err != nil {
 		return Ask{}, err
 	}
@@ -147,6 +153,29 @@ func (r *Registry) PendingItemQuestions() ([]Ask, error) {
 func (r *Registry) RecordItemQuestion(id, questionID string) error {
 	_, err := r.db.Exec(`UPDATE asks SET ledger_question=? WHERE id=? AND ledger_question=''`, questionID, id)
 	return err
+}
+
+// An agent's ask has a deadline only when it carries a default, so every agent ask past its deadline takes its default.
+func (r *Registry) ApplyAskDefaults(now time.Time) ([]Ask, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	due, err := queryAsks(context.Background(), tx, `WHERE origin=? AND state=? AND deadline_ms>0 AND deadline_ms<=? ORDER BY created_at_ms, id`, AskOriginAgent, AskOpen, now.UnixMilli())
+	if err != nil || len(due) == 0 {
+		return nil, err
+	}
+	for _, ask := range due {
+		if _, err := tx.Exec(`UPDATE asks SET state=?,answered_at_ms=? WHERE id=? AND state=?`, AskExpired, now.UnixMilli(), ask.ID, AskOpen); err != nil {
+			return nil, err
+		}
+	}
+	return due, tx.Commit()
+}
+
+func (r *Registry) DefaultedAsksSince(since time.Time) ([]Ask, error) {
+	return queryAsks(context.Background(), r.read, `WHERE origin=? AND state=? AND deadline_ms>0 AND answered_at_ms>=? ORDER BY answered_at_ms, id`, AskOriginAgent, AskExpired, since.UnixMilli())
 }
 
 func (r *Registry) AbandonItemQuestion(id string, at time.Time) error {

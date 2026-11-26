@@ -110,8 +110,11 @@ func (d *Daemon) syncItemQuestions(ctx context.Context) {
 	host := d.hostIdentity().ID
 	for _, ask := range pending {
 		if ask.LedgerQuestion == "" {
-			reply, err := d.writeItemQuestion(ctx, itemQuestionWrite{ProjectKey: ask.LedgerKey, SessionID: ask.SessionID, Raise: &ledger.ItemQuestionRaise{
-				ItemID: ask.WorkItem, AskHostID: host, AskID: ask.ID, Title: ask.Title, Prompts: itemQuestionPrompts(ask)}})
+			raise := &ledger.ItemQuestionRaise{ItemID: ask.WorkItem, AskHostID: host, AskID: ask.ID, Title: ask.Title, Prompts: itemQuestionPrompts(ask)}
+			if index, defaulted := askDefault(ask); defaulted {
+				raise.Default, raise.DeadlineMs = &index, ask.Deadline.UnixMilli()
+			}
+			reply, err := d.writeItemQuestion(ctx, itemQuestionWrite{ProjectKey: ask.LedgerKey, SessionID: ask.SessionID, Raise: raise})
 			if errors.Is(err, ledger.ErrItemGone) {
 				d.log.Printf("item questions: %s is on %s, which is gone; it stays a plain ask", ask.ID, ask.WorkItem)
 				if err := d.Registry.AbandonItemQuestion(ask.ID, time.Now()); err != nil {
@@ -129,7 +132,7 @@ func (d *Daemon) syncItemQuestions(ctx context.Context) {
 			}
 			ask.LedgerQuestion = reply.QuestionID
 		}
-		outcome := itemQuestionOutcome(ask.State)
+		outcome := itemQuestionOutcome(ask)
 		if outcome == "" {
 			continue
 		}
@@ -148,8 +151,11 @@ func (d *Daemon) syncItemQuestions(ctx context.Context) {
 	}
 }
 
-func itemQuestionOutcome(state string) string {
-	switch state {
+func itemQuestionOutcome(ask registry.Ask) string {
+	if _, defaulted := askDefault(ask); defaulted && ask.State == registry.AskExpired {
+		return ledger.ItemQuestionDefaulted
+	}
+	switch ask.State {
 	case registry.AskAnswered:
 		return ledger.ItemQuestionAnswered
 	case registry.AskWithdrawn:
@@ -180,6 +186,9 @@ func itemQuestionPrompts(ask registry.Ask) []ledger.ItemQuestionPrompt {
 }
 
 func askAnswerLine(ask registry.Ask) string {
+	if _, defaulted := askDefault(ask); defaulted && ask.State == registry.AskExpired {
+		return askDefaultMessage(ask)
+	}
 	if ask.State != registry.AskAnswered {
 		return ""
 	}
