@@ -39,7 +39,7 @@ var injectedNoticeKinds = map[string]string{
 func PresentTimelineItem(item TimelineItem) TimelineItem {
 	channel := ""
 	fromCLI := item.Kind == "message" && item.Role == "peer" && item.Sender == CLIPeerSender
-	if (item.Kind == "message" || item.Kind == "text") && item.Role == "user" && item.Origin == "" {
+	if (item.Kind == "message" || item.Kind == "text") && item.Role == "user" && (item.Origin == "" || item.Origin == AgentKindPeer) {
 		fromCLI = strings.HasPrefix(item.Text, CLILabel)
 		if envelope, ok := ParsePeerEnvelope(item.Text); ok {
 			item.Role, item.Origin, item.Sender, item.Title, item.Text = "peer", AgentKindPeer, envelope.Sender, envelope.Sender, envelope.Body
@@ -62,7 +62,7 @@ func PresentTimelineItem(item TimelineItem) TimelineItem {
 
 func PresentExchanges(exchanges []Exchange) []Exchange {
 	for index := range exchanges {
-		if exchanges[index].Origin != "" || exchanges[index].Command {
+		if exchange := exchanges[index]; exchange.Command || exchange.Origin != "" && (exchange.Origin != AgentKindPeer || exchange.Sender != "") {
 			continue
 		}
 		if envelope, ok := ParsePeerEnvelope(exchanges[index].User); ok {

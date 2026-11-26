@@ -243,6 +243,9 @@ func (r *Registry) RecordDeliveryIntent(input DeliveryIntentInput) (*DeliveryInt
 	if err != nil {
 		return nil, err
 	}
+	if err := recordMessageSender(tx, id, input.SenderSessionID, r.now()); err != nil {
+		return nil, err
+	}
 	intent, err := deliveryIntentByID(tx, row)
 	if err != nil {
 		return nil, err
@@ -422,7 +425,11 @@ func failDeliveryIntent(q deliveryIntentExecutor, id int64, failure string) (boo
 }
 
 func insertQueuedDeliveryIntent(tx *sql.Tx, senderSessionID, targetSessionID, message string, queueID int64, relayed bool) (int64, error) {
-	res, err := tx.Exec(`INSERT INTO delivery_intents(uuid,sender_session_id,target_session_id,message,queue_id,relayed,status,evidence,created_at) VALUES(?,?,?,?,?,?,?,?,strftime('%Y-%m-%d %H:%M:%f','now'))`, uuid.NewString(), senderSessionID, targetSessionID, boundedIntentMessage(message), queueID, relayed, DeliveryIntentQueued, surface.EvidenceQueued)
+	id := uuid.NewString()
+	if err := recordMessageSender(tx, id, senderSessionID, time.Now()); err != nil {
+		return 0, err
+	}
+	res, err := tx.Exec(`INSERT INTO delivery_intents(uuid,sender_session_id,target_session_id,message,queue_id,relayed,status,evidence,created_at) VALUES(?,?,?,?,?,?,?,?,strftime('%Y-%m-%d %H:%M:%f','now'))`, id, senderSessionID, targetSessionID, boundedIntentMessage(message), queueID, relayed, DeliveryIntentQueued, surface.EvidenceQueued)
 	if err != nil {
 		return 0, err
 	}

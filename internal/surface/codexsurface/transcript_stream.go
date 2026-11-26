@@ -106,6 +106,7 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 			items = append(cutOff, items...)
 			projection := codexUserProjection{pending: session.CodexPendingEventUser, turnID: session.CodexPendingEventTurn}
 			if projection.consume(record, items, effectiveTurnID) {
+				codexForgetInput(&session.CodexToolWindow, record, items)
 				session.CodexPendingEventUser = projection.pending
 				session.CodexPendingEventTurn = projection.turnID
 				session.CodexCurrentTurnID = currentTurnID

@@ -32,6 +32,13 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 			}
 		}
 	}
+	if err := s.attributeCodexInput(&event); err != nil {
+		s.mu.Lock()
+		s.appendFailed = true
+		s.mu.Unlock()
+		s.appendSourceError(fmt.Errorf("session journal append failed: %w", err))
+		return
+	}
 	s.mu.Lock()
 	payload, bodyKey := s.normalizeLocked(event)
 	previous := s.streamedBodies.get(bodyKey)

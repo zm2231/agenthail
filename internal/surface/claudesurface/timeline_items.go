@@ -117,7 +117,7 @@ func claudeRecordItems(record map[string]any) []surface.TimelineItem {
 					return claudeCommandItems(text)
 				}
 				if claudeCommandInvocation(text) {
-					return []surface.TimelineItem{{Kind: "message", Role: kind, Title: kind, Text: claudeCommandLine(text)}}
+					return []surface.TimelineItem{{Kind: "message", Role: kind, Origin: surface.OriginPerson, Title: kind, Text: claudeCommandLine(text)}}
 				}
 			}
 		}
@@ -137,8 +137,8 @@ func claudeRecordItems(record map[string]any) []surface.TimelineItem {
 			return []surface.TimelineItem{item}
 		}
 		item := surface.TimelineItem{Kind: "message", Role: kind, Title: kind, Text: text}
-		if kind == "user" && !typed {
-			item.Origin = claudeRecordedOrigin(text)
+		if kind == "user" {
+			item.Origin = claudeUserOrigin(typed, text)
 		}
 		return []surface.TimelineItem{item}
 	}
@@ -152,8 +152,8 @@ func claudeRecordItems(record map[string]any) []surface.TimelineItem {
 			item.Kind = "message"
 			item.Title = kind
 			item.Text = transcript.String(block, "text")
-			if kind == "user" && !typed {
-				item.Origin = claudeRecordedOrigin(item.Text)
+			if kind == "user" {
+				item.Origin = claudeUserOrigin(typed, item.Text)
 			}
 		case "thinking":
 			item.Kind = "reasoning"

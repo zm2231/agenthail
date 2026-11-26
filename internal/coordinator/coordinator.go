@@ -377,6 +377,9 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 	ready := func(started surface.Session) error {
 		readyErr = s.Registry.RecordStartingSession(started, registry.AliasReservation{}, registry.SessionOrigin{SessionID: started.ID, Via: registry.OriginCoordinator})
 		if readyErr == nil {
+			readyErr = s.Registry.RecordMessageSender(messageUUID, surface.SystemSessionID)
+		}
+		if readyErr == nil {
 			recorded = &started
 		}
 		return readyErr

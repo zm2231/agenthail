@@ -5,6 +5,16 @@ type CodexToolWindow struct {
 	Known      bool
 	Open       []CodexOpenCall
 	Background []CodexBackgroundCommand
+	Inputs     []CodexOpenInput
+}
+
+// CodexOpenInput is a user message Codex recorded before the completion that
+// names the client it came from.
+type CodexOpenInput struct {
+	Key    string
+	TurnID string
+	At     string
+	Text   string
 }
 
 type CodexOpenCall struct {

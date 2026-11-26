@@ -13,7 +13,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func (d *Daemon) doSessionOperation(ctx context.Context, adapter surface.Surface, session *surface.Session, action string, forkOptions surface.ForkOptions, forkName, creator string, queue surface.NativeQueueRequest) (actionResult, error) {
+func (d *Daemon) doSessionOperation(ctx context.Context, adapter surface.Surface, session *surface.Session, action string, forkOptions surface.ForkOptions, forkName, creator string, author surface.Author, queue surface.NativeQueueRequest) (actionResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()
 	var result any
@@ -74,6 +74,11 @@ func (d *Daemon) doSessionOperation(ctx context.Context, adapter surface.Surface
 		if !ok {
 			err = surface.ErrUnsupported
 			break
+		}
+		if queue.Action == "add" {
+			if err = d.Registry.RecordMessageSender(queue.ClientID, surface.SendOptions{SourceSessionID: creator, Author: author}.Sender()); err != nil {
+				break
+			}
 		}
 		result, err = native.NativeQueue(ctx, session, queue)
 	default:

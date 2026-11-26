@@ -112,7 +112,8 @@ func (d *Daemon) typedPrompt(row registry.JournalPrompt) (promptItem, bool) {
 
 // isTypedPrompt reports whether a user-role message is text a person typed.
 // Journal rows written before their provider marked injections carry no
-// origin, so the injected wrappers are recognised by their text.
+// origin, so the injected wrappers are recognised by their text; a person's
+// own built-in commands, such as /compact, are not prompts either.
 func isTypedPrompt(text string) bool {
 	return claudesurface.IsTypedHumanPrompt(text)
 }

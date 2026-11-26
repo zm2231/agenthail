@@ -91,7 +91,9 @@ func dropJournalPromptColumns(tx *sql.Tx) error {
 // journalPromptsSQL opens with the predicate of the session_journal_prompts
 // indexes and orders by their key, so it walks one of them in order and stops
 // at its limit. The indexes hold every journal column it reads, so it never
-// visits the table. Its session conditions mirror surface.Session.Delegated.
+// visits the table. A message recorded as the person's is theirs in any
+// top-level session; one recorded with no origin is taken only from a session
+// no agent started, since such a row can be an agent's brief.
 func journalPromptsSQL(sessionScoped bool) string {
 	session := ""
 	if sessionScoped {
@@ -102,8 +104,8 @@ func journalPromptsSQL(sessionScoped bool) string {
 		JOIN sessions s ON s.id=j.session_id
 		LEFT JOIN session_origins o ON o.session_id=j.session_id
 		WHERE j.kind IN ('message','text') AND j.payload_role='user'
-		AND j.payload_origin IN ('','human')
-		AND s.host_id='' AND s.parent_session_id='' AND s.subagent_depth=0 AND s.source NOT IN ('exec','subAgent') AND COALESCE(o.via,'')!='agent'
+		AND s.host_id='' AND s.parent_session_id='' AND s.subagent_depth=0 AND s.source NOT IN ('exec','subAgent')
+		AND (j.payload_origin='person' OR j.payload_origin='' AND COALESCE(o.via,'')!='agent')
 		` + session + `
 		AND (?2='' OR j.payload_body LIKE ?2 ESCAPE '\')
 		AND (?3='' OR j.payload_at<?4 OR (j.payload_at=?4 AND (j.session_id<?3 OR (j.session_id=?3 AND j.seq<?5))))
@@ -166,7 +168,8 @@ type JournalPromptQuery struct {
 }
 
 // JournalPrompts lists user messages, newest first, from this host's
-// top-level sessions that no agent started; the caller tells typed prompts
+// top-level sessions: those recorded as the person's, and those recorded
+// with no origin in sessions no agent started. The caller tells typed prompts
 // from injected text.
 // Text matches the message's retained inline body, case-insensitively for
 // ASCII.

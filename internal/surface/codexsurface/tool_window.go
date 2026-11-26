@@ -18,9 +18,13 @@ func codexRecordItems(window *surface.CodexToolWindow, record map[string]any, tu
 	if codexRecordStartsTurn(record) {
 		window.Known = true
 		window.Open = nil
+		window.Inputs = nil
 	}
 	if transcript.String(record, "type") == "event_msg" && transcript.String(payload, "type") == "item_completed" {
 		item, _ := payload["item"].(map[string]any)
+		if transcript.String(item, "type") == "UserMessage" {
+			return codexClaimInput(window, item, turnID)
+		}
 		return codexCompletedItems(window, item, turnID)
 	}
 	items := codexTimelineItems(record)
@@ -29,6 +33,7 @@ func codexRecordItems(window *surface.CodexToolWindow, record map[string]any, tu
 			items = []surface.TimelineItem{*opaque}
 		}
 	}
+	codexOpenInput(window, record, items, turnID)
 	if _, ended := codexRecordEndsTurn(record); ended {
 		window.Open = nil
 		return items
@@ -45,6 +50,75 @@ func codexRecordItems(window *surface.CodexToolWindow, record map[string]any, tu
 		}
 	}
 	return items
+}
+
+// codexOpenInput holds a message Codex attributes to its user until the
+// completion that follows it names the client that sent it.
+func codexOpenInput(window *surface.CodexToolWindow, record map[string]any, items []surface.TimelineItem, turnID string) {
+	payload, _ := record["payload"].(map[string]any)
+	if transcript.String(record, "type") != "response_item" || len(items) == 0 || items[0].Kind != "message" || items[0].Role != "user" || !codexUserProvenance(payload) {
+		return
+	}
+	key := codexTranscriptItemKey(record, items[0], 0)
+	if key == "" {
+		return
+	}
+	window.Inputs = append(slices.Clone(window.Inputs), surface.CodexOpenInput{Key: key, TurnID: turnID, At: transcript.String(record, "timestamp"), Text: items[0].Text})
+}
+
+// codexForgetInput drops a held message whose record is served as a duplicate
+// of the user_message event before it.
+func codexForgetInput(window *surface.CodexToolWindow, record map[string]any, items []surface.TimelineItem) {
+	if len(items) == 0 || len(window.Inputs) == 0 {
+		return
+	}
+	key := codexTranscriptItemKey(record, items[0], 0)
+	window.Inputs = slices.DeleteFunc(slices.Clone(window.Inputs), func(input surface.CodexOpenInput) bool { return input.Key == key })
+}
+
+func codexUserProvenance(payload map[string]any) bool {
+	metadata, _ := payload["internal_chat_message_metadata_passthrough"].(map[string]any)
+	entries, _ := metadata["content_item_metadata"].([]any)
+	return slices.ContainsFunc(entries, func(raw any) bool {
+		entry, _ := raw.(map[string]any)
+		provenance, _ := entry["provenance"].(map[string]any)
+		return transcript.String(provenance, "type") == "user"
+	})
+}
+
+// codexClaimInput serves the held message again under its own key, now with
+// the client id Codex recorded for it. A message no client sent was typed
+// into Codex itself.
+func codexClaimInput(window *surface.CodexToolWindow, item map[string]any, turnID string) []surface.TimelineItem {
+	text := strings.TrimSpace(codexUserMessageText(item["content"]))
+	index := slices.IndexFunc(window.Inputs, func(input surface.CodexOpenInput) bool {
+		return input.TurnID == turnID && strings.TrimSpace(input.Text) == text
+	})
+	if index < 0 {
+		return nil
+	}
+	input := window.Inputs[index]
+	window.Inputs = slices.Delete(slices.Clone(window.Inputs), index, index+1)
+	row := surface.TimelineItem{ID: input.Key, Kind: "message", Role: "user", Title: "user", Text: input.Text, Timestamp: input.At, MessageID: transcript.String(item, "client_id")}
+	if row.MessageID == "" {
+		row.Origin = surface.OriginPerson
+	}
+	return []surface.TimelineItem{row}
+}
+
+func codexUserMessageText(content any) string {
+	blocks, _ := content.([]any)
+	var parts []string
+	for _, raw := range blocks {
+		block, _ := raw.(map[string]any)
+		if transcript.String(block, "type") != "text" {
+			continue
+		}
+		if text := transcript.String(block, "text"); text != "" && !codexImageWrapper(text) {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func codexOpenCall(window *surface.CodexToolWindow, record map[string]any, item surface.TimelineItem, turnID string) {
