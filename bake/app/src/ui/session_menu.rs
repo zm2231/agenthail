@@ -483,6 +483,9 @@ fn settled(s: &mut App, done: Done) {
         }
         Done::Set(id, key, value, result) => {
             s.menus.busy.remove(&(id.clone(), key));
+            if key == "model" {
+                super::complete::model_settled(s, &id, result.is_err());
+            }
             match result {
                 Ok(()) => {
                     s.menus.supersede(&id, "settings");

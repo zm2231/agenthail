@@ -43,6 +43,7 @@ pub struct Complete {
     recorded: HashMap<String, Vec<Prompt>>,
     prompts_asked: HashMap<String, u64>,
     goal_pending: HashSet<String>,
+    model_typed: HashMap<String, String>,
     goal_keys: HashMap<(String, String), (String, String)>,
     local: HashMap<String, Vec<(String, time::OffsetDateTime)>>,
     pub search: Option<Search>,
@@ -267,6 +268,8 @@ fn accept(s: &mut App, item: &Item) {
 }
 
 pub fn pump(s: &mut App) -> bool {
+    let (busy, confirm, rekeyed) = (&s.menus.busy, &s.menus.confirm, &s.rekeyed);
+    s.complete.model_typed.retain(|id, _| busy.iter().any(|(k, w)| *w == "model" && feed::composer::current(rekeyed, k) == id) || confirm.as_ref().is_some_and(|c| c.key == "model" && feed::composer::current(rekeyed, &c.session) == id));
     if s.screen != crate::Screen::Session
         && let Some(id) = s.composer_for.clone()
     {
@@ -596,16 +599,35 @@ fn pick_model(s: &mut App, id: &str, query: &str) {
         (Some(chip), false) => {
             let list: Vec<(String, String)> = chip.choices.iter().map(|c| (c.id.clone(), c.label.clone())).collect();
             let wanted = complete::resolve_model(query, &list);
-            match chip.choices.iter().find(|c| c.id == wanted).cloned() {
+            let choice = chip.choices.iter().find(|c| c.id == wanted).cloned();
+            if choice.as_ref().is_none_or(|c| chip.pick(&c.id) != feed::settings::Pick::Unchanged) {
+                s.complete.model_typed.insert(id.to_string(), format!("/model {query}"));
+            }
+            match choice {
                 Some(choice) => super::session_menu::choose(s, id, &chip, &choice),
                 None => super::session_menu::set(s, id, "model", &wanted),
             }
         }
-        (None, false) => super::session_menu::set(s, id, "model", query),
+        (None, false) => {
+            s.complete.model_typed.insert(id.to_string(), format!("/model {query}"));
+            super::session_menu::set(s, id, "model", query);
+        }
         (None, true) => {
             let line = models_note(s, id);
             crate::note(s, id, line);
         }
+    }
+}
+
+pub fn model_settled(s: &mut App, id: &str, failed: bool) {
+    let id = feed::composer::current(&s.rekeyed, id).to_string();
+    let Some(typed) = s.complete.model_typed.remove(&id).filter(|_| failed) else { return };
+    if s.composer_for.as_deref() == Some(id.as_str()) {
+        if s.composer.text.trim().is_empty() {
+            replace_composer(s, &typed);
+        }
+    } else if s.drafts.get(&id).trim().is_empty() {
+        s.drafts.set(&id, &typed);
     }
 }
 
