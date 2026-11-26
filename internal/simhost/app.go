@@ -29,6 +29,17 @@ func (h *Host) install(ctx context.Context, owner string, l *lease, app string) 
 	return map[string]any{"installed": app}, nil
 }
 
+func (h *Host) uninstall(ctx context.Context, l *lease, bundleID string) (map[string]any, error) {
+	if !bundlePattern.MatchString(bundleID) {
+		return nil, refuse("invalid", "bundleId is required.")
+	}
+	if _, err := h.run(ctx, "xcrun", "simctl", "uninstall", l.udid, bundleID); err != nil {
+		return nil, err
+	}
+	delete(l.launched, bundleID)
+	return map[string]any{"uninstalled": bundleID}, nil
+}
+
 func (h *Host) launch(ctx context.Context, l *lease, req Request) (map[string]any, error) {
 	if !bundlePattern.MatchString(req.BundleID) {
 		return nil, refuse("invalid", "bundleId is required.")

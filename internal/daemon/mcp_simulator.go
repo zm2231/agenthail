@@ -11,7 +11,7 @@ import (
 )
 
 type mcpSimulatorInput struct {
-	Action    string            `json:"action" jsonschema:"list, acquire, renew, release, install, launch, terminate, openUrl, describe, tap, type, swipe, button, screenshot, push, location or logs."`
+	Action    string            `json:"action" jsonschema:"list, acquire, renew, release, install, uninstall, launch, terminate, openUrl, describe, tap, type, swipe, button, screenshot, push, location or logs."`
 	Kind      string            `json:"kind,omitempty" jsonschema:"iphone or ipad; needed when you hold both."`
 	Runtime   string            `json:"runtime,omitempty" jsonschema:"acquire: an installed iOS version such as 18.5; without it, the shared device, whatever its version. Other actions: which held device. release with neither kind nor runtime ends every lease."`
 	App       string            `json:"app,omitempty" jsonschema:"install: a .app path inside your outDir."`
