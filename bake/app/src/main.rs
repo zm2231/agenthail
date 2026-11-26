@@ -535,6 +535,7 @@ pub fn confirm_label(s: &App, id: &str, ask: Confirm) -> &'static str {
     match ask {
         Confirm::PutBack if asking => "It may already have arrived. Put back?",
         Confirm::PutBack => "Put back",
+        Confirm::Discard if asking && s.unsent.latest(id).is_some_and(|u| u.maybe_delivered) => "It may already have arrived. Dismiss?",
         Confirm::Discard if asking => "Discard this message?",
         Confirm::Discard => "Dismiss",
         Confirm::SendNew if asking => "It may already have arrived. Send again?",
@@ -584,8 +585,8 @@ pub fn send_as_new(s: &mut App, id: &str, tx: &mut Tx) {
 }
 
 pub fn dismiss_unsent(s: &mut App, id: &str) {
-    let held = unsent_held(s, id);
-    if !confirmed(s, id, Confirm::Discard, held) {
+    let needed = unsent_held(s, id) || s.unsent.latest(id).is_some_and(|u| u.maybe_delivered);
+    if !confirmed(s, id, Confirm::Discard, needed) {
         return;
     }
     if let Some(key) = s.unsent.latest(id).map(|u| u.key.clone()) {
@@ -776,16 +777,17 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &s.composer.text);
     }
-    let restored: Vec<String> = s.unsent.iter().filter(|(id, u)| s.drafts.get(id).trim() == u.text).map(|(id, _)| id.clone()).collect();
-    for id in &restored {
+    let mut restored: Vec<(String, String)> = s.unsent.iter().filter(|(id, u)| s.drafts.get(id).trim() == u.text).map(|(id, u)| (id.clone(), u.text.clone())).collect();
+    restored.dedup_by(|a, b| a.0 == b.0);
+    for (id, _) in &restored {
         s.drafts.set(id, "");
     }
     s.drafts.rekey(&s.rekeyed);
     s.unsent.rekey(&s.rekeyed);
-    let held: Vec<(String, String)> = s.unsent.iter().map(|(id, u)| (id.clone(), u.text.clone())).collect();
-    for (id, text) in held.into_iter().filter(|(id, _)| restored.iter().any(|old| feed::composer::current(&s.rekeyed, old) == id.as_str())) {
-        if s.drafts.get(&id).trim().is_empty() {
-            s.drafts.set(&id, &text);
+    for (old, text) in restored {
+        let new = feed::composer::current(&s.rekeyed, &old).to_string();
+        if s.drafts.get(&new).trim().is_empty() {
+            s.drafts.set(&new, &text);
         }
     }
     let retired: Vec<(String, String)> = s.rekeyed.keys().map(|old| (old.clone(), feed::composer::current(&s.rekeyed, old).to_string())).filter(|(old, new)| old != new).collect();
