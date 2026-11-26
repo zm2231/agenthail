@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 use time::OffsetDateTime;
@@ -267,23 +269,25 @@ struct Found {
     sessions: Vec<Pick>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Unsettled {
-    pub channel: String,
-    pub message: String,
-    pub key: String,
-}
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Unsettled(HashMap<(String, String), String>);
 
 impl Unsettled {
-    pub fn key_for(this: Option<&Unsettled>, channel: &str, message: &str) -> String {
-        match this {
-            Some(u) if u.channel == channel && u.message == message => u.key.clone(),
-            _ => request_key(),
+    pub fn key_for(&self, channel: &str, message: &str) -> String {
+        self.0.get(&(channel.to_string(), message.to_string())).cloned().unwrap_or_else(request_key)
+    }
+
+    pub fn record(&mut self, channel: &str, message: &str, key: &str, open: bool) {
+        let at = (channel.to_string(), message.to_string());
+        if open {
+            self.0.insert(at, key.to_string());
+        } else {
+            self.0.remove(&at);
         }
     }
 }
 
-pub const MAY_HAVE_REACHED: &str = "Some members may already have this message. Send it again unchanged to finish without repeating it, or edit it to send a new one.";
+pub const MAY_HAVE_REACHED: &str = "Some members may already have this message, so sending it again unchanged only reports what became of it and doesn't deliver it twice. Edit it to send it as a new message.";
 
 fn unsettled(error: RespondError) -> Failure {
     let partial = error.status == 409 && error.code == "conflict";

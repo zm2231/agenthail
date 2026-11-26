@@ -86,11 +86,16 @@ fn session_search_offers_local_sessions_and_names_them_for_the_daemon() {
 
 #[test]
 fn an_unsettled_send_is_retried_under_its_own_key_only_while_unchanged() {
-    let u = Unsettled { channel: "ship".into(), message: "hello".into(), key: "k1".into() };
-    assert_eq!(Unsettled::key_for(Some(&u), "ship", "hello"), "k1");
-    assert_ne!(Unsettled::key_for(Some(&u), "ship", "hello again"), "k1");
-    assert_ne!(Unsettled::key_for(Some(&u), "ops", "hello"), "k1");
-    assert_ne!(Unsettled::key_for(None, "ship", "hello"), Unsettled::key_for(None, "ship", "hello"));
+    let mut u = Unsettled::default();
+    assert_ne!(u.key_for("ship", "hello"), u.key_for("ship", "hello"));
+    u.record("ship", "hello", "k1", true);
+    u.record("ops", "status", "k2", true);
+    u.record("ship", "other", "k3", false);
+    assert_eq!((u.key_for("ship", "hello"), u.key_for("ops", "status")), ("k1".to_string(), "k2".to_string()), "a later send elsewhere keeps an earlier open one");
+    assert_ne!(u.key_for("ship", "hello again"), "k1");
+    assert_ne!(u.key_for("ops", "hello"), "k1");
+    u.record("ship", "hello", "k1", false);
+    assert_ne!(u.key_for("ship", "hello"), "k1");
     let (client, _rx) = daemon(replies(&[(400, r#"{"error":{"code":"invalid_request","message":"no members"}}"#)]));
     let plain = client.channel_send("ship", "hello", "k4").unwrap_err();
     assert!(!plain.uncertain && plain.message == "no members");

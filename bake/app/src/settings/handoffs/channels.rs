@@ -1,4 +1,4 @@
-use feed::handoffs::{self, Channel, Handoffs, Unsettled, session_ref};
+use feed::handoffs::{self, Channel, Handoffs, session_ref};
 use rune::{El, TextEdit, col, row};
 use rune_kit::{Button, ButtonVariant, ControlSize, TextArea};
 
@@ -32,13 +32,10 @@ fn send(s: &mut Prefs) {
         return;
     }
     let (out, open) = (s.handoffs.sent.clone(), s.handoffs.unsettled.clone());
-    let key = Unsettled::key_for(open.lock().unwrap().as_ref(), &channel, &message);
+    let key = open.lock().unwrap().key_for(&channel, &message);
     change(s, Section::Channels, format!("channel-send-{channel}"), move |c| {
         let result = c.channel_send(&channel, &message, &key);
-        *open.lock().unwrap() = match &result {
-            Err(f) if f.uncertain => Some(Unsettled { channel: channel.clone(), message: message.clone(), key }),
-            _ => None,
-        };
+        open.lock().unwrap().record(&channel, &message, &key, result.as_ref().is_err_and(|f| f.uncertain));
         *out.lock().unwrap() = Some(format!("#{channel}: {}", result?.summary()));
         Ok(())
     });
