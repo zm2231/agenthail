@@ -204,7 +204,7 @@ pub(crate) fn changes_view(s: &App, id: &str) -> El {
         .min_h(0.0)
         .px(20.0)
         .pt(10.0)
-        .pb(120.0)
+        .pb(120.0 + super::queue::reserve(s, id) + super::background::reserve(s, id))
         .child(rune_kit::diff::DiffView::new(|s: &App| &s.diff, |s: &mut App| &mut s.diff).key("diff").build(s, theme::kit()))
 }
 

@@ -4,7 +4,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::catalog::{Client, Session, enc};
+use crate::catalog::{Client, Session, enc, parse_time};
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
@@ -89,8 +89,13 @@ pub fn children(parent: &str, listed: &[Session], fetched: &[Session]) -> Vec<Se
 }
 
 pub fn in_daemon_order(children: &mut [Session], listed: &[Session]) {
-    let rank: std::collections::HashMap<&str, usize> = listed.iter().enumerate().map(|(i, x)| (x.id.as_str(), i)).collect();
-    children.sort_by_key(|x| rank.get(x.id.as_str()).copied().unwrap_or(usize::MAX));
+    let ids: HashSet<&str> = listed.iter().map(|x| x.id.as_str()).collect();
+    children.sort_by(|a, b| match (ids.contains(a.id.as_str()), ids.contains(b.id.as_str())) {
+        (true, true) => parse_time(&b.registered_at).cmp(&parse_time(&a.registered_at)).then_with(|| a.id.cmp(&b.id)),
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        (false, false) => std::cmp::Ordering::Equal,
+    });
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -299,13 +304,17 @@ mod tests {
     }
 
     #[test]
-    fn listed_children_come_first_in_list_order_and_the_rest_keep_the_page_order() {
-        let listed = vec![row(r#"{"id":"p"}"#), child("l2", "p"), child("x", "q"), child("l1", "p")];
-        let fetched = vec![child("h1", "p"), child("l1", "p"), child("h2", "p")];
+    fn listed_children_come_newest_first_and_the_rest_keep_the_page_order() {
+        let at = |mut x: Session, when: &str| {
+            x.registered_at = when.into();
+            x
+        };
+        let listed = vec![row(r#"{"id":"p"}"#), at(child("old", "p"), "2026-11-26T09:00:00Z"), at(child("new", "p"), "2026-11-26T12:00:00.5Z"), at(child("b-tie", "p"), "2026-11-26T08:00:00Z"), at(child("a-tie", "p"), "2026-11-26T08:00:00.000Z")];
+        let fetched = vec![child("h1", "p"), child("old", "p"), child("h2", "p")];
         let mut list = children("p", &listed, &fetched);
         in_daemon_order(&mut list, &listed);
         let ids: Vec<&str> = list.iter().map(|x| x.id.as_str()).collect();
-        assert_eq!(ids, ["l2", "l1", "h1", "h2"]);
+        assert_eq!(ids, ["new", "old", "a-tie", "b-tie", "h1", "h2"]);
     }
 
     #[test]

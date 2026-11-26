@@ -34,6 +34,7 @@ pub struct Crew {
     loading: HashSet<String>,
     errors: HashMap<String, String>,
     claude: HashMap<String, ClaudeSubagents>,
+    claude_errors: HashMap<String, String>,
     claude_asked: HashMap<String, ClaudeAsk>,
     claude_loading: HashSet<String>,
     rows: HashMap<String, Session>,
@@ -85,6 +86,7 @@ fn touch(s: &mut App, id: &str) {
         s.crew.errors.remove(&old);
         s.crew.loading.remove(&old);
         s.crew.claude.remove(&old);
+        s.crew.claude_errors.remove(&old);
         s.crew.claude_asked.remove(&old);
         s.crew.expanded.remove(&old);
     }
@@ -224,12 +226,15 @@ pub(crate) fn done(s: &mut App, done: Done) {
             }
             match result {
                 Ok(list) => {
+                    s.crew.claude_errors.remove(&id);
                     s.crew.claude.insert(id, list);
                 }
-                Err(_) => {
+                Err(error) => {
                     if let Some(a) = s.crew.claude_asked.get_mut(&id) {
                         a.failed = true;
                     }
+                    s.crew.claude.remove(&id);
+                    s.crew.claude_errors.insert(id, error);
                 }
             }
         }
@@ -314,7 +319,8 @@ pub(crate) fn section(s: &App, x: &Session) -> Option<El> {
     let error = s.crew.errors.get(&x.id);
     let observed = s.crew.claude.get(&x.id).map(|c| c.list(s.crew.expanded.contains(&x.id)));
     let total = observed.as_ref().map_or(0, |o| o.total);
-    if parent.is_none() && children.is_empty() && total == 0 && !loading && error.is_none() {
+    let claude_error = s.crew.claude_errors.get(&x.id);
+    if parent.is_none() && children.is_empty() && total == 0 && !loading && error.is_none() && claude_error.is_none() {
         return None;
     }
     let mut body = col().w_full().gap(2.0);
@@ -339,6 +345,9 @@ pub(crate) fn section(s: &App, x: &Session) -> Option<El> {
     if loading || error.is_some() {
         let note = error.map_or_else(|| "Loading subagents".to_string(), |e| format!("Couldn't load subagents: {e}"));
         body = body.child(text(note).font(META).color(if error.is_some() { attention() } else { faint() }).wrap().px(6.0).py(4.0));
+    }
+    if let Some(e) = claude_error {
+        body = body.child(text(format!("Couldn't read Claude's subagents: {e}")).font(META).color(attention()).wrap().px(6.0).py(4.0));
     }
     if let Some(o) = observed.filter(|o| o.total > 0) {
         body = body.child(text(o.summary()).font(META).color(faint()).px(6.0).pt(if children.is_empty() && parent.is_none() { 0.0 } else { 8.0 }).pb(2.0));
