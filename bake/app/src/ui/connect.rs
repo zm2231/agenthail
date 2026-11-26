@@ -1,5 +1,5 @@
 use std::sync::mpsc::{RecvTimeoutError, Sender, channel};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use feed::catalog::Client;
 use feed::connect::{self, Problem};
@@ -12,6 +12,7 @@ use crate::{App, Bg};
 
 const EVERY: Duration = Duration::from_secs(2);
 const SETTLE: Duration = Duration::from_secs(2);
+const RECHECK: Duration = Duration::from_secs(30);
 
 #[derive(Default)]
 pub struct Link {
@@ -32,21 +33,23 @@ fn attach(s: &mut App, client: Client) {
     let (poke, poked) = channel();
     s.link.poke = Some(poke);
     std::thread::spawn(move || {
-        let mut up = false;
+        let mut checked: Option<Instant> = None;
         loop {
-            let probed = if up { Ok(()) } else { c.probe().map(|_| ()) };
+            let probed = if checked.is_some_and(|at| at.elapsed() < RECHECK) { Ok(()) } else { c.probe().map(|_| checked = Some(Instant::now())) };
             let message = match probed {
-                Err(problem) => Bg::Down(problem),
+                Err(problem) => {
+                    checked = None;
+                    Bg::Down(problem)
+                }
                 Ok(()) => match c.snapshot() {
                     Ok(snap) => {
-                        up = true;
                         if tx.send(Bg::SendSettings(snap.busy_delivery, snap.rekeyed, snap.queue)).is_err() || tx.send(Bg::DecisionsRev(snap.decisions_rev)).is_err() {
                             return;
                         }
                         Bg::Snapshot(snap.updated_at, snap.sessions)
                     }
                     Err(error) => {
-                        up = false;
+                        checked = None;
                         Bg::Down(c.probe().err().unwrap_or_else(|| Problem::Failed(error.to_string())))
                     }
                 },
@@ -76,10 +79,15 @@ pub fn down(s: &mut App, problem: Problem) {
 }
 
 pub fn up(s: &mut App) {
-    s.link.problem = None;
+    if !matches!(s.link.problem, Some(Problem::StartFailed(_))) {
+        s.link.problem = None;
+    }
 }
 
 pub fn retry(s: &mut App) {
+    if matches!(s.link.problem, Some(Problem::StartFailed(_))) {
+        s.link.problem = None;
+    }
     if s.client.is_none() {
         return start(s);
     }
@@ -201,16 +209,7 @@ mod tests {
         rt.frame(1.0 / 60.0);
     }
 
-    #[test]
-    fn without_a_key_or_a_daemon_the_window_says_what_is_wrong_and_offers_to_start() {
-        let home = std::env::temp_dir().join(format!("agenthail-connect-{}", std::process::id()));
-        std::fs::create_dir_all(&home).unwrap();
-        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
-        unsafe {
-            std::env::set_var("HOME", &home);
-            std::env::set_var("AGENTHAIL_API_URL", format!("http://{closed}"));
-            std::env::remove_var("AGENTHAIL_API_TOKEN");
-        }
+    fn runtime() -> Runtime<App> {
         let spec = AppSpec::<App> {
             poll: Some(crate::poll),
             on_key: Some(crate::on_key),
@@ -218,19 +217,73 @@ mod tests {
             families: rune_theme_opencode::FAMILIES,
             ..AppSpec::new("Agenthail", (1440.0, 900.0), crate::init, crate::ui::view)
         };
-        let mut rt = rune::App::new(spec).headless_runtime((1440.0, 900.0), Env { system_dark: true, scale: 1.0 });
+        rune::App::new(spec).headless_runtime((1440.0, 900.0), Env { system_dark: true, scale: 1.0 })
+    }
+
+    fn in_child(test: &str, url: &str, key: Option<&str>) -> Option<std::path::PathBuf> {
+        if let Ok(home) = std::env::var("AGENTHAIL_CONNECT_HOME") {
+            return Some(home.into());
+        }
+        let home = std::env::temp_dir().join(format!("agenthail-connect-{}-{test}", std::process::id()));
+        std::fs::create_dir_all(home.join(".agenthail")).unwrap();
+        if let Some(key) = key {
+            std::fs::write(home.join(".agenthail/dashboard.token"), key).unwrap();
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([&format!("ui::connect::tests::{test}"), "--exact", "--nocapture", "--test-threads=1"])
+            .env("AGENTHAIL_CONNECT_HOME", &home)
+            .env("HOME", &home)
+            .env("AGENTHAIL_API_URL", url)
+            .env_remove("AGENTHAIL_API_TOKEN")
+            .env_remove("AGENTHAIL_FIXTURES")
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&home);
+        let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success() && said.contains("1 passed"), "{said}");
+        None
+    }
+
+    #[test]
+    fn without_a_key_or_a_daemon_the_window_says_what_is_wrong_and_offers_to_start() {
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
+        let url = std::env::var("AGENTHAIL_API_URL").ok().filter(|_| std::env::var("AGENTHAIL_CONNECT_HOME").is_ok()).unwrap_or(format!("http://{closed}"));
+        let Some(home) = in_child("without_a_key_or_a_daemon_the_window_says_what_is_wrong_and_offers_to_start", &url, None) else { return };
+        let mut rt = runtime();
         let text = settle(&mut rt, "no Agenthail key");
         assert!(text.contains("Agenthail isn't running"), "{text}");
         assert!(text.contains("no Agenthail key yet"), "{text}");
         assert!(rt.find("connect-start").is_some());
         assert!(rt.find("connect-retry").is_some());
 
-        std::fs::create_dir_all(home.join(".agenthail")).unwrap();
         std::fs::write(home.join(".agenthail/dashboard.token"), "t\n").unwrap();
         press(&mut rt, "connect-retry");
         let text = settle(&mut rt, "Nothing is answering");
-        assert!(text.contains(&format!("Nothing is answering at http://{closed}")), "{text}");
+        assert!(text.contains(&format!("Nothing is answering at {url}")), "{text}");
         assert!(rt.find("connect-start").is_some());
-        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_daemon_on_another_protocol_asks_for_a_restart() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut stream = stream;
+                let _ = stream.read(&mut [0; 4096]);
+                let body = r#"{"protocol":5,"minimumProtocol":5,"maximumProtocol":5}"#;
+                let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            }
+        });
+        let url = std::env::var("AGENTHAIL_API_URL").ok().filter(|_| std::env::var("AGENTHAIL_CONNECT_HOME").is_ok()).unwrap_or(url);
+        if in_child("a_daemon_on_another_protocol_asks_for_a_restart", &url, Some("t")).is_none() {
+            return;
+        }
+        let mut rt = runtime();
+        let text = settle(&mut rt, "protocol 5");
+        assert!(text.contains("Agenthail needs an update"), "{text}");
+        assert!(text.contains("speaks protocol 5; this app needs protocol 1"), "{text}");
+        assert!(rt.find("connect-start").is_some());
     }
 }

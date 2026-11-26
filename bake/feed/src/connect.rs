@@ -63,7 +63,11 @@ impl Problem {
 }
 
 pub fn open() -> Result<Client, Problem> {
-    Client::from_env().map_err(|_| Problem::NoToken)
+    Client::from_env().map_err(|_| Problem::NoToken).and_then(keyed)
+}
+
+fn keyed(client: Client) -> Result<Client, Problem> {
+    if client.token.trim().is_empty() { Err(Problem::NoToken) } else { Ok(client) }
 }
 
 pub fn check(reply: &Value) -> Result<Build, Problem> {
@@ -89,8 +93,8 @@ impl Client {
             Err(ureq::Error::Status(401 | 403, _)) => Err(Problem::Refused),
             Err(ureq::Error::Status(code, _)) => Err(Problem::Failed(format!("it answered with status {code}"))),
             Err(ureq::Error::Transport(t)) => Err(match t.kind() {
+                ureq::ErrorKind::ConnectionFailed | ureq::ErrorKind::Io if timed_out(&t) => Problem::Slow,
                 ureq::ErrorKind::ConnectionFailed => Problem::NotRunning(client.base.clone()),
-                ureq::ErrorKind::Io if timed_out(&t) => Problem::Slow,
                 _ => Problem::Failed(t.to_string()),
             }),
         }
@@ -186,6 +190,12 @@ mod tests {
         let problem = client.probe().unwrap_err();
         assert_eq!(problem, Problem::Incompatible(4));
         assert_eq!(problem.start(), Some("Restart Agenthail"));
+    }
+
+    #[test]
+    fn an_empty_key_is_no_key() {
+        assert_eq!(keyed(Client::new("http://127.0.0.1:1", " \n")).err(), Some(Problem::NoToken));
+        assert!(keyed(Client::new("http://127.0.0.1:1", "t")).is_ok());
     }
 
     #[test]
