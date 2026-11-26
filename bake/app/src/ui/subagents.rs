@@ -49,7 +49,7 @@ pub enum Done {
 }
 
 pub(crate) fn fetched<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
-    s.crew.pages.values().flatten().find(|x| x.id == id).or_else(|| s.crew.rows.get(id))
+    s.crew.rows.get(id).or_else(|| s.crew.pages.values().flatten().find(|x| x.id == id))
 }
 
 fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'static) {
@@ -115,8 +115,7 @@ pub(crate) fn refresh(s: &mut App, id: &str) {
     }
     touch(s, id);
     page(s, id);
-    let unresolved_subagent = session(s, id).is_none() && known(s, id).and_then(crew::parent_of).is_some();
-    if (s.crew.rows.contains_key(id) || unresolved_subagent) && outside(s, id) {
+    if !listed(s, id) && (s.crew.rows.contains_key(id) || known(s, id).and_then(crew::parent_of).is_some()) {
         read_row(s, id);
     }
     if let Some(parent) = parent {
