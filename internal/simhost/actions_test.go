@@ -126,3 +126,48 @@ func TestPushLocationAndLogs(t *testing.T) {
 		t.Fatalf("logs ran %+v", sim.ran("xcrun simctl spawn"))
 	}
 }
+
+const describeScalarsJSON = `[{"AXFrame":"{{0, 0}, {402, 874}}","AXUniqueId":null,"frame":{"y":0,"x":0,"width":402,"height":874},"role_description":"application","AXLabel":"Rune","content_required":false,"type":"Application","title":null,"help":null,"custom_actions":[],"AXValue":null,"enabled":true,"role":"AXApplication","subrole":null,"pid":4242,"children":[
+ {"AXFrame":"{{16, 120}, {370, 44}}","AXUniqueId":null,"frame":{"y":120,"x":16,"width":370,"height":44},"role_description":"text","AXLabel":"Name","content_required":false,"type":"StaticText","title":null,"help":null,"custom_actions":[],"AXValue":"Ada","enabled":true,"role":"AXStaticText","subrole":null,"children":[]},
+ {"AXFrame":"{{16, 164}, {370, 44}}","AXUniqueId":null,"frame":{"y":164,"x":16,"width":370,"height":44},"role_description":"text","AXLabel":"Cards","content_required":false,"type":"StaticText","title":null,"help":null,"custom_actions":[],"AXValue":12,"enabled":true,"role":"AXStaticText","subrole":null,"children":[]},
+ {"AXFrame":"{{16, 208}, {370, 44}}","AXUniqueId":"volume","frame":{"y":208,"x":16,"width":370,"height":44},"role_description":"slider","AXLabel":"Volume","content_required":false,"type":"Slider","title":null,"help":null,"custom_actions":[],"AXValue":0.75,"enabled":true,"role":"AXSlider","subrole":null,"children":[]},
+ {"AXFrame":"{{16, 252}, {370, 44}}","AXUniqueId":null,"frame":{"y":252,"x":16,"width":370,"height":44},"role_description":"switch","AXLabel":"Sync","content_required":false,"type":"Switch","title":null,"help":null,"custom_actions":[],"AXValue":true,"enabled":0,"role":"AXCheckBox","subrole":"AXSwitch","children":[]},
+ {"AXFrame":"{{0, 790}, {100, 49}}","AXUniqueId":null,"frame":{"y":790,"x":0,"width":100,"height":49},"role_description":"button","AXLabel":"Inbox","content_required":false,"type":"Button","title":null,"help":null,"custom_actions":[],"AXValue":false,"enabled":true,"role":"AXButton","subrole":null,"children":[]}]}]`
+
+func TestDescribeRendersEveryScalarValueAsText(t *testing.T) {
+	sim := newFakeSim()
+	sim.devices["U1"] = "Agenthail iPhone"
+	sim.describe = describeScalarsJSON
+	h, _ := newTestHost(t, sim)
+	mustCall(t, h, "s1", Request{Action: "acquire", Kind: "iphone"})
+	out := mustCall(t, h, "s1", Request{Action: "describe"})
+	want := "- [ref=e1] Application \"Rune\" @(0,0 402x874)\n" +
+		"  - [ref=e2] StaticText \"Name\" value=\"Ada\" @(16,120 370x44)\n" +
+		"  - [ref=e3] StaticText \"Cards\" value=\"12\" @(16,164 370x44)\n" +
+		"  - [ref=e4] Slider \"Volume\" id=\"volume\" value=\"0.75\" @(16,208 370x44)\n" +
+		"  - [ref=e5] Switch \"Sync\" value=\"true\" disabled @(16,252 370x44)\n" +
+		"  - [ref=e6] Button \"Inbox\" value=\"false\" @(0,790 100x49)\n"
+	if tree := out["tree"].(string); tree != want {
+		t.Fatalf("tree =\n%s\nwant\n%s", tree, want)
+	}
+}
+
+const describeActionsJSON = `[{"AXFrame":"{{0, 0}, {402, 874}}","AXUniqueId":null,"frame":{"y":0,"x":0,"width":402,"height":874},"role_description":"application","AXLabel":"Home screen","content_required":false,"type":"Application","title":null,"help":null,"custom_actions":[],"AXValue":null,"enabled":true,"role":"AXApplication","subrole":null,"pid":88,"traits":[],"children":[
+ {"AXFrame":"{{0, 60}, {402, 700}}","AXUniqueId":null,"frame":{"y":60,"x":0,"width":402,"height":700},"role_description":"group","AXLabel":null,"content_required":false,"type":"Group","title":null,"help":null,"custom_actions":null,"AXValue":null,"enabled":true,"role":"AXGroup","subrole":null,"traits":["Header"],"children":[
+  {"AXFrame":"{{27, 80}, {64, 64}}","AXUniqueId":"Messages","frame":{"y":80,"x":27,"width":64,"height":64},"role_description":"button","AXLabel":"Messages","content_required":false,"type":"Button","title":null,"help":"Double tap to open","custom_actions":["Edit mode","Today","App Library"],"AXValue":null,"enabled":true,"role":"AXButton","subrole":null,"traits":["Button","Selected"],"children":[]},
+  {"AXFrame":"{{27, 180}, {64, 64}}","AXUniqueId":null,"frame":{"y":180,"x":27,"width":64,"height":64},"role_description":"button","AXLabel":"","content_required":false,"type":"Button","title":null,"help":null,"custom_actions":["Remove App"," ",""],"AXValue":null,"enabled":true,"role":"AXButton","subrole":null,"traits":["Button"],"children":[]}]}]}]`
+
+func TestDescribeShowsTraitsAndVoiceOverActions(t *testing.T) {
+	sim := newFakeSim()
+	sim.devices["U1"] = "Agenthail iPhone"
+	sim.describe = describeActionsJSON
+	h, _ := newTestHost(t, sim)
+	mustCall(t, h, "s1", Request{Action: "acquire", Kind: "iphone"})
+	out := mustCall(t, h, "s1", Request{Action: "describe"})
+	want := "- [ref=e1] Application \"Home screen\" @(0,0 402x874)\n" +
+		"  - [ref=e2] Button \"Messages\" id=\"Messages\" traits=Button,Selected actions=[\"Edit mode\",\"Today\",\"App Library\"] @(27,80 64x64)\n" +
+		"  - [ref=e3] Button traits=Button actions=[\"Remove App\"] @(27,180 64x64)\n"
+	if tree := out["tree"].(string); tree != want {
+		t.Fatalf("tree =\n%s\nwant\n%s", tree, want)
+	}
+}
