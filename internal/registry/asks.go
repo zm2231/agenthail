@@ -67,29 +67,33 @@ type AskAnswer struct {
 }
 
 type Ask struct {
-	ID          string
-	SessionID   string
-	Origin      string
-	Title       string
-	Questions   []AskQuestion
-	RoutedTo    string
-	RoutedAt    time.Time
-	Route       []AskHop
-	State       string
-	Answer      AskAnswer
-	AnsweredBy  string
-	AnsweredVia string
-	AnsweredAt  time.Time
-	AppliedAt   time.Time
-	ApplyStatus string
-	ApplyID     string
-	CreatedAt   time.Time
-	Ref         string
-	WaitKind    surface.WaitingKind
-	Answerable  bool
-	AnnouncedAt time.Time
-	Deadline    time.Time
-	Open        []string
+	ID             string
+	SessionID      string
+	Origin         string
+	Title          string
+	Questions      []AskQuestion
+	RoutedTo       string
+	RoutedAt       time.Time
+	Route          []AskHop
+	State          string
+	Answer         AskAnswer
+	AnsweredBy     string
+	AnsweredVia    string
+	AnsweredAt     time.Time
+	AppliedAt      time.Time
+	ApplyStatus    string
+	ApplyID        string
+	CreatedAt      time.Time
+	Ref            string
+	WaitKind       surface.WaitingKind
+	Answerable     bool
+	AnnouncedAt    time.Time
+	Deadline       time.Time
+	Open           []string
+	WorkItem       string
+	LedgerKey      string
+	LedgerQuestion string
+	LedgerResolved time.Time
 }
 
 func newAskID() (string, error) {
@@ -116,8 +120,8 @@ func (r *Registry) RaiseAsk(ask Ask, at time.Time) (Ask, error) {
 	if err != nil {
 		return Ask{}, err
 	}
-	_, err = r.db.Exec(`INSERT INTO asks(id,session_id,origin,title,questions_json,routed_to,routed_at_ms,route_json,state,created_at_ms,answerable) VALUES(?,?,?,?,?,?,?,?,?,?,1)`,
-		ask.ID, ask.SessionID, ask.Origin, ask.Title, string(questions), ask.RoutedTo, at.UnixMilli(), string(route), AskOpen, at.UnixMilli())
+	_, err = r.db.Exec(`INSERT INTO asks(id,session_id,origin,title,questions_json,routed_to,routed_at_ms,route_json,state,created_at_ms,answerable,work_item,ledger_key) VALUES(?,?,?,?,?,?,?,?,?,?,1,?,?)`,
+		ask.ID, ask.SessionID, ask.Origin, ask.Title, string(questions), ask.RoutedTo, at.UnixMilli(), string(route), AskOpen, at.UnixMilli(), ask.WorkItem, ask.LedgerKey)
 	if err != nil {
 		return Ask{}, err
 	}
@@ -134,6 +138,25 @@ func (r *Registry) Ask(id string) (Ask, bool, error) {
 
 func (r *Registry) OpenAsks() ([]Ask, error) {
 	return queryAsks(context.Background(), r.read, `WHERE state=? ORDER BY created_at_ms, id`, AskOpen)
+}
+
+func (r *Registry) PendingItemQuestions() ([]Ask, error) {
+	return queryAsks(context.Background(), r.read, `WHERE work_item<>'' AND ledger_resolved_at_ms=0 AND (ledger_question='' OR state<>?) ORDER BY created_at_ms, id`, AskOpen)
+}
+
+func (r *Registry) RecordItemQuestion(id, questionID string) error {
+	_, err := r.db.Exec(`UPDATE asks SET ledger_question=? WHERE id=? AND ledger_question=''`, questionID, id)
+	return err
+}
+
+func (r *Registry) AbandonItemQuestion(id string, at time.Time) error {
+	_, err := r.db.Exec(`UPDATE asks SET ledger_resolved_at_ms=? WHERE id=? AND ledger_question='' AND ledger_resolved_at_ms=0`, at.UnixMilli(), id)
+	return err
+}
+
+func (r *Registry) RecordItemQuestionResolved(id string, at time.Time) error {
+	_, err := r.db.Exec(`UPDATE asks SET ledger_resolved_at_ms=? WHERE id=? AND state<>? AND ledger_question<>'' AND ledger_resolved_at_ms=0`, at.UnixMilli(), id, AskOpen)
+	return err
 }
 
 func (r *Registry) SessionAsks(sessionID string) ([]Ask, error) {
@@ -264,7 +287,7 @@ type askQuerier interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-const askColumns = `id,session_id,origin,title,questions_json,routed_to,routed_at_ms,route_json,state,answer_json,answered_by,answered_via,answered_at_ms,applied_at_ms,apply_status,apply_id,created_at_ms,ref,wait_kind,answerable,announced_at_ms,deadline_ms`
+const askColumns = `id,session_id,origin,title,questions_json,routed_to,routed_at_ms,route_json,state,answer_json,answered_by,answered_via,answered_at_ms,applied_at_ms,apply_status,apply_id,created_at_ms,ref,wait_kind,answerable,announced_at_ms,deadline_ms,work_item,ledger_key,ledger_question,ledger_resolved_at_ms`
 
 func queryAsks(ctx context.Context, q askQuerier, where string, args ...any) ([]Ask, error) {
 	rows, err := q.QueryContext(ctx, `SELECT `+askColumns+` FROM asks `+where, args...)
@@ -276,9 +299,9 @@ func queryAsks(ctx context.Context, q askQuerier, where string, args ...any) ([]
 	for rows.Next() {
 		var ask Ask
 		var questions, route, answer string
-		var routed, answered, applied, created, announced, deadline int64
+		var routed, answered, applied, created, announced, deadline, resolved int64
 		var kind string
-		if err := rows.Scan(&ask.ID, &ask.SessionID, &ask.Origin, &ask.Title, &questions, &ask.RoutedTo, &routed, &route, &ask.State, &answer, &ask.AnsweredBy, &ask.AnsweredVia, &answered, &applied, &ask.ApplyStatus, &ask.ApplyID, &created, &ask.Ref, &kind, &ask.Answerable, &announced, &deadline); err != nil {
+		if err := rows.Scan(&ask.ID, &ask.SessionID, &ask.Origin, &ask.Title, &questions, &ask.RoutedTo, &routed, &route, &ask.State, &answer, &ask.AnsweredBy, &ask.AnsweredVia, &answered, &applied, &ask.ApplyStatus, &ask.ApplyID, &created, &ask.Ref, &kind, &ask.Answerable, &announced, &deadline, &ask.WorkItem, &ask.LedgerKey, &ask.LedgerQuestion, &resolved); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(questions), &ask.Questions); err != nil {
@@ -306,6 +329,9 @@ func queryAsks(ctx context.Context, q askQuerier, where string, args ...any) ([]
 			ask.Deadline = time.UnixMilli(deadline).UTC()
 		}
 		ask.WaitKind = surface.WaitingKind(kind)
+		if resolved > 0 {
+			ask.LedgerResolved = time.UnixMilli(resolved).UTC()
+		}
 		out = append(out, ask)
 	}
 	return out, rows.Err()

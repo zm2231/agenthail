@@ -30,7 +30,7 @@ func TestANotificationWithdrawnWhileTheDaemonStopsLeavesTheDevicesWhenItStartsAg
 
 	before := &withdrawals{}
 	first, stop := runDaemonWith(t, store, func(d *Daemon) { d.withdrawDesktop = before.record })
-	ask, err := first.daemon.raiseAsk(session, input)
+	ask, _, err := first.daemon.raiseAsk(session, input)
 	if err != nil {
 		t.Fatal(err)
 	}

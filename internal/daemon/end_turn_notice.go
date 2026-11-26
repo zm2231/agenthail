@@ -110,13 +110,15 @@ type dashboardAsk struct {
 	AnsweredAt time.Time `json:"answeredAt,omitzero"`
 	Deadline   time.Time `json:"deadline,omitzero"`
 	Open       []string  `json:"open,omitempty"`
+	WorkItem   string    `json:"workItem,omitempty"`
+	LedgerKey  string    `json:"ledgerKey,omitempty"`
 }
 
 func askRow(ask *registry.Ask) *dashboardAsk {
 	if ask == nil {
 		return nil
 	}
-	return &dashboardAsk{ID: ask.ID, Origin: ask.Origin, Title: ask.Title, RoutedTo: ask.RoutedTo, AskedAt: ask.CreatedAt, AnsweredAt: ask.AnsweredAt, Deadline: ask.Deadline, Open: ask.Open}
+	return &dashboardAsk{ID: ask.ID, Origin: ask.Origin, Title: ask.Title, RoutedTo: ask.RoutedTo, AskedAt: ask.CreatedAt, AnsweredAt: ask.AnsweredAt, Deadline: ask.Deadline, Open: ask.Open, WorkItem: ask.WorkItem, LedgerKey: ask.LedgerKey}
 }
 
 func (ask *dashboardAsk) asksPerson() bool {

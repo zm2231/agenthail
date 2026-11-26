@@ -126,6 +126,12 @@ func buildDecisions(sources decisionSources) decisionsPage {
 	}
 	for _, row := range asking {
 		item := decisionItem{Key: answerKey(row), SessionID: row.ID, ProjectID: projectIDOf(row), Kind: row.Attention.Kind, Reason: row.Attention.Reason, Since: decisionSince(row), HoldsUp: sources.queued[row.ID]}
+		if row.Attention.Kind == AttentionAsk && row.Ask != nil && row.Ask.WorkItem != "" {
+			item.WorkItem, item.LedgerKey = row.Ask.WorkItem, row.Ask.LedgerKey
+			if sources.workTitle != nil {
+				item.WorkTitle = sources.workTitle(item.LedgerKey, item.WorkItem)
+			}
+		}
 		answer := read[row.ID]
 		switch {
 		case answer.err != nil:

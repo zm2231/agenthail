@@ -11,7 +11,7 @@ import (
 )
 
 const askUsage = `usage:
-  agenthail ask <title> [--question <text>] --option <label>[: <what it does>]... [--recommend <n>] [--link <title>=<url>] [--json]
+  agenthail ask <title> [--question <text>] --option <label>[: <what it does>]... [--recommend <n>] [--link <title>=<url>] [--item <work item>] [--json]
   agenthail ask list [--json]
   agenthail ask show <ask-id> [--json]
   agenthail ask answer <ask-id> <answer>
@@ -43,6 +43,8 @@ type askListed struct {
 	RoutedTo   string           `json:"routedTo"`
 	State      string           `json:"state"`
 	AnsweredBy string           `json:"answeredBy"`
+	WorkItem   string           `json:"workItem,omitempty"`
+	Note       string           `json:"note,omitempty"`
 }
 
 type askQuestionOut struct {
@@ -166,6 +168,14 @@ func (a *App) cmdAsk(args []string) error {
 		}
 		return a.changeAsk(map[string]any{"op": args[0], "askId": args[1]}, true, map[string]string{"escalate": "escalated ", "withdraw": "withdrew "}[args[0]]+args[1])
 	}
+	item := ""
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--item" {
+			item = strings.TrimSpace(args[i+1])
+			args = append(args[:i:i], args[i+2:]...)
+			break
+		}
+	}
 	title, questions, jsonOut, err := parseAsk(args)
 	if err != nil {
 		return err
@@ -174,7 +184,7 @@ func (a *App) cmdAsk(args []string) error {
 	if caller == nil {
 		return errors.New("agenthail ask raises an ask for the agent session it runs in, and none is set here")
 	}
-	body, err := a.askCall(http.MethodPost, nil, map[string]any{"op": "raise", "sessionId": caller.ID, "title": title, "questions": questions})
+	body, err := a.askCall(http.MethodPost, nil, map[string]any{"op": "raise", "sessionId": caller.ID, "title": title, "questions": questions, "item": item})
 	if err != nil {
 		return err
 	}
@@ -185,7 +195,14 @@ func (a *App) cmdAsk(args []string) error {
 	if err := json.Unmarshal(body, &raised); err != nil {
 		return err
 	}
-	fmt.Printf("%s is open and goes to %s. End your turn; the answer arrives as a message.\n", raised.ID, raised.RoutedTo)
+	if raised.WorkItem != "" {
+		fmt.Printf("%s is open on %s and goes to %s. End your turn; the answer arrives as a message.\n", raised.ID, raised.WorkItem, raised.RoutedTo)
+	} else {
+		fmt.Printf("%s is open and goes to %s. End your turn; the answer arrives as a message.\n", raised.ID, raised.RoutedTo)
+	}
+	if raised.Note != "" {
+		fmt.Println(raised.Note)
+	}
 	return nil
 }
 
@@ -256,7 +273,11 @@ func (a *App) printAsks(query url.Values, jsonOut bool) error {
 		return nil
 	}
 	for _, ask := range listed.Asks {
-		fmt.Printf("%s  %s  from %s to %s: %s\n", ask.ID, ask.State, ask.SessionID, ask.RoutedTo, ask.Title)
+		on := ""
+		if ask.WorkItem != "" {
+			on = " on " + ask.WorkItem
+		}
+		fmt.Printf("%s  %s  from %s%s to %s: %s\n", ask.ID, ask.State, ask.SessionID, on, ask.RoutedTo, ask.Title)
 		for i, question := range ask.Questions {
 			labels := make([]string, len(question.Options))
 			for j, option := range question.Options {

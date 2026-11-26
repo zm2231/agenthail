@@ -102,6 +102,7 @@ func (d *Daemon) registerLedgerRoutes(mux *http.ServeMux, dashboard *dashboardSe
 	mux.HandleFunc("/api/v1/ledger/attach", d.apiV1Guard(dashboard, "control", d.ledgerWriteRoute(d.apiLedgerAttachHandler)))
 	mux.HandleFunc("/api/v1/ledger/question", d.apiV1Guard(dashboard, "control", d.ledgerWriteRoute(d.apiLedgerQuestionHandler)))
 	mux.HandleFunc("/api/v1/ledger/work", d.apiV1Guard(dashboard, "control", d.ledgerWriteRoute(d.apiLedgerWorkHandler)))
+	mux.HandleFunc(itemQuestionPath, d.apiV1Guard(dashboard, "control", d.apiLedgerItemQuestionHandler))
 	mux.HandleFunc("/api/v1/ledger/phases", d.apiV1Guard(dashboard, "control", d.ledgerWriteRoute(d.apiLedgerPhasesHandler)))
 	mux.HandleFunc("/api/v1/ledger/import", d.apiV1Guard(dashboard, "control", d.ledgerWriteRoute(d.apiLedgerImportHandler)))
 	mux.HandleFunc("/api/v1/ledger/clause", d.apiV1Guard(dashboard, "control", d.ledgerWriteRoute(d.apiLedgerClauseHandler)))

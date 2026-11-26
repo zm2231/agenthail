@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -78,4 +79,48 @@ func TestASessionRaisesAnAskWithTheCommandAndThePersonAnswersIt(t *testing.T) {
 		turns := host.Turns(t, id)
 		return len(turns) == 2 && strings.Contains(turns[1].Text, "Roll back? Keep it")
 	})
+}
+
+func TestAnAskWithItemIsOnTheWorkItemItNames(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	app, r, host, _, id := hostedClaudeApp(t)
+	if _, err := r.AddProject(registry.ProjectRecord{ID: "p-asks", WorkspaceRoot: host.Cwd, Title: "asks", Added: true}, ""); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(host.Cwd)
+	startTestDaemon(t, app, r, host.Home)
+	t.Setenv("AGENTHAIL_SESSION_ID", id)
+	var held []string
+	for _, text := range []string{"Import the March export", "Rename the export columns"} {
+		added, err := captureStdout(t, func() error { return app.Run([]string{"ledger", "work", "add", text, "--json"}) })
+		var result struct {
+			Item struct{ ID string } `json:"item"`
+		}
+		if err != nil || json.Unmarshal([]byte(added), &result) != nil || result.Item.ID == "" {
+			t.Fatalf("add = %q, %v", added, err)
+		}
+		if err := app.Run([]string{"ledger", "work", "claim", result.Item.ID}); err != nil {
+			t.Fatal(err)
+		}
+		held = append(held, result.Item.ID)
+	}
+
+	output, err := captureStdout(t, func() error {
+		return app.Run([]string{"ask", "Rename to snake_case?", "--option", "Yes", "--option", "No", "--item", held[1]})
+	})
+	if err != nil || !strings.Contains(output, "is open on "+held[1]) {
+		t.Fatalf("ask --item = %q, %v", output, err)
+	}
+	open, err := r.OpenAsks()
+	if err != nil || len(open) != 1 || open[0].WorkItem != held[1] {
+		t.Fatalf("open asks %+v err %v", open, err)
+	}
+	if err := app.Run([]string{"ask", "Drop it?", "--option", "Yes", "--option", "No", "--item", "nowhere-W9"}); err == nil || !strings.Contains(err.Error(), "not held by this session") {
+		t.Fatalf("an ask on an item the session does not hold: %v", err)
+	}
+	t.Setenv("AGENTHAIL_SESSION_ID", "")
+	listed, err := captureStdout(t, func() error { return app.Run([]string{"ask", "list"}) })
+	if err != nil || !strings.Contains(listed, " on "+held[1]+" to person: Rename to snake_case?") {
+		t.Fatalf("list = %q, %v", listed, err)
+	}
 }

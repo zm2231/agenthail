@@ -379,7 +379,7 @@ Each project's view in the dashboard has a Work section: the project's ledger as
 
 | Lane | When |
 |------|------|
-| Waiting on you | its holder has an open ask routed to the person |
+| Waiting on you | an ask about the item is open with the person, or its holder has an open ask to the person about no item in particular |
 | CI failing | a PR the item's log names is open and its checks fail |
 | Waiting on CI | such a PR is open and its checks are still running |
 | In review | the item is in review |
