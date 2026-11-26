@@ -285,12 +285,12 @@ pub fn edit(item: &Item, text: &str, token: &Token) -> (Range<usize>, String, us
     } else {
         format!("{insertion} ")
     };
-    let past = match next {
-        _ if open => 0,
-        Some(c) if c.is_whitespace() => c.len_utf8(),
-        _ => 1,
+    let caret = match next {
+        Some(c) if spaced && trailing => token.range.start + replacement.len() + c.len_utf8(),
+        _ if open => token.range.start + insertion.len(),
+        Some(c) if spaced => token.range.start + insertion.len() + c.len_utf8(),
+        _ => token.range.start + insertion.len() + 1,
     };
-    let caret = token.range.start + insertion.len() + past;
     (token.range.clone(), replacement, caret)
 }
 
@@ -401,6 +401,10 @@ impl History {
         }
         self.position = Some(p - 1);
         self.entries.get(p - 1).cloned()
+    }
+
+    pub fn current(&self) -> Option<&str> {
+        self.entries.get(self.position?).map(String::as_str)
     }
 
     pub fn stop(&mut self) {
@@ -527,8 +531,8 @@ impl Client {
         })
     }
 
-    pub fn goal_set(&self, session: &str, goal: &str) -> Result<(), RespondError> {
-        self.action("goal-set", json!({"sessionId": session, "message": goal})).map(drop)
+    pub fn goal_set(&self, session: &str, goal: &str) -> Result<crate::composer::Delivered, RespondError> {
+        Ok(crate::composer::Delivered::read(&self.action("goal-set", json!({"sessionId": session, "message": goal}))?))
     }
 }
 
@@ -639,6 +643,7 @@ mod tests {
         assert_eq!(apply(&item("@src/"), "@srmain", &inside), ("@src/ main".into(), 5));
         assert_eq!(apply(&item("@scout"), "@sc and", &Token::at("@sc and", 3).unwrap()), ("@scout and".into(), 7));
         assert_eq!(apply(&item("@scout"), "@sc\u{a0}and", &Token::at("@sc\u{a0}and", 3).unwrap()), ("@scout\u{a0}and".into(), 8), "past a wide space");
+        assert_eq!(apply(&item("/steer "), "/st\u{a0}now", &Token::at("/st\u{a0}now", 3).unwrap()), ("/steer\u{a0}now".into(), 8), "a trailing space gives way to a wide one");
         assert!(completes(&item("/compact"), "/compact", &tok("/compact").unwrap()));
         assert!(completes(&item("/steer "), "/steer", &tok("/steer").unwrap()));
         assert!(!completes(&item("/compact"), "/com", &t));
@@ -754,7 +759,7 @@ mod tests {
         assert_eq!(seen.recv().unwrap().1, json!({"action": "session-fork", "sessionId": "h::s1", "fork": {"beforeTurnId": "t2"}}));
         assert_eq!(client.fork("s1", None, "k2").unwrap(), "other");
         assert_eq!(seen.recv().unwrap().1, json!({"action": "session-fork", "sessionId": "s1"}));
-        client.goal_set("h::s1", "Ship the importer").unwrap();
+        assert_eq!(client.goal_set("h::s1", "Ship the importer").unwrap(), crate::composer::Delivered::Sent);
         assert_eq!(seen.recv().unwrap().1, json!({"action": "goal-set", "sessionId": "h::s1", "message": "Ship the importer"}));
     }
 }
