@@ -747,7 +747,7 @@ mod tests {
     fn a_launcher_that_answers_without_a_session_was_submitted() {
         let reply = Ok(json!({"ok": true, "status": "pending", "accepted": true, "launcher": "tmux", "warning": "focus it yourself"}));
         assert_eq!(outcome(reply, &claude()), Outcome::Submitted("Submitted to tmux. It appears in the sidebar once it starts.\nfocus it yourself".into()));
-        let unsent = Err(RespondError { message: "connection refused".into(), code: String::new(), maybe_delivered: false, reply: Value::Null, answered: false });
+        let unsent = Err(RespondError { message: "connection refused".into(), code: String::new(), maybe_delivered: false, reply: Value::Null, answered: false, status: 0 });
         assert_eq!(outcome(unsent, &claude()), Outcome::Failed("connection refused".into()));
     }
 }

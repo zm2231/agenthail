@@ -47,14 +47,12 @@ pub fn target(d: &Decision) -> Option<Target> {
     (!ledger_key.is_empty()).then(|| Target { ledger_key, work_item: d.work_item.clone(), host: d.host.clone() })
 }
 
-pub fn of_work(listed: &[Decision], w: &Work) -> Decision {
+pub fn of_work(listed: &[Decision], complete: bool, w: &Work) -> Option<Decision> {
     let key = key(&w.project, &w.id);
-    let reviews = || listed.iter().filter(|d| d.is_review());
-    let exact = reviews().find(|d| d.key == key || target(d).is_some_and(|t| t.ledger_key == w.project && t.work_item == w.id));
-    if let Some(d) = exact.or_else(|| reviews().find(|d| d.work_item == w.id)) {
-        return d.clone();
+    if let Some(d) = listed.iter().find(|d| d.is_review() && (d.key == key || target(d).is_some_and(|t| t.ledger_key == w.project && t.work_item == w.id))) {
+        return Some(d.clone());
     }
-    Decision { group: "review".into(), kind: "review".into(), key, session_id: w.assignee.clone().unwrap_or_default(), work_item: w.id.clone(), work_title: w.text.clone(), ledger_key: w.project.clone(), ..Default::default() }
+    complete.then(|| Decision { group: "review".into(), kind: "review".into(), key, session_id: w.assignee.clone().unwrap_or_default(), work_item: w.id.clone(), work_title: w.text.clone(), ledger_key: w.project.clone(), ..Default::default() })
 }
 
 pub fn note_problem(note: &str) -> Option<&'static str> {
@@ -62,7 +60,7 @@ pub fn note_problem(note: &str) -> Option<&'static str> {
 }
 
 pub fn needs_newer(e: &RespondError) -> bool {
-    e.answered && (e.code == "not_found" || e.message == "status code 404" || e.message == "unsupported dashboard action" || e.message == "sessionId is required")
+    e.answered && (e.status == 404 || e.code == "not_found" || e.message == "unsupported dashboard action" || e.message == "sessionId is required")
 }
 
 pub fn needs_newer_note() -> String {
@@ -107,7 +105,7 @@ impl Client {
         if !note.trim().is_empty() {
             payload["note"] = Value::String(note.trim().into());
         }
-        self.action("work-review", payload)
+        self.action("work-review", payload).and_then(crate::catalog::confirmed)
     }
 }
 
@@ -176,12 +174,11 @@ mod tests {
     #[test]
     fn the_work_screen_uses_the_listed_review_or_this_computers_ledger() {
         let w = Work { id: "p-W6".into(), text: "Wire review".into(), assignee: Some("holder".into()), project: "p-1".into(), ..Default::default() };
-        let listed = vec![decision(r#"{"group":"review","key":"review:p-1:p-W6","sessionId":"h2::holder","workItem":"p-W6","ledgerKey":"p-1"}"#)];
-        let listed = vec![Decision { host: "h2".into(), ..listed[0].clone() }];
-        assert_eq!(target(&of_work(&listed, &w)).unwrap().host, "h2");
-        let linked = vec![Decision { key: "review:p-0:p-W6".into(), ledger_key: "p-0".into(), ..listed[0].clone() }];
-        assert_eq!(target(&of_work(&linked, &w)).unwrap().ledger_key, "p-0");
-        let own = of_work(&[], &w);
+        let listed = vec![Decision { host: "h2".into(), ..decision(r#"{"group":"review","key":"review:p-1:p-W6","sessionId":"h2::holder","workItem":"p-W6","ledgerKey":"p-1"}"#) }];
+        assert_eq!(target(&of_work(&listed, false, &w).unwrap()).unwrap().host, "h2");
+        let other = vec![Decision { key: "review:p-0:p-W6".into(), ledger_key: "p-0".into(), ..listed[0].clone() }];
+        assert_eq!(of_work(&other, false, &w), None);
+        let own = of_work(&other, true, &w).unwrap();
         assert_eq!(own.id(), "review:p-1:p-W6");
         assert_eq!(target(&own), Some(Target { ledger_key: "p-1".into(), work_item: "p-W6".into(), host: String::new() }));
         assert_eq!(own.session_id, "holder");
@@ -208,13 +205,15 @@ mod tests {
             (400, r#"{"error":{"code":"invalid_request","message":"sessionId is required"}}"#),
             (400, r#"{"error":{"code":"invalid_request","message":"unsupported dashboard action"}}"#),
             (404, "not here"),
+            (404, r#"{"error":{"code":"route_missing","message":"nothing here"}}"#),
             (409, r#"{"error":{"code":"stale","message":"this request was already answered or has expired"}}"#),
             (403, r#"{"error":{"code":"forbidden","message":"only the person reviews through work-review"}}"#),
             (400, r#"{"error":{"code":"invalid_request","message":"sending work back needs a note: what it still needs"}}"#),
             (504, r#"{"error":{"code":"host_outcome_unknown","message":"Host mac did not answer"}}"#),
+            (202, r#"{"ok":true,"status":"submitted"}"#),
         ]);
         let t = Target { ledger_key: "p-1".into(), work_item: "p-W6".into(), host: String::new() };
-        for _ in 0..3 {
+        for _ in 0..4 {
             let e = client.work_review(&t, Verdict::Approve, "").unwrap_err();
             assert!(needs_newer(&e), "{e:?}");
         }
@@ -229,6 +228,8 @@ mod tests {
         assert_eq!(refusal(&note), "sending work back needs a note: what it still needs");
         let unknown = client.work_review(&t, Verdict::Approve, "").unwrap_err();
         assert!(unknown.maybe_delivered && !needs_newer(&unknown));
+        let submitted = client.work_review(&t, Verdict::Approve, "").unwrap_err();
+        assert!(submitted.maybe_delivered && submitted.code == "submitted");
         let unsent = Client::new("http://127.0.0.1:0", "secret").work_review(&t, Verdict::Approve, "").unwrap_err();
         assert!(!needs_newer(&unsent));
         assert_eq!(needs_newer_note(), "Needs Agenthail v0.2.173 or later");

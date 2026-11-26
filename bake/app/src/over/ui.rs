@@ -325,7 +325,7 @@ pub fn need_actions(s: &App, n: &Need, compact: bool) -> El {
         _ => None,
     };
     let r = match (n.kind, work) {
-        (NeedKind::Check, Some((_, d))) => crate::over::decisions::review_buttons(s, &d, size, &format!("{}-{}", if compact { "need-row" } else { "need-focus" }, d.id()), r),
+        (NeedKind::Check, Some((_, d))) => crate::over::decisions::review_buttons(s, &d, size, &format!("{}-{}", if compact { "need-row" } else { "need-focus" }, d.id()), true, r),
         (NeedKind::CiFailing, Some((w, d))) => {
             let url = crate::over::work::pr_of(s, w, &d, feed::derive::work::pr(w).as_deref()).map(|p| p.url);
             let t = t.clone();
@@ -345,7 +345,7 @@ pub fn need_actions(s: &App, n: &Need, compact: bool) -> El {
             move |s: &mut App| open_target(s, &t)
         }).build(k)),
     };
-    if n.kind == NeedKind::CiFailing {
+    if n.kind == NeedKind::CiFailing || matches!(t, Target::Session(_)) {
         return r;
     }
     r.child(Button::new("Open").variant(ButtonVariant::Ghost).control_size(size).on_press(move |s: &mut App| open_target(s, &t)).build(k))

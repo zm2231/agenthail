@@ -116,11 +116,18 @@ impl Decision {
     }
 
     pub fn hold_key(&self) -> String {
+        if self.is_review() {
+            return self.review_hold();
+        }
         match self.requests.first() {
             Some(r) => request_hold(&self.session_id, &r.id),
             None if self.is_parked() => parked_hold(&self.host, &self.work_item),
             None => self.state_hold(),
         }
+    }
+
+    fn review_hold(&self) -> String {
+        format!("review|{}|{}|{}|{}", self.host, self.key, self.work_item, self.since)
     }
 
     fn state_hold(&self) -> String {
@@ -129,6 +136,7 @@ impl Decision {
 
     pub fn holds(&self, key: &str) -> bool {
         self.state_hold() == key
+            || self.is_review() && self.review_hold() == key
             || self.requests.iter().any(|r| request_hold(&self.session_id, &r.id) == key)
             || std::iter::once(self).chain(&self.covers).any(|c| !c.work_item.is_empty() && parked_hold(&c.host, &c.work_item) == key)
     }
@@ -412,6 +420,12 @@ mod tests {
         assert_eq!(d.recommended(), None);
         assert_eq!(d.id(), "review:p:p-W3");
         assert!(decision(r#"{"group":"waiting","key":"review:p:p-W4"}"#).is_review());
+        let other = decision(r#"{"group":"review","key":"review:p:p-W5","sessionId":"s","workItem":"p-W5"}"#);
+        let mine = decision(r#"{"group":"review","key":"review:p:p-W3","sessionId":"s","workItem":"p-W3"}"#);
+        assert_ne!(mine.hold_key(), other.hold_key());
+        assert!(mine.holds(&mine.hold_key()) && !other.holds(&mine.hold_key()));
+        let elsewhere = Decision { host: "h2".into(), ..mine.clone() };
+        assert!(!elsewhere.holds(&mine.hold_key()));
     }
 
     #[test]

@@ -414,6 +414,7 @@ pub struct RespondError {
     pub maybe_delivered: bool,
     pub reply: Value,
     pub answered: bool,
+    pub status: u16,
 }
 
 impl RespondError {
@@ -428,13 +429,13 @@ impl RespondError {
             502 => !released_answer,
             _ => false,
         };
-        RespondError { message, code, maybe_delivered, reply, answered: true }
+        RespondError { message, code, maybe_delivered, reply, answered: true, status }
     }
 
     fn from_transport(error: &ureq::Transport) -> Self {
         use ureq::ErrorKind::*;
         let unsent = matches!(error.kind(), InvalidUrl | UnknownScheme | Dns | InsecureRequestHttpsOnly | ConnectionFailed | InvalidProxyUrl | ProxyConnect | ProxyUnauthorized);
-        RespondError { message: error.to_string(), code: String::new(), maybe_delivered: !unsent, reply: Value::Null, answered: false }
+        RespondError { message: error.to_string(), code: String::new(), maybe_delivered: !unsent, reply: Value::Null, answered: false, status: 0 }
     }
 }
 
@@ -680,7 +681,7 @@ impl Client {
             .set("Idempotency-Key", key)
             .send_json(body)
         {
-            Ok(response) => response.into_json().map_err(|e| RespondError { message: format!("the daemon's reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: true, answered: true, reply: Value::Null }),
+            Ok(response) => response.into_json().map_err(|e| RespondError { message: format!("the daemon's reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: true, answered: true, reply: Value::Null, status: 0 }),
             Err(ureq::Error::Status(code, response)) => Err(RespondError::from_status(name, code, &response.into_string().unwrap_or_default())),
             Err(ureq::Error::Transport(error)) => Err(RespondError::from_transport(&error)),
         }
@@ -690,7 +691,7 @@ impl Client {
 impl Client {
     pub(crate) fn post_empty(&self, path: &str, name: &str, key: &str) -> std::result::Result<Value, RespondError> {
         match self.agent.post(&format!("{}{path}", self.base)).set("Authorization", &format!("Bearer {}", self.token)).set("Idempotency-Key", key).call() {
-            Ok(response) => response.into_json().map_err(|e| RespondError { message: format!("the daemon's reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: true, answered: true, reply: Value::Null }),
+            Ok(response) => response.into_json().map_err(|e| RespondError { message: format!("the daemon's reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: true, answered: true, reply: Value::Null, status: 0 }),
             Err(ureq::Error::Status(code, response)) => Err(RespondError::from_status(name, code, &response.into_string().unwrap_or_default())),
             Err(ureq::Error::Transport(error)) => Err(RespondError::from_transport(&error)),
         }
@@ -699,14 +700,14 @@ impl Client {
 
 pub fn confirmed(reply: Value) -> std::result::Result<Value, RespondError> {
     if reply["status"] == "submitted" {
-        return Err(RespondError { message: "the daemon took it but hasn't confirmed it ran".into(), code: "submitted".into(), maybe_delivered: true, answered: true, reply });
+        return Err(RespondError { message: "the daemon took it but hasn't confirmed it ran".into(), code: "submitted".into(), maybe_delivered: true, answered: true, reply, status: 0 });
     }
     Ok(reply)
 }
 
 fn action_body(name: &str, payload: Value) -> std::result::Result<Value, RespondError> {
     let Value::Object(mut fields) = payload else {
-        return Err(RespondError { message: format!("the {name} payload is not a JSON object"), code: "invalid_request".into(), maybe_delivered: false, reply: Value::Null, answered: false });
+        return Err(RespondError { message: format!("the {name} payload is not a JSON object"), code: "invalid_request".into(), maybe_delivered: false, reply: Value::Null, answered: false, status: 0 });
     };
     fields.insert("action".into(), Value::String(name.into()));
     Ok(Value::Object(fields))

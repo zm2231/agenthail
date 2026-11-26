@@ -63,7 +63,7 @@ fn line(s: &App, i: usize, d: &Decision, shift: bool) -> El {
     }
     let mut actions = row().gap(6.0).items_center();
     if d.is_review() {
-        actions = review_buttons(s, d, ControlSize::Small, &format!("decision-{i}"), actions);
+        actions = review_buttons(s, d, ControlSize::Small, &format!("decision-{i}"), false, actions);
         if let Some(p) = review::pr_link(&d.prs, None) {
             let url = p.url.clone();
             let label = if p.number > 0 { format!("Open PR #{}", p.number) } else { "Open PR".into() };
@@ -97,7 +97,7 @@ fn line(s: &App, i: usize, d: &Decision, shift: bool) -> El {
     row().key(format!("decision-{i}")).w_full().gap(14.0).items_start().px(14.0).py(12.0).radius(10.0).child(body).child(actions)
 }
 
-pub fn review_buttons(s: &App, d: &Decision, size: ControlSize, key: &str, mut r: El) -> El {
+pub fn review_buttons(s: &App, d: &Decision, size: ControlSize, key: &str, show_note: bool, mut r: El) -> El {
     let k = kit();
     let st = &s.ov.inbox;
     let acting = st.acting.contains(&d.id());
@@ -113,8 +113,9 @@ pub fn review_buttons(s: &App, d: &Decision, size: ControlSize, key: &str, mut r
         c = c.help(review::needs_newer_note());
     }
     r = r.child(a.build(k).key(format!("{key}-approve"))).child(c.build(k).key(format!("{key}-changes")));
-    if old && !st.notes.get(&d.id()).is_some_and(|(hold, _)| d.holds(hold)) {
-        r = r.child(text(review::needs_newer_note()).font(META).color(weak()));
+    let note = st.notes.get(&d.id()).filter(|(hold, _)| show_note && d.holds(hold)).map(|(_, n)| n.clone()).or_else(|| old.then(review::needs_newer_note));
+    if let Some(n) = note {
+        r = r.child(text(n).font(META).color(ui::needs_color()).wrap().shrink());
     }
     r
 }

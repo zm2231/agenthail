@@ -73,7 +73,8 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
         .child(text(plain(&w.text)).font(TITLE.lh(30.0)).color(strong()).wrap())
         .child(text(plain(&w.description)).font(BODY).color(base()).wrap().max_lines(3));
 
-    let review = crate::over::work_review(s, id).unwrap_or_default();
+    let listed = crate::over::work_review(s, id);
+    let review = listed.clone().unwrap_or_default();
     let mut links = row().gap(4.0).items_center();
     if let Some(p) = pr_of(s, w, &review, pr.as_deref()) {
         let label = if p.number > 0 { format!("Open PR #{}", p.number) } else { "Open PR".into() };
@@ -96,7 +97,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
                     .child(text("What was asked".to_string()).font(META_MED).color(weak()))
                     .child(text(plain(&w.acceptance)).font(BODY).color(base()).wrap()),
             )
-            .child(verdict_row(s, &review, &revision))
+            .child(verdict_row(s, listed.as_ref(), &revision))
             .child(links)
             .child(row().gap(6.0).items_center().child(icon(&icons::INFO, 13.0).color(weak())).child(text(format!("Approval covers {revision} only. A new commit asks again. Merging is a separate step.").to_string()).font(META).color(weak())));
         col().w_full().radius(14.0).fill(k.c.surface_raised).border(1.0, k.c.warning.icon.alpha(0.4)).child(c)
@@ -199,8 +200,11 @@ pub fn pr_of(s: &App, w: &crate::over::Work, review: &feed::decisions::Decision,
     feed::review::pr_link(review.prs.iter().chain(timeline.iter()).chain(holder), number).cloned()
 }
 
-fn verdict_row(s: &App, d: &feed::decisions::Decision, revision: &str) -> El {
+fn verdict_row(s: &App, d: Option<&feed::decisions::Decision>, revision: &str) -> El {
     let k = kit();
+    let missing = d.is_none();
+    let fallback = feed::decisions::Decision::default();
+    let d = d.unwrap_or(&fallback);
     let st = &s.ov.inbox;
     let ready = crate::over::inbox::reviewable(st, d);
     let busy = st.acting.contains(&d.id());
@@ -216,7 +220,11 @@ fn verdict_row(s: &App, d: &feed::decisions::Decision, revision: &str) -> El {
         .child(ui::ghost_keys(&["A"]))
         .child(Button::new("Ask for changes").variant(ButtonVariant::Outline).control_size(ControlSize::Regular).shortcut("C").disabled(!ready).on_press(move |s: &mut App| crate::over::inbox::ask_changes(s, &dc)).build(k).key("work-changes"))
         .child(ui::ghost_keys(&["C"]));
-    let note = st.notes.get(&d.id()).filter(|(hold, _)| d.holds(hold)).map(|(_, n)| n.clone()).or_else(|| crate::over::inbox::too_old(st, d).then(feed::review::needs_newer_note));
+    let note = if missing {
+        Some(if s.ov.inbox.inbox.is_some() { "Some computers didn't answer, so this can't be reviewed here until they do.".to_string() } else { "Looking for this review…".to_string() })
+    } else {
+        st.notes.get(&d.id()).filter(|(hold, _)| d.holds(hold)).map(|(_, n)| n.clone()).or_else(|| crate::over::inbox::too_old(st, d).then(feed::review::needs_newer_note))
+    };
     if let Some(n) = note {
         r = r.child(text(n).font(META).color(ui::needs_color()).wrap());
     }

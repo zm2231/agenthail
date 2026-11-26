@@ -124,9 +124,9 @@ pub fn drain(s: &mut crate::App) -> bool {
                 st.newest = Some(Instant::now());
                 let reviewed = ledger.is_some();
                 match result {
-                    Err((e, hold)) if reviewed && review::needs_newer(&e) => {
+                    Err((e, _)) if reviewed && review::needs_newer(&e) => {
                         st.review_old.insert(host, Instant::now());
-                        st.notes.insert(id, (hold, review::needs_newer_note()));
+                        st.notes.remove(&id);
                     }
                     Ok(()) => {
                         st.notes.remove(&id);
