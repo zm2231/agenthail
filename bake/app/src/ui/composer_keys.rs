@@ -50,8 +50,12 @@ impl State {
     }
 
     pub fn rekey(&mut self, old: &str, new: &str) {
-        if let Some(text) = self.stash.remove(old) {
-            self.stash.entry(new.to_string()).or_insert(text);
+        if let Some(moving) = self.stash.remove(old) {
+            let text = match self.stash.remove(new) {
+                Some(existing) if !existing.is_empty() && existing != moving => format!("{existing}\n\n{moving}"),
+                _ => moving,
+            };
+            self.stash.insert(new.to_string(), text);
         }
     }
 }
@@ -191,6 +195,13 @@ mod tests {
         assert_eq!(back.stash.get("new").map(String::as_str), Some("set aside"));
         assert!(!back.stash.contains_key("old"));
         assert!(State::from_json(&Value::Null).stash.is_empty());
+        back.stash.insert("older".into(), "another".into());
+        back.rekey("older", "new");
+        assert_eq!(back.stash.get("new").map(String::as_str), Some("set aside\n\nanother"), "two stashes meeting on one session both stay, as drafts do");
+        back.stash.insert("same".into(), "set aside\n\nanother".into());
+        back.rekey("same", "new");
+        assert_eq!(back.stash.len(), 1);
+        assert_eq!(back.stash.get("new").map(String::as_str), Some("set aside\n\nanother"));
     }
 
     #[test]
