@@ -105,6 +105,7 @@ pub fn drain(s: &mut App) -> bool {
         changed = true;
         p.loading = false;
         if p.asked.as_ref() != Some(&filter(p)) {
+            p.asked = None;
             continue;
         }
         match page {
