@@ -8,6 +8,7 @@ mod theme;
 mod transcript;
 mod ui;
 mod voice;
+mod web;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -69,6 +70,8 @@ pub enum Screen {
     Project(String),
     Work(String),
     Sessions,
+    Extensions,
+    Extension(String),
 }
 
 pub struct Fixtures {
@@ -1098,6 +1101,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= ui::gone::watch(s);
     changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s);
     changed |= ui::attach::pump(s);
+    changed |= over::extensions::drain(s);
     switch_composer(s);
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &s.composer.text);

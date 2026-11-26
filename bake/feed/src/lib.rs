@@ -11,6 +11,7 @@ pub mod decisions;
 pub mod composer;
 pub mod derive;
 pub mod edits;
+pub mod extensions;
 pub mod focus;
 pub mod gone;
 pub mod history;
@@ -44,4 +45,10 @@ pub fn daemon() -> anyhow::Result<(String, String)> {
         }
     };
     Ok((base, token))
+}
+
+pub fn dashboard_token() -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let token = std::fs::read_to_string(format!("{home}/.agenthail/dashboard.token")).ok()?;
+    Some(token.trim().to_string()).filter(|t| !t.is_empty())
 }

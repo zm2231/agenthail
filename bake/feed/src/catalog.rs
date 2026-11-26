@@ -546,6 +546,12 @@ pub struct OpenRequest {
     pub actions: Vec<RequestAction>,
 }
 
+impl OpenRequest {
+    pub fn is_compound(&self) -> bool {
+        self.questions.as_ref().is_some_and(|qs| qs.len() > 1 || qs.iter().any(|q| q.multi_select))
+    }
+}
+
 pub fn numbered_options(body: &str) -> Vec<String> {
     let mut found = Vec::new();
     let mut expect = 1;
@@ -570,8 +576,8 @@ pub fn numbered_options(body: &str) -> Vec<String> {
 
 #[derive(Clone)]
 pub struct Client {
-    base: String,
-    token: String,
+    pub(crate) base: String,
+    pub(crate) token: String,
     agent: ureq::Agent,
 }
 

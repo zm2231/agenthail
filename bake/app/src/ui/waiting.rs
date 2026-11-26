@@ -45,7 +45,7 @@ pub(crate) fn settled_request<'a>(s: &'a App, x: &Session) -> Option<&'a feed::c
 }
 
 pub(crate) fn is_compound(request: &feed::catalog::OpenRequest) -> bool {
-    request.questions.as_ref().is_some_and(|qs| qs.len() > 1 || qs.iter().any(|q| q.multi_select))
+    request.is_compound()
 }
 
 pub(crate) fn question_context(q: &feed::catalog::RequestQuestion) -> Option<El> {
