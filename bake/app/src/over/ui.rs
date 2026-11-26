@@ -291,6 +291,23 @@ pub fn card(content: El) -> El {
     col().w_full().radius(12.0).fill(k.c.surface_base).border(1.0, edge()).child(content)
 }
 
+pub fn new_session_button(project: Option<&str>) -> El {
+    let project = project.map(str::to_string);
+    Button::new("New session")
+        .variant(ButtonVariant::Ghost)
+        .control_size(ControlSize::Small)
+        .icon(&icons::PLUS)
+        .shortcut("⌘N")
+        .on_press_tx(move |s: &mut App, tx: &mut rune::Tx| {
+            let prefill = match &project {
+                Some(key) => crate::ui::new_session::project_prefill(s, key),
+                None => crate::ui::new_session::Prefill::default(),
+            };
+            crate::ui::new_session::open(s, prefill, tx);
+        })
+        .build(kit())
+}
+
 pub fn notice(message: &str) -> El {
     let toast = rune_kit::Toast::new("notice", message.to_string()).icon(kit(), &icons::INFO).on_close(|s: &mut App| s.ov.notice = None).closable().build(kit());
     col().absolute(0.0, 0.0).w_full().h_full().items_end().justify_end().padding(24.0).child(toast)

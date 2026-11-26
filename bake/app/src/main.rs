@@ -12,7 +12,7 @@ use feed::catalog::{Client, OpenRequest, Session, WorkItem};
 use feed::derive::Recorded;
 use feed::derive::live::{Fetched, Ledger, Overview};
 use feed::source::{Live, Message};
-use rune::{AppSpec, Chrome, TextEdit, Tx, WindowOptions};
+use rune::{AppSpec, Chrome, KeyEvent, TextEdit, Tx, WindowOptions};
 use time::OffsetDateTime;
 
 use crate::over::Over;
@@ -28,6 +28,7 @@ pub enum Bg {
     Sent(String, Result<(), feed::catalog::RespondError>),
     Requests(String, Vec<OpenRequest>, std::time::Instant),
     Answered(String, String, Result<(), feed::catalog::RespondError>),
+    NewSession(ui::new_session::Loaded),
     Error(String),
 }
 
@@ -79,6 +80,7 @@ pub struct App {
     pub diff: rune_kit::diff::DiffState,
     pub diff_key: (String, usize),
     pub ov: Over,
+    pub new_session: Option<ui::new_session::Sheet>,
     revealed: Option<String>,
     client: Option<Client>,
     fixtures: Option<Fixtures>,
@@ -156,6 +158,7 @@ fn init() -> App {
         diff: rune_kit::diff::DiffState::new(Vec::new()),
         diff_key: (String::new(), usize::MAX),
         ov: Over::new(live, fixture.is_none()),
+        new_session: None,
         revealed: None,
         client: None,
         fixtures: None,
@@ -553,6 +556,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 s.answer_status.insert(request.clone(), status);
                 fetch_requests_at(s, &id, &[0, 2000, 6000, 9000]);
             }
+            Bg::NewSession(loaded) => ui::new_session::take(s, loaded),
             Bg::Error(error) => s.status = format!("daemon: {error}"),
         }
     }
@@ -606,10 +610,14 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed
 }
 
+fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
+    ui::new_session::on_key(s, ev, tx) || over::on_key(s, ev, tx)
+}
+
 fn main() {
     rune::App::new(AppSpec::<App> {
         poll: Some(poll),
-        on_key: Some(over::on_key),
+        on_key: Some(on_key),
         fonts: rune_theme_opencode::FONTS,
         families: rune_theme_opencode::FAMILIES,
         min_size: Some((1100.0, 700.0)),

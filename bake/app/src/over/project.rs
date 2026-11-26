@@ -29,7 +29,7 @@ fn toolbar(s: &App, key: &str) -> Toolbar {
     let name = s.ov.d.project(key).map(|p| p.name.clone()).unwrap_or_default();
     Toolbar::new()
         .leading(row().gap(14.0).items_center().child(ui::avatar(&name, 18.0)).child(ui::crumb(&[("Projects", false), (&name, true)])))
-        .trailing(row().gap(10.0).items_center().child(variant(s, key)).child(ui::needs_button(s)))
+        .trailing(row().gap(10.0).items_center().child(ui::new_session_button(Some(key))).child(variant(s, key)).child(ui::needs_button(s)))
 }
 
 pub fn work_card(s: &App, w: &Work, compact: bool) -> El {

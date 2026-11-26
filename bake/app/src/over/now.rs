@@ -163,7 +163,7 @@ fn focus_card(s: &App) -> El {
 fn toolbar(s: &App, strip: bool) -> Toolbar {
     let mut t = Toolbar::new();
     t = if strip { t.leading(row().gap(12.0).items_center().child(text("Now".to_string()).font(BODY_MED).color(strong())).child(ui::strip(s, None))) } else { t.leading(ui::crumb(&[("Now", true)])) };
-    t.trailing(row().gap(10.0).items_center().child(variant(s)).child(ui::needs_button(s)))
+    t.trailing(row().gap(10.0).items_center().child(ui::new_session_button(None)).child(variant(s)).child(ui::needs_button(s)))
 }
 
 pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
