@@ -1,5 +1,5 @@
 use super::*;
-use feed::queue::{Done, Op, Queued, READ_FAILED, Taking, waiting};
+use feed::queue::{Done, Op, Queued, READ_FAILED, Recovered, Taking, waiting};
 use rune::TextEdit;
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
@@ -77,7 +77,7 @@ fn run(s: &mut App, id: &str, row: Queued, op: Op) {
         if let Some(open) = s.composer_for.clone() {
             s.drafts.set(&open, &s.composer.text);
         }
-        s.queue_taking.push(Taking { session: id.to_string(), host: row.host.clone(), id: row.id, text: row.message.clone(), attempt: feed::catalog::request_key() });
+        s.queue_taking.push(Taking { session: id.to_string(), host: row.host.clone(), id: row.id, text: row.message.clone(), attempt: feed::catalog::request_key(), steer: op == Op::Steer });
         if let Err(error) = crate::over::layout::save_now(s) {
             s.queue_taking.retain(|t| (t.host.as_str(), t.id) != (row.host.as_str(), row.id));
             crate::over::layout::save(s);
@@ -163,7 +163,7 @@ pub(crate) fn recover(s: &mut App) {
         return;
     }
     let Some(client) = s.client.clone() else {
-        let back = leftover.iter().map(|t| (t.clone(), Some(t.text.clone()))).collect();
+        let back = leftover.iter().map(|t| (t.clone(), Recovered::Restore { text: t.text.clone(), may_have_arrived: true })).collect();
         restore(s, back);
         return;
     };
@@ -178,14 +178,19 @@ pub(crate) fn recover(s: &mut App) {
     });
 }
 
-pub(crate) fn restore(s: &mut App, back: Vec<(Taking, Option<String>)>) {
-    for (taking, text) in back {
+pub(crate) fn restore(s: &mut App, back: Vec<(Taking, Recovered)>) {
+    for (taking, outcome) in back {
         s.queue_taking.retain(|t| t != &taking);
         s.queue_working.remove(&(taking.host.clone(), taking.id));
-        let Some(text) = text else { continue };
+        let Recovered::Restore { text, may_have_arrived } = outcome else { continue };
         let session = feed::composer::current(&s.rekeyed, &taking.session).to_string();
         hand_back(s, &session, &text);
-        s.queue_note.insert(session, "A queued message you were taking back or steering when the app closed is back in the composer; check the queue before sending.".into());
+        let note = if may_have_arrived {
+            "A queued message you were taking back or steering when the app closed is back in the composer, but it may already have reached the agent; check the conversation and the queue before sending."
+        } else {
+            "A queued message you were taking back when the app closed is back in the composer."
+        };
+        s.queue_note.insert(session, note.into());
     }
     crate::over::layout::save(s);
 }

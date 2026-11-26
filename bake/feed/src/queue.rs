@@ -140,22 +140,30 @@ pub struct Taking {
     pub id: i64,
     pub text: String,
     pub attempt: String,
+    pub steer: bool,
 }
 
 impl Taking {
 
     pub fn to_json(list: &[Taking]) -> Value {
-        Value::Array(list.iter().map(|t| serde_json::json!({"session": t.session, "host": t.host, "id": t.id, "text": t.text, "attempt": t.attempt})).collect())
+        Value::Array(list.iter().map(|t| serde_json::json!({"session": t.session, "host": t.host, "id": t.id, "text": t.text, "attempt": t.attempt, "steer": t.steer})).collect())
     }
 
     pub fn from_json(value: &Value) -> Vec<Taking> {
         let read = |v: &Value| -> Option<Taking> {
             let text = v["text"].as_str().filter(|t| !t.trim().is_empty())?.to_string();
             let attempt = v["attempt"].as_str().unwrap_or_default().to_string();
-            Some(Taking { session: v["session"].as_str().filter(|s| !s.is_empty())?.to_string(), host: v["host"].as_str().unwrap_or_default().to_string(), id: v["id"].as_i64()?, text, attempt })
+            let steer = v["steer"].as_bool().unwrap_or(true);
+            Some(Taking { session: v["session"].as_str().filter(|s| !s.is_empty())?.to_string(), host: v["host"].as_str().unwrap_or_default().to_string(), id: v["id"].as_i64()?, text, attempt, steer })
         };
         value.as_array().map(|a| a.iter().filter_map(read).collect()).unwrap_or_default()
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Recovered {
+    Restore { text: String, may_have_arrived: bool },
+    WentThrough,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -205,19 +213,27 @@ impl Client {
         self.queue_rows("/api/v1/queue", "").map(|rows| rows.into_iter().filter(|r| r.session_id == session).collect())
     }
 
-    pub fn finish(&self, taking: &Taking) -> Option<String> {
+    fn status_of(&self, taking: &Taking) -> Option<String> {
         let mut path = format!("/api/v1/queue?id={}", taking.id);
         if !taking.host.is_empty() {
             path.push_str(&format!("&host={}", enc(&taking.host)));
         }
-        let status = self.queue_rows(&path, &taking.host).ok().and_then(|rows| rows.into_iter().next()).map(|r| r.status);
-        match status.as_deref() {
-            Some("delivered" | "inflight") => None,
+        self.queue_rows(&path, &taking.host).ok().map(|rows| rows.into_iter().next().map(|r| r.status).unwrap_or_default())
+    }
+
+    pub fn finish(&self, taking: &Taking) -> Recovered {
+        let restore = |sure: bool| Recovered::Restore { text: taking.text.clone(), may_have_arrived: !sure };
+        match self.status_of(taking).as_deref() {
+            Some("delivered" | "inflight") => Recovered::WentThrough,
             Some("pending") => match self.queue_cancel(taking.id, &taking.host) {
-                Ok(text) if !text.trim().is_empty() => Some(text),
-                _ => Some(taking.text.clone()),
+                Ok(text) => Recovered::Restore { text: if text.trim().is_empty() { taking.text.clone() } else { text }, may_have_arrived: false },
+                Err(_) => match self.status_of(taking).as_deref() {
+                    Some("delivered" | "inflight") => Recovered::WentThrough,
+                    _ => restore(false),
+                },
             },
-            _ => Some(taking.text.clone()),
+            Some("canceled") => restore(!taking.steer),
+            _ => restore(false),
         }
     }
 
@@ -300,7 +316,7 @@ mod tests {
 
     #[test]
     fn a_message_being_taken_back_survives_a_restart() {
-        let taking = vec![Taking { session: "s1".into(), host: "vps".into(), id: 7, text: "hold on".into(), attempt: "k1".into() }];
+        let taking = vec![Taking { session: "s1".into(), host: "vps".into(), id: 7, text: "hold on".into(), attempt: "k1".into(), steer: false }];
         assert_eq!(Taking::from_json(&Taking::to_json(&taking)), taking);
         assert!(Taking::from_json(&json!([{"session": "s1", "id": 7, "text": " "}, {"id": 7, "text": "x"}, {"session": "s1", "text": "x"}])).is_empty());
         assert_eq!(Taking::from_json(&json!(null)), vec![]);
@@ -308,26 +324,35 @@ mod tests {
 
     #[test]
     fn a_leftover_take_back_is_finished_and_restored_unless_the_message_went_through() {
-        let taking = |id: i64, host: &str| Taking { session: "s1".into(), host: host.into(), id, text: format!("t{id}"), attempt: format!("a{id}") };
+        let taking = |id: i64, host: &str, steer: bool| Taking { session: "s1".into(), host: host.into(), id, text: format!("t{id}"), attempt: format!("a{id}"), steer };
+        let sure = |text: &str| Recovered::Restore { text: text.into(), may_have_arrived: false };
+        let unsure = |text: &str| Recovered::Restore { text: text.into(), may_have_arrived: true };
         let (client, seen) = daemon(replies(&[
             (200, r#"{"items":[{"id":7,"sessionId":"s1","status":"pending"}]}"#),
             (200, r#"{"ok":true,"result":{"message":"as queued"}}"#),
+            (200, r#"{"items":[{"id":8,"sessionId":"s1","status":"canceled"}]}"#),
             (200, r#"{"items":[{"id":8,"sessionId":"s1","status":"canceled"}]}"#),
             (200, r#"{"items":[{"id":9,"sessionId":"s1","status":"delivered"}]}"#),
             (200, r#"{"items":[]}"#),
             (500, r#"{"error":{"code":"internal_error","message":"down"}}"#),
             (200, r#"{"items":[{"id":12,"sessionId":"s1","status":"pending"}]}"#),
-            (400, r#"{"error":{"code":"invalid_request","message":"already canceled"}}"#),
+            (400, r#"{"error":{"code":"invalid_request","message":"not pending"}}"#),
+            (200, r#"{"items":[{"id":12,"sessionId":"s1","status":"inflight"}]}"#),
+            (200, r#"{"items":[{"id":13,"sessionId":"s1","status":"pending"}]}"#),
+            (504, r#"{"error":{"code":"host_outcome_unknown","message":"no answer"}}"#),
+            (500, r#"{"error":{"code":"internal_error","message":"down"}}"#),
         ]));
-        assert_eq!(client.finish(&taking(7, "vps")).as_deref(), Some("as queued"));
+        assert_eq!(client.finish(&taking(7, "vps", false)), sure("as queued"));
         assert_eq!(seen.recv().unwrap().0, "/api/v1/queue?id=7&host=vps");
         assert_eq!(seen.recv().unwrap().1, json!({"action": "queue-cancel", "queueId": 7, "host": "vps"}));
-        assert_eq!(client.finish(&taking(8, "")).as_deref(), Some("t8"));
+        assert_eq!(client.finish(&taking(8, "", false)), sure("t8"));
         assert_eq!(seen.recv().unwrap().0, "/api/v1/queue?id=8");
-        assert_eq!(client.finish(&taking(9, "")), None);
-        assert_eq!(client.finish(&taking(10, "")).as_deref(), Some("t10"));
-        assert_eq!(client.finish(&taking(11, "")).as_deref(), Some("t11"));
-        assert_eq!(client.finish(&taking(12, "")).as_deref(), Some("t12"));
+        assert_eq!(client.finish(&taking(8, "", true)), unsure("t8"));
+        assert_eq!(client.finish(&taking(9, "", false)), Recovered::WentThrough);
+        assert_eq!(client.finish(&taking(10, "", false)), unsure("t10"));
+        assert_eq!(client.finish(&taking(11, "", false)), unsure("t11"));
+        assert_eq!(client.finish(&taking(12, "", false)), Recovered::WentThrough);
+        assert_eq!(client.finish(&taking(13, "", false)), unsure("t13"));
     }
 
     #[test]

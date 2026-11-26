@@ -36,7 +36,7 @@ pub enum Bg {
     NewSession(ui::new_session::Loaded),
     Queue(String, u64, Result<feed::queue::Read, String>),
     QueueDone(String, (String, i64), feed::queue::Done),
-    Recovered(Vec<(feed::queue::Taking, Option<String>)>),
+    Recovered(Vec<(feed::queue::Taking, feed::queue::Recovered)>),
     Older(String, u64, Result<feed::history::Older, feed::history::Miss>),
     Body(String, u64, String, u64, Result<String, String>),
     Error(String),
