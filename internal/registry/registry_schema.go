@@ -491,6 +491,10 @@ CREATE TABLE IF NOT EXISTS message_senders (
 	sender_session_id TEXT NOT NULL,
 	recorded_at_ms INTEGER NOT NULL
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS message_senders_unknown (
+	session_id TEXT PRIMARY KEY,
+	before_ms INTEGER NOT NULL
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS peer_relay_sockets (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	socket_path TEXT NOT NULL,

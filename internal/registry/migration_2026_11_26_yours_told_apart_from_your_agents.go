@@ -51,28 +51,33 @@ func (r *Registry) MessageSender(messageID string) (sender string, found bool, e
 
 // MessageSendersSince is when this host began recording the sender of every
 // message it sends to the session: when Agenthail began recording them, or
-// when the session last moved here from another host, whichever is later. A
-// message the provider recorded before then may have come from Agenthail
-// without an id, or under an id another host recorded.
+// when the session last moved here, whichever is later. A message the provider
+// recorded before then may have come from Agenthail without an id, or under an
+// id only another host recorded.
 func (r *Registry) MessageSendersSince(session string) (time.Time, error) {
+	return messageSendersSince(r.read, session)
+}
+
+func messageSendersSince(q catalogQuerier, session string) (time.Time, error) {
 	var at int64
-	if err := r.read.QueryRow(`SELECT applied_at_ms FROM schema_migrations WHERE name=?`, messageSendersMigration).Scan(&at); err != nil {
-		return time.Time{}, err
-	}
-	since := time.UnixMilli(at)
-	var arrived sql.NullString
-	if err := r.read.QueryRow(`SELECT MAX(created_at) FROM session_moves WHERE conversation=? AND role='in' AND state=?`, session, MoveResumed).Scan(&arrived); err != nil {
-		return time.Time{}, err
-	}
-	if !arrived.Valid {
-		return since, nil
-	}
-	moved, err := parseTimestamp(arrived.String)
+	err := q.QueryRow(`SELECT MAX(m.applied_at_ms,COALESCE((SELECT before_ms FROM message_senders_unknown WHERE session_id=?),0)) FROM schema_migrations m WHERE m.name=?`, session, messageSendersMigration).Scan(&at)
+	return time.UnixMilli(at), err
+}
+
+// sendersUnknownBefore is the moment a host taking the session in must treat
+// as its own MessageSendersSince. It is stated in the sending host's clock, so
+// a destination whose clock runs behind still counts every message written
+// before the move as one whose sender it does not know.
+func sendersUnknownBefore(q catalogQuerier, session string, now time.Time) (int64, error) {
+	since, err := messageSendersSince(q, session)
 	if err != nil {
-		return time.Time{}, err
+		return 0, err
 	}
-	if moved.After(since) {
-		return moved, nil
-	}
-	return since, nil
+	return max(since.UnixMilli(), now.UnixMilli()), nil
+}
+
+func recordSendersUnknownTx(tx *sql.Tx, session string, before int64) error {
+	_, err := tx.Exec(`INSERT INTO message_senders_unknown(session_id,before_ms) VALUES(?,?)
+		ON CONFLICT(session_id) DO UPDATE SET before_ms=MAX(before_ms,excluded.before_ms)`, session, before)
+	return err
 }

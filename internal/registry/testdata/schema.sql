@@ -768,6 +768,12 @@ CREATE TABLE message_senders (
 	recorded_at_ms INTEGER NOT NULL
 ) WITHOUT ROWID;
 
+-- table message_senders_unknown
+CREATE TABLE message_senders_unknown (
+	session_id TEXT PRIMARY KEY,
+	before_ms INTEGER NOT NULL
+) WITHOUT ROWID;
+
 -- table move_dropped_relays
 CREATE TABLE move_dropped_relays (
 	move_id TEXT NOT NULL,

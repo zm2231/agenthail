@@ -3,6 +3,7 @@ package registry
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -74,5 +75,32 @@ func TestUpgradingRecordsTheSenderOfEveryEarlierDeliveryFromThen(t *testing.T) {
 	}
 	if upgraded, err := r.MessageSendersSince("target"); err != nil || !upgraded.After(created) {
 		t.Fatalf("recording began %v, created %v: %v", upgraded, created, err)
+	}
+}
+
+func TestAMoveTellsTheNextHostUntilWhenItCannotKnowWhoSentAMessage(t *testing.T) {
+	r := openTestRegistry(t)
+	recording, err := r.MessageSendersSince(moveConversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ahead := recording.Add(3 * time.Hour)
+	if _, err := r.PrepareMoveIn("move-1", moveConversation, "h00000000000a", []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetMoveState("move-1", MoveReceived, "", MovePrepared); err != nil {
+		t.Fatal(err)
+	}
+	session := surface.Session{ID: moveConversation, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
+	if _, err := r.TakeMovedSession("move-1", session, "", time.Time{}, nil, MoveCarry{SendersUnknownBefore: ahead.UnixMilli()}, "", MovedCoordinatorPlace{}); err != nil {
+		t.Fatal(err)
+	}
+	if since, err := r.MessageSendersSince(moveConversation); err != nil || !since.Equal(time.UnixMilli(ahead.UnixMilli())) {
+		t.Fatalf("senders known here since %v, want the source's %v: %v", since, ahead, err)
+	}
+	r.now = func() time.Time { return ahead.Add(-time.Hour) }
+	carry, err := r.MoveCarry(moveConversation, "")
+	if err != nil || carry.SendersUnknownBefore != ahead.UnixMilli() {
+		t.Fatalf("moving it on carries %d, want %d: %v", carry.SendersUnknownBefore, ahead.UnixMilli(), err)
 	}
 }

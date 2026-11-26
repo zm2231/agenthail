@@ -58,32 +58,25 @@ func TestAMovedCodexSessionKeepsWhatAgentsSentItElsewhereOutOfThePrompts(t *test
 	if err := r.RecordSessionOrigin(registry.OriginOf(worker.ID, lead.ID)); err != nil {
 		t.Fatal(err)
 	}
-	recording, err := r.MessageSendersSince(worker.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := r.PrepareMoveIn("move-1", worker.ID, "h00000000000a", []byte(`{}`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.SetMoveState("move-1", registry.MoveReceived, "", registry.MovePrepared); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.TakeMovedSession("move-1", worker, "", time.Time{}, nil, registry.MoveCarry{}, "", registry.MovedCoordinatorPlace{}); err != nil {
-		t.Fatal(err)
-	}
-	arrived, err := r.MessageSendersSince(worker.ID)
-	if err != nil {
+	sourceClock := time.Now().Add(time.Hour)
+	carry := registry.MoveCarry{SendersUnknownBefore: sourceClock.UnixMilli()}
+	if _, err := r.TakeMovedSession("move-1", worker, "", time.Time{}, nil, carry, "", registry.MovedCoordinatorPlace{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.RecordMessageSender("sent-here", lead.ID); err != nil {
 		t.Fatal(err)
 	}
-	elsewhere := recording.Add(arrived.Sub(recording) / 2)
 	source := journalSource(d, worker, fake)
-	source.append(codexInput("w1", "Rebase onto main", "sent-on-the-other-host", "", elsewhere))
-	source.append(codexInput("w2", "Rename the flag", "", surface.OriginPerson, elsewhere))
-	source.append(codexInput("w3", "Tag the release", "sent-here", "", arrived.Add(time.Minute)))
-	source.append(codexInput("w4", "Also bump the version", "", surface.OriginPerson, arrived.Add(2*time.Minute)))
+	source.append(codexInput("w1", "Rebase onto main", "sent-on-the-other-host", "", sourceClock.Add(-time.Second)))
+	source.append(codexInput("w2", "Rename the flag", "", surface.OriginPerson, sourceClock.Add(-time.Second)))
+	source.append(codexInput("w3", "Tag the release", "sent-here", "", sourceClock.Add(time.Minute)))
+	source.append(codexInput("w4", "Also bump the version", "", surface.OriginPerson, sourceClock.Add(2*time.Minute)))
 
 	code, body, raw := getPrompts(t, dashboardRouter(d), "sessionId="+worker.ID)
 	if code != http.StatusOK || promptTexts(body.Prompts) != "Also bump the version" {

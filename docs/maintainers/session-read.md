@@ -187,9 +187,10 @@ looks up the `client_id` Codex keeps on each message in the senders Agenthail
 records for every message it sends: the person's sends read as `person`, an
 agent's or Agenthail's as `peer`. A message no Agenthail send recorded was typed
 into Codex itself and reads as `person`, but only from when the host began
-recording senders, or from when the session last moved here from another host:
-the senders of messages sent before then may be unknown here, so such a
-message keeps no origin unless its id names an agent. A row with no origin is
+recording senders, or, for a session moved here from another host, from when
+it arrived by both hosts' clocks (the move carries the source's): the senders
+of messages sent before then may be unknown here, so such a message keeps no
+origin unless its id names an agent. A row with no origin is
 listed only from a session no agent started, and
 its text must look typed. A request scans at most 2000 journal
 rows; when it stops short of `limit` it returns the cursor it reached, so a
