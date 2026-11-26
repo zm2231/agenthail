@@ -24,6 +24,8 @@ struct SessionLaunchTest {
 
         let opened = try decide(#"{"ok":true,"status":"submitted","accepted":true,"session":{"id":"s1","surface":"claude","name":"","status":"idle","lastActive":"2026-10-04T12:00:00Z"}}"#)
         check(opened == .open("s1"), "a receipt with a session opens it")
+        let unsent = try decide(#"{"ok":true,"sent":false,"session":{"id":"s2","surface":"devin","name":"","status":"idle","lastActive":"2026-10-04T12:00:00Z"},"detail":"interrupted"}"#)
+        check(unsent == .openUnsent("s2"), "a session whose first message was not sent opens and says so")
 
         let hostUnknown = try decide(#"{"error":{"code":"host_outcome_unknown","message":"the paired host never answered"}}"#)
         check(hostUnknown == .unconfirmed(nil), "an unanswered paired host stays unconfirmed")

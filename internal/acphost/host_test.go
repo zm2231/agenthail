@@ -695,3 +695,32 @@ func TestAnAgentReopenedWithoutATurnStillStopsWhenIdle(t *testing.T) {
 	}
 	t.Fatal("an agent reopened without a turn never stopped when idle")
 }
+
+func TestANewAgentThatNeverRunsATurnStillStopsWhenIdle(t *testing.T) {
+	previous := idleStop
+	idleStop = 200 * time.Millisecond
+	t.Cleanup(func() { idleStop = previous })
+	h := startHost(t, fakeAgent(t, "fake"))
+	state := h.create("fake", "", "")
+	s := h.host.heldSession(state.SessionID)
+	pid := s.snapshot().PID
+	pending := &pendingRequest{request: Request{ID: "req-open"}, answer: make(chan permissionAnswer, 1)}
+	s.mu.Lock()
+	s.pending["req-open"] = pending
+	s.mu.Unlock()
+	time.Sleep(400 * time.Millisecond)
+	if errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
+		t.Fatal("an agent with an open request must not be stopped as idle")
+	}
+	s.mu.Lock()
+	delete(s.pending, "req-open")
+	s.mu.Unlock()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("a new agent that never ran a turn never stopped when idle")
+}

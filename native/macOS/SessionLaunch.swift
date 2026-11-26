@@ -26,6 +26,7 @@ enum SessionLaunchOutcome: Equatable {
 
 enum SessionLaunchDecision: Equatable {
     case open(String)
+    case openUnsent(String)
     case submitted(String)
     case starting
     case unconfirmed(String?)
@@ -46,7 +47,7 @@ enum SessionLaunchDecision: Equatable {
             return
         }
         if let id = receipt.id, !id.isEmpty {
-            self = .open(id)
+            self = receipt.firstMessageNotSent ? .openUnsent(id) : .open(id)
             return
         }
         if receipt.status == "submitted" && receipt.accepted == nil {

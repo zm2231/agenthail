@@ -491,6 +491,7 @@ func (s *session) create(ctx context.Context, params CreateParams) error {
 	s.writer, s.norm = writer, newNormalizer(writer)
 	s.state.Status, s.state.LastActive = StatusIdle, time.Now().UTC()
 	s.saveLocked()
+	s.armIdleLocked()
 	s.mu.Unlock()
 	return nil
 }
@@ -712,7 +713,13 @@ func (s *session) armIdleLocked() {
 		defer s.startMu.Unlock()
 		if s.quiet() {
 			s.stopProcess()
+			return
 		}
+		s.mu.Lock()
+		if s.conn != nil && !s.closed && s.state.Status != StatusBusy {
+			s.armIdleLocked()
+		}
+		s.mu.Unlock()
 	})
 }
 
