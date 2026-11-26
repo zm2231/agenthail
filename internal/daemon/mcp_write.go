@@ -46,7 +46,7 @@ func (d *Daemon) mcpActionAs(ctx context.Context, caller *mcpCaller, p principal
 		}
 		request.ScopeProjectID, request.ScopeRank = limits.project, limits.rank
 		request.ScopeOverseen, request.ScopeControl = limits.overseen, limits.control
-		if limits.control != "" && request.SourceSessionID == "" {
+		if (limits.project != "" || limits.rank != "") && request.SourceSessionID == "" {
 			request.SourceSessionID = caller.session.ID
 		}
 	}

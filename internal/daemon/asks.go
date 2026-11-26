@@ -149,7 +149,7 @@ func (d *Daemon) askHearer(sessionID string) (noticeRecipient, bool) {
 		return noticeRecipient{}, false
 	}
 	hearer, ok := d.noticeRecipient(*session)
-	if !ok || hearer.sessionID == session.ID || !d.hears(hearer.sessionID) {
+	if !ok || hearer.sessionID == session.ID || surface.IsUnrepliableSender(hearer.sessionID) || !d.hears(hearer.sessionID) {
 		return noticeRecipient{}, false
 	}
 	return hearer, true

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -95,25 +96,27 @@ func (d *Daemon) scopedLiveSessions(caller *mcpCaller, filter string, descendant
 	return refs, nil
 }
 
-// mcpVisibleHostSessions lists the paired hosts' sessions the caller may read:
-// every one with read.all, else those in the caller's project.
+// mcpVisibleHostSessions lists the paired hosts' sessions the caller may read,
+// as mcpVisibleSessions does this host's: every one with read.all, those in
+// the caller's project, and those the caller started, by the starters their
+// hosts last published.
 func (d *Daemon) mcpVisibleHostSessions(caller *mcpCaller, filter string) ([]visibleSession, error) {
-	if filter == mcpFilterMine {
-		return nil, nil
-	}
-	everything := caller.has("read.all") && filter != mcpFilterProject
-	inProject := caller.has("read.project") && caller.project != nil
-	if !everything && !inProject {
+	everything := caller.has("read.all") && filter == mcpFilterAllVisible
+	inProject := caller.has("read.project") && caller.project != nil && filter != mcpFilterMine
+	started := caller.has("control.descendants") && filter != mcpFilterProject
+	if !everything && !inProject && !started {
 		return nil, nil
 	}
 	refs, err := d.Registry.LiveHostSessions()
 	if err != nil {
 		return nil, err
 	}
+	rows := mirroredRows(refs)
 	visible := []visibleSession{}
 	for index := range refs {
 		ref := refs[index]
-		if !everything && hostProjectID(ref.Project) != caller.project.ID {
+		if !everything && !(inProject && hostProjectID(ref.Project) == caller.project.ID) &&
+			!(started && slices.Contains(mirroredStarterChain(hosts.Qualify(ref.HostID, ref.ID), rows), caller.session.ID)) {
 			continue
 		}
 		session, err := d.Registry.Session(ref.ID)

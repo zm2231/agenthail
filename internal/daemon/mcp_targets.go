@@ -52,7 +52,7 @@ func (d *Daemon) mcpTargets(caller *mcpCaller) targets.Resolver[*surface.Session
 			}
 			matches := make([]targets.Remote, 0, len(answer.Matches))
 			for _, match := range answer.Matches {
-				matches = append(matches, targets.Remote{ID: match.ID, Surface: match.Surface, Name: match.Name, Alias: match.Alias, Host: targets.Host(match.Host), Exact: match.Exact, Project: match.Project, Archived: match.Archived})
+				matches = append(matches, targets.Remote{ID: match.ID, Surface: match.Surface, Name: match.Name, Alias: match.Alias, Host: targets.Host(match.Host), Exact: match.Exact, Project: match.Project, Archived: match.Archived, StartedBy: match.StartedBy})
 			}
 			return matches, nil
 		},
@@ -75,42 +75,59 @@ func mcpTargetRefusal(err error) error {
 }
 
 // mcpRemoteTarget admits a session on a paired host. A queued send goes to
-// any with control.all or in the caller's spawner chain, else a non-archived
-// one in the caller's project. Anything more reaches only a session in the
-// caller's own project, for a caller with project reach whose role's
-// remote-project-control is not ask. The project and the archive come from
-// the owning host's own answer, never from this host's mirror alone, which
-// can be stale, and the owner checks them again (forwardedScope); while that
-// host does not answer, a send queues.
+// any with control.all, the caller's starter or a session the caller started
+// (starter_scope.go), else a non-archived one in the caller's project.
+// Anything more reaches a session the caller started, or one in its own
+// project for a caller with project reach whose role's remote-project-control
+// is not ask. The project, the archive and the starters come from the owning
+// host's own answer, never from this host's mirror alone, which can be stale,
+// and the owner checks them again (forwardedScope); while that host does not
+// answer, a send queues.
 func (d *Daemon) mcpRemoteTarget(caller *mcpCaller, ref string, remote targets.Remote, reach controlReach) (*surface.Session, error) {
 	if !remote.Exact {
 		return nil, refuse("invalid", fmt.Sprintf("%s does not name one session exactly; it matched %s. Address it by @alias or session id.", ref, remote.Label()))
 	}
+	tie, err := d.remoteStarterTie(caller, remote)
+	if err != nil {
+		return nil, err
+	}
 	if reach != reachQueued {
-		spawner, err := d.remoteSpawner(caller, remote.ID)
-		if err != nil {
-			return nil, err
-		}
-		if spawner {
+		switch tie {
+		case tieStartedCaller:
 			return nil, scopeRefusal(remote.ID, "down_only", mcpDownOnly)
+		case tieCallerStarted:
+			return remoteStarterControl(caller, remote, reach)
 		}
 		return d.remoteProjectControl(caller, remote, reach)
 	}
-	if caller.has("control.all") || remote.Surface == surface.KindAgent {
+	if caller.has("control.all") || remote.Surface == surface.KindAgent || tie != untied {
 		return remote.Session(), nil
-	}
-	spawner, err := d.remoteSpawner(caller, remote.ID)
-	if err != nil || spawner {
-		return remote.Session(), err
 	}
 	if remote.Project == "" && caller.project != nil {
 		return remote.Session(), nil
 	}
 	if caller.project == nil || remote.Project != caller.project.ID {
-		return nil, crossProject(scopeRefusal(remote.ID, "different_project", fmt.Sprintf("%s runs on host %s and is not in your project; across hosts you may message only sessions in your own project.", remote.Label(), remote.Host.Name)))
+		return nil, crossProject(scopeRefusal(remote.ID, "different_project", fmt.Sprintf("%s runs on host %s and is not in your project; across hosts you may message only sessions in your own project, the session that started you and sessions you started.", remote.Label(), remote.Host.Name)))
 	}
 	if remote.Archived {
 		return nil, scopeRefusal(remote.ID, "archived", fmt.Sprintf("%s on host %s is archived.", remote.Label(), remote.Host.Name))
+	}
+	return remote.Session(), nil
+}
+
+// remoteStarterControl admits a session the caller started on a paired host
+// as a session it started on this one: with control.descendants, under its
+// role's decision for sessions it started or leads, wherever it runs and
+// whatever project either is in.
+func remoteStarterControl(caller *mcpCaller, remote targets.Remote, reach controlReach) (*surface.Session, error) {
+	if caller.extension != "" || !caller.has("control.descendants") {
+		return nil, scopeRefusal(remote.ID, "not_queued", fmt.Sprintf("%s runs on host %s; you may only send it a queued message.", remote.Label(), remote.Host.Name))
+	}
+	if remote.Archived {
+		return nil, scopeRefusal(remote.ID, "archived", fmt.Sprintf("%s on host %s is archived.", remote.Label(), remote.Host.Name))
+	}
+	if caller.role.Decision(overseenControl) == agentroles.Ask {
+		return nil, overseenRefusal(remote.ID, remote.Label(), reach)
 	}
 	return remote.Session(), nil
 }
@@ -153,18 +170,6 @@ func overseenRefusal(targetID, label string, reach controlReach) error {
 	return scopeRefusal(targetID, "not_queued", fmt.Sprintf("Your role leaves %s %s, a session you started or lead, to the person, so you may only send it a queued message.", what, label))
 }
 
-func (d *Daemon) remoteSpawner(caller *mcpCaller, ref string) (bool, error) {
-	_, id, ok := hosts.Split(ref)
-	if !ok {
-		return false, nil
-	}
-	ancestors, err := d.Registry.SessionAncestors(caller.session.ID)
-	if err != nil {
-		return false, err
-	}
-	return slices.Contains(ancestors, id), nil
-}
-
 type forwardedLimits struct {
 	project string
 	rank    string
@@ -177,28 +182,34 @@ type forwardedLimits struct {
 }
 
 // forwardScope names what the owning host checks before it acts on a remote
-// target for a caller whose reach across hosts is its own project: the
-// project, and for anything more than a queued send the caller's permission
-// rank. Its notice is what to tell the person once the action has run.
+// target for an agent: the caller's project, which the session must share
+// unless the caller started it, and for anything more than a queued send the
+// caller's permission rank. Its notice is what to tell the person once the
+// action has run. Only this host knows the session that started the caller,
+// so a queued send to it goes unchecked there.
 func (d *Daemon) forwardScope(caller *mcpCaller, targetID, action string, reach controlReach) (forwardedLimits, error) {
-	if _, id, remote := hosts.Split(targetID); !remote || caller.project == nil || surface.IsAgentIdentityID(id) {
+	if _, id, remote := hosts.Split(targetID); !remote || surface.IsAgentIdentityID(id) {
 		return forwardedLimits{}, nil
+	}
+	project := ""
+	if caller.project != nil {
+		project = caller.project.ID
 	}
 	if reach == reachQueued {
 		if caller.has("control.all") {
 			return forwardedLimits{}, nil
 		}
-		spawner, err := d.remoteSpawner(caller, targetID)
-		if err != nil || spawner {
+		chain, err := d.starterChain(caller.session.ID)
+		if err != nil || slices.Contains(chain, targetID) {
 			return forwardedLimits{}, err
 		}
-		return forwardedLimits{project: caller.project.ID}, nil
+		return forwardedLimits{project: project}, nil
 	}
 	ceiling, err := parseCeiling(caller.ceiling)
 	if err != nil {
 		return forwardedLimits{}, err
 	}
-	limits := forwardedLimits{project: caller.project.ID, rank: ceiling.Permission}
+	limits := forwardedLimits{project: project, rank: ceiling.Permission}
 	if caller.role == nil {
 		return limits, nil
 	}

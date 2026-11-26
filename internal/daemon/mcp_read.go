@@ -57,9 +57,12 @@ func (d *Daemon) mcpRead(ctx context.Context, caller *mcpCaller, input mcpReadIn
 		}
 		return d.mcpReadInbox(identity, input.Ack)
 	}
-	session, err := d.mcpReadableSession(caller, input.SessionID)
+	session, remote, err := d.mcpReadable(ctx, caller, input.SessionID)
 	if err != nil {
 		return nil, err
+	}
+	if remote != nil {
+		return d.mcpReadRemote(ctx, remote.ID, input)
 	}
 	switch {
 	case input.BodyRef != "":
@@ -140,11 +143,19 @@ func (d *Daemon) mcpReadBack(ctx context.Context, session *surface.Session, curs
 	page, _, err := d.readSessionPage(ctx, session, adapter, before, limit, surfaceOperationTimeout, true)
 	var gap *registry.SessionJournalHistoryGapError
 	if errors.As(err, &gap) {
-		return map[string]any{"sessionId": session.ID, "items": []mcpItemView{}, "truncated": false, "unavailable": "No older history is retained."}, nil
+		return mcpNoOlderHistory(session.ID), nil
 	}
 	if err != nil {
 		return nil, &mcpRefusal{Code: "busy", Message: "The session could not be read: " + err.Error(), Retryable: true}
 	}
+	return mcpReadPage(session.ID, page, before, after)
+}
+
+func mcpNoOlderHistory(sessionID string) map[string]any {
+	return map[string]any{"sessionId": sessionID, "items": []mcpItemView{}, "truncated": false, "unavailable": "No older history is retained."}
+}
+
+func mcpReadPage(sessionID string, page *surface.SessionReadResult, before int64, after string) (any, error) {
 	pending := page.Items
 	if after != "" {
 		index := -1
@@ -171,7 +182,7 @@ func (d *Daemon) mcpReadBack(ctx context.Context, session *surface.Session, curs
 	for _, item := range pending[start:] {
 		items = append(items, mcpItem(item))
 	}
-	result := map[string]any{"sessionId": session.ID, "items": items, "latestSeq": page.JournalSeq, "source": page.Source}
+	result := map[string]any{"sessionId": sessionID, "items": items, "latestSeq": page.JournalSeq, "source": page.Source}
 	switch {
 	case start > 0:
 		result["nextCursor"] = encodeReadCursor(before, pending[start].ID)

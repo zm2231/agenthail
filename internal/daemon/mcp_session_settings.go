@@ -23,9 +23,17 @@ func (d *Daemon) mcpSessionSettings(ctx context.Context, caller *mcpCaller, inpu
 		if strings.TrimSpace(input.Value) != "" {
 			return nil, refuse("invalid", "value needs a setting.")
 		}
-		session, err := d.mcpReadableSession(caller, input.Target)
+		session, remote, err := d.mcpReadable(ctx, caller, input.Target)
 		if err != nil {
 			return nil, err
+		}
+		if remote != nil {
+			var view sessionSettingsView
+			if err := d.hostGet(ctx, remote.ID, "/api/v1/session-settings", "id", nil, &view); err != nil {
+				return nil, err
+			}
+			view.SessionID = remote.ID
+			return view, nil
 		}
 		return d.sessionSettings(ctx, session)
 	}

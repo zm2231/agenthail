@@ -10,23 +10,28 @@ import (
 )
 
 // forwardedScope checks an agent's action that a paired host sent here for a
-// session in the agent's own project. The sending host admitted it from its
-// mirror; this host knows the session's project, whether it is archived and
-// its permission rank, so it decides again. It also knows whether the caller
-// started or leads the session, so it picks which of the caller's two
-// decisions applies and returns it.
+// session in the agent's own project or one the agent started. The sending
+// host admitted it from the owning host's answer; this host records the
+// session's project, its starters, whether it is archived and its permission
+// rank, so it decides again. It also knows whether the caller started or
+// leads the session, so it picks which of the caller's two decisions applies
+// and returns it.
 func (d *Daemon) forwardedScope(session surface.Session, request dashboardActionRequest) (string, error) {
-	if request.ScopeProjectID == "" || surface.IsAgentIdentity(&session) {
+	if request.ScopeProjectID == "" && request.ScopeRank == "" || surface.IsAgentIdentity(&session) {
 		return "", nil
 	}
-	if err := d.forwardedLimits(session, request); err != nil {
+	started, err := d.startedVia(request.SourceSessionID, session.ID)
+	if err != nil {
+		return "", err
+	}
+	if err := d.forwardedLimits(session, request, started); err != nil {
 		return "", err
 	}
 	decision := request.ScopeControl
 	if decision == "" {
 		return "", nil
 	}
-	if d.oversees(request.SourceSessionID, session) {
+	if started || d.oversees(request.SourceSessionID, session) {
 		decision = request.ScopeOverseen
 	}
 	if decision == agentroles.Ask {
@@ -35,9 +40,9 @@ func (d *Daemon) forwardedScope(session surface.Session, request dashboardAction
 	return decision, nil
 }
 
-func (d *Daemon) forwardedLimits(session surface.Session, request dashboardActionRequest) error {
-	if project := d.resolveProject(session); project != request.ScopeProjectID {
-		return scopeFailure("different_project", fmt.Sprintf("%s is not in the caller's project %s; across hosts an agent reaches only sessions in its own project", session.ID, request.ScopeProjectID))
+func (d *Daemon) forwardedLimits(session surface.Session, request dashboardActionRequest, started bool) error {
+	if project := d.resolveProject(session); !started && (request.ScopeProjectID == "" || project != request.ScopeProjectID) {
+		return scopeFailure("different_project", fmt.Sprintf("%s is not in the caller's project and the caller did not start it; across hosts an agent reaches only sessions in its own project and sessions it started", session.ID))
 	}
 	if request.Action != "session-unarchive" {
 		archived, err := d.Registry.SessionArchived(session.ID)

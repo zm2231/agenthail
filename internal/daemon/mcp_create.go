@@ -159,7 +159,7 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 		request := dashboardActionRequest{
 			Action: "session-create", Host: host, Surface: string(kind), Cwd: cwd, Message: input.Message, Model: strings.TrimSpace(input.Model),
 			PermissionMode: start.permissionMode, Approval: start.approval, Alias: strings.TrimSpace(input.Alias), Ceiling: start.ceiling.encode(),
-			Isolation: isolation, Worktree: strings.TrimSpace(input.Branch), Base: strings.TrimSpace(input.Base),
+			Isolation: isolation, Worktree: strings.TrimSpace(input.Branch), Base: strings.TrimSpace(input.Base), SourceSessionID: caller.session.ID,
 		}
 		var result json.RawMessage
 		if input.Task {
@@ -199,7 +199,7 @@ func (d *Daemon) mcpCreateHostTask(ctx context.Context, caller *mcpCaller, input
 	if err := d.mcpChildrenRefusal(caller); err != nil {
 		return nil, err
 	}
-	request.Task, request.SourceSessionID = true, caller.session.ID
+	request.Task = true
 	return d.mcpAction(ctx, caller, "agenthail_create", input.mcpWrite, request)
 }
 
@@ -280,7 +280,7 @@ func (d *Daemon) agentCreateOnHost(ctx context.Context, caller *mcpCaller, host 
 		Action: "session-create", Host: host, TurnOptions: asked.TurnOptions, LaunchSettings: asked.LaunchSettings,
 		Surface: string(kind), Cwd: cwd, Message: asked.Message, Model: asked.Model, Alias: asked.Alias, Name: asked.Name, Agent: asked.Agent,
 		PermissionMode: start.permissionMode, Approval: start.approval, Isolation: asked.Isolation, Worktree: asked.Worktree, Base: asked.Base,
-		Ceiling: start.ceiling.encode(),
+		Ceiling: start.ceiling.encode(), SourceSessionID: caller.session.ID,
 	}
 	if asked.Task {
 		release, _ := d.spawnLocks.acquire(caller.session.ID, true)
@@ -288,7 +288,7 @@ func (d *Daemon) agentCreateOnHost(ctx context.Context, caller *mcpCaller, host 
 		if err := d.mcpChildrenRefusal(caller); err != nil {
 			return actionReply{}, err
 		}
-		request.Task, request.SourceSessionID = true, caller.session.ID
+		request.Task = true
 	}
 	body, err := json.Marshal(request)
 	if err != nil {

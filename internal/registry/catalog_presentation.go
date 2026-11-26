@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -174,7 +173,7 @@ func catalogPresentationRows(ctx context.Context, tx *sql.Tx, history bool) ([]C
 			&pinnedAt, &snoozedAt, &snoozedUntil, &snoozeWake, &row.StartedBy, &starterHost, &row.Task, &firstUnread, &revision); err != nil {
 			return nil, err
 		}
-		row.StartedBy = hosts.Qualify(starterHost, row.StartedBy)
+		row.StartedBy = QualifiedStarter(starterHost, row.StartedBy)
 		row.PinnedAt = unixMilliOrZero(pinnedAt)
 		if revision != "" {
 			row.ReadState = &surface.ReadState{FirstUnread: firstUnread, Revision: revision}
