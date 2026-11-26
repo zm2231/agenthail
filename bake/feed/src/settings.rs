@@ -294,7 +294,7 @@ mod tests {
     }
 
     fn all() -> Session {
-        with(Capabilities { model: true, compact: true, commands: true })
+        with(Capabilities { model: true, compact: true, commands: true, ..Capabilities::default() })
     }
 
     fn with(capabilities: Capabilities) -> Session {
@@ -354,7 +354,7 @@ mod tests {
         s.runtime_kind = "claude-cli".into();
         s.effort = Some(Setting { value: "high".into() });
         let models = opts(json!([{"id": "opus", "displayName": "Opus"}]));
-        let caps = Capabilities { model: true, compact: true, commands: false };
+        let caps = Capabilities { model: true, compact: true, commands: false, ..Capabilities::default() };
         let chips = super::chips(&s, &models, &with(caps.clone()));
         let effort = chips.iter().find(|c| c.key == "effort").unwrap();
         assert!(!effort.changeable);

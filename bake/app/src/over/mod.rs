@@ -146,8 +146,16 @@ pub fn go(s: &mut App, to: Screen) {
     }
     s.ov.jump = None;
     s.ov.notice = None;
-    s.composer = TextEdit::new("");
+    crate::switch_composer(s);
     arrive(s);
+}
+
+pub fn composer_target(s: &App) -> Option<String> {
+    match &s.screen {
+        Screen::Session => s.selected.clone(),
+        Screen::Project(key) => lead_of(s, key).map(|lead| feed::composer::current(&s.rekeyed, &lead).to_string()),
+        _ => None,
+    }
 }
 
 pub fn open_session(s: &mut App, id: &str) {
@@ -311,7 +319,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             if let Some(prev) = s.ov.back.pop() {
                 leave(s);
                 s.screen = prev;
-                s.composer = TextEdit::new("");
+                crate::switch_composer(s);
                 arrive(s);
             }
             true

@@ -170,15 +170,20 @@ pub struct Session {
     pub read_only: bool,
 }
 
-#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
 pub struct Capabilities {
-    #[serde(default)]
+    pub interrupt: bool,
+    pub steer: bool,
     pub model: bool,
-    #[serde(default)]
     pub compact: bool,
-    #[serde(default)]
     pub commands: bool,
+}
+
+impl Default for Capabilities {
+    fn default() -> Self {
+        Capabilities { interrupt: true, steer: true, model: false, compact: false, commands: false }
+    }
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -303,6 +308,23 @@ pub struct Snapshot {
     pub updated_at: String,
     #[serde(default)]
     pub sessions: Vec<Session>,
+    #[serde(default)]
+    pub busy_delivery: String,
+    #[serde(default)]
+    pub rekeyed: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    pub queue: Vec<QueueRow>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueRow {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub session_id: String,
+    #[serde(default)]
+    pub status: String,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -370,6 +392,7 @@ pub struct RespondError {
     pub code: String,
     pub maybe_delivered: bool,
     pub reply: Value,
+    pub answered: bool,
 }
 
 impl RespondError {
@@ -384,13 +407,13 @@ impl RespondError {
             502 => !released_answer,
             _ => false,
         };
-        RespondError { message, code, maybe_delivered, reply }
+        RespondError { message, code, maybe_delivered, reply, answered: true }
     }
 
     fn from_transport(error: &ureq::Transport) -> Self {
         use ureq::ErrorKind::*;
         let unsent = matches!(error.kind(), InvalidUrl | UnknownScheme | Dns | InsecureRequestHttpsOnly | ConnectionFailed | InvalidProxyUrl | ProxyConnect | ProxyUnauthorized);
-        RespondError { message: error.to_string(), code: String::new(), maybe_delivered: !unsent, reply: Value::Null }
+        RespondError { message: error.to_string(), code: String::new(), maybe_delivered: !unsent, reply: Value::Null, answered: false }
     }
 }
 
@@ -608,15 +631,19 @@ impl Client {
     }
 
     pub fn action(&self, name: &str, payload: Value) -> std::result::Result<Value, RespondError> {
+        self.action_keyed(name, payload, &request_key())
+    }
+
+    pub fn action_keyed(&self, name: &str, payload: Value, key: &str) -> std::result::Result<Value, RespondError> {
         let body = action_body(name, payload)?;
         match self
             .agent
             .post(&format!("{}/api/v1/actions", self.base))
             .set("Authorization", &format!("Bearer {}", self.token))
-            .set("Idempotency-Key", &request_key())
+            .set("Idempotency-Key", key)
             .send_json(body)
         {
-            Ok(response) => Ok(response.into_json().unwrap_or(Value::Null)),
+            Ok(response) => response.into_json().map_err(|e| RespondError { message: format!("the daemon's reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: true, answered: true, reply: Value::Null }),
             Err(ureq::Error::Status(code, response)) => Err(RespondError::from_status(name, code, &response.into_string().unwrap_or_default())),
             Err(ureq::Error::Transport(error)) => Err(RespondError::from_transport(&error)),
         }
@@ -625,13 +652,13 @@ impl Client {
 
 fn action_body(name: &str, payload: Value) -> std::result::Result<Value, RespondError> {
     let Value::Object(mut fields) = payload else {
-        return Err(RespondError { message: format!("the {name} payload is not a JSON object"), code: "invalid_request".into(), maybe_delivered: false, reply: Value::Null });
+        return Err(RespondError { message: format!("the {name} payload is not a JSON object"), code: "invalid_request".into(), maybe_delivered: false, reply: Value::Null, answered: false });
     };
     fields.insert("action".into(), Value::String(name.into()));
     Ok(Value::Object(fields))
 }
 
-fn request_key() -> String {
+pub fn request_key() -> String {
     static SEQ: AtomicU64 = AtomicU64::new(0);
     format!("bake-{}-{}-{}", std::process::id(), OffsetDateTime::now_utc().unix_timestamp_nanos(), SEQ.fetch_add(1, Ordering::Relaxed))
 }

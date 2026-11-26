@@ -11,7 +11,7 @@ use feed::derive::sessions::busy;
 use crate::over::{Line, Work, plain, short_id};
 use crate::over::ui::{self, BODY, BODY_MED, HEAD, META, META_MED, base, kit, strong, weak};
 use crate::over::go;
-use crate::{App, Screen};
+use crate::{App, Confirm, Screen};
 
 fn variant(s: &App, key: &str) -> El {
     let k = key.to_string();
@@ -306,6 +306,7 @@ pub fn board(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>) -> El {
 }
 
 fn lead_chat(s: &App, lead: &str) -> El {
+    let lead = feed::composer::current(&s.rekeyed, lead);
     if s.panes.get(lead).is_some_and(|p| !p.blocks.is_empty()) {
         return crate::transcript::view(s, lead);
     }
@@ -315,6 +316,7 @@ fn lead_chat(s: &App, lead: &str) -> El {
 }
 
 fn composer(s: &App, placeholder: &str, lead: &str) -> El {
+    let lead = feed::composer::current(&s.rekeyed, lead);
     let k = kit();
     let (to, to2) = (lead.to_string(), lead.to_string());
     let input = text_input(&s.composer, BODY.lh(21.0))
@@ -326,13 +328,41 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
         .placeholder(placeholder.to_string(), weak())
         .on_edit(|s: &mut App| &mut s.composer)
         .on_submit(move |s: &mut App, tx: &mut Tx| crate::send_to(s, &to, tx));
-    let status = if s.sending.contains(lead) { "Sending…".to_string() } else { s.status_line.get(lead).cloned().unwrap_or_else(|| "Sends as you".into()) };
+    let status = crate::composer_note(s, lead).or_else(|| crate::send_busy(s, lead).map(|b| b.hint().to_string())).unwrap_or_else(|| "Sends as you".into());
     let controls = row()
         .w_full()
         .items_center()
         .gap(6.0)
         .child(ui::spacer())
-        .child(text(status).font(META).color(weak()))
+        .child(text(status).font(META).color(weak()));
+    let controls = match crate::busy_delivery(s, lead) {
+        Some(choice) => {
+            let to = lead.to_string();
+            controls.child(Button::new(choice.label()).variant(ButtonVariant::Ghost).control_size(ControlSize::Small).build(k).key("busy-delivery").on_press(move |s: &mut App| crate::pick_busy(s, &to, choice.other())))
+        }
+        None => controls,
+    };
+    let controls = if crate::can_stop(s, lead) {
+        let to = lead.to_string();
+        controls.child(Button::new("Stop").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).build(k).key("stop").on_press(move |s: &mut App| crate::stop(s, &to)))
+    } else {
+        controls
+    };
+    let controls = if s.unsent.has(lead) {
+        let (again, back, drop, new) = (lead.to_string(), lead.to_string(), lead.to_string(), lead.to_string());
+        let mut controls = controls;
+        if crate::unsent_held(s, lead) {
+            controls = controls.child(Button::new(crate::confirm_label(s, lead, Confirm::PutBack)).variant(ButtonVariant::Ghost).build(k).key("send-put-back").on_press(move |s: &mut App| crate::put_back_unsent(s, &back)));
+        }
+        controls = controls.child(Button::new(crate::confirm_label(s, lead, Confirm::Discard)).variant(ButtonVariant::Ghost).build(k).key("send-dismiss").on_press(move |s: &mut App| crate::dismiss_unsent(s, &drop)));
+        if crate::offers_new_send(s, lead) {
+            controls = controls.child(Button::new(crate::confirm_label(s, lead, Confirm::SendNew)).variant(ButtonVariant::Ghost).build(k).key("send-new").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::send_as_new(s, &new, tx)));
+        }
+        controls.child(Button::new("Retry").variant(ButtonVariant::Ghost).build(k).key("send-retry").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::retry(s, &again, tx)))
+    } else {
+        controls
+    };
+    let controls = controls
         .child(IconButton::new(&icons::ARROW_UP).variant(IconButtonVariant::Submit).label("Send").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::send_to(s, &to2, tx)).build(k));
     col()
         .w_full()

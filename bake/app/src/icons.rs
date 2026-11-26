@@ -40,3 +40,5 @@ lucide!(MORE, "ah-more", r#"<circle cx="5.5" cy="12" r="1.2"/><circle cx="12" cy
 lucide!(PIN, "ah-pin", r#"<path d="M12 17v4.5"/><path d="M8.5 3.5h7l-1 6 3.5 3.5v2.5h-12V13l3.5-3.5z"/>"#);
 lucide!(SHRINK, "ah-shrink", r#"<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>"#);
 lucide!(SELECTOR, "ah-selector", r#"<path d="m8 9 4-4 4 4"/><path d="m8 15 4 4 4-4"/>"#);
+lucide!(STOP, "ah-stop", r#"<rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor"/>"#);
+lucide!(ROTATE, "ah-rotate", r#"<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5"/><path d="M4 4v4.5h4.5"/>"#);

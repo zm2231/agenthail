@@ -73,6 +73,14 @@ pub fn restore(s: &mut App) -> bool {
     true
 }
 
+fn unsent(s: &App) -> Value {
+    let mut all = s.unsent.clone();
+    for (id, pending) in s.in_flight.iter().flat_map(|(id, list)| list.iter().map(move |p| (id, p))) {
+        all.add(id, pending.clone());
+    }
+    all.to_json()
+}
+
 fn encode(s: &App) -> String {
     let boards: serde_json::Map<String, Value> = s.ov.boards.iter().map(|(k, v)| (k.clone(), Value::Bool(*v))).collect();
     json!({
@@ -81,6 +89,8 @@ fn encode(s: &App) -> String {
         "focus": s.ov.now_focus.map(|(i, before)| json!({ "pane": i, "before": before })),
         "boards": boards,
         "looked": { "now": s.ov.looked_now, "projects": s.ov.looked },
+        "drafts": s.drafts.to_json(),
+        "unsent": unsent(s),
     })
     .to_string()
 }
@@ -107,23 +117,42 @@ pub fn load(s: &mut App) {
     if let Some(m) = v["looked"]["projects"].as_object() {
         s.ov.looked = m.iter().filter_map(|(k, t)| t.as_str().map(|t| (k.clone(), t.to_string()))).collect();
     }
+    s.drafts = feed::composer::Drafts::from_json(&v["drafts"]);
+    s.unsent = feed::composer::Unconfirmed::from_json(&v["unsent"]);
+    let held: Vec<(String, String)> = s.unsent.iter().map(|(id, u)| (id.clone(), u.text.clone())).collect();
+    for (id, text) in held {
+        if s.drafts.get(&id).trim().is_empty() {
+            s.drafts.set(&id, &text);
+        }
+    }
     s.ov.arrange();
     *LAST.lock().expect("layout lock") = encode(s);
 }
 
-fn writer() -> &'static Sender<String> {
-    static WRITER: OnceLock<Sender<String>> = OnceLock::new();
+type Write = (String, Option<Sender<Result<(), String>>>);
+
+fn writer() -> &'static Sender<Write> {
+    static WRITER: OnceLock<Sender<Write>> = OnceLock::new();
     WRITER.get_or_init(|| {
-        let (tx, rx) = channel::<String>();
+        let (tx, rx) = channel::<Write>();
         std::thread::spawn(move || {
-            for text in rx {
+            for (text, done) in rx {
                 let Some(p) = path() else { continue };
-                let written = p.parent().is_none_or(|dir| std::fs::create_dir_all(dir).is_ok()) && std::fs::write(&p, &text).is_ok();
-                if !written {
+                let next = p.with_extension("json.next");
+                let written = p
+                    .parent()
+                    .map_or(Ok(()), std::fs::create_dir_all)
+                    .and_then(|()| std::fs::write(&next, &text))
+                    .and_then(|()| std::fs::rename(&next, &p))
+                    .map_err(|e| e.to_string());
+                if written.is_err() {
                     let mut last = LAST.lock().expect("layout lock");
                     if *last == text {
                         last.clear();
                     }
+                }
+                if let Some(done) = done {
+                    let _ = done.send(written);
                 }
             }
         });
@@ -138,7 +167,21 @@ pub fn save(s: &App) {
     let now = encode(s);
     let mut last = LAST.lock().expect("layout lock");
     if *last != now {
-        let _ = writer().send(now.clone());
+        let _ = writer().send((now.clone(), None));
         *last = now;
     }
+}
+
+pub fn save_now(s: &App) -> Result<(), String> {
+    if !s.ov.persist {
+        return Ok(());
+    }
+    if path().is_none() {
+        return Err("HOME is not set".into());
+    }
+    let now = encode(s);
+    let (done, wait) = channel();
+    *LAST.lock().expect("layout lock") = now.clone();
+    writer().send((now, Some(done))).map_err(|_| "the layout writer stopped".to_string())?;
+    wait.recv_timeout(std::time::Duration::from_secs(5)).map_err(|_| "saving took too long".to_string())?
 }

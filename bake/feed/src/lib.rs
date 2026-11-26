@@ -4,6 +4,7 @@ pub mod question;
 pub mod settings;
 pub mod catalog;
 pub mod create;
+pub mod composer;
 pub mod derive;
 pub mod edits;
 pub mod focus;

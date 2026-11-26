@@ -2,6 +2,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::catalog::{Client, RespondError};
+use crate::composer::{Busy, Delivered, Stop};
 
 type Outcome<T> = std::result::Result<T, RespondError>;
 
@@ -23,8 +24,17 @@ pub struct ReadState {
 }
 
 impl Client {
-    pub fn interrupt(&self, session: &str) -> Outcome<()> {
-        self.action("interrupt", json!({"sessionId": session})).map(drop)
+    pub fn interrupt(&self, session: &str) -> Outcome<Stop> {
+        Ok(Stop::read(&self.action("interrupt", json!({"sessionId": session}))?))
+    }
+
+    /// `busy` None leaves a busy session to the daemon's busy-delivery setting.
+    pub fn send_as(&self, session: &str, message: &str, busy: Option<Busy>, key: &str) -> Outcome<Delivered> {
+        let mut payload = json!({"sessionId": session, "message": message, "author": "person"});
+        if let Some(busy) = busy {
+            payload["busyDelivery"] = Value::String(busy.as_str().into());
+        }
+        Ok(Delivered::read(&self.action_keyed("send", payload, key)?))
     }
 
     pub fn steer(&self, session: &str, message: &str) -> Outcome<()> {
@@ -149,7 +159,7 @@ mod tests {
     fn each_action_sends_the_body_its_handler_reads() {
         type Call = Box<dyn Fn(&Client) -> Outcome<()>>;
         let calls: Vec<(Call, Value)> = vec![
-            (Box::new(|c| c.interrupt("s1")), json!({"action": "interrupt", "sessionId": "s1"})),
+            (Box::new(|c| c.interrupt("s1").map(drop)), json!({"action": "interrupt", "sessionId": "s1"})),
             (Box::new(|c| c.steer("s1", "stop")), json!({"action": "steer", "sessionId": "s1", "message": "stop", "author": "person"})),
             (Box::new(|c| c.queue_cancel(7, "").map(drop)), json!({"action": "queue-cancel", "queueId": 7, "host": ""})),
             (Box::new(|c| c.queue_cancel(7, "mac").map(drop)), json!({"action": "queue-cancel", "queueId": 7, "host": "mac"})),
@@ -171,6 +181,15 @@ mod tests {
             (Box::new(|c| c.limit_move("s1", None, false).map(drop)), json!({"action": "limit-move", "sessionId": "s1", "stopTerminal": false})),
             (Box::new(|c| c.limit_move("s1", Some("/home/a/.claude-b"), true).map(drop)), json!({"action": "limit-move", "sessionId": "s1", "configRoot": "/home/a/.claude-b", "stopTerminal": true})),
             (Box::new(|c| c.send("s1", "hi")), json!({"action": "send", "sessionId": "s1", "message": "hi", "author": "person"})),
+            (Box::new(|c| c.send_as("s1", "hi", None, &crate::catalog::request_key()).map(drop)), json!({"action": "send", "sessionId": "s1", "message": "hi", "author": "person"})),
+            (
+                Box::new(|c| c.send_as("s1", "hi", Some(Busy::Steer), &crate::catalog::request_key()).map(drop)),
+                json!({"action": "send", "sessionId": "s1", "message": "hi", "author": "person", "busyDelivery": "steer"}),
+            ),
+            (
+                Box::new(|c| c.send_as("s1", "hi", Some(Busy::Queue), &crate::catalog::request_key()).map(drop)),
+                json!({"action": "send", "sessionId": "s1", "message": "hi", "author": "person", "busyDelivery": "queue"}),
+            ),
             (
                 Box::new(|c| c.respond("s1", "ask-2", vec!["Yes".into()], Default::default())),
                 json!({"action": "respond", "sessionId": "s1", "requestId": "ask-2", "decision": {"choices": ["Yes"], "answers": {}}}),
@@ -209,7 +228,7 @@ mod tests {
             (502, r#"{"error":{"code":"bad_gateway","message":"session ended"}}"#),
         ]);
         let conflict = client.session_read("s1", "r9", true).unwrap_err();
-        assert_eq!((conflict.code.as_str(), conflict.message.as_str(), conflict.maybe_delivered), ("read_state_conflict", "the conversation moved on", false));
+        assert_eq!((conflict.code.as_str(), conflict.message.as_str(), conflict.maybe_delivered, conflict.answered), ("read_state_conflict", "the conversation moved on", false, true));
         assert!(!client.interrupt("s1").unwrap_err().maybe_delivered);
         assert!(!client.respond("s1", "ask-1", vec!["Yes".into()], Default::default()).unwrap_err().maybe_delivered);
     }
@@ -231,6 +250,33 @@ mod tests {
     }
 
     #[test]
+    fn an_unreadable_success_reply_is_maybe_delivered() {
+        let (client, _seen) = daemon(vec![(200, r#"{"ok":tr"#)]);
+        let error = client.send_as("s1", "hi", None, "k").unwrap_err();
+        assert!(error.maybe_delivered, "{}", error.message);
+        assert_eq!(error.code, "unreadable_reply");
+    }
+
+    #[test]
+    fn a_stop_still_in_progress_is_not_reported_as_done() {
+        let (client, _seen) = daemon(vec![(202, r#"{"ok":true,"status":"submitted"}"#), (200, r#"{"ok":true,"result":{"action":"interrupt","evidence":"delivered"}}"#)]);
+        assert_eq!(client.interrupt("s1").unwrap(), Stop::Unconfirmed);
+        assert_eq!(client.interrupt("s1").unwrap(), Stop::Stopped);
+    }
+
+    #[test]
+    fn a_retried_send_carries_the_request_id_it_was_given() {
+        let (client, seen) = daemon(vec![
+            (200, r#"{"ok":true,"result":{"evidence":"queued","queueId":3}}"#),
+            (202, r#"{"ok":true,"status":"submitted"}"#),
+        ]);
+        assert_eq!(client.send_as("s1", "hi", Some(Busy::Queue), "retry-1").unwrap(), Delivered::Queued(Some(3)));
+        assert_eq!(seen.recv().unwrap().key, "retry-1");
+        assert_eq!(client.send_as("s1", "hi", Some(Busy::Queue), "retry-1").unwrap(), Delivered::Unconfirmed);
+        assert_eq!(seen.recv().unwrap().key, "retry-1");
+    }
+
+    #[test]
     fn any_action_name_gets_a_key_the_daemon_accepts() {
         let (client, seen) = daemon(vec![(200, r#"{"ok":true}"#)]);
         let name = "x".repeat(200);
@@ -243,7 +289,7 @@ mod tests {
     #[test]
     fn a_daemon_that_never_answered_the_connection_got_nothing() {
         let error = Client::new("http://127.0.0.1:0", "secret").steer("s1", "stop").unwrap_err();
-        assert!(!error.maybe_delivered, "{}", error.message);
+        assert!(!error.maybe_delivered && !error.answered, "{}", error.message);
     }
 
     #[test]
