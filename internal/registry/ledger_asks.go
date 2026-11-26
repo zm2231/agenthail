@@ -23,6 +23,7 @@ type LedgerQuestion struct {
 	Deadline       time.Time
 	Answered       bool
 	Defaulted      bool
+	WorkItem       string
 }
 
 func LedgerAskRef(projectKey, questionID string) string {
@@ -82,7 +83,7 @@ func (r *Registry) SyncLedgerAsks(projectKey string, questions []LedgerQuestion,
 		state := ""
 		switch {
 		case !asked && !q.Answered && !q.Defaulted && !dismissed[ref]:
-			if err := raiseLedgerAsk(tx, ref, q, at); err != nil {
+			if err := raiseLedgerAsk(tx, projectKey, ref, q, at); err != nil {
 				return nil, err
 			}
 		case asked && q.Defaulted:
@@ -119,7 +120,7 @@ func dismissedLedgerRefs(tx *sql.Tx, prefix string) (map[string]bool, error) {
 	return dismissed, rows.Err()
 }
 
-func raiseLedgerAsk(tx *sql.Tx, ref string, q LedgerQuestion, at time.Time) error {
+func raiseLedgerAsk(tx *sql.Tx, projectKey, ref string, q LedgerQuestion, at time.Time) error {
 	var local bool
 	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM sessions WHERE id=? AND host_id='')`, q.OwnerSessionID).Scan(&local); err != nil || !local {
 		return err
@@ -136,8 +137,12 @@ func raiseLedgerAsk(tx *sql.Tx, ref string, q LedgerQuestion, at time.Time) erro
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(`INSERT OR IGNORE INTO asks(id,session_id,origin,title,questions_json,routed_to,routed_at_ms,route_json,state,created_at_ms,ref,deadline_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-		id, q.OwnerSessionID, AskOriginLedger, clip(q.ID+": "+q.Text, MaxAskTitle), string(questions), AskToPerson, at.UnixMilli(), string(route), AskOpen, at.UnixMilli(), ref, q.Deadline.UnixMilli())
+	ledgerKey := ""
+	if q.WorkItem != "" {
+		ledgerKey = projectKey
+	}
+	_, err = tx.Exec(`INSERT OR IGNORE INTO asks(id,session_id,origin,title,questions_json,routed_to,routed_at_ms,route_json,state,created_at_ms,ref,deadline_ms,work_item,ledger_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		id, q.OwnerSessionID, AskOriginLedger, clip(q.ID+": "+q.Text, MaxAskTitle), string(questions), AskToPerson, at.UnixMilli(), string(route), AskOpen, at.UnixMilli(), ref, q.Deadline.UnixMilli(), q.WorkItem, ledgerKey)
 	return err
 }
 

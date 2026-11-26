@@ -157,11 +157,13 @@ Provisional words never hold a turn. The gate does not hold a session while the 
 A session that needs the person to decide something records a question instead of guessing:
 
 ```
-agenthail ledger question --to <goal|ask|clause|project> "Index titles only, or bodies too?" \
+agenthail ledger question --to <goal|ask|clause|item|project> "Index titles only, or bodies too?" \
   --recommendation "titles only" --default "titles only" --deadline 4h --kind scope [--keeps-breadth]
 ```
 
 The question is an ask for the person on the asking session's row, with the recommendation and the default as its options and room for their own words. They are notified when it is asked. Their answer is recorded as their utterance and attached to the question as its answer, and the asking session gets one message with it. An answer recorded another way (`attach --as answers` with words the person typed) closes the ask. `agenthail ledger questions [--all]` lists open questions, and with `--all` the answered ones too.
+
+A question to a work item is about that item: it takes the goal of the item's clause, a deleted item is refused, and while the person's ask is open the item alone waits on `person` in the Waiting on you lane, and Needs you names it. It stays a ledger question with these rules, not an agent's ask recorded on the item.
 
 If nobody answers by the deadline:
 

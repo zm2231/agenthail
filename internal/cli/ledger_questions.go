@@ -34,7 +34,7 @@ func (a *App) ledgerQuestion(args []string) error {
 	}
 	text := strings.TrimSpace(strings.Join(w.positional[1:], " "))
 	if text == "" || w.value("--to") == "" || w.value("--deadline") == "" || w.value("--kind") == "" {
-		return fmt.Errorf(`usage: agenthail ledger question --to <goal|ask|clause|project> "<question>" --recommendation "<r>" --default "<d>" --deadline <30m|4h|2d> --kind <scope|framing|outward> [--keeps-breadth]`)
+		return fmt.Errorf(`usage: agenthail ledger question --to <goal|ask|clause|item|project> "<question>" --recommendation "<r>" --default "<d>" --deadline <30m|4h|2d> --kind <scope|framing|outward> [--keeps-breadth]`)
 	}
 	deadline, err := parseLedgerDeadline(w.value("--deadline"), time.Now())
 	if err != nil {
