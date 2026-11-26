@@ -34,7 +34,7 @@ pub const COMPOSER: [(Edit, &str); 8] = [
 
 #[derive(Default)]
 pub struct State {
-    escaped: Option<Instant>,
+    escaped: Option<(String, Instant)>,
     stash: HashMap<String, String>,
 }
 
@@ -88,14 +88,14 @@ fn cycle_mode(s: &mut App, id: &str) -> bool {
 }
 
 fn interrupt(s: &mut App, id: &str) {
-    if search::selected(s).as_deref() == Some(id) && search::can_stop(s, id) {
+    if crate::over::composer_target(s).as_deref() == Some(id) && search::can_stop(s, id) {
         s.complete.keys.escaped = None;
         crate::stop(s, id);
         return;
     }
     let now = Instant::now();
-    if !s.complete.keys.escaped.take().is_some_and(|at| now.duration_since(at) < DOUBLE_ESCAPE) {
-        s.complete.keys.escaped = Some(now);
+    if !s.complete.keys.escaped.take().is_some_and(|(at_id, at)| at_id == id && now.duration_since(at) < DOUBLE_ESCAPE) {
+        s.complete.keys.escaped = Some((id.to_string(), now));
         return;
     }
     if !super::complete::clear_into_history(s, id) {
@@ -104,17 +104,15 @@ fn interrupt(s: &mut App, id: &str) {
 }
 
 fn stash(s: &mut App, id: &str) -> bool {
-    let held = if s.composer.text.is_empty() {
-        match s.complete.keys.stash.remove(id) {
-            Some(held) => held,
-            None => return false,
-        }
-    } else {
-        let current = s.composer.text.clone();
-        let back = s.complete.keys.stash.remove(id).unwrap_or_default();
-        s.complete.keys.stash.insert(id.to_string(), current);
-        back
-    };
+    let empty = s.composer.text.is_empty() && !s.attach.tray.has(id);
+    if empty && !s.complete.keys.stash.contains_key(id) && !s.attach.tray.has_stashed(id) {
+        return false;
+    }
+    let held = s.complete.keys.stash.remove(id).unwrap_or_default();
+    if !s.composer.text.is_empty() {
+        s.complete.keys.stash.insert(id.to_string(), s.composer.text.clone());
+    }
+    s.attach.tray.swap_stash(id);
     super::complete::replace_composer(s, &held);
     true
 }

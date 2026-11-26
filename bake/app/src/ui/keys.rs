@@ -101,10 +101,15 @@ pub fn stepped<'a>(order: &'a [String], current: Option<&str>, by: isize) -> Opt
 }
 
 fn step(s: &mut App, by: isize) -> bool {
-    let Some(id) = search::selected(s) else { return false };
-    let project = crate::ui::gone::shown(s, &id).and_then(|x| over::ui::project_for(s, x));
-    let order = over::ui::sidebar_order(s, project.as_deref(), Some(&id));
-    let Some(next) = stepped(&order, Some(&id), by).map(str::to_string) else { return false };
+    let selected = search::selected(s);
+    let project = match (&s.screen, &selected) {
+        (_, Some(id)) => crate::ui::gone::shown(s, id).and_then(|x| over::ui::project_for(s, x)),
+        (Screen::Project(key), None) => Some(key.clone()),
+        (Screen::Work(id), None) => s.ov.d.work.get(id).map(|w| w.project.clone()),
+        _ => None,
+    };
+    let order = over::ui::sidebar_order(s, project.as_deref(), selected.as_deref());
+    let Some(next) = stepped(&order, selected.as_deref(), by).map(str::to_string) else { return false };
     over::open_session(s, &next);
     true
 }
