@@ -2,7 +2,7 @@ use rune::{Color, El, Icon, Key, KeyEvent, ScrollSpec, TextStyle, Tx, col, icon,
 use rune_theme_opencode::icons;
 
 use feed::catalog::Session;
-use feed::search::{Command, Selected, commands, one_line};
+use feed::search::{Command, Selected, commands, commands_lead, one_line};
 
 use crate::icons as ah;
 use crate::over::search;
@@ -42,14 +42,15 @@ fn command_icon(c: Command) -> &'static Icon {
 }
 
 fn entries(s: &App) -> Vec<Entry> {
-    let q = s.ov.jump.as_ref().map(|e| e.text.as_str()).unwrap_or_default();
-    let mut out: Vec<Entry> = s.ov.d.jump(q, &s.ov.needs, &s.ov.hands_on).into_iter().map(|h| Entry { group: h.group, title: h.title, status: h.status, badge: h.badge, look: Look::Avatar(h.avatar), pick: Some(Pick::Target(h.target)) }).collect();
+    let q = query(s);
+    let hits = s.ov.d.jump(q, &s.ov.needs, &s.ov.hands_on).into_iter().map(|h| Entry { group: h.group, title: h.title, status: h.status, badge: h.badge, look: Look::Avatar(h.avatar), pick: Some(Pick::Target(h.target)) });
     let selected = search::selected(s);
     let title = selected.as_deref().map(|id| search::selected_title(s, id)).unwrap_or_default();
     let current = selected.as_deref().map(|id| Selected { title: &title, can_stop: search::can_stop(s, id) });
-    for c in commands(q, current) {
-        out.push(Entry { group: "Commands", title: c.title, status: String::new(), badge: c.shortcut.to_string(), look: Look::Icon(command_icon(c.command)), pick: Some(Pick::Command(c.command)) });
-    }
+    let rows = commands(q, current);
+    let lead = commands_lead(q, &rows);
+    let cmds = rows.into_iter().map(|c| Entry { group: "Commands", title: c.title, status: String::new(), badge: c.shortcut.to_string(), look: Look::Icon(command_icon(c.command)), pick: Some(Pick::Command(c.command)) });
+    let mut out: Vec<Entry> = if lead { cmds.chain(hits).collect() } else { hits.chain(cmds).collect() };
     if let Some(found) = search::codex_for(s) {
         let group = "Codex history";
         let note = |text: String| Entry { group, title: text, status: String::new(), badge: String::new(), look: Look::Icon(&ah::CLOCK), pick: None };
@@ -78,6 +79,20 @@ fn entries(s: &App) -> Vec<Entry> {
     out
 }
 
+fn query(s: &App) -> &str {
+    s.ov.jump.as_ref().map(|e| e.text.as_str()).unwrap_or_default()
+}
+
+fn highlighted(s: &App) -> usize {
+    let (at, ix) = &s.ov.jump_ix;
+    if at == query(s) { *ix } else { 0 }
+}
+
+fn highlight(s: &mut App, ix: usize, tx: &mut Tx) {
+    s.ov.jump_ix = (query(s).to_string(), ix);
+    tx.scroll_into_view_in("jump-list", format!("hit-{ix}"));
+}
+
 fn picks(s: &App) -> usize {
     entries(s).iter().filter(|e| e.pick.is_some()).count()
 }
@@ -103,17 +118,17 @@ pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             true
         }
         Key::Down => {
-            s.ov.jump_ix = (s.ov.jump_ix + 1).min(picks(s).saturating_sub(1));
-            tx.scroll_into_view_in("jump-list", format!("hit-{}", s.ov.jump_ix));
+            let ix = (highlighted(s) + 1).min(picks(s).saturating_sub(1));
+            highlight(s, ix, tx);
             true
         }
         Key::Up => {
-            s.ov.jump_ix = s.ov.jump_ix.saturating_sub(1);
-            tx.scroll_into_view_in("jump-list", format!("hit-{}", s.ov.jump_ix));
+            let ix = highlighted(s).saturating_sub(1);
+            highlight(s, ix, tx);
             true
         }
         Key::Enter => {
-            let ix = s.ov.jump_ix.min(picks(s).saturating_sub(1));
+            let ix = highlighted(s).min(picks(s).saturating_sub(1));
             run_at(s, ix, tx);
             true
         }
@@ -132,13 +147,18 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
         .shrink()
         .color(strong())
         .placeholder("Jump to a project, work item or session, or run a command".to_string(), weak())
-        .on_edit(|s: &mut App| s.ov.jump.as_mut().expect("jump open"))
+        .on_edit(|s: &mut App| {
+            if s.ov.jump_ix.0 != query(s) {
+                s.ov.jump_ix = (query(s).to_string(), 0);
+            }
+            s.ov.jump.as_mut().expect("jump open")
+        })
         .on_input_key(|s: &mut App, ev: &KeyEvent, tx: &mut Tx| key(s, ev, tx));
     let search = row().w_full().gap(10.0).items_center().px(16.0).py(14.0).border_sides([0.0, 0.0, 1.0, 0.0], ui::rule()).child(icon(&icons::MAGNIFYING_GLASS, 18.0).color(k.c.icon_base)).child(input).child(ui::ghost_keys(&["esc"]));
     let mut list = col().w_full().gap(2.0).padding(8.0);
     let mut last = "";
     let found = entries(s);
-    let ix = s.ov.jump_ix.min(found.iter().filter(|e| e.pick.is_some()).count().saturating_sub(1));
+    let ix = highlighted(s).min(found.iter().filter(|e| e.pick.is_some()).count().saturating_sub(1));
     let mut i = 0;
     for h in found {
         if h.group != last {
@@ -189,7 +209,7 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
         .child(row().gap(6.0).items_center().child(ui::ghost_keys(&["↑", "↓"])).child(text("move".to_string()).font(META).color(weak())))
         .child(row().gap(6.0).items_center().child(ui::ghost_keys(&["⏎"])).child(text("open".to_string()).font(META).color(weak())))
         .child(ui::spacer())
-        .child(text("Projects, work, sessions, commands, then older Codex threads".to_string()).font(META).color(weak()));
+        .child(text("Projects, work, sessions and commands, then older Codex threads".to_string()).font(META).color(weak()));
     let panel = col()
         .key("jump")
         .w(680.0)
