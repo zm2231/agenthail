@@ -3,6 +3,8 @@ use feed::gone::{Fix, Gone};
 
 const RECHECK: f64 = 20.0;
 
+static LOOKUPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub enum Look {
     Pending,
     Found(Gone),
@@ -14,7 +16,6 @@ pub struct Missing {
     pub look: Look,
     asked: f64,
     asking: Option<u64>,
-    seq: u64,
     pub fixing: Option<Fix>,
     pub error: Option<String>,
 }
@@ -27,7 +28,7 @@ pub fn shown<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
 }
 
 fn not_found(id: String, why: String, at: f64) -> Missing {
-    Missing { id, look: Look::Failed(why), asked: at, asking: None, seq: 0, fixing: None, error: None }
+    Missing { id, look: Look::Failed(why), asked: at, asking: None, fixing: None, error: None }
 }
 
 pub fn watch(s: &mut App) -> bool {
@@ -52,15 +53,16 @@ pub fn watch(s: &mut App) -> bool {
     if s.snapshots == 0 && !s.status.starts_with("daemon:") {
         return false;
     }
-    let seq = s.missing.as_ref().map_or(0, |m| m.seq) + 1;
+    if s.missing.as_ref().is_some_and(|m| m.id == id && (m.asking.is_some() || m.fixing.is_some() || s.clock - m.asked < RECHECK)) {
+        return false;
+    }
+    let seq = LOOKUPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
     match s.missing.as_mut().filter(|m| m.id == id) {
-        Some(m) if m.asking.is_some() || m.fixing.is_some() || s.clock - m.asked < RECHECK => return false,
         Some(m) => {
             m.asked = s.clock;
             m.asking = Some(seq);
-            m.seq = seq;
         }
-        None => s.missing = Some(Missing { id: id.clone(), look: Look::Pending, asked: s.clock, asking: Some(seq), seq, fixing: None, error: None }),
+        None => s.missing = Some(Missing { id: id.clone(), look: Look::Pending, asked: s.clock, asking: Some(seq), fixing: None, error: None }),
     }
     let known = s.last_row.clone().filter(|r| r.id == id).or_else(|| s.ov.d.session(&id).cloned());
     let tx = s.outbox.clone();
@@ -148,7 +150,7 @@ fn exchanges(g: &Gone) -> El {
     let list = col().w_full().max_w(780.0).gap(18.0).px(32.0).py(16.0).children(g.exchanges.iter().map(|e| {
         let mut c = col().w_full().gap(10.0);
         if !e.user.is_empty() {
-            c = c.child(turn("You", &e.user, theme::text()));
+            c = c.child(turn(&e.from, &e.user, theme::text()));
         }
         if !e.assistant.is_empty() {
             c = c.child(turn("Agent", &e.assistant, muted()));
@@ -166,7 +168,14 @@ pub fn screen(s: &App, id: &str) -> El {
         Look::Found(g) => {
             let center = col().grow(1.0).h_full().min_w(0.0).child(header(s, &g.row)).child(banner(m, g));
             let streamed = s.panes.get(id).is_some_and(|p| !p.blocks.is_empty());
-            if streamed || g.exchanges.is_empty() || s.tab == Tab::Changes { conversation(s, id, center) } else { center.child(exchanges(g)) }
+            if streamed || s.tab == Tab::Changes {
+                conversation(s, id, center)
+            } else if g.exchanges.is_empty() {
+                let why = g.read_error.as_ref().map_or("Agenthail returned no conversation for this session.".to_string(), |e| format!("Couldn't read this session's conversation: {e}"));
+                center.child(col().key("gone-empty").w_full().grow(1.0).items_center().justify_center().child(text(why).font(BODY_BOLD).color(faint()).wrap()).child(el().h(80.0)))
+            } else {
+                center.child(exchanges(g))
+            }
         }
     }
 }

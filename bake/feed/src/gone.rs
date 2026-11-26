@@ -7,6 +7,14 @@ pub enum Why {
     Archived,
     Offline(String),
     Unlisted,
+    Unchecked(String),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Listing {
+    Found(Session),
+    Absent,
+    Unchecked(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -33,6 +41,7 @@ impl Fix {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Exchange {
+    pub from: String,
     pub user: String,
     pub assistant: String,
 }
@@ -43,6 +52,7 @@ pub struct Gone {
     pub why: Why,
     pub fix: Option<Fix>,
     pub exchanges: Vec<Exchange>,
+    pub read_error: Option<String>,
 }
 
 impl Gone {
@@ -52,6 +62,7 @@ impl Gone {
             Why::Offline(host) if host.is_empty() => "This session is offline because its computer isn't reachable.".into(),
             Why::Offline(host) => format!("This session is offline because {host} isn't reachable."),
             Why::Unlisted => "Agenthail no longer lists this session. You're reading what it last had.".into(),
+            Why::Unchecked(e) => format!("Agenthail no longer lists this session, and couldn't check whether it was archived: {e}"),
         }
     }
 }
@@ -86,7 +97,17 @@ impl Detail {
     fn exchanges(&self) -> Vec<Exchange> {
         let Detail::Found(v) = self else { return Vec::new() };
         let text = |e: &Value, k: &str| e[k].as_str().unwrap_or_default().trim().to_string();
-        v["exchanges"].as_array().into_iter().flatten().map(|e| Exchange { user: text(e, "user"), assistant: text(e, "assistant") }).filter(|e| !e.user.is_empty() || !e.assistant.is_empty()).collect()
+        v["exchanges"].as_array().into_iter().flatten().map(|e| Exchange { from: sender(&text(e, "origin"), &text(e, "sender")), user: text(e, "user"), assistant: text(e, "assistant") }).filter(|e| !e.user.is_empty() || !e.assistant.is_empty()).collect()
+    }
+
+    fn read_error(&self) -> Option<String> {
+        let Detail::Found(v) = self else { return None };
+        match &v["readError"] {
+            Value::Null => None,
+            Value::String(e) if e.trim().is_empty() => None,
+            Value::String(e) => Some(e.trim().to_string()),
+            other => other["message"].as_str().map(String::from).or_else(|| Some(other.to_string())),
+        }
     }
 
     fn row(&self, id: &str) -> Option<Session> {
@@ -98,24 +119,41 @@ impl Detail {
     }
 }
 
+pub fn sender(origin: &str, sender: &str) -> String {
+    match origin {
+        "" => "You".into(),
+        "peer" if !sender.is_empty() => sender.to_string(),
+        "peer" => "Another agent".into(),
+        other => {
+            let words = other.replace(['-', '_'], " ");
+            let mut c = words.chars();
+            c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
+        }
+    }
+}
+
 fn reachable(x: &Session) -> bool {
     matches!(x.host.state.as_str(), "" | "local" | "connected") && x.unavailable_reason.as_deref().is_none_or(str::is_empty)
 }
 
-pub fn classify(id: &str, detail: &Detail, listed: Option<Session>, known: Option<&Session>) -> Result<Gone, String> {
-    let row = listed.clone().or_else(|| known.cloned()).or_else(|| detail.row(id));
-    let row = match (row, detail) {
-        (Some(r), _) => r,
-        (None, Detail::Unreachable) => Session { id: id.to_string(), ..Session::default() },
-        (None, Detail::Missing) => return Err("Agenthail has no session with this id any more.".into()),
-        (None, Detail::Failed(e)) => return Err(format!("Couldn't look this session up: {e}")),
-        (None, Detail::Found(_)) => unreachable!("a found detail always gives a row"),
+pub fn classify(id: &str, detail: &Detail, listing: Listing, known: Option<&Session>) -> Result<Gone, String> {
+    let listed = match &listing {
+        Listing::Found(r) => Some(r.clone()),
+        _ => None,
     };
+    match (detail, &listed) {
+        (Detail::Missing, _) => return Err("Agenthail has no session with this id any more.".into()),
+        (Detail::Failed(e), None) => return Err(format!("Couldn't look this session up: {e}")),
+        _ => {}
+    }
+    let row = listed.clone().or_else(|| known.cloned()).or_else(|| detail.row(id)).unwrap_or_else(|| Session { id: id.to_string(), ..Session::default() });
     let archived = listed.as_ref().map_or(row.archived, |l| l.archived);
     let why = if archived {
         Why::Archived
     } else if *detail == Detail::Unreachable || !reachable(&row) {
         Why::Offline(row.host.name.clone())
+    } else if let Listing::Unchecked(e) = listing {
+        Why::Unchecked(e)
     } else {
         Why::Unlisted
     };
@@ -124,7 +162,7 @@ pub fn classify(id: &str, detail: &Detail, listed: Option<Session>, known: Optio
         _ if row.capabilities.lifecycle.resume || detail.resume() => Some(Fix::Resume),
         _ => None,
     };
-    Ok(Gone { row, why, fix, exchanges: detail.exchanges() })
+    Ok(Gone { row, why, fix, exchanges: detail.exchanges(), read_error: detail.read_error() })
 }
 
 const PAGES: usize = 10;
@@ -147,24 +185,37 @@ impl Client {
         let detail = Detail::read(self.get_coded(&format!("/api/v1/session?id={}&limit=20", enc(id))));
         let found = detail.row(id);
         let terms = search_terms([known, found.as_ref()].into_iter().flatten());
-        let listed = terms.iter().find_map(|term| self.listed(id, term));
-        classify(id, &detail, listed, known)
+        let mut listing = if terms.is_empty() { Listing::Unchecked("it has no name or folder to search by".into()) } else { Listing::Absent };
+        for term in &terms {
+            match self.listed(id, term) {
+                Ok(Some(row)) => {
+                    listing = Listing::Found(row);
+                    break;
+                }
+                Ok(None) => {}
+                Err(e) => listing = Listing::Unchecked(e),
+            }
+        }
+        classify(id, &detail, listing, known)
     }
 
-    fn listed(&self, id: &str, term: &str) -> Option<Session> {
+    fn listed(&self, id: &str, term: &str) -> Result<Option<Session>, String> {
         let mut cursor: Option<String> = None;
         for _ in 0..PAGES {
             let mut path = format!("/api/v1/snapshot?q={}&limit=200", enc(term));
             if let Some(c) = &cursor {
                 path.push_str(&format!("&cursor={}", enc(c)));
             }
-            let page = self.get_json(&path).ok()?;
+            let page = self.get_json(&path).map_err(|e| e.to_string())?;
             if let Some(row) = page["sessions"].as_array().into_iter().flatten().find(|r| r["id"] == id) {
-                return serde_json::from_value(row.clone()).ok();
+                return serde_json::from_value(row.clone()).map(Some).map_err(|e| e.to_string());
             }
-            cursor = Some(page["nextCursor"].as_str().filter(|c| !c.is_empty())?.to_string());
+            match page["nextCursor"].as_str().filter(|c| !c.is_empty()) {
+                Some(c) => cursor = Some(c.to_string()),
+                None => return Ok(None),
+            }
         }
-        None
+        Err(format!("more than {} pages match \"{term}\"", PAGES * 200))
     }
 
     pub fn fix(&self, id: &str, fix: Fix) -> Result<(), RespondError> {
@@ -196,7 +247,7 @@ mod tests {
     #[test]
     fn an_archived_listing_offers_unarchive_whatever_its_capabilities() {
         let listed = row(json!({"id": "s1", "name": "Fix the importer", "archived": true, "host": {"name": "studio", "state": "local"}}));
-        let g = classify("s1", &detail(), Some(listed), None).unwrap();
+        let g = classify("s1", &detail(), Listing::Found(listed), None).unwrap();
         assert_eq!(g.why, Why::Archived);
         assert_eq!(g.fix, Some(Fix::Unarchive));
         assert!(g.note().contains("archived"));
@@ -205,24 +256,24 @@ mod tests {
     #[test]
     fn an_unreachable_host_is_offline_and_resumes_only_when_the_session_can() {
         let known = row(json!({"id": "s1", "name": "Fix the importer", "host": {"name": "buildbox", "state": "connected"}}));
-        let g = classify("s1", &Detail::Unreachable, None, Some(&known)).unwrap();
+        let g = classify("s1", &Detail::Unreachable, Listing::Absent, Some(&known)).unwrap();
         assert_eq!(g.why, Why::Offline("buildbox".into()));
         assert_eq!(g.fix, None);
         assert_eq!(g.note(), "This session is offline because buildbox isn't reachable.");
         let able = row(json!({"id": "s1", "host": {"name": "buildbox", "state": "disconnected"}, "capabilities": {"lifecycle": {"resume": true}}}));
-        let g = classify("s1", &Detail::Failed("timeout".into()), Some(able), None).unwrap();
+        let g = classify("s1", &Detail::Failed("timeout".into()), Listing::Found(able), None).unwrap();
         assert_eq!((g.why, g.fix), (Why::Offline("buildbox".into()), Some(Fix::Resume)));
     }
 
     #[test]
     fn an_unavailable_reason_counts_as_offline() {
         let listed = row(json!({"id": "s1", "host": {"name": "studio", "state": "local"}, "unavailableReason": "host down"}));
-        assert_eq!(classify("s1", &detail(), Some(listed), None).unwrap().why, Why::Offline("studio".into()));
+        assert_eq!(classify("s1", &detail(), Listing::Found(listed), None).unwrap().why, Why::Offline("studio".into()));
     }
 
     #[test]
     fn a_reachable_session_that_left_the_list_is_unlisted_and_uses_the_detail_for_its_header() {
-        let g = classify("s1", &detail(), None, None).unwrap();
+        let g = classify("s1", &detail(), Listing::Absent, None).unwrap();
         assert_eq!(g.why, Why::Unlisted);
         assert_eq!(g.fix, Some(Fix::Resume));
         assert_eq!((g.row.name.as_str(), g.row.alias.as_deref(), g.row.surface.as_str()), ("Fix the importer", Some("fixer"), "codex"));
@@ -232,15 +283,15 @@ mod tests {
     fn the_listing_decides_archived_over_an_older_known_copy() {
         let known = row(json!({"id": "s1", "archived": true}));
         let listed = row(json!({"id": "s1", "host": {"state": "local"}}));
-        assert_eq!(classify("s1", &detail(), Some(listed), Some(&known)).unwrap().why, Why::Unlisted);
-        assert_eq!(classify("s1", &detail(), None, Some(&known)).unwrap().why, Why::Archived);
+        assert_eq!(classify("s1", &detail(), Listing::Found(listed), Some(&known)).unwrap().why, Why::Unlisted);
+        assert_eq!(classify("s1", &detail(), Listing::Absent, Some(&known)).unwrap().why, Why::Archived);
     }
 
     #[test]
     fn a_session_the_daemon_never_heard_of_gives_an_error_not_a_spinner() {
-        assert!(classify("s1", &Detail::Missing, None, None).unwrap_err().contains("no session"));
-        assert!(classify("s1", &Detail::Failed("refused".into()), None, None).unwrap_err().contains("refused"));
-        let g = classify("s1", &Detail::Unreachable, None, None).unwrap();
+        assert!(classify("s1", &Detail::Missing, Listing::Absent, None).unwrap_err().contains("no session"));
+        assert!(classify("s1", &Detail::Failed("refused".into()), Listing::Absent, None).unwrap_err().contains("refused"));
+        let g = classify("s1", &Detail::Unreachable, Listing::Absent, None).unwrap();
         assert_eq!((g.row.id.as_str(), &g.why), ("s1", &Why::Offline(String::new())));
         assert!(g.note().contains("its computer"));
     }
@@ -258,9 +309,9 @@ mod tests {
     #[test]
     fn the_returned_exchanges_stand_in_for_the_transcript() {
         let d = Detail::Found(json!({"session": {"id": "s1"}, "exchanges": [{"user": "Speed it up", "assistant": "Done, twice as fast"}, {"user": " ", "assistant": ""}]}));
-        let g = classify("s1", &d, None, None).unwrap();
-        assert_eq!(g.exchanges, vec![Exchange { user: "Speed it up".into(), assistant: "Done, twice as fast".into() }]);
-        assert!(classify("s1", &Detail::Unreachable, None, None).unwrap().exchanges.is_empty());
+        let g = classify("s1", &d, Listing::Absent, None).unwrap();
+        assert_eq!(g.exchanges, vec![Exchange { from: "You".into(), user: "Speed it up".into(), assistant: "Done, twice as fast".into() }]);
+        assert!(classify("s1", &Detail::Unreachable, Listing::Absent, None).unwrap().exchanges.is_empty());
     }
 
     #[test]
@@ -269,6 +320,32 @@ mod tests {
         let found = row(json!({"id": "s1", "name": "Fix it", "cwd": " "}));
         assert_eq!(search_terms([&known, &found].into_iter()), vec!["Fix it", "fixer", "/work/app"]);
         assert!(search_terms([&row(json!({"id": "s1"}))].into_iter()).is_empty());
+    }
+
+    #[test]
+    fn a_lookup_that_fails_shows_the_error_even_with_a_remembered_row() {
+        let known = row(json!({"id": "s1", "name": "Fix it", "host": {"state": "local"}}));
+        assert!(classify("s1", &Detail::Missing, Listing::Absent, Some(&known)).unwrap_err().contains("no session"));
+        assert!(classify("s1", &Detail::Failed("refused".into()), Listing::Unchecked("refused".into()), Some(&known)).unwrap_err().contains("refused"));
+    }
+
+    #[test]
+    fn a_search_that_could_not_run_says_so_instead_of_unlisted() {
+        let g = classify("s1", &detail(), Listing::Unchecked("timed out".into()), None).unwrap();
+        assert_eq!(g.why, Why::Unchecked("timed out".into()));
+        assert!(g.note().contains("couldn't check whether it was archived: timed out"));
+    }
+
+    #[test]
+    fn prompts_name_who_sent_them() {
+        assert_eq!(sender("", ""), "You");
+        assert_eq!(sender("peer", "@reviewer"), "@reviewer");
+        assert_eq!(sender("peer", ""), "Another agent");
+        assert_eq!(sender("task-notification", ""), "Task notification");
+        let d = Detail::Found(json!({"session": {}, "exchanges": [{"user": "Check this", "origin": "peer", "sender": "@lead", "assistant": "On it"}], "readError": "transcript moved"}));
+        let g = classify("s1", &d, Listing::Absent, None).unwrap();
+        assert_eq!(g.exchanges[0].from, "@lead");
+        assert_eq!(g.read_error.as_deref(), Some("transcript moved"));
     }
 
     #[test]
