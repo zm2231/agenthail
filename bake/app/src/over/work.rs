@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use rune::{Cx, El, ScrollSpec, col, el, icon, row, text};
 use rune_kit::shell::Toolbar;
-use rune_kit::{Button, ButtonVariant};
+use rune_kit::{Button, ButtonVariant, ControlSize};
 use rune_theme_opencode::icons;
 
 use feed::derive::phase::{CHECK, SHIP, phase};
@@ -73,11 +73,12 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
         .child(text(plain(&w.text)).font(TITLE.lh(30.0)).color(strong()).wrap())
         .child(text(plain(&w.description)).font(BODY).color(base()).wrap().max_lines(3));
 
+    let review = crate::over::work_review(s, id).unwrap_or_default();
     let mut links = row().gap(4.0).items_center();
-    if let Some(n) = &pr {
-        links = links.child(Button::new(format!("Open PR #{n}")).variant(ButtonVariant::Ghost).icon(&icons::GITHUB).on_press(|s: &mut App| crate::over::act(s, "Open PR")).build(k));
+    if let Some(p) = pr_of(s, w, &review, pr.as_deref()) {
+        let label = if p.number > 0 { format!("Open PR #{}", p.number) } else { "Open PR".into() };
+        links = links.child(Button::new(label).variant(ButtonVariant::Ghost).icon(&icons::GITHUB).on_press(move |_: &mut App| crate::open_link(&p.url)).build(k).key("work-open-pr"));
     }
-    links = links.child(Button::new("Open in px0").variant(ButtonVariant::Ghost).icon(&icons::ARROW_UP_RIGHT).on_press(|s: &mut App| crate::over::act(s, "Open in px0")).build(k));
 
     let waiting = if phase == CHECK {
         let c = col()
@@ -95,16 +96,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
                     .child(text("What was asked".to_string()).font(META_MED).color(weak()))
                     .child(text(plain(&w.acceptance)).font(BODY).color(base()).wrap()),
             )
-            .child(
-                row()
-                    .w_full()
-                    .gap(8.0)
-                    .items_center()
-                    .child(Button::new(format!("Approve outcome for {revision}")).variant(ButtonVariant::Contrast).shortcut("A").on_press(|s: &mut App| crate::over::act(s, "Approved outcome")).build(k))
-                    .child(ui::ghost_keys(&["A"]))
-                    .child(Button::new("Ask for changes").variant(ButtonVariant::Outline).shortcut("C").on_press(|s: &mut App| crate::over::act(s, "Ask for changes")).build(k))
-                    .child(ui::ghost_keys(&["C"])),
-            )
+            .child(verdict_row(s, &review, &revision))
             .child(links)
             .child(row().gap(6.0).items_center().child(icon(&icons::INFO, 13.0).color(weak())).child(text(format!("Approval covers {revision} only. A new commit asks again. Merging is a separate step.").to_string()).font(META).color(weak())));
         col().w_full().radius(14.0).fill(k.c.surface_raised).border(1.0, k.c.warning.icon.alpha(0.4)).child(c)
@@ -199,6 +191,36 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
         )
         .trailing(ui::needs_button(s));
     ui::frame(cx, s, Some(ui::sidebar(s, Some(&w.project), Some(id))), main, Some(rail), toolbar)
+}
+
+pub fn pr_of(s: &App, w: &crate::over::Work, review: &feed::decisions::Decision, number: Option<&str>) -> Option<feed::catalog::Pr> {
+    let holder = w.assignee.as_deref().and_then(|a| s.ov.d.session(a)).map(|x| x.prs.as_slice()).unwrap_or_default();
+    let timeline = feed::review::timeline_pr(w);
+    feed::review::pr_link(review.prs.iter().chain(timeline.iter()).chain(holder), number).cloned()
+}
+
+fn verdict_row(s: &App, d: &feed::decisions::Decision, revision: &str) -> El {
+    let k = kit();
+    let st = &s.ov.inbox;
+    let ready = crate::over::inbox::reviewable(st, d);
+    let busy = st.acting.contains(&d.id());
+    let unconfirmed = st.unconfirmed.contains(&d.hold_key());
+    let approve = if busy { "Sending…".to_string() } else if unconfirmed { "Sent, not confirmed".to_string() } else { format!("Approve outcome for {revision}") };
+    let (da, dc) = (d.clone(), d.clone());
+    let mut r = row()
+        .w_full()
+        .gap(8.0)
+        .items_center()
+        .flex_wrap()
+        .child(Button::new(approve).variant(ButtonVariant::Contrast).shortcut("A").disabled(!ready).on_press(move |s: &mut App| crate::over::inbox::review(s, &da, feed::review::Verdict::Approve, "")).build(k).key("work-approve"))
+        .child(ui::ghost_keys(&["A"]))
+        .child(Button::new("Ask for changes").variant(ButtonVariant::Outline).control_size(ControlSize::Regular).shortcut("C").disabled(!ready).on_press(move |s: &mut App| crate::over::inbox::ask_changes(s, &dc)).build(k).key("work-changes"))
+        .child(ui::ghost_keys(&["C"]));
+    let note = st.notes.get(&d.id()).filter(|(hold, _)| d.holds(hold)).map(|(_, n)| n.clone()).or_else(|| crate::over::inbox::too_old(st, d).then(feed::review::needs_newer_note));
+    if let Some(n) = note {
+        r = r.child(text(n).font(META).color(ui::needs_color()).wrap());
+    }
+    r
 }
 
 fn gap_line(t: &str) -> El {

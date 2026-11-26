@@ -1,4 +1,4 @@
-mod decisions;
+pub mod decisions;
 pub mod inbox;
 mod jump;
 pub mod layout;
@@ -6,7 +6,7 @@ mod now;
 mod project;
 mod sessions;
 pub mod ui;
-mod work;
+pub mod work;
 
 use std::collections::{HashMap, HashSet};
 
@@ -210,8 +210,18 @@ pub fn open_jump(s: &mut App, tx: &mut Tx) {
     tx.focus("jump-input", false);
 }
 
-pub fn act(s: &mut App, what: &str) {
-    s.ov.notice = Some(format!("{what} isn't available here yet"));
+pub fn work_review(s: &App, id: &str) -> Option<feed::decisions::Decision> {
+    let w = s.ov.d.work.get(id)?;
+    let listed = s.ov.inbox.inbox.as_ref().map(|i| i.decisions.as_slice()).unwrap_or_default();
+    Some(feed::review::of_work(listed, w))
+}
+
+fn review_key(s: &mut App, id: &str, verdict: feed::review::Verdict) {
+    let Some(d) = work_review(s, id) else { return };
+    match verdict {
+        feed::review::Verdict::Approve => inbox::review(s, &d, verdict, ""),
+        feed::review::Verdict::Reject => inbox::ask_changes(s, &d),
+    }
 }
 
 pub fn view(s: &App, cx: &mut Cx<App>, layer: &mut Vec<El>) -> El {
@@ -233,9 +243,17 @@ pub fn overlays(s: &App, layer: &mut Vec<El>) {
     if let Some(n) = &s.ov.notice {
         layer.push(ui::notice(n));
     }
+    decisions::note_dialog(s, layer);
 }
 
 pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
+    if s.ov.inbox.note.is_some() {
+        if matches!(ev.key, Key::Escape) {
+            s.ov.inbox.note = None;
+            return true;
+        }
+        return false;
+    }
     if ev.is_command('k') {
         if s.ov.jump.is_some() {
             s.ov.jump = None;
@@ -348,12 +366,13 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
                 }
                 _ => false,
             },
-            "a" if matches!(s.screen, Screen::Work(_)) => {
-                act(s, "Approve outcome");
-                true
-            }
-            "c" if matches!(s.screen, Screen::Work(_)) => {
-                act(s, "Ask for changes");
+            "a" | "c" if matches!(s.screen, Screen::Work(_)) => {
+                if let Screen::Work(id) = s.screen.clone()
+                    && s.ov.d.work.get(&id).is_some_and(|w| feed::derive::phase(w) == feed::derive::phase::CHECK)
+                {
+                    let verdict = if t.eq_ignore_ascii_case("a") { feed::review::Verdict::Approve } else { feed::review::Verdict::Reject };
+                    review_key(s, &id, verdict);
+                }
                 true
             }
             _ => false,

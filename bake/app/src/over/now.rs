@@ -178,7 +178,7 @@ fn focus_card(s: &App) -> El {
         .child(text(n.title.clone()).font(TITLE.lh(30.0)).color(strong()).wrap())
         .child(text(n.kind.ask().to_string()).font(BODY).color(base()))
         .child(meta)
-        .child(row().w_full().pt(4.0).child(ui::need_actions(n, false)));
+        .child(row().w_full().pt(4.0).child(ui::need_actions(s, n, false)));
     col().w_full().radius(14.0).fill(k.c.surface_raised).border(1.0, ui::kind_color(n.kind).alpha(0.35)).child(c)
 }
 

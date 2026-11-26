@@ -315,24 +315,36 @@ pub fn notice(message: &str) -> El {
     col().absolute(0.0, 0.0).w_full().h_full().items_end().justify_end().padding(24.0).child(toast)
 }
 
-pub fn need_actions(n: &Need, compact: bool) -> El {
+pub fn need_actions(s: &App, n: &Need, compact: bool) -> El {
     let k = kit();
     let t = n.target.clone();
     let size = if compact { ControlSize::Small } else { ControlSize::Regular };
-    let primary = Button::new(n.kind.primary()).variant(ButtonVariant::Contrast).control_size(size).on_press({
-        let t = t.clone();
-        move |s: &mut App| {
-            if matches!(t, Target::Session(_)) {
-                open_target(s, &t);
-            } else {
-                crate::over::act(s, "Approved");
-            }
+    let r = row().gap(6.0).items_center();
+    let work = match &t {
+        Target::Work(id) => s.ov.d.work.get(id).zip(crate::over::work_review(s, id)),
+        _ => None,
+    };
+    let r = match (n.kind, work) {
+        (NeedKind::Check, Some((_, d))) => crate::over::decisions::review_buttons(s, &d, size, &format!("{}-{}", if compact { "need-row" } else { "need-focus" }, d.id()), r),
+        (NeedKind::CiFailing, Some((w, d))) => {
+            let url = crate::over::work::pr_of(s, w, &d, feed::derive::work::pr(w).as_deref()).map(|p| p.url);
+            let t = t.clone();
+            r.child(
+                Button::new(n.kind.primary())
+                    .variant(ButtonVariant::Contrast)
+                    .control_size(size)
+                    .on_press(move |s: &mut App| match &url {
+                        Some(url) => crate::open_link(url),
+                        None => open_target(s, &t),
+                    })
+                    .build(k),
+            )
         }
-    });
-    let mut r = row().gap(6.0).items_center().child(primary.build(k));
-    if matches!(n.kind, NeedKind::Check | NeedKind::Approval) {
-        r = r.child(Button::new("Ask for changes").variant(ButtonVariant::Ghost).control_size(size).on_press(|s: &mut App| crate::over::act(s, "Ask for changes")).build(k));
-    }
+        _ => r.child(Button::new(n.kind.primary()).variant(ButtonVariant::Contrast).control_size(size).on_press({
+            let t = t.clone();
+            move |s: &mut App| open_target(s, &t)
+        }).build(k)),
+    };
     if n.kind == NeedKind::CiFailing {
         return r;
     }
@@ -359,7 +371,7 @@ pub fn need_row(s: &App, i: usize, n: &Need, focused: bool) -> El {
         .radius(10.0)
         .child(avatar(&n.project, 22.0))
         .child(body)
-        .child(need_actions(n, true))
+        .child(need_actions(s, n, true))
         .on_press(move |s: &mut App| {
             s.ov.need_ix = i;
             open_target(s, &t);

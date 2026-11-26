@@ -5,16 +5,25 @@ use std::time::{Duration, Instant};
 use feed::brief::Brief;
 use feed::catalog::{Client, RespondError, request_key};
 use feed::decisions::{Decision, Handled, Inbox, gone, remember};
+use feed::review::{self, Verdict};
 use feed::version::{Build, notice};
+use rune::TextEdit;
 
 const EVERY: Duration = Duration::from_secs(10);
 const VERSION_EVERY: Duration = Duration::from_secs(60);
+const OLD_RECHECK: Duration = Duration::from_secs(300);
 
 enum Done {
     Inbox(Instant, Inbox),
-    Acted(String, Handled, Result<(), (RespondError, String)>),
+    Acted(String, Handled, Option<String>, String, Result<(), (RespondError, String)>),
     Brief(String, Result<Brief, RespondError>),
-    Version(Option<String>),
+    Version(Option<String>, Option<String>),
+}
+
+pub struct Note {
+    pub decision: Decision,
+    pub title: String,
+    pub text: TextEdit,
 }
 
 #[derive(Default, Clone)]
@@ -35,6 +44,9 @@ pub struct State {
     pub notes: HashMap<String, (String, String)>,
     pub briefs: HashMap<String, BriefState>,
     pub version: Option<String>,
+    review_old: HashMap<String, Instant>,
+    pub note: Option<Note>,
+    daemon: Option<String>,
     newest: Option<Instant>,
     started: bool,
 }
@@ -42,7 +54,7 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         let (tx, rx) = channel();
-        State { tx, rx, inbox: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, newest: None, started: false }
+        State { tx, rx, inbox: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, review_old: HashMap::new(), note: None, daemon: None, newest: None, started: false }
     }
 }
 
@@ -69,8 +81,9 @@ pub fn start(state: &mut State, client: &Client) {
     let (versions, said) = (client.clone(), tx.clone());
     std::thread::spawn(move || {
         loop {
-            let shown = versions.version().ok().and_then(|daemon| notice(&app_build(), &daemon));
-            if said.send(Done::Version(shown)).is_err() {
+            let daemon = versions.version().ok();
+            let shown = daemon.as_ref().and_then(|d| notice(&app_build(), d));
+            if said.send(Done::Version(shown, daemon.filter(|d| d.known()).map(|d| d.revision))).is_err() {
                 return;
             }
             std::thread::sleep(VERSION_EVERY);
@@ -106,10 +119,15 @@ pub fn drain(s: &mut crate::App) -> bool {
                 }
                 st.inbox = Some(inbox);
             }
-            Done::Acted(id, entry, result) => {
+            Done::Acted(id, entry, ledger, host, result) => {
                 st.acting.remove(&id);
                 st.newest = Some(Instant::now());
+                let reviewed = ledger.is_some();
                 match result {
+                    Err((e, hold)) if reviewed && review::needs_newer(&e) => {
+                        st.review_old.insert(host, Instant::now());
+                        st.notes.insert(id, (hold, review::needs_newer_note()));
+                    }
                     Ok(()) => {
                         st.notes.remove(&id);
                         if let Some(inbox) = &mut st.inbox {
@@ -122,11 +140,15 @@ pub fn drain(s: &mut crate::App) -> bool {
                         st.unconfirmed.insert(hold);
                     }
                     Err((e, hold)) => {
-                        st.notes.insert(id, (hold, format!("Not sent: {}", e.message)));
+                        let why = if reviewed { review::refusal(&e) } else { e.message };
+                        st.notes.insert(id, (hold, format!("Not sent: {why}")));
                     }
                 }
                 if let Some(client) = &s.client {
                     refresh(client, &s.ov.inbox.tx);
+                }
+                if let Some(key) = ledger {
+                    crate::fetch_ledger(s, &key);
                 }
             }
             Done::Brief(project, result) => {
@@ -147,7 +169,15 @@ pub fn drain(s: &mut crate::App) -> bool {
                     }
                 }
             }
-            Done::Version(shown) => st.version = shown,
+            Done::Version(shown, daemon) => {
+                st.version = shown;
+                if daemon.is_some() && daemon != st.daemon {
+                    if st.daemon.is_some() {
+                        st.review_old.clear();
+                    }
+                    st.daemon = daemon;
+                }
+            }
         }
     }
     changed
@@ -158,6 +188,8 @@ fn title_of(s: &crate::App, d: &Decision) -> String {
 }
 
 fn act(s: &mut crate::App, d: &Decision, outcome: &str, run: impl FnOnce(&Client, &Decision) -> Result<(), (RespondError, String)> + Send + 'static) {
+    let ledger = review::target(d).map(|t| t.ledger_key);
+    let host = d.host.clone();
     let id = d.id();
     if s.ov.inbox.acting.contains(&id) {
         return;
@@ -173,7 +205,7 @@ fn act(s: &mut crate::App, d: &Decision, outcome: &str, run: impl FnOnce(&Client
     let (tx, d) = (s.ov.inbox.tx.clone(), d.clone());
     std::thread::spawn(move || {
         let result = run(&client, &d);
-        let _ = tx.send(Done::Acted(id, entry, result));
+        let _ = tx.send(Done::Acted(id, entry, ledger, host, result));
     });
 }
 
@@ -217,6 +249,45 @@ pub fn not_now(s: &mut crate::App, d: &Decision) {
         }
         Ok(())
     });
+}
+
+pub fn too_old(st: &State, d: &Decision) -> bool {
+    st.review_old.get(&d.host).is_some_and(|at| at.elapsed() < OLD_RECHECK)
+}
+
+pub fn reviewable(st: &State, d: &Decision) -> bool {
+    review::target(d).is_some() && !too_old(st, d) && !st.acting.contains(&d.id()) && !st.unconfirmed.contains(&d.hold_key())
+}
+
+pub fn review(s: &mut crate::App, d: &Decision, verdict: Verdict, note: &str) {
+    if !reviewable(&s.ov.inbox, d) || verdict == Verdict::Reject && review::note_problem(note).is_some() {
+        return;
+    }
+    let note = note.to_string();
+    act(s, d, verdict.outcome(), move |client, d| {
+        let t = review::target(d).expect("checked above");
+        client.work_review(&t, verdict, &note).map(drop).map_err(|e| (e, d.hold_key()))
+    });
+}
+
+pub fn ask_changes(s: &mut crate::App, d: &Decision) {
+    if !reviewable(&s.ov.inbox, d) {
+        return;
+    }
+    let title = if d.work_title.is_empty() { title_of(s, d) } else { d.work_title.clone() };
+    let mut text = TextEdit::new("");
+    text.focused = true;
+    s.composer.focused = false;
+    s.ov.inbox.note = Some(Note { decision: d.clone(), title, text });
+}
+
+pub fn send_changes(s: &mut crate::App) {
+    let Some(n) = s.ov.inbox.note.take() else { return };
+    if review::note_problem(&n.text.text).is_some() {
+        s.ov.inbox.note = Some(n);
+        return;
+    }
+    review(s, &n.decision, Verdict::Reject, &n.text.text);
 }
 
 pub fn ask_brief(s: &mut crate::App, project: &str) {
