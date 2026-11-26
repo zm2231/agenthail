@@ -12,10 +12,10 @@ const SHOWN: usize = 8;
 pub enum Done {
     Commands(String, Result<RuntimeCommands, String>),
     Files(u64, String, String, Result<SessionFiles, String>),
-    Prompts(String, Result<Vec<Prompt>, String>),
+    Prompts(u64, String, Result<Vec<Prompt>, String>),
     Found(u64, Result<Found, String>),
     Forked(String, String, Result<String, RespondError>),
-    Goal(String, Result<(), RespondError>),
+    Goal(String, String, Result<(), RespondError>),
 }
 
 pub struct Search {
@@ -40,6 +40,7 @@ pub struct Complete {
     files_asked: Option<(u64, String, String)>,
     history: HashMap<String, History>,
     recorded: HashMap<String, Vec<Prompt>>,
+    prompts_asked: HashMap<String, u64>,
     local: HashMap<String, Vec<(String, time::OffsetDateTime)>>,
     pub search: Option<Search>,
     seq: u64,
@@ -249,8 +250,7 @@ pub fn pump(s: &mut App) -> bool {
             s.complete.commands.remove(&id);
             s.complete.commands_asked.remove(&id);
         }
-        let asked = id.clone();
-        spawn(s, move |c| Done::Prompts(asked.clone(), c.prompts(Some(&asked), "")));
+        refresh(s, &id);
         changed = true;
     }
     if s.complete.dismissed.as_deref().is_some_and(|d| d != s.composer.text) {
@@ -291,6 +291,13 @@ pub fn pump(s: &mut App) -> bool {
         }
     }
     changed
+}
+
+pub fn refresh(s: &mut App, id: &str) {
+    s.complete.seq += 1;
+    let (seq, asked) = (s.complete.seq, id.to_string());
+    s.complete.prompts_asked.insert(asked.clone(), seq);
+    spawn(s, move |c| Done::Prompts(seq, asked.clone(), c.prompts(Some(&asked), "")));
 }
 
 fn rebuild(s: &mut App, id: &str) {
@@ -347,8 +354,11 @@ pub fn done(s: &mut App, done: Done) {
                 s.complete.files = Some((id, query, result));
             }
         }
-        Done::Prompts(id, result) => {
-            let id = feed::composer::current(&s.rekeyed, &id).to_string();
+        Done::Prompts(seq, asked, result) => {
+            if s.complete.prompts_asked.get(&asked) != Some(&seq) {
+                return;
+            }
+            let id = feed::composer::current(&s.rekeyed, &asked).to_string();
             if let Ok(prompts) = result {
                 s.complete.recorded.insert(id.clone(), prompts);
                 rebuild(s, &id);
@@ -378,7 +388,11 @@ pub fn done(s: &mut App, done: Done) {
                 Err(error) => s.ov.notice = Some(format!("Couldn't fork: {}", error.message)),
             }
         }
-        Done::Goal(id, result) => {
+        Done::Goal(id, typed, result) => {
+            let id = feed::composer::current(&s.rekeyed, &id).to_string();
+            if result.as_ref().is_ok_and(|_| s.composer_for.as_deref() == Some(id.as_str()) && s.composer.text.trim() == typed) {
+                replace_composer(s, "");
+            }
             let line = match result {
                 Ok(()) => "Goal set".to_string(),
                 Err(error) if error.maybe_delivered => format!("Goal sent, not confirmed: {}", error.message),
@@ -410,6 +424,16 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
         crate::note(s, id, "Wait for the message being sent, then steer.".into());
         return true;
     }
+    if command == Slash::Goal {
+        if s.client.is_none() {
+            crate::note(s, id, "Fixture mode: not sent".into());
+            return true;
+        }
+        let (asked, typed) = (id.to_string(), s.composer.text.trim().to_string());
+        crate::note(s, id, "Setting the goal…".into());
+        spawn(s, move |c| Done::Goal(asked.clone(), typed.clone(), c.goal_set(&asked, &argument)));
+        return true;
+    }
     s.complete.dismissed = None;
     replace_composer(s, "");
     match command {
@@ -419,13 +443,7 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
         Slash::Steer => crate::steer_text(s, id, argument, tx),
         Slash::Model if argument.is_empty() && s.screen != crate::Screen::Session => crate::note(s, id, "Type a model after /model, or open the session to pick one.".into()),
         Slash::Model => pick_model(s, id, &argument),
-        Slash::Goal => {
-            if s.client.is_none() {
-                crate::note(s, id, "Fixture mode: not sent".into());
-            }
-            let asked = id.to_string();
-            spawn(s, move |c| Done::Goal(asked.clone(), c.goal_set(&asked, &argument)));
-        }
+        Slash::Goal => {}
     }
     true
 }

@@ -986,10 +986,18 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 s.busy_default = Busy::parse(&busy);
                 follow_rekeys(s, rekeyed);
                 let (rows, keys, seen) = (&s.queue_rows, &s.rekeyed, s.snapshots);
+                let mut left = Vec::new();
                 for (id, receipts) in s.queued.iter_mut() {
+                    let before = receipts.len();
                     receipts.retain(|(at, receipt)| feed::composer::queued_note(rows, keys, id, receipt, seen >= at + 2).is_some());
+                    if receipts.len() < before {
+                        left.push(id.clone());
+                    }
                 }
                 s.queued.retain(|_, receipts| !receipts.is_empty());
+                for id in left {
+                    ui::complete::refresh(s, &id);
+                }
             }
             Bg::Sent(id, pending, retry, result) => take_sent(s, id, pending, retry, result),
             Bg::Stopped(id, result) => {
