@@ -141,6 +141,14 @@ impl ConfigRoot {
         self.full_until = usage.full_until;
     }
 
+    pub fn take_reading(&mut self, usage: RootUsage) -> bool {
+        let unread = usage.usage.is_none() && !usage.full && usage.usage_problem.as_deref().is_some_and(|p| !p.is_empty());
+        if !unread {
+            self.take_usage(usage);
+        }
+        !unread
+    }
+
     pub fn title(&self) -> String {
         if let Some(proxy) = self.proxy.as_deref().filter(|p| !p.is_empty()) {
             return format!("{proxy} via proxy");
@@ -183,6 +191,8 @@ pub struct RootPick {
 #[serde(rename_all = "camelCase")]
 pub struct RootUsage {
     pub root: String,
+    #[serde(default)]
+    pub usage_problem: Option<String>,
     #[serde(default)]
     pub usage: Option<Usage>,
     #[serde(default)]
@@ -673,6 +683,16 @@ mod tests {
         assert_eq!(roots.iter().map(ConfigRoot::selectable).collect::<Vec<_>>(), [true, true, false]);
         assert_eq!(roots.iter().map(ConfigRoot::reads_usage).collect::<Vec<_>>(), [true, true, false]);
         assert_eq!(options.projects[0].root_path, "/w/app");
+    }
+
+    #[test]
+    fn an_unreadable_reading_keeps_what_was_known() {
+        let mut root = ConfigRoot { root: "/r".into(), full: true, full_until: Some("Friday".into()), ..Default::default() };
+        let unread: RootUsage = serde_json::from_str(r#"{"root":"/r","proxy":"shared","usageProblem":"the shared proxy's accounts are not readable from this host"}"#).unwrap();
+        assert!(!root.take_reading(unread));
+        assert!(root.full, "an account known to be out stays out");
+        assert!(root.take_reading(RootUsage { root: "/r".into(), ..Default::default() }));
+        assert!(!root.full);
     }
 
     #[test]

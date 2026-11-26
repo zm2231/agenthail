@@ -183,7 +183,10 @@ fn settled(s: &mut App, done: Done) {
             if let Some(Ok(roots)) = s.limits.roots.get_mut(&host)
                 && let Some(root) = roots.iter_mut().find(|r| r.root == usage.root)
             {
-                root.take_usage(usage);
+                let root_path = root.root.clone();
+                if !root.take_reading(usage) {
+                    s.limits.unread.insert((host, root_path));
+                }
             }
         }
         Done::Resumed(id, stop, now, result) => {
