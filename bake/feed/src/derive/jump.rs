@@ -45,7 +45,7 @@ impl World {
         let mut rest: Vec<&Session> = self.sessions.iter().filter(|x| x.project.is_some() && !hands_on.contains(&x.id)).collect();
         rest.sort_by(|a, b| b.last_active.cmp(&a.last_active));
         sessions.extend(rest);
-        for x in sessions.into_iter().filter(|x| has(&self.title(x)) || has(&x.project_name())).take(PER_GROUP) {
+        for x in sessions.into_iter().filter(|x| has(&self.title(x)) || has(&x.project_name()) || has(&x.summary())).take(PER_GROUP) {
             let gist = self.gist(x);
             let state = if busy(x) { "Working" } else { "Idle" };
             let status = if gist == x.display.label { state.to_string() } else { format!("{state} · {}", short_title(&gist, 70)) };
