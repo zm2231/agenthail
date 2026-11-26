@@ -38,6 +38,7 @@ func TestPromptsListThePersonsWordsInAnAgentsSessionAndLeaveOutWhatAgentsSent(t 
 	workerSource.append(codexInput("w5", "Plan the release", "coordinator", "", at.Add(4*time.Second)))
 	workerSource.append(codexInput("w6", "An old brief", "", surface.OriginPerson, since.Add(-time.Hour)))
 	personSource.append(codexInput("p1", "An old prompt of mine", "", surface.OriginPerson, since.Add(-time.Hour)))
+	personSource.append(codexInput("p2", "Run the linter", "rebase", "", since.Add(-time.Hour)))
 
 	code, body, raw := getPrompts(t, dashboardRouter(d), "")
 	if code != http.StatusOK {
