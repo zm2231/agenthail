@@ -469,6 +469,37 @@ pub fn strip(s: &App, current: Option<&str>) -> El {
 
 pub use feed::derive::text::short_title;
 
+fn with_menu(row_: El, id: &str) -> El {
+    let id = id.to_string();
+    row_.on_secondary_press(move |s: &mut App, p, _: &mut rune::Tx| crate::ui::session_menu::open_at(s, &id, p))
+}
+
+fn session_row(s: &App, x: &feed::catalog::Session, depth: u8, lead: bool, selected: Option<&str>) -> El {
+    let id = x.id.clone();
+    let waiting = x.display.label.starts_with("Waiting on");
+    let mut r = SidebarRow::new(short_title(&s.ov.d.title(x), 40))
+        .height(44.0)
+        .depth(depth)
+        .avatar(avatar(&s.ov.d.title(x), 18.0))
+        .subtitle(if waiting { x.display.label.clone() } else if lead { format!("Lead · {}", short_title(&s.ov.d.gist(x), 40)) } else { short_title(&s.ov.d.gist(x), 48) })
+        .selected(selected == Some(x.id.as_str()))
+        .on_select(move |s: &mut App, _| crate::over::open_session(s, &id));
+    if x.unread() || x.pinned() {
+        r = r.trailing(crate::ui::session_menu::marks(x));
+    }
+    if busy(x) {
+        r = r.status(RowStatus::Busy);
+    }
+    if waiting {
+        r = r.subtitle_color(kit().c.warning.icon);
+    }
+    with_menu(r.build(kit()).key(session_key(&x.id)), &x.id)
+}
+
+pub fn session_key(id: &str) -> String {
+    format!("s-{id}")
+}
+
 pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -> El {
     let k = kit();
     let home = SidebarRow::new("Now").icon(&icons::DOT_GRID).detail("⌘0").height(32.0).selected(matches!(s.screen, Screen::Now)).on_select(|s: &mut App, _| go(s, Screen::Now)).build(k).key("home");
@@ -500,17 +531,19 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -
             (Target::Session(id), Some(x)) | (Target::Work(id), Some(x)) => id == x,
             _ => false,
         };
-        needs = needs.row(
-            SidebarRow::new(short_title(&n.title, 60))
-                .height(44.0)
-                .avatar(avatar(&n.project, 18.0))
-                .subtitle(n.kind.wanted())
-                .subtitle_color(needs_color())
-                .selected(sel)
-                .on_select(move |s: &mut App, _| open_target(s, &t))
-                .build(k)
-                .key(format!("need-{i}")),
-        );
+        let mut need = SidebarRow::new(short_title(&n.title, 60))
+            .height(44.0)
+            .avatar(avatar(&n.project, 18.0))
+            .subtitle(n.kind.wanted())
+            .subtitle_color(needs_color())
+            .selected(sel)
+            .on_select(move |s: &mut App, _| open_target(s, &t))
+            .build(k)
+            .key(format!("need-{i}"));
+        if let Target::Session(id) = &n.target {
+            need = with_menu(need, id);
+        }
+        needs = needs.row(need);
     }
     if !matches!(s.screen, Screen::Now) {
         sb = sb.section(needs);
@@ -519,28 +552,13 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -
     if let Some(cp) = current_project {
         order.sort_by_key(|p| p.key != cp);
     }
+    let mut shown = false;
     for (pi, p) in order.iter().take(if current_project.is_some() { 1 } else { 0 }).enumerate() {
         let mut sec = SidebarSection::new(p.name.clone()).key(format!("sec-p{pi}")).count(p.sessions.len());
-        for (id, depth) in s.ov.d.project_rows(p).iter().take(8) {
+        for (_, (id, depth)) in s.ov.d.project_rows(p).iter().enumerate().filter(|(n, (id, _))| *n < 8 || selected == Some(id.as_str())) {
             let Some(x) = s.ov.d.session(id) else { continue };
-            let idc = id.clone();
-            let lead = p.lead.as_deref() == Some(id.as_str());
-            let waiting = x.display.label.starts_with("Waiting on");
-            let mut row_ = SidebarRow::new(short_title(&s.ov.d.title(x), 40))
-                .height(44.0)
-                .depth(*depth)
-                .avatar(avatar(&s.ov.d.title(x), 18.0))
-                .subtitle(if waiting { x.display.label.clone() } else if lead { format!("Lead · {}", short_title(&s.ov.d.gist(x), 40)) } else { short_title(&s.ov.d.gist(x), 48) })
-                .selected(selected == Some(id.as_str()))
-                .on_select(move |s: &mut App, _| crate::over::open_session(s, &idc));
-            if busy(x) {
-                row_ = row_.status(RowStatus::Busy);
-            }
-            if waiting {
-                row_ = row_.subtitle_color(kit().c.warning.icon);
-            }
-            let menu_id = id.clone();
-            sec = sec.row(row_.build(k).key(format!("s-{id}")).on_secondary_press(move |s: &mut App, p, _: &mut rune::Tx| crate::ui::session_menu::open_at(s, &menu_id, p)));
+            shown |= selected == Some(id.as_str());
+            sec = sec.row(session_row(s, x, *depth, p.lead.as_deref() == Some(id.as_str()), selected));
         }
         let pname = p.name.clone();
         sec = sec.row(
@@ -556,6 +574,12 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -
                 .key(format!("all-{}", p.key)),
         );
         sb = sb.section(sec);
+    }
+    if !shown
+        && matches!(s.screen, Screen::Session)
+        && let Some(x) = selected.and_then(|id| s.ov.d.session(id))
+    {
+        sb = sb.section(SidebarSection::new(x.project_name()).key("sec-open").row(session_row(s, x, 0, false, selected)));
     }
     let mut others = SidebarSection::new("Projects").key("sec-projects").count(s.ov.d.projects.len());
     for p in order.iter().skip(if current_project.is_some() { 1 } else { 0 }).take(10) {

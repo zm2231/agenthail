@@ -73,7 +73,6 @@ pub struct App {
     lru: Vec<String>,
     pub open: HashSet<String>,
     pub counter: u64,
-    pub by_project: bool,
     pub composer: TextEdit,
     pub composer_for: Option<String>,
     pub drafts: Drafts,
@@ -162,7 +161,6 @@ fn init() -> App {
         lru: Vec::new(),
         open: HashSet::new(),
         counter: 0,
-        by_project: false,
         composer: TextEdit::new(""),
         composer_for: None,
         drafts: Drafts::default(),
@@ -965,9 +963,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         s.revealed = None;
     } else if s.revealed != s.selected
         && let Some(id) = s.selected.clone()
-        && ui::in_sidebar(s, &id)
+        && s.ov.d.session(&id).is_some()
     {
-        tx.scroll_into_view_in("sidebar-list", format!("row-{id}"));
+        tx.scroll_into_view_in("sidebar-scroll", over::ui::session_key(&id));
         s.revealed = Some(id);
     }
     changed |= ui::session_menu::drain(s);

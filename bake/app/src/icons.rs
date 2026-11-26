@@ -14,7 +14,6 @@ macro_rules! lucide {
     };
 }
 
-lucide!(SEARCH, "ah-search", r#"<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>"#);
 lucide!(BRANCH, "ah-branch", r#"<circle cx="6" cy="5" r="2.2"/><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="7" r="2.2"/><path d="M6 7.2v9.6"/><path d="M18 9.2c0 5-6 4-11.2 8"/>"#);
 lucide!(SERVER, "ah-server", r#"<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>"#);
 lucide!(FOLDER, "ah-folder", r#"<path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3.8l2 2.2h7.2A2.5 2.5 0 0 1 21 9.7v7.8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/>"#);
