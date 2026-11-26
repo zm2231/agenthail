@@ -75,6 +75,38 @@ fn need_row(n: &Need) -> Row {
     Row { label, target: n.target.clone() }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Link {
+    Connected,
+    Connecting,
+    Recording,
+    Down,
+}
+
+impl Link {
+    pub fn of(status: &str) -> Link {
+        match status {
+            "live" => Link::Connected,
+            "connecting" => Link::Connecting,
+            "fixture" | "fixtures" => Link::Recording,
+            _ => Link::Down,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Link::Connected => "Connected",
+            Link::Connecting => "Connecting…",
+            Link::Recording => "Showing a recording",
+            Link::Down => "Agenthail isn't running",
+        }
+    }
+
+    pub fn warns(self) -> bool {
+        self == Link::Down
+    }
+}
+
 pub fn badge(needs_you: usize) -> (u32, String) {
     let count = u32::try_from(needs_you).unwrap_or(u32::MAX);
     let said = match count {
@@ -209,6 +241,19 @@ mod tests {
         assert_eq!(badge(bar.needs_you), (0, String::new()));
         let titles: Vec<String> = bar.sections().into_iter().map(|(t, _)| t).collect();
         assert_eq!(titles, ["Recent"]);
+    }
+
+    #[test]
+    fn only_an_unreachable_daemon_shows_the_warning() {
+        assert_eq!(Link::of("live").label(), "Connected");
+        assert_eq!(Link::of("fixtures"), Link::Recording);
+        for status in ["live", "connecting", "fixture", "fixtures"] {
+            assert!(!Link::of(status).warns(), "{status}");
+        }
+        for status in ["daemon: connection refused", "no daemon token"] {
+            assert_eq!(Link::of(status), Link::Down);
+            assert!(Link::of(status).warns());
+        }
     }
 
     #[test]

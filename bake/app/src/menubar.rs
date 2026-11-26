@@ -1,18 +1,19 @@
 use std::cell::RefCell;
 
 use feed::derive::Target;
-use feed::derive::menubar::{self, MenuBar};
+use feed::derive::menubar::{self, Link, MenuBar};
 use rune::{AppHandle, MenuItem, Taskbar, Tray, TrayEvent, TrayIcon, TrayItem, TraySpec, WindowHandle};
 
 use crate::App;
 
 const ICON: &[u8] = include_bytes!("../assets/menubar.png");
+const WARNING: &[u8] = include_bytes!("../assets/menubar-warning.png");
 
 #[derive(Default)]
 pub struct Bar {
     tray: Option<Tray>,
     app: Option<AppHandle<App>>,
-    shown: Option<(MenuBar, &'static str)>,
+    shown: Option<(MenuBar, Link)>,
 }
 
 impl Bar {
@@ -32,8 +33,8 @@ pub fn install(app: rune::App<App>) -> rune::App<App> {
     }
     let handle = app.handle();
     let picks = handle.clone();
-    let spec = match icon() {
-        Ok(icon) => TraySpec::new("com.agenthail.app", "Agenthail", icon).tooltip("Agenthail").menu(tray_items(&MenuBar::default(), "Connecting…")),
+    let spec = match icon(ICON) {
+        Ok(icon) => TraySpec::new("com.agenthail.app", "Agenthail", icon).tooltip("Agenthail").menu(tray_items(&MenuBar::default(), Link::Connecting)),
         Err(error) => {
             eprintln!("agenthail: no menu bar icon: {error}");
             return app;
@@ -68,30 +69,33 @@ pub fn badge(s: &App) {
 
 pub fn refresh(s: &mut App) {
     let bar = MenuBar::build(&s.ov.d, &s.ov.needs);
-    let status = status(&s.status);
-    if s.bar.shown.as_ref().is_some_and(|(b, st)| *b == bar && *st == status) {
+    let link = Link::of(&s.status);
+    if s.bar.shown.as_ref().is_some_and(|(b, l)| *b == bar && *l == link) {
         return;
     }
     if let Some(tray) = &s.bar.tray {
-        tray.set_menu(tray_items(&bar, status));
+        tray.set_menu(tray_items(&bar, link));
+        let was = s.bar.shown.as_ref().is_some_and(|(_, l)| l.warns());
+        if link.warns() != was {
+            show_link(tray, link);
+        }
     }
     if let Some(app) = &s.bar.app {
         let _ = app.set_menu(dock_items(&bar));
     }
-    s.bar.shown = Some((bar, status));
+    s.bar.shown = Some((bar, link));
 }
 
-fn status(status: &str) -> &'static str {
-    match status {
-        "live" => "Connected",
-        "connecting" => "Connecting…",
-        "fixture" | "fixtures" => "Showing a recording",
-        _ => "Agenthail isn't running",
+fn show_link(tray: &Tray, link: Link) {
+    let (art, tip) = if link.warns() { (WARNING, link.label()) } else { (ICON, "Agenthail") };
+    match icon(art).and_then(|i| tray.set_icon(i).map_err(|e| e.to_string())) {
+        Ok(()) => tray.set_tooltip(tip),
+        Err(error) => eprintln!("agenthail: menu bar icon not changed: {error}"),
     }
 }
 
-fn tray_items(bar: &MenuBar, status: &str) -> Vec<TrayItem> {
-    let mut items = vec![TrayItem::action("status", status).enabled(false), TrayItem::Separator];
+fn tray_items(bar: &MenuBar, link: Link) -> Vec<TrayItem> {
+    let mut items = vec![TrayItem::action("status", link.label()).enabled(false), TrayItem::Separator];
     for (i, (title, rows)) in bar.sections().into_iter().enumerate() {
         items.push(TrayItem::action(format!("section-{i}"), title).enabled(false));
         items.extend(rows.iter().map(|r| TrayItem::action(menubar::item_id(&r.target), r.label.clone())));
@@ -154,8 +158,8 @@ fn on_event(app: &AppHandle<App>, event: TrayEvent) {
     }
 }
 
-fn icon() -> Result<TrayIcon, String> {
-    let mut decoder = png::Decoder::new(std::io::Cursor::new(ICON));
+fn icon(art: &[u8]) -> Result<TrayIcon, String> {
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(art));
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
     let (width, height) = (reader.info().width, reader.info().height);
