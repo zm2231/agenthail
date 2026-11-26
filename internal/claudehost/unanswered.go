@@ -37,13 +37,14 @@ func (m *Manager) replaceUnanswered(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if !m.signalHost(ctx, host, syscall.SIGHUP) {
+	signalled, err := m.signalHost(ctx, host, syscall.SIGHUP)
+	if err != nil {
+		return host.pid, fmt.Errorf("%w; stop pid %d to start a new one: %v", errUnanswered, host.pid, err)
+	}
+	if !signalled || m.awaitRelease(ctx, host.pid, retireWait) {
 		return host.pid, nil
 	}
-	if m.awaitRelease(ctx, host.pid, retireWait) {
-		return host.pid, nil
-	}
-	if !m.signalHost(ctx, host, syscall.SIGKILL) {
+	if signalled, _ := m.signalHost(ctx, host, syscall.SIGKILL); !signalled {
 		return host.pid, nil
 	}
 	if m.awaitRelease(ctx, host.pid, killWait) {
@@ -57,19 +58,21 @@ type hostProcess struct {
 	started string
 }
 
-// The handle is taken before the identity check; on Linux it is a pidfd, so the
-// signal cannot reach a process that took the pid after the check.
-func (m *Manager) signalHost(ctx context.Context, host hostProcess, signal syscall.Signal) bool {
-	process, err := os.FindProcess(host.pid)
+// The handle is opened before the identity check, so a later owner of the pid is never signalled.
+func (m *Manager) signalHost(ctx context.Context, host hostProcess, signal syscall.Signal) (bool, error) {
+	handle, err := openProcess(host.pid)
 	if err != nil {
-		return false
+		if errors.Is(err, syscall.ESRCH) {
+			return false, nil
+		}
+		return false, err
 	}
-	defer process.Release()
+	defer handle.close()
 	again, err := m.currentHost(ctx)
 	if err != nil || again != host {
-		return false
+		return false, nil
 	}
-	return process.Signal(signal) == nil
+	return handle.signal(signal) == nil, nil
 }
 
 func (m *Manager) awaitRelease(ctx context.Context, pid int, wait time.Duration) bool {

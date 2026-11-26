@@ -4,7 +4,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -69,6 +71,15 @@ func TestEnsureRetiresAHostThatStoppedAnsweringAndKeepsItsSession(t *testing.T) 
 	}
 
 	client, err = manager.Ensure(ctx)
+	if runtime.GOOS != "linux" {
+		if err == nil || !strings.Contains(err.Error(), "stop pid "+strconv.Itoa(old.PID)) {
+			t.Fatalf("Ensure with a silent host = %v, want it named without a process handle to signal it", err)
+		}
+		if !claudehosttest.Alive(old.PID) || len(claudehost.NewClient(f.Home).Retiring()) != 0 {
+			t.Fatal("a host was signalled without a process handle")
+		}
+		return
+	}
 	if err != nil {
 		t.Fatalf("Ensure with a silent host = %v, want it replaced", err)
 	}
@@ -90,6 +101,9 @@ func TestEnsureRetiresAHostThatStoppedAnsweringAndKeepsItsSession(t *testing.T) 
 }
 
 func TestEnsureKillsAHostThatCannotRetireAndKeepsItsClaudeRunning(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("only Linux holds a process handle to signal a host safely")
+	}
 	t.Cleanup(claudehost.SetUnansweredWaits(2*time.Second, 2*time.Second))
 	f := claudehosttest.New(t, "")
 	ctx := testContext(t)
@@ -207,7 +221,7 @@ func TestReplacementLeavesAReusedPIDAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager := f.Manager(t, "test")
-	if claudehost.SignalHost(manager, other.Process.Pid, "Thu Jan  1 00:00:00 1970", syscall.SIGKILL) {
+	if signalled, _ := claudehost.SignalHost(manager, other.Process.Pid, "Thu Jan  1 00:00:00 1970", syscall.SIGKILL); signalled {
 		t.Fatal("a pid with another start time was signalled")
 	}
 	if !claudehosttest.Alive(other.Process.Pid) {

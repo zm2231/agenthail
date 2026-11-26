@@ -19,6 +19,6 @@ func SetUnansweredWaits(after, retire time.Duration) (restore func()) {
 	return func() { unansweredAfter, retireWait = previousAfter, previousRetire }
 }
 
-func SignalHost(m *Manager, pid int, started string, signal syscall.Signal) bool {
+func SignalHost(m *Manager, pid int, started string, signal syscall.Signal) (bool, error) {
 	return m.signalHost(context.Background(), hostProcess{pid: pid, started: started}, signal)
 }
