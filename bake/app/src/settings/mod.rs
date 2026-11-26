@@ -5,6 +5,8 @@ mod parts;
 
 use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
@@ -51,6 +53,9 @@ pub struct Prefs {
     client: Option<Client>,
     no_client: String,
     pub draft_orphaned: bool,
+    watching: Arc<AtomicBool>,
+    cursor: Arc<AtomicU64>,
+    external: bool,
     pub tab: usize,
     pub base: Option<Result<Base, Failure>>,
     pub settings: Option<Result<Settings, Failure>>,
@@ -137,6 +142,9 @@ fn init() -> Prefs {
         client,
         no_client,
         draft_orphaned: false,
+        watching: Arc::new(AtomicBool::new(false)),
+        cursor: Arc::new(AtomicU64::new(0)),
+        external: false,
         tab: 0,
         base: None,
         settings: None,
@@ -307,7 +315,45 @@ fn denied<T>(r: &Result<T, Failure>) -> bool {
     r.as_ref().is_err_and(|f| f.denied)
 }
 
+fn watch(s: &Prefs) {
+    let Some(client) = s.client.clone() else { return };
+    let Some(handle) = WINDOW.with(|w| w.get().map(|(h, _)| h.clone())) else { return };
+    if s.cursor.load(Ordering::Relaxed) == 0 || s.watching.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let (running, cursor) = (s.watching.clone(), s.cursor.clone());
+    std::thread::spawn(move || {
+        while handle.is_visible() {
+            let _ = client.follow_events(cursor.load(Ordering::Relaxed), |kind, id| {
+                cursor.fetch_max(id, Ordering::Relaxed);
+                if feed::prefs::rereads(kind) {
+                    handle.update(|s: &mut Prefs, _| changed_elsewhere(s));
+                }
+                handle.is_visible()
+            });
+            std::thread::sleep(Duration::from_secs(2));
+        }
+        running.store(false, Ordering::Release);
+    });
+}
+
+fn changed_elsewhere(s: &mut Prefs) {
+    if busy(s) {
+        s.external = true;
+    } else {
+        reload(s);
+    }
+}
+
 fn take(s: &mut Prefs, done: Done) {
+    take_one(s, done);
+    if s.external && !busy(s) {
+        s.external = false;
+        reload(s);
+    }
+}
+
+fn take_one(s: &mut Prefs, done: Done) {
     s.in_flight = s.in_flight.saturating_sub(1);
     s.tick += 1;
     match done {
@@ -318,10 +364,12 @@ fn take(s: &mut Prefs, done: Done) {
             s.settling.remove(&what);
             let refusal = match got {
                 Got::Base(r) => {
-                    if r.is_ok() {
+                    if let Ok(b) = &r {
                         s.base_ok_at = s.tick;
+                        s.cursor.fetch_max(b.event_cursor, Ordering::Relaxed);
                     }
                     s.base = Some(r);
+                    watch(s);
                     seed_name(s);
                     false
                 }

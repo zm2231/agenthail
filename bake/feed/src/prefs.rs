@@ -26,6 +26,8 @@ pub struct Base {
     pub codex_recent_hours: i64,
     #[serde(default)]
     pub person: Option<Person>,
+    #[serde(default)]
+    pub event_cursor: u64,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -373,6 +375,35 @@ impl Client {
     }
 }
 
+pub fn rereads(event: &str) -> bool {
+    event == "settings.updated" || event == "stream.reset"
+}
+
+pub fn read_events(reader: impl std::io::BufRead, mut on: impl FnMut(&str, u64) -> bool) -> std::io::Result<()> {
+    let (mut kind, mut id) = (String::new(), 0u64);
+    for line in reader.lines() {
+        let line = line?;
+        if let Some(v) = line.strip_prefix("event:") {
+            kind = v.trim().to_string();
+        } else if let Some(v) = line.strip_prefix("id:") {
+            id = v.trim().parse().unwrap_or(id);
+        } else if line.is_empty() && !kind.is_empty() {
+            if !on(&kind, id) {
+                return Ok(());
+            }
+            kind.clear();
+        }
+    }
+    Ok(())
+}
+
+impl Client {
+    pub fn follow_events(&self, after: u64, on: impl FnMut(&str, u64) -> bool) -> anyhow::Result<()> {
+        let reader = self.event_stream(after, Duration::from_secs(120))?;
+        Ok(read_events(reader, on)?)
+    }
+}
+
 pub fn name_field(person: &Person) -> String {
     if person.set { person.name.clone() } else { String::new() }
 }
@@ -611,6 +642,18 @@ mod tests {
     }
 
     #[test]
+    fn settings_changes_are_read_from_the_event_stream() {
+        let stream = "id: 7\nevent: session.updated\ndata: {}\n\n: keepalive\n\nid: 8\nevent: settings.updated\ndata: {\"source\":\"dashboard\"}\n\nid: 9\nevent: stream.reset\ndata: {}\n\nid: 10\nevent: settings.updated\ndata: {}\n\n";
+        let mut seen = Vec::new();
+        read_events(std::io::Cursor::new(stream), |kind, id| {
+            seen.push((kind.to_string(), id, rereads(kind)));
+            id < 9
+        })
+        .unwrap();
+        assert_eq!(seen, vec![("session.updated".into(), 7, false), ("settings.updated".into(), 8, true), ("stream.reset".into(), 9, true)]);
+    }
+
+    #[test]
     fn the_codex_window_offers_presets_and_keeps_a_custom_value() {
         assert_eq!(codex_recent_choices(5), vec![1, 3, 5, 8, 12, 24]);
         assert_eq!(codex_recent_choices(48), vec![1, 3, 5, 8, 12, 24, 48]);
@@ -765,10 +808,10 @@ mod tests {
         let remote = r#"{"available":true,"roots":[{"root":"/u/.claude","name":"default","settingsPath":"/u/.claude/settings.json","atStartup":true},{"root":"/u/broken","name":"broken","settingsPath":"/u/broken/settings.json","problem":"not a JSON object"}]}"#;
         let compact = r#"{"roots":[{"root":"/u/.claude","settingsPath":"/u/.claude/settings.json","autoCompactWindow":{"tokens":400000},"modelWindows":{"claude-opus-5-5":{"auto":true}},"agenthailIdleCompaction":{"enabled":true,"minContextTokens":200000,"preLimitPercent":90}}],"idleCompactionHolds":null}"#;
         let prefs = r#"{"preferences":[{"id":"leadCompletionsOnly","title":"Only the lead's completions","detail":"Others stay quiet.","default":true,"value":false}]}"#;
-        let base = r#"{"sessions":[],"busyDelivery":"steer","codexRecentHours":8,"person":{"name":"Ada","set":true}}"#;
+        let base = r#"{"sessions":[],"busyDelivery":"steer","codexRecentHours":8,"eventCursor":41,"person":{"name":"Ada","set":true}}"#;
         let (client, rx) = daemon(replies(&[(200, base), (200, settings), (200, remote), (200, compact), (200, prefs)]));
         let b = client.base_settings().unwrap();
-        assert_eq!((b.busy_delivery.as_str(), b.codex_recent_hours, b.person), ("steer", 8, Some(person("Ada", true))));
+        assert_eq!((b.busy_delivery.as_str(), b.codex_recent_hours, b.event_cursor, b.person), ("steer", 8, 41, Some(person("Ada", true))));
         let s = client.settings().unwrap();
         assert_eq!((s.dashboard.codex_recent_hours, s.dashboard.busy_delivery.as_str(), s.claude_default_root.as_str()), (8, "steer", "work"));
         assert!(!s.dashboard.resumes_after_limit() && s.dashboard.moves_after_limit() && s.notifications.enabled);

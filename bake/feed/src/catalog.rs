@@ -644,6 +644,17 @@ impl Client {
         Ok(rows)
     }
 
+    pub(crate) fn event_stream(&self, after: u64, idle: Duration) -> Result<impl std::io::BufRead + use<>> {
+        let agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(5)).timeout_read(idle).build();
+        let response = agent
+            .get(&format!("{}/api/v1/events?after={after}", self.base))
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .set("Accept", "text/event-stream")
+            .call()
+            .map_err(|e| anyhow!(e.to_string()))?;
+        Ok(std::io::BufReader::new(response.into_reader()))
+    }
+
     pub(crate) fn session_stream(&self, session: &str, budget: Duration) -> Result<impl std::io::BufRead + use<>> {
         let agent = ureq::AgentBuilder::new().timeout(budget).build();
         let response = agent
