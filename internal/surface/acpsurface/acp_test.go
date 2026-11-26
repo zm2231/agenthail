@@ -13,11 +13,12 @@ import (
 	"github.com/zm2231/agenthail/internal/acp/acptest"
 	"github.com/zm2231/agenthail/internal/acphost"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func TestMain(m *testing.M) {
 	acptest.RunIfAgent()
-	os.Exit(m.Run())
+	os.Exit(testkit.RunInOwnHome(m.Run))
 }
 
 func fakeAgent(t *testing.T, id string) acphost.Agent {
