@@ -6,7 +6,7 @@ use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Menu, MenuItem, Place
 use crate::icons;
 use crate::theme::{self, BODY, META, accent, failed, faint, muted};
 use crate::ui::session_menu::{Confirm, Open, chips_for, choose, close_rename, current_alias, run, save_rename, set};
-use crate::{App, session};
+use crate::App;
 
 pub fn marks(x: &Session) -> El {
     let mut r = row().gap(4.0).items_center();
@@ -94,7 +94,7 @@ fn rename_dialog(s: &App, id: &str, layer: &mut Vec<El>) {
     let problem = menu::rename_problem(&text_now, current.as_deref());
     let unchanged = menu::unchanged(&text_now, current.as_deref());
     let clearing = menu::clears(&text_now, current.as_deref());
-    let title = session(s, id).map(|x| x.title()).unwrap_or_default();
+    let title = crate::ui::gone::shown(s, id).map(|x| x.title()).unwrap_or_default();
     let input = text_input(&s.menus.rename_text, BODY)
         .single_line()
         .key("rename-input")

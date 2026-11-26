@@ -17,6 +17,7 @@ pub struct Missing {
     asked: f64,
     asking: Option<u64>,
     pub fixing: Option<(Fix, u64)>,
+    fresh: bool,
     pub error: Option<String>,
 }
 
@@ -28,7 +29,7 @@ pub fn shown<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
 }
 
 fn not_found(id: String, why: String, at: f64) -> Missing {
-    Missing { id, look: Look::Failed(why), asked: at, asking: None, fixing: None, error: None }
+    Missing { id, look: Look::Failed(why), asked: at, asking: None, fixing: None, fresh: false, error: None }
 }
 
 pub fn watch(s: &mut App) -> bool {
@@ -62,7 +63,7 @@ pub fn watch(s: &mut App) -> bool {
             m.asked = s.clock;
             m.asking = Some(seq);
         }
-        None => s.missing = Some(Missing { id: id.clone(), look: Look::Pending, asked: s.clock, asking: Some(seq), fixing: None, error: None }),
+        None => s.missing = Some(Missing { id: id.clone(), look: Look::Pending, asked: s.clock, asking: Some(seq), fixing: None, fresh: false, error: None }),
     }
     let known = s.last_row.clone().filter(|r| r.id == id).or_else(|| s.ov.d.session(&id).cloned());
     let tx = s.outbox.clone();
@@ -76,6 +77,7 @@ pub fn watch(s: &mut App) -> bool {
 pub fn looked(s: &mut App, id: &str, seq: u64, result: Result<Gone, String>) {
     let Some(m) = s.missing.as_mut().filter(|m| m.id == id && m.asking == Some(seq)) else { return };
     m.asking = None;
+    m.fresh = true;
     m.look = match result {
         Ok(g) => Look::Found(g),
         Err(e) => Look::Failed(e),
@@ -84,6 +86,7 @@ pub fn looked(s: &mut App, id: &str, seq: u64, result: Result<Gone, String>) {
 
 pub fn recheck(s: &mut App, id: &str) {
     if let Some(m) = s.missing.as_mut().filter(|m| m.id == id) {
+        m.fresh = false;
         m.asking = None;
         m.asked = f64::NEG_INFINITY;
     }
@@ -91,7 +94,7 @@ pub fn recheck(s: &mut App, id: &str) {
 
 fn fix(s: &mut App, fix: Fix) {
     let Some(client) = s.client.clone() else { return };
-    if s.missing.as_ref().is_none_or(|m| m.fixing.is_some() || super::session_menu::changing(s, &m.id)) {
+    if s.missing.as_ref().is_none_or(|m| !m.fresh || m.fixing.is_some() || super::session_menu::changing(s, &m.id)) {
         return;
     }
     let Some(m) = s.missing.as_mut() else { return };
@@ -111,6 +114,7 @@ pub fn fixed(s: &mut App, id: &str, seq: u64, fix: Fix, result: Result<(), feed:
     s.menus.busy.remove(&(id.to_string(), "menu"));
     let Some(m) = s.missing.as_mut().filter(|m| m.id == id && m.fixing.is_some_and(|(_, n)| n == seq)) else { return };
     m.fixing = None;
+    m.fresh = false;
     m.asked = f64::NEG_INFINITY;
     if let Err(e) = result {
         m.error = Some(if e.maybe_delivered { format!("{} may not have gone through: {}", fix.doing(), e.message) } else { format!("{} didn't work: {}", fix.doing(), e.message) });
@@ -139,9 +143,10 @@ fn banner(m: &Missing, g: &Gone) -> El {
         .child(icon(&icons::CLOCK, 16.0).color(attention()))
         .child(text_col);
     if let Some(f) = g.fix {
-        let label = match m.fixing {
-            Some(_) => format!("{}…", f.doing()),
-            None => f.label().to_string(),
+        let label = match (m.fixing, m.fresh) {
+            (Some(_), _) => format!("{}…", f.doing()),
+            (None, false) => "Checking…".to_string(),
+            (None, true) => f.label().to_string(),
         };
         r = r.child(Button::new(label).variant(ButtonVariant::Ghost).build(k).key("gone-fix").on_press(move |s: &mut App| self::fix(s, f)));
     }
