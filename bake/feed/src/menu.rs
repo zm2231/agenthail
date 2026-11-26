@@ -185,14 +185,37 @@ pub fn names_pr(asked: &str, pr: &crate::catalog::Pr) -> bool {
     if let Ok(number) = asked.parse::<u64>() {
         return pr.number == number;
     }
-    let Some((_, rest)) = asked.split_once("://") else { return false };
-    let path = rest.split(['?', '#']).next().unwrap_or_default().trim_end_matches('/');
-    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
-    let [host, owner, name, "pull", number] = parts[..] else { return false };
+    let Ok(link) = url::Url::parse(asked) else { return false };
+    if !matches!(link.scheme(), "http" | "https") || !link.username().is_empty() || link.password().is_some() {
+        return false;
+    }
+    let Some(host) = link.host_str() else { return false };
+    let path = decoded(link.path());
+    let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
+    let [owner, name, "pull", number] = parts[..] else { return false };
     let Ok(number) = number.parse::<u64>() else { return false };
-    let host = host.rsplit('@').next().unwrap_or(host).split(':').next().unwrap_or(host);
     let repo = format!("{host}/{owner}/{}", name.trim_end_matches(".git")).to_lowercase();
     pr.number == number && pr.repo.to_lowercase() == repo
+}
+
+fn decoded(path: &str) -> String {
+    let bytes = path.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = bytes.get(i + 1..i + 3).and_then(|h| std::str::from_utf8(h).ok()).and_then(|h| u8::from_str_radix(h, 16).ok());
+        match (bytes[i], hex) {
+            (b'%', Some(byte)) => {
+                out.push(byte);
+                i += 3;
+            }
+            (byte, _) => {
+                out.push(byte);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 pub fn pr_problem(text: &str) -> Option<&'static str> {
@@ -325,10 +348,10 @@ mod tests {
     #[test]
     fn the_pull_request_the_daemon_linked_is_found_from_what_was_typed() {
         let pr = Pr { repo: "github.com/Owner/Repo".into(), number: 12, url: "https://github.com/Owner/Repo/pull/12".into(), ..Default::default() };
-        for asked in ["12", "#12", " https://github.com/owner/repo/pull/12 ", "https://github.com/Owner/Repo/pull/12/", "https://github.com/Owner/Repo/pull/12?w=1", "https://github.com/Owner/Repo/pull/12#discussion", "https://github.com/Owner/Repo.git/pull/12", "https://github.com//Owner/Repo/pull/12", "https://github.com/Owner/Repo//pull/12/"] {
+        for asked in ["12", "#12", " https://github.com/owner/repo/pull/12 ", "https://github.com/Owner/Repo/pull/12/", "https://github.com/Owner/Repo/pull/12?w=1", "https://github.com/Owner/Repo/pull/12#discussion", "https://github.com/Owner/Repo.git/pull/12", "https://github.com//Owner/Repo/pull/12", "https://github.com/%4Fwner/Rep%6F/pull/12"] {
             assert!(names_pr(asked, &pr), "{asked}");
         }
-        for asked in ["13", "https://git.example.com/Owner/Repo/pull/12", "https://github.com/Owner/Other/pull/12", "https://github.com/Owner/Repo/pull/13", "https://github.com/Owner/Repo/issues/12", "fix"] {
+        for asked in ["13", "https://github.com/Owner/Repo//pull/12", "https://me@github.com/Owner/Repo/pull/12", "ftp://github.com/Owner/Repo/pull/12", "https://git.example.com/Owner/Repo/pull/12", "https://github.com/Owner/Other/pull/12", "https://github.com/Owner/Repo/pull/13", "https://github.com/Owner/Repo/issues/12", "fix"] {
             assert!(!names_pr(asked, &pr), "{asked}");
         }
         let enterprise = Pr { repo: "git.example.com/team/app".into(), number: 3, ..Default::default() };
