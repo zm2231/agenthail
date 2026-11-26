@@ -47,6 +47,7 @@ const (
 	WorkPark     WorkAction = "park"
 	WorkUnpark   WorkAction = "unpark"
 	WorkTakeover WorkAction = "takeover"
+	WorkProof    WorkAction = "proof"
 )
 
 type Handoff struct {
@@ -79,25 +80,29 @@ type WorkItem struct {
 	Timeline     []WorkEntry `json:"timeline,omitempty"`
 	Phase        Phase       `json:"phase,omitempty"`
 	PhaseSince   time.Time   `json:"phaseSince,omitzero"`
+	Proof        []ProofStep `json:"proof,omitempty"`
+	proofIssued  int
+	round        int
 }
 
 type WorkRequest struct {
-	ProjectKey  string     `json:"projectKey"`
-	SessionID   string     `json:"sessionId"`
-	Action      WorkAction `json:"action"`
-	ClauseID    string     `json:"clauseId,omitempty"`
-	ItemID      string     `json:"itemId,omitempty"`
-	Text        string     `json:"text,omitempty"`
-	Reason      string     `json:"reason,omitempty"`
-	DependsOn   string     `json:"dependsOn,omitempty"`
-	UtteranceID string     `json:"utteranceId,omitempty"`
-	Handoff     Handoff    `json:"handoff,omitempty"`
-	Park        *Park      `json:"park,omitempty"`
-	ForSession  string     `json:"forSession,omitempty"`
-	LogType     string     `json:"logType,omitempty"`
-	Fields      WorkFields `json:"fields,omitempty"`
-	Change      WorkChange `json:"change,omitempty"`
-	Takeover    *Takeover  `json:"takeover,omitempty"`
+	ProjectKey  string      `json:"projectKey"`
+	SessionID   string      `json:"sessionId"`
+	Action      WorkAction  `json:"action"`
+	ClauseID    string      `json:"clauseId,omitempty"`
+	ItemID      string      `json:"itemId,omitempty"`
+	Text        string      `json:"text,omitempty"`
+	Reason      string      `json:"reason,omitempty"`
+	DependsOn   string      `json:"dependsOn,omitempty"`
+	UtteranceID string      `json:"utteranceId,omitempty"`
+	Handoff     Handoff     `json:"handoff,omitempty"`
+	Park        *Park       `json:"park,omitempty"`
+	ForSession  string      `json:"forSession,omitempty"`
+	LogType     string      `json:"logType,omitempty"`
+	Fields      WorkFields  `json:"fields,omitempty"`
+	Change      WorkChange  `json:"change,omitempty"`
+	Takeover    *Takeover   `json:"takeover,omitempty"`
+	Proof       *ProofWrite `json:"proof,omitempty"`
 	// Source marks a log the daemon writes itself; a request from outside
 	// cannot set it.
 	Source string `json:"-"`
@@ -118,6 +123,9 @@ type WorkDepPayload struct {
 func (s *Store) Work(req WorkRequest, now time.Time) (WorkResult, error) {
 	if req.ProjectKey == "" || req.SessionID == "" {
 		return WorkResult{}, refuse("project and acting session are required")
+	}
+	if req.Action == WorkProof {
+		return s.workProof(req, now)
 	}
 	id, readback := req.ItemID, ""
 	board, release, err := s.writePlanned(req.ProjectKey, req.SessionID, now, func(board *Board, ids *idIssuer) (EventType, any, error) {

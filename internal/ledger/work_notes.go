@@ -106,6 +106,7 @@ func (item *WorkItem) snapshot() WorkItem {
 	out.Children = slices.Clone(item.Children)
 	out.Labels = slices.Clone(item.Labels)
 	out.Timeline = slices.Clone(item.Timeline)
+	out.Proof = slices.Clone(item.Proof)
 	if item.Handoff != nil {
 		out.Handoff = item.Handoff.clone()
 	}

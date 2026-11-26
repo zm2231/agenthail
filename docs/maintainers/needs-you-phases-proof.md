@@ -210,11 +210,11 @@ A proof step is one check the holder ran:
 
 | Field | Meaning | Limit |
 |---|---|---|
-| `id` | issued by the ledger, `p1`, `p2`… within the item | |
+| `id` | issued by the ledger's owner, `p1`, `p2`… within the item; a removed step's id is never issued again | |
 | `title` | what was checked | 120 characters |
 | `expected` | what should happen | 1,000 characters |
 | `observed` | what happened | 1,000 characters, empty until checked |
-| `outcome` | `pass`, `fail` or `pending` (written before it was run) | |
+| `outcome` | `pass`, `fail` or `pending` (written before it was run, the default); a pass or a fail needs `observed` | |
 | `revision` | the commit or build it was observed at, optional | 64 characters |
 | `attachments` | `{title, url}`: http(s) links to a screenshot, a log, a CI run, a recording | 5 per step, title 80 |
 | `by`, `at` | the writing session and time | |
@@ -225,14 +225,14 @@ An item holds at most 30 steps. Files are referenced by link, never stored in th
 
 - A new ledger event `work_item.proof`. Every proof write goes to the project's ledger owner, as every work write does (`/api/v1/ledger/work` is routed to the owner), and the owner plans it against its own board under the board lock. So the owner alone allocates step ids and enforces the 30-step cap, and every host applies the owner's events in the owner's order and ends with the same proof.
 - Each write is one operation: `add` (a new step, id issued by the owner; the type is added to the id-issuing types so replay protects the ids), `replace` (every field of one step) or `remove` (one step). `replace` and `remove` carry `base`, the step's `version` as the writer last read it; the owner refuses a stale base with `409 conflict` and the current step, so two concurrent edits never silently overwrite each other. Each step's `version` is a counter the owner writes into the event payload when it plans the write: 1 on add, the previous version plus one on each replace. It is never read from a host's own event sequence, which differs between hosts, so every host reports the same version and any of them can be used as `base`.
-- Each write carries an operation id from the writer (the MCP tool and the CLI make one per call), stored as the event's `ref`: `proof:<itemId>:<operationId>`. A retry after an unknown result is a no-op that returns the step as the first write left it, so an add is never doubled.
+- Each write carries an operation id, stored as the event's `ref`: `proof:<itemId>:<operationId>`. The CLI makes one per call unless `--operation` names it; over MCP it defaults to the call's `clientRequestId`; an HTTP client sends its own. A retry with the same operation id records nothing and returns the item as it is, so an add is never doubled.
 - Only the item's holder writes proof, while the item is `in_progress`, `blocked` or `in_review` (the holder can still correct a step after submitting). A reviewer comments instead.
-- CLI: `agenthail ledger proof <item> --title "..." --expected "..." [--observed "..."] [--outcome pass|fail|pending] [--revision <sha>] [--link <title>=<url>]...` adds; `--step <id> --base <version>` replaces; `--remove <id> --base <version>` removes.
-- MCP: `agenthail_ledger_write {"op": "work", "request": {"action": "proof", "itemId", "proof": {"op": "add" | "replace" | "remove", "step": {...}, "base": <version>, "operationId": "..."}}}`.
+- CLI: `agenthail ledger proof <item> --title "..." --expected "..." [--observed "..."] [--outcome pass|fail|pending] [--revision <sha>] [--link <title>=<url>]...` adds; `--step <id> --base <version>` with the same fields replaces; `--remove --step <id> --base <version>` removes; `agenthail ledger proof <item>` lists the proof.
+- MCP and HTTP: `agenthail_ledger_write {"op": "work", "request": {"action": "proof", "itemId", "proof": {"op": "add" | "replace" | "remove", "step": {"id", "title", "expected", "observed", "outcome", "revision", "attachments": [{"title", "url"}]}, "base": <version>, "operationId": "..."}}}`, the same body as `POST /api/v1/ledger/work`. A refusal, a stale `base` included, is `409` with the reason.
 
 ### Reading
 
-- The item read (`ledger show`, `agenthail_ledger_read {"view": "item"}`, `/api/v1/ledger?view=item`) returns `proof`: every step in order, each with `stale: true` when it was written before the item's last move into `in_progress` (it was sent back since).
+- The item read (`ledger show`, `agenthail_ledger_read {"view": "item"}`, `/api/v1/ledger?view=item`) returns `proof`: every step in order, each with `stale: true` when it was written before the item last changed holder or was sent back from review, the same moments that end a Verify mark.
 - Work lists and board rows return the counts `{pass, fail, pending}` of steps that are not stale.
 - The `review` entry in the Needs-you list returns the same counts (1c).
 

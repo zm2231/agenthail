@@ -43,6 +43,7 @@ const (
 	EventWorkEdit      EventType = "work_item.edit"
 	EventWorkLink      EventType = "work_item.link"
 	EventPhaseLabels   EventType = "phase_labels"
+	EventWorkProof     EventType = "work_item.proof"
 )
 
 const (
