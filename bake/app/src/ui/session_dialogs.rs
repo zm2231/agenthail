@@ -43,6 +43,7 @@ fn act_icon(act: &Act) -> &'static rune::Icon {
     match act {
         Act::Rename => &icons::CORNER,
         Act::Terminal => &icons::TERMINAL,
+        Act::Call => &icons::PHONE,
         Act::Pr(_) | Act::PrUnlink(_) | Act::PrLink => &icons::PULL,
         Act::PrWatch(..) => &icons::ACTIVITY,
         Act::Pin(_) => &icons::PIN,

@@ -4,6 +4,7 @@ mod over;
 mod theme;
 mod transcript;
 mod ui;
+mod voice;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -421,6 +422,12 @@ pub fn toggle_pick(s: &mut App, request: &str, siblings: &[String], option: &str
 
 pub fn open_link(url: &str) {
     if url.starts_with("https://") || url.starts_with("http://") {
+        let _ = std::process::Command::new("open").arg(url).spawn();
+    }
+}
+
+pub fn open_settings(url: &str) {
+    if url.starts_with("x-apple.systempreferences:") {
         let _ = std::process::Command::new("open").arg(url).spawn();
     }
 }
@@ -1038,6 +1045,10 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         tx.scroll_into_view_in("sidebar-scroll", over::ui::session_key(&id));
         s.revealed = Some(id);
     }
+    if let Some(id) = voice::take_opened_session() {
+        over::open_session(s, &id);
+        changed = true;
+    }
     changed |= ui::session_menu::drain(s);
     changed |= over::inbox::drain(s);
     changed |= ui::gone::watch(s);
@@ -1056,6 +1067,10 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
 }
 
 fn main() {
+    if args().iter().any(|a| a == "--voice") {
+        voice::run_alone();
+        return;
+    }
     rune::App::new(AppSpec::<App> {
         poll: Some(poll),
         on_key: Some(on_key),
