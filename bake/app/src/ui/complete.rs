@@ -15,7 +15,7 @@ pub enum Done {
     Prompts(u64, String, Result<Vec<Prompt>, String>),
     Found(u64, Result<Found, String>),
     Forked(String, String, String, Result<String, RespondError>),
-    Goal(String, String, Result<feed::composer::Delivered, RespondError>),
+    Goal(String, String, String, Result<feed::composer::Delivered, RespondError>),
 }
 
 pub struct Search {
@@ -487,7 +487,7 @@ pub fn done(s: &mut App, done: Done) {
                 Err(error) => s.ov.notice = Some(format!("Couldn't fork: {}", error.message)),
             }
         }
-        Done::Goal(asked, typed, result) => {
+        Done::Goal(asked, typed, goal, result) => {
             let id = feed::composer::current(&s.rekeyed, &asked).to_string();
             s.complete.goal_pending.remove(&id);
             let unsure = match &result {
@@ -495,7 +495,7 @@ pub fn done(s: &mut App, done: Done) {
                 Err(e) => e.maybe_delivered,
             };
             if !unsure {
-                s.complete.goal_keys.retain(|_, (_, sent)| feed::composer::current(&s.rekeyed, sent) != id);
+                s.complete.goal_keys.retain(|(_, text), (_, sent)| *text != goal || feed::composer::current(&s.rekeyed, sent) != id);
             }
             if result.as_ref().is_ok_and(|d| *d != feed::composer::Delivered::Unconfirmed) {
                 if s.composer_for.as_deref() == Some(id.as_str()) {
@@ -551,7 +551,10 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
         let typed = s.composer.text.trim().to_string();
         let (key, asked) = s.complete.goal_keys.entry((id.to_string(), argument.clone())).or_insert_with(|| (feed::catalog::request_key(), id.to_string())).clone();
         crate::note(s, id, "Setting the goal…".into());
-        spawn(s, move |c| Done::Goal(asked.clone(), typed.clone(), c.goal_set(&asked, &argument, &key)));
+        spawn(s, move |c| {
+            let result = c.goal_set(&asked, &argument, &key);
+            Done::Goal(asked.clone(), typed.clone(), argument.clone(), result)
+        });
         return true;
     }
     let busy = |what: &str| s.menus.busy.iter().any(|(k, w)| *w == what && feed::composer::current(&s.rekeyed, k) == id);
