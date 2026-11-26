@@ -10,6 +10,7 @@ use crate::over::ui::{self, BODY_MED, META, META_MED, kit, strong, weak};
 use crate::over::{Target, open_target};
 use crate::App;
 
+#[derive(Clone)]
 pub enum Pick {
     Target(Target),
     Codex(Box<Session>),
@@ -131,7 +132,7 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
         .shrink()
         .color(strong())
         .placeholder("Jump to a project, work item or session, or run a command".to_string(), weak())
-        .on_edit(|s: &mut App| search::edited(s).expect("jump open"))
+        .on_edit(|s: &mut App| s.ov.jump.as_mut().expect("jump open"))
         .on_input_key(|s: &mut App, ev: &KeyEvent, tx: &mut Tx| key(s, ev, tx));
     let search = row().w_full().gap(10.0).items_center().px(16.0).py(14.0).border_sides([0.0, 0.0, 1.0, 0.0], ui::rule()).child(icon(&icons::MAGNIFYING_GLASS, 18.0).color(k.c.icon_base)).child(input).child(ui::ghost_keys(&["esc"]));
     let mut list = col().w_full().gap(2.0).padding(8.0);
@@ -148,10 +149,10 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
             Look::Avatar(name) => ui::avatar(name, 22.0),
             Look::Icon(glyph) => row().w(22.0).h(22.0).items_center().justify_center().child(icon(glyph, 15.0).color(k.c.icon_base)),
         };
-        if h.pick.is_none() {
+        let Some(pick) = h.pick else {
             list = list.child(row().w_full().gap(12.0).items_center().px(10.0).py(6.0).child(mark).child(text(h.title).font(META).color(weak()).wrap().shrink()));
             continue;
-        }
+        };
         let active = i == ix;
         let at = i;
         i += 1;
@@ -167,7 +168,7 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
             .px(10.0)
             .py(8.0)
             .radius(8.0)
-            .on_press_tx(move |s: &mut App, tx: &mut Tx| run_at(s, at, tx))
+            .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, pick.clone(), tx))
             .child(mark)
             .child(body)
             .child(text(h.badge).font(META).color(weak()));

@@ -80,12 +80,6 @@ fn invalidate(p: &mut Panel) {
     p.error = None;
 }
 
-fn edited(s: &mut App) -> &mut TextEdit {
-    let p = s.ov.search.activity.panel.as_mut().expect("activity open");
-    invalidate(p);
-    &mut p.query
-}
-
 fn pending(p: &Panel) -> bool {
     p.asked.as_ref() != Some(&filter(p))
 }
@@ -208,7 +202,7 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
         .shrink()
         .color(strong())
         .placeholder("Search activity".to_string(), weak())
-        .on_edit(edited)
+        .on_edit(|s: &mut App| &mut s.ov.search.activity.panel.as_mut().expect("activity open").query)
         .on_input_key(|s: &mut App, ev: &KeyEvent, _: &mut Tx| key(s, ev).unwrap_or(false));
     let mut pops = Vec::new();
     let mut labels = vec![ALL_EVENTS.to_string()];

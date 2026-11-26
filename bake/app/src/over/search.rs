@@ -55,15 +55,6 @@ fn jump_query(s: &App) -> Option<String> {
     s.ov.jump.as_ref().and_then(|e| codex_query(&e.text))
 }
 
-pub fn edited(s: &mut App) -> Option<&mut rune::TextEdit> {
-    let st = &mut s.ov.search;
-    if st.codex.as_ref().is_some_and(|(_, _, found)| found.is_none()) {
-        st.codex = None;
-    }
-    st.typed = None;
-    s.ov.jump.as_mut()
-}
-
 pub fn forget_codex(s: &mut App) {
     s.ov.search.codex = None;
     s.ov.search.typed = None;
