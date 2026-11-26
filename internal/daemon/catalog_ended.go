@@ -235,7 +235,11 @@ func (d *Daemon) restoreEndedSession(item catalogRestore, publish func(ended, re
 
 // presentUnlisted gives a session no discovery pass lists, such as one whose
 // start never opened it, the catalog row that listings and archive state read.
+// A session at work is left to the pass that lists it.
 func (d *Daemon) presentUnlisted(ctx context.Context, session *surface.Session) error {
+	if session.Status == surface.StatusBusy {
+		return nil
+	}
 	if _, listed, err := d.Registry.CatalogProjectionFingerprint(session.ID); err != nil || listed {
 		return err
 	}
@@ -255,15 +259,17 @@ func (d *Daemon) presentUnlisted(ctx context.Context, session *surface.Session) 
 	if err != nil {
 		return err
 	}
-	alias, _ := d.Registry.ReverseAlias(session.ID)
+	read, err := d.Registry.Session(session.ID)
+	if err != nil {
+		return err
+	}
+	alias, _ := d.Registry.ReverseAlias(read.ID)
 	observedAt := time.Now().UTC()
-	d.restoreEndedSession(catalogRestore{id: session.ID}, func(ended, read surface.Session) bool {
-		identityCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		defer cancel()
-		identity := d.catalogIdentities.Identity(identityCtx, ended, observedAt, func() *projectresolve.CatalogProject { return d.storedCatalogProject(ended.ID) })
-		restore := &registry.SessionUpdate{From: read, Owns: registry.SessionActivityFields | registry.SessionProcessFields, Guard: registry.AllSessionFields}
-		return d.publishCatalogSession(ctx, adapter, ended, restore, identity, alias, counts[ended.ID], d.limitResumeRow(ended.ID), false, config, view, nil, observedAt, nil, nil)
-	})
+	identityCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	identity := d.catalogIdentities.Identity(identityCtx, *read, observedAt, func() *projectresolve.CatalogProject { return d.storedCatalogProject(read.ID) })
+	cancel()
+	unchanged := &registry.SessionUpdate{From: *read, Owns: registry.SessionActivityFields, Guard: registry.AllSessionFields}
+	d.publishCatalogSession(ctx, adapter, *read, unchanged, identity, alias, counts[read.ID], d.limitResumeRow(read.ID), false, config, view, nil, observedAt, nil, nil)
 	return d.catalog.flushCommitted()
 }
 

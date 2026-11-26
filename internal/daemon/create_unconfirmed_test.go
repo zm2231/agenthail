@@ -105,3 +105,23 @@ func TestArchivingASessionThatNeverOpenedListsItAsArchived(t *testing.T) {
 		t.Fatalf("session read %d %s, want archived true", response.Code, response.Body)
 	}
 }
+
+func TestAStartThroughALauncherWhoseOpenIsNotConfirmedLeavesNoSessionAndFreesItsName(t *testing.T) {
+	d, r, fake, _, _ := daemonFixture(t)
+	d.SetLaunchers(surface.NewLaunchers([]surface.Surface{fake}))
+	fake.openUnconfirmed = surface.DeliveryOutcomeUnknown(errors.New("the provider did not answer"))
+	body := `{"action":"session-create","surface":"codex","launcher":"codex-app-server","message":"hello","alias":"starter"}`
+	if w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", body); w.Code < http.StatusMultipleChoices {
+		t.Fatalf("status=%d body=%s, want the start refused", w.Code, w.Body.String())
+	}
+	if _, err := r.Session("started"); err == nil {
+		t.Fatal("the unconfirmed session was recorded")
+	}
+	if owner, err := r.LookupAlias("starter"); err == nil {
+		t.Fatalf("@starter is held by %s after a start that opened nothing", owner)
+	}
+	fake.openUnconfirmed = nil
+	if w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", body); w.Code != http.StatusCreated {
+		t.Fatalf("a new start under the same name: %d %s", w.Code, w.Body.String())
+	}
+}

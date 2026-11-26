@@ -171,7 +171,7 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 	if err != nil {
 		return nil, nil, err
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), claudeStartTimeout)
+	ctx, cancel := startContext(ctx)
 	defer cancel()
 	id := uuid.NewString()
 	opened, err := c.hostOpen(ctx, claudehost.OpenRequest{
@@ -195,6 +195,21 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 	}
 	sent, err := c.sendHostTurn(ctx, session, options.Message, "", nil, surface.SourceSessionID(ctx) == surface.PersonSessionID, false)
 	return session, sent, err
+}
+
+// startContext keeps the caller's values and its cancellation, as at
+// shutdown, but not its deadline, which is shorter than the host's own.
+func startContext(caller context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(caller), claudeStartTimeout)
+	stop := context.AfterFunc(caller, func() {
+		if errors.Is(caller.Err(), context.Canceled) {
+			cancel()
+		}
+	})
+	return ctx, func() {
+		stop()
+		cancel()
+	}
 }
 
 // abandonOpen closes a conversation the start is giving up on. Once the host

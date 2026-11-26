@@ -11,7 +11,9 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const pendingCredentialLifetime = surfaceOperationTimeout + startNameMargin
+// pendingCredentialLifetime outlasts the longest start, since a session's
+// credential is issued before its open and bound when the session is recorded.
+const pendingCredentialLifetime = surface.SessionStartTimeout + startNameMargin
 
 // Only hashes are stored, so the raw tokens this process minted are the only ones it can send again.
 type daemonMCPCredentials struct {

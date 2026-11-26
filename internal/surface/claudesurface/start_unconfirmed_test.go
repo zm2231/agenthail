@@ -81,6 +81,39 @@ func TestAnOpenTheHostDoesNotConfirmIsClosedThereAndStartsNothing(t *testing.T) 
 	}
 }
 
+func TestAStartWhoseCallerIsCancelledClosesItsOpenAndStartsNothing(t *testing.T) {
+	t.Setenv("FAKE_CLAUDE_INITIALIZE_MS", "30000")
+	host := claudehosttest.New(t, "")
+	client := host.Start(t)
+	c := surfacetest.InDaemon(NewClaude(nil, host.Home))
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(500*time.Millisecond, cancel)
+	started := time.Now()
+	session, sent, err := c.StartSession(ctx, surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd})
+	if err == nil || session != nil || sent != nil || surface.IsDeliveryOutcomeUnknown(err) {
+		t.Fatalf("session=%+v sent=%+v err=%v, want no session and a definite failure", session, sent, err)
+	}
+	if took := time.Since(started); took > 20*time.Second {
+		t.Fatalf("the cancelled start took %s", took)
+	}
+	spawned := spawnedSessions(t, host)
+	if len(spawned) != 1 {
+		t.Fatalf("spawned=%v", spawned)
+	}
+	testkit.Eventually(t, "the cancelled conversation to be gone from the host", 15*time.Second, func() bool {
+		listing, err := client.List(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, listed := range listing.Sessions {
+			if listed.SessionID == spawned[0] {
+				return false
+			}
+		}
+		return true
+	})
+}
+
 func spawnedSessions(t *testing.T, host *claudehosttest.Fixture) []string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(host.ClaudeDir, "spawns.jsonl"))
