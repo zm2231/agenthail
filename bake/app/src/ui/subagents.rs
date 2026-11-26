@@ -172,7 +172,7 @@ fn page(s: &mut App, id: &str) {
 }
 
 fn claude(s: &mut App, id: &str) {
-    let Some(stamp) = session(s, id).map(|x| x.last_active.clone()) else { return };
+    let Some(stamp) = session(s, id).filter(|x| x.surface == "claude").map(|x| x.last_active.clone()) else { return };
     if s.crew.claude_loading.contains(id) {
         return;
     }

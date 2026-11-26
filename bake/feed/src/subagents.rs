@@ -188,16 +188,28 @@ impl Client {
 
     pub fn session_row(&self, id: &str) -> Result<Session, String> {
         let value = self.get_json(&format!("/api/v1/session?id={}&limit=1", enc(id))).map_err(|e| e.to_string())?;
-        let mut row: Session = serde_json::from_value(value["session"].clone()).map_err(|e| e.to_string())?;
-        if row.id.is_empty() {
-            return Err("Agenthail returned no session".into());
-        }
-        if let Some(alias) = value["alias"].as_str().filter(|a| !a.is_empty()) {
-            row.alias = Some(alias.to_string());
-        }
-        Ok(row)
+        detail_row(&value)
     }
+}
 
+pub fn detail_row(detail: &Value) -> Result<Session, String> {
+    let Value::Object(mut raw) = detail["session"].clone() else { return Err("Agenthail returned no session".into()) };
+    for key in ["capabilities", "readOnly", "archived", "attention"] {
+        if let Some(v) = detail.get(key).filter(|v| !v.is_null()) {
+            raw.insert(key.into(), v.clone());
+        }
+    }
+    if let Some(alias) = detail["alias"].as_str().filter(|a| !a.is_empty()) {
+        raw.insert("alias".into(), Value::String(alias.into()));
+    }
+    let row: Session = serde_json::from_value(Value::Object(raw)).map_err(|e| e.to_string())?;
+    if row.id.is_empty() {
+        return Err("Agenthail returned no session".into());
+    }
+    Ok(row)
+}
+
+impl Client {
     pub fn subagent_sessions(&self, parent: &str) -> Result<Vec<Session>, String> {
         for _ in 0..PAGE_TRIES {
             match self.subagent_pages(parent) {
@@ -344,6 +356,15 @@ mod tests {
         assert_eq!((got.id.as_str(), got.title(), parent_of(&got)), ("p", "@planner".to_string(), Some("g".to_string())));
         assert_eq!(asked.recv().unwrap().0, "/api/v1/session?id=p&limit=1");
         assert!(client.session_row("p").is_err());
+    }
+
+    #[test]
+    fn a_parent_row_keeps_what_it_may_do() {
+        let detail: Value = serde_json::from_str(r#"{"session":{"id":"p","name":"Plan","surface":"codex"},"capabilities":{"send":true,"interrupt":false,"steer":false},"readOnly":true,"archived":true}"#).unwrap();
+        let row = detail_row(&detail).unwrap();
+        assert!(row.read_only && row.archived);
+        assert!(!row.capabilities.interrupt && !row.capabilities.steer);
+        assert!(detail_row(&serde_json::json!({"session": null})).is_err());
     }
 
     #[test]
