@@ -28,19 +28,20 @@ func refuse(code, format string, args ...any) *Error {
 type point struct{ X, Y float64 }
 
 type lease struct {
-	owner    string
-	kind     string
-	device   string
-	runtime  string
-	udid     string
-	acquired time.Time
-	lastUsed time.Time
-	capAt    time.Time
-	lock     *os.File
-	mu       sync.Mutex
-	ended    bool
-	launched map[string]bool
-	refs     map[string]point
+	owner     string
+	kind      string
+	device    string
+	runtime   string
+	udid      string
+	acquired  time.Time
+	lastUsed  time.Time
+	capAt     time.Time
+	lock      *os.File
+	mu        sync.Mutex
+	ended     bool
+	uploading bool
+	launched  map[string]bool
+	refs      map[string]point
 }
 
 type LeaseView struct {

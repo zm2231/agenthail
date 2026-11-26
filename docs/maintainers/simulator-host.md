@@ -166,8 +166,23 @@ A daemon that runs no simulators, such as one on Linux, forwards each
   answer, at most 8 MiB, and is written on the forwarding host under its own
   output folder for the session, where `path` then copies a screenshot. Results
   name the Mac as `host` and carry no `outDir`.
-- `install` is refused for a forwarded session, which has no folder on the
-  Mac; a forwarded session launches an app already on the simulator.
+- A forwarded `install` uploads the app. `app` is an absolute `.app` folder in
+  the session's folders on the forwarding host (its ceiling's roots, or its
+  working directory), checked as a screenshot `path` is; anything else is
+  `out_of_scope`. The forwarding host walks it through an `os.Root`, refusing a
+  link or anything that is not a file or folder, and refuses an app whose files
+  total over 512 MiB as `too_large` before sending anything. It streams the app
+  as a gzip tar holding one `<Name>.app/` folder to the Mac's host-only
+  `POST /api/v1/simulator/install?owner=&kind=&runtime=` with
+  `Expect: 100-continue`. The Mac checks the lease before it reads the body, so
+  a refused install (`not_held`, or `busy` while another upload to the same
+  lease runs) sends no app. It unpacks only clean relative paths of files and
+  folders under that one `.app`, through an `os.Root`, into
+  `~/.agenthail/simulator/out/.staging/install-*`, refusing more than 512 MiB of
+  files or of compressed stream. It checks the lease again, installs that copy
+  and removes it however the install ends; a daemon that starts removes any
+  `install-*` copy a stopped one left. The result names the forwarding host's
+  path as `installed`.
 - Archiving the session on the forwarding host releases what it holds on every
   Mac it has called, after any forwarded call still running has finished, and
   removes its folder there. A lease the Mac never hears released ends

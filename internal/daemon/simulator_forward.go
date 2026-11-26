@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +30,7 @@ type simulatorForwardRequest struct {
 
 func (d *Daemon) registerSimulatorRoutes(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/simulator", d.apiV1Guard(dashboard, "control", d.hostOnly(d.apiSimulatorHandler)))
+	mux.HandleFunc("/api/v1/simulator/install", d.apiV1Guard(dashboard, "control", d.hostOnly(d.apiSimulatorInstallHandler)))
 	mux.HandleFunc("/api/v1/simulator/status", d.apiV1Guard(dashboard, "read", d.hostOnly(d.apiSimulatorStatusHandler)))
 }
 
@@ -75,20 +78,11 @@ func (d *Daemon) apiSimulatorHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_json", err.Error())
 		return
 	}
-	if req.Owner == "" || len(req.Owner) > 256 || strings.Contains(req.Owner, "::") {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "owner must be the calling session's id.")
-		return
-	}
-	if d.simHost == nil || !d.simHost.Local() {
-		writeAPIError(w, http.StatusConflict, "unavailable", "This host runs no iOS simulators.")
-		return
-	}
-	if status := d.simulatorStatus(r.Context()); !status.Ready {
-		writeAPIError(w, http.StatusConflict, "unavailable", "This host can't run iOS simulators: "+status.Problem+".")
+	if !d.servesForwardedSimulator(w, r, req.Owner) {
 		return
 	}
 	if req.Request.Action == "install" {
-		writeAPIError(w, http.StatusConflict, "unavailable", "A session on another host can't install apps here yet; launch one already on the simulator.")
+		writeAPIError(w, http.StatusConflict, "invalid", "A session on another host installs by uploading its app.")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), simulatorTimeout(req.Request.Action))
@@ -124,6 +118,47 @@ func (d *Daemon) apiSimulatorHandler(w http.ResponseWriter, r *http.Request) {
 	writeDashboardJSON(w, http.StatusOK, out)
 }
 
+func (d *Daemon) servesForwardedSimulator(w http.ResponseWriter, r *http.Request, owner string) bool {
+	if owner == "" || len(owner) > 256 || strings.Contains(owner, "::") {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "owner must be the calling session's id.")
+		return false
+	}
+	if d.simHost == nil || !d.simHost.Local() {
+		writeAPIError(w, http.StatusConflict, "unavailable", "This host runs no iOS simulators.")
+		return false
+	}
+	if status := d.simulatorStatus(r.Context()); !status.Ready {
+		writeAPIError(w, http.StatusConflict, "unavailable", "This host can't run iOS simulators: "+status.Problem+".")
+		return false
+	}
+	return true
+}
+
+func (d *Daemon) apiSimulatorInstallHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use POST for this endpoint.")
+		return
+	}
+	hostID, ok := requestingHost(r.Context())
+	if !ok || hostID == "" {
+		writeAPIError(w, http.StatusForbidden, "host_only", "Only a paired host uploads apps to install.")
+		return
+	}
+	query := r.URL.Query()
+	if !d.servesForwardedSimulator(w, r, query.Get("owner")) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), simulatorTimeout("install"))
+	defer cancel()
+	out, err := d.simHost.InstallArchive(ctx, hosts.Qualify(hostID, query.Get("owner")), simhost.Request{Action: "install", Kind: query.Get("kind"), Runtime: query.Get("runtime")}, r.Body)
+	if err != nil {
+		refusal := mcpRefusalFor(simulatorRefusal(err))
+		writeAPIError(w, http.StatusConflict, refusal.Code, refusal.Message)
+		return
+	}
+	writeDashboardJSON(w, http.StatusOK, out)
+}
+
 func readBounded(path string, limit int64) ([]byte, error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -136,8 +171,11 @@ func readBounded(path string, limit int64) ([]byte, error) {
 }
 
 func simulatorTimeout(simulatorAction string) time.Duration {
-	if simulatorAction == "acquire" {
+	switch simulatorAction {
+	case "acquire":
 		return 11 * time.Minute
+	case "install":
+		return 10 * time.Minute
 	}
 	return time.Minute
 }
@@ -201,8 +239,13 @@ func (d *Daemon) refreshSimulators(ctx context.Context, host *pairedHost) {
 }
 
 func (d *Daemon) forwardSimulator(ctx context.Context, owner string, req simhost.Request) (map[string]any, error) {
+	var bundle *simhost.AppBundle
 	if req.Action == "install" {
-		return nil, refuse("unavailable", "A session on another host can't install apps on the Mac's simulator yet; launch one already on it.")
+		var err error
+		if bundle, err = simhost.OpenApp(req.App); err != nil {
+			return nil, simulatorRefusal(err)
+		}
+		defer bundle.Close()
 	}
 	host, err := d.simulatorDeviceHost(ctx)
 	if err != nil {
@@ -211,13 +254,18 @@ func (d *Daemon) forwardSimulator(ctx context.Context, owner string, req simhost
 	d.noteSimulatorHost(owner, host.record.ID)
 	ctx, cancel := context.WithTimeout(ctx, simulatorTimeout(req.Action)+10*time.Second)
 	defer cancel()
+	if bundle != nil {
+		out, err := uploadApp(ctx, host, owner, req, bundle)
+		if err != nil {
+			return nil, forwardRefusal(host, err)
+		}
+		out["installed"] = req.App
+		out["host"] = host.record.Name
+		return out, nil
+	}
 	var out map[string]any
 	if err := d.ledgerHostCall(ctx, host, http.MethodPost, "/api/v1/simulator", nil, simulatorForwardRequest{Owner: owner, Request: req}, &out); err != nil {
-		var status hosts.StatusError
-		if errors.As(err, &status) && status.Code != "" {
-			return nil, &mcpRefusal{Code: status.Code, Message: status.Message + " (on " + host.record.Name + ")"}
-		}
-		return nil, &mcpRefusal{Code: "unavailable", Message: fmt.Sprintf("%s did not answer: %v", host.record.Name, err), Retryable: true}
+		return nil, forwardRefusal(host, err)
 	}
 	out["host"] = host.record.Name
 	if encoded, _ := out["fileData"].(string); encoded != "" {
@@ -233,6 +281,48 @@ func (d *Daemon) forwardSimulator(ctx context.Context, owner string, req simhost
 		out["file"] = file
 		delete(out, "fileData")
 		delete(out, "fileName")
+	}
+	return out, nil
+}
+
+func forwardRefusal(host *pairedHost, err error) error {
+	var status hosts.StatusError
+	if errors.As(err, &status) && status.Code != "" {
+		return &mcpRefusal{Code: status.Code, Message: status.Message + " (on " + host.record.Name + ")"}
+	}
+	var refusal *simhost.Error
+	if errors.As(err, &refusal) {
+		return simulatorRefusal(refusal)
+	}
+	return &mcpRefusal{Code: "unavailable", Message: fmt.Sprintf("%s did not answer: %v", host.record.Name, err), Retryable: true}
+}
+
+// Expect: 100-continue holds the body until the Mac has checked the lease.
+func uploadApp(ctx context.Context, host *pairedHost, owner string, req simhost.Request, bundle *simhost.AppBundle) (map[string]any, error) {
+	reader, writer := io.Pipe()
+	sent := make(chan error, 1)
+	go func() {
+		err := bundle.WriteArchive(writer)
+		writer.CloseWithError(err)
+		sent <- err
+	}()
+	query := url.Values{"owner": []string{owner}, "kind": []string{req.Kind}, "runtime": []string{req.Runtime}}
+	response, err := host.client.Stream(ctx, "/api/v1/simulator/install", query, reader, http.Header{"Content-Type": []string{"application/gzip"}, "Expect": []string{"100-continue"}})
+	reader.CloseWithError(errors.New("upload ended"))
+	if err != nil {
+		var refusal *simhost.Error
+		if sendErr := <-sent; errors.As(sendErr, &refusal) {
+			return nil, refusal
+		}
+		return nil, err
+	}
+	body, err := hosts.ReadResponse(response)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

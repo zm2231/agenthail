@@ -66,6 +66,7 @@ func New(config Config) *Host {
 		home, _ := os.UserHomeDir()
 		h.outRoot = filepath.Join(home, ".agenthail", "simulator", "out")
 	}
+	h.sweepStaging()
 	return h
 }
 
