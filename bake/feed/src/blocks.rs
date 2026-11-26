@@ -1,5 +1,5 @@
 use crate::focus::{self, AskRuns};
-use crate::item::{AgentMessage, Item};
+use crate::item::{AgentMessage, AttachedFile, Attachment, Item};
 use crate::summary;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -29,6 +29,9 @@ pub enum Kind {
     Annotation(String),
     Notice(String),
     Instructions(String),
+    Image(Attachment),
+    File(Item),
+    Files(Vec<AttachedFile>),
     Unknown { title: String, kind: String, text: String },
 }
 
@@ -47,7 +50,7 @@ impl Block {
 
     pub fn is_message_in(&self) -> bool {
         match &self.kind {
-            Kind::User(_) | Kind::AgentFold { .. } => true,
+            Kind::User(_) | Kind::Files(_) | Kind::AgentFold { .. } => true,
             Kind::Agent(entry) => entry.agent.is_incoming(),
             _ => false,
         }
@@ -87,6 +90,11 @@ pub fn strip_image_markers(text: &str) -> (String, usize) {
         })
         .collect();
     (kept.join("\n").trim().to_string(), images)
+}
+
+fn caption(item: &Item) -> Option<String> {
+    let text = item.text.trim();
+    (!text.is_empty() && text != "Image attachment").then(|| text.to_string())
 }
 
 fn work_block(tools: Vec<Item>, focus: bool) -> Block {
@@ -143,13 +151,16 @@ pub fn build(items: &[Item], options: &Options) -> Vec<Block> {
         match item.kind.as_str() {
             "message" | "text" => {
                 flush!();
-                if item.text.trim().is_empty() {
+                if item.text.trim().is_empty() && item.files.is_empty() {
                     continue;
                 }
                 if item.role_is("user") {
                     let (text, images) = strip_image_markers(&item.text);
                     if !text.is_empty() {
                         blocks.push(Block::new(format!("item:{}", item.id), Kind::User(text), item.timestamp.clone()));
+                    }
+                    if !item.files.is_empty() {
+                        blocks.push(Block::new(format!("files:{}", item.id), Kind::Files(item.files.clone()), item.timestamp.clone()));
                     }
                     if images > 0 {
                         let note = if images == 1 { "Image attached".to_string() } else { format!("{images} images attached") };
@@ -159,9 +170,27 @@ pub fn build(items: &[Item], options: &Options) -> Vec<Block> {
                     blocks.push(Block::new(format!("item:{}", item.id), Kind::Assistant(item.text.clone()), item.timestamp.clone()));
                 }
             }
-            "attachment" | "file" => {
+            "file" => {
                 flush!();
-                blocks.push(Block::new(format!("item:{}", item.id), Kind::Annotation("Image attached".into()), None));
+                if !item.role_is("user") {
+                    if let Some(caption) = caption(item) {
+                        blocks.push(Block::new(format!("caption:{}", item.id), Kind::Assistant(caption), item.timestamp.clone()));
+                    }
+                }
+                blocks.push(Block::new(format!("item:{}", item.id), Kind::File(item.clone()), item.timestamp.clone()));
+            }
+            "attachment" => {
+                flush!();
+                if item.role_is("assistant") {
+                    if let Some(caption) = caption(item) {
+                        blocks.push(Block::new(format!("caption:{}", item.id), Kind::Assistant(caption), item.timestamp.clone()));
+                    }
+                }
+                let kind = match item.attachment.as_ref().filter(|a| a.is_image()) {
+                    Some(attachment) => Kind::Image(attachment.clone()),
+                    None => Kind::Annotation("Image attached".into()),
+                };
+                blocks.push(Block::new(format!("item:{}", item.id), kind, None));
             }
             "notice" => {
                 flush!();

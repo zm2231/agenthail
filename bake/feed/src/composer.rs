@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
+use crate::attach::Upload;
 use crate::catalog::QueueRow;
 use serde_json::{Value, json};
 
@@ -140,6 +141,7 @@ impl Delivered {
 pub struct Unsent {
     pub session: String,
     pub text: String,
+    pub attachments: Vec<Upload>,
     pub key: String,
     pub busy: Option<Busy>,
     pub maybe_delivered: bool,
@@ -157,22 +159,35 @@ impl Unsent {
         self.maybe_delivered && self.tries > 0
     }
 
-    pub fn resend(&self, text: &str) -> bool {
-        self.reuses_key() && self.text == text
+    pub fn same(&self, text: &str, attachments: &[Upload]) -> bool {
+        self.text == text && self.attachments.iter().map(|a| &a.id).eq(attachments.iter().map(|a| &a.id))
+    }
+
+    pub fn resend(&self, text: &str, attachments: &[Upload]) -> bool {
+        self.reuses_key() && self.same(text, attachments)
+    }
+
+    pub fn ids(&self) -> Vec<String> {
+        self.attachments.iter().map(|a| a.id.clone()).collect()
     }
 
     pub fn to_json(&self) -> Value {
-        json!({"session": self.session, "text": self.text, "key": self.key, "busy": self.busy.map(Busy::as_str), "maybeDelivered": self.maybe_delivered, "error": self.error, "tries": self.tries})
+        let attachments: Vec<Value> = self.attachments.iter().map(Upload::to_json).collect();
+        json!({"session": self.session, "text": self.text, "attachments": attachments, "key": self.key, "busy": self.busy.map(Busy::as_str), "maybeDelivered": self.maybe_delivered, "error": self.error, "tries": self.tries})
     }
 
     pub fn from_json(id: &str, value: &Value) -> Option<Unsent> {
         let session = value["session"].as_str().filter(|s| !s.is_empty()).unwrap_or(id).to_string();
-        let text = value["text"].as_str().filter(|t| !t.trim().is_empty())?.to_string();
+        let attachments: Vec<Upload> = value["attachments"].as_array().into_iter().flatten().filter_map(Upload::from_json).collect();
+        let text = value["text"].as_str().unwrap_or_default().to_string();
+        if text.trim().is_empty() && attachments.is_empty() {
+            return None;
+        }
         let key = value["key"].as_str().filter(|k| !k.is_empty())?.to_string();
         let busy = value["busy"].as_str().and_then(Busy::parse);
         let maybe_delivered = value["maybeDelivered"].as_bool().unwrap_or(true);
         let tries = value["tries"].as_u64().unwrap_or_default() as u32;
-        Some(Unsent { session, text, key, busy, maybe_delivered, error: value["error"].as_str().unwrap_or_default().to_string(), tries })
+        Some(Unsent { session, text, attachments, key, busy, maybe_delivered, error: value["error"].as_str().unwrap_or_default().to_string(), tries })
     }
 
     pub fn failed(self, retry: bool, maybe_delivered: bool, answered: bool, error: String) -> Unsent {
@@ -184,6 +199,12 @@ impl Unsent {
     }
 
     pub fn quoted(&self) -> String {
+        if self.text.trim().is_empty() {
+            return match self.attachments.as_slice() {
+                [one] => format!("“{}”", one.name),
+                many => format!("{} attachments", many.len()),
+            };
+        }
         let line = self.text.lines().next().unwrap_or_default();
         let short: String = line.chars().take(48).collect();
         if short.len() < self.text.len() { format!("“{short}…”") } else { format!("“{short}”") }
@@ -223,9 +244,9 @@ impl Unconfirmed {
         self.latest(id).is_some()
     }
 
-    pub fn take_same(&mut self, id: &str, text: &str) -> Option<Unsent> {
+    pub fn take_same(&mut self, id: &str, text: &str, attachments: &[Upload]) -> Option<Unsent> {
         let list = self.0.get(id)?;
-        let at = list.iter().rposition(|u| u.resend(text)).or_else(|| list.iter().rposition(|u| u.text == text))?;
+        let at = list.iter().rposition(|u| u.resend(text, attachments)).or_else(|| list.iter().rposition(|u| u.same(text, attachments)))?;
         let unsent = self.0.get_mut(id)?.remove(at);
         if self.0.get(id).is_some_and(|l| l.is_empty()) {
             self.0.remove(id);
@@ -382,21 +403,38 @@ mod tests {
 
     #[test]
     fn only_an_unconfirmed_message_is_sent_again_as_it_was() {
-        let unsent = Unsent { session: "s1".into(), text: "ship it".into(), key: "k1".into(), busy: Some(Busy::Steer), maybe_delivered: true, error: "timeout".into(), tries: 0 };
-        assert!(unsent.resend("ship it"));
-        assert!(!unsent.resend("ship it now"));
+        let unsent = Unsent { session: "s1".into(), text: "ship it".into(), attachments: vec![], key: "k1".into(), busy: Some(Busy::Steer), maybe_delivered: true, error: "timeout".into(), tries: 0 };
+        assert!(unsent.resend("ship it", &[]));
+        assert!(!unsent.resend("ship it now", &[]));
         let retried = Unsent { tries: 1, ..unsent.clone() };
-        assert!(retried.resend("ship it"));
+        assert!(retried.resend("ship it", &[]));
         assert!(retried.offers_new_send() && !unsent.offers_new_send());
         assert!(retried.note().starts_with("Still not confirmed after a retry"));
         let refused = Unsent { maybe_delivered: false, ..unsent };
-        assert!(!refused.resend("ship it"));
+        assert!(!refused.resend("ship it", &[]));
         assert!(refused.note().starts_with("Not sent: timeout"));
     }
 
     #[test]
+    fn attachments_travel_with_an_unconfirmed_message() {
+        let shot = Upload { id: "up/1/shot.png".into(), name: "shot.png".into(), media_type: "image/png".into(), bytes: 9, width: 3, height: 3 };
+        let unsent = Unsent { session: "s1".into(), text: String::new(), attachments: vec![shot.clone()], key: "k1".into(), busy: None, maybe_delivered: true, error: "timeout".into(), tries: 0 };
+        assert_eq!(Unsent::from_json("s1", &unsent.to_json()), Some(unsent.clone()));
+        assert_eq!(unsent.quoted(), "“shot.png”");
+        assert_eq!(unsent.ids(), vec!["up/1/shot.png".to_string()]);
+        assert!(unsent.resend("", std::slice::from_ref(&shot)));
+        assert!(!unsent.resend("", &[]));
+        let mut held = Unconfirmed::default();
+        held.add("s1", unsent.clone());
+        assert_eq!(held.take_same("s1", "", &[]), None);
+        assert_eq!(held.take_same("s1", "", &[shot]).map(|u| u.key), Some("k1".into()));
+        let two = Unsent { attachments: vec![Upload::default(), Upload::default()], ..unsent };
+        assert_eq!(two.quoted(), "2 attachments");
+    }
+
+    #[test]
     fn an_unconfirmed_message_survives_a_restart_with_its_request_id() {
-        let unsent = Unsent { session: "old".into(), text: "ship it".into(), key: "k1".into(), busy: Some(Busy::Queue), maybe_delivered: true, error: "the app closed".into(), tries: 0 };
+        let unsent = Unsent { session: "old".into(), text: "ship it".into(), attachments: vec![], key: "k1".into(), busy: Some(Busy::Queue), maybe_delivered: true, error: "the app closed".into(), tries: 0 };
         assert_eq!(Unsent::from_json("new", &unsent.to_json()), Some(unsent.clone()));
         let idle = Unsent { busy: None, maybe_delivered: false, tries: 2, ..unsent };
         assert_eq!(Unsent::from_json("new", &idle.to_json()), Some(idle));
@@ -441,7 +479,7 @@ mod tests {
     }
 
     fn unsent(key: &str, text: &str, maybe_delivered: bool) -> Unsent {
-        Unsent { session: "s1".into(), text: text.into(), key: key.into(), busy: None, maybe_delivered, error: "timeout".into(), tries: 0 }
+        Unsent { session: "s1".into(), text: text.into(), attachments: vec![], key: key.into(), busy: None, maybe_delivered, error: "timeout".into(), tries: 0 }
     }
 
     #[test]
@@ -466,10 +504,10 @@ mod tests {
         held.add("s1", unsent("k1", "hello", true));
         held.add("s1", unsent("k2", "hello", false));
         held.add("s1", unsent("k3", "other", false));
-        assert_eq!(held.take_same("s1", "hello").map(|u| u.key), Some("k1".into()));
-        assert_eq!(held.take_same("s1", "hello").map(|u| u.key), Some("k2".into()));
-        assert_eq!(held.take_same("s1", "hello"), None);
-        assert_eq!(held.take_same("s1", "other").map(|u| u.maybe_delivered), Some(false));
+        assert_eq!(held.take_same("s1", "hello", &[]).map(|u| u.key), Some("k1".into()));
+        assert_eq!(held.take_same("s1", "hello", &[]).map(|u| u.key), Some("k2".into()));
+        assert_eq!(held.take_same("s1", "hello", &[]), None);
+        assert_eq!(held.take_same("s1", "other", &[]).map(|u| u.maybe_delivered), Some(false));
         assert_eq!(held, Unconfirmed::default());
     }
 
@@ -481,7 +519,7 @@ mod tests {
         held.rekey(&map(&[("old", "new")]));
         assert!(!held.has("old"));
         assert_eq!(held.0["new"].len(), 2);
-        assert_eq!(held.take_same("new", "hello").map(|u| u.session), Some("s1".into()));
+        assert_eq!(held.take_same("new", "hello", &[]).map(|u| u.session), Some("s1".into()));
         held.add("new", unsent("k1", "hello", true));
         assert_eq!(Unconfirmed::from_json(&held.to_json()), held);
         let single = Unconfirmed::from_json(&json!({"s9": {"text": "hi", "key": "k"}}));
