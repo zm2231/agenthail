@@ -215,7 +215,7 @@ pub fn run(s: &mut App, id: &str, act: Act) {
                 let order = crate::over::ui::sidebar_order(s, project.as_deref(), Some(id));
                 s.menus.leaving.insert(id.to_string(), order);
             }
-            let revision = session(s, id).and_then(|x| x.read_state.as_ref()).map(|r| r.revision.clone()).unwrap_or_default();
+            let revision = super::gone::shown(s, id).and_then(|x| x.read_state.as_ref()).map(|r| r.revision.clone()).unwrap_or_default();
             let id = id.to_string();
             spawn(s, Duration::ZERO, move |c| {
                 let result = match &act {

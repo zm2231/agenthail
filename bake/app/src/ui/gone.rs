@@ -92,6 +92,9 @@ pub fn recheck(s: &mut App, id: &str) {
 fn fix(s: &mut App, fix: Fix) {
     let Some(client) = s.client.clone() else { return };
     let Some(m) = s.missing.as_mut().filter(|m| m.fixing.is_none()) else { return };
+    if !s.menus.busy.insert((m.id.clone(), "menu")) {
+        return;
+    }
     let seq = LOOKUPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
     m.fixing = Some((fix, seq));
     m.asking = None;
@@ -104,6 +107,7 @@ fn fix(s: &mut App, fix: Fix) {
 }
 
 pub fn fixed(s: &mut App, id: &str, seq: u64, fix: Fix, result: Result<(), feed::catalog::RespondError>) {
+    s.menus.busy.remove(&(id.to_string(), "menu"));
     let Some(m) = s.missing.as_mut().filter(|m| m.id == id && m.fixing.is_some_and(|(_, n)| n == seq)) else { return };
     m.fixing = None;
     m.asked = f64::NEG_INFINITY;
