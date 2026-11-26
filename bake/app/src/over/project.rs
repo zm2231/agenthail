@@ -306,6 +306,7 @@ pub fn board(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>) -> El {
 }
 
 fn lead_chat(s: &App, lead: &str) -> El {
+    let lead = feed::composer::current(&s.rekeyed, lead);
     if s.panes.get(lead).is_some_and(|p| !p.blocks.is_empty()) {
         return crate::transcript::view(s, lead);
     }

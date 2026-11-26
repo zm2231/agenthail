@@ -182,6 +182,10 @@ impl Unconfirmed {
         self.latest(id).is_some()
     }
 
+    pub fn holds_back(&self, id: &str, message: &str) -> bool {
+        self.0.get(id).is_some_and(|list| list.iter().any(|u| u.maybe_delivered && u.text != message && message.contains(u.text.as_str())))
+    }
+
     pub fn take_same(&mut self, id: &str, text: &str) -> Option<Unsent> {
         let list = self.0.get(id)?;
         let at = list.iter().rposition(|u| u.resend(text)).or_else(|| list.iter().rposition(|u| u.text == text))?;
@@ -390,6 +394,18 @@ mod tests {
         held.remove("s1", "k1");
         assert!(!held.has("s1"));
         assert_eq!(held, Unconfirmed::default());
+    }
+
+    #[test]
+    fn text_wrapping_an_unconfirmed_message_is_held_back() {
+        let mut held = Unconfirmed::default();
+        held.add("s1", unsent("k1", "A", true));
+        held.add("s1", unsent("k2", "C", false));
+        assert!(held.holds_back("s1", &put_back("B", "A")));
+        assert!(!held.holds_back("s1", "A"));
+        assert!(!held.holds_back("s1", "B"));
+        assert!(!held.holds_back("s1", "C and D"));
+        assert!(!held.holds_back("s2", "A and B"));
     }
 
     #[test]

@@ -72,6 +72,7 @@ pub struct App {
     pub unsent: Unconfirmed,
     pub in_flight: HashMap<String, Vec<Unsent>>,
     restored: HashMap<String, (String, String)>,
+    held_back: HashSet<String>,
     pub queued: HashMap<String, Vec<(u64, Delivered)>>,
     snapshots: u64,
     queue_rows: Vec<feed::catalog::QueueRow>,
@@ -159,6 +160,7 @@ fn init() -> App {
         unsent: Unconfirmed::default(),
         in_flight: HashMap::new(),
         restored: HashMap::new(),
+        held_back: HashSet::new(),
         queued: HashMap::new(),
         snapshots: 0,
         queue_rows: Vec::new(),
@@ -282,6 +284,7 @@ pub fn select(s: &mut App, id: &str) {
 }
 
 pub fn load_pane(s: &mut App, id: &str) {
+    let id = &feed::composer::current(&s.rekeyed, id).to_string();
     s.lru.retain(|x| x != id);
     s.lru.push(id.to_string());
     if !s.panes.contains_key(id) {
@@ -483,6 +486,10 @@ pub fn send_to(s: &mut App, id: &str, tx: &mut Tx) {
         note(s, id, "Fixture mode: not sent".into());
         return;
     }
+    if s.unsent.holds_back(id, &message) {
+        s.held_back.insert(id.to_string());
+        return;
+    }
     s.composer = TextEdit::new("");
     s.restored.remove(id);
     match s.unsent.take_same(id, &message) {
@@ -519,6 +526,7 @@ pub fn dismiss_unsent(s: &mut App, id: &str) {
     if let Some(key) = s.unsent.latest(id).map(|u| u.key.clone()) {
         s.unsent.remove(id, &key);
         s.restored.remove(id);
+        s.held_back.remove(id);
         over::layout::save(s);
     }
 }
@@ -530,6 +538,7 @@ fn fresh(s: &App, id: &str, text: String) -> Unsent {
 fn dispatch(s: &mut App, id: &str, pending: Unsent, resent: bool, tx: &mut Tx) {
     let Some(client) = s.client.clone() else { return };
     let id = id.to_string();
+    s.held_back.remove(&id);
     s.in_flight.entry(id.clone()).or_default().push(pending.clone());
     if s.composer_for.as_deref() == Some(id.as_str()) {
         s.drafts.set(&id, &s.composer.text);
@@ -537,10 +546,8 @@ fn dispatch(s: &mut App, id: &str, pending: Unsent, resent: bool, tx: &mut Tx) {
     if let Err(error) = over::layout::save_now(s) {
         settle(s, &id, &pending.key);
         put_back(s, &id, &pending.text);
-        note(s, &id, format!("Not sent: the message couldn't be saved first ({error})"));
-        if resent {
-            s.unsent.add(&id, pending);
-        }
+        let maybe_delivered = resent && pending.maybe_delivered;
+        s.unsent.add(&id, Unsent { maybe_delivered, error: format!("the message couldn't be saved first ({error})"), ..pending });
         return;
     }
     tx.scroll_to_bottom(format!("transcript-{id}"));
@@ -608,6 +615,9 @@ pub fn composer_note(s: &App, id: &str) -> Option<String> {
     }
     if sending(s, id) {
         parts.push("Sending…".into());
+    }
+    if s.held_back.contains(id) {
+        parts.push("Retry or dismiss the unconfirmed message first: it may already have arrived".into());
     }
     parts.extend(s.unsent.note(id));
     let queued = s.queued.get(id).into_iter().flatten().find_map(|(at, receipt)| feed::composer::queued_note(&s.queue_rows, &s.rekeyed, id, receipt, s.snapshots >= at + 2));
@@ -719,6 +729,7 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
             s.queued.entry(new.clone()).or_default().extend(receipts);
         }
         move_key(&mut s.restored, &old, &new);
+        move_member(&mut s.held_back, &old, &new);
         move_key(&mut s.status_line, &old, &new);
         move_key(&mut s.busy_pick, &old, &new);
         move_key(&mut s.work_pick, &old, &new);
