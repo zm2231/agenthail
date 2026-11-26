@@ -105,7 +105,9 @@ impl Decision {
     }
 
     pub fn holds(&self, key: &str) -> bool {
-        self.id() == key || self.requests.iter().any(|r| request_hold(&self.session_id, &r.id) == key)
+        self.id() == key
+            || self.requests.iter().any(|r| request_hold(&self.session_id, &r.id) == key)
+            || std::iter::once(self).chain(&self.covers).any(|c| !c.work_item.is_empty() && parked_hold(&c.host, &c.work_item) == key)
     }
 
     pub fn is_parked(&self) -> bool {
@@ -163,7 +165,8 @@ impl Decision {
     pub fn hold_of(&self, target: &Dismiss) -> String {
         match target {
             Dismiss::Request { session, request } => request_hold(session, request),
-            _ => self.id(),
+            Dismiss::Parked { work_item, host } => parked_hold(host, work_item),
+            Dismiss::Stopped { .. } => self.id(),
         }
     }
 
@@ -185,6 +188,10 @@ fn unread(name: &str, error: &anyhow::Error) -> String {
     } else {
         format!("{name}'s decisions couldn't be read, so they aren't shown.")
     }
+}
+
+pub fn parked_hold(host: &str, work_item: &str) -> String {
+    format!("parked|{host}|{work_item}")
 }
 
 pub fn request_hold(session: &str, request: &str) -> String {
@@ -352,6 +359,15 @@ mod tests {
         assert_eq!(stopped.not_now_label(&Default::default()), "Not now");
         let held: std::collections::HashSet<String> = [stopped.id()].into();
         assert!(stopped.open_dismissals(&held).is_empty());
+        let a = Decision { kind: "parked".into(), session_id: "s".into(), work_item: "p-A".into(), host: "h2".into(), reason: "pick".into(), ..Default::default() };
+        let b = Decision { work_item: "p-B".into(), ..a.clone() };
+        let group = Decision { covers: vec![a.clone(), b.clone()], ..a.clone() };
+        let doubtful = group.hold_of(&group.dismissals()[1]);
+        assert_eq!(doubtful, parked_hold("h2", "p-B"));
+        let held: std::collections::HashSet<String> = [doubtful.clone()].into();
+        assert_eq!(group.open_dismissals(&held), [Dismiss::Parked { work_item: "p-A", host: "h2" }]);
+        assert!(b.holds(&doubtful) && group.holds(&doubtful) && !a.holds(&doubtful));
+        assert!(b.open_dismissals(&held).is_empty());
     }
 
     #[test]
