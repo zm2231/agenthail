@@ -56,10 +56,11 @@ Each session row in the session view, the snapshot and the catalog stream carrie
 
 1. An open ask to the person: `waiting_person` from `facts`.
 2. The judgment's facts, from `facts`: a worker awaiting its project's lead waits on `@lead`; any other awaited session, or a running child, is named by alias, else "a session", with "and N others" for more; running background tasks read "background work". All are `waiting_work`.
-3. The judge's state, from `judge`. A worker in a project with a lead never waits on the person: the lead is who it answers to, so `waiting_person` reads `waiting_work` on `@lead`. A judgment with an error gives no state.
-4. An `end_turn` for the turn: `done`, from `endTurn`.
+3. An `end_turn` whose `waitingOn` says what the person has to do ([work record](work-record.md#agenthail_end_turn-mcp-always-loaded)): `waiting_person`, from `endTurn`, with `reason` the `waitingOn` text, `turnId` the completed turn and `pushed` whether its push went out. A worker in a project with a lead reads `waiting_work` on `@lead`. A judgment of an older turn does not apply.
+4. The judge's state, from `judge`. A worker in a project with a lead never waits on the person: the lead is who it answers to, so `waiting_person` reads `waiting_work` on `@lead`. A judgment with an error gives no state.
+5. An `end_turn` for the turn: `done`, from `endTurn`.
 
-Otherwise the row has no `turnState` and keeps its usual label. The labels are "Done", "Needs you", "Said it would continue", and "Waiting on <reason>". Only the label changes: the row stays `idle`, and a judged "Needs you" adds no attention, Inbox card or count. An Inbox item for it is layer 4.
+Otherwise the row has no `turnState` and keeps its usual label. The labels are "Done", "Needs you", "Said it would continue", and "Waiting on <reason>". Only the label changes: the row stays `idle`, and a judged "Needs you" adds no attention, Inbox card or count. A wait from `waitingOn` is listed in Needs you as kind `turn`.
 
 A judgment that lands after the turn completes republishes the row, so a paired viewer shows the host's state. The viewer never judges a mirrored session itself.
 
@@ -72,6 +73,8 @@ A turn whose row reads "Needs you" from the judge pushes "<session> needs you: <
 - the session is delegated, or a worker whose lead the state names instead;
 - the state comes from an open ask, which was announced when it reached the person;
 - the judge reads any other state.
+
+A turn whose `end_turn` gave `waitingOn` pushes "Needs you: <waitingOn>" in place of its finished push, under the same rules, keys and event type, as soon as it completes. It is claimed on the turn's `turn_ends` row (`waiting_pushed_at_ms`) the same way, and the judge never pushes it, since the row's state comes from `endTurn` before the judge. A typed turn does not push but is still listed in Needs you.
 
 Only the prompt hook marks a turn typed. A terminal Claude without `agenthail hooks install`, or any Codex thread, Agenthail's included, without `agenthail hooks install codex`, gets no mark, so a turn the person types there pushes too; `agenthail doctor` says so for missing or outdated hooks. Claude sessions Agenthail hosts run the hook themselves.
 

@@ -52,6 +52,9 @@ A row opens when the turn's `UserPromptSubmit` hook runs (Claude host, and Codex
 | `next_json` | follow-ups, at most 3 |
 | `source` | `tool` |
 | `routed_to` | the session told of a needs-you instead of the person |
+| `waiting_person` | what the person has to do before the work goes on, from `waitingOn`; empty when nothing waits on them |
+| `work_item`, `ledger_key` | the work item the wait holds up, and the ledger that keeps it |
+| `waiting_pushed_at_ms` | when the wait was pushed to the person; negative while a push is claimed and not yet sent |
 
 Slice 4 (schema 64) adds `answered_at_ms`, set when the person's reply claims the ask, and `answer_status` and `answer_message_id` from its delivery receipt (`unknown` when delivery failed in a way that may still have reached the session).
 
@@ -96,9 +99,15 @@ A session with none of these rows looks exactly as it does today; adopted termin
 ### `agenthail_end_turn` (MCP, always loaded)
 
 ```
-headline  string, cut to 80 where shown   sidebar and push line
-next      up to 3 strings, each cut to 160 where shown
+headline   string, cut to 80 where shown   sidebar and push line
+next       up to 3 strings, each cut to 160 where shown
+waitingOn  optional, one line, at most 120 characters: what the person has to do before the work goes on
+item       optional, the work item the wait holds up
 ```
+
+**Waiting on the person.** `waitingOn` is for a turn whose work cannot go on until the person acts, such as uploading a file or signing in; a decision between options is an ask. A longer `waitingOn` is refused, as is `item` without `waitingOn`. The wait is linked to the named item, which the session must hold in progress or blocked, or else to the session's only item in progress, the rule the PR watcher logs a pull request by; with several in progress and none named, the result's `note` says to name one. Once the turn completes, the row's `endTurn` carries `waitingOn`, `turnId`, `workItem`, `ledgerKey` and `waitPushed`, and its `turnState` reads `waiting_person` ([turn judge](turn-judge.md#the-row)). The wait stands until a newer turn opens.
+
+`GET /api/v1/decisions` lists it as kind `turn`, group `waiting`, `answerable` false, with `reason` the `waitingOn` text, `since` when the turn ended, and `workItem`, `workTitle` and `ledgerKey` when linked. A worker's wait in a project with a lead is under "Handled by a lead" instead, with `heldBy` the lead, while the lead can act; when the lead is archived, unavailable or itself waiting on the person, the wait is the person's. The person dismisses it with `dismiss-decision` and its `sessionId`; another session is refused. Every decisions item carries a `key`, unique within the page and stable while the item stays: `ask:<askId>`, `request:<sessionId>`, `stopped:<sessionId>`, `turn:<sessionId>:<turnId>`, `parked:<ledgerKey>:<workItem>`. Clients key items by it.
 
 **Order.** The agent calls the tool when the turn's work is done and then writes its reply as its final message, with no tool call after it; a successful result says so. Claude Opus 5.5 returns text written between tool calls as a progress-update `thinking` block holding only a summary of that text, so a reply written before the call would reach the transcript as a Thought rather than as the reply. Only the text after a turn's last tool call is kept verbatim.
 
@@ -106,7 +115,7 @@ Only a blank headline is refused. Line breaks fold into spaces, next items past 
 
 **Skipped call and spoken questions.** Nothing holds or prompts a turn that ends without `agenthail_end_turn`: the turn judge reads its state from the reply, and the row shows no headline. A reply that asks the person something no ask carries is judged waiting on the person and pushes Needs you ([turn judge](turn-judge.md#the-push)). Agenthail installs no `Stop` hook. A `Stop` hook an earlier install wrote goes away without the person doing anything: the daemon, when it starts (as after an update), removes from every Claude config root's `settings.json` and from Codex any agenthail hook this binary no longer writes, and installs nothing; `agenthail hooks install` and `uninstall`, and their `codex` forms, remove them too. Until then `agenthail hook stop` reads its input and exits 0 with no output, so an old hook neither errors nor holds a turn. The daemon starts Codex for this only when its `hooks.json` or `config.toml` names such a hook, and leaves every other hook where it is, so Codex keeps trusting them.
 
-**Effects.** Session rows, in the session view and the snapshot, carry `endTurn {headline, next, endedAt}` while the end stands, with the headline cut to 80 characters and each next item to 160. The turn-completed notification says "done: headline" with the same cut headline, or nothing when the session has an ask open to the person, which was announced on its own. A phone push names the session by its alias (else the app) and its project, never by the session's title, since pushes pass through the relay and Apple: "@builder in widget done: Deployed".
+**Effects.** Session rows, in the session view and the snapshot, carry `endTurn {headline, next, endedAt}`, with the wait's fields above once its turn completed, while the end stands, with the headline cut to 80 characters and each next item to 160. The turn-completed notification says "done: headline" with the same cut headline, or nothing when the session has an ask open to the person, which was announced on its own. A phone push names the session by its alias (else the app) and its project, never by the session's title, since pushes pass through the relay and Apple: "@builder in widget done: Deployed".
 
 ### `isolation: "worktree"` on `agenthail_create` and `agenthail thread create --worktree`
 

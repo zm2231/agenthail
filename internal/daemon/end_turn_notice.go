@@ -13,9 +13,14 @@ import (
 const AttentionAsk = "ask"
 
 type dashboardEndTurn struct {
-	Headline string    `json:"headline"`
-	Next     []string  `json:"next,omitempty"`
-	EndedAt  time.Time `json:"endedAt"`
+	Headline   string    `json:"headline"`
+	Next       []string  `json:"next,omitempty"`
+	EndedAt    time.Time `json:"endedAt"`
+	WaitingOn  string    `json:"waitingOn,omitempty"`
+	TurnID     string    `json:"turnId,omitempty"`
+	WorkItem   string    `json:"workItem,omitempty"`
+	LedgerKey  string    `json:"ledgerKey,omitempty"`
+	WaitPushed bool      `json:"waitPushed,omitempty"`
 }
 
 const (
@@ -31,8 +36,14 @@ func endTurnRow(end *registry.TurnEnd) *dashboardEndTurn {
 	for _, item := range end.Next {
 		next = append(next, shownLine(item, nextShownRunes))
 	}
-	return &dashboardEndTurn{Headline: shownLine(end.Headline, headlineShownRunes), Next: next, EndedAt: end.EndedAt}
+	row := &dashboardEndTurn{Headline: shownLine(end.Headline, headlineShownRunes), Next: next, EndedAt: end.EndedAt}
+	if end.WaitingOn != "" && end.CompletedTurnID != "" {
+		row.WaitingOn, row.TurnID, row.WorkItem, row.LedgerKey, row.WaitPushed = end.WaitingOn, end.CompletedTurnID, end.WorkItem, end.LedgerKey, !end.WaitPushed.IsZero()
+	}
+	return row
 }
+
+func (end *dashboardEndTurn) waits() bool { return end != nil && end.WaitingOn != "" }
 
 func shownLine(text string, limit int) string {
 	runes := []rune(text)

@@ -40,7 +40,7 @@ export function decisionHosts() {
 }
 
 export function decisionKey(item) {
-  return item.workItem ? `${item.sessionId}#${item.workItem}` : item.sessionId;
+  return item.key;
 }
 
 export function qualify(hostId, id) {
@@ -50,6 +50,7 @@ export function qualify(hostId, id) {
 
 function qualified(item, hostId) {
   const out = { ...item, hostId, sessionId: qualify(hostId, item.sessionId) };
+  if (item.key) out.key = qualify(hostId, item.key);
   if (item.projectId) out.projectId = qualify(hostId, item.projectId);
   if (item.holdsUp) out.holdsUp = item.holdsUp.map((id) => qualify(hostId, id));
   if (item.heldBy) out.heldBy = qualify(hostId, item.heldBy);

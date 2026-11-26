@@ -89,6 +89,76 @@ func (d *Daemon) pushJudgedTurn(judgment registry.TurnJudgment) bool {
 	return true
 }
 
+// A turn that ended saying it waits on the person pushes once, in place of its finished push, unless the person typed its prompt or a lead hears it first.
+func (d *Daemon) pushWaitingTurn(session *surface.Session, turnID string) bool {
+	end, found, err := d.Registry.CompletedTurnEnd(session.ID, turnID)
+	if err != nil || !found || end.WaitingOn == "" || session.Delegated() {
+		return false
+	}
+	if typed, err := d.Registry.TurnTyped(session.ID, turnID); err != nil || typed {
+		return false
+	}
+	waits := func() (bool, string) {
+		state, askID, err := d.waitingTurnState(session, end)
+		return err == nil && state != nil && state.State == turnWaitingPerson && state.Source == turnSourceEndTurn, askID
+	}
+	ok, askID := waits()
+	if !ok {
+		return false
+	}
+	claimedAt := time.Now()
+	claimed, err := d.Registry.ClaimWaitPush(session.ID, turnID, askID, claimedAt)
+	if err != nil {
+		d.log.Printf("waiting turn: claim the push of %s turn %s: %s", d.resolveDisplay(session.ID), turnID, err)
+		return false
+	}
+	if !claimed {
+		return false
+	}
+	if ok, _ := waits(); !ok {
+		if err := d.Registry.ReleaseWaitPush(session.ID, turnID, claimedAt); err != nil {
+			d.log.Printf("waiting turn: release the push of %s turn %s: %s", d.resolveDisplay(session.ID), turnID, err)
+		}
+		return false
+	}
+	body := "Needs you: " + shownLine(end.WaitingOn, headlineShownRunes)
+	hostID := d.hostIdentity().ID
+	mobile := mobileNotification{Title: d.sessionPushTag(session), Message: body, SessionID: session.ID, TurnID: turnID, EventType: turnNeedsYouEvent,
+		CollapseID: turnNotificationKey(hostID, session.ID, turnID), DedupeKey: needsYouDedupeKey(hostID, session.ID, turnID)}
+	sent, err := d.needsYouTakesTurnPush(session.ID, turnID,
+		func() (bool, error) { return d.Registry.ConfirmWaitPush(session.ID, turnID, claimedAt) },
+		func() error { return d.Registry.ReleaseWaitPush(session.ID, turnID, claimedAt) },
+		func() { d.sendTurnNeedsYou(session.ID, body, mobile) })
+	if err != nil {
+		d.log.Printf("waiting turn: settle the push of %s turn %s: %s", d.resolveDisplay(session.ID), turnID, err)
+	}
+	if sent {
+		d.requestCatalogDiscovery()
+		d.publishEvent("state.changed", session.ID, map[string]string{"source": "turn-needs-you"})
+	}
+	return sent
+}
+
+func (d *Daemon) waitingTurnState(session *surface.Session, end registry.TurnEnd) (*dashboardTurnState, string, error) {
+	identity, err := d.sessionIdentity(*session)
+	if err != nil {
+		return nil, "", err
+	}
+	leads, err := d.loadLeadDirectory()
+	if err != nil {
+		return nil, "", err
+	}
+	row := dashboardSession{ID: session.ID, Project: identity.Project, EndTurn: endTurnRow(&end)}
+	ask, asked, err := d.Registry.RowAsk(session.ID)
+	if err != nil {
+		return nil, "", err
+	}
+	if asked {
+		row.Ask = askRow(&ask)
+	}
+	return turnStateOf(&row, nil, leads), ask.ID, nil
+}
+
 func (d *Daemon) judgedTurnState(session *surface.Session, judgment *registry.TurnJudgment) (*dashboardTurnState, string, error) {
 	identity, err := d.sessionIdentity(*session)
 	if err != nil {

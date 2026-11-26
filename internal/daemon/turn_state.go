@@ -85,6 +85,9 @@ func turnStateOf(row *dashboardSession, judgment *registry.TurnJudgment, leads l
 	}
 	lead, hasLead := leads.leadOf(row.Project)
 	isLead := hasLead && lead.sessionID == row.ID
+	if judgment != nil && judgment.TurnID != "" && row.EndTurn.waits() && judgment.TurnID != row.EndTurn.TurnID {
+		judgment = nil
+	}
 	if judgment != nil {
 		facts := judgment.Facts
 		var awaited []string
@@ -103,6 +106,14 @@ func turnStateOf(row *dashboardSession, judgment *registry.TurnJudgment, leads l
 		case facts.BackgroundRunning:
 			return &dashboardTurnState{State: turnWaitingWork, Reason: "background work", Source: turnSourceFacts}
 		}
+	}
+	if end := row.EndTurn; end.waits() {
+		if hasLead && !isLead {
+			return &dashboardTurnState{State: turnWaitingWork, Reason: "@" + lead.name, Source: turnSourceEndTurn}
+		}
+		return &dashboardTurnState{State: turnWaitingPerson, Reason: end.WaitingOn, Source: turnSourceEndTurn, TurnID: end.TurnID, Pushed: end.WaitPushed, Headline: shownLine(end.WaitingOn, headlineShownRunes)}
+	}
+	if judgment != nil {
 		switch judgment.State {
 		case turnWaitingPerson:
 			if hasLead && !isLead {

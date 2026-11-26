@@ -17,6 +17,10 @@ type TurnEnd struct {
 	Headline        string
 	Next            []string
 	Source          string
+	WaitingOn       string
+	WorkItem        string
+	LedgerKey       string
+	WaitPushed      time.Time
 }
 
 const TurnSourceTool = "tool"
@@ -61,8 +65,8 @@ func (r *Registry) EndTurn(end TurnEnd, activeTurnID string, at time.Time) (Turn
 			return TurnEnd{}, err
 		}
 	}
-	if _, err := tx.Exec(`UPDATE turn_ends SET ended_at_ms=?,turn_id=?,headline=?,next_json=?,source=? WHERE session_id=? AND started_at_ms=?`,
-		at.UnixMilli(), activeTurnID, end.Headline, string(next), end.Source, end.SessionID, started); err != nil {
+	if _, err := tx.Exec(`UPDATE turn_ends SET ended_at_ms=?,turn_id=?,headline=?,next_json=?,source=?,waiting_person=?,work_item=?,ledger_key=? WHERE session_id=? AND started_at_ms=?`,
+		at.UnixMilli(), activeTurnID, end.Headline, string(next), end.Source, end.WaitingOn, end.WorkItem, end.LedgerKey, end.SessionID, started); err != nil {
 		return TurnEnd{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -184,23 +188,52 @@ const currentTurnEnd = `te.ended_at_ms>0
  AND te.started_at_ms=(SELECT MAX(started_at_ms) FROM turn_ends WHERE session_id=te.session_id)
  AND (te.completed_turn_id='' OR te.completed_turn_id=COALESCE((SELECT completed_turn_id FROM session_runtime WHERE session_id=te.session_id),''))`
 
-const turnEndColumns = `te.session_id,te.started_at_ms,te.ended_at_ms,te.turn_id,te.completed_turn_id,te.headline,te.next_json,te.source`
+const turnEndColumns = `te.session_id,te.started_at_ms,te.ended_at_ms,te.turn_id,te.completed_turn_id,te.headline,te.next_json,te.source,te.waiting_person,te.work_item,te.ledger_key,te.waiting_pushed_at_ms`
 
 func scanTurnEnds(rows *sql.Rows) ([]TurnEnd, error) {
 	defer rows.Close()
 	var out []TurnEnd
 	for rows.Next() {
 		var end TurnEnd
-		var started, ended int64
+		var started, ended, pushed int64
 		var next string
-		if err := rows.Scan(&end.SessionID, &started, &ended, &end.TurnID, &end.CompletedTurnID, &end.Headline, &next, &end.Source); err != nil {
+		if err := rows.Scan(&end.SessionID, &started, &ended, &end.TurnID, &end.CompletedTurnID, &end.Headline, &next, &end.Source, &end.WaitingOn, &end.WorkItem, &end.LedgerKey, &pushed); err != nil {
 			return nil, err
 		}
 		end.StartedAt, end.EndedAt = time.UnixMilli(started).UTC(), time.UnixMilli(ended).UTC()
+		if pushed > 0 {
+			end.WaitPushed = time.UnixMilli(pushed).UTC()
+		}
 		if err := json.Unmarshal([]byte(next), &end.Next); err != nil {
 			return nil, err
 		}
 		out = append(out, end)
 	}
 	return out, rows.Err()
+}
+
+// ClaimWaitPush takes the one push of a completed turn that ended waiting on the person, while that turn is still the session's last and none runs, and the session's open ask is still askID; a claim is negative until confirmed, so it never reads as pushed before the push is sent.
+func (r *Registry) ClaimWaitPush(sessionID, completedTurnID, askID string, at time.Time) (bool, error) {
+	result, err := r.db.Exec(`UPDATE turn_ends SET waiting_pushed_at_ms=? WHERE session_id=? AND completed_turn_id=? AND waiting_person<>'' AND waiting_pushed_at_ms=0
+		AND EXISTS (SELECT 1 FROM session_runtime WHERE session_id=? AND completed_turn_id=? AND active_turn_id='')
+		AND COALESCE((SELECT (`+rowAsk+`) FROM (SELECT ? AS session_id) s),'')=?`, -at.UnixMilli(), sessionID, completedTurnID, sessionID, completedTurnID, sessionID, askID)
+	if err != nil {
+		return false, err
+	}
+	claimed, err := result.RowsAffected()
+	return claimed == 1, err
+}
+
+func (r *Registry) ConfirmWaitPush(sessionID, completedTurnID string, claimedAt time.Time) (bool, error) {
+	result, err := r.db.Exec(`UPDATE turn_ends SET waiting_pushed_at_ms=? WHERE session_id=? AND completed_turn_id=? AND waiting_pushed_at_ms=?`, claimedAt.UnixMilli(), sessionID, completedTurnID, -claimedAt.UnixMilli())
+	if err != nil {
+		return false, err
+	}
+	confirmed, err := result.RowsAffected()
+	return confirmed == 1, err
+}
+
+func (r *Registry) ReleaseWaitPush(sessionID, completedTurnID string, claimedAt time.Time) error {
+	_, err := r.db.Exec(`UPDATE turn_ends SET waiting_pushed_at_ms=0 WHERE session_id=? AND completed_turn_id=? AND waiting_pushed_at_ms=?`, sessionID, completedTurnID, -claimedAt.UnixMilli())
+	return err
 }

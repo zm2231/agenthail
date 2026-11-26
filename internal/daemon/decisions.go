@@ -13,9 +13,12 @@ const (
 	decisionWaiting = "waiting"
 )
 
+const decisionTurn = "turn"
+
 var decisionGroupOrder = map[string]int{decisionStopped: 0, decisionHolding: 1, decisionWaiting: 2}
 
 type decisionItem struct {
+	Key          string            `json:"key"`
 	Group        string            `json:"group"`
 	SessionID    string            `json:"sessionId"`
 	ProjectID    string            `json:"projectId,omitempty"`
@@ -28,6 +31,7 @@ type decisionItem struct {
 	HoldsUp      []string          `json:"holdsUp,omitempty"`
 	WorkItem     string            `json:"workItem,omitempty"`
 	WorkTitle    string            `json:"workTitle,omitempty"`
+	LedgerKey    string            `json:"ledgerKey,omitempty"`
 }
 
 type leadHandledItem struct {
@@ -37,6 +41,8 @@ type leadHandledItem struct {
 	Role      string    `json:"role"`
 	Reason    string    `json:"reason"`
 	Since     time.Time `json:"since,omitzero"`
+	WorkItem  string    `json:"workItem,omitempty"`
+	LedgerKey string    `json:"ledgerKey,omitempty"`
 }
 
 type decisionsPage struct {
@@ -56,6 +62,8 @@ type decisionSources struct {
 	queued    map[string][]string
 	parked    func([]dashboardSession) []decisionItem
 	dismissed map[string]string
+	lead      func(dashboardSession) (string, bool)
+	workTitle func(ledgerKey, itemID string) string
 }
 
 type decisionRequests struct {
@@ -71,7 +79,11 @@ func buildDecisions(sources decisionSources) decisionsPage {
 	page := decisionsPage{Decisions: []decisionItem{}, LeadHandling: []leadHandledItem{}}
 	var asking []dashboardSession
 	for _, row := range sources.rows {
-		if _, _, remote := hosts.Split(row.ID); remote || !presentationNeedsYou(&row) {
+		if _, _, remote := hosts.Split(row.ID); remote {
+			continue
+		}
+		if !presentationNeedsYou(&row) {
+			sources.addWaitingTurn(&page, byID, row)
 			continue
 		}
 		if row.Attention.Kind == "request" {
@@ -84,7 +96,7 @@ func buildDecisions(sources decisionSources) decisionsPage {
 			asking = append(asking, row)
 			continue
 		}
-		item := decisionItem{Group: decisionStopped, SessionID: row.ID, ProjectID: projectIDOf(row), Kind: row.Attention.Kind, Reason: row.Attention.Reason, Since: decisionSince(row)}
+		item := decisionItem{Key: "stopped:" + row.ID, Group: decisionStopped, SessionID: row.ID, ProjectID: projectIDOf(row), Kind: row.Attention.Kind, Reason: row.Attention.Reason, Since: decisionSince(row)}
 		if !sources.dismissedNow(item) {
 			page.Decisions = append(page.Decisions, item)
 		}
@@ -94,11 +106,11 @@ func buildDecisions(sources decisionSources) decisionsPage {
 		read = sources.requests(asking)
 	}
 	for _, row := range asking {
-		item := decisionItem{SessionID: row.ID, ProjectID: projectIDOf(row), Kind: row.Attention.Kind, Reason: row.Attention.Reason, Since: decisionSince(row), HoldsUp: sources.queued[row.ID]}
+		item := decisionItem{Key: answerKey(row), SessionID: row.ID, ProjectID: projectIDOf(row), Kind: row.Attention.Kind, Reason: row.Attention.Reason, Since: decisionSince(row), HoldsUp: sources.queued[row.ID]}
 		answer := read[row.ID]
 		switch {
 		case answer.err != nil:
-			item.Group, item.RequestError = decisionStopped, answer.err.Error()
+			item.Key, item.Group, item.RequestError = "stopped:"+row.ID, decisionStopped, answer.err.Error()
 			if sources.dismissedNow(item) {
 				continue
 			}
@@ -130,6 +142,43 @@ func buildDecisions(sources decisionSources) decisionsPage {
 		return a.WorkItem < b.WorkItem
 	})
 	return page
+}
+
+// A wait a lead hears stays with the lead while it can act, as a lead's prompts do.
+func (s decisionSources) addWaitingTurn(page *decisionsPage, rows map[string]dashboardSession, row dashboardSession) {
+	end, state := row.EndTurn, row.TurnState
+	if !end.waits() || state == nil || state.Source != turnSourceEndTurn {
+		return
+	}
+	if state.State == turnWaitingWork {
+		lead, ok := "", false
+		if s.lead != nil {
+			lead, ok = s.lead(row)
+		}
+		if !ok {
+			return
+		}
+		if hearerHolds(rows, lead) {
+			page.LeadHandling = append(page.LeadHandling, leadHandledItem{SessionID: row.ID, ProjectID: projectIDOf(row), HeldBy: lead, Role: "lead", Reason: end.WaitingOn, Since: end.EndedAt, WorkItem: end.WorkItem, LedgerKey: end.LedgerKey})
+			return
+		}
+	} else if state.State != turnWaitingPerson {
+		return
+	}
+	item := decisionItem{Key: "turn:" + row.ID + ":" + end.TurnID, Group: decisionWaiting, SessionID: row.ID, ProjectID: projectIDOf(row), Kind: decisionTurn, Reason: end.WaitingOn, Since: end.EndedAt, WorkItem: end.WorkItem, LedgerKey: end.LedgerKey}
+	if item.WorkItem != "" && s.workTitle != nil {
+		item.WorkTitle = s.workTitle(item.LedgerKey, item.WorkItem)
+	}
+	if !s.dismissedNow(item) {
+		page.Decisions = append(page.Decisions, item)
+	}
+}
+
+func answerKey(row dashboardSession) string {
+	if row.Attention.Kind == AttentionAsk && row.Ask != nil {
+		return "ask:" + row.Ask.ID
+	}
+	return "request:" + row.ID
 }
 
 func asksForAnswer(row dashboardSession) bool {

@@ -5,6 +5,7 @@ import { arrangeTiles, fillTiles, orderTiles, tileColumns, tileLetter, tileLeads
 import { changeTiles, onTileOrderChange, tileOrder } from "./tile-order.js";
 import { currentStops } from "./decision-card.js";
 import { stopsByProject } from "./inbox-stops.js";
+import { shownDecisions } from "./decisions.js";
 import { openProject, leaveProject } from "./project-pane.js";
 import { syncDecisionPane } from "./pane-scope.js";
 import { renderSessions } from "./sessions.js";
@@ -68,7 +69,7 @@ export function setScope(scope) {
 }
 
 export function openDecision(sessionId) {
-  app.decisionSelected = sessionId;
+  app.decisionSelected = shownDecisions().find((item) => item.sessionId === sessionId)?.key ?? null;
   app.decisionFailure = "";
   setScope("inbox");
 }

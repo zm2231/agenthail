@@ -12,6 +12,7 @@
 -- migration 2026-11-24-session-context-key
 -- migration 2026-11-24-tracked-journal-rows
 -- migration 2026-11-25-worktree-projects
+-- migration 2026-11-26-turns-wait-on-the-person
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -1247,6 +1248,10 @@ CREATE TABLE turn_ends (
 	next_json TEXT NOT NULL DEFAULT 'null',
 	source TEXT NOT NULL DEFAULT '',
 	typed INTEGER NOT NULL DEFAULT 0,
+	waiting_person TEXT NOT NULL DEFAULT '',
+	work_item TEXT NOT NULL DEFAULT '',
+	ledger_key TEXT NOT NULL DEFAULT '',
+	waiting_pushed_at_ms INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (session_id, started_at_ms)
 );
 
@@ -1683,7 +1688,7 @@ BEGIN
 END;
 
 -- trigger catalog_presentation_version_turn_ends_update
-CREATE TRIGGER catalog_presentation_version_turn_ends_update AFTER UPDATE OF completed_turn_id,ended_at_ms,headline,next_json,session_id,source,started_at_ms,turn_id,typed ON turn_ends WHEN (NEW.completed_turn_id IS NOT OLD.completed_turn_id OR NEW.ended_at_ms IS NOT OLD.ended_at_ms OR NEW.headline IS NOT OLD.headline OR NEW.next_json IS NOT OLD.next_json OR NEW.session_id IS NOT OLD.session_id OR NEW.source IS NOT OLD.source OR NEW.started_at_ms IS NOT OLD.started_at_ms OR NEW.turn_id IS NOT OLD.turn_id OR NEW.typed IS NOT OLD.typed)
+CREATE TRIGGER catalog_presentation_version_turn_ends_update AFTER UPDATE OF completed_turn_id,ended_at_ms,headline,ledger_key,next_json,session_id,source,started_at_ms,turn_id,typed,waiting_person,waiting_pushed_at_ms,work_item ON turn_ends WHEN (NEW.completed_turn_id IS NOT OLD.completed_turn_id OR NEW.ended_at_ms IS NOT OLD.ended_at_ms OR NEW.headline IS NOT OLD.headline OR NEW.ledger_key IS NOT OLD.ledger_key OR NEW.next_json IS NOT OLD.next_json OR NEW.session_id IS NOT OLD.session_id OR NEW.source IS NOT OLD.source OR NEW.started_at_ms IS NOT OLD.started_at_ms OR NEW.turn_id IS NOT OLD.turn_id OR NEW.typed IS NOT OLD.typed OR NEW.waiting_person IS NOT OLD.waiting_person OR NEW.waiting_pushed_at_ms IS NOT OLD.waiting_pushed_at_ms OR NEW.work_item IS NOT OLD.work_item)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;
