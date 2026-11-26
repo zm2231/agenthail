@@ -37,6 +37,7 @@ pub struct Web {
     signing: bool,
     renew_at: Option<Instant>,
     checking: bool,
+    opening: bool,
     checked_at: Option<Instant>,
     verified: Option<String>,
     remint: bool,
@@ -64,6 +65,7 @@ impl Web {
             signing: false,
             renew_at: None,
             checking: false,
+            opening: false,
             checked_at: None,
             verified: None,
             remint: false,
@@ -119,6 +121,7 @@ impl Web {
         }
         let page = want.to_string();
         self.checking = true;
+        self.opening = opening;
         self.checked_at = Some(Instant::now());
         Some((page, cookie))
     }
@@ -138,7 +141,8 @@ impl Web {
                 self.ready = None;
                 self.phase = Phase::SigningIn;
             }
-            Err(_) => self.remint = true,
+            Err(_) if self.opening => self.remint = true,
+            Err(_) => {}
         }
     }
 
@@ -487,6 +491,15 @@ mod tests {
         assert!(web.cookie.is_some(), "the open page keeps its cookie meanwhile");
         assert!(web.verified.is_none(), "the next page still waits");
         assert!(web.sign_in_due(now()), "a fresh sign-in stands in for the unclear check");
+        web.signing = false;
+        web.remint = false;
+        web.verified = Some(cookie.value.clone());
+        web.loaded = Some(b.into());
+        web.checked_at = None;
+        web.check_due(Some(b)).unwrap();
+        web.checked(&cookie.value, Err("connection refused".into()));
+        assert!(!web.remint, "an unclear routine check on an open page changes nothing");
+        web.remint = true;
         web.signed(Err("daemon down".into()));
         assert_eq!(web.phase, Phase::Shown, "a failed sign-in with a working cookie keeps the page");
         web.renew_at = Some(Instant::now());
