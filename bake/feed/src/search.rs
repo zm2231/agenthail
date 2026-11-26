@@ -269,13 +269,13 @@ impl Client {
             match self.listed(&row.id, &term) {
                 Ok(Some(listed)) => {
                     row.archived = listed.archived;
-                    break;
+                    return found;
                 }
                 Ok(None) => {}
                 Err(e) => return Recheck::Unknown(e),
             }
         }
-        found
+        Recheck::Unknown("Agenthail's session list doesn't include it".into())
     }
 }
 
@@ -441,8 +441,7 @@ mod tests {
         assert_eq!(asked.recv().unwrap().0, "/api/v1/snapshot?q=Fix+the+importer&limit=200");
         let unlisted = r#"{"sessions": [], "nextCursor": ""}"#;
         let (client, _asked) = crate::mock::daemon(vec![(200, detail.into()), (200, unlisted.into())]);
-        let archived = Session { archived: true, ..known.clone() };
-        assert!(matches!(client.recheck(&archived), Recheck::Fresh(r) if r.archived));
+        assert!(matches!(client.recheck(&known), Recheck::Unknown(_)));
         let (client, _failed) = crate::mock::daemon(vec![(200, detail.into()), (500, r#"{"error":{"code":"internal_error","message":"boom"}}"#.into())]);
         assert!(matches!(client.recheck(&known), Recheck::Unknown(_)));
     }

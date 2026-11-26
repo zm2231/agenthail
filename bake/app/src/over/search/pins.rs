@@ -81,6 +81,7 @@ impl Pins {
             }
             Recheck::Gone => self.unpin(&id),
             Recheck::Unknown(_) => {
+                self.verified.remove(&id);
                 self.checked.insert(id, Instant::now());
             }
         }
