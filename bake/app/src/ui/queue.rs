@@ -7,6 +7,7 @@ use crate::Bg;
 
 const SHOWN: usize = 3;
 const ROW_HEIGHT: f32 = 46.0;
+const NOTE_HEIGHT: f32 = 34.0;
 const READ_FAILED: &str = "Couldn't read the queue";
 
 pub(crate) fn rows(s: &App, id: &str) -> Vec<Queued> {
@@ -17,20 +18,34 @@ pub(crate) fn wants(s: &App, id: &str) -> bool {
     session(s, id).is_some_and(|x| x.queue_count > 0) || !rows(s, id).is_empty() || s.queued.contains_key(id)
 }
 
+fn generation(s: &App, id: &str) -> u64 {
+    s.queue_gen.get(id).copied().unwrap_or_default()
+}
+
+fn bump(s: &mut App, id: &str) {
+    *s.queue_gen.entry(id.to_string()).or_default() += 1;
+}
+
 pub(crate) fn fetch(s: &mut App, id: &str) {
     let Some(client) = s.client.clone() else { return };
-    if !s.queue_fetching.insert(id.to_string()) {
+    let generation = generation(s, id);
+    if s.queue_fetching.insert(id.to_string(), generation) == Some(generation) {
         return;
     }
     let (out, id) = (s.outbox.clone(), id.to_string());
     std::thread::spawn(move || {
         let result = client.queue(&id).map_err(|e| e.to_string());
-        let _ = out.send(Bg::Queue(id, result));
+        let _ = out.send(Bg::Queue(id, generation, result));
     });
 }
 
-pub(crate) fn take(s: &mut App, id: String, result: Result<Vec<Queued>, String>) {
-    s.queue_fetching.remove(&id);
+pub(crate) fn take(s: &mut App, id: String, asked: u64, result: Result<Vec<Queued>, String>) {
+    if s.queue_fetching.get(&id) == Some(&asked) {
+        s.queue_fetching.remove(&id);
+    }
+    if asked < generation(s, &id) {
+        return;
+    }
     let id = feed::composer::current(&s.rekeyed, &id).to_string();
     match result {
         Ok(list) => {
@@ -51,6 +66,7 @@ fn run(s: &mut App, id: &str, row: Queued, op: Op) {
         return;
     }
     s.queue_note.remove(id);
+    bump(s, id);
     let host = session(s, id).map(|x| if x.host.id.is_empty() { x.host.name.clone() } else { x.host.id.clone() }).unwrap_or_default();
     let (out, id) = (s.outbox.clone(), id.to_string());
     std::thread::spawn(move || {
@@ -71,6 +87,7 @@ fn hand_back(s: &mut App, id: &str, message: &str) {
 pub(crate) fn done(s: &mut App, id: String, queue_id: i64, done: Done) {
     s.queue_working.remove(&queue_id);
     let id = feed::composer::current(&s.rekeyed, &id).to_string();
+    bump(s, &id);
     let drop_row = |s: &mut App| {
         if let Some(list) = s.queue.get_mut(&id) {
             list.retain(|r| r.id != queue_id);
@@ -96,6 +113,16 @@ pub(crate) fn done(s: &mut App, id: String, queue_id: i64, done: Done) {
             };
             s.queue_note.insert(id.clone(), note);
         }
+        Done::Unsure(message, error) => {
+            let note = match message {
+                Some(message) => {
+                    hand_back(s, &id, &message);
+                    format!("The daemon didn't confirm taking it off the queue, so it may still send. Its text is in the composer; check the queue before sending. {}", error.message)
+                }
+                None => format!("The daemon didn't confirm the removal; check the queue. {}", error.message),
+            };
+            s.queue_note.insert(id.clone(), note);
+        }
         Done::Failed(error) => {
             s.queue_note.insert(id.clone(), format!("Couldn't change the queued message: {}", error.message));
         }
@@ -106,8 +133,8 @@ pub(crate) fn done(s: &mut App, id: String, queue_id: i64, done: Done) {
 
 pub(crate) fn reserve(s: &App, id: &str) -> f32 {
     let shown = rows(s, id).len().min(SHOWN);
-    let extra = usize::from(rows(s, id).len() > SHOWN) + usize::from(s.queue_note.contains_key(id));
-    shown as f32 * ROW_HEIGHT + extra as f32 * 20.0 + if shown + extra > 0 { 12.0 } else { 0.0 }
+    let note = usize::from(s.queue_note.contains_key(id));
+    shown as f32 * ROW_HEIGHT + note as f32 * NOTE_HEIGHT + if shown + note > 0 { 12.0 } else { 0.0 }
 }
 
 fn row_el(s: &App, x: &Session, item: &Queued) -> El {
@@ -191,12 +218,12 @@ pub(crate) fn dock(s: &App, x: &Session) -> Option<El> {
         return None;
     }
     let mut c = col().key("queue-dock").w_full().pt(6.0).pb(6.0).border_sides([0.0, 0.0, 1.0, 0.0], line());
-    c = c.children(list.iter().take(SHOWN).map(|item| row_el(s, x, item)));
-    if list.len() > SHOWN {
-        c = c.child(row().h(20.0).px(12.0).items_center().child(text(format!("{} more queued", list.len() - SHOWN)).font(META).color(faint())));
+    if !list.is_empty() {
+        let rows_el = col().w_full().children(list.iter().map(|item| row_el(s, x, item)));
+        c = c.child(col().key("queue-dock-rows").w_full().max_h(SHOWN as f32 * ROW_HEIGHT).scroll(ScrollSpec { stick_bottom: false }).child(rows_el));
     }
     if let Some(note) = note {
-        c = c.child(row().h(20.0).px(12.0).items_center().child(text(note.clone()).font(META).color(attention()).truncate()));
+        c = c.child(row().w_full().h(NOTE_HEIGHT).px(12.0).items_center().child(text(note.clone()).font(META).color(attention()).wrap().max_lines(2)));
     }
     Some(c)
 }

@@ -31,11 +31,11 @@ pub fn load_older(s: &mut App, id: &str) -> bool {
         return false;
     }
     pane.earlier.loading = true;
-    let (from, known) = (pane.earlier.next.unwrap_or(0), pane.transcript.ids());
+    let (from, known, generation) = (pane.earlier.next.unwrap_or(0), pane.transcript.ids(), pane.generation);
     let (out, id) = (s.outbox.clone(), id.to_string());
     std::thread::spawn(move || {
         let result = client.older(&id, from, &known);
-        let _ = out.send(Bg::Older(id, result));
+        let _ = out.send(Bg::Older(id, generation, result));
     });
     true
 }
@@ -47,9 +47,9 @@ pub fn retry_older(s: &mut App, id: &str) {
     load_older(s, id);
 }
 
-pub fn take_older(s: &mut App, id: String, result: Result<Older, Miss>) {
+pub fn take_older(s: &mut App, id: String, generation: u64, result: Result<Older, Miss>) {
     let mut counter = s.counter;
-    let Some(pane) = s.panes.get_mut(&id) else { return };
+    let Some(pane) = s.panes.get_mut(&id).filter(|p| p.generation == generation) else { return };
     pane.earlier.loading = false;
     match result {
         Ok(older) => {
@@ -79,16 +79,16 @@ pub fn load_body(s: &mut App, id: &str, item: &str) {
     let mut counter = s.counter;
     pane.bump_item(item, &mut counter);
     s.counter = counter;
-    let (out, id, item) = (s.outbox.clone(), id.to_string(), item.to_string());
+    let (out, id, item, generation) = (s.outbox.clone(), id.to_string(), item.to_string(), pane.generation);
     std::thread::spawn(move || {
         let result = client.full_body(&id, &body_ref);
-        let _ = out.send(Bg::Body(id, item, result));
+        let _ = out.send(Bg::Body(id, generation, item, result));
     });
 }
 
-pub fn take_body(s: &mut App, id: String, item: String, result: Result<String, String>) {
+pub fn take_body(s: &mut App, id: String, generation: u64, item: String, result: Result<String, String>) {
     let mut counter = s.counter;
-    let Some(pane) = s.panes.get_mut(&id) else { return };
+    let Some(pane) = s.panes.get_mut(&id).filter(|p| p.generation == generation) else { return };
     match result {
         Ok(text) => {
             pane.expanding.remove(&item);
@@ -100,6 +100,17 @@ pub fn take_body(s: &mut App, id: String, item: String, result: Result<String, S
         Err(error) => {
             pane.expanding.insert(item.clone(), Some(format!("Couldn't load the full message: {error}")));
             pane.bump_item(&item, &mut counter);
+        }
+    }
+    s.counter = counter;
+}
+
+pub fn show_more(s: &mut App, block: &str, item: &str, limit: usize) {
+    let mut counter = s.counter;
+    for pane in s.panes.values_mut() {
+        if pane.transcript.item(item).is_some() {
+            pane.shown.insert(item.to_string(), limit);
+            pane.bump(block, &mut counter);
         }
     }
     s.counter = counter;

@@ -49,6 +49,9 @@ struct Timeline {
 }
 
 fn read_page(value: &Value) -> Result<Page, Miss> {
+    if let Some(error) = value["readError"].as_str().filter(|e| !e.is_empty()) {
+        return Err(Miss::Failed(error.to_string()));
+    }
     let timeline: Timeline = serde_json::from_value(value["timeline"].clone()).map_err(|e| Miss::Failed(e.to_string()))?;
     if let Some(reason) = timeline.unavailable_reason.filter(|r| !r.is_empty()) {
         return Err(Miss::Failed(reason));
@@ -187,6 +190,7 @@ mod tests {
             (409, r#"{"earliestPosition":1,"latestPosition":707,"error":{"code":"history_gap","message":"gone"}}"#),
             (200, r#"{"timeline":{"nextBefore":0,"items":[],"unavailableReason":"transcript unavailable"}}"#),
             (500, r#"{"error":{"code":"registry_error","message":"disk"}}"#),
+            (200, r#"{"readError":"Session journal could not be read.","timeline":{"nextBefore":0,"items":[]}}"#),
         ]));
         let page = client.session_page("s 1", 0).unwrap();
         assert_eq!(seen.recv().unwrap().0, "/api/v1/session?id=s+1&timeline=1&limit=50");
@@ -196,6 +200,7 @@ mod tests {
         assert_eq!(client.session_page("s1", 1), Ok(Page::default()));
         assert_eq!(client.session_page("s1", 3), Err(Miss::Failed("transcript unavailable".into())));
         assert_eq!(client.session_page("s1", 3), Err(Miss::Failed("disk".into())));
+        assert_eq!(client.session_page("s1", 3), Err(Miss::Failed("Session journal could not be read.".into())));
     }
 
     #[test]

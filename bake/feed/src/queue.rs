@@ -119,6 +119,7 @@ pub enum Done {
     TakenBack(String),
     Steered,
     SteerFailed(String, RespondError),
+    Unsure(Option<String>, RespondError),
     Failed(RespondError),
 }
 
@@ -132,6 +133,7 @@ impl Client {
         let message = match self.queue_cancel(row.id, host) {
             Ok(text) if text.is_empty() => row.message.clone(),
             Ok(text) => text,
+            Err(error) if error.maybe_delivered => return Done::Unsure((op != Op::Remove).then(|| row.message.clone()), error),
             Err(error) => return Done::Failed(error),
         };
         match op {
@@ -224,6 +226,8 @@ mod tests {
             (400, r#"{"error":{"code":"invalid_request","message":"already delivered"}}"#),
             (200, r#"{"ok":true,"result":{"message":"steer me"}}"#),
             (502, r#"{"error":{"code":"bad_gateway","message":"turn busy"}}"#),
+            (504, r#"{"error":{"code":"host_outcome_unknown","message":"Host mac did not answer"}}"#),
+            (504, r#"{"error":{"code":"host_outcome_unknown","message":"Host mac did not answer"}}"#),
         ]));
         match client.queue_op(Op::Steer, &r, "") {
             Done::Failed(error) => assert_eq!(error.message, "already delivered"),
@@ -233,5 +237,10 @@ mod tests {
             Done::SteerFailed(text, error) => assert!(text == "steer me" && error.maybe_delivered),
             other => panic!("{other:?}"),
         }
+        match client.queue_op(Op::TakeBack, &r, "") {
+            Done::Unsure(Some(text), error) => assert!(text == "m7" && error.maybe_delivered),
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(client.queue_op(Op::Remove, &r, ""), Done::Unsure(None, _)));
     }
 }

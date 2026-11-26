@@ -34,10 +34,10 @@ pub enum Bg {
     Requests(String, Vec<OpenRequest>, std::time::Instant),
     Answered(String, String, Result<(), feed::catalog::RespondError>),
     NewSession(ui::new_session::Loaded),
-    Queue(String, Result<Vec<feed::queue::Queued>, String>),
+    Queue(String, u64, Result<Vec<feed::queue::Queued>, String>),
     QueueDone(String, i64, feed::queue::Done),
-    Older(String, Result<feed::history::Older, feed::history::Miss>),
-    Body(String, String, Result<String, String>),
+    Older(String, u64, Result<feed::history::Older, feed::history::Miss>),
+    Body(String, u64, String, Result<String, String>),
     Error(String),
 }
 
@@ -91,7 +91,8 @@ pub struct App {
     pub stopping: HashSet<String>,
     pub queue: HashMap<String, Vec<feed::queue::Queued>>,
     pub queue_working: HashSet<i64>,
-    queue_fetching: HashSet<String>,
+    queue_fetching: HashMap<String, u64>,
+    queue_gen: HashMap<String, u64>,
     pub queue_note: HashMap<String, String>,
     pub busy_default: Option<Busy>,
     pub busy_pick: HashMap<String, Busy>,
@@ -184,7 +185,8 @@ fn init() -> App {
         stopping: HashSet::new(),
         queue: HashMap::new(),
         queue_working: HashSet::new(),
-        queue_fetching: HashSet::new(),
+        queue_fetching: HashMap::new(),
+        queue_gen: HashMap::new(),
         queue_note: HashMap::new(),
         busy_default: None,
         busy_pick: HashMap::new(),
@@ -938,10 +940,10 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 fetch_requests_at(s, &id, &[0, 2000, 6000, 9000]);
             }
             Bg::NewSession(loaded) => ui::new_session::take(s, loaded),
-            Bg::Queue(id, result) => ui::queue::take(s, id, result),
+            Bg::Queue(id, asked, result) => ui::queue::take(s, id, asked, result),
             Bg::QueueDone(id, queue_id, done) => ui::queue::done(s, id, queue_id, done),
-            Bg::Older(id, result) => history::take_older(s, id, result),
-            Bg::Body(id, item, result) => history::take_body(s, id, item, result),
+            Bg::Older(id, generation, result) => history::take_older(s, id, generation, result),
+            Bg::Body(id, generation, item, result) => history::take_body(s, id, generation, item, result),
             Bg::Error(error) => s.status = format!("daemon: {error}"),
         }
     }
@@ -967,7 +969,12 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                         pane.last_batch = t;
                         moved |= pane.transcript.apply(b.seq, b.events);
                     }
-                    Message::Status(status) => pane.status = status,
+                    Message::Status(status) => {
+                        if status == "live" && !pane.caught_up {
+                            pane.last_batch = pane.last_batch.min(t);
+                        }
+                        pane.status = status;
+                    }
                     Message::CaughtUp => caught.push(id.clone()),
                 }
             }

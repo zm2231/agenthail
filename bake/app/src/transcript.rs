@@ -79,7 +79,11 @@ pub struct Pane {
     pub last_batch: f64,
     pub earlier: Earlier,
     pub expanding: HashMap<String, Option<String>>,
+    pub shown: HashMap<String, usize>,
+    pub generation: u64,
 }
+
+static PANES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 impl Pane {
     pub fn new() -> Self {
@@ -94,6 +98,8 @@ impl Pane {
             last_batch: f64::MAX,
             earlier: Earlier::default(),
             expanding: HashMap::new(),
+            shown: HashMap::new(),
+            generation: PANES.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         }
     }
 
@@ -145,31 +151,44 @@ fn markdown(body: &str) -> El {
 
 pub struct Cx<'a> {
     pub session: &'a str,
+    pub block: &'a str,
     pub pane: &'a Pane,
     pub open: &'a std::collections::HashSet<String>,
 }
 
 const SHOWN_BODY: usize = 20_000;
 
-fn entry_body(cx: &Cx, label: &str, item: &feed::Item) -> El {
-    let (shown, clipped) = feed::summary::clip(&item.text, SHOWN_BODY);
-    let mut head = row().w_full().gap(6.0).items_center().child(text(label.to_string()).font(META_BOLD).color(muted())).child(el().grow(1.0));
+fn body_tools(cx: &Cx, item: &feed::Item, mut head: El) -> El {
     if item.truncated && item.body_ref.is_some() {
         let (sid, iid) = (cx.session.to_string(), item.id.clone());
         head = match cx.pane.expanding.get(&item.id) {
-            Some(None) => head.child(text("Loading the full output…").font(META).color(faint())),
+            Some(None) => head.child(text("Loading all of it…").font(META).color(faint())),
             Some(Some(note)) => head
                 .child(text(note.clone()).font(META).color(failed()).truncate().max_w(320.0))
                 .child(action(format!("full-{}", item.id), &icons::ROTATE, "Try again").on_press(move |s: &mut App| crate::history::load_body(s, &sid, &iid))),
             None => head.child(action(format!("full-{}", item.id), &icons::CHEVRON_DOWN, "Show all").on_press(move |s: &mut App| crate::history::load_body(s, &sid, &iid))),
         };
     }
-    head = head.child(action(format!("copy-{}", item.id), &icons::COPY, "Copy").on_press_tx(crate::history::copy(item.text.clone())));
+    head.child(action(format!("copy-{}", item.id), &icons::COPY, "Copy").on_press_tx(crate::history::copy(item.text.clone())))
+}
+
+fn entry_body(cx: &Cx, label: &str, item: &feed::Item) -> El {
+    let limit = cx.pane.shown.get(&item.id).copied().unwrap_or(SHOWN_BODY);
+    let (shown, clipped) = feed::summary::clip(&item.text, limit);
+    let head = body_tools(cx, item, row().w_full().gap(6.0).items_center().child(text(label.to_string()).font(META_BOLD).color(muted())).child(el().grow(1.0)));
     let mut c = col().w_full().gap(4.0).child(head).child(
         col().w_full().px(10.0).py(8.0).radius(8.0).fill(Color::BLACK.alpha(0.18)).child(text(shown.to_string()).font(META).color(theme::text()).wrap().selectable(true)),
     );
     if clipped {
-        c = c.child(text(format!("Showing the first {} characters; Copy takes all of it", SHOWN_BODY)).font(META).color(faint()));
+        let (iid, more) = (item.id.clone(), limit + SHOWN_BODY * 5);
+        let block = cx.block.to_string();
+        c = c.child(
+            row()
+                .gap(8.0)
+                .items_center()
+                .child(text(format!("Showing {} of {} KB", shown.len() / 1024, item.text.len() / 1024)).font(META).color(faint()))
+                .child(action(format!("more-{}", item.id), &icons::CHEVRON_DOWN, "Show more").on_press(move |s: &mut App| crate::history::show_more(s, &block, &iid, more))),
+        );
     }
     c
 }
@@ -373,7 +392,7 @@ fn block_el(cx: &Cx, block: &Block, open: bool, gap: f32, last: bool) -> El {
         Kind::Unknown { title, .. } => col().child(text(title.clone()).font(META).color(faint())),
     };
     let mut row_el = col().w_full().max_w(780.0).px(36.0).pt(gap).child(body);
-    if let Some(footer) = footer(cx.session, block, cx.pane) {
+    if let Some(footer) = footer(cx, block) {
         row_el = row_el.hover_group().child(footer);
     }
     if last { row_el.streaming(true) } else { row_el }
@@ -393,28 +412,26 @@ fn action(key: String, glyph: &'static rune::Icon, label: &str) -> El {
         .child(text(label.to_string()).font(META).color(faint()))
 }
 
-fn footer(session: &str, block: &Block, pane: &Pane) -> Option<El> {
+fn footer(cx: &Cx, block: &Block) -> Option<El> {
+    let item = block.id.strip_prefix("item:")?;
     let (body, user) = match &block.kind {
-        Kind::User(body) if !body.trim_start().starts_with("<hook_prompt") => (body, true),
-        Kind::Assistant(body) => (body, false),
+        Kind::User(body) if !body.trim_start().starts_with("<hook_prompt") => (body.clone(), true),
+        Kind::Assistant(body) => (body.clone(), false),
+        Kind::Notice(_) | Kind::Annotation(_) | Kind::Unknown { .. } => {
+            let full = cx.pane.transcript.item(item).filter(|i| i.truncated && i.body_ref.is_some())?;
+            return Some(body_tools(cx, full, row().gap(6.0).items_center().pt(2.0)));
+        }
         _ => return None,
     };
-    let item = block.id.strip_prefix("item:")?;
     let mut tools = row().gap(2.0).items_center().group_opacity(0.0, 1.0);
     tools = tools.child(action(format!("copy-{item}"), &icons::COPY, "Copy").on_press_tx(crate::history::copy(body.clone())));
     if user {
         tools = tools.child(action(format!("edit-{item}"), &icons::PENCIL, "Edit").on_press(crate::history::edit(body.clone())));
     }
     let mut line = row().gap(6.0).items_center().pt(2.0);
-    if pane.transcript.item(item).is_some_and(|i| i.truncated && i.body_ref.is_some()) {
-        let (sid, iid) = (session.to_string(), item.to_string());
-        line = match pane.expanding.get(item) {
-            Some(None) => line.child(text("Loading the full message…").font(META).color(faint())),
-            Some(Some(note)) => line
-                .child(text(note.clone()).font(META).color(failed()).truncate().max_w(420.0))
-                .child(action(format!("full-{item}"), &icons::ROTATE, "Try again").on_press(move |s: &mut App| crate::history::load_body(s, &sid, &iid))),
-            None => line.child(action(format!("full-{item}"), &icons::CHEVRON_DOWN, "Show the full message").on_press(move |s: &mut App| crate::history::load_body(s, &sid, &iid))),
-        };
+    if let Some(full) = cx.pane.transcript.item(item).filter(|i| i.truncated && i.body_ref.is_some()) {
+        line = body_tools(cx, full, line);
+        return Some(if user { col().w_full().items_end().child(line) } else { line });
     }
     let line = line.child(tools);
     Some(if user { col().w_full().items_end().child(line) } else { line })
@@ -466,7 +483,7 @@ pub fn view(s: &App, id: &str) -> El {
             let open = s.open.contains(&block.id);
             let last = i + 1 == pane.blocks.len() && pane.transcript.turn_open;
             let gap = gap_for(&pane.blocks, i);
-            let cx = Cx { session: &key, pane, open: &s.open };
+            let cx = Cx { session: &key, block: &block.id, pane, open: &s.open };
             memo(&block.id, (pane.revs[i], open, last, gap.to_bits()), || block_el(&cx, block, open, gap, last))
         },
     );
