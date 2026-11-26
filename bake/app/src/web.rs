@@ -291,7 +291,9 @@ fn build(slot: &NativeView, page: Rc<RefCell<String>>, loads: Sender<Load>, foll
     wry::WebViewBuilder::new()
         .with_navigation_handler(move |url| match navigation(&url, &page.borrow()) {
             Navigation::Allow => {
-                let _ = loads.send(Load::Navigating(url));
+                if url.starts_with("http://") || url.starts_with("https://") {
+                    let _ = loads.send(Load::Navigating(url));
+                }
                 true
             }
             Navigation::OpenOutside => {

@@ -102,6 +102,8 @@ pub struct Extension {
     #[serde(default)]
     pub tools: Vec<String>,
     #[serde(default)]
+    pub tools_note: String,
+    #[serde(default)]
     pub jobs: BTreeMap<String, Job>,
     #[serde(default)]
     pub last_event_error: String,
@@ -359,6 +361,9 @@ pub fn problems(ext: &Extension) -> Vec<Problem> {
         } else if mount.signin && mount.key.is_empty() && mount.state == "serving" {
             out.push(Problem { text: format!("{} signs in once you name its key: agenthail extensions key {} {} --key-file <path>", mount.label, ext.id, mount.name), failed: false });
         }
+    }
+    if !ext.tools_note.is_empty() {
+        out.push(Problem { text: ext.tools_note.clone(), failed: false });
     }
     for (name, job) in &ext.jobs {
         if !job.last_error.is_empty() {

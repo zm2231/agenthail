@@ -479,7 +479,7 @@ pub fn hub(s: &App, cx: &mut Cx<App>) -> El {
         list = list.child(text(error.clone()).font(META).color(crate::theme::failed()).wrap().w_full());
     }
     let shown = sections(s);
-    let titled = shown.len() > 1;
+    let titled = shown.len() > 1 || shown.iter().any(|c| !c.host.is_local());
     for catalog in shown {
         list = list.child(catalog_block(s, catalog, titled, &origin));
     }

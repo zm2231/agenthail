@@ -22,7 +22,7 @@ fn sample() -> List {
                 "id": "board", "label": "Board", "description": "Work at a glance", "state": "loaded",
                 "page": {"port": 48200, "entry": "index.html"},
                 "capabilities": ["ledger.read"], "pendingCapabilities": ["sessions.send"], "actions": ["refresh"],
-                "jobs": {"sync": {"lastError": "timed out"}}
+                "jobs": {"sync": {"lastError": "timed out"}}, "toolsNote": "Its tools are over the budget, so sessions don't see them." 
             },
             {
                 "id": "broken", "label": "Broken", "state": "invalid", "error": "extension.json: missing id",
@@ -93,7 +93,7 @@ fn problems_name_what_failed_and_what_waits() {
     let list = sample();
     let board = list.extensions.iter().find(|e| e.id == "board").unwrap();
     let texts: Vec<(String, bool)> = problems(board).into_iter().map(|p| (p.text, p.failed)).collect();
-    assert_eq!(texts, [("Waits for your approval: sessions.send".to_string(), false), ("Job sync failed: timed out".to_string(), true)]);
+    assert_eq!(texts, [("Waits for your approval: sessions.send".to_string(), false), ("Its tools are over the budget, so sessions don't see them.".to_string(), false), ("Job sync failed: timed out".to_string(), true)]);
     assert_eq!(status(board), ("loaded".to_string(), Tone::Failed));
     let broken = list.extensions.iter().find(|e| e.id == "broken").unwrap();
     assert_eq!(status(broken), ("invalid".to_string(), Tone::Failed));
