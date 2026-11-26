@@ -135,12 +135,12 @@ fn settled(s: &mut App, done: Done) {
         Done::Roots(host, generation, _) | Done::Usage(host, generation, _) | Done::Unread(host, generation, _) | Done::Read(host, generation)
             if s.limits.reading.get(&host) != Some(&generation) => {}
         Done::Roots(host, _, roots) => {
-            s.limits.unread.retain(|(h, _)| *h != host);
             match roots {
                 Err(error) if matches!(s.limits.roots.get(&host), Some(Ok(_))) => {
                     s.limits.refresh_error.insert(host, error);
                 }
                 roots => {
+                    s.limits.unread.retain(|(h, _)| *h != host);
                     s.limits.refresh_error.remove(&host);
                     s.limits.roots.insert(host, roots);
                 }

@@ -187,11 +187,11 @@ pub fn names_pr(asked: &str, pr: &crate::catalog::Pr) -> bool {
     let Some((_, rest)) = asked.split_once("://") else { return false };
     let path = rest.split(['?', '#']).next().unwrap_or_default().trim_end_matches('/');
     let parts: Vec<&str> = path.split('/').collect();
-    let [_, owner, name, "pull", number] = parts[..] else { return false };
+    let [host, owner, name, "pull", number] = parts[..] else { return false };
     let Ok(number) = number.parse::<u64>() else { return false };
-    let repo = format!("{owner}/{}", name.trim_end_matches(".git")).to_lowercase();
-    let linked = pr.repo.to_lowercase();
-    pr.number == number && (linked.is_empty() || linked == repo || linked.ends_with(&format!("/{repo}")))
+    let host = host.rsplit('@').next().unwrap_or(host).split(':').next().unwrap_or(host);
+    let repo = format!("{host}/{owner}/{}", name.trim_end_matches(".git")).to_lowercase();
+    pr.number == number && pr.repo.to_lowercase() == repo
 }
 
 pub fn pr_problem(text: &str) -> Option<&'static str> {
@@ -323,15 +323,16 @@ mod tests {
 
     #[test]
     fn the_pull_request_the_daemon_linked_is_found_from_what_was_typed() {
-        let pr = Pr { repo: "Owner/Repo".into(), number: 12, url: "https://github.com/Owner/Repo/pull/12".into(), ..Default::default() };
+        let pr = Pr { repo: "github.com/Owner/Repo".into(), number: 12, url: "https://github.com/Owner/Repo/pull/12".into(), ..Default::default() };
         for asked in ["12", "#12", " https://github.com/owner/repo/pull/12 ", "https://github.com/Owner/Repo/pull/12/", "https://github.com/Owner/Repo/pull/12?w=1", "https://github.com/Owner/Repo/pull/12#discussion", "https://github.com/Owner/Repo.git/pull/12"] {
             assert!(names_pr(asked, &pr), "{asked}");
         }
-        for asked in ["13", "https://github.com/Owner/Other/pull/12", "https://github.com/Owner/Repo/pull/13", "https://github.com/Owner/Repo/issues/12", "fix"] {
+        for asked in ["13", "https://git.example.com/Owner/Repo/pull/12", "https://github.com/Owner/Other/pull/12", "https://github.com/Owner/Repo/pull/13", "https://github.com/Owner/Repo/issues/12", "fix"] {
             assert!(!names_pr(asked, &pr), "{asked}");
         }
         let enterprise = Pr { repo: "git.example.com/team/app".into(), number: 3, ..Default::default() };
         assert!(names_pr("https://git.example.com/team/app/pull/3", &enterprise));
+        assert!(names_pr("https://GIT.example.com:443/team/app/pull/3", &enterprise));
         assert!(!names_pr("https://git.example.com/other/team/app/pull/3", &enterprise));
     }
 
