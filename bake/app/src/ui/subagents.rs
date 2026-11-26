@@ -83,11 +83,15 @@ fn touch(s: &mut App, id: &str) {
         let Some(at) = s.crew.recent.iter().position(|x| !held.contains(x)) else { break };
         let old = s.crew.recent.remove(at);
         s.crew.pages.remove(&old);
-        s.crew.asked.remove(&old);
+        if !s.crew.asked.get(&old).is_some_and(|a| a.in_flight) {
+            s.crew.asked.remove(&old);
+        }
         s.crew.errors.remove(&old);
         s.crew.claude.remove(&old);
         s.crew.claude_errors.remove(&old);
-        s.crew.claude_asked.remove(&old);
+        if !s.crew.claude_asked.get(&old).is_some_and(|a| a.in_flight) {
+            s.crew.claude_asked.remove(&old);
+        }
         s.crew.expanded.remove(&old);
     }
     if s.crew.rows.len() > KEPT {
@@ -211,6 +215,10 @@ pub(crate) fn done(s: &mut App, done: Done) {
         Done::Page(id, seq, result) => {
             let Some(asked) = s.crew.asked.get_mut(&id).filter(|a| a.seq == seq) else { return };
             asked.in_flight = false;
+            if !s.crew.recent.contains(&id) {
+                s.crew.asked.remove(&id);
+                return;
+            }
             match result {
                 Ok(mut rows) => {
                     rows.retain(|x| !s.crew.deleted.contains(&x.id));
@@ -226,6 +234,10 @@ pub(crate) fn done(s: &mut App, done: Done) {
         Done::Claude(id, seq, result) => {
             let Some(asked) = s.crew.claude_asked.get_mut(&id).filter(|a| a.seq == seq) else { return };
             asked.in_flight = false;
+            if !s.crew.recent.contains(&id) {
+                s.crew.claude_asked.remove(&id);
+                return;
+            }
             match result {
                 Ok(list) => {
                     s.crew.claude_errors.remove(&id);
