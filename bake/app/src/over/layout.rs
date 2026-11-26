@@ -75,7 +75,7 @@ pub fn restore(s: &mut App) -> bool {
 
 fn unsent(s: &App) -> Value {
     let mut all = s.unsent.clone();
-    for (id, pending) in &s.in_flight {
+    for (id, pending) in s.in_flight.iter().flat_map(|(id, list)| list.iter().map(move |p| (id, p))) {
         all.add(id, pending.clone());
     }
     all.to_json()
@@ -91,6 +91,7 @@ fn encode(s: &App) -> String {
         "looked": { "now": s.ov.looked_now, "projects": s.ov.looked },
         "drafts": s.drafts.to_json(),
         "unsent": unsent(s),
+        "restored": s.restored.iter().map(|(id, (merged, before))| (id.clone(), json!([merged, before]))).collect::<serde_json::Map<String, Value>>(),
     })
     .to_string()
 }
@@ -119,12 +120,19 @@ pub fn load(s: &mut App) {
     }
     s.drafts = feed::composer::Drafts::from_json(&v["drafts"]);
     s.unsent = feed::composer::Unconfirmed::from_json(&v["unsent"]);
+    for (id, pair) in v["restored"].as_object().into_iter().flatten() {
+        if let (Some(merged), Some(before)) = (pair[0].as_str(), pair[1].as_str()) {
+            s.restored.insert(id.clone(), (merged.to_string(), before.to_string()));
+        }
+    }
     let held: Vec<(String, String)> = s.unsent.iter().map(|(id, u)| (id.clone(), u.text.clone())).collect();
     for (id, text) in held {
         let before = s.drafts.get(&id).trim_end().to_string();
         let merged = feed::composer::put_back(&before, &text);
-        s.drafts.set(&id, &merged);
-        s.restored.insert(id, (merged, before));
+        if merged != before {
+            s.drafts.set(&id, &merged);
+            s.restored.insert(id, (merged, before));
+        }
     }
     s.ov.arrange();
     *LAST.lock().expect("layout lock") = encode(s);

@@ -68,7 +68,7 @@ pub enum Delivered {
     Steered,
     NotSteered,
     Queued(Option<i64>),
-    QueuedUntilAnswer,
+    QueuedUntilAnswer(Option<i64>),
     Unconfirmed,
 }
 
@@ -80,12 +80,19 @@ impl Delivered {
         }
         let receipt: Receipt = serde_json::from_value(result.clone()).unwrap_or_default();
         match (receipt.evidence.as_str(), receipt.not_steered) {
-            ("queued", _) if receipt.waiting_on.as_ref().is_some_and(|w| !w.is_null()) => Delivered::QueuedUntilAnswer,
+            ("queued", _) if receipt.waiting_on.as_ref().is_some_and(|w| !w.is_null()) => Delivered::QueuedUntilAnswer(receipt.queue_id),
             ("queued", _) => Delivered::Queued(receipt.queue_id),
             ("unknown" | "submitted", _) => Delivered::Unconfirmed,
             (_, Some(true)) => Delivered::NotSteered,
             (_, Some(false)) => Delivered::Steered,
             _ => Delivered::Sent,
+        }
+    }
+
+    pub fn queue_id(&self) -> Option<Option<i64>> {
+        match self {
+            Delivered::Queued(id) | Delivered::QueuedUntilAnswer(id) => Some(*id),
+            _ => None,
         }
     }
 
@@ -95,7 +102,7 @@ impl Delivered {
             Delivered::Steered => "Steered".into(),
             Delivered::NotSteered => "Sent as a new message; this session didn't take it as a steer".into(),
             Delivered::Queued(_) => format!("Queued ({})", queued.max(1)),
-            Delivered::QueuedUntilAnswer => "Queued until you answer".into(),
+            Delivered::QueuedUntilAnswer(_) => "Queued until you answer".into(),
             Delivered::Unconfirmed => "Sent, not confirmed yet".into(),
         }
     }
@@ -146,13 +153,14 @@ pub fn put_back(draft: &str, text: &str) -> String {
     }
 }
 
-pub fn queued_note(rows: &[QueueRow], rekeyed: &HashMap<String, String>, id: &str, queue_id: Option<i64>, seen_since: bool) -> Option<String> {
+pub fn queued_note(rows: &[QueueRow], rekeyed: &HashMap<String, String>, id: &str, receipt: &Delivered, seen_since: bool) -> Option<String> {
+    let queue_id = receipt.queue_id()?;
     let pending: Vec<&QueueRow> = rows.iter().filter(|r| r.status == "pending" && current(rekeyed, &r.session_id) == id).collect();
     let ours = match queue_id {
         Some(q) => pending.iter().any(|r| r.id == q),
         None => !pending.is_empty(),
     };
-    (!seen_since || ours).then(|| Delivered::Queued(queue_id).note(pending.len() as i64))
+    (!seen_since || ours).then(|| receipt.note(pending.len() as i64))
 }
 
 pub fn take_back(composer: &str, text: &str, restored: Option<&(String, String)>) -> Option<String> {
@@ -303,7 +311,7 @@ mod tests {
         assert_eq!(Delivered::read(&json!({"ok": true, "result": {"evidence": "transport_accepted", "notSteered": false}})), Delivered::Steered);
         assert_eq!(Delivered::read(&json!({"ok": true, "result": {"evidence": "delivered", "notSteered": true}})), Delivered::NotSteered);
         assert_eq!(Delivered::read(&json!({"ok": true, "result": {"evidence": "queued", "queueId": 4}})), Delivered::Queued(Some(4)));
-        assert_eq!(Delivered::read(&json!({"ok": true, "result": {"evidence": "queued", "queueId": 4, "waitingOn": {"kind": "ask"}}})), Delivered::QueuedUntilAnswer);
+        assert_eq!(Delivered::read(&json!({"ok": true, "result": {"evidence": "queued", "queueId": 4, "waitingOn": {"kind": "ask"}}})), Delivered::QueuedUntilAnswer(Some(4)));
         assert_eq!(Delivered::read(&json!({"ok": true, "result": {"evidence": "unknown"}})), Delivered::Unconfirmed);
         assert_eq!(Delivered::read(&json!({"ok": true, "result": {"evidence": "submitted", "status": "submitted"}})), Delivered::Unconfirmed);
         assert_eq!(Delivered::read(&json!({"ok": true, "status": "submitted"})), Delivered::Unconfirmed);
@@ -398,14 +406,19 @@ mod tests {
     #[test]
     fn a_queued_note_stays_until_a_fresh_snapshot_shows_the_row_gone() {
         let none = HashMap::new();
-        assert_eq!(queued_note(&[], &none, "s1", Some(7), false).as_deref(), Some("Queued (1)"));
+        let (seven, unnumbered) = (Delivered::Queued(Some(7)), Delivered::Queued(None));
+        assert_eq!(queued_note(&[], &none, "s1", &seven, false).as_deref(), Some("Queued (1)"));
         let rows = [row(6, "s1", "pending"), row(7, "s1", "pending"), row(8, "s2", "pending"), row(5, "s1", "delivered")];
-        assert_eq!(queued_note(&rows, &none, "s1", Some(7), true).as_deref(), Some("Queued (2)"));
-        assert_eq!(queued_note(&rows[..1], &none, "s1", Some(7), true), None);
-        assert_eq!(queued_note(&rows[..1], &none, "s1", None, true).as_deref(), Some("Queued (1)"));
-        assert_eq!(queued_note(&rows[2..], &none, "s1", None, true), None);
+        assert_eq!(queued_note(&rows, &none, "s1", &seven, true).as_deref(), Some("Queued (2)"));
+        assert_eq!(queued_note(&rows[..1], &none, "s1", &seven, true), None);
+        assert_eq!(queued_note(&rows[..1], &none, "s1", &unnumbered, true).as_deref(), Some("Queued (1)"));
+        assert_eq!(queued_note(&rows[2..], &none, "s1", &unnumbered, true), None);
         let moved = [row(7, "old", "pending")];
-        assert_eq!(queued_note(&moved, &map(&[("old", "s1")]), "s1", Some(7), true).as_deref(), Some("Queued (1)"));
+        assert_eq!(queued_note(&moved, &map(&[("old", "s1")]), "s1", &seven, true).as_deref(), Some("Queued (1)"));
+        let answer = Delivered::QueuedUntilAnswer(Some(7));
+        assert_eq!(queued_note(&rows, &none, "s1", &answer, true).as_deref(), Some("Queued until you answer"));
+        assert_eq!(queued_note(&rows[..1], &none, "s1", &answer, true), None);
+        assert_eq!(queued_note(&rows, &none, "s1", &Delivered::Steered, false), None);
     }
 
     #[test]
