@@ -139,6 +139,7 @@ pub struct Taking {
     pub host: String,
     pub id: i64,
     pub text: String,
+    pub attempt: String,
 }
 
 impl Taking {
@@ -147,13 +148,14 @@ impl Taking {
     }
 
     pub fn to_json(list: &[Taking]) -> Value {
-        Value::Array(list.iter().map(|t| serde_json::json!({"session": t.session, "host": t.host, "id": t.id, "text": t.text})).collect())
+        Value::Array(list.iter().map(|t| serde_json::json!({"session": t.session, "host": t.host, "id": t.id, "text": t.text, "attempt": t.attempt})).collect())
     }
 
     pub fn from_json(value: &Value) -> Vec<Taking> {
         let read = |v: &Value| -> Option<Taking> {
             let text = v["text"].as_str().filter(|t| !t.trim().is_empty())?.to_string();
-            Some(Taking { session: v["session"].as_str().filter(|s| !s.is_empty())?.to_string(), host: v["host"].as_str().unwrap_or_default().to_string(), id: v["id"].as_i64()?, text })
+            let attempt = v["attempt"].as_str().unwrap_or_default().to_string();
+            Some(Taking { session: v["session"].as_str().filter(|s| !s.is_empty())?.to_string(), host: v["host"].as_str().unwrap_or_default().to_string(), id: v["id"].as_i64()?, text, attempt })
         };
         value.as_array().map(|a| a.iter().filter_map(read).collect()).unwrap_or_default()
     }
@@ -209,8 +211,8 @@ impl Client {
     pub fn unfinished(&self, list: Vec<Taking>) -> Vec<Taking> {
         list.into_iter()
             .filter(|t| {
-                let rows = if t.host.is_empty() { self.held_here(&t.session) } else { self.queue_rows(&format!("/api/v1/queue?sessionId={}", enc(&t.session)), &t.host) };
-                rows.map_or(true, |rows| !t.still_queued(&rows))
+                let path = if t.host.is_empty() { "/api/v1/queue".to_string() } else { format!("/api/v1/queue?host={}", enc(&t.host)) };
+                self.queue_rows(&path, &t.host).map_or(true, |rows| !t.still_queued(&rows))
             })
             .collect()
     }
@@ -294,7 +296,7 @@ mod tests {
 
     #[test]
     fn a_message_being_taken_back_survives_a_restart() {
-        let taking = vec![Taking { session: "s1".into(), host: "vps".into(), id: 7, text: "hold on".into() }];
+        let taking = vec![Taking { session: "s1".into(), host: "vps".into(), id: 7, text: "hold on".into(), attempt: "k1".into() }];
         assert_eq!(Taking::from_json(&Taking::to_json(&taking)), taking);
         assert!(Taking::from_json(&json!([{"session": "s1", "id": 7, "text": " "}, {"id": 7, "text": "x"}, {"session": "s1", "text": "x"}])).is_empty());
         assert_eq!(Taking::from_json(&json!(null)), vec![]);
@@ -302,7 +304,7 @@ mod tests {
 
     #[test]
     fn a_leftover_take_back_is_restored_unless_its_message_is_still_queued() {
-        let taking = |id: i64| Taking { session: "s1".into(), host: String::new(), id, text: format!("t{id}") };
+        let taking = |id: i64| Taking { session: "s1".into(), host: String::new(), id, text: format!("t{id}"), attempt: format!("a{id}") };
         let (client, _seen) = daemon(replies(&[
             (200, r#"{"items":[{"id":7,"sessionId":"s1","status":"pending"}]}"#),
             (200, r#"{"items":[{"id":7,"sessionId":"s1","status":"pending"}]}"#),
@@ -310,11 +312,11 @@ mod tests {
         ]));
         let restore = client.unfinished(vec![taking(7), taking(8), taking(9)]);
         assert_eq!(restore.iter().map(|t| t.id).collect::<Vec<_>>(), vec![8, 9]);
-        let (client, seen) = daemon(replies(&[(200, r#"{"items":[{"id":7,"sessionId":"vps::s1","status":"pending"}]}"#), (200, r#"{"items":[{"id":7,"sessionId":"other","status":"pending"}]}"#)]));
+        let (client, seen) = daemon(replies(&[(200, r#"{"items":[{"id":7,"sessionId":"vps::renamed","status":"pending"}]}"#), (200, r#"{"items":[{"id":6,"sessionId":"vps::s1","status":"pending"}]}"#)]));
         let held_here = Taking { session: "vps::s1".into(), ..taking(7) };
         let there = Taking { host: "vps".into(), ..held_here.clone() };
         assert_eq!(client.unfinished(vec![there.clone()]), vec![]);
-        assert_eq!(seen.recv().unwrap().0, "/api/v1/queue?sessionId=vps%3A%3As1");
+        assert_eq!(seen.recv().unwrap().0, "/api/v1/queue?host=vps");
         assert_eq!(client.unfinished(vec![held_here.clone()]), vec![held_here]);
         assert_eq!(seen.recv().unwrap().0, "/api/v1/queue");
         let remote = Taking { host: "vps".into(), ..taking(7) };
