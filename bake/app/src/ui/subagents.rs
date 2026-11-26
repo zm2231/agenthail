@@ -12,6 +12,7 @@ struct PageAsk {
     key: String,
     at: Instant,
     seq: u64,
+    in_flight: bool,
 }
 
 struct RowAsk {
@@ -33,7 +34,6 @@ pub struct Crew {
     pages: HashMap<String, Vec<Session>>,
     asked: HashMap<String, PageAsk>,
     seq: u64,
-    loading: HashSet<String>,
     errors: HashMap<String, String>,
     claude: HashMap<String, ClaudeSubagents>,
     claude_errors: HashMap<String, String>,
@@ -85,7 +85,6 @@ fn touch(s: &mut App, id: &str) {
         s.crew.pages.remove(&old);
         s.crew.asked.remove(&old);
         s.crew.errors.remove(&old);
-        s.crew.loading.remove(&old);
         s.crew.claude.remove(&old);
         s.crew.claude_errors.remove(&old);
         s.crew.claude_asked.remove(&old);
@@ -101,7 +100,7 @@ fn touch(s: &mut App, id: &str) {
 
 pub(crate) fn load(s: &mut App, id: &str) {
     s.crew.claude_asked.remove(id);
-    if s.crew.errors.remove(id).is_some() {
+    if s.crew.errors.remove(id).is_some() && !loading(s, id) {
         s.crew.asked.remove(id);
     }
     if let Some(parent) = parent_of(s, id) {
@@ -160,10 +159,14 @@ fn read_row(s: &mut App, id: &str) {
     spawn(s, move |c| Done::Row(id.clone(), seq, c.session_row(&id)));
 }
 
+fn loading(s: &App, id: &str) -> bool {
+    s.crew.asked.get(id).is_some_and(|a| a.in_flight)
+}
+
 fn page(s: &mut App, id: &str) {
     let Some(x) = known(s, id) else { return };
     if !crew::page_wanted(x, listed(s, id)) {
-        if !s.crew.loading.contains(id) {
+        if !loading(s, id) {
             keep_open_lineage(s, id, &[]);
             s.crew.pages.remove(id);
             s.crew.asked.remove(id);
@@ -174,13 +177,12 @@ fn page(s: &mut App, id: &str) {
     let key = crew::page_key(x);
     let held = held(s);
     let holds_open = s.crew.pages.get(id).is_some_and(|rows| rows.iter().any(|x| held.contains(&x.id)));
-    if s.crew.loading.contains(id) || s.crew.asked.get(id).is_some_and(|a| !crew::page_due(a.key == key, a.at.elapsed(), holds_open)) {
+    if s.crew.asked.get(id).is_some_and(|a| a.in_flight || !crew::page_due(a.key == key, a.at.elapsed(), holds_open)) {
         return;
     }
     s.crew.seq += 1;
     let seq = s.crew.seq;
-    s.crew.asked.insert(id.to_string(), PageAsk { key, at: Instant::now(), seq });
-    s.crew.loading.insert(id.to_string());
+    s.crew.asked.insert(id.to_string(), PageAsk { key, at: Instant::now(), seq, in_flight: true });
     let id = id.to_string();
     spawn(s, move |c| Done::Page(id.clone(), seq, c.subagent_sessions(&id)));
 }
@@ -205,10 +207,8 @@ fn claude(s: &mut App, id: &str) {
 pub(crate) fn done(s: &mut App, done: Done) {
     match done {
         Done::Page(id, seq, result) => {
-            if s.crew.asked.get(&id).is_none_or(|a| a.seq != seq) {
-                return;
-            }
-            s.crew.loading.remove(&id);
+            let Some(asked) = s.crew.asked.get_mut(&id).filter(|a| a.seq == seq) else { return };
+            asked.in_flight = false;
             match result {
                 Ok(mut rows) => {
                     rows.retain(|x| !s.crew.deleted.contains(&x.id));
@@ -309,7 +309,7 @@ pub(crate) fn section(s: &App, x: &Session) -> Option<El> {
     let parent = crew::parent_of(x).and_then(|p| session(s, &p));
     let mut children = crew::children(&x.id, &s.sessions, s.crew.pages.get(&x.id).map(Vec::as_slice).unwrap_or_default());
     crew::in_daemon_order(&mut children, &s.sessions);
-    let loading = s.crew.loading.contains(&x.id);
+    let loading = loading(s, &x.id);
     let error = s.crew.errors.get(&x.id);
     let observed = s.crew.claude.get(&x.id).map(|c| c.list(s.crew.expanded.contains(&x.id)));
     let total = observed.as_ref().map_or(0, |o| o.total);
