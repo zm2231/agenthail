@@ -192,7 +192,7 @@ fn take(s: &mut App, done: Done) {
                 Err(error) => s.ov.notice = Some(format!("{what} didn't work: {}", error.message)),
             }
         }
-        Done::Signed(result) => ext.web.signed(result),
+        Done::Signed(result) => ext.web.signed(result, time::OffsetDateTime::now_utc()),
         Done::Checked(page, value, known) => ext.web.checked(&page, &value, known),
     }
 }
