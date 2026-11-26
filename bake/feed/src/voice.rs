@@ -848,7 +848,8 @@ impl Call {
             }
             Req::Abandon => {}
             Req::Stop => {
-                if current {
+                let asked = job.action.as_ref().and_then(|a| a.attempt_id.clone());
+                if current && self.hangup_pending && asked.is_some() && asked == self.hangup_attempt {
                     match result {
                         Ok(next) => self.state = Some(next),
                         Err(error) => {

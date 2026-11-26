@@ -485,3 +485,16 @@ fn a_start_whose_outcome_is_unknown_keeps_a_hangup_that_can_be_retried() {
         assert_eq!(again.action.unwrap().attempt_id, Some(id));
     }
 }
+
+#[test]
+fn a_stop_error_after_the_host_confirmed_the_end_changes_nothing() {
+    let mut call = ready();
+    let id = started(&mut call, 0.0);
+    let stop = only_job(&call.hangup());
+    let ended = refresh(&call.tick(1.0));
+    call.reply(ended, Ok(state(json!({"phase": "ended", "attemptId": id}))), 1.0);
+    assert!(!call.hangup_pending && call.can_call());
+    call.reply(stop, Err("timed out".into()), 2.0);
+    assert!(!call.hangup_unconfirmed && call.error.is_none());
+    assert!(call.can_call());
+}
