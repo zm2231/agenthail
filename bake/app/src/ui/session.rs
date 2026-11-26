@@ -49,7 +49,11 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
         .shadow(2.0, 10.0, if ready { accent().alpha(0.45) } else { Color::TRANSPARENT })
         .press_scale(0.92)
         .motion(SPRING)
-        .on_press_tx(|s: &mut App, tx: &mut Tx| send(s, tx))
+        .on_press_tx(|s: &mut App, tx: &mut Tx| {
+            if let Some(id) = s.selected.clone() {
+                super::complete::submit(s, &id, tx);
+            }
+        })
         .child(icon(&icons::ARROW_UP, 15.0).color(if ready { Color::WHITE } else { faint() }));
     let busy = crate::busy_delivery(s, &x.id);
     let unsent = s.unsent.has(&x.id);

@@ -376,7 +376,7 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
     };
     let lead_session = crate::session(s, lead);
     let controls = controls
-        .child(IconButton::new(&icons::ARROW_UP).variant(IconButtonVariant::Submit).label("Send").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::send_to(s, &to2, tx)).build(k));
+        .child(IconButton::new(&icons::ARROW_UP).variant(IconButtonVariant::Submit).label("Send").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::ui::complete::submit(s, &to2, tx)).build(k));
     col()
         .w_full()
         .max_w(780.0)

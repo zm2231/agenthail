@@ -77,16 +77,22 @@ fn files_for<'a>(c: &'a Complete, id: &str, query: &str) -> Option<&'a Result<Se
     c.files.as_ref().filter(|(s, q, _)| s == id && q == query).map(|(_, _, r)| r)
 }
 
+fn model_mode<'a>(s: &'a App, x: &Session) -> Option<&'a str> {
+    let plain = !super::attach::has(s, &x.id);
+    if plain && x.capabilities.model { complete::model_query(&s.composer.text) } else { None }
+}
+
+fn picking_model(s: &App) -> bool {
+    s.composer_for.as_deref().and_then(|id| session(s, id)).is_some_and(|x| model_mode(s, x).is_some())
+}
+
 fn shown(s: &App, x: &Session) -> (Vec<Item>, Option<String>) {
     let text = s.composer.text.as_str();
     if s.complete.dismissed.as_deref() == Some(text) || s.complete.search.as_ref().is_some_and(|q| q.session == x.id) {
         return (Vec::new(), None);
     }
     let plain = !super::attach::has(s, &x.id);
-    if plain
-        && x.capabilities.model
-        && let Some(query) = complete::model_query(text)
-    {
+    if let Some(query) = model_mode(s, x) {
         return match models(s, &x.id) {
             Some((list, current)) => (complete::model_items(query, &list, &current), None),
             None => (Vec::new(), Some(models_note(s, &x.id))),
@@ -181,8 +187,7 @@ pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             }
             Key::Tab | Key::Enter if !ev.mods.shift => {
                 let item = &items[at];
-                let done = complete::model_query(&s.composer.text).is_some_and(|_| s.composer.text.trim() == item.insertion) || token(s).is_some_and(|t| complete::completes(item, &s.composer.text, &t));
-                if done {
+                if completed(s, item) {
                     return ev.key == Key::Tab;
                 }
                 accept(s, item);
@@ -229,10 +234,26 @@ pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     }
 }
 
+fn completed(s: &App, item: &Item) -> bool {
+    if picking_model(s) {
+        return s.composer.text.trim() == item.insertion;
+    }
+    token(s).is_some_and(|t| complete::completes(item, &s.composer.text, &t))
+}
+
+pub fn submit(s: &mut App, id: &str, tx: &mut Tx) {
+    let open = session(s, id).filter(|_| s.composer_for.as_deref() == Some(id)).map(|x| shown(s, x).0).unwrap_or_default();
+    if let Some(item) = open.get(s.complete.highlighted.min(open.len().saturating_sub(1))).filter(|item| !completed(s, item)).cloned() {
+        accept(s, &item);
+        return;
+    }
+    crate::send_to(s, id, tx);
+}
+
 fn accept(s: &mut App, item: &Item) {
     s.complete.highlighted = 0;
     s.composer.focused = true;
-    if complete::model_query(&s.composer.text).is_some() {
+    if picking_model(s) {
         replace_composer(s, &item.insertion);
         return;
     }
@@ -462,7 +483,7 @@ pub fn done(s: &mut App, done: Done) {
         Done::Goal(asked, typed, result) => {
             let id = feed::composer::current(&s.rekeyed, &asked).to_string();
             s.complete.goal_pending.remove(&id);
-            if result.is_ok() {
+            if result.as_ref().is_ok_and(|d| *d != feed::composer::Delivered::Unconfirmed) {
                 if s.composer_for.as_deref() == Some(id.as_str()) {
                     if s.composer.text.trim() == typed {
                         replace_composer(s, "");
