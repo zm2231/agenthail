@@ -403,6 +403,12 @@ impl History {
         self.entries.get(p - 1).cloned()
     }
 
+    pub fn leave(&mut self) -> Option<String> {
+        self.position?;
+        self.stop();
+        Some(std::mem::take(&mut self.draft))
+    }
+
     pub fn current(&self) -> Option<&str> {
         self.entries.get(self.position?).map(String::as_str)
     }
@@ -427,6 +433,7 @@ pub fn can_fork(session: &Session) -> bool {
 pub struct Found {
     pub prompts: Vec<Prompt>,
     pub problems: Vec<String>,
+    pub more: bool,
 }
 
 fn connected_hosts(snapshot: &Value) -> Vec<(String, String)> {
@@ -469,41 +476,49 @@ impl Client {
     }
 
     pub fn prompts(&self, session: Option<&str>, query: &str) -> Result<Vec<Prompt>, String> {
-        let prompts = self.prompts_on(session, query, None)?;
-        Ok(match session.and_then(|id| id.split_once("::")) {
+        Ok(self.search_session(session, query)?.prompts)
+    }
+
+    pub fn search_session(&self, session: Option<&str>, query: &str) -> Result<Found, String> {
+        let (prompts, more) = self.prompts_on(session, query, None)?;
+        let prompts = match session.and_then(|id| id.split_once("::")) {
             Some((host, _)) => prompts.into_iter().map(|p| on_host(p, host)).collect(),
             None => prompts,
-        })
+        };
+        Ok(Found { prompts, problems: Vec::new(), more })
     }
 
     pub fn prompts_everywhere(&self, query: &str) -> Result<Found, String> {
-        let mut prompts = self.prompts(None, query)?;
+        let Found { mut prompts, mut more, .. } = self.search_session(None, query)?;
         let mut problems = Vec::new();
         let hosts = self.read("/api/v1/snapshot?sessions=none").map(|v| connected_hosts(&v)).unwrap_or_else(|error| {
             problems.push(format!("Couldn't find the other computers to search: {error}"));
             Vec::new()
         });
-        let asked: Vec<(String, Result<Vec<Prompt>, String>)> = std::thread::scope(|scope| {
+        let asked: Vec<(String, Result<(Vec<Prompt>, bool), String>)> = std::thread::scope(|scope| {
             let running: Vec<_> = hosts.iter().map(|(id, name)| (name.clone(), scope.spawn(move || self.prompts_on(None, query, Some(id))), id.clone())).collect();
             running
                 .into_iter()
                 .map(|(name, job, id)| {
-                    let found = job.join().unwrap_or_else(|_| Err("the search stopped".into())).map(|list| list.into_iter().map(|p| on_host(p, &id)).collect());
+                    let found = job.join().unwrap_or_else(|_| Err("the search stopped".into())).map(|(list, more)| (list.into_iter().map(|p| on_host(p, &id)).collect(), more));
                     (name, found)
                 })
                 .collect()
         });
         for (name, found) in asked {
             match found {
-                Ok(list) => prompts.extend(list),
+                Ok((list, cut)) => {
+                    prompts.extend(list);
+                    more |= cut;
+                }
                 Err(error) => problems.push(format!("Couldn't search {name}: {error}")),
             }
         }
         prompts.sort_by_key(|p| std::cmp::Reverse(crate::catalog::parse_time(&p.ts).unwrap_or(OffsetDateTime::UNIX_EPOCH)));
-        Ok(Found { prompts, problems })
+        Ok(Found { prompts, problems, more })
     }
 
-    fn prompts_on(&self, session: Option<&str>, query: &str, host: Option<&str>) -> Result<Vec<Prompt>, String> {
+    fn prompts_on(&self, session: Option<&str>, query: &str, host: Option<&str>) -> Result<(Vec<Prompt>, bool), String> {
         let mut path = format!("/api/v1/prompts?limit={PROMPTS_ASKED}");
         if let Some(id) = session {
             path.push_str(&format!("&sessionId={}", enc(id)));
@@ -515,7 +530,8 @@ impl Client {
             path.push_str(&format!("&q={}", enc(query.trim())));
         }
         let value = self.read(&path)?;
-        serde_json::from_value(value["prompts"].clone()).map_err(|e| e.to_string())
+        let more = value["nextBefore"].as_str().is_some_and(|c| !c.is_empty());
+        Ok((serde_json::from_value(value["prompts"].clone()).map_err(|e| e.to_string())?, more))
     }
 
     pub fn fork(&self, session: &str, before: Option<&str>, key: &str) -> Result<String, RespondError> {
@@ -697,6 +713,9 @@ mod tests {
         h.older("y");
         h.stop();
         assert!(!h.browsing());
+        h.older("my draft");
+        assert_eq!(h.leave().as_deref(), Some("my draft"), "leaving mid-browse hands back the draft");
+        assert_eq!(h.leave(), None);
         let at = |ts: &str| crate::catalog::parse_time(ts).unwrap();
         let stamped = |text: &str, ts: &str| Prompt { ts: ts.into(), ..prompt(text, None) };
         let recorded = [stamped("b", "2026-11-26T10:02:00Z"), stamped("a", "2026-11-26T10:01:00Z")];
@@ -738,15 +757,18 @@ mod tests {
         let (client, seen) = daemon(replies(&[
             (200, r#"{"prompts":[{"sessionId":"s1","itemId":"i1","ts":"2026-11-26T10:00:00Z","text":"here"}]}"#),
             (200, r#"{"daemon":{"hosts":[{"id":"h1","name":"buildbox","state":"connected"},{"id":"h2","name":"laptop","state":"unreachable"}]}}"#),
-            (200, r#"{"prompts":[{"sessionId":"s9","itemId":"i9","ts":"2026-11-26T11:00:00Z","text":"there"},{"sessionId":"h1::s8","itemId":"i8","ts":"2026-11-26T09:00:00Z","text":"older"}]}"#),
+            (200, r#"{"prompts":[{"sessionId":"s9","itemId":"i9","ts":"2026-11-26T11:00:00Z","text":"there"},{"sessionId":"h1::s8","itemId":"i8","ts":"2026-11-26T09:00:00Z","text":"older"}],"nextBefore":""}"#),
         ]));
         let found = client.prompts_everywhere("t").unwrap();
+        assert!(!found.more);
         assert_eq!(found.prompts.iter().map(|p| (p.session_id.as_str(), p.text.as_str())).collect::<Vec<_>>(), vec![("h1::s9", "there"), ("s1", "here"), ("h1::s8", "older")]);
         assert!(found.problems.is_empty());
         let paths: Vec<String> = seen.try_iter().map(|(p, _)| p).collect();
         assert_eq!(paths, vec!["/api/v1/prompts?limit=100&q=t", "/api/v1/snapshot?sessions=none", "/api/v1/prompts?limit=100&host=h1&q=t"]);
         let (client, _seen) = daemon(replies(&[(200, r#"{"prompts":[]}"#), (200, r#"{"daemon":{"hosts":[{"id":"h1","name":"buildbox","state":"connected"}]}}"#), (502, r#"{"error":{"message":"host timed out"}}"#)]));
         assert_eq!(client.prompts_everywhere("").unwrap().problems, vec!["Couldn't search buildbox: host timed out".to_string()]);
+        let (client, _more) = daemon(replies(&[(200, r#"{"prompts":[{"sessionId":"s1","text":"a"}],"nextBefore":"2.4e6:2:s1"}"#)]));
+        assert!(client.search_session(Some("s1"), "").unwrap().more);
         let (client, _seen) = daemon(replies(&[(200, r#"{"prompts":[{"sessionId":"s1","text":"here"}]}"#), (500, r#"{"error":{"message":"snapshot failed"}}"#)]));
         let found = client.prompts_everywhere("").unwrap();
         assert_eq!((found.prompts.len(), found.problems), (1, vec!["Couldn't find the other computers to search: snapshot failed".to_string()]));
