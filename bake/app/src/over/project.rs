@@ -333,6 +333,7 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
         .placeholder(placeholder.to_string(), weak())
         .on_edit(|s: &mut App| &mut s.composer)
         .on_input_paste(|s: &mut App, content, _: &mut Tx| crate::ui::attach::paste(s, content))
+        .on_input_key(crate::ui::complete::key)
         .on_submit(move |s: &mut App, tx: &mut Tx| crate::send_to(s, &to, tx));
     let status = crate::composer_note(s, lead).or_else(|| crate::send_busy(s, lead).map(|b| b.hint().to_string())).unwrap_or_else(|| "Sends as you".into());
     let controls = row()
@@ -373,13 +374,27 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
     } else {
         controls
     };
+    let lead_session = crate::session(s, lead);
     let controls = controls
-        .child(IconButton::new(&icons::ARROW_UP).variant(IconButtonVariant::Submit).label("Send").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::send_to(s, &to2, tx)).build(k));
+        .child(IconButton::new(&icons::ARROW_UP).variant(IconButtonVariant::Submit).label("Send").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::ui::complete::submit(s, &to2, tx)).build(k));
     col()
         .w_full()
         .max_w(780.0)
         .px(28.0)
         .pb(16.0)
         .on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_composer(r))
-        .child(col().w_full().gap(8.0).padding(12.0).radius(14.0).fill(k.c.surface_raised).border(1.0, if s.attach.dropping { crate::theme::accent() } else { ui::edge() }).children(crate::ui::attach::chips(s, lead)).child(input).child(controls))
+        .child(
+            col()
+                .w_full()
+                .gap(8.0)
+                .padding(12.0)
+                .radius(14.0)
+                .fill(k.c.surface_raised)
+                .border(1.0, if s.attach.dropping { crate::theme::accent() } else { ui::edge() })
+                .children(lead_session.and_then(|x| crate::ui::complete::search(s, x)))
+                .children(lead_session.and_then(|x| crate::ui::complete::menu(s, x)))
+                .children(crate::ui::attach::chips(s, lead))
+                .child(input)
+                .child(controls),
+        )
 }
