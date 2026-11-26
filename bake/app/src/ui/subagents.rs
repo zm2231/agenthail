@@ -61,15 +61,21 @@ fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'sta
     });
 }
 
-fn held(s: &App) -> HashSet<String> {
-    let Some(sel) = s.selected.clone() else { return HashSet::new() };
-    let mut held = HashSet::from([sel.clone()]);
-    let mut at = sel;
-    while let Some(parent) = parent_of(s, &at).filter(|p| !held.contains(p)) {
-        held.insert(parent.clone());
-        at = parent;
+const LINEAGE: usize = 8;
+
+fn lineage(s: &App, id: &str) -> Vec<String> {
+    let mut line = vec![id.to_string()];
+    while line.len() < LINEAGE {
+        match line.last().and_then(|at| parent_of(s, at)).filter(|p| !line.contains(p)) {
+            Some(parent) => line.push(parent),
+            None => break,
+        }
     }
-    held
+    line
+}
+
+fn held(s: &App) -> HashSet<String> {
+    s.selected.as_deref().map(|sel| lineage(s, sel).into_iter().collect()).unwrap_or_default()
 }
 
 fn touch(s: &mut App, id: &str) {
@@ -110,21 +116,21 @@ pub(crate) fn refresh(s: &mut App, id: &str) {
     if s.client.is_none() {
         return;
     }
-    let parent = parent_of(s, id);
-    if let Some(parent) = &parent {
-        touch(s, parent);
+    let line = lineage(s, id);
+    for at in line.iter().rev() {
+        touch(s, at);
     }
-    touch(s, id);
-    page(s, id);
     let unresolved_subagent = session(s, id).is_none() && known(s, id).and_then(crew::parent_of).is_some();
     if (s.crew.rows.contains_key(id) || unresolved_subagent) && outside(s, id) {
         read_row(s, id);
     }
-    if let Some(parent) = parent {
-        if outside(s, &parent) {
-            read_row(s, &parent);
+    for ancestor in &line[1..] {
+        if outside(s, ancestor) {
+            read_row(s, ancestor);
         }
-        page(s, &parent);
+    }
+    for at in &line {
+        page(s, at);
     }
     claude(s, id);
 }
@@ -168,7 +174,8 @@ fn page(s: &mut App, id: &str) {
         return;
     }
     let key = crew::page_key(x);
-    let holds_open = s.selected.as_deref().is_some_and(|sel| s.crew.pages.get(id).is_some_and(|rows| rows.iter().any(|x| x.id == sel)));
+    let held = held(s);
+    let holds_open = s.crew.pages.get(id).is_some_and(|rows| rows.iter().any(|x| held.contains(&x.id)));
     if s.crew.loading.contains(id) || s.crew.asked.get(id).is_some_and(|a| !crew::page_due(a.key == key, a.at.elapsed(), holds_open)) {
         return;
     }
