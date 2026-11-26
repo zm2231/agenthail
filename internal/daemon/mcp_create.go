@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/zm2231/agenthail/internal/acphost"
 	"github.com/zm2231/agenthail/internal/agentroles"
 
 	"github.com/google/uuid"
@@ -17,7 +18,7 @@ import (
 
 type mcpCreateInput struct {
 	mcpWrite
-	Surface        string `json:"surface" jsonschema:"claude, codex, or notion (a Notion AI thread, if your role may start one)."`
+	Surface        string `json:"surface" jsonschema:"claude, codex, notion (a Notion AI thread, if your role may start one), or a configured ACP agent such as devin."`
 	Cwd            string `json:"cwd,omitempty" jsonschema:"Claude and Codex: absolute folder the session works in; it must be inside the folders you may work in."`
 	Message        string `json:"message" jsonschema:"The session's first message."`
 	Model          string `json:"model,omitempty"`
@@ -31,20 +32,20 @@ type mcpCreateInput struct {
 }
 
 // agenthail_capabilities reports this same refusal, so the two cannot disagree.
-func spawnRefusal(caller *mcpCaller, kind surface.SurfaceKind) *mcpRefusal {
+func spawnRefusal(caller *mcpCaller, kind surface.SurfaceKind, acpAgent bool) *mcpRefusal {
 	switch {
 	case !caller.has("spawn"):
 		return refuse("capability_missing", "This session may not start sessions.")
 	case kind == surface.KindNotion && caller.role.Decision("notion-create") == agentroles.Ask:
 		return &mcpRefusal{Code: "exceeds_ceiling", Message: "A Notion thread works in the person's Notion workspace, outside any ceiling; your role leaves starting one to the person.", Detail: map[string]any{"axis": "surface", "action": "notion-create"}}
-	case kind != surface.KindClaude && kind != surface.KindCodex && kind != surface.KindNotion:
-		return refuse("invalid", "surface is claude, codex or notion.")
+	case kind != surface.KindClaude && kind != surface.KindCodex && kind != surface.KindNotion && !acpAgent:
+		return refuse("invalid", "surface is claude, codex, notion or a configured ACP agent such as devin.")
 	}
 	return nil
 }
 
 func (d *Daemon) mcpCreateScope(caller *mcpCaller, kind surface.SurfaceKind, mode, rawCwd string) (childStart, string, string, error) {
-	if refusal := spawnRefusal(caller, kind); refusal != nil {
+	if refusal := spawnRefusal(caller, kind, d.isACPAgent(kind)); refusal != nil {
 		return childStart{}, "", "", refusal.about("new:" + string(kind))
 	}
 	if !filepath.IsAbs(strings.TrimSpace(rawCwd)) {
@@ -59,7 +60,7 @@ func (d *Daemon) mcpCreateScope(caller *mcpCaller, kind surface.SurfaceKind, mod
 		return childStart{}, "", "", err
 	}
 	about := "new:" + string(kind) + ":" + cwd
-	start, err := childCeiling(ceiling, kind, strings.TrimSpace(mode), cwd)
+	start, err := childCeiling(ceiling, kind, d.isACPAgent(kind), strings.TrimSpace(mode), cwd)
 	if refusal, ok := err.(*mcpRefusal); ok {
 		return childStart{}, "", "", refusal.about(about)
 	}
@@ -122,8 +123,10 @@ func (d *Daemon) mcpChildrenRefusal(caller *mcpCaller) error {
 
 func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCreateInput) (any, error) {
 	kind := surface.SurfaceKind(strings.TrimSpace(input.Surface))
+	remoteHost := strings.TrimSpace(input.Host) != "" && !d.isLocalHostRef(strings.TrimSpace(input.Host))
+	acpAgent := d.isACPAgent(kind) || remoteHost && acphost.ValidAgentID(string(kind))
 	if !caller.has("spawn") {
-		return nil, spawnRefusal(caller, kind)
+		return nil, spawnRefusal(caller, kind, acpAgent)
 	}
 	if strings.TrimSpace(input.Message) == "" {
 		return nil, refuse("invalid", "message is required.")
@@ -131,7 +134,7 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 	if kind == surface.KindNotion && input.Task {
 		return nil, refuse("invalid", "A Notion thread cannot be a task.")
 	}
-	if refusal := spawnRefusal(caller, kind); refusal != nil {
+	if refusal := spawnRefusal(caller, kind, acpAgent); refusal != nil {
 		return nil, refusal.about("new:" + string(kind))
 	}
 	if kind == surface.KindNotion {
@@ -148,7 +151,7 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 	if isolation == "" && (strings.TrimSpace(input.Branch) != "" || strings.TrimSpace(input.Base) != "") {
 		return nil, refuse("invalid", "branch and base need isolation worktree.")
 	}
-	if host := strings.TrimSpace(input.Host); host != "" && !d.isLocalHostRef(host) {
+	if host := strings.TrimSpace(input.Host); remoteHost {
 		if input.Task {
 			return nil, refuse("invalid", "A session on another computer cannot be a task.")
 		}
@@ -190,11 +193,12 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 // is its only root, since the caller's folders are on this computer.
 func (d *Daemon) remoteCreateScope(caller *mcpCaller, host string, kind surface.SurfaceKind, mode, rawCwd string) (childStart, string, []string, error) {
 	about := "new:" + string(kind) + "@" + host
-	if refusal := spawnRefusal(caller, kind); refusal != nil {
+	acpAgent := acphost.ValidAgentID(string(kind))
+	if refusal := spawnRefusal(caller, kind, acpAgent); refusal != nil {
 		return childStart{}, "", nil, refusal.about(about)
 	}
-	if kind != surface.KindClaude && kind != surface.KindCodex {
-		return childStart{}, "", nil, refuse("invalid", "surface is claude or codex.")
+	if kind != surface.KindClaude && kind != surface.KindCodex && !acpAgent {
+		return childStart{}, "", nil, refuse("invalid", "surface is claude, codex or an ACP agent such as devin.")
 	}
 	if _, paired := d.pairedHost(host); !paired {
 		return childStart{}, "", nil, refuse("invalid", fmt.Sprintf("No paired computer is named %q.", host))
@@ -213,7 +217,7 @@ func (d *Daemon) remoteCreateScope(caller *mcpCaller, host string, kind surface.
 		return childStart{}, "", nil, err
 	}
 	ceiling.Roots = nil
-	start, err := childCeiling(ceiling, kind, strings.TrimSpace(mode), cwd)
+	start, err := childCeiling(ceiling, kind, acpAgent, strings.TrimSpace(mode), cwd)
 	if refusal, ok := err.(*mcpRefusal); ok {
 		return childStart{}, "", nil, refusal.about(about)
 	}

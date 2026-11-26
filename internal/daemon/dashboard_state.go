@@ -176,7 +176,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		if !surface.Listed(adapter) {
 			continue
 		}
-		entry := dashboardSurface{Name: string(adapter.Name()), Connected: false, Health: "unknown", Capabilities: adapter.Capabilities()}
+		entry := dashboardSurface{Name: string(adapter.Name()), Label: surfaceLabel(adapter), Connected: false, Health: "unknown", Capabilities: adapter.Capabilities()}
 		if record, found := catalogSurface[adapter.Name()]; found {
 			entry.Health = record.Health
 			entry.HealthDetail = record.Detail

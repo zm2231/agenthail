@@ -5,13 +5,15 @@ import { defaultStartHost, renderStartHost } from "./start-host.js";
 import { clearLogicalRequest } from "./actions.js";
 import { reloadStartCatalog } from "./start-catalog.js";
 
-export function startable(name, connected) {
-  return (connected || name === "claude") && ["codex", "claude", "notion"].includes(name);
+const builtIn = ["codex", "claude", "notion"];
+
+export function startable(name, connected, label) {
+  return (connected || name === "claude") && (builtIn.includes(name) || Boolean(label));
 }
 
 export function startableSurfaces() {
-  if (app.startOptions) return (app.startOptions.surfaces || []).filter((item) => startable(item.id, item.connected)).map((item) => item.id);
-  return app.state.surfaces.filter((item) => startable(item.name, item.connected)).map((item) => item.name);
+  if (app.startOptions) return (app.startOptions.surfaces || []).filter((item) => startable(item.id, item.connected, item.label)).map((item) => item.id);
+  return app.state.surfaces.filter((item) => startable(item.name, item.connected, item.label)).map((item) => item.name);
 }
 
 export function renderStartSurfaceOptions() {
@@ -22,7 +24,7 @@ export function renderStartSurfaceOptions() {
     .map((name) => `<option value="${escape(name)}">${escape(labels[name] || name)}</option>`)
     .join("");
   if (surfaces.includes(current)) select.value = current;
-  $("#new-conversation-toggle").hidden = app.state.surfaces.every((item) => !startable(item.name, item.connected));
+  $("#new-conversation-toggle").hidden = app.state.surfaces.every((item) => !startable(item.name, item.connected, item.label));
   renderStartProjects();
   renderStartHost();
   syncStartForm();
@@ -43,7 +45,9 @@ export function renderStartProjects() {
 export function syncStartForm() {
   const selected = $("#new-conversation-surface").value;
   const isCodex = selected === "codex";
-  for (const [attribute, enabled] of [["data-code-start", selected !== "notion"], ["data-claude-start", selected === "claude"]]) {
+  const isAgent = selected !== "" && !builtIn.includes(selected);
+  renderAgentChoices(isAgent ? selected : "");
+  for (const [attribute, enabled] of [["data-code-start", selected !== "notion"], ["data-claude-start", selected === "claude"], ["data-effort-start", selected === "claude" || isCodex], ["data-agent-start", isAgent]]) {
     document.querySelectorAll(`[${attribute}]`).forEach(field => { field.hidden = !enabled; field.querySelectorAll("input,select,textarea").forEach(input => input.disabled = !enabled); });
   }
   $("[data-start-folder]").hidden = selected === "notion" || $("#new-conversation-project").value !== "";
@@ -56,6 +60,16 @@ export function syncStartForm() {
     });
   });
   renderStartLaunchers();
+}
+
+function renderAgentChoices(agent) {
+  const option = (app.startOptions?.surfaces || []).find((item) => item.id === agent);
+  for (const [id, values] of [["#new-conversation-agent-mode", option?.modes], ["#new-conversation-agent-model", option?.models]]) {
+    const select = $(id);
+    const current = select.value;
+    select.innerHTML = '<option value="">Use agent default</option>' + (values || []).map((value) => `<option value="${escape(value)}">${escape(value)}</option>`).join("");
+    if ((values || []).includes(current)) select.value = current;
+  }
 }
 
 export function renderStartLaunchers() {

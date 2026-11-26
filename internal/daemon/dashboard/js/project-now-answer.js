@@ -13,7 +13,7 @@ export function inlineAnswer(session, decisions = shownDecisions()) {
   if (!item) return null;
   const requests = item.requests || [];
   const request = requests.length === 1 ? requests[0] : null;
-  if (request && !questionKinds.includes(request.kind) && request.kind !== "input" && request.summary) {
+  if (request && !questionKinds.includes(request.kind) && request.kind !== "input" && request.summary && !request.noAllow) {
     return { kind: "allow", sessionId: session.id, request };
   }
   const answer = request && request.questions?.length === 1 ? recommended(request) : null;

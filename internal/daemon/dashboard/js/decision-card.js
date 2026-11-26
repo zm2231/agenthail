@@ -60,7 +60,7 @@ function renderApproval(item, request) {
   const input = request.input && Object.keys(request.input).length ? `<pre>${escape(JSON.stringify(request.input, null, 2))}</pre>` : "";
   const detail = [request.description, request.reason, request.blockedPath && `Path: ${request.blockedPath}`].filter(Boolean).map((line) => `<p>${escape(line)}</p>`).join("");
   const button = (choice, label, kind) => `<button class="${kind}" type="button" data-decision-respond="${choice}" data-request-id="${escape(request.id)}">${label}</button>`;
-  return `<div class="request-card"><h3>${escape(title)}</h3>${detail}${input}<div class="request-actions">${button("allow", "Allow", "primary-button")}${request.alwaysAllow ? button("always", "Always allow", "soft-button") : ""}${button("deny", "Deny", "soft-button")}</div></div>`;
+  return `<div class="request-card"><h3>${escape(title)}</h3>${detail}${input}<div class="request-actions">${request.noAllow ? "" : button("allow", "Allow", "primary-button")}${request.alwaysAllow && !request.noAllow ? button("always", "Always allow", "soft-button") : ""}${button("deny", "Deny", "soft-button")}</div></div>`;
 }
 
 function renderRequest(item, request) {

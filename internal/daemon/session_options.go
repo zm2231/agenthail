@@ -11,6 +11,7 @@ import (
 	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/acpsurface"
 )
 
 // sessionOptionsHandler is this host's launch catalog: the agents it can
@@ -23,9 +24,12 @@ func (d *Daemon) sessionOptionsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type option struct {
-		ID        string `json:"id"`
-		Workspace bool   `json:"workspace"`
-		Connected bool   `json:"connected"`
+		ID        string   `json:"id"`
+		Label     string   `json:"label,omitempty"`
+		Workspace bool     `json:"workspace"`
+		Connected bool     `json:"connected"`
+		Modes     []string `json:"modes,omitempty"`
+		Models    []string `json:"models,omitempty"`
 	}
 	health := map[surface.SurfaceKind]string{}
 	if states, err := d.Registry.CatalogSurfaces(); err == nil {
@@ -36,10 +40,13 @@ func (d *Daemon) sessionOptionsHandler(w http.ResponseWriter, r *http.Request) {
 	options := []option{}
 	for _, adapter := range d.Surfaces {
 		connected := health[adapter.Name()] == "healthy"
-		if _, ok := adapter.(surface.SessionStarter); ok {
-			options = append(options, option{string(adapter.Name()), true, connected})
+		if agent, ok := adapter.(*acpsurface.ACP); ok {
+			modes, models := agent.Choices()
+			options = append(options, option{ID: string(adapter.Name()), Label: agent.Label(), Workspace: true, Connected: agent.Agent().Installed(), Modes: modes, Models: models})
+		} else if _, ok := adapter.(surface.SessionStarter); ok {
+			options = append(options, option{ID: string(adapter.Name()), Workspace: true, Connected: connected})
 		} else if adapter.Name() == surface.KindNotion {
-			options = append(options, option{string(adapter.Name()), false, connected})
+			options = append(options, option{ID: string(adapter.Name()), Connected: connected})
 		}
 	}
 	projects, err := d.launchProjects()

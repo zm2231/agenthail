@@ -271,7 +271,7 @@ func TestThreadCreateCodexValidatesInputs(t *testing.T) {
 		want string
 	}{
 		{"missing action", []string{"thread"}, "usage:"},
-		{"unsupported surface", []string{"thread", "create", "notion", "hello"}, "requires Codex or Claude"},
+		{"unsupported surface", []string{"thread", "create", "notion", "hello"}, "requires Codex, Claude or an ACP agent"},
 		{"missing message", []string{"thread", "create", "codex"}, "message is required"},
 		{"two messages", []string{"thread", "create", "codex", "positional", "--message", "flag"}, "either positionally"},
 		{"bad approval", []string{"thread", "create", "codex", "hello", "--approval", "always"}, "approval must"},

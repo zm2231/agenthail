@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -23,6 +24,10 @@ func (d *Daemon) unstartedSession(message string, startErr error) error {
 }
 
 func (d *Daemon) startedSessionOutcome(session *surface.Session, creator, alias, messageUUID, message string, sent *surface.SendResult, startErr error, extra map[string]any) (actionResult, error) {
+	if errors.Is(startErr, surface.ErrInterruptedBeforeSend) {
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "deferred", SessionID: session.ID, Message: message, Error: startErr.Error()})
+		return sessionCreateResult(http.StatusCreated, map[string]any{"ok": true, "session": session, "sent": false, "detail": "The session started, but it was interrupted before your first message reached it; send the message again."}, extra), nil
+	}
 	if startErr != nil {
 		intent, intentErr := d.Registry.RecordSessionCreationIntent(session.ID, surface.SendOptions{SourceSessionID: creator, Author: surface.AuthorPerson}.Sender(), messageUUID, message)
 		if intentErr != nil {

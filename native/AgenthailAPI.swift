@@ -534,6 +534,8 @@ final class AgenthailAPI: @unchecked Sendable {
             body.merge(codex.fields) { _, value in value }
         } else if surface == "claude" {
             body.merge(claude.fields) { _, value in value }
+        } else if surface != "notion", !claude.permissionMode.isEmpty {
+            body["permissionMode"] = claude.permissionMode
         }
         return try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
     }

@@ -97,12 +97,12 @@ func (d *Daemon) scanSession(ctx context.Context, scan *relayScan, adapter surfa
 		d.drainMessageQueue(ctx, adapter, session)
 		return
 	}
-	// An exited or offline Claude or Codex session stays a delivery target,
+	// An exited or offline Claude, Codex or ACP session stays a delivery target,
 	// since a send resumes it; it is observed only to drain its queue, unless
 	// a turn the daemon started is still open on it. An offline one may have
 	// no PID left to tell whether its process exited.
 	inactive := claudeProcessExited(session) || relayTargetInactive(session)
-	resumes := session.Surface == surface.KindClaude || session.Surface == surface.KindCodex
+	resumes := session.Surface == surface.KindClaude || session.Surface == surface.KindCodex || surface.IsACPRuntime(session.RuntimeKind)
 	if !isTask && !watched.Armed && !watched.OpenTurnOnly && inactive && (!resumes || queued == 0) {
 		d.syncRelaysObserved(ctx, scan, adapter, session, observeOnce(adapter, session, observeAdapter))
 		return

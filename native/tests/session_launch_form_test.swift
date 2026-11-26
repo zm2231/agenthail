@@ -94,6 +94,14 @@ struct SessionLaunchFormTest {
         check(notion["action"] as? String == "notion-create", "Notion uses notion-create")
         check(notion["cwd"] as? String == "" && notion["model"] as? String == "" && notion["effort"] == nil, "Notion sends no folder, model or effort")
 
+        var devin = SessionLaunchForm(agent: "devin", folder: "/work/sample", model: "sample-model", effort: "high", message: "Fix it")
+        devin.permissionMode = "accept-edits"
+        check(devin.isACP && !devin.setsEffort && devin.setsLaunchOptions, "an ACP agent takes a mode but no effort")
+        let agent = try await send(devin, api)
+        check(agent["action"] as? String == "session-create" && agent["surface"] as? String == "devin", "an ACP agent uses session-create")
+        check(agent["permissionMode"] as? String == "accept-edits" && agent["model"] as? String == "sample-model", "its mode and model are sent")
+        check(Set(agent.keys) == ["action", "surface", "message", "cwd", "model", "permissionMode"], "an ACP agent sends only the sheet's fields")
+
         try await checkLaunchOptions(api)
     }
 

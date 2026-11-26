@@ -529,6 +529,14 @@ final class AgenthailModel {
                 operationError = nil
                 await openCreatedSession(id, started: true)
                 return .opened
+            case .openUnsent(let id):
+                draft(for: id).restore(form.trimmedMessage)
+                await openCreatedSession(id, started: true)
+                guard knownSessions.contains(where: { $0.id == id }) else {
+                    return .failed(SessionCreationReceipt.notSentUnopenedMessage)
+                }
+                operationError = SessionCreationReceipt.notSentMessage
+                return .opened
             case .submitted(let note):
                 operationError = nil
                 return .submitted(note)

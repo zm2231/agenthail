@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/zm2231/agenthail/internal/acphost"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -62,7 +63,12 @@ func defaultLauncherForSurface(kind surface.SurfaceKind) string {
 		return surface.LauncherClaudeSDK
 	case surface.KindCodex:
 		return surface.LauncherCodexAppServer
+	case surface.KindNotion, surface.KindAgent:
+		return surface.LauncherExternal
 	default:
+		if acphost.ValidAgentID(string(kind)) {
+			return surface.LauncherACP
+		}
 		return surface.LauncherExternal
 	}
 }

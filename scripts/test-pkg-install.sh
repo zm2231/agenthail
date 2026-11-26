@@ -211,7 +211,8 @@ if tail -c "+$((daemon_log_offset + 1))" "$HOME/.agenthail/daemon.log" | grep -F
 	exit 1
 fi
 doctor_json="$(/usr/local/bin/agenthail doctor --json || true)"
-jq -e '.surfaces | length == 3' <<<"$doctor_json" >/dev/null
+jq -e '.surfaces | length == 4' <<<"$doctor_json" >/dev/null
+jq -e '.surfaces[] | select(.surface == "devin") | .ok and .error == null and (.agentUnavailable | test("unavailable here"))' <<<"$doctor_json" >/dev/null
 # launchd runs the daemon from its bundle, so the grants it reads are the
 # bundle's, whichever of them this machine has.
 jq -e --arg holder "$daemon_bundle" '.permissions.holder == $holder and .permissions.problem == null and (.permissions.grants | length == 3) and all(.permissions.grants[]; .state != "unknown")' <<<"$doctor_json" >/dev/null

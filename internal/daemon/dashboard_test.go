@@ -796,6 +796,30 @@ func TestDashboardRecordsDefinitiveInitialDeliveryFailure(t *testing.T) {
 	}
 }
 
+func TestAFirstMessageInterruptedBeforeItWasSentIsNotADeliveryFailure(t *testing.T) {
+	d, registry, fake, _, _ := daemonFixture(t)
+	fake.startErr = surface.DeliveryUnavailable(fmt.Errorf("%w: stopped", surface.ErrInterruptedBeforeSend))
+	handler := dashboardRouter(d)
+	body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "codex", "message": "Build this", "cwd": t.TempDir()})
+	request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
+	request.Header.Set("Origin", "http://example.test")
+	request.Host = "example.test"
+	request.AddCookie(browserCookie(t, d.Registry))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	var reply struct {
+		OK      bool             `json:"ok"`
+		Sent    *bool            `json:"sent"`
+		Session *surface.Session `json:"session"`
+	}
+	if response.Code != http.StatusCreated || json.Unmarshal(response.Body.Bytes(), &reply) != nil || !reply.OK || reply.Sent == nil || *reply.Sent || reply.Session == nil {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if asks := openDeliveryAsks(t, registry); len(asks) != 0 {
+		t.Fatalf("asks=%+v, want no delivery problem for a message that was never sent", asks)
+	}
+}
+
 func TestDashboardStartCwdExpandsHomeAndRejectsFiles(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct NewSessionOptionsChip: View {
     @Binding var form: SessionLaunchForm
+    var modes: [String] = []
     @State private var open = false
 
     var body: some View {
@@ -21,6 +22,12 @@ struct NewSessionOptionsChip: View {
                 TextField("Name", text: $form.alias, prompt: Text("Optional"))
                 if form.setsLaunchOptions && form.agent == "codex" { codexFields }
                 if form.setsLaunchOptions && form.agent == "claude" { claudeFields }
+                if form.setsLaunchOptions && form.isACP && !modes.isEmpty {
+                    Picker("Mode", selection: $form.permissionMode) {
+                        Text("Agent default").tag("")
+                        ForEach(modes, id: \.self) { Text($0).tag($0) }
+                    }
+                }
             }
             .formStyle(.grouped)
             .frame(width: 360)

@@ -77,7 +77,17 @@ type childStart struct {
 	ceiling        sessionCeiling
 }
 
-func childCeiling(caller sessionCeiling, kind surface.SurfaceKind, mode, cwd string) (childStart, error) {
+func childCeiling(caller sessionCeiling, kind surface.SurfaceKind, acpAgent bool, mode, cwd string) (childStart, error) {
+	if acpAgent {
+		if len(caller.Roots) > 0 && !underRoot(cwd, caller.Roots) {
+			return childStart{}, &mcpRefusal{Code: "exceeds_ceiling", Message: "That folder is outside the folders you may work in.", Detail: map[string]any{"axis": "roots", "limit": caller.Roots}}
+		}
+		start := childStart{permissionMode: mode, ceiling: sessionCeiling{Permission: caller.Permission, Roots: caller.Roots}}
+		if len(start.ceiling.Roots) == 0 {
+			start.ceiling.Roots = []string{cwd}
+		}
+		return start, nil
+	}
 	ranks, modes := claudePermissionRank, claudeModeForRank
 	if kind == surface.KindCodex {
 		ranks, modes = codexApprovalRank, codexApprovalForRank

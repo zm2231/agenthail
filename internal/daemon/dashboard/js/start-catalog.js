@@ -4,7 +4,7 @@ import { responseError } from "./http.js";
 import { loadStartRootPick, loadStartRootUsage, renderStartConfigRoots } from "./start-roots.js";
 import { renderStartSurfaceOptions } from "./start-form.js";
 import { $ } from "./dom.js";
-import { escape } from "./format.js";
+import { escape, learnLabels } from "./format.js";
 import { friendlyError, toast } from "./feedback.js";
 
 export async function loadStartOptions() {
@@ -15,6 +15,7 @@ export async function loadStartOptions() {
   if (host !== app.startHost) return;
   app.startOptions = options;
   app.launchers = options.launchers || [];
+  learnLabels(options.surfaces);
   renderStartConfigRoots(options.claudeConfigRoots || []);
   renderStartSurfaceOptions();
   loadStartRootUsage(options, host);

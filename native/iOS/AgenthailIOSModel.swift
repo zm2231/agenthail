@@ -831,6 +831,10 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting, ListingR
                 let id = HostCatalog.qualify(target.remote ?? target.hostID, created)
                 let launched = receipt.launcher ?? launcher?.id ?? surface
                 deliveryStatus[id] = receipt.status == "submitted" || receipt.outcomeUnknown ? "Submitted to \(launched)." : (surface == "claude" ? "Session started. Waiting for activity." : "Conversation started")
+                if receipt.firstMessageNotSent {
+                    deliveryStatus[id] = SessionCreationReceipt.notSentMessage
+                    composerSession.setDraft(message, for: id)
+                }
                 requestedSessionID = id
             }
             if receipt.id != nil { creationRequestIdentity = nil; creationRequestKey = nil }

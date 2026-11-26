@@ -39,13 +39,14 @@ func (m *sessionSourceManager) journalServable(session *surface.Session, adapter
 		return false
 	}
 	_, derived := adapter.(surface.TranscriptItemReader)
-	if provider, ok := adapter.(surface.LocalTranscriptProvider); ok && session.Surface == surface.KindCodex && provider.RequiresLocalTranscript(session) {
-		derived = true
-	}
-	if !derived {
+	local, isLocal := localJournalVersion(adapter, session)
+	if !derived && !isLocal {
 		return true
 	}
 	version, err := m.registry.SessionJournalDerivation(session.ID)
+	if _, versioned := adapter.(surface.JournalDeriver); versioned && isLocal {
+		return err == nil && version >= local
+	}
 	return err == nil && version >= max(transcriptJournalDerivation, codexJournalDerivation)
 }
 
@@ -148,7 +149,7 @@ func (s *sessionSource) loadSeed() error {
 		return nil
 	}
 	if localTranscript && trustedIdentity == "" && seedSeq > 0 {
-		return fmt.Errorf("Codex local transcript identity checkpoint is unavailable: %w", surface.ErrTranscriptUnavailable)
+		return fmt.Errorf("%s local transcript identity checkpoint is unavailable: %w", s.session.Surface, surface.ErrTranscriptUnavailable)
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, sessionJournalSeedTimeout)
 	defer cancel()
@@ -208,7 +209,7 @@ func (s *sessionSource) loadSeed() error {
 		return nil
 	}
 	if localTranscript && read.TranscriptOffsetSet && read.TranscriptIdentity == "" {
-		return fmt.Errorf("Codex local transcript identity is unavailable: %w", surface.ErrTranscriptUnavailable)
+		return fmt.Errorf("%s local transcript identity is unavailable: %w", s.session.Surface, surface.ErrTranscriptUnavailable)
 	}
 	if err := s.manager.registry.RecordSessionJournalHistoryBoundary(s.session.ID, max(0, read.NextBefore)); err != nil {
 		return err
@@ -219,8 +220,8 @@ func (s *sessionSource) loadSeed() error {
 	if err := s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, read.TranscriptIdentity); err != nil {
 		return err
 	}
-	if s.codexTranscriptJournal() {
-		return s.manager.registry.MarkSessionJournalDerivation(s.session.ID, codexJournalDerivation)
+	if version, local := s.localTranscriptJournal(); local {
+		return s.manager.registry.MarkSessionJournalDerivation(s.session.ID, version)
 	}
 	if _, ok := s.adapter.(surface.TranscriptItemReader); ok {
 		if err := s.recordTranscriptCheckpoint(read.TranscriptOffset, read.TranscriptIdentity); err != nil {
