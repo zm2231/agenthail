@@ -2,16 +2,20 @@ package codexsurface
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"github.com/zm2231/agenthail/internal/surface"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
+
+const codexStderrTailBytes = 4 << 10
 
 // codexStdioClient runs its own `codex app-server` over stdio for one task,
 // with the environment it is given, so it never reaches a thread or a daemon
@@ -24,7 +28,10 @@ type codexStdioClient struct {
 	mu      sync.Mutex
 	next    int
 	waiting map[int]chan map[string]any
+	stderr  *tailBuffer
 	done    chan struct{}
+	waitErr error
+	exited  error
 }
 
 func startCodexStdio(ctx context.Context, binary string, env []string) (*codexStdioClient, error) {
@@ -32,7 +39,11 @@ func startCodexStdio(ctx context.Context, binary string, env []string) (*codexSt
 	// git clone into CODEX_HOME, which this short run would leave half done.
 	cmd := surface.ProcessGroupCommand(ctx, binary, "app-server", "--disable", "plugins")
 	cmd.Env = env
-	cmd.Stderr = nil
+	stderr := &tailBuffer{limit: codexStderrTailBytes}
+	cmd.Stderr = stderr
+	// A process that left the group could hold stderr open past the
+	// app-server's exit; stop copying from it then.
+	cmd.WaitDelay = time.Second
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -44,7 +55,7 @@ func startCodexStdio(ctx context.Context, binary string, env []string) (*codexSt
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start codex app-server: %w", err)
 	}
-	c := &codexStdioClient{ctx: ctx, cmd: cmd, stdin: stdin, waiting: map[int]chan map[string]any{}, done: make(chan struct{})}
+	c := &codexStdioClient{ctx: ctx, cmd: cmd, stdin: stdin, waiting: map[int]chan map[string]any{}, stderr: stderr, done: make(chan struct{})}
 	go c.read(stdout)
 	_, err = c.Request(ctx, "initialize", map[string]any{"clientInfo": map[string]any{"name": "agenthail", "version": "0"}}, 30*time.Second)
 	if err != nil {
@@ -59,7 +70,11 @@ func startCodexStdio(ctx context.Context, binary string, env []string) (*codexSt
 }
 
 func (c *codexStdioClient) read(stdout io.Reader) {
-	defer close(c.done)
+	defer func() {
+		c.waitErr = c.cmd.Wait()
+		c.exited = fmt.Errorf("codex app-server exited: %v%s", c.waitErr, c.stderr.lines())
+		close(c.done)
+	}()
 	lines := bufio.NewScanner(stdout)
 	lines.Buffer(make([]byte, 1<<20), 1<<26)
 	for lines.Scan() {
@@ -90,8 +105,19 @@ func (c *codexStdioClient) write(message map[string]any) error {
 		return err
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	_, err = c.stdin.Write(append(data, '\n'))
+	c.mu.Unlock()
+	if err == nil {
+		return nil
+	}
+	// A failed write usually means the app-server is exiting; its exit
+	// error says why, once the reader has drained what it printed.
+	select {
+	case <-c.done:
+		return c.exited
+	case <-c.ctx.Done():
+	case <-time.After(5 * time.Second):
+	}
 	return err
 }
 
@@ -114,7 +140,7 @@ func (c *codexStdioClient) Request(ctx context.Context, method string, params ma
 		}
 		return message, nil
 	case <-c.done:
-		return nil, errors.New("codex app-server exited")
+		return nil, c.exited
 	case <-timer.C:
 		return nil, fmt.Errorf("%s: no answer from codex app-server", method)
 	case <-ctx.Done():
@@ -132,5 +158,39 @@ func (c *codexStdioClient) Close() error {
 	// Killing the group also ends anything the app-server started, which
 	// could otherwise keep writing to CODEX_HOME after it exits.
 	_ = c.cmd.Cancel()
-	return c.cmd.Wait()
+	<-c.done
+	return c.waitErr
+}
+
+type tailBuffer struct {
+	mu    sync.Mutex
+	limit int
+	data  []byte
+	cut   bool
+}
+
+func (b *tailBuffer) Write(data []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.data = append(b.data, data...)
+	if over := len(b.data) - b.limit; over > 0 {
+		b.data = append(b.data[:0], b.data[over:]...)
+		b.cut = true
+	}
+	return len(data), nil
+}
+
+func (b *tailBuffer) lines() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	data := b.data
+	if b.cut {
+		if newline := bytes.IndexByte(data, '\n'); newline >= 0 {
+			data = data[newline+1:]
+		}
+	}
+	if text := strings.TrimSpace(string(data)); text != "" {
+		return ": " + text
+	}
+	return ""
 }
