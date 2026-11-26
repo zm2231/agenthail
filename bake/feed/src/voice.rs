@@ -10,6 +10,10 @@ use crate::catalog::Client;
 mod trail;
 pub use trail::{Attempt, KEPT_CALLS, Setup, Trail, UNFINISHED};
 
+#[path = "voice_details.rs"]
+mod details;
+pub use details::Section;
+
 pub const PROTOCOL: i64 = 1;
 pub const HEARTBEAT_SECS: f64 = 10.0;
 pub const HEARTBEAT_GRACE_SECS: f64 = 30.0;

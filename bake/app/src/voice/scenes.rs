@@ -17,6 +17,10 @@ pub const SCENES: &[(&str, fn(&mut Win))] = &[
     ("unconfirmed", unconfirmed),
     ("host-ended", host_ended),
     ("new-conversation", new_conversation),
+    ("briefed", briefed),
+    ("details", details),
+    ("route-typed", route_typed),
+    ("setup-stuck", setup_stuck),
 ];
 
 fn state(mut value: Value) -> State {
@@ -38,6 +42,8 @@ fn answer(call: &mut Call, effects: Vec<Effect>, value: Value) -> Vec<Effect> {
 fn fresh(w: &mut Win, target: &str, name: &str) {
     w.call = Call::new(target);
     w.name = name.to_string();
+    w.route_edit = rune::TextEdit::new(target);
+    w.route_typed = target.to_string();
     w.offer = None;
     w.ask = None;
     w.call.peer("ready", "", 0.0);
@@ -57,13 +63,17 @@ fn dial(w: &mut Win) -> String {
 }
 
 fn talk(w: &mut Win, events: Value) {
+    talk_with(w, events, json!(null));
+}
+
+fn talk_with(w: &mut Win, events: Value, brief: Value) {
     let id = dial(w);
     let target = (!w.call.target.is_empty()).then(|| json!({"id": w.call.target, "name": w.name}));
     let start = w.call.peer("offer", "v=0", 0.0);
     answer(&mut w.call, start, json!({"phase": "negotiating", "attemptId": id, "target": target}));
     w.call.peer("connection", "connected", 0.0);
     let connected = w.call.peer("channel", "open", 0.0);
-    answer(&mut w.call, connected, json!({"phase": "connected", "attemptId": id, "session": {"id": "operator", "name": "Agenthail orchestrator"}, "target": target, "events": events}));
+    answer(&mut w.call, connected, json!({"phase": "connected", "attemptId": id, "session": {"id": "operator", "name": "Agenthail orchestrator"}, "target": target, "events": events, "brief": brief, "audioProvider": "OpenAI Realtime", "codingProvider": "codex", "skillDigest": "sha256:4f1c9a07"}));
 }
 
 fn lines(open: bool) -> Value {
@@ -155,4 +165,28 @@ fn host_ended(w: &mut Win) {
 fn new_conversation(w: &mut Win) {
     fresh(w, "", "");
     w.ask = Some(Ask::NewConversation);
+}
+
+fn briefed(w: &mut Win) {
+    fresh(w, "builder", "Builder");
+    let as_of = time::OffsetDateTime::now_utc() - time::Duration::minutes(3);
+    let as_of = as_of.format(&time::format_description::well_known::Rfc3339).unwrap_or_default();
+    talk_with(w, lines(false), json!({"sessionId": "builder", "asOf": as_of, "bytes": 6200, "exchanges": 4, "omitted": ["2 older exchanges", "tool output"]}));
+}
+
+fn details(w: &mut Win) {
+    routed(w);
+    w.details = true;
+}
+
+fn route_typed(w: &mut Win) {
+    fresh(w, "", "");
+    w.route_edit = rune::TextEdit::new("@builder");
+}
+
+fn setup_stuck(w: &mut Win) {
+    w.call = Call::new("");
+    w.call.tick(0.0);
+    w.call.setup(feed::voice::Setup::Page);
+    w.call.tick(20.0);
 }

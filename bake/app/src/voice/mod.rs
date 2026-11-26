@@ -34,6 +34,9 @@ pub struct Win {
     pub name: String,
     pub offer: Option<(String, String)>,
     pub typed: TextEdit,
+    pub route_edit: TextEdit,
+    route_typed: String,
+    pub details: bool,
     pub ask: Option<Ask>,
     pub slot: NativeView,
     client: Option<Client>,
@@ -66,6 +69,9 @@ impl Win {
             name: name.to_string(),
             offer: None,
             typed: TextEdit::new(""),
+            route_edit: TextEdit::new(target.trim()),
+            route_typed: target.trim().to_string(),
+            details: false,
             ask: None,
             slot: NativeView::new(),
             client,
@@ -160,6 +166,10 @@ impl Win {
     fn build_peer(&mut self) {}
 
     pub fn route(&mut self, target: &str, name: &str) {
+        self.route_typed = target.trim().to_string();
+        if self.route_edit.text.trim() != self.route_typed {
+            self.route_edit = TextEdit::new(self.route_typed.as_str());
+        }
         if self.call.active() {
             self.offer = (target.trim() != self.call.target).then(|| (target.trim().to_string(), name.to_string()));
             return;
@@ -248,6 +258,11 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
     w.build_peer();
     if let Some((target, name)) = ROUTE.with(|r| r.borrow_mut().take()) {
         w.route(&target, &name);
+        changed = true;
+    }
+    let typed = w.route_edit.text.trim().to_string();
+    if typed != w.route_typed {
+        w.route(&typed, "");
         changed = true;
     }
     while let Ok((job, result)) = w.replies.1.try_recv() {

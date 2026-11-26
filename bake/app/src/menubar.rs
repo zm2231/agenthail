@@ -140,10 +140,16 @@ fn dock_items(bar: &MenuBar) -> Vec<MenuItem<App>> {
 }
 
 fn open_target(s: &mut App, target: &Target) {
+    front(s);
+    crate::over::open_target(s, target);
+}
+
+pub fn front(s: &App) {
     if let Some(app) = &s.bar.app {
         app.open();
+    } else if let Some((window, _)) = WINDOW.with_borrow(|w| w.clone()) {
+        window.focus();
     }
-    crate::over::open_target(s, target);
 }
 
 fn on_event(app: &AppHandle<App>, event: TrayEvent) {

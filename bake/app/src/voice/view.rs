@@ -126,6 +126,9 @@ fn body(w: &Win) -> El {
         b = b.child(note(ELSEWHERE, muted()).key("voice-elsewhere"));
     }
     b = b.child(transcript(w));
+    if let Some(brief) = briefing(w) {
+        b = b.child(brief);
+    }
     if let Some(session) = w.call.state.as_ref().and_then(|s| s.session.clone()) {
         let id = session.id.clone();
         b = b.child(
@@ -142,7 +145,76 @@ fn body(w: &Win) -> El {
     if let Some(id) = w.call.attempt() {
         b = b.child(text(format!("Call ID {id}")).font(META).color(faint()).selectable(true));
     }
+    let toggle = small(if w.details { "Hide voice details" } else { "Voice details" }, ButtonVariant::GhostMuted)
+        .on_press(|w: &mut Win| w.details = !w.details)
+        .build(kit())
+        .key("voice-details-toggle");
+    b = b.child(row().child(toggle));
+    if w.details {
+        b = b.child(details(w));
+    }
     b
+}
+
+fn briefing(w: &Win) -> Option<El> {
+    let state = w.call.state.as_ref()?;
+    let brief = state.brief.as_ref()?;
+    let target = state.target.as_ref()?;
+    let name = if target.name.is_empty() { &target.id } else { &target.name };
+    let mut card = col()
+        .key("voice-brief")
+        .w_full()
+        .gap(4.0)
+        .padding(12.0)
+        .radius(10.0)
+        .fill(wash())
+        .border(1.0, line())
+        .child(text(brief.summary(name, time::OffsetDateTime::now_utc())).font(META).color(muted()).wrap().w_full());
+    if let Some(left) = brief.left_out() {
+        card = card.child(text(left).font(META).color(faint()).wrap().w_full());
+    }
+    Some(card)
+}
+
+fn details(w: &Win) -> El {
+    let mut list = col().key("voice-details").w_full().gap(14.0).padding(12.0).radius(10.0).fill(wash()).border(1.0, line());
+    for section in w.call.details() {
+        let mut group = col().w_full().gap(4.0).child(text(section.title).font(META_BOLD).color(muted()));
+        for (name, value) in section.rows {
+            group = group.child(
+                row()
+                    .w_full()
+                    .gap(12.0)
+                    .child(text(name).font(META).color(faint()).w(130.0))
+                    .child(text(value).font(META).color(theme::text()).wrap().grow(1.0).shrink().min_w(0.0).selectable(true)),
+            );
+        }
+        list = list.child(group);
+    }
+    list
+}
+
+fn route_field(w: &Win) -> El {
+    let input = text_input(&w.route_edit, BODY)
+        .single_line()
+        .key("voice-route")
+        .label("Session route")
+        .grow(1.0)
+        .min_w(0.0)
+        .color(theme::text())
+        .placeholder("Exact session ID or alias", faint())
+        .on_edit(|w: &mut Win| &mut w.route_edit);
+    let hint = if w.route_edit.text.trim().is_empty() {
+        "Leave blank to use Agenthail's normal orchestration workflow."
+    } else {
+        "This routes work only to that exact existing session."
+    };
+    col()
+        .w_full()
+        .gap(4.0)
+        .child(text("Session route (optional)").font(META_BOLD).color(muted()))
+        .child(row().w_full().px(10.0).py(7.0).radius(8.0).fill(wash()).border(1.0, line()).child(input))
+        .child(text(hint).font(META).color(faint()).wrap().w_full())
 }
 
 fn transcript(w: &Win) -> El {
@@ -153,7 +225,7 @@ fn transcript(w: &Win) -> El {
             .gap(6.0)
             .py(8.0)
             .child(text("What would you like to work on?").font(TITLE).color(theme::text()))
-            .child(note("Talk to the Agenthail orchestrator, or call one exact Codex or Claude session from its menu.", muted()));
+            .child(note("Talk to the Agenthail orchestrator, or route this call to one exact existing Codex or Claude session.", muted()));
     }
     let routed = w.call.state.as_ref().is_some_and(|s| s.target.is_some());
     let mut list = col().w_full().gap(12.0).key("voice-transcript");
@@ -198,6 +270,7 @@ fn controls(w: &Win) -> El {
             ),
         );
     }
+    dock = dock.child(route_field(w));
     if !call.has_local_call() {
         let label = if call.routed() { format!("Call {}", shown_name(w)) } else { "Talk to orchestrator".to_string() };
         dock = dock.child(
