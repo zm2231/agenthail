@@ -209,6 +209,7 @@ pub fn run(s: &mut App, id: &str, act: Act) {
             if not_sent(s) || !s.menus.busy.insert((id.to_string(), "menu")) {
                 return;
             }
+            super::gone::recheck(s, id);
             if act == Act::Archive(true) {
                 let project = session(s, id).and_then(|x| crate::over::ui::project_for(s, x));
                 let order = crate::over::ui::sidebar_order(s, project.as_deref(), Some(id));
@@ -254,7 +255,7 @@ pub fn close_rename(s: &mut App) {
 }
 
 pub fn current_alias(s: &App, id: &str) -> Option<String> {
-    session(s, id).and_then(|x| x.alias.clone()).filter(|a| !a.is_empty())
+    super::gone::shown(s, id).and_then(|x| x.alias.clone()).filter(|a| !a.is_empty())
 }
 
 pub fn save_rename(s: &mut App) {
@@ -381,6 +382,7 @@ fn settled(s: &mut App, done: Done) {
         }
         Done::Acted(id, act, from, Ok(read)) => {
             s.menus.busy.remove(&(id.clone(), "menu"));
+            super::gone::recheck(s, &id);
             if let Some(patch) = patch_of(&act, read, from) {
                 land(s, &id, patch);
             }
@@ -390,11 +392,13 @@ fn settled(s: &mut App, done: Done) {
         }
         Done::Acted(id, act, _, Err(error)) => {
             s.menus.busy.remove(&(id.clone(), "menu"));
+            super::gone::recheck(s, &id);
             s.menus.leaving.remove(&id);
             s.ov.notice = Some(failure(verb(&act), &error));
         }
         Done::Renamed(id, seq, result) => {
             s.menus.busy.remove(&(id.clone(), "menu"));
+            super::gone::recheck(s, &id);
             let current = s.menus.renaming.as_deref() == Some(id.as_str()) && s.menus.rename_seq == seq;
             match result {
                 Ok(alias) => {

@@ -193,7 +193,10 @@ pub fn classify(id: &str, detail: &Detail, listing: Listing, known: Option<&Sess
         _ if row.capabilities.lifecycle.resume || detail.resume() => Some(Fix::Resume),
         _ => None,
     };
-    Ok(Gone { row, why, fix, exchanges: detail.exchanges(), read_error: detail.read_error(), history: detail.history() })
+    Ok(Gone { row, why, fix, exchanges: detail.exchanges(), read_error: match detail {
+        Detail::Failed(e) => Some(e.clone()),
+        _ => detail.read_error(),
+    }, history: detail.history() })
 }
 
 const PAGES: usize = 10;
@@ -392,6 +395,14 @@ mod tests {
         let known = row(json!({"id": "s1", "host": {"name": "buildbox", "state": "connected"}}));
         assert!(classify("s1", &Detail::Unreachable, Listing::Absent, Some(&known)).unwrap().empty_note().contains("offline"));
         assert!(classify("s1", &detail(), Listing::Absent, None).unwrap().empty_note().contains("no conversation"));
+    }
+
+    #[test]
+    fn a_failed_read_beside_a_found_listing_shows_the_failure() {
+        let listed = row(json!({"id": "s1", "archived": true}));
+        let g = classify("s1", &Detail::Failed("conflict".into()), Listing::Found(listed), None).unwrap();
+        assert_eq!(g.why, Why::Archived);
+        assert_eq!(g.empty_note(), "Couldn't read this session's conversation: conflict");
     }
 
     #[test]

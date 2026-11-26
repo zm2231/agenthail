@@ -82,6 +82,13 @@ pub fn looked(s: &mut App, id: &str, seq: u64, result: Result<Gone, String>) {
     };
 }
 
+pub fn recheck(s: &mut App, id: &str) {
+    if let Some(m) = s.missing.as_mut().filter(|m| m.id == id) {
+        m.asking = None;
+        m.asked = f64::NEG_INFINITY;
+    }
+}
+
 fn fix(s: &mut App, fix: Fix) {
     let Some(client) = s.client.clone() else { return };
     let Some(m) = s.missing.as_mut().filter(|m| m.fixing.is_none()) else { return };
