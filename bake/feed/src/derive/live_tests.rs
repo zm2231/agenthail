@@ -151,3 +151,23 @@ fn actors_from_a_fetch_that_started_earlier_never_replace_later_ones() {
     assert!(ov.world(&[]).name_of("helper-1").contains("newest"), "an on-demand fetch that started first and landed last");
 }
 
+#[test]
+fn a_burst_of_arrivals_leaves_one_rebuild_pending() {
+    let sessions = || vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")];
+    let mut ov = Overview::default();
+    ov.refresh(fetched("2026-11-24T12:00:00Z", sessions(), vec![]));
+    ov.world(&[]);
+    assert!(!ov.stale());
+    assert!(!ov.take_sessions("2026-11-24T11:00:00Z", sessions()));
+    assert!(!ov.stale(), "a snapshot that changes nothing asks for no rebuild");
+    for id in ["t1", "t2", "t3"] {
+        ov.take_tail(id, "2026-11-24T11:59:00Z".into(), Err("timed out".into()));
+    }
+    ov.take_ledger("p", Instant::now(), Ok(Ledger { rows: vec![work("w1", "open")], actors: HashMap::new() }));
+    ov.refresh(fetched("2026-11-24T12:00:20Z", sessions(), vec![]));
+    assert!(ov.stale());
+    ov.world(&[]);
+    assert!(!ov.stale(), "one rebuild covers every arrival before it");
+    assert!(ov.wants("old"));
+    assert!(ov.stale(), "a project opened for loading asks for a rebuild to show it");
+}

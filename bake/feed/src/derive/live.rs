@@ -105,6 +105,7 @@ pub struct Overview {
     ledgers: HashMap<String, Vec<Work>>,
     ledger_at: HashMap<String, Instant>,
     actor_at: HashMap<String, Instant>,
+    stale: bool,
     failed: HashSet<String>,
     covered: HashSet<String>,
     pending: HashSet<String>,
@@ -136,7 +137,12 @@ impl Overview {
         }
         self.base.updated_at = at.to_string();
         self.base.sessions = sessions;
+        self.stale = true;
         true
+    }
+
+    pub fn stale(&self) -> bool {
+        self.stale
     }
 
     pub fn refresh(&mut self, fetched: Fetched) {
@@ -148,6 +154,7 @@ impl Overview {
         let actors = std::mem::replace(&mut recorded.actors, std::mem::take(&mut self.base.actors));
         recorded.transcripts = std::mem::take(&mut self.base.transcripts);
         self.base = recorded;
+        self.stale = true;
         self.take_actors(started, actors);
         self.covered = ledgers.keys().cloned().collect();
         for (key, result) in ledgers {
@@ -164,11 +171,13 @@ impl Overview {
             return false;
         }
         self.pending.insert(project.to_string());
+        self.stale = true;
         true
     }
 
     pub fn take_ledger(&mut self, project: &str, started: Instant, result: Result<Ledger, String>) {
         self.pending.remove(project);
+        self.stale = true;
         let rows = result.map(|l| {
             self.take_actors(started, l.actors);
             l.rows
@@ -209,9 +218,11 @@ impl Overview {
 
     pub fn take_tail(&mut self, session: &str, last_active: String, result: Result<Tail, String>) {
         self.tails.take(session, last_active, result);
+        self.stale = true;
     }
 
-    pub fn world(&self, panes: &[(&str, &[Item])]) -> World {
+    pub fn world(&mut self, panes: &[(&str, &[Item])]) -> World {
+        self.stale = false;
         let mut raw = self.base.clone();
         raw.ledgers = self.ledgers.clone();
         let panes = panes.iter().filter(|(_, items)| !items.is_empty()).map(|(id, items)| (id.to_string(), tails::trim(items)));

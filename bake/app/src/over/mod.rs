@@ -45,7 +45,7 @@ pub struct Over {
 }
 
 impl Over {
-    pub fn new(live: Overview, persist: bool) -> Over {
+    pub fn new(mut live: Overview, persist: bool) -> Over {
         let d = live.world(&[]);
         let mut needs = d.needs();
         feed::derive::needs::sort(&mut needs);
