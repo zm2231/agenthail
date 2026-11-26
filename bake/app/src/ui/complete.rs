@@ -539,15 +539,20 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
         spawn(s, move |c| Done::Goal(asked.clone(), typed.clone(), c.goal_set(&asked, &argument)));
         return true;
     }
+    let busy = |what: &str| s.menus.busy.iter().any(|(k, w)| *w == what && feed::composer::current(&s.rekeyed, k) == id);
+    let picker = super::session_menu::chips_for(s, id).iter().any(|c| c.key == "model" && c.changeable);
     let pending = match command {
-        Slash::Model => s.menus.busy.contains(&(id.to_string(), "model")).then_some("The last model change is still on its way."),
-        Slash::Compact => s.menus.busy.contains(&(id.to_string(), "compact")).then_some("Compacting is already on its way."),
-        Slash::Stop => s.stopping.contains(id).then_some("Stopping is already on its way."),
-        Slash::Name => (s.menus.rename_saving || super::session_menu::changing(s, id)).then_some("Another change to this session is still on its way."),
+        Slash::Model if busy("model") => Some("The last model change is still on its way.".to_string()),
+        Slash::Model if argument.is_empty() && s.screen != crate::Screen::Session => Some("Type a model after /model, or open the session to pick one.".to_string()),
+        Slash::Model if argument.is_empty() && !picker => Some(models_note(s, id)),
+        Slash::Model => None,
+        Slash::Compact => busy("compact").then(|| "Compacting is already on its way.".to_string()),
+        Slash::Stop => s.stopping.contains(id).then(|| "Stopping is already on its way.".to_string()),
+        Slash::Name => (s.menus.rename_saving || super::session_menu::changing(s, id)).then(|| "Another change to this session is still on its way.".to_string()),
         Slash::Steer | Slash::Goal => None,
     };
     if let Some(wait) = pending {
-        crate::note(s, id, wait.into());
+        crate::note(s, id, wait);
         return true;
     }
     s.complete.dismissed = None;
@@ -557,7 +562,6 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
         Slash::Compact => super::session_menu::compact(s, id),
         Slash::Stop => crate::stop(s, id),
         Slash::Steer => crate::steer_text(s, id, argument, tx),
-        Slash::Model if argument.is_empty() && s.screen != crate::Screen::Session => crate::note(s, id, "Type a model after /model, or open the session to pick one.".into()),
         Slash::Model => pick_model(s, id, &argument),
         Slash::Goal => {}
     }
