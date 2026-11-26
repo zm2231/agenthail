@@ -153,11 +153,12 @@ pub fn next_need(s: &mut App) {
     open_target(s, &t);
 }
 
-pub fn open_jump(s: &mut App, query: &str) {
-    let mut edit = TextEdit::new(query);
+pub fn open_jump(s: &mut App, tx: &mut Tx) {
+    let mut edit = TextEdit::new("");
     edit.focused = true;
     s.ov.jump = Some(edit);
     s.ov.jump_ix = 0;
+    tx.focus("jump-input", false);
 }
 
 pub fn act(s: &mut App, what: &str) {
@@ -183,7 +184,6 @@ pub fn overlays(s: &App, layer: &mut Vec<El>) {
     if let Some(n) = &s.ov.notice {
         layer.push(ui::notice(n));
     }
-    layout::save(s);
 }
 
 pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
@@ -191,8 +191,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         if s.ov.jump.is_some() {
             s.ov.jump = None;
         } else {
-            open_jump(s, "");
-            tx.focus("jump-input", false);
+            open_jump(s, tx);
         }
         return true;
     }

@@ -198,7 +198,7 @@ pub fn lead(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>) -> El {
                 .child(ui::avatar(&p.lead_name, 22.0))
                 .child(col().gap(1.0).child(text(format!("{}, the lead", p.lead_name)).font(BODY_MED).color(strong())).child(text(s.ov.d.session(lead).map(|x| s.ov.d.gist(x)).unwrap_or_default()).font(META).color(weak()).truncate().max_w(620.0)))
                 .child(ui::spacer())
-                .child(Button::new("Workers").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).icon(&icons::BULLET_LIST).on_press(|s: &mut App| crate::over::open_jump(s, "")).build(kit()));
+                .child(Button::new("Workers").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).icon(&icons::BULLET_LIST).on_press_tx(|s: &mut App, tx: &mut Tx| crate::over::open_jump(s, tx)).build(kit()));
             col()
                 .w_full()
                 .h_full()

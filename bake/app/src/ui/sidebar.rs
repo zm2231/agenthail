@@ -142,10 +142,7 @@ pub(crate) fn sidebar(s: &App) -> El {
         .fill(Color::BLACK.alpha(0.20))
         .border(1.0, Color::WHITE.alpha(0.07))
         .hover(Color::BLACK.alpha(0.28))
-        .on_press_tx(|s: &mut App, tx: &mut Tx| {
-            crate::over::open_jump(s, "");
-            tx.focus("jump-input", false);
-        })
+        .on_press_tx(crate::over::open_jump)
         .child(icon(&icons::SEARCH, 14.0).color(muted()))
         .child(text("Jump to").font(META).color(muted()))
         .child(spacer())

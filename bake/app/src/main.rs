@@ -549,6 +549,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         }
         s.revealed = s.selected.clone();
     }
+    over::layout::save(s);
     tx.wake_after(Duration::from_millis(if busy { 16 } else { 250 }));
     changed
 }

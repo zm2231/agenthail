@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::mpsc::{Sender, channel};
+use std::sync::{Mutex, OnceLock};
 
 use serde_json::{Value, json};
 
@@ -104,20 +105,31 @@ pub fn load(s: &mut App) {
     *LAST.lock().expect("layout lock") = encode(s);
 }
 
+fn writer() -> &'static Sender<String> {
+    static WRITER: OnceLock<Sender<String>> = OnceLock::new();
+    WRITER.get_or_init(|| {
+        let (tx, rx) = channel::<String>();
+        std::thread::spawn(move || {
+            for text in rx {
+                let Some(p) = path() else { continue };
+                if let Some(dir) = p.parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+                let _ = std::fs::write(&p, text);
+            }
+        });
+        tx
+    })
+}
+
 pub fn save(s: &App) {
     if !s.ov.persist {
         return;
     }
     let now = encode(s);
     let mut last = LAST.lock().expect("layout lock");
-    if *last == now {
-        return;
-    }
-    let Some(p) = path() else { return };
-    if let Some(dir) = p.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    if std::fs::write(&p, &now).is_ok() {
+    if *last != now {
+        let _ = writer().send(now.clone());
         *last = now;
     }
 }
