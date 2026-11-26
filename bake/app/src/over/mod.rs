@@ -5,7 +5,7 @@ pub mod layout;
 mod now;
 mod project;
 mod sessions;
-mod ui;
+pub mod ui;
 mod work;
 
 use std::collections::{HashMap, HashSet};
@@ -304,7 +304,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         }
         return true;
     }
-    if shell::is_sidebar_toggle(ev) && s.screen != Screen::Session {
+    if shell::is_sidebar_toggle(ev) {
         if s.screen == Screen::Now && !s.ov.now_brief {
             layout::toggle_pane(s, 0);
         } else {

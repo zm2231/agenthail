@@ -170,6 +170,8 @@ pub struct Session {
     pub capabilities: Capabilities,
     #[serde(default)]
     pub read_only: bool,
+    #[serde(default)]
+    pub unavailable_reason: Option<String>,
 }
 
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
@@ -185,6 +187,14 @@ pub struct Capabilities {
     pub compact: bool,
     #[serde(default)]
     pub commands: bool,
+    #[serde(default)]
+    pub lifecycle: Lifecycle,
+}
+
+#[derive(Deserialize, Clone, Copy, Debug, Default, PartialEq)]
+pub struct Lifecycle {
+    #[serde(default)]
+    pub resume: bool,
 }
 
 fn capabilities_or_default<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Capabilities, D::Error> {
@@ -193,7 +203,7 @@ fn capabilities_or_default<'de, D: serde::Deserializer<'de>>(d: D) -> std::resul
 
 impl Default for Capabilities {
     fn default() -> Self {
-        Capabilities { interrupt: true, steer: true, model: false, compact: false, commands: false }
+        Capabilities { interrupt: true, steer: true, model: false, compact: false, commands: false, lifecycle: Lifecycle::default() }
     }
 }
 
@@ -574,6 +584,17 @@ impl Client {
 
     pub(crate) fn get_json(&self, path: &str) -> Result<Value> {
         self.get(path)
+    }
+
+    pub(crate) fn get_coded(&self, path: &str) -> std::result::Result<Value, (u16, String)> {
+        match self.agent.get(&format!("{}{path}", self.base)).set("Authorization", &format!("Bearer {}", self.token)).set("Accept", "application/json").call() {
+            Ok(response) => response.into_json().map_err(|e| (0, e.to_string())),
+            Err(ureq::Error::Status(code, response)) => {
+                let body: Value = response.into_json().unwrap_or(Value::Null);
+                Err((code, body["error"]["code"].as_str().unwrap_or_default().to_string()))
+            }
+            Err(ureq::Error::Transport(error)) => Err((0, error.to_string())),
+        }
     }
 
     pub(crate) fn ledger_rows(&self, project: &str) -> Result<Vec<Value>> {

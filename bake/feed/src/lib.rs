@@ -10,6 +10,7 @@ pub mod composer;
 pub mod derive;
 pub mod edits;
 pub mod focus;
+pub mod gone;
 pub mod item;
 pub mod menu;
 pub mod source;

@@ -33,6 +33,8 @@ pub enum Bg {
     Requests(String, Vec<OpenRequest>, std::time::Instant),
     Answered(String, String, Result<(), feed::catalog::RespondError>),
     NewSession(ui::new_session::Loaded),
+    Looked(String, u64, Result<feed::gone::Gone, String>),
+    Fixed(String, u64, feed::gone::Fix, Result<(), feed::catalog::RespondError>),
     Error(String),
 }
 
@@ -73,7 +75,6 @@ pub struct App {
     lru: Vec<String>,
     pub open: HashSet<String>,
     pub counter: u64,
-    pub by_project: bool,
     pub composer: TextEdit,
     pub composer_for: Option<String>,
     pub drafts: Drafts,
@@ -104,6 +105,8 @@ pub struct App {
     pub menus: ui::session_menu::Menus,
     pub new_session: Option<ui::new_session::Sheet>,
     revealed: Option<String>,
+    pub missing: Option<ui::gone::Missing>,
+    last_row: Option<Session>,
     client: Option<Client>,
     fixtures: Option<Fixtures>,
     inbox: Receiver<Bg>,
@@ -162,7 +165,6 @@ fn init() -> App {
         lru: Vec::new(),
         open: HashSet::new(),
         counter: 0,
-        by_project: false,
         composer: TextEdit::new(""),
         composer_for: None,
         drafts: Drafts::default(),
@@ -193,6 +195,8 @@ fn init() -> App {
         menus: ui::session_menu::Menus::new(),
         new_session: None,
         revealed: None,
+        missing: None,
+        last_row: None,
         client: None,
         fixtures: None,
         inbox,
@@ -920,6 +924,8 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             }
             Bg::NewSession(loaded) => ui::new_session::take(s, loaded),
             Bg::Error(error) => s.status = format!("daemon: {error}"),
+            Bg::Looked(id, seq, result) => ui::gone::looked(s, &id, seq, result),
+            Bg::Fixed(id, seq, fix, result) => ui::gone::fixed(s, &id, seq, fix, result),
         }
     }
     let mut busy = false;
@@ -965,14 +971,16 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     if s.screen != Screen::Session {
         s.revealed = None;
     } else if s.revealed != s.selected
+        && s.ov.sidebar.is_open()
         && let Some(id) = s.selected.clone()
-        && ui::in_sidebar(s, &id)
+        && (s.ov.d.session(&id).is_some() || ui::gone::shown(s, &id).is_some())
     {
-        tx.scroll_into_view_in("sidebar-list", format!("row-{id}"));
+        tx.scroll_into_view_in("sidebar-scroll", over::ui::session_key(&id));
         s.revealed = Some(id);
     }
     changed |= ui::session_menu::drain(s);
     changed |= over::inbox::drain(s);
+    changed |= ui::gone::watch(s);
     switch_composer(s);
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &s.composer.text);

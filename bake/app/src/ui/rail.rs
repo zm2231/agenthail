@@ -183,5 +183,5 @@ pub(crate) fn rail(s: &App, x: &Session) -> El {
             row().w_full().gap(8.0).items_center().child(icon(g, 12.0).color(faint())).child(text(k.to_string()).font(META).color(muted())).child(spacer()).child(text(v).font(META_BOLD).color(theme::text()).truncate().max_w(150.0))
         })),
     ));
-    col().key("rail").w(300.0).h_full().px(12.0).child(el().w_full().h(36.0).window_drag()).child(col().w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(col().w_full().pb(16.0).children(parts)))
+    col().key("rail").w_full().h_full().scroll(ScrollSpec { stick_bottom: false }).child(col().w_full().px(12.0).pb(16.0).children(parts))
 }

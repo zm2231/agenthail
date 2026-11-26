@@ -48,6 +48,7 @@ pub struct Menus {
     pub busy: HashSet<(String, &'static str)>,
     pub note: HashMap<String, String>,
     pub context_error: HashMap<String, String>,
+    leaving: HashMap<String, Vec<String>>,
     seq: u64,
     newest: HashMap<(String, &'static str), u64>,
     rename_seq: u64,
@@ -73,6 +74,7 @@ impl Menus {
             busy: HashSet::new(),
             note: HashMap::new(),
             context_error: HashMap::new(),
+            leaving: HashMap::new(),
             seq: 0,
             newest: HashMap::new(),
             rename_seq: 0,
@@ -204,10 +206,16 @@ pub fn run(s: &mut App, id: &str, act: Act) {
         Act::Rename => start_rename(s, id),
         Act::Pr(url) => open_link(&url),
         act => {
-            if not_sent(s) || !s.menus.busy.insert((id.to_string(), "menu")) {
+            if not_sent(s) || changing(s, id) || !super::gone::settled(s, id) || !s.menus.busy.insert((id.to_string(), "menu")) {
                 return;
             }
-            let revision = session(s, id).and_then(|x| x.read_state.as_ref()).map(|r| r.revision.clone()).unwrap_or_default();
+            super::gone::recheck(s, id);
+            if act == Act::Archive(true) {
+                let project = super::gone::shown(s, id).and_then(|x| crate::over::ui::project_for(s, x));
+                let order = crate::over::ui::sidebar_order(s, project.as_deref(), Some(id));
+                s.menus.leaving.insert(id.to_string(), order);
+            }
+            let revision = super::gone::shown(s, id).and_then(|x| x.read_state.as_ref()).map(|r| r.revision.clone()).unwrap_or_default();
             let id = id.to_string();
             spawn(s, Duration::ZERO, move |c| {
                 let result = match &act {
@@ -221,6 +229,11 @@ pub fn run(s: &mut App, id: &str, act: Act) {
             });
         }
     }
+}
+
+pub fn changing(s: &App, id: &str) -> bool {
+    let now = feed::composer::current(&s.rekeyed, id);
+    s.menus.busy.iter().any(|(k, what)| *what == "menu" && feed::composer::current(&s.rekeyed, k) == now)
 }
 
 pub fn open_at(s: &mut App, id: &str, at: PointerPress) {
@@ -247,7 +260,7 @@ pub fn close_rename(s: &mut App) {
 }
 
 pub fn current_alias(s: &App, id: &str) -> Option<String> {
-    session(s, id).and_then(|x| x.alias.clone()).filter(|a| !a.is_empty())
+    super::gone::shown(s, id).and_then(|x| x.alias.clone()).filter(|a| !a.is_empty())
 }
 
 pub fn save_rename(s: &mut App) {
@@ -261,10 +274,11 @@ pub fn save_rename(s: &mut App) {
         close_rename(s);
         return;
     }
-    if !s.menus.busy.insert((id.clone(), "menu")) {
+    if changing(s, &id) || !super::gone::settled(s, &id) || !s.menus.busy.insert((id.clone(), "menu")) {
         s.menus.rename_error = Some("Another change to this session is still on its way.".into());
         return;
     }
+    super::gone::recheck(s, &id);
     s.menus.rename_saving = true;
     s.menus.rename_error = None;
     let (name, seq) = (menu::normalized(&text), s.menus.rename_seq);
@@ -315,6 +329,19 @@ fn patch_of(act: &Act, read: Option<feed::action::ReadState>, from: String) -> O
     }
 }
 
+fn leave_archived(s: &mut App, id: &str) {
+    let Some(order) = s.menus.leaving.remove(id) else { return };
+    let now = feed::composer::current(&s.rekeyed, id).to_string();
+    if s.screen != Screen::Session || s.selected.as_deref() != Some(now.as_str()) {
+        return;
+    }
+    let order: Vec<String> = order.iter().map(|x| feed::composer::current(&s.rekeyed, x).to_string()).collect();
+    match feed::gone::next_after(&order, &now, |x| session(s, x).is_some_and(|x| !x.archived)) {
+        Some(next) => crate::over::open_session(s, &next),
+        None => crate::over::go(s, Screen::Now),
+    }
+}
+
 fn land(s: &mut App, id: &str, patch: Patch) {
     if s.ov.live.patch(id, patch, Instant::now()) {
         s.sessions = s.ov.live.sessions().to_vec();
@@ -361,16 +388,23 @@ fn settled(s: &mut App, done: Done) {
         }
         Done::Acted(id, act, from, Ok(read)) => {
             s.menus.busy.remove(&(id.clone(), "menu"));
+            super::gone::recheck(s, &id);
             if let Some(patch) = patch_of(&act, read, from) {
                 land(s, &id, patch);
             }
+            if act == Act::Archive(true) {
+                leave_archived(s, &id);
+            }
         }
         Done::Acted(id, act, _, Err(error)) => {
-            s.menus.busy.remove(&(id, "menu"));
+            s.menus.busy.remove(&(id.clone(), "menu"));
+            super::gone::recheck(s, &id);
+            s.menus.leaving.remove(&id);
             s.ov.notice = Some(failure(verb(&act), &error));
         }
         Done::Renamed(id, seq, result) => {
             s.menus.busy.remove(&(id.clone(), "menu"));
+            super::gone::recheck(s, &id);
             let current = s.menus.renaming.as_deref() == Some(id.as_str()) && s.menus.rename_seq == seq;
             match result {
                 Ok(alias) => {

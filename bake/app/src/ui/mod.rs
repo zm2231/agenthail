@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use feed::catalog::{self, PHASES, Session, State};
 use rune::{Color, Cx, El, Icon, ScrollSpec, SystemMaterial, Transition, Tx, col, el, icon, row, text, text_input};
 use rune_kit::{Button, ButtonVariant, Keybind, KeybindVariant};
@@ -9,24 +7,20 @@ use crate::theme::{
     self, BODY, BODY_BOLD, HEADING, LABEL, META, META_BOLD, SPRING, TITLE, accent, accent_deep, attention, card, done, failed, faint, line, muted, raised, wash,
 };
 use crate::transcript::{self, session_avatar};
-use crate::{App, Screen, Tab, answer_request, pick_work, session_edits, short_path, show_changes, select, send, draft_reply, session, toggle_pick, open_link};
+use crate::{App, Bg, Screen, Tab, answer_request, pick_work, session_edits, short_path, show_changes, send, draft_reply, session, toggle_pick, open_link};
 
 mod chips;
+pub mod gone;
 pub mod new_session;
 mod rail;
 mod session;
 mod session_dialogs;
 pub mod session_menu;
-mod sidebar;
 mod waiting;
 
 use rail::*;
 use session::*;
-use sidebar::*;
 
-pub fn in_sidebar(s: &App, id: &str) -> bool {
-    ordered(s).iter().any(|x| x.id == id)
-}
 use waiting::*;
 
 pub(crate) fn state_color(state: State) -> Color {
@@ -98,7 +92,7 @@ pub(crate) fn avatar_with_state(name: &str, state: State, size: f32) -> El {
 pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let mut layer = Vec::new();
     let body = match &s.screen {
-        Screen::Session => session_body(s),
+        Screen::Session => session_body(s, cx),
         _ => crate::over::view(s, cx, &mut layer),
     };
     crate::over::overlays(s, &mut layer);
@@ -113,22 +107,20 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     rune_kit::root(root, layer)
 }
 
-fn session_body(s: &App) -> El {
-    let content = col()
-        .grow(1.0)
-        .h_full()
-        .min_w(0.0)
-        .my(8.0)
-        .radius(16.0)
-        .continuous_corners()
-        .fill(card())
-        .border(1.0, Color::WHITE.alpha(0.08))
-        .shadow(10.0, 40.0, Color::BLACK.alpha(0.40))
-        .clip_rounded(16.0)
-        .child(session_screen(s));
-    let body = row().w_full().h_full().child(sidebar(s)).child(content);
-    match s.selected.as_deref().and_then(|id| session(s, id)) {
-        Some(x) => body.child(rail(s, x)),
-        None => body.child(el().w(8.0)),
-    }
+fn session_body(s: &App, cx: &mut Cx<App>) -> El {
+    let selected = s.selected.as_deref();
+    let x = selected.and_then(|id| gone::shown(s, id));
+    let project = x.and_then(|x| crate::over::ui::project_for(s, x));
+    let sidebar = crate::over::ui::sidebar(s, project.as_deref(), selected);
+    crate::over::ui::frame(cx, s, Some(sidebar), session_screen(s), x.map(|x| rail(s, x)), session_toolbar(s, x))
+}
+
+fn session_toolbar(s: &App, x: Option<&Session>) -> rune_kit::shell::Toolbar {
+    let bar = rune_kit::shell::Toolbar::new().trailing(crate::over::ui::needs_button(s));
+    let Some(x) = x else { return bar };
+    let (name, key) = (x.project_name(), x.project_key());
+    let title = s.ov.d.session(&x.id).map(|w| s.ov.d.title(w)).unwrap_or_else(|| x.title());
+    let crumb = crate::over::ui::crumb(&[(&name, false), (&crate::over::ui::short_title(&title, 40), true)]);
+    let crumb = if s.ov.d.project(&key).is_some() { row().on_press(move |s: &mut App| crate::over::go(s, Screen::Project(key.clone()))).child(crumb) } else { crumb };
+    bar.leading(row().gap(14.0).items_center().child(crate::over::ui::avatar(&name, 18.0)).child(crumb))
 }
