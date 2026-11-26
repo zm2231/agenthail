@@ -24,6 +24,8 @@ struct ClaudeAsk {
     stamp: String,
     at: Instant,
     failed: bool,
+    seq: u64,
+    in_flight: bool,
 }
 
 #[derive(Default)]
@@ -36,7 +38,6 @@ pub struct Crew {
     claude: HashMap<String, ClaudeSubagents>,
     claude_errors: HashMap<String, String>,
     claude_asked: HashMap<String, ClaudeAsk>,
-    claude_loading: HashSet<String>,
     rows: HashMap<String, Session>,
     deleted: HashSet<String>,
     row_asked: HashMap<String, RowAsk>,
@@ -46,7 +47,7 @@ pub struct Crew {
 
 pub enum Done {
     Page(String, u64, Result<Vec<Session>, String>),
-    Claude(String, Result<ClaudeSubagents, String>),
+    Claude(String, u64, Result<ClaudeSubagents, String>),
     Row(String, u64, RowRead),
 }
 
@@ -163,7 +164,7 @@ fn page(s: &mut App, id: &str) {
     let Some(x) = known(s, id) else { return };
     if !crew::page_wanted(x, listed(s, id)) {
         if !s.crew.loading.contains(id) {
-            keep_selected(s, id, &[]);
+            keep_open_lineage(s, id, &[]);
             s.crew.pages.remove(id);
             s.crew.asked.remove(id);
             s.crew.errors.remove(id);
@@ -186,7 +187,7 @@ fn page(s: &mut App, id: &str) {
 
 fn claude(s: &mut App, id: &str) {
     let Some(stamp) = known(s, id).filter(|x| x.surface == "claude").map(|x| x.last_active.clone()) else { return };
-    if s.crew.claude_loading.contains(id) {
+    if s.crew.claude_asked.get(id).is_some_and(|a| a.in_flight) {
         return;
     }
     let working = s.crew.claude.get(id).is_some_and(ClaudeSubagents::working);
@@ -194,10 +195,11 @@ fn claude(s: &mut App, id: &str) {
     if !crew::claude_due(asked, &stamp, working) {
         return;
     }
-    s.crew.claude_asked.insert(id.to_string(), ClaudeAsk { stamp, at: Instant::now(), failed: false });
-    s.crew.claude_loading.insert(id.to_string());
+    s.crew.seq += 1;
+    let seq = s.crew.seq;
+    s.crew.claude_asked.insert(id.to_string(), ClaudeAsk { stamp, at: Instant::now(), failed: false, seq, in_flight: true });
     let id = id.to_string();
-    spawn(s, move |c| Done::Claude(id.clone(), c.claude_subagents(&id)));
+    spawn(s, move |c| Done::Claude(id.clone(), seq, c.claude_subagents(&id)));
 }
 
 pub(crate) fn done(s: &mut App, done: Done) {
@@ -211,7 +213,7 @@ pub(crate) fn done(s: &mut App, done: Done) {
                 Ok(mut rows) => {
                     rows.retain(|x| !s.crew.deleted.contains(&x.id));
                     s.crew.errors.remove(&id);
-                    keep_selected(s, &id, &rows);
+                    keep_open_lineage(s, &id, &rows);
                     s.crew.pages.insert(id, rows);
                 }
                 Err(error) => {
@@ -219,20 +221,16 @@ pub(crate) fn done(s: &mut App, done: Done) {
                 }
             }
         }
-        Done::Claude(id, result) => {
-            s.crew.claude_loading.remove(&id);
-            if !s.crew.recent.contains(&id) {
-                return;
-            }
+        Done::Claude(id, seq, result) => {
+            let Some(asked) = s.crew.claude_asked.get_mut(&id).filter(|a| a.seq == seq) else { return };
+            asked.in_flight = false;
             match result {
                 Ok(list) => {
                     s.crew.claude_errors.remove(&id);
                     s.crew.claude.insert(id, list);
                 }
                 Err(error) => {
-                    if let Some(a) = s.crew.claude_asked.get_mut(&id) {
-                        a.failed = true;
-                    }
+                    asked.failed = true;
                     s.crew.claude.remove(&id);
                     s.crew.claude_errors.insert(id, error);
                 }
@@ -263,16 +261,12 @@ pub(crate) fn done(s: &mut App, done: Done) {
     }
 }
 
-fn keep_selected(s: &mut App, parent: &str, rows: &[Session]) {
-    let Some(sel) = s.selected.clone() else { return };
-    if rows.iter().any(|x| x.id == sel) || s.sessions.iter().any(|x| x.id == sel) {
-        return;
-    }
-    if s.crew.deleted.contains(&sel) {
-        return;
-    }
-    if let Some(row) = s.crew.pages.get(parent).and_then(|old| old.iter().find(|x| x.id == sel)).cloned() {
-        s.crew.rows.insert(sel, row);
+fn keep_open_lineage(s: &mut App, parent: &str, rows: &[Session]) {
+    let Some(old) = s.crew.pages.get(parent) else { return };
+    let held = held(s);
+    let kept: Vec<Session> = old.iter().filter(|x| held.contains(&x.id) && !rows.iter().any(|r| r.id == x.id) && !listed(s, &x.id) && !s.crew.deleted.contains(&x.id)).cloned().collect();
+    for row in kept {
+        s.crew.rows.insert(row.id.clone(), row);
     }
 }
 
