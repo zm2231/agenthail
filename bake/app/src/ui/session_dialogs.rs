@@ -51,7 +51,7 @@ fn act_icon(act: &Act) -> &'static rune::Icon {
 }
 
 fn session_menu(s: &App, open: &Open, layer: &mut Vec<El>) {
-    let Some(x) = session(s, &open.session) else { return };
+    let Some(x) = crate::ui::gone::shown(s, &open.session) else { return };
     let mut m = Menu::new("session-menu").open(true).min_width(220.0).on_close(|s: &mut App| s.menus.open = None);
     m = match open.at {
         Some(p) => m.at(p.x, p.y),

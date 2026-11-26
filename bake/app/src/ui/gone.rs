@@ -86,6 +86,7 @@ fn fix(s: &mut App, fix: Fix) {
     let Some(client) = s.client.clone() else { return };
     let Some(m) = s.missing.as_mut().filter(|m| m.fixing.is_none()) else { return };
     m.fixing = Some(fix);
+    m.asking = None;
     m.error = None;
     let (id, tx) = (m.id.clone(), s.outbox.clone());
     std::thread::spawn(move || {
