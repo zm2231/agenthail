@@ -267,7 +267,7 @@ func (b Broadcaster) Send(ctx context.Context, target Target, message, label, so
 	coordinators = slices.DeleteFunc(coordinators, func(spec registry.CoordinatorSpec) bool {
 		return sourceSessionID != "" && spec.SessionID == sourceSessionID
 	})
-	if len(members) == 0 && len(coordinators) == 0 && target.ProjectID == "" {
+	if len(members) == 0 && len(skipped) == 0 && len(coordinators) == 0 && target.ProjectID == "" {
 		return result, fmt.Errorf("#%s has no members other than the sender", target.Name)
 	}
 	for _, spec := range coordinators {
@@ -287,11 +287,11 @@ func (b Broadcaster) Send(ctx context.Context, target Target, message, label, so
 // whose folder is gone is skipped with the reason. Coordinators are reached
 // even when idle past the window or ended, since a send starts or resumes one.
 // One-off runs are not members: a task child until its task settles, and a
-// delegated run (a Codex exec run or a sub-agent) always.
+// delegated run (a Codex exec run or a sub-agent) always. A stored channel's
+// own members are skipped by the same rule, except a coordinator.
 func (b Broadcaster) members(target Target, now time.Time) ([]string, []Recipient, []registry.CoordinatorSpec, error) {
 	if target.ProjectID == "" {
-		members, err := b.Registry.ChannelMembers(target.Channel)
-		return members, nil, nil, err
+		return b.channelMembers(target.Channel)
 	}
 	specs, err := b.Registry.ProjectCoordinators(target.ProjectID)
 	if err != nil {
@@ -342,6 +342,51 @@ func (b Broadcaster) members(target Target, now time.Time) ([]string, []Recipien
 	sort.Strings(members)
 	sort.Slice(skipped, func(i, j int) bool { return skipped[i].SessionID < skipped[j].SessionID })
 	return members, skipped, coordinators, nil
+}
+
+func (b Broadcaster) channelMembers(channel string) ([]string, []Recipient, []registry.CoordinatorSpec, error) {
+	stored, err := b.Registry.ChannelMembers(channel)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	specs, err := b.Registry.Coordinators()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	coordinated := map[string]bool{}
+	for _, spec := range specs {
+		if spec.HostID == "" && spec.SessionID != "" {
+			coordinated[spec.SessionID] = true
+		}
+	}
+	snapshot, err := b.Registry.CatalogSnapshot()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	archive, err := b.Registry.ArchiveState()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	records := map[string]registry.CatalogSessionState{}
+	for _, record := range snapshot.Sessions {
+		if record.HostID == "" {
+			records[record.Session.ID] = record
+		}
+	}
+	var members []string
+	var skipped []Recipient
+	for _, member := range stored {
+		record, local := records[member]
+		if local && !coordinated[member] {
+			item, _ := sessionProject(record)
+			if reason := unreachable(record, item, archive); reason != "" {
+				skipped = append(skipped, Recipient{SessionID: member, Outcome: OutcomeSkipped, Detail: reason})
+				continue
+			}
+		}
+		members = append(members, member)
+	}
+	return members, skipped, nil, nil
 }
 
 func unreachable(record registry.CatalogSessionState, item Project, archive registry.ArchiveState) string {

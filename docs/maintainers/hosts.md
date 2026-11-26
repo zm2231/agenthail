@@ -249,7 +249,9 @@ qualified for this daemon.
 
 A channel lives where it was made. A remote member is stored by its raw id and
 mirrored row; `channel-send` holds the message for that member's host and
-delivers to local members directly.
+delivers to local members directly. A local member that is archived, whose
+`cwd` no longer exists, or that has ended is `skipped` as a project post's
+member is (below), unless it is one of this host's coordinators.
 
 A project channel has no stored members, and each host decides its own.
 `channel-send` to `#<project>` delivers to this host's members, read from its

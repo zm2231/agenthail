@@ -380,6 +380,53 @@ func TestAProjectPostReachesLiveConversationsAndSkipsOnesItCannotReach(t *testin
 		t.Fatalf("a post that skipped members raised a delivery ask: %+v %v", asks, err)
 	}
 
+	for channel, members := range map[string][]string{"crew": {"live", "ended", "archived", "folder-gone", "unloaded"}, "retired": {"ended", "archived"}} {
+		if _, err := local.reg.CreateChannel(channel); err != nil {
+			t.Fatal(err)
+		}
+		for _, member := range members {
+			if err := local.reg.AddToChannel(channel, member); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	before := len(local.fake.delivered())
+	crew := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "#crew", "message": "handoff", "sourceSessionId": "local-a"})
+	var crewAnswer struct {
+		Recipients []broadcast.Recipient `json:"recipients"`
+	}
+	if crew.Code != http.StatusOK || json.Unmarshal(crew.Body.Bytes(), &crewAnswer) != nil {
+		t.Fatalf("a channel post every reachable member got: status=%d body=%s", crew.Code, crew.Body)
+	}
+	got := map[string]broadcast.Recipient{}
+	for _, recipient := range crewAnswer.Recipients {
+		got[recipient.SessionID] = recipient
+	}
+	for id, recipient := range want {
+		if id == "ended-pinned" {
+			continue
+		}
+		if delivered := got[id].Outcome; recipient.Outcome == broadcast.OutcomeSent && delivered != broadcast.OutcomeFailed && delivered != broadcast.OutcomeSkipped {
+			recipient = got[id]
+		}
+		if got[id] != recipient {
+			t.Fatalf("channel member %s = %+v, want %+v", id, got[id], recipient)
+		}
+	}
+	if len(got) != 5 || len(local.fake.delivered())-before != 1 {
+		t.Fatalf("the channel post reached %+v and delivered %d, want only the live member delivered", crewAnswer.Recipients, len(local.fake.delivered())-before)
+	}
+	retired := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "#retired", "message": "handoff"})
+	if retired.Code != http.StatusBadRequest || !strings.Contains(retired.Body.String(), "#retired has no reachable members other than the sender; skipped ") {
+		t.Fatalf("a channel post every member of which was skipped: status=%d body=%s", retired.Code, retired.Body)
+	}
+	if err := local.reg.SyncDeliveryAsks(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if asks, err := local.reg.OpenAsks(); err != nil || slices.ContainsFunc(asks, func(ask registry.Ask) bool { return ask.Origin == "delivery" }) {
+		t.Fatalf("a channel post that skipped members raised a delivery ask: %+v %v", asks, err)
+	}
+
 	local.fake.failSends(surface.DeliveryTerminal(errors.New("model rejected")))
 	response, members, _ = post()
 	if response.Code != http.StatusConflict || members["live"].Outcome != broadcast.OutcomeFailed || members["ended"].Outcome != broadcast.OutcomeSkipped {
