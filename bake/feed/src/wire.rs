@@ -15,6 +15,8 @@ pub struct Data {
     pub kind: String,
     #[serde(default)]
     pub reason: Option<String>,
+    #[serde(default)]
+    pub version: u64,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -79,7 +81,8 @@ impl Rebuild {
         } else if data.op == "remove" {
             self.rows.remove(&data.item_id);
             events.push(Event::Remove(data.item_id.clone()));
-        } else if let Some(item) = wire.item {
+        } else if let Some(mut item) = wire.item {
+            item.version = data.version;
             let bytes = item.text.len();
             self.rows.insert(item.id.clone(), (item.clone(), bytes));
             events.push(Event::Upsert(item));
@@ -110,5 +113,18 @@ impl Sse {
             self.data.push(value.strip_prefix(' ').unwrap_or(value).to_string());
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_upsert_carries_the_rows_version() {
+        let wire: Wire = serde_json::from_str(r#"{"seq":4,"type":"item","data":{"itemId":"a","op":"upsert","kind":"toolResult","version":812,"truncated":true,"bodyRef":"r"},"item":{"id":"a","kind":"toolResult","text":"head","truncated":true,"bodyRef":"r"}}"#).unwrap();
+        let Outcome::Events(4, events) = Rebuild::default().apply(wire) else { panic!("no events") };
+        let Event::Upsert(item) = &events[0] else { panic!("{events:?}") };
+        assert_eq!((item.version, item.body_ref.as_deref(), item.truncated), (812, Some("r"), true));
     }
 }

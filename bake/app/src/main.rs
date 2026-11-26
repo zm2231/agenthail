@@ -37,7 +37,7 @@ pub enum Bg {
     Queue(String, u64, Result<Vec<feed::queue::Queued>, String>),
     QueueDone(String, i64, feed::queue::Done),
     Older(String, u64, Result<feed::history::Older, feed::history::Miss>),
-    Body(String, u64, String, Result<String, String>),
+    Body(String, u64, String, u64, Result<String, String>),
     Error(String),
 }
 
@@ -93,6 +93,7 @@ pub struct App {
     pub queue_working: HashSet<i64>,
     queue_fetching: HashMap<String, u64>,
     queue_gen: HashMap<String, u64>,
+    queue_epoch: u64,
     pub queue_note: HashMap<String, String>,
     pub busy_default: Option<Busy>,
     pub busy_pick: HashMap<String, Busy>,
@@ -187,6 +188,7 @@ fn init() -> App {
         queue_working: HashSet::new(),
         queue_fetching: HashMap::new(),
         queue_gen: HashMap::new(),
+        queue_epoch: 0,
         queue_note: HashMap::new(),
         busy_default: None,
         busy_pick: HashMap::new(),
@@ -842,6 +844,8 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
         move_member(&mut s.stopping, &old, &new);
         move_key(&mut s.queue_note, &old, &new);
         move_key(&mut s.queue, &old, &new);
+        s.queue_fetching.remove(&old);
+        ui::queue::invalidate(s, &new);
     }
     if let Some(id) = s.composer_for.clone()
         && s.drafts.get(&id) != s.composer.text
@@ -943,7 +947,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Queue(id, asked, result) => ui::queue::take(s, id, asked, result),
             Bg::QueueDone(id, queue_id, done) => ui::queue::done(s, id, queue_id, done),
             Bg::Older(id, generation, result) => history::take_older(s, id, generation, result),
-            Bg::Body(id, generation, item, result) => history::take_body(s, id, generation, item, result),
+            Bg::Body(id, generation, item, version, result) => history::take_body(s, id, generation, item, version, result),
             Bg::Error(error) => s.status = format!("daemon: {error}"),
         }
     }

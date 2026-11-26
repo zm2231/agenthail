@@ -417,7 +417,7 @@ fn footer(cx: &Cx, block: &Block) -> Option<El> {
     let (body, user) = match &block.kind {
         Kind::User(body) if !body.trim_start().starts_with("<hook_prompt") => (body.clone(), true),
         Kind::Assistant(body) => (body.clone(), false),
-        Kind::Notice(_) | Kind::Annotation(_) | Kind::Unknown { .. } => {
+        Kind::Unknown { .. } => {
             let full = cx.pane.transcript.item(item).filter(|i| i.truncated && i.body_ref.is_some())?;
             return Some(body_tools(cx, full, row().gap(6.0).items_center().pt(2.0)));
         }

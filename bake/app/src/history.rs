@@ -71,7 +71,7 @@ pub fn take_older(s: &mut App, id: String, generation: u64, result: Result<Older
 pub fn load_body(s: &mut App, id: &str, item: &str) {
     let Some(client) = s.client.clone() else { return };
     let Some(pane) = s.panes.get_mut(id) else { return };
-    let Some(body_ref) = pane.transcript.item(item).filter(|i| i.truncated).and_then(|i| i.body_ref.clone()) else { return };
+    let Some((body_ref, version)) = pane.transcript.item(item).filter(|i| i.truncated).and_then(|i| Some((i.body_ref.clone()?, i.version))) else { return };
     if pane.expanding.get(item).is_some_and(|note| note.is_none()) {
         return;
     }
@@ -82,17 +82,17 @@ pub fn load_body(s: &mut App, id: &str, item: &str) {
     let (out, id, item, generation) = (s.outbox.clone(), id.to_string(), item.to_string(), pane.generation);
     std::thread::spawn(move || {
         let result = client.full_body(&id, &body_ref);
-        let _ = out.send(Bg::Body(id, generation, item, result));
+        let _ = out.send(Bg::Body(id, generation, item, version, result));
     });
 }
 
-pub fn take_body(s: &mut App, id: String, generation: u64, item: String, result: Result<String, String>) {
+pub fn take_body(s: &mut App, id: String, generation: u64, item: String, version: u64, result: Result<String, String>) {
     let mut counter = s.counter;
     let Some(pane) = s.panes.get_mut(&id).filter(|p| p.generation == generation) else { return };
     match result {
         Ok(text) => {
             pane.expanding.remove(&item);
-            if pane.transcript.expand(&item, text) {
+            if pane.transcript.expand(&item, version, text) {
                 pane.rebuild(&mut counter);
                 s.panes_moved = true;
             }

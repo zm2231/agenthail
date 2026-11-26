@@ -22,7 +22,7 @@ pub struct Transcript {
     pub seq: u64,
     dirty: Option<usize>,
     checkpoint: Option<Checkpoint>,
-    expanded: HashMap<String, String>,
+    expanded: HashMap<String, (u64, String)>,
 }
 
 fn is_prompt(item: &Item) -> bool {
@@ -55,15 +55,15 @@ impl Transcript {
         true
     }
 
-    pub fn expand(&mut self, id: &str, text: String) -> bool {
+    pub fn expand(&mut self, id: &str, version: u64, text: String) -> bool {
         let Some(&at) = self.index.get(id) else { return false };
         let item = &mut self.items[at];
-        if !item.truncated {
+        if !item.truncated || item.version != version {
             return false;
         }
         item.text = text.clone();
         item.truncated = false;
-        self.expanded.insert(id.to_string(), text);
+        self.expanded.insert(id.to_string(), (version, text));
         self.touch(at);
         self.revision += 1;
         true
@@ -80,7 +80,7 @@ impl Transcript {
             match event {
                 Event::Upsert(mut item) => {
                     match self.expanded.get(&item.id) {
-                        Some(full) if item.truncated => {
+                        Some((version, full)) if item.truncated && *version == item.version => {
                             item.text = full.clone();
                             item.truncated = false;
                         }
@@ -197,13 +197,17 @@ mod tests {
     #[test]
     fn an_expanded_body_survives_the_stream_resending_its_head() {
         let mut t = Transcript::default();
-        let head = Item { truncated: true, body_ref: Some("r".into()), ..item("a", "head") };
+        let head = Item { truncated: true, body_ref: Some("r".into()), version: 40, ..item("a", "head") };
         t.apply(1, vec![Event::Upsert(head.clone())]);
-        assert!(!t.expand("missing", "x".into()));
-        assert!(t.expand("a", "head and the rest".into()));
-        assert!(!t.expand("a", "again".into()));
-        t.apply(2, vec![Event::Upsert(head)]);
+        assert!(!t.expand("missing", 40, "x".into()));
+        assert!(!t.expand("a", 39, "older read".into()));
+        assert!(t.expand("a", 40, "head and the rest".into()));
+        assert!(!t.expand("a", 40, "again".into()));
+        t.apply(2, vec![Event::Upsert(head.clone())]);
         assert_eq!((t.item("a").unwrap().text.as_str(), t.item("a").unwrap().truncated), ("head and the rest", false));
+        t.apply(3, vec![Event::Upsert(Item { version: 55, ..head.clone() })]);
+        assert_eq!((t.item("a").unwrap().text.as_str(), t.item("a").unwrap().truncated), ("head", true));
+        assert!(t.expand("a", 55, "head and more of the rest".into()));
         t.apply(3, vec![Event::Upsert(item("a", "edited"))]);
         assert_eq!(t.item("a").unwrap().text, "edited");
         t.apply(4, vec![Event::Upsert(Item { truncated: true, ..item("a", "new head") })]);

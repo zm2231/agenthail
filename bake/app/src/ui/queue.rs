@@ -18,20 +18,22 @@ pub(crate) fn wants(s: &App, id: &str) -> bool {
     session(s, id).is_some_and(|x| x.queue_count > 0) || !rows(s, id).is_empty() || s.queued.contains_key(id)
 }
 
-fn generation(s: &App, id: &str) -> u64 {
+fn valid_from(s: &App, id: &str) -> u64 {
     s.queue_gen.get(id).copied().unwrap_or_default()
 }
 
-fn bump(s: &mut App, id: &str) {
-    *s.queue_gen.entry(id.to_string()).or_default() += 1;
+pub(crate) fn invalidate(s: &mut App, id: &str) {
+    s.queue_epoch += 1;
+    s.queue_gen.insert(id.to_string(), s.queue_epoch);
 }
 
 pub(crate) fn fetch(s: &mut App, id: &str) {
     let Some(client) = s.client.clone() else { return };
-    let generation = generation(s, id);
-    if s.queue_fetching.insert(id.to_string(), generation) == Some(generation) {
+    if s.queue_fetching.get(id).is_some_and(|&asked| asked >= valid_from(s, id)) {
         return;
     }
+    let generation = s.queue_epoch;
+    s.queue_fetching.insert(id.to_string(), generation);
     let (out, id) = (s.outbox.clone(), id.to_string());
     std::thread::spawn(move || {
         let result = client.queue(&id).map_err(|e| e.to_string());
@@ -43,10 +45,10 @@ pub(crate) fn take(s: &mut App, id: String, asked: u64, result: Result<Vec<Queue
     if s.queue_fetching.get(&id) == Some(&asked) {
         s.queue_fetching.remove(&id);
     }
-    if asked < generation(s, &id) {
+    let id = feed::composer::current(&s.rekeyed, &id).to_string();
+    if asked < valid_from(s, &id) {
         return;
     }
-    let id = feed::composer::current(&s.rekeyed, &id).to_string();
     match result {
         Ok(list) => {
             if s.queue_note.get(&id).is_some_and(|n| n.starts_with(READ_FAILED)) {
@@ -66,7 +68,7 @@ fn run(s: &mut App, id: &str, row: Queued, op: Op) {
         return;
     }
     s.queue_note.remove(id);
-    bump(s, id);
+    invalidate(s, id);
     let host = session(s, id).map(|x| if x.host.id.is_empty() { x.host.name.clone() } else { x.host.id.clone() }).unwrap_or_default();
     let (out, id) = (s.outbox.clone(), id.to_string());
     std::thread::spawn(move || {
@@ -87,7 +89,7 @@ fn hand_back(s: &mut App, id: &str, message: &str) {
 pub(crate) fn done(s: &mut App, id: String, queue_id: i64, done: Done) {
     s.queue_working.remove(&queue_id);
     let id = feed::composer::current(&s.rekeyed, &id).to_string();
-    bump(s, &id);
+    invalidate(s, &id);
     let drop_row = |s: &mut App| {
         if let Some(list) = s.queue.get_mut(&id) {
             list.retain(|r| r.id != queue_id);
