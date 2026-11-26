@@ -44,7 +44,7 @@ fn line(s: &App, i: usize, d: &Decision, shift: bool) -> El {
         body = body.child(text(format!("Covers {} items", d.covers.len())).font(META_MED).color(base()));
         for c in &d.covers {
             let title = if c.work_title.is_empty() { c.reason_text() } else { c.work_title.clone() };
-            body = body.child(row().gap(6.0).items_center().child(ui::id_label(&crate::over::short_id(&c.work_item))).child(text(crate::over::plain(&title)).font(META).color(base()).truncate().shrink()));
+            body = body.child(row().gap(6.0).items_center().child(ui::id_label(&c.work_item)).child(text(crate::over::plain(&title)).font(META).color(base()).truncate().shrink()));
         }
     }
     for (q, answer) in d.recommended_lines() {
