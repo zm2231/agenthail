@@ -51,6 +51,8 @@ pub struct Headline {
     pub outcome: String,
     #[serde(default)]
     pub at: Option<String>,
+    #[serde(default)]
+    pub turn_id: String,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]

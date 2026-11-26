@@ -1,6 +1,7 @@
 mod history;
 mod icons;
 mod menubar;
+mod notify;
 mod over;
 mod theme;
 mod transcript;
@@ -124,6 +125,7 @@ pub struct App {
     bar: menubar::Bar,
     revealed: Option<String>,
     pub missing: Option<ui::gone::Missing>,
+    pub notify: notify::State,
     last_row: Option<Session>,
     client: Option<Client>,
     fixtures: Option<Fixtures>,
@@ -225,6 +227,7 @@ fn init() -> App {
         bar: menubar::Bar::default(),
         revealed: None,
         missing: None,
+        notify: notify::State::default(),
         last_row: None,
         client: None,
         fixtures: None,
@@ -272,6 +275,7 @@ fn init() -> App {
                 });
                 watch_overview(client.clone(), app.outbox.clone());
                 over::inbox::start(&mut app.ov.inbox, &client);
+                notify::start(&mut app);
                 app.client = Some(client);
             }
             Err(error) => app.status = error.to_string(),
@@ -883,6 +887,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Snapshot(at, sessions) => {
                 if s.ov.live.take_sessions(&at, sessions) {
                     s.sessions = s.ov.live.sessions().to_vec();
+                    s.notify.sessions_moved = true;
                 }
                 s.now = OffsetDateTime::now_utc();
                 s.status = "live".into();
@@ -902,6 +907,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Overview(fetched) => {
                 s.ov.live.refresh(*fetched);
                 s.sessions = s.ov.live.sessions().to_vec();
+                s.notify.sessions_moved = true;
                 fetch_tails(s);
                 arrived = true;
             }
@@ -1043,6 +1049,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     }
     changed |= ui::session_menu::drain(s);
     changed |= over::inbox::drain(s);
+    changed |= notify::tick(s);
     changed |= ui::gone::watch(s);
     changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s);
     switch_composer(s);

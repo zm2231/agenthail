@@ -93,6 +93,7 @@ dependencies = [
  "png 0.18.1",
  "rune",
  "rune-kit",
+ "rune-notify",
  "rune-theme-opencode",
  "serde",
  "serde_json",
@@ -2896,6 +2897,22 @@ dependencies = [
 name = "rune-motion"
 version = "0.1.0"
 source = "git+https://github.com/zm2231/rune?rev=d74939198aee33e645fb8dbd5a1d996da23afbc6#d74939198aee33e645fb8dbd5a1d996da23afbc6"
+
+[[package]]
+name = "rune-notify"
+version = "0.0.1"
+source = "git+https://github.com/zm2231/rune?rev=d74939198aee33e645fb8dbd5a1d996da23afbc6#d74939198aee33e645fb8dbd5a1d996da23afbc6"
+dependencies = [
+ "async-channel",
+ "async-io",
+ "block2 0.6.2",
+ "futures-lite",
+ "objc2 0.6.5",
+ "windows",
+ "windows-core",
+ "windows-registry",
+ "zbus",
+]
 
 [[package]]
 name = "rune-spell"
