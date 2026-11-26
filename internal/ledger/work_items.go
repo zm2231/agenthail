@@ -26,28 +26,29 @@ func (s WorkState) settled() bool { return s == WorkDone || s == WorkClosed || s
 type WorkAction string
 
 const (
-	WorkAdd      WorkAction = "add"
-	WorkClaim    WorkAction = "claim"
-	WorkBlock    WorkAction = "block"
-	WorkUnblock  WorkAction = "unblock"
-	WorkSubmit   WorkAction = "submit"
-	WorkApprove  WorkAction = "approve"
-	WorkReject   WorkAction = "reject"
-	WorkReopen   WorkAction = "reopen"
-	WorkHandoff  WorkAction = "handoff"
-	WorkDep      WorkAction = "dep"
-	WorkUndep    WorkAction = "undep"
-	WorkComment  WorkAction = "comment"
-	WorkLog      WorkAction = "log"
-	WorkEdit     WorkAction = "edit"
-	WorkLink     WorkAction = "link"
-	WorkClose    WorkAction = "close"
-	WorkDelete   WorkAction = "delete"
-	WorkRestore  WorkAction = "restore"
-	WorkPark     WorkAction = "park"
-	WorkUnpark   WorkAction = "unpark"
-	WorkTakeover WorkAction = "takeover"
-	WorkProof    WorkAction = "proof"
+	WorkAdd        WorkAction = "add"
+	WorkClaim      WorkAction = "claim"
+	WorkBlock      WorkAction = "block"
+	WorkUnblock    WorkAction = "unblock"
+	WorkSubmit     WorkAction = "submit"
+	WorkApprove    WorkAction = "approve"
+	WorkReject     WorkAction = "reject"
+	WorkReopen     WorkAction = "reopen"
+	WorkHandoff    WorkAction = "handoff"
+	WorkDep        WorkAction = "dep"
+	WorkUndep      WorkAction = "undep"
+	WorkComment    WorkAction = "comment"
+	WorkLog        WorkAction = "log"
+	WorkEdit       WorkAction = "edit"
+	WorkLink       WorkAction = "link"
+	WorkClose      WorkAction = "close"
+	WorkDelete     WorkAction = "delete"
+	WorkRestore    WorkAction = "restore"
+	WorkPark       WorkAction = "park"
+	WorkUnpark     WorkAction = "unpark"
+	WorkTakeover   WorkAction = "takeover"
+	WorkProof      WorkAction = "proof"
+	WorkReviewPass WorkAction = "review-pass"
 )
 
 type Handoff struct {
@@ -81,6 +82,7 @@ type WorkItem struct {
 	Phase        Phase       `json:"phase,omitempty"`
 	PhaseSince   time.Time   `json:"phaseSince,omitzero"`
 	Proof        []ProofStep `json:"proof,omitempty"`
+	ReviewPass   *ReviewPass `json:"reviewPass,omitempty"`
 	proofIssued  int
 	round        int
 }
@@ -194,7 +196,7 @@ func (b *Board) applyWorkItemState(event Event) error {
 		return nil
 	}
 	item.State, item.Assignee, item.Reason = p.ToState, p.Assignee, p.Reason
-	item.Reviewer = p.Reviewer
+	item.Reviewer, item.ReviewPass = p.Reviewer, nil
 	if p.Handoff != nil {
 		item.Handoff = p.Handoff
 	}

@@ -904,6 +904,13 @@ CREATE TABLE IF NOT EXISTS ledger_backlog_told (
 	told_at_ms INTEGER NOT NULL,
 	PRIMARY KEY (project_key, item_id)
 );
+CREATE TABLE IF NOT EXISTS work_review_pushes (
+	project_key TEXT NOT NULL,
+	item_id TEXT NOT NULL,
+	in_review_at_ms INTEGER NOT NULL,
+	claimed_at_ms INTEGER NOT NULL,
+	PRIMARY KEY (project_key, item_id, in_review_at_ms)
+);
 CREATE TABLE IF NOT EXISTS notification_withdrawals (
 	ask_id TEXT PRIMARY KEY,
 	seq INTEGER NOT NULL

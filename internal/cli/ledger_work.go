@@ -30,6 +30,7 @@ const ledgerWorkUsage = `usage: agenthail ledger work [list] [--state <s,...>] [
        agenthail ledger work close <item_id> --reason "done: <what finished it>|duplicate|wontfix|obsolete ..."
        agenthail ledger work delete <item_id> [--reason "..."]
        agenthail ledger work <approve|reject> <item_id> [--utterance <the person's words>] [--reason "..."]
+       agenthail ledger work review-pass <item_id> --reason "<what the person decides>"   (the project's lead hands the review to the person)
        agenthail ledger work takeover <item_id> --then release|submit|done --reason "..." [--utterance <the person's words> [--force]]
        agenthail ledger work dep <item_id> --on <item_id> [--remove]
        agenthail ledger work handoff <item_id> [--done "..."] [--remaining "..."] [--decisions "..."] [--uncertain "..."]
@@ -274,7 +275,7 @@ var workActions = map[ledger.WorkAction]bool{
 	ledger.WorkAdd: true, ledger.WorkClaim: true, ledger.WorkBlock: true, ledger.WorkUnblock: true, ledger.WorkSubmit: true,
 	ledger.WorkApprove: true, ledger.WorkReject: true, ledger.WorkReopen: true, ledger.WorkHandoff: true, ledger.WorkDep: true,
 	ledger.WorkComment: true, ledger.WorkLog: true, ledger.WorkEdit: true, ledger.WorkLink: true, ledger.WorkClose: true,
-	ledger.WorkDelete: true, ledger.WorkRestore: true, ledger.WorkPark: true, ledger.WorkUnpark: true, ledger.WorkTakeover: true,
+	ledger.WorkDelete: true, ledger.WorkRestore: true, ledger.WorkPark: true, ledger.WorkUnpark: true, ledger.WorkTakeover: true, ledger.WorkReviewPass: true,
 }
 
 func workLine(item ledger.WorkItem) string {

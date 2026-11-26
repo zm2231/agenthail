@@ -44,6 +44,9 @@ func (d *Daemon) dispatchAction(ctx context.Context, p principal, request dashbo
 	if request.Action == "dismiss-decision" {
 		return d.doDismissDecision(ctx, p, request)
 	}
+	if request.Action == workReviewAction {
+		return d.doWorkReview(ctx, p, request)
+	}
 	if operation, typed := typedActions[request.Action]; typed {
 		return operation(d, ctx, p, request)
 	}

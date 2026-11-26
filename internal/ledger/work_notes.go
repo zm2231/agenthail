@@ -114,6 +114,10 @@ func (item *WorkItem) snapshot() WorkItem {
 		park := item.Park.clone()
 		out.Park = &park
 	}
+	if item.ReviewPass != nil {
+		pass := *item.ReviewPass
+		out.ReviewPass = &pass
+	}
 	return out
 }
 

@@ -63,17 +63,24 @@ type ledgerBoardReads struct {
 	asks     map[string][]registry.Ask
 }
 
-func (d *Daemon) ledgerBoardReads() *ledgerBoardReads {
-	reads := &ledgerBoardReads{d: d, sessions: map[string]*surface.Session{}, prs: map[string]registry.SessionPR{}, asks: map[string][]registry.Ask{}}
-	if bySession, err := d.Registry.SessionPRs(); err == nil {
-		for _, prs := range bySession {
-			for _, pr := range prs {
-				if known, ok := reads.prs[pr.URL]; !ok || pr.LastReadAt.After(known.LastReadAt) {
-					reads.prs[pr.URL] = pr
-				}
+func (d *Daemon) linkedPRs() map[string]registry.SessionPR {
+	byURL := map[string]registry.SessionPR{}
+	bySession, err := d.Registry.SessionPRs()
+	if err != nil {
+		return byURL
+	}
+	for _, prs := range bySession {
+		for _, pr := range prs {
+			if known, ok := byURL[pr.URL]; !ok || pr.LastReadAt.After(known.LastReadAt) {
+				byURL[pr.URL] = pr
 			}
 		}
 	}
+	return byURL
+}
+
+func (d *Daemon) ledgerBoardReads() *ledgerBoardReads {
+	reads := &ledgerBoardReads{d: d, sessions: map[string]*surface.Session{}, prs: d.linkedPRs(), asks: map[string][]registry.Ask{}}
 	if open, err := d.Registry.OpenAsks(); err == nil {
 		for _, ask := range open {
 			if ask.RoutedTo == registry.AskToPerson {

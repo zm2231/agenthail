@@ -134,6 +134,8 @@ func moveLedgerTx(tx *sql.Tx, from, to string, held bool) error {
 		`UPDATE ledger_grants SET project_key=?2 WHERE project_key=?1`,
 		`UPDATE OR IGNORE ledger_backlog_told SET project_key=?2 WHERE project_key=?1`,
 		`DELETE FROM ledger_backlog_told WHERE project_key=?1`,
+		`UPDATE OR IGNORE work_review_pushes SET project_key=?2 WHERE project_key=?1`,
+		`DELETE FROM work_review_pushes WHERE project_key=?1`,
 	} {
 		if _, err := tx.Exec(statement, from, to); err != nil {
 			return err

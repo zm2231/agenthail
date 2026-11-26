@@ -15,6 +15,7 @@
 -- migration 2026-11-26-turns-wait-on-the-person
 -- migration 2026-11-26-waits-on-the-lead-escalate
 -- migration 2026-11-26-workspace-folders-join-projects
+-- migration 2026-11-26-your-reviews-push-once
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -1297,6 +1298,15 @@ CREATE TABLE work_records (
 	kept_paths TEXT NOT NULL DEFAULT '',
 	created_at_ms INTEGER NOT NULL,
 	settled_at_ms INTEGER NOT NULL DEFAULT 0
+);
+
+-- table work_review_pushes
+CREATE TABLE work_review_pushes (
+	project_key TEXT NOT NULL,
+	item_id TEXT NOT NULL,
+	in_review_at_ms INTEGER NOT NULL,
+	claimed_at_ms INTEGER NOT NULL,
+	PRIMARY KEY (project_key, item_id, in_review_at_ms)
 );
 
 -- trigger asks_applied_withdraw
