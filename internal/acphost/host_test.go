@@ -492,6 +492,11 @@ func TestOneContestedSessionDoesNotHoldUpOpeningAnother(t *testing.T) {
 
 func reopenAbove(t *testing.T, agent Agent, state State) string {
 	t.Helper()
+	return editSaved(t, agent, state, func(saved map[string]any) { saved["mode"] = "bypass" })
+}
+
+func editSaved(t *testing.T, agent Agent, state State, edit func(map[string]any)) string {
+	t.Helper()
 	path := filepath.Join(agent.Env["AGENTHAIL_ACPTEST_STATE"], state.AgentSessionID+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -501,7 +506,7 @@ func reopenAbove(t *testing.T, agent Agent, state State) string {
 	if err := json.Unmarshal(data, &saved); err != nil {
 		t.Fatal(err)
 	}
-	saved["mode"] = "bypass"
+	edit(saved)
 	if data, err = json.Marshal(saved); err != nil {
 		t.Fatal(err)
 	}
@@ -554,14 +559,14 @@ func TestALateCancelForAnEndedTurnLeavesTheNextTurnRunning(t *testing.T) {
 	second := h.send(state.SessionID, "slow")
 	h.waitFor(state.SessionID, func(s State) bool { return s.Status == StatusBusy && s.TurnID == second })
 	s := h.host.heldSession(state.SessionID)
-	if err := s.cancelTurn(first); err != nil {
+	if err := s.cancelTurn(first, false); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(300 * time.Millisecond)
 	if now := s.snapshot(); now.Status != StatusBusy || now.TurnID != second {
 		t.Fatalf("a cancel for an ended turn stopped the next one: %+v", now)
 	}
-	if err := s.cancelTurn(second); err != nil {
+	if err := s.cancelTurn(second, false); err != nil {
 		t.Fatal(err)
 	}
 	if done := h.waitFor(state.SessionID, func(s State) bool { return s.LastTurnID == second }); done.LastStop != "cancelled" {
@@ -599,12 +604,52 @@ func TestACancelRacingTheNextPromptNeverEndsIt(t *testing.T) {
 	s := h.host.heldSession(state.SessionID)
 	for i := range 30 {
 		turn := h.send(state.SessionID, fmt.Sprintf("reply:race-%d", i))
-		go func() { _ = s.cancelTurn(turn) }()
+		go func() { _ = s.cancelTurn(turn, false) }()
 		h.waitFor(state.SessionID, func(s State) bool { return s.LastTurnID == turn })
 		next := h.send(state.SessionID, "reply:next")
 		done := h.waitFor(state.SessionID, func(s State) bool { return s.LastTurnID == next })
 		if done.LastStop != "end_turn" {
 			t.Fatalf("iteration %d: a cancel for the previous turn ended the next one (%s)", i, done.LastStop)
 		}
+	}
+}
+
+func TestAnInterruptDuringALoadAnswersRequestsAndStopsTheStartingSend(t *testing.T) {
+	agent := fakeAgent(t, "fake")
+	h := startHost(t, agent)
+	state := h.create("fake", "", "")
+	s := h.host.heldSession(state.SessionID)
+	s.stopProcess()
+	editSaved(t, agent, state, func(saved map[string]any) { saved["loadMs"] = 1500 })
+	sent := make(chan error, 1)
+	go func() {
+		_, err := h.client.Send(context.Background(), SendParams{SessionID: state.SessionID, Text: "reply:should-not-run"})
+		sent <- err
+	}()
+	time.Sleep(300 * time.Millisecond)
+	pending := &pendingRequest{request: Request{ID: "req-load"}, answer: make(chan permissionAnswer, 1)}
+	s.mu.Lock()
+	s.pending["req-load"] = pending
+	s.mu.Unlock()
+	started := time.Now()
+	if err := s.cancel(); err != nil {
+		t.Fatal(err)
+	}
+	if waited := time.Since(started); waited > 500*time.Millisecond {
+		t.Fatalf("the interrupt waited %s behind the load", waited)
+	}
+	select {
+	case answer := <-pending.answer:
+		if answer.result.Outcome.Outcome != "cancelled" {
+			t.Fatalf("answer=%+v", answer.result)
+		}
+	default:
+		t.Fatal("the open request must be answered cancelled")
+	}
+	if err := <-sent; !isCode(err, CodeInvalid) || !strings.Contains(err.Error(), "interrupted") {
+		t.Fatalf("a send still starting when interrupted must not start its turn: %v", err)
+	}
+	if now := s.snapshot(); now.Status == StatusBusy {
+		t.Fatalf("a turn started after the interrupt: %+v", now)
 	}
 }

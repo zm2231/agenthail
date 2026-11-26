@@ -41,19 +41,21 @@ type session struct {
 	agent Agent
 	lock  *sessionLock
 
-	startMu sync.Mutex
-	mu      sync.Mutex
-	state   State
-	writer  *transcriptWriter
-	norm    *normalizer
-	cmd     *exec.Cmd
-	conn    *acp.Conn
-	caps    acp.AgentCapabilities
-	loading bool
-	pending map[string]*pendingRequest
-	idle    *time.Timer
-	exited  chan struct{}
-	closed  bool
+	startMu  sync.Mutex
+	promptMu sync.Mutex
+	cancels  uint64
+	mu       sync.Mutex
+	state    State
+	writer   *transcriptWriter
+	norm     *normalizer
+	cmd      *exec.Cmd
+	conn     *acp.Conn
+	caps     acp.AgentCapabilities
+	loading  bool
+	pending  map[string]*pendingRequest
+	idle     *time.Timer
+	exited   chan struct{}
+	closed   bool
 }
 
 func (s *session) snapshot() State {
@@ -233,7 +235,7 @@ func (s *session) enforceCeiling(previous, turnID string) {
 	if conn == nil {
 		return
 	}
-	_ = s.cancelTurn(turnID)
+	_ = s.cancelTurn(turnID, false)
 	ctx, cancel := context.WithTimeout(context.Background(), agentTimeout)
 	defer cancel()
 	if err := s.setModeOnAgent(ctx, previous); err != nil {
@@ -624,7 +626,7 @@ func (s *session) send(ctx context.Context, params SendParams) (SendResult, erro
 		return SendResult{}, err
 	}
 	s.mu.Lock()
-	refused, busy := s.state.Refused, s.state.Status == StatusBusy
+	refused, busy, cancels := s.state.Refused, s.state.Status == StatusBusy, s.cancels
 	s.mu.Unlock()
 	if refused != "" {
 		return SendResult{}, callError(CodeInvalid, "%s", refused)
@@ -636,7 +638,13 @@ func (s *session) send(ctx context.Context, params SendParams) (SendResult, erro
 		return SendResult{}, err
 	}
 	turnID := uuid.NewString()
+	s.promptMu.Lock()
+	defer s.promptMu.Unlock()
 	s.mu.Lock()
+	if s.cancels != cancels {
+		s.mu.Unlock()
+		return SendResult{}, callError(CodeInvalid, "the session was interrupted before this message started a turn")
+	}
 	if s.state.Status == StatusBusy {
 		s.mu.Unlock()
 		return SendResult{}, callError(CodeBusy, "the session is running a turn")
@@ -699,23 +707,25 @@ func (s *session) finishTurnLocked(stop string) {
 }
 
 func (s *session) cancel() error {
-	s.mu.Lock()
-	turnID := s.state.TurnID
-	s.mu.Unlock()
-	return s.cancelTurn(turnID)
+	return s.cancelTurn("", true)
 }
 
-// cancelTurn holds startMu through the write so no later prompt can reach the agent ahead of this session-wide cancel.
-func (s *session) cancelTurn(turnID string) error {
-	s.startMu.Lock()
-	defer s.startMu.Unlock()
+// cancelTurn writes under promptMu so no later prompt reaches the agent ahead of this session-wide cancel. An interrupt targets whatever turn is current and also stops a send still starting.
+func (s *session) cancelTurn(turnID string, interrupt bool) error {
 	s.mu.Lock()
-	conn, agentSession := s.conn, s.state.AgentSessionID
-	current := s.state.TurnID == turnID
-	busy := current && turnID != "" && s.state.Status == StatusBusy
-	if current {
+	if interrupt {
+		turnID = s.state.TurnID
+		s.cancels++
+	}
+	if s.state.TurnID == turnID {
 		s.cancelRequestsLocked()
 	}
+	s.mu.Unlock()
+	s.promptMu.Lock()
+	defer s.promptMu.Unlock()
+	s.mu.Lock()
+	conn, agentSession := s.conn, s.state.AgentSessionID
+	busy := turnID != "" && s.state.TurnID == turnID && s.state.Status == StatusBusy
 	s.mu.Unlock()
 	if !busy {
 		return nil
@@ -761,7 +771,7 @@ func (s *session) respond(requestID, choice string) (RespondResult, error) {
 	s.mu.Unlock()
 	s.changed()
 	if choice == "stop" {
-		go func() { _ = s.cancelTurn(turnID) }()
+		go func() { _ = s.cancelTurn(turnID, false) }()
 	}
 	err := awaitWritten(written)
 	if err != nil {

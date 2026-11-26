@@ -37,6 +37,7 @@ type session struct {
 	Mode    string   `json:"mode"`
 	Model   string   `json:"model"`
 	History []string `json:"history"`
+	LoadMS  int      `json:"loadMs,omitempty"`
 }
 
 type Agent struct {
@@ -103,6 +104,7 @@ func (a *Agent) Request(ctx context.Context, method string, params json.RawMessa
 		if err != nil {
 			return nil, &acp.Error{Code: acp.CodeInvalidParams, Message: err.Error()}
 		}
+		time.Sleep(time.Duration(s.LoadMS) * time.Millisecond)
 		for i, text := range s.History {
 			kind := "user_message_chunk"
 			if i%2 == 1 {
