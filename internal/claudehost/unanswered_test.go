@@ -15,7 +15,7 @@ import (
 )
 
 // stallingManager starts hosts whose event loop is blocked for block ms out of
-// every block+gap ms once marker exists; with stopOnHangup the stall ends at
+// every block+gap ms once marker holds their pid; with stopOnHangup the stall ends at
 // SIGHUP, as a host busy on a long synchronous task eventually runs its
 // signal handlers.
 func stallingManager(t *testing.T, f *claudehosttest.Fixture, block, gap int, stopOnHangup bool) (*claudehost.Manager, string) {
@@ -28,7 +28,9 @@ func stallingManager(t *testing.T, f *claudehosttest.Fixture, block, gap int, st
 		hangup = "process.on('SIGHUP', () => { stopped = true; });\n"
 	}
 	source := "const fs = require('fs');\nlet stopped = false;\n" + hangup +
-		"setInterval(() => {\n  if (stopped || !fs.existsSync(" + strconv.Quote(marker) + ")) return;\n" +
+		"setInterval(() => {\n  let target = '';\n" +
+		"  try { target = fs.readFileSync(" + strconv.Quote(marker) + ", 'utf8'); } catch {}\n" +
+		"  if (stopped || target !== String(process.pid)) return;\n" +
 		"  const end = Date.now() + " + strconv.Itoa(block) + ";\n  while (Date.now() < end) {}\n}, " + strconv.Itoa(gap) + ").unref();\n"
 	if err := os.WriteFile(script, []byte(source), 0600); err != nil {
 		t.Fatal(err)
@@ -52,7 +54,7 @@ func TestEnsureRetiresAHostThatStoppedAnsweringAndKeepsItsSession(t *testing.T) 
 	}
 	sessionID := uuid.NewString()
 	opened := f.Open(t, client, sessionID)
-	if err := os.WriteFile(marker, nil, 0600); err != nil {
+	if err := os.WriteFile(marker, []byte(strconv.Itoa(old.PID)), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -81,7 +83,10 @@ func TestEnsureKillsAHostThatCannotRetireAndKeepsItsClaudeRunning(t *testing.T) 
 	t.Cleanup(claudehost.SetUnansweredWaits(2*time.Second, 2*time.Second))
 	f := claudehosttest.New(t, "")
 	ctx := testContext(t)
-	client := f.Start(t)
+	client, err := f.Manager(t, "test", "FAKE_CLAUDE_OUTLIVES_INPUT=1").Ensure(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	old, err := client.Hello(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +128,7 @@ func TestEnsureKeepsASlowHostThatStillAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(marker, nil, 0600); err != nil {
+	if err := os.WriteFile(marker, []byte(strconv.Itoa(old.PID)), 0600); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
