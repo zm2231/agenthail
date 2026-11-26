@@ -99,7 +99,9 @@ fn touch(s: &mut App, id: &str) {
 }
 
 pub(crate) fn load(s: &mut App, id: &str) {
-    s.crew.claude_asked.remove(id);
+    if s.crew.claude_asked.get(id).is_some_and(|a| !a.in_flight) {
+        s.crew.claude_asked.remove(id);
+    }
     if s.crew.errors.remove(id).is_some() && !loading(s, id) {
         s.crew.asked.remove(id);
     }
