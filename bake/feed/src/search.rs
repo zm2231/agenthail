@@ -256,6 +256,10 @@ pub fn reread(detail: crate::gone::Detail, known: &Session) -> Recheck {
     Recheck::Fresh(Box::new(row))
 }
 
+fn hidden_from_list(x: &Session) -> bool {
+    x.delegated == Some(true) || x.subagent.as_ref().is_some_and(|v| !v.is_null())
+}
+
 impl Client {
     pub fn recheck(&self, known: &Session) -> Recheck {
         let detail = crate::gone::Detail::read(self.get_coded(&format!("/api/v1/session?id={}&limit=1", enc(&known.id))));
@@ -279,6 +283,9 @@ impl Client {
                 Ok(None) => {}
                 Err(e) => return Recheck::Unknown(e),
             }
+        }
+        if hidden_from_list(known) || hidden_from_list(row) {
+            return Recheck::Unknown("Agenthail's session list hides this kind of session".into());
         }
         found
     }
@@ -448,6 +455,9 @@ mod tests {
         let unlisted = r#"{"sessions": [], "nextCursor": ""}"#;
         let (client, _asked) = crate::mock::daemon(vec![(200, detail.into()), (200, unlisted.into())]);
         assert!(matches!(client.recheck(&known), Recheck::Fresh(r) if !r.archived && r.status == "busy"));
+        let delegated = Session { delegated: Some(true), ..known.clone() };
+        let (client, _hidden) = crate::mock::daemon(vec![(200, detail.into()), (200, unlisted.into())]);
+        assert!(matches!(client.recheck(&delegated), Recheck::Unknown(_)));
         let (client, _failed) = crate::mock::daemon(vec![(200, detail.into()), (500, r#"{"error":{"code":"internal_error","message":"boom"}}"#.into())]);
         assert!(matches!(client.recheck(&known), Recheck::Unknown(_)));
     }
