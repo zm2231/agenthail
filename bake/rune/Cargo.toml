@@ -8,16 +8,16 @@ license = "MIT"
 [dependencies]
 feed = { path = "../feed" }
 serde_json = "1"
-rune = { git = "https://github.com/zm2231/rune", rev = "3efe0ea7c6f3097dc1c821264800edc2fd272c46", features = ["tooling"] }
-rune-kit = { git = "https://github.com/zm2231/rune", rev = "3efe0ea7c6f3097dc1c821264800edc2fd272c46", features = ["markdown"] }
+rune = { git = "https://github.com/zm2231/rune", rev = "d74939198aee33e645fb8dbd5a1d996da23afbc6", features = ["tooling"] }
+rune-kit = { git = "https://github.com/zm2231/rune", rev = "d74939198aee33e645fb8dbd5a1d996da23afbc6", features = ["markdown"] }
 
 [patch.crates-io]
-winit = { git = "https://github.com/zm2231/rune", rev = "3efe0ea7c6f3097dc1c821264800edc2fd272c46" }
-sctk-adwaita = { git = "https://github.com/zm2231/rune", rev = "3efe0ea7c6f3097dc1c821264800edc2fd272c46" }
-parley_engine = { git = "https://github.com/zm2231/rune", rev = "3efe0ea7c6f3097dc1c821264800edc2fd272c46" }
-wgpu-hal = { git = "https://github.com/zm2231/rune", rev = "3efe0ea7c6f3097dc1c821264800edc2fd272c46" }
-accesskit_windows = { git = "https://github.com/zm2231/rune", rev = "3efe0ea7c6f3097dc1c821264800edc2fd272c46" }
-accesskit_macos = { git = "https://github.com/zm2231/rune", rev = "3efe0ea7c6f3097dc1c821264800edc2fd272c46" }
+winit = { git = "https://github.com/zm2231/rune", rev = "d74939198aee33e645fb8dbd5a1d996da23afbc6" }
+sctk-adwaita = { git = "https://github.com/zm2231/rune", rev = "d74939198aee33e645fb8dbd5a1d996da23afbc6" }
+parley_engine = { git = "https://github.com/zm2231/rune", rev = "d74939198aee33e645fb8dbd5a1d996da23afbc6" }
+wgpu-hal = { git = "https://github.com/zm2231/rune", rev = "d74939198aee33e645fb8dbd5a1d996da23afbc6" }
+accesskit_windows = { git = "https://github.com/zm2231/rune", rev = "d74939198aee33e645fb8dbd5a1d996da23afbc6" }
+accesskit_macos = { git = "https://github.com/zm2231/rune", rev = "d74939198aee33e645fb8dbd5a1d996da23afbc6" }
 
 [profile.release]
 debug = false
