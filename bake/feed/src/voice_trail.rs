@@ -78,10 +78,22 @@ impl Trail {
         let mut attempts: Vec<Attempt> = saved.attempts.into_iter().filter(|a| !own.contains(&a.id)).collect();
         attempts.extend(self.attempts.drain(..).filter(|a| own.contains(&a.id)));
         attempts.sort_by_key(|a| a.started_at);
-        let keep = attempts.len().saturating_sub(KEPT_CALLS);
-        attempts.drain(..keep);
-        self.own = own.into_iter().filter(|id| attempts.iter().any(|a| a.id == *id)).collect();
         self.attempts = attempts;
+        self.own = own;
+        self.cap();
+    }
+
+    fn cap(&mut self) {
+        let mut extra = self.attempts.len().saturating_sub(KEPT_CALLS);
+        let own = &self.own;
+        self.attempts.retain(|a| {
+            let live = a.cause.is_none() && own.contains(&a.id);
+            let drop = extra > 0 && !live;
+            extra -= usize::from(drop);
+            !drop
+        });
+        let attempts = &self.attempts;
+        self.own.retain(|id| attempts.iter().any(|a| a.id == *id));
     }
 
     pub fn save(&self) -> String {
@@ -96,9 +108,7 @@ impl Trail {
         let started_at = OffsetDateTime::now_utc().unix_timestamp();
         self.attempts.push(Attempt { id: id.into(), started_at, clock, ..Attempt::default() });
         self.own.push(id.into());
-        let keep = self.attempts.len().saturating_sub(KEPT_CALLS);
-        let dropped: Vec<String> = self.attempts.drain(..keep).map(|a| a.id).collect();
-        self.own.retain(|id| !dropped.contains(id));
+        self.cap();
         self.changed = true;
     }
 

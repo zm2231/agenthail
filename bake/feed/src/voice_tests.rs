@@ -629,6 +629,25 @@ fn two_owners_of_one_call_log_keep_each_others_calls() {
 }
 
 #[test]
+fn a_live_call_survives_twenty_newer_calls_from_another_owner() {
+    let mut mine = Trail::default();
+    mine.begin("mine-live", 0.0);
+    mine.attempts[0].started_at -= 3600;
+    let mut theirs = Trail::default();
+    for k in 0..KEPT_CALLS {
+        theirs.begin(&format!("theirs-{k}"), 0.0);
+        theirs.end(&format!("theirs-{k}"), "local_hangup", 1.0);
+    }
+    mine.combine(Trail::parse(&theirs.save()).unwrap());
+    assert_eq!(mine.attempts.len(), KEPT_CALLS);
+    assert!(mine.attempts.iter().any(|a| a.id == "mine-live"));
+    mine.end("mine-live", "local_hangup", 5.0);
+    assert_eq!(mine.last().unwrap().cause.as_deref(), Some("local_hangup"));
+    mine.combine(Trail::parse(&theirs.save()).unwrap());
+    assert!(mine.attempts.iter().all(|a| a.id != "mine-live"), "once ended it ages out like any other call");
+}
+
+#[test]
 fn calls_logged_before_the_saved_log_could_be_read_join_it() {
     let mut saved = Trail::default();
     for k in 0..19 {
