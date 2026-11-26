@@ -36,7 +36,7 @@ impl MenuBar {
             .collect();
         let mut listed: Vec<&Session> = w.sessions.iter().filter(|x| !x.archived && !hidden(x) && !w.helpers.contains(&x.id) && !asked.contains(x.id.as_str())).collect();
         listed.sort_by_key(|x| Reverse(x.last_active.clone()));
-        let helping: HashSet<&str> = w.sessions.iter().filter(|x| w.helpers.contains(&x.id) && !x.archived && busy(x)).filter_map(|x| x.subagent.as_ref()?.get("parentId")?.as_str()).collect();
+        let helping: HashSet<&str> = w.sessions.iter().filter(|x| w.helpers.contains(&x.id) && !x.archived && busy(x)).filter_map(|x| root_of(w, x)).collect();
         let (working, recent): (Vec<&Session>, Vec<&Session>) = listed.into_iter().partition(|x| busy(x) || helping.contains(x.id.as_str()));
         MenuBar {
             needs_you: needs.len(),
@@ -50,6 +50,21 @@ impl MenuBar {
         let needs = if self.needs_you > self.needs.len() { format!("Needs you ({}, {} shown)", self.needs_you, self.needs.len()) } else { format!("Needs you ({})", self.needs_you) };
         [(needs, &self.needs[..]), ("Working".to_string(), &self.working[..]), ("Recent".to_string(), &self.recent[..])].into_iter().filter(|(_, rows)| !rows.is_empty()).collect()
     }
+}
+
+fn parent(x: &Session) -> Option<&str> {
+    x.subagent.as_ref()?.get("parentId")?.as_str()
+}
+
+fn root_of<'a>(w: &'a World, helper: &'a Session) -> Option<&'a str> {
+    let mut id = parent(helper)?;
+    for _ in 0..w.sessions.len() {
+        match w.session(id).filter(|x| w.helpers.contains(&x.id)) {
+            Some(up) => id = parent(up)?,
+            None => return Some(id),
+        }
+    }
+    None
 }
 
 fn need_row(n: &Need) -> Row {
@@ -177,8 +192,11 @@ mod tests {
     fn a_session_whose_helper_is_working_is_listed_as_working() {
         let w = world(vec![
             session("lead", json!({})),
-            session("helper", json!({"status": "busy", "subagent": {"parentId": "lead"}})),
+            session("helper", json!({"subagent": {"parentId": "lead"}})),
+            session("nested", json!({"status": "busy", "subagent": {"parentId": "helper"}})),
             session("other", json!({})),
+            session("loop-a", json!({"status": "busy", "subagent": {"parentId": "loop-b"}})),
+            session("loop-b", json!({"subagent": {"parentId": "loop-a"}})),
         ]);
         let bar = MenuBar::build(&w, &[]);
         assert_eq!(ids(&bar.working), ["open-session:lead"]);
