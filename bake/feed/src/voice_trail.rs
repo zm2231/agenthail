@@ -66,15 +66,15 @@ impl Trail {
     }
 
     pub fn parse(saved: &str) -> Result<Trail, String> {
-        let mut attempts: Vec<Attempt> = serde_json::from_str(saved).map_err(|e| e.to_string())?;
-        let keep = attempts.len().saturating_sub(KEPT_CALLS);
-        attempts.drain(..keep);
-        Ok(Trail { attempts, changed: keep > 0, ..Trail::default() })
+        let attempts: Vec<Attempt> = serde_json::from_str(saved).map_err(|e| e.to_string())?;
+        Ok(Trail { attempts, ..Trail::default() })
     }
 
     pub fn load(saved: &str, pid: u32, alive: impl Fn(u32) -> bool) -> Result<Trail, String> {
         let mut trail = Trail { pid, ..Trail::parse(saved)? };
-        trail.changed |= trail.close_orphans(&alive);
+        let closed = trail.close_orphans(&alive);
+        let trimmed = trail.cap();
+        trail.changed = closed || trimmed;
         Ok(trail)
     }
 
@@ -101,17 +101,17 @@ impl Trail {
         self.cap();
     }
 
-    fn cap(&mut self) {
-        let mut extra = self.attempts.len().saturating_sub(KEPT_CALLS);
-        let own = &self.own;
+    fn cap(&mut self) -> bool {
+        let before = self.attempts.len();
+        let mut extra = before.saturating_sub(KEPT_CALLS);
         self.attempts.retain(|a| {
-            let live = a.cause.is_none() && own.contains(&a.id);
-            let drop = extra > 0 && !live;
+            let drop = extra > 0 && a.cause.is_some();
             extra -= usize::from(drop);
             !drop
         });
         let attempts = &self.attempts;
         self.own.retain(|id| attempts.iter().any(|a| a.id == *id));
+        self.attempts.len() < before
     }
 
     pub fn save(&self) -> String {

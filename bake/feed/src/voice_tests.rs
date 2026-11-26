@@ -666,6 +666,28 @@ fn a_live_call_survives_twenty_newer_calls_from_another_owner() {
 }
 
 #[test]
+fn another_owner_saving_many_calls_never_evicts_a_running_owners_call() {
+    let mut a = Trail::owned_by(1);
+    a.begin("a-live", 0.0);
+    a.attempts[0].started_at -= 3600;
+    let mut disk = a.save();
+    let mut b = Trail::owned_by(2);
+    for k in 0..KEPT_CALLS + 5 {
+        let id = format!("b-{k}");
+        b.begin(&id, 0.0);
+        b.end(&id, "local_hangup", 1.0);
+        b.combine(Trail::parse(&disk).unwrap(), |pid| pid == 1 || pid == 2);
+        disk = b.save();
+    }
+    let kept = Trail::parse(&disk).unwrap();
+    assert_eq!(kept.attempts.len(), KEPT_CALLS);
+    assert!(kept.attempts.iter().any(|a| a.id == "a-live" && a.cause.is_none()));
+    let after = Trail::load(&disk, 3, |pid| pid == 2).unwrap();
+    let cut = after.attempts.iter().find(|a| a.id == "a-live").unwrap();
+    assert_eq!(cut.cause.as_deref(), Some(UNFINISHED), "once its app is gone the call is closed, not lost");
+}
+
+#[test]
 fn calls_logged_before_the_saved_log_could_be_read_join_it() {
     let mut saved = Trail::default();
     for k in 0..19 {
