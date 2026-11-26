@@ -13,6 +13,7 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfacetest"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 type slowResponses struct {
@@ -57,6 +58,17 @@ func rolloutTurnEnd(t *testing.T, threadID, turnID string) string {
 	return ""
 }
 
+// awaitNoActiveTurn waits until the app server, not only the rollout, has
+// ended the thread's turn, since a send to a thread with a turn running is
+// not accepted.
+func awaitNoActiveTurn(t *testing.T, codex *Codex, conn codexClient, threadID string) {
+	t.Helper()
+	testkit.Eventually(t, "the app server to end the thread's turn", 30*time.Second, func() bool {
+		active, err := codex.activeTurnID(context.Background(), conn, threadID, "")
+		return err == nil && active == ""
+	})
+}
+
 func followingRuntime(t *testing.T) (*Codex, codexClient) {
 	t.Helper()
 	realManagedCodexWith(t, &slowResponses{delay: 2 * time.Second})
@@ -99,6 +111,7 @@ func TestATurnSentToAnIdleThreadSurvivesAgenthailFollowingIt(t *testing.T) {
 	if end := rolloutTurnEnd(t, session.ID, sent.UUID); end != "task_complete" {
 		t.Fatalf("the first turn ended with %s", end)
 	}
+	awaitNoActiveTurn(t, codex, follower, session.ID)
 	session.Status = surface.StatusIdle
 	sent, err = codex.Send(ctx, session, "second")
 	if err != nil || !sent.Accepted {
@@ -174,6 +187,7 @@ func TestATurnStillStartingAfterTheStartWaitIsNotReloaded(t *testing.T) {
 	if end := rolloutTurnEnd(t, session.ID, sent.UUID); end != "task_complete" {
 		t.Fatalf("the first turn ended with %s", end)
 	}
+	awaitNoActiveTurn(t, codex, follower, session.ID)
 	session.Status = surface.StatusIdle
 	if sent, err = codex.Send(ctx, session, "second"); err != nil || !sent.Accepted {
 		t.Fatalf("send to the idle thread: %+v %v", sent, err)

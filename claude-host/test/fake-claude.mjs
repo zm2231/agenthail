@@ -264,6 +264,18 @@ async function turn(message) {
     // A background shell Claude started, in its process group.
     const shell = spawn('sleep', ['600'], { stdio: 'ignore' });
     reply = `shell:${shell.pid}`;
+  } else if (text.startsWith('WAIT')) {
+    // A turn that runs until the file it names exists.
+    const file = text.slice('WAIT'.length).trim();
+    await new Promise((resolve) => {
+      const timer = setInterval(() => {
+        if (fs.existsSync(file)) {
+          clearInterval(timer);
+          resolve();
+        }
+      }, 20);
+    });
+    reply = 'waited';
   } else if (text.startsWith('HANG')) {
     // A turn that ignores interrupts and the end of its input, like a wedged
     // Claude: only a kill ends it.

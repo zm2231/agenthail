@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,20 +23,24 @@ import (
 
 type slowCatchUpClaude struct {
 	*claudesurface.Claude
-	delay time.Duration
+	release chan struct{}
 }
 
 func (c *slowCatchUpClaude) TranscriptItems(ctx context.Context, session *surface.Session, request surface.TranscriptItemsRequest) (*surface.TranscriptItemsResult, error) {
 	if request.Identity != "" {
-		time.Sleep(c.delay)
+		select {
+		case <-c.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 	return c.Claude.TranscriptItems(ctx, session, request)
 }
 
 func TestACatchUpThatOutlastsThePageWaitArrivesOverTheStreamInTranscriptOrder(t *testing.T) {
-	previousGrace, previousWait := sessionPageHandoffGrace, sessionPageCatchUpWait
-	sessionPageHandoffGrace, sessionPageCatchUpWait = 10*time.Millisecond, 100*time.Millisecond
-	t.Cleanup(func() { sessionPageHandoffGrace, sessionPageCatchUpWait = previousGrace, previousWait })
+	previousGrace := sessionPageHandoffGrace
+	sessionPageHandoffGrace = 10 * time.Millisecond
+	t.Cleanup(func() { sessionPageHandoffGrace = previousGrace })
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	d, r, _, _, _ := daemonFixture(t)
 	t.Cleanup(d.sources.shutdown)
@@ -52,8 +57,14 @@ func TestACatchUpThatOutlastsThePageWaitArrivesOverTheStreamInTranscriptOrder(t 
 	if err := r.RecordObservedSession(session); err != nil {
 		t.Fatal(err)
 	}
-	const catchUpDelay = 1500 * time.Millisecond
-	d.Surfaces = []surface.Surface{&slowCatchUpClaude{Claude: claudesurface.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home), delay: catchUpDelay}}
+	claude := &slowCatchUpClaude{Claude: claudesurface.NewClaude(signin.Fixed{Browser: signin.Chrome}, fixture.Home), release: make(chan struct{})}
+	var releaseOnce sync.Once
+	releaseCatchUp := func() { releaseOnce.Do(func() { close(claude.release) }) }
+	t.Cleanup(releaseCatchUp)
+	d.Surfaces = []surface.Surface{claude}
+	if err := d.sources.seed(t.Context(), &session, claude); err != nil {
+		t.Fatal(err)
+	}
 	handler := dashboardRouter(d)
 	if got := readDashboardExchanges(t, handler, conversation, ""); len(got) != 2 {
 		t.Fatalf("first page exchanges=%+v", got)
@@ -76,16 +87,15 @@ func TestACatchUpThatOutlastsThePageWaitArrivesOverTheStreamInTranscriptOrder(t 
 	request := httptest.NewRequest(http.MethodGet, "/api/session?id="+conversation+"&timeline=1", nil)
 	request.AddCookie(browserCookie(t, d.Registry))
 	response := httptest.NewRecorder()
-	started := time.Now()
 	handler.ServeHTTP(response, request)
-	elapsed := time.Since(started)
 	var page timelinePage
 	if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil || response.Code != http.StatusOK {
 		t.Fatalf("status=%d err=%v body=%s", response.Code, err, response.Body.String())
 	}
-	if elapsed >= catchUpDelay/2 || len(page.exchanges(t)) != 2 || page.JournalSeq == 0 {
-		t.Fatalf("page took %v with %d exchanges at seq %d; want the journal's page once the wait runs out", elapsed, len(page.exchanges(t)), page.JournalSeq)
+	if !page.CatchingUp || len(page.exchanges(t)) != 2 || page.JournalSeq == 0 {
+		t.Fatalf("page catchingUp=%v with %d exchanges at seq %d; want the journal's page while the catch-up runs", page.CatchingUp, len(page.exchanges(t)), page.JournalSeq)
 	}
+	releaseCatchUp()
 
 	server := httptest.NewServer(handler)
 	defer server.Close()

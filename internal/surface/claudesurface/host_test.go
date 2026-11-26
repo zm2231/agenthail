@@ -307,7 +307,8 @@ func TestAPersonsTurnWaitsForAnOrphanedSessionAndThenResumesItOnce(t *testing.T)
 	id := uuid.NewString()
 	opened := fixture.Open(t, client, id)
 	sess := listedSession(t, c, id)
-	if _, err := c.SendHumanTurn(surface.WithMessageUUID(context.Background(), uuid.NewString()), sess, "SLOW 3000", nil); err != nil {
+	finish := filepath.Join(t.TempDir(), "finish")
+	if _, err := c.SendHumanTurn(surface.WithMessageUUID(context.Background(), uuid.NewString()), sess, "WAIT "+finish, nil); err != nil {
 		t.Fatal(err)
 	}
 	fixture.KillHost(t)
@@ -327,6 +328,9 @@ func TestAPersonsTurnWaitsForAnOrphanedSessionAndThenResumesItOnce(t *testing.T)
 	held("while the host is down")
 	fixture.Start(t)
 	held("while a new host runs and the orphan still holds the session")
+	if err := os.WriteFile(finish, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	testkit.Eventually(t, "the orphaned CLI to finish its turn and exit", 15*time.Second, func() bool { return !claudehosttest.Alive(opened.PID) })
 	c.host.forget()
 	if _, err := c.SendHumanTurn(surface.WithMessageUUID(context.Background(), uuid.NewString()), sess, "after", nil); err != nil {
@@ -337,7 +341,7 @@ func TestAPersonsTurnWaitsForAnOrphanedSessionAndThenResumesItOnce(t *testing.T)
 	for _, turn := range fixture.Turns(t, id) {
 		texts = append(texts, turn.Text)
 	}
-	if strings.Join(texts, ",") != "SLOW 3000,after" || len(fixture.Spawns(t, id)) != 2 {
+	if strings.Join(texts, ",") != "WAIT "+finish+",after" || len(fixture.Spawns(t, id)) != 2 {
 		t.Fatalf("turns = %q spawns = %d, want the held messages undelivered and one resume", texts, len(fixture.Spawns(t, id)))
 	}
 }

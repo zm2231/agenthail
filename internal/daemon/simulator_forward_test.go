@@ -54,6 +54,10 @@ func simulatorsOnHosts(t *testing.T, names ...string) *forwardedSims {
 		outRoot := t.TempDir()
 		host := simhost.New(simhost.Config{Exec: commands.exec, OutRoot: outRoot, LockDir: t.TempDir(), GOOS: "darwin"})
 		node.daemon.SetSimulatorHost(host)
+		// The mirror reads simulators from one version per connection, which names none before the first probe ends.
+		if !node.daemon.simulatorStatus(context.Background()).Ready {
+			t.Fatalf("%s's simulator probe did not report ready", name)
+		}
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			t.Fatal(err)

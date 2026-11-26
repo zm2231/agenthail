@@ -330,27 +330,30 @@ func TestAHostFromBeforeReleaseIsReleasedOnceAndLeavesAsItAlwaysDid(t *testing.T
 	})
 }
 
-// The drain grace stands in for the hour of a prompt cache, so a grace of
-// seconds here is the hour, and working past it is the session working on
-// for most of an hour after the update.
+// The drain grace stands in for the hour of a prompt cache, so a turn that
+// runs past the grace from the retire is the session working on for most of
+// an hour after the update.
 func TestAKeptSessionThatWorksPastTheDrainGraceStillCompactsBeforeItsRetiringHostLeaves(t *testing.T) {
-	t.Setenv("AGENTHAIL_CLAUDE_HOST_DRAIN_GRACE_MS", "3000")
+	const grace = 10 * time.Second
+	t.Setenv("AGENTHAIL_CLAUDE_HOST_DRAIN_GRACE_MS", fmt.Sprint(grace.Milliseconds()))
 	x := newRetiringFixture(t)
 	now := time.Now()
 	kept := x.open(250_000, now.Add(-10*time.Minute))
 	x.update()
+	retired := time.Now()
 	read := map[string]idleTranscript{}
 	x.d.compactIdle(x.ctx, now, read)
 
 	session := kept.session
-	for i := range 5 {
-		if _, err := x.d.dispatcher().DeliverWithOptions(x.ctx, x.claude, &session, fmt.Sprintf("work %d", i), "", surface.SendOptions{Author: surface.AuthorPerson}); err != nil {
-			t.Fatal(err)
-		}
-		testkit.Eventually(t, "the turn", 15*time.Second, func() bool { return len(x.f.Turns(t, kept.session.ID)) == i+2 })
-		testkit.Eventually(t, "the turn to end", 15*time.Second, func() bool { return hostState(t, x.client, kept.session.ID) == "idle" })
-		time.Sleep(time.Second)
+	if _, err := x.d.dispatcher().DeliverWithOptions(x.ctx, x.claude, &session, "SLOW 600000", "", surface.SendOptions{Author: surface.AuthorPerson}); err != nil {
+		t.Fatal(err)
 	}
+	testkit.Eventually(t, "the long turn to start", 15*time.Second, func() bool { return hostState(t, x.client, kept.session.ID) == "busy" })
+	time.Sleep(time.Until(retired.Add(grace)))
+	if err := x.client.Interrupt(x.ctx, kept.session.ID); err != nil {
+		t.Fatal(err)
+	}
+	testkit.Eventually(t, "the long turn to end", 15*time.Second, func() bool { return hostState(t, x.client, kept.session.ID) == "idle" })
 	if !claudehosttest.Alive(kept.pid) {
 		t.Fatal("the retiring host closed a kept session that kept working past the drain grace")
 	}
