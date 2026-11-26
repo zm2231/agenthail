@@ -269,7 +269,7 @@ fn row_el(s: &App, x: &Session, item: &Queued) -> El {
                 .grow(1.0)
                 .min_w(0.0)
                 .gap(2.0)
-                .child(text(item.first_line().to_string()).font(META_BOLD).color(theme::text()).truncate())
+                .child(text(item.headline()).font(META_BOLD).color(theme::text()).truncate())
                 .child(text(if working { "Working…".to_string() } else { item.summary(s.now) }).font(META).color(faint()).truncate()),
         )
         .child(actions)
