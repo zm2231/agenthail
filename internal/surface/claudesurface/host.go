@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -21,20 +22,31 @@ import (
 
 const (
 	claudeHostListTTL       = time.Second
-	claudeHostListTimeout   = 500 * time.Millisecond
+	claudeHostListTimeout   = 5 * time.Second
 	claudeHostSilentOpenTTL = 5 * time.Second
+	claudeHostTakenTTL      = 10 * time.Minute
 )
 
 type claudeHost struct {
-	client     claudehost.Client
-	state      string
+	client claudehost.Client
+	state  string
+	// fetch lets one listing ask the hosts at a time; mu guards the cache and
+	// is never held across a call to a host.
+	fetch      sync.Mutex
 	mu         sync.Mutex
 	ttl        time.Duration
 	listed     time.Time
+	forgotten  time.Time
 	sessions   map[string]int
 	open       map[string]claudehost.Session
 	openListed map[string]time.Time
-	partial    bool
+	// unseen are sessions a partial listing kept from an earlier one, since
+	// the host that runs them may be the one that did not answer.
+	unseen  map[string]bool
+	partial bool
+	// taken are the requests a host took an answer to, by request id, so a
+	// snapshot read before the answer cannot bring them back.
+	taken map[string]time.Time
 }
 
 // claudeHosted reports whether the host runs the session's conversation. Its
@@ -74,6 +86,7 @@ func (h *claudeHost) runs(ctx context.Context, pid int, conversation string, rea
 func (h *claudeHost) forget() {
 	h.mu.Lock()
 	h.listed = time.Time{}
+	h.forgotten = time.Now()
 	h.mu.Unlock()
 }
 
@@ -92,40 +105,59 @@ func (h *claudeHost) listing(ctx context.Context) map[string]int {
 	if h == nil {
 		return nil
 	}
+	h.fetch.Lock()
+	defer h.fetch.Unlock()
+	h.mu.Lock()
+	fresh := time.Since(h.listed) <= h.ttl
+	h.mu.Unlock()
+	if !fresh {
+		h.refresh(ctx)
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if time.Since(h.listed) > h.ttl {
-		listCtx, cancel := context.WithTimeout(ctx, claudeHostListTimeout)
-		started := time.Now()
-		listing, err := h.client.List(listCtx)
-		took := time.Since(started)
-		cancel()
-		previous, previousOpen, previousListed, wasPartial := h.sessions, h.open, h.openListed, h.partial
-		h.sessions = map[string]int{}
-		h.open = map[string]claudehost.Session{}
-		h.openListed = map[string]time.Time{}
-		h.partial = err != nil || len(listing.Unanswered) > 0
-		if err == nil {
-			for _, session := range listing.Sessions {
-				h.sessions[session.SessionID] = session.PID
-				h.open[session.SessionID] = session
-				h.openListed[session.SessionID] = started
-			}
-			for _, orphan := range listing.Orphans {
-				h.sessions[orphan.SessionID] = orphan.PID
-			}
-		} else {
-			h.readState()
-		}
-		if h.partial {
-			h.keepUnseen(previous, previousOpen, previousListed)
-		}
-		if h.partial != wasPartial {
-			logClaudeHostListing(h.partial, took, err, listing.Unanswered)
-		}
-		h.listed = time.Now()
-	}
 	return maps.Clone(h.sessions)
+}
+
+func (h *claudeHost) refresh(ctx context.Context) {
+	listCtx, cancel := context.WithTimeout(ctx, claudeHostListTimeout)
+	started := time.Now()
+	listing, err := h.client.List(listCtx)
+	took := time.Since(started)
+	cancel()
+	sessions := map[string]int{}
+	open := map[string]claudehost.Session{}
+	openListed := map[string]time.Time{}
+	partial := err != nil || len(listing.Unanswered) > 0
+	if err == nil {
+		for _, session := range listing.Sessions {
+			sessions[session.SessionID] = session.PID
+			open[session.SessionID] = session
+			openListed[session.SessionID] = started
+		}
+		for _, orphan := range listing.Orphans {
+			sessions[orphan.SessionID] = orphan.PID
+		}
+	} else {
+		h.readState(sessions)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	previous, previousOpen, previousListed, wasPartial := h.sessions, h.open, h.openListed, h.partial
+	h.sessions, h.open, h.openListed, h.partial = sessions, open, openListed, partial
+	h.unseen = map[string]bool{}
+	if partial {
+		h.keepUnseen(previous, previousOpen, previousListed)
+	}
+	for id, session := range h.open {
+		h.open[id] = h.withoutTaken(session)
+	}
+	if partial != wasPartial {
+		logClaudeHostListing(partial, took, err, listing.Unanswered)
+	}
+	h.listed = time.Now()
+	if h.forgotten.After(started) {
+		h.listed = time.Time{}
+	}
 }
 
 func (h *claudeHost) keepUnseen(previous map[string]int, previousOpen map[string]claudehost.Session, previousListed map[string]time.Time) {
@@ -137,6 +169,7 @@ func (h *claudeHost) keepUnseen(previous map[string]int, previousOpen map[string
 		if session, ok := previousOpen[id]; ok && session.PID == pid {
 			h.open[id] = session
 			h.openListed[id] = previousListed[id]
+			h.unseen[id] = true
 		}
 	}
 }
@@ -155,6 +188,37 @@ func logClaudeHostListing(partial bool, took time.Duration, err error, unanswere
 	}
 }
 
+// answered drops a request its host took an answer to from the cached
+// listing, now and from any listing read before the answer.
+func (h *claudeHost) answered(conversation, requestID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	now := time.Now()
+	if h.taken == nil {
+		h.taken = map[string]time.Time{}
+	}
+	for id, at := range h.taken {
+		if now.Sub(at) > claudeHostTakenTTL {
+			delete(h.taken, id)
+		}
+	}
+	h.taken[requestID] = now
+	if session, ok := h.open[conversation]; ok {
+		h.open[conversation] = h.withoutTaken(session)
+	}
+}
+
+func (h *claudeHost) withoutTaken(session claudehost.Session) claudehost.Session {
+	if len(h.taken) == 0 || !slices.ContainsFunc(session.Requests, func(request claudehost.Request) bool { _, ok := h.taken[request.RequestID]; return ok }) {
+		return session
+	}
+	session.Requests = slices.DeleteFunc(slices.Clone(session.Requests), func(request claudehost.Request) bool {
+		_, ok := h.taken[request.RequestID]
+		return ok
+	})
+	return session
+}
+
 // unanswered reports whether a host did not answer the last listing.
 func (h *claudeHost) unanswered() bool {
 	h.mu.Lock()
@@ -169,7 +233,7 @@ func (h *claudeHost) requestsKnown(conversation string, pid int) bool {
 		return true
 	}
 	if session, ok := h.open[conversation]; ok && session.PID == pid {
-		return time.Since(h.openListed[conversation]) <= claudeHostSilentOpenTTL
+		return !h.unseen[conversation] || time.Since(h.openListed[conversation]) <= claudeHostSilentOpenTTL
 	}
 	return h.sessions[conversation] != pid
 }
@@ -190,7 +254,7 @@ func (h *claudeHost) session(ctx context.Context, conversation string, pid int) 
 // readState reads the processes the host recorded starting. One counts only
 // while its pid runs with the recorded start time; a different start time means
 // another process reused the pid.
-func (h *claudeHost) readState() {
+func (h *claudeHost) readState(sessions map[string]int) {
 	data, err := os.ReadFile(h.state)
 	if err != nil {
 		return
@@ -209,7 +273,7 @@ func (h *claudeHost) readState() {
 			continue
 		}
 		if started, err := procstart.Lstart(context.Background(), entry.PID); err == nil && started == entry.Started {
-			h.sessions[id] = entry.PID
+			sessions[id] = entry.PID
 		}
 	}
 }

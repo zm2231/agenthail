@@ -17,8 +17,11 @@ func (c *Claude) Commands(ctx context.Context, sess *surface.Session) (*surface.
 		return &surface.RuntimeCommands{Commands: []surface.RuntimeCommand{}, Unavailable: claudeCommandsUnavailable}, nil
 	}
 	if claudeHosted(sess) {
-		if listed, ok := c.host.session(ctx, sess.ID, sess.PID); ok && listed.Commands != nil {
-			return claudeRuntimeCommands(listed.Commands), nil
+		readCtx, cancel := context.WithTimeout(ctx, claudeHostListTimeout)
+		commands, _ := c.host.client.SessionCommands(readCtx, sess.ID)
+		cancel()
+		if commands != nil {
+			return claudeRuntimeCommands(commands), nil
 		}
 	}
 	if sess.Cwd == "" || c.host == nil {

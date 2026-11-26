@@ -411,7 +411,6 @@ class Session {
       requests: [...this.pending.values()].map((p) => p.request),
       tasks: this.describeTasks(),
       taskTurnOwed: this.taskTurnOwed(),
-      commands: this.commands,
     };
   }
 
@@ -558,6 +557,8 @@ const methods = {
     return {};
   },
   commands: listCommands,
+  session: ({ sessionId }) => session(sessionId).describe(),
+  sessionCommands: ({ sessionId }) => ({ commands: session(sessionId).commands }),
   list: () => ({
     sessions: [...sessions.values()].map((s) => s.describe()),
     orphans: liveOrphans(),

@@ -113,7 +113,7 @@ func TestAHostThatDoesNotAnswerDelaysOnlyTheSessionsItRuns(t *testing.T) {
 	}
 	select {
 	case <-hostedDone:
-	case <-time.After(5 * time.Second):
+	case <-time.After(claudeHostListTimeout + 5*time.Second):
 		t.Fatal("the hosted read did not give up on a host that does not answer")
 	}
 }

@@ -34,28 +34,36 @@ func (c *Claude) hostWaiting(ctx context.Context, sess *surface.Session) (*surfa
 }
 
 // Requests lists the open requests of a session the host runs, oldest first,
-// read from the host now rather than from its cached listing. While a host
-// does not answer, a session it may run has requests no one can read, which
-// is an error rather than none.
+// read now from the host that runs it, so a slow host that does not run it
+// costs nothing. A session no host runs has none.
 func (c *Claude) Requests(ctx context.Context, sess *surface.Session) (surface.RequestState, error) {
 	state := surface.RequestState{Requests: []surface.Request{}}
 	if !claudeHosted(sess) {
 		state.Requests = c.prompts.requests(sess.ID)
 		return state, nil
 	}
-	c.host.forget()
-	listed, ok := c.host.session(ctx, sess.ID, sess.PID)
-	if !c.host.requestsKnown(sess.ID, sess.PID) || !ok && c.host.unanswered() {
-		return state, fmt.Errorf("the Claude host running session %s did not answer", sess.ID)
-	}
-	if !ok {
+	readCtx, cancel := context.WithTimeout(ctx, claudeHostListTimeout)
+	listed, err := c.host.client.Session(readCtx, sess.ID)
+	cancel()
+	switch {
+	case claudehost.IsCode(err, "not_open"), claudehost.IsCode(err, "held"), errors.Is(err, claudehost.ErrNotRunning):
+		c.host.forget()
+		return state, nil
+	case err != nil:
+		return state, fmt.Errorf("the Claude host running session %s did not answer: %w", sess.ID, err)
+	case listed.PID != sess.PID:
+		c.host.forget()
 		return state, nil
 	}
-	state.PermissionMode = listed.PermissionMode
+	return requestState(listed), nil
+}
+
+func requestState(listed claudehost.Session) surface.RequestState {
+	state := surface.RequestState{Requests: []surface.Request{}, PermissionMode: listed.PermissionMode}
 	for _, request := range listed.Requests {
 		state.Requests = append(state.Requests, claudeRequest(request))
 	}
-	return state, nil
+	return state
 }
 
 // Respond answers one open request of a session the host runs. A request no
@@ -80,6 +88,7 @@ func (c *Claude) Respond(ctx context.Context, sess *surface.Session, requestID s
 	case err != nil:
 		return "", claudeHostDeliveryError(err)
 	}
+	c.host.answered(sess.ID, requestID)
 	return outcome, nil
 }
 
