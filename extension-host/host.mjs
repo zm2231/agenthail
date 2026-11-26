@@ -61,9 +61,13 @@ async function answer(socket, line) {
   }
 }
 
+// A client may hang up before its reply is written. The write then fails
+// with EPIPE, which the socket reports and readline repeats on its interface;
+// both are that client's loss, not the host's, so neither may end the host.
 const server = net.createServer(socket => {
   socket.on('error', () => {});
   const lines = readline.createInterface({ input: socket, crlfDelay: Infinity });
+  lines.on('error', () => {});
   lines.on('line', line => {
     if (line.length > MAX_LINE) {
       socket.destroy();
