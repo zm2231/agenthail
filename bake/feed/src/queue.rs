@@ -143,9 +143,6 @@ pub struct Taking {
 }
 
 impl Taking {
-    pub fn still_queued(&self, rows: &[Queued]) -> bool {
-        rows.iter().any(|r| r.id == self.id && r.host == self.host && r.status == "pending")
-    }
 
     pub fn to_json(list: &[Taking]) -> Value {
         Value::Array(list.iter().map(|t| serde_json::json!({"session": t.session, "host": t.host, "id": t.id, "text": t.text, "attempt": t.attempt})).collect())
@@ -208,13 +205,20 @@ impl Client {
         self.queue_rows("/api/v1/queue", "").map(|rows| rows.into_iter().filter(|r| r.session_id == session).collect())
     }
 
-    pub fn unfinished(&self, list: Vec<Taking>) -> Vec<Taking> {
-        list.into_iter()
-            .filter(|t| {
-                let path = if t.host.is_empty() { "/api/v1/queue".to_string() } else { format!("/api/v1/queue?host={}", enc(&t.host)) };
-                self.queue_rows(&path, &t.host).map_or(true, |rows| !t.still_queued(&rows))
-            })
-            .collect()
+    pub fn finish(&self, taking: &Taking) -> Option<String> {
+        let mut path = format!("/api/v1/queue?id={}", taking.id);
+        if !taking.host.is_empty() {
+            path.push_str(&format!("&host={}", enc(&taking.host)));
+        }
+        let status = self.queue_rows(&path, &taking.host).ok().and_then(|rows| rows.into_iter().next()).map(|r| r.status);
+        match status.as_deref() {
+            Some("delivered" | "inflight") => None,
+            Some("pending") => match self.queue_cancel(taking.id, &taking.host) {
+                Ok(text) if !text.trim().is_empty() => Some(text),
+                _ => Some(taking.text.clone()),
+            },
+            _ => Some(taking.text.clone()),
+        }
     }
 
     pub fn queue_op(&self, op: Op, row: &Queued) -> Done {
@@ -303,26 +307,27 @@ mod tests {
     }
 
     #[test]
-    fn a_leftover_take_back_is_restored_unless_its_message_is_still_queued() {
-        let taking = |id: i64| Taking { session: "s1".into(), host: String::new(), id, text: format!("t{id}"), attempt: format!("a{id}") };
-        let (client, _seen) = daemon(replies(&[
+    fn a_leftover_take_back_is_finished_and_restored_unless_the_message_went_through() {
+        let taking = |id: i64, host: &str| Taking { session: "s1".into(), host: host.into(), id, text: format!("t{id}"), attempt: format!("a{id}") };
+        let (client, seen) = daemon(replies(&[
             (200, r#"{"items":[{"id":7,"sessionId":"s1","status":"pending"}]}"#),
-            (200, r#"{"items":[{"id":7,"sessionId":"s1","status":"pending"}]}"#),
+            (200, r#"{"ok":true,"result":{"message":"as queued"}}"#),
+            (200, r#"{"items":[{"id":8,"sessionId":"s1","status":"canceled"}]}"#),
+            (200, r#"{"items":[{"id":9,"sessionId":"s1","status":"delivered"}]}"#),
+            (200, r#"{"items":[]}"#),
             (500, r#"{"error":{"code":"internal_error","message":"down"}}"#),
+            (200, r#"{"items":[{"id":12,"sessionId":"s1","status":"pending"}]}"#),
+            (400, r#"{"error":{"code":"invalid_request","message":"already canceled"}}"#),
         ]));
-        let restore = client.unfinished(vec![taking(7), taking(8), taking(9)]);
-        assert_eq!(restore.iter().map(|t| t.id).collect::<Vec<_>>(), vec![8, 9]);
-        let (client, seen) = daemon(replies(&[(200, r#"{"items":[{"id":7,"sessionId":"vps::renamed","status":"pending"}]}"#), (200, r#"{"items":[{"id":6,"sessionId":"vps::s1","status":"pending"}]}"#)]));
-        let held_here = Taking { session: "vps::s1".into(), ..taking(7) };
-        let there = Taking { host: "vps".into(), ..held_here.clone() };
-        assert_eq!(client.unfinished(vec![there.clone()]), vec![]);
-        assert_eq!(seen.recv().unwrap().0, "/api/v1/queue?host=vps");
-        assert_eq!(client.unfinished(vec![held_here.clone()]), vec![held_here]);
-        assert_eq!(seen.recv().unwrap().0, "/api/v1/queue");
-        let remote = Taking { host: "vps".into(), ..taking(7) };
-        assert!(!remote.still_queued(&[row(7, "s1", "pending")]));
-        assert!(remote.still_queued(&[Queued { host: "vps".into(), ..row(7, "s1", "pending") }]));
-        assert!(!taking(7).still_queued(&[row(7, "s1", "canceled")]));
+        assert_eq!(client.finish(&taking(7, "vps")).as_deref(), Some("as queued"));
+        assert_eq!(seen.recv().unwrap().0, "/api/v1/queue?id=7&host=vps");
+        assert_eq!(seen.recv().unwrap().1, json!({"action": "queue-cancel", "queueId": 7, "host": "vps"}));
+        assert_eq!(client.finish(&taking(8, "")).as_deref(), Some("t8"));
+        assert_eq!(seen.recv().unwrap().0, "/api/v1/queue?id=8");
+        assert_eq!(client.finish(&taking(9, "")), None);
+        assert_eq!(client.finish(&taking(10, "")).as_deref(), Some("t10"));
+        assert_eq!(client.finish(&taking(11, "")).as_deref(), Some("t11"));
+        assert_eq!(client.finish(&taking(12, "")).as_deref(), Some("t12"));
     }
 
     #[test]

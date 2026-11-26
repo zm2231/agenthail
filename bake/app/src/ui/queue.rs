@@ -163,21 +163,28 @@ pub(crate) fn recover(s: &mut App) {
         return;
     }
     let Some(client) = s.client.clone() else {
-        restore(s, leftover.clone(), leftover);
+        let back = leftover.iter().map(|t| (t.clone(), Some(t.text.clone()))).collect();
+        restore(s, back);
         return;
     };
+    s.queue_working.extend(leftover.iter().map(|t| (t.host.clone(), t.id)));
     let out = s.outbox.clone();
     std::thread::spawn(move || {
-        let back = client.unfinished(leftover.clone());
-        let _ = out.send(Bg::Recovered(leftover, back));
+        let back = leftover.into_iter().map(|t| {
+            let text = client.finish(&t);
+            (t, text)
+        });
+        let _ = out.send(Bg::Recovered(back.collect()));
     });
 }
 
-pub(crate) fn restore(s: &mut App, checked: Vec<Taking>, back: Vec<Taking>) {
-    s.queue_taking.retain(|t| !checked.contains(t));
-    for taking in back {
+pub(crate) fn restore(s: &mut App, back: Vec<(Taking, Option<String>)>) {
+    for (taking, text) in back {
+        s.queue_taking.retain(|t| t != &taking);
+        s.queue_working.remove(&(taking.host.clone(), taking.id));
+        let Some(text) = text else { continue };
         let session = feed::composer::current(&s.rekeyed, &taking.session).to_string();
-        hand_back(s, &session, &taking.text);
+        hand_back(s, &session, &text);
         s.queue_note.insert(session, "A queued message you were taking back or steering when the app closed is back in the composer; check the queue before sending.".into());
     }
     crate::over::layout::save(s);
