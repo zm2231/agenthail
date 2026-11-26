@@ -213,7 +213,7 @@ pub fn open_jump(s: &mut App, tx: &mut Tx) {
 pub fn work_review(s: &App, id: &str) -> Option<feed::decisions::Decision> {
     let w = s.ov.d.work.get(id)?;
     let inbox = s.ov.inbox.inbox.as_ref()?;
-    feed::review::of_work(&inbox.decisions, inbox.notes.is_empty(), w)
+    feed::review::of_work(&inbox.decisions, w)
 }
 
 fn review_key(s: &mut App, id: &str, verdict: feed::review::Verdict) {

@@ -15,7 +15,7 @@ const OLD_RECHECK: Duration = Duration::from_secs(300);
 
 enum Done {
     Inbox(Instant, Inbox),
-    Acted(String, Handled, Option<String>, String, Result<(), (RespondError, String)>),
+    Acted(String, Handled, bool, String, Result<(), (RespondError, String)>),
     Brief(String, Result<Brief, RespondError>),
     Version(Option<String>, Option<String>),
 }
@@ -119,10 +119,9 @@ pub fn drain(s: &mut crate::App) -> bool {
                 }
                 st.inbox = Some(inbox);
             }
-            Done::Acted(id, entry, ledger, host, result) => {
+            Done::Acted(id, entry, reviewed, host, result) => {
                 st.acting.remove(&id);
                 st.newest = Some(Instant::now());
-                let reviewed = ledger.is_some();
                 match result {
                     Err((e, _)) if reviewed && review::needs_newer(&e) => {
                         st.review_old.insert(host, Instant::now());
@@ -146,9 +145,6 @@ pub fn drain(s: &mut crate::App) -> bool {
                 }
                 if let Some(client) = &s.client {
                     refresh(client, &s.ov.inbox.tx);
-                }
-                if let Some(key) = ledger {
-                    crate::fetch_ledger(s, &key);
                 }
             }
             Done::Brief(project, result) => {
@@ -188,7 +184,7 @@ fn title_of(s: &crate::App, d: &Decision) -> String {
 }
 
 fn act(s: &mut crate::App, d: &Decision, outcome: &str, run: impl FnOnce(&Client, &Decision) -> Result<(), (RespondError, String)> + Send + 'static) {
-    let ledger = review::target(d).map(|t| t.ledger_key);
+    let reviewed = review::target(d).is_some();
     let host = d.host.clone();
     let id = d.id();
     if s.ov.inbox.acting.contains(&id) {
@@ -205,7 +201,7 @@ fn act(s: &mut crate::App, d: &Decision, outcome: &str, run: impl FnOnce(&Client
     let (tx, d) = (s.ov.inbox.tx.clone(), d.clone());
     std::thread::spawn(move || {
         let result = run(&client, &d);
-        let _ = tx.send(Done::Acted(id, entry, ledger, host, result));
+        let _ = tx.send(Done::Acted(id, entry, reviewed, host, result));
     });
 }
 

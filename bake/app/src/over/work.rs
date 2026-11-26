@@ -221,7 +221,11 @@ fn verdict_row(s: &App, d: Option<&feed::decisions::Decision>, revision: &str) -
         .child(Button::new("Ask for changes").variant(ButtonVariant::Outline).control_size(ControlSize::Regular).shortcut("C").disabled(!ready).on_press(move |s: &mut App| crate::over::inbox::ask_changes(s, &dc)).build(k).key("work-changes"))
         .child(ui::ghost_keys(&["C"]));
     let note = if missing {
-        Some(if s.ov.inbox.inbox.is_some() { "Some computers didn't answer, so this can't be reviewed here until they do.".to_string() } else { "Looking for this review…".to_string() })
+        Some(match &s.ov.inbox.inbox {
+            None => "Looking for this review…".to_string(),
+            Some(i) if !i.notes.is_empty() => "Some computers didn't answer, so this review can't be found yet.".to_string(),
+            Some(_) => "This isn't in your reviews: its lead has it, or it was just reviewed.".to_string(),
+        })
     } else {
         st.notes.get(&d.id()).filter(|(hold, _)| d.holds(hold)).map(|(_, n)| n.clone()).or_else(|| crate::over::inbox::too_old(st, d).then(feed::review::needs_newer_note))
     };

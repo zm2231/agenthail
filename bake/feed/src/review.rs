@@ -47,12 +47,9 @@ pub fn target(d: &Decision) -> Option<Target> {
     (!ledger_key.is_empty()).then(|| Target { ledger_key, work_item: d.work_item.clone(), host: d.host.clone() })
 }
 
-pub fn of_work(listed: &[Decision], complete: bool, w: &Work) -> Option<Decision> {
+pub fn of_work(listed: &[Decision], w: &Work) -> Option<Decision> {
     let key = key(&w.project, &w.id);
-    if let Some(d) = listed.iter().find(|d| d.is_review() && (d.key == key || target(d).is_some_and(|t| t.ledger_key == w.project && t.work_item == w.id))) {
-        return Some(d.clone());
-    }
-    complete.then(|| Decision { group: "review".into(), kind: "review".into(), key, session_id: w.assignee.clone().unwrap_or_default(), work_item: w.id.clone(), work_title: w.text.clone(), ledger_key: w.project.clone(), ..Default::default() })
+    listed.iter().find(|d| d.is_review() && (d.key == key || target(d).is_some_and(|t| t.ledger_key == w.project && t.work_item == w.id))).cloned()
 }
 
 pub fn note_problem(note: &str) -> Option<&'static str> {
@@ -172,16 +169,13 @@ mod tests {
     }
 
     #[test]
-    fn the_work_screen_uses_the_listed_review_or_this_computers_ledger() {
+    fn the_work_screen_acts_only_on_a_review_listed_for_the_person() {
         let w = Work { id: "p-W6".into(), text: "Wire review".into(), assignee: Some("holder".into()), project: "p-1".into(), ..Default::default() };
         let listed = vec![Decision { host: "h2".into(), ..decision(r#"{"group":"review","key":"review:p-1:p-W6","sessionId":"h2::holder","workItem":"p-W6","ledgerKey":"p-1"}"#) }];
-        assert_eq!(target(&of_work(&listed, false, &w).unwrap()).unwrap().host, "h2");
+        assert_eq!(target(&of_work(&listed, &w).unwrap()).unwrap().host, "h2");
         let other = vec![Decision { key: "review:p-0:p-W6".into(), ledger_key: "p-0".into(), ..listed[0].clone() }];
-        assert_eq!(of_work(&other, false, &w), None);
-        let own = of_work(&other, true, &w).unwrap();
-        assert_eq!(own.id(), "review:p-1:p-W6");
-        assert_eq!(target(&own), Some(Target { ledger_key: "p-1".into(), work_item: "p-W6".into(), host: String::new() }));
-        assert_eq!(own.session_id, "holder");
+        assert_eq!(of_work(&other, &w), None);
+        assert_eq!(of_work(&[], &w), None);
     }
 
     #[test]

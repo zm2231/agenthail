@@ -321,13 +321,16 @@ pub fn need_actions(s: &App, n: &Need, compact: bool) -> El {
     let size = if compact { ControlSize::Small } else { ControlSize::Regular };
     let r = row().gap(6.0).items_center();
     let work = match &t {
-        Target::Work(id) => s.ov.d.work.get(id).zip(crate::over::work_review(s, id)),
+        Target::Work(id) => s.ov.d.work.get(id).map(|w| (w, crate::over::work_review(s, id))),
         _ => None,
     };
     let r = match (n.kind, work) {
-        (NeedKind::Check, Some((_, d))) => crate::over::decisions::review_buttons(s, &d, size, &format!("{}-{}", if compact { "need-row" } else { "need-focus" }, d.id()), true, r),
+        (NeedKind::Check, Some((_, Some(d)))) => crate::over::decisions::review_buttons(s, &d, size, &format!("{}-{}", if compact { "need-row" } else { "need-focus" }, d.id()), true, r),
+        (NeedKind::Check, _) => {
+            return r.child(Button::new("Open").variant(ButtonVariant::Contrast).control_size(size).on_press(move |s: &mut App| open_target(s, &t)).build(k));
+        }
         (NeedKind::CiFailing, Some((w, d))) => {
-            let url = crate::over::work::pr_of(s, w, &d, feed::derive::work::pr(w).as_deref()).map(|p| p.url);
+            let url = crate::over::work::pr_of(s, w, &d.unwrap_or_default(), feed::derive::work::pr(w).as_deref()).map(|p| p.url);
             let t = t.clone();
             r.child(
                 Button::new(n.kind.primary())
