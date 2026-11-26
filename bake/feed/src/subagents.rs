@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -268,6 +268,35 @@ impl Client {
     }
 }
 
+#[derive(Default)]
+pub struct Gone(HashMap<String, u64>);
+
+impl Gone {
+    const KEPT: usize = 100;
+
+    pub fn mark(&mut self, id: String, last_asked: u64) {
+        if self.0.len() >= Self::KEPT {
+            self.0.clear();
+        }
+        self.0.insert(id, last_asked);
+    }
+
+    pub fn holds(&self, id: &str) -> bool {
+        self.0.contains_key(id)
+    }
+
+    pub fn admits(&mut self, id: &str, asked: u64) -> bool {
+        match self.0.get(id) {
+            Some(at) if asked <= *at => false,
+            Some(_) => {
+                self.0.remove(id);
+                true
+            }
+            None => true,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -462,5 +491,19 @@ mod tests {
         assert_eq!(got.total, 1);
         assert!(got.links[0].working);
         assert_eq!(asked.recv().unwrap().0, "/api/v1/session-metadata?id=s&subagents=all");
+    }
+
+    #[test]
+    fn a_gone_session_comes_back_only_from_a_read_asked_after_it_went() {
+        let mut gone = Gone::default();
+        assert!(gone.admits("c1", 1));
+        gone.mark("c1".into(), 7);
+        assert!(gone.holds("c1"));
+        assert!(!gone.admits("c1", 5));
+        assert!(!gone.admits("c1", 7));
+        assert!(gone.holds("c1"));
+        assert!(gone.admits("c1", 8));
+        assert!(!gone.holds("c1"));
+        assert!(gone.admits("c1", 3));
     }
 }

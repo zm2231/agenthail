@@ -39,7 +39,7 @@ pub struct Crew {
     claude_errors: HashMap<String, String>,
     claude_asked: HashMap<String, ClaudeAsk>,
     rows: HashMap<String, Session>,
-    deleted: HashSet<String>,
+    deleted: feed::subagents::Gone,
     row_asked: HashMap<String, RowAsk>,
     expanded: HashSet<String>,
     recent: Vec<String>,
@@ -221,7 +221,7 @@ pub(crate) fn done(s: &mut App, done: Done) {
             }
             match result {
                 Ok(mut rows) => {
-                    rows.retain(|x| !s.crew.deleted.contains(&x.id));
+                    rows.retain(|x| s.crew.deleted.admits(&x.id, seq));
                     s.crew.errors.remove(&id);
                     keep_open_lineage(s, &id, &rows);
                     s.crew.pages.insert(id, rows);
@@ -256,8 +256,9 @@ pub(crate) fn done(s: &mut App, done: Done) {
             asked.at = Instant::now();
             match result {
                 RowRead::Found(row) => {
-                    s.crew.deleted.remove(&id);
-                    s.crew.rows.insert(id, row);
+                    if s.crew.deleted.admits(&id, seq) {
+                        s.crew.rows.insert(id, row);
+                    }
                 }
                 RowRead::Gone => forget(s, id),
                 RowRead::Failed(_) => {}
@@ -271,16 +272,14 @@ pub(crate) fn forget(s: &mut App, id: String) {
     for rows in s.crew.pages.values_mut() {
         rows.retain(|x| x.id != id);
     }
-    if s.crew.deleted.len() >= 100 {
-        s.crew.deleted.clear();
-    }
-    s.crew.deleted.insert(id);
+    let asked = s.crew.seq;
+    s.crew.deleted.mark(id, asked);
 }
 
 fn keep_open_lineage(s: &mut App, parent: &str, rows: &[Session]) {
     let Some(old) = s.crew.pages.get(parent) else { return };
     let held = held(s);
-    let kept: Vec<Session> = old.iter().filter(|x| held.contains(&x.id) && !rows.iter().any(|r| r.id == x.id) && !listed(s, &x.id) && !s.crew.deleted.contains(&x.id)).cloned().collect();
+    let kept: Vec<Session> = old.iter().filter(|x| held.contains(&x.id) && !rows.iter().any(|r| r.id == x.id) && !listed(s, &x.id) && !s.crew.deleted.holds(&x.id)).cloned().collect();
     for row in kept {
         s.crew.rows.insert(row.id.clone(), row);
     }
