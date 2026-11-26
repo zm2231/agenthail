@@ -1,8 +1,8 @@
 package claudehost
 
 import (
-	"errors"
 	"context"
+	"errors"
 	"syscall"
 	"time"
 )
