@@ -57,6 +57,10 @@ func TestAMovedCodexSessionKeepsWhatAgentsSentItElsewhereOutOfThePrompts(t *test
 	if err := r.RecordSessionOrigin(registry.OriginOf(worker.ID, lead.ID)); err != nil {
 		t.Fatal(err)
 	}
+	recording, err := r.MessageSendersSince(worker.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := r.PrepareMoveIn("move-1", worker.ID, "h00000000000a", []byte(`{}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -73,9 +77,10 @@ func TestAMovedCodexSessionKeepsWhatAgentsSentItElsewhereOutOfThePrompts(t *test
 	if err := r.RecordMessageSender("sent-here", lead.ID); err != nil {
 		t.Fatal(err)
 	}
+	elsewhere := recording.Add(arrived.Sub(recording) / 2)
 	source := journalSource(d, worker, fake)
-	source.append(codexInput("w1", "Rebase onto main", "sent-on-the-other-host", "", arrived.Add(-time.Minute)))
-	source.append(codexInput("w2", "Rename the flag", "", surface.OriginPerson, arrived.Add(-30*time.Second)))
+	source.append(codexInput("w1", "Rebase onto main", "sent-on-the-other-host", "", elsewhere))
+	source.append(codexInput("w2", "Rename the flag", "", surface.OriginPerson, elsewhere))
 	source.append(codexInput("w3", "Tag the release", "sent-here", "", arrived.Add(time.Minute)))
 	source.append(codexInput("w4", "Also bump the version", "", surface.OriginPerson, arrived.Add(2*time.Minute)))
 
