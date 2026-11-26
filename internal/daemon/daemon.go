@@ -100,6 +100,9 @@ type Daemon struct {
 	// waitingContended, when set, runs when a session's waiting lock is held
 	// by another caller and this one is about to wait for it.
 	waitingContended func(sessionID string)
+	// credentialRead, when set, runs after an MCP request's session
+	// credential is read and before the request is let through or refused.
+	credentialRead func()
 	// notifyDesktop shows a desktop notification; it is NotifyRequest outside
 	// tests.
 	notifyDesktop func(title, message, sessionID, identifier, requestID string, actions []surface.RequestAction) error
