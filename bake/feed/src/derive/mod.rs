@@ -5,6 +5,7 @@ mod gist;
 pub mod hands_on;
 pub mod jump;
 pub mod live;
+pub mod menubar;
 mod names;
 pub mod needs;
 pub mod phase;
