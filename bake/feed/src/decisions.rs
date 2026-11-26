@@ -100,12 +100,17 @@ impl Decision {
     pub fn hold_key(&self) -> String {
         match self.requests.first() {
             Some(r) => request_hold(&self.session_id, &r.id),
-            None => self.id(),
+            None if self.is_parked() => parked_hold(&self.host, &self.work_item),
+            None => self.state_hold(),
         }
     }
 
+    fn state_hold(&self) -> String {
+        format!("state|{}|{}|{}|{}", self.session_id, self.kind, self.reason, self.since)
+    }
+
     pub fn holds(&self, key: &str) -> bool {
-        self.id() == key
+        self.state_hold() == key
             || self.requests.iter().any(|r| request_hold(&self.session_id, &r.id) == key)
             || std::iter::once(self).chain(&self.covers).any(|c| !c.work_item.is_empty() && parked_hold(&c.host, &c.work_item) == key)
     }
@@ -166,7 +171,7 @@ impl Decision {
         match target {
             Dismiss::Request { session, request } => request_hold(session, request),
             Dismiss::Parked { work_item, host } => parked_hold(host, work_item),
-            Dismiss::Stopped { .. } => self.id(),
+            Dismiss::Stopped { .. } => self.state_hold(),
         }
     }
 
@@ -358,8 +363,12 @@ mod tests {
         let stopped = decision(r#"{"group":"stopped","sessionId":"s"}"#);
         assert_eq!(stopped.dismissals(), [Dismiss::Stopped { session: "s" }]);
         assert_eq!(stopped.not_now_label(&Default::default()), "Not now");
-        let held: std::collections::HashSet<String> = [stopped.id()].into();
+        let held: std::collections::HashSet<String> = [stopped.hold_key()].into();
         assert!(stopped.open_dismissals(&held).is_empty());
+        let later = decision(r#"{"group":"stopped","sessionId":"s","kind":"stopped","reason":"stopped again","since":"2026-11-24T11:00:00Z"}"#);
+        assert_eq!(later.id(), stopped.id());
+        assert!(!later.holds(&stopped.hold_key()));
+        assert_eq!(later.open_dismissals(&held).len(), 1);
         let a = Decision { kind: "parked".into(), session_id: "s".into(), work_item: "p-A".into(), host: "h2".into(), reason: "pick".into(), ..Default::default() };
         let b = Decision { work_item: "p-B".into(), ..a.clone() };
         let group = Decision { covers: vec![a.clone(), b.clone()], ..a.clone() };
