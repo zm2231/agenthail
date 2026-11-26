@@ -65,6 +65,9 @@ pub fn take_older(s: &mut App, id: String, generation: u64, result: Result<Older
     let Some(pane) = s.panes.get_mut(&id).filter(|p| p.generation == generation) else { return };
     pane.earlier.loading = false;
     match result {
+        Ok(older) if !older.anchored && older.next == 0 => {
+            pane.earlier.note = Some("Couldn't line up earlier messages with this conversation".into());
+        }
         Ok(older) => {
             pane.earlier.next = Some(older.next);
             pane.earlier.anchored |= older.anchored;

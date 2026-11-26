@@ -65,6 +65,7 @@ impl Queued {
             "retrying" => "Held: waiting to retry",
             "behind" => "Held: behind an earlier message",
             "notLoaded" => "Held: this conversation is not loaded",
+            "limited" => "Held: this agent hit its usage limit",
             "hostUnreachable" => "Held: this agent's host is unreachable",
             _ => "Delivers on the next scan",
         }
@@ -190,6 +191,7 @@ mod tests {
         assert_eq!((r.id, r.first_line(), r.service_tier.as_str()), (7, "check the build", "flex"));
         let now = crate::catalog::parse_time("2026-11-26T10:05:00Z").unwrap();
         assert_eq!(r.summary(now), "Held: this agent is working · Queued 5m ago");
+        assert_eq!(Queued { held_by: "limited".into(), queued_at: String::new(), ..r.clone() }.summary(now), "Held: this agent hit its usage limit");
         let failed = Queued { evidence: "failed".into(), last_error: Some(" 401 ".into()), queued_at: String::new(), ..r.clone() };
         assert_eq!(failed.summary(now), "Delivery failed · 401");
     }
