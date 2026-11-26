@@ -121,8 +121,11 @@ fn expire(s: &mut Prefs, now: Instant) -> bool {
     if !s.dev.expires.is_some_and(|at| now >= at) {
         return false;
     }
+    let id = s.dev.pairing.as_ref().map(|(p, _)| p.id.clone()).unwrap_or_default();
     cancel(s);
     s.dev.notice = Progress::Expired.notice();
+    let attempt = s.dev.attempt;
+    spawn(s, move |c| Got::Status(attempt, c.pairing_status(&id)));
     true
 }
 
@@ -186,7 +189,15 @@ pub fn take(s: &mut Prefs, got: Got) {
                 super::refused(s, None, true);
                 return;
             }
-            let Some((p, _)) = &s.dev.pairing else { return };
+            let Some((p, _)) = &s.dev.pairing else {
+                if let Ok(status) = &result
+                    && let Progress::Paired(name) = Progress::of(Some(status), &Pairing::default(), OffsetDateTime::now_utc())
+                {
+                    s.dev.notice = Progress::Paired(name).notice();
+                    super::fetch(s, Read::Devices);
+                }
+                return;
+            };
             match Progress::of(result.as_ref().ok(), p, OffsetDateTime::now_utc()) {
                 Progress::Waiting => s.dev.next_check = Some(now + CHECK_EVERY),
                 progress => {
@@ -519,6 +530,23 @@ mod tests {
         assert!(expire(&mut s, Instant::now() + Duration::from_secs(301)));
         assert!(s.dev.pairing.is_none());
         assert_eq!(s.dev.notice.as_deref(), Some(dev::EXPIRED));
+    }
+
+    #[test]
+    fn a_phone_that_pairs_just_before_the_deadline_is_reported_paired() {
+        let mut s = prefs();
+        started(&mut s, "p1", 5);
+        assert!(expire(&mut s, Instant::now() + Duration::from_secs(301)));
+        assert_eq!(s.dev.notice.as_deref(), Some(dev::EXPIRED));
+        let last = s.dev.attempt;
+        take(&mut s, Got::Status(last, Ok(PairingStatus { state: "paired".into(), device: Some(dev::PairedName { name: "Ada's iPhone".into() }) })));
+        assert_eq!(s.dev.notice.as_deref(), Some("Paired Ada's iPhone."));
+        assert!(s.dev.pairing.is_none());
+        take(&mut s, Got::Status(last, Ok(PairingStatus { state: "expired".into(), device: None })));
+        assert_eq!(s.dev.notice.as_deref(), Some("Paired Ada's iPhone."));
+        start(&mut s);
+        take(&mut s, Got::Status(last, Ok(PairingStatus { state: "paired".into(), device: None })));
+        assert_eq!(s.dev.notice, None);
     }
 
     #[test]
