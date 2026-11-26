@@ -111,7 +111,7 @@ pub(crate) fn load(s: &mut App, id: &str) {
 }
 
 pub(crate) fn refresh(s: &mut App, id: &str) {
-    if s.client.is_none() {
+    if s.client.is_none() || s.screen != Screen::Session {
         return;
     }
     let line = lineage(s, id);
