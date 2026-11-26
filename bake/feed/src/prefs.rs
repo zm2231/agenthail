@@ -30,6 +30,8 @@ pub struct Base {
     pub event_cursor: u64,
     #[serde(default)]
     pub daemon: crate::devices::Daemon,
+    #[serde(flatten)]
+    pub handoffs: crate::handoffs::Handoffs,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -244,7 +246,7 @@ impl Failure {
     }
 }
 
-fn read_failure(scope: &'static str, status: u16, body: &str) -> Failure {
+pub(crate) fn read_failure(scope: &'static str, status: u16, body: &str) -> Failure {
     if status == 401 || status == 403 {
         return refused(scope);
     }

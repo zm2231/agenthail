@@ -16,6 +16,7 @@ pub mod edits;
 pub mod extensions;
 pub mod focus;
 pub mod gone;
+pub mod handoffs;
 pub mod history;
 pub mod item;
 pub mod limit;

@@ -1,6 +1,7 @@
 mod claude;
 mod devices;
 mod general;
+mod handoffs;
 mod notify;
 mod parts;
 
@@ -46,6 +47,8 @@ pub enum Section {
     Compaction,
     Notify,
     Devices,
+    Relays,
+    Channels,
 }
 
 enum Done {
@@ -90,6 +93,7 @@ pub struct Prefs {
     pub open_select: Option<&'static str>,
     pub holds_open: HashSet<String>,
     pub home: String,
+    pub handoffs: handoffs::Form,
     loaded: bool,
     in_flight: usize,
     seq: HashMap<Read, u64>,
@@ -188,6 +192,7 @@ fn init() -> Prefs {
         open_select: None,
         holds_open: HashSet::new(),
         home: std::env::var("HOME").unwrap_or_default(),
+        handoffs: handoffs::Form::default(),
         loaded: false,
         in_flight: 0,
         seq: HashMap::new(),
@@ -374,6 +379,8 @@ fn watch(s: &Prefs, from: u64) {
                 if feed::prefs::rereads(kind) && handle.is_visible() {
                     let reset = kind == "stream.reset";
                     handle.update(move |s: &mut Prefs, _| changed_elsewhere(s, id, reset));
+                } else if kind == "state.changed" && handle.is_visible() {
+                    handle.update(|s: &mut Prefs, _| handoffs::changed(s));
                 }
                 true
             });
@@ -416,6 +423,7 @@ fn take(s: &mut Prefs, done: Done) {
         s.external = false;
         reload(s);
     }
+    handoffs::flush(s);
 }
 
 fn take_one(s: &mut Prefs, done: Done) {
@@ -488,7 +496,7 @@ fn take_one(s: &mut Prefs, done: Done) {
                     }
                     s.saved_notice = true;
                 }
-                Ok(()) => {}
+                Ok(()) => handoffs::saved(s, &key),
                 Err(failure) => {
                     let refusal = failure.denied;
                     s.notes.insert(section, failure);
@@ -563,7 +571,7 @@ fn unfollowed(s: &Prefs) -> Option<El> {
     Some(col().w_full().items_center().pb(8.0).child(parts::failure(s, &note).w(parts::WIDTH)))
 }
 
-pub const TABS: [&str; 4] = ["General", "Claude", "Notifications", "Devices"];
+pub const TABS: [&str; 5] = ["General", "Claude", "Notifications", "Devices", "Handoffs"];
 
 pub fn view(s: &Prefs, _: &mut Cx<Prefs>) -> El {
     let k = theme::kit();
@@ -572,11 +580,13 @@ pub fn view(s: &Prefs, _: &mut Cx<Prefs>) -> El {
         s.tab = i;
         s.open_select = None;
         devices::hide_link(s);
+        handoffs::changed(s);
     });
     let page = match s.tab {
         1 => claude::page(s, &mut layer),
         2 => notify::page(s),
         3 => devices::page(s, &mut layer),
+        handoffs::TAB => handoffs::page(s, &mut layer),
         _ => general::page(s, &mut layer),
     };
     let body = col()
