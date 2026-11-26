@@ -14,7 +14,7 @@ fn line(s: &App, i: usize, d: &Decision, shift: bool) -> El {
     let k = kit();
     let id = d.id();
     let acting = s.ov.inbox.acting.contains(&id);
-    let unconfirmed = s.ov.inbox.unconfirmed.contains(&id);
+    let unconfirmed = s.ov.inbox.unconfirmed.contains(&d.hold_key());
     let who = s.ov.d.session(&d.session_id).map(|x| s.ov.d.title(x)).unwrap_or_else(|| crate::over::short_id(&d.session_id));
     let project = s.ov.d.project(&d.project_id).map(|p| p.name.clone()).unwrap_or_default();
     let mut meta: Vec<String> = vec![ui::short_title(&who, 28)];

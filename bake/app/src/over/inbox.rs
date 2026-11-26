@@ -12,7 +12,7 @@ const VERSION_EVERY: u32 = 6;
 
 enum Done {
     Inbox(Instant, Result<Inbox, String>),
-    Acted(String, Handled, Result<(), RespondError>),
+    Acted(String, String, Handled, Result<(), RespondError>),
     Brief(String, Result<Brief, RespondError>),
     Version(Option<String>),
 }
@@ -105,7 +105,7 @@ pub fn drain(s: &mut crate::App) -> bool {
                 match result {
                     Ok(inbox) => {
                         if inbox.notes.is_empty() {
-                            st.unconfirmed.retain(|id| inbox.decisions.iter().any(|d| d.id() == *id));
+                            st.unconfirmed.retain(|hold| inbox.decisions.iter().any(|d| d.hold_key() == *hold));
                         }
                         st.inbox = Some(inbox);
                         st.error = None;
@@ -113,7 +113,7 @@ pub fn drain(s: &mut crate::App) -> bool {
                     Err(e) => st.error = Some(format!("Couldn't read decisions: {e}")),
                 }
             }
-            Done::Acted(id, entry, result) => {
+            Done::Acted(id, hold, entry, result) => {
                 st.acting.remove(&id);
                 st.newest = Some(Instant::now());
                 match result {
@@ -126,7 +126,7 @@ pub fn drain(s: &mut crate::App) -> bool {
                     }
                     Err(e) if e.maybe_delivered => {
                         st.notes.insert(id.clone(), format!("Sent, not confirmed: {}", e.message));
-                        st.unconfirmed.insert(id);
+                        st.unconfirmed.insert(hold);
                     }
                     Err(e) => {
                         st.notes.insert(id, format!("Not sent: {}", e.message));
@@ -177,15 +177,15 @@ fn act(s: &mut crate::App, d: &Decision, outcome: &str, run: impl FnOnce(&Client
     let entry = Handled { title: title_of(s, d), session: d.session_id.clone(), outcome: outcome.into(), at };
     s.ov.inbox.acting.insert(id.clone());
     s.ov.inbox.notes.remove(&id);
-    let (tx, d) = (s.ov.inbox.tx.clone(), d.clone());
+    let (tx, d, hold) = (s.ov.inbox.tx.clone(), d.clone(), d.hold_key());
     std::thread::spawn(move || {
         let result = run(&client, &d);
-        let _ = tx.send(Done::Acted(id, entry, result));
+        let _ = tx.send(Done::Acted(id, hold, entry, result));
     });
 }
 
 pub fn accept(s: &mut crate::App, d: &Decision) {
-    if d.recommended().is_none() || s.ov.inbox.unconfirmed.contains(&d.id()) {
+    if d.recommended().is_none() || s.ov.inbox.unconfirmed.contains(&d.hold_key()) {
         return;
     }
     act(s, d, "Accepted the recommended answer", |client, d| {
@@ -195,7 +195,7 @@ pub fn accept(s: &mut crate::App, d: &Decision) {
 }
 
 pub fn shift_target(st: &State) -> Option<&Decision> {
-    st.inbox.as_ref()?.decisions.iter().find(|d| d.recommended().is_some() && !st.unconfirmed.contains(&d.id()) && !st.acting.contains(&d.id()))
+    st.inbox.as_ref()?.decisions.iter().find(|d| d.recommended().is_some() && !st.unconfirmed.contains(&d.hold_key()) && !st.acting.contains(&d.id()))
 }
 
 pub fn accept_first(s: &mut crate::App) -> bool {

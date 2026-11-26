@@ -96,6 +96,11 @@ impl Decision {
         }
     }
 
+    pub fn hold_key(&self) -> String {
+        let requests: Vec<&str> = self.requests.iter().map(|r| r.id.as_str()).collect();
+        format!("{}|{}", self.id(), requests.join(","))
+    }
+
     pub fn is_parked(&self) -> bool {
         self.kind == "parked" || !self.work_item.is_empty() && !self.is_review()
     }
@@ -298,6 +303,9 @@ mod tests {
         let asks = decision(r#"{"sessionId":"s","answerable":true,"requests":[{"id":"a"},{"id":"b"}]}"#);
         assert_eq!(asks.dismissals(), [Dismiss::Request { session: "s", request: "a" }, Dismiss::Request { session: "s", request: "b" }]);
         assert_eq!(asks.not_now_label(), "Not now for all 2");
+        let next = decision(r#"{"sessionId":"s","answerable":true,"requests":[{"id":"b"}]}"#);
+        assert_eq!(asks.id(), next.id());
+        assert_ne!(asks.hold_key(), next.hold_key());
         let stopped = decision(r#"{"group":"stopped","sessionId":"s"}"#);
         assert_eq!(stopped.dismissals(), [Dismiss::Stopped { session: "s" }]);
         assert_eq!(stopped.not_now_label(), "Not now");
