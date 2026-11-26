@@ -120,9 +120,13 @@ pub struct Unsent {
 }
 
 impl Unsent {
-    /// The daemon replays a finished reply for a reused id, so an unconfirmed send is retried once exactly as first sent.
     pub fn reuses_key(&self) -> bool {
-        self.maybe_delivered && self.tries == 0
+        self.maybe_delivered
+    }
+
+    /// The daemon replays a finished reply for a reused id, so after a retry a fresh send is the only way to try again.
+    pub fn offers_new_send(&self) -> bool {
+        self.maybe_delivered && self.tries > 0
     }
 
     pub fn resend(&self, text: &str) -> bool {
@@ -159,7 +163,7 @@ impl Unsent {
 
     pub fn note(&self) -> String {
         if self.maybe_delivered && self.tries > 0 {
-            format!("Still not confirmed after a retry: {}. Check the session: Retry now sends it as a new message.", self.error)
+            format!("Still not confirmed after a retry: {}", self.error)
         } else if self.maybe_delivered { format!("Not confirmed: {}. Retry is safe: it won't send twice.", self.error) } else { format!("Not sent: {}", self.error) }
     }
 }
@@ -342,7 +346,8 @@ mod tests {
         assert!(unsent.resend("ship it"));
         assert!(!unsent.resend("ship it now"));
         let retried = Unsent { tries: 1, ..unsent.clone() };
-        assert!(!retried.resend("ship it"));
+        assert!(retried.resend("ship it"));
+        assert!(retried.offers_new_send() && !unsent.offers_new_send());
         assert!(retried.note().starts_with("Still not confirmed after a retry"));
         let refused = Unsent { maybe_delivered: false, ..unsent };
         assert!(!refused.resend("ship it"));
@@ -368,9 +373,10 @@ mod tests {
         assert!(!first.maybe_delivered);
         let retry = Unsent { tries: 1, ..unsent("k1", "hello", true) };
         let refused = retry.clone().failed(false, "connection refused".into());
-        assert!(refused.maybe_delivered && refused.reuses_key(), "{refused:?}");
+        assert!(refused.reuses_key(), "{refused:?}");
+        assert!(!refused.offers_new_send());
         let unknown = retry.failed(true, "timeout".into());
-        assert!(unknown.maybe_delivered && !unknown.reuses_key());
+        assert!(unknown.reuses_key() && unknown.offers_new_send());
         assert_eq!(unknown.error, "timeout");
     }
 

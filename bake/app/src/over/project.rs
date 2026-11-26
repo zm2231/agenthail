@@ -11,7 +11,7 @@ use feed::derive::sessions::busy;
 use crate::over::{Line, Work, plain, short_id};
 use crate::over::ui::{self, BODY, BODY_MED, HEAD, META, META_MED, base, kit, strong, weak};
 use crate::over::go;
-use crate::{App, Screen};
+use crate::{App, Confirm, Screen};
 
 fn variant(s: &App, key: &str) -> El {
     let k = key.to_string();
@@ -348,15 +348,17 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
     } else {
         controls
     };
-    let controls = if crate::unsent_held(s, lead) {
-        let back = lead.to_string();
-        controls.child(Button::new(crate::put_back_label(s, &back)).variant(ButtonVariant::Ghost).build(k).key("send-put-back").on_press(move |s: &mut App| crate::put_back_unsent(s, &back)))
-    } else {
-        controls
-    };
     let controls = if s.unsent.has(lead) {
-        let (again, drop) = (lead.to_string(), lead.to_string());
-        controls.child(Button::new("Dismiss").variant(ButtonVariant::Ghost).build(k).key("send-dismiss").on_press(move |s: &mut App| crate::dismiss_unsent(s, &drop))).child(Button::new("Retry").variant(ButtonVariant::Ghost).build(k).key("send-retry").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::retry(s, &again, tx)))
+        let (again, back, drop, new) = (lead.to_string(), lead.to_string(), lead.to_string(), lead.to_string());
+        let mut controls = controls;
+        if crate::unsent_held(s, lead) {
+            controls = controls.child(Button::new(crate::confirm_label(s, lead, Confirm::PutBack)).variant(ButtonVariant::Ghost).build(k).key("send-put-back").on_press(move |s: &mut App| crate::put_back_unsent(s, &back)));
+        }
+        controls = controls.child(Button::new(crate::confirm_label(s, lead, Confirm::Discard)).variant(ButtonVariant::Ghost).build(k).key("send-dismiss").on_press(move |s: &mut App| crate::dismiss_unsent(s, &drop)));
+        if crate::offers_new_send(s, lead) {
+            controls = controls.child(Button::new(crate::confirm_label(s, lead, Confirm::SendNew)).variant(ButtonVariant::Ghost).build(k).key("send-new").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::send_as_new(s, &new, tx)));
+        }
+        controls.child(Button::new("Retry").variant(ButtonVariant::Ghost).build(k).key("send-retry").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::retry(s, &again, tx)))
     } else {
         controls
     };
