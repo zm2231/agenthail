@@ -485,12 +485,9 @@ pub fn send_to(s: &mut App, id: &str, tx: &mut Tx) {
     }
     s.composer = TextEdit::new("");
     s.restored.remove(id);
-    match s.unsent.matching(id, &message).cloned() {
-        Some(again) => {
-            s.unsent.remove(id, &again.key);
-            dispatch(s, id, again, true, tx);
-        }
-        None => {
+    match s.unsent.take_same(id, &message) {
+        Some(again) if again.maybe_delivered => dispatch(s, id, again, true, tx),
+        _ => {
             let pending = fresh(s, id, message);
             dispatch(s, id, pending, false, tx);
         }
@@ -605,16 +602,19 @@ fn note(s: &mut App, id: &str, text: String) {
 }
 
 pub fn composer_note(s: &App, id: &str) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
     if s.stopping.contains(id) {
-        return Some("Stopping…".into());
+        parts.push("Stopping…".into());
     }
     if sending(s, id) {
-        return Some("Sending…".into());
+        parts.push("Sending…".into());
     }
-    if let Some(note) = s.unsent.note(id) {
-        return Some(note);
-    }
+    parts.extend(s.unsent.note(id));
     let queued = s.queued.get(id).into_iter().flatten().find_map(|(at, receipt)| feed::composer::queued_note(&s.queue_rows, &s.rekeyed, id, receipt, s.snapshots >= at + 2));
+    if !parts.is_empty() {
+        parts.extend(queued);
+        return Some(parts.join(" · "));
+    }
     match (queued, s.status_line.get(id)) {
         (Some(q), Some(line)) if !line.starts_with("Sent") => Some(format!("{q} · {line}")),
         (Some(q), _) => Some(q),

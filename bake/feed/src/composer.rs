@@ -164,10 +164,10 @@ pub fn queued_note(rows: &[QueueRow], rekeyed: &HashMap<String, String>, id: &st
 }
 
 pub fn take_back(composer: &str, text: &str, restored: Option<&(String, String)>) -> Option<String> {
-    if composer.trim() == text {
-        return Some(String::new());
+    match restored {
+        Some((merged, before)) => (merged == composer).then(|| before.clone()),
+        None => (composer.trim() == text).then(String::new),
     }
-    restored.filter(|(merged, _)| merged == composer).map(|(_, before)| before.clone())
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -182,8 +182,14 @@ impl Unconfirmed {
         self.latest(id).is_some()
     }
 
-    pub fn matching(&self, id: &str, text: &str) -> Option<&Unsent> {
-        self.0.get(id).and_then(|list| list.iter().rev().find(|u| u.resend(text)))
+    pub fn take_same(&mut self, id: &str, text: &str) -> Option<Unsent> {
+        let list = self.0.get(id)?;
+        let at = list.iter().rposition(|u| u.resend(text)).or_else(|| list.iter().rposition(|u| u.text == text))?;
+        let unsent = self.0.get_mut(id)?.remove(at);
+        if self.0.get(id).is_some_and(|l| l.is_empty()) {
+            self.0.remove(id);
+        }
+        Some(unsent)
     }
 
     pub fn add(&mut self, id: &str, unsent: Unsent) {
@@ -361,6 +367,9 @@ mod tests {
         assert_eq!(take_back("hello\n\n  and more", "hello", Some(&restored)), None);
         assert_eq!(take_back(&merged, "hello", None), None);
         assert_eq!(take_back("hello world", "hello", None), None);
+        let typed_again = ("hello".to_string(), "hello".to_string());
+        assert_eq!(take_back("hello", "hello", Some(&typed_again)).as_deref(), Some("hello"));
+        assert_eq!(take_back("hello", "hello", Some(&restored)), None);
     }
 
     fn unsent(key: &str, text: &str, maybe_delivered: bool) -> Unsent {
@@ -373,8 +382,6 @@ mod tests {
         held.add("s1", unsent("k1", "hello", true));
         held.add("s1", unsent("k2", "hello world", false));
         assert_eq!(held.latest("s1").map(|u| u.key.as_str()), Some("k2"));
-        assert_eq!(held.matching("s1", "hello").map(|u| u.key.as_str()), Some("k1"));
-        assert_eq!(held.matching("s1", "hello world"), None);
         assert!(held.note("s1").unwrap().starts_with("2 messages"));
         held.add("s1", unsent("k1", "hello", true));
         assert_eq!(held.iter().count(), 2);
@@ -386,6 +393,19 @@ mod tests {
     }
 
     #[test]
+    fn sending_the_same_text_again_resolves_its_record() {
+        let mut held = Unconfirmed::default();
+        held.add("s1", unsent("k1", "hello", true));
+        held.add("s1", unsent("k2", "hello", false));
+        held.add("s1", unsent("k3", "other", false));
+        assert_eq!(held.take_same("s1", "hello").map(|u| u.key), Some("k1".into()));
+        assert_eq!(held.take_same("s1", "hello").map(|u| u.key), Some("k2".into()));
+        assert_eq!(held.take_same("s1", "hello"), None);
+        assert_eq!(held.take_same("s1", "other").map(|u| u.maybe_delivered), Some(false));
+        assert_eq!(held, Unconfirmed::default());
+    }
+
+    #[test]
     fn unconfirmed_sends_follow_a_rekey_and_survive_a_restart() {
         let mut held = Unconfirmed::default();
         held.add("old", unsent("k1", "hello", true));
@@ -393,7 +413,8 @@ mod tests {
         held.rekey(&map(&[("old", "new")]));
         assert!(!held.has("old"));
         assert_eq!(held.0["new"].len(), 2);
-        assert_eq!(held.matching("new", "hello").map(|u| u.session.as_str()), Some("s1"));
+        assert_eq!(held.take_same("new", "hello").map(|u| u.session), Some("s1".into()));
+        held.add("new", unsent("k1", "hello", true));
         assert_eq!(Unconfirmed::from_json(&held.to_json()), held);
         let single = Unconfirmed::from_json(&json!({"s9": {"text": "hi", "key": "k"}}));
         assert_eq!(single.latest("s9").map(|u| u.session.as_str()), Some("s9"));
