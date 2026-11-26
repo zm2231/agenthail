@@ -70,7 +70,7 @@ func TestAStopSparesATurnOpenedOnceTheSessionResumed(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := r.OpenTurn("opened-after", seen.Add(time.Second)); err != nil {
+	if err := r.OpenTurn("opened-after", seen); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.OpenTurn("resumed", seen.Add(-time.Second)); err != nil {
