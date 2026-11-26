@@ -530,11 +530,11 @@ final class AgenthailModel {
                 await openCreatedSession(id, started: true)
                 return .opened
             case .openUnsent(let id):
+                draft(for: id).restore(form.trimmedMessage)
                 await openCreatedSession(id, started: true)
-                guard let session = knownSessions.first(where: { AgenthailLink.matches($0, reference: id) }) else {
+                guard knownSessions.contains(where: { $0.id == id }) else {
                     return .failed(SessionCreationReceipt.notSentUnopenedMessage)
                 }
-                draft(for: session.id).restore(form.trimmedMessage)
                 operationError = SessionCreationReceipt.notSentMessage
                 return .opened
             case .submitted(let note):
