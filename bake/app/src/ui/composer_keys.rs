@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use feed::catalog::Session;
 use rune::{Chord, Key, KeyEvent, Mods, Tx};
+use serde_json::{Value, json};
 
 use crate::App;
 use crate::over::search;
@@ -36,6 +37,23 @@ pub const COMPOSER: [(Edit, &str); 8] = [
 pub struct State {
     escaped: Option<(String, Instant)>,
     stash: HashMap<String, String>,
+}
+
+impl State {
+    pub fn to_json(&self) -> Value {
+        json!(self.stash)
+    }
+
+    pub fn from_json(value: &Value) -> State {
+        let stash = value.as_object().into_iter().flatten().filter_map(|(id, text)| Some((id.clone(), text.as_str()?.to_string()))).collect();
+        State { escaped: None, stash }
+    }
+
+    pub fn rekey(&mut self, old: &str, new: &str) {
+        if let Some(text) = self.stash.remove(old) {
+            self.stash.entry(new.to_string()).or_insert(text);
+        }
+    }
 }
 
 pub fn find(matches: impl Fn(&Chord) -> bool) -> Option<Edit> {
@@ -103,18 +121,28 @@ fn interrupt(s: &mut App, id: &str) {
     }
 }
 
+fn held(s: &App, id: &str) -> bool {
+    s.complete.keys.stash.contains_key(id) || super::attach::stashing(s, id)
+}
+
 fn stash(s: &mut App, id: &str) -> bool {
-    let empty = s.composer.text.is_empty() && !s.attach.tray.has(id);
-    if empty && !s.complete.keys.stash.contains_key(id) && !s.attach.tray.has_stashed(id) {
+    let empty = s.composer.text.is_empty() && !super::attach::has(s, id);
+    if empty && !held(s, id) {
         return false;
     }
-    let held = s.complete.keys.stash.remove(id).unwrap_or_default();
+    let back = s.complete.keys.stash.remove(id).unwrap_or_default();
     if !s.composer.text.is_empty() {
         s.complete.keys.stash.insert(id.to_string(), s.composer.text.clone());
     }
-    s.attach.tray.swap_stash(id);
-    super::complete::replace_composer(s, &held);
+    super::attach::swap_stash(s, id);
+    super::complete::replace_composer(s, &back);
     true
+}
+
+pub fn restore_after_send(s: &mut App, id: &str) {
+    if s.composer_for.as_deref() == Some(id) && s.composer.text.is_empty() && !super::attach::has(s, id) && held(s, id) {
+        stash(s, id);
+    }
 }
 
 #[cfg(test)]
@@ -152,6 +180,17 @@ mod tests {
         assert_eq!(press(Key::Text("k".into()), CTRL), None, "Control-K stays the field's");
         assert_eq!(press(Key::Text("r".into()), CTRL), None, "Control-R searches what was sent");
         assert_eq!(press(Key::Escape, Mods { shift: true, ..Mods::default() }), None);
+    }
+
+    #[test]
+    fn a_stashed_draft_survives_a_restart_and_follows_its_session() {
+        let mut held = State::default();
+        held.stash.insert("old".into(), "set aside".into());
+        let mut back = State::from_json(&held.to_json());
+        back.rekey("old", "new");
+        assert_eq!(back.stash.get("new").map(String::as_str), Some("set aside"));
+        assert!(!back.stash.contains_key("old"));
+        assert!(State::from_json(&Value::Null).stash.is_empty());
     }
 
     #[test]

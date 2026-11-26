@@ -14,7 +14,7 @@ pub mod attach;
 pub(crate) mod background;
 mod chips;
 pub mod complete;
-mod composer_keys;
+pub mod composer_keys;
 pub mod gone;
 pub mod keys;
 pub(crate) mod queue;

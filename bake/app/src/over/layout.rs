@@ -96,6 +96,8 @@ fn encode(s: &App) -> String {
         "looked": { "now": s.ov.looked_now, "projects": s.ov.looked },
         "drafts": s.drafts.to_json(),
         "attachments": crate::ui::attach::saved(s),
+        "stashes": s.complete.keys.to_json(),
+        "stashedAttachments": crate::ui::attach::stashed_saved(s),
         "unsent": unsent(s),
         "queueTaking": feed::queue::Taking::to_json(&s.queue_taking),
         "backgroundDock": s.dock.to_json(),
@@ -128,6 +130,8 @@ pub fn load(s: &mut App) {
     s.drafts = feed::composer::Drafts::from_json(&v["drafts"]);
     s.unsent = feed::composer::Unconfirmed::from_json(&v["unsent"]);
     s.attach.tray = feed::attach::Tray::from_json(&v["attachments"]);
+    s.attach.tray.load_stashed(&v["stashedAttachments"]);
+    s.complete.keys = crate::ui::composer_keys::State::from_json(&v["stashes"]);
     let held: Vec<(String, feed::composer::Unsent)> = s.unsent.iter().map(|(id, u)| (id.clone(), u.clone())).collect();
     for (id, unsent) in held {
         if s.drafts.get(&id).trim().is_empty() && !s.attach.tray.has(&id) {

@@ -66,6 +66,7 @@ pub struct Attach {
     pub sent: HashMap<String, Sent>,
     pub thumbs: HashMap<u64, rune::Image>,
     pub adding: HashMap<u64, (String, Vec<String>)>,
+    pub stashed_jobs: HashSet<u64>,
     pub unsaved: Option<String>,
     next_job: u64,
     pub menu: Option<Open>,
@@ -135,12 +136,32 @@ pub fn has(s: &App, id: &str) -> bool {
 }
 
 pub fn adding(s: &App, id: &str) -> usize {
-    s.attach.adding.values().filter(|(at, _)| at == id).count()
+    s.attach.adding.iter().filter(|(job, (at, _))| at == id && !s.attach.stashed_jobs.contains(job)).count()
 }
 
 pub fn saved(s: &App) -> serde_json::Value {
-    let names: Vec<(String, String)> = s.attach.adding.values().flat_map(|(id, names)| names.iter().map(move |n| (id.clone(), n.clone()))).collect();
-    s.attach.tray.to_json_with(&names)
+    s.attach.tray.to_json_with(&adding_names(s, false))
+}
+
+pub fn stashed_saved(s: &App) -> serde_json::Value {
+    s.attach.tray.stashed_json_with(&adding_names(s, true))
+}
+
+fn adding_names(s: &App, stashed: bool) -> Vec<(String, String)> {
+    s.attach.adding.iter().filter(|(job, _)| s.attach.stashed_jobs.contains(job) == stashed).flat_map(|(_, (id, names))| names.iter().map(move |n| (id.clone(), n.clone()))).collect()
+}
+
+pub fn stashing(s: &App, id: &str) -> bool {
+    s.attach.tray.has_stashed(id) || s.attach.adding.iter().any(|(job, (at, _))| at == id && s.attach.stashed_jobs.contains(job))
+}
+
+pub fn swap_stash(s: &mut App, id: &str) {
+    s.attach.tray.swap_stash(id);
+    for (job, (at, _)) in &s.attach.adding {
+        if at == id && !s.attach.stashed_jobs.remove(job) {
+            s.attach.stashed_jobs.insert(*job);
+        }
+    }
 }
 
 pub fn rekey(s: &mut App, old: &str, new: &str) {
@@ -274,6 +295,10 @@ pub fn done(s: &mut App, done: Done, tx: &mut Tx) {
         Done::Prepared(job, files) => {
             let Some((id, _)) = s.attach.adding.remove(&job) else { return };
             let id = feed::composer::current(&s.rekeyed, &id).to_string();
+            let stashed = s.attach.stashed_jobs.remove(&job);
+            if stashed {
+                s.attach.tray.swap_stash(&id);
+            }
             let mut problem = None;
             for file in files {
                 let prepared = match file {
@@ -296,6 +321,9 @@ pub fn done(s: &mut App, done: Done, tx: &mut Tx) {
                         problem.get_or_insert(error);
                     }
                 }
+            }
+            if stashed {
+                s.attach.tray.swap_stash(&id);
             }
             if let Some(problem) = problem {
                 crate::note(s, &id, problem.message());

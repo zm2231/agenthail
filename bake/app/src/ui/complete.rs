@@ -387,6 +387,7 @@ fn rebuild(s: &mut App, id: &str) {
 pub fn sending(s: &mut App, id: &str) {
     s.complete.dismissed = None;
     s.complete.history.entry(id.to_string()).or_default().stop();
+    super::composer_keys::restore_after_send(s, id);
 }
 
 pub fn delivered(s: &mut App, id: &str, text: &str) {
@@ -412,6 +413,7 @@ pub fn rekey(s: &mut App, old: &str, new: &str) {
     if let Some(history) = c.history.remove(old) {
         c.history.insert(new.to_string(), history);
     }
+    c.keys.rekey(old, new);
     let prefix = format!("{old}/");
     let moving: Vec<String> = c.fork_keys.keys().filter(|k| k.starts_with(&prefix)).cloned().collect();
     for point in moving {
