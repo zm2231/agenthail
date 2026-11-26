@@ -539,6 +539,17 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
         spawn(s, move |c| Done::Goal(asked.clone(), typed.clone(), c.goal_set(&asked, &argument)));
         return true;
     }
+    let pending = match command {
+        Slash::Model => s.menus.busy.contains(&(id.to_string(), "model")).then_some("The last model change is still on its way."),
+        Slash::Compact => s.menus.busy.contains(&(id.to_string(), "compact")).then_some("Compacting is already on its way."),
+        Slash::Stop => s.stopping.contains(id).then_some("Stopping is already on its way."),
+        Slash::Name => (s.menus.rename_saving || super::session_menu::changing(s, id)).then_some("Another change to this session is still on its way."),
+        Slash::Steer | Slash::Goal => None,
+    };
+    if let Some(wait) = pending {
+        crate::note(s, id, wait.into());
+        return true;
+    }
     s.complete.dismissed = None;
     replace_composer(s, "");
     match command {
@@ -691,6 +702,7 @@ pub fn search(s: &App, x: &Session) -> Option<El> {
         Some(Err(error)) => list = list.child(text(format!("Couldn't search what you sent: {error}")).font(META).color(failed()).px(10.0).py(4.0)),
         Some(Ok(found)) if found.is_empty() => {
             let empty = match (search.more, search.query.text.trim().is_empty()) {
+                _ if !search.problems.is_empty() => "Nothing found where the search could look.",
                 (true, _) => "Nothing among the newest prompts. Type more to narrow the search.",
                 (false, true) => "Nothing sent yet.",
                 (false, false) => "No sent prompt matches.",
