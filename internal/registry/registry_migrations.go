@@ -492,10 +492,14 @@ func migrateTx(tx *sql.Tx) error {
 		{"work_item", `TEXT NOT NULL DEFAULT ''`},
 		{"ledger_key", `TEXT NOT NULL DEFAULT ''`},
 		{"waiting_pushed_at_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"lead_escalated_at_ms", `INTEGER NOT NULL DEFAULT 0`},
 	} {
 		if err := ensureColumn(tx, "turn_ends", column.name, column.decl); err != nil {
 			return err
 		}
+	}
+	if err := ensureColumn(tx, "turn_judgments", "lead_escalated_at_ms", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
 	}
 	if err := ensureColumn(tx, "agent_inbox", "delivered_at_ms", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err

@@ -28,6 +28,9 @@ type dashboardTurnState struct {
 	TurnID   string `json:"turnId,omitempty"`
 	Pushed   bool   `json:"pushed,omitempty"`
 	Headline string `json:"headline,omitempty"`
+	// OnLead marks a worker waiting on its lead; Escalated, a wait that moved from the lead to the person because the lead did not answer in time or could not act.
+	OnLead    bool `json:"onLead,omitempty"`
+	Escalated bool `json:"escalated,omitempty"`
 }
 
 type leadRef struct {
@@ -98,7 +101,7 @@ func turnStateOf(row *dashboardSession, judgment *registry.TurnJudgment, leads l
 		}
 		switch {
 		case hasLead && !isLead && slices.Contains(awaited, lead.sessionID):
-			return &dashboardTurnState{State: turnWaitingWork, Reason: "@" + lead.name, Source: turnSourceFacts}
+			return leadWait(lead, judgment, turnSourceFacts)
 		case len(awaited) > 0:
 			return &dashboardTurnState{State: turnWaitingWork, Reason: namedSessions(awaited, leads), Source: turnSourceFacts}
 		case len(facts.Children) > 0:
@@ -108,16 +111,16 @@ func turnStateOf(row *dashboardSession, judgment *registry.TurnJudgment, leads l
 		}
 	}
 	if end := row.EndTurn; end.waits() {
-		if hasLead && !isLead {
-			return &dashboardTurnState{State: turnWaitingWork, Reason: "@" + lead.name, Source: turnSourceEndTurn}
+		if hasLead && !isLead && !end.Escalated {
+			return &dashboardTurnState{State: turnWaitingWork, Reason: "@" + lead.name, Source: turnSourceEndTurn, TurnID: end.TurnID, OnLead: true}
 		}
-		return &dashboardTurnState{State: turnWaitingPerson, Reason: end.WaitingOn, Source: turnSourceEndTurn, TurnID: end.TurnID, Pushed: end.WaitPushed, Headline: shownLine(end.WaitingOn, headlineShownRunes)}
+		return &dashboardTurnState{State: turnWaitingPerson, Reason: end.WaitingOn, Source: turnSourceEndTurn, TurnID: end.TurnID, Pushed: end.WaitPushed, Headline: shownLine(end.WaitingOn, headlineShownRunes), Escalated: end.Escalated && hasLead && !isLead}
 	}
 	if judgment != nil {
 		switch judgment.State {
 		case turnWaitingPerson:
 			if hasLead && !isLead {
-				return &dashboardTurnState{State: turnWaitingWork, Reason: "@" + lead.name, Source: turnSourceJudge}
+				return leadWait(lead, judgment, turnSourceJudge)
 			}
 			return &dashboardTurnState{State: turnWaitingPerson, Source: turnSourceJudge, TurnID: judgment.TurnID, Pushed: !judgment.PushedAt.IsZero(), Headline: shownLine(judgment.Headline, headlineShownRunes)}
 		case turnDone, turnWaitingWork, turnContinuing:
@@ -130,6 +133,18 @@ func turnStateOf(row *dashboardSession, judgment *registry.TurnJudgment, leads l
 		return &dashboardTurnState{State: turnDone, Source: turnSourceEndTurn}
 	}
 	return nil
+}
+
+// A worker's judged wait on its lead names no request the person could act on, so once it moves to them it says who did not answer and what the turn said.
+func leadWait(lead leadRef, judgment *registry.TurnJudgment, source string) *dashboardTurnState {
+	if judgment.LeadEscalated.IsZero() {
+		return &dashboardTurnState{State: turnWaitingWork, Reason: "@" + lead.name, Source: source, TurnID: judgment.TurnID, OnLead: true}
+	}
+	reason := "@" + lead.name + " has not answered"
+	if judgment.Headline != "" {
+		reason += ": " + judgment.Headline
+	}
+	return &dashboardTurnState{State: turnWaitingPerson, Reason: reason, Source: source, TurnID: judgment.TurnID, Pushed: !judgment.PushedAt.IsZero(), Headline: shownLine(reason, headlineShownRunes), Escalated: true}
 }
 
 func namedSessions(ids []string, leads leadDirectory) string {

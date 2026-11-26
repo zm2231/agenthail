@@ -21,6 +21,7 @@ type dashboardEndTurn struct {
 	WorkItem   string    `json:"workItem,omitempty"`
 	LedgerKey  string    `json:"ledgerKey,omitempty"`
 	WaitPushed bool      `json:"waitPushed,omitempty"`
+	Escalated  bool      `json:"escalated,omitempty"`
 }
 
 const (
@@ -39,6 +40,7 @@ func endTurnRow(end *registry.TurnEnd) *dashboardEndTurn {
 	row := &dashboardEndTurn{Headline: shownLine(end.Headline, headlineShownRunes), Next: next, EndedAt: end.EndedAt}
 	if end.WaitingOn != "" && end.CompletedTurnID != "" {
 		row.WaitingOn, row.TurnID, row.WorkItem, row.LedgerKey, row.WaitPushed = end.WaitingOn, end.CompletedTurnID, end.WorkItem, end.LedgerKey, !end.WaitPushed.IsZero()
+		row.Escalated = !end.LeadEscalated.IsZero()
 	}
 	return row
 }

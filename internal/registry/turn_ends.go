@@ -21,6 +21,7 @@ type TurnEnd struct {
 	WorkItem        string
 	LedgerKey       string
 	WaitPushed      time.Time
+	LeadEscalated   time.Time
 }
 
 const TurnSourceTool = "tool"
@@ -188,22 +189,23 @@ const currentTurnEnd = `te.ended_at_ms>0
  AND te.started_at_ms=(SELECT MAX(started_at_ms) FROM turn_ends WHERE session_id=te.session_id)
  AND (te.completed_turn_id='' OR te.completed_turn_id=COALESCE((SELECT completed_turn_id FROM session_runtime WHERE session_id=te.session_id),''))`
 
-const turnEndColumns = `te.session_id,te.started_at_ms,te.ended_at_ms,te.turn_id,te.completed_turn_id,te.headline,te.next_json,te.source,te.waiting_person,te.work_item,te.ledger_key,te.waiting_pushed_at_ms`
+const turnEndColumns = `te.session_id,te.started_at_ms,te.ended_at_ms,te.turn_id,te.completed_turn_id,te.headline,te.next_json,te.source,te.waiting_person,te.work_item,te.ledger_key,te.waiting_pushed_at_ms,te.lead_escalated_at_ms`
 
 func scanTurnEnds(rows *sql.Rows) ([]TurnEnd, error) {
 	defer rows.Close()
 	var out []TurnEnd
 	for rows.Next() {
 		var end TurnEnd
-		var started, ended, pushed int64
+		var started, ended, pushed, escalated int64
 		var next string
-		if err := rows.Scan(&end.SessionID, &started, &ended, &end.TurnID, &end.CompletedTurnID, &end.Headline, &next, &end.Source, &end.WaitingOn, &end.WorkItem, &end.LedgerKey, &pushed); err != nil {
+		if err := rows.Scan(&end.SessionID, &started, &ended, &end.TurnID, &end.CompletedTurnID, &end.Headline, &next, &end.Source, &end.WaitingOn, &end.WorkItem, &end.LedgerKey, &pushed, &escalated); err != nil {
 			return nil, err
 		}
 		end.StartedAt, end.EndedAt = time.UnixMilli(started).UTC(), time.UnixMilli(ended).UTC()
 		if pushed > 0 {
 			end.WaitPushed = time.UnixMilli(pushed).UTC()
 		}
+		end.LeadEscalated = unixMilliOrZero(escalated)
 		if err := json.Unmarshal([]byte(next), &end.Next); err != nil {
 			return nil, err
 		}
@@ -236,4 +238,15 @@ func (r *Registry) ConfirmWaitPush(sessionID, completedTurnID string, claimedAt 
 func (r *Registry) ReleaseWaitPush(sessionID, completedTurnID string, claimedAt time.Time) error {
 	_, err := r.db.Exec(`UPDATE turn_ends SET waiting_pushed_at_ms=0 WHERE session_id=? AND completed_turn_id=? AND waiting_pushed_at_ms=?`, sessionID, completedTurnID, -claimedAt.UnixMilli())
 	return err
+}
+
+// EscalateTurnEnd moves a completed turn's wait from the lead to the person once, while that turn is still the session's last and none runs.
+func (r *Registry) EscalateTurnEnd(sessionID, completedTurnID string, at time.Time) (bool, error) {
+	result, err := r.db.Exec(`UPDATE turn_ends SET lead_escalated_at_ms=? WHERE session_id=? AND completed_turn_id=? AND waiting_person<>'' AND lead_escalated_at_ms=0
+		AND EXISTS (SELECT 1 FROM session_runtime WHERE session_id=? AND completed_turn_id=? AND active_turn_id='')`, at.UnixMilli(), sessionID, completedTurnID, sessionID, completedTurnID)
+	if err != nil {
+		return false, err
+	}
+	moved, err := result.RowsAffected()
+	return moved == 1, err
 }

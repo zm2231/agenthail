@@ -41,6 +41,8 @@ type Config struct {
 	AskEscalateMinutes int `json:"askEscalateMinutes,omitempty"`
 	// AskPermissionEscalateMinutes is the same for a permission request, which holds a tool call; unset is 3.
 	AskPermissionEscalateMinutes int `json:"askPermissionEscalateMinutes,omitempty"`
+	// LeadWaitEscalateMinutes is how long a worker that holds work may wait on its lead, without having said what for, before the wait moves to the person; unset is 120.
+	LeadWaitEscalateMinutes int `json:"leadWaitEscalateMinutes,omitempty"`
 	// SimulatorHost names the paired Mac a host without simulators forwards to; unset picks the only connected one that runs them.
 	SimulatorHost string `json:"simulatorHost,omitempty"`
 	// NotificationPreferences holds the person's choices that differ from each preference's default.

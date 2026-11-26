@@ -302,6 +302,7 @@ func (d *Daemon) runAskSweeps(ctx context.Context) {
 	defer ticker.Stop()
 	for {
 		d.sweepAsks(time.Now())
+		d.sweepLeadWaits(ctx, time.Now())
 		select {
 		case <-ctx.Done():
 			return
