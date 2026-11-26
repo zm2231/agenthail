@@ -2,6 +2,7 @@ package ledger_test
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/ledger"
@@ -90,6 +91,21 @@ func TestAHandoffRecordsItsShapeAndFreesTheItem(t *testing.T) {
 	read[0].Handoff.Done[0], read[0].Handoff.Remaining = "changed by a reader", nil
 	if again, _ := board(t, s).WorkItem("widget-W1"); again.Handoff.Done[0] != "schema written" || len(again.Handoff.Remaining) != 1 {
 		t.Fatalf("a reader changed the board's handoff: %+v", again.Handoff)
+	}
+}
+
+func TestOnlyTheHolderReleasesAnItemAndItsHandoffStays(t *testing.T) {
+	s := newStore(t)
+	searchAsk(t, s)
+	items(t, s, "add the index")
+	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkRelease, ItemID: "widget-W1"}, "release needs it in_progress or blocked")
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W1"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkHandoff, ItemID: "widget-W1", Handoff: ledger.Handoff{Remaining: []string{"backfill"}}})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W1"})
+	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkRelease, ItemID: "widget-W1", SessionID: "other"}, "only its assignee releases it")
+	released := work(t, s, ledger.WorkRequest{Action: ledger.WorkRelease, ItemID: "widget-W1", Reason: "the parser comes first"})
+	if item := released.Item; item.State != ledger.WorkOpen || item.Assignee != "" || item.Handoff == nil || item.Handoff.Remaining[0] != "backfill" || !strings.Contains(released.Readback, "released by s1") {
+		t.Fatalf("released = %+v %q", item, released.Readback)
 	}
 }
 

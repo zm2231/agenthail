@@ -4,6 +4,8 @@ package buildinfo
 
 import (
 	"runtime/debug"
+
+	"golang.org/x/mod/semver"
 )
 
 const (
@@ -81,4 +83,13 @@ func (i Identity) String() string {
 		revision += ", modified"
 	}
 	return i.Version + " (" + revision + ")"
+}
+
+// Older reports whether a is a release older than b, and whether that can be
+// decided: only two release versions compare, so a dev build never does.
+func Older(a, b Identity) (older, known bool) {
+	if !semver.IsValid(a.Version) || !semver.IsValid(b.Version) {
+		return false, false
+	}
+	return semver.Compare(a.Version, b.Version) < 0, true
 }

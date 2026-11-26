@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
@@ -218,7 +219,7 @@ func TestAPendingClaimBlocksOthersOnlyUntilItExpires(t *testing.T) {
 func TestAWriteAnOlderHostCannotReadNamesTheHostToUpdateAndLandsOnceItCan(t *testing.T) {
 	newer := func(node *federationNode, path string) { node.gate.newerSender.Store(&path) }
 	t.Run("claim", func(t *testing.T) {
-		mac, owner, _ := ledgerOnTwoHosts(t)
+		mac, owner, _ := ledgerOnTwoHostsBuilt(t, release("v0.2.171"), release("v0.2.170"))
 		newer(owner, "/api/v1/ledger/sync/claim")
 		if code, _, body := assignOwner(t, mac); code != http.StatusServiceUnavailable || !strings.Contains(body, "Update Agenthail on vps") || !strings.Contains(body, "addedByANewerHost") {
 			t.Fatalf("a claim the owner cannot read: status=%d body=%s", code, body)
@@ -232,7 +233,7 @@ func TestAWriteAnOlderHostCannotReadNamesTheHostToUpdateAndLandsOnceItCan(t *tes
 		}
 	})
 	t.Run("confirm held by sync", func(t *testing.T) {
-		mac, owner, _ := ledgerOnTwoHosts(t)
+		mac, owner, _ := ledgerOnTwoHostsBuilt(t, release("v0.2.171"), release("v0.2.170"))
 		said := capturePrompt(t, mac, "local-a", "p-before", "said before the move")
 		newer(owner, "/api/v1/ledger/sync/confirm")
 		code, result, body := assignOwner(t, mac)
@@ -252,7 +253,7 @@ func TestAWriteAnOlderHostCannotReadNamesTheHostToUpdateAndLandsOnceItCan(t *tes
 		}
 	})
 	t.Run("write behind a held confirm", func(t *testing.T) {
-		mac, owner, _ := ledgerOnTwoHosts(t)
+		mac, owner, _ := ledgerOnTwoHostsBuilt(t, release("v0.2.171"), release("v0.2.170"))
 		newer(owner, "/api/v1/ledger/sync/confirm")
 		if code, result, body := assignOwner(t, mac); code != http.StatusOK || result.Confirmed {
 			t.Fatalf("a confirm the owner cannot read: status=%d body=%s", code, body)
@@ -269,8 +270,39 @@ func TestAWriteAnOlderHostCannotReadNamesTheHostToUpdateAndLandsOnceItCan(t *tes
 		}
 		sameLedgerOnBothHosts(t, widgetKey, mac, owner)
 	})
+	t.Run("an owner that is not older", func(t *testing.T) {
+		for name, ownerBuild := range map[string]buildinfo.Identity{"same release": release("v0.2.171"), "newer release": release("v0.2.172"), "unnamed build": {}} {
+			t.Run(name, func(t *testing.T) {
+				mac, owner, _ := ledgerOnTwoHostsBuilt(t, release("v0.2.171"), ownerBuild)
+				newer(owner, "/api/v1/ledger/sync/claim")
+				if code, _, body := assignOwner(t, mac); code != http.StatusBadRequest || strings.Contains(body, ledgerOwnerOutdatedCode) || !strings.Contains(body, "this host runs v0.2.171") {
+					t.Fatalf("a claim an owner that is not older refuses: status=%d body=%s", code, body)
+				}
+				newer(owner, "/api/v1/ledger/sync/confirm")
+				if code, _, body := assignOwner(t, mac); code != http.StatusBadRequest || strings.Contains(body, ledgerOwnerOutdatedCode) || !strings.Contains(body, "this host runs v0.2.171") || !strings.Contains(body, "keeps the ledger") {
+					t.Fatalf("a confirm an owner that is not older refuses: status=%d body=%s", code, body)
+				}
+				if ownerOf(t, mac) != "" || ownerOf(t, owner) != "" {
+					t.Fatalf("an owner kept after a refused confirm: mac=%q owner=%q", ownerOf(t, mac), ownerOf(t, owner))
+				}
+				if _, pending := owner.daemon.ledgerClaims.lookup(widgetKey); pending {
+					t.Fatal("the owner still holds the claim after a refused confirm")
+				}
+				owner.gate.newerSender.Store(nil)
+				if code, result, body := assignOwner(t, mac); code != http.StatusOK || !result.Confirmed {
+					t.Fatalf("assignment: status=%d body=%s", code, body)
+				}
+				add := ledger.WorkRequest{ProjectKey: widgetKey, SessionID: "local-a", Action: ledger.WorkAdd, Text: "fix the flag"}
+				newer(owner, "/api/v1/ledger/work")
+				code, body := ledgerRequest(t, mac, "/api/v1/ledger/work", add)
+				if code != http.StatusBadRequest || strings.Contains(body, ledgerOwnerOutdatedCode) || !strings.Contains(body, "addedByANewerHost") || !strings.Contains(body, "this host runs v0.2.171") {
+					t.Fatalf("a write an owner that is not older refuses: status=%d body=%s", code, body)
+				}
+			})
+		}
+	})
 	t.Run("proxied write", func(t *testing.T) {
-		mac, owner, _ := ledgerOnTwoHosts(t)
+		mac, owner, _ := ledgerOnTwoHostsBuilt(t, release("v0.2.171"), release("v0.2.170"))
 		if code, result, body := assignOwner(t, mac); code != http.StatusOK || !result.Confirmed {
 			t.Fatalf("assignment: status=%d body=%s", code, body)
 		}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/broadcast"
+	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -46,7 +47,12 @@ func widgetOnTwoHosts(t *testing.T) (*federationNode, *federationNode, registry.
 
 func widgetOnTwoHostsWith(t *testing.T, configure func(*federation)) (*federationNode, *federationNode, registry.PairedHost) {
 	t.Helper()
-	local, remote, record := pairedFederationWith(t, configure)
+	return widgetOnTwoHostsBuilt(t, configure, buildinfo.Identity{}, buildinfo.Identity{})
+}
+
+func widgetOnTwoHostsBuilt(t *testing.T, configure func(*federation), localBuild, remoteBuild buildinfo.Identity) (*federationNode, *federationNode, registry.PairedHost) {
+	t.Helper()
+	local, remote, record := pairedFederationBuilt(t, configure, localBuild, remoteBuild)
 	localRepo := widgetRepo(t, "https://github.com/example/widget.git")
 	remoteRepo := widgetRepo(t, "https://github.com/example/widget.git")
 	moveSession(t, local, "local-a", localRepo, time.Now())

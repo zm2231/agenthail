@@ -188,6 +188,7 @@ agenthail ledger work approve <item>        # or reject; done after approval
 agenthail ledger work review-pass <item> --reason "..."   # the project's lead hands the review to the person
 agenthail ledger work dep <item> --on <other item>
 agenthail ledger work handoff <item> --done "..." --remaining "..."
+agenthail ledger work release <item>        # give back an item you hold, open for the next session
 ```
 
 Every `ledger work <command>` can also be written without `work`, as in td: `ledger list`, `ledger show <item>`, `ledger add` (or `create`, `new`), `ledger edit` (or `update`), `ledger start` (claim), `ledger review` (submit), `ledger close`, `ledger delete`, `ledger reopen` and the rest. `agenthail ledger help` lists them all, and so does an unknown command. Every item has a type (`task`, the default, `bug` or `feature`) and a priority from `P0`, the most urgent, to `P3` (default `P2`), and can carry a description, acceptance criteria and labels. `--found-in` names the item or clause the work was found from. Any session may move an item that hangs off a clause to another live clause with `work link` and a `--reason`; the item's timeline records the move and the reason, and the item then shows under the new clause only. When the move leaves the old clause with no work that is not closed or deleted, the reply says so (`C139 now has no work`), so an ask is not left without work by accident. A moved item belongs to the clause it moved to: if the person's words behind the clause it moved off are later reclassified, the item stays; if the words behind the clause it moved to are reclassified, the item becomes found work again rather than going back.
@@ -314,6 +315,7 @@ Once a project has an owner:
 
 - **Writes that create an ID** (goals, asks, clauses, cuts, decisions, work items, questions) go through the owner, so IDs never change.
   - If the owner cannot be reached, the write is refused. The message names the owner and says nothing was recorded; retry once it is back.
+  - A write the owner refuses because it runs an older release than the laptop, and does not know a key the laptop sent, is refused as outdated: the message names both releases and the host to update. A request with a key neither host knows, such as a handoff's `done` sent outside `handoff`, is refused on the laptop before it is sent, and the message says where the key belongs.
 - **Everything else** (captured words, comments, logs, gate results) is recorded on the laptop first and replayed to the owner when it is reachable.
   - A laptop that travels keeps capturing offline and catches up on reconnect.
 - **The laptop pulls the owner's log** and keeps its board in the owner's order. Both hosts end up with the same log, event for event, and every write lands once.
@@ -324,7 +326,7 @@ Assigning an owner runs in two phases, so a failure partway never leaves only on
 2. The laptop commits locally.
 3. The laptop confirms, and the owner commits.
 
-If the confirmation is lost, `ledger owner` says the assignment is not confirmed yet, and sync confirms it once the owner answers. If the owner refuses, the laptop keeps its ledger alone again. Moving a ledger to a different owner later is not supported.
+If the confirmation is lost, `ledger owner` says the assignment is not confirmed yet, and sync confirms it once the owner answers. If the owner refuses, or refuses a key in the confirmation while it runs the same or a newer release, the laptop keeps its ledger alone again. Moving a ledger to a different owner later is not supported.
 
 ### Checking that two hosts agree
 

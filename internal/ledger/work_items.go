@@ -35,6 +35,7 @@ const (
 	WorkReject     WorkAction = "reject"
 	WorkReopen     WorkAction = "reopen"
 	WorkHandoff    WorkAction = "handoff"
+	WorkRelease    WorkAction = "release"
 	WorkDep        WorkAction = "dep"
 	WorkUndep      WorkAction = "undep"
 	WorkComment    WorkAction = "comment"

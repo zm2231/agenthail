@@ -44,6 +44,8 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
                                  Comment on an item from any session
   ledger handoff <item_id> --done/--remaining/--decisions/--uncertain "..."
                                  Hand off a claimed item with its state; it reopens for the next session
+  ledger release <item_id> [--reason "..."]
+                                 Give back an item you hold without a handoff; it reopens for the next session
   ledger takeover <item_id> --then release|submit|done --reason "..." [--utterance <id> [--force]]
                                  Take over an item whose holder is archived or gone; done needs a merged PR the watcher logged
   ledger park <item_id>... --usage <provider[:root]>|--later "<why>"|--person "<question>"|--idea --utterance <ref>

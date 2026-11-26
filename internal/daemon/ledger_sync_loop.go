@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/ledger"
 )
@@ -205,7 +206,7 @@ func (d *Daemon) ledgerHostCall(ctx context.Context, host *pairedHost, method, p
 	}
 	answer, err := hosts.ReadResponse(response)
 	if err != nil {
-		return outdatedLedgerHost(host.record.Name, err)
+		return d.outdatedLedgerHost(host, err)
 	}
 	if out == nil {
 		return nil
@@ -214,25 +215,55 @@ func (d *Daemon) ledgerHostCall(ctx context.Context, host *pairedHost, method, p
 }
 
 type ledgerHostOutdated struct {
-	host, refusal string
+	host, theirs, ours, refusal string
 }
 
 func (e ledgerHostOutdated) Error() string {
-	return fmt.Sprintf("update Agenthail on %s: it does not know what this host sent (%s), so nothing was recorded there", e.host, e.refusal)
+	return fmt.Sprintf("update Agenthail on %s: it runs %s, older than this host's %s, and does not know what this host sent (%s), so nothing was recorded there", e.host, e.theirs, e.ours, e.refusal)
 }
 
-func outdatedLedgerHost(name string, err error) error {
+func (d *Daemon) outdatedLedgerHost(host *pairedHost, err error) error {
 	var status hosts.StatusError
-	if errors.As(err, &status) && status.Code == ledgerUnknownKeyCode {
-		return ledgerHostOutdated{host: name, refusal: status.Message}
+	if !errors.As(err, &status) || status.Code != ledgerUnknownKeyCode {
+		return err
 	}
-	return err
+	if outdated, older := d.olderLedgerHost(host, status.Message); older {
+		return outdated
+	}
+	return d.refusedLedgerKey(host, status.Message)
+}
+
+type ledgerKeyRefused struct{ message string }
+
+func (e ledgerKeyRefused) Error() string { return e.message }
+
+func (d *Daemon) refusedLedgerKey(host *pairedHost, refusal string) ledgerKeyRefused {
+	theirs := "a build it has not named"
+	if build := host.reportedBuild(); build != nil {
+		theirs = build.String()
+	}
+	return ledgerKeyRefused{fmt.Sprintf("%s refused a key this host knows (%s); nothing was recorded. %s runs %s and this host runs %s.", host.record.Name, refusal, host.record.Name, theirs, d.build)}
+}
+
+func (d *Daemon) olderLedgerHost(host *pairedHost, refusal string) (ledgerHostOutdated, bool) {
+	build := host.reportedBuild()
+	if build == nil {
+		return ledgerHostOutdated{}, false
+	}
+	if older, known := buildinfo.Older(*build, d.build); !known || !older {
+		return ledgerHostOutdated{}, false
+	}
+	return ledgerHostOutdated{host: host.record.Name, theirs: build.Version, ours: d.build.Version, refusal: refusal}, true
 }
 
 func ledgerHostActionError(host *pairedHost, err error) error {
+	var refused ledgerKeyRefused
+	if errors.As(err, &refused) {
+		return actionFailed(http.StatusBadRequest, ledgerUnknownKeyCode, refused.message)
+	}
 	var outdated ledgerHostOutdated
 	if errors.As(err, &outdated) {
-		return actionFailed(http.StatusServiceUnavailable, ledgerOwnerOutdatedCode, fmt.Sprintf("Update Agenthail on %s, then retry: it does not know what this host sent (%s). Nothing was recorded.", outdated.host, outdated.refusal))
+		return actionFailed(http.StatusServiceUnavailable, ledgerOwnerOutdatedCode, fmt.Sprintf("Update Agenthail on %s, then retry: it runs %s, older than this host's %s, and does not know what this host sent (%s). Nothing was recorded.", outdated.host, outdated.theirs, outdated.ours, outdated.refusal))
 	}
 	var status hosts.StatusError
 	if errors.As(err, &status) && status.Status == http.StatusConflict {
