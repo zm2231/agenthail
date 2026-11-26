@@ -98,12 +98,13 @@ fn actors<'a>(client: &Client, sessions: &[Session], rows: impl Iterator<Item = 
 }
 
 // Sessions only move forward in time, a project's rows survive a failed fetch,
-// and a ledger fetch never overwrites one that started after it.
+// and neither rows nor actors from a fetch replace ones from a fetch that started after it.
 #[derive(Default)]
 pub struct Overview {
     base: Recorded,
     ledgers: HashMap<String, Vec<Work>>,
     ledger_at: HashMap<String, Instant>,
+    actor_at: HashMap<String, Instant>,
     failed: HashSet<String>,
     covered: HashSet<String>,
     pending: HashSet<String>,
@@ -144,11 +145,10 @@ impl Overview {
             recorded.updated_at = std::mem::take(&mut self.base.updated_at);
             recorded.sessions = std::mem::take(&mut self.base.sessions);
         }
-        let mut actors = std::mem::take(&mut self.base.actors);
-        actors.extend(std::mem::take(&mut recorded.actors));
-        recorded.actors = actors;
+        let actors = std::mem::replace(&mut recorded.actors, std::mem::take(&mut self.base.actors));
         recorded.transcripts = std::mem::take(&mut self.base.transcripts);
         self.base = recorded;
+        self.take_actors(started, actors);
         self.covered = ledgers.keys().cloned().collect();
         for (key, result) in ledgers {
             self.apply(key, started, result);
@@ -170,10 +170,20 @@ impl Overview {
     pub fn take_ledger(&mut self, project: &str, started: Instant, result: Result<Ledger, String>) {
         self.pending.remove(project);
         let rows = result.map(|l| {
-            self.base.actors.extend(l.actors);
+            self.take_actors(started, l.actors);
             l.rows
         });
         self.apply(project.to_string(), started, rows);
+    }
+
+    fn take_actors(&mut self, started: Instant, actors: HashMap<String, Actor>) {
+        for (id, actor) in actors {
+            if self.actor_at.get(&id).is_some_and(|at| *at > started) {
+                continue;
+            }
+            self.actor_at.insert(id.clone(), started);
+            self.base.actors.insert(id, actor);
+        }
     }
 
     fn apply(&mut self, key: String, started: Instant, result: Result<Vec<Work>, String>) {

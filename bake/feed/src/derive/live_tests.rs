@@ -4,6 +4,7 @@ use std::time::Instant;
 use serde_json::{Value, json};
 
 use super::live::{Fetched, Ledger, Overview};
+use super::world::Actor;
 use super::*;
 use crate::catalog::Session;
 
@@ -127,3 +128,26 @@ fn a_ledger_fetch_that_started_earlier_never_overwrites_a_later_one() {
     ov.take_ledger("p", later, Ok(Ledger { rows: vec![work("new", "open")], actors: HashMap::new() }));
     assert_eq!(board_ids(&ov.world(&[]), "p"), ["newest"], "an on-demand fetch that started first and landed last");
 }
+
+fn actor(alias: &str) -> HashMap<String, Actor> {
+    [("helper-1".to_string(), Actor { alias: Some(alias.into()), name: None, surface: None })].into()
+}
+
+#[test]
+fn actors_from_a_fetch_that_started_earlier_never_replace_later_ones() {
+    let sessions = || vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")];
+    let (earlier, later) = (Instant::now(), Instant::now() + std::time::Duration::from_millis(1));
+    let mut ov = Overview::default();
+    ov.take_ledger("p", later, Ok(Ledger { rows: vec![], actors: actor("fresh") }));
+    let mut stale = fetched("2026-11-24T12:00:00Z", sessions(), vec![]);
+    stale.recorded.actors = actor("stale");
+    ov.refresh(Fetched { started: earlier, ..stale });
+    assert!(ov.world(&[]).name_of("helper-1").contains("fresh"), "a refresh that started first and landed last");
+    let latest = later + std::time::Duration::from_millis(1);
+    let mut newest = fetched("2026-11-24T12:00:20Z", sessions(), vec![]);
+    newest.recorded.actors = actor("newest");
+    ov.refresh(Fetched { started: latest, ..newest });
+    ov.take_ledger("p", later, Ok(Ledger { rows: vec![], actors: actor("fresh") }));
+    assert!(ov.world(&[]).name_of("helper-1").contains("newest"), "an on-demand fetch that started first and landed last");
+}
+
