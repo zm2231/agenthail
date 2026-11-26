@@ -143,7 +143,8 @@ impl ConfigRoot {
 
     pub fn spent(&self, now: time::OffsetDateTime) -> bool {
         let at_limit = |l: &Limit| l.percent >= 100.0 && l.resets_at.as_deref().and_then(crate::catalog::parse_time).is_none_or(|at| at > now);
-        self.full || self.usage.as_ref().is_some_and(|u| u.limits.iter().any(at_limit))
+        let full = self.full && self.full_until.as_deref().and_then(crate::catalog::parse_time).is_none_or(|at| at > now);
+        full || self.usage.as_ref().is_some_and(|u| u.limits.iter().any(at_limit))
     }
 
     pub fn same_account(&self, other: &ConfigRoot) -> bool {
@@ -703,6 +704,8 @@ mod tests {
         assert!(!reading(100.0, Some("2026-11-26T09:00:00Z")).spent(now));
         assert!(!reading(99.0, Some("2026-11-26T11:00:00Z")).spent(now));
         assert!(ConfigRoot { full: true, ..Default::default() }.spent(now));
+        assert!(ConfigRoot { full: true, full_until: Some("2026-11-26T11:00:00Z".into()), ..Default::default() }.spent(now));
+        assert!(!ConfigRoot { full: true, full_until: Some("2026-11-26T09:59:00Z".into()), ..Default::default() }.spent(now), "a proxy past the time it frees up is not held out");
     }
 
     #[test]
