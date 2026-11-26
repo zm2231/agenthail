@@ -82,6 +82,10 @@ fn start(s: &mut Prefs) {
 
 fn cancel(s: &mut Prefs) {
     s.dev.attempt += 1;
+    clear(s);
+}
+
+fn clear(s: &mut Prefs) {
     s.dev.starting = false;
     s.dev.checking = false;
     s.dev.pairing = None;
@@ -122,7 +126,7 @@ fn expire(s: &mut Prefs, now: Instant) -> bool {
         return false;
     }
     let id = s.dev.pairing.as_ref().map(|(p, _)| p.id.clone()).unwrap_or_default();
-    cancel(s);
+    clear(s);
     s.dev.notice = Progress::Expired.notice();
     let attempt = s.dev.attempt;
     spawn(s, move |c| Got::Status(attempt, c.pairing_status(&id)));
@@ -567,6 +571,19 @@ mod tests {
         assert!(expire(&mut s, Instant::now()));
         let last = s.dev.attempt;
         take(&mut s, Got::Status(last, Ok(PairingStatus { state: "paired".into(), device: Some(dev::PairedName { name: "Ada's iPhone".into() }) })));
+        assert_eq!(s.dev.notice.as_deref(), Some("Paired Ada's iPhone."));
+    }
+
+    #[test]
+    fn a_paired_reply_already_on_its_way_at_the_deadline_still_counts() {
+        let mut s = prefs();
+        started(&mut s, "p1", 5);
+        let inflight = s.dev.attempt;
+        s.dev.checking = true;
+        assert!(expire(&mut s, Instant::now() + Duration::from_secs(301)));
+        take(&mut s, Got::Status(inflight, Ok(PairingStatus { state: "paired".into(), device: Some(dev::PairedName { name: "Ada's iPhone".into() }) })));
+        assert_eq!(s.dev.notice.as_deref(), Some("Paired Ada's iPhone."));
+        take(&mut s, Got::Status(inflight, Err(Failure::new("timed out"))));
         assert_eq!(s.dev.notice.as_deref(), Some("Paired Ada's iPhone."));
     }
 
