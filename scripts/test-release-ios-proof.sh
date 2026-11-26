@@ -88,6 +88,9 @@ WANT_SHA="$inputs_commit" RUNS="$(runs 11 success)" JOB_11=success JOB_12= find_
 WANT_SHA="$ios_commit" RUNS="$(runs 11 success 12 success)" JOB_11=success JOB_12=success find_proof "$inputs_commit"
 [ "$(value proven)" = false ] || fail "a green run before the input list changed proved the tag: $(cat "$work/output")"
 
+[ "$(cd "$repo" && scripts/ios-inputs.sh last "$docs_commit")" = "$ios_commit" ] || fail "a docs commit after an iOS change is not the last iOS change"
+[ "$(cd "$repo" && scripts/ios-inputs.sh last "$inputs_commit")" = "$inputs_commit" ] || fail "a later iOS change did not become the last one"
+
 changed="$work/changed"
 (cd "$repo" && scripts/ios-inputs.sh list) | grep -qx scripts/fixtures/colours.json || fail "a source outside native/ is not listed by its repository path"
 for path in native/iOS/App.swift native/Shared.swift native/project.yml scripts/ios-inputs.sh scripts/release-ios-proof.sh .github/workflows/ios.yml scripts/fixtures/colours.json; do

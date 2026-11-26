@@ -168,6 +168,8 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - name: Open, update or close the main iOS issue
         env:
           GH_TOKEN: ${{ github.token }}
@@ -175,7 +177,13 @@ jobs:
           ARTIFACT_URL: ${{ needs.ios.outputs.artifact }}
           ISSUE_ASSIGNEE: ${{ github.repository_owner }}
           RESULT: ${{ needs.ios.result }}
-        run: scripts/ci-failure-issue.sh "$RESULT" "iOS tests on main are failing" "iOS test run for a push to main"
+        run: |
+          latest="$(scripts/ios-inputs.sh last origin/main)"
+          if [ "$latest" != "$GITHUB_SHA" ]; then
+            echo "$latest, a later commit on main, changed iOS; its run reports on the main iOS issue."
+            exit 0
+          fi
+          scripts/ci-failure-issue.sh "$RESULT" "iOS tests on main are failing" "iOS test run for a push to main"
 
   ios-release:
     needs: changes

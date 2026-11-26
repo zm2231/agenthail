@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 usage() {
-	echo "usage: $0 list | touched <changed-paths-file>" >&2
+	echo "usage: $0 list | touched <changed-paths-file> | last <commit>" >&2
 	exit 2
 }
 
@@ -51,8 +51,15 @@ touched() {
 	echo false
 }
 
+last() {
+	local -a inputs
+	mapfile -t inputs < <(list)
+	git -C "$ROOT" log -1 --first-parent --format=%H "${1:?}" -- "${inputs[@]}"
+}
+
 case "${1:-}" in
 	list) list ;;
 	touched) shift && touched "$@" ;;
+	last) shift && last "$@" ;;
 	*) usage ;;
 esac
