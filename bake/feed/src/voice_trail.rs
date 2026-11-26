@@ -95,7 +95,7 @@ impl Trail {
         let own = std::mem::take(&mut self.own);
         let mut attempts: Vec<Attempt> = saved.attempts.into_iter().filter(|a| !own.contains(&a.id)).collect();
         attempts.extend(self.attempts.drain(..).filter(|a| own.contains(&a.id)));
-        attempts.sort_by_key(|a| a.started_ms);
+        attempts.sort_by_key(|a| (a.started_ms, a.owner));
         self.attempts = attempts;
         self.own = own;
         self.close_orphans(&alive);

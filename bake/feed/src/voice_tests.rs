@@ -707,6 +707,28 @@ fn the_log_keeps_the_newest_calls_from_both_owners_within_one_second() {
 }
 
 #[test]
+fn calls_started_in_the_same_millisecond_are_kept_the_same_whichever_owner_saves() {
+    let log = |pid: u32, name: &str| {
+        let mut trail = Trail::owned_by(pid);
+        for k in 0..KEPT_CALLS {
+            let id = format!("{name}-{k:02}");
+            trail.begin(&id, 0.0);
+            trail.end(&id, "local_hangup", 1.0);
+            trail.attempts.last_mut().unwrap().started_ms = 5_000;
+        }
+        trail
+    };
+    let mut a = log(1, "a");
+    let mut b = log(2, "b");
+    let (a_disk, b_disk) = (a.save(), b.save());
+    a.combine(Trail::parse(&b_disk).unwrap(), |_| true);
+    b.combine(Trail::parse(&a_disk).unwrap(), |_| true);
+    let ids = |t: &Trail| t.attempts.iter().map(|x| x.id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids(&a), ids(&b));
+    assert_eq!(ids(&a).len(), KEPT_CALLS);
+}
+
+#[test]
 fn calls_logged_before_the_saved_log_could_be_read_join_it() {
     let mut saved = Trail::default();
     for k in 0..19 {
