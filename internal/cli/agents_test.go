@@ -39,6 +39,7 @@ func runDoctorForAgent(t *testing.T, app *App) (doctorAgentResult, error) {
 }
 
 func TestAMissingAgentIsUnavailableOnAutoOffWhenTurnedOffAndAFailureOnlyWhenTurnedOn(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	fake := &cliSurface{kind: surface.KindCodex}
 	app, _ := cliFixture(t, fake)
 	app.Surfaces[0].Surface = absentCLIAgent{&runtimeCLISurface{cliSurface: fake, status: surface.RuntimeStatus{Name: "Codex managed app-server", Detail: "codex is not installed"}}}
@@ -94,6 +95,7 @@ func TestAgentsUseRefusesAnUnknownAgentOrSetting(t *testing.T) {
 }
 
 func TestAgentsReadTheirSettingDespiteAnUnrelatedMistakeInTheSettingsFile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	fake := &cliSurface{kind: surface.KindCodex}
 	app, _ := cliFixture(t, fake)
 	app.Surfaces[0].Surface = absentCLIAgent{&runtimeCLISurface{cliSurface: fake}}
