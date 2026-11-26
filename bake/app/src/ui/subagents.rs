@@ -309,7 +309,7 @@ fn claude_row(s: &App, link: &ClaudeSubagent) -> El {
 pub(crate) fn section(s: &App, x: &Session) -> Option<El> {
     let parent = crew::parent_of(x).and_then(|p| session(s, &p));
     let mut children = crew::children(&x.id, &s.sessions, s.crew.pages.get(&x.id).map(Vec::as_slice).unwrap_or_default());
-    crew::in_daemon_order(&mut children);
+    crew::in_daemon_order(&mut children, &s.sessions);
     let loading = s.crew.loading.contains(&x.id);
     let error = s.crew.errors.get(&x.id);
     let observed = s.crew.claude.get(&x.id).map(|c| c.list(s.crew.expanded.contains(&x.id)));
