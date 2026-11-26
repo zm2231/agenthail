@@ -336,11 +336,11 @@ pub fn commands(query: &str, selected: Option<Selected>) -> Vec<CommandRow> {
     let mut rows = vec![CommandRow { command: Command::NewSession, title: "New session".into(), shortcut: "⌘N" }];
     if let Some(x) = selected {
         if x.can_stop {
-            rows.push(CommandRow { command: Command::Stop, title: format!("Stop {}", one_line(x.title)), shortcut: "" });
+            rows.push(CommandRow { command: Command::Stop, title: format!("Stop {}", one_line(x.title)), shortcut: "⌘." });
         }
         rows.push(CommandRow { command: Command::Rename, title: format!("Rename {}", one_line(x.title)), shortcut: "" });
     }
-    rows.push(CommandRow { command: Command::Refresh, title: "Refresh".into(), shortcut: "" });
+    rows.push(CommandRow { command: Command::Refresh, title: "Refresh".into(), shortcut: "⌘R" });
     rows.push(CommandRow { command: Command::Activity, title: "Activity history".into(), shortcut: "" });
     rows.retain(|r| q.is_empty() || r.title.to_lowercase().contains(&q));
     rows.sort_by_key(|r| !names(&r.title, &q));
