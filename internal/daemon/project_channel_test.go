@@ -380,7 +380,7 @@ func TestAProjectPostReachesLiveConversationsAndSkipsOnesItCannotReach(t *testin
 		t.Fatalf("a post that skipped members raised a delivery ask: %+v %v", asks, err)
 	}
 
-	for channel, members := range map[string][]string{"crew": {"live", "ended", "archived", "folder-gone", "unloaded"}, "retired": {"ended", "archived"}} {
+	for channel, members := range map[string][]string{"crew": {"live", "ended", "archived", "folder-gone", "unloaded", "lead"}, "retired": {"ended", "archived"}} {
 		if _, err := local.reg.CreateChannel(channel); err != nil {
 			t.Fatal(err)
 		}
@@ -389,6 +389,12 @@ func TestAProjectPostReachesLiveConversationsAndSkipsOnesItCannotReach(t *testin
 				t.Fatal(err)
 			}
 		}
+	}
+	lead := local.fake.sessions["lead"]
+	lead.Status, lead.Ended = surface.StatusNotLoaded, true
+	local.fake.sessions["lead"] = lead
+	if err := local.reg.RecordObservedSession(lead); err != nil {
+		t.Fatal(err)
 	}
 	before := len(local.fake.delivered())
 	crew := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "#crew", "message": "handoff", "sourceSessionId": "local-a"})
@@ -413,8 +419,11 @@ func TestAProjectPostReachesLiveConversationsAndSkipsOnesItCannotReach(t *testin
 			t.Fatalf("channel member %s = %+v, want %+v", id, got[id], recipient)
 		}
 	}
-	if len(got) != 5 || len(local.fake.delivered())-before != 1 {
-		t.Fatalf("the channel post reached %+v and delivered %d, want only the live member delivered", crewAnswer.Recipients, len(local.fake.delivered())-before)
+	if outcome := got["lead"].Outcome; outcome == broadcast.OutcomeSkipped || outcome == broadcast.OutcomeFailed {
+		t.Fatalf("an ended coordinator in the channel was not reached: %+v", got["lead"])
+	}
+	if len(got) != 6 || len(local.fake.delivered())-before != 2 {
+		t.Fatalf("the channel post reached %+v and delivered %d, want the live member and the coordinator delivered", crewAnswer.Recipients, len(local.fake.delivered())-before)
 	}
 	retired := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "#retired", "message": "handoff"})
 	if retired.Code != http.StatusBadRequest || !strings.Contains(retired.Body.String(), "#retired has no reachable members other than the sender; skipped ") {
