@@ -46,6 +46,25 @@ type federatedSurface struct {
 	stopped   int
 	stops     []string
 	stopErr   error
+	// kept names the transcripts of ended conversations the surface still
+	// keeps, which stay in the catalog once it stops listing them.
+	kept map[string]bool
+}
+
+func (f *federatedSurface) EndedConversation(transcript string) (bool, time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return transcript != "" && f.kept[transcript], time.Time{}
+}
+
+func (f *federatedSurface) end(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.kept == nil {
+		f.kept = map[string]bool{}
+	}
+	f.kept[f.sessions[id].Transcript] = true
+	delete(f.sessions, id)
 }
 
 func (f *federatedSurface) Interrupt(context.Context, *surface.Session) error {

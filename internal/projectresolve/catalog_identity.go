@@ -123,6 +123,14 @@ func NewCatalogIdentityCache() *CatalogIdentityCache {
 	return &CatalogIdentityCache{entries: map[string]catalogIdentityEntry{}, known: map[string]*CatalogProject{}, repositories: &CatalogRepositoryCache{entries: map[string]catalogRepositoryEntry{}}, roots: map[string]catalogRootEntry{}, refreshing: map[string]struct{}{}, slots: make(chan struct{}, catalogIdentityRefreshes)}
 }
 
+// Generation changes whenever the added projects or links change, so a
+// project a session was given before it may now be wrong.
+func (c *CatalogIdentityCache) Generation() uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.generation
+}
+
 // Wait returns once no background refresh is running.
 func (c *CatalogIdentityCache) Wait() { c.inflight.Wait() }
 

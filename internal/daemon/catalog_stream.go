@@ -534,6 +534,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 		}
 		d.publishSurfaceHealth(health, time.Now().UTC())
 	}
+	d.reidentifyCatalogRows(ctx)
 	d.catalogIdentities.Prune(time.Now())
 	d.publishUnarchivedProjects()
 	d.publishProjectMoves()

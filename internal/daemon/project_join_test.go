@@ -13,6 +13,7 @@ import (
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -338,6 +339,77 @@ func TestARemovalDuringAJoinOfTheSameFolderWaitsForIt(t *testing.T) {
 	for range 2 {
 		if answer := <-answers; !strings.Contains(answer, `"ok":true`) {
 			t.Fatalf("a join and a removal of one folder, one after the other, both stand; got %s", answer)
+		}
+	}
+}
+
+func allSessionsView(t *testing.T, node *federationNode) SessionViewSnapshot {
+	t.Helper()
+	response := node.request(t, http.MethodGet, "/api/v1/snapshot?scope=all&limit=200", nil)
+	var view SessionViewSnapshot
+	if err := json.Unmarshal(response.Body.Bytes(), &view); err != nil || view.View == nil {
+		t.Fatalf("session view: %v %s", err, response.Body.String())
+	}
+	return view
+}
+
+func TestAJoinMovesSessionsThatEndedBeforeIt(t *testing.T) {
+	f := newJoinFixture(t)
+	for node, id := range map[*federationNode]string{f.mac: "laptop-ended", f.server: "vps-b"} {
+		node.fake.sessions[id] = surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "work " + id, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: filepath.Join(t.TempDir(), id+".jsonl")}
+	}
+	moveSession(t, f.mac, "laptop-ended", f.macFolder, time.Now().Add(-time.Hour))
+	moveSession(t, f.server, "vps-b", filepath.Join(f.serverFolder, "src"), time.Now().Add(-time.Hour))
+	discoverOn(f.mac, f.server)
+	f.mac.fake.end("laptop-ended")
+	f.server.fake.end("vps-b")
+	for range catalogOmissionThreshold + 1 {
+		discoverOn(f.mac, f.server)
+	}
+
+	var joined struct {
+		Project struct {
+			ID string `json:"id"`
+		} `json:"project"`
+	}
+	f.action(t, f.mac, map[string]any{"action": "project-add", "path": f.serverFolder, "host": "vps", "join": f.projectID}, http.StatusOK, &joined)
+	key := joined.Project.ID
+
+	ended := map[*federationNode][]string{
+		f.mac:    {"laptop-ended", hosts.Qualify(f.serverRecord.ID, "vps-b")},
+		f.server: {"vps-b", hosts.Qualify(f.macRecord.ID, "laptop-ended")},
+	}
+	testkit.Eventually(t, "the ended sessions in the shared project on both computers", 10*time.Second, func() bool {
+		discoverOn(f.server, f.mac)
+		for node, ids := range ended {
+			projects := map[string]string{}
+			for _, row := range allSessionsView(t, node).Sessions {
+				if row.Project != nil {
+					projects[row.ID] = row.Project.ID
+				}
+			}
+			for _, id := range ids {
+				if projects[id] != key {
+					return false
+				}
+			}
+		}
+		return true
+	})
+	for node, name := range map[*federationNode]string{f.mac: "mac", f.server: "server"} {
+		var named []string
+		for _, project := range allSessionsView(t, node).View.Projects {
+			if project.Name == "agenthail-v2" {
+				named = append(named, project.ID)
+			}
+		}
+		for _, project := range node.snapshot(t).Projects {
+			if project.DisplayName == "agenthail-v2" && project.ID != key {
+				named = append(named, project.ID)
+			}
+		}
+		if !slices.Equal(named, []string{key}) {
+			t.Fatalf("%s names agenthail-v2 %v, want only %s", name, named, key)
 		}
 	}
 }
