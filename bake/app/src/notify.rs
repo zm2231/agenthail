@@ -9,7 +9,7 @@ use rune_notify::{Click, Notification};
 
 use crate::{App, Screen};
 
-const WITHDRAWN_FOR: std::time::Duration = std::time::Duration::from_secs(600);
+const WITHDRAWN_KEPT: usize = 64;
 
 enum Done {
     Prefs(Option<Prefs>),
@@ -26,7 +26,7 @@ pub struct State {
     failed: bool,
     focused: bool,
     reads: u64,
-    withdrawn: Vec<(String, std::time::Instant)>,
+    withdrawn: Vec<String>,
     pub sessions_moved: bool,
     clicks: Receiver<Click>,
     clicked: Sender<Click>,
@@ -197,9 +197,9 @@ pub fn tick(s: &mut App) -> bool {
     let mut withdrawn = std::mem::take(&mut s.notify.withdrawn);
     for step in steps {
         dirty |= step.dirty;
-        withdrawn.extend(step.remove.into_iter().map(|key| (key, std::time::Instant::now())));
-        withdrawn.retain(|(_, at)| at.elapsed() < WITHDRAWN_FOR);
-        let gone: Vec<&str> = withdrawn.iter().map(|(key, _)| key.as_str()).collect();
+        withdrawn.extend(step.remove);
+        withdrawn.drain(..withdrawn.len().saturating_sub(WITHDRAWN_KEPT));
+        let gone: Vec<&str> = withdrawn.iter().map(String::as_str).collect();
         rune_notify::remove(&gone);
         for n in &step.post {
             post(n);
