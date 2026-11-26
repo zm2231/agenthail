@@ -118,7 +118,12 @@ Every action except `list`, `acquire`, `renew` and `release` needs a lease.
   file. Refs are valid until the next `describe`.
 - `tap` takes a ref (its frame's centre) or `x` and `y`; `swipe` takes a ref
   or `x`, `y` and `toX`, `toY`, with `seconds` (0.6 by default). `type` sends
-  its text to the focused field on AXe's standard input. `button` presses
+  its text to the focused field on AXe's standard input; it cannot send
+  keys such as Tab or the arrows. `key` presses hardware keyboard keys by
+  HID keycode (0 to 255): `key` alone (`axe key`), `key` while holding
+  `modifiers` (`axe key-combo`; distinct modifier keys 224 to 231, so `key`
+  43 with `modifiers` `[225]` is Shift-Tab), or `keys`, up to 100 pressed in
+  order (`axe key-sequence`). `button` presses
   `home`, `lock` or `side-button`. There is no Siri, Apple Pay, microphone or
   voice action.
 - `install` takes a `.app` folder inside the session's `outDir` (in the lease

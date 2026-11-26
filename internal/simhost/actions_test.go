@@ -194,3 +194,46 @@ func TestUninstallRemovesAnAppOnlyFromTheCallersLeasedDevice(t *testing.T) {
 		t.Fatalf("uninstall = %v, ran %+v", out, sim.ran("xcrun simctl uninstall"))
 	}
 }
+
+func TestKeyPressesHardwareKeysTheTypeActionCannot(t *testing.T) {
+	h, sim := leased(t)
+	tab := 43
+	cases := []struct {
+		req  Request
+		want string
+	}{
+		{Request{Action: "key", Key: &tab}, "axe key 43 --udid U1"},
+		{Request{Action: "key", Key: &tab, Modifiers: []int{225}}, "axe key-combo --modifiers 225 --key 43 --udid U1"},
+		{Request{Action: "key", Keys: []int{43, 43, 40}}, "axe key-sequence --keycodes 43,43,40 --udid U1"},
+	}
+	for _, c := range cases {
+		mustCall(t, h, "s1", c.req)
+		if len(sim.ran(c.want)) != 1 {
+			t.Fatalf("%+v ran %+v, want %q", c.req, sim.ran("axe key"), c.want)
+		}
+	}
+	big, zero, shift := 256, 0, 225
+	refused := []Request{
+		{Action: "key"},
+		{Action: "key", Key: &tab, Keys: []int{43}},
+		{Action: "key", Key: &big},
+		{Action: "key", Keys: []int{4, -1}},
+		{Action: "key", Keys: make([]int, 101)},
+		{Action: "key", Keys: []int{43}, Modifiers: []int{225}},
+		{Action: "key", Key: &tab, Modifiers: []int{43}},
+		{Action: "key", Key: &tab, Modifiers: []int{225, 225}},
+		{Action: "key", Key: &shift, Modifiers: []int{225}},
+	}
+	before := len(sim.ran("axe key"))
+	for _, req := range refused {
+		if code := refusalCode(t, h, "s1", req); code != "invalid" {
+			t.Fatalf("%+v = %s, want invalid", req, code)
+		}
+	}
+	if len(sim.ran("axe key")) != before {
+		t.Fatalf("a refused key reached axe: %+v", sim.ran("axe key"))
+	}
+	if code := refusalCode(t, h, "s2", Request{Action: "key", Key: &zero}); code != "not_held" {
+		t.Fatalf("key without a lease = %s", code)
+	}
+}
