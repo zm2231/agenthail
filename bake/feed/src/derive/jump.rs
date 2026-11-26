@@ -2,7 +2,7 @@ use crate::catalog::Session;
 
 use super::needs::{Need, Target};
 use super::phase::{CHECK, PHASES, phase};
-use super::sessions::busy;
+use super::sessions::{busy, hidden};
 use super::text::{plain, short_id, short_title};
 use super::world::{Work, World};
 
@@ -42,10 +42,10 @@ impl World {
             out.push(Hit { group: "Work", title: plain(&w.text), status: format!("{} · {whose} · {project}", PHASES[ph]), badge: short_id(&w.id), avatar: project, target: Target::Work(w.id.clone()) });
         }
         let mut sessions: Vec<&Session> = hands_on.iter().filter_map(|id| self.session(id)).collect();
-        let mut rest: Vec<&Session> = self.sessions.iter().filter(|x| x.project.is_some() && !hands_on.contains(&x.id)).collect();
+        let mut rest: Vec<&Session> = self.sessions.iter().filter(|x| (x.archived || !hidden(x)) && !hands_on.contains(&x.id)).collect();
         rest.sort_by(|a, b| b.last_active.cmp(&a.last_active));
         sessions.extend(rest);
-        for x in sessions.into_iter().filter(|x| has(&self.title(x)) || has(&x.project_name()) || has(&x.summary())).take(PER_GROUP) {
+        for x in sessions.into_iter().filter(|x| has(&self.title(x)) || has(&x.name) || x.alias.as_deref().is_some_and(has) || has(&x.project_name()) || has(&x.summary())).take(PER_GROUP) {
             let gist = self.gist(x);
             let state = if busy(x) { "Working" } else { "Idle" };
             let status = if gist == x.display.label { state.to_string() } else { format!("{state} · {}", short_title(&gist, 70)) };

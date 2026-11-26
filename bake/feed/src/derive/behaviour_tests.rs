@@ -203,3 +203,21 @@ fn since_you_left_reaches_back_to_when_you_looked() {
     assert!(new.is_empty());
     assert_eq!(text(&old), ["Shipped after", "Shipped before you looked", "Still waiting"]);
 }
+
+#[test]
+fn jump_finds_every_listed_session_with_or_without_a_project() {
+    let w = world(json!({"sessions": [
+        session("busyprobe", json!({"project": null})),
+        session("helper-run", json!({"project": null, "alias": "probe-helper", "name": "<task>"})),
+        session("old-probe", json!({"archived": true})),
+        session("closed-probe", json!({"display": {"kind": "idle", "label": "Closed"}})),
+        session("other", json!({}))
+    ]}));
+    let found = |q: &str| -> Vec<Target> { w.jump(q, &[], &[]).into_iter().filter(|h| h.group == "Sessions").map(|h| h.target).collect() };
+    assert_eq!(found("busyprobe"), [Target::Session("busyprobe".into())]);
+    assert_eq!(found("probe-helper"), [Target::Session("helper-run".into())]);
+    assert_eq!(found("old-probe"), [Target::Session("old-probe".into())]);
+    assert!(found("closed-probe").is_empty());
+    let hit = w.jump("busyprobe", &[], &[]).into_iter().find(|h| h.group == "Sessions").unwrap();
+    assert_eq!(hit.badge, "No project");
+}
