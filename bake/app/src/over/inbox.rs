@@ -32,7 +32,7 @@ pub struct State {
     pub history: Vec<Handled>,
     pub acting: HashSet<String>,
     pub unconfirmed: HashSet<String>,
-    pub notes: HashMap<String, String>,
+    pub notes: HashMap<String, (String, String)>,
     pub briefs: HashMap<String, BriefState>,
     pub version: Option<String>,
     newest: Option<Instant>,
@@ -117,11 +117,11 @@ pub fn drain(s: &mut crate::App) -> bool {
                         remember(&mut st.history, entry);
                     }
                     Err((e, hold)) if e.maybe_delivered => {
-                        st.notes.insert(id.clone(), format!("Sent, not confirmed: {}", e.message));
+                        st.notes.insert(id, (hold.clone(), format!("Sent, not confirmed: {}", e.message)));
                         st.unconfirmed.insert(hold);
                     }
-                    Err((e, _)) => {
-                        st.notes.insert(id, format!("Not sent: {}", e.message));
+                    Err((e, hold)) => {
+                        st.notes.insert(id, (hold, format!("Not sent: {}", e.message)));
                     }
                 }
                 if let Some(client) = &s.client {
@@ -162,7 +162,7 @@ fn act(s: &mut crate::App, d: &Decision, outcome: &str, run: impl FnOnce(&Client
         return;
     }
     let Some(client) = s.client.clone() else {
-        s.ov.inbox.notes.insert(id, "Fixture mode: not sent".into());
+        s.ov.inbox.notes.insert(id, (d.hold_key(), "Fixture mode: not sent".into()));
         return;
     };
     let at = s.ov.d.now.format(&time::format_description::well_known::Rfc3339).unwrap_or_default();

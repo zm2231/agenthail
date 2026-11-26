@@ -54,7 +54,7 @@ fn line(s: &App, i: usize, d: &Decision, shift: bool) -> El {
     if !d.request_error.is_empty() {
         body = body.child(text(d.request_error.clone()).font(META).color(ui::needs_color()).wrap());
     }
-    if let Some(note) = s.ov.inbox.notes.get(&id) {
+    if let Some((_, note)) = s.ov.inbox.notes.get(&id).filter(|(hold, _)| d.holds(hold)) {
         body = body.child(text(note.clone()).font(META).color(ui::needs_color()).wrap());
     }
     let mut actions = row().gap(6.0).items_center();
