@@ -3,6 +3,7 @@ package daemon
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -112,6 +113,8 @@ func (d *Daemon) writeSessionStream(w http.ResponseWriter, r *http.Request, sess
 	}, func() bool { return d.apiEventStreamAuthorized(r) })
 }
 
+const bodyRewrittenCode = "body_rewritten"
+
 func (d *Daemon) sessionStreamBodyHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
@@ -131,16 +134,30 @@ func (d *Daemon) sessionStreamBodyHandler(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	body, total, err := d.Registry.SessionJournalBody(id, ref, start, end)
-	if err == sql.ErrNoRows {
+	var expected *uint64
+	if value := strings.TrimSpace(r.URL.Query().Get("version")); value != "" {
+		version, err := strconv.ParseUint(value, 10, 64)
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid_version", "The body version is invalid.")
+			return
+		}
+		expected = &version
+	}
+	part, err := d.Registry.SessionJournalBodyRange(id, ref, start, end, expected)
+	if errors.Is(err, sql.ErrNoRows) {
 		writeAPIError(w, http.StatusNotFound, "body_unavailable", "The retained body is unavailable.")
+		return
+	}
+	if errors.Is(err, registry.ErrSessionJournalBodyRewritten) {
+		writeAPIErrorWith(w, http.StatusConflict, bodyRewrittenCode, "The body was rewritten since that version; read it again from the start.", map[string]any{"version": part.Version, "total": part.Total})
 		return
 	}
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_range", "The body range is invalid.")
 		return
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"sessionId": id, "bodyRef": ref, "start": start, "end": start + len(body), "total": total, "body": string(body), "truncated": start+len(body) < total})
+	body := part.Body
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"sessionId": id, "bodyRef": ref, "version": part.Version, "start": start, "end": start + len(body), "total": part.Total, "body": string(body), "truncated": start+len(body) < part.Total})
 }
 
 func writeSessionStreamEntry(w http.ResponseWriter, sessionID string, entry registry.SessionJournalEntry, toItem func(sessionJournalPayload) surface.TimelineItem) error {

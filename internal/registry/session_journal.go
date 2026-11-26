@@ -2,6 +2,7 @@ package registry
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -444,26 +445,54 @@ func storeSessionJournalBody(tx journalWriter, entry SessionJournalEntry) error 
 }
 
 func (r *Registry) SessionJournalBody(sessionID, ref string, start, end int) ([]byte, int, error) {
+	part, err := r.SessionJournalBodyRange(sessionID, ref, start, end, nil)
+	return part.Body, part.Total, err
+}
+
+// SessionJournalBodyPart is one range of a retained body. Version is the
+// seq of the body's last whole write: a rewrite changes it and an append to
+// the tail keeps it, so ranges read under one version belong to one body.
+type SessionJournalBodyPart struct {
+	Body    []byte
+	Total   int
+	Version uint64
+}
+
+var ErrSessionJournalBodyRewritten = errors.New("session journal body was rewritten")
+
+// SessionJournalBodyRange checks an expected version before the range, so a
+// reader whose body was rewritten shorter learns of the rewrite, not a bad range.
+func (r *Registry) SessionJournalBodyRange(sessionID, ref string, start, end int, expected *uint64) (SessionJournalBodyPart, error) {
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(ref) == "" || start < 0 || end < start {
-		return nil, 0, fmt.Errorf("invalid session journal body range")
+		return SessionJournalBodyPart{}, fmt.Errorf("invalid session journal body range")
 	}
 	if start == int(^uint(0)>>1) || end-start == int(^uint(0)>>1) {
-		return nil, 0, fmt.Errorf("invalid session journal body range")
+		return SessionJournalBodyPart{}, fmt.Errorf("invalid session journal body range")
 	}
-	full, found, err := readSessionJournalFullBody(r.read, sessionID, ref)
+	readTx, err := r.read.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return nil, 0, err
+		return SessionJournalBodyPart{}, err
 	}
-	if !found {
-		return nil, 0, sql.ErrNoRows
+	defer readTx.Rollback()
+	tx := journalTx{Tx: readTx, prepared: r.journalRead}
+	var part SessionJournalBodyPart
+	var baseLength int
+	if err := tx.QueryRow(journalBodyStampSQL, sessionID, ref).Scan(&part.Version, &baseLength, &part.Total); err != nil {
+		return SessionJournalBodyPart{}, err
 	}
-	total := len(full)
-	body := full[min(start, total):min(end+1, total)]
+	if expected != nil && *expected != part.Version {
+		return SessionJournalBodyPart{Total: part.Total, Version: part.Version}, ErrSessionJournalBodyRewritten
+	}
+	total := part.Total
 	if start > total {
-		return nil, 0, fmt.Errorf("session journal body range is outside the retained body")
+		return SessionJournalBodyPart{}, fmt.Errorf("session journal body range is outside the retained body")
+	}
+	body, err := bodyRange(tx, sessionID, ref, baseLength, start, min(end+1, total))
+	if err != nil {
+		return SessionJournalBodyPart{}, err
 	}
 	if start < total && len(body) > 0 && !utf8.RuneStart(body[0]) {
-		return nil, 0, fmt.Errorf("session journal body range starts inside a UTF-8 code point")
+		return SessionJournalBodyPart{}, fmt.Errorf("session journal body range starts inside a UTF-8 code point")
 	}
 	if end > total {
 		end = total
@@ -471,7 +500,8 @@ func (r *Registry) SessionJournalBody(sessionID, ref string, start, end int) ([]
 	for end > start && end < total && !utf8.RuneStart(body[end-start]) {
 		end--
 	}
-	return append([]byte(nil), body[:end-start]...), total, nil
+	part.Body = body[:end-start]
+	return part, nil
 }
 
 // SessionJournalDerivation returns the version of the item derivation a

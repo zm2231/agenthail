@@ -11,6 +11,7 @@ enum AgenthailAPIError: LocalizedError {
     case requestStale(String, settled: String? = nil)
     case outcomeUnknown(String)
     case historyGap(String)
+    case bodyRewritten(String, version: UInt64?)
     case olderHost
     case streamGap
     case streamUnsupported
@@ -26,6 +27,7 @@ enum AgenthailAPIError: LocalizedError {
         case .requestStale(let message, _): return message
         case .outcomeUnknown(let message): return "\(message) The outcome is unknown; check the session before retrying."
         case .historyGap(let message): return message
+        case .bodyRewritten(let message, _): return message
         case .olderHost: return "This computer runs an older Agenthail. Update it to use this."
         case .streamGap: return "The live activity history changed. Reloading the current activity."
         case .streamUnsupported: return "This session has no live stream. It refreshes when it changes."
@@ -943,11 +945,12 @@ final class AgenthailAPI: @unchecked Sendable {
         if !Task.isCancelled { throw AgenthailAPIError.streamClosed }
     }
 
-    func sessionStreamBody(id: String, ref: String, start: Int = 0, end: Int? = nil) async throws -> SessionStreamBody {
+    func sessionStreamBody(id: String, ref: String, start: Int = 0, end: Int? = nil, version: UInt64? = nil) async throws -> SessionStreamBody {
         var components = URLComponents()
         components.path = "/api/v1/session-stream-body"
         var query = [URLQueryItem(name: "id", value: id), URLQueryItem(name: "ref", value: ref), URLQueryItem(name: "start", value: String(start))]
         if let end { query.append(URLQueryItem(name: "end", value: String(end))) }
+        if let version { query.append(URLQueryItem(name: "version", value: String(version))) }
         components.queryItems = query
         guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
         return try await get(path)
@@ -1106,6 +1109,9 @@ final class AgenthailAPI: @unchecked Sendable {
                 }
                 if let error = object["error"] as? [String: Any], error["code"] as? String == "stale" {
                     throw AgenthailAPIError.requestStale(message, settled: object["settled"] as? String)
+                }
+                if let error = object["error"] as? [String: Any], error["code"] as? String == "body_rewritten" {
+                    throw AgenthailAPIError.bodyRewritten(message, version: (object["version"] as? NSNumber)?.uint64Value)
                 }
                 if let error = object["error"] as? [String: Any], error["code"] as? String == "history_gap" {
                     throw AgenthailAPIError.historyGap("The oldest activity is no longer retained. Current activity is still available here; no new session is needed.")

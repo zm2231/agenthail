@@ -305,6 +305,55 @@ final class AgenthailIOSTests: XCTestCase {
         XCTAssertGreaterThan(RetainedBodyURLProtocol.state.requestCount, 1)
     }
 
+    @MainActor
+    func testRetainedBodyRestartsOnceWhenTheBodyIsRewrittenBetweenRanges() async throws {
+        RetainedBodyURLProtocol.state.reset(total: 40_000, rewriteBeforeRequest: [2])
+        let configuration = FixtureScope.open(self).configuration([RetainedBodyURLProtocol.self])
+        let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
+        model.selectedSessionID = "computer::demo"
+        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref", attachment: nil)
+
+        let result = await model.retainedSessionBody(for: item)
+
+        XCTAssertNil(result?.error)
+        XCTAssertEqual(result?.text, String(repeating: "y", count: 40_000))
+        let sent = RetainedBodyURLProtocol.state.versionsSent
+        XCTAssertEqual(sent.first, .some(nil))
+        XCTAssertEqual(sent[1], "1")
+        XCTAssertTrue(sent.dropFirst(2).allSatisfy { $0 == "2" })
+    }
+
+    @MainActor
+    func testRetainedBodyFromAHostWithoutBodyVersionsLoadsUnpinned() async throws {
+        RetainedBodyURLProtocol.state.reset(total: 40_000, unversioned: true)
+        let configuration = FixtureScope.open(self).configuration([RetainedBodyURLProtocol.self])
+        let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
+        model.selectedSessionID = "computer::demo"
+        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref", attachment: nil)
+
+        let result = await model.retainedSessionBody(for: item)
+
+        XCTAssertNil(result?.error)
+        XCTAssertEqual(result?.text.count, 40_000)
+        let sent = RetainedBodyURLProtocol.state.versionsSent
+        XCTAssertGreaterThan(sent.count, 1)
+        XCTAssertTrue(sent.allSatisfy { $0 == nil })
+    }
+
+    @MainActor
+    func testRetainedBodyReportsASecondRewriteInsteadOfJoiningBodies() async throws {
+        RetainedBodyURLProtocol.state.reset(total: 40_000, rewriteBeforeRequest: [2, 4])
+        let configuration = FixtureScope.open(self).configuration([RetainedBodyURLProtocol.self])
+        let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
+        model.selectedSessionID = "computer::demo"
+        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref", attachment: nil)
+
+        let result = await model.retainedSessionBody(for: item)
+
+        XCTAssertEqual(result?.error, "The body was rewritten since that version; read it again from the start.")
+        XCTAssertFalse(result?.text.contains("x") ?? true)
+    }
+
     func testSessionAttachmentFetchIsAuthenticatedAndBounded() async throws {
         AttachmentURLProtocol.state.reset(oversized: false)
         let configuration = FixtureScope.open(self).configuration([AttachmentURLProtocol.self])
@@ -661,18 +710,36 @@ private final class RetainedBodyState: @unchecked Sendable {
     private var total = 0
     private var invalidBoundary = false
     private var requests = 0
+    private var version: UInt64 = 1
+    private var rewriteBeforeRequest: Set<Int> = []
+    private var unversioned = false
+    private var sentVersions: [String?] = []
     var requestCount: Int { lock.withLock { requests } }
-    func reset(total: Int, invalidBoundary: Bool = false) { lock.withLock { self.total = total; self.invalidBoundary = invalidBoundary; requests = 0 } }
-    func response(start: Int, end: Int) -> String {
+    var versionsSent: [String?] { lock.withLock { sentVersions } }
+    func reset(total: Int, invalidBoundary: Bool = false, rewriteBeforeRequest: Set<Int> = [], unversioned: Bool = false) {
+        lock.withLock { self.total = total; self.invalidBoundary = invalidBoundary; self.rewriteBeforeRequest = rewriteBeforeRequest; self.unversioned = unversioned; requests = 0; version = 1; sentVersions = [] }
+    }
+    func response(start: Int, end: Int, expected: String?) -> (status: Int, body: String) {
         lock.withLock {
             requests += 1
+            sentVersions.append(expected)
+            if rewriteBeforeRequest.contains(requests) { version += 1 }
+            if !unversioned, let expected, expected != String(version) {
+                return (409, String(data: try! JSONSerialization.data(withJSONObject: [
+                    "error": ["code": "body_rewritten", "message": "The body was rewritten since that version; read it again from the start."],
+                    "version": version, "total": total
+                ]), encoding: .utf8)!)
+            }
+            let letter = version == 1 ? "x" : "y"
             let boundedEnd = min(end, total)
             let length = max(0, boundedEnd - start)
-            let body = invalidBoundary && boundedEnd < total ? String(repeating: "x", count: max(0, length - 1)) + "\u{FFFD}" : String(repeating: "x", count: length)
-            return String(data: try! JSONSerialization.data(withJSONObject: [
+            let body = invalidBoundary && boundedEnd < total ? String(repeating: letter, count: max(0, length - 1)) + "\u{FFFD}" : String(repeating: letter, count: length)
+            var answer: [String: Any] = [
                 "sessionId": "demo", "bodyRef": "body-ref", "start": start, "end": boundedEnd,
                 "total": total, "body": body, "truncated": boundedEnd < total
-            ]), encoding: .utf8)!
+            ]
+            if !unversioned { answer["version"] = version }
+            return (200, String(data: try! JSONSerialization.data(withJSONObject: answer), encoding: .utf8)!)
         }
     }
 }
@@ -688,8 +755,8 @@ private final class RetainedBodyURLProtocol: URLProtocol, @unchecked Sendable {
         let query = Dictionary(uniqueKeysWithValues: components.queryItems!.map { ($0.name, $0.value ?? "") })
         let start = Int(query["start"]!)!
         let end = Int(query["end"]!)!
-        let body = Self.state.response(start: start, end: end)
-        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+        let (status, body) = Self.state.response(start: start, end: end, expected: query["version"])
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }

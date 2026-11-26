@@ -28,6 +28,7 @@ type mcpReadInput struct {
 	Ack       string  `json:"ack,omitempty" jsonschema:"an agent identity's ack from its last inbox read, to mark those messages read"`
 	BodyRef   string  `json:"bodyRef,omitempty" jsonschema:"bodyRef of a clipped item, to page through its full text"`
 	Offset    int     `json:"offset,omitempty" jsonschema:"byte offset into bodyRef; use nextOffset from the previous call"`
+	Version   *uint64 `json:"version,omitempty" jsonschema:"version from the previous bodyRef read; refused as body_rewritten when the body has been rewritten since"`
 }
 
 type mcpItemView struct {
@@ -66,7 +67,7 @@ func (d *Daemon) mcpRead(ctx context.Context, caller *mcpCaller, input mcpReadIn
 	}
 	switch {
 	case input.BodyRef != "":
-		return d.mcpReadBody(session.ID, input.BodyRef, input.Offset)
+		return d.mcpReadBody(session.ID, input.BodyRef, input.Offset, input.Version)
 	case input.Since != nil:
 		return d.mcpReadSince(session.ID, *input.Since)
 	}
@@ -77,27 +78,38 @@ func (d *Daemon) mcpRead(ctx context.Context, caller *mcpCaller, input mcpReadIn
 	return d.mcpReadBack(ctx, session, input.Before, limit)
 }
 
-func (d *Daemon) mcpReadBody(sessionID, ref string, offset int) (any, error) {
+func (d *Daemon) mcpReadBody(sessionID, ref string, offset int, version *uint64) (any, error) {
 	if offset < 0 {
 		return nil, refuse("invalid", "offset must not be negative.")
 	}
-	body, total, err := d.Registry.SessionJournalBody(sessionID, ref, offset, offset+mcpBodyChunk)
+	part, err := d.Registry.SessionJournalBodyRange(sessionID, ref, offset, offset+mcpBodyChunk, version)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, refuse("not_found", "That body is no longer retained.")
+	}
+	if errors.Is(err, registry.ErrSessionJournalBodyRewritten) {
+		return nil, errMCPBodyRewritten
 	}
 	if err != nil {
 		return nil, refuse("invalid", "The body range is invalid.")
 	}
+	return mcpBodyPage(sessionID, ref, offset, part.Body, part.Total, &part.Version), nil
+}
+
+var errMCPBodyRewritten = refuse("body_rewritten", "The body was rewritten since that version; read it again from offset 0 without version.")
+
+func mcpBodyPage(sessionID, ref string, offset int, body []byte, total int, version *uint64) map[string]any {
 	if offset+len(body) < total {
 		body = wholeRunes(body)
 	}
-	text := string(body)
 	end := offset + len(body)
-	result := map[string]any{"sessionId": sessionID, "bodyRef": ref, "offset": offset, "end": end, "total": total, "text": text, "truncated": end < total}
+	result := map[string]any{"sessionId": sessionID, "bodyRef": ref, "offset": offset, "end": end, "total": total, "text": string(body), "truncated": end < total}
+	if version != nil {
+		result["version"] = *version
+	}
 	if end < total {
 		result["nextOffset"] = end
 	}
-	return result, nil
+	return result
 }
 
 func (d *Daemon) mcpReadSince(sessionID string, since uint64) (any, error) {

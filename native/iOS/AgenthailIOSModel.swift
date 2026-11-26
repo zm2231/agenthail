@@ -1820,17 +1820,32 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting, ListingR
         guard let id = selectedSessionID, let ref = item.bodyRef, case let (connection, route)? = try? resolveServer(id) else { return nil }
         let chunkSize = 16 << 10
         let maximum = 8 << 20
-        var cursor = max(0, start)
+        let first = max(0, start)
+        var cursor = first
         var total: Int?
+        var version: UInt64?
+        var restarted = false
         var chunks: [String] = []
 
         do {
             while cursor < (total ?? maximum) {
                 let requestedEnd = min(cursor + chunkSize, maximum)
-                let chunk = try await connection.api.sessionStreamBody(id: route.sessionID, ref: ref, start: cursor, end: requestedEnd)
+                let chunk: SessionStreamBody
+                do {
+                    chunk = try await connection.api.sessionStreamBody(id: route.sessionID, ref: ref, start: cursor, end: requestedEnd, version: version)
+                } catch AgenthailAPIError.bodyRewritten(_, version: let current) where !restarted {
+                    guard server(for: id) === connection else { return nil }
+                    restarted = true
+                    cursor = first
+                    total = nil
+                    version = current
+                    chunks = []
+                    continue
+                }
                 guard server(for: id) === connection else { return nil }
                 if total == nil { total = chunk.total }
-                guard chunk.total == total, chunk.start == cursor, chunk.end > cursor, chunk.end <= maximum else {
+                if version == nil { version = chunk.version }
+                guard chunk.version == version, chunk.total == total, chunk.start == cursor, chunk.end > cursor, chunk.end <= maximum else {
                     return RetainedBodyResult(text: chunks.joined(), error: "The retained body returned an invalid range.")
                 }
                 if chunk.end < chunk.total && chunk.body.last == "\u{FFFD}" {
