@@ -137,15 +137,16 @@ impl Win {
     fn eval(&self, _: &str) {}
 
     #[cfg(target_os = "macos")]
-    fn build_peer(&mut self) {
+    fn build_peer(&mut self) -> bool {
         if self.web.is_some() || self.call.closed() {
-            return;
+            return false;
         }
-        let Ok(peer) = self.peer.clone() else { return };
+        let Ok(peer) = self.peer.clone() else { return false };
         if !self.slot.in_window() {
             let effects = self.call.setup(Setup::Window);
+            let said = !effects.is_empty();
             self.run(effects);
-            return;
+            return said;
         }
         let effects = self.call.peer("loading", "", self.clock);
         self.run(effects);
@@ -160,10 +161,13 @@ impl Win {
                 self.run(effects);
             }
         }
+        true
     }
 
     #[cfg(not(target_os = "macos"))]
-    fn build_peer(&mut self) {}
+    fn build_peer(&mut self) -> bool {
+        false
+    }
 
     pub fn route(&mut self, target: &str, name: &str) {
         self.route_typed = target.trim().to_string();
@@ -276,8 +280,7 @@ pub fn trace(from: &'static str, w: &Win) {
 
 fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
     w.clock = t;
-    let mut changed = false;
-    w.build_peer();
+    let mut changed = w.build_peer();
     if let Some((target, name)) = ROUTE.with(|r| r.borrow_mut().take()) {
         w.route(&target, &name);
         changed = true;
@@ -302,6 +305,7 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
         #[cfg(target_os = "macos")]
         if kind == peer::LOADED {
             let effects = w.call.setup(Setup::Check);
+            changed |= !effects.is_empty();
             w.run(effects);
             if let Some(web) = &w.web {
                 web.check(w.heard.0.clone());
@@ -318,6 +322,7 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
         changed = true;
     }
     let effects = w.call.tick(t);
+    changed |= effects.iter().any(|e| matches!(e, Effect::Note(_)));
     w.run(effects);
     if w.call.trail.changed {
         w.call.trail.changed = false;
