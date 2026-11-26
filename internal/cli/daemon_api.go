@@ -188,22 +188,24 @@ func (c *daemonAPIClient) scope(payload map[string]any) bool {
 		return false
 	}
 	limits := c.forward.limits
-	if target, _ := payload["sessionId"].(string); limits == nil || target != limits.TargetID || payload["scopeProjectId"] != nil {
+	if target, _ := payload["sessionId"].(string); limits == nil || target != limits.TargetID || payload["scopeProjectId"] != nil || payload["scopeRank"] != nil {
 		return false
 	}
 	c.forward.ran, _ = payload["action"].(string)
-	if limits.ScopeProjectID == "" {
+	if limits.ScopeProjectID == "" && limits.ScopeRank == "" {
 		return false
 	}
-	payload["scopeProjectId"] = limits.ScopeProjectID
+	if limits.ScopeProjectID != "" {
+		payload["scopeProjectId"] = limits.ScopeProjectID
+	}
 	if limits.ScopeRank != "" {
 		payload["scopeRank"] = limits.ScopeRank
 	}
 	if limits.ScopeControl != "" {
 		payload["scopeOverseen"], payload["scopeControl"] = limits.ScopeOverseen, limits.ScopeControl
-		if source, _ := payload["sourceSessionId"].(string); source == "" && c.forward.source != "" {
-			payload["sourceSessionId"] = c.forward.source
-		}
+	}
+	if source, _ := payload["sourceSessionId"].(string); source == "" && c.forward.source != "" {
+		payload["sourceSessionId"] = c.forward.source
 	}
 	return true
 }

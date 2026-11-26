@@ -3,8 +3,6 @@ package registry
 import (
 	"encoding/json"
 	"time"
-
-	"github.com/zm2231/agenthail/internal/hosts"
 )
 
 // CatalogRowMetadata is what a catalog row shows about its sessions beyond
@@ -62,7 +60,7 @@ func (r *Registry) CatalogRowMetadata(sessionIDs []string) (CatalogRowMetadata, 
 	if _, err := queryRows(r.read, nil, func(row rowScanner) (struct{}, error) {
 		var id, starter, host string
 		err := row.Scan(&id, &starter, &host)
-		meta.starters[id] = hosts.Qualify(host, starter)
+		meta.starters[id] = QualifiedStarter(host, starter)
 		return struct{}{}, err
 	}, agentStarterSelect+` AND o.session_id`+sessionIDsIn, string(ids)); err != nil {
 		return CatalogRowMetadata{}, err

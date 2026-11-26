@@ -29,6 +29,9 @@ func (d *Daemon) sessionTranscript(id string) string {
 	if err != nil || session.Surface != surface.KindClaude {
 		return ""
 	}
+	if host, err := d.Registry.SessionHost(id); err != nil || host != "" {
+		return ""
+	}
 	return session.Transcript
 }
 

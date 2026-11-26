@@ -32,6 +32,9 @@ type Remote struct {
 	Exact    bool                `json:"exact"`
 	Project  string              `json:"project,omitempty"`
 	Archived bool                `json:"archived,omitempty"`
+	// StartedBy is the session's starter chain, nearest first, as the host
+	// that runs it records it.
+	StartedBy []string `json:"startedBy,omitempty"`
 }
 
 func (t Remote) Label() string {

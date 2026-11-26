@@ -17,14 +17,15 @@ import (
 )
 
 type resolveMatch struct {
-	ID       string              `json:"id"`
-	Surface  surface.SurfaceKind `json:"surface"`
-	Name     string              `json:"name,omitempty"`
-	Alias    string              `json:"alias,omitempty"`
-	Host     dashboardHost       `json:"host"`
-	Exact    bool                `json:"exact"`
-	Project  string              `json:"project,omitempty"`
-	Archived bool                `json:"archived,omitempty"`
+	ID        string              `json:"id"`
+	Surface   surface.SurfaceKind `json:"surface"`
+	Name      string              `json:"name,omitempty"`
+	Alias     string              `json:"alias,omitempty"`
+	Host      dashboardHost       `json:"host"`
+	Exact     bool                `json:"exact"`
+	Project   string              `json:"project,omitempty"`
+	Archived  bool                `json:"archived,omitempty"`
+	StartedBy []string            `json:"startedBy,omitempty"`
 }
 
 type resolveResponse struct {
@@ -102,7 +103,11 @@ func (d *Daemon) resolveLocal(ctx context.Context, target string) ([]resolveMatc
 		if err != nil {
 			return nil, err
 		}
-		return []resolveMatch{{ID: sid, Surface: session.Surface, Name: session.Name, Alias: alias, Host: host, Exact: named || d.Registry.NamesSession(*session, target), Project: project, Archived: archived}}, nil
+		chain, err := d.starterChain(sid)
+		if err != nil {
+			return nil, err
+		}
+		return []resolveMatch{{ID: sid, Surface: session.Surface, Name: session.Name, Alias: alias, Host: host, Exact: named || d.Registry.NamesSession(*session, target), Project: project, Archived: archived, StartedBy: chain}}, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
@@ -125,7 +130,11 @@ func (d *Daemon) resolveLocal(ctx context.Context, target string) ([]resolveMatc
 		if err != nil {
 			return nil, err
 		}
-		matches = append(matches, resolveMatch{ID: session.ID, Surface: session.Surface, Name: session.Name, Alias: alias, Host: host, Exact: d.Registry.NamesSession(*session, lookup), Project: project, Archived: archived})
+		chain, err := d.starterChain(session.ID)
+		if err != nil {
+			return nil, err
+		}
+		matches = append(matches, resolveMatch{ID: session.ID, Surface: session.Surface, Name: session.Name, Alias: alias, Host: host, Exact: d.Registry.NamesSession(*session, lookup), Project: project, Archived: archived, StartedBy: chain})
 	}
 	return matches, nil
 }
@@ -149,6 +158,9 @@ func (d *Daemon) resolveRemote(ctx context.Context, candidates []*pairedHost, ta
 				for _, match := range answer.Matches {
 					match.ID = hosts.Qualify(host.record.ID, match.ID)
 					match.Host = host.ref()
+					for index, starter := range match.StartedBy {
+						match.StartedBy[index] = d.fromPairedHost(host.record.ID, starter)
+					}
 					result.Matches = append(result.Matches, match)
 				}
 				continue
@@ -176,12 +188,18 @@ func (d *Daemon) resolveRemote(ctx context.Context, candidates []*pairedHost, ta
 
 func (d *Daemon) resolveMirrored(host *pairedHost, target string) []resolveMatch {
 	found, err := d.Registry.MatchHostSessions(host.record.ID, target)
+	if err != nil || len(found) == 0 {
+		return nil
+	}
+	refs, err := d.Registry.LiveHostSessions()
 	if err != nil {
 		return nil
 	}
+	rows := mirroredRows(refs)
 	matches := []resolveMatch{}
 	for _, match := range found {
-		matches = append(matches, resolveMatch{ID: hosts.Qualify(host.record.ID, match.ID), Surface: match.Surface, Name: match.Name, Alias: match.Alias, Host: host.ref(), Exact: true})
+		id := hosts.Qualify(host.record.ID, match.ID)
+		matches = append(matches, resolveMatch{ID: id, Surface: match.Surface, Name: match.Name, Alias: match.Alias, Host: host.ref(), Exact: true, StartedBy: mirroredStarterChain(id, rows)})
 	}
 	return matches
 }
