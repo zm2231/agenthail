@@ -130,11 +130,6 @@ pub fn page(s: &Prefs, layer: &mut Vec<El>) -> El {
     if let Some(f) = s.notes.get(&Section::General) {
         out = out.child(parts::failure(s, f));
     }
-    if let Some(Err(f)) = &s.base
-        && settings.is_none()
-    {
-        out = out.child(parts::failure(s, f));
-    }
     if let Some(person) = base.and_then(|b| b.person.as_ref()) {
         out = out.child(name_section(s, person, writable));
     }

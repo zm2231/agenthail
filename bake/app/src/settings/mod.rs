@@ -58,6 +58,7 @@ pub struct Prefs {
     external: bool,
     seen: u64,
     rewatch: bool,
+    retry_base: Option<std::time::Instant>,
     pub tab: usize,
     pub base: Option<Result<Base, Failure>>,
     pub settings: Option<Result<Settings, Failure>>,
@@ -151,6 +152,7 @@ fn init() -> Prefs {
         rest_pending: false,
         seen: 0,
         rewatch: false,
+        retry_base: None,
         external: false,
         tab: 0,
         base: None,
@@ -248,11 +250,6 @@ pub fn reload(s: &mut Prefs) {
 fn read_rest(s: &mut Prefs) {
     if !std::mem::take(&mut s.rest_pending) {
         return;
-    }
-    if let Some(Ok(b)) = &s.base
-        && std::mem::take(&mut s.rewatch)
-    {
-        watch(s, b.event_cursor.max(s.seen));
     }
     for what in &ALL[1..] {
         s.settling.insert(*what);
@@ -403,8 +400,12 @@ fn take_one(s: &mut Prefs, done: Done) {
             s.settling.remove(&what);
             let refusal = match got {
                 Got::Base(r) => {
-                    if r.is_ok() {
+                    s.retry_base = r.is_err().then(|| std::time::Instant::now() + Duration::from_secs(10));
+                    if let Ok(b) = &r {
                         s.base_ok_at = s.tick;
+                        if std::mem::take(&mut s.rewatch) {
+                            watch(s, b.event_cursor.max(s.seen));
+                        }
                     }
                     s.base = Some(r);
                     read_rest(s);
@@ -482,8 +483,17 @@ fn poll(s: &mut Prefs, _: f64, tx: &mut Tx) -> bool {
         take(s, done);
         changed = true;
     }
+    if let Some(at) = s.retry_base
+        && std::time::Instant::now() >= at
+        && visible()
+    {
+        s.retry_base = None;
+        fetch(s, Read::Base);
+    }
     if s.in_flight > 0 {
         tx.wake_after(Duration::from_millis(60));
+    } else if s.retry_base.is_some() && visible() {
+        tx.wake_after(Duration::from_secs(1));
     }
     changed
 }
@@ -501,6 +511,13 @@ fn on_key(s: &mut Prefs, ev: &KeyEvent, tx: &mut Tx) -> bool {
 
 pub fn toggle_select(s: &mut Prefs, key: &'static str) {
     s.open_select = if s.open_select == Some(key) { None } else { Some(key) };
+}
+
+fn unfollowed(s: &Prefs) -> Option<El> {
+    let Some(Err(f)) = &s.base else { return None };
+    let f = explain(s, f);
+    let note = Failure { message: format!("Couldn't read this computer's state, so changes made elsewhere won't show here until it can: {}", f.message), ..f };
+    Some(col().w_full().items_center().pb(8.0).child(parts::failure(s, &note).w(parts::WIDTH)))
 }
 
 pub const TABS: [&str; 3] = ["General", "Claude", "Notifications"];
@@ -522,6 +539,7 @@ pub fn view(s: &Prefs, _: &mut Cx<Prefs>) -> El {
         .h_full()
         .child(el().absolute(0.0, 0.0).w_full().h_full().fill(theme::card_deep()))
         .child(col().w_full().items_center().pt(14.0).pb(10.0).child(tabs.build(k)))
+        .children(unfollowed(s))
         .child(parts::scroll(page));
     rune_kit::root(body, layer)
 }
