@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/buildinfo"
 	"github.com/zm2231/agenthail/internal/ledger"
@@ -45,6 +46,16 @@ func TestEveryWorkActionFromAnotherHostIsRecordedByTheLedgersOwner(t *testing.T)
 		mustLedger(t, mac, "/api/v1/ledger/work", req, &result)
 		return result.Item
 	}
+	said := capturePrompt(t, mac, "local-a", "p-1", "fix the flag")
+	mustLedger(t, mac, "/api/v1/ledger/goal", ledgerGoalRequest{ProjectKey: widgetKey, SessionID: "local-a", Name: "Flags"}, nil)
+	mustLedger(t, mac, "/api/v1/ledger/attach", ledger.AttachRequest{ProjectKey: widgetKey, SessionID: "local-a", UtteranceID: said, As: ledger.AsNewAsk, To: "widget-G1", Clauses: []string{"fix the flag"}}, nil)
+	board, err := owner.daemon.ledgerStore().Board(widgetKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found := board.Clause("widget-C1"); !found {
+		t.Fatal("the owner has no clause for the person's words")
+	}
 	item := work("local-a", ledger.WorkRequest{Action: ledger.WorkAdd, Text: "fix the flag", Fields: ledger.WorkFields{Type: ledger.WorkBug, Priority: "P1"}}).ID
 	other := work("local-a", ledger.WorkRequest{Action: ledger.WorkAdd, Text: "write the docs"}).ID
 	steps := []struct {
@@ -52,6 +63,7 @@ func TestEveryWorkActionFromAnotherHostIsRecordedByTheLedgersOwner(t *testing.T)
 		req     ledger.WorkRequest
 		check   func(ledger.WorkItem) bool
 	}{
+		{"local-a", ledger.WorkRequest{Action: ledger.WorkLink, ClauseID: "widget-C1"}, func(i ledger.WorkItem) bool { return i.ClauseID == "widget-C1" }},
 		{"local-a", ledger.WorkRequest{Action: ledger.WorkEdit, Change: ledger.WorkChange{Description: ptr("the flag is read twice")}}, func(i ledger.WorkItem) bool { return i.Description == "the flag is read twice" }},
 		{"local-a", ledger.WorkRequest{Action: ledger.WorkDep, DependsOn: other}, func(i ledger.WorkItem) bool { return len(i.DependsOn) == 1 }},
 		{"local-a", ledger.WorkRequest{Action: ledger.WorkUndep, DependsOn: other}, func(i ledger.WorkItem) bool { return len(i.DependsOn) == 0 }},
@@ -86,6 +98,16 @@ func TestEveryWorkActionFromAnotherHostIsRecordedByTheLedgersOwner(t *testing.T)
 		if got := ownersItem(t, owner, item); !step.check(got) {
 			t.Fatalf("after %s from the other host, the owner has %+v", step.req.Action, got)
 		}
+	}
+
+	work("local-a", ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: item})
+	if err := mac.reg.ArchiveSession("local-a", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	work("lead", ledger.WorkRequest{Action: ledger.WorkTakeover, ItemID: item, Reason: "its session was archived", Takeover: &ledger.Takeover{Then: ledger.TakeoverRelease}})
+	got := ownersItem(t, owner, item)
+	if last := got.Timeline[len(got.Timeline)-1]; got.State != ledger.WorkOpen || got.Assignee != "" || last.Actor != "lead" || !strings.Contains(last.Text, "taken over from local-a (archived)") {
+		t.Fatalf("after a takeover from the other host, the owner has %+v", got)
 	}
 }
 
