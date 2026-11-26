@@ -105,20 +105,14 @@ func (d *Daemon) hostGet(ctx context.Context, qualifiedID, path, idParam string,
 		return &mcpRefusal{Code: "refused", Message: fmt.Sprintf("Host %s did not answer: %s", host.record.Name, err), Retryable: true}
 	}
 	body, err := hosts.ReadResponse(response)
+	var status hosts.StatusError
+	if errors.As(err, &status) {
+		refusal, _ := mcpCodeFor(status.Status, status.Code)
+		refusal.Message = fmt.Sprintf("Host %s: %s", host.record.Name, status.Message)
+		return &hostAnswerError{refusal: refusal, code: status.Code}
+	}
 	if err != nil {
 		return &mcpRefusal{Code: "refused", Message: fmt.Sprintf("Host %s did not answer: %s", host.record.Name, err), Retryable: true}
-	}
-	if response.StatusCode != http.StatusOK {
-		var failure struct {
-			Error struct {
-				Code    string `json:"code"`
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		_ = json.Unmarshal(body, &failure)
-		refusal, _ := mcpCodeFor(response.StatusCode, failure.Error.Code)
-		refusal.Message = fmt.Sprintf("Host %s: %s", host.record.Name, failure.Error.Message)
-		return &hostAnswerError{refusal: refusal, code: failure.Error.Code}
 	}
 	if err := json.Unmarshal(body, out); err != nil {
 		return &mcpRefusal{Code: "refused", Message: fmt.Sprintf("Host %s answered with what this host cannot read: %s", host.record.Name, err), Retryable: true}

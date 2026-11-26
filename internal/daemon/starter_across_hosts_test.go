@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/zm2231/agenthail/internal/daemonapi"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -281,4 +283,109 @@ func mustMCP(t *testing.T, node *federationNode, id string) *mcp.ClientSession {
 		t.Fatal(err)
 	}
 	return mcpSession(t, mcpServer(t, node.daemon), issueMCPToken(t, node.daemon, *session))
+}
+
+func TestAWorkerStartedFromAnAgentsShellOnAPairedHostRecordsItsStarterThere(t *testing.T) {
+	laptop, vps, vpsRecord, laptopRecord := pairedBothWays(t)
+	payload, _ := json.Marshal(map[string]any{"action": "session-create", "host": "vps", "surface": "codex", "message": "build the parser", "cwd": t.TempDir(), "sourceSessionId": "laptop-a"})
+	answer := askScope(t, laptop.daemon, daemonapi.ScopeRequest{SessionID: "laptop-a", Action: "create", Create: payload}, "127.0.0.1:50000")
+	if answer.status >= http.StatusMultipleChoices {
+		t.Fatalf("create through the CLI's scope request: status=%d body=%s", answer.status, answer.body)
+	}
+	origin, found, err := vps.reg.SessionOrigin("started")
+	if err != nil || !found || origin.Via != registry.OriginAgent || vps.daemon.hostQualified(origin.CreatorID) != hosts.Qualify(laptopRecord.ID, "laptop-a") {
+		t.Fatalf("the vps records origin=%+v found=%v err=%v, want laptop-a as the starter", origin, found, err)
+	}
+	vps.daemon.discoverCatalog(context.Background())
+	testkit.Eventually(t, "the worker mirrored on the laptop with its starter", 10*time.Second, func() bool {
+		return slices.ContainsFunc(sessionsOf(laptop.snapshot(t), vpsRecord.ID), func(row dashboardSession) bool {
+			return row.ID == hosts.Qualify(vpsRecord.ID, "started") && row.StartedBy == "laptop-a"
+		})
+	})
+}
+
+func TestAStarterPagesItsWorkersHistoryAndBodiesFromThePairedHost(t *testing.T) {
+	f := startAcrossHosts(t)
+	full := strings.Repeat("é", 15000)
+	item, _ := json.Marshal(sessionJournalPayload{ItemID: "long", Kind: "message", Role: "assistant", Body: full[:8000], Truncated: true, BodyRef: "body-long", Version: 1, Op: "upsert", TS: time.Now().Format(time.RFC3339Nano)})
+	if _, _, err := f.vps.reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: "started", Kind: "message", ProviderKey: "long", Payload: item, ObservedAt: time.Now(), BodyRef: "body-long", FullBody: []byte(full)}, registry.SessionJournalRetention{Count: 4096, Bytes: 64 << 20}); err != nil {
+		t.Fatal(err)
+	}
+	page, refused := callMCP(t, f.starter, "agenthail_read", map[string]any{"sessionId": f.created})
+	items, _ := page["items"].([]any)
+	if refused || !slices.ContainsFunc(items, func(item any) bool { return item.(map[string]any)["bodyRef"] == "body-long" }) {
+		t.Fatalf("the starter's read of its worker: refused=%v page=%v", refused, page)
+	}
+	var rebuilt strings.Builder
+	for offset := 0; ; {
+		chunk, refused := callMCP(t, f.starter, "agenthail_read", map[string]any{"sessionId": f.created, "bodyRef": "body-long", "offset": offset})
+		if refused || chunk["sessionId"] != f.created {
+			t.Fatalf("body chunk at %d: %v", offset, chunk)
+		}
+		rebuilt.WriteString(chunk["text"].(string))
+		next, more := chunk["nextOffset"].(float64)
+		if !more {
+			break
+		}
+		offset = int(next)
+	}
+	if rebuilt.String() != full {
+		t.Fatalf("rebuilt %d bytes from the paired host, want %d", rebuilt.Len(), len(full))
+	}
+	out, refused := callMCP(t, f.bystander, "agenthail_read", map[string]any{"sessionId": f.created, "bodyRef": "body-long"})
+	refusedAs(t, "a session that did not start it reading a body", out, refused, "out_of_scope")
+	out, refused = callMCP(t, f.starter, "agenthail_read", map[string]any{"sessionId": f.created, "bodyRef": "body-gone"})
+	refusedAs(t, "a body the paired host does not hold", out, refused, "not_found")
+	out, refused = callMCP(t, f.starter, "agenthail_read", map[string]any{"sessionId": f.created, "since": 0})
+	refusedAs(t, "since on another computer", out, refused, "invalid")
+	out, refused = callMCP(t, f.starter, "agenthail_read", map[string]any{"sessionId": f.created, "before": "0:moved-on"})
+	if detail, _ := out["detail"].(map[string]any); !refused || out["code"] != "not_found" || detail["stale"] != true {
+		t.Fatalf("a cursor past an item the paired host no longer shows: refused=%v out=%v", refused, out)
+	}
+
+	retention := registry.SessionJournalRetention{Count: 2, Bytes: 1024}
+	for _, key := range []string{"one", "two", "three"} {
+		if _, _, err := f.vps.reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: "started", Kind: "text", ProviderKey: key, Payload: []byte(key)}, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+	window, err := f.vps.reg.SessionJournalAfter("started", 0, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gone, refused := callMCP(t, f.starter, "agenthail_read", map[string]any{"sessionId": f.created, "before": encodeReadCursor(int64(window.EarliestSeq), "")})
+	if refused || gone["unavailable"] != "No older history is retained." {
+		t.Fatalf("history the paired host no longer retains: refused=%v out=%v", refused, gone)
+	}
+
+	f.vps.gate.proxyDown.Store(true)
+	f.vps.server.CloseClientConnections()
+	out, refused = callMCP(t, f.starter, "agenthail_read", map[string]any{"sessionId": f.created})
+	if !refused || out["code"] != "refused" || out["retryable"] != true {
+		t.Fatalf("a read while the paired host does not answer: refused=%v out=%v", refused, out)
+	}
+}
+
+func TestTheOwningHostRefusesAForgedSenderForAStarterItDoesNotMirror(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	moveSession(t, local, "local-b", local.fake.sessions["local-a"].Cwd, time.Now())
+	if out, refused := callMCP(t, mustMCP(t, local, "local-a"), "agenthail_create", map[string]any{"surface": "codex", "host": "vps", "cwd": widgetRepo(t, "https://github.com/example/gadget.git"), "message": "build the parser", "clientRequestId": "start"}); refused {
+		t.Fatalf("create: %v", out)
+	}
+	if origin, _, _ := remote.reg.SessionOrigin("started"); !surface.IsUnrepliableSender(origin.CreatorID) {
+		t.Fatalf("setup: starter recorded as %q, want a stand-in for a session the vps does not mirror", origin.CreatorID)
+	}
+	forward := func(source string) *httptest.ResponseRecorder {
+		t.Helper()
+		return local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "steer", "sessionId": hosts.Qualify(record.ID, "started"), "message": "forwarded by " + source, "sourceSessionId": source, "scopeProjectId": widgetProject})
+	}
+	if refused := forward("local-b"); refused.Code != http.StatusForbidden || !strings.Contains(refused.Body.String(), "different_project") {
+		t.Fatalf("a forwarded steer from local-b: status=%d body=%s", refused.Code, refused.Body.String())
+	}
+	if slices.ContainsFunc(remote.fake.delivered(), func(got string) bool { return strings.Contains(got, "forwarded by local-b") }) {
+		t.Fatal("the refused steer reached the worker")
+	}
+	if admitted := forward("local-a"); admitted.Code != http.StatusOK {
+		t.Fatalf("a forwarded steer from the starter: status=%d body=%s", admitted.Code, admitted.Body.String())
+	}
 }
