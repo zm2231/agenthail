@@ -88,9 +88,6 @@ pub fn section(s: &App) -> El {
     let st = &s.ov.inbox;
     let count = st.inbox.as_ref().map(|i| i.decisions.len());
     let mut c = col().w_full().gap(6.0).child(ui::section_head("Decisions", count, Some(text("from every connected computer".to_string()).font(META).color(weak()))));
-    if let Some(e) = &st.error {
-        c = c.child(text(e.clone()).font(META).color(ui::needs_color()).wrap());
-    }
     let Some(found) = &st.inbox else {
         let note = if s.client.is_some() { "Looking for decisions…" } else { "Decisions show when the app is connected to the daemon." };
         return c.child(text(note.to_string()).font(META).color(weak()));
@@ -111,7 +108,7 @@ pub fn section(s: &App) -> El {
         list = list.child(line(s, i, d, target.as_deref() == Some(d.id().as_str())));
     }
     if found.decisions.is_empty() {
-        list = list.child(row().gap(8.0).items_center().px(14.0).py(10.0).child(icon(&icons::CIRCLE_CHECK, 14.0).color(weak())).child(text(if st.error.is_some() { "Nothing needed you when decisions last loaded." } else if found.notes.is_empty() { "Nothing needs you." } else { "Nothing needs you on the computers that answered." }.to_string()).font(BODY).color(weak())));
+        list = list.child(row().gap(8.0).items_center().px(14.0).py(10.0).child(icon(&icons::CIRCLE_CHECK, 14.0).color(weak())).child(text(if found.notes.is_empty() { "Nothing needs you." } else { "Nothing needs you on the computers that answered." }.to_string()).font(BODY).color(weak())));
     }
     if !found.lead_handling.is_empty() {
         list = list.child(text("Handled by a lead".to_string()).font(META_MED).color(weak()).px(14.0).pt(12.0).pb(2.0));

@@ -12,7 +12,7 @@ const EVERY: Duration = Duration::from_secs(10);
 const VERSION_EVERY: u32 = 6;
 
 enum Done {
-    Inbox(Instant, Result<Inbox, String>),
+    Inbox(Instant, Inbox),
     Acted(String, Handled, Result<(), (RespondError, String)>),
     Brief(String, Result<Brief, RespondError>),
     Version(Option<String>),
@@ -30,7 +30,6 @@ pub struct State {
     tx: Sender<Done>,
     rx: Receiver<Done>,
     pub inbox: Option<Inbox>,
-    pub error: Option<String>,
     pub history: Vec<Handled>,
     pub acting: HashSet<String>,
     pub unconfirmed: HashSet<String>,
@@ -44,7 +43,7 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         let (tx, rx) = channel();
-        State { tx, rx, inbox: None, error: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, newest: None, started: false }
+        State { tx, rx, inbox: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, newest: None, started: false }
     }
 }
 
@@ -58,7 +57,7 @@ pub fn app_build() -> Build {
 
 fn fetch(client: &Client, tx: &Sender<Done>) -> bool {
     let started = Instant::now();
-    tx.send(Done::Inbox(started, client.inbox().map_err(|e| e.to_string()))).is_ok()
+    tx.send(Done::Inbox(started, client.inbox())).is_ok()
 }
 
 pub fn start(state: &mut State, client: &Client) {
@@ -98,21 +97,15 @@ pub fn drain(s: &mut crate::App) -> bool {
         changed = true;
         let st = &mut s.ov.inbox;
         match done {
-            Done::Inbox(started, result) => {
+            Done::Inbox(started, inbox) => {
                 if st.newest.is_some_and(|n| n > started) {
                     continue;
                 }
                 st.newest = Some(started);
-                match result {
-                    Ok(inbox) => {
-                        if inbox.notes.is_empty() {
-                            st.unconfirmed.retain(|hold| inbox.decisions.iter().any(|d| d.holds(hold)));
-                        }
-                        st.inbox = Some(inbox);
-                        st.error = None;
-                    }
-                    Err(e) => st.error = Some(format!("Couldn't read decisions: {e}")),
+                if inbox.notes.is_empty() {
+                    st.unconfirmed.retain(|hold| inbox.decisions.iter().any(|d| d.holds(hold)));
                 }
+                st.inbox = Some(inbox);
             }
             Done::Acted(id, entry, result) => {
                 st.acting.remove(&id);

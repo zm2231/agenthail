@@ -556,6 +556,11 @@ impl Client {
         Self { base: base.trim_end_matches('/').into(), token: token.into(), agent }
     }
 
+    pub(crate) fn timed(&self, timeout: Duration) -> Client {
+        let agent = ureq::AgentBuilder::new().timeout_connect(timeout.min(Duration::from_secs(5))).timeout(timeout).build();
+        Client { base: self.base.clone(), token: self.token.clone(), agent }
+    }
+
     fn get(&self, path: &str) -> Result<Value> {
         let response = self
             .agent

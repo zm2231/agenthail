@@ -5,6 +5,7 @@ use crate::catalog::{Client, OpenRequest, RespondError, enc};
 
 pub const GROUPS: [(&str, &str); 4] = [("stopped", "Stopped on you"), ("holding", "Holding up work"), ("waiting", "Waiting on you"), ("review", "Waiting for your review")];
 pub const HISTORY_KEPT: usize = 20;
+const HOST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6);
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -167,6 +168,14 @@ impl Decision {
     }
 }
 
+fn unread(name: &str, error: &anyhow::Error) -> String {
+    if error.to_string().contains("404") {
+        format!("{name} runs an older Agenthail without the Inbox.")
+    } else {
+        format!("{name}'s decisions couldn't be read, so they aren't shown.")
+    }
+}
+
 pub fn request_hold(session: &str, request: &str) -> String {
     format!("{session}|{request}")
 }
@@ -246,17 +255,23 @@ impl Client {
         Ok(serde_json::from_value(self.get_json(&path)?)?)
     }
 
-    pub fn inbox(&self) -> anyhow::Result<Inbox> {
-        let local = self.decisions(None)?;
+    pub fn inbox(&self) -> Inbox {
+        let quick = self.timed(HOST_TIMEOUT);
+        let (local, hosts) = std::thread::scope(|scope| {
+            let local = scope.spawn(|| quick.decisions(None));
+            let hosts = quick.get_json("/api/v1/hosts");
+            (local.join().unwrap_or_else(|_| Err(anyhow::anyhow!("the fetch stopped"))), hosts)
+        });
         let mut inbox = Inbox::default();
-        let (hosts, listed) = match self.get_json("/api/v1/hosts") {
-            Ok(h) => (h, true),
-            Err(_) => (serde_json::Value::Null, false),
-        };
+        let listed = hosts.is_ok();
+        let hosts = hosts.unwrap_or_default();
         let own = hosts["host"]["id"].as_str().unwrap_or_default().to_string();
-        inbox.add(local, "", "", &own);
+        match local {
+            Ok(page) => inbox.add(page, "", "", &own),
+            Err(e) => inbox.notes.push(unread("This computer", &e)),
+        }
         if !listed {
-            inbox.notes.push("Couldn't list the paired computers, so only this computer's decisions are shown.".into());
+            inbox.notes.push("Couldn't list the paired computers, so their decisions aren't shown.".into());
         }
         let mut paired: Vec<(String, String)> = Vec::new();
         for h in hosts["hosts"].as_array().into_iter().flatten() {
@@ -268,18 +283,17 @@ impl Client {
             }
         }
         let pages: Vec<(String, String, anyhow::Result<Page>)> = std::thread::scope(|scope| {
-            let jobs: Vec<_> = paired.iter().map(|(id, name)| (id.clone(), name.clone(), scope.spawn(|| self.decisions(Some(id))))).collect();
+            let jobs: Vec<_> = paired.iter().map(|(id, name)| (id.clone(), name.clone(), scope.spawn(|| quick.decisions(Some(id))))).collect();
             jobs.into_iter().map(|(id, name, job)| (id, name, job.join().unwrap_or_else(|_| Err(anyhow::anyhow!("the fetch stopped"))))).collect()
         });
         for (id, name, page) in pages {
             match page {
                 Ok(page) => inbox.add(page, &id, &name, &own),
-                Err(e) if e.to_string().contains("404") => inbox.notes.push(format!("{name} runs an older Agenthail without the Inbox.")),
-                Err(_) => inbox.notes.push(format!("{name} isn't answering, so its decisions aren't shown.")),
+                Err(e) => inbox.notes.push(unread(&name, &e)),
             }
         }
         inbox.settle();
-        Ok(inbox)
+        inbox
     }
 }
 
@@ -367,6 +381,8 @@ mod tests {
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 let stream = stream.unwrap();
+                let routes = routes.clone();
+                std::thread::spawn(move || {
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
                 let mut line = String::new();
                 reader.read_line(&mut line).unwrap();
@@ -379,8 +395,12 @@ mod tests {
                 }
                 let path = line.split_whitespace().nth(1).unwrap_or_default().to_string();
                 let (status, body) = routes.iter().find(|r| r.0 == path).map(|r| (r.1, r.2)).unwrap_or((404, r#"{"error":{"code":"not_found","message":"no"}}"#));
+                if path.ends_with("host=slow") {
+                    std::thread::sleep(std::time::Duration::from_secs(9));
+                }
                 let mut stream = stream;
-                write!(stream, "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                let _ = write!(stream, "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                });
             }
         });
         base
@@ -401,7 +421,7 @@ mod tests {
                   "leadHandling":[{"sessionId":"crew","heldBy":"lead","reason":"run tests"}]}"#,
             ),
         ]);
-        let inbox = Client::new(&base, "t").inbox().unwrap();
+        let inbox = Client::new(&base, "t").inbox();
         let rows: Vec<(&str, &str, &str)> = inbox.decisions.iter().map(|d| (d.session_id.as_str(), d.project_id.as_str(), d.host.as_str())).collect();
         assert_eq!(rows, [("h2::remote", "h2::p", "h2"), ("local", "", "")]);
         assert_eq!(inbox.decisions[0].holds_up, ["h2::w"]);
@@ -415,9 +435,9 @@ mod tests {
     #[test]
     fn a_missing_computer_list_is_said_not_hidden() {
         let base = serve(vec![("/api/v1/decisions", 200, r#"{"decisions":[],"leadHandling":[]}"#), ("/api/v1/hosts", 500, r#"{"error":{"code":"internal_error","message":"boom"}}"#)]);
-        let inbox = Client::new(&base, "t").inbox().unwrap();
+        let inbox = Client::new(&base, "t").inbox();
         assert!(inbox.decisions.is_empty());
-        assert_eq!(inbox.notes, ["Couldn't list the paired computers, so only this computer's decisions are shown."]);
+        assert_eq!(inbox.notes, ["Couldn't list the paired computers, so their decisions aren't shown."]);
     }
 
     #[test]
@@ -429,6 +449,22 @@ mod tests {
         inbox.settle();
         let hosts: Vec<&str> = inbox.decisions.iter().map(|d| d.host.as_str()).collect();
         assert_eq!(hosts, ["", "h2"]);
+    }
+
+    #[test]
+    fn other_computers_still_show_when_this_one_fails_or_one_stalls() {
+        let base = serve(vec![
+            ("/api/v1/decisions", 500, r#"{"error":{"code":"internal_error","message":"boom"}}"#),
+            ("/api/v1/hosts", 200, r#"{"host":{"id":"h1","name":"studio"},"hosts":[{"id":"h2","name":"forge","state":"connected"},{"id":"slow","name":"stuck","state":"connected"}]}"#),
+            ("/api/v1/decisions?host=h2", 200, r#"{"decisions":[{"group":"waiting","sessionId":"remote"}],"leadHandling":[]}"#),
+            ("/api/v1/decisions?host=slow", 200, r#"{"decisions":[{"group":"waiting","sessionId":"late"}],"leadHandling":[]}"#),
+        ]);
+        let started = std::time::Instant::now();
+        let inbox = Client::new(&base, "t").inbox();
+        assert!(started.elapsed() < std::time::Duration::from_secs(8));
+        let ids: Vec<&str> = inbox.decisions.iter().map(|d| d.session_id.as_str()).collect();
+        assert_eq!(ids, ["h2::remote"]);
+        assert_eq!(inbox.notes, ["This computer's decisions couldn't be read, so they aren't shown.", "stuck's decisions couldn't be read, so they aren't shown."]);
     }
 
     #[test]
