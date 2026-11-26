@@ -148,9 +148,7 @@ fn failed_view(message: &str) -> El {
 fn exchanges(g: &Gone) -> El {
     let turn = |who: &str, body: &str, color: Color| col().w_full().gap(4.0).child(label(who)).child(text(body.to_string()).font(BODY).color(color).wrap());
     let mut head = row().w_full().gap(10.0).items_center();
-    if let Some(n) = g.history.note() {
-        head = head.child(text(n).font(META).color(faint()));
-    }
+    head = head.child(text(g.history.note()).font(META).color(faint()));
     let list = col().w_full().max_w(780.0).gap(18.0).px(32.0).py(16.0).child(head).children(g.exchanges.iter().map(|e| {
         let mut c = col().w_full().gap(10.0);
         if !e.user.is_empty() {

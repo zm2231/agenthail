@@ -971,7 +971,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         s.revealed = None;
     } else if s.revealed != s.selected
         && let Some(id) = s.selected.clone()
-        && s.ov.d.session(&id).is_some()
+        && (s.ov.d.session(&id).is_some() || ui::gone::shown(s, &id).is_some())
     {
         tx.scroll_into_view_in("sidebar-scroll", over::ui::session_key(&id));
         s.revealed = Some(id);

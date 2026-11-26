@@ -609,7 +609,7 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -
     }
     if !shown
         && matches!(s.screen, Screen::Session)
-        && let Some(x) = selected.and_then(|id| s.ov.d.session(id))
+        && let Some(x) = selected.and_then(|id| s.ov.d.session(id).or_else(|| crate::ui::gone::shown(s, id)))
     {
         sb = sb.section(SidebarSection::new(x.project_name()).key("sec-open").row(session_row(s, x, 0, false, selected)));
     }

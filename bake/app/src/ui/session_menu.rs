@@ -209,7 +209,7 @@ pub fn run(s: &mut App, id: &str, act: Act) {
             if not_sent(s) || !s.menus.busy.insert((id.to_string(), "menu")) {
                 return;
             }
-            if act == Act::Archive(true) && s.screen == Screen::Session && s.selected.as_deref() == Some(id) {
+            if act == Act::Archive(true) {
                 let project = session(s, id).and_then(|x| crate::over::ui::project_for(s, x));
                 let order = crate::over::ui::sidebar_order(s, project.as_deref(), Some(id));
                 s.menus.leaving.insert(id.to_string(), order);
@@ -328,7 +328,8 @@ fn leave_archived(s: &mut App, id: &str) {
     if s.screen != Screen::Session || s.selected.as_deref() != Some(now.as_str()) {
         return;
     }
-    match feed::gone::next_after(&order, id, |x| x != now && session(s, x).is_some_and(|x| !x.archived)) {
+    let order: Vec<String> = order.iter().map(|x| feed::composer::current(&s.rekeyed, x).to_string()).collect();
+    match feed::gone::next_after(&order, &now, |x| session(s, x).is_some_and(|x| !x.archived)) {
         Some(next) => crate::over::open_session(s, &next),
         None => crate::over::go(s, Screen::Now),
     }

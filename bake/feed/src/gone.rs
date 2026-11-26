@@ -65,13 +65,10 @@ pub struct History {
 }
 
 impl History {
-    pub fn note(self) -> Option<String> {
-        match (self.returned >= PAGE, self.cut_text) {
-            (true, true) => Some(format!("Showing the last {PAGE} exchanges, with long messages cut short. Older ones aren't loaded here.")),
-            (true, false) => Some(format!("Showing the last {PAGE} exchanges. Older ones aren't loaded here.")),
-            (false, true) => Some("Long messages are cut short here.".into()),
-            (false, false) => None,
-        }
+    pub fn note(self) -> String {
+        let older = if self.returned >= PAGE { format!("Showing the last {PAGE} exchanges.") } else { "Showing the latest exchanges Agenthail could load.".to_string() };
+        let cut = if self.cut_text { " Long messages are cut short." } else { "" };
+        format!("{older}{cut} Older ones aren't loaded here.")
     }
 }
 
@@ -384,12 +381,10 @@ mod tests {
     }
 
     #[test]
-    fn a_full_page_or_cut_text_says_what_is_missing() {
-        let d = |v: Value| classify("s1", &Detail::Found(v), Listing::Absent, None).unwrap().history;
-        assert_eq!(d(json!({"session": {}, "exchanges": [], "transcriptReturnedExchanges": 50})).note().as_deref(), Some("Showing the last 50 exchanges. Older ones aren't loaded here."));
-        assert!(d(json!({"session": {}, "exchanges": [], "transcriptReturnedExchanges": 50, "transcriptTruncated": true})).note().unwrap().contains("long messages cut short"));
-        assert_eq!(d(json!({"session": {}, "exchanges": [{"user": "a"}], "transcriptTruncated": true})).note().as_deref(), Some("Long messages are cut short here."));
-        assert_eq!(d(json!({"session": {}, "exchanges": [{"user": "a"}]})).note(), None);
+    fn the_reader_always_says_older_exchanges_are_not_loaded() {
+        let d = |v: Value| classify("s1", &Detail::Found(v), Listing::Absent, None).unwrap().history.note();
+        assert_eq!(d(json!({"session": {}, "exchanges": [], "transcriptReturnedExchanges": 50})), "Showing the last 50 exchanges. Older ones aren't loaded here.");
+        assert_eq!(d(json!({"session": {}, "exchanges": [{"user": "a"}], "transcriptTruncated": true})), "Showing the latest exchanges Agenthail could load. Long messages are cut short. Older ones aren't loaded here.");
     }
 
     #[test]
