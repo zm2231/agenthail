@@ -158,10 +158,28 @@ pub(crate) fn done(s: &mut App, id: String, working: (String, i64), done: Done) 
 }
 
 pub(crate) fn recover(s: &mut App) {
-    for taking in std::mem::take(&mut s.queue_taking) {
+    let leftover = s.queue_taking.clone();
+    if leftover.is_empty() {
+        return;
+    }
+    let Some(client) = s.client.clone() else {
+        restore(s, leftover.clone(), leftover);
+        return;
+    };
+    let out = s.outbox.clone();
+    std::thread::spawn(move || {
+        let back = client.unfinished(leftover.clone());
+        let _ = out.send(Bg::Recovered(leftover, back));
+    });
+}
+
+pub(crate) fn restore(s: &mut App, checked: Vec<Taking>, back: Vec<Taking>) {
+    s.queue_taking.retain(|t| !checked.contains(t));
+    for taking in back {
         hand_back(s, &taking.session, &taking.text);
         s.queue_note.insert(taking.session.clone(), "A queued message you were taking back or steering when the app closed is back in the composer; check the queue before sending.".into());
     }
+    crate::over::layout::save(s);
 }
 
 pub(crate) fn reserve(s: &App, id: &str) -> f32 {

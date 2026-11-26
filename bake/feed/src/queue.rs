@@ -142,6 +142,10 @@ pub struct Taking {
 }
 
 impl Taking {
+    pub fn still_queued(&self, rows: &[Queued]) -> bool {
+        rows.iter().any(|r| r.id == self.id && r.host == self.host && r.status == "pending")
+    }
+
     pub fn to_json(list: &[Taking]) -> Value {
         Value::Array(list.iter().map(|t| serde_json::json!({"session": t.session, "host": t.host, "id": t.id, "text": t.text})).collect())
     }
@@ -196,6 +200,15 @@ impl Client {
             (Err(error), Ok(rows)) => Ok(Read { rows, partial: Some(format!("{READ_FAILED} on {host}, so only what this computer holds is shown: {error}")) }),
             (Ok(rows), Err(error)) => Ok(Read { rows, partial: Some(format!("{READ_FAILED} this computer holds for this session: {error}")) }),
         }
+    }
+
+    pub fn unfinished(&self, list: Vec<Taking>) -> Vec<Taking> {
+        list.into_iter()
+            .filter(|t| {
+                let remote = (!t.host.is_empty()).then_some(t.host.as_str());
+                self.queue(&t.session, remote).map_or(true, |read| !t.still_queued(&read.rows))
+            })
+            .collect()
     }
 
     pub fn queue_op(&self, op: Op, row: &Queued) -> Done {
@@ -281,6 +294,22 @@ mod tests {
         assert_eq!(Taking::from_json(&Taking::to_json(&taking)), taking);
         assert!(Taking::from_json(&json!([{"session": "s1", "id": 7, "text": " "}, {"id": 7, "text": "x"}, {"session": "s1", "text": "x"}])).is_empty());
         assert_eq!(Taking::from_json(&json!(null)), vec![]);
+    }
+
+    #[test]
+    fn a_leftover_take_back_is_restored_unless_its_message_is_still_queued() {
+        let taking = |id: i64| Taking { session: "s1".into(), host: String::new(), id, text: format!("t{id}") };
+        let (client, _seen) = daemon(replies(&[
+            (200, r#"{"items":[{"id":7,"sessionId":"s1","status":"pending"}]}"#),
+            (200, r#"{"items":[{"id":7,"sessionId":"s1","status":"pending"}]}"#),
+            (500, r#"{"error":{"code":"internal_error","message":"down"}}"#),
+        ]));
+        let restore = client.unfinished(vec![taking(7), taking(8), taking(9)]);
+        assert_eq!(restore.iter().map(|t| t.id).collect::<Vec<_>>(), vec![8, 9]);
+        let remote = Taking { host: "vps".into(), ..taking(7) };
+        assert!(!remote.still_queued(&[row(7, "s1", "pending")]));
+        assert!(remote.still_queued(&[Queued { host: "vps".into(), ..row(7, "s1", "pending") }]));
+        assert!(!taking(7).still_queued(&[row(7, "s1", "canceled")]));
     }
 
     #[test]
