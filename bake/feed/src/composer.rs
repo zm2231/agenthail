@@ -175,11 +175,11 @@ impl Unsent {
         Some(Unsent { session, text, key, busy, maybe_delivered, error: value["error"].as_str().unwrap_or_default().to_string(), tries })
     }
 
-    pub fn failed(self, maybe_delivered: bool, answered: bool, error: String) -> Unsent {
-        if self.tries == 0 {
+    pub fn failed(self, retry: bool, maybe_delivered: bool, answered: bool, error: String) -> Unsent {
+        if !retry {
             return Unsent { maybe_delivered, error, ..self };
         }
-        let tries = if answered { self.tries } else { self.tries - 1 };
+        let tries = self.tries + u32::from(answered);
         Unsent { maybe_delivered: true, tries, error, ..self }
     }
 
@@ -409,19 +409,19 @@ mod tests {
 
     #[test]
     fn a_retry_that_never_left_keeps_the_first_sends_doubt() {
-        let first = unsent("k1", "hello", true).failed(false, false, "connection refused".into());
+        let first = unsent("k1", "hello", true).failed(false, false, false, "connection refused".into());
         assert!(!first.maybe_delivered);
-        let retry = Unsent { tries: 1, ..unsent("k1", "hello", true) };
-        let unreached = retry.clone().failed(false, false, "connection refused".into());
+        let retry = unsent("k1", "hello", true);
+        let unreached = retry.clone().failed(true, false, false, "connection refused".into());
         assert!(unreached.reuses_key(), "{unreached:?}");
         assert!(!unreached.offers_new_send());
-        let refused = retry.clone().failed(false, true, "action_reservation_failed".into());
+        let refused = retry.clone().failed(true, false, true, "action_reservation_failed".into());
         assert!(refused.reuses_key() && refused.offers_new_send());
         assert!(refused.note().starts_with("Still not confirmed after a retry: action_reservation_failed"));
-        let unknown = retry.clone().failed(true, true, "host_outcome_unknown".into());
+        let unknown = retry.clone().failed(true, true, true, "host_outcome_unknown".into());
         assert!(unknown.reuses_key() && unknown.offers_new_send());
         assert_eq!(unknown.error, "host_outcome_unknown");
-        let timed_out = retry.failed(true, false, "timeout".into());
+        let timed_out = retry.failed(true, true, false, "timeout".into());
         assert!(timed_out.reuses_key() && !timed_out.offers_new_send());
     }
 

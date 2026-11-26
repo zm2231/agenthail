@@ -28,7 +28,7 @@ pub enum Bg {
     Tail(String, String, Result<Tail, String>),
     OverviewError(String),
     SendSettings(String, HashMap<String, String>, Vec<feed::catalog::QueueRow>),
-    Sent(String, Unsent, Result<Delivered, feed::catalog::RespondError>),
+    Sent(String, Unsent, bool, Result<Delivered, feed::catalog::RespondError>),
     Stopped(String, Result<feed::composer::Stop, feed::catalog::RespondError>),
     Requests(String, Vec<OpenRequest>, std::time::Instant),
     Answered(String, String, Result<(), feed::catalog::RespondError>),
@@ -493,7 +493,7 @@ pub fn send_to(s: &mut App, id: &str, tx: &mut Tx) {
     }
     s.composer = TextEdit::new("");
     match s.unsent.take_same(id, &message) {
-        Some(again) if again.reuses_key() => dispatch(s, id, Unsent { tries: again.tries + 1, ..again }, true, tx),
+        Some(again) if again.reuses_key() => dispatch(s, id, again, true, tx),
         _ => {
             let pending = fresh(s, id, message);
             dispatch(s, id, pending, false, tx);
@@ -514,7 +514,7 @@ pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
     }
     s.unsent.remove(id, &unsent.key);
     if unsent.reuses_key() {
-        dispatch(s, id, Unsent { tries: unsent.tries + 1, ..unsent }, true, tx);
+        dispatch(s, id, unsent, true, tx);
     } else {
         let pending = fresh(s, id, unsent.text);
         dispatch(s, id, pending, false, tx);
@@ -610,15 +610,15 @@ fn dispatch(s: &mut App, id: &str, pending: Unsent, resent: bool, tx: &mut Tx) {
     if let Err(error) = over::layout::save_now(s) {
         settle(s, &id, &pending.key);
         put_back(s, &id, &pending.text);
-        let (maybe_delivered, tries) = if resent { (pending.maybe_delivered, pending.tries.saturating_sub(1)) } else { (false, 0) };
-        s.unsent.add(&id, Unsent { maybe_delivered, tries, error: format!("the message couldn't be saved first ({error})"), ..pending });
+        let maybe_delivered = resent && pending.maybe_delivered;
+        s.unsent.add(&id, Unsent { maybe_delivered, error: format!("the message couldn't be saved first ({error})"), ..pending });
         return;
     }
     tx.scroll_to_bottom(format!("transcript-{id}"));
     let out = s.outbox.clone();
     std::thread::spawn(move || {
         let result = client.send_as(&pending.session, &pending.text, pending.busy, &pending.key);
-        let _ = out.send(Bg::Sent(id, pending, result));
+        let _ = out.send(Bg::Sent(id, pending, resent, result));
     });
 }
 
@@ -715,7 +715,7 @@ fn put_back(s: &mut App, id: &str, text: &str) {
     }
 }
 
-fn take_sent(s: &mut App, id: String, pending: Unsent, result: Result<Delivered, feed::catalog::RespondError>) {
+fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Result<Delivered, feed::catalog::RespondError>) {
     let id = feed::composer::current(&s.rekeyed, &id).to_string();
     settle(s, &id, &pending.key);
     s.unsent.remove(&id, &pending.key);
@@ -734,7 +734,7 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, result: Result<Delivered,
     };
     if let Some((maybe_delivered, answered, error)) = failure {
         put_back(s, &id, &pending.text);
-        s.unsent.add(&id, pending.failed(maybe_delivered, answered, error));
+        s.unsent.add(&id, pending.failed(retry, maybe_delivered, answered, error));
     }
 }
 
@@ -870,7 +870,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 }
                 s.queued.retain(|_, receipts| !receipts.is_empty());
             }
-            Bg::Sent(id, pending, result) => take_sent(s, id, pending, result),
+            Bg::Sent(id, pending, retry, result) => take_sent(s, id, pending, retry, result),
             Bg::Stopped(id, result) => {
                 let id = feed::composer::current(&s.rekeyed, &id).to_string();
                 s.stopping.remove(&id);
