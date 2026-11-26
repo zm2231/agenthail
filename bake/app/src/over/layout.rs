@@ -10,6 +10,11 @@ use crate::App;
 pub const PANES: [&str; 3] = ["Sidebar", "Needs you", "Sessions"];
 
 static LAST: Mutex<String> = Mutex::new(String::new());
+static FAILED: Mutex<Option<String>> = Mutex::new(None);
+
+pub fn failure() -> Option<String> {
+    FAILED.lock().expect("layout lock").clone()
+}
 
 fn path() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
@@ -151,6 +156,7 @@ fn writer() -> &'static Sender<Write> {
                     .and_then(|()| std::fs::write(&next, &text))
                     .and_then(|()| std::fs::rename(&next, &p))
                     .map_err(|e| e.to_string());
+                *FAILED.lock().expect("layout lock") = written.clone().err();
                 if written.is_err() {
                     let mut last = LAST.lock().expect("layout lock");
                     if *last == text {
@@ -188,6 +194,12 @@ pub fn save_now(s: &App) -> Result<(), String> {
     let now = encode(s);
     let (done, wait) = channel();
     *LAST.lock().expect("layout lock") = now.clone();
-    writer().send((now, Some(done))).map_err(|_| "the layout writer stopped".to_string())?;
-    wait.recv_timeout(std::time::Duration::from_secs(5)).map_err(|_| "saving took too long".to_string())?
+    let result = writer()
+        .send((now, Some(done)))
+        .map_err(|_| "the layout writer stopped".to_string())
+        .and_then(|()| wait.recv_timeout(std::time::Duration::from_secs(5)).map_err(|_| "saving took too long".to_string())?);
+    if let Err(error) = &result {
+        *FAILED.lock().expect("layout lock") = Some(error.clone());
+    }
+    result
 }

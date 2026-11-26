@@ -183,7 +183,15 @@ fn prepare(s: &mut App, id: &str, names: Vec<String>, work: impl FnOnce() -> Vec
 }
 
 fn keep_draft(s: &mut App) {
-    s.attach.unsaved = crate::over::layout::save_now(s).err().map(|error| format!("The draft couldn't be saved ({error}), so its attachments may not come back if the app closes."));
+    let _ = crate::over::layout::save_now(s);
+    notice_saving(s);
+}
+
+fn notice_saving(s: &mut App) -> bool {
+    let now = crate::over::layout::failure().map(|error| format!("Drafts couldn't be saved ({error}), so they and their attachments may not come back if the app closes."));
+    let changed = now != s.attach.unsaved;
+    s.attach.unsaved = now;
+    changed
 }
 
 pub fn choose(s: &mut App, tx: &mut Tx) {
@@ -325,7 +333,7 @@ fn act(tx: &mut Tx, then: Then, path: &Path) {
 }
 
 pub fn pump(s: &mut App) -> bool {
-    let mut changed = false;
+    let mut changed = notice_saving(s);
     if s.attach.scanned != s.counter || s.attach.rescan {
         s.attach.scanned = s.counter;
         s.attach.rescan = false;
