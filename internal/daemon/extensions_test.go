@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"maps"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -623,4 +624,30 @@ func TestAnExtensionHostThatKeepsCrashingIsLoggedOnceAndAgainWhenItRecovers(t *t
 func withoutCursor(sdk []byte) []byte {
 	_, rest, _ := bytes.Cut(sdk, []byte("\n"))
 	return rest
+}
+
+func TestTheExtensionHostKeepsRunningWhenTheDaemonHangsUpBeforeItsAnswer(t *testing.T) {
+	f := startExtensionFixture(t)
+	client := f.d.extensions.host.Client()
+	before, err := client.Hello(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Each batch ends with an answered hello, which the host accepts after every
+	// hang-up before it, so the pending connections stay under macOS's accept
+	// queue limit of 128, beyond which a unix socket refuses the dial.
+	for range 10 {
+		for range 20 {
+			conn, err := net.Dial("unix", f.d.extensions.host.SocketPath())
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = conn.Write([]byte(`{"id":1,"method":"status"}` + "\n"))
+			conn.Close()
+		}
+		after, err := client.Hello(context.Background())
+		if err != nil || after.PID != before.PID || syscall.Kill(before.PID, 0) != nil {
+			t.Fatalf("the host after calls hung up before their answers: %+v %v, want process %d still serving", after, err, before.PID)
+		}
+	}
 }

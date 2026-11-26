@@ -19,6 +19,7 @@ func TestEachMessageAgenthailGivesCodexCarriesItsDeliveryIDOnItsTurn(t *testing.
 	if end := rolloutTurnEnd(t, session.ID, first.UUID); end != "task_complete" {
 		t.Fatalf("the first turn ended with %s", end)
 	}
+	awaitNoActiveTurn(t, codex, follower, session.ID)
 	session.Status = surface.StatusIdle
 	sent, err := codex.Send(surface.WithMessageUUID(ctx, "delivery-sent"), session, "second")
 	if err != nil || !sent.Accepted {

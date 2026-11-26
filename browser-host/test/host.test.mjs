@@ -1,6 +1,7 @@
 import '../../scripts/test-home.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import test from 'node:test';
 import { missingLibraries } from '../browser.mjs';
@@ -30,6 +31,24 @@ test('a host with no Chromium yet answers hello and reports it absent without do
   assert.equal(fs.existsSync(path.join(host.dir, 'browsers')), false);
   const unknown = await call(host.socket, 'navigate');
   assert.equal(unknown.error.code, 'unknown_method');
+});
+
+test('a client that hangs up before its reply leaves the host running', async t => {
+  const host = startHost(t);
+  await call(host.socket, 'hello');
+  for (let i = 0; i < 200; i++) {
+    const conn = net.createConnection(host.socket);
+    const connected = await new Promise(resolve => {
+      conn.once('connect', () => resolve(true));
+      conn.once('error', () => resolve(false));
+    });
+    if (!connected) break;
+    conn.end(JSON.stringify({ id: 1, method: 'hello' }) + '\n');
+    conn.destroy();
+  }
+  const hello = await call(host.socket, 'hello');
+  assert.equal(host.child.exitCode, null);
+  assert.equal(hello.result.pid, host.child.pid);
 });
 
 test('the host exits and removes its socket when its owner goes away', async t => {

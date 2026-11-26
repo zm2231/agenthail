@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -9,10 +10,11 @@ import (
 )
 
 // finishingStatusSurface reports a reply that ended at endedAt from a process
-// still busy, as Claude does while Stop hooks run.
+// still busy, as Claude does while Stop hooks run, read at its own clock.
 type finishingStatusSurface struct {
 	*localStatusSurface
 	endedAt time.Time
+	now     atomic.Pointer[time.Time]
 }
 
 func (s *finishingStatusSurface) LocalStatus(ctx context.Context, session surface.Session) (surface.Session, error) {
@@ -20,7 +22,7 @@ func (s *finishingStatusSurface) LocalStatus(ctx context.Context, session surfac
 	session.Activity = nil
 	if session.ID == "from" {
 		activity := &surface.Activity{BusySince: s.endedAt.Add(-time.Minute), LastProgressAt: s.endedAt, EndedAt: s.endedAt}
-		activity.Finishing(time.Now())
+		activity.Finishing(*s.now.Load())
 		session.Activity = activity
 	}
 	return session, err
@@ -36,7 +38,9 @@ func (s *finishingStatusSurface) List(ctx context.Context) ([]surface.Session, e
 
 func TestTheStatusPassMarksAReplyFinishingOnceItsGraceEndsWithoutAFileChange(t *testing.T) {
 	d, _, local := localStatusFixture(t)
-	source := &finishingStatusSurface{localStatusSurface: local, endedAt: time.Now().Add(300*time.Millisecond - surface.FinishingGrace)}
+	source := &finishingStatusSurface{localStatusSurface: local, endedAt: time.Now().Add(-surface.FinishingGrace)}
+	before := source.endedAt.Add(surface.FinishingGrace - time.Millisecond)
+	source.now.Store(&before)
 	d.Surfaces = []surface.Surface{source}
 	local.writeStatus(t, "from", surface.StatusBusy)
 	d.discoverCatalog(context.Background())
@@ -58,7 +62,8 @@ func TestTheStatusPassMarksAReplyFinishingOnceItsGraceEndsWithoutAFileChange(t *
 	if got := activity(); got == nil || !got.FinishingSince.IsZero() {
 		t.Fatalf("activity %+v before the grace ended, want one not yet finishing", got)
 	}
-	time.Sleep(time.Until(source.endedAt.Add(surface.FinishingGrace)) + 50*time.Millisecond)
+	after := source.endedAt.Add(surface.FinishingGrace)
+	source.now.Store(&after)
 	d.refreshCatalogStatus(context.Background())
 	if got := activity(); got == nil || !got.FinishingSince.Equal(source.endedAt) {
 		t.Fatalf("activity %+v after the grace, want finishing since %s", got, source.endedAt)

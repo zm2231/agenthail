@@ -488,13 +488,11 @@ func TestASocketCallerIsNamedWhileBackgroundReadsHoldEveryGeneralReader(t *testi
 	}
 }
 
-// holdEveryGeneralReader shortens the caller bound and holds every general
-// reader for three bounds, as the background scans did when callers stalled.
+// holdEveryGeneralReader holds every general reader past the caller bound, as
+// the background scans did when callers stalled, so naming a caller that
+// needed one is refused.
 func holdEveryGeneralReader(t *testing.T, reg *registry.Registry) {
 	t.Helper()
-	previous := mcpCallerBound
-	mcpCallerBound = 2 * time.Second
-	t.Cleanup(func() { mcpCallerBound = previous })
 	var held []*sql.Conn
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
@@ -513,6 +511,6 @@ func holdEveryGeneralReader(t *testing.T, reg *registry.Registry) {
 			_ = conn.Close()
 		}
 	}
-	time.AfterFunc(3*mcpCallerBound, releaseAll)
+	time.AfterFunc(mcpCallerBound+time.Second, releaseAll)
 	t.Cleanup(releaseAll)
 }
