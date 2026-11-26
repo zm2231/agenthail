@@ -97,8 +97,14 @@ impl Decision {
     }
 
     pub fn hold_key(&self) -> String {
-        let requests: Vec<&str> = self.requests.iter().map(|r| r.id.as_str()).collect();
-        format!("{}|{}", self.id(), requests.join(","))
+        match self.requests.first() {
+            Some(r) => format!("{}|{}", self.session_id, r.id),
+            None => self.id(),
+        }
+    }
+
+    pub fn holds(&self, key: &str) -> bool {
+        self.id() == key || self.requests.iter().any(|r| format!("{}|{}", self.session_id, r.id) == key)
     }
 
     pub fn is_parked(&self) -> bool {
@@ -306,6 +312,10 @@ mod tests {
         let next = decision(r#"{"sessionId":"s","answerable":true,"requests":[{"id":"b"}]}"#);
         assert_eq!(asks.id(), next.id());
         assert_ne!(asks.hold_key(), next.hold_key());
+        let grown = decision(r#"{"sessionId":"s","answerable":true,"requests":[{"id":"a"},{"id":"c"}]}"#);
+        assert_eq!(asks.hold_key(), grown.hold_key());
+        assert!(grown.holds(&asks.hold_key()));
+        assert!(!next.holds(&asks.hold_key()));
         let stopped = decision(r#"{"group":"stopped","sessionId":"s"}"#);
         assert_eq!(stopped.dismissals(), [Dismiss::Stopped { session: "s" }]);
         assert_eq!(stopped.not_now_label(), "Not now");

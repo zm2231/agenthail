@@ -105,7 +105,7 @@ pub fn drain(s: &mut crate::App) -> bool {
                 match result {
                     Ok(inbox) => {
                         if inbox.notes.is_empty() {
-                            st.unconfirmed.retain(|hold| inbox.decisions.iter().any(|d| d.hold_key() == *hold));
+                            st.unconfirmed.retain(|hold| inbox.decisions.iter().any(|d| d.holds(hold)));
                         }
                         st.inbox = Some(inbox);
                         st.error = None;
