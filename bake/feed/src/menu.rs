@@ -193,12 +193,16 @@ pub fn names_pr(asked: &str, pr: &crate::catalog::Pr) -> bool {
 }
 
 fn pr_link(asked: &str) -> Option<(String, u64)> {
-    let link = url::Url::parse(asked.trim()).ok()?;
+    let asked = asked.trim();
+    let asked = asked.strip_prefix('#').unwrap_or(asked).trim();
+    let link = url::Url::parse(asked).ok()?;
     if !matches!(link.scheme(), "http" | "https") || !link.username().is_empty() || link.password().is_some() {
         return None;
     }
     let host = link.host_str()?;
-    let path = decoded(link.path());
+    let after = asked.split_once("://")?.1;
+    let raw = after.find('/').map(|i| &after[i..]).unwrap_or("");
+    let path = decoded(raw.split(['?', '#']).next().unwrap_or(""));
     let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
     let [owner, name, "pull", number] = parts[..] else { return None };
     let number = number.parse::<u64>().ok().filter(|n| *n > 0 && *n <= i64::MAX as u64)?;
@@ -379,7 +383,11 @@ mod tests {
         assert_eq!(pr_problem("https://github.com/o/r/issues/34"), Some("That isn't a pull request link or number."));
         assert_eq!(pr_problem("https://github.com/o/r/pull/0"), Some("That isn't a pull request link or number."));
         assert_eq!(pr_problem("9223372036854775807"), None);
-        for refused in ["##12", "9223372036854775808", "https://github.com/o/r/pull/9223372036854775808", "https://github.com/o w/r/pull/3", "https://github.com/o/../pull/3", "https://github.com/o/r!/pull/3"] {
+        assert_eq!(pr_problem("#https://github.com/o/r/pull/12"), None);
+        let pr = Pr { repo: "github.com/o/r".into(), number: 12, ..Default::default() };
+        assert!(names_pr("#https://github.com/o/r/pull/12", &pr));
+        assert!(!names_pr("https://github.com/o/./r/pull/12", &pr));
+        for refused in ["##12", "9223372036854775808", "https://github.com/o/./r/pull/12", "https://github.com/x/../o/r/pull/12", "https://github.com/o/r/pull/9223372036854775808", "https://github.com/o w/r/pull/3", "https://github.com/o/../pull/3", "https://github.com/o/r!/pull/3"] {
             assert_eq!(pr_problem(refused), Some("That isn't a pull request link or number."), "{refused}");
         }
         assert_eq!(pr_problem("0"), Some("That isn't a pull request link or number."));
