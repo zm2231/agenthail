@@ -14,6 +14,7 @@ pub struct Bar {
     tray: Option<Tray>,
     app: Option<AppHandle<App>>,
     shown: Option<(MenuBar, Link)>,
+    warning: bool,
 }
 
 impl Bar {
@@ -70,15 +71,17 @@ pub fn badge(s: &App) {
 pub fn refresh(s: &mut App) {
     let bar = MenuBar::build(&s.ov.d, &s.ov.needs);
     let link = Link::of(&s.status);
+    if let Some(tray) = &s.bar.tray
+        && link.warns() != s.bar.warning
+        && show_link(tray, link)
+    {
+        s.bar.warning = link.warns();
+    }
     if s.bar.shown.as_ref().is_some_and(|(b, l)| *b == bar && *l == link) {
         return;
     }
     if let Some(tray) = &s.bar.tray {
         tray.set_menu(tray_items(&bar, link));
-        let was = s.bar.shown.as_ref().is_some_and(|(_, l)| l.warns());
-        if link.warns() != was {
-            show_link(tray, link);
-        }
     }
     if let Some(app) = &s.bar.app {
         let _ = app.set_menu(dock_items(&bar));
@@ -86,11 +89,17 @@ pub fn refresh(s: &mut App) {
     s.bar.shown = Some((bar, link));
 }
 
-fn show_link(tray: &Tray, link: Link) {
+fn show_link(tray: &Tray, link: Link) -> bool {
     let (art, tip) = if link.warns() { (WARNING, link.label()) } else { (ICON, "Agenthail") };
     match icon(art).and_then(|i| tray.set_icon(i).map_err(|e| e.to_string())) {
-        Ok(()) => tray.set_tooltip(tip),
-        Err(error) => eprintln!("agenthail: menu bar icon not changed: {error}"),
+        Ok(()) => {
+            tray.set_tooltip(tip);
+            true
+        }
+        Err(error) => {
+            eprintln!("agenthail: menu bar icon not changed: {error}");
+            false
+        }
     }
 }
 
