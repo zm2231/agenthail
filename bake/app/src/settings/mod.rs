@@ -57,7 +57,7 @@ pub struct Prefs {
     rest_pending: bool,
     external: bool,
     seen: u64,
-    reset_reread: bool,
+    rewatch: bool,
     pub tab: usize,
     pub base: Option<Result<Base, Failure>>,
     pub settings: Option<Result<Settings, Failure>>,
@@ -118,7 +118,7 @@ pub fn open() {
     WINDOW.with(|w| {
         if let Some((handle, window)) = w.get() {
             handle.update(|s: &mut Prefs, _| {
-                s.reset_reread = false;
+                s.rewatch = true;
                 reload(s);
             });
             window.open();
@@ -150,7 +150,7 @@ fn init() -> Prefs {
         watcher: Arc::new(AtomicU64::new(0)),
         rest_pending: false,
         seen: 0,
-        reset_reread: false,
+        rewatch: false,
         external: false,
         tab: 0,
         base: None,
@@ -246,7 +246,9 @@ fn read_rest(s: &mut Prefs) {
     if !std::mem::take(&mut s.rest_pending) {
         return;
     }
-    if let Some(Ok(b)) = &s.base {
+    if let Some(Ok(b)) = &s.base
+        && std::mem::take(&mut s.rewatch)
+    {
         watch(s, b.event_cursor.max(s.seen));
     }
     for what in &ALL[1..] {
@@ -365,13 +367,10 @@ fn watch(s: &Prefs, from: u64) {
 }
 
 fn changed_elsewhere(s: &mut Prefs, id: u64, reset: bool) {
-    if reset {
-        if std::mem::replace(&mut s.reset_reread, true) {
+    if !reset {
+        if id <= s.seen {
             return;
         }
-    } else if id <= s.seen {
-        return;
-    } else {
         s.seen = id;
     }
     if busy(s) {
@@ -471,6 +470,7 @@ pub fn notify(s: &mut Prefs, what: Notify) {
 fn poll(s: &mut Prefs, _: f64, tx: &mut Tx) -> bool {
     let mut changed = false;
     if !s.loaded && (visible() || std::env::args().any(|a| a == "--window")) {
+        s.rewatch = true;
         reload(s);
         changed = true;
     }
