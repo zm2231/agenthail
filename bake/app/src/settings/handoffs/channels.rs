@@ -4,7 +4,7 @@ use rune_kit::{Button, ButtonVariant, ControlSize, TextArea};
 
 use super::super::parts::{self, line};
 use super::super::{Prefs, Section, busy, saving};
-use super::{Who, change, field, matches, note, remove, small, status};
+use super::{Who, change, field, forget, matches, note, refused, remove, small, status};
 use crate::theme;
 
 fn create(s: &mut Prefs) {
@@ -63,7 +63,7 @@ fn picked(s: &Prefs, c: &Channel, off: bool) -> Vec<El> {
     let k = theme::kit();
     let mut rows = members(s, c, off);
     let add = small("Add", "channel-add", off || session_ref(&f.member.text).is_none(), add_member);
-    let input = field("channel-member", &f.member, "Add a session", "Find a session or @alias", off, Some(Who::Member), |s| &mut s.handoffs.member, add_member);
+    let input = field("channel-member", Section::Channels, &f.member, "Add a session", "Find a session or @alias", off, Some(Who::Member), |s| &mut s.handoffs.member, add_member);
     rows.push(line("Add a session", None, row().gap(8.0).items_center().child(input).child(add)));
     rows.extend(matches(s, Who::Member, off));
     let message = TextArea::new(&f.message)
@@ -98,7 +98,10 @@ fn pick(s: &mut Prefs, value: String) {
         s.handoffs.picked = value;
         s.handoffs.member = TextEdit::new("");
         s.handoffs.message = TextEdit::new("");
-        s.handoffs.found = None;
+        if !s.notes.get(&Section::Channels).is_some_and(refused) {
+            s.notes.remove(&Section::Channels);
+        }
+        forget(s);
         note(s, Section::Channels, None);
     }
 }
@@ -110,7 +113,7 @@ pub fn section(s: &Prefs, h: &Handoffs, off: bool, layer: &mut Vec<El>) -> El {
         rows.push(parts::words("No shared channels yet."));
     }
     let create_button = small("Create", "channel-create", off || handoffs::channel_name(&f.channel_name.text).is_err(), create);
-    let input = field("channel-name", &f.channel_name, "New channel", "launch-review", off, None, |s| &mut s.handoffs.channel_name, create);
+    let input = field("channel-name", Section::Channels, &f.channel_name, "New channel", "launch-review", off, None, |s| &mut s.handoffs.channel_name, create);
     rows.push(line("New channel", None, row().gap(8.0).items_center().child(input).child(create_button)));
     if !h.channels.is_empty() {
         let choices = h.channels.iter().map(|c| (format!("#{}", c.name), c.name.clone())).collect();

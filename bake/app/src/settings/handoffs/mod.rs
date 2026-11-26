@@ -1,6 +1,7 @@
 mod channels;
 mod relays;
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -38,7 +39,7 @@ pub struct Form {
     pub picked: String,
     pub member: TextEdit,
     pub message: TextEdit,
-    pub problem: Option<(Section, &'static str)>,
+    pub problems: HashMap<Section, &'static str>,
     pub sent: Arc<Mutex<Option<String>>>,
     pub found: Option<(Who, Vec<Pick>)>,
     searching: Arc<AtomicU64>,
@@ -57,7 +58,7 @@ impl Default for Form {
             picked: String::new(),
             member: TextEdit::new(""),
             message: TextEdit::new(""),
-            problem: None,
+            problems: HashMap::new(),
             sent: Arc::new(Mutex::new(None)),
             found: None,
             searching: Arc::new(AtomicU64::new(0)),
@@ -118,7 +119,10 @@ pub fn writable(s: &Prefs) -> bool {
 }
 
 fn note(s: &mut Prefs, section: Section, problem: Option<&'static str>) {
-    s.handoffs.problem = problem.map(|p| (section, p));
+    match problem {
+        Some(p) => s.handoffs.problems.insert(section, p),
+        None => s.handoffs.problems.remove(&section),
+    };
     if section == Section::Channels {
         *s.handoffs.sent.lock().unwrap() = None;
     }
@@ -129,7 +133,7 @@ fn change(s: &mut Prefs, section: Section, key: String, job: impl FnOnce(&Client
         return;
     }
     note(s, section, None);
-    s.handoffs.found = None;
+    forget(s);
     write(s, key, section, REREAD, job);
 }
 
@@ -165,9 +169,13 @@ fn search(s: &mut Prefs, who: Who) {
     });
 }
 
-fn choose(s: &mut Prefs, who: Who, target: &str) {
+pub fn forget(s: &mut Prefs) {
     s.handoffs.searching.fetch_add(1, Ordering::AcqRel);
     s.handoffs.found = None;
+}
+
+fn choose(s: &mut Prefs, who: Who, target: &str) {
+    forget(s);
     *text_of(s, who) = TextEdit::new(target);
 }
 
@@ -190,7 +198,7 @@ pub fn matches(s: &Prefs, who: Who, off: bool) -> Option<El> {
     Some(list)
 }
 
-pub fn field(key: &str, edit: &TextEdit, label: &str, hint: &str, off: bool, who: Option<Who>, pick: for<'a> fn(&'a mut Prefs) -> &'a mut TextEdit, submit: fn(&mut Prefs)) -> El {
+pub fn field(key: &str, section: Section, edit: &TextEdit, label: &str, hint: &str, off: bool, who: Option<Who>, pick: for<'a> fn(&'a mut Prefs) -> &'a mut TextEdit, submit: fn(&mut Prefs)) -> El {
     TextInput::new(edit)
         .label(label.to_string())
         .placeholder(hint.to_string())
@@ -198,7 +206,7 @@ pub fn field(key: &str, edit: &TextEdit, label: &str, hint: &str, off: bool, who
         .disabled(off)
         .on_edit(pick)
         .on_change(move |s: &mut Prefs, _: &mut Tx| {
-            s.handoffs.problem = None;
+            s.handoffs.problems.remove(&section);
             if let Some(who) = who {
                 search(s, who);
             }
@@ -218,8 +226,8 @@ pub fn remove(key: &str, off: bool, press: impl Fn(&mut Prefs) + 'static) -> El 
 
 pub fn status(s: &Prefs, section: Section) -> Option<El> {
     let note = s.notes.get(&section).filter(|f| !(refused(f) && !writable(s)));
-    let shown = match (s.handoffs.problem, note) {
-        (Some((at, p)), _) if at == section => text(p.to_string()).font(META).color(failed()).wrap().px(4.0),
+    let shown = match (s.handoffs.problems.get(&section), note) {
+        (Some(p), _) => text(p.to_string()).font(META).color(failed()).wrap().px(4.0),
         (_, Some(f)) => parts::failure(s, f),
         _ if section == Section::Channels => text(s.handoffs.sent.lock().unwrap().clone()?).font(META).color(muted()).wrap().px(4.0),
         _ => return None,
