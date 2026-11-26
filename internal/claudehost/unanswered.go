@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/poll"
+	"github.com/zm2231/agenthail/internal/procstart"
 )
 
 // Any hello answered within this window resets it, so a slow host is kept.
@@ -32,26 +33,37 @@ func unanswered(err error) bool {
 
 // SIGHUP retires the host as an update would; its sessions keep running.
 func (m *Manager) replaceUnanswered(ctx context.Context) (int, error) {
-	pid, err := m.currentHostPID(ctx)
+	host, err := m.currentHost(ctx)
 	if err != nil {
 		return 0, err
 	}
-	if err := syscall.Kill(pid, syscall.SIGHUP); err != nil {
-		if errors.Is(err, syscall.ESRCH) {
-			return pid, nil
-		}
-		return pid, fmt.Errorf("ask the Claude host (pid %d) to retire: %w", pid, err)
+	if !m.signalHost(ctx, host, syscall.SIGHUP) {
+		return host.pid, nil
 	}
-	if m.awaitRelease(ctx, pid, retireWait) {
-		return pid, nil
+	if m.awaitRelease(ctx, host.pid, retireWait) {
+		return host.pid, nil
 	}
-	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-		return pid, fmt.Errorf("stop the Claude host (pid %d): %w", pid, err)
+	if !m.signalHost(ctx, host, syscall.SIGKILL) {
+		return host.pid, nil
 	}
-	if m.awaitRelease(ctx, pid, killWait) {
-		return pid, nil
+	if m.awaitRelease(ctx, host.pid, killWait) {
+		return host.pid, nil
 	}
-	return pid, fmt.Errorf("the Claude host (pid %d) neither retired nor exited", pid)
+	return host.pid, fmt.Errorf("the Claude host (pid %d) neither retired nor exited", host.pid)
+}
+
+type hostProcess struct {
+	pid     int
+	started string
+}
+
+// A pid reused since the host was found has another start time and is left alone.
+func (m *Manager) signalHost(ctx context.Context, host hostProcess, signal syscall.Signal) bool {
+	again, err := m.currentHost(ctx)
+	if err != nil || again != host {
+		return false
+	}
+	return syscall.Kill(host.pid, signal) == nil
 }
 
 func (m *Manager) awaitRelease(ctx context.Context, pid int, wait time.Duration) bool {
@@ -70,24 +82,29 @@ func (m *Manager) awaitRelease(ctx context.Context, pid int, wait time.Duration)
 	}) == nil
 }
 
-func (m *Manager) currentHostPID(ctx context.Context) (int, error) {
+// A host writes state.json only once it listens, so a host still starting is never named.
+func (m *Manager) currentHost(ctx context.Context) (hostProcess, error) {
 	data, err := os.ReadFile(filepath.Join(m.stateDir(), "state.json"))
 	if err != nil {
-		return 0, fmt.Errorf("%w, and its pid is unknown: %v", errUnanswered, err)
+		return hostProcess{}, fmt.Errorf("%w, and its pid is unknown: %v", errUnanswered, err)
 	}
 	var state struct {
 		PID int `json:"pid"`
 	}
 	if err := json.Unmarshal(data, &state); err != nil || state.PID <= 0 {
-		return 0, fmt.Errorf("%w, and state.json names no pid", errUnanswered)
+		return hostProcess{}, fmt.Errorf("%w, and state.json names no pid", errUnanswered)
 	}
 	socket := SocketPath(m.Home)
 	if _, err := os.Lstat(strings.TrimSuffix(socket, ".sock") + "." + strconv.Itoa(state.PID) + ".sock"); err == nil {
-		return 0, fmt.Errorf("%w, and pid %d in state.json has retired", errUnanswered, state.PID)
+		return hostProcess{}, fmt.Errorf("%w, and pid %d in state.json has retired", errUnanswered, state.PID)
+	}
+	started, err := procstart.Lstart(ctx, state.PID)
+	if err != nil || started == "" {
+		return hostProcess{}, fmt.Errorf("%w, and pid %d in state.json no longer runs", errUnanswered, state.PID)
 	}
 	out, err := exec.CommandContext(ctx, "ps", "-ww", "-o", "args=", "-p", strconv.Itoa(state.PID)).Output()
 	if err != nil || !strings.Contains(string(out), "--socket "+socket+" ") {
-		return 0, fmt.Errorf("%w, and pid %d in state.json is not a Claude host of %s", errUnanswered, state.PID, socket)
+		return hostProcess{}, fmt.Errorf("%w, and pid %d in state.json is not a Claude host of %s", errUnanswered, state.PID, socket)
 	}
-	return state.PID, nil
+	return hostProcess{pid: state.PID, started: started}, nil
 }

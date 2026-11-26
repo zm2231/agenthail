@@ -2,6 +2,7 @@ package claudehost_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"syscall"
@@ -143,5 +144,64 @@ func TestEnsureKeepsASlowHostThatStillAnswers(t *testing.T) {
 	}
 	if retiring := claudehost.NewClient(f.Home).Retiring(); len(retiring) != 0 {
 		t.Fatalf("retiring hosts = %v, want the slow host kept", retiring)
+	}
+}
+
+func TestASecondDaemonWaitsForAHostStillStarting(t *testing.T) {
+	t.Cleanup(claudehost.SetUnansweredWaits(time.Second, time.Second))
+	f := claudehosttest.New(t, "")
+	ctx := testContext(t)
+	script := filepath.Join(t.TempDir(), "slow-start.cjs")
+	if err := os.WriteFile(script, []byte("if (process.argv.includes('--socket')) { const end = Date.now() + 3000; while (Date.now() < end) {} }\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	owner := claudehosttest.OwnerEnv()
+	pids := make(chan int, 2)
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			client, err := f.Manager(t, "test", owner[1]+" --require="+script).Ensure(ctx)
+			if err == nil {
+				var hello claudehost.Hello
+				hello, err = client.Hello(ctx)
+				pids <- hello.PID
+			}
+			errs <- err
+		}()
+	}
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("Ensure while the host starts = %v, want it to wait for the host", err)
+		}
+	}
+	if first, second := <-pids, <-pids; first != second {
+		t.Fatalf("hosts = %d and %d, want one", first, second)
+	}
+	if retiring := claudehost.NewClient(f.Home).Retiring(); len(retiring) != 0 {
+		t.Fatalf("retiring hosts = %v, want none", retiring)
+	}
+}
+
+func TestReplacementLeavesAReusedPIDAlone(t *testing.T) {
+	f := claudehosttest.New(t, "")
+	socket := claudehost.SocketPath(f.Home)
+	other := exec.Command("sh", "-c", "sleep 30; :", "sh", "--socket", socket, "--state")
+	if err := other.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Process.Kill(); _ = other.Wait() })
+	dir := filepath.Join(f.Home, ".agenthail", "claude-host")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{"pid":`+strconv.Itoa(other.Process.Pid)+`}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	manager := f.Manager(t, "test")
+	if claudehost.SignalHost(manager, other.Process.Pid, "Thu Jan  1 00:00:00 1970", syscall.SIGKILL) {
+		t.Fatal("a pid with another start time was signalled")
+	}
+	if !claudehosttest.Alive(other.Process.Pid) {
+		t.Fatal("the process now holding the pid was killed")
 	}
 }

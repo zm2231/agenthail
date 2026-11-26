@@ -137,6 +137,12 @@ func (m *Manager) ensure(ctx context.Context, launch Launch) (Client, error) {
 		}
 		lockHeld = true
 		lockTaken()
+		if silentSince.IsZero() || time.Since(silentSince) < unansweredAfter {
+			return silent()
+		}
+		if _, err := m.currentHost(ctx); err != nil {
+			return false, nil
+		}
 		return silent()
 	})
 	if lockHeld && errors.Is(err, context.DeadlineExceeded) {

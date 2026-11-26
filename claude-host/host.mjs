@@ -537,13 +537,13 @@ const methods = {
     s.end();
     if (!(await by(deadline, s.done.then(() => true)))) {
       log(`Claude ${s.pid} for session ${s.id} did not exit ${CLOSE_GRACE_MS} ms after close; killing it`);
-      await killSession(s);
+      killSession(s);
       if (!(await by(Date.now() + KILL_WAIT_MS, s.done.then(() => true)))) {
         throw new HostError('stuck', `Claude ${s.pid} for session ${s.id} did not exit after it was killed`);
       }
     }
     // done also settles when Claude ends its output but its process lingers.
-    await killSession(s);
+    killSession(s);
     return {};
   },
   // release lets the host close a session it keeps for the daemon, retiring
@@ -1166,6 +1166,7 @@ function spawnDetached(s, options, exited) {
   });
   if (!child.pid) return child;
   s.pid = child.pid;
+  s.child = child;
   s.started = processStart(s.pid);
   if (!s.started) {
     child.kill('SIGKILL');
@@ -1481,11 +1482,11 @@ function processStartLater(pid) {
 }
 
 // killSession kills a session's Claude process and the processes it started
-// in its group, such as background shells, if Claude still runs; its start
-// time tells it from a later process given the same pid. Claude is spawned
-// detached, so it leads its own process group.
-async function killSession(s) {
-  if (!(await runsNow({ pid: s.pid, started: s.started }))) return;
+// in its group, such as background shells, if Claude still runs. Until Node
+// reaps the child and records its exit, its pid and process group cannot be
+// reused. Claude is spawned detached, so it leads its own process group.
+function killSession(s) {
+  if (!s.child || s.child.exitCode !== null || s.child.signalCode !== null) return;
   try {
     process.kill(-s.pid, 'SIGKILL');
   } catch {
