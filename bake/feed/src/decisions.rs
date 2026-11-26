@@ -98,13 +98,13 @@ impl Decision {
 
     pub fn hold_key(&self) -> String {
         match self.requests.first() {
-            Some(r) => format!("{}|{}", self.session_id, r.id),
+            Some(r) => request_hold(&self.session_id, &r.id),
             None => self.id(),
         }
     }
 
     pub fn holds(&self, key: &str) -> bool {
-        self.id() == key || self.requests.iter().any(|r| format!("{}|{}", self.session_id, r.id) == key)
+        self.id() == key || self.requests.iter().any(|r| request_hold(&self.session_id, &r.id) == key)
     }
 
     pub fn is_parked(&self) -> bool {
@@ -165,6 +165,10 @@ impl Decision {
             _ => "Not now".into(),
         }
     }
+}
+
+pub fn request_hold(session: &str, request: &str) -> String {
+    format!("{session}|{request}")
 }
 
 pub fn gone(error: &RespondError) -> bool {

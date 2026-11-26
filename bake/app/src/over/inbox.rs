@@ -4,7 +4,8 @@ use std::time::{Duration, Instant};
 
 use feed::brief::Brief;
 use feed::catalog::{Client, RespondError, request_key};
-use feed::decisions::{Decision, Handled, Inbox, gone, remember};
+use feed::action::Dismiss;
+use feed::decisions::{Decision, Handled, Inbox, gone, remember, request_hold};
 use feed::version::{Build, notice};
 
 const EVERY: Duration = Duration::from_secs(10);
@@ -12,7 +13,7 @@ const VERSION_EVERY: u32 = 6;
 
 enum Done {
     Inbox(Instant, Result<Inbox, String>),
-    Acted(String, String, Handled, Result<(), RespondError>),
+    Acted(String, Handled, Result<(), (RespondError, String)>),
     Brief(String, Result<Brief, RespondError>),
     Version(Option<String>),
 }
@@ -113,7 +114,7 @@ pub fn drain(s: &mut crate::App) -> bool {
                     Err(e) => st.error = Some(format!("Couldn't read decisions: {e}")),
                 }
             }
-            Done::Acted(id, hold, entry, result) => {
+            Done::Acted(id, entry, result) => {
                 st.acting.remove(&id);
                 st.newest = Some(Instant::now());
                 match result {
@@ -124,11 +125,11 @@ pub fn drain(s: &mut crate::App) -> bool {
                         }
                         remember(&mut st.history, entry);
                     }
-                    Err(e) if e.maybe_delivered => {
+                    Err((e, hold)) if e.maybe_delivered => {
                         st.notes.insert(id.clone(), format!("Sent, not confirmed: {}", e.message));
                         st.unconfirmed.insert(hold);
                     }
-                    Err(e) => {
+                    Err((e, _)) => {
                         st.notes.insert(id, format!("Not sent: {}", e.message));
                     }
                 }
@@ -164,7 +165,7 @@ fn title_of(s: &crate::App, d: &Decision) -> String {
     s.ov.d.session(&d.session_id).map(|x| s.ov.d.title(x)).unwrap_or_else(|| if d.work_title.is_empty() { feed::derive::text::short_id(&d.session_id) } else { d.work_title.clone() })
 }
 
-fn act(s: &mut crate::App, d: &Decision, outcome: &str, run: impl FnOnce(&Client, &Decision) -> Result<(), RespondError> + Send + 'static) {
+fn act(s: &mut crate::App, d: &Decision, outcome: &str, run: impl FnOnce(&Client, &Decision) -> Result<(), (RespondError, String)> + Send + 'static) {
     let id = d.id();
     if s.ov.inbox.acting.contains(&id) {
         return;
@@ -177,10 +178,10 @@ fn act(s: &mut crate::App, d: &Decision, outcome: &str, run: impl FnOnce(&Client
     let entry = Handled { title: title_of(s, d), session: d.session_id.clone(), outcome: outcome.into(), at };
     s.ov.inbox.acting.insert(id.clone());
     s.ov.inbox.notes.remove(&id);
-    let (tx, d, hold) = (s.ov.inbox.tx.clone(), d.clone(), d.hold_key());
+    let (tx, d) = (s.ov.inbox.tx.clone(), d.clone());
     std::thread::spawn(move || {
         let result = run(&client, &d);
-        let _ = tx.send(Done::Acted(id, hold, entry, result));
+        let _ = tx.send(Done::Acted(id, entry, result));
     });
 }
 
@@ -190,7 +191,7 @@ pub fn accept(s: &mut crate::App, d: &Decision) {
     }
     act(s, d, "Accepted the recommended answer", |client, d| {
         let (request, choices) = d.recommended().expect("checked above");
-        client.respond(&d.session_id, &request, choices, Default::default())
+        client.respond(&d.session_id, &request, choices, Default::default()).map_err(|e| (e, d.hold_key()))
     });
 }
 
@@ -211,10 +212,14 @@ pub fn accept_first(s: &mut crate::App) -> bool {
 pub fn not_now(s: &mut crate::App, d: &Decision) {
     act(s, d, "Not now", |client, d| {
         for target in d.dismissals() {
+            let hold = match &target {
+                Dismiss::Request { session, request } => request_hold(session, request),
+                _ => d.id(),
+            };
             match client.dismiss_decision(target) {
                 Ok(()) => {}
                 Err(e) if gone(&e) => {}
-                Err(e) => return Err(e),
+                Err(e) => return Err((e, hold)),
             }
         }
         Ok(())
