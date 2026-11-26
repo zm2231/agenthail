@@ -19,6 +19,8 @@ pub struct Meter {
     #[serde(default)]
     pub resets_at: Option<String>,
     #[serde(default)]
+    pub severity: String,
+    #[serde(default)]
     pub aged: bool,
     #[serde(default)]
     pub as_of: Option<String>,
@@ -257,6 +259,12 @@ impl Plan {
     }
 }
 
+impl Meter {
+    pub fn critical(&self) -> bool {
+        self.severity == "critical" || self.percent >= 90.0
+    }
+}
+
 pub fn failure(error: &RespondError) -> String {
     let done: Vec<&str> = error.reply["done"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
     if !done.is_empty() {
@@ -345,6 +353,14 @@ mod tests {
         ]);
         assert!(still_reading(&sets));
         assert!(!still_reading(&sets[1..]));
+    }
+
+    #[test]
+    fn a_meter_at_its_ceiling_is_critical_whatever_its_percent() {
+        let at_ceiling: Meter = serde_json::from_value(json!({"label": "Session", "percent": 50, "severity": "critical"})).unwrap();
+        let busy: Meter = serde_json::from_value(json!({"label": "Session", "percent": 92})).unwrap();
+        let calm: Meter = serde_json::from_value(json!({"label": "Session", "percent": 50, "severity": "warning"})).unwrap();
+        assert_eq!([at_ceiling.critical(), busy.critical(), calm.critical()], [true, true, false]);
     }
 
     #[test]

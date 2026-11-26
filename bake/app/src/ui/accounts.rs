@@ -202,7 +202,7 @@ pub fn drain(s: &mut App) -> bool {
 fn meter_row(s: &App, m: &Meter) -> El {
     let k = theme::kit();
     let pct = m.percent;
-    let color = if pct >= 90.0 { failed() } else if pct >= 60.0 { attention() } else { theme::text() };
+    let color = if m.critical() { failed() } else if pct >= 60.0 || m.severity == "warning" { attention() } else { theme::text() };
     let read = m.as_of.as_deref().and_then(feed::catalog::parse_time).map(|at| ((s.now - at).whole_seconds() / 60).max(1));
     let resets = match (m.aged, read) {
         (true, Some(minutes)) => format!("read {} ago", span(minutes)),
