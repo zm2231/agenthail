@@ -152,4 +152,9 @@ const decisionKey = vm.runInContext("decisionKey", context);
 assert.deepEqual(withParked.decisions.map(decisionKey), ["parked:repo:github.com/acme/widget:widget-W12", "request:worker"], "a parked item is a row of its own beside its session's request");
 const fromPeer = plain(vm.runInContext("mergeDecisions", context)([{ host: { id: "mini", name: "mini" }, page: { decisions: [{ key: "turn:worker:t9", group: "waiting", sessionId: "worker", kind: "turn", reason: "Upload the March export", answerable: false }], leadHandling: [] } }]));
 assert.equal(decisionKey(fromPeer.decisions[0]), "mini::turn:worker:t9", "a key from a paired host names that host, so two hosts' entries never collide");
+const older = plain(vm.runInContext("mergeDecisions", context)([
+  { host: { id: "", name: "laptop" }, page: { decisions: [parked], leadHandling: [] } },
+  { host: { id: "old", name: "old" }, page: { decisions: [{ group: "waiting", sessionId: "w", kind: "request", reason: "r", answerable: true }, { group: "waiting", sessionId: "w", kind: "parked", workItem: "widget-W3", reason: "p", answerable: false }], leadHandling: [] } },
+]));
+assert.deepEqual(older.decisions.map(decisionKey), ["old::w", "old::w#widget-W3", "parked:repo:github.com/acme/widget:widget-W12"], "a paired host on an older build, sending no keys, still lists each item once under its own key");
 console.log("dashboard decisions ok");

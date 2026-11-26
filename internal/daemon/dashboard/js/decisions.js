@@ -39,8 +39,9 @@ export function decisionHosts() {
   return [{ id: "", name: local?.name || "this computer", state: "connected" }, ...paired.map((host) => ({ id: host.id, name: host.name, state: host.state }))];
 }
 
+// A paired host on an older build sends no key; its items are keyed as it would key them.
 export function decisionKey(item) {
-  return item.key;
+  return item.key ?? (item.workItem ? `${item.sessionId}#${item.workItem}` : item.sessionId);
 }
 
 export function qualify(hostId, id) {
