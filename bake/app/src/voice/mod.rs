@@ -21,6 +21,7 @@ thread_local! {
     static WINDOW: RefCell<Option<WindowHandle>> = const { RefCell::new(None) };
     static ROUTE: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
     static OPENED: RefCell<Option<String>> = const { RefCell::new(None) };
+    static UNSAVED: RefCell<Option<Trail>> = const { RefCell::new(None) };
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -67,7 +68,8 @@ impl Win {
             None => Err("Voice needs the Agenthail daemon. Start it, then open this window again.".into()),
         };
         let mut call = Call::new(target);
-        let loaded = load_trail();
+        let unsaved = UNSAVED.with(|u| u.borrow_mut().take());
+        let loaded = unsaved.or_else(load_trail);
         let keep_log = loaded.is_some();
         call.trail = loaded.unwrap_or_default();
         if let Err(error) = &peer {
@@ -156,6 +158,7 @@ impl Win {
     #[cfg(target_os = "macos")]
     fn fresh_page(&mut self) {
         let (Some(web), Ok(peer)) = (&self.web, &self.peer) else { return };
+        self.loads += 1;
         web.eval("window.agenthailCall = \"\"; window.agenthailVoice && window.agenthailVoice.end()");
         web.reload(peer);
         let mut effects = self.call.peer("loading", "", self.clock);
@@ -280,8 +283,9 @@ fn closed(w: &mut Win, _: &mut Tx) {
     w.gone.store(true, Ordering::SeqCst);
     let effects = w.call.close();
     w.run(effects);
-    if w.call.trail.changed && w.keep_log {
-        save_trail(&w.call.trail);
+    if w.call.trail.changed && w.keep_log && !save_trail(&w.call.trail) {
+        let trail = std::mem::take(&mut w.call.trail);
+        UNSAVED.with(|u| *u.borrow_mut() = Some(trail));
     }
     #[cfg(target_os = "macos")]
     {

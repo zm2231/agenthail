@@ -567,6 +567,20 @@ fn a_call_the_host_moved_by_voice_offers_the_route_in_the_field() {
     assert_eq!(back.action.as_ref().unwrap().target_id.as_deref(), Some(""));
 }
 
+#[test]
+fn only_the_readiness_check_makes_a_reloaded_page_ready() {
+    let mut call = ready();
+    connected(&mut call);
+    call.hangup();
+    call.peer("loading", "", 1.0);
+    call.setup(Setup::Page);
+    assert!(call.heard("", "ready", "", 1.0).is_empty());
+    assert!(!call.ready, "a ready message the page sent itself doesn't count");
+    call.setup(Setup::Check);
+    call.checked(true, 2.0);
+    assert!(call.ready);
+}
+
 fn dialed_routed(call: &mut Call) -> String {
     let select = only_job(&call.call());
     let prepare = only_job(&call.reply(select, Ok(state(json!({"phase": "ready"}))), 0.0));

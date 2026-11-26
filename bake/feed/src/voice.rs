@@ -649,7 +649,7 @@ impl Call {
 
     pub fn heard(&mut self, call: &str, kind: &str, value: &str, now: f64) -> Vec<Effect> {
         let of_a_call = matches!(kind, "offer" | "connection" | "channel" | "error");
-        if of_a_call && self.attempt.as_deref() != Some(call) {
+        if kind == "ready" || of_a_call && self.attempt.as_deref() != Some(call) {
             return Vec::new();
         }
         self.peer(kind, value, now)
