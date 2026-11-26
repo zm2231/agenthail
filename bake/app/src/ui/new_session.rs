@@ -43,6 +43,8 @@ enum Choice {
     Effort,
     Account,
     Permission,
+    Mode,
+    Tier,
 }
 
 pub struct Sheet {
@@ -53,6 +55,8 @@ pub struct Sheet {
     branch: TextEdit,
     base: TextEdit,
     alias: TextEdit,
+    agent: TextEdit,
+    schema: TextEdit,
     message: TextEdit,
     options: Option<SessionOptions>,
     models: HashMap<String, Vec<ModelOption>>,
@@ -81,6 +85,8 @@ impl Sheet {
             branch: TextEdit::new(""),
             base: TextEdit::new(""),
             alias: TextEdit::new(""),
+            agent: TextEdit::new(""),
+            schema: TextEdit::new(""),
             message,
             options: None,
             models: HashMap::new(),
@@ -104,6 +110,8 @@ impl Sheet {
             branch: self.branch.text.clone(),
             base: self.base.text.clone(),
             alias: self.alias.text.clone(),
+            agent: self.agent.text.clone(),
+            output_schema: self.schema.text.clone(),
             message: self.message.text.clone(),
             ..self.launch.clone()
         }
@@ -474,6 +482,8 @@ fn choose(s: &mut App, which: Choice, value: String) {
         Choice::Surface => {
             if value != sheet.launch.surface {
                 sheet.launch = Launch { host: sheet.launch.host.clone(), surface: value, ..Default::default() };
+                sheet.agent = TextEdit::new("");
+                sheet.schema = TextEdit::new("");
                 load_models(s);
             }
         }
@@ -501,6 +511,8 @@ fn choose(s: &mut App, which: Choice, value: String) {
         Choice::Effort => sheet.launch.effort = value,
         Choice::Account => sheet.launch.config_root = value,
         Choice::Permission => sheet.launch.permission = value,
+        Choice::Mode => sheet.launch.mode = value,
+        Choice::Tier => sheet.launch.service_tier = value,
     }
 }
 
@@ -536,7 +548,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             true
         }
         Key::Text(_) | Key::Enter | Key::Up | Key::Down => true,
-        _ => ev.mods.cmd,
+        _ => ev.mods.cmd || ev.mods.ctrl,
     }
 }
 
@@ -636,6 +648,17 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
             let choices: Vec<(String, String)> = std::iter::once((default.to_string(), String::new())).chain(modes.iter().map(|(value, label)| (label.to_string(), value.to_string()))).collect();
             tune = tune.child(field(name, select("new-session-permission", Choice::Permission, &choices, &sheet.launch.permission, sheet.open, &mut popups)));
         }
+        if request.takes_codex_options() {
+            let with_default = |default: &str, pairs: &[(&str, &str)]| -> Vec<(String, String)> {
+                std::iter::once((default.to_string(), String::new())).chain(pairs.iter().map(|(value, label)| (label.to_string(), value.to_string()))).collect()
+            };
+            tune = tune
+                .child(field("Mode", select("new-session-mode", Choice::Mode, &with_default("Session default", &create::CODEX_MODES), &sheet.launch.mode, sheet.open, &mut popups)))
+                .child(field("Service tier", select("new-session-tier", Choice::Tier, &with_default("Runtime default", &create::CODEX_SERVICE_TIERS), &sheet.launch.service_tier, sheet.open, &mut popups)));
+        }
+        if sheet.launch.surface == create::CLAUDE && !request.in_terminal() {
+            tune = tune.child(field("Claude agent", line_input(&sheet.agent, "new-session-agent", "Optional", |x| &mut x.agent)));
+        }
         let launchers = sheet.launchers();
         if !launchers.is_empty() {
             let choices: Vec<(String, String)> = std::iter::once(("Default".to_string(), String::new()))
@@ -645,6 +668,24 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
             tune = tune.child(field("Runs in", select("new-session-launcher", Choice::Launcher, &choices, &current, sheet.open, &mut popups)));
         }
         body = body.child(tune);
+    }
+
+    if sheet.options.is_some() && request.takes_codex_options() {
+        let schema = text_input(&sheet.schema, BODY)
+            .key("new-session-schema")
+            .label("Output JSON schema")
+            .w_full()
+            .min_h(56.0)
+            .max_h(160.0)
+            .px(10.0)
+            .py(8.0)
+            .radius(6.0)
+            .fill(theme::wash())
+            .border(1.0, theme::line())
+            .color(theme::text())
+            .placeholder("Optional JSON object".to_string(), faint())
+            .on_edit(|s: &mut App| &mut sheet_mut(s).schema);
+        body = body.child(field("Output JSON schema", schema));
     }
 
     if sheet.options.is_some() && request.takes_worktree() {

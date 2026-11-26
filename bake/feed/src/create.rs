@@ -253,6 +253,12 @@ pub const CLAUDE_PERMISSION_MODES: [(&str, &str); 6] = [
     ("bypassPermissions", "Bypass permissions"),
 ];
 
+pub const CODEX_MODES: [(&str, &str); 2] = [("plan", "Plan"), ("default", "Default")];
+
+pub const CODEX_SERVICE_TIERS: [(&str, &str); 3] = [("default", "Default"), ("fast", "Fast"), ("flex", "Flex")];
+
+const OUTPUT_SCHEMA_LIMIT: usize = 64 << 10;
+
 pub const CODEX_APPROVALS: [(&str, &str); 3] = [("on-request", "Ask when needed"), ("untrusted", "Ask for untrusted work"), ("never", "Never ask")];
 
 pub fn permission_modes(surface: &str) -> &'static [(&'static str, &'static str)] {
@@ -273,6 +279,10 @@ pub struct Launch {
     pub effort: String,
     pub permission: String,
     pub config_root: String,
+    pub agent: String,
+    pub mode: String,
+    pub service_tier: String,
+    pub output_schema: String,
     pub launcher: Option<Launcher>,
     pub worktree: bool,
     pub branch: String,
@@ -295,6 +305,22 @@ impl Launch {
         self.uses_folder() && self.launcher.is_none()
     }
 
+    pub fn takes_codex_options(&self) -> bool {
+        self.surface == CODEX && !self.in_terminal()
+    }
+
+    fn schema(&self) -> std::result::Result<Option<Value>, &'static str> {
+        let text = self.output_schema.trim();
+        if !self.takes_codex_options() || text.is_empty() {
+            return Ok(None);
+        }
+        match serde_json::from_str::<Value>(text) {
+            Ok(schema @ Value::Object(_)) if schema.to_string().len() <= OUTPUT_SCHEMA_LIMIT => Ok(Some(schema)),
+            Ok(Value::Object(_)) => Err("The output schema must be at most 64 KiB."),
+            _ => Err("The output schema must be a JSON object."),
+        }
+    }
+
     pub fn alias_name(&self) -> &str {
         let name = self.alias.trim();
         name.strip_prefix('@').unwrap_or(name)
@@ -312,6 +338,8 @@ impl Launch {
             Some("A name is up to 80 characters, without spaces, / or #.")
         } else if self.launcher.as_ref().is_some_and(|l| !l.available) {
             Some("That terminal isn't available on this computer.")
+        } else if let Err(problem) = self.schema() {
+            Some(problem)
         } else {
             None
         }
@@ -345,8 +373,15 @@ impl Launch {
             if !self.in_terminal() {
                 put("effort", &self.effort);
                 match self.surface.as_str() {
-                    CLAUDE => put("permissionMode", &self.permission),
-                    CODEX => put("approvalPolicy", &self.permission),
+                    CLAUDE => {
+                        put("permissionMode", &self.permission);
+                        put("agent", &self.agent);
+                    }
+                    CODEX => {
+                        put("approvalPolicy", &self.permission);
+                        put("mode", &self.mode);
+                        put("serviceTier", &self.service_tier);
+                    }
                     _ => {}
                 }
             }
@@ -355,6 +390,9 @@ impl Launch {
                 put("worktree", &self.branch);
                 put("base", &self.base);
             }
+        }
+        if let Ok(Some(schema)) = self.schema() {
+            body.insert("outputSchema".into(), schema);
         }
         Value::Object(body)
     }
@@ -541,6 +579,37 @@ mod tests {
     fn codex_takes_its_approval_policy_and_no_account() {
         let launch = Launch { surface: CODEX.into(), permission: "never".into(), config_root: "/home/a/.claude".into(), effort: "xhigh".into(), ..claude() };
         assert_eq!(launch.payload(), json!({"surface": "codex", "message": "Fix the build", "cwd": "/work/app", "effort": "xhigh", "approvalPolicy": "never"}));
+    }
+
+    #[test]
+    fn codex_sends_its_launch_options_and_claude_its_agent() {
+        let codex = Launch {
+            surface: CODEX.into(),
+            mode: "plan".into(),
+            service_tier: "flex".into(),
+            output_schema: r#" {"type":"object","properties":{"ok":{"type":"boolean"}}} "#.into(),
+            agent: "reviewer".into(),
+            ..claude()
+        };
+        assert_eq!(
+            codex.payload(),
+            json!({"surface": "codex", "message": "Fix the build", "cwd": "/work/app", "mode": "plan", "serviceTier": "flex", "outputSchema": {"type": "object", "properties": {"ok": {"type": "boolean"}}}})
+        );
+        let claude = Launch { agent: "reviewer".into(), mode: "plan".into(), output_schema: "{}".into(), ..claude() };
+        assert_eq!(claude.payload(), json!({"surface": "claude", "message": "Fix the build", "cwd": "/work/app", "agent": "reviewer"}));
+        let terminal = Launch { launcher: Some(Launcher { agents: vec![CODEX.into()], ..launcher("tmux", false) }), ..codex };
+        assert!(terminal.payload().get("outputSchema").is_none() && terminal.payload().get("mode").is_none());
+    }
+
+    #[test]
+    fn an_output_schema_must_be_a_small_json_object() {
+        let codex = |schema: &str| Launch { surface: CODEX.into(), output_schema: schema.into(), ..claude() };
+        assert_eq!(codex("").problem(), None);
+        assert_eq!(codex("[1]").problem(), Some("The output schema must be a JSON object."));
+        assert_eq!(codex("{not json").problem(), Some("The output schema must be a JSON object."));
+        let huge = format!(r#"{{"description":"{}"}}"#, "x".repeat(70_000));
+        assert_eq!(codex(&huge).problem(), Some("The output schema must be at most 64 KiB."));
+        assert_eq!(Launch { surface: CLAUDE.into(), ..codex("[1]") }.problem(), None, "only Codex reads a schema");
     }
 
     #[test]
