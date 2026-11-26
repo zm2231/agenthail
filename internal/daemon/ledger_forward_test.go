@@ -3,12 +3,17 @@ package daemon
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zm2231/agenthail/internal/buildinfo"
+	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func release(version string) buildinfo.Identity {
@@ -208,3 +213,63 @@ func lastKind(item ledger.WorkItem) string {
 }
 
 func ptr[T any](value T) *T { return &value }
+
+func TestAReviewOnTheLedgersOwnerGoesToTheLeadOnAnotherHostUntilItsTurnBlocksOnThePerson(t *testing.T) {
+	mac, owner := ownedLedgerOnTwoHosts(t, release("v0.2.170"), release("v0.2.170"))
+	if _, err := owner.reg.ClearCoordinator("repo:github.com/example/widget", "fixture", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	mac.serve(t, nil)
+	owner.start(t, testRoots(mac.server))
+	macRecord := owner.pair(t, mac, "mac")
+	testkit.Eventually(t, "the owner mirrors the Mac", 10*time.Second, func() bool {
+		return len(sessionsOf(owner.snapshot(t), macRecord.ID)) == 2
+	})
+	mcpAs := func(sessionID string) *mcp.ClientSession {
+		caller, err := mac.reg.Session(sessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return mcpSession(t, mcpServer(t, mac.daemon), issueMCPToken(t, mac.daemon, *caller))
+	}
+	worker, lead := mcpAs("local-a"), mcpAs("lead")
+	work := func(request map[string]any) map[string]any {
+		t.Helper()
+		out, refused := callMCP(t, worker, "agenthail_ledger_write", map[string]any{"op": "work", "clientRequestId": fmt.Sprint(request), "request": request})
+		if refused {
+			t.Fatalf("%v: %v", request, out)
+		}
+		return out
+	}
+	item := work(map[string]any{"action": "add", "text": "pick the import window"})["item"].(map[string]any)["id"].(string)
+	work(map[string]any{"action": "claim", "itemId": item})
+	work(map[string]any{"action": "submit", "itemId": item})
+	if out, refused := callMCP(t, lead, "agenthail_ask", map[string]any{"title": "Which release window", "questions": []any{map[string]any{"question": "Ship tonight or Monday?", "options": []any{map[string]any{"label": "Tonight"}, map[string]any{"label": "Monday"}}}}}); refused {
+		t.Fatalf("the lead's ask: %v", out)
+	}
+	mac.daemon.discoverCatalog(t.Context())
+
+	macLead := hosts.Qualify(macRecord.ID, "lead")
+	var page decisionsPage
+	testkit.Eventually(t, "the owner sees the lead's open ask", 10*time.Second, func() bool {
+		rows, _, err := owner.daemon.decisionRows(t.Context())
+		return err == nil && slices.ContainsFunc(rows, func(row dashboardSession) bool {
+			return row.ID == macLead && row.Attention != nil && row.Attention.Kind == AttentionAsk
+		})
+	})
+	if page = freshDecisions(t, owner.daemon); len(reviewsOn(page)) != 0 || len(page.LeadHandling) != 1 || page.LeadHandling[0].WorkItem != item || page.LeadHandling[0].HeldBy != macLead {
+		t.Fatalf("with an open ask the lead on the Mac lost the review: %+v", page)
+	}
+
+	approval := &surface.Waiting{Kind: surface.WaitingApproval, ID: "lead-approval", Answerable: true, Since: time.Now()}
+	session := mac.fake.sessions["lead"]
+	session.Status, session.WaitingOn = surface.StatusBusy, approval
+	mac.fake.sessions["lead"] = session
+	mac.fake.observations["lead"] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "lead-1", WaitingOn: approval}
+	mac.daemon.discoverCatalog(t.Context())
+	testkit.Eventually(t, "the owner gives the review to the person once the lead's turn waits on them", 10*time.Second, func() bool {
+		page = freshDecisions(t, owner.daemon)
+		reviews := reviewsOn(page)
+		return len(reviews) == 1 && reviews[0].WorkItem == item && len(page.LeadHandling) == 0
+	})
+}

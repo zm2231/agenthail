@@ -82,7 +82,13 @@ type reviewEntry struct {
 }
 
 func (e reviewEntry) leadHolds(rows map[string]dashboardSession) bool {
-	return e.lead != "" && !e.passed && e.lead != e.item.SessionID && hearerHolds(rows, e.lead)
+	return e.lead != "" && !e.passed && e.lead != e.item.SessionID && leadReviews(rows, e.lead)
+}
+
+// A review does not need an answer now, so an open ask or a turn that ended waiting on the person leaves the lead free to take it; only a turn stopped on a tool approval or question it cannot pass does not.
+func leadReviews(rows map[string]dashboardSession, id string) bool {
+	lead, live := liveRow(rows, id)
+	return live && lead.WaitingOn == nil
 }
 
 type decisionRequests struct {
@@ -232,14 +238,16 @@ func asksForAnswer(row dashboardSession) bool {
 
 // A lead holds a prompt only while it can act and is not itself waiting on the person.
 func hearerHolds(rows map[string]dashboardSession, id string) bool {
-	hearer, known := rows[id]
-	if !known || hearer.Archived || hearer.Display == nil || hearer.Display.Kind == "unavailable" {
-		return false
-	}
-	if hearer.TurnState != nil && hearer.TurnState.State == turnWaitingPerson {
+	hearer, live := liveRow(rows, id)
+	if !live || hearer.TurnState != nil && hearer.TurnState.State == turnWaitingPerson {
 		return false
 	}
 	return hearer.Attention == nil || !asksForAnswer(hearer)
+}
+
+func liveRow(rows map[string]dashboardSession, id string) (dashboardSession, bool) {
+	row, known := rows[id]
+	return row, known && !row.Archived && row.Display != nil && row.Display.Kind != "unavailable"
 }
 
 func decisionSince(row dashboardSession) time.Time {

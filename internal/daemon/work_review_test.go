@@ -149,6 +149,29 @@ func TestAReviewMovesToThePersonWhenTheLeadIsGone(t *testing.T) {
 	}
 }
 
+func TestALeadWhoseTurnEndedWaitingOnThePersonStillHoldsAReview(t *testing.T) {
+	f := newMCPAnswerFixture(t)
+	pushes := newPushRecorder(t, f.r)
+	leadSession := f.asProjectLead(t, "lead")
+	_, id := f.submitWork(t, "Import the March export")
+	lead := f.surface.sessions["lead"]
+	for _, observation := range []*surface.TurnObservation{{Status: surface.StatusIdle}, {Status: surface.StatusBusy, ActiveTurnID: "lead-1"}} {
+		f.surface.observations["lead"] = observation
+		f.d.observeSession(t.Context(), f.surface, &lead)
+	}
+	if out, refused := callMCP(t, leadSession, "agenthail_end_turn", map[string]any{"headline": "Blocked", "waitingOn": "Sign in to the build service"}); refused {
+		t.Fatalf("the lead's end turn refused: %v", out)
+	}
+	f.surface.observations["lead"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "lead-1", Reply: &surface.ReplyResult{Text: "reply", Done: true}}
+	f.d.observeSession(t.Context(), f.surface, &lead)
+	f.d.background.wait()
+
+	page := f.sweepReviews(t)
+	if len(reviewsOn(page)) != 0 || !slices.ContainsFunc(page.LeadHandling, func(held leadHandledItem) bool { return held.WorkItem == id && held.HeldBy == "lead" }) || pushes.count(workReviewEvent) != 0 {
+		t.Fatalf("a lead waiting on the person for something else lost the review: %+v, %d pushes", page, pushes.count(workReviewEvent))
+	}
+}
+
 func TestThePersonSendsBackAndApprovesAReviewInTheirOwnWords(t *testing.T) {
 	f := newMCPAnswerFixture(t)
 	key, id := f.submitWork(t, "Import the March export")
