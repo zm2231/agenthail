@@ -115,7 +115,7 @@ impl ProxyGroup {
 
 pub fn proxies(sets: &[Set]) -> Vec<ProxyGroup> {
     let mut out: Vec<ProxyGroup> = Vec::new();
-    let mut ordered: Vec<&Set> = sets.iter().filter(|s| s.proxy.as_ref().is_some_and(|p| !p.id.is_empty())).collect();
+    let mut ordered: Vec<&Set> = sets.iter().filter(|s| s.provider == "proxy" && s.proxy.as_ref().is_some_and(|p| !p.id.is_empty())).collect();
     ordered.sort_by_key(|s| !s.local);
     for set in ordered {
         let proxy = set.proxy.clone().unwrap_or_default();
@@ -133,7 +133,13 @@ pub fn still_reading(sets: &[Set]) -> bool {
 }
 
 pub fn accounts(sets: &[Set]) -> Vec<&Set> {
-    sets.iter().filter(|s| s.proxy.is_none()).collect()
+    sets.iter().filter(|s| s.provider != "proxy").collect()
+}
+
+impl Set {
+    pub fn via(&self) -> Option<&str> {
+        self.proxy.as_ref().filter(|_| self.provider != "proxy").map(|p| p.name.as_str())
+    }
 }
 
 impl Set {
@@ -301,11 +307,11 @@ mod tests {
 
     fn sets() -> Vec<Set> {
         serde_json::from_value(json!([
-            {"host": "laptop", "local": false, "proxy": {"name": "shared", "id": "px"}, "accounts": [{"id": "far.json", "provider": "claude", "label": "far"}]},
+            {"host": "laptop", "local": false, "provider": "proxy", "proxy": {"name": "shared", "id": "px"}, "accounts": [{"id": "far.json", "provider": "claude", "label": "far"}]},
             {"host": "mac", "local": true, "provider": "claude", "login": "claude.ai", "account": "a@example.com", "name": "main", "meters": [{"kind": "session", "label": "Session", "percent": 40}]},
             {"host": "mac", "local": true, "provider": "claude", "login": "signed_out", "name": "spare", "meters": null, "problem": "Not signed in"},
             {"host": "mac", "local": true, "provider": "codex", "meters": null},
-            {"host": "mac", "local": true, "meters": null, "proxy": {"name": "shared", "id": "px"}, "accounts": [
+            {"host": "mac", "local": true, "provider": "proxy", "meters": null, "proxy": {"name": "shared", "id": "px"}, "accounts": [
                 {"id": "lead.json", "provider": "claude", "label": "lead", "preferred": true, "setOn": "mac"},
                 {"id": "spare.json", "provider": "claude", "label": "spare"},
                 {"id": "gpt.json", "provider": "codex", "label": "gpt", "meters": null}
@@ -335,6 +341,20 @@ mod tests {
         assert!(!set.runs(&session(json!({"id": "h2", "state": "connected"}), "/r/a")));
         let far: Set = serde_json::from_value(json!({"host": "forge", "hostId": "h2", "root": "/r/a"})).unwrap();
         assert!(far.runs(&session(json!({"id": "h2", "state": "connected"}), "/r/a")));
+    }
+
+    #[test]
+    fn a_root_through_a_proxy_is_an_account_and_the_proxys_own_set_is_its_group() {
+        let sets: Vec<Set> = serde_json::from_value(json!([
+            {"host": "mac", "local": true, "provider": "claude", "name": "main", "account": "a@example.com", "root": "/r/main", "meters": [{"label": "Session", "percent": 10}]},
+            {"host": "mac", "local": true, "provider": "claude", "name": "team", "root": "/r/team", "login": "proxy", "proxy": {"name": "shared", "id": "px"}, "meters": null},
+            {"host": "mac", "local": true, "provider": "proxy", "name": "shared", "proxy": {"name": "shared", "id": "px"}, "accounts": [{"id": "dev.json", "provider": "claude", "label": "dev@example.com", "meters": [{"label": "Claude", "percent": 18, "severity": "critical"}]}], "problem": "Every shared Claude account is over its ceiling."}
+        ]))
+        .unwrap();
+        let groups = proxies(&sets);
+        assert_eq!(groups.len(), 1);
+        assert_eq!((groups[0].accounts.len(), groups[0].problem.as_str()), (1, "Every shared Claude account is over its ceiling."));
+        assert_eq!(accounts(&sets).iter().map(|s| (s.title(), s.via())).collect::<Vec<_>>(), [("a@example.com".to_string(), None), ("team".to_string(), Some("shared"))]);
     }
 
     #[test]

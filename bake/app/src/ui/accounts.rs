@@ -255,6 +255,8 @@ fn account_card(s: &App, set: &Set) -> El {
     c = c.children(set.meters.iter().map(|m| meter_row(s, m)));
     if !set.problem.is_empty() {
         c = c.child(text(set.problem.clone()).font(META).color(attention()).wrap());
+    } else if let Some(proxy) = set.via() {
+        c = c.child(text(format!("Runs through the {proxy} proxy; its accounts are below")).font(META).color(muted()));
     } else if set.meters.is_empty() {
         c = c.child(text("No current reading").font(META).color(faint()));
     }
