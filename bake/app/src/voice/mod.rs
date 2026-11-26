@@ -105,7 +105,7 @@ impl Win {
                 Some(action) => client.voice(action),
                 None => client.voice_state(),
             };
-            if let (Req::Start(attempt), Ok(_)) = (&job.req, &result) {
+            if let Req::Start(attempt) = &job.req {
                 if gone.load(Ordering::SeqCst) {
                     let _ = client.voice(&Action { attempt_id: Some(attempt.clone()), ..Action::new("stop") });
                     return;

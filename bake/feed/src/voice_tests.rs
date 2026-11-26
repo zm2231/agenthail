@@ -377,13 +377,13 @@ fn a_microphone_answer_for_an_earlier_attempt_is_ignored() {
 }
 
 #[test]
-fn a_start_bound_to_another_target_is_hung_up() {
-    let mut call = Call::new("builder");
+fn a_start_bound_to_another_target_is_hung_up_even_when_the_select_reply_agreed() {
+    let mut call = Call::new("s-builder");
     call.peer("ready", "", 0.0);
     let first = only_job(&call.tick(0.0));
     call.reply(first, Ok(state(json!({"phase": "ready"}))), 0.0);
     let select = only_job(&call.call());
-    let prepare = only_job(&call.reply(select, Ok(state(json!({"phase": "ready", "target": {"id": "s-builder", "name": "Builder"}}))), 0.0));
+    let prepare = only_job(&call.reply(select, Ok(state(json!({"phase": "ready", "target": {"id": "s-reviewer", "name": "Reviewer"}}))), 0.0));
     call.reply(prepare, Ok(state(json!({"phase": "ready"}))), 0.0);
     let id = call.attempt().unwrap().to_string();
     call.mic(&id, true);
@@ -392,4 +392,49 @@ fn a_start_bound_to_another_target_is_hung_up() {
     assert!(after.contains(&Effect::PeerEnd));
     assert_eq!(named(&only_job(&after)), "stop");
     assert!(call.error.as_deref().unwrap().starts_with("Another Agenthail window changed"));
+}
+
+#[test]
+fn a_start_bound_to_the_requested_session_or_to_none_for_the_orchestrator_keeps_going() {
+    let mut call = Call::new("s-builder");
+    call.peer("ready", "", 0.0);
+    let first = only_job(&call.tick(0.0));
+    call.reply(first, Ok(state(json!({"phase": "ready"}))), 0.0);
+    let id = dialed_routed(&mut call);
+    let start = only_job(&call.peer("offer", "v=0", 0.0));
+    let after = call.reply(start, Ok(state(json!({"phase": "negotiating", "attemptId": id, "target": {"id": "s-builder", "name": "Builder"}}))), 1.0);
+    assert!(!after.contains(&Effect::PeerEnd));
+    assert_eq!(call.error, None);
+    let mut orchestrator = ready();
+    let id = dialed(&mut orchestrator);
+    let start = only_job(&orchestrator.peer("offer", "v=0", 0.0));
+    let after = orchestrator.reply(start, Ok(state(json!({"phase": "negotiating", "attemptId": id, "target": {"id": "s-other", "name": "Other"}}))), 1.0);
+    assert!(after.contains(&Effect::PeerEnd), "an orchestrator call that comes back routed is hung up");
+}
+
+fn dialed_routed(call: &mut Call) -> String {
+    let select = only_job(&call.call());
+    let prepare = only_job(&call.reply(select, Ok(state(json!({"phase": "ready"}))), 0.0));
+    call.reply(prepare, Ok(state(json!({"phase": "ready"}))), 0.0);
+    let id = call.attempt().unwrap().to_string();
+    call.mic(&id, true);
+    id
+}
+
+#[test]
+fn an_old_heartbeat_reply_does_not_let_a_second_heartbeat_out() {
+    let mut call = ready();
+    let old = started(&mut call, 0.0);
+    let stale = beat(&call.tick(0.0)).unwrap();
+    let stop = only_job(&call.hangup());
+    call.reply(stop, Ok(state(json!({"phase": "stopping", "attemptId": old}))), 0.5);
+    let ended = refresh(&call.tick(1.0));
+    call.reply(ended, Ok(state(json!({"phase": "ended", "attemptId": old}))), 1.0);
+    let new = started(&mut call, 1.0);
+    let pending = beat(&call.tick(1.0)).unwrap();
+    assert_eq!(pending.req, Req::Heartbeat(new.clone()));
+    call.reply(stale, Err("heartbeat requires the current active voice call".into()), 2.0);
+    assert!(beat(&call.tick(2.5)).is_none(), "the new attempt's heartbeat is still out");
+    call.reply(pending, Ok(state(json!({"phase": "negotiating", "attemptId": new}))), 3.0);
+    assert!(beat(&call.tick(13.0)).is_some());
 }

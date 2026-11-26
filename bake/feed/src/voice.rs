@@ -325,9 +325,9 @@ pub struct Call {
     refreshing: bool,
     next_refresh: f64,
     beat_due: Option<f64>,
-    beating: bool,
+    beating: Option<String>,
     last_beat: f64,
-    selected: Option<String>,
+    requested: Option<String>,
     asking_mic: bool,
     lost_at: Option<f64>,
     out: Vec<Effect>,
@@ -473,8 +473,8 @@ impl Call {
             self.fetch(Req::Refresh, None);
         }
         if let (Some(due), Some(id)) = (self.beat_due, self.attempt.clone()) {
-            if now >= due && !self.beating {
-                self.beating = true;
+            if now >= due && self.beating.is_none() {
+                self.beating = Some(id.clone());
                 self.fetch(Req::Heartbeat(id.clone()), Some(Action::new("heartbeat").attempt(&id)));
             }
         }
@@ -499,6 +499,7 @@ impl Call {
         self.mic_denied = false;
         self.generation += 1;
         self.attempt = Some(fresh_id());
+        self.requested = Some(self.target.trim().to_string()).filter(|t| !t.is_empty());
         let select = Action { target_id: Some(self.target.trim().to_string()), ..Action::new("select") };
         self.fetch(Req::Select, Some(select));
         self.drain()
@@ -615,7 +616,7 @@ impl Call {
         self.work += 1;
         self.working = false;
         self.beat_due = None;
-        self.beating = false;
+        self.beating = None;
         self.lost_at = None;
         self.dialing = false;
         self.audio_connected = false;
@@ -730,7 +731,6 @@ impl Call {
                     match result {
                         Ok(next) => {
                             if job.req == Req::Select {
-                                self.selected = next.target.as_ref().map(|t| t.id.clone());
                                 self.state = Some(next);
                                 self.fetch(Req::Prepare, Some(Action::new("prepare")));
                             } else {
@@ -752,7 +752,7 @@ impl Call {
                     self.state = Some(next);
                     self.host_has_call = true;
                     self.last_beat = now;
-                    if bound != self.selected {
+                    if bound != self.requested {
                         self.error = Some("Another Agenthail window changed who this call talks to before it started, so it was hung up. Call again.".into());
                         self.end_call();
                     } else {
@@ -783,7 +783,9 @@ impl Call {
                 }
             }
             Req::Heartbeat(id) => {
-                self.beating = false;
+                if self.beating.as_deref() == Some(id.as_str()) {
+                    self.beating = None;
+                }
                 if current && self.attempt.as_deref() == Some(id.as_str()) {
                     self.beat_due = Some(now + HEARTBEAT_SECS);
                     match result {
@@ -902,7 +904,7 @@ impl Call {
                 self.out.push(Effect::PeerEnd);
             }
             self.beat_due = None;
-            self.beating = false;
+            self.beating = None;
             self.lost_at = None;
             self.hangup_pending = false;
             self.hangup_unconfirmed = false;
