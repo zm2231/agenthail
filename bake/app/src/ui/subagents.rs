@@ -211,6 +211,11 @@ fn claude(s: &mut App, id: &str) {
 }
 
 pub(crate) fn done(s: &mut App, done: Done) {
+    take(s, done);
+    settle(s);
+}
+
+fn take(s: &mut App, done: Done) {
     match done {
         Done::Page(id, seq, result) => {
             let Some(asked) = s.crew.asked.get_mut(&id).filter(|a| a.seq == seq) else { return };
@@ -270,7 +275,6 @@ pub(crate) fn done(s: &mut App, done: Done) {
             }
         }
     }
-    settle(s);
 }
 
 pub(crate) fn forget(s: &mut App, id: &str) {
