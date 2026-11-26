@@ -109,7 +109,7 @@ func (d *Daemon) pushWaitingTurn(session *surface.Session, turnID string) bool {
 	}
 	waits := func() (bool, string) {
 		state, askID, err := d.waitingTurnState(session, end)
-		return err == nil && state != nil && state.State == turnWaitingPerson && state.Source == turnSourceEndTurn, askID
+		return err == nil && state != nil && state.State == turnWaitingPerson && state.Source == turnSourceEndTurn && state.Escalated == escalated, askID
 	}
 	ok, askID := waits()
 	if !ok {
@@ -123,6 +123,9 @@ func (d *Daemon) pushWaitingTurn(session *surface.Session, turnID string) bool {
 	}
 	if !claimed {
 		return false
+	}
+	if d.turnPushRead != nil {
+		d.turnPushRead()
 	}
 	if ok, _ := waits(); !ok {
 		if err := d.Registry.ReleaseWaitPush(session.ID, turnID, claimedAt); err != nil {

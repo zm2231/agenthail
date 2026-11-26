@@ -158,3 +158,41 @@ func TestTheLedgerGateTellsAWorkerToAskItsLead(t *testing.T) {
 		t.Fatalf("a session without a lead is told to ask one: %s", notice)
 	}
 }
+
+func TestAMovedWaitDoesNotPushWhenTheWorkerBecomesTheLeadWhileItIsClaimed(t *testing.T) {
+	f, pushes := leadWaitFixture(t)
+	workerTurn(t, f, f.worker, "turn-1", map[string]any{"headline": "Ready", "waitingOn": "Approve the schema change"})
+	f.d.turnPushRead = func() {
+		f.d.turnPushRead = nil
+		person := principal{ID: localDashboardPrincipal, Kind: principalPerson}
+		if reply := f.d.doAction(t.Context(), person, dashboardActionRequest{Action: "coordinator-set", SessionID: "worker", Name: "mate", Replace: true}); reply.Status != 200 {
+			t.Fatalf("coordinator-set status=%d %s", reply.Status, reply.Body)
+		}
+	}
+	f.sweepLeadWaits(t, 11*time.Minute)
+	if count := pushes.count(turnNeedsYouEvent); count != 0 {
+		t.Fatalf("a wait that stopped being a moved one while its push was claimed pushed %d times", count)
+	}
+	if end, found, err := f.r.CompletedTurnEnd("worker", "turn-1"); err != nil || !found || !end.WaitPushed.IsZero() {
+		t.Fatalf("the claim was not released: %+v %v %v", end, found, err)
+	}
+}
+
+func TestAWorkerAwaitingItsLeadMovesAfterTheLongerWindow(t *testing.T) {
+	f, pushes := leadWaitFixture(t)
+	f.holdWork(t, "write the plan")
+	workerTurn(t, f, f.worker, "turn-1", map[string]any{"headline": "Asked the lead for an ack"})
+	if err := f.r.RecordTurnJudgment(registry.TurnJudgment{SessionID: "worker", TurnID: "turn-1", EndedAt: time.Now(), State: turnDone, Headline: "Asked the lead for an ack", Facts: registry.TurnFacts{Awaiting: []string{"lead"}, AwaitedRelays: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if row := f.row(t, "worker"); row.TurnState == nil || row.TurnState.Source != turnSourceFacts || !row.TurnState.OnLead {
+		t.Fatalf("a worker awaiting its lead is not waiting on it: %+v", row.TurnState)
+	}
+	if page := f.sweepLeadWaits(t, 119*time.Minute); len(waitingTurns(page)) != 0 {
+		t.Fatalf("a wait on the lead from the facts moved inside two hours: %+v", page)
+	}
+	page := f.sweepLeadWaits(t, 121*time.Minute)
+	if turns := waitingTurns(page); len(turns) != 1 || turns[0].Reason != "@captain has not answered: Asked the lead for an ack" || pushes.count(turnNeedsYouEvent) != 1 {
+		t.Fatalf("after two hours the wait from the facts is not the person's: %+v", page)
+	}
+}
