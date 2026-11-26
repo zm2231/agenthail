@@ -386,3 +386,35 @@ func TestRelaysQueuedWhileTheirTargetIsObservedReachItInOrder(t *testing.T) {
 		t.Fatalf("the target received the source's replies as %v, want turn-1 then turn-2 once each", replies)
 	}
 }
+
+// sharingSurface reads one listing per scan through the scan its
+// observations run in, the way the Claude surface lists its processes.
+type sharingSurface struct {
+	*daemonSurface
+	listings atomic.Int32
+}
+
+type sharingListingKey struct{}
+
+func (s *sharingSurface) Observe(ctx context.Context, session *surface.Session) (*surface.TurnObservation, error) {
+	surface.ScanShared(ctx, sharingListingKey{}, time.Minute, func() bool {
+		s.listings.Add(1)
+		return true
+	})
+	return &surface.TurnObservation{Status: surface.StatusIdle}, nil
+}
+
+func TestTheSessionsOfOneScanShareTheirSurfacesListing(t *testing.T) {
+	d, r, fake, _, _ := daemonFixture(t)
+	sharing := &sharingSurface{daemonSurface: fake}
+	d.Surfaces = []surface.Surface{sharing}
+	watchSessions(t, r, fake, surface.KindCodex, "one", "two", "three")
+	<-d.planScan(t.Context())
+	if listings := sharing.listings.Load(); listings != 1 {
+		t.Fatalf("one scan of three sessions listed %d times, want once", listings)
+	}
+	<-d.planScan(t.Context())
+	if listings := sharing.listings.Load(); listings != 2 {
+		t.Fatalf("the next scan did not list again: %d listings in all", listings)
+	}
+}

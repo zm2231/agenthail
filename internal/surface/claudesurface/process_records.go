@@ -1,6 +1,7 @@
 package claudesurface
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -21,6 +22,33 @@ type claudeSessionRecord struct {
 	root   string
 	fields map[string]any
 	readAt time.Time
+}
+
+// claudeScanAge bounds how long one scan reuses a read of Claude's files and
+// background jobs, so a slow scan still sees a process that starts during it.
+const claudeScanAge = time.Second
+
+type claudeRecordsKey struct{ c *Claude }
+
+type claudeRecordsRead struct {
+	roots       []string
+	records     []claudeSessionRecord
+	readAt      time.Time
+	transcripts func(string) []string
+	err         error
+}
+
+// scanRecords is records and a transcript lookup over the same roots, read
+// once for every session a scan in ctx observes.
+func (c *Claude) scanRecords(ctx context.Context) claudeRecordsRead {
+	return surface.ScanShared(ctx, claudeRecordsKey{c}, claudeScanAge, func() claudeRecordsRead {
+		read := claudeRecordsRead{readAt: time.Now()}
+		read.roots, read.records, read.err = c.records()
+		if read.err == nil {
+			read.transcripts = c.transcripts.pass(read.roots)
+		}
+		return read
+	})
 }
 
 // records returns the config roots and the session records of Claude

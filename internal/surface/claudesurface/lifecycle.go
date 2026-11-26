@@ -92,7 +92,7 @@ func (c *Claude) backgroundJobs(ctx context.Context, root string) ([]rootedBackg
 		if _, err := os.Stat(each); i > 0 && os.IsNotExist(err) {
 			continue
 		}
-		listed, err := c.backgroundSessions(ctx, each)
+		listed, err := c.scanBackgroundSessions(ctx, each)
 		if err != nil {
 			return nil, err
 		}
@@ -101,6 +101,26 @@ func (c *Claude) backgroundJobs(ctx context.Context, root string) ([]rootedBackg
 		}
 	}
 	return jobs, nil
+}
+
+type claudeBackgroundKey struct {
+	c    *Claude
+	root string
+}
+
+type claudeBackgroundRead struct {
+	jobs []claudeBackground
+	err  error
+}
+
+// scanBackgroundSessions lists root's background jobs once for every session
+// a scan in ctx observes; each listing starts a Claude process.
+func (c *Claude) scanBackgroundSessions(ctx context.Context, root string) ([]claudeBackground, error) {
+	read := surface.ScanShared(ctx, claudeBackgroundKey{c, root}, claudeScanAge, func() claudeBackgroundRead {
+		jobs, err := c.backgroundSessions(ctx, root)
+		return claudeBackgroundRead{jobs, err}
+	})
+	return read.jobs, read.err
 }
 
 func (c *Claude) backgroundSessions(ctx context.Context, root string) ([]claudeBackground, error) {
