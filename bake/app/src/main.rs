@@ -1,5 +1,6 @@
 mod history;
 mod icons;
+mod menubar;
 mod over;
 mod theme;
 mod transcript;
@@ -120,6 +121,7 @@ pub struct App {
     pub accounts: ui::accounts::Accounts,
     pub prs: ui::pr_link::Prs,
     pub new_session: Option<ui::new_session::Sheet>,
+    bar: menubar::Bar,
     revealed: Option<String>,
     pub missing: Option<ui::gone::Missing>,
     last_row: Option<Session>,
@@ -220,6 +222,7 @@ fn init() -> App {
         accounts: ui::accounts::Accounts::new(),
         prs: ui::pr_link::Prs::new(),
         new_session: None,
+        bar: menubar::Bar::default(),
         revealed: None,
         missing: None,
         last_row: None,
@@ -1047,6 +1050,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         s.drafts.set(&id, &s.composer.text);
     }
     over::layout::save(s);
+    if changed || !s.bar.is_shown() {
+        menubar::refresh(s);
+    }
     tx.wake_after(Duration::from_millis(if busy { 16 } else { 250 }));
     changed
 }
@@ -1056,7 +1062,7 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
 }
 
 fn main() {
-    rune::App::new(AppSpec::<App> {
+    let app = rune::App::new(AppSpec::<App> {
         poll: Some(poll),
         on_key: Some(on_key),
         fonts: rune_theme_opencode::FONTS,
@@ -1066,6 +1072,6 @@ fn main() {
     })
         .chrome(Chrome { full_size_content: true, traffic_lights: Some((20.0, 20.0)), drag_regions: true })
         .window_options(WindowOptions { transparent: true, resizable: true, visible: true, ..Default::default() })
-        .srgb_blend(true)
-        .run();
+        .srgb_blend(true);
+    menubar::install(app).run();
 }
