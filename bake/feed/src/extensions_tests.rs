@@ -198,3 +198,11 @@ fn a_web_session_is_known_unless_the_page_port_turns_its_cookie_down() {
     drop(closed);
     assert!(session_known(&gone, &session).is_err());
 }
+
+#[test]
+fn a_list_says_how_old_it_is() {
+    assert_eq!(age(2, false), "Updated just now");
+    assert_eq!(age(42, false), "Updated 42s ago");
+    assert_eq!(age(125, true), "Refreshing… last read 2m ago");
+    assert_eq!(age(7300, false), "Updated 2h ago");
+}

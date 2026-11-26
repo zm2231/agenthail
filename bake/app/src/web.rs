@@ -12,6 +12,7 @@ const RENEW_RETRY: Duration = Duration::from_secs(60);
 const SLOW: Duration = Duration::from_secs(10);
 const CHECK_EVERY: Duration = Duration::from_secs(20);
 const KEPT: usize = 6;
+const UNREACHED: Duration = Duration::from_secs(20);
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 enum Load {
@@ -110,6 +111,11 @@ impl Page {
                 }
                 Load::Finished(_) => {}
             }
+        }
+        if self.opened && !self.arrived && self.phase == Phase::Loading && self.loading_since.is_some_and(|at| at.elapsed() >= UNREACHED) {
+            self.phase = Phase::Failed(format!("Nothing came back from the page in {} seconds. Check that it is serving, then Reload.", UNREACHED.as_secs()));
+            self.loading_since = None;
+            changed = true;
         }
         if self.slow() != self.slow_shown {
             self.slow_shown = self.slow();

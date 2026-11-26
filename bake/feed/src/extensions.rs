@@ -446,6 +446,16 @@ pub fn session_known(page: &str, session: &WebSession) -> std::result::Result<bo
     }
 }
 
+pub fn age(secs: u64, refreshing: bool) -> String {
+    let read = match secs {
+        0..=4 => "just now".to_string(),
+        5..=59 => format!("{secs}s ago"),
+        60..=3599 => format!("{}m ago", secs / 60),
+        _ => format!("{}h ago", secs / 3600),
+    };
+    if refreshing { format!("Refreshing… last read {read}") } else { format!("Updated {read}") }
+}
+
 pub fn holds_settings(client: &Client) -> bool {
     crate::dashboard_token().is_some_and(|token| token == client.token)
 }

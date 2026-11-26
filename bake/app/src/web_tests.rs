@@ -237,3 +237,18 @@ fn a_failed_page_is_tried_again_only_when_opened_again() {
     assert_eq!(web.pages[A].phase, Phase::Loading);
     assert!(web.cookie.is_some(), "a page failure needs no new sign-in");
 }
+
+#[test]
+fn a_page_that_never_answers_fails_but_one_that_arrived_only_turns_slow() {
+    let mut web = Web::new();
+    open(&mut web, A, false);
+    web.pages.get_mut(A).unwrap().loading_since = Some(Instant::now() - UNREACHED);
+    assert!(web.pump(None));
+    assert!(matches!(web.pages[A].phase, Phase::Failed(_)));
+    open(&mut web, B, false);
+    web.pages.get_mut(B).unwrap().arrived = true;
+    web.pages.get_mut(B).unwrap().loading_since = Some(Instant::now() - UNREACHED);
+    web.pump(None);
+    assert_eq!(web.pages[B].phase, Phase::Loading);
+    assert!(web.pages[B].slow());
+}

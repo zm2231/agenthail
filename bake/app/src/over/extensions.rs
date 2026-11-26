@@ -29,6 +29,7 @@ pub struct Catalog {
     pub host: Host,
     pub list: Option<List>,
     pub error: Option<String>,
+    pub fetched: Option<Instant>,
 }
 
 impl Catalog {
@@ -48,6 +49,7 @@ pub struct State {
     pub acting: Option<String>,
     pub web: Web,
     fetched_at: Option<Instant>,
+    ages: Vec<String>,
     hosts_pending: bool,
     listing: HashSet<String>,
     generation: HashMap<String, u64>,
@@ -58,7 +60,7 @@ pub struct State {
 impl State {
     pub fn new() -> State {
         let (tx, rx) = channel();
-        State { catalogs: Vec::new(), hosts_error: None, settings: false, acting: None, web: Web::new(), fetched_at: None, hosts_pending: false, listing: HashSet::new(), generation: HashMap::new(), tx, rx }
+        State { catalogs: Vec::new(), hosts_error: None, settings: false, acting: None, web: Web::new(), fetched_at: None, ages: Vec::new(), hosts_pending: false, listing: HashSet::new(), generation: HashMap::new(), tx, rx }
     }
 }
 
@@ -148,7 +150,7 @@ fn take(s: &mut App, done: Done) {
             let mut old: Vec<Catalog> = std::mem::take(&mut ext.catalogs);
             for host in hosts {
                 let at = old.iter().position(|c| c.host.id == host.id);
-                let mut catalog = at.map(|i| old.remove(i)).unwrap_or(Catalog { host: host.clone(), list: None, error: None });
+                let mut catalog = at.map(|i| old.remove(i)).unwrap_or(Catalog { host: host.clone(), list: None, error: None, fetched: None });
                 if !host.available() {
                     catalog.error = Some(format!("{} is {}.", host.name, if host.state.is_empty() { "unreachable" } else { &host.state }));
                 }
@@ -159,7 +161,7 @@ fn take(s: &mut App, done: Done) {
         Done::Hosts(Err(error)) => ext.hosts_error = Some(format!("Couldn't read the computers: {error}")),
         Done::Listed(_, key, result) => {
             if key == "local" && !ext.catalogs.iter().any(|c| c.host.is_local()) {
-                ext.catalogs.insert(0, Catalog { host: local_host(), list: None, error: None });
+                ext.catalogs.insert(0, Catalog { host: local_host(), list: None, error: None, fetched: None });
             }
             if let Some(catalog) = ext.catalogs.iter_mut().find(|c| c.key() == key) {
                 match result {
@@ -168,6 +170,7 @@ fn take(s: &mut App, done: Done) {
                             catalog.error = list.host_problem(&catalog.host.name);
                         }
                         catalog.list = Some(list);
+                        catalog.fetched = Some(Instant::now());
                     }
                     Err(error) => catalog.error = Some(error),
                 }
@@ -182,6 +185,7 @@ fn take(s: &mut App, done: Done) {
                     if let Some(local) = ext.catalogs.iter_mut().find(|c| c.host.is_local()) {
                         local.error = list.host_problem(&local.host.name);
                         local.list = Some(list);
+                        local.fetched = Some(Instant::now());
                     }
                 }
                 Err(error) if error.maybe_delivered => s.ov.notice = Some(format!("{what} may not have finished: {}", error.message)),
@@ -214,6 +218,11 @@ pub fn drain(s: &mut App) -> bool {
     }
     if s.ov.ext.fetched_at.is_none_or(|at| at.elapsed() >= REFRESH) {
         refresh(s);
+    }
+    let ages: Vec<String> = s.ov.ext.catalogs.iter().filter_map(|c| Some(feed::extensions::age(c.fetched?.elapsed().as_secs(), s.ov.ext.listing.contains(&c.key())))).collect();
+    if ages != s.ov.ext.ages {
+        s.ov.ext.ages = ages;
+        changed = true;
     }
     let want = current_entry(s).and_then(|e| e.url);
     if let Some(client) = s.client.clone()
@@ -426,9 +435,17 @@ fn sections(s: &App) -> Vec<&Catalog> {
 
 fn catalog_block(s: &App, catalog: &Catalog, titled: bool, origin: &str) -> El {
     let mut block = col().w_full().gap(10.0);
+    let mut head = row().w_full().gap(8.0).items_center().pt(6.0);
     if titled {
         let title = if catalog.host.is_local() { "On this computer".to_string() } else { format!("On {}", catalog.host.name) };
-        block = block.child(text(title).font(HEAD).color(strong()).pt(6.0));
+        head = head.child(text(title).font(HEAD).color(strong()));
+    }
+    if let Some(at) = catalog.fetched {
+        let refreshing = s.ov.ext.listing.contains(&catalog.key());
+        head = head.child(ui::spacer()).child(text(feed::extensions::age(at.elapsed().as_secs(), refreshing)).font(META).color(weak()).key(format!("ext-age-{}", catalog.key())));
+    }
+    if titled || catalog.fetched.is_some() {
+        block = block.child(head);
     }
     if let Some(error) = &catalog.error {
         block = block.child(text(error.clone()).font(META).color(crate::theme::failed()).wrap().w_full());
