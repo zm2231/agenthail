@@ -13,6 +13,7 @@ pub mod accounts;
 pub mod attach;
 pub(crate) mod background;
 mod chips;
+pub mod complete;
 pub mod gone;
 pub(crate) mod queue;
 pub mod limit;

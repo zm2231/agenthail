@@ -36,6 +36,7 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
         .placeholder(format!("Message {}", x.title()), faint())
         .on_edit(|s: &mut App| &mut s.composer)
         .on_input_paste(|s: &mut App, content, _: &mut Tx| super::attach::paste(s, content))
+        .on_input_key(super::complete::key)
         .on_submit(|s: &mut App, tx: &mut Tx| send(s, tx));
     let ready = !s.composer.text.trim().is_empty() || super::attach::has(s, &x.id);
     let send_button = col()
@@ -48,7 +49,11 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
         .shadow(2.0, 10.0, if ready { accent().alpha(0.45) } else { Color::TRANSPARENT })
         .press_scale(0.92)
         .motion(SPRING)
-        .on_press_tx(|s: &mut App, tx: &mut Tx| send(s, tx))
+        .on_press_tx(|s: &mut App, tx: &mut Tx| {
+            if let Some(id) = s.selected.clone() {
+                super::complete::submit(s, &id, tx);
+            }
+        })
         .child(icon(&icons::ARROW_UP, 15.0).color(if ready { Color::WHITE } else { faint() }));
     let busy = crate::busy_delivery(s, &x.id);
     let unsent = s.unsent.has(&x.id);
@@ -116,6 +121,8 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
         .shadow(10.0, 34.0, Color::BLACK.alpha(0.45))
         .children(crate::ui::background::dock(s, x))
         .children(crate::ui::queue::dock(s, x))
+        .children(super::complete::search(s, x))
+        .children(super::complete::menu(s, x))
         .children(super::attach::chips(s, &x.id).map(|c| col().w_full().px(12.0).pt(10.0).child(c)))
         .child(col().w_full().px(16.0).pt(13.0).pb(4.0).child(input))
         .child(controls.child(send_button));

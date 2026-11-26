@@ -15,7 +15,7 @@ const REFRESH: Duration = Duration::from_secs(30);
 
 pub enum Done {
     Settings(String, u64, Result<SessionSettings, String>),
-    Models(String, Vec<ModelOption>),
+    Models(String, u64, Result<Vec<ModelOption>, String>),
     Context(String, u64, Result<Option<ContextUsage>, String>),
     Acted(String, Act, String, Result<Option<feed::action::ReadState>, RespondError>),
     Renamed(String, u64, Result<String, RespondError>),
@@ -53,6 +53,9 @@ pub struct Menus {
     newest: HashMap<(String, &'static str), u64>,
     rename_seq: u64,
     refreshed: Option<(String, Instant)>,
+    models_asked: HashMap<String, Instant>,
+    settings_asked: HashMap<String, Instant>,
+    pub models_error: HashMap<String, String>,
     tx: Sender<Done>,
     rx: Receiver<Done>,
 }
@@ -79,6 +82,9 @@ impl Menus {
             newest: HashMap::new(),
             rename_seq: 0,
             refreshed: None,
+            models_asked: HashMap::new(),
+            settings_asked: HashMap::new(),
+            models_error: HashMap::new(),
             tx,
             rx,
         }
@@ -154,11 +160,35 @@ pub fn load(s: &mut App, id: &str) {
     s.menus.refreshed = Some((id.to_string(), Instant::now()));
     fetch_settings(s, id, Duration::ZERO);
     fetch_context(s, id, Duration::ZERO);
-    let surface = session(s, id).map(|x| x.surface.clone()).unwrap_or_default();
-    if !surface.is_empty() {
-        let id = id.to_string();
-        spawn(s, Duration::ZERO, move |c| c.session_models(&surface, &id).ok().map(|m| Done::Models(id, m)));
+    fetch_models(s, id);
+}
+
+pub fn ensure_models(s: &mut App, id: &str) {
+    if s.client.is_none() || session(s, id).is_none() {
+        return;
     }
+    if !s.menus.settings.contains_key(id) && s.menus.settings_asked.get(id).is_none_or(|at| at.elapsed() >= REFRESH) {
+        s.menus.settings_asked.insert(id.to_string(), Instant::now());
+        fetch_settings(s, id, Duration::ZERO);
+    }
+    let retry = match s.menus.models_asked.get(id) {
+        None => true,
+        Some(at) => s.menus.models_error.contains_key(id) && at.elapsed() >= REFRESH,
+    };
+    if retry {
+        fetch_models(s, id);
+    }
+}
+
+fn fetch_models(s: &mut App, id: &str) {
+    let surface = session(s, id).map(|x| x.surface.clone()).unwrap_or_default();
+    if surface.is_empty() {
+        return;
+    }
+    s.menus.models_asked.insert(id.to_string(), Instant::now());
+    let (id, seq) = (id.to_string(), s.menus.next());
+    s.menus.newest.insert((id.clone(), "models"), seq);
+    spawn(s, Duration::ZERO, move |c| Some(Done::Models(id.clone(), seq, c.session_models(&surface, &id).map_err(|e| e.to_string()))));
 }
 
 fn refresh_shown(s: &mut App) {
@@ -166,11 +196,17 @@ fn refresh_shown(s: &mut App) {
         return;
     }
     let Some(id) = s.selected.clone() else { return };
+    if !s.menus.models_asked.contains_key(&id) {
+        fetch_models(s, &id);
+    }
     let due = s.menus.refreshed.as_ref().is_none_or(|(shown, at)| *shown != id || at.elapsed() >= REFRESH);
     if due {
         s.menus.refreshed = Some((id.clone(), Instant::now()));
         fetch_settings(s, &id, Duration::ZERO);
         fetch_context(s, &id, Duration::ZERO);
+        if s.menus.models_error.contains_key(&id) {
+            fetch_models(s, &id);
+        }
     }
 }
 
@@ -259,6 +295,16 @@ fn start_rename(s: &mut App, id: &str) {
     s.composer.focused = false;
     s.menus.rename_error = None;
     s.menus.rename_saving = false;
+}
+
+pub fn rename_to(s: &mut App, id: &str, name: &str) {
+    if menu::unchanged(name, current_alias(s, id).as_deref()) {
+        return;
+    }
+    start_rename(s, id);
+    s.menus.rename_text = TextEdit::new(name);
+    s.menus.rename_text.focused = true;
+    save_rename(s);
 }
 
 pub fn close_rename(s: &mut App) {
@@ -374,8 +420,13 @@ fn settled(s: &mut App, done: Done) {
                 }
             }
         }
-        Done::Models(id, models) => {
+        Done::Models(id, seq, _) if s.menus.newest.get(&(id.clone(), "models")) != Some(&seq) => {}
+        Done::Models(id, _, Ok(models)) => {
+            s.menus.models_error.remove(&id);
             s.menus.models.insert(id, models);
+        }
+        Done::Models(id, _, Err(error)) => {
+            s.menus.models_error.insert(id, error);
         }
         Done::Context(id, seq, result) => {
             if !s.menus.fresh(&id, "context", seq) {
@@ -421,6 +472,7 @@ fn settled(s: &mut App, done: Done) {
                     land(s, &id, Patch::Alias((!alias.is_empty()).then_some(alias)));
                     if current {
                         close_rename(s);
+                        s.composer.focused = true;
                     }
                 }
                 Err(error) if current => {
@@ -432,6 +484,9 @@ fn settled(s: &mut App, done: Done) {
         }
         Done::Set(id, key, value, result) => {
             s.menus.busy.remove(&(id.clone(), key));
+            if key == "model" {
+                super::complete::model_settled(s, &id, result.is_err());
+            }
             match result {
                 Ok(()) => {
                     s.menus.supersede(&id, "settings");
