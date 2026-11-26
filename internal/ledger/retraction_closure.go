@@ -34,6 +34,7 @@ func dependencies(t EventType, src eventSource) []string {
 	}
 	add(RetractedAsk, src.Target)
 	add(RetractedClause, src.Target)
+	add(RetractedWorkItem, src.Target)
 	return keys
 }
 

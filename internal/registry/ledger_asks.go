@@ -100,6 +100,20 @@ func (r *Registry) SyncLedgerAsks(projectKey string, questions []LedgerQuestion,
 		ask.State, ask.AnsweredAt = state, at
 		closed = append(closed, ask)
 	}
+	listed := make(map[string]bool, len(questions))
+	for _, q := range questions {
+		listed[LedgerAskRef(projectKey, q.ID)] = true
+	}
+	for ref, ask := range openByRef {
+		if listed[ref] {
+			continue
+		}
+		if _, err := tx.Exec(`UPDATE asks SET state=?,answered_at_ms=? WHERE id=? AND state=?`, AskWithdrawn, at.UnixMilli(), ask.ID, AskOpen); err != nil {
+			return nil, err
+		}
+		ask.State, ask.AnsweredAt = AskWithdrawn, at
+		closed = append(closed, ask)
+	}
 	return closed, tx.Commit()
 }
 
