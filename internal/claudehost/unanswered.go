@@ -57,13 +57,19 @@ type hostProcess struct {
 	started string
 }
 
-// A pid reused since the host was found has another start time and is left alone.
+// The handle is taken before the identity check; on Linux it is a pidfd, so the
+// signal cannot reach a process that took the pid after the check.
 func (m *Manager) signalHost(ctx context.Context, host hostProcess, signal syscall.Signal) bool {
+	process, err := os.FindProcess(host.pid)
+	if err != nil {
+		return false
+	}
+	defer process.Release()
 	again, err := m.currentHost(ctx)
 	if err != nil || again != host {
 		return false
 	}
-	return syscall.Kill(host.pid, signal) == nil
+	return process.Signal(signal) == nil
 }
 
 func (m *Manager) awaitRelease(ctx context.Context, pid int, wait time.Duration) bool {
