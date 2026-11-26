@@ -214,7 +214,10 @@ fn settled(s: &mut App, done: Done) {
                     note(s, &id, stop, format!("Moved to {}", target.name), false);
                 }
                 Ok(Moved::Done(Some(detail))) => {
-                    note(s, &id, stop, format!("Moved to {}, but {detail}", target.name), true);
+                    let title = session(s, &id).map(|x| x.title()).unwrap_or_default();
+                    let text = format!("Moved {title} to {}, but {detail}", target.name);
+                    s.ov.notice = Some(text.clone());
+                    note(s, &id, stop, text, true);
                 }
                 Ok(Moved::NeedsConsent(message)) => {
                     s.limits.note.remove(&id);
