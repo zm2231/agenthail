@@ -106,9 +106,9 @@ pub(crate) fn done(s: &mut App, id: String, working: (String, i64), done: Done) 
             drop_row(s);
             hand_back(s, &id, &message);
         }
-        Done::Steered => {
+        Done::Steered(receipt) => {
             drop_row(s);
-            s.status_line.insert(id.clone(), "Steered".into());
+            s.status_line.insert(id.clone(), receipt.note(1));
         }
         Done::SteerFailed(message, error) => {
             drop_row(s);

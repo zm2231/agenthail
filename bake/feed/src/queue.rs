@@ -5,7 +5,7 @@ use serde_json::Value;
 use time::OffsetDateTime;
 
 use crate::catalog::{Capabilities, Client, RespondError, ago, enc};
-use crate::composer::current;
+use crate::composer::{Delivered, current};
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -96,6 +96,12 @@ impl Queued {
     }
 
     pub fn take_back_refusal(&self) -> Option<&'static str> {
+        if !self.author.is_empty() && self.author != "person" {
+            return Some("This message came from another session; editing it would resend it as yours.");
+        }
+        if !self.model.is_empty() || !self.service_tier.is_empty() || self.output_schema.as_ref().is_some_and(|s| !s.is_null()) {
+            return Some("Editing here would drop this message's model or turn settings.");
+        }
         (!self.attachments.is_empty()).then_some("Editing here would drop this message's attachments.")
     }
 }
@@ -117,7 +123,7 @@ pub enum Op {
 pub enum Done {
     Removed,
     TakenBack(String),
-    Steered,
+    Steered(Delivered),
     SteerFailed(String, RespondError),
     Unsure(Option<String>, RespondError),
     Failed(RespondError),
@@ -139,8 +145,8 @@ impl Client {
         match op {
             Op::Remove => Done::Removed,
             Op::TakeBack => Done::TakenBack(message),
-            Op::Steer => match self.steer(&row.session_id, &message) {
-                Ok(()) => Done::Steered,
+            Op::Steer => match self.action("steer", serde_json::json!({"sessionId": row.session_id, "message": message, "author": "person"})) {
+                Ok(reply) => Done::Steered(Delivered::read(&reply)),
                 Err(error) => Done::SteerFailed(message, error),
             },
         }
@@ -191,6 +197,8 @@ mod tests {
         assert!(attached.steer_refusal(&caps).unwrap().contains("attachments"));
         assert!(attached.take_back_refusal().is_some());
         assert_eq!(mine.take_back_refusal(), None);
+        assert!(Queued { author: "agent".into(), ..mine.clone() }.take_back_refusal().unwrap().contains("as yours"));
+        assert!(Queued { service_tier: "flex".into(), ..mine.clone() }.take_back_refusal().unwrap().contains("turn settings"));
     }
 
     #[test]
@@ -208,15 +216,21 @@ mod tests {
             (200, r#"{"ok":true,"result":{"message":"edited text"}}"#),
             (200, r#"{"ok":true,"result":{"message":""}}"#),
             (200, r#"{"ok":true,"result":{"message":"steer me"}}"#),
-            (200, r#"{"ok":true}"#),
+            (200, r#"{"ok":true,"result":{"evidence":"transport_accepted","status":"sent","requestId":"r1"}}"#),
+            (200, r#"{"ok":true,"result":{"message":"x"}}"#),
+            (200, r#"{"ok":true,"result":{"evidence":"queued","queueId":9,"waitingOn":{"kind":"ask"}}}"#),
+            (200, r#"{"ok":true,"result":{"message":"x"}}"#),
+            (202, r#"{"ok":true,"status":"submitted"}"#),
         ]));
         assert_eq!(client.queue_op(Op::TakeBack, &r, "mac"), Done::TakenBack("edited text".into()));
         assert_eq!(seen.recv().unwrap().1, json!({"action": "queue-cancel", "queueId": 7, "host": "mac"}));
         assert_eq!(client.queue_op(Op::Remove, &r, ""), Done::Removed);
         seen.recv().unwrap();
-        assert_eq!(client.queue_op(Op::Steer, &r, ""), Done::Steered);
+        assert_eq!(client.queue_op(Op::Steer, &r, ""), Done::Steered(Delivered::Steered));
         seen.recv().unwrap();
         assert_eq!(seen.recv().unwrap().1, json!({"action": "steer", "sessionId": "s1", "message": "steer me", "author": "person"}));
+        assert_eq!(client.queue_op(Op::Steer, &r, ""), Done::Steered(Delivered::QueuedUntilAnswer(Some(9))));
+        assert_eq!(client.queue_op(Op::Steer, &r, ""), Done::Steered(Delivered::Unconfirmed));
     }
 
     #[test]

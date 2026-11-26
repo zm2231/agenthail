@@ -433,6 +433,20 @@ fn footer(cx: &Cx, block: &Block) -> Option<El> {
     Some(if user { col().w_full().items_end().child(line) } else { line })
 }
 
+pub fn empty(s: &App, id: &str, note: String) -> El {
+    let settled = s.panes.get(id).is_some_and(|p| p.caught_up && !p.earlier.loading && p.earlier.next == Some(0));
+    let note = if settled && note == "Loading the transcript…" { "Nothing to show in this conversation yet".to_string() } else { note };
+    let mut c = col().w_full().grow(1.0).items_center().justify_center().gap(12.0);
+    if !settled {
+        c = c.child(rune_kit::Loader::new().size(22.0).color(accent()).build(theme::kit()));
+    }
+    c = c.child(text(note).font(BODY_BOLD).color(faint()));
+    if let Some(earlier) = earlier_el(s, id) {
+        c = c.child(earlier);
+    }
+    c.child(el().h(80.0))
+}
+
 fn earlier_el(s: &App, id: &str) -> Option<El> {
     let pane = s.panes.get(id)?;
     let key = id.to_string();

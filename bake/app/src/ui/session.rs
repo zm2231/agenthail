@@ -232,7 +232,7 @@ pub(crate) fn session_screen(s: &App) -> El {
     } else if empty {
         let status = s.panes.get(&id).map(|p| p.status.clone()).unwrap_or_default();
         let note = if matches!(status.as_str(), "" | "loading" | "live") { "Loading the transcript…".to_string() } else { status };
-        center = center.child(transcript::loading(note));
+        center = center.child(transcript::empty(s, &id, note));
     } else {
         center = center.child(transcript::view(s, &id));
     }

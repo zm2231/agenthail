@@ -58,6 +58,11 @@ pub fn take_older(s: &mut App, id: String, generation: u64, result: Result<Older
                 pane.rebuild(&mut counter);
                 s.panes_moved = true;
             }
+            if pane.blocks.is_empty() {
+                s.counter = counter;
+                load_older(s, &id);
+                return;
+            }
         }
         Err(Miss::Gone) => {
             pane.earlier.next = Some(0);
