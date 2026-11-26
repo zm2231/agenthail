@@ -179,8 +179,16 @@ each host and merges by `ts`.
 
 A prompt is a user message the journal recorded from a person: messages from
 peers, task notifications, injected context and continuation summaries are
-left out, and so are subagents, delegated sessions, sessions an agent started
-and sessions mirrored from another host. A request scans at most 2000 journal
+left out, and so are subagents, delegated sessions and sessions mirrored from
+another host. Each user row carries who wrote it. A row recorded as the
+person's (`origin` `person`) is listed from any session, including one an agent
+started. Claude records the person's typing itself. For Codex, the journal
+looks up the `client_id` Codex keeps on each message in the senders Agenthail
+records for every message it sends: the person's sends read as `person`, an
+agent's or Agenthail's as `peer`. A message no Agenthail send recorded was typed
+into Codex itself and reads as `person`. A row with no origin, written before
+the journal recorded one, is listed only from a session no agent started, and
+its text must look typed. A request scans at most 2000 journal
 rows; when it stops short of `limit` it returns the cursor it reached, so a
 rare `q` match may take several pages.
 

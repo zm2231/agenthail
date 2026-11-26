@@ -38,6 +38,7 @@ type daemonSurface struct {
 	notice        string
 	nilResult     bool
 	sent          []string
+	messageIDs    []string
 	steered       []string
 	steeredAs     []string
 	models        []string
@@ -229,12 +230,13 @@ func TestScanBacksOffFailingRelayOnlySessionsAndRecovers(t *testing.T) {
 	}
 }
 
-func (f *daemonSurface) Send(_ context.Context, session *surface.Session, message string) (*surface.SendResult, error) {
+func (f *daemonSurface) Send(ctx context.Context, session *surface.Session, message string) (*surface.SendResult, error) {
 	if f.rejectBusy && session.Status == surface.StatusBusy {
 		return &surface.SendResult{Accepted: false}, nil
 	}
 	f.mu.Lock()
 	f.sent = append(f.sent, message)
+	f.messageIDs = append(f.messageIDs, surface.MessageUUID(ctx))
 	f.mu.Unlock()
 	if f.nilResult {
 		return nil, nil
@@ -248,12 +250,13 @@ func (f *daemonSurface) Send(_ context.Context, session *surface.Session, messag
 	}
 	return &surface.SendResult{UUID: turnID, Accepted: f.accepted, Notice: f.notice}, nil
 }
-func (f *daemonSurface) SendWithOptions(_ context.Context, session *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
+func (f *daemonSurface) SendWithOptions(ctx context.Context, session *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
 	if f.rejectBusy && session.Status == surface.StatusBusy {
 		return &surface.SendResult{Accepted: false}, nil
 	}
 	f.mu.Lock()
 	f.sent = append(f.sent, message)
+	f.messageIDs = append(f.messageIDs, surface.MessageUUID(ctx))
 	f.mu.Unlock()
 	if f.nilResult {
 		return nil, nil
@@ -270,6 +273,9 @@ func (f *daemonSurface) SendWithOptions(_ context.Context, session *surface.Sess
 }
 func (f *daemonSurface) StartSession(ctx context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
 	f.startOptions = append(f.startOptions, options)
+	f.mu.Lock()
+	f.messageIDs = append(f.messageIDs, surface.MessageUUID(ctx))
+	f.mu.Unlock()
 	f.startCeilings = append(f.startCeilings, surface.StartCeiling(ctx))
 	if f.startRefused != nil {
 		return nil, nil, f.startRefused
@@ -337,6 +343,7 @@ func (f *daemonSurface) Steer(ctx context.Context, _ *surface.Session, message s
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.steered = append(f.steered, message)
+	f.messageIDs = append(f.messageIDs, surface.MessageUUID(ctx))
 	f.steeredAs = append(f.steeredAs, surface.LabelSender(ctx, message))
 	return nil
 }
