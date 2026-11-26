@@ -37,6 +37,7 @@ pub struct Crew {
     claude_asked: HashMap<String, ClaudeAsk>,
     claude_loading: HashSet<String>,
     rows: HashMap<String, Session>,
+    deleted: HashSet<String>,
     row_asked: HashMap<String, RowAsk>,
     expanded: HashSet<String>,
     recent: Vec<String>,
@@ -49,7 +50,7 @@ pub enum Done {
 }
 
 pub(crate) fn fetched<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
-    s.crew.rows.get(id).or_else(|| s.crew.pages.values().flatten().find(|x| x.id == id))
+    s.crew.pages.values().flatten().find(|x| x.id == id).or_else(|| s.crew.rows.get(id))
 }
 
 fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'static) {
@@ -115,7 +116,8 @@ pub(crate) fn refresh(s: &mut App, id: &str) {
     }
     touch(s, id);
     page(s, id);
-    if !listed(s, id) && (s.crew.rows.contains_key(id) || known(s, id).and_then(crew::parent_of).is_some()) {
+    let unresolved_subagent = session(s, id).is_none() && known(s, id).and_then(crew::parent_of).is_some();
+    if (s.crew.rows.contains_key(id) || unresolved_subagent) && outside(s, id) {
         read_row(s, id);
     }
     if let Some(parent) = parent {
@@ -166,7 +168,8 @@ fn page(s: &mut App, id: &str) {
         return;
     }
     let key = crew::page_key(x);
-    if s.crew.loading.contains(id) || s.crew.asked.get(id).is_some_and(|a| !crew::page_due(a.key == key, a.at.elapsed())) {
+    let holds_open = s.selected.as_deref().is_some_and(|sel| s.crew.pages.get(id).is_some_and(|rows| rows.iter().any(|x| x.id == sel)));
+    if s.crew.loading.contains(id) || s.crew.asked.get(id).is_some_and(|a| !crew::page_due(a.key == key, a.at.elapsed(), holds_open)) {
         return;
     }
     s.crew.seq += 1;
@@ -201,7 +204,8 @@ pub(crate) fn done(s: &mut App, done: Done) {
             }
             s.crew.loading.remove(&id);
             match result {
-                Ok(rows) => {
+                Ok(mut rows) => {
+                    rows.retain(|x| !s.crew.deleted.contains(&x.id));
                     s.crew.errors.remove(&id);
                     keep_selected(s, &id, &rows);
                     s.crew.pages.insert(id, rows);
@@ -233,10 +237,18 @@ pub(crate) fn done(s: &mut App, done: Done) {
             asked.at = Instant::now();
             match result {
                 RowRead::Found(row) => {
+                    s.crew.deleted.remove(&id);
                     s.crew.rows.insert(id, row);
                 }
                 RowRead::Gone => {
                     s.crew.rows.remove(&id);
+                    for rows in s.crew.pages.values_mut() {
+                        rows.retain(|x| x.id != id);
+                    }
+                    if s.crew.deleted.len() >= 100 {
+                        s.crew.deleted.clear();
+                    }
+                    s.crew.deleted.insert(id);
                 }
                 RowRead::Failed(_) => {}
             }
@@ -247,6 +259,9 @@ pub(crate) fn done(s: &mut App, done: Done) {
 fn keep_selected(s: &mut App, parent: &str, rows: &[Session]) {
     let Some(sel) = s.selected.clone() else { return };
     if rows.iter().any(|x| x.id == sel) || s.sessions.iter().any(|x| x.id == sel) {
+        return;
+    }
+    if s.crew.deleted.contains(&sel) {
         return;
     }
     if let Some(row) = s.crew.pages.get(parent).and_then(|old| old.iter().find(|x| x.id == sel)).cloned() {

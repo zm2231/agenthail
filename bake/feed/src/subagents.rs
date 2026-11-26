@@ -60,11 +60,12 @@ pub fn page_key(x: &Session) -> String {
 }
 
 pub const PAGE_EVERY: Duration = Duration::from_secs(60);
+pub const PAGE_OPEN_EVERY: Duration = Duration::from_secs(15);
 pub const CLAUDE_EVERY: Duration = Duration::from_secs(15);
 pub const CLAUDE_IDLE_EVERY: Duration = Duration::from_secs(60);
 
-pub fn page_due(same_key: bool, since: Duration) -> bool {
-    !same_key || since >= PAGE_EVERY
+pub fn page_due(same_key: bool, since: Duration, holds_open: bool) -> bool {
+    !same_key || since >= if holds_open { PAGE_OPEN_EVERY } else { PAGE_EVERY }
 }
 
 pub struct Asked<'a> {
@@ -363,9 +364,11 @@ mod tests {
 
     #[test]
     fn the_hidden_page_is_read_again_when_its_counts_move_or_a_minute_passes() {
-        assert!(page_due(false, Duration::ZERO));
-        assert!(!page_due(true, Duration::from_secs(59)));
-        assert!(page_due(true, PAGE_EVERY));
+        assert!(page_due(false, Duration::ZERO, false));
+        assert!(!page_due(true, Duration::from_secs(59), false));
+        assert!(page_due(true, PAGE_EVERY, false));
+        assert!(!page_due(true, Duration::from_secs(14), true));
+        assert!(page_due(true, PAGE_OPEN_EVERY, true));
         let a = row(r#"{"id":"p","hiddenSubagents":{"count":3,"working":0},"liveHiddenSubagents":{"count":1,"working":0}}"#);
         let b = row(r#"{"id":"p","hiddenSubagents":{"count":3,"working":0},"liveHiddenSubagents":{"count":2,"working":0}}"#);
         assert_ne!(page_key(&a), page_key(&b));
