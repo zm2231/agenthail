@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,5 +48,46 @@ func TestStreamsSendBodyBytesBeforeTheFirstKeepalive(t *testing.T) {
 		if err != nil || line != ": connected\n" {
 			t.Fatalf("%s stream with nothing to replay sent %q before its first keepalive: %v", name, line, err)
 		}
+	}
+}
+
+func TestASessionStreamMarksWhereTheReplayReachesTheLiveStream(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 1)}
+	adapter.caps.Stream = true
+	d := newTestDaemon(t, reg, []surface.Surface{adapter})
+	for _, id := range []string{"message-1", "message-2"} {
+		payload := `{"itemId":"` + id + `","version":1,"op":"upsert","kind":"text","ts":"2026-10-03T12:00:00Z","body":"` + id + `"}`
+		if _, inserted, err := reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: id, Payload: []byte(payload)}, registry.SessionJournalRetention{Count: 10, Bytes: 4096}); err != nil || !inserted {
+			t.Fatalf("inserted=%v err=%v", inserted, err)
+		}
+	}
+	server := httptest.NewServer(dashboardRouter(d))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/session-stream?id="+from.ID+"&after=0", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	reader := bufio.NewReader(response.Body)
+	var rows []string
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("the stream ended before marking the live point, after rows %v: %v", rows, err)
+		}
+		if line == ": live\n" {
+			break
+		}
+		if body, ok := strings.CutPrefix(line, "data: "); ok {
+			rows = append(rows, body)
+		}
+	}
+	if len(rows) != 2 || !strings.Contains(rows[0], "message-1") || !strings.Contains(rows[1], "message-2") {
+		t.Fatalf("rows before the live point = %v", rows)
 	}
 }
