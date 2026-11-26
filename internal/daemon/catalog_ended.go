@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -230,6 +231,46 @@ func (d *Daemon) restoreEndedSession(item catalogRestore, publish func(ended, re
 		ended.LastActive = item.changed
 	}
 	return publish(ended, *session)
+}
+
+// presentUnlisted gives a session no discovery pass lists, such as one whose
+// start never opened it, the catalog row that listings and archive state read.
+// A session at work is left to the pass that lists it.
+func (d *Daemon) presentUnlisted(ctx context.Context, session *surface.Session) error {
+	if session.Status == surface.StatusBusy {
+		return nil
+	}
+	if _, listed, err := d.Registry.CatalogProjectionFingerprint(session.ID); err != nil || listed {
+		return err
+	}
+	adapter, err := d.adapters().For(session)
+	if err != nil {
+		return err
+	}
+	config, err := dashconfig.Load()
+	if err != nil {
+		return err
+	}
+	view, err := d.loadCatalogViewState()
+	if err != nil {
+		return err
+	}
+	counts, err := d.Registry.QueueCounts()
+	if err != nil {
+		return err
+	}
+	read, err := d.Registry.Session(session.ID)
+	if err != nil {
+		return err
+	}
+	alias, _ := d.Registry.ReverseAlias(read.ID)
+	observedAt := time.Now().UTC()
+	identityCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	identity := d.catalogIdentities.Identity(identityCtx, *read, observedAt, func() *projectresolve.CatalogProject { return d.storedCatalogProject(read.ID) })
+	cancel()
+	unchanged := &registry.SessionUpdate{From: *read, Owns: registry.SessionActivityFields, Guard: registry.AllSessionFields}
+	d.publishCatalogSession(ctx, adapter, *read, unchanged, identity, alias, counts[read.ID], d.limitResumeRow(read.ID), false, config, view, nil, observedAt, nil, nil)
+	return d.catalog.flushCommitted()
 }
 
 func (d *Daemon) discoverEndedSessions(ctx context.Context, adapter surface.Surface, keeper surface.EndedConversations, seen, hidden map[string]struct{}, observedAt time.Time, publish func(ended surface.Session, read *surface.Session, identity projectresolve.CatalogIdentity) bool) error {

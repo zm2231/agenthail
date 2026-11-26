@@ -149,10 +149,20 @@ func (c *Claude) startRoot(options surface.SessionStartOptions) (string, error) 
 	return root, nil
 }
 
+var (
+	// claudeStartTimeout outlasts the host's own open deadline, so the host,
+	// not the caller's deadline, decides whether a slow Claude started.
+	claudeStartTimeout = surface.SessionStartTimeout
+	// claudeAbandonTimeout bounds closing a conversation whose open was not
+	// confirmed, which outlasts the host's close grace.
+	claudeAbandonTimeout = 15 * time.Second
+)
+
 // StartSession opens a new conversation in the Claude host and sends the
 // message as its first turn. The host answers the session's permission
-// prompts, and the session has no Remote Control. The conversation id is
-// chosen here, so an open whose outcome is unknown still names the session.
+// prompts, and the session has no Remote Control. It returns a session only
+// once the host opened it and it was recorded: an open the host did not
+// confirm is closed there, so no conversation outlives a start that failed.
 func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
 	if err := validateClaudeStart(options); err != nil {
 		return nil, nil, err
@@ -161,28 +171,62 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 	if err != nil {
 		return nil, nil, err
 	}
+	ctx, cancel := startContext(ctx)
+	defer cancel()
 	id := uuid.NewString()
 	opened, err := c.hostOpen(ctx, claudehost.OpenRequest{
 		SessionID: id, Cwd: options.Cwd, Model: options.Model, PermissionMode: options.PermissionMode,
 		Effort: options.Effort, Agent: options.Agent, Name: options.Name,
 		ConfigDir: root,
 	})
+	if err != nil {
+		failure := claudeHostDeliveryError(fmt.Errorf("Claude creation: %w", err))
+		if surface.IsDeliveryOutcomeUnknown(failure) {
+			return nil, nil, c.abandonOpen(id, failure)
+		}
+		return nil, nil, failure
+	}
 	session := &surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds", PID: opened.PID, Name: options.Name, Cwd: options.Cwd, Status: surface.StatusIdle, Source: "agenthail", ConfiguredModel: options.Model, LastActive: time.Now()}
 	if opened.PID > 0 {
 		session.PIDIdentity, _ = processIdentity(opened.PID)
 	}
-	if err != nil {
-		failure := claudeHostDeliveryError(fmt.Errorf("Claude creation: %w", err))
-		if surface.IsDeliveryOutcomeUnknown(failure) {
-			return session, nil, failure
-		}
-		return nil, nil, failure
-	}
 	if err := surface.SessionReady(ctx, *session); err != nil {
-		return session, nil, fmt.Errorf("record the new conversation before its first turn: %w", err)
+		return nil, nil, c.abandonOpen(id, fmt.Errorf("record the new conversation before its first turn: %w", err))
 	}
 	sent, err := c.sendHostTurn(ctx, session, options.Message, "", nil, surface.SourceSessionID(ctx) == surface.PersonSessionID, false)
 	return session, sent, err
+}
+
+// startContext keeps the caller's values and its cancellation, as at
+// shutdown, but not its deadline, which is shorter than the host's own.
+func startContext(caller context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(caller), claudeStartTimeout)
+	stop := context.AfterFunc(caller, func() {
+		if errors.Is(caller.Err(), context.Canceled) {
+			cancel()
+		}
+	})
+	return ctx, func() {
+		stop()
+		cancel()
+	}
+}
+
+// abandonOpen closes a conversation the start is giving up on. Once the host
+// confirms it is closed or was never open, the start failed outright; a host
+// that does not answer leaves its outcome unknown.
+func (c *Claude) abandonOpen(id string, cause error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), claudeAbandonTimeout)
+	defer cancel()
+	err := c.host.client.Close(ctx, id)
+	if err == nil || claudehost.IsCode(err, "not_open") {
+		var unknown surface.DeliveryOutcomeUnknownError
+		if errors.As(cause, &unknown) {
+			return surface.DeliveryUnavailable(fmt.Errorf("%w; the Claude host has closed it", unknown.Err))
+		}
+		return cause
+	}
+	return surface.DeliveryOutcomeUnknown(fmt.Errorf("%w; closing it on the Claude host failed too: %w", cause, err))
 }
 
 // claudeBackgroundStarter starts a conversation as a Claude Code background

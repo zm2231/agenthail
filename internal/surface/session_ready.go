@@ -1,6 +1,14 @@
 package surface
 
-import "context"
+import (
+	"context"
+	"time"
+)
+
+// SessionStartTimeout bounds a new session's open and first turn. A starter
+// whose provider bounds its own open waits this long rather than for its
+// caller's deadline, so the provider decides whether a slow start opened.
+const SessionStartTimeout = 90 * time.Second
 
 type sessionReadyKey struct{}
 

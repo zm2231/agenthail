@@ -29,45 +29,48 @@ import (
 )
 
 type daemonSurface struct {
-	mu             sync.Mutex
-	kind           surface.SurfaceKind
-	sessions       map[string]surface.Session
-	resolveStalls  bool
-	observations   map[string]*surface.TurnObservation
-	accepted       bool
-	notice         string
-	nilResult      bool
-	sent           []string
-	steered        []string
-	steeredAs      []string
-	models         []string
-	modelOptions   []surface.ModelOption
-	listCalls      atomic.Int32
-	rejectBusy     bool
-	sendErr        error
-	turnID         string
-	observeErr     error
-	listErr        error
-	observeCalls   atomic.Int32
-	transcripts    map[string]string
-	limitReads     atomic.Int32
-	listings       atomic.Int32
-	startOptions   []surface.SessionStartOptions
-	startCeilings  []json.RawMessage
-	startErr       error
-	startRefused   error
-	startHook      func()
-	firstTurn      func()
-	unrecordable   bool
-	caps           surface.Capabilities
-	streamEvents   []surface.StreamEvent
-	streamErr      error
-	contextUsage   *surface.ContextUsage
-	searchResults  []surface.SessionSearchResult
-	searchErr      error
-	compactCalls   atomic.Int32
-	compactRelease <-chan struct{}
-	compactErr     error
+	mu            sync.Mutex
+	kind          surface.SurfaceKind
+	sessions      map[string]surface.Session
+	resolveStalls bool
+	observations  map[string]*surface.TurnObservation
+	accepted      bool
+	notice        string
+	nilResult     bool
+	sent          []string
+	steered       []string
+	steeredAs     []string
+	models        []string
+	modelOptions  []surface.ModelOption
+	listCalls     atomic.Int32
+	rejectBusy    bool
+	sendErr       error
+	turnID        string
+	observeErr    error
+	listErr       error
+	observeCalls  atomic.Int32
+	transcripts   map[string]string
+	limitReads    atomic.Int32
+	listings      atomic.Int32
+	startOptions  []surface.SessionStartOptions
+	startCeilings []json.RawMessage
+	startErr      error
+	startRefused  error
+	// openUnconfirmed returns the session before it is recorded, as a
+	// starter does whose open the provider never confirmed.
+	openUnconfirmed error
+	startHook       func()
+	firstTurn       func()
+	unrecordable    bool
+	caps            surface.Capabilities
+	streamEvents    []surface.StreamEvent
+	streamErr       error
+	contextUsage    *surface.ContextUsage
+	searchResults   []surface.SessionSearchResult
+	searchErr       error
+	compactCalls    atomic.Int32
+	compactRelease  <-chan struct{}
+	compactErr      error
 }
 
 type runtimeDaemonSurface struct {
@@ -277,6 +280,9 @@ func (f *daemonSurface) StartSession(ctx context.Context, options surface.Sessio
 	}
 	session := &surface.Session{ID: "started", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Name: "Started conversation", Cwd: options.Cwd, Status: surface.StatusBusy, Source: "appServer", Transport: "managed", LastActive: time.Now()}
 	f.sessions[session.ID] = *session
+	if f.openUnconfirmed != nil {
+		return session, nil, f.openUnconfirmed
+	}
 	ready := *session
 	if f.unrecordable {
 		ready.RuntimeKind = ""

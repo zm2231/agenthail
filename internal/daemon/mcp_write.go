@@ -87,16 +87,23 @@ func mcpActionOutcome(reply actionReply) (json.RawMessage, *mcpRefusal) {
 		var submitted struct {
 			Status  string
 			TaskID  int64 `json:"taskId"`
+			Detail  string
 			Session struct {
 				ID string `json:"id"`
 			} `json:"session"`
 		}
 		if json.Unmarshal(reply.Body, &submitted) == nil && submitted.Status == "submitted" {
-			if submitted.TaskID != 0 {
-				encoded, err := json.Marshal(map[string]any{"taskId": submitted.TaskID, "sessionId": submitted.Session.ID, "state": registry.TaskRunning, "outcome": "unknown"})
-				if err == nil {
-					return encoded, nil
-				}
+			var outcome map[string]any
+			switch {
+			case submitted.TaskID != 0:
+				outcome = map[string]any{"taskId": submitted.TaskID, "sessionId": submitted.Session.ID, "state": registry.TaskRunning, "outcome": "unknown"}
+			case submitted.Session.ID != "":
+				outcome = map[string]any{"sessionId": submitted.Session.ID, "outcome": "unknown", "detail": submitted.Detail + " Whether its first message arrived is not known; read the session before sending it again."}
+			default:
+				return nil, mcpUnknownOutcome()
+			}
+			if encoded, err := json.Marshal(outcome); err == nil {
+				return encoded, nil
 			}
 			return nil, mcpUnknownOutcome()
 		}

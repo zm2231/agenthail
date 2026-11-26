@@ -353,6 +353,10 @@ func (c Client) Hello(ctx context.Context) (Hello, error) {
 func (c Client) Open(ctx context.Context, request OpenRequest) (Session, error) {
 	var out Session
 	hello, err := c.Hello(ctx)
+	var unknown *OutcomeUnknownError
+	if errors.As(err, &unknown) {
+		return out, fmt.Errorf("the Claude host did not answer hello, so nothing was opened: %v", unknown.Err)
+	}
 	if err == nil && hello.Protocol != Protocol {
 		err = fmt.Errorf("%w: pid %d runs %s protocol %d, and this build opens sessions with protocol %d", ErrOtherProtocol, hello.PID, hello.HostVersion, hello.Protocol, Protocol)
 	}

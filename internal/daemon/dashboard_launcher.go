@@ -115,7 +115,7 @@ func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashb
 		return readyErr
 	})
 	session, sent, startErr := starter.StartSession(ctx, options)
-	if session == nil {
+	if session == nil || startErr != nil && recorded == nil && readyErr == nil {
 		if startErr == nil {
 			startErr = errors.New("session starter returned no session")
 		}
@@ -248,6 +248,9 @@ func (d *Daemon) launchSession(ctx context.Context, request dashboardActionReque
 		return actionResult{}, createStorageFailure(launchResult.Session, fmt.Sprintf("session was created, but could not be recorded before its first turn, which was not sent: %s; do not retry automatically", readyErr), map[string]any{"launcher": request.Launcher})
 	}
 	startErr := launchErr
+	if launchErr != nil && launchResult.Session != nil && recorded == nil {
+		return actionResult{}, d.unstartedSession(request.Message, launchErr)
+	}
 	if launchErr != nil && launchResult.Session == nil {
 		var acceptedErr surface.LaunchAcceptedError
 		switch {

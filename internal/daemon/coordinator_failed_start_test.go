@@ -201,3 +201,29 @@ func TestACoordinatorStartThatFailsKeepsThePreviousLead(t *testing.T) {
 		t.Fatalf("lead=%q after an outcome-unknown start, want the new conversation", got)
 	}
 }
+
+func TestACoordinatorStartWhoseOpenIsNotConfirmedKeepsThePreviousLeadAndRecordsNothing(t *testing.T) {
+	d, r, fake, repo := projectsFixture(t)
+	if response := runDashboardAction(t, d, `{"action":"project-add","path":"`+repo+`"}`); response.Code != http.StatusOK {
+		t.Fatalf("add: %d %s", response.Code, response.Body)
+	}
+	if response := runDashboardAction(t, d, `{"action":"coordinator-set","sessionId":"from","name":"captain"}`); response.Code != http.StatusOK {
+		t.Fatalf("set: %d %s", response.Code, response.Body)
+	}
+	d.Surfaces[0] = goneConversationSurface{daemonSurface: fake, gone: map[string]bool{"from": true}}
+	pastGoneGrace(d)
+	fake.openUnconfirmed = surface.DeliveryOutcomeUnknown(errors.New("the Claude host did not answer"))
+	if response := runDashboardAction(t, d, `{"action":"coordinator-send","name":"captain","message":"hello"}`); response.Code < http.StatusMultipleChoices {
+		t.Fatalf("a start whose open was not confirmed was reported as sent: %d %s", response.Code, response.Body)
+	}
+	spec, err := r.CoordinatorNamed("captain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lead, err := r.CoordinatorSessionID(spec); err != nil || lead != "from" {
+		t.Fatalf("lead=%q err=%v, want the previous lead kept", lead, err)
+	}
+	if _, err := r.Session("started"); err == nil {
+		t.Fatal("the unconfirmed conversation was recorded")
+	}
+}
