@@ -405,6 +405,7 @@ fn take_one(s: &mut Prefs, done: Done) {
                         s.base_ok_at = s.tick;
                         if std::mem::take(&mut s.rewatch) {
                             watch(s, b.event_cursor.max(s.seen));
+                            s.rest_pending = true;
                         }
                     }
                     s.base = Some(r);
