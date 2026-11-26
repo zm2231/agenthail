@@ -259,20 +259,22 @@ pub(crate) fn done(s: &mut App, done: Done) {
                     s.crew.deleted.remove(&id);
                     s.crew.rows.insert(id, row);
                 }
-                RowRead::Gone => {
-                    s.crew.rows.remove(&id);
-                    for rows in s.crew.pages.values_mut() {
-                        rows.retain(|x| x.id != id);
-                    }
-                    if s.crew.deleted.len() >= 100 {
-                        s.crew.deleted.clear();
-                    }
-                    s.crew.deleted.insert(id);
-                }
+                RowRead::Gone => forget(s, id),
                 RowRead::Failed(_) => {}
             }
         }
     }
+}
+
+pub(crate) fn forget(s: &mut App, id: String) {
+    s.crew.rows.remove(&id);
+    for rows in s.crew.pages.values_mut() {
+        rows.retain(|x| x.id != id);
+    }
+    if s.crew.deleted.len() >= 100 {
+        s.crew.deleted.clear();
+    }
+    s.crew.deleted.insert(id);
 }
 
 fn keep_open_lineage(s: &mut App, parent: &str, rows: &[Session]) {
