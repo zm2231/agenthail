@@ -76,6 +76,7 @@ pub struct App {
     pub diff: rune_kit::diff::DiffState,
     pub diff_key: (String, usize),
     pub ov: Over,
+    revealed: Option<String>,
     client: Option<Client>,
     fixtures: Option<Fixtures>,
     inbox: Receiver<Bg>,
@@ -156,6 +157,7 @@ fn init() -> App {
         diff: rune_kit::diff::DiffState::new(Vec::new()),
         diff_key: (String::new(), usize::MAX),
         ov: Over::new(world, fixture.is_none()),
+        revealed: None,
         client: None,
         fixtures: None,
         inbox,
@@ -538,6 +540,14 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     s.counter = counter;
     if s.tab == Tab::Changes && (changed || s.diff_key.0 != s.selected.clone().unwrap_or_default()) {
         refresh_diff(s);
+    }
+    if s.screen != Screen::Session {
+        s.revealed = None;
+    } else if s.revealed != s.selected {
+        if let Some(id) = &s.selected {
+            tx.scroll_into_view_in("sidebar-list", format!("row-{id}"));
+        }
+        s.revealed = s.selected.clone();
     }
     tx.wake_after(Duration::from_millis(if busy { 16 } else { 250 }));
     changed
