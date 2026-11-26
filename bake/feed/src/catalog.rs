@@ -104,6 +104,8 @@ pub struct Pr {
 pub struct TurnState {
     #[serde(default)]
     pub state: String,
+    #[serde(default)]
+    pub reason: String,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -652,6 +654,16 @@ impl Client {
             .set("Idempotency-Key", key)
             .send_json(body)
         {
+            Ok(response) => response.into_json().map_err(|e| RespondError { message: format!("the daemon's reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: true, answered: true, reply: Value::Null }),
+            Err(ureq::Error::Status(code, response)) => Err(RespondError::from_status(name, code, &response.into_string().unwrap_or_default())),
+            Err(ureq::Error::Transport(error)) => Err(RespondError::from_transport(&error)),
+        }
+    }
+}
+
+impl Client {
+    pub(crate) fn post_empty(&self, path: &str, name: &str, key: &str) -> std::result::Result<Value, RespondError> {
+        match self.agent.post(&format!("{}{path}", self.base)).set("Authorization", &format!("Bearer {}", self.token)).set("Idempotency-Key", key).call() {
             Ok(response) => response.into_json().map_err(|e| RespondError { message: format!("the daemon's reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: true, answered: true, reply: Value::Null }),
             Err(ureq::Error::Status(code, response)) => Err(RespondError::from_status(name, code, &response.into_string().unwrap_or_default())),
             Err(ureq::Error::Transport(error)) => Err(RespondError::from_transport(&error)),

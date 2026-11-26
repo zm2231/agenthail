@@ -1,9 +1,11 @@
 pub mod action;
 pub mod blocks;
+pub mod brief;
 pub mod question;
 pub mod settings;
 pub mod catalog;
 pub mod create;
+pub mod decisions;
 pub mod composer;
 pub mod derive;
 pub mod edits;
@@ -13,6 +15,7 @@ pub mod menu;
 pub mod source;
 pub mod store;
 pub mod summary;
+pub mod version;
 pub mod wire;
 
 pub use blocks::{Block, Kind};
