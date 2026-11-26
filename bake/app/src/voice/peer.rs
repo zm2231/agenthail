@@ -24,13 +24,21 @@ impl Web {
             .with_incognito(true)
             .with_autoplay(true)
             .with_initialization_script(BRIDGE)
-            .with_navigation_handler(move |url| peer_allowed(&url, &navigation))
+            .with_navigation_handler(move |url| {
+                let allowed = peer_allowed(&url, &navigation);
+                if !allowed {
+                    eprintln!("voice: the audio page tried to leave for {}", without_query(&url));
+                }
+                allowed
+            })
             .with_permission_handler(|kind| match kind {
                 PermissionKind::Microphone => PermissionResponse::Allow,
                 _ => PermissionResponse::Deny,
             })
             .with_ipc_handler(move |request: Request<String>| {
-                if !peer_allowed(&request.uri().to_string(), &messages) {
+                let from = request.uri().to_string();
+                if !peer_allowed(&from, &messages) {
+                    eprintln!("voice: ignored a message from {}", without_query(&from));
                     return;
                 }
                 let Ok(message) = serde_json::from_str::<serde_json::Value>(request.body()) else { return };
@@ -40,8 +48,16 @@ impl Web {
                 }
             })
             .with_on_page_load_handler(move |event, url| {
-                if matches!(event, PageLoadEvent::Finished) && peer_allowed(&url, &loads) {
-                    let _ = heard.send((LOADED.into(), String::new()));
+                let shown = without_query(&url);
+                match event {
+                    PageLoadEvent::Started => eprintln!("voice: loading {shown}"),
+                    PageLoadEvent::Finished if peer_allowed(&url, &loads) => {
+                        eprintln!("voice: loaded {shown}");
+                        let _ = heard.send((LOADED.into(), String::new()));
+                    }
+                    PageLoadEvent::Finished => {
+                        let _ = heard.send(("unavailable".into(), format!("The audio page opened at an unexpected address: {shown}")));
+                    }
                 }
             })
             .build_as_child(slot)
@@ -51,6 +67,7 @@ impl Web {
 
     pub fn check(&self, heard: Sender<(String, String)>) {
         let asked = self.view.evaluate_script_with_callback("typeof window.agenthailVoice === 'object'", move |answer| {
+            eprintln!("voice: readiness check answered {}", answer.trim());
             let message = if answer.trim() == "true" {
                 ("ready".to_string(), String::new())
             } else {
@@ -68,6 +85,10 @@ impl Web {
             log_eval(&error.to_string());
         }
     }
+}
+
+fn without_query(url: &str) -> &str {
+    url.split(['?', '#']).next().unwrap_or(url)
 }
 
 fn log_eval(error: &str) {

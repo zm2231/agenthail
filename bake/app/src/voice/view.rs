@@ -214,7 +214,8 @@ fn controls(w: &Win) -> El {
                 .w_full(),
         );
         if let Some(reason) = call.unavailable().filter(|r| r != OCCUPIED && r != ELSEWHERE && call.error.as_ref() != Some(r) && call.connection_error.as_ref() != Some(r)) {
-            dock = dock.child(text(reason).font(META).color(faint()).wrap().w_full().key("voice-unavailable"));
+            let tone = if call.setup_stuck() { failed() } else { faint() };
+            dock = dock.child(text(reason).font(META).color(tone).wrap().w_full().key("voice-unavailable"));
         }
         if call.routed() {
             dock = dock.child(

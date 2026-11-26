@@ -498,3 +498,113 @@ fn a_stop_error_after_the_host_confirmed_the_end_changes_nothing() {
     assert!(!call.hangup_unconfirmed && call.error.is_none());
     assert!(call.can_call());
 }
+
+#[test]
+fn each_audio_setup_stage_says_what_it_waits_for_and_when_it_is_stuck() {
+    let mut call = Call::new("");
+    assert_eq!(call.unavailable().as_deref(), Some("Call audio is not ready."));
+    call.tick(1.0);
+    let said = call.setup(Setup::Window);
+    assert_eq!(said, vec![Effect::Note(Setup::Window.waiting().into())]);
+    assert!(call.setup(Setup::Window).is_empty(), "the same stage is said once");
+    assert_eq!(call.unavailable().as_deref(), Some(Setup::Window.waiting()));
+    call.tick(3.9);
+    assert!(!call.setup_stuck());
+    let stuck = call.tick(4.0);
+    assert!(stuck.contains(&Effect::Note(Setup::Window.stuck().into())));
+    assert!(call.setup_stuck());
+    assert_eq!(call.unavailable().as_deref(), Some(Setup::Window.stuck()));
+    assert!(!call.tick(9.0).iter().any(|e| matches!(e, Effect::Note(_))), "stuck is said once");
+    call.setup(Setup::Page);
+    assert!(!call.setup_stuck(), "a later stage starts its own wait");
+    call.tick(23.9);
+    assert_eq!(call.unavailable().as_deref(), Some(Setup::Page.waiting()));
+    call.tick(24.0);
+    assert_eq!(call.unavailable().as_deref(), Some(Setup::Page.stuck()));
+    call.setup(Setup::Check);
+    call.peer("ready", "", 25.0);
+    assert!(!call.setup_stuck());
+    assert_ne!(call.unavailable().as_deref(), Some(Setup::Check.waiting()));
+    assert!(call.setup(Setup::Page).is_empty(), "a ready page needs no setup");
+}
+
+#[test]
+fn an_unavailable_page_replaces_the_wait_with_its_error() {
+    let mut call = Call::new("");
+    call.setup(Setup::Page);
+    let effects = call.peer("unavailable", "The audio page opened at an unexpected address: http://127.0.0.1:1/x", 1.0);
+    assert!(effects.contains(&Effect::Note("The audio page opened at an unexpected address: http://127.0.0.1:1/x".into())));
+    assert_eq!(call.error.as_deref(), Some("The audio page opened at an unexpected address: http://127.0.0.1:1/x"));
+    assert_eq!(call.unavailable().as_deref(), Some("Call audio is not ready."));
+    assert!(!call.setup_stuck());
+}
+
+fn milestones(call: &Call) -> Vec<String> {
+    call.trail.last().unwrap().milestones.iter().map(|(n, _)| n.clone()).collect()
+}
+
+#[test]
+fn the_call_log_follows_one_call_from_prepare_to_hangup() {
+    let mut call = ready();
+    let id = started(&mut call, 1.0);
+    let ticked = call.tick(2.0);
+    call.reply(refresh(&ticked), Ok(state(json!({"phase": "negotiating", "attemptId": id, "sdp": "v=0 answer"}))), 2.0);
+    call.peer("connection", "connected", 2.5);
+    let connected = only_job(&call.peer("channel", "open", 2.5));
+    call.reply(connected, Ok(state(json!({"phase": "connected", "attemptId": id}))), 3.0);
+    call.hangup();
+    let attempt = call.trail.last().unwrap();
+    assert_eq!(attempt.id, id);
+    assert_eq!(attempt.cause.as_deref(), Some("local_hangup"));
+    assert_eq!(
+        milestones(&call),
+        ["prepared", "microphone_granted", "offer_submitted", "host_start_accepted", "sdp_applied", "peer_connected", "data_channel_open", "host_connected", "local_ended"]
+    );
+    let at: Vec<f64> = attempt.milestones.iter().map(|(_, s)| *s).collect();
+    assert!(at.windows(2).all(|w| w[0] <= w[1]), "{at:?}");
+    assert!(call.trail.changed);
+}
+
+#[test]
+fn the_call_log_names_why_a_call_ended() {
+    let mut call = ready();
+    call.tick(0.0);
+    let select = only_job(&call.call());
+    let prepare = only_job(&call.reply(select, Ok(state(json!({"phase": "ready"}))), 0.0));
+    call.reply(prepare, Ok(state(json!({"phase": "ready"}))), 0.0);
+    let id = call.attempt().unwrap().to_string();
+    call.mic(&id, false);
+    assert_eq!(call.trail.last().unwrap().cause.as_deref(), Some("microphone_denied"));
+
+    let mut call = ready();
+    let id = started(&mut call, 0.0);
+    let ticked = call.tick(5.0);
+    call.reply(refresh(&ticked), Ok(state(json!({"phase": "ended", "attemptId": id}))), 5.0);
+    assert_eq!(call.trail.last().unwrap().cause.as_deref(), Some("host_ended"));
+
+    let mut call = ready();
+    let id = dialed(&mut call);
+    let start = only_job(&call.peer("offer", "v=0", 0.0));
+    call.reply(start, Err(Failure { message: "refused".into(), host: Some(state(json!({"phase": "ready"}))) }), 0.0);
+    let attempt = call.trail.last().unwrap();
+    assert_eq!((attempt.id.as_str(), attempt.cause.as_deref(), attempt.failed_at.as_deref()), (id.as_str(), Some("host_start_rejected"), Some("host_start")));
+}
+
+#[test]
+fn a_saved_call_log_keeps_the_last_twenty_and_closes_unfinished_calls() {
+    let mut trail = Trail::default();
+    for k in 0..25 {
+        trail.begin(&format!("call-{k}"), 0.0);
+        if k != 24 {
+            trail.end(&format!("call-{k}"), "local_hangup", 1.0);
+        }
+    }
+    assert_eq!(trail.attempts.len(), KEPT_CALLS);
+    assert_eq!(trail.attempts[0].id, "call-5");
+    let loaded = Trail::load(&trail.save());
+    assert_eq!(loaded.attempts.len(), KEPT_CALLS);
+    assert_eq!(loaded.last().unwrap().cause.as_deref(), Some(UNFINISHED));
+    assert!(loaded.changed, "closing an unfinished call is saved");
+    assert_eq!(loaded.attempts[0].milestones, vec![("local_ended".to_string(), 1.0)]);
+    assert!(Trail::load("not json").attempts.is_empty());
+}

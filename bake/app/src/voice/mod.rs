@@ -12,7 +12,9 @@ use std::time::Duration;
 use feed::catalog::Client;
 #[cfg(target_os = "macos")]
 use feed::voice::Peer;
-use feed::voice::{Action, Call, Effect, Failure, Job, Req, State};
+use feed::voice::{Action, Call, Effect, Failure, Job, Req, State, Trail};
+#[cfg(target_os = "macos")]
+use feed::voice::Setup;
 use rune::{AppSpec, Chrome, MicPermission, NativeView, TextEdit, Tx, Voice, WindowHandle, WindowOptions, WindowSpec};
 
 thread_local! {
@@ -54,7 +56,9 @@ impl Win {
             None => Err("Voice needs the Agenthail daemon. Start it, then open this window again.".into()),
         };
         let mut call = Call::new(target);
+        call.trail = load_trail();
         if let Err(error) = &peer {
+            eprintln!("voice: {error}");
             call.error = Some(error.clone());
         }
         Win {
@@ -93,6 +97,7 @@ impl Win {
                     self.eval(&format!("void window.agenthailVoice.answer({quoted})"));
                 }
                 Effect::PeerMute(muted) => self.eval(&format!("window.agenthailVoice && window.agenthailVoice.mute({muted})")),
+                Effect::Note(note) => eprintln!("voice: {note}"),
             }
         }
     }
@@ -127,16 +132,25 @@ impl Win {
 
     #[cfg(target_os = "macos")]
     fn build_peer(&mut self) {
-        if self.web.is_some() || !self.slot.in_window() {
+        if self.web.is_some() || self.call.closed() {
             return;
         }
         let Ok(peer) = self.peer.clone() else { return };
+        if !self.slot.in_window() {
+            let effects = self.call.setup(Setup::Window);
+            self.run(effects);
+            return;
+        }
         let effects = self.call.peer("loading", "", self.clock);
+        self.run(effects);
+        let effects = self.call.setup(Setup::Page);
         self.run(effects);
         match peer::Web::build(&self.slot, &peer, self.heard.0.clone()) {
             Ok(web) => self.web = Some(web),
             Err(error) => {
-                let effects = self.call.peer("unavailable", &format!("The audio page couldn't open: {error}"), self.clock);
+                let error = format!("The audio page couldn't open: {error}");
+                self.peer = Err(error.clone());
+                let effects = self.call.peer("unavailable", &error, self.clock);
                 self.run(effects);
             }
         }
@@ -242,8 +256,16 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
         changed = true;
     }
     while let Ok((kind, value)) = w.heard.1.try_recv() {
+        match kind.as_str() {
+            "loaded" => {}
+            "offer" => eprintln!("voice: the audio page made its offer"),
+            _ if value.is_empty() => eprintln!("voice: the audio page said {kind}"),
+            _ => eprintln!("voice: the audio page said {kind}: {value}"),
+        }
         #[cfg(target_os = "macos")]
         if kind == peer::LOADED {
+            let effects = w.call.setup(Setup::Check);
+            w.run(effects);
             if let Some(web) = &w.web {
                 web.check(w.heard.0.clone());
             }
@@ -260,6 +282,31 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
     }
     let effects = w.call.tick(t);
     w.run(effects);
+    if w.call.trail.changed {
+        w.call.trail.changed = false;
+        save_trail(&w.call.trail);
+    }
     tx.wake_after(Duration::from_millis(100));
     changed
+}
+
+
+fn trail_file() -> Option<std::path::PathBuf> {
+    if rune::is_headless() {
+        return None;
+    }
+    let home = std::env::var_os("HOME")?;
+    Some(std::path::PathBuf::from(home).join("Library/Application Support/Agenthail/voice-calls.json"))
+}
+
+fn load_trail() -> Trail {
+    trail_file().and_then(|path| std::fs::read_to_string(path).ok()).map(|saved| Trail::load(&saved)).unwrap_or_default()
+}
+
+fn save_trail(trail: &Trail) {
+    let Some(path) = trail_file() else { return };
+    let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&path, trail.save()));
+    if let Err(error) = written {
+        eprintln!("voice: the call log couldn't be saved: {error}");
+    }
 }
