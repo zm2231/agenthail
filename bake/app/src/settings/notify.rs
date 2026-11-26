@@ -28,9 +28,6 @@ fn desktop(s: &Prefs, status: &NotifyStatus) -> El {
     if problem {
         rows.push(parts::problem(status.detail()));
     }
-    if !on && let Some(permission) = s.permission {
-        rows.extend(own(permission));
-    }
     rows.push(buttons);
     section("", rows, Some("Agenthail notifies when an agent finishes or fails, and when a message can't be delivered.".into()))
 }
@@ -71,8 +68,7 @@ pub fn page(s: &Prefs) -> El {
         Some(Err(f)) => out = out.child(parts::failure(s, f)),
         Some(Ok(st)) => out = out.child(desktop(s, &st.notifications)),
     }
-    if !matches!(&s.settings, Some(Ok(_)))
-        && !std::env::var_os("HOME").is_some_and(|home| daemon_posts(std::path::Path::new(&home)))
+    if !std::env::var_os("HOME").is_some_and(|home| daemon_posts(std::path::Path::new(&home)))
         && let Some(note) = s.permission.and_then(own)
     {
         out = out.child(section("", vec![note], None));
