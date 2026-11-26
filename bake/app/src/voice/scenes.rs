@@ -187,6 +187,6 @@ fn route_typed(w: &mut Win) {
 fn setup_stuck(w: &mut Win) {
     w.call = Call::new("");
     w.call.tick(0.0);
-    w.call.setup(feed::voice::Setup::Page);
+    w.call.setup(feed::voice::Setup::Page, 0.0);
     w.call.tick(20.0);
 }

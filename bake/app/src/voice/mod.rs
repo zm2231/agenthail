@@ -158,7 +158,7 @@ impl Win {
         web.eval("window.agenthailCall = \"\"; window.agenthailVoice && window.agenthailVoice.end()");
         web.reload(peer);
         let mut effects = self.call.peer("loading", "", self.clock);
-        effects.extend(self.call.setup(Setup::Page));
+        effects.extend(self.call.setup(Setup::Page, self.clock));
         self.run(effects);
     }
 
@@ -172,14 +172,14 @@ impl Win {
         }
         let Ok(peer) = self.peer.clone() else { return false };
         if !self.slot.in_window() {
-            let effects = self.call.setup(Setup::Window);
+            let effects = self.call.setup(Setup::Window, self.clock);
             let said = !effects.is_empty();
             self.run(effects);
             return said;
         }
         let effects = self.call.peer("loading", "", self.clock);
         self.run(effects);
-        let effects = self.call.setup(Setup::Page);
+        let effects = self.call.setup(Setup::Page, self.clock);
         self.run(effects);
         match peer::Web::build(&self.slot, &peer, self.heard.0.clone()) {
             Ok(web) => self.web = Some(web),
@@ -355,7 +355,7 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
         #[cfg(target_os = "macos")]
         if kind == peer::LOADED {
             w.loads += 1;
-            let effects = w.call.setup(Setup::Check);
+            let effects = w.call.setup(Setup::Check, t);
             changed |= !effects.is_empty();
             w.run(effects);
             if let Some(web) = &w.web {

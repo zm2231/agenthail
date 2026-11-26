@@ -492,11 +492,12 @@ impl Call {
         }
     }
 
-    pub fn setup(&mut self, stage: Setup) -> Vec<Effect> {
+    pub fn setup(&mut self, stage: Setup, now: f64) -> Vec<Effect> {
         if self.closed || self.ready || self.setup.is_some_and(|(s, _)| s == stage) {
             return Vec::new();
         }
-        self.setup = Some((stage, self.clock));
+        self.clock = now;
+        self.setup = Some((stage, now));
         self.setup_stuck = false;
         self.out.push(Effect::Note(stage.waiting().into()));
         self.drain()

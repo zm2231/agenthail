@@ -536,14 +536,14 @@ fn a_readiness_check_counts_only_while_the_page_is_being_checked() {
     let mut call = Call::new("");
     call.peer("loading", "", 0.0);
     assert!(call.checked(true, 0.0).is_empty(), "no check was asked for yet");
-    call.setup(Setup::Check);
+    call.setup(Setup::Check, 0.0);
     call.checked(true, 1.0);
     assert!(call.ready);
     assert!(call.checked(false, 2.0).is_empty(), "a late failed check can't undo a ready page");
     assert!(call.ready && call.error.is_none());
     let mut failing = Call::new("");
     failing.peer("loading", "", 0.0);
-    failing.setup(Setup::Check);
+    failing.setup(Setup::Check, 0.0);
     failing.checked(false, 1.0);
     assert!(failing.error.as_deref().unwrap().starts_with("The audio page didn't start"));
 }
@@ -585,10 +585,10 @@ fn only_the_readiness_check_makes_a_reloaded_page_ready() {
     connected(&mut call);
     call.hangup();
     call.peer("loading", "", 1.0);
-    call.setup(Setup::Page);
+    call.setup(Setup::Page, 0.0);
     assert!(call.heard("", "ready", "", 1.0).is_empty());
     assert!(!call.ready, "a ready message the page sent itself doesn't count");
-    call.setup(Setup::Check);
+    call.setup(Setup::Check, 0.0);
     call.checked(true, 2.0);
     assert!(call.ready);
 }
@@ -597,7 +597,7 @@ fn only_the_readiness_check_makes_a_reloaded_page_ready() {
 fn a_page_that_fails_its_check_without_a_call_ends_no_audio() {
     let mut call = Call::new("");
     call.peer("loading", "", 0.0);
-    call.setup(Setup::Check);
+    call.setup(Setup::Check, 0.0);
     let effects = call.checked(false, 1.0);
     assert!(!effects.contains(&Effect::PeerEnd), "ending audio would reload the page and check it again");
     assert!(!call.ready);
@@ -797,9 +797,9 @@ fn each_audio_setup_stage_says_what_it_waits_for_and_when_it_is_stuck() {
     let mut call = Call::new("");
     assert_eq!(call.unavailable().as_deref(), Some("Call audio is not ready."));
     call.tick(1.0);
-    let said = call.setup(Setup::Window);
+    let said = call.setup(Setup::Window, 1.0);
     assert_eq!(said, vec![Effect::Note(Setup::Window.waiting().into())]);
-    assert!(call.setup(Setup::Window).is_empty(), "the same stage is said once");
+    assert!(call.setup(Setup::Window, 1.5).is_empty(), "the same stage is said once");
     assert_eq!(call.unavailable().as_deref(), Some(Setup::Window.waiting()));
     call.tick(3.9);
     assert!(!call.setup_stuck());
@@ -808,23 +808,33 @@ fn each_audio_setup_stage_says_what_it_waits_for_and_when_it_is_stuck() {
     assert!(call.setup_stuck());
     assert_eq!(call.unavailable().as_deref(), Some(Setup::Window.stuck()));
     assert!(!call.tick(9.0).iter().any(|e| matches!(e, Effect::Note(_))), "stuck is said once");
-    call.setup(Setup::Page);
+    call.setup(Setup::Page, 9.0);
     assert!(!call.setup_stuck(), "a later stage starts its own wait");
     call.tick(23.9);
     assert_eq!(call.unavailable().as_deref(), Some(Setup::Page.waiting()));
     call.tick(24.0);
     assert_eq!(call.unavailable().as_deref(), Some(Setup::Page.stuck()));
-    call.setup(Setup::Check);
+    call.setup(Setup::Check, 24.0);
     call.peer("ready", "", 25.0);
     assert!(!call.setup_stuck());
     assert_ne!(call.unavailable().as_deref(), Some(Setup::Check.waiting()));
-    assert!(call.setup(Setup::Page).is_empty(), "a ready page needs no setup");
+    assert!(call.setup(Setup::Page, 26.0).is_empty(), "a ready page needs no setup");
+}
+
+#[test]
+fn a_stage_started_after_a_long_gap_waits_its_full_time() {
+    let mut call = Call::new("");
+    call.tick(1.0);
+    assert!(call.setup(Setup::Check, 60.0).contains(&Effect::Note(Setup::Check.waiting().into())));
+    assert!(!call.tick(60.1).contains(&Effect::Note(Setup::Check.stuck().into())));
+    assert!(!call.setup_stuck());
+    assert!(call.tick(65.0).contains(&Effect::Note(Setup::Check.stuck().into())));
 }
 
 #[test]
 fn an_unavailable_page_replaces_the_wait_with_its_error() {
     let mut call = Call::new("");
-    call.setup(Setup::Page);
+    call.setup(Setup::Page, 0.0);
     let effects = call.peer("unavailable", "The audio page opened at an unexpected address: http://127.0.0.1:1/x", 1.0);
     assert!(effects.contains(&Effect::Note("The audio page opened at an unexpected address: http://127.0.0.1:1/x".into())));
     assert_eq!(call.error.as_deref(), Some("The audio page opened at an unexpected address: http://127.0.0.1:1/x"));
