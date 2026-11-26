@@ -86,7 +86,7 @@ impl Client {
             Dismiss::Request { session, request } => json!({"sessionId": session, "requestId": request}),
             Dismiss::Parked { work_item, host } => json!({"workItem": work_item, "host": host}),
         };
-        self.action("dismiss-decision", payload).map(drop)
+        self.action("dismiss-decision", payload).and_then(crate::catalog::confirmed).map(drop)
     }
 
     pub fn limit_resume(&self, session: &str, resume: bool) -> Outcome<()> {
@@ -153,6 +153,16 @@ mod tests {
             }
         });
         (Client::new(&base, "secret"), rx)
+    }
+
+    #[test]
+    fn a_submitted_answer_or_dismissal_is_unconfirmed() {
+        let submitted = r#"{"ok":true,"status":"submitted"}"#;
+        let (client, _seen) = daemon(vec![(202, submitted), (202, submitted)]);
+        let e = client.respond("s1", "r1", vec!["a".into()], Default::default()).unwrap_err();
+        assert!(e.maybe_delivered && e.code == "submitted");
+        let e = client.dismiss_decision(Dismiss::Stopped { session: "s1" }).unwrap_err();
+        assert!(e.maybe_delivered && e.code == "submitted");
     }
 
     #[test]

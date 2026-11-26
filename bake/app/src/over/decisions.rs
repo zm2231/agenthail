@@ -108,7 +108,7 @@ pub fn section(s: &App) -> El {
         list = list.child(line(s, i, d, first_accept == Some(i)));
     }
     if found.decisions.is_empty() {
-        list = list.child(row().gap(8.0).items_center().px(14.0).py(10.0).child(icon(&icons::CIRCLE_CHECK, 14.0).color(weak())).child(text(if found.notes.is_empty() { "Nothing needs you." } else { "Nothing needs you on the computers that answered." }.to_string()).font(BODY).color(weak())));
+        list = list.child(row().gap(8.0).items_center().px(14.0).py(10.0).child(icon(&icons::CIRCLE_CHECK, 14.0).color(weak())).child(text(if st.error.is_some() { "Nothing needed you when decisions last loaded." } else if found.notes.is_empty() { "Nothing needs you." } else { "Nothing needs you on the computers that answered." }.to_string()).font(BODY).color(weak())));
     }
     if !found.lead_handling.is_empty() {
         list = list.child(text("Handled by a lead".to_string()).font(META_MED).color(weak()).px(14.0).pt(12.0).pb(2.0));

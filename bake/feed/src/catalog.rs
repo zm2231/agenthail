@@ -634,7 +634,7 @@ impl Client {
     }
 
     pub fn respond(&self, session: &str, request: &str, choices: Vec<String>, answers: std::collections::BTreeMap<String, String>) -> std::result::Result<(), RespondError> {
-        self.action("respond", serde_json::json!({"sessionId": session, "requestId": request, "decision": {"choices": choices, "answers": answers}})).map(drop)
+        self.action("respond", serde_json::json!({"sessionId": session, "requestId": request, "decision": {"choices": choices, "answers": answers}})).and_then(confirmed).map(drop)
     }
 
     pub fn send(&self, session: &str, message: &str) -> std::result::Result<(), RespondError> {
@@ -669,6 +669,13 @@ impl Client {
             Err(ureq::Error::Transport(error)) => Err(RespondError::from_transport(&error)),
         }
     }
+}
+
+pub fn confirmed(reply: Value) -> std::result::Result<Value, RespondError> {
+    if reply["status"] == "submitted" {
+        return Err(RespondError { message: "the daemon took it but hasn't confirmed it ran".into(), code: "submitted".into(), maybe_delivered: true, answered: true, reply });
+    }
+    Ok(reply)
 }
 
 fn action_body(name: &str, payload: Value) -> std::result::Result<Value, RespondError> {

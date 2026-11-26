@@ -9,6 +9,9 @@ fn main() {
     for name in ["AGENTHAIL_VERSION", "AGENTHAIL_REVISION", "AGENTHAIL_MODIFIED"] {
         println!("cargo:rerun-if-env-changed={name}");
     }
+    for path in ["src", "../feed/src", "Cargo.toml", "../feed/Cargo.toml"] {
+        println!("cargo:rerun-if-changed={path}");
+    }
     for path in ["HEAD", "index", "packed-refs"].iter().filter_map(|p| git(&["rev-parse", "--git-path", p])) {
         println!("cargo:rerun-if-changed={path}");
     }

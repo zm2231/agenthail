@@ -104,7 +104,9 @@ pub fn drain(s: &mut crate::App) -> bool {
                 st.newest = Some(started);
                 match result {
                     Ok(inbox) => {
-                        st.unconfirmed.retain(|id| inbox.decisions.iter().any(|d| d.id() == *id));
+                        if inbox.notes.is_empty() {
+                            st.unconfirmed.retain(|id| inbox.decisions.iter().any(|d| d.id() == *id));
+                        }
                         st.inbox = Some(inbox);
                         st.error = None;
                     }

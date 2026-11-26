@@ -65,9 +65,7 @@ impl Client {
 }
 
 fn read(value: serde_json::Value) -> Result<Brief, RespondError> {
-    if value["status"] == "submitted" {
-        return Err(RespondError { message: "the daemon has it but hasn't finished; ask again to check".into(), code: "submitted".into(), maybe_delivered: true, answered: true, reply: value });
-    }
+    let value = crate::catalog::confirmed(value)?;
     serde_json::from_value(value).map_err(|e| RespondError { message: format!("the daemon's reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: true, answered: true, reply: serde_json::Value::Null })
 }
 
