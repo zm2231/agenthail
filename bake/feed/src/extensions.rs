@@ -439,9 +439,9 @@ pub fn session_known(page: &str, session: &WebSession) -> std::result::Result<bo
     url.set_query(None);
     let agent = ureq::AgentBuilder::new().timeout_connect(std::time::Duration::from_secs(5)).timeout(std::time::Duration::from_secs(10)).redirects(0).build();
     match agent.get(url.as_str()).set("Cookie", &format!("{}={}", session.name, session.value)).call() {
-        Ok(_) => Ok(true),
+        Ok(_) | Err(ureq::Error::Status(404, _)) => Ok(true),
         Err(ureq::Error::Status(401, _)) => Ok(false),
-        Err(ureq::Error::Status(_, _)) => Ok(true),
+        Err(ureq::Error::Status(code, _)) => Err(format!("the page's port answered {code}")),
         Err(ureq::Error::Transport(error)) => Err(error.to_string()),
     }
 }

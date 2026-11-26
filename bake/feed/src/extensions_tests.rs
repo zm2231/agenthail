@@ -186,12 +186,13 @@ fn an_extension_grant_ask_is_answered_with_its_option_id() {
 #[test]
 fn a_web_session_is_known_unless_the_page_port_turns_its_cookie_down() {
     let session = WebSession { name: "agenthail_web".into(), value: "v1".into(), path: "/".into(), expires_at: String::new(), scopes: vec![] };
-    let (client, rx) = daemon(replies(&[(401, r#"{"error":{"code":"unauthorized","message":"no"}}"#), (404, "{}"), (200, "{}")]));
+    let (client, rx) = daemon(replies(&[(401, r#"{"error":{"code":"unauthorized","message":"no"}}"#), (404, "{}"), (200, "{}"), (503, "{}")]));
     let page = format!("{}/index.html?x=1", client.origin());
     assert_eq!(session_known(&page, &session), Ok(false));
     assert_eq!(rx.recv().unwrap().0, "/_agenthail/signin.js");
     assert_eq!(session_known(&page, &session), Ok(true));
     assert_eq!(session_known(&page, &session), Ok(true));
+    assert_eq!(session_known(&page, &session), Err("the page's port answered 503".into()), "an answer before the cookie is read proves nothing");
     let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let gone = format!("http://{}/", closed.local_addr().unwrap());
     drop(closed);

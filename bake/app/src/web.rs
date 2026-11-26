@@ -39,6 +39,7 @@ pub struct Web {
     checking: bool,
     checked_at: Option<Instant>,
     verified: Option<String>,
+    remint: bool,
     loaded: Option<String>,
     ready: Option<String>,
     loading_since: Option<Instant>,
@@ -65,6 +66,7 @@ impl Web {
             checking: false,
             checked_at: None,
             verified: None,
+            remint: false,
             loaded: None,
             ready: None,
             loading_since: None,
@@ -84,7 +86,7 @@ impl Web {
 
     pub fn sign_in_due(&mut self, now: OffsetDateTime) -> bool {
         let waiting = self.renew_at.is_some_and(|at| at > Instant::now());
-        let due = !self.failed() && !self.signing && !waiting && self.cookie.as_ref().is_none_or(|c| expiring(c, now));
+        let due = !self.failed() && !self.signing && !waiting && (self.remint || self.cookie.as_ref().is_none_or(|c| expiring(c, now)));
         self.signing |= due;
         due
     }
@@ -94,6 +96,7 @@ impl Web {
         match result {
             Ok(cookie) => {
                 self.verified = Some(cookie.value.clone());
+                self.remint = false;
                 self.checked_at = Some(Instant::now());
                 self.cookie = Some(cookie);
                 self.cookie_set = false;
@@ -125,15 +128,17 @@ impl Web {
         if self.cookie.as_ref().is_none_or(|c| c.value != value) {
             return;
         }
-        if known == Ok(false) {
-            self.cookie = None;
-            self.renew_at = None;
-            self.verified = None;
-            self.loaded = None;
-            self.ready = None;
-            self.phase = Phase::SigningIn;
-        } else {
-            self.verified = Some(value.to_string());
+        match known {
+            Ok(true) => self.verified = Some(value.to_string()),
+            Ok(false) => {
+                self.cookie = None;
+                self.renew_at = None;
+                self.verified = None;
+                self.loaded = None;
+                self.ready = None;
+                self.phase = Phase::SigningIn;
+            }
+            Err(_) => self.remint = true,
         }
     }
 
@@ -143,6 +148,7 @@ impl Web {
         self.cookie_set = false;
         self.renew_at = None;
         self.verified = None;
+        self.remint = false;
         self.loaded = None;
         self.ready = None;
         self.committed = false;
@@ -249,7 +255,7 @@ impl Web {
             }
         }
         if self.loaded.as_deref() != Some(want) {
-            if self.verified.as_deref() != Some(cookie.value.as_str()) {
+            if self.checking || self.verified.as_deref() != Some(cookie.value.as_str()) {
                 return Ok(false);
             }
             *self.page.borrow_mut() = want.to_string();
@@ -466,6 +472,28 @@ mod tests {
         assert!(web.check_due(Some(b)).is_none(), "one check at a time");
         web.checked(&cookie.value, Ok(true));
         assert_eq!(web.verified.as_deref(), Some("v"), "b may open now");
+    }
+
+    #[test]
+    fn an_unclear_check_before_opening_a_page_signs_in_afresh() {
+        let (a, b) = ("http://127.0.0.1:48200/", "http://127.0.0.1:48300/");
+        let mut web = Web::new();
+        web.cookie = Some(session("2026-11-26T22:00:00Z"));
+        web.loaded = Some(a.into());
+        web.ready = Some(a.into());
+        web.phase = Phase::Shown;
+        let (_, cookie) = web.check_due(Some(b)).unwrap();
+        web.checked(&cookie.value, Err("the page's port answered 503".into()));
+        assert!(web.cookie.is_some(), "the open page keeps its cookie meanwhile");
+        assert!(web.verified.is_none(), "the next page still waits");
+        assert!(web.sign_in_due(now()), "a fresh sign-in stands in for the unclear check");
+        web.signed(Err("daemon down".into()));
+        assert_eq!(web.phase, Phase::Shown, "a failed sign-in with a working cookie keeps the page");
+        web.renew_at = Some(Instant::now());
+        assert!(web.sign_in_due(now()));
+        web.signed(Ok(session("2026-11-26T23:00:00Z")));
+        assert_eq!(web.verified.as_deref(), Some("v"));
+        assert_eq!(web.loaded.as_deref(), Some(a), "the open page stays while the next one waits");
     }
 
     #[test]
