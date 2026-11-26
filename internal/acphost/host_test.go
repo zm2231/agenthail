@@ -653,13 +653,13 @@ func TestAnInterruptDuringALoadAnswersRequestsAndStopsEverySendAlreadyStarting(t
 		t.Fatal("the open request must be answered cancelled")
 	}
 	for range 2 {
-		got := <-results
-		if got.err != nil || got.result.TurnID == "" {
-			t.Fatalf("a message interrupted before it started is recorded, not failed: %+v", got)
+		if got := <-results; !isCode(got.err, CodeInterrupted) {
+			t.Fatalf("a message stopped before it reached the agent must be refused as interrupted, not sent: %+v", got)
 		}
-		items := h.items("fake", state.SessionID)
-		if items[got.result.TurnID+":done"].Status != "interrupted" {
-			t.Fatalf("done=%+v", items[got.result.TurnID+":done"])
+	}
+	for id, item := range h.items("fake", state.SessionID) {
+		if strings.Contains(item.Text, "before") {
+			t.Fatalf("a message that was never sent must not appear in the transcript: %s %+v", id, item)
 		}
 	}
 	if data, _ := os.ReadFile(path); strings.Contains(string(data), "before") {

@@ -644,15 +644,9 @@ func (s *session) send(ctx context.Context, params SendParams) (SendResult, erro
 	s.promptMu.Lock()
 	defer s.promptMu.Unlock()
 	s.mu.Lock()
-	if s.cancels != cancels && s.state.Status != StatusBusy {
-		s.norm.startTurn(turnID, surface.TimelineItem{Text: params.Text, MessageID: params.MessageID})
-		s.norm.noticeItem(fmt.Sprintf("Interrupted before it reached %s.", s.agent.DisplayName()))
-		s.state.TurnID = turnID
-		s.norm.endTurn(acp.StopCancelled, "")
-		s.finishTurnLocked(acp.StopCancelled)
+	if s.cancels != cancels {
 		s.mu.Unlock()
-		s.changed()
-		return SendResult{TurnID: turnID}, nil
+		return SendResult{}, callError(CodeInterrupted, "the session was interrupted before this message reached %s; it was not sent", s.agent.DisplayName())
 	}
 	if s.state.Status == StatusBusy {
 		s.mu.Unlock()

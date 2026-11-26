@@ -332,7 +332,7 @@ func TestAdapterControlsModelAndModeAndListsModels(t *testing.T) {
 }
 
 func TestAHandoverIsRetryableOnEverySendPath(t *testing.T) {
-	for _, code := range []string{acphost.CodeDraining, acphost.CodeHeld, acphost.CodeBusy} {
+	for _, code := range []string{acphost.CodeDraining, acphost.CodeHeld, acphost.CodeBusy, acphost.CodeInterrupted} {
 		if err := deliveryError(&acphost.CallError{Code: code, Message: "moving"}); !surface.IsDeliveryUnavailable(err) {
 			t.Fatalf("%s must be retryable: %v", code, err)
 		}

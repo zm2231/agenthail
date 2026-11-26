@@ -286,9 +286,11 @@ index: listing reads the records in the agent's directory.
   ahead of any later prompt, and an agent ignores a cancel with nothing
   running; a cancel from a stop answer or a ceiling breach names its turn and
   does nothing once that turn has ended. An interrupt also covers a message
-  still starting (the session reopening for it): that message is recorded
-  with the notice "Interrupted before it reached <agent>" and an interrupted
-  end, is never sent to the agent, and its delivery is not a failure.
+  still starting (the session reopening for it): that message is never sent
+  to the agent and is refused with `interrupted`, which the adapter reports
+  as unavailable. A direct send is returned to its sender as not sent, with
+  no delivery problem; a queued message stays queued and is sent later, as
+  after any interrupt.
 - Model and mode: `session/set_config_option` with the option whose
   `category` is `model` or `mode`; an agent that lists `modes` but no config
   options gets `session/set_mode`, one with `models` gets

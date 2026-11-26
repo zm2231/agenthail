@@ -29,13 +29,14 @@ type CallError struct {
 func (e *CallError) Error() string { return e.Message }
 
 const (
-	CodeNotFound = "not_found"
-	CodeBusy     = "busy"
-	CodeStale    = "stale"
-	CodeDraining = "draining"
-	CodeInvalid  = "invalid"
-	CodeHeld     = "held_elsewhere"
-	CodeFailed   = "failed"
+	CodeNotFound    = "not_found"
+	CodeBusy        = "busy"
+	CodeStale       = "stale"
+	CodeDraining    = "draining"
+	CodeInterrupted = "interrupted"
+	CodeInvalid     = "invalid"
+	CodeHeld        = "held_elsewhere"
+	CodeFailed      = "failed"
 )
 
 func callError(code, format string, args ...any) *CallError {
