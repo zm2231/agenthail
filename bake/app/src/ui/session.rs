@@ -2,6 +2,8 @@ use super::*;
 use feed::composer::Busy;
 use crate::Confirm;
 
+const COMPOSER_BELOW: f32 = 18.0;
+
 pub(crate) fn header(s: &App, x: &Session) -> El {
     let state = x.state(s.now);
     let label_value = if state == State::NeedsYou || x.display.label.is_empty() { state.label().to_string() } else { x.display.label.clone() };
@@ -123,12 +125,25 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
         .fill(card().alpha(0.78))
         .border(if s.attach.dropping { 1.5 } else { 1.0 }, if s.attach.dropping { accent() } else { Color::WHITE.alpha(0.10) })
         .shadow(10.0, 34.0, Color::BLACK.alpha(0.45))
-        .children(crate::ui::background::dock(s, x))
-        .children(crate::ui::queue::dock(s, x))
-        .children(super::attach::chips(s, &x.id).map(|c| col().w_full().px(12.0).pt(10.0).child(c)))
+        .child(
+            col()
+                .key("composer-stack")
+                .w_full()
+                .shrink()
+                .min_h(0.0)
+                .scroll(ScrollSpec { stick_bottom: false })
+                .children(crate::ui::background::dock(s, x))
+                .children(crate::ui::queue::dock(s, x))
+                .children(super::attach::chips(s, &x.id).map(|c| col().w_full().px(12.0).pt(10.0).child(c))),
+        )
         .child(col().w_full().px(16.0).pt(13.0).pb(4.0).child(input))
-        .child(controls.child(send_button));
-    col().w_full().items_center().px(28.0).pb(18.0).mt(-120.0).child(box_el)
+        .child(controls.child(send_button))
+        .on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_composer(r));
+    let box_el = match s.cover.room(COMPOSER_BELOW) {
+        Some(room) => box_el.max_h(room),
+        None => box_el,
+    };
+    col().w_full().items_center().px(28.0).pb(COMPOSER_BELOW).mt(-120.0).child(box_el)
 }
 
 pub(crate) fn counts(diff: &rune_kit::diff::FileDiff) -> (usize, usize) {
@@ -217,7 +232,8 @@ pub(crate) fn changes_view(s: &App, id: &str) -> El {
         .min_h(0.0)
         .px(20.0)
         .pt(10.0)
-        .pb(120.0 + super::queue::reserve(s, id) + super::background::reserve(s, id))
+        .pb(s.cover.reserve())
+        .on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_view(r))
         .child(rune_kit::diff::DiffView::new(|s: &App| &s.diff, |s: &mut App| &mut s.diff).key("diff").build(s, theme::kit()))
 }
 
@@ -242,11 +258,11 @@ pub(crate) fn session_screen(s: &App) -> El {
         };
         center = center.child(col().w_full().items_center().px(32.0).pb(12.0).child(pill(glyph, label, color)));
     }
-    super::attach::drop_target(conversation(s, &id, center).child(composer(s, x)))
+    super::attach::drop_target(conversation(s, &id, center).child(composer(s, x)).on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_bottom(r[1] + r[3])))
 }
 
 pub(crate) fn conversation(s: &App, id: &str, center: El) -> El {
-    let center = center.child(tabs(s, id)).child(el().w_full().h(1.0).fill(line()));
+    let center = center.child(tabs(s, id)).child(el().w_full().h(1.0).fill(line()).on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_top(r[1] + r[3])));
     let empty = s.panes.get(id).is_none_or(|p| p.blocks.is_empty());
     if s.tab == Tab::Changes && !empty {
         center.child(changes_view(s, id))

@@ -13,6 +13,7 @@ use crate::icons;
 use crate::theme::{self, META, META_BOLD, failed, faint, line, muted, wash};
 use crate::{App, Bg};
 
+const CHIP_ROWS_SHOWN: f32 = 2.5;
 const PICTURES_AT_ONCE: usize = 3;
 const COPIED_FOR: Duration = Duration::from_secs(2);
 const IMAGE_WIDTH: f32 = 520.0;
@@ -578,7 +579,7 @@ pub fn chips(s: &App, id: &str) -> Option<El> {
     if preparing > 0 {
         r = r.child(row().h(24.0).gap(6.0).items_center().child(rune_kit::Loader::new().size(10.0).color(faint()).build(theme::kit())).child(text("Adding…").font(META).color(faint())));
     }
-    Some(r)
+    Some(col().key("attachment-tray").w_full().max_h(CHIP_ROWS_SHOWN * 24.0 + (CHIP_ROWS_SHOWN - 1.0) * 6.0).scroll(rune::ScrollSpec { stick_bottom: false }).child(r))
 }
 
 pub fn image_el(s: &App, session: &str, a: &Attachment) -> El {

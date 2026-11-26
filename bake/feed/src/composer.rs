@@ -356,6 +356,63 @@ impl Drafts {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Cover {
+    pub view: Option<[f32; 4]>,
+    pub composer: Option<[f32; 4]>,
+    pub top: Option<f32>,
+    pub bottom: Option<f32>,
+}
+
+impl Cover {
+    pub const GAP: f32 = 10.0;
+    pub const KEEP: f32 = 96.0;
+    pub const FLOOR: f32 = 150.0;
+
+    pub fn set_top(&mut self, y: f32) {
+        if self.top.is_none_or(|t| (t - y).abs() > 0.5) {
+            self.top = Some(y);
+        }
+    }
+
+    pub fn set_bottom(&mut self, y: f32) {
+        if self.bottom.is_none_or(|b| (b - y).abs() > 0.5) {
+            self.bottom = Some(y);
+        }
+    }
+
+    pub fn room(&self, below: f32) -> Option<f32> {
+        let (top, bottom) = (self.top?, self.bottom?);
+        Some((bottom - below - top - Self::KEEP).max(Self::FLOOR))
+    }
+
+    pub fn set_view(&mut self, r: [f32; 4]) {
+        if self.view.is_none_or(|v| moved(v, r)) {
+            self.view = Some(r);
+        }
+    }
+
+    pub fn set_composer(&mut self, r: [f32; 4]) {
+        if self.composer.is_none_or(|v| moved(v, r)) {
+            self.composer = Some(r);
+        }
+    }
+
+    pub fn reserve(&self) -> f32 {
+        let (Some([vx, vy, vw, vh]), Some([cx, cy, cw, ch])) = (self.view, self.composer) else { return Self::GAP };
+        let across = cx < vx + vw && vx < cx + cw;
+        let bottom = vy + vh;
+        if !across || ch <= 0.0 || cy >= bottom {
+            return Self::GAP;
+        }
+        (bottom - cy.max(vy)) + Self::GAP
+    }
+}
+
+fn moved(a: [f32; 4], b: [f32; 4]) -> bool {
+    a.iter().zip(b).any(|(x, y)| (x - y).abs() > 0.5)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -583,5 +640,43 @@ mod tests {
         assert_eq!(back, drafts);
         assert_eq!(Drafts::from_json(&json!({"s1": 3, "s2": " ", "s3": "ok"})).get("s3"), "ok");
         assert_eq!(Drafts::from_json(&json!(null)), Drafts::default());
+    }
+
+    #[test]
+    fn the_view_reserves_what_the_composer_covers() {
+        let view = [0.0, 100.0, 800.0, 600.0];
+        let mut c = Cover::default();
+        assert_eq!(c.reserve(), Cover::GAP);
+        c.set_view(view);
+        c.set_composer([50.0, 580.0, 700.0, 138.0]);
+        assert_eq!(c.reserve(), 120.0 + Cover::GAP);
+        c.set_composer([50.0, 380.0, 700.0, 338.0]);
+        assert_eq!(c.reserve(), 320.0 + Cover::GAP);
+    }
+
+    #[test]
+    fn a_composer_below_or_beside_the_view_reserves_only_the_gap() {
+        let mut c = Cover { view: Some([0.0, 100.0, 800.0, 600.0]), ..Cover::default() };
+        c.set_composer([50.0, 700.0, 700.0, 140.0]);
+        assert_eq!(c.reserve(), Cover::GAP);
+        c.set_composer([900.0, 500.0, 300.0, 140.0]);
+        assert_eq!(c.reserve(), Cover::GAP);
+    }
+
+    #[test]
+    fn the_composer_leaves_rows_of_transcript_above_it() {
+        let mut c = Cover::default();
+        assert_eq!(c.room(18.0), None);
+        c.set_top(300.0);
+        c.set_bottom(900.0);
+        assert_eq!(c.room(18.0), Some(900.0 - 18.0 - 300.0 - Cover::KEEP));
+        c.set_top(800.0);
+        assert_eq!(c.room(18.0), Some(Cover::FLOOR));
+    }
+
+    #[test]
+    fn a_composer_taller_than_the_view_reserves_the_whole_view() {
+        let c = Cover { view: Some([0.0, 100.0, 800.0, 200.0]), composer: Some([0.0, 50.0, 800.0, 400.0]), ..Cover::default() };
+        assert_eq!(c.reserve(), 200.0 + Cover::GAP);
     }
 }

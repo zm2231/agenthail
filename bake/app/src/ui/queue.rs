@@ -195,12 +195,6 @@ pub(crate) fn restore(s: &mut App, back: Vec<(Taking, Recovered)>) {
     crate::over::layout::save(s);
 }
 
-pub(crate) fn reserve(s: &App, id: &str) -> f32 {
-    let shown = rows(s, id).len().min(SHOWN);
-    let note = usize::from(s.queue_note.contains_key(id));
-    shown as f32 * ROW_HEIGHT + note as f32 * NOTE_HEIGHT + if shown + note > 0 { 12.0 } else { 0.0 }
-}
-
 fn row_el(s: &App, x: &Session, item: &Queued) -> El {
     let k = theme::kit();
     let working = s.queue_working.contains(&(item.host.clone(), item.id));

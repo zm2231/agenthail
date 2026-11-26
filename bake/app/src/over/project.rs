@@ -380,5 +380,6 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
         .max_w(780.0)
         .px(28.0)
         .pb(16.0)
+        .on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_composer(r))
         .child(col().w_full().gap(8.0).padding(12.0).radius(14.0).fill(k.c.surface_raised).border(1.0, if s.attach.dropping { crate::theme::accent() } else { ui::edge() }).children(crate::ui::attach::chips(s, lead)).child(input).child(controls))
 }

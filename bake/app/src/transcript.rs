@@ -492,7 +492,7 @@ fn gap_for(blocks: &[Block], ix: usize) -> f32 {
 pub fn view(s: &App, id: &str) -> El {
     let count = s.panes.get(id).map(|p| p.blocks.len()).unwrap_or(0);
     let key = id.to_string();
-    let stack = col().key(format!("rows-{id}")).w_full().items_center().growth(GrowthSpec::default()).selection_group(true).pb(130.0 + crate::ui::queue::reserve(s, id) + crate::ui::background::reserve(s, id)).virtual_rows(
+    let stack = col().key(format!("rows-{id}")).w_full().items_center().growth(GrowthSpec::default()).selection_group(true).pb(s.cover.reserve()).virtual_rows(
         count,
         60.0,
         {
@@ -516,7 +516,7 @@ pub fn view(s: &App, id: &str) -> El {
     );
     let watch = id.to_string();
     let stack = stack.on_visible_rows(move |s: &mut App, rows| crate::history::seen_rows(s, &watch, rows.start));
-    let mut scroll = col().key(format!("transcript-{id}")).w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: true });
+    let mut scroll = col().key(format!("transcript-{id}")).w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: true }).on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_view(r));
     if let Some(earlier) = earlier_el(s, id) {
         scroll = scroll.child(earlier);
     }
