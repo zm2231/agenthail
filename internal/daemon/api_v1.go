@@ -132,6 +132,7 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc(projectTilesPath, d.apiV1Guard(dashboard, "control", d.projectTilesHandler))
 	mux.HandleFunc("/api/v1/projects/activity", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(func(w http.ResponseWriter, r *http.Request) { d.projectActivityHandler(dashboard, w, r) })))
 	mux.HandleFunc("/api/v1/events", d.apiV1Guard(dashboard, "read", d.recordDeviceStream("events", d.apiEventsHandler)))
+	mux.HandleFunc(hostTasksPath, d.apiV1Guard(dashboard, "read", d.hostOnly(d.apiHostTasksHandler)))
 	mux.HandleFunc("/api/v1/catalog-events", d.apiV1Guard(dashboard, "read", d.recordDeviceStream("catalog-events", d.apiCatalogStreamHandler)))
 	mux.HandleFunc("/api/v1/session", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("id", d.dashboardSessionHandler))))
 	mux.HandleFunc("/api/v1/session-metadata", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.hostRouted("id", d.dashboardSessionMetadataHandler))))

@@ -152,18 +152,21 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 		return nil, refuse("invalid", "branch and base need isolation worktree.")
 	}
 	if host := strings.TrimSpace(input.Host); remoteHost {
-		if input.Task {
-			return nil, refuse("invalid", "A session on another computer cannot be a task.")
-		}
 		start, cwd, notices, err := d.remoteCreateScope(caller, host, kind, input.PermissionMode, input.Cwd)
 		if err != nil {
 			return nil, err
 		}
-		result, err := d.mcpAction(ctx, caller, "agenthail_create", input.mcpWrite, dashboardActionRequest{
+		request := dashboardActionRequest{
 			Action: "session-create", Host: host, Surface: string(kind), Cwd: cwd, Message: input.Message, Model: strings.TrimSpace(input.Model),
 			PermissionMode: start.permissionMode, Approval: start.approval, Alias: strings.TrimSpace(input.Alias), Ceiling: start.ceiling.encode(),
 			Isolation: isolation, Worktree: strings.TrimSpace(input.Branch), Base: strings.TrimSpace(input.Base),
-		})
+		}
+		var result json.RawMessage
+		if input.Task {
+			result, err = d.mcpCreateHostTask(ctx, caller, host, input, request)
+		} else {
+			result, err = d.mcpAction(ctx, caller, "agenthail_create", input.mcpWrite, request)
+		}
 		for _, notice := range notices {
 			d.noticeAfter(ctx, caller, notice, err)
 		}
@@ -186,6 +189,26 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 	})
 	d.noticeAfter(ctx, caller, notice, err)
 	return result, err
+}
+
+// mcpCreateHostTask starts a task's child on a paired host, where its task is
+// settled, and records the task here, where its spawner waits on it.
+func (d *Daemon) mcpCreateHostTask(ctx context.Context, caller *mcpCaller, hostRef string, input mcpCreateInput, request dashboardActionRequest) (json.RawMessage, error) {
+	host, found := d.pairedHost(hostRef)
+	if !found {
+		return nil, refuse("invalid", fmt.Sprintf("No paired computer is named %q.", hostRef))
+	}
+	release, _ := d.spawnLocks.acquire(caller.session.ID, true)
+	defer release()
+	if err := d.mcpChildrenRefusal(caller); err != nil {
+		return nil, err
+	}
+	request.Task, request.SourceSessionID = true, caller.session.ID
+	result, err := d.mcpAction(ctx, caller, "agenthail_create", input.mcpWrite, request)
+	if err != nil {
+		return nil, err
+	}
+	return d.startHostTask(caller, host, input.Message, result)
 }
 
 // remoteCreateScope bounds a session an agent starts on a paired computer:

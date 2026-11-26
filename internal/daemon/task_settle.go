@@ -19,6 +19,7 @@ func (d *Daemon) settleTask(child string, settlement registry.TaskSettlement) (b
 	if err != nil || !settled {
 		return settled, err
 	}
+	d.flushTaskChange()
 	d.publishTaskSettled(child, settlement.State, settlement.Kind)
 	return true, nil
 }
@@ -66,6 +67,7 @@ func (d *Daemon) settleTaskFromObservation(ctx context.Context, adapter surface.
 		if err := d.Registry.MarkTaskStalled(session.ID, observation.TurnUnconfirmed); err != nil {
 			d.log.Printf("task stalled %s: %s", d.resolveDisplay(session.ID), err)
 		}
+		d.flushTaskChange()
 	}
 	settlement, finished := finishedTaskTurn(observation)
 	if !finished {
@@ -97,6 +99,10 @@ func (d *Daemon) settlementUnderGoal(ctx context.Context, adapter surface.Surfac
 	}
 	if err != nil || goal.Status != surface.GoalStatusComplete {
 		if err == nil && goalStopped(goal.Status) {
+			if err := d.Registry.AnnounceTaskChange(session.ID, goalStopNoticeKey(session.ID, goal)); err != nil {
+				d.log.Printf("announce the stopped goal of %s: %s", d.resolveDisplay(session.ID), err)
+			}
+			d.flushTaskChange()
 			d.publishEvent(taskEventGoalStopped, session.ID, nil)
 		}
 		if err := d.Registry.RecordTaskTurn(session.ID, settlement.TurnID, settlement.State, settlement.Result); err != nil {
@@ -182,7 +188,7 @@ func (r *taskGoalReads) retain(running map[string]bool) {
 // children aren't watched, so this is the one place that sees it; a failed read
 // leaves what is stored.
 func (d *Daemon) refreshTaskLatest(ctx context.Context, task registry.Task) registry.Task {
-	if task.State == registry.TaskRunning || task.State == registry.TaskCancelled {
+	if task.State == registry.TaskRunning || task.State == registry.TaskCancelled || d.taskChildHost(task.Child) != "" {
 		return task
 	}
 	session, err := d.Registry.Session(task.Child)
@@ -211,6 +217,7 @@ func (d *Daemon) refreshTaskLatest(ctx context.Context, task registry.Task) regi
 		d.log.Printf("task latest for %s: %s", d.resolveDisplay(task.Child), err)
 		return task
 	}
+	d.flushTaskChange()
 	if fresh, found, err := d.Registry.TaskForChild(task.Child); err == nil && found {
 		return fresh
 	}

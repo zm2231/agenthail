@@ -1,10 +1,15 @@
 package registry
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"time"
 	"unicode/utf8"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 const (
@@ -99,18 +104,13 @@ func foundTask(task Task, err error) (Task, bool, error) {
 
 // The first settler wins; everyone after it has only latest.
 func (r *Registry) SettleTask(child string, settlement TaskSettlement, at time.Time) (bool, error) {
-	result, err := r.db.Exec(`UPDATE tasks SET state=?,result_kind=?,result=?,result_turn_id=?,stalled=0,settled_at_ms=? WHERE child_session_id=? AND state='running'`,
+	return r.changeTask(child, `UPDATE tasks SET state=?,result_kind=?,result=?,result_turn_id=?,stalled=0,settled_at_ms=? WHERE child_session_id=? AND state='running'`,
 		settlement.State, settlement.Kind, clipTaskText(settlement.Result, taskResultLimit), settlement.TurnID, at.UnixMilli(), child)
-	if err != nil {
-		return false, err
-	}
-	changed, err := result.RowsAffected()
-	return changed > 0, err
 }
 
 // RecordTaskLatest takes the turn the text came from, or "" for a report.
 func (r *Registry) RecordTaskLatest(child, turnID, text string, at time.Time) error {
-	_, err := r.db.Exec(`UPDATE tasks SET latest=?,latest_turn_id=CASE WHEN ?2='' THEN latest_turn_id ELSE ?2 END,latest_at_ms=? WHERE child_session_id=? AND state<>'running'`, clipTaskText(text, taskResultLimit), turnID, at.UnixMilli(), child)
+	_, err := r.changeTask(child, `UPDATE tasks SET latest=?,latest_turn_id=CASE WHEN ?2='' THEN latest_turn_id ELSE ?2 END,latest_at_ms=? WHERE child_session_id=? AND state<>'running'`, clipTaskText(text, taskResultLimit), turnID, at.UnixMilli(), child)
 	return err
 }
 
@@ -124,11 +124,31 @@ func (r *Registry) RecordTaskTurn(child, turnID, state, text string) error {
 // MarkTaskStalled records whether the child's last turn can't be confirmed as
 // over or running. Such a child stays open and holds no spawn slot.
 func (r *Registry) MarkTaskStalled(child string, stalled bool) error {
-	_, err := r.db.Exec(`UPDATE tasks SET stalled=?1 WHERE child_session_id=?2 AND state='running' AND stalled<>?1`, stalled, child)
+	_, err := r.changeTask(child, `UPDATE tasks SET stalled=?1 WHERE child_session_id=?2 AND state='running' AND stalled<>?1`, stalled, child)
 	return err
 }
 
-// RunningTaskChildren maps each running task's child to whether it has left the catalog.
+func (r *Registry) changeTask(child, statement string, args ...any) (bool, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(statement, args...)
+	if err != nil {
+		return false, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil || changed == 0 {
+		return false, err
+	}
+	if err := announceTaskChangeTx(tx, child, ""); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
+}
+
+// RunningTaskChildren maps each running task's child on this host to whether it has left the catalog.
 func (r *Registry) RunningTaskChildren() (map[string]bool, error) {
 	type row struct {
 		child string
@@ -140,7 +160,7 @@ func (r *Registry) RunningTaskChildren() (map[string]bool, error) {
 		return item, err
 	}, `SELECT t.child_session_id,(s.status='offline' AND c.session_id IS NULL)
 		FROM tasks t JOIN sessions s ON s.id=t.child_session_id LEFT JOIN catalog_sessions c ON c.session_id=s.id
-		WHERE t.state='running'`)
+		WHERE t.state='running' AND s.host_id=''`)
 	if err != nil {
 		return nil, err
 	}
@@ -182,6 +202,56 @@ func (r *Registry) ClearTaskWake(id int64) error {
 }
 
 func cancelTaskTx(tx *sql.Tx, child string, at time.Time) error {
-	_, err := tx.Exec(`UPDATE tasks SET state='cancelled',stalled=0,wake=0,settled_at_ms=? WHERE child_session_id=? AND state='running'`, at.UnixMilli(), child)
+	result, err := tx.Exec(`UPDATE tasks SET state='cancelled',stalled=0,wake=0,settled_at_ms=? WHERE child_session_id=? AND state='running'`, at.UnixMilli(), child)
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil || changed == 0 {
+		return err
+	}
+	return announceTaskChangeTx(tx, child, "")
+}
+
+// TaskChangedEvent names only the child: every catalog reader sees it, so the
+// parent's host reads the task itself with its host token.
+const TaskChangedEvent = "task.changed"
+
+func (r *Registry) AnnounceTaskChange(child, key string) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := announceTaskChangeTx(tx, child, key); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// Journaled in the transaction that changed the task, so a stop between the two loses nothing.
+func announceTaskChangeTx(tx *sql.Tx, child, key string) error {
+	var parent, parentHost string
+	err := tx.QueryRow(`SELECT p.id,p.host_id FROM tasks t JOIN sessions p ON p.id=t.parent_session_id WHERE t.child_session_id=?`, child).Scan(&parent, &parentHost)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if parentHost == "" && !surface.IsUnrepliableSender(parent) {
+		return nil
+	}
+	if key == "" {
+		var nonce [12]byte
+		if _, err := rand.Read(nonce[:]); err != nil {
+			return err
+		}
+		key = hex.EncodeToString(nonce[:])
+	}
+	payload, err := json.Marshal(map[string]string{"childId": child})
+	if err != nil {
+		return err
+	}
+	_, _, err = appendCatalogEventTx(tx, CatalogEvent{DedupeKey: TaskChangedEvent + ":" + child + ":" + key, Type: TaskChangedEvent, EntityID: child, Payload: payload})
 	return err
 }

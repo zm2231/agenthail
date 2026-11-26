@@ -63,6 +63,7 @@ func (d *Daemon) recordReport(child string, taskID int64, state, result string) 
 	settled, err := d.settleTask(child, registry.TaskSettlement{State: state, Kind: registry.TaskKindReported, Result: result, TurnID: baseline.CompletedTurnID})
 	if err == nil && !settled {
 		err = d.Registry.RecordTaskLatest(child, "", result, time.Now())
+		d.flushTaskChange()
 	}
 	if err != nil {
 		writeActionResult(recorder, actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error()))
@@ -100,6 +101,14 @@ func (d *Daemon) mcpResult(ctx context.Context, caller *mcpCaller, input mcpResu
 		if err := d.clearTaskWake(task.ID); err != nil {
 			return nil, err
 		}
+	}
+	if host := d.taskChildHost(task.Child); host != "" {
+		task, note := d.refreshHostTask(ctx, task, host)
+		out := clippedTaskResult(task, mcpOutputLimit)
+		if note != "" && out.Next == "" {
+			out.Next = note
+		}
+		return out, nil
 	}
 	return clippedTaskResult(d.refreshTaskLatest(ctx, task), mcpOutputLimit), nil
 }
