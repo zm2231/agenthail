@@ -506,7 +506,7 @@ mod tests {
         assert!(web.sign_in_due(now()));
         web.signed(Ok(session("2026-11-26T23:00:00Z")));
         assert_eq!(web.verified.as_deref(), Some("v"));
-        assert_eq!(web.loaded.as_deref(), Some(a), "the open page stays while the next one waits");
+        assert_eq!(web.loaded.as_deref(), Some(b), "the open page stays through all of it");
     }
 
     #[test]
