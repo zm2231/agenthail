@@ -117,15 +117,20 @@ fn tray_items(bar: &MenuBar, link: Link) -> Vec<TrayItem> {
     items.extend([
         TrayItem::action("new-session", "New Session"),
         TrayItem::action("open", "Open Agenthail"),
-        TrayItem::action("settings", "Settings…").enabled(false),
+        TrayItem::action("settings", "Settings…"),
         TrayItem::Separator,
         TrayItem::action("quit", "Quit Agenthail"),
     ]);
     items
 }
 
+pub fn settings_item() -> MenuItem<App> {
+    let shortcut = "cmd+comma".parse().expect("the Settings shortcut parses");
+    MenuItem::new("Settings…", crate::settings::open_from_menu).id("settings").key_equivalent(shortcut)
+}
+
 fn dock_items(bar: &MenuBar) -> Vec<MenuItem<App>> {
-    let mut items = Vec::new();
+    let mut items = vec![settings_item()];
     for (i, (title, rows)) in bar.sections().into_iter().enumerate() {
         if i > 0 {
             items.push(MenuItem::separator().dock());
@@ -153,6 +158,7 @@ fn on_event(app: &AppHandle<App>, event: TrayEvent) {
         TrayEvent::Menu(id) => match id.as_str() {
             "open" => app.open(),
             "quit" => app.quit(),
+            "settings" => crate::settings::open(),
             "new-session" => {
                 app.open();
                 app.update(|s, tx| {

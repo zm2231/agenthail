@@ -1151,6 +1151,5 @@ fn main() {
     prefs.options = WindowOptions { visible: false, resizable: true, ..Default::default() };
     let (handle, window) = app.window(prefs);
     settings::keep(handle, window);
-    let shortcut = "cmd+comma".parse().expect("the Settings shortcut parses");
-    menubar::install(app.menu_item(rune::MenuItem::new("Settings…", settings::open_from_menu).id("settings").key_equivalent(shortcut))).run();
+    menubar::install(app.menu_item(menubar::settings_item())).run();
 }

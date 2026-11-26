@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use feed::catalog::RespondError;
@@ -14,6 +15,12 @@ const WITHDRAWN_KEPT: usize = 64;
 enum Done {
     Prefs(Option<Prefs>),
     Acted(String, String, Result<(), RespondError>),
+}
+
+static PREFS_CHANGED: AtomicBool = AtomicBool::new(false);
+
+pub fn prefs_changed() {
+    PREFS_CHANGED.store(true, Ordering::SeqCst);
 }
 
 pub struct State {
@@ -169,7 +176,7 @@ pub fn tick(s: &mut App) -> bool {
     let now = time::OffsetDateTime::now_utc();
     let focused = rune_notify::app_focused();
     let st = &mut s.notify;
-    st.stale |= focused && !st.focused || st.failed && st.sessions_moved;
+    st.stale |= focused && !st.focused || st.failed && st.sessions_moved || PREFS_CHANGED.swap(false, Ordering::SeqCst);
     st.focused = focused;
     if st.stale {
         read_prefs(s);
