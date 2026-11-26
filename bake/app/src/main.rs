@@ -129,6 +129,7 @@ pub struct App {
     pub notify: notify::State,
     last_row: Option<Session>,
     client: Option<Client>,
+    overview_poke: Option<Sender<()>>,
     fixtures: Option<Fixtures>,
     inbox: Receiver<Bg>,
     outbox: Sender<Bg>,
@@ -152,27 +153,18 @@ fn load_recorded(path: &str) -> Result<Recorded, String> {
     serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))
 }
 
-fn overview(client: &Client) -> Bg {
-    match feed::derive::live::fetch(client) {
-        Ok(fetched) => Bg::Overview(Box::new(fetched)),
-        Err(error) => Bg::OverviewError(error.to_string()),
-    }
-}
-
-pub fn fetch_overview(client: &Client, tx: &Sender<Bg>) {
-    let (client, tx) = (client.clone(), tx.clone());
-    std::thread::spawn(move || {
-        let _ = tx.send(overview(&client));
-    });
-}
-
-fn watch_overview(client: Client, tx: Sender<Bg>) {
+fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<()>) {
     std::thread::spawn(move || {
         loop {
-            if tx.send(overview(&client)).is_err() {
+            let message = match feed::derive::live::fetch(&client) {
+                Ok(fetched) => Bg::Overview(Box::new(fetched)),
+                Err(error) => Bg::OverviewError(error.to_string()),
+            };
+            if tx.send(message).is_err() {
                 return;
             }
-            std::thread::sleep(Duration::from_secs(20));
+            let _ = poke.recv_timeout(Duration::from_secs(20));
+            while poke.try_recv().is_ok() {}
         }
     });
 }
@@ -241,6 +233,7 @@ fn init() -> App {
         notify: notify::State::default(),
         last_row: None,
         client: None,
+        overview_poke: None,
         fixtures: None,
         inbox,
         outbox,
@@ -284,7 +277,9 @@ fn init() -> App {
                         std::thread::sleep(Duration::from_secs(2));
                     }
                 });
-                watch_overview(client.clone(), app.outbox.clone());
+                let (poke, poked) = channel();
+                watch_overview(client.clone(), app.outbox.clone(), poked);
+                app.overview_poke = Some(poke);
                 over::inbox::start(&mut app.ov.inbox, &client);
                 notify::start(&mut app);
                 app.client = Some(client);

@@ -13,7 +13,7 @@ pub struct Pins {
     rows: Vec<Session>,
     verified: HashSet<String>,
     revision: HashMap<String, u64>,
-    checking: Option<(String, u64)>,
+    checking: HashMap<String, u64>,
     checked: HashMap<String, Instant>,
     requests: u64,
     tx: Sender<(String, u64, u64, Recheck)>,
@@ -23,7 +23,7 @@ pub struct Pins {
 impl Default for Pins {
     fn default() -> Pins {
         let (tx, rx) = channel();
-        Pins { rows: Vec::new(), verified: HashSet::new(), revision: HashMap::new(), checking: None, checked: HashMap::new(), requests: 0, tx, rx }
+        Pins { rows: Vec::new(), verified: HashSet::new(), revision: HashMap::new(), checking: HashMap::new(), checked: HashMap::new(), requests: 0, tx, rx }
     }
 }
 
@@ -64,10 +64,10 @@ impl Pins {
     }
 
     fn take(&mut self, id: String, seq: u64, revision: u64, found: Recheck) {
-        if self.checking.as_ref() != Some(&(id.clone(), seq)) {
+        if self.checking.get(&id) != Some(&seq) {
             return;
         }
-        self.checking = None;
+        self.checking.remove(&id);
         if self.revision.get(&id).copied().unwrap_or_default() != revision {
             return;
         }
@@ -97,14 +97,14 @@ fn recheck(s: &mut App) -> bool {
     let Some(id) = super::selected(s) else { return dropped };
     let pins = &s.ov.search.pins;
     let Some(row) = pins.row(&id).cloned() else { return dropped };
-    if pins.checking.is_some() || pins.checked.get(&id).is_some_and(|at| at.elapsed() < RECHECK) {
+    if pins.checking.contains_key(&id) || pins.checked.get(&id).is_some_and(|at| at.elapsed() < RECHECK) {
         return dropped;
     }
     let Some(client) = s.client.clone() else { return dropped };
     let pins = &mut s.ov.search.pins;
     pins.requests += 1;
     let (seq, revision) = (pins.requests, pins.revision.get(&id).copied().unwrap_or_default());
-    pins.checking = Some((id.clone(), seq));
+    pins.checking.insert(id.clone(), seq);
     let tx = pins.tx.clone();
     std::thread::spawn(move || {
         let found = client.recheck(&row);
