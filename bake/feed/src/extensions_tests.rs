@@ -86,6 +86,9 @@ fn approval_goes_to_the_asking_session_or_directly() {
     assert_eq!(approval(&by_id("board")), Approval::Direct);
     assert_eq!(approval(&by_id("broken")), Approval::Nothing);
     assert_eq!(waiting(&by_id("proxy")), ["Admin (http://forge:9000)"]);
+    let mut asked = by_id("broken");
+    asked.approval_ask = Some(ApprovalAsk { id: "ask-9".into(), session_id: "s-other".into() });
+    assert_eq!(approval(&asked), Approval::Ask("s-other".into()), "an open ask is always the way in");
 }
 
 #[test]

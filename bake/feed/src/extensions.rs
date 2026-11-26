@@ -327,11 +327,9 @@ pub enum Approval {
 }
 
 pub fn approval(ext: &Extension) -> Approval {
-    if waiting(ext).is_empty() {
-        return Approval::Nothing;
-    }
     match asking_session(ext) {
         Some(session) => Approval::Ask(session),
+        None if waiting(ext).is_empty() => Approval::Nothing,
         None => Approval::Direct,
     }
 }
