@@ -8,6 +8,7 @@ const HEADER_HEIGHT: f32 = 34.0;
 const LINE_HEIGHT: f32 = 20.0;
 const LINES_SHOWN: usize = 5;
 const NOTE_LINES: usize = 2;
+const LINES_PAD: f32 = 6.0;
 
 fn global_default(key: &str) -> Option<String> {
     let out = std::process::Command::new("/usr/bin/defaults").args(["read", "-g", key]).output().ok()?;
@@ -28,12 +29,12 @@ fn shown<'a>(s: &App, x: &'a Session) -> Option<&'a BackgroundTasks> {
 }
 
 fn lines(b: &BackgroundTasks) -> usize {
-    b.tasks.len() + if b.source_note().is_some() { NOTE_LINES } else { 0 }
+    if b.source_note().is_some() { LINES_SHOWN } else { b.tasks.len() }
 }
 
 pub(crate) fn reserve(s: &App, id: &str) -> f32 {
     let Some(b) = session(s, id).and_then(|x| shown(s, x)) else { return 0.0 };
-    let open = if s.dock.is_open(b, id) { lines(b).min(LINES_SHOWN) as f32 * LINE_HEIGHT + 6.0 } else { 0.0 };
+    let open = if s.dock.is_open(b, id) { lines(b).min(LINES_SHOWN) as f32 * LINE_HEIGHT + LINES_PAD } else { 0.0 };
     HEADER_HEIGHT + open
 }
 
@@ -86,7 +87,7 @@ pub(crate) fn dock(s: &App, x: &Session) -> Option<El> {
                 row().key(format!("background-task-{}", t.id)).w_full().h(LINE_HEIGHT).items_center().help(line.clone()).child(text(line).font(META).color(muted()).truncate())
             }))
             .children(b.source_note().map(|n| row().w_full().min_h(NOTE_LINES as f32 * LINE_HEIGHT).items_center().child(text(n).font(META).color(faint()).wrap())));
-        c = c.child(col().key("background-tasks-lines").w_full().max_h(LINES_SHOWN as f32 * LINE_HEIGHT + 6.0).scroll(ScrollSpec { stick_bottom: false }).child(list));
+        c = c.child(col().key("background-tasks-lines").w_full().max_h(LINES_SHOWN as f32 * LINE_HEIGHT + LINES_PAD).scroll(ScrollSpec { stick_bottom: false }).child(list));
     }
     Some(c)
 }
