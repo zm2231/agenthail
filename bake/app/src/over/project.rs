@@ -328,7 +328,7 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
         .placeholder(placeholder.to_string(), weak())
         .on_edit(|s: &mut App| &mut s.composer)
         .on_submit(move |s: &mut App, tx: &mut Tx| crate::send_to(s, &to, tx));
-    let status = crate::composer_note(s, lead).or_else(|| crate::busy_delivery(s, lead).map(|b| b.hint().to_string())).unwrap_or_else(|| "Sends as you".into());
+    let status = crate::composer_note(s, lead).or_else(|| crate::send_busy(s, lead).map(|b| b.hint().to_string())).unwrap_or_else(|| "Sends as you".into());
     let controls = row()
         .w_full()
         .items_center()

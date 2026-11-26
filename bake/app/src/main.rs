@@ -596,7 +596,11 @@ pub fn dismiss_unsent(s: &mut App, id: &str) {
 }
 
 fn fresh(s: &App, id: &str, text: String) -> Unsent {
-    Unsent { session: id.to_string(), text, key: feed::catalog::request_key(), busy: busy_delivery(s, id), maybe_delivered: true, error: "the app closed before the daemon answered".into(), tries: 0 }
+    Unsent { session: id.to_string(), text, key: feed::catalog::request_key(), busy: send_busy(s, id), maybe_delivered: true, error: "the app closed before the daemon answered".into(), tries: 0 }
+}
+
+pub fn send_busy(s: &App, id: &str) -> Option<Busy> {
+    busy_delivery(s, id).or_else(|| (busy_now(s, id) && s.busy_default == Some(Busy::Queue)).then_some(Busy::Queue))
 }
 
 fn dispatch(s: &mut App, id: &str, pending: Unsent, resent: bool, tx: &mut Tx) {
