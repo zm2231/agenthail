@@ -103,6 +103,10 @@ func (d *Daemon) writeSessionStream(w http.ResponseWriter, r *http.Request, sess
 	if !follow() {
 		return
 	}
+	// A client reading the replay holds every retained row once it sees this.
+	if _, err := fmt.Fprint(w, ": live\n\n"); err != nil || sse.Flush(w) != nil {
+		return
+	}
 	sse.Follow(r.Context(), w, wake, func(_ struct{}, open bool) bool {
 		return follow() && open
 	}, func() bool { return d.apiEventStreamAuthorized(r) })
