@@ -173,7 +173,11 @@ fn writer() -> &'static Sender<Write> {
 }
 
 pub fn save(s: &App) {
-    if !s.ov.persist || path().is_none() {
+    if !s.ov.persist {
+        return;
+    }
+    if path().is_none() {
+        *FAILED.lock().expect("layout lock") = Some("HOME is not set".into());
         return;
     }
     let now = encode(s);
@@ -189,6 +193,7 @@ pub fn save_now(s: &App) -> Result<(), String> {
         return Ok(());
     }
     if path().is_none() {
+        *FAILED.lock().expect("layout lock") = Some("HOME is not set".into());
         return Err("HOME is not set".into());
     }
     let now = encode(s);
