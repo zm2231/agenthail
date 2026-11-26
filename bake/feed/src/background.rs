@@ -116,7 +116,7 @@ pub enum Clock {
     TwentyFour,
 }
 
-const TWELVE_HOUR_REGIONS: [&str; 12] = ["US", "CA", "AU", "NZ", "IN", "PH", "PK", "EG", "SA", "BD", "CO", "MX"];
+const TWELVE_HOUR_REGIONS: [&str; 15] = ["US", "CA", "AU", "NZ", "IN", "PH", "PK", "EG", "SA", "BD", "CO", "MX", "KR", "TW", "HK"];
 
 impl Clock {
     pub fn from_settings(force_24: bool, force_12: bool, locale: &str) -> Clock {
@@ -126,7 +126,8 @@ impl Clock {
         if force_12 {
             return Clock::Twelve;
         }
-        let region = locale.split(['_', '-', '@', '.']).nth(1).unwrap_or_default();
+        let base = locale.split(['@', '.']).next().unwrap_or_default();
+        let region = base.split(['_', '-']).skip(1).find(|part| part.len() == 2 && part.chars().all(|c| c.is_ascii_uppercase())).unwrap_or_default();
         if TWELVE_HOUR_REGIONS.contains(&region) { Clock::Twelve } else { Clock::TwentyFour }
     }
 
@@ -272,6 +273,10 @@ mod tests {
         assert_eq!(Clock::from_settings(false, true, "fr_FR"), Clock::Twelve);
         assert_eq!(Clock::from_settings(false, false, "en-US.UTF-8"), Clock::Twelve);
         assert_eq!(Clock::from_settings(false, false, ""), Clock::TwentyFour);
+        assert_eq!(Clock::from_settings(false, false, "en_Latn_US"), Clock::Twelve);
+        assert_eq!(Clock::from_settings(false, false, "zh-Hant-TW"), Clock::Twelve);
+        assert_eq!(Clock::from_settings(false, false, "ja_JP"), Clock::TwentyFour);
+        assert_eq!(Clock::from_settings(false, false, "sr_Latn_RS@calendar=gregorian"), Clock::TwentyFour);
     }
 
     #[test]
