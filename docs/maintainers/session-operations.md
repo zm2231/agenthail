@@ -136,7 +136,10 @@ policy. Only an explicit `queue`, or a message with per-message options, waits
 for that turn to end. `send --no-queue` refuses delayed delivery, while
 `queue` always creates the durable pending item and `steer` is an explicit active-
 turn control. The setting is exposed by the dashboard/API settings endpoint and
-the existing dashboard settings write path. Read-only targets fail before
+the `dashboard-config` settings action, which changes only the fields it names:
+a request with `busyDelivery` alone keeps `codexRecentHours`, and the reverse. The
+single-value actions (`resume-after-limit`, `move-after-limit`,
+`claude-default-root`) refuse a request without their value. Read-only targets fail before
 dispatch. An unknown delivery outcome must be inspected before an explicit retry;
 it is never resent automatically. A queued message records only a per-message
 choice (`queue`, or `steer` for a steer held behind a question). One without a

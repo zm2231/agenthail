@@ -23,6 +23,13 @@ export async function loadSettings() {
   }
 }
 
+export function dashboardConfigChange(saved, codexRecentHours, busyDelivery) {
+  const change = {};
+  if (codexRecentHours !== saved.codexRecentHours) change.codexRecentHours = codexRecentHours;
+  if (busyDelivery !== (saved.busyDelivery || "queue")) change.busyDelivery = busyDelivery;
+  return Object.keys(change).length ? { action: "dashboard-config", ...change } : null;
+}
+
 export function renderClaudeDefaultRoot(chosen, roots) {
   const select = $("#settings-claude-default-root");
   select.innerHTML = [`<option value="">The primary root</option>`, ...roots.map(name => `<option value="${escape(name)}">${escape(name)}</option>`)].join("");

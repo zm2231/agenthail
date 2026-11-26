@@ -613,8 +613,11 @@ final class AgenthailAPI: @unchecked Sendable {
         try await post("/api/v1/claude/remote-control", body: ["root": root, "atStartup": atStartup])
     }
 
-    func updateDashboardConfig(busyDelivery: String, codexRecentHours: Int) async throws {
-        let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: ["action": "dashboard-config", "codexRecentHours": codexRecentHours, "busyDelivery": busyDelivery])
+    func updateDashboardConfig(codexRecentHours: Int? = nil, busyDelivery: String? = nil) async throws {
+        var body: [String: Any] = ["action": "dashboard-config"]
+        if let codexRecentHours { body["codexRecentHours"] = codexRecentHours }
+        if let busyDelivery { body["busyDelivery"] = busyDelivery }
+        let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: body)
     }
 
     func setClaudeDefaultRoot(_ name: String) async throws {

@@ -80,9 +80,12 @@ func EnableRemoteAccess(config dashconfig.Config) (dashconfig.Config, RemoteAcce
 	if err := tailscale.Publish(run, node.Self.DNSName, target, config.RemoteAccess.Port); err != nil {
 		return config, RemoteAccessStatus{}, err
 	}
-	config.RemoteAccess.Enabled = true
-	config.RemoteAccess.TailscalePath = path
-	if err := dashconfig.Save(config); err != nil {
+	config, err = dashconfig.Update(func(saved *dashconfig.Config) error {
+		saved.RemoteAccess.Enabled = true
+		saved.RemoteAccess.TailscalePath = path
+		return nil
+	})
+	if err != nil {
 		return config, RemoteAccessStatus{}, err
 	}
 	result := RemoteAccessStatusForConfig(config)
@@ -109,6 +112,8 @@ func DisableRemoteAccess(config dashconfig.Config) (dashconfig.Config, error) {
 	if _, err := tailscale.Unpublish(run, node.Self.DNSName, target, config.RemoteAccess.Port); err != nil {
 		return config, err
 	}
-	config.RemoteAccess.Enabled = false
-	return config, dashconfig.Save(config)
+	return dashconfig.Update(func(saved *dashconfig.Config) error {
+		saved.RemoteAccess.Enabled = false
+		return nil
+	})
 }

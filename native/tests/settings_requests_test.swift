@@ -26,9 +26,14 @@ struct SettingsRequestsTest {
         RecordingProtocol.reset()
         model.setCodexRecentHours(12)
         let config = await waitFor { $0.path == "/api/v1/settings" && $0.method == "POST" }
-        check(config?.body["action"] as? String == "dashboard-config" && config?.body["codexRecentHours"] as? Int == 12 && config?.body["busyDelivery"] as? String == "steer", "the window change keeps the busy delivery: \(String(describing: config?.body))")
+        check(config?.body["action"] as? String == "dashboard-config" && config?.body["codexRecentHours"] as? Int == 12 && config?.body.count == 2, "the window change sends only the window: \(String(describing: config?.body))")
         check(await waitFor { $0.path == "/api/v1/snapshot" } != nil, "the window change refreshes the snapshot")
         check(await waitForRefresh(), "the window change's refresh sends all of its requests: \(RecordingProtocol.requests.map { "\($0.method) \($0.path)" })")
+        RecordingProtocol.reset()
+        model.setBusyDelivery(.queue)
+        let delivery = await waitFor { $0.path == "/api/v1/settings" && $0.method == "POST" }
+        check(delivery?.body["action"] as? String == "dashboard-config" && delivery?.body["busyDelivery"] as? String == "queue" && delivery?.body.count == 2, "the delivery change sends only the delivery: \(String(describing: delivery?.body))")
+        check(await waitForRefresh(), "the delivery change's refresh sends all of its requests: \(RecordingProtocol.requests.map { "\($0.method) \($0.path)" })")
         RecordingProtocol.reset()
         model.setCodexRecentHours(5)
         check(RecordingProtocol.requests.isEmpty, "choosing the current window sends nothing: \(RecordingProtocol.requests.map { "\($0.method) \($0.path)" })")

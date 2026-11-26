@@ -29,12 +29,10 @@ func (a *App) cmdLimitResume(args []string) error {
 		if err := a.personAction(ctx, daemonapi.PersonActionSettings, payload); err != nil {
 			return err
 		}
-		config, err := dashconfig.Load()
-		if err != nil {
-			return err
-		}
-		config.ResumeAfterLimit = &enabled
-		if err := dashconfig.Save(config); err != nil {
+		if _, err := dashconfig.Update(func(config *dashconfig.Config) error {
+			config.ResumeAfterLimit = &enabled
+			return nil
+		}); err != nil {
 			return err
 		}
 		if enabled {

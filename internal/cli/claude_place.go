@@ -70,12 +70,14 @@ func (a *App) cmdRootsDefault(args []string) error {
 		} else if err := knownRoot(name); err != nil {
 			return err
 		}
-		config.SetClaudeDefaultRoot(name)
+		if _, err := dashconfig.Update(func(config *dashconfig.Config) error {
+			config.SetClaudeDefaultRoot(name)
+			return nil
+		}); err != nil {
+			return err
+		}
 	default:
 		return errors.New(rootsDefaultUsage)
-	}
-	if err := dashconfig.Save(config); err != nil {
-		return err
 	}
 	fmt.Println("saved; new Claude sessions on this host follow it")
 	return nil

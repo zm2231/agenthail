@@ -1162,13 +1162,13 @@ final class AgenthailModel {
 
 
     func setBusyDelivery(_ mode: FollowUpAction) {
-        guard let snapshot, mode != busyDelivery else { return }
-        updateDashboardConfig(busyDelivery: mode.rawValue, codexRecentHours: snapshot.codexRecentHours)
+        guard snapshot != nil, mode != busyDelivery else { return }
+        updateDashboardConfig(busyDelivery: mode.rawValue)
     }
 
     func setCodexRecentHours(_ hours: Int) {
         guard let snapshot, hours != snapshot.codexRecentHours else { return }
-        updateDashboardConfig(busyDelivery: busyDelivery.rawValue, codexRecentHours: hours)
+        updateDashboardConfig(codexRecentHours: hours)
     }
 
     func setAgentMode(_ agent: String, mode: String) {
@@ -1231,11 +1231,11 @@ final class AgenthailModel {
         }
     }
 
-    private func updateDashboardConfig(busyDelivery: String, codexRecentHours: Int) {
+    private func updateDashboardConfig(codexRecentHours: Int? = nil, busyDelivery: String? = nil) {
         guard let api else { return }
         Task {
             do {
-                try await api.updateDashboardConfig(busyDelivery: busyDelivery, codexRecentHours: codexRecentHours)
+                try await api.updateDashboardConfig(codexRecentHours: codexRecentHours, busyDelivery: busyDelivery)
                 settings = try await api.settings()
                 operationError = nil
             } catch {

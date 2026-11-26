@@ -32,16 +32,18 @@ func (d *Daemon) agentStatuses(config dashconfig.Config) []surface.AgentStatus {
 	return surface.AgentStatuses(d.Surfaces, config.AgentMode)
 }
 
-func (d *Daemon) setAgentMode(config *dashconfig.Config, agent, value string) error {
+func (d *Daemon) setAgentMode(agent, value string) error {
 	mode, err := agentswitch.ParseMode(value)
 	if err != nil {
 		return err
 	}
-	if !slices.ContainsFunc(d.agentStatuses(*config), func(status surface.AgentStatus) bool { return status.ID == agent }) {
-		return fmt.Errorf("%q is not an agent this computer can turn on or off", agent)
-	}
-	config.SetAgentMode(agent, mode)
-	if err := dashconfig.Save(*config); err != nil {
+	if _, err := dashconfig.Update(func(config *dashconfig.Config) error {
+		if !slices.ContainsFunc(d.agentStatuses(*config), func(status surface.AgentStatus) bool { return status.ID == agent }) {
+			return fmt.Errorf("%q is not an agent this computer can turn on or off", agent)
+		}
+		config.SetAgentMode(agent, mode)
+		return nil
+	}); err != nil {
 		return err
 	}
 	d.requestCatalogDiscovery()

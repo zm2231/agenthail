@@ -168,6 +168,7 @@ jobs:
           node scripts/test-dashboard-model.mjs
           node scripts/test-dashboard-turn-settings.mjs
           node scripts/test-dashboard-config-roots.mjs
+          node scripts/test-dashboard-settings.mjs
           node scripts/test-dashboard-devices.mjs
           node scripts/test-dashboard-read-state.mjs
           node scripts/test-session-controls.mjs

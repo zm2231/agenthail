@@ -123,14 +123,17 @@ func (d *Daemon) notificationPreferencesHandler(w http.ResponseWriter, r *http.R
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "unknown notification preference "+request.ID)
 			return
 		}
-		if config.NotificationPreferences == nil {
-			config.NotificationPreferences = map[string]bool{}
-		}
-		config.NotificationPreferences[request.ID] = *request.Value
-		if *request.Value == known.Default {
-			delete(config.NotificationPreferences, request.ID)
-		}
-		if err := dashconfig.Save(config); err != nil {
+		config, err = dashconfig.Update(func(config *dashconfig.Config) error {
+			if config.NotificationPreferences == nil {
+				config.NotificationPreferences = map[string]bool{}
+			}
+			config.NotificationPreferences[request.ID] = *request.Value
+			if *request.Value == known.Default {
+				delete(config.NotificationPreferences, request.ID)
+			}
+			return nil
+		})
+		if err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
