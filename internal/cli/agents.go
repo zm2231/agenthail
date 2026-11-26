@@ -98,12 +98,10 @@ func (a *App) useAgent(agent, value string) error {
 		}
 		return fmt.Errorf("unknown agent %q; agents: %s", agent, strings.Join(ids, ", "))
 	}
-	config, err := dashconfig.Load()
-	if err != nil {
-		return err
-	}
-	config.SetAgentMode(agent, mode)
-	if err := dashconfig.Save(config); err != nil {
+	if _, err := dashconfig.Update(func(config *dashconfig.Config) error {
+		config.SetAgentMode(agent, mode)
+		return nil
+	}); err != nil {
 		return err
 	}
 	statuses, err = a.agentStatuses()

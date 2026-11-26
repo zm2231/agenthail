@@ -77,11 +77,7 @@ func (d *Daemon) foldAgentPolicy() error {
 		}
 		changed = append(changed, name)
 	}
-	config, err := dashconfig.Load()
-	if err != nil {
-		return err
-	}
-	if err := dashconfig.Save(config); err != nil {
+	if _, err := dashconfig.Update(func(*dashconfig.Config) error { return nil }); err != nil {
 		return err
 	}
 	if len(changed) > 0 {

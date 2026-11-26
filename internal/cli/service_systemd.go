@@ -173,12 +173,10 @@ func (s *systemdService) Install() error {
 		}
 	}
 	if _, err := os.Stat(dashconfig.Path()); os.IsNotExist(err) {
-		config, loadErr := dashconfig.Load()
-		if loadErr != nil {
-			return loadErr
-		}
-		config.Enabled = true
-		if err := dashconfig.Save(config); err != nil {
+		if _, err := dashconfig.Update(func(config *dashconfig.Config) error {
+			config.Enabled = true
+			return nil
+		}); err != nil {
 			return err
 		}
 	}

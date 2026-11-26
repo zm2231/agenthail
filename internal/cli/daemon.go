@@ -105,8 +105,10 @@ func (a *App) cmdDashboard(args []string) error {
 	}
 	switch action {
 	case "enable":
-		config.Enabled = true
-		if err := dashconfig.Save(config); err != nil {
+		if config, err = dashconfig.Update(func(config *dashconfig.Config) error {
+			config.Enabled = true
+			return nil
+		}); err != nil {
 			return err
 		}
 		if err := a.restartDaemonForDashboard(); err != nil {
@@ -121,8 +123,10 @@ func (a *App) cmdDashboard(args []string) error {
 		}
 		return a.openDashboard()
 	case "disable":
-		config.Enabled = false
-		if err := dashconfig.Save(config); err != nil {
+		if _, err := dashconfig.Update(func(config *dashconfig.Config) error {
+			config.Enabled = false
+			return nil
+		}); err != nil {
 			return err
 		}
 		if _, running := daemonctl.IsRunning(); running {
@@ -158,8 +162,10 @@ func (a *App) cmdDashboard(args []string) error {
 		if hours < 1 {
 			return fmt.Errorf("Codex recent hours must be at least 1")
 		}
-		config.CodexRecentHours = hours
-		if err := dashconfig.Save(config); err != nil {
+		if config, err = dashconfig.Update(func(config *dashconfig.Config) error {
+			config.CodexRecentHours = hours
+			return nil
+		}); err != nil {
 			return err
 		}
 		fmt.Printf("Codex current window: %dh\n", config.CodexRecentHours)

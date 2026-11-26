@@ -87,8 +87,10 @@ func (a *App) ensureDashboardReady() (dashconfig.Config, bool, error) {
 	}
 	enabled := !config.Enabled
 	if enabled {
-		config.Enabled = true
-		if err := dashconfig.Save(config); err != nil {
+		if config, err = dashconfig.Update(func(config *dashconfig.Config) error {
+			config.Enabled = true
+			return nil
+		}); err != nil {
 			return dashconfig.Config{}, false, err
 		}
 	}
@@ -177,8 +179,10 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 		if err != nil {
 			return err
 		}
-		config.RemoteAccess.Enabled = false
-		if err := dashconfig.Save(config); err != nil {
+		if _, err := dashconfig.Update(func(config *dashconfig.Config) error {
+			config.RemoteAccess.Enabled = false
+			return nil
+		}); err != nil {
 			return err
 		}
 		if dashboardDaemonRunning() {
@@ -251,8 +255,10 @@ func (a *App) publishDashboardRemote(run tailscale.Runner, dnsName, path string,
 	if err := tailscale.Publish(run, dnsName, target, dashconfig.DefaultRemoteAccessPort); err != nil {
 		return err
 	}
-	config.RemoteAccess = dashconfig.RemoteAccess{Enabled: true, Provider: "tailscale", Port: dashconfig.DefaultRemoteAccessPort, TailscalePath: path}
-	if err := dashconfig.Save(config); err != nil {
+	if _, err := dashconfig.Update(func(config *dashconfig.Config) error {
+		config.RemoteAccess = dashconfig.RemoteAccess{Enabled: true, Provider: "tailscale", Port: dashconfig.DefaultRemoteAccessPort, TailscalePath: path}
+		return nil
+	}); err != nil {
 		return err
 	}
 	if err := a.syncDaemonMounts(); err != nil {

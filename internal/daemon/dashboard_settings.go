@@ -59,11 +59,11 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 	}
 	switch request.Action {
 	case "remote-enable":
-		if config, _, err = EnableRemoteAccess(config); err == nil {
+		if _, _, err = EnableRemoteAccess(config); err == nil {
 			err = d.syncExtensionMounts()
 		}
 	case "remote-disable":
-		if config, err = DisableRemoteAccess(config); err == nil {
+		if _, err = DisableRemoteAccess(config); err == nil {
 			err = d.syncExtensionMounts()
 		}
 	case "dashboard-config":
@@ -71,13 +71,15 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 			err = fmt.Errorf("dashboard-config names no setting: send codexRecentHours or busyDelivery")
 			break
 		}
-		if request.CodexRecentHours != nil {
-			config.CodexRecentHours = *request.CodexRecentHours
-		}
-		if request.BusyDelivery != nil {
-			config.BusyDelivery = deliverypolicy.Mode(*request.BusyDelivery)
-		}
-		if err = dashconfig.Save(config); err == nil {
+		if _, err = dashconfig.Update(func(config *dashconfig.Config) error {
+			if request.CodexRecentHours != nil {
+				config.CodexRecentHours = *request.CodexRecentHours
+			}
+			if request.BusyDelivery != nil {
+				config.BusyDelivery = deliverypolicy.Mode(*request.BusyDelivery)
+			}
+			return nil
+		}); err == nil {
 			d.publishCatalogPresence()
 		}
 	case "resume-after-limit":
@@ -85,25 +87,31 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 			err = fmt.Errorf("resume-after-limit needs resumeAfterLimit")
 			break
 		}
-		config.ResumeAfterLimit = request.ResumeAfterLimit
-		err = dashconfig.Save(config)
+		_, err = dashconfig.Update(func(config *dashconfig.Config) error {
+			config.ResumeAfterLimit = request.ResumeAfterLimit
+			return nil
+		})
 	case "move-after-limit":
 		if request.MoveAfterLimit == nil {
 			err = fmt.Errorf("move-after-limit needs moveAfterLimit")
 			break
 		}
-		config.MoveAfterLimit = request.MoveAfterLimit
-		err = dashconfig.Save(config)
+		_, err = dashconfig.Update(func(config *dashconfig.Config) error {
+			config.MoveAfterLimit = request.MoveAfterLimit
+			return nil
+		})
 	case "agent-mode":
-		err = d.setAgentMode(&config, request.Agent, request.Mode)
+		err = d.setAgentMode(request.Agent, request.Mode)
 	case "claude-default-root":
 		if request.ClaudeDefaultRoot == nil {
 			err = fmt.Errorf("claude-default-root needs claudeDefaultRoot, empty for the primary root")
 			break
 		}
 		if err = d.knownClaudeRoot(*request.ClaudeDefaultRoot); err == nil {
-			config.SetClaudeDefaultRoot(*request.ClaudeDefaultRoot)
-			err = dashconfig.Save(config)
+			_, err = dashconfig.Update(func(config *dashconfig.Config) error {
+				config.SetClaudeDefaultRoot(*request.ClaudeDefaultRoot)
+				return nil
+			})
 		}
 	case "person-name":
 		err = d.Registry.SetPersonName(request.PersonName)

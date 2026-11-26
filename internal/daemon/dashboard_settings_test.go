@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"fmt"
 	"net/http"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/dashconfig"
@@ -44,6 +46,24 @@ func TestDashboardConfigChangesOnlyTheFieldsItSends(t *testing.T) {
 	saved(48, deliverypolicy.Queue)
 	post(`{"action":"dashboard-config","codexRecentHours":2,"busyDelivery":"steer"}`, http.StatusOK)
 	saved(2, deliverypolicy.Steer)
+	for round, hours := range []int{3, 8, 24, 1, 12, 5, 48, 2} {
+		delivery := []string{"queue", "steer"}[round%2]
+		var wg sync.WaitGroup
+		for _, body := range []string{fmt.Sprintf(`{"action":"dashboard-config","codexRecentHours":%d}`, hours), `{"action":"dashboard-config","busyDelivery":"` + delivery + `"}`} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if response := serveDashboardRequest(handler, http.MethodPost, "/api/settings", body); response.Code != http.StatusOK {
+					t.Errorf("%s: status=%d body=%s", body, response.Code, response.Body.String())
+				}
+			}()
+		}
+		wg.Wait()
+		if t.Failed() {
+			t.FailNow()
+		}
+		saved(hours, deliverypolicy.Mode(delivery))
+	}
 	post(`{"action":"dashboard-config"}`, http.StatusBadRequest)
 	post(`{"action":"dashboard-config","codexRecentHours":500}`, http.StatusBadRequest)
 	saved(2, deliverypolicy.Steer)

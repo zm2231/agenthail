@@ -1,8 +1,10 @@
 package dashconfig
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -91,5 +93,58 @@ func TestDashboardListenIsLoopbackOnly(t *testing.T) {
 	}
 	if _, err := Load(); err == nil {
 		t.Fatal("hand-edited non-loopback listener was loaded")
+	}
+}
+
+func TestConcurrentUpdatesKeepEachOthersFields(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := Save(Config{}); err != nil {
+		t.Fatal(err)
+	}
+	const writers = 32
+	var wg sync.WaitGroup
+	errs := make(chan error, writers*2)
+	stop := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if _, err := Load(); err != nil {
+				errs <- fmt.Errorf("a read during writes: %w", err)
+				return
+			}
+		}
+	}()
+	for i := range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := Update(func(config *Config) error {
+				if config.NotificationPreferences == nil {
+					config.NotificationPreferences = map[string]bool{}
+				}
+				config.NotificationPreferences[fmt.Sprintf("p%d", i)] = true
+				return nil
+			})
+			if err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(stop)
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	config, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(config.NotificationPreferences) != writers {
+		t.Fatalf("kept %d of %d concurrent updates: %v", len(config.NotificationPreferences), writers, config.NotificationPreferences)
 	}
 }

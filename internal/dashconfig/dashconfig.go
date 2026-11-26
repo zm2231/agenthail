@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	qrcode "github.com/skip2/go-qrcode"
 	"github.com/zm2231/agenthail/internal/agentswitch"
@@ -124,7 +125,55 @@ func Load() (Config, error) {
 	return config, nil
 }
 
+func Update(change func(*Config) error) (Config, error) {
+	unlock, err := lock()
+	if err != nil {
+		return Config{}, err
+	}
+	defer unlock()
+	config, err := Load()
+	if err != nil {
+		return Config{}, err
+	}
+	if err := change(&config); err != nil {
+		return Config{}, err
+	}
+	if err := write(&config); err != nil {
+		return Config{}, err
+	}
+	return config, nil
+}
+
+// Save replaces the whole saved config; a change to some fields goes through
+// Update, which holds the lock from read to write.
 func Save(config Config) error {
+	unlock, err := lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return write(&config)
+}
+
+func lock() (func(), error) {
+	if err := os.MkdirAll(filepath.Dir(Path()), 0700); err != nil {
+		return nil, fmt.Errorf("create dashboard config directory: %w", err)
+	}
+	file, err := os.OpenFile(Path()+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("open dashboard config lock: %w", err)
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+		file.Close()
+		return nil, fmt.Errorf("lock dashboard config: %w", err)
+	}
+	return func() {
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		file.Close()
+	}, nil
+}
+
+func write(config *Config) error {
 	if config.Listen == "" {
 		config.Listen = DefaultListen
 	}
@@ -150,10 +199,23 @@ func Save(config Config) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(Path()), 0700); err != nil {
-		return fmt.Errorf("create dashboard config directory: %w", err)
+	temp, err := os.CreateTemp(filepath.Dir(Path()), ".dashboard-*.json")
+	if err != nil {
+		return fmt.Errorf("write dashboard config: %w", err)
 	}
-	return os.WriteFile(Path(), append(data, '\n'), 0600)
+	defer os.Remove(temp.Name())
+	if err := temp.Chmod(0600); err != nil {
+		temp.Close()
+		return fmt.Errorf("write dashboard config: %w", err)
+	}
+	if _, err := temp.Write(append(data, '\n')); err != nil {
+		temp.Close()
+		return fmt.Errorf("write dashboard config: %w", err)
+	}
+	if err := temp.Close(); err != nil {
+		return fmt.Errorf("write dashboard config: %w", err)
+	}
+	return os.Rename(temp.Name(), Path())
 }
 
 // LoadAgentModes reads only the agent settings, so a mistake elsewhere in the
