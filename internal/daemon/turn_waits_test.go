@@ -102,6 +102,14 @@ func TestThePersonDismissesAWaitingTurnAndATypedTurnWaitsWithoutAPush(t *testing
 	if page := freshDecisions(t, f.d); len(waitingTurns(page)) != 0 {
 		t.Fatalf("a dismissed wait is still in Needs you: %+v", page.Decisions)
 	}
+
+	dismissed := page.Decisions[0]
+	later := dismissed
+	later.Key = "turn:" + f.from.ID + ":turn-2"
+	sources := decisionSources{dismissed: map[string]string{f.from.ID: decisionStateKey(dismissed)}}
+	if !sources.dismissedNow(dismissed) || sources.dismissedNow(later) {
+		t.Fatal("a dismissal hides a later wait with the same words ended in the same millisecond")
+	}
 }
 
 func TestAWaitIsOneLineOnWorkTheSessionHolds(t *testing.T) {
@@ -123,7 +131,7 @@ func TestAWaitIsOneLineOnWorkTheSessionHolds(t *testing.T) {
 
 func TestAWorkersWaitIsHandledByItsLeadUntilTheLeadIsGone(t *testing.T) {
 	f := newMCPAnswerFixture(t)
-	f.asProjectLead(t, "lead")
+	leadSession := f.asProjectLead(t, "lead")
 	worker := f.surface.sessions["worker"]
 	store, key := f.d.ledgerStore(), ledgerKeyAt(t, f.r, worker.Cwd)
 	added, err := store.Work(ledger.WorkRequest{ProjectKey: key, SessionID: "worker", Action: ledger.WorkAdd, Text: "import the March export"}, time.Now())
@@ -141,6 +149,22 @@ func TestAWorkersWaitIsHandledByItsLeadUntilTheLeadIsGone(t *testing.T) {
 	}
 	if held := page.LeadHandling[0]; held.SessionID != "worker" || held.HeldBy != "lead" || held.Reason != "Upload the March export" || held.WorkItem != added.Item.ID || held.LedgerKey != key {
 		t.Fatalf("handled by the lead: %+v", held)
+	}
+
+	lead := f.surface.sessions["lead"]
+	for _, observation := range []*surface.TurnObservation{{Status: surface.StatusIdle}, {Status: surface.StatusBusy, ActiveTurnID: "lead-1"}} {
+		f.surface.observations["lead"] = observation
+		f.d.observeSession(t.Context(), f.surface, &lead)
+	}
+	if out, refused := callMCP(t, leadSession, "agenthail_end_turn", map[string]any{"headline": "Blocked", "waitingOn": "Sign in to the build service"}); refused {
+		t.Fatalf("the lead's end turn refused: %v", out)
+	}
+	f.surface.observations["lead"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "lead-1", Reply: &surface.ReplyResult{Text: "reply", Done: true}}
+	f.d.observeSession(t.Context(), f.surface, &lead)
+	f.d.background.wait()
+	page = freshDecisions(t, f.d)
+	if len(page.LeadHandling) != 0 || len(waitingTurns(page)) != 2 {
+		t.Fatalf("with its lead itself waiting on the person, the worker's wait is not the person's: %+v", page)
 	}
 
 	if err := f.r.ArchiveSession("lead", time.Now()); err != nil {

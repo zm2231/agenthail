@@ -147,7 +147,7 @@ func buildDecisions(sources decisionSources) decisionsPage {
 // A wait a lead hears stays with the lead while it can act, as a lead's prompts do.
 func (s decisionSources) addWaitingTurn(page *decisionsPage, rows map[string]dashboardSession, row dashboardSession) {
 	end, state := row.EndTurn, row.TurnState
-	if !end.waits() || state == nil || state.Source != turnSourceEndTurn {
+	if row.Archived || !end.waits() || state == nil || state.Source != turnSourceEndTurn {
 		return
 	}
 	if state.State == turnWaitingWork {
@@ -189,6 +189,9 @@ func asksForAnswer(row dashboardSession) bool {
 func hearerHolds(rows map[string]dashboardSession, id string) bool {
 	hearer, known := rows[id]
 	if !known || hearer.Archived || hearer.Display == nil || hearer.Display.Kind == "unavailable" {
+		return false
+	}
+	if hearer.TurnState != nil && hearer.TurnState.State == turnWaitingPerson {
 		return false
 	}
 	return hearer.Attention == nil || !asksForAnswer(hearer)

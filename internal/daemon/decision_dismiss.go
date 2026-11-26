@@ -71,7 +71,11 @@ func (d *Daemon) doDismissDecision(ctx context.Context, p principal, request das
 }
 
 func decisionStateKey(item decisionItem) string {
-	return item.Kind + "\x1f" + item.Reason + "\x1f" + strconv.FormatInt(item.Since.UnixMilli(), 10)
+	key := item.Kind + "\x1f" + item.Reason + "\x1f" + strconv.FormatInt(item.Since.UnixMilli(), 10)
+	if item.Kind == decisionTurn {
+		key += "\x1f" + item.Key
+	}
+	return key
 }
 
 func (s decisionSources) dismissedNow(item decisionItem) bool {

@@ -293,7 +293,6 @@ func (d *Daemon) turnVerdictLanded(sessionID, turnID string) {
 	d.settleTurnPush(sessionID, entry, gen, settledOnVerdict)
 }
 
-// The needs-you push stands for the turn's finished push, and for the burst it ends.
 // The needs-you push stands for the turn's finished push, and for the burst it ends: its claim is confirmed under the settler's lock, so scheduling, the shutdown flush and a failed confirm each see either the finished push still waiting or the needs-you push sent.
 func (d *Daemon) needsYouTakesTurnPush(sessionID, turnID string, confirm func() (bool, error), release func() error, send func()) (bool, error) {
 	p := d.turnPushes
