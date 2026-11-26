@@ -71,10 +71,10 @@ fn line(s: &App, i: usize, d: &Decision, shift: bool) -> El {
     if !d.is_review() {
         let dd = d.clone();
         actions = actions.child(
-            Button::new(d.not_now_label())
+            Button::new(d.not_now_label(&s.ov.inbox.unconfirmed))
                 .variant(ButtonVariant::Ghost)
                 .control_size(ControlSize::Small)
-                .disabled(acting)
+                .disabled(acting || d.open_dismissals(&s.ov.inbox.unconfirmed).is_empty())
                 .help("Take this off Needs you without answering")
                 .on_press(move |s: &mut App| inbox::not_now(s, &dd))
                 .build(k)

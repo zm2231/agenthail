@@ -160,8 +160,19 @@ impl Decision {
         vec![Dismiss::Stopped { session: &self.session_id }]
     }
 
-    pub fn not_now_label(&self) -> String {
-        match self.dismissals().len() {
+    pub fn hold_of(&self, target: &Dismiss) -> String {
+        match target {
+            Dismiss::Request { session, request } => request_hold(session, request),
+            _ => self.id(),
+        }
+    }
+
+    pub fn open_dismissals(&self, held: &std::collections::HashSet<String>) -> Vec<Dismiss<'_>> {
+        self.dismissals().into_iter().filter(|t| !held.contains(&self.hold_of(t))).collect()
+    }
+
+    pub fn not_now_label(&self, held: &std::collections::HashSet<String>) -> String {
+        match self.open_dismissals(held).len() {
             n if n > 1 => format!("Not now for all {n}"),
             _ => "Not now".into(),
         }
@@ -326,7 +337,7 @@ mod tests {
         assert_eq!(parked.dismissals(), [Dismiss::Parked { work_item: "p-W1", host: "h2" }]);
         let asks = decision(r#"{"sessionId":"s","answerable":true,"requests":[{"id":"a"},{"id":"b"}]}"#);
         assert_eq!(asks.dismissals(), [Dismiss::Request { session: "s", request: "a" }, Dismiss::Request { session: "s", request: "b" }]);
-        assert_eq!(asks.not_now_label(), "Not now for all 2");
+        assert_eq!(asks.not_now_label(&Default::default()), "Not now for all 2");
         let next = decision(r#"{"sessionId":"s","answerable":true,"requests":[{"id":"b"}]}"#);
         assert_eq!(asks.id(), next.id());
         assert_ne!(asks.hold_key(), next.hold_key());
@@ -334,9 +345,13 @@ mod tests {
         assert_eq!(asks.hold_key(), grown.hold_key());
         assert!(grown.holds(&asks.hold_key()));
         assert!(!next.holds(&asks.hold_key()));
+        let held: std::collections::HashSet<String> = [request_hold("s", "b")].into();
+        assert_eq!(asks.open_dismissals(&held), [Dismiss::Request { session: "s", request: "a" }]);
         let stopped = decision(r#"{"group":"stopped","sessionId":"s"}"#);
         assert_eq!(stopped.dismissals(), [Dismiss::Stopped { session: "s" }]);
-        assert_eq!(stopped.not_now_label(), "Not now");
+        assert_eq!(stopped.not_now_label(&Default::default()), "Not now");
+        let held: std::collections::HashSet<String> = [stopped.id()].into();
+        assert!(stopped.open_dismissals(&held).is_empty());
     }
 
     #[test]
@@ -426,7 +441,7 @@ mod tests {
         assert_eq!(rows, [("h2::remote", "h2::p", "h2"), ("local", "", "")]);
         assert_eq!(inbox.decisions[0].holds_up, ["h2::w"]);
         assert_eq!(inbox.decisions[0].dismissals(), [Dismiss::Parked { work_item: "p-W2", host: "h2" }, Dismiss::Parked { work_item: "p-W3", host: "h2" }]);
-        assert_eq!(inbox.decisions[0].not_now_label(), "Not now for all 2");
+        assert_eq!(inbox.decisions[0].not_now_label(&Default::default()), "Not now for all 2");
         assert_eq!(inbox.lead_handling[0].session_id, "h2::crew");
         assert_eq!(inbox.lead_handling[0].held_by, "h2::lead");
         assert_eq!(inbox.notes, ["off isn't answering, so its decisions aren't shown.", "legacy runs an older Agenthail without the Inbox.", "old runs an older Agenthail without the Inbox."]);

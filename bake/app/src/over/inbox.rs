@@ -4,8 +4,7 @@ use std::time::{Duration, Instant};
 
 use feed::brief::Brief;
 use feed::catalog::{Client, RespondError, request_key};
-use feed::action::Dismiss;
-use feed::decisions::{Decision, Handled, Inbox, gone, remember, request_hold};
+use feed::decisions::{Decision, Handled, Inbox, gone, remember};
 use feed::version::{Build, notice};
 
 const EVERY: Duration = Duration::from_secs(10);
@@ -202,12 +201,13 @@ pub fn accept_first(s: &mut crate::App) -> bool {
 }
 
 pub fn not_now(s: &mut crate::App, d: &Decision) {
-    act(s, d, "Not now", |client, d| {
-        for target in d.dismissals() {
-            let hold = match &target {
-                Dismiss::Request { session, request } => request_hold(session, request),
-                _ => d.id(),
-            };
+    let held = s.ov.inbox.unconfirmed.clone();
+    if d.open_dismissals(&held).is_empty() {
+        return;
+    }
+    act(s, d, "Not now", move |client, d| {
+        for target in d.open_dismissals(&held) {
+            let hold = d.hold_of(&target);
             match client.dismiss_decision(target) {
                 Ok(()) => {}
                 Err(e) if gone(&e) => {}
