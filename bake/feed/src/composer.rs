@@ -59,6 +59,8 @@ pub struct Receipt {
     #[serde(default)]
     pub not_steered: Option<bool>,
     #[serde(default)]
+    pub request_id: String,
+    #[serde(default)]
     pub waiting_on: Option<Value>,
 }
 
@@ -85,6 +87,7 @@ impl Delivered {
             ("unknown" | "submitted", _) => Delivered::Unconfirmed,
             (_, Some(true)) => Delivered::NotSteered,
             (_, Some(false)) => Delivered::Steered,
+            (_, None) if !receipt.request_id.is_empty() => Delivered::Steered,
             _ => Delivered::Sent,
         }
     }
@@ -329,6 +332,9 @@ mod tests {
         assert_eq!(Delivered::read(&json!({"ok": true, "result": {"evidence": "delivered", "status": "delivered"}})), Delivered::Sent);
         assert_eq!(Delivered::read(&json!({"ok": true, "result": {"evidence": "transport_accepted", "notSteered": false}})), Delivered::Steered);
         assert_eq!(Delivered::read(&json!({"ok": true, "result": {"evidence": "delivered", "notSteered": true}})), Delivered::NotSteered);
+        assert_eq!(Delivered::read(&json!({"ok": true, "result": {"evidence": "transport_accepted", "status": "sent", "requestId": "r1", "detail": "Steer sent to @scout."}})), Delivered::Steered);
+        assert_eq!(Delivered::read(&json!({"ok": true, "result": {"evidence": "delivered", "status": "sent", "requestId": "r1", "notSteered": true}})), Delivered::NotSteered);
+        assert_eq!(Delivered::read(&json!({"ok": true, "result": {"evidence": "delivered", "status": "sent", "turnId": "t1"}})), Delivered::Sent);
         assert_eq!(Delivered::read(&json!({"ok": true, "result": {"evidence": "queued", "queueId": 4}})), Delivered::Queued(Some(4)));
         assert_eq!(Delivered::read(&json!({"ok": true, "result": {"evidence": "queued", "queueId": 4, "waitingOn": {"kind": "ask"}}})), Delivered::QueuedUntilAnswer(Some(4)));
         assert_eq!(Delivered::read(&json!({"ok": true, "result": {"evidence": "unknown"}})), Delivered::Unconfirmed);
