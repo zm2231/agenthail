@@ -1,0 +1,358 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::sync::mpsc::{Receiver, Sender, channel};
+use std::time::Duration;
+
+use feed::catalog::Client;
+use feed::look::{self as fl, Fit, Look, Rgb, Tint, View, Wallpaper};
+use rune::{Color, Cx, El, Pixels, PixelsWrap, SystemMaterial, Tx, el};
+use rune_kit::Kit;
+
+use crate::theme::{self, Paint};
+
+const IMAGE_SIDE: u32 = 2560;
+
+struct Picture {
+    pixels: Pixels,
+    size: (f32, f32),
+    worst: Rgb,
+}
+
+enum Got {
+    Device(String),
+    View(Box<View>),
+    Image(String, Result<(u32, u32, Vec<u8>), String>),
+    Problem(Option<String>),
+}
+
+#[derive(Default)]
+struct State {
+    look: Look,
+    view: Option<View>,
+    device: String,
+    pictures: HashMap<String, Result<Picture, String>>,
+    meshes: HashMap<String, Picture>,
+    kits: HashMap<String, &'static Kit>,
+    rx: Option<Receiver<Got>>,
+    tx: Option<Sender<Got>>,
+    problem: Option<String>,
+    area: (f32, f32),
+    scale: f32,
+    scheme: Option<rune::ColorScheme>,
+}
+
+thread_local! {
+    static STATE: RefCell<State> = RefCell::new(State { area: (1440.0, 900.0), scale: 2.0, ..State::default() });
+}
+
+pub fn view() -> Option<View> {
+    STATE.with_borrow(|s| s.view.clone())
+}
+
+pub fn device() -> String {
+    STATE.with_borrow(|s| s.device.clone())
+}
+
+pub fn problem() -> Option<String> {
+    STATE.with_borrow(|s| s.problem.clone())
+}
+
+pub fn scheme() -> rune::ColorScheme {
+    STATE.with_borrow(|s| scheme_of(&s.look))
+}
+
+fn scheme_of(look: &Look) -> rune::ColorScheme {
+    match look.theme {
+        fl::Theme::System => rune::ColorScheme::System,
+        fl::Theme::Dark => rune::ColorScheme::Dark,
+        fl::Theme::Light => rune::ColorScheme::Light,
+    }
+}
+
+pub fn take_view(view: View) {
+    STATE.with_borrow_mut(|s| {
+        if let Some(tx) = &s.tx {
+            let _ = tx.send(Got::View(Box::new(view)));
+        }
+    });
+}
+
+fn start(s: &mut State) {
+    let (tx, rx) = channel();
+    s.rx = Some(rx);
+    s.tx = Some(tx.clone());
+    std::thread::spawn(move || follow(tx));
+}
+
+fn follow(tx: Sender<Got>) {
+    let Ok(client) = Client::from_env() else { return };
+    let device = fl::device_name();
+    if tx.send(Got::Device(device.clone())).is_err() {
+        return;
+    }
+    let class = fl::device_class();
+    let mut fetched: Vec<String> = Vec::new();
+    loop {
+        let cursor = client.base_settings().map(|b| b.event_cursor).unwrap_or(0);
+        if !read(&client, class, &device, &tx, &mut fetched) {
+            return;
+        }
+        let result = client.follow_events(cursor, || {}, |kind, _| kind != "ui.changed" && kind != "stream.reset" || read(&client, class, &device, &tx, &mut fetched));
+        if let Err(e) = result
+            && tx.send(Got::Problem(Some(format!("Can't follow appearance changes right now ({e}); retrying.")))).is_err()
+        {
+            return;
+        }
+        std::thread::sleep(Duration::from_secs(2));
+    }
+}
+
+fn read(client: &Client, class: &str, device: &str, tx: &Sender<Got>, fetched: &mut Vec<String>) -> bool {
+    let view = match client.ui_view(class, device) {
+        Ok(view) => view,
+        Err(f) => return tx.send(Got::Problem(Some(format!("Couldn't read appearance settings: {}", f.message)))).is_ok(),
+    };
+    let paths = Look::from_view(&view).images();
+    if tx.send(Got::View(Box::new(view))).is_err() {
+        return false;
+    }
+    for path in paths {
+        if fetched.contains(&path) {
+            continue;
+        }
+        let got = client.ui_background(&path).and_then(|data| fl::decode(&data, IMAGE_SIDE));
+        if got.is_ok() {
+            fetched.push(path.clone());
+        }
+        if tx.send(Got::Image(path, got)).is_err() {
+            return false;
+        }
+    }
+    true
+}
+
+fn picture(w: u32, h: u32, rgba: Vec<u8>, scale: f32, dark_worst: bool) -> Picture {
+    let worst = fl::worst(&rgba, dark_worst);
+    let pixels = Pixels::new();
+    pixels.set(w, h, rgba);
+    Picture { pixels, size: (w as f32 / scale.max(1.0), h as f32 / scale.max(1.0)), worst }
+}
+
+pub fn poll(tx: &mut Tx) -> bool {
+    let changed = STATE.with_borrow_mut(|s| {
+        if s.rx.is_none() {
+            start(s);
+        }
+        let mut changed = false;
+        let got: Vec<Got> = s.rx.as_ref().map(|rx| rx.try_iter().collect()).unwrap_or_default();
+        for g in got {
+            changed = true;
+            match g {
+                Got::Device(d) => s.device = d,
+                Got::View(v) => {
+                    s.look = Look::from_view(&v);
+                    s.view = Some(*v);
+                    s.problem = None;
+                }
+                Got::Image(path, Ok((w, h, rgba))) => {
+                    let dark = s.look.wallpaper(true) == &Wallpaper::Image(path.clone());
+                    let p = picture(w, h, rgba, s.scale, dark);
+                    s.pictures.insert(path, Ok(p));
+                }
+                Got::Image(path, Err(e)) => {
+                    s.pictures.insert(path, Err(e));
+                }
+                Got::Problem(p) => s.problem = p,
+            }
+        }
+        let scheme = scheme_of(&s.look);
+        if s.scheme != Some(scheme) && s.view.is_some() {
+            s.scheme = Some(scheme);
+            tx.set_color_scheme(scheme);
+        }
+        changed
+    });
+    if changed {
+        crate::settings::nudge();
+    }
+    changed
+}
+
+fn rgb(c: Rgb) -> Color {
+    Color { r: fl::linear(c[0]), g: fl::linear(c[1]), b: fl::linear(c[2]), a: 1.0 }
+}
+
+fn srgb(c: Color) -> Rgb {
+    [fl::gamma(c.r), fl::gamma(c.g), fl::gamma(c.b)]
+}
+
+fn ground_rgb(dark: bool) -> Rgb {
+    if dark { [0.086, 0.086, 0.094] } else { [0.957, 0.957, 0.965] }
+}
+
+fn wallpaper_key(w: &Wallpaper) -> String {
+    format!("{w:?}")
+}
+
+fn worst_of(s: &mut State, dark: bool) -> Option<Rgb> {
+    let w = s.look.wallpaper(dark).clone();
+    match &w {
+        Wallpaper::Image(path) => s.pictures.get(path).and_then(|p| p.as_ref().ok()).map(|p| p.worst),
+        Wallpaper::Mesh { .. } => mesh_picture(s, &w, dark).map(|p| p.worst),
+        Wallpaper::Linear { stops, .. } => {
+            let key = |c: &Rgb| fl::luminance(*c);
+            let colors = stops.iter().map(|(c, _)| *c);
+            if dark { colors.max_by(|a, b| key(a).total_cmp(&key(b))) } else { colors.min_by(|a, b| key(a).total_cmp(&key(b))) }
+        }
+        Wallpaper::None | Wallpaper::Desktop => None,
+    }
+}
+
+fn mesh_picture<'a>(s: &'a mut State, w: &Wallpaper, dark: bool) -> Option<&'a Picture> {
+    let Wallpaper::Mesh { columns, rows, colors } = w else { return None };
+    let key = wallpaper_key(w);
+    if !s.meshes.contains_key(&key) {
+        let (mw, mh, rgba) = fl::mesh(*columns, *rows, colors, 1.0);
+        s.meshes.insert(key.clone(), picture(mw, mh, rgba, 1.0, dark));
+    }
+    s.meshes.get(&key)
+}
+
+fn tint_rgb(look: &Look, dark: bool, accent: Rgb) -> Rgb {
+    match look.tint {
+        Tint::Ground => ground_rgb(dark),
+        Tint::Accent => accent,
+        Tint::Color(c) => c,
+    }
+}
+
+fn quant(x: f32) -> u32 {
+    (x.clamp(0.0, 1.0) * 255.0).round() as u32
+}
+
+fn cached(s: &mut State, key: String, build: impl FnOnce() -> Kit) -> &'static Kit {
+    *s.kits.entry(key).or_insert_with(|| Box::leak(Box::new(build())))
+}
+
+fn accented(k: &mut Kit, accent: Option<Color>) {
+    if let Some(a) = accent {
+        k.c.bg_accent = a;
+        k.c.text_accent = a;
+        k.c.icon_accent = a;
+        k.c.border_focus = a;
+    }
+}
+
+pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool) {
+    let system_dark = cx.system_dark();
+    let (paint, kit, chrome, scale) = STATE.with_borrow_mut(|s| {
+        let dark = s.look.dark(system_dark);
+        let mut paint = if dark { Paint::dark() } else { Paint::light() };
+        let role = |name: &str, fallback: Color| s.look.role(name, dark).map(rgb).unwrap_or(fallback);
+        paint.text = role("body", paint.text);
+        paint.muted = role("muted", paint.muted);
+        paint.faint = role("faint", paint.faint);
+        paint.attention = role("needs-you", paint.attention);
+        paint.done = role("done", paint.done);
+        paint.failed = role("error", paint.failed);
+        let accent = s.look.accent.map(|(d, l)| if dark { d } else { l });
+        if let Some(a) = accent {
+            paint.accent = rgb(a);
+            paint.accent_deep = rgb(fl::blend(a, [0.0; 3], 0.35));
+        }
+        let accent_rgb = accent.unwrap_or_else(|| srgb(paint.accent));
+        let translucent = glass && s.look.translucent(dark);
+        let mut key = format!("{dark}:{translucent}:{accent:?}");
+        if translucent {
+            let ground = ground_rgb(dark);
+            let tint = tint_rgb(&s.look, dark, accent_rgb);
+            let strength = if session { s.look.session_opacity } else { s.look.opacity };
+            let worst = worst_of(s, dark).unwrap_or(ground);
+            let pane = s.look.pane_tint(dark, worst, ground, tint, strength, s.look.pane_opacity);
+            let float = s.look.pane_tint(dark, worst, ground, tint, strength, s.look.float_opacity);
+            paint.card = paint.card.alpha(0.6);
+            paint.card_deep = paint.card_deep.alpha(0.7);
+            paint.raised = paint.raised.alpha(0.78);
+            paint.glass_tint = rgb(tint).alpha(float);
+            paint.blur = s.look.blur / 3.0;
+            paint.ground = rgb(ground);
+            key = format!("{key}:{}:{}:{:?}:{}", quant(pane), quant(s.look.border), tint, quant(float));
+            paint.pane = rgb(tint).alpha(pane);
+            paint.border = Color::WHITE.alpha(s.look.border);
+        } else {
+            paint.glass_tint = paint.card.alpha(if dark { 0.78 } else { 1.0 });
+        }
+        let kit = cached(s, format!("kit:{key}"), || {
+            let mut k = Kit::neutral(dark);
+            if translucent {
+                k.c.bg_deep = paint.pane;
+                k.c.bg_base = Color::WHITE.alpha(0.025);
+                k.c.border_muted = paint.border;
+            }
+            accented(&mut k, accent.map(|_| paint.accent));
+            k
+        });
+        let chrome = cached(s, format!("chrome:{key}"), || {
+            let mut k = rune_theme_opencode::kit(dark).clone();
+            if translucent {
+                k.c.bg_deep = paint.pane;
+                k.c.bg_base = Color::WHITE.alpha(0.025);
+                k.c.border_muted = paint.border;
+            } else if dark {
+                k.c.bg_deep = Color::TRANSPARENT;
+                k.c.border_muted = Color::WHITE.alpha(0.09);
+            }
+            accented(&mut k, accent.map(|_| paint.accent));
+            k
+        });
+        (paint, kit, chrome, s.look.text_scale)
+    });
+    theme::set(paint, kit, chrome);
+    cx.zoom(scale);
+}
+
+pub fn backdrop(session: bool) -> El {
+    STATE.with_borrow_mut(|s| {
+        let paint = theme::paint();
+        let dark = paint.dark;
+        let base = el().key("backdrop").absolute(0.0, 0.0).w_full().h_full().on_layout_any(|r, tx| {
+            let scale = tx.scale();
+            STATE.with_borrow_mut(|s| {
+                s.area = (r[2], r[3]);
+                s.scale = scale;
+            });
+        });
+        if !s.look.drawn(dark) {
+            let base = base.fill(paint.card_deep);
+            return if dark { base.system_material(SystemMaterial::Glass) } else { base };
+        }
+        let strength = if session { s.look.session_opacity } else { s.look.opacity };
+        let w = s.look.wallpaper(dark).clone();
+        let art = match &w {
+            Wallpaper::Image(path) => match s.pictures.get(path) {
+                Some(Ok(p)) => {
+                    let placed = fl::place(s.look.fit, s.look.position, p.size, s.area);
+                    let wrap = if s.look.fit == Fit::Tile { PixelsWrap::Repeat } else { PixelsWrap::Extend };
+                    let full = el().w_full().h_full();
+                    Some(if placed.tile || s.look.fit == Fit::Cover { full.pixels_wrap(&p.pixels, placed.rect, wrap) } else { el().clip_rounded(0.0).w_full().h_full().child(el().absolute(placed.rect[0], placed.rect[1]).size(placed.rect[2], placed.rect[3]).pixels(&p.pixels)) })
+                }
+                _ => None,
+            },
+            Wallpaper::Mesh { .. } => mesh_picture(s, &w, dark).map(|p| el().w_full().h_full().pixels(&p.pixels)),
+            Wallpaper::Linear { angle, stops } => {
+                let stops: Vec<(f32, Color)> = stops.iter().map(|(c, at)| (*at, rgb(*c))).collect();
+                Some(el().w_full().h_full().linear_gradient(angle.to_radians(), stops))
+            }
+            Wallpaper::None | Wallpaper::Desktop => None,
+        };
+        let blur = if s.look.translucent(dark) { s.look.blur / 3.0 } else { 0.0 };
+        let mut root = base.clip_rounded(0.0).fill(paint.ground);
+        if let Some(art) = art {
+            root = root.child(el().absolute(0.0, 0.0).w_full().h_full().opacity(strength).blur(blur).child(art));
+        }
+        if s.look.dim > 0.0 {
+            root = root.child(el().absolute(0.0, 0.0).w_full().h_full().fill(if dark { Color::BLACK } else { Color::WHITE }.alpha(s.look.dim)));
+        }
+        root
+    })
+}

@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 pub use edit::{Change, Entry, KEYS, Preset, Scope, describe, device_class, device_name, owner};
-pub use paint::{GRAIN_SIDE, Placement, SCANLINE_ROWS, Texture, blend, boundary, contrast, grain, linear, luminance, mesh, pane_alpha, place, scanlines, worst};
+pub use paint::{Placement, blend, boundary, contrast, decode, gamma, linear, luminance, mesh, pane_alpha, place, worst};
 
 pub type Rgb = [f32; 3];
 
@@ -111,9 +111,6 @@ pub struct Look {
     pub readable: bool,
     pub border: f32,
     pub gutter: f32,
-    pub texture: Texture,
-    pub texture_strength: f32,
-    pub texture_spacing: f32,
     pub scrim_black: bool,
     pub text_scale: f32,
     pub target: f32,
@@ -233,13 +230,6 @@ impl Look {
             readable: text(v, "glass.readability", "auto") == "auto",
             border: number(v, "glass.border", 0.08, (0.0, 0.3)),
             gutter: number(v, "glass.gutter", 0.0, (0.0, 16.0)),
-            texture: match text(v, "texture", "none") {
-                "scanlines" => Texture::Scanlines,
-                "grain" => Texture::Grain,
-                _ => Texture::None,
-            },
-            texture_strength: number(v, "texture.strength", 0.2, (0.0, 0.6)),
-            texture_spacing: number(v, "texture.spacing", 3.0, (2.0, 8.0)),
             scrim_black: text(v, "scrim.tint", "auto") == "black",
             text_scale: number(v, "text.scale", 1.0, (0.8, 1.6)),
             target: number(v, "contrast.target", 4.5, (4.5, 7.0)),
@@ -275,6 +265,18 @@ impl Look {
         self.roles.get(name).map(|(d, l)| if dark { *d } else { *l })
     }
 
+    pub fn pane_tint(&self, dark: bool, worst: Rgb, ground: Rgb, tint: Rgb, strength: f32, minimum: f32) -> f32 {
+        if !self.readable {
+            return minimum;
+        }
+        let behind = blend(blend(ground, worst, strength), if dark { [0.0; 3] } else { [1.0; 3] }, self.dim);
+        let mut roles: Vec<f32> = READ_ON_PANES.iter().filter_map(|r| self.role(r, dark)).map(luminance).collect();
+        if roles.is_empty() {
+            roles.push(if dark { 0.84 } else { 0.012 });
+        }
+        pane_alpha(luminance(behind), luminance(tint), boundary(&roles, dark, self.target), dark, minimum)
+    }
+
     pub fn translucent(&self, dark: bool) -> bool {
         dark && self.glass && self.drawn(dark)
     }
@@ -284,7 +286,10 @@ impl Look {
     }
 }
 
-pub const NOT_DRAWN: [&str; 4] = [
+const READ_ON_PANES: [&str; 5] = ["body", "muted", "faint", "meta", "code"];
+
+pub const NOT_DRAWN: [&str; 5] = [
+    "Texture: it lies only over open background, and this app's panes cover the whole window.",
     "Desktop: this app can't read the desktop picture yet, so it draws no background for it.",
     "Space between panes (glass.gutter): panes keep this app's fixed spacing.",
     "Readability layer colour (scrim.tint): this app's panes cover the whole window, so there is no open area for it.",

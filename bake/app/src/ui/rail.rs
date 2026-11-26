@@ -6,7 +6,7 @@ pub(crate) fn rail_section(title: &str, glyph: &'static Icon, body: El) -> El {
         .gap(8.0)
         .pt(14.0)
         .child(row().gap(6.0).items_center().px(4.0).child(icon(glyph, 12.0).color(faint())).child(label(title)))
-        .child(col().w_full().px(12.0).py(12.0).radius(14.0).fill(Color::BLACK.alpha(0.20)).border(1.0, Color::WHITE.alpha(0.07)).child(body))
+        .child(col().w_full().px(12.0).py(12.0).radius(14.0).fill(Color::BLACK.alpha(0.20)).border(1.0, crate::theme::ink(0.07)).child(body))
 }
 
 pub(crate) fn phase_stepper(state: &str) -> El {
@@ -15,13 +15,13 @@ pub(crate) fn phase_stepper(state: &str) -> El {
     for i in 0..PHASES.len() {
         let reached = i <= current;
         let size = if i == current { 12.0 } else { 8.0 };
-        let mut dot = el().size(size, size).radius(size / 2.0).fill(if reached { accent() } else { Color::WHITE.alpha(0.15) });
+        let mut dot = el().size(size, size).radius(size / 2.0).fill(if reached { accent() } else { crate::theme::ink(0.15) });
         if i == current {
             dot = dot.shadow(0.0, 10.0, accent().alpha(0.8)).border(2.0, Color::WHITE.alpha(0.9));
         }
         nodes = nodes.child(dot);
         if i + 1 < PHASES.len() {
-            nodes = nodes.child(el().grow(1.0).h(2.0).radius(1.0).fill(if i < current { accent().alpha(0.7) } else { Color::WHITE.alpha(0.10) }));
+            nodes = nodes.child(el().grow(1.0).h(2.0).radius(1.0).fill(if i < current { accent().alpha(0.7) } else { crate::theme::ink(0.10) }));
         }
     }
     let names = row().w_full().children(PHASES.iter().enumerate().map(|(i, name)| {
@@ -88,7 +88,7 @@ pub(crate) fn rail(s: &App, x: &Session) -> El {
                             .px(6.0)
                             .py(5.0)
                             .radius(7.0)
-                            .hover(Color::WHITE.alpha(0.06))
+                            .hover(crate::theme::ink(0.06))
                             .on_press(move |s: &mut App| pick_work(s, &item))
                             .child(text(w.item_id.rsplit('-').next().unwrap_or(&w.item_id).to_string()).font(META_BOLD).color(muted()))
                             .child(text(w.text.clone()).font(META).color(theme::text()).truncate().grow(1.0).min_w(0.0))
@@ -110,8 +110,8 @@ pub(crate) fn rail(s: &App, x: &Session) -> El {
                     .w(10.0)
                     .items_center()
                     .self_stretch()
-                    .child(el().size(8.0, 8.0).radius(4.0).mt(5.0).fill(if n == 0 { accent() } else { Color::WHITE.alpha(0.25) }))
-                    .child(el().w(1.5).grow(1.0).fill(if n + 1 < count { Color::WHITE.alpha(0.10) } else { Color::TRANSPARENT }));
+                    .child(el().size(8.0, 8.0).radius(4.0).mt(5.0).fill(if n == 0 { accent() } else { crate::theme::ink(0.25) }))
+                    .child(el().w(1.5).grow(1.0).fill(if n + 1 < count { crate::theme::ink(0.10) } else { Color::TRANSPARENT }));
                 row()
                     .w_full()
                     .gap(10.0)
@@ -139,7 +139,7 @@ pub(crate) fn rail(s: &App, x: &Session) -> El {
                     .px(6.0)
                     .py(5.0)
                     .radius(7.0)
-                    .hover(Color::WHITE.alpha(0.06))
+                    .hover(crate::theme::ink(0.06))
                     .on_press(show_changes)
                     .child(icon(&icons::LAYERS, 12.0).color(faint()))
                     .child(col().grow(1.0).min_w(0.0).child(text(name).font(META_BOLD).color(theme::text()).truncate()).child(text(f.path.clone()).font(META).color(faint()).truncate()))
@@ -156,7 +156,7 @@ pub(crate) fn rail(s: &App, x: &Session) -> El {
             .w_full()
             .h(6.0)
             .radius(3.0)
-            .fill(Color::WHITE.alpha(0.10))
+            .fill(crate::theme::ink(0.10))
             .child(el().w(240.0 * plan.done as f32 / total).h(6.0).radius(3.0).linear_gradient(0.0, [(0.0, done()), (1.0, accent())]).motion(SPRING));
         parts.push(rail_section("Progress", &icons::LIST, col().w_full().gap(8.0).child(text(format!("{} of {} tasks done", plan.done, plan.total)).font(META).color(theme::text())).child(bar)));
     }
@@ -166,7 +166,7 @@ pub(crate) fn rail(s: &App, x: &Session) -> El {
             &icons::PULL,
             col().w_full().gap(8.0).children(x.prs.iter().map(|p| {
                 let url = p.url.clone();
-                row().key(format!("pr-{}", p.number)).w_full().gap(8.0).items_center().radius(6.0).hover(Color::WHITE.alpha(0.06)).on_press(move |_: &mut App| open_link(&url)).child(icon(&icons::PULL, 13.0).color(done())).child(text(format!("#{}", p.number)).font(META_BOLD).color(accent())).child(text(p.title.clone()).font(META).color(theme::text()).truncate().min_w(0.0))
+                row().key(format!("pr-{}", p.number)).w_full().gap(8.0).items_center().radius(6.0).hover(crate::theme::ink(0.06)).on_press(move |_: &mut App| open_link(&url)).child(icon(&icons::PULL, 13.0).color(done())).child(text(format!("#{}", p.number)).font(META_BOLD).color(accent())).child(text(p.title.clone()).font(META).color(theme::text()).truncate().min_w(0.0))
             })),
         ));
     }

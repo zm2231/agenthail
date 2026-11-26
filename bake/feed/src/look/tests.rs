@@ -115,17 +115,6 @@ fn a_mesh_runs_corner_to_corner() {
 }
 
 #[test]
-fn textures_are_tiles() {
-    let (w, h, px) = scanlines(4.0, 0.5);
-    assert_eq!((w, h), (1, SCANLINE_ROWS));
-    assert_eq!(px[3], 128);
-    assert_eq!(px[16 * 4 + 3], 0);
-    let (gw, gh, g) = grain(0.2);
-    assert_eq!((gw, gh, g.len()), (GRAIN_SIDE, GRAIN_SIDE, (GRAIN_SIDE * GRAIN_SIDE * 4) as usize));
-    assert!(g.chunks_exact(4).all(|p| p[3] <= 26));
-}
-
-#[test]
 fn changes_are_the_lines_the_daemon_checks() {
     let everywhere = Scope::Everywhere;
     let here = Scope::ThisComputer("Studio".into());
@@ -151,4 +140,19 @@ fn history_names_who_and_when() {
     assert_eq!(describe(&e("@collab", "2026-11-16T16:46:27-05:00"), now), "@collab · 9 d ago");
     assert_eq!(describe(&e("person", "2026-11-26T09:00:00Z"), now), "You · 3 h ago");
     assert_eq!(describe(&e("person", ""), now), "You");
+}
+
+#[test]
+fn pane_tint_follows_strength_dim_and_the_readability_switch() {
+    let view: View = serde_json::from_str(LIVE).unwrap();
+    let mut look = Look::from_view(&view);
+    let ground = hex("#161618").unwrap();
+    let white = [1.0; 3];
+    let full = look.pane_tint(true, white, ground, ground, 1.0, 0.0);
+    assert!(full > 0.5, "{full}");
+    assert!(look.pane_tint(true, white, ground, ground, 0.1, 0.0) < full);
+    look.dim = 0.8;
+    assert!(look.pane_tint(true, white, ground, ground, 1.0, 0.0) < full);
+    look.readable = false;
+    assert_eq!(look.pane_tint(true, white, ground, ground, 1.0, 0.25), 0.25);
 }

@@ -157,6 +157,17 @@ impl Client {
         serde_json::from_value(value).map_err(|e| Failure { uncertain: true, ..Failure::new(format!("the daemon's reply couldn't be read: {e}")) })
     }
 
+    pub fn ui_upload(&self, name: &str, data: &[u8]) -> Result<String, Failure> {
+        let url = format!("{}/api/v1/ui/background?name={}", self.base, enc(name));
+        let request = self.timed(std::time::Duration::from_secs(180)).agent.post(&url).set("Authorization", &self.bearer()).set("Accept", "application/json").set("Content-Type", "application/octet-stream");
+        let reply: Value = match request.send_bytes(data) {
+            Ok(response) => response.into_json().map_err(|e| Failure::new(format!("the daemon's reply couldn't be read: {e}")))?,
+            Err(ureq::Error::Status(code, response)) => return Err(crate::prefs::read_failure("settings", code, &response.into_string().unwrap_or_default())),
+            Err(ureq::Error::Transport(error)) => return Err(Failure::new(error.to_string())),
+        };
+        reply["path"].as_str().filter(|p| !p.is_empty()).map(str::to_string).ok_or_else(|| Failure::new("the daemon didn't say where it kept the picture"))
+    }
+
     pub fn ui_background(&self, path: &str) -> Result<Vec<u8>, String> {
         let url = format!("{}/api/v1/ui/background?path={}", self.base, enc(path));
         let response = match self.timed(std::time::Duration::from_secs(60)).agent.get(&url).set("Authorization", &self.bearer()).call() {

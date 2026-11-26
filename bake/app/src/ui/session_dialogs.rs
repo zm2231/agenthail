@@ -27,7 +27,7 @@ pub fn button(x: &Session) -> El {
         .radius(9.0)
         .items_center()
         .justify_center()
-        .hover(rune::Color::WHITE.alpha(0.08))
+        .hover(crate::theme::ink(0.08))
         .label("Session actions")
         .on_press(move |s: &mut App| {
             s.menus.chip = None;

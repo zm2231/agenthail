@@ -1,12 +1,5 @@
 use super::{Fit, Position, Rgb};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Texture {
-    None,
-    Scanlines,
-    Grain,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Placement {
     pub rect: [f32; 4],
@@ -41,7 +34,7 @@ pub fn linear(c: f32) -> f32 {
     if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
 }
 
-fn gamma(c: f32) -> f32 {
+pub fn gamma(c: f32) -> f32 {
     if c <= 0.0031308 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
 }
 
@@ -119,34 +112,9 @@ pub fn mesh(columns: usize, rows: usize, colors: &[Rgb], aspect: f32) -> (u32, u
     (mw as u32, mh as u32, out)
 }
 
-pub const SCANLINE_ROWS: u32 = 64;
-
-pub fn scanlines(spacing: f32, strength: f32) -> (u32, u32, Vec<u8>) {
-    let line = (SCANLINE_ROWS as f32 / spacing.max(1.0)).round().max(1.0) as usize;
-    let alpha = (strength.clamp(0.0, 1.0) * 255.0).round() as u8;
-    let mut out = vec![0u8; SCANLINE_ROWS as usize * 4];
-    for row in 0..line.min(SCANLINE_ROWS as usize) {
-        out[row * 4 + 3] = alpha;
-    }
-    (1, SCANLINE_ROWS, out)
-}
-
-pub const GRAIN_SIDE: u32 = 256;
-
-pub fn grain(strength: f32) -> (u32, u32, Vec<u8>) {
-    let n = (GRAIN_SIDE * GRAIN_SIDE) as usize;
-    let mut out = vec![0u8; n * 4];
-    let mut seed: u32 = 0x9E37_79B9;
-    let scale = strength.clamp(0.0, 1.0) * 0.5;
-    for i in 0..n {
-        seed ^= seed << 13;
-        seed ^= seed >> 17;
-        seed ^= seed << 5;
-        let v = (seed & 0xff) as f32 / 255.0;
-        let light = v > 0.5;
-        let a = ((v - 0.5).abs() * 2.0 * scale * 255.0).round() as u8;
-        let c = if light { 255 } else { 0 };
-        out[i * 4..i * 4 + 4].copy_from_slice(&[c, c, c, a]);
-    }
-    (GRAIN_SIDE, GRAIN_SIDE, out)
+pub fn decode(data: &[u8], max_side: u32) -> Result<(u32, u32, Vec<u8>), String> {
+    let picture = image::load_from_memory(data).map_err(|e| e.to_string())?;
+    let picture = if picture.width().max(picture.height()) > max_side { picture.resize(max_side, max_side, image::imageops::FilterType::Triangle) } else { picture };
+    let rgba = picture.to_rgba8();
+    Ok((rgba.width(), rgba.height(), rgba.into_raw()))
 }
