@@ -39,7 +39,7 @@ pub struct Over {
     pub sidebar: PaneState,
     pub inspector: PaneState,
     pub jump: Option<TextEdit>,
-    pub jump_ix: usize,
+    pub jump_ix: (String, usize),
     pub need_ix: usize,
     pub open_lanes: HashSet<String>,
     pub widths: HashMap<String, f32>,
@@ -75,7 +75,7 @@ impl Over {
             sidebar: PaneState::new(300.0).range(200.0, 480.0),
             inspector: PaneState::new(340.0).range(260.0, 520.0),
             jump: None,
-            jump_ix: 0,
+            jump_ix: (String::new(), 0),
             need_ix: 0,
             open_lanes: HashSet::new(),
             widths: HashMap::new(),
@@ -213,7 +213,7 @@ pub fn open_jump(s: &mut App, tx: &mut Tx) {
     let mut edit = TextEdit::new("");
     edit.focused = true;
     s.ov.jump = Some(edit);
-    s.ov.jump_ix = 0;
+    s.ov.jump_ix = (String::new(), 0);
     search::forget_codex(s);
     tx.focus("jump-input", false);
 }

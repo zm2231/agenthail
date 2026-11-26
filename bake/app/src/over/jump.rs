@@ -42,7 +42,7 @@ fn command_icon(c: Command) -> &'static Icon {
 }
 
 fn entries(s: &App) -> Vec<Entry> {
-    let q = s.ov.jump.as_ref().map(|e| e.text.as_str()).unwrap_or_default();
+    let q = query(s);
     let hits = s.ov.d.jump(q, &s.ov.needs, &s.ov.hands_on).into_iter().map(|h| Entry { group: h.group, title: h.title, status: h.status, badge: h.badge, look: Look::Avatar(h.avatar), pick: Some(Pick::Target(h.target)) });
     let selected = search::selected(s);
     let title = selected.as_deref().map(|id| search::selected_title(s, id)).unwrap_or_default();
@@ -79,6 +79,20 @@ fn entries(s: &App) -> Vec<Entry> {
     out
 }
 
+fn query(s: &App) -> &str {
+    s.ov.jump.as_ref().map(|e| e.text.as_str()).unwrap_or_default()
+}
+
+fn highlighted(s: &App) -> usize {
+    let (at, ix) = &s.ov.jump_ix;
+    if at == query(s) { *ix } else { 0 }
+}
+
+fn highlight(s: &mut App, ix: usize, tx: &mut Tx) {
+    s.ov.jump_ix = (query(s).to_string(), ix);
+    tx.scroll_into_view_in("jump-list", format!("hit-{ix}"));
+}
+
 fn picks(s: &App) -> usize {
     entries(s).iter().filter(|e| e.pick.is_some()).count()
 }
@@ -104,17 +118,17 @@ pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             true
         }
         Key::Down => {
-            s.ov.jump_ix = (s.ov.jump_ix + 1).min(picks(s).saturating_sub(1));
-            tx.scroll_into_view_in("jump-list", format!("hit-{}", s.ov.jump_ix));
+            let ix = (highlighted(s) + 1).min(picks(s).saturating_sub(1));
+            highlight(s, ix, tx);
             true
         }
         Key::Up => {
-            s.ov.jump_ix = s.ov.jump_ix.saturating_sub(1);
-            tx.scroll_into_view_in("jump-list", format!("hit-{}", s.ov.jump_ix));
+            let ix = highlighted(s).saturating_sub(1);
+            highlight(s, ix, tx);
             true
         }
         Key::Enter => {
-            let ix = s.ov.jump_ix.min(picks(s).saturating_sub(1));
+            let ix = highlighted(s).min(picks(s).saturating_sub(1));
             run_at(s, ix, tx);
             true
         }
@@ -139,7 +153,7 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
     let mut list = col().w_full().gap(2.0).padding(8.0);
     let mut last = "";
     let found = entries(s);
-    let ix = s.ov.jump_ix.min(found.iter().filter(|e| e.pick.is_some()).count().saturating_sub(1));
+    let ix = highlighted(s).min(found.iter().filter(|e| e.pick.is_some()).count().saturating_sub(1));
     let mut i = 0;
     for h in found {
         if h.group != last {
@@ -190,7 +204,7 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
         .child(row().gap(6.0).items_center().child(ui::ghost_keys(&["↑", "↓"])).child(text("move".to_string()).font(META).color(weak())))
         .child(row().gap(6.0).items_center().child(ui::ghost_keys(&["⏎"])).child(text("open".to_string()).font(META).color(weak())))
         .child(ui::spacer())
-        .child(text("Projects, work, sessions, commands, then older Codex threads".to_string()).font(META).color(weak()));
+        .child(text("Projects, work, sessions and commands, then older Codex threads".to_string()).font(META).color(weak()));
     let panel = col()
         .key("jump")
         .w(680.0)
