@@ -46,6 +46,7 @@ pub struct State {
     pub notes: HashMap<String, (String, String)>,
     pub briefs: HashMap<String, BriefState>,
     pub version: Option<String>,
+    pub reads: u64,
     review_old: HashMap<String, Instant>,
     pub note: Option<Note>,
     daemon: Option<String>,
@@ -56,7 +57,7 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         let (tx, rx) = channel();
-        State { tx, rx, inbox: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, review_old: HashMap::new(), note: None, daemon: None, newest: None, started: false }
+        State { tx, rx, inbox: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, reads: 0, review_old: HashMap::new(), note: None, daemon: None, newest: None, started: false }
     }
 }
 
@@ -98,7 +99,8 @@ pub fn start(state: &mut State, client: &Client) {
     });
 }
 
-fn refresh(client: &Client, tx: &Sender<Done>) {
+pub fn refresh(client: &Client, st: &State) {
+    let tx = &st.tx;
     let (client, tx) = (client.clone(), tx.clone());
     std::thread::spawn(move || {
         fetch(&client, &tx);
@@ -116,6 +118,7 @@ pub fn drain(s: &mut crate::App) -> bool {
                     continue;
                 }
                 st.newest = Some(started);
+                st.reads += 1;
                 if inbox.notes.is_empty() {
                     st.unconfirmed.retain(|hold| inbox.decisions.iter().any(|d| d.holds(hold)));
                 }
@@ -146,7 +149,7 @@ pub fn drain(s: &mut crate::App) -> bool {
                     }
                 }
                 if let Some(client) = &s.client {
-                    refresh(client, &s.ov.inbox.tx);
+                    refresh(client, &s.ov.inbox);
                 }
             }
             Done::Brief(project, result) => {
