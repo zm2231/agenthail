@@ -259,7 +259,7 @@ func (r *Registry) CancelMessage(id int64) (CanceledMessage, error) {
 }
 
 func (r *Registry) PendingSenders(sessionID string) ([]string, error) {
-	rows, err := r.read.Query(`SELECT DISTINCT source_session_id FROM message_queue WHERE session_id=? AND status='pending' ORDER BY source_session_id`, sessionID)
+	rows, err := r.read.Query(`SELECT DISTINCT source_session_id FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND status='pending' ORDER BY source_session_id`, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +284,7 @@ func (r *Registry) CancelMessagesForSession(sessionID string, senders []string) 
 	}
 	defer tx.Rollback()
 	const from = ` AND (? OR source_session_id IN (SELECT value FROM json_each(?)))`
-	rows, err := tx.Query(`SELECT id,message FROM message_queue WHERE session_id=? AND status='pending'`+from, sessionID, all, string(only))
+	rows, err := tx.Query(`SELECT id,message FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND status='pending'`+from, sessionID, all, string(only))
 	if err != nil {
 		return 0, err
 	}

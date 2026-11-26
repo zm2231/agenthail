@@ -32,14 +32,17 @@ const queuePeerRow = `%[1]s.operation='message' AND %[1]s.author!='person' AND %
 // else's. The claim takes the oldest row that is due and not behind its sender.
 const queueBehindSender = `%[1]s.source_session_id!='' AND EXISTS(SELECT 1 FROM message_queue lane WHERE lane.session_id=%[1]s.session_id AND lane.host_request='' AND lane.id<%[1]s.id AND lane.status IN ('pending','inflight') AND lane.source_session_id=%[1]s.source_session_id)`
 
-const queueDueRow = `%[1]s.status='pending' AND %[1]s.available_at_ms<=%[2]s AND NOT (` + queueBehindSender + `)`
+// SQLite reads the partial index message_queue_open only for a query that
+// repeats its condition, so a read of one session's pending or inflight rows
+// states it before the status it wants; without it the read scans the queue.
+const queueDueRow = `%[1]s.status IN ('pending','inflight') AND %[1]s.status='pending' AND %[1]s.available_at_ms<=%[2]s AND NOT (` + queueBehindSender + `)`
 
 var queueTargetOpen = `NOT EXISTS(SELECT 1 FROM session_moves WHERE conversation=?1 AND role='out' AND state IN ('preparing','sent')) AND NOT ` + fmt.Sprintf(limitHeldFilter, "?1")
 
 func claimCandidateFilter(busyDelivery string, mode deliverypolicy.Mode) string {
 	due := fmt.Sprintf(queueDueRow, "message_queue", "?2")
 	if busyDelivery == "steer" {
-		due = `status='pending' AND available_at_ms<=?2 AND ` + queueSteerRow("message_queue", mode)
+		due = `status IN ('pending','inflight') AND status='pending' AND available_at_ms<=?2 AND ` + queueSteerRow("message_queue", mode)
 	}
 	return `session_id=?1 AND host_request='' AND ` + due + ` ORDER BY id LIMIT 1`
 }
@@ -52,10 +55,16 @@ func claimInflightExpired(status string, operation QueueOperation, inflightAt in
 	return status == "inflight" && inflightAt > 0 && inflightAt < now.Add(-inflightTimeout).UnixMilli()
 }
 
+// claimCheckQuery reads, without a write, whether a claim could take anything:
+// the target is open, and a row is inflight or one is due.
+func claimCheckQuery(filter string) string {
+	return `SELECT ` + queueTargetOpen + `,EXISTS(SELECT 1 FROM message_queue WHERE session_id=?1 AND host_request='' AND status IN ('pending','inflight') AND status='inflight'),EXISTS(SELECT 1 FROM message_queue WHERE ` + filter + `)`
+}
+
 func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDelivery string) (*QueuedMessage, error) {
 	filter := claimCandidateFilter(busyDelivery, r.busyMode())
 	var open, inflight, due bool
-	if err := r.read.QueryRow(`SELECT `+queueTargetOpen+`,EXISTS(SELECT 1 FROM message_queue WHERE session_id=?1 AND host_request='' AND status='inflight'),EXISTS(SELECT 1 FROM message_queue WHERE `+filter+`)`, sessionID, now.UnixMilli()).Scan(&open, &inflight, &due); err != nil {
+	if err := r.read.QueryRow(claimCheckQuery(filter), sessionID, now.UnixMilli()).Scan(&open, &inflight, &due); err != nil {
 		return nil, err
 	}
 	if !open || !inflight && !due {
@@ -66,7 +75,7 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 		return nil, err
 	}
 	defer tx.Rollback()
-	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM message_queue WHERE session_id=? AND host_request='' AND status='inflight')`, sessionID).Scan(&inflight); err != nil {
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM message_queue WHERE session_id=? AND host_request='' AND status IN ('pending','inflight') AND status='inflight')`, sessionID).Scan(&inflight); err != nil {
 		return nil, err
 	}
 	if inflight {
@@ -106,7 +115,7 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 // A target takes one delivery at a time: while any row is inflight, nothing
 // else is claimed, and one that never reported back is settled as unknown.
 func deadLetterExpiredInflight(tx *sql.Tx, sessionID string, now time.Time) (bool, error) {
-	rows, err := tx.Query(`SELECT id,operation,inflight_at_ms FROM message_queue WHERE session_id=? AND host_request='' AND status='inflight'`, sessionID)
+	rows, err := tx.Query(`SELECT id,operation,inflight_at_ms FROM message_queue WHERE session_id=? AND host_request='' AND status IN ('pending','inflight') AND status='inflight'`, sessionID)
 	if err != nil {
 		return false, err
 	}

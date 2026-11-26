@@ -240,3 +240,29 @@ func TestAStoppedSessionThatCannotBeObservedKeepsItsTurnUntilRetriesBackOff(t *t
 	}
 	t.Fatal("a stopped session that cannot be observed is watched for as long as its turn stays open")
 }
+
+func TestATurnOpenedAfterAScanStartedOutlivesThatScansObservation(t *testing.T) {
+	f, _ := startHostedWorker(t)
+	deliveredTurnRuns(t, f, "turn-1")
+	turnEndsWith(t, f, "turn-1", "Started the build")
+	f.d.scanAndRelay(t.Context())
+	workerStoppedMidTurn(t, f)
+	scan := newRelayScan()
+	time.Sleep(5 * time.Millisecond)
+	if err := f.d.Registry.OpenTurn("worker", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	worker := f.fake.sessions["worker"]
+	f.d.observeInScan(t.Context(), scan, f.fake, &worker, true)
+	watched, err := f.d.Registry.WatchedSessions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range watched {
+		if session.ID == "worker" {
+			return
+		}
+	}
+	t.Fatal("a turn opened after the scan's shared reads was stopped on them")
+}

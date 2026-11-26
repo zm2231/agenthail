@@ -163,7 +163,7 @@ func (c *Claude) conversation(ctx context.Context, id string, pin claudePin) (cl
 	if alive {
 		return state, nil
 	}
-	root, err := c.conversationRoot(id)
+	root, err := c.conversationRootIn(ctx, id)
 	if err != nil {
 		return state, err
 	}
@@ -188,11 +188,11 @@ func (c *Claude) conversation(ctx context.Context, id string, pin claudePin) (cl
 // conversation, and whether any live process holds it. pin, when set, names
 // the holder; a conversation several processes hold is refused without one.
 func (c *Claude) conversationProcess(ctx context.Context, id string, pin claudePin) (*surface.Session, bool, error) {
-	readAt := time.Now()
-	roots, records, err := c.records()
-	if err != nil {
-		return nil, false, err
+	read := c.scanRecords(ctx)
+	if read.err != nil {
+		return nil, false, read.err
 	}
+	records := read.records
 	holders := holderRecords(records, id)
 	shared := len(holders) > 1
 	if pin.pid > 0 {
@@ -212,7 +212,7 @@ func (c *Claude) conversationProcess(ctx context.Context, id string, pin claudeP
 	if len(holders) == 0 {
 		return nil, false, nil
 	}
-	process, ok := c.process(ctx, claudeSessionRecord{root: holderRoot(records, holders[0]), fields: holders[0], readAt: readAt}, c.transcripts.pass(roots))
+	process, ok := c.process(ctx, claudeSessionRecord{root: holderRoot(records, holders[0]), fields: holders[0], readAt: read.readAt}, read.transcripts)
 	if !ok {
 		return nil, true, nil
 	}

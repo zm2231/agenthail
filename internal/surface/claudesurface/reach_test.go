@@ -155,6 +155,28 @@ func TestClaudeObserveExitedSessionIsAtRestOnlyWithoutLiveProcess(t *testing.T) 
 	}
 }
 
+func TestOneScanListsClaudesBackgroundJobsOnceForItsExitedSessions(t *testing.T) {
+	fixture := claudetest.New(t)
+	c := surfacetest.InDaemon(NewClaude(nil, fixture.Home))
+	session := exitedSession(fixture)
+	scan := surface.NewScan().Attach(context.Background())
+	for range 3 {
+		observation, err := c.Observe(scan, &session)
+		if err != nil || observation.Status != surface.StatusIdle {
+			t.Fatalf("observation=%+v err=%v", observation, err)
+		}
+	}
+	if calls := fixture.Invocations("agents", "--json", "--all"); calls != 1 {
+		t.Fatalf("one scan listed Claude's agents %d times, want once", calls)
+	}
+	if _, err := c.Observe(context.Background(), &session); err != nil {
+		t.Fatal(err)
+	}
+	if calls := fixture.Invocations("agents", "--json", "--all"); calls != 2 {
+		t.Fatalf("an observation outside the scan listed Claude's agents %d times in all, want 2", calls)
+	}
+}
+
 func TestClaudeResumeThatClaudeRefusesSaysWhy(t *testing.T) {
 	fixture, host, c := hostResume(t)
 	host.Refuse(t, fixtureConversation, "Error: Settings file not found: /fixture/settings.json")

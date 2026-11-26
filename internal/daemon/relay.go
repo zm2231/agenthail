@@ -112,6 +112,29 @@ func backgroundHold(ctx context.Context, observed *sessionObservation, from *sur
 type relayScan struct {
 	mu      sync.Mutex
 	readers map[surface.CompletionScanner]surface.CompletionReader
+	shared  *surface.Scan
+}
+
+func newRelayScan() *relayScan { return &relayScan{shared: surface.NewScan()} }
+
+// observeOnce reads the session's observation sharing the scan's surface
+// reads; what the scan goes on to do with it, such as a delivery, reads fresh.
+// A nil scan shares nothing.
+func (s *relayScan) observeOnce(adapter surface.Surface, session *surface.Session, read func(context.Context, surface.Surface, *surface.Session) (*surface.TurnObservation, error)) *sessionObservation {
+	if s == nil {
+		return observeOnce(adapter, session, read)
+	}
+	return observeOnce(adapter, session, func(ctx context.Context, adapter surface.Surface, session *surface.Session) (*surface.TurnObservation, error) {
+		return read(s.shared.Attach(ctx), adapter, session)
+	})
+}
+
+// seen is a time no later than the reads behind an observation made now.
+func (s *relayScan) seen() time.Time {
+	if s == nil {
+		return time.Now()
+	}
+	return s.shared.Started()
 }
 
 func (s *relayScan) reader(adapter surface.Surface) (surface.CompletionReader, bool) {

@@ -54,7 +54,7 @@ func (d *Daemon) planScan(ctx context.Context) <-chan struct{} {
 	d.retainTaskRequestsRead(taskChildren)
 	d.deliverTaskWakes()
 	d.pruneObservationFailures(watched)
-	scan := &relayScan{}
+	scan := newRelayScan()
 	for _, watchedSession := range watched {
 		gone, isTask := taskChildren[watchedSession.ID]
 		if watchedSession.Surface == surface.KindClaude && !claudeRefreshed && !isTask && !d.onlyClosesATurn(watchedSession, queueCounts[watchedSession.ID]) {
@@ -104,7 +104,7 @@ func (d *Daemon) scanSession(ctx context.Context, scan *relayScan, adapter surfa
 	inactive := claudeProcessExited(session) || relayTargetInactive(session)
 	resumes := session.Surface == surface.KindClaude || session.Surface == surface.KindCodex || surface.IsACPRuntime(session.RuntimeKind)
 	if !isTask && !watched.Armed && !watched.OpenTurnOnly && inactive && (!resumes || queued == 0) {
-		d.syncRelaysObserved(ctx, scan, adapter, session, observeOnce(adapter, session, observeAdapter))
+		d.syncRelaysObserved(ctx, scan, adapter, session, scan.observeOnce(adapter, session, observeAdapter))
 		return
 	}
 	if queued == 0 && !d.observationAllowed(session.ID) {
@@ -200,9 +200,9 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 // A session watched only to see its turn end is not armed when seen busy, so a turn it started itself pushes nothing.
 func (d *Daemon) observeInScan(ctx context.Context, scan *relayScan, adapter surface.Surface, session *surface.Session, arm bool) {
 	read := *session
-	seen := time.Now()
+	seen := scan.seen()
 	exited := session.Ended || relayTargetInactive(session)
-	observed := observeOnce(adapter, session, d.observeTurn)
+	observed := scan.observeOnce(adapter, session, d.observeTurn)
 	observation, err := observed.get(ctx)
 	unobserved := err != nil && d.readUnobservedBackground(ctx, adapter, session)
 	d.syncRelaysObserved(ctx, scan, adapter, session, observed)

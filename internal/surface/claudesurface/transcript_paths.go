@@ -16,17 +16,21 @@ import (
 // session records and transcripts, or "" when no root holds it yet. A
 // conversation found in two roots is refused rather than guessed.
 func (c *Claude) conversationRoot(conversationID string) (string, error) {
-	roots, records, err := c.records()
-	if err != nil {
-		return "", err
+	return c.conversationRootIn(context.Background(), conversationID)
+}
+
+func (c *Claude) conversationRootIn(ctx context.Context, conversationID string) (string, error) {
+	read := c.scanRecords(ctx)
+	if read.err != nil {
+		return "", read.err
 	}
 	found := map[string]bool{}
-	for _, record := range records {
+	for _, record := range read.records {
 		if transcript.String(record.fields, "sessionId") == conversationID {
 			found[record.root] = true
 		}
 	}
-	return claudeHoldingRoot(conversationID, roots, found, c.transcripts.pass(roots)(conversationID))
+	return claudeHoldingRoot(conversationID, read.roots, found, read.transcripts(conversationID))
 }
 
 func claudeHoldingRoot(conversationID string, roots []string, found map[string]bool, transcripts []string) (string, error) {

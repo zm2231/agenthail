@@ -184,15 +184,12 @@ const (
 // and every session whose folder is inside it. A read that fails counts as
 // working, the safer answer before removing files.
 func (d *Daemon) worktreeUse(path, owner string) worktreeUsage {
-	sessions, err := d.Registry.ListSessions(0)
+	sessions, err := d.Registry.ListSessionsUsing(path, owner)
 	if err != nil {
 		return worktreeWorking
 	}
 	use := worktreeFree
 	for _, listed := range sessions {
-		if (owner == "" || listed.ID != owner) && !underRoot(listed.Cwd, []string{path}) {
-			continue
-		}
 		// The listing shows a session missing from the catalog as offline;
 		// its recorded status is the safer read before removing files.
 		session, err := d.Registry.Session(listed.ID)
