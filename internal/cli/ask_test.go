@@ -112,8 +112,17 @@ func TestAnAskWithItemIsOnTheWorkItemItNames(t *testing.T) {
 		t.Fatalf("ask --item = %q, %v", output, err)
 	}
 	open, err := r.OpenAsks()
-	if err != nil || len(open) != 1 || open[0].WorkItem != held[1] {
+	if err != nil || len(open) != 1 || open[0].WorkItem != held[1] || !open[0].Deadline.IsZero() {
 		t.Fatalf("open asks %+v err %v", open, err)
+	}
+	output, err = captureStdout(t, func() error {
+		return app.Run([]string{"ask", "Keep the old names?", "--option", "Rename", "--option", "Keep", "--item", held[0], "--default", "2", "--default-after", "30"})
+	})
+	if err != nil || !strings.Contains(output, "it takes its default: Keep.") {
+		t.Fatalf("ask --default = %q, %v", output, err)
+	}
+	if err := app.Run([]string{"ask", "Keep?", "--option", "Rename", "--option", "Keep", "--default", "2"}); err == nil || !strings.Contains(err.Error(), "--default-after") {
+		t.Fatalf("a default without its minutes: %v", err)
 	}
 	if err := app.Run([]string{"ask", "Drop it?", "--option", "Yes", "--option", "No", "--item", "nowhere-W9"}); err == nil || !strings.Contains(err.Error(), "not held by this session") {
 		t.Fatalf("an ask on an item the session does not hold: %v", err)

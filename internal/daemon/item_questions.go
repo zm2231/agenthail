@@ -152,16 +152,13 @@ func (d *Daemon) syncItemQuestions(ctx context.Context) {
 }
 
 func itemQuestionOutcome(ask registry.Ask) string {
-	if _, defaulted := askDefault(ask); defaulted && ask.State == registry.AskExpired {
-		return ledger.ItemQuestionDefaulted
-	}
 	switch ask.State {
 	case registry.AskAnswered:
 		return ledger.ItemQuestionAnswered
 	case registry.AskWithdrawn:
 		return ledger.ItemQuestionWithdrawn
 	case registry.AskExpired:
-		return ledger.ItemQuestionExpired
+		return ledger.ItemQuestionDefaulted
 	}
 	return ""
 }
@@ -186,7 +183,7 @@ func itemQuestionPrompts(ask registry.Ask) []ledger.ItemQuestionPrompt {
 }
 
 func askAnswerLine(ask registry.Ask) string {
-	if _, defaulted := askDefault(ask); defaulted && ask.State == registry.AskExpired {
+	if ask.State == registry.AskExpired {
 		return askDefaultMessage(ask)
 	}
 	if ask.State != registry.AskAnswered {

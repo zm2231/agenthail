@@ -11,8 +11,8 @@ type mcpAskInput struct {
 	Questions           []askQuestionInput `json:"questions,omitempty" jsonschema:"1 to 4. Limits: question 160 characters, 1 to 6 options, label 40, does 90; recommended is an option index; at most 3 links."`
 	Withdraw            string             `json:"withdraw,omitempty" jsonschema:"The id of an open ask of yours to withdraw instead."`
 	Item                string             `json:"item,omitempty" jsonschema:"The work item it is about; default your one in progress."`
-	Default             *int               `json:"default,omitempty" jsonschema:"One question only: the option index that applies if nobody answers. Leave it out unless that option is safe to take without the person."`
-	DefaultAfterMinutes int                `json:"defaultAfterMinutes,omitempty" jsonschema:"With default: minutes until it applies, 15 to 10080."`
+	Default             *int               `json:"default,omitempty" jsonschema:"One question only: the option index taken if unanswered; only an option safe without the person."`
+	DefaultAfterMinutes int                `json:"defaultAfterMinutes,omitempty" jsonschema:"Minutes until default applies, 15 to 10080."`
 }
 
 func (d *Daemon) mcpAsk(_ context.Context, caller *mcpCaller, input mcpAskInput) (any, error) {

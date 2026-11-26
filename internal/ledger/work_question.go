@@ -13,13 +13,12 @@ import (
 const (
 	ItemQuestionAnswered  = "answered"
 	ItemQuestionWithdrawn = "withdrawn"
-	ItemQuestionExpired   = "expired"
 	ItemQuestionDefaulted = "defaulted"
 )
 
 var ErrItemGone = errors.New("the work item is gone")
 
-var itemQuestionOutcomes = []string{ItemQuestionAnswered, ItemQuestionWithdrawn, ItemQuestionExpired, ItemQuestionDefaulted}
+var itemQuestionOutcomes = []string{ItemQuestionAnswered, ItemQuestionWithdrawn, ItemQuestionDefaulted}
 
 type ItemQuestionOption struct {
 	Label string `json:"label"`
@@ -171,7 +170,7 @@ func (b *Board) questionItem(itemID, projectKey string) (string, error) {
 // ResolveItemQuestion closes the question of an ask once the ask is answered, withdrawn or expired. A repeat is a no-op.
 func (s *Store) ResolveItemQuestion(req ItemQuestionResolve, now time.Time) error {
 	if !slices.Contains(itemQuestionOutcomes, req.Outcome) || req.By == "" {
-		return refuse("an item question resolves as answered, withdrawn, expired or defaulted, by the person or a session")
+		return refuse("an item question resolves as answered, withdrawn or defaulted, by the person or a session")
 	}
 	board, release, err := s.lockBoard(req.ProjectKey)
 	if err != nil {

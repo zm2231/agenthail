@@ -21,7 +21,10 @@ func askDefault(ask registry.Ask) (int, bool) {
 }
 
 func askDefaultMessage(ask registry.Ask) string {
-	index, _ := askDefault(ask)
+	index, ok := askDefault(ask)
+	if !ok {
+		return ""
+	}
 	return "[agenthail] No answer by " + ask.Deadline.Local().Format("Jan 2 15:04 MST") + "; the default applies: " + ask.Questions[0].Options[index].Label + "."
 }
 
