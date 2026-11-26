@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/agentswitch"
 	"github.com/zm2231/agenthail/internal/signin"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -29,6 +30,16 @@ func (d *Daemon) observedSurfaceHealth(kind surface.SurfaceKind) (dashboardSurfa
 
 func (d *Daemon) dashboardSurfaceHealth(ctx context.Context, adapter surface.Surface, listErr error) dashboardSurface {
 	entry := dashboardSurface{Name: string(adapter.Name()), Label: surfaceLabel(adapter), Connected: listErr == nil, Health: "healthy", Capabilities: adapter.Capabilities()}
+	if agentswitch.IsOff(listErr) {
+		entry.Health = "agent_off"
+		entry.HealthDetail = listErr.Error()
+		return entry
+	}
+	if agentswitch.IsUnavailable(listErr) {
+		entry.Health = "agent_unavailable"
+		entry.HealthDetail = listErr.Error()
+		return entry
+	}
 	if signin.IsOff(listErr) {
 		entry.Health = "signin_off"
 		entry.HealthDetail = listErr.Error()

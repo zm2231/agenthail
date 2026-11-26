@@ -434,11 +434,11 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 		operationCtx, cancel := context.WithTimeout(gapCtx, 12*time.Second)
 		complete := true
 		var sessions []surface.Session
-		var err error
 		listedAt := time.Now()
-		if lister, ok := adapter.(surface.CatalogLister); ok {
+		err := d.agentGate(adapter)
+		if lister, ok := adapter.(surface.CatalogLister); ok && err == nil {
 			sessions, complete, err = lister.CatalogList(operationCtx)
-		} else {
+		} else if err == nil {
 			sessions, err = adapter.List(operationCtx)
 		}
 		cancel()

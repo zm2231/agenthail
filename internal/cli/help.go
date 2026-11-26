@@ -192,6 +192,11 @@ Phones:
                                  Show a code that pairs the iPhone app with this host
   devices remove <device>        Disconnect a phone from this host
 
+Agents on this computer:
+  agents [list] [--json]        Show whether Agenthail works with Codex and Claude here
+  agents use <agent> auto|on|off
+                                auto: used when installed (default); on: missing is a failure; off: left alone
+
 Browser sign-in (Notion and Claude Remote Control only):
   signin [list] [--json]        Show consumers, sign-in profiles and this computer's browser profiles
   signin add <browser> <profile> [--label <label>]

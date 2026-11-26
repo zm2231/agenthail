@@ -8,7 +8,7 @@ export function renderSurfaceHealth() {
   $("#surface-health-list").innerHTML = surfaces.map((surface) => {
     const name = labels[surface.name] || surface.name;
     const health = surface.health || (surface.connected ? "healthy" : "unavailable");
-    const state = health === "healthy" ? "Healthy" : health === "degraded" ? "Needs attention" : health === "signin_off" ? "Sign-in off" : health === "signin_unavailable" ? "No browser here" : "Unavailable";
+    const state = health === "healthy" ? "Healthy" : health === "degraded" ? "Needs attention" : health === "signin_off" ? "Sign-in off" : health === "signin_unavailable" ? "No browser here" : health === "agent_off" ? "Off" : health === "agent_unavailable" ? "Not installed here" : "Unavailable";
     const rawDetail = surface.healthDetail || surface.error || "Ready";
     const detail = health === "signin_off"
       ? signinOffHint(rawDetail)

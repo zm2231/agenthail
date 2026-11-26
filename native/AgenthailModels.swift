@@ -560,9 +560,10 @@ struct SurfaceState: Decodable, Identifiable, Equatable {
     var repairAction: String? = nil
     var repairLabel: String? = nil
 
-    /// Browser sign-in turned off, or a computer with no browser: states the
-    /// surface reports, not problems to act on.
-    var isStatedLimit: Bool { health == "signin_off" || health == "signin_unavailable" }
+    /// Browser sign-in or the agent turned off, a computer with no browser, or
+    /// an agent not installed here: states the surface reports, not problems
+    /// to act on.
+    var isStatedLimit: Bool { ["signin_off", "signin_unavailable", "agent_off", "agent_unavailable"].contains(health) }
     var needsAttention: Bool { (health != "healthy" && !isStatedLimit) || !(runtime?.advice.isEmpty ?? true) }
 }
 
@@ -1875,6 +1876,15 @@ struct DashboardSettingsState: Decodable {
     let notifications: NotificationStatusState
     var claudeDefaultRoot: String? = nil
     var claudeRoots: [String]? = nil
+    var agents: [AgentSwitchState]? = nil
+}
+
+struct AgentSwitchState: Decodable, Identifiable, Equatable {
+    let id: String
+    let label: String
+    let mode: String
+    let state: String
+    var detail: String? = nil
 }
 
 struct NotificationPreferenceState: Decodable, Identifiable, Equatable {

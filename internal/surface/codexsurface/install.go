@@ -1,6 +1,7 @@
 package codexsurface
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,4 +66,16 @@ func DetectCodexInstallation(home CodexHome) CodexInstallation {
 		}
 	}
 	return install
+}
+
+func (c *Codex) AgentLabel() string { return "Codex" }
+
+func (c *Codex) LocateProgram() error {
+	if !c.managed {
+		return nil
+	}
+	if install := DetectCodexInstallation(c.home); install.Desktop != "" || install.Daemon != "" {
+		return nil
+	}
+	return errors.New("neither the Codex app nor a codex command was found")
 }

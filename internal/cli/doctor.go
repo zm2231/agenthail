@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/acphost"
+	"github.com/zm2231/agenthail/internal/agentswitch"
 	"github.com/zm2231/agenthail/internal/claudehooks"
 	"github.com/zm2231/agenthail/internal/claudemcp"
 	"github.com/zm2231/agenthail/internal/daemonctl"
@@ -36,12 +37,14 @@ func (a *App) cmdDoctor(args []string) error {
 		Error             string                 `json:"error,omitempty"`
 		SigninOff         string                 `json:"signinOff,omitempty"`
 		SigninUnavailable string                 `json:"signinUnavailable,omitempty"`
+		AgentOff          string                 `json:"agentOff,omitempty"`
 		AgentUnavailable  string                 `json:"agentUnavailable,omitempty"`
 		Runtime           *surface.RuntimeStatus `json:"runtime,omitempty"`
 	}
 	var results []doctorResult
 	failures := 0
 	home, _ := os.UserHomeDir()
+	settings, settingsErr := dashconfig.Load()
 	for _, e := range a.Surfaces {
 		if !surface.Listed(e.Surface) {
 			continue
@@ -77,6 +80,21 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		if caps.Steer {
 			enabled = append(enabled, "steer")
+		}
+		if gate := surface.AgentGate(e.Surface, settings.AgentMode(e.Name)); gate != nil {
+			result := doctorResult{Surface: e.Name, Capabilities: enabled, WritePath: "checked immediately before delivery", OK: true}
+			switch {
+			case agentswitch.IsOff(gate):
+				result.AgentOff = gate.Error()
+			case agentswitch.IsUnavailable(gate):
+				result.AgentUnavailable = gate.Error()
+			default:
+				result.OK = false
+				result.Error = gate.Error()
+				failures++
+			}
+			results = append(results, result)
+			continue
 		}
 		var healthErr error
 		if checker, ok := e.Surface.(surface.HealthChecker); ok {
@@ -149,7 +167,6 @@ func (a *App) cmdDoctor(args []string) error {
 		results = append(results, result)
 	}
 	signins := a.signinStatus(ctx)
-	_, settingsErr := dashconfig.Load()
 	if settingsErr != nil {
 		settingsErr = fmt.Errorf("%s cannot be read; until it is fixed new sessions can be refused and queued messages wait for an idle session rather than steer: %w", dashconfig.Path(), settingsErr)
 		failures++
@@ -559,7 +576,9 @@ func (a *App) cmdDoctor(args []string) error {
 			if result.SigninUnavailable != "" {
 				fmt.Printf("  sign-in unavailable: %s\n", result.SigninUnavailable)
 			}
-			if result.AgentUnavailable != "" {
+			if result.AgentOff != "" {
+				fmt.Printf("  off: %s\n", result.AgentOff)
+			} else if result.AgentUnavailable != "" {
 				fmt.Printf("  unavailable: %s\n", result.AgentUnavailable)
 			} else if result.OK {
 				fmt.Printf("  sessions: %d\n", result.Sessions)

@@ -36,6 +36,7 @@ struct DesktopSettings: View {
             ClaudeCompactSettings(model: model)
                 .tabItem { Label("Claude", systemImage: "rectangle.compress.vertical") }.tag(5)
             SettingsPages(pages: [
+                ("On this Mac", AnyView(AgentSwitchSettings(model: model))),
                 ("Roles", AnyView(AgentRolesSettings(model: model))),
                 ("Assignments", AnyView(AgentAssignmentsSettings(model: model))),
             ])

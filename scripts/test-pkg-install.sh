@@ -210,9 +210,23 @@ if tail -c "+$((daemon_log_offset + 1))" "$HOME/.agenthail/daemon.log" | grep -F
 	echo "error: menu app attempted an unsupervised daemon start" >&2
 	exit 1
 fi
-doctor_json="$(/usr/local/bin/agenthail doctor --json || true)"
-jq -e '.surfaces | length == 4' <<<"$doctor_json" >/dev/null
-jq -e '.surfaces[] | select(.surface == "devin") | .ok and .error == null and (.agentUnavailable | test("unavailable here"))' <<<"$doctor_json" >/dev/null
+# The runner has neither Codex nor Claude Code, and nothing signed into
+# Notion. Sign-in off and an agent not installed are each a stated limit, so
+# doctor is healthy; only an agent turned on and missing fails it.
+/usr/local/bin/agenthail signin use notion none >/dev/null
+/usr/local/bin/agenthail signin use claude none >/dev/null
+doctor_json="$(/usr/local/bin/agenthail doctor --json)"
+jq -e '.ok and (.surfaces | length == 3)' <<<"$doctor_json" >/dev/null
+jq -e '[.surfaces[] | select(.surface == "codex" or .surface == "claude") | select(.ok and (.agentUnavailable // "") != "")] | length == 2' <<<"$doctor_json" >/dev/null
+/usr/local/bin/agenthail agents use codex off >/dev/null
+jq -e '.ok and any(.surfaces[]; .surface == "codex" and .ok and (.agentOff // "") != "")' <<<"$(/usr/local/bin/agenthail doctor --json)" >/dev/null
+/usr/local/bin/agenthail agents use codex on >/dev/null
+if missing_json="$(/usr/local/bin/agenthail doctor --json)"; then
+	echo "error: doctor stayed healthy with Codex turned on and not installed" >&2
+	exit 1
+fi
+jq -e '(.ok | not) and any(.surfaces[]; .surface == "codex" and (.ok | not) and (.error | test("turned on but not installed")))' <<<"$missing_json" >/dev/null
+/usr/local/bin/agenthail agents use codex auto >/dev/null
 # launchd runs the daemon from its bundle, so the grants it reads are the
 # bundle's, whichever of them this machine has.
 jq -e --arg holder "$daemon_bundle" '.permissions.holder == $holder and .permissions.problem == null and (.permissions.grants | length == 3) and all(.permissions.grants[]; .state != "unknown")' <<<"$doctor_json" >/dev/null

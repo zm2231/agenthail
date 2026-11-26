@@ -19,6 +19,11 @@ func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashb
 	if approval != "" && approval != "untrusted" && approval != "on-request" && approval != "never" {
 		return actionResult{}, invalidRequest("approval policy is invalid")
 	}
+	if adapter := d.adapters().ForSurface(surface.SurfaceKind(request.Surface)); adapter != nil {
+		if err := d.agentGate(adapter); err != nil {
+			return actionResult{}, conflict(err.Error())
+		}
+	}
 	creator := strings.TrimSpace(request.SourceSessionID)
 	if creator != "" {
 		if _, err := d.Registry.Session(creator); err != nil {
