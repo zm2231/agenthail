@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -12,7 +13,9 @@ import (
 
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/ledger"
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -339,5 +342,155 @@ func TestARemovalDuringAJoinOfTheSameFolderWaitsForIt(t *testing.T) {
 		if answer := <-answers; !strings.Contains(answer, `"ok":true`) {
 			t.Fatalf("a join and a removal of one folder, one after the other, both stand; got %s", answer)
 		}
+	}
+}
+
+func allSessionsView(t *testing.T, node *federationNode) SessionViewSnapshot {
+	t.Helper()
+	response := node.request(t, http.MethodGet, "/api/v1/snapshot?scope=all&limit=200", nil)
+	var view SessionViewSnapshot
+	if err := json.Unmarshal(response.Body.Bytes(), &view); err != nil || view.View == nil {
+		t.Fatalf("session view: %v %s", err, response.Body.String())
+	}
+	return view
+}
+
+func TestAJoinMovesSessionsThatEndedBeforeIt(t *testing.T) {
+	f := newJoinFixture(t)
+	for node, id := range map[*federationNode]string{f.mac: "laptop-ended", f.server: "vps-b"} {
+		node.fake.sessions[id] = surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "work " + id, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: filepath.Join(t.TempDir(), id+".jsonl")}
+	}
+	moveSession(t, f.mac, "laptop-ended", f.macFolder, time.Now().Add(-time.Hour))
+	moveSession(t, f.server, "vps-b", filepath.Join(f.serverFolder, "src"), time.Now().Add(-time.Hour))
+	discoverOn(f.mac, f.server)
+	f.mac.fake.end("laptop-ended")
+	f.server.fake.end("vps-b")
+	for range catalogOmissionThreshold + 1 {
+		discoverOn(f.mac, f.server)
+	}
+
+	var joined struct {
+		Project struct {
+			ID string `json:"id"`
+		} `json:"project"`
+	}
+	f.action(t, f.mac, map[string]any{"action": "project-add", "path": f.serverFolder, "host": "vps", "join": f.projectID}, http.StatusOK, &joined)
+	key := joined.Project.ID
+
+	ended := map[*federationNode][]string{
+		f.mac:    {"laptop-ended", hosts.Qualify(f.serverRecord.ID, "vps-b")},
+		f.server: {"vps-b", hosts.Qualify(f.macRecord.ID, "laptop-ended")},
+	}
+	testkit.Eventually(t, "the ended sessions in the shared project on both computers", 10*time.Second, func() bool {
+		discoverOn(f.server, f.mac)
+		for node, ids := range ended {
+			projects := map[string]string{}
+			for _, row := range allSessionsView(t, node).Sessions {
+				if row.Project != nil {
+					projects[row.ID] = row.Project.ID
+				}
+			}
+			for _, id := range ids {
+				if projects[id] != key {
+					return false
+				}
+			}
+		}
+		return true
+	})
+	for node, name := range map[*federationNode]string{f.mac: "mac", f.server: "server"} {
+		var named []string
+		for _, project := range allSessionsView(t, node).View.Projects {
+			if project.Name == "agenthail-v2" {
+				named = append(named, project.ID)
+			}
+		}
+		for _, project := range node.snapshot(t).Projects {
+			if project.DisplayName == "agenthail-v2" && project.ID != key {
+				named = append(named, project.ID)
+			}
+		}
+		if !slices.Equal(named, []string{key}) {
+			t.Fatalf("%s names agenthail-v2 %v, want only %s", name, named, key)
+		}
+	}
+}
+
+func TestAnEndedSessionWhoseRepositoryIsGoneKeepsItsProject(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	node := newFederationNode(t)
+	repo := testkit.GitRepo(t)
+	node.fake.sessions["gone"] = surface.Session{ID: "gone", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "work gone", Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: filepath.Join(t.TempDir(), "gone.jsonl")}
+	moveSession(t, node, "gone", repo, time.Now().Add(-time.Hour))
+	discoverOn(node)
+	node.fake.end("gone")
+	for range catalogOmissionThreshold + 1 {
+		discoverOn(node)
+	}
+	before := projectresolve.StoredSessionProject(node.reg, "gone")
+	if before == nil || !strings.HasPrefix(before.ID, "implicit:") {
+		t.Fatalf("the ended session's project before = %+v, want its repository", before)
+	}
+	if err := os.RemoveAll(repo); err != nil {
+		t.Fatal(err)
+	}
+	response := node.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "project-add", "path": t.TempDir(), "title": "elsewhere"})
+	if response.Code != http.StatusOK {
+		t.Fatalf("project-add: %d %s", response.Code, response.Body.String())
+	}
+	discoverOn(node)
+	generation := node.daemon.catalogIdentities.Generation()
+	testkit.Eventually(t, "the sweep after the add", 10*time.Second, func() bool {
+		discoverOn(node)
+		return node.daemon.catalogReidentified.Load() == generation
+	})
+	if after := projectresolve.StoredSessionProject(node.reg, "gone"); after == nil || after.ID != before.ID {
+		t.Fatalf("the ended session's project after its repository went = %+v, want %s", after, before.ID)
+	}
+}
+
+func TestAFolderGitCannotReadKeepsEachEndedSessionsProject(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	node := newFederationNode(t)
+	repo := testkit.GitRepo(t)
+	for _, id := range []string{"first", "second"} {
+		node.fake.sessions[id] = surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "work " + id, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: filepath.Join(t.TempDir(), id+".jsonl")}
+		moveSession(t, node, id, repo, time.Now().Add(-time.Hour))
+	}
+	discoverOn(node)
+	node.fake.end("first")
+	node.fake.end("second")
+	for range catalogOmissionThreshold + 1 {
+		discoverOn(node)
+	}
+	other := []byte(`{"id":"p-other","localId":"p-other","displayName":"other","rootPath":"/elsewhere","kind":"folder","added":true}`)
+	fingerprint, _, err := node.reg.CatalogProjectionFingerprint("second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if written, err := node.reg.ReidentifyCatalogSession("second", fingerprint, strings.Replace(fingerprint, `"name":"work second"`, `"name":"work second "`, 1), other, json.RawMessage(`{}`)); err != nil || !written {
+		t.Fatalf("seed a second project: written=%v err=%v", written, err)
+	}
+	stored := map[string]string{"first": projectresolve.StoredSessionProject(node.reg, "first").ID, "second": "p-other"}
+	if err := os.WriteFile(filepath.Join(repo, ".git", "config"), []byte("[core\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	response := node.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "project-add", "path": t.TempDir(), "title": "elsewhere"})
+	if response.Code != http.StatusOK {
+		t.Fatalf("project-add: %d %s", response.Code, response.Body.String())
+	}
+	discoverOn(node)
+	generation := node.daemon.catalogIdentities.Generation()
+	for range 3 {
+		discoverOn(node)
+		node.daemon.background.wait()
+	}
+	for id, want := range stored {
+		if got := projectresolve.StoredSessionProject(node.reg, id); got == nil || got.ID != want {
+			t.Fatalf("%s's project while git cannot read its folder = %+v, want %s", id, got, want)
+		}
+	}
+	if node.daemon.catalogReidentified.Load() == generation {
+		t.Fatal("a sweep that could not read a folder counted as done")
 	}
 }

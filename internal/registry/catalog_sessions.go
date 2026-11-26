@@ -496,6 +496,22 @@ func (r *Registry) MarkCatalogDiscoveryFailure(kind surface.SurfaceKind, reason 
 }
 
 func (r *Registry) UpdateCatalogSessionProjection(sessionID, priorFingerprint, nextFingerprint string) (CatalogEvent, bool, error) {
+	return r.updateCatalogSessionProjection(sessionID, priorFingerprint, nextFingerprint, nil, nil)
+}
+
+// ReidentifyCatalogSession moves a row to another project without observing
+// the session, so its freshness and misses stay as the last pass left them.
+// It reports false, writing nothing, when the row's projection is no longer
+// priorFingerprint.
+func (r *Registry) ReidentifyCatalogSession(sessionID, priorFingerprint, nextFingerprint string, project, checkout json.RawMessage) (bool, error) {
+	if !json.Valid(project) || !json.Valid(checkout) {
+		return false, fmt.Errorf("catalog identity must be JSON")
+	}
+	event, _, err := r.updateCatalogSessionProjection(sessionID, priorFingerprint, nextFingerprint, project, checkout)
+	return event.Type != "", err
+}
+
+func (r *Registry) updateCatalogSessionProjection(sessionID, priorFingerprint, nextFingerprint string, project, checkout json.RawMessage) (CatalogEvent, bool, error) {
 	if sessionID == "" || nextFingerprint == "" {
 		return CatalogEvent{}, false, fmt.Errorf("catalog session id and projection fingerprint are required")
 	}
@@ -537,6 +553,11 @@ func (r *Registry) UpdateCatalogSessionProjection(sessionID, priorFingerprint, n
 	}
 	if _, err := tx.Exec(`UPDATE catalog_sessions SET projection_fingerprint=?,projection_generation=? WHERE session_id=?`, nextFingerprint, generation, sessionID); err != nil {
 		return CatalogEvent{}, false, err
+	}
+	if project != nil {
+		if _, err := tx.Exec(`UPDATE catalog_sessions SET host_project=?,checkout=? WHERE session_id=?`, []byte(project), []byte(checkout), sessionID); err != nil {
+			return CatalogEvent{}, false, err
+		}
 	}
 	session["observedAt"] = lastObserved
 	session["freshness"] = CatalogFreshness{Generation: uint64(generation), ObservedAt: lastObserved, Stale: misses > 0 || discoveryFailures > 0}

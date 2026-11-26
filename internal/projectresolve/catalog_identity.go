@@ -66,6 +66,17 @@ type CatalogIdentity struct {
 	Problem  string
 }
 
+const (
+	problemWorkspaceUnavailable  = "workspace path is unavailable"
+	problemRepositoryUnavailable = "repository identity is unavailable"
+)
+
+// ProjectResolved reports that Project was read from the folder, not carried
+// over from what a session held before because the folder could not be read.
+func (identity CatalogIdentity) ProjectResolved() bool {
+	return identity.Problem != problemWorkspaceUnavailable && identity.Problem != problemRepositoryUnavailable
+}
+
 // catalogIdentityTTL bounds how long a resolved workspace identity is reused.
 // A change to the git state it was read from invalidates it sooner; working
 // tree edits that touch none of it show up in Dirty once the entry expires.
@@ -121,6 +132,14 @@ type catalogIdentityEntry struct {
 
 func NewCatalogIdentityCache() *CatalogIdentityCache {
 	return &CatalogIdentityCache{entries: map[string]catalogIdentityEntry{}, known: map[string]*CatalogProject{}, repositories: &CatalogRepositoryCache{entries: map[string]catalogRepositoryEntry{}}, roots: map[string]catalogRootEntry{}, refreshing: map[string]struct{}{}, slots: make(chan struct{}, catalogIdentityRefreshes)}
+}
+
+// Generation changes whenever the added projects or links change, so a
+// project a session was given before it may now be wrong.
+func (c *CatalogIdentityCache) Generation() uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.generation
 }
 
 // Wait returns once no background refresh is running.
@@ -194,7 +213,7 @@ func (c *CatalogIdentityCache) RootRepository(ctx context.Context, root string, 
 func (c *CatalogIdentityCache) Identity(ctx context.Context, session surface.Session, now time.Time, prior func() *CatalogProject) CatalogIdentity {
 	path, err := catalogSessionPath(session.Cwd)
 	if err != nil || path == "" {
-		return CatalogIdentity{Project: prior(), Problem: "workspace path is unavailable"}
+		return CatalogIdentity{Project: prior(), Problem: problemWorkspaceUnavailable}
 	}
 	c.mu.Lock()
 	entry, found := c.entries[path]
@@ -404,7 +423,7 @@ func resolveUnlinkedCatalogIdentity(ctx context.Context, path string, projects [
 	existing := nearestExistingDirectory(path)
 	repository, notRepository, err := ResolveCatalogRepository(ctx, existing, repositories, CatalogIdentityGitTimeout)
 	if err != nil && !notRepository {
-		identity.Problem = "repository identity is unavailable"
+		identity.Problem = problemRepositoryUnavailable
 		return identity, catalogGitDirs{}, true
 	}
 	inRepository := err == nil
