@@ -20,12 +20,14 @@ func slowGit(t *testing.T, slow, stall string) {
 		t.Fatal(err)
 	}
 	bin := t.TempDir()
-	script := "#!/bin/sh\nfor a in \"$@\"; do [ \"$a\" = " + slow + " ] && " + stall + "; done\nexec '" + strings.ReplaceAll(real, "'", `'\''`) + "' \"$@\"\n"
+	script := "#!/bin/sh\nfor a in \"$@\"; do [ \"$a\" = " + slow + " ] && " + stall + "; done\nexec " + shellQuoted(real) + " \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
+
+func shellQuoted(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 func gitIn(t *testing.T, dir string, args ...string) {
 	t.Helper()
@@ -84,7 +86,7 @@ func TestAGitAnswerThatReachesTheLookupAfterItsBudgetIsGitsAnswer(t *testing.T) 
 				exec.Command("kill", strings.TrimSpace(string(pid))).Run()
 			}
 		})
-		return "{ sleep 3 & echo $! > '" + pidFile + "'; " + answer + "; }"
+		return "{ sleep 3 & echo $! > " + shellQuoted(pidFile) + "; " + answer + "; }"
 	}
 	t.Run("a refusal", func(t *testing.T) {
 		folder := filepath.Join(t.TempDir(), "widget")
