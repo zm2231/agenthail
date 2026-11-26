@@ -31,9 +31,14 @@ func turnNotificationKey(hostID, sessionID, turnID string) string {
 }
 
 // A turn the judge reads as waiting on the person pushes once, unless the person typed its prompt into the session and so is at it, or a newer turn has started since.
+// A worker's wait that moved from its lead to the person pushes once too, whoever typed its prompt.
 func (d *Daemon) pushJudgedTurn(judgment registry.TurnJudgment) bool {
-	if judgment.Error != "" || judgment.State != turnWaitingPerson || judgment.Facts.Typed {
+	escalated := !judgment.LeadEscalated.IsZero()
+	if !escalated && (judgment.Error != "" || judgment.State != turnWaitingPerson || judgment.Facts.Typed) {
 		return false
+	}
+	pushable := func(state *dashboardTurnState) bool {
+		return state != nil && state.State == turnWaitingPerson && state.Escalated == escalated && (escalated || state.Source == turnSourceJudge)
 	}
 	session, err := d.Registry.Session(judgment.SessionID)
 	if err != nil || session.Delegated() {
@@ -44,7 +49,7 @@ func (d *Daemon) pushJudgedTurn(judgment registry.TurnJudgment) bool {
 		d.log.Printf("turn judge: read the state of %s: %s", d.resolveDisplay(session.ID), err)
 		return false
 	}
-	if state == nil || state.State != turnWaitingPerson || state.Source != turnSourceJudge {
+	if !pushable(state) {
 		return false
 	}
 	claimedAt := time.Now()
@@ -60,14 +65,16 @@ func (d *Daemon) pushJudgedTurn(judgment registry.TurnJudgment) bool {
 		d.turnPushRead()
 	}
 	// The project and its lead are not in the claim, so the state is read again once claimed: the push goes out only if the row still needed the person at or after the claim. Until it is confirmed the claim reads as not pushed, so no viewer mirrors it.
-	if state, _, err := d.judgedTurnState(session, &judgment); err != nil || state == nil || state.State != turnWaitingPerson || state.Source != turnSourceJudge {
+	if state, _, err := d.judgedTurnState(session, &judgment); err != nil || !pushable(state) {
 		if err := d.Registry.ReleaseTurnPush(session.ID, judgment.TurnID, claimedAt); err != nil {
 			d.log.Printf("turn judge: release the push of %s turn %s: %s", d.resolveDisplay(session.ID), judgment.TurnID, err)
 		}
 		return false
 	}
 	body := "Needs you"
-	if end, ok, err := d.Registry.CompletedTurnEnd(session.ID, judgment.TurnID); err == nil && ok {
+	if escalated {
+		body += ": " + state.Headline
+	} else if end, ok, err := d.Registry.CompletedTurnEnd(session.ID, judgment.TurnID); err == nil && ok {
 		body += ": " + shownLine(end.Headline, headlineShownRunes)
 	}
 	hostID := d.hostIdentity().ID
@@ -90,12 +97,14 @@ func (d *Daemon) pushJudgedTurn(judgment registry.TurnJudgment) bool {
 }
 
 // A turn that ended saying it waits on the person pushes once, in place of its finished push, unless the person typed its prompt or a lead hears it first.
+// Once a worker's wait moves from its lead to the person it pushes once, whoever typed its prompt.
 func (d *Daemon) pushWaitingTurn(session *surface.Session, turnID string) bool {
 	end, found, err := d.Registry.CompletedTurnEnd(session.ID, turnID)
 	if err != nil || !found || end.WaitingOn == "" || session.Delegated() {
 		return false
 	}
-	if typed, err := d.Registry.TurnTyped(session.ID, turnID); err != nil || typed {
+	escalated := !end.LeadEscalated.IsZero()
+	if typed, err := d.Registry.TurnTyped(session.ID, turnID); err != nil || typed && !escalated {
 		return false
 	}
 	waits := func() (bool, string) {

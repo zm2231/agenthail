@@ -147,7 +147,17 @@ func buildDecisions(sources decisionSources) decisionsPage {
 // A wait a lead hears stays with the lead while it can act, as a lead's prompts do.
 func (s decisionSources) addWaitingTurn(page *decisionsPage, rows map[string]dashboardSession, row dashboardSession) {
 	end, state := row.EndTurn, row.TurnState
-	if row.Archived || !end.waits() || state == nil || state.Source != turnSourceEndTurn {
+	if row.Archived || state == nil {
+		return
+	}
+	if state.Escalated && state.Source != turnSourceEndTurn {
+		item := decisionItem{Key: "turn:" + row.ID + ":" + state.TurnID, Group: decisionWaiting, SessionID: row.ID, ProjectID: projectIDOf(row), Kind: decisionTurn, Reason: state.Reason, Since: decisionSince(row)}
+		if !s.dismissedNow(item) {
+			page.Decisions = append(page.Decisions, item)
+		}
+		return
+	}
+	if !end.waits() || state.Source != turnSourceEndTurn {
 		return
 	}
 	if state.State == turnWaitingWork {

@@ -29,23 +29,24 @@ func (f TurnFacts) Pending() bool {
 }
 
 type TurnJudgment struct {
-	SessionID    string             `json:"sessionId"`
-	TurnID       string             `json:"turnId"`
-	EndedAt      time.Time          `json:"endedAt"`
-	JudgedAt     time.Time          `json:"judgedAt,omitzero"`
-	Model        string             `json:"model,omitempty"`
-	PromiseModel string             `json:"promiseModel,omitempty"`
-	Ms           int64              `json:"ms,omitempty"`
-	Promise      float64            `json:"promise"`
-	Needs        float64            `json:"needs"`
-	NeedsTail    float64            `json:"needsTail"`
-	State        string             `json:"state,omitempty"`
-	StateP       map[string]float64 `json:"stateProbabilities,omitempty"`
-	Ending       string             `json:"ending"`
-	Headline     string             `json:"headline,omitempty"`
-	Facts        TurnFacts          `json:"facts"`
-	Error        string             `json:"error,omitempty"`
-	PushedAt     time.Time          `json:"pushedAt,omitzero"`
+	SessionID     string             `json:"sessionId"`
+	TurnID        string             `json:"turnId"`
+	EndedAt       time.Time          `json:"endedAt"`
+	JudgedAt      time.Time          `json:"judgedAt,omitzero"`
+	Model         string             `json:"model,omitempty"`
+	PromiseModel  string             `json:"promiseModel,omitempty"`
+	Ms            int64              `json:"ms,omitempty"`
+	Promise       float64            `json:"promise"`
+	Needs         float64            `json:"needs"`
+	NeedsTail     float64            `json:"needsTail"`
+	State         string             `json:"state,omitempty"`
+	StateP        map[string]float64 `json:"stateProbabilities,omitempty"`
+	Ending        string             `json:"ending"`
+	Headline      string             `json:"headline,omitempty"`
+	Facts         TurnFacts          `json:"facts"`
+	Error         string             `json:"error,omitempty"`
+	PushedAt      time.Time          `json:"pushedAt,omitzero"`
+	LeadEscalated time.Time          `json:"leadEscalated,omitzero"`
 }
 
 func (r *Registry) TurnEndFacts(sessionID string) (TurnFacts, error) {
@@ -91,16 +92,17 @@ func (r *Registry) RecordTurnJudgment(j TurnJudgment) error {
 	return tx.Commit()
 }
 
-const turnJudgmentColumns = `j.session_id, j.turn_id, j.ended_at_ms, j.judged_at_ms, j.model, j.promise_model, j.ms, j.promise, j.needs, j.needs_tail, j.state, j.state_json, j.ending, j.headline, j.facts_json, j.error, j.pushed_at_ms`
+const turnJudgmentColumns = `j.session_id, j.turn_id, j.ended_at_ms, j.judged_at_ms, j.model, j.promise_model, j.ms, j.promise, j.needs, j.needs_tail, j.state, j.state_json, j.ending, j.headline, j.facts_json, j.error, j.pushed_at_ms, j.lead_escalated_at_ms`
 
 func scanTurnJudgment(row rowScanner) (TurnJudgment, error) {
 	var j TurnJudgment
-	var ended, judged, pushed int64
+	var ended, judged, pushed, escalated int64
 	var stateP, facts string
-	if err := row.Scan(&j.SessionID, &j.TurnID, &ended, &judged, &j.Model, &j.PromiseModel, &j.Ms, &j.Promise, &j.Needs, &j.NeedsTail, &j.State, &stateP, &j.Ending, &j.Headline, &facts, &j.Error, &pushed); err != nil {
+	if err := row.Scan(&j.SessionID, &j.TurnID, &ended, &judged, &j.Model, &j.PromiseModel, &j.Ms, &j.Promise, &j.Needs, &j.NeedsTail, &j.State, &stateP, &j.Ending, &j.Headline, &facts, &j.Error, &pushed, &escalated); err != nil {
 		return TurnJudgment{}, err
 	}
 	j.EndedAt, j.JudgedAt, j.PushedAt = time.UnixMilli(ended).UTC(), unixMilliOrZero(judged), unixMilliOrZero(max(pushed, 0))
+	j.LeadEscalated = unixMilliOrZero(escalated)
 	_ = json.Unmarshal([]byte(stateP), &j.StateP)
 	_ = json.Unmarshal([]byte(facts), &j.Facts)
 	return j, nil
@@ -116,6 +118,17 @@ func (r *Registry) ClaimTurnPush(sessionID, turnID, askID string, at time.Time) 
 	}
 	claimed, err := result.RowsAffected()
 	return claimed == 1, err
+}
+
+// EscalateTurnJudgment moves a judged turn's wait from the lead to the person once, while that turn is still the session's last and none runs.
+func (r *Registry) EscalateTurnJudgment(sessionID, turnID string, at time.Time) (bool, error) {
+	result, err := r.db.Exec(`UPDATE turn_judgments SET lead_escalated_at_ms=? WHERE session_id=? AND turn_id=? AND lead_escalated_at_ms=0
+		AND EXISTS (SELECT 1 FROM session_runtime WHERE session_id=? AND completed_turn_id=? AND active_turn_id='')`, at.UnixMilli(), sessionID, turnID, sessionID, turnID)
+	if err != nil {
+		return false, err
+	}
+	moved, err := result.RowsAffected()
+	return moved == 1, err
 }
 
 func (r *Registry) ConfirmTurnPush(sessionID, turnID string, claimedAt time.Time) (bool, error) {

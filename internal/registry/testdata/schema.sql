@@ -13,6 +13,7 @@
 -- migration 2026-11-24-tracked-journal-rows
 -- migration 2026-11-25-worktree-projects
 -- migration 2026-11-26-turns-wait-on-the-person
+-- migration 2026-11-26-waits-on-the-lead-escalate
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -1252,6 +1253,7 @@ CREATE TABLE turn_ends (
 	work_item TEXT NOT NULL DEFAULT '',
 	ledger_key TEXT NOT NULL DEFAULT '',
 	waiting_pushed_at_ms INTEGER NOT NULL DEFAULT 0,
+	lead_escalated_at_ms INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (session_id, started_at_ms)
 );
 
@@ -1274,6 +1276,7 @@ CREATE TABLE turn_judgments (
 	facts_json TEXT NOT NULL DEFAULT '',
 	error TEXT NOT NULL DEFAULT '',
 	pushed_at_ms INTEGER NOT NULL DEFAULT 0,
+	lead_escalated_at_ms INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY(session_id, turn_id)
 );
 
@@ -1688,7 +1691,7 @@ BEGIN
 END;
 
 -- trigger catalog_presentation_version_turn_ends_update
-CREATE TRIGGER catalog_presentation_version_turn_ends_update AFTER UPDATE OF completed_turn_id,ended_at_ms,headline,ledger_key,next_json,session_id,source,started_at_ms,turn_id,typed,waiting_person,waiting_pushed_at_ms,work_item ON turn_ends WHEN (NEW.completed_turn_id IS NOT OLD.completed_turn_id OR NEW.ended_at_ms IS NOT OLD.ended_at_ms OR NEW.headline IS NOT OLD.headline OR NEW.ledger_key IS NOT OLD.ledger_key OR NEW.next_json IS NOT OLD.next_json OR NEW.session_id IS NOT OLD.session_id OR NEW.source IS NOT OLD.source OR NEW.started_at_ms IS NOT OLD.started_at_ms OR NEW.turn_id IS NOT OLD.turn_id OR NEW.typed IS NOT OLD.typed OR NEW.waiting_person IS NOT OLD.waiting_person OR NEW.waiting_pushed_at_ms IS NOT OLD.waiting_pushed_at_ms OR NEW.work_item IS NOT OLD.work_item)
+CREATE TRIGGER catalog_presentation_version_turn_ends_update AFTER UPDATE OF completed_turn_id,ended_at_ms,headline,lead_escalated_at_ms,ledger_key,next_json,session_id,source,started_at_ms,turn_id,typed,waiting_person,waiting_pushed_at_ms,work_item ON turn_ends WHEN (NEW.completed_turn_id IS NOT OLD.completed_turn_id OR NEW.ended_at_ms IS NOT OLD.ended_at_ms OR NEW.headline IS NOT OLD.headline OR NEW.lead_escalated_at_ms IS NOT OLD.lead_escalated_at_ms OR NEW.ledger_key IS NOT OLD.ledger_key OR NEW.next_json IS NOT OLD.next_json OR NEW.session_id IS NOT OLD.session_id OR NEW.source IS NOT OLD.source OR NEW.started_at_ms IS NOT OLD.started_at_ms OR NEW.turn_id IS NOT OLD.turn_id OR NEW.typed IS NOT OLD.typed OR NEW.waiting_person IS NOT OLD.waiting_person OR NEW.waiting_pushed_at_ms IS NOT OLD.waiting_pushed_at_ms OR NEW.work_item IS NOT OLD.work_item)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;
@@ -1706,7 +1709,7 @@ BEGIN
 END;
 
 -- trigger catalog_presentation_version_turn_judgments_update
-CREATE TRIGGER catalog_presentation_version_turn_judgments_update AFTER UPDATE OF ended_at_ms,ending,error,facts_json,headline,judged_at_ms,model,ms,needs,needs_tail,promise,promise_model,pushed_at_ms,session_id,state,state_json,turn_id ON turn_judgments WHEN (NEW.ended_at_ms IS NOT OLD.ended_at_ms OR NEW.ending IS NOT OLD.ending OR NEW.error IS NOT OLD.error OR NEW.facts_json IS NOT OLD.facts_json OR NEW.headline IS NOT OLD.headline OR NEW.judged_at_ms IS NOT OLD.judged_at_ms OR NEW.model IS NOT OLD.model OR NEW.ms IS NOT OLD.ms OR NEW.needs IS NOT OLD.needs OR NEW.needs_tail IS NOT OLD.needs_tail OR NEW.promise IS NOT OLD.promise OR NEW.promise_model IS NOT OLD.promise_model OR NEW.pushed_at_ms IS NOT OLD.pushed_at_ms OR NEW.session_id IS NOT OLD.session_id OR NEW.state IS NOT OLD.state OR NEW.state_json IS NOT OLD.state_json OR NEW.turn_id IS NOT OLD.turn_id)
+CREATE TRIGGER catalog_presentation_version_turn_judgments_update AFTER UPDATE OF ended_at_ms,ending,error,facts_json,headline,judged_at_ms,lead_escalated_at_ms,model,ms,needs,needs_tail,promise,promise_model,pushed_at_ms,session_id,state,state_json,turn_id ON turn_judgments WHEN (NEW.ended_at_ms IS NOT OLD.ended_at_ms OR NEW.ending IS NOT OLD.ending OR NEW.error IS NOT OLD.error OR NEW.facts_json IS NOT OLD.facts_json OR NEW.headline IS NOT OLD.headline OR NEW.judged_at_ms IS NOT OLD.judged_at_ms OR NEW.lead_escalated_at_ms IS NOT OLD.lead_escalated_at_ms OR NEW.model IS NOT OLD.model OR NEW.ms IS NOT OLD.ms OR NEW.needs IS NOT OLD.needs OR NEW.needs_tail IS NOT OLD.needs_tail OR NEW.promise IS NOT OLD.promise OR NEW.promise_model IS NOT OLD.promise_model OR NEW.pushed_at_ms IS NOT OLD.pushed_at_ms OR NEW.session_id IS NOT OLD.session_id OR NEW.state IS NOT OLD.state OR NEW.state_json IS NOT OLD.state_json OR NEW.turn_id IS NOT OLD.turn_id)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;

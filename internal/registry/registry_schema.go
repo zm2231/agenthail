@@ -728,6 +728,7 @@ CREATE TABLE IF NOT EXISTS turn_ends (
 	work_item TEXT NOT NULL DEFAULT '',
 	ledger_key TEXT NOT NULL DEFAULT '',
 	waiting_pushed_at_ms INTEGER NOT NULL DEFAULT 0,
+	lead_escalated_at_ms INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (session_id, started_at_ms)
 );
 CREATE TABLE IF NOT EXISTS asks (
@@ -791,6 +792,7 @@ CREATE TABLE IF NOT EXISTS turn_judgments (
 	facts_json TEXT NOT NULL DEFAULT '',
 	error TEXT NOT NULL DEFAULT '',
 	pushed_at_ms INTEGER NOT NULL DEFAULT 0,
+	lead_escalated_at_ms INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY(session_id, turn_id)
 );
 CREATE INDEX IF NOT EXISTS turn_judgments_ended ON turn_judgments(ended_at_ms);

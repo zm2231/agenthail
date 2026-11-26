@@ -70,12 +70,29 @@ func (d *Daemon) gateLedgerTurn(session surface.Session, turnID string) {
 		return
 	}
 	key := fmt.Sprintf("ledger:g2:%s:%s", session.ID, turnID)
-	if _, err := d.Registry.QueueMessageWithKey(session.ID, gateNotice(blocked), key); err != nil {
+	lead := ""
+	if ref, ok := d.workerLead(session); ok {
+		lead = "@" + ref.name
+	}
+	if _, err := d.Registry.QueueMessageWithKey(session.ID, gateNotice(blocked, lead), key); err != nil {
 		d.log.Printf("ledger G2: queue for %s: %s", session.ID, err)
 	}
 }
 
-func gateNotice(results []ledger.GateResult) string {
+func (d *Daemon) workerLead(session surface.Session) (leadRef, bool) {
+	identity, err := d.sessionIdentity(session)
+	if err != nil {
+		return leadRef{}, false
+	}
+	leads, err := d.loadLeadDirectory()
+	if err != nil {
+		return leadRef{}, false
+	}
+	lead, ok := leads.leadOf(identity.Project)
+	return lead, ok && lead.sessionID != session.ID
+}
+
+func gateNotice(results []ledger.GateResult, lead string) string {
 	var lines []string
 	for _, result := range results {
 		texts := map[string]string{}
@@ -87,9 +104,13 @@ func gateNotice(results []ledger.GateResult) string {
 			lines = append(lines, fmt.Sprintf("    %s: %s", item, texts[item]))
 		}
 	}
-	return fmt.Sprintf(`[intent ledger] You ended your turn with open work and no progress on it:
+	notice := fmt.Sprintf(`[intent ledger] You ended your turn with open work and no progress on it:
 %s
 Before you stop: report what changed (agenthail ledger progress <clause> --ref <commit|file|PR|evidence>) or declare what you are waiting on (agenthail ledger wait <clause> --condition "..." --deadline 30m).`, strings.Join(lines, "\n"))
+	if lead != "" {
+		notice += fmt.Sprintf("\nIf you are waiting on your lead %s, raise it with agenthail_ask: the ask goes to %s, and to the person if %s does not answer.", lead, lead, lead)
+	}
+	return notice
 }
 
 func (d *Daemon) apiLedgerClauseHandler(w http.ResponseWriter, r *http.Request) {
