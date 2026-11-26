@@ -80,6 +80,9 @@ pub fn refresh(s: &mut App) {
     let Some(client) = s.client.clone() else { return };
     s.ov.ext.settings = feed::extensions::holds_settings(&client);
     s.ov.ext.fetched_at = Some(Instant::now());
+    if !s.ov.ext.catalogs.iter().any(|c| c.host.is_local()) {
+        s.ov.ext.catalogs.insert(0, Catalog { host: local_host(), list: None, error: None, fetched: None });
+    }
     list(s, &local_host());
     if s.ov.ext.hosts_pending {
         return;
@@ -160,9 +163,6 @@ fn take(s: &mut App, done: Done) {
         }
         Done::Hosts(Err(error)) => ext.hosts_error = Some(format!("Couldn't read the computers: {error}")),
         Done::Listed(_, key, result) => {
-            if key == "local" && !ext.catalogs.iter().any(|c| c.host.is_local()) {
-                ext.catalogs.insert(0, Catalog { host: local_host(), list: None, error: None, fetched: None });
-            }
             if let Some(catalog) = ext.catalogs.iter_mut().find(|c| c.key() == key) {
                 match result {
                     Ok(list) => {
@@ -428,9 +428,7 @@ fn extension_card(s: &App, ext: &Extension, own: &[&Entry], host: &Host) -> El {
 }
 
 fn sections(s: &App) -> Vec<&Catalog> {
-    let all = &s.ov.ext.catalogs;
-    let any = all.iter().any(|c| c.list.as_ref().is_some_and(|l| !l.extensions.is_empty()));
-    all.iter().enumerate().filter(|(i, c)| c.list.as_ref().is_some_and(|l| !l.extensions.is_empty()) || c.error.is_some() || c.list.is_none() || (*i == 0 && !any)).map(|(_, c)| c).collect()
+    s.ov.ext.catalogs.iter().collect()
 }
 
 fn catalog_block(s: &App, catalog: &Catalog, titled: bool, origin: &str) -> El {
