@@ -129,10 +129,9 @@ impl Web {
             self.cookie = None;
             self.renew_at = None;
             self.verified = None;
-            if self.phase == Phase::Loading {
-                self.loaded = None;
-                self.ready = None;
-            }
+            self.loaded = None;
+            self.ready = None;
+            self.phase = Phase::SigningIn;
         } else {
             self.verified = Some(value.to_string());
         }
@@ -254,6 +253,7 @@ impl Web {
                 return Ok(false);
             }
             *self.page.borrow_mut() = want.to_string();
+            self.verified = None;
             view.load_url(want).map_err(|e| format!("Couldn't open {want}: {e}"))?;
             self.loaded = Some(want.to_string());
             self.ready = None;
@@ -451,51 +451,43 @@ mod tests {
     }
 
     #[test]
-    fn a_cookie_the_daemon_forgot_is_replaced_without_reloading() {
-        let page = "http://127.0.0.1:48200/";
-        let mut web = Web::new();
-        web.cookie = Some(session("2026-11-26T22:00:00Z"));
-        assert!(web.check_due(None).is_none(), "nothing to check before a page is chosen");
-        web.loaded = Some(page.into());
-        web.ready = Some(page.into());
-        web.phase = Phase::Shown;
-        let (checked, cookie) = web.check_due(Some(page)).unwrap();
-        assert_eq!(checked, page);
-        assert!(web.check_due(Some(page)).is_none(), "one check at a time");
-        web.checked("someone-else", Ok(false));
-        assert!(web.cookie.is_some(), "an answer about an older cookie changes nothing");
-        web.checked_at = None;
-        web.check_due(Some(page)).unwrap();
-        web.checked(&cookie.value, Ok(false));
-        assert!(web.cookie.is_none());
-        assert!(web.sign_in_due(now()));
-        assert_eq!(web.loaded.as_deref(), Some(page), "a page that already loaded stays");
-        assert_eq!(web.phase, Phase::Shown);
-        web.checked_at = None;
-        assert!(web.check_due(Some(page)).is_none(), "no check while signing in");
-    }
-
-    #[test]
-    fn a_new_page_opens_only_with_a_cookie_its_port_accepts() {
+    fn each_page_opens_only_with_a_cookie_its_port_has_just_accepted() {
         let (a, b) = ("http://127.0.0.1:48200/", "http://127.0.0.1:48300/");
         let mut web = Web::new();
         web.sign_in_due(now());
         web.signed(Ok(session("2026-11-26T22:00:00Z")));
         assert!(web.check_due(Some(a)).is_none(), "a cookie just minted needs no check");
+        web.verified = None;
         web.loaded = Some(a.into());
         web.ready = Some(a.into());
         web.phase = Phase::Shown;
-        web.checked_at = Some(Instant::now());
-        web.verified = None;
         let (port, cookie) = web.check_due(Some(b)).expect("opening another page checks first, whatever the timer says");
         assert_eq!(port, b);
-        web.loaded = Some(b.into());
-        web.phase = Phase::Loading;
+        assert!(web.check_due(Some(b)).is_none(), "one check at a time");
+        web.checked(&cookie.value, Ok(true));
+        assert_eq!(web.verified.as_deref(), Some("v"), "b may open now");
+    }
+
+    #[test]
+    fn a_forgotten_cookie_signs_in_again_and_reopens_the_page() {
+        let page = "http://127.0.0.1:48200/";
+        let mut web = Web::new();
+        web.cookie = Some(session("2026-11-26T22:00:00Z"));
+        web.loaded = Some(page.into());
+        web.ready = Some(page.into());
+        web.phase = Phase::Shown;
+        let (_, cookie) = web.check_due(Some(page)).unwrap();
+        web.checked("someone-else", Ok(false));
+        assert!(web.cookie.is_some(), "an answer about an older cookie changes nothing");
+        web.checked_at = None;
+        web.check_due(Some(page)).unwrap();
         web.checked(&cookie.value, Ok(false));
-        assert!(web.loaded.is_none(), "a page still loading opens again after the new sign-in");
+        assert!(web.cookie.is_none() && web.loaded.is_none() && web.ready.is_none());
+        assert_eq!(web.phase, Phase::SigningIn);
+        assert!(web.check_due(Some(page)).is_none(), "no check while there is no cookie");
         assert!(web.sign_in_due(now()));
         web.signed(Ok(session("2026-11-26T23:00:00Z")));
-        assert_eq!(web.verified.as_deref(), Some("v"));
+        assert_eq!(web.verified.as_deref(), Some("v"), "the fresh cookie opens the page");
     }
 
     #[test]
