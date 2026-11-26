@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -222,8 +223,8 @@ func TestAnAgentsShellStartsATaskOnAPairedHostThroughTheCLI(t *testing.T) {
 func TestATaskOnAPairedHostNeedsASessionHereToStartIt(t *testing.T) {
 	local, remote, _ := pairedFederation(t)
 	response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "session-create", "host": "vps", "surface": "codex", "message": "orphan", "cwd": t.TempDir(), "task": true})
-	if response.Code < http.StatusBadRequest {
-		t.Fatalf("status=%d body=%s, want a task with no starting session refused", response.Code, response.Body.String())
+	if response.Code < http.StatusBadRequest || !strings.Contains(response.Body.String(), "the session on this computer that started it") {
+		t.Fatalf("status=%d body=%s, want a task with no starting session refused here", response.Code, response.Body.String())
 	}
 	if _, err := remote.reg.Session("started"); err == nil {
 		t.Fatal("the paired host started a child for a task nothing here can wait on")
