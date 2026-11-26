@@ -176,10 +176,11 @@ impl Unsent {
     }
 
     pub fn failed(self, maybe_delivered: bool, answered: bool, error: String) -> Unsent {
-        if self.tries == 0 || maybe_delivered || answered {
+        if self.tries == 0 {
             return Unsent { maybe_delivered, error, ..self };
         }
-        Unsent { maybe_delivered: true, tries: self.tries - 1, error, ..self }
+        let tries = if maybe_delivered || answered { self.tries } else { self.tries - 1 };
+        Unsent { maybe_delivered: true, tries, error, ..self }
     }
 
     pub fn quoted(&self) -> String {
@@ -414,9 +415,9 @@ mod tests {
         let unreached = retry.clone().failed(false, false, "connection refused".into());
         assert!(unreached.reuses_key(), "{unreached:?}");
         assert!(!unreached.offers_new_send());
-        let refused = retry.clone().failed(false, true, "session ended".into());
-        assert!(!refused.reuses_key() && !refused.offers_new_send());
-        assert!(refused.note().starts_with("Not sent: session ended"));
+        let refused = retry.clone().failed(false, true, "action_reservation_failed".into());
+        assert!(refused.reuses_key() && refused.offers_new_send());
+        assert!(refused.note().starts_with("Still not confirmed after a retry: action_reservation_failed"));
         let unknown = retry.failed(true, true, "timeout".into());
         assert!(unknown.reuses_key() && unknown.offers_new_send());
         assert_eq!(unknown.error, "timeout");
