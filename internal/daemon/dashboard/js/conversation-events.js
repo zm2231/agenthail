@@ -236,7 +236,7 @@ export function bindConversationEvents() {
       projectMessage.disabled = true;
       try {
         const result = await action("channel-send", { channel: `#${projectMessage.dataset.projectMessage}`, message, author: "person" }, crypto.randomUUID(), "");
-        const names = (result.recipients || []).map((recipient) => recipient.coordinator || displayName(app.state.sessions.find((session) => session.id === recipient.sessionId) || { id: recipient.sessionId }));
+        const names = (result.recipients || []).filter((recipient) => recipient.outcome !== "skipped").map((recipient) => recipient.coordinator || displayName(app.state.sessions.find((session) => session.id === recipient.sessionId) || { id: recipient.sessionId }));
         toast(`Sent to ${names.length}: ${names.join(", ")}.`);
       } catch (error) {
         toast(error.message);

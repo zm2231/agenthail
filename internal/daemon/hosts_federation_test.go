@@ -161,6 +161,9 @@ func (f *federatedSurface) Send(ctx context.Context, session *surface.Session, m
 	f.persons = append(f.persons, surface.PersonName(ctx))
 	f.mu.Unlock()
 	f.record(message)
+	if err := f.sendFailure(); err != nil {
+		return nil, err
+	}
 	return &surface.SendResult{UUID: "remote-turn", Accepted: true}, nil
 }
 
@@ -174,7 +177,22 @@ func (f *federatedSurface) SendWithOptions(ctx context.Context, session *surface
 	f.options = append(f.options, options)
 	f.mu.Unlock()
 	f.record(message)
+	if err := f.sendFailure(); err != nil {
+		return nil, err
+	}
 	return &surface.SendResult{UUID: "remote-turn", Accepted: true}, nil
+}
+
+func (f *federatedSurface) failSends(err error) {
+	f.daemonSurface.mu.Lock()
+	defer f.daemonSurface.mu.Unlock()
+	f.sendErr = err
+}
+
+func (f *federatedSurface) sendFailure() error {
+	f.daemonSurface.mu.Lock()
+	defer f.daemonSurface.mu.Unlock()
+	return f.sendErr
 }
 
 func (f *federatedSurface) Steer(_ context.Context, _ *surface.Session, message string) error {

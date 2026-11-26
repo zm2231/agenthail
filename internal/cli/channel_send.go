@@ -91,7 +91,7 @@ func (a *App) printChannelResult(receipt channelReceipt) {
 		if label == "" {
 			label = a.sessionDisplay(recipient.SessionID)
 		}
-		tag := map[string]string{broadcast.OutcomeSent: "[ OK ]", broadcast.OutcomeQueued: "[QUEUE]", broadcast.OutcomeSubmitted: "[SUBMIT]", broadcast.OutcomeFailed: "[FAIL]"}[recipient.Outcome]
+		tag := map[string]string{broadcast.OutcomeSent: "[ OK ]", broadcast.OutcomeQueued: "[QUEUE]", broadcast.OutcomeSubmitted: "[SUBMIT]", broadcast.OutcomeFailed: "[FAIL]", broadcast.OutcomeSkipped: "[SKIP]"}[recipient.Outcome]
 		if recipient.Detail != "" {
 			fmt.Printf("  %s %s: %s\n", tag, label, recipient.Detail)
 		} else {
@@ -103,7 +103,11 @@ func (a *App) printChannelResult(receipt channelReceipt) {
 			fmt.Printf("  [%s] host %s: %s\n", strings.ToUpper(host.State), host.Name, host.Detail)
 		}
 	}
-	fmt.Printf("#%s: %d sent, %d queued, %d submitted, %d failed\n", receipt.Target.Label(), receipt.Count(broadcast.OutcomeSent), receipt.Count(broadcast.OutcomeQueued), receipt.Count(broadcast.OutcomeSubmitted), receipt.Count(broadcast.OutcomeFailed))
+	summary := fmt.Sprintf("#%s: %d sent, %d queued, %d submitted, %d failed", receipt.Target.Label(), receipt.Count(broadcast.OutcomeSent), receipt.Count(broadcast.OutcomeQueued), receipt.Count(broadcast.OutcomeSubmitted), receipt.Count(broadcast.OutcomeFailed))
+	if skipped := receipt.Count(broadcast.OutcomeSkipped); skipped > 0 {
+		summary += fmt.Sprintf(", %d skipped", skipped)
+	}
+	fmt.Println(summary)
 	if len(receipt.Unreachable) > 0 {
 		fmt.Printf("held for unreachable host(s): %s\n", strings.Join(receipt.Unreachable, ", "))
 	}

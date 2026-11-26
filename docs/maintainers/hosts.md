@@ -249,19 +249,25 @@ qualified for this daemon.
 
 A channel lives where it was made. A remote member is stored by its raw id and
 mirrored row; `channel-send` holds the message for that member's host and
-delivers to local members directly.
+delivers to local members directly. A local member that is archived, whose
+`cwd` no longer exists, or that has ended is `skipped` as a project post's
+member is (below), unless it is one of this host's coordinators.
 
 A project channel has no stored members, and each host decides its own.
 `channel-send` to `#<project>` delivers to this host's members, read from its
-catalog: every local row whose project `id` is the project's, that is not
-archived and is pinned, working or was used within `surface.ActiveWindow`,
-whether or not its process is still up (delivery resumes one that ended; the
-catalog marks such a row stale, which does not exclude it), and is not a
-one-off run: a task child (`agenthail_create` with `task`) until its task
-settles, or a delegated run (a Codex exec run or a sub-agent) at all; plus
-the project's coordinators on this host, which `internal/coordinator` starts or
-resumes. `internal/broadcast` holds that resolution and delivery; only the
-daemon runs it, and the CLI posts the action.
+catalog: every local row whose project `id` is the project's, that is pinned,
+working or was used within `surface.ActiveWindow`, and is not a one-off run: a
+task child (`agenthail_create` with `task`) until its task settles, or a
+delegated run (a Codex exec run or a sub-agent) at all; plus the project's
+coordinators on this host, which `internal/coordinator` starts or resumes. A
+post starts no other conversation: a member that is archived, whose `cwd` no
+longer exists, or whose status is `offline` (its process ended) is returned
+with outcome `skipped` and the reason, and is never delivered to, so it has no
+delivery intent and raises no delivery ask. `skipped` is not a failure: the
+send answers 200 when no reached recipient failed, and a project post refuses
+as having no members only when it reached nobody, naming the skipped ones.
+`internal/broadcast` holds that resolution and delivery; only the daemon runs
+it, and the CLI posts the action.
 
 Every paired host that holds the project (`CatalogProjectHosts`, stale rows
 included, plus the hosts of the project's coordinators) gets one

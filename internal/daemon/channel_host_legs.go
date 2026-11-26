@@ -169,7 +169,7 @@ func channelLegAnswer(leg channelHostLeg, answer hostAnswer) ([]broadcast.Recipi
 				reply.Recipients[index].Coordinator = leg.ID + "::" + name
 			}
 		}
-		leg.State, leg.Recipients = channelLegReached, len(reply.Recipients)
+		leg.State, leg.Recipients = channelLegReached, broadcast.Result{Recipients: reply.Recipients}.Reached()
 		return reply.Recipients, leg
 	}
 	leg.State, leg.Rule = channelLegRefused, reply.Detail.Rule
