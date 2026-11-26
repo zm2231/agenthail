@@ -149,7 +149,7 @@ func (r *Registry) SetProjectTitle(id, title string) error {
 }
 
 func (r *Registry) SetProjectRepository(id, key string, repository []byte) error {
-	_, err := r.db.Exec(`UPDATE projects SET project_key=?,repository=? WHERE id=? AND added=1`, key, append([]byte{}, repository...), id)
+	_, err := r.db.Exec(`UPDATE projects SET project_key=?,repository=? WHERE id=? AND added=1 AND joined=0`, key, append([]byte{}, repository...), id)
 	return err
 }
 

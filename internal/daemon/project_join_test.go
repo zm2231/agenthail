@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -172,6 +173,21 @@ func TestAFolderOnAnotherComputerJoinsAProjectWithOneKeyLeadAndLedger(t *testing
 		return mac != nil && server != nil && mac.DisplayName == "cockpit" && server.DisplayName == "cockpit"
 	})
 
+	records, err := f.server.reg.ListProjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range records {
+		if record.Joined {
+			if err := f.server.reg.SetProjectRepository(record.ID, "repo:github.com/example/other", nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if records, err := f.server.reg.ListProjects(); err != nil || !slices.ContainsFunc(records, func(record registry.ProjectRecord) bool { return record.Joined && record.Key == key }) {
+		t.Fatalf("a repository refresh replaced the joined folder's key: %+v (%v)", records, err)
+	}
+
 	again := f.action(t, f.mac, map[string]any{"action": "project-add", "path": f.serverFolder, "host": "vps", "join": key}, http.StatusOK, nil)
 	if !strings.Contains(again, `"created":false`) {
 		t.Fatalf("joining the same folder again = %s, want created false", again)
@@ -198,6 +214,14 @@ func TestAJoinIsRefusedWhereTheFolderAlreadyBelongsElsewhere(t *testing.T) {
 
 	keyed := widgetRepo(t, "https://github.com/example/widget.git")
 	f.refused(t, f.mac, map[string]any{"action": "project-add", "path": keyed, "host": "vps", "join": f.projectID}, http.StatusConflict, "project_keyed")
+
+	gainedRemote := testkit.GitRepo(t)
+	f.action(t, f.server, map[string]any{"action": "project-add", "path": gainedRemote}, http.StatusOK, nil)
+	testkit.Git(t, gainedRemote, "remote", "add", "origin", "https://github.com/example/gadget.git")
+	f.refused(t, f.mac, map[string]any{"action": "project-add", "path": gainedRemote, "host": "vps", "join": f.projectID}, http.StatusConflict, "project_keyed")
+	if synced, err := ledger.NewStore(f.server.reg.WriteDB(), f.server.reg.ReadDB()).SyncedProjects(f.macRecord.ID); err != nil || len(synced) != 0 {
+		t.Fatalf("a refused join left the server replicating %v (%v)", synced, err)
+	}
 
 	serverRoot, err := projectresolveRoot(f.serverFolder)
 	if err != nil {

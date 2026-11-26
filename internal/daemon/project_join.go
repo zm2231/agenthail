@@ -210,7 +210,7 @@ func (d *Daemon) joinFolder(ctx context.Context, path string, share projectShare
 		return actionOK(map[string]any{"ok": true, "project": projectresolve.AddedCatalogProject(*existing, plan.inRepository), "created": false}), nil
 	case existing != nil && existing.Joined:
 		return actionResult{}, actionFailed(http.StatusConflict, "project_joined", fmt.Sprintf("%s is already joined to %s; unjoin it first with agenthail project unjoin", folder, existing.Title))
-	case existing != nil && existing.Key != "", existing == nil && plan.record.Key != "":
+	case plan.record.Key != "", existing != nil && existing.Key != "":
 		return actionResult{}, actionFailed(http.StatusConflict, "project_keyed", fmt.Sprintf("%s is in a repository with a remote, which is already one project on every computer; join two such projects with agenthail project link", folder))
 	}
 	own := []string{plan.record.ID, plan.supersedes}
