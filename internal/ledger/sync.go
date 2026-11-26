@@ -9,7 +9,7 @@ import (
 
 var issuesID = map[EventType]bool{
 	EventGoal: true, EventAsk: true, EventClause: true, EventCut: true,
-	EventDecision: true, EventWorkItem: true, EventQuestion: true,
+	EventDecision: true, EventWorkItem: true, EventQuestion: true, EventWorkProof: true,
 }
 
 func IssuesID(t EventType) bool { return issuesID[t] }

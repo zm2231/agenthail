@@ -32,6 +32,11 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
   ledger verify <item_id> "<what you are checking>"
                                  Mark an item you hold as built and being checked: its phase is Verify
                                  until a new pull request opens or it is claimed or sent back again
+  ledger proof <item_id> [--title "..." --expected "..." [--observed "..."] [--outcome pass|fail|pending]
+             [--revision <commit>] [--link <title>=<url>]...] [--step <id> --base <version> [--remove]]
+                                 What the holder checked on an item, expected against observed; with no
+                                 fields, lists it. --step replaces a step and --remove drops one, both at
+                                 the version you last read
   ledger phases [--label <phase>=<name>]...
                                  Each phase (scope, build, review, verify, check, ship) and this
                                  project's name for it; --label renames one, an empty name restores it

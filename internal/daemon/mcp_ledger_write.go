@@ -15,7 +15,7 @@ type mcpLedgerWriteInput struct {
 	mcpWrite
 	Op      string         `json:"op" jsonschema:"attach, clause, question, work or phases: the same operations as agenthail ledger attach, clause, question, work and phases."`
 	Project string         `json:"project,omitempty" jsonschema:"a project by name or id, as agenthail_projects lists them; yours by default, required when you are in none"`
-	Request map[string]any `json:"request" jsonschema:"The operation's fields, as the CLI sends them; your project and session are filled in for you. Unknown keys are refused. A work add nests type, priority, description, acceptance, labels, from and parent under fields (fields.type); an edit nests text, type, priority, description, acceptance, addLabels, removeLabels and parent (empty to clear) under change; undep drops a dependsOn; a park nests kind (usage, idea, later, person) and its fields under park, as the CLI sends them; a takeover nests then (release, submit or done) and force under takeover. attach also takes fragments, a list of attaches recorded in one call, each on its own. phases takes labels: {phase key: name}, empty restores the default."`
+	Request map[string]any `json:"request" jsonschema:"The operation's fields, as the CLI sends them; your project and session are filled in for you. Unknown keys are refused. A work add nests type, priority, description, acceptance, labels, from and parent under fields (fields.type); an edit nests text, type, priority, description, acceptance, addLabels, removeLabels and parent (empty to clear) under change; undep drops a dependsOn; a park nests kind (usage, idea, later, person) and its fields under park, as the CLI sends them; a takeover nests then (release, submit or done) and force under takeover; proof nests op (add|replace|remove), step {id, title, expected, observed, outcome, revision, attachments [{title, url}]}, base (the step's version) and operationId (defaults to clientRequestId). attach also takes fragments, a list of attaches recorded in one call, each on its own. phases takes labels: {phase key: name}, empty restores the default."`
 }
 
 func (d *Daemon) mcpLedgerWrite(ctx context.Context, caller *mcpCaller, input mcpLedgerWriteInput) (any, error) {
@@ -42,6 +42,11 @@ func (d *Daemon) mcpLedgerWrite(ctx context.Context, caller *mcpCaller, input mc
 	request["projectKey"], request["sessionId"] = projectKey, caller.session.ID
 	action, _ := request["action"].(string)
 	itemID, _ := request["itemId"].(string)
+	if proof, ok := request["proof"].(map[string]any); ok && op == "work" && ledger.WorkAction(action) == ledger.WorkProof {
+		if id, _ := proof["operationId"].(string); strings.TrimSpace(id) == "" {
+			proof["operationId"] = strings.TrimSpace(input.ClientRequestID)
+		}
+	}
 	caller.remoteChange = strings.Join(strings.Fields(strings.Join([]string{op, action, itemID, "in " + projectKey}, " ")), " ")
 	notice := ""
 	if utterance, _ := request["utteranceId"].(string); op == "work" && ledger.WorkAction(action) == ledger.WorkTakeover && strings.TrimSpace(utterance) == "" {

@@ -61,6 +61,7 @@ var ledgerCommands = map[string]func(a *App, c ledgerCall) error{
 	"check":        func(a *App, c ledgerCall) error { return a.ledgerCheck(c.args) },
 	"check-report": func(a *App, c ledgerCall) error { return a.ledgerCheckReport(c.args) },
 	"phases":       func(a *App, c ledgerCall) error { return a.ledgerPhases(c.store, c.args) },
+	"proof":        func(a *App, c ledgerCall) error { return a.ledgerProof(c.store, c.args) },
 }
 
 func (a *App) cmdLedger(args []string) error {

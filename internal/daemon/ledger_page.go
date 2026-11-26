@@ -41,19 +41,20 @@ type ledgerPageView struct {
 }
 
 type ledgerPageRow struct {
-	ID       string            `json:"id"`
-	Title    string            `json:"title"`
-	What     string            `json:"what,omitempty"`
-	For      string            `json:"for,omitempty"`
-	Type     string            `json:"type,omitempty"`
-	Priority string            `json:"priority,omitempty"`
-	Phase    ledger.Phase      `json:"phase,omitempty"`
-	Holder   string            `json:"holder,omitempty"`
-	Since    time.Time         `json:"since,omitzero"`
-	Note     string            `json:"note,omitempty"`
-	Reviewer string            `json:"reviewer,omitempty"`
-	Parked   *ledgerPageParked `json:"parked,omitempty"`
-	Flight   *ledgerPageFlight `json:"flight,omitempty"`
+	ID       string              `json:"id"`
+	Title    string              `json:"title"`
+	What     string              `json:"what,omitempty"`
+	For      string              `json:"for,omitempty"`
+	Type     string              `json:"type,omitempty"`
+	Priority string              `json:"priority,omitempty"`
+	Phase    ledger.Phase        `json:"phase,omitempty"`
+	Proof    *ledger.ProofCounts `json:"proof,omitempty"`
+	Holder   string              `json:"holder,omitempty"`
+	Since    time.Time           `json:"since,omitzero"`
+	Note     string              `json:"note,omitempty"`
+	Reviewer string              `json:"reviewer,omitempty"`
+	Parked   *ledgerPageParked   `json:"parked,omitempty"`
+	Flight   *ledgerPageFlight   `json:"flight,omitempty"`
 }
 
 type ledgerPageParked struct {
@@ -204,6 +205,10 @@ func (d *Daemon) fillLedgerPage(view *ledgerPageView, board *ledger.Board, now t
 	}
 	row := func(item ledger.WorkItem) ledgerPageRow {
 		out := ledgerPageRow{ID: item.ID, Title: item.Text, What: firstLine(item.Description), Type: string(item.Type), Priority: item.Priority, Phase: item.Phase, Holder: name(item.Assignee), Since: stateSince(item)}
+		if len(item.Proof) > 0 {
+			counts := item.ProofCounts()
+			out.Proof = &counts
+		}
 		if clause, ok := board.Clause(item.ClauseID); ok && clause.Text != item.Text {
 			out.For = firstLine(clause.Text)
 		}

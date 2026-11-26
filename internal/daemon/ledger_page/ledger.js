@@ -57,6 +57,11 @@ function day(value) {
   return Number.isNaN(at.getTime()) ? "" : at.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+function proofWords(proof) {
+  const parts = [proof.pass && `${proof.pass} passed`, proof.fail && `${proof.fail} failed`, proof.pending && `${proof.pending} pending`].filter(Boolean);
+  return parts.length ? `Proof: ${parts.join(", ")}` : "";
+}
+
 function chip(className, text) {
   return text ? node("span", `chip ${className}`, text) : null;
 }
@@ -65,6 +70,7 @@ function rowChips(row, since = row.since) {
   return [
     chip("holder", row.holder),
     row.phase && chip("phase", view.phaseLabels?.[row.phase] || row.phase),
+    row.proof && chip(`proof${row.proof.fail ? " failing" : ""}`, proofWords(row.proof)),
     priorityWords[row.priority] && chip(`priority ${row.priority.toLowerCase()}`, priorityWords[row.priority]),
     row.type && row.type !== "task" && chip("type", row.type),
     chip("since", ago(since)),

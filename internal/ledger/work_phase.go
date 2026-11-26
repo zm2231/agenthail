@@ -65,19 +65,21 @@ func ParsePRLine(text string) (PRMark, string, bool) {
 }
 
 func (item *WorkItem) refreshPhase() {
-	item.Phase, item.PhaseSince = timelinePhase(item.Timeline)
+	item.Phase, item.PhaseSince, item.round = timelinePhase(item.Timeline)
+	item.refreshProof()
 }
 
 // timelinePhase replays an item's own timeline. A Verify mark counts until a
 // pull request is opened after it, the item changes holder, or it is sent
 // back from review; being blocked and unblocked keeps it.
-func timelinePhase(timeline []WorkEntry) (Phase, time.Time) {
+func timelinePhase(timeline []WorkEntry) (Phase, time.Time, int) {
 	var (
 		state                     WorkState
 		holder                    string
 		verified, merged, entered bool
 		phase                     Phase
 		since                     time.Time
+		round                     int
 	)
 	open := map[string]bool{}
 	for _, e := range timeline {
@@ -89,6 +91,7 @@ func timelinePhase(timeline []WorkEntry) (Phase, time.Time) {
 			}
 			if next != holder || state == WorkInReview && e.State == WorkInProgress {
 				verified = false
+				round++
 			}
 			state, holder, entered = e.State, next, true
 		case e.Kind == "log" && e.Source == WorkSourcePRItem:
@@ -113,7 +116,7 @@ func timelinePhase(timeline []WorkEntry) (Phase, time.Time) {
 			phase, since = next, e.At
 		}
 	}
-	return phase, since
+	return phase, since, round
 }
 
 func phaseOf(state WorkState, held, verified, merged, openPR bool) Phase {
