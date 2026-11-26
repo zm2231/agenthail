@@ -47,7 +47,7 @@ pub struct Complete {
     pub search: Option<Search>,
     seq: u64,
     forking: bool,
-    fork_keys: HashMap<String, String>,
+    fork_keys: HashMap<String, (String, String)>,
 }
 
 fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'static) {
@@ -251,6 +251,7 @@ pub fn pump(s: &mut App) -> bool {
     }
     if s.complete.search.as_ref().is_some_and(|q| s.composer_for.as_deref() != Some(q.session.as_str())) {
         s.complete.search = None;
+        s.composer.focused = true;
     }
     let Some(id) = s.composer_for.clone() else {
         if let Some(left) = s.complete.session.take() {
@@ -365,6 +366,13 @@ pub fn rekey(s: &mut App, old: &str, new: &str) {
     if let Some(history) = c.history.remove(old) {
         c.history.insert(new.to_string(), history);
     }
+    let prefix = format!("{old}/");
+    let moving: Vec<String> = c.fork_keys.keys().filter(|k| k.starts_with(&prefix)).cloned().collect();
+    for point in moving {
+        if let Some(request) = c.fork_keys.remove(&point) {
+            c.fork_keys.insert(format!("{new}/{}", &point[prefix.len()..]), request);
+        }
+    }
     if c.goal_pending.remove(old) {
         c.goal_pending.insert(new.to_string());
     }
@@ -423,7 +431,12 @@ pub fn done(s: &mut App, done: Done) {
             s.complete.forking = false;
             if !result.as_ref().is_err_and(|e| e.maybe_delivered) {
                 s.complete.fork_keys.remove(&point);
+                if let Some((sess, item)) = point.split_once('/') {
+                    let moved = format!("{}/{item}", feed::composer::current(&s.rekeyed, sess));
+                    s.complete.fork_keys.remove(&moved);
+                }
             }
+            let from = feed::composer::current(&s.rekeyed, &from).to_string();
             match result {
                 Ok(id) if !id.is_empty() => {
                     s.drafts.set(&id, &prompt);
@@ -600,8 +613,8 @@ fn fork(s: &mut App, from: &str, prompt: &Prompt) {
     }
     s.complete.forking = true;
     let point = format!("{from}/{}", prompt.item_id);
-    let key = s.complete.fork_keys.entry(point.clone()).or_insert_with(feed::catalog::request_key).clone();
-    let (from, turn, text) = (from.to_string(), prompt.turn_id.clone(), prompt.text.clone());
+    let (key, sent_from) = s.complete.fork_keys.entry(point.clone()).or_insert_with(|| (feed::catalog::request_key(), from.to_string())).clone();
+    let (from, turn, text) = (sent_from, prompt.turn_id.clone(), prompt.text.clone());
     spawn(s, move |c| {
         let result = c.fork(&from, turn.as_deref(), &key);
         Done::Forked(from.clone(), point.clone(), text.clone(), result)
