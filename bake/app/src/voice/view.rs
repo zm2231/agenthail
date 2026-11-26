@@ -312,17 +312,18 @@ fn controls(w: &Win) -> El {
     let connected = call.connected_call();
     let mut buttons = row().w_full().gap(8.0).items_center();
     if connected {
-        if let Some((target, name)) = w.offer.clone() {
-            let label = if target.is_empty() { "Return to orchestrator".to_string() } else { format!("Transfer to {}", if name.is_empty() { &target } else { &name }) };
+        let route = w.route_edit.text.trim();
+        if call.can_transfer_to(route) {
+            let named = w.offer.as_ref().filter(|(target, name)| target == route && !name.is_empty()).map_or(route, |(_, name)| name.as_str());
+            let label = if route.is_empty() { "Return to orchestrator".to_string() } else { format!("Transfer to {named}") };
             buttons = buttons.child(
                 small(label, ButtonVariant::Neutral)
                     .disabled(call.working())
                     .on_press(|w: &mut Win| {
                         w.sync_route();
-                        if let Some((target, _)) = w.offer.clone() {
-                            let effects = w.call.transfer(&target);
-                            w.run(effects);
-                        }
+                        let target = w.route_typed.clone();
+                        let effects = w.call.transfer(&target);
+                        w.run(effects);
                     })
                     .build(kit())
                     .key("voice-transfer"),

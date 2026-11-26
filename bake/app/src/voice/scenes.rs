@@ -114,7 +114,7 @@ fn routed(w: &mut Win) {
 
 fn transfer(w: &mut Win) {
     connected(w);
-    w.offer = Some(("builder".into(), "Builder".into()));
+    w.route("builder", "Builder");
 }
 
 fn stop_target(w: &mut Win) {

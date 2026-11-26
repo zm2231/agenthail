@@ -803,6 +803,11 @@ impl Call {
         self.drain()
     }
 
+    pub fn can_transfer_to(&self, route: &str) -> bool {
+        let on = self.state.as_ref().and_then(|s| s.target.as_ref()).map_or("", |t| t.id.as_str());
+        self.connected_call() && route.trim() != on
+    }
+
     pub fn transfer(&mut self, target: &str) -> Vec<Effect> {
         if self.closed || self.working || !self.connected_call() {
             return Vec::new();

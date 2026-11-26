@@ -552,6 +552,21 @@ fn an_oversized_saved_log_is_trimmed_and_saved_again() {
     assert!(loaded.changed);
 }
 
+#[test]
+fn a_call_the_host_moved_by_voice_offers_the_route_in_the_field() {
+    let mut call = ready();
+    let id = connected(&mut call);
+    assert!(!call.can_transfer_to(""), "already on the orchestrator");
+    assert!(call.can_transfer_to("s-builder"));
+    let moved = refresh(&call.tick(1.0));
+    call.reply(moved, Ok(state(json!({"phase": "connected", "attemptId": id, "target": {"id": "s-builder", "name": "Builder"}}))), 1.0);
+    assert_eq!(call.target, "", "the window's own route is unchanged");
+    assert!(call.can_transfer_to(""), "the empty field returns the call to the orchestrator");
+    assert!(!call.can_transfer_to("s-builder"));
+    let back = only_job(&call.transfer(""));
+    assert_eq!(back.action.as_ref().unwrap().target_id.as_deref(), Some(""));
+}
+
 fn dialed_routed(call: &mut Call) -> String {
     let select = only_job(&call.call());
     let prepare = only_job(&call.reply(select, Ok(state(json!({"phase": "ready"}))), 0.0));
