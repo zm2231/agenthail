@@ -5,7 +5,7 @@ use crate::Confirm;
 pub(crate) fn header(s: &App, x: &Session) -> El {
     let state = x.state(s.now);
     let label_value = if state == State::NeedsYou || x.display.label.is_empty() { state.label().to_string() } else { x.display.label.clone() };
-    let mut chips = row().gap(6.0).items_center().child(chip(&icons::FOLDER, x.project_name()));
+    let mut chips = row().w_full().flex_wrap().gap(6.0).items_center().child(chip(&icons::FOLDER, x.project_name()));
     if let Some(branch) = &x.checkout.branch {
         chips = chips.child(chip(&icons::BRANCH, branch.clone()));
     }
@@ -22,8 +22,17 @@ pub(crate) fn header(s: &App, x: &Session) -> El {
         .pb(16.0)
         .window_drag()
         .child(avatar_with_state(&x.title(), state, 40.0))
-        .child(col().grow(1.0).min_w(0.0).gap(7.0).child(text(x.title()).font(HEADING).color(theme::text()).truncate()).child(chips).child(crate::ui::chips::turn(s, x)))
-        .child(pill(state_icon(state), label_value, state_color(state)))
+        .child(
+            row()
+                .grow(1.0)
+                .w(1.0)
+                .min_w(0.0)
+                .flex_wrap()
+                .gap(12.0)
+                .items_center()
+                .child(col().grow(1.0).w(1.0).min_w(260.0).gap(7.0).child(text(x.title()).font(HEADING).color(theme::text()).truncate()).child(chips).child(crate::ui::chips::turn(s, x)))
+                .child(pill(state_icon(state), label_value.clone(), state_color(state)).help(label_value)),
+        )
         .child(session_menu::button(x))
 }
 
