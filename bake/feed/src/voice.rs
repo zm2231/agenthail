@@ -1,0 +1,893 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use time::OffsetDateTime;
+
+use crate::catalog::Client;
+
+pub const PROTOCOL: i64 = 1;
+pub const HEARTBEAT_SECS: f64 = 10.0;
+pub const HEARTBEAT_GRACE_SECS: f64 = 30.0;
+pub const RECOVERY_SECS: f64 = 10.0;
+pub const MIC_DENIED: &str = "Microphone access is off for Agenthail. Turn it on in System Settings, Privacy & Security, Microphone, then call again.";
+pub const MIC_SETTINGS: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
+pub const ELSEWHERE: &str = "A call is already active in another Agenthail window. Hang up there to call from here.";
+pub const OCCUPIED: &str = "Another device owns this call. Hang up there to call from this Mac.";
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct Party {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct Event {
+    #[serde(default)]
+    pub sequence: i64,
+    #[serde(default)]
+    pub method: String,
+    #[serde(default)]
+    pub params: Value,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct State {
+    #[serde(default)]
+    pub protocol: i64,
+    pub session: Option<Party>,
+    #[serde(default)]
+    pub phase: String,
+    pub attempt_id: Option<String>,
+    pub message: Option<String>,
+    pub sdp: Option<String>,
+    #[serde(default)]
+    pub events: Vec<Event>,
+    #[serde(default)]
+    pub truncated: bool,
+    #[serde(default)]
+    pub occupied: bool,
+    pub target: Option<Party>,
+    pub terminal_reason: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    You,
+    Agent,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Line {
+    pub id: String,
+    pub role: Role,
+    pub text: String,
+    pub open: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Talk {
+    Listening,
+    Hearing,
+    Speaking,
+}
+
+impl State {
+    pub fn has_call(&self) -> bool {
+        ["starting", "negotiating", "connected", "stopping", "unknown"].contains(&self.phase.as_str())
+    }
+
+    fn terminal(&self) -> bool {
+        self.phase == "ended" || self.phase == "blocked"
+    }
+
+    fn message(&self) -> Option<String> {
+        self.message.clone().filter(|m| !m.is_empty())
+    }
+
+    pub fn lines(&self) -> Vec<Line> {
+        let mut lines: Vec<Line> = Vec::new();
+        let mut open: Vec<(Role, usize)> = Vec::new();
+        for event in &self.events {
+            if event.method == "thread/realtime/started" {
+                open.clear();
+                for line in &mut lines {
+                    line.open = false;
+                }
+            }
+            let role = match event.params["role"].as_str() {
+                Some("user") => Role::You,
+                Some("assistant") => Role::Agent,
+                _ => continue,
+            };
+            let at = open.iter().position(|(r, _)| *r == role);
+            match event.method.as_str() {
+                "thread/realtime/transcript/delta" => {
+                    let Some(delta) = event.params["delta"].as_str() else { continue };
+                    match at {
+                        Some(k) => lines[open[k].1].text.push_str(delta),
+                        None => {
+                            open.push((role, lines.len()));
+                            lines.push(Line { id: event.sequence.to_string(), role, text: delta.into(), open: true });
+                        }
+                    }
+                }
+                "thread/realtime/transcript/done" => {
+                    let Some(text) = event.params["text"].as_str() else { continue };
+                    match at {
+                        Some(k) => {
+                            let (_, index) = open.remove(k);
+                            lines[index].text = text.into();
+                            lines[index].open = false;
+                        }
+                        None => lines.push(Line { id: event.sequence.to_string(), role, text: text.into(), open: false }),
+                    }
+                }
+                _ => {}
+            }
+        }
+        lines
+    }
+
+    pub fn talk(&self) -> Talk {
+        match self.lines().iter().rev().find(|l| l.open).map(|l| l.role) {
+            Some(Role::Agent) => Talk::Speaking,
+            Some(Role::You) => Talk::Hearing,
+            None => Talk::Listening,
+        }
+    }
+}
+
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Action {
+    pub action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attempt_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sdp: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub muted: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_revision: Option<i64>,
+}
+
+impl Action {
+    pub fn new(name: &str) -> Action {
+        Action { action: name.into(), ..Action::default() }
+    }
+
+    fn attempt(mut self, id: &str) -> Action {
+        self.attempt_id = Some(id.into());
+        self
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Peer {
+    pub url: String,
+    pub authorization: String,
+    pub origin: String,
+}
+
+pub fn origin(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url).ok()?;
+    let host = parsed.host_str()?.to_ascii_lowercase();
+    let secure = match parsed.scheme() {
+        "https" => true,
+        "http" => ["127.0.0.1", "[::1]", "::1", "localhost"].contains(&host.as_str()),
+        _ => false,
+    };
+    (secure && parsed.username().is_empty() && parsed.password().is_none()).then(|| parsed.origin().ascii_serialization())
+}
+
+fn loopback(base: &str) -> String {
+    match url::Url::parse(base) {
+        Ok(mut parsed) if matches!(parsed.host_str(), Some("0.0.0.0" | "[::]" | "::")) => {
+            let _ = parsed.set_host(Some("127.0.0.1"));
+            parsed.as_str().trim_end_matches('/').to_string()
+        }
+        _ => base.to_string(),
+    }
+}
+
+pub fn peer_allowed(url: &str, peer: &Peer) -> bool {
+    url::Url::parse(url).is_ok_and(|u| u.path() == "/api/v1/voice/peer" && u.origin().ascii_serialization() == peer.origin)
+}
+
+impl Client {
+    pub fn voice_peer(&self) -> Result<Peer, String> {
+        let base = loopback(self.base());
+        let origin = origin(&base).ok_or("Voice needs Agenthail's loopback address or an HTTPS address.")?;
+        Ok(Peer { url: format!("{base}/api/v1/voice/peer"), authorization: self.bearer(), origin })
+    }
+
+    pub fn voice_state(&self) -> Result<State, String> {
+        let value = self.get_reply("/api/v1/voice").map_err(|(code, body)| failure(code, &body))?;
+        parse(value)
+    }
+
+    pub fn voice(&self, action: &Action) -> Result<State, String> {
+        let body = serde_json::to_value(action).map_err(|e| e.to_string())?;
+        let value = self.post_json("/api/v1/voice", body).map_err(|e| match e.status {
+            0 => e.message,
+            status => failure(status, &e.reply.to_string()),
+        })?;
+        parse(value)
+    }
+}
+
+fn failure(status: u16, body: &str) -> String {
+    let reply: Value = serde_json::from_str(body).unwrap_or_default();
+    match reply["error"]["message"].as_str() {
+        Some(message) if !message.is_empty() => message.to_string(),
+        _ if status == 0 => body.to_string(),
+        _ => format!("Voice connection failed ({status})."),
+    }
+}
+
+fn parse(value: Value) -> Result<State, String> {
+    let state: State = serde_json::from_value(value).map_err(|e| format!("the daemon's voice reply couldn't be read: {e}"))?;
+    if state.protocol != PROTOCOL {
+        return Err(format!("This Agenthail speaks voice protocol {}; this app speaks {PROTOCOL}. Update both to the same version.", state.protocol));
+    }
+    Ok(state)
+}
+
+pub fn fresh_id() -> String {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let nanos = OffsetDateTime::now_utc().unix_timestamp_nanos() as u128;
+    let mixed = nanos ^ (u128::from(std::process::id()) << 64) ^ (u128::from(SEQ.fetch_add(1, Ordering::Relaxed)) << 96);
+    let hex = format!("{mixed:032x}");
+    format!("{}-{}-{}-{}-{}", &hex[0..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..32])
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Req {
+    Refresh,
+    Select,
+    Prepare,
+    Start(String),
+    Connected(String),
+    Heartbeat(String),
+    Input(i64),
+    Stop,
+    Text,
+    Transfer,
+    Interrupt,
+    TargetInterrupt,
+    New,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Job {
+    pub generation: u64,
+    pub work: u64,
+    pub req: Req,
+    pub action: Option<Action>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Effect {
+    Fetch(Job),
+    AskMic,
+    PeerStart,
+    PeerEnd,
+    PeerAnswer(String),
+    PeerMute(bool),
+}
+
+#[derive(Default)]
+pub struct Call {
+    pub state: Option<State>,
+    pub error: Option<String>,
+    pub connection_error: Option<String>,
+    pub ready: bool,
+    pub dialing: bool,
+    pub muted: bool,
+    pub mic_denied: bool,
+    pub audio_connected: bool,
+    pub hangup_pending: bool,
+    pub hangup_unconfirmed: bool,
+    pub target: String,
+    pub visible: bool,
+    generation: u64,
+    work: u64,
+    working: bool,
+    attempt: Option<String>,
+    applied_sdp: Option<String>,
+    channel_open: bool,
+    connected_reported: bool,
+    start_submitted: bool,
+    host_has_call: bool,
+    reported_muted: bool,
+    input_revision: i64,
+    hangup_attempt: Option<String>,
+    closed: bool,
+    refreshing: bool,
+    next_refresh: f64,
+    beat_due: Option<f64>,
+    beating: bool,
+    last_beat: f64,
+    lost_at: Option<f64>,
+    out: Vec<Effect>,
+}
+
+impl Call {
+    pub fn new(target: &str) -> Call {
+        Call { target: target.trim().to_string(), visible: true, ..Call::default() }
+    }
+
+    pub fn working(&self) -> bool {
+        self.working
+    }
+
+    pub fn attempt(&self) -> Option<&str> {
+        self.attempt.as_deref()
+    }
+
+    pub fn has_local_call(&self) -> bool {
+        self.dialing || self.audio_connected || self.attempt.is_some()
+    }
+
+    pub fn active(&self) -> bool {
+        self.has_local_call() || self.hangup_pending || self.hangup_unconfirmed
+    }
+
+    pub fn elsewhere(&self) -> bool {
+        !self.active() && self.state.as_ref().is_some_and(|s| s.has_call() && !s.occupied)
+    }
+
+    pub fn routed(&self) -> bool {
+        !self.target.trim().is_empty()
+    }
+
+    pub fn unavailable(&self) -> Option<String> {
+        let state = self.state.as_ref();
+        let reason = if self.closed {
+            "This call window is closed."
+        } else if !self.ready {
+            "Call audio is not ready."
+        } else if self.working {
+            "Another voice action is in progress."
+        } else if self.dialing {
+            "A call is starting."
+        } else if self.audio_connected {
+            "A call is connected."
+        } else if self.hangup_pending {
+            "The host has not yet confirmed the last hangup."
+        } else if self.hangup_unconfirmed {
+            "The host did not confirm the last hangup."
+        } else if state.is_some_and(|s| s.occupied) {
+            OCCUPIED
+        } else if self.elsewhere() {
+            ELSEWHERE
+        } else if state.is_some_and(|s| s.has_call()) {
+            "The host still has a call."
+        } else if state.is_some_and(|s| s.phase == "blocked") {
+            "The host blocked voice calls."
+        } else {
+            return self.connection_error.clone();
+        };
+        Some(reason.into())
+    }
+
+    pub fn can_call(&self) -> bool {
+        self.unavailable().is_none()
+    }
+
+    pub fn can_start_new(&self) -> bool {
+        self.state.as_ref().is_some_and(|s| !s.has_call() && !s.occupied && s.phase != "creating" && s.phase != "blocked")
+            && !self.working
+            && !self.active()
+            && !self.closed
+    }
+
+    pub fn connected_call(&self) -> bool {
+        self.audio_connected && self.state.as_ref().is_some_and(|s| s.phase == "connected" && !s.occupied)
+    }
+
+    pub fn title(&self) -> String {
+        if self.hangup_pending {
+            return "Audio off; confirming hangup…".into();
+        }
+        if self.hangup_unconfirmed {
+            return "Audio off; hangup unconfirmed".into();
+        }
+        if self.connection_error.is_some() {
+            return "Reconnecting to Agenthail".into();
+        }
+        if self.audio_connected {
+            if self.muted {
+                return "Microphone muted".into();
+            }
+            return match self.state.as_ref().map(State::talk) {
+                Some(Talk::Speaking) => "Speaking",
+                Some(Talk::Hearing) => "Hearing you",
+                _ => "Listening",
+            }
+            .into();
+        }
+        if self.dialing {
+            return "Connecting audio…".into();
+        }
+        match self.state.as_ref().map(|s| s.phase.as_str()) {
+            Some("starting" | "negotiating") => "Connecting audio…",
+            Some("stopping") => "Ending call…",
+            Some("unknown") => "Connection needs attention",
+            Some("blocked") => "Voice unavailable",
+            Some("creating") => "Preparing orchestrator…",
+            Some("connected") => "Call in progress",
+            Some("ready" | "idle" | "ended") => "Ready to talk",
+            _ => "Connecting to Agenthail…",
+        }
+        .into()
+    }
+
+    fn fetch(&mut self, req: Req, action: Option<Action>) {
+        let job = Job { generation: self.generation, work: self.work, req, action };
+        self.out.push(Effect::Fetch(job));
+    }
+
+    fn begin_work(&mut self) {
+        self.work += 1;
+        self.working = true;
+    }
+
+    fn end_work(&mut self, work: u64) {
+        if self.work == work {
+            self.working = false;
+        }
+    }
+
+    fn drain(&mut self) -> Vec<Effect> {
+        std::mem::take(&mut self.out)
+    }
+
+    pub fn tick(&mut self, now: f64) -> Vec<Effect> {
+        if self.closed {
+            return Vec::new();
+        }
+        if !self.refreshing && now >= self.next_refresh && (self.visible || self.active()) {
+            self.refreshing = true;
+            self.fetch(Req::Refresh, None);
+        }
+        if let (Some(due), Some(id)) = (self.beat_due, self.attempt.clone()) {
+            if now >= due && !self.beating {
+                self.beating = true;
+                self.fetch(Req::Heartbeat(id.clone()), Some(Action::new("heartbeat").attempt(&id)));
+            }
+        }
+        if self.lost_at.is_some_and(|at| now - at >= RECOVERY_SECS) && !self.audio_connected {
+            self.error.get_or_insert_with(|| "Audio could not reconnect. Call again to resume this conversation.".into());
+            self.end_call();
+        }
+        self.drain()
+    }
+
+    pub fn call(&mut self) -> Vec<Effect> {
+        if !self.can_call() {
+            return Vec::new();
+        }
+        self.begin_work();
+        self.dialing = true;
+        self.error = None;
+        self.mic_denied = false;
+        self.generation += 1;
+        self.attempt = Some(fresh_id());
+        let select = Action { target_id: Some(self.target.trim().to_string()), ..Action::new("select") };
+        self.fetch(Req::Select, Some(select));
+        self.drain()
+    }
+
+    fn dial_failed(&mut self, error: String, work: u64) {
+        self.error = Some(error);
+        self.dialing = false;
+        self.attempt = None;
+        self.out.push(Effect::PeerEnd);
+        self.end_work(work);
+    }
+
+    pub fn mic(&mut self, granted: bool) -> Vec<Effect> {
+        if self.closed || !self.dialing || self.attempt.is_none() {
+            return Vec::new();
+        }
+        let work = self.work;
+        if granted {
+            self.out.push(Effect::PeerStart);
+            self.end_work(work);
+        } else {
+            self.dial_failed(MIC_DENIED.into(), work);
+            self.mic_denied = true;
+        }
+        self.drain()
+    }
+
+    pub fn peer(&mut self, kind: &str, value: &str, now: f64) -> Vec<Effect> {
+        if self.closed {
+            return Vec::new();
+        }
+        match kind {
+            "loading" => self.ready = false,
+            "ready" => self.ready = true,
+            "unavailable" => {
+                self.ready = false;
+                self.error = Some(value.into());
+                self.end_call();
+            }
+            "offer" => {
+                if let Some(id) = self.attempt.clone() {
+                    self.start_submitted = true;
+                    let start = Action { sdp: Some(value.into()), ..Action::new("start").attempt(&id) };
+                    self.fetch(Req::Start(id), Some(start));
+                }
+            }
+            "connection" => {
+                self.audio_connected = value == "connected";
+                if self.audio_connected {
+                    self.lost_at = None;
+                }
+                if value == "disconnected" && self.lost_at.is_none() {
+                    self.lost_at = Some(now);
+                }
+                if value == "failed" || value == "closed" {
+                    self.error.get_or_insert_with(|| "Audio disconnected. Call again to resume this conversation.".into());
+                    self.end_call();
+                }
+                self.report_connected();
+            }
+            "channel" => {
+                self.channel_open = value == "open";
+                self.report_connected();
+            }
+            "error" => {
+                self.error.get_or_insert_with(|| value.to_string());
+                self.end_call();
+            }
+            _ => {}
+        }
+        self.drain()
+    }
+
+    fn report_connected(&mut self) {
+        let Some(id) = self.attempt.clone() else { return };
+        if !self.audio_connected || !self.channel_open || self.connected_reported {
+            return;
+        }
+        self.connected_reported = true;
+        self.dialing = false;
+        self.fetch(Req::Connected(id.clone()), Some(Action::new("connected").attempt(&id)));
+    }
+
+    pub fn toggle_mute(&mut self) -> Vec<Effect> {
+        if !self.audio_connected {
+            return Vec::new();
+        }
+        self.muted = !self.muted;
+        self.out.push(Effect::PeerMute(self.muted));
+        self.report_input();
+        self.drain()
+    }
+
+    fn report_input(&mut self) {
+        let Some(id) = self.attempt.clone() else { return };
+        if !self.host_has_call || self.muted == self.reported_muted {
+            return;
+        }
+        self.reported_muted = self.muted;
+        self.input_revision += 1;
+        let report = Action { muted: Some(self.muted), input_revision: Some(self.input_revision), ..Action::new("input-state").attempt(&id) };
+        self.fetch(Req::Input(self.input_revision), Some(report));
+    }
+
+    pub fn hangup(&mut self) -> Vec<Effect> {
+        self.end_call();
+        self.drain()
+    }
+
+    fn end_call(&mut self) {
+        self.generation += 1;
+        self.work += 1;
+        self.working = false;
+        self.beat_due = None;
+        self.beating = false;
+        self.lost_at = None;
+        self.dialing = false;
+        self.audio_connected = false;
+        self.channel_open = false;
+        self.out.push(Effect::PeerEnd);
+        let local = self.attempt.take();
+        let stop = self.start_submitted || self.hangup_unconfirmed;
+        self.start_submitted = false;
+        let id = local.or_else(|| self.hangup_attempt.clone());
+        match id {
+            Some(id) if stop && !self.state.as_ref().is_some_and(|s| s.occupied) => {
+                self.hangup_pending = true;
+                self.hangup_unconfirmed = false;
+                self.hangup_attempt = Some(id.clone());
+                self.fetch(Req::Stop, Some(Action::new("stop").attempt(&id)));
+            }
+            _ => {}
+        }
+    }
+
+    fn host_stopped(&mut self, next: State) {
+        let fallback = next.message().unwrap_or_else(|| "The host ended this voice call.".into());
+        self.error.get_or_insert(fallback);
+        self.state = Some(next);
+        self.start_submitted = false;
+        self.end_call();
+    }
+
+    pub fn send_text(&mut self, text: &str) -> Vec<Effect> {
+        let Some(id) = self.attempt.clone() else { return Vec::new() };
+        if self.closed || self.working || text.trim().is_empty() {
+            return Vec::new();
+        }
+        self.begin_work();
+        let typed = Action { text: Some(text.trim().into()), message_id: Some(fresh_id()), ..Action::new("text").attempt(&id) };
+        self.fetch(Req::Text, Some(typed));
+        self.drain()
+    }
+
+    pub fn transfer(&mut self, target: &str) -> Vec<Effect> {
+        if self.closed || self.working || !self.connected_call() {
+            return Vec::new();
+        }
+        self.target = target.trim().to_string();
+        self.begin_work();
+        let to = Action { target_id: Some(self.target.clone()), ..Action::new("transfer") };
+        self.fetch(Req::Transfer, Some(to));
+        self.drain()
+    }
+
+    pub fn interrupt(&mut self) -> Vec<Effect> {
+        if self.closed || !self.connected_call() {
+            return Vec::new();
+        }
+        self.fetch(Req::Interrupt, Some(Action::new("interrupt")));
+        self.drain()
+    }
+
+    pub fn interrupt_target(&mut self) -> Vec<Effect> {
+        let attempt = self.state.as_ref().and_then(|s| s.target.as_ref().and(s.attempt_id.clone()));
+        let Some(id) = attempt else { return Vec::new() };
+        if self.closed || self.working || !self.connected_call() {
+            return Vec::new();
+        }
+        self.begin_work();
+        self.fetch(Req::TargetInterrupt, Some(Action::new("target-interrupt").attempt(&id)));
+        self.drain()
+    }
+
+    pub fn start_new(&mut self) -> Vec<Effect> {
+        if !self.can_start_new() {
+            return Vec::new();
+        }
+        self.begin_work();
+        self.error = None;
+        self.generation += 1;
+        self.fetch(Req::New, Some(Action::new("new")));
+        self.drain()
+    }
+
+    pub fn close(&mut self) -> Vec<Effect> {
+        if self.closed {
+            return Vec::new();
+        }
+        self.end_call();
+        self.closed = true;
+        self.state = None;
+        self.drain()
+    }
+
+    pub fn closed(&self) -> bool {
+        self.closed
+    }
+
+    pub fn reply(&mut self, job: Job, result: Result<State, String>, now: f64) -> Vec<Effect> {
+        let current = job.generation == self.generation && !self.closed;
+        match job.req {
+            Req::Refresh => {
+                self.refreshing = false;
+                self.next_refresh = now + if self.audio_connected { 3.0 } else { 1.0 };
+                if current {
+                    match result {
+                        Ok(next) => self.refreshed(next),
+                        Err(error) => self.connection_error = Some(format!("Reconnecting: {error}")),
+                    }
+                }
+            }
+            Req::Select | Req::Prepare => {
+                if current {
+                    match result {
+                        Ok(next) => {
+                            self.state = Some(next);
+                            if job.req == Req::Select {
+                                self.fetch(Req::Prepare, Some(Action::new("prepare")));
+                            } else {
+                                self.reset_call();
+                                self.out.push(Effect::AskMic);
+                            }
+                        }
+                        Err(error) => self.dial_failed(error, job.work),
+                    }
+                }
+            }
+            Req::Start(id) => match result {
+                Ok(next) if current => {
+                    self.state = Some(next);
+                    self.host_has_call = true;
+                    self.report_input();
+                    self.beat_due = Some(now + HEARTBEAT_SECS);
+                    self.last_beat = now;
+                }
+                Err(error) if current => {
+                    self.error = Some(error);
+                    self.dialing = false;
+                    self.out.push(Effect::PeerEnd);
+                    self.fetch(Req::Stop, Some(Action::new("stop").attempt(&id)));
+                }
+                _ => {
+                    let stale = Job { generation: self.generation, work: 0, req: Req::Stop, action: Some(Action::new("stop").attempt(&id)) };
+                    self.out.push(Effect::Fetch(stale));
+                }
+            },
+            Req::Connected(_) => {
+                if current {
+                    match result {
+                        Ok(next) => self.state = Some(next),
+                        Err(error) => {
+                            self.error = Some(error);
+                            self.end_call();
+                        }
+                    }
+                }
+            }
+            Req::Heartbeat(id) => {
+                self.beating = false;
+                if current && self.attempt.as_deref() == Some(id.as_str()) {
+                    self.beat_due = Some(now + HEARTBEAT_SECS);
+                    match result {
+                        Ok(next) => {
+                            self.last_beat = now;
+                            if next.phase == "stopping" && next.attempt_id.as_deref() == Some(id.as_str()) {
+                                self.host_stopped(next);
+                            } else if ["ended", "blocked", "unknown"].contains(&next.phase.as_str()) {
+                                let fallback = next.message().unwrap_or_else(|| "The host ended this call.".into());
+                                self.error.get_or_insert(fallback);
+                                self.end_call();
+                            }
+                        }
+                        Err(_) if now - self.last_beat >= HEARTBEAT_GRACE_SECS => {
+                            self.error.get_or_insert_with(|| "The connection to Agenthail was lost. Audio has stopped; call again when it reconnects.".into());
+                            self.end_call();
+                        }
+                        Err(_) => {}
+                    }
+                }
+            }
+            Req::Input(revision) => {
+                if current {
+                    match result {
+                        Ok(next) if revision == self.input_revision => self.state = Some(next),
+                        Ok(_) => {}
+                        Err(_) => {
+                            self.error.get_or_insert_with(|| "Agenthail could not record whether the microphone is muted, so the call ended.".into());
+                            self.end_call();
+                        }
+                    }
+                }
+            }
+            Req::Stop => {
+                if current {
+                    match result {
+                        Ok(next) => self.state = Some(next),
+                        Err(error) => {
+                            self.hangup_pending = false;
+                            self.hangup_unconfirmed = true;
+                            self.error.get_or_insert(format!("Audio is off locally. Host hangup is unconfirmed: {error}"));
+                        }
+                    }
+                }
+            }
+            Req::Text => {
+                self.end_work(job.work);
+                if current {
+                    match result {
+                        Ok(next) => self.state = Some(next),
+                        Err(error) => self.error = Some(format!("Text outcome is unknown. Check the conversation before resending. {error}")),
+                    }
+                }
+            }
+            Req::Transfer | Req::Interrupt | Req::TargetInterrupt | Req::New => {
+                self.end_work(job.work);
+                if current {
+                    match result {
+                        Ok(next) => self.state = Some(next),
+                        Err(error) => self.error = Some(error),
+                    }
+                }
+            }
+        }
+        self.drain()
+    }
+
+    fn reset_call(&mut self) {
+        self.applied_sdp = None;
+        self.channel_open = false;
+        self.connected_reported = false;
+        self.start_submitted = false;
+        self.muted = false;
+        self.host_has_call = false;
+        self.reported_muted = false;
+        self.input_revision = 0;
+    }
+
+    fn refreshed(&mut self, next: State) {
+        let ours = self.attempt.is_some() && next.attempt_id == self.attempt;
+        if next.phase == "unknown" && ours {
+            let fallback = next.message().unwrap_or_else(|| "The host can no longer confirm this call. Audio has stopped.".into());
+            self.error.get_or_insert(fallback);
+            self.state = Some(next);
+            self.end_call();
+            return;
+        }
+        if next.phase == "stopping" && ours {
+            self.host_stopped(next);
+            return;
+        }
+        let terminal = next.terminal();
+        if terminal && (self.hangup_pending || self.hangup_unconfirmed) && next.attempt_id != self.hangup_attempt {
+            return;
+        }
+        if terminal && (self.dialing || self.audio_connected) {
+            if !ours {
+                return;
+            }
+            let fallback = if next.phase == "blocked" {
+                "The host blocked this voice call. Check the call details before trying again."
+            } else if self.dialing {
+                "The host ended this voice call before audio connected."
+            } else {
+                "The host ended this connected voice call."
+            };
+            self.error.get_or_insert(next.message().unwrap_or_else(|| fallback.into()));
+        }
+        let answer = next.sdp.clone().filter(|sdp| ours && self.applied_sdp.as_ref() != Some(sdp));
+        self.state = Some(next);
+        self.connection_error = None;
+        if terminal {
+            let had_local = self.has_local_call();
+            self.audio_connected = false;
+            self.dialing = false;
+            self.attempt = None;
+            if had_local {
+                self.out.push(Effect::PeerEnd);
+            }
+            self.beat_due = None;
+            self.beating = false;
+            self.lost_at = None;
+            self.hangup_pending = false;
+            self.hangup_unconfirmed = false;
+            self.hangup_attempt = None;
+        }
+        if let Some(sdp) = answer {
+            self.applied_sdp = Some(sdp.clone());
+            self.out.push(Effect::PeerAnswer(sdp));
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "voice_tests.rs"]
+mod tests;
