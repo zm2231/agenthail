@@ -54,6 +54,7 @@ pub struct Menus {
     rename_seq: u64,
     refreshed: Option<(String, Instant)>,
     models_asked: HashMap<String, Instant>,
+    settings_asked: HashMap<String, Instant>,
     pub models_error: HashMap<String, String>,
     tx: Sender<Done>,
     rx: Receiver<Done>,
@@ -82,6 +83,7 @@ impl Menus {
             rename_seq: 0,
             refreshed: None,
             models_asked: HashMap::new(),
+            settings_asked: HashMap::new(),
             models_error: HashMap::new(),
             tx,
             rx,
@@ -165,7 +167,8 @@ pub fn ensure_models(s: &mut App, id: &str) {
     if s.client.is_none() || session(s, id).is_none() {
         return;
     }
-    if !s.menus.models_asked.contains_key(id) && !s.menus.settings.contains_key(id) {
+    if !s.menus.settings.contains_key(id) && s.menus.settings_asked.get(id).is_none_or(|at| at.elapsed() >= REFRESH) {
+        s.menus.settings_asked.insert(id.to_string(), Instant::now());
         fetch_settings(s, id, Duration::ZERO);
     }
     let retry = match s.menus.models_asked.get(id) {

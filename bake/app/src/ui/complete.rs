@@ -203,6 +203,7 @@ pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     let id = x.id.clone();
     if let Some(h) = s.complete.history.get_mut(&id).filter(|h| h.browsing() && h.current() != Some(s.composer.text.as_str())) {
         h.stop();
+        return false;
     }
     match ev.key {
         Key::Up if line_start(&s.composer.text, s.composer.focus) => {
@@ -249,9 +250,19 @@ pub fn pump(s: &mut App) -> bool {
     if s.complete.search.as_ref().is_some_and(|q| s.composer_for.as_deref() != Some(q.session.as_str())) {
         s.complete.search = None;
     }
-    let Some(id) = s.composer_for.clone() else { return false };
+    let Some(id) = s.composer_for.clone() else {
+        if let Some(left) = s.complete.session.take()
+            && let Some(h) = s.complete.history.get_mut(&left)
+        {
+            h.stop();
+        }
+        return false;
+    };
     let mut changed = false;
     if s.complete.session.as_deref() != Some(id.as_str()) {
+        if let Some(h) = s.complete.session.as_ref().and_then(|left| s.complete.history.get_mut(left)) {
+            h.stop();
+        }
         s.complete.session = Some(id.clone());
         s.complete.highlighted = 0;
         s.complete.dismissed = None;
