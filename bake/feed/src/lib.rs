@@ -6,6 +6,7 @@ pub mod question;
 pub mod review;
 pub mod settings;
 pub mod catalog;
+pub mod complete;
 pub mod create;
 pub mod decisions;
 pub mod composer;
