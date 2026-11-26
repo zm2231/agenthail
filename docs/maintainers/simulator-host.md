@@ -110,8 +110,10 @@ A session drives a device only while it holds its lease:
 Every action except `list`, `acquire`, `renew` and `release` needs a lease.
 
 - `describe` reads the accessibility tree with `axe describe-ui` and returns one
-  line per element that has a label, identifier or value, each with a ref, its
-  type and frame in points. The whole tree is written to a file; the result
+  line per element that has a label, identifier, value or VoiceOver action,
+  each with a ref, its type, its traits, its VoiceOver actions and its frame
+  in points. A value that axe reports as a number or boolean shows as written
+  (`12`, `true`). The whole tree is written to a file; the result
   returns as much as fits the tool result limit, with `truncated` and the
   file. Refs are valid until the next `describe`.
 - `tap` takes a ref (its frame's centre) or `x` and `y`; `swipe` takes a ref

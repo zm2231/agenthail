@@ -17,6 +17,8 @@ type axNode struct {
 	ID      axText  `json:"AXUniqueId"`
 	Title   axText  `json:"title"`
 	Enabled *axBool `json:"enabled"`
+	Traits  axList  `json:"traits"`
+	Actions axList  `json:"custom_actions"`
 	Frame   struct {
 		X      float64 `json:"x"`
 		Y      float64 `json:"y"`
@@ -46,6 +48,17 @@ func (t *axText) UnmarshalJSON(data []byte) error {
 		}
 		*t = axText(b.String())
 	}
+	return nil
+}
+
+type axList []axText
+
+func (l *axList) UnmarshalJSON(data []byte) error {
+	var items []axText
+	if json.Unmarshal(data, &items) != nil {
+		items = nil
+	}
+	*l = items
 	return nil
 }
 
@@ -101,11 +114,21 @@ func describeNode(node axNode) string {
 		}
 		return value
 	}
+	list := func(items axList) []string {
+		var out []string
+		for _, item := range items {
+			if item := text(item); item != "" {
+				out = append(out, item)
+			}
+		}
+		return out
+	}
 	label, value, id := text(node.Label), text(node.Value), text(node.ID)
 	if label == "" {
 		label = text(node.Title)
 	}
-	if label == "" && value == "" && id == "" {
+	actions := list(node.Actions)
+	if label == "" && value == "" && id == "" && len(actions) == 0 {
 		return ""
 	}
 	parts := []string{string(node.Type)}
@@ -117,6 +140,16 @@ func describeNode(node axNode) string {
 	}
 	if value != "" {
 		parts = append(parts, "value="+strconv.Quote(value))
+	}
+	if traits := list(node.Traits); len(traits) > 0 {
+		parts = append(parts, "traits="+strings.Join(traits, ","))
+	}
+	if len(actions) > 0 {
+		quoted := make([]string, len(actions))
+		for i, action := range actions {
+			quoted[i] = strconv.Quote(action)
+		}
+		parts = append(parts, "actions=["+strings.Join(quoted, ",")+"]")
 	}
 	if node.Enabled != nil && !*node.Enabled {
 		parts = append(parts, "disabled")

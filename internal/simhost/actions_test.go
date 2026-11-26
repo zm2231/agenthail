@@ -151,3 +151,23 @@ func TestDescribeRendersEveryScalarValueAsText(t *testing.T) {
 		t.Fatalf("tree =\n%s\nwant\n%s", tree, want)
 	}
 }
+
+const describeActionsJSON = `[{"AXFrame":"{{0, 0}, {402, 874}}","AXUniqueId":null,"frame":{"y":0,"x":0,"width":402,"height":874},"role_description":"application","AXLabel":"Home screen","content_required":false,"type":"Application","title":null,"help":null,"custom_actions":[],"AXValue":null,"enabled":true,"role":"AXApplication","subrole":null,"pid":88,"traits":[],"children":[
+ {"AXFrame":"{{0, 60}, {402, 700}}","AXUniqueId":null,"frame":{"y":60,"x":0,"width":402,"height":700},"role_description":"group","AXLabel":null,"content_required":false,"type":"Group","title":null,"help":null,"custom_actions":null,"AXValue":null,"enabled":true,"role":"AXGroup","subrole":null,"traits":["Header"],"children":[
+  {"AXFrame":"{{27, 80}, {64, 64}}","AXUniqueId":"Messages","frame":{"y":80,"x":27,"width":64,"height":64},"role_description":"button","AXLabel":"Messages","content_required":false,"type":"Button","title":null,"help":"Double tap to open","custom_actions":["Edit mode","Today","App Library"],"AXValue":null,"enabled":true,"role":"AXButton","subrole":null,"traits":["Button","Selected"],"children":[]},
+  {"AXFrame":"{{27, 180}, {64, 64}}","AXUniqueId":null,"frame":{"y":180,"x":27,"width":64,"height":64},"role_description":"button","AXLabel":"","content_required":false,"type":"Button","title":null,"help":null,"custom_actions":["Remove App"," ",""],"AXValue":null,"enabled":true,"role":"AXButton","subrole":null,"traits":["Button"],"children":[]}]}]}]`
+
+func TestDescribeShowsTraitsAndVoiceOverActions(t *testing.T) {
+	sim := newFakeSim()
+	sim.devices["U1"] = "Agenthail iPhone"
+	sim.describe = describeActionsJSON
+	h, _ := newTestHost(t, sim)
+	mustCall(t, h, "s1", Request{Action: "acquire", Kind: "iphone"})
+	out := mustCall(t, h, "s1", Request{Action: "describe"})
+	want := "- [ref=e1] Application \"Home screen\" @(0,0 402x874)\n" +
+		"  - [ref=e2] Button \"Messages\" id=\"Messages\" traits=Button,Selected actions=[\"Edit mode\",\"Today\",\"App Library\"] @(27,80 64x64)\n" +
+		"  - [ref=e3] Button traits=Button actions=[\"Remove App\"] @(27,180 64x64)\n"
+	if tree := out["tree"].(string); tree != want {
+		t.Fatalf("tree =\n%s\nwant\n%s", tree, want)
+	}
+}
