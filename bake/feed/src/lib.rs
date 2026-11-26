@@ -16,6 +16,7 @@ pub mod history;
 pub mod item;
 pub mod limit;
 pub mod menu;
+pub mod notify;
 #[cfg(test)]
 mod mock;
 pub mod queue;
