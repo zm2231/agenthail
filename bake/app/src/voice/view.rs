@@ -319,11 +319,13 @@ fn controls(w: &Win) -> El {
             buttons = buttons.child(
                 small(label, ButtonVariant::Neutral)
                     .disabled(call.working())
-                    .on_press(move |w: &mut Win| {
-                        w.offer = None;
-                        w.name = name.clone();
-                        let effects = w.call.transfer(&target);
-                        w.run(effects);
+                    .on_press(|w: &mut Win| {
+                        w.sync_route();
+                        if let Some((target, name)) = w.offer.take() {
+                            w.name = name;
+                            let effects = w.call.transfer(&target);
+                            w.run(effects);
+                        }
                     })
                     .build(kit())
                     .key("voice-transfer"),

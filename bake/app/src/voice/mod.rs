@@ -54,6 +54,7 @@ pub struct Win {
     gone: Arc<AtomicBool>,
     clock: f64,
     save_after: f64,
+    keep_log: bool,
 }
 
 impl Win {
@@ -64,7 +65,9 @@ impl Win {
             None => Err("Voice needs the Agenthail daemon. Start it, then open this window again.".into()),
         };
         let mut call = Call::new(target);
-        call.trail = load_trail();
+        let loaded = load_trail();
+        let keep_log = loaded.is_some();
+        call.trail = loaded.unwrap_or_default();
         if let Err(error) = &peer {
             eprintln!("voice: {error}");
             call.error = Some(error.clone());
@@ -90,6 +93,7 @@ impl Win {
             gone: Arc::new(AtomicBool::new(false)),
             clock: 0.0,
             save_after: 0.0,
+            keep_log,
         }
     }
 
@@ -259,7 +263,7 @@ fn closed(w: &mut Win, _: &mut Tx) {
     w.gone.store(true, Ordering::SeqCst);
     let effects = w.call.close();
     w.run(effects);
-    if w.call.trail.changed {
+    if w.call.trail.changed && w.keep_log {
         save_trail(&w.call.trail);
     }
     #[cfg(target_os = "macos")]
@@ -347,7 +351,7 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
     let effects = w.call.tick(t);
     changed |= effects.iter().any(|e| matches!(e, Effect::Note(_)));
     w.run(effects);
-    if w.call.trail.changed && t >= w.save_after {
+    if w.call.trail.changed && w.keep_log && t >= w.save_after {
         if save_trail(&w.call.trail) {
             w.call.trail.changed = false;
         } else {
@@ -368,17 +372,32 @@ fn trail_file() -> Option<std::path::PathBuf> {
     Some(std::path::PathBuf::from(home).join("Library/Application Support/Agenthail/voice-calls.json"))
 }
 
-fn load_trail() -> Trail {
-    let Some(path) = trail_file() else { return Trail::default() };
-    let Ok(saved) = std::fs::read_to_string(&path) else { return Trail::default() };
-    Trail::load(&saved).unwrap_or_else(|error| {
-        let aside = path.with_extension("unreadable.json");
-        eprintln!("voice: the call log couldn't be read ({error}); it was moved to {}", aside.display());
-        if let Err(error) = std::fs::rename(&path, &aside) {
-            eprintln!("voice: the unreadable call log couldn't be moved: {error}");
+fn load_trail() -> Option<Trail> {
+    let Some(path) = trail_file() else { return Some(Trail::default()) };
+    let saved = match std::fs::read_to_string(&path) {
+        Ok(saved) => saved,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Some(Trail::default()),
+        Err(error) => {
+            eprintln!("voice: the call log couldn't be read, so this window won't write it: {error}");
+            return None;
         }
-        Trail::default()
-    })
+    };
+    match Trail::load(&saved) {
+        Ok(trail) => Some(trail),
+        Err(error) => {
+            let aside = path.with_extension("unreadable.json");
+            match std::fs::rename(&path, &aside) {
+                Ok(()) => {
+                    eprintln!("voice: the call log couldn't be read ({error}); it was moved to {}", aside.display());
+                    Some(Trail::default())
+                }
+                Err(moved) => {
+                    eprintln!("voice: the call log couldn't be read ({error}) or moved aside ({moved}), so this window won't write it");
+                    None
+                }
+            }
+        }
+    }
 }
 
 fn save_trail(trail: &Trail) -> bool {
