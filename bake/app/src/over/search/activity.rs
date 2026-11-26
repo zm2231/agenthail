@@ -73,6 +73,19 @@ fn load(s: &mut App, reset: bool) {
     });
 }
 
+fn invalidate(p: &mut Panel) {
+    p.generation = 0;
+    p.asked = None;
+    p.loading = false;
+    p.error = None;
+}
+
+fn edited(s: &mut App) -> &mut TextEdit {
+    let p = s.ov.search.activity.panel.as_mut().expect("activity open");
+    invalidate(p);
+    &mut p.query
+}
+
 fn pending(p: &Panel) -> bool {
     p.asked.as_ref() != Some(&filter(p))
 }
@@ -195,7 +208,7 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
         .shrink()
         .color(strong())
         .placeholder("Search activity".to_string(), weak())
-        .on_edit(|s: &mut App| &mut s.ov.search.activity.panel.as_mut().expect("activity open").query)
+        .on_edit(edited)
         .on_input_key(|s: &mut App, ev: &KeyEvent, _: &mut Tx| key(s, ev).unwrap_or(false));
     let mut pops = Vec::new();
     let mut labels = vec![ALL_EVENTS.to_string()];
@@ -218,6 +231,7 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
             let Some(p) = s.ov.search.activity.panel.as_mut() else { return };
             p.kind_open = false;
             p.kind = p.list.kinds.iter().find(|k| kind_label(k) == v).cloned().unwrap_or_default();
+            invalidate(p);
             p.typed = (filter(p), Instant::now().checked_sub(SETTLE).unwrap_or_else(Instant::now));
         })
         .build(k, &mut pops);
@@ -248,7 +262,7 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
         n => format!("{n} events shown"),
     };
     foot = foot.child(text(shown).font(META).color(weak()));
-    if let Some(e) = &p.error {
+    if let Some(e) = p.error.as_ref().filter(|_| !pending(p)) {
         foot = foot.child(text(e.clone()).font(META).color(crate::theme::failed()).wrap().shrink());
     }
     foot = foot.child(ui::spacer());

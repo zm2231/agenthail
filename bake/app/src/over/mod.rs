@@ -210,6 +210,7 @@ pub fn open_jump(s: &mut App, tx: &mut Tx) {
     edit.focused = true;
     s.ov.jump = Some(edit);
     s.ov.jump_ix = 0;
+    search::forget_codex(s);
     tx.focus("jump-input", false);
 }
 

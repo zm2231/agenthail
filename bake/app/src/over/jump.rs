@@ -131,7 +131,7 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
         .shrink()
         .color(strong())
         .placeholder("Jump to a project, work item or session, or run a command".to_string(), weak())
-        .on_edit(|s: &mut App| s.ov.jump.as_mut().expect("jump open"))
+        .on_edit(|s: &mut App| search::edited(s).expect("jump open"))
         .on_input_key(|s: &mut App, ev: &KeyEvent, tx: &mut Tx| key(s, ev, tx));
     let search = row().w_full().gap(10.0).items_center().px(16.0).py(14.0).border_sides([0.0, 0.0, 1.0, 0.0], ui::rule()).child(icon(&icons::MAGNIFYING_GLASS, 18.0).color(k.c.icon_base)).child(input).child(ui::ghost_keys(&["esc"]));
     let mut list = col().w_full().gap(2.0).padding(8.0);
