@@ -88,7 +88,7 @@ func TestAQuestionNeedsItsSafeguards(t *testing.T) {
 	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "how broad?", DefaultAnswer: "omit fuzzy matching", KeepsBreadth: true}, "cannot be declared --keeps-breadth")
 	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "which index?"}, "needs --default")
 	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "which index?", DefaultAnswer: "fts", DeadlineMs: asked.Add(-time.Minute).UnixMilli()}, "deadline in the future")
-	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C9", Text: "which index?", DefaultAnswer: "fts"}, "is not a goal, ask or clause")
+	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C9", Text: "which index?", DefaultAnswer: "fts"}, "is not a goal, ask, clause or work item")
 	questionRefused(t, s, ledger.QuestionRequest{To: "widget-C1", Text: "which index?", DefaultAnswer: "fts", Kind: "vibes"}, "unknown --kind")
 	outward := askQuestion(t, s, ledger.QuestionRequest{To: "widget-G1", Text: "publish the index to the team?", Kind: ledger.QuestionOutward})
 	if outward.DefaultAnswer != ledger.OutwardDefault || outward.ID != "widget-Q1" {
