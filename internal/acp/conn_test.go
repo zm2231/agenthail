@@ -193,3 +193,42 @@ func TestAgentErrorsAndClosedConnections(t *testing.T) {
 		t.Fatalf("notify after close err=%v", err)
 	}
 }
+
+type acknowledging struct{ written chan error }
+
+func (a acknowledging) Request(context.Context, string, json.RawMessage) (any, error) {
+	return acp.Acknowledged{Result: acp.Cancelled(), Written: func(err error) { a.written <- err }}, nil
+}
+
+func (acknowledging) Notification(string, json.RawMessage) {}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("the agent's input is closed") }
+
+func TestAnAcknowledgedAnswerLearnsWhetherItWasWritten(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		writer io.Writer
+		failed bool
+	}{{"written", io.Discard, false}, {"write fails", failingWriter{}, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader, agent := io.Pipe()
+			handler := acknowledging{written: make(chan error, 1)}
+			conn := acp.NewConn(reader, tc.writer, handler)
+			conn.Start()
+			go func() {
+				_, _ = agent.Write([]byte(`{"jsonrpc":"2.0","id":7,"method":"session/request_permission","params":{}}` + "\n"))
+			}()
+			select {
+			case err := <-handler.written:
+				if (err != nil) != tc.failed {
+					t.Fatalf("written err=%v, want failed=%v", err, tc.failed)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("the handler never learned the outcome of the write")
+			}
+			agent.Close()
+		})
+	}
+}

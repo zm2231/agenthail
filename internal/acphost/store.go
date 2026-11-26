@@ -77,6 +77,18 @@ func (s Store) Records(agent string) ([]State, error) {
 
 type sessionLock struct{ file *os.File }
 
+func (s Store) lockWaiting(agent, id string, wait time.Duration) (*sessionLock, error) {
+	deadline := time.Now().Add(wait)
+	for {
+		lock, err := s.lock(agent, id)
+		var held *CallError
+		if err == nil || !errors.As(err, &held) || held.Code != CodeHeld || time.Now().After(deadline) {
+			return lock, err
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func (s Store) lock(agent, id string) (*sessionLock, error) {
 	if err := os.MkdirAll(s.dir(agent), 0o700); err != nil {
 		return nil, err

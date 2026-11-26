@@ -123,8 +123,10 @@ func (d *Daemon) mcpChildrenRefusal(caller *mcpCaller) error {
 
 func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCreateInput) (any, error) {
 	kind := surface.SurfaceKind(strings.TrimSpace(input.Surface))
+	remoteHost := strings.TrimSpace(input.Host) != "" && !d.isLocalHostRef(strings.TrimSpace(input.Host))
+	acpAgent := d.isACPAgent(kind) || remoteHost && acphost.ValidAgentID(string(kind))
 	if !caller.has("spawn") {
-		return nil, spawnRefusal(caller, kind, d.isACPAgent(kind))
+		return nil, spawnRefusal(caller, kind, acpAgent)
 	}
 	if strings.TrimSpace(input.Message) == "" {
 		return nil, refuse("invalid", "message is required.")
@@ -132,7 +134,7 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 	if kind == surface.KindNotion && input.Task {
 		return nil, refuse("invalid", "A Notion thread cannot be a task.")
 	}
-	if refusal := spawnRefusal(caller, kind, d.isACPAgent(kind)); refusal != nil {
+	if refusal := spawnRefusal(caller, kind, acpAgent); refusal != nil {
 		return nil, refusal.about("new:" + string(kind))
 	}
 	if kind == surface.KindNotion {
@@ -149,7 +151,7 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 	if isolation == "" && (strings.TrimSpace(input.Branch) != "" || strings.TrimSpace(input.Base) != "") {
 		return nil, refuse("invalid", "branch and base need isolation worktree.")
 	}
-	if host := strings.TrimSpace(input.Host); host != "" && !d.isLocalHostRef(host) {
+	if host := strings.TrimSpace(input.Host); remoteHost {
 		if input.Task {
 			return nil, refuse("invalid", "A session on another computer cannot be a task.")
 		}

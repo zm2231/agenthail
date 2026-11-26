@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/acphost"
 	"github.com/zm2231/agenthail/internal/claudehooks"
 	"github.com/zm2231/agenthail/internal/claudemcp"
 	"github.com/zm2231/agenthail/internal/daemonctl"
@@ -144,6 +145,12 @@ func (a *App) cmdDoctor(args []string) error {
 		failures++
 	}
 	home, _ := os.UserHomeDir()
+	var agentProblems []string
+	_, problems := acphost.LoadAgents(home)
+	for _, problem := range problems {
+		agentProblems = append(agentProblems, problem.Error())
+	}
+	failures += len(agentProblems)
 	claudeRoots, claudeRootsErr := surface.ClaudeConfigRoots(home)
 	if claudeRootsErr != nil {
 		failures++
@@ -325,6 +332,9 @@ func (a *App) cmdDoctor(args []string) error {
 		if settingsErr != nil {
 			report["settingsError"] = settingsErr.Error()
 		}
+		if len(agentProblems) > 0 {
+			report["acpAgentProblems"] = agentProblems
+		}
 		if connectionErr != nil {
 			report["connectionError"] = connectionErr.Error()
 		}
@@ -345,6 +355,9 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		if settingsErr != nil {
 			fmt.Printf("settings: %s\n", settingsErr)
+		}
+		for _, problem := range agentProblems {
+			fmt.Printf("ACP agents: %s; that entry is skipped\n", problem)
 		}
 		if claudeRootsErr != nil {
 			fmt.Printf("claude config: %s\n", claudeRootsErr)

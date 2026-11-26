@@ -179,3 +179,19 @@ func TestASpawnerRunsAtMostEightChildrenAtOnce(t *testing.T) {
 		t.Fatalf("a ninth running child: %v", out)
 	}
 }
+
+func TestAnACPAgentKnownOnlyOnAPairedHostIsNotRefusedHere(t *testing.T) {
+	f := newMCPCodexFixture(t)
+	_, parentToken, _ := f.startParent(t)
+	out, refused := f.create(t, parentToken, map[string]any{"surface": "helper", "host": "build-box", "cwd": "/srv/work", "message": "remote work", "clientRequestId": "r1"})
+	text := fmt.Sprint(out)
+	if !refused {
+		t.Fatalf("an unknown host must not start anything: %v", out)
+	}
+	if strings.Contains(text, "surface is") || strings.Contains(text, "ACP agent") {
+		t.Fatalf("an agent configured only on the paired host must be left to that host: %v", out)
+	}
+	if _, refused := f.create(t, parentToken, map[string]any{"surface": "helper", "message": "local work", "clientRequestId": "r2"}); !refused {
+		t.Fatal("an agent this host does not have must be refused here")
+	}
+}

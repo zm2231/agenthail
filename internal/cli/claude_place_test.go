@@ -132,3 +132,26 @@ func TestThreadCreateStartsInTheCreatorsRootElseTheDefault(t *testing.T) {
 		t.Fatalf("a named root is passed through untouched: %+v", starter.options[2])
 	}
 }
+
+func TestDoctorReportsASkippedACPAgentEntry(t *testing.T) {
+	claudeRootsHome(t)
+	app, _ := cliFixture(t, &cliSurface{kind: surface.KindClaude})
+	home, _ := os.UserHomeDir()
+	if err := os.MkdirAll(filepath.Dir(surface.AgenthailConfigPath(home)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(surface.AgenthailConfigPath(home), []byte(`{"acpAgents": [{"id": "claude", "command": ["x"]}, {"id": "helper", "command": ["helper-agent"]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output, _ := captureStdout(t, func() error { return app.Run([]string{"doctor", "--json"}) })
+	var answer struct {
+		OK       bool     `json:"ok"`
+		Problems []string `json:"acpAgentProblems"`
+	}
+	if err := json.Unmarshal([]byte(output), &answer); err != nil {
+		t.Fatalf("output=%s err=%v", output, err)
+	}
+	if answer.OK || len(answer.Problems) != 1 || !strings.Contains(answer.Problems[0], `"claude"`) {
+		t.Fatalf("doctor must name the skipped entry and only it: %+v", answer)
+	}
+}

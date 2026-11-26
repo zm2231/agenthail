@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -60,7 +61,7 @@ func startHost(t *testing.T, agents ...Agent) *harness {
 	}()
 	t.Cleanup(func() {
 		for _, state := range host.held().Sessions {
-			host.closeSession(state.SessionID, false)
+			host.closeSession(state.SessionID, false, false)
 		}
 		host.exit()
 	})
@@ -268,7 +269,7 @@ func TestHostReopensAfterRestartAndClosesAnOpenTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer next.closeSession(state.SessionID, false)
+	defer next.closeSession(state.SessionID, false, false)
 	if reopened.state.TurnID != "" || reopened.state.LastTurnID != turn {
 		t.Fatalf("state=%+v", reopened.state)
 	}
@@ -392,5 +393,48 @@ func TestClientForgetsTheSocketOfAHostThatIsGone(t *testing.T) {
 	}
 	if _, err := os.Stat(alive); err != nil {
 		t.Fatalf("a socket whose process lives must stay: %v", err)
+	}
+}
+
+func TestHostRefusesACeilingAboveTheAgentsDefaultEvenWhenAskedForIt(t *testing.T) {
+	h := startHost(t, fakeAgent(t, "fake"))
+	if _, err := h.client.Create(context.Background(), CreateParams{SessionID: uuid.NewString(), Agent: "fake", Cwd: t.TempDir(), Ceiling: "plan", Mode: "default"}); !isCode(err, "exceeds_ceiling") {
+		t.Fatalf("the agent's own default above the ceiling must be refused: %v", err)
+	}
+}
+
+func TestIdleStopNeverEndsATurnThatJustStarted(t *testing.T) {
+	previous := idleStop
+	idleStop = time.Millisecond
+	t.Cleanup(func() { idleStop = previous })
+	h := startHost(t, fakeAgent(t, "fake"))
+	state := h.create("fake", "", "")
+	for i := range 20 {
+		turn := h.send(state.SessionID, fmt.Sprintf("reply:turn-%d", i))
+		done := h.waitFor(state.SessionID, func(s State) bool { return s.LastTurnID == turn })
+		if done.LastStop != "end_turn" {
+			t.Fatalf("turn %d ended %q", i, done.LastStop)
+		}
+	}
+}
+
+func TestClosingASessionWaitsForItsAgentToExit(t *testing.T) {
+	h := startHost(t, fakeAgent(t, "fake"))
+	state := h.create("fake", "", "")
+	h.waitFor(state.SessionID, func(s State) bool { return s.Status == StatusIdle })
+	pid := h.host.heldSession(state.SessionID).snapshot().PID
+	if pid == 0 {
+		t.Fatal("no agent pid recorded")
+	}
+	if !h.host.closeSession(state.SessionID, false, true) {
+		t.Fatal("an idle session must close")
+	}
+	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("the agent must be gone before its lock is released: %v", err)
+	}
+	if lock, err := h.host.store.lock("fake", state.SessionID); err != nil {
+		t.Fatalf("the lock must be free once closed: %v", err)
+	} else {
+		lock.release()
 	}
 }

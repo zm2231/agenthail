@@ -35,6 +35,11 @@ type Handler interface {
 	Notification(method string, params json.RawMessage)
 }
 
+type Acknowledged struct {
+	Result  any
+	Written func(error)
+}
+
 type message struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id,omitempty"`
@@ -219,16 +224,21 @@ func (c *Conn) serve(m message) {
 			err = typed
 		}
 	}
+	written := func(error) {}
+	if acknowledged, ok := result.(Acknowledged); ok {
+		result, written = acknowledged.Result, acknowledged.Written
+	}
 	if err != nil {
 		_ = c.write(message{JSONRPC: "2.0", ID: m.ID, Error: err})
 		return
 	}
 	raw, marshalErr := json.Marshal(result)
 	if marshalErr != nil {
+		written(marshalErr)
 		_ = c.write(message{JSONRPC: "2.0", ID: m.ID, Error: &Error{Code: CodeInternal, Message: marshalErr.Error()}})
 		return
 	}
-	_ = c.write(message{JSONRPC: "2.0", ID: m.ID, Result: raw})
+	written(c.write(message{JSONRPC: "2.0", ID: m.ID, Result: raw}))
 }
 
 func (c *Conn) close(err error) {

@@ -34,6 +34,7 @@ type Host struct {
 	log     *log.Logger
 
 	mu       sync.Mutex
+	openMu   sync.Mutex
 	sessions map[string]*session
 	outcomes map[string]*outcome
 	watchers map[chan Event]struct{}
@@ -310,6 +311,9 @@ func (h *Host) act(ctx context.Context, call Call) (any, error) {
 		}
 		s.startMu.Lock()
 		defer s.startMu.Unlock()
+		if err := s.closedError(); err != nil {
+			return nil, err
+		}
 		if err := s.ensureRunning(ctx, nil); err != nil {
 			return nil, err
 		}
@@ -329,7 +333,7 @@ func (h *Host) act(ctx context.Context, call Call) (any, error) {
 		if err := json.Unmarshal(call.Params, &p); err != nil {
 			return nil, callError(CodeInvalid, "%v", err)
 		}
-		h.closeSession(p.SessionID, true)
+		h.closeSession(p.SessionID, true, false)
 		return struct{}{}, nil
 	}
 	return nil, callError(CodeInvalid, "unknown method %q", call.Method)
@@ -406,6 +410,8 @@ func (h *Host) create(ctx context.Context, p CreateParams) (State, error) {
 }
 
 func (h *Host) open(id string) (*session, error) {
+	h.openMu.Lock()
+	defer h.openMu.Unlock()
 	h.mu.Lock()
 	if s := h.sessions[id]; s != nil {
 		h.mu.Unlock()
@@ -428,8 +434,12 @@ func (h *Host) open(id string) (*session, error) {
 	if !found {
 		return nil, callError(CodeNotFound, "no ACP session %s", id)
 	}
-	lock, err := h.store.lock(agent.ID, id)
+	lock, err := h.store.lockWaiting(agent.ID, id, handoverWait)
 	if err != nil {
+		return nil, err
+	}
+	if state, err = h.store.ReadRecord(agent.ID, id); err != nil {
+		lock.release()
 		return nil, err
 	}
 	writer, err := h.store.openTranscript(agent.ID, id)
@@ -472,30 +482,26 @@ func stopLeftover(state State) {
 	_ = syscall.Kill(-state.PID, syscall.SIGKILL)
 }
 
-func (h *Host) closeSession(id string, closeAgent bool) {
+func (h *Host) closeSession(id string, closeAgent, onlyQuiet bool) bool {
 	h.mu.Lock()
 	s := h.sessions[id]
-	delete(h.sessions, id)
-	draining := h.draining
-	remaining := len(h.sessions)
 	h.mu.Unlock()
 	if s != nil {
-		if closeAgent {
-			s.mu.Lock()
-			conn, agentSession, closable := s.conn, s.state.AgentSessionID, s.caps.Session("close")
-			s.mu.Unlock()
-			if conn != nil && closable {
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				_ = conn.Request(ctx, "session/close", map[string]string{"sessionId": agentSession}, nil)
-				cancel()
-			}
+		if !s.close(closeAgent, onlyQuiet) {
+			return false
 		}
-		s.close()
 		h.publish(Event{SessionID: id, Status: StatusStopped})
 	}
+	h.mu.Lock()
+	if h.sessions[id] == s {
+		delete(h.sessions, id)
+	}
+	draining, remaining := h.draining, len(h.sessions)
+	h.mu.Unlock()
 	if draining && remaining == 0 {
 		h.exit()
 	}
+	return true
 }
 
 func (h *Host) drain() {
@@ -540,7 +546,7 @@ func (h *Host) drainSessions() {
 			return
 		}
 		for _, id := range quiet {
-			h.closeSession(id, false)
+			h.closeSession(id, false, true)
 		}
 		select {
 		case <-h.exited:

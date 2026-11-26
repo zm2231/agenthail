@@ -19,15 +19,22 @@ import (
 )
 
 var (
-	idleStop      = 15 * time.Minute
-	agentTimeout  = 2 * time.Minute
-	stopGrace     = 5 * time.Second
-	errNotRunning = errors.New("the agent is not running")
+	idleStop           = 15 * time.Minute
+	agentTimeout       = 2 * time.Minute
+	stopGrace          = 5 * time.Second
+	handoverWait       = 3 * stopGrace
+	answerWriteTimeout = 30 * time.Second
+	errNotRunning      = errors.New("the agent is not running")
 )
+
+type permissionAnswer struct {
+	result  acp.RequestPermissionResult
+	written chan error
+}
 
 type pendingRequest struct {
 	request Request
-	answer  chan acp.RequestPermissionResult
+	answer  chan permissionAnswer
 }
 
 type session struct {
@@ -46,6 +53,7 @@ type session struct {
 	loading bool
 	pending map[string]*pendingRequest
 	idle    *time.Timer
+	exited  chan struct{}
 	closed  bool
 }
 
@@ -110,13 +118,13 @@ func (s *session) Request(ctx context.Context, method string, params json.RawMes
 		request.RawInput = p.ToolCall.RawInput
 	}
 	request.ID, request.Options, request.CreatedAt = "req-"+uuid.NewString(), p.Options, time.Now().UTC()
-	pending := &pendingRequest{request: request, answer: make(chan acp.RequestPermissionResult, 1)}
+	pending := &pendingRequest{request: request, answer: make(chan permissionAnswer, 1)}
 	s.pending[request.ID] = pending
 	s.mu.Unlock()
 	s.changed()
 	select {
 	case answer := <-pending.answer:
-		return answer, nil
+		return acp.Acknowledged{Result: answer.result, Written: func(err error) { answer.written <- err }}, nil
 	case <-ctx.Done():
 		s.mu.Lock()
 		delete(s.pending, request.ID)
@@ -218,7 +226,7 @@ func (s *session) enforceCeiling(previous string) {
 
 func (s *session) cancelRequestsLocked() {
 	for id, pending := range s.pending {
-		pending.answer <- acp.Cancelled()
+		pending.answer <- permissionAnswer{result: acp.Cancelled(), written: make(chan error, 1)}
 		delete(s.pending, id)
 	}
 }
@@ -242,14 +250,22 @@ func (s *session) ensureRunning(ctx context.Context, mcp []acp.MCPServer) error 
 	err := conn.Request(ctx, "session/load", acp.LoadSessionParams{SessionID: agentSession, Cwd: s.state.Cwd, MCPServers: mcpOrEmpty(mcp)}, &setup)
 	s.mu.Lock()
 	s.loading = false
+	recorded := s.state.Mode
 	if err == nil {
 		s.applySetupLocked(setup)
 		s.saveLocked()
 	}
+	loaded, above := s.state.Mode, s.aboveCeilingLocked(s.state.Mode)
 	s.mu.Unlock()
 	if err != nil {
 		s.stopProcess()
 		return fmt.Errorf("load the %s session: %w", s.agent.DisplayName(), err)
+	}
+	if above {
+		if setErr := s.setModeOnAgent(ctx, recorded); setErr != nil || s.snapshot().Mode != recorded {
+			s.stopProcess()
+			return callError("exceeds_ceiling", "%s reopened the session in %s, above its ceiling of %s, and Agenthail could not set it back to %s: %v", s.agent.DisplayName(), loaded, s.state.Ceiling, recorded, setErr)
+		}
 	}
 	return nil
 }
@@ -302,8 +318,9 @@ func (s *session) startProcess(ctx context.Context) error {
 		return fmt.Errorf("start %s: %w", s.agent.DisplayName(), err)
 	}
 	conn := acp.NewConn(stdout, stdin, s)
+	exited := make(chan struct{})
 	s.mu.Lock()
-	s.cmd, s.conn = cmd, conn
+	s.cmd, s.conn, s.exited = cmd, conn, exited
 	s.state.PID = cmd.Process.Pid
 	if started, err := procstart.Lstart(context.Background(), cmd.Process.Pid); err == nil {
 		s.state.PIDStart = started
@@ -311,7 +328,7 @@ func (s *session) startProcess(ctx context.Context) error {
 	s.saveLocked()
 	s.mu.Unlock()
 	conn.Start()
-	go s.watch(cmd, conn)
+	go s.watch(cmd, conn, exited)
 	var init acp.InitializeResult
 	err = conn.Request(ctx, "initialize", acp.InitializeParams{ProtocolVersion: acp.ProtocolVersion, ClientCapabilities: acp.ClientCapabilities{}, ClientInfo: acp.ClientInfo{Name: "agenthail", Version: s.host.version}}, &init)
 	if err != nil {
@@ -328,7 +345,8 @@ func (s *session) startProcess(ctx context.Context) error {
 	return nil
 }
 
-func (s *session) watch(cmd *exec.Cmd, conn *acp.Conn) {
+func (s *session) watch(cmd *exec.Cmd, conn *acp.Conn, exited chan struct{}) {
+	defer close(exited)
 	<-conn.Done()
 	done := make(chan struct{})
 	go func() { _ = cmd.Wait(); close(done) }()
@@ -358,7 +376,7 @@ func (s *session) watch(cmd *exec.Cmd, conn *acp.Conn) {
 
 func (s *session) stopProcess() {
 	s.mu.Lock()
-	cmd := s.cmd
+	cmd, exited := s.cmd, s.exited
 	if s.idle != nil {
 		s.idle.Stop()
 	}
@@ -370,6 +388,12 @@ func (s *session) stopProcess() {
 		_ = closer.Close()
 	}
 	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+	select {
+	case <-exited:
+	case <-time.After(stopGrace):
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		<-exited
+	}
 }
 
 func (s *session) create(ctx context.Context, params CreateParams) error {
@@ -410,6 +434,12 @@ func (s *session) create(ctx context.Context, params CreateParams) error {
 		if err := s.setOption(ctx, "mode", mode); err != nil {
 			return fail(err)
 		}
+	}
+	s.mu.Lock()
+	started, above := s.state.Mode, s.aboveCeilingLocked(s.state.Mode)
+	s.mu.Unlock()
+	if above {
+		return fail(callError("exceeds_ceiling", "Your ceiling is %s, and %s would start in %s, above it.", s.state.Ceiling, s.agent.DisplayName(), started))
 	}
 	if params.Model != "" && params.Model != s.state.Model {
 		if err := s.setOption(ctx, "model", params.Model); err != nil {
@@ -558,6 +588,9 @@ func (s *session) setModeOnAgent(ctx context.Context, mode string) error {
 func (s *session) send(ctx context.Context, params SendParams) (SendResult, error) {
 	s.startMu.Lock()
 	defer s.startMu.Unlock()
+	if err := s.closedError(); err != nil {
+		return SendResult{}, err
+	}
 	s.mu.Lock()
 	refused, busy := s.state.Refused, s.state.Status == StatusBusy
 	s.mu.Unlock()
@@ -625,10 +658,9 @@ func (s *session) finishTurnLocked(stop string) {
 		s.idle.Stop()
 	}
 	s.idle = time.AfterFunc(idleStop, func() {
-		s.mu.Lock()
-		quiet := s.state.Status == StatusIdle && len(s.pending) == 0
-		s.mu.Unlock()
-		if quiet {
+		s.startMu.Lock()
+		defer s.startMu.Unlock()
+		if s.quiet() {
 			s.stopProcess()
 		}
 	})
@@ -677,16 +709,52 @@ func (s *session) respond(requestID, choice string) (RespondResult, error) {
 		return RespondResult{}, callError(CodeInvalid, "answer with allow, deny or stop")
 	}
 	delete(s.pending, requestID)
-	pending.answer <- answer
+	written := make(chan error, 1)
+	pending.answer <- permissionAnswer{result: answer, written: written}
 	s.mu.Unlock()
+	s.changed()
+	select {
+	case err := <-written:
+		if err != nil {
+			return RespondResult{}, callError(CodeFailed, "the answer did not reach %s: %v", s.agent.DisplayName(), err)
+		}
+	case <-time.After(answerWriteTimeout):
+		return RespondResult{}, callError(CodeFailed, "%s did not take the answer within %s", s.agent.DisplayName(), answerWriteTimeout)
+	}
 	if choice == "stop" {
 		_ = s.cancel()
 	}
-	s.changed()
 	return RespondResult{Outcome: outcome}, nil
 }
 
-func (s *session) close() {
+func (s *session) quiet() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state.Status != StatusBusy && len(s.pending) == 0
+}
+
+func (s *session) close(closeAgent, onlyQuiet bool) bool {
+	s.startMu.Lock()
+	defer s.startMu.Unlock()
+	s.mu.Lock()
+	closed := s.closed
+	s.mu.Unlock()
+	if closed {
+		return true
+	}
+	if onlyQuiet && !s.quiet() {
+		return false
+	}
+	if closeAgent {
+		s.mu.Lock()
+		conn, agentSession, closable := s.conn, s.state.AgentSessionID, s.caps.Session("close")
+		s.mu.Unlock()
+		if conn != nil && closable {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			_ = conn.Request(ctx, "session/close", map[string]string{"sessionId": agentSession}, nil)
+			cancel()
+		}
+	}
 	s.stopProcess()
 	s.mu.Lock()
 	s.closed = true
@@ -695,4 +763,14 @@ func (s *session) close() {
 	}
 	s.mu.Unlock()
 	s.lock.release()
+	return true
+}
+
+func (s *session) closedError() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return callError(CodeDraining, "this session moved to the current ACP host; send again")
+	}
+	return nil
 }
