@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use super::*;
-use feed::subagents::{self as crew, Asked, ClaudeSubagent, ClaudeSubagents};
+use feed::subagents::{self as crew, Asked, ClaudeSubagent, ClaudeSubagents, RowRead};
 use rune_kit::ControlSize;
 
 const KEPT: usize = 6;
@@ -45,7 +45,7 @@ pub struct Crew {
 pub enum Done {
     Page(String, u64, Result<Vec<Session>, String>),
     Claude(String, Result<ClaudeSubagents, String>),
-    Row(String, u64, Result<Session, String>),
+    Row(String, u64, RowRead),
 }
 
 pub(crate) fn fetched<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
@@ -152,7 +152,8 @@ fn read_row(s: &mut App, id: &str) {
 fn page(s: &mut App, id: &str) {
     let Some(x) = session(s, id) else { return };
     if !crew::wants_page(x) && !s.crew.rows.contains_key(id) {
-        if !s.crew.loading.contains(id) && !held(s).contains(id) {
+        if !s.crew.loading.contains(id) {
+            keep_selected(s, id, &[]);
             s.crew.pages.remove(id);
             s.crew.asked.remove(id);
             s.crew.errors.remove(id);
@@ -225,8 +226,14 @@ pub(crate) fn done(s: &mut App, done: Done) {
             let Some(asked) = s.crew.row_asked.get_mut(&id).filter(|a| a.seq == seq) else { return };
             asked.in_flight = false;
             asked.at = Instant::now();
-            if let Ok(row) = result {
-                s.crew.rows.insert(id, row);
+            match result {
+                RowRead::Found(row) => {
+                    s.crew.rows.insert(id, row);
+                }
+                RowRead::Gone => {
+                    s.crew.rows.remove(&id);
+                }
+                RowRead::Failed(_) => {}
             }
         }
     }

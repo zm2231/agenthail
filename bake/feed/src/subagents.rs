@@ -186,10 +186,22 @@ impl Client {
         claude_subagents(&self.get_json(&format!("/api/v1/session-metadata?id={}&subagents=all", enc(session))).map_err(|e| e.to_string())?)
     }
 
-    pub fn session_row(&self, id: &str) -> Result<Session, String> {
-        let value = self.get_json(&format!("/api/v1/session?id={}&limit=1", enc(id))).map_err(|e| e.to_string())?;
-        detail_row(&value)
+    pub fn session_row(&self, id: &str) -> RowRead {
+        match self.get_coded(&format!("/api/v1/session?id={}&limit=1", enc(id))) {
+            Ok(value) => detail_row(&value).map_or_else(RowRead::Failed, RowRead::Found),
+            Err((404, _)) => RowRead::Gone,
+            Err((0, message)) => RowRead::Failed(message),
+            Err((code, name)) if name.is_empty() => RowRead::Failed(format!("status code {code}")),
+            Err((_, name)) => RowRead::Failed(name),
+        }
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum RowRead {
+    Found(Session),
+    Gone,
+    Failed(String),
 }
 
 pub fn detail_row(detail: &Value) -> Result<Session, String> {
@@ -352,10 +364,12 @@ mod tests {
             (200, r#"{"session":{"id":"p","name":"Plan the importer","status":"idle","subagent":{"parentId":"g","rootId":"g","depth":1,"nickname":"Noether"}},"alias":"planner"}"#),
             (404, r#"{"error":{"code":"not_found"}}"#),
         ]));
-        let got = client.session_row("p").unwrap();
+        let RowRead::Found(got) = client.session_row("p") else { panic!("expected a row") };
         assert_eq!((got.id.as_str(), got.title(), parent_of(&got)), ("p", "@planner".to_string(), Some("g".to_string())));
         assert_eq!(asked.recv().unwrap().0, "/api/v1/session?id=p&limit=1");
-        assert!(client.session_row("p").is_err());
+        assert_eq!(client.session_row("p"), RowRead::Gone);
+        let (client, _asked) = daemon(replies(&[(503, r#"{"error":{"code":"host_unreachable"}}"#)]));
+        assert_eq!(client.session_row("p"), RowRead::Failed("host_unreachable".into()));
     }
 
     #[test]
