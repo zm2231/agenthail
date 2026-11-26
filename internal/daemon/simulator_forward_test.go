@@ -96,6 +96,30 @@ func TestAHostWithoutSimulatorsDrivesAPairedMacs(t *testing.T) {
 	}
 }
 
+func TestAHostWithoutSimulatorsUninstallsFromAPairedMacsLeasedDevice(t *testing.T) {
+	f := simulatorsOnTwoHosts(t)
+	ctx := context.Background()
+	if _, err := f.linux.daemon.forwardSimulator(ctx, "local-a", simhost.Request{Action: "uninstall", BundleID: "com.example.app"}); refusalOf(err) != "not_held" {
+		t.Fatalf("forwarded uninstall without a lease = %v", err)
+	}
+	if _, err := f.linux.daemon.forwardSimulator(ctx, "local-a", simhost.Request{Action: "acquire", Kind: "iphone"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.linux.daemon.forwardSimulator(ctx, "local-b", simhost.Request{Action: "uninstall", BundleID: "com.example.app"}); refusalOf(err) != "not_held" {
+		t.Fatalf("forwarded uninstall by a session that holds no lease = %v", err)
+	}
+	if f.commands.ran("xcrun simctl uninstall") {
+		t.Fatal("a refused uninstall reached the Mac's simulator")
+	}
+	out, err := f.linux.daemon.forwardSimulator(ctx, "local-a", simhost.Request{Action: "uninstall", BundleID: "com.example.app"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out["host"] != "mac" || out["uninstalled"] != "com.example.app" || !f.commands.ran("xcrun simctl uninstall U1 com.example.app") {
+		t.Fatalf("forwarded uninstall = %v", out)
+	}
+}
+
 func TestOnlyAPairedHostForwardsSimulatorCalls(t *testing.T) {
 	f := simulatorsOnTwoHosts(t)
 	response := f.mac.request(t, http.MethodPost, "/api/v1/simulator", simulatorForwardRequest{Owner: "local-a", Request: simhost.Request{Action: "acquire", Kind: "iphone"}})

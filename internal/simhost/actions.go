@@ -31,7 +31,7 @@ type Request struct {
 	Limit     int               `json:"limit,omitempty"`
 }
 
-var Actions = []string{"list", "acquire", "renew", "release", "install", "launch", "terminate", "openUrl", "describe", "tap", "type", "swipe", "button", "screenshot", "push", "location", "logs"}
+var Actions = []string{"list", "acquire", "renew", "release", "install", "uninstall", "launch", "terminate", "openUrl", "describe", "tap", "type", "swipe", "button", "screenshot", "push", "location", "logs"}
 
 var buttons = map[string]bool{"home": true, "lock": true, "side-button": true}
 
@@ -69,6 +69,8 @@ func (h *Host) Call(ctx context.Context, owner string, req Request) (map[string]
 	switch req.Action {
 	case "install":
 		return h.install(ctx, owner, l, req.App)
+	case "uninstall":
+		return h.uninstall(ctx, l, req.BundleID)
 	case "launch":
 		return h.launch(ctx, l, req)
 	case "terminate":
@@ -113,7 +115,7 @@ func (h *Host) Call(ctx context.Context, owner string, req Request) (map[string]
 	return nil, refuse("invalid", "action must be %s.", strings.Join(Actions, ", "))
 }
 
-const HowTo = "Read the screen with describe, then tap a ref from it (refs last until the next describe), or tap, swipe by x,y in points. type enters text into the focused field; button presses home, lock or side-button. install takes a .app you copied into outDir; launch and terminate take its bundleId; openUrl opens a link or deep link. screenshot saves a PNG; logs reads an app's recent log. The lease ends after 10 minutes unused or at endsAt; renew moves endsAt on. release it when you are done."
+const HowTo = "Read the screen with describe, then tap a ref from it (refs last until the next describe), or tap, swipe by x,y in points. type enters text into the focused field; button presses home, lock or side-button. install takes a .app you copied into outDir; launch, terminate and uninstall take its bundleId; openUrl opens a link or deep link. screenshot saves a PNG; logs reads an app's recent log. The lease ends after 10 minutes unused or at endsAt; renew moves endsAt on. release it when you are done."
 
 func (h *Host) list(ctx context.Context, owner string) (map[string]any, error) {
 	all, err := h.devices(ctx)

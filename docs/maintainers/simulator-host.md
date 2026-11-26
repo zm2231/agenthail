@@ -128,6 +128,7 @@ Every action except `list`, `acquire`, `renew` and `release` needs a lease.
   private staging folder, and installs that copy, so the path cannot be
   swapped between the check and the install. `launch` passes `args`, and `env` as
   `SIMCTL_CHILD_` variables, and restarts an app already running.
+  `uninstall` removes the app with `bundleId` from the leased device.
   `terminate` and `openUrl` do what they say.
 - `screenshot` writes a PNG of the screen and returns `file`, `bytes`, `width`
   and `height`; with `path` the daemon copies it there under the same rules as

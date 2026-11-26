@@ -171,3 +171,26 @@ func TestDescribeShowsTraitsAndVoiceOverActions(t *testing.T) {
 		t.Fatalf("tree =\n%s\nwant\n%s", tree, want)
 	}
 }
+
+func TestUninstallRemovesAnAppOnlyFromTheCallersLeasedDevice(t *testing.T) {
+	sim := newFakeSim()
+	sim.devices["U1"] = "Agenthail iPhone"
+	h, _ := newTestHost(t, sim)
+	if code := refusalCode(t, h, "s1", Request{Action: "uninstall", BundleID: "com.example.app"}); code != "not_held" {
+		t.Fatalf("uninstall without a lease = %s", code)
+	}
+	mustCall(t, h, "s2", Request{Action: "acquire", Kind: "iphone"})
+	if code := refusalCode(t, h, "s1", Request{Action: "uninstall", BundleID: "com.example.app"}); code != "not_held" {
+		t.Fatalf("uninstall while another session holds the device = %s", code)
+	}
+	if len(sim.ran("xcrun simctl uninstall")) != 0 {
+		t.Fatal("a refused uninstall reached simctl")
+	}
+	if code := refusalCode(t, h, "s2", Request{Action: "uninstall"}); code != "invalid" {
+		t.Fatalf("uninstall without a bundleId = %s", code)
+	}
+	out := mustCall(t, h, "s2", Request{Action: "uninstall", BundleID: "com.example.app"})
+	if out["uninstalled"] != "com.example.app" || len(sim.ran("xcrun simctl uninstall U1 com.example.app")) != 1 {
+		t.Fatalf("uninstall = %v, ran %+v", out, sim.ran("xcrun simctl uninstall"))
+	}
+}
