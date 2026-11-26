@@ -57,6 +57,7 @@ impl Replay {
 #[derive(Default)]
 pub struct Earlier {
     pub next: Option<i64>,
+    pub anchored: bool,
     pub loading: bool,
     pub note: Option<String>,
     pub at_top: bool,
@@ -76,6 +77,7 @@ pub struct Pane {
     pub replay: Option<Replay>,
     pub status: String,
     pub caught_up: bool,
+    pub paged_first: bool,
     pub last_batch: f64,
     pub earlier: Earlier,
     pub expanding: HashMap<String, Option<String>>,
@@ -95,6 +97,7 @@ impl Pane {
             replay: None,
             status: "loading".into(),
             caught_up: false,
+            paged_first: false,
             last_batch: f64::MAX,
             earlier: Earlier::default(),
             expanding: HashMap::new(),
