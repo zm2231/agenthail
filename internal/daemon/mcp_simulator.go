@@ -14,7 +14,7 @@ type mcpSimulatorInput struct {
 	Action    string            `json:"action" jsonschema:"list, acquire, renew, release, install, uninstall, launch, terminate, openUrl, describe, tap, type, swipe, button, screenshot, push, location or logs."`
 	Kind      string            `json:"kind,omitempty" jsonschema:"iphone or ipad; needed when you hold both."`
 	Runtime   string            `json:"runtime,omitempty" jsonschema:"acquire: an installed iOS version such as 18.5; without it, the shared device, whatever its version. Other actions: which held device. release with neither kind nor runtime ends every lease."`
-	App       string            `json:"app,omitempty" jsonschema:"install: a .app path inside your outDir."`
+	App       string            `json:"app,omitempty" jsonschema:"install: a .app in your outDir, or in your folders when the simulators are on another host."`
 	BundleID  string            `json:"bundleId,omitempty" jsonschema:"The app's bundle id."`
 	Args      []string          `json:"args,omitempty" jsonschema:"launch: arguments."`
 	Env       map[string]string `json:"env,omitempty" jsonschema:"launch: environment."`
@@ -44,6 +44,13 @@ func (d *Daemon) mcpSimulator(ctx context.Context, caller *mcpCaller, input mcpS
 		if status := d.simulatorStatus(ctx); !status.Ready {
 			return nil, &mcpRefusal{Code: "unavailable", Message: "This host can't run iOS simulators: " + status.Problem + ".", Detail: map[string]any{"fix": status.Fix}}
 		}
+	}
+	if input.Action == "install" && !d.simHost.Local() {
+		app, err := callerApp(caller, input.App)
+		if err != nil {
+			return nil, err
+		}
+		input.App = app
 	}
 	var save string
 	if input.Action == "screenshot" && input.Path != "" {
@@ -136,7 +143,7 @@ func simulatorRefusal(err error) error {
 }
 
 func (input mcpSimulatorInput) mcpTimeout() time.Duration {
-	if input.Action == "acquire" {
+	if input.Action == "acquire" || input.Action == "install" {
 		return 11 * time.Minute
 	}
 	return time.Minute

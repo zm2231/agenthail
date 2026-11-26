@@ -15,13 +15,15 @@ import (
 )
 
 type simCommands struct {
-	mu      sync.Mutex
-	lines   []string
-	noAXe   bool
-	shotPNG []byte
-	holdOn  string
-	held    chan struct{}
-	release chan struct{}
+	mu          sync.Mutex
+	lines       []string
+	noAXe       bool
+	shotPNG     []byte
+	holdOn      string
+	held        chan struct{}
+	release     chan struct{}
+	failInstall bool
+	staged      map[string]string
 }
 
 func (s *simCommands) hold(prefix string) {
@@ -52,6 +54,11 @@ func (s *simCommands) exec(_ context.Context, cmd simhost.Command) ([]byte, erro
 		return []byte(`{"devices":{"r":[{"udid":"U1","name":"Agenthail iPhone","state":"Booted"}]}}`), nil
 	case strings.HasPrefix(line, "axe --version"):
 		return []byte("1.8.0\n"), nil
+	case strings.HasPrefix(line, "xcrun simctl install U1 "):
+		s.staged = stagedFiles(cmd.Args[len(cmd.Args)-1])
+		if s.failInstall {
+			return nil, &simhost.CommandError{Command: "xcrun simctl install", Err: errors.New("exit status 1"), Stderr: "The app is not built for the simulator."}
+		}
 	case strings.HasPrefix(line, "xcrun simctl io U1 screenshot"):
 		return nil, os.WriteFile(cmd.Args[len(cmd.Args)-1], s.shotPNG, 0o600)
 	}

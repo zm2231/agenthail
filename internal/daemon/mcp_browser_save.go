@@ -17,6 +17,21 @@ func screenshotPath(caller *mcpCaller, path string) (string, error) {
 	if err != nil {
 		return "", refuse("invalid", "path's folder must already exist.")
 	}
+	return inCallerFolders(caller, parent, filepath.Base(path))
+}
+
+func callerApp(caller *mcpCaller, app string) (string, error) {
+	if !filepath.IsAbs(app) || filepath.Clean(app) != app || filepath.Ext(app) != ".app" {
+		return "", refuse("invalid", "app must be an absolute, clean path to a .app folder.")
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(app))
+	if err != nil {
+		return "", refuse("not_found", "No app is at "+app+".")
+	}
+	return inCallerFolders(caller, parent, filepath.Base(app))
+}
+
+func inCallerFolders(caller *mcpCaller, parent, name string) (string, error) {
 	ceiling, err := parseCeiling(caller.ceiling)
 	if err != nil {
 		return "", err
@@ -34,7 +49,7 @@ func screenshotPath(caller *mcpCaller, path string) (string, error) {
 	if !underRoot(parent, real) {
 		return "", &mcpRefusal{Code: "out_of_scope", Message: "That path is outside the folders you may work in.", Detail: map[string]any{"roots": roots}}
 	}
-	return filepath.Join(parent, filepath.Base(path)), nil
+	return filepath.Join(parent, name), nil
 }
 
 func saveScreenshot(from, to string) error {

@@ -2,19 +2,25 @@ package daemon
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/simhost"
+	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
@@ -22,12 +28,16 @@ type simMac struct {
 	node     *federationNode
 	commands *simCommands
 	host     *simhost.Host
+	outRoot  string
+	received *countingListener
 }
 
 type forwardedSims struct {
 	linux, mac *federationNode
 	commands   *simCommands
 	macHost    *simhost.Host
+	macOut     string
+	received   *countingListener
 	macs       map[string]*simMac
 }
 
@@ -41,10 +51,16 @@ func simulatorsOnHosts(t *testing.T, names ...string) *forwardedSims {
 	for _, name := range names {
 		commands := &simCommands{shotPNG: []byte("\x89PNG\r\n\x1a\nforwarded")}
 		node := newFederationNode(t, "remote-"+name)
-		host := simhost.New(simhost.Config{Exec: commands.exec, OutRoot: t.TempDir(), LockDir: t.TempDir(), GOOS: "darwin"})
+		outRoot := t.TempDir()
+		host := simhost.New(simhost.Config{Exec: commands.exec, OutRoot: outRoot, LockDir: t.TempDir(), GOOS: "darwin"})
 		node.daemon.SetSimulatorHost(host)
-		node.serve(t, nil)
-		macs[name] = &simMac{node: node, commands: commands, host: host}
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		received := &countingListener{Listener: listener}
+		node.serve(t, received)
+		macs[name] = &simMac{node: node, commands: commands, host: host, outRoot: outRoot, received: received}
 		servers = append(servers, node)
 	}
 	linux.start(t, testRoots(servers[0].server))
@@ -54,7 +70,7 @@ func simulatorsOnHosts(t *testing.T, names ...string) *forwardedSims {
 		testkit.Eventually(t, name+" reports its simulators", 10*time.Second, func() bool { return host.runsSimulators() })
 	}
 	first := macs[names[0]]
-	return &forwardedSims{linux: linux, mac: first.node, commands: first.commands, macHost: first.host, macs: macs}
+	return &forwardedSims{linux: linux, mac: first.node, commands: first.commands, macHost: first.host, macOut: first.outRoot, received: first.received, macs: macs}
 }
 
 func simulatorsOnTwoHosts(t *testing.T) *forwardedSims {
@@ -86,9 +102,6 @@ func TestAHostWithoutSimulatorsDrivesAPairedMacs(t *testing.T) {
 	}
 	if _, raw := shot["fileData"]; raw || !strings.HasSuffix(file, "-screenshot.png") || strings.Count(filepath.Base(file), "-") != 1 {
 		t.Fatalf("the forwarded result %v kept the Mac's encoding or name", shot)
-	}
-	if _, err := f.linux.daemon.forwardSimulator(ctx, "local-a", simhost.Request{Action: "install", App: "/tmp/App.app"}); refusalOf(err) != "unavailable" {
-		t.Fatalf("forwarded install = %v", err)
 	}
 	f.linux.daemon.releaseForwardedSimulators("local-a")
 	if f.macHost.Holds(owner) {
@@ -351,4 +364,186 @@ func TestTheVersionAnswersWhileASimulatorProbeIsSlow(t *testing.T) {
 		t.Fatalf("simulators while the reprobe runs = %v", v.Simulators)
 	}
 	close(commands.release)
+}
+
+type countingListener struct {
+	net.Listener
+	read atomic.Int64
+}
+
+func (l *countingListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return &countingConn{Conn: conn, read: &l.read}, nil
+}
+
+type countingConn struct {
+	net.Conn
+	read *atomic.Int64
+}
+
+func (c *countingConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	c.read.Add(int64(n))
+	return n, err
+}
+
+func stagedFiles(app string) map[string]string {
+	files := map[string]string{}
+	_ = filepath.WalkDir(app, func(name string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		info, _ := entry.Info()
+		data, _ := os.ReadFile(name)
+		rel, _ := filepath.Rel(app, name)
+		files[filepath.ToSlash(rel)] = fmt.Sprintf("%o %s", info.Mode().Perm()&0o111, data)
+		return nil
+	})
+	return files
+}
+
+func builtApp(t *testing.T, filler int) string {
+	t.Helper()
+	app := filepath.Join(t.TempDir(), "Rune.app")
+	if err := os.MkdirAll(filepath.Join(app, "Frameworks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, file := range map[string]struct {
+		data string
+		mode os.FileMode
+	}{"Rune": {"binary", 0o755}, "Info.plist": {"plist", 0o644}, "Frameworks/Kit": {"kit", 0o755}} {
+		if err := os.WriteFile(filepath.Join(app, filepath.FromSlash(name)), []byte(file.data), file.mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if filler > 0 {
+		data := make([]byte, filler)
+		if _, err := rand.Read(data); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(app, "assets.car"), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return app
+}
+
+func installCopiesLeft(t *testing.T, outRoot string) []string {
+	t.Helper()
+	left, err := filepath.Glob(filepath.Join(outRoot, ".staging", "install-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return left
+}
+
+func TestARemoteSessionInstallsItsAppOnTheMacsLeasedSimulator(t *testing.T) {
+	f := simulatorsOnTwoHosts(t)
+	ctx := context.Background()
+	app := builtApp(t, 0)
+	if _, err := f.linux.daemon.forwardSimulator(ctx, "local-a", simhost.Request{Action: "acquire", Kind: "iphone"}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := f.linux.daemon.forwardSimulator(ctx, "local-a", simhost.Request{Action: "install", Kind: "iphone", App: app})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out["installed"] != app || out["host"] != "mac" {
+		t.Fatalf("forwarded install = %v", out)
+	}
+	f.commands.mu.Lock()
+	staged := f.commands.staged
+	f.commands.mu.Unlock()
+	want := map[string]string{"Rune": "111 binary", "Info.plist": "0 plist", "Frameworks/Kit": "111 kit"}
+	if fmt.Sprint(staged) != fmt.Sprint(want) {
+		t.Fatalf("simctl installed %v, want %v", staged, want)
+	}
+	if left := installCopiesLeft(t, f.macOut); len(left) != 0 {
+		t.Fatalf("the Mac kept the uploaded copy: %v", left)
+	}
+}
+
+func TestARemoteInstallWithoutALeaseSendsNoApp(t *testing.T) {
+	f := simulatorsOnTwoHosts(t)
+	app := builtApp(t, 4<<20)
+	before := f.received.read.Load()
+	_, err := f.linux.daemon.forwardSimulator(context.Background(), "local-a", simhost.Request{Action: "install", App: app})
+	if refusalOf(err) != "not_held" {
+		t.Fatalf("install without a lease = %v", err)
+	}
+	if read := f.received.read.Load() - before; read > 64<<10 {
+		t.Fatalf("the Mac received %d bytes for a refused install", read)
+	}
+	if f.commands.ran("xcrun simctl install") || len(installCopiesLeft(t, f.macOut)) != 0 {
+		t.Fatal("a refused install reached the simulator or left a copy")
+	}
+}
+
+func TestAFailedRemoteInstallLeavesNoCopyOnTheMac(t *testing.T) {
+	f := simulatorsOnTwoHosts(t)
+	ctx := context.Background()
+	if _, err := f.linux.daemon.forwardSimulator(ctx, "local-a", simhost.Request{Action: "acquire", Kind: "iphone"}); err != nil {
+		t.Fatal(err)
+	}
+	f.commands.mu.Lock()
+	f.commands.failInstall = true
+	f.commands.mu.Unlock()
+	_, err := f.linux.daemon.forwardSimulator(ctx, "local-a", simhost.Request{Action: "install", App: builtApp(t, 0)})
+	if refusalOf(err) != "simulator_failed" || !strings.Contains(err.Error(), "not built for the simulator") {
+		t.Fatalf("failed install = %v", err)
+	}
+	if left := installCopiesLeft(t, f.macOut); len(left) != 0 {
+		t.Fatalf("a failed install left %v", left)
+	}
+}
+
+func TestAnOversizedAppIsRefusedBeforeUpload(t *testing.T) {
+	f := simulatorsOnTwoHosts(t)
+	ctx := context.Background()
+	if _, err := f.linux.daemon.forwardSimulator(ctx, "local-a", simhost.Request{Action: "acquire", Kind: "iphone"}); err != nil {
+		t.Fatal(err)
+	}
+	app := builtApp(t, 0)
+	sparse, err := os.Create(filepath.Join(app, "huge.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sparse.Truncate(simhost.AppArchiveLimit + 1); err != nil {
+		t.Fatal(err)
+	}
+	sparse.Close()
+	before := f.received.read.Load()
+	if _, err := f.linux.daemon.forwardSimulator(ctx, "local-a", simhost.Request{Action: "install", App: app}); refusalOf(err) != "too_large" {
+		t.Fatalf("oversized install = %v", err)
+	}
+	if read := f.received.read.Load() - before; read != 0 || f.commands.ran("xcrun simctl install") {
+		t.Fatalf("an oversized app reached the Mac (%d bytes)", read)
+	}
+}
+
+func TestARemoteSessionInstallsOnlyAnAppInItsFolders(t *testing.T) {
+	f := simulatorsOnTwoHosts(t)
+	ctx := context.Background()
+	app := builtApp(t, 0)
+	caller := &mcpCaller{session: surface.Session{ID: "local-a", Cwd: filepath.Dir(app)}, capabilities: []string{"simulator.drive"}}
+	if _, err := f.linux.daemon.mcpSimulator(ctx, caller, mcpSimulatorInput{Action: "acquire", Kind: "iphone"}); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := builtApp(t, 0)
+	if _, err := f.linux.daemon.mcpSimulator(ctx, caller, mcpSimulatorInput{Action: "install", App: elsewhere}); refusalOf(err) != "out_of_scope" {
+		t.Fatalf("install of an app outside the session's folders = %v", err)
+	}
+	if f.commands.ran("xcrun simctl install") {
+		t.Fatal("an app outside the session's folders reached the Mac")
+	}
+	out, err := f.linux.daemon.mcpSimulator(ctx, caller, mcpSimulatorInput{Action: "install", App: app})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.(map[string]any)["installed"] != app || !f.commands.ran("xcrun simctl install U1 ") {
+		t.Fatalf("install of the session's own app = %v", out)
+	}
 }

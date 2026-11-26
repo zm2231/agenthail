@@ -166,6 +166,8 @@ func NewClient(endpoint, address, token string, options ClientOptions) (*Client,
 		TLSHandshakeTimeout: 5 * time.Second,
 		IdleConnTimeout:     90 * time.Second,
 		MaxIdleConnsPerHost: 4,
+		// Bounds the wait for a peer's 100 Continue; a refusal needs no upload.
+		ExpectContinueTimeout: 30 * time.Second,
 	}
 	base := &url.URL{Scheme: parsed.Scheme, Host: parsed.Host}
 	return &Client{endpoint: base, address: address, tls: transport.TLSClientConfig, token: token, hostID: options.HostID, http: &http.Client{Transport: transport, Timeout: 30 * time.Second}, stream: &http.Client{Transport: transport}}, nil

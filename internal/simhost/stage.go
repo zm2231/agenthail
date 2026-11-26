@@ -5,7 +5,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 )
@@ -43,10 +42,7 @@ func (h *Host) stageApp(owner, app string) (string, func(), error) {
 	if !info.IsDir() {
 		return "", nil, refuse("invalid", "app must be a .app folder.")
 	}
-	if err := os.MkdirAll(filepath.Join(h.outRoot, ".staging"), 0o700); err != nil {
-		return "", nil, err
-	}
-	stage, err := os.MkdirTemp(filepath.Join(h.outRoot, ".staging"), "install-")
+	stage, err := h.stagingDir()
 	if err != nil {
 		return "", nil, err
 	}
@@ -68,21 +64,12 @@ func relativeTo(dir, app string) (string, bool) {
 }
 
 func copyTree(fsys fs.FS, from, to string) error {
-	return fs.WalkDir(fsys, from, func(name string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
+	return walkApp(fsys, from, func(name string, entry fs.DirEntry) error {
 		dest := filepath.Join(to, filepath.FromSlash(strings.TrimPrefix(strings.TrimPrefix(name, from), "/")))
-		switch {
-		case entry.Type()&fs.ModeSymlink != 0:
-			return refuse("invalid", "The app holds a link (%s); install takes apps without links.", path.Base(name))
-		case entry.IsDir():
+		if entry.IsDir() {
 			return os.MkdirAll(dest, 0o700)
-		case entry.Type().IsRegular():
-			return copyFile(fsys, name, dest)
-		default:
-			return refuse("invalid", "The app holds something that is neither a file nor a folder (%s).", path.Base(name))
 		}
+		return copyFile(fsys, name, dest)
 	})
 }
 
