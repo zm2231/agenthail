@@ -301,6 +301,8 @@ agenthail ledger owner server     # run once on the laptop, per project
 agenthail ledger owner            # show the owner, sync cursor and replay backlog
 ```
 
+Joining a folder on another computer to a project (`agenthail project add <path> --host <host> --join <project>`) assigns the owner for you: the joined computer's ledger of the project becomes a replica of the one the project's computer keeps.
+
 Nothing changes on upgrade: a project you do not assign stays local. You assign each project separately, and different projects can have different owners. If the laptop already holds history for the project, that history moves to the owner. This works only while the owner has no history of its own for that project.
 
 Once a project has an owner:

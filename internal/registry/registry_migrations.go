@@ -507,6 +507,9 @@ func migrateTx(tx *sql.Tx) error {
 	if err := ensureColumn(tx, "projects", "worktree", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
+	if err := ensureColumn(tx, "projects", "joined", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
 	if version < 18 {
 		if err := backfillIntentUUIDs(tx); err != nil {
 			return err

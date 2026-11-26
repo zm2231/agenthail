@@ -81,7 +81,7 @@ struct ProjectTiles: Equatable {
     }
 
     static func colourID(_ projectID: String, owner hostID: String) -> String {
-        hostID.isEmpty || projectID.isEmpty || projectID.contains("::") || projectID.hasPrefix("repo:") ? projectID : hostID + "::" + projectID
+        hostID.isEmpty || projectID.isEmpty || projectID.contains("::") || projectID.hasPrefix("repo:") || projectID.hasPrefix("shared:") ? projectID : hostID + "::" + projectID
     }
 
     static func colour(_ projectID: String) -> Int {

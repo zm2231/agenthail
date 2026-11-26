@@ -229,16 +229,14 @@ func outdatedLedgerHost(name string, err error) error {
 	return err
 }
 
-func writeLedgerHostError(w http.ResponseWriter, host *pairedHost, err error) {
+func ledgerHostActionError(host *pairedHost, err error) error {
 	var outdated ledgerHostOutdated
 	if errors.As(err, &outdated) {
-		writeAPIError(w, http.StatusServiceUnavailable, ledgerOwnerOutdatedCode, fmt.Sprintf("Update Agenthail on %s, then retry: it does not know what this host sent (%s). Nothing was recorded.", outdated.host, outdated.refusal))
-		return
+		return actionFailed(http.StatusServiceUnavailable, ledgerOwnerOutdatedCode, fmt.Sprintf("Update Agenthail on %s, then retry: it does not know what this host sent (%s). Nothing was recorded.", outdated.host, outdated.refusal))
 	}
 	var status hosts.StatusError
 	if errors.As(err, &status) && status.Status == http.StatusConflict {
-		writeAPIError(w, http.StatusConflict, "refused", status.Message)
-		return
+		return actionFailed(http.StatusConflict, "refused", status.Message)
 	}
-	writeAPIError(w, http.StatusBadGateway, "ledger_owner_unreachable", "The ledger owner "+host.record.Name+" could not be reached: "+err.Error())
+	return actionFailed(http.StatusBadGateway, "ledger_owner_unreachable", "The ledger owner "+host.record.Name+" could not be reached: "+err.Error())
 }

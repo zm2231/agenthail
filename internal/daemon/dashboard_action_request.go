@@ -84,4 +84,7 @@ type dashboardActionRequest struct {
 	Ceiling         json.RawMessage            `json:"ceiling,omitempty"`
 	Task            bool                       `json:"task,omitempty"`
 	Host            string                     `json:"host,omitempty"`
+	Join            string                     `json:"join,omitempty"`
+	JoinKey         string                     `json:"joinKey,omitempty"`
+	LedgerOwner     string                     `json:"ledgerOwner,omitempty"`
 }

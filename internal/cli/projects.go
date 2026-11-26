@@ -13,7 +13,8 @@ import (
 )
 
 const projectUsage = `usage: agenthail project list [--all] [--json]
-       agenthail project add <path> [--name <title>] [--host <host>] [--json]
+       agenthail project add <path> [--name <title>] [--host <host>] [--join <name|id|path>] [--json]
+       agenthail project unjoin <name|id|path> [--host <host>] [--json]
        agenthail project remove <name|id|path> [--json]
        agenthail project rename <name|id|path> <new name> [--json]
        agenthail project <archive|unarchive> <name|id|path> [--json]
@@ -38,6 +39,16 @@ with a remote are one project on every paired host. Archiving hides a project
 and its sessions until it is unarchived or one of its sessions shows new
 activity; removing an added project moves its sessions to the next project
 that holds them.
+
+Joining adds a folder, on this host or a paired one, to an existing project:
+'project add <path> --host <host> --join <project>'. The folders are then one
+project on every paired host, with one lead, who may run on any of them, and
+one ledger, kept by the host that had the project. A project without a
+repository key gets a shared key the first time a folder joins it, and keeps
+it when renamed. A folder in a repository with a remote, a folder joined to
+another project, and a folder whose project has its own lead or ledger cannot
+join. Unjoining makes the folder a project of its own again; the project
+keeps its lead and ledger.
 
 Linking joins one project into another: its sessions, lead and ledger become
 the second project's. A link between two repositories with remotes holds on
@@ -217,6 +228,17 @@ func (a *App) cmdProject(args []string) error {
 		} else if absolute, err := filepath.Abs(positional[1]); err == nil {
 			payload["path"] = absolute
 		}
+		if join := strings.TrimSpace(flagVal(args, "--join")); join != "" {
+			projects, err := daemonProjects(ctx, client)
+			if err != nil {
+				return err
+			}
+			target, err := a.linkTarget(projects, join)
+			if err != nil {
+				return err
+			}
+			payload["join"] = target.ID
+		}
 		var answer struct {
 			Project struct {
 				DisplayName string `json:"displayName"`
@@ -236,6 +258,27 @@ func (a *App) cmdProject(args []string) error {
 			return nil
 		}
 		fmt.Printf("added project %s (%s)\n", answer.Project.DisplayName, answer.Project.RootPath)
+		return nil
+	case "unjoin":
+		if len(positional) != 2 {
+			return fmt.Errorf("%s", projectUsage)
+		}
+		projects, err := daemonProjects(ctx, client)
+		if err != nil {
+			return err
+		}
+		checkout, err := resolveJoinedCheckout(projects, positional[1], strings.TrimSpace(flagVal(args, "--host")))
+		if err != nil {
+			return err
+		}
+		var answer map[string]any
+		if err := a.gatedProjectAction(ctx, client, map[string]any{"action": "project-unjoin", "projectId": checkout.ProjectID}, &answer); err != nil {
+			return err
+		}
+		if jsonOut {
+			return emit(answer)
+		}
+		fmt.Printf("unjoined %s on %s; it is a project of its own again\n", checkout.RootPath, checkout.Host.Name)
 		return nil
 	case "remove", "rm":
 		if len(positional) != 2 {
@@ -423,6 +466,42 @@ func (a *App) threadSessionAction(target string, payload map[string]any) (map[st
 // resolveAddedCheckout picks the one added checkout a selector names: the
 // checkout itself by id or folder, else the project's only added checkout,
 // preferring this host's.
+func resolveJoinedCheckout(projects []projectRow, selector, host string) (projectCheckout, error) {
+	project, err := resolveProject(projects, selector)
+	if err != nil {
+		return projectCheckout{}, err
+	}
+	if checkout, found := project.checkoutNamed(selector); found && checkout.Added && host == "" {
+		return checkout, nil
+	}
+	var local, remote []projectCheckout
+	for _, checkout := range project.Checkouts {
+		switch {
+		case !checkout.Added:
+		case host != "" && !strings.EqualFold(checkout.Host.Name, host) && checkout.Host.ID != host:
+		case checkout.Host.State == "local":
+			local = append(local, checkout)
+		default:
+			remote = append(remote, checkout)
+		}
+	}
+	candidates := local
+	if len(candidates) == 0 {
+		candidates = remote
+	}
+	switch len(candidates) {
+	case 0:
+		return projectCheckout{}, fmt.Errorf("project %s has no added folder there to unjoin", project.DisplayName)
+	case 1:
+		return candidates[0], nil
+	}
+	labels := make([]string, 0, len(candidates))
+	for _, checkout := range candidates {
+		labels = append(labels, fmt.Sprintf("%s on %s (%s)", checkout.RootPath, checkout.Host.Name, checkout.ProjectID))
+	}
+	return projectCheckout{}, fmt.Errorf("project %s is added in several folders: %s; unjoin one by its id, folder or --host", project.DisplayName, strings.Join(labels, ", "))
+}
+
 func resolveAddedCheckout(projects []projectRow, selector string) (projectCheckout, error) {
 	project, err := resolveProject(projects, selector)
 	if err != nil {

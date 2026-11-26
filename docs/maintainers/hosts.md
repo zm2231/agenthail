@@ -128,8 +128,9 @@ Each paired host has one mirror loop:
 - It imports only sessions the remote serves itself: a row that is already
   host-qualified, or that names another host, is skipped. Two daemons paired
   both ways therefore show each other's sessions exactly once.
-- A mirrored row's project `id` stays as it is when it is a `repo:` key, so
-  the same folder of the same repository is one project on both hosts. A
+- A mirrored row's project `id` stays as it is when it is a `repo:` or
+  `shared:` key, so the same folder of the same repository, or folders joined
+  to one project, are one project on both hosts. A
   project without a key, and every project's `localId`, is qualified with the
   host. A `repo:` id is never host-qualified, even though a key for a folder
   inside a repository contains `::`.

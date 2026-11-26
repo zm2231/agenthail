@@ -28,55 +28,58 @@ func (d *Daemon) apiLedgerOwnerHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, "host_not_found", "No paired host "+req.Host+"; see agenthail hosts.")
 		return
 	}
-	if err := d.hostTransit(r.Context(), host); err != nil {
+	result, err := d.assignLedgerOwner(r.Context(), host, req.ProjectKey)
+	if err != nil {
 		writeActionResult(w, actionResult{}, err)
 		return
 	}
+	writeDashboardJSON(w, http.StatusOK, result)
+}
+
+// assignLedgerOwner makes host the owner of this host's ledger under key,
+// in the two phases that never leave only one of them thinking it owns it.
+func (d *Daemon) assignLedgerOwner(ctx context.Context, host *pairedHost, key string) (ledgerOwnerResponse, error) {
+	if err := d.hostTransit(ctx, host); err != nil {
+		return ledgerOwnerResponse{}, err
+	}
 	host.ledgerMu.Lock()
 	defer host.ledgerMu.Unlock()
-	key, store := req.ProjectKey, d.ledgerStore()
+	store := d.ledgerStore()
 	if err := store.CanAssignOwner(key, host.record.ID); err != nil {
-		writeLedgerError(w, err)
-		return
+		return ledgerOwnerResponse{}, ledgerActionError(err)
 	}
 	moves, err := store.HoldsHistory(key)
 	if err != nil {
-		writeLedgerError(w, err)
-		return
+		return ledgerOwnerResponse{}, ledgerActionError(err)
 	}
 	adopting, err := store.HoldsUnsharedIDs(key)
 	if err != nil {
-		writeLedgerError(w, err)
-		return
+		return ledgerOwnerResponse{}, ledgerActionError(err)
 	}
 	var claimed ledgerOwnerResponse
-	if err := d.ledgerHostCall(r.Context(), host, http.MethodPost, "/api/v1/ledger/sync/claim", nil, ledgerClaimRequest{ProjectKey: key, Adopting: adopting}, &claimed); err != nil {
-		writeLedgerHostError(w, host, err)
-		return
+	if err := d.ledgerHostCall(ctx, host, http.MethodPost, "/api/v1/ledger/sync/claim", nil, ledgerClaimRequest{ProjectKey: key, Adopting: adopting}, &claimed); err != nil {
+		return ledgerOwnerResponse{}, ledgerHostActionError(host, err)
 	}
 	if claimed.Owner != host.record.ID {
-		d.abortLedgerClaim(r.Context(), host, key)
-		writeAPIError(w, http.StatusConflict, "owner_mismatch", host.record.Name+" answered as "+claimed.Owner+", not as itself; nothing was recorded.")
-		return
+		d.abortLedgerClaim(ctx, host, key)
+		return ledgerOwnerResponse{}, actionFailed(http.StatusConflict, "owner_mismatch", host.record.Name+" answered as "+claimed.Owner+", not as itself; nothing was recorded.")
 	}
 	if err := store.AssignOwner(key, host.record.ID); err != nil {
-		d.abortLedgerClaim(r.Context(), host, key)
-		writeLedgerError(w, err)
-		return
+		d.abortLedgerClaim(ctx, host, key)
+		return ledgerOwnerResponse{}, ledgerActionError(err)
 	}
 	result := ledgerOwnerResponse{ProjectKey: key, Owner: host.record.ID, OwnerName: host.record.Name, Adopted: moves}
 	var refusal ledgerOwnerRefusal
-	switch err := d.confirmLedgerOwnerLocked(r.Context(), host, key); {
+	switch err := d.confirmLedgerOwnerLocked(ctx, host, key); {
 	case err == nil:
 		result.Confirmed = true
 	case errors.As(err, &refusal):
-		writeAPIError(w, http.StatusConflict, "refused", refusal.message)
-		return
+		return ledgerOwnerResponse{}, actionFailed(http.StatusConflict, "refused", refusal.message)
 	default:
 		result.Pending = err.Error()
 	}
 	d.wakeLedgerSync(host)
-	writeDashboardJSON(w, http.StatusOK, result)
+	return result, nil
 }
 
 func (d *Daemon) abortLedgerClaim(ctx context.Context, host *pairedHost, key string) {

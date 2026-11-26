@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/broadcast"
+	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 )
@@ -115,7 +116,7 @@ func (d *Daemon) projectLedgerKey(named broadcast.Project) (string, error) {
 	}
 	switch {
 	case elsewhere.Key != "":
-	case strings.HasPrefix(named.ID, "repo:"):
+	case hosts.ProjectKey(named.ID):
 		elsewhere.Key = named.ID
 	case strings.HasPrefix(named.ID, projectresolve.CatalogImplicitProjectID("")):
 		return "", nil

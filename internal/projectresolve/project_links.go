@@ -66,7 +66,7 @@ func LoadProjectLinks(reg *registry.Registry) (ProjectLinkSet, error) {
 // A survivor may have no checkout on this host, so its name comes from its id.
 func ProjectIDName(id string, records []registry.ProjectRecord) string {
 	for _, record := range records {
-		if record.ID == id && record.Title != "" {
+		if (record.ID == id || record.Added && record.Key == id) && record.Title != "" {
 			return record.Title
 		}
 	}

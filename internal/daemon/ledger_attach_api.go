@@ -176,12 +176,15 @@ func (d *Daemon) ledgerProjectKnown(key, sessionID string) (bool, error) {
 }
 
 func writeLedgerError(w http.ResponseWriter, err error) {
+	writeActionResult(w, actionResult{}, ledgerActionError(err))
+}
+
+func ledgerActionError(err error) error {
 	var refusal *ledger.Refusal
 	if errors.As(err, &refusal) {
-		writeAPIError(w, http.StatusConflict, "refused", refusal.Reason)
-		return
+		return actionFailed(http.StatusConflict, "refused", refusal.Reason)
 	}
-	writeAPIError(w, http.StatusInternalServerError, "ledger_write_failed", err.Error())
+	return actionFailed(http.StatusInternalServerError, "ledger_write_failed", err.Error())
 }
 
 func (d *Daemon) apiLedgerGoalHandler(w http.ResponseWriter, r *http.Request) {

@@ -91,8 +91,10 @@ So on a paired host:
 - the paired host's own clones and worktrees of the repository stay in the
   repository's keyed project;
 - the paired host can add a worktree of its own as its own project, which is a
-  separate project. Links between keyless projects stay on their host, so the
-  two cannot be joined across hosts.
+  separate project. Links between keyless projects stay on their host; to
+  make the two one project, join one folder to the other's project (see
+  [projects](projects.md#joining-a-folder-on-another-computer)), which gives
+  it a shared key.
 
 A session started on another host for the worktree project's work, such as a
 worker the worktree project's lead starts on a paired Linux host, works in a
