@@ -92,17 +92,20 @@ func (d *Daemon) mcpReadBody(sessionID, ref string, offset int, version *uint64)
 	if err != nil {
 		return nil, refuse("invalid", "The body range is invalid.")
 	}
-	return mcpBodyPage(sessionID, ref, offset, part.Body, part.Total, part.Version), nil
+	return mcpBodyPage(sessionID, ref, offset, part.Body, part.Total, &part.Version), nil
 }
 
 var errMCPBodyRewritten = refuse("body_rewritten", "The body was rewritten since that version; read it again from offset 0 without version.")
 
-func mcpBodyPage(sessionID, ref string, offset int, body []byte, total int, version uint64) map[string]any {
+func mcpBodyPage(sessionID, ref string, offset int, body []byte, total int, version *uint64) map[string]any {
 	if offset+len(body) < total {
 		body = wholeRunes(body)
 	}
 	end := offset + len(body)
-	result := map[string]any{"sessionId": sessionID, "bodyRef": ref, "version": version, "offset": offset, "end": end, "total": total, "text": string(body), "truncated": end < total}
+	result := map[string]any{"sessionId": sessionID, "bodyRef": ref, "offset": offset, "end": end, "total": total, "text": string(body), "truncated": end < total}
+	if version != nil {
+		result["version"] = *version
+	}
 	if end < total {
 		result["nextOffset"] = end
 	}

@@ -126,6 +126,8 @@ is refused with `409 body_rewritten`, carrying the current `version` and
 malformed `version` is `400 invalid_version`, an unknown or expired reference
 `404 body_unavailable`, and a bad range `400 invalid_range`. The endpoint is
 routed to the session's host, so the same holds for a session on a paired host.
+A paired host running an Agenthail from before body versions ignores `version`
+and answers without one; a reader then reads that body unpinned, as before.
 
 A source failure
 (provider stream or seed error, or a rejected journal write) is a typed

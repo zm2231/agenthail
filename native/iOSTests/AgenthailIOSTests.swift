@@ -324,6 +324,23 @@ final class AgenthailIOSTests: XCTestCase {
     }
 
     @MainActor
+    func testRetainedBodyFromAHostWithoutBodyVersionsLoadsUnpinned() async throws {
+        RetainedBodyURLProtocol.state.reset(total: 40_000, unversioned: true)
+        let configuration = FixtureScope.open(self).configuration([RetainedBodyURLProtocol.self])
+        let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
+        model.selectedSessionID = "computer::demo"
+        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref", attachment: nil)
+
+        let result = await model.retainedSessionBody(for: item)
+
+        XCTAssertNil(result?.error)
+        XCTAssertEqual(result?.text.count, 40_000)
+        let sent = RetainedBodyURLProtocol.state.versionsSent
+        XCTAssertGreaterThan(sent.count, 1)
+        XCTAssertTrue(sent.allSatisfy { $0 == nil })
+    }
+
+    @MainActor
     func testRetainedBodyReportsASecondRewriteInsteadOfJoiningBodies() async throws {
         RetainedBodyURLProtocol.state.reset(total: 40_000, rewriteBeforeRequest: [2, 4])
         let configuration = FixtureScope.open(self).configuration([RetainedBodyURLProtocol.self])
@@ -695,18 +712,19 @@ private final class RetainedBodyState: @unchecked Sendable {
     private var requests = 0
     private var version: UInt64 = 1
     private var rewriteBeforeRequest: Set<Int> = []
+    private var unversioned = false
     private var sentVersions: [String?] = []
     var requestCount: Int { lock.withLock { requests } }
     var versionsSent: [String?] { lock.withLock { sentVersions } }
-    func reset(total: Int, invalidBoundary: Bool = false, rewriteBeforeRequest: Set<Int> = []) {
-        lock.withLock { self.total = total; self.invalidBoundary = invalidBoundary; self.rewriteBeforeRequest = rewriteBeforeRequest; requests = 0; version = 1; sentVersions = [] }
+    func reset(total: Int, invalidBoundary: Bool = false, rewriteBeforeRequest: Set<Int> = [], unversioned: Bool = false) {
+        lock.withLock { self.total = total; self.invalidBoundary = invalidBoundary; self.rewriteBeforeRequest = rewriteBeforeRequest; self.unversioned = unversioned; requests = 0; version = 1; sentVersions = [] }
     }
     func response(start: Int, end: Int, expected: String?) -> (status: Int, body: String) {
         lock.withLock {
             requests += 1
             sentVersions.append(expected)
             if rewriteBeforeRequest.contains(requests) { version += 1 }
-            if let expected, expected != String(version) {
+            if !unversioned, let expected, expected != String(version) {
                 return (409, String(data: try! JSONSerialization.data(withJSONObject: [
                     "error": ["code": "body_rewritten", "message": "The body was rewritten since that version; read it again from the start."],
                     "version": version, "total": total
@@ -716,10 +734,12 @@ private final class RetainedBodyState: @unchecked Sendable {
             let boundedEnd = min(end, total)
             let length = max(0, boundedEnd - start)
             let body = invalidBoundary && boundedEnd < total ? String(repeating: letter, count: max(0, length - 1)) + "\u{FFFD}" : String(repeating: letter, count: length)
-            return (200, String(data: try! JSONSerialization.data(withJSONObject: [
-                "sessionId": "demo", "bodyRef": "body-ref", "version": version, "start": start, "end": boundedEnd,
+            var answer: [String: Any] = [
+                "sessionId": "demo", "bodyRef": "body-ref", "start": start, "end": boundedEnd,
                 "total": total, "body": body, "truncated": boundedEnd < total
-            ]), encoding: .utf8)!)
+            ]
+            if !unversioned { answer["version"] = version }
+            return (200, String(data: try! JSONSerialization.data(withJSONObject: answer), encoding: .utf8)!)
         }
     }
 }

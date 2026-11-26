@@ -2213,7 +2213,7 @@ struct RuntimeCommands: Decodable, Equatable, Sendable {
 struct SessionStreamBody: Decodable {
     let sessionId: String
     let bodyRef: String
-    let version: UInt64
+    let version: UInt64?
     let start: Int
     let end: Int
     let total: Int

@@ -274,10 +274,13 @@ type actionGate struct {
 	// legacyMetadata, when set, is the session metadata body a host from
 	// before subagent paging returns.
 	legacyMetadata atomic.Pointer[string]
-	snapshots      atomic.Pointer[snapshotHold]
-	versions       atomic.Pointer[snapshotHold]
-	actions        atomic.Pointer[snapshotHold]
-	transfers      atomic.Pointer[snapshotHold]
+	// unversionedBodies answers body reads as a host from before body
+	// versions: it ignores an expected version and returns none.
+	unversionedBodies atomic.Bool
+	snapshots         atomic.Pointer[snapshotHold]
+	versions          atomic.Pointer[snapshotHold]
+	actions           atomic.Pointer[snapshotHold]
+	transfers         atomic.Pointer[snapshotHold]
 	// beyondVersion counts requests for anything other than /api/v1/version.
 	beyondVersion atomic.Int32
 	// ledgerDrops extends drops and truncate to ledger writes.
@@ -523,6 +526,24 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 			w.Header().Set(hosts.ResponseHeader, identity.ID)
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = io.WriteString(w, *body)
+			return
+		}
+		if n.gate.unversionedBodies.Load() && r.URL.Path == "/api/v1/session-stream-body" {
+			query := r.URL.Query()
+			query.Del("version")
+			r.URL.RawQuery = query.Encode()
+			recorder := httptest.NewRecorder()
+			n.handler.ServeHTTP(recorder, r)
+			var answer map[string]any
+			if json.Unmarshal(recorder.Body.Bytes(), &answer) == nil {
+				delete(answer, "version")
+			}
+			for key, values := range recorder.Header() {
+				w.Header()[key] = values
+			}
+			w.Header().Del("Content-Length")
+			w.WriteHeader(recorder.Code)
+			_ = json.NewEncoder(w).Encode(answer)
 			return
 		}
 		if n.gate.rootlessPrepare.Load() && r.URL.Path == "/api/v1/session-move/prepare" {

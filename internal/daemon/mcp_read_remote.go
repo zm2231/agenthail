@@ -72,13 +72,13 @@ func (d *Daemon) mcpReadRemoteBody(ctx context.Context, qualifiedID, ref string,
 	} else if err != nil {
 		return nil, err
 	}
-	if answer.Version == nil {
-		return nil, refuse("refused", "The session's host answered without a body version; update Agenthail on that host.")
+	if version != nil && answer.Version == nil {
+		return nil, refuse("refused", "The session's host runs an older Agenthail that cannot check a body version; read without version, or update that host.")
 	}
 	if version != nil && *answer.Version != *version {
 		return nil, errMCPBodyRewritten
 	}
-	return mcpBodyPage(qualifiedID, ref, offset, []byte(answer.Body), answer.Total, *answer.Version), nil
+	return mcpBodyPage(qualifiedID, ref, offset, []byte(answer.Body), answer.Total, answer.Version), nil
 }
 
 type hostAnswerError struct {

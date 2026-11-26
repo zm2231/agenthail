@@ -420,3 +420,31 @@ func TestARangedBodyReadThroughAPairedHostIsRefusedOnceTheBodyIsRewritten(t *tes
 		t.Fatalf("the body endpoint routed to the paired host: status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestABodyReadFromAPairedHostWithoutBodyVersionsStaysUnpinned(t *testing.T) {
+	f := startAcrossHosts(t)
+	full := strings.Repeat("é", 6000)
+	item, _ := json.Marshal(sessionJournalPayload{ItemID: "tool", Kind: "message", Role: "assistant", Body: full[:64], Truncated: true, BodyRef: "body-old", Version: 1, Op: "upsert", TS: time.Now().Format(time.RFC3339Nano)})
+	if _, _, err := f.vps.reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: "started", Kind: "message", ProviderKey: "tool", Payload: item, ObservedAt: time.Now(), BodyRef: "body-old", FullBody: []byte(full)}, registry.SessionJournalRetention{Count: 4096, Bytes: 64 << 20}); err != nil {
+		t.Fatal(err)
+	}
+	f.vps.gate.unversionedBodies.Store(true)
+	var rebuilt strings.Builder
+	for offset := 0; ; {
+		chunk, refused := callMCP(t, f.starter, "agenthail_read", map[string]any{"sessionId": f.created, "bodyRef": "body-old", "offset": offset})
+		if _, versioned := chunk["version"]; refused || versioned {
+			t.Fatalf("a chunk at %d from a host without body versions: refused=%v %v", offset, refused, chunk)
+		}
+		rebuilt.WriteString(chunk["text"].(string))
+		next, more := chunk["nextOffset"].(float64)
+		if !more {
+			break
+		}
+		offset = int(next)
+	}
+	if rebuilt.String() != full {
+		t.Fatalf("rebuilt %d bytes, want %d", rebuilt.Len(), len(full))
+	}
+	out, refused := callMCP(t, f.starter, "agenthail_read", map[string]any{"sessionId": f.created, "bodyRef": "body-old", "version": 1})
+	refusedAs(t, "an expected version a host without body versions cannot check", out, refused, "refused")
+}
