@@ -4,7 +4,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::catalog::{Client, Session, enc};
+use crate::catalog::{Client, Session, enc, parse_time};
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
@@ -86,6 +86,12 @@ pub fn children(parent: &str, listed: &[Session], fetched: &[Session]) -> Vec<Se
     let live: Vec<&Session> = listed.iter().filter(|x| parent_of(x).as_deref() == Some(parent)).collect();
     let ids: HashSet<&str> = live.iter().map(|x| x.id.as_str()).collect();
     fetched.iter().filter(|x| parent_of(x).as_deref() == Some(parent) && !ids.contains(x.id.as_str())).chain(live).cloned().collect()
+}
+
+pub fn in_daemon_order(children: &mut [Session]) {
+    children.sort_by(|a, b| {
+        (a.status != "busy").cmp(&(b.status != "busy")).then_with(|| parse_time(&b.last_active).cmp(&parse_time(&a.last_active))).then_with(|| a.id.cmp(&b.id))
+    });
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -291,6 +297,20 @@ mod tests {
         let fetched = vec![child("a", "p"), stale, child("z", "other")];
         let got: Vec<(String, String)> = children("p", &listed, &fetched).into_iter().map(|x| (x.id, x.name)).collect();
         assert_eq!(got, vec![("a".into(), "a task".into()), ("b".into(), "b task".into())]);
+    }
+
+    #[test]
+    fn children_follow_the_daemon_order() {
+        let mut list = vec![
+            row(r#"{"id":"idle-new","status":"idle","lastActive":"2026-11-26T12:59:17.5Z"}"#),
+            row(r#"{"id":"busy-old","status":"busy","lastActive":"2026-11-26T09:00:00Z"}"#),
+            row(r#"{"id":"idle-old","status":"idle","lastActive":"2026-11-26T12:59:17Z"}"#),
+            row(r#"{"id":"b-tie","status":"idle","lastActive":"2026-11-26T08:00:00Z"}"#),
+            row(r#"{"id":"a-tie","status":"idle","lastActive":"2026-11-26T08:00:00.000Z"}"#),
+        ];
+        in_daemon_order(&mut list);
+        let ids: Vec<&str> = list.iter().map(|x| x.id.as_str()).collect();
+        assert_eq!(ids, ["busy-old", "idle-new", "idle-old", "a-tie", "b-tie"]);
     }
 
     #[test]
