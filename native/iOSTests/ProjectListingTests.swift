@@ -35,7 +35,7 @@ final class ProjectListingTests: XCTestCase {
 
     func testAFolderJoinedFromAnotherComputerIsOneProjectUnderItsSharedKey() throws {
         let key = "shared:5f0c2a9e-7d41-4b8e-9a13-2c6f8e0b4d71"
-        let laptop = ProjectState(id: key, displayName: "agenthail-v2", checkouts: [Self.checkout(Self.local, "p-laptop", "/Volumes/4/agenthail-v2")],
+        let laptop = ProjectState(id: key, displayName: "agenthail-v2", checkouts: [Self.checkout(Self.local, "p-laptop", "/Users/a/agenthail-v2")],
                                   coordinators: [ProjectState.Lead(host: Self.local, name: "v2-lead", surface: "claude", sessionId: "s1")])
         let server = ProjectState(id: key, displayName: "agenthail-v2", checkouts: [Self.checkout(Self.local, "p-server", "/home/a/agenthail-v2")])
         let (projects, order) = Self.merge([("hlaptop", [laptop]), ("hserver", [server])])
