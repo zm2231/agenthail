@@ -280,7 +280,7 @@ impl Client {
                 Err(e) => return Recheck::Unknown(e),
             }
         }
-        Recheck::Unknown("Agenthail's session list doesn't include it".into())
+        found
     }
 }
 
@@ -447,7 +447,7 @@ mod tests {
         assert_eq!(asked.recv().unwrap().0, "/api/v1/snapshot?q=Fix+the%0Aimporter&limit=200");
         let unlisted = r#"{"sessions": [], "nextCursor": ""}"#;
         let (client, _asked) = crate::mock::daemon(vec![(200, detail.into()), (200, unlisted.into())]);
-        assert!(matches!(client.recheck(&known), Recheck::Unknown(_)));
+        assert!(matches!(client.recheck(&known), Recheck::Fresh(r) if !r.archived && r.status == "busy"));
         let (client, _failed) = crate::mock::daemon(vec![(200, detail.into()), (500, r#"{"error":{"code":"internal_error","message":"boom"}}"#.into())]);
         assert!(matches!(client.recheck(&known), Recheck::Unknown(_)));
     }
