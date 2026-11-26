@@ -158,9 +158,7 @@ fn body(w: &Win) -> El {
 }
 
 fn briefing(w: &Win) -> Option<El> {
-    let state = w.call.state.as_ref()?;
-    let brief = state.brief.as_ref()?;
-    let target = state.target.as_ref()?;
+    let (brief, target) = w.call.state.as_ref()?.shown_brief()?;
     let name = if target.name.is_empty() { &target.id } else { &target.name };
     let mut card = col()
         .key("voice-brief")
@@ -321,8 +319,7 @@ fn controls(w: &Win) -> El {
                     .disabled(call.working())
                     .on_press(|w: &mut Win| {
                         w.sync_route();
-                        if let Some((target, name)) = w.offer.take() {
-                            w.name = name;
+                        if let Some((target, _)) = w.offer.clone() {
                             let effects = w.call.transfer(&target);
                             w.run(effects);
                         }

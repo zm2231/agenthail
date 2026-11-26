@@ -455,6 +455,46 @@ fn page_events_from_an_earlier_call_are_ignored() {
     assert!(call.heard("", "ready", "", 0.0).is_empty());
 }
 
+fn connected(call: &mut Call) -> String {
+    let id = started(call, 0.0);
+    call.peer("connection", "connected", 0.0);
+    let up = only_job(&call.peer("channel", "open", 0.0));
+    call.reply(up, Ok(state(json!({"phase": "connected", "attemptId": id}))), 0.0);
+    assert!(call.connected_call());
+    id
+}
+
+#[test]
+fn a_failed_transfer_keeps_the_route_the_call_is_on() {
+    let mut call = ready();
+    let id = connected(&mut call);
+    let to = only_job(&call.transfer("s-builder"));
+    assert_eq!(call.target, "s-builder");
+    call.reply(to, Err("Agenthail couldn't reach that session.".into()), 1.0);
+    assert_eq!(call.target, "", "the call stays with the orchestrator");
+    assert!(!call.working());
+    let again = only_job(&call.transfer("s-builder"));
+    call.reply(again, Ok(state(json!({"phase": "connected", "attemptId": id, "target": {"id": "s-builder", "name": "Builder"}}))), 2.0);
+    assert_eq!(call.target, "s-builder");
+}
+
+#[test]
+fn a_brief_shows_only_for_the_session_it_was_made_for() {
+    let host = state(json!({
+        "phase": "ready",
+        "target": {"id": "s-reviewer", "name": "Reviewer"},
+        "brief": {"sessionId": "s-builder", "asOf": "2026-11-26T11:55:00Z", "exchanges": 3}
+    }));
+    assert!(host.shown_brief().is_none());
+    let matching = state(json!({
+        "phase": "ready",
+        "target": {"id": "s-builder", "name": "Builder"},
+        "brief": {"sessionId": "s-builder", "asOf": "2026-11-26T11:55:00Z", "exchanges": 3}
+    }));
+    let (brief, target) = matching.shown_brief().unwrap();
+    assert_eq!((brief.exchanges, target.name.as_str()), (3, "Builder"));
+}
+
 fn dialed_routed(call: &mut Call) -> String {
     let select = only_job(&call.call());
     let prepare = only_job(&call.reply(select, Ok(state(json!({"phase": "ready"}))), 0.0));

@@ -123,6 +123,11 @@ pub enum Talk {
 }
 
 impl State {
+    pub fn shown_brief(&self) -> Option<(&Brief, &Party)> {
+        let target = self.target.as_ref()?;
+        self.brief.as_ref().filter(|b| b.session_id == target.id).map(|b| (b, target))
+    }
+
     pub fn has_call(&self) -> bool {
         ["starting", "negotiating", "connected", "stopping", "unknown"].contains(&self.phase.as_str())
     }
@@ -394,6 +399,7 @@ pub struct Call {
     beating: Option<String>,
     last_beat: f64,
     requested: Option<String>,
+    transfer_from: Option<String>,
     asking_mic: bool,
     lost_at: Option<f64>,
     out: Vec<Effect>,
@@ -790,7 +796,7 @@ impl Call {
         if self.closed || self.working || !self.connected_call() {
             return Vec::new();
         }
-        self.target = target.trim().to_string();
+        self.transfer_from = Some(std::mem::replace(&mut self.target, target.trim().to_string()));
         self.begin_work();
         let to = Action { target_id: Some(self.target.clone()), ..Action::new("transfer") };
         self.fetch(Req::Transfer, Some(to));
@@ -996,6 +1002,12 @@ impl Call {
             }
             Req::Transfer | Req::Interrupt | Req::TargetInterrupt | Req::New => {
                 self.end_work(job.work);
+                if job.req == Req::Transfer {
+                    let from = self.transfer_from.take();
+                    if let (Err(_), Some(from)) = (&result, from) {
+                        self.target = from;
+                    }
+                }
                 if current {
                     match result {
                         Ok(next) => self.state = Some(next),

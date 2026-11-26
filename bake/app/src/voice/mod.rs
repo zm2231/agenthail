@@ -110,7 +110,7 @@ impl Win {
                     let quoted = serde_json::to_string(&attempt).unwrap_or_default();
                     self.eval(&format!("window.agenthailCall = {quoted}; void window.agenthailVoice.start()"));
                 }
-                Effect::PeerEnd => self.eval("window.agenthailVoice && window.agenthailVoice.end()"),
+                Effect::PeerEnd => self.eval("window.agenthailCall = \"\"; window.agenthailVoice && window.agenthailVoice.end()"),
                 Effect::PeerAnswer(sdp) => {
                     let quoted = serde_json::to_string(&sdp).unwrap_or_default();
                     self.eval(&format!("void window.agenthailVoice.answer({quoted})"));
@@ -316,6 +316,12 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
             w.route(&target, &name);
             changed = true;
         }
+    }
+    if !w.call.working() && w.offer.as_ref().is_some_and(|(target, _)| *target == w.call.target) {
+        if let Some((_, name)) = w.offer.take() {
+            w.name = name;
+        }
+        changed = true;
     }
     while let Ok((job, result)) = w.replies.1.try_recv() {
         let effects = w.call.reply(job, result, t);
