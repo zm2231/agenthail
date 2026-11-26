@@ -334,7 +334,7 @@ impl App {
 }
 
 pub fn session<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
-    s.sessions.iter().find(|x| x.id == id).or_else(|| over::search::pinned(s, id)).or_else(|| ui::subagents::fetched(s, id))
+    feed::search::lookup(s.sessions.iter().find(|x| x.id == id), over::search::pinned(s, id), || ui::subagents::fetched(s, id))
 }
 
 pub fn select(s: &mut App, id: &str) {

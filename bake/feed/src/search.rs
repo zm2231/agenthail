@@ -222,6 +222,21 @@ impl Client {
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum Pinned<'a> {
+    Unpinned,
+    Verified(&'a Session),
+    Withheld,
+}
+
+pub fn lookup<'a>(listed: Option<&'a Session>, pinned: Pinned<'a>, cached: impl FnOnce() -> Option<&'a Session>) -> Option<&'a Session> {
+    listed.or_else(|| match pinned {
+        Pinned::Verified(x) => Some(x),
+        Pinned::Withheld => None,
+        Pinned::Unpinned => cached(),
+    })
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Recheck {
     Fresh(Box<Session>),
@@ -482,5 +497,17 @@ mod tests {
         assert_eq!(working[0].title, "Stop @fixer");
         assert_eq!(commands("FIXER", Some(Selected { title: "@fixer", can_stop: true })).len(), 2);
         assert!(commands("zzz", None).is_empty());
+    }
+
+    #[test]
+    fn an_unverified_search_pin_hides_a_cached_row() {
+        let listed = Session { id: "c1".into(), name: "Listed".into(), ..Session::default() };
+        let pinned = Session { id: "c1".into(), name: "Pinned".into(), ..Session::default() };
+        let cached = Session { id: "c1".into(), name: "Cached".into(), ..Session::default() };
+        let name = |x: Option<&Session>| x.map(|x| x.name.clone());
+        assert_eq!(name(lookup(None, Pinned::Withheld, || Some(&cached))), None);
+        assert_eq!(name(lookup(None, Pinned::Verified(&pinned), || Some(&cached))), Some("Pinned".into()));
+        assert_eq!(name(lookup(None, Pinned::Unpinned, || Some(&cached))), Some("Cached".into()));
+        assert_eq!(name(lookup(Some(&listed), Pinned::Withheld, || Some(&cached))), Some("Listed".into()));
     }
 }

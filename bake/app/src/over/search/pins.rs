@@ -3,7 +3,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
 use feed::catalog::Session;
-use feed::search::Recheck;
+use feed::search::{Pinned, Recheck};
 
 use crate::App;
 
@@ -12,6 +12,7 @@ const RECHECK: Duration = Duration::from_secs(20);
 pub struct Pins {
     rows: Vec<Session>,
     verified: HashSet<String>,
+    gone: HashSet<String>,
     revision: HashMap<String, u64>,
     checking: HashMap<String, u64>,
     checked: HashMap<String, Instant>,
@@ -23,13 +24,18 @@ pub struct Pins {
 impl Default for Pins {
     fn default() -> Pins {
         let (tx, rx) = channel();
-        Pins { rows: Vec::new(), verified: HashSet::new(), revision: HashMap::new(), checking: HashMap::new(), checked: HashMap::new(), requests: 0, tx, rx }
+        Pins { rows: Vec::new(), verified: HashSet::new(), gone: HashSet::new(), revision: HashMap::new(), checking: HashMap::new(), checked: HashMap::new(), requests: 0, tx, rx }
     }
 }
 
 impl Pins {
-    pub fn get(&self, id: &str) -> Option<&Session> {
-        self.row(id).filter(|_| self.verified.contains(id))
+    pub fn get(&self, id: &str) -> Pinned<'_> {
+        match self.row(id) {
+            Some(x) if self.verified.contains(id) => Pinned::Verified(x),
+            Some(_) => Pinned::Withheld,
+            None if self.gone.contains(id) => Pinned::Withheld,
+            None => Pinned::Unpinned,
+        }
     }
 
     fn row(&self, id: &str) -> Option<&Session> {
@@ -41,6 +47,7 @@ impl Pins {
         self.rows.retain(|x| x.id != id);
         self.rows.push(row);
         self.verified.remove(&id);
+        self.gone.remove(&id);
         self.touch(&id);
     }
 
@@ -79,7 +86,10 @@ impl Pins {
                 self.verified.insert(id.clone());
                 self.checked.insert(id, Instant::now());
             }
-            Recheck::Gone => self.unpin(&id),
+            Recheck::Gone => {
+                self.unpin(&id);
+                self.gone.insert(id);
+            }
             Recheck::Unknown(_) => {
                 self.verified.remove(&id);
                 self.checked.insert(id, Instant::now());
@@ -93,6 +103,7 @@ fn recheck(s: &mut App) -> bool {
     let pins = &mut s.ov.search.pins;
     let before = pins.rows.len();
     pins.rows.retain(|x| !listed.contains(x.id.as_str()));
+    pins.gone.retain(|id| !listed.contains(id.as_str()));
     let dropped = pins.rows.len() != before;
     let Some(id) = super::selected(s) else { return dropped };
     let pins = &s.ov.search.pins;
@@ -120,4 +131,42 @@ pub fn drain(s: &mut App) -> bool {
         changed = true;
     }
     changed | recheck(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn verdict(p: &Pins, id: &str) -> &'static str {
+        match p.get(id) {
+            Pinned::Unpinned => "unpinned",
+            Pinned::Verified(_) => "verified",
+            Pinned::Withheld => "withheld",
+        }
+    }
+
+    fn check(p: &mut Pins, id: &str, found: Recheck) {
+        p.requests += 1;
+        let (seq, revision) = (p.requests, p.revision.get(id).copied().unwrap_or_default());
+        p.checking.insert(id.to_string(), seq);
+        p.take(id.to_string(), seq, revision, found);
+    }
+
+    #[test]
+    fn a_pin_stays_withheld_until_verified_and_after_it_fails() {
+        let row = Session { id: "c1".into(), ..Session::default() };
+        let mut p = Pins::default();
+        assert_eq!(verdict(&p, "c1"), "unpinned");
+        p.pin(row.clone());
+        assert_eq!(verdict(&p, "c1"), "withheld");
+        check(&mut p, "c1", Recheck::Fresh(Box::new(row.clone())));
+        assert_eq!(verdict(&p, "c1"), "verified");
+        check(&mut p, "c1", Recheck::Unknown("offline".into()));
+        assert_eq!(verdict(&p, "c1"), "withheld");
+        check(&mut p, "c1", Recheck::Gone);
+        assert_eq!(verdict(&p, "c1"), "withheld");
+        p.pin(row);
+        check(&mut p, "c1", Recheck::Fresh(Box::new(Session { id: "c1".into(), ..Session::default() })));
+        assert_eq!(verdict(&p, "c1"), "verified");
+    }
 }
