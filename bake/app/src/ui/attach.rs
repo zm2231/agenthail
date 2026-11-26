@@ -213,6 +213,14 @@ pub fn clear(s: &mut App, id: &str) {
     s.attach.tray.clear(id);
 }
 
+pub fn restore(s: &mut App, id: &str, unsent: &feed::composer::Unsent) -> Vec<String> {
+    let lost = s.attach.tray.restore(id, &unsent.attachments);
+    if let Some(gone) = attach::missing_upload(&unsent.error) {
+        s.attach.tray.expire(id, &gone);
+    }
+    lost
+}
+
 pub fn remove(s: &mut App, local: u64) {
     s.attach.tray.remove(local);
     s.attach.thumbs.remove(&local);
@@ -334,6 +342,12 @@ pub fn pump(s: &mut App) -> bool {
             let _ = out.send(Bg::Attach(Done::Picture(a.id, result)));
         });
     }
+    let broken: Vec<String> = s.attach.pictures.iter().filter_map(|(id, p)| matches!(p, Picture::Ready(image) if image.error().is_some()).then(|| id.clone())).collect();
+    for id in broken {
+        s.attach.pictures.insert(id, Picture::Failed("Couldn't load image".into()));
+        s.attach.rev += 1;
+        changed = true;
+    }
     let now = Instant::now();
     for sent in s.attach.sent.values_mut() {
         if sent.copied.is_some_and(|at| now.duration_since(at) >= COPIED_FOR) {
@@ -346,6 +360,9 @@ pub fn pump(s: &mut App) -> bool {
 }
 
 fn retry_picture(s: &mut App, id: &str) {
+    if let Some(folder) = cache_root().map(|root| root.join(attach::folder(id))) {
+        let _ = std::fs::remove_dir_all(folder);
+    }
     s.attach.pictures.remove(id);
     s.attach.rescan = true;
     s.attach.rev += 1;
@@ -493,7 +510,7 @@ pub fn chips(s: &App, id: &str) -> Option<El> {
             .child(text(chip.name.clone()).font(META).color(theme::text()).truncate().max_w(220.0));
         match chip.state {
             State::Uploading => c = c.child(rune_kit::Loader::new().size(10.0).color(faint()).build(theme::kit())),
-            State::Failed(_) => {
+            State::Failed(_) if chip.data.is_some() => {
                 let session = id.to_string();
                 c = c.child(
                     col()
@@ -506,7 +523,7 @@ pub fn chips(s: &App, id: &str) -> Option<El> {
                         .child(icon(&icons::ROTATE, 11.0).color(failed())),
                 )
             }
-            State::Ready(_) => {}
+            State::Ready(_) | State::Failed(_) => {}
         }
         c = c.child(
             col()

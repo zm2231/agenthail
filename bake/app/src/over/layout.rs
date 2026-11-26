@@ -122,13 +122,11 @@ pub fn load(s: &mut App) {
     s.drafts = feed::composer::Drafts::from_json(&v["drafts"]);
     s.unsent = feed::composer::Unconfirmed::from_json(&v["unsent"]);
     s.attach.tray = feed::attach::Tray::from_json(&v["attachments"]);
-    let held: Vec<(String, String, Vec<feed::attach::Upload>)> = s.unsent.iter().map(|(id, u)| (id.clone(), u.text.clone(), u.attachments.clone())).collect();
-    for (id, text, attachments) in held {
-        if s.drafts.get(&id).trim().is_empty() {
-            s.drafts.set(&id, &text);
-        }
-        if !s.attach.tray.has(&id) {
-            s.attach.tray.restore(&id, &attachments);
+    let held: Vec<(String, feed::composer::Unsent)> = s.unsent.iter().map(|(id, u)| (id.clone(), u.clone())).collect();
+    for (id, unsent) in held {
+        if s.drafts.get(&id).trim().is_empty() && !s.attach.tray.has(&id) {
+            s.drafts.set(&id, &unsent.text);
+            crate::ui::attach::restore(s, &id, &unsent);
         }
     }
     s.queue_taking = feed::queue::Taking::from_json(&v["queueTaking"]);

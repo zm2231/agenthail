@@ -552,15 +552,18 @@ pub fn send_to(s: &mut App, id: &str, tx: &mut Tx) {
 }
 
 fn clear_sent(s: &mut App, id: &str, unsent: &Unsent) {
-    if s.composer_for.as_deref() == Some(id) && s.composer.text.trim() == unsent.text {
+    let chips = s.attach.tray.chips(id).len();
+    let same = shown_text(s, id).trim() == unsent.text && chips == unsent.attachments.len() && s.attach.tray.ready(id).is_ok_and(|now| unsent.same(&unsent.text, &now));
+    if !same {
+        return;
+    }
+    if s.composer_for.as_deref() == Some(id) {
         s.composer = TextEdit::new("");
         s.composer.focused = true;
-    } else if s.drafts.get(id).trim() == unsent.text {
+    } else {
         s.drafts.set(id, "");
     }
-    if s.attach.tray.ready(id).is_ok_and(|now| unsent.same(&unsent.text, &now)) {
-        ui::attach::clear(s, id);
-    }
+    ui::attach::clear(s, id);
 }
 
 pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
@@ -615,7 +618,7 @@ pub fn put_back_unsent(s: &mut App, id: &str) {
         s.composer.focused = true;
     }
     s.drafts.set(id, &merged);
-    let lost = s.attach.tray.restore(id, &unsent.attachments);
+    let lost = ui::attach::restore(s, id, &unsent);
     if !lost.is_empty() {
         note(s, id, format!("Could not come back with the message: {}.", lost.join(", ")));
     }
@@ -770,13 +773,11 @@ fn shown_text<'a>(s: &'a App, id: &str) -> &'a str {
 }
 
 fn put_back(s: &mut App, id: &str, unsent: &Unsent) {
-    if !s.attach.tray.has(id) {
-        s.attach.tray.restore(id, &unsent.attachments);
-    }
-    let text = unsent.text.as_str();
-    if !shown_text(s, id).trim().is_empty() {
+    if !shown_text(s, id).trim().is_empty() || ui::attach::has(s, id) {
         return;
     }
+    ui::attach::restore(s, id, unsent);
+    let text = unsent.text.as_str();
     if s.composer_for.as_deref() == Some(id) {
         let focused = s.composer.focused;
         s.composer = TextEdit::new(text);
@@ -804,8 +805,9 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
         Err(error) => Some((error.maybe_delivered, error.answered, error.message)),
     };
     if let Some((maybe_delivered, answered, error)) = failure {
-        put_back(s, &id, &pending);
-        s.unsent.add(&id, pending.failed(retry, maybe_delivered, answered, error));
+        let failed = pending.failed(retry, maybe_delivered, answered, error);
+        put_back(s, &id, &failed);
+        s.unsent.add(&id, failed);
     }
 }
 
@@ -879,6 +881,9 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
         }
         if let Some(receipts) = s.queued.remove(&old) {
             s.queued.entry(new.clone()).or_default().extend(receipts);
+        }
+        if let Some(n) = s.attach.preparing.remove(&old) {
+            *s.attach.preparing.entry(new.clone()).or_default() += n;
         }
         move_key(&mut s.status_line, &old, &new);
         move_key(&mut s.busy_pick, &old, &new);

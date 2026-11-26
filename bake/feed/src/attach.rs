@@ -226,13 +226,15 @@ impl Chip {
 pub enum Hold {
     Uploading,
     Failed(String),
+    TooMany,
 }
 
 impl Hold {
     pub fn note(&self) -> String {
         match self {
             Hold::Uploading => "Waiting for attachments to upload".into(),
-            Hold::Failed(name) => format!("{name} didn't upload. Retry it or remove it."),
+            Hold::Failed(name) => format!("{name} can't be sent. Retry it, or remove it and attach it again."),
+            Hold::TooMany => format!("A message can carry up to {MAX_COUNT} attachments. Remove some to send."),
         }
     }
 }
@@ -290,6 +292,9 @@ impl Tray {
     }
 
     pub fn ready(&self, id: &str) -> Result<Vec<Upload>, Hold> {
+        if self.chips(id).len() > MAX_COUNT {
+            return Err(Hold::TooMany);
+        }
         let mut out = Vec::new();
         for chip in self.chips(id) {
             match &chip.state {
@@ -328,11 +333,15 @@ impl Tray {
         for old in retired {
             let moving = self.chips.remove(&old).unwrap_or_default();
             let new = crate::composer::current(rekeyed, &old).to_string();
-            let list = self.chips.entry(new).or_default();
-            for chip in moving {
-                if list.len() < MAX_COUNT {
-                    list.push(chip);
-                }
+            self.chips.entry(new).or_default().extend(moving);
+        }
+    }
+
+    pub fn expire(&mut self, id: &str, upload: &str) {
+        for chip in self.chips.get_mut(id).into_iter().flatten() {
+            if matches!(&chip.state, State::Ready(u) if u.id == upload) {
+                chip.state = State::Failed("No longer on its computer. Remove it and attach it again.".into());
+                chip.data = None;
             }
         }
     }
@@ -358,6 +367,12 @@ impl Tray {
         }
         tray
     }
+}
+
+pub fn missing_upload(error: &str) -> Option<String> {
+    let rest = error.split_once("attachment \"")?.1;
+    let (id, tail) = rest.split_once('"')?;
+    tail.trim_start().starts_with("is not stored on this host").then(|| id.to_string())
 }
 
 pub fn media_type(name: &str) -> &'static str {
@@ -618,6 +633,37 @@ mod tests {
         assert_eq!(back.ready("s2").unwrap(), vec![upload("a")]);
         assert_eq!(back.restore("s2", &[upload("a")]), Vec::<String>::new());
         assert_eq!(back.chips("s2").len(), 1);
+    }
+
+    #[test]
+    fn a_merge_past_the_limit_keeps_every_chip_and_holds_the_send() {
+        let mut tray = Tray::default();
+        for (session, n) in [("old", 5), ("new", 5)] {
+            let uploads: Vec<Upload> = (0..n).map(|i| upload(&format!("{session}{i}"))).collect();
+            tray.restore(session, &uploads);
+        }
+        tray.rekey(&HashMap::from([("old".to_string(), "new".to_string())]));
+        assert_eq!(tray.chips("new").len(), 10);
+        assert_eq!(tray.ready("new"), Err(Hold::TooMany));
+        for chip in tray.chips("new")[..2].to_vec() {
+            tray.remove(chip.local);
+        }
+        assert_eq!(tray.ready("new").unwrap().len(), 8);
+    }
+
+    #[test]
+    fn an_expired_upload_becomes_a_chip_to_attach_again() {
+        let error = r#"attachment "upload:abc/shot.png" is not stored on this host; upload it again"#;
+        assert_eq!(missing_upload(error).as_deref(), Some("upload:abc/shot.png"));
+        assert_eq!(missing_upload("message is required"), None);
+        let mut tray = Tray::default();
+        tray.restore("s1", &[upload("upload:abc/shot.png"), upload("b")]);
+        tray.expire("s1", "upload:abc/shot.png");
+        assert_eq!(tray.ready("s1"), Err(Hold::Failed("upload:abc/shot.png.txt".into())));
+        let gone = tray.chips("s1")[0].local;
+        assert_eq!(tray.retry(gone), None);
+        tray.remove(gone);
+        assert_eq!(tray.ready("s1").unwrap(), vec![upload("b")]);
     }
 
     #[test]
