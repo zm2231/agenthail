@@ -68,8 +68,7 @@ pub fn badge(s: &App) {
     });
 }
 
-pub fn refresh(s: &mut App) {
-    let bar = MenuBar::build(&s.ov.d, &s.ov.needs);
+pub fn warn(s: &mut App) {
     let link = Link::of(&s.status);
     if let Some(tray) = &s.bar.tray
         && link.warns() != s.bar.warning
@@ -77,6 +76,11 @@ pub fn refresh(s: &mut App) {
     {
         s.bar.warning = link.warns();
     }
+}
+
+pub fn refresh(s: &mut App) {
+    let bar = MenuBar::build(&s.ov.d, &s.ov.needs);
+    let link = Link::of(&s.status);
     if s.bar.shown.as_ref().is_some_and(|(b, l)| *b == bar && *l == link) {
         return;
     }
