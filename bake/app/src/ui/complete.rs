@@ -423,6 +423,8 @@ pub fn rekey(s: &mut App, old: &str, new: &str) {
     }
     if let Some(search) = c.search.as_mut().filter(|q| q.session == old) {
         search.session = new.to_string();
+        search.asked = None;
+        search.results = None;
     }
     rebuild(s, new);
 }
