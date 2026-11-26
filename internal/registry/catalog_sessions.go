@@ -631,7 +631,13 @@ func (r *Registry) recordCatalogDiscovery(kind surface.SurfaceKind, seen map[str
 	for _, item := range deferred {
 		misses := item.misses + 1
 		_, isGone := gone[item.id]
-		if misses < threshold || keeping && !isGone {
+		var archived bool
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM session_archive WHERE session_id=?)`, item.id).Scan(&archived); err != nil {
+			return nil, err
+		}
+		// The archive listing reads catalog rows, so an archived session stays
+		// retired there rather than removed once its conversation is gone.
+		if misses < threshold || keeping && !isGone || archived {
 			if item.misses >= threshold {
 				continue
 			}

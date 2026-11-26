@@ -48,6 +48,10 @@ provider source. The
 session open never preloads the whole transcript. A failed older read reports
 `timeline.unavailableReason` instead of returning an empty page.
 
+`archived` is true once the person has archived the session. It reads the
+archive record itself, so it holds for a session no catalog pass lists, such
+as one whose start never opened it.
+
 `journalSeq` is the session watermark captured in the same SQLite read
 transaction as the page. Open `/api/v1/session-stream?id=<session>&after=<journalSeq>`
 to receive subsequent changes rather than replaying the entire retained journal.

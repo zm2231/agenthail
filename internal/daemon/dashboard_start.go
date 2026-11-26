@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func dashboardStartCwd(value string) (string, error) {
@@ -37,7 +38,7 @@ func dashboardStartCwd(value string) (string, error) {
 }
 
 func (d *Daemon) reserveName(name string) (registry.AliasReservation, error) {
-	reservation, err := d.Registry.ReserveAlias(name, time.Now().Add(surfaceOperationTimeout+startNameMargin))
+	reservation, err := d.Registry.ReserveAlias(name, time.Now().Add(surface.SessionStartTimeout+startNameMargin))
 	if err == nil {
 		return reservation, nil
 	}

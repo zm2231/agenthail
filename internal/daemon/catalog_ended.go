@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -230,6 +231,40 @@ func (d *Daemon) restoreEndedSession(item catalogRestore, publish func(ended, re
 		ended.LastActive = item.changed
 	}
 	return publish(ended, *session)
+}
+
+// presentUnlisted gives a session no discovery pass lists, such as one whose
+// start never opened it, the catalog row that listings and archive state read.
+func (d *Daemon) presentUnlisted(ctx context.Context, session *surface.Session) error {
+	if _, listed, err := d.Registry.CatalogProjectionFingerprint(session.ID); err != nil || listed {
+		return err
+	}
+	adapter, err := d.adapters().For(session)
+	if err != nil {
+		return err
+	}
+	config, err := dashconfig.Load()
+	if err != nil {
+		return err
+	}
+	view, err := d.loadCatalogViewState()
+	if err != nil {
+		return err
+	}
+	counts, err := d.Registry.QueueCounts()
+	if err != nil {
+		return err
+	}
+	alias, _ := d.Registry.ReverseAlias(session.ID)
+	observedAt := time.Now().UTC()
+	d.restoreEndedSession(catalogRestore{id: session.ID}, func(ended, read surface.Session) bool {
+		identityCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		identity := d.catalogIdentities.Identity(identityCtx, ended, observedAt, func() *projectresolve.CatalogProject { return d.storedCatalogProject(ended.ID) })
+		restore := &registry.SessionUpdate{From: read, Owns: registry.SessionActivityFields | registry.SessionProcessFields, Guard: registry.AllSessionFields}
+		return d.publishCatalogSession(ctx, adapter, ended, restore, identity, alias, counts[ended.ID], d.limitResumeRow(ended.ID), false, config, view, nil, observedAt, nil, nil)
+	})
+	return d.catalog.flushCommitted()
 }
 
 func (d *Daemon) discoverEndedSessions(ctx context.Context, adapter surface.Surface, keeper surface.EndedConversations, seen, hidden map[string]struct{}, observedAt time.Time, publish func(ended surface.Session, read *surface.Session, identity projectresolve.CatalogIdentity) bool) error {

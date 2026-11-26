@@ -367,6 +367,11 @@ kept, and queued delivery continues: a message delivered to an archived
 session resumes it, which unarchives it. Archiving a project hides it and does
 not stop its sessions. A session is archived when it or its project is.
 
+An archived session stays in the `archived` list after its conversation is
+gone: a catalog pass retires its row instead of removing it. Archiving a
+session no catalog pass lists, such as one whose start never opened it, gives
+it that row, so it is listed as archived too.
+
 New activity unarchives the session and its project: a turn after the
 archive, work in progress, a queued item, or an open attention item. Nothing
 that needs the user stays hidden.

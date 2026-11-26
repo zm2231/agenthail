@@ -386,6 +386,9 @@ func (s Service) start(ctx context.Context, spec registry.CoordinatorSpec, previ
 		settle("")
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("coordinator conversation %s started but could not be recorded before its first turn, which was not sent: %w", session.ID, readyErr))
 	}
+	if startErr != nil && recorded == nil {
+		session = nil
+	}
 	if session == nil {
 		settle("")
 	} else {

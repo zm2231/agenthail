@@ -820,6 +820,9 @@ func (d *Daemon) doSessionArchive(ctx context.Context, action string, session *s
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 	}
+	if err := d.presentUnlisted(ctx, session); err != nil {
+		d.log.Printf("present %s in the catalog: %s", d.resolveDisplay(sessionID), err)
+	}
 	d.publishCatalogPresence()
 	// A catalog pass that read the archive state before this change may still
 	// publish its rows; the pass this requests runs after it and settles them.
