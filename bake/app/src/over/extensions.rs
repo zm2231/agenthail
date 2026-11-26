@@ -22,7 +22,7 @@ pub enum Done {
     Listed(u64, String, Result<List, String>),
     Acted(String, Result<List, RespondError>),
     Signed(Result<WebSession, String>),
-    Probed(String, Probe),
+    Probed(u64, Probe),
 }
 
 pub struct Catalog {
@@ -62,6 +62,10 @@ impl State {
     }
 }
 
+fn local_host() -> Host {
+    Host { id: String::new(), name: "This computer".into(), state: "connected".into() }
+}
+
 fn host_key(host: &Host) -> String {
     if host.is_local() { "local".into() } else { host.id.clone() }
 }
@@ -74,6 +78,7 @@ pub fn refresh(s: &mut App) {
     let Some(client) = s.client.clone() else { return };
     s.ov.ext.settings = feed::extensions::holds_settings(&client);
     s.ov.ext.fetched_at = Some(Instant::now());
+    list(s, &local_host());
     if s.ov.ext.hosts_pending {
         return;
     }
@@ -126,7 +131,7 @@ fn take(s: &mut App, done: Done) {
     match &done {
         Done::Hosts(result) => {
             s.ov.ext.hosts_pending = false;
-            for host in result.iter().flatten().filter(|h| h.available()) {
+            for host in result.iter().flatten().filter(|h| h.available() && !h.is_local()) {
                 list(s, host);
             }
         }
@@ -153,6 +158,9 @@ fn take(s: &mut App, done: Done) {
         }
         Done::Hosts(Err(error)) => ext.hosts_error = Some(format!("Couldn't read the computers: {error}")),
         Done::Listed(_, key, result) => {
+            if key == "local" && !ext.catalogs.iter().any(|c| c.host.is_local()) {
+                ext.catalogs.insert(0, Catalog { host: local_host(), list: None, error: None });
+            }
             if let Some(catalog) = ext.catalogs.iter_mut().find(|c| c.key() == key) {
                 match result {
                     Ok(list) => {
@@ -179,7 +187,7 @@ fn take(s: &mut App, done: Done) {
             }
         }
         Done::Signed(result) => ext.web.signed(result),
-        Done::Probed(page, result) => ext.web.probed(page, result),
+        Done::Probed(seq, result) => ext.web.probed(seq, result),
     }
 }
 
@@ -217,11 +225,11 @@ pub fn drain(s: &mut App) -> bool {
             let _ = tx.send(Done::Signed(client.web_session().map_err(|e| e.message)));
         });
     }
-    if let Some((page, cookie)) = s.ov.ext.web.probe_due(want.as_deref()) {
+    if let Some((seq, page, cookie)) = s.ov.ext.web.probe_due(want.as_deref()) {
         let tx = s.ov.ext.tx.clone();
         std::thread::spawn(move || {
             let result = feed::extensions::probe(&page, &cookie);
-            let _ = tx.send(Done::Probed(page, result));
+            let _ = tx.send(Done::Probed(seq, result));
         });
     }
     changed | s.ov.ext.web.pump(want.as_deref())
