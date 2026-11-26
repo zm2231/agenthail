@@ -5,7 +5,7 @@ use crate::catalog::{Client, Session, enc};
 
 pub const CODEX_MIN_CHARS: usize = 3;
 pub const HISTORY_PAGE: usize = 25;
-const HISTORY_MAX_QUERY: usize = 200;
+pub const HISTORY_MAX_QUERY: usize = 200;
 
 pub fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -260,16 +260,19 @@ impl Client {
     pub fn recheck(&self, known: &Session) -> Recheck {
         let detail = crate::gone::Detail::read(self.get_coded(&format!("/api/v1/session?id={}&limit=1", enc(&known.id))));
         let mut found = reread(detail, known);
-        if let Recheck::Fresh(row) = &mut found {
-            for term in crate::gone::search_terms(std::iter::once(&**row)) {
-                match self.listed(&row.id, &term) {
-                    Ok(Some(listed)) => {
-                        row.archived = listed.archived;
-                        break;
-                    }
-                    Ok(None) => {}
-                    Err(_) => break,
+        let Recheck::Fresh(row) = &mut found else { return found };
+        let terms = crate::gone::search_terms(std::iter::once(&**row));
+        if terms.is_empty() {
+            return Recheck::Unknown("it has no name or folder to look it up by".into());
+        }
+        for term in terms {
+            match self.listed(&row.id, &term) {
+                Ok(Some(listed)) => {
+                    row.archived = listed.archived;
+                    break;
                 }
+                Ok(None) => {}
+                Err(e) => return Recheck::Unknown(e),
             }
         }
         found
@@ -438,8 +441,10 @@ mod tests {
         assert_eq!(asked.recv().unwrap().0, "/api/v1/snapshot?q=Fix+the+importer&limit=200");
         let unlisted = r#"{"sessions": [], "nextCursor": ""}"#;
         let (client, _asked) = crate::mock::daemon(vec![(200, detail.into()), (200, unlisted.into())]);
-        let archived = Session { archived: true, ..known };
+        let archived = Session { archived: true, ..known.clone() };
         assert!(matches!(client.recheck(&archived), Recheck::Fresh(r) if r.archived));
+        let (client, _failed) = crate::mock::daemon(vec![(200, detail.into()), (500, r#"{"error":{"code":"internal_error","message":"boom"}}"#.into())]);
+        assert!(matches!(client.recheck(&known), Recheck::Unknown(_)));
     }
 
     #[test]

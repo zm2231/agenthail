@@ -51,6 +51,11 @@ fn load(s: &mut App, reset: bool) {
     st.requests += 1;
     let generation = st.requests;
     let Some(p) = st.panel.as_mut() else { return };
+    if too_long(p) {
+        p.asked = None;
+        p.loading = false;
+        return;
+    }
     let f = filter(p);
     let reset = reset || p.asked.as_ref() != Some(&f);
     let before = if reset { 0 } else { p.list.next_before };
@@ -80,12 +85,19 @@ fn invalidate(p: &mut Panel) {
     p.error = None;
 }
 
+fn too_long(p: &Panel) -> bool {
+    p.query.text.trim().len() > feed::search::HISTORY_MAX_QUERY
+}
+
 fn pending(p: &Panel) -> bool {
-    p.asked.as_ref() != Some(&filter(p))
+    !too_long(p) && p.asked.as_ref() != Some(&filter(p))
 }
 
 fn settle(s: &mut App) -> bool {
     let Some(p) = s.ov.search.activity.panel.as_mut() else { return false };
+    if too_long(p) {
+        return false;
+    }
     let f = filter(p);
     if p.typed.0 != f {
         p.typed = (f, Instant::now());
@@ -242,28 +254,32 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
         .child(kinds)
         .child(ui::ghost_keys(&["esc"]));
     let mut list = col().w_full().gap(2.0).padding(8.0);
-    if p.list.items.is_empty() && !p.loading && !pending(p) && p.error.is_none() {
+    let long = too_long(p);
+    if long {
+        list = list.child(text("This search is too long. Shorten it to search activity.".to_string()).font(META).color(weak()).px(12.0).py(10.0));
+    } else if p.list.items.is_empty() && !p.loading && !pending(p) && p.error.is_none() {
         list = list.child(text("No activity matches these filters.".to_string()).font(META).color(weak()).px(12.0).py(10.0));
     }
-    if !pending(p) {
+    if !pending(p) && !long {
         for e in &p.list.items {
             list = list.child(entry_row(s, e));
         }
     }
     let mut foot = row().w_full().gap(12.0).items_center().px(16.0).py(10.0).border_sides([1.0, 0.0, 0.0, 0.0], ui::rule());
     let shown = match p.list.items.len() {
+        _ if long => String::new(),
         _ if pending(p) => "Searching…".to_string(),
         1 => "1 event shown".to_string(),
         n => format!("{n} events shown"),
     };
     foot = foot.child(text(shown).font(META).color(weak()));
-    if let Some(e) = p.error.as_ref().filter(|_| !pending(p)) {
+    if let Some(e) = p.error.as_ref().filter(|_| !pending(p) && !long) {
         foot = foot.child(text(e.clone()).font(META).color(crate::theme::failed()).wrap().shrink());
     }
     foot = foot.child(ui::spacer());
     if p.loading || pending(p) {
         foot = foot.child(Spinner::new().build(k));
-    } else if p.list.has_more {
+    } else if p.list.has_more && !long {
         foot = foot.child(Button::new("Load more").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).build(k).key("activity-more").on_press(|s: &mut App| load(s, false)));
     }
     let title = row().w_full().gap(10.0).items_center().px(16.0).pt(14.0).child(text("Activity history".to_string()).font(BODY_MED).color(strong())).child(ui::spacer());

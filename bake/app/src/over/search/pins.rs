@@ -11,6 +11,7 @@ const RECHECK: Duration = Duration::from_secs(20);
 
 pub struct Pins {
     rows: Vec<Session>,
+    verified: HashSet<String>,
     revision: HashMap<String, u64>,
     checking: Option<(String, u64)>,
     checked: HashMap<String, Instant>,
@@ -22,12 +23,16 @@ pub struct Pins {
 impl Default for Pins {
     fn default() -> Pins {
         let (tx, rx) = channel();
-        Pins { rows: Vec::new(), revision: HashMap::new(), checking: None, checked: HashMap::new(), requests: 0, tx, rx }
+        Pins { rows: Vec::new(), verified: HashSet::new(), revision: HashMap::new(), checking: None, checked: HashMap::new(), requests: 0, tx, rx }
     }
 }
 
 impl Pins {
     pub fn get(&self, id: &str) -> Option<&Session> {
+        self.row(id).filter(|_| self.verified.contains(id))
+    }
+
+    fn row(&self, id: &str) -> Option<&Session> {
         self.rows.iter().find(|x| x.id == id)
     }
 
@@ -35,6 +40,7 @@ impl Pins {
         let id = row.id.clone();
         self.rows.retain(|x| x.id != id);
         self.rows.push(row);
+        self.verified.remove(&id);
         self.touch(&id);
     }
 
@@ -52,6 +58,7 @@ impl Pins {
 
     fn unpin(&mut self, id: &str) {
         self.rows.retain(|x| x.id != id);
+        self.verified.remove(id);
         self.revision.remove(id);
         self.checked.remove(id);
     }
@@ -69,6 +76,7 @@ impl Pins {
                 if let Some(x) = self.rows.iter_mut().find(|x| x.id == id) {
                     *x = *row;
                 }
+                self.verified.insert(id.clone());
                 self.checked.insert(id, Instant::now());
             }
             Recheck::Gone => self.unpin(&id),
@@ -87,7 +95,7 @@ fn recheck(s: &mut App) -> bool {
     let dropped = pins.rows.len() != before;
     let Some(id) = super::selected(s) else { return dropped };
     let pins = &s.ov.search.pins;
-    let Some(row) = pins.get(&id).cloned() else { return dropped };
+    let Some(row) = pins.row(&id).cloned() else { return dropped };
     if pins.checking.is_some() || pins.checked.get(&id).is_some_and(|at| at.elapsed() < RECHECK) {
         return dropped;
     }
