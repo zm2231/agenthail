@@ -84,10 +84,6 @@ pub struct Pairing {
 }
 
 impl Pairing {
-    pub fn expired(&self, now: OffsetDateTime) -> bool {
-        parse_time(&self.expires_at).is_some_and(|at| now >= at)
-    }
-
     pub fn deadline(&self, now: OffsetDateTime) -> String {
         let Some(at) = parse_time(&self.expires_at) else { return "The code works once, for five minutes.".into() };
         let minutes = ((at - now).whole_seconds().max(0) + 59) / 60;
@@ -122,11 +118,10 @@ pub enum Progress {
 }
 
 impl Progress {
-    pub fn of(status: Option<&PairingStatus>, pairing: &Pairing, now: OffsetDateTime) -> Progress {
-        match status.map(|s| s.state.as_str()) {
-            Some("paired") => Progress::Paired(status.and_then(|s| s.device.as_ref()).map(|d| d.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| "the iPhone".into())),
-            Some("expired") => Progress::Expired,
-            _ if pairing.expired(now) => Progress::Expired,
+    pub fn of(status: &PairingStatus) -> Progress {
+        match status.state.as_str() {
+            "paired" => Progress::Paired(status.device.as_ref().map(|d| d.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| "the iPhone".into())),
+            "expired" => Progress::Expired,
             _ => Progress::Waiting,
         }
     }
@@ -301,18 +296,16 @@ mod tests {
     }
 
     #[test]
-    fn pairing_progress_follows_the_daemon_then_the_deadline() {
+    fn pairing_progress_follows_the_daemon_and_the_deadline_reads_as_minutes_left() {
         let p = Pairing { id: "p1".into(), expires_at: "2026-11-26T10:05:00Z".into(), pairing_url: "agenthail://pair?x=1".into(), endpoint: "https://mini:7412".into() };
         let before = at("2026-11-26T10:01:30Z");
         let after = at("2026-11-26T10:05:00Z");
         let status = |state: &str, name: Option<&str>| PairingStatus { state: state.into(), device: name.map(|n| PairedName { name: n.into() }) };
-        assert_eq!(Progress::of(None, &p, before), Progress::Waiting);
-        assert_eq!(Progress::of(None, &p, after), Progress::Expired);
-        assert_eq!(Progress::of(Some(&status("pending", None)), &p, before), Progress::Waiting);
-        assert_eq!(Progress::of(Some(&status("pending", None)), &p, after), Progress::Expired);
-        assert_eq!(Progress::of(Some(&status("expired", None)), &p, before), Progress::Expired);
-        assert_eq!(Progress::of(Some(&status("paired", Some("Ada's iPhone"))), &p, after), Progress::Paired("Ada's iPhone".into()));
-        assert_eq!(Progress::of(Some(&status("paired", Some(""))), &p, before).notice().as_deref(), Some("Paired the iPhone."));
+        assert_eq!(Progress::of(&status("pending", None)), Progress::Waiting);
+        assert_eq!(Progress::of(&status("", None)), Progress::Waiting);
+        assert_eq!(Progress::of(&status("expired", None)), Progress::Expired);
+        assert_eq!(Progress::of(&status("paired", Some("Ada's iPhone"))), Progress::Paired("Ada's iPhone".into()));
+        assert_eq!(Progress::of(&status("paired", Some(""))).notice().as_deref(), Some("Paired the iPhone."));
         assert_eq!(Progress::Expired.notice().as_deref(), Some(EXPIRED));
         assert_eq!(Progress::Waiting.notice(), None);
         assert_eq!(p.deadline(before), "The code works once, within the next 4 minutes.");
@@ -320,7 +313,6 @@ mod tests {
         assert_eq!(p.deadline(after), "The code works once, within the next minute.");
         let unknown = Pairing { expires_at: "soon".into(), ..p };
         assert_eq!(unknown.deadline(before), "The code works once, for five minutes.");
-        assert!(!unknown.expired(after));
     }
 
     #[test]

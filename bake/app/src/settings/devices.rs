@@ -154,6 +154,13 @@ pub fn opened(s: &mut Prefs) {
     s.dev.copied_until = None;
 }
 
+fn reported(result: &Result<PairingStatus, Failure>) -> Progress {
+    match result {
+        Ok(status) => Progress::of(status),
+        Err(_) => Progress::Waiting,
+    }
+}
+
 pub fn take(s: &mut Prefs, got: Got) {
     let now = Instant::now();
     match got {
@@ -189,16 +196,14 @@ pub fn take(s: &mut Prefs, got: Got) {
                 super::refused(s, None, true);
                 return;
             }
-            let Some((p, _)) = &s.dev.pairing else {
-                if let Ok(status) = &result
-                    && let Progress::Paired(name) = Progress::of(Some(status), &Pairing::default(), OffsetDateTime::now_utc())
-                {
+            if s.dev.pairing.is_none() {
+                if let Progress::Paired(name) = reported(&result) {
                     s.dev.notice = Progress::Paired(name).notice();
                     super::fetch(s, Read::Devices);
                 }
                 return;
-            };
-            match Progress::of(result.as_ref().ok(), p, OffsetDateTime::now_utc()) {
+            }
+            match reported(&result) {
                 Progress::Waiting => s.dev.next_check = Some(now + CHECK_EVERY),
                 progress => {
                     s.dev.notice = progress.notice();
@@ -547,6 +552,32 @@ mod tests {
         start(&mut s);
         take(&mut s, Got::Status(last, Ok(PairingStatus { state: "paired".into(), device: None })));
         assert_eq!(s.dev.notice, None);
+    }
+
+    #[test]
+    fn a_pending_reply_read_after_the_deadline_leaves_the_end_to_the_final_check() {
+        let mut s = prefs();
+        started(&mut s, "p1", 5);
+        let current = s.dev.attempt;
+        s.dev.expires = Some(Instant::now() - Duration::from_secs(1));
+        take(&mut s, Got::Status(current, Ok(PairingStatus { state: "pending".into(), device: None })));
+        assert!(s.dev.pairing.is_some() && s.dev.notice.is_none());
+        take(&mut s, Got::Status(current, Err(Failure::new("timed out"))));
+        assert!(s.dev.pairing.is_some());
+        assert!(expire(&mut s, Instant::now()));
+        let last = s.dev.attempt;
+        take(&mut s, Got::Status(last, Ok(PairingStatus { state: "paired".into(), device: Some(dev::PairedName { name: "Ada's iPhone".into() }) })));
+        assert_eq!(s.dev.notice.as_deref(), Some("Paired Ada's iPhone."));
+    }
+
+    #[test]
+    fn the_daemon_saying_expired_ends_pairing() {
+        let mut s = prefs();
+        started(&mut s, "p1", 5);
+        let current = s.dev.attempt;
+        take(&mut s, Got::Status(current, Ok(PairingStatus { state: "expired".into(), device: None })));
+        assert!(s.dev.pairing.is_none());
+        assert_eq!(s.dev.notice.as_deref(), Some(dev::EXPIRED));
     }
 
     #[test]
