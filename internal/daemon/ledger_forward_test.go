@@ -159,6 +159,50 @@ func TestAHolderOnAnotherHostHandsOffAndReleasesOverMCP(t *testing.T) {
 	}
 }
 
+func TestOnlyTheLeadOnAnotherHostPassesAReviewOnToTheLedgersOwner(t *testing.T) {
+	mac, owner := ownedLedgerOnTwoHosts(t, release("v0.2.170"), release("v0.2.170"))
+	writer := func(sessionID string) func(map[string]any) (map[string]any, bool) {
+		caller, err := mac.reg.Session(sessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		session := mcpSession(t, mcpServer(t, mac.daemon), issueMCPToken(t, mac.daemon, *caller))
+		calls := 0
+		return func(request map[string]any) (map[string]any, bool) {
+			t.Helper()
+			calls++
+			return callMCP(t, session, "agenthail_ledger_write", map[string]any{"op": "work", "clientRequestId": fmt.Sprintf("%s-%d", sessionID, calls), "request": request})
+		}
+	}
+	worker, lead := writer("local-a"), writer("lead")
+	out, refused := worker(map[string]any{"action": "add", "text": "pick the import window"})
+	if refused {
+		t.Fatalf("add: %v", out)
+	}
+	item := out["item"].(map[string]any)["id"].(string)
+	for _, action := range []string{"claim", "submit"} {
+		if out, refused := worker(map[string]any{"action": action, "itemId": item}); refused {
+			t.Fatalf("%s: %v", action, out)
+		}
+	}
+
+	out, refused = worker(map[string]any{"action": "review-pass", "itemId": item, "reason": "Pick the import window"})
+	if !refused || !strings.Contains(fmt.Sprint(out["message"]), "only the lead") {
+		t.Fatalf("a review-pass from a session that does not lead the project = %v", out)
+	}
+	if got := ownersItem(t, owner, item); got.ReviewPass != nil {
+		t.Fatalf("the owner recorded a review-pass the lead did not make: %+v", got.ReviewPass)
+	}
+
+	if out, refused := lead(map[string]any{"action": "review-pass", "itemId": item, "reason": "Pick the import window"}); refused {
+		t.Fatalf("the lead's review-pass: %v", out)
+	}
+	got := ownersItem(t, owner, item)
+	if got.State != ledger.WorkInReview || got.ReviewPass == nil || got.ReviewPass.By != "lead" || got.ReviewPass.Reason != "Pick the import window" || lastKind(got) != "review-pass" {
+		t.Fatalf("the owner's item after the lead's review-pass: %+v", got)
+	}
+}
+
 func lastKind(item ledger.WorkItem) string {
 	return item.Timeline[len(item.Timeline)-1].Kind
 }
