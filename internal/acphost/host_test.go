@@ -670,3 +670,28 @@ func TestAnInterruptDuringALoadAnswersRequestsAndStopsEverySendAlreadyStarting(t
 		t.Fatalf("a message after the interrupt must run: %+v", done)
 	}
 }
+
+func TestAnAgentReopenedWithoutATurnStillStopsWhenIdle(t *testing.T) {
+	previous := idleStop
+	t.Cleanup(func() { idleStop = previous })
+	h := startHost(t, fakeAgent(t, "fake"))
+	state := h.create("fake", "", "")
+	s := h.host.heldSession(state.SessionID)
+	s.stopProcess()
+	idleStop = 200 * time.Millisecond
+	if _, err := h.client.SetOption(context.Background(), OptionParams{SessionID: state.SessionID, Category: "mode", Value: "ask"}); err != nil {
+		t.Fatal(err)
+	}
+	pid := s.snapshot().PID
+	if pid == 0 {
+		t.Fatal("the mode change must reopen the agent")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("an agent reopened without a turn never stopped when idle")
+}

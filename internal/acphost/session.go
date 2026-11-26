@@ -287,6 +287,9 @@ func (s *session) ensureRunning(ctx context.Context, mcp []acp.MCPServer, prefer
 		s.stopProcess()
 		return fmt.Errorf("load the %s session: %w", s.agent.DisplayName(), err)
 	}
+	s.mu.Lock()
+	s.armIdleLocked()
+	s.mu.Unlock()
 	if above {
 		target := s.offeredWithinCeiling(preferred, recorded)
 		if target == "" {
@@ -697,6 +700,10 @@ func (s *session) finishTurnLocked(stop string) {
 	s.state.LastTurnID, s.state.LastStop = s.state.TurnID, stop
 	s.state.TurnID, s.state.Status, s.state.LastActive = "", StatusIdle, time.Now().UTC()
 	s.saveLocked()
+	s.armIdleLocked()
+}
+
+func (s *session) armIdleLocked() {
 	if s.idle != nil {
 		s.idle.Stop()
 	}

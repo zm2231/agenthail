@@ -219,7 +219,9 @@ func deliveryError(err error) error {
 		return surface.DeliveryUnavailable(fmt.Errorf("%w: %s", surface.ErrDeliveryHeld, callErr.Message))
 	case errors.As(err, &callErr) && (callErr.Code == acphost.CodeInvalid || callErr.Code == acphost.CodeNotFound):
 		return surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
-	case errors.As(err, &callErr) && (callErr.Code == acphost.CodeDraining || callErr.Code == acphost.CodeHeld || callErr.Code == acphost.CodeInterrupted):
+	case errors.As(err, &callErr) && callErr.Code == acphost.CodeInterrupted:
+		return surface.DeliveryUnavailable(fmt.Errorf("%w: %s", surface.ErrInterruptedBeforeSend, callErr.Message))
+	case errors.As(err, &callErr) && (callErr.Code == acphost.CodeDraining || callErr.Code == acphost.CodeHeld):
 		return surface.DeliveryUnavailable(err)
 	}
 	return err

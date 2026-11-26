@@ -612,6 +612,9 @@ var ErrOpenIsTheDaemons = errors.New("only the Agenthail daemon opens a conversa
 // caller publishes before sending again.
 var ErrRouteChanged = errors.New("the session's route changed before delivery")
 
+// ErrInterruptedBeforeSend is a message an interrupt stopped before it reached the agent: it was not sent, and is not a failure.
+var ErrInterruptedBeforeSend = errors.New("interrupted before the message reached the agent")
+
 // ErrNothingToSteer is a steer that found the session idle: its turn ended
 // before the steer reached it.
 var ErrNothingToSteer = errors.New("session idle; nothing to steer")
