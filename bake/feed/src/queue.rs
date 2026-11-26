@@ -57,6 +57,15 @@ impl Queued {
         self.message.lines().find(|l| !l.trim().is_empty()).unwrap_or_default().trim()
     }
 
+    pub fn headline(&self) -> String {
+        let names: Vec<&str> = self.attachments.iter().map(|a| a["name"].as_str().filter(|n| !n.is_empty()).unwrap_or("attachment")).collect();
+        match (self.first_line(), names.is_empty()) {
+            (line, true) => line.to_string(),
+            ("", false) => names.join(", "),
+            (line, false) => format!("{line} · {}", names.join(", ")),
+        }
+    }
+
     fn hold(&self) -> &'static str {
         match self.held_by.as_str() {
             "waiting" => "Held: this agent is waiting on you",
@@ -301,6 +310,9 @@ mod tests {
         assert!(Queued { output_schema: Some(json!({})), ..mine.clone() }.steer_refusal(&caps).is_some());
         let attached = Queued { attachments: vec![json!({"name": "a.png"})], ..mine.clone() };
         assert!(attached.steer_refusal(&caps).unwrap().contains("attachments"));
+        assert_eq!(attached.headline(), format!("{} · a.png", mine.first_line()));
+        let only = Queued { message: String::new(), attachments: vec![json!({"name": "a.png"}), json!({"name": "b.md"})], ..mine.clone() };
+        assert_eq!(only.headline(), "a.png, b.md");
         assert!(attached.take_back_refusal().is_some());
         assert_eq!(mine.take_back_refusal(), None);
         assert!(Queued { author: "agent".into(), ..mine.clone() }.take_back_refusal().unwrap().contains("as yours"));

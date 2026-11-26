@@ -10,6 +10,11 @@ use crate::App;
 pub const PANES: [&str; 3] = ["Sidebar", "Needs you", "Sessions"];
 
 static LAST: Mutex<String> = Mutex::new(String::new());
+static FAILED: Mutex<Option<String>> = Mutex::new(None);
+
+pub fn failure() -> Option<String> {
+    FAILED.lock().expect("layout lock").clone()
+}
 
 fn path() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
@@ -90,6 +95,7 @@ fn encode(s: &App) -> String {
         "boards": boards,
         "looked": { "now": s.ov.looked_now, "projects": s.ov.looked },
         "drafts": s.drafts.to_json(),
+        "attachments": crate::ui::attach::saved(s),
         "unsent": unsent(s),
         "queueTaking": feed::queue::Taking::to_json(&s.queue_taking),
     })
@@ -120,10 +126,12 @@ pub fn load(s: &mut App) {
     }
     s.drafts = feed::composer::Drafts::from_json(&v["drafts"]);
     s.unsent = feed::composer::Unconfirmed::from_json(&v["unsent"]);
-    let held: Vec<(String, String)> = s.unsent.iter().map(|(id, u)| (id.clone(), u.text.clone())).collect();
-    for (id, text) in held {
-        if s.drafts.get(&id).trim().is_empty() {
-            s.drafts.set(&id, &text);
+    s.attach.tray = feed::attach::Tray::from_json(&v["attachments"]);
+    let held: Vec<(String, feed::composer::Unsent)> = s.unsent.iter().map(|(id, u)| (id.clone(), u.clone())).collect();
+    for (id, unsent) in held {
+        if s.drafts.get(&id).trim().is_empty() && !s.attach.tray.has(&id) {
+            s.drafts.set(&id, &unsent.text);
+            crate::ui::attach::restore(s, &id, &unsent);
         }
     }
     s.queue_taking = feed::queue::Taking::from_json(&v["queueTaking"]);
@@ -148,6 +156,7 @@ fn writer() -> &'static Sender<Write> {
                     .and_then(|()| std::fs::write(&next, &text))
                     .and_then(|()| std::fs::rename(&next, &p))
                     .map_err(|e| e.to_string());
+                *FAILED.lock().expect("layout lock") = written.clone().err();
                 if written.is_err() {
                     let mut last = LAST.lock().expect("layout lock");
                     if *last == text {
@@ -164,7 +173,11 @@ fn writer() -> &'static Sender<Write> {
 }
 
 pub fn save(s: &App) {
-    if !s.ov.persist || path().is_none() {
+    if !s.ov.persist {
+        return;
+    }
+    if path().is_none() {
+        *FAILED.lock().expect("layout lock") = Some("HOME is not set".into());
         return;
     }
     let now = encode(s);
@@ -180,11 +193,18 @@ pub fn save_now(s: &App) -> Result<(), String> {
         return Ok(());
     }
     if path().is_none() {
+        *FAILED.lock().expect("layout lock") = Some("HOME is not set".into());
         return Err("HOME is not set".into());
     }
     let now = encode(s);
     let (done, wait) = channel();
     *LAST.lock().expect("layout lock") = now.clone();
-    writer().send((now, Some(done))).map_err(|_| "the layout writer stopped".to_string())?;
-    wait.recv_timeout(std::time::Duration::from_secs(5)).map_err(|_| "saving took too long".to_string())?
+    let result = writer()
+        .send((now, Some(done)))
+        .map_err(|_| "the layout writer stopped".to_string())
+        .and_then(|()| wait.recv_timeout(std::time::Duration::from_secs(5)).map_err(|_| "saving took too long".to_string())?);
+    if let Err(error) = &result {
+        *FAILED.lock().expect("layout lock") = Some(error.clone());
+    }
+    result
 }

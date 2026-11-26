@@ -62,6 +62,46 @@ pub struct Item {
     pub turn_id: Option<String>,
     #[serde(default)]
     pub agent: Option<AgentMessage>,
+    #[serde(default)]
+    pub attachment: Option<Attachment>,
+    #[serde(default)]
+    pub files: Vec<AttachedFile>,
+}
+
+#[derive(Deserialize, Clone, Debug, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Attachment {
+    pub id: String,
+    #[serde(default)]
+    pub media_type: String,
+    #[serde(default)]
+    pub width: u32,
+    #[serde(default)]
+    pub height: u32,
+    #[serde(default)]
+    pub bytes: u64,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+impl Attachment {
+    pub fn is_image(&self) -> bool {
+        self.media_type.starts_with("image/")
+    }
+
+    pub fn ratio(&self) -> Option<f32> {
+        (self.width > 0 && self.height > 0).then(|| self.width as f32 / self.height as f32)
+    }
+}
+
+#[derive(Deserialize, Clone, Debug, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachedFile {
+    pub name: String,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub bytes: Option<u64>,
 }
 
 impl Item {

@@ -48,8 +48,11 @@ impl Client {
     }
 
     /// `busy` None leaves a busy session to the daemon's busy-delivery setting.
-    pub fn send_as(&self, session: &str, message: &str, busy: Option<Busy>, key: &str) -> Outcome<Delivered> {
+    pub fn send_as(&self, session: &str, message: &str, attachments: &[String], busy: Option<Busy>, key: &str) -> Outcome<Delivered> {
         let mut payload = json!({"sessionId": session, "message": message, "author": "person"});
+        if !attachments.is_empty() {
+            payload["attachments"] = json!(attachments);
+        }
         if let Some(busy) = busy {
             payload["busyDelivery"] = Value::String(busy.as_str().into());
         }
@@ -220,14 +223,18 @@ mod tests {
             (Box::new(|c| c.pr("s1", PrOp::Unlink, "34").map(drop)), json!({"action": "pr", "sessionId": "s1", "op": "unlink", "pr": "34"})),
             (Box::new(|c| c.pr("s1", PrOp::Unwatch, "34").map(drop)), json!({"action": "pr", "sessionId": "s1", "op": "unwatch", "pr": "34"})),
             (Box::new(|c| c.send("s1", "hi")), json!({"action": "send", "sessionId": "s1", "message": "hi", "author": "person"})),
-            (Box::new(|c| c.send_as("s1", "hi", None, &crate::catalog::request_key()).map(drop)), json!({"action": "send", "sessionId": "s1", "message": "hi", "author": "person"})),
+            (Box::new(|c| c.send_as("s1", "hi", &[], None, &crate::catalog::request_key()).map(drop)), json!({"action": "send", "sessionId": "s1", "message": "hi", "author": "person"})),
             (
-                Box::new(|c| c.send_as("s1", "hi", Some(Busy::Steer), &crate::catalog::request_key()).map(drop)),
+                Box::new(|c| c.send_as("s1", "hi", &[], Some(Busy::Steer), &crate::catalog::request_key()).map(drop)),
                 json!({"action": "send", "sessionId": "s1", "message": "hi", "author": "person", "busyDelivery": "steer"}),
             ),
             (
-                Box::new(|c| c.send_as("s1", "hi", Some(Busy::Queue), &crate::catalog::request_key()).map(drop)),
+                Box::new(|c| c.send_as("s1", "hi", &[], Some(Busy::Queue), &crate::catalog::request_key()).map(drop)),
                 json!({"action": "send", "sessionId": "s1", "message": "hi", "author": "person", "busyDelivery": "queue"}),
+            ),
+            (
+                Box::new(|c| c.send_as("s1", "", &["up-1".into(), "up-2".into()], None, &crate::catalog::request_key()).map(drop)),
+                json!({"action": "send", "sessionId": "s1", "message": "", "author": "person", "attachments": ["up-1", "up-2"]}),
             ),
             (
                 Box::new(|c| c.respond("s1", "ask-2", vec!["Yes".into()], Default::default())),
@@ -309,7 +316,7 @@ mod tests {
     #[test]
     fn an_unreadable_success_reply_is_maybe_delivered() {
         let (client, _seen) = daemon(vec![(200, r#"{"ok":tr"#)]);
-        let error = client.send_as("s1", "hi", None, "k").unwrap_err();
+        let error = client.send_as("s1", "hi", &[], None, "k").unwrap_err();
         assert!(error.maybe_delivered, "{}", error.message);
         assert_eq!(error.code, "unreadable_reply");
     }
@@ -327,9 +334,9 @@ mod tests {
             (200, r#"{"ok":true,"result":{"evidence":"queued","queueId":3}}"#),
             (202, r#"{"ok":true,"status":"submitted"}"#),
         ]);
-        assert_eq!(client.send_as("s1", "hi", Some(Busy::Queue), "retry-1").unwrap(), Delivered::Queued(Some(3)));
+        assert_eq!(client.send_as("s1", "hi", &[], Some(Busy::Queue), "retry-1").unwrap(), Delivered::Queued(Some(3)));
         assert_eq!(seen.recv().unwrap().key, "retry-1");
-        assert_eq!(client.send_as("s1", "hi", Some(Busy::Queue), "retry-1").unwrap(), Delivered::Unconfirmed);
+        assert_eq!(client.send_as("s1", "hi", &[], Some(Busy::Queue), "retry-1").unwrap(), Delivered::Unconfirmed);
         assert_eq!(seen.recv().unwrap().key, "retry-1");
     }
 

@@ -44,6 +44,7 @@ pub enum Bg {
     Recovered(Vec<(feed::queue::Taking, feed::queue::Recovered)>),
     Older(String, u64, Result<feed::history::Older, feed::history::Miss>),
     Body(String, u64, String, u64, Result<String, String>),
+    Attach(ui::attach::Done),
     Error(String),
 }
 
@@ -124,6 +125,7 @@ pub struct App {
     pub prs: ui::pr_link::Prs,
     pub new_session: Option<ui::new_session::Sheet>,
     bar: menubar::Bar,
+    pub attach: ui::attach::Attach,
     revealed: Option<String>,
     pub missing: Option<ui::gone::Missing>,
     pub notify: notify::State,
@@ -226,6 +228,7 @@ fn init() -> App {
         prs: ui::pr_link::Prs::new(),
         new_session: None,
         bar: menubar::Bar::default(),
+        attach: ui::attach::Attach::default(),
         revealed: None,
         missing: None,
         notify: notify::State::default(),
@@ -537,39 +540,61 @@ pub fn send(s: &mut App, tx: &mut Tx) {
 
 pub fn send_to(s: &mut App, id: &str, tx: &mut Tx) {
     let message = s.composer.text.trim().to_string();
-    if message.is_empty() || sending(s, id) {
+    if message.is_empty() && !ui::attach::has(s, id) || sending(s, id) {
         return;
     }
     if s.client.is_none() {
         note(s, id, "Fixture mode: not sent".into());
         return;
     }
+    let attachments = match ui::attach::ready(s, id) {
+        Ok(attachments) => attachments,
+        Err(hold) => {
+            note(s, id, hold);
+            return;
+        }
+    };
     s.composer = TextEdit::new("");
-    match s.unsent.take_same(id, &message) {
+    ui::attach::clear(s, id);
+    match s.unsent.take_same(id, &message, &attachments) {
         Some(again) if again.reuses_key() => dispatch(s, id, again, true, tx),
         _ => {
-            let pending = fresh(s, id, message);
+            let pending = fresh(s, id, message, attachments);
             dispatch(s, id, pending, false, tx);
         }
     }
 }
 
-pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
-    let Some(unsent) = s.unsent.latest(id).cloned() else { return };
-    if sending(s, id) || s.client.is_none() {
+fn clear_sent(s: &mut App, id: &str, unsent: &Unsent) {
+    let chips = s.attach.tray.chips(id).len();
+    let same = ui::attach::adding(s, id) == 0 && shown_text(s, id).trim() == unsent.text && chips == unsent.attachments.len() && s.attach.tray.ready(id).is_ok_and(|now| unsent.same(&unsent.text, &now));
+    if !same {
         return;
     }
-    if s.composer_for.as_deref() == Some(id) && s.composer.text.trim() == unsent.text {
+    if s.composer_for.as_deref() == Some(id) {
         s.composer = TextEdit::new("");
         s.composer.focused = true;
-    } else if s.drafts.get(id).trim() == unsent.text {
+    } else {
         s.drafts.set(id, "");
     }
+    ui::attach::clear(s, id);
+}
+
+pub fn can_retry(s: &App, id: &str) -> bool {
+    s.unsent.latest(id).is_some_and(|u| feed::attach::missing_upload(&u.error).is_none())
+}
+
+pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
+    let Some(unsent) = s.unsent.latest(id).cloned() else { return };
+    if sending(s, id) || s.client.is_none() || !can_retry(s, id) {
+        return;
+    }
+    clear_sent(s, id, &unsent);
     s.unsent.remove(id, &unsent.key);
     if unsent.reuses_key() {
         dispatch(s, id, unsent, true, tx);
     } else {
-        let pending = fresh(s, id, unsent.text);
+        let pending = fresh(s, id, unsent.text, unsent.attachments);
         dispatch(s, id, pending, false, tx);
     }
 }
@@ -611,15 +636,21 @@ pub fn put_back_unsent(s: &mut App, id: &str) {
         s.composer.focused = true;
     }
     s.drafts.set(id, &merged);
+    ui::attach::restore(s, id, &unsent);
     over::layout::save(s);
 }
 
 pub fn unsent_held(s: &App, id: &str) -> bool {
-    s.unsent.latest(id).is_some_and(|u| shown_text(s, id).trim() != u.text)
+    s.unsent.latest(id).is_some_and(|u| !shows(s, id, u))
+}
+
+fn shows(s: &App, id: &str, unsent: &Unsent) -> bool {
+    let attached = s.attach.tray.ready(id).unwrap_or_default();
+    shown_text(s, id).trim() == unsent.text && unsent.attachments.iter().all(|a| attached.iter().any(|b| b.id == a.id))
 }
 
 pub fn offers_new_send(s: &App, id: &str) -> bool {
-    s.unsent.latest(id).is_some_and(|u| u.offers_new_send())
+    can_retry(s, id) && s.unsent.latest(id).is_some_and(|u| u.offers_new_send())
 }
 
 pub fn send_as_new(s: &mut App, id: &str, tx: &mut Tx) {
@@ -627,13 +658,9 @@ pub fn send_as_new(s: &mut App, id: &str, tx: &mut Tx) {
     if sending(s, id) || s.client.is_none() || !confirmed(s, id, Confirm::SendNew, true) {
         return;
     }
-    if s.composer_for.as_deref() == Some(id) && s.composer.text.trim() == unsent.text {
-        s.composer = TextEdit::new("");
-    } else if s.drafts.get(id).trim() == unsent.text {
-        s.drafts.set(id, "");
-    }
+    clear_sent(s, id, &unsent);
     s.unsent.remove(id, &unsent.key);
-    let pending = fresh(s, id, unsent.text);
+    let pending = fresh(s, id, unsent.text, unsent.attachments);
     dispatch(s, id, pending, false, tx);
 }
 
@@ -648,8 +675,8 @@ pub fn dismiss_unsent(s: &mut App, id: &str) {
     }
 }
 
-fn fresh(s: &App, id: &str, text: String) -> Unsent {
-    Unsent { session: id.to_string(), text, key: feed::catalog::request_key(), busy: send_busy(s, id), maybe_delivered: true, error: "the app closed before the daemon answered".into(), tries: 0 }
+fn fresh(s: &App, id: &str, text: String, attachments: Vec<feed::attach::Upload>) -> Unsent {
+    Unsent { session: id.to_string(), text, attachments, key: feed::catalog::request_key(), busy: send_busy(s, id), maybe_delivered: true, error: "the app closed before the daemon answered".into(), tries: 0 }
 }
 
 pub fn send_busy(s: &App, id: &str) -> Option<Busy> {
@@ -667,7 +694,7 @@ fn dispatch(s: &mut App, id: &str, pending: Unsent, resent: bool, tx: &mut Tx) {
     }
     if let Err(error) = over::layout::save_now(s) {
         settle(s, &id, &pending.key);
-        put_back(s, &id, &pending.text);
+        put_back(s, &id, &pending);
         let maybe_delivered = resent && pending.maybe_delivered;
         s.unsent.add(&id, Unsent { maybe_delivered, error: format!("the message couldn't be saved first ({error})"), ..pending });
         return;
@@ -675,7 +702,7 @@ fn dispatch(s: &mut App, id: &str, pending: Unsent, resent: bool, tx: &mut Tx) {
     tx.scroll_to_bottom(format!("transcript-{id}"));
     let out = s.outbox.clone();
     std::thread::spawn(move || {
-        let result = client.send_as(&pending.session, &pending.text, pending.busy, &pending.key);
+        let result = client.send_as(&pending.session, &pending.text, &pending.ids(), pending.busy, &pending.key);
         let _ = out.send(Bg::Sent(id, pending, resent, result));
     });
 }
@@ -726,7 +753,7 @@ fn settle(s: &mut App, id: &str, key: &str) {
     }
 }
 
-fn note(s: &mut App, id: &str, text: String) {
+pub(crate) fn note(s: &mut App, id: &str, text: String) {
     s.status_line.insert(id.to_string(), text);
 }
 
@@ -739,7 +766,7 @@ pub fn composer_note(s: &App, id: &str) -> Option<String> {
         parts.push("Sending…".into());
     }
     if let Some(latest) = s.unsent.latest(id)
-        && shown_text(s, id).trim() != latest.text
+        && !shows(s, id, latest)
     {
         parts.push(latest.quoted());
     }
@@ -760,10 +787,12 @@ fn shown_text<'a>(s: &'a App, id: &str) -> &'a str {
     if s.composer_for.as_deref() == Some(id) { &s.composer.text } else { s.drafts.get(id) }
 }
 
-fn put_back(s: &mut App, id: &str, text: &str) {
-    if !shown_text(s, id).trim().is_empty() {
+fn put_back(s: &mut App, id: &str, unsent: &Unsent) {
+    if !shown_text(s, id).trim().is_empty() || ui::attach::has(s, id) {
         return;
     }
+    ui::attach::restore(s, id, unsent);
+    let text = unsent.text.as_str();
     if s.composer_for.as_deref() == Some(id) {
         let focused = s.composer.focused;
         s.composer = TextEdit::new(text);
@@ -791,8 +820,9 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
         Err(error) => Some((error.maybe_delivered, error.answered, error.message)),
     };
     if let Some((maybe_delivered, answered, error)) = failure {
-        put_back(s, &id, &pending.text);
-        s.unsent.add(&id, pending.failed(retry, maybe_delivered, answered, error));
+        let failed = pending.failed(retry, maybe_delivered, answered, error);
+        put_back(s, &id, &failed);
+        s.unsent.add(&id, failed);
     }
 }
 
@@ -841,6 +871,7 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
         s.drafts.set(id, "");
     }
     s.drafts.rekey(&s.rekeyed);
+    s.attach.tray.rekey(&s.rekeyed);
     s.unsent.rekey(&s.rekeyed);
     for (old, text) in restored {
         let new = feed::composer::current(&s.rekeyed, &old).to_string();
@@ -866,6 +897,7 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
         if let Some(receipts) = s.queued.remove(&old) {
             s.queued.entry(new.clone()).or_default().extend(receipts);
         }
+        ui::attach::rekey(s, &old, &new);
         move_key(&mut s.status_line, &old, &new);
         move_key(&mut s.busy_pick, &old, &new);
         move_key(&mut s.work_pick, &old, &new);
@@ -979,6 +1011,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Recovered(back) => ui::queue::restore(s, back),
             Bg::Older(id, generation, result) => history::take_older(s, id, generation, result),
             Bg::Body(id, generation, item, version, result) => history::take_body(s, id, generation, item, version, result),
+            Bg::Attach(done) => ui::attach::done(s, done, tx),
             Bg::Error(error) => s.status = format!("daemon: {error}"),
             Bg::Looked(id, seq, result) => ui::gone::looked(s, &id, seq, result),
             Bg::Fixed(id, seq, fix, result) => ui::gone::fixed(s, &id, seq, fix, result),
@@ -1063,6 +1096,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= notify::tick(s);
     changed |= ui::gone::watch(s);
     changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s);
+    changed |= ui::attach::pump(s);
     switch_composer(s);
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &s.composer.text);
@@ -1098,6 +1132,7 @@ fn main() {
     let app = rune::App::new(AppSpec::<App> {
         poll: Some(poll),
         on_key: Some(on_key),
+        setup: Some(ui::attach::setup),
         fonts: rune_theme_opencode::FONTS,
         families: rune_theme_opencode::FAMILIES,
         min_size: Some((1100.0, 700.0)),

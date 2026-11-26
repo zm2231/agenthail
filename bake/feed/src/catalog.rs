@@ -206,6 +206,8 @@ pub struct Capabilities {
     #[serde(default)]
     pub commands: bool,
     #[serde(default)]
+    pub attach: bool,
+    #[serde(default)]
     pub lifecycle: Lifecycle,
 }
 
@@ -221,7 +223,7 @@ fn capabilities_or_default<'de, D: serde::Deserializer<'de>>(d: D) -> std::resul
 
 impl Default for Capabilities {
     fn default() -> Self {
-        Capabilities { interrupt: true, steer: true, model: false, compact: false, commands: false, lifecycle: Lifecycle::default() }
+        Capabilities { interrupt: true, steer: true, model: false, compact: false, commands: false, attach: false, lifecycle: Lifecycle::default() }
     }
 }
 
@@ -665,6 +667,33 @@ impl Client {
         Ok(std::io::BufReader::new(response.into_reader()))
     }
 
+    pub fn upload(&self, session: &str, name: &str, data: &[u8]) -> std::result::Result<crate::attach::Upload, RespondError> {
+        let path = format!("/api/v1/uploads?sessionId={}&name={}", enc(session), enc(name));
+        let request = self.timed(Duration::from_secs(180)).agent.post(&format!("{}{path}", self.base));
+        let reply = match request.set("Authorization", &format!("Bearer {}", self.token)).set("Accept", "application/json").set("Content-Type", "application/octet-stream").send_bytes(data) {
+            Ok(response) => response.into_json::<Value>().map_err(|e| RespondError { message: format!("the daemon's reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: false, answered: true, reply: Value::Null, status: 0 })?,
+            Err(ureq::Error::Status(code, response)) => return Err(RespondError::from_status("upload", code, &response.into_string().unwrap_or_default())),
+            Err(ureq::Error::Transport(error)) => return Err(RespondError::from_transport(&error)),
+        };
+        crate::attach::Upload::from_json(&reply["upload"]).ok_or_else(|| RespondError { message: "the daemon didn't say where it kept the file".into(), code: "unreadable_reply".into(), maybe_delivered: false, answered: true, reply, status: 0 })
+    }
+
+    pub fn attachment(&self, session: &str, id: &str) -> std::result::Result<Vec<u8>, String> {
+        let path = format!("/api/v1/session-attachment?sessionId={}&id={}", enc(session), enc(id));
+        let request = self.timed(Duration::from_secs(120)).agent.get(&format!("{}{path}", self.base));
+        let response = match request.set("Authorization", &format!("Bearer {}", self.token)).call() {
+            Ok(response) => response,
+            Err(ureq::Error::Status(code, response)) => return Err(RespondError::from_status("attachment", code, &response.into_string().unwrap_or_default()).message),
+            Err(ureq::Error::Transport(error)) => return Err(RespondError::from_transport(&error).message),
+        };
+        let mut data = Vec::new();
+        std::io::Read::read_to_end(&mut std::io::Read::take(response.into_reader(), crate::attach::OPEN_LIMIT + 1), &mut data).map_err(|e| e.to_string())?;
+        if data.len() as u64 > crate::attach::OPEN_LIMIT {
+            return Err(format!("Too large to open here, {}.", crate::attach::size_label(data.len() as u64)));
+        }
+        Ok(data)
+    }
+
     pub fn snapshot(&self) -> Result<Snapshot> {
         Ok(serde_json::from_value(self.get("/api/v1/snapshot")?)?)
     }
@@ -829,6 +858,7 @@ mod capabilities_tests {
         assert!(!c.interrupt && !c.steer && !c.model && !c.compact && !c.commands);
         let c = caps(r#","capabilities":{"model":true}"#);
         assert!(c.model && !c.interrupt && !c.steer);
+        assert!(!c.attach && caps(r#","capabilities":{"attach":true}"#).attach);
         let c = caps(r#","capabilities":{"interrupt":true,"steer":false,"compact":true}"#);
         assert!(c.interrupt && !c.steer && c.compact && !c.commands);
     }

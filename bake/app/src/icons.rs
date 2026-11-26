@@ -49,3 +49,11 @@ lucide!(PHONE, "ah-phone", r#"<path d="M5 4h3.5l1.8 4.5-2.3 1.4a11 11 0 0 0 6.1 
 lucide!(PHONE_OFF, "ah-phone-off", r#"<path d="M10.7 13.3a11 11 0 0 0 3.4 2.7l1.4-2.3L20 15.5V19a2 2 0 0 1-2 2 16 16 0 0 1-9.6-4.4"/><path d="M5.6 13.4A16 16 0 0 1 3 6a2 2 0 0 1 2-2h3.5l1.8 4.5-2.3 1.4"/><path d="M21 3 3 21"/>"#);
 lucide!(MIC, "ah-mic", r#"<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/>"#);
 lucide!(MIC_OFF, "ah-mic-off", r#"<path d="M15 9.5V6a3 3 0 0 0-5.7-1.3"/><path d="M9 9v2a3 3 0 0 0 5 2.2"/><path d="M18.5 11a6.5 6.5 0 0 1-1 3.4M5.5 11a6.5 6.5 0 0 0 10.4 5.2"/><path d="M12 17.5V21"/><path d="M3 3l18 18"/>"#);
+lucide!(PAPERCLIP, "ah-paperclip", r#"<path d="m21 11.5-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l8-8"/>"#);
+lucide!(CLOSE, "ah-close", r#"<path d="M18 6 6 18"/><path d="m6 6 12 12"/>"#);
+lucide!(FILE, "ah-file", r#"<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>"#);
+lucide!(FILE_TEXT, "ah-file-text", r#"<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/>"#);
+lucide!(IMAGE, "ah-image", r#"<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>"#);
+lucide!(FILM, "ah-film", r#"<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 7.5h4M3 12h18M3 16.5h4M17 7.5h4M17 16.5h4"/>"#);
+lucide!(AUDIO, "ah-audio", r#"<path d="M2 13a2 2 0 0 0 2-2V7a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0V4a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0v-4a2 2 0 0 1 2-2"/>"#);
+lucide!(ARCHIVE, "ah-archive", r#"<rect x="3" y="3" width="18" height="5" rx="1"/><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>"#);
