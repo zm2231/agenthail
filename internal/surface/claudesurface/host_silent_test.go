@@ -35,7 +35,7 @@ func (f *fakeHost) set(method string, reply func() any) {
 
 func fakeHome(t *testing.T) string {
 	t.Helper()
-	home, err := os.MkdirTemp("", "ah-silent-")
+	home, err := os.MkdirTemp("/tmp", "ahs")
 	if err != nil {
 		t.Fatal(err)
 	}
