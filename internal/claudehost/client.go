@@ -749,7 +749,7 @@ func (c Client) dial(ctx context.Context) (net.Conn, error) {
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "unix", c.Socket)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrNotRunning, err)
+		return nil, fmt.Errorf("%w: %w", ErrNotRunning, err)
 	}
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)

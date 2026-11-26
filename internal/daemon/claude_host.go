@@ -17,7 +17,7 @@ import (
 
 const (
 	claudeHostCheckInterval  = 30 * time.Second
-	claudeHostEnsureTimeout  = 20 * time.Second
+	claudeHostEnsureTimeout  = 45 * time.Second
 	claudeHostWatchRetryWait = 2 * time.Second
 )
 
