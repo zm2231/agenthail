@@ -83,7 +83,19 @@ pub fn changed(s: &mut Prefs) {
 }
 
 pub fn flush(s: &mut Prefs) {
-    if s.handoffs.stale && !busy(s) {
+    if busy(s) {
+        return;
+    }
+    if let Some(Ok(base)) = &s.base {
+        let listed = &base.handoffs;
+        s.handoffs.unsettled.lock().unwrap().keep_channels(listed);
+        if !s.handoffs.picked.is_empty() && listed.channel(&s.handoffs.picked).is_none() {
+            s.handoffs.picked.clear();
+            s.handoffs.message = TextEdit::new("");
+            s.handoffs.member = TextEdit::new("");
+        }
+    }
+    if s.handoffs.stale {
         changed(s);
     }
 }

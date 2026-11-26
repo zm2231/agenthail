@@ -104,6 +104,9 @@ fn an_unsettled_send_is_retried_under_its_own_key_only_while_unchanged() {
     u.forget_channel("ship");
     assert_ne!(u.key_for("ship", "hello"), "k4", "a deleted channel recreated under its name is new");
     assert_eq!(u.key_for("ops", "status"), "k2");
+    u.record("ship", "hello", "k5", &maybe);
+    u.keep_channels(&serde_json::from_str(r#"{"channels":[{"name":"ship"}]}"#).unwrap());
+    assert_eq!((u.key_for("ship", "hello"), u.key_for("ops", "status") == "k2"), ("k5".to_string(), false), "a channel gone from the list loses its open sends");
     let (client, _rx) = daemon(replies(&[(400, r#"{"error":{"code":"invalid_request","message":"no members"}}"#)]));
     let plain = client.channel_send("ship", "hello", "k4").unwrap_err();
     assert!(!plain.uncertain && plain.message == "no members");

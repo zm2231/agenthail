@@ -289,9 +289,13 @@ impl Unsettled {
     pub fn forget_channel(&mut self, channel: &str) {
         self.0.retain(|(at, _), _| at != channel);
     }
+
+    pub fn keep_channels(&mut self, listed: &Handoffs) {
+        self.0.retain(|(at, _), _| listed.channel(at).is_some());
+    }
 }
 
-pub const MAY_HAVE_REACHED: &str = "Some members may already have this message, so sending it again unchanged only reports what became of it and doesn't deliver it twice. Edit it to send it as a new message.";
+pub const MAY_HAVE_REACHED: &str = "Some members may already have this message. Sending it again unchanged finishes that same request or reports what became of it, and never delivers it twice. Edit it to send it as a new message.";
 
 fn unsettled(error: RespondError) -> Failure {
     let partial = error.status == 409 && error.code == "conflict";
