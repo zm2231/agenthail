@@ -22,6 +22,7 @@ pub mod notify;
 mod mock;
 pub mod queue;
 pub mod prefer;
+pub mod prefs;
 pub mod source;
 pub mod store;
 pub mod summary;

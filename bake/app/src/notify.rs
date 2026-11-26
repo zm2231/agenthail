@@ -72,7 +72,7 @@ fn read_prefs(s: &mut App) {
     (st.asking, st.stale) = (true, false);
     let tx = st.tx.clone();
     std::thread::spawn(move || {
-        let _ = tx.send(Done::Prefs(client.notification_preferences().ok()));
+        let _ = tx.send(Done::Prefs(client.notification_preferences().ok().map(|rows| Prefs::from_preferences(&rows))));
     });
 }
 

@@ -3,6 +3,7 @@ mod icons;
 mod menubar;
 mod notify;
 mod over;
+mod settings;
 mod theme;
 mod transcript;
 mod ui;
@@ -1112,6 +1113,10 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
 }
 
 fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
+    if ev.is_command(',') {
+        settings::open();
+        return true;
+    }
     ui::new_session::on_key(s, ev, tx) || over::on_key(s, ev, tx)
 }
 
@@ -1129,7 +1134,7 @@ fn main() {
         voice::run_alone();
         return;
     }
-    let app = rune::App::new(AppSpec::<App> {
+    let mut app = rune::App::new(AppSpec::<App> {
         poll: Some(poll),
         on_key: Some(on_key),
         setup: Some(ui::attach::setup),
@@ -1142,5 +1147,10 @@ fn main() {
         .window_options(WindowOptions { transparent: true, resizable: true, visible: true, ..Default::default() })
         .srgb_blend(true)
         .on_quit(on_quit);
-    menubar::install(app).run();
+    let mut prefs = settings::spec();
+    prefs.options = WindowOptions { visible: false, resizable: true, ..Default::default() };
+    let (handle, window) = app.window(prefs);
+    settings::keep(handle, window);
+    let shortcut = "cmd+comma".parse().expect("the Settings shortcut parses");
+    menubar::install(app.menu_item(rune::MenuItem::new("Settings…", settings::open_from_menu).id("settings").key_equivalent(shortcut))).run();
 }

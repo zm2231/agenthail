@@ -1,12 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::catalog::{Client, OpenRequest, Session, parse_time};
+use crate::catalog::{OpenRequest, Session, parse_time};
 use crate::decisions::Decision;
+use crate::prefs::Preference;
 
 pub const REPLY: &str = "reply";
 const CHOICE: &str = "choice:";
@@ -46,23 +46,13 @@ impl Default for Prefs {
     }
 }
 
-#[derive(Deserialize)]
-struct PrefRow {
-    #[serde(default)]
-    id: String,
-    #[serde(default)]
-    value: bool,
-}
-
-impl Client {
-    pub fn notification_preferences(&self) -> Result<Prefs> {
-        let value = self.get_json("/api/v1/notification-preferences")?;
-        let rows: Vec<PrefRow> = serde_json::from_value(value["preferences"].clone())?;
+impl Prefs {
+    pub fn from_preferences(rows: &[Preference]) -> Prefs {
         let mut prefs = Prefs::default();
         if let Some(row) = rows.iter().find(|r| r.id == LEAD_COMPLETIONS_ONLY) {
             prefs.lead_completions_only = row.value;
         }
-        Ok(prefs)
+        prefs
     }
 }
 

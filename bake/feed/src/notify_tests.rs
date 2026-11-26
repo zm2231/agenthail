@@ -210,10 +210,10 @@ fn what_was_noticed_survives_a_restart_and_old_keys_are_dropped() {
 #[test]
 fn preferences_come_from_the_daemon() {
     let (client, asked) = crate::mock::daemon(vec![(200, r#"{"preferences":[{"id":"leadCompletionsOnly","value":false,"default":true}]}"#.into())]);
-    assert_eq!(client.notification_preferences().unwrap(), Prefs { lead_completions_only: false });
+    assert_eq!(Prefs::from_preferences(&client.notification_preferences().unwrap()), Prefs { lead_completions_only: false });
     assert_eq!(asked.recv().unwrap().0, "/api/v1/notification-preferences");
     let (client, _asked) = crate::mock::daemon(vec![(200, r#"{"preferences":[]}"#.into())]);
-    assert_eq!(client.notification_preferences().unwrap(), Prefs::default());
+    assert_eq!(Prefs::from_preferences(&client.notification_preferences().unwrap()), Prefs::default());
 }
 
 #[test]
