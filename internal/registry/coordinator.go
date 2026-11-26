@@ -693,7 +693,7 @@ func (r *Registry) HandOverCoordinator(spec CoordinatorSpec, previous, next stri
 	}
 	if previous != "" {
 		for _, statement := range append([]string{
-			`UPDATE delivery_intents SET target_session_id=?2,updated_at=datetime('now') WHERE queue_id IN (SELECT id FROM message_queue WHERE session_id=?1 AND status='pending')`,
+			`UPDATE delivery_intents SET target_session_id=?2,updated_at=datetime('now') WHERE queue_id IN (SELECT id FROM message_queue WHERE session_id=?1 AND status IN ('pending','inflight') AND status='pending')`,
 			`UPDATE message_queue SET session_id=?2,updated_at=datetime('now') WHERE session_id=?1 AND status='pending'`,
 			`INSERT OR IGNORE INTO channel_members (channel_id,session_id) SELECT channel_id,?2 FROM channel_members WHERE session_id=?1`,
 			`DELETE FROM channel_members WHERE session_id=?1`,

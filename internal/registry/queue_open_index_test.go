@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/deliverypolicy"
 )
 
 func TestASchema116RegistryUpgradesToIndexedOpenQueueReads(t *testing.T) {
@@ -38,6 +40,8 @@ func TestASchema116RegistryUpgradesToIndexedOpenQueueReads(t *testing.T) {
 		{"queue counts", queueCountsQuery, nil},
 		{"watched sessions", watchedSessionsQuery, watchedArgs},
 		{"one session's queue", `SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight')`, []any{"s1"}},
+		{"claim check", claimCheckQuery(claimCandidateFilter("", deliverypolicy.Queue)), []any{"s1", now.UnixMilli()}},
+		{"steer claim check", claimCheckQuery(claimCandidateFilter("steer", deliverypolicy.Steer)), []any{"s1", now.UnixMilli()}},
 	} {
 		for _, step := range queryPlan(t, r, read.query, read.args...) {
 			if strings.Contains(step, "message_queue") && !strings.Contains(step, "USING INDEX message_queue_open") {

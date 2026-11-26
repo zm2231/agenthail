@@ -124,7 +124,7 @@ func (r *Registry) SessionMoveRefusal(conversation string, toHost bool) (string,
 		reason string
 	}{
 		{`SELECT EXISTS(SELECT 1 FROM session_moves WHERE conversation=? AND role='out' AND state IN ('preparing','sent'))`, "a move of it has not finished"},
-		{`SELECT EXISTS(SELECT 1 FROM message_queue WHERE session_id=? AND status='inflight')`, "a message to it is being delivered"},
+		{`SELECT EXISTS(SELECT 1 FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND status='inflight')`, "a message to it is being delivered"},
 	}
 	for _, check := range checks {
 		var found bool
@@ -442,7 +442,7 @@ func (r *Registry) pendingMoveQueue(tx rowQuerier, conversation string) ([]Moved
 			item.QueuedAt, err = parseSQLiteTimestamp(queuedAt)
 		}
 		return item, err
-	}, `SELECT id,message,delivery_key,source_session_id,busy_delivery,relay_hops,operation,uploads,queued_at FROM message_queue WHERE session_id=? AND host_request='' AND status='pending' ORDER BY id`, conversation)
+	}, `SELECT id,message,delivery_key,source_session_id,busy_delivery,relay_hops,operation,uploads,queued_at FROM message_queue WHERE session_id=? AND host_request='' AND status IN ('pending','inflight') AND status='pending' ORDER BY id`, conversation)
 }
 
 // CompleteMoveOut hands a conversation the target resumed to the target, in
