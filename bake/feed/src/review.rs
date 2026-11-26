@@ -61,7 +61,7 @@ pub fn lead_of<'a>(handled: &'a [LeadHandled], w: &Work) -> Option<&'a LeadHandl
 pub fn unlisted_note(inbox: Option<&Inbox>, w: &Work, name_of: impl Fn(&str) -> String) -> String {
     let Some(inbox) = inbox else { return "Looking for this review…".into() };
     if let Some(h) = lead_of(&inbox.lead_handling, w) {
-        return format!("{} has this review first. It comes to you when they pass it on or wait on you.", name_of(&h.held_by));
+        return format!("{} is handling this first. It comes to you once they pass it on or stop to wait on you.", name_of(&h.held_by));
     }
     if !inbox.read.iter().any(String::is_empty) {
         return "This computer's decisions couldn't be read, so this review can't be found yet.".into();
@@ -214,7 +214,10 @@ mod tests {
         held.add(page(r#"{"decisions":[],"leadHandling":[{"sessionId":"worker","heldBy":"lead","role":"lead","reason":"Ready for review","workItem":"p-W31","ledgerKey":"project:p-1"}]}"#), "", "", "h1");
         held.notes.push("katbox isn't answering, so its decisions aren't shown.".into());
         assert_eq!(lead_of(&held.lead_handling, &w).map(|h| h.session_id.as_str()), Some("worker"));
-        assert_eq!(unlisted_note(Some(&held), &w, name), "Lead has this review first. It comes to you when they pass it on or wait on you.");
+        assert_eq!(unlisted_note(Some(&held), &w, name), "Lead is handling this first. It comes to you once they pass it on or stop to wait on you.");
+        let mut waiting = Inbox::default();
+        waiting.add(page(r#"{"decisions":[],"leadHandling":[{"sessionId":"worker","heldBy":"lead","role":"lead","reason":"Waiting on the build","workItem":"p-W31","ledgerKey":"project:p-1"}]}"#), "", "", "h1");
+        assert_eq!(unlisted_note(Some(&waiting), &w, name), unlisted_note(Some(&held), &w, name));
         let other = Work { id: "p-W32".into(), ..w.clone() };
         assert_eq!(lead_of(&held.lead_handling, &other), None);
         let elsewhere = Work { project: "p-0".into(), ..w.clone() };

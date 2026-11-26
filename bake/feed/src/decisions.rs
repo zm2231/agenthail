@@ -307,7 +307,8 @@ pub fn rev_moved(seen: &mut Option<String>, rev: &str) -> bool {
     if rev.is_empty() || seen.as_deref() == Some(rev) {
         return false;
     }
-    seen.replace(rev.to_string()).is_some()
+    *seen = Some(rev.to_string());
+    true
 }
 
 pub fn remember(history: &mut Vec<Handled>, entry: Handled) {
@@ -526,9 +527,9 @@ mod tests {
     }
 
     #[test]
-    fn a_new_decisions_revision_asks_again_but_the_first_and_a_repeat_do_not() {
+    fn a_new_decisions_revision_asks_again_but_a_repeat_does_not() {
         let mut seen = None;
-        assert!(!rev_moved(&mut seen, "r1"));
+        assert!(rev_moved(&mut seen, "r1"));
         assert!(!rev_moved(&mut seen, "r1"));
         assert!(!rev_moved(&mut seen, ""));
         assert!(rev_moved(&mut seen, "r2"));
