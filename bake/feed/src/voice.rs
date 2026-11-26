@@ -6,6 +6,14 @@ use time::OffsetDateTime;
 
 use crate::catalog::Client;
 
+#[path = "voice_trail.rs"]
+mod trail;
+pub use trail::{Attempt, KEPT_CALLS, Setup, Trail, UNFINISHED};
+
+#[path = "voice_details.rs"]
+mod details;
+pub use details::Section;
+
 pub const PROTOCOL: i64 = 1;
 pub const HEARTBEAT_SECS: f64 = 10.0;
 pub const HEARTBEAT_GRACE_SECS: f64 = 30.0;
@@ -52,6 +60,45 @@ pub struct State {
     pub occupied: bool,
     pub target: Option<Party>,
     pub terminal_reason: Option<String>,
+    pub audio_provider: Option<String>,
+    pub coding_provider: Option<String>,
+    pub skill_digest: Option<String>,
+    pub brief: Option<Brief>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Brief {
+    #[serde(default)]
+    pub session_id: String,
+    #[serde(default)]
+    pub as_of: String,
+    #[serde(default)]
+    pub bytes: i64,
+    #[serde(default)]
+    pub exchanges: i64,
+    #[serde(default)]
+    pub omitted: Vec<String>,
+}
+
+impl Brief {
+    pub fn summary(&self, name: &str, now: OffsetDateTime) -> String {
+        let exchanges = match self.exchanges {
+            1 => "1 recent exchange".to_string(),
+            n => format!("{n} recent exchanges"),
+        };
+        let age = crate::catalog::ago(&self.as_of, now);
+        let when = match age.as_str() {
+            "" => String::new(),
+            "now" => ", read just now".into(),
+            age => format!(", read {age} ago"),
+        };
+        format!("The call was briefed on {name}: {exchanges}{when}.")
+    }
+
+    pub fn left_out(&self) -> Option<String> {
+        (!self.omitted.is_empty()).then(|| format!("Left out of the brief: {}.", self.omitted.join(", ")))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,6 +123,11 @@ pub enum Talk {
 }
 
 impl State {
+    pub fn shown_brief(&self) -> Option<(&Brief, &Party)> {
+        let target = self.target.as_ref()?;
+        self.brief.as_ref().filter(|b| b.session_id == target.id).map(|b| (b, target))
+    }
+
     pub fn has_call(&self) -> bool {
         ["starting", "negotiating", "connected", "stopping", "unknown"].contains(&self.phase.as_str())
     }
@@ -200,6 +252,15 @@ fn loopback(base: &str) -> String {
     }
 }
 
+pub fn shown_address(url: &str) -> String {
+    let Ok(mut parsed) = url::Url::parse(url) else { return "an unreadable address".into() };
+    let _ = parsed.set_username("");
+    let _ = parsed.set_password(None);
+    parsed.set_query(None);
+    parsed.set_fragment(None);
+    parsed.to_string()
+}
+
 pub fn peer_allowed(url: &str, peer: &Peer) -> bool {
     url::Url::parse(url).is_ok_and(|u| u.path() == "/api/v1/voice/peer" && u.origin().ascii_serialization() == peer.origin)
 }
@@ -307,10 +368,11 @@ pub struct Job {
 pub enum Effect {
     Fetch(Job),
     AskMic(String),
-    PeerStart,
+    PeerStart(String),
     PeerEnd,
     PeerAnswer(String),
     PeerMute(bool),
+    Note(String),
 }
 
 #[derive(Default)]
@@ -346,9 +408,15 @@ pub struct Call {
     beating: Option<String>,
     last_beat: f64,
     requested: Option<String>,
+    transfer_from: Option<(u64, String)>,
+    peer_started: bool,
     asking_mic: bool,
     lost_at: Option<f64>,
     out: Vec<Effect>,
+    pub trail: Trail,
+    clock: f64,
+    setup: Option<(Setup, f64)>,
+    setup_stuck: bool,
 }
 
 impl Call {
@@ -385,7 +453,11 @@ impl Call {
         let reason = if self.closed {
             "This call window is closed."
         } else if !self.ready {
-            "Call audio is not ready."
+            match self.setup {
+                Some((stage, _)) if self.setup_stuck => stage.stuck(),
+                Some((stage, _)) => stage.waiting(),
+                None => "Call audio is not ready.",
+            }
         } else if self.working {
             "Another voice action is in progress."
         } else if self.dialing {
@@ -412,6 +484,32 @@ impl Call {
 
     pub fn can_call(&self) -> bool {
         self.unavailable().is_none()
+    }
+
+    pub fn setup_stuck(&self) -> bool {
+        !self.ready && self.setup_stuck
+    }
+
+    pub fn checked(&mut self, ok: bool, now: f64) -> Vec<Effect> {
+        if self.closed || self.ready || !self.setup.is_some_and(|(s, _)| s == Setup::Check) {
+            return Vec::new();
+        }
+        if ok {
+            self.peer("ready", "", now)
+        } else {
+            self.peer("unavailable", "The audio page didn't start. Check that Agenthail is running and up to date, then open this window again.", now)
+        }
+    }
+
+    pub fn setup(&mut self, stage: Setup, now: f64) -> Vec<Effect> {
+        if self.closed || self.ready || self.setup.is_some_and(|(s, _)| s == stage) {
+            return Vec::new();
+        }
+        self.clock = now;
+        self.setup = Some((stage, now));
+        self.setup_stuck = false;
+        self.out.push(Effect::Note(stage.waiting().into()));
+        self.drain()
     }
 
     pub fn can_start_new(&self) -> bool {
@@ -486,6 +584,13 @@ impl Call {
         if self.closed {
             return Vec::new();
         }
+        self.clock = now;
+        if let Some((stage, since)) = self.setup {
+            if !self.ready && !self.setup_stuck && now - since >= stage.limit() {
+                self.setup_stuck = true;
+                self.out.push(Effect::Note(stage.stuck().into()));
+            }
+        }
         if !self.refreshing && now >= self.next_refresh && (self.visible || self.active()) {
             self.refreshing = true;
             self.fetch(Req::Refresh, None);
@@ -498,11 +603,11 @@ impl Call {
         }
         if self.host_has_call && self.attempt.is_some() && now - self.last_beat >= HEARTBEAT_GRACE_SECS {
             self.error.get_or_insert_with(|| "The connection to Agenthail was lost. Audio has stopped; call again when it reconnects.".into());
-            self.end_call();
+            self.end_call("host_unreachable");
         }
         if self.lost_at.is_some_and(|at| now - at >= RECOVERY_SECS) && !self.audio_connected {
             self.error.get_or_insert_with(|| "Audio could not reconnect. Call again to resume this conversation.".into());
-            self.end_call();
+            self.end_call("peer_disconnected");
         }
         self.drain()
     }
@@ -516,18 +621,24 @@ impl Call {
         self.error = None;
         self.mic_denied = false;
         self.generation += 1;
-        self.attempt = Some(fresh_id());
+        let id = fresh_id();
+        self.trail.begin(&id, self.clock);
+        self.attempt = Some(id);
         self.requested = Some(self.target.trim().to_string()).filter(|t| !t.is_empty());
         let select = Action { target_id: Some(self.target.trim().to_string()), ..Action::new("select") };
         self.fetch(Req::Select, Some(select));
         self.drain()
     }
 
-    fn dial_failed(&mut self, error: String, work: u64) {
+    fn dial_failed(&mut self, error: String, work: u64, stage: &str, cause: &str) {
+        if let Some(id) = &self.attempt {
+            self.trail.fail(id, stage);
+            self.trail.end(id, cause, self.clock);
+        }
         self.error = Some(error);
         self.dialing = false;
         self.attempt = None;
-        self.out.push(Effect::PeerEnd);
+        self.end_peer();
         self.end_work(work);
     }
 
@@ -538,26 +649,52 @@ impl Call {
         self.asking_mic = false;
         let work = self.work;
         if granted {
-            self.out.push(Effect::PeerStart);
+            self.trail.mark(attempt, "microphone_granted", self.clock);
+            self.peer_started = true;
+            self.out.push(Effect::PeerStart(attempt.to_string()));
             self.end_work(work);
         } else {
-            self.dial_failed(MIC_DENIED.into(), work);
+            self.dial_failed(MIC_DENIED.into(), work, "native_audio_start", "microphone_denied");
             self.mic_denied = true;
         }
         self.drain()
+    }
+
+    pub fn heard(&mut self, call: &str, kind: &str, value: &str, now: f64) -> Vec<Effect> {
+        let of_a_call = matches!(kind, "offer" | "connection" | "channel" | "error");
+        if kind == "ready" || of_a_call && self.attempt.as_deref() != Some(call) {
+            return Vec::new();
+        }
+        self.peer(kind, value, now)
     }
 
     pub fn peer(&mut self, kind: &str, value: &str, now: f64) -> Vec<Effect> {
         if self.closed {
             return Vec::new();
         }
+        self.clock = now;
+        if let Some(id) = self.attempt.clone() {
+            match kind {
+                "offer" => self.trail.mark(&id, "offer_submitted", now),
+                "connection" => self.trail.mark(&id, &format!("peer_{value}"), now),
+                "channel" if value == "open" => self.trail.mark(&id, "data_channel_open", now),
+                _ => {}
+            }
+        }
         match kind {
             "loading" => self.ready = false,
-            "ready" => self.ready = true,
+            "ready" => {
+                self.ready = true;
+                self.setup = None;
+                self.setup_stuck = false;
+            }
             "unavailable" => {
                 self.ready = false;
+                self.setup = None;
+                self.setup_stuck = false;
+                self.out.push(Effect::Note(value.into()));
                 self.error = Some(value.into());
-                self.end_call();
+                self.end_call("audio_unavailable");
             }
             "offer" => {
                 if let Some(id) = self.attempt.clone() {
@@ -576,7 +713,7 @@ impl Call {
                 }
                 if value == "failed" || value == "closed" {
                     self.error.get_or_insert_with(|| "Audio disconnected. Call again to resume this conversation.".into());
-                    self.end_call();
+                    self.end_call(&format!("peer_{value}"));
                 }
                 self.report_connected();
             }
@@ -586,7 +723,7 @@ impl Call {
             }
             "error" => {
                 self.error.get_or_insert_with(|| value.to_string());
-                self.end_call();
+                self.end_call("audio_error");
             }
             _ => {}
         }
@@ -625,11 +762,11 @@ impl Call {
     }
 
     pub fn hangup(&mut self) -> Vec<Effect> {
-        self.end_call();
+        self.end_call("local_hangup");
         self.drain()
     }
 
-    fn end_call(&mut self) {
+    fn end_call(&mut self, cause: &str) {
         self.generation += 1;
         self.work += 1;
         self.working = false;
@@ -641,8 +778,11 @@ impl Call {
         self.channel_open = false;
         self.asking_mic = false;
         self.host_has_call = false;
-        self.out.push(Effect::PeerEnd);
+        self.end_peer();
         let local = self.attempt.take();
+        if let Some(id) = &local {
+            self.trail.end(id, cause, self.clock);
+        }
         let stop = self.start_submitted || self.hangup_unconfirmed;
         self.start_submitted = false;
         let id = local.or_else(|| self.hangup_attempt.clone());
@@ -657,12 +797,18 @@ impl Call {
         }
     }
 
+    fn end_peer(&mut self) {
+        if std::mem::take(&mut self.peer_started) {
+            self.out.push(Effect::PeerEnd);
+        }
+    }
+
     fn host_stopped(&mut self, next: State) {
         let fallback = next.message().unwrap_or_else(|| "The host ended this voice call.".into());
         self.error.get_or_insert(fallback);
         self.state = Some(next);
         self.start_submitted = false;
-        self.end_call();
+        self.end_call("host_stopping");
     }
 
     pub fn send_text(&mut self, text: &str) -> Vec<Effect> {
@@ -676,12 +822,18 @@ impl Call {
         self.drain()
     }
 
+    pub fn can_transfer_to(&self, route: &str) -> bool {
+        let on = self.state.as_ref().and_then(|s| s.target.as_ref()).map_or("", |t| t.id.as_str());
+        self.connected_call() && route.trim() != on
+    }
+
     pub fn transfer(&mut self, target: &str) -> Vec<Effect> {
         if self.closed || self.working || !self.connected_call() {
             return Vec::new();
         }
-        self.target = target.trim().to_string();
+        let from = std::mem::replace(&mut self.target, target.trim().to_string());
         self.begin_work();
+        self.transfer_from = Some((self.work, from));
         let to = Action { target_id: Some(self.target.clone()), ..Action::new("transfer") };
         self.fetch(Req::Transfer, Some(to));
         self.drain()
@@ -721,7 +873,7 @@ impl Call {
         if self.closed {
             return Vec::new();
         }
-        self.end_call();
+        self.end_call("window_closed");
         self.closed = true;
         self.state = None;
         self.drain()
@@ -733,6 +885,7 @@ impl Call {
 
     pub fn reply(&mut self, job: Job, result: Result<State, Failure>, now: f64) -> Vec<Effect> {
         let current = job.generation == self.generation && !self.closed;
+        self.clock = now;
         let (result, host) = match result {
             Ok(next) => (Ok(next), None),
             Err(failure) => (Err(failure.message), failure.host),
@@ -753,62 +906,76 @@ impl Call {
                     match result {
                         Ok(next) => {
                             if job.req == Req::Select {
+                                if self.requested.is_some() {
+                                    self.requested = next.target.as_ref().map(|t| t.id.clone()).or(self.requested.take());
+                                }
                                 self.state = Some(next);
                                 self.fetch(Req::Prepare, Some(Action::new("prepare")));
                             } else {
                                 self.state = Some(next);
                                 self.reset_call();
                                 if let Some(id) = self.attempt.clone() {
+                                    self.trail.mark(&id, "prepared", self.clock);
                                     self.asking_mic = true;
                                     self.out.push(Effect::AskMic(id));
                                 }
                             }
                         }
-                        Err(error) => self.dial_failed(error, job.work),
+                        Err(error) => {
+                            let stage = if job.req == Req::Select { "target_select" } else { "operator_prepare" };
+                            self.dial_failed(error, job.work, stage, &format!("{stage}_failed"));
+                        }
                     }
                 }
             }
             Req::Start(id) => match result {
                 Ok(next) if current => {
+                    self.trail.mark(&id, "host_start_accepted", now);
                     let bound = next.target.as_ref().map(|t| t.id.clone());
                     self.state = Some(next);
                     self.host_has_call = true;
                     self.last_beat = now;
                     if bound != self.requested {
                         self.error = Some("Another Agenthail window changed who this call talks to before it started, so it was hung up. Call again.".into());
-                        self.end_call();
+                        self.end_call("target_changed");
                     } else {
                         self.report_input();
                         self.beat_due = Some(now);
                     }
                 }
                 Err(error) if current && host.as_ref().is_some_and(|h| h.attempt_id.as_deref() != Some(id.as_str())) => {
+                    self.trail.fail(&id, "host_start");
+                    self.trail.end(&id, "host_start_rejected", now);
                     self.error = Some(error);
                     self.dialing = false;
                     self.attempt = None;
                     self.start_submitted = false;
-                    self.out.push(Effect::PeerEnd);
+                    self.end_peer();
                     self.fetch(Req::Abandon, Some(Action::new("stop").attempt(&id)));
                 }
                 Err(error) if current => {
+                    self.trail.fail(&id, "host_start");
                     self.error = Some(error);
                     if let Some(host) = host {
                         self.state = Some(host);
                     }
-                    self.end_call();
+                    self.end_call("host_start_rejected");
                 }
                 _ => {
                     let stale = Job { generation: self.generation, work: 0, req: Req::Abandon, action: Some(Action::new("stop").attempt(&id)) };
                     self.out.push(Effect::Fetch(stale));
                 }
             },
-            Req::Connected(_) => {
+            Req::Connected(id) => {
                 if current {
                     match result {
-                        Ok(next) => self.state = Some(next),
+                        Ok(next) => {
+                            self.trail.mark(&id, "host_connected", now);
+                            self.state = Some(next);
+                        }
                         Err(error) => {
                             self.error = Some(error);
-                            self.end_call();
+                            self.end_call("host_connected_failed");
                         }
                     }
                 }
@@ -827,7 +994,7 @@ impl Call {
                             } else if ["ended", "blocked", "unknown"].contains(&next.phase.as_str()) {
                                 let fallback = next.message().unwrap_or_else(|| "The host ended this call.".into());
                                 self.error.get_or_insert(fallback);
-                                self.end_call();
+                                self.end_call(&format!("host_{}", next.phase));
                             }
                         }
                         Err(_) => {}
@@ -841,7 +1008,7 @@ impl Call {
                         Ok(_) => {}
                         Err(_) => {
                             self.error.get_or_insert_with(|| "Agenthail could not record whether the microphone is muted, so the call ended.".into());
-                            self.end_call();
+                            self.end_call("input_report_failed");
                         }
                     }
                 }
@@ -871,6 +1038,11 @@ impl Call {
             }
             Req::Transfer | Req::Interrupt | Req::TargetInterrupt | Req::New => {
                 self.end_work(job.work);
+                if job.req == Req::Transfer && self.transfer_from.as_ref().is_some_and(|(work, _)| *work == job.work) {
+                    if let Some((_, from)) = self.transfer_from.take().filter(|_| current && result.is_err()) {
+                        self.target = from;
+                    }
+                }
                 if current {
                     match result {
                         Ok(next) => self.state = Some(next),
@@ -900,7 +1072,7 @@ impl Call {
             let fallback = next.message().unwrap_or_else(|| "The host can no longer confirm this call. Audio has stopped.".into());
             self.error.get_or_insert(fallback);
             self.state = Some(next);
-            self.end_call();
+            self.end_call("host_unknown");
             return;
         }
         if next.phase == "stopping" && ours {
@@ -929,11 +1101,15 @@ impl Call {
         self.connection_error = None;
         if terminal {
             let had_local = self.has_local_call();
+            if let Some(id) = &self.attempt {
+                let phase = self.state.as_ref().map(|s| s.phase.clone()).unwrap_or_default();
+                self.trail.end(id, &format!("host_{phase}"), self.clock);
+            }
             self.audio_connected = false;
             self.dialing = false;
             self.attempt = None;
             if had_local {
-                self.out.push(Effect::PeerEnd);
+                self.end_peer();
             }
             self.beat_due = None;
             self.beating = None;
@@ -943,6 +1119,9 @@ impl Call {
             self.hangup_attempt = None;
         }
         if let Some(sdp) = answer {
+            if let Some(id) = &self.attempt {
+                self.trail.mark(id, "sdp_answer_sent", self.clock);
+            }
             self.applied_sdp = Some(sdp.clone());
             self.out.push(Effect::PeerAnswer(sdp));
         }

@@ -1097,6 +1097,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         s.revealed = Some(id);
     }
     if let Some(id) = voice::take_opened_session() {
+        menubar::front(s);
         over::open_session(s, &id);
         changed = true;
     }
