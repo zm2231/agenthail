@@ -402,3 +402,59 @@ func TestASessionStreamThatStopsReadingDuringABurstStillReceivesEveryRow(t *test
 		}
 	}
 }
+
+func TestAPISessionStreamBodyCarriesTheVersionARangedReaderExpects(t *testing.T) {
+	d, reg, _, from, _ := daemonFixture(t)
+	prefix := strings.Repeat("p", 32)
+	write := func(body string) {
+		t.Helper()
+		if _, _, err := reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: "tool", Payload: []byte(`{"itemId":"tool","version":1,"bodyRef":"opaque"}`), BodyRef: "opaque", FullBody: []byte(body)}, registry.SessionJournalRetention{Count: 8, Bytes: sessionJournalRetentionBytes}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	server := httptest.NewServer(dashboardRouter(d))
+	defer server.Close()
+	type answer struct {
+		Version *uint64 `json:"version"`
+		Body    string  `json:"body"`
+		Total   int     `json:"total"`
+		Error   struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	read := func(query string) (int, answer) {
+		t.Helper()
+		request, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/session-stream-body?id="+from.ID+"&ref=opaque&"+query, nil)
+		request.Header.Set("Authorization", "Bearer secret")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		var got answer
+		if err := json.NewDecoder(response.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		return response.StatusCode, got
+	}
+	write(prefix + "first")
+	status, head := read("start=0&end=32")
+	if status != http.StatusOK || head.Version == nil || head.Body != prefix {
+		t.Fatalf("first range: status=%d %+v", status, head)
+	}
+	expect := "version=" + strconv.FormatUint(*head.Version, 10)
+	if status, same := read("start=32&end=48&" + expect); status != http.StatusOK || same.Body != "first" || *same.Version != *head.Version {
+		t.Fatalf("a range of the unchanged body: status=%d %+v", status, same)
+	}
+	write(prefix + "other")
+	status, refused := read("start=32&end=48&" + expect)
+	if status != http.StatusConflict || refused.Error.Code != bodyRewrittenCode || refused.Version == nil || *refused.Version == *head.Version {
+		t.Fatalf("a range of the rewritten body expecting the old version: status=%d %+v", status, refused)
+	}
+	if status, fresh := read("start=0&end=48&version=" + strconv.FormatUint(*refused.Version, 10)); status != http.StatusOK || fresh.Body != prefix+"other" {
+		t.Fatalf("a restart at the new version: status=%d %+v", status, fresh)
+	}
+	if status, bad := read("start=0&version=-1"); status != http.StatusBadRequest || bad.Error.Code != "invalid_version" {
+		t.Fatalf("a malformed version: status=%d %+v", status, bad)
+	}
+}

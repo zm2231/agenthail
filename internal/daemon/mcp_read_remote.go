@@ -18,7 +18,7 @@ func (d *Daemon) mcpReadRemote(ctx context.Context, qualifiedID string, input mc
 	case input.Since != nil:
 		return nil, refuse("invalid", "since reads only sessions on this computer; read a session on another computer back without since.")
 	case input.BodyRef != "":
-		return d.mcpReadRemoteBody(ctx, qualifiedID, input.BodyRef, input.Offset)
+		return d.mcpReadRemoteBody(ctx, qualifiedID, input.BodyRef, input.Offset, input.Version)
 	}
 	limit, err := pageLimit(input.Limit, 5, surface.MaxExchangePage)
 	if err != nil {
@@ -49,34 +49,36 @@ func (d *Daemon) mcpReadRemote(ctx context.Context, qualifiedID string, input mc
 	return mcpReadPage(qualifiedID, page, before, after)
 }
 
-func (d *Daemon) mcpReadRemoteBody(ctx context.Context, qualifiedID, ref string, offset int) (any, error) {
+func (d *Daemon) mcpReadRemoteBody(ctx context.Context, qualifiedID, ref string, offset int, version *uint64) (any, error) {
 	if offset < 0 {
 		return nil, refuse("invalid", "offset must not be negative.")
 	}
 	query := url.Values{"ref": {ref}, "start": {strconv.Itoa(offset)}, "end": {strconv.Itoa(offset + mcpBodyChunk)}}
+	if version != nil {
+		query.Set("version", strconv.FormatUint(*version, 10))
+	}
 	var answer struct {
-		End   int    `json:"end"`
-		Total int    `json:"total"`
-		Body  string `json:"body"`
+		Version *uint64 `json:"version"`
+		Total   int     `json:"total"`
+		Body    string  `json:"body"`
 	}
 	var failure *hostAnswerError
 	if err := d.hostGet(ctx, qualifiedID, "/api/v1/session-stream-body", "id", query, &answer); errors.As(err, &failure) && failure.code == "body_unavailable" {
 		return nil, refuse("not_found", "That body is no longer retained.")
 	} else if errors.As(err, &failure) && failure.code == "invalid_range" {
 		return nil, refuse("invalid", "The body range is invalid.")
+	} else if errors.As(err, &failure) && failure.code == bodyRewrittenCode {
+		return nil, errMCPBodyRewritten
 	} else if err != nil {
 		return nil, err
 	}
-	body := []byte(answer.Body)
-	if offset+len(body) < answer.Total {
-		body = wholeRunes(body)
+	if answer.Version == nil {
+		return nil, refuse("refused", "The session's host answered without a body version; update Agenthail on that host.")
 	}
-	end := offset + len(body)
-	result := map[string]any{"sessionId": qualifiedID, "bodyRef": ref, "offset": offset, "end": end, "total": answer.Total, "text": string(body), "truncated": end < answer.Total}
-	if end < answer.Total {
-		result["nextOffset"] = end
+	if version != nil && *answer.Version != *version {
+		return nil, errMCPBodyRewritten
 	}
-	return result, nil
+	return mcpBodyPage(qualifiedID, ref, offset, []byte(answer.Body), answer.Total, *answer.Version), nil
 }
 
 type hostAnswerError struct {

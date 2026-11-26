@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -387,5 +388,35 @@ func TestTheOwningHostRefusesAForgedSenderForAStarterItDoesNotMirror(t *testing.
 	}
 	if admitted := forward("local-a"); admitted.Code != http.StatusOK {
 		t.Fatalf("a forwarded steer from the starter: status=%d body=%s", admitted.Code, admitted.Body.String())
+	}
+}
+
+func TestARangedBodyReadThroughAPairedHostIsRefusedOnceTheBodyIsRewritten(t *testing.T) {
+	f := startAcrossHosts(t)
+	prefix := strings.Repeat("é", 4096)
+	write := func(tail string) {
+		t.Helper()
+		item, _ := json.Marshal(sessionJournalPayload{ItemID: "tool", Kind: "message", Role: "assistant", Body: prefix[:64], Truncated: true, BodyRef: "body-tool", Version: 1, Op: "upsert", TS: time.Now().Format(time.RFC3339Nano)})
+		if _, _, err := f.vps.reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: "started", Kind: "message", ProviderKey: "tool", Payload: item, ObservedAt: time.Now(), BodyRef: "body-tool", FullBody: []byte(prefix + tail)}, registry.SessionJournalRetention{Count: 4096, Bytes: 64 << 20}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("first")
+	head, refused := callMCP(t, f.starter, "agenthail_read", map[string]any{"sessionId": f.created, "bodyRef": "body-tool"})
+	version, ok := head["version"].(float64)
+	if refused || !ok || head["nextOffset"] == nil {
+		t.Fatalf("the first chunk from the paired host: refused=%v %v", refused, head)
+	}
+	write("other")
+	out, refused := callMCP(t, f.starter, "agenthail_read", map[string]any{"sessionId": f.created, "bodyRef": "body-tool", "offset": head["nextOffset"], "version": version})
+	refusedAs(t, "the next chunk of a body the paired host rewrote", out, refused, "body_rewritten")
+	fresh, refused := callMCP(t, f.starter, "agenthail_read", map[string]any{"sessionId": f.created, "bodyRef": "body-tool", "offset": head["nextOffset"]})
+	if refused || fresh["version"] == version {
+		t.Fatalf("a read without a version after the rewrite: refused=%v %v", refused, fresh)
+	}
+
+	path := "/api/v1/session-stream-body?id=" + f.created + "&ref=body-tool&start=0&end=16&version=" + strconv.FormatUint(uint64(version), 10)
+	if response := f.laptop.request(t, http.MethodGet, path, nil); response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"body_rewritten"`) {
+		t.Fatalf("the body endpoint routed to the paired host: status=%d body=%s", response.Code, response.Body.String())
 	}
 }
