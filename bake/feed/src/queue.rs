@@ -125,6 +125,8 @@ pub fn waiting(rows: &[Queued], rekeyed: &HashMap<String, String>, session: &str
     out
 }
 
+pub const READ_FAILED: &str = "Couldn't read the queue";
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Read {
     pub rows: Vec<Queued>,
@@ -190,8 +192,8 @@ impl Client {
                 rows.extend(held);
                 Ok(Read { rows, partial: None })
             }
-            (Err(error), Ok(rows)) => Ok(Read { rows, partial: Some(format!("Couldn't read the queue on {host}, so only what this computer holds is shown: {error}")) }),
-            (Ok(rows), Err(error)) => Ok(Read { rows, partial: Some(format!("Couldn't read the queue this computer holds for this session: {error}")) }),
+            (Err(error), Ok(rows)) => Ok(Read { rows, partial: Some(format!("{READ_FAILED} on {host}, so only what this computer holds is shown: {error}")) }),
+            (Ok(rows), Err(error)) => Ok(Read { rows, partial: Some(format!("{READ_FAILED} this computer holds for this session: {error}")) }),
         }
     }
 

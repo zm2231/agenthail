@@ -1,5 +1,5 @@
 use super::*;
-use feed::queue::{Done, Op, Queued, Taking, waiting};
+use feed::queue::{Done, Op, Queued, READ_FAILED, Taking, waiting};
 use rune::TextEdit;
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
@@ -8,14 +8,14 @@ use crate::Bg;
 const SHOWN: usize = 3;
 const ROW_HEIGHT: f32 = 46.0;
 const NOTE_HEIGHT: f32 = 34.0;
-const READ_FAILED: &str = "Couldn't read the queue";
+
 
 pub(crate) fn rows(s: &App, id: &str) -> Vec<Queued> {
     s.queue.get(id).map(|rows| waiting(rows, &s.rekeyed, id)).unwrap_or_default()
 }
 
 pub(crate) fn wants(s: &App, id: &str) -> bool {
-    session(s, id).is_some_and(|x| x.queue_count > 0) || !rows(s, id).is_empty() || s.queued.contains_key(id)
+    session(s, id).is_some_and(|x| x.queue_count > 0) || !rows(s, id).is_empty() || s.queued.contains_key(id) || s.queue_note.contains_key(id)
 }
 
 fn valid_from(s: &App, id: &str) -> u64 {

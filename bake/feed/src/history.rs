@@ -123,16 +123,31 @@ impl Client {
     }
 
     pub fn full_body(&self, session: &str, body_ref: &str) -> Result<String, String> {
-        collect_body(
-            |start| {
-                let path = format!("/api/v1/session-stream-body?id={}&ref={}&start={start}", enc(session), enc(body_ref));
-                let value = self.get_reply(&path).map_err(|(code, text)| refusal(code, &text))?;
-                let (end, total) = (value["end"].as_u64().map_or(start, |e| e as usize), value["total"].as_u64().unwrap_or_default() as usize);
-                Ok(Chunk { text: value["body"].as_str().unwrap_or_default().to_string(), end, total, more: value["truncated"].as_bool().unwrap_or(false) })
-            },
-            BODY_CAP,
-        )
+        let read = || {
+            collect_body(
+                |start| {
+                    let path = format!("/api/v1/session-stream-body?id={}&ref={}&start={start}", enc(session), enc(body_ref));
+                    let value = self.get_reply(&path).map_err(|(code, text)| refusal(code, &text))?;
+                    let (end, total) = (value["end"].as_u64().map_or(start, |e| e as usize), value["total"].as_u64().unwrap_or_default() as usize);
+                    Ok(Chunk { text: value["body"].as_str().unwrap_or_default().to_string(), end, total, more: value["truncated"].as_bool().unwrap_or(false) })
+                },
+                BODY_CAP,
+            )
+        };
+        settled(read)
     }
+}
+
+pub fn settled(mut read: impl FnMut() -> Result<String, String>) -> Result<String, String> {
+    let mut last = read()?;
+    for _ in 0..2 {
+        let again = read()?;
+        if again == last {
+            return Ok(again);
+        }
+        last = again;
+    }
+    Err("it changed while loading; try again".into())
 }
 
 pub struct Chunk {
@@ -255,6 +270,8 @@ mod tests {
         let (client, seen) = daemon(replies(&[
             (200, r#"{"body":"��héllo","end":12,"total":21,"truncated":true}"#),
             (200, r#"{"body":" — done","end":21,"total":21,"truncated":false}"#),
+            (200, r#"{"body":"��héllo","end":12,"total":21,"truncated":true}"#),
+            (200, r#"{"body":" — done","end":21,"total":21,"truncated":false}"#),
         ]));
         assert_eq!(client.full_body("s1", "body/a").unwrap(), "\u{FFFD}\u{FFFD}héllo — done");
         assert_eq!(seen.recv().unwrap().0, "/api/v1/session-stream-body?id=s1&ref=body%2Fa&start=0");
@@ -278,6 +295,21 @@ mod tests {
         assert_eq!((read.unwrap(), starts), ("abcdabcdabcd".to_string(), vec![0, 4, 8]));
         assert!(collect_body(|start| chunk("abcdef", start + 6, 30, true), 16).unwrap_err().contains("larger"));
         assert!(collect_body(|start| chunk("", start, 9, true), 16).unwrap_err().contains("stopped"));
+    }
+
+    #[test]
+    fn a_body_counts_only_once_two_reads_agree() {
+        let mut reads = vec!["v2", "v2", "v1"].into_iter();
+        assert_eq!(settled(|| Ok(reads.next().unwrap().to_string())).unwrap(), "v2");
+        let mut moving = 0;
+        assert!(settled(|| {
+            moving += 1;
+            Ok(moving.to_string())
+        })
+        .unwrap_err()
+        .contains("changed"));
+        let mut flips = vec!["a", "b", "b"].into_iter();
+        assert_eq!(settled(|| Ok(flips.next().unwrap().to_string())).unwrap(), "b");
     }
 
     #[test]

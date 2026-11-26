@@ -80,7 +80,7 @@ impl Transcript {
             match event {
                 Event::Upsert(mut item) => {
                     match self.expanded.get(&item.id) {
-                        Some((version, full)) if item.truncated && *version == item.version => {
+                        Some((version, full)) if item.truncated && *version == item.version && full.starts_with(&item.text) => {
                             item.text = full.clone();
                             item.truncated = false;
                         }
@@ -205,6 +205,9 @@ mod tests {
         assert!(!t.expand("a", 40, "again".into()));
         t.apply(2, vec![Event::Upsert(head.clone())]);
         assert_eq!((t.item("a").unwrap().text.as_str(), t.item("a").unwrap().truncated), ("head and the rest", false));
+        t.apply(3, vec![Event::Upsert(Item { text: "HEAD".into(), ..head.clone() })]);
+        assert_eq!((t.item("a").unwrap().text.as_str(), t.item("a").unwrap().truncated), ("HEAD", true));
+        assert!(t.expand("a", 40, "head and the rest".into()));
         t.apply(3, vec![Event::Upsert(Item { version: 55, ..head.clone() })]);
         assert_eq!((t.item("a").unwrap().text.as_str(), t.item("a").unwrap().truncated), ("head", true));
         assert!(t.expand("a", 55, "head and more of the rest".into()));
