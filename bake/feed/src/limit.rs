@@ -113,9 +113,10 @@ pub struct Target {
 pub fn targets(stop: &Stop, current: Option<&str>, roots: &[ConfigRoot]) -> Vec<Target> {
     let mut out = Vec::new();
     if let Some(offer) = &stop.offer {
-        let usage = roots.iter().find(|r| r.root == offer.root).and_then(ConfigRoot::usage_line);
+        let known = roots.iter().find(|r| r.root == offer.root);
+        let usage = known.and_then(ConfigRoot::usage_line);
         let detail = [offer.reason.clone().filter(|r| !r.is_empty()), usage].into_iter().flatten().collect::<Vec<_>>().join(" · ");
-        out.push(Target { root: offer.root.clone(), name: offer.name(), detail: (!detail.is_empty()).then_some(detail), full: false, offered: true });
+        out.push(Target { root: offer.root.clone(), name: offer.name(), detail: (!detail.is_empty()).then_some(detail), full: known.is_some_and(|r| r.full), offered: true });
     }
     let offered = stop.offer.as_ref().map(|o| o.root.as_str());
     for root in roots.iter().filter(|r| r.selectable() && Some(r.root.as_str()) != current && Some(r.root.as_str()) != offered) {
@@ -232,6 +233,9 @@ mod tests {
         let got = targets(&stop, Some("/r/a"), &roots);
         assert_eq!(got.iter().map(|t| (t.root.as_str(), t.name.as_str(), t.offered, t.full)).collect::<Vec<_>>(), [("/r/b", "b@example.com", true, false), ("/r/c", "c", false, true)]);
         assert_eq!(got[0].detail.as_deref(), Some("most room · session 12%"));
+        let mut spent = roots.clone();
+        spent[1].full = true;
+        assert!(targets(&stop, Some("/r/a"), &spent)[0].full, "a suggested account that has run out can't be picked");
         let no_offer = Stop { offer: None, ..stop };
         assert_eq!(targets(&no_offer, None, &roots).iter().map(|t| t.root.as_str()).collect::<Vec<_>>(), ["/r/a", "/r/b", "/r/c"]);
     }

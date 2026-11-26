@@ -65,6 +65,7 @@ pub fn change(s: &mut App, id: &str, op: PrOp, pr: &str) {
 
 pub fn start(s: &mut App, id: &str) {
     s.prs.linking = Some(id.to_string());
+    s.prs.link_seq = 0;
     s.prs.text = TextEdit::new("");
     s.prs.text.focused = true;
     s.composer.focused = false;
