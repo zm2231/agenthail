@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use feed::catalog::RespondError;
@@ -17,10 +17,10 @@ enum Done {
     Acted(String, String, Result<(), RespondError>),
 }
 
-static PREFS_CHANGED: AtomicBool = AtomicBool::new(false);
+static SAVED: Mutex<Vec<(String, bool)>> = Mutex::new(Vec::new());
 
-pub fn prefs_changed() {
-    PREFS_CHANGED.store(true, Ordering::SeqCst);
+pub fn preference_saved(id: &str, value: bool) {
+    SAVED.lock().unwrap_or_else(|e| e.into_inner()).push((id.to_string(), value));
 }
 
 pub struct State {
@@ -30,6 +30,7 @@ pub struct State {
     on: bool,
     asking: bool,
     stale: bool,
+    edited: bool,
     failed: bool,
     focused: bool,
     reads: u64,
@@ -45,7 +46,7 @@ impl Default for State {
     fn default() -> Self {
         let (clicked, clicks) = channel();
         let (tx, rx) = channel();
-        State { store: Notified::default(), path: None, prefs: None, on: false, asking: false, stale: true, failed: false, focused: false, reads: 0, withdrawn: Vec::new(), sessions_moved: false, clicks, clicked, tx, rx }
+        State { store: Notified::default(), path: None, prefs: None, on: false, asking: false, stale: true, edited: false, failed: false, focused: false, reads: 0, withdrawn: Vec::new(), sessions_moved: false, clicks, clicked, tx, rx }
     }
 }
 
@@ -76,7 +77,7 @@ fn read_prefs(s: &mut App) {
     if st.asking {
         return;
     }
-    (st.asking, st.stale) = (true, false);
+    (st.asking, st.stale, st.edited) = (true, false, false);
     let tx = st.tx.clone();
     std::thread::spawn(move || {
         let _ = tx.send(Done::Prefs(client.notification_preferences().ok().map(|rows| Prefs::from_preferences(&rows))));
@@ -156,6 +157,7 @@ pub fn tick(s: &mut App) -> bool {
     let mut changed = false;
     while let Ok(done) = s.notify.rx.try_recv() {
         match done {
+            Done::Prefs(_) if s.notify.edited => s.notify.asking = false,
             Done::Prefs(prefs) => {
                 s.notify.asking = false;
                 s.notify.failed = prefs.is_none();
@@ -176,7 +178,11 @@ pub fn tick(s: &mut App) -> bool {
     let now = time::OffsetDateTime::now_utc();
     let focused = rune_notify::app_focused();
     let st = &mut s.notify;
-    st.stale |= focused && !st.focused || st.failed && st.sessions_moved || PREFS_CHANGED.swap(false, Ordering::SeqCst);
+    for (id, value) in std::mem::take(&mut *SAVED.lock().unwrap_or_else(|e| e.into_inner())) {
+        st.prefs.get_or_insert_with(Prefs::default).set(&id, value);
+        (st.edited, st.stale) = (true, true);
+    }
+    st.stale |= focused && !st.focused || st.failed && st.sessions_moved;
     st.focused = focused;
     if st.stale {
         read_prefs(s);

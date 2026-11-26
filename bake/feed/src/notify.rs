@@ -49,10 +49,16 @@ impl Default for Prefs {
 impl Prefs {
     pub fn from_preferences(rows: &[Preference]) -> Prefs {
         let mut prefs = Prefs::default();
-        if let Some(row) = rows.iter().find(|r| r.id == LEAD_COMPLETIONS_ONLY) {
-            prefs.lead_completions_only = row.value;
+        for row in rows {
+            prefs.set(&row.id, row.value);
         }
         prefs
+    }
+
+    pub fn set(&mut self, id: &str, value: bool) {
+        if id == LEAD_COMPLETIONS_ONLY {
+            self.lead_completions_only = value;
+        }
     }
 }
 

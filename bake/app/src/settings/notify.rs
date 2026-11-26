@@ -39,7 +39,7 @@ fn preferences(s: &Prefs, list: &[Preference]) -> El {
             let key = format!("preference-{}", p.id);
             let control = parts::switch(&key, &p.title, value, busy(s), move |s| {
                 let id = id.clone();
-                write(s, format!("preference-{id}"), Section::Notify, &[Read::Preferences], move |c| c.set_notification_preference(&id, !value).map(|_| crate::notify::prefs_changed()));
+                write(s, format!("preference-{id}"), Section::Notify, &[Read::Preferences], move |c| c.set_notification_preference(&id, !value).map(|_| crate::notify::preference_saved(&id, !value)));
             });
             line(&p.title, Some(p.detail.clone()), control)
         })
