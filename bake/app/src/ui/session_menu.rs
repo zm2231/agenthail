@@ -155,7 +155,7 @@ pub fn load(s: &mut App, id: &str) {
     let surface = session(s, id).map(|x| x.surface.clone()).unwrap_or_default();
     if !surface.is_empty() {
         let id = id.to_string();
-        spawn(s, Duration::ZERO, move |c| c.models(&surface, &id).ok().map(|m| Done::Models(id, m)));
+        spawn(s, Duration::ZERO, move |c| c.session_models(&surface, &id).ok().map(|m| Done::Models(id, m)));
     }
 }
 

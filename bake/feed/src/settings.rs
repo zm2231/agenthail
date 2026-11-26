@@ -92,7 +92,7 @@ impl Client {
         Ok(serde_json::from_value(self.get_json(&format!("/api/v1/session-settings?id={}", enc(session)))?)?)
     }
 
-    pub fn models(&self, surface: &str, session: &str) -> Result<Vec<ModelOption>> {
+    pub fn session_models(&self, surface: &str, session: &str) -> Result<Vec<ModelOption>> {
         let value = self.get_json(&format!("/api/v1/models?surface={}&id={}", enc(surface), enc(session)))?;
         Ok(serde_json::from_value(value["models"].clone()).unwrap_or_default())
     }
@@ -463,7 +463,7 @@ mod tests {
         });
         let client = Client::new(&base, "secret");
         assert_eq!(client.session_settings("h1::s 1").unwrap().model.unwrap().value, "gpt-6.1-sol");
-        assert_eq!(client.models("codex", "h1::s 1").unwrap()[0].display_name, "GPT-6.1-Sol");
+        assert_eq!(client.session_models("codex", "h1::s 1").unwrap()[0].display_name, "GPT-6.1-Sol");
         assert_eq!(client.context_usage("h1::s 1").unwrap().unwrap().fraction(), Some(0.1));
         assert_eq!(client.context_usage("h1::s 1").unwrap_err().to_string(), "timed out");
         assert_eq!(client.context_usage("h1::s 1").unwrap(), None);

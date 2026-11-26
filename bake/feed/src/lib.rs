@@ -3,6 +3,7 @@ pub mod blocks;
 pub mod question;
 pub mod settings;
 pub mod catalog;
+pub mod create;
 pub mod derive;
 pub mod edits;
 pub mod focus;
