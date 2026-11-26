@@ -238,13 +238,22 @@ pub fn drain(s: &mut App) -> bool {
         s.limits.picking = None;
         changed = true;
     }
-    if s.limits.confirm.as_ref().is_some_and(|c| stale(s, &c.session, &c.since) || target_spent(s, &c.session, &c.target.root)) {
-        s.limits.confirm = None;
-        changed = true;
+    let spent = |s: &App, session: &str, target: &Target| target_spent(s, session, &target.root).then(|| format!("{} ran out of usage, so it can't take this session now.", target.name));
+    if let Some(c) = &s.limits.confirm {
+        let out = spent(s, &c.session, &c.target);
+        if out.is_some() || stale(s, &c.session, &c.since) {
+            s.limits.confirm = None;
+            s.ov.notice = out.or(s.ov.notice.take());
+            changed = true;
+        }
     }
-    if s.limits.consent.as_ref().is_some_and(|c| stale(s, &c.session, &c.since) || target_spent(s, &c.session, &c.target.root)) {
-        s.limits.consent = None;
-        changed = true;
+    if let Some(c) = &s.limits.consent {
+        let out = spent(s, &c.session, &c.target);
+        if out.is_some() || stale(s, &c.session, &c.since) {
+            s.limits.consent = None;
+            s.ov.notice = out.or(s.ov.notice.take());
+            changed = true;
+        }
     }
     changed
 }
