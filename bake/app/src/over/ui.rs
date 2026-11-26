@@ -500,7 +500,7 @@ pub fn project_for(s: &App, x: &feed::catalog::Session) -> Option<String> {
     Some(x.project_key()).filter(|k| s.ov.d.project(k).is_some())
 }
 
-pub fn sidebar_order(s: &App, current_project: Option<&str>) -> Vec<String> {
+pub fn sidebar_order(s: &App, current_project: Option<&str>, selected: Option<&str>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     if !matches!(s.screen, Screen::Now) {
         for slot in need_slots(&s.ov.needs, s.ov.looked_now.as_deref(), 4) {
@@ -513,6 +513,9 @@ pub fn sidebar_order(s: &App, current_project: Option<&str>) -> Vec<String> {
     }
     if let Some(p) = current_project.and_then(|k| s.ov.d.project(k)) {
         out.extend(s.ov.d.project_rows(p).into_iter().map(|(id, _)| id));
+    }
+    if let Some(id) = selected.filter(|id| !out.iter().any(|x| x == id)) {
+        out.push(id.to_string());
     }
     let mut seen = std::collections::HashSet::new();
     out.retain(|id| seen.insert(id.clone()));

@@ -53,9 +53,35 @@ pub struct Gone {
     pub fix: Option<Fix>,
     pub exchanges: Vec<Exchange>,
     pub read_error: Option<String>,
+    pub history: History,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct History {
+    pub returned: usize,
+    pub total: usize,
+    pub truncated: bool,
+}
+
+impl History {
+    pub fn note(self) -> Option<String> {
+        (self.truncated || self.returned < self.total).then(|| if self.total > self.returned { format!("Showing the last {} of {} exchanges.", self.returned, self.total) } else { "Showing only the latest part of this conversation.".to_string() })
+    }
+
+    pub fn more(self, limit: usize) -> bool {
+        self.returned >= limit && self.total > self.returned
+    }
 }
 
 impl Gone {
+    pub fn empty_note(&self) -> String {
+        match (&self.read_error, &self.why) {
+            (Some(e), _) => format!("Couldn't read this session's conversation: {e}"),
+            (None, Why::Offline(_)) => "Its conversation can't be read while it's offline.".into(),
+            (None, _) => "Agenthail returned no conversation for this session.".into(),
+        }
+    }
+
     pub fn note(&self) -> String {
         match &self.why {
             Why::Archived => "This session is archived. You're reading what it last had.".into(),
@@ -100,6 +126,14 @@ impl Detail {
         v["exchanges"].as_array().into_iter().flatten().map(|e| Exchange { from: sender(&text(e, "origin"), &text(e, "sender")), user: text(e, "user"), assistant: text(e, "assistant") }).filter(|e| !e.user.is_empty() || !e.assistant.is_empty()).collect()
     }
 
+    fn history(&self) -> History {
+        let Detail::Found(v) = self else { return History::default() };
+        let n = |k: &str| v[k].as_u64().map(|x| x as usize);
+        let returned = n("transcriptReturnedExchanges").unwrap_or_else(|| v["exchanges"].as_array().map_or(0, Vec::len));
+        let total = n("transcriptOriginalExchanges").or(n("exchangeCount")).unwrap_or(returned).max(returned);
+        History { returned, total, truncated: v["transcriptTruncated"].as_bool().unwrap_or(false) }
+    }
+
     fn read_error(&self) -> Option<String> {
         let Detail::Found(v) = self else { return None };
         match &v["readError"] {
@@ -121,7 +155,7 @@ impl Detail {
 
 pub fn sender(origin: &str, sender: &str) -> String {
     match origin {
-        "" => "You".into(),
+        "" | "person" => "You".into(),
         "peer" if !sender.is_empty() => sender.to_string(),
         "peer" => "Another agent".into(),
         other => {
@@ -162,7 +196,7 @@ pub fn classify(id: &str, detail: &Detail, listing: Listing, known: Option<&Sess
         _ if row.capabilities.lifecycle.resume || detail.resume() => Some(Fix::Resume),
         _ => None,
     };
-    Ok(Gone { row, why, fix, exchanges: detail.exchanges(), read_error: detail.read_error() })
+    Ok(Gone { row, why, fix, exchanges: detail.exchanges(), read_error: detail.read_error(), history: detail.history() })
 }
 
 const PAGES: usize = 10;
@@ -181,8 +215,8 @@ pub fn search_terms<'a>(rows: impl Iterator<Item = &'a Session>) -> Vec<String> 
 }
 
 impl Client {
-    pub fn look_up(&self, id: &str, known: Option<&Session>) -> Result<Gone, String> {
-        let detail = Detail::read(self.get_coded(&format!("/api/v1/session?id={}&limit=20", enc(id))));
+    pub fn look_up(&self, id: &str, known: Option<&Session>, limit: usize) -> Result<Gone, String> {
+        let detail = Detail::read(self.get_coded(&format!("/api/v1/session?id={}&limit={limit}", enc(id))));
         let found = detail.row(id);
         let terms = search_terms([known, found.as_ref()].into_iter().flatten());
         let mut listing = if terms.is_empty() { Listing::Unchecked("it has no name or folder to search by".into()) } else { Listing::Absent };
@@ -339,6 +373,7 @@ mod tests {
     #[test]
     fn prompts_name_who_sent_them() {
         assert_eq!(sender("", ""), "You");
+        assert_eq!(sender("person", ""), "You");
         assert_eq!(sender("peer", "@reviewer"), "@reviewer");
         assert_eq!(sender("peer", ""), "Another agent");
         assert_eq!(sender("task-notification", ""), "Task notification");
@@ -346,6 +381,25 @@ mod tests {
         let g = classify("s1", &d, Listing::Absent, None).unwrap();
         assert_eq!(g.exchanges[0].from, "@lead");
         assert_eq!(g.read_error.as_deref(), Some("transcript moved"));
+    }
+
+    #[test]
+    fn a_cut_short_transcript_says_so_and_offers_more_only_when_the_limit_cut_it() {
+        let d = |v: Value| classify("s1", &Detail::Found(v), Listing::Absent, None).unwrap().history;
+        let h = d(json!({"session": {}, "exchanges": [], "exchangeCount": 50, "transcriptTruncated": true, "transcriptReturnedExchanges": 20, "transcriptOriginalExchanges": 50}));
+        assert_eq!(h.note().as_deref(), Some("Showing the last 20 of 50 exchanges."));
+        assert!(h.more(20) && !h.more(80));
+        let bytes = d(json!({"session": {}, "exchanges": [], "transcriptTruncated": true, "transcriptReturnedExchanges": 5, "transcriptOriginalExchanges": 5}));
+        assert_eq!(bytes.note().as_deref(), Some("Showing only the latest part of this conversation."));
+        assert!(!bytes.more(20));
+        assert_eq!(d(json!({"session": {}, "exchanges": [{"user": "a"}]})).note(), None);
+    }
+
+    #[test]
+    fn an_offline_session_with_nothing_read_says_why() {
+        let known = row(json!({"id": "s1", "host": {"name": "buildbox", "state": "connected"}}));
+        assert!(classify("s1", &Detail::Unreachable, Listing::Absent, Some(&known)).unwrap().empty_note().contains("offline"));
+        assert!(classify("s1", &detail(), Listing::Absent, None).unwrap().empty_note().contains("no conversation"));
     }
 
     #[test]

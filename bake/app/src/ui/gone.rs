@@ -2,6 +2,7 @@ use super::*;
 use feed::gone::{Fix, Gone};
 
 const RECHECK: f64 = 20.0;
+const LIMIT: usize = 20;
 
 static LOOKUPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -16,6 +17,7 @@ pub struct Missing {
     pub look: Look,
     asked: f64,
     asking: Option<u64>,
+    limit: usize,
     pub fixing: Option<Fix>,
     pub error: Option<String>,
 }
@@ -28,7 +30,7 @@ pub fn shown<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
 }
 
 fn not_found(id: String, why: String, at: f64) -> Missing {
-    Missing { id, look: Look::Failed(why), asked: at, asking: None, fixing: None, error: None }
+    Missing { id, look: Look::Failed(why), asked: at, asking: None, limit: LIMIT, fixing: None, error: None }
 }
 
 pub fn watch(s: &mut App) -> bool {
@@ -62,12 +64,13 @@ pub fn watch(s: &mut App) -> bool {
             m.asked = s.clock;
             m.asking = Some(seq);
         }
-        None => s.missing = Some(Missing { id: id.clone(), look: Look::Pending, asked: s.clock, asking: Some(seq), fixing: None, error: None }),
+        None => s.missing = Some(Missing { id: id.clone(), look: Look::Pending, asked: s.clock, asking: Some(seq), limit: LIMIT, fixing: None, error: None }),
     }
     let known = s.last_row.clone().filter(|r| r.id == id).or_else(|| s.ov.d.session(&id).cloned());
     let tx = s.outbox.clone();
+    let limit = s.missing.as_ref().map_or(LIMIT, |m| m.limit);
     std::thread::spawn(move || {
-        let result = client.look_up(&id, known.as_ref());
+        let result = client.look_up(&id, known.as_ref(), limit);
         let _ = tx.send(Bg::Looked(id, seq, result));
     });
     true
@@ -145,9 +148,23 @@ fn failed_view(message: &str) -> El {
         .child(el().h(80.0))
 }
 
-fn exchanges(g: &Gone) -> El {
+fn more(s: &mut App) {
+    if let Some(m) = s.missing.as_mut().filter(|m| m.asking.is_none()) {
+        m.limit *= 4;
+        m.asked = f64::NEG_INFINITY;
+    }
+}
+
+fn exchanges(g: &Gone, limit: usize) -> El {
     let turn = |who: &str, body: &str, color: Color| col().w_full().gap(4.0).child(label(who)).child(text(body.to_string()).font(BODY).color(color).wrap());
-    let list = col().w_full().max_w(780.0).gap(18.0).px(32.0).py(16.0).children(g.exchanges.iter().map(|e| {
+    let mut head = row().w_full().gap(10.0).items_center();
+    if let Some(n) = g.history.note() {
+        head = head.child(text(n).font(META).color(faint()));
+    }
+    if g.history.more(limit) {
+        head = head.child(Button::new("Show older").variant(ButtonVariant::Ghost).build(theme::kit()).key("gone-older").on_press(more));
+    }
+    let list = col().w_full().max_w(780.0).gap(18.0).px(32.0).py(16.0).child(head).children(g.exchanges.iter().map(|e| {
         let mut c = col().w_full().gap(10.0);
         if !e.user.is_empty() {
             c = c.child(turn(&e.from, &e.user, theme::text()));
@@ -167,14 +184,12 @@ pub fn screen(s: &App, id: &str) -> El {
         Look::Failed(e) => failed_view(e),
         Look::Found(g) => {
             let center = col().grow(1.0).h_full().min_w(0.0).child(header(s, &g.row)).child(banner(m, g));
-            let streamed = s.panes.get(id).is_some_and(|p| !p.blocks.is_empty());
-            if streamed || s.tab == Tab::Changes {
+            if s.panes.get(id).is_some_and(|p| !p.blocks.is_empty()) {
                 conversation(s, id, center)
             } else if g.exchanges.is_empty() {
-                let why = g.read_error.as_ref().map_or("Agenthail returned no conversation for this session.".to_string(), |e| format!("Couldn't read this session's conversation: {e}"));
-                center.child(col().key("gone-empty").w_full().grow(1.0).items_center().justify_center().child(text(why).font(BODY_BOLD).color(faint()).wrap()).child(el().h(80.0)))
+                center.child(col().key("gone-empty").w_full().grow(1.0).items_center().justify_center().child(text(g.empty_note()).font(BODY_BOLD).color(faint()).wrap()).child(el().h(80.0)))
             } else {
-                center.child(exchanges(g))
+                center.child(exchanges(g, m.limit))
             }
         }
     }

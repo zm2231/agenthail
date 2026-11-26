@@ -48,7 +48,7 @@ pub struct Menus {
     pub busy: HashSet<(String, &'static str)>,
     pub note: HashMap<String, String>,
     pub context_error: HashMap<String, String>,
-    leaving: Option<(String, Vec<String>)>,
+    leaving: HashMap<String, Vec<String>>,
     seq: u64,
     newest: HashMap<(String, &'static str), u64>,
     rename_seq: u64,
@@ -74,7 +74,7 @@ impl Menus {
             busy: HashSet::new(),
             note: HashMap::new(),
             context_error: HashMap::new(),
-            leaving: None,
+            leaving: HashMap::new(),
             seq: 0,
             newest: HashMap::new(),
             rename_seq: 0,
@@ -211,7 +211,8 @@ pub fn run(s: &mut App, id: &str, act: Act) {
             }
             if act == Act::Archive(true) && s.screen == Screen::Session && s.selected.as_deref() == Some(id) {
                 let project = session(s, id).and_then(|x| crate::over::ui::project_for(s, x));
-                s.menus.leaving = Some((id.to_string(), crate::over::ui::sidebar_order(s, project.as_deref())));
+                let order = crate::over::ui::sidebar_order(s, project.as_deref(), Some(id));
+                s.menus.leaving.insert(id.to_string(), order);
             }
             let revision = session(s, id).and_then(|x| x.read_state.as_ref()).map(|r| r.revision.clone()).unwrap_or_default();
             let id = id.to_string();
@@ -322,7 +323,7 @@ fn patch_of(act: &Act, read: Option<feed::action::ReadState>, from: String) -> O
 }
 
 fn leave_archived(s: &mut App, id: &str) {
-    let Some((_, order)) = s.menus.leaving.take_if(|(l, _)| l == id) else { return };
+    let Some(order) = s.menus.leaving.remove(id) else { return };
     if s.screen != Screen::Session || s.selected.as_deref() != Some(id) {
         return;
     }
@@ -387,7 +388,7 @@ fn settled(s: &mut App, done: Done) {
         }
         Done::Acted(id, act, _, Err(error)) => {
             s.menus.busy.remove(&(id.clone(), "menu"));
-            s.menus.leaving.take_if(|(l, _)| *l == id);
+            s.menus.leaving.remove(&id);
             s.ov.notice = Some(failure(verb(&act), &error));
         }
         Done::Renamed(id, seq, result) => {
