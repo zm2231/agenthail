@@ -95,6 +95,8 @@ pub fn take_body(s: &mut App, id: String, generation: u64, item: String, version
             if pane.transcript.expand(&item, version, text) {
                 pane.rebuild(&mut counter);
                 s.panes_moved = true;
+            } else {
+                pane.bump_item(&item, &mut counter);
             }
         }
         Err(error) => {
