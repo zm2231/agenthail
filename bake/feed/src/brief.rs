@@ -60,9 +60,15 @@ fn segment(value: &str) -> String {
 
 impl Client {
     pub fn project_brief(&self, project: &str, key: &str) -> Result<Brief, RespondError> {
-        let value = self.post_empty(&format!("/api/v1/projects/{}/brief", segment(project)), "brief", key)?;
-        serde_json::from_value(value).map_err(|e| RespondError { message: format!("the daemon's reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: true, answered: true, reply: serde_json::Value::Null })
+        read(self.post_empty(&format!("/api/v1/projects/{}/brief", segment(project)), "brief", key)?)
     }
+}
+
+fn read(value: serde_json::Value) -> Result<Brief, RespondError> {
+    if value["status"] == "submitted" {
+        return Err(RespondError { message: "the daemon has it but hasn't finished; ask again to check".into(), code: "submitted".into(), maybe_delivered: true, answered: true, reply: value });
+    }
+    serde_json::from_value(value).map_err(|e| RespondError { message: format!("the daemon's reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: true, answered: true, reply: serde_json::Value::Null })
 }
 
 #[cfg(test)]
@@ -79,6 +85,14 @@ mod tests {
         assert_eq!(brief(r#"{"ok":true,"ref":"@v2-lead","started":true,"since":{"at":"2026-11-23T12:00:00Z","fallback":true}}"#).notice(now), "Asked @v2-lead to catch you up on the last 24 hours. This starts its conversation.");
         assert_eq!(brief(r#"{"ok":true,"ref":"@lead","since":{"at":"2026-11-24T09:00:00Z"},"result":{"evidence":"queued"}}"#).notice(now), "Asked @lead to catch you up since you wrote 3h ago. It replies after its current turn.");
         assert_eq!(brief(r#"{"ok":true,"result":{"evidence":"delivered"}}"#).notice(now), "Asked @lead to catch you up.");
+    }
+
+    #[test]
+    fn a_brief_still_being_handled_is_not_reported_as_asked() {
+        let e = read(serde_json::json!({"ok": true, "status": "submitted"})).unwrap_err();
+        assert!(e.maybe_delivered);
+        assert_eq!(e.code, "submitted");
+        assert_eq!(read(serde_json::json!({"ok": true, "ref": "@lead"})).unwrap().r#ref, "@lead");
     }
 
     #[test]

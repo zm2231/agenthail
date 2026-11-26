@@ -3,7 +3,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
 use feed::brief::Brief;
-use feed::catalog::{Client, request_key};
+use feed::catalog::{Client, RespondError, request_key};
 use feed::decisions::{Decision, Handled, Inbox, gone, remember};
 use feed::version::{Build, notice};
 
@@ -12,8 +12,8 @@ const VERSION_EVERY: u32 = 6;
 
 enum Done {
     Inbox(Instant, Result<Inbox, String>),
-    Acted(String, Handled, Result<(), String>),
-    Brief(String, Result<Brief, String>),
+    Acted(String, Handled, Result<(), RespondError>),
+    Brief(String, Result<Brief, RespondError>),
     Version(Option<String>),
 }
 
@@ -32,6 +32,7 @@ pub struct State {
     pub error: Option<String>,
     pub history: Vec<Handled>,
     pub acting: HashSet<String>,
+    pub unconfirmed: HashSet<String>,
     pub notes: HashMap<String, String>,
     pub briefs: HashMap<String, BriefState>,
     pub version: Option<String>,
@@ -42,7 +43,7 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         let (tx, rx) = channel();
-        State { tx, rx, inbox: None, error: None, history: Vec::new(), acting: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, newest: None, started: false }
+        State { tx, rx, inbox: None, error: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, newest: None, started: false }
     }
 }
 
@@ -103,6 +104,7 @@ pub fn drain(s: &mut crate::App) -> bool {
                 st.newest = Some(started);
                 match result {
                     Ok(inbox) => {
+                        st.unconfirmed.retain(|id| inbox.decisions.iter().any(|d| d.id() == *id));
                         st.inbox = Some(inbox);
                         st.error = None;
                     }
@@ -120,8 +122,12 @@ pub fn drain(s: &mut crate::App) -> bool {
                         }
                         remember(&mut st.history, entry);
                     }
+                    Err(e) if e.maybe_delivered => {
+                        st.notes.insert(id.clone(), format!("Sent, not confirmed: {}", e.message));
+                        st.unconfirmed.insert(id);
+                    }
                     Err(e) => {
-                        st.notes.insert(id, e);
+                        st.notes.insert(id, format!("Not sent: {}", e.message));
                     }
                 }
                 if let Some(client) = &s.client {
@@ -138,7 +144,10 @@ pub fn drain(s: &mut crate::App) -> bool {
                         b.key = None;
                     }
                     Err(e) => {
-                        b.notice = Some(e);
+                        if !e.maybe_delivered {
+                            b.key = None;
+                        }
+                        b.notice = Some(if e.maybe_delivered { format!("Asked, not confirmed: {}", e.message) } else { format!("Couldn't ask: {}", e.message) });
                         b.failed = true;
                     }
                 }
@@ -153,7 +162,7 @@ fn title_of(s: &crate::App, d: &Decision) -> String {
     s.ov.d.session(&d.session_id).map(|x| s.ov.d.title(x)).unwrap_or_else(|| if d.work_title.is_empty() { feed::derive::text::short_id(&d.session_id) } else { d.work_title.clone() })
 }
 
-fn act(s: &mut crate::App, d: &Decision, outcome: &str, run: impl FnOnce(&Client, &Decision) -> Result<(), String> + Send + 'static) {
+fn act(s: &mut crate::App, d: &Decision, outcome: &str, run: impl FnOnce(&Client, &Decision) -> Result<(), RespondError> + Send + 'static) {
     let id = d.id();
     if s.ov.inbox.acting.contains(&id) {
         return;
@@ -174,17 +183,17 @@ fn act(s: &mut crate::App, d: &Decision, outcome: &str, run: impl FnOnce(&Client
 }
 
 pub fn accept(s: &mut crate::App, d: &Decision) {
-    if d.recommended().is_none() {
+    if d.recommended().is_none() || s.ov.inbox.unconfirmed.contains(&d.id()) {
         return;
     }
     act(s, d, "Accepted the recommended answer", |client, d| {
         let (request, choices) = d.recommended().expect("checked above");
-        client.respond(&d.session_id, &request, choices, Default::default()).map_err(|e| e.message)
+        client.respond(&d.session_id, &request, choices, Default::default())
     });
 }
 
 pub fn accept_first(s: &mut crate::App) -> bool {
-    let first = s.ov.inbox.inbox.as_ref().and_then(|i| i.decisions.iter().find(|d| d.recommended().is_some()).cloned());
+    let first = s.ov.inbox.inbox.as_ref().and_then(|i| i.decisions.iter().find(|d| d.recommended().is_some() && !s.ov.inbox.unconfirmed.contains(&d.id())).cloned());
     match first {
         Some(d) => {
             accept(s, &d);
@@ -200,7 +209,7 @@ pub fn not_now(s: &mut crate::App, d: &Decision) {
             match client.dismiss_decision(target) {
                 Ok(()) => {}
                 Err(e) if gone(&e) => {}
-                Err(e) => return Err(e.message),
+                Err(e) => return Err(e),
             }
         }
         Ok(())
@@ -220,7 +229,7 @@ pub fn ask_brief(s: &mut crate::App, project: &str) {
     let key = b.key.get_or_insert_with(request_key).clone();
     let (tx, project) = (s.ov.inbox.tx.clone(), project.to_string());
     std::thread::spawn(move || {
-        let result = client.project_brief(&project, &key).map_err(|e| e.message);
+        let result = client.project_brief(&project, &key);
         let _ = tx.send(Done::Brief(project, result));
     });
 }

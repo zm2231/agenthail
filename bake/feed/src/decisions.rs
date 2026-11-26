@@ -89,7 +89,11 @@ impl Decision {
         if !self.key.is_empty() {
             return self.key.clone();
         }
-        if self.work_item.is_empty() { self.session_id.clone() } else { format!("{}#{}", self.session_id, self.work_item) }
+        match (self.session_id.is_empty(), self.work_item.is_empty()) {
+            (_, true) => self.session_id.clone(),
+            (true, false) => format!("{}#{}", self.host, self.work_item),
+            (false, false) => format!("{}#{}", self.session_id, self.work_item),
+        }
     }
 
     pub fn is_parked(&self) -> bool {
@@ -187,7 +191,7 @@ impl Inbox {
         }
         let mut out: Vec<Decision> = Vec::new();
         for d in kept {
-            match out.iter_mut().find(|o| d.is_parked() && o.is_parked() && o.session_id == d.session_id && o.reason == d.reason) {
+            match out.iter_mut().find(|o| d.is_parked() && o.is_parked() && !d.session_id.is_empty() && o.session_id == d.session_id && o.reason == d.reason) {
                 Some(lead) => {
                     if lead.covers.is_empty() {
                         lead.covers.push(lead.clone());
@@ -383,6 +387,17 @@ mod tests {
         let inbox = Client::new(&base, "t").inbox().unwrap();
         assert!(inbox.decisions.is_empty());
         assert_eq!(inbox.notes, ["Couldn't list the paired computers, so only this computer's decisions are shown."]);
+    }
+
+    #[test]
+    fn parked_items_without_a_session_stay_apart_across_computers() {
+        let mut inbox = Inbox::default();
+        let page = |json: &str| serde_json::from_str::<Page>(json).unwrap();
+        inbox.add(page(r#"{"decisions":[{"group":"stopped","kind":"parked","sessionId":"","workItem":"p-W1","reason":"pick"}]}"#), "", "", "h1");
+        inbox.add(page(r#"{"decisions":[{"group":"stopped","kind":"parked","sessionId":"","workItem":"p-W1","reason":"pick"}]}"#), "h2", "forge", "h1");
+        inbox.settle();
+        let hosts: Vec<&str> = inbox.decisions.iter().map(|d| d.host.as_str()).collect();
+        assert_eq!(hosts, ["", "h2"]);
     }
 
     #[test]

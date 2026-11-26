@@ -14,6 +14,7 @@ fn line(s: &App, i: usize, d: &Decision, first_accept: bool) -> El {
     let k = kit();
     let id = d.id();
     let acting = s.ov.inbox.acting.contains(&id);
+    let unconfirmed = s.ov.inbox.unconfirmed.contains(&id);
     let who = s.ov.d.session(&d.session_id).map(|x| s.ov.d.title(x)).unwrap_or_else(|| crate::over::short_id(&d.session_id));
     let project = s.ov.d.project(&d.project_id).map(|p| p.name.clone()).unwrap_or_default();
     let mut meta: Vec<String> = vec![ui::short_title(&who, 28)];
@@ -54,7 +55,7 @@ fn line(s: &App, i: usize, d: &Decision, first_accept: bool) -> El {
             .child(text("coming soon".to_string()).font(META).color(weak()));
     } else if d.recommended().is_some() {
         let dd = d.clone();
-        let mut accept = Button::new(if acting { "Answering…" } else { "Accept recommended" }).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(acting).on_press(move |s: &mut App| inbox::accept(s, &dd));
+        let mut accept = Button::new(if acting { "Answering…" } else if unconfirmed { "Sent, not confirmed" } else { "Accept recommended" }).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(acting || unconfirmed).on_press(move |s: &mut App| inbox::accept(s, &dd));
         if first_accept {
             accept = accept.shortcut("⇧↩");
         }
@@ -107,7 +108,7 @@ pub fn section(s: &App) -> El {
         list = list.child(line(s, i, d, first_accept == Some(i)));
     }
     if found.decisions.is_empty() {
-        list = list.child(row().gap(8.0).items_center().px(14.0).py(10.0).child(icon(&icons::CIRCLE_CHECK, 14.0).color(weak())).child(text("Nothing needs you.".to_string()).font(BODY).color(weak())));
+        list = list.child(row().gap(8.0).items_center().px(14.0).py(10.0).child(icon(&icons::CIRCLE_CHECK, 14.0).color(weak())).child(text(if found.notes.is_empty() { "Nothing needs you." } else { "Nothing needs you on the computers that answered." }.to_string()).font(BODY).color(weak())));
     }
     if !found.lead_handling.is_empty() {
         list = list.child(text("Handled by a lead".to_string()).font(META_MED).color(weak()).px(14.0).pt(12.0).pb(2.0));
