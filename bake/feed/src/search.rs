@@ -321,9 +321,9 @@ pub fn commands(query: &str, selected: Option<Selected>) -> Vec<CommandRow> {
     let mut rows = vec![CommandRow { command: Command::NewSession, title: "New session".into(), shortcut: "⌘N" }];
     if let Some(x) = selected {
         if x.can_stop {
-            rows.push(CommandRow { command: Command::Stop, title: format!("Stop {}", x.title), shortcut: "" });
+            rows.push(CommandRow { command: Command::Stop, title: format!("Stop {}", one_line(x.title)), shortcut: "" });
         }
-        rows.push(CommandRow { command: Command::Rename, title: format!("Rename {}", x.title), shortcut: "" });
+        rows.push(CommandRow { command: Command::Rename, title: format!("Rename {}", one_line(x.title)), shortcut: "" });
     }
     rows.push(CommandRow { command: Command::Refresh, title: "Refresh".into(), shortcut: "" });
     rows.push(CommandRow { command: Command::Activity, title: "Activity history".into(), shortcut: "" });
@@ -334,7 +334,7 @@ pub fn commands(query: &str, selected: Option<Selected>) -> Vec<CommandRow> {
 
 fn names(title: &str, q: &str) -> bool {
     let q = one_line(q).to_lowercase();
-    let title = one_line(title).to_lowercase();
+    let title = title.to_lowercase();
     !q.is_empty() && (title == q || title.strip_prefix(&q).is_some_and(|rest| rest.starts_with(' ')))
 }
 
@@ -513,5 +513,8 @@ mod tests {
         assert!(!commands_lead("history", &rows));
         assert!(!commands_lead("", &commands("", None)));
         assert!(!commands_lead("zzz", &[]));
+        let named = commands("rename fix the importer", Some(Selected { title: "Fix the\n  importer", can_stop: true }));
+        assert_eq!(named.iter().map(|r| r.title.as_str()).collect::<Vec<_>>(), ["Rename Fix the importer"]);
+        assert!(commands_lead("Rename Fix the importer", &named));
     }
 }
