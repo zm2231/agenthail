@@ -15,7 +15,7 @@ const REFRESH: Duration = Duration::from_secs(30);
 
 pub enum Done {
     Settings(String, u64, Result<SessionSettings, String>),
-    Models(String, Result<Vec<ModelOption>, String>),
+    Models(String, u64, Result<Vec<ModelOption>, String>),
     Context(String, u64, Result<Option<ContextUsage>, String>),
     Acted(String, Act, String, Result<Option<feed::action::ReadState>, RespondError>),
     Renamed(String, u64, Result<String, RespondError>),
@@ -186,8 +186,8 @@ fn fetch_models(s: &mut App, id: &str) {
         return;
     }
     s.menus.models_asked.insert(id.to_string(), Instant::now());
-    let id = id.to_string();
-    spawn(s, Duration::ZERO, move |c| Some(Done::Models(id.clone(), c.session_models(&surface, &id).map_err(|e| e.to_string()))));
+    let (id, seq) = (id.to_string(), s.menus.next());
+    spawn(s, Duration::ZERO, move |c| Some(Done::Models(id.clone(), seq, c.session_models(&surface, &id).map_err(|e| e.to_string()))));
 }
 
 fn refresh_shown(s: &mut App) {
@@ -418,11 +418,12 @@ fn settled(s: &mut App, done: Done) {
                 }
             }
         }
-        Done::Models(id, Ok(models)) => {
+        Done::Models(id, seq, _) if !s.menus.fresh(&id, "models", seq) => {}
+        Done::Models(id, _, Ok(models)) => {
             s.menus.models_error.remove(&id);
             s.menus.models.insert(id, models);
         }
-        Done::Models(id, Err(error)) => {
+        Done::Models(id, _, Err(error)) => {
             s.menus.models_error.insert(id, error);
         }
         Done::Context(id, seq, result) => {

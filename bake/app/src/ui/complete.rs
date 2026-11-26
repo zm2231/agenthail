@@ -497,7 +497,7 @@ pub fn done(s: &mut App, done: Done) {
             if !unsure {
                 s.complete.goal_keys.retain(|(_, text), (_, sent)| *text != goal || feed::composer::current(&s.rekeyed, sent) != id);
             }
-            if result.as_ref().is_ok_and(|d| *d != feed::composer::Delivered::Unconfirmed) {
+            if result.as_ref().is_ok_and(|d| *d != feed::composer::Delivered::Unconfirmed) && !super::attach::has(s, &id) {
                 if s.composer_for.as_deref() == Some(id.as_str()) {
                     if s.composer.text.trim() == typed {
                         replace_composer(s, "");
