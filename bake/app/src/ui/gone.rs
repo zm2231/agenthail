@@ -157,7 +157,8 @@ fn exchanges(g: &Gone) -> El {
     let turn = |who: &str, body: &str, color: Color| col().w_full().gap(4.0).child(label(who)).child(text(body.to_string()).font(BODY).color(color).wrap());
     let mut head = row().w_full().gap(10.0).items_center();
     head = head.child(text(g.history.note()).font(META).color(faint()));
-    let list = col().w_full().max_w(780.0).gap(18.0).px(32.0).py(16.0).child(head).children(g.exchanges.iter().map(|e| {
+    let error = g.read_error.as_ref().map(|e| text(format!("Couldn't read all of this conversation: {e}")).font(META).color(failed()).wrap());
+    let list = col().w_full().max_w(780.0).gap(18.0).px(32.0).py(16.0).child(head).children(error).children(g.exchanges.iter().map(|e| {
         let mut c = col().w_full().gap(10.0);
         if !e.user.is_empty() {
             c = c.child(turn(&e.from, &e.user, theme::text()));
@@ -177,7 +178,9 @@ pub fn screen(s: &App, id: &str) -> El {
         Look::Failed(e) => failed_view(e),
         Look::Found(g) => {
             let center = col().grow(1.0).h_full().min_w(0.0).child(header(s, &g.row)).child(banner(m, g));
-            if s.panes.get(id).is_some_and(|p| !p.blocks.is_empty()) {
+            let pane = s.panes.get(id).filter(|p| !p.blocks.is_empty());
+            let live = pane.is_some_and(|p| matches!(p.status.as_str(), "live" | "replay" | "replay finished"));
+            if live || (pane.is_some() && g.exchanges.is_empty()) {
                 conversation(s, id, center)
             } else if g.exchanges.is_empty() {
                 center.child(col().key("gone-empty").w_full().grow(1.0).items_center().justify_center().child(text(g.empty_note()).font(BODY_BOLD).color(faint()).wrap()).child(el().h(80.0)))
