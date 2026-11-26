@@ -498,6 +498,10 @@ func (d *Daemon) doProjectAction(ctx context.Context, _ principal, request proje
 	if request.Action == "project-rename" && (title == "" || len(title) > projectTitleLimit) {
 		return actionResult{}, invalidRequest(fmt.Sprintf("a project name is 1 to %d characters", projectTitleLimit))
 	}
+	if request.Action == "project-remove" {
+		d.projectWrites.Lock()
+		defer d.projectWrites.Unlock()
+	}
 	targets, err := d.localProjectCheckouts(request.ProjectID)
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
@@ -856,8 +860,8 @@ func (d *Daemon) stopRun(ctx context.Context, session *surface.Session) (surface
 var projectAddGitTimeout = 30 * time.Second
 
 func (d *Daemon) addProject(ctx context.Context, path, title string) (projectresolve.CatalogProject, bool, error) {
-	d.projectAdds.Lock()
-	defer d.projectAdds.Unlock()
+	d.projectWrites.Lock()
+	defer d.projectWrites.Unlock()
 	plan, err := d.planProjectAdd(ctx, path, title)
 	if err != nil {
 		return projectresolve.CatalogProject{}, false, err

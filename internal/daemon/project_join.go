@@ -133,6 +133,8 @@ func (d *Daemon) doProjectShare(ctx context.Context, request projectRequest) (ac
 // shareLocalProject gives an added project of this host the shared key, if
 // it has no key yet, and names the host keeping its ledger.
 func (d *Daemon) shareLocalProject(projectID string) (projectShare, error) {
+	d.projectWrites.Lock()
+	defer d.projectWrites.Unlock()
 	records, err := d.Registry.ListProjects()
 	if err != nil {
 		return projectShare{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
@@ -191,8 +193,8 @@ func (d *Daemon) doProjectJoinFolder(ctx context.Context, request projectRequest
 // repository with a remote is already one project on every host, and one
 // with its own lead or ledger would need two histories merged.
 func (d *Daemon) joinFolder(ctx context.Context, path string, share projectShare) (actionResult, error) {
-	d.projectAdds.Lock()
-	defer d.projectAdds.Unlock()
+	d.projectWrites.Lock()
+	defer d.projectWrites.Unlock()
 	plan, err := d.planProjectAdd(ctx, path, share.Title)
 	var missing *folderNotFoundError
 	switch {
@@ -293,6 +295,8 @@ func (d *Daemon) doProjectUnjoin(request projectRequest) (actionResult, error) {
 	if request.ProjectID == "" {
 		return actionResult{}, invalidRequest("projectId is required")
 	}
+	d.projectWrites.Lock()
+	defer d.projectWrites.Unlock()
 	records, err := d.Registry.ListProjects()
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())

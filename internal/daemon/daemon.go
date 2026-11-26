@@ -122,9 +122,9 @@ type Daemon struct {
 	catalogLive       map[string]*catalogLiveSession
 	catalogIdentities *projectresolve.CatalogIdentityCache
 	repositoryKeys    repositoryKeyWatch
-	// projectAdds keeps an add and a join of one folder from both
-	// passing their checks before either writes.
-	projectAdds     sync.Mutex
+	// projectWrites runs one add, join, share, unjoin or removal of this
+	// host's projects at a time, so none acts on a plan another changed.
+	projectWrites   sync.Mutex
 	ledgerOnce      sync.Once
 	heldWorkVersion atomic.Uint64
 	heldWorkRows    heldWorkCache

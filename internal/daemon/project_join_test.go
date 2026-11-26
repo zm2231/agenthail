@@ -253,7 +253,7 @@ func assertNotAdded(t *testing.T, node *federationNode, folder string) {
 func TestAJoinAndAPlainAddOfTheSameFolderEndWithTheFolderJoined(t *testing.T) {
 	f := newJoinFixture(t)
 	folder := t.TempDir()
-	f.server.daemon.projectAdds.Lock()
+	f.server.daemon.projectWrites.Lock()
 	answers := make(chan int, 2)
 	go func() {
 		answers <- f.mac.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "project-add", "path": folder, "host": "vps", "join": f.projectID}).Code
@@ -262,7 +262,7 @@ func TestAJoinAndAPlainAddOfTheSameFolderEndWithTheFolderJoined(t *testing.T) {
 		answers <- f.server.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "project-add", "path": folder}).Code
 	}()
 	time.Sleep(200 * time.Millisecond)
-	f.server.daemon.projectAdds.Unlock()
+	f.server.daemon.projectWrites.Unlock()
 	for range 2 {
 		if code := <-answers; code != http.StatusOK {
 			t.Fatalf("an add or join answered %d", code)
@@ -285,4 +285,32 @@ func TestAJoinAndAPlainAddOfTheSameFolderEndWithTheFolderJoined(t *testing.T) {
 		}
 	}
 	t.Fatal("the folder was not added")
+}
+
+func TestARemovalDuringAJoinOfTheSameFolderWaitsForIt(t *testing.T) {
+	f := newJoinFixture(t)
+	folder := t.TempDir()
+	var added struct {
+		Project struct {
+			LocalID string `json:"localId"`
+		} `json:"project"`
+	}
+	f.action(t, f.server, map[string]any{"action": "project-add", "path": folder}, http.StatusOK, &added)
+	f.server.daemon.projectWrites.Lock()
+	answers := make(chan string, 2)
+	go func() {
+		response := f.mac.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "project-add", "path": folder, "host": "vps", "join": f.projectID})
+		answers <- "join " + response.Body.String()
+	}()
+	go func() {
+		response := f.server.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "project-remove", "projectId": added.Project.LocalID})
+		answers <- "remove " + response.Body.String()
+	}()
+	time.Sleep(200 * time.Millisecond)
+	f.server.daemon.projectWrites.Unlock()
+	for range 2 {
+		if answer := <-answers; !strings.Contains(answer, `"ok":true`) {
+			t.Fatalf("a join and a removal of one folder, one after the other, both stand; got %s", answer)
+		}
+	}
 }
