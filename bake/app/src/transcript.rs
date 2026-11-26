@@ -54,6 +54,21 @@ impl Replay {
     }
 }
 
+#[derive(Default)]
+pub struct Earlier {
+    pub next: Option<i64>,
+    pub anchored: bool,
+    pub loading: bool,
+    pub note: Option<String>,
+    pub at_top: bool,
+}
+
+impl Earlier {
+    pub fn more(&self) -> bool {
+        self.next != Some(0)
+    }
+}
+
 pub struct Pane {
     pub transcript: Transcript,
     pub blocks: Vec<Block>,
@@ -61,11 +76,36 @@ pub struct Pane {
     pub live: Option<std::sync::mpsc::Receiver<feed::source::Message>>,
     pub replay: Option<Replay>,
     pub status: String,
+    pub caught_up: bool,
+    pub paged_first: bool,
+    pub reload: usize,
+    pub last_batch: f64,
+    pub earlier: Earlier,
+    pub expanding: HashMap<String, Option<String>>,
+    pub shown: HashMap<String, usize>,
+    pub generation: u64,
 }
+
+static PANES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 impl Pane {
     pub fn new() -> Self {
-        Self { transcript: Transcript::default(), blocks: Vec::new(), revs: Vec::new(), live: None, replay: None, status: "loading".into() }
+        Self {
+            transcript: Transcript::default(),
+            blocks: Vec::new(),
+            revs: Vec::new(),
+            live: None,
+            replay: None,
+            status: "loading".into(),
+            caught_up: false,
+            paged_first: false,
+            reload: 0,
+            last_batch: f64::MAX,
+            earlier: Earlier::default(),
+            expanding: HashMap::new(),
+            shown: HashMap::new(),
+            generation: PANES.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        }
     }
 
     pub fn rebuild(&mut self, counter: &mut u64) {
@@ -89,6 +129,14 @@ impl Pane {
         self.revs.extend(revs);
     }
 
+    pub fn bump_item(&mut self, item: &str, counter: &mut u64) {
+        let holder = self.blocks.iter().position(|b| b.id.strip_prefix("item:") == Some(item) || matches!(&b.kind, Kind::Work(w) if w.items.iter().any(|i| i.id == item)));
+        if let Some(ix) = holder {
+            *counter += 1;
+            self.revs[ix] = *counter;
+        }
+    }
+
     pub fn bump(&mut self, id: &str, counter: &mut u64) {
         if let Some(ix) = self.blocks.iter().position(|b| b.id == id) {
             *counter += 1;
@@ -106,13 +154,60 @@ fn markdown(body: &str) -> El {
     Markdown::new(body.to_string()).selectable(true).render(&MarkdownStyle::neutral(true)).selection_group(false)
 }
 
-fn entry_el(entry: &Entry) -> El {
+pub struct Cx<'a> {
+    pub session: &'a str,
+    pub block: &'a str,
+    pub pane: &'a Pane,
+    pub open: &'a std::collections::HashSet<String>,
+}
+
+const SHOWN_BODY: usize = 20_000;
+
+fn body_tools(cx: &Cx, item: &feed::Item, mut head: El) -> El {
+    if item.truncated && item.body_ref.is_some() {
+        let (sid, iid) = (cx.session.to_string(), item.id.clone());
+        head = match cx.pane.expanding.get(&item.id) {
+            Some(None) => head.child(text("Loading all of it…").font(META).color(faint())),
+            Some(Some(note)) => head
+                .child(text(note.clone()).font(META).color(failed()).truncate().max_w(320.0))
+                .child(action(format!("full-{}", item.id), &icons::ROTATE, "Try again").on_press(move |s: &mut App| crate::history::load_body(s, &sid, &iid))),
+            None => head.child(action(format!("full-{}", item.id), &icons::CHEVRON_DOWN, "Show all").on_press(move |s: &mut App| crate::history::load_body(s, &sid, &iid))),
+        };
+    }
+    head.child(action(format!("copy-{}", item.id), &icons::COPY, "Copy").on_press_tx(crate::history::copy(item.text.clone())))
+}
+
+fn entry_body(cx: &Cx, label: &str, item: &feed::Item) -> El {
+    let limit = cx.pane.shown.get(&item.id).copied().unwrap_or(SHOWN_BODY);
+    let (shown, clipped) = feed::summary::clip(&item.text, limit);
+    let head = body_tools(cx, item, row().w_full().gap(6.0).items_center().child(text(label.to_string()).font(META_BOLD).color(muted())).child(el().grow(1.0)));
+    let mut c = col().w_full().gap(4.0).child(head).child(
+        col().w_full().px(10.0).py(8.0).radius(8.0).fill(Color::BLACK.alpha(0.18)).child(text(shown.to_string()).font(META).color(theme::text()).wrap().selectable(true)),
+    );
+    if clipped {
+        let (iid, more) = (item.id.clone(), limit + SHOWN_BODY * 5);
+        let block = cx.block.to_string();
+        c = c.child(
+            row()
+                .gap(8.0)
+                .items_center()
+                .child(text(format!("Showing {} of {} KB", shown.len() / 1024, item.text.len() / 1024)).font(META).color(faint()))
+                .child(action(format!("more-{}", item.id), &icons::CHEVRON_DOWN, "Show more").on_press(move |s: &mut App| crate::history::show_more(s, &block, &iid, more))),
+        );
+    }
+    c
+}
+
+fn entry_el(cx: &Cx, block: &str, entry: &Entry) -> El {
     let (glyph, title, detail, failure) = match entry {
         Entry::Call { call, results } => (&icons::TERMINAL, call.title.clone(), first_line(&call.text, 140), results.iter().any(feed::summary::is_failure)),
         Entry::Output(item) => (&icons::CORNER, "Output".to_string(), first_line(&item.text, 140), false),
         Entry::Reasoning(item) => (&icons::SPARKLES, "Thinking".to_string(), first_line(&item.text, 160), false),
     };
+    let key = format!("entry:{}", entry.id());
+    let expanded = cx.open.contains(&key);
     let mut line_el = row()
+        .key(format!("entry-{}", entry.id()))
         .w_full()
         .gap(8.0)
         .items_center()
@@ -126,23 +221,31 @@ fn entry_el(entry: &Entry) -> El {
     if failure {
         line_el = line_el.child(row().px(6.0).py(1.0).radius(5.0).fill(failed().alpha(0.15)).child(text("failed").font(META_BOLD).color(failed())));
     }
-    line_el
+    let line_el = line_el.child(icon(if expanded { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, 11.0).color(faint())).on_press(toggle_in(key, block.to_string()));
+    if !expanded {
+        return line_el;
+    }
+    col().w_full().gap(4.0).child(line_el).child(col().w_full().pl(10.0).pb(6.0).gap(8.0).children(entry.bodies().into_iter().map(|(label, item)| entry_body(cx, label, item))))
 }
 
-fn toggle(id: String) -> impl Fn(&mut App) + 'static {
+fn toggle_in(id: String, block: String) -> impl Fn(&mut App) + 'static {
     move |s: &mut App| {
         if !s.open.remove(&id) {
             s.open.insert(id.clone());
         }
         let mut counter = s.counter;
         for pane in s.panes.values_mut() {
-            pane.bump(&id, &mut counter);
+            pane.bump(&block, &mut counter);
         }
         s.counter = counter;
     }
 }
 
-fn work_el(id: &str, work: &Work, open: bool) -> El {
+fn toggle(id: String) -> impl Fn(&mut App) + 'static {
+    toggle_in(id.clone(), id)
+}
+
+fn work_el(cx: &Cx, id: &str, work: &Work, open: bool) -> El {
     let shown = open || !work.folds;
     let label = if work.live {
         format!("Working · {}", work.label)
@@ -188,7 +291,7 @@ fn work_el(id: &str, work: &Work, open: bool) -> El {
                 .pl(8.0)
                 .border_sides([0.0, 0.0, 0.0, 1.5], line())
                 .gap(1.0)
-                .children(entries.into_iter().map(entry_el)),
+                .children(entries.into_iter().map(|e| entry_el(cx, id, e))),
         );
     }
     c
@@ -235,7 +338,7 @@ fn agent_el(entry: &AgentEntry) -> El {
         )
 }
 
-fn block_el(block: &Block, open: bool, gap: f32, last: bool) -> El {
+fn block_el(cx: &Cx, block: &Block, open: bool, gap: f32, last: bool) -> El {
     let body = match &block.kind {
         Kind::User(body) if body.trim_start().starts_with("<hook_prompt") => {
             let inner = body.split_once('>').map(|(_, rest)| rest).unwrap_or(body).replace("</hook_prompt>", "");
@@ -267,7 +370,7 @@ fn block_el(block: &Block, open: bool, gap: f32, last: bool) -> El {
             }
             c
         }
-        Kind::Work(work) => work_el(&block.id, work, open),
+        Kind::Work(work) => work_el(cx, &block.id, work, open),
         Kind::Agent(entry) => agent_el(entry),
         Kind::AgentFold { label, members, .. } => {
             let head = row()
@@ -293,8 +396,84 @@ fn block_el(block: &Block, open: bool, gap: f32, last: bool) -> El {
         Kind::Instructions(_) => row().gap(6.0).items_center().child(icon(&icons::LAYERS, 12.0).color(faint())).child(text("Instructions").font(META).color(faint())),
         Kind::Unknown { title, .. } => col().child(text(title.clone()).font(META).color(faint())),
     };
-    let row_el = col().w_full().max_w(780.0).px(36.0).pt(gap).child(body);
+    let mut row_el = col().w_full().max_w(780.0).px(36.0).pt(gap).child(body);
+    if let Some(footer) = footer(cx, block) {
+        row_el = row_el.hover_group().child(footer);
+    }
     if last { row_el.streaming(true) } else { row_el }
+}
+
+fn action(key: String, glyph: &'static rune::Icon, label: &str) -> El {
+    row()
+        .key(key)
+        .gap(4.0)
+        .items_center()
+        .px(6.0)
+        .py(3.0)
+        .radius(6.0)
+        .hover(wash())
+        .press_scale(0.96)
+        .child(icon(glyph, 12.0).color(faint()))
+        .child(text(label.to_string()).font(META).color(faint()))
+}
+
+fn footer(cx: &Cx, block: &Block) -> Option<El> {
+    let item = block.id.strip_prefix("item:")?;
+    let (body, user) = match &block.kind {
+        Kind::User(body) if !body.trim_start().starts_with("<hook_prompt") => (body.clone(), true),
+        Kind::Assistant(body) => (body.clone(), false),
+        _ => return None,
+    };
+    let mut tools = row().gap(2.0).items_center().group_opacity(0.0, 1.0);
+    tools = tools.child(action(format!("copy-{item}"), &icons::COPY, "Copy").on_press_tx(crate::history::copy(body.clone())));
+    let images = cx.pane.transcript.images_with(item);
+    if user && images > 0 {
+        tools = tools.child(action(format!("edit-{item}"), &icons::PENCIL, "Edit").opacity(0.45).help("Edit would resend this message without its images"));
+    } else if user {
+        tools = tools.child(action(format!("edit-{item}"), &icons::PENCIL, "Edit").on_press(crate::history::edit(body.clone())));
+    }
+    let mut line = row().gap(6.0).items_center().pt(2.0);
+    if let Some(full) = cx.pane.transcript.item(item).filter(|i| i.truncated && i.body_ref.is_some()) {
+        line = body_tools(cx, full, line);
+        return Some(if user { col().w_full().items_end().child(line) } else { line });
+    }
+    let line = line.child(tools);
+    Some(if user { col().w_full().items_end().child(line) } else { line })
+}
+
+pub fn empty(s: &App, id: &str, note: String) -> El {
+    let settled = s.panes.get(id).is_some_and(|p| p.caught_up && !p.earlier.loading && p.earlier.next == Some(0));
+    let note = if settled && note == "Loading the transcript…" { "Nothing to show in this conversation yet".to_string() } else { note };
+    let mut c = col().w_full().grow(1.0).items_center().justify_center().gap(12.0);
+    if !settled {
+        c = c.child(rune_kit::Loader::new().size(22.0).color(accent()).build(theme::kit()));
+    }
+    c = c.child(text(note).font(BODY_BOLD).color(faint()));
+    if let Some(earlier) = earlier_el(s, id) {
+        c = c.child(earlier);
+    }
+    c.child(el().h(80.0))
+}
+
+fn earlier_el(s: &App, id: &str) -> Option<El> {
+    let pane = s.panes.get(id)?;
+    let key = id.to_string();
+    let body = if pane.earlier.loading {
+        row().gap(8.0).items_center().child(rune_kit::Loader::new().size(12.0).color(faint()).build(theme::kit())).child(text("Loading earlier messages…").font(META).color(faint()))
+    } else if let Some(note) = &pane.earlier.note {
+        let mut r = row().gap(8.0).items_center().child(text(note.clone()).font(META).color(faint()));
+        if pane.earlier.next != Some(0) {
+            r = r.child(action("earlier-retry".into(), &icons::ROTATE, "Try again").on_press(move |s: &mut App| crate::history::retry_older(s, &key)));
+        }
+        r
+    } else if crate::history::can_load(s, id) {
+        row().child(action("earlier".into(), &icons::CHEVRON_DOWN, "Load earlier").on_press(move |s: &mut App| {
+            crate::history::load_older(s, &key);
+        }))
+    } else {
+        return None;
+    };
+    Some(col().key(format!("earlier-{id}")).w_full().items_center().pt(14.0).child(body))
 }
 
 fn gap_for(blocks: &[Block], ix: usize) -> f32 {
@@ -309,7 +488,7 @@ fn gap_for(blocks: &[Block], ix: usize) -> f32 {
 pub fn view(s: &App, id: &str) -> El {
     let count = s.panes.get(id).map(|p| p.blocks.len()).unwrap_or(0);
     let key = id.to_string();
-    let stack = col().key(format!("rows-{id}")).w_full().items_center().growth(GrowthSpec::default()).selection_group(true).pb(130.0).virtual_rows(
+    let stack = col().key(format!("rows-{id}")).w_full().items_center().growth(GrowthSpec::default()).selection_group(true).pb(130.0 + crate::ui::queue::reserve(s, id)).virtual_rows(
         count,
         60.0,
         {
@@ -322,10 +501,21 @@ pub fn view(s: &App, id: &str) -> El {
             let open = s.open.contains(&block.id);
             let last = i + 1 == pane.blocks.len() && pane.transcript.turn_open;
             let gap = gap_for(&pane.blocks, i);
-            memo(&block.id, (pane.revs[i], open, last, gap.to_bits()), || block_el(block, open, gap, last))
+            let cx = Cx { session: &key, block: &block.id, pane, open: &s.open };
+            let images = match (&block.kind, block.id.strip_prefix("item:")) {
+                (Kind::User(_), Some(item)) => pane.transcript.images_with(item),
+                _ => 0,
+            };
+            memo(&block.id, (pane.revs[i], open, last, gap.to_bits(), images), || block_el(&cx, block, open, gap, last))
         },
     );
-    col().key(format!("transcript-{id}")).w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: true }).child(stack)
+    let watch = id.to_string();
+    let stack = stack.on_visible_rows(move |s: &mut App, rows| crate::history::seen_rows(s, &watch, rows.start));
+    let mut scroll = col().key(format!("transcript-{id}")).w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: true });
+    if let Some(earlier) = earlier_el(s, id) {
+        scroll = scroll.child(earlier);
+    }
+    scroll.child(stack)
 }
 
 pub fn loading(note: String) -> El {

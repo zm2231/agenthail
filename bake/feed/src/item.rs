@@ -55,6 +55,10 @@ pub struct Item {
     #[serde(default)]
     pub truncated: bool,
     #[serde(default)]
+    pub body_ref: Option<String>,
+    #[serde(default)]
+    pub version: u64,
+    #[serde(default)]
     pub turn_id: Option<String>,
     #[serde(default)]
     pub agent: Option<AgentMessage>,

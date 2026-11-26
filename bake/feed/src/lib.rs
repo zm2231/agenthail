@@ -11,8 +11,12 @@ pub mod derive;
 pub mod edits;
 pub mod focus;
 pub mod gone;
+pub mod history;
 pub mod item;
 pub mod menu;
+#[cfg(test)]
+mod mock;
+pub mod queue;
 pub mod source;
 pub mod store;
 pub mod summary;

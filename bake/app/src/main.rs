@@ -1,3 +1,4 @@
+mod history;
 mod icons;
 mod over;
 mod theme;
@@ -35,6 +36,11 @@ pub enum Bg {
     NewSession(ui::new_session::Loaded),
     Looked(String, u64, Result<feed::gone::Gone, String>),
     Fixed(String, u64, feed::gone::Fix, Result<(), feed::catalog::RespondError>),
+    Queue(String, u64, Result<feed::queue::Read, String>),
+    QueueDone(String, (String, i64), feed::queue::Done),
+    Recovered(Vec<(feed::queue::Taking, feed::queue::Recovered)>),
+    Older(String, u64, Result<feed::history::Older, feed::history::Miss>),
+    Body(String, u64, String, u64, Result<String, String>),
     Error(String),
 }
 
@@ -85,6 +91,13 @@ pub struct App {
     snapshots: u64,
     queue_rows: Vec<feed::catalog::QueueRow>,
     pub stopping: HashSet<String>,
+    pub queue: HashMap<String, Vec<feed::queue::Queued>>,
+    pub queue_working: HashSet<(String, i64)>,
+    queue_fetching: HashMap<String, u64>,
+    queue_gen: HashMap<String, u64>,
+    queue_epoch: u64,
+    pub queue_note: HashMap<String, String>,
+    pub queue_taking: Vec<feed::queue::Taking>,
     pub busy_default: Option<Busy>,
     pub busy_pick: HashMap<String, Busy>,
     pub rekeyed: HashMap<String, String>,
@@ -175,6 +188,13 @@ fn init() -> App {
         snapshots: 0,
         queue_rows: Vec::new(),
         stopping: HashSet::new(),
+        queue: HashMap::new(),
+        queue_working: HashSet::new(),
+        queue_fetching: HashMap::new(),
+        queue_gen: HashMap::new(),
+        queue_epoch: 0,
+        queue_note: HashMap::new(),
+        queue_taking: Vec::new(),
         busy_default: None,
         busy_pick: HashMap::new(),
         rekeyed: HashMap::new(),
@@ -268,6 +288,7 @@ fn init() -> App {
 }
 
 const PANE_REBUILD_SECS: f64 = 1.0;
+const REPLAY_QUIET_SECS: f64 = 1.5;
 const SETTLE_GRACE: std::time::Duration = std::time::Duration::from_secs(6);
 
 impl App {
@@ -297,6 +318,7 @@ pub fn select(s: &mut App, id: &str) {
     }
     fetch_requests(s, id);
     ui::session_menu::load(s, id);
+    ui::queue::fetch(s, id);
 }
 
 pub fn load_pane(s: &mut App, id: &str) {
@@ -828,6 +850,10 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
         move_key(&mut s.busy_pick, &old, &new);
         move_key(&mut s.work_pick, &old, &new);
         move_member(&mut s.stopping, &old, &new);
+        move_key(&mut s.queue_note, &old, &new);
+        move_key(&mut s.queue, &old, &new);
+        s.queue_fetching.remove(&old);
+        ui::queue::invalidate(s, &new);
     }
     if let Some(id) = s.composer_for.clone()
         && s.drafts.get(&id) != s.composer.text
@@ -853,6 +879,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 s.status = "live".into();
                 if let Some(id) = s.selected.clone() {
                     fetch_requests(s, &id);
+                    if ui::queue::wants(s, &id) {
+                        ui::queue::fetch(s, &id);
+                    }
                     if let Some(work) = session(s, &id).and_then(|x| x.primary_work(s.work_pick.get(&id).map(String::as_str)).cloned()) {
                         fetch_item(s, &work.project_key, &work.item_id);
                     }
@@ -923,6 +952,11 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 fetch_requests_at(s, &id, &[0, 2000, 6000, 9000]);
             }
             Bg::NewSession(loaded) => ui::new_session::take(s, loaded),
+            Bg::Queue(id, asked, result) => ui::queue::take(s, id, asked, result),
+            Bg::QueueDone(id, queue_id, done) => ui::queue::done(s, id, queue_id, done),
+            Bg::Recovered(back) => ui::queue::restore(s, back),
+            Bg::Older(id, generation, result) => history::take_older(s, id, generation, result),
+            Bg::Body(id, generation, item, version, result) => history::take_body(s, id, generation, item, version, result),
             Bg::Error(error) => s.status = format!("daemon: {error}"),
             Bg::Looked(id, seq, result) => ui::gone::looked(s, &id, seq, result),
             Bg::Fixed(id, seq, fix, result) => ui::gone::fixed(s, &id, seq, fix, result),
@@ -931,7 +965,8 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     let mut busy = false;
     let mut counter = s.counter;
     let mut panes_moved = false;
-    for pane in s.panes.values_mut() {
+    let mut caught: Vec<String> = Vec::new();
+    for (id, pane) in s.panes.iter_mut() {
         let mut moved = false;
         if let Some(replay) = &mut pane.replay {
             let (c, more) = replay.pump(t, &mut pane.transcript);
@@ -941,13 +976,29 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 pane.status = "replay finished".into();
             }
         }
-        if let Some(rx) = &pane.live {
+        let arrived: Vec<Message> = pane.live.as_ref().map(|rx| rx.try_iter().collect()).unwrap_or_default();
+        if pane.live.is_some() {
             busy = true;
-            while let Ok(message) = rx.try_recv() {
+            for message in arrived {
                 match message {
-                    Message::Batch(b) => moved |= pane.transcript.apply(b.seq, b.events),
-                    Message::Status(status) => pane.status = status,
+                    Message::Batch(b) => {
+                        history::batch_arrived(pane, t);
+                        moved |= pane.transcript.apply(b.seq, b.events);
+                    }
+                    Message::Status(status) => {
+                        if status == "live" && !pane.caught_up {
+                            pane.last_batch = pane.last_batch.min(t);
+                        }
+                        if status.starts_with("reconnecting") && !pane.caught_up && pane.transcript.items().is_empty() && !caught.contains(id) {
+                            caught.push(id.clone());
+                        }
+                        pane.status = status;
+                    }
+                    Message::CaughtUp => caught.push(id.clone()),
                 }
+            }
+            if !pane.caught_up && t - pane.last_batch >= REPLAY_QUIET_SECS && !caught.contains(id) {
+                caught.push(id.clone());
             }
         }
         if moved {
@@ -958,6 +1009,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     }
     s.counter = counter;
     s.panes_moved |= panes_moved;
+    for id in caught {
+        history::caught_up(s, &id);
+    }
     if s.ov.live.stale() || (s.panes_moved && s.clock - s.built_at >= PANE_REBUILD_SECS) {
         rebuild(s);
         changed = true;

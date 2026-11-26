@@ -11,6 +11,7 @@ use crate::{App, Bg, Screen, Tab, answer_request, pick_work, session_edits, shor
 
 mod chips;
 pub mod gone;
+pub(crate) mod queue;
 pub mod new_session;
 mod rail;
 mod session;

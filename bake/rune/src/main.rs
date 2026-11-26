@@ -135,6 +135,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                     changed |= s.transcript.apply(b.seq, b.events);
                 }
                 Message::Status(status) => s.status = status,
+                Message::CaughtUp => {}
             }
         }
         tx.wake_after(Duration::from_millis(16));
