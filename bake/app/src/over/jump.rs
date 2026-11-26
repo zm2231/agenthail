@@ -1,4 +1,4 @@
-use rune::{Color, El, Key, KeyEvent, TextStyle, Tx, col, icon, row, text, text_input};
+use rune::{Color, El, Key, KeyEvent, ScrollSpec, TextStyle, Tx, col, icon, row, text, text_input};
 use rune_theme_opencode::icons;
 
 use feed::derive::Hit;
@@ -12,7 +12,7 @@ pub fn hits(s: &App) -> Vec<Hit> {
     s.ov.d.jump(q, &s.ov.needs, &s.ov.hands_on)
 }
 
-pub fn key(s: &mut App, ev: &KeyEvent, _tx: &mut Tx) -> bool {
+pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     match ev.key {
         Key::Escape => {
             s.ov.jump = None;
@@ -20,10 +20,12 @@ pub fn key(s: &mut App, ev: &KeyEvent, _tx: &mut Tx) -> bool {
         }
         Key::Down => {
             s.ov.jump_ix = (s.ov.jump_ix + 1).min(hits(s).len().saturating_sub(1));
+            tx.scroll_into_view_in("jump-list", format!("hit-{}", s.ov.jump_ix));
             true
         }
         Key::Up => {
             s.ov.jump_ix = s.ov.jump_ix.saturating_sub(1);
+            tx.scroll_into_view_in("jump-list", format!("hit-{}", s.ov.jump_ix));
             true
         }
         Key::Enter => {
@@ -101,7 +103,7 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
         .border(1.0, k.c.border_base)
         .shadow(0.0, 24.0, Color::BLACK.alpha(0.55))
         .child(search)
-        .child(list)
+        .child(col().key("jump-list").w_full().max_h(520.0).scroll(ScrollSpec { stick_bottom: false }).child(list))
         .child(foot);
     layer.push(
         col()

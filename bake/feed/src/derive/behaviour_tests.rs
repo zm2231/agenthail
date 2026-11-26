@@ -221,3 +221,17 @@ fn jump_finds_every_listed_session_with_or_without_a_project() {
     let hit = w.jump("busyprobe", &[], &[]).into_iter().find(|h| h.group == "Sessions").unwrap();
     assert_eq!(hit.badge, "No project");
 }
+
+#[test]
+fn jump_lists_every_match_when_you_search_and_three_a_group_when_you_dont() {
+    let w = world(json!({"sessions": [
+        session("probe-1", json!({"project": null})),
+        session("probe-2", json!({})),
+        session("probe-3", json!({})),
+        session("probe-4", json!({"project": null})),
+        session("probe-5", json!({}))
+    ]}));
+    let sessions = |q: &str| w.jump(q, &[], &[]).into_iter().filter(|h| h.group == "Sessions").count();
+    assert_eq!(sessions("probe"), 5);
+    assert_eq!(sessions(""), 3);
+}

@@ -39,6 +39,8 @@ pub struct Decision {
     pub host: String,
     #[serde(skip)]
     pub host_name: String,
+    #[serde(skip)]
+    pub covers: Vec<Decision>,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -87,7 +89,11 @@ impl Decision {
         if !self.key.is_empty() {
             return self.key.clone();
         }
-        format!("{}/{}/{}/{}", self.host, self.session_id, self.work_item, self.requests.first().map(|r| r.id.as_str()).unwrap_or_default())
+        if self.work_item.is_empty() { self.session_id.clone() } else { format!("{}#{}", self.session_id, self.work_item) }
+    }
+
+    pub fn is_parked(&self) -> bool {
+        self.kind == "parked" || !self.work_item.is_empty() && !self.is_review()
     }
 
     pub fn is_review(&self) -> bool {
@@ -118,8 +124,11 @@ impl Decision {
     }
 
     pub fn dismissals(&self) -> Vec<Dismiss<'_>> {
-        if !self.work_item.is_empty() {
-            return vec![Dismiss::Parked { work_item: &self.work_item, host: &self.host }];
+        if self.is_parked() {
+            if self.covers.is_empty() {
+                return vec![Dismiss::Parked { work_item: &self.work_item, host: &self.host }];
+            }
+            return self.covers.iter().map(|c| Dismiss::Parked { work_item: &c.work_item, host: &c.host }).collect();
         }
         if self.answerable && !self.requests.is_empty() {
             return self.requests.iter().map(|r| Dismiss::Request { session: &self.session_id, request: &r.id }).collect();
@@ -137,6 +146,59 @@ impl Decision {
 
 pub fn gone(error: &RespondError) -> bool {
     error.code == "stale" || error.code == "not_found" || error.message.contains("404")
+}
+
+pub fn qualify(id: &str, host: &str, own: &str) -> String {
+    let id = if host.is_empty() || id.is_empty() || id.contains("::") { id.to_string() } else { format!("{host}::{id}") };
+    let mine = format!("{own}::");
+    match id.strip_prefix(mine.as_str()) {
+        Some(local) if !own.is_empty() => local.to_string(),
+        _ => id,
+    }
+}
+
+fn owner(id: &str) -> &str {
+    id.split_once("::").map(|(h, _)| h).unwrap_or_default()
+}
+
+impl Inbox {
+    pub fn add(&mut self, page: Page, host: &str, host_name: &str, own: &str) {
+        let q = |id: &str| qualify(id, host, own);
+        for d in page.decisions {
+            let mut d = Decision { host: host.into(), host_name: host_name.into(), session_id: q(&d.session_id), project_id: q(&d.project_id), ..d };
+            d.holds_up = d.holds_up.iter().map(|x| q(x)).collect();
+            self.decisions.push(d);
+        }
+        for h in page.lead_handling {
+            self.lead_handling.push(LeadHandled { session_id: q(&h.session_id), project_id: q(&h.project_id), held_by: q(&h.held_by), ..h });
+        }
+    }
+
+    pub fn settle(&mut self) {
+        let mut all: Vec<Decision> = std::mem::take(&mut self.decisions).into_iter().flat_map(|d| if d.covers.is_empty() { vec![d] } else { d.covers }).collect();
+        order(&mut all);
+        let mut kept: Vec<Decision> = Vec::new();
+        for d in all {
+            match kept.iter().position(|k| k.id() == d.id()) {
+                Some(i) if d.host == owner(&d.session_id) && kept[i].host != owner(&kept[i].session_id) => kept[i] = d,
+                Some(_) => {}
+                None => kept.push(d),
+            }
+        }
+        let mut out: Vec<Decision> = Vec::new();
+        for d in kept {
+            match out.iter_mut().find(|o| d.is_parked() && o.is_parked() && o.session_id == d.session_id && o.reason == d.reason) {
+                Some(lead) => {
+                    if lead.covers.is_empty() {
+                        lead.covers.push(lead.clone());
+                    }
+                    lead.covers.push(d);
+                }
+                None => out.push(d),
+            }
+        }
+        self.decisions = out;
+    }
 }
 
 pub fn order(decisions: &mut [Decision]) {
@@ -159,30 +221,37 @@ impl Client {
 
     pub fn inbox(&self) -> anyhow::Result<Inbox> {
         let local = self.decisions(None)?;
-        let mut inbox = Inbox { decisions: local.decisions, lead_handling: local.lead_handling, notes: Vec::new() };
-        let hosts = self.get_json("/api/v1/hosts").unwrap_or_default();
-        let paired: Vec<(String, String)> = hosts["hosts"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|h| h["state"] == "connected")
-            .filter_map(|h| Some((h["id"].as_str()?.to_string(), h["name"].as_str().unwrap_or_default().to_string())))
-            .collect();
+        let mut inbox = Inbox::default();
+        let (hosts, listed) = match self.get_json("/api/v1/hosts") {
+            Ok(h) => (h, true),
+            Err(_) => (serde_json::Value::Null, false),
+        };
+        let own = hosts["host"]["id"].as_str().unwrap_or_default().to_string();
+        inbox.add(local, "", "", &own);
+        if !listed {
+            inbox.notes.push("Couldn't list the paired computers, so only this computer's decisions are shown.".into());
+        }
+        let mut paired: Vec<(String, String)> = Vec::new();
+        for h in hosts["hosts"].as_array().into_iter().flatten() {
+            let (Some(id), name) = (h["id"].as_str(), h["name"].as_str().unwrap_or_default().to_string()) else { continue };
+            match h["state"].as_str().unwrap_or_default() {
+                "connected" => paired.push((id.to_string(), name)),
+                "incompatible" => inbox.notes.push(format!("{name} runs an older Agenthail without the Inbox.")),
+                _ => inbox.notes.push(format!("{name} isn't answering, so its decisions aren't shown.")),
+            }
+        }
         let pages: Vec<(String, String, anyhow::Result<Page>)> = std::thread::scope(|scope| {
             let jobs: Vec<_> = paired.iter().map(|(id, name)| (id.clone(), name.clone(), scope.spawn(|| self.decisions(Some(id))))).collect();
             jobs.into_iter().map(|(id, name, job)| (id, name, job.join().unwrap_or_else(|_| Err(anyhow::anyhow!("the fetch stopped"))))).collect()
         });
         for (id, name, page) in pages {
             match page {
-                Ok(page) => {
-                    inbox.decisions.extend(page.decisions.into_iter().map(|d| Decision { host: id.clone(), host_name: name.clone(), ..d }));
-                    inbox.lead_handling.extend(page.lead_handling);
-                }
+                Ok(page) => inbox.add(page, &id, &name, &own),
                 Err(e) if e.to_string().contains("404") => inbox.notes.push(format!("{name} runs an older Agenthail without the Inbox.")),
                 Err(_) => inbox.notes.push(format!("{name} isn't answering, so its decisions aren't shown.")),
             }
         }
-        order(&mut inbox.decisions);
+        inbox.settle();
         Ok(inbox)
     }
 }
@@ -256,14 +325,13 @@ mod tests {
         assert_eq!(h[0].title, format!("t{}", HISTORY_KEPT + 2));
     }
 
-    #[test]
-    fn the_inbox_reads_this_computer_and_each_connected_one() {
+    fn serve(routes: Vec<(&'static str, u16, &'static str)>) -> String {
         use std::io::{BufRead, BufReader, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         std::thread::spawn(move || {
-            for _ in 0..4 {
-                let (stream, _) = listener.accept().unwrap();
+            for stream in listener.incoming() {
+                let stream = stream.unwrap();
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
                 let mut line = String::new();
                 reader.read_line(&mut line).unwrap();
@@ -275,20 +343,54 @@ mod tests {
                     }
                 }
                 let path = line.split_whitespace().nth(1).unwrap_or_default().to_string();
-                let (status, body) = match path.as_str() {
-                    "/api/v1/decisions" => (200, r#"{"decisions":[{"group":"waiting","sessionId":"local","since":"2026-11-24T10:00:00Z"}],"leadHandling":[]}"#.to_string()),
-                    "/api/v1/hosts" => (200, r#"{"hosts":[{"id":"h2","name":"forge","state":"connected"},{"id":"h3","name":"old","state":"connected"},{"id":"h4","name":"off","state":"unreachable"}]}"#.to_string()),
-                    "/api/v1/decisions?host=h2" => (200, r#"{"decisions":[{"group":"stopped","sessionId":"remote","workItem":"p-W2"}],"leadHandling":[]}"#.to_string()),
-                    _ => (404, r#"{"error":{"code":"not_found","message":"no"}}"#.to_string()),
-                };
+                let (status, body) = routes.iter().find(|r| r.0 == path).map(|r| (r.1, r.2)).unwrap_or((404, r#"{"error":{"code":"not_found","message":"no"}}"#));
                 let mut stream = stream;
                 write!(stream, "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
             }
         });
+        base
+    }
+
+    #[test]
+    fn the_inbox_reads_this_computer_and_each_connected_one_by_its_own_ids() {
+        let base = serve(vec![
+            ("/api/v1/decisions", 200, r#"{"decisions":[{"group":"waiting","sessionId":"local","since":"2026-11-24T10:00:00Z"}],"leadHandling":[]}"#),
+            ("/api/v1/hosts", 200, r#"{"host":{"id":"h1","name":"studio"},"hosts":[{"id":"h2","name":"forge","state":"connected"},{"id":"h3","name":"old","state":"connected"},{"id":"h4","name":"off","state":"unreachable"},{"id":"h5","name":"legacy","state":"incompatible"}]}"#),
+            (
+                "/api/v1/decisions?host=h2",
+                200,
+                r#"{"decisions":[
+                    {"group":"stopped","kind":"parked","sessionId":"remote","projectId":"p","workItem":"p-W2","reason":"pick a bucket","holdsUp":["w"]},
+                    {"group":"stopped","kind":"parked","sessionId":"remote","projectId":"p","workItem":"p-W3","reason":"pick a bucket"},
+                    {"group":"waiting","sessionId":"h1::local","since":"2026-11-24T10:00:00Z"}],
+                  "leadHandling":[{"sessionId":"crew","heldBy":"lead","reason":"run tests"}]}"#,
+            ),
+        ]);
         let inbox = Client::new(&base, "t").inbox().unwrap();
-        let rows: Vec<(&str, &str)> = inbox.decisions.iter().map(|d| (d.session_id.as_str(), d.host.as_str())).collect();
-        assert_eq!(rows, [("remote", "h2"), ("local", "")]);
-        assert_eq!(inbox.decisions[0].dismissals(), [Dismiss::Parked { work_item: "p-W2", host: "h2" }]);
-        assert_eq!(inbox.notes, ["old runs an older Agenthail without the Inbox."]);
+        let rows: Vec<(&str, &str, &str)> = inbox.decisions.iter().map(|d| (d.session_id.as_str(), d.project_id.as_str(), d.host.as_str())).collect();
+        assert_eq!(rows, [("h2::remote", "h2::p", "h2"), ("local", "", "")]);
+        assert_eq!(inbox.decisions[0].holds_up, ["h2::w"]);
+        assert_eq!(inbox.decisions[0].dismissals(), [Dismiss::Parked { work_item: "p-W2", host: "h2" }, Dismiss::Parked { work_item: "p-W3", host: "h2" }]);
+        assert_eq!(inbox.decisions[0].not_now_label(), "Not now for all 2");
+        assert_eq!(inbox.lead_handling[0].session_id, "h2::crew");
+        assert_eq!(inbox.lead_handling[0].held_by, "h2::lead");
+        assert_eq!(inbox.notes, ["off isn't answering, so its decisions aren't shown.", "legacy runs an older Agenthail without the Inbox.", "old runs an older Agenthail without the Inbox."]);
+    }
+
+    #[test]
+    fn a_missing_computer_list_is_said_not_hidden() {
+        let base = serve(vec![("/api/v1/decisions", 200, r#"{"decisions":[],"leadHandling":[]}"#), ("/api/v1/hosts", 500, r#"{"error":{"code":"internal_error","message":"boom"}}"#)]);
+        let inbox = Client::new(&base, "t").inbox().unwrap();
+        assert!(inbox.decisions.is_empty());
+        assert_eq!(inbox.notes, ["Couldn't list the paired computers, so only this computer's decisions are shown."]);
+    }
+
+    #[test]
+    fn ids_from_another_computer_carry_its_name_unless_they_are_ours() {
+        assert_eq!(qualify("s", "h2", "h1"), "h2::s");
+        assert_eq!(qualify("h1::s", "h2", "h1"), "s");
+        assert_eq!(qualify("h3::s", "h2", "h1"), "h3::s");
+        assert_eq!(qualify("s", "", "h1"), "s");
+        assert_eq!(qualify("", "h2", "h1"), "");
     }
 }

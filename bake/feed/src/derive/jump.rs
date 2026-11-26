@@ -21,8 +21,9 @@ impl World {
     pub fn jump(&self, query: &str, needs: &[Need], hands_on: &[String]) -> Vec<Hit> {
         let q = query.trim().to_lowercase();
         let has = |t: &str| q.is_empty() || t.to_lowercase().contains(&q);
+        let cap = if q.is_empty() { PER_GROUP } else { usize::MAX };
         let mut out = Vec::new();
-        for p in self.projects.iter().filter(|p| has(&p.name)).take(PER_GROUP) {
+        for p in self.projects.iter().filter(|p| has(&p.name)).take(cap) {
             let waiting = needs.iter().filter(|n| n.project_key == p.key).count();
             let moving = p.sessions.iter().filter_map(|id| self.session(id)).filter(|x| busy(x)).count();
             let mut status = Vec::new();
@@ -35,7 +36,7 @@ impl World {
         }
         let mut work: Vec<&Work> = self.work.values().filter(|w| matches!(w.state.as_str(), "in_progress" | "in_review")).filter(|w| has(&w.text) || has(&w.id)).collect();
         work.sort_by(|a, b| phase(b).cmp(&phase(a)).then(b.last_at().cmp(a.last_at())).then(a.id.cmp(&b.id)));
-        for w in work.into_iter().take(PER_GROUP) {
+        for w in work.into_iter().take(cap) {
             let ph = phase(w);
             let whose = if ph == CHECK { "your move".to_string() } else { format!("{}'s move", short_title(&self.whose_move(w), 24)) };
             let project = self.project(&w.project).map(|p| p.name.clone()).unwrap_or_default();
@@ -45,7 +46,7 @@ impl World {
         let mut rest: Vec<&Session> = self.sessions.iter().filter(|x| (x.archived || !hidden(x)) && !hands_on.contains(&x.id)).collect();
         rest.sort_by(|a, b| b.last_active.cmp(&a.last_active));
         sessions.extend(rest);
-        for x in sessions.into_iter().filter(|x| has(&self.title(x)) || has(&x.name) || x.alias.as_deref().is_some_and(has) || has(&x.project_name()) || has(&x.summary())).take(PER_GROUP) {
+        for x in sessions.into_iter().filter(|x| has(&self.title(x)) || has(&x.name) || x.alias.as_deref().is_some_and(has) || has(&x.project_name()) || has(&x.summary())).take(cap) {
             let gist = self.gist(x);
             let state = if busy(x) { "Working" } else { "Idle" };
             let status = if gist == x.display.label { state.to_string() } else { format!("{state} · {}", short_title(&gist, 70)) };

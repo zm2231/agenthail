@@ -113,6 +113,7 @@ pub fn drain(s: &mut crate::App) -> bool {
                 st.acting.remove(&id);
                 match result {
                     Ok(()) => {
+                        st.newest = Some(Instant::now());
                         st.notes.remove(&id);
                         if let Some(inbox) = &mut st.inbox {
                             inbox.decisions.retain(|d| d.id() != id);
