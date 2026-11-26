@@ -55,7 +55,7 @@ func TestUpgradingRecordsTheSenderOfEveryEarlierDeliveryFromThen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := r.MessageSendersSince()
+	created, err := r.MessageSendersSince("target")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestUpgradingRecordsTheSenderOfEveryEarlierDeliveryFromThen(t *testing.T) {
 	if sender, found, err := r.MessageSender(intent.UUID); err != nil || !found || sender != "sender" {
 		t.Fatalf("an earlier delivery's sender=%q found=%v err=%v", sender, found, err)
 	}
-	if upgraded, err := r.MessageSendersSince(); err != nil || !upgraded.After(created) {
+	if upgraded, err := r.MessageSendersSince("target"); err != nil || !upgraded.After(created) {
 		t.Fatalf("recording began %v, created %v: %v", upgraded, created, err)
 	}
 }

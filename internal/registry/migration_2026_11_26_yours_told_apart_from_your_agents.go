@@ -49,13 +49,30 @@ func (r *Registry) MessageSender(messageID string) (sender string, found bool, e
 	return sender, err == nil, err
 }
 
-// MessageSendersSince is when Agenthail began recording the sender of every
-// message it sends. A message a provider recorded before then may have come
-// from Agenthail without an id.
-func (r *Registry) MessageSendersSince() (time.Time, error) {
+// MessageSendersSince is when this host began recording the sender of every
+// message it sends to the session: when Agenthail began recording them, or
+// when the session last moved here from another host, whichever is later. A
+// message the provider recorded before then may have come from Agenthail
+// without an id, or under an id another host recorded.
+func (r *Registry) MessageSendersSince(session string) (time.Time, error) {
 	var at int64
 	if err := r.read.QueryRow(`SELECT applied_at_ms FROM schema_migrations WHERE name=?`, messageSendersMigration).Scan(&at); err != nil {
 		return time.Time{}, err
 	}
-	return time.UnixMilli(at), nil
+	since := time.UnixMilli(at)
+	var arrived sql.NullString
+	if err := r.read.QueryRow(`SELECT MAX(created_at) FROM session_moves WHERE conversation=? AND role='in' AND state=?`, session, MoveResumed).Scan(&arrived); err != nil {
+		return time.Time{}, err
+	}
+	if !arrived.Valid {
+		return since, nil
+	}
+	moved, err := parseTimestamp(arrived.String)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if moved.After(since) {
+		return moved, nil
+	}
+	return since, nil
 }
