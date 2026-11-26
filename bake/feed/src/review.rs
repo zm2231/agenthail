@@ -48,8 +48,9 @@ pub fn target(d: &Decision) -> Option<Target> {
 }
 
 pub fn of_work(listed: &[Decision], w: &Work) -> Option<Decision> {
-    let key = key(&w.project, &w.id);
-    listed.iter().find(|d| d.is_review() && (d.key == key || target(d).is_some_and(|t| t.ledger_key == w.project && t.work_item == w.id))).cloned()
+    let ledger_key = crate::catalog::ledger_key(&w.project);
+    let key = key(&ledger_key, &w.id);
+    listed.iter().find(|d| d.is_review() && (d.key == key || target(d).is_some_and(|t| t.ledger_key == ledger_key && t.work_item == w.id))).cloned()
 }
 
 pub fn note_problem(note: &str) -> Option<&'static str> {
@@ -171,9 +172,14 @@ mod tests {
     #[test]
     fn the_work_screen_acts_only_on_a_review_listed_for_the_person() {
         let w = Work { id: "p-W6".into(), text: "Wire review".into(), assignee: Some("holder".into()), project: "p-1".into(), ..Default::default() };
-        let listed = vec![Decision { host: "h2".into(), ..decision(r#"{"group":"review","key":"review:p-1:p-W6","sessionId":"h2::holder","workItem":"p-W6","ledgerKey":"p-1"}"#) }];
+        let listed = vec![Decision { host: "h2".into(), ..decision(r#"{"group":"review","key":"review:project:p-1:p-W6","sessionId":"h2::holder","workItem":"p-W6","ledgerKey":"project:p-1"}"#) }];
         assert_eq!(target(&of_work(&listed, &w).unwrap()).unwrap().host, "h2");
-        let other = vec![Decision { key: "review:p-0:p-W6".into(), ledger_key: "p-0".into(), ..listed[0].clone() }];
+        let unkeyed = vec![Decision { key: "review:project:p-1:p-W6".into(), ledger_key: String::new(), ..listed[0].clone() }];
+        assert_eq!(target(&of_work(&unkeyed, &w).unwrap()).unwrap().ledger_key, "project:p-1");
+        let repo = Work { project: "repo:github.com/o/r".into(), ..w.clone() };
+        let repo_listed = vec![Decision { key: "review:repo:github.com/o/r:p-W6".into(), ledger_key: "repo:github.com/o/r".into(), ..listed[0].clone() }];
+        assert!(of_work(&repo_listed, &repo).is_some());
+        let other = vec![Decision { key: "review:project:p-0:p-W6".into(), ledger_key: "project:p-0".into(), ..listed[0].clone() }];
         assert_eq!(of_work(&other, &w), None);
         assert_eq!(of_work(&[], &w), None);
     }
