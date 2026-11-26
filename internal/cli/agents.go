@@ -35,7 +35,7 @@ func (a *App) cmdAgents(args []string) error {
 }
 
 func (a *App) agentStatuses() ([]surface.AgentStatus, error) {
-	config, err := dashconfig.Load()
+	config, err := dashconfig.LoadAgentModes()
 	if err != nil {
 		return nil, err
 	}

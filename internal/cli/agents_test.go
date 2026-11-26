@@ -3,9 +3,12 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -87,5 +90,28 @@ func TestAgentsUseRefusesAnUnknownAgentOrSetting(t *testing.T) {
 	}
 	if err := app.Run([]string{"agents", "use", "codex", "disabled"}); err == nil || !strings.Contains(err.Error(), "auto, on or off") {
 		t.Fatalf("unknown setting: %v", err)
+	}
+}
+
+func TestAgentsReadTheirSettingDespiteAnUnrelatedMistakeInTheSettingsFile(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindCodex}
+	app, _ := cliFixture(t, fake)
+	app.Surfaces[0].Surface = absentCLIAgent{&runtimeCLISurface{cliSurface: fake}}
+	if err := os.MkdirAll(filepath.Dir(dashconfig.Path()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dashconfig.Path(), []byte(`{"codexRecentHours":9999,"agentModes":{"codex":"off"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output, err := captureStdout(t, func() error { return app.Run([]string{"agents", "--json"}) })
+	var listing struct {
+		Agents []surface.AgentStatus `json:"agents"`
+	}
+	if err != nil || json.Unmarshal([]byte(output), &listing) != nil || len(listing.Agents) != 1 || listing.Agents[0].State != surface.AgentOff {
+		t.Fatalf("agents --json: err=%v output=%s", err, output)
+	}
+	result, _ := runDoctorForAgent(t, app)
+	if !result.OK || result.AgentOff == "" {
+		t.Fatalf("doctor: %+v", result)
 	}
 }
