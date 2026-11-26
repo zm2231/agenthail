@@ -300,6 +300,9 @@ impl TranscriptView {
                 div().text_size(px(ty::META)).text_color(palette.muted).child(text.clone()).into_any_element()
             }
             Kind::Instructions(_) => div().text_size(px(ty::META)).text_color(palette.muted).child("Instructions").into_any_element(),
+            Kind::Image(_) => div().text_size(px(ty::META)).text_color(palette.muted).child("Image attached").into_any_element(),
+            Kind::File(item) => div().text_size(px(ty::META)).text_color(palette.muted).child(feed::attach::sent_name(item)).into_any_element(),
+            Kind::Files(files) => div().text_size(px(ty::META)).text_color(palette.muted).child(files.iter().map(|f| f.name.as_str()).collect::<Vec<_>>().join(", ")).into_any_element(),
             Kind::Unknown { title, .. } => div().text_size(px(ty::META)).text_color(palette.muted).child(title.clone()).into_any_element(),
         };
         row.child(body).into_any_element()

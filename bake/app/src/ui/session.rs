@@ -35,8 +35,9 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
         .color(theme::text())
         .placeholder(format!("Message {}", x.title()), faint())
         .on_edit(|s: &mut App| &mut s.composer)
+        .on_input_paste(|s: &mut App, content, _: &mut Tx| super::attach::paste(s, content))
         .on_submit(|s: &mut App, tx: &mut Tx| send(s, tx));
-    let ready = !s.composer.text.trim().is_empty();
+    let ready = !s.composer.text.trim().is_empty() || super::attach::has(s, &x.id);
     let send_button = col()
         .key("send")
         .size(30.0, 30.0)
@@ -55,7 +56,7 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
         Some(note) => text(note).font(META).color(if unsent { attention() } else { muted() }),
         None => text(crate::send_busy(s, &x.id).map(|b| b.hint()).unwrap_or("Return to send · Shift-Return for a new line")).font(META).color(faint()),
     };
-    let mut controls = row().w_full().px(10.0).pb(10.0).gap(8.0).items_center().child(chip(&icons::SPARKLES, x.surface.clone()));
+    let mut controls = row().w_full().px(10.0).pb(10.0).gap(8.0).items_center().children(super::attach::button(s, &x.id)).child(chip(&icons::SPARKLES, x.surface.clone()));
     if let Some(choice) = busy {
         let id = x.id.clone();
         controls = controls.child(
@@ -109,9 +110,10 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
         .radius(18.0)
         .backdrop_blur(22.0)
         .fill(card().alpha(0.78))
-        .border(1.0, Color::WHITE.alpha(0.10))
+        .border(if s.attach.dropping { 1.5 } else { 1.0 }, if s.attach.dropping { accent() } else { Color::WHITE.alpha(0.10) })
         .shadow(10.0, 34.0, Color::BLACK.alpha(0.45))
         .children(crate::ui::queue::dock(s, x))
+        .children(super::attach::chips(s, &x.id).map(|c| col().w_full().px(12.0).pt(10.0).child(c)))
         .child(col().w_full().px(16.0).pt(13.0).pb(4.0).child(input))
         .child(controls.child(send_button));
     col().w_full().items_center().px(28.0).pb(18.0).mt(-120.0).child(box_el)
@@ -228,7 +230,7 @@ pub(crate) fn session_screen(s: &App) -> El {
         };
         center = center.child(col().w_full().items_center().px(32.0).pb(12.0).child(pill(glyph, label, color)));
     }
-    conversation(s, &id, center).child(composer(s, x))
+    super::attach::drop_target(conversation(s, &id, center).child(composer(s, x)))
 }
 
 pub(crate) fn conversation(s: &App, id: &str, center: El) -> El {

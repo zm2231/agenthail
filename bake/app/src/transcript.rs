@@ -159,6 +159,7 @@ pub struct Cx<'a> {
     pub block: &'a str,
     pub pane: &'a Pane,
     pub open: &'a std::collections::HashSet<String>,
+    pub app: &'a App,
 }
 
 const SHOWN_BODY: usize = 20_000;
@@ -394,6 +395,9 @@ fn block_el(cx: &Cx, block: &Block, open: bool, gap: f32, last: bool) -> El {
         }
         Kind::Annotation(note) | Kind::Notice(note) => row().gap(6.0).child(text(note.clone()).font(META).color(faint()).wrap()),
         Kind::Instructions(_) => row().gap(6.0).items_center().child(icon(&icons::LAYERS, 12.0).color(faint())).child(text("Instructions").font(META).color(faint())),
+        Kind::Image(attachment) => crate::ui::attach::image_el(cx.app, cx.session, attachment),
+        Kind::File(item) => crate::ui::attach::file_el(cx.app, cx.session, item),
+        Kind::Files(files) => crate::ui::attach::files_el(cx.app, &block.id, files),
         Kind::Unknown { title, .. } => col().child(text(title.clone()).font(META).color(faint())),
     };
     let mut row_el = col().w_full().max_w(780.0).px(36.0).pt(gap).child(body);
@@ -501,9 +505,10 @@ pub fn view(s: &App, id: &str) -> El {
             let open = s.open.contains(&block.id);
             let last = i + 1 == pane.blocks.len() && pane.transcript.turn_open;
             let gap = gap_for(&pane.blocks, i);
-            let cx = Cx { session: &key, block: &block.id, pane, open: &s.open };
+            let cx = Cx { session: &key, block: &block.id, pane, open: &s.open, app: s };
             let images = match (&block.kind, block.id.strip_prefix("item:")) {
                 (Kind::User(_), Some(item)) => pane.transcript.images_with(item),
+                (Kind::Image(_) | Kind::File(_) | Kind::Files(_), _) => s.attach.rev as usize,
                 _ => 0,
             };
             memo(&block.id, (pane.revs[i], open, last, gap.to_bits(), images), || block_el(&cx, block, open, gap, last))

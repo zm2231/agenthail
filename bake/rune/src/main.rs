@@ -249,6 +249,9 @@ fn block_el(block: &Block, open: bool, gap: f32, last: bool) -> El {
         }
         Kind::Annotation(note) | Kind::Notice(note) => col().child(text(note.clone()).font(META).color(t.text_secondary).wrap()),
         Kind::Instructions(_) => col().child(text("Instructions").font(META).color(t.text_secondary)),
+        Kind::Image(_) => col().child(text("Image attached").font(META).color(t.text_secondary)),
+        Kind::File(item) => col().child(text(feed::attach::sent_name(item)).font(META).color(t.text_secondary)),
+        Kind::Files(files) => col().child(text(files.iter().map(|f| f.name.as_str()).collect::<Vec<_>>().join(", ")).font(META).color(t.text_secondary)),
         Kind::Unknown { title, .. } => col().child(text(title.clone()).font(META).color(t.text_secondary)),
     };
     let row = col().w_full().max_w(860.0).px(20.0).pt(gap).child(body);

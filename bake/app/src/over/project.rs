@@ -209,7 +209,7 @@ pub fn lead(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>) -> El {
                 .child(col().gap(1.0).child(text(format!("{}, the lead", p.lead_name)).font(BODY_MED).color(strong())).child(text(s.ov.d.session(lead).map(|x| s.ov.d.gist(x)).unwrap_or_default()).font(META).color(weak()).truncate().max_w(620.0)))
                 .child(ui::spacer())
                 .child(Button::new("Workers").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).icon(&icons::BULLET_LIST).on_press_tx(|s: &mut App, tx: &mut Tx| crate::over::open_jump(s, tx)).build(kit()));
-            col()
+            crate::ui::attach::drop_target(col()
                 .w_full()
                 .h_full()
                 .items_center()
@@ -217,7 +217,7 @@ pub fn lead(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>) -> El {
                 .children(crate::over::decisions::brief_note(s, key).map(|n| row().w_full().px(28.0).py(8.0).border_sides([0.0, 0.0, 1.0, 0.0], ui::rule()).child(n)))
                 .child(lead_chat(s, lead))
                 .child(waiting_line(s, lead))
-                .child(composer(s, &format!("Tell {}…", p.lead_name), lead))
+                .child(composer(s, &format!("Tell {}…", p.lead_name), lead)))
         }
         None => col().w_full().h_full().center().gap(8.0).child(text("This project has no lead yet.".to_string()).font(BODY_MED).color(weak())).children(crate::over::decisions::brief_note(s, key)),
     };
@@ -332,12 +332,14 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
         .color(strong())
         .placeholder(placeholder.to_string(), weak())
         .on_edit(|s: &mut App| &mut s.composer)
+        .on_input_paste(|s: &mut App, content, _: &mut Tx| crate::ui::attach::paste(s, content))
         .on_submit(move |s: &mut App, tx: &mut Tx| crate::send_to(s, &to, tx));
     let status = crate::composer_note(s, lead).or_else(|| crate::send_busy(s, lead).map(|b| b.hint().to_string())).unwrap_or_else(|| "Sends as you".into());
     let controls = row()
         .w_full()
         .items_center()
         .gap(6.0)
+        .children(crate::ui::attach::button(s, lead))
         .child(ui::spacer())
         .child(text(status).font(META).color(weak()));
     let controls = match crate::busy_delivery(s, lead) {
@@ -374,5 +376,5 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
         .max_w(780.0)
         .px(28.0)
         .pb(16.0)
-        .child(col().w_full().gap(8.0).padding(12.0).radius(14.0).fill(k.c.surface_raised).border(1.0, ui::edge()).child(input).child(controls))
+        .child(col().w_full().gap(8.0).padding(12.0).radius(14.0).fill(k.c.surface_raised).border(1.0, if s.attach.dropping { crate::theme::accent() } else { ui::edge() }).children(crate::ui::attach::chips(s, lead)).child(input).child(controls))
 }
