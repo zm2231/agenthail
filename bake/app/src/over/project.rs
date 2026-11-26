@@ -350,7 +350,7 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
     };
     let controls = if crate::unsent_held(s, lead) {
         let back = lead.to_string();
-        controls.child(Button::new("Put back").variant(ButtonVariant::Ghost).build(k).key("send-put-back").on_press(move |s: &mut App| crate::put_back_unsent(s, &back)))
+        controls.child(Button::new(crate::put_back_label(s, &back)).variant(ButtonVariant::Ghost).build(k).key("send-put-back").on_press(move |s: &mut App| crate::put_back_unsent(s, &back)))
     } else {
         controls
     };

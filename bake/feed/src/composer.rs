@@ -143,6 +143,14 @@ impl Unsent {
         Some(Unsent { session, text, key, busy, maybe_delivered, error: value["error"].as_str().unwrap_or_default().to_string(), tries })
     }
 
+    pub fn failed(self, maybe_delivered: bool, error: String) -> Unsent {
+        if self.tries == 0 {
+            return Unsent { maybe_delivered, error, ..self };
+        }
+        let tries = if maybe_delivered { self.tries } else { self.tries - 1 };
+        Unsent { maybe_delivered: true, tries, error, ..self }
+    }
+
     pub fn quoted(&self) -> String {
         let line = self.text.lines().next().unwrap_or_default();
         let short: String = line.chars().take(48).collect();
@@ -352,6 +360,18 @@ mod tests {
         let bare = Unsent::from_json("s1", &json!({"text": "hi", "key": "k"})).unwrap();
         assert!(bare.maybe_delivered);
         assert_eq!(bare.session, "s1");
+    }
+
+    #[test]
+    fn a_retry_that_never_left_keeps_the_first_sends_doubt() {
+        let first = unsent("k1", "hello", true).failed(false, "connection refused".into());
+        assert!(!first.maybe_delivered);
+        let retry = Unsent { tries: 1, ..unsent("k1", "hello", true) };
+        let refused = retry.clone().failed(false, "connection refused".into());
+        assert!(refused.maybe_delivered && refused.reuses_key(), "{refused:?}");
+        let unknown = retry.failed(true, "timeout".into());
+        assert!(unknown.maybe_delivered && !unknown.reuses_key());
+        assert_eq!(unknown.error, "timeout");
     }
 
     #[test]

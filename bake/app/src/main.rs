@@ -71,6 +71,7 @@ pub struct App {
     pub drafts: Drafts,
     pub unsent: Unconfirmed,
     pub in_flight: HashMap<String, Vec<Unsent>>,
+    confirm_put_back: HashSet<String>,
     pub queued: HashMap<String, Vec<(u64, Delivered)>>,
     snapshots: u64,
     queue_rows: Vec<feed::catalog::QueueRow>,
@@ -157,6 +158,7 @@ fn init() -> App {
         drafts: Drafts::default(),
         unsent: Unconfirmed::default(),
         in_flight: HashMap::new(),
+        confirm_put_back: HashSet::new(),
         queued: HashMap::new(),
         snapshots: 0,
         queue_rows: Vec::new(),
@@ -514,7 +516,14 @@ pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
 
 pub fn put_back_unsent(s: &mut App, id: &str) {
     let Some(unsent) = s.unsent.latest(id).cloned() else { return };
+    if unsent.maybe_delivered && s.confirm_put_back.insert(id.to_string()) {
+        return;
+    }
+    s.confirm_put_back.remove(id);
     s.unsent.remove(id, &unsent.key);
+    if unsent.maybe_delivered {
+        note(s, id, "Put back. It may already have arrived.".into());
+    }
     let merged = feed::composer::put_back(shown_text(s, id), &unsent.text);
     if s.composer_for.as_deref() == Some(id) {
         s.composer = TextEdit::new(merged.as_str());
@@ -528,7 +537,12 @@ pub fn unsent_held(s: &App, id: &str) -> bool {
     s.unsent.latest(id).is_some_and(|u| shown_text(s, id).trim() != u.text)
 }
 
+pub fn put_back_label(s: &App, id: &str) -> &'static str {
+    if s.confirm_put_back.contains(id) { "It may already have arrived. Put back?" } else { "Put back" }
+}
+
 pub fn dismiss_unsent(s: &mut App, id: &str) {
+    s.confirm_put_back.remove(id);
     if let Some(key) = s.unsent.latest(id).map(|u| u.key.clone()) {
         s.unsent.remove(id, &key);
         over::layout::save(s);
@@ -542,6 +556,7 @@ fn fresh(s: &App, id: &str, text: String) -> Unsent {
 fn dispatch(s: &mut App, id: &str, pending: Unsent, resent: bool, tx: &mut Tx) {
     let Some(client) = s.client.clone() else { return };
     let id = id.to_string();
+    s.confirm_put_back.remove(&id);
     s.in_flight.entry(id.clone()).or_default().push(pending.clone());
     if s.composer_for.as_deref() == Some(id.as_str()) {
         s.drafts.set(&id, &s.composer.text);
@@ -673,7 +688,7 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, result: Result<Delivered,
     };
     if let Some((maybe_delivered, error)) = failure {
         put_back(s, &id, &pending.text);
-        s.unsent.add(&id, Unsent { maybe_delivered, error, ..pending });
+        s.unsent.add(&id, pending.failed(maybe_delivered, error));
     }
 }
 
