@@ -2,6 +2,7 @@ use std::ops::Range;
 
 use serde::Deserialize;
 use serde_json::{Value, json};
+use time::OffsetDateTime;
 
 use crate::catalog::{Capabilities, Client, RespondError, Session, enc};
 
@@ -340,10 +341,11 @@ pub struct Prompt {
     pub text: String,
 }
 
-pub fn sent_texts(local: &[String], recorded: &[Prompt]) -> Vec<String> {
-    let mut out: Vec<String> = local.iter().filter(|t| !recorded.iter().any(|p| &p.text == *t)).cloned().collect();
-    out.extend(recorded.iter().map(|p| p.text.clone()));
-    out
+pub fn sent_texts(local: &[(String, OffsetDateTime)], recorded: &[Prompt]) -> Vec<String> {
+    let mut all: Vec<(OffsetDateTime, &str)> = local.iter().map(|(t, at)| (*at, t.as_str())).collect();
+    all.extend(recorded.iter().map(|p| (crate::catalog::parse_time(&p.ts).unwrap_or(OffsetDateTime::UNIX_EPOCH), p.text.as_str())));
+    all.sort_by(|a, b| b.0.cmp(&a.0));
+    all.into_iter().map(|(_, t)| t.to_string()).collect()
 }
 
 pub fn distinct(prompts: Vec<Prompt>) -> Vec<Prompt> {
@@ -592,7 +594,7 @@ mod tests {
     fn history_steps_back_and_returns_to_the_draft() {
         let mut h = History::default();
         assert_eq!(h.older("draft"), None);
-        h.replace(sent_texts(&["just sent".into()], &[prompt("second", Some("t2")), prompt("first", None), prompt("second", None), prompt(" ", None)]));
+        h.replace(sent_texts(&[("just sent".into(), OffsetDateTime::now_utc())], &[prompt("second", Some("t2")), prompt("first", None), prompt("second", None), prompt(" ", None)]));
         assert_eq!(h.older("half typed").as_deref(), Some("just sent"));
         assert!(h.browsing());
         assert_eq!(h.older("ignored").as_deref(), Some("second"));
@@ -610,7 +612,17 @@ mod tests {
         h.older("y");
         h.stop();
         assert!(!h.browsing());
-        assert_eq!(sent_texts(&["second".into()], &[prompt("second", None)]), vec!["second".to_string()]);
+        let at = |ts: &str| crate::catalog::parse_time(ts).unwrap();
+        let stamped = |text: &str, ts: &str| Prompt { ts: ts.into(), ..prompt(text, None) };
+        let recorded = [stamped("b", "2026-11-26T10:02:00Z"), stamped("a", "2026-11-26T10:01:00Z")];
+        let mut again = History::default();
+        again.replace(sent_texts(&[("a".into(), at("2026-11-26T10:03:00Z"))], &recorded));
+        assert_eq!(again.older("").as_deref(), Some("a"), "sending an older prompt again makes it the newest");
+        assert_eq!(again.older("").as_deref(), Some("b"));
+        assert_eq!(again.older(""), None);
+        let mut later = History::default();
+        later.replace(sent_texts(&[("a".into(), at("2026-11-26T10:00:00Z"))], &recorded));
+        assert_eq!(later.older("").as_deref(), Some("b"), "a prompt recorded since comes first");
         assert_eq!(distinct(vec![prompt("a", None), prompt("a", Some("t")), prompt("b", None)]).len(), 2);
         assert!(forkable(&prompt("a", Some("t1"))) && !forkable(&prompt("a", Some(""))) && !forkable(&prompt("a", None)));
     }
