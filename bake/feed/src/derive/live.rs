@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 
 use crate::catalog::{Client, Session, parse_time};
+use crate::menu::Patch;
 use crate::derive::tails::{self, Tail, Tails};
 use crate::derive::world::{Actor, Recorded, Rows, Work, World};
 use crate::item::Item;
@@ -13,6 +14,7 @@ use crate::item::Item;
 const LEDGER_WINDOW_H: f64 = 72.0;
 const DONE_KEPT: usize = 40;
 const RECENT_DAYS: i64 = 4;
+pub const EXPECT_HOLD: std::time::Duration = std::time::Duration::from_secs(15);
 
 pub struct Fetched {
     pub recorded: Recorded,
@@ -110,6 +112,7 @@ pub struct Overview {
     covered: HashSet<String>,
     pending: HashSet<String>,
     tails: Tails,
+    expected: Vec<(String, Patch, Instant)>,
 }
 
 fn newer(at: &str, than: &str) -> bool {
@@ -137,6 +140,7 @@ impl Overview {
         }
         self.base.updated_at = at.to_string();
         self.base.sessions = sessions;
+        self.reconcile();
         self.stale = true;
         true
     }
@@ -145,15 +149,26 @@ impl Overview {
         self.stale
     }
 
-    /// A change the daemon confirmed at `at` holds until a snapshot taken after it.
-    pub fn patch(&mut self, id: &str, patch: &crate::menu::Patch, at: &str) -> bool {
-        let Some(x) = self.base.sessions.iter_mut().find(|x| x.id == id) else { return false };
-        patch.apply(x);
-        if newer(at, &self.base.updated_at) {
-            self.base.updated_at = at.to_string();
-        }
+    /// The daemon can publish a row read before a confirmed change; hold it until shown.
+    pub fn patch(&mut self, id: &str, patch: Patch, at: Instant) -> bool {
+        self.expected.retain(|(other, p, _)| !(other == id && p.same_field(&patch)));
+        self.expected.push((id.to_string(), patch, at));
+        let before = self.base.sessions.clone();
+        self.reconcile();
         self.stale = true;
-        true
+        self.base.sessions != before
+    }
+
+    fn reconcile(&mut self) {
+        let sessions = &mut self.base.sessions;
+        self.expected.retain(|(id, patch, at)| {
+            let Some(x) = sessions.iter_mut().find(|x| x.id == *id) else { return false };
+            if patch.shown(x) || at.elapsed() >= EXPECT_HOLD {
+                return false;
+            }
+            patch.apply(x);
+            true
+        });
     }
 
     pub fn refresh(&mut self, fetched: Fetched) {
@@ -165,6 +180,7 @@ impl Overview {
         let actors = std::mem::replace(&mut recorded.actors, std::mem::take(&mut self.base.actors));
         recorded.transcripts = std::mem::take(&mut self.base.transcripts);
         self.base = recorded;
+        self.reconcile();
         self.stale = true;
         self.take_actors(started, actors);
         self.covered = ledgers.keys().cloned().collect();

@@ -312,7 +312,7 @@ fn patch_of(act: &Act, read: Option<feed::action::ReadState>) -> Option<Patch> {
 }
 
 fn land(s: &mut App, id: &str, patch: Patch) {
-    if s.ov.live.patch(id, &patch, &stamp()) {
+    if s.ov.live.patch(id, patch, Instant::now()) {
         s.sessions = s.ov.live.sessions().to_vec();
     }
 }
@@ -411,6 +411,12 @@ pub fn drain(s: &mut App) -> bool {
     while let Ok(done) = s.menus.rx.try_recv() {
         changed = true;
         settled(s, done);
+    }
+    if let Some((id, key)) = s.menus.chip.clone()
+        && !chips_for(s, &id).iter().any(|c| c.key == key && c.changeable)
+    {
+        s.menus.chip = None;
+        changed = true;
     }
     refresh_shown(s);
     changed

@@ -173,17 +173,42 @@ fn a_burst_of_arrivals_leaves_one_rebuild_pending() {
 }
 
 #[test]
-fn a_confirmed_change_shows_until_a_later_snapshot_says_otherwise() {
+fn a_confirmed_change_outlasts_a_stale_row_until_the_daemon_shows_it() {
     use crate::menu::Patch;
     let mut ov = Overview::default();
     assert!(ov.take_sessions("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
-    assert!(ov.patch("a", &Patch::Alias(Some("scout".into())), "2026-11-24T12:00:05Z"));
-    assert!(ov.stale());
+    assert!(ov.patch("a", Patch::Alias(Some("scout".into())), Instant::now()));
     let w = ov.world(&[]);
-    assert_eq!(w.title(w.session("a").unwrap()), "@scout");
-    assert!(!ov.take_sessions("2026-11-24T12:00:04Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]), "a snapshot from before the change");
-    assert_eq!(ov.sessions()[0].alias.as_deref(), Some("scout"));
-    assert!(ov.take_sessions("2026-11-24T12:00:06Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
-    assert_eq!(ov.sessions()[0].alias, None, "the daemon's later word wins");
-    assert!(!ov.patch("missing", &Patch::Archived(true), "2026-11-24T12:00:07Z"));
+    assert_eq!(w.title(w.session("a").unwrap()), "@scout", "names follow the change");
+    assert!(ov.take_sessions("2026-11-24T12:00:04Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert_eq!(ov.sessions()[0].alias.as_deref(), Some("scout"), "a row read before the change");
+    let mut shown = session("a", "p", "2026-11-24T11:00:00Z", "idle");
+    shown.alias = Some("scout".into());
+    assert!(ov.take_sessions("2026-11-24T12:00:06Z", vec![shown]));
+    assert!(ov.take_sessions("2026-11-24T12:00:08Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert_eq!(ov.sessions()[0].alias, None, "once shown, the daemon's later word wins");
+}
+
+#[test]
+fn a_change_the_daemon_never_shows_gives_way() {
+    use crate::menu::Patch;
+    let mut ov = Overview::default();
+    assert!(ov.take_sessions("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    let long_ago = Instant::now().checked_sub(super::live::EXPECT_HOLD).unwrap();
+    assert!(!ov.patch("a", Patch::Archived(true), long_ago), "an expired change is not shown");
+    assert!(!ov.sessions()[0].archived);
+    assert!(!ov.patch("missing", Patch::Archived(true), Instant::now()));
+}
+
+#[test]
+fn a_late_confirmation_does_not_undo_what_the_daemon_already_shows() {
+    use crate::menu::Patch;
+    let mut ov = Overview::default();
+    let mut pinned = session("a", "p", "2026-11-24T11:00:00Z", "idle");
+    pinned.pinned_at = Some("2026-11-24T12:00:01Z".into());
+    assert!(ov.take_sessions("2026-11-24T12:00:02Z", vec![pinned]));
+    assert!(!ov.patch("a", Patch::Pinned(Some("2026-11-24T12:00:03Z".into())), Instant::now()));
+    assert_eq!(ov.sessions()[0].pinned_at.as_deref(), Some("2026-11-24T12:00:01Z"));
+    assert!(ov.take_sessions("2026-11-24T12:00:04Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(ov.sessions()[0].pinned_at.is_none(), "an unpin after it wins");
 }

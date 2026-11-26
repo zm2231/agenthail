@@ -42,6 +42,20 @@ impl Patch {
             Patch::Alias(alias) => x.alias = alias.clone(),
         }
     }
+
+    /// A read receipt for an older revision is settled by the daemon's newer one.
+    pub fn shown(&self, x: &Session) -> bool {
+        match self {
+            Patch::Pinned(at) => x.pinned_at.is_some() == at.is_some(),
+            Patch::Archived(on) => x.archived == *on,
+            Patch::Read(state) => x.read_state.as_ref().is_none_or(|r| r.revision != state.revision || r.first_unread.is_empty() == state.first_unread.is_empty()),
+            Patch::Alias(alias) => x.alias == *alias,
+        }
+    }
+
+    pub fn same_field(&self, other: &Patch) -> bool {
+        std::mem::discriminant(self) == std::mem::discriminant(other)
+    }
 }
 
 impl Session {
@@ -217,6 +231,18 @@ mod tests {
         Patch::Alias(None).apply(&mut x);
         assert!(!x.pinned());
         assert_eq!(x.alias, None);
+    }
+
+    #[test]
+    fn a_read_receipt_is_settled_by_the_same_state_or_a_newer_revision() {
+        let mut x = session();
+        let read = Patch::Read(ReadState { first_unread: String::new(), revision: "r2".into() });
+        x.read_state = Some(ReadState { first_unread: "item-1".into(), revision: "r2".into() });
+        assert!(!read.shown(&x));
+        x.read_state = Some(ReadState { first_unread: "item-7".into(), revision: "r3".into() });
+        assert!(read.shown(&x));
+        x.read_state = Some(ReadState { first_unread: String::new(), revision: "r2".into() });
+        assert!(read.shown(&x));
     }
 
     #[test]
