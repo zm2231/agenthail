@@ -34,7 +34,7 @@ pub enum Patch {
     Archived(bool),
     Read { receipt: ReadState, from: Vec<String> },
     Alias(Option<String>),
-    Prs(Vec<crate::catalog::Pr>),
+    Pr { pr: crate::catalog::Pr, linked: bool },
 }
 
 impl Patch {
@@ -44,7 +44,11 @@ impl Patch {
             Patch::Archived(on) => x.archived = *on,
             Patch::Read { receipt, .. } => x.read_state = Some(receipt.clone()),
             Patch::Alias(alias) => x.alias = alias.clone(),
-            Patch::Prs(prs) => x.prs = prs.clone(),
+            Patch::Pr { pr, linked: true } => match x.prs.iter_mut().find(|p| p.url == pr.url) {
+                Some(shown) => shown.watch = pr.watch,
+                None => x.prs.push(pr.clone()),
+            },
+            Patch::Pr { pr, linked: false } => x.prs.retain(|p| p.url != pr.url),
         }
     }
 
@@ -55,11 +59,17 @@ impl Patch {
             Patch::Archived(on) => x.archived == *on,
             Patch::Read { from, .. } => x.read_state.as_ref().is_none_or(|r| !from.contains(&r.revision)),
             Patch::Alias(alias) => x.alias == *alias,
-            Patch::Prs(prs) => x.prs == *prs,
+            Patch::Pr { pr, linked } => match x.prs.iter().find(|p| p.url == pr.url) {
+                Some(shown) => *linked && shown.watch == pr.watch,
+                None => !linked,
+            },
         }
     }
 
     pub fn same_field(&self, other: &Patch) -> bool {
+        if let (Patch::Pr { pr: a, .. }, Patch::Pr { pr: b, .. }) = (self, other) {
+            return a.url == b.url;
+        }
         std::mem::discriminant(self) == std::mem::discriminant(other)
     }
 
@@ -87,7 +97,10 @@ impl Patch {
             Patch::Archived(_) => x.archived = daemon.archived,
             Patch::Read { .. } => x.read_state = daemon.read_state.clone(),
             Patch::Alias(_) => x.alias = daemon.alias.clone(),
-            Patch::Prs(_) => x.prs = daemon.prs.clone(),
+            Patch::Pr { pr, .. } => {
+                x.prs.retain(|p| p.url != pr.url);
+                x.prs.extend(daemon.prs.iter().filter(|p| p.url == pr.url).cloned());
+            }
         }
     }
 }

@@ -3,6 +3,10 @@ use serde_json::{Value, json};
 
 use crate::catalog::{Client, RespondError, enc};
 
+fn list<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Vec<T>, D::Error> {
+    Ok(Option::<Vec<T>>::deserialize(d)?.unwrap_or_default())
+}
+
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Meter {
@@ -32,7 +36,7 @@ pub struct ProxyAccount {
     pub routed: bool,
     #[serde(default)]
     pub set_on: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "list")]
     pub meters: Vec<Meter>,
 }
 
@@ -63,13 +67,13 @@ pub struct Set {
     pub account: String,
     #[serde(default)]
     pub login: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "list")]
     pub meters: Vec<Meter>,
     #[serde(default)]
     pub problem: String,
     #[serde(default)]
     pub proxy: Option<Proxy>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "list")]
     pub accounts: Vec<ProxyAccount>,
     #[serde(default)]
     pub proxy_problem: String,
@@ -77,7 +81,13 @@ pub struct Set {
 
 impl Set {
     pub fn title(&self) -> String {
-        [&self.login, &self.account, &self.name].into_iter().find(|t| !t.is_empty()).cloned().unwrap_or_else(|| self.provider.clone())
+        match self.provider.as_str() {
+            "codex" => "Codex".into(),
+            "" => self.host.clone(),
+            _ if !self.account.is_empty() => self.account.clone(),
+            _ if !self.name.is_empty() => self.name.clone(),
+            _ => "Claude".into(),
+        }
     }
 }
 
@@ -162,9 +172,9 @@ pub struct Named {
 pub struct PlanHost {
     #[serde(default)]
     pub host: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "list")]
     pub roots: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "list")]
     pub sessions: Vec<Named>,
 }
 
@@ -173,17 +183,17 @@ pub struct PlanHost {
 pub struct Plan {
     #[serde(default)]
     pub set: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "list")]
     pub changes: Vec<Change>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "list")]
     pub release: Vec<Named>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "list")]
     pub hosts: Vec<PlanHost>,
     #[serde(default)]
     pub nothing: Option<String>,
     #[serde(default)]
     pub confirm: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "list")]
     pub warnings: Vec<String>,
     #[serde(default)]
     pub plan_id: String,
@@ -239,7 +249,7 @@ impl Plan {
 
 impl Client {
     pub fn usage_sets(&self) -> anyhow::Result<Vec<Set>> {
-        Ok(serde_json::from_value(self.get_json("/api/v1/usage")?["sets"].clone()).unwrap_or_default())
+        Ok(serde_json::from_value::<Option<Vec<Set>>>(self.get_json("/api/v1/usage")?["sets"].clone())?.unwrap_or_default())
     }
 
     pub fn prefer_plan(&self, proxy: &str, account: &str, set: Prefer, now: bool) -> anyhow::Result<Plan> {
@@ -263,11 +273,13 @@ mod tests {
     fn sets() -> Vec<Set> {
         serde_json::from_value(json!([
             {"host": "laptop", "local": false, "proxy": {"name": "shared", "id": "px"}, "accounts": [{"id": "far.json", "provider": "claude", "label": "far"}]},
-            {"host": "mac", "local": true, "provider": "claude", "login": "a@example.com", "meters": [{"kind": "session", "label": "Session", "percent": 40}]},
-            {"host": "mac", "local": true, "proxy": {"name": "shared", "id": "px"}, "accounts": [
+            {"host": "mac", "local": true, "provider": "claude", "login": "claude.ai", "account": "a@example.com", "name": "main", "meters": [{"kind": "session", "label": "Session", "percent": 40}]},
+            {"host": "mac", "local": true, "provider": "claude", "login": "signed_out", "name": "spare", "meters": null, "problem": "Not signed in"},
+            {"host": "mac", "local": true, "provider": "codex", "meters": null},
+            {"host": "mac", "local": true, "meters": null, "proxy": {"name": "shared", "id": "px"}, "accounts": [
                 {"id": "lead.json", "provider": "claude", "label": "lead", "preferred": true, "setOn": "mac"},
                 {"id": "spare.json", "provider": "claude", "label": "spare"},
-                {"id": "gpt.json", "provider": "codex", "label": "gpt"}
+                {"id": "gpt.json", "provider": "codex", "label": "gpt", "meters": null}
             ]}
         ]))
         .unwrap()
@@ -282,7 +294,7 @@ mod tests {
         let [lead, _, gpt] = &groups[0].accounts[..] else { panic!() };
         assert!(lead.preferred && groups[0].has_peers(lead));
         assert!(!groups[0].has_peers(gpt));
-        assert_eq!(accounts(&sets).iter().map(|s| s.title()).collect::<Vec<_>>(), ["a@example.com"]);
+        assert_eq!(accounts(&sets).iter().map(|s| s.title()).collect::<Vec<_>>(), ["a@example.com", "spare", "Codex"]);
     }
 
     #[test]
@@ -298,6 +310,8 @@ mod tests {
 
     #[test]
     fn a_plan_reads_as_the_native_sheet_does() {
+        let empty: Plan = serde_json::from_value(json!({"set": "on", "planId": "p2", "changes": null, "release": null, "hosts": [{"host": "mac", "roots": null, "sessions": null}], "warnings": null})).unwrap();
+        assert_eq!(empty.affect_lines(), ["mac:  · no running sessions"]);
         let plan: Plan = serde_json::from_value(json!({
             "set": "only", "planId": "p1",
             "changes": [{"id": "spare.json", "label": "spare", "before": 0, "after": 10}, {"id": "lead.json", "label": "lead", "before": 10, "after": 0}, {"id": "x", "label": "x", "before": 2.5, "after": 0}],

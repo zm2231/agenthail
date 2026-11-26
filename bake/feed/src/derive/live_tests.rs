@@ -190,22 +190,26 @@ fn a_confirmed_change_outlasts_a_stale_row_until_the_daemon_shows_it() {
 }
 
 #[test]
-fn a_watched_pull_request_holds_until_the_daemon_row_carries_it() {
+fn a_pull_request_change_holds_only_that_pull_request_until_the_daemon_shows_it() {
     use crate::catalog::Pr;
     use crate::menu::Patch;
+    let pr = |n: u64, watch: bool, checks: &str| Pr { number: n, url: format!("https://github.com/o/r/pull/{n}"), watch, checks: checks.into(), ..Default::default() };
+    let row = |prs: Vec<Pr>| {
+        let mut x = session("a", "p", "2026-11-24T11:00:00Z", "idle");
+        x.prs = prs;
+        x
+    };
     let mut ov = Overview::default();
-    let mut linked = session("a", "p", "2026-11-24T11:00:00Z", "idle");
-    linked.prs = vec![Pr { number: 12, url: "https://github.com/o/r/pull/12".into(), ..Default::default() }];
-    assert!(ov.take_sessions("2026-11-24T12:00:00Z", vec![linked.clone()]));
-    let watched = vec![Pr { watch: true, ..linked.prs[0].clone() }];
-    assert!(ov.patch("a", Patch::Prs(watched.clone()), Instant::now()));
-    assert!(ov.take_sessions("2026-11-24T12:00:04Z", vec![linked.clone()]));
-    assert_eq!(ov.sessions()[0].prs, watched, "a row read before the change");
-    let mut shown = linked.clone();
-    shown.prs = watched;
-    assert!(ov.take_sessions("2026-11-24T12:00:06Z", vec![shown]));
-    assert!(ov.take_sessions("2026-11-24T12:00:08Z", vec![linked]));
-    assert!(!ov.sessions()[0].prs[0].watch, "once shown, the daemon's later word wins");
+    assert!(ov.take_sessions("2026-11-24T12:00:00Z", vec![row(vec![pr(12, false, "pending"), pr(13, false, "")])]));
+    assert!(ov.patch("a", Patch::Pr { pr: pr(12, true, "pending"), linked: true }, Instant::now()));
+    assert!(ov.patch("a", Patch::Pr { pr: pr(13, false, ""), linked: false }, Instant::now()), "a change to another pull request is its own");
+    assert!(ov.take_sessions("2026-11-24T12:00:04Z", vec![row(vec![pr(12, false, "failing"), pr(13, false, "")])]));
+    let shown: Vec<(u64, bool, String)> = ov.sessions()[0].prs.iter().map(|p| (p.number, p.watch, p.checks.clone())).collect();
+    assert_eq!(shown, vec![(12, true, "failing".to_string())], "a stale row keeps both changes but its newer checks still show");
+    assert!(ov.take_sessions("2026-11-24T12:00:06Z", vec![row(vec![pr(12, true, "passing")])]));
+    assert!(ov.take_sessions("2026-11-24T12:00:08Z", vec![row(vec![pr(12, false, "passing"), pr(14, false, "")])]));
+    let shown: Vec<(u64, bool)> = ov.sessions()[0].prs.iter().map(|p| (p.number, p.watch)).collect();
+    assert_eq!(shown, vec![(12, false), (14, false)], "once shown, the daemon's later word wins");
 }
 
 #[test]

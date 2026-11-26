@@ -74,11 +74,23 @@ pub fn open(s: &mut App) {
 }
 
 fn close(s: &mut App) {
+    if s.accounts.planning.as_ref().is_some_and(|p| p.applying) {
+        return;
+    }
     s.accounts.open = false;
     s.accounts.planning = None;
 }
 
+fn close_sheet(s: &mut App) {
+    if !s.accounts.planning.as_ref().is_some_and(|p| p.applying) {
+        s.accounts.planning = None;
+    }
+}
+
 fn preview(s: &mut App, change: Change) {
+    if s.accounts.planning.as_ref().is_some_and(|p| p.applying) {
+        return;
+    }
     s.accounts.seq += 1;
     let seq = s.accounts.seq;
     s.accounts.planning = Some(Planning { change: change.clone(), plan: None, applying: false, result: None, seq });
@@ -94,7 +106,7 @@ fn preview(s: &mut App, change: Change) {
 }
 
 fn toggle_now(s: &mut App) {
-    let Some(p) = &s.accounts.planning else { return };
+    let Some(p) = s.accounts.planning.as_ref().filter(|p| !p.applying) else { return };
     let mut change = p.change.clone();
     change.now = !change.now;
     preview(s, change);
@@ -138,7 +150,14 @@ fn settled(s: &mut App, done: Done) {
                         p.result = Some(Err("The proxy changed since the preview. Check the new plan.".into()));
                     }
                 }
-                Err(error) => p.result = Some(Err(error.message)),
+                Err(error) => {
+                    let (change, message) = (p.change.clone(), error.message);
+                    preview(s, change);
+                    if let Some(p) = s.accounts.planning.as_mut() {
+                        p.result = Some(Err(format!("{message} Check the plan again before retrying.")));
+                    }
+                    fetch(s);
+                }
             }
         }
     }
@@ -312,7 +331,7 @@ fn sheet(p: &Planning, layer: &mut Vec<El>) {
             plan.changes_anything()
         }
     };
-    if p.change.set != Prefer::On || p.change.now {
+    if p.change.set == Prefer::Only {
         let switch = Switch::new(p.change.now).label("Move running sessions").description("Releases the sessions on the accounts it turns off; each moves on its next request and rebuilds its prompt cache.").on_toggle(toggle_now).build(k);
         body = body.child(el().h(4.0)).child(switch);
     }
@@ -333,11 +352,11 @@ fn sheet(p: &Planning, layer: &mut Vec<El>) {
         }
     };
     let mut buttons = row().w_full().gap(8.0).px(16.0).py(14.0).child(el().grow(1.0));
-    buttons = buttons.child(Button::new(if finished { "Done" } else { "Cancel" }).variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(|s: &mut App| s.accounts.planning = None).build(k).key("prefer-cancel"));
+    buttons = buttons.child(Button::new(if finished { "Done" } else { "Cancel" }).variant(ButtonVariant::Ghost).control_size(ControlSize::Small).disabled(p.applying).on_press(close_sheet).build(k).key("prefer-cancel"));
     if !finished {
         buttons = buttons.child(Button::new(apply_label).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(!ready || p.applying).on_press(apply).build(k).key("prefer-apply"));
     }
-    Dialog::new("prefer", title(&p.change)).open(true).fit().width(440.0).on_close(|s: &mut App| s.accounts.planning = None).child(body).child(buttons).build(k, layer);
+    Dialog::new("prefer", title(&p.change)).open(true).fit().width(440.0).on_close(close_sheet).child(body).child(buttons).build(k, layer);
 }
 
 pub fn overlays(s: &App, layer: &mut Vec<El>) {

@@ -76,6 +76,10 @@ fn minutes_until(at: Option<&str>, now: OffsetDateTime) -> Option<i64> {
 
 impl Session {
     pub fn limit(&self, now: OffsetDateTime) -> Option<Stop> {
+        let outranked = !matches!(self.display.kind.as_str(), "" | "limited") || self.attention.as_ref().is_some_and(|a| a.kind != "usageLimit");
+        if outranked {
+            return None;
+        }
         if let Some(stop) = self.limit_resume.as_ref().filter(|s| s.state != "released") {
             let waiting = stop.state == "waiting";
             let label = match (stop.note.as_deref().map(str::trim).filter(|n| !n.is_empty()), waiting, minutes_until(stop.resets_at.as_deref(), now)) {
@@ -190,6 +194,18 @@ mod tests {
         assert_eq!(x.summary(), "Stopped by usage limit");
         let lifted = session(json!({"attention": {"kind": "stopped", "reason": "API error"}, "usageLimit": {"resetsAt": "2020-01-01T00:00:00Z"}}));
         assert_eq!(lifted.summary(), "API error");
+    }
+
+    #[test]
+    fn what_the_daemon_ranks_above_a_limit_hides_it() {
+        let now = at("2026-11-26T10:00:00Z");
+        let stop = json!({"state": "waiting", "resetsAt": "2026-11-26T12:00:00Z"});
+        assert!(session(json!({"display": {"kind": "limited"}, "attention": {"kind": "usageLimit"}, "limitResume": stop})).limit(now).is_some());
+        for display in ["working", "waiting", "unavailable"] {
+            assert_eq!(session(json!({"display": {"kind": display}, "limitResume": stop})).limit(now), None, "{display}");
+        }
+        let asked = session(json!({"display": {"kind": "limited"}, "attention": {"kind": "ask", "reason": "Which branch?"}, "limitResume": stop}));
+        assert_eq!((asked.limit(now), asked.summary()), (None, "Which branch?".to_string()));
     }
 
     #[test]

@@ -15,6 +15,7 @@ use crate::{App, session};
 pub enum Done {
     Roots(String, Result<Vec<ConfigRoot>, String>),
     Usage(String, RootUsage),
+    Unread(String, String),
     Resumed(String, bool, Result<(), RespondError>),
     Moved(String, Target, Result<Moved, RespondError>),
 }
@@ -35,6 +36,8 @@ pub struct Limits {
     pub confirm: Option<Confirm>,
     pub consent: Option<Consent>,
     pub roots: HashMap<String, Result<Vec<ConfigRoot>, String>>,
+    pub unread: HashSet<(String, String)>,
+    pub reading: HashSet<String>,
     pub busy: HashSet<String>,
     pub note: HashMap<String, (String, bool)>,
     tx: Sender<Done>,
@@ -44,7 +47,7 @@ pub struct Limits {
 impl Limits {
     pub fn new() -> Limits {
         let (tx, rx) = channel();
-        Limits { picking: None, confirm: None, consent: None, roots: HashMap::new(), busy: HashSet::new(), note: HashMap::new(), tx, rx }
+        Limits { picking: None, confirm: None, consent: None, roots: HashMap::new(), unread: HashSet::new(), reading: HashSet::new(), busy: HashSet::new(), note: HashMap::new(), tx, rx }
     }
 }
 
@@ -92,18 +95,18 @@ fn open_picker(s: &mut App, id: &str) {
         }
         return;
     }
-    if matches!(s.limits.roots.get(&host), Some(Ok(_))) {
+    if !s.limits.reading.insert(host.clone()) {
         return;
     }
-    s.limits.roots.remove(&host);
     spawn(s, move |c, tx| {
         let roots = c.session_options(&host).map(|o| o.claude_config_roots).map_err(|e| e.to_string());
         let readable: Vec<String> = roots.as_ref().map(|r| r.iter().filter(|r| r.reads_usage()).map(|r| r.root.clone()).collect()).unwrap_or_default();
         let _ = tx.send(Done::Roots(host.clone(), roots));
         for root in readable {
-            if let Ok(usage) = c.claude_usage(&root, &host) {
-                let _ = tx.send(Done::Usage(host.clone(), usage));
-            }
+            let _ = tx.send(match c.claude_usage(&root, &host) {
+                Ok(usage) => Done::Usage(host.clone(), usage),
+                Err(_) => Done::Unread(host.clone(), root),
+            });
         }
     });
 }
@@ -126,7 +129,15 @@ fn move_to(s: &mut App, id: &str, target: Target, stop_terminal: bool) {
 fn settled(s: &mut App, done: Done) {
     match done {
         Done::Roots(host, roots) => {
-            s.limits.roots.insert(host, roots);
+            s.limits.reading.remove(&host);
+            s.limits.unread.retain(|(h, _)| *h != host);
+            let kept = matches!(s.limits.roots.get(&host), Some(Ok(_))) && roots.is_err();
+            if !kept {
+                s.limits.roots.insert(host, roots);
+            }
+        }
+        Done::Unread(host, root) => {
+            s.limits.unread.insert((host, root));
         }
         Done::Usage(host, usage) => {
             if let Some(Ok(roots)) = s.limits.roots.get_mut(&host)
@@ -195,7 +206,7 @@ pub(crate) fn card(s: &App, x: &Session, stop: &Stop) -> El {
             let id = x.id.clone();
             actions = actions.child(button("Don't resume", ButtonVariant::Ghost, busy).help("Keep the session stopped when its usage limit resets").on_press(move |s: &mut App| resume(s, &id, false)).build(k).key("limit-cancel"));
         }
-        if let Some(offer) = &stop.offer {
+        if let Some(offer) = stop.offer.as_ref().filter(|_| stop.waiting) {
             let target = Target { root: offer.root.clone(), name: offer.name(), detail: offer.reason.clone(), full: false, offered: true };
             let id = x.id.clone();
             let help = match &offer.reason {
@@ -212,7 +223,7 @@ pub(crate) fn card(s: &App, x: &Session, stop: &Stop) -> El {
             );
         }
         let id = x.id.clone();
-        actions = actions.child(button("Another account…", ButtonVariant::Ghost, busy).help("Pick the Claude account this session continues under").on_press(move |s: &mut App| open_picker(s, &id)).build(k).key("limit-pick"));
+        actions = actions.children(stop.waiting.then(|| button("Another account…", ButtonVariant::Ghost, busy).help("Pick the Claude account this session continues under").on_press(move |s: &mut App| open_picker(s, &id)).build(k).key("limit-pick")));
         actions = actions.child(spacer()).child(Button::new("Usage").variant(ButtonVariant::GhostMuted).control_size(ControlSize::Small).icon(&icons::ACTIVITY).on_press(super::accounts::open).build(k).key("limit-usage"));
         body = body.child(actions);
     }
@@ -235,13 +246,13 @@ pub(crate) fn card(s: &App, x: &Session, stop: &Stop) -> El {
     col().w_full().items_center().px(32.0).pb(12.0).child(card_el)
 }
 
-fn target_row(id: &str, t: &Target, busy: bool) -> El {
+fn target_row(id: &str, t: &Target, busy: bool, unread: bool) -> El {
     let usable = !t.full && !busy;
     let mut name = row().gap(8.0).items_center().child(text(t.name.clone()).font(BODY_BOLD).color(if usable { theme::text() } else { faint() }).truncate());
     if t.offered {
         name = name.child(row().px(7.0).py(2.0).radius(6.0).fill(attention().alpha(0.2)).child(text("Suggested").font(META).color(attention())));
     }
-    let detail = if t.full { Some("Out of usage".to_string()) } else { t.detail.clone() };
+    let detail = if t.full { Some("Out of usage".to_string()) } else { t.detail.clone().or_else(|| unread.then(|| "Usage couldn't be read".to_string())) };
     let mut r = row()
         .key(format!("limit-target-{}", t.root))
         .w_full()
@@ -285,7 +296,11 @@ fn picker(s: &App, id: &str, layer: &mut Vec<El>) {
             if list.is_empty() {
                 body = body.child(text("No other Claude account is set up on this computer.").font(META).color(muted()).wrap());
             }
-            body = body.children(list.iter().map(|t| target_row(id, t, busy)));
+            let host = host_key(x);
+            body = body.children(list.iter().map(|t| target_row(id, t, busy, s.limits.unread.contains(&(host.clone(), t.root.clone())))));
+            if s.limits.reading.contains(&host) {
+                body = body.child(text("Checking for changes…").font(META).color(faint()));
+            }
         }
     }
     if let Some(root) = x.claude_config_root.as_ref().filter(|r| !r.name.is_empty()) {

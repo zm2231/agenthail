@@ -11,7 +11,7 @@ use crate::theme::{self, BODY, META, failed, faint};
 use crate::{App, session};
 
 pub enum Done {
-    Changed(String, PrOp, u64, Result<Vec<Pr>, RespondError>),
+    Changed(String, PrOp, String, u64, Result<Vec<Pr>, RespondError>),
 }
 
 pub struct Prs {
@@ -20,6 +20,7 @@ pub struct Prs {
     pub error: Option<String>,
     pub saving: bool,
     seq: u64,
+    link_seq: u64,
     tx: Sender<Done>,
     rx: Receiver<Done>,
 }
@@ -27,7 +28,7 @@ pub struct Prs {
 impl Prs {
     pub fn new() -> Prs {
         let (tx, rx) = channel();
-        Prs { linking: None, text: TextEdit::new(""), error: None, saving: false, seq: 0, tx, rx }
+        Prs { linking: None, text: TextEdit::new(""), error: None, saving: false, seq: 0, link_seq: 0, tx, rx }
     }
 }
 
@@ -53,7 +54,7 @@ fn send(s: &mut App, id: &str, op: PrOp, pr: &str) -> bool {
     let (tx, id, pr, seq) = (s.prs.tx.clone(), id.to_string(), pr.to_string(), s.prs.seq);
     std::thread::spawn(move || {
         let result = client.pr(&id, op, &pr);
-        let _ = tx.send(Done::Changed(id, op, seq, result));
+        let _ = tx.send(Done::Changed(id, op, pr, seq, result));
     });
     true
 }
@@ -84,6 +85,7 @@ fn save(s: &mut App) {
         return;
     }
     if send(s, &id, PrOp::Link, &pr) {
+        s.prs.link_seq = s.prs.seq;
         s.prs.saving = true;
         s.prs.error = None;
     } else if s.client.is_none() {
@@ -92,12 +94,19 @@ fn save(s: &mut App) {
 }
 
 fn settled(s: &mut App, done: Done) {
-    let Done::Changed(id, op, seq, result) = done;
+    let Done::Changed(id, op, asked, seq, result) = done;
     s.menus.busy.remove(&(id.clone(), "pr"));
-    let dialog = op == PrOp::Link && s.prs.linking.as_deref() == Some(id.as_str()) && s.prs.seq == seq;
+    let dialog = op == PrOp::Link && s.prs.linking.as_deref() == Some(id.as_str()) && s.prs.link_seq == seq;
     match result {
         Ok(prs) => {
-            if s.ov.live.patch(&id, Patch::Prs(prs), Instant::now()) {
+            let number = asked.trim().trim_start_matches('#').parse::<u64>().ok();
+            let changed = match op {
+                PrOp::Unlink => Some(Pr { url: asked.clone(), ..Default::default() }),
+                _ => prs.iter().find(|p| p.url == asked || Some(p.number) == number).cloned(),
+            };
+            if let Some(pr) = changed
+                && s.ov.live.patch(&id, Patch::Pr { pr, linked: op != PrOp::Unlink }, Instant::now())
+            {
                 s.sessions = s.ov.live.sessions().to_vec();
             }
             if dialog {
