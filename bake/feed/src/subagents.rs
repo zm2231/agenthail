@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::time::Duration;
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -51,7 +52,27 @@ pub fn wants_page(x: &Session) -> bool {
 
 pub fn page_key(x: &Session) -> String {
     let roll = |r: &Option<Rollup>| r.as_ref().map_or("-".to_string(), |r| format!("{}/{}", r.count, r.working));
-    format!("{}|{}|{}", x.id, roll(&x.subagents), roll(&x.hidden_subagents))
+    format!("{}|{}|{}|{}", x.id, roll(&x.subagents), roll(&x.hidden_subagents), roll(&x.live_hidden_subagents))
+}
+
+pub const PAGE_EVERY: Duration = Duration::from_secs(60);
+pub const CLAUDE_EVERY: Duration = Duration::from_secs(15);
+
+pub fn page_due(same_key: bool, since: Duration) -> bool {
+    !same_key || since >= PAGE_EVERY
+}
+
+pub struct Asked<'a> {
+    pub stamp: &'a str,
+    pub since: Duration,
+    pub failed: bool,
+}
+
+pub fn claude_due(asked: Option<Asked>, stamp: &str, working: bool) -> bool {
+    match asked {
+        None => true,
+        Some(a) => a.since >= CLAUDE_EVERY && (a.stamp != stamp || working || a.failed),
+    }
 }
 
 pub fn children(parent: &str, listed: &[Session], fetched: &[Session]) -> Vec<Session> {
@@ -141,17 +162,38 @@ impl ClaudeList<'_> {
     }
 }
 
-pub fn claude_subagents(metadata: &Value) -> ClaudeSubagents {
+impl ClaudeSubagents {
+    pub fn working(&self) -> bool {
+        self.links.iter().any(|l| l.working)
+    }
+}
+
+pub fn claude_subagents(metadata: &Value) -> Result<ClaudeSubagents, String> {
+    if let Some(error) = metadata["errors"]["claudeSubagents"].as_str() {
+        return Err(error.to_string());
+    }
     let links: Vec<ClaudeSubagent> = serde_json::from_value(metadata["claudeSubagents"].clone()).unwrap_or_default();
     let total = metadata["claudeSubagentsTotal"].as_u64().map_or(links.len(), |t| t as usize);
-    ClaudeSubagents { links, total }
+    Ok(ClaudeSubagents { links, total })
 }
 
 const PAGE_TRIES: usize = 3;
 
 impl Client {
-    pub fn claude_subagents(&self, session: &str) -> anyhow::Result<ClaudeSubagents> {
-        Ok(claude_subagents(&self.get_json(&format!("/api/v1/session-metadata?id={}&subagents=all", enc(session)))?))
+    pub fn claude_subagents(&self, session: &str) -> Result<ClaudeSubagents, String> {
+        claude_subagents(&self.get_json(&format!("/api/v1/session-metadata?id={}&subagents=all", enc(session))).map_err(|e| e.to_string())?)
+    }
+
+    pub fn session_row(&self, id: &str) -> Result<Session, String> {
+        let value = self.get_json(&format!("/api/v1/session?id={}&limit=1", enc(id))).map_err(|e| e.to_string())?;
+        let mut row: Session = serde_json::from_value(value["session"].clone()).map_err(|e| e.to_string())?;
+        if row.id.is_empty() {
+            return Err("Agenthail returned no session".into());
+        }
+        if let Some(alias) = value["alias"].as_str().filter(|a| !a.is_empty()) {
+            row.alias = Some(alias.to_string());
+        }
+        Ok(row)
     }
 
     pub fn subagent_sessions(&self, parent: &str) -> Result<Vec<Session>, String> {
@@ -236,7 +278,7 @@ mod tests {
         let mut links: Vec<String> = (0..2).map(|i| link(&format!("w{i}"), true)).collect();
         links.extend((0..10).map(|i| link(&format!("d{i}"), false)));
         let meta: Value = serde_json::from_str(&format!(r#"{{"claudeSubagents":[{}],"claudeSubagentsTotal":12}}"#, links.join(","))).unwrap();
-        let got = claude_subagents(&meta);
+        let got = claude_subagents(&meta).unwrap();
         let short = got.list(false);
         assert_eq!((short.shown.len(), short.earlier, short.working, short.total), (10, 2, 2, 12));
         assert_eq!(short.summary(), "2 working, 12 subagents in all");
@@ -256,7 +298,49 @@ mod tests {
         assert_eq!(bare.title(), "Subagent a8f06ab0");
         let one = ClaudeSubagents { links: vec![bare], total: 1 };
         assert_eq!(one.list(false).summary(), "1 subagent in all");
-        assert_eq!(claude_subagents(&Value::Null), ClaudeSubagents::default());
+        assert_eq!(claude_subagents(&Value::Null), Ok(ClaudeSubagents::default()));
+    }
+
+    #[test]
+    fn a_failed_read_is_not_an_empty_list() {
+        let meta: Value = serde_json::from_str(r#"{"sessionId":"s","errors":{"claudeSubagents":"transcript unreadable"}}"#).unwrap();
+        assert_eq!(claude_subagents(&meta), Err("transcript unreadable".into()));
+        let other: Value = serde_json::from_str(r#"{"sessionId":"s","claudeSubagents":[],"errors":{"context":"timeout"}}"#).unwrap();
+        assert_eq!(claude_subagents(&other), Ok(ClaudeSubagents::default()));
+    }
+
+    #[test]
+    fn claude_subagents_are_read_again_while_any_could_have_changed() {
+        let asked = |stamp, secs, failed| Some(Asked { stamp, since: Duration::from_secs(secs), failed });
+        assert!(claude_due(None, "t1", false));
+        assert!(!claude_due(asked("t1", 60, false), "t1", false));
+        assert!(claude_due(asked("t1", 15, false), "t1", true));
+        assert!(!claude_due(asked("t1", 5, false), "t1", true));
+        assert!(claude_due(asked("t0", 15, false), "t1", false));
+        assert!(!claude_due(asked("t0", 14, false), "t1", false));
+        assert!(claude_due(asked("t1", 15, true), "t1", false));
+    }
+
+    #[test]
+    fn the_hidden_page_is_read_again_when_its_counts_move_or_a_minute_passes() {
+        assert!(page_due(false, Duration::ZERO));
+        assert!(!page_due(true, Duration::from_secs(59)));
+        assert!(page_due(true, PAGE_EVERY));
+        let a = row(r#"{"id":"p","hiddenSubagents":{"count":3,"working":0},"liveHiddenSubagents":{"count":1,"working":0}}"#);
+        let b = row(r#"{"id":"p","hiddenSubagents":{"count":3,"working":0},"liveHiddenSubagents":{"count":2,"working":0}}"#);
+        assert_ne!(page_key(&a), page_key(&b));
+    }
+
+    #[test]
+    fn a_parent_outside_the_list_is_read_as_a_row() {
+        let (client, asked) = daemon(replies(&[
+            (200, r#"{"session":{"id":"p","name":"Plan the importer","status":"idle","subagent":{"parentId":"g","rootId":"g","depth":1,"nickname":"Noether"}},"alias":"planner"}"#),
+            (404, r#"{"error":{"code":"not_found"}}"#),
+        ]));
+        let got = client.session_row("p").unwrap();
+        assert_eq!((got.id.as_str(), got.title(), parent_of(&got)), ("p", "@planner".to_string(), Some("g".to_string())));
+        assert_eq!(asked.recv().unwrap().0, "/api/v1/session?id=p&limit=1");
+        assert!(client.session_row("p").is_err());
     }
 
     #[test]

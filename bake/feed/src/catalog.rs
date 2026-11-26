@@ -181,6 +181,8 @@ pub struct Session {
     #[serde(default)]
     pub hidden_subagents: Option<crate::subagents::Rollup>,
     #[serde(default)]
+    pub live_hidden_subagents: Option<crate::subagents::Rollup>,
+    #[serde(default)]
     pub background_tasks: Option<crate::background::BackgroundTasks>,
     #[serde(default)]
     pub delegated: Option<bool>,

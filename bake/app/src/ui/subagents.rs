@@ -1,33 +1,48 @@
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use super::*;
-use feed::subagents::{self as crew, ClaudeSubagent, ClaudeSubagents};
+use feed::subagents::{self as crew, Asked, ClaudeSubagent, ClaudeSubagents};
 use rune_kit::ControlSize;
 
 const KEPT: usize = 6;
-const CLAUDE_EVERY: Duration = Duration::from_secs(15);
+
+struct PageAsk {
+    key: String,
+    at: Instant,
+    seq: u64,
+}
+
+struct ClaudeAsk {
+    stamp: String,
+    at: Instant,
+    failed: bool,
+}
 
 #[derive(Default)]
 pub struct Crew {
     pages: HashMap<String, Vec<Session>>,
-    keys: HashMap<String, String>,
+    asked: HashMap<String, PageAsk>,
+    seq: u64,
     loading: HashSet<String>,
     errors: HashMap<String, String>,
     claude: HashMap<String, ClaudeSubagents>,
-    claude_asked: HashMap<String, (String, Instant)>,
+    claude_asked: HashMap<String, ClaudeAsk>,
     claude_loading: HashSet<String>,
+    parents: HashMap<String, Session>,
+    parent_asked: HashSet<String>,
     expanded: HashSet<String>,
     recent: Vec<String>,
 }
 
 pub enum Done {
-    Page(String, String, Result<Vec<Session>, String>),
+    Page(String, u64, Result<Vec<Session>, String>),
     Claude(String, Result<ClaudeSubagents, String>),
+    Parent(String, Result<Session, String>),
 }
 
 pub(crate) fn fetched<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
-    s.crew.pages.values().flatten().find(|x| x.id == id)
+    s.crew.pages.values().flatten().find(|x| x.id == id).or_else(|| s.crew.parents.get(id))
 }
 
 fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'static) {
@@ -38,27 +53,44 @@ fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'sta
     });
 }
 
+fn held(s: &App) -> HashSet<String> {
+    let Some(sel) = s.selected.clone() else { return HashSet::new() };
+    let mut held = HashSet::from([sel.clone()]);
+    let mut at = sel;
+    while let Some(parent) = parent_of(s, &at).filter(|p| !held.contains(p)) {
+        held.insert(parent.clone());
+        at = parent;
+    }
+    held
+}
+
 fn touch(s: &mut App, id: &str) {
     s.crew.recent.retain(|x| x != id);
     s.crew.recent.push(id.to_string());
-    let held: HashSet<String> = s.selected.iter().flat_map(|sel| std::iter::once(sel.clone()).chain(parent_of(s, sel))).collect();
+    let held = held(s);
     while s.crew.recent.len() > KEPT {
         let Some(at) = s.crew.recent.iter().position(|x| !held.contains(x)) else { break };
         let old = s.crew.recent.remove(at);
         s.crew.pages.remove(&old);
-        s.crew.keys.remove(&old);
+        s.crew.asked.remove(&old);
         s.crew.errors.remove(&old);
         s.crew.loading.remove(&old);
         s.crew.claude.remove(&old);
         s.crew.claude_asked.remove(&old);
         s.crew.expanded.remove(&old);
     }
+    if s.crew.parents.len() > KEPT {
+        s.crew.parents.retain(|id, _| held.contains(id));
+    }
 }
 
 pub(crate) fn load(s: &mut App, id: &str) {
     s.crew.claude_asked.remove(id);
     if s.crew.errors.remove(id).is_some() {
-        s.crew.keys.remove(id);
+        s.crew.asked.remove(id);
+    }
+    if let Some(parent) = parent_of(s, id) {
+        s.crew.parent_asked.remove(&parent);
     }
     refresh(s, id);
 }
@@ -74,6 +106,9 @@ pub(crate) fn refresh(s: &mut App, id: &str) {
     touch(s, id);
     page(s, id);
     if let Some(parent) = parent {
+        if session(s, &parent).is_none() {
+            parent_row(s, &parent);
+        }
         page(s, &parent);
     }
     claude(s, id);
@@ -86,55 +121,59 @@ fn parent_of(s: &App, id: &str) -> Option<String> {
     })
 }
 
+fn parent_row(s: &mut App, id: &str) {
+    if !s.crew.parent_asked.insert(id.to_string()) {
+        return;
+    }
+    let id = id.to_string();
+    spawn(s, move |c| Done::Parent(id.clone(), c.session_row(&id)));
+}
+
 fn page(s: &mut App, id: &str) {
     let Some(x) = session(s, id) else { return };
-    if !crew::wants_page(x) {
-        if !s.crew.loading.contains(id) && fetched_parent_of_selected(s) != Some(id) {
+    if !crew::wants_page(x) && !s.crew.parents.contains_key(id) {
+        if !s.crew.loading.contains(id) && !held(s).contains(id) {
             s.crew.pages.remove(id);
-            s.crew.keys.remove(id);
+            s.crew.asked.remove(id);
             s.crew.errors.remove(id);
         }
         return;
     }
     let key = crew::page_key(x);
-    if s.crew.keys.get(id) == Some(&key) {
+    if s.crew.loading.contains(id) || s.crew.asked.get(id).is_some_and(|a| !crew::page_due(a.key == key, a.at.elapsed())) {
         return;
     }
-    s.crew.keys.insert(id.to_string(), key.clone());
+    s.crew.seq += 1;
+    let seq = s.crew.seq;
+    s.crew.asked.insert(id.to_string(), PageAsk { key, at: Instant::now(), seq });
     s.crew.loading.insert(id.to_string());
     let id = id.to_string();
-    spawn(s, move |c| Done::Page(id.clone(), key, c.subagent_sessions(&id)));
-}
-
-fn fetched_parent_of_selected(s: &App) -> Option<&str> {
-    let sel = s.selected.as_deref()?;
-    if s.sessions.iter().any(|x| x.id == sel) {
-        return None;
-    }
-    s.crew.pages.iter().find(|(_, rows)| rows.iter().any(|x| x.id == sel)).map(|(p, _)| p.as_str())
+    spawn(s, move |c| Done::Page(id.clone(), seq, c.subagent_sessions(&id)));
 }
 
 fn claude(s: &mut App, id: &str) {
     let Some(stamp) = session(s, id).map(|x| x.last_active.clone()) else { return };
-    if s.crew.claude_loading.contains(id) || s.crew.claude_asked.get(id).is_some_and(|(seen, at)| *seen == stamp || at.elapsed() < CLAUDE_EVERY) {
+    if s.crew.claude_loading.contains(id) {
         return;
     }
-    s.crew.claude_asked.insert(id.to_string(), (stamp, Instant::now()));
+    let working = s.crew.claude.get(id).is_some_and(ClaudeSubagents::working);
+    let asked = s.crew.claude_asked.get(id).map(|a| Asked { stamp: &a.stamp, since: a.at.elapsed(), failed: a.failed });
+    if !crew::claude_due(asked, &stamp, working) {
+        return;
+    }
+    s.crew.claude_asked.insert(id.to_string(), ClaudeAsk { stamp, at: Instant::now(), failed: false });
     s.crew.claude_loading.insert(id.to_string());
     let id = id.to_string();
-    spawn(s, move |c| Done::Claude(id.clone(), c.claude_subagents(&id).map_err(|e| e.to_string())));
+    spawn(s, move |c| Done::Claude(id.clone(), c.claude_subagents(&id)));
 }
 
 pub(crate) fn done(s: &mut App, done: Done) {
     match done {
-        Done::Page(id, key, result) => {
-            if s.crew.keys.get(&id) != Some(&key) {
+        Done::Page(id, seq, result) => {
+            if s.crew.asked.get(&id).is_none_or(|a| a.seq != seq) {
                 return;
             }
             s.crew.loading.remove(&id);
-            if !s.crew.recent.contains(&id) {
-                return;
-            }
             match result {
                 Ok(rows) => {
                     s.crew.errors.remove(&id);
@@ -147,8 +186,23 @@ pub(crate) fn done(s: &mut App, done: Done) {
         }
         Done::Claude(id, result) => {
             s.crew.claude_loading.remove(&id);
-            if let (Ok(list), true) = (result, s.crew.recent.contains(&id)) {
-                s.crew.claude.insert(id, list);
+            if !s.crew.recent.contains(&id) {
+                return;
+            }
+            match result {
+                Ok(list) => {
+                    s.crew.claude.insert(id, list);
+                }
+                Err(_) => {
+                    if let Some(a) = s.crew.claude_asked.get_mut(&id) {
+                        a.failed = true;
+                    }
+                }
+            }
+        }
+        Done::Parent(id, result) => {
+            if let Ok(row) = result {
+                s.crew.parents.insert(id, row);
             }
         }
     }
