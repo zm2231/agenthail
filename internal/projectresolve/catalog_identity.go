@@ -611,7 +611,7 @@ func (repositories *CatalogRepositoryCache) repository(ctx context.Context, comm
 func readCatalogRootCommits(ctx context.Context, commonDir string) ([]string, error) {
 	output, err := CatalogGit(ctx, commonDir, "rev-list", "--max-parents=0", "HEAD")
 	if err != nil {
-		if ctx.Err() != nil {
+		if catalogGitStopped(ctx, err) {
 			return nil, err
 		}
 		return nil, nil
@@ -674,7 +674,7 @@ func ResolveCatalogRepository(ctx context.Context, path string, repositories *Ca
 	defer cancel()
 	defer func() {
 		var gitErr *catalogGitError
-		if err != nil && ctx.Err() == nil && errors.Is(gitCtx.Err(), context.DeadlineExceeded) && errors.As(err, &gitErr) {
+		if err != nil && ctx.Err() == nil && errors.Is(gitCtx.Err(), context.DeadlineExceeded) && errors.As(err, &gitErr) && !gitErr.answered() {
 			err = &CatalogGitTimeoutError{Path: path, Budget: budget, Step: strings.Join(gitErr.args, " ")}
 		}
 	}()
@@ -844,6 +844,17 @@ func (e *catalogGitError) Error() string {
 
 func (e *catalogGitError) Unwrap() error { return e.err }
 
+// answered: git exited on its own, so its error stands even past the budget.
+func (e *catalogGitError) answered() bool {
+	var exitErr *exec.ExitError
+	return errors.As(e.err, &exitErr) && exitErr.Exited()
+}
+
+func catalogGitStopped(ctx context.Context, err error) bool {
+	var gitErr *catalogGitError
+	return err != nil && ctx.Err() != nil && !(errors.As(err, &gitErr) && gitErr.answered())
+}
+
 // isCatalogNoMatch reports "git config --get-regexp" finding no entry, which
 // it says with exit status 1 and nothing on stderr.
 func isCatalogNoMatch(err error) bool {
@@ -861,7 +872,7 @@ func isCatalogBare(ctx context.Context, path string, err error) (bool, error) {
 		return false, nil
 	}
 	bare, bareErr := CatalogGit(ctx, path, "rev-parse", "--is-bare-repository")
-	if bareErr != nil && ctx.Err() != nil {
+	if catalogGitStopped(ctx, bareErr) {
 		return false, bareErr
 	}
 	return bareErr == nil && bare == "true", nil

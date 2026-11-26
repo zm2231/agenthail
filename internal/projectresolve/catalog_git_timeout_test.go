@@ -75,3 +75,27 @@ func TestARepositoryLookupThatRunsOutOfTimeSaysSoAndNamesTheGitStep(t *testing.T
 		})
 	}
 }
+
+func TestAGitAnswerThatReachesTheLookupAfterItsBudgetIsGitsAnswer(t *testing.T) {
+	answerLate := func(answer string) string { return "{ sleep 1 & " + answer + "; }" }
+	t.Run("a refusal", func(t *testing.T) {
+		folder := filepath.Join(t.TempDir(), "widget")
+		gitIn(t, filepath.Dir(folder), "init", "-q", folder)
+		slowGit(t, "--show-toplevel", answerLate("echo 'fatal: detected dubious ownership in repository' >&2; exit 128"))
+		_, notRepository, err := ResolveCatalogRepository(context.Background(), folder, nil, 200*time.Millisecond)
+		var timeout *CatalogGitTimeoutError
+		if err == nil || errors.As(err, &timeout) || notRepository || !strings.Contains(err.Error(), "dubious ownership") {
+			t.Fatalf("a refusal git gave after the budget answered %v (not a repository: %v), want the refusal", err, notRepository)
+		}
+	})
+	t.Run("no root commits", func(t *testing.T) {
+		folder := filepath.Join(t.TempDir(), "widget")
+		gitIn(t, filepath.Dir(folder), "init", "-q", folder)
+		gitIn(t, folder, "commit", "-q", "--allow-empty", "-m", "first")
+		slowGit(t, "rev-list", answerLate("echo 'fatal: bad revision' >&2; exit 128"))
+		repository, _, err := ResolveCatalogRepository(context.Background(), folder, nil, 200*time.Millisecond)
+		if err != nil || repository.Toplevel == "" {
+			t.Fatalf("a rev-list git answered after the budget gave %+v, %v; want the repository without root commits", repository, err)
+		}
+	})
+}
