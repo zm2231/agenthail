@@ -835,13 +835,11 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
         }
         Ok(delivered) => {
             note(s, &id, delivered.note(0));
+            ui::complete::delivered(s, &id, &pending.text);
             None
         }
         Err(error) => Some((error.maybe_delivered, error.answered, error.message)),
     };
-    if failure.is_none() {
-        ui::complete::delivered(s, &id, &pending.text);
-    }
     if let Some((maybe_delivered, answered, error)) = failure {
         let failed = pending.failed(retry, maybe_delivered, answered, error);
         put_back(s, &id, &failed);

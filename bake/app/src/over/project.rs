@@ -374,6 +374,7 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
     } else {
         controls
     };
+    let lead_session = crate::session(s, lead);
     let controls = controls
         .child(IconButton::new(&icons::ARROW_UP).variant(IconButtonVariant::Submit).label("Send").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::send_to(s, &to2, tx)).build(k));
     col()
@@ -381,5 +382,18 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
         .max_w(780.0)
         .px(28.0)
         .pb(16.0)
-        .child(col().w_full().gap(8.0).padding(12.0).radius(14.0).fill(k.c.surface_raised).border(1.0, if s.attach.dropping { crate::theme::accent() } else { ui::edge() }).children(crate::session(s, lead).and_then(|x| crate::ui::complete::search(s, x))).children(crate::session(s, lead).and_then(|x| crate::ui::complete::menu(s, x))).children(crate::ui::attach::chips(s, lead)).child(input).child(controls))
+        .child(
+            col()
+                .w_full()
+                .gap(8.0)
+                .padding(12.0)
+                .radius(14.0)
+                .fill(k.c.surface_raised)
+                .border(1.0, if s.attach.dropping { crate::theme::accent() } else { ui::edge() })
+                .children(lead_session.and_then(|x| crate::ui::complete::search(s, x)))
+                .children(lead_session.and_then(|x| crate::ui::complete::menu(s, x)))
+                .children(crate::ui::attach::chips(s, lead))
+                .child(input)
+                .child(controls),
+        )
 }

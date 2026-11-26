@@ -323,7 +323,9 @@ pub fn rekey(s: &mut App, old: &str, new: &str) {
     if let Some(prompts) = c.recorded.remove(old) {
         c.recorded.entry(new.to_string()).or_insert(prompts);
     }
-    c.history.remove(old);
+    if let Some(history) = c.history.remove(old) {
+        c.history.insert(new.to_string(), history);
+    }
     c.commands.remove(old);
     c.commands_asked.remove(old);
     if c.session.as_deref() == Some(old) {
