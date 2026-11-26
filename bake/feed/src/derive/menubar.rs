@@ -36,10 +36,11 @@ impl MenuBar {
             .collect();
         let mut listed: Vec<&Session> = w.sessions.iter().filter(|x| !x.archived && !hidden(x) && !w.helpers.contains(&x.id) && !asked.contains(x.id.as_str())).collect();
         listed.sort_by_key(|x| Reverse(x.last_active.clone()));
-        let (working, recent): (Vec<&Session>, Vec<&Session>) = listed.into_iter().partition(|x| busy(x));
+        let helping: HashSet<&str> = w.sessions.iter().filter(|x| w.helpers.contains(&x.id) && !x.archived && busy(x)).filter_map(|x| x.subagent.as_ref()?.get("parentId")?.as_str()).collect();
+        let (working, recent): (Vec<&Session>, Vec<&Session>) = listed.into_iter().partition(|x| busy(x) || helping.contains(x.id.as_str()));
         MenuBar {
             needs_you: needs.len(),
-            needs: needs.iter().take(SHOWN).map(|n| Row { label: format!("{}  ·  {}", short_title(&n.title, LABEL_CHARS), short_title(&n.who, LABEL_CHARS / 2)), target: n.target.clone() }).collect(),
+            needs: needs.iter().take(SHOWN).map(need_row).collect(),
             working: working.into_iter().take(SHOWN).map(|x| row(w, x, false)).collect(),
             recent: recent.into_iter().take(SHOWN).map(|x| row(w, x, true)).collect(),
         }
@@ -49,7 +50,14 @@ impl MenuBar {
         let needs = if self.needs_you > self.needs.len() { format!("Needs you ({}, {} shown)", self.needs_you, self.needs.len()) } else { format!("Needs you ({})", self.needs_you) };
         [(needs, &self.needs[..]), ("Working".to_string(), &self.working[..]), ("Recent".to_string(), &self.recent[..])].into_iter().filter(|(_, rows)| !rows.is_empty()).collect()
     }
+}
 
+fn need_row(n: &Need) -> Row {
+    let mut label = format!("{}  ·  {}", short_title(&n.title, LABEL_CHARS), short_title(&n.who, LABEL_CHARS / 2));
+    if let Some(id) = &n.label {
+        label.push_str(&format!("  ·  {id}"));
+    }
+    Row { label, target: n.target.clone() }
 }
 
 pub fn badge(needs_you: usize) -> (u32, String) {
@@ -153,16 +161,28 @@ mod tests {
         let sessions = (0..8).map(|i| session(&format!("s{i}"), json!({"status": "busy", "lastActive": format!("2026-11-24T11:0{i}:00Z")}))).collect();
         let w = world(sessions);
         let needs: Vec<Need> = (0..7)
-            .map(|i| Need { kind: super::super::NeedKind::Check, group: super::super::Group::Waiting, project: "P".into(), project_key: "p".into(), title: format!("Item {i}"), who: "@worker".into(), at: String::new(), target: Target::Work(format!("p-W{i}")), label: None })
+            .map(|i| Need { kind: super::super::NeedKind::Check, group: super::super::Group::Waiting, project: "P".into(), project_key: "p".into(), title: "Same title".into(), who: "@worker".into(), at: String::new(), target: Target::Work(format!("p-W{i}")), label: Some(format!("W{i}")) })
             .collect();
         let bar = MenuBar::build(&w, &needs);
         assert_eq!(ids(&bar.working), ["open-session:s7", "open-session:s6", "open-session:s5", "open-session:s4", "open-session:s3"]);
         assert_eq!(bar.needs.len(), SHOWN);
         let titles: Vec<String> = bar.sections().into_iter().map(|(t, _)| t).collect();
         assert_eq!(titles, ["Needs you (7, 5 shown)", "Working"]);
-        assert_eq!(bar.needs[0].label, "Item 0  ·  @worker");
+        assert_eq!(bar.needs[0].label, "Same title  ·  @worker  ·  W0");
         assert_ne!(bar.needs[0].label, bar.needs[1].label);
         assert_eq!(badge(bar.needs_you), (7, "7 things need you".to_string()));
+    }
+
+    #[test]
+    fn a_session_whose_helper_is_working_is_listed_as_working() {
+        let w = world(vec![
+            session("lead", json!({})),
+            session("helper", json!({"status": "busy", "subagent": {"parentId": "lead"}})),
+            session("other", json!({})),
+        ]);
+        let bar = MenuBar::build(&w, &[]);
+        assert_eq!(ids(&bar.working), ["open-session:lead"]);
+        assert_eq!(ids(&bar.recent), ["open-session:other"]);
     }
 
     #[test]
