@@ -259,7 +259,20 @@ pub fn reread(detail: crate::gone::Detail, known: &Session) -> Recheck {
 impl Client {
     pub fn recheck(&self, known: &Session) -> Recheck {
         let detail = crate::gone::Detail::read(self.get_coded(&format!("/api/v1/session?id={}&limit=1", enc(&known.id))));
-        reread(detail, known)
+        let mut found = reread(detail, known);
+        if let Recheck::Fresh(row) = &mut found {
+            for term in crate::gone::search_terms(std::iter::once(&**row)) {
+                match self.listed(&row.id, &term) {
+                    Ok(Some(listed)) => {
+                        row.archived = listed.archived;
+                        break;
+                    }
+                    Ok(None) => {}
+                    Err(_) => break,
+                }
+            }
+        }
+        found
     }
 }
 
@@ -411,6 +424,22 @@ mod tests {
         assert_eq!(reread(Detail::Unreachable, &known), Recheck::Gone);
         assert_eq!(reread(Detail::Failed("timeout".into()), &known), Recheck::Unknown("timeout".into()));
         assert!(matches!(reread(Detail::Found(json!({"session": {"id": "other"}})), &known), Recheck::Unknown(_)));
+    }
+
+    #[test]
+    fn a_recheck_reads_the_archived_state_from_the_session_list() {
+        let known = Session { id: "c1".into(), name: "Fix the importer".into(), ..Session::default() };
+        let detail = r#"{"session": {"id": "c1", "surface": "codex", "name": "Fix the importer", "status": "idle"}, "capabilities": {"lifecycle": {"resume": true}}}"#;
+        let listing = r#"{"sessions": [{"id": "c0", "name": "Fix the importer too"}, {"id": "c1", "name": "Fix the importer", "archived": true}], "nextCursor": ""}"#;
+        let (client, asked) = crate::mock::daemon(vec![(200, detail.into()), (200, listing.into())]);
+        let Recheck::Fresh(row) = client.recheck(&known) else { panic!("expected a fresh row") };
+        assert!(row.archived);
+        assert_eq!(asked.recv().unwrap().0, "/api/v1/session?id=c1&limit=1");
+        assert_eq!(asked.recv().unwrap().0, "/api/v1/snapshot?q=Fix+the+importer&limit=200");
+        let unlisted = r#"{"sessions": [], "nextCursor": ""}"#;
+        let (client, _asked) = crate::mock::daemon(vec![(200, detail.into()), (200, unlisted.into())]);
+        let archived = Session { archived: true, ..known };
+        assert!(matches!(client.recheck(&archived), Recheck::Fresh(r) if r.archived));
     }
 
     #[test]
