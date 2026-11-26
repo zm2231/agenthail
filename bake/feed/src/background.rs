@@ -89,10 +89,10 @@ impl BackgroundTask {
         parse_time(&self.since)
     }
 
-    pub fn since_text(&self, now: OffsetDateTime, offset: i32) -> Option<String> {
-        let offset = UtcOffset::from_whole_seconds(offset).unwrap_or(UtcOffset::UTC);
-        let at = self.since_at()?.to_offset(offset);
-        let now = now.to_offset(offset);
+    pub fn since_text(&self, now: OffsetDateTime, offset_at: impl Fn(OffsetDateTime) -> i32) -> Option<String> {
+        let local = |t: OffsetDateTime| t.to_offset(UtcOffset::from_whole_seconds(offset_at(t)).unwrap_or(UtcOffset::UTC));
+        let at = local(self.since_at()?);
+        let now = local(now);
         let hour = match at.hour() % 12 {
             0 => 12,
             h => h,
@@ -106,8 +106,8 @@ impl BackgroundTask {
         }
     }
 
-    pub fn timed_line(&self, now: OffsetDateTime, offset: i32) -> String {
-        match self.since_text(now, offset) {
+    pub fn timed_line(&self, now: OffsetDateTime, offset_at: impl Fn(OffsetDateTime) -> i32) -> String {
+        match self.since_text(now, offset_at) {
             Some(since) => format!("{} · {since}", self.line()),
             None => self.line(),
         }
@@ -212,12 +212,20 @@ mod tests {
     fn since_reads_as_a_local_clock() {
         let t = BackgroundTask { id: "x".into(), kind: "shell".into(), description: "build".into(), since: "2026-11-26T13:16:50Z".into(), ..Default::default() };
         let now = at("2026-11-26T15:00:00Z");
-        assert_eq!(t.timed_line(now, 0), "Shell: build · since 1:16 PM");
-        assert_eq!(t.timed_line(now, -5 * 3600), "Shell: build · since 8:16 AM");
-        assert_eq!(t.timed_line(at("2026-11-27T15:00:00Z"), 0), "Shell: build · since Thu 1:16 PM");
-        assert_eq!(t.timed_line(at("2026-11-26T15:00:00Z"), 11 * 3600), "Shell: build · since 12:16 AM");
+        assert_eq!(t.timed_line(now, |_| 0), "Shell: build · since 1:16 PM");
+        assert_eq!(t.timed_line(now, |_| -5 * 3600), "Shell: build · since 8:16 AM");
+        assert_eq!(t.timed_line(at("2026-11-27T15:00:00Z"), |_| 0), "Shell: build · since Thu 1:16 PM");
+        assert_eq!(t.timed_line(at("2026-11-26T15:00:00Z"), |_| 11 * 3600), "Shell: build · since 12:16 AM");
         let undated = BackgroundTask { since: String::new(), ..t };
-        assert_eq!(undated.timed_line(now, 0), "Shell: build");
+        assert_eq!(undated.timed_line(now, |_| 0), "Shell: build");
+    }
+
+    #[test]
+    fn since_uses_the_clock_of_its_own_moment() {
+        let t = BackgroundTask { id: "x".into(), kind: "shell".into(), description: "watch".into(), since: "2026-11-01T05:30:00Z".into(), ..Default::default() };
+        let switch = at("2026-11-01T06:00:00Z");
+        let eastern = |when: OffsetDateTime| if when < switch { -4 * 3600 } else { -5 * 3600 };
+        assert_eq!(t.timed_line(at("2026-11-01T09:00:00Z"), eastern), "Shell: watch · since 1:30 AM");
     }
 
     #[test]

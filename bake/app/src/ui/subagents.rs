@@ -1,11 +1,12 @@
 use std::collections::{HashMap, HashSet};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::*;
 use feed::subagents::{self as crew, Asked, ClaudeSubagent, ClaudeSubagents};
 use rune_kit::ControlSize;
 
 const KEPT: usize = 6;
+const PARENT_RETRY: Duration = Duration::from_secs(15);
 
 struct PageAsk {
     key: String,
@@ -30,7 +31,7 @@ pub struct Crew {
     claude_asked: HashMap<String, ClaudeAsk>,
     claude_loading: HashSet<String>,
     parents: HashMap<String, Session>,
-    parent_asked: HashSet<String>,
+    parent_asked: HashMap<String, Option<Instant>>,
     expanded: HashSet<String>,
     recent: Vec<String>,
 }
@@ -82,6 +83,9 @@ fn touch(s: &mut App, id: &str) {
     if s.crew.parents.len() > KEPT {
         s.crew.parents.retain(|id, _| held.contains(id));
     }
+    if s.crew.parent_asked.len() > KEPT {
+        s.crew.parent_asked.retain(|id, failed| failed.is_none() || held.contains(id));
+    }
 }
 
 pub(crate) fn load(s: &mut App, id: &str) {
@@ -122,9 +126,12 @@ fn parent_of(s: &App, id: &str) -> Option<String> {
 }
 
 fn parent_row(s: &mut App, id: &str) {
-    if !s.crew.parent_asked.insert(id.to_string()) {
-        return;
+    match s.crew.parent_asked.get(id) {
+        Some(None) => return,
+        Some(Some(failed)) if failed.elapsed() < PARENT_RETRY => return,
+        _ => {}
     }
+    s.crew.parent_asked.insert(id.to_string(), None);
     let id = id.to_string();
     spawn(s, move |c| Done::Parent(id.clone(), c.session_row(&id)));
 }
@@ -200,11 +207,15 @@ pub(crate) fn done(s: &mut App, done: Done) {
                 }
             }
         }
-        Done::Parent(id, result) => {
-            if let Ok(row) = result {
+        Done::Parent(id, result) => match result {
+            Ok(row) => {
+                s.crew.parent_asked.remove(&id);
                 s.crew.parents.insert(id, row);
             }
-        }
+            Err(_) => {
+                s.crew.parent_asked.insert(id, Some(Instant::now()));
+            }
+        },
     }
 }
 

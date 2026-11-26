@@ -59,7 +59,7 @@ pub(crate) fn dock(s: &App, x: &Session) -> Option<El> {
         .key("background-tasks-dismiss");
     let mut c = col().key("background-tasks").w_full().px(12.0).border_sides([0.0, 0.0, 1.0, 0.0], line()).child(row().w_full().gap(6.0).items_center().child(header).child(close));
     if open {
-        let offset = rune::time::LocalTime::at(s.now.unix_timestamp() * 1000).offset;
+        let offset = |t: time::OffsetDateTime| rune::time::LocalTime::at(t.unix_timestamp() * 1000).offset;
         let list = col()
             .w_full()
             .pl(21.0)
