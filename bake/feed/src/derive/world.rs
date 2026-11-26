@@ -125,6 +125,8 @@ pub struct Recorded {
     pub ledgers: HashMap<String, Vec<Work>>,
     #[serde(default)]
     pub transcripts: HashMap<String, Vec<Item>>,
+    #[serde(skip)]
+    pub prompted_before: HashSet<String>,
     #[serde(default)]
     pub usage: Vec<Meter>,
     #[serde(default)]
@@ -166,6 +168,7 @@ pub struct World {
     pub projects: Vec<Project>,
     pub work: HashMap<String, Work>,
     pub transcripts: HashMap<String, Vec<Item>>,
+    pub prompted_before: HashSet<String>,
     pub started_by: HashMap<String, String>,
     pub helpers: HashSet<String>,
     pub usage: Vec<Meter>,
@@ -192,7 +195,7 @@ impl World {
         }
         let names = crate::derive::names::build(&raw.sessions, &raw.actors, &work);
         let projects = projects(&raw.projects, &raw.sessions);
-        World { now, sessions: raw.sessions, projects, work, transcripts: raw.transcripts, started_by, helpers, usage: raw.usage, hosts: raw.hosts, rows: HashMap::new(), names }
+        World { now, sessions: raw.sessions, projects, work, transcripts: raw.transcripts, prompted_before: raw.prompted_before, started_by, helpers, usage: raw.usage, hosts: raw.hosts, rows: HashMap::new(), names }
     }
 
     pub fn session(&self, id: &str) -> Option<&Session> {

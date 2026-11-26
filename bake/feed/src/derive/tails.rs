@@ -1,22 +1,33 @@
 use std::collections::{HashMap, HashSet};
 use std::io::BufRead;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use time::OffsetDateTime;
 
 use crate::catalog::{Client, Session, parse_time};
+use crate::derive::hands_on::from_person;
 use crate::item::Item;
 use crate::store::Transcript;
 use crate::wire::{Outcome, Rebuild, Sse, Wire};
 
 pub const TAIL_ITEMS: usize = 160;
+pub const READ_BUDGET: Duration = Duration::from_secs(15);
+pub const IN_FLIGHT: usize = 4;
 const TAIL_HOURS: f64 = 24.0;
 const TAIL_SESSIONS: usize = 14;
 const LONG_TEXT: usize = 1200;
-const READ_BUDGET: Duration = Duration::from_secs(15);
+const LIVE: &str = ": live";
 
-pub fn trim(items: &[Item]) -> Vec<Item> {
-    items[items.len().saturating_sub(TAIL_ITEMS)..]
+#[derive(Clone, Debug, Default)]
+pub struct Tail {
+    pub items: Vec<Item>,
+    pub prompted_before: bool,
+}
+
+pub fn trim(items: &[Item]) -> Tail {
+    let start = items.len().saturating_sub(TAIL_ITEMS);
+    let prompted_before = items[..start].iter().any(from_person);
+    let items = items[start..]
         .iter()
         .map(|i| {
             let mut i = i.clone();
@@ -29,12 +40,17 @@ pub fn trim(items: &[Item]) -> Vec<Item> {
             }
             i
         })
-        .collect()
+        .collect();
+    Tail { items, prompted_before }
 }
 
-pub fn read(lines: impl Iterator<Item = String>) -> Vec<Item> {
+pub fn read(lines: impl Iterator<Item = std::io::Result<String>>) -> Result<Tail, String> {
     let (mut sse, mut rebuild, mut transcript) = (Sse::default(), Rebuild::default(), Transcript::default());
     for line in lines {
+        let line = line.map_err(|e| e.to_string())?;
+        if line == LIVE {
+            return Ok(trim(transcript.items()));
+        }
         let Some(json) = sse.line(&line) else { continue };
         let Ok(wire) = serde_json::from_str::<Wire>(&json) else { continue };
         match rebuild.apply(wire) {
@@ -42,21 +58,19 @@ pub fn read(lines: impl Iterator<Item = String>) -> Vec<Item> {
                 transcript.apply(seq, events);
             }
             Outcome::Skip => {}
-            Outcome::Resync => break,
+            Outcome::Resync => return Err("the replay did not line up".into()),
         }
     }
-    trim(transcript.items())
+    Err("the stream ended before its replay finished".into())
 }
 
-pub fn fetch(client: &Client, session: &str) -> Result<Vec<Item>, String> {
-    let reader = client.session_stream(session).map_err(|e| e.to_string())?;
-    let deadline = Instant::now() + READ_BUDGET;
-    Ok(read(reader.lines().map_while(Result::ok).take_while(|_| Instant::now() < deadline)))
+pub fn fetch(client: &Client, session: &str, budget: Duration) -> Result<Tail, String> {
+    read(client.session_stream(session, budget).map_err(|e| e.to_string())?.lines())
 }
 
 #[derive(Default)]
 pub struct Tails {
-    held: HashMap<String, (String, Vec<Item>)>,
+    held: HashMap<String, (String, Tail)>,
     fetching: HashSet<String>,
 }
 
@@ -71,20 +85,21 @@ impl Tails {
         let due: Vec<(String, String)> = recent
             .into_iter()
             .filter(|s| !open.contains(&s.id) && !self.fetching.contains(&s.id) && self.held.get(&s.id).is_none_or(|(at, _)| *at != s.last_active))
+            .take(IN_FLIGHT.saturating_sub(self.fetching.len()))
             .map(|s| (s.id.clone(), s.last_active.clone()))
             .collect();
         self.fetching.extend(due.iter().map(|(id, _)| id.clone()));
         due
     }
 
-    pub fn take(&mut self, session: &str, last_active: String, result: Result<Vec<Item>, String>) {
+    pub fn take(&mut self, session: &str, last_active: String, result: Result<Tail, String>) {
         self.fetching.remove(session);
-        if let Some(items) = result.ok().filter(|items| !items.is_empty()) {
-            self.held.insert(session.to_string(), (last_active, items));
+        if let Ok(tail) = result {
+            self.held.insert(session.to_string(), (last_active, tail));
         }
     }
 
-    pub fn items(&self) -> impl Iterator<Item = (&String, &Vec<Item>)> {
-        self.held.iter().map(|(id, (_, items))| (id, items))
+    pub fn held(&self) -> impl Iterator<Item = (&String, &Tail)> {
+        self.held.iter().map(|(id, (_, tail))| (id, tail))
     }
 }

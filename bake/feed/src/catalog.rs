@@ -523,8 +523,8 @@ impl Client {
         Ok(rows)
     }
 
-    pub(crate) fn session_stream(&self, session: &str) -> Result<impl std::io::BufRead + use<>> {
-        let agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(5)).timeout_read(Duration::from_millis(1500)).build();
+    pub(crate) fn session_stream(&self, session: &str, budget: Duration) -> Result<impl std::io::BufRead + use<>> {
+        let agent = ureq::AgentBuilder::new().timeout(budget).build();
         let response = agent
             .get(&format!("{}/api/v1/session-stream?id={}&after=0", self.base, enc(session)))
             .set("Authorization", &format!("Bearer {}", self.token))

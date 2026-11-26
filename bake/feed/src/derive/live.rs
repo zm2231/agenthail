@@ -1,11 +1,12 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::time::Instant;
 
 use anyhow::Result;
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 
 use crate::catalog::{Client, Session, parse_time};
-use crate::derive::tails::{self, Tails};
+use crate::derive::tails::{self, Tail, Tails};
 use crate::derive::world::{Actor, Recorded, Rows, Work, World};
 use crate::item::Item;
 
@@ -16,6 +17,7 @@ const RECENT_DAYS: i64 = 4;
 pub struct Fetched {
     pub recorded: Recorded,
     pub ledgers: HashMap<String, Result<Vec<Work>, String>>,
+    pub started: Instant,
 }
 
 pub struct Ledger {
@@ -24,6 +26,7 @@ pub struct Ledger {
 }
 
 pub fn fetch(client: &Client) -> Result<Fetched> {
+    let started = Instant::now();
     let snap = client.get_json("/api/v1/snapshot")?;
     let now = snap["updatedAt"].as_str().and_then(parse_time).unwrap_or_else(OffsetDateTime::now_utc);
     let sessions: Vec<Session> = serde_json::from_value(snap["sessions"].clone()).unwrap_or_default();
@@ -52,7 +55,7 @@ pub fn fetch(client: &Client) -> Result<Fetched> {
     let mut recorded: Recorded = serde_json::from_value(raw)?;
     recorded.actors = actors(client, &sessions, ledgers.values().filter_map(|r| r.as_ref().ok()).flatten());
     recorded.sessions = sessions;
-    Ok(Fetched { recorded, ledgers })
+    Ok(Fetched { recorded, ledgers, started })
 }
 
 pub fn ledger(client: &Client, project: &str, sessions: &[Session]) -> Result<Ledger, String> {
@@ -94,11 +97,15 @@ fn actors<'a>(client: &Client, sessions: &[Session], rows: impl Iterator<Item = 
     })
 }
 
-// Sessions only move forward in time, and a project's rows survive a failed fetch.
+// Sessions only move forward in time, a project's rows survive a failed fetch,
+// and neither rows nor actors from a fetch replace ones from a fetch that started after it.
 #[derive(Default)]
 pub struct Overview {
     base: Recorded,
     ledgers: HashMap<String, Vec<Work>>,
+    ledger_at: HashMap<String, Instant>,
+    actor_at: HashMap<String, Instant>,
+    stale: bool,
     failed: HashSet<String>,
     covered: HashSet<String>,
     pending: HashSet<String>,
@@ -108,8 +115,8 @@ pub struct Overview {
 fn newer(at: &str, than: &str) -> bool {
     match (parse_time(at), parse_time(than)) {
         (Some(a), Some(b)) => a > b,
-        (_, None) => true,
-        (None, Some(_)) => false,
+        (Some(_), None) => true,
+        (None, _) => false,
     }
 }
 
@@ -130,27 +137,33 @@ impl Overview {
         }
         self.base.updated_at = at.to_string();
         self.base.sessions = sessions;
+        self.stale = true;
         true
     }
 
+    pub fn stale(&self) -> bool {
+        self.stale
+    }
+
     pub fn refresh(&mut self, fetched: Fetched) {
-        let Fetched { mut recorded, ledgers } = fetched;
+        let Fetched { mut recorded, ledgers, started } = fetched;
         if !newer(&recorded.updated_at, &self.base.updated_at) {
             recorded.updated_at = std::mem::take(&mut self.base.updated_at);
             recorded.sessions = std::mem::take(&mut self.base.sessions);
         }
-        let mut actors = std::mem::take(&mut self.base.actors);
-        actors.extend(std::mem::take(&mut recorded.actors));
-        recorded.actors = actors;
+        let actors = std::mem::replace(&mut recorded.actors, std::mem::take(&mut self.base.actors));
         recorded.transcripts = std::mem::take(&mut self.base.transcripts);
         self.base = recorded;
+        self.stale = true;
+        self.take_actors(started, actors);
         self.covered = ledgers.keys().cloned().collect();
         for (key, result) in ledgers {
-            self.apply(key, result);
+            self.apply(key, started, result);
         }
         let listed: HashSet<&str> = self.base.projects.iter().filter(|p| !p.archived).map(|p| p.id.as_str()).collect();
         self.ledgers.retain(|k, _| listed.contains(k.as_str()));
         self.failed.retain(|k| listed.contains(k.as_str()));
+        self.ledger_at.retain(|k, _| listed.contains(k.as_str()));
     }
 
     pub fn wants(&mut self, project: &str) -> bool {
@@ -158,19 +171,35 @@ impl Overview {
             return false;
         }
         self.pending.insert(project.to_string());
+        self.stale = true;
         true
     }
 
-    pub fn take_ledger(&mut self, project: &str, result: Result<Ledger, String>) {
+    pub fn take_ledger(&mut self, project: &str, started: Instant, result: Result<Ledger, String>) {
         self.pending.remove(project);
+        self.stale = true;
         let rows = result.map(|l| {
-            self.base.actors.extend(l.actors);
+            self.take_actors(started, l.actors);
             l.rows
         });
-        self.apply(project.to_string(), rows);
+        self.apply(project.to_string(), started, rows);
     }
 
-    fn apply(&mut self, key: String, result: Result<Vec<Work>, String>) {
+    fn take_actors(&mut self, started: Instant, actors: HashMap<String, Actor>) {
+        for (id, actor) in actors {
+            if self.actor_at.get(&id).is_some_and(|at| *at > started) {
+                continue;
+            }
+            self.actor_at.insert(id.clone(), started);
+            self.base.actors.insert(id, actor);
+        }
+    }
+
+    fn apply(&mut self, key: String, started: Instant, result: Result<Vec<Work>, String>) {
+        if self.ledger_at.get(&key).is_some_and(|at| *at > started) {
+            return;
+        }
+        self.ledger_at.insert(key.clone(), started);
         match result {
             Ok(rows) => {
                 self.failed.remove(&key);
@@ -187,15 +216,24 @@ impl Overview {
         self.tails.due(&self.base.sessions, now, open)
     }
 
-    pub fn take_tail(&mut self, session: &str, last_active: String, result: Result<Vec<Item>, String>) {
+    pub fn take_tail(&mut self, session: &str, last_active: String, result: Result<Tail, String>) {
         self.tails.take(session, last_active, result);
+        self.stale = true;
     }
 
-    pub fn world(&self, panes: &[(&str, &[Item])]) -> World {
+    pub fn world(&mut self, panes: &[(&str, &[Item])]) -> World {
+        self.stale = false;
         let mut raw = self.base.clone();
         raw.ledgers = self.ledgers.clone();
-        raw.transcripts.extend(self.tails.items().map(|(id, items)| (id.clone(), items.clone())));
-        raw.transcripts.extend(panes.iter().filter(|(_, items)| !items.is_empty()).map(|(id, items)| (id.to_string(), tails::trim(items))));
+        let panes = panes.iter().filter(|(_, items)| !items.is_empty()).map(|(id, items)| (id.to_string(), tails::trim(items)));
+        for (id, tail) in self.tails.held().map(|(id, tail)| (id.clone(), tail.clone())).chain(panes) {
+            if tail.prompted_before {
+                raw.prompted_before.insert(id.clone());
+            } else {
+                raw.prompted_before.remove(&id);
+            }
+            raw.transcripts.insert(id, tail.items);
+        }
         let mut world = World::new(raw);
         for key in &self.failed {
             world.rows.insert(key.clone(), if self.ledgers.contains_key(key) { Rows::Stale } else { Rows::Unavailable });

@@ -11,6 +11,7 @@ use std::time::Duration;
 use feed::catalog::{Client, OpenRequest, Session, WorkItem};
 use feed::derive::Recorded;
 use feed::derive::live::{Fetched, Ledger, Overview};
+use feed::derive::tails::{self, Tail};
 use feed::source::{Live, Message};
 use rune::{AppSpec, Chrome, TextEdit, Tx, WindowOptions};
 use time::OffsetDateTime;
@@ -22,8 +23,8 @@ pub enum Bg {
     Snapshot(String, Vec<Session>),
     Item(String, WorkItem),
     Overview(Box<Fetched>),
-    Ledger(String, Result<Ledger, String>),
-    Tail(String, String, Result<Vec<feed::Item>, String>),
+    Ledger(String, std::time::Instant, Result<Ledger, String>),
+    Tail(String, String, Result<Tail, String>),
     OverviewError(String),
     Sent(String, Result<(), feed::catalog::RespondError>),
     Requests(String, Vec<OpenRequest>, std::time::Instant),
@@ -291,7 +292,8 @@ fn fetch_tails(s: &mut App) {
     for (id, last_active) in s.ov.live.due_tails(&open) {
         let (tx, client) = (s.outbox.clone(), client.clone());
         std::thread::spawn(move || {
-            let result = feed::derive::tails::fetch(&client, &id);
+            let read = std::panic::AssertUnwindSafe(|| tails::fetch(&client, &id, tails::READ_BUDGET));
+            let result = std::panic::catch_unwind(read).unwrap_or_else(|_| Err("the read stopped".into()));
             let _ = tx.send(Bg::Tail(id, last_active, result));
         });
     }
@@ -302,11 +304,10 @@ pub fn fetch_ledger(s: &mut App, project: &str) {
     if !s.ov.live.wants(project) {
         return;
     }
-    rebuild(s);
-    let (tx, project, sessions) = (s.outbox.clone(), project.to_string(), s.sessions.clone());
+    let (tx, project, sessions, started) = (s.outbox.clone(), project.to_string(), s.sessions.clone(), std::time::Instant::now());
     std::thread::spawn(move || {
         let result = feed::derive::live::ledger(&client, &project, &sessions);
-        let _ = tx.send(Bg::Ledger(project, result));
+        let _ = tx.send(Bg::Ledger(project, started, result));
     });
 }
 
@@ -480,12 +481,12 @@ pub fn send_to(s: &mut App, id: &str, tx: &mut Tx) {
 fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     s.clock = t;
     let mut changed = false;
+    let mut arrived = false;
     while let Ok(message) = s.inbox.try_recv() {
         changed = true;
         match message {
             Bg::Snapshot(at, sessions) => {
                 if s.ov.live.take_sessions(&at, sessions) {
-                    rebuild(s);
                     s.sessions = s.ov.live.sessions().to_vec();
                 }
                 s.now = OffsetDateTime::now_utc();
@@ -502,18 +503,16 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             }
             Bg::Overview(fetched) => {
                 s.ov.live.refresh(*fetched);
-                rebuild(s);
                 s.sessions = s.ov.live.sessions().to_vec();
                 fetch_tails(s);
-                over::arrive(s);
+                arrived = true;
             }
             Bg::Tail(id, last_active, result) => {
                 s.ov.live.take_tail(&id, last_active, result);
-                rebuild(s);
+                fetch_tails(s);
             }
-            Bg::Ledger(project, result) => {
-                s.ov.live.take_ledger(&project, result);
-                rebuild(s);
+            Bg::Ledger(project, started, result) => {
+                s.ov.live.take_ledger(&project, started, result);
             }
             Bg::OverviewError(error) => s.ov.notice = Some(format!("Couldn't refresh the overview: {error}")),
             Bg::Sent(id, result) => {
@@ -589,8 +588,12 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     }
     s.counter = counter;
     s.panes_moved |= panes_moved;
-    if s.panes_moved && s.clock - s.built_at >= PANE_REBUILD_SECS {
+    if s.ov.live.stale() || (s.panes_moved && s.clock - s.built_at >= PANE_REBUILD_SECS) {
         rebuild(s);
+        changed = true;
+    }
+    if arrived {
+        over::arrive(s);
     }
     if s.tab == Tab::Changes && (changed || s.diff_key.0 != s.selected.clone().unwrap_or_default()) {
         refresh_diff(s);

@@ -6,18 +6,20 @@ use super::world::World;
 pub const HANDS_ON_CAP: usize = 5;
 const RECENT_HOURS: f64 = 0.5;
 
-fn from_person(i: &Item) -> bool {
+pub(crate) fn from_person(i: &Item) -> bool {
     let t = i.text.trim_start();
     i.kind == "message" && i.role_is("user") && i.agent.is_none() && !t.starts_with("<cross-session-message") && !t.starts_with("[from ")
 }
 
 impl World {
-    // The first prompt starts a session and does not show the person is steering it.
+    // The first prompt starts a session and does not show the person is steering it,
+    // unless an earlier message from the person fell outside the kept transcript.
     pub fn last_said(&self, session: &str) -> Option<&str> {
         if self.helpers.contains(session) || self.started_by.contains_key(session) {
             return None;
         }
-        self.transcripts.get(session)?.iter().filter(|i| from_person(i)).skip(1).last()?.timestamp.as_deref()
+        let opening = usize::from(!self.prompted_before.contains(session));
+        self.transcripts.get(session)?.iter().filter(|i| from_person(i)).skip(opening).last()?.timestamp.as_deref()
     }
 
     pub fn hands_on(&self, pinned: &[String]) -> Vec<&Session> {

@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use std::time::Instant;
 
 use serde_json::{Value, json};
 
 use super::live::{Fetched, Ledger, Overview};
+use super::world::Actor;
 use super::*;
 use crate::catalog::Session;
 
@@ -21,7 +23,7 @@ fn recorded(at: &str, sessions: Vec<Session>) -> Recorded {
 }
 
 fn fetched(at: &str, sessions: Vec<Session>, ledgers: Vec<(&str, Result<Vec<Work>, String>)>) -> Fetched {
-    Fetched { recorded: recorded(at, sessions), ledgers: ledgers.into_iter().map(|(k, r)| (k.to_string(), r)).collect() }
+    Fetched { recorded: recorded(at, sessions), ledgers: ledgers.into_iter().map(|(k, r)| (k.to_string(), r)).collect(), started: Instant::now() }
 }
 
 fn status(w: &World, id: &str) -> String {
@@ -84,7 +86,7 @@ fn a_listed_project_without_recent_sessions_gets_its_board_when_opened() {
     assert!(ov.wants("old"));
     assert!(!ov.wants("old"), "one fetch at a time");
     assert_eq!(ov.world(&[]).rows.get("old"), Some(&Rows::Loading));
-    ov.take_ledger("old", Ok(Ledger { rows: vec![work("w9", "open")], actors: HashMap::new() }));
+    ov.take_ledger("old", Instant::now(), Ok(Ledger { rows: vec![work("w9", "open")], actors: HashMap::new() }));
     let w = ov.world(&[]);
     assert_eq!(board_ids(&w, "old"), ["w9"]);
     assert_eq!(w.rows.get("old"), None);
@@ -99,4 +101,73 @@ fn a_recording_shows_every_ledger_it_holds() {
     let mut ov = Overview::recorded(serde_json::from_value(raw).unwrap());
     assert!(!ov.wants("p"));
     assert_eq!(board_ids(&ov.world(&[]), "p"), ["w1"]);
+}
+
+#[test]
+fn an_overview_without_a_valid_time_never_replaces_the_held_sessions() {
+    let mut ov = Overview::default();
+    assert!(!ov.take_sessions("", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    ov.refresh(fetched("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:59:00Z", "busy")], vec![]));
+    assert!(!ov.take_sessions("not a time", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    ov.refresh(fetched("", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")], vec![]));
+    assert_eq!(status(&ov.world(&[]), "a"), "busy");
+}
+
+#[test]
+fn a_ledger_fetch_that_started_earlier_never_overwrites_a_later_one() {
+    let sessions = || vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")];
+    let (earlier, later) = (Instant::now(), Instant::now() + std::time::Duration::from_millis(1));
+    let mut ov = Overview::default();
+    ov.take_ledger("p", later, Ok(Ledger { rows: vec![work("new", "open")], actors: HashMap::new() }));
+    ov.refresh(Fetched { started: earlier, ..fetched("2026-11-24T12:00:00Z", sessions(), vec![("p", Ok(vec![work("old", "open")]))]) });
+    assert_eq!(board_ids(&ov.world(&[]), "p"), ["new"], "a refresh that started first and landed last");
+    ov.take_ledger("p", earlier, Err("timed out".into()));
+    assert_eq!(ov.world(&[]).rows.get("p"), None, "nor does its failure mark the newer rows stale");
+    let latest = later + std::time::Duration::from_millis(1);
+    ov.refresh(Fetched { started: latest, ..fetched("2026-11-24T12:00:20Z", sessions(), vec![("p", Ok(vec![work("newest", "open")]))]) });
+    ov.take_ledger("p", later, Ok(Ledger { rows: vec![work("new", "open")], actors: HashMap::new() }));
+    assert_eq!(board_ids(&ov.world(&[]), "p"), ["newest"], "an on-demand fetch that started first and landed last");
+}
+
+fn actor(alias: &str) -> HashMap<String, Actor> {
+    [("helper-1".to_string(), Actor { alias: Some(alias.into()), name: None, surface: None })].into()
+}
+
+#[test]
+fn actors_from_a_fetch_that_started_earlier_never_replace_later_ones() {
+    let sessions = || vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")];
+    let (earlier, later) = (Instant::now(), Instant::now() + std::time::Duration::from_millis(1));
+    let mut ov = Overview::default();
+    ov.take_ledger("p", later, Ok(Ledger { rows: vec![], actors: actor("fresh") }));
+    let mut stale = fetched("2026-11-24T12:00:00Z", sessions(), vec![]);
+    stale.recorded.actors = actor("stale");
+    ov.refresh(Fetched { started: earlier, ..stale });
+    assert!(ov.world(&[]).name_of("helper-1").contains("fresh"), "a refresh that started first and landed last");
+    let latest = later + std::time::Duration::from_millis(1);
+    let mut newest = fetched("2026-11-24T12:00:20Z", sessions(), vec![]);
+    newest.recorded.actors = actor("newest");
+    ov.refresh(Fetched { started: latest, ..newest });
+    ov.take_ledger("p", later, Ok(Ledger { rows: vec![], actors: actor("fresh") }));
+    assert!(ov.world(&[]).name_of("helper-1").contains("newest"), "an on-demand fetch that started first and landed last");
+}
+
+#[test]
+fn a_burst_of_arrivals_leaves_one_rebuild_pending() {
+    let sessions = || vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")];
+    let mut ov = Overview::default();
+    ov.refresh(fetched("2026-11-24T12:00:00Z", sessions(), vec![]));
+    ov.world(&[]);
+    assert!(!ov.stale());
+    assert!(!ov.take_sessions("2026-11-24T11:00:00Z", sessions()));
+    assert!(!ov.stale(), "a snapshot that changes nothing asks for no rebuild");
+    for id in ["t1", "t2", "t3"] {
+        ov.take_tail(id, "2026-11-24T11:59:00Z".into(), Err("timed out".into()));
+    }
+    ov.take_ledger("p", Instant::now(), Ok(Ledger { rows: vec![work("w1", "open")], actors: HashMap::new() }));
+    ov.refresh(fetched("2026-11-24T12:00:20Z", sessions(), vec![]));
+    assert!(ov.stale());
+    ov.world(&[]);
+    assert!(!ov.stale(), "one rebuild covers every arrival before it");
+    assert!(ov.wants("old"));
+    assert!(ov.stale(), "a project opened for loading asks for a rebuild to show it");
 }
