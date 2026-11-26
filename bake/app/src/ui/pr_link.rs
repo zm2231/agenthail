@@ -60,7 +60,9 @@ fn send(s: &mut App, id: &str, op: PrOp, pr: &str) -> bool {
 }
 
 pub fn change(s: &mut App, id: &str, op: PrOp, pr: &str) {
-    send(s, id, op, pr);
+    if writable(s, id) {
+        send(s, id, op, pr);
+    }
 }
 
 pub fn start(s: &mut App, id: &str) {
@@ -79,8 +81,16 @@ fn close(s: &mut App) {
     s.prs.saving = false;
 }
 
+fn writable(s: &App, id: &str) -> bool {
+    session(s, id).is_some_and(|x| !x.read_only)
+}
+
 fn save(s: &mut App) {
     let Some(id) = s.prs.linking.clone() else { return };
+    if !writable(s, &id) {
+        close(s);
+        return;
+    }
     let pr = s.prs.text.text.trim().to_string();
     if s.prs.saving || pr_problem(&pr).is_some() {
         return;
@@ -128,6 +138,13 @@ pub fn drain(s: &mut App) -> bool {
     while let Ok(done) = s.prs.rx.try_recv() {
         changed = true;
         settled(s, done);
+    }
+    if let Some(id) = s.prs.linking.clone()
+        && !s.prs.saving
+        && !writable(s, &id)
+    {
+        close(s);
+        changed = true;
     }
     changed
 }

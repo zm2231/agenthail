@@ -83,7 +83,7 @@ fn since(s: &App, id: &str) -> String {
 }
 
 fn waiting_since(s: &App, id: &str) -> Option<String> {
-    session(s, id).and_then(|x| x.limit(s.now)).filter(|stop| stop.held && stop.waiting).map(|stop| stop.since)
+    session(s, id).filter(|x| !x.read_only).and_then(|x| x.limit(s.now)).filter(|stop| stop.held && stop.waiting).map(|stop| stop.since)
 }
 
 fn current(s: &App, id: &str, since: &str) -> bool {
