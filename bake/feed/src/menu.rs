@@ -185,17 +185,20 @@ pub fn names_pr(asked: &str, pr: &crate::catalog::Pr) -> bool {
     if let Ok(number) = asked.parse::<u64>() {
         return pr.number == number;
     }
-    let Ok(link) = url::Url::parse(asked) else { return false };
+    pr_link(asked).is_some_and(|(repo, number)| pr.number == number && pr.repo.to_lowercase() == repo)
+}
+
+fn pr_link(asked: &str) -> Option<(String, u64)> {
+    let link = url::Url::parse(asked.trim()).ok()?;
     if !matches!(link.scheme(), "http" | "https") || !link.username().is_empty() || link.password().is_some() {
-        return false;
+        return None;
     }
-    let Some(host) = link.host_str() else { return false };
+    let host = link.host_str()?;
     let path = decoded(link.path());
     let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
-    let [owner, name, "pull", number] = parts[..] else { return false };
-    let Ok(number) = number.parse::<u64>() else { return false };
-    let repo = format!("{host}/{owner}/{}", name.trim_end_matches(".git")).to_lowercase();
-    pr.number == number && pr.repo.to_lowercase() == repo
+    let [owner, name, "pull", number] = parts[..] else { return None };
+    let number = number.parse::<u64>().ok().filter(|n| *n > 0)?;
+    Some((format!("{host}/{owner}/{}", name.trim_end_matches(".git")).to_lowercase(), number))
 }
 
 fn decoded(path: &str) -> String {
@@ -224,8 +227,7 @@ pub fn pr_problem(text: &str) -> Option<&'static str> {
         return Some("Paste a pull request link, or its number.");
     }
     let number = text.parse::<u64>().is_ok_and(|n| n > 0);
-    let link = (text.starts_with("https://") || text.starts_with("http://")) && text.contains("/pull/");
-    if number || link { None } else { Some("That isn't a pull request link or number.") }
+    if number || pr_link(text).is_some() { None } else { Some("That isn't a pull request link or number.") }
 }
 
 pub fn normalized(text: &str) -> String {
@@ -365,6 +367,9 @@ mod tests {
         assert_eq!(pr_problem(" "), Some("Paste a pull request link, or its number."));
         assert_eq!(pr_problem("#34"), None);
         assert_eq!(pr_problem("https://github.com/o/r/pull/34"), None);
+        assert_eq!(pr_problem("https://github.com/o/r/%70ull/34"), None);
+        assert_eq!(pr_problem("https://github.com/o/r/issues/34"), Some("That isn't a pull request link or number."));
+        assert_eq!(pr_problem("https://github.com/o/r/pull/0"), Some("That isn't a pull request link or number."));
         assert_eq!(pr_problem("0"), Some("That isn't a pull request link or number."));
         assert_eq!(pr_problem("fix it"), Some("That isn't a pull request link or number."));
     }

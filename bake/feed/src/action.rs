@@ -115,7 +115,13 @@ impl Client {
 
     pub fn pr(&self, session: &str, op: PrOp, pr: &str) -> Outcome<Vec<Pr>> {
         let reply = self.action("pr", json!({"sessionId": session, "op": op.as_str(), "pr": pr}))?;
-        Ok(serde_json::from_value(reply["prs"].clone()).unwrap_or_default())
+        serde_json::from_value(reply["prs"].clone()).map_err(|e| RespondError {
+            message: format!("the daemon's answer didn't list the session's pull requests: {e}"),
+            code: "unreadable_reply".into(),
+            maybe_delivered: true,
+            answered: true,
+            reply,
+        })
     }
 }
 
@@ -214,7 +220,7 @@ mod tests {
                 json!({"action": "respond", "sessionId": "s1", "requestId": "ask-2", "decision": {"choices": ["Yes"], "answers": {}}}),
             ),
         ];
-        let (client, seen) = daemon(calls.iter().map(|_| (200, r#"{"ok":true}"#)).collect());
+        let (client, seen) = daemon(calls.iter().map(|_| (200, r#"{"ok":true,"prs":[]}"#)).collect());
         let mut keys = std::collections::HashSet::new();
         for (call, want) in calls {
             call(&client).unwrap();
@@ -235,6 +241,7 @@ mod tests {
             (200, r#"{"ok":true,"sessionId":"s1","readState":{"revision":"r10"}}"#),
             (200, r#"{"ok":true,"sessionId":"s1","prs":[{"repo":"o/r","number":12,"url":"https://github.com/o/r/pull/12","watch":true,"checks":"failing"}]}"#),
             (200, r#"{"ok":true,"result":{"sessionId":"s2"}}"#),
+            (200, r#"{"ok":true,"sessionId":"s1"}"#),
             (409, r#"{"error":{"code":"move_needs_consent","message":"a terminal runs this session"}}"#),
             (409, r#"{"error":{"code":"move_refused","message":"no other Claude account has room for this session now"}}"#),
         ]);
@@ -243,6 +250,8 @@ mod tests {
         assert_eq!(client.session_read("s1", "r9", true).unwrap(), Some(ReadState { first_unread: String::new(), revision: "r10".into() }));
         let prs = client.pr("s1", PrOp::Watch, "12").unwrap();
         assert_eq!((prs[0].number, prs[0].watch, prs[0].checks.as_str()), (12, true, "failing"));
+        let unread = client.pr("s1", PrOp::Link, "13").unwrap_err();
+        assert!(unread.maybe_delivered && unread.code == "unreadable_reply", "{unread:?}");
         use crate::limit::Moved;
         assert_eq!(client.limit_move("s1", Some("/r/b"), false).unwrap(), Moved::Done);
         assert_eq!(client.limit_move("s1", Some("/r/b"), false).unwrap(), Moved::NeedsConsent("a terminal runs this session".into()));
