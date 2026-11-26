@@ -242,7 +242,7 @@ impl Failure {
     }
 }
 
-fn read_failure(scope: &'static str, status: u16, body: &str) -> Failure {
+pub(crate) fn read_failure(scope: &'static str, status: u16, body: &str) -> Failure {
     if status == 401 || status == 403 {
         return refused(scope);
     }

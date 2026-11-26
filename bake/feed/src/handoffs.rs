@@ -2,7 +2,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 
-use crate::catalog::{Client, ago, confirmed};
+use crate::catalog::{Client, ago, confirmed, enc};
 use crate::prefs::{Failure, write_failure};
 
 fn listed<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Vec<T>, D::Error> {
@@ -118,7 +118,7 @@ pub fn channel_name(draft: &str) -> Result<String, &'static str> {
     if name.is_empty() {
         return Err("Name the channel.");
     }
-    if name.chars().count() > 80 || name.contains([' ', '\t', '\r', '\n', '/', ':', '#']) {
+    if name.len() > 80 || name.contains([' ', '\t', '\r', '\n', '/', ':', '#']) {
         return Err("A channel name is 1 to 80 characters without spaces, /, : or #.");
     }
     Ok(name.to_string())
@@ -189,7 +189,7 @@ impl Sent {
             parts.push(format!("delivered to {}", count(self.sent, "session", "sessions")));
         }
         if self.queued > 0 {
-            parts.push(format!("queued for {}", count(self.queued, "busy session", "busy sessions")));
+            parts.push(format!("queued for {}", count(self.queued, "session", "sessions")));
         }
         if self.submitted > 0 {
             parts.push(format!("{} taken but not yet confirmed", count(self.submitted, "delivery", "deliveries")));
@@ -213,11 +213,72 @@ impl Sent {
     }
 }
 
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PickHost {
+    #[serde(default)]
+    pub state: String,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Pick {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub alias: Option<String>,
+    #[serde(default)]
+    pub read_only: bool,
+    #[serde(default)]
+    pub host: Option<PickHost>,
+}
+
+impl Pick {
+    pub fn local(&self) -> bool {
+        self.host.as_ref().is_none_or(|h| h.state.is_empty() || h.state == "local")
+    }
+
+    pub fn alias(&self) -> Option<&str> {
+        self.alias.as_deref().filter(|a| !a.is_empty())
+    }
+
+    pub fn label(&self) -> String {
+        match self.alias() {
+            Some(alias) => format!("@{alias}"),
+            None if self.name.trim().is_empty() => self.id.clone(),
+            None => self.name.trim().to_string(),
+        }
+    }
+
+    pub fn target(&self) -> String {
+        self.alias().map(|a| format!("@{a}")).unwrap_or_else(|| self.id.clone())
+    }
+}
+
+pub fn picks(found: Vec<Pick>, writable_only: bool) -> Vec<Pick> {
+    let mut seen = std::collections::HashSet::new();
+    found.into_iter().filter(|p| p.local() && !(writable_only && p.read_only) && seen.insert(p.id.clone())).collect()
+}
+
+#[derive(Deserialize)]
+struct Found {
+    #[serde(default, deserialize_with = "listed")]
+    sessions: Vec<Pick>,
+}
+
 fn act(client: &Client, name: &str, payload: Value) -> Result<Value, Failure> {
     client.action(name, payload).and_then(confirmed).map_err(|e| write_failure("control", e))
 }
 
 impl Client {
+    pub fn find_sessions(&self, query: &str) -> Result<Vec<Pick>, Failure> {
+        let path = format!("/api/v1/snapshot?scope=all&members=1&limit=20&q={}", enc(query.trim()));
+        let value = self.get_reply(&path).map_err(|(status, body)| crate::prefs::read_failure("read", status, &body))?;
+        let found: Found = serde_json::from_value(value).map_err(|e| Failure::new(format!("the daemon's reply couldn't be read: {e}")))?;
+        Ok(found.sessions)
+    }
+
     pub fn channel_create(&self, name: &str) -> Result<(), Failure> {
         act(self, "channel-create", json!({"channel": name})).map(drop)
     }
@@ -287,6 +348,7 @@ mod tests {
         assert!(channel_name("a:b").is_err());
         assert!(channel_name(&"x".repeat(81)).is_err());
         assert!(channel_name(&"x".repeat(80)).is_ok());
+        assert!(channel_name(&"é".repeat(41)).is_err(), "the daemon counts bytes");
     }
 
     #[test]
@@ -309,9 +371,30 @@ mod tests {
     #[test]
     fn a_channel_send_says_who_it_reached() {
         assert_eq!(Sent { sent: 1, ..Default::default() }.summary(), "Delivered to 1 session.");
-        assert_eq!(Sent { sent: 2, queued: 1, older: 1, unreachable: vec!["forge".into()], ..Default::default() }.summary(), "Delivered to 2 sessions; queued for 1 busy session; 1 older session not reached; held for forge.");
+        assert_eq!(Sent { sent: 2, queued: 1, older: 1, unreachable: vec!["forge".into()], ..Default::default() }.summary(), "Delivered to 2 sessions; queued for 1 session; 1 older session not reached; held for forge.");
         assert_eq!(Sent { submitted: 2, skipped: 1, ..Default::default() }.summary(), "2 deliveries taken but not yet confirmed; 1 member skipped.");
         assert_eq!(Sent::default().summary(), "Sent.");
+    }
+
+    #[test]
+    fn session_search_offers_local_sessions_and_names_them_for_the_daemon() {
+        let page = r#"{"sessions":[
+            {"id":"h1::a","name":"Writer","alias":"writer","host":{"state":"local"}},
+            {"id":"h1::b","name":"  Docs pass ","alias":"","readOnly":true},
+            {"id":"h2::c","name":"Far","host":{"state":"connected"}},
+            {"id":"h1::a","name":"Writer again","alias":"writer"},
+            {"id":"h1::d","name":""}
+        ],"nextCursor":"x"}"#;
+        let (client, rx) = daemon(replies(&[(200, page), (403, r#"{"error":{"message":"no"}}"#)]));
+        let found = client.find_sessions(" doc & pass ").unwrap();
+        let (path, _) = rx.recv().unwrap();
+        assert_eq!(path, "/api/v1/snapshot?scope=all&members=1&limit=20&q=doc+%26+pass");
+        let all = picks(found.clone(), false);
+        assert_eq!(all.iter().map(|p| (p.label(), p.target())).collect::<Vec<_>>(), vec![("@writer".into(), "@writer".into()), ("Docs pass".into(), "h1::b".into()), ("h1::d".to_string(), "h1::d".to_string())]);
+        assert_eq!(picks(found, true).iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), vec!["h1::a", "h1::d"]);
+        assert!(client.find_sessions("x").unwrap_err().denied);
+        let empty: Found = serde_json::from_str(r#"{"sessions":null}"#).unwrap();
+        assert!(empty.sessions.is_empty());
     }
 
     #[test]

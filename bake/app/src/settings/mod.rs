@@ -413,6 +413,7 @@ fn take(s: &mut Prefs, done: Done) {
         s.external = false;
         reload(s);
     }
+    handoffs::flush(s);
 }
 
 fn take_one(s: &mut Prefs, done: Done) {
