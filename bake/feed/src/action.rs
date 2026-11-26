@@ -31,8 +31,9 @@ impl Client {
         self.action("steer", json!({"sessionId": session, "message": message, "author": "person"})).map(drop)
     }
 
-    pub fn queue_cancel(&self, session: &str, queue_id: i64) -> Outcome<String> {
-        let reply = self.action("queue-cancel", json!({"sessionId": session, "queueId": queue_id}))?;
+    /// `host` names the computer that holds the queue row; "" is this one.
+    pub fn queue_cancel(&self, queue_id: i64, host: &str) -> Outcome<String> {
+        let reply = self.action("queue-cancel", json!({"queueId": queue_id, "host": host}))?;
         Ok(reply["result"]["message"].as_str().unwrap_or_default().to_string())
     }
 
@@ -150,7 +151,8 @@ mod tests {
         let calls: Vec<(Call, Value)> = vec![
             (Box::new(|c| c.interrupt("s1")), json!({"action": "interrupt", "sessionId": "s1"})),
             (Box::new(|c| c.steer("s1", "stop")), json!({"action": "steer", "sessionId": "s1", "message": "stop", "author": "person"})),
-            (Box::new(|c| c.queue_cancel("s1", 7).map(drop)), json!({"action": "queue-cancel", "sessionId": "s1", "queueId": 7})),
+            (Box::new(|c| c.queue_cancel(7, "").map(drop)), json!({"action": "queue-cancel", "queueId": 7, "host": ""})),
+            (Box::new(|c| c.queue_cancel(7, "mac").map(drop)), json!({"action": "queue-cancel", "queueId": 7, "host": "mac"})),
             (Box::new(|c| c.session_archive("s1", true)), json!({"action": "session-archive", "sessionId": "s1"})),
             (Box::new(|c| c.session_archive("s1", false)), json!({"action": "session-unarchive", "sessionId": "s1"})),
             (Box::new(|c| c.session_pin("s1", true)), json!({"action": "session-pin", "sessionId": "s1"})),
@@ -194,7 +196,7 @@ mod tests {
             (200, r#"{"ok":true,"alias":"scout"}"#),
             (200, r#"{"ok":true,"sessionId":"s1","readState":{"revision":"r10"}}"#),
         ]);
-        assert_eq!(client.queue_cancel("s1", 7).unwrap(), "take this back");
+        assert_eq!(client.queue_cancel(7, "").unwrap(), "take this back");
         assert_eq!(client.alias("s1", "@scout").unwrap(), "scout");
         assert_eq!(client.session_read("s1", "r9", true).unwrap(), Some(ReadState { first_unread: String::new(), revision: "r10".into() }));
     }
@@ -204,30 +206,43 @@ mod tests {
         let (client, _seen) = daemon(vec![
             (409, r#"{"error":{"code":"read_state_conflict","message":"the conversation moved on"}}"#),
             (400, r#"{"error":{"code":"invalid_request","message":"this session cannot be interrupted"}}"#),
-            (502, r#"{"error":{"code":"control_failed","message":"the runtime broke"}}"#),
+            (502, r#"{"error":{"code":"bad_gateway","message":"session ended"}}"#),
         ]);
         let conflict = client.session_read("s1", "r9", true).unwrap_err();
         assert_eq!((conflict.code.as_str(), conflict.message.as_str(), conflict.maybe_delivered), ("read_state_conflict", "the conversation moved on", false));
         assert!(!client.interrupt("s1").unwrap_err().maybe_delivered);
-        assert!(!client.compact("s1").unwrap_err().maybe_delivered);
+        assert!(!client.respond("s1", "ask-1", vec!["Yes".into()], Default::default()).unwrap_err().maybe_delivered);
     }
 
     #[test]
     fn an_unknown_outcome_is_maybe_delivered() {
         let (client, _seen) = daemon(vec![
             (504, r#"{"error":{"code":"host_outcome_unknown","message":"Host mac did not answer; the outcome is unknown"}}"#),
+            (502, r#"{"error":{"code":"control_failed","message":"compact outcome unknown"},"result":{"sessionId":"s1","action":"compact","evidence":"accepted"}}"#),
             (502, r#"{"error":{"code":"bad_gateway","message":"turn busy"}}"#),
-            (502, r#"{"error":{"code":"bad_gateway","message":"turn busy"}}"#),
+            (502, r#"{"error":{"code":"host_answer_too_large","message":"Host mac answered with more than 8 MiB."}}"#),
+            (502, r#"{"error":{"code":"bad_gateway","message":"the answer may have reached the session, so it is not sent again: timeout"}}"#),
         ]);
         assert!(client.compact("s1").unwrap_err().maybe_delivered);
+        assert!(client.compact("s1").unwrap_err().maybe_delivered);
         assert!(client.steer("s1", "stop").unwrap_err().maybe_delivered);
-        assert!(!client.turn_setting("s1", "effort", "high").unwrap_err().maybe_delivered);
+        assert!(client.turn_setting("s1", "effort", "high").unwrap_err().maybe_delivered);
+        assert!(client.respond("s1", "ask-1", vec!["Yes".into()], Default::default()).unwrap_err().maybe_delivered);
+    }
+
+    #[test]
+    fn any_action_name_gets_a_key_the_daemon_accepts() {
+        let (client, seen) = daemon(vec![(200, r#"{"ok":true}"#)]);
+        let name = "x".repeat(200);
+        client.action(&name, json!({})).unwrap();
+        let got = seen.recv().unwrap();
+        assert!(got.key.len() <= 128, "{}", got.key);
+        assert_eq!(got.body["action"], name.as_str());
     }
 
     #[test]
     fn a_daemon_that_never_answered_the_connection_got_nothing() {
-        let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-        let error = Client::new(&format!("http://127.0.0.1:{port}"), "secret").steer("s1", "stop").unwrap_err();
+        let error = Client::new("http://127.0.0.1:0", "secret").steer("s1", "stop").unwrap_err();
         assert!(!error.maybe_delivered, "{}", error.message);
     }
 
@@ -246,8 +261,7 @@ mod tests {
 
     #[test]
     fn a_payload_that_is_not_an_object_is_refused_before_sending() {
-        let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-        let error = Client::new(&format!("http://127.0.0.1:{port}"), "secret").action("compact", json!(["s1"])).unwrap_err();
+        let error = Client::new("http://127.0.0.1:0", "secret").action("compact", json!(["s1"])).unwrap_err();
         assert_eq!((error.code.as_str(), error.maybe_delivered), ("invalid_request", false));
     }
 }

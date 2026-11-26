@@ -346,9 +346,10 @@ impl RespondError {
         let error = serde_json::from_str::<Value>(body).ok().map(|v| v["error"].clone()).unwrap_or_default();
         let code = error["code"].as_str().unwrap_or_default().to_string();
         let message = error["message"].as_str().map(str::to_string).unwrap_or_else(|| format!("status code {status}"));
+        let released_answer = action == "respond" && code == "bad_gateway" && !message.starts_with("the answer may have reached");
         let maybe_delivered = match status {
             504 => true,
-            502 => matches!(action, "send" | "steer") || code.ends_with("_unknown") || message.starts_with("the answer may have reached"),
+            502 => !released_answer,
             _ => false,
         };
         RespondError { message, code, maybe_delivered }
@@ -580,7 +581,7 @@ impl Client {
             .agent
             .post(&format!("{}/api/v1/actions", self.base))
             .set("Authorization", &format!("Bearer {}", self.token))
-            .set("Idempotency-Key", &request_key(name))
+            .set("Idempotency-Key", &request_key())
             .send_json(body)
         {
             Ok(response) => Ok(response.into_json().unwrap_or(Value::Null)),
@@ -598,9 +599,9 @@ fn action_body(name: &str, payload: Value) -> std::result::Result<Value, Respond
     Ok(Value::Object(fields))
 }
 
-fn request_key(name: &str) -> String {
+fn request_key() -> String {
     static SEQ: AtomicU64 = AtomicU64::new(0);
-    format!("bake-{name}-{}-{}", OffsetDateTime::now_utc().unix_timestamp_nanos(), SEQ.fetch_add(1, Ordering::Relaxed))
+    format!("bake-{}-{}-{}", std::process::id(), OffsetDateTime::now_utc().unix_timestamp_nanos(), SEQ.fetch_add(1, Ordering::Relaxed))
 }
 
 #[cfg(test)]
