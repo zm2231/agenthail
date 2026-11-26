@@ -706,7 +706,11 @@ pub fn status_bar(s: &App) -> El {
         );
     }
     let working = s.ov.d.working();
-    r = r.child(spacer()).child(row().gap(6.0).items_center().child(Spinner::new().size(10.0).build(k)).child(text(format!("{working} working")).font(META).color(base())));
+    r = r.child(spacer());
+    if let Some(v) = &s.ov.inbox.version {
+        r = r.child(row().gap(6.0).items_center().shrink().min_w(0.0).child(icon(&rune_theme_opencode::icons::INFO, 12.0).color(k.c.warning.icon)).child(text(v.clone()).font(META).color(k.c.warning.icon).truncate().shrink()));
+    }
+    r = r.child(row().gap(6.0).items_center().child(Spinner::new().size(10.0).build(k)).child(text(format!("{working} working")).font(META).color(base())));
     for h in &s.ov.d.hosts {
         let up = matches!(h.state.as_str(), "local" | "connected");
         r = r.child(

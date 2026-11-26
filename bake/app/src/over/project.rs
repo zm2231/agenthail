@@ -7,6 +7,7 @@ use feed::derive::board::{LANES, fold};
 use feed::derive::digest::{HAPPENED, count, cut, pick};
 use feed::derive::phase::{CHECK, SHIP, phase};
 use feed::derive::sessions::busy;
+use feed::derive::turn_end::turn_end;
 
 use crate::over::{Line, Work, plain, short_id};
 use crate::over::ui::{self, BODY, BODY_MED, HEAD, META, META_MED, base, kit, strong, weak};
@@ -29,7 +30,7 @@ fn toolbar(s: &App, key: &str) -> Toolbar {
     let name = s.ov.d.project(key).map(|p| p.name.clone()).unwrap_or_default();
     Toolbar::new()
         .leading(row().gap(14.0).items_center().child(ui::avatar(&name, 18.0)).child(ui::crumb(&[("Projects", false), (&name, true)])))
-        .trailing(row().gap(10.0).items_center().child(ui::new_session_button(Some(key))).child(variant(s, key)).child(ui::needs_button(s)))
+        .trailing(row().gap(10.0).items_center().child(crate::over::decisions::brief_button(s, key)).child(ui::new_session_button(Some(key))).child(variant(s, key)).child(ui::needs_button(s)))
 }
 
 pub fn work_card(s: &App, w: &Work, compact: bool) -> El {
@@ -120,6 +121,7 @@ fn crew_panel(s: &App, lead: Option<&str>) -> El {
     }
     for (i, x) in crew.iter().take(5).enumerate() {
         let id = x.id.clone();
+        let end = turn_end(x, !s.ov.d.asks(&x.id).iter().all(|a| a.answer.is_some()));
         let status = if busy(x) { rune_kit::Spinner::new().size(11.0).build(k) } else { rune::icon(&icons::CIRCLE_CHECK, 12.0).color(weak()) };
         c = c.child(
             row()
@@ -140,7 +142,8 @@ fn crew_panel(s: &App, lead: Option<&str>) -> El {
                         .min_w(0.0)
                         .gap(2.0)
                         .child(row().gap(6.0).items_center().child(text(ui::short_title(&s.ov.d.title(x), 30)).font(META_MED).color(strong()).truncate().shrink()).child(ui::spacer()).child(text(s.ov.d.ago(&x.last_active)).font(META).color(weak())))
-                        .child(text(s.ov.d.gist(x)).font(META).color(weak()).max_lines(2).wrap()),
+                        .child(text(end.label.clone()).font(META_MED).color(if end.needs_you { ui::needs_color() } else { base() }))
+                        .children(Some(if end.headline.is_empty() { s.ov.d.gist(x) } else { crate::over::plain(&end.headline) }).filter(|t| !t.is_empty() && *t != end.label).map(|t| text(t).font(META).color(weak()).max_lines(3).wrap())),
                 ),
         );
     }
@@ -211,11 +214,12 @@ pub fn lead(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>) -> El {
                 .h_full()
                 .items_center()
                 .child(head)
+                .children(crate::over::decisions::brief_note(s, key).map(|n| row().w_full().px(28.0).py(8.0).border_sides([0.0, 0.0, 1.0, 0.0], ui::rule()).child(n)))
                 .child(lead_chat(s, lead))
                 .child(waiting_line(s, lead))
                 .child(composer(s, &format!("Tell {}…", p.lead_name), lead))
         }
-        None => col().w_full().h_full().center().child(text("This project has no lead yet.".to_string()).font(BODY_MED).color(weak())),
+        None => col().w_full().h_full().center().gap(8.0).child(text("This project has no lead yet.".to_string()).font(BODY_MED).color(weak())).children(crate::over::decisions::brief_note(s, key)),
     };
     ui::frame(cx, s, Some(ui::sidebar(s, Some(key), p.lead.as_deref())), main, Some(panel), toolbar(s, key))
 }
@@ -282,6 +286,7 @@ pub fn board(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>) -> El {
         .pt(16.0)
         .pb(24.0)
         .child(row().w_full().items_center().gap(10.0).child(text("Since you left".to_string()).font(HEAD).color(strong())).child(text(summary).font(META).color(weak()).truncate().shrink()))
+        .children(crate::over::decisions::brief_note(s, key))
         .child(since)
         .children(rows_note(s, key))
         .child(board.mt(8.0));

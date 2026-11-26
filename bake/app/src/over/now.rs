@@ -61,7 +61,7 @@ pub fn digest_line(s: &App, key: String, l: &Line) -> El {
         .child(text(s.ov.d.ago(&l.at)).font(META).color(weak()))
 }
 
-pub fn digest_block(s: &App, p: &Project, lines: &[Line], max: usize, looked: Option<&str>) -> El {
+pub fn digest_block(s: &App, p: &Project, lines: &[Line], max: usize, looked: Option<&str>, catch_up: bool) -> El {
     let k = kit();
     let key = p.key.clone();
     let summary: Vec<String> = HAPPENED.iter().map(|k| (count(lines, *k), k.word())).filter(|(n, _)| *n > 0).map(|(n, w)| format!("{n} {w}")).collect();
@@ -73,8 +73,12 @@ pub fn digest_block(s: &App, p: &Project, lines: &[Line], max: usize, looked: Op
         .child(text(p.name.clone()).font(HEAD).color(strong()))
         .child(text(summary.join(" · ")).font(META).color(weak()).truncate().shrink())
         .child(ui::spacer())
+        .children(catch_up.then(|| crate::over::decisions::brief_button(s, &p.key)))
         .child(Button::new("Open project").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(move |s: &mut App| go(s, Screen::Project(key.clone()))).build(k));
     let mut c = col().w_full().gap(2.0).padding(14.0).child(head.mb(6.0));
+    if catch_up && let Some(note) = crate::over::decisions::brief_note(s, &p.key) {
+        c = c.child(note.pl(32.0).pb(6.0));
+    }
     let mut shown = pick(lines, 2);
     shown.truncate(max);
     let (new, old) = cut(shown, looked);
@@ -195,6 +199,7 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
     if s.ov.needs.len() > 1 {
         centre = centre.child(ui::needs_list(s));
     }
+    centre = centre.child(crate::over::decisions::section(s).pt(14.0));
     centre = centre.child(
         col()
             .w_full()
@@ -204,7 +209,7 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
             .child(text("Each line opens what it is about.".to_string()).font(META).color(weak())),
     );
     for (p, lines) in s.ov.d.digests(s.ov.d.window(looked)).iter().take(6) {
-        centre = centre.child(digest_block(s, p, lines, 5, looked));
+        centre = centre.child(digest_block(s, p, lines, 5, looked, false));
     }
     let centre = col()
         .w_full()
@@ -284,9 +289,10 @@ pub fn brief(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
         .child(ui::sessions_block(s, false))
         .child(ui::section_head("Needs you", Some(s.ov.needs.len()), Some(row().gap(6.0).items_center().child(text("Next".to_string()).font(META).color(weak())).child(ui::ghost_keys(&["⌘J"])))).mt(10.0))
         .child(ui::needs_list(s))
+        .child(crate::over::decisions::section(s).mt(10.0))
         .child(ui::section_head("By project", None, Some(text("From the ledger and each session's last word".to_string()).font(META).color(weak()))).mt(10.0));
     for (p, lines) in digests.iter().take(6) {
-        c = c.child(digest_block(s, p, lines, 4, looked));
+        c = c.child(digest_block(s, p, lines, 4, looked, true));
     }
     let mut mv = col().w_full().gap(2.0).padding(6.0);
     for (i, x) in moving.iter().take(6).enumerate() {

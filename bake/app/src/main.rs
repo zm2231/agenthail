@@ -238,6 +238,7 @@ fn init() -> App {
                     }
                 });
                 watch_overview(client.clone(), app.outbox.clone());
+                over::inbox::start(&mut app.ov.inbox, &client);
                 app.client = Some(client);
             }
             Err(error) => app.status = error.to_string(),
@@ -971,6 +972,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         s.revealed = Some(id);
     }
     changed |= ui::session_menu::drain(s);
+    changed |= over::inbox::drain(s);
     switch_composer(s);
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &s.composer.text);

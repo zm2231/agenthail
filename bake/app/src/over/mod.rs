@@ -1,3 +1,5 @@
+mod decisions;
+pub mod inbox;
 mod jump;
 pub mod layout;
 mod now;
@@ -44,6 +46,7 @@ pub struct Over {
     pub sessions_project: Option<String>,
     pub sessions_project_open: bool,
     pub sessions_query: TextEdit,
+    pub inbox: inbox::State,
 }
 
 impl Over {
@@ -77,6 +80,7 @@ impl Over {
             sessions_project: None,
             sessions_project_open: false,
             sessions_query: TextEdit::new(""),
+            inbox: inbox::State::default(),
         }
     }
 
@@ -354,6 +358,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             }
             _ => false,
         },
+        Key::Enter if s.screen == Screen::Now && ev.mods.shift => inbox::accept_first(s),
         Key::Enter if s.screen == Screen::Now => {
             if let Some(t) = s.ov.needs.get(s.ov.need_ix).map(|n| n.target.clone()) {
                 open_target(s, &t);
