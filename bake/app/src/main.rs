@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
-use feed::catalog::{Client, OpenRequest, Session, Snapshot, WorkItem};
+use feed::catalog::{Client, OpenRequest, Session, WorkItem};
 use feed::derive::Recorded;
 use feed::derive::live::{Fetched, Ledger, Overview};
 use feed::source::{Live, Message};
@@ -96,14 +96,6 @@ fn arg(name: &str) -> Option<String> {
     args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned()
 }
 
-fn load_snapshot(path: &str) -> (Vec<Session>, OffsetDateTime) {
-    let text = std::fs::read_to_string(path).unwrap_or_default();
-    let raw: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
-    let now = raw["updatedAt"].as_str().and_then(feed::catalog::parse_time).unwrap_or_else(OffsetDateTime::now_utc);
-    let snap: Snapshot = serde_json::from_value(raw).unwrap_or_default();
-    (snap.sessions, now)
-}
-
 fn load_recorded(path: &str) -> Result<Recorded, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
     serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))
@@ -127,7 +119,9 @@ fn watch_overview(client: Client, tx: Sender<Bg>) {
 fn init() -> App {
     let (outbox, inbox) = channel();
     let fixture = arg("--fixture");
-    let (live, world_error) = match fixture.as_deref().map(load_recorded) {
+    let fixtures = arg("--fixtures").or_else(|| std::env::var("AGENTHAIL_FIXTURES").ok());
+    let recording = fixtures.as_ref().map(|dir| format!("{dir}/snapshot.json")).or_else(|| fixture.clone());
+    let (live, world_error) = match recording.as_deref().map(load_recorded) {
         Some(Ok(raw)) => (Overview::recorded(raw), None),
         Some(Err(error)) => (Overview::default(), Some(error)),
         None => (Overview::default(), None),
@@ -167,17 +161,16 @@ fn init() -> App {
         status: "connecting".into(),
         clock: 0.0,
     };
-    if let Some(dir) = arg("--fixtures").or_else(|| std::env::var("AGENTHAIL_FIXTURES").ok()) {
-        let (sessions, now) = load_snapshot(&format!("{dir}/snapshot.json"));
-        app.sessions = sessions;
-        app.now = now;
+    if recording.is_some() {
+        app.sessions = app.ov.d.sessions.clone();
+        app.now = app.ov.d.now;
+    }
+    if let Some(dir) = fixtures {
         let streams = std::fs::read_to_string(format!("{dir}/streams.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
         let speed = arg("--speed").and_then(|s| s.parse().ok()).unwrap_or(10.0);
         app.fixtures = Some(Fixtures { dir, streams, speed });
         app.status = "fixtures".into();
     } else if let Some(path) = &fixture {
-        app.sessions = app.ov.d.sessions.clone();
-        app.now = app.ov.d.now;
         let dir = std::path::Path::new(path).parent().map(|p| p.display().to_string()).unwrap_or_default();
         app.fixtures = Some(Fixtures { dir, streams: HashMap::new(), speed: 1.0 });
         app.status = "fixture".into();
