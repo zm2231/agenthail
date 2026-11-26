@@ -12,6 +12,7 @@ use crate::{App, Bg, Screen, Tab, answer_request, pick_work, session_edits, shor
 pub mod accounts;
 pub mod attach;
 mod chips;
+pub mod complete;
 pub mod gone;
 pub(crate) mod queue;
 pub mod limit;

@@ -45,6 +45,7 @@ pub enum Bg {
     Older(String, u64, Result<feed::history::Older, feed::history::Miss>),
     Body(String, u64, String, u64, Result<String, String>),
     Attach(ui::attach::Done),
+    Complete(ui::complete::Done),
     Error(String),
 }
 
@@ -126,6 +127,7 @@ pub struct App {
     pub new_session: Option<ui::new_session::Sheet>,
     bar: menubar::Bar,
     pub attach: ui::attach::Attach,
+    pub complete: ui::complete::Complete,
     revealed: Option<String>,
     pub missing: Option<ui::gone::Missing>,
     pub notify: notify::State,
@@ -229,6 +231,7 @@ fn init() -> App {
         new_session: None,
         bar: menubar::Bar::default(),
         attach: ui::attach::Attach::default(),
+        complete: ui::complete::Complete::default(),
         revealed: None,
         missing: None,
         notify: notify::State::default(),
@@ -539,6 +542,19 @@ pub fn send(s: &mut App, tx: &mut Tx) {
 }
 
 pub fn send_to(s: &mut App, id: &str, tx: &mut Tx) {
+    if !ui::complete::run(s, id, tx) {
+        send_with(s, id, None, tx);
+    }
+}
+
+pub fn steer_text(s: &mut App, id: &str, text: String, tx: &mut Tx) {
+    let focused = s.composer.focused;
+    s.composer = TextEdit::new(text.as_str());
+    s.composer.focused = focused;
+    send_with(s, id, Some(Busy::Steer), tx);
+}
+
+fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
     let message = s.composer.text.trim().to_string();
     if message.is_empty() && !ui::attach::has(s, id) || sending(s, id) {
         return;
@@ -554,12 +570,16 @@ pub fn send_to(s: &mut App, id: &str, tx: &mut Tx) {
             return;
         }
     };
+    let focused = s.composer.focused;
     s.composer = TextEdit::new("");
+    s.composer.focused = focused;
     ui::attach::clear(s, id);
+    ui::complete::sent(s, id, &message);
     match s.unsent.take_same(id, &message, &attachments) {
         Some(again) if again.reuses_key() => dispatch(s, id, again, true, tx),
         _ => {
-            let pending = fresh(s, id, message, attachments);
+            let mut pending = fresh(s, id, message, attachments);
+            pending.busy = busy.or(pending.busy);
             dispatch(s, id, pending, false, tx);
         }
     }
@@ -1012,6 +1032,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Older(id, generation, result) => history::take_older(s, id, generation, result),
             Bg::Body(id, generation, item, version, result) => history::take_body(s, id, generation, item, version, result),
             Bg::Attach(done) => ui::attach::done(s, done, tx),
+            Bg::Complete(done) => ui::complete::done(s, done),
             Bg::Error(error) => s.status = format!("daemon: {error}"),
             Bg::Looked(id, seq, result) => ui::gone::looked(s, &id, seq, result),
             Bg::Fixed(id, seq, fix, result) => ui::gone::fixed(s, &id, seq, fix, result),
@@ -1097,6 +1118,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= ui::gone::watch(s);
     changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s);
     changed |= ui::attach::pump(s);
+    changed |= ui::complete::pump(s);
     switch_composer(s);
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &s.composer.text);

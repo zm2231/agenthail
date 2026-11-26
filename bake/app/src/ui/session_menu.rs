@@ -261,6 +261,12 @@ fn start_rename(s: &mut App, id: &str) {
     s.menus.rename_saving = false;
 }
 
+pub fn rename_to(s: &mut App, id: &str, name: &str) {
+    start_rename(s, id);
+    s.menus.rename_text = TextEdit::new(name);
+    save_rename(s);
+}
+
 pub fn close_rename(s: &mut App) {
     s.menus.rename_seq += 1;
     s.menus.renaming = None;

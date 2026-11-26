@@ -36,6 +36,7 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
         .placeholder(format!("Message {}", x.title()), faint())
         .on_edit(|s: &mut App| &mut s.composer)
         .on_input_paste(|s: &mut App, content, _: &mut Tx| super::attach::paste(s, content))
+        .on_input_key(super::complete::key)
         .on_submit(|s: &mut App, tx: &mut Tx| send(s, tx));
     let ready = !s.composer.text.trim().is_empty() || super::attach::has(s, &x.id);
     let send_button = col()
@@ -115,6 +116,8 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
         .border(if s.attach.dropping { 1.5 } else { 1.0 }, if s.attach.dropping { accent() } else { Color::WHITE.alpha(0.10) })
         .shadow(10.0, 34.0, Color::BLACK.alpha(0.45))
         .children(crate::ui::queue::dock(s, x))
+        .children(super::complete::search(s, x))
+        .children(super::complete::menu(s, x))
         .children(super::attach::chips(s, &x.id).map(|c| col().w_full().px(12.0).pt(10.0).child(c)))
         .child(col().w_full().px(16.0).pt(13.0).pb(4.0).child(input))
         .child(controls.child(send_button));
