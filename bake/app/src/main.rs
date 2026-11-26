@@ -576,7 +576,7 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
     ui::attach::clear(s, id);
     ui::complete::sending(s, id);
     match s.unsent.take_same(id, &message, &attachments) {
-        Some(again) if again.reuses_key() && busy.is_none_or(|b| again.busy == Some(b)) => dispatch(s, id, again, true, tx),
+        Some(again) if again.reuses_key() && same_delivery(&again, busy, busy.or_else(|| send_busy(s, id))) => dispatch(s, id, again, true, tx),
         found => {
             if let Some(again) = found.filter(|u| u.reuses_key()) {
                 s.unsent.add(id, again);
@@ -621,6 +621,10 @@ pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
         pending.busy = steered(unsent.busy, pending.busy);
         dispatch(s, id, pending, false, tx);
     }
+}
+
+fn same_delivery(again: &Unsent, asked: Option<Busy>, now: Option<Busy>) -> bool {
+    asked.is_none_or(|b| again.busy == Some(b)) && (again.busy != Some(Busy::Steer) || now == Some(Busy::Steer))
 }
 
 fn steered(was: Option<Busy>, now: Option<Busy>) -> Option<Busy> {

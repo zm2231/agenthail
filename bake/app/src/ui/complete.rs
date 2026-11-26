@@ -550,8 +550,15 @@ fn use_prompt(s: &mut App, text: &str) {
     replace_composer(s, text);
 }
 
+impl Search {
+    fn current(&self) -> Option<&Result<Vec<Prompt>, String>> {
+        let asked = self.asked.as_ref()?;
+        (asked.0 == self.query.text.trim() && asked.1 == self.all).then_some(self.results.as_ref()).flatten()
+    }
+}
+
 fn results(s: &App) -> &[Prompt] {
-    match s.complete.search.as_ref().and_then(|x| x.results.as_ref()) {
+    match s.complete.search.as_ref().and_then(Search::current) {
         Some(Ok(list)) => list,
         _ => &[],
     }
@@ -624,7 +631,7 @@ pub fn search(s: &App, x: &Session) -> Option<El> {
     let head = row().w_full().gap(8.0).items_center().child(input).child(scope("This session", false)).child(scope("All sessions", true)).child(text("esc").font(META).color(faint()));
     let mut list = col().key("prompt-results").w_full().gap(1.0);
     let forks = !search.all && complete::can_fork(x);
-    match &search.results {
+    match search.current() {
         None => list = list.child(text("Searching…").font(META).color(faint()).px(10.0).py(4.0)),
         Some(Err(error)) => list = list.child(text(format!("Couldn't search what you sent: {error}")).font(META).color(failed()).px(10.0).py(4.0)),
         Some(Ok(found)) if found.is_empty() => {
@@ -674,7 +681,7 @@ pub fn search(s: &App, x: &Session) -> Option<El> {
             }
         }
     }
-    if search.more && search.results.as_ref().is_some_and(|r| r.as_ref().is_ok_and(|l| !l.is_empty())) {
+    if search.more && search.current().is_some_and(|r| r.as_ref().is_ok_and(|l| !l.is_empty())) {
         list = list.child(text("Showing the newest matches. Type more to narrow the search.").font(META).color(faint()).px(10.0).py(2.0));
     }
     for problem in &search.problems {
