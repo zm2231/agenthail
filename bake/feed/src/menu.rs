@@ -1,3 +1,4 @@
+use crate::action::ReadState;
 use crate::catalog::Session;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,6 +22,25 @@ pub struct Entry {
 impl Entry {
     fn on(act: Act, label: impl Into<String>) -> Entry {
         Entry { act, label: label.into(), note: None, enabled: true }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Patch {
+    Pinned(Option<String>),
+    Archived(bool),
+    Read(ReadState),
+    Alias(Option<String>),
+}
+
+impl Patch {
+    pub fn apply(&self, x: &mut Session) {
+        match self {
+            Patch::Pinned(at) => x.pinned_at = at.clone(),
+            Patch::Archived(on) => x.archived = *on,
+            Patch::Read(state) => x.read_state = Some(state.clone()),
+            Patch::Alias(alias) => x.alias = alias.clone(),
+        }
     }
 }
 
@@ -102,7 +122,6 @@ pub fn unchanged(text: &str, current: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::action::ReadState;
     use crate::catalog::{Named, Pr, Runtime};
 
     fn session() -> Session {
@@ -183,6 +202,21 @@ mod tests {
         assert!(unchanged("@scout", Some("scout")));
         assert!(unchanged("", None));
         assert!(!unchanged("scout2", Some("scout")));
+    }
+
+    #[test]
+    fn a_landed_change_shows_on_the_session() {
+        let mut x = session();
+        Patch::Pinned(Some("2026-11-26T10:00:00Z".into())).apply(&mut x);
+        Patch::Archived(true).apply(&mut x);
+        Patch::Alias(Some("scout".into())).apply(&mut x);
+        Patch::Read(ReadState { first_unread: "item-2".into(), revision: "r2".into() }).apply(&mut x);
+        assert!(x.pinned() && x.archived && x.unread());
+        assert_eq!(x.title(), "@scout");
+        Patch::Pinned(None).apply(&mut x);
+        Patch::Alias(None).apply(&mut x);
+        assert!(!x.pinned());
+        assert_eq!(x.alias, None);
     }
 
     #[test]

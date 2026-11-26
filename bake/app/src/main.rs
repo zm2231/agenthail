@@ -561,7 +561,6 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Error(error) => s.status = format!("daemon: {error}"),
         }
     }
-    changed |= ui::session_menu::drain(s);
     let mut busy = false;
     let mut counter = s.counter;
     let mut panes_moved = false;
@@ -611,6 +610,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         tx.scroll_into_view_in("sidebar-list", format!("row-{id}"));
         s.revealed = Some(id);
     }
+    changed |= ui::session_menu::drain(s);
     over::layout::save(s);
     tx.wake_after(Duration::from_millis(if busy { 16 } else { 250 }));
     changed

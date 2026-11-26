@@ -162,6 +162,19 @@ pub struct Session {
     pub read_state: Option<crate::action::ReadState>,
     #[serde(default)]
     pub runtime: Option<Runtime>,
+    #[serde(default)]
+    pub capabilities: Capabilities,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Capabilities {
+    #[serde(default)]
+    pub model: bool,
+    #[serde(default)]
+    pub compact: bool,
+    #[serde(default)]
+    pub commands: bool,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]

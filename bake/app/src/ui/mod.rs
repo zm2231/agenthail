@@ -14,6 +14,7 @@ use crate::{App, Screen, Tab, answer_request, pick_work, session_edits, short_pa
 mod chips;
 mod rail;
 mod session;
+mod session_dialogs;
 pub mod session_menu;
 mod sidebar;
 mod waiting;

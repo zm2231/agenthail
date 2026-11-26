@@ -1,24 +1,25 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use feed::action::ReadState;
-use feed::catalog::{Client, RespondError, Session};
-use feed::menu::{self, Act};
-use feed::settings::{self, Choice, ContextUsage, ModelOption, Pick, SessionSettings};
-use rune::{El, PointerPress, TextEdit, Tx, col, el, icon, row, text, text_input};
-use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Menu, MenuItem, Placement};
+use feed::catalog::{Client, RespondError};
+use feed::menu::{self, Act, Patch};
+use feed::settings::{self, Chip, Choice, ContextUsage, ModelOption, Pick, SessionSettings};
+use rune::{PointerPress, TextEdit};
 
-use crate::icons;
-use crate::theme::{self, BODY, META, accent, failed, faint, muted};
-use crate::{App, open_link, session};
+use crate::{App, Screen, open_link, session};
+
+pub use super::session_dialogs::{button, marks, overlays};
+
+const REFRESH: Duration = Duration::from_secs(30);
+const PATCH_HOLD: Duration = Duration::from_secs(6);
 
 pub enum Done {
-    Settings(String, SessionSettings),
+    Settings(String, u64, Result<SessionSettings, String>),
     Models(String, Vec<ModelOption>),
-    Context(String, ContextUsage),
-    Acted(String, Act, Result<Option<ReadState>, RespondError>),
-    Renamed(String, Result<String, RespondError>),
+    Context(String, u64, Result<Option<ContextUsage>, String>),
+    Acted(String, Act, Result<Option<feed::action::ReadState>, RespondError>),
+    Renamed(String, u64, Result<String, RespondError>),
     Set(String, &'static str, String, Result<(), RespondError>),
     Compacted(String, Result<(), RespondError>),
 }
@@ -47,6 +48,11 @@ pub struct Menus {
     pub context: HashMap<String, ContextUsage>,
     pub busy: HashSet<(String, &'static str)>,
     pub note: HashMap<String, String>,
+    seq: u64,
+    newest: HashMap<(String, &'static str), u64>,
+    rename_seq: u64,
+    patches: Vec<(String, Patch, Instant)>,
+    refreshed: Option<(String, Instant)>,
     tx: Sender<Done>,
     rx: Receiver<Done>,
 }
@@ -67,10 +73,40 @@ impl Menus {
             context: HashMap::new(),
             busy: HashSet::new(),
             note: HashMap::new(),
+            seq: 0,
+            newest: HashMap::new(),
+            rename_seq: 0,
+            patches: Vec::new(),
+            refreshed: None,
             tx,
             rx,
         }
     }
+
+    fn next(&mut self) -> u64 {
+        self.seq += 1;
+        self.seq
+    }
+
+    fn fresh(&mut self, id: &str, what: &'static str, seq: u64) -> bool {
+        let newest = self.newest.entry((id.to_string(), what)).or_default();
+        if seq <= *newest {
+            return false;
+        }
+        *newest = seq;
+        true
+    }
+
+    fn supersede(&mut self, id: &str, what: &'static str) {
+        let seq = self.next();
+        self.newest.insert((id.to_string(), what), seq);
+    }
+}
+
+pub fn chips_for(s: &App, id: &str) -> Vec<Chip> {
+    let (Some(set), Some(x)) = (s.menus.settings.get(id), session(s, id)) else { return Vec::new() };
+    let models = s.menus.models.get(id).map(Vec::as_slice).unwrap_or(&[]);
+    settings::chips(set, models, &x.capabilities)
 }
 
 fn spawn(s: &App, after: Duration, job: impl FnOnce(&Client) -> Option<Done> + Send + 'static) {
@@ -84,37 +120,56 @@ fn spawn(s: &App, after: Duration, job: impl FnOnce(&Client) -> Option<Done> + S
     });
 }
 
-fn fetch_settings(s: &App, id: &str, after: Duration) {
-    let id = id.to_string();
-    spawn(s, after, move |c| c.session_settings(&id).ok().map(|set| Done::Settings(id, set)));
+fn fetch_settings(s: &mut App, id: &str, after: Duration) {
+    let (id, seq) = (id.to_string(), s.menus.next());
+    spawn(s, after, move |c| Some(Done::Settings(id.clone(), seq, c.session_settings(&id).map_err(|e| e.to_string()))));
 }
 
-fn fetch_context(s: &App, id: &str, after: Duration) {
-    let id = id.to_string();
-    spawn(s, after, move |c| c.context_usage(&id).ok().flatten().map(|u| Done::Context(id, u)));
+fn fetch_context(s: &mut App, id: &str, after: Duration) {
+    let (id, seq) = (id.to_string(), s.menus.next());
+    spawn(s, after, move |c| Some(Done::Context(id.clone(), seq, c.context_usage(&id).map_err(|e| e.to_string()))));
+}
+
+fn load_fixture(s: &mut App, id: &str) {
+    let Some(f) = &s.fixtures else { return };
+    let Ok(raw) = std::fs::read_to_string(format!("{}/settings/{id}.json", f.dir)) else { return };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else { return };
+    if let Ok(set) = serde_json::from_value(value["settings"].clone()) {
+        s.menus.settings.insert(id.to_string(), set);
+    }
+    if let Ok(models) = serde_json::from_value(value["models"].clone()) {
+        s.menus.models.insert(id.to_string(), models);
+    }
+    if let Ok(usage) = serde_json::from_value(value["context"].clone()) {
+        s.menus.context.insert(id.to_string(), usage);
+    }
 }
 
 pub fn load(s: &mut App, id: &str) {
-    if let Some(f) = &s.fixtures {
-        let Ok(raw) = std::fs::read_to_string(format!("{}/settings/{id}.json", f.dir)) else { return };
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else { return };
-        if let Ok(set) = serde_json::from_value(value["settings"].clone()) {
-            s.menus.settings.insert(id.to_string(), set);
-        }
-        if let Ok(models) = serde_json::from_value(value["models"].clone()) {
-            s.menus.models.insert(id.to_string(), models);
-        }
-        if let Ok(usage) = serde_json::from_value(value["context"].clone()) {
-            s.menus.context.insert(id.to_string(), usage);
-        }
+    if s.fixtures.is_some() {
+        load_fixture(s, id);
         return;
     }
-    let surface = session(s, id).map(|x| x.surface.clone()).unwrap_or_default();
+    s.menus.refreshed = Some((id.to_string(), Instant::now()));
     fetch_settings(s, id, Duration::ZERO);
     fetch_context(s, id, Duration::ZERO);
+    let surface = session(s, id).map(|x| x.surface.clone()).unwrap_or_default();
     if !surface.is_empty() {
         let id = id.to_string();
         spawn(s, Duration::ZERO, move |c| c.models(&surface, &id).ok().map(|m| Done::Models(id, m)));
+    }
+}
+
+fn refresh_shown(s: &mut App) {
+    if s.screen != Screen::Session || s.client.is_none() {
+        return;
+    }
+    let Some(id) = s.selected.clone() else { return };
+    let due = s.menus.refreshed.as_ref().is_none_or(|(shown, at)| *shown != id || at.elapsed() >= REFRESH);
+    if due {
+        s.menus.refreshed = Some((id.clone(), Instant::now()));
+        fetch_settings(s, &id, Duration::ZERO);
+        fetch_context(s, &id, Duration::ZERO);
     }
 }
 
@@ -169,8 +224,14 @@ pub fn run(s: &mut App, id: &str, act: Act) {
     }
 }
 
+pub fn open_at(s: &mut App, id: &str, at: PointerPress) {
+    s.menus.chip = None;
+    s.menus.open = Some(Open { session: id.to_string(), at: Some(at) });
+}
+
 fn start_rename(s: &mut App, id: &str) {
-    let current = session(s, id).and_then(|x| x.alias.clone()).unwrap_or_default();
+    let current = current_alias(s, id).unwrap_or_default();
+    s.menus.rename_seq += 1;
     s.menus.renaming = Some(id.to_string());
     s.menus.rename_text = TextEdit::new(current.as_str());
     s.menus.rename_text.focused = true;
@@ -179,17 +240,18 @@ fn start_rename(s: &mut App, id: &str) {
     s.menus.rename_saving = false;
 }
 
-fn close_rename(s: &mut App) {
+pub fn close_rename(s: &mut App) {
+    s.menus.rename_seq += 1;
     s.menus.renaming = None;
     s.menus.rename_error = None;
     s.menus.rename_saving = false;
 }
 
-fn current_alias(s: &App, id: &str) -> Option<String> {
+pub fn current_alias(s: &App, id: &str) -> Option<String> {
     session(s, id).and_then(|x| x.alias.clone()).filter(|a| !a.is_empty())
 }
 
-fn save_rename(s: &mut App) {
+pub fn save_rename(s: &mut App) {
     let Some(id) = s.menus.renaming.clone() else { return };
     let current = current_alias(s, &id);
     let text = s.menus.rename_text.text.clone();
@@ -202,11 +264,11 @@ fn save_rename(s: &mut App) {
     }
     s.menus.rename_saving = true;
     s.menus.rename_error = None;
-    let name = menu::normalized(&text);
-    spawn(s, Duration::ZERO, move |c| Some(Done::Renamed(id.clone(), c.alias(&id, &name))));
+    let (name, seq) = (menu::normalized(&text), s.menus.rename_seq);
+    spawn(s, Duration::ZERO, move |c| Some(Done::Renamed(id.clone(), seq, c.alias(&id, &name))));
 }
 
-pub fn choose(s: &mut App, id: &str, chip: &settings::Chip, choice: &Choice) {
+pub fn choose(s: &mut App, id: &str, chip: &Chip, choice: &Choice) {
     s.menus.chip = None;
     match chip.pick(&choice.id) {
         Pick::Unchanged => {}
@@ -215,7 +277,7 @@ pub fn choose(s: &mut App, id: &str, chip: &settings::Chip, choice: &Choice) {
     }
 }
 
-fn set(s: &mut App, id: &str, key: &'static str, value: &str) {
+pub fn set(s: &mut App, id: &str, key: &'static str, value: &str) {
     s.menus.confirm = None;
     if not_sent(s) || s.menus.busy.contains(&(id.to_string(), key)) {
         return;
@@ -241,13 +303,113 @@ fn stamp() -> String {
     time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap_or_default()
 }
 
-fn landed(s: &mut App, id: &str, act: &Act, read: Option<ReadState>) {
-    let Some(x) = s.sessions.iter_mut().find(|x| x.id == id) else { return };
+fn patch_of(act: &Act, read: Option<feed::action::ReadState>) -> Option<Patch> {
     match act {
-        Act::Pin(on) => x.pinned_at = on.then(stamp),
-        Act::Archive(on) => x.archived = *on,
-        Act::Read(_) => x.read_state = read.or(x.read_state.take()),
-        _ => {}
+        Act::Pin(on) => Some(Patch::Pinned(on.then(stamp))),
+        Act::Archive(on) => Some(Patch::Archived(*on)),
+        Act::Read(_) => read.map(Patch::Read),
+        _ => None,
+    }
+}
+
+fn hold(s: &mut App, id: &str, patch: Patch) {
+    s.menus.patches.retain(|(other, p, _)| !(other == id && std::mem::discriminant(p) == std::mem::discriminant(&patch)));
+    s.menus.patches.push((id.to_string(), patch, Instant::now()));
+}
+
+fn apply_patches(s: &mut App) -> bool {
+    s.menus.patches.retain(|(_, _, at)| at.elapsed() < PATCH_HOLD);
+    let mut changed = false;
+    for (id, patch, _) in &s.menus.patches {
+        for x in s.sessions.iter_mut().chain(s.ov.d.sessions.iter_mut()).filter(|x| x.id == *id) {
+            let before = x.clone();
+            patch.apply(x);
+            changed |= *x != before;
+        }
+    }
+    changed
+}
+
+fn settled(s: &mut App, done: Done) {
+    match done {
+        Done::Settings(id, seq, result) => {
+            if !s.menus.fresh(&id, "settings", seq) {
+                return;
+            }
+            match result {
+                Ok(set) => {
+                    s.menus.note.remove(&id);
+                    s.menus.settings.insert(id, set);
+                }
+                Err(error) => {
+                    s.menus.note.insert(id, format!("Couldn't read the settings: {error}"));
+                }
+            }
+        }
+        Done::Models(id, models) => {
+            s.menus.models.insert(id, models);
+        }
+        Done::Context(id, seq, result) => {
+            if !s.menus.fresh(&id, "context", seq) {
+                return;
+            }
+            match result {
+                Ok(Some(usage)) => {
+                    s.menus.context.insert(id, usage);
+                }
+                _ => {
+                    s.menus.context.remove(&id);
+                }
+            }
+        }
+        Done::Acted(id, act, Ok(read)) => {
+            if let Some(patch) = patch_of(&act, read) {
+                hold(s, &id, patch);
+            }
+        }
+        Done::Acted(_, act, Err(error)) => s.ov.notice = Some(failure(verb(&act), &error)),
+        Done::Renamed(id, seq, result) => {
+            let current = s.menus.renaming.as_deref() == Some(id.as_str()) && s.menus.rename_seq == seq;
+            match result {
+                Ok(alias) => {
+                    hold(s, &id, Patch::Alias((!alias.is_empty()).then_some(alias)));
+                    if current {
+                        close_rename(s);
+                    }
+                }
+                Err(error) if current => {
+                    s.menus.rename_saving = false;
+                    s.menus.rename_error = Some(error.message);
+                }
+                Err(error) => s.ov.notice = Some(failure("Renaming", &error)),
+            }
+        }
+        Done::Set(id, key, value, result) => {
+            s.menus.busy.remove(&(id.clone(), key));
+            match result {
+                Ok(()) => {
+                    s.menus.supersede(&id, "settings");
+                    if let Some(set) = s.menus.settings.get_mut(&id) {
+                        settings::apply(set, key, &value);
+                    }
+                    fetch_settings(s, &id, Duration::from_millis(1500));
+                }
+                Err(error) => s.ov.notice = Some(failure("Changing the setting", &error)),
+            }
+        }
+        Done::Compacted(id, result) => {
+            s.menus.busy.remove(&(id.clone(), "compact"));
+            match result {
+                Ok(()) => {
+                    s.menus.supersede(&id, "context");
+                    if let Some(usage) = s.menus.context.get_mut(&id) {
+                        usage.compacting = true;
+                    }
+                    fetch_context(s, &id, Duration::from_secs(8));
+                }
+                Err(error) => s.ov.notice = Some(failure("Compacting", &error)),
+            }
+        }
     }
 }
 
@@ -255,215 +417,9 @@ pub fn drain(s: &mut App) -> bool {
     let mut changed = false;
     while let Ok(done) = s.menus.rx.try_recv() {
         changed = true;
-        match done {
-            Done::Settings(id, set) => {
-                s.menus.settings.insert(id, set);
-            }
-            Done::Models(id, models) => {
-                s.menus.models.insert(id, models);
-            }
-            Done::Context(id, usage) => {
-                s.menus.note.remove(&id);
-                s.menus.context.insert(id, usage);
-            }
-            Done::Acted(id, act, Ok(read)) => landed(s, &id, &act, read),
-            Done::Acted(_, act, Err(error)) => s.ov.notice = Some(failure(verb(&act), &error)),
-            Done::Renamed(id, Ok(alias)) => {
-                if let Some(x) = s.sessions.iter_mut().find(|x| x.id == id) {
-                    x.alias = (!alias.is_empty()).then_some(alias);
-                }
-                close_rename(s);
-            }
-            Done::Renamed(_, Err(error)) => {
-                s.menus.rename_saving = false;
-                s.menus.rename_error = Some(error.message);
-            }
-            Done::Set(id, key, value, result) => {
-                s.menus.busy.remove(&(id.clone(), key));
-                match result {
-                    Ok(()) => {
-                        if let Some(set) = s.menus.settings.get_mut(&id) {
-                            settings::apply(set, key, &value);
-                        }
-                        fetch_settings(s, &id, Duration::from_millis(1500));
-                    }
-                    Err(error) => s.ov.notice = Some(failure("Changing the setting", &error)),
-                }
-            }
-            Done::Compacted(id, result) => {
-                s.menus.busy.remove(&(id.clone(), "compact"));
-                match result {
-                    Ok(()) => {
-                        s.menus.note.insert(id.clone(), "Compacting the context".into());
-                        fetch_context(s, &id, Duration::from_secs(8));
-                    }
-                    Err(error) => s.ov.notice = Some(failure("Compacting", &error)),
-                }
-            }
-        }
+        settled(s, done);
     }
+    changed |= apply_patches(s);
+    refresh_shown(s);
     changed
-}
-
-pub fn open_at(s: &mut App, id: &str, at: PointerPress) {
-    s.menus.chip = None;
-    s.menus.open = Some(Open { session: id.to_string(), at: Some(at) });
-}
-
-pub fn marks(x: &Session) -> El {
-    let mut r = row().gap(4.0).items_center();
-    if x.unread() {
-        r = r.child(el().size(7.0, 7.0).radius(3.5).fill(accent()));
-    }
-    if x.pinned() {
-        r = r.child(icon(&icons::PIN, 11.0).color(faint()));
-    }
-    r
-}
-
-pub fn button(x: &Session) -> El {
-    let id = x.id.clone();
-    col()
-        .key("session-menu-trigger")
-        .size(30.0, 30.0)
-        .radius(9.0)
-        .items_center()
-        .justify_center()
-        .hover(rune::Color::WHITE.alpha(0.08))
-        .label("Session actions")
-        .on_press(move |s: &mut App| {
-            s.menus.chip = None;
-            s.menus.open = match &s.menus.open {
-                Some(o) if o.session == id && o.at.is_none() => None,
-                _ => Some(Open { session: id.clone(), at: None }),
-            };
-        })
-        .child(icon(&icons::MORE, 16.0).color(muted()))
-}
-
-fn act_icon(act: &Act) -> &'static rune::Icon {
-    match act {
-        Act::Rename => &icons::CORNER,
-        Act::Terminal => &icons::TERMINAL,
-        Act::Pr(_) => &icons::PULL,
-        Act::Pin(_) => &icons::PIN,
-        Act::Read(_) => &icons::CHECK_CIRCLE,
-        Act::Archive(_) => &icons::INBOX,
-    }
-}
-
-fn session_menu(s: &App, open: &Open, layer: &mut Vec<El>) {
-    let Some(x) = session(s, &open.session) else { return };
-    let mut m = Menu::new("session-menu").open(true).min_width(220.0).on_close(|s: &mut App| s.menus.open = None);
-    m = match open.at {
-        Some(p) => m.at(p.x, p.y),
-        None => m.placement(Placement::BottomEnd),
-    };
-    for (i, group) in menu::entries(x).into_iter().enumerate() {
-        if i > 0 {
-            m = m.separator();
-        }
-        for entry in group {
-            let (id, act) = (x.id.clone(), entry.act.clone());
-            let mut item = MenuItem::new(entry.label).icon(act_icon(&entry.act)).disabled(!entry.enabled);
-            if let Some(note) = entry.note {
-                item = item.description(note);
-            }
-            m = m.item(item.on_select(move |s: &mut App| run(s, &id, act.clone())));
-        }
-    }
-    let _ = m.build(theme::kit(), layer);
-}
-
-fn chip_menu(s: &App, id: &str, key: &'static str, layer: &mut Vec<El>) {
-    let Some(set) = s.menus.settings.get(id) else { return };
-    let models = s.menus.models.get(id).map(Vec::as_slice).unwrap_or(&[]);
-    let Some(chip) = settings::chips(set, models).into_iter().find(|c| c.key == key) else { return };
-    let mut m = Menu::new(format!("chip-{key}")).open(true).min_width(200.0).placement(Placement::BottomStart).on_close(|s: &mut App| s.menus.chip = None).group_label(chip.name);
-    for choice in &chip.choices {
-        let (id, chip_, choice_) = (id.to_string(), chip.clone(), choice.clone());
-        m = m.item(MenuItem::new(choice.label.clone()).checked(choice.id == chip.value).on_select(move |s: &mut App| choose(s, &id, &chip_, &choice_)));
-    }
-    if chip.next_turn {
-        m = m.separator().group_label("Applies from the next turn");
-    }
-    let _ = m.build(theme::kit(), layer);
-}
-
-fn rename_dialog(s: &App, id: &str, layer: &mut Vec<El>) {
-    let k = theme::kit();
-    let current = current_alias(s, id);
-    let text_now = s.menus.rename_text.text.clone();
-    let problem = menu::rename_problem(&text_now, current.as_deref());
-    let unchanged = menu::unchanged(&text_now, current.as_deref());
-    let clearing = menu::clears(&text_now, current.as_deref());
-    let title = session(s, id).map(|x| x.title()).unwrap_or_default();
-    let input = text_input(&s.menus.rename_text, BODY)
-        .single_line()
-        .key("rename-input")
-        .label("Name")
-        .grow(1.0)
-        .min_w(0.0)
-        .color(theme::text())
-        .placeholder("name", faint())
-        .on_edit(|s: &mut App| &mut s.menus.rename_text)
-        .on_submit(|s: &mut App, _: &mut Tx| save_rename(s));
-    let field = row().w_full().gap(6.0).items_center().px(10.0).py(7.0).radius(8.0).fill(theme::wash()).border(1.0, theme::line()).child(text("@").font(BODY).color(muted())).child(input);
-    let mut body = col().w_full().gap(10.0).px(16.0).pb(16.0).child(field);
-    if let Some(message) = s.menus.rename_error.clone().or_else(|| (!text_now.is_empty()).then_some(problem).flatten().map(String::from)) {
-        body = body.child(text(message).font(META).color(failed()).wrap().w_full());
-    }
-    let save_label = if s.menus.rename_saving { "Saving…" } else if clearing { "Clear name" } else { "Save" };
-    let buttons = row()
-        .w_full()
-        .gap(8.0)
-        .child(el().grow(1.0))
-        .child(Button::new("Cancel").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(close_rename).build(k).key("rename-cancel"))
-        .child(
-            Button::new(save_label)
-                .variant(ButtonVariant::Contrast)
-                .control_size(ControlSize::Small)
-                .disabled(s.menus.rename_saving || problem.is_some() || unchanged)
-                .on_press(save_rename)
-                .build(k)
-                .key("rename-save"),
-        );
-    let description = if current.is_some() { "Other agents and links use this name to reach the session. Leave it empty to clear it." } else { "Other agents and links use this name to reach the session." };
-    Dialog::new("rename", format!("Rename {title}")).description(description).open(true).fit().width(400.0).on_close(close_rename).child(body.child(buttons)).build(k, layer);
-}
-
-fn confirm_dialog(c: &Confirm, layer: &mut Vec<El>) {
-    let k = theme::kit();
-    let (id, key, value) = (c.session.clone(), c.key, c.choice.id.clone());
-    let buttons = row()
-        .w_full()
-        .gap(8.0)
-        .px(16.0)
-        .pb(16.0)
-        .child(el().grow(1.0))
-        .child(Button::new("Cancel").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(|s: &mut App| s.menus.confirm = None).build(k).key("confirm-cancel"))
-        .child(Button::new(c.choice.label.clone()).variant(ButtonVariant::Danger).control_size(ControlSize::Small).on_press(move |s: &mut App| set(s, &id, key, &value)).build(k).key("confirm-switch"));
-    Dialog::new("confirm-mode", format!("Switch to {}?", c.choice.label))
-        .description("The agent will run tools without asking you first.")
-        .open(true)
-        .fit()
-        .width(400.0)
-        .on_close(|s: &mut App| s.menus.confirm = None)
-        .child(buttons)
-        .build(k, layer);
-}
-
-pub fn overlays(s: &App, layer: &mut Vec<El>) {
-    if let Some(open) = &s.menus.open {
-        session_menu(s, open, layer);
-    }
-    if let Some((id, key)) = &s.menus.chip {
-        chip_menu(s, id, key, layer);
-    }
-    if let Some(id) = &s.menus.renaming {
-        rename_dialog(s, id, layer);
-    }
-    if let Some(c) = &s.menus.confirm {
-        confirm_dialog(c, layer);
-    }
 }

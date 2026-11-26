@@ -1,12 +1,12 @@
 use feed::catalog::Session;
-use feed::settings::{self, Chip, ContextUsage};
+use feed::settings::{Chip, ContextUsage};
 use rune::{El, icon, row, text};
 use rune_kit::ProgressCircle;
 
 use crate::App;
 use crate::icons;
 use crate::theme::{self, META, faint, line, muted, wash};
-use crate::ui::session_menu::compact;
+use crate::ui::session_menu::{chips_for, compact};
 
 fn chip_el(s: &App, x: &Session, chip: &Chip) -> El {
     let busy = s.menus.busy.contains(&(x.id.clone(), chip.key));
@@ -70,16 +70,15 @@ fn compact_el(s: &App, x: &Session) -> El {
 
 pub fn turn(s: &App, x: &Session) -> El {
     let mut r = row().key("turn-chips").gap(6.0).items_center();
-    if let Some(set) = s.menus.settings.get(&x.id) {
-        let models = s.menus.models.get(&x.id).map(Vec::as_slice).unwrap_or(&[]);
-        for chip in settings::chips(set, models) {
-            r = r.child(chip_el(s, x, &chip));
-        }
+    for chip in chips_for(s, &x.id) {
+        r = r.child(chip_el(s, x, &chip));
     }
     if let Some(usage) = s.menus.context.get(&x.id) {
         r = r.child(context_el(usage));
     }
-    r = r.child(compact_el(s, x));
+    if x.capabilities.compact {
+        r = r.child(compact_el(s, x));
+    }
     if let Some(note) = s.menus.note.get(&x.id) {
         r = r.child(text(note.clone()).font(META).color(faint()));
     }

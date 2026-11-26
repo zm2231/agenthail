@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use serde::Deserialize;
 
-use crate::catalog::{Client, enc};
+use crate::catalog::{Capabilities, Client, enc};
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -178,7 +178,7 @@ fn claude_modes() -> Vec<Choice> {
 }
 
 /// The choices match what the daemon's turn-setting accepts for each surface.
-pub fn chips(settings: &SessionSettings, models: &[ModelOption]) -> Vec<Chip> {
+pub fn chips(settings: &SessionSettings, models: &[ModelOption], caps: &Capabilities) -> Vec<Chip> {
     let codex = settings.surface == "codex";
     let claude = settings.surface == "claude";
     let hosted = settings.runtime_kind == CLAUDE_HOST;
@@ -194,7 +194,7 @@ pub fn chips(settings: &SessionSettings, models: &[ModelOption]) -> Vec<Chip> {
         model_choices.push(Choice::new(&model, &model));
     }
     if !model_choices.is_empty() {
-        let changeable = !models.is_empty();
+        let changeable = caps.model && !models.is_empty();
         out.push(Chip { key: "model", name: "Model", value: model.clone(), choices: model_choices, changeable, next_turn: codex, note: note("model") });
     }
 
@@ -203,7 +203,7 @@ pub fn chips(settings: &SessionSettings, models: &[ModelOption]) -> Vec<Chip> {
         running.map(|m| m.supported_reasoning_efforts.clone()).unwrap_or_default()
     } else if claude && hosted {
         running.map(|m| m.supported_reasoning_efforts.clone()).filter(|e| !e.is_empty()).unwrap_or_else(|| CLAUDE_HOST_EFFORTS.iter().map(|e| e.to_string()).collect())
-    } else if claude {
+    } else if claude && caps.commands {
         CLAUDE_REMOTE_EFFORTS.iter().map(|e| e.to_string()).collect()
     } else {
         Vec::new()
@@ -279,6 +279,10 @@ mod tests {
         .unwrap()
     }
 
+    fn all() -> Capabilities {
+        Capabilities { model: true, compact: true, commands: true }
+    }
+
     fn ids(c: &Chip) -> Vec<&str> {
         c.choices.iter().map(|c| c.id.as_str()).collect()
     }
@@ -289,7 +293,7 @@ mod tests {
             {"id": "default", "displayName": "Default (recommended)", "default": true, "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"]},
             {"id": "opus", "displayName": "Opus 5.5", "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"]}
         ]));
-        let chips = chips(&claude_host(), &models);
+        let chips = chips(&claude_host(), &models, &all());
         assert_eq!(chips.iter().map(|c| c.key).collect::<Vec<_>>(), vec!["model", "effort", "mode"]);
         assert_eq!(ids(&chips[0]), vec!["default", "opus", "claude-opus-5-5"]);
         assert_eq!(chips[0].label(), "claude-opus-5-5");
@@ -307,7 +311,7 @@ mod tests {
     #[test]
     fn a_hosted_claude_effort_follows_the_running_models_levels() {
         let models = opts(json!([{"id": "claude-opus-5-5", "displayName": "Opus", "supportedReasoningEfforts": ["low", "high"]}]));
-        let chips = chips(&claude_host(), &models);
+        let chips = chips(&claude_host(), &models, &all());
         assert_eq!(ids(&chips[1]), vec!["low", "high"]);
     }
 
@@ -315,7 +319,7 @@ mod tests {
     fn a_terminal_claude_session_shows_its_permission_mode_without_changing_it() {
         let mut s = claude_host();
         s.runtime_kind = "claude-cli".into();
-        let chips = chips(&s, &[]);
+        let chips = chips(&s, &[], &all());
         assert_eq!(chips[0].key, "model");
         assert!(!chips[0].changeable, "no model list, nothing to choose from");
         assert_eq!(ids(&chips[1]), vec!["low", "medium", "high", "max"]);
@@ -323,7 +327,24 @@ mod tests {
         assert!(!mode.changeable);
         assert_eq!(mode.label(), "Bypass permissions");
         s.permission = None;
-        assert!(super::chips(&s, &[]).iter().all(|c| c.key != "mode"));
+        assert!(super::chips(&s, &[], &all()).iter().all(|c| c.key != "mode"));
+    }
+
+    #[test]
+    fn a_terminal_claude_session_without_commands_offers_no_effort_the_daemon_would_refuse() {
+        let mut s = claude_host();
+        s.runtime_kind = "claude-cli".into();
+        s.effort = Some(Setting { value: "high".into() });
+        let models = opts(json!([{"id": "opus", "displayName": "Opus"}]));
+        let caps = Capabilities { model: true, compact: true, commands: false };
+        let chips = super::chips(&s, &models, &caps);
+        let effort = chips.iter().find(|c| c.key == "effort").unwrap();
+        assert!(!effort.changeable);
+        assert_eq!(effort.label(), "High");
+        s.effort = None;
+        assert!(super::chips(&s, &models, &caps).iter().all(|c| c.key != "effort"));
+        let no_model = Capabilities { model: false, ..caps };
+        assert!(!super::chips(&s, &models, &no_model)[0].changeable);
     }
 
     #[test]
@@ -332,7 +353,7 @@ mod tests {
             {"id": "gpt-6.1-sol", "displayName": "GPT-6.1-Sol", "supportedReasoningEfforts": ["low", "medium", "high", "xhigh"], "defaultReasoningEffort": "medium"},
             {"id": "gpt-6-luna", "displayName": "GPT-6-Luna"}
         ]));
-        let chips = chips(&codex(), &models);
+        let chips = chips(&codex(), &models, &all());
         assert_eq!(chips[0].label(), "GPT-6.1-Sol");
         assert!(chips.iter().all(|c| c.next_turn));
         assert_eq!(chips[1].label(), "Extra high");
@@ -340,15 +361,15 @@ mod tests {
         assert_eq!(ids(&chips[2]), vec!["default", "plan"]);
         let mut s = codex();
         s.effort = None;
-        assert_eq!(super::chips(&s, &models)[1].value, "medium");
+        assert_eq!(super::chips(&s, &models, &all())[1].value, "medium");
         s.model = Some(Setting { value: "gpt-6-luna".into() });
-        assert!(super::chips(&s, &models).iter().all(|c| c.key != "effort"), "a model with no levels has no effort chip");
+        assert!(super::chips(&s, &models, &all()).iter().all(|c| c.key != "effort"), "a model with no levels has no effort chip");
     }
 
     #[test]
     fn a_model_the_list_lacks_is_still_shown() {
         let models = opts(json!([{"id": "gpt-6-luna", "displayName": "GPT-6-Luna"}]));
-        let chips = chips(&codex(), &models);
+        let chips = chips(&codex(), &models, &all());
         assert_eq!(ids(&chips[0]), vec!["gpt-6-luna", "gpt-6.1-sol"]);
         let effort = chips.iter().find(|c| c.key == "effort").unwrap();
         assert!(!effort.changeable);
