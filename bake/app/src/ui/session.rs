@@ -75,6 +75,10 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
     controls = controls.child(status.truncate()).child(spacer());
     if unsent {
         let (id, again) = (x.id.clone(), x.id.clone());
+        if crate::unsent_held(s, &x.id) {
+            let back = x.id.clone();
+            controls = controls.child(Button::new("Put back").variant(ButtonVariant::Ghost).build(theme::kit()).key("send-put-back").on_press(move |s: &mut App| crate::put_back_unsent(s, &back)));
+        }
         controls = controls.child(Button::new("Dismiss").variant(ButtonVariant::Ghost).build(theme::kit()).key("send-dismiss").on_press(move |s: &mut App| crate::dismiss_unsent(s, &again)));
         controls = controls.child(Button::new("Retry").variant(ButtonVariant::Ghost).icon(&icons::ROTATE).build(theme::kit()).key("send-retry").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::retry(s, &id, tx)));
     }

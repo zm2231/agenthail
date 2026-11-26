@@ -512,6 +512,23 @@ pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
     }
 }
 
+pub fn put_back_unsent(s: &mut App, id: &str) {
+    let Some(unsent) = s.unsent.latest(id).cloned() else { return };
+    s.unsent.remove(id, &unsent.key);
+    let merged = feed::composer::put_back(shown_text(s, id), &unsent.text);
+    if s.composer_for.as_deref() == Some(id) {
+        s.composer = TextEdit::new(merged.as_str());
+        s.composer.focused = true;
+    } else {
+        s.drafts.set(id, &merged);
+    }
+    over::layout::save(s);
+}
+
+pub fn unsent_held(s: &App, id: &str) -> bool {
+    s.unsent.latest(id).is_some_and(|u| shown_text(s, id).trim() != u.text)
+}
+
 pub fn dismiss_unsent(s: &mut App, id: &str) {
     if let Some(key) = s.unsent.latest(id).map(|u| u.key.clone()) {
         s.unsent.remove(id, &key);
@@ -700,8 +717,18 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &s.composer.text);
     }
+    let restored: Vec<String> = s.unsent.iter().filter(|(id, u)| s.drafts.get(id).trim() == u.text).map(|(id, _)| id.clone()).collect();
+    for id in &restored {
+        s.drafts.set(id, "");
+    }
     s.drafts.rekey(&s.rekeyed);
     s.unsent.rekey(&s.rekeyed);
+    let held: Vec<(String, String)> = s.unsent.iter().map(|(id, u)| (id.clone(), u.text.clone())).collect();
+    for (id, text) in held.into_iter().filter(|(id, _)| restored.iter().any(|old| feed::composer::current(&s.rekeyed, old) == id.as_str())) {
+        if s.drafts.get(&id).trim().is_empty() {
+            s.drafts.set(&id, &text);
+        }
+    }
     let retired: Vec<(String, String)> = s.rekeyed.keys().map(|old| (old.clone(), feed::composer::current(&s.rekeyed, old).to_string())).filter(|(old, new)| old != new).collect();
     for (old, new) in retired {
         if s.selected.as_deref() == Some(old.as_str()) {

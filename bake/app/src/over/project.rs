@@ -348,6 +348,12 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
     } else {
         controls
     };
+    let controls = if crate::unsent_held(s, lead) {
+        let back = lead.to_string();
+        controls.child(Button::new("Put back").variant(ButtonVariant::Ghost).build(k).key("send-put-back").on_press(move |s: &mut App| crate::put_back_unsent(s, &back)))
+    } else {
+        controls
+    };
     let controls = if s.unsent.has(lead) {
         let (again, drop) = (lead.to_string(), lead.to_string());
         controls.child(Button::new("Dismiss").variant(ButtonVariant::Ghost).build(k).key("send-dismiss").on_press(move |s: &mut App| crate::dismiss_unsent(s, &drop))).child(Button::new("Retry").variant(ButtonVariant::Ghost).build(k).key("send-retry").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::retry(s, &again, tx)))
