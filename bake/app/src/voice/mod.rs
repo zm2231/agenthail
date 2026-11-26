@@ -241,6 +241,10 @@ fn closed(w: &mut Win, _: &mut Tx) {
     w.gone.store(true, Ordering::SeqCst);
     let effects = w.call.close();
     w.run(effects);
+    if w.call.trail.changed {
+        w.call.trail.changed = false;
+        save_trail(&w.call.trail);
+    }
     #[cfg(target_os = "macos")]
     {
         w.web = None;
@@ -289,6 +293,12 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
     if typed != w.route_typed {
         w.route(&typed, "");
         changed = true;
+    }
+    if !w.call.active() {
+        if let Some((target, name)) = w.offer.take() {
+            w.route(&target, &name);
+            changed = true;
+        }
     }
     while let Ok((job, result)) = w.replies.1.try_recv() {
         let effects = w.call.reply(job, result, t);
@@ -348,7 +358,8 @@ fn load_trail() -> Trail {
 
 fn save_trail(trail: &Trail) {
     let Some(path) = trail_file() else { return };
-    let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&path, trail.save()));
+    let part = path.with_extension("json.part");
+    let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&part, trail.save())).and_then(|()| std::fs::rename(&part, &path));
     if let Err(error) = written {
         eprintln!("voice: the call log couldn't be saved: {error}");
     }
