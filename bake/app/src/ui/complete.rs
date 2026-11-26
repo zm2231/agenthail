@@ -27,6 +27,7 @@ pub struct Search {
     asked: Option<(String, bool)>,
     results: Option<Result<Vec<Prompt>, String>>,
     problems: Vec<String>,
+    more: bool,
 }
 
 #[derive(Default)]
@@ -251,17 +252,15 @@ pub fn pump(s: &mut App) -> bool {
         s.complete.search = None;
     }
     let Some(id) = s.composer_for.clone() else {
-        if let Some(left) = s.complete.session.take()
-            && let Some(h) = s.complete.history.get_mut(&left)
-        {
-            h.stop();
+        if let Some(left) = s.complete.session.take() {
+            leave_history(s, &left);
         }
         return false;
     };
     let mut changed = false;
     if s.complete.session.as_deref() != Some(id.as_str()) {
-        if let Some(h) = s.complete.session.as_ref().and_then(|left| s.complete.history.get_mut(left)) {
-            h.stop();
+        if let Some(left) = s.complete.session.clone() {
+            leave_history(s, &left);
         }
         s.complete.session = Some(id.clone());
         s.complete.highlighted = 0;
@@ -299,11 +298,12 @@ pub fn pump(s: &mut App) -> bool {
             search.asked = Some(wanted.clone());
             search.ix = 0;
             search.problems.clear();
+            search.more = false;
             search.results = s.client.is_none().then(|| Err("Fixture mode: searching needs the daemon".to_string()));
             let (seq, session) = (search.seq, (!wanted.1).then(|| search.session.clone()));
             spawn(s, move |c| {
                 let found = match &session {
-                    Some(id) => c.prompts(Some(id), &wanted.0).map(|prompts| Found { prompts, problems: Vec::new() }),
+                    Some(id) => c.search_session(Some(id), &wanted.0),
                     None => c.prompts_everywhere(&wanted.0),
                 };
                 Done::Found(seq, found)
@@ -312,6 +312,16 @@ pub fn pump(s: &mut App) -> bool {
         }
     }
     changed
+}
+
+fn leave_history(s: &mut App, left: &str) {
+    let Some(h) = s.complete.history.get_mut(left) else { return };
+    let recalled = h.current().map(str::to_string);
+    if let Some(draft) = h.leave()
+        && recalled.as_deref() == Some(s.drafts.get(left))
+    {
+        s.drafts.set(left, &draft);
+    }
 }
 
 pub fn refresh(s: &mut App, id: &str) {
@@ -399,6 +409,7 @@ pub fn done(s: &mut App, done: Done) {
                     Ok(found) => {
                         search.results = Some(Ok(if search.all { complete::distinct(found.prompts) } else { found.prompts }));
                         search.problems = found.problems;
+                        search.more = found.more;
                     }
                     Err(error) => search.results = Some(Err(error)),
                 }
@@ -523,7 +534,7 @@ fn open_search(s: &mut App, id: &str) {
     let mut query = TextEdit::new("");
     query.focused = true;
     s.composer.focused = false;
-    s.complete.search = Some(Search { session: id.to_string(), query, all: false, ix: 0, seq: 0, asked: None, results: None, problems: Vec::new() });
+    s.complete.search = Some(Search { session: id.to_string(), query, all: false, ix: 0, seq: 0, asked: None, results: None, problems: Vec::new(), more: false });
 }
 
 fn close_search(s: &mut App) {
@@ -658,6 +669,9 @@ pub fn search(s: &App, x: &Session) -> Option<El> {
                 list = list.child(r);
             }
         }
+    }
+    if search.more && search.results.as_ref().is_some_and(|r| r.as_ref().is_ok_and(|l| !l.is_empty())) {
+        list = list.child(text("Showing the newest matches. Type more to narrow the search.").font(META).color(faint()).px(10.0).py(2.0));
     }
     for problem in &search.problems {
         list = list.child(text(problem.clone()).font(META).color(failed()).px(10.0).py(2.0));
