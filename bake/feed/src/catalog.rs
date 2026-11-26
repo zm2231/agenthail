@@ -704,6 +704,14 @@ impl Client {
         }
     }
 
+    pub(crate) fn put_json(&self, path: &str, body: Value) -> std::result::Result<Value, RespondError> {
+        match self.agent.put(&format!("{}{path}", self.base)).set("Authorization", &format!("Bearer {}", self.token)).set("Accept", "application/json").send_json(body) {
+            Ok(response) => response.into_json().map_err(|e| RespondError { message: format!("the daemon's reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: true, answered: true, reply: Value::Null, status: 0 }),
+            Err(ureq::Error::Status(code, response)) => Err(RespondError::from_status(path, code, &response.into_string().unwrap_or_default())),
+            Err(ureq::Error::Transport(error)) => Err(RespondError::from_transport(&error)),
+        }
+    }
+
     pub fn action(&self, name: &str, payload: Value) -> std::result::Result<Value, RespondError> {
         self.action_keyed(name, payload, &request_key())
     }
