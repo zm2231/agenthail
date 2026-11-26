@@ -9,7 +9,7 @@ use feed::decisions::{Decision, Handled, Inbox, gone, remember, request_hold};
 use feed::version::{Build, notice};
 
 const EVERY: Duration = Duration::from_secs(10);
-const VERSION_EVERY: u32 = 6;
+const VERSION_EVERY: Duration = Duration::from_secs(60);
 
 enum Done {
     Inbox(Instant, Inbox),
@@ -66,19 +66,18 @@ pub fn start(state: &mut State, client: &Client) {
     }
     state.started = true;
     let (client, tx) = (client.clone(), state.tx.clone());
+    let (versions, said) = (client.clone(), tx.clone());
     std::thread::spawn(move || {
-        let mut round = 0u32;
         loop {
-            if round % VERSION_EVERY == 0 {
-                let shown = client.version().ok().and_then(|daemon| notice(&app_build(), &daemon));
-                if tx.send(Done::Version(shown)).is_err() {
-                    return;
-                }
-            }
-            if !fetch(&client, &tx) {
+            let shown = versions.version().ok().and_then(|daemon| notice(&app_build(), &daemon));
+            if said.send(Done::Version(shown)).is_err() {
                 return;
             }
-            round = round.wrapping_add(1);
+            std::thread::sleep(VERSION_EVERY);
+        }
+    });
+    std::thread::spawn(move || {
+        while fetch(&client, &tx) {
             std::thread::sleep(EVERY);
         }
     });
