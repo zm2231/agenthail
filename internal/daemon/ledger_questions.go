@@ -56,3 +56,16 @@ func (d *Daemon) sweepLedgerQuestions(now time.Time) {
 		}
 	}
 }
+
+func (d *Daemon) apiLedgerPhasesHandler(w http.ResponseWriter, r *http.Request) {
+	var req ledger.PhaseLabelsRequest
+	if !decodeLedgerWrite(w, r, &req) || !d.knownLedgerSession(w, r, req.SessionID) || !d.knownLedgerProject(w, r, req.ProjectKey, req.SessionID) {
+		return
+	}
+	labels, err := d.ledgerStore().SetPhaseLabels(req, time.Now())
+	if err != nil {
+		writeLedgerError(w, err)
+		return
+	}
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"phaseLabels": labels})
+}

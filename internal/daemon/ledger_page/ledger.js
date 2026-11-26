@@ -64,6 +64,7 @@ function chip(className, text) {
 function rowChips(row, since = row.since) {
   return [
     chip("holder", row.holder),
+    row.phase && chip("phase", view.phaseLabels?.[row.phase] || row.phase),
     priorityWords[row.priority] && chip(`priority ${row.priority.toLowerCase()}`, priorityWords[row.priority]),
     row.type && row.type !== "task" && chip("type", row.type),
     chip("since", ago(since)),

@@ -123,6 +123,9 @@ func (s *Store) Read(projectKey string, req ReadRequest) (map[string]any, error)
 	}
 	entries, next := pageEntries(entriesOf(list), req.Cursor, limit, req.Budget)
 	result[view], result["truncated"] = entries, next != ""
+	if view == "work" {
+		result["phaseLabels"] = board.PhaseLabels()
+	}
 	if next != "" {
 		result["nextCursor"] = next
 	}
@@ -188,7 +191,7 @@ func readItem(board *Board, id string, result map[string]any) (map[string]any, e
 		return nil, refuse("the item view needs an id: a work item, a work action or an ask")
 	}
 	if ctx, ok := board.WorkContext(id); ok {
-		result["kind"], result["item"] = "work", readJSON(ctx)
+		result["kind"], result["item"], result["phaseLabels"] = "work", readJSON(ctx), board.PhaseLabels()
 		return result, nil
 	}
 	for _, ask := range board.AllAsks() {

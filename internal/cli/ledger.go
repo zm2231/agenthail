@@ -60,6 +60,7 @@ var ledgerCommands = map[string]func(a *App, c ledgerCall) error{
 	"wait":         func(a *App, c ledgerCall) error { return a.ledgerClause(ledger.ClauseWait, c.args) },
 	"check":        func(a *App, c ledgerCall) error { return a.ledgerCheck(c.args) },
 	"check-report": func(a *App, c ledgerCall) error { return a.ledgerCheckReport(c.args) },
+	"phases":       func(a *App, c ledgerCall) error { return a.ledgerPhases(c.store, c.args) },
 }
 
 func (a *App) cmdLedger(args []string) error {
@@ -355,7 +356,7 @@ func (a *App) ledgerSetScope(positional []string, enabled bool, mode ledger.Atta
 }
 
 var ledgerWorkShortForms = map[string]bool{"add": true, "create": true, "new": true, "list": true, "edit": true, "update": true,
-	"start": true, "claim": true, "log": true, "comment": true, "handoff": true, "block": true, "unblock": true, "review": true, "submit": true,
+	"start": true, "claim": true, "log": true, "verify": true, "comment": true, "handoff": true, "block": true, "unblock": true, "review": true, "submit": true,
 	"approve": true, "reject": true, "park": true, "unpark": true, "close": true, "reopen": true, "delete": true, "restore": true, "dep": true, "link": true, "takeover": true,
 	"ready": true, "next": true, "critical-path": true, "search": true, "tree": true}
 

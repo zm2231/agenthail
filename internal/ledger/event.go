@@ -42,6 +42,7 @@ const (
 	EventCapture       EventType = "capture"
 	EventWorkEdit      EventType = "work_item.edit"
 	EventWorkLink      EventType = "work_item.link"
+	EventPhaseLabels   EventType = "phase_labels"
 )
 
 const (

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -155,6 +156,9 @@ func TestTheWorkPageShowsAProjectsWorkByStateWithWhoHoldsItAndWhatItIsFor(t *tes
 	}
 	if len(view.Done) != 1 || view.Done[0].ID != shipped.ID || view.Done[0].Reviewer != "@checker" {
 		t.Errorf("recently done: %+v", view.Done)
+	}
+	if phases := []ledger.Phase{view.Board[laneIdle][0].Phase, view.Board[laneReview][0].Phase, view.Work[string(ledger.WorkOpen)][0].Phase, view.Done[0].Phase}; !slices.Equal(phases, []ledger.Phase{ledger.PhaseBuild, ledger.PhaseCheck, ledger.PhaseScope, ledger.PhaseShip}) || view.Phases[ledger.PhaseCheck] != "Check" || len(view.Phases) != len(ledger.Phases) {
+		t.Errorf("phases %v with labels %v, want build, check, scope and ship under the default names", phases, view.Phases)
 	}
 
 	etag := response.Header.Get("ETag")

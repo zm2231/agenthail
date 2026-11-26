@@ -77,6 +77,8 @@ type WorkItem struct {
 	Handoff      *Handoff    `json:"handoff,omitempty"`
 	Park         *Park       `json:"park,omitempty"`
 	Timeline     []WorkEntry `json:"timeline,omitempty"`
+	Phase        Phase       `json:"phase,omitempty"`
+	PhaseSince   time.Time   `json:"phaseSince,omitzero"`
 }
 
 type WorkRequest struct {
@@ -162,9 +164,10 @@ func (b *Board) applyWorkItem(event Event) error {
 			item.Park = &park
 		}
 		item.Timeline[0].At = h.CreatedAt
-		item.Timeline = append(append(item.Timeline, h.Timeline...),
+		item.Timeline = append(append(item.Timeline, importedTimeline(h.Timeline)...),
 			WorkEntry{At: event.CreatedAt, Actor: event.ActorSessionID, Kind: "imported", Text: "from " + p.ImportedFrom, State: h.State})
 	}
+	item.refreshPhase()
 	b.workItems[p.ItemID] = item
 	b.adoptChild(item.Parent, item.ID)
 	if c := b.clauses[p.ClauseID]; c != nil && p.ClauseID != "" {
@@ -193,7 +196,8 @@ func (b *Board) applyWorkItemState(event Event) error {
 	case p.FromState == WorkParked:
 		item.Park = nil
 	}
-	item.Timeline = append(item.Timeline, WorkEntry{At: event.CreatedAt, Actor: p.Actor, Kind: "state", State: p.ToState, Text: stateEntryText(p)})
+	item.Timeline = append(item.Timeline, WorkEntry{At: event.CreatedAt, Actor: p.Actor, Kind: "state", State: p.ToState, Text: stateEntryText(p), Assignee: p.Assignee})
+	item.refreshPhase()
 	return nil
 }
 

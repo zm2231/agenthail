@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/apitime"
@@ -24,10 +23,6 @@ const (
 	holderIdle    = "idle"
 	holderEnded   = "ended"
 	holderUnknown = "unknown"
-
-	prOpenedLog = "PR opened: "
-	prMergedLog = "PR merged: "
-	prClosedLog = "PR closed unmerged: "
 )
 
 var ledgerBoardLanes = []string{laneYou, laneCIFailing, laneCIPending, laneReview, laneBlocked, laneRunning, laneIdle}
@@ -167,20 +162,18 @@ func itemPRs(item ledger.WorkItem, linked map[string]registry.SessionPR) []ledge
 		if entry.Kind != "log" {
 			continue
 		}
-		for _, prefix := range []string{prOpenedLog, prMergedLog, prClosedLog} {
-			url, ok := strings.CutPrefix(strings.TrimSpace(entry.Text), prefix)
-			if _, known := linked[url]; !ok || !known {
-				continue
-			}
-			if !slices.Contains(order, url) {
-				order = append(order, url)
-			}
-			switch prefix {
-			case prMergedLog:
-				ended[url] = "merged"
-			case prClosedLog:
-				ended[url] = "closed"
-			}
+		mark, url, ok := ledger.ParsePRLine(entry.Text)
+		if _, known := linked[url]; !ok || !known {
+			continue
+		}
+		if !slices.Contains(order, url) {
+			order = append(order, url)
+		}
+		switch mark {
+		case ledger.PRMerged:
+			ended[url] = "merged"
+		case ledger.PRClosed:
+			ended[url] = "closed"
 		}
 	}
 	prs := make([]ledgerPagePR, 0, len(order))

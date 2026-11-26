@@ -27,8 +27,14 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
   ledger tree [<item_id>] [--all]
                                  Unfinished items nested under their parents; --all adds finished ones
   ledger start <item_id>         Claim an item; waits for its dependencies (claim)
-  ledger log <item_id> "<text>" [--type progress|blocker|decision|hypothesis|tried|result]
+  ledger log <item_id> "<text>" [--type progress|blocker|decision|hypothesis|tried|result|verify]
                                  Add to the running log of an item you hold
+  ledger verify <item_id> "<what you are checking>"
+                                 Mark an item you hold as built and being checked: its phase is Verify
+                                 until a new pull request opens or it is claimed or sent back again
+  ledger phases [--label <phase>=<name>]...
+                                 Each phase (scope, build, review, verify, check, ship) and this
+                                 project's name for it; --label renames one, an empty name restores it
   ledger comment <item_id> "<text>"
                                  Comment on an item from any session
   ledger handoff <item_id> --done/--remaining/--decisions/--uncertain "..."

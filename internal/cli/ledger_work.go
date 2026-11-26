@@ -24,7 +24,8 @@ const ledgerWorkUsage = `usage: agenthail ledger work [list] [--state <s,...>] [
                                           [--parent <item_id> | --no-parent]   (or work update)
        agenthail ledger work link <item_id> <clause_id> [--reason "..."]   (--reason moves an item off the clause it hangs off)
        agenthail ledger work comment <item_id> "<text>"
-       agenthail ledger work log <item_id> "<text>" [--type progress|blocker|decision|hypothesis|tried|result]
+       agenthail ledger work log <item_id> "<text>" [--type progress|blocker|decision|hypothesis|tried|result|verify]
+       agenthail ledger work verify <item_id> "<what you are checking>"   (a verify log: building is over, the work is being checked)
        agenthail ledger work <claim|block|unblock|submit|reopen|restore> <item_id> [--reason "..."]
        agenthail ledger work close <item_id> --reason "done: <what finished it>|duplicate|wontfix|obsolete ..."
        agenthail ledger work delete <item_id> [--reason "..."]
@@ -77,11 +78,18 @@ func (a *App) ledgerWork(store *ledger.Store, args []string) error {
 	if alias, ok := workActionAliases[w.positional[1]]; ok {
 		action = alias
 	}
+	verify := w.positional[1] == ledger.LogVerify
+	if verify {
+		action = ledger.WorkLog
+	}
 	if len(w.positional) == 2 && !workActions[action] {
 		return a.ledgerWorkShow(store, w, w.positional[1])
 	}
 	req := ledger.WorkRequest{Action: action, Reason: w.value("--reason"), DependsOn: w.value("--on"), UtteranceID: w.value("--utterance"), LogType: w.value("--type"),
 		Handoff: ledger.Handoff{Done: w.values["--done"], Remaining: w.values["--remaining"], Decisions: w.values["--decisions"], Uncertain: w.values["--uncertain"]}}
+	if verify {
+		req.LogType = ledger.LogVerify
+	}
 	if action == ledger.WorkTakeover {
 		req.Takeover = &ledger.Takeover{Then: w.value("--then"), Force: w.bools["--force"]}
 	}
@@ -278,6 +286,9 @@ func workLine(item ledger.WorkItem) string {
 		}
 	}
 	line := fmt.Sprintf("%s [%s] %s %s %s: %s", item.ID, item.State, item.Priority, item.Type, on, item.Text)
+	if item.Phase != "" {
+		line += " phase=" + string(item.Phase)
+	}
 	if len(item.Labels) > 0 {
 		line += " #" + strings.Join(item.Labels, " #")
 	}

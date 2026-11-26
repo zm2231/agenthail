@@ -13,9 +13,9 @@ import (
 
 type mcpLedgerWriteInput struct {
 	mcpWrite
-	Op      string         `json:"op" jsonschema:"attach, clause, question or work: the same operations as agenthail ledger attach, clause, question and work."`
+	Op      string         `json:"op" jsonschema:"attach, clause, question, work or phases: the same operations as agenthail ledger attach, clause, question, work and phases."`
 	Project string         `json:"project,omitempty" jsonschema:"a project by name or id, as agenthail_projects lists them; yours by default, required when you are in none"`
-	Request map[string]any `json:"request" jsonschema:"The operation's fields, as the CLI sends them; your project and session are filled in for you. Unknown keys are refused. A work add nests type, priority, description, acceptance, labels, from and parent under fields (fields.type); an edit nests text, type, priority, description, acceptance, addLabels, removeLabels and parent (empty to clear) under change; undep drops a dependsOn; a park nests kind (usage, idea, later, person) and its fields under park, as the CLI sends them; a takeover nests then (release, submit or done) and force under takeover. attach also takes fragments, a list of attaches recorded in one call, each on its own."`
+	Request map[string]any `json:"request" jsonschema:"The operation's fields, as the CLI sends them; your project and session are filled in for you. Unknown keys are refused. A work add nests type, priority, description, acceptance, labels, from and parent under fields (fields.type); an edit nests text, type, priority, description, acceptance, addLabels, removeLabels and parent (empty to clear) under change; undep drops a dependsOn; a park nests kind (usage, idea, later, person) and its fields under park, as the CLI sends them; a takeover nests then (release, submit or done) and force under takeover. attach also takes fragments, a list of attaches recorded in one call, each on its own. phases takes labels: {phase key: name}, empty restores the default."`
 }
 
 func (d *Daemon) mcpLedgerWrite(ctx context.Context, caller *mcpCaller, input mcpLedgerWriteInput) (any, error) {
@@ -26,11 +26,11 @@ func (d *Daemon) mcpLedgerWrite(ctx context.Context, caller *mcpCaller, input mc
 	if err != nil {
 		return nil, err
 	}
-	handlers := map[string]http.HandlerFunc{"attach": d.apiLedgerAttachHandler, "clause": d.apiLedgerClauseHandler, "question": d.apiLedgerQuestionHandler, "work": d.apiLedgerWorkHandler}
+	handlers := map[string]http.HandlerFunc{"attach": d.apiLedgerAttachHandler, "clause": d.apiLedgerClauseHandler, "question": d.apiLedgerQuestionHandler, "work": d.apiLedgerWorkHandler, "phases": d.apiLedgerPhasesHandler}
 	op := strings.TrimSpace(input.Op)
 	handler, ok := handlers[op]
 	if !ok {
-		return nil, refuse("invalid", "op is attach, clause, question or work.")
+		return nil, refuse("invalid", "op is attach, clause, question, work or phases.")
 	}
 	request := input.Request
 	if request == nil {

@@ -3,6 +3,7 @@ package prwatch
 import (
 	"time"
 
+	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
@@ -27,7 +28,7 @@ func (w *Watcher) Link(link registry.SessionPR, explicit bool) error {
 		})
 	}
 	if err == nil && linked && link.ItemID != "" {
-		w.host.LogItem(link.SessionID, link.ItemID, "PR opened: "+link.URL)
+		w.host.LogItem(link.SessionID, link.ItemID, ledger.PRLine(ledger.PROpened, link.URL))
 	}
 	return err
 }
@@ -37,9 +38,9 @@ func outcomeLine(before, after registry.SessionPR) string {
 	case before.State == after.State:
 		return ""
 	case after.State == "merged":
-		return "PR merged: " + after.URL
+		return ledger.PRLine(ledger.PRMerged, after.URL)
 	case after.State == "closed":
-		return "PR closed unmerged: " + after.URL
+		return ledger.PRLine(ledger.PRClosed, after.URL)
 	}
 	return ""
 }
