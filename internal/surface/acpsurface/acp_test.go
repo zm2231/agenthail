@@ -330,3 +330,14 @@ func TestAdapterControlsModelAndModeAndListsModels(t *testing.T) {
 		t.Fatalf("models=%+v err=%v", models, err)
 	}
 }
+
+func TestAHandoverIsRetryableOnEverySendPath(t *testing.T) {
+	for _, code := range []string{acphost.CodeDraining, acphost.CodeHeld, acphost.CodeBusy} {
+		if err := deliveryError(&acphost.CallError{Code: code, Message: "moving"}); !surface.IsDeliveryUnavailable(err) {
+			t.Fatalf("%s must be retryable: %v", code, err)
+		}
+	}
+	if err := deliveryError(&acphost.CallError{Code: acphost.CodeInvalid, Message: "no such model"}); surface.IsDeliveryUnavailable(err) {
+		t.Fatal("an invalid request must not be retried")
+	}
+}

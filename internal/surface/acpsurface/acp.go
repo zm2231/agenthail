@@ -200,7 +200,7 @@ func (a *ACP) SendWithOptions(ctx context.Context, sess *surface.Session, messag
 	}
 	if options.Model != "" {
 		if _, err := a.client.SetOption(ctx, acphost.OptionParams{SessionID: sess.ID, Category: "model", Value: options.Model}); err != nil {
-			return nil, surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
+			return nil, deliveryError(err)
 		}
 	}
 	result, err := a.client.Send(ctx, acphost.SendParams{SessionID: sess.ID, Text: message, MessageID: surface.MessageUUID(ctx), MCPServers: servers})
@@ -219,7 +219,7 @@ func deliveryError(err error) error {
 		return surface.DeliveryUnavailable(fmt.Errorf("%w: %s", surface.ErrDeliveryHeld, callErr.Message))
 	case errors.As(err, &callErr) && (callErr.Code == acphost.CodeInvalid || callErr.Code == acphost.CodeNotFound):
 		return surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
-	case errors.As(err, &callErr) && callErr.Code == acphost.CodeDraining:
+	case errors.As(err, &callErr) && (callErr.Code == acphost.CodeDraining || callErr.Code == acphost.CodeHeld):
 		return surface.DeliveryUnavailable(err)
 	}
 	return err

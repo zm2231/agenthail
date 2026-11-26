@@ -34,7 +34,7 @@ type Host struct {
 	log     *log.Logger
 
 	mu       sync.Mutex
-	openMu   sync.Mutex
+	opening  map[string]*sync.Mutex
 	sessions map[string]*session
 	outcomes map[string]*outcome
 	watchers map[chan Event]struct{}
@@ -410,8 +410,18 @@ func (h *Host) create(ctx context.Context, p CreateParams) (State, error) {
 }
 
 func (h *Host) open(id string) (*session, error) {
-	h.openMu.Lock()
-	defer h.openMu.Unlock()
+	h.mu.Lock()
+	if h.opening == nil {
+		h.opening = map[string]*sync.Mutex{}
+	}
+	gate := h.opening[id]
+	if gate == nil {
+		gate = &sync.Mutex{}
+		h.opening[id] = gate
+	}
+	h.mu.Unlock()
+	gate.Lock()
+	defer gate.Unlock()
 	h.mu.Lock()
 	if s := h.sessions[id]; s != nil {
 		h.mu.Unlock()

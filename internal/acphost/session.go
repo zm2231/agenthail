@@ -19,12 +19,11 @@ import (
 )
 
 var (
-	idleStop           = 15 * time.Minute
-	agentTimeout       = 2 * time.Minute
-	stopGrace          = 5 * time.Second
-	handoverWait       = 3 * stopGrace
-	answerWriteTimeout = 30 * time.Second
-	errNotRunning      = errors.New("the agent is not running")
+	idleStop      = 15 * time.Minute
+	agentTimeout  = 2 * time.Minute
+	stopGrace     = 5 * time.Second
+	handoverWait  = 3 * stopGrace
+	errNotRunning = errors.New("the agent is not running")
 )
 
 type permissionAnswer struct {
@@ -151,8 +150,9 @@ func (s *session) Notification(method string, params json.RawMessage) {
 	if !s.loading && s.norm != nil && s.norm.turnID != "" {
 		s.norm.update(u)
 	}
+	loading := s.loading
 	s.mu.Unlock()
-	if guard != "" {
+	if guard != "" && !loading {
 		go s.enforceCeiling(guard)
 	}
 }
@@ -196,6 +196,12 @@ func (s *session) applyStateLocked(u acp.Update) string {
 	return ""
 }
 
+func (s *session) withinCeiling(mode string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.aboveCeilingLocked(mode)
+}
+
 func (s *session) aboveCeilingLocked(mode string) bool {
 	return s.state.Ceiling != "" && mode != "" && RankIndex(s.agent.ModeRank(mode)) > RankIndex(s.state.Ceiling)
 }
@@ -234,7 +240,10 @@ func (s *session) cancelRequestsLocked() {
 func (s *session) ensureRunning(ctx context.Context, mcp []acp.MCPServer) error {
 	s.mu.Lock()
 	running := s.conn != nil
-	agentSession := s.state.AgentSessionID
+	agentSession, recorded := s.state.AgentSessionID, s.state.Mode
+	if s.aboveCeilingLocked(recorded) {
+		recorded = ""
+	}
 	s.mu.Unlock()
 	if running {
 		return nil
@@ -250,7 +259,6 @@ func (s *session) ensureRunning(ctx context.Context, mcp []acp.MCPServer) error 
 	err := conn.Request(ctx, "session/load", acp.LoadSessionParams{SessionID: agentSession, Cwd: s.state.Cwd, MCPServers: mcpOrEmpty(mcp)}, &setup)
 	s.mu.Lock()
 	s.loading = false
-	recorded := s.state.Mode
 	if err == nil {
 		s.applySetupLocked(setup)
 		s.saveLocked()
@@ -262,10 +270,18 @@ func (s *session) ensureRunning(ctx context.Context, mcp []acp.MCPServer) error 
 		return fmt.Errorf("load the %s session: %w", s.agent.DisplayName(), err)
 	}
 	if above {
-		if setErr := s.setModeOnAgent(ctx, recorded); setErr != nil || s.snapshot().Mode != recorded {
-			s.stopProcess()
-			return callError("exceeds_ceiling", "%s reopened the session in %s, above its ceiling of %s, and Agenthail could not set it back to %s: %v", s.agent.DisplayName(), loaded, s.state.Ceiling, recorded, setErr)
+		target := recorded
+		if target == "" {
+			target, err = s.pickModeWithinCeiling()
 		}
+		if err == nil {
+			err = s.setModeOnAgent(ctx, target)
+		}
+		if mode := s.snapshot().Mode; err == nil && s.withinCeiling(mode) {
+			return nil
+		}
+		s.stopProcess()
+		return callError("exceeds_ceiling", "%s reopened the session in %s, above its ceiling of %s, and Agenthail could not set a mode within it: %v", s.agent.DisplayName(), loaded, s.state.Ceiling, err)
 	}
 	return nil
 }
@@ -711,20 +727,35 @@ func (s *session) respond(requestID, choice string) (RespondResult, error) {
 	delete(s.pending, requestID)
 	written := make(chan error, 1)
 	pending.answer <- permissionAnswer{result: answer, written: written}
+	conn := s.conn
 	s.mu.Unlock()
 	s.changed()
-	select {
-	case err := <-written:
-		if err != nil {
-			return RespondResult{}, callError(CodeFailed, "the answer did not reach %s: %v", s.agent.DisplayName(), err)
-		}
-	case <-time.After(answerWriteTimeout):
-		return RespondResult{}, callError(CodeFailed, "%s did not take the answer within %s", s.agent.DisplayName(), answerWriteTimeout)
-	}
+	err := awaitWritten(written, conn)
 	if choice == "stop" {
 		_ = s.cancel()
 	}
+	if err != nil {
+		return RespondResult{}, callError(CodeFailed, "the answer did not reach %s: %v", s.agent.DisplayName(), err)
+	}
 	return RespondResult{Outcome: outcome}, nil
+}
+
+// awaitWritten has no deadline of its own: a write still pending is not a failure, and the caller's own timeout leaves the outcome unknown.
+func awaitWritten(written chan error, conn *acp.Conn) error {
+	if conn == nil {
+		return errNotRunning
+	}
+	select {
+	case err := <-written:
+		return err
+	case <-conn.Done():
+	}
+	select {
+	case err := <-written:
+		return err
+	case <-time.After(stopGrace):
+		return errors.New("the agent stopped before the answer was written")
+	}
 }
 
 func (s *session) quiet() bool {

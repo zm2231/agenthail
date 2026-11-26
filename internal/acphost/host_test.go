@@ -438,3 +438,70 @@ func TestClosingASessionWaitsForItsAgentToExit(t *testing.T) {
 		lock.release()
 	}
 }
+
+func TestAReopenedSessionIsSetBackWithinItsCeilingBeforeItsPrompt(t *testing.T) {
+	agent := fakeAgent(t, "fake")
+	h := startHost(t, agent)
+	state := h.create("fake", "edits", "")
+	if state.Mode != "default" {
+		t.Fatalf("mode=%s", state.Mode)
+	}
+	s := h.host.heldSession(state.SessionID)
+	s.stopProcess()
+	path := filepath.Join(agent.Env["AGENTHAIL_ACPTEST_STATE"], state.AgentSessionID+".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved map[string]any
+	if err := json.Unmarshal(data, &saved); err != nil {
+		t.Fatal(err)
+	}
+	saved["mode"] = "bypass"
+	if data, err = json.Marshal(saved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	turn := h.send(state.SessionID, "reply:within")
+	done := h.waitFor(state.SessionID, func(s State) bool { return s.LastTurnID == turn })
+	if done.Mode != "default" {
+		t.Fatalf("the reopened session ran in %s", done.Mode)
+	}
+	if data, _ := os.ReadFile(path); !strings.Contains(string(data), `"default"`) {
+		t.Fatalf("the agent was not set back: %s", data)
+	}
+}
+
+func TestOneContestedSessionDoesNotHoldUpOpeningAnother(t *testing.T) {
+	previous := handoverWait
+	handoverWait = time.Second
+	t.Cleanup(func() { handoverWait = previous })
+	agent := fakeAgent(t, "fake")
+	h := startHost(t, agent)
+	contested := h.create("fake", "", "")
+	free := h.create("fake", "", "")
+	if !h.host.closeSession(free.SessionID, false, false) {
+		t.Fatal("close")
+	}
+	next := NewHost(h.home, "test", []Agent{agent}, nil)
+	waited := make(chan error, 1)
+	go func() {
+		_, err := next.open(contested.SessionID)
+		waited <- err
+	}()
+	time.Sleep(100 * time.Millisecond)
+	started := time.Now()
+	opened, err := next.open(free.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer next.closeSession(opened.state.SessionID, false, false)
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("opening a free session waited %s behind a contested one", elapsed)
+	}
+	if err := <-waited; !isCode(err, CodeHeld) {
+		t.Fatalf("a session another host keeps must report it is held: %v", err)
+	}
+}
