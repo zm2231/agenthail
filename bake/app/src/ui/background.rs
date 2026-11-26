@@ -85,7 +85,7 @@ pub(crate) fn dock(s: &App, x: &Session) -> Option<El> {
                 let line = t.timed_line(s.now, clock(), offset);
                 row().key(format!("background-task-{}", t.id)).w_full().h(LINE_HEIGHT).items_center().help(line.clone()).child(text(line).font(META).color(muted()).truncate())
             }))
-            .children(b.source_note().map(|n| row().w_full().h(NOTE_LINES as f32 * LINE_HEIGHT).items_center().child(text(n).font(META).color(faint()).wrap().max_lines(NOTE_LINES))));
+            .children(b.source_note().map(|n| row().w_full().min_h(NOTE_LINES as f32 * LINE_HEIGHT).items_center().child(text(n).font(META).color(faint()).wrap())));
         c = c.child(col().key("background-tasks-lines").w_full().max_h(LINES_SHOWN as f32 * LINE_HEIGHT + 6.0).scroll(ScrollSpec { stick_bottom: false }).child(list));
     }
     Some(c)
