@@ -15,7 +15,7 @@ const RENEW_RETRY: Duration = Duration::from_secs(60);
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 enum Load {
     Navigating(String),
-    Started,
+    Started(String),
     Finished(String),
 }
 
@@ -45,6 +45,7 @@ pub struct Web {
     recheck: Option<String>,
     loading_since: Option<Instant>,
     navigating: Option<(String, Instant)>,
+    left: Option<String>,
     want: Option<String>,
     page: Rc<RefCell<String>>,
     loads: (Sender<Load>, Receiver<Load>),
@@ -71,6 +72,7 @@ impl Web {
             recheck: None,
             loading_since: None,
             navigating: None,
+            left: None,
             want: None,
             page: Rc::new(RefCell::new(String::new())),
             loads: channel(),
@@ -179,7 +181,13 @@ impl Web {
             }
             match load {
                 Load::Navigating(url) => self.navigating = Some((url, Instant::now())),
-                Load::Started => self.navigating = None,
+                Load::Started(url) => match &self.loaded {
+                    Some(page) if !feed::extensions::same_origin(&url, page) && (url.starts_with("http://") || url.starts_with("https://")) => {
+                        self.navigating = None;
+                        self.left = Some(url);
+                    }
+                    _ => self.navigating = Some((url, Instant::now())),
+                },
                 Load::Finished(url) => {
                     self.navigating = None;
                     self.loading_since = None;
@@ -234,6 +242,13 @@ impl Web {
             self.view = Some(build(slot, self.page.clone(), self.loads.0.clone(), self.follow.0.clone())?);
         }
         let Some(view) = &self.view else { return Ok(false) };
+        if let Some(url) = self.left.take() {
+            crate::open_link(&url);
+            if let Some(page) = &self.loaded {
+                view.load_url(page).map_err(|e| format!("Couldn't open {page}: {e}"))?;
+                self.loading_since = Some(Instant::now());
+            }
+        }
         while let Ok(url) = self.follow.1.try_recv() {
             if self.loaded.as_deref() == Some(want) {
                 view.load_url(&url).map_err(|e| format!("Couldn't open {url}: {e}"))?;
@@ -257,7 +272,7 @@ impl Web {
 
     #[cfg(not(target_os = "macos"))]
     fn show(&mut self, _want: &str, _cookie: &WebSession, cleared: bool, _in_window: bool) -> Result<bool, String> {
-        let _ = (&self.page, &self.loads.0, &self.follow.0, &self.cookie_set, &self.loaded, &self.loading_since);
+        let _ = (&self.page, &self.loads.0, &self.follow.0, &self.left, &self.cookie_set, &self.loaded, &self.loading_since);
         if cleared { Err("Pages open in the Mac app.".into()) } else { Ok(false) }
     }
 }
@@ -286,23 +301,11 @@ fn web_cookie(session: &WebSession, page: &str) -> Result<wry::cookie::Cookie<'s
 }
 
 #[cfg(target_os = "macos")]
-const OUTSIDE_LINKS: &str = r#"document.addEventListener("click", (event) => {
-  const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
-  if (!link || event.defaultPrevented || !["", "_self", "_top", "_parent"].includes(link.target)) return;
-  const url = new URL(link.href, location.href);
-  if ((url.protocol === "http:" || url.protocol === "https:") && url.origin !== location.origin) {
-    event.preventDefault();
-    window.open(url.href, "_blank");
-  }
-}, true);"#;
-
-#[cfg(target_os = "macos")]
 fn build(slot: &NativeView, page: Rc<RefCell<String>>, loads: Sender<Load>, follow: Sender<String>) -> Result<wry::WebView, String> {
     use feed::extensions::{Navigation, navigation, same_origin};
     let finished = loads.clone();
     let opener = page.clone();
     wry::WebViewBuilder::new()
-        .with_initialization_script_for_main_only(OUTSIDE_LINKS, true)
         .with_navigation_handler(move |url| match navigation(&url, &page.borrow()) {
             Navigation::Allow => {
                 if same_origin(&url, &page.borrow()) {
@@ -325,7 +328,7 @@ fn build(slot: &NativeView, page: Rc<RefCell<String>>, loads: Sender<Load>, foll
         })
         .with_on_page_load_handler(move |event, url| {
             let _ = finished.send(match event {
-                wry::PageLoadEvent::Started => Load::Started,
+                wry::PageLoadEvent::Started => Load::Started(url),
                 wry::PageLoadEvent::Finished => Load::Finished(url),
             });
         })
@@ -440,7 +443,7 @@ mod tests {
         web.loaded = Some(page.into());
         web.phase = Phase::Loading;
         let landed = "http://127.0.0.1:48200/login";
-        web.loads.0.send(Load::Started).unwrap();
+        web.loads.0.send(Load::Started(landed.into())).unwrap();
         web.loads.0.send(Load::Finished(landed.into())).unwrap();
         web.pump(None);
         assert_eq!(web.phase, Phase::Shown);
@@ -465,6 +468,7 @@ mod tests {
         web.ready = Some(page.into());
         web.phase = Phase::Shown;
         web.loads.0.send(Load::Navigating("http://127.0.0.1:48200/report".into())).unwrap();
+        web.loads.0.send(Load::Started("http://127.0.0.1:48200/report".into())).unwrap();
         web.pump(None);
         assert!(web.probe_due(Some(page)).is_none(), "not before the limit");
         web.navigating.as_mut().unwrap().1 -= LOAD_LIMIT;
@@ -536,6 +540,22 @@ mod tests {
         web.loads.0.send(Load::Finished("https://example.com/".into())).unwrap();
         web.pump(None);
         assert!(web.probe_due(Some(page)).is_none());
+    }
+
+    #[test]
+    fn a_page_that_leaves_for_another_site_is_sent_back() {
+        let page = "http://127.0.0.1:48200/";
+        let mut web = Web::new();
+        web.loaded = Some(page.into());
+        web.phase = Phase::Shown;
+        web.loads.0.send(Load::Started("https://example.com/".into())).unwrap();
+        web.pump(None);
+        assert_eq!(web.left.as_deref(), Some("https://example.com/"));
+        assert!(web.navigating.is_none());
+        web.left = None;
+        web.loads.0.send(Load::Started("about:blank".into())).unwrap();
+        web.pump(None);
+        assert!(web.left.is_none());
     }
 
     #[test]

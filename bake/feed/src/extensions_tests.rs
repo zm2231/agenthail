@@ -22,7 +22,7 @@ fn sample() -> List {
                 "id": "board", "label": "Board", "description": "Work at a glance", "state": "loaded",
                 "page": {"port": 48200, "entry": "index.html"},
                 "capabilities": ["ledger.read"], "pendingCapabilities": ["sessions.send"], "actions": ["refresh"],
-                "jobs": {"sync": {"lastError": "timed out"}}, "toolsNote": "Its tools are over the budget, so sessions don't see them." 
+                "jobs": {"sync": {"lastError": "timed out"}}, "toolsNote": "Its tools are over the budget, so sessions don't see them."
             },
             {
                 "id": "broken", "label": "Broken", "state": "invalid", "error": "extension.json: missing id",
