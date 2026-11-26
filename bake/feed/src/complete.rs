@@ -436,14 +436,16 @@ pub struct Found {
     pub more: bool,
 }
 
-fn connected_hosts(snapshot: &Value) -> Vec<(String, String)> {
-    snapshot["daemon"]["hosts"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|h| h["state"] == "connected")
-        .filter_map(|h| Some((h["id"].as_str()?.to_string(), h["name"].as_str().unwrap_or_default().to_string())))
-        .collect()
+fn paired_hosts(snapshot: &Value, problems: &mut Vec<String>) -> Vec<(String, String)> {
+    let mut connected = Vec::new();
+    for h in snapshot["daemon"]["hosts"].as_array().into_iter().flatten() {
+        let (Some(id), name) = (h["id"].as_str(), h["name"].as_str().unwrap_or_default()) else { continue };
+        match h["state"].as_str().unwrap_or_default() {
+            "connected" => connected.push((id.to_string(), name.to_string())),
+            state => problems.push(format!("Didn't search {name}: it's {}", if state.is_empty() { "not connected" } else { state })),
+        }
+    }
+    connected
 }
 
 fn on_host(mut prompt: Prompt, host: &str) -> Prompt {
@@ -494,7 +496,7 @@ impl Client {
             problems.push(format!("Couldn't search this computer: {error}"));
             Found::default()
         });
-        let hosts = self.read("/api/v1/snapshot?sessions=none").map(|v| connected_hosts(&v)).unwrap_or_else(|error| {
+        let hosts = self.read("/api/v1/snapshot?sessions=none").map(|v| paired_hosts(&v, &mut problems)).unwrap_or_else(|error| {
             problems.push(format!("Couldn't find the other computers to search: {error}"));
             Vec::new()
         });
@@ -768,7 +770,7 @@ mod tests {
         let found = client.prompts_everywhere("t").unwrap();
         assert!(!found.more);
         assert_eq!(found.prompts.iter().map(|p| (p.session_id.as_str(), p.text.as_str())).collect::<Vec<_>>(), vec![("h1::s9", "there"), ("s1", "here"), ("h1::s8", "older")]);
-        assert!(found.problems.is_empty());
+        assert_eq!(found.problems, vec!["Didn't search laptop: it's unreachable".to_string()]);
         let paths: Vec<String> = seen.try_iter().map(|(p, _)| p).collect();
         assert_eq!(paths, vec!["/api/v1/prompts?limit=100&q=t", "/api/v1/snapshot?sessions=none", "/api/v1/prompts?limit=100&host=h1&q=t"]);
         let (client, _seen) = daemon(replies(&[(200, r#"{"prompts":[]}"#), (200, r#"{"daemon":{"hosts":[{"id":"h1","name":"buildbox","state":"connected"}]}}"#), (502, r#"{"error":{"message":"host timed out"}}"#)]));
