@@ -128,13 +128,13 @@ pub fn targets(stop: &Stop, current: Option<&str>, roots: &[ConfigRoot], now: Of
     let mut out = Vec::new();
     if let Some(offer) = &stop.offer {
         let known = roots.iter().find(|r| r.root == offer.root);
-        let usage = known.and_then(ConfigRoot::usage_line);
+        let usage = known.and_then(|r| r.usage_line(now));
         let detail = [offer.reason.clone().filter(|r| !r.is_empty()), usage].into_iter().flatten().collect::<Vec<_>>().join(" · ");
         out.push(Target { root: offer.root.clone(), name: offer.name(), detail: (!detail.is_empty()).then_some(detail), full: known.is_some_and(|r| r.spent(now)), offered: true });
     }
     let offered = stop.offer.as_ref().map(|o| o.root.as_str());
     for root in roots.iter().filter(|r| r.selectable() && Some(r.root.as_str()) != current && Some(r.root.as_str()) != offered) {
-        out.push(Target { root: root.root.clone(), name: root.title(), detail: root.usage_line(), full: root.spent(now), offered: false });
+        out.push(Target { root: root.root.clone(), name: root.title(), detail: root.usage_line(now), full: root.spent(now), offered: false });
     }
     out
 }
