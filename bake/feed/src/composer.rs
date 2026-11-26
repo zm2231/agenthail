@@ -137,6 +137,12 @@ impl Unsent {
         Some(Unsent { session, text, key, busy, maybe_delivered, error: value["error"].as_str().unwrap_or_default().to_string() })
     }
 
+    pub fn quoted(&self) -> String {
+        let line = self.text.lines().next().unwrap_or_default();
+        let short: String = line.chars().take(48).collect();
+        if short.len() < self.text.len() { format!("“{short}…”") } else { format!("“{short}”") }
+    }
+
     pub fn note(&self) -> String {
         if self.maybe_delivered { format!("Not confirmed: {}. Retry is safe: it won't send twice.", self.error) } else { format!("Not sent: {}", self.error) }
     }
@@ -163,13 +169,6 @@ pub fn queued_note(rows: &[QueueRow], rekeyed: &HashMap<String, String>, id: &st
     (!seen_since || ours).then(|| receipt.note(pending.len() as i64))
 }
 
-pub fn take_back(composer: &str, text: &str, restored: Option<&(String, String)>) -> Option<String> {
-    match restored {
-        Some((merged, before)) => (merged == composer).then(|| before.clone()),
-        None => (composer.trim() == text).then(String::new),
-    }
-}
-
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Unconfirmed(HashMap<String, Vec<Unsent>>);
 
@@ -180,10 +179,6 @@ impl Unconfirmed {
 
     pub fn has(&self, id: &str) -> bool {
         self.latest(id).is_some()
-    }
-
-    pub fn holds_back(&self, id: &str, message: &str) -> bool {
-        self.0.get(id).is_some_and(|list| list.iter().any(|u| u.maybe_delivered && u.text != message && message.contains(u.text.as_str())))
     }
 
     pub fn take_same(&mut self, id: &str, text: &str) -> Option<Unsent> {
@@ -355,25 +350,18 @@ mod tests {
     }
 
     #[test]
+    fn an_unsent_message_is_quoted_short() {
+        assert_eq!(unsent("k", "hello", true).quoted(), "“hello”");
+        assert_eq!(unsent("k", "first line\nsecond", true).quoted(), "“first line…”");
+        assert_eq!(unsent("k", &"x".repeat(60), true).quoted(), format!("“{}…”", "x".repeat(48)));
+    }
+
+    #[test]
     fn a_message_put_back_keeps_what_was_typed_since() {
         assert_eq!(put_back("", "hello"), "hello");
         assert_eq!(put_back("hello", "hello"), "hello");
         assert_eq!(put_back("and more", "hello"), "hello\n\nand more");
         assert_eq!(put_back("hello\n\nand more", "hello"), "hello\n\nand more");
-    }
-
-    #[test]
-    fn a_retry_takes_back_only_the_copy_that_was_put_back() {
-        assert_eq!(take_back("hello", "hello", None).as_deref(), Some(""));
-        let merged = put_back("and more", "hello");
-        let restored = (merged.clone(), "and more".to_string());
-        assert_eq!(take_back(&merged, "hello", Some(&restored)).as_deref(), Some("and more"));
-        assert_eq!(take_back("hello\n\n  and more", "hello", Some(&restored)), None);
-        assert_eq!(take_back(&merged, "hello", None), None);
-        assert_eq!(take_back("hello world", "hello", None), None);
-        let typed_again = ("hello".to_string(), "hello".to_string());
-        assert_eq!(take_back("hello", "hello", Some(&typed_again)).as_deref(), Some("hello"));
-        assert_eq!(take_back("hello", "hello", Some(&restored)), None);
     }
 
     fn unsent(key: &str, text: &str, maybe_delivered: bool) -> Unsent {
@@ -394,18 +382,6 @@ mod tests {
         held.remove("s1", "k1");
         assert!(!held.has("s1"));
         assert_eq!(held, Unconfirmed::default());
-    }
-
-    #[test]
-    fn text_wrapping_an_unconfirmed_message_is_held_back() {
-        let mut held = Unconfirmed::default();
-        held.add("s1", unsent("k1", "A", true));
-        held.add("s1", unsent("k2", "C", false));
-        assert!(held.holds_back("s1", &put_back("B", "A")));
-        assert!(!held.holds_back("s1", "A"));
-        assert!(!held.holds_back("s1", "B"));
-        assert!(!held.holds_back("s1", "C and D"));
-        assert!(!held.holds_back("s2", "A and B"));
     }
 
     #[test]

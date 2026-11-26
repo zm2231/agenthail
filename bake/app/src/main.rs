@@ -71,8 +71,6 @@ pub struct App {
     pub drafts: Drafts,
     pub unsent: Unconfirmed,
     pub in_flight: HashMap<String, Vec<Unsent>>,
-    restored: HashMap<String, (String, String)>,
-    held_back: HashSet<String>,
     pub queued: HashMap<String, Vec<(u64, Delivered)>>,
     snapshots: u64,
     queue_rows: Vec<feed::catalog::QueueRow>,
@@ -159,8 +157,6 @@ fn init() -> App {
         drafts: Drafts::default(),
         unsent: Unconfirmed::default(),
         in_flight: HashMap::new(),
-        restored: HashMap::new(),
-        held_back: HashSet::new(),
         queued: HashMap::new(),
         snapshots: 0,
         queue_rows: Vec::new(),
@@ -486,12 +482,7 @@ pub fn send_to(s: &mut App, id: &str, tx: &mut Tx) {
         note(s, id, "Fixture mode: not sent".into());
         return;
     }
-    if s.unsent.holds_back(id, &message) {
-        s.held_back.insert(id.to_string());
-        return;
-    }
     s.composer = TextEdit::new("");
-    s.restored.remove(id);
     match s.unsent.take_same(id, &message) {
         Some(again) if again.maybe_delivered => dispatch(s, id, again, true, tx),
         _ => {
@@ -506,13 +497,12 @@ pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
     if sending(s, id) || s.client.is_none() {
         return;
     }
-    if s.composer_for.as_deref() == Some(id)
-        && let Some(rest) = feed::composer::take_back(&s.composer.text, &unsent.text, s.restored.get(id))
-    {
-        s.composer = TextEdit::new(rest);
+    if s.composer_for.as_deref() == Some(id) && s.composer.text.trim() == unsent.text {
+        s.composer = TextEdit::new("");
         s.composer.focused = true;
+    } else if s.drafts.get(id).trim() == unsent.text {
+        s.drafts.set(id, "");
     }
-    s.restored.remove(id);
     s.unsent.remove(id, &unsent.key);
     if unsent.maybe_delivered {
         dispatch(s, id, unsent, true, tx);
@@ -525,8 +515,6 @@ pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
 pub fn dismiss_unsent(s: &mut App, id: &str) {
     if let Some(key) = s.unsent.latest(id).map(|u| u.key.clone()) {
         s.unsent.remove(id, &key);
-        s.restored.remove(id);
-        s.held_back.remove(id);
         over::layout::save(s);
     }
 }
@@ -538,7 +526,6 @@ fn fresh(s: &App, id: &str, text: String) -> Unsent {
 fn dispatch(s: &mut App, id: &str, pending: Unsent, resent: bool, tx: &mut Tx) {
     let Some(client) = s.client.clone() else { return };
     let id = id.to_string();
-    s.held_back.remove(&id);
     s.in_flight.entry(id.clone()).or_default().push(pending.clone());
     if s.composer_for.as_deref() == Some(id.as_str()) {
         s.drafts.set(&id, &s.composer.text);
@@ -616,8 +603,10 @@ pub fn composer_note(s: &App, id: &str) -> Option<String> {
     if sending(s, id) {
         parts.push("Sending…".into());
     }
-    if s.held_back.contains(id) {
-        parts.push("Retry or dismiss the unconfirmed message first: it may already have arrived".into());
+    if let Some(latest) = s.unsent.latest(id)
+        && shown_text(s, id).trim() != latest.text
+    {
+        parts.push(latest.quoted());
     }
     parts.extend(s.unsent.note(id));
     let queued = s.queued.get(id).into_iter().flatten().find_map(|(at, receipt)| feed::composer::queued_note(&s.queue_rows, &s.rekeyed, id, receipt, s.snapshots >= at + 2));
@@ -632,18 +621,21 @@ pub fn composer_note(s: &App, id: &str) -> Option<String> {
     }
 }
 
+fn shown_text<'a>(s: &'a App, id: &str) -> &'a str {
+    if s.composer_for.as_deref() == Some(id) { &s.composer.text } else { s.drafts.get(id) }
+}
+
 fn put_back(s: &mut App, id: &str, text: &str) {
-    let shown = s.composer_for.as_deref() == Some(id);
-    let before = if shown { s.composer.text.clone() } else { s.drafts.get(id).to_string() };
-    let merged = feed::composer::put_back(&before, text);
-    if shown {
+    if !shown_text(s, id).trim().is_empty() {
+        return;
+    }
+    if s.composer_for.as_deref() == Some(id) {
         let focused = s.composer.focused;
-        s.composer = TextEdit::new(merged.as_str());
+        s.composer = TextEdit::new(text);
         s.composer.focused = focused;
     } else {
-        s.drafts.set(id, &merged);
+        s.drafts.set(id, text);
     }
-    s.restored.insert(id.to_string(), (merged, before.trim_end().to_string()));
 }
 
 fn take_sent(s: &mut App, id: String, pending: Unsent, result: Result<Delivered, feed::catalog::RespondError>) {
@@ -728,8 +720,6 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
         if let Some(receipts) = s.queued.remove(&old) {
             s.queued.entry(new.clone()).or_default().extend(receipts);
         }
-        move_key(&mut s.restored, &old, &new);
-        move_member(&mut s.held_back, &old, &new);
         move_key(&mut s.status_line, &old, &new);
         move_key(&mut s.busy_pick, &old, &new);
         move_key(&mut s.work_pick, &old, &new);
