@@ -18,6 +18,10 @@ pub struct Meter {
     pub percent: f64,
     #[serde(default)]
     pub resets_at: Option<String>,
+    #[serde(default)]
+    pub aged: bool,
+    #[serde(default)]
+    pub as_of: Option<String>,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]

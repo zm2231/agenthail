@@ -115,7 +115,7 @@ fn settled(s: &mut App, done: Done) {
         }
         Err(error) if dialog => {
             s.prs.saving = false;
-            s.prs.error = Some(error.message);
+            s.prs.error = Some(if error.maybe_delivered { format!("It may have been linked anyway: {}. Check the session's pull requests before trying again.", error.message) } else { error.message });
         }
         Err(error) => {
             s.ov.notice = Some(if error.maybe_delivered { format!("{} may not have gone through: {}", what(op), error.message) } else { format!("{} didn't work: {}", what(op), error.message) });

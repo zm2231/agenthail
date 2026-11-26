@@ -35,6 +35,8 @@ pub struct LimitResume {
     #[serde(default)]
     pub state: String,
     #[serde(default)]
+    pub refused_at: Option<String>,
+    #[serde(default)]
     pub resets_at: Option<String>,
     #[serde(default)]
     pub note: Option<String>,
@@ -57,6 +59,7 @@ pub struct Stop {
     pub waiting: bool,
     pub held: bool,
     pub offer: Option<MoveOffer>,
+    pub since: String,
 }
 
 pub fn span(minutes: i64) -> String {
@@ -89,7 +92,7 @@ impl Session {
                 (None, true, Some(m)) if m <= 0 => "Usage limit, resuming now".into(),
                 (None, true, Some(m)) => format!("Usage limit, resumes in {}", span(m)),
             };
-            return Some(Stop { label, waiting, held: true, offer: stop.move_to.clone().filter(|o| !o.root.is_empty()) });
+            return Some(Stop { label, waiting, held: true, offer: stop.move_to.clone().filter(|o| !o.root.is_empty()), since: stop.refused_at.clone().unwrap_or_default() });
         }
         let limit = self.usage_limit.as_ref()?;
         let label = match minutes_until(limit.resets_at.as_deref(), now) {
@@ -97,7 +100,7 @@ impl Session {
             Some(m) => format!("Usage limit, resets in {}", span(m)),
             None => "Usage limit reached".into(),
         };
-        Some(Stop { label, waiting: false, held: false, offer: None })
+        Some(Stop { label, waiting: false, held: false, offer: None, since: limit.resets_at.clone().unwrap_or_default() })
     }
 }
 
@@ -108,6 +111,17 @@ pub struct Target {
     pub detail: Option<String>,
     pub full: bool,
     pub offered: bool,
+}
+
+pub fn carry_usage(fresh: &mut [ConfigRoot], known: &[ConfigRoot]) {
+    for root in fresh.iter_mut().filter(|r| r.usage.is_none() && !r.full) {
+        if let Some(old) = known.iter().find(|k| k.root == root.root) {
+            root.usage = old.usage.clone();
+            root.best = old.best.clone();
+            root.full = old.full;
+            root.full_until = old.full_until.clone();
+        }
+    }
 }
 
 pub fn targets(stop: &Stop, current: Option<&str>, roots: &[ConfigRoot]) -> Vec<Target> {
@@ -210,6 +224,22 @@ mod tests {
     }
 
     #[test]
+    fn a_refreshed_account_list_keeps_what_was_known_until_new_readings_arrive() {
+        let mut full = root("c", "/r/c", Some("c@example.com"));
+        full.full = true;
+        let mut fresh = vec![root("c", "/r/c", Some("c@example.com")), root("d", "/r/d", Some("d@example.com"))];
+        carry_usage(&mut fresh, &[full]);
+        assert_eq!(fresh.iter().map(|r| r.full).collect::<Vec<_>>(), [true, false]);
+    }
+
+    #[test]
+    fn a_stop_is_known_by_when_it_began() {
+        let now = at("2026-11-26T10:00:00Z");
+        let x = session(json!({"limitResume": {"state": "waiting", "refusedAt": "2026-11-26T09:00:00Z"}}));
+        assert_eq!(x.limit(now).unwrap().since, "2026-11-26T09:00:00Z");
+    }
+
+    #[test]
     fn spans_read_like_the_status_bar() {
         assert_eq!([span(0), span(1), span(60), span(61), span(1440 + 90)], ["now", "1m", "1h", "1h 1m", "1d 1h"]);
     }
@@ -224,7 +254,7 @@ mod tests {
 
     #[test]
     fn the_daemons_pick_comes_first_and_the_current_account_is_left_out() {
-        let stop = Stop { label: String::new(), waiting: true, held: true, offer: Some(MoveOffer { root: "/r/b".into(), account: Some("b@example.com".into()), reason: Some("most room".into()) }) };
+        let stop = Stop { label: String::new(), waiting: true, held: true, offer: Some(MoveOffer { root: "/r/b".into(), account: Some("b@example.com".into()), reason: Some("most room".into()) }), since: String::new() };
         let mut b = root("b", "/r/b", Some("b@example.com"));
         b.take_usage(serde_json::from_value(json!({"root": "/r/b", "usage": {"limits": [{"kind": "5h", "percent": 12}]}})).unwrap());
         let mut c = root("c", "/r/c", Some("c@example.com"));

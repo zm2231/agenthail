@@ -42,7 +42,7 @@ pub struct Limits {
     pub refresh_error: HashMap<String, String>,
     generation: u64,
     pub busy: HashSet<String>,
-    pub note: HashMap<String, (String, bool)>,
+    pub note: HashMap<String, (String, bool, String)>,
     tx: Sender<Done>,
     rx: Receiver<Done>,
 }
@@ -74,6 +74,15 @@ fn not_sent(s: &mut App) -> bool {
 
 fn failure(what: &str, error: &RespondError) -> String {
     if error.maybe_delivered { format!("{what} may not have gone through: {}", error.message) } else { format!("{what} didn't work: {}", error.message) }
+}
+
+fn since(s: &App, id: &str) -> String {
+    session(s, id).and_then(|x| x.limit(s.now)).map(|stop| stop.since).unwrap_or_default()
+}
+
+fn note(s: &mut App, id: &str, text: String, bad: bool) {
+    let since = since(s, id);
+    s.limits.note.insert(id.to_string(), (text, bad, since));
 }
 
 fn resume(s: &mut App, id: &str, now: bool) {
@@ -122,7 +131,7 @@ fn move_to(s: &mut App, id: &str, target: Target, stop_terminal: bool) {
     if not_sent(s) || !s.limits.busy.insert(id.to_string()) {
         return;
     }
-    s.limits.note.insert(id.to_string(), (format!("Moving to {}…", target.name), false));
+    note(s, id, format!("Moving to {}…", target.name), false);
     let id = id.to_string();
     spawn(s, move |c, tx| {
         let result = c.limit_move(&id, Some(&target.root), stop_terminal);
@@ -139,7 +148,10 @@ fn settled(s: &mut App, done: Done) {
                 Err(error) if matches!(s.limits.roots.get(&host), Some(Ok(_))) => {
                     s.limits.refresh_error.insert(host, error);
                 }
-                roots => {
+                mut roots => {
+                    if let (Ok(fresh), Some(Ok(known))) = (roots.as_mut(), s.limits.roots.get(&host)) {
+                        feed::limit::carry_usage(fresh, known);
+                    }
                     s.limits.unread.retain(|(h, _)| *h != host);
                     s.limits.refresh_error.remove(&host);
                     s.limits.roots.insert(host, roots);
@@ -161,25 +173,25 @@ fn settled(s: &mut App, done: Done) {
         }
         Done::Resumed(id, now, result) => {
             s.limits.busy.remove(&id);
-            let note = match result {
+            let (text, bad) = match result {
                 Ok(()) if now => ("Asked it to continue".to_string(), false),
                 Ok(()) => ("It stays stopped when the limit resets".to_string(), false),
                 Err(error) => (failure(if now { "Resuming" } else { "Keeping it stopped" }, &error), true),
             };
-            s.limits.note.insert(id, note);
+            note(s, &id, text, bad);
         }
         Done::Moved(id, target, result) => {
             s.limits.busy.remove(&id);
             match result {
                 Ok(Moved::Done) => {
-                    s.limits.note.insert(id, (format!("Moved to {}", target.name), false));
+                    note(s, &id, format!("Moved to {}", target.name), false);
                 }
                 Ok(Moved::NeedsConsent(message)) => {
                     s.limits.note.remove(&id);
                     s.limits.consent = Some(Consent { session: id, target, message });
                 }
                 Err(error) => {
-                    s.limits.note.insert(id, (failure("Moving", &error), true));
+                    note(s, &id, failure("Moving", &error), true);
                 }
             }
         }
@@ -220,14 +232,16 @@ pub(crate) fn card(s: &App, x: &Session, stop: &Stop) -> El {
             actions = actions.child(button("Don't resume", ButtonVariant::Ghost, busy).help("Keep the session stopped when its usage limit resets").on_press(move |s: &mut App| resume(s, &id, false)).build(k).key("limit-cancel"));
         }
         if let Some(offer) = stop.offer.as_ref().filter(|_| stop.waiting) {
-            let target = Target { root: offer.root.clone(), name: offer.name(), detail: offer.reason.clone(), full: false, offered: true };
+            let full = matches!(s.limits.roots.get(&host_key(x)), Some(Ok(roots)) if roots.iter().any(|r| r.root == offer.root && r.full));
+            let target = Target { root: offer.root.clone(), name: offer.name(), detail: offer.reason.clone(), full, offered: true };
             let id = x.id.clone();
             let help = match &offer.reason {
+                _ if full => format!("{} is out of usage now", offer.name()),
                 Some(reason) if !reason.is_empty() => format!("Continue this session under {}: {reason}", offer.name()),
                 _ => format!("Continue this session under {}", offer.name()),
             };
             actions = actions.child(
-                button(format!("Move to {}…", offer.name()), ButtonVariant::Neutral, busy)
+                button(format!("Move to {}…", offer.name()), ButtonVariant::Neutral, busy || full)
                     .icon(&icons::ARROW_RIGHT)
                     .help(help)
                     .on_press(move |s: &mut App| s.limits.confirm = Some(Confirm { session: id.clone(), target: target.clone() }))
@@ -240,7 +254,7 @@ pub(crate) fn card(s: &App, x: &Session, stop: &Stop) -> El {
         actions = actions.child(spacer()).child(Button::new("Usage").variant(ButtonVariant::GhostMuted).control_size(ControlSize::Small).icon(&icons::ACTIVITY).on_press(super::accounts::open).build(k).key("limit-usage"));
         body = body.child(actions);
     }
-    if let Some((note, bad)) = s.limits.note.get(&x.id) {
+    if let Some((note, bad, _)) = s.limits.note.get(&x.id).filter(|n| n.2 == stop.since) {
         body = body.child(text(note.clone()).font(META).color(if *bad { failed() } else { muted() }).wrap());
     }
     let card_el = row()

@@ -203,7 +203,12 @@ fn meter_row(s: &App, m: &Meter) -> El {
     let k = theme::kit();
     let pct = m.percent;
     let color = if pct >= 90.0 { failed() } else if pct >= 60.0 { attention() } else { theme::text() };
-    let resets = m.resets_at.as_deref().and_then(feed::catalog::parse_time).map(|at| ((at - s.now).whole_seconds() as f64 / 60.0).ceil() as i64).filter(|m| *m > 0).map(|m| format!("resets in {}", span(m))).unwrap_or_default();
+    let read = m.as_of.as_deref().and_then(feed::catalog::parse_time).map(|at| ((s.now - at).whole_seconds() / 60).max(1));
+    let resets = match (m.aged, read) {
+        (true, Some(minutes)) => format!("read {} ago", span(minutes)),
+        (true, None) => "an old reading".into(),
+        (false, _) => m.resets_at.as_deref().and_then(feed::catalog::parse_time).map(|at| ((at - s.now).whole_seconds() as f64 / 60.0).ceil() as i64).filter(|m| *m > 0).map(|m| format!("resets in {}", span(m))).unwrap_or_default(),
+    };
     let bar = row().grow(1.0).h(4.0).radius(2.0).fill(k.c.border_base).child(el().w_frac((pct / 100.0).clamp(0.02, 1.0) as f32).h(4.0).radius(2.0).fill(color));
     row()
         .w_full()
