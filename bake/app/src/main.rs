@@ -1180,6 +1180,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     if changed || !s.bar.is_shown() {
         menubar::refresh(s);
     }
+    menubar::sync_keys(s);
     menubar::warn(s);
     menubar::badge(s);
     tx.wake_after(Duration::from_millis(if busy { 16 } else { 250 }));
@@ -1225,5 +1226,5 @@ fn main() {
     prefs.options = WindowOptions { visible: false, resizable: true, ..Default::default() };
     let (handle, window) = app.window(prefs);
     settings::keep(handle, window);
-    menubar::install(app.menu_item(menubar::settings_item())).run();
+    menubar::install(menubar::with_menus(app)).run();
 }

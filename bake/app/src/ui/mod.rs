@@ -15,6 +15,7 @@ pub(crate) mod background;
 mod chips;
 pub mod complete;
 pub mod gone;
+pub mod keys;
 pub(crate) mod queue;
 pub mod limit;
 pub mod new_session;
