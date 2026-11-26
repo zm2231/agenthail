@@ -182,7 +182,7 @@ fn pull_requests(x: &Session) -> Vec<Entry> {
 
 fn pr_number(asked: &str) -> Option<u64> {
     let asked = asked.trim();
-    asked.strip_prefix('#').unwrap_or(asked).parse::<u64>().ok().filter(|n| *n > 0)
+    asked.strip_prefix('#').unwrap_or(asked).parse::<u64>().ok().filter(|n| *n > 0 && *n <= i64::MAX as u64)
 }
 
 pub fn names_pr(asked: &str, pr: &crate::catalog::Pr) -> bool {
@@ -201,7 +201,7 @@ fn pr_link(asked: &str) -> Option<(String, u64)> {
     let path = decoded(link.path());
     let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
     let [owner, name, "pull", number] = parts[..] else { return None };
-    let number = number.parse::<u64>().ok().filter(|n| *n > 0)?;
+    let number = number.parse::<u64>().ok().filter(|n| *n > 0 && *n <= i64::MAX as u64)?;
     let name = name.strip_suffix(".git").unwrap_or(name);
     let segment = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
     if !segment(owner) || !segment(name) || name == "." || name == ".." {
@@ -378,7 +378,8 @@ mod tests {
         assert_eq!(pr_problem("https://github.com/o/r/%70ull/34"), None);
         assert_eq!(pr_problem("https://github.com/o/r/issues/34"), Some("That isn't a pull request link or number."));
         assert_eq!(pr_problem("https://github.com/o/r/pull/0"), Some("That isn't a pull request link or number."));
-        for refused in ["##12", "https://github.com/o w/r/pull/3", "https://github.com/o/../pull/3", "https://github.com/o/r!/pull/3"] {
+        assert_eq!(pr_problem("9223372036854775807"), None);
+        for refused in ["##12", "9223372036854775808", "https://github.com/o/r/pull/9223372036854775808", "https://github.com/o w/r/pull/3", "https://github.com/o/../pull/3", "https://github.com/o/r!/pull/3"] {
             assert_eq!(pr_problem(refused), Some("That isn't a pull request link or number."), "{refused}");
         }
         assert_eq!(pr_problem("0"), Some("That isn't a pull request link or number."));

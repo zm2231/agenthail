@@ -90,6 +90,11 @@ fn current(s: &App, id: &str, since: &str) -> bool {
     waiting_since(s, id).as_deref() == Some(since)
 }
 
+fn target_spent(s: &App, id: &str, root: &str) -> bool {
+    let Some(x) = session(s, id) else { return false };
+    matches!(s.limits.roots.get(&host_key(x)), Some(Ok(roots)) if roots.iter().any(|r| r.root == root && r.spent(s.now)))
+}
+
 fn note(s: &mut App, id: &str, since: String, text: String, bad: bool) {
     s.limits.note.insert(id.to_string(), (text, bad, since));
 }
@@ -140,6 +145,10 @@ fn move_to(s: &mut App, id: &str, since: &str, target: Target, stop_terminal: bo
     s.limits.picking = None;
     if !current(s, id, since) {
         s.ov.notice = Some("The session's usage stop changed, so nothing was moved. Check it again.".into());
+        return;
+    }
+    if target_spent(s, id, &target.root) {
+        s.ov.notice = Some(format!("{} is out of usage now, so nothing was moved.", target.name));
         return;
     }
     if not_sent(s) || !s.limits.busy.insert(id.to_string()) {
@@ -229,11 +238,11 @@ pub fn drain(s: &mut App) -> bool {
         s.limits.picking = None;
         changed = true;
     }
-    if s.limits.confirm.as_ref().is_some_and(|c| stale(s, &c.session, &c.since)) {
+    if s.limits.confirm.as_ref().is_some_and(|c| stale(s, &c.session, &c.since) || target_spent(s, &c.session, &c.target.root)) {
         s.limits.confirm = None;
         changed = true;
     }
-    if s.limits.consent.as_ref().is_some_and(|c| stale(s, &c.session, &c.since)) {
+    if s.limits.consent.as_ref().is_some_and(|c| stale(s, &c.session, &c.since) || target_spent(s, &c.session, &c.target.root)) {
         s.limits.consent = None;
         changed = true;
     }
