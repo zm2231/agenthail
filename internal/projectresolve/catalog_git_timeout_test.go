@@ -20,7 +20,7 @@ func slowGit(t *testing.T, slow, stall string) {
 		t.Fatal(err)
 	}
 	bin := t.TempDir()
-	script := "#!/bin/sh\nfor a in \"$@\"; do [ \"$a\" = " + slow + " ] && " + stall + "; done\nexec " + real + " \"$@\"\n"
+	script := "#!/bin/sh\nfor a in \"$@\"; do [ \"$a\" = " + slow + " ] && " + stall + "; done\nexec '" + strings.ReplaceAll(real, "'", `'\''`) + "' \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -77,12 +77,12 @@ func TestARepositoryLookupThatRunsOutOfTimeSaysSoAndNamesTheGitStep(t *testing.T
 }
 
 func TestAGitAnswerThatReachesTheLookupAfterItsBudgetIsGitsAnswer(t *testing.T) {
-	answerLate := func(answer string) string { return "{ sleep 1 & " + answer + "; }" }
+	answerLate := func(answer string) string { return "{ sleep 3 & " + answer + "; }" }
 	t.Run("a refusal", func(t *testing.T) {
 		folder := filepath.Join(t.TempDir(), "widget")
 		gitIn(t, filepath.Dir(folder), "init", "-q", folder)
 		slowGit(t, "--show-toplevel", answerLate("echo 'fatal: detected dubious ownership in repository' >&2; exit 128"))
-		_, notRepository, err := ResolveCatalogRepository(context.Background(), folder, nil, 200*time.Millisecond)
+		_, notRepository, err := ResolveCatalogRepository(context.Background(), folder, nil, time.Second)
 		var timeout *CatalogGitTimeoutError
 		if err == nil || errors.As(err, &timeout) || notRepository || !strings.Contains(err.Error(), "dubious ownership") {
 			t.Fatalf("a refusal git gave after the budget answered %v (not a repository: %v), want the refusal", err, notRepository)
@@ -93,7 +93,7 @@ func TestAGitAnswerThatReachesTheLookupAfterItsBudgetIsGitsAnswer(t *testing.T) 
 		gitIn(t, filepath.Dir(folder), "init", "-q", folder)
 		gitIn(t, folder, "commit", "-q", "--allow-empty", "-m", "first")
 		slowGit(t, "rev-list", answerLate("echo 'fatal: bad revision' >&2; exit 128"))
-		repository, _, err := ResolveCatalogRepository(context.Background(), folder, nil, 200*time.Millisecond)
+		repository, _, err := ResolveCatalogRepository(context.Background(), folder, nil, time.Second)
 		if err != nil || repository.Toplevel == "" {
 			t.Fatalf("a rev-list git answered after the budget gave %+v, %v; want the repository without root commits", repository, err)
 		}

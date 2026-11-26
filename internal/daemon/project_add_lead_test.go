@@ -57,7 +57,7 @@ func TestRemovingAProjectGitCannotReadKeepsItAndItsLead(t *testing.T) {
 				t.Fatal(err)
 			}
 			bin := t.TempDir()
-			script := "#!/bin/sh\nfor a in \"$@\"; do [ \"$a\" = --show-toplevel ] && { " + c.git + "; }; done\nexec " + real + " \"$@\"\n"
+			script := "#!/bin/sh\nfor a in \"$@\"; do [ \"$a\" = --show-toplevel ] && { " + c.git + "; }; done\nexec '" + strings.ReplaceAll(real, "'", `'\''`) + "' \"$@\"\n"
 			if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
 				t.Fatal(err)
 			}
