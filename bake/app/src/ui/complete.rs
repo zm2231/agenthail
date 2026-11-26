@@ -15,7 +15,7 @@ pub enum Done {
     Prompts(u64, String, Result<Vec<Prompt>, String>),
     Found(u64, Result<Found, String>),
     Forked(String, String, Result<String, RespondError>),
-    Goal(String, String, Result<(), RespondError>),
+    Goal(String, String, Result<feed::composer::Delivered, RespondError>),
 }
 
 pub struct Search {
@@ -201,6 +201,9 @@ pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         return false;
     }
     let id = x.id.clone();
+    if let Some(h) = s.complete.history.get_mut(&id).filter(|h| h.browsing() && h.current() != Some(s.composer.text.as_str())) {
+        h.stop();
+    }
     match ev.key {
         Key::Up if line_start(&s.composer.text, s.composer.focus) => {
             let current = s.composer.text.clone();
@@ -415,7 +418,9 @@ pub fn done(s: &mut App, done: Done) {
                 }
             }
             let line = match result {
-                Ok(()) => "Goal set".to_string(),
+                Ok(feed::composer::Delivered::Queued(_) | feed::composer::Delivered::QueuedUntilAnswer(_)) => "Goal queued; it's set when this turn ends".to_string(),
+                Ok(feed::composer::Delivered::Unconfirmed) => "Goal sent, not confirmed yet".to_string(),
+                Ok(_) => "Goal set".to_string(),
                 Err(error) if error.maybe_delivered => format!("Goal sent, not confirmed: {}", error.message),
                 Err(error) => format!("Couldn't set the goal: {}", error.message),
             };

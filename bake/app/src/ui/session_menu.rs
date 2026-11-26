@@ -162,11 +162,17 @@ pub fn load(s: &mut App, id: &str) {
 }
 
 pub fn ensure_models(s: &mut App, id: &str) {
+    if s.client.is_none() || session(s, id).is_none() {
+        return;
+    }
+    if !s.menus.models_asked.contains_key(id) && !s.menus.settings.contains_key(id) {
+        fetch_settings(s, id, Duration::ZERO);
+    }
     let retry = match s.menus.models_asked.get(id) {
         None => true,
         Some(at) => s.menus.models_error.contains_key(id) && at.elapsed() >= REFRESH,
     };
-    if s.client.is_some() && retry {
+    if retry {
         fetch_models(s, id);
     }
 }
