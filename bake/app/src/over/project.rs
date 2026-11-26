@@ -365,7 +365,11 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
         if crate::offers_new_send(s, lead) {
             controls = controls.child(Button::new(crate::confirm_label(s, lead, Confirm::SendNew)).variant(ButtonVariant::Ghost).build(k).key("send-new").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::send_as_new(s, &new, tx)));
         }
-        controls.child(Button::new("Retry").variant(ButtonVariant::Ghost).build(k).key("send-retry").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::retry(s, &again, tx)))
+        if crate::can_retry(s, lead) {
+            controls.child(Button::new("Retry").variant(ButtonVariant::Ghost).build(k).key("send-retry").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::retry(s, &again, tx)))
+        } else {
+            controls
+        }
     } else {
         controls
     };

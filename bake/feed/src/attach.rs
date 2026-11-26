@@ -200,6 +200,7 @@ pub enum State {
     Uploading,
     Ready(Upload),
     Failed(String),
+    Gone(Upload),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -218,6 +219,7 @@ impl Chip {
             State::Failed(error) => format!("{} didn't upload: {error}", self.name),
             State::Uploading => format!("{}, {}, uploading", self.name, size_label(self.size)),
             State::Ready(_) => format!("{}, {}", self.name, size_label(self.size)),
+            State::Gone(_) => format!("{} is no longer on its computer. Remove it and attach it again.", self.name),
         }
     }
 }
@@ -300,7 +302,7 @@ impl Tray {
             match &chip.state {
                 State::Ready(upload) => out.push(upload.clone()),
                 State::Uploading => return Err(Hold::Uploading),
-                State::Failed(_) => return Err(Hold::Failed(chip.name.clone())),
+                State::Failed(_) | State::Gone(_) => return Err(Hold::Failed(chip.name.clone())),
             }
         }
         Ok(out)
@@ -310,22 +312,20 @@ impl Tray {
         self.chips.remove(id);
     }
 
-    pub fn restore(&mut self, id: &str, uploads: &[Upload]) -> Vec<String> {
-        let mut lost = Vec::new();
+    pub fn restore(&mut self, id: &str, uploads: &[Upload]) {
         for upload in uploads {
-            let list = self.chips.entry(id.to_string()).or_default();
-            if list.iter().any(|c| matches!(&c.state, State::Ready(u) if u.id == upload.id)) {
-                continue;
-            }
-            if list.len() >= MAX_COUNT {
-                lost.push(upload.name.clone());
-                continue;
-            }
-            self.next += 1;
-            list.push(Chip { local: self.next, name: upload.name.clone(), image: upload.is_image(), size: upload.bytes, data: None, state: State::Ready(upload.clone()) });
+            self.put(id, upload, false);
         }
-        self.chips.retain(|_, list| !list.is_empty());
-        lost
+    }
+
+    fn put(&mut self, id: &str, upload: &Upload, gone: bool) {
+        let list = self.chips.entry(id.to_string()).or_default();
+        if list.iter().any(|c| matches!(&c.state, State::Ready(u) | State::Gone(u) if u.id == upload.id)) {
+            return;
+        }
+        self.next += 1;
+        let state = if gone { State::Gone(upload.clone()) } else { State::Ready(upload.clone()) };
+        list.push(Chip { local: self.next, name: upload.name.clone(), image: upload.is_image(), size: upload.bytes, data: None, state });
     }
 
     pub fn rekey(&mut self, rekeyed: &HashMap<String, String>) {
@@ -339,10 +339,12 @@ impl Tray {
 
     pub fn expire(&mut self, id: &str, upload: &str) {
         for chip in self.chips.get_mut(id).into_iter().flatten() {
-            if matches!(&chip.state, State::Ready(u) if u.id == upload) {
-                chip.state = State::Failed("No longer on its computer. Remove it and attach it again.".into());
-                chip.data = None;
-            }
+            let gone = match &chip.state {
+                State::Ready(u) if u.id == upload => u.clone(),
+                _ => continue,
+            };
+            chip.state = State::Gone(gone);
+            chip.data = None;
         }
     }
 
@@ -351,7 +353,14 @@ impl Tray {
             self.chips
                 .iter()
                 .map(|(id, list)| {
-                    let kept: Vec<Value> = list.iter().filter_map(|c| if let State::Ready(u) = &c.state { Some(u.to_json()) } else { None }).collect();
+                    let kept: Vec<Value> = list
+                        .iter()
+                        .filter_map(|c| match &c.state {
+                            State::Ready(u) => Some(u.to_json()),
+                            State::Gone(u) => Some(json!({"upload": u.to_json(), "gone": true})),
+                            _ => None,
+                        })
+                        .collect();
                     (id.clone(), Value::Array(kept))
                 })
                 .filter(|(_, v)| v.as_array().is_some_and(|a| !a.is_empty()))
@@ -362,8 +371,12 @@ impl Tray {
     pub fn from_json(value: &Value) -> Tray {
         let mut tray = Tray::default();
         for (id, raw) in value.as_object().into_iter().flatten() {
-            let uploads: Vec<Upload> = raw.as_array().into_iter().flatten().filter_map(Upload::from_json).collect();
-            tray.restore(id, &uploads);
+            for entry in raw.as_array().into_iter().flatten() {
+                let (value, gone) = if entry["gone"] == true { (&entry["upload"], true) } else { (entry, false) };
+                if let Some(upload) = Upload::from_json(value) {
+                    tray.put(id, &upload, gone);
+                }
+            }
         }
         tray
     }
@@ -631,7 +644,7 @@ mod tests {
         back.rekey(&HashMap::from([("s1".to_string(), "s2".to_string())]));
         assert!(!back.has("s1"));
         assert_eq!(back.ready("s2").unwrap(), vec![upload("a")]);
-        assert_eq!(back.restore("s2", &[upload("a")]), Vec::<String>::new());
+        back.restore("s2", &[upload("a")]);
         assert_eq!(back.chips("s2").len(), 1);
     }
 
@@ -667,10 +680,15 @@ mod tests {
     }
 
     #[test]
-    fn restore_names_what_no_longer_fits() {
+    fn restoring_past_the_limit_keeps_everything_and_survives_a_reload() {
         let mut tray = Tray::default();
-        let many: Vec<Upload> = (0..MAX_COUNT + 1).map(|i| upload(&i.to_string())).collect();
-        assert_eq!(tray.restore("s1", &many), vec![format!("{MAX_COUNT}.txt")]);
+        let many: Vec<Upload> = (0..MAX_COUNT + 2).map(|i| upload(&i.to_string())).collect();
+        tray.restore("s1", &many);
+        tray.expire("s1", "0");
+        let back = Tray::from_json(&tray.to_json());
+        assert_eq!(back.chips("s1").len(), MAX_COUNT + 2);
+        assert!(matches!(back.chips("s1")[0].state, State::Gone(_)));
+        assert_eq!(back.ready("s1"), Err(Hold::TooMany));
     }
 
     #[test]

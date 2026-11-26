@@ -86,7 +86,9 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
         if crate::offers_new_send(s, &x.id) {
             controls = controls.child(Button::new(crate::confirm_label(s, &x.id, Confirm::SendNew)).variant(ButtonVariant::Ghost).build(k).key("send-new").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::send_as_new(s, &new, tx)));
         }
-        controls = controls.child(Button::new("Retry").variant(ButtonVariant::Ghost).icon(&icons::ROTATE).build(k).key("send-retry").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::retry(s, &id, tx)));
+        if crate::can_retry(s, &x.id) {
+            controls = controls.child(Button::new("Retry").variant(ButtonVariant::Ghost).icon(&icons::ROTATE).build(k).key("send-retry").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::retry(s, &id, tx)));
+        }
     }
     if crate::can_stop(s, &x.id) {
         let id = x.id.clone();

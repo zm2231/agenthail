@@ -213,12 +213,11 @@ pub fn clear(s: &mut App, id: &str) {
     s.attach.tray.clear(id);
 }
 
-pub fn restore(s: &mut App, id: &str, unsent: &feed::composer::Unsent) -> Vec<String> {
-    let lost = s.attach.tray.restore(id, &unsent.attachments);
+pub fn restore(s: &mut App, id: &str, unsent: &feed::composer::Unsent) {
+    s.attach.tray.restore(id, &unsent.attachments);
     if let Some(gone) = attach::missing_upload(&unsent.error) {
         s.attach.tray.expire(id, &gone);
     }
-    lost
 }
 
 pub fn remove(s: &mut App, local: u64) {
@@ -236,11 +235,11 @@ pub fn done(s: &mut App, done: Done, tx: &mut Tx) {
     s.attach.rev += 1;
     match done {
         Done::Prepared(id, files) => {
+            let id = feed::composer::current(&s.rekeyed, &id).to_string();
             if let Some(n) = s.attach.preparing.get_mut(&id) {
                 *n = n.saturating_sub(1);
             }
             s.attach.preparing.retain(|_, n| *n > 0);
-            let id = feed::composer::current(&s.rekeyed, &id).to_string();
             let mut problem = None;
             for file in files {
                 let prepared = match file {
@@ -490,7 +489,7 @@ pub fn chips(s: &App, id: &str) -> Option<El> {
     let mut r = row().key("attachment-chips").w_full().flex_wrap().gap(6.0);
     for chip in list {
         let local = chip.local;
-        let failed_ = matches!(chip.state, State::Failed(_));
+        let failed_ = matches!(chip.state, State::Failed(_) | State::Gone(_));
         let thumb = match s.attach.thumbs.get(&local).filter(|_| chip.image) {
             Some(image) => el().size(18.0, 18.0).radius(4.0).pixels_fit(image.pixels(), SurfaceFit::Fill),
             None => col().size(18.0, 18.0).items_center().justify_center().child(icon(if chip.image { &icons::IMAGE } else { &icons::FILE }, 12.0).color(faint())),
@@ -523,7 +522,7 @@ pub fn chips(s: &App, id: &str) -> Option<El> {
                         .child(icon(&icons::ROTATE, 11.0).color(failed())),
                 )
             }
-            State::Ready(_) | State::Failed(_) => {}
+            State::Ready(_) | State::Failed(_) | State::Gone(_) => {}
         }
         c = c.child(
             col()

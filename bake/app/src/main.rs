@@ -553,7 +553,7 @@ pub fn send_to(s: &mut App, id: &str, tx: &mut Tx) {
 
 fn clear_sent(s: &mut App, id: &str, unsent: &Unsent) {
     let chips = s.attach.tray.chips(id).len();
-    let same = shown_text(s, id).trim() == unsent.text && chips == unsent.attachments.len() && s.attach.tray.ready(id).is_ok_and(|now| unsent.same(&unsent.text, &now));
+    let same = !s.attach.preparing.contains_key(id) && shown_text(s, id).trim() == unsent.text && chips == unsent.attachments.len() && s.attach.tray.ready(id).is_ok_and(|now| unsent.same(&unsent.text, &now));
     if !same {
         return;
     }
@@ -566,9 +566,13 @@ fn clear_sent(s: &mut App, id: &str, unsent: &Unsent) {
     ui::attach::clear(s, id);
 }
 
+pub fn can_retry(s: &App, id: &str) -> bool {
+    s.unsent.latest(id).is_some_and(|u| feed::attach::missing_upload(&u.error).is_none())
+}
+
 pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
     let Some(unsent) = s.unsent.latest(id).cloned() else { return };
-    if sending(s, id) || s.client.is_none() {
+    if sending(s, id) || s.client.is_none() || !can_retry(s, id) {
         return;
     }
     clear_sent(s, id, &unsent);
@@ -618,10 +622,7 @@ pub fn put_back_unsent(s: &mut App, id: &str) {
         s.composer.focused = true;
     }
     s.drafts.set(id, &merged);
-    let lost = ui::attach::restore(s, id, &unsent);
-    if !lost.is_empty() {
-        note(s, id, format!("Could not come back with the message: {}.", lost.join(", ")));
-    }
+    ui::attach::restore(s, id, &unsent);
     over::layout::save(s);
 }
 
@@ -635,7 +636,7 @@ fn shows(s: &App, id: &str, unsent: &Unsent) -> bool {
 }
 
 pub fn offers_new_send(s: &App, id: &str) -> bool {
-    s.unsent.latest(id).is_some_and(|u| u.offers_new_send())
+    can_retry(s, id) && s.unsent.latest(id).is_some_and(|u| u.offers_new_send())
 }
 
 pub fn send_as_new(s: &mut App, id: &str, tx: &mut Tx) {
