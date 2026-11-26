@@ -28,10 +28,10 @@ struct HappeningNow: View {
             }
             LeadSteps(items: pane.timelineItems, showsAll: $showsAllSteps)
         }
-        .task(id: session.project?.key) {
+        .task(id: session.project?.id) {
             ready = nil
-            guard let api = model.api, let key = session.project?.key, !key.isEmpty else { return }
-            await LedgerReady.follow(api: api, projectKey: key) { ready = $0 }
+            guard let api = model.api, let projectID = session.project?.id, !projectID.isEmpty else { return }
+            await LedgerReady.follow(api: api, projectID: projectID) { ready = $0 }
         }
     }
 }

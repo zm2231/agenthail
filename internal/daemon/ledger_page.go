@@ -11,7 +11,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/apitime"
-	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -89,18 +88,13 @@ func (d *Daemon) ledgerPage() http.Handler {
 	return mux
 }
 
-// The page takes any id the dashboard and apps list a project under: the
-// project's own id, or a checkout's local id, bare or qualified by its host.
-// It reads the ledger the sessions in that project write to.
 func (d *Daemon) ledgerPageTarget(projectID string) (string, error) {
-	if host, local, qualified := hosts.Split(projectID); qualified && host == d.hostIdentity().ID {
-		projectID = local
-	}
-	found, err := d.catalogProjectOf(projectID)
+	keys, err := d.projectLedgerKeys()
 	if err != nil {
 		return "", err
 	}
-	return projectresolve.LedgerKey(d.Registry, found)
+	key, _, err := keys.of(projectID)
+	return key, err
 }
 
 func (d *Daemon) catalogProjectOf(projectID string) (*projectresolve.CatalogProject, error) {

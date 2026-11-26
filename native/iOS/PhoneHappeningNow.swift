@@ -83,10 +83,10 @@ struct PhoneHappeningNow: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
-        .task(id: session.project?.key) {
+        .task(id: session.project?.id) {
             ready = nil
-            guard let key = session.project?.key, !key.isEmpty, let api = model.api(for: session.id) else { return }
-            await LedgerReady.follow(api: api, projectKey: key) { ready = $0 }
+            guard let projectID = session.project?.id, !projectID.isEmpty, let api = model.api(for: session.id) else { return }
+            await LedgerReady.follow(api: api, projectID: projectID) { ready = $0 }
         }
     }
 }

@@ -15,27 +15,54 @@ func LedgerKey(reg *registry.Registry, found *CatalogProject) (string, error) {
 	if found == nil {
 		return "", nil
 	}
-	records, err := reg.ListProjects()
+	keys, err := NewLedgerKeys(reg)
 	if err != nil {
 		return "", err
 	}
+	return keys.Of(found)
+}
+
+// LedgerKeys resolves many projects' ledger keys against one read of the
+// added projects and the repository moves.
+type LedgerKeys struct {
+	reg     *registry.Registry
+	records []registry.ProjectRecord
+	moved   map[string]string
+}
+
+func NewLedgerKeys(reg *registry.Registry) (*LedgerKeys, error) {
+	records, err := reg.ListProjects()
+	if err != nil {
+		return nil, err
+	}
 	moved, err := reg.ProjectMoveTargets()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	for index := range records {
 		if to, found := moved[records[index].Key]; found {
 			records[index].Key = to
 		}
 	}
+	return &LedgerKeys{reg: reg, records: records, moved: moved}, nil
+}
+
+// Records are the projects added here, their keys following repository moves.
+func (k *LedgerKeys) Records() []registry.ProjectRecord { return k.records }
+
+func (k *LedgerKeys) Of(found *CatalogProject) (string, error) {
+	if found == nil {
+		return "", nil
+	}
+	reg := k.reg
 	if found.LinkedFrom == nil {
-		for _, record := range records {
+		for _, record := range k.records {
 			if record.Added && record.ID == found.LocalID {
 				return addedLedgerKey(reg, record)
 			}
 		}
 	}
-	for _, record := range records {
+	for _, record := range k.records {
 		if !record.Added || record.ID != found.ID && (record.Key == "" || record.Key != found.ID) {
 			continue
 		}
@@ -47,7 +74,7 @@ func LedgerKey(reg *registry.Registry, found *CatalogProject) (string, error) {
 		}
 		return addedLedgerKey(reg, record)
 	}
-	if to, found := moved[found.Key]; found {
+	if to, found := k.moved[found.Key]; found {
 		return to, nil
 	}
 	return found.Key, nil

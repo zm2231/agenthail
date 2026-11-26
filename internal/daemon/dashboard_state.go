@@ -326,6 +326,15 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		}
 		state.Projects = catalogProjects(state.Sessions, projectRecords, coordinators, links, view.archive.Projects, d.localHost(), d.coordinatorHostRef)
 		setProjectMCP(state.Projects, settings)
+		ledgerKeys, err := d.projectLedgerKeys()
+		if err != nil {
+			return dashboardState{}, fmt.Errorf("read project ledgers: %w", err)
+		}
+		for index := range state.Projects {
+			if state.Projects[index].LedgerKey, _, err = ledgerKeys.of(state.Projects[index].ID); err != nil {
+				return dashboardState{}, fmt.Errorf("read the ledger of %s: %w", state.Projects[index].ID, err)
+			}
+		}
 	}
 	if err := d.addLeadReplacements(&state); err != nil {
 		return dashboardState{}, err
