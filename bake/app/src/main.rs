@@ -977,6 +977,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                         if status == "live" && !pane.caught_up {
                             pane.last_batch = pane.last_batch.min(t);
                         }
+                        if status.starts_with("reconnecting") && !pane.caught_up && pane.transcript.items().is_empty() && !caught.contains(id) {
+                            caught.push(id.clone());
+                        }
                         pane.status = status;
                     }
                     Message::CaughtUp => caught.push(id.clone()),

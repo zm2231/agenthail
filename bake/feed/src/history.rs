@@ -119,26 +119,29 @@ impl Client {
             |start| {
                 let path = format!("/api/v1/session-stream-body?id={}&ref={}&start={start}", enc(session), enc(body_ref));
                 let value = self.get_reply(&path).map_err(|(code, text)| refusal(code, &text))?;
-                Ok((value["body"].as_str().unwrap_or_default().to_string(), value["truncated"].as_bool().unwrap_or(false)))
+                let end = value["end"].as_u64().map_or(start, |e| e as usize);
+                Ok((value["body"].as_str().unwrap_or_default().to_string(), end, value["truncated"].as_bool().unwrap_or(false)))
             },
             BODY_CAP,
         )
     }
 }
 
-pub fn collect_body(mut fetch: impl FnMut(usize) -> Result<(String, bool), String>, cap: usize) -> Result<String, String> {
-    let mut body = String::new();
+pub fn collect_body(mut fetch: impl FnMut(usize) -> Result<(String, usize, bool), String>, cap: usize) -> Result<String, String> {
+    let (mut body, mut start) = (String::new(), 0);
     loop {
-        let (chunk, more) = fetch(body.len())?;
+        let (chunk, end, more) = fetch(start)?;
+        body.push_str(&chunk);
         if !more {
-            body.push_str(&chunk);
             return Ok(body);
         }
-        let whole = chunk.trim_end_matches('\u{FFFD}');
-        if whole.is_empty() || body.len() + whole.len() > cap {
+        if end <= start {
+            return Err("the daemon stopped returning more of it".into());
+        }
+        if end > cap {
             return Err("it is larger than the daemon keeps".into());
         }
-        body.push_str(whole);
+        start = end;
     }
 }
 
@@ -218,14 +221,14 @@ mod tests {
     }
 
     #[test]
-    fn a_long_body_is_read_in_pieces_without_splitting_a_character() {
+    fn a_long_body_is_read_in_pieces_at_the_ranges_the_daemon_returns() {
         let (client, seen) = daemon(replies(&[
-            (200, r#"{"body":"héllo wor��","end":12,"total":20,"truncated":true}"#),
-            (200, r#"{"body":"ld — done","end":20,"total":20,"truncated":false}"#),
+            (200, r#"{"body":"��héllo","end":12,"total":21,"truncated":true}"#),
+            (200, r#"{"body":" — done","end":21,"total":21,"truncated":false}"#),
         ]));
-        assert_eq!(client.full_body("s1", "body/a").unwrap(), "héllo world — done");
+        assert_eq!(client.full_body("s1", "body/a").unwrap(), "\u{FFFD}\u{FFFD}héllo — done");
         assert_eq!(seen.recv().unwrap().0, "/api/v1/session-stream-body?id=s1&ref=body%2Fa&start=0");
-        assert_eq!(seen.recv().unwrap().0, "/api/v1/session-stream-body?id=s1&ref=body%2Fa&start=10");
+        assert_eq!(seen.recv().unwrap().0, "/api/v1/session-stream-body?id=s1&ref=body%2Fa&start=12");
         let (client, _seen) = daemon(replies(&[(404, r#"{"error":{"code":"body_unavailable","message":"The retained body is unavailable."}}"#)]));
         assert_eq!(client.full_body("s1", "x").unwrap_err(), "The retained body is unavailable.");
     }
@@ -237,12 +240,12 @@ mod tests {
         let read = collect_body(
             |start| {
                 starts.push(start);
-                Ok(("abcd".into(), start < 8))
+                Ok(("abcd".into(), start + 4, start < 8))
             },
             16,
         );
         assert_eq!((read.unwrap(), starts), ("abcdabcdabcd".to_string(), vec![0, 4, 8]));
-        assert!(collect_body(|_| Ok(("abcdef".into(), true)), 16).is_err());
-        assert!(collect_body(|_| Ok(("\u{FFFD}".into(), true)), 16).is_err());
+        assert!(collect_body(|start| Ok(("abcdef".into(), start + 6, true)), 16).unwrap_err().contains("larger"));
+        assert!(collect_body(|start| Ok((String::new(), start, true)), 16).unwrap_err().contains("stopped"));
     }
 }
