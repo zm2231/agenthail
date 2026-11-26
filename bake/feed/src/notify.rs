@@ -15,8 +15,7 @@ const RECENT_MINUTES: i64 = 10;
 const KEEP_DAYS: i64 = 7;
 const LEAD_COMPLETIONS_ONLY: &str = "leadCompletionsOnly";
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Kind {
     Needs,
     Finished,
@@ -27,6 +26,7 @@ pub struct Notice {
     pub key: String,
     pub kind: Kind,
     pub session: String,
+    pub source: String,
     pub thread: String,
     pub title: String,
     pub body: String,
@@ -111,7 +111,7 @@ pub fn needs(decisions: &[Decision], sessions: &[Session], sound: bool) -> Vec<N
     let mut out = Vec::new();
     for d in decisions.iter().filter(|d| !d.is_review() && !d.is_parked() && !d.session_id.is_empty()) {
         let thread = title_of(sessions, &d.session_id, &d.work_title);
-        let notice = |key: String, body: String, request: Option<String>, buttons: Vec<(String, String)>| Notice { key, kind: Kind::Needs, session: d.session_id.clone(), thread: thread.clone(), title: thread.clone(), body, request, buttons, sound };
+        let notice = |key: String, body: String, request: Option<String>, buttons: Vec<(String, String)>| Notice { key, kind: Kind::Needs, session: d.session_id.clone(), source: d.host.clone(), thread: thread.clone(), title: thread.clone(), body, request, buttons, sound };
         if d.requests.is_empty() {
             let reason = d.reason_text();
             let body = if reason.trim().is_empty() { "Needs you".to_string() } else { format!("Needs you: {}", reason.trim()) };
@@ -148,7 +148,7 @@ pub fn finished(sessions: &[Session], leads: &HashMap<String, String>, prefs: Op
             (_, headline) => format!("Done: {headline}"),
         };
         let title = s.title();
-        out.push(Notice { key: format!("done|{}|{turn}", s.id), kind: Kind::Finished, session: s.id.clone(), thread: title.clone(), title, body, request: None, buttons: Vec::new(), sound: prefs.is_some() });
+        out.push(Notice { key: format!("done|{}|{turn}", s.id), kind: Kind::Finished, session: s.id.clone(), source: String::new(), thread: title.clone(), title, body, request: None, buttons: Vec::new(), sound: prefs.is_some() });
     }
     out
 }
@@ -165,9 +165,16 @@ pub struct Notified {
     #[serde(default)]
     seen: BTreeMap<String, i64>,
     #[serde(default)]
-    primed: BTreeSet<Kind>,
+    primed: BTreeSet<String>,
     #[serde(default)]
-    posted: BTreeSet<String>,
+    posted: BTreeMap<String, String>,
+}
+
+fn prefix(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Needs => "need|",
+        Kind::Finished => "done|",
+    }
 }
 
 impl Notified {
@@ -188,34 +195,30 @@ impl Notified {
         self.seen.contains_key(key)
     }
 
-    pub fn take(&mut self, kind: Kind, notices: Vec<Notice>, complete: bool, now: OffsetDateTime, shown: impl Fn(&Notice) -> bool) -> Step {
+    pub fn take(&mut self, kind: Kind, notices: Vec<Notice>, read: &[String], now: OffsetDateTime, shown: impl Fn(&Notice) -> bool) -> Step {
         let stamp = now.unix_timestamp();
-        let primed = self.primed.contains(&kind);
+        let prefix = prefix(kind);
         let mut step = Step::default();
         let current: BTreeSet<String> = notices.iter().map(|n| n.key.clone()).collect();
         for n in notices {
             let fresh = self.seen.insert(n.key.clone(), stamp).is_none();
             step.dirty |= fresh;
-            if fresh && primed && !shown(&n) {
+            if fresh && self.primed.contains(&format!("{prefix}{}", n.source)) && !shown(&n) {
                 if n.kind == Kind::Needs {
-                    self.posted.insert(n.key.clone());
+                    self.posted.insert(n.key.clone(), n.source.clone());
                 }
                 step.post.push(n);
             }
         }
-        step.dirty |= self.primed.insert(kind);
-        if complete && kind == Kind::Needs {
-            let gone: Vec<String> = self.posted.iter().filter(|k| !current.contains(*k)).cloned().collect();
-            for key in gone {
-                self.posted.remove(&key);
-                step.remove.push(key);
-                step.dirty = true;
-            }
+        for source in read {
+            step.dirty |= self.primed.insert(format!("{prefix}{source}"));
         }
-        let prefix = match kind {
-            Kind::Needs => "need|",
-            Kind::Finished => "done|",
-        };
+        let gone: Vec<String> = self.posted.iter().filter(|(k, source)| k.starts_with(prefix) && read.contains(source) && !current.contains(*k)).map(|(k, _)| k.clone()).collect();
+        for key in gone {
+            self.posted.remove(&key);
+            step.remove.push(key);
+            step.dirty = true;
+        }
         let oldest = stamp - KEEP_DAYS * 86_400;
         let before = self.seen.len();
         self.seen.retain(|k, at| !k.starts_with(prefix) || current.contains(k) || *at >= oldest);

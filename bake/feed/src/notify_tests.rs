@@ -4,7 +4,7 @@ use time::OffsetDateTime;
 
 use super::*;
 use crate::catalog::Session;
-use crate::decisions::Decision;
+use crate::decisions::{Decision, Inbox, Page};
 
 fn now() -> OffsetDateTime {
     OffsetDateTime::from_unix_timestamp(1_795_694_400).unwrap()
@@ -123,44 +123,66 @@ fn a_session_the_app_does_not_list_is_named_by_its_work() {
     assert_eq!(needs(&[d], &[], true)[0].title, "Fix the login page");
 }
 
+fn here() -> Vec<String> {
+    vec![String::new()]
+}
+
 fn notice(key: &str, kind: Kind, session: &str) -> Notice {
-    Notice { key: key.into(), kind, session: session.into(), thread: String::new(), title: String::new(), body: String::new(), request: None, buttons: Vec::new(), sound: false }
+    from(key, kind, session, "")
+}
+
+fn from(key: &str, kind: Kind, session: &str, source: &str) -> Notice {
+    Notice { key: key.into(), kind, session: session.into(), source: source.into(), thread: String::new(), title: String::new(), body: String::new(), request: None, buttons: Vec::new(), sound: false }
 }
 
 #[test]
 fn the_first_look_only_learns_what_is_already_open() {
     let mut n = Notified::default();
-    let first = n.take(Kind::Needs, vec![notice("need|a|1", Kind::Needs, "a")], false, now(), |_| false);
+    let first = n.take(Kind::Needs, vec![notice("need|a|1", Kind::Needs, "a")], &here(), now(), |_| false);
     assert!(first.post.is_empty());
-    let next = n.take(Kind::Needs, vec![notice("need|a|1", Kind::Needs, "a"), notice("need|b|2", Kind::Needs, "b")], true, now(), |_| false);
+    let next = n.take(Kind::Needs, vec![notice("need|a|1", Kind::Needs, "a"), notice("need|b|2", Kind::Needs, "b")], &here(), now(), |_| false);
     assert_eq!(keys(&next.post), ["need|b|2"]);
     assert!(next.dirty);
-    let again = n.take(Kind::Needs, vec![notice("need|b|2", Kind::Needs, "b")], true, now(), |_| false);
+    let again = n.take(Kind::Needs, vec![notice("need|b|2", Kind::Needs, "b")], &here(), now(), |_| false);
     assert!(again.post.is_empty());
-    let quiet = n.take(Kind::Needs, vec![notice("need|b|2", Kind::Needs, "b")], true, now(), |_| false);
+    let quiet = n.take(Kind::Needs, vec![notice("need|b|2", Kind::Needs, "b")], &here(), now(), |_| false);
     assert!(!quiet.dirty, "nothing new, nothing to save");
-    let done = n.take(Kind::Finished, vec![notice("done|a|t1", Kind::Finished, "a")], true, now(), |_| false);
+    let done = n.take(Kind::Finished, vec![notice("done|a|t1", Kind::Finished, "a")], &here(), now(), |_| false);
     assert!(done.post.is_empty(), "each kind learns on its own first look");
 }
 
 #[test]
 fn what_is_on_screen_is_never_posted_later_either() {
     let mut n = Notified::default();
-    n.take(Kind::Needs, Vec::new(), true, now(), |_| false);
-    let step = n.take(Kind::Needs, vec![notice("need|a|1", Kind::Needs, "a"), notice("need|b|2", Kind::Needs, "b")], true, now(), |x| x.session == "a");
+    n.take(Kind::Needs, Vec::new(), &here(), now(), |_| false);
+    let step = n.take(Kind::Needs, vec![notice("need|a|1", Kind::Needs, "a"), notice("need|b|2", Kind::Needs, "b")], &here(), now(), |x| x.session == "a");
     assert_eq!(keys(&step.post), ["need|b|2"]);
-    let later = n.take(Kind::Needs, vec![notice("need|a|1", Kind::Needs, "a")], true, now(), |_| false);
+    let later = n.take(Kind::Needs, vec![notice("need|a|1", Kind::Needs, "a")], &here(), now(), |_| false);
     assert!(later.post.is_empty());
+}
+
+#[test]
+fn a_computer_that_answers_late_only_learns_what_it_already_had_open() {
+    let mut n = Notified::default();
+    let both = vec![String::new(), "studio".to_string()];
+    n.take(Kind::Needs, vec![from("need|a|1", Kind::Needs, "a", "")], &here(), now(), |_| false);
+    let back = n.take(Kind::Needs, vec![from("need|a|1", Kind::Needs, "a", ""), from("need|s|old", Kind::Needs, "s", "studio")], &both, now(), |_| false);
+    assert!(back.post.is_empty());
+    let later = n.take(Kind::Needs, vec![from("need|s|new", Kind::Needs, "s", "studio"), from("need|a|2", Kind::Needs, "a", "")], &both, now(), |_| false);
+    assert_eq!(keys(&later.post), ["need|s|new", "need|a|2"]);
+    let away = n.take(Kind::Needs, Vec::new(), &here(), now(), |_| false);
+    assert_eq!(away.remove, ["need|a|2"], "only what the computers that answered no longer hold is taken back");
+    assert_eq!(n.take(Kind::Needs, Vec::new(), &both, now(), |_| false).remove, ["need|s|new"]);
 }
 
 #[test]
 fn an_answered_need_is_taken_back_only_after_a_full_read() {
     let mut n = Notified::default();
-    n.take(Kind::Needs, Vec::new(), true, now(), |_| false);
-    n.take(Kind::Needs, vec![notice("need|a|1", Kind::Needs, "a")], true, now(), |_| false);
-    assert!(n.take(Kind::Needs, Vec::new(), false, now(), |_| false).remove.is_empty(), "a computer that didn't answer may still hold it");
-    assert_eq!(n.take(Kind::Needs, Vec::new(), true, now(), |_| false).remove, ["need|a|1"]);
-    assert!(n.take(Kind::Needs, Vec::new(), true, now(), |_| false).remove.is_empty());
+    n.take(Kind::Needs, Vec::new(), &here(), now(), |_| false);
+    n.take(Kind::Needs, vec![notice("need|a|1", Kind::Needs, "a")], &here(), now(), |_| false);
+    assert!(n.take(Kind::Needs, Vec::new(), &[], now(), |_| false).remove.is_empty(), "a computer that didn't answer may still hold it");
+    assert_eq!(n.take(Kind::Needs, Vec::new(), &here(), now(), |_| false).remove, ["need|a|1"]);
+    assert!(n.take(Kind::Needs, Vec::new(), &here(), now(), |_| false).remove.is_empty());
 }
 
 #[test]
@@ -168,18 +190,18 @@ fn what_was_noticed_survives_a_restart_and_old_keys_are_dropped() {
     let dir = std::env::temp_dir().join(format!("feed-notified-{}", std::process::id()));
     let path = dir.join("notified.json");
     let mut n = Notified::default();
-    n.take(Kind::Needs, Vec::new(), true, now(), |_| false);
-    n.take(Kind::Finished, vec![notice("done|a|t1", Kind::Finished, "a")], true, now(), |_| false);
-    n.take(Kind::Needs, vec![notice("need|a|1", Kind::Needs, "a")], true, now(), |_| false);
+    n.take(Kind::Needs, Vec::new(), &here(), now(), |_| false);
+    n.take(Kind::Finished, vec![notice("done|a|t1", Kind::Finished, "a")], &here(), now(), |_| false);
+    n.take(Kind::Needs, vec![notice("need|a|1", Kind::Needs, "a")], &here(), now(), |_| false);
     n.save(&path).unwrap();
     let mut back = Notified::load(&path);
     assert_eq!(back, n);
-    assert!(back.take(Kind::Needs, vec![notice("need|a|1", Kind::Needs, "a")], true, now(), |_| false).post.is_empty());
+    assert!(back.take(Kind::Needs, vec![notice("need|a|1", Kind::Needs, "a")], &here(), now(), |_| false).post.is_empty());
     let week = now() + time::Duration::days(8);
-    back.take(Kind::Finished, Vec::new(), true, week, |_| false);
+    back.take(Kind::Finished, Vec::new(), &here(), week, |_| false);
     assert!(!back.seen("done|a|t1"));
     assert!(back.seen("need|a|1"), "a sweep of one kind leaves the other's keys");
-    back.take(Kind::Needs, vec![notice("need|a|1", Kind::Needs, "a")], true, week, |_| false);
+    back.take(Kind::Needs, vec![notice("need|a|1", Kind::Needs, "a")], &here(), week, |_| false);
     assert!(back.seen("need|a|1"), "a need still open is kept however old");
     std::fs::remove_dir_all(&dir).unwrap();
     assert_eq!(Notified::load(&path), Notified::default());
@@ -192,4 +214,12 @@ fn preferences_come_from_the_daemon() {
     assert_eq!(asked.recv().unwrap().0, "/api/v1/notification-preferences");
     let (client, _asked) = crate::mock::daemon(vec![(200, r#"{"preferences":[]}"#.into())]);
     assert_eq!(client.notification_preferences().unwrap(), Prefs::default());
+}
+
+#[test]
+fn the_inbox_names_each_computer_it_read() {
+    let mut inbox = Inbox::default();
+    inbox.add(Page::default(), "", "", "own");
+    inbox.add(Page::default(), "studio", "Studio", "own");
+    assert_eq!(inbox.read, ["", "studio"]);
 }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use feed::catalog::{Client, RespondError};
+use feed::catalog::RespondError;
 use feed::derive::needs::{NeedKind, Target};
 use feed::notify::{Kind, Notice, Notified, Prefs, REPLY, choice_of};
 use rune_notify::{Click, Notification};
@@ -10,7 +10,7 @@ use rune_notify::{Click, Notification};
 use crate::{App, Screen};
 
 enum Done {
-    Prefs(Prefs),
+    Prefs(Option<Prefs>),
     Acted(String, String, Result<(), RespondError>),
 }
 
@@ -19,6 +19,10 @@ pub struct State {
     path: Option<PathBuf>,
     prefs: Option<Prefs>,
     on: bool,
+    asking: bool,
+    stale: bool,
+    failed: bool,
+    focused: bool,
     reads: u64,
     pub sessions_moved: bool,
     clicks: Receiver<Click>,
@@ -31,7 +35,7 @@ impl Default for State {
     fn default() -> Self {
         let (clicked, clicks) = channel();
         let (tx, rx) = channel();
-        State { store: Notified::default(), path: None, prefs: None, on: false, reads: 0, sessions_moved: false, clicks, clicked, tx, rx }
+        State { store: Notified::default(), path: None, prefs: None, on: false, asking: false, stale: true, failed: false, focused: false, reads: 0, sessions_moved: false, clicks, clicked, tx, rx }
     }
 }
 
@@ -40,7 +44,7 @@ fn path() -> Option<PathBuf> {
     Some(PathBuf::from(home).join("Library/Application Support/Agenthail/notified.json"))
 }
 
-pub fn start(s: &mut App, client: &Client) {
+pub fn start(s: &mut App) {
     let st = &mut s.notify;
     if st.on || !rune_notify::available() {
         return;
@@ -54,11 +58,18 @@ pub fn start(s: &mut App, client: &Client) {
     rune_notify::on_click(move |click| {
         let _ = clicked.send(click);
     });
-    let (client, tx) = (client.clone(), st.tx.clone());
+}
+
+fn read_prefs(s: &mut App) {
+    let Some(client) = s.client.clone() else { return };
+    let st = &mut s.notify;
+    if st.asking {
+        return;
+    }
+    (st.asking, st.stale) = (true, false);
+    let tx = st.tx.clone();
     std::thread::spawn(move || {
-        if let Ok(prefs) = client.notification_preferences() {
-            let _ = tx.send(Done::Prefs(prefs));
-        }
+        let _ = tx.send(Done::Prefs(client.notification_preferences().ok()));
     });
 }
 
@@ -135,7 +146,13 @@ pub fn tick(s: &mut App) -> bool {
     let mut changed = false;
     while let Ok(done) = s.notify.rx.try_recv() {
         match done {
-            Done::Prefs(prefs) => s.notify.prefs = Some(prefs),
+            Done::Prefs(prefs) => {
+                s.notify.asking = false;
+                s.notify.failed = prefs.is_none();
+                if prefs.is_some() {
+                    s.notify.prefs = prefs;
+                }
+            }
             Done::Acted(session, what, result) => acted(s, session, what, result),
         }
     }
@@ -148,6 +165,12 @@ pub fn tick(s: &mut App) -> bool {
     }
     let now = time::OffsetDateTime::now_utc();
     let focused = rune_notify::app_focused();
+    let st = &mut s.notify;
+    st.stale |= focused && !st.focused || st.failed && st.sessions_moved;
+    st.focused = focused;
+    if st.stale {
+        read_prefs(s);
+    }
     let mut steps = Vec::new();
     let reads = s.ov.inbox.reads;
     if reads != s.notify.reads
@@ -155,16 +178,15 @@ pub fn tick(s: &mut App) -> bool {
     {
         s.notify.reads = reads;
         let found = feed::notify::needs(&inbox.decisions, &s.sessions, s.notify.prefs.is_some());
-        let complete = inbox.notes.is_empty();
         let mut store = std::mem::take(&mut s.notify.store);
-        steps.push(store.take(Kind::Needs, found, complete, now, |n| focused && on_screen(s, n)));
+        steps.push(store.take(Kind::Needs, found, &inbox.read, now, |n| focused && on_screen(s, n)));
         s.notify.store = store;
     }
     if std::mem::take(&mut s.notify.sessions_moved) {
         let leads: HashMap<String, String> = s.ov.d.projects.iter().filter_map(|p| Some((p.key.clone(), p.lead.clone()?))).collect();
         let found = feed::notify::finished(&s.sessions, &leads, s.notify.prefs.as_ref(), now);
         let mut store = std::mem::take(&mut s.notify.store);
-        steps.push(store.take(Kind::Finished, found, true, now, |n| focused && on_screen(s, n)));
+        steps.push(store.take(Kind::Finished, found, &[String::new()], now, |n| focused && on_screen(s, n)));
         s.notify.store = store;
     }
     let mut dirty = false;

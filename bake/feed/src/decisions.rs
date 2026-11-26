@@ -93,6 +93,7 @@ pub struct Inbox {
     pub decisions: Vec<Decision>,
     pub lead_handling: Vec<LeadHandled>,
     pub notes: Vec<String>,
+    pub read: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -255,6 +256,7 @@ fn owner(id: &str) -> &str {
 impl Inbox {
     pub fn add(&mut self, page: Page, host: &str, host_name: &str, own: &str) {
         let q = |id: &str| qualify(id, host, own);
+        self.read.push(host.to_string());
         for d in page.decisions {
             let mut d = Decision { host: host.into(), host_name: host_name.into(), session_id: q(&d.session_id), project_id: q(&d.project_id), ..d };
             d.holds_up = d.holds_up.iter().map(|x| q(x)).collect();

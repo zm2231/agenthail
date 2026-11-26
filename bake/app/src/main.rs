@@ -272,7 +272,7 @@ fn init() -> App {
                 });
                 watch_overview(client.clone(), app.outbox.clone());
                 over::inbox::start(&mut app.ov.inbox, &client);
-                notify::start(&mut app, &client);
+                notify::start(&mut app);
                 app.client = Some(client);
             }
             Err(error) => app.status = error.to_string(),
