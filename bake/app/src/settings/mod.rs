@@ -43,7 +43,8 @@ pub enum Section {
     Remote,
     Compaction,
     Notify,
-    Handoffs,
+    Relays,
+    Channels,
 }
 
 enum Done {
@@ -477,7 +478,7 @@ fn take_one(s: &mut Prefs, done: Done) {
                     }
                     s.saved_notice = true;
                 }
-                Ok(()) => {}
+                Ok(()) => handoffs::saved(s, &key),
                 Err(failure) => {
                     let refusal = failure.denied;
                     s.notes.insert(section, failure);
