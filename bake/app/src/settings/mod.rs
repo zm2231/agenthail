@@ -237,6 +237,9 @@ pub fn reload(s: &mut Prefs) {
         }
         return;
     }
+    for what in ALL {
+        *s.seq.entry(what).or_default() += 1;
+    }
     s.settling.extend(ALL);
     s.rest_pending = true;
     fetch(s, Read::Base);
@@ -252,6 +255,7 @@ fn read_rest(s: &mut Prefs) {
         watch(s, b.event_cursor.max(s.seen));
     }
     for what in &ALL[1..] {
+        s.settling.insert(*what);
         fetch(s, *what);
     }
 }
