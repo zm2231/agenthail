@@ -6,14 +6,6 @@ pub fn ordered(s: &App) -> Vec<&Session> {
     list
 }
 
-pub fn next_waiting(s: &mut App) {
-    let waiting: Vec<String> = ordered(s).into_iter().filter(|x| x.state(s.now) == State::NeedsYou).map(|x| x.id.clone()).collect();
-    let next = waiting.iter().skip_while(|id| Some(*id) != s.selected.as_ref()).nth(1).or(waiting.first()).cloned();
-    if let Some(id) = next {
-        select(s, &id);
-    }
-}
-
 pub(crate) fn session_row(s: &App, x: &Session) -> El {
     let state = x.state(s.now);
     let selected = s.selected.as_deref() == Some(x.id.as_str());
@@ -73,7 +65,7 @@ pub(crate) fn group(title: &str, count: usize, glyph: &'static Icon, color: Colo
     if let Some(key) = project {
         head = head
             .key(format!("project-{key}"))
-            .on_press(move |s: &mut App| open_project(s, &key))
+            .on_press(move |s: &mut App| crate::over::go(s, Screen::Project(key.clone())))
             .child(row().gap(3.0).items_center().px(6.0).py(2.0).radius(6.0).hover(wash()).child(text("Overview").font(META).color(accent())).child(icon(&icons::CHEVRON_RIGHT, 11.0).color(accent())));
     }
     col().w_full().child(head).child(col().w_full().gap(2.0).children(rows))
@@ -125,6 +117,20 @@ pub(crate) fn sidebar(s: &App) -> El {
     let list = ordered(s);
     let needs = list.iter().filter(|x| x.state(s.now) == State::NeedsYou).count();
     let working = list.iter().filter(|x| x.state(s.now) == State::Working).count();
+    let home = row()
+        .key("home")
+        .w_full()
+        .gap(8.0)
+        .items_center()
+        .px(10.0)
+        .py(7.0)
+        .radius(10.0)
+        .hover(Color::WHITE.alpha(0.06))
+        .on_press(|s: &mut App| crate::over::go(s, Screen::Now))
+        .child(icon(&icons::INBOX, 14.0).color(muted()))
+        .child(text("Now").font(META_BOLD).color(theme::text()))
+        .child(spacer())
+        .child(keys(&["⌘", "0"]));
     let search = row()
         .key("search")
         .w_full()
@@ -136,9 +142,12 @@ pub(crate) fn sidebar(s: &App) -> El {
         .fill(Color::BLACK.alpha(0.20))
         .border(1.0, Color::WHITE.alpha(0.07))
         .hover(Color::BLACK.alpha(0.28))
-        .on_press_tx(|s: &mut App, tx: &mut Tx| open_palette(s, tx))
+        .on_press_tx(|s: &mut App, tx: &mut Tx| {
+            crate::over::open_jump(s, "");
+            tx.focus("jump-input", false);
+        })
         .child(icon(&icons::SEARCH, 14.0).color(muted()))
-        .child(text("Jump to a session").font(META).color(muted()))
+        .child(text("Jump to").font(META).color(muted()))
         .child(spacer())
         .child(keys(&["⌘", "K"]));
     let header = col()
@@ -146,6 +155,7 @@ pub(crate) fn sidebar(s: &App) -> El {
         .px(12.0)
         .gap(10.0)
         .child(el().w_full().h(40.0).window_drag())
+        .child(home)
         .child(search)
         .child(row().w_full().gap(8.0).child(stat(&icons::HAND, needs, "need you", attention())).child(stat(&icons::BOLT, working, "working", accent())))
         .child(segmented(s));

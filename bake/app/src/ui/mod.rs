@@ -1,26 +1,21 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
-use feed::catalog::{self, BoardRow, PHASES, Session, State};
-use rune::{Color, Cx, El, Icon, ScrollSpec, SystemMaterial, TextStyle, Transition, Tx, col, el, icon, row, text, text_input};
+use feed::catalog::{self, PHASES, Session, State};
+use rune::{Color, Cx, El, Icon, ScrollSpec, SystemMaterial, Transition, Tx, col, el, icon, row, text, text_input};
 use rune_kit::{Button, ButtonVariant, Keybind, KeybindVariant};
 
 use crate::icons;
 use crate::theme::{
-    self, BODY, BODY_BOLD, HEADING, HERO, LABEL, META, META_BOLD, NUMBER, SPRING, TITLE, accent, accent_deep, attention, card, done, failed, faint, line, muted, raised, wash,
+    self, BODY, BODY_BOLD, HEADING, LABEL, META, META_BOLD, SPRING, TITLE, accent, accent_deep, attention, card, done, failed, faint, line, muted, raised, wash,
 };
 use crate::transcript::{self, session_avatar};
-use crate::{App, Screen, Tab, answer_request, pick_work, session_edits, short_path, show_changes, open_palette, open_project, select, send, draft_reply, session, toggle_pick, open_link};
+use crate::{App, Screen, Tab, answer_request, pick_work, session_edits, short_path, show_changes, select, send, draft_reply, session, toggle_pick, open_link};
 
-mod palette;
-mod project;
 mod rail;
 mod session;
 mod sidebar;
 mod waiting;
 
-pub use sidebar::{next_waiting, ordered};
-use palette::*;
-use project::*;
 use rail::*;
 use session::*;
 use sidebar::*;
@@ -92,11 +87,23 @@ pub(crate) fn avatar_with_state(name: &str, state: State, size: f32) -> El {
     col().size(size, size).child(session_avatar(name, size)).child(status_mark(state).absolute(size - 9.0, size - 9.0))
 }
 
-pub fn view(s: &App, _: &mut Cx<App>) -> El {
-    let main = match &s.screen {
-        Screen::Session => session_screen(s),
-        Screen::Project(key) => project_screen(s, key),
+pub fn view(s: &App, cx: &mut Cx<App>) -> El {
+    let mut layer = Vec::new();
+    let body = match &s.screen {
+        Screen::Session => session_body(s),
+        _ => crate::over::view(s, cx, &mut layer),
     };
+    crate::over::overlays(s, &mut layer);
+    let root = col()
+        .w_full()
+        .h_full()
+        .child(el().absolute(0.0, 0.0).w_full().h_full().system_material(SystemMaterial::Glass).fill(theme::card_deep()))
+        .child(el().absolute(0.0, 0.0).w_full().h_full().fill(theme::glass_tint()))
+        .child(body);
+    rune_kit::root(root, layer)
+}
+
+fn session_body(s: &App) -> El {
     let content = col()
         .grow(1.0)
         .h_full()
@@ -108,20 +115,10 @@ pub fn view(s: &App, _: &mut Cx<App>) -> El {
         .border(1.0, Color::WHITE.alpha(0.08))
         .shadow(10.0, 40.0, Color::BLACK.alpha(0.40))
         .clip_rounded(16.0)
-        .child(main);
-    let mut body = row().w_full().h_full().child(sidebar(s)).child(content);
-    match (&s.screen, s.selected.as_deref().and_then(|id| session(s, id))) {
-        (Screen::Session, Some(x)) => body = body.child(rail(s, x)),
-        _ => body = body.child(el().w(8.0)),
+        .child(session_screen(s));
+    let body = row().w_full().h_full().child(sidebar(s)).child(content);
+    match s.selected.as_deref().and_then(|id| session(s, id)) {
+        Some(x) => body.child(rail(s, x)),
+        None => body.child(el().w(8.0)),
     }
-    let mut root = col()
-        .w_full()
-        .h_full()
-        .child(el().absolute(0.0, 0.0).w_full().h_full().system_material(SystemMaterial::Glass).fill(theme::card_deep()))
-        .child(el().absolute(0.0, 0.0).w_full().h_full().fill(theme::glass_tint()))
-        .child(body);
-    if let Some(edit) = &s.palette {
-        root = root.child(palette(s, edit));
-    }
-    root
 }

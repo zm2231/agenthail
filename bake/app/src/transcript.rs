@@ -135,7 +135,7 @@ fn toggle(id: String) -> impl Fn(&mut App) + 'static {
             s.open.insert(id.clone());
         }
         let mut counter = s.counter;
-        if let Some(pane) = s.selected.clone().and_then(|sel| s.panes.get_mut(&sel)) {
+        for pane in s.panes.values_mut() {
             pane.bump(&id, &mut counter);
         }
         s.counter = counter;

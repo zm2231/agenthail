@@ -10,8 +10,6 @@ pub const BODY_BOLD: TextStyle = TextStyle::new(13.5, 600.0);
 pub const LABEL: TextStyle = TextStyle::new(10.5, 680.0);
 pub const TITLE: TextStyle = TextStyle::new(15.0, 650.0);
 pub const HEADING: TextStyle = TextStyle::new(22.0, 680.0);
-pub const HERO: TextStyle = TextStyle::new(30.0, 720.0);
-pub const NUMBER: TextStyle = TextStyle::new(26.0, 700.0);
 
 pub fn kit() -> &'static Kit {
     static KIT: OnceLock<Kit> = OnceLock::new();

@@ -269,7 +269,7 @@ pub(crate) fn waiting_card(s: &App, x: &Session) -> El {
         .build(theme::kit())
         .key("waiting-reply")
         .on_press_tx(|_: &mut App, tx: &mut Tx| tx.focus("composer", true));
-    let next = Button::new("Next waiting").variant(ButtonVariant::Ghost).icon(&icons::ARROW_RIGHT).build(theme::kit()).key("waiting-next").on_press(next_waiting);
+    let next = Button::new("Next waiting").variant(ButtonVariant::Ghost).icon(&icons::ARROW_RIGHT).build(theme::kit()).key("waiting-next").on_press(crate::over::next_need);
     let busy = s.answering.is_some();
     let source = if choices.is_empty() {
         None

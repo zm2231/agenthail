@@ -92,6 +92,8 @@ dependencies = [
  "feed",
  "rune",
  "rune-kit",
+ "rune-theme-opencode",
+ "serde",
  "serde_json",
  "time",
 ]
@@ -2916,6 +2918,16 @@ dependencies = [
  "windows-core",
  "windows-sys 0.61.2",
  "zeroize",
+]
+
+[[package]]
+name = "rune-theme-opencode"
+version = "0.0.1"
+source = "git+https://github.com/anomalyco/rune?rev=927eaaf0c978f682e4c7eb3435226da5c217fbe4#927eaaf0c978f682e4c7eb3435226da5c217fbe4"
+dependencies = [
+ "rune",
+ "rune-kit",
+ "serde_json",
 ]
 
 [[package]]
