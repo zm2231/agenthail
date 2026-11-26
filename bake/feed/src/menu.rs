@@ -6,6 +6,9 @@ pub enum Act {
     Rename,
     Terminal,
     Pr(String),
+    PrWatch(String, bool),
+    PrUnlink(String),
+    PrLink,
     Pin(bool),
     Read(bool),
     Archive(bool),
@@ -31,6 +34,7 @@ pub enum Patch {
     Archived(bool),
     Read { receipt: ReadState, from: Vec<String> },
     Alias(Option<String>),
+    Prs(Vec<crate::catalog::Pr>),
 }
 
 impl Patch {
@@ -40,6 +44,7 @@ impl Patch {
             Patch::Archived(on) => x.archived = *on,
             Patch::Read { receipt, .. } => x.read_state = Some(receipt.clone()),
             Patch::Alias(alias) => x.alias = alias.clone(),
+            Patch::Prs(prs) => x.prs = prs.clone(),
         }
     }
 
@@ -50,6 +55,7 @@ impl Patch {
             Patch::Archived(on) => x.archived == *on,
             Patch::Read { from, .. } => x.read_state.as_ref().is_none_or(|r| !from.contains(&r.revision)),
             Patch::Alias(alias) => x.alias == *alias,
+            Patch::Prs(prs) => x.prs == *prs,
         }
     }
 
@@ -81,6 +87,7 @@ impl Patch {
             Patch::Archived(_) => x.archived = daemon.archived,
             Patch::Read { .. } => x.read_state = daemon.read_state.clone(),
             Patch::Alias(_) => x.alias = daemon.alias.clone(),
+            Patch::Prs(_) => x.prs = daemon.prs.clone(),
         }
     }
 }
@@ -122,12 +129,51 @@ pub fn entries(x: &Session) -> Vec<Vec<Entry>> {
         }
         open.push(entry);
     }
+    let mut groups = vec![open];
+    if !x.read_only {
+        groups.push(pull_requests(x));
+    }
     let mut keep = vec![Entry::on(Act::Pin(!x.pinned()), if x.pinned() { "Unpin" } else { "Pin" })];
     if x.read_state.is_some() {
         keep.push(Entry::on(Act::Read(x.unread()), if x.unread() { "Mark as read" } else { "Mark as unread" }));
     }
     keep.push(Entry::on(Act::Archive(!x.archived), if x.archived { "Unarchive" } else { "Archive" }));
-    vec![open, keep]
+    groups.push(keep);
+    groups
+}
+
+fn pull_requests(x: &Session) -> Vec<Entry> {
+    let linked: Vec<_> = x.prs.iter().filter(|p| !p.url.is_empty()).collect();
+    let mut out = Vec::new();
+    for pr in &linked {
+        let which = if linked.len() == 1 { "pull request".to_string() } else { format!("#{}", pr.number) };
+        let mut watch = if pr.watch {
+            Entry::on(Act::PrWatch(pr.url.clone(), false), format!("Stop watching {which}"))
+        } else {
+            Entry::on(Act::PrWatch(pr.url.clone(), true), format!("Watch {which}"))
+        };
+        watch.note = Some(if !pr.problem.is_empty() {
+            pr.problem.clone()
+        } else if pr.watch {
+            "Changes to it wake this session".into()
+        } else {
+            "Wakes this session when it changes, and settles its worktree on merge".into()
+        });
+        out.push(watch);
+        out.push(Entry::on(Act::PrUnlink(pr.url.clone()), format!("Unlink {which}")));
+    }
+    out.push(Entry::on(Act::PrLink, "Link a pull request…"));
+    out
+}
+
+pub fn pr_problem(text: &str) -> Option<&'static str> {
+    let text = text.trim().trim_start_matches('#');
+    if text.is_empty() {
+        return Some("Paste a pull request link, or its number.");
+    }
+    let number = text.parse::<u64>().is_ok_and(|n| n > 0);
+    let link = (text.starts_with("https://") || text.starts_with("http://")) && text.contains("/pull/");
+    if number || link { None } else { Some("That isn't a pull request link or number.") }
 }
 
 pub fn normalized(text: &str) -> String {
@@ -175,7 +221,7 @@ mod tests {
 
     #[test]
     fn a_plain_session_offers_rename_pin_and_archive() {
-        assert_eq!(labels(&session()), vec![vec!["Rename…"], vec!["Pin", "Archive"]]);
+        assert_eq!(labels(&session()), vec![vec!["Rename…"], vec!["Link a pull request…"], vec!["Pin", "Archive"]]);
     }
 
     #[test]
@@ -184,10 +230,10 @@ mod tests {
         x.pinned_at = Some("2026-11-26T10:00:00Z".into());
         x.archived = true;
         x.read_state = Some(ReadState { first_unread: "item-4".into(), revision: "r1".into() });
-        let keep = &entries(&x)[1];
+        let keep = &entries(&x)[2];
         assert_eq!(keep.iter().map(|e| (e.label.as_str(), e.act.clone())).collect::<Vec<_>>(), vec![("Unpin", Act::Pin(false)), ("Mark as read", Act::Read(true)), ("Unarchive", Act::Archive(false))]);
         x.read_state = Some(ReadState { first_unread: String::new(), revision: "r1".into() });
-        assert_eq!(entries(&x)[1][1], Entry::on(Act::Read(false), "Mark as unread"));
+        assert_eq!(entries(&x)[2][1], Entry::on(Act::Read(false), "Mark as unread"));
     }
 
     #[test]
@@ -218,14 +264,42 @@ mod tests {
     #[test]
     fn each_pull_request_with_a_link_gets_an_entry() {
         let mut x = session();
-        x.prs = vec![Pr { number: 12, title: "Fix it".into(), url: "https://github.com/o/r/pull/12".into() }];
+        x.prs = vec![Pr { number: 12, title: "Fix it".into(), url: "https://github.com/o/r/pull/12".into(), ..Default::default() }];
         let open = &entries(&x)[0];
         assert_eq!(open[1].label, "Open pull request");
         assert_eq!(open[1].act, Act::Pr("https://github.com/o/r/pull/12".into()));
         assert_eq!(open[1].note.as_deref(), Some("Fix it"));
-        x.prs.push(Pr { number: 13, title: String::new(), url: "https://github.com/o/r/pull/13".into() });
-        x.prs.push(Pr { number: 14, title: "No link".into(), url: String::new() });
+        x.prs.push(Pr { number: 13, title: String::new(), url: "https://github.com/o/r/pull/13".into(), watch: true, ..Default::default() });
+        x.prs.push(Pr { number: 14, title: "No link".into(), url: String::new(), ..Default::default() });
         assert_eq!(labels(&x)[0], vec!["Rename…", "Open pull request #12", "Open pull request #13"]);
+    }
+
+    #[test]
+    fn each_linked_pull_request_can_be_watched_or_unlinked_and_another_linked() {
+        let mut x = session();
+        x.prs = vec![Pr { number: 12, url: "https://github.com/o/r/pull/12".into(), ..Default::default() }];
+        let group = &entries(&x)[1];
+        assert_eq!(group.iter().map(|e| (e.label.as_str(), e.act.clone())).collect::<Vec<_>>(), vec![
+            ("Watch pull request", Act::PrWatch("https://github.com/o/r/pull/12".into(), true)),
+            ("Unlink pull request", Act::PrUnlink("https://github.com/o/r/pull/12".into())),
+            ("Link a pull request…", Act::PrLink),
+        ]);
+        x.prs.push(Pr { number: 13, url: "https://github.com/o/r/pull/13".into(), watch: true, problem: "GitHub rate limits reads".into(), ..Default::default() });
+        let group = &entries(&x)[1];
+        assert_eq!(group[0].label, "Watch #12");
+        assert_eq!((group[2].label.as_str(), group[2].act.clone()), ("Stop watching #13", Act::PrWatch("https://github.com/o/r/pull/13".into(), false)));
+        assert_eq!(group[2].note.as_deref(), Some("GitHub rate limits reads"));
+        x.read_only = true;
+        assert_eq!(entries(&x).len(), 2);
+    }
+
+    #[test]
+    fn a_pull_request_is_a_link_or_a_number() {
+        assert_eq!(pr_problem(" "), Some("Paste a pull request link, or its number."));
+        assert_eq!(pr_problem("#34"), None);
+        assert_eq!(pr_problem("https://github.com/o/r/pull/34"), None);
+        assert_eq!(pr_problem("0"), Some("That isn't a pull request link or number."));
+        assert_eq!(pr_problem("fix it"), Some("That isn't a pull request link or number."));
     }
 
     #[test]

@@ -190,6 +190,25 @@ fn a_confirmed_change_outlasts_a_stale_row_until_the_daemon_shows_it() {
 }
 
 #[test]
+fn a_watched_pull_request_holds_until_the_daemon_row_carries_it() {
+    use crate::catalog::Pr;
+    use crate::menu::Patch;
+    let mut ov = Overview::default();
+    let mut linked = session("a", "p", "2026-11-24T11:00:00Z", "idle");
+    linked.prs = vec![Pr { number: 12, url: "https://github.com/o/r/pull/12".into(), ..Default::default() }];
+    assert!(ov.take_sessions("2026-11-24T12:00:00Z", vec![linked.clone()]));
+    let watched = vec![Pr { watch: true, ..linked.prs[0].clone() }];
+    assert!(ov.patch("a", Patch::Prs(watched.clone()), Instant::now()));
+    assert!(ov.take_sessions("2026-11-24T12:00:04Z", vec![linked.clone()]));
+    assert_eq!(ov.sessions()[0].prs, watched, "a row read before the change");
+    let mut shown = linked.clone();
+    shown.prs = watched;
+    assert!(ov.take_sessions("2026-11-24T12:00:06Z", vec![shown]));
+    assert!(ov.take_sessions("2026-11-24T12:00:08Z", vec![linked]));
+    assert!(!ov.sessions()[0].prs[0].watch, "once shown, the daemon's later word wins");
+}
+
+#[test]
 fn a_change_the_daemon_never_shows_gives_way() {
     use crate::menu::Patch;
     let mut ov = Overview::default();

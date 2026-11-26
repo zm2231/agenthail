@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::catalog::{Client, RespondError};
+use crate::catalog::{Client, Pr, RespondError};
 use crate::composer::{Busy, Delivered, Stop};
 
 type Outcome<T> = std::result::Result<T, RespondError>;
@@ -12,6 +12,25 @@ pub enum Dismiss<'a> {
     Request { session: &'a str, request: &'a str },
     /// `host` names the computer whose ledger reported the item; "" is this one.
     Parked { work_item: &'a str, host: &'a str },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PrOp {
+    Link,
+    Unlink,
+    Watch,
+    Unwatch,
+}
+
+impl PrOp {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PrOp::Link => "link",
+            PrOp::Unlink => "unlink",
+            PrOp::Watch => "watch",
+            PrOp::Unwatch => "unwatch",
+        }
+    }
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -94,13 +113,9 @@ impl Client {
         self.action(name, json!({"sessionId": session})).map(drop)
     }
 
-    /// `None` takes the account the daemon offers.
-    pub fn limit_move(&self, session: &str, config_root: Option<&str>, stop_terminal: bool) -> Outcome<Value> {
-        let mut payload = json!({"sessionId": session, "stopTerminal": stop_terminal});
-        if let Some(root) = config_root {
-            payload["configRoot"] = Value::String(root.into());
-        }
-        self.action("limit-move", payload)
+    pub fn pr(&self, session: &str, op: PrOp, pr: &str) -> Outcome<Vec<Pr>> {
+        let reply = self.action("pr", json!({"sessionId": session, "op": op.as_str(), "pr": pr}))?;
+        Ok(serde_json::from_value(reply["prs"].clone()).unwrap_or_default())
     }
 }
 
@@ -180,6 +195,10 @@ mod tests {
             (Box::new(|c| c.limit_resume("s1", false)), json!({"action": "limit-resume-cancel", "sessionId": "s1"})),
             (Box::new(|c| c.limit_move("s1", None, false).map(drop)), json!({"action": "limit-move", "sessionId": "s1", "stopTerminal": false})),
             (Box::new(|c| c.limit_move("s1", Some("/home/a/.claude-b"), true).map(drop)), json!({"action": "limit-move", "sessionId": "s1", "configRoot": "/home/a/.claude-b", "stopTerminal": true})),
+            (Box::new(|c| c.pr("s1", PrOp::Watch, "https://github.com/o/r/pull/12").map(drop)), json!({"action": "pr", "sessionId": "s1", "op": "watch", "pr": "https://github.com/o/r/pull/12"})),
+            (Box::new(|c| c.pr("s1", PrOp::Link, "34").map(drop)), json!({"action": "pr", "sessionId": "s1", "op": "link", "pr": "34"})),
+            (Box::new(|c| c.pr("s1", PrOp::Unlink, "34").map(drop)), json!({"action": "pr", "sessionId": "s1", "op": "unlink", "pr": "34"})),
+            (Box::new(|c| c.pr("s1", PrOp::Unwatch, "34").map(drop)), json!({"action": "pr", "sessionId": "s1", "op": "unwatch", "pr": "34"})),
             (Box::new(|c| c.send("s1", "hi")), json!({"action": "send", "sessionId": "s1", "message": "hi", "author": "person"})),
             (Box::new(|c| c.send_as("s1", "hi", None, &crate::catalog::request_key()).map(drop)), json!({"action": "send", "sessionId": "s1", "message": "hi", "author": "person"})),
             (
@@ -214,10 +233,20 @@ mod tests {
             (200, r#"{"ok":true,"result":{"message":"take this back","attachments":[]}}"#),
             (200, r#"{"ok":true,"alias":"scout"}"#),
             (200, r#"{"ok":true,"sessionId":"s1","readState":{"revision":"r10"}}"#),
+            (200, r#"{"ok":true,"sessionId":"s1","prs":[{"repo":"o/r","number":12,"url":"https://github.com/o/r/pull/12","watch":true,"checks":"failing"}]}"#),
+            (200, r#"{"ok":true,"result":{"sessionId":"s2"}}"#),
+            (409, r#"{"error":{"code":"move_needs_consent","message":"a terminal runs this session"}}"#),
+            (409, r#"{"error":{"code":"move_refused","message":"no other Claude account has room for this session now"}}"#),
         ]);
         assert_eq!(client.queue_cancel(7, "").unwrap(), "take this back");
         assert_eq!(client.alias("s1", "@scout").unwrap(), "scout");
         assert_eq!(client.session_read("s1", "r9", true).unwrap(), Some(ReadState { first_unread: String::new(), revision: "r10".into() }));
+        let prs = client.pr("s1", PrOp::Watch, "12").unwrap();
+        assert_eq!((prs[0].number, prs[0].watch, prs[0].checks.as_str()), (12, true, "failing"));
+        use crate::limit::Moved;
+        assert_eq!(client.limit_move("s1", Some("/r/b"), false).unwrap(), Moved::Done);
+        assert_eq!(client.limit_move("s1", Some("/r/b"), false).unwrap(), Moved::NeedsConsent("a terminal runs this session".into()));
+        assert_eq!(client.limit_move("s1", None, false).unwrap_err().code, "move_refused");
     }
 
     #[test]
