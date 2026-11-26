@@ -199,7 +199,7 @@ pub fn section(s: &App) -> El {
                     .hover(kit().c.surface_raised_hover)
                     .on_press(move |s: &mut App| crate::over::open_session(s, &id))
                     .child(text(ui::short_title(&who, 28)).font(META_MED).color(strong()))
-                    .child(text(format!("{} has it · {}", h.held_by, crate::over::plain(&h.reason))).font(META).color(weak()).truncate().shrink()),
+                    .child(text(format!("{} has it · {}", s.ov.d.name_of(&h.held_by),crate::over::plain(&h.reason))).font(META).color(weak()).truncate().shrink()),
             );
         }
     }

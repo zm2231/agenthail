@@ -77,6 +77,10 @@ pub struct LeadHandled {
     pub reason: String,
     #[serde(default)]
     pub since: String,
+    #[serde(default)]
+    pub work_item: String,
+    #[serde(default)]
+    pub ledger_key: String,
 }
 
 #[derive(Deserialize, Clone, Debug, Default)]
@@ -299,6 +303,13 @@ pub fn order(decisions: &mut [Decision]) {
     decisions.sort_by(|a, b| a.rank().cmp(&b.rank()).then(a.since.cmp(&b.since)).then(a.session_id.cmp(&b.session_id)).then(a.work_item.cmp(&b.work_item)));
 }
 
+pub fn rev_moved(seen: &mut Option<String>, rev: &str) -> bool {
+    if rev.is_empty() || seen.as_deref() == Some(rev) {
+        return false;
+    }
+    seen.replace(rev.to_string()).is_some()
+}
+
 pub fn remember(history: &mut Vec<Handled>, entry: Handled) {
     history.insert(0, entry);
     history.truncate(HISTORY_KEPT);
@@ -512,6 +523,20 @@ mod tests {
         assert_eq!(inbox.lead_handling[0].session_id, "h2::crew");
         assert_eq!(inbox.lead_handling[0].held_by, "h2::lead");
         assert_eq!(inbox.notes, ["off isn't answering, so its decisions aren't shown.", "legacy runs an older Agenthail without the Inbox.", "old runs an older Agenthail without the Inbox."]);
+    }
+
+    #[test]
+    fn a_new_decisions_revision_asks_again_but_the_first_and_a_repeat_do_not() {
+        let mut seen = None;
+        assert!(!rev_moved(&mut seen, "r1"));
+        assert!(!rev_moved(&mut seen, "r1"));
+        assert!(!rev_moved(&mut seen, ""));
+        assert!(rev_moved(&mut seen, "r2"));
+        assert_eq!(seen.as_deref(), Some("r2"));
+        let snap: crate::catalog::Snapshot = serde_json::from_str(r#"{"decisionsRev":"r3","ownDecisionsRev":"o"}"#).unwrap();
+        assert!(rev_moved(&mut seen, &snap.decisions_rev));
+        let older: crate::catalog::Snapshot = serde_json::from_str("{}").unwrap();
+        assert!(!rev_moved(&mut seen, &older.decisions_rev));
     }
 
     #[test]

@@ -97,7 +97,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
                     .child(text("What was asked".to_string()).font(META_MED).color(weak()))
                     .child(text(plain(&w.acceptance)).font(BODY).color(base()).wrap()),
             )
-            .child(verdict_row(s, listed.as_ref(), &revision))
+            .child(verdict_row(s, w, listed.as_ref(), &revision))
             .child(links)
             .child(row().gap(6.0).items_center().child(icon(&icons::INFO, 13.0).color(weak())).child(text(format!("Approval covers {revision} only. A new commit asks again. Merging is a separate step.").to_string()).font(META).color(weak())));
         col().w_full().radius(14.0).fill(k.c.surface_raised).border(1.0, k.c.warning.icon.alpha(0.4)).child(c)
@@ -200,7 +200,7 @@ pub fn pr_of(s: &App, w: &crate::over::Work, review: &feed::decisions::Decision,
     feed::review::pr_link(review.prs.iter().chain(timeline.iter()).chain(holder), number).cloned()
 }
 
-fn verdict_row(s: &App, d: Option<&feed::decisions::Decision>, revision: &str) -> El {
+fn verdict_row(s: &App, w: &crate::over::Work, d: Option<&feed::decisions::Decision>, revision: &str) -> El {
     let k = kit();
     let missing = d.is_none();
     let fallback = feed::decisions::Decision::default();
@@ -221,11 +221,7 @@ fn verdict_row(s: &App, d: Option<&feed::decisions::Decision>, revision: &str) -
         .child(Button::new("Ask for changes").variant(ButtonVariant::Outline).control_size(ControlSize::Regular).shortcut("C").disabled(!ready).on_press(move |s: &mut App| crate::over::inbox::ask_changes(s, &dc)).build(k).key("work-changes"))
         .child(ui::ghost_keys(&["C"]));
     let note = if missing {
-        Some(match &s.ov.inbox.inbox {
-            None => "Looking for this review…".to_string(),
-            Some(i) if !i.notes.is_empty() => "Some computers didn't answer, so this review can't be found yet.".to_string(),
-            Some(_) => "This isn't in your reviews: its lead has it, or it was just reviewed.".to_string(),
-        })
+        Some(feed::review::unlisted_note(st.inbox.as_ref(), w, |id| s.ov.d.name_of(id)))
     } else {
         st.notes.get(&d.id()).filter(|(hold, _)| d.holds(hold)).map(|(_, n)| n.clone()).or_else(|| crate::over::inbox::too_old(st, d).then(feed::review::needs_newer_note))
     };
