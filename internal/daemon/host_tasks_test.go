@@ -71,8 +71,9 @@ func TestATaskStartedOnAPairedHostSettlesWhenItsChildReportsThere(t *testing.T) 
 	}
 	select {
 	case out := <-waited:
-		if fmt.Sprint(out["timedOut"]) == "true" {
-			t.Fatalf("wait timed out instead of returning the remote settlement: %v", out)
+		ready, _ := out["ready"].([]any)
+		if len(ready) != 1 || ready[0].(map[string]any)["type"] != "settled" {
+			t.Fatalf("wait=%v, want the remote settlement ready", out)
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("wait did not return")
