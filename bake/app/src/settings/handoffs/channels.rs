@@ -1,10 +1,10 @@
-use feed::handoffs::{self, Channel, Handoffs, session_ref};
+use feed::handoffs::{self, Channel, Handoffs, Unsettled, session_ref};
 use rune::{El, TextEdit, col, row};
 use rune_kit::{Button, ButtonVariant, ControlSize, TextArea};
 
 use super::super::parts::{self, line};
 use super::super::{Prefs, Section, busy, saving};
-use super::{Who, change, field, forget, matches, note, refused, remove, small, status};
+use super::{Who, change, edited, field, forget, matches, note, refused, remove, small, status};
 use crate::theme;
 
 fn create(s: &mut Prefs) {
@@ -31,10 +31,15 @@ fn send(s: &mut Prefs) {
     if message.is_empty() || channel.is_empty() {
         return;
     }
-    let out = s.handoffs.sent.clone();
+    let (out, open) = (s.handoffs.sent.clone(), s.handoffs.unsettled.clone());
+    let key = Unsettled::key_for(open.lock().unwrap().as_ref(), &channel, &message);
     change(s, Section::Channels, format!("channel-send-{channel}"), move |c| {
-        let sent = c.channel_send(&channel, &message)?;
-        *out.lock().unwrap() = Some(format!("#{channel}: {}", sent.summary()));
+        let result = c.channel_send(&channel, &message, &key);
+        *open.lock().unwrap() = match &result {
+            Err(f) if f.uncertain => Some(Unsettled { channel: channel.clone(), message: message.clone(), key }),
+            _ => None,
+        };
+        *out.lock().unwrap() = Some(format!("#{channel}: {}", result?.summary()));
         Ok(())
     });
 }
@@ -73,6 +78,7 @@ fn picked(s: &Prefs, c: &Channel, off: bool) -> Vec<El> {
         .auto_grow(2, 5)
         .disabled(off)
         .on_edit(|s: &mut Prefs| &mut s.handoffs.message)
+        .on_change(|s: &mut Prefs, _: &mut rune::Tx| edited(s, Section::Channels))
         .build(k)
         .key("settings-channel-message");
     rows.push(row().w_full().px(14.0).py(10.0).child(message.grow(1.0)));

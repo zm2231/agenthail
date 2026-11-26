@@ -2,7 +2,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 
-use crate::catalog::{Client, ago, confirmed, enc};
+use crate::catalog::{Client, RespondError, ago, confirmed, enc, request_key};
 use crate::prefs::{Failure, write_failure};
 
 fn listed<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Vec<T>, D::Error> {
@@ -267,6 +267,32 @@ struct Found {
     sessions: Vec<Pick>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Unsettled {
+    pub channel: String,
+    pub message: String,
+    pub key: String,
+}
+
+impl Unsettled {
+    pub fn key_for(this: Option<&Unsettled>, channel: &str, message: &str) -> String {
+        match this {
+            Some(u) if u.channel == channel && u.message == message => u.key.clone(),
+            _ => request_key(),
+        }
+    }
+}
+
+pub const MAY_HAVE_REACHED: &str = "Some members may already have this message. Send it again unchanged to finish without repeating it, or edit it to send a new one.";
+
+fn unsettled(error: RespondError) -> Failure {
+    let partial = error.status == 409 && error.code == "conflict";
+    if !(partial || error.maybe_delivered) {
+        return write_failure("control", error);
+    }
+    Failure { uncertain: true, ..Failure::new(format!("{MAY_HAVE_REACHED} ({})", error.message)) }
+}
+
 fn act(client: &Client, name: &str, payload: Value) -> Result<Value, Failure> {
     client.action(name, payload).and_then(confirmed).map_err(|e| write_failure("control", e))
 }
@@ -295,8 +321,8 @@ impl Client {
         act(self, "channel-remove", json!({"channel": name, "targetId": target})).map(drop)
     }
 
-    pub fn channel_send(&self, name: &str, message: &str) -> Result<Sent, Failure> {
-        let reply = act(self, "channel-send", json!({"channel": name, "message": message, "author": "person"}))?;
+    pub fn channel_send(&self, name: &str, message: &str, key: &str) -> Result<Sent, Failure> {
+        let reply = self.action_keyed("channel-send", json!({"channel": name, "message": message, "author": "person"}), key).and_then(confirmed).map_err(unsettled)?;
         Ok(serde_json::from_value(reply).unwrap_or_default())
     }
 

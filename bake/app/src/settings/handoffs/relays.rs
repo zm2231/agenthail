@@ -4,7 +4,7 @@ use time::OffsetDateTime;
 
 use super::super::parts::{self, line};
 use super::super::{Prefs, Section, busy, saving};
-use super::{Who, change, draft, field, matches, note, remove, small, status};
+use super::{Who, change, draft, edited, field, matches, note, remove, small, status};
 use crate::theme::{self, BODY, META, attention, muted};
 
 fn add(s: &mut Prefs) {
@@ -42,7 +42,10 @@ pub fn section(s: &Prefs, h: &Handoffs, off: bool, layer: &mut Vec<El>) -> El {
         rows.push(parts::words("No automatic handoffs yet."));
     }
     let choices = vec![("Turn finished".to_string(), TURN_FINISHED.to_string()), ("Goal completed".to_string(), GOAL_COMPLETED.to_string())];
-    let when = parts::select(s, "settings-relay-handoff", "Hand off when", choices, &f.relay_handoff, off, layer, |s, value| s.handoffs.relay_handoff = value);
+    let when = parts::select(s, "settings-relay-handoff", "Hand off when", choices, &f.relay_handoff, off, layer, |s, value| {
+        s.handoffs.relay_handoff = value;
+        edited(s, Section::Relays);
+    });
     let once = f.relay_once;
     rows.push(line("When", Some("The session whose replies hand off".into()), field("relay-from", Section::Relays, &f.relay_from, "When", "Find a session or @alias", off, Some(Who::From), |s| &mut s.handoffs.relay_from, add)));
     rows.extend(matches(s, Who::From, off));
@@ -50,7 +53,10 @@ pub fn section(s: &Prefs, h: &Handoffs, off: bool, layer: &mut Vec<El>) -> El {
     rows.push(line("Finishes with text matching", Some("A regular expression; .* matches every reply".into()), field("relay-pattern", Section::Relays, &f.relay_pattern, "Finishes with text matching", ".*", off, None, |s| &mut s.handoffs.relay_pattern, add)));
     rows.push(line("Hand off to", None, field("relay-to", Section::Relays, &f.relay_to, "Hand off to", "Find a session or @alias", off, Some(Who::To), |s| &mut s.handoffs.relay_to, add)));
     rows.extend(matches(s, Who::To, off));
-    rows.push(line("Run this handoff once", None, parts::switch("relay-once", "Run this handoff once", once, off, move |s| s.handoffs.relay_once = !once)));
+    rows.push(line("Run this handoff once", None, parts::switch("relay-once", "Run this handoff once", once, off, move |s| {
+        s.handoffs.relay_once = !once;
+        edited(s, Section::Relays);
+    })));
     rows.extend(status(s, Section::Relays));
     let ready = draft(s).problem().is_none();
     rows.push(row().w_full().px(14.0).py(10.0).child(col().grow(1.0)).child(small("Add Handoff", "relay-add", off || !ready, add)));

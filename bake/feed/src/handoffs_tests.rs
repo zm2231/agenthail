@@ -85,6 +85,18 @@ fn session_search_offers_local_sessions_and_names_them_for_the_daemon() {
 }
 
 #[test]
+fn an_unsettled_send_is_retried_under_its_own_key_only_while_unchanged() {
+    let u = Unsettled { channel: "ship".into(), message: "hello".into(), key: "k1".into() };
+    assert_eq!(Unsettled::key_for(Some(&u), "ship", "hello"), "k1");
+    assert_ne!(Unsettled::key_for(Some(&u), "ship", "hello again"), "k1");
+    assert_ne!(Unsettled::key_for(Some(&u), "ops", "hello"), "k1");
+    assert_ne!(Unsettled::key_for(None, "ship", "hello"), Unsettled::key_for(None, "ship", "hello"));
+    let (client, _rx) = daemon(replies(&[(400, r#"{"error":{"code":"invalid_request","message":"no members"}}"#)]));
+    let plain = client.channel_send("ship", "hello", "k4").unwrap_err();
+    assert!(!plain.uncertain && plain.message == "no members");
+}
+
+#[test]
 fn each_change_posts_its_action_and_reports_refusals() {
     let ok = r#"{"ok":true}"#;
     let sent = r#"{"ok":true,"sent":2,"queued":0,"submitted":0,"failed":0,"skipped":0,"older":0,"recipients":[]}"#;
@@ -96,15 +108,15 @@ fn each_change_posts_its_action_and_reports_refusals() {
     client.channel_add("ship", "@writer").unwrap();
     client.channel_remove("ship", "s2").unwrap();
     client.channel_delete("ship").unwrap();
-    assert_eq!(client.channel_send("ship", "hello").unwrap().summary(), "Delivered to 2 sessions.");
+    assert_eq!(client.channel_send("ship", "hello", "k1").unwrap().summary(), "Delivered to 2 sessions.");
     let draft = RelayDraft { from: "@a".into(), to: "@b".into(), ..Default::default() };
     client.relay_add(&draft).unwrap();
     client.relay_remove(7).unwrap();
-    let conflict = client.channel_send("ship", "again").unwrap_err();
-    assert!(!conflict.denied && !conflict.uncertain && conflict.message.contains("1 failed"));
+    let conflict = client.channel_send("ship", "again", "k2").unwrap_err();
+    assert!(!conflict.denied && conflict.uncertain && conflict.message.starts_with(MAY_HAVE_REACHED) && conflict.message.contains("1 failed"));
     let refused = client.relay_remove(8).unwrap_err();
     assert!(refused.denied && refused.scope == "control");
-    assert!(client.channel_delete("x").unwrap_err().uncertain);
+    assert!(client.channel_send("x", "m", "k3").unwrap_err().message.starts_with(MAY_HAVE_REACHED));
     assert!(client.channel_delete("y").unwrap_err().uncertain);
     let bodies: Vec<Value> = rx.try_iter().map(|(path, body)| {
         assert_eq!(path, "/api/v1/actions");

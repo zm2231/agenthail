@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use feed::catalog::Client;
-use feed::handoffs::{Pick, RelayDraft, TURN_FINISHED, picks};
+use feed::handoffs::{Pick, RelayDraft, TURN_FINISHED, Unsettled, picks};
 use feed::prefs::Failure;
 use rune::{El, TextEdit, Tx, col, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize, TextInput};
@@ -41,6 +41,7 @@ pub struct Form {
     pub message: TextEdit,
     pub problems: HashMap<Section, &'static str>,
     pub sent: Arc<Mutex<Option<String>>>,
+    pub unsettled: Arc<Mutex<Option<Unsettled>>>,
     pub found: Option<(Who, Vec<Pick>)>,
     searching: Arc<AtomicU64>,
     stale: bool,
@@ -60,6 +61,7 @@ impl Default for Form {
             message: TextEdit::new(""),
             problems: HashMap::new(),
             sent: Arc::new(Mutex::new(None)),
+            unsettled: Arc::new(Mutex::new(None)),
             found: None,
             searching: Arc::new(AtomicU64::new(0)),
             stale: false,
@@ -125,6 +127,13 @@ fn note(s: &mut Prefs, section: Section, problem: Option<&'static str>) {
     };
     if section == Section::Channels {
         *s.handoffs.sent.lock().unwrap() = None;
+    }
+}
+
+pub fn edited(s: &mut Prefs, section: Section) {
+    s.handoffs.problems.remove(&section);
+    if !s.notes.get(&section).is_some_and(refused) {
+        s.notes.remove(&section);
     }
 }
 
@@ -206,7 +215,7 @@ pub fn field(key: &str, section: Section, edit: &TextEdit, label: &str, hint: &s
         .disabled(off)
         .on_edit(pick)
         .on_change(move |s: &mut Prefs, _: &mut Tx| {
-            s.handoffs.problems.remove(&section);
+            edited(s, section);
             if let Some(who) = who {
                 search(s, who);
             }
