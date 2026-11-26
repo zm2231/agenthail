@@ -856,6 +856,8 @@ func (d *Daemon) stopRun(ctx context.Context, session *surface.Session) (surface
 var projectAddGitTimeout = 30 * time.Second
 
 func (d *Daemon) addProject(ctx context.Context, path, title string) (projectresolve.CatalogProject, bool, error) {
+	d.projectAdds.Lock()
+	defer d.projectAdds.Unlock()
 	plan, err := d.planProjectAdd(ctx, path, title)
 	if err != nil {
 		return projectresolve.CatalogProject{}, false, err

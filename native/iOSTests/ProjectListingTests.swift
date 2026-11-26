@@ -33,6 +33,21 @@ final class ProjectListingTests: XCTestCase {
         XCTAssertEqual(ProjectContents.leadSessionID(listed.state.leads[1], of: listed), "hserver::s2")
     }
 
+    func testAFolderJoinedFromAnotherComputerIsOneProjectUnderItsSharedKey() throws {
+        let key = "shared:5f0c2a9e-7d41-4b8e-9a13-2c6f8e0b4d71"
+        let laptop = ProjectState(id: key, displayName: "agenthail-v2", checkouts: [Self.checkout(Self.local, "p-laptop", "/Volumes/4/agenthail-v2")],
+                                  coordinators: [ProjectState.Lead(host: Self.local, name: "v2-lead", surface: "claude", sessionId: "s1")])
+        let server = ProjectState(id: key, displayName: "agenthail-v2", checkouts: [Self.checkout(Self.local, "p-server", "/home/a/agenthail-v2")])
+        let (projects, order) = Self.merge([("hlaptop", [laptop]), ("hserver", [server])])
+
+        XCTAssertEqual(order, [key], "a shared key is never named by the computer listing it")
+        let listed = try XCTUnwrap(projects[key])
+        XCTAssertEqual(listed.servers, ["hlaptop", "hserver"])
+        XCTAssertEqual(listed.state.checkouts.map(\.projectId), ["p-laptop", "hserver::p-server"])
+        XCTAssertEqual(listed.state.leads.map(\.name), ["v2-lead"])
+        XCTAssertEqual(ProjectToolsRoute.target(listed, takesSettings: { $0 == "hserver" })?.projectID, key, "its settings go to any computer holding it, by its key")
+    }
+
     func testPeersListingTheSameCheckoutShowItOnceFromItsOwnComputer() throws {
         let serverHost = SessionHost(id: "hserver", name: "server", state: "connected")
         let laptop = ProjectState(id: Self.repo, displayName: "widget", checkouts: [

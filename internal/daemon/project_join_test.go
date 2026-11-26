@@ -249,3 +249,40 @@ func assertNotAdded(t *testing.T, node *federationNode, folder string) {
 		}
 	}
 }
+
+func TestAJoinAndAPlainAddOfTheSameFolderEndWithTheFolderJoined(t *testing.T) {
+	f := newJoinFixture(t)
+	folder := t.TempDir()
+	f.server.daemon.projectAdds.Lock()
+	answers := make(chan int, 2)
+	go func() {
+		answers <- f.mac.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "project-add", "path": folder, "host": "vps", "join": f.projectID}).Code
+	}()
+	go func() {
+		answers <- f.server.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "project-add", "path": folder}).Code
+	}()
+	time.Sleep(200 * time.Millisecond)
+	f.server.daemon.projectAdds.Unlock()
+	for range 2 {
+		if code := <-answers; code != http.StatusOK {
+			t.Fatalf("an add or join answered %d", code)
+		}
+	}
+	root, err := filepath.EvalSymlinks(folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := f.server.reg.ListProjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range records {
+		if record.Added && record.WorkspaceRoot == root {
+			if !record.Joined || !strings.HasPrefix(record.Key, hosts.SharedPrefix) {
+				t.Fatalf("the folder ended as %+v, want it joined under the shared key", record)
+			}
+			return
+		}
+	}
+	t.Fatal("the folder was not added")
+}

@@ -191,6 +191,8 @@ func (d *Daemon) doProjectJoinFolder(ctx context.Context, request projectRequest
 // repository with a remote is already one project on every host, and one
 // with its own lead or ledger would need two histories merged.
 func (d *Daemon) joinFolder(ctx context.Context, path string, share projectShare) (actionResult, error) {
+	d.projectAdds.Lock()
+	defer d.projectAdds.Unlock()
 	plan, err := d.planProjectAdd(ctx, path, share.Title)
 	var missing *folderNotFoundError
 	switch {
@@ -252,6 +254,8 @@ func (d *Daemon) joinFolder(ctx context.Context, path string, share projectShare
 		return actionResult{}, actionFailed(http.StatusConflict, "project_state_conflict", err.Error())
 	case err != nil:
 		return actionResult{}, invalidRequest(err.Error())
+	case project.Key != share.Key:
+		return actionResult{}, actionFailed(http.StatusConflict, "project_state_conflict", fmt.Sprintf("%s became a project of its own while it was being joined; join it again", folder))
 	}
 	return actionOK(map[string]any{"ok": true, "project": project, "created": created}), nil
 }

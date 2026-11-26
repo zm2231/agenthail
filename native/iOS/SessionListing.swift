@@ -72,7 +72,7 @@ final class SessionListing {
 
     private func earlierTargets(_ project: ListedProject) -> [ScopeTarget] {
         let request = ScopeRequest(scope: "all", projectID: project.state.id)
-        let shared = project.state.id.hasPrefix(HostCatalog.repositoryPrefix)
+        let shared = ProjectKey.names(project.state.id)
         let direct = shared ? project.servers + project.state.checkouts.map { ProjectRouting.owner($0.host, of: project) } : []
         var seen: Set<String> = []
         return ([project.hostID] + direct).compactMap { hostID in
