@@ -57,6 +57,8 @@ const ledgerHelp = `Intent ledger (agenthail ledger <command>; agenthail ledger 
   ledger review <item_id>        Submit a claimed item for review (submit)
   ledger approve <item_id> | ledger reject <item_id> --reason "..." [--utterance <id>]
                                  Review submitted work: another session, or the person's own words
+  ledger review-pass <item_id> --reason "..."
+                                 As the project's lead, hand a review to the person with what they decide
   ledger close <item_id> --reason "done: <PR, commit or where it landed>"
                                  Mark unclaimed work done that was finished elsewhere; claimed work goes
                                  through review

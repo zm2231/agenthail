@@ -256,6 +256,8 @@ func (b *Board) dispatch(event Event) error {
 		err = b.applyPhaseLabels(event.Payload)
 	case EventWorkProof:
 		err = b.applyWorkProof(event)
+	case EventWorkReviewPass:
+		err = b.applyWorkReviewPass(event)
 	}
 	return err
 }

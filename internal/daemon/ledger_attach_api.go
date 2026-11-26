@@ -37,6 +37,7 @@ func (d *Daemon) ledgerStore() *ledger.Store {
 			d.ledgerHub.changed(key)
 			d.wakeLedgerAsks(key)
 			d.republishHeldWork()
+			d.decisions.poke()
 		})
 		d.ledger.OnRecord(d.wakeLedgerOwner)
 	})

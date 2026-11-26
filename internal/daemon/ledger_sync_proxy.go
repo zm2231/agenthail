@@ -44,6 +44,10 @@ func (d *Daemon) ledgerWriteRoute(next http.HandlerFunc) http.HandlerFunc {
 			writeLedgerError(w, err)
 			return
 		}
+		if err := d.refuseReviewPass(r.URL.Path, body); err != nil {
+			writeAPIError(w, http.StatusForbidden, "forbidden", err.Error())
+			return
+		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		var head struct {
 			ProjectKey string `json:"projectKey"`

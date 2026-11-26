@@ -303,6 +303,7 @@ func (d *Daemon) runAskSweeps(ctx context.Context) {
 	for {
 		d.sweepAsks(time.Now())
 		d.sweepLeadWaits(ctx, time.Now())
+		d.sweepReviewPushes(ctx)
 		select {
 		case <-ctx.Done():
 			return

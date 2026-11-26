@@ -73,6 +73,9 @@ type dashboardActionRequest struct {
 	Attachments     []string                   `json:"attachments"`
 	RequestID       string                     `json:"requestId"`
 	WorkItem        string                     `json:"workItem"`
+	LedgerKey       string                     `json:"ledgerKey"`
+	Verdict         string                     `json:"verdict"`
+	Note            string                     `json:"note"`
 	Decision        surface.Response           `json:"decision"`
 	Instructions    *string                    `json:"instructions"`
 	Replace         bool                       `json:"replace"`

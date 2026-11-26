@@ -41,10 +41,12 @@ func (b *Board) planWork(req WorkRequest, ids *idIssuer) (EventType, any, string
 		return b.planWorkLink(req)
 	case WorkTakeover:
 		return b.planWorkTakeover(req)
+	case WorkReviewPass:
+		return b.planReviewPass(req)
 	}
 	transition, ok := workTransitions[req.Action]
 	if !ok {
-		return "", nil, "", refuse("unknown work action %q; use add, claim, block, unblock, park, unpark, submit, approve, reject, reopen, handoff, takeover, dep, undep, comment or log", req.Action)
+		return "", nil, "", refuse("unknown work action %q; use add, claim, block, unblock, park, unpark, submit, approve, reject, review-pass, reopen, handoff, takeover, dep, undep, comment or log", req.Action)
 	}
 	item := b.workItems[req.ItemID]
 	if item == nil {
