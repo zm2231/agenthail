@@ -34,12 +34,12 @@ fn needs_you_is_one_count_across_list_board_digest_and_sessions() {
 }
 
 #[test]
-fn needs_are_ordered_by_kind_then_oldest_first() {
+fn needs_are_ordered_by_group_then_kind_then_oldest_first() {
     let Some(w) = recorded() else { return };
     let needs = w.needs();
     for pair in needs.windows(2) {
         let (a, b) = (&pair[0], &pair[1]);
-        assert!((a.kind.rank(), &a.at) <= (b.kind.rank(), &b.at), "{:?} before {:?}", a.kind, b.kind);
+        assert!((a.group, a.kind.rank(), &a.at) <= (b.group, b.kind.rank(), &b.at), "{:?} {:?} before {:?} {:?}", a.group, a.kind, b.group, b.kind);
     }
 }
 
