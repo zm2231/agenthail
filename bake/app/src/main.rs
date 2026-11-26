@@ -33,6 +33,8 @@ pub enum Bg {
     Requests(String, Vec<OpenRequest>, std::time::Instant),
     Answered(String, String, Result<(), feed::catalog::RespondError>),
     NewSession(ui::new_session::Loaded),
+    Looked(String, Result<feed::gone::Gone, String>),
+    Fixed(String, feed::gone::Fix, Result<(), feed::catalog::RespondError>),
     Error(String),
 }
 
@@ -103,6 +105,8 @@ pub struct App {
     pub menus: ui::session_menu::Menus,
     pub new_session: Option<ui::new_session::Sheet>,
     revealed: Option<String>,
+    pub missing: Option<ui::gone::Missing>,
+    last_row: Option<Session>,
     client: Option<Client>,
     fixtures: Option<Fixtures>,
     inbox: Receiver<Bg>,
@@ -191,6 +195,8 @@ fn init() -> App {
         menus: ui::session_menu::Menus::new(),
         new_session: None,
         revealed: None,
+        missing: None,
+        last_row: None,
         client: None,
         fixtures: None,
         inbox,
@@ -917,6 +923,8 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             }
             Bg::NewSession(loaded) => ui::new_session::take(s, loaded),
             Bg::Error(error) => s.status = format!("daemon: {error}"),
+            Bg::Looked(id, result) => ui::gone::looked(s, &id, result),
+            Bg::Fixed(id, fix, result) => ui::gone::fixed(s, &id, fix, result),
         }
     }
     let mut busy = false;
@@ -969,6 +977,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         s.revealed = Some(id);
     }
     changed |= ui::session_menu::drain(s);
+    ui::gone::watch(s);
     switch_composer(s);
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &s.composer.text);

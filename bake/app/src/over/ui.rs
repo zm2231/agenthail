@@ -496,6 +496,29 @@ fn session_row(s: &App, x: &feed::catalog::Session, depth: u8, lead: bool, selec
     with_menu(r.build(kit()).key(session_key(&x.id)), &x.id)
 }
 
+pub fn project_for(s: &App, x: &feed::catalog::Session) -> Option<String> {
+    Some(x.project_key()).filter(|k| s.ov.d.project(k).is_some())
+}
+
+pub fn sidebar_order(s: &App, current_project: Option<&str>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    if !matches!(s.screen, Screen::Now) {
+        for slot in need_slots(&s.ov.needs, s.ov.looked_now.as_deref(), 4) {
+            if let Slot::Need(_, n) = slot
+                && let Target::Session(id) = &n.target
+            {
+                out.push(id.clone());
+            }
+        }
+    }
+    if let Some(p) = current_project.and_then(|k| s.ov.d.project(k)) {
+        out.extend(s.ov.d.project_rows(p).into_iter().map(|(id, _)| id));
+    }
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|id| seen.insert(id.clone()));
+    out
+}
+
 pub fn session_key(id: &str) -> String {
     format!("s-{id}")
 }

@@ -8,9 +8,10 @@ use crate::theme::{
     self, BODY, BODY_BOLD, HEADING, LABEL, META, META_BOLD, SPRING, TITLE, accent, accent_deep, attention, card, done, failed, faint, line, muted, raised, wash,
 };
 use crate::transcript::{self, session_avatar};
-use crate::{App, Screen, Tab, answer_request, pick_work, session_edits, short_path, show_changes, send, draft_reply, session, toggle_pick, open_link};
+use crate::{App, Bg, Screen, Tab, answer_request, pick_work, session_edits, short_path, show_changes, send, draft_reply, session, toggle_pick, open_link};
 
 mod chips;
+pub mod gone;
 pub mod new_session;
 mod rail;
 mod session;
@@ -109,8 +110,8 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
 
 fn session_body(s: &App, cx: &mut Cx<App>) -> El {
     let selected = s.selected.as_deref();
-    let x = selected.and_then(|id| session(s, id));
-    let project = x.map(|x| x.project_key()).filter(|k| s.ov.d.project(k).is_some());
+    let x = selected.and_then(|id| gone::shown(s, id));
+    let project = x.and_then(|x| crate::over::ui::project_for(s, x));
     let sidebar = crate::over::ui::sidebar(s, project.as_deref(), selected);
     crate::over::ui::frame(cx, s, Some(sidebar), session_screen(s), x.map(|x| rail(s, x)), session_toolbar(s, x))
 }

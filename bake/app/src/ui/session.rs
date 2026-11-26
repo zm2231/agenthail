@@ -208,7 +208,7 @@ pub(crate) fn changes_view(s: &App, id: &str) -> El {
 
 pub(crate) fn session_screen(s: &App) -> El {
     let Some(id) = s.selected.clone() else { return transcript::loading("Pick a session".into()) };
-    let Some(x) = session(s, &id) else { return transcript::loading("Loading sessions…".into()) };
+    let Some(x) = session(s, &id) else { return super::gone::screen(s, &id) };
     let mut center = col().grow(1.0).h_full().min_w(0.0).child(header(s, x));
     let open = open_request(s, x).is_some();
     let sent = has_settled(s, x);
@@ -224,16 +224,19 @@ pub(crate) fn session_screen(s: &App) -> El {
         };
         center = center.child(col().w_full().items_center().px(32.0).pb(12.0).child(pill(glyph, label, color)));
     }
-    center = center.child(tabs(s, &id)).child(el().w_full().h(1.0).fill(line()));
-    let empty = s.panes.get(&id).is_none_or(|p| p.blocks.is_empty());
+    conversation(s, &id, center).child(composer(s, x))
+}
+
+pub(crate) fn conversation(s: &App, id: &str, center: El) -> El {
+    let center = center.child(tabs(s, id)).child(el().w_full().h(1.0).fill(line()));
+    let empty = s.panes.get(id).is_none_or(|p| p.blocks.is_empty());
     if s.tab == Tab::Changes && !empty {
-        center = center.child(changes_view(s, &id));
+        center.child(changes_view(s, id))
     } else if empty {
-        let status = s.panes.get(&id).map(|p| p.status.clone()).unwrap_or_default();
+        let status = s.panes.get(id).map(|p| p.status.clone()).unwrap_or_default();
         let note = if matches!(status.as_str(), "" | "loading" | "live") { "Loading the transcript…".to_string() } else { status };
-        center = center.child(transcript::loading(note));
+        center.child(transcript::loading(note))
     } else {
-        center = center.child(transcript::view(s, &id));
+        center.child(transcript::view(s, id))
     }
-    center.child(composer(s, x))
 }
