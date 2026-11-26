@@ -28,6 +28,8 @@ pub struct Base {
     pub person: Option<Person>,
     #[serde(default)]
     pub event_cursor: u64,
+    #[serde(flatten)]
+    pub handoffs: crate::handoffs::Handoffs,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -249,7 +251,7 @@ fn read_failure(scope: &'static str, status: u16, body: &str) -> Failure {
     Failure::new(message)
 }
 
-fn write_failure(scope: &'static str, error: RespondError) -> Failure {
+pub(crate) fn write_failure(scope: &'static str, error: RespondError) -> Failure {
     if error.status == 401 || error.status == 403 {
         return refused(scope);
     }
