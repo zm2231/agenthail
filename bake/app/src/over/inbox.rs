@@ -24,6 +24,7 @@ pub struct Note {
     pub decision: Decision,
     pub title: String,
     pub text: TextEdit,
+    pub gone: bool,
 }
 
 #[derive(Default, Clone)]
@@ -274,16 +275,25 @@ pub fn ask_changes(s: &mut crate::App, d: &Decision) {
     let mut text = TextEdit::new("");
     text.focused = true;
     s.composer.focused = false;
-    s.ov.inbox.note = Some(Note { decision: d.clone(), title, text });
+    s.ov.inbox.note = Some(Note { decision: d.clone(), title, text, gone: false });
+}
+
+fn listed(st: &State, d: &Decision) -> Option<Decision> {
+    st.inbox.as_ref()?.decisions.iter().find(|x| x.id() == d.id() && x.host == d.host).cloned()
 }
 
 pub fn send_changes(s: &mut crate::App) {
-    let Some(n) = s.ov.inbox.note.take() else { return };
+    let Some(mut n) = s.ov.inbox.note.take() else { return };
     if review::note_problem(&n.text.text).is_some() {
         s.ov.inbox.note = Some(n);
         return;
     }
-    review(s, &n.decision, Verdict::Reject, &n.text.text);
+    let Some(current) = listed(&s.ov.inbox, &n.decision) else {
+        n.gone = true;
+        s.ov.inbox.note = Some(n);
+        return;
+    };
+    review(s, &current, Verdict::Reject, &n.text.text);
 }
 
 pub fn ask_brief(s: &mut crate::App, project: &str) {
