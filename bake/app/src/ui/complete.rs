@@ -48,6 +48,7 @@ pub struct Complete {
     seq: u64,
     forking: bool,
     fork_keys: HashMap<String, (String, String)>,
+    shown_ids: Vec<String>,
 }
 
 fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'static) {
@@ -313,6 +314,13 @@ pub fn pump(s: &mut App) -> bool {
             changed = true;
         }
     }
+    if let Some(x) = session(s, &id).cloned() {
+        let ids: Vec<String> = shown(s, &x).0.into_iter().map(|i| i.id).collect();
+        if ids != s.complete.shown_ids {
+            s.complete.shown_ids = ids;
+            s.complete.highlighted = 0;
+        }
+    }
     changed
 }
 
@@ -440,7 +448,11 @@ pub fn done(s: &mut App, done: Done) {
             match result {
                 Ok(id) if !id.is_empty() => {
                     s.drafts.set(&id, &prompt);
-                    crate::over::open_session(s, &id);
+                    if s.composer_for.as_deref() == Some(from.as_str()) {
+                        crate::over::open_session(s, &id);
+                    } else {
+                        s.ov.notice = Some("The fork is ready, with your prompt in its composer. Find it in the sidebar.".into());
+                    }
                 }
                 Ok(_) => s.ov.notice = Some("The fork started, but the daemon didn't say which session it made.".into()),
                 Err(error) if error.maybe_delivered => crate::note(s, &from, format!("Fork sent, not confirmed: {}. Fork from here again checks the same request; it won't make a second copy.", error.message)),
