@@ -6,10 +6,10 @@ fn main() -> anyhow::Result<()> {
     let fetched = t.elapsed();
     let due = overview.due_tails(&Default::default());
     let results: Vec<_> = std::thread::scope(|scope| {
-        let jobs: Vec<_> = due.into_iter().map(|(id, at)| scope.spawn(|| (feed::derive::tails::fetch(&client, &id), id, at))).collect();
+        let jobs: Vec<_> = due.into_iter().map(|(id, at)| scope.spawn(|| (feed::derive::tails::fetch(&client, &id, feed::derive::tails::READ_BUDGET), id, at))).collect();
         jobs.into_iter().filter_map(|h| h.join().ok()).collect()
     });
-    let tails = results.iter().filter(|(r, _, _)| r.as_ref().is_ok_and(|items| !items.is_empty())).count();
+    let tails = results.iter().filter(|(r, _, _)| r.as_ref().is_ok_and(|tail| !tail.items.is_empty())).count();
     for (result, id, at) in results {
         overview.take_tail(&id, at, result);
     }

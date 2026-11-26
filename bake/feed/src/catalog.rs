@@ -476,8 +476,12 @@ pub(crate) fn enc(value: &str) -> String {
 impl Client {
     pub fn from_env() -> Result<Self> {
         let (base, token) = crate::daemon()?;
+        Ok(Self::at(&base, &token))
+    }
+
+    pub fn at(base: &str, token: &str) -> Self {
         let agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(5)).timeout(Duration::from_secs(30)).build();
-        Ok(Self { base: base.trim_end_matches('/').into(), token, agent })
+        Self { base: base.trim_end_matches('/').into(), token: token.into(), agent }
     }
 
     fn get(&self, path: &str) -> Result<Value> {
@@ -513,8 +517,8 @@ impl Client {
         Ok(rows)
     }
 
-    pub(crate) fn session_stream(&self, session: &str) -> Result<impl std::io::BufRead + use<>> {
-        let agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(5)).timeout_read(Duration::from_millis(1500)).build();
+    pub(crate) fn session_stream(&self, session: &str, budget: Duration) -> Result<impl std::io::BufRead + use<>> {
+        let agent = ureq::AgentBuilder::new().timeout(budget).build();
         let response = agent
             .get(&format!("{}/api/v1/session-stream?id={}&after=0", self.base, enc(session)))
             .set("Authorization", &format!("Bearer {}", self.token))

@@ -11,6 +11,7 @@ use std::time::Duration;
 use feed::catalog::{Client, OpenRequest, Session, WorkItem};
 use feed::derive::Recorded;
 use feed::derive::live::{Fetched, Ledger, Overview};
+use feed::derive::tails::{self, Tail};
 use feed::source::{Live, Message};
 use rune::{AppSpec, Chrome, TextEdit, Tx, WindowOptions};
 use time::OffsetDateTime;
@@ -23,7 +24,7 @@ pub enum Bg {
     Item(String, WorkItem),
     Overview(Box<Fetched>),
     Ledger(String, std::time::Instant, Result<Ledger, String>),
-    Tail(String, String, Result<Vec<feed::Item>, String>),
+    Tail(String, String, Result<Tail, String>),
     OverviewError(String),
     Sent(String, Result<(), feed::catalog::RespondError>),
     Requests(String, Vec<OpenRequest>, std::time::Instant),
@@ -288,7 +289,8 @@ fn fetch_tails(s: &mut App) {
     for (id, last_active) in s.ov.live.due_tails(&open) {
         let (tx, client) = (s.outbox.clone(), client.clone());
         std::thread::spawn(move || {
-            let result = feed::derive::tails::fetch(&client, &id);
+            let read = std::panic::AssertUnwindSafe(|| tails::fetch(&client, &id, tails::READ_BUDGET));
+            let result = std::panic::catch_unwind(read).unwrap_or_else(|_| Err("the read stopped".into()));
             let _ = tx.send(Bg::Tail(id, last_active, result));
         });
     }
@@ -507,6 +509,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Tail(id, last_active, result) => {
                 s.ov.live.take_tail(&id, last_active, result);
                 rebuild(s);
+                fetch_tails(s);
             }
             Bg::Ledger(project, started, result) => {
                 s.ov.live.take_ledger(&project, started, result);

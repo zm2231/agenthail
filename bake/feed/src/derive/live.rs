@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 
 use crate::catalog::{Client, Session, parse_time};
-use crate::derive::tails::{self, Tails};
+use crate::derive::tails::{self, Tail, Tails};
 use crate::derive::world::{Actor, Recorded, Rows, Work, World};
 use crate::item::Item;
 
@@ -197,15 +197,22 @@ impl Overview {
         self.tails.due(&self.base.sessions, now, open)
     }
 
-    pub fn take_tail(&mut self, session: &str, last_active: String, result: Result<Vec<Item>, String>) {
+    pub fn take_tail(&mut self, session: &str, last_active: String, result: Result<Tail, String>) {
         self.tails.take(session, last_active, result);
     }
 
     pub fn world(&self, panes: &[(&str, &[Item])]) -> World {
         let mut raw = self.base.clone();
         raw.ledgers = self.ledgers.clone();
-        raw.transcripts.extend(self.tails.items().map(|(id, items)| (id.clone(), items.clone())));
-        raw.transcripts.extend(panes.iter().filter(|(_, items)| !items.is_empty()).map(|(id, items)| (id.to_string(), tails::trim(items))));
+        let panes = panes.iter().filter(|(_, items)| !items.is_empty()).map(|(id, items)| (id.to_string(), tails::trim(items)));
+        for (id, tail) in self.tails.held().map(|(id, tail)| (id.clone(), tail.clone())).chain(panes) {
+            if tail.prompted_before {
+                raw.prompted_before.insert(id.clone());
+            } else {
+                raw.prompted_before.remove(&id);
+            }
+            raw.transcripts.insert(id, tail.items);
+        }
         let mut world = World::new(raw);
         for key in &self.failed {
             world.rows.insert(key.clone(), if self.ledgers.contains_key(key) { Rows::Stale } else { Rows::Unavailable });
