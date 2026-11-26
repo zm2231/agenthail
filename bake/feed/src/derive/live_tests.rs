@@ -40,15 +40,15 @@ fn an_overview_fetched_before_a_newer_session_snapshot_keeps_the_newer_sessions(
     ov.refresh(fetched("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")], vec![]));
     assert!(ov.take_sessions("2026-11-24T12:00:04Z", vec![session("a", "p", "2026-11-24T12:00:03Z", "busy")]));
     ov.refresh(fetched("2026-11-24T12:00:02Z", vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")], vec![("p", Ok(vec![work("w1", "open")]))]));
-    let w = ov.world();
+    let w = ov.world(&[]);
     assert_eq!(status(&w, "a"), "busy");
     assert_eq!(board_ids(&w, "p"), ["w1"], "the rest of the older refresh still lands");
     assert!(!ov.take_sessions("2026-11-24T12:00:03Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
-    assert_eq!(status(&ov.world(), "a"), "busy");
+    assert_eq!(status(&ov.world(&[]), "a"), "busy");
     ov.refresh(fetched("2026-11-24T12:00:04Z", vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")], vec![]));
-    assert_eq!(status(&ov.world(), "a"), "busy", "a refresh stamped the same time keeps the sessions held");
+    assert_eq!(status(&ov.world(&[]), "a"), "busy", "a refresh stamped the same time keeps the sessions held");
     ov.refresh(fetched("2026-11-24T12:00:10Z", vec![session("a", "p", "2026-11-24T12:00:09Z", "idle")], vec![]));
-    assert_eq!(status(&ov.world(), "a"), "idle", "a newer overview replaces the sessions");
+    assert_eq!(status(&ov.world(&[]), "a"), "idle", "a newer overview replaces the sessions");
 }
 
 #[test]
@@ -56,13 +56,13 @@ fn a_failed_ledger_fetch_keeps_the_last_rows_marked_stale_until_the_next_success
     let sessions = || vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")];
     let mut ov = Overview::default();
     ov.refresh(fetched("2026-11-24T12:00:00Z", sessions(), vec![("p", Ok(vec![work("w1", "open"), work("w2", "in_progress")]))]));
-    assert_eq!(ov.world().rows.get("p"), None);
+    assert_eq!(ov.world(&[]).rows.get("p"), None);
     ov.refresh(fetched("2026-11-24T12:00:20Z", sessions(), vec![("p", Err("timed out".into()))]));
-    let w = ov.world();
+    let w = ov.world(&[]);
     assert_eq!(board_ids(&w, "p"), ["w1", "w2"]);
     assert_eq!(w.rows.get("p"), Some(&Rows::Stale));
     ov.refresh(fetched("2026-11-24T12:00:40Z", sessions(), vec![("p", Ok(vec![work("w3", "open")]))]));
-    let w = ov.world();
+    let w = ov.world(&[]);
     assert_eq!(board_ids(&w, "p"), ["w3"]);
     assert_eq!(w.rows.get("p"), None);
 }
@@ -71,7 +71,7 @@ fn a_failed_ledger_fetch_keeps_the_last_rows_marked_stale_until_the_next_success
 fn a_ledger_that_never_loaded_is_unavailable_rather_than_empty() {
     let mut ov = Overview::default();
     ov.refresh(fetched("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")], vec![("p", Err("refused".into()))]));
-    assert_eq!(ov.world().rows.get("p"), Some(&Rows::Unavailable));
+    assert_eq!(ov.world(&[]).rows.get("p"), Some(&Rows::Unavailable));
 }
 
 #[test]
@@ -79,17 +79,17 @@ fn a_listed_project_without_recent_sessions_gets_its_board_when_opened() {
     let sessions = || vec![session("a", "p", "2026-11-24T11:59:00Z", "idle"), session("b", "old", "2026-11-10T09:00:00Z", "idle")];
     let mut ov = Overview::default();
     ov.refresh(fetched("2026-11-24T12:00:00Z", sessions(), vec![("p", Ok(vec![]))]));
-    assert!(ov.world().project("old").is_some(), "the project is listed");
+    assert!(ov.world(&[]).project("old").is_some(), "the project is listed");
     assert!(!ov.wants("p"), "refreshes already cover it");
     assert!(ov.wants("old"));
     assert!(!ov.wants("old"), "one fetch at a time");
-    assert_eq!(ov.world().rows.get("old"), Some(&Rows::Loading));
+    assert_eq!(ov.world(&[]).rows.get("old"), Some(&Rows::Loading));
     ov.take_ledger("old", Ok(Ledger { rows: vec![work("w9", "open")], actors: HashMap::new() }));
-    let w = ov.world();
+    let w = ov.world(&[]);
     assert_eq!(board_ids(&w, "old"), ["w9"]);
     assert_eq!(w.rows.get("old"), None);
     ov.refresh(fetched("2026-11-24T12:00:20Z", sessions(), vec![("p", Ok(vec![]))]));
-    assert_eq!(board_ids(&ov.world(), "old"), ["w9"], "a refresh that skips the project keeps its rows");
+    assert_eq!(board_ids(&ov.world(&[]), "old"), ["w9"], "a refresh that skips the project keeps its rows");
     assert!(ov.wants("old"), "and it is fetched again while open");
 }
 
@@ -98,5 +98,5 @@ fn a_recording_shows_every_ledger_it_holds() {
     let raw: Value = json!({"updatedAt": "2026-11-24T12:00:00Z", "projects": [{"id": "p", "displayName": "P"}], "sessions": [{"id": "a", "lastActive": "2026-11-01T00:00:00Z", "project": {"id": "p", "name": "P"}}], "ledgers": {"p": [{"id": "w1", "state": "open", "timeline": []}]}});
     let mut ov = Overview::recorded(serde_json::from_value(raw).unwrap());
     assert!(!ov.wants("p"));
-    assert_eq!(board_ids(&ov.world(), "p"), ["w1"]);
+    assert_eq!(board_ids(&ov.world(&[]), "p"), ["w1"]);
 }

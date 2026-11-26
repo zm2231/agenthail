@@ -10,6 +10,7 @@ pub mod needs;
 pub mod phase;
 pub mod proof;
 pub mod sessions;
+pub mod tails;
 pub mod text;
 pub mod timeline;
 pub mod work;
@@ -30,3 +31,5 @@ mod fixture_tests;
 mod behaviour_tests;
 #[cfg(test)]
 mod live_tests;
+#[cfg(test)]
+mod tails_tests;

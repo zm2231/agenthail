@@ -46,7 +46,7 @@ pub struct Over {
 
 impl Over {
     pub fn new(live: Overview, persist: bool) -> Over {
-        let d = live.world();
+        let d = live.world(&[]);
         let mut needs = d.needs();
         feed::derive::needs::sort(&mut needs);
         Over {
@@ -77,8 +77,8 @@ impl Over {
         }
     }
 
-    pub fn rebuild(&mut self) {
-        let d = self.live.world();
+    pub fn rebuild(&mut self, panes: &[(&str, &[feed::Item])]) {
+        let d = self.live.world(panes);
         let mut needs = d.needs();
         feed::derive::needs::sort(&mut needs);
         self.hands_on = d.hands_on(&[]).iter().map(|x| x.id.clone()).collect();

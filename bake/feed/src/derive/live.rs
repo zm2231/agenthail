@@ -5,6 +5,8 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 
 use crate::catalog::{Client, Session, parse_time};
+use crate::derive::tails::{self, Tails};
+use crate::item::Item;
 use crate::derive::world::{Actor, Recorded, Rows, Work, World};
 
 const LEDGER_WINDOW_H: f64 = 72.0;
@@ -100,6 +102,7 @@ pub struct Overview {
     failed: HashSet<String>,
     covered: HashSet<String>,
     pending: HashSet<String>,
+    tails: Tails,
 }
 
 fn newer(at: &str, than: &str) -> bool {
@@ -114,7 +117,7 @@ impl Overview {
     pub fn recorded(mut raw: Recorded) -> Overview {
         let ledgers = std::mem::take(&mut raw.ledgers);
         let covered = raw.projects.iter().map(|p| p.id.clone()).collect();
-        Overview { base: raw, ledgers, failed: HashSet::new(), covered, pending: HashSet::new() }
+        Overview { base: raw, ledgers, covered, ..Overview::default() }
     }
 
     pub fn sessions(&self) -> &[Session] {
@@ -179,9 +182,20 @@ impl Overview {
         }
     }
 
-    pub fn world(&self) -> World {
+    pub fn due_tails(&mut self, open: &HashSet<String>) -> Vec<(String, String)> {
+        let now = parse_time(&self.base.updated_at).unwrap_or_else(OffsetDateTime::now_utc);
+        self.tails.due(&self.base.sessions, now, open)
+    }
+
+    pub fn take_tail(&mut self, session: &str, last_active: String, result: Result<Vec<Item>, String>) {
+        self.tails.take(session, last_active, result);
+    }
+
+    pub fn world(&self, panes: &[(&str, &[Item])]) -> World {
         let mut raw = self.base.clone();
         raw.ledgers = self.ledgers.clone();
+        raw.transcripts.extend(self.tails.items().map(|(id, items)| (id.clone(), items.clone())));
+        raw.transcripts.extend(panes.iter().filter(|(_, items)| !items.is_empty()).map(|(id, items)| (id.to_string(), tails::trim(items))));
         let mut world = World::new(raw);
         for key in &self.failed {
             world.rows.insert(key.clone(), if self.ledgers.contains_key(key) { Rows::Stale } else { Rows::Unavailable });

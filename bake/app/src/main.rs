@@ -23,6 +23,7 @@ pub enum Bg {
     Item(String, WorkItem),
     Overview(Box<Fetched>),
     Ledger(String, Result<Ledger, String>),
+    Tail(String, String, Result<Vec<feed::Item>, String>),
     OverviewError(String),
     Sent(String, Result<(), feed::catalog::RespondError>),
     Requests(String, Vec<OpenRequest>, std::time::Instant),
@@ -269,12 +270,29 @@ pub fn load_pane(s: &mut App, id: &str) {
     }
 }
 
+fn rebuild(s: &mut App) {
+    let panes: Vec<(&str, &[feed::Item])> = s.panes.iter().map(|(id, p)| (id.as_str(), p.transcript.items())).collect();
+    s.ov.rebuild(&panes);
+}
+
+fn fetch_tails(s: &mut App) {
+    let Some(client) = s.client.clone() else { return };
+    let open: HashSet<String> = s.panes.keys().cloned().collect();
+    for (id, last_active) in s.ov.live.due_tails(&open) {
+        let (tx, client) = (s.outbox.clone(), client.clone());
+        std::thread::spawn(move || {
+            let result = feed::derive::tails::fetch(&client, &id);
+            let _ = tx.send(Bg::Tail(id, last_active, result));
+        });
+    }
+}
+
 pub fn fetch_ledger(s: &mut App, project: &str) {
     let Some(client) = s.client.clone() else { return };
     if !s.ov.live.wants(project) {
         return;
     }
-    s.ov.rebuild();
+    rebuild(s);
     let (tx, project, sessions) = (s.outbox.clone(), project.to_string(), s.sessions.clone());
     std::thread::spawn(move || {
         let result = feed::derive::live::ledger(&client, &project, &sessions);
@@ -457,7 +475,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         match message {
             Bg::Snapshot(at, sessions) => {
                 if s.ov.live.take_sessions(&at, sessions) {
-                    s.ov.rebuild();
+                    rebuild(s);
                     s.sessions = s.ov.live.sessions().to_vec();
                 }
                 s.now = OffsetDateTime::now_utc();
@@ -474,13 +492,18 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             }
             Bg::Overview(fetched) => {
                 s.ov.live.refresh(*fetched);
-                s.ov.rebuild();
+                rebuild(s);
                 s.sessions = s.ov.live.sessions().to_vec();
+                fetch_tails(s);
                 over::arrive(s);
+            }
+            Bg::Tail(id, last_active, result) => {
+                s.ov.live.take_tail(&id, last_active, result);
+                rebuild(s);
             }
             Bg::Ledger(project, result) => {
                 s.ov.live.take_ledger(&project, result);
-                s.ov.rebuild();
+                rebuild(s);
             }
             Bg::OverviewError(error) => s.ov.notice = Some(format!("Couldn't refresh the overview: {error}")),
             Bg::Sent(id, result) => {
