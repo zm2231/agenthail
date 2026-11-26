@@ -115,7 +115,8 @@ pub(crate) fn refresh(s: &mut App, id: &str) {
     }
     touch(s, id);
     page(s, id);
-    if s.crew.rows.contains_key(id) && outside(s, id) {
+    let unresolved_subagent = session(s, id).is_none() && known(s, id).and_then(crew::parent_of).is_some();
+    if (s.crew.rows.contains_key(id) || unresolved_subagent) && outside(s, id) {
         read_row(s, id);
     }
     if let Some(parent) = parent {
