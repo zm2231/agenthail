@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 
 use crate::catalog::{Client, Pr, RespondError};
-use crate::decisions::Decision;
+use crate::decisions::{Decision, Inbox, LeadHandled};
 use crate::derive::Work;
 
 pub const RELEASE: &str = "v0.2.173";
@@ -51,6 +51,25 @@ pub fn of_work(listed: &[Decision], w: &Work) -> Option<Decision> {
     let ledger_key = crate::catalog::ledger_key(&w.project);
     let key = key(&ledger_key, &w.id);
     listed.iter().find(|d| d.is_review() && (d.key == key || target(d).is_some_and(|t| t.ledger_key == ledger_key && t.work_item == w.id))).cloned()
+}
+
+pub fn lead_of<'a>(handled: &'a [LeadHandled], w: &Work) -> Option<&'a LeadHandled> {
+    let ledger_key = crate::catalog::ledger_key(&w.project);
+    handled.iter().find(|h| h.work_item == w.id && h.ledger_key == ledger_key)
+}
+
+pub fn unlisted_note(inbox: Option<&Inbox>, w: &Work, name_of: impl Fn(&str) -> String) -> String {
+    let Some(inbox) = inbox else { return "Looking for this review…".into() };
+    if let Some(h) = lead_of(&inbox.lead_handling, w) {
+        return format!("{} is handling this first. It comes to you once they pass it on or stop to wait on you.", name_of(&h.held_by));
+    }
+    if !inbox.read.iter().any(String::is_empty) {
+        return "This computer's decisions couldn't be read, so this review can't be found yet.".into();
+    }
+    if !inbox.notes.is_empty() && !crate::catalog::ledger_key(&w.project).starts_with("project:") {
+        return format!("This review can't be found yet. {}", inbox.notes.join(" "));
+    }
+    "This isn't in your reviews right now. It may have just been reviewed.".into()
 }
 
 pub fn note_problem(note: &str) -> Option<&'static str> {
@@ -182,6 +201,41 @@ mod tests {
         let other = vec![Decision { key: "review:project:p-0:p-W6".into(), ledger_key: "project:p-0".into(), ..listed[0].clone() }];
         assert_eq!(of_work(&other, &w), None);
         assert_eq!(of_work(&[], &w), None);
+    }
+
+    #[test]
+    fn an_unlisted_review_says_why_it_is_missing() {
+        let w = Work { id: "p-W31".into(), project: "p-1".into(), ..Default::default() };
+        let name = |id: &str| if id == "lead" { "Lead".to_string() } else { id.to_string() };
+        let page = |json: &str| serde_json::from_str::<crate::decisions::Page>(json).unwrap();
+        assert_eq!(unlisted_note(None, &w, name), "Looking for this review…");
+
+        let mut held = Inbox::default();
+        held.add(page(r#"{"decisions":[],"leadHandling":[{"sessionId":"worker","heldBy":"lead","role":"lead","reason":"Ready for review","workItem":"p-W31","ledgerKey":"project:p-1"}]}"#), "", "", "h1");
+        held.notes.push("katbox isn't answering, so its decisions aren't shown.".into());
+        assert_eq!(lead_of(&held.lead_handling, &w).map(|h| h.session_id.as_str()), Some("worker"));
+        assert_eq!(unlisted_note(Some(&held), &w, name), "Lead is handling this first. It comes to you once they pass it on or stop to wait on you.");
+        let mut waiting = Inbox::default();
+        waiting.add(page(r#"{"decisions":[],"leadHandling":[{"sessionId":"worker","heldBy":"lead","role":"lead","reason":"Waiting on the build","workItem":"p-W31","ledgerKey":"project:p-1"}]}"#), "", "", "h1");
+        assert_eq!(unlisted_note(Some(&waiting), &w, name), unlisted_note(Some(&held), &w, name));
+        let other = Work { id: "p-W32".into(), ..w.clone() };
+        assert_eq!(lead_of(&held.lead_handling, &other), None);
+        let elsewhere = Work { project: "p-0".into(), ..w.clone() };
+        assert_eq!(lead_of(&held.lead_handling, &elsewhere), None);
+
+        let mut read = Inbox::default();
+        read.add(page(r#"{"decisions":[]}"#), "", "", "h1");
+        read.notes.push("katbox isn't answering, so its decisions aren't shown.".into());
+        assert_eq!(unlisted_note(Some(&read), &w, name), "This isn't in your reviews right now. It may have just been reviewed.");
+        let repo = Work { project: "repo:github.com/o/r".into(), ..w.clone() };
+        assert_eq!(unlisted_note(Some(&read), &repo, name), "This review can't be found yet. katbox isn't answering, so its decisions aren't shown.");
+        read.notes.clear();
+        assert_eq!(unlisted_note(Some(&read), &repo, name), "This isn't in your reviews right now. It may have just been reviewed.");
+
+        let mut unread = Inbox::default();
+        unread.add(page(r#"{"decisions":[]}"#), "h2", "forge", "h1");
+        unread.notes.push("This computer's decisions couldn't be read, so they aren't shown.".into());
+        assert_eq!(unlisted_note(Some(&unread), &w, name), "This computer's decisions couldn't be read, so this review can't be found yet.");
     }
 
     #[test]

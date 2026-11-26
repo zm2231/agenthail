@@ -28,6 +28,7 @@ use crate::transcript::{Pane, Replay};
 
 pub enum Bg {
     Snapshot(String, Vec<Session>),
+    DecisionsRev(String),
     Item(String, WorkItem),
     Overview(Box<Fetched>),
     Ledger(String, std::time::Instant, Result<Ledger, String>),
@@ -271,7 +272,7 @@ fn init() -> App {
                     loop {
                         let message = match c.snapshot() {
                             Ok(snap) => {
-                                if tx.send(Bg::SendSettings(snap.busy_delivery, snap.rekeyed, snap.queue)).is_err() {
+                                if tx.send(Bg::SendSettings(snap.busy_delivery, snap.rekeyed, snap.queue)).is_err() || tx.send(Bg::DecisionsRev(snap.decisions_rev)).is_err() {
                                     return;
                                 }
                                 Bg::Snapshot(snap.updated_at, snap.sessions)
@@ -978,6 +979,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 }
                 s.queued.retain(|_, receipts| !receipts.is_empty());
             }
+            Bg::DecisionsRev(rev) => over::inbox::rev_seen(s, &rev),
             Bg::Sent(id, pending, retry, result) => take_sent(s, id, pending, retry, result),
             Bg::Stopped(id, result) => {
                 let id = feed::composer::current(&s.rekeyed, &id).to_string();

@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use feed::brief::Brief;
 use feed::catalog::{Client, RespondError, request_key};
-use feed::decisions::{Decision, Handled, Inbox, gone, remember};
+use feed::decisions::{Decision, Handled, Inbox, gone, remember, rev_moved};
 use feed::review::{self, Verdict};
 use feed::version::{Build, notice};
 use rune::TextEdit;
@@ -51,13 +51,14 @@ pub struct State {
     pub note: Option<Note>,
     daemon: Option<String>,
     newest: Option<Instant>,
+    rev: Option<String>,
     started: bool,
 }
 
 impl Default for State {
     fn default() -> Self {
         let (tx, rx) = channel();
-        State { tx, rx, inbox: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, reads: 0, review_old: HashMap::new(), note: None, daemon: None, newest: None, started: false }
+        State { tx, rx, inbox: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, reads: 0, review_old: HashMap::new(), note: None, daemon: None, newest: None, rev: None, started: false }
     }
 }
 
@@ -105,6 +106,14 @@ pub fn refresh(client: &Client, st: &State) {
     std::thread::spawn(move || {
         fetch(&client, &tx);
     });
+}
+
+pub fn rev_seen(s: &mut crate::App, rev: &str) {
+    if rev_moved(&mut s.ov.inbox.rev, rev)
+        && let Some(client) = &s.client
+    {
+        refresh(client, &s.ov.inbox);
+    }
 }
 
 pub fn drain(s: &mut crate::App) -> bool {

@@ -358,6 +358,8 @@ pub struct Snapshot {
     pub rekeyed: std::collections::HashMap<String, String>,
     #[serde(default)]
     pub queue: Vec<QueueRow>,
+    #[serde(default)]
+    pub decisions_rev: String,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
