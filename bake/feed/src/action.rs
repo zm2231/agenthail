@@ -2,7 +2,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::catalog::{Client, RespondError};
-use crate::composer::{Busy, Delivered};
+use crate::composer::{Busy, Delivered, Stop};
 
 type Outcome<T> = std::result::Result<T, RespondError>;
 
@@ -24,8 +24,8 @@ pub struct ReadState {
 }
 
 impl Client {
-    pub fn interrupt(&self, session: &str) -> Outcome<Delivered> {
-        Ok(Delivered::read(&self.action("interrupt", json!({"sessionId": session}))?))
+    pub fn interrupt(&self, session: &str) -> Outcome<Stop> {
+        Ok(Stop::read(&self.action("interrupt", json!({"sessionId": session}))?))
     }
 
     /// `busy` None leaves a busy session to the daemon's busy-delivery setting.
@@ -228,7 +228,7 @@ mod tests {
             (502, r#"{"error":{"code":"bad_gateway","message":"session ended"}}"#),
         ]);
         let conflict = client.session_read("s1", "r9", true).unwrap_err();
-        assert_eq!((conflict.code.as_str(), conflict.message.as_str(), conflict.maybe_delivered), ("read_state_conflict", "the conversation moved on", false));
+        assert_eq!((conflict.code.as_str(), conflict.message.as_str(), conflict.maybe_delivered, conflict.answered), ("read_state_conflict", "the conversation moved on", false, true));
         assert!(!client.interrupt("s1").unwrap_err().maybe_delivered);
         assert!(!client.respond("s1", "ask-1", vec!["Yes".into()], Default::default()).unwrap_err().maybe_delivered);
     }
@@ -260,8 +260,8 @@ mod tests {
     #[test]
     fn a_stop_still_in_progress_is_not_reported_as_done() {
         let (client, _seen) = daemon(vec![(202, r#"{"ok":true,"status":"submitted"}"#), (200, r#"{"ok":true,"result":{"action":"interrupt","evidence":"delivered"}}"#)]);
-        assert_eq!(client.interrupt("s1").unwrap(), Delivered::Unconfirmed);
-        assert_eq!(client.interrupt("s1").unwrap(), Delivered::Sent);
+        assert_eq!(client.interrupt("s1").unwrap(), Stop::Unconfirmed);
+        assert_eq!(client.interrupt("s1").unwrap(), Stop::Stopped);
     }
 
     #[test]
@@ -289,7 +289,7 @@ mod tests {
     #[test]
     fn a_daemon_that_never_answered_the_connection_got_nothing() {
         let error = Client::new("http://127.0.0.1:0", "secret").steer("s1", "stop").unwrap_err();
-        assert!(!error.maybe_delivered, "{}", error.message);
+        assert!(!error.maybe_delivered && !error.answered, "{}", error.message);
     }
 
     #[test]

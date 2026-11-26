@@ -29,7 +29,7 @@ pub enum Bg {
     OverviewError(String),
     SendSettings(String, HashMap<String, String>, Vec<feed::catalog::QueueRow>),
     Sent(String, Unsent, Result<Delivered, feed::catalog::RespondError>),
-    Stopped(String, Result<Delivered, feed::catalog::RespondError>),
+    Stopped(String, Result<feed::composer::Stop, feed::catalog::RespondError>),
     Requests(String, Vec<OpenRequest>, std::time::Instant),
     Answered(String, String, Result<(), feed::catalog::RespondError>),
     Error(String),
@@ -720,7 +720,7 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, result: Result<Delivered,
     settle(s, &id, &pending.key);
     s.unsent.remove(&id, &pending.key);
     let failure = match result {
-        Ok(Delivered::Unconfirmed) => Some((true, "the daemon took it but hasn't confirmed delivery".to_string())),
+        Ok(Delivered::Unconfirmed) => Some((true, true, "the daemon took it but hasn't confirmed delivery".to_string())),
         Ok(receipt @ (Delivered::Queued(_) | Delivered::QueuedUntilAnswer(_))) => {
             s.status_line.remove(&id);
             s.queued.entry(id.clone()).or_default().push((s.snapshots, receipt));
@@ -730,11 +730,11 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, result: Result<Delivered,
             note(s, &id, delivered.note(0));
             None
         }
-        Err(error) => Some((error.maybe_delivered, error.message)),
+        Err(error) => Some((error.maybe_delivered, error.answered, error.message)),
     };
-    if let Some((maybe_delivered, error)) = failure {
+    if let Some((maybe_delivered, answered, error)) = failure {
         put_back(s, &id, &pending.text);
-        s.unsent.add(&id, pending.failed(maybe_delivered, error));
+        s.unsent.add(&id, pending.failed(maybe_delivered, answered, error));
     }
 }
 
@@ -875,8 +875,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 let id = feed::composer::current(&s.rekeyed, &id).to_string();
                 s.stopping.remove(&id);
                 let status = match result {
-                    Ok(Delivered::Unconfirmed) => "Stop sent, not confirmed yet".to_string(),
-                    Ok(_) => "Stopped".to_string(),
+                    Ok(stop) => stop.note().to_string(),
                     Err(error) if error.maybe_delivered => format!("Stop sent, not confirmed: {}", error.message),
                     Err(error) => format!("Couldn't stop: {}", error.message),
                 };

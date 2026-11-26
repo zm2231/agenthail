@@ -49,6 +49,31 @@ impl Busy {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Stop {
+    Stopped,
+    Asked,
+    Unconfirmed,
+}
+
+impl Stop {
+    pub fn read(reply: &Value) -> Stop {
+        match (Delivered::read(reply), reply["result"]["evidence"].as_str()) {
+            (Delivered::Unconfirmed, _) => Stop::Unconfirmed,
+            (_, Some("transport_accepted")) => Stop::Asked,
+            _ => Stop::Stopped,
+        }
+    }
+
+    pub fn note(self) -> &'static str {
+        match self {
+            Stop::Stopped => "Stopped",
+            Stop::Asked => "Stop sent; the turn may still be finishing",
+            Stop::Unconfirmed => "Stop sent, not confirmed yet",
+        }
+    }
+}
+
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Receipt {
@@ -150,12 +175,11 @@ impl Unsent {
         Some(Unsent { session, text, key, busy, maybe_delivered, error: value["error"].as_str().unwrap_or_default().to_string(), tries })
     }
 
-    pub fn failed(self, maybe_delivered: bool, error: String) -> Unsent {
-        if self.tries == 0 {
+    pub fn failed(self, maybe_delivered: bool, answered: bool, error: String) -> Unsent {
+        if self.tries == 0 || maybe_delivered || answered {
             return Unsent { maybe_delivered, error, ..self };
         }
-        let tries = if maybe_delivered { self.tries } else { self.tries - 1 };
-        Unsent { maybe_delivered: true, tries, error, ..self }
+        Unsent { maybe_delivered: true, tries: self.tries - 1, error, ..self }
     }
 
     pub fn quoted(&self) -> String {
@@ -319,6 +343,15 @@ mod tests {
     }
 
     #[test]
+    fn a_stop_says_how_far_it_got() {
+        assert_eq!(Stop::read(&json!({"ok": true, "result": {"action": "interrupt", "evidence": "delivered"}})), Stop::Stopped);
+        assert_eq!(Stop::read(&json!({"ok": true, "result": {"action": "interrupt", "evidence": "transport_accepted"}})), Stop::Asked);
+        assert_eq!(Stop::read(&json!({"ok": true, "result": {"action": "interrupt", "evidence": "unknown"}})), Stop::Unconfirmed);
+        assert_eq!(Stop::read(&json!({"ok": true, "status": "submitted"})), Stop::Unconfirmed);
+        assert_eq!(Stop::Asked.note(), "Stop sent; the turn may still be finishing");
+    }
+
+    #[test]
     fn busy_delivery_reads_the_daemons_words() {
         assert_eq!(Busy::parse("queue"), Some(Busy::Queue));
         assert_eq!(Busy::parse("steer"), Some(Busy::Steer));
@@ -375,13 +408,16 @@ mod tests {
 
     #[test]
     fn a_retry_that_never_left_keeps_the_first_sends_doubt() {
-        let first = unsent("k1", "hello", true).failed(false, "connection refused".into());
+        let first = unsent("k1", "hello", true).failed(false, false, "connection refused".into());
         assert!(!first.maybe_delivered);
         let retry = Unsent { tries: 1, ..unsent("k1", "hello", true) };
-        let refused = retry.clone().failed(false, "connection refused".into());
-        assert!(refused.reuses_key(), "{refused:?}");
-        assert!(!refused.offers_new_send());
-        let unknown = retry.failed(true, "timeout".into());
+        let unreached = retry.clone().failed(false, false, "connection refused".into());
+        assert!(unreached.reuses_key(), "{unreached:?}");
+        assert!(!unreached.offers_new_send());
+        let refused = retry.clone().failed(false, true, "session ended".into());
+        assert!(!refused.reuses_key() && !refused.offers_new_send());
+        assert!(refused.note().starts_with("Not sent: session ended"));
+        let unknown = retry.failed(true, true, "timeout".into());
         assert!(unknown.reuses_key() && unknown.offers_new_send());
         assert_eq!(unknown.error, "timeout");
     }
