@@ -190,7 +190,10 @@ func (d *Daemon) refreshSigninSurfaces(lifetime context.Context) {
 			continue
 		}
 		ctx, cancel := context.WithTimeout(lifetime, 20*time.Second)
-		_, err := adapter.List(ctx)
+		err := d.agentGate(adapter)
+		if err == nil {
+			_, err = adapter.List(ctx)
+		}
 		if lifetime.Err() != nil {
 			cancel()
 			return

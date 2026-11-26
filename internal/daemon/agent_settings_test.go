@@ -11,17 +11,24 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-type absentDaemonAgent struct {
+type localDaemonAgent struct {
 	*daemonSurface
+	installed *bool
 }
 
-func (absentDaemonAgent) AgentLabel() string   { return "Codex" }
-func (absentDaemonAgent) LocateProgram() error { return errors.New("no codex command") }
+func (localDaemonAgent) AgentLabel() string { return "Codex" }
+func (a localDaemonAgent) LocateProgram() error {
+	if *a.installed {
+		return nil
+	}
+	return errors.New("no codex command")
+}
 
-func TestAnAgentNotInstalledIsUnavailableAndOneTurnedOffIsOffAndStartsNothing(t *testing.T) {
+func TestAnAgentNotInstalledIsUnavailableAndOneTurnedOffIsNeitherDiscoveredNorStarted(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	d, _, fake, _, _ := daemonFixture(t)
-	d.Surfaces = []surface.Surface{absentDaemonAgent{fake}}
+	installed := false
+	d.Surfaces = []surface.Surface{localDaemonAgent{daemonSurface: fake, installed: &installed}}
 	handler := dashboardRouter(d)
 	ctx := context.Background()
 
@@ -50,6 +57,22 @@ func TestAnAgentNotInstalledIsUnavailableAndOneTurnedOffIsOffAndStartsNothing(t 
 		t.Fatalf("a missing Codex on auto reads %q", got)
 	}
 
+	offered := func() bool {
+		t.Helper()
+		options := serveDashboardRequest(handler, http.MethodGet, "/api/v1/session-options", "")
+		if options.Code != http.StatusOK {
+			t.Fatalf("session options status=%d body=%s", options.Code, options.Body.String())
+		}
+		return strings.Contains(options.Body.String(), `"id":"codex"`)
+	}
+	if offered() {
+		t.Fatal("an agent not installed is offered for new sessions")
+	}
+	installed = true
+	if !offered() || health() != "healthy" {
+		t.Fatal("an installed agent on auto is not offered or not healthy")
+	}
+
 	if response := serveDashboardRequest(handler, http.MethodPost, "/api/settings", `{"action":"agent-mode","agent":"codex","mode":"off"}`); response.Code != http.StatusOK {
 		t.Fatalf("turn off: status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -58,6 +81,9 @@ func TestAnAgentNotInstalledIsUnavailableAndOneTurnedOffIsOffAndStartsNothing(t 
 	}
 	if got := health(); got != "agent_off" {
 		t.Fatalf("a Codex turned off reads %q", got)
+	}
+	if offered() {
+		t.Fatal("an installed agent turned off is still offered")
 	}
 	response := serveDashboardRequest(handler, http.MethodPost, "/api/action", `{"action":"session-create","surface":"codex","message":"hello"}`)
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "Codex is turned off") {
@@ -70,6 +96,7 @@ func TestAnAgentNotInstalledIsUnavailableAndOneTurnedOffIsOffAndStartsNothing(t 
 		}
 	}
 
+	installed = false
 	if response := serveDashboardRequest(handler, http.MethodPost, "/api/settings", `{"action":"agent-mode","agent":"codex","mode":"on"}`); response.Code != http.StatusOK {
 		t.Fatalf("turn on: status=%d body=%s", response.Code, response.Body.String())
 	}

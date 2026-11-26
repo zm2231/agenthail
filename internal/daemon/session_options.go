@@ -39,6 +39,9 @@ func (d *Daemon) sessionOptionsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	options := []option{}
 	for _, adapter := range d.Surfaces {
+		if d.agentGate(adapter) != nil {
+			continue
+		}
 		connected := health[adapter.Name()] == "healthy"
 		if agent, ok := adapter.(*acpsurface.ACP); ok {
 			modes, models := agent.Choices()
