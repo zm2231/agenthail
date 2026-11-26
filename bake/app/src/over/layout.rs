@@ -117,7 +117,7 @@ pub fn load(s: &mut App) {
     }
     s.drafts = feed::composer::Drafts::from_json(&v["drafts"]);
     for (id, raw) in v["unsent"].as_object().into_iter().flatten() {
-        if let Some(unsent) = feed::composer::Unsent::from_json(raw) {
+        if let Some(unsent) = feed::composer::Unsent::from_json(id, raw) {
             let draft = feed::composer::put_back(s.drafts.get(id), &unsent.text);
             s.drafts.set(id, &draft);
             s.unsent.insert(id.clone(), unsent);
@@ -127,12 +127,14 @@ pub fn load(s: &mut App) {
     *LAST.lock().expect("layout lock") = encode(s);
 }
 
-fn writer() -> &'static Sender<String> {
-    static WRITER: OnceLock<Sender<String>> = OnceLock::new();
+type Write = (String, Option<Sender<()>>);
+
+fn writer() -> &'static Sender<Write> {
+    static WRITER: OnceLock<Sender<Write>> = OnceLock::new();
     WRITER.get_or_init(|| {
-        let (tx, rx) = channel::<String>();
+        let (tx, rx) = channel::<Write>();
         std::thread::spawn(move || {
-            for text in rx {
+            for (text, done) in rx {
                 let Some(p) = path() else { continue };
                 let written = p.parent().is_none_or(|dir| std::fs::create_dir_all(dir).is_ok()) && std::fs::write(&p, &text).is_ok();
                 if !written {
@@ -140,6 +142,9 @@ fn writer() -> &'static Sender<String> {
                     if *last == text {
                         last.clear();
                     }
+                }
+                if let Some(done) = done {
+                    let _ = done.send(());
                 }
             }
         });
@@ -154,7 +159,19 @@ pub fn save(s: &App) {
     let now = encode(s);
     let mut last = LAST.lock().expect("layout lock");
     if *last != now {
-        let _ = writer().send(now.clone());
+        let _ = writer().send((now.clone(), None));
         *last = now;
+    }
+}
+
+pub fn save_now(s: &App) {
+    if !s.ov.persist || path().is_none() {
+        return;
+    }
+    let now = encode(s);
+    let (done, wait) = channel();
+    *LAST.lock().expect("layout lock") = now.clone();
+    if writer().send((now, Some(done))).is_ok() {
+        let _ = wait.recv_timeout(std::time::Duration::from_secs(2));
     }
 }

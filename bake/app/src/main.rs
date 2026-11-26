@@ -474,44 +474,51 @@ pub fn send_to(s: &mut App, id: &str, tx: &mut Tx) {
     if message.is_empty() || s.sending.contains(id) {
         return;
     }
+    if s.client.is_none() {
+        note(s, id, "Fixture mode: not sent".into());
+        return;
+    }
     s.composer = TextEdit::new("");
-    dispatch(s, id, message, tx);
+    let again = s.unsent.get(id).filter(|u| u.resend(&message)).cloned();
+    dispatch(s, id, again.unwrap_or_else(|| fresh(s, id, message)), tx);
 }
 
 pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
     let Some(unsent) = s.unsent.get(id).cloned() else { return };
-    if s.sending.contains(id) {
+    if s.sending.contains(id) || s.client.is_none() {
         return;
     }
     if s.composer_for.as_deref() == Some(id)
-        && let Some(rest) = s.composer.text.trim_start().strip_prefix(unsent.text.as_str())
+        && let Some(rest) = feed::composer::take_back(&s.composer.text, &unsent.text)
     {
-        s.composer = TextEdit::new(rest.trim_start());
+        s.composer = TextEdit::new(rest);
         s.composer.focused = true;
     }
-    dispatch(s, id, unsent.text, tx);
+    let pending = if unsent.maybe_delivered { unsent } else { fresh(s, id, unsent.text) };
+    dispatch(s, id, pending, tx);
 }
 
-fn dispatch(s: &mut App, id: &str, message: String, tx: &mut Tx) {
+fn fresh(s: &App, id: &str, text: String) -> Unsent {
+    Unsent { session: id.to_string(), text, key: feed::catalog::request_key(), busy: busy_delivery(s, id), maybe_delivered: true, error: "the app closed before the daemon answered".into() }
+}
+
+fn dispatch(s: &mut App, id: &str, pending: Unsent, tx: &mut Tx) {
+    let Some(client) = s.client.clone() else { return };
     let id = id.to_string();
     tx.scroll_to_bottom(format!("transcript-{id}"));
-    let busy = busy_delivery(s, &id);
-    let key = s.unsent.get(&id).and_then(|u| u.key_for(&message, busy)).map(str::to_string).unwrap_or_else(feed::catalog::request_key);
-    match s.client.clone() {
-        Some(client) => {
-            s.sending.insert(id.clone());
-            s.unsent.remove(&id);
-            s.queued.remove(&id);
-            let pending = Unsent { text: message, key, busy, maybe_delivered: true, error: "the app closed before the daemon answered".into() };
-            s.in_flight.insert(id.clone(), pending.clone());
-            let out = s.outbox.clone();
-            std::thread::spawn(move || {
-                let result = client.send_as(&id, &pending.text, pending.busy, &pending.key);
-                let _ = out.send(Bg::Sent(id, pending, result));
-            });
-        }
-        None => note(s, &id, "Fixture mode: not sent".into()),
+    s.sending.insert(id.clone());
+    s.unsent.remove(&id);
+    s.queued.remove(&id);
+    s.in_flight.insert(id.clone(), pending.clone());
+    if s.composer_for.as_deref() == Some(id.as_str()) {
+        s.drafts.set(&id, &s.composer.text);
     }
+    over::layout::save_now(s);
+    let out = s.outbox.clone();
+    std::thread::spawn(move || {
+        let result = client.send_as(&pending.session, &pending.text, pending.busy, &pending.key);
+        let _ = out.send(Bg::Sent(id, pending, result));
+    });
 }
 
 pub fn busy_now(s: &App, id: &str) -> bool {

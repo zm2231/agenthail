@@ -326,13 +326,26 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
         .placeholder(placeholder.to_string(), weak())
         .on_edit(|s: &mut App| &mut s.composer)
         .on_submit(move |s: &mut App, tx: &mut Tx| crate::send_to(s, &to, tx));
-    let status = crate::composer_note(s, lead).unwrap_or_else(|| "Sends as you".into());
+    let status = crate::composer_note(s, lead).or_else(|| crate::busy_delivery(s, lead).map(|b| b.hint().to_string())).unwrap_or_else(|| "Sends as you".into());
     let controls = row()
         .w_full()
         .items_center()
         .gap(6.0)
         .child(ui::spacer())
         .child(text(status).font(META).color(weak()));
+    let controls = match crate::busy_delivery(s, lead) {
+        Some(choice) => {
+            let to = lead.to_string();
+            controls.child(Button::new(choice.label()).variant(ButtonVariant::Ghost).control_size(ControlSize::Small).build(k).key("busy-delivery").on_press(move |s: &mut App| crate::pick_busy(s, &to, choice.other())))
+        }
+        None => controls,
+    };
+    let controls = if crate::can_stop(s, lead) {
+        let to = lead.to_string();
+        controls.child(Button::new("Stop").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).build(k).key("stop").on_press(move |s: &mut App| crate::stop(s, &to)))
+    } else {
+        controls
+    };
     let controls = if s.unsent.contains_key(lead) {
         let again = lead.to_string();
         controls.child(Button::new("Retry").variant(ButtonVariant::Ghost).build(k).key("send-retry").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::retry(s, &again, tx)))

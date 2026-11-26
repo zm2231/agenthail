@@ -80,7 +80,7 @@ impl Delivered {
         match (receipt.evidence.as_str(), receipt.not_steered) {
             ("queued", _) if receipt.waiting_on.as_ref().is_some_and(|w| !w.is_null()) => Delivered::QueuedUntilAnswer,
             ("queued", _) => Delivered::Queued,
-            ("unknown", _) => Delivered::Unconfirmed,
+            ("unknown" | "submitted", _) => Delivered::Unconfirmed,
             (_, Some(true)) => Delivered::NotSteered,
             (_, Some(false)) => Delivered::Steered,
             _ => Delivered::Sent,
@@ -101,6 +101,7 @@ impl Delivered {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Unsent {
+    pub session: String,
     pub text: String,
     pub key: String,
     pub busy: Option<Busy>,
@@ -109,21 +110,22 @@ pub struct Unsent {
 }
 
 impl Unsent {
-    /// The daemon replays any finished reply for a reused id, so only an unconfirmed send keeps it.
-    pub fn key_for(&self, text: &str, busy: Option<Busy>) -> Option<&str> {
-        (self.maybe_delivered && self.text == text && self.busy == busy).then_some(self.key.as_str())
+    /// The daemon replays a reused id only for the identical body, so an unconfirmed send is retried exactly as first sent.
+    pub fn resend(&self, text: &str) -> bool {
+        self.maybe_delivered && self.text == text
     }
 
     pub fn to_json(&self) -> Value {
-        json!({"text": self.text, "key": self.key, "busy": self.busy.map(Busy::as_str), "maybeDelivered": self.maybe_delivered, "error": self.error})
+        json!({"session": self.session, "text": self.text, "key": self.key, "busy": self.busy.map(Busy::as_str), "maybeDelivered": self.maybe_delivered, "error": self.error})
     }
 
-    pub fn from_json(value: &Value) -> Option<Unsent> {
+    pub fn from_json(id: &str, value: &Value) -> Option<Unsent> {
+        let session = value["session"].as_str().filter(|s| !s.is_empty()).unwrap_or(id).to_string();
         let text = value["text"].as_str().filter(|t| !t.trim().is_empty())?.to_string();
         let key = value["key"].as_str().filter(|k| !k.is_empty())?.to_string();
         let busy = value["busy"].as_str().and_then(Busy::parse);
         let maybe_delivered = value["maybeDelivered"].as_bool().unwrap_or(true);
-        Some(Unsent { text, key, busy, maybe_delivered, error: value["error"].as_str().unwrap_or_default().to_string() })
+        Some(Unsent { session, text, key, busy, maybe_delivered, error: value["error"].as_str().unwrap_or_default().to_string() })
     }
 
     pub fn note(&self) -> String {
@@ -140,6 +142,14 @@ pub fn put_back(draft: &str, text: &str) -> String {
     } else {
         format!("{text}\n\n{draft}")
     }
+}
+
+pub fn take_back(composer: &str, text: &str) -> Option<String> {
+    let composer = composer.trim();
+    if composer == text {
+        return Some(String::new());
+    }
+    composer.strip_prefix(text).and_then(|rest| rest.strip_prefix("\n\n")).map(|rest| rest.trim_start().to_string())
 }
 
 pub fn current<'a>(rekeyed: &'a HashMap<String, String>, mut id: &'a str) -> &'a str {
@@ -218,6 +228,7 @@ mod tests {
         assert_eq!(Delivered::read(&json!({"ok": true, "result": {"evidence": "queued", "queueId": 4}})), Delivered::Queued);
         assert_eq!(Delivered::read(&json!({"ok": true, "result": {"evidence": "queued", "queueId": 4, "waitingOn": {"kind": "ask"}}})), Delivered::QueuedUntilAnswer);
         assert_eq!(Delivered::read(&json!({"ok": true, "result": {"evidence": "unknown"}})), Delivered::Unconfirmed);
+        assert_eq!(Delivered::read(&json!({"ok": true, "result": {"evidence": "submitted", "status": "submitted"}})), Delivered::Unconfirmed);
         assert_eq!(Delivered::read(&json!({"ok": true, "status": "submitted"})), Delivered::Unconfirmed);
         assert_eq!(Delivered::read(&json!({"ok": true})), Delivered::Sent);
         assert_eq!(Delivered::Queued.note(0), "Queued (1)");
@@ -226,25 +237,26 @@ mod tests {
     }
 
     #[test]
-    fn only_an_unconfirmed_retry_of_the_same_message_reuses_its_request_id() {
-        let unsent = Unsent { text: "ship it".into(), key: "k1".into(), busy: Some(Busy::Steer), maybe_delivered: true, error: "timeout".into() };
-        assert_eq!(unsent.key_for("ship it", Some(Busy::Steer)), Some("k1"));
-        assert_eq!(unsent.key_for("ship it now", Some(Busy::Steer)), None);
-        assert_eq!(unsent.key_for("ship it", Some(Busy::Queue)), None);
+    fn only_an_unconfirmed_message_is_sent_again_as_it_was() {
+        let unsent = Unsent { session: "s1".into(), text: "ship it".into(), key: "k1".into(), busy: Some(Busy::Steer), maybe_delivered: true, error: "timeout".into() };
+        assert!(unsent.resend("ship it"));
+        assert!(!unsent.resend("ship it now"));
         let refused = Unsent { maybe_delivered: false, ..unsent };
-        assert_eq!(refused.key_for("ship it", Some(Busy::Steer)), None);
+        assert!(!refused.resend("ship it"));
         assert!(refused.note().starts_with("Not sent: timeout"));
     }
 
     #[test]
     fn an_unconfirmed_message_survives_a_restart_with_its_request_id() {
-        let unsent = Unsent { text: "ship it".into(), key: "k1".into(), busy: Some(Busy::Queue), maybe_delivered: true, error: "the app closed".into() };
-        assert_eq!(Unsent::from_json(&unsent.to_json()), Some(unsent.clone()));
+        let unsent = Unsent { session: "old".into(), text: "ship it".into(), key: "k1".into(), busy: Some(Busy::Queue), maybe_delivered: true, error: "the app closed".into() };
+        assert_eq!(Unsent::from_json("new", &unsent.to_json()), Some(unsent.clone()));
         let idle = Unsent { busy: None, maybe_delivered: false, ..unsent };
-        assert_eq!(Unsent::from_json(&idle.to_json()), Some(idle));
-        assert_eq!(Unsent::from_json(&json!({"text": "hi"})), None);
-        assert_eq!(Unsent::from_json(&json!({"text": " ", "key": "k"})), None);
-        assert!(Unsent::from_json(&json!({"text": "hi", "key": "k"})).unwrap().maybe_delivered);
+        assert_eq!(Unsent::from_json("new", &idle.to_json()), Some(idle));
+        assert_eq!(Unsent::from_json("s1", &json!({"text": "hi"})), None);
+        assert_eq!(Unsent::from_json("s1", &json!({"text": " ", "key": "k"})), None);
+        let bare = Unsent::from_json("s1", &json!({"text": "hi", "key": "k"})).unwrap();
+        assert!(bare.maybe_delivered);
+        assert_eq!(bare.session, "s1");
     }
 
     #[test]
@@ -253,6 +265,14 @@ mod tests {
         assert_eq!(put_back("hello", "hello"), "hello");
         assert_eq!(put_back("and more", "hello"), "hello\n\nand more");
         assert_eq!(put_back("hello\n\nand more", "hello"), "hello\n\nand more");
+    }
+
+    #[test]
+    fn a_retry_takes_back_only_the_copy_that_was_put_back() {
+        assert_eq!(take_back("hello", "hello").as_deref(), Some(""));
+        assert_eq!(take_back(&put_back("and more", "hello"), "hello").as_deref(), Some("and more"));
+        assert_eq!(take_back("hello world", "hello"), None);
+        assert_eq!(take_back("say hello", "hello"), None);
     }
 
     #[test]
