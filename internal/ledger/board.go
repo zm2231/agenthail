@@ -258,6 +258,10 @@ func (b *Board) dispatch(event Event) error {
 		err = b.applyWorkProof(event)
 	case EventWorkReviewPass:
 		err = b.applyWorkReviewPass(event)
+	case EventWorkQuestion:
+		err = b.applyWorkQuestion(event)
+	case EventWorkQuestionRes:
+		err = b.applyWorkQuestionResolved(event)
 	}
 	return err
 }

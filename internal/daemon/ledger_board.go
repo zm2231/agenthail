@@ -61,6 +61,9 @@ type ledgerBoardReads struct {
 	sessions map[string]*surface.Session
 	prs      map[string]registry.SessionPR
 	asks     map[string][]registry.Ask
+	onItem   map[string][]registry.Ask
+	toPerson map[string]bool
+	hostID   string
 }
 
 func (d *Daemon) linkedPRs() map[string]registry.SessionPR {
@@ -80,11 +83,17 @@ func (d *Daemon) linkedPRs() map[string]registry.SessionPR {
 }
 
 func (d *Daemon) ledgerBoardReads() *ledgerBoardReads {
-	reads := &ledgerBoardReads{d: d, sessions: map[string]*surface.Session{}, prs: d.linkedPRs(), asks: map[string][]registry.Ask{}}
+	reads := &ledgerBoardReads{d: d, sessions: map[string]*surface.Session{}, prs: d.linkedPRs(), asks: map[string][]registry.Ask{}, onItem: map[string][]registry.Ask{}, toPerson: map[string]bool{}, hostID: d.hostIdentity().ID}
 	if open, err := d.Registry.OpenAsks(); err == nil {
 		for _, ask := range open {
 			if ask.RoutedTo == registry.AskToPerson {
-				reads.asks[ask.SessionID] = append(reads.asks[ask.SessionID], ask)
+				reads.toPerson[ask.ID] = true
+				if ask.WorkItem != "" {
+					on := ask.LedgerKey + "\x00" + ask.WorkItem
+					reads.onItem[on] = append(reads.onItem[on], ask)
+				} else {
+					reads.asks[ask.SessionID] = append(reads.asks[ask.SessionID], ask)
+				}
 			}
 		}
 	}
@@ -106,16 +115,29 @@ func (r *ledgerBoardReads) session(id string) *surface.Session {
 	return session
 }
 
-func (r *ledgerBoardReads) flight(board *ledger.Board, item ledger.WorkItem) *ledgerPageFlight {
+// An ask linked to an item marks only that item, whoever holds the item now and whether or not its question has reached the ledger yet; a holder's ask linked to no item marks every item it holds. An ask with this host's lead is not the person's.
+func (r *ledgerBoardReads) flight(key string, board *ledger.Board, item ledger.WorkItem) *ledgerPageFlight {
 	flight := &ledgerPageFlight{PRs: itemPRs(item, r.prs), WaitsOn: board.OpenDependencies(item.ID)}
+	listed := map[string]bool{}
 	if item.Assignee != "" {
 		flight.HolderState = holderUnknown
 		if session := r.session(item.Assignee); session != nil {
 			flight.HolderState = holderState(*session)
 		}
-		for _, ask := range r.asks[item.Assignee] {
-			flight.Asks = append(flight.Asks, ledgerPageAsk{ID: ask.ID, Title: firstLine(ask.Title), Since: ask.CreatedAt})
+	}
+	for _, ask := range append(r.asks[item.Assignee], r.onItem[key+"\x00"+item.ID]...) {
+		listed[ask.ID] = true
+		flight.Asks = append(flight.Asks, ledgerPageAsk{ID: ask.ID, Title: firstLine(ask.Title), Since: ask.CreatedAt})
+	}
+	for _, question := range item.OpenQuestions() {
+		if listed[question.AskID] || question.AskHostID == r.hostID && !r.toPerson[question.AskID] {
+			continue
 		}
+		listed[question.AskID] = true
+		flight.Asks = append(flight.Asks, ledgerPageAsk{ID: question.AskID, Title: firstLine(question.Title), Since: question.At})
+	}
+	if len(flight.Asks) > 0 {
+		flight.WaitsOn = append(flight.WaitsOn, "person")
 	}
 	if entry := item.LatestLog(); entry != nil {
 		flight.LastLog = &ledgerPageLog{Text: firstLine(entry.Text), At: entry.At}

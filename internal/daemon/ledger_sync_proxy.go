@@ -75,74 +75,91 @@ func (d *Daemon) ledgerWriteRoute(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (d *Daemon) proxyLedgerWrite(w http.ResponseWriter, r *http.Request, ownerID, key string, body []byte) {
+	reply, failure := d.writeAtLedgerOwner(r.Context(), ownerID, key, r.URL.Path, body)
+	if failure != nil {
+		writeAPIError(w, failure.status, failure.code, failure.message)
+		return
+	}
+	w.Header().Set("Content-Type", reply.contentType)
+	w.WriteHeader(reply.status)
+	_, _ = w.Write(reply.body)
+}
+
+type ledgerOwnerReply struct {
+	status      int
+	contentType string
+	body        []byte
+}
+
+type ledgerOwnerFailure struct {
+	status        int
+	code, message string
+}
+
+func (f *ledgerOwnerFailure) Error() string { return f.message }
+
+func (d *Daemon) writeAtLedgerOwner(ctx context.Context, ownerID, key, path string, body []byte) (ledgerOwnerReply, *ledgerOwnerFailure) {
 	host, found := d.pairedHost(ownerID)
 	name := ownerID
 	if found {
 		name = host.record.Name
 	}
 	unreachable := fmt.Sprintf("The ledger for %s is kept on %s, which this host cannot reach right now; nothing was recorded. Retry once %s is back.", key, name, name)
+	fail := func(status int, code, message string) (ledgerOwnerReply, *ledgerOwnerFailure) {
+		return ledgerOwnerReply{}, &ledgerOwnerFailure{status: status, code: code, message: message}
+	}
 	if !found {
-		writeAPIError(w, http.StatusServiceUnavailable, "ledger_owner_unreachable", unreachable)
-		return
+		return fail(http.StatusServiceUnavailable, "ledger_owner_unreachable", unreachable)
 	}
 	if state, _ := host.status(); state != hostStateConnected {
-		writeAPIError(w, http.StatusServiceUnavailable, "ledger_owner_unreachable", unreachable)
-		return
+		return fail(http.StatusServiceUnavailable, "ledger_owner_unreachable", unreachable)
 	}
-	if _, err := d.syncLedgerProject(r.Context(), host, key); err != nil {
+	if _, err := d.syncLedgerProject(ctx, host, key); err != nil {
 		var outdated ledgerHostOutdated
 		if errors.As(err, &outdated) {
-			writeLedgerOwnerOutdated(w, key, name, outdated.refusal)
-			return
+			return fail(http.StatusServiceUnavailable, ledgerOwnerOutdatedCode, ledgerOwnerOutdatedMessage(key, name, outdated.refusal))
 		}
-		writeAPIError(w, http.StatusServiceUnavailable, "ledger_owner_unreachable", unreachable+" ("+err.Error()+")")
-		return
+		return fail(http.StatusServiceUnavailable, "ledger_owner_unreachable", unreachable+" ("+err.Error()+")")
 	}
 	header := http.Header{"Content-Type": {"application/json"}, actionIdempotencyHeader: {"ledger-" + uuid.NewString()}}
 	var response *http.Response
 	var err error
 	for attempt := 1; attempt <= ledgerProxyAttempts; attempt++ {
-		if response, err = host.client.Do(r.Context(), http.MethodPost, r.URL.Path, nil, body, header); err == nil {
+		if response, err = host.client.Do(ctx, http.MethodPost, path, nil, body, header); err == nil {
 			break
 		}
 		var notSent hosts.NotSentError
-		if errors.As(err, &notSent) || r.Context().Err() != nil {
-			writeAPIError(w, http.StatusServiceUnavailable, "ledger_owner_unreachable", unreachable)
-			return
+		if errors.As(err, &notSent) || ctx.Err() != nil {
+			return fail(http.StatusServiceUnavailable, "ledger_owner_unreachable", unreachable)
 		}
 		select {
-		case <-r.Context().Done():
+		case <-ctx.Done():
 		case <-time.After(time.Duration(attempt) * 500 * time.Millisecond):
 		}
 	}
 	if err != nil {
-		writeAPIError(w, http.StatusGatewayTimeout, "ledger_owner_unconfirmed", fmt.Sprintf("%s did not confirm the write for %s after %d tries, so it may or may not be recorded; check agenthail ledger board before retrying.", name, key, ledgerProxyAttempts))
-		return
+		return fail(http.StatusGatewayTimeout, "ledger_owner_unconfirmed", fmt.Sprintf("%s did not confirm the write for %s after %d tries, so it may or may not be recorded; check agenthail ledger board before retrying.", name, key, ledgerProxyAttempts))
 	}
 	defer response.Body.Close()
 	answer, err := io.ReadAll(io.LimitReader(response.Body, 32<<20))
 	if err != nil {
-		writeAPIError(w, http.StatusGatewayTimeout, "ledger_owner_unconfirmed", fmt.Sprintf("%s's answer for %s was cut off, so the write may or may not be recorded; check agenthail ledger board before retrying.", name, key))
-		return
+		return fail(http.StatusGatewayTimeout, "ledger_owner_unconfirmed", fmt.Sprintf("%s's answer for %s was cut off, so the write may or may not be recorded; check agenthail ledger board before retrying.", name, key))
 	}
 	var refusal struct {
 		Error struct{ Code, Message string } `json:"error"`
 	}
 	if response.StatusCode == http.StatusBadRequest && json.Unmarshal(answer, &refusal) == nil && refusal.Error.Code == ledgerUnknownKeyCode {
-		writeLedgerOwnerOutdated(w, key, name, refusal.Error.Message)
-		return
+		return fail(http.StatusServiceUnavailable, ledgerOwnerOutdatedCode, ledgerOwnerOutdatedMessage(key, name, refusal.Error.Message))
 	}
 	if response.StatusCode >= 200 && response.StatusCode < 300 {
 		host.ledgerMu.Lock()
-		head, err := d.pullLedger(r.Context(), host, key)
+		head, err := d.pullLedger(ctx, host, key)
 		host.ledgerMu.Unlock()
 		d.recordLedgerSync(key, head, err)
 	}
-	w.Header().Set("Content-Type", response.Header.Get("Content-Type"))
-	w.WriteHeader(response.StatusCode)
-	_, _ = w.Write(answer)
+	return ledgerOwnerReply{status: response.StatusCode, contentType: response.Header.Get("Content-Type"), body: answer}, nil
 }
 
-func writeLedgerOwnerOutdated(w http.ResponseWriter, key, owner, refusal string) {
-	writeAPIError(w, http.StatusServiceUnavailable, ledgerOwnerOutdatedCode, fmt.Sprintf("The ledger for %s is kept on %s, which does not know what this host sent (%s); nothing was recorded. Update Agenthail on %s, then retry.", key, owner, refusal, owner))
+func ledgerOwnerOutdatedMessage(key, owner, refusal string) string {
+	return fmt.Sprintf("The ledger for %s is kept on %s, which does not know what this host sent (%s); nothing was recorded. Update Agenthail on %s, then retry.", key, owner, refusal, owner)
 }

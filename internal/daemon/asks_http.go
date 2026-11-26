@@ -26,10 +26,13 @@ type askView struct {
 	AnsweredBy string                 `json:"answeredBy,omitempty"`
 	AnsweredAt time.Time              `json:"answeredAt,omitzero"`
 	CreatedAt  time.Time              `json:"createdAt"`
+	WorkItem   string                 `json:"workItem,omitempty"`
+	LedgerKey  string                 `json:"ledgerKey,omitempty"`
+	Note       string                 `json:"note,omitempty"`
 }
 
 func newAskView(ask registry.Ask) askView {
-	view := askView{ID: ask.ID, SessionID: ask.SessionID, Title: ask.Title, Questions: ask.Questions, RoutedTo: ask.RoutedTo, Route: ask.Route, State: ask.State, AnsweredBy: ask.AnsweredBy, AnsweredAt: ask.AnsweredAt, CreatedAt: ask.CreatedAt}
+	view := askView{ID: ask.ID, SessionID: ask.SessionID, Title: ask.Title, Questions: ask.Questions, RoutedTo: ask.RoutedTo, Route: ask.Route, State: ask.State, AnsweredBy: ask.AnsweredBy, AnsweredAt: ask.AnsweredAt, CreatedAt: ask.CreatedAt, WorkItem: ask.WorkItem, LedgerKey: ask.LedgerKey}
 	if ask.State == registry.AskAnswered {
 		answer := ask.Answer
 		view.Answer = &answer
@@ -46,6 +49,7 @@ type askHTTPRequest struct {
 	Answers   map[string]string  `json:"answers"`
 	Choices   []string           `json:"choices"`
 	Note      string             `json:"note"`
+	Item      string             `json:"item"`
 }
 
 // asksHandler serves the CLI on this machine, which speaks for the session it runs in; nothing else may claim a session here.
@@ -104,7 +108,7 @@ func (d *Daemon) changeAsk(ctx context.Context, w http.ResponseWriter, request a
 			writeAPIError(w, http.StatusNotFound, "not_found", "No session "+request.SessionID+" raises asks here.")
 			return
 		}
-		ask, err := d.raiseAsk(*session, askInput{Title: request.Title, Questions: request.Questions})
+		ask, note, err := d.raiseAsk(*session, askInput{Title: request.Title, Questions: request.Questions, Item: request.Item})
 		var invalid askInvalid
 		switch {
 		case errors.As(err, &invalid):
@@ -112,7 +116,9 @@ func (d *Daemon) changeAsk(ctx context.Context, w http.ResponseWriter, request a
 		case err != nil:
 			writeAPIError(w, http.StatusInternalServerError, "registry_error", err.Error())
 		default:
-			writeDashboardJSON(w, http.StatusOK, newAskView(ask))
+			view := newAskView(ask)
+			view.Note = note
+			writeDashboardJSON(w, http.StatusOK, view)
 		}
 	case "withdraw":
 		session, err := d.Registry.Session(request.SessionID)

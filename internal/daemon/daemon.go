@@ -198,8 +198,9 @@ type Daemon struct {
 	// limitResumesRead, when set, runs each time usage-limit stops are read.
 	limitResumesRead func()
 	// turnPushRead, when set, runs between claiming a turn's needs-you push and reading its state again.
-	turnPushRead   func()
-	reviewPushRead func()
+	turnPushRead    func()
+	reviewPushRead  func()
+	itemQuestionsMu sync.Mutex
 	// liveSources names the surface of each session the catalog holds a
 	// source for because its process is live.
 	liveSources map[string]surface.SurfaceKind

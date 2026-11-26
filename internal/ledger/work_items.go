@@ -68,21 +68,22 @@ type WorkItem struct {
 	ClauseID string `json:"clauseId,omitempty"`
 	Text     string `json:"text"`
 	WorkFields
-	ImportedFrom string      `json:"importedFrom,omitempty"`
-	State        WorkState   `json:"state"`
-	Assignee     string      `json:"assignee,omitempty"`
-	CreatedBy    string      `json:"createdBy"`
-	Reason       string      `json:"reason,omitempty"`
-	Reviewer     string      `json:"reviewer,omitempty"`
-	DependsOn    []string    `json:"dependsOn,omitempty"`
-	Children     []string    `json:"children,omitempty"`
-	Handoff      *Handoff    `json:"handoff,omitempty"`
-	Park         *Park       `json:"park,omitempty"`
-	Timeline     []WorkEntry `json:"timeline,omitempty"`
-	Phase        Phase       `json:"phase,omitempty"`
-	PhaseSince   time.Time   `json:"phaseSince,omitzero"`
-	Proof        []ProofStep `json:"proof,omitempty"`
-	ReviewPass   *ReviewPass `json:"reviewPass,omitempty"`
+	ImportedFrom string         `json:"importedFrom,omitempty"`
+	State        WorkState      `json:"state"`
+	Assignee     string         `json:"assignee,omitempty"`
+	CreatedBy    string         `json:"createdBy"`
+	Reason       string         `json:"reason,omitempty"`
+	Reviewer     string         `json:"reviewer,omitempty"`
+	DependsOn    []string       `json:"dependsOn,omitempty"`
+	Children     []string       `json:"children,omitempty"`
+	Handoff      *Handoff       `json:"handoff,omitempty"`
+	Park         *Park          `json:"park,omitempty"`
+	Timeline     []WorkEntry    `json:"timeline,omitempty"`
+	Phase        Phase          `json:"phase,omitempty"`
+	PhaseSince   time.Time      `json:"phaseSince,omitzero"`
+	Proof        []ProofStep    `json:"proof,omitempty"`
+	ReviewPass   *ReviewPass    `json:"reviewPass,omitempty"`
+	Questions    []ItemQuestion `json:"questions,omitempty"`
 	proofIssued  int
 	round        int
 }

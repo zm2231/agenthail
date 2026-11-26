@@ -10,6 +10,7 @@ type mcpAskInput struct {
 	Title     string             `json:"title,omitempty" jsonschema:"One line, at most 80 characters: what you need decided."`
 	Questions []askQuestionInput `json:"questions,omitempty" jsonschema:"1 to 4. Limits: question 160 characters, 1 to 6 options, label 40, does 90; recommended is an option index; at most 3 links."`
 	Withdraw  string             `json:"withdraw,omitempty" jsonschema:"The id of an open ask of yours to withdraw instead."`
+	Item      string             `json:"item,omitempty" jsonschema:"The work item it is about; default your one in progress."`
 }
 
 func (d *Daemon) mcpAsk(_ context.Context, caller *mcpCaller, input mcpAskInput) (any, error) {
@@ -24,7 +25,7 @@ func (d *Daemon) mcpAsk(_ context.Context, caller *mcpCaller, input mcpAskInput)
 		}
 		return map[string]any{"ok": true, "askId": id, "outcome": "withdrawn"}, nil
 	}
-	ask, err := d.raiseAsk(caller.session, askInput{Title: input.Title, Questions: input.Questions})
+	ask, note, err := d.raiseAsk(caller.session, askInput{Title: input.Title, Questions: input.Questions, Item: input.Item})
 	var invalid askInvalid
 	if errors.As(err, &invalid) {
 		return nil, refuse("invalid", err.Error()+".")
@@ -36,5 +37,12 @@ func (d *Daemon) mcpAsk(_ context.Context, caller *mcpCaller, input mcpAskInput)
 	if routedTo != "person" {
 		routedTo = d.answerTarget(routedTo)
 	}
-	return map[string]any{"ok": true, "askId": ask.ID, "routedTo": routedTo}, nil
+	reply := map[string]any{"ok": true, "askId": ask.ID, "routedTo": routedTo}
+	if ask.WorkItem != "" {
+		reply["workItem"] = ask.WorkItem
+	}
+	if note != "" {
+		reply["note"] = note
+	}
+	return reply, nil
 }

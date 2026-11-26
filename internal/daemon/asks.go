@@ -42,6 +42,7 @@ type askQuestionInput struct {
 type askInput struct {
 	Title     string             `json:"title"`
 	Questions []askQuestionInput `json:"questions"`
+	Item      string             `json:"item,omitempty"`
 }
 
 func isAskID(id string) bool { return strings.HasPrefix(id, askPrefix) }
@@ -170,18 +171,25 @@ func (d *Daemon) hears(sessionID string) bool {
 
 type askInvalid struct{ error }
 
-func (d *Daemon) raiseAsk(session surface.Session, input askInput) (registry.Ask, error) {
+func (d *Daemon) raiseAsk(session surface.Session, input askInput) (registry.Ask, string, error) {
 	if err := validAsk(input); err != nil {
-		return registry.Ask{}, askInvalid{err}
+		return registry.Ask{}, "", askInvalid{err}
 	}
-	ask := registry.Ask{SessionID: session.ID, Origin: registry.AskOriginAgent, Title: strings.TrimSpace(input.Title), Questions: askQuestions(input), RoutedTo: registry.AskToPerson}
+	work, note, refusal := d.linkedWork(session, strings.TrimSpace(input.Item))
+	if refusal != nil {
+		if refusal.Code == "invalid" {
+			return registry.Ask{}, "", askInvalid{errors.New(refusal.Message)}
+		}
+		return registry.Ask{}, "", errors.New(refusal.Message)
+	}
+	ask := registry.Ask{SessionID: session.ID, Origin: registry.AskOriginAgent, Title: strings.TrimSpace(input.Title), Questions: askQuestions(input), RoutedTo: registry.AskToPerson, WorkItem: work.item.ID, LedgerKey: work.key}
 	hearer, routed := d.askHearer(session.ID)
 	if routed {
 		ask.RoutedTo = hearer.sessionID
 	}
 	ask, err := d.Registry.RaiseAsk(ask, time.Now())
 	if err != nil {
-		return registry.Ask{}, err
+		return registry.Ask{}, "", err
 	}
 	if routed {
 		ask = d.tellHearer(ask, hearer)
@@ -189,7 +197,7 @@ func (d *Daemon) raiseAsk(session surface.Session, input askInput) (registry.Ask
 		d.announceAsk(ask)
 	}
 	d.publishAsk(ask.SessionID)
-	return ask, nil
+	return ask, note, nil
 }
 
 func (d *Daemon) tellHearer(ask registry.Ask, hearer noticeRecipient) registry.Ask {
@@ -304,6 +312,7 @@ func (d *Daemon) runAskSweeps(ctx context.Context) {
 		d.sweepAsks(time.Now())
 		d.sweepLeadWaits(ctx, time.Now())
 		d.sweepReviewPushes(ctx)
+		d.syncItemQuestionsSoon()
 		select {
 		case <-ctx.Done():
 			return
@@ -462,6 +471,7 @@ func (d *Daemon) withdrawNotification(ctx context.Context, w registry.Notificati
 }
 
 func (d *Daemon) publishAsk(sessionID string) {
+	d.syncItemQuestionsSoon()
 	d.requestCatalogDiscovery()
 	d.publishEvent("state.changed", sessionID, map[string]string{"source": "ask"})
 }

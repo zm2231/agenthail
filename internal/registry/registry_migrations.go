@@ -501,6 +501,16 @@ func migrateTx(tx *sql.Tx) error {
 	if err := ensureColumn(tx, "turn_judgments", "lead_escalated_at_ms", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
+	for _, column := range []struct{ name, decl string }{
+		{"work_item", `TEXT NOT NULL DEFAULT ''`},
+		{"ledger_key", `TEXT NOT NULL DEFAULT ''`},
+		{"ledger_question", `TEXT NOT NULL DEFAULT ''`},
+		{"ledger_resolved_at_ms", `INTEGER NOT NULL DEFAULT 0`},
+	} {
+		if err := ensureColumn(tx, "asks", column.name, column.decl); err != nil {
+			return err
+		}
+	}
 	if err := ensureColumn(tx, "agent_inbox", "delivered_at_ms", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}

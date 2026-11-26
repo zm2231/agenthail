@@ -185,12 +185,12 @@ func (d *Daemon) projectLedgerPage(projectID string) (ledgerPageView, error) {
 		if err != nil {
 			return ledgerPageView{}, err
 		}
-		d.fillLedgerPage(&view, board, time.Now())
+		d.fillLedgerPage(&view, key, board, time.Now())
 	}
 	return view, nil
 }
 
-func (d *Daemon) fillLedgerPage(view *ledgerPageView, board *ledger.Board, now time.Time) {
+func (d *Daemon) fillLedgerPage(view *ledgerPageView, key string, board *ledger.Board, now time.Time) {
 	view.Phases = board.PhaseLabels()
 	names := map[string]string{}
 	name := func(sessionID string) string {
@@ -232,7 +232,7 @@ func (d *Daemon) fillLedgerPage(view *ledgerPageView, board *ledger.Board, now t
 			if item.State == ledger.WorkBlocked {
 				r.Note = firstLine(item.Reason)
 			}
-			r.Flight = reads.flight(board, item)
+			r.Flight = reads.flight(key, board, item)
 			view.Board[r.Flight.Lane] = append(view.Board[r.Flight.Lane], r)
 		case ledger.WorkParked:
 			r := row(item)
