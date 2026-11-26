@@ -61,15 +61,10 @@ fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'sta
     });
 }
 
-const LINEAGE: usize = 8;
-
 fn lineage(s: &App, id: &str) -> Vec<String> {
     let mut line = vec![id.to_string()];
-    while line.len() < LINEAGE {
-        match line.last().and_then(|at| parent_of(s, at)).filter(|p| !line.contains(p)) {
-            Some(parent) => line.push(parent),
-            None => break,
-        }
+    while let Some(parent) = line.last().and_then(|at| parent_of(s, at)).filter(|p| !line.contains(p)) {
+        line.push(parent);
     }
     line
 }
