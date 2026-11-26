@@ -26,13 +26,14 @@ pub struct Form {
     asked: HashSet<String>,
     pub history_open: bool,
     pub confirm_reset: bool,
+    seen_rev: String,
 }
 
 pub enum Got {
     History(Result<Vec<Entry>, Failure>),
     Presets(Result<Vec<Preset>, Failure>),
     Thumb(String, Result<(u32, u32, Vec<u8>), String>),
-    Wrote(Result<View, Failure>),
+    Wrote(u64, Result<View, Failure>),
 }
 
 fn spawn(s: &mut Prefs, job: impl FnOnce(&Client) -> Got + Send + 'static) -> bool {
@@ -59,6 +60,11 @@ pub fn opened(s: &mut Prefs) {
 }
 
 pub fn changed(s: &mut Prefs) {
+    let rev = crate::look::view().map(|v| v.rev).unwrap_or_default();
+    if rev == s.appearance.seen_rev {
+        return;
+    }
+    s.appearance.seen_rev = rev;
     if !s.appearance.writing {
         s.appearance.drafts.clear();
     }
@@ -83,7 +89,10 @@ pub fn write(s: &mut Prefs, change: Change) {
     let device = crate::look::device();
     s.appearance.error = None;
     s.appearance.confirm_reset = false;
-    if spawn(s, move |c| Got::Wrote(c.ui_change(fl::device_class(), &device, &change))) {
+    if spawn(s, move |c| {
+        let ticket = crate::look::ticket();
+        Got::Wrote(ticket, c.ui_change(fl::device_class(), &device, &change))
+    }) {
         s.appearance.writing = true;
     }
 }
@@ -138,11 +147,15 @@ pub fn choose_image(s: &mut Prefs, tx: &mut Tx) {
     if s.appearance.writing || s.client.is_none() {
         return;
     }
-    let options = FileDialogOptions { title: "Choose a background image".into(), ..Default::default() }.filter("Images", &["png", "jpg", "jpeg", "heic", "webp", "gif"]);
+    s.appearance.writing = true;
+    let options = FileDialogOptions { title: "Choose a background image".into(), ..Default::default() }.filter("Images", &["png", "jpg", "jpeg", "webp", "gif"]);
     tx.open_file(options, |s: &mut Prefs, result, _| match result {
         Ok(Some(path)) => upload(s, path),
-        Ok(None) => {}
-        Err(e) => s.appearance.error = Some(Failure::new(format!("Couldn't open the file picker: {e}"))),
+        Ok(None) => s.appearance.writing = false,
+        Err(e) => {
+            s.appearance.writing = false;
+            s.appearance.error = Some(Failure::new(format!("Couldn't open the file picker: {e}")));
+        }
     });
 }
 
@@ -151,19 +164,19 @@ fn upload(s: &mut Prefs, path: std::path::PathBuf) {
     let scope = scope(s);
     let device = crate::look::device();
     s.appearance.error = None;
-    if spawn(s, move |c| {
+    let started = spawn(s, move |c| {
         let data = match std::fs::read(&path) {
             Ok(data) => data,
-            Err(e) => return Got::Wrote(Err(Failure::new(format!("Couldn't read {name}: {e}")))),
+            Err(e) => return Got::Wrote(0, Err(Failure::new(format!("Couldn't read {name}: {e}")))),
         };
         let stored = match c.ui_upload(&name, &data) {
             Ok(stored) => stored,
-            Err(f) => return Got::Wrote(Err(f)),
+            Err(f) => return Got::Wrote(0, Err(f)),
         };
-        Got::Wrote(c.ui_change(fl::device_class(), &device, &Change::set(&scope, "background", &format!("image: {stored}"), &format!("background to {name}"))))
-    }) {
-        s.appearance.writing = true;
-    }
+        let ticket = crate::look::ticket();
+        Got::Wrote(ticket, c.ui_change(fl::device_class(), &device, &Change::set(&scope, "background", &format!("image: {stored}"), &format!("background to {name}"))))
+    });
+    s.appearance.writing = started;
 }
 
 pub fn take(s: &mut Prefs, got: Got) {
@@ -179,10 +192,10 @@ pub fn take(s: &mut Prefs, got: Got) {
             s.appearance.thumbs.insert(path, pixels);
         }
         Got::Thumb(..) => {}
-        Got::Wrote(result) => {
+        Got::Wrote(ticket, result) => {
             s.appearance.writing = false;
             match result {
-                Ok(view) => crate::look::take_view(view),
+                Ok(view) => crate::look::take_view(ticket, view),
                 Err(f) => {
                     s.appearance.drafts.clear();
                     s.appearance.error = Some(f);

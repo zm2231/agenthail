@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 pub use edit::{Change, Entry, KEYS, Preset, Scope, describe, device_class, device_name, owner};
-pub use paint::{Placement, blend, boundary, contrast, decode, gamma, linear, luminance, mesh, pane_alpha, place, worst};
+pub use paint::{POOL_CELLS, Placement, blend, boundary, contrast, decode, gamma, linear, luminance, mesh, pane_alpha, place, reachable, worst};
 
 pub type Rgb = [f32; 3];
 
@@ -265,16 +265,18 @@ impl Look {
         self.roles.get(name).map(|(d, l)| if dark { *d } else { *l })
     }
 
-    pub fn pane_tint(&self, dark: bool, worst: Rgb, ground: Rgb, tint: Rgb, strength: f32, minimum: f32) -> f32 {
+    pub fn pane_tint(&self, dark: bool, worst: Rgb, ground: Rgb, tint: Rgb, strength: f32, minimum: f32) -> (f32, Rgb) {
         if !self.readable {
-            return minimum;
+            return (minimum, tint);
         }
         let behind = blend(blend(ground, worst, strength), if dark { [0.0; 3] } else { [1.0; 3] }, self.dim);
         let mut roles: Vec<f32> = READ_ON_PANES.iter().filter_map(|r| self.role(r, dark)).map(luminance).collect();
         if roles.is_empty() {
             roles.push(if dark { 0.84 } else { 0.012 });
         }
-        pane_alpha(luminance(behind), luminance(tint), boundary(&roles, dark, self.target), dark, minimum)
+        let edge = boundary(&roles, dark, self.target);
+        let tint = reachable(tint, edge, dark);
+        (pane_alpha(luminance(behind), luminance(tint), edge, dark, minimum), tint)
     }
 
     pub fn translucent(&self, dark: bool) -> bool {
@@ -288,7 +290,8 @@ impl Look {
 
 const READ_ON_PANES: [&str; 5] = ["body", "muted", "faint", "meta", "code"];
 
-pub const NOT_DRAWN: [&str; 5] = [
+pub const NOT_DRAWN: [&str; 6] = [
+    "Text colours for timestamps, links, code, live work, removed diff lines and other agents' messages: this app keeps its own; body, secondary, quiet, needs-you, done and error text follow the settings.",
     "Texture: it lies only over open background, and this app's panes cover the whole window.",
     "Desktop: this app can't read the desktop picture yet, so it draws no background for it.",
     "Space between panes (glass.gutter): panes keep this app's fixed spacing.",

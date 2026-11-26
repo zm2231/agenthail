@@ -159,8 +159,9 @@ pub fn nudge() {
     WINDOW.with(|w| {
         if let Some((handle, _)) = w.get() {
             handle.update(|s: &mut Prefs, tx| {
-                tx.set_color_scheme(crate::look::scheme());
-                appearance::changed(s);
+                if crate::look::poll(crate::look::Window::Settings, tx) {
+                    appearance::changed(s);
+                }
             });
         }
     });
@@ -558,6 +559,10 @@ fn poll(s: &mut Prefs, _: f64, tx: &mut Tx) -> bool {
         changed = true;
     }
     changed |= devices::poll(s, tx);
+    if crate::look::poll(crate::look::Window::Settings, tx) {
+        appearance::changed(s);
+        changed = true;
+    }
     if let Some(at) = s.retry_base
         && std::time::Instant::now() >= at
         && visible()
@@ -567,6 +572,8 @@ fn poll(s: &mut Prefs, _: f64, tx: &mut Tx) -> bool {
     }
     if s.in_flight > 0 {
         tx.wake_after(Duration::from_millis(60));
+    } else if s.tab == appearance::TAB && (visible() || std::env::args().any(|a| a == "--window")) {
+        tx.wake_after(Duration::from_millis(300));
     } else if s.retry_base.is_some() && visible() {
         tx.wake_after(Duration::from_secs(1));
     }

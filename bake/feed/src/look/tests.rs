@@ -95,14 +95,29 @@ fn panes_darken_only_as_far_as_text_needs() {
 }
 
 #[test]
-fn the_worst_pixel_ignores_a_few_outliers() {
-    let mut rgba = vec![20u8; 400 * 4];
-    for px in rgba.chunks_exact_mut(4).take(10) {
-        px.copy_from_slice(&[255, 255, 255, 255]);
+fn the_worst_area_is_pooled_so_a_small_bright_patch_still_counts() {
+    let side = 960u32;
+    let mut rgba = vec![20u8; (side * side * 4) as usize];
+    for y in 0..40 {
+        for x in 0..40 {
+            let i = ((y * side + x) * 4) as usize;
+            rgba[i..i + 4].copy_from_slice(&[250, 250, 250, 255]);
+        }
     }
-    assert_eq!(worst(&rgba, true), [20.0 / 255.0; 3]);
-    assert_eq!(worst(&rgba, false), [20.0 / 255.0; 3]);
-    assert_eq!(worst(&[], true), [1.0; 3]);
+    let w = worst(&rgba, side, true);
+    assert!(w[0] > 0.9, "{w:?}");
+    assert!((worst(&rgba, side, false)[0] - 20.0 / 255.0).abs() < 1e-4);
+    assert_eq!(worst(&[], 4, true), [1.0; 3]);
+}
+
+#[test]
+fn a_tint_too_bright_for_the_text_is_darkened_until_it_can_work() {
+    let roles = [luminance(hex("#ececee").unwrap())];
+    let edge = boundary(&roles, true, 4.5);
+    let pale = reachable([0.9, 0.9, 0.95], edge, true);
+    assert!(luminance(pale) <= edge);
+    let fine = hex("#161618").unwrap();
+    assert_eq!(reachable(fine, edge, true), fine);
 }
 
 #[test]
@@ -148,11 +163,13 @@ fn pane_tint_follows_strength_dim_and_the_readability_switch() {
     let mut look = Look::from_view(&view);
     let ground = hex("#161618").unwrap();
     let white = [1.0; 3];
-    let full = look.pane_tint(true, white, ground, ground, 1.0, 0.0);
+    let full = look.pane_tint(true, white, ground, ground, 1.0, 0.0).0;
     assert!(full > 0.5, "{full}");
-    assert!(look.pane_tint(true, white, ground, ground, 0.1, 0.0) < full);
+    assert!(look.pane_tint(true, white, ground, ground, 0.1, 0.0).0 < full);
     look.dim = 0.8;
-    assert!(look.pane_tint(true, white, ground, ground, 1.0, 0.0) < full);
+    assert!(look.pane_tint(true, white, ground, ground, 1.0, 0.0).0 < full);
+    let (a, t) = look.pane_tint(true, white, ground, [1.0; 3], 1.0, 0.0);
+    assert!(a <= 1.0 && luminance(t) < luminance([1.0; 3]));
     look.readable = false;
-    assert_eq!(look.pane_tint(true, white, ground, ground, 1.0, 0.25), 0.25);
+    assert_eq!(look.pane_tint(true, white, ground, ground, 1.0, 0.25), (0.25, ground));
 }

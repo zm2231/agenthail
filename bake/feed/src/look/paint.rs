@@ -63,20 +63,37 @@ pub fn pane_alpha(behind: f32, tint: f32, boundary: f32, dark: bool, minimum: f3
     need.clamp(0.0, 1.0).max(minimum)
 }
 
-pub fn worst(rgba: &[u8], dark: bool) -> Rgb {
-    let mut pixels: Vec<(f32, Rgb)> = rgba
-        .chunks_exact(4)
-        .map(|p| {
-            let c = [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0];
-            (luminance(c), c)
-        })
-        .collect();
-    if pixels.is_empty() {
+pub const POOL_CELLS: u32 = 96;
+
+pub fn worst(rgba: &[u8], width: u32, dark: bool) -> Rgb {
+    let w = width.max(1) as usize;
+    let h = rgba.len() / 4 / w;
+    if h == 0 {
         return if dark { [1.0; 3] } else { [0.0; 3] };
     }
-    pixels.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let at = if dark { (pixels.len() - 1) * 95 / 100 } else { (pixels.len() - 1) * 5 / 100 };
-    pixels[at].1
+    let cell = (w.max(h) / POOL_CELLS as usize).max(1);
+    let (cw, ch) = (w.div_ceil(cell), h.div_ceil(cell));
+    let mut sums = vec![([0.0f32; 3], 0u32); cw * ch];
+    for y in 0..h {
+        for x in 0..w {
+            let i = (y * w + x) * 4;
+            let slot = &mut sums[(y / cell) * cw + x / cell];
+            for k in 0..3 {
+                slot.0[k] += rgba[i + k] as f32 / 255.0;
+            }
+            slot.1 += 1;
+        }
+    }
+    let cells = sums.into_iter().filter(|(_, n)| *n > 0).map(|(c, n)| c.map(|v| v / n as f32));
+    let key = |c: &Rgb| luminance(*c);
+    let pick = if dark { cells.max_by(|a, b| key(a).total_cmp(&key(b))) } else { cells.min_by(|a, b| key(a).total_cmp(&key(b))) };
+    pick.unwrap_or(if dark { [1.0; 3] } else { [0.0; 3] })
+}
+
+pub fn reachable(tint: Rgb, boundary: f32, dark: bool) -> Rgb {
+    let toward = if dark { [0.0; 3] } else { [1.0; 3] };
+    let fits = |c: Rgb| if dark { luminance(c) <= boundary } else { luminance(c) >= boundary };
+    (0..=20).map(|i| blend(tint, toward, i as f32 / 20.0)).find(|c| fits(*c)).unwrap_or(toward)
 }
 
 pub fn blend(under: Rgb, over: Rgb, alpha: f32) -> Rgb {

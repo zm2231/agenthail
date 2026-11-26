@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
@@ -20,7 +21,7 @@ struct Picture {
 
 enum Got {
     Device(String),
-    View(Box<View>),
+    View(u64, Box<View>),
     Image(String, Result<(u32, u32, Vec<u8>), String>),
     Problem(Option<String>),
 }
@@ -38,7 +39,10 @@ struct State {
     problem: Option<String>,
     area: (f32, f32),
     scale: f32,
-    scheme: Option<rune::ColorScheme>,
+    applied: u64,
+    generation: u64,
+    seen_main: u64,
+    seen_settings: u64,
 }
 
 thread_local! {
@@ -57,10 +61,6 @@ pub fn problem() -> Option<String> {
     STATE.with_borrow(|s| s.problem.clone())
 }
 
-pub fn scheme() -> rune::ColorScheme {
-    STATE.with_borrow(|s| scheme_of(&s.look))
-}
-
 fn scheme_of(look: &Look) -> rune::ColorScheme {
     match look.theme {
         fl::Theme::System => rune::ColorScheme::System,
@@ -69,10 +69,16 @@ fn scheme_of(look: &Look) -> rune::ColorScheme {
     }
 }
 
-pub fn take_view(view: View) {
+static TICKET: AtomicU64 = AtomicU64::new(0);
+
+pub fn ticket() -> u64 {
+    TICKET.fetch_add(1, Ordering::Relaxed) + 1
+}
+
+pub fn take_view(ticket: u64, view: View) {
     STATE.with_borrow_mut(|s| {
         if let Some(tx) = &s.tx {
-            let _ = tx.send(Got::View(Box::new(view)));
+            let _ = tx.send(Got::View(ticket, Box::new(view)));
         }
     });
 }
@@ -85,7 +91,17 @@ fn start(s: &mut State) {
 }
 
 fn follow(tx: Sender<Got>) {
-    let Ok(client) = Client::from_env() else { return };
+    let client = loop {
+        match Client::from_env() {
+            Ok(client) => break client,
+            Err(e) => {
+                if tx.send(Got::Problem(Some(format!("Can't read appearance settings without Agenthail's sign-in ({e}); retrying.")))).is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_secs(5));
+            }
+        }
+    };
     let device = fl::device_name();
     if tx.send(Got::Device(device.clone())).is_err() {
         return;
@@ -108,12 +124,13 @@ fn follow(tx: Sender<Got>) {
 }
 
 fn read(client: &Client, class: &str, device: &str, tx: &Sender<Got>, fetched: &mut Vec<String>) -> bool {
+    let ticket = ticket();
     let view = match client.ui_view(class, device) {
         Ok(view) => view,
         Err(f) => return tx.send(Got::Problem(Some(format!("Couldn't read appearance settings: {}", f.message)))).is_ok(),
     };
     let paths = Look::from_view(&view).images();
-    if tx.send(Got::View(Box::new(view))).is_err() {
+    if tx.send(Got::View(ticket, Box::new(view))).is_err() {
         return false;
     }
     for path in paths {
@@ -132,47 +149,63 @@ fn read(client: &Client, class: &str, device: &str, tx: &Sender<Got>, fetched: &
 }
 
 fn picture(w: u32, h: u32, rgba: Vec<u8>, scale: f32, dark_worst: bool) -> Picture {
-    let worst = fl::worst(&rgba, dark_worst);
+    let worst = fl::worst(&rgba, w, dark_worst);
     let pixels = Pixels::new();
     pixels.set(w, h, rgba);
     Picture { pixels, size: (w as f32 / scale.max(1.0), h as f32 / scale.max(1.0)), worst }
 }
 
-pub fn poll(tx: &mut Tx) -> bool {
-    let changed = STATE.with_borrow_mut(|s| {
-        if s.rx.is_none() {
-            start(s);
-        }
-        let mut changed = false;
-        let got: Vec<Got> = s.rx.as_ref().map(|rx| rx.try_iter().collect()).unwrap_or_default();
-        for g in got {
-            changed = true;
-            match g {
-                Got::Device(d) => s.device = d,
-                Got::View(v) => {
-                    s.look = Look::from_view(&v);
-                    s.view = Some(*v);
-                    s.problem = None;
-                }
-                Got::Image(path, Ok((w, h, rgba))) => {
-                    let dark = s.look.wallpaper(true) == &Wallpaper::Image(path.clone());
-                    let p = picture(w, h, rgba, s.scale, dark);
-                    s.pictures.insert(path, Ok(p));
-                }
-                Got::Image(path, Err(e)) => {
-                    s.pictures.insert(path, Err(e));
-                }
-                Got::Problem(p) => s.problem = p,
+fn pump(s: &mut State) {
+    if s.rx.is_none() {
+        start(s);
+    }
+    let got: Vec<Got> = s.rx.as_ref().map(|rx| rx.try_iter().collect()).unwrap_or_default();
+    for g in got {
+        s.generation += 1;
+        match g {
+            Got::Device(d) => s.device = d,
+            Got::View(ticket, v) if ticket > s.applied => {
+                s.applied = ticket;
+                s.look = Look::from_view(&v);
+                s.view = Some(*v);
+                s.problem = None;
             }
+            Got::View(..) => {}
+            Got::Image(path, Ok((w, h, rgba))) => {
+                let dark = s.look.wallpaper(true) == &Wallpaper::Image(path.clone());
+                let p = picture(w, h, rgba, s.scale, dark);
+                s.pictures.insert(path, Ok(p));
+            }
+            Got::Image(path, Err(e)) => {
+                s.problem = Some(format!("Couldn't show the background {path}: {e}"));
+                s.pictures.insert(path, Err(e));
+            }
+            Got::Problem(p) => s.problem = p,
         }
-        let scheme = scheme_of(&s.look);
-        if s.scheme != Some(scheme) && s.view.is_some() {
-            s.scheme = Some(scheme);
-            tx.set_color_scheme(scheme);
+    }
+}
+
+pub enum Window {
+    Main,
+    Settings,
+}
+
+pub fn poll(window: Window, tx: &mut Tx) -> bool {
+    let (changed, other) = STATE.with_borrow_mut(|s| {
+        pump(s);
+        let generation = s.generation;
+        let (mine, theirs) = match window {
+            Window::Main => (&mut s.seen_main, s.seen_settings),
+            Window::Settings => (&mut s.seen_settings, s.seen_main),
+        };
+        let changed = *mine != generation;
+        *mine = generation;
+        if changed && s.view.is_some() {
+            tx.set_color_scheme(scheme_of(&s.look));
         }
-        changed
+        (changed, theirs != generation)
     });
-    if changed {
+    if other && matches!(window, Window::Main) {
         crate::settings::nudge();
     }
     changed
@@ -268,16 +301,16 @@ pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool) {
             let tint = tint_rgb(&s.look, dark, accent_rgb);
             let strength = if session { s.look.session_opacity } else { s.look.opacity };
             let worst = worst_of(s, dark).unwrap_or(ground);
-            let pane = s.look.pane_tint(dark, worst, ground, tint, strength, s.look.pane_opacity);
-            let float = s.look.pane_tint(dark, worst, ground, tint, strength, s.look.float_opacity);
+            let (pane, pane_rgb) = s.look.pane_tint(dark, worst, ground, tint, strength, s.look.pane_opacity);
+            let (float, float_rgb) = s.look.pane_tint(dark, worst, ground, tint, strength, s.look.float_opacity);
             paint.card = paint.card.alpha(0.6);
             paint.card_deep = paint.card_deep.alpha(0.7);
             paint.raised = paint.raised.alpha(0.78);
-            paint.glass_tint = rgb(tint).alpha(float);
+            paint.glass_tint = rgb(float_rgb).alpha(float);
             paint.blur = s.look.blur / 3.0;
             paint.ground = rgb(ground);
-            key = format!("{key}:{}:{}:{:?}:{}", quant(pane), quant(s.look.border), tint, quant(float));
-            paint.pane = rgb(tint).alpha(pane);
+            key = format!("{key}:{}:{}:{:?}", quant(pane), quant(s.look.border), pane_rgb.map(quant));
+            paint.pane = rgb(pane_rgb).alpha(pane);
             paint.border = Color::WHITE.alpha(s.look.border);
         } else {
             paint.glass_tint = paint.card.alpha(if dark { 0.78 } else { 1.0 });
