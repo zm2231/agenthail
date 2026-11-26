@@ -1,8 +1,9 @@
 use std::collections::HashSet;
 
-use crate::catalog::Session;
+use crate::catalog::{Session, parse_time};
 
 use super::asks::Ask;
+use super::sessions::busy;
 use super::text::{plain, short_id};
 use super::world::{Work, World};
 
@@ -65,6 +66,23 @@ impl NeedKind {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum Group {
+    Holding,
+    Waiting,
+}
+
+pub const GROUPS: [Group; 2] = [Group::Holding, Group::Waiting];
+
+impl Group {
+    pub fn label(self) -> &'static str {
+        match self {
+            Group::Holding => "Holding up work",
+            Group::Waiting => "Waiting",
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Target {
     Session(String),
@@ -75,6 +93,7 @@ pub enum Target {
 #[derive(Clone, Debug)]
 pub struct Need {
     pub kind: NeedKind,
+    pub group: Group,
     pub project: String,
     pub project_key: String,
     pub title: String,
@@ -104,8 +123,23 @@ pub fn flagged(s: &Session) -> bool {
     latest.is_some_and(|h| h.outcome == "needs_you") || s.attention.is_some()
 }
 
-pub fn sort(needs: &mut [Need]) {
-    needs.sort_by(|a, b| a.kind.rank().cmp(&b.kind.rank()).then(a.at.cmp(&b.at)).then(a.title.cmp(&b.title)).then(a.target.cmp(&b.target)));
+pub fn is_new(at: &str, looked: Option<&str>) -> bool {
+    match (parse_time(at), looked.and_then(parse_time)) {
+        (Some(at), Some(looked)) => at > looked,
+        _ => false,
+    }
+}
+
+pub fn arrange(needs: &mut [Need], looked: Option<&str>) {
+    needs.sort_by(|a, b| {
+        a.group
+            .cmp(&b.group)
+            .then(is_new(&b.at, looked).cmp(&is_new(&a.at, looked)))
+            .then(a.kind.rank().cmp(&b.kind.rank()))
+            .then(a.at.cmp(&b.at))
+            .then(a.title.cmp(&b.title))
+            .then(a.target.cmp(&b.target))
+    });
 }
 
 pub fn need_of<'a>(needs: &'a [Need], session: &str, replayed: Option<&str>) -> Option<&'a Need> {
@@ -139,6 +173,16 @@ impl World {
         self.work.values().filter(|w| w.project == project && self.is_waiting_on_you(w)).collect()
     }
 
+    pub fn group(&self, kind: NeedKind, s: &Session) -> Group {
+        if kind == NeedKind::Finished {
+            return Group::Waiting;
+        }
+        let stopped = s.attention.as_ref().is_some_and(|a| a.kind != "replacedRequest") || s.turn_state.as_ref().is_some_and(|t| t.state == "waiting_person");
+        let worker = self.started_by.contains_key(&s.id) && !s.archived;
+        let in_progress = s.held_work.iter().any(|h| self.work.get(&h.item_id).map_or(h.state.as_str(), |w| w.state.as_str()) == "in_progress");
+        if busy(s) || stopped || worker || in_progress || s.queue_count > 0 { Group::Holding } else { Group::Waiting }
+    }
+
     pub fn needs(&self) -> Vec<Need> {
         let mut out = Vec::new();
         for s in &self.sessions {
@@ -157,11 +201,12 @@ impl World {
             } else {
                 continue;
             };
-            out.push(Need { kind, project: s.project_name(), project_key: s.project_key(), title: plain(&headline), who: self.title(s), at, target: Target::Session(s.id.clone()), label: None });
+            out.push(Need { kind, group: self.group(kind, s), project: s.project_name(), project_key: s.project_key(), title: plain(&headline), who: self.title(s), at, target: Target::Session(s.id.clone()), label: None });
         }
         for w in self.work.values().filter(|w| self.is_waiting_on_you(w)) {
             out.push(Need {
                 kind: if ci_failing(w) { NeedKind::CiFailing } else { NeedKind::Check },
+                group: Group::Waiting,
                 project: self.project(&w.project).map(|p| p.name.clone()).unwrap_or_default(),
                 project_key: w.project.clone(),
                 title: plain(&w.text),
@@ -171,12 +216,12 @@ impl World {
                 label: Some(short_id(&w.id)),
             });
         }
-        sort(&mut out);
+        arrange(&mut out, None);
         out
     }
 
     pub fn ask_need(&self, a: &Ask) -> Option<Need> {
         let x = self.session(&a.session)?;
-        Some(Need { kind: NeedKind::Question, project: x.project_name(), project_key: x.project_key(), title: a.question.clone(), who: self.title(x), at: a.at.clone(), target: Target::Session(a.session.clone()), label: None })
+        Some(Need { kind: NeedKind::Question, group: self.group(NeedKind::Question, x), project: x.project_name(), project_key: x.project_key(), title: a.question.clone(), who: self.title(x), at: a.at.clone(), target: Target::Session(a.session.clone()), label: None })
     }
 }

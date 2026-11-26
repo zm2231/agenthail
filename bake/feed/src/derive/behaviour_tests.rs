@@ -112,3 +112,94 @@ fn ties_resolve_the_same_way_on_every_load() {
         assert_eq!(order(), first);
     }
 }
+
+fn asks(at: &str) -> Value {
+    json!({"endTurn": {"headline": "Which branch should this land on?", "outcome": "needs_you", "at": at}})
+}
+
+fn with(mut a: Value, b: Value) -> Value {
+    a.as_object_mut().unwrap().extend(b.as_object().unwrap().clone());
+    a
+}
+
+#[test]
+fn needs_hold_up_work_only_when_something_running_waits_on_you() {
+    let at = "2026-11-24T11:00:00Z";
+    let w = world(json!({
+        "sessions": [
+            session("ask", with(asks(at), json!({"attention": {"kind": "ask"}}))),
+            session("permission", with(asks(at), json!({"attention": {"kind": "permission"}}))),
+            session("stalled", with(asks(at), json!({"turnState": {"state": "waiting_person"}}))),
+            session("running", with(asks(at), json!({"status": "busy"}))),
+            session("worker", with(asks(at), json!({"startedBy": "lead"}))),
+            session("holder", with(asks(at), json!({"heldWork": [{"itemId": "p-W1", "state": "ready"}]}))),
+            session("queued", with(asks(at), json!({"queueCount": 2}))),
+            session("idle", asks(at)),
+            session("parked", with(asks(at), json!({"heldWork": [{"itemId": "p-W3", "state": "in_progress"}]}))),
+            session("lead", json!({})),
+            session("finished", json!({"turnCompletion": {"headline": "Wrote the migration", "outcome": "finished", "at": "2026-11-24T11:59:00Z"}})),
+        ],
+        "ledgers": {"p": [
+            {"id": "p-W1", "text": "Held", "state": "in_progress", "timeline": [{"at": at, "kind": "state", "state": "in_progress"}]},
+            {"id": "p-W2", "text": "Review me", "state": "in_review", "timeline": [{"at": at, "kind": "state", "state": "in_review"}]},
+            {"id": "p-W3", "text": "Parked", "state": "blocked", "timeline": [{"at": at, "kind": "state", "state": "blocked"}]}
+        ]}
+    }));
+    let needs = w.needs();
+    let of = |g: Group| -> Vec<String> {
+        let mut ids: Vec<String> = needs.iter().filter(|n| n.group == g).map(|n| match &n.target {
+            Target::Session(id) | Target::Work(id) | Target::Project(id) => id.clone(),
+        }).collect();
+        ids.sort();
+        ids
+    };
+    assert_eq!(of(Group::Holding), ["ask", "holder", "permission", "queued", "running", "stalled", "worker"]);
+    assert_eq!(of(Group::Waiting), ["finished", "idle", "p-W2", "parked"]);
+    let first_waiting = needs.iter().position(|n| n.group == Group::Waiting).unwrap();
+    assert!(needs[first_waiting..].iter().all(|n| n.group == Group::Waiting), "groups interleave");
+}
+
+#[test]
+fn what_arrived_after_you_looked_goes_above_the_cut() {
+    let w = world(json!({"sessions": [
+        session("old-q", asks("2026-11-24T09:00:00Z")),
+        session("new-q", asks("2026-11-24T11:30:00Z")),
+        session("old-done", json!({"turnCompletion": {"headline": "Old", "outcome": "needs_you", "at": "2026-11-24T08:00:00Z"}})),
+    ]}));
+    let ids = |needs: &[Need]| -> Vec<String> { needs.iter().map(|n| match &n.target { Target::Session(id) => id.clone(), other => format!("{other:?}") }).collect() };
+    let mut needs = w.needs();
+    assert_eq!(ids(&needs), ["old-done", "old-q", "new-q"]);
+    let looked = Some("2026-11-24T10:00:00Z");
+    needs::arrange(&mut needs, looked);
+    assert_eq!(ids(&needs), ["new-q", "old-done", "old-q"]);
+    assert!(needs::is_new(&needs[0].at, looked) && !needs[1..].iter().any(|n| needs::is_new(&n.at, looked)));
+    needs::arrange(&mut needs, None);
+    assert_eq!(ids(&needs), ["old-done", "old-q", "new-q"]);
+}
+
+#[test]
+fn since_you_left_reaches_back_to_when_you_looked() {
+    let w = world(json!({
+        "sessions": [session("s", json!({}))],
+        "ledgers": {"p": [
+            {"id": "p-A", "text": "Shipped long ago", "state": "done", "timeline": [{"at": "2026-11-23T20:00:00Z", "kind": "state", "state": "done"}]},
+            {"id": "p-B", "text": "Shipped before you looked", "state": "done", "timeline": [{"at": "2026-11-24T09:00:00Z", "kind": "state", "state": "done"}]},
+            {"id": "p-C", "text": "Shipped after", "state": "done", "timeline": [{"at": "2026-11-24T11:00:00Z", "kind": "state", "state": "done"}]},
+            {"id": "p-D", "text": "Still waiting", "state": "in_review", "timeline": [{"at": "2026-11-24T08:00:00Z", "kind": "state", "state": "in_review"}]}
+        ]}
+    }));
+    let p = w.project("p").unwrap().clone();
+    let text = |lines: &[&Line]| -> Vec<String> { lines.iter().map(|l| l.text.clone()).collect() };
+    assert_eq!(w.window(None), WINDOW_HOURS);
+    assert_eq!(w.window(Some("not a time")), WINDOW_HOURS);
+    let looked = Some("2026-11-24T10:00:00Z");
+    assert_eq!(w.window(looked), 2.0);
+    let lines = w.digest(&p, w.window(looked));
+    let (new, old) = digest::cut(lines.iter().collect(), looked);
+    assert_eq!(text(&new), ["Shipped after"]);
+    assert_eq!(text(&old), ["Still waiting"]);
+    let all = w.digest(&p, w.window(None));
+    let (new, old) = digest::cut(all.iter().collect(), None);
+    assert!(new.is_empty());
+    assert_eq!(text(&old), ["Shipped after", "Shipped before you looked", "Still waiting"]);
+}
