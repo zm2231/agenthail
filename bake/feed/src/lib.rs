@@ -1,4 +1,5 @@
 pub mod action;
+pub mod background;
 pub mod blocks;
 pub mod brief;
 pub mod question;
@@ -23,6 +24,7 @@ pub mod queue;
 pub mod prefer;
 pub mod source;
 pub mod store;
+pub mod subagents;
 pub mod summary;
 pub mod version;
 pub mod voice;

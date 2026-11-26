@@ -1,0 +1,264 @@
+use serde::Deserialize;
+use serde_json::{Value, json};
+use time::{OffsetDateTime, UtcOffset};
+
+use crate::catalog::parse_time;
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackgroundTasks {
+    #[serde(default)]
+    pub running: bool,
+    #[serde(default)]
+    pub tasks: Vec<BackgroundTask>,
+    #[serde(default)]
+    pub since: String,
+    #[serde(default)]
+    pub source: String,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackgroundTask {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub parent_id: String,
+    #[serde(default)]
+    pub ambient: bool,
+    #[serde(default)]
+    pub since: String,
+}
+
+impl BackgroundTasks {
+    pub fn is_shown(&self) -> bool {
+        self.running || !self.tasks.is_empty()
+    }
+
+    pub fn active_count(&self) -> usize {
+        self.tasks.iter().filter(|t| !t.ambient).count()
+    }
+
+    pub fn summary(&self) -> String {
+        if !self.running {
+            return "Only ambient tasks run".into();
+        }
+        match self.active_count() {
+            0 => "Background work running".into(),
+            1 => "1 background task running".into(),
+            n => format!("{n} background tasks running"),
+        }
+    }
+
+    pub fn source_note(&self) -> Option<&'static str> {
+        (self.source == "status").then_some("Claude reports a background shell but not which one.")
+    }
+
+    pub fn task_set(&self) -> String {
+        let mut ids: Vec<&str> = self.tasks.iter().map(|t| t.id.as_str()).collect();
+        ids.sort_unstable();
+        std::iter::once(if self.running { "running" } else { "ambient" }).chain(ids).collect::<Vec<_>>().join(",")
+    }
+}
+
+impl BackgroundTask {
+    pub fn kind_label(&self) -> String {
+        match self.kind.as_str() {
+            "shell" => "Shell".into(),
+            "agent" => "Agent".into(),
+            "monitor" => "Monitor".into(),
+            "" => "Task".into(),
+            other => {
+                let mut chars = other.chars();
+                chars.next().map(|c| c.to_uppercase().chain(chars.flat_map(char::to_lowercase)).collect()).unwrap_or_default()
+            }
+        }
+    }
+
+    pub fn line(&self) -> String {
+        let text = if self.description.trim().is_empty() { self.id.as_str() } else { self.description.as_str() };
+        let line = format!("{}: {text}", self.kind_label());
+        if self.ambient { format!("{line} (ambient)") } else { line }
+    }
+
+    pub fn since_at(&self) -> Option<OffsetDateTime> {
+        parse_time(&self.since)
+    }
+
+    pub fn since_text(&self, now: OffsetDateTime, offset: i32) -> Option<String> {
+        let offset = UtcOffset::from_whole_seconds(offset).unwrap_or(UtcOffset::UTC);
+        let at = self.since_at()?.to_offset(offset);
+        let now = now.to_offset(offset);
+        let hour = match at.hour() % 12 {
+            0 => 12,
+            h => h,
+        };
+        let clock = format!("{hour}:{:02} {}", at.minute(), if at.hour() < 12 { "AM" } else { "PM" });
+        if at.date() == now.date() {
+            Some(format!("since {clock}"))
+        } else {
+            let day = at.weekday().to_string();
+            Some(format!("since {} {clock}", &day[..3]))
+        }
+    }
+
+    pub fn timed_line(&self, now: OffsetDateTime, offset: i32) -> String {
+        match self.since_text(now, offset) {
+            Some(since) => format!("{} · {since}", self.line()),
+            None => self.line(),
+        }
+    }
+}
+
+const REMEMBERED: usize = 500;
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DockChoices {
+    dismissed: Vec<(String, String)>,
+    open: Vec<(String, String)>,
+}
+
+fn value<'a>(list: &'a [(String, String)], session: &str) -> Option<&'a str> {
+    list.iter().find(|(id, _)| id == session).map(|(_, v)| v.as_str())
+}
+
+fn set(list: &mut Vec<(String, String)>, session: &str, to: String) {
+    list.retain(|(id, _)| id != session);
+    list.push((session.to_string(), to));
+    if list.len() > REMEMBERED {
+        list.drain(..list.len() - REMEMBERED);
+    }
+}
+
+impl DockChoices {
+    pub fn shows(&self, background: &BackgroundTasks, session: &str) -> bool {
+        background.is_shown() && value(&self.dismissed, session) != Some(background.task_set().as_str())
+    }
+
+    pub fn dismiss(&mut self, background: &BackgroundTasks, session: &str) {
+        set(&mut self.dismissed, session, background.task_set());
+    }
+
+    pub fn is_open(&self, background: &BackgroundTasks, session: &str) -> bool {
+        value(&self.open, session).map_or(background.running, |v| v == "open")
+    }
+
+    pub fn toggle(&mut self, background: &BackgroundTasks, session: &str) {
+        let to = if self.is_open(background, session) { "closed" } else { "open" };
+        set(&mut self.open, session, to.into());
+    }
+
+    pub fn to_json(&self) -> Value {
+        let pairs = |list: &[(String, String)]| list.iter().map(|(id, v)| json!([id, v])).collect::<Vec<_>>();
+        json!({ "dismissed": pairs(&self.dismissed), "open": pairs(&self.open) })
+    }
+
+    pub fn from_json(v: &Value) -> DockChoices {
+        let pairs = |v: &Value| -> Vec<(String, String)> {
+            let mut list: Vec<(String, String)> = v.as_array().into_iter().flatten().filter_map(|p| Some((p.get(0)?.as_str()?.to_string(), p.get(1)?.as_str()?.to_string()))).collect();
+            if list.len() > REMEMBERED {
+                list.drain(..list.len() - REMEMBERED);
+            }
+            list
+        };
+        DockChoices { dismissed: pairs(&v["dismissed"]), open: pairs(&v["open"]) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(ts: &str) -> OffsetDateTime {
+        parse_time(ts).unwrap()
+    }
+
+    fn tasks(json: &str) -> BackgroundTasks {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn reads_the_daemon_shape() {
+        let b = tasks(r#"{"running":true,"tasks":[{"id":"bz1","kind":"shell","description":"Run HEAD rune lib suite three times","since":"2026-11-26T13:16:50.920000000Z"},{"id":"w1","kind":"monitor","ambient":true}],"since":"2026-11-26T13:16:50.920000000Z","source":"host"}"#);
+        assert_eq!(b.summary(), "1 background task running");
+        assert_eq!(b.tasks[0].line(), "Shell: Run HEAD rune lib suite three times");
+        assert_eq!(b.tasks[1].line(), "Monitor: w1 (ambient)");
+        assert_eq!(b.source_note(), None);
+        assert!(b.is_shown());
+    }
+
+    #[test]
+    fn the_summary_follows_what_runs() {
+        assert_eq!(tasks(r#"{"running":false,"tasks":[{"id":"w","kind":"monitor","ambient":true}],"source":"host"}"#).summary(), "Only ambient tasks run");
+        assert_eq!(tasks(r#"{"running":true,"source":"status"}"#).summary(), "Background work running");
+        assert_eq!(tasks(r#"{"running":true,"tasks":[{"id":"a","kind":"shell"},{"id":"b","kind":"agent"}],"source":"host"}"#).summary(), "2 background tasks running");
+        assert_eq!(tasks(r#"{"running":true,"source":"status"}"#).source_note(), Some("Claude reports a background shell but not which one."));
+        assert!(!tasks(r#"{"running":false,"source":"host"}"#).is_shown());
+    }
+
+    #[test]
+    fn an_unknown_kind_is_named_plainly() {
+        let t = |kind: &str| BackgroundTask { id: "x".into(), kind: kind.into(), ..Default::default() };
+        assert_eq!(t("agent").kind_label(), "Agent");
+        assert_eq!(t("cron").kind_label(), "Cron");
+        assert_eq!(t("").kind_label(), "Task");
+    }
+
+    #[test]
+    fn since_reads_as_a_local_clock() {
+        let t = BackgroundTask { id: "x".into(), kind: "shell".into(), description: "build".into(), since: "2026-11-26T13:16:50Z".into(), ..Default::default() };
+        let now = at("2026-11-26T15:00:00Z");
+        assert_eq!(t.timed_line(now, 0), "Shell: build · since 1:16 PM");
+        assert_eq!(t.timed_line(now, -5 * 3600), "Shell: build · since 8:16 AM");
+        assert_eq!(t.timed_line(at("2026-11-27T15:00:00Z"), 0), "Shell: build · since Thu 1:16 PM");
+        assert_eq!(t.timed_line(at("2026-11-26T15:00:00Z"), 11 * 3600), "Shell: build · since 12:16 AM");
+        let undated = BackgroundTask { since: String::new(), ..t };
+        assert_eq!(undated.timed_line(now, 0), "Shell: build");
+    }
+
+    #[test]
+    fn a_dismissed_dock_returns_when_the_tasks_change() {
+        let one = tasks(r#"{"running":true,"tasks":[{"id":"a","kind":"shell"}],"source":"host"}"#);
+        let two = tasks(r#"{"running":true,"tasks":[{"id":"b","kind":"shell"},{"id":"a","kind":"shell"}],"source":"host"}"#);
+        let mut c = DockChoices::default();
+        assert!(c.shows(&one, "s"));
+        c.dismiss(&one, "s");
+        assert!(!c.shows(&one, "s"));
+        assert!(c.shows(&one, "other"));
+        assert!(c.shows(&two, "s"));
+        let back = DockChoices::from_json(&c.to_json());
+        assert_eq!(back, c);
+        assert!(!back.shows(&one, "s"));
+    }
+
+    #[test]
+    fn the_dock_opens_unless_only_ambient_tasks_run() {
+        let running = tasks(r#"{"running":true,"tasks":[{"id":"a","kind":"shell"}],"source":"host"}"#);
+        let ambient = tasks(r#"{"running":false,"tasks":[{"id":"w","kind":"monitor","ambient":true}],"source":"host"}"#);
+        let mut c = DockChoices::default();
+        assert!(c.is_open(&running, "s"));
+        assert!(!c.is_open(&ambient, "s"));
+        c.toggle(&running, "s");
+        assert!(!c.is_open(&running, "s"));
+        c.toggle(&running, "s");
+        assert!(c.is_open(&ambient, "s"));
+    }
+
+    #[test]
+    fn choices_keep_only_the_latest_sessions() {
+        let b = tasks(r#"{"running":true,"source":"host"}"#);
+        let mut c = DockChoices::default();
+        for i in 0..REMEMBERED + 10 {
+            c.dismiss(&b, &format!("s{i}"));
+        }
+        assert!(c.shows(&b, "s0"));
+        assert!(!c.shows(&b, &format!("s{}", REMEMBERED + 9)));
+        assert_eq!(DockChoices::from_json(&c.to_json()).dismissed.len(), REMEMBERED);
+        c.dismiss(&b, "s20");
+        assert_eq!(c.dismissed.last().map(|(id, _)| id.as_str()), Some("s20"));
+    }
+}
