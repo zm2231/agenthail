@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
@@ -336,23 +337,28 @@ pub fn phase(state: &str) -> usize {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RespondError {
     pub message: String,
+    pub code: String,
     pub maybe_delivered: bool,
 }
 
 impl RespondError {
-    pub fn from_send_status(code: u16, body: &str) -> Self {
-        let mut error = Self::from_status(code, body);
-        error.maybe_delivered = matches!(code, 502 | 504);
-        error
+    pub fn from_status(action: &str, status: u16, body: &str) -> Self {
+        let error = serde_json::from_str::<Value>(body).ok().map(|v| v["error"].clone()).unwrap_or_default();
+        let code = error["code"].as_str().unwrap_or_default().to_string();
+        let message = error["message"].as_str().map(str::to_string).unwrap_or_else(|| format!("status code {status}"));
+        let released_answer = action == "respond" && code == "bad_gateway" && !message.starts_with("the answer may have reached");
+        let maybe_delivered = match status {
+            504 => true,
+            502 => !released_answer,
+            _ => false,
+        };
+        RespondError { message, code, maybe_delivered }
     }
 
-    pub fn from_status(code: u16, body: &str) -> Self {
-        let message = serde_json::from_str::<Value>(body)
-            .ok()
-            .and_then(|v| v["error"]["message"].as_str().map(str::to_string))
-            .unwrap_or_else(|| format!("status code {code}"));
-        let maybe_delivered = code == 502 && message.starts_with("the answer may have reached");
-        RespondError { message, maybe_delivered }
+    fn from_transport(error: &ureq::Transport) -> Self {
+        use ureq::ErrorKind::*;
+        let unsent = matches!(error.kind(), InvalidUrl | UnknownScheme | Dns | InsecureRequestHttpsOnly | ConnectionFailed | InvalidProxyUrl | ProxyConnect | ProxyUnauthorized);
+        RespondError { message: error.to_string(), code: String::new(), maybe_delivered: !unsent }
     }
 }
 
@@ -476,8 +482,12 @@ pub(crate) fn enc(value: &str) -> String {
 impl Client {
     pub fn from_env() -> Result<Self> {
         let (base, token) = crate::daemon()?;
+        Ok(Self::new(&base, &token))
+    }
+
+    pub fn new(base: &str, token: &str) -> Self {
         let agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(5)).timeout(Duration::from_secs(30)).build();
-        Ok(Self { base: base.trim_end_matches('/').into(), token, agent })
+        Self { base: base.trim_end_matches('/').into(), token: token.into(), agent }
     }
 
     fn get(&self, path: &str) -> Result<Value> {
@@ -558,34 +568,40 @@ impl Client {
     }
 
     pub fn respond(&self, session: &str, request: &str, choices: Vec<String>, answers: std::collections::BTreeMap<String, String>) -> std::result::Result<(), RespondError> {
-        let key = format!("bake-respond-{}-{}", request, OffsetDateTime::now_utc().unix_timestamp_nanos());
-        match self
-            .agent
-            .post(&format!("{}/api/v1/actions", self.base))
-            .set("Authorization", &format!("Bearer {}", self.token))
-            .set("Idempotency-Key", &key)
-            .send_json(serde_json::json!({"action": "respond", "sessionId": session, "requestId": request, "decision": {"choices": choices, "answers": answers}}))
-        {
-            Ok(_) => Ok(()),
-            Err(ureq::Error::Status(code, response)) => Err(RespondError::from_status(code, &response.into_string().unwrap_or_default())),
-            Err(error) => Err(RespondError { message: error.to_string(), maybe_delivered: true }),
-        }
+        self.action("respond", serde_json::json!({"sessionId": session, "requestId": request, "decision": {"choices": choices, "answers": answers}})).map(drop)
     }
 
     pub fn send(&self, session: &str, message: &str) -> std::result::Result<(), RespondError> {
-        let key = format!("bake-{}-{}", session, OffsetDateTime::now_utc().unix_timestamp_nanos());
+        self.action("send", serde_json::json!({"sessionId": session, "message": message, "author": "person"})).map(drop)
+    }
+
+    pub fn action(&self, name: &str, payload: Value) -> std::result::Result<Value, RespondError> {
+        let body = action_body(name, payload)?;
         match self
             .agent
             .post(&format!("{}/api/v1/actions", self.base))
             .set("Authorization", &format!("Bearer {}", self.token))
-            .set("Idempotency-Key", &key)
-            .send_json(serde_json::json!({"action": "send", "sessionId": session, "message": message, "author": "person"}))
+            .set("Idempotency-Key", &request_key())
+            .send_json(body)
         {
-            Ok(_) => Ok(()),
-            Err(ureq::Error::Status(code, response)) => Err(RespondError::from_send_status(code, &response.into_string().unwrap_or_default())),
-            Err(error) => Err(RespondError { message: error.to_string(), maybe_delivered: true }),
+            Ok(response) => Ok(response.into_json().unwrap_or(Value::Null)),
+            Err(ureq::Error::Status(code, response)) => Err(RespondError::from_status(name, code, &response.into_string().unwrap_or_default())),
+            Err(ureq::Error::Transport(error)) => Err(RespondError::from_transport(&error)),
         }
     }
+}
+
+fn action_body(name: &str, payload: Value) -> std::result::Result<Value, RespondError> {
+    let Value::Object(mut fields) = payload else {
+        return Err(RespondError { message: format!("the {name} payload is not a JSON object"), code: "invalid_request".into(), maybe_delivered: false });
+    };
+    fields.insert("action".into(), Value::String(name.into()));
+    Ok(Value::Object(fields))
+}
+
+fn request_key() -> String {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    format!("bake-{}-{}-{}", std::process::id(), OffsetDateTime::now_utc().unix_timestamp_nanos(), SEQ.fetch_add(1, Ordering::Relaxed))
 }
 
 #[cfg(test)]
@@ -594,19 +610,20 @@ mod respond_error_tests {
 
     #[test]
     fn a_maybe_delivered_answer_is_not_offered_again() {
-        let e = RespondError::from_status(502, r#"{"error":{"code":"bad_gateway","message":"the answer may have reached the session, so it is not sent again: timeout"}}"#);
+        let e = RespondError::from_status("respond", 502, r#"{"error":{"code":"bad_gateway","message":"the answer may have reached the session, so it is not sent again: timeout"}}"#);
         assert!(e.maybe_delivered);
         assert!(e.message.starts_with("the answer may have reached"));
     }
 
     #[test]
     fn a_released_answer_can_be_given_again() {
-        let e = RespondError::from_status(502, r#"{"error":{"code":"bad_gateway","message":"session ended"}}"#);
+        let e = RespondError::from_status("respond", 502, r#"{"error":{"code":"bad_gateway","message":"session ended"}}"#);
         assert!(!e.maybe_delivered);
-        let stale = RespondError::from_status(409, r#"{"error":{"code":"stale","message":"this request was already answered or has expired"}}"#);
+        let stale = RespondError::from_status("respond", 409, r#"{"error":{"code":"stale","message":"this request was already answered or has expired"}}"#);
         assert!(!stale.maybe_delivered);
         assert_eq!(stale.message, "this request was already answered or has expired");
-        assert_eq!(RespondError::from_status(500, "not json").message, "status code 500");
+        assert_eq!(stale.code, "stale");
+        assert_eq!(RespondError::from_status("respond", 500, "not json").message, "status code 500");
     }
 
     #[test]
@@ -624,7 +641,8 @@ mod respond_error_tests {
 
     #[test]
     fn a_send_lost_at_the_gateway_is_unconfirmed() {
-        assert!(RespondError::from_send_status(504, "").maybe_delivered);
-        assert!(!RespondError::from_send_status(503, r#"{"error":{"code":"unavailable","message":"down"}}"#).maybe_delivered);
+        assert!(RespondError::from_status("send", 504, "").maybe_delivered);
+        assert!(RespondError::from_status("send", 502, "").maybe_delivered);
+        assert!(!RespondError::from_status("send", 503, r#"{"error":{"code":"unavailable","message":"down"}}"#).maybe_delivered);
     }
 }

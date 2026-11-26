@@ -1,3 +1,4 @@
+pub mod action;
 pub mod blocks;
 pub mod question;
 pub mod catalog;
