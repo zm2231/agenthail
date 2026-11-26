@@ -568,3 +568,43 @@ func TestALateCancelForAnEndedTurnLeavesTheNextTurnRunning(t *testing.T) {
 		t.Fatalf("done=%+v", done)
 	}
 }
+
+func TestCancellingAnIdleSessionAnswersItsOpenRequests(t *testing.T) {
+	h := startHost(t, fakeAgent(t, "fake"))
+	state := h.create("fake", "", "")
+	s := h.host.heldSession(state.SessionID)
+	pending := &pendingRequest{request: Request{ID: "req-idle"}, answer: make(chan permissionAnswer, 1)}
+	s.mu.Lock()
+	s.pending["req-idle"] = pending
+	s.mu.Unlock()
+	if err := s.cancel(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case answer := <-pending.answer:
+		if answer.result.Outcome.Outcome != "cancelled" {
+			t.Fatalf("answer=%+v", answer.result)
+		}
+	default:
+		t.Fatal("an open request on an idle session must be answered cancelled")
+	}
+	if len(s.snapshot().Requests) != 0 {
+		t.Fatal("the request must be gone")
+	}
+}
+
+func TestACancelRacingTheNextPromptNeverEndsIt(t *testing.T) {
+	h := startHost(t, fakeAgent(t, "fake"))
+	state := h.create("fake", "", "")
+	s := h.host.heldSession(state.SessionID)
+	for i := range 30 {
+		turn := h.send(state.SessionID, fmt.Sprintf("reply:race-%d", i))
+		go func() { _ = s.cancelTurn(turn) }()
+		h.waitFor(state.SessionID, func(s State) bool { return s.LastTurnID == turn })
+		next := h.send(state.SessionID, "reply:next")
+		done := h.waitFor(state.SessionID, func(s State) bool { return s.LastTurnID == next })
+		if done.LastStop != "end_turn" {
+			t.Fatalf("iteration %d: a cancel for the previous turn ended the next one (%s)", i, done.LastStop)
+		}
+	}
+}

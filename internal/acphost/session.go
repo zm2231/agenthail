@@ -705,11 +705,15 @@ func (s *session) cancel() error {
 	return s.cancelTurn(turnID)
 }
 
+// cancelTurn holds startMu through the write so no later prompt can reach the agent ahead of this session-wide cancel.
 func (s *session) cancelTurn(turnID string) error {
+	s.startMu.Lock()
+	defer s.startMu.Unlock()
 	s.mu.Lock()
 	conn, agentSession := s.conn, s.state.AgentSessionID
-	busy := s.state.Status == StatusBusy && turnID != "" && s.state.TurnID == turnID
-	if busy {
+	current := s.state.TurnID == turnID
+	busy := current && turnID != "" && s.state.Status == StatusBusy
+	if current {
 		s.cancelRequestsLocked()
 	}
 	s.mu.Unlock()

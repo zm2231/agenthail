@@ -44,13 +44,12 @@ type Agent struct {
 	conn     *acp.Conn
 	mu       sync.Mutex
 	cancels  map[string]chan struct{}
-	early    map[string]bool
 }
 
 func NewAgent(stateDir string) *Agent { return &Agent{stateDir: stateDir} }
 
 func (a *Agent) Serve(r io.Reader, w io.Writer) {
-	a.cancels, a.early = map[string]chan struct{}{}, map[string]bool{}
+	a.cancels = map[string]chan struct{}{}
 	a.conn = acp.NewConn(r, w, a)
 	a.conn.Start()
 	<-a.conn.Done()
@@ -66,9 +65,18 @@ func (a *Agent) Notification(method string, params json.RawMessage) {
 	if cancel := a.cancels[p.SessionID]; cancel != nil {
 		close(cancel)
 		delete(a.cancels, p.SessionID)
-	} else {
-		a.early[p.SessionID] = true
 	}
+	a.mu.Unlock()
+}
+
+func (a *Agent) Received(method string, params json.RawMessage) {
+	if method != "session/prompt" {
+		return
+	}
+	var p acp.PromptParams
+	_ = json.Unmarshal(params, &p)
+	a.mu.Lock()
+	a.cancels[p.SessionID] = make(chan struct{})
 	a.mu.Unlock()
 }
 
@@ -175,13 +183,11 @@ func (a *Agent) prompt(ctx context.Context, p acp.PromptParams) (any, error) {
 	for _, block := range p.Prompt {
 		text += block.Text
 	}
-	cancel := make(chan struct{})
 	a.mu.Lock()
-	if a.early[s.ID] {
-		delete(a.early, s.ID)
+	cancel := a.cancels[s.ID]
+	if cancel == nil {
+		cancel = make(chan struct{})
 		close(cancel)
-	} else {
-		a.cancels[s.ID] = cancel
 	}
 	a.mu.Unlock()
 	defer func() {

@@ -35,6 +35,10 @@ type Handler interface {
 	Notification(method string, params json.RawMessage)
 }
 
+type Receiver interface {
+	Received(method string, params json.RawMessage)
+}
+
 type Acknowledged struct {
 	Result  any
 	Written func(error)
@@ -176,6 +180,9 @@ func (c *Conn) read(r io.Reader) {
 		}
 		switch {
 		case m.Method != "" && len(m.ID) > 0:
+			if receiver, ok := c.handler.(Receiver); ok {
+				receiver.Received(m.Method, m.Params)
+			}
 			go c.serve(m)
 		case m.Method != "":
 			if c.handler != nil {
