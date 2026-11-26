@@ -176,7 +176,7 @@ fn dialog(s: &App, id: &str, layer: &mut Vec<El>) {
         .child(Button::new(if s.prs.saving { "Linking…" } else { "Link" }).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(s.prs.saving || problem.is_some()).on_press(save).build(k).key("pr-link-save"));
     let title = session(s, id).map(|x| x.title()).unwrap_or_default();
     Dialog::new("pr-link", format!("Link a pull request to {title}"))
-        .description("A number picks the pull request with that number already linked to this session, or else the one in the session's own repository. Linking also watches it, so changes to it wake the session.")
+        .description("A number picks the pull request with that number already linked to this session, or else the one in the session's own repository; if linked pull requests in more than one repository share the number, paste the link instead. Linking also watches it, so changes to it wake the session.")
         .open(true)
         .fit()
         .width(440.0)

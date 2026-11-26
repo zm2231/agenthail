@@ -45,6 +45,7 @@ pub struct Limits {
     generation: u64,
     pub busy: HashSet<String>,
     pub note: HashMap<String, (String, bool, String)>,
+    pub warnings: Vec<String>,
     tx: Sender<Done>,
     rx: Receiver<Done>,
 }
@@ -52,7 +53,7 @@ pub struct Limits {
 impl Limits {
     pub fn new() -> Limits {
         let (tx, rx) = channel();
-        Limits { picking: None, confirm: None, consent: None, roots: HashMap::new(), unread: HashSet::new(), reading: HashMap::new(), refresh_error: HashMap::new(), generation: 0, busy: HashSet::new(), note: HashMap::new(), tx, rx }
+        Limits { picking: None, confirm: None, consent: None, roots: HashMap::new(), unread: HashSet::new(), reading: HashMap::new(), refresh_error: HashMap::new(), generation: 0, busy: HashSet::new(), note: HashMap::new(), warnings: Vec::new(), tx, rx }
     }
 }
 
@@ -216,7 +217,7 @@ fn settled(s: &mut App, done: Done) {
                 Ok(Moved::Done(Some(detail))) => {
                     let title = session(s, &id).map(|x| x.title()).unwrap_or_default();
                     let text = format!("Moved {title} to {}, but {detail}", target.name);
-                    s.ov.notice = Some(text.clone());
+                    s.limits.warnings.push(text.clone());
                     note(s, &id, stop, text, true);
                 }
                 Ok(Moved::NeedsConsent(message)) => {
@@ -451,7 +452,24 @@ fn consent(c: &Consent, layer: &mut Vec<El>) {
         .build(k, layer);
 }
 
+fn warnings(s: &App, layer: &mut Vec<El>) {
+    let k = theme::kit();
+    let mut stack = col().gap(8.0).w(420.0);
+    for (i, warning) in s.limits.warnings.iter().enumerate() {
+        let toast = rune_kit::Toast::new(format!("move-warning-{i}"), warning.clone()).icon(k, &icons::GAUGE).on_close(move |s: &mut App| {
+            if i < s.limits.warnings.len() {
+                s.limits.warnings.remove(i);
+            }
+        });
+        stack = stack.child(toast.closable().build(k));
+    }
+    layer.push(col().absolute(0.0, 0.0).w_full().h_full().items_end().justify_start().padding(24.0).child(stack));
+}
+
 pub fn overlays(s: &App, layer: &mut Vec<El>) {
+    if !s.limits.warnings.is_empty() {
+        warnings(s, layer);
+    }
     if let Some((id, since)) = &s.limits.picking {
         picker(s, id, since, layer);
     }
