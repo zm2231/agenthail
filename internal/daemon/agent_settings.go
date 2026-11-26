@@ -10,7 +10,13 @@ import (
 )
 
 func (d *Daemon) agentGate(adapter surface.Surface) error {
-	config, _ := dashconfig.Load()
+	if _, local := adapter.(surface.LocalAgent); !local {
+		return nil
+	}
+	config, err := dashconfig.Load()
+	if err != nil {
+		return fmt.Errorf("whether %s is turned on or off cannot be read until %s is fixed: %w", adapter.Name(), dashconfig.Path(), err)
+	}
 	return surface.AgentGate(adapter, config.AgentMode(string(adapter.Name())))
 }
 

@@ -81,7 +81,11 @@ func (a *App) cmdDoctor(args []string) error {
 		if caps.Steer {
 			enabled = append(enabled, "steer")
 		}
-		if gate := surface.AgentGate(e.Surface, settings.AgentMode(e.Name)); gate != nil {
+		gate := surface.AgentGate(e.Surface, settings.AgentMode(e.Name))
+		if _, local := e.Surface.(surface.LocalAgent); local && settingsErr != nil {
+			gate = fmt.Errorf("whether %s is turned on or off cannot be read until %s is fixed", e.Name, dashconfig.Path())
+		}
+		if gate != nil {
 			result := doctorResult{Surface: e.Name, Capabilities: enabled, WritePath: "checked immediately before delivery", OK: true}
 			switch {
 			case agentswitch.IsOff(gate):

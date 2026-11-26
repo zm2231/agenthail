@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -89,6 +91,18 @@ func TestAnAgentNotInstalledIsUnavailableAndOneTurnedOffIsNeitherDiscoveredNorSt
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "Codex is turned off") {
 		t.Fatalf("start while off: status=%d body=%s", response.Code, response.Body.String())
 	}
+
+	installed = true
+	if err := os.WriteFile(dashconfig.Path(), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if response := serveDashboardRequest(handler, http.MethodPost, "/api/action", `{"action":"session-create","surface":"codex","message":"hello"}`); response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "cannot be read") {
+		t.Fatalf("start with unreadable settings: status=%d body=%s", response.Code, response.Body.String())
+	}
+	if err := os.Remove(dashconfig.Path()); err != nil {
+		t.Fatal(err)
+	}
+	installed = false
 
 	for _, body := range []string{`{"action":"agent-mode","agent":"codex","mode":"disabled"}`, `{"action":"agent-mode","agent":"notion","mode":"off"}`} {
 		if response := serveDashboardRequest(handler, http.MethodPost, "/api/settings", body); response.Code != http.StatusBadRequest {
