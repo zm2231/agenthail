@@ -50,6 +50,10 @@ pub fn wants_page(x: &Session) -> bool {
     x.hidden_subagents.as_ref().is_some_and(|h| h.count > 0)
 }
 
+pub fn page_wanted(x: &Session, listed: bool) -> bool {
+    !listed || wants_page(x)
+}
+
 pub fn page_key(x: &Session) -> String {
     let roll = |r: &Option<Rollup>| r.as_ref().map_or("-".to_string(), |r| format!("{}/{}", r.count, r.working));
     format!("{}|{}|{}|{}", x.id, roll(&x.subagents), roll(&x.hidden_subagents), roll(&x.live_hidden_subagents))
@@ -296,6 +300,15 @@ mod tests {
         assert!(!wants_page(&row(r#"{"id":"p","hiddenSubagents":{"count":0,"working":0}}"#)));
         let busier = row(r#"{"id":"p","subagents":{"count":28,"working":1},"hiddenSubagents":{"count":27,"working":1}}"#);
         assert_ne!(page_key(&parent), page_key(&busier));
+    }
+
+    #[test]
+    fn a_row_from_outside_the_list_always_reads_its_page() {
+        let counted = row(r#"{"id":"p","hiddenSubagents":{"count":0,"working":0}}"#);
+        assert!(!page_wanted(&counted, true));
+        assert!(page_wanted(&counted, false));
+        assert!(page_wanted(&row(r#"{"id":"p"}"#), false));
+        assert!(page_wanted(&row(r#"{"id":"p","hiddenSubagents":{"count":2,"working":0}}"#), true));
     }
 
     #[test]

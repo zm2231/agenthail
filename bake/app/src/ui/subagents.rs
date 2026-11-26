@@ -128,14 +128,19 @@ pub(crate) fn refresh(s: &mut App, id: &str) {
 }
 
 fn outside(s: &App, id: &str) -> bool {
-    !s.sessions.iter().any(|x| x.id == id) && !s.crew.pages.values().flatten().any(|x| x.id == id)
+    !listed(s, id) && !s.crew.pages.values().flatten().any(|x| x.id == id)
+}
+
+fn known<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
+    super::gone::shown(s, id)
+}
+
+fn listed(s: &App, id: &str) -> bool {
+    s.sessions.iter().any(|x| x.id == id)
 }
 
 fn parent_of(s: &App, id: &str) -> Option<String> {
-    session(s, id).and_then(crew::parent_of).or_else(|| match &s.missing {
-        Some(super::gone::Missing { id: m, look: super::gone::Look::Found(g), .. }) if m == id => crew::parent_of(&g.row),
-        _ => None,
-    })
+    known(s, id).and_then(crew::parent_of)
 }
 
 fn read_row(s: &mut App, id: &str) {
@@ -150,8 +155,8 @@ fn read_row(s: &mut App, id: &str) {
 }
 
 fn page(s: &mut App, id: &str) {
-    let Some(x) = session(s, id) else { return };
-    if !crew::wants_page(x) && !s.crew.rows.contains_key(id) {
+    let Some(x) = known(s, id) else { return };
+    if !crew::page_wanted(x, listed(s, id)) {
         if !s.crew.loading.contains(id) {
             keep_selected(s, id, &[]);
             s.crew.pages.remove(id);
@@ -173,7 +178,7 @@ fn page(s: &mut App, id: &str) {
 }
 
 fn claude(s: &mut App, id: &str) {
-    let Some(stamp) = session(s, id).filter(|x| x.surface == "claude").map(|x| x.last_active.clone()) else { return };
+    let Some(stamp) = known(s, id).filter(|x| x.surface == "claude").map(|x| x.last_active.clone()) else { return };
     if s.crew.claude_loading.contains(id) {
         return;
     }
