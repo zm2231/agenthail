@@ -19,6 +19,14 @@ fn only_job(effects: &[Effect]) -> Job {
     list.remove(0)
 }
 
+fn refresh(effects: &[Effect]) -> Job {
+    jobs(effects).into_iter().find(|j| j.req == Req::Refresh).unwrap()
+}
+
+fn beat(effects: &[Effect]) -> Option<Job> {
+    jobs(effects).into_iter().find(|j| matches!(j.req, Req::Heartbeat(_)))
+}
+
 fn named(job: &Job) -> &str {
     job.action.as_ref().map(|a| a.action.as_str()).unwrap_or("GET")
 }
@@ -38,10 +46,12 @@ fn dialed(call: &mut Call) -> String {
     let prepare = only_job(&call.reply(select, Ok(state(json!({"phase": "ready"}))), 0.0));
     assert_eq!(named(&prepare), "prepare");
     let asked = call.reply(prepare, Ok(state(json!({"phase": "ready", "session": {"id": "op", "name": "Agenthail orchestrator"}}))), 0.0);
-    assert_eq!(asked, vec![Effect::AskMic]);
-    assert_eq!(call.mic(true), vec![Effect::PeerStart]);
+    let id = call.attempt().unwrap().to_string();
+    assert_eq!(asked, vec![Effect::AskMic(id.clone())]);
+    assert_eq!(call.mic(&id, true), vec![Effect::PeerStart]);
+    assert!(call.mic(&id, true).is_empty(), "one answer per ask");
     assert!(!call.working(), "the call button frees once the peer starts");
-    call.attempt().unwrap().to_string()
+    id
 }
 
 fn started(call: &mut Call, now: f64) -> String {
@@ -86,11 +96,14 @@ fn a_whole_call_connects_mutes_and_hangs_up() {
     let mut call = ready();
     assert!(call.can_call());
     let id = started(&mut call, 0.0);
-    let refresh = only_job(&call.tick(1.0));
-    let answer = call.reply(refresh, Ok(state(json!({"phase": "negotiating", "attemptId": id, "sdp": "v=0 answer"}))), 1.0);
+    let ticked = call.tick(1.0);
+    let first = beat(&ticked).unwrap();
+    assert_eq!(first.req, Req::Heartbeat(id.clone()), "the first heartbeat goes out as soon as the host has the call");
+    call.reply(first, Ok(state(json!({"phase": "negotiating", "attemptId": id}))), 1.0);
+    let answer = call.reply(refresh(&ticked), Ok(state(json!({"phase": "negotiating", "attemptId": id, "sdp": "v=0 answer"}))), 1.0);
     assert_eq!(answer, vec![Effect::PeerAnswer("v=0 answer".into())]);
-    let refresh = only_job(&call.tick(2.0));
-    assert!(call.reply(refresh, Ok(state(json!({"phase": "negotiating", "attemptId": id, "sdp": "v=0 answer"}))), 2.0).is_empty(), "an answer is applied once");
+    let again = refresh(&call.tick(2.0));
+    assert!(call.reply(again, Ok(state(json!({"phase": "negotiating", "attemptId": id, "sdp": "v=0 answer"}))), 2.0).is_empty(), "an answer is applied once");
     assert!(call.peer("connection", "connected", 2.0).is_empty());
     let connected = only_job(&call.peer("channel", "open", 2.0));
     assert_eq!(connected.req, Req::Connected(id.clone()));
@@ -110,8 +123,8 @@ fn a_whole_call_connects_mutes_and_hangs_up() {
     assert_eq!(stop.action.as_ref().unwrap().attempt_id.as_deref(), Some(id.as_str()));
     assert!(call.hangup_pending);
     call.reply(stop, Ok(state(json!({"phase": "stopping", "attemptId": id}))), 3.0);
-    let refresh = only_job(&call.tick(4.0));
-    call.reply(refresh, Ok(state(json!({"phase": "ended", "attemptId": id}))), 4.0);
+    let ended = refresh(&call.tick(4.0));
+    call.reply(ended, Ok(state(json!({"phase": "ended", "attemptId": id}))), 4.0);
     assert!(!call.hangup_pending && !call.active());
     assert!(call.can_call());
     assert_eq!(call.error, None);
@@ -123,7 +136,8 @@ fn a_denied_microphone_ends_the_attempt_before_any_start() {
     let select = only_job(&call.call());
     let prepare = only_job(&call.reply(select, Ok(state(json!({"phase": "ready"}))), 0.0));
     call.reply(prepare, Ok(state(json!({"phase": "ready"}))), 0.0);
-    assert_eq!(call.mic(false), vec![Effect::PeerEnd]);
+    let id = call.attempt().unwrap().to_string();
+    assert_eq!(call.mic(&id, false), vec![Effect::PeerEnd]);
     assert!(call.mic_denied);
     assert_eq!(call.error.as_deref(), Some(MIC_DENIED));
     assert!(!call.active() && call.can_call());
@@ -153,27 +167,43 @@ fn another_device_owns_the_call() {
 }
 
 #[test]
-fn heartbeats_run_every_ten_seconds_and_a_lost_host_ends_the_call() {
+fn heartbeats_run_every_ten_seconds_and_a_stalled_host_ends_the_call_at_the_deadline() {
     let mut call = ready();
     let id = started(&mut call, 0.0);
-    let due: Vec<Job> = jobs(&call.tick(9.0)).into_iter().filter(|j| j.req != Req::Refresh).collect();
-    assert!(due.is_empty());
-    let beat = jobs(&call.tick(10.0)).into_iter().find(|j| j.req == Req::Heartbeat(id.clone())).unwrap();
-    assert!(jobs(&call.tick(10.5)).iter().all(|j| !matches!(j.req, Req::Heartbeat(_))), "one heartbeat at a time");
-    call.reply(beat, Err("connection refused".into()), 15.0);
-    let beat = jobs(&call.tick(25.0)).into_iter().find(|j| matches!(j.req, Req::Heartbeat(_))).unwrap();
-    let after = call.reply(beat, Err("connection refused".into()), 31.0);
-    assert!(after.contains(&Effect::PeerEnd));
-    assert_eq!(named(&only_job(&after)), "stop");
+    let first = beat(&call.tick(0.0)).unwrap();
+    assert!(beat(&call.tick(0.5)).is_none(), "one heartbeat at a time");
+    call.reply(first, Ok(state(json!({"phase": "negotiating", "attemptId": id}))), 0.5);
+    assert!(beat(&call.tick(10.0)).is_none());
+    let stalled = beat(&call.tick(10.5));
+    assert!(stalled.is_some());
+    assert!(!call.tick(30.4).contains(&Effect::PeerEnd));
+    let after = call.tick(30.6);
+    assert!(after.contains(&Effect::PeerEnd), "the deadline holds while the heartbeat is still waiting");
+    assert!(jobs(&after).iter().any(|j| named(j) == "stop"));
     assert!(call.error.as_deref().unwrap().starts_with("The connection to Agenthail was lost"));
+    call.reply(stalled.unwrap(), Err("timed out".into()), 40.0);
+    assert!(!call.active() || call.hangup_pending);
+}
+
+#[test]
+fn failed_heartbeats_inside_the_grace_keep_the_call() {
+    let mut call = ready();
+    let id = started(&mut call, 0.0);
+    let first = beat(&call.tick(0.0)).unwrap();
+    call.reply(first, Err("connection refused".into()), 5.0);
+    let second = beat(&call.tick(15.0)).unwrap();
+    assert_eq!(second.req, Req::Heartbeat(id.clone()));
+    call.reply(second, Ok(state(json!({"phase": "negotiating", "attemptId": id}))), 15.0);
+    assert!(!call.tick(40.0).contains(&Effect::PeerEnd), "a heartbeat that landed restarts the grace");
+    assert!(call.attempt().is_some());
 }
 
 #[test]
 fn a_heartbeat_that_finds_the_host_stopping_hangs_up() {
     let mut call = ready();
     let id = started(&mut call, 0.0);
-    let beat = jobs(&call.tick(10.0)).into_iter().find(|j| matches!(j.req, Req::Heartbeat(_))).unwrap();
-    let after = call.reply(beat, Ok(state(json!({"phase": "stopping", "attemptId": id, "message": "Codex closed the call"}))), 10.0);
+    let first = beat(&call.tick(10.0)).unwrap();
+    let after = call.reply(first, Ok(state(json!({"phase": "stopping", "attemptId": id, "message": "Codex closed the call"}))), 10.0);
     assert!(after.contains(&Effect::PeerEnd));
     assert_eq!(call.error.as_deref(), Some("Codex closed the call"));
     assert!(call.attempt().is_none());
@@ -207,12 +237,12 @@ fn an_unconfirmed_hangup_can_be_retried_for_the_same_attempt() {
 #[test]
 fn a_failed_refresh_shows_reconnecting_until_the_next_one_lands() {
     let mut call = ready();
-    let refresh = only_job(&call.tick(1.0));
-    call.reply(refresh, Err("connection refused".into()), 1.0);
+    let failed = only_job(&call.tick(1.0));
+    call.reply(failed, Err("connection refused".into()), 1.0);
     assert_eq!(call.title(), "Reconnecting to Agenthail");
     assert!(!call.can_call());
-    let refresh = only_job(&call.tick(2.0));
-    call.reply(refresh, Ok(state(json!({"phase": "ready"}))), 2.0);
+    let next = only_job(&call.tick(2.0));
+    call.reply(next, Ok(state(json!({"phase": "ready"}))), 2.0);
     assert_eq!(call.title(), "Ready to talk");
 }
 
@@ -231,8 +261,8 @@ fn audio_that_stays_disconnected_for_ten_seconds_ends_the_call() {
 fn the_host_ending_a_dialing_call_says_so() {
     let mut call = ready();
     let id = started(&mut call, 0.0);
-    let refresh = only_job(&call.tick(1.0));
-    let after = call.reply(refresh, Ok(state(json!({"phase": "ended", "attemptId": id}))), 1.0);
+    let ended = refresh(&call.tick(1.0));
+    let after = call.reply(ended, Ok(state(json!({"phase": "ended", "attemptId": id}))), 1.0);
     assert!(after.contains(&Effect::PeerEnd));
     assert_eq!(call.error.as_deref(), Some("The host ended this voice call before audio connected."));
     assert!(!call.active());
@@ -310,4 +340,56 @@ fn attempt_ids_are_unique() {
     let a = fresh_id();
     assert_eq!(a.len(), 36);
     assert_ne!(a, fresh_id());
+}
+
+#[test]
+fn a_late_start_for_an_old_attempt_never_touches_the_new_one() {
+    let mut call = ready();
+    let old = dialed(&mut call);
+    let late = only_job(&call.peer("offer", "v=0 offer", 0.0));
+    let stop = only_job(&call.hangup());
+    call.reply(stop, Ok(state(json!({"phase": "stopping", "attemptId": old}))), 0.5);
+    let ended = refresh(&call.tick(1.0));
+    call.reply(ended, Ok(state(json!({"phase": "ended", "attemptId": old}))), 1.0);
+    let new = started(&mut call, 1.0);
+    let cleanup = only_job(&call.reply(late, Ok(state(json!({"phase": "negotiating", "attemptId": old}))), 2.0));
+    assert_eq!((cleanup.req.clone(), cleanup.action.clone().unwrap().attempt_id), (Req::Abandon, Some(old)));
+    assert!(call.reply(cleanup, Err("stop requires the current call".into()), 2.5).is_empty());
+    assert!(!call.hangup_unconfirmed && !call.hangup_pending);
+    assert_eq!(call.attempt(), Some(new.as_str()));
+}
+
+#[test]
+fn a_microphone_answer_for_an_earlier_attempt_is_ignored() {
+    let mut call = ready();
+    let select = only_job(&call.call());
+    let prepare = only_job(&call.reply(select, Ok(state(json!({"phase": "ready"}))), 0.0));
+    call.reply(prepare, Ok(state(json!({"phase": "ready"}))), 0.0);
+    let old = call.attempt().unwrap().to_string();
+    call.hangup();
+    let select = only_job(&call.call());
+    assert!(call.mic(&old, true).is_empty(), "the new attempt hasn't asked yet");
+    let prepare = only_job(&call.reply(select, Ok(state(json!({"phase": "ready"}))), 1.0));
+    call.reply(prepare, Ok(state(json!({"phase": "ready"}))), 1.0);
+    assert!(call.mic(&old, true).is_empty());
+    let new = call.attempt().unwrap().to_string();
+    assert_eq!(call.mic(&new, true), vec![Effect::PeerStart]);
+}
+
+#[test]
+fn a_start_bound_to_another_target_is_hung_up() {
+    let mut call = Call::new("builder");
+    call.peer("ready", "", 0.0);
+    let first = only_job(&call.tick(0.0));
+    call.reply(first, Ok(state(json!({"phase": "ready"}))), 0.0);
+    let select = only_job(&call.call());
+    let prepare = only_job(&call.reply(select, Ok(state(json!({"phase": "ready", "target": {"id": "s-builder", "name": "Builder"}}))), 0.0));
+    call.reply(prepare, Ok(state(json!({"phase": "ready"}))), 0.0);
+    let id = call.attempt().unwrap().to_string();
+    call.mic(&id, true);
+    let start = only_job(&call.peer("offer", "v=0", 0.0));
+    let after = call.reply(start, Ok(state(json!({"phase": "negotiating", "attemptId": id, "target": {"id": "s-reviewer", "name": "Reviewer"}}))), 1.0);
+    assert!(after.contains(&Effect::PeerEnd));
+    assert_eq!(named(&only_job(&after)), "stop");
+    assert!(call.error.as_deref().unwrap().starts_with("Another Agenthail window changed"));
 }

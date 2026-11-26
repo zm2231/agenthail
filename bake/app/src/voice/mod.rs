@@ -4,13 +4,15 @@ mod scenes;
 mod view;
 
 use std::cell::RefCell;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
 use feed::catalog::Client;
 #[cfg(target_os = "macos")]
 use feed::voice::Peer;
-use feed::voice::{Call, Effect, Job, State};
+use feed::voice::{Action, Call, Effect, Job, Req, State};
 use rune::{AppSpec, Chrome, MicPermission, NativeView, TextEdit, Tx, Voice, WindowHandle, WindowOptions, WindowSpec};
 
 thread_local! {
@@ -39,7 +41,8 @@ pub struct Win {
     web: Option<peer::Web>,
     replies: (Sender<(Job, Result<State, String>)>, Receiver<(Job, Result<State, String>)>),
     heard: (Sender<(String, String)>, Receiver<(String, String)>),
-    mic: (Sender<bool>, Receiver<bool>),
+    mic: (Sender<(String, bool)>, Receiver<(String, bool)>),
+    gone: Arc<AtomicBool>,
     clock: f64,
 }
 
@@ -69,6 +72,7 @@ impl Win {
             replies: channel(),
             heard: channel(),
             mic: channel(),
+            gone: Arc::new(AtomicBool::new(false)),
             clock: 0.0,
         }
     }
@@ -81,7 +85,7 @@ impl Win {
         for effect in effects {
             match effect {
                 Effect::Fetch(job) => self.fetch(job),
-                Effect::AskMic => ask_mic(self.mic.0.clone()),
+                Effect::AskMic(attempt) => ask_mic(self.mic.0.clone(), attempt),
                 Effect::PeerStart => self.eval("void window.agenthailVoice.start()"),
                 Effect::PeerEnd => self.eval("window.agenthailVoice && window.agenthailVoice.end()"),
                 Effect::PeerAnswer(sdp) => {
@@ -95,12 +99,18 @@ impl Win {
 
     fn fetch(&self, job: Job) {
         let Some(client) = self.client.clone() else { return };
-        let tx = self.replies.0.clone();
+        let (tx, gone) = (self.replies.0.clone(), self.gone.clone());
         std::thread::spawn(move || {
             let result = match &job.action {
                 Some(action) => client.voice(action),
                 None => client.voice_state(),
             };
+            if let (Req::Start(attempt), Ok(_)) = (&job.req, &result) {
+                if gone.load(Ordering::SeqCst) {
+                    let _ = client.voice(&Action { attempt_id: Some(attempt.clone()), ..Action::new("stop") });
+                    return;
+                }
+            }
             let _ = tx.send((job, result));
         });
     }
@@ -146,16 +156,16 @@ impl Win {
     }
 }
 
-fn ask_mic(tx: Sender<bool>) {
+fn ask_mic(tx: Sender<(String, bool)>, attempt: String) {
     match Voice::permission() {
         MicPermission::Granted => {
-            let _ = tx.send(true);
+            let _ = tx.send((attempt, true));
         }
         MicPermission::Undetermined => Voice::request_permission(move |answer| {
-            let _ = tx.send(answer == MicPermission::Granted);
+            let _ = tx.send((attempt, answer == MicPermission::Granted));
         }),
         _ => {
-            let _ = tx.send(false);
+            let _ = tx.send((attempt, false));
         }
     }
 }
@@ -200,6 +210,7 @@ pub fn run_alone() {
 const CHROME: Chrome = Chrome { full_size_content: true, traffic_lights: Some((16.0, 18.0)), drag_regions: true };
 
 fn closed(w: &mut Win, _: &mut Tx) {
+    w.gone.store(true, Ordering::SeqCst);
     let effects = w.call.close();
     w.run(effects);
     #[cfg(target_os = "macos")]
@@ -242,8 +253,8 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
         w.run(effects);
         changed = true;
     }
-    while let Ok(granted) = w.mic.1.try_recv() {
-        let effects = w.call.mic(granted);
+    while let Ok((attempt, granted)) = w.mic.1.try_recv() {
+        let effects = w.call.mic(&attempt, granted);
         w.run(effects);
         changed = true;
     }

@@ -23,7 +23,6 @@ impl Web {
             .with_url_and_headers(peer.url.clone(), headers)
             .with_incognito(true)
             .with_autoplay(true)
-            .with_transparent(true)
             .with_initialization_script(BRIDGE)
             .with_navigation_handler(move |url| peer_allowed(&url, &navigation))
             .with_permission_handler(|kind| match kind {

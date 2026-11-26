@@ -269,6 +269,7 @@ pub enum Req {
     Heartbeat(String),
     Input(i64),
     Stop,
+    Abandon,
     Text,
     Transfer,
     Interrupt,
@@ -287,7 +288,7 @@ pub struct Job {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Effect {
     Fetch(Job),
-    AskMic,
+    AskMic(String),
     PeerStart,
     PeerEnd,
     PeerAnswer(String),
@@ -326,6 +327,8 @@ pub struct Call {
     beat_due: Option<f64>,
     beating: bool,
     last_beat: f64,
+    selected: Option<String>,
+    asking_mic: bool,
     lost_at: Option<f64>,
     out: Vec<Effect>,
 }
@@ -475,6 +478,10 @@ impl Call {
                 self.fetch(Req::Heartbeat(id.clone()), Some(Action::new("heartbeat").attempt(&id)));
             }
         }
+        if self.host_has_call && self.attempt.is_some() && now - self.last_beat >= HEARTBEAT_GRACE_SECS {
+            self.error.get_or_insert_with(|| "The connection to Agenthail was lost. Audio has stopped; call again when it reconnects.".into());
+            self.end_call();
+        }
         if self.lost_at.is_some_and(|at| now - at >= RECOVERY_SECS) && !self.audio_connected {
             self.error.get_or_insert_with(|| "Audio could not reconnect. Call again to resume this conversation.".into());
             self.end_call();
@@ -505,10 +512,11 @@ impl Call {
         self.end_work(work);
     }
 
-    pub fn mic(&mut self, granted: bool) -> Vec<Effect> {
-        if self.closed || !self.dialing || self.attempt.is_none() {
+    pub fn mic(&mut self, attempt: &str, granted: bool) -> Vec<Effect> {
+        if self.closed || !self.dialing || !self.asking_mic || self.attempt.as_deref() != Some(attempt) {
             return Vec::new();
         }
+        self.asking_mic = false;
         let work = self.work;
         if granted {
             self.out.push(Effect::PeerStart);
@@ -612,6 +620,8 @@ impl Call {
         self.dialing = false;
         self.audio_connected = false;
         self.channel_open = false;
+        self.asking_mic = false;
+        self.host_has_call = false;
         self.out.push(Effect::PeerEnd);
         let local = self.attempt.take();
         let stop = self.start_submitted || self.hangup_unconfirmed;
@@ -719,12 +729,17 @@ impl Call {
                 if current {
                     match result {
                         Ok(next) => {
-                            self.state = Some(next);
                             if job.req == Req::Select {
+                                self.selected = next.target.as_ref().map(|t| t.id.clone());
+                                self.state = Some(next);
                                 self.fetch(Req::Prepare, Some(Action::new("prepare")));
                             } else {
+                                self.state = Some(next);
                                 self.reset_call();
-                                self.out.push(Effect::AskMic);
+                                if let Some(id) = self.attempt.clone() {
+                                    self.asking_mic = true;
+                                    self.out.push(Effect::AskMic(id));
+                                }
                             }
                         }
                         Err(error) => self.dial_failed(error, job.work),
@@ -733,11 +748,17 @@ impl Call {
             }
             Req::Start(id) => match result {
                 Ok(next) if current => {
+                    let bound = next.target.as_ref().map(|t| t.id.clone());
                     self.state = Some(next);
                     self.host_has_call = true;
-                    self.report_input();
-                    self.beat_due = Some(now + HEARTBEAT_SECS);
                     self.last_beat = now;
+                    if bound != self.selected {
+                        self.error = Some("Another Agenthail window changed who this call talks to before it started, so it was hung up. Call again.".into());
+                        self.end_call();
+                    } else {
+                        self.report_input();
+                        self.beat_due = Some(now);
+                    }
                 }
                 Err(error) if current => {
                     self.error = Some(error);
@@ -746,7 +767,7 @@ impl Call {
                     self.fetch(Req::Stop, Some(Action::new("stop").attempt(&id)));
                 }
                 _ => {
-                    let stale = Job { generation: self.generation, work: 0, req: Req::Stop, action: Some(Action::new("stop").attempt(&id)) };
+                    let stale = Job { generation: self.generation, work: 0, req: Req::Abandon, action: Some(Action::new("stop").attempt(&id)) };
                     self.out.push(Effect::Fetch(stale));
                 }
             },
@@ -776,10 +797,6 @@ impl Call {
                                 self.end_call();
                             }
                         }
-                        Err(_) if now - self.last_beat >= HEARTBEAT_GRACE_SECS => {
-                            self.error.get_or_insert_with(|| "The connection to Agenthail was lost. Audio has stopped; call again when it reconnects.".into());
-                            self.end_call();
-                        }
                         Err(_) => {}
                     }
                 }
@@ -796,6 +813,7 @@ impl Call {
                     }
                 }
             }
+            Req::Abandon => {}
             Req::Stop => {
                 if current {
                     match result {
@@ -839,6 +857,7 @@ impl Call {
         self.host_has_call = false;
         self.reported_muted = false;
         self.input_revision = 0;
+        self.asking_mic = false;
     }
 
     fn refreshed(&mut self, next: State) {

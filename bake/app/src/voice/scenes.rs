@@ -51,8 +51,9 @@ fn dial(w: &mut Win) -> String {
     let select = w.call.call();
     let prepare = answer(&mut w.call, select, base.clone());
     answer(&mut w.call, prepare, base);
-    w.call.mic(true);
-    w.call.attempt().unwrap_or_default().to_string()
+    let id = w.call.attempt().unwrap_or_default().to_string();
+    w.call.mic(&id, true);
+    id
 }
 
 fn talk(w: &mut Win, events: Value) {
@@ -116,7 +117,8 @@ fn denied(w: &mut Win) {
     let select = w.call.call();
     let prepare = answer(&mut w.call, select, json!({"phase": "ready"}));
     answer(&mut w.call, prepare, json!({"phase": "ready"}));
-    w.call.mic(false);
+    let id = w.call.attempt().unwrap_or_default().to_string();
+    w.call.mic(&id, false);
 }
 
 fn other(w: &mut Win, value: Value) {
