@@ -188,7 +188,9 @@ impl Web {
                         self.ready = self.loaded.clone();
                         changed = true;
                     }
-                    self.recheck = Some(url);
+                    if self.loaded.as_deref().is_some_and(|page| feed::extensions::same_origin(&url, page)) {
+                        self.recheck = Some(url);
+                    }
                 }
             }
         }
@@ -284,22 +286,31 @@ fn web_cookie(session: &WebSession, page: &str) -> Result<wry::cookie::Cookie<'s
 }
 
 #[cfg(target_os = "macos")]
+const OUTSIDE_LINKS: &str = r#"document.addEventListener("click", (event) => {
+  const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+  if (!link || event.defaultPrevented || !["", "_self", "_top", "_parent"].includes(link.target)) return;
+  const url = new URL(link.href, location.href);
+  if ((url.protocol === "http:" || url.protocol === "https:") && url.origin !== location.origin) {
+    event.preventDefault();
+    window.open(url.href, "_blank");
+  }
+}, true);"#;
+
+#[cfg(target_os = "macos")]
 fn build(slot: &NativeView, page: Rc<RefCell<String>>, loads: Sender<Load>, follow: Sender<String>) -> Result<wry::WebView, String> {
-    use feed::extensions::{Navigation, navigation};
+    use feed::extensions::{Navigation, navigation, same_origin};
     let finished = loads.clone();
     let opener = page.clone();
     wry::WebViewBuilder::new()
+        .with_initialization_script_for_main_only(OUTSIDE_LINKS, true)
         .with_navigation_handler(move |url| match navigation(&url, &page.borrow()) {
             Navigation::Allow => {
-                if url.starts_with("http://") || url.starts_with("https://") {
+                if same_origin(&url, &page.borrow()) {
                     let _ = loads.send(Load::Navigating(url));
                 }
                 true
             }
-            Navigation::OpenOutside => {
-                crate::open_link(&url);
-                false
-            }
+            Navigation::Elsewhere => true,
             Navigation::Refuse => false,
         })
         .with_new_window_req_handler(move |url, _| {
@@ -307,7 +318,7 @@ fn build(slot: &NativeView, page: Rc<RefCell<String>>, loads: Sender<Load>, foll
                 Navigation::Allow => {
                     let _ = follow.send(url);
                 }
-                Navigation::OpenOutside => crate::open_link(&url),
+                Navigation::Elsewhere => crate::open_link(&url),
                 Navigation::Refuse => {}
             }
             wry::NewWindowResponse::Deny
@@ -510,6 +521,21 @@ mod tests {
         let (seq, _, _) = web.probe_due(Some(b)).unwrap();
         web.probed(seq, Probe::SignIn);
         assert!(!web.failed(), "b gets its own retry");
+    }
+
+    #[test]
+    fn a_page_on_another_site_is_never_sent_the_cookie() {
+        let page = "http://127.0.0.1:48200/";
+        let mut web = Web::new();
+        web.sign_in_due(now());
+        web.signed(Ok(session("2026-11-26T22:00:00Z")));
+        let (seq, _, _) = web.probe_due(Some(page)).unwrap();
+        web.probed(seq, Probe::Open);
+        web.loaded = Some(page.into());
+        web.phase = Phase::Loading;
+        web.loads.0.send(Load::Finished("https://example.com/".into())).unwrap();
+        web.pump(None);
+        assert!(web.probe_due(Some(page)).is_none());
     }
 
     #[test]

@@ -400,7 +400,7 @@ pub fn status(ext: &Extension) -> (String, Tone) {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Navigation {
     Allow,
-    OpenOutside,
+    Elsewhere,
     Refuse,
 }
 
@@ -423,8 +423,12 @@ pub fn navigation(target: &str, page: &str) -> Navigation {
     } else if a.1 == b.1 {
         Navigation::Refuse
     } else {
-        Navigation::OpenOutside
+        Navigation::Elsewhere
     }
+}
+
+pub fn same_origin(target: &str, page: &str) -> bool {
+    matches!((url::Url::parse(target), url::Url::parse(page)), (Ok(a), Ok(b)) if matches!(a.scheme(), "http" | "https") && origin_of(&a) == origin_of(&b))
 }
 
 pub fn page_host(page: &str) -> Option<String> {

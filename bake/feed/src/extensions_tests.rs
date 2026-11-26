@@ -122,9 +122,13 @@ fn navigation_keeps_the_page_on_its_own_port() {
     assert_eq!(navigation("http://127.0.0.1:48200/other", page), Navigation::Allow);
     assert_eq!(navigation("about:blank", page), Navigation::Allow);
     assert_eq!(navigation("http://127.0.0.1:7412/api/v1/snapshot", page), Navigation::Refuse);
-    assert_eq!(navigation("https://example.com/", page), Navigation::OpenOutside);
+    assert_eq!(navigation("https://example.com/", page), Navigation::Elsewhere);
     assert_eq!(navigation("file:///etc/passwd", page), Navigation::Refuse);
     assert_eq!(navigation("not a url", page), Navigation::Refuse);
+    assert!(same_origin("http://127.0.0.1:48200/report?x=1", page));
+    assert!(!same_origin("http://127.0.0.1:48300/", page));
+    assert!(!same_origin("https://example.com/", page));
+    assert!(!same_origin("about:blank", page));
     assert_eq!(page_host(page).as_deref(), Some("127.0.0.1"));
     assert_eq!(page_host("https://mac.tailnet.ts.net:48100/").as_deref(), Some("mac.tailnet.ts.net"));
     assert_eq!(page_host("http://[::1]:48100/").as_deref(), Some("::1"));
