@@ -29,8 +29,10 @@ pub struct Web {
     cleared: Option<String>,
     resigned: bool,
     loaded: Option<String>,
+    want: Option<String>,
     page: Rc<RefCell<String>>,
     finished: (Sender<String>, Receiver<String>),
+    follow: (Sender<String>, Receiver<String>),
 }
 
 impl Web {
@@ -47,8 +49,10 @@ impl Web {
             cleared: None,
             resigned: false,
             loaded: None,
+            want: None,
             page: Rc::new(RefCell::new(String::new())),
             finished: channel(),
+            follow: channel(),
         }
     }
 
@@ -75,6 +79,7 @@ impl Web {
 
     pub fn probe_due(&mut self, want: Option<&str>) -> Option<(String, WebSession)> {
         let want = want?;
+        self.want = Some(want.to_string());
         if self.failed() || self.probing.is_some() || self.cleared.as_deref() == Some(want) {
             return None;
         }
@@ -91,6 +96,9 @@ impl Web {
             return;
         }
         self.probing = None;
+        if self.want.as_deref() != Some(page.as_str()) {
+            return;
+        }
         match result {
             Probe::Open => {
                 self.cleared = Some(page);
@@ -106,19 +114,19 @@ impl Web {
     }
 
     pub fn reload(&mut self) {
-        if self.failed() {
-            self.phase = Phase::SigningIn;
-            self.cleared = None;
-            self.loaded = None;
-            self.resigned = false;
-            return;
-        }
+        self.phase = if self.cookie.is_some() { Phase::Loading } else { Phase::SigningIn };
+        self.cleared = None;
+        self.loaded = None;
+        self.resigned = false;
+    }
+
+    pub fn shows(&self, want: &str) -> bool {
         #[cfg(target_os = "macos")]
-        if let Some(view) = &self.view
-            && view.reload().is_ok()
-        {
-            self.phase = Phase::Loading;
+        if self.view.is_some() {
+            return self.loaded.as_deref() == Some(want);
         }
+        let _ = want;
+        true
     }
 
     pub fn pump(&mut self, want: Option<&str>) -> bool {
@@ -129,6 +137,7 @@ impl Web {
                 changed = true;
             }
         }
+        self.want = want.map(str::to_string);
         let Some(want) = want else { return changed };
         if self.failed() {
             return changed;
@@ -157,9 +166,14 @@ impl Web {
                 return Ok(false);
             }
             let Some(slot) = &self.slot else { return Ok(false) };
-            self.view = Some(build(slot, self.page.clone(), self.finished.0.clone())?);
+            self.view = Some(build(slot, self.page.clone(), self.finished.0.clone(), self.follow.0.clone())?);
         }
         let Some(view) = &self.view else { return Ok(false) };
+        while let Ok(url) = self.follow.1.try_recv() {
+            if self.loaded.as_deref() == Some(want) {
+                view.load_url(&url).map_err(|e| format!("Couldn't open {url}: {e}"))?;
+            }
+        }
         if !self.cookie_set {
             view.set_cookie(&web_cookie(cookie, want)?).map_err(|e| format!("Couldn't hand the page its sign-in: {e}"))?;
             self.cookie_set = true;
@@ -176,7 +190,7 @@ impl Web {
 
     #[cfg(not(target_os = "macos"))]
     fn show(&mut self, _want: &str, _cookie: &WebSession, cleared: bool, _in_window: bool) -> Result<bool, String> {
-        let _ = (&self.page, &self.finished.0, &self.cookie_set, &self.loaded);
+        let _ = (&self.page, &self.finished.0, &self.follow.0, &self.cookie_set, &self.loaded);
         if cleared { Err("Pages open in the Mac app.".into()) } else { Ok(false) }
     }
 }
@@ -201,8 +215,9 @@ fn web_cookie(session: &WebSession, page: &str) -> Result<wry::cookie::Cookie<'s
 }
 
 #[cfg(target_os = "macos")]
-fn build(slot: &NativeView, page: Rc<RefCell<String>>, finished: Sender<String>) -> Result<wry::WebView, String> {
+fn build(slot: &NativeView, page: Rc<RefCell<String>>, finished: Sender<String>, follow: Sender<String>) -> Result<wry::WebView, String> {
     use feed::extensions::{Navigation, navigation};
+    let opener = page.clone();
     wry::WebViewBuilder::new()
         .with_navigation_handler(move |url| match navigation(&url, &page.borrow()) {
             Navigation::Allow => true,
@@ -212,8 +227,14 @@ fn build(slot: &NativeView, page: Rc<RefCell<String>>, finished: Sender<String>)
             }
             Navigation::Refuse => false,
         })
-        .with_new_window_req_handler(|url, _| {
-            crate::open_link(&url);
+        .with_new_window_req_handler(move |url, _| {
+            match navigation(&url, &opener.borrow()) {
+                Navigation::Allow => {
+                    let _ = follow.send(url);
+                }
+                Navigation::OpenOutside => crate::open_link(&url),
+                Navigation::Refuse => {}
+            }
             wry::NewWindowResponse::Deny
         })
         .with_on_page_load_handler(move |event, url| {
@@ -263,6 +284,7 @@ mod tests {
         let mut web = Web::new();
         assert!(web.sign_in_due(now()));
         web.signed(Ok(session("2026-11-26T22:00:00Z")));
+        web.want = Some(page.into());
         let (url, _) = web.probe_due(Some(page)).unwrap();
         assert!(web.probe_due(Some(page)).is_none(), "one probe at a time");
         web.probed(url, Probe::SignIn);
@@ -280,13 +302,44 @@ mod tests {
         let mut web = Web::new();
         web.sign_in_due(now());
         web.signed(Ok(session("2026-11-26T22:00:00Z")));
+        web.want = Some(page.into());
         let (url, _) = web.probe_due(Some(page)).unwrap();
         web.probed(url, Probe::Open);
         assert!(web.probe_due(Some(page)).is_none());
         let other = "http://127.0.0.1:48300/";
+        web.want = Some(other.into());
         let (url, _) = web.probe_due(Some(other)).unwrap();
         web.probed(url, Probe::Unreachable("connection refused".into()));
         assert_eq!(web.phase, Phase::Failed("Couldn't reach the page: connection refused".into()));
+    }
+
+    #[test]
+    fn a_probe_for_a_page_left_behind_changes_nothing() {
+        let (a, b) = ("http://127.0.0.1:48200/", "http://127.0.0.1:48300/");
+        let mut web = Web::new();
+        web.sign_in_due(now());
+        web.signed(Ok(session("2026-11-26T22:00:00Z")));
+        web.want = Some(a.into());
+        let (url, _) = web.probe_due(Some(a)).unwrap();
+        web.want = Some(b.into());
+        web.probed(url, Probe::Unreachable("connection refused".into()));
+        assert!(!web.failed());
+        assert!(web.probe_due(Some(b)).is_some());
+    }
+
+    #[test]
+    fn reload_checks_the_page_again() {
+        let page = "http://127.0.0.1:48200/";
+        let mut web = Web::new();
+        web.sign_in_due(now());
+        web.signed(Ok(session("2026-11-26T22:00:00Z")));
+        web.want = Some(page.into());
+        let (url, _) = web.probe_due(Some(page)).unwrap();
+        web.probed(url, Probe::Open);
+        web.loaded = Some(page.into());
+        web.reload();
+        assert_eq!(web.phase, Phase::Loading);
+        assert!(web.probe_due(Some(page)).is_some());
     }
 
     #[test]
@@ -295,6 +348,7 @@ mod tests {
         let mut web = Web::new();
         web.sign_in_due(now());
         web.signed(Ok(session("2026-11-26T22:00:00Z")));
+        web.want = Some(page.into());
         let (url, _) = web.probe_due(Some(page)).unwrap();
         web.probed(url, Probe::Open);
         web.loaded = Some(page.into());

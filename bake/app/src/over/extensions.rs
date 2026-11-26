@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
@@ -17,7 +18,7 @@ use crate::{App, Screen};
 const REFRESH: Duration = Duration::from_secs(20);
 
 pub enum Done {
-    Hosts(u64, Result<Vec<Host>, String>),
+    Hosts(Result<Vec<Host>, String>),
     Listed(u64, String, Result<List, String>),
     Acted(String, Result<List, RespondError>),
     Signed(Result<WebSession, String>),
@@ -32,7 +33,7 @@ pub struct Catalog {
 
 impl Catalog {
     fn key(&self) -> String {
-        if self.host.is_local() { "local".into() } else { self.host.id.clone() }
+        host_key(&self.host)
     }
 
     fn entries(&self, origin: &str) -> Vec<Entry> {
@@ -47,7 +48,9 @@ pub struct State {
     pub acting: Option<String>,
     pub web: Web,
     fetched_at: Option<Instant>,
-    generation: u64,
+    hosts_pending: bool,
+    listing: HashSet<String>,
+    generation: HashMap<String, u64>,
     tx: Sender<Done>,
     rx: Receiver<Done>,
 }
@@ -55,8 +58,12 @@ pub struct State {
 impl State {
     pub fn new() -> State {
         let (tx, rx) = channel();
-        State { catalogs: Vec::new(), hosts_error: None, settings: false, acting: None, web: Web::new(), fetched_at: None, generation: 0, tx, rx }
+        State { catalogs: Vec::new(), hosts_error: None, settings: false, acting: None, web: Web::new(), fetched_at: None, hosts_pending: false, listing: HashSet::new(), generation: HashMap::new(), tx, rx }
     }
+}
+
+fn host_key(host: &Host) -> String {
+    if host.is_local() { "local".into() } else { host.id.clone() }
 }
 
 fn shown(s: &App) -> bool {
@@ -67,22 +74,28 @@ pub fn refresh(s: &mut App) {
     let Some(client) = s.client.clone() else { return };
     s.ov.ext.settings = feed::extensions::holds_settings(&client);
     s.ov.ext.fetched_at = Some(Instant::now());
-    s.ov.ext.generation += 1;
-    let (tx, generation) = (s.ov.ext.tx.clone(), s.ov.ext.generation);
+    if s.ov.ext.hosts_pending {
+        return;
+    }
+    s.ov.ext.hosts_pending = true;
+    let tx = s.ov.ext.tx.clone();
     std::thread::spawn(move || {
-        let hosts = client.hosts().map_err(|e| e.to_string());
-        let reachable: Vec<Host> = hosts.as_ref().map(|h| h.iter().filter(|h| h.available()).cloned().collect()).unwrap_or_default();
-        if tx.send(Done::Hosts(generation, hosts)).is_err() {
-            return;
-        }
-        for host in reachable {
-            let (tx, client) = (tx.clone(), client.clone());
-            std::thread::spawn(move || {
-                let key = if host.is_local() { "local".to_string() } else { host.id.clone() };
-                let result = client.extensions((!host.is_local()).then_some(host.id.as_str())).map_err(|e| e.to_string());
-                let _ = tx.send(Done::Listed(generation, key, result));
-            });
-        }
+        let _ = tx.send(Done::Hosts(client.hosts().map_err(|e| e.to_string())));
+    });
+}
+
+fn list(s: &mut App, host: &Host) {
+    let Some(client) = s.client.clone() else { return };
+    let key = host_key(host);
+    if !s.ov.ext.listing.insert(key.clone()) {
+        return;
+    }
+    let generation = s.ov.ext.generation.entry(key.clone()).or_default();
+    *generation += 1;
+    let (tx, generation, host) = (s.ov.ext.tx.clone(), *generation, host.clone());
+    std::thread::spawn(move || {
+        let result = client.extensions((!host.is_local()).then_some(host.id.as_str())).map_err(|e| e.to_string());
+        let _ = tx.send(Done::Listed(generation, key, result));
     });
 }
 
@@ -110,10 +123,22 @@ fn reload_all(s: &mut App) {
 }
 
 fn take(s: &mut App, done: Done) {
+    match &done {
+        Done::Hosts(result) => {
+            s.ov.ext.hosts_pending = false;
+            for host in result.iter().flatten().filter(|h| h.available()) {
+                list(s, host);
+            }
+        }
+        Done::Listed(_, key, _) => {
+            s.ov.ext.listing.remove(key);
+        }
+        _ => {}
+    }
     let ext = &mut s.ov.ext;
     match done {
-        Done::Hosts(generation, _) | Done::Listed(generation, _, _) if generation != ext.generation => {}
-        Done::Hosts(_, Ok(hosts)) => {
+        Done::Listed(generation, key, _) if ext.generation.get(&key) != Some(&generation) => {}
+        Done::Hosts(Ok(hosts)) => {
             ext.hosts_error = None;
             let mut old: Vec<Catalog> = std::mem::take(&mut ext.catalogs);
             for host in hosts {
@@ -126,7 +151,7 @@ fn take(s: &mut App, done: Done) {
                 ext.catalogs.push(catalog);
             }
         }
-        Done::Hosts(_, Err(error)) => ext.hosts_error = Some(format!("Couldn't read the computers: {error}")),
+        Done::Hosts(Err(error)) => ext.hosts_error = Some(format!("Couldn't read the computers: {error}")),
         Done::Listed(_, key, result) => {
             if let Some(catalog) = ext.catalogs.iter_mut().find(|c| c.key() == key) {
                 match result {
@@ -142,7 +167,7 @@ fn take(s: &mut App, done: Done) {
             ext.acting = None;
             match result {
                 Ok(list) => {
-                    ext.generation += 1;
+                    *ext.generation.entry("local".into()).or_default() += 1;
                     ext.fetched_at = Some(Instant::now());
                     if let Some(local) = ext.catalogs.iter_mut().find(|c| c.host.is_local()) {
                         local.error = list.host_problem(&local.host.name);
@@ -245,11 +270,35 @@ fn tone_color(tone: Tone) -> Color {
     }
 }
 
+const OFFERED: [(&str, &rune::Icon); 16] = [
+    ("terminal", &icons::CONSOLE),
+    ("server", &icons::SERVER),
+    ("globe", &icons::GLOBE),
+    ("network", &icons::GLOBE),
+    ("chart", &icons::WINDOW_ANALYTICS),
+    ("gauge", &icons::WINDOW_ANALYTICS),
+    ("checklist", &icons::CHECKLIST),
+    ("list", &icons::BULLET_LIST),
+    ("grid", &icons::DOT_GRID),
+    ("doc", &icons::FILE_DOCUMENT),
+    ("note", &icons::FILE_DOCUMENT),
+    ("folder", &icons::FOLDER),
+    ("gear", &icons::SETTINGS_GEAR),
+    ("lock", &icons::LOCK),
+    ("bubble", &icons::SPEECH_BUBBLE),
+    ("photo", &icons::PHOTO),
+];
+
+fn offered_icon(name: &str) -> Option<&'static rune::Icon> {
+    let words: Vec<&str> = name.split('.').collect();
+    OFFERED.iter().find(|(word, _)| words.iter().any(|w| w.contains(word))).map(|(_, icon)| *icon)
+}
+
 fn entry_icon(entry: &Entry) -> &'static rune::Icon {
-    match entry.kind {
+    offered_icon(&entry.icon).unwrap_or(match entry.kind {
         Kind::Mount(_) => &icons::GLOBE,
         Kind::Page => &icons::WINDOW_CURSOR,
-    }
+    })
 }
 
 fn entry_row(entry: &Entry) -> El {
@@ -491,7 +540,7 @@ pub fn page(s: &App, cx: &mut Cx<App>, id: &str) -> El {
                     .child(text(message.clone()).font(BODY).color(weak()).wrap().max_w(520.0))
                     .child(Button::new("Reload").variant(ButtonVariant::Contrast).control_size(ControlSize::Small).on_press(|s: &mut App| s.ov.ext.web.reload()).build(k).key("ext-retry"))
             }
-            (Some(_), _, Some(_)) if covered(s) => el().w_full().h_full(),
+            (Some(url), _, Some(_)) if covered(s) || !s.ov.ext.web.shows(url) => el().w_full().h_full(),
             (Some(_), _, Some(slot)) => el().key("ext-page").w_full().h_full().radius(10.0).native_view(slot),
             (Some(_), _, None) => el().w_full().h_full(),
             (None, _, _) => closed(&entry.label, entry.closed_reason(), entry.approval_session.clone()),
@@ -507,4 +556,19 @@ pub fn page(s: &App, cx: &mut Cx<App>, id: &str) -> El {
     }
     let toolbar = Toolbar::new().leading(crumb).trailing(trailing.child(ui::needs_button(s)));
     ui::frame(cx, s, Some(ui::sidebar(s, None, None)), col().w_full().h_full().padding(6.0).child(main), None, toolbar)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_offered_symbol_name_picks_the_nearest_icon() {
+        assert!(std::ptr::eq(offered_icon("server.rack").unwrap(), &icons::SERVER));
+        assert!(std::ptr::eq(offered_icon("rectangle.grid.2x2").unwrap(), &icons::DOT_GRID));
+        assert!(std::ptr::eq(offered_icon("chart.bar.xaxis").unwrap(), &icons::WINDOW_ANALYTICS));
+        assert!(std::ptr::eq(offered_icon("checklist").unwrap(), &icons::CHECKLIST));
+        assert!(offered_icon("").is_none());
+        assert!(offered_icon("puzzlepiece.extension").is_none());
+    }
 }

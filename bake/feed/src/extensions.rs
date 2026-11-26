@@ -438,6 +438,7 @@ pub fn probe(page: &str, session: &WebSession) -> Probe {
     match agent.get(page).set("Cookie", &format!("{}={}", session.name, session.value)).call() {
         Ok(_) => Probe::Open,
         Err(ureq::Error::Status(401 | 403, _)) => Probe::SignIn,
+        Err(ureq::Error::Status(code, _)) if code >= 500 => Probe::Unreachable(format!("it answered {code}")),
         Err(ureq::Error::Status(_, _)) => Probe::Open,
         Err(ureq::Error::Transport(error)) => Probe::Unreachable(error.to_string()),
     }
