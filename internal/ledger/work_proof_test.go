@@ -84,7 +84,16 @@ func TestOnlyTheHolderWritesProofAndAWellFormedStep(t *testing.T) {
 	}
 	workRefused(t, s, proofWrite(ledger.ProofAdd, "", importChecked, 0), "operationId")
 	workRefused(t, s, proofWrite("edit", "odd", importChecked, 0), "not add, replace or remove")
-	for i := range 30 {
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkBlock, ItemID: "widget-W1", SessionID: holder, Reason: "waiting on the export"})
+	work(t, s, proofWrite(ledger.ProofAdd, "while-blocked", importChecked, 0))
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkUnblock, ItemID: "widget-W1", SessionID: holder})
+	work(t, s, proofWrite(ledger.ProofAdd, "after-unblock", importChecked, 0))
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkPark, ItemID: "widget-W1", SessionID: holder, Park: &ledger.Park{Kind: ledger.ParkLater, Why: "after the export lands"}})
+	workRefused(t, s, proofWrite(ledger.ProofAdd, "while-parked", importChecked, 0), "only the session holding widget-W1")
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkUnpark, ItemID: "widget-W1", SessionID: holder})
+	workRefused(t, s, proofWrite(ledger.ProofAdd, "released", importChecked, 0), "only the session holding widget-W1")
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W1", SessionID: holder})
+	for i := range 28 {
 		work(t, s, proofWrite(ledger.ProofAdd, fmt.Sprint("fill-", i), importChecked, 0))
 	}
 	workRefused(t, s, proofWrite(ledger.ProofAdd, "one-more", importChecked, 0), "already has 30 proof steps")
