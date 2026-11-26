@@ -44,7 +44,8 @@ func (a *App) cmdDoctor(args []string) error {
 	var results []doctorResult
 	failures := 0
 	home, _ := os.UserHomeDir()
-	settings, settingsErr := dashconfig.Load()
+	_, settingsErr := dashconfig.Load()
+	modes, modesErr := dashconfig.LoadAgentModes()
 	for _, e := range a.Surfaces {
 		if !surface.Listed(e.Surface) {
 			continue
@@ -81,9 +82,9 @@ func (a *App) cmdDoctor(args []string) error {
 		if caps.Steer {
 			enabled = append(enabled, "steer")
 		}
-		gate := surface.AgentGate(e.Surface, settings.AgentMode(e.Name))
-		if _, local := e.Surface.(surface.LocalAgent); local && settingsErr != nil {
-			gate = fmt.Errorf("whether %s is turned on or off cannot be read until %s is fixed", e.Name, dashconfig.Path())
+		gate := surface.AgentGate(e.Surface, modes.AgentMode(e.Name))
+		if _, local := e.Surface.(surface.LocalAgent); local && modesErr != nil {
+			gate = fmt.Errorf("whether %s is turned on or off cannot be read until %s is fixed: %w", e.Name, dashconfig.Path(), modesErr)
 		}
 		if gate != nil {
 			result := doctorResult{Surface: e.Name, Capabilities: enabled, WritePath: "checked immediately before delivery", OK: true}

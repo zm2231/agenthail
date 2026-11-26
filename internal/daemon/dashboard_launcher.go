@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/agentswitch"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/worktree"
@@ -20,7 +21,7 @@ func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashb
 		return actionResult{}, invalidRequest("approval policy is invalid")
 	}
 	if adapter := d.adapters().ForSurface(surface.SurfaceKind(request.Surface)); adapter != nil {
-		if err := d.agentGate(adapter); err != nil {
+		if err := d.agentGate(adapter); err != nil && !agentswitch.IsUnavailable(err) && !agentswitch.IsMissing(err) {
 			return actionResult{}, conflict(err.Error())
 		}
 	}

@@ -138,6 +138,7 @@ var gatedCommands = []struct {
 	{"coordinator-clear", func(f gatedFixture) []string { return []string{"coordinator", "clear", "--cwd", f.widget} }, refused, runs, refused},
 	{"coordinator-clear", func(gatedFixture) []string { return []string{"coordinator", "clear", "--name", "widget-lead"} }, refused, runs, refused},
 	{"resume-after-limit", func(gatedFixture) []string { return []string{"limit-resume", "off"} }, refused, refused, refused},
+	{"agent-mode", func(gatedFixture) []string { return []string{"agents", "use", "codex", "off"} }, refused, refused, refused},
 	{"relay-add", func(gatedFixture) []string { return []string{"relay", "add", "worker", "widget-other"} }, refused, runs, refused},
 	{"relay-remove", func(f gatedFixture) []string { return []string{"relay", "rm", f.relay()} }, refused, runs, refused},
 	{"channel-create", func(f gatedFixture) []string {

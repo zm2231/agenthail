@@ -78,6 +78,14 @@ func (a *App) useAgent(agent, value string) error {
 	if err != nil {
 		return err
 	}
+	ctx, cancel, err := a.deadlineContext(a.DefaultTimeout)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	if err := a.personAction(ctx, daemonapi.PersonActionSettings, map[string]any{"action": "agent-mode", "agent": agent, "mode": string(mode)}); err != nil {
+		return err
+	}
 	statuses, err := a.agentStatuses()
 	if err != nil {
 		return err
@@ -89,14 +97,6 @@ func (a *App) useAgent(agent, value string) error {
 			ids[i] = status.ID
 		}
 		return fmt.Errorf("unknown agent %q; agents: %s", agent, strings.Join(ids, ", "))
-	}
-	ctx, cancel, err := a.deadlineContext(a.DefaultTimeout)
-	if err != nil {
-		return err
-	}
-	defer cancel()
-	if err := a.personAction(ctx, daemonapi.PersonActionSettings, map[string]any{"action": "agent-mode", "agent": agent, "mode": string(mode)}); err != nil {
-		return err
 	}
 	config, err := dashconfig.Load()
 	if err != nil {

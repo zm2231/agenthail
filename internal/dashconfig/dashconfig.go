@@ -154,6 +154,28 @@ func Save(config Config) error {
 	return os.WriteFile(Path(), append(data, '\n'), 0600)
 }
 
+// LoadAgentModes reads only the agent settings, so a mistake elsewhere in the
+// file does not change which agents are on or off.
+func LoadAgentModes() (Config, error) {
+	data, err := os.ReadFile(Path())
+	if os.IsNotExist(err) {
+		return Config{}, nil
+	}
+	if err != nil {
+		return Config{}, fmt.Errorf("read dashboard config: %w", err)
+	}
+	var config struct {
+		AgentModes map[string]agentswitch.Mode `json:"agentModes"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return Config{}, fmt.Errorf("parse dashboard config: %w", err)
+	}
+	if err := validateAgents(config.AgentModes); err != nil {
+		return Config{}, err
+	}
+	return Config{AgentModes: config.AgentModes}, nil
+}
+
 func validateAgents(agents map[string]agentswitch.Mode) error {
 	for agent, mode := range agents {
 		if _, err := agentswitch.ParseMode(string(mode)); err != nil {

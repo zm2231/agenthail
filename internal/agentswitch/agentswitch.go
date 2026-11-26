@@ -77,6 +77,11 @@ func IsUnavailable(err error) bool {
 	return errors.As(err, &target)
 }
 
+func IsMissing(err error) bool {
+	var target MissingError
+	return errors.As(err, &target)
+}
+
 func Check(agent Agent, mode Mode) error {
 	if mode == Off {
 		return OffError{Agent: agent.ID, Label: agent.Label}
