@@ -75,6 +75,8 @@ pub fn turn(s: &App, x: &Session) -> El {
     }
     if let Some(usage) = s.menus.context.get(&x.id) {
         r = r.child(context_el(usage));
+    } else if let Some(error) = s.menus.context_error.get(&x.id) {
+        r = r.child(text(format!("Context use unknown: {error}")).font(META).color(faint()).truncate().max_w(280.0).key("context-use"));
     }
     if x.capabilities.compact {
         r = r.child(compact_el(s, x));

@@ -12,7 +12,6 @@ use crate::{App, Screen, open_link, session};
 pub use super::session_dialogs::{button, marks, overlays};
 
 const REFRESH: Duration = Duration::from_secs(30);
-const PATCH_HOLD: Duration = Duration::from_secs(6);
 
 pub enum Done {
     Settings(String, u64, Result<SessionSettings, String>),
@@ -48,10 +47,10 @@ pub struct Menus {
     pub context: HashMap<String, ContextUsage>,
     pub busy: HashSet<(String, &'static str)>,
     pub note: HashMap<String, String>,
+    pub context_error: HashMap<String, String>,
     seq: u64,
     newest: HashMap<(String, &'static str), u64>,
     rename_seq: u64,
-    patches: Vec<(String, Patch, Instant)>,
     refreshed: Option<(String, Instant)>,
     tx: Sender<Done>,
     rx: Receiver<Done>,
@@ -73,10 +72,10 @@ impl Menus {
             context: HashMap::new(),
             busy: HashSet::new(),
             note: HashMap::new(),
+            context_error: HashMap::new(),
             seq: 0,
             newest: HashMap::new(),
             rename_seq: 0,
-            patches: Vec::new(),
             refreshed: None,
             tx,
             rx,
@@ -106,7 +105,7 @@ impl Menus {
 pub fn chips_for(s: &App, id: &str) -> Vec<Chip> {
     let (Some(set), Some(x)) = (s.menus.settings.get(id), session(s, id)) else { return Vec::new() };
     let models = s.menus.models.get(id).map(Vec::as_slice).unwrap_or(&[]);
-    settings::chips(set, models, &x.capabilities)
+    settings::chips(set, models, x)
 }
 
 fn spawn(s: &App, after: Duration, job: impl FnOnce(&Client) -> Option<Done> + Send + 'static) {
@@ -312,22 +311,10 @@ fn patch_of(act: &Act, read: Option<feed::action::ReadState>) -> Option<Patch> {
     }
 }
 
-fn hold(s: &mut App, id: &str, patch: Patch) {
-    s.menus.patches.retain(|(other, p, _)| !(other == id && std::mem::discriminant(p) == std::mem::discriminant(&patch)));
-    s.menus.patches.push((id.to_string(), patch, Instant::now()));
-}
-
-fn apply_patches(s: &mut App) -> bool {
-    s.menus.patches.retain(|(_, _, at)| at.elapsed() < PATCH_HOLD);
-    let mut changed = false;
-    for (id, patch, _) in &s.menus.patches {
-        for x in s.sessions.iter_mut().chain(s.ov.d.sessions.iter_mut()).filter(|x| x.id == *id) {
-            let before = x.clone();
-            patch.apply(x);
-            changed |= *x != before;
-        }
+fn land(s: &mut App, id: &str, patch: Patch) {
+    if s.ov.live.patch(id, &patch, &stamp()) {
+        s.sessions = s.ov.live.sessions().to_vec();
     }
-    changed
 }
 
 fn settled(s: &mut App, done: Done) {
@@ -355,16 +342,22 @@ fn settled(s: &mut App, done: Done) {
             }
             match result {
                 Ok(Some(usage)) => {
+                    s.menus.context_error.remove(&id);
                     s.menus.context.insert(id, usage);
                 }
-                _ => {
+                Ok(None) => {
+                    s.menus.context_error.remove(&id);
                     s.menus.context.remove(&id);
+                }
+                Err(error) => {
+                    s.menus.context.remove(&id);
+                    s.menus.context_error.insert(id, error);
                 }
             }
         }
         Done::Acted(id, act, Ok(read)) => {
             if let Some(patch) = patch_of(&act, read) {
-                hold(s, &id, patch);
+                land(s, &id, patch);
             }
         }
         Done::Acted(_, act, Err(error)) => s.ov.notice = Some(failure(verb(&act), &error)),
@@ -372,7 +365,7 @@ fn settled(s: &mut App, done: Done) {
             let current = s.menus.renaming.as_deref() == Some(id.as_str()) && s.menus.rename_seq == seq;
             match result {
                 Ok(alias) => {
-                    hold(s, &id, Patch::Alias((!alias.is_empty()).then_some(alias)));
+                    land(s, &id, Patch::Alias((!alias.is_empty()).then_some(alias)));
                     if current {
                         close_rename(s);
                     }
@@ -419,7 +412,6 @@ pub fn drain(s: &mut App) -> bool {
         changed = true;
         settled(s, done);
     }
-    changed |= apply_patches(s);
     refresh_shown(s);
     changed
 }

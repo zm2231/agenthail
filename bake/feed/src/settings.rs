@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use serde::Deserialize;
 
-use crate::catalog::{Capabilities, Client, enc};
+use crate::catalog::{Client, Session, enc};
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -99,6 +99,9 @@ impl Client {
 
     pub fn context_usage(&self, session: &str) -> Result<Option<ContextUsage>> {
         let value = self.get_json(&format!("/api/v1/session-metadata?id={}", enc(session)))?;
+        if let Some(error) = value["errors"]["context"].as_str() {
+            anyhow::bail!("{error}");
+        }
         Ok(serde_json::from_value(value["context"].clone()).ok())
     }
 }
@@ -178,7 +181,17 @@ fn claude_modes() -> Vec<Choice> {
 }
 
 /// The choices match what the daemon's turn-setting accepts for each surface.
-pub fn chips(settings: &SessionSettings, models: &[ModelOption], caps: &Capabilities) -> Vec<Chip> {
+pub fn chips(settings: &SessionSettings, models: &[ModelOption], session: &Session) -> Vec<Chip> {
+    let mut out = offered(settings, models, &session.capabilities);
+    if session.read_only {
+        for chip in &mut out {
+            chip.changeable = false;
+        }
+    }
+    out
+}
+
+fn offered(settings: &SessionSettings, models: &[ModelOption], caps: &crate::catalog::Capabilities) -> Vec<Chip> {
     let codex = settings.surface == "codex";
     let claude = settings.surface == "claude";
     let hosted = settings.runtime_kind == CLAUDE_HOST;
@@ -252,6 +265,7 @@ pub fn apply(settings: &mut SessionSettings, key: &str, value: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::catalog::Capabilities;
     use serde_json::json;
 
     fn opts(models: serde_json::Value) -> Vec<ModelOption> {
@@ -279,8 +293,12 @@ mod tests {
         .unwrap()
     }
 
-    fn all() -> Capabilities {
-        Capabilities { model: true, compact: true, commands: true }
+    fn all() -> Session {
+        with(Capabilities { model: true, compact: true, commands: true })
+    }
+
+    fn with(capabilities: Capabilities) -> Session {
+        Session { capabilities, ..Default::default() }
     }
 
     fn ids(c: &Chip) -> Vec<&str> {
@@ -337,14 +355,25 @@ mod tests {
         s.effort = Some(Setting { value: "high".into() });
         let models = opts(json!([{"id": "opus", "displayName": "Opus"}]));
         let caps = Capabilities { model: true, compact: true, commands: false };
-        let chips = super::chips(&s, &models, &caps);
+        let chips = super::chips(&s, &models, &with(caps.clone()));
         let effort = chips.iter().find(|c| c.key == "effort").unwrap();
         assert!(!effort.changeable);
         assert_eq!(effort.label(), "High");
         s.effort = None;
-        assert!(super::chips(&s, &models, &caps).iter().all(|c| c.key != "effort"));
+        assert!(super::chips(&s, &models, &with(caps.clone())).iter().all(|c| c.key != "effort"));
         let no_model = Capabilities { model: false, ..caps };
-        assert!(!super::chips(&s, &models, &no_model)[0].changeable);
+        assert!(!super::chips(&s, &models, &with(no_model))[0].changeable);
+    }
+
+    #[test]
+    fn a_read_only_session_shows_its_settings_without_offering_changes() {
+        let models = opts(json!([{"id": "gpt-6.1-sol", "displayName": "GPT-6.1-Sol", "supportedReasoningEfforts": ["low", "xhigh"]}]));
+        let mut x = all();
+        x.read_only = true;
+        let chips = chips(&codex(), &models, &x);
+        assert_eq!(chips.len(), 3);
+        assert!(chips.iter().all(|c| !c.changeable));
+        assert_eq!(chips[1].label(), "Extra high");
     }
 
     #[test]
@@ -410,6 +439,7 @@ mod tests {
             r#"{"models":[{"id":"gpt-6.1-sol","displayName":"GPT-6.1-Sol"}]}"#,
             r#"{"sessionId":"h1::s 1","context":{"usedTokens":10,"contextWindow":100}}"#,
             r#"{"sessionId":"h1::s 1","errors":{"context":"timed out"}}"#,
+            r#"{"sessionId":"h1::s 1"}"#,
         ];
         let paths = std::thread::spawn(move || {
             let mut paths = Vec::new();
@@ -435,12 +465,14 @@ mod tests {
         assert_eq!(client.session_settings("h1::s 1").unwrap().model.unwrap().value, "gpt-6.1-sol");
         assert_eq!(client.models("codex", "h1::s 1").unwrap()[0].display_name, "GPT-6.1-Sol");
         assert_eq!(client.context_usage("h1::s 1").unwrap().unwrap().fraction(), Some(0.1));
+        assert_eq!(client.context_usage("h1::s 1").unwrap_err().to_string(), "timed out");
         assert_eq!(client.context_usage("h1::s 1").unwrap(), None);
         assert_eq!(
             paths.join().unwrap(),
             vec![
                 "/api/v1/session-settings?id=h1%3A%3As+1",
                 "/api/v1/models?surface=codex&id=h1%3A%3As+1",
+                "/api/v1/session-metadata?id=h1%3A%3As+1",
                 "/api/v1/session-metadata?id=h1%3A%3As+1",
                 "/api/v1/session-metadata?id=h1%3A%3As+1"
             ]

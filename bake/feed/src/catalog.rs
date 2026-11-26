@@ -164,6 +164,8 @@ pub struct Session {
     pub runtime: Option<Runtime>,
     #[serde(default)]
     pub capabilities: Capabilities,
+    #[serde(default)]
+    pub read_only: bool,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]

@@ -145,6 +145,17 @@ impl Overview {
         self.stale
     }
 
+    /// A change the daemon confirmed at `at` holds until a snapshot taken after it.
+    pub fn patch(&mut self, id: &str, patch: &crate::menu::Patch, at: &str) -> bool {
+        let Some(x) = self.base.sessions.iter_mut().find(|x| x.id == id) else { return false };
+        patch.apply(x);
+        if newer(at, &self.base.updated_at) {
+            self.base.updated_at = at.to_string();
+        }
+        self.stale = true;
+        true
+    }
+
     pub fn refresh(&mut self, fetched: Fetched) {
         let Fetched { mut recorded, ledgers, started } = fetched;
         if !newer(&recorded.updated_at, &self.base.updated_at) {

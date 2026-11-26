@@ -171,3 +171,19 @@ fn a_burst_of_arrivals_leaves_one_rebuild_pending() {
     assert!(ov.wants("old"));
     assert!(ov.stale(), "a project opened for loading asks for a rebuild to show it");
 }
+
+#[test]
+fn a_confirmed_change_shows_until_a_later_snapshot_says_otherwise() {
+    use crate::menu::Patch;
+    let mut ov = Overview::default();
+    assert!(ov.take_sessions("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(ov.patch("a", &Patch::Alias(Some("scout".into())), "2026-11-24T12:00:05Z"));
+    assert!(ov.stale());
+    let w = ov.world(&[]);
+    assert_eq!(w.title(w.session("a").unwrap()), "@scout");
+    assert!(!ov.take_sessions("2026-11-24T12:00:04Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]), "a snapshot from before the change");
+    assert_eq!(ov.sessions()[0].alias.as_deref(), Some("scout"));
+    assert!(ov.take_sessions("2026-11-24T12:00:06Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert_eq!(ov.sessions()[0].alias, None, "the daemon's later word wins");
+    assert!(!ov.patch("missing", &Patch::Archived(true), "2026-11-24T12:00:07Z"));
+}
