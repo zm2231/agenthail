@@ -39,7 +39,7 @@ pub struct Web {
     checking: bool,
     opening: bool,
     checked_at: Option<Instant>,
-    verified: Option<String>,
+    verified: Option<(String, Option<String>)>,
     remint: bool,
     loaded: Option<String>,
     ready: Option<String>,
@@ -97,7 +97,7 @@ impl Web {
         self.signing = false;
         match result {
             Ok(cookie) => {
-                self.verified = Some(cookie.value.clone());
+                self.verified = Some((cookie.value.clone(), None));
                 self.remint = false;
                 self.checked_at = Some(Instant::now());
                 self.cookie = Some(cookie);
@@ -115,7 +115,7 @@ impl Web {
             return None;
         }
         let cookie = self.cookie.clone()?;
-        let opening = self.loaded.as_deref() != Some(want) && self.verified.as_deref() != Some(cookie.value.as_str());
+        let opening = self.loaded.as_deref() != Some(want) && !self.verified_for(&cookie.value, want);
         if !opening && self.checked_at.is_some_and(|at| at.elapsed() < CHECK_EVERY) {
             return None;
         }
@@ -126,13 +126,17 @@ impl Web {
         Some((page, cookie))
     }
 
-    pub fn checked(&mut self, value: &str, known: Result<bool, String>) {
+    fn verified_for(&self, value: &str, page: &str) -> bool {
+        self.verified.as_ref().is_some_and(|(v, p)| v == value && p.as_deref().is_none_or(|p| p == page))
+    }
+
+    pub fn checked(&mut self, page: &str, value: &str, known: Result<bool, String>) {
         self.checking = false;
         if self.cookie.as_ref().is_none_or(|c| c.value != value) {
             return;
         }
         match known {
-            Ok(true) => self.verified = Some(value.to_string()),
+            Ok(true) => self.verified = Some((value.to_string(), Some(page.to_string()))),
             Ok(false) => {
                 self.cookie = None;
                 self.renew_at = None;
@@ -178,6 +182,7 @@ impl Web {
         while let Ok(load) = self.loads.1.try_recv() {
             let Some(page) = self.loaded.clone() else { continue };
             match load {
+                Load::Started(url) if !self.arrived && !feed::extensions::same_origin(&url, &page) => {}
                 Load::Started(url) if leaves(&url, &page) => {
                     self.left = Some(url);
                     self.committed = false;
@@ -241,9 +246,6 @@ impl Web {
         }
         if let Some(url) = self.left.take() {
             crate::open_link(&url);
-            if !self.arrived {
-                return Err(format!("This page sent you to {url}, so it opened in your browser."));
-            }
             if let Some(page) = &self.loaded {
                 view.load_url(page).map_err(|e| format!("Couldn't open {page}: {e}"))?;
                 self.ready = None;
@@ -259,7 +261,7 @@ impl Web {
             }
         }
         if self.loaded.as_deref() != Some(want) {
-            if self.checking || self.verified.as_deref() != Some(cookie.value.as_str()) {
+            if self.checking || !self.verified_for(&cookie.value, want) {
                 return Ok(false);
             }
             *self.page.borrow_mut() = want.to_string();
@@ -449,10 +451,11 @@ mod tests {
         let mut web = Web::new();
         web.loaded = Some(page.into());
         web.phase = Phase::Loading;
-        web.loads.0.send(Load::Started("https://example.com/".into())).unwrap();
+        web.loads.0.send(Load::Started("http://127.0.0.1:48100/".into())).unwrap();
+        web.loads.0.send(Load::Finished("http://127.0.0.1:48100/".into())).unwrap();
         web.pump(None);
-        assert!(!web.arrived, "an entry that redirects away never arrived, so it fails instead of reopening");
-        web.left = None;
+        assert!(web.left.is_none() && web.ready.is_none(), "a late event from the page before is ignored");
+        assert_eq!(web.phase, Phase::Loading);
         web.loads.0.send(Load::Started(page.into())).unwrap();
         web.loads.0.send(Load::Started("https://example.com/".into())).unwrap();
         assert!(web.pump(None), "leaving redraws at once");
@@ -474,8 +477,9 @@ mod tests {
         let (port, cookie) = web.check_due(Some(b)).expect("opening another page checks first, whatever the timer says");
         assert_eq!(port, b);
         assert!(web.check_due(Some(b)).is_none(), "one check at a time");
-        web.checked(&cookie.value, Ok(true));
-        assert_eq!(web.verified.as_deref(), Some("v"), "b may open now");
+        web.checked(b, &cookie.value, Ok(true));
+        assert!(web.verified_for("v", b), "b may open now");
+        assert!(!web.verified_for("v", a), "a check answers only for its own page");
     }
 
     #[test]
@@ -487,17 +491,17 @@ mod tests {
         web.ready = Some(a.into());
         web.phase = Phase::Shown;
         let (_, cookie) = web.check_due(Some(b)).unwrap();
-        web.checked(&cookie.value, Err("the page's port answered 503".into()));
+        web.checked(b, &cookie.value, Err("the page's port answered 503".into()));
         assert!(web.cookie.is_some(), "the open page keeps its cookie meanwhile");
         assert!(web.verified.is_none(), "the next page still waits");
         assert!(web.sign_in_due(now()), "a fresh sign-in stands in for the unclear check");
         web.signing = false;
         web.remint = false;
-        web.verified = Some(cookie.value.clone());
+        web.verified = Some((cookie.value.clone(), None));
         web.loaded = Some(b.into());
         web.checked_at = None;
         web.check_due(Some(b)).unwrap();
-        web.checked(&cookie.value, Err("connection refused".into()));
+        web.checked(b, &cookie.value, Err("connection refused".into()));
         assert!(!web.remint, "an unclear routine check on an open page changes nothing");
         web.remint = true;
         web.signed(Err("daemon down".into()));
@@ -505,7 +509,7 @@ mod tests {
         web.renew_at = Some(Instant::now());
         assert!(web.sign_in_due(now()));
         web.signed(Ok(session("2026-11-26T23:00:00Z")));
-        assert_eq!(web.verified.as_deref(), Some("v"));
+        assert!(web.verified_for("v", b));
         assert_eq!(web.loaded.as_deref(), Some(b), "the open page stays through all of it");
     }
 
@@ -518,17 +522,17 @@ mod tests {
         web.ready = Some(page.into());
         web.phase = Phase::Shown;
         let (_, cookie) = web.check_due(Some(page)).unwrap();
-        web.checked("someone-else", Ok(false));
+        web.checked(page, "someone-else", Ok(false));
         assert!(web.cookie.is_some(), "an answer about an older cookie changes nothing");
         web.checked_at = None;
         web.check_due(Some(page)).unwrap();
-        web.checked(&cookie.value, Ok(false));
+        web.checked(page, &cookie.value, Ok(false));
         assert!(web.cookie.is_none() && web.loaded.is_none() && web.ready.is_none());
         assert_eq!(web.phase, Phase::SigningIn);
         assert!(web.check_due(Some(page)).is_none(), "no check while there is no cookie");
         assert!(web.sign_in_due(now()));
         web.signed(Ok(session("2026-11-26T23:00:00Z")));
-        assert_eq!(web.verified.as_deref(), Some("v"), "the fresh cookie opens the page");
+        assert!(web.verified_for("v", page), "the fresh cookie opens the page");
     }
 
     #[test]
@@ -546,6 +550,7 @@ mod tests {
         let mut web = Web::new();
         web.loaded = Some(page.into());
         web.phase = Phase::Shown;
+        web.arrived = true;
         web.loads.0.send(Load::Started("https://example.com/".into())).unwrap();
         web.loads.0.send(Load::Finished("https://example.com/".into())).unwrap();
         web.pump(None);
