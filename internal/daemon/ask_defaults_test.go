@@ -33,6 +33,12 @@ func TestAnAskWithADefaultTakesItAtItsDeadlineAndTellsTheSessionOnce(t *testing.
 	if ask, _, _ := f.r.Ask(askID); ask.State != registry.AskOpen {
 		t.Fatalf("the default applied before its deadline: %s", ask.State)
 	}
+	if expired, err := f.r.ApplyAskDefaults(time.Now().Add(16 * time.Minute)); err != nil || len(expired) != 1 {
+		t.Fatalf("the default did not apply at its deadline: %+v %v", expired, err)
+	}
+	if got := noticesTo(t, f.r, "lead", "the default applies"); got != 0 {
+		t.Fatal("the session was told before any sweep")
+	}
 	for range 2 {
 		f.d.sweepAsks(time.Now().Add(16 * time.Minute))
 	}
