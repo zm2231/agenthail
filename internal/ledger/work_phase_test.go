@@ -184,3 +184,23 @@ func TestImportedHistoryCannotPassForThePRWatcher(t *testing.T) {
 	work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W1", SessionID: holder})
 	workRefused(t, s, ledger.WorkRequest{Action: ledger.WorkTakeover, ItemID: "widget-W1", Reason: "gone", Takeover: takeover(ledger.TakeoverDone, ledger.HolderGone)}, "no \"PR merged:\" line")
 }
+
+func TestBlockingAnUnblockedItemDoesNotHandItBackToItsLastHolder(t *testing.T) {
+	s := newStore(t)
+	searchAsk(t, s)
+	heldBy(t, s, "add the index")
+	verifies(t, s, "widget-W1")
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkBlock, ItemID: "widget-W1", SessionID: holder, Reason: "waiting on CI"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkUnblock, ItemID: "widget-W1", SessionID: holder})
+	blocked := work(t, s, ledger.WorkRequest{Action: ledger.WorkBlock, ItemID: "widget-W1", SessionID: "s2", Reason: "the host has no disk yet"})
+	if blocked.Item.Assignee != "" || blocked.Item.Phase != ledger.PhaseScope {
+		t.Fatalf("blocked by another session: assignee %q phase %q, want no holder and scope", blocked.Item.Assignee, blocked.Item.Phase)
+	}
+	board, _ := s.Board(project)
+	if held := board.HeldBy(holder); len(held) != 0 {
+		t.Fatalf("the last holder still holds %+v", held)
+	}
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkUnblock, ItemID: "widget-W1", SessionID: "s2"})
+	work(t, s, ledger.WorkRequest{Action: ledger.WorkClaim, ItemID: "widget-W1", SessionID: holder})
+	wantPhase(t, s, "widget-W1", ledger.PhaseBuild)
+}

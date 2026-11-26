@@ -75,6 +75,9 @@ func (b *Board) planWork(req WorkRequest, ids *idIssuer) (EventType, any, string
 		if payload.Reason == "" {
 			return "", nil, "", refuse("block needs --reason: what %s waits on", item.ID)
 		}
+		if item.State == WorkOpen {
+			payload.Assignee = ""
+		}
 	case WorkSubmit:
 		if item.Assignee != req.SessionID {
 			return "", nil, "", refuse("%s is claimed by %s; only its assignee submits it", item.ID, item.Assignee)
