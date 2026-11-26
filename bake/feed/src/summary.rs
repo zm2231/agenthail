@@ -26,6 +26,26 @@ impl Entry {
             Entry::Output(item) | Entry::Reasoning(item) => &item.id,
         }
     }
+
+    pub fn bodies(&self) -> Vec<(&'static str, &Item)> {
+        let parts: Vec<(&'static str, &Item)> = match self {
+            Entry::Call { call, results } => std::iter::once(("Input", call)).chain(results.iter().map(|r| ("Output", r))).collect(),
+            Entry::Output(item) => vec![("Output", item)],
+            Entry::Reasoning(item) => vec![("Thinking", item)],
+        };
+        parts.into_iter().filter(|(_, item)| !item.text.trim().is_empty() || item.truncated).collect()
+    }
+}
+
+pub fn clip(text: &str, max: usize) -> (&str, bool) {
+    if text.len() <= max {
+        return (text, false);
+    }
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    (&text[..end], true)
 }
 
 pub fn entries(items: &[Item]) -> Vec<Entry> {
@@ -177,5 +197,31 @@ pub fn label(items: &[Item]) -> String {
     match chars.next() {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
         None => label,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(id: &str, kind: &str, text: &str) -> Item {
+        Item { id: id.into(), kind: kind.into(), text: text.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn an_entry_shows_its_input_then_each_output() {
+        let call = Entry::Call { call: item("c", "toolCall", "ls"), results: vec![item("r1", "toolResult", "a\nb"), item("r2", "toolResult", " ")] };
+        let parts: Vec<(&str, &str)> = call.bodies().iter().map(|(l, i)| (*l, i.id.as_str())).collect();
+        assert_eq!(parts, vec![("Input", "c"), ("Output", "r1")]);
+        let clipped = Item { truncated: true, ..item("o", "toolResult", "") };
+        assert_eq!(Entry::Output(clipped).bodies().len(), 1);
+        assert_eq!(Entry::Reasoning(item("t", "reasoning", "hm")).bodies()[0].0, "Thinking");
+    }
+
+    #[test]
+    fn clipping_keeps_whole_characters() {
+        assert_eq!(clip("short", 10), ("short", false));
+        assert_eq!(clip("héllo", 2), ("h", true));
+        assert_eq!(clip("héllo", 3), ("hé", true));
     }
 }

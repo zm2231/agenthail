@@ -188,6 +188,7 @@ impl TranscriptView {
                         first.get_or_insert(at);
                     }
                 }
+                Message::CaughtUp => {}
                 Message::Status(status) => {
                     if status == "replay finished" {
                         self.finished = true;

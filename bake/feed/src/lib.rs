@@ -8,6 +8,7 @@ pub mod composer;
 pub mod derive;
 pub mod edits;
 pub mod focus;
+pub mod history;
 pub mod item;
 pub mod menu;
 #[cfg(test)]

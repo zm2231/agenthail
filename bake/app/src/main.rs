@@ -1,3 +1,4 @@
+mod history;
 mod icons;
 mod over;
 mod theme;
@@ -35,6 +36,8 @@ pub enum Bg {
     NewSession(ui::new_session::Loaded),
     Queue(String, Result<Vec<feed::queue::Queued>, String>),
     QueueDone(String, i64, feed::queue::Done),
+    Older(String, Result<feed::history::Older, feed::history::Miss>),
+    Body(String, String, Result<String, String>),
     Error(String),
 }
 
@@ -273,6 +276,7 @@ fn init() -> App {
 }
 
 const PANE_REBUILD_SECS: f64 = 1.0;
+const REPLAY_QUIET_SECS: f64 = 1.5;
 const SETTLE_GRACE: std::time::Duration = std::time::Duration::from_secs(6);
 
 impl App {
@@ -936,13 +940,16 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::NewSession(loaded) => ui::new_session::take(s, loaded),
             Bg::Queue(id, result) => ui::queue::take(s, id, result),
             Bg::QueueDone(id, queue_id, done) => ui::queue::done(s, id, queue_id, done),
+            Bg::Older(id, result) => history::take_older(s, id, result),
+            Bg::Body(id, item, result) => history::take_body(s, id, item, result),
             Bg::Error(error) => s.status = format!("daemon: {error}"),
         }
     }
     let mut busy = false;
     let mut counter = s.counter;
     let mut panes_moved = false;
-    for pane in s.panes.values_mut() {
+    let mut caught: Vec<String> = Vec::new();
+    for (id, pane) in s.panes.iter_mut() {
         let mut moved = false;
         if let Some(replay) = &mut pane.replay {
             let (c, more) = replay.pump(t, &mut pane.transcript);
@@ -956,9 +963,16 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             busy = true;
             while let Ok(message) = rx.try_recv() {
                 match message {
-                    Message::Batch(b) => moved |= pane.transcript.apply(b.seq, b.events),
+                    Message::Batch(b) => {
+                        pane.last_batch = t;
+                        moved |= pane.transcript.apply(b.seq, b.events);
+                    }
                     Message::Status(status) => pane.status = status,
+                    Message::CaughtUp => caught.push(id.clone()),
                 }
+            }
+            if !pane.caught_up && t - pane.last_batch >= REPLAY_QUIET_SECS && !caught.contains(id) {
+                caught.push(id.clone());
             }
         }
         if moved {
@@ -969,6 +983,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     }
     s.counter = counter;
     s.panes_moved |= panes_moved;
+    for id in caught {
+        history::caught_up(s, &id);
+    }
     if s.ov.live.stale() || (s.panes_moved && s.clock - s.built_at >= PANE_REBUILD_SECS) {
         rebuild(s);
         changed = true;

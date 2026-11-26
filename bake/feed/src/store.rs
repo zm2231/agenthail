@@ -22,6 +22,7 @@ pub struct Transcript {
     pub seq: u64,
     dirty: Option<usize>,
     checkpoint: Option<Checkpoint>,
+    expanded: HashMap<String, String>,
 }
 
 fn is_prompt(item: &Item) -> bool {
@@ -33,6 +34,41 @@ impl Transcript {
         &self.items
     }
 
+    pub fn item(&self, id: &str) -> Option<&Item> {
+        self.index.get(id).map(|&at| &self.items[at])
+    }
+
+    pub fn ids(&self) -> std::collections::HashSet<String> {
+        self.index.keys().cloned().collect()
+    }
+
+    pub fn prepend(&mut self, older: Vec<Item>) -> bool {
+        let mut seen = std::collections::HashSet::new();
+        let fresh: Vec<Item> = older.into_iter().filter(|i| !self.index.contains_key(&i.id) && seen.insert(i.id.clone())).collect();
+        if fresh.is_empty() {
+            return false;
+        }
+        self.items.splice(0..0, fresh);
+        self.index = self.items.iter().enumerate().map(|(i, item)| (item.id.clone(), i)).collect();
+        self.touch(0);
+        self.revision += 1;
+        true
+    }
+
+    pub fn expand(&mut self, id: &str, text: String) -> bool {
+        let Some(&at) = self.index.get(id) else { return false };
+        let item = &mut self.items[at];
+        if !item.truncated {
+            return false;
+        }
+        item.text = text.clone();
+        item.truncated = false;
+        self.expanded.insert(id.to_string(), text);
+        self.touch(at);
+        self.revision += 1;
+        true
+    }
+
     fn touch(&mut self, at: usize) {
         self.dirty = Some(self.dirty.map_or(at, |d| d.min(at)));
     }
@@ -42,7 +78,17 @@ impl Transcript {
         let mut changed = false;
         for event in events {
             match event {
-                Event::Upsert(item) => {
+                Event::Upsert(mut item) => {
+                    match self.expanded.get(&item.id) {
+                        Some(full) if item.truncated => {
+                            item.text = full.clone();
+                            item.truncated = false;
+                        }
+                        Some(_) => {
+                            self.expanded.remove(&item.id);
+                        }
+                        None => {}
+                    }
                     if item.role_is("user") && matches!(item.kind.as_str(), "message" | "text") || item.agent.as_ref().is_some_and(|a| a.is_incoming()) {
                         self.turn_open = true;
                     }
@@ -118,5 +164,49 @@ impl Transcript {
             self.checkpoint = Some(Checkpoint { item: cut, block: checkpoint.block + between, focus });
         }
         Some((checkpoint.block, tail))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(id: &str, text: &str) -> Item {
+        Item { id: id.into(), kind: "message".into(), role: Some("assistant".into()), text: text.into(), ..Default::default() }
+    }
+
+    fn ids(t: &Transcript) -> Vec<&str> {
+        t.items().iter().map(|i| i.id.as_str()).collect()
+    }
+
+    #[test]
+    fn older_rows_go_in_front_once() {
+        let mut t = Transcript::default();
+        t.apply(1, vec![Event::Upsert(item("c", "c")), Event::Upsert(item("d", "d"))]);
+        t.tail(true);
+        assert!(t.prepend(vec![item("a", "a"), item("b", "b"), item("c", "stale"), item("a", "again")]));
+        assert_eq!(ids(&t), vec!["a", "b", "c", "d"]);
+        assert_eq!(t.item("c").unwrap().text, "c");
+        assert!(!t.prepend(vec![item("b", "b")]));
+        let (start, blocks) = t.tail(true).unwrap();
+        assert_eq!((start, blocks.len()), (0, 4));
+        t.apply(2, vec![Event::Upsert(item("b", "b2"))]);
+        assert_eq!(ids(&t), vec!["a", "b", "c", "d"]);
+    }
+
+    #[test]
+    fn an_expanded_body_survives_the_stream_resending_its_head() {
+        let mut t = Transcript::default();
+        let head = Item { truncated: true, body_ref: Some("r".into()), ..item("a", "head") };
+        t.apply(1, vec![Event::Upsert(head.clone())]);
+        assert!(!t.expand("missing", "x".into()));
+        assert!(t.expand("a", "head and the rest".into()));
+        assert!(!t.expand("a", "again".into()));
+        t.apply(2, vec![Event::Upsert(head)]);
+        assert_eq!((t.item("a").unwrap().text.as_str(), t.item("a").unwrap().truncated), ("head and the rest", false));
+        t.apply(3, vec![Event::Upsert(item("a", "edited"))]);
+        assert_eq!(t.item("a").unwrap().text, "edited");
+        t.apply(4, vec![Event::Upsert(Item { truncated: true, ..item("a", "new head") })]);
+        assert_eq!(t.item("a").unwrap().text, "new head");
     }
 }

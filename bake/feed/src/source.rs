@@ -14,6 +14,7 @@ pub struct Batch {
 pub enum Message {
     Batch(Batch),
     Status(String),
+    CaughtUp,
 }
 
 fn feed_line(line: &str, sse: &mut Sse, rebuild: &mut Rebuild, tx: &Sender<Message>) -> Result<bool, ()> {
@@ -57,6 +58,9 @@ impl Live {
                     let mut rebuild = Rebuild::default();
                     for line in BufReader::new(response.into_reader()).lines() {
                         let Ok(line) = line else { break };
+                        if line == ": live" && tx.send(Message::CaughtUp).is_err() {
+                            return;
+                        }
                         if let Some(json) = line.strip_prefix("data:").map(str::trim) {
                             if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
                                 if let Some(seq) = v["seq"].as_u64() {

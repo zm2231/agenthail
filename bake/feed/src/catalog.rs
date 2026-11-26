@@ -569,6 +569,15 @@ impl Client {
         self.get(path)
     }
 
+    pub(crate) fn get_reply(&self, path: &str) -> std::result::Result<Value, (u16, String)> {
+        let request = self.agent.get(&format!("{}{path}", self.base)).set("Authorization", &format!("Bearer {}", self.token)).set("Accept", "application/json");
+        match request.call() {
+            Ok(response) => response.into_json().map_err(|e| (0, e.to_string())),
+            Err(ureq::Error::Status(code, response)) => Err((code, response.into_string().unwrap_or_default())),
+            Err(error) => Err((0, error.to_string())),
+        }
+    }
+
     pub(crate) fn ledger_rows(&self, project: &str) -> Result<Vec<Value>> {
         let mut rows = Vec::new();
         let mut cursor: Option<String> = None;
