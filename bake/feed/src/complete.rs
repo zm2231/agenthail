@@ -363,6 +363,7 @@ pub struct History {
     entries: Vec<String>,
     position: Option<usize>,
     draft: String,
+    waiting: Option<Vec<String>>,
 }
 
 impl History {
@@ -371,6 +372,10 @@ impl History {
     }
 
     pub fn replace(&mut self, texts: Vec<String>) {
+        if self.browsing() {
+            self.waiting = Some(texts);
+            return;
+        }
         let mut seen = std::collections::HashSet::new();
         self.entries = texts.into_iter().filter(|t| !t.trim().is_empty() && seen.insert(t.clone())).collect();
         if self.position.is_some_and(|p| p >= self.entries.len()) {
@@ -391,7 +396,7 @@ impl History {
     pub fn newer(&mut self) -> Option<String> {
         let p = self.position?;
         if p == 0 {
-            self.position = None;
+            self.stop();
             return Some(std::mem::take(&mut self.draft));
         }
         self.position = Some(p - 1);
@@ -400,7 +405,9 @@ impl History {
 
     pub fn stop(&mut self) {
         self.position = None;
-        self.draft.clear();
+        if let Some(texts) = self.waiting.take() {
+            self.replace(texts);
+        }
     }
 }
 
@@ -679,7 +686,9 @@ mod tests {
         h.older("x");
         h.older("x");
         h.replace(vec!["only".into()]);
+        assert_eq!(h.newer().as_deref(), Some("just sent"), "a refresh waits while the person is browsing");
         assert_eq!(h.newer().as_deref(), Some("x"));
+        assert_eq!(h.older("y").as_deref(), Some("only"), "and applies once they're back at their draft");
         h.older("y");
         h.stop();
         assert!(!h.browsing());
