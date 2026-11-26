@@ -78,6 +78,7 @@ pub struct Pane {
     pub status: String,
     pub caught_up: bool,
     pub paged_first: bool,
+    pub reload: bool,
     pub last_batch: f64,
     pub earlier: Earlier,
     pub expanding: HashMap<String, Option<String>>,
@@ -98,6 +99,7 @@ impl Pane {
             status: "loading".into(),
             caught_up: false,
             paged_first: false,
+            reload: false,
             last_batch: f64::MAX,
             earlier: Earlier::default(),
             expanding: HashMap::new(),
@@ -424,7 +426,10 @@ fn footer(cx: &Cx, block: &Block) -> Option<El> {
     };
     let mut tools = row().gap(2.0).items_center().group_opacity(0.0, 1.0);
     tools = tools.child(action(format!("copy-{item}"), &icons::COPY, "Copy").on_press_tx(crate::history::copy(body.clone())));
-    if user {
+    let images = cx.pane.transcript.item(item).map_or(0, |i| feed::blocks::strip_image_markers(&i.text).1);
+    if user && images > 0 {
+        tools = tools.child(action(format!("edit-{item}"), &icons::PENCIL, "Edit").opacity(0.45).help("Edit would resend this message without its images"));
+    } else if user {
         tools = tools.child(action(format!("edit-{item}"), &icons::PENCIL, "Edit").on_press(crate::history::edit(body.clone())));
     }
     let mut line = row().gap(6.0).items_center().pt(2.0);

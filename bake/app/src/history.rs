@@ -9,7 +9,7 @@ pub fn batch_arrived(pane: &mut Pane, t: f64) {
     if pane.paged_first {
         let (live, status) = (pane.live.take(), std::mem::take(&mut pane.status));
         *pane = Pane::new();
-        (pane.live, pane.status) = (live, status);
+        (pane.live, pane.status, pane.reload) = (live, status, true);
     }
     pane.last_batch = t;
 }
@@ -18,7 +18,7 @@ pub fn caught_up(s: &mut App, id: &str) {
     let Some(pane) = s.panes.get_mut(id) else { return };
     pane.caught_up = true;
     pane.paged_first = pane.transcript.items().is_empty();
-    if pane.earlier.at_top || pane.blocks.is_empty() {
+    if pane.earlier.at_top || pane.blocks.is_empty() || std::mem::take(&mut pane.reload) {
         load_older(s, id);
     }
 }

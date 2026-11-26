@@ -34,9 +34,10 @@ pub(crate) fn fetch(s: &mut App, id: &str) {
     }
     let generation = s.queue_epoch;
     s.queue_fetching.insert(id.to_string(), generation);
+    let remote = session(s, id).filter(|x| x.host.state != "local" && !x.host.state.is_empty()).map(|x| if x.host.id.is_empty() { x.host.name.clone() } else { x.host.id.clone() });
     let (out, id) = (s.outbox.clone(), id.to_string());
     std::thread::spawn(move || {
-        let result = client.queue(&id).map_err(|e| e.to_string());
+        let result = client.queue(&id, remote.as_deref()).map_err(|e| e.to_string());
         let _ = out.send(Bg::Queue(id, generation, result));
     });
 }
@@ -62,22 +63,18 @@ pub(crate) fn take(s: &mut App, id: String, asked: u64, result: Result<Vec<Queue
     }
 }
 
-fn host(s: &App, id: &str) -> String {
-    session(s, id).map(|x| if x.host.id.is_empty() { x.host.name.clone() } else { x.host.id.clone() }).unwrap_or_default()
-}
-
 fn run(s: &mut App, id: &str, row: Queued, op: Op) {
     let Some(client) = s.client.clone() else { return };
-    let host = host(s, id);
-    if !s.queue_working.insert((host.clone(), row.id)) {
+    let working = (row.host.clone(), row.id);
+    if !s.queue_working.insert(working.clone()) {
         return;
     }
     s.queue_note.remove(id);
     invalidate(s, id);
     let (out, id) = (s.outbox.clone(), id.to_string());
     std::thread::spawn(move || {
-        let done = client.queue_op(op, &row, &host);
-        let _ = out.send(Bg::QueueDone(id, (host, row.id), done));
+        let done = client.queue_op(op, &row);
+        let _ = out.send(Bg::QueueDone(id, working, done));
     });
 }
 
@@ -92,12 +89,12 @@ fn hand_back(s: &mut App, id: &str, message: &str) {
 
 pub(crate) fn done(s: &mut App, id: String, working: (String, i64), done: Done) {
     s.queue_working.remove(&working);
-    let queue_id = working.1;
+    let (host, queue_id) = working;
     let id = feed::composer::current(&s.rekeyed, &id).to_string();
     invalidate(s, &id);
     let drop_row = |s: &mut App| {
         if let Some(list) = s.queue.get_mut(&id) {
-            list.retain(|r| r.id != queue_id);
+            list.retain(|r| !(r.id == queue_id && r.host == host));
         }
     };
     match done {
@@ -146,7 +143,7 @@ pub(crate) fn reserve(s: &App, id: &str) -> f32 {
 
 fn row_el(s: &App, x: &Session, item: &Queued) -> El {
     let k = theme::kit();
-    let working = s.queue_working.contains(&(host(s, &x.id), item.id));
+    let working = s.queue_working.contains(&(item.host.clone(), item.id));
     let mut actions = row().gap(2.0).items_center();
     if crate::busy_now(s, &x.id) && x.capabilities.steer {
         let refusal = item.steer_refusal(&x.capabilities);
@@ -160,7 +157,7 @@ fn row_el(s: &App, x: &Session, item: &Queued) -> El {
                 .help(refusal.unwrap_or("Steer into the current turn"))
                 .on_press(move |s: &mut App| run(s, &id, it.clone(), Op::Steer))
                 .build(k)
-                .key(format!("queue-steer-{}", item.id)),
+                .key(format!("queue-steer-{}-{}", item.host, item.id)),
         );
     }
     let refusal = item.take_back_refusal();
@@ -174,7 +171,7 @@ fn row_el(s: &App, x: &Session, item: &Queued) -> El {
             .help(refusal.unwrap_or("Take it back into the composer"))
             .on_press(move |s: &mut App| run(s, &id, it.clone(), Op::TakeBack))
             .build(k)
-            .key(format!("queue-edit-{}", item.id)),
+            .key(format!("queue-edit-{}-{}", item.host, item.id)),
     );
     let message = item.message.clone();
     actions = actions.child(
@@ -185,7 +182,7 @@ fn row_el(s: &App, x: &Session, item: &Queued) -> El {
             .help("Copy text")
             .on_press_tx(move |_: &mut App, tx: &mut Tx| tx.copy(message.clone()))
             .build(k)
-            .key(format!("queue-copy-{}", item.id)),
+            .key(format!("queue-copy-{}-{}", item.host, item.id)),
     );
     let (id, it) = (x.id.clone(), item.clone());
     actions = actions.child(
@@ -197,10 +194,10 @@ fn row_el(s: &App, x: &Session, item: &Queued) -> El {
             .help("Remove queued message")
             .on_press(move |s: &mut App| run(s, &id, it.clone(), Op::Remove))
             .build(k)
-            .key(format!("queue-remove-{}", item.id)),
+            .key(format!("queue-remove-{}-{}", item.host, item.id)),
     );
     row()
-        .key(format!("queued-{}", item.id))
+        .key(format!("queued-{}-{}", item.host, item.id))
         .w_full()
         .h(ROW_HEIGHT)
         .gap(10.0)

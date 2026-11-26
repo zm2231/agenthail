@@ -40,6 +40,8 @@ pub struct Queued {
     pub service_tier: String,
     #[serde(default)]
     pub output_schema: Option<Value>,
+    #[serde(skip)]
+    pub host: String,
 }
 
 impl Queued {
@@ -141,13 +143,27 @@ pub enum Done {
 }
 
 impl Client {
-    pub fn queue(&self, session: &str) -> anyhow::Result<Vec<Queued>> {
-        let value = self.get_json(&format!("/api/v1/queue?sessionId={}", enc(session)))?;
-        Ok(serde_json::from_value(value["items"].clone()).unwrap_or_default())
+    fn queue_rows(&self, path: &str, host: &str) -> anyhow::Result<Vec<Queued>> {
+        let value = self.get_json(path)?;
+        let mut rows: Vec<Queued> = serde_json::from_value(value["items"].clone()).unwrap_or_default();
+        for row in &mut rows {
+            row.host = host.to_string();
+        }
+        Ok(rows)
     }
 
-    pub fn queue_op(&self, op: Op, row: &Queued, host: &str) -> Done {
-        let message = match self.queue_cancel(row.id, host) {
+    pub fn queue(&self, session: &str, remote: Option<&str>) -> anyhow::Result<Vec<Queued>> {
+        let routed = self.queue_rows(&format!("/api/v1/queue?sessionId={}", enc(session)), remote.unwrap_or_default());
+        let Some(_) = remote else { return routed };
+        let held = self.queue_rows("/api/v1/queue", "").map(|rows| rows.into_iter().filter(|r| r.session_id == session).collect::<Vec<_>>());
+        match (routed, held) {
+            (Err(error), Err(_)) => Err(error),
+            (routed, held) => Ok(routed.unwrap_or_default().into_iter().chain(held.unwrap_or_default()).collect()),
+        }
+    }
+
+    pub fn queue_op(&self, op: Op, row: &Queued) -> Done {
+        let message = match self.queue_cancel(row.id, &row.host) {
             Ok(text) if text.is_empty() => row.message.clone(),
             Ok(text) => text,
             Err(error) if error.maybe_delivered => return Done::Unsure((op != Op::Remove).then(|| row.message.clone()), error),
@@ -223,9 +239,26 @@ mod tests {
     #[test]
     fn the_queue_is_read_for_one_session() {
         let (client, seen) = daemon(replies(&[(200, r#"{"items":[{"id":3,"sessionId":"s 1","message":"hi","status":"pending"}]}"#)]));
-        let rows = client.queue("s 1").unwrap();
+        let rows = client.queue("s 1", None).unwrap();
         assert_eq!(seen.recv().unwrap().0, "/api/v1/queue?sessionId=s+1");
-        assert_eq!((rows[0].id, rows[0].message.as_str()), (3, "hi"));
+        assert_eq!((rows[0].id, rows[0].message.as_str(), rows[0].host.as_str()), (3, "hi", ""));
+    }
+
+    #[test]
+    fn a_remote_sessions_queue_includes_what_this_computer_holds_for_it() {
+        let (client, seen) = daemon(replies(&[
+            (200, r#"{"items":[{"id":3,"sessionId":"vps/s1","message":"there","status":"pending"}]}"#),
+            (200, r#"{"items":[{"id":3,"sessionId":"vps/s1","message":"held here","status":"pending"},{"id":4,"sessionId":"other","status":"pending"}]}"#),
+            (502, r#"{"error":{"code":"host_unreachable","message":"Host vps is unreachable"}}"#),
+            (200, r#"{"items":[{"id":5,"sessionId":"vps/s1","message":"held","status":"pending"}]}"#),
+        ]));
+        let rows = client.queue("vps/s1", Some("vps")).unwrap();
+        assert_eq!(seen.recv().unwrap().0, "/api/v1/queue?sessionId=vps%2Fs1");
+        assert_eq!(seen.recv().unwrap().0, "/api/v1/queue");
+        let got: Vec<(i64, &str, &str)> = rows.iter().map(|r| (r.id, r.host.as_str(), r.message.as_str())).collect();
+        assert_eq!(got, vec![(3, "vps", "there"), (3, "", "held here")]);
+        let down = client.queue("vps/s1", Some("vps")).unwrap();
+        assert_eq!((down.len(), down[0].id, down[0].host.as_str()), (1, 5, ""));
     }
 
     #[test]
@@ -241,15 +274,15 @@ mod tests {
             (200, r#"{"ok":true,"result":{"message":"x"}}"#),
             (202, r#"{"ok":true,"status":"submitted"}"#),
         ]));
-        assert_eq!(client.queue_op(Op::TakeBack, &r, "mac"), Done::TakenBack("edited text".into()));
+        assert_eq!(client.queue_op(Op::TakeBack, &Queued { host: "mac".into(), ..r.clone() }), Done::TakenBack("edited text".into()));
         assert_eq!(seen.recv().unwrap().1, json!({"action": "queue-cancel", "queueId": 7, "host": "mac"}));
-        assert_eq!(client.queue_op(Op::Remove, &r, ""), Done::Removed);
+        assert_eq!(client.queue_op(Op::Remove, &r), Done::Removed);
         seen.recv().unwrap();
-        assert_eq!(client.queue_op(Op::Steer, &r, ""), Done::Steered(Delivered::Steered));
+        assert_eq!(client.queue_op(Op::Steer, &r), Done::Steered(Delivered::Steered));
         seen.recv().unwrap();
         assert_eq!(seen.recv().unwrap().1, json!({"action": "steer", "sessionId": "s1", "message": "steer me", "author": "person"}));
-        assert_eq!(client.queue_op(Op::Steer, &r, ""), Done::Steered(Delivered::QueuedUntilAnswer(Some(9))));
-        assert_eq!(client.queue_op(Op::Steer, &r, ""), Done::Steered(Delivered::Unconfirmed));
+        assert_eq!(client.queue_op(Op::Steer, &r), Done::Steered(Delivered::QueuedUntilAnswer(Some(9))));
+        assert_eq!(client.queue_op(Op::Steer, &r), Done::Steered(Delivered::Unconfirmed));
     }
 
     #[test]
@@ -262,18 +295,18 @@ mod tests {
             (504, r#"{"error":{"code":"host_outcome_unknown","message":"Host mac did not answer"}}"#),
             (504, r#"{"error":{"code":"host_outcome_unknown","message":"Host mac did not answer"}}"#),
         ]));
-        match client.queue_op(Op::Steer, &r, "") {
+        match client.queue_op(Op::Steer, &r) {
             Done::Failed(error) => assert_eq!(error.message, "already delivered"),
             other => panic!("{other:?}"),
         }
-        match client.queue_op(Op::Steer, &r, "") {
+        match client.queue_op(Op::Steer, &r) {
             Done::SteerFailed(text, error) => assert!(text == "steer me" && error.maybe_delivered),
             other => panic!("{other:?}"),
         }
-        match client.queue_op(Op::TakeBack, &r, "") {
+        match client.queue_op(Op::TakeBack, &r) {
             Done::Unsure(Some(text), error) => assert!(text == "m7" && error.maybe_delivered),
             other => panic!("{other:?}"),
         }
-        assert!(matches!(client.queue_op(Op::Remove, &r, ""), Done::Unsure(None, _)));
+        assert!(matches!(client.queue_op(Op::Remove, &r), Done::Unsure(None, _)));
     }
 }
