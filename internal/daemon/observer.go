@@ -200,13 +200,17 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 // A session watched only to see its turn end is not armed when seen busy, so a turn it started itself pushes nothing.
 func (d *Daemon) observeInScan(ctx context.Context, scan *relayScan, adapter surface.Surface, session *surface.Session, arm bool) {
 	read := *session
+	seen := time.Now()
+	exited := session.Ended || relayTargetInactive(session)
 	observed := observeOnce(adapter, session, d.observeTurn)
 	observation, err := observed.get(ctx)
 	unobserved := err != nil && d.readUnobservedBackground(ctx, adapter, session)
 	d.syncRelaysObserved(ctx, scan, adapter, session, observed)
 	source, transport := session.Source, session.Transport
 	if err != nil {
-		d.recordObservationFailure(session.ID)
+		if backedOff := d.recordObservationFailure(session.ID); backedOff && exited {
+			d.stopOpenTurn(session.ID, seen)
+		}
 		d.logObserveError(session.ID, err)
 		if unobserved {
 			d.releaseUnobservedHold(ctx, adapter, session)
@@ -316,6 +320,11 @@ func (d *Daemon) observeInScan(ctx context.Context, scan *relayScan, adapter sur
 			d.pushWaitingTurn(session, observation.CompletedTurnID)
 		}
 	}
+	// A session stopped mid-turn writes no completion, so once its last
+	// observation after exit binds none, the turn is over.
+	if exited && observation.Status != surface.StatusBusy && observation.ActiveTurnID == "" {
+		d.stopOpenTurn(session.ID, seen)
+	}
 	notice := turnCompletedNotice{title: notificationTitle, desktop: notificationBody, mobile: notificationBody, outcome: notificationOutcome}
 	if notice.desktop != "" && observation.Reply.Error == "" {
 		notice = d.endTurnNotifications(session, observation.CompletedTurnID, notice.title, notice.desktop)
@@ -386,6 +395,12 @@ func (d *Daemon) observeInScan(ctx context.Context, scan *relayScan, adapter sur
 		if after, err := d.Registry.QueueMark(session.ID); markErr != nil || err != nil || after != before {
 			d.publishEvent("state.changed", session.ID, map[string]string{"source": "queue"})
 		}
+	}
+}
+
+func (d *Daemon) stopOpenTurn(sessionID string, seen time.Time) {
+	if err := d.Registry.StopOpenTurn(sessionID, seen, time.Now()); err != nil {
+		d.log.Printf("stop open turn %s: %s", d.resolveDisplay(sessionID), err)
 	}
 }
 

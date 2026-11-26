@@ -730,6 +730,7 @@ CREATE TABLE IF NOT EXISTS turn_ends (
 	ledger_key TEXT NOT NULL DEFAULT '',
 	waiting_pushed_at_ms INTEGER NOT NULL DEFAULT 0,
 	lead_escalated_at_ms INTEGER NOT NULL DEFAULT 0,
+	stopped_at_ms INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (session_id, started_at_ms)
 );
 CREATE TABLE IF NOT EXISTS asks (

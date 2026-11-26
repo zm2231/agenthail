@@ -322,7 +322,8 @@ func (d *Daemon) observationAllowed(sessionID string) bool {
 	return !found || !time.Now().Before(retry.retryAt)
 }
 
-func (d *Daemon) recordObservationFailure(sessionID string) {
+// recordObservationFailure reports whether the retries have backed off as far as they go.
+func (d *Daemon) recordObservationFailure(sessionID string) bool {
 	d.retryMu.Lock()
 	retry := d.observeRetry[sessionID]
 	retry.failures++
@@ -333,6 +334,7 @@ func (d *Daemon) recordObservationFailure(sessionID string) {
 	retry.retryAt = time.Now().Add(delay)
 	d.observeRetry[sessionID] = retry
 	d.retryMu.Unlock()
+	return delay == time.Minute
 }
 
 func (d *Daemon) clearObservationFailure(sessionID string) {

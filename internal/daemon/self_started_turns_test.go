@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -142,4 +143,100 @@ func TestATurnOfAClaudeSessionWhoseProcessExitedIsStillSeenEnding(t *testing.T) 
 	f.d.scanAndRelay(t.Context())
 	endBoundTo(t, f, "turn-1", "Wrote the report")
 	expectNoNotification(t, received, "a turn the session started itself pushed")
+}
+
+func workerStoppedMidTurn(t *testing.T, f *extensionFixture) {
+	t.Helper()
+	worker := f.fake.sessions["worker"]
+	worker.Status, worker.Ended = surface.StatusOffline, true
+	f.fake.sessions["worker"] = worker
+	if err := f.d.Registry.RecordObservedSession(worker); err != nil {
+		t.Fatal(err)
+	}
+	f.fake.observations["worker"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-1", CompletedAt: time.Now().Add(-time.Minute), Reply: &surface.ReplyResult{Done: true, Text: "Started the build."}}
+}
+
+func expectNotWatched(t *testing.T, f *extensionFixture) {
+	t.Helper()
+	watched, err := f.d.Registry.WatchedSessions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range watched {
+		if session.ID == "worker" {
+			t.Fatalf("a session stopped mid-turn is still watched: %+v", session)
+		}
+	}
+}
+
+func TestATurnThatEndedBeforeItsSessionWasStoppedIsNoLongerWatched(t *testing.T) {
+	f, _ := startHostedWorker(t)
+	deliveredTurnRuns(t, f, "turn-1")
+	turnEndsWith(t, f, "turn-1", "Started the build")
+	f.d.scanAndRelay(t.Context())
+	if err := f.d.Registry.OpenTurn("worker", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.d.Registry.EndTurn(registry.TurnEnd{SessionID: "worker", Headline: "Opened the pull request", Source: registry.TurnSourceTool}, "turn-2", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	workerStoppedMidTurn(t, f)
+	f.d.scanAndRelay(t.Context())
+	expectNotWatched(t, f)
+	end, ok, err := f.d.Registry.CurrentTurnEnd("worker")
+	if err != nil || !ok || end.Headline != "Opened the pull request" {
+		t.Fatalf("the last end of a stopped session no longer stands: %+v %v %v", end, ok, err)
+	}
+}
+
+func TestATurnOpenedByAPromptWhenItsSessionWasStoppedIsNoLongerWatched(t *testing.T) {
+	f, _ := startHostedWorker(t)
+	deliveredTurnRuns(t, f, "turn-1")
+	turnEndsWith(t, f, "turn-1", "Started the build")
+	f.d.scanAndRelay(t.Context())
+	if err := f.d.Registry.OpenTurn("worker", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	workerStoppedMidTurn(t, f)
+	f.d.scanAndRelay(t.Context())
+	expectNotWatched(t, f)
+}
+
+func TestAStoppedSessionThatCannotBeObservedKeepsItsTurnUntilRetriesBackOff(t *testing.T) {
+	f, _ := startHostedWorker(t)
+	deliveredTurnRuns(t, f, "turn-1")
+	turnEndsWith(t, f, "turn-1", "Started the build")
+	f.d.scanAndRelay(t.Context())
+	if err := f.d.Registry.OpenTurn("worker", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	workerStoppedMidTurn(t, f)
+	f.fake.observeErr = errors.New("transcript unreadable")
+	watchedAfter := func() bool {
+		f.d.retryMu.Lock()
+		retry := f.d.observeRetry["worker"]
+		retry.retryAt = time.Now()
+		f.d.observeRetry["worker"] = retry
+		f.d.retryMu.Unlock()
+		f.d.scanAndRelay(t.Context())
+		watched, err := f.d.Registry.WatchedSessions()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, session := range watched {
+			if session.ID == "worker" {
+				return true
+			}
+		}
+		return false
+	}
+	if !watchedAfter() {
+		t.Fatal("one failed observation stopped the turn")
+	}
+	for range 10 {
+		if !watchedAfter() {
+			return
+		}
+	}
+	t.Fatal("a stopped session that cannot be observed is watched for as long as its turn stays open")
 }

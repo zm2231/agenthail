@@ -92,7 +92,7 @@ type WatchedSession struct {
 	OpenTurnOnly bool
 }
 
-// TurnEndWatch is how long a turn opened with no completion seen keeps its session watched.
+// TurnEndWatch is how long a turn opened with no completion seen keeps its session watched, unless its session exits first.
 const TurnEndWatch = 24 * time.Hour
 
 const watchedForWork = `
@@ -107,7 +107,7 @@ const watchedForWork = `
 
 const watchedForTurnEnd = `
 	SELECT te.session_id FROM turn_ends te
-	WHERE te.started_at_ms>=? AND te.completed_turn_id='' AND NOT EXISTS (SELECT 1 FROM turn_ends later WHERE later.session_id=te.session_id AND later.started_at_ms>te.started_at_ms)`
+	WHERE te.started_at_ms>=? AND te.completed_turn_id='' AND te.stopped_at_ms=0 AND NOT EXISTS (SELECT 1 FROM turn_ends later WHERE later.session_id=te.session_id AND later.started_at_ms>te.started_at_ms)`
 
 const watchedSessionsQuery = `
 	SELECT s.id,s.surface,EXISTS(SELECT 1 FROM session_runtime r WHERE r.session_id=s.id AND r.notification_armed=1),
