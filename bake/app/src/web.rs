@@ -39,6 +39,7 @@ pub struct Web {
     ready: Option<String>,
     loading_since: Option<Instant>,
     committed: bool,
+    arrived: bool,
     slow_shown: bool,
     left: Option<String>,
     page: Rc<RefCell<String>>,
@@ -61,6 +62,7 @@ impl Web {
             ready: None,
             loading_since: None,
             committed: false,
+            arrived: false,
             slow_shown: false,
             left: None,
             page: Rc::new(RefCell::new(String::new())),
@@ -101,6 +103,7 @@ impl Web {
         self.loaded = None;
         self.ready = None;
         self.committed = false;
+        self.arrived = false;
         self.loading_since = None;
     }
 
@@ -125,9 +128,13 @@ impl Web {
                 Load::Started(url) if leaves(&url, &page) => {
                     self.left = Some(url);
                     self.committed = false;
+                    self.ready = None;
+                    changed = true;
                 }
                 Load::Started(url) => {
-                    self.committed |= feed::extensions::same_origin(&url, &page);
+                    let home = feed::extensions::same_origin(&url, &page);
+                    self.committed |= home;
+                    self.arrived |= home;
                     self.loading_since = Some(Instant::now());
                 }
                 Load::Finished(url) if self.committed && self.left.is_none() && feed::extensions::same_origin(&url, &page) => {
@@ -181,13 +188,14 @@ impl Web {
         }
         if let Some(url) = self.left.take() {
             crate::open_link(&url);
-            if self.phase == Phase::Loading {
+            if !self.arrived {
                 return Err(format!("This page sent you to {url}, so it opened in your browser."));
             }
             if let Some(page) = &self.loaded {
                 view.load_url(page).map_err(|e| format!("Couldn't open {page}: {e}"))?;
                 self.ready = None;
                 self.committed = false;
+                self.arrived = false;
                 self.phase = Phase::Loading;
                 self.loading_since = Some(Instant::now());
             }
@@ -203,6 +211,7 @@ impl Web {
             self.loaded = Some(want.to_string());
             self.ready = None;
             self.committed = false;
+            self.arrived = false;
             self.loading_since = Some(Instant::now());
             self.phase = Phase::Loading;
             return Ok(true);
@@ -378,13 +387,20 @@ mod tests {
     }
 
     #[test]
-    fn a_page_still_loading_that_leaves_is_not_reopened() {
+    fn leaving_before_and_after_the_page_arrives() {
+        let page = "http://127.0.0.1:48200/";
         let mut web = Web::new();
-        web.loaded = Some("http://127.0.0.1:48200/".into());
+        web.loaded = Some(page.into());
         web.phase = Phase::Loading;
         web.loads.0.send(Load::Started("https://example.com/".into())).unwrap();
         web.pump(None);
-        assert_eq!(web.left.as_deref(), Some("https://example.com/"));
+        assert!(!web.arrived, "an entry that redirects away never arrived, so it fails instead of reopening");
+        web.left = None;
+        web.loads.0.send(Load::Started(page.into())).unwrap();
+        web.loads.0.send(Load::Started("https://example.com/".into())).unwrap();
+        assert!(web.pump(None), "leaving redraws at once");
+        assert!(web.arrived, "it arrived first, so the entry is reopened");
+        assert!(web.ready.is_none());
     }
 
     #[test]
