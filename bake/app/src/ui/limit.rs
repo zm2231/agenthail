@@ -17,8 +17,8 @@ pub enum Done {
     Usage(String, u64, RootUsage),
     Unread(String, u64, String),
     Read(String, u64),
-    Resumed(String, bool, Result<(), RespondError>),
-    Moved(String, Target, Result<Moved, RespondError>),
+    Resumed(String, String, bool, Result<(), RespondError>),
+    Moved(String, String, Target, Result<Moved, RespondError>),
 }
 
 pub struct Confirm {
@@ -80,8 +80,7 @@ fn since(s: &App, id: &str) -> String {
     session(s, id).and_then(|x| x.limit(s.now)).map(|stop| stop.since).unwrap_or_default()
 }
 
-fn note(s: &mut App, id: &str, text: String, bad: bool) {
-    let since = since(s, id);
+fn note(s: &mut App, id: &str, since: String, text: String, bad: bool) {
     s.limits.note.insert(id.to_string(), (text, bad, since));
 }
 
@@ -90,9 +89,9 @@ fn resume(s: &mut App, id: &str, now: bool) {
         return;
     }
     s.limits.note.remove(id);
-    let id = id.to_string();
+    let (id, stop) = (id.to_string(), since(s, id));
     spawn(s, move |c, tx| {
-        let _ = tx.send(Done::Resumed(id.clone(), now, c.limit_resume(&id, now)));
+        let _ = tx.send(Done::Resumed(id.clone(), stop, now, c.limit_resume(&id, now)));
     });
 }
 
@@ -131,11 +130,12 @@ fn move_to(s: &mut App, id: &str, target: Target, stop_terminal: bool) {
     if not_sent(s) || !s.limits.busy.insert(id.to_string()) {
         return;
     }
-    note(s, id, format!("Moving to {}…", target.name), false);
+    let stop = since(s, id);
+    note(s, id, stop.clone(), format!("Moving to {}…", target.name), false);
     let id = id.to_string();
     spawn(s, move |c, tx| {
         let result = c.limit_move(&id, Some(&target.root), stop_terminal);
-        let _ = tx.send(Done::Moved(id, target, result));
+        let _ = tx.send(Done::Moved(id, stop, target, result));
     });
 }
 
@@ -171,27 +171,29 @@ fn settled(s: &mut App, done: Done) {
                 root.take_usage(usage);
             }
         }
-        Done::Resumed(id, now, result) => {
+        Done::Resumed(id, stop, now, result) => {
             s.limits.busy.remove(&id);
             let (text, bad) = match result {
                 Ok(()) if now => ("Asked it to continue".to_string(), false),
                 Ok(()) => ("It stays stopped when the limit resets".to_string(), false),
                 Err(error) => (failure(if now { "Resuming" } else { "Keeping it stopped" }, &error), true),
             };
-            note(s, &id, text, bad);
+            note(s, &id, stop, text, bad);
         }
-        Done::Moved(id, target, result) => {
+        Done::Moved(id, stop, target, result) => {
             s.limits.busy.remove(&id);
             match result {
                 Ok(Moved::Done) => {
-                    note(s, &id, format!("Moved to {}", target.name), false);
+                    note(s, &id, stop, format!("Moved to {}", target.name), false);
                 }
                 Ok(Moved::NeedsConsent(message)) => {
                     s.limits.note.remove(&id);
-                    s.limits.consent = Some(Consent { session: id, target, message });
+                    if since(s, &id) == stop {
+                        s.limits.consent = Some(Consent { session: id, target, message });
+                    }
                 }
                 Err(error) => {
-                    note(s, &id, failure("Moving", &error), true);
+                    note(s, &id, stop, failure("Moving", &error), true);
                 }
             }
         }
