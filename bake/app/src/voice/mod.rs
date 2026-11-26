@@ -4,6 +4,7 @@ mod scenes;
 mod view;
 
 use std::cell::RefCell;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -21,7 +22,7 @@ thread_local! {
     static WINDOW: RefCell<Option<WindowHandle>> = const { RefCell::new(None) };
     static ROUTE: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
     static OPENED: RefCell<Option<String>> = const { RefCell::new(None) };
-    static UNSAVED: RefCell<Option<(Trail, bool)>> = const { RefCell::new(None) };
+    static UNSAVED: RefCell<Option<Trail>> = const { RefCell::new(None) };
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -55,7 +56,6 @@ pub struct Win {
     gone: Arc<AtomicBool>,
     clock: f64,
     save_after: f64,
-    keep_log: bool,
     #[cfg(target_os = "macos")]
     loads: u64,
 }
@@ -68,11 +68,7 @@ impl Win {
             None => Err("Voice needs the Agenthail daemon. Start it, then open this window again.".into()),
         };
         let mut call = Call::new(target);
-        let (trail, keep_log) = UNSAVED.with(|u| u.borrow_mut().take()).unwrap_or_else(|| match load_trail() {
-            Some(trail) => (trail, true),
-            None => (Trail::default(), false),
-        });
-        call.trail = trail;
+        call.trail = UNSAVED.with(|u| u.borrow_mut().take()).unwrap_or_else(load_trail);
         if let Err(error) = &peer {
             eprintln!("voice: {error}");
             call.error = Some(error.clone());
@@ -98,7 +94,6 @@ impl Win {
             gone: Arc::new(AtomicBool::new(false)),
             clock: 0.0,
             save_after: 0.0,
-            keep_log,
             #[cfg(target_os = "macos")]
             loads: 0,
         }
@@ -284,9 +279,9 @@ fn closed(w: &mut Win, _: &mut Tx) {
     w.gone.store(true, Ordering::SeqCst);
     let effects = w.call.close();
     w.run(effects);
-    if w.call.trail.changed && !(w.keep_log && save_trail(&w.call.trail)) {
+    if w.call.trail.changed && !save_trail(&mut w.call.trail) {
         let trail = std::mem::take(&mut w.call.trail);
-        UNSAVED.with(|u| *u.borrow_mut() = Some((trail, w.keep_log)));
+        UNSAVED.with(|u| *u.borrow_mut() = Some(trail));
     }
     #[cfg(target_os = "macos")]
     {
@@ -372,8 +367,8 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
         if kind == peer::CHECKED {
             if call == w.loads.to_string() {
                 let effects = w.call.checked(value == "true", t);
-                changed |= !effects.is_empty();
                 w.run(effects);
+                changed = true;
             }
             continue;
         }
@@ -389,17 +384,8 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
     let effects = w.call.tick(t);
     changed |= effects.iter().any(|e| matches!(e, Effect::Note(_)));
     w.run(effects);
-    if w.call.trail.changed && !w.keep_log && t >= w.save_after {
-        match load_trail() {
-            Some(saved) => {
-                w.call.trail.merge(saved);
-                w.keep_log = true;
-            }
-            None => w.save_after = t + SAVE_RETRY_SECS,
-        }
-    }
-    if w.call.trail.changed && w.keep_log && t >= w.save_after {
-        if save_trail(&w.call.trail) {
+    if w.call.trail.changed && t >= w.save_after {
+        if save_trail(&mut w.call.trail) {
             w.call.trail.changed = false;
         } else {
             w.save_after = t + SAVE_RETRY_SECS;
@@ -411,43 +397,27 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
 }
 
 
-fn trail_file() -> Option<std::path::PathBuf> {
+fn trail_file() -> Option<PathBuf> {
     if rune::is_headless() {
         return None;
     }
     let home = std::env::var_os("HOME")?;
-    Some(std::path::PathBuf::from(home).join("Library/Application Support/Agenthail/voice-calls.json"))
+    Some(PathBuf::from(home).join("Library/Application Support/Agenthail/voice-calls.json"))
 }
 
-fn load_trail() -> Option<Trail> {
-    let Some(path) = trail_file() else { return Some(Trail::default()) };
-    let saved = match std::fs::read_to_string(&path) {
-        Ok(saved) => saved,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Some(Trail::default()),
-        Err(error) => {
-            eprintln!("voice: the call log couldn't be read, so this window won't write it: {error}");
-            return None;
+fn load_trail() -> Trail {
+    let saved = trail_file().map(std::fs::read_to_string);
+    match saved {
+        Some(Ok(saved)) => Trail::load(&saved).unwrap_or_default(),
+        Some(Err(error)) if error.kind() != std::io::ErrorKind::NotFound => {
+            eprintln!("voice: the call log couldn't be read: {error}");
+            Trail::default()
         }
-    };
-    match Trail::load(&saved) {
-        Ok(trail) => Some(trail),
-        Err(error) => {
-            let aside = unused_aside(&path);
-            match std::fs::rename(&path, &aside) {
-                Ok(()) => {
-                    eprintln!("voice: the call log couldn't be read ({error}); it was moved to {}", aside.display());
-                    Some(Trail::default())
-                }
-                Err(moved) => {
-                    eprintln!("voice: the call log couldn't be read ({error}) or moved aside ({moved}), so this window won't write it");
-                    None
-                }
-            }
-        }
+        _ => Trail::default(),
     }
 }
 
-fn unused_aside(path: &std::path::Path) -> std::path::PathBuf {
+fn unused_aside(path: &Path) -> PathBuf {
     let stamp = time::OffsetDateTime::now_utc().unix_timestamp();
     (0..)
         .map(|n| path.with_extension(if n == 0 { format!("unreadable-{stamp}.json") } else { format!("unreadable-{stamp}-{n}.json") }))
@@ -455,10 +425,30 @@ fn unused_aside(path: &std::path::Path) -> std::path::PathBuf {
         .unwrap_or_else(|| path.with_extension("unreadable.json"))
 }
 
-fn save_trail(trail: &Trail) -> bool {
+fn saved_trail(path: &Path) -> Result<Trail, String> {
+    match std::fs::read_to_string(path) {
+        Ok(saved) => Trail::parse(&saved).or_else(|error| {
+            let aside = unused_aside(path);
+            std::fs::rename(path, &aside).map_err(|moved| format!("it couldn't be read ({error}) or moved aside ({moved})"))?;
+            eprintln!("voice: the call log couldn't be read ({error}); it was moved to {}", aside.display());
+            Ok(Trail::default())
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Trail::default()),
+        Err(error) => Err(format!("it couldn't be read: {error}")),
+    }
+}
+
+fn save_trail(trail: &mut Trail) -> bool {
     let Some(path) = trail_file() else { return true };
-    let part = path.with_extension("json.part");
-    let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&part, trail.save())).and_then(|()| std::fs::rename(&part, &path));
+    let written = (|| -> Result<(), String> {
+        let dir = path.parent().ok_or("it has no folder")?;
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        let lock = std::fs::File::options().create(true).truncate(false).write(true).open(dir.join("voice-calls.lock")).map_err(|e| e.to_string())?;
+        lock.lock().map_err(|e| e.to_string())?;
+        trail.combine(saved_trail(&path)?);
+        let part = path.with_extension(format!("{}.part", std::process::id()));
+        std::fs::write(&part, trail.save()).and_then(|()| std::fs::rename(&part, &path)).map_err(|e| e.to_string())
+    })();
     if let Err(error) = &written {
         eprintln!("voice: the call log couldn't be saved: {error}");
     }

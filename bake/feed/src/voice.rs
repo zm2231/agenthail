@@ -620,8 +620,9 @@ impl Call {
         self.drain()
     }
 
-    fn dial_failed(&mut self, error: String, work: u64, cause: &str) {
+    fn dial_failed(&mut self, error: String, work: u64, stage: &str, cause: &str) {
         if let Some(id) = &self.attempt {
+            self.trail.fail(id, stage);
             self.trail.end(id, cause, self.clock);
         }
         self.error = Some(error);
@@ -643,7 +644,7 @@ impl Call {
             self.out.push(Effect::PeerStart(attempt.to_string()));
             self.end_work(work);
         } else {
-            self.dial_failed(MIC_DENIED.into(), work, "microphone_denied");
+            self.dial_failed(MIC_DENIED.into(), work, "native_audio_start", "microphone_denied");
             self.mic_denied = true;
         }
         self.drain()
@@ -911,8 +912,8 @@ impl Call {
                             }
                         }
                         Err(error) => {
-                            let cause = if job.req == Req::Select { "select_failed" } else { "prepare_failed" };
-                            self.dial_failed(error, job.work, cause);
+                            let stage = if job.req == Req::Select { "target_select" } else { "operator_prepare" };
+                            self.dial_failed(error, job.work, stage, &format!("{stage}_failed"));
                         }
                     }
                 }

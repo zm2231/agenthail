@@ -54,28 +54,34 @@ pub struct Attempt {
 pub struct Trail {
     pub attempts: Vec<Attempt>,
     pub changed: bool,
+    own: Vec<String>,
 }
 
 impl Trail {
-    pub fn load(saved: &str) -> Result<Trail, String> {
+    pub fn parse(saved: &str) -> Result<Trail, String> {
         let mut attempts: Vec<Attempt> = serde_json::from_str(saved).map_err(|e| e.to_string())?;
         let keep = attempts.len().saturating_sub(KEPT_CALLS);
         attempts.drain(..keep);
-        let mut changed = keep > 0;
-        for attempt in attempts.iter_mut().filter(|a| a.cause.is_none()) {
-            attempt.cause = Some(UNFINISHED.into());
-            changed = true;
-        }
-        Ok(Trail { attempts, changed })
+        Ok(Trail { attempts, changed: keep > 0, own: Vec::new() })
     }
 
-    pub fn merge(&mut self, saved: Trail) {
-        let mut attempts: Vec<Attempt> = saved.attempts.into_iter().filter(|a| !self.attempts.iter().any(|b| b.id == a.id)).collect();
-        attempts.append(&mut self.attempts);
+    pub fn load(saved: &str) -> Result<Trail, String> {
+        let mut trail = Trail::parse(saved)?;
+        for attempt in trail.attempts.iter_mut().filter(|a| a.cause.is_none()) {
+            attempt.cause = Some(UNFINISHED.into());
+        }
+        Ok(trail)
+    }
+
+    pub fn combine(&mut self, saved: Trail) {
+        let own = std::mem::take(&mut self.own);
+        let mut attempts: Vec<Attempt> = saved.attempts.into_iter().filter(|a| !own.contains(&a.id)).collect();
+        attempts.extend(self.attempts.drain(..).filter(|a| own.contains(&a.id)));
+        attempts.sort_by_key(|a| a.started_at);
         let keep = attempts.len().saturating_sub(KEPT_CALLS);
         attempts.drain(..keep);
+        self.own = own.into_iter().filter(|id| attempts.iter().any(|a| a.id == *id)).collect();
         self.attempts = attempts;
-        self.changed = true;
     }
 
     pub fn save(&self) -> String {
@@ -83,14 +89,16 @@ impl Trail {
     }
 
     pub fn last(&self) -> Option<&Attempt> {
-        self.attempts.last()
+        self.attempts.iter().rev().find(|a| self.own.contains(&a.id)).or(self.attempts.last())
     }
 
     pub fn begin(&mut self, id: &str, clock: f64) {
         let started_at = OffsetDateTime::now_utc().unix_timestamp();
         self.attempts.push(Attempt { id: id.into(), started_at, clock, ..Attempt::default() });
+        self.own.push(id.into());
         let keep = self.attempts.len().saturating_sub(KEPT_CALLS);
-        self.attempts.drain(..keep);
+        let dropped: Vec<String> = self.attempts.drain(..keep).map(|a| a.id).collect();
+        self.own.retain(|id| !dropped.contains(id));
         self.changed = true;
     }
 

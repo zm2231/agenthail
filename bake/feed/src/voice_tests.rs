@@ -138,6 +138,7 @@ fn a_denied_microphone_ends_the_attempt_before_any_start() {
     call.reply(prepare, Ok(state(json!({"phase": "ready"}))), 0.0);
     let id = call.attempt().unwrap().to_string();
     assert!(call.mic(&id, false).is_empty(), "no audio was started, so there is none to end");
+    assert_eq!(call.trail.last().unwrap().failed_at.as_deref(), Some("native_audio_start"));
     assert!(call.mic_denied);
     assert_eq!(call.error.as_deref(), Some(MIC_DENIED));
     assert!(!call.active() && call.can_call());
@@ -431,11 +432,22 @@ fn a_call_to_an_alias_keeps_going_when_the_start_binds_the_session_it_names() {
 }
 
 #[test]
+fn a_failed_prepare_is_logged_with_its_step() {
+    let mut call = ready();
+    let select = only_job(&call.call());
+    let prepare = only_job(&call.reply(select, Ok(state(json!({"phase": "ready"}))), 0.0));
+    call.reply(prepare, Err("the orchestrator couldn't start".into()), 0.0);
+    let logged = call.trail.last().unwrap();
+    assert_eq!((logged.cause.as_deref(), logged.failed_at.as_deref()), (Some("operator_prepare_failed"), Some("operator_prepare")));
+}
+
+#[test]
 fn a_failed_select_is_logged_as_its_own_step() {
     let mut call = ready();
     let select = only_job(&call.call());
     call.reply(select, Err("no such session".into()), 0.0);
-    assert_eq!(call.trail.last().unwrap().cause.as_deref(), Some("select_failed"));
+    let logged = call.trail.last().unwrap();
+    assert_eq!((logged.cause.as_deref(), logged.failed_at.as_deref()), (Some("target_select_failed"), Some("target_select")));
 }
 
 #[test]
@@ -592,7 +604,32 @@ fn a_page_that_fails_its_check_without_a_call_ends_no_audio() {
 }
 
 #[test]
-fn calls_logged_while_the_saved_log_was_unreadable_join_it_once_it_reads() {
+fn two_owners_of_one_call_log_keep_each_others_calls() {
+    let mut first = Trail::default();
+    first.begin("a-done", 0.0);
+    first.end("a-done", "local_hangup", 1.0);
+    let mut second = Trail::load(&first.save()).unwrap();
+    second.begin("b-live", 0.0);
+    second.mark("b-live", "prepared", 1.0);
+    let disk = second.save();
+    first.begin("a-live", 2.0);
+    first.combine(Trail::parse(&disk).unwrap());
+    let ids: Vec<_> = first.attempts.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(ids.len(), 3);
+    assert!(ids.contains(&"b-live") && ids.contains(&"a-live") && ids.contains(&"a-done"));
+    let theirs = first.attempts.iter().find(|a| a.id == "b-live").unwrap();
+    assert_eq!(theirs.cause, None, "another owner's live call is never written as ended");
+    assert_eq!(first.last().unwrap().id, "a-live", "this window's details show its own call");
+    let disk = first.save();
+    second.end("b-live", "local_hangup", 3.0);
+    second.combine(Trail::parse(&disk).unwrap());
+    let mine = second.attempts.iter().find(|a| a.id == "b-live").unwrap();
+    assert_eq!(mine.cause.as_deref(), Some("local_hangup"));
+    assert!(second.attempts.iter().any(|a| a.id == "a-live"));
+}
+
+#[test]
+fn calls_logged_before_the_saved_log_could_be_read_join_it() {
     let mut saved = Trail::default();
     for k in 0..19 {
         saved.begin(&format!("old-{k}"), 0.0);
@@ -602,13 +639,10 @@ fn calls_logged_while_the_saved_log_was_unreadable_join_it_once_it_reads() {
     fresh.begin("new-0", 0.0);
     fresh.end("new-0", "local_hangup", 1.0);
     fresh.begin("new-1", 2.0);
-    fresh.changed = false;
-    fresh.merge(saved);
+    fresh.combine(Trail::parse(&saved.save()).unwrap());
     let ids: Vec<_> = fresh.attempts.iter().map(|a| a.id.as_str()).collect();
     assert_eq!(ids.len(), KEPT_CALLS);
-    assert_eq!(ids[0], "old-1");
-    assert_eq!(&ids[KEPT_CALLS - 2..], ["new-0", "new-1"]);
-    assert!(fresh.changed);
+    assert!(ids.contains(&"new-0") && ids.contains(&"new-1") && !ids.contains(&"old-0"));
     fresh.mark("new-1", "prepared", 3.0);
     assert_eq!(fresh.last().unwrap().milestones, vec![("prepared".to_string(), 1.0)]);
 }
@@ -804,7 +838,6 @@ fn a_saved_call_log_keeps_the_last_twenty_and_closes_unfinished_calls() {
     let loaded = Trail::load(&trail.save()).unwrap();
     assert_eq!(loaded.attempts.len(), KEPT_CALLS);
     assert_eq!(loaded.last().unwrap().cause.as_deref(), Some(UNFINISHED));
-    assert!(loaded.changed, "closing an unfinished call is saved");
     assert_eq!(loaded.attempts[0].milestones, vec![("local_ended".to_string(), 1.0)]);
     assert!(Trail::load("not json").is_err());
 }
