@@ -152,18 +152,21 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 		return nil, refuse("invalid", "branch and base need isolation worktree.")
 	}
 	if host := strings.TrimSpace(input.Host); remoteHost {
-		if input.Task {
-			return nil, refuse("invalid", "A session on another computer cannot be a task.")
-		}
 		start, cwd, notices, err := d.remoteCreateScope(caller, host, kind, input.PermissionMode, input.Cwd)
 		if err != nil {
 			return nil, err
 		}
-		result, err := d.mcpAction(ctx, caller, "agenthail_create", input.mcpWrite, dashboardActionRequest{
+		request := dashboardActionRequest{
 			Action: "session-create", Host: host, Surface: string(kind), Cwd: cwd, Message: input.Message, Model: strings.TrimSpace(input.Model),
 			PermissionMode: start.permissionMode, Approval: start.approval, Alias: strings.TrimSpace(input.Alias), Ceiling: start.ceiling.encode(),
 			Isolation: isolation, Worktree: strings.TrimSpace(input.Branch), Base: strings.TrimSpace(input.Base),
-		})
+		}
+		var result json.RawMessage
+		if input.Task {
+			result, err = d.mcpCreateHostTask(ctx, caller, input, request)
+		} else {
+			result, err = d.mcpAction(ctx, caller, "agenthail_create", input.mcpWrite, request)
+		}
 		for _, notice := range notices {
 			d.noticeAfter(ctx, caller, notice, err)
 		}
@@ -186,6 +189,18 @@ func (d *Daemon) mcpCreate(ctx context.Context, caller *mcpCaller, input mcpCrea
 	})
 	d.noticeAfter(ctx, caller, notice, err)
 	return result, err
+}
+
+// mcpCreateHostTask starts a task's child on a paired host, where its task is
+// settled; the action chain records it here, where its spawner waits on it.
+func (d *Daemon) mcpCreateHostTask(ctx context.Context, caller *mcpCaller, input mcpCreateInput, request dashboardActionRequest) (json.RawMessage, error) {
+	release, _ := d.spawnLocks.acquire(caller.session.ID, true)
+	defer release()
+	if err := d.mcpChildrenRefusal(caller); err != nil {
+		return nil, err
+	}
+	request.Task, request.SourceSessionID = true, caller.session.ID
+	return d.mcpAction(ctx, caller, "agenthail_create", input.mcpWrite, request)
 }
 
 // remoteCreateScope bounds a session an agent starts on a paired computer:
@@ -252,9 +267,6 @@ func (d *Daemon) agentCreateOnHost(ctx context.Context, caller *mcpCaller, host 
 	if asked.Launcher != "" {
 		return actionReply{}, refuse("invalid", "A session on another computer starts in the background, not in a terminal.")
 	}
-	if asked.Task {
-		return actionReply{}, refuse("invalid", "A session on another computer cannot be a task.")
-	}
 	kind := surface.SurfaceKind(strings.TrimSpace(asked.Surface))
 	mode := asked.PermissionMode
 	if kind == surface.KindCodex {
@@ -269,6 +281,14 @@ func (d *Daemon) agentCreateOnHost(ctx context.Context, caller *mcpCaller, host 
 		Surface: string(kind), Cwd: cwd, Message: asked.Message, Model: asked.Model, Alias: asked.Alias, Name: asked.Name, Agent: asked.Agent,
 		PermissionMode: start.permissionMode, Approval: start.approval, Isolation: asked.Isolation, Worktree: asked.Worktree, Base: asked.Base,
 		Ceiling: start.ceiling.encode(),
+	}
+	if asked.Task {
+		release, _ := d.spawnLocks.acquire(caller.session.ID, true)
+		defer release()
+		if err := d.mcpChildrenRefusal(caller); err != nil {
+			return actionReply{}, err
+		}
+		request.Task, request.SourceSessionID = true, caller.session.ID
 	}
 	body, err := json.Marshal(request)
 	if err != nil {

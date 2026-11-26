@@ -77,7 +77,9 @@ func (r *Registry) SessionChildren(sessionID string) ([]string, error) {
 }
 
 func (r *Registry) RunningChildren(creatorID string) ([]string, error) {
-	return queryRows(r.read, nil, scanString, `SELECT s.id FROM session_origins o JOIN sessions s ON s.id=o.session_id WHERE o.creator_session_id=? AND (s.status='busy' OR (s.status<>'offline' AND EXISTS (SELECT 1 FROM tasks t WHERE t.child_session_id=s.id AND t.state='running'))) AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.child_session_id=s.id AND t.stalled=1) AND `+liveLocalSession+` ORDER BY s.id`, creatorID)
+	return queryRows(r.read, nil, scanString, `SELECT s.id FROM session_origins o JOIN sessions s ON s.id=o.session_id WHERE o.creator_session_id=? AND (s.status='busy' OR (s.status<>'offline' AND EXISTS (SELECT 1 FROM tasks t WHERE t.child_session_id=s.id AND t.state='running'))) AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.child_session_id=s.id AND t.stalled=1) AND `+liveLocalSession+`
+		UNION SELECT t.child_session_id FROM tasks t JOIN sessions s ON s.id=t.child_session_id WHERE t.parent_session_id=? AND s.host_id<>'' AND t.state='running' AND t.stalled=0
+		ORDER BY 1`, creatorID, creatorID)
 }
 
 const maxSpawnerChain = 64

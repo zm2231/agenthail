@@ -586,6 +586,7 @@ func (d *Daemon) mirrorHostOnce(ctx context.Context, host *pairedHost, outage *h
 			d.hostAnswered(host, outage)
 			continue
 		}
+		d.pullAllHostTasks(ctx, host)
 		d.drainHostDeliveries(ctx, host)
 		d.resumeHostMoves(ctx, host)
 		gap, err := d.followHostCatalog(ctx, host, seq)
@@ -788,6 +789,9 @@ func (d *Daemon) applyHostCatalogEvent(host *pairedHost, envelope catalogStreamE
 		}
 		host.setHidden(payload.SessionID, nil)
 		return d.removeHostRow(host.record.ID, payload.SessionID, "removed_by_host")
+	case registry.TaskChangedEvent:
+		d.pullChangedHostTask(context.Background(), host, envelope.Data)
+		return nil
 	case "host.keys":
 		var payload struct {
 			Keys []hosts.SigningKey `json:"keys"`

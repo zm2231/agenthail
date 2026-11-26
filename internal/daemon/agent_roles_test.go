@@ -107,10 +107,6 @@ func TestAnAgentStartsASessionOnAPairedComputerWithinItsCeilingAndThePersonIsTol
 	if refused := askScope(t, local.daemon, daemonapi.ScopeRequest{SessionID: "spawner", Action: "create", Create: above}, local127); refused.code != "exceeds_ceiling" {
 		t.Fatalf("a start above the spawner's ceiling on the paired computer: %+v", refused)
 	}
-	asTask, _ := json.Marshal(map[string]any{"surface": "codex", "host": "vps", "cwd": work, "message": "help", "task": true})
-	if refused := askScope(t, local.daemon, daemonapi.ScopeRequest{SessionID: "spawner", Action: "create", Create: asTask}, local127); refused.code != "invalid" {
-		t.Fatalf("a task on the paired computer: %+v", refused)
-	}
 	payload, _ := json.Marshal(map[string]any{"surface": "codex", "host": "vps", "cwd": work + "/", "message": "help"})
 	answer := askScope(t, local.daemon, daemonapi.ScopeRequest{SessionID: "spawner", Action: "create", Create: payload}, local127)
 	if answer.status >= http.StatusMultipleChoices {

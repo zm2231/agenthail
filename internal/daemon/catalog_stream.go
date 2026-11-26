@@ -325,6 +325,9 @@ func (d *Daemon) listedCatalogEvents(batch []registry.CatalogEvent) ([]registry.
 	}
 	listed := make([]registry.CatalogEvent, 0, len(batch))
 	for _, event := range batch {
+		if event.Type == registry.TaskChangedEvent {
+			continue
+		}
 		if event.Type == "session.upserted" && !listing.CurrentEntity(event.EntityID) {
 			payload, err := json.Marshal(map[string]string{"sessionId": event.EntityID, "reason": "unlisted"})
 			if err != nil {

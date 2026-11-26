@@ -177,6 +177,7 @@ type Daemon struct {
 	github                   github.Client
 	prs                      *prwatch.Watcher
 	taskGoals                taskGoalReads
+	hostGoalStops            hostGoalStops
 	taskWaitRead             func()
 	taskNoticeMu             sync.Mutex
 	turnStopNoticeMu         sync.Mutex

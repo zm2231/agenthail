@@ -229,3 +229,28 @@ func daemonAt(t *testing.T, app *App, server *scopeServer) {
 		return &daemonAPIClient{baseURL: http.URL, token: "dashboard-synthetic", httpClient: http.Client()}, nil
 	}
 }
+
+func TestAnAgentsThreadCreateWithTaskAsksForATaskOnTheHostItNames(t *testing.T) {
+	starter := &starterCLISurface{cliSurface: &cliSurface{kind: surface.KindCodex}}
+	app := threadFixture(t, starter)
+	if err := app.Registry.RecordObservedSession(surface.Session{ID: "worker", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	server := &scopeServer{accepted: `{"ok":true,"session":{"id":"started","surface":"codex","cwd":"/srv/work"},"result":{"uuid":"turn-1","accepted":true},"taskId":7}`}
+	daemonAt(t, app, server)
+	t.Setenv("AGENTHAIL_SESSION_ID", "worker")
+	output, err := captureStdout(t, func() error {
+		return app.Run([]string{"thread", "create", "codex", "Build it", "--host", "vps", "--cwd", "/srv/work", "--task"})
+	})
+	if err != nil || !strings.Contains(output, "task 7:") {
+		t.Fatalf("output=%q err=%v, want the task's id", output, err)
+	}
+	asked := server.requests()
+	var create map[string]any
+	if len(asked) != 1 || asked[0].Action != "create" || json.Unmarshal(asked[0].Create, &create) != nil {
+		t.Fatalf("scope requests=%+v", asked)
+	}
+	if create["task"] != true || create["host"] != "vps" || create["sourceSessionId"] != "worker" {
+		t.Fatalf("create request=%v, want a task on vps started by the worker", create)
+	}
+}

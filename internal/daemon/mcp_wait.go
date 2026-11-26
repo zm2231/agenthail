@@ -209,25 +209,43 @@ func (d *Daemon) taskAttention(ctx context.Context, task registry.Task) []mcpWai
 	if err != nil {
 		return nil
 	}
-	items := d.taskRequests(ctx, task, session)
+	remote := d.taskChildHost(task.Child) != ""
+	items := d.taskRequests(ctx, task, session, remote)
+	stop, stopped := hostGoalStop{}, false
+	if remote {
+		stop, stopped = d.hostGoalStops.get(task.Child)
+	} else if goal := d.stoppedTaskGoal(ctx, task); goal != nil {
+		stop, stopped = hostGoalStop{Status: goal.Status, Reason: goal.Reason, Key: goalStopNoticeKey(task.Child, goal)}, true
+	}
+	if !stopped {
+		return items
+	}
+	return append(items, mcpWaitItem{
+		Type: "goal_stopped", TaskID: task.ID, Child: task.Child, GoalStatus: stop.Status, Reason: stop.Reason,
+		Next: "Resume it with agenthail_goal, or end the task with agenthail_interrupt and agenthail_archive.",
+		key:  "g:" + stop.Key,
+	})
+}
+
+func (d *Daemon) stoppedTaskGoal(ctx context.Context, task registry.Task) *surface.GoalState {
+	session, err := d.Registry.Session(task.Child)
+	if err != nil {
+		return nil
+	}
 	adapter, err := d.adapters().For(session)
 	if err != nil || !surface.EffectiveCapabilities(adapter, session).Goal {
-		return items
+		return nil
 	}
 	readCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()
 	goal, err := adapter.GoalGet(readCtx, session)
 	if err != nil || goal == nil || goal.CreatedAt.IsZero() || !goalStopped(goal.Status) {
-		return items
+		return nil
 	}
-	return append(items, mcpWaitItem{
-		Type: "goal_stopped", TaskID: task.ID, Child: task.Child, GoalStatus: goal.Status, Reason: goal.Reason,
-		Next: "Resume it with agenthail_goal, or end the task with agenthail_interrupt and agenthail_archive.",
-		key:  "g:" + goalStopNoticeKey(task.Child, goal),
-	})
+	return goal
 }
 
-func (d *Daemon) taskRequests(ctx context.Context, task registry.Task, session *surface.Session) []mcpWaitItem {
+func (d *Daemon) taskRequests(ctx context.Context, task registry.Task, session *surface.Session, remote bool) []mcpWaitItem {
 	waiting, err := d.Registry.SessionWaiting(task.Child)
 	if err != nil || waiting == nil {
 		return nil
@@ -242,6 +260,9 @@ func (d *Daemon) taskRequests(ctx context.Context, task registry.Task, session *
 			Next: "Answer it with agenthail_answer, or leave it for the person.",
 			key:  "r:" + task.Child + ":" + id, waiting: waiting,
 		}
+	}
+	if remote {
+		return []mcpWaitItem{item(waiting.ID, string(waiting.Kind))}
 	}
 	open, err := d.openRequests(ctx, session)
 	requests := open.requests
