@@ -367,10 +367,8 @@ jobs:
       IOS_BUNDLE_ID: ${{ vars.AGENTHAIL_IOS_BUNDLE_ID }}
     steps:
       - uses: actions/checkout@v5
-      - name: Install XcodeGen
-        run: brew install xcodegen
       - name: Generate Xcode project
-        run: xcodegen generate --spec native/project.yml
+        run: scripts/xcodegen.sh generate --spec native/project.yml
       - uses: actions/cache@v5
         with:
           path: ${{ runner.temp }}/swiftpm

@@ -21,6 +21,8 @@ list() {
 		scripts/ios-test-stall-guard.sh \
 		scripts/ios-ui-tests.sh \
 		scripts/test-xcodegen-project.sh \
+		scripts/xcodegen.sh \
+		scripts/verified-download.sh \
 		scripts/release-ios-proof.sh \
 		.github/workflows/ios.yml
 	while IFS= read -r source; do normalize "native/$source"; done <<<"$sources" | sort -u

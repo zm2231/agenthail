@@ -15,7 +15,6 @@ checksum() {
 }
 
 [ -f "$path" ] && [ "$(checksum "$path")" = "$sha" ] && exit 0
-rm -f "$path"
 mkdir -p "$(dirname "$path")"
 download=""
 trap 'rm -f "$download"' EXIT
