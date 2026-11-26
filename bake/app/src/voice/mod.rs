@@ -57,7 +57,7 @@ pub struct Win {
     clock: f64,
     save_after: f64,
     #[cfg(target_os = "macos")]
-    loads: u64,
+    page_spent: bool,
 }
 
 impl Win {
@@ -95,7 +95,7 @@ impl Win {
             clock: 0.0,
             save_after: 0.0,
             #[cfg(target_os = "macos")]
-            loads: 0,
+            page_spent: false,
         }
     }
 
@@ -112,7 +112,7 @@ impl Win {
                     let quoted = serde_json::to_string(&attempt).unwrap_or_default();
                     self.eval(&format!("window.agenthailCall = {quoted}; void window.agenthailVoice.start()"));
                 }
-                Effect::PeerEnd => self.fresh_page(),
+                Effect::PeerEnd => self.end_page(),
                 Effect::PeerAnswer(sdp) => {
                     let quoted = serde_json::to_string(&sdp).unwrap_or_default();
                     self.eval(&format!("void window.agenthailVoice.answer({quoted})"));
@@ -152,18 +152,32 @@ impl Win {
     fn eval(&self, _: &str) {}
 
     #[cfg(target_os = "macos")]
-    fn fresh_page(&mut self) {
-        let (Some(web), Ok(peer)) = (&self.web, &self.peer) else { return };
-        self.loads += 1;
+    fn end_page(&mut self) {
+        let Some(web) = &self.web else { return };
         web.eval("window.agenthailCall = \"\"; window.agenthailVoice && window.agenthailVoice.end()");
+        self.page_spent = true;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn end_page(&mut self) {}
+
+    #[cfg(target_os = "macos")]
+    fn fresh_page(&mut self) -> bool {
+        if !std::mem::take(&mut self.page_spent) {
+            return false;
+        }
+        let (Some(web), Ok(peer)) = (&self.web, &self.peer) else { return false };
         web.reload(peer);
         let mut effects = self.call.peer("loading", "", self.clock);
         effects.extend(self.call.setup(Setup::Page, self.clock));
         self.run(effects);
+        true
     }
 
     #[cfg(not(target_os = "macos"))]
-    fn fresh_page(&mut self) {}
+    fn fresh_page(&mut self) -> bool {
+        false
+    }
 
     #[cfg(target_os = "macos")]
     fn build_peer(&mut self) -> bool {
@@ -322,7 +336,8 @@ pub fn trace(from: &'static str, w: &Win) {
 
 fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
     w.clock = t;
-    let mut changed = w.build_peer();
+    let mut changed = w.fresh_page();
+    changed |= w.build_peer();
     if let Some((target, name)) = ROUTE.with(|r| r.borrow_mut().take()) {
         w.route(&target, &name);
         changed = true;
@@ -353,23 +368,23 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
             _ => eprintln!("voice: the audio page said {kind}: {value}"),
         }
         #[cfg(target_os = "macos")]
-        if kind == peer::LOADED {
-            w.loads += 1;
-            let effects = w.call.setup(Setup::Check, t);
-            changed |= !effects.is_empty();
+        if [peer::LOADED, peer::MISLOADED, peer::CHECKED].contains(&kind.as_str()) {
+            let Some(navigation) = w.web.as_ref().map(peer::Web::navigation) else { continue };
+            if call != navigation {
+                continue;
+            }
+            let effects = match kind.as_str() {
+                peer::LOADED => {
+                    if let Some(web) = &w.web {
+                        web.check(w.heard.0.clone(), navigation);
+                    }
+                    w.call.setup(Setup::Check, t)
+                }
+                peer::MISLOADED => w.call.peer("unavailable", &value, t),
+                _ => w.call.checked(value == "true", t),
+            };
             w.run(effects);
-            if let Some(web) = &w.web {
-                web.check(w.heard.0.clone(), w.loads);
-            }
-            continue;
-        }
-        #[cfg(target_os = "macos")]
-        if kind == peer::CHECKED {
-            if call == w.loads.to_string() {
-                let effects = w.call.checked(value == "true", t);
-                w.run(effects);
-                changed = true;
-            }
+            changed = true;
             continue;
         }
         let effects = w.call.heard(&call, &kind, &value, t);

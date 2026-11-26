@@ -252,6 +252,15 @@ fn loopback(base: &str) -> String {
     }
 }
 
+pub fn shown_address(url: &str) -> String {
+    let Ok(mut parsed) = url::Url::parse(url) else { return "an unreadable address".into() };
+    let _ = parsed.set_username("");
+    let _ = parsed.set_password(None);
+    parsed.set_query(None);
+    parsed.set_fragment(None);
+    parsed.to_string()
+}
+
 pub fn peer_allowed(url: &str, peer: &Peer) -> bool {
     url::Url::parse(url).is_ok_and(|u| u.path() == "/api/v1/voice/peer" && u.origin().ascii_serialization() == peer.origin)
 }

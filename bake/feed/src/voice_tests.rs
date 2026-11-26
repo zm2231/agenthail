@@ -793,6 +793,13 @@ fn a_stop_error_after_the_host_confirmed_the_end_changes_nothing() {
 }
 
 #[test]
+fn logged_addresses_leave_out_credentials_queries_and_fragments() {
+    assert_eq!(shown_address("https://user:secret@example.com/path?token=abc#frag"), "https://example.com/path");
+    assert_eq!(shown_address("http://127.0.0.1:7777/api/v1/voice/peer?x=1"), "http://127.0.0.1:7777/api/v1/voice/peer");
+    assert_eq!(shown_address("not a url user:secret"), "an unreadable address");
+}
+
+#[test]
 fn each_audio_setup_stage_says_what_it_waits_for_and_when_it_is_stuck() {
     let mut call = Call::new("");
     assert_eq!(call.unavailable().as_deref(), Some("Call audio is not ready."));
