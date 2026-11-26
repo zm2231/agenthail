@@ -1,15 +1,98 @@
-use rune::{Color, El, Key, KeyEvent, ScrollSpec, TextStyle, Tx, col, icon, row, text, text_input};
+use rune::{Color, El, Icon, Key, KeyEvent, ScrollSpec, TextStyle, Tx, col, icon, row, text, text_input};
 use rune_theme_opencode::icons;
 
-use feed::derive::Hit;
+use feed::catalog::Session;
+use feed::search::{Command, Selected, commands, one_line};
 
+use crate::icons as ah;
+use crate::over::search;
 use crate::over::ui::{self, BODY_MED, META, META_MED, kit, strong, weak};
+use crate::over::{Target, open_target};
 use crate::App;
-use crate::over::open_target;
 
-pub fn hits(s: &App) -> Vec<Hit> {
+pub enum Pick {
+    Target(Target),
+    Codex(Box<Session>),
+    Command(Command),
+}
+
+enum Look {
+    Avatar(String),
+    Icon(&'static Icon),
+}
+
+struct Entry {
+    group: &'static str,
+    title: String,
+    status: String,
+    badge: String,
+    look: Look,
+    pick: Option<Pick>,
+}
+
+fn command_icon(c: Command) -> &'static Icon {
+    match c {
+        Command::NewSession => &icons::PLUS,
+        Command::Stop => &ah::STOP,
+        Command::Rename => &ah::PENCIL,
+        Command::Refresh => &ah::ROTATE,
+        Command::Activity => &ah::ACTIVITY,
+    }
+}
+
+fn entries(s: &App) -> Vec<Entry> {
     let q = s.ov.jump.as_ref().map(|e| e.text.as_str()).unwrap_or_default();
-    s.ov.d.jump(q, &s.ov.needs, &s.ov.hands_on)
+    let mut out: Vec<Entry> = s.ov.d.jump(q, &s.ov.needs, &s.ov.hands_on).into_iter().map(|h| Entry { group: h.group, title: h.title, status: h.status, badge: h.badge, look: Look::Avatar(h.avatar), pick: Some(Pick::Target(h.target)) }).collect();
+    if let Some(found) = search::codex_for(s) {
+        let group = "Codex history";
+        let note = |text: String| Entry { group, title: text, status: String::new(), badge: String::new(), look: Look::Icon(&ah::CLOCK), pick: None };
+        match found {
+            None => out.push(note("Searching older Codex threads…".into())),
+            Some(Err(e)) => out.push(note(e.clone())),
+            Some(Ok(codex)) => {
+                let listed = |id: &str| out.iter().any(|e| matches!(&e.pick, Some(Pick::Target(Target::Session(x))) if x == id));
+                let fresh: Vec<Entry> = codex
+                    .fresh(listed)
+                    .map(|h| {
+                        let x = &h.session;
+                        let place = x.cwd.as_deref().and_then(|c| c.rsplit('/').find(|p| !p.is_empty())).unwrap_or("Codex").to_string();
+                        let status = if h.snippet.is_empty() { place } else { format!("{place} · {}", h.snippet) };
+                        Entry { group, title: one_line(&x.title()), status, badge: feed::catalog::ago(&x.last_active, s.now), look: Look::Icon(&ah::CLOCK), pick: Some(Pick::Codex(Box::new(x.clone()))) }
+                    })
+                    .collect();
+                let shown = fresh.len();
+                out.extend(fresh);
+                if let Some(n) = codex.note(shown) {
+                    out.push(note(n));
+                }
+            }
+        }
+    }
+    let selected = search::selected(s);
+    let title = selected.as_deref().map(|id| search::selected_title(s, id)).unwrap_or_default();
+    let current = selected.as_deref().map(|id| Selected { title: &title, can_stop: search::can_stop(s, id) });
+    for c in commands(q, current) {
+        out.push(Entry { group: "Commands", title: c.title, status: String::new(), badge: c.shortcut.to_string(), look: Look::Icon(command_icon(c.command)), pick: Some(Pick::Command(c.command)) });
+    }
+    out
+}
+
+fn picks(s: &App) -> usize {
+    entries(s).iter().filter(|e| e.pick.is_some()).count()
+}
+
+fn run(s: &mut App, pick: Pick, tx: &mut Tx) {
+    match pick {
+        Pick::Target(t) => open_target(s, &t),
+        Pick::Codex(x) => search::open_codex(s, *x),
+        Pick::Command(c) => search::run(s, c, tx),
+    }
+}
+
+fn run_at(s: &mut App, ix: usize, tx: &mut Tx) {
+    if let Some(pick) = entries(s).into_iter().filter_map(|e| e.pick).nth(ix) {
+        run(s, pick, tx);
+    }
 }
 
 pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
@@ -19,7 +102,7 @@ pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             true
         }
         Key::Down => {
-            s.ov.jump_ix = (s.ov.jump_ix + 1).min(hits(s).len().saturating_sub(1));
+            s.ov.jump_ix = (s.ov.jump_ix + 1).min(picks(s).saturating_sub(1));
             tx.scroll_into_view_in("jump-list", format!("hit-{}", s.ov.jump_ix));
             true
         }
@@ -29,11 +112,8 @@ pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             true
         }
         Key::Enter => {
-            let found = hits(s);
-            let ix = s.ov.jump_ix.min(found.len().saturating_sub(1));
-            if let Some(h) = found.into_iter().nth(ix) {
-                open_target(s, &h.target);
-            }
+            let ix = s.ov.jump_ix.min(picks(s).saturating_sub(1));
+            run_at(s, ix, tx);
             true
         }
         _ => false,
@@ -50,33 +130,47 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
         .grow(1.0)
         .shrink()
         .color(strong())
-        .placeholder("Jump to a project, work item or session".to_string(), weak())
+        .placeholder("Jump to a project, work item or session, or run a command".to_string(), weak())
         .on_edit(|s: &mut App| s.ov.jump.as_mut().expect("jump open"))
         .on_input_key(|s: &mut App, ev: &KeyEvent, tx: &mut Tx| key(s, ev, tx));
     let search = row().w_full().gap(10.0).items_center().px(16.0).py(14.0).border_sides([0.0, 0.0, 1.0, 0.0], ui::rule()).child(icon(&icons::MAGNIFYING_GLASS, 18.0).color(k.c.icon_base)).child(input).child(ui::ghost_keys(&["esc"]));
     let mut list = col().w_full().gap(2.0).padding(8.0);
     let mut last = "";
-    let found = hits(s);
-    let ix = s.ov.jump_ix.min(found.len().saturating_sub(1));
-    for (i, h) in found.into_iter().enumerate() {
+    let found = entries(s);
+    let ix = s.ov.jump_ix.min(found.iter().filter(|e| e.pick.is_some()).count().saturating_sub(1));
+    let mut i = 0;
+    for h in found {
         if h.group != last {
             list = list.child(text(h.group.to_string()).font(META_MED).color(weak()).px(10.0).pt(if last.is_empty() { 4.0 } else { 12.0 }).pb(4.0));
             last = h.group;
         }
+        let mark = match &h.look {
+            Look::Avatar(name) => ui::avatar(name, 22.0),
+            Look::Icon(glyph) => row().w(22.0).h(22.0).items_center().justify_center().child(icon(glyph, 15.0).color(k.c.icon_base)),
+        };
+        if h.pick.is_none() {
+            list = list.child(row().w_full().gap(12.0).items_center().px(10.0).py(6.0).child(mark).child(text(h.title).font(META).color(weak()).wrap().shrink()));
+            continue;
+        }
         let active = i == ix;
-        let t = h.target.clone();
+        let at = i;
+        i += 1;
+        let mut body = col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(text(h.title).font(BODY_MED).color(strong()).truncate());
+        if !h.status.is_empty() {
+            body = body.child(text(h.status).font(META).color(weak()).truncate());
+        }
         let mut r = row()
-            .key(format!("hit-{i}"))
+            .key(format!("hit-{at}"))
             .w_full()
             .gap(12.0)
             .items_center()
             .px(10.0)
             .py(8.0)
             .radius(8.0)
-            .on_press(move |s: &mut App| open_target(s, &t))
-            .child(ui::avatar(&h.avatar, 22.0))
-            .child(col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(text(h.title.clone()).font(BODY_MED).color(strong()).truncate()).child(text(h.status.clone()).font(META).color(weak()).truncate()))
-            .child(text(h.badge.clone()).font(META).color(weak()));
+            .on_press_tx(move |s: &mut App, tx: &mut Tx| run_at(s, at, tx))
+            .child(mark)
+            .child(body)
+            .child(text(h.badge).font(META).color(weak()));
         if active {
             r = r.fill(k.c.surface_raised_hover).child(icon(&icons::ENTER, 14.0).color(k.c.icon_base));
         } else {
@@ -94,7 +188,7 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
         .child(row().gap(6.0).items_center().child(ui::ghost_keys(&["↑", "↓"])).child(text("move".to_string()).font(META).color(weak())))
         .child(row().gap(6.0).items_center().child(ui::ghost_keys(&["⏎"])).child(text("open".to_string()).font(META).color(weak())))
         .child(ui::spacer())
-        .child(text("Projects first, then work, then sessions".to_string()).font(META).color(weak()));
+        .child(text("Projects, work, sessions, older Codex threads, then commands".to_string()).font(META).color(weak()));
     let panel = col()
         .key("jump")
         .w(680.0)

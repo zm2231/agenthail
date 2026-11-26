@@ -4,6 +4,7 @@ mod jump;
 pub mod layout;
 mod now;
 mod project;
+pub mod search;
 mod sessions;
 pub mod ui;
 pub mod work;
@@ -47,6 +48,7 @@ pub struct Over {
     pub sessions_project_open: bool,
     pub sessions_query: TextEdit,
     pub inbox: inbox::State,
+    pub search: search::State,
 }
 
 impl Over {
@@ -81,6 +83,7 @@ impl Over {
             sessions_project_open: false,
             sessions_query: TextEdit::new(""),
             inbox: inbox::State::default(),
+            search: search::State::default(),
         }
     }
 
@@ -240,6 +243,7 @@ pub fn overlays(s: &App, layer: &mut Vec<El>) {
     if s.ov.jump.is_some() {
         jump::view(s, layer);
     }
+    search::activity_view(s, layer);
     if let Some(n) = &s.ov.notice {
         layer.push(ui::notice(n));
     }
@@ -253,6 +257,9 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             return true;
         }
         return false;
+    }
+    if let Some(done) = search::activity_key(s, ev) {
+        return done;
     }
     if ev.is_command('k') {
         if s.ov.jump.is_some() {

@@ -152,14 +152,24 @@ fn load_recorded(path: &str) -> Result<Recorded, String> {
     serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))
 }
 
+fn overview(client: &Client) -> Bg {
+    match feed::derive::live::fetch(client) {
+        Ok(fetched) => Bg::Overview(Box::new(fetched)),
+        Err(error) => Bg::OverviewError(error.to_string()),
+    }
+}
+
+pub fn fetch_overview(client: &Client, tx: &Sender<Bg>) {
+    let (client, tx) = (client.clone(), tx.clone());
+    std::thread::spawn(move || {
+        let _ = tx.send(overview(&client));
+    });
+}
+
 fn watch_overview(client: Client, tx: Sender<Bg>) {
     std::thread::spawn(move || {
         loop {
-            let message = match feed::derive::live::fetch(&client) {
-                Ok(fetched) => Bg::Overview(Box::new(fetched)),
-                Err(error) => Bg::OverviewError(error.to_string()),
-            };
-            if tx.send(message).is_err() {
+            if tx.send(overview(&client)).is_err() {
                 return;
             }
             std::thread::sleep(Duration::from_secs(20));
@@ -316,7 +326,7 @@ impl App {
 }
 
 pub fn session<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
-    s.sessions.iter().find(|x| x.id == id)
+    s.sessions.iter().find(|x| x.id == id).or_else(|| over::search::pinned(s, id))
 }
 
 pub fn select(s: &mut App, id: &str) {
@@ -1060,6 +1070,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     }
     changed |= ui::session_menu::drain(s);
     changed |= over::inbox::drain(s);
+    changed |= over::search::drain(s);
     changed |= notify::tick(s);
     changed |= ui::gone::watch(s);
     changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s);
