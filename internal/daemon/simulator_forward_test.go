@@ -519,12 +519,11 @@ func TestAnOversizedAppIsRefusedBeforeUpload(t *testing.T) {
 		t.Fatal(err)
 	}
 	sparse.Close()
-	before := f.received.read.Load()
 	if _, err := f.linux.daemon.forwardSimulator(ctx, "local-a", simhost.Request{Action: "install", App: app}); refusalOf(err) != "too_large" {
 		t.Fatalf("oversized install = %v", err)
 	}
-	if read := f.received.read.Load() - before; read != 0 || f.commands.ran("xcrun simctl install") {
-		t.Fatalf("an oversized app reached the Mac (%d bytes)", read)
+	if f.mac.gate.simulatorInstalls.Load() != 0 || f.commands.ran("xcrun simctl install") {
+		t.Fatal("an oversized app reached the Mac")
 	}
 }
 

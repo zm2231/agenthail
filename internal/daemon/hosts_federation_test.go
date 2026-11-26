@@ -274,10 +274,11 @@ type federationNode struct {
 type actionGate struct {
 	// oldResolve answers a resolve as a host from before ambiguity carried
 	// candidates: 409 ambiguous_target with no candidates.
-	oldResolve atomic.Bool
-	drops      atomic.Int32
-	truncate   atomic.Int32
-	proxyDown  atomic.Bool
+	oldResolve        atomic.Bool
+	drops             atomic.Int32
+	simulatorInstalls atomic.Int32
+	truncate          atomic.Int32
+	proxyDown         atomic.Bool
 	// proxyRefusals counts the requests refused while proxyDown is set.
 	proxyRefusals atomic.Int32
 	// snapshotsDown refuses snapshots and catalog streams while the version
@@ -455,6 +456,9 @@ func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 		}
 		if r.URL.Path != "/api/v1/version" {
 			n.gate.beyondVersion.Add(1)
+		}
+		if r.URL.Path == "/api/v1/simulator/install" {
+			n.gate.simulatorInstalls.Add(1)
 		}
 		if r.URL.Path == "/api/v1/resolve" && n.gate.oldResolve.Load() {
 			identity, _ := n.reg.HostIdentity()
