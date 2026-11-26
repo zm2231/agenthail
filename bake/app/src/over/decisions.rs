@@ -141,8 +141,9 @@ pub fn note_dialog(s: &App, layer: &mut Vec<El>) {
         .child(Button::new("Cancel").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(|s: &mut App| s.ov.inbox.note = None).build(k).key("review-note-cancel"))
         .child(Button::new("Ask for changes").variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(problem.is_some() || n.gone).on_press(inbox::send_changes).build(k).key("review-note-send"));
     let mut body = col().w_full().gap(10.0).px(16.0).pb(16.0).child(field);
-    if n.gone {
-        body = body.child(text("This review isn't waiting on you any more, so your note wasn't sent. Copy it if you want to send it to the worker yourself.".to_string()).font(META).color(ui::needs_color()).wrap().w_full());
+    let why = if n.gone { Some("This review isn't waiting on you any more, or it was resubmitted, so your note wasn't sent. Copy it if you want to send it to the worker yourself.".to_string()) } else { n.why.clone() };
+    if let Some(why) = why {
+        body = body.child(text(why).font(META).color(ui::needs_color()).wrap().w_full());
     }
     let body = body.child(buttons);
     Dialog::new("review-note", format!("Ask for changes to {}", ui::short_title(&crate::over::plain(&n.title), 48)))

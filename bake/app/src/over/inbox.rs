@@ -25,6 +25,7 @@ pub struct Note {
     pub title: String,
     pub text: TextEdit,
     pub gone: bool,
+    pub why: Option<String>,
 }
 
 #[derive(Default, Clone)]
@@ -275,25 +276,35 @@ pub fn ask_changes(s: &mut crate::App, d: &Decision) {
     let mut text = TextEdit::new("");
     text.focused = true;
     s.composer.focused = false;
-    s.ov.inbox.note = Some(Note { decision: d.clone(), title, text, gone: false });
+    s.ov.inbox.note = Some(Note { decision: d.clone(), title, text, gone: false, why: None });
 }
 
 fn listed(st: &State, d: &Decision) -> Option<Decision> {
-    st.inbox.as_ref()?.decisions.iter().find(|x| x.id() == d.id() && x.host == d.host).cloned()
+    st.inbox.as_ref()?.decisions.iter().find(|x| x.host == d.host && x.hold_key() == d.hold_key()).cloned()
 }
 
 pub fn send_changes(s: &mut crate::App) {
-    let Some(mut n) = s.ov.inbox.note.take() else { return };
-    if review::note_problem(&n.text.text).is_some() {
-        s.ov.inbox.note = Some(n);
+    let st = &s.ov.inbox;
+    let Some(n) = st.note.as_ref() else { return };
+    if n.gone || review::note_problem(&n.text.text).is_some() {
         return;
     }
-    let Some(current) = listed(&s.ov.inbox, &n.decision) else {
-        n.gone = true;
-        s.ov.inbox.note = Some(n);
-        return;
+    let current = listed(st, &n.decision);
+    let why = match &current {
+        None => None,
+        Some(c) if !reviewable(st, c) => Some(if too_old(st, c) { review::needs_newer_note() } else { "A verdict on this review is still on its way.".into() }),
+        Some(_) => None,
     };
-    review(s, &current, Verdict::Reject, &n.text.text);
+    let note = n.text.text.clone();
+    let n = s.ov.inbox.note.as_mut().expect("checked above");
+    match (current, why) {
+        (None, _) => n.gone = true,
+        (Some(_), Some(why)) => n.why = Some(why),
+        (Some(current), None) => {
+            s.ov.inbox.note = None;
+            review(s, &current, Verdict::Reject, &note);
+        }
+    }
 }
 
 pub fn ask_brief(s: &mut crate::App, project: &str) {
