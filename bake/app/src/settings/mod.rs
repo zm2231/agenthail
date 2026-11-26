@@ -297,17 +297,10 @@ fn seed_name(s: &mut Prefs) {
 
 fn settle_compaction(s: &mut Prefs) {
     let Some(Ok(c)) = &s.compaction else { return };
-    if c.roots.iter().any(|r| r.root == s.draft.root) {
-        return;
-    }
-    let first = c.roots.first().map(|r| r.root.clone()).unwrap_or_default();
-    if s.draft.root.is_empty() && !s.draft_orphaned || !claude::draft(s).touched() {
-        s.draft.root = first;
-        s.draft_orphaned = false;
-    } else if !s.draft.root.is_empty() {
-        s.draft.root.clear();
-        s.draft_orphaned = true;
-    }
+    let roots: Vec<&str> = c.roots.iter().map(|r| r.root.as_str()).collect();
+    let (root, orphaned) = claude::draft(s).retarget(s.draft_orphaned, &roots);
+    s.draft.root = root;
+    s.draft_orphaned = orphaned;
 }
 
 fn denied<T>(r: &Result<T, Failure>) -> bool {

@@ -539,6 +539,16 @@ impl CompactDraft {
         !self.window.trim().is_empty() || self.enabled.is_some() || self.idle.is_some() || self.agenthail_idle.is_some() || !self.min_tokens.trim().is_empty() || !self.pre_limit.trim().is_empty()
     }
 
+    pub fn retarget(&self, orphaned: bool, roots: &[&str]) -> (String, bool) {
+        if roots.contains(&self.root.as_str()) {
+            return (self.root.clone(), false);
+        }
+        if self.root.is_empty() && !orphaned || !self.touched() {
+            return (roots.first().map(|r| r.to_string()).unwrap_or_default(), false);
+        }
+        (String::new(), true)
+    }
+
     pub fn touched(&self) -> bool {
         self.changes() || !self.model.trim().is_empty()
     }
@@ -713,6 +723,18 @@ mod tests {
         let mut d = CompactDraft { root: "/r/a".into(), ..Default::default() };
         assert!(!d.changes() && !d.touched() && d.problem().is_none());
         assert!(CompactDraft { model: "opus".into(), ..Default::default() }.touched());
+        let roots = ["/r/a", "/r/b"];
+        let fresh = CompactDraft::default();
+        assert_eq!(fresh.retarget(false, &roots), ("/r/a".into(), false));
+        let kept = CompactDraft { root: "/r/b".into(), model: "opus".into(), ..Default::default() };
+        assert_eq!(kept.retarget(false, &roots), ("/r/b".into(), false));
+        let gone = CompactDraft { root: "/r/z".into(), model: "opus".into(), ..Default::default() };
+        assert_eq!(gone.retarget(false, &roots), (String::new(), true), "a draft never moves to another folder on its own");
+        let waiting = CompactDraft { root: String::new(), ..gone.clone() };
+        assert_eq!(waiting.retarget(true, &roots), (String::new(), true));
+        let empty = CompactDraft { root: "/r/z".into(), ..Default::default() };
+        assert_eq!(empty.retarget(false, &roots), ("/r/a".into(), false), "an untouched draft just follows the list");
+        assert_eq!(empty.retarget(false, &[]), (String::new(), false));
         d.min_tokens = "abc".into();
         assert_eq!(d.problem(), Some("From context size must be a whole number of tokens."));
         d.min_tokens = "0".into();
