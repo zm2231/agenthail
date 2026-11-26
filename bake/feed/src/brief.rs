@@ -66,7 +66,7 @@ impl Client {
 
 fn read(value: serde_json::Value) -> Result<Brief, RespondError> {
     let value = crate::catalog::confirmed(value)?;
-    serde_json::from_value(value).map_err(|e| RespondError { message: format!("the daemon's reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: true, answered: true, reply: serde_json::Value::Null })
+    serde_json::from_value(value).map_err(|e| RespondError { message: format!("the daemon's reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: true, answered: true, reply: serde_json::Value::Null, status: 0 })
 }
 
 #[cfg(test)]

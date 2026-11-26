@@ -1,8 +1,9 @@
-use rune::{El, col, icon, row, text};
-use rune_kit::{Button, ButtonVariant, ControlSize};
+use rune::{El, Tx, col, el, icon, row, text, text_input};
+use rune_kit::{Button, ButtonVariant, ControlSize, Dialog};
 use rune_theme_opencode::icons;
 
 use feed::decisions::Decision;
+use feed::review::{self, Verdict};
 
 use crate::App;
 use crate::over::inbox;
@@ -40,6 +41,9 @@ fn line(s: &App, i: usize, d: &Decision, shift: bool) -> El {
     if !d.work_item.is_empty() && d.covers.is_empty() {
         facts = facts.child(ui::id_label(&crate::over::short_id(&d.work_item)));
     }
+    if let Some(p) = d.proof_line() {
+        facts = facts.child(text(p).font(META).color(weak()));
+    }
     if !d.covers.is_empty() {
         body = body.child(text(format!("Covers {} items", d.covers.len())).font(META_MED).color(base()));
         for c in &d.covers {
@@ -59,10 +63,12 @@ fn line(s: &App, i: usize, d: &Decision, shift: bool) -> El {
     }
     let mut actions = row().gap(6.0).items_center();
     if d.is_review() {
-        actions = actions
-            .child(Button::new("Approve").variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(true).build(k))
-            .child(Button::new("Reject").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).disabled(true).build(k))
-            .child(text("coming soon".to_string()).font(META).color(weak()));
+        actions = review_buttons(s, d, ControlSize::Small, &format!("decision-{i}"), false, actions);
+        if let Some(p) = review::pr_link(&d.prs, None) {
+            let url = p.url.clone();
+            let label = if p.number > 0 { format!("Open PR #{}", p.number) } else { "Open PR".into() };
+            actions = actions.child(Button::new(label).variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(move |_: &mut App| crate::open_link(&url)).build(k).key(format!("decision-{i}-pr")));
+        }
     } else if d.recommended().is_some() {
         let dd = d.clone();
         let mut accept = Button::new(if acting { "Answering…" } else if unconfirmed { "Sent, not confirmed" } else { "Accept recommended" }).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(acting || unconfirmed).on_press(move |s: &mut App| inbox::accept(s, &dd));
@@ -89,6 +95,65 @@ fn line(s: &App, i: usize, d: &Decision, shift: bool) -> El {
         );
     }
     row().key(format!("decision-{i}")).w_full().gap(14.0).items_start().px(14.0).py(12.0).radius(10.0).child(body).child(actions)
+}
+
+pub fn review_buttons(s: &App, d: &Decision, size: ControlSize, key: &str, show_note: bool, mut r: El) -> El {
+    let k = kit();
+    let st = &s.ov.inbox;
+    let acting = st.acting.contains(&d.id());
+    let unconfirmed = st.unconfirmed.contains(&d.hold_key());
+    let old = inbox::too_old(st, d);
+    let ready = inbox::reviewable(st, d);
+    let approve = if acting { "Sending…" } else if unconfirmed { "Sent, not confirmed" } else { "Approve" };
+    let (da, dc) = (d.clone(), d.clone());
+    let mut a = Button::new(approve).variant(ButtonVariant::Contrast).control_size(size).disabled(!ready).on_press(move |s: &mut App| inbox::review(s, &da, Verdict::Approve, ""));
+    let mut c = Button::new("Ask for changes").variant(ButtonVariant::Ghost).control_size(size).disabled(!ready).on_press(move |s: &mut App| inbox::ask_changes(s, &dc));
+    if old {
+        a = a.help(review::needs_newer_note());
+        c = c.help(review::needs_newer_note());
+    }
+    r = r.child(a.build(k).key(format!("{key}-approve"))).child(c.build(k).key(format!("{key}-changes")));
+    let note = st.notes.get(&d.id()).filter(|(hold, _)| show_note && d.holds(hold)).map(|(_, n)| n.clone()).or_else(|| old.then(review::needs_newer_note));
+    if let Some(n) = note {
+        r = r.child(text(n).font(META).color(ui::needs_color()).wrap().shrink());
+    }
+    r
+}
+
+pub fn note_dialog(s: &App, layer: &mut Vec<El>) {
+    let Some(n) = &s.ov.inbox.note else { return };
+    let k = kit();
+    let problem = review::note_problem(&n.text.text);
+    let input = text_input(&n.text, BODY)
+        .key("review-note-input")
+        .label("What it still needs")
+        .w_full()
+        .min_h(72.0)
+        .color(strong())
+        .placeholder("What should change before you approve?", weak())
+        .on_edit(|s: &mut App| &mut s.ov.inbox.note.as_mut().expect("the dialog is open").text)
+        .on_submit(|s: &mut App, _: &mut Tx| inbox::send_changes(s));
+    let field = col().w_full().px(10.0).py(8.0).radius(8.0).fill(k.c.surface_base).border(1.0, ui::rule()).child(input);
+    let buttons = row()
+        .w_full()
+        .gap(8.0)
+        .child(el().grow(1.0))
+        .child(Button::new("Cancel").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(|s: &mut App| s.ov.inbox.note = None).build(k).key("review-note-cancel"))
+        .child(Button::new("Ask for changes").variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(problem.is_some() || n.gone).on_press(inbox::send_changes).build(k).key("review-note-send"));
+    let mut body = col().w_full().gap(10.0).px(16.0).pb(16.0).child(field);
+    let why = if n.gone { Some("This review isn't waiting on you any more, or it was resubmitted, so your note wasn't sent. Copy it if you want to send it to the worker yourself.".to_string()) } else { n.why.clone() };
+    if let Some(why) = why {
+        body = body.child(text(why).font(META).color(ui::needs_color()).wrap().w_full());
+    }
+    let body = body.child(buttons);
+    Dialog::new("review-note", format!("Ask for changes to {}", ui::short_title(&crate::over::plain(&n.title), 48)))
+        .description("The worker holding it gets your note and the item goes back to them.")
+        .open(true)
+        .fit()
+        .width(460.0)
+        .on_close(|s: &mut App| s.ov.inbox.note = None)
+        .child(body)
+        .build(k, layer);
 }
 
 pub fn section(s: &App) -> El {

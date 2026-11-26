@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 use crate::action::Dismiss;
-use crate::catalog::{Client, OpenRequest, RespondError, enc};
+use crate::catalog::{Client, OpenRequest, Pr, RespondError, enc};
 
 pub const GROUPS: [(&str, &str); 4] = [("stopped", "Stopped on you"), ("holding", "Holding up work"), ("waiting", "Waiting on you"), ("review", "Waiting for your review")];
 pub const HISTORY_KEPT: usize = 20;
@@ -36,12 +36,30 @@ pub struct Decision {
     pub work_item: String,
     #[serde(default)]
     pub work_title: String,
+    #[serde(default)]
+    pub ledger_key: String,
+    #[serde(default)]
+    pub phase: String,
+    #[serde(default)]
+    pub proof: Option<ProofCounts>,
+    #[serde(default)]
+    pub prs: Vec<Pr>,
     #[serde(skip)]
     pub host: String,
     #[serde(skip)]
     pub host_name: String,
     #[serde(skip)]
     pub covers: Vec<Decision>,
+}
+
+#[derive(Deserialize, Clone, Copy, Debug, Default, PartialEq)]
+pub struct ProofCounts {
+    #[serde(default)]
+    pub pass: usize,
+    #[serde(default)]
+    pub fail: usize,
+    #[serde(default)]
+    pub pending: usize,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -98,11 +116,18 @@ impl Decision {
     }
 
     pub fn hold_key(&self) -> String {
+        if self.is_review() {
+            return self.review_hold();
+        }
         match self.requests.first() {
             Some(r) => request_hold(&self.session_id, &r.id),
             None if self.is_parked() => parked_hold(&self.host, &self.work_item),
             None => self.state_hold(),
         }
+    }
+
+    fn review_hold(&self) -> String {
+        format!("review|{}|{}|{}|{}", self.host, self.key, self.work_item, self.since)
     }
 
     fn state_hold(&self) -> String {
@@ -111,6 +136,7 @@ impl Decision {
 
     pub fn holds(&self, key: &str) -> bool {
         self.state_hold() == key
+            || self.is_review() && self.review_hold() == key
             || self.requests.iter().any(|r| request_hold(&self.session_id, &r.id) == key)
             || std::iter::once(self).chain(&self.covers).any(|c| !c.work_item.is_empty() && parked_hold(&c.host, &c.work_item) == key)
     }
@@ -121,6 +147,12 @@ impl Decision {
 
     pub fn is_review(&self) -> bool {
         self.group == "review" || self.kind == "review" || self.key.starts_with("review:")
+    }
+
+    pub fn proof_line(&self) -> Option<String> {
+        let p = self.proof?;
+        let parts: Vec<String> = [(p.pass, "passed"), (p.fail, "failed"), (p.pending, "pending")].iter().filter(|(n, _)| *n > 0).map(|(n, w)| format!("{n} {w}")).collect();
+        (!parts.is_empty()).then(|| parts.join(" · "))
     }
 
     pub fn group_title(&self) -> &'static str {
@@ -388,6 +420,12 @@ mod tests {
         assert_eq!(d.recommended(), None);
         assert_eq!(d.id(), "review:p:p-W3");
         assert!(decision(r#"{"group":"waiting","key":"review:p:p-W4"}"#).is_review());
+        let other = decision(r#"{"group":"review","key":"review:p:p-W5","sessionId":"s","workItem":"p-W5"}"#);
+        let mine = decision(r#"{"group":"review","key":"review:p:p-W3","sessionId":"s","workItem":"p-W3"}"#);
+        assert_ne!(mine.hold_key(), other.hold_key());
+        assert!(mine.holds(&mine.hold_key()) && !other.holds(&mine.hold_key()));
+        let elsewhere = Decision { host: "h2".into(), ..mine.clone() };
+        assert!(!elsewhere.holds(&mine.hold_key()));
     }
 
     #[test]

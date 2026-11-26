@@ -58,8 +58,8 @@ impl NeedKind {
 
     pub fn primary(self) -> &'static str {
         match self {
-            NeedKind::Question => "Reply",
-            NeedKind::Approval | NeedKind::Check => "Approve",
+            NeedKind::Question | NeedKind::Approval => "Reply",
+            NeedKind::Check => "Approve",
             NeedKind::CiFailing => "See the failure",
             NeedKind::Finished => "Open",
         }
