@@ -620,13 +620,16 @@ func (s *session) setModeOnAgent(ctx context.Context, mode string) error {
 }
 
 func (s *session) send(ctx context.Context, params SendParams) (SendResult, error) {
+	s.mu.Lock()
+	cancels := s.cancels
+	s.mu.Unlock()
 	s.startMu.Lock()
 	defer s.startMu.Unlock()
 	if err := s.closedError(); err != nil {
 		return SendResult{}, err
 	}
 	s.mu.Lock()
-	refused, busy, cancels := s.state.Refused, s.state.Status == StatusBusy, s.cancels
+	refused, busy := s.state.Refused, s.state.Status == StatusBusy
 	s.mu.Unlock()
 	if refused != "" {
 		return SendResult{}, callError(CodeInvalid, "%s", refused)
@@ -641,9 +644,15 @@ func (s *session) send(ctx context.Context, params SendParams) (SendResult, erro
 	s.promptMu.Lock()
 	defer s.promptMu.Unlock()
 	s.mu.Lock()
-	if s.cancels != cancels {
+	if s.cancels != cancels && s.state.Status != StatusBusy {
+		s.norm.startTurn(turnID, surface.TimelineItem{Text: params.Text, MessageID: params.MessageID})
+		s.norm.noticeItem(fmt.Sprintf("Interrupted before it reached %s.", s.agent.DisplayName()))
+		s.state.TurnID = turnID
+		s.norm.endTurn(acp.StopCancelled, "")
+		s.finishTurnLocked(acp.StopCancelled)
 		s.mu.Unlock()
-		return SendResult{}, callError(CodeInvalid, "the session was interrupted before this message started a turn")
+		s.changed()
+		return SendResult{TurnID: turnID}, nil
 	}
 	if s.state.Status == StatusBusy {
 		s.mu.Unlock()

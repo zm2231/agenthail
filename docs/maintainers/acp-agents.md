@@ -280,7 +280,15 @@ index: listing reads the records in the agent's directory.
   so the Agenthail queue holds the message as it does for a busy Codex
   thread. ACP has no steer; `Capabilities.Steer` is false.
 - Interrupt: `session/cancel`. Every open permission request of the session
-  is answered `cancelled` first, as the protocol requires.
+  is answered `cancelled` first, as the protocol requires, even with no turn
+  running. A cancel and a prompt are written under one lock (not the one
+  that covers reopening a session), so a cancel always reaches the agent
+  ahead of any later prompt, and an agent ignores a cancel with nothing
+  running; a cancel from a stop answer or a ceiling breach names its turn and
+  does nothing once that turn has ended. An interrupt also covers a message
+  still starting (the session reopening for it): that message is recorded
+  with the notice "Interrupted before it reached <agent>" and an interrupted
+  end, is never sent to the agent, and its delivery is not a failure.
 - Model and mode: `session/set_config_option` with the option whose
   `category` is `model` or `mode`; an agent that lists `modes` but no config
   options gets `session/set_mode`, one with `models` gets

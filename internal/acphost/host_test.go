@@ -614,19 +614,25 @@ func TestACancelRacingTheNextPromptNeverEndsIt(t *testing.T) {
 	}
 }
 
-func TestAnInterruptDuringALoadAnswersRequestsAndStopsTheStartingSend(t *testing.T) {
+func TestAnInterruptDuringALoadAnswersRequestsAndStopsEverySendAlreadyStarting(t *testing.T) {
 	agent := fakeAgent(t, "fake")
 	h := startHost(t, agent)
 	state := h.create("fake", "", "")
 	s := h.host.heldSession(state.SessionID)
 	s.stopProcess()
-	editSaved(t, agent, state, func(saved map[string]any) { saved["loadMs"] = 1500 })
-	sent := make(chan error, 1)
-	go func() {
-		_, err := h.client.Send(context.Background(), SendParams{SessionID: state.SessionID, Text: "reply:should-not-run"})
-		sent <- err
-	}()
-	time.Sleep(300 * time.Millisecond)
+	path := editSaved(t, agent, state, func(saved map[string]any) { saved["loadMs"] = 1500 })
+	type sent struct {
+		result SendResult
+		err    error
+	}
+	results := make(chan sent, 2)
+	for _, text := range []string{"reply:first-before", "reply:second-before"} {
+		go func() {
+			result, err := h.client.Send(context.Background(), SendParams{SessionID: state.SessionID, Text: text})
+			results <- sent{result, err}
+		}()
+		time.Sleep(150 * time.Millisecond)
+	}
 	pending := &pendingRequest{request: Request{ID: "req-load"}, answer: make(chan permissionAnswer, 1)}
 	s.mu.Lock()
 	s.pending["req-load"] = pending
@@ -646,10 +652,21 @@ func TestAnInterruptDuringALoadAnswersRequestsAndStopsTheStartingSend(t *testing
 	default:
 		t.Fatal("the open request must be answered cancelled")
 	}
-	if err := <-sent; !isCode(err, CodeInvalid) || !strings.Contains(err.Error(), "interrupted") {
-		t.Fatalf("a send still starting when interrupted must not start its turn: %v", err)
+	for range 2 {
+		got := <-results
+		if got.err != nil || got.result.TurnID == "" {
+			t.Fatalf("a message interrupted before it started is recorded, not failed: %+v", got)
+		}
+		items := h.items("fake", state.SessionID)
+		if items[got.result.TurnID+":done"].Status != "interrupted" {
+			t.Fatalf("done=%+v", items[got.result.TurnID+":done"])
+		}
 	}
-	if now := s.snapshot(); now.Status == StatusBusy {
-		t.Fatalf("a turn started after the interrupt: %+v", now)
+	if data, _ := os.ReadFile(path); strings.Contains(string(data), "before") {
+		t.Fatalf("a message sent before the interrupt reached the agent: %s", data)
+	}
+	after := h.send(state.SessionID, "reply:after")
+	if done := h.waitFor(state.SessionID, func(s State) bool { return s.LastTurnID == after }); done.LastStop != "end_turn" {
+		t.Fatalf("a message after the interrupt must run: %+v", done)
 	}
 }
