@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -27,6 +29,7 @@ type harness struct {
 	home   string
 	host   *Host
 	client Client
+	served chan struct{}
 }
 
 func fakeAgent(t *testing.T, id string) Agent {
@@ -50,14 +53,18 @@ func startHost(t *testing.T, agents ...Agent) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { _ = host.Serve(listener, socket) }()
+	served := make(chan struct{})
+	go func() {
+		_ = serveUntilExit(host, listener, socket)
+		close(served)
+	}()
 	t.Cleanup(func() {
 		for _, state := range host.held().Sessions {
 			host.closeSession(state.SessionID, false)
 		}
 		host.exit()
 	})
-	return &harness{t: t, home: home, host: host, client: Client{Home: home}}
+	return &harness{t: t, home: home, host: host, client: Client{Home: home}, served: served}
 }
 
 func (h *harness) create(agent, ceiling, mode string) State {
@@ -332,11 +339,17 @@ func TestDrainedHostExitsAfterItsLastSession(t *testing.T) {
 	if _, err := h.client.Create(context.Background(), CreateParams{SessionID: uuid.NewString(), Agent: "fake", Cwd: t.TempDir()}); !errors.Is(err, ErrNotRunning) {
 		t.Fatalf("the main socket must be free once draining: %v", err)
 	}
+	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-h.served:
+		t.Fatal("the host stopped serving while its session was busy")
+	default:
+	}
 	if err := h.client.Cancel(context.Background(), state.SessionID); err != nil {
 		t.Fatalf("the draining host must still serve its session: %v", err)
 	}
 	select {
-	case <-h.host.Exited():
+	case <-h.served:
 	case <-time.After(15 * time.Second):
 		t.Fatal("the drained host did not exit after its last session")
 	}
@@ -355,5 +368,29 @@ func TestOutcomeLookupFencesAnUnseenKey(t *testing.T) {
 	}
 	if got := h.host.heldSession(state.SessionID).snapshot(); got.LastTurnID != "" || got.Status != StatusIdle {
 		t.Fatalf("state=%+v", got)
+	}
+}
+
+func TestClientForgetsTheSocketOfAHostThatIsGone(t *testing.T) {
+	h := startHost(t, fakeAgent(t, "fake"))
+	gone := exec.Command("true")
+	if err := gone.Run(); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(h.home, ".agenthail", fmt.Sprintf("acp-host.%d.sock", gone.Process.Pid))
+	alive := filepath.Join(h.home, ".agenthail", fmt.Sprintf("acp-host.%d.sock", os.Getpid()))
+	for _, path := range []string{stale, alive} {
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := h.client.Held(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("a socket whose host is gone must be removed: %v", err)
+	}
+	if _, err := os.Stat(alive); err != nil {
+		t.Fatalf("a socket whose process lives must stay: %v", err)
 	}
 }

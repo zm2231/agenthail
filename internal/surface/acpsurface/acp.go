@@ -283,13 +283,22 @@ func (a *ACP) Model(ctx context.Context, sess *surface.Session, name string) (st
 }
 
 func (a *ACP) Control(ctx context.Context, sess *surface.Session, control surface.ControlRequest) (*surface.ControlResult, error) {
-	if control.Action != "permission-mode" {
+	result := &surface.ControlResult{SessionID: sess.ID, Action: control.Action, Evidence: surface.EvidenceDelivered, Source: "acp"}
+	var err error
+	switch control.Action {
+	case "interrupt":
+		err = a.Interrupt(ctx, sess)
+	case "model":
+		result.Output, err = a.Model(ctx, sess, strings.TrimSpace(control.Value))
+	case "permission-mode":
+		_, err = a.client.SetOption(ctx, acphost.OptionParams{SessionID: sess.ID, Category: "mode", Value: strings.TrimSpace(control.Value)})
+	default:
 		return nil, surface.ErrUnsupported
 	}
-	if _, err := a.client.SetOption(ctx, acphost.OptionParams{SessionID: sess.ID, Category: "mode", Value: strings.TrimSpace(control.Value)}); err != nil {
+	if err != nil {
 		return nil, err
 	}
-	return &surface.ControlResult{SessionID: sess.ID, Action: control.Action, Evidence: surface.EvidenceDelivered, Source: "acp"}, nil
+	return result, nil
 }
 
 func (a *ACP) Close(ctx context.Context, sess *surface.Session) error {

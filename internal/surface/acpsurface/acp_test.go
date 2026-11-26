@@ -140,6 +140,9 @@ func TestAdapterStartsReadsAndStreamsASession(t *testing.T) {
 			if event.Text == "first-reply" {
 				t.Fatal("the stream must start at the given offset")
 			}
+			if event.ProviderKey != "timeline:"+event.ID {
+				t.Fatalf("a streamed item must carry the key its seeded row has: %+v", event)
+			}
 			if event.Kind == "message" && event.Role == "assistant" && event.Text == "second-reply" {
 				if event.TurnID == "" || event.TurnID == observation.CompletedTurnID {
 					t.Fatalf("event=%+v", event)
@@ -264,7 +267,7 @@ func TestAdapterInterruptsATurn(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if err := adapter.Interrupt(context.Background(), session); err != nil {
+	if _, err := adapter.Control(context.Background(), session, surface.ControlRequest{Action: "interrupt"}); err != nil {
 		t.Fatal(err)
 	}
 	waitIdle(t, adapter, session)
@@ -301,5 +304,29 @@ func TestASecondAgentNeedsOnlyAConfigEntry(t *testing.T) {
 	waitIdle(t, adapter, session)
 	if reply, err := adapter.Reply(context.Background(), session, 1); err != nil || reply.Text != "from-config" {
 		t.Fatalf("reply=%+v err=%v", reply, err)
+	}
+}
+
+func TestAdapterControlsModelAndModeAndListsModels(t *testing.T) {
+	home := startHost(t, fakeAgent(t, "fake"))
+	adapter := New(home, fakeAgent(t, "fake"))
+	session := start(t, adapter, "reply:ready")
+	waitIdle(t, adapter, session)
+	result, err := adapter.Control(context.Background(), session, surface.ControlRequest{Action: "model", Value: "large"})
+	if err != nil || result.Output != "large" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if _, err := adapter.Control(context.Background(), session, surface.ControlRequest{Action: "permission-mode", Value: "ask"}); err != nil {
+		t.Fatal(err)
+	}
+	if state, err := adapter.Requests(context.Background(), session); err != nil || state.PermissionMode != "ask" {
+		t.Fatalf("state=%+v err=%v", state, err)
+	}
+	if _, err := adapter.Control(context.Background(), session, surface.ControlRequest{Action: "compact"}); err != surface.ErrUnsupported {
+		t.Fatalf("an action the agent has no way to do must be unsupported: %v", err)
+	}
+	models, err := adapter.Models(context.Background())
+	if err != nil || len(models) != 2 || models[0].ID != "small" || models[1].DisplayName != "Large" {
+		t.Fatalf("models=%+v err=%v", models, err)
 	}
 }

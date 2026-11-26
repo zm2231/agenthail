@@ -10,6 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,7 +41,16 @@ func (c Client) sockets() []string {
 	main := SocketPath(c.Home)
 	matches, _ := filepath.Glob(filepath.Join(filepath.Dir(main), "acp-host.*.sock"))
 	sort.Strings(matches)
-	return append([]string{main}, matches...)
+	sockets := []string{main}
+	for _, match := range matches {
+		pid, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(filepath.Base(match), "acp-host."), ".sock"))
+		if err == nil && syscall.Kill(pid, 0) == syscall.ESRCH {
+			_ = os.Remove(match)
+			continue
+		}
+		sockets = append(sockets, match)
+	}
+	return sockets
 }
 
 func (c Client) logf(format string, args ...any) {

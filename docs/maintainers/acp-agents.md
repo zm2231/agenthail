@@ -176,7 +176,9 @@ The draining host refuses new sessions with `draining`, keeps serving its own
 (send, cancel, respond, list, subscribe), closes each once it is idle with no
 open request, and exits when its last session has closed. It exits then
 whether or not anything is still connected to it, so drained hosts never
-accumulate. Saved sessions and held sessions are different
+accumulate. A host that dies without exiting (killed, crashed) leaves its
+`acp-host.<pid>.sock`; the client removes a private socket whose process is
+gone the next time it looks for hosts. Saved sessions and held sessions are different
 lists. The catalog's `List` reads the session records on disk, whichever host
 wrote them. A host's `held` answer names only the sessions it has open, that
 is, whose lock it holds. The client routes every operation on a session to

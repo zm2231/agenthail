@@ -221,7 +221,7 @@ func streamEvent(item surface.TimelineItem, offset int64) surface.StreamEvent {
 	if item.Kind == "done" {
 		operation = "phase"
 	}
-	return surface.StreamEvent{ID: item.ID, ProviderKey: item.ID, Version: uint64(offset + 1), Operation: operation, Final: true, TurnID: item.TurnID,
+	return surface.StreamEvent{ID: item.ID, ProviderKey: "timeline:" + item.ID, Version: uint64(offset + 1), Operation: operation, Final: true, TurnID: item.TurnID,
 		Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status,
 		Timestamp: at, Kind: item.Kind, Text: item.Text, MessageID: item.MessageID}
 }

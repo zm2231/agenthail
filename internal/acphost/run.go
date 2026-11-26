@@ -51,7 +51,16 @@ func Run(home, version string) error {
 	_ = os.Chmod(socket, 0o600)
 	host := NewHost(home, version, agents, logger)
 	logger.Printf("ACP host %s serving %d agents on %s", version, len(agents), socket)
-	return host.Serve(listener, socket)
+	return serveUntilExit(host, listener, socket)
+}
+
+// serveUntilExit outlives the listener: a drain closes it while the host keeps serving its sessions on a private socket.
+func serveUntilExit(host *Host, listener net.Listener, socket string) error {
+	if err := host.Serve(listener, socket); err != nil {
+		return err
+	}
+	<-host.Exited()
+	return nil
 }
 
 type Manager struct {
