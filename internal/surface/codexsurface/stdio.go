@@ -105,8 +105,19 @@ func (c *codexStdioClient) write(message map[string]any) error {
 		return err
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	_, err = c.stdin.Write(append(data, '\n'))
+	c.mu.Unlock()
+	if err == nil {
+		return nil
+	}
+	// A failed write usually means the app-server is exiting; its exit
+	// error says why, once the reader has drained what it printed.
+	select {
+	case <-c.done:
+		return c.exited
+	case <-c.ctx.Done():
+	case <-time.After(5 * time.Second):
+	}
 	return err
 }
 

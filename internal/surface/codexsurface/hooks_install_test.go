@@ -235,7 +235,7 @@ func TestCodexAppServerThatExitsSaysWhyFromTheEndOfItsStderr(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	bin := t.TempDir()
-	failing := "#!/bin/sh\ni=0\nwhile [ $i -lt 200 ]; do echo \"early noise line $i\" >&2; i=$((i+1)); done\necho 'Error: failed to load config.toml: invalid key' >&2\nexit 3\n"
+	failing := "#!/bin/sh\nread line\nid=$(printf '%s' \"$line\" | sed -n 's/.*\"id\":\\([0-9]*\\).*/\\1/p')\nprintf '{\"id\":%s,\"result\":{}}\\n' \"$id\"\nexec 0<&-\nsleep 0.2\ni=0\nwhile [ $i -lt 200 ]; do echo \"early noise line $i\" >&2; i=$((i+1)); done\necho 'Error: failed to load config.toml: invalid key' >&2\nexit 3\n"
 	if err := os.WriteFile(filepath.Join(bin, "codex"), []byte(failing), 0700); err != nil {
 		t.Fatal(err)
 	}
