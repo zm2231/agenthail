@@ -9,7 +9,7 @@ cp -R "$repo/native" "$tmp/native"
 mkdir -p "$tmp/scripts"
 cp -R "$repo/scripts/fixtures" "$tmp/scripts/fixtures"
 rm -rf "$tmp/native/Agenthail.xcodeproj"
-xcodegen generate --quiet --spec "$tmp/native/project.yml" --project "$tmp/native" --project-root "$tmp/native"
+"$repo/scripts/xcodegen.sh" generate --quiet --spec "$tmp/native/project.yml" --project "$tmp/native" --project-root "$tmp/native"
 
 normalize() {
   sed -E '/^[[:space:]]*(compatibilityVersion|productRefGroup) = /d' "$1" | perl -0pe 's/\n\s*TargetAttributes = \{\n\s*\};(?=\n)//g'

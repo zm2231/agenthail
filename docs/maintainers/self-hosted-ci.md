@@ -70,7 +70,7 @@ The `runs-on` expression in a workflow comes from the pull request, so a fork ca
 Each runner is a separate service under the same macOS user, in `~/actions-runner-agenthail-N`, registered with the labels `self-hosted,macOS,ARM64,agenthail`. Exactly one of them also has the label `agenthail-ios`, which `ios`, `iOS nightly` and `iOS live nightly` require: an iOS job boots its simulator and three parallel clones of it, and with one iOS job at a time on the host they never compete with each other, and only one set of simulators shares the CPU with the `verify` jobs on the other runners. Other iOS jobs wait for that runner. A runner that is configured again loses the label; add it back with `config.sh --labels` or the repository's runner settings, or every iOS job waits.
 
 1. Install Xcode, select it with `sudo xcode-select -s`, then run `sudo xcodebuild -license accept`, `sudo xcodebuild -runFirstLaunch` and `xcodebuild -downloadPlatform iOS`.
-2. Install `jq` and `xcodegen` with Homebrew.
+2. Install `jq` with Homebrew. CI fetches its pinned XcodeGen with `scripts/xcodegen.sh`.
 3. Configure the runner with `PATH` including `/opt/homebrew/bin`, then `./svc.sh install && ./svc.sh start`.
 4. Copy `scripts/ci-runner-job-started.sh` to `~/actions-runner-agenthail-hooks/job-started.sh` and add `ACTIONS_RUNNER_HOOK_JOB_STARTED=<that path>` to the runner's `.env`. Restart the runner service.
 5. Turn off crash reporter dialogs for the runner's user: `defaults write com.apple.CrashReporter DialogType none`. See [Crash reporter dialogs](#crash-reporter-dialogs).
