@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"net/http"
 	"slices"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func (f *mcpAnswerFixture) submitWork(t *testing.T, text string) (string, string) {
@@ -108,6 +110,30 @@ func TestAReviewStaysWithTheLeadUntilTheLeadPassesItOn(t *testing.T) {
 	if count := pushes.count(workReviewEvent); count != 1 {
 		t.Fatalf("a passed review pushed %d times", count)
 	}
+}
+
+func TestALedgerChangeThatMovesAReviewPublishesANewDecisionsRevision(t *testing.T) {
+	f := newMCPAnswerFixture(t)
+	f.asProjectLead(t, "lead")
+	key, id := f.submitWork(t, "Import the March export")
+	f.d.discoverCatalog(t.Context())
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	go f.d.runDecisionsRevision(ctx)
+	testkit.Eventually(t, "the first revision published", 10*time.Second, func() bool { return len(decisionsEvents(t, f.d)) > 0 })
+	before, _ := f.d.decisions.current()
+
+	if _, err := f.d.ledgerStore().Work(ledger.WorkRequest{ProjectKey: key, SessionID: "lead", Action: ledger.WorkReviewPass, ItemID: id, Reason: "Pick the import window"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	moved := ownRevision(t, f.d)
+	if moved == before {
+		t.Fatal("a passed review left the decisions page as it was")
+	}
+	testkit.Eventually(t, "the passed review's revision published", 10*time.Second, func() bool {
+		events := decisionsEvents(t, f.d)
+		return events[len(events)-1]["own"] == moved
+	})
 }
 
 func TestAReviewMovesToThePersonWhenTheLeadIsGone(t *testing.T) {
