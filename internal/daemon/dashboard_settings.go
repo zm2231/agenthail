@@ -43,15 +43,15 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		}
 	}()
 	var request struct {
-		Action            string `json:"action"`
-		CodexRecentHours  int    `json:"codexRecentHours"`
-		BusyDelivery      string `json:"busyDelivery"`
-		PersonName        string `json:"personName"`
-		ResumeAfterLimit  bool   `json:"resumeAfterLimit"`
-		MoveAfterLimit    bool   `json:"moveAfterLimit"`
-		ClaudeDefaultRoot string `json:"claudeDefaultRoot"`
-		Agent             string `json:"agent"`
-		Mode              string `json:"mode"`
+		Action            string  `json:"action"`
+		CodexRecentHours  *int    `json:"codexRecentHours"`
+		BusyDelivery      *string `json:"busyDelivery"`
+		PersonName        string  `json:"personName"`
+		ResumeAfterLimit  *bool   `json:"resumeAfterLimit"`
+		MoveAfterLimit    *bool   `json:"moveAfterLimit"`
+		ClaudeDefaultRoot *string `json:"claudeDefaultRoot"`
+		Agent             string  `json:"agent"`
+		Mode              string  `json:"mode"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid settings request")
@@ -67,24 +67,42 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 			err = d.syncExtensionMounts()
 		}
 	case "dashboard-config":
-		config.CodexRecentHours = request.CodexRecentHours
-		if request.BusyDelivery != "" {
-			config.BusyDelivery = deliverypolicy.Mode(request.BusyDelivery)
+		if request.CodexRecentHours == nil && request.BusyDelivery == nil {
+			err = fmt.Errorf("dashboard-config names no setting: send codexRecentHours or busyDelivery")
+			break
+		}
+		if request.CodexRecentHours != nil {
+			config.CodexRecentHours = *request.CodexRecentHours
+		}
+		if request.BusyDelivery != nil {
+			config.BusyDelivery = deliverypolicy.Mode(*request.BusyDelivery)
 		}
 		if err = dashconfig.Save(config); err == nil {
 			d.publishCatalogPresence()
 		}
 	case "resume-after-limit":
-		config.ResumeAfterLimit = &request.ResumeAfterLimit
+		if request.ResumeAfterLimit == nil {
+			err = fmt.Errorf("resume-after-limit needs resumeAfterLimit")
+			break
+		}
+		config.ResumeAfterLimit = request.ResumeAfterLimit
 		err = dashconfig.Save(config)
 	case "move-after-limit":
-		config.MoveAfterLimit = &request.MoveAfterLimit
+		if request.MoveAfterLimit == nil {
+			err = fmt.Errorf("move-after-limit needs moveAfterLimit")
+			break
+		}
+		config.MoveAfterLimit = request.MoveAfterLimit
 		err = dashconfig.Save(config)
 	case "agent-mode":
 		err = d.setAgentMode(&config, request.Agent, request.Mode)
 	case "claude-default-root":
-		if err = d.knownClaudeRoot(request.ClaudeDefaultRoot); err == nil {
-			config.SetClaudeDefaultRoot(request.ClaudeDefaultRoot)
+		if request.ClaudeDefaultRoot == nil {
+			err = fmt.Errorf("claude-default-root needs claudeDefaultRoot, empty for the primary root")
+			break
+		}
+		if err = d.knownClaudeRoot(*request.ClaudeDefaultRoot); err == nil {
+			config.SetClaudeDefaultRoot(*request.ClaudeDefaultRoot)
 			err = dashconfig.Save(config)
 		}
 	case "person-name":

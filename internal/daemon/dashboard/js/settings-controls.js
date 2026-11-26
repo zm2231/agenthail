@@ -1,7 +1,8 @@
 import { action } from "./actions.js";
 import { load } from "./dashboard-state.js";
 import { friendlyError, toast } from "./feedback.js";
-import { createLoginLink, hideRemoteQR, revealRemoteQR, updateSettings } from "./settings.js";
+import { createLoginLink, dashboardConfigChange, hideRemoteQR, revealRemoteQR, updateSettings } from "./settings.js";
+import { app } from "./state.js";
 import { $ } from "./dom.js";
 
 export function bindSettingsEvents() {
@@ -78,7 +79,12 @@ export function bindSettingsEvents() {
   $("#dashboard-settings-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
-      await updateSettings({ action: "dashboard-config", codexRecentHours: Number($("#settings-codex-hours").value), busyDelivery: $("#settings-busy-delivery").value });
+      const change = dashboardConfigChange(app.settings?.dashboard ?? {}, Number($("#settings-codex-hours").value), $("#settings-busy-delivery").value);
+      if (!change) {
+        toast("Nothing to save.");
+        return;
+      }
+      await updateSettings(change);
       await load(true);
       toast("Settings saved.");
     } catch (error) {
