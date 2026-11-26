@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use feed::catalog::{RespondError, Session};
-use feed::complete::{self, Can, History, Input, Item, Prompt, RuntimeCommands, SessionFiles, Slash, Token, Trigger};
+use feed::complete::{self, Can, Found, History, Input, Item, Prompt, RuntimeCommands, SessionFiles, Slash, Token, Trigger};
 use rune::{Color, El, Key, KeyEvent, TextEdit, Tx, col, row, text, text_input};
 
 use crate::theme::{self, BODY, META, META_BOLD, SPRING, accent, failed, faint, muted, wash};
@@ -11,9 +11,9 @@ const SHOWN: usize = 8;
 
 pub enum Done {
     Commands(String, Result<RuntimeCommands, String>),
-    Files(String, String, Result<SessionFiles, String>),
+    Files(u64, String, String, Result<SessionFiles, String>),
     Prompts(String, Result<Vec<Prompt>, String>),
-    Found(u64, Result<Vec<Prompt>, String>),
+    Found(u64, Result<Found, String>),
     Forked(String, String, Result<String, RespondError>),
     Goal(String, Result<(), RespondError>),
 }
@@ -26,6 +26,7 @@ pub struct Search {
     seq: u64,
     asked: Option<(String, bool)>,
     results: Option<Result<Vec<Prompt>, String>>,
+    problems: Vec<String>,
 }
 
 #[derive(Default)]
@@ -36,7 +37,7 @@ pub struct Complete {
     commands: HashMap<String, Result<RuntimeCommands, String>>,
     commands_asked: HashSet<String>,
     files: Option<(String, String, Result<SessionFiles, String>)>,
-    files_asked: Option<(String, String)>,
+    files_asked: Option<(u64, String, String)>,
     history: HashMap<String, History>,
     recorded: HashMap<String, Vec<Prompt>>,
     local: HashMap<String, Vec<(String, time::OffsetDateTime)>>,
@@ -235,11 +236,11 @@ fn accept(s: &mut App, item: &Item) {
 }
 
 pub fn pump(s: &mut App) -> bool {
-    let Some(id) = s.composer_for.clone() else { return false };
-    let mut changed = false;
-    if s.complete.search.as_ref().is_some_and(|q| q.session != id) {
+    if s.complete.search.as_ref().is_some_and(|q| s.composer_for.as_deref() != Some(q.session.as_str())) {
         s.complete.search = None;
     }
+    let Some(id) = s.composer_for.clone() else { return false };
+    let mut changed = false;
     if s.complete.session.as_deref() != Some(id.as_str()) {
         s.complete.session = Some(id.clone());
         s.complete.highlighted = 0;
@@ -261,10 +262,11 @@ pub fn pump(s: &mut App) -> bool {
             let asked = id.clone();
             spawn(s, move |c| Done::Commands(asked.clone(), c.session_commands(&asked)));
         }
-        Some(t) if t.trigger == Trigger::Mention && s.complete.files_asked.as_ref() != Some(&(id.clone(), t.query.clone())) => {
-            s.complete.files_asked = Some((id.clone(), t.query.clone()));
-            let (asked, query) = (id.clone(), t.query);
-            spawn(s, move |c| Done::Files(asked.clone(), query.clone(), c.session_files(&asked, &query)));
+        Some(t) if t.trigger == Trigger::Mention && s.complete.files_asked.as_ref().is_none_or(|(_, i, q)| *i != id || *q != t.query) => {
+            s.complete.seq += 1;
+            let (seq, asked, query) = (s.complete.seq, id.clone(), t.query);
+            s.complete.files_asked = Some((seq, asked.clone(), query.clone()));
+            spawn(s, move |c| Done::Files(seq, asked.clone(), query.clone(), c.session_files(&asked, &query)));
         }
         _ => {}
     }
@@ -275,9 +277,16 @@ pub fn pump(s: &mut App) -> bool {
             search.seq = s.complete.seq;
             search.asked = Some(wanted.clone());
             search.ix = 0;
+            search.problems.clear();
             search.results = s.client.is_none().then(|| Err("Fixture mode: searching needs the daemon".to_string()));
             let (seq, session) = (search.seq, (!wanted.1).then(|| search.session.clone()));
-            spawn(s, move |c| Done::Found(seq, c.prompts(session.as_deref(), &wanted.0)));
+            spawn(s, move |c| {
+                let found = match &session {
+                    Some(id) => c.prompts(Some(id), &wanted.0).map(|prompts| Found { prompts, problems: Vec::new() }),
+                    None => c.prompts_everywhere(&wanted.0),
+                };
+                Done::Found(seq, found)
+            });
             changed = true;
         }
     }
@@ -289,16 +298,41 @@ fn rebuild(s: &mut App, id: &str) {
     s.complete.history.entry(id.to_string()).or_default().replace(texts);
 }
 
-pub fn sent(s: &mut App, id: &str, text: &str) {
+pub fn sending(s: &mut App, id: &str) {
     s.complete.dismissed = None;
+    s.complete.history.entry(id.to_string()).or_default().stop();
+}
+
+pub fn delivered(s: &mut App, id: &str, text: &str) {
     if text.trim().is_empty() {
         return;
     }
     let local = s.complete.local.entry(id.to_string()).or_default();
     local.retain(|(t, _)| t != text);
     local.insert(0, (text.to_string(), time::OffsetDateTime::now_utc()));
-    s.complete.history.entry(id.to_string()).or_default().stop();
     rebuild(s, id);
+}
+
+pub fn rekey(s: &mut App, old: &str, new: &str) {
+    let c = &mut s.complete;
+    if let Some(moving) = c.local.remove(old) {
+        let local = c.local.entry(new.to_string()).or_default();
+        local.extend(moving);
+        local.sort_by(|a, b| b.1.cmp(&a.1));
+    }
+    if let Some(prompts) = c.recorded.remove(old) {
+        c.recorded.entry(new.to_string()).or_insert(prompts);
+    }
+    c.history.remove(old);
+    c.commands.remove(old);
+    c.commands_asked.remove(old);
+    if c.session.as_deref() == Some(old) {
+        c.session = Some(new.to_string());
+    }
+    if let Some(search) = c.search.as_mut().filter(|q| q.session == old) {
+        search.session = new.to_string();
+    }
+    rebuild(s, new);
 }
 
 pub fn done(s: &mut App, done: Done) {
@@ -306,12 +340,13 @@ pub fn done(s: &mut App, done: Done) {
         Done::Commands(id, result) => {
             s.complete.commands.insert(id, result);
         }
-        Done::Files(id, query, result) => {
-            if s.complete.files_asked.as_ref() == Some(&(id.clone(), query.clone())) {
+        Done::Files(seq, id, query, result) => {
+            if s.complete.files_asked.as_ref().is_some_and(|(asked, _, _)| *asked == seq) {
                 s.complete.files = Some((id, query, result));
             }
         }
         Done::Prompts(id, result) => {
+            let id = feed::composer::current(&s.rekeyed, &id).to_string();
             if let Ok(prompts) = result {
                 s.complete.recorded.insert(id.clone(), prompts);
                 rebuild(s, &id);
@@ -319,8 +354,14 @@ pub fn done(s: &mut App, done: Done) {
         }
         Done::Found(seq, result) => {
             if let Some(search) = s.complete.search.as_mut().filter(|x| x.seq == seq) {
-                search.results = Some(result.map(complete::distinct));
                 search.ix = 0;
+                match result {
+                    Ok(found) => {
+                        search.results = Some(Ok(complete::distinct(found.prompts)));
+                        search.problems = found.problems;
+                    }
+                    Err(error) => search.results = Some(Err(error)),
+                }
             }
         }
         Done::Forked(from, prompt, result) => {
@@ -374,6 +415,7 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
         Slash::Compact => super::session_menu::compact(s, id),
         Slash::Stop => crate::stop(s, id),
         Slash::Steer => crate::steer_text(s, id, argument, tx),
+        Slash::Model if argument.is_empty() && s.screen != crate::Screen::Session => crate::note(s, id, "Type a model after /model, or open the session to pick one.".into()),
         Slash::Model => pick_model(s, id, &argument),
         Slash::Goal => {
             if s.client.is_none() {
@@ -420,7 +462,7 @@ fn open_search(s: &mut App, id: &str) {
     let mut query = TextEdit::new("");
     query.focused = true;
     s.composer.focused = false;
-    s.complete.search = Some(Search { session: id.to_string(), query, all: false, ix: 0, seq: 0, asked: None, results: None });
+    s.complete.search = Some(Search { session: id.to_string(), query, all: false, ix: 0, seq: 0, asked: None, results: None, problems: Vec::new() });
 }
 
 fn close_search(s: &mut App) {
@@ -555,6 +597,9 @@ pub fn search(s: &App, x: &Session) -> Option<El> {
                 list = list.child(r);
             }
         }
+    }
+    for problem in &search.problems {
+        list = list.child(text(problem.clone()).font(META).color(failed()).px(10.0).py(2.0));
     }
     Some(col().key("prompt-search-panel").w_full().gap(6.0).px(12.0).pt(10.0).child(head).child(list))
 }

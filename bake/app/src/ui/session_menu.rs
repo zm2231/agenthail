@@ -278,6 +278,9 @@ fn start_rename(s: &mut App, id: &str) {
 }
 
 pub fn rename_to(s: &mut App, id: &str, name: &str) {
+    if menu::unchanged(name, current_alias(s, id).as_deref()) {
+        return;
+    }
     start_rename(s, id);
     s.menus.rename_text = TextEdit::new(name);
     save_rename(s);

@@ -574,7 +574,7 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
     s.composer = TextEdit::new("");
     s.composer.focused = focused;
     ui::attach::clear(s, id);
-    ui::complete::sent(s, id, &message);
+    ui::complete::sending(s, id);
     match s.unsent.take_same(id, &message, &attachments) {
         Some(again) if again.reuses_key() => dispatch(s, id, again, true, tx),
         _ => {
@@ -839,6 +839,9 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
         }
         Err(error) => Some((error.maybe_delivered, error.answered, error.message)),
     };
+    if failure.is_none() {
+        ui::complete::delivered(s, &id, &pending.text);
+    }
     if let Some((maybe_delivered, answered, error)) = failure {
         let failed = pending.failed(retry, maybe_delivered, answered, error);
         put_back(s, &id, &failed);
@@ -918,6 +921,7 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
             s.queued.entry(new.clone()).or_default().extend(receipts);
         }
         ui::attach::rekey(s, &old, &new);
+        ui::complete::rekey(s, &old, &new);
         move_key(&mut s.status_line, &old, &new);
         move_key(&mut s.busy_pick, &old, &new);
         move_key(&mut s.work_pick, &old, &new);
