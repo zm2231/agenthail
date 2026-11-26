@@ -57,3 +57,35 @@ func TestAnUpgradedRegistryStopsWatchingTheOpenTurnsOfEndedSessions(t *testing.T
 		t.Fatalf("the last end of an ended session no longer stands: %q", got)
 	}
 }
+
+func TestAStopSparesATurnOpenedOnceTheSessionResumed(t *testing.T) {
+	r := coordinatorRegistry(t)
+	seen := time.Now()
+	for _, session := range []surface.Session{
+		{ID: "opened-after", Status: surface.StatusOffline},
+		{ID: "resumed", Status: surface.StatusIdle},
+	} {
+		session.Surface, session.RuntimeKind, session.Cwd = surface.KindClaude, surface.RuntimeClaudeHost, "/work"
+		if err := r.RecordObservedSession(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.OpenTurn("opened-after", seen.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.OpenTurn("resumed", seen.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"opened-after", "resumed"} {
+		if err := r.StopOpenTurn(id, seen, seen.Add(2*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	watched, err := r.WatchedSessions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(watched) != 2 {
+		t.Fatalf("a resumed session's turn was stopped: %+v", watched)
+	}
+}

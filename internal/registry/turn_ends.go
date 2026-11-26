@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 type TurnEnd struct {
@@ -77,9 +79,11 @@ func (r *Registry) EndTurn(end TurnEnd, activeTurnID string, at time.Time) (Turn
 	return end, nil
 }
 
-// StopOpenTurn marks the newest turn of a session whose process has exited as stopped when no completion was bound to it, so it is no longer watched; a completion seen later still binds to it.
-func (r *Registry) StopOpenTurn(sessionID string, at time.Time) error {
-	_, err := r.db.Exec(`UPDATE turn_ends SET stopped_at_ms=? WHERE session_id=? AND completed_turn_id='' AND stopped_at_ms=0 AND started_at_ms=(SELECT MAX(started_at_ms) FROM turn_ends WHERE session_id=?)`, at.UnixMilli(), sessionID, sessionID)
+// StopOpenTurn marks the newest turn of an exited session as stopped when no completion was bound to it, so it is no longer watched; a completion seen later still binds to it. A turn opened after seen, or a session the registry no longer holds as exited, was resumed since the observer saw it exit and keeps its turn.
+func (r *Registry) StopOpenTurn(sessionID string, seen, at time.Time) error {
+	_, err := r.db.Exec(`UPDATE turn_ends SET stopped_at_ms=? WHERE session_id=? AND completed_turn_id='' AND stopped_at_ms=0 AND started_at_ms<=?
+		AND started_at_ms=(SELECT MAX(started_at_ms) FROM turn_ends WHERE session_id=?)
+		AND EXISTS (SELECT 1 FROM sessions s WHERE s.id=? AND (s.ended=1 OR s.status=?))`, at.UnixMilli(), sessionID, seen.UnixMilli(), sessionID, sessionID, string(surface.StatusOffline))
 	return err
 }
 
