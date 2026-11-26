@@ -112,10 +112,13 @@ fn writer() -> &'static Sender<String> {
         std::thread::spawn(move || {
             for text in rx {
                 let Some(p) = path() else { continue };
-                if let Some(dir) = p.parent() {
-                    let _ = std::fs::create_dir_all(dir);
+                let written = p.parent().is_none_or(|dir| std::fs::create_dir_all(dir).is_ok()) && std::fs::write(&p, &text).is_ok();
+                if !written {
+                    let mut last = LAST.lock().expect("layout lock");
+                    if *last == text {
+                        last.clear();
+                    }
                 }
-                let _ = std::fs::write(&p, text);
             }
         });
         tx

@@ -273,6 +273,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             }
             if let Some(prev) = s.ov.back.pop() {
                 s.screen = prev;
+                s.composer = TextEdit::new("");
                 arrive(s);
             }
             true
