@@ -12,11 +12,13 @@ use rune::{Cx, El, Key, KeyEvent, TextEdit, Tx};
 use rune_kit::shell::{self, PaneState};
 
 pub use feed::derive::text::{clip_words, plain, short_id};
+pub use feed::derive::live::Overview;
 pub use feed::derive::{Happened, Line, Need, NeedKind, PHASES, Project, Target, Work, World};
 
 use crate::{App, Screen};
 
 pub struct Over {
+    pub live: Overview,
     pub d: World,
     pub needs: Vec<Need>,
     pub hands_on: Vec<String>,
@@ -43,12 +45,14 @@ pub struct Over {
 }
 
 impl Over {
-    pub fn new(d: World, persist: bool) -> Over {
+    pub fn new(live: Overview, persist: bool) -> Over {
+        let d = live.world();
         let mut needs = d.needs();
         feed::derive::needs::sort(&mut needs);
         Over {
             hands_on: d.hands_on(&[]).iter().map(|x| x.id.clone()).collect(),
             needs,
+            live,
             d,
             back: Vec::new(),
             now_brief: false,
@@ -73,7 +77,8 @@ impl Over {
         }
     }
 
-    pub fn set_world(&mut self, d: World) {
+    pub fn rebuild(&mut self) {
+        let d = self.live.world();
         let mut needs = d.needs();
         feed::derive::needs::sort(&mut needs);
         self.hands_on = d.hands_on(&[]).iter().map(|x| x.id.clone()).collect();
@@ -90,6 +95,7 @@ fn lead_of(s: &App, key: &str) -> Option<String> {
 pub fn arrive(s: &mut App) {
     match s.screen.clone() {
         Screen::Project(key) => {
+            crate::fetch_ledger(s, &key);
             if let Some(lead) = lead_of(s, &key) {
                 crate::load_pane(s, &lead);
             }

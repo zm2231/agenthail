@@ -9,7 +9,8 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
 use feed::catalog::{Client, OpenRequest, Session, Snapshot, WorkItem};
-use feed::derive::{Recorded, World};
+use feed::derive::Recorded;
+use feed::derive::live::{Fetched, Ledger, Overview};
 use feed::source::{Live, Message};
 use rune::{AppSpec, Chrome, TextEdit, Tx, WindowOptions};
 use time::OffsetDateTime;
@@ -18,9 +19,10 @@ use crate::over::Over;
 use crate::transcript::{Pane, Replay};
 
 pub enum Bg {
-    Snapshot(Vec<Session>),
+    Snapshot(String, Vec<Session>),
     Item(String, WorkItem),
-    Recorded(Box<Recorded>),
+    Overview(Box<Fetched>),
+    Ledger(String, Result<Ledger, String>),
     OverviewError(String),
     Sent(String, Result<(), feed::catalog::RespondError>),
     Requests(String, Vec<OpenRequest>, std::time::Instant),
@@ -102,16 +104,16 @@ fn load_snapshot(path: &str) -> (Vec<Session>, OffsetDateTime) {
     (snap.sessions, now)
 }
 
-fn load_world(path: &str) -> Result<World, String> {
+fn load_recorded(path: &str) -> Result<Recorded, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
-    World::from_json(&text).map_err(|e| format!("{path}: {e}"))
+    serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))
 }
 
 fn watch_overview(client: Client, tx: Sender<Bg>) {
     std::thread::spawn(move || {
         loop {
-            let message = match feed::derive::live::recorded(&client) {
-                Ok(recorded) => Bg::Recorded(Box::new(recorded)),
+            let message = match feed::derive::live::fetch(&client) {
+                Ok(fetched) => Bg::Overview(Box::new(fetched)),
                 Err(error) => Bg::OverviewError(error.to_string()),
             };
             if tx.send(message).is_err() {
@@ -125,10 +127,10 @@ fn watch_overview(client: Client, tx: Sender<Bg>) {
 fn init() -> App {
     let (outbox, inbox) = channel();
     let fixture = arg("--fixture");
-    let (world, world_error) = match fixture.as_deref().map(load_world) {
-        Some(Ok(world)) => (world, None),
-        Some(Err(error)) => (World::new(Recorded::default()), Some(error)),
-        None => (World::new(Recorded::default()), None),
+    let (live, world_error) = match fixture.as_deref().map(load_recorded) {
+        Some(Ok(raw)) => (Overview::recorded(raw), None),
+        Some(Err(error)) => (Overview::default(), Some(error)),
+        None => (Overview::default(), None),
     };
     let mut app = App {
         sessions: Vec::new(),
@@ -156,7 +158,7 @@ fn init() -> App {
         work_pick: HashMap::new(),
         diff: rune_kit::diff::DiffState::new(Vec::new()),
         diff_key: (String::new(), usize::MAX),
-        ov: Over::new(world, fixture.is_none()),
+        ov: Over::new(live, fixture.is_none()),
         revealed: None,
         client: None,
         fixtures: None,
@@ -187,7 +189,7 @@ fn init() -> App {
                 std::thread::spawn(move || {
                     loop {
                         let message = match c.snapshot() {
-                            Ok(snap) => Bg::Snapshot(snap.sessions),
+                            Ok(snap) => Bg::Snapshot(snap.updated_at, snap.sessions),
                             Err(error) => Bg::Error(error.to_string()),
                         };
                         if tx.send(message).is_err() {
@@ -196,9 +198,7 @@ fn init() -> App {
                         std::thread::sleep(Duration::from_secs(2));
                     }
                 });
-                if fixture.is_none() {
-                    watch_overview(client.clone(), app.outbox.clone());
-                }
+                watch_overview(client.clone(), app.outbox.clone());
                 app.client = Some(client);
             }
             Err(error) => app.status = error.to_string(),
@@ -274,6 +274,19 @@ pub fn load_pane(s: &mut App, id: &str) {
         let old = s.lru.remove(0);
         s.panes.remove(&old);
     }
+}
+
+pub fn fetch_ledger(s: &mut App, project: &str) {
+    let Some(client) = s.client.clone() else { return };
+    if !s.ov.live.wants(project) {
+        return;
+    }
+    s.ov.rebuild();
+    let (tx, project, sessions) = (s.outbox.clone(), project.to_string(), s.sessions.clone());
+    std::thread::spawn(move || {
+        let result = feed::derive::live::ledger(&client, &project, &sessions);
+        let _ = tx.send(Bg::Ledger(project, result));
+    });
 }
 
 fn fetch_requests(s: &mut App, id: &str) {
@@ -449,8 +462,11 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     while let Ok(message) = s.inbox.try_recv() {
         changed = true;
         match message {
-            Bg::Snapshot(sessions) => {
-                s.sessions = sessions;
+            Bg::Snapshot(at, sessions) => {
+                if s.ov.live.take_sessions(&at, sessions) {
+                    s.ov.rebuild();
+                    s.sessions = s.ov.live.sessions().to_vec();
+                }
                 s.now = OffsetDateTime::now_utc();
                 s.status = "live".into();
                 if let Some(id) = s.selected.clone() {
@@ -463,9 +479,15 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Item(id, item) => {
                 s.items.insert(id, item);
             }
-            Bg::Recorded(recorded) => {
-                s.ov.set_world(World::new(*recorded));
+            Bg::Overview(fetched) => {
+                s.ov.live.refresh(*fetched);
+                s.ov.rebuild();
+                s.sessions = s.ov.live.sessions().to_vec();
                 over::arrive(s);
+            }
+            Bg::Ledger(project, result) => {
+                s.ov.live.take_ledger(&project, result);
+                s.ov.rebuild();
             }
             Bg::OverviewError(error) => s.ov.notice = Some(format!("Couldn't refresh the overview: {error}")),
             Bg::Sent(id, result) => {

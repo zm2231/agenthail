@@ -22,9 +22,11 @@ pub use jump::Hit;
 pub use needs::{Need, NeedKind, Target};
 pub use phase::{PHASES, phase};
 pub use proof::Proof;
-pub use world::{Entry, Project, Recorded, Work, World};
+pub use world::{Entry, Project, Recorded, Rows, Work, World};
 
 #[cfg(test)]
 mod fixture_tests;
 #[cfg(test)]
 mod behaviour_tests;
+#[cfg(test)]
+mod live_tests;

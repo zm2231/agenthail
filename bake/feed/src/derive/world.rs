@@ -112,7 +112,7 @@ pub struct Actor {
     pub surface: Option<String>,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Recorded {
     #[serde(default)]
@@ -143,6 +143,23 @@ pub struct Project {
     pub last_active: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rows {
+    Loading,
+    Stale,
+    Unavailable,
+}
+
+impl Rows {
+    pub fn note(self) -> &'static str {
+        match self {
+            Rows::Loading => "Loading this project's work…",
+            Rows::Stale => "Couldn't refresh this project's work. Showing what it last had.",
+            Rows::Unavailable => "Couldn't load this project's work.",
+        }
+    }
+}
+
 pub struct World {
     pub now: OffsetDateTime,
     pub sessions: Vec<Session>,
@@ -153,6 +170,7 @@ pub struct World {
     pub helpers: HashSet<String>,
     pub usage: Vec<Meter>,
     pub hosts: Vec<Host>,
+    pub rows: HashMap<String, Rows>,
     pub(crate) names: HashMap<String, String>,
 }
 
@@ -174,7 +192,7 @@ impl World {
         }
         let names = crate::derive::names::build(&raw.sessions, &raw.actors, &work);
         let projects = projects(&raw.projects, &raw.sessions);
-        World { now, sessions: raw.sessions, projects, work, transcripts: raw.transcripts, started_by, helpers, usage: raw.usage, hosts: raw.hosts, names }
+        World { now, sessions: raw.sessions, projects, work, transcripts: raw.transcripts, started_by, helpers, usage: raw.usage, hosts: raw.hosts, rows: HashMap::new(), names }
     }
 
     pub fn session(&self, id: &str) -> Option<&Session> {

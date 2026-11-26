@@ -269,6 +269,8 @@ impl Session {
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     #[serde(default)]
+    pub updated_at: String,
+    #[serde(default)]
     pub sessions: Vec<Session>,
 }
 

@@ -96,6 +96,12 @@ fn lane_more(lane: String, open: bool, hidden: usize) -> El {
             .child(text(label).font(META_MED).color(weak()))
 }
 
+fn rows_note(s: &App, key: &str) -> Option<El> {
+    let rows = *s.ov.d.rows.get(key)?;
+    let color = if rows == feed::derive::Rows::Loading { weak() } else { ui::needs_color() };
+    Some(row().w_full().gap(6.0).items_center().child(rune::icon(&icons::INFO, 13.0).color(color)).child(text(rows.note().to_string()).font(META).color(color).wrap()))
+}
+
 fn group(s: &App, key: &str, title: &str, items: &[&Work], empty: &str) -> El {
     let mut c = col().w_full().gap(8.0).child(ui::section_head(title, Some(items.len()), None));
     if items.is_empty() {
@@ -182,6 +188,7 @@ pub fn lead(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>) -> El {
                 .pt(14.0)
                 .pb(24.0)
                 .child(crew_panel(s, p.lead.as_deref()))
+                .children(rows_note(s, key))
                 .child(group(s, key, LANES[0], &cols[0], "Nothing waits on you here."))
                 .child(group(s, key, LANES[1], &cols[1], "Nothing is being built."))
                 .child(group(s, key, LANES[2], &cols[2], "The queue is empty.")),
@@ -267,6 +274,7 @@ pub fn board(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>) -> El {
         .pb(24.0)
         .child(row().w_full().items_center().gap(10.0).child(text("Since you left".to_string()).font(HEAD).color(strong())).child(text(summary).font(META).color(weak()).truncate().shrink()))
         .child(since)
+        .children(rows_note(s, key))
         .child(board.mt(8.0));
     let hint = row()
         .gap(6.0)
