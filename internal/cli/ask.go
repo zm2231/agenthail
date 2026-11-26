@@ -273,7 +273,11 @@ func (a *App) printAsks(query url.Values, jsonOut bool) error {
 		return nil
 	}
 	for _, ask := range listed.Asks {
-		fmt.Printf("%s  %s  from %s to %s: %s\n", ask.ID, ask.State, ask.SessionID, ask.RoutedTo, ask.Title)
+		on := ""
+		if ask.WorkItem != "" {
+			on = " on " + ask.WorkItem
+		}
+		fmt.Printf("%s  %s  from %s%s to %s: %s\n", ask.ID, ask.State, ask.SessionID, on, ask.RoutedTo, ask.Title)
 		for i, question := range ask.Questions {
 			labels := make([]string, len(question.Options))
 			for j, option := range question.Options {
