@@ -14,6 +14,7 @@ pub const MAX_FILE_BYTES: u64 = 25 << 20;
 pub const MAX_IMAGE_BYTES: u64 = 5 << 20;
 pub const MAX_IMAGE_EDGE: u32 = 2048;
 pub const OPEN_LIMIT: u64 = 50 << 20;
+const UNSAVED: &str = "the app closed before it uploaded. Remove it and attach it again";
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -358,7 +359,7 @@ impl Tray {
                         .filter_map(|c| match &c.state {
                             State::Ready(u) => Some(u.to_json()),
                             State::Gone(u) => Some(json!({"upload": u.to_json(), "gone": true})),
-                            _ => None,
+                            State::Uploading | State::Failed(_) => Some(json!({"lost": {"name": c.name, "bytes": c.size, "image": c.image}})),
                         })
                         .collect();
                     (id.clone(), Value::Array(kept))
@@ -372,6 +373,12 @@ impl Tray {
         let mut tray = Tray::default();
         for (id, raw) in value.as_object().into_iter().flatten() {
             for entry in raw.as_array().into_iter().flatten() {
+                if let Some(name) = entry["lost"]["name"].as_str() {
+                    tray.next += 1;
+                    let chip = Chip { local: tray.next, name: name.to_string(), image: entry["lost"]["image"] == true, size: entry["lost"]["bytes"].as_u64().unwrap_or_default(), data: None, state: State::Failed(UNSAVED.into()) };
+                    tray.chips.entry(id.clone()).or_default().push(chip);
+                    continue;
+                }
                 let (value, gone) = if entry["gone"] == true { (&entry["upload"], true) } else { (entry, false) };
                 if let Some(upload) = Upload::from_json(value) {
                     tray.put(id, &upload, gone);
@@ -638,9 +645,10 @@ mod tests {
         let a = tray.add("s1", prepared("a.txt", b"aaa")).unwrap().unwrap();
         tray.add("s1", prepared("b.txt", b"bbb")).unwrap();
         tray.uploaded(a, Ok(upload("a")));
-        let back = Tray::from_json(&tray.to_json());
+        let mut back = Tray::from_json(&tray.to_json());
+        assert_eq!(back.ready("s1"), Err(Hold::Failed("b.txt".into())));
+        back.remove(back.chips("s1")[1].local);
         assert_eq!(back.ready("s1").unwrap(), vec![upload("a")]);
-        let mut back = back;
         back.rekey(&HashMap::from([("s1".to_string(), "s2".to_string())]));
         assert!(!back.has("s1"));
         assert_eq!(back.ready("s2").unwrap(), vec![upload("a")]);
@@ -677,6 +685,20 @@ mod tests {
         assert_eq!(tray.retry(gone), None);
         tray.remove(gone);
         assert_eq!(tray.ready("s1").unwrap(), vec![upload("b")]);
+    }
+
+    #[test]
+    fn chips_not_yet_uploaded_come_back_asking_to_be_attached_again() {
+        let mut tray = Tray::default();
+        let a = tray.add("s1", prepared("a.txt", b"aaa")).unwrap().unwrap();
+        tray.add("s1", prepared("b.txt", b"bbb")).unwrap();
+        tray.uploaded(a, Err("offline".into()));
+        let back = Tray::from_json(&tray.to_json());
+        assert_eq!(back.chips("s1").iter().map(|c| (c.name.as_str(), c.size)).collect::<Vec<_>>(), [("a.txt", 3), ("b.txt", 3)]);
+        assert!(back.chips("s1").iter().all(|c| matches!(c.state, State::Failed(_)) && c.data.is_none()));
+        assert_eq!(back.ready("s1"), Err(Hold::Failed("a.txt".into())));
+        let mut back = back;
+        assert_eq!(back.retry(back.chips("s1")[0].local), None);
     }
 
     #[test]
