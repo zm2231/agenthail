@@ -15,6 +15,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/claudesurface"
 	"github.com/zm2231/agenthail/internal/surface/codexsurface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 type localDaemonAgent struct {
@@ -138,6 +139,9 @@ func TestCodexAndClaudeWithNeitherOnPathAreStillOfferedUntilTurnedOff(t *testing
 	t.Setenv("HOME", home)
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", "")
+	desktop := codexsurface.CodexDesktopExecutables
+	codexsurface.CodexDesktopExecutables = []string{filepath.Join(home, "Applications", "Codex.app", "Contents", "MacOS", "Codex")}
+	t.Cleanup(func() { codexsurface.CodexDesktopExecutables = desktop })
 	_, registry, _, _, _ := daemonFixture(t)
 	codex := codexsurface.NewCodexIn(codexsurface.CodexHome{Codex: filepath.Join(home, ".codex"), State: filepath.Join(home, ".agenthail")}, "")
 	d := newTestDaemon(t, registry, []surface.Surface{claudesurface.NewClaude(nil, home), codex})
@@ -156,5 +160,12 @@ func TestCodexAndClaudeWithNeitherOnPathAreStillOfferedUntilTurnedOff(t *testing
 	}
 	if c.offered("claude") || !c.offered("codex") {
 		t.Fatal("turning Claude off must leave it out and keep Codex")
+	}
+
+	testkit.WriteExecutable(t, codexsurface.CodexDesktopExecutables[0], "#!/bin/sh\n")
+	for _, status := range c.agents() {
+		if status.ID == "codex" && status.State != surface.AgentOn {
+			t.Fatalf("Codex with its app installed reads %+v", status)
+		}
 	}
 }
