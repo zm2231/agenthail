@@ -177,7 +177,8 @@ pub fn classify(id: &str, detail: &Detail, listing: Listing, known: Option<&Sess
         (Detail::Failed(e), None) => return Err(format!("Couldn't look this session up: {e}")),
         _ => {}
     }
-    let row = listed.clone().or_else(|| known.cloned()).or_else(|| detail.row(id)).unwrap_or_else(|| Session { id: id.to_string(), ..Session::default() });
+    let mut row = listed.clone().or_else(|| known.cloned()).or_else(|| detail.row(id)).unwrap_or_else(|| Session { id: id.to_string(), ..Session::default() });
+    row.name = crate::search::one_line(&row.name);
     let archived = listed.as_ref().map_or(row.archived, |l| l.archived);
     let why = if archived {
         Why::Archived
@@ -321,6 +322,17 @@ mod tests {
         assert_eq!(g.why, Why::Unlisted);
         assert_eq!(g.fix, Some(Fix::Resume));
         assert_eq!((g.row.name.as_str(), g.row.alias.as_deref(), g.row.surface.as_str()), ("Fix the importer", Some("fixer"), "codex"));
+    }
+
+    #[test]
+    fn a_stored_name_with_line_breaks_heads_the_screen_on_one_line() {
+        let d = Detail::Found(json!({"session": {"id": "s1", "name": "Port the export\n\n  to the new schema "}}));
+        assert_eq!(classify("s1", &d, Listing::Absent, None).unwrap().row.title(), "Port the export to the new schema");
+        assert_eq!(search_terms(d.row("s1").iter()), vec!["Port the export\n\n  to the new schema"]);
+        let listed = row(json!({"id": "s1", "name": "Fix the\nimporter", "archived": true}));
+        assert_eq!(classify("s1", &detail(), Listing::Found(listed), None).unwrap().row.name, "Fix the importer");
+        let known = row(json!({"id": "s1", "name": "Fix\r\nit"}));
+        assert_eq!(classify("s1", &Detail::Unreachable, Listing::Absent, Some(&known)).unwrap().row.name, "Fix it");
     }
 
     #[test]
