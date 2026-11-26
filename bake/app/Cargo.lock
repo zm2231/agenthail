@@ -90,6 +90,7 @@ name = "agenthail-rune"
 version = "0.0.0"
 dependencies = [
  "feed",
+ "libc",
  "png 0.18.1",
  "rune",
  "rune-kit",

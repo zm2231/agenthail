@@ -559,7 +559,7 @@ fn an_oversized_saved_log_is_trimmed_and_saved_again() {
         })
         .collect();
     let saved = serde_json::to_string(&attempts).unwrap();
-    let loaded = Trail::load(&saved).unwrap();
+    let loaded = Trail::load(&saved, 7, |_| true).unwrap();
     assert_eq!(loaded.attempts.len(), KEPT_CALLS);
     assert!(loaded.changed);
 }
@@ -605,45 +605,63 @@ fn a_page_that_fails_its_check_without_a_call_ends_no_audio() {
 
 #[test]
 fn two_owners_of_one_call_log_keep_each_others_calls() {
-    let mut first = Trail::default();
+    let both = |pid: u32| pid == 1 || pid == 2;
+    let mut first = Trail::owned_by(1);
     first.begin("a-done", 0.0);
     first.end("a-done", "local_hangup", 1.0);
-    let mut second = Trail::load(&first.save()).unwrap();
+    let mut second = Trail::load(&first.save(), 2, both).unwrap();
     second.begin("b-live", 0.0);
     second.mark("b-live", "prepared", 1.0);
     let disk = second.save();
     first.begin("a-live", 2.0);
-    first.combine(Trail::parse(&disk).unwrap());
+    first.combine(Trail::parse(&disk).unwrap(), both);
     let ids: Vec<_> = first.attempts.iter().map(|a| a.id.as_str()).collect();
     assert_eq!(ids.len(), 3);
     assert!(ids.contains(&"b-live") && ids.contains(&"a-live") && ids.contains(&"a-done"));
     let theirs = first.attempts.iter().find(|a| a.id == "b-live").unwrap();
-    assert_eq!(theirs.cause, None, "another owner's live call is never written as ended");
+    assert_eq!(theirs.cause, None, "another running owner's call is never written as ended");
     assert_eq!(first.last().unwrap().id, "a-live", "this window's details show its own call");
     let disk = first.save();
     second.end("b-live", "local_hangup", 3.0);
-    second.combine(Trail::parse(&disk).unwrap());
+    second.combine(Trail::parse(&disk).unwrap(), both);
     let mine = second.attempts.iter().find(|a| a.id == "b-live").unwrap();
     assert_eq!(mine.cause.as_deref(), Some("local_hangup"));
     assert!(second.attempts.iter().any(|a| a.id == "a-live"));
 }
 
 #[test]
+fn a_call_cut_off_when_its_app_quit_stays_unfinished_through_later_saves() {
+    let mut cut_off = Trail::owned_by(1);
+    cut_off.begin("cut-off", 0.0);
+    let disk = cut_off.save();
+    let only_me = |pid: u32| pid == 2;
+    let mut next = Trail::load(&disk, 2, only_me).unwrap();
+    assert!(next.changed);
+    next.begin("next", 1.0);
+    next.combine(Trail::parse(&disk).unwrap(), only_me);
+    let cut = next.attempts.iter().find(|a| a.id == "cut-off").unwrap();
+    assert_eq!(cut.cause.as_deref(), Some(UNFINISHED));
+    let written = Trail::parse(&next.save()).unwrap();
+    assert_eq!(written.attempts.iter().find(|a| a.id == "cut-off").unwrap().cause.as_deref(), Some(UNFINISHED));
+}
+
+#[test]
 fn a_live_call_survives_twenty_newer_calls_from_another_owner() {
-    let mut mine = Trail::default();
+    let both = |pid: u32| pid == 1 || pid == 2;
+    let mut mine = Trail::owned_by(1);
     mine.begin("mine-live", 0.0);
     mine.attempts[0].started_at -= 3600;
-    let mut theirs = Trail::default();
+    let mut theirs = Trail::owned_by(2);
     for k in 0..KEPT_CALLS {
         theirs.begin(&format!("theirs-{k}"), 0.0);
         theirs.end(&format!("theirs-{k}"), "local_hangup", 1.0);
     }
-    mine.combine(Trail::parse(&theirs.save()).unwrap());
+    mine.combine(Trail::parse(&theirs.save()).unwrap(), both);
     assert_eq!(mine.attempts.len(), KEPT_CALLS);
     assert!(mine.attempts.iter().any(|a| a.id == "mine-live"));
     mine.end("mine-live", "local_hangup", 5.0);
     assert_eq!(mine.last().unwrap().cause.as_deref(), Some("local_hangup"));
-    mine.combine(Trail::parse(&theirs.save()).unwrap());
+    mine.combine(Trail::parse(&theirs.save()).unwrap(), both);
     assert!(mine.attempts.iter().all(|a| a.id != "mine-live"), "once ended it ages out like any other call");
 }
 
@@ -654,11 +672,11 @@ fn calls_logged_before_the_saved_log_could_be_read_join_it() {
         saved.begin(&format!("old-{k}"), 0.0);
         saved.end(&format!("old-{k}"), "local_hangup", 1.0);
     }
-    let mut fresh = Trail::default();
+    let mut fresh = Trail::owned_by(2);
     fresh.begin("new-0", 0.0);
     fresh.end("new-0", "local_hangup", 1.0);
     fresh.begin("new-1", 2.0);
-    fresh.combine(Trail::parse(&saved.save()).unwrap());
+    fresh.combine(Trail::parse(&saved.save()).unwrap(), |_| false);
     let ids: Vec<_> = fresh.attempts.iter().map(|a| a.id.as_str()).collect();
     assert_eq!(ids.len(), KEPT_CALLS);
     assert!(ids.contains(&"new-0") && ids.contains(&"new-1") && !ids.contains(&"old-0"));
@@ -854,11 +872,12 @@ fn a_saved_call_log_keeps_the_last_twenty_and_closes_unfinished_calls() {
     }
     assert_eq!(trail.attempts.len(), KEPT_CALLS);
     assert_eq!(trail.attempts[0].id, "call-5");
-    let loaded = Trail::load(&trail.save()).unwrap();
+    let loaded = Trail::load(&trail.save(), 7, |_| false).unwrap();
     assert_eq!(loaded.attempts.len(), KEPT_CALLS);
     assert_eq!(loaded.last().unwrap().cause.as_deref(), Some(UNFINISHED));
+    assert!(loaded.changed, "an unfinished call is written as unfinished");
     assert_eq!(loaded.attempts[0].milestones, vec![("local_ended".to_string(), 1.0)]);
-    assert!(Trail::load("not json").is_err());
+    assert!(Trail::load("not json", 7, |_| true).is_err());
 }
 
 #[test]

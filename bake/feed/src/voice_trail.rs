@@ -46,6 +46,8 @@ pub struct Attempt {
     pub milestones: Vec<(String, f64)>,
     pub cause: Option<String>,
     pub failed_at: Option<String>,
+    #[serde(default)]
+    pub owner: u32,
     #[serde(skip)]
     clock: f64,
 }
@@ -55,31 +57,47 @@ pub struct Trail {
     pub attempts: Vec<Attempt>,
     pub changed: bool,
     own: Vec<String>,
+    pid: u32,
 }
 
 impl Trail {
+    pub fn owned_by(pid: u32) -> Trail {
+        Trail { pid, ..Trail::default() }
+    }
+
     pub fn parse(saved: &str) -> Result<Trail, String> {
         let mut attempts: Vec<Attempt> = serde_json::from_str(saved).map_err(|e| e.to_string())?;
         let keep = attempts.len().saturating_sub(KEPT_CALLS);
         attempts.drain(..keep);
-        Ok(Trail { attempts, changed: keep > 0, own: Vec::new() })
+        Ok(Trail { attempts, changed: keep > 0, ..Trail::default() })
     }
 
-    pub fn load(saved: &str) -> Result<Trail, String> {
-        let mut trail = Trail::parse(saved)?;
-        for attempt in trail.attempts.iter_mut().filter(|a| a.cause.is_none()) {
-            attempt.cause = Some(UNFINISHED.into());
-        }
+    pub fn load(saved: &str, pid: u32, alive: impl Fn(u32) -> bool) -> Result<Trail, String> {
+        let mut trail = Trail { pid, ..Trail::parse(saved)? };
+        trail.changed |= trail.close_orphans(&alive);
         Ok(trail)
     }
 
-    pub fn combine(&mut self, saved: Trail) {
+    fn close_orphans(&mut self, alive: &impl Fn(u32) -> bool) -> bool {
+        let (pid, own) = (self.pid, &self.own);
+        let mut closed = false;
+        for attempt in self.attempts.iter_mut().filter(|a| a.cause.is_none() && !own.contains(&a.id)) {
+            if attempt.owner == 0 || attempt.owner == pid || !alive(attempt.owner) {
+                attempt.cause = Some(UNFINISHED.into());
+                closed = true;
+            }
+        }
+        closed
+    }
+
+    pub fn combine(&mut self, saved: Trail, alive: impl Fn(u32) -> bool) {
         let own = std::mem::take(&mut self.own);
         let mut attempts: Vec<Attempt> = saved.attempts.into_iter().filter(|a| !own.contains(&a.id)).collect();
         attempts.extend(self.attempts.drain(..).filter(|a| own.contains(&a.id)));
         attempts.sort_by_key(|a| a.started_at);
         self.attempts = attempts;
         self.own = own;
+        self.close_orphans(&alive);
         self.cap();
     }
 
@@ -106,7 +124,7 @@ impl Trail {
 
     pub fn begin(&mut self, id: &str, clock: f64) {
         let started_at = OffsetDateTime::now_utc().unix_timestamp();
-        self.attempts.push(Attempt { id: id.into(), started_at, clock, ..Attempt::default() });
+        self.attempts.push(Attempt { id: id.into(), started_at, owner: self.pid, clock, ..Attempt::default() });
         self.own.push(id.into());
         self.cap();
         self.changed = true;

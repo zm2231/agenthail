@@ -406,15 +406,28 @@ fn trail_file() -> Option<PathBuf> {
 }
 
 fn load_trail() -> Trail {
+    let pid = std::process::id();
     let saved = trail_file().map(std::fs::read_to_string);
     match saved {
-        Some(Ok(saved)) => Trail::load(&saved).unwrap_or_default(),
+        Some(Ok(saved)) => Trail::load(&saved, pid, running).unwrap_or_else(|_| Trail::owned_by(pid)),
         Some(Err(error)) if error.kind() != std::io::ErrorKind::NotFound => {
             eprintln!("voice: the call log couldn't be read: {error}");
-            Trail::default()
+            Trail::owned_by(pid)
         }
-        _ => Trail::default(),
+        _ => Trail::owned_by(pid),
     }
+}
+
+#[cfg(unix)]
+fn running(pid: u32) -> bool {
+    let Ok(pid) = i32::try_from(pid) else { return false };
+    let answered = unsafe { libc::kill(pid, 0) };
+    answered == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(not(unix))]
+fn running(_: u32) -> bool {
+    true
 }
 
 fn unused_aside(path: &Path) -> PathBuf {
@@ -445,7 +458,7 @@ fn save_trail(trail: &mut Trail) -> bool {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         let lock = std::fs::File::options().create(true).truncate(false).write(true).open(dir.join("voice-calls.lock")).map_err(|e| e.to_string())?;
         lock.lock().map_err(|e| e.to_string())?;
-        trail.combine(saved_trail(&path)?);
+        trail.combine(saved_trail(&path)?, running);
         let part = path.with_extension(format!("{}.part", std::process::id()));
         std::fs::write(&part, trail.save()).and_then(|()| std::fs::rename(&part, &path)).map_err(|e| e.to_string())
     })();
