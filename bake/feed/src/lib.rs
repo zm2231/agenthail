@@ -2,6 +2,7 @@ pub mod action;
 pub mod blocks;
 pub mod brief;
 pub mod question;
+pub mod review;
 pub mod settings;
 pub mod catalog;
 pub mod create;

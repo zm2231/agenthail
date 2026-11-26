@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 use crate::action::Dismiss;
-use crate::catalog::{Client, OpenRequest, RespondError, enc};
+use crate::catalog::{Client, OpenRequest, Pr, RespondError, enc};
 
 pub const GROUPS: [(&str, &str); 4] = [("stopped", "Stopped on you"), ("holding", "Holding up work"), ("waiting", "Waiting on you"), ("review", "Waiting for your review")];
 pub const HISTORY_KEPT: usize = 20;
@@ -36,12 +36,30 @@ pub struct Decision {
     pub work_item: String,
     #[serde(default)]
     pub work_title: String,
+    #[serde(default)]
+    pub ledger_key: String,
+    #[serde(default)]
+    pub phase: String,
+    #[serde(default)]
+    pub proof: Option<ProofCounts>,
+    #[serde(default)]
+    pub prs: Vec<Pr>,
     #[serde(skip)]
     pub host: String,
     #[serde(skip)]
     pub host_name: String,
     #[serde(skip)]
     pub covers: Vec<Decision>,
+}
+
+#[derive(Deserialize, Clone, Copy, Debug, Default, PartialEq)]
+pub struct ProofCounts {
+    #[serde(default)]
+    pub pass: usize,
+    #[serde(default)]
+    pub fail: usize,
+    #[serde(default)]
+    pub pending: usize,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -121,6 +139,12 @@ impl Decision {
 
     pub fn is_review(&self) -> bool {
         self.group == "review" || self.kind == "review" || self.key.starts_with("review:")
+    }
+
+    pub fn proof_line(&self) -> Option<String> {
+        let p = self.proof?;
+        let parts: Vec<String> = [(p.pass, "passed"), (p.fail, "failed"), (p.pending, "pending")].iter().filter(|(n, _)| *n > 0).map(|(n, w)| format!("{n} {w}")).collect();
+        (!parts.is_empty()).then(|| parts.join(" · "))
     }
 
     pub fn group_title(&self) -> &'static str {
