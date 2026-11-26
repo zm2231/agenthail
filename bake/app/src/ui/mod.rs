@@ -10,6 +10,7 @@ use crate::transcript::{self, session_avatar};
 use crate::{App, Bg, Screen, Tab, answer_request, pick_work, session_edits, short_path, show_changes, send, draft_reply, session, toggle_pick, open_link};
 
 pub mod accounts;
+pub(crate) mod background;
 mod chips;
 pub mod gone;
 pub(crate) mod queue;
@@ -19,6 +20,7 @@ pub mod pr_link;
 mod rail;
 mod session;
 mod session_dialogs;
+pub(crate) mod subagents;
 pub mod session_menu;
 mod waiting;
 

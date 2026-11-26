@@ -170,6 +170,7 @@ pub(crate) fn rail(s: &App, x: &Session) -> El {
             })),
         ));
     }
+    parts.extend(super::subagents::section(s, x));
     let facts: [(&'static Icon, &str, String); 4] = [
         (&icons::SPARKLES, "Agent", x.surface.clone()),
         (&icons::SERVER, "Host", x.host.name.clone()),
