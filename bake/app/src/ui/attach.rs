@@ -173,12 +173,18 @@ fn prepare(s: &mut App, id: &str, names: Vec<String>, work: impl FnOnce() -> Vec
     let id = feed::composer::current(&s.rekeyed, id).to_string();
     s.attach.next_job += 1;
     let job = s.attach.next_job;
-    s.attach.adding.insert(job, (id, names));
-    let _ = crate::over::layout::save_now(s);
+    s.attach.adding.insert(job, (id.clone(), names));
+    keep_draft(s, &id);
     let out = s.outbox.clone();
     std::thread::spawn(move || {
         let _ = out.send(Bg::Attach(Done::Prepared(job, work())));
     });
+}
+
+fn keep_draft(s: &mut App, id: &str) {
+    if let Err(error) = crate::over::layout::save_now(s) {
+        crate::note(s, id, format!("The draft couldn't be saved ({error}), so its attachments may not come back if the app closes."));
+    }
 }
 
 pub fn choose(s: &mut App, tx: &mut Tx) {
@@ -286,7 +292,7 @@ pub fn done(s: &mut App, done: Done, tx: &mut Tx) {
             if let Some(problem) = problem {
                 crate::note(s, &id, problem.message());
             }
-            let _ = crate::over::layout::save_now(s);
+            keep_draft(s, &id);
         }
         Done::Uploaded(local, result) => s.attach.tray.uploaded(local, result),
         Done::Picture(id, result) => {
