@@ -155,7 +155,7 @@ fn init() -> App {
         work_pick: HashMap::new(),
         diff: rune_kit::diff::DiffState::new(Vec::new()),
         diff_key: (String::new(), usize::MAX),
-        ov: Over::new(live, fixture.is_none()),
+        ov: Over::new(live, recording.is_none()),
         revealed: None,
         client: None,
         fixtures: None,

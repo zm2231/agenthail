@@ -224,7 +224,8 @@ pub fn board(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>) -> El {
     let k = kit();
     let Some(p) = s.ov.d.project(key) else { return col() };
     let cols = s.ov.d.board(key).lanes;
-    let lines = s.ov.d.digest(p, crate::over::now::WINDOW);
+    let looked = s.ov.looked.get(key).map(String::as_str);
+    let lines = s.ov.d.digest(p, s.ov.d.window(looked));
     let mut since = row().w_full().gap(8.0).items_stretch();
     for (i, l) in pick(&lines, 1).iter().enumerate() {
         let (glyph, color) = ui::happened_style(l.kind);
@@ -246,7 +247,7 @@ pub fn board(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>) -> El {
         );
     }
     let counts: Vec<String> = HAPPENED.iter().map(|k| format!("{} {}", count(&lines, *k), k.word())).collect();
-    let summary = format!("{}, last {:.0} hours", counts.join(" · "), crate::over::now::WINDOW);
+    let summary = format!("{}, {}", counts.join(" · "), crate::over::now::since_note(s, looked).to_lowercase());
     let mut board = row().w_full().gap(12.0).items_start();
     for (i, title) in LANES.iter().enumerate() {
         let items = &cols[i];

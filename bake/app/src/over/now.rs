@@ -3,7 +3,7 @@ use rune_kit::shell::Toolbar;
 use rune_kit::{Button, ButtonVariant, ControlSize, SegmentedControl, Spinner};
 use rune_theme_opencode::icons;
 
-use feed::derive::digest::{HAPPENED, count, pick};
+use feed::derive::digest::{HAPPENED, count, cut, pick};
 use feed::derive::sessions::busy;
 
 use crate::over::{Happened, Line, Project};
@@ -12,6 +12,16 @@ use crate::over::{go, next_need, open_target};
 use crate::{App, Screen};
 
 pub const WINDOW: f64 = feed::derive::WINDOW_HOURS;
+
+pub fn since_note(s: &App, looked: Option<&str>) -> String {
+    match looked {
+        Some(t) => match s.ov.d.ago(t).as_str() {
+            "now" => "Since you looked just now".to_string(),
+            ago => format!("Since you looked, {ago} ago"),
+        },
+        None => format!("Last {WINDOW:.0} hours"),
+    }
+}
 
 fn variant(s: &App) -> El {
     let seg = SegmentedControl::new(&["Three panes", "Brief"], Some(if s.ov.now_brief { 1 } else { 0 }))
@@ -51,7 +61,7 @@ pub fn digest_line(s: &App, key: String, l: &Line) -> El {
         .child(text(s.ov.d.ago(&l.at)).font(META).color(weak()))
 }
 
-pub fn digest_block(s: &App, p: &Project, lines: &[Line], max: usize) -> El {
+pub fn digest_block(s: &App, p: &Project, lines: &[Line], max: usize, looked: Option<&str>) -> El {
     let k = kit();
     let key = p.key.clone();
     let summary: Vec<String> = HAPPENED.iter().map(|k| (count(lines, *k), k.word())).filter(|(n, _)| *n > 0).map(|(n, w)| format!("{n} {w}")).collect();
@@ -67,8 +77,16 @@ pub fn digest_block(s: &App, p: &Project, lines: &[Line], max: usize) -> El {
     let mut c = col().w_full().gap(2.0).padding(14.0).child(head.mb(6.0));
     let mut shown = pick(lines, 2);
     shown.truncate(max);
-    for (i, l) in shown.into_iter().enumerate() {
+    let (new, old) = cut(shown, looked);
+    let divider = !new.is_empty() && !old.is_empty();
+    for (i, l) in new.iter().enumerate() {
         c = c.child(digest_line(s, format!("d-{}-{i}", p.key), l));
+    }
+    if divider {
+        c = c.child(ui::new_divider(format!("d-{}-new", p.key)));
+    }
+    for (i, l) in old.iter().enumerate() {
+        c = c.child(digest_line(s, format!("d-{}-{}", p.key, new.len() + i), l));
     }
     if lines.len() > max {
         c = c.child(text(format!("{} more in {}", lines.len() - max, p.name)).font(META).color(weak()).pl(35.0).pt(4.0));
@@ -141,7 +159,7 @@ fn focus_card(s: &App) -> El {
         .gap(10.0)
         .items_center()
         .child(ui::kind_pill(n.kind))
-        .child(text(format!("{} of {total} that need you", s.ov.need_ix + 1)).font(META).color(weak()))
+        .child(text(format!("{} · {} of {total} that need you", n.group.label(), s.ov.need_ix + 1)).font(META).color(weak()))
         .child(ui::spacer())
         .child(Button::new("Next").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).shortcut("⌘J").on_press(|s: &mut App| next_need(s)).build(k));
     let mut meta = row().gap(8.0).items_center().child(ui::avatar(&n.project, 16.0)).child(text(n.project.clone()).font(META_MED).color(base())).child(text(format!("{} · {}", n.who, s.ov.d.ago(&n.at))).font(META).color(weak()));
@@ -172,16 +190,21 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
     let side_in_split = !(centre_c && rail_c);
     let rail_in_split = !rail_c && !centre_c;
 
-    let mut centre = col().w_full().max_w(860.0).gap(16.0).px(28.0).pt(20.0).pb(40.0).child(focus_card(s)).child(
+    let looked = s.ov.looked_now.as_deref();
+    let mut centre = col().w_full().max_w(860.0).gap(16.0).px(28.0).pt(20.0).pb(40.0).child(focus_card(s));
+    if s.ov.needs.len() > 1 {
+        centre = centre.child(ui::needs_list(s));
+    }
+    centre = centre.child(
         col()
             .w_full()
             .gap(3.0)
             .pt(14.0)
-            .child(ui::section_head("Since you left", None, Some(text(format!("Last {WINDOW:.0} hours, from the records")).font(META).color(weak()))))
+            .child(ui::section_head("Since you left", None, Some(text(format!("{}, from the records", since_note(s, looked))).font(META).color(weak()))))
             .child(text("Each line opens what it is about.".to_string()).font(META).color(weak())),
     );
-    for (p, lines) in s.ov.d.digests(WINDOW).iter().take(6) {
-        centre = centre.child(digest_block(s, p, lines, 5));
+    for (p, lines) in s.ov.d.digests(s.ov.d.window(looked)).iter().take(6) {
+        centre = centre.child(digest_block(s, p, lines, 5, looked));
     }
     let centre = col()
         .w_full()
@@ -242,17 +265,14 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
 
 pub fn brief(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
     let moving = s.ov.d.moving(&s.ov.hands_on);
-    let digests = s.ov.d.digests(WINDOW);
+    let looked = s.ov.looked_now.as_deref();
+    let digests = s.ov.d.digests(s.ov.d.window(looked));
     let shipped: usize = digests.iter().map(|(_, l)| count(l, Happened::Shipped)).sum();
     let intro = col()
         .w_full()
         .gap(6.0)
         .child(text("Since you left".to_string()).font(TITLE).color(strong()))
-        .child(text(format!("{} need you · {} shipped · {} working · last {WINDOW:.0} hours across {} projects", s.ov.needs.len(), shipped, s.ov.d.working(), digests.len())).font(BODY).color(base()));
-    let mut needs = col().w_full().gap(2.0).padding(6.0);
-    for (i, n) in s.ov.needs.iter().enumerate() {
-        needs = needs.child(ui::need_row(s, i, n, i == s.ov.need_ix));
-    }
+        .child(text(format!("{} need you · {} shipped · {} working · {} across {} projects", s.ov.needs.len(), shipped, s.ov.d.working(), since_note(s, looked).to_lowercase(), digests.len())).font(BODY).color(base()));
     let mut c = col()
         .w_full()
         .max_w(820.0)
@@ -263,10 +283,10 @@ pub fn brief(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>) -> El {
         .child(intro)
         .child(ui::sessions_block(s, false))
         .child(ui::section_head("Needs you", Some(s.ov.needs.len()), Some(row().gap(6.0).items_center().child(text("Next".to_string()).font(META).color(weak())).child(ui::ghost_keys(&["⌘J"])))).mt(10.0))
-        .child(ui::card(needs))
+        .child(ui::needs_list(s))
         .child(ui::section_head("By project", None, Some(text("From the ledger and each session's last word".to_string()).font(META).color(weak()))).mt(10.0));
     for (p, lines) in digests.iter().take(6) {
-        c = c.child(digest_block(s, p, lines, 4));
+        c = c.child(digest_block(s, p, lines, 4, looked));
     }
     let mut mv = col().w_full().gap(2.0).padding(6.0);
     for (i, x) in moving.iter().take(6).enumerate() {

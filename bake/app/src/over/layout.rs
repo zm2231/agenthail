@@ -80,6 +80,7 @@ fn encode(s: &App) -> String {
         "collapsed": collapsed(s),
         "focus": s.ov.now_focus.map(|(i, before)| json!({ "pane": i, "before": before })),
         "boards": boards,
+        "looked": { "now": s.ov.looked_now, "projects": s.ov.looked },
     })
     .to_string()
 }
@@ -102,6 +103,11 @@ pub fn load(s: &mut App) {
     if let Some(m) = v["boards"].as_object() {
         s.ov.boards = m.iter().filter_map(|(k, b)| b.as_bool().map(|b| (k.clone(), b))).collect::<HashMap<_, _>>();
     }
+    s.ov.looked_now = v["looked"]["now"].as_str().map(str::to_string);
+    if let Some(m) = v["looked"]["projects"].as_object() {
+        s.ov.looked = m.iter().filter_map(|(k, t)| t.as_str().map(|t| (k.clone(), t.to_string()))).collect();
+    }
+    s.ov.arrange();
     *LAST.lock().expect("layout lock") = encode(s);
 }
 

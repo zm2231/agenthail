@@ -4,7 +4,9 @@ use rune_kit::{Badge, BadgeVariant, Button, ButtonVariant, ControlSize, Keybind,
 use feed::derive::sessions::busy;
 use rune_theme_opencode::icons;
 
-use crate::over::{Happened, Need, NeedKind, PHASES, Target};
+use feed::derive::needs::is_new;
+
+use crate::over::{Group, Happened, Need, NeedKind, PHASES, Target};
 use crate::over::{go, next_need, open_target};
 use crate::{App, Screen};
 
@@ -353,6 +355,53 @@ pub fn need_row(s: &App, i: usize, n: &Need, focused: bool) -> El {
     r
 }
 
+pub fn group_head(g: Group, n: usize) -> El {
+    let color = if g == Group::Holding { needs_color() } else { weak() };
+    row().w_full().gap(8.0).items_center().px(10.0).pt(8.0).pb(2.0).child(text(g.label().to_uppercase()).font(LABEL).color(color)).child(text(n.to_string()).font(LABEL).color(weak()))
+}
+
+pub fn new_divider(key: String) -> El {
+    let line = || el().h(1.0).grow(1.0).fill(kit().c.text_accent.alpha(0.4));
+    row().key(key).w_full().gap(8.0).items_center().px(10.0).py(4.0).child(line()).child(text("New since you looked".to_string()).font(LABEL).color(kit().c.text_accent)).child(line())
+}
+
+pub enum Slot<'a> {
+    Head(Group, usize),
+    Need(usize, &'a Need),
+    Divider,
+}
+
+pub fn need_slots<'a>(needs: &'a [Need], looked: Option<&str>, max: usize) -> Vec<Slot<'a>> {
+    let mut out = Vec::new();
+    for g in crate::over::GROUPS {
+        let rows: Vec<(usize, &Need)> = needs.iter().enumerate().filter(|(i, n)| n.group == g && *i < max).collect();
+        if rows.is_empty() {
+            continue;
+        }
+        out.push(Slot::Head(g, needs.iter().filter(|n| n.group == g).count()));
+        let fresh = rows.iter().take_while(|(_, n)| is_new(&n.at, looked)).count();
+        for (j, (i, n)) in rows.into_iter().enumerate() {
+            out.push(Slot::Need(i, n));
+            if j + 1 == fresh {
+                out.push(Slot::Divider);
+            }
+        }
+    }
+    out
+}
+
+pub fn needs_list(s: &App) -> El {
+    let mut c = col().w_full().gap(2.0).padding(6.0);
+    for (si, slot) in need_slots(&s.ov.needs, s.ov.looked_now.as_deref(), usize::MAX).into_iter().enumerate() {
+        c = c.child(match slot {
+            Slot::Head(g, count) => group_head(g, count).key(format!("needs-group-{si}")),
+            Slot::Divider => new_divider(format!("needs-new-{si}")),
+            Slot::Need(i, n) => need_row(s, i, n, i == s.ov.need_ix),
+        });
+    }
+    card(c)
+}
+
 pub fn needs_button(s: &App) -> El {
     let n = s.ov.needs.len();
     Button::new(format!("{n} need you"))
@@ -417,7 +466,18 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -
         .key("sessions");
     let mut sb = Sidebar::new().label("Navigation").inset(0.0).header_gap(2.0).header_padding(0.0, 12.0).row_gap(2.0).header(home).header(search).header(all);
     let mut needs = SidebarSection::new("Needs you").key("sec-needs").count(s.ov.needs.len());
-    for (i, n) in s.ov.needs.iter().take(6).enumerate() {
+    for (si, slot) in need_slots(&s.ov.needs, s.ov.looked_now.as_deref(), 6).into_iter().enumerate() {
+        let (i, n) = match slot {
+            Slot::Head(g, count) => {
+                needs = needs.row(group_head(g, count).key(format!("need-group-{si}")));
+                continue;
+            }
+            Slot::Divider => {
+                needs = needs.row(new_divider(format!("need-new-{si}")));
+                continue;
+            }
+            Slot::Need(i, n) => (i, n),
+        };
         let t = n.target.clone();
         let sel = match (&n.target, selected) {
             (Target::Session(id), Some(x)) | (Target::Work(id), Some(x)) => id == x,
