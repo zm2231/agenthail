@@ -245,10 +245,18 @@ fn parse(value: Value) -> Result<State, String> {
 
 pub fn fresh_id() -> String {
     static SEQ: AtomicU64 = AtomicU64::new(0);
-    let nanos = OffsetDateTime::now_utc().unix_timestamp_nanos() as u128;
-    let mixed = nanos ^ (u128::from(std::process::id()) << 64) ^ (u128::from(SEQ.fetch_add(1, Ordering::Relaxed)) << 96);
-    let hex = format!("{mixed:032x}");
+    let nanos = OffsetDateTime::now_utc().unix_timestamp_nanos() as u64;
+    let seed = nanos ^ (u64::from(std::process::id()) << 32) ^ SEQ.fetch_add(1, Ordering::Relaxed).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    let (high, low) = (mix(seed), mix(seed ^ 0xd1b5_4a32_d192_ed03));
+    let hex = format!("{high:016x}{low:016x}");
     format!("{}-{}-{}-{}-{}", &hex[0..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..32])
+}
+
+fn mix(mut z: u64) -> u64 {
+    z = z.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
 }
 
 #[derive(Clone, Debug, PartialEq)]
