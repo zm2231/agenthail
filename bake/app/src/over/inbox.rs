@@ -51,6 +51,7 @@ pub fn app_build() -> Build {
         version: option_env!("AGENTHAIL_VERSION").unwrap_or_default().into(),
         revision: option_env!("AGENTHAIL_REVISION").unwrap_or_default().into(),
         modified: option_env!("AGENTHAIL_MODIFIED") == Some("true"),
+        release: option_env!("AGENTHAIL_RELEASE") == Some("true"),
     }
 }
 

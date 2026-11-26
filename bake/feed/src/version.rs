@@ -11,6 +11,8 @@ pub struct Build {
     pub revision: String,
     #[serde(default)]
     pub modified: bool,
+    #[serde(skip)]
+    pub release: bool,
 }
 
 impl Build {
@@ -27,7 +29,7 @@ impl Build {
 }
 
 pub fn notice(app: &Build, daemon: &Build) -> Option<String> {
-    if !app.known() || !daemon.known() || app.modified || daemon.modified || app.revision == daemon.revision {
+    if !app.release || !app.known() || !daemon.known() || app.modified || daemon.modified || app.revision == daemon.revision {
         return None;
     }
     Some(format!("The running daemon is {}; this app is {}. Restart Agenthail to use this version.", daemon.label(), app.label()))
@@ -44,7 +46,7 @@ mod tests {
     use super::*;
 
     fn build(version: &str, revision: &str, modified: bool) -> Build {
-        Build { version: version.into(), revision: revision.into(), modified }
+        Build { version: version.into(), revision: revision.into(), modified, release: true }
     }
 
     #[test]
@@ -60,9 +62,15 @@ mod tests {
     }
 
     #[test]
+    fn a_development_build_never_asks_for_a_restart() {
+        let dev = Build { release: false, ..build("v0.2.164", "46a57600aaaa", false) };
+        assert_eq!(notice(&dev, &build("v0.2.171", "1f2373224a7c", false)), None);
+    }
+
+    #[test]
     fn the_daemon_build_reads_from_the_version_reply() {
         let b: Build = serde_json::from_str(r#"{"protocol":2,"version":"v0.2.171","revision":"1f2373224a7c1441","modified":false}"#).unwrap();
-        assert_eq!(b, build("v0.2.171", "1f2373224a7c1441", false));
+        assert_eq!(b, Build { release: false, ..build("v0.2.171", "1f2373224a7c1441", false) });
         assert_eq!(build("v1", "abcdef123", true).label(), "v1 (abcdef12, modified)");
     }
 }

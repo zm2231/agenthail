@@ -8,7 +8,7 @@ fn git(args: &[&str]) -> Option<String> {
 }
 
 fn main() {
-    for name in ["AGENTHAIL_VERSION", "AGENTHAIL_REVISION", "AGENTHAIL_MODIFIED"] {
+    for name in ["AGENTHAIL_VERSION", "AGENTHAIL_REVISION", "AGENTHAIL_MODIFIED", "AGENTHAIL_RELEASE"] {
         println!("cargo:rerun-if-env-changed={name}");
     }
     for path in SOURCES {
@@ -26,4 +26,5 @@ fn main() {
     println!("cargo:rustc-env=AGENTHAIL_REVISION={revision}");
     println!("cargo:rustc-env=AGENTHAIL_VERSION={version}");
     println!("cargo:rustc-env=AGENTHAIL_MODIFIED={modified}");
+    println!("cargo:rustc-env=AGENTHAIL_RELEASE={}", std::env::var("AGENTHAIL_RELEASE").is_ok_and(|v| v == "true"));
 }
