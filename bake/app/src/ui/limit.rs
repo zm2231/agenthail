@@ -23,17 +23,19 @@ pub enum Done {
 
 pub struct Confirm {
     pub session: String,
+    pub since: String,
     pub target: Target,
 }
 
 pub struct Consent {
     pub session: String,
+    pub since: String,
     pub target: Target,
     pub message: String,
 }
 
 pub struct Limits {
-    pub picking: Option<String>,
+    pub picking: Option<(String, String)>,
     pub confirm: Option<Confirm>,
     pub consent: Option<Consent>,
     pub roots: HashMap<String, Result<Vec<ConfigRoot>, String>>,
@@ -80,6 +82,14 @@ fn since(s: &App, id: &str) -> String {
     session(s, id).and_then(|x| x.limit(s.now)).map(|stop| stop.since).unwrap_or_default()
 }
 
+fn waiting_since(s: &App, id: &str) -> Option<String> {
+    session(s, id).and_then(|x| x.limit(s.now)).filter(|stop| stop.held && stop.waiting).map(|stop| stop.since)
+}
+
+fn current(s: &App, id: &str, since: &str) -> bool {
+    waiting_since(s, id).as_deref() == Some(since)
+}
+
 fn note(s: &mut App, id: &str, since: String, text: String, bad: bool) {
     s.limits.note.insert(id.to_string(), (text, bad, since));
 }
@@ -98,7 +108,8 @@ fn resume(s: &mut App, id: &str, now: bool) {
 fn open_picker(s: &mut App, id: &str) {
     let Some(x) = session(s, id) else { return };
     let host = host_key(x);
-    s.limits.picking = Some(id.to_string());
+    let Some(stop) = waiting_since(s, id) else { return };
+    s.limits.picking = Some((id.to_string(), stop));
     if s.client.is_none() {
         let recorded = s.fixtures.as_ref().and_then(|f| std::fs::read_to_string(format!("{}/session-options.json", f.dir)).ok());
         if let Some(options) = recorded.and_then(|t| serde_json::from_str::<feed::create::SessionOptions>(&t).ok()) {
@@ -123,14 +134,18 @@ fn open_picker(s: &mut App, id: &str) {
     });
 }
 
-fn move_to(s: &mut App, id: &str, target: Target, stop_terminal: bool) {
+fn move_to(s: &mut App, id: &str, since: &str, target: Target, stop_terminal: bool) {
     s.limits.confirm = None;
     s.limits.consent = None;
     s.limits.picking = None;
+    if !current(s, id, since) {
+        s.ov.notice = Some("The session's usage stop changed, so nothing was moved. Check it again.".into());
+        return;
+    }
     if not_sent(s) || !s.limits.busy.insert(id.to_string()) {
         return;
     }
-    let stop = since(s, id);
+    let stop = since.to_string();
     note(s, id, stop.clone(), format!("Moving to {}…", target.name), false);
     let id = id.to_string();
     spawn(s, move |c, tx| {
@@ -188,8 +203,8 @@ fn settled(s: &mut App, done: Done) {
                 }
                 Ok(Moved::NeedsConsent(message)) => {
                     s.limits.note.remove(&id);
-                    if since(s, &id) == stop {
-                        s.limits.consent = Some(Consent { session: id, target, message });
+                    if current(s, &id, &stop) {
+                        s.limits.consent = Some(Consent { session: id, since: stop, target, message });
                     }
                 }
                 Err(error) => {
@@ -205,6 +220,19 @@ pub fn drain(s: &mut App) -> bool {
     while let Ok(done) = s.limits.rx.try_recv() {
         changed = true;
         settled(s, done);
+    }
+    let stale = |s: &App, id: &str, since: &str| !current(s, id, since);
+    if s.limits.picking.as_ref().is_some_and(|(id, since)| stale(s, id, since)) {
+        s.limits.picking = None;
+        changed = true;
+    }
+    if s.limits.confirm.as_ref().is_some_and(|c| stale(s, &c.session, &c.since)) {
+        s.limits.confirm = None;
+        changed = true;
+    }
+    if s.limits.consent.as_ref().is_some_and(|c| stale(s, &c.session, &c.since)) {
+        s.limits.consent = None;
+        changed = true;
     }
     changed
 }
@@ -236,7 +264,7 @@ pub(crate) fn card(s: &App, x: &Session, stop: &Stop) -> El {
         if let Some(offer) = stop.offer.as_ref().filter(|_| stop.waiting) {
             let full = matches!(s.limits.roots.get(&host_key(x)), Some(Ok(roots)) if roots.iter().any(|r| r.root == offer.root && r.full));
             let target = Target { root: offer.root.clone(), name: offer.name(), detail: offer.reason.clone(), full, offered: true };
-            let id = x.id.clone();
+            let (id, since) = (x.id.clone(), stop.since.clone());
             let help = match &offer.reason {
                 _ if full => format!("{} is out of usage now", offer.name()),
                 Some(reason) if !reason.is_empty() => format!("Continue this session under {}: {reason}", offer.name()),
@@ -246,7 +274,7 @@ pub(crate) fn card(s: &App, x: &Session, stop: &Stop) -> El {
                 button(format!("Move to {}…", offer.name()), ButtonVariant::Neutral, busy || full)
                     .icon(&icons::ARROW_RIGHT)
                     .help(help)
-                    .on_press(move |s: &mut App| s.limits.confirm = Some(Confirm { session: id.clone(), target: target.clone() }))
+                    .on_press(move |s: &mut App| s.limits.confirm = Some(Confirm { session: id.clone(), since: since.clone(), target: target.clone() }))
                     .build(k)
                     .key("limit-move"),
             );
@@ -275,7 +303,7 @@ pub(crate) fn card(s: &App, x: &Session, stop: &Stop) -> El {
     col().w_full().items_center().px(32.0).pb(12.0).child(card_el)
 }
 
-fn target_row(id: &str, t: &Target, busy: bool, unread: bool) -> El {
+fn target_row(id: &str, since: &str, t: &Target, busy: bool, unread: bool) -> El {
     let usable = !t.full && !busy;
     let mut name = row().gap(8.0).items_center().child(text(t.name.clone()).font(BODY_BOLD).color(if usable { theme::text() } else { faint() }).truncate());
     if t.offered {
@@ -299,10 +327,10 @@ fn target_row(id: &str, t: &Target, busy: bool, unread: bool) -> El {
         .border(1.0, Color::WHITE.alpha(0.08))
         .child(col().grow(1.0).min_w(0.0).gap(2.0).child(name).children(detail.map(|d| text(d).font(META).color(muted()).truncate())));
     if usable {
-        let (id, target) = (id.to_string(), t.clone());
+        let (id, since, target) = (id.to_string(), since.to_string(), t.clone());
         r = r.hover(Color::WHITE.alpha(0.09)).on_press(move |s: &mut App| {
             s.limits.picking = None;
-            s.limits.confirm = Some(Confirm { session: id.clone(), target: target.clone() });
+            s.limits.confirm = Some(Confirm { session: id.clone(), since: since.clone(), target: target.clone() });
         });
         r = r.child(icon(&icons::ARROW_RIGHT, 13.0).color(faint()));
     } else {
@@ -311,7 +339,7 @@ fn target_row(id: &str, t: &Target, busy: bool, unread: bool) -> El {
     r
 }
 
-fn picker(s: &App, id: &str, layer: &mut Vec<El>) {
+fn picker(s: &App, id: &str, since: &str, layer: &mut Vec<El>) {
     let k = theme::kit();
     let Some(x) = session(s, id) else { return };
     let Some(stop) = x.limit(s.now) else { return };
@@ -331,7 +359,7 @@ fn picker(s: &App, id: &str, layer: &mut Vec<El>) {
                 body = body.child(text("No other Claude account is set up on this computer.").font(META).color(muted()).wrap());
             }
             let host = host_key(x);
-            body = body.children(list.iter().map(|t| target_row(id, t, busy, s.limits.unread.contains(&(host.clone(), t.root.clone())))));
+            body = body.children(list.iter().map(|t| target_row(id, since, t, busy, s.limits.unread.contains(&(host.clone(), t.root.clone())))));
             if let Some(error) = s.limits.refresh_error.get(&host) {
                 body = body.child(text(format!("Couldn't refresh the accounts, so this list may be out of date: {error}")).font(META).color(failed()).wrap());
             } else if s.limits.reading.contains_key(&host) {
@@ -355,7 +383,7 @@ fn picker(s: &App, id: &str, layer: &mut Vec<El>) {
 
 fn confirm(c: &Confirm, layer: &mut Vec<El>) {
     let k = theme::kit();
-    let (id, target) = (c.session.clone(), c.target.clone());
+    let (id, since, target) = (c.session.clone(), c.since.clone(), c.target.clone());
     let reason = c.target.detail.as_ref().filter(|d| c.target.offered && !d.is_empty()).map(|d| format!(" Chosen for {d}."));
     let buttons = row()
         .w_full()
@@ -364,7 +392,7 @@ fn confirm(c: &Confirm, layer: &mut Vec<El>) {
         .pb(16.0)
         .child(el().grow(1.0))
         .child(Button::new("Cancel").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(|s: &mut App| s.limits.confirm = None).build(k).key("limit-confirm-cancel"))
-        .child(Button::new(format!("Move to {}", c.target.name)).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).on_press(move |s: &mut App| move_to(s, &id, target.clone(), false)).build(k).key("limit-confirm-move"));
+        .child(Button::new(format!("Move to {}", c.target.name)).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).on_press(move |s: &mut App| move_to(s, &id, &since, target.clone(), false)).build(k).key("limit-confirm-move"));
     Dialog::new("limit-confirm", format!("Move this session to {}?", c.target.name))
         .description(format!("It stops here and continues under that account.{}", reason.unwrap_or_default()))
         .open(true)
@@ -377,7 +405,7 @@ fn confirm(c: &Confirm, layer: &mut Vec<El>) {
 
 fn consent(c: &Consent, layer: &mut Vec<El>) {
     let k = theme::kit();
-    let (id, target) = (c.session.clone(), c.target.clone());
+    let (id, since, target) = (c.session.clone(), c.since.clone(), c.target.clone());
     let buttons = row()
         .w_full()
         .gap(8.0)
@@ -385,7 +413,7 @@ fn consent(c: &Consent, layer: &mut Vec<El>) {
         .pb(16.0)
         .child(el().grow(1.0))
         .child(Button::new("Cancel").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(|s: &mut App| s.limits.consent = None).build(k).key("limit-consent-cancel"))
-        .child(Button::new("Stop the terminal and move").variant(ButtonVariant::Danger).control_size(ControlSize::Small).on_press(move |s: &mut App| move_to(s, &id, target.clone(), true)).build(k).key("limit-consent-move"));
+        .child(Button::new("Stop the terminal and move").variant(ButtonVariant::Danger).control_size(ControlSize::Small).on_press(move |s: &mut App| move_to(s, &id, &since, target.clone(), true)).build(k).key("limit-consent-move"));
     Dialog::new("limit-consent", format!("Stop its terminal to move it to {}?", c.target.name))
         .description(c.message.clone())
         .open(true)
@@ -397,8 +425,8 @@ fn consent(c: &Consent, layer: &mut Vec<El>) {
 }
 
 pub fn overlays(s: &App, layer: &mut Vec<El>) {
-    if let Some(id) = &s.limits.picking {
-        picker(s, id, layer);
+    if let Some((id, since)) = &s.limits.picking {
+        picker(s, id, since, layer);
     }
     if let Some(c) = &s.limits.confirm {
         confirm(c, layer);
