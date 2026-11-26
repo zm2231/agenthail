@@ -36,3 +36,5 @@ lucide!(ARROW_RIGHT, "ah-arrow-right", r#"<path d="M5 12h14"/><path d="m13 6 6 6
 lucide!(ACTIVITY, "ah-activity", r#"<path d="M3 12h4l2.5-6 5 12 2.5-6h4"/>"#);
 lucide!(LIST, "ah-list", r#"<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>"#);
 lucide!(CORNER, "ah-corner", r#"<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5A5.5 5.5 0 0 1 20 14.5 5.5 5.5 0 0 1 14.5 20H11"/>"#);
+lucide!(STOP, "ah-stop", r#"<rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor"/>"#);
+lucide!(ROTATE, "ah-rotate", r#"<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5"/><path d="M4 4v4.5h4.5"/>"#);

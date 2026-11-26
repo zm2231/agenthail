@@ -73,6 +73,12 @@ pub fn restore(s: &mut App) -> bool {
     true
 }
 
+fn unsent(s: &App) -> Value {
+    let mut all: serde_json::Map<String, Value> = s.unsent.iter().map(|(id, u)| (id.clone(), u.to_json())).collect();
+    all.extend(s.in_flight.iter().map(|(id, u)| (id.clone(), u.to_json())));
+    Value::Object(all)
+}
+
 fn encode(s: &App) -> String {
     let boards: serde_json::Map<String, Value> = s.ov.boards.iter().map(|(k, v)| (k.clone(), Value::Bool(*v))).collect();
     json!({
@@ -81,6 +87,8 @@ fn encode(s: &App) -> String {
         "focus": s.ov.now_focus.map(|(i, before)| json!({ "pane": i, "before": before })),
         "boards": boards,
         "looked": { "now": s.ov.looked_now, "projects": s.ov.looked },
+        "drafts": s.drafts.to_json(),
+        "unsent": unsent(s),
     })
     .to_string()
 }
@@ -106,6 +114,14 @@ pub fn load(s: &mut App) {
     s.ov.looked_now = v["looked"]["now"].as_str().map(str::to_string);
     if let Some(m) = v["looked"]["projects"].as_object() {
         s.ov.looked = m.iter().filter_map(|(k, t)| t.as_str().map(|t| (k.clone(), t.to_string()))).collect();
+    }
+    s.drafts = feed::composer::Drafts::from_json(&v["drafts"]);
+    for (id, raw) in v["unsent"].as_object().into_iter().flatten() {
+        if let Some(unsent) = feed::composer::Unsent::from_json(raw) {
+            let draft = feed::composer::put_back(s.drafts.get(id), &unsent.text);
+            s.drafts.set(id, &draft);
+            s.unsent.insert(id.clone(), unsent);
+        }
     }
     s.ov.arrange();
     *LAST.lock().expect("layout lock") = encode(s);

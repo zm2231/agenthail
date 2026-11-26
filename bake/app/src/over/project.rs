@@ -326,13 +326,20 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
         .placeholder(placeholder.to_string(), weak())
         .on_edit(|s: &mut App| &mut s.composer)
         .on_submit(move |s: &mut App, tx: &mut Tx| crate::send_to(s, &to, tx));
-    let status = if s.sending.contains(lead) { "Sending…".to_string() } else { s.status_line.get(lead).cloned().unwrap_or_else(|| "Sends as you".into()) };
+    let status = crate::composer_note(s, lead).unwrap_or_else(|| "Sends as you".into());
     let controls = row()
         .w_full()
         .items_center()
         .gap(6.0)
         .child(ui::spacer())
-        .child(text(status).font(META).color(weak()))
+        .child(text(status).font(META).color(weak()));
+    let controls = if s.unsent.contains_key(lead) {
+        let again = lead.to_string();
+        controls.child(Button::new("Retry").variant(ButtonVariant::Ghost).build(k).key("send-retry").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::retry(s, &again, tx)))
+    } else {
+        controls
+    };
+    let controls = controls
         .child(IconButton::new(&icons::ARROW_UP).variant(IconButtonVariant::Submit).label("Send").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::send_to(s, &to2, tx)).build(k));
     col()
         .w_full()

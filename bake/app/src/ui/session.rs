@@ -1,4 +1,5 @@
 use super::*;
+use feed::composer::Busy;
 
 pub(crate) fn header(s: &App, x: &Session) -> El {
     let state = x.state(s.now);
@@ -46,7 +47,52 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
         .motion(SPRING)
         .on_press_tx(|s: &mut App, tx: &mut Tx| send(s, tx))
         .child(icon(&icons::ARROW_UP, 15.0).color(if ready { Color::WHITE } else { faint() }));
-    let status = if s.send_status.is_empty() { text("Return to send · Shift-Return for a new line").font(META).color(faint()) } else { text(s.send_status.clone()).font(META).color(muted()) };
+    let busy = crate::busy_delivery(s, &x.id);
+    let unsent = s.unsent.get(&x.id);
+    let status = match crate::composer_note(s, &x.id) {
+        Some(note) => text(note).font(META).color(if unsent.is_some() { attention() } else { muted() }),
+        None => text(busy.map(|b| b.hint()).unwrap_or("Return to send · Shift-Return for a new line")).font(META).color(faint()),
+    };
+    let mut controls = row().w_full().px(10.0).pb(10.0).gap(8.0).items_center().child(chip(&icons::SPARKLES, x.surface.clone()));
+    if let Some(choice) = busy {
+        let id = x.id.clone();
+        controls = controls.child(
+            row()
+                .key("busy-delivery")
+                .gap(5.0)
+                .items_center()
+                .px(8.0)
+                .py(3.0)
+                .radius(7.0)
+                .fill(wash())
+                .hover(Color::WHITE.alpha(0.08))
+                .motion(SPRING)
+                .on_press(move |s: &mut App| crate::pick_busy(s, &id, choice.other()))
+                .child(icon(if choice == Busy::Steer { &icons::BOLT } else { &icons::CLOCK }, 12.0).color(accent()))
+                .child(text(choice.label()).font(META_BOLD).color(theme::text())),
+        );
+    }
+    controls = controls.child(status.truncate()).child(spacer());
+    if unsent.is_some() {
+        let id = x.id.clone();
+        controls = controls.child(Button::new("Retry").variant(ButtonVariant::Ghost).icon(&icons::ROTATE).build(theme::kit()).key("send-retry").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::retry(s, &id, tx)));
+    }
+    if crate::can_stop(s, &x.id) {
+        let id = x.id.clone();
+        controls = controls.child(
+            col()
+                .key("stop")
+                .size(30.0, 30.0)
+                .radius(15.0)
+                .items_center()
+                .justify_center()
+                .fill(failed().alpha(if s.stopping.contains(&x.id) { 0.35 } else { 0.85 }))
+                .press_scale(0.92)
+                .motion(SPRING)
+                .on_press(move |s: &mut App| crate::stop(s, &id))
+                .child(icon(&icons::STOP, 13.0).color(Color::WHITE)),
+        );
+    }
     let box_el = col()
         .w_full()
         .max_w(780.0)
@@ -56,7 +102,7 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
         .border(1.0, Color::WHITE.alpha(0.10))
         .shadow(10.0, 34.0, Color::BLACK.alpha(0.45))
         .child(col().w_full().px(16.0).pt(13.0).pb(4.0).child(input))
-        .child(row().w_full().px(10.0).pb(10.0).gap(8.0).items_center().child(chip(&icons::SPARKLES, x.surface.clone())).child(status).child(spacer()).child(send_button));
+        .child(controls.child(send_button));
     col().w_full().items_center().px(28.0).pb(18.0).mt(-120.0).child(box_el)
 }
 
