@@ -245,6 +245,7 @@ impl Hold {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Tray {
     chips: HashMap<String, Vec<Chip>>,
+    stashed: HashMap<String, Vec<Chip>>,
     next: u64,
 }
 
@@ -278,8 +279,23 @@ impl Tray {
         self.chips.retain(|_, list| !list.is_empty());
     }
 
+    pub fn has_stashed(&self, id: &str) -> bool {
+        self.stashed.contains_key(id)
+    }
+
+    pub fn swap_stash(&mut self, id: &str) {
+        let shown = self.chips.remove(id).unwrap_or_default();
+        let held = self.stashed.remove(id).unwrap_or_default();
+        if !shown.is_empty() {
+            self.stashed.insert(id.to_string(), shown);
+        }
+        if !held.is_empty() {
+            self.chips.insert(id.to_string(), held);
+        }
+    }
+
     pub fn uploaded(&mut self, local: u64, result: Result<Upload, String>) {
-        if let Some(chip) = self.chips.values_mut().flatten().find(|c| c.local == local) {
+        if let Some(chip) = self.chips.values_mut().chain(self.stashed.values_mut()).flatten().find(|c| c.local == local) {
             chip.state = match result {
                 Ok(upload) => State::Ready(upload),
                 Err(error) => State::Failed(error),
@@ -330,11 +346,13 @@ impl Tray {
     }
 
     pub fn rekey(&mut self, rekeyed: &HashMap<String, String>) {
-        let retired: Vec<String> = self.chips.keys().filter(|id| crate::composer::current(rekeyed, id) != id.as_str()).cloned().collect();
-        for old in retired {
-            let moving = self.chips.remove(&old).unwrap_or_default();
-            let new = crate::composer::current(rekeyed, &old).to_string();
-            self.chips.entry(new).or_default().extend(moving);
+        for map in [&mut self.chips, &mut self.stashed] {
+            let retired: Vec<String> = map.keys().filter(|id| crate::composer::current(rekeyed, id) != id.as_str()).cloned().collect();
+            for old in retired {
+                let moving = map.remove(&old).unwrap_or_default();
+                let new = crate::composer::current(rekeyed, &old).to_string();
+                map.entry(new).or_default().extend(moving);
+            }
         }
     }
 
@@ -637,6 +655,29 @@ mod tests {
         tray.remove(a);
         assert_eq!(tray.ready("s1").unwrap().len(), 1);
         assert_eq!(tray.ready("other"), Ok(vec![]));
+    }
+
+    #[test]
+    fn a_stash_sets_attachments_aside_and_brings_them_back() {
+        let mut tray = Tray::default();
+        let a = tray.add("s1", prepared("a.txt", b"aaa")).unwrap().unwrap();
+        tray.swap_stash("s1");
+        assert!(!tray.has("s1") && tray.has_stashed("s1"));
+        assert_eq!(tray.ready("s1"), Ok(vec![]), "a send now carries none of them");
+        tray.uploaded(a, Ok(upload("a")));
+        let b = tray.add("s1", prepared("b.txt", b"bbb")).unwrap().unwrap();
+        tray.swap_stash("s1");
+        assert_eq!(tray.ready("s1").unwrap(), vec![upload("a")], "an upload that finished while set aside comes back ready");
+        tray.rekey(&HashMap::from([("s1".to_string(), "s2".to_string())]));
+        tray.swap_stash("s2");
+        assert_eq!(tray.chips("s2").iter().map(|c| c.local).collect::<Vec<_>>(), [b]);
+        tray.swap_stash("s2");
+        tray.swap_stash("s2");
+        assert!(tray.has_stashed("s2"));
+        tray.remove(b);
+        tray.swap_stash("s2");
+        assert_eq!(tray.ready("s2").unwrap(), vec![upload("a")]);
+        assert!(!tray.has_stashed("s2"), "an empty draft leaves nothing set aside");
     }
 
     #[test]
