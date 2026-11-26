@@ -151,8 +151,9 @@ fn add_picture(s: &mut App, id: &str, name: &str, png: Vec<u8>) {
 }
 
 fn prepare(s: &mut App, id: &str, work: impl FnOnce() -> Vec<Result<Prepared, Problem>> + Send + 'static) {
-    *s.attach.preparing.entry(id.to_string()).or_default() += 1;
-    let (out, id) = (s.outbox.clone(), id.to_string());
+    let id = feed::composer::current(&s.rekeyed, id).to_string();
+    *s.attach.preparing.entry(id.clone()).or_default() += 1;
+    let out = s.outbox.clone();
     std::thread::spawn(move || {
         let _ = out.send(Bg::Attach(Done::Prepared(id, work())));
     });
