@@ -624,7 +624,7 @@ pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
 }
 
 fn same_delivery(again: &Unsent, asked: Option<Busy>, now: Option<Busy>) -> bool {
-    asked.is_none_or(|b| again.busy == Some(b)) && (again.busy != Some(Busy::Steer) || now == Some(Busy::Steer))
+    asked.is_none_or(|b| again.busy == Some(b)) && (again.busy == Some(Busy::Steer)) == (now == Some(Busy::Steer))
 }
 
 fn steered(was: Option<Busy>, now: Option<Busy>) -> Option<Busy> {

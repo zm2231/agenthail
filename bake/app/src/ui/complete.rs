@@ -397,9 +397,12 @@ pub fn done(s: &mut App, done: Done) {
             if s.complete.prompts_asked.get(&id) != Some(&seq) {
                 return;
             }
-            if let Ok(prompts) = result {
-                s.complete.recorded.insert(id.clone(), prompts);
-                rebuild(s, &id);
+            match result {
+                Ok(prompts) => {
+                    s.complete.recorded.insert(id.clone(), prompts);
+                    rebuild(s, &id);
+                }
+                Err(error) => crate::note(s, &id, format!("Couldn't load what you sent before: {error}")),
             }
         }
         Done::Found(seq, result) => {
