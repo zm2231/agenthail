@@ -398,8 +398,9 @@ pub fn read_events(reader: impl std::io::BufRead, mut on: impl FnMut(&str, u64) 
 }
 
 impl Client {
-    pub fn follow_events(&self, after: u64, on: impl FnMut(&str, u64) -> bool) -> anyhow::Result<()> {
+    pub fn follow_events(&self, after: u64, opened: impl FnOnce(), on: impl FnMut(&str, u64) -> bool) -> anyhow::Result<()> {
         let reader = self.event_stream(after, Duration::from_secs(120))?;
+        opened();
         Ok(read_events(reader, on)?)
     }
 }

@@ -59,6 +59,7 @@ pub struct Prefs {
     seen: u64,
     rewatch: bool,
     retry_base: Option<std::time::Instant>,
+    stream_down: Option<String>,
     pub tab: usize,
     pub base: Option<Result<Base, Failure>>,
     pub settings: Option<Result<Settings, Failure>>,
@@ -153,6 +154,7 @@ fn init() -> Prefs {
         seen: 0,
         rewatch: false,
         retry_base: None,
+        stream_down: None,
         external: false,
         tab: 0,
         base: None,
@@ -348,7 +350,13 @@ fn watch(s: &Prefs, from: u64) {
     std::thread::spawn(move || {
         let mut after = from;
         while current.load(Ordering::Acquire) == mine {
-            let _ = client.follow_events(after, |kind, id| {
+            let up = handle.clone();
+            let opened = move || up.update(move |s: &mut Prefs, _| {
+                if s.watcher.load(Ordering::Acquire) == mine {
+                    s.stream_down = None;
+                }
+            });
+            let result = client.follow_events(after, opened, |kind, id| {
                 if current.load(Ordering::Acquire) != mine {
                     return false;
                 }
@@ -359,6 +367,17 @@ fn watch(s: &Prefs, from: u64) {
                 }
                 true
             });
+            if current.load(Ordering::Acquire) == mine {
+                let why = match result {
+                    Err(e) => e.to_string(),
+                    Ok(()) => "the daemon closed the stream".into(),
+                };
+                handle.update(move |s: &mut Prefs, _| {
+                    if s.watcher.load(Ordering::Acquire) == mine {
+                        s.stream_down = Some(why);
+                    }
+                });
+            }
             std::thread::sleep(Duration::from_secs(2));
             if !handle.is_visible() {
                 return;
@@ -515,9 +534,14 @@ pub fn toggle_select(s: &mut Prefs, key: &'static str) {
 }
 
 fn unfollowed(s: &Prefs) -> Option<El> {
-    let Some(Err(f)) = &s.base else { return None };
-    let f = explain(s, f);
-    let note = Failure { message: format!("Couldn't read this computer's state, so changes made elsewhere won't show here until it can: {}", f.message), ..f };
+    let note = match (&s.base, &s.stream_down) {
+        (Some(Err(f)), _) => {
+            let f = explain(s, f);
+            Failure { message: format!("Couldn't read this computer's state, so changes made elsewhere won't show here until it can: {}", f.message), ..f }
+        }
+        (_, Some(why)) => Failure { uncertain: true, ..Failure::new(format!("Can't follow changes made elsewhere right now ({why}), so what shows may be out of date. Settings keeps trying.")) },
+        _ => return None,
+    };
     Some(col().w_full().items_center().pb(8.0).child(parts::failure(s, &note).w(parts::WIDTH)))
 }
 
