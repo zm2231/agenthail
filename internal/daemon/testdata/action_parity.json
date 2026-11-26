@@ -1175,6 +1175,18 @@
     },
     "body": "{\"created\":false,\"ok\":true,\"project\":{\"id\":\"p-parity\",\"localId\":\"p-parity\",\"displayName\":\"Parity\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\",\"kind\":\"folder\",\"added\":true}}\n"
   },
+  "api/action project-add join unknown project": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"missing is not an added project on \u003chost\u003e; add its folder first with agenthail project add\"}}\n"
+  },
   "api/action project-add with a title": {
     "status": 200,
     "header": {
@@ -1210,6 +1222,30 @@
       ]
     },
     "body": "{\"archived\":true,\"checkouts\":[{\"host\":\"\u003chost\u003e\",\"ok\":true,\"projectId\":\"p-parity\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\"}],\"ok\":true,\"projectId\":\"p-parity\"}\n"
+  },
+  "api/action project-join from a host": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"project-join needs the project's key and name\"}}\n"
+  },
+  "api/action project-join not from a host": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"project-join is sent by a paired host; join a folder with project-add and join\"}}\n"
   },
   "api/action project-link a project with a lead": {
     "status": 409,
@@ -1367,6 +1403,30 @@
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"projectId is required\"}}\n"
   },
+  "api/action project-share from a host": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"missing is not an added project on \u003chost\u003e; add its folder first with agenthail project add\"}}\n"
+  },
+  "api/action project-share not from a host": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"project-share is asked by a paired host; join a folder with project-add and join\"}}\n"
+  },
   "api/action project-unarchive": {
     "status": 404,
     "header": {
@@ -1390,6 +1450,18 @@
       ]
     },
     "body": "{\"archived\":false,\"checkouts\":[{\"host\":\"\u003chost\u003e\",\"ok\":true,\"projectId\":\"p-parity\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\"}],\"ok\":true,\"projectId\":\"p-parity\"}\n"
+  },
+  "api/action project-unjoin": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again\"}}\n"
   },
   "api/action project-unlink a project not linked": {
     "status": 409,
@@ -3815,6 +3887,18 @@
     },
     "body": "{\"created\":false,\"ok\":true,\"project\":{\"id\":\"p-parity\",\"localId\":\"p-parity\",\"displayName\":\"Parity\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\",\"kind\":\"folder\",\"added\":true}}\n"
   },
+  "api/v1/actions project-add join unknown project": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"missing is not an added project on \u003chost\u003e; add its folder first with agenthail project add\"}}\n"
+  },
   "api/v1/actions project-add with a title": {
     "status": 200,
     "header": {
@@ -3850,6 +3934,30 @@
       ]
     },
     "body": "{\"archived\":true,\"checkouts\":[{\"host\":\"\u003chost\u003e\",\"ok\":true,\"projectId\":\"p-parity\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\"}],\"ok\":true,\"projectId\":\"p-parity\"}\n"
+  },
+  "api/v1/actions project-join from a host": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"project-join needs the project's key and name\"}}\n"
+  },
+  "api/v1/actions project-join not from a host": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"project-join is sent by a paired host; join a folder with project-add and join\"}}\n"
   },
   "api/v1/actions project-link a project with a lead": {
     "status": 409,
@@ -4007,6 +4115,30 @@
     },
     "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"projectId is required\"}}\n"
   },
+  "api/v1/actions project-share from a host": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"missing is not an added project on \u003chost\u003e; add its folder first with agenthail project add\"}}\n"
+  },
+  "api/v1/actions project-share not from a host": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"project-share is asked by a paired host; join a folder with project-add and join\"}}\n"
+  },
   "api/v1/actions project-unarchive": {
     "status": 404,
     "header": {
@@ -4030,6 +4162,18 @@
       ]
     },
     "body": "{\"archived\":false,\"checkouts\":[{\"host\":\"\u003chost\u003e\",\"ok\":true,\"projectId\":\"p-parity\",\"rootPath\":\"\u003ctmp\u003e/agenthail-parity/project\"}],\"ok\":true,\"projectId\":\"p-parity\"}\n"
+  },
+  "api/v1/actions project-unjoin": {
+    "status": 404,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"project_not_found\",\"message\":\"project missing is not listed on \u003chost\u003e; it may be listed under another id now, for example after its repository's origin changed; refresh the project list and try again\"}}\n"
   },
   "api/v1/actions project-unlink a project not linked": {
     "status": 409,
