@@ -288,6 +288,19 @@ pub struct Snapshot {
     pub busy_delivery: String,
     #[serde(default)]
     pub rekeyed: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    pub queue: Vec<QueueRow>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueRow {
+    #[serde(default)]
+    pub id: i64,
+    #[serde(default)]
+    pub session_id: String,
+    #[serde(default)]
+    pub status: String,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -603,7 +616,7 @@ impl Client {
             .set("Idempotency-Key", key)
             .send_json(body)
         {
-            Ok(response) => Ok(response.into_json().unwrap_or(Value::Null)),
+            Ok(response) => response.into_json().map_err(|e| RespondError { message: format!("the daemon's reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: true }),
             Err(ureq::Error::Status(code, response)) => Err(RespondError::from_status(name, code, &response.into_string().unwrap_or_default())),
             Err(ureq::Error::Transport(error)) => Err(RespondError::from_transport(&error)),
         }

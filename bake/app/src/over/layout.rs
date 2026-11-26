@@ -119,9 +119,12 @@ pub fn load(s: &mut App) {
     }
     s.drafts = feed::composer::Drafts::from_json(&v["drafts"]);
     s.unsent = feed::composer::Unconfirmed::from_json(&v["unsent"]);
-    for (id, unsent) in s.unsent.iter() {
-        let draft = feed::composer::put_back(s.drafts.get(id), &unsent.text);
-        s.drafts.set(id, &draft);
+    let held: Vec<(String, String)> = s.unsent.iter().map(|(id, u)| (id.clone(), u.text.clone())).collect();
+    for (id, text) in held {
+        let before = s.drafts.get(&id).trim_end().to_string();
+        let merged = feed::composer::put_back(&before, &text);
+        s.drafts.set(&id, &merged);
+        s.restored.insert(id, (merged, before));
     }
     s.ov.arrange();
     *LAST.lock().expect("layout lock") = encode(s);
@@ -136,7 +139,13 @@ fn writer() -> &'static Sender<Write> {
         std::thread::spawn(move || {
             for (text, done) in rx {
                 let Some(p) = path() else { continue };
-                let written = p.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&p, &text)).map_err(|e| e.to_string());
+                let next = p.with_extension("json.next");
+                let written = p
+                    .parent()
+                    .map_or(Ok(()), std::fs::create_dir_all)
+                    .and_then(|()| std::fs::write(&next, &text))
+                    .and_then(|()| std::fs::rename(&next, &p))
+                    .map_err(|e| e.to_string());
                 if written.is_err() {
                     let mut last = LAST.lock().expect("layout lock");
                     if *last == text {
@@ -165,8 +174,11 @@ pub fn save(s: &App) {
 }
 
 pub fn save_now(s: &App) -> Result<(), String> {
-    if !s.ov.persist || path().is_none() {
+    if !s.ov.persist {
         return Ok(());
+    }
+    if path().is_none() {
+        return Err("HOME is not set".into());
     }
     let now = encode(s);
     let (done, wait) = channel();

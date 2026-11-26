@@ -27,7 +27,7 @@ pub enum Bg {
     Ledger(String, std::time::Instant, Result<Ledger, String>),
     Tail(String, String, Result<Tail, String>),
     OverviewError(String),
-    SendSettings(String, HashMap<String, String>),
+    SendSettings(String, HashMap<String, String>, Vec<feed::catalog::QueueRow>),
     Sent(String, Unsent, Result<Delivered, feed::catalog::RespondError>),
     Stopped(String, Result<Delivered, feed::catalog::RespondError>),
     Requests(String, Vec<OpenRequest>, std::time::Instant),
@@ -72,8 +72,9 @@ pub struct App {
     pub unsent: Unconfirmed,
     pub in_flight: HashMap<String, Unsent>,
     restored: HashMap<String, (String, String)>,
-    pub queued: HashMap<String, u64>,
+    pub queued: HashMap<String, (u64, Option<i64>)>,
     snapshots: u64,
+    queue_rows: Vec<feed::catalog::QueueRow>,
     pub stopping: HashSet<String>,
     pub busy_default: Option<Busy>,
     pub busy_pick: HashMap<String, Busy>,
@@ -161,6 +162,7 @@ fn init() -> App {
         restored: HashMap::new(),
         queued: HashMap::new(),
         snapshots: 0,
+        queue_rows: Vec::new(),
         stopping: HashSet::new(),
         busy_default: None,
         busy_pick: HashMap::new(),
@@ -212,7 +214,7 @@ fn init() -> App {
                     loop {
                         let message = match c.snapshot() {
                             Ok(snap) => {
-                                if tx.send(Bg::SendSettings(snap.busy_delivery, snap.rekeyed)).is_err() {
+                                if tx.send(Bg::SendSettings(snap.busy_delivery, snap.rekeyed, snap.queue)).is_err() {
                                     return;
                                 }
                                 Bg::Snapshot(snap.updated_at, snap.sessions)
@@ -268,6 +270,7 @@ pub fn session<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
 }
 
 pub fn select(s: &mut App, id: &str) {
+    let id = &feed::composer::current(&s.rekeyed, id).to_string();
     s.selected = Some(id.to_string());
     s.screen = Screen::Session;
     s.tab = Tab::Conversation;
@@ -589,7 +592,6 @@ pub fn stop(s: &mut App, id: &str) {
 }
 
 fn note(s: &mut App, id: &str, text: String) {
-    s.queued.remove(id);
     s.status_line.insert(id.to_string(), text);
 }
 
@@ -603,12 +605,12 @@ pub fn composer_note(s: &App, id: &str) -> Option<String> {
     if let Some(note) = s.unsent.note(id) {
         return Some(note);
     }
-    if let Some(at) = s.queued.get(id) {
-        let waiting = session(s, id).map(|x| x.queue_count).unwrap_or_default();
-        let cleared = s.snapshots >= at + 2 && waiting == 0 && !busy_now(s, id);
-        return (!cleared).then(|| Delivered::Queued.note(waiting));
+    let queued = s.queued.get(id).and_then(|(at, queue_id)| feed::composer::queued_note(&s.queue_rows, &s.rekeyed, id, *queue_id, s.snapshots >= at + 2));
+    match (queued, s.status_line.get(id)) {
+        (Some(q), Some(line)) if !line.starts_with("Sent") => Some(format!("{q} · {line}")),
+        (Some(q), _) => Some(q),
+        (None, line) => line.cloned(),
     }
-    s.status_line.get(id).cloned()
 }
 
 fn put_back(s: &mut App, id: &str, text: &str) {
@@ -627,13 +629,18 @@ fn put_back(s: &mut App, id: &str, text: &str) {
 
 fn take_sent(s: &mut App, id: String, pending: Unsent, result: Result<Delivered, feed::catalog::RespondError>) {
     let id = feed::composer::current(&s.rekeyed, &id).to_string();
-    s.sending.remove(&id);
-    s.in_flight.remove(&id);
+    if s.in_flight.get(&id).is_some_and(|p| p.key == pending.key) {
+        s.in_flight.remove(&id);
+    }
+    if !s.in_flight.contains_key(&id) {
+        s.sending.remove(&id);
+    }
+    s.unsent.remove(&id, &pending.key);
     let failure = match result {
         Ok(Delivered::Unconfirmed) => Some((true, "the daemon took it but hasn't confirmed delivery".to_string())),
-        Ok(Delivered::Queued) => {
+        Ok(Delivered::Queued(queue_id)) => {
             s.status_line.remove(&id);
-            s.queued.insert(id.clone(), s.snapshots);
+            s.queued.insert(id.clone(), (s.snapshots, queue_id));
             None
         }
         Ok(delivered) => {
@@ -702,7 +709,13 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
             s.lru.retain(|x| x != &old);
             load_pane(s, &new);
         }
-        move_key(&mut s.in_flight, &old, &new);
+        if let Some(pending) = s.in_flight.remove(&old) {
+            if s.in_flight.contains_key(&new) {
+                s.unsent.add(&new, pending);
+            } else {
+                s.in_flight.insert(new.clone(), pending);
+            }
+        }
         move_key(&mut s.restored, &old, &new);
         move_key(&mut s.queued, &old, &new);
         move_key(&mut s.status_line, &old, &new);
@@ -757,8 +770,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 s.ov.live.take_ledger(&project, started, result);
             }
             Bg::OverviewError(error) => s.ov.notice = Some(format!("Couldn't refresh the overview: {error}")),
-            Bg::SendSettings(busy, rekeyed) => {
+            Bg::SendSettings(busy, rekeyed, queue) => {
                 s.snapshots += 1;
+                s.queue_rows = queue;
                 s.busy_default = Busy::parse(&busy);
                 follow_rekeys(s, rekeyed);
             }

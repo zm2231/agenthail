@@ -250,6 +250,14 @@ mod tests {
     }
 
     #[test]
+    fn an_unreadable_success_reply_is_maybe_delivered() {
+        let (client, _seen) = daemon(vec![(200, r#"{"ok":tr"#)]);
+        let error = client.send_as("s1", "hi", None, "k").unwrap_err();
+        assert!(error.maybe_delivered, "{}", error.message);
+        assert_eq!(error.code, "unreadable_reply");
+    }
+
+    #[test]
     fn a_stop_still_in_progress_is_not_reported_as_done() {
         let (client, _seen) = daemon(vec![(202, r#"{"ok":true,"status":"submitted"}"#), (200, r#"{"ok":true,"result":{"action":"interrupt","evidence":"delivered"}}"#)]);
         assert_eq!(client.interrupt("s1").unwrap(), Delivered::Unconfirmed);
@@ -262,7 +270,7 @@ mod tests {
             (200, r#"{"ok":true,"result":{"evidence":"queued","queueId":3}}"#),
             (202, r#"{"ok":true,"status":"submitted"}"#),
         ]);
-        assert_eq!(client.send_as("s1", "hi", Some(Busy::Queue), "retry-1").unwrap(), Delivered::Queued);
+        assert_eq!(client.send_as("s1", "hi", Some(Busy::Queue), "retry-1").unwrap(), Delivered::Queued(Some(3)));
         assert_eq!(seen.recv().unwrap().key, "retry-1");
         assert_eq!(client.send_as("s1", "hi", Some(Busy::Queue), "retry-1").unwrap(), Delivered::Unconfirmed);
         assert_eq!(seen.recv().unwrap().key, "retry-1");
