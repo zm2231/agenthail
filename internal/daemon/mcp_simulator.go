@@ -29,7 +29,7 @@ type mcpSimulatorInput struct {
 	Button    string            `json:"button,omitempty" jsonschema:"home, lock or side-button."`
 	Key       *int              `json:"key,omitempty" jsonschema:"key: one HID keycode, 0 to 255: 40 Return, 41 Escape, 42 Backspace, 43 Tab, 44 Space, 79 to 82 Right, Left, Down, Up, 4 to 29 a to z."`
 	Keys      []int             `json:"keys,omitempty" jsonschema:"key: HID keycodes pressed in order, at most 100, instead of key."`
-	Modifiers []int             `json:"modifiers,omitempty" jsonschema:"key: modifiers held while key is pressed: 224 Control, 225 Shift, 226 Option, 227 Command; [225] with key 43 is Shift-Tab."`
+	Modifiers []int             `json:"modifiers,omitempty" jsonschema:"key: distinct modifiers held while key is pressed: 224 Control, 225 Shift, 226 Option, 227 Command; [225] with key 43 is Shift-Tab."`
 	Payload   json.RawMessage   `json:"payload,omitempty" jsonschema:"push: a JSON object with aps."`
 	Latitude  *float64          `json:"latitude,omitempty" jsonschema:"location: with longitude; neither clears it."`
 	Longitude *float64          `json:"longitude,omitempty" jsonschema:"location: with latitude."`

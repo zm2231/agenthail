@@ -120,7 +120,7 @@ func (h *Host) Call(ctx context.Context, owner string, req Request) (map[string]
 	return nil, refuse("invalid", "action must be %s.", strings.Join(Actions, ", "))
 }
 
-const HowTo = "Read the screen with describe, then tap a ref from it (refs last until the next describe), or tap, swipe by x,y in points. type enters text into the focused field; key presses a hardware key by HID keycode, or a sequence of them; button presses home, lock or side-button. install takes a .app you copied into outDir, or from your folders when the simulators run on another host; launch, terminate and uninstall take its bundleId; openUrl opens a link or deep link. screenshot saves a PNG; logs reads an app's recent log. The lease ends after 10 minutes unused or at endsAt; renew moves endsAt on. release it when you are done."
+const HowTo = "Read the screen with describe, then tap a ref from it (refs last until the next describe), or tap, swipe by x,y in points. type enters text into the focused field; key presses a hardware key by HID keycode (43 Tab, 40 Return, 79 to 82 the arrows) while holding modifiers (225 Shift), or keys presses up to 100 in order; button presses home, lock or side-button. install takes a .app you copied into outDir, or from your folders when the simulators run on another host; launch, terminate and uninstall take its bundleId; openUrl opens a link or deep link. screenshot saves a PNG; logs reads an app's recent log. The lease ends after 10 minutes unused or at endsAt; renew moves endsAt on. release it when you are done."
 
 func (h *Host) list(ctx context.Context, owner string) (map[string]any, error) {
 	all, err := h.devices(ctx)

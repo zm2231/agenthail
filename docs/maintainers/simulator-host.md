@@ -121,9 +121,13 @@ Every action except `list`, `acquire`, `renew` and `release` needs a lease.
   its text to the focused field on AXe's standard input; it cannot send
   keys such as Tab or the arrows. `key` presses hardware keyboard keys by
   HID keycode (0 to 255): `key` alone (`axe key`), `key` while holding
-  `modifiers` (`axe key-combo`; distinct modifier keys 224 to 231, so `key`
-  43 with `modifiers` `[225]` is Shift-Tab), or `keys`, up to 100 pressed in
-  order (`axe key-sequence`). `button` presses
+  `modifiers` (`axe key-combo`; distinct modifier keys 224 to 231, none
+  equal to `key`, so `key` 43 with `modifiers` `[225]` is Shift-Tab), or
+  `keys`, up to 100 pressed in order (`axe key-sequence`). Common keycodes:
+  4 to 29 the letters a to z, 40 Return, 41 Escape, 42 Backspace, 43 Tab,
+  44 Space, 79 Right, 80 Left, 81 Down, 82 Up; modifiers 224 Control,
+  225 Shift, 226 Option, 227 Command, and 228 to 231 the right-hand ones.
+  `button` presses
   `home`, `lock` or `side-button`. There is no Siri, Apple Pay, microphone or
   voice action.
 - `install` takes a `.app` folder inside the session's `outDir` (in the lease
