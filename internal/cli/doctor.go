@@ -82,23 +82,15 @@ func (a *App) cmdDoctor(args []string) error {
 		if caps.Steer {
 			enabled = append(enabled, "steer")
 		}
-		gate := surface.AgentGate(e.Surface, modes.AgentMode(e.Name))
-		if _, local := e.Surface.(surface.LocalAgent); local && modesErr != nil {
-			gate = fmt.Errorf("whether %s is turned on or off cannot be read until %s is fixed: %w", e.Name, dashconfig.Path(), modesErr)
+		mode := modes.AgentMode(e.Name)
+		_, local := e.Surface.(surface.LocalAgent)
+		if local && modesErr != nil {
+			results = append(results, doctorResult{Surface: e.Name, Capabilities: enabled, WritePath: "checked immediately before delivery", Error: fmt.Sprintf("whether %s is turned on or off cannot be read until %s is fixed: %s", e.Name, dashconfig.Path(), modesErr)})
+			failures++
+			continue
 		}
-		if gate != nil {
-			result := doctorResult{Surface: e.Name, Capabilities: enabled, WritePath: "checked immediately before delivery", OK: true}
-			switch {
-			case agentswitch.IsOff(gate):
-				result.AgentOff = gate.Error()
-			case agentswitch.IsUnavailable(gate):
-				result.AgentUnavailable = gate.Error()
-			default:
-				result.OK = false
-				result.Error = gate.Error()
-				failures++
-			}
-			results = append(results, result)
+		if off := surface.AgentTurnedOff(e.Surface, mode); off != nil {
+			results = append(results, doctorResult{Surface: e.Name, Capabilities: enabled, WritePath: "checked immediately before delivery", OK: true, AgentOff: off.Error()})
 			continue
 		}
 		var healthErr error
@@ -128,6 +120,17 @@ func (a *App) cmdDoctor(args []string) error {
 		if signin.IsUnavailable(err) {
 			signinUnavailable = err.Error()
 			err = nil
+		}
+		if local {
+			switch checked := surface.AgentHealth(e.Surface, mode, err); {
+			case agentswitch.IsUnavailable(checked):
+				results = append(results, doctorResult{Surface: e.Name, Capabilities: enabled, WritePath: "checked immediately before delivery", OK: true, AgentUnavailable: checked.Error()})
+				continue
+			case agentswitch.IsMissing(checked):
+				results = append(results, doctorResult{Surface: e.Name, Capabilities: enabled, WritePath: "checked immediately before delivery", Error: checked.Error()})
+				failures++
+				continue
+			}
 		}
 		result := doctorResult{Surface: e.Name, Capabilities: enabled, Sessions: len(sessions), WritePath: "checked immediately before delivery", OK: err == nil, SigninOff: signinOff, SigninUnavailable: signinUnavailable}
 		if provider, ok := e.Surface.(surface.RuntimeStatusProvider); ok {

@@ -38,14 +38,20 @@ func runDoctorForAgent(t *testing.T, app *App) (doctorAgentResult, error) {
 	return payload.Surfaces[0], err
 }
 
-func TestAMissingAgentIsUnavailableOnAutoOffWhenTurnedOffAndAFailureOnlyWhenTurnedOn(t *testing.T) {
+func TestAnUnreachableAgentWithoutItsProgramIsUnavailableOnAutoOffWhenTurnedOffAndAFailureOnlyWhenTurnedOn(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	fake := &cliSurface{kind: surface.KindCodex}
 	app, _ := cliFixture(t, fake)
-	app.Surfaces[0].Surface = absentCLIAgent{&runtimeCLISurface{cliSurface: fake, status: surface.RuntimeStatus{Name: "Codex managed app-server", Detail: "codex is not installed"}}}
+	app.Surfaces[0].Surface = absentCLIAgent{&runtimeCLISurface{cliSurface: fake, status: surface.RuntimeStatus{Name: "Codex Desktop bridge", Reachable: true, Durable: true, Backend: "desktop"}}}
 	app.daemonService = &fakeService{loaded: true}
 
 	result, err := runDoctorForAgent(t, app)
+	if err != nil || !result.OK || result.AgentUnavailable != "" || result.Error != "" {
+		t.Fatalf("a Codex reached without its command on PATH is not unavailable: err=%v result=%+v", err, result)
+	}
+
+	fake.listErr = errors.New("Codex session discovery is unavailable")
+	result, err = runDoctorForAgent(t, app)
 	if err != nil || !result.OK || result.Error != "" || !strings.Contains(result.AgentUnavailable, "Codex is not installed") || result.AgentOff != "" {
 		t.Fatalf("auto with Codex missing: err=%v result=%+v", err, result)
 	}

@@ -442,7 +442,7 @@ func (d *Daemon) discoverCatalogOf(ctx context.Context, only map[surface.Surface
 			sessions, err = adapter.List(operationCtx)
 		}
 		cancel()
-		health := d.recordSurfaceHealth(passCtx, adapter, err)
+		health := d.recordSurfaceHealth(passCtx, adapter, d.agentHealth(adapter, err))
 		if err == nil {
 			d.noteCatalogRuntimeGap(adapter.Name(), gap.Without())
 		}

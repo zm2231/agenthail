@@ -140,7 +140,7 @@ Notion is optional. It works as an external workspace for research, notes, and l
 
 ### Agents on this computer
 
-Codex, Claude and Devin are each on `auto` by default: Agenthail works with the ones installed here, and one that is not installed shows as unavailable, not as a failure. Turn an agent `off` to leave it alone, or `on` to make a missing one a failure that `agenthail doctor` reports.
+Codex, Claude and Devin are each on `auto` by default: Agenthail works with each one it can reach here, and one that cannot be reached because it is not installed shows as unavailable, not as a failure. Turn an agent `off` to leave it alone: Agenthail stops discovering its sessions and starting new ones, and leaves sessions already running as they are. Turn it `on` to make a missing one a failure that `agenthail doctor` reports.
 
 ```bash
 agenthail agents                           # each agent's setting and what it comes to here

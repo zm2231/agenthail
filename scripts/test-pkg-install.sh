@@ -217,7 +217,8 @@ fi
 /usr/local/bin/agenthail signin use claude none >/dev/null
 doctor_json="$(/usr/local/bin/agenthail doctor --json)"
 jq -e '.ok and (.surfaces | length == 4)' <<<"$doctor_json" >/dev/null
-jq -e '[.surfaces[] | select(.surface == "codex" or .surface == "claude" or .surface == "devin") | select(.ok and .error == null and (.agentUnavailable // "") != "")] | length == 3' <<<"$doctor_json" >/dev/null
+jq -e '[.surfaces[] | select(.surface == "codex" or .surface == "devin") | select(.ok and .error == null and (.agentUnavailable // "") != "")] | length == 2' <<<"$doctor_json" >/dev/null
+jq -e 'any(.surfaces[]; .surface == "claude" and .ok and .error == null)' <<<"$doctor_json" >/dev/null
 /usr/local/bin/agenthail agents use codex off >/dev/null
 jq -e '.ok and any(.surfaces[]; .surface == "codex" and .ok and (.agentOff // "") != "")' <<<"$(/usr/local/bin/agenthail doctor --json)" >/dev/null
 /usr/local/bin/agenthail agents use codex on >/dev/null

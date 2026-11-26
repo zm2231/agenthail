@@ -17,7 +17,15 @@ func (d *Daemon) agentGate(adapter surface.Surface) error {
 	if err != nil {
 		return fmt.Errorf("whether %s is turned on or off cannot be read until %s is fixed: %w", adapter.Name(), dashconfig.Path(), err)
 	}
-	return surface.AgentGate(adapter, config.AgentMode(string(adapter.Name())))
+	return surface.AgentTurnedOff(adapter, config.AgentMode(string(adapter.Name())))
+}
+
+func (d *Daemon) agentHealth(adapter surface.Surface, probeErr error) error {
+	config, err := dashconfig.LoadAgentModes()
+	if err != nil {
+		return probeErr
+	}
+	return surface.AgentHealth(adapter, config.AgentMode(string(adapter.Name())), probeErr)
 }
 
 func (d *Daemon) agentStatuses(config dashconfig.Config) []surface.AgentStatus {

@@ -198,7 +198,7 @@ func (d *Daemon) refreshSigninSurfaces(lifetime context.Context) {
 			cancel()
 			return
 		}
-		d.publishSurfaceHealth(d.recordSurfaceHealth(ctx, adapter, err), time.Now().UTC())
+		d.publishSurfaceHealth(d.recordSurfaceHealth(ctx, adapter, d.agentHealth(adapter, err)), time.Now().UTC())
 		cancel()
 	}
 }

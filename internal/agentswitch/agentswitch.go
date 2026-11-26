@@ -82,16 +82,22 @@ func IsMissing(err error) bool {
 	return errors.As(err, &target)
 }
 
-func Check(agent Agent, mode Mode) error {
+// Check reads probeErr, the outcome of reaching the agent here, through the
+// person's setting. An agent on auto is unavailable only when it cannot be
+// reached and its program is missing, since some agents are reached without
+// their program on PATH.
+func Check(agent Agent, mode Mode, probeErr error) error {
 	if mode == Off {
 		return OffError{Agent: agent.ID, Label: agent.Label}
 	}
 	err := agent.Locate()
 	switch {
 	case err == nil:
-		return nil
+		return probeErr
 	case mode == On:
 		return MissingError{Agent: agent.ID, Label: agent.Label, Err: err}
+	case probeErr == nil:
+		return nil
 	default:
 		return UnavailableError{Agent: agent.ID, Label: agent.Label, Err: err}
 	}

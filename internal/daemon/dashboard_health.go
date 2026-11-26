@@ -58,7 +58,11 @@ func (d *Daemon) dashboardSurfaceHealth(ctx context.Context, adapter surface.Sur
 	healthCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if checker, ok := adapter.(surface.HealthChecker); ok {
-		if err := checker.Health(healthCtx); signin.IsUnavailable(err) {
+		if err := d.agentHealth(adapter, checker.Health(healthCtx)); agentswitch.IsUnavailable(err) {
+			entry.Health = "agent_unavailable"
+			entry.HealthDetail = err.Error()
+			return entry
+		} else if signin.IsUnavailable(err) {
 			entry.Health = "signin_unavailable"
 			entry.HealthDetail = err.Error()
 		} else if err != nil {

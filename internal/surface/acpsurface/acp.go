@@ -44,6 +44,8 @@ func (a *ACP) LocateProgram() error {
 
 func (a *ACP) RequiredOnAuto() bool { return !a.agent.BuiltIn() }
 
+func (a *ACP) Health(context.Context) error { return a.LocateProgram() }
+
 func (a *ACP) RuntimeKinds() []surface.RuntimeKind { return []surface.RuntimeKind{Kind(a.agent.ID)} }
 
 func (a *ACP) Capabilities() surface.Capabilities {
