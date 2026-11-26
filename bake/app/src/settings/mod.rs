@@ -5,7 +5,7 @@ mod handoffs;
 mod notify;
 mod parts;
 
-use std::cell::OnceCell;
+use std::cell::{Cell, OnceCell};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -74,6 +74,7 @@ pub struct Prefs {
     pub remote: Option<Result<RemoteControl, Failure>>,
     pub compaction: Option<Result<Compaction, Failure>>,
     pub preferences: Option<Result<Vec<Preference>, Failure>>,
+    pub permission: Option<feed::notify::Permission>,
     pub dev: devices::Devices,
     writing: Option<String>,
     settling: HashSet<Read>,
@@ -103,6 +104,16 @@ pub struct Prefs {
 
 thread_local! {
     static WINDOW: OnceCell<(AppHandle<Prefs>, WindowHandle)> = const { OnceCell::new() };
+    static PERMISSION: Cell<Option<feed::notify::Permission>> = const { Cell::new(None) };
+}
+
+pub fn permission_changed(permission: feed::notify::Permission) {
+    PERMISSION.set(Some(permission));
+    WINDOW.with(|w| {
+        if let Some((handle, _)) = w.get() {
+            handle.update(move |s: &mut Prefs, _| s.permission = Some(permission));
+        }
+    });
 }
 
 pub fn spec() -> rune::WindowSpec<Prefs> {
@@ -159,6 +170,7 @@ fn init() -> Prefs {
     Prefs {
         client,
         no_client,
+        permission: PERMISSION.get(),
         draft_orphaned: false,
         watcher: Arc::new(AtomicU64::new(0)),
         rest_pending: false,

@@ -1,3 +1,4 @@
+use feed::notify::{NOTIFICATION_SETTINGS, Permission};
 use feed::prefs::{Notify, NotifyStatus, Preference};
 use rune::{El, row};
 use rune_kit::{Button, ButtonVariant, ControlSize};
@@ -27,8 +28,21 @@ fn desktop(s: &Prefs, status: &NotifyStatus) -> El {
     if problem {
         rows.push(parts::problem(status.detail()));
     }
+    if !on && let Some(permission) = s.permission {
+        rows.extend(own(permission));
+    }
     rows.push(buttons);
     section("", rows, Some("Agenthail notifies when an agent finishes or fails, and when a message can't be delivered.".into()))
+}
+
+fn own(permission: Permission) -> Option<El> {
+    let (head, how) = permission.note()?;
+    let control = if permission.warns() {
+        Button::new("Open System Settings…").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(|_: &mut Prefs| crate::open_settings(NOTIFICATION_SETTINGS)).build(theme::kit()).key("settings-notify-permission")
+    } else {
+        row()
+    };
+    Some(line(head, Some(how.to_string()), control))
 }
 
 fn preferences(s: &Prefs, list: &[Preference]) -> El {
