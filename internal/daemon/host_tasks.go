@@ -57,7 +57,7 @@ func (d *Daemon) apiHostTasksHandler(w http.ResponseWriter, r *http.Request) {
 		writeActionResult(w, actionResult{}, err)
 		return
 	}
-	children := r.URL.Query()["child"]
+	children, refresh := r.URL.Query()["child"], r.URL.Query().Get("refresh") == "1"
 	if len(children) > hostTaskPullLimit {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("Ask for at most %d tasks at once.", hostTaskPullLimit))
 		return
@@ -69,7 +69,9 @@ func (d *Daemon) apiHostTasksHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	held := make([]hostTask, 0, len(tasks))
 	for _, task := range tasks {
-		task = d.refreshTaskLatest(r.Context(), task)
+		if refresh {
+			task = d.refreshTaskLatest(r.Context(), task)
+		}
 		record := hostTask{ChildID: task.Child, State: task.State, Kind: task.Kind, Result: task.Result, ResultTurnID: task.ResultTurnID, Latest: task.Latest, LatestTurnID: task.LatestTurnID, Stalled: task.Stalled}
 		if !task.LatestAt.IsZero() {
 			record.LatestAtMS = task.LatestAt.UnixMilli()
@@ -115,7 +117,11 @@ func (d *Daemon) startHostTask(caller *mcpCaller, host *pairedHost, message stri
 	return json.Marshal(started)
 }
 
-func (d *Daemon) pullHostTasks(ctx context.Context, host *pairedHost, children []string) error {
+func (d *Daemon) pullHostTasks(ctx context.Context, host *pairedHost, children []string, refresh bool) error {
+	query := url.Values{}
+	if refresh {
+		query.Set("refresh", "1")
+	}
 	for len(children) > 0 {
 		batch := children[:min(len(children), hostTaskPullLimit)]
 		children = children[len(batch):]
@@ -123,7 +129,8 @@ func (d *Daemon) pullHostTasks(ctx context.Context, host *pairedHost, children [
 			Tasks []hostTask `json:"tasks"`
 		}
 		pullCtx, cancel := context.WithTimeout(ctx, hostTaskPullWait)
-		err := host.client.GetJSON(pullCtx, hostTasksPath, url.Values{"child": batch}, &answer)
+		query["child"] = batch
+		err := host.client.GetJSON(pullCtx, hostTasksPath, query, &answer)
 		cancel()
 		if err != nil {
 			return fmt.Errorf("read tasks on host %s: %w", host.record.Name, err)
@@ -135,10 +142,10 @@ func (d *Daemon) pullHostTasks(ctx context.Context, host *pairedHost, children [
 	return nil
 }
 
-func (d *Daemon) pullRunningHostTasks(ctx context.Context, host *pairedHost) {
-	children, err := d.Registry.HostTaskChildren(host.record.ID, true)
+func (d *Daemon) pullAllHostTasks(ctx context.Context, host *pairedHost) {
+	children, err := d.Registry.HostTaskChildren(host.record.ID)
 	if err == nil && len(children) > 0 {
-		err = d.pullHostTasks(ctx, host, children)
+		err = d.pullHostTasks(ctx, host, children, false)
 	}
 	if err != nil {
 		d.log.Printf("host %s tasks: %s", host.record.Name, err)
@@ -158,7 +165,7 @@ func (d *Daemon) pullChangedHostTask(ctx context.Context, host *pairedHost, payl
 	if _, found, err := d.Registry.TaskForChild(changed.ChildID); err != nil || !found {
 		return
 	}
-	if err := d.pullHostTasks(ctx, host, []string{changed.ChildID}); err != nil {
+	if err := d.pullHostTasks(ctx, host, []string{changed.ChildID}, false); err != nil {
 		d.log.Printf("host %s tasks: %s", host.record.Name, err)
 	}
 }
@@ -183,7 +190,7 @@ func (d *Daemon) refreshHostTask(ctx context.Context, task registry.Task, hostID
 	if !found {
 		return task, ""
 	}
-	if err := d.pullHostTasks(ctx, host, []string{task.Child}); err != nil {
+	if err := d.pullHostTasks(ctx, host, []string{task.Child}, true); err != nil {
 		if task.State != registry.TaskRunning {
 			return task, ""
 		}

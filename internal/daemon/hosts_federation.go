@@ -586,7 +586,7 @@ func (d *Daemon) mirrorHostOnce(ctx context.Context, host *pairedHost, outage *h
 			d.hostAnswered(host, outage)
 			continue
 		}
-		d.pullRunningHostTasks(ctx, host)
+		d.pullAllHostTasks(ctx, host)
 		d.drainHostDeliveries(ctx, host)
 		d.resumeHostMoves(ctx, host)
 		gap, err := d.followHostCatalog(ctx, host, seq)

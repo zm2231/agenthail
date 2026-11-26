@@ -67,11 +67,11 @@ func (r *Registry) HostTasks(hostID string, children []string) ([]Task, error) {
 		WHERE (p.host_id=? OR substr(p.id,1,?)=?) AND t.child_session_id IN (?`+strings.Repeat(",?", len(children)-1)+`) ORDER BY t.id`, args...)
 }
 
-// HostTaskChildren are the children on hostID of tasks started here that
-// still change: running ones, and settled ones a later turn may update.
-func (r *Registry) HostTaskChildren(hostID string, running bool) ([]string, error) {
+// HostTaskChildren are the children on hostID of tasks started here. A
+// settled one stays among them, since a later report on that host updates it.
+func (r *Registry) HostTaskChildren(hostID string) ([]string, error) {
 	return queryRows(r.read, []string{}, scanString, `SELECT t.child_session_id FROM tasks t JOIN sessions s ON s.id=t.child_session_id
-		WHERE s.host_id=? AND (?=0 OR t.state='running') ORDER BY t.id`, hostID, running)
+		WHERE s.host_id=? AND t.state<>'cancelled' ORDER BY t.id`, hostID)
 }
 
 // ApplyHostTask brings a task started here up to what the host running its
@@ -89,7 +89,7 @@ func (r *Registry) ApplyHostTask(hostID string, held Task, at time.Time) (bool, 
 	case held.State == TaskRunning:
 		return false, r.MarkTaskStalled(held.Child, held.Stalled)
 	case held.State == TaskCancelled:
-		return false, r.CancelTask(held.Child, at)
+		return local.State == TaskRunning, r.CancelTask(held.Child, at)
 	case local.State == TaskRunning:
 		settled, err = r.SettleTask(held.Child, TaskSettlement{State: held.State, Kind: held.Kind, Result: held.Result, TurnID: held.ResultTurnID}, at)
 		if err != nil {
