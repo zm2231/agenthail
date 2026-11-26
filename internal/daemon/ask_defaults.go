@@ -36,6 +36,11 @@ func (d *Daemon) applyAskDefaults(now time.Time) {
 		d.log.Printf("ask defaults: apply: %s", err)
 	}
 	for _, ask := range expired {
+		if ask.RoutedTo != registry.AskToPerson {
+			if _, err := d.Registry.CancelPendingByKey(askNoticeKey(ask.ID, ask.RoutedTo)); err != nil {
+				d.log.Printf("ask defaults: withdraw the notice of %s: %s", ask.ID, err)
+			}
+		}
 		d.withdrawAsk(ask.ID)
 		d.publishAsk(ask.SessionID)
 	}

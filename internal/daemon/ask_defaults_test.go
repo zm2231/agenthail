@@ -58,6 +58,26 @@ func TestAnAskWithADefaultTakesItAtItsDeadlineAndTellsTheSessionOnce(t *testing.
 	}
 }
 
+func TestAWorkersAskThatTakesItsDefaultNoLongerReachesItsLead(t *testing.T) {
+	f := newMCPAnswerFixture(t)
+	f.hold(t, "worker", "Import the March export", false)
+	out, refused := callMCP(t, f.worker, "agenthail_ask", waitAsk(1, 15))
+	if refused || out["routedTo"] != "lead" {
+		t.Fatalf("a worker's ask = %v", out)
+	}
+	askID := out["askId"].(string)
+	if got := noticesTo(t, f.r, "lead", askID); got != 1 {
+		t.Fatalf("the lead has %d notices of the ask before its deadline", got)
+	}
+	f.d.sweepAsks(time.Now().Add(16 * time.Minute))
+	if got := noticesTo(t, f.r, "lead", askID); got != 0 {
+		t.Fatalf("the lead still has %d notices of an ask that took its default", got)
+	}
+	if got := noticesTo(t, f.r, "worker", "the default applies: Keep."); got != 1 {
+		t.Fatalf("the worker was told %d times", got)
+	}
+}
+
 func TestAnAskAnsweredBeforeItsDeadlineNeverTakesItsDefault(t *testing.T) {
 	f := newMCPAnswerFixture(t)
 	f.hold(t, "lead", "Import the March export", false)
