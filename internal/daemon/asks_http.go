@@ -28,11 +28,15 @@ type askView struct {
 	CreatedAt  time.Time              `json:"createdAt"`
 	WorkItem   string                 `json:"workItem,omitempty"`
 	LedgerKey  string                 `json:"ledgerKey,omitempty"`
+	DefaultAt  time.Time              `json:"defaultAt,omitzero"`
 	Note       string                 `json:"note,omitempty"`
 }
 
 func newAskView(ask registry.Ask) askView {
 	view := askView{ID: ask.ID, SessionID: ask.SessionID, Title: ask.Title, Questions: ask.Questions, RoutedTo: ask.RoutedTo, Route: ask.Route, State: ask.State, AnsweredBy: ask.AnsweredBy, AnsweredAt: ask.AnsweredAt, CreatedAt: ask.CreatedAt, WorkItem: ask.WorkItem, LedgerKey: ask.LedgerKey}
+	if _, defaulted := askDefault(ask); defaulted {
+		view.DefaultAt = ask.Deadline
+	}
 	if ask.State == registry.AskAnswered {
 		answer := ask.Answer
 		view.Answer = &answer
@@ -41,15 +45,17 @@ func newAskView(ask registry.Ask) askView {
 }
 
 type askHTTPRequest struct {
-	Op        string             `json:"op"`
-	SessionID string             `json:"sessionId"`
-	AskID     string             `json:"askId"`
-	Title     string             `json:"title"`
-	Questions []askQuestionInput `json:"questions"`
-	Answers   map[string]string  `json:"answers"`
-	Choices   []string           `json:"choices"`
-	Note      string             `json:"note"`
-	Item      string             `json:"item"`
+	Op                  string             `json:"op"`
+	SessionID           string             `json:"sessionId"`
+	AskID               string             `json:"askId"`
+	Title               string             `json:"title"`
+	Questions           []askQuestionInput `json:"questions"`
+	Answers             map[string]string  `json:"answers"`
+	Choices             []string           `json:"choices"`
+	Note                string             `json:"note"`
+	Item                string             `json:"item"`
+	Default             *int               `json:"default"`
+	DefaultAfterMinutes int                `json:"defaultAfterMinutes"`
 }
 
 // asksHandler serves the CLI on this machine, which speaks for the session it runs in; nothing else may claim a session here.
@@ -108,7 +114,7 @@ func (d *Daemon) changeAsk(ctx context.Context, w http.ResponseWriter, request a
 			writeAPIError(w, http.StatusNotFound, "not_found", "No session "+request.SessionID+" raises asks here.")
 			return
 		}
-		ask, note, err := d.raiseAsk(*session, askInput{Title: request.Title, Questions: request.Questions, Item: request.Item})
+		ask, note, err := d.raiseAsk(*session, askInput{Title: request.Title, Questions: request.Questions, Item: request.Item, Default: request.Default, DefaultAfterMinutes: request.DefaultAfterMinutes})
 		var invalid askInvalid
 		switch {
 		case errors.As(err, &invalid):

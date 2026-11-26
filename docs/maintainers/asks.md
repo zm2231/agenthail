@@ -6,17 +6,25 @@ An ask is a decision an agent puts to the person, or to the agent it reports to.
 
 An agent raises an ask and then ends its turn; the answer arrives as its next message. Raising does not end the turn.
 
-- MCP: `agenthail_ask {"title": "...", "questions": [...], "item": "<work item>"}`, or `{"withdraw": "<ask id>"}`. It returns `{"ok": true, "askId", "routedTo"}`, where `routedTo` is `person` or the hearer's `@alias` or id, plus `workItem` when the ask is on a work item and `note` when it could not pick one.
-- CLI: `agenthail ask "<title>" --option <label>[: <what it does>]... [--recommend <n>] [--link <title>=<url>] [--question <text> ...] [--item <work item>]`. The title is the first question unless `--question` follows it; options, a recommendation and links belong to the question before them. The CLI raises for the session it runs in (`AGENTHAIL_SESSION_ID`, `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`).
+- MCP: `agenthail_ask {"title": "...", "questions": [...], "item": "<work item>", "default": <option index>, "defaultAfterMinutes": <n>}`, or `{"withdraw": "<ask id>"}`. It returns `{"ok": true, "askId", "routedTo"}`, where `routedTo` is `person` or the hearer's `@alias` or id, plus `workItem` when the ask is on a work item, `note` when it could not pick one, and `defaultAt` when it carries a default.
+- CLI: `agenthail ask "<title>" --option <label>[: <what it does>]... [--recommend <n>] [--link <title>=<url>] [--question <text> ...] [--item <work item>] [--default <n> --default-after <minutes>]`. The title is the first question unless `--question` follows it; options, a recommendation and links belong to the question before them. The CLI raises for the session it runs in (`AGENTHAIL_SESSION_ID`, `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`).
 
 Limits, refused as `invalid` with a message the agent can act on: a one-line title of at most 80 characters; 1 to 4 distinct questions of at most 160; 1 to 6 options per question, label at most 40, `does` at most 90; `recommended` an option index; at most 3 `http(s)` links per question.
+
+## Defaults
+
+No default is the normal case: an ask waits for its answer however long that takes. An agent may offer one when an option is safe to take without the person.
+
+- `default` is an option index (`--default <n>` counts from 1, as `--recommend` does) and `defaultAfterMinutes` is 15 to 10,080; both or neither, and only on an ask with one question. The question carries the option's id as `default`, and the ask carries `defaultAt`.
+- A default whose label or `does` reads as an outward act (sending, merging, deploying, paying, deleting: the word list ledger questions use) is refused: `an outward default; leave default out so the person answers`.
+- An answer before `defaultAt` settles the ask as usual. At `defaultAt` the ask sweep, every 30 seconds, expires an open ask (`state` `expired`) and the session gets one message: `[agenthail] No answer by <time>; the default applies: <label>.` A daemon stopped between the two still sends it on a later sweep, within a day. The item's question, if the ask is on one, is resolved as `defaulted` with that message as its answer.
 
 ## Asks on held work
 
 An ask from a session that holds work is about one work item, and the ledger records it there as a question.
 
 - `item` names it, and must be an item the session holds `in_progress` or `blocked`; any other is refused as `invalid`. Without `item`, the ask is on the session's only item in progress. A session holding none raises a plain ask. With several in progress and none named, the ask is plain too, and the reply's `note` says to name one.
-- The ask row keeps `work_item`, `ledger_key` and, once recorded, `ledger_question`. The ledger gets two daemon-only events, `work_item.question` (id prefix `IQ`, issued by the ledger's owner) and `work_item.question.resolved`. They carry the ask's title and questions, then how it ended: `answered`, `withdrawn` or `expired`, with the answer and who gave it. Agents cannot write them: a paired host sends them through the host-only `/api/v1/ledger/item-question`.
+- The ask row keeps `work_item`, `ledger_key` and, once recorded, `ledger_question`. The ledger gets two daemon-only events, `work_item.question` (id prefix `IQ`, issued by the ledger's owner) and `work_item.question.resolved`. They carry the ask's title and questions, then how it ended: `answered`, `withdrawn` or `defaulted`, with the answer and who gave it. Agents cannot write them: a paired host sends them through the host-only `/api/v1/ledger/item-question`.
 - The ask goes out at once whether or not the ledger is reachable. The daemon records the question whenever an ask changes and every 30 seconds, through the ledger's owner when a paired host keeps it. Each write carries a ref made from the ask (`item-question:<host>:<ask>`, `item-question-resolved:<host>:<ask>`), and the owner answers a ref it already holds with the question it issued the first time. So a retry after an outage or a lost reply records one question, resolved once. If the item was deleted before its question was recorded, the daemon stops trying and the ask stays a plain ask.
 - The item shows the question until the ask ends, whoever holds the item by then. While the ask is open and with the person, the item waits on `person` and is in the board's Waiting on you lane, from the moment the ask is raised, before its question is recorded and through a handoff. An ask the lead holds does not mark it. In `/api/v1/decisions` the ask carries `workItem`, `workTitle` and `ledgerKey`.
 

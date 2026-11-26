@@ -19,6 +19,10 @@ type QuestionRequest struct {
 	KeepsBreadth   bool         `json:"keepsBreadth,omitempty"`
 }
 
+func OutwardWord(text string) string {
+	return outwardWords.FindString(text)
+}
+
 var outwardWords = regexp.MustCompile(`(?i)\b(send\w*|sent|e-?mail\w*|ship\w*|merg\w*|deploy\w*|push\w*|force-push\w*|publish\w*|releas\w*|launch\w*|go(es|ing)? live|roll(s|ed|ing)? ?out|spen[dt]\w*|pa(y|ys|ying|id|yment|yments)|purchas\w*|buy\w*|bought|charg\w*|refund\w*|transfer\w*|delet\w*|destroy\w*|wip(e|es|ed|ing)|truncat\w*|drop table|rm|uninstall\w*|terminat\w*|revok\w*|upload\w*|submit\w*|post(s|ed|ing)?|tweet\w*|announc\w*|invit\w*|notify\w*|contact\w*|sign(s|ed|ing)? up)\b`)
 
 var narrowingWords = regexp.MustCompile(`(?i)\b(drop\w*|defer\w*|skip\w*|later|postpon\w*|smaller|minimal\w*|minimum|only|without|exclud\w*|cut\w*|omit\w*|leav(e|es|ing) out|left out|not now|remov\w*|limit\w*|restrict\w*|narrow\w*|reduc\w*|simplif\w*|fewer|less|subset|partial\w*|stub\w*|mvp|instead|descop\w*|de-scop\w*|punt\w*|shelv\w*|backlog\w*|out of scope|trim\w*|strip\w*|lighter|cheaper|quick(er)? version)\b`)

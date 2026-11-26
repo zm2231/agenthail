@@ -8,10 +8,11 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const askUsage = `usage:
-  agenthail ask <title> [--question <text>] --option <label>[: <what it does>]... [--recommend <n>] [--link <title>=<url>] [--item <work item>] [--json]
+  agenthail ask <title> [--question <text>] --option <label>[: <what it does>]... [--recommend <n>] [--link <title>=<url>] [--item <work item>] [--default <n> --default-after <minutes>] [--json]
   agenthail ask list [--json]
   agenthail ask show <ask-id> [--json]
   agenthail ask answer <ask-id> <answer>
@@ -44,12 +45,14 @@ type askListed struct {
 	State      string           `json:"state"`
 	AnsweredBy string           `json:"answeredBy"`
 	WorkItem   string           `json:"workItem,omitempty"`
+	DefaultAt  time.Time        `json:"defaultAt,omitzero"`
 	Note       string           `json:"note,omitempty"`
 }
 
 type askQuestionOut struct {
 	Question    string `json:"question"`
 	Recommended string `json:"recommended"`
+	Default     string `json:"default"`
 	Options     []struct {
 		ID    string `json:"id"`
 		Label string `json:"label"`
@@ -168,23 +171,37 @@ func (a *App) cmdAsk(args []string) error {
 		}
 		return a.changeAsk(map[string]any{"op": args[0], "askId": args[1]}, true, map[string]string{"escalate": "escalated ", "withdraw": "withdrew "}[args[0]]+args[1])
 	}
-	item := ""
-	for i := 0; i+1 < len(args); i++ {
-		if args[i] == "--item" {
-			item = strings.TrimSpace(args[i+1])
+	flags := map[string]string{"--item": "", "--default": "", "--default-after": ""}
+	for i := 0; i+1 < len(args); {
+		if _, ok := flags[args[i]]; ok {
+			flags[args[i]] = strings.TrimSpace(args[i+1])
 			args = append(args[:i:i], args[i+2:]...)
-			break
+			continue
 		}
+		i++
 	}
 	title, questions, jsonOut, err := parseAsk(args)
 	if err != nil {
 		return err
 	}
+	raise := map[string]any{"op": "raise", "title": title, "questions": questions, "item": flags["--item"]}
+	if flags["--default"] != "" || flags["--default-after"] != "" {
+		option, err := strconv.Atoi(flags["--default"])
+		if err != nil || option < 1 {
+			return errors.New("--default is the number of an option, from 1, and goes with --default-after <minutes>")
+		}
+		minutes, err := strconv.Atoi(flags["--default-after"])
+		if err != nil {
+			return errors.New("--default-after is the minutes until the default applies, and goes with --default <n>")
+		}
+		raise["default"], raise["defaultAfterMinutes"] = option-1, minutes
+	}
 	caller := a.callerSession()
 	if caller == nil {
 		return errors.New("agenthail ask raises an ask for the agent session it runs in, and none is set here")
 	}
-	body, err := a.askCall(http.MethodPost, nil, map[string]any{"op": "raise", "sessionId": caller.ID, "title": title, "questions": questions, "item": item})
+	raise["sessionId"] = caller.ID
+	body, err := a.askCall(http.MethodPost, nil, raise)
 	if err != nil {
 		return err
 	}
@@ -199,6 +216,13 @@ func (a *App) cmdAsk(args []string) error {
 		fmt.Printf("%s is open on %s and goes to %s. End your turn; the answer arrives as a message.\n", raised.ID, raised.WorkItem, raised.RoutedTo)
 	} else {
 		fmt.Printf("%s is open and goes to %s. End your turn; the answer arrives as a message.\n", raised.ID, raised.RoutedTo)
+	}
+	if !raised.DefaultAt.IsZero() && len(raised.Questions) == 1 {
+		for _, option := range raised.Questions[0].Options {
+			if option.ID == raised.Questions[0].Default {
+				fmt.Printf("Unanswered by %s, it takes its default: %s.\n", raised.DefaultAt.Local().Format("Jan 2 15:04 MST"), option.Label)
+			}
+		}
 	}
 	if raised.Note != "" {
 		fmt.Println(raised.Note)
