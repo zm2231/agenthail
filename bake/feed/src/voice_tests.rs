@@ -378,13 +378,13 @@ fn a_microphone_answer_for_an_earlier_attempt_is_ignored() {
 }
 
 #[test]
-fn a_start_bound_to_another_target_is_hung_up_even_when_the_select_reply_agreed() {
+fn a_start_bound_to_another_target_than_the_select_resolved_is_hung_up() {
     let mut call = Call::new("s-builder");
     call.peer("ready", "", 0.0);
     let first = only_job(&call.tick(0.0));
     call.reply(first, Ok(state(json!({"phase": "ready"}))), 0.0);
     let select = only_job(&call.call());
-    let prepare = only_job(&call.reply(select, Ok(state(json!({"phase": "ready", "target": {"id": "s-reviewer", "name": "Reviewer"}}))), 0.0));
+    let prepare = only_job(&call.reply(select, Ok(state(json!({"phase": "ready", "target": {"id": "s-builder", "name": "Builder"}}))), 0.0));
     call.reply(prepare, Ok(state(json!({"phase": "ready"}))), 0.0);
     let id = call.attempt().unwrap().to_string();
     call.mic(&id, true);
@@ -411,6 +411,31 @@ fn a_start_bound_to_the_requested_session_or_to_none_for_the_orchestrator_keeps_
     let start = only_job(&orchestrator.peer("offer", "v=0", 0.0));
     let after = orchestrator.reply(start, Ok(state(json!({"phase": "negotiating", "attemptId": id, "target": {"id": "s-other", "name": "Other"}}))), 1.0);
     assert!(after.contains(&Effect::PeerEnd), "an orchestrator call that comes back routed is hung up");
+}
+
+#[test]
+fn a_call_to_an_alias_keeps_going_when_the_start_binds_the_session_it_names() {
+    let mut call = Call::new("builder");
+    call.peer("ready", "", 0.0);
+    let first = only_job(&call.tick(0.0));
+    call.reply(first, Ok(state(json!({"phase": "ready"}))), 0.0);
+    let select = only_job(&call.call());
+    let prepare = only_job(&call.reply(select, Ok(state(json!({"phase": "ready", "target": {"id": "s-builder", "name": "Builder"}}))), 0.0));
+    call.reply(prepare, Ok(state(json!({"phase": "ready"}))), 0.0);
+    let id = call.attempt().unwrap().to_string();
+    call.mic(&id, true);
+    let start = only_job(&call.peer("offer", "v=0", 0.0));
+    let after = call.reply(start, Ok(state(json!({"phase": "negotiating", "attemptId": id, "target": {"id": "s-builder", "name": "Builder"}}))), 1.0);
+    assert!(!after.contains(&Effect::PeerEnd));
+    assert_eq!(call.error, None);
+}
+
+#[test]
+fn a_failed_select_is_logged_as_its_own_step() {
+    let mut call = ready();
+    let select = only_job(&call.call());
+    call.reply(select, Err("no such session".into()), 0.0);
+    assert_eq!(call.trail.last().unwrap().cause.as_deref(), Some("select_failed"));
 }
 
 fn dialed_routed(call: &mut Call) -> String {
@@ -558,7 +583,7 @@ fn the_call_log_follows_one_call_from_prepare_to_hangup() {
     assert_eq!(attempt.cause.as_deref(), Some("local_hangup"));
     assert_eq!(
         milestones(&call),
-        ["prepared", "microphone_granted", "offer_submitted", "host_start_accepted", "sdp_applied", "peer_connected", "data_channel_open", "host_connected", "local_ended"]
+        ["prepared", "microphone_granted", "offer_submitted", "host_start_accepted", "sdp_answer_sent", "peer_connected", "data_channel_open", "host_connected", "local_ended"]
     );
     let at: Vec<f64> = attempt.milestones.iter().map(|(_, s)| *s).collect();
     assert!(at.windows(2).all(|w| w[0] <= w[1]), "{at:?}");

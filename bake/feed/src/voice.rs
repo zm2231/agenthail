@@ -856,6 +856,9 @@ impl Call {
                     match result {
                         Ok(next) => {
                             if job.req == Req::Select {
+                                if self.requested.is_some() {
+                                    self.requested = next.target.as_ref().map(|t| t.id.clone()).or(self.requested.take());
+                                }
                                 self.state = Some(next);
                                 self.fetch(Req::Prepare, Some(Action::new("prepare")));
                             } else {
@@ -868,7 +871,10 @@ impl Call {
                                 }
                             }
                         }
-                        Err(error) => self.dial_failed(error, job.work, "prepare_failed"),
+                        Err(error) => {
+                            let cause = if job.req == Req::Select { "select_failed" } else { "prepare_failed" };
+                            self.dial_failed(error, job.work, cause);
+                        }
                     }
                 }
             }
@@ -1059,7 +1065,7 @@ impl Call {
         }
         if let Some(sdp) = answer {
             if let Some(id) = &self.attempt {
-                self.trail.mark(id, "sdp_applied", self.clock);
+                self.trail.mark(id, "sdp_answer_sent", self.clock);
             }
             self.applied_sdp = Some(sdp.clone());
             self.out.push(Effect::PeerAnswer(sdp));
