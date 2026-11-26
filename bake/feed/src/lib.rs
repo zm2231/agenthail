@@ -1,11 +1,13 @@
 pub mod action;
 pub mod blocks;
 pub mod question;
+pub mod settings;
 pub mod catalog;
 pub mod derive;
 pub mod edits;
 pub mod focus;
 pub mod item;
+pub mod menu;
 pub mod source;
 pub mod store;
 pub mod summary;

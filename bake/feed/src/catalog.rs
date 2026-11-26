@@ -156,6 +156,19 @@ pub struct Session {
     pub subagent: Option<Value>,
     #[serde(default)]
     pub delegated: Option<bool>,
+    #[serde(default)]
+    pub pinned_at: Option<String>,
+    #[serde(default)]
+    pub read_state: Option<crate::action::ReadState>,
+    #[serde(default)]
+    pub runtime: Option<Runtime>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Runtime {
+    #[serde(default)]
+    pub focusable: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -262,7 +275,7 @@ impl Session {
         let state = self.state(now);
         let recent = parse_time(&self.last_active).is_some_and(|t| (now - t).whole_hours() < 24);
         let closed = self.display.label == "Closed";
-        matches!(state, State::NeedsYou | State::Working) || (recent && !closed && (self.open || self.current || self.alias.is_some()))
+        self.pinned_at.is_some() || matches!(state, State::NeedsYou | State::Working) || (recent && !closed && (self.open || self.current || self.alias.is_some()))
     }
 }
 
