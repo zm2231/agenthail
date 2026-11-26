@@ -458,12 +458,20 @@ impl Client {
     }
 
     pub fn prompts(&self, session: Option<&str>, query: &str) -> Result<Vec<Prompt>, String> {
-        self.prompts_on(session, query, None)
+        let prompts = self.prompts_on(session, query, None)?;
+        Ok(match session.and_then(|id| id.split_once("::")) {
+            Some((host, _)) => prompts.into_iter().map(|p| on_host(p, host)).collect(),
+            None => prompts,
+        })
     }
 
     pub fn prompts_everywhere(&self, query: &str) -> Result<Found, String> {
         let mut prompts = self.prompts(None, query)?;
-        let hosts = self.read("/api/v1/snapshot?sessions=none").map(|v| connected_hosts(&v)).unwrap_or_default();
+        let mut problems = Vec::new();
+        let hosts = self.read("/api/v1/snapshot?sessions=none").map(|v| connected_hosts(&v)).unwrap_or_else(|error| {
+            problems.push(format!("Couldn't find the other computers to search: {error}"));
+            Vec::new()
+        });
         let asked: Vec<(String, Result<Vec<Prompt>, String>)> = std::thread::scope(|scope| {
             let running: Vec<_> = hosts.iter().map(|(id, name)| (name.clone(), scope.spawn(move || self.prompts_on(None, query, Some(id))), id.clone())).collect();
             running
@@ -474,7 +482,6 @@ impl Client {
                 })
                 .collect()
         });
-        let mut problems = Vec::new();
         for (name, found) in asked {
             match found {
                 Ok(list) => prompts.extend(list),
@@ -506,7 +513,11 @@ impl Client {
             payload["fork"] = json!({"beforeTurnId": turn});
         }
         let reply = self.action_keyed("session-fork", payload, key)?;
-        Ok(reply["result"]["session"]["id"].as_str().unwrap_or_default().to_string())
+        let id = reply["result"]["session"]["id"].as_str().unwrap_or_default();
+        Ok(match session.split_once("::") {
+            Some((host, _)) if !id.is_empty() && !id.contains("::") => format!("{host}::{id}"),
+            _ => id.to_string(),
+        })
     }
 
     pub fn goal_set(&self, session: &str, goal: &str) -> Result<(), RespondError> {
@@ -692,7 +703,7 @@ mod tests {
         let (client, seen) = daemon(replies(&[
             (200, r#"{"commands":[{"name":"review","description":"Review","argumentHint":"","insert":"/review"}],"unavailable":""}"#),
             (200, r#"{"files":[{"path":"src","dir":true}],"truncated":false}"#),
-            (200, r#"{"prompts":[{"sessionId":"h::s 1","itemId":"i1","turnId":"t1","ts":"2026-11-26T10:00:00Z","text":"ship it"}],"nextBefore":""}"#),
+            (200, r#"{"prompts":[{"sessionId":"s 1","itemId":"i1","turnId":"t1","ts":"2026-11-26T10:00:00Z","text":"ship it"}],"nextBefore":""}"#),
             (200, r#"{"prompts":[],"nextBefore":""}"#),
             (403, r#"{"error":{"code":"forbidden","message":"This token can't read prompts."}}"#),
         ]));
@@ -700,7 +711,8 @@ mod tests {
         assert_eq!(seen.recv().unwrap().0, "/api/v1/session-commands?id=h%3A%3As+1");
         assert!(client.session_files("h::s 1", "src/m").unwrap().files[0].dir);
         assert_eq!(seen.recv().unwrap().0, "/api/v1/session-files?id=h%3A%3As+1&q=src%2Fm&limit=50");
-        assert_eq!(client.prompts(Some("h::s 1"), "").unwrap()[0].turn_id.as_deref(), Some("t1"));
+        let on_host = client.prompts(Some("h::s 1"), "").unwrap();
+        assert_eq!((on_host[0].turn_id.as_deref(), on_host[0].session_id.as_str()), (Some("t1"), "h::s 1"));
         assert_eq!(seen.recv().unwrap().0, "/api/v1/prompts?limit=100&sessionId=h%3A%3As+1");
         assert!(client.prompts(None, " ship ").unwrap().is_empty());
         assert_eq!(seen.recv().unwrap().0, "/api/v1/prompts?limit=100&q=ship");
@@ -721,15 +733,18 @@ mod tests {
         assert_eq!(paths, vec!["/api/v1/prompts?limit=100&q=t", "/api/v1/snapshot?sessions=none", "/api/v1/prompts?limit=100&host=h1&q=t"]);
         let (client, _seen) = daemon(replies(&[(200, r#"{"prompts":[]}"#), (200, r#"{"daemon":{"hosts":[{"id":"h1","name":"buildbox","state":"connected"}]}}"#), (502, r#"{"error":{"message":"host timed out"}}"#)]));
         assert_eq!(client.prompts_everywhere("").unwrap().problems, vec!["Couldn't search buildbox: host timed out".to_string()]);
+        let (client, _seen) = daemon(replies(&[(200, r#"{"prompts":[{"sessionId":"s1","text":"here"}]}"#), (500, r#"{"error":{"message":"snapshot failed"}}"#)]));
+        let found = client.prompts_everywhere("").unwrap();
+        assert_eq!((found.prompts.len(), found.problems), (1, vec!["Couldn't find the other computers to search: snapshot failed".to_string()]));
     }
 
     #[test]
     fn fork_and_goal_send_the_bodies_their_handlers_read() {
-        let (client, seen) = daemon(replies(&[(200, r#"{"ok":true,"result":{"session":{"id":"h::new"}}}"#), (200, r#"{"ok":true}"#), (200, r#"{"ok":true,"result":{"evidence":"delivered"}}"#)]));
+        let (client, seen) = daemon(replies(&[(200, r#"{"ok":true,"result":{"session":{"id":"new"}}}"#), (200, r#"{"ok":true,"result":{"session":{"id":"other"}}}"#), (200, r#"{"ok":true,"result":{"evidence":"delivered"}}"#)]));
         assert_eq!(client.fork("h::s1", Some("t2"), "k1").unwrap(), "h::new");
         assert_eq!(seen.recv().unwrap().1, json!({"action": "session-fork", "sessionId": "h::s1", "fork": {"beforeTurnId": "t2"}}));
-        client.fork("h::s1", None, "k2").unwrap();
-        assert_eq!(seen.recv().unwrap().1, json!({"action": "session-fork", "sessionId": "h::s1"}));
+        assert_eq!(client.fork("s1", None, "k2").unwrap(), "other");
+        assert_eq!(seen.recv().unwrap().1, json!({"action": "session-fork", "sessionId": "s1"}));
         client.goal_set("h::s1", "Ship the importer").unwrap();
         assert_eq!(seen.recv().unwrap().1, json!({"action": "goal-set", "sessionId": "h::s1", "message": "Ship the importer"}));
     }
