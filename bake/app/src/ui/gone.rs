@@ -13,7 +13,8 @@ pub struct Missing {
     pub id: String,
     pub look: Look,
     asked: f64,
-    asking: bool,
+    asking: Option<u64>,
+    seq: u64,
     pub fixing: Option<Fix>,
     pub error: Option<String>,
 }
@@ -25,48 +26,54 @@ pub fn shown<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
     })
 }
 
-pub fn watch(s: &mut App) {
+fn not_found(id: String, why: String, at: f64) -> Missing {
+    Missing { id, look: Look::Failed(why), asked: at, asking: None, seq: 0, fixing: None, error: None }
+}
+
+pub fn watch(s: &mut App) -> bool {
     let Some(id) = s.selected.clone().filter(|_| s.screen == Screen::Session) else {
-        s.missing = None;
-        return;
+        return s.missing.take().is_some();
     };
     if let Some(x) = session(s, &id) {
         s.last_row = Some(x.clone());
-        s.missing = None;
-        return;
+        return s.missing.take().is_some();
     }
     if s.menus.busy.contains(&(id.clone(), "menu")) {
-        return;
+        return false;
     }
     let Some(client) = s.client.clone() else {
-        if s.missing.as_ref().is_none_or(|m| m.id != id) {
-            s.missing = Some(Missing { id, look: Look::Failed("This session isn't in the recording.".into()), asked: s.clock, asking: false, fixing: None, error: None });
+        if s.missing.as_ref().is_some_and(|m| m.id == id) {
+            return false;
         }
-        return;
+        let why = if s.fixtures.is_some() { "This session isn't in the recording.".to_string() } else { format!("Agenthail isn't connected: {}", s.status) };
+        s.missing = Some(not_found(id, why, s.clock));
+        return true;
     };
     if s.snapshots == 0 && !s.status.starts_with("daemon:") {
-        return;
+        return false;
     }
-    let mine = s.missing.as_mut().filter(|m| m.id == id);
-    match mine {
-        Some(m) if m.asking || m.fixing.is_some() || s.clock - m.asked < RECHECK => return,
+    let seq = s.missing.as_ref().map_or(0, |m| m.seq) + 1;
+    match s.missing.as_mut().filter(|m| m.id == id) {
+        Some(m) if m.asking.is_some() || m.fixing.is_some() || s.clock - m.asked < RECHECK => return false,
         Some(m) => {
             m.asked = s.clock;
-            m.asking = true;
+            m.asking = Some(seq);
+            m.seq = seq;
         }
-        None => s.missing = Some(Missing { id: id.clone(), look: Look::Pending, asked: s.clock, asking: true, fixing: None, error: None }),
+        None => s.missing = Some(Missing { id: id.clone(), look: Look::Pending, asked: s.clock, asking: Some(seq), seq, fixing: None, error: None }),
     }
     let known = s.last_row.clone().filter(|r| r.id == id).or_else(|| s.ov.d.session(&id).cloned());
     let tx = s.outbox.clone();
     std::thread::spawn(move || {
         let result = client.look_up(&id, known.as_ref());
-        let _ = tx.send(Bg::Looked(id, result));
+        let _ = tx.send(Bg::Looked(id, seq, result));
     });
+    true
 }
 
-pub fn looked(s: &mut App, id: &str, result: Result<Gone, String>) {
-    let Some(m) = s.missing.as_mut().filter(|m| m.id == id) else { return };
-    m.asking = false;
+pub fn looked(s: &mut App, id: &str, seq: u64, result: Result<Gone, String>) {
+    let Some(m) = s.missing.as_mut().filter(|m| m.id == id && m.asking == Some(seq)) else { return };
+    m.asking = None;
     m.look = match result {
         Ok(g) => Look::Found(g),
         Err(e) => Look::Failed(e),
@@ -136,6 +143,21 @@ fn failed_view(message: &str) -> El {
         .child(el().h(80.0))
 }
 
+fn exchanges(g: &Gone) -> El {
+    let turn = |who: &str, body: &str, color: Color| col().w_full().gap(4.0).child(label(who)).child(text(body.to_string()).font(BODY).color(color).wrap());
+    let list = col().w_full().max_w(780.0).gap(18.0).px(32.0).py(16.0).children(g.exchanges.iter().map(|e| {
+        let mut c = col().w_full().gap(10.0);
+        if !e.user.is_empty() {
+            c = c.child(turn("You", &e.user, theme::text()));
+        }
+        if !e.assistant.is_empty() {
+            c = c.child(turn("Agent", &e.assistant, muted()));
+        }
+        c
+    }));
+    col().key("gone-exchanges").w_full().grow(1.0).min_h(0.0).items_center().scroll(ScrollSpec { stick_bottom: true }).child(list)
+}
+
 pub fn screen(s: &App, id: &str) -> El {
     let Some(m) = s.missing.as_ref().filter(|m| m.id == id) else { return transcript::loading("Loading sessions…".into()) };
     match &m.look {
@@ -143,7 +165,8 @@ pub fn screen(s: &App, id: &str) -> El {
         Look::Failed(e) => failed_view(e),
         Look::Found(g) => {
             let center = col().grow(1.0).h_full().min_w(0.0).child(header(s, &g.row)).child(banner(m, g));
-            conversation(s, id, center)
+            let streamed = s.panes.get(id).is_some_and(|p| !p.blocks.is_empty());
+            if streamed || g.exchanges.is_empty() || s.tab == Tab::Changes { conversation(s, id, center) } else { center.child(exchanges(g)) }
         }
     }
 }

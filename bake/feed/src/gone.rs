@@ -32,10 +32,17 @@ impl Fix {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct Exchange {
+    pub user: String,
+    pub assistant: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Gone {
     pub row: Session,
     pub why: Why,
     pub fix: Option<Fix>,
+    pub exchanges: Vec<Exchange>,
 }
 
 impl Gone {
@@ -76,6 +83,12 @@ impl Detail {
         }
     }
 
+    fn exchanges(&self) -> Vec<Exchange> {
+        let Detail::Found(v) = self else { return Vec::new() };
+        let text = |e: &Value, k: &str| e[k].as_str().unwrap_or_default().trim().to_string();
+        v["exchanges"].as_array().into_iter().flatten().map(|e| Exchange { user: text(e, "user"), assistant: text(e, "assistant") }).filter(|e| !e.user.is_empty() || !e.assistant.is_empty()).collect()
+    }
+
     fn row(&self, id: &str) -> Option<Session> {
         let Detail::Found(v) = self else { return None };
         let raw = &v["session"];
@@ -111,23 +124,47 @@ pub fn classify(id: &str, detail: &Detail, listed: Option<Session>, known: Optio
         _ if row.capabilities.lifecycle.resume || detail.resume() => Some(Fix::Resume),
         _ => None,
     };
-    Ok(Gone { row, why, fix })
+    Ok(Gone { row, why, fix, exchanges: detail.exchanges() })
+}
+
+const PAGES: usize = 10;
+
+pub fn search_terms<'a>(rows: impl Iterator<Item = &'a Session>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for r in rows {
+        for term in [Some(r.name.clone()), r.alias.clone(), r.cwd.clone()].into_iter().flatten() {
+            let term = term.trim().to_string();
+            if !term.is_empty() && !out.contains(&term) {
+                out.push(term);
+            }
+        }
+    }
+    out
 }
 
 impl Client {
     pub fn look_up(&self, id: &str, known: Option<&Session>) -> Result<Gone, String> {
         let detail = Detail::read(self.get_coded(&format!("/api/v1/session?id={}&limit=20", enc(id))));
         let found = detail.row(id);
-        let names: Vec<String> = [known.map(|k| k.name.clone()), found.as_ref().map(|f| f.name.clone()), known.and_then(|k| k.alias.clone()), found.and_then(|f| f.alias)].into_iter().flatten().filter(|n| !n.trim().is_empty()).collect();
-        let mut listed = None;
-        for name in names {
-            let Ok(page) = self.get_json(&format!("/api/v1/snapshot?q={}&limit=50", enc(name.trim()))) else { continue };
-            if let Some(row) = page["sessions"].as_array().into_iter().flatten().find(|r| r["id"] == id) {
-                listed = serde_json::from_value(row.clone()).ok();
-                break;
-            }
-        }
+        let terms = search_terms([known, found.as_ref()].into_iter().flatten());
+        let listed = terms.iter().find_map(|term| self.listed(id, term));
         classify(id, &detail, listed, known)
+    }
+
+    fn listed(&self, id: &str, term: &str) -> Option<Session> {
+        let mut cursor: Option<String> = None;
+        for _ in 0..PAGES {
+            let mut path = format!("/api/v1/snapshot?q={}&limit=200", enc(term));
+            if let Some(c) = &cursor {
+                path.push_str(&format!("&cursor={}", enc(c)));
+            }
+            let page = self.get_json(&path).ok()?;
+            if let Some(row) = page["sessions"].as_array().into_iter().flatten().find(|r| r["id"] == id) {
+                return serde_json::from_value(row.clone()).ok();
+            }
+            cursor = Some(page["nextCursor"].as_str().filter(|c| !c.is_empty())?.to_string());
+        }
+        None
     }
 
     pub fn fix(&self, id: &str, fix: Fix) -> Result<(), RespondError> {
@@ -216,6 +253,22 @@ mod tests {
         assert_eq!(next_after(&order, "d", |_| true).as_deref(), Some("c"));
         assert_eq!(next_after(&order, "b", |x| x == "b"), None);
         assert_eq!(next_after(&order, "z", |_| true), None);
+    }
+
+    #[test]
+    fn the_returned_exchanges_stand_in_for_the_transcript() {
+        let d = Detail::Found(json!({"session": {"id": "s1"}, "exchanges": [{"user": "Speed it up", "assistant": "Done, twice as fast"}, {"user": " ", "assistant": ""}]}));
+        let g = classify("s1", &d, None, None).unwrap();
+        assert_eq!(g.exchanges, vec![Exchange { user: "Speed it up".into(), assistant: "Done, twice as fast".into() }]);
+        assert!(classify("s1", &Detail::Unreachable, None, None).unwrap().exchanges.is_empty());
+    }
+
+    #[test]
+    fn the_search_tries_name_alias_and_folder_once_each() {
+        let known = row(json!({"id": "s1", "name": "Fix it", "alias": "fixer", "cwd": "/work/app"}));
+        let found = row(json!({"id": "s1", "name": "Fix it", "cwd": " "}));
+        assert_eq!(search_terms([&known, &found].into_iter()), vec!["Fix it", "fixer", "/work/app"]);
+        assert!(search_terms([&row(json!({"id": "s1"}))].into_iter()).is_empty());
     }
 
     #[test]

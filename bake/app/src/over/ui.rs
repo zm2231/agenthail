@@ -560,9 +560,15 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -
             .subtitle(n.kind.wanted())
             .subtitle_color(needs_color())
             .selected(sel)
-            .on_select(move |s: &mut App, _| open_target(s, &t))
-            .build(k)
-            .key(format!("need-{i}"));
+            .on_select(move |s: &mut App, _| open_target(s, &t));
+        let held = match &n.target {
+            Target::Session(id) => s.ov.d.session(id),
+            _ => None,
+        };
+        if let Some(x) = held.filter(|x| x.unread() || x.pinned()) {
+            need = need.trailing(crate::ui::session_menu::marks(x));
+        }
+        let mut need = need.build(k).key(format!("need-{i}"));
         if let Target::Session(id) = &n.target {
             need = with_menu(need, id);
         }
