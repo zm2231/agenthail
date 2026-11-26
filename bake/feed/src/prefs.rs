@@ -28,6 +28,8 @@ pub struct Base {
     pub person: Option<Person>,
     #[serde(default)]
     pub event_cursor: u64,
+    #[serde(default)]
+    pub daemon: crate::devices::Daemon,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -99,6 +101,8 @@ pub struct Settings {
     pub claude_roots: Vec<String>,
     #[serde(default)]
     pub notifications: NotifyStatus,
+    #[serde(default)]
+    pub remote_access: Option<crate::devices::RemoteAccess>,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -249,7 +253,7 @@ fn read_failure(scope: &'static str, status: u16, body: &str) -> Failure {
     Failure::new(message)
 }
 
-fn write_failure(scope: &'static str, error: RespondError) -> Failure {
+pub(crate) fn write_failure(scope: &'static str, error: RespondError) -> Failure {
     if error.status == 401 || error.status == 403 {
         return refused(scope);
     }
@@ -258,12 +262,12 @@ fn write_failure(scope: &'static str, error: RespondError) -> Failure {
     Failure { uncertain, ..Failure::new(message) }
 }
 
-fn read<T: DeserializeOwned>(client: &Client, path: &str, scope: &'static str) -> Result<T, Failure> {
+pub(crate) fn read<T: DeserializeOwned>(client: &Client, path: &str, scope: &'static str) -> Result<T, Failure> {
     let value = client.get_reply(path).map_err(|(status, body)| read_failure(scope, status, &body))?;
     serde_json::from_value(value).map_err(|e| Failure::new(format!("the daemon's reply couldn't be read: {e}")))
 }
 
-fn reply<T: DeserializeOwned>(value: Value) -> Result<T, Failure> {
+pub(crate) fn reply<T: DeserializeOwned>(value: Value) -> Result<T, Failure> {
     serde_json::from_value(value).map_err(|e| Failure { uncertain: true, ..Failure::new(format!("the daemon's reply couldn't be read: {e}")) })
 }
 
@@ -324,7 +328,7 @@ impl Client {
         reply(value["preferences"].clone()).map_err(|f| Failure { uncertain: false, ..f })
     }
 
-    fn post_settings(&self, body: Value) -> Result<(), Failure> {
+    pub(crate) fn post_settings(&self, body: Value) -> Result<(), Failure> {
         self.post_json("/api/v1/settings", body).map(drop).map_err(|e| write_failure("settings", e))
     }
 
@@ -376,7 +380,7 @@ impl Client {
 }
 
 pub fn rereads(event: &str) -> bool {
-    event == "settings.updated" || event == "stream.reset"
+    matches!(event, "settings.updated" | "stream.reset" | "device.paired" | "device.revoked" | "host.paired" | "host.removed" | "host.state")
 }
 
 pub fn read_events(reader: impl std::io::BufRead, mut on: impl FnMut(&str, u64) -> bool) -> std::io::Result<()> {

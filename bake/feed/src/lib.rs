@@ -10,6 +10,7 @@ pub mod create;
 pub mod decisions;
 pub mod composer;
 pub mod derive;
+pub mod devices;
 pub mod edits;
 pub mod extensions;
 pub mod focus;
