@@ -79,7 +79,7 @@ impl Tails {
 
     pub fn take(&mut self, session: &str, last_active: String, result: Result<Vec<Item>, String>) {
         self.fetching.remove(session);
-        if let Ok(items) = result {
+        if let Some(items) = result.ok().filter(|items| !items.is_empty()) {
             self.held.insert(session.to_string(), (last_active, items));
         }
     }

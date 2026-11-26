@@ -59,13 +59,15 @@ fn only_recent_sessions_without_a_pane_are_fetched_and_again_only_when_they_move
 }
 
 #[test]
-fn a_failed_tail_is_retried_on_the_next_refresh() {
+fn a_failed_or_empty_tail_is_retried_on_the_next_refresh() {
     let now = parse_time("2026-11-24T12:00:00Z").unwrap();
     let sessions = vec![session("a", "2026-11-24T11:50:00Z")];
     let mut tails = Tails::default();
     assert_eq!(tails.due(&sessions, now, &HashSet::new()).len(), 1);
     tails.take("a", "2026-11-24T11:50:00Z".into(), Err("timed out".into()));
     assert_eq!(tails.due(&sessions, now, &HashSet::new()).len(), 1);
+    tails.take("a", "2026-11-24T11:50:00Z".into(), Ok(Vec::new()));
+    assert_eq!(tails.due(&sessions, now, &HashSet::new()).len(), 1, "a read cut off before any item is not kept");
 }
 
 #[test]
