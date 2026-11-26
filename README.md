@@ -138,6 +138,19 @@ If a writer lock outlives the process that held it, Agenthail reports an ownersh
 
 Notion is optional. It works as an external workspace for research, notes, and longer-running threads. Sign into Notion in your default browser and Agenthail finds those threads and can start new ones. Notion needs a browser on the computer that runs Agenthail, so a server without one, such as a standard Linux install, leaves it out.
 
+### Agents on this computer
+
+Codex, Claude and Devin are each on `auto` by default: Agenthail works with each one it can reach here, and one that cannot be reached because it is not installed shows as unavailable, not as a failure. Turn an agent `off` to leave it alone: Agenthail stops discovering its sessions and starting new ones, and leaves sessions already running as they are. Turn it `on` to make a missing one a failure that `agenthail doctor` reports.
+
+```bash
+agenthail agents                           # each agent's setting and what it comes to here
+agenthail agents use codex off             # leave Codex alone on this computer
+agenthail agents use claude on             # a missing Claude Code is a failure
+agenthail agents use claude auto           # back to the default
+```
+
+Settings > Agents in the Mac app, and Agents in the web dashboard's Settings, set the same thing.
+
 ### Browser sign-in
 
 Notion and Claude sessions reached over Remote Control authenticate with browser cookies. By default they use your system default browser and the profile it last used: Local State's last used profile for Chrome, Brave, Arc, Chromium and Edge, the default profile in profiles.ini for Firefox, and Safari's single profile. Nothing else reads cookies.

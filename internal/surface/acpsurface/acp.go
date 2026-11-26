@@ -33,6 +33,19 @@ func (a *ACP) Name() surface.SurfaceKind { return surface.SurfaceKind(a.agent.ID
 
 func (a *ACP) Label() string { return a.agent.DisplayName() }
 
+func (a *ACP) AgentLabel() string { return a.agent.DisplayName() }
+
+func (a *ACP) LocateProgram() error {
+	if a.agent.Installed() {
+		return nil
+	}
+	return fmt.Errorf("no %q command on PATH", a.agent.Command[0])
+}
+
+func (a *ACP) RequiredOnAuto() bool { return !a.agent.BuiltIn() }
+
+func (a *ACP) Health(context.Context) error { return a.LocateProgram() }
+
 func (a *ACP) RuntimeKinds() []surface.RuntimeKind { return []surface.RuntimeKind{Kind(a.agent.ID)} }
 
 func (a *ACP) Capabilities() surface.Capabilities {

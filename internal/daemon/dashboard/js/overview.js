@@ -41,6 +41,10 @@ export function renderOverview() {
             ? "Sign-in off"
             : surface.health === "signin_unavailable"
             ? "No browser here"
+            : surface.health === "agent_off"
+            ? "Off"
+            : surface.health === "agent_unavailable"
+            ? "Not installed here"
             : surface.connected
             ? "Connected"
             : "Not connected";

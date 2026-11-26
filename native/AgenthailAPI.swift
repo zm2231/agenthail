@@ -619,6 +619,10 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: ["action": "claude-default-root", "claudeDefaultRoot": name])
     }
 
+    func setAgentMode(_ agent: String, mode: String) async throws {
+        let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: ["action": "agent-mode", "agent": agent, "mode": mode])
+    }
+
     func setResumeAfterLimit(_ enabled: Bool) async throws {
         let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: ["action": "resume-after-limit", "resumeAfterLimit": enabled])
     }

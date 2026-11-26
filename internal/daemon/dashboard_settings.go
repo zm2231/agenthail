@@ -28,7 +28,7 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if r.Method == http.MethodGet {
-		writeDashboardJSON(w, http.StatusOK, map[string]any{"dashboard": config, "claudeDefaultRoot": config.ClaudeDefaultRoot(), "claudeRoots": d.claudeRootNames(), "remoteAccess": RemoteAccessStatusForConfig(config), "notifications": notify.CurrentStatus(), "daemon": map[string]any{"pid": os.Getpid(), "running": true}})
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"dashboard": config, "claudeDefaultRoot": config.ClaudeDefaultRoot(), "claudeRoots": d.claudeRootNames(), "remoteAccess": RemoteAccessStatusForConfig(config), "notifications": notify.CurrentStatus(), "agents": d.agentStatuses(config), "daemon": map[string]any{"pid": os.Getpid(), "running": true}})
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -50,6 +50,8 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		ResumeAfterLimit  bool   `json:"resumeAfterLimit"`
 		MoveAfterLimit    bool   `json:"moveAfterLimit"`
 		ClaudeDefaultRoot string `json:"claudeDefaultRoot"`
+		Agent             string `json:"agent"`
+		Mode              string `json:"mode"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid settings request")
@@ -78,6 +80,8 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 	case "move-after-limit":
 		config.MoveAfterLimit = &request.MoveAfterLimit
 		err = dashconfig.Save(config)
+	case "agent-mode":
+		err = d.setAgentMode(&config, request.Agent, request.Mode)
 	case "claude-default-root":
 		if err = d.knownClaudeRoot(request.ClaudeDefaultRoot); err == nil {
 			config.SetClaudeDefaultRoot(request.ClaudeDefaultRoot)

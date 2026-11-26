@@ -53,3 +53,10 @@ func (c *Claude) Health(ctx context.Context) error {
 	}
 	return nil
 }
+
+func (c *Claude) AgentLabel() string { return "Claude" }
+
+func (c *Claude) LocateProgram() error {
+	_, err := surface.ClaudeBinary(c.home)
+	return err
+}

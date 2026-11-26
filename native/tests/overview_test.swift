@@ -58,6 +58,12 @@ struct OverviewTest {
         expect(!bridgeCard.detail.contains("ws://") && bridgeCard.problem?.fixLabel == "Launch Codex", "a missing Codex bridge reads plainly and offers Launch Codex: \(bridgeCard.detail)")
         expect(bridgeCard.problem?.details.contains { $0.contains("ws://127.0.0.1:1") } == true, "the address stays in the details")
         expect(claudeCard.problem == nil, "a healthy surface has no problem")
+        let absentCodex = surface(#"{"name":"codex","connected":false,"health":"agent_unavailable","healthDetail":"Codex is not installed on this computer (neither the Codex app nor a codex command was found); install it to use it here, or run `agenthail agents use codex off` to turn it off","capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":true,"interrupt":true,"steer":true}}"#)
+        let absentCard = SurfaceOverview.build(surfaces: [absentCodex], sessions: [], codexRecentHours: 8)[0]
+        expect(absentCard.health == .agentUnavailable && absentCard.isQuiet && !absentCodex.needsAttention && absentCard.detail == "Codex is not installed on this Mac.", "an agent not installed here is a stated limit, not a problem: \(absentCard.detail)")
+        let offClaude = surface(#"{"name":"claude","connected":false,"health":"agent_off","healthDetail":"Claude is turned off; to turn it back on, run `agenthail agents use claude auto` or open Settings > Agents","capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":true,"interrupt":true,"steer":true}}"#)
+        let offCard = SurfaceOverview.build(surfaces: [offClaude], sessions: [], codexRecentHours: 8)[0]
+        expect(offCard.health == .agentOff && offCard.stateLabel == "Off" && offCard.isQuiet && offCard.detail == "Claude is turned off on this Mac.", "an agent turned off reads as off: \(offCard.detail)")
         expect(headlessCard.isQuiet && unsetCard.isQuiet && !codexCard.isQuiet && claudeCard.isQuiet, "stated limits read quietly, problems do not")
         expect(!headless.needsAttention && !unset.needsAttention && codex.needsAttention, "stated limits need no attention")
 

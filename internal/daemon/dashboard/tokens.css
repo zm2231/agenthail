@@ -2331,15 +2331,22 @@ a.attached-file {
 }
 .health-state.signin_off,
 .health-state.signin_unavailable,
+.health-state.agent_off,
+.health-state.agent_unavailable,
 .surface-health-icon.signin_off,
-.surface-health-icon.signin_unavailable {
+.surface-health-icon.signin_unavailable,
+.surface-health-icon.agent_off,
+.surface-health-icon.agent_unavailable {
   color: var(--quiet);
 }
 .connection-line.signin_off i,
-.connection-line.signin_unavailable i {
+.connection-line.signin_unavailable i,
+.connection-line.agent_off i,
+.connection-line.agent_unavailable i {
   background: var(--quiet);
 }
-.signin-card {
+.signin-card,
+.agents-card {
   grid-column: 1 / -1;
 }
 .signin-consumer {

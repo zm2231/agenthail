@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	qrcode "github.com/skip2/go-qrcode"
+	"github.com/zm2231/agenthail/internal/agentswitch"
 	"github.com/zm2231/agenthail/internal/daemonctl"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 )
@@ -47,6 +48,26 @@ type Config struct {
 	SimulatorHost string `json:"simulatorHost,omitempty"`
 	// NotificationPreferences holds the person's choices that differ from each preference's default.
 	NotificationPreferences map[string]bool `json:"notificationPreferences,omitempty"`
+	// AgentModes holds each agent the person set to on or off; an agent not listed is auto.
+	AgentModes map[string]agentswitch.Mode `json:"agentModes,omitempty"`
+}
+
+func (c Config) AgentMode(agent string) agentswitch.Mode {
+	if mode, ok := c.AgentModes[agent]; ok {
+		return mode
+	}
+	return agentswitch.Auto
+}
+
+func (c *Config) SetAgentMode(agent string, mode agentswitch.Mode) {
+	if mode == agentswitch.Auto {
+		delete(c.AgentModes, agent)
+		return
+	}
+	if c.AgentModes == nil {
+		c.AgentModes = map[string]agentswitch.Mode{}
+	}
+	c.AgentModes[agent] = mode
 }
 
 // ResumesAfterLimit reports whether sessions a usage limit stopped resume
@@ -94,6 +115,9 @@ func Load() (Config, error) {
 	if err := validateCodexRecentHours(config.CodexRecentHours); err != nil {
 		return Config{}, err
 	}
+	if err := validateAgents(config.AgentModes); err != nil {
+		return Config{}, err
+	}
 	if err := validateDashboardListen(config.Listen); err != nil {
 		return Config{}, err
 	}
@@ -116,6 +140,9 @@ func Save(config Config) error {
 	if err := validateCodexRecentHours(config.CodexRecentHours); err != nil {
 		return err
 	}
+	if err := validateAgents(config.AgentModes); err != nil {
+		return err
+	}
 	if err := validateDashboardListen(config.Listen); err != nil {
 		return err
 	}
@@ -127,6 +154,37 @@ func Save(config Config) error {
 		return fmt.Errorf("create dashboard config directory: %w", err)
 	}
 	return os.WriteFile(Path(), append(data, '\n'), 0600)
+}
+
+// LoadAgentModes reads only the agent settings, so a mistake elsewhere in the
+// file does not change which agents are on or off.
+func LoadAgentModes() (Config, error) {
+	data, err := os.ReadFile(Path())
+	if os.IsNotExist(err) {
+		return Config{}, nil
+	}
+	if err != nil {
+		return Config{}, fmt.Errorf("read dashboard config: %w", err)
+	}
+	var config struct {
+		AgentModes map[string]agentswitch.Mode `json:"agentModes"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return Config{}, fmt.Errorf("parse dashboard config: %w", err)
+	}
+	if err := validateAgents(config.AgentModes); err != nil {
+		return Config{}, err
+	}
+	return Config{AgentModes: config.AgentModes}, nil
+}
+
+func validateAgents(agents map[string]agentswitch.Mode) error {
+	for agent, mode := range agents {
+		if _, err := agentswitch.ParseMode(string(mode)); err != nil {
+			return fmt.Errorf("agentModes.%s: %w", agent, err)
+		}
+	}
+	return nil
 }
 
 func validateCodexRecentHours(hours int) error {

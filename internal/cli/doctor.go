@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/acphost"
+	"github.com/zm2231/agenthail/internal/agentswitch"
 	"github.com/zm2231/agenthail/internal/claudehooks"
 	"github.com/zm2231/agenthail/internal/claudemcp"
 	"github.com/zm2231/agenthail/internal/daemonctl"
@@ -36,12 +37,15 @@ func (a *App) cmdDoctor(args []string) error {
 		Error             string                 `json:"error,omitempty"`
 		SigninOff         string                 `json:"signinOff,omitempty"`
 		SigninUnavailable string                 `json:"signinUnavailable,omitempty"`
+		AgentOff          string                 `json:"agentOff,omitempty"`
 		AgentUnavailable  string                 `json:"agentUnavailable,omitempty"`
 		Runtime           *surface.RuntimeStatus `json:"runtime,omitempty"`
 	}
 	var results []doctorResult
 	failures := 0
 	home, _ := os.UserHomeDir()
+	_, settingsErr := dashconfig.Load()
+	modes, modesErr := dashconfig.LoadAgentModes()
 	for _, e := range a.Surfaces {
 		if !surface.Listed(e.Surface) {
 			continue
@@ -78,17 +82,20 @@ func (a *App) cmdDoctor(args []string) error {
 		if caps.Steer {
 			enabled = append(enabled, "steer")
 		}
+		mode := modes.AgentMode(e.Name)
+		_, local := e.Surface.(surface.LocalAgent)
+		if local && modesErr != nil {
+			results = append(results, doctorResult{Surface: e.Name, Capabilities: enabled, WritePath: "checked immediately before delivery", Error: fmt.Sprintf("whether %s is turned on or off cannot be read until %s is fixed: %s", e.Name, dashconfig.Path(), modesErr)})
+			failures++
+			continue
+		}
+		if off := surface.AgentTurnedOff(e.Surface, mode); off != nil {
+			results = append(results, doctorResult{Surface: e.Name, Capabilities: enabled, WritePath: "checked immediately before delivery", OK: true, AgentOff: off.Error()})
+			continue
+		}
 		var healthErr error
 		if checker, ok := e.Surface.(surface.HealthChecker); ok {
 			healthErr = checker.Health(ctx)
-		}
-		if acp, ok := e.Surface.(interface{ Agent() acphost.Agent }); ok && !acp.Agent().Installed() {
-			if acp.Agent().BuiltIn() {
-				agent := acp.Agent()
-				results = append(results, doctorResult{Surface: e.Name, Capabilities: enabled, OK: true, AgentUnavailable: fmt.Sprintf("%s is not installed on this computer, so it is unavailable here. Install %q to start %s sessions, or turn it off with {\"id\": %q, \"disabled\": true} under acpAgents in %s.", agent.DisplayName(), agent.Command[0], agent.DisplayName(), agent.ID, surface.AgenthailConfigPath(home))})
-				continue
-			}
-			healthErr = fmt.Errorf("%s: command %q is not installed", acp.Agent().DisplayName(), acp.Agent().Command[0])
 		}
 		var sessions []surface.Session
 		var err error
@@ -113,6 +120,17 @@ func (a *App) cmdDoctor(args []string) error {
 		if signin.IsUnavailable(err) {
 			signinUnavailable = err.Error()
 			err = nil
+		}
+		if local {
+			switch checked := surface.AgentHealth(e.Surface, mode, err); {
+			case agentswitch.IsUnavailable(checked):
+				results = append(results, doctorResult{Surface: e.Name, Capabilities: enabled, WritePath: "checked immediately before delivery", OK: true, AgentUnavailable: checked.Error()})
+				continue
+			case agentswitch.IsMissing(checked):
+				results = append(results, doctorResult{Surface: e.Name, Capabilities: enabled, WritePath: "checked immediately before delivery", Error: checked.Error()})
+				failures++
+				continue
+			}
 		}
 		result := doctorResult{Surface: e.Name, Capabilities: enabled, Sessions: len(sessions), WritePath: "checked immediately before delivery", OK: err == nil, SigninOff: signinOff, SigninUnavailable: signinUnavailable}
 		if provider, ok := e.Surface.(surface.RuntimeStatusProvider); ok {
@@ -149,7 +167,6 @@ func (a *App) cmdDoctor(args []string) error {
 		results = append(results, result)
 	}
 	signins := a.signinStatus(ctx)
-	_, settingsErr := dashconfig.Load()
 	if settingsErr != nil {
 		settingsErr = fmt.Errorf("%s cannot be read; until it is fixed new sessions can be refused and queued messages wait for an idle session rather than steer: %w", dashconfig.Path(), settingsErr)
 		failures++
@@ -559,7 +576,9 @@ func (a *App) cmdDoctor(args []string) error {
 			if result.SigninUnavailable != "" {
 				fmt.Printf("  sign-in unavailable: %s\n", result.SigninUnavailable)
 			}
-			if result.AgentUnavailable != "" {
+			if result.AgentOff != "" {
+				fmt.Printf("  off: %s\n", result.AgentOff)
+			} else if result.AgentUnavailable != "" {
 				fmt.Printf("  unavailable: %s\n", result.AgentUnavailable)
 			} else if result.OK {
 				fmt.Printf("  sessions: %d\n", result.Sessions)

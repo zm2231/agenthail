@@ -25,6 +25,8 @@ struct SurfaceOverview: Identifiable, Equatable {
         case degraded
         case signinOff
         case signinUnavailable
+        case agentOff
+        case agentUnavailable
         case unavailable
     }
 
@@ -49,6 +51,8 @@ struct SurfaceOverview: Identifiable, Equatable {
         case .degraded: return "Needs attention"
         case .signinOff: return "Sign-in off"
         case .signinUnavailable: return "No browser here"
+        case .agentOff: return "Off"
+        case .agentUnavailable: return "Not installed here"
         case .unavailable: return "Unavailable"
         }
     }
@@ -78,6 +82,8 @@ struct SurfaceOverview: Identifiable, Equatable {
         case "degraded": return .degraded
         case "signin_off": return .signinOff
         case "signin_unavailable": return .signinUnavailable
+        case "agent_off": return .agentOff
+        case "agent_unavailable": return .agentUnavailable
         default: return .unavailable
         }
     }
@@ -104,6 +110,10 @@ struct SurfaceOverview: Identifiable, Equatable {
             return SurfaceProblem(sentence: "\(consumer) can't sign in: browser sign-in is off.", fix: .browserSignIn, details: details)
         case "signin_unavailable":
             return SurfaceProblem(sentence: "\(consumer) can't sign in: this computer has no browser.", fix: .browserSignIn, details: details)
+        case "agent_off":
+            return SurfaceProblem(sentence: "\(name) is turned off on this Mac.", fix: nil, details: details)
+        case "agent_unavailable":
+            return SurfaceProblem(sentence: "\(name) is not installed on this Mac.", fix: nil, details: details)
         default:
             break
         }

@@ -12,6 +12,7 @@ import (
 	"github.com/zm2231/agenthail/internal/claudepick"
 	"github.com/zm2231/agenthail/internal/dashconfig"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/acpsurface"
 )
 
 func claudeRootsHome(t *testing.T) string {
@@ -158,13 +159,6 @@ func TestDoctorReportsASkippedACPAgentEntry(t *testing.T) {
 	}
 }
 
-type acpDoctorSurface struct {
-	cliSurface
-	agent acphost.Agent
-}
-
-func (s *acpDoctorSurface) Agent() acphost.Agent { return s.agent }
-
 func TestDoctorReadsABuiltInAgentThatIsNotInstalledAsUnavailableAndFailsAConfiguredOne(t *testing.T) {
 	claudeRootsHome(t)
 	t.Setenv("PATH", t.TempDir())
@@ -172,8 +166,8 @@ func TestDoctorReadsABuiltInAgentThatIsNotInstalledAsUnavailableAndFailsAConfigu
 	builtIn := acphost.BuiltInAgents()[0]
 	configured := acphost.Agent{ID: "helper", Label: "Helper", Command: []string{"helper-agent"}}
 	app.Surfaces = append(app.Surfaces,
-		SurfaceEntry{Name: builtIn.ID, Surface: &acpDoctorSurface{cliSurface{kind: surface.SurfaceKind(builtIn.ID)}, builtIn}},
-		SurfaceEntry{Name: configured.ID, Surface: &acpDoctorSurface{cliSurface{kind: surface.SurfaceKind(configured.ID)}, configured}})
+		SurfaceEntry{Name: builtIn.ID, Surface: acpsurface.New(t.TempDir(), builtIn)},
+		SurfaceEntry{Name: configured.ID, Surface: acpsurface.New(t.TempDir(), configured)})
 	output, _ := captureStdout(t, func() error { return app.Run([]string{"doctor", "--json"}) })
 	var answer struct {
 		Surfaces []struct {
@@ -189,10 +183,10 @@ func TestDoctorReadsABuiltInAgentThatIsNotInstalledAsUnavailableAndFailsAConfigu
 	var names []string
 	for _, s := range answer.Surfaces {
 		names = append(names, s.Surface)
-		if s.Surface == builtIn.ID && (!s.OK || s.Error != "" || !strings.Contains(s.AgentUnavailable, "unavailable here") || !strings.Contains(s.AgentUnavailable, `"disabled": true`)) {
+		if s.Surface == builtIn.ID && (!s.OK || s.Error != "" || !strings.Contains(s.AgentUnavailable, "not installed") || !strings.Contains(s.AgentUnavailable, "agenthail agents use devin off")) {
 			t.Fatalf("a built-in agent that is not installed reads as unavailable, not as a fault: %+v", s)
 		}
-		if s.Surface == configured.ID && !strings.Contains(s.Error, `"helper-agent" is not installed`) {
+		if s.Surface == configured.ID && (s.OK || !strings.Contains(s.Error, "turned on but not installed") || !strings.Contains(s.Error, `"helper-agent"`)) {
 			t.Fatalf("a configured agent whose command is missing is a failure: %+v", s)
 		}
 	}

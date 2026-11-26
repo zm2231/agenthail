@@ -1171,6 +1171,19 @@ final class AgenthailModel {
         updateDashboardConfig(busyDelivery: busyDelivery.rawValue, codexRecentHours: hours)
     }
 
+    func setAgentMode(_ agent: String, mode: String) {
+        guard let api else { return }
+        Task {
+            do {
+                try await api.setAgentMode(agent, mode: mode)
+                settings = try await api.settings()
+                operationError = nil
+            } catch {
+                operationError = AgenthailAPIError.userMessage(error)
+            }
+        }
+    }
+
     /// Whether this computer resumes sessions a usage limit stopped; on unless turned off.
     var resumesAfterLimit: Bool { settings?.dashboard.resumeAfterLimit != false }
 

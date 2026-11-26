@@ -5,6 +5,21 @@ import { createLoginLink, hideRemoteQR, revealRemoteQR, updateSettings } from ".
 import { $ } from "./dom.js";
 
 export function bindSettingsEvents() {
+  document.addEventListener("change", async (event) => {
+    const select = event.target.closest("[data-agent-mode]");
+    if (!select) return;
+    select.disabled = true;
+    try {
+      await updateSettings({ action: "agent-mode", agent: select.dataset.agentMode, mode: select.value });
+      await load(true);
+      toast("Agent setting saved.");
+    } catch (error) {
+      toast(friendlyError(error));
+      await load(true);
+    } finally {
+      select.disabled = false;
+    }
+  });
   document.addEventListener("click", async (event) => {
     const repair = event.target.closest("[data-surface-repair]");
     if (repair) {

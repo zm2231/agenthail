@@ -168,7 +168,7 @@ private struct SurfaceCard: View {
         switch overview.health {
         case .healthy: return DesktopPalette.done
         case .degraded: return DesktopPalette.failed
-        case .signinOff, .signinUnavailable: return DesktopPalette.text2
+        case .signinOff, .signinUnavailable, .agentOff, .agentUnavailable: return DesktopPalette.text2
         case .unavailable: return DesktopPalette.failed
         }
     }

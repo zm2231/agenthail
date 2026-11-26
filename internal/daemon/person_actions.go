@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/agentroles"
+	"github.com/zm2231/agenthail/internal/agentswitch"
 
 	"github.com/zm2231/agenthail/internal/broadcast"
 	"github.com/zm2231/agenthail/internal/daemonapi"
@@ -23,7 +24,8 @@ const (
 
 type personActionRequest struct {
 	dashboardActionRequest
-	ResumeAfterLimit bool `json:"resumeAfterLimit"`
+	ResumeAfterLimit bool   `json:"resumeAfterLimit"`
+	Mode             string `json:"mode"`
 }
 
 func decodePersonAction(a daemonapi.PersonAction) (personActionRequest, error) {
@@ -227,6 +229,19 @@ func (d *Daemon) describePersonAction(api string, request personActionRequest) (
 				return "Turn on resuming sessions a usage limit stopped", nil
 			}
 			return "Turn off resuming sessions a usage limit stopped", nil
+		}
+		if request.Action == "agent-mode" {
+			mode, err := agentswitch.ParseMode(request.Mode)
+			if err != nil {
+				return "", refuse("invalid", err.Error())
+			}
+			switch mode {
+			case agentswitch.Off:
+				return fmt.Sprintf("Turn off %s on this computer", request.Agent), nil
+			case agentswitch.On:
+				return fmt.Sprintf("Turn on %s on this computer, so a missing %s is a failure", request.Agent, request.Agent), nil
+			}
+			return fmt.Sprintf("Use %s on this computer whenever it is installed", request.Agent), nil
 		}
 		return "", refuse("invalid", "the setting "+request.Action+" cannot be asked for.")
 	}

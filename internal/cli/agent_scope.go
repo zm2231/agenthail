@@ -94,7 +94,7 @@ func (a *App) controlScopeOf(ctx context.Context, target string) error {
 var gatedActions = []string{
 	"project-add", "project-remove", "project-rename", "project-archive", "project-unarchive", "project-link", "project-unlink", "project-setting",
 	"coordinator-set", "coordinator-new", "coordinator-clear",
-	"resume-after-limit",
+	"resume-after-limit", "agent-mode",
 	"relay-add", "relay-remove",
 	"channel-create", "channel-delete", "channel-rename", "channel-add", "channel-remove",
 	"queue-cancel", "queue-clear",

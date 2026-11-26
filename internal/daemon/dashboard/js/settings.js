@@ -29,6 +29,18 @@ export function renderClaudeDefaultRoot(chosen, roots) {
   select.value = chosen || "";
 }
 
+const agentModes = [["auto", "Automatic (when installed)"], ["on", "On"], ["off", "Off"]];
+const agentStates = { on: ["healthy", "In use"], off: ["agent_off", "Off"], unavailable: ["agent_unavailable", "Not installed here"], missing: ["unavailable", "Missing"] };
+
+export function renderAgents(agents) {
+  $("#agents-list").innerHTML = agents.map((agent) => {
+    const options = agentModes.map(([mode, label]) => `<option value="${mode}"${agent.mode === mode ? " selected" : ""}>${label}</option>`).join("");
+    const [stateClass, stateLabel] = agentStates[agent.state] || agentStates.missing;
+    const detail = agent.state === "missing" ? `<p class="signin-problem">${escape(agent.detail || "")}</p>` : agent.state === "unavailable" ? `<p class="signin-resolved">${escape(agent.detail || "")}</p>` : "";
+    return `<div class="signin-consumer"><div><strong>${escape(agent.label)}</strong><span class="health-state ${stateClass}">${stateLabel}</span>${detail}</div><label><span class="sr-only">Setting for ${escape(agent.label)}</span><select data-agent-mode="${escape(agent.id)}">${options}</select></label></div>`;
+  }).join("") || '<div class="empty-card">No agents run on this computer.</div>';
+}
+
 export function renderSettings() {
   if (!app.settings) return;
   const { dashboard, remoteAccess } = app.settings;
@@ -37,6 +49,7 @@ export function renderSettings() {
   $("#settings-resume-after-limit").checked = dashboard.resumeAfterLimit !== false;
   $("#settings-move-after-limit").checked = dashboard.moveAfterLimit !== false;
   renderClaudeDefaultRoot(app.settings.claudeDefaultRoot, app.settings.claudeRoots || []);
+  renderAgents(app.settings.agents || []);
   $("#settings-listener").textContent = dashboard.listen;
   renderSurfaceHealth();
   const remoteQR = app.remoteQRVisible

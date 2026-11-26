@@ -106,6 +106,7 @@ func commandFlagSpec(command string, args []string) (flagSpec, bool) {
 		"move":    {values: map[string]bool{"--to": true, "--root": true, "--wait": true, "--timeout": true}, bools: map[string]bool{"--json": true, "--help": true, "--stop-terminal": true, "--unfinished": true}},
 		"devices": {values: map[string]bool{"--name": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"signin":  {values: map[string]bool{"--label": true}, bools: map[string]bool{"--json": true, "--help": true}},
+		"agents":  {bools: map[string]bool{"--json": true, "--help": true}},
 		"person":  {bools: map[string]bool{"--reset": true, "--json": true}},
 		"brief":   {values: map[string]bool{"--from": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"doctor":  {bools: map[string]bool{"--json": true}}, "registry": {}, "permissions": {bools: map[string]bool{"--json": true}}, "triggers": {values: map[string]bool{"--trigger": true, "--session": true, "--limit": true}, bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},

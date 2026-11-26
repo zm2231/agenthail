@@ -230,6 +230,8 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdProject(rest)
 	case "signin":
 		return a.cmdSignin(rest)
+	case "agents":
+		return a.cmdAgents(rest)
 	case "identify":
 		return a.cmdIdentify(rest)
 	case "identity", "identities":
