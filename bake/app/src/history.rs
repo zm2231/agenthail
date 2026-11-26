@@ -6,7 +6,7 @@ use crate::{App, Bg};
 pub fn caught_up(s: &mut App, id: &str) {
     let Some(pane) = s.panes.get_mut(id) else { return };
     pane.caught_up = true;
-    if pane.earlier.at_top {
+    if pane.earlier.at_top || pane.blocks.is_empty() {
         load_older(s, id);
     }
 }
