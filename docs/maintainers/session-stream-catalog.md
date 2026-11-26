@@ -110,7 +110,24 @@ Each session event has `itemId`, optional `providerKey`, mutation `version`,
 operation (`upsert`, `remove`, or `phase`), `kind`, optional `turnId`
 and `ts`, bounded `body`, `truncated`, optional `truncationReason`, and optional `bodyRef`. A body
 reference is opaque, bound to the authenticated session, range-limited and
-expires with journal retention; it never names a host path. A source failure
+expires with journal retention; it never names a host path.
+
+`GET /api/v1/session-stream-body?id=<session>&ref=<bodyRef>&start=<byte>[&end=<byte>][&version=<n>]`
+returns `{sessionId, bodyRef, version, start, end, total, body, truncated}`:
+the bytes from `start` up to `end` (at most 16 KiB, the default), cut back to
+whole UTF-8 characters. `version` is the session sequence of the body's last
+whole write, read in the same transaction as the range. A rewrite of the body
+gives it a new version, even when the new body has the same length and the
+same first bytes; appending to its tail keeps the version, because the bytes
+already read do not change. A ranged reader passes the version of its first
+read as `version` on the next ones; once the body has been rewritten, the read
+is refused with `409 body_rewritten`, carrying the current `version` and
+`total` beside the error, and the reader starts again from `start=0`. A
+malformed `version` is `400 invalid_version`, an unknown or expired reference
+`404 body_unavailable`, and a bad range `400 invalid_range`. The endpoint is
+routed to the session's host, so the same holds for a session on a paired host.
+
+A source failure
 (provider stream or seed error, or a rejected journal write) is a typed
 `source-error` reset with a bounded `reason`, not a removal. A rejected write
 does not advance that item's provider cursor or body state, so a replay of the
