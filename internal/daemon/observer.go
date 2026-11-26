@@ -200,6 +200,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 // A session watched only to see its turn end is not armed when seen busy, so a turn it started itself pushes nothing.
 func (d *Daemon) observeInScan(ctx context.Context, scan *relayScan, adapter surface.Surface, session *surface.Session, arm bool) {
 	read := *session
+	exited := session.Ended || relayTargetInactive(session) || claudeProcessExited(session)
 	observed := observeOnce(adapter, session, d.observeTurn)
 	observation, err := observed.get(ctx)
 	unobserved := err != nil && d.readUnobservedBackground(ctx, adapter, session)
@@ -314,6 +315,13 @@ func (d *Daemon) observeInScan(ctx context.Context, scan *relayScan, adapter sur
 		}
 		if !stale {
 			d.pushWaitingTurn(session, observation.CompletedTurnID)
+		}
+	}
+	// A session stopped mid-turn writes no completion, so once its last
+	// observation after exit binds none, the turn is over.
+	if exited && observation.Status != surface.StatusBusy && observation.ActiveTurnID == "" {
+		if err := d.Registry.StopOpenTurn(session.ID, time.Now()); err != nil {
+			d.log.Printf("stop open turn %s: %s", d.resolveDisplay(session.ID), err)
 		}
 	}
 	notice := turnCompletedNotice{title: notificationTitle, desktop: notificationBody, mobile: notificationBody, outcome: notificationOutcome}

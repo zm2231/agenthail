@@ -493,6 +493,7 @@ func migrateTx(tx *sql.Tx) error {
 		{"ledger_key", `TEXT NOT NULL DEFAULT ''`},
 		{"waiting_pushed_at_ms", `INTEGER NOT NULL DEFAULT 0`},
 		{"lead_escalated_at_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"stopped_at_ms", `INTEGER NOT NULL DEFAULT 0`},
 	} {
 		if err := ensureColumn(tx, "turn_ends", column.name, column.decl); err != nil {
 			return err

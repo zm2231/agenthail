@@ -42,7 +42,7 @@ func (r *Registry) OpenTurn(sessionID string, at time.Time) error {
 	return tx.Commit()
 }
 
-// A turn has started since the last end when one was opened, the last one completed, or the runtime names another active turn; a later end of the same turn replaces the earlier one.
+// A turn has started since the last end when one was opened, the last one completed or stopped, or the runtime names another active turn; a later end of the same turn replaces the earlier one.
 func (r *Registry) EndTurn(end TurnEnd, activeTurnID string, at time.Time) (TurnEnd, error) {
 	next, err := json.Marshal(end.Next)
 	if err != nil {
@@ -53,10 +53,10 @@ func (r *Registry) EndTurn(end TurnEnd, activeTurnID string, at time.Time) (Turn
 		return TurnEnd{}, err
 	}
 	defer tx.Rollback()
-	var started, ended int64
+	var started, ended, stopped int64
 	var turnID, completed string
-	err = tx.QueryRow(`SELECT started_at_ms,ended_at_ms,turn_id,completed_turn_id FROM turn_ends WHERE session_id=? ORDER BY started_at_ms DESC LIMIT 1`, end.SessionID).Scan(&started, &ended, &turnID, &completed)
-	fresh := errors.Is(err, sql.ErrNoRows) || err == nil && (completed != "" || ended > 0 && turnID != "" && activeTurnID != "" && turnID != activeTurnID)
+	err = tx.QueryRow(`SELECT started_at_ms,ended_at_ms,turn_id,completed_turn_id,stopped_at_ms FROM turn_ends WHERE session_id=? ORDER BY started_at_ms DESC LIMIT 1`, end.SessionID).Scan(&started, &ended, &turnID, &completed, &stopped)
+	fresh := errors.Is(err, sql.ErrNoRows) || err == nil && (completed != "" || stopped > 0 || ended > 0 && turnID != "" && activeTurnID != "" && turnID != activeTurnID)
 	switch {
 	case err != nil && !errors.Is(err, sql.ErrNoRows):
 		return TurnEnd{}, err
@@ -75,6 +75,12 @@ func (r *Registry) EndTurn(end TurnEnd, activeTurnID string, at time.Time) (Turn
 	}
 	end.StartedAt, end.EndedAt, end.TurnID = time.UnixMilli(started).UTC(), time.UnixMilli(at.UnixMilli()).UTC(), activeTurnID
 	return end, nil
+}
+
+// StopOpenTurn marks the newest turn of a session whose process has exited as stopped when no completion was bound to it, so it is no longer watched; a completion seen later still binds to it.
+func (r *Registry) StopOpenTurn(sessionID string, at time.Time) error {
+	_, err := r.db.Exec(`UPDATE turn_ends SET stopped_at_ms=? WHERE session_id=? AND completed_turn_id='' AND stopped_at_ms=0 AND started_at_ms=(SELECT MAX(started_at_ms) FROM turn_ends WHERE session_id=?)`, at.UnixMilli(), sessionID, sessionID)
+	return err
 }
 
 func (r *Registry) MarkTurnTyped(sessionID string, typed bool) error {
