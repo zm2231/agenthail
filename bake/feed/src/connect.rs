@@ -68,7 +68,8 @@ impl Problem {
 
     pub fn bar(&self, offline: Option<Duration>) -> String {
         match (self, offline) {
-            (Problem::Slow | Problem::StartFailed(_), _) | (_, None) => self.title().into(),
+            (Problem::Slow, _) => "Agenthail is slow to respond".into(),
+            (Problem::StartFailed(_), _) | (_, None) => self.title().into(),
             (_, Some(for_)) => {
                 let m = for_.as_secs() / 60;
                 let age = match m {
@@ -227,7 +228,7 @@ mod tests {
         assert_eq!(down.bar(Some(Duration::from_secs(20))), "Offline · as of now");
         assert_eq!(down.bar(Some(Duration::from_secs(5 * 60))), "Offline · as of 5m");
         assert_eq!(down.bar(Some(Duration::from_secs(3 * 3600))), "Offline · as of 3h");
-        assert_eq!(Problem::Slow.bar(Some(Duration::from_secs(600))), "Waiting for Agenthail");
+        assert_eq!(Problem::Slow.bar(Some(Duration::from_secs(600))), "Agenthail is slow to respond");
         assert_eq!(Problem::StartFailed("boom".into()).bar(Some(Duration::from_secs(600))), "Agenthail didn't start");
     }
 
