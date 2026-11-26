@@ -63,6 +63,7 @@ pub struct Sheet {
     open: Option<Choice>,
     starting: bool,
     submitted: Option<String>,
+    uncertain: bool,
     error: Option<String>,
     existing: Option<String>,
     prefill: Prefill,
@@ -90,6 +91,7 @@ impl Sheet {
             open: None,
             starting: false,
             submitted: None,
+            uncertain: false,
             error: None,
             existing: None,
             prefill,
@@ -220,7 +222,12 @@ impl Sheet {
                 self.existing = Some(session);
                 Next::Stay
             }
-            Outcome::Unknown { session: None, message } | Outcome::Failed(message) => {
+            Outcome::Unknown { session: None, message } => {
+                self.submitted = Some(message);
+                self.uncertain = true;
+                Next::Stay
+            }
+            Outcome::Failed(message) => {
                 self.error = Some(message);
                 Next::Stay
             }
@@ -229,6 +236,7 @@ impl Sheet {
 
     fn again(&mut self) {
         self.submitted = None;
+        self.uncertain = false;
         self.existing = None;
         self.error = None;
         self.message = TextEdit::new("");
@@ -432,6 +440,14 @@ fn start_another(s: &mut App, tx: &mut Tx) {
         sheet.again();
         tx.focus("new-session-message", false);
     }
+}
+
+fn start_again(s: &mut App) {
+    if let Some(sheet) = s.new_session.as_mut() {
+        sheet.submitted = None;
+        sheet.uncertain = false;
+    }
+    start(s);
 }
 
 fn open_existing(s: &mut App) {
@@ -684,8 +700,13 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
     let mut foot = row().w_full().gap(8.0).items_center().pt(4.0);
     if let Some(submitted) = &sheet.submitted {
         foot = foot
-            .child(note(submitted, muted()).shrink())
-            .child(Button::new("Start another").variant(ButtonVariant::Ghost).on_press_tx(start_another).build(k))
+            .child(note(submitted, muted()).shrink());
+        foot = if sheet.uncertain {
+            foot.child(Button::new("Start again").variant(ButtonVariant::Ghost).on_press(start_again).build(k))
+        } else {
+            foot.child(Button::new("Start another").variant(ButtonVariant::Ghost).on_press_tx(start_another).build(k))
+        };
+        foot = foot
             .child(Button::new("Done").variant(ButtonVariant::Contrast).on_press(close).build(k));
     } else {
         let hint = if sheet.starting {
@@ -739,6 +760,14 @@ mod tests {
         assert!(!sheet.can_start(), "the session exists, so Start would make a second one");
         sheet.again();
         assert!(sheet.message.text.is_empty() && sheet.existing.is_none());
+    }
+
+    #[test]
+    fn an_unknown_outcome_asks_before_starting_again() {
+        let mut sheet = ready();
+        assert!(matches!(sheet.settle(Outcome::Unknown { session: None, message: "can't tell".into() }), Next::Stay));
+        assert!(sheet.uncertain && !sheet.can_start(), "Start would make a second session if the first one started");
+        assert_eq!(sheet.message.text, "Fix the build", "Start again sends the same form");
     }
 
     #[test]
