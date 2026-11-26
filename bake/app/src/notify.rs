@@ -9,6 +9,8 @@ use rune_notify::{Click, Notification};
 
 use crate::{App, Screen};
 
+const WITHDRAWN_FOR: std::time::Duration = std::time::Duration::from_secs(600);
+
 enum Done {
     Prefs(Option<Prefs>),
     Acted(String, String, Result<(), RespondError>),
@@ -24,6 +26,7 @@ pub struct State {
     failed: bool,
     focused: bool,
     reads: u64,
+    withdrawn: Vec<(String, std::time::Instant)>,
     pub sessions_moved: bool,
     clicks: Receiver<Click>,
     clicked: Sender<Click>,
@@ -35,7 +38,7 @@ impl Default for State {
     fn default() -> Self {
         let (clicked, clicks) = channel();
         let (tx, rx) = channel();
-        State { store: Notified::default(), path: None, prefs: None, on: false, asking: false, stale: true, failed: false, focused: false, reads: 0, sessions_moved: false, clicks, clicked, tx, rx }
+        State { store: Notified::default(), path: None, prefs: None, on: false, asking: false, stale: true, failed: false, focused: false, reads: 0, withdrawn: Vec::new(), sessions_moved: false, clicks, clicked, tx, rx }
     }
 }
 
@@ -171,33 +174,38 @@ pub fn tick(s: &mut App) -> bool {
     if st.stale {
         read_prefs(s);
     }
+    let sound = s.notify.prefs.is_some() && !s.notify.failed;
     let mut steps = Vec::new();
     let reads = s.ov.inbox.reads;
     if reads != s.notify.reads
         && let Some(inbox) = &s.ov.inbox.inbox
     {
         s.notify.reads = reads;
-        let found = feed::notify::needs(&inbox.decisions, &s.sessions, s.notify.prefs.is_some());
+        let found = feed::notify::needs(&inbox.decisions, &s.sessions, sound);
         let mut store = std::mem::take(&mut s.notify.store);
         steps.push(store.take(Kind::Needs, found, &inbox.read, now, |n| focused && on_screen(s, n)));
         s.notify.store = store;
     }
     if std::mem::take(&mut s.notify.sessions_moved) {
         let leads: HashMap<String, String> = s.ov.d.projects.iter().filter_map(|p| Some((p.key.clone(), p.lead.clone()?))).collect();
-        let found = feed::notify::finished(&s.sessions, &leads, s.notify.prefs.as_ref(), now);
+        let found = feed::notify::finished(&s.sessions, &leads, &s.notify.prefs.clone().unwrap_or_default(), sound, now);
         let mut store = std::mem::take(&mut s.notify.store);
         steps.push(store.take(Kind::Finished, found, &[String::new()], now, |n| focused && on_screen(s, n)));
         s.notify.store = store;
     }
     let mut dirty = false;
+    let mut withdrawn = std::mem::take(&mut s.notify.withdrawn);
     for step in steps {
         dirty |= step.dirty;
-        let gone: Vec<&str> = step.remove.iter().map(String::as_str).collect();
+        withdrawn.extend(step.remove.into_iter().map(|key| (key, std::time::Instant::now())));
+        withdrawn.retain(|(_, at)| at.elapsed() < WITHDRAWN_FOR);
+        let gone: Vec<&str> = withdrawn.iter().map(|(key, _)| key.as_str()).collect();
         rune_notify::remove(&gone);
         for n in &step.post {
             post(n);
         }
     }
+    s.notify.withdrawn = withdrawn;
     if dirty && let Some(path) = &s.notify.path {
         let _ = s.notify.store.save(path);
     }

@@ -126,8 +126,8 @@ pub fn needs(decisions: &[Decision], sessions: &[Session], sound: bool) -> Vec<N
     out
 }
 
-pub fn finished(sessions: &[Session], leads: &HashMap<String, String>, prefs: Option<&Prefs>, now: OffsetDateTime) -> Vec<Notice> {
-    let quiet = prefs.cloned().unwrap_or_default().lead_completions_only;
+pub fn finished(sessions: &[Session], leads: &HashMap<String, String>, prefs: &Prefs, sound: bool, now: OffsetDateTime) -> Vec<Notice> {
+    let quiet = prefs.lead_completions_only;
     let mut out = Vec::new();
     for s in sessions.iter().filter(|s| !s.archived) {
         let Some(done) = &s.turn_completion else { continue };
@@ -148,7 +148,7 @@ pub fn finished(sessions: &[Session], leads: &HashMap<String, String>, prefs: Op
             (_, headline) => format!("Done: {headline}"),
         };
         let title = s.title();
-        out.push(Notice { key: format!("done|{}|{turn}", s.id), kind: Kind::Finished, session: s.id.clone(), source: String::new(), thread: title.clone(), title, body, request: None, buttons: Vec::new(), sound: prefs.is_some() });
+        out.push(Notice { key: format!("done|{}|{turn}", s.id), kind: Kind::Finished, session: s.id.clone(), source: String::new(), thread: title.clone(), title, body, request: None, buttons: Vec::new(), sound });
     }
     out
 }

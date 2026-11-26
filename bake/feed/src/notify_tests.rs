@@ -39,7 +39,7 @@ fn keys(notices: &[Notice]) -> Vec<&str> {
 
 #[test]
 fn a_recent_finished_or_failed_turn_notifies_once_per_turn() {
-    let found = finished(&sessions(), &leads(), Some(&Prefs::default()), now());
+    let found = finished(&sessions(), &leads(), &Prefs::default(), true, now());
     assert_eq!(keys(&found), ["done|lead|t1", "done|solo|t3"]);
     assert_eq!(found[0].title, "@lead");
     assert_eq!(found[0].thread, "@lead");
@@ -51,14 +51,14 @@ fn a_recent_finished_or_failed_turn_notifies_once_per_turn() {
 #[test]
 fn other_agents_in_a_led_project_finish_quietly_only_while_the_preference_is_on() {
     let off = Prefs { lead_completions_only: false };
-    assert_eq!(keys(&finished(&sessions(), &leads(), Some(&off), now())), ["done|lead|t1", "done|worker|t2", "done|solo|t3"]);
-    assert_eq!(finished(&sessions(), &leads(), Some(&off), now())[1].body, "Finished");
-    assert_eq!(keys(&finished(&sessions(), &HashMap::new(), Some(&Prefs::default()), now())), ["done|lead|t1", "done|worker|t2", "done|solo|t3"]);
+    assert_eq!(keys(&finished(&sessions(), &leads(), &off, true, now())), ["done|lead|t1", "done|worker|t2", "done|solo|t3"]);
+    assert_eq!(finished(&sessions(), &leads(), &off, true, now())[1].body, "Finished");
+    assert_eq!(keys(&finished(&sessions(), &HashMap::new(), &Prefs::default(), true, now())), ["done|lead|t1", "done|worker|t2", "done|solo|t3"]);
 }
 
 #[test]
-fn without_the_preferences_it_keeps_their_defaults_and_posts_silently() {
-    let found = finished(&sessions(), &leads(), None, now());
+fn unread_preferences_keep_their_defaults_and_post_silently() {
+    let found = finished(&sessions(), &leads(), &Prefs::default(), false, now());
     assert_eq!(keys(&found), ["done|lead|t1", "done|solo|t3"]);
     assert!(found.iter().all(|n| !n.sound));
 }
