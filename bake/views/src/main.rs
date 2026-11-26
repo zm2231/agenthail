@@ -70,7 +70,7 @@ fn init() -> App {
     let replay = !rune::extra_args().iter().any(|a| a == "--no-replay");
     let ask = if replay { d.last_ask() } else { None };
     needs.extend(ask.as_ref().and_then(|a| d.ask_need(a)));
-    feed::derive::needs::sort(&mut needs);
+    feed::derive::needs::arrange(&mut needs, None);
     let hands_on = d.hands_on(&[]).iter().map(|s| s.id.clone()).collect();
     let mut app = App {
         d,
