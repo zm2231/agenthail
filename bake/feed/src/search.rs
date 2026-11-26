@@ -221,6 +221,43 @@ impl Client {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum Recheck {
+    Fresh(Box<Session>),
+    Gone,
+    Unknown(String),
+}
+
+pub fn reread(detail: crate::gone::Detail, known: &Session) -> Recheck {
+    use crate::gone::Detail;
+    let v = match detail {
+        Detail::Found(v) => v,
+        Detail::Missing | Detail::Unreachable => return Recheck::Gone,
+        Detail::Failed(e) => return Recheck::Unknown(e),
+    };
+    let Ok(mut row) = serde_json::from_value::<Session>(v["session"].clone()) else {
+        return Recheck::Unknown("Agenthail sent a session this app can't read".into());
+    };
+    if row.id != known.id {
+        return Recheck::Unknown("Agenthail answered for a different session".into());
+    }
+    row.alias = v["alias"].as_str().filter(|a| !a.is_empty()).map(String::from);
+    if let Ok(caps) = serde_json::from_value(v["capabilities"].clone()) {
+        row.capabilities = caps;
+    }
+    row.read_only = v["readOnly"].as_bool().unwrap_or(false);
+    row.archived = known.archived;
+    row.project = row.project.or_else(|| known.project.clone());
+    Recheck::Fresh(Box::new(row))
+}
+
+impl Client {
+    pub fn recheck(&self, known: &Session) -> Recheck {
+        let detail = crate::gone::Detail::read(self.get_coded(&format!("/api/v1/session?id={}&limit=1", enc(&known.id))));
+        reread(detail, known)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     NewSession,
@@ -350,6 +387,22 @@ mod tests {
         a.take(page(&[9], true, 0), true);
         assert_eq!(a.items.len(), 1);
         assert!(!a.has_more);
+    }
+
+    #[test]
+    fn a_recheck_takes_the_daemons_current_row_and_keeps_what_it_does_not_send() {
+        use crate::gone::Detail;
+        let known = Session { id: "c1".into(), name: "Old name".into(), alias: Some("old".into()), status: "working".into(), archived: true, ..Session::default() };
+        let v = json!({"session": {"id": "c1", "surface": "codex", "name": "Fix the importer", "status": "idle", "lastActive": "2026-11-26T10:00:00Z"}, "alias": "fixer", "capabilities": {"interrupt": false, "steer": true, "lifecycle": {"resume": true}}, "readOnly": true});
+        let Recheck::Fresh(row) = reread(Detail::Found(v), &known) else { panic!("expected a fresh row") };
+        assert_eq!((row.name.as_str(), row.status.as_str(), row.alias.as_deref()), ("Fix the importer", "idle", Some("fixer")));
+        assert!(!row.capabilities.interrupt && row.capabilities.lifecycle.resume && row.read_only && row.archived);
+        let unaliased = reread(Detail::Found(json!({"session": {"id": "c1"}, "alias": ""})), &known);
+        assert!(matches!(unaliased, Recheck::Fresh(r) if r.alias.is_none()));
+        assert_eq!(reread(Detail::Missing, &known), Recheck::Gone);
+        assert_eq!(reread(Detail::Unreachable, &known), Recheck::Gone);
+        assert_eq!(reread(Detail::Failed("timeout".into()), &known), Recheck::Unknown("timeout".into()));
+        assert!(matches!(reread(Detail::Found(json!({"session": {"id": "other"}})), &known), Recheck::Unknown(_)));
     }
 
     #[test]
