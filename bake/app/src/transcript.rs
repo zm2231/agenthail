@@ -502,7 +502,11 @@ pub fn view(s: &App, id: &str) -> El {
             let last = i + 1 == pane.blocks.len() && pane.transcript.turn_open;
             let gap = gap_for(&pane.blocks, i);
             let cx = Cx { session: &key, block: &block.id, pane, open: &s.open };
-            memo(&block.id, (pane.revs[i], open, last, gap.to_bits()), || block_el(&cx, block, open, gap, last))
+            let images = match (&block.kind, block.id.strip_prefix("item:")) {
+                (Kind::User(_), Some(item)) => pane.transcript.images_with(item),
+                _ => 0,
+            };
+            memo(&block.id, (pane.revs[i], open, last, gap.to_bits(), images), || block_el(&cx, block, open, gap, last))
         },
     );
     let watch = id.to_string();
