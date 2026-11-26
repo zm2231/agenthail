@@ -123,6 +123,11 @@ pub(crate) fn done(s: &mut App, id: String, working: (String, i64), done: Done) 
             drop_row(s);
             s.status_line.insert(id.clone(), receipt.note(1));
         }
+        Done::SteerUnconfirmed(message) => {
+            drop_row(s);
+            hand_back(s, &id, &message);
+            s.queue_note.insert(id.clone(), "The steer wasn't confirmed. The message is back in the composer; check the conversation before resending.".into());
+        }
         Done::SteerFailed(message, error) => {
             drop_row(s);
             hand_back(s, &id, &message);

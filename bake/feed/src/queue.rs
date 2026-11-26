@@ -167,6 +167,7 @@ pub enum Done {
     Removed,
     TakenBack(String),
     Steered(Delivered),
+    SteerUnconfirmed(String),
     SteerFailed(String, RespondError),
     Unsure(Option<String>, RespondError),
     Failed(RespondError),
@@ -208,7 +209,10 @@ impl Client {
             Op::Remove => Done::Removed,
             Op::TakeBack => Done::TakenBack(message),
             Op::Steer => match self.action("steer", serde_json::json!({"sessionId": row.session_id, "message": message, "author": "person"})) {
-                Ok(reply) => Done::Steered(Delivered::read(&reply)),
+                Ok(reply) => match Delivered::read(&reply) {
+                    Delivered::Unconfirmed => Done::SteerUnconfirmed(message),
+                    receipt => Done::Steered(receipt),
+                },
                 Err(error) => Done::SteerFailed(message, error),
             },
         }
@@ -328,7 +332,7 @@ mod tests {
         seen.recv().unwrap();
         assert_eq!(seen.recv().unwrap().1, json!({"action": "steer", "sessionId": "s1", "message": "steer me", "author": "person"}));
         assert_eq!(client.queue_op(Op::Steer, &r), Done::Steered(Delivered::QueuedUntilAnswer(Some(9))));
-        assert_eq!(client.queue_op(Op::Steer, &r), Done::Steered(Delivered::Unconfirmed));
+        assert_eq!(client.queue_op(Op::Steer, &r), Done::SteerUnconfirmed("x".into()));
     }
 
     #[test]
