@@ -151,14 +151,14 @@ func (s *session) Notification(method string, params json.RawMessage) {
 		return
 	}
 	s.mu.Lock()
-	guard := s.applyStateLocked(u)
+	guard, guardTurn := s.applyStateLocked(u), s.state.TurnID
 	if !s.loading && s.norm != nil && s.norm.turnID != "" {
 		s.norm.update(u)
 	}
 	loading := s.loading
 	s.mu.Unlock()
 	if guard != "" && !loading {
-		go s.enforceCeiling(guard)
+		go s.enforceCeiling(guard, guardTurn)
 	}
 }
 
@@ -223,18 +223,17 @@ func (s *session) aboveCeilingLocked(mode string) bool {
 	return s.state.Ceiling != "" && mode != "" && RankIndex(s.agent.ModeRank(mode)) > RankIndex(s.state.Ceiling)
 }
 
-func (s *session) enforceCeiling(previous string) {
+func (s *session) enforceCeiling(previous, turnID string) {
 	s.mu.Lock()
-	current, agentSession, conn := s.state.Mode, s.state.AgentSessionID, s.conn
-	s.cancelRequestsLocked()
-	if s.norm != nil && s.norm.turnID != "" {
+	current, conn := s.state.Mode, s.conn
+	if s.norm != nil && s.norm.turnID != "" && s.norm.turnID == turnID {
 		s.norm.noticeItem(fmt.Sprintf("The agent switched itself to the %s mode, above this session's ceiling of %s. Agenthail stopped the turn and set the mode back to %s.", current, s.state.Ceiling, previous))
 	}
 	s.mu.Unlock()
 	if conn == nil {
 		return
 	}
-	_ = conn.Notify("session/cancel", acp.SessionIDParams{SessionID: agentSession})
+	_ = s.cancelTurn(turnID)
 	ctx, cancel := context.WithTimeout(context.Background(), agentTimeout)
 	defer cancel()
 	if err := s.setModeOnAgent(ctx, previous); err != nil {
@@ -701,8 +700,18 @@ func (s *session) finishTurnLocked(stop string) {
 
 func (s *session) cancel() error {
 	s.mu.Lock()
-	conn, agentSession, busy := s.conn, s.state.AgentSessionID, s.state.Status == StatusBusy
-	s.cancelRequestsLocked()
+	turnID := s.state.TurnID
+	s.mu.Unlock()
+	return s.cancelTurn(turnID)
+}
+
+func (s *session) cancelTurn(turnID string) error {
+	s.mu.Lock()
+	conn, agentSession := s.conn, s.state.AgentSessionID
+	busy := s.state.Status == StatusBusy && turnID != "" && s.state.TurnID == turnID
+	if busy {
+		s.cancelRequestsLocked()
+	}
 	s.mu.Unlock()
 	if !busy {
 		return nil
@@ -720,6 +729,7 @@ func (s *session) respond(requestID, choice string) (RespondResult, error) {
 		s.mu.Unlock()
 		return RespondResult{}, callError(CodeStale, "this request was already answered or has ended")
 	}
+	turnID := s.state.TurnID
 	var answer acp.RequestPermissionResult
 	outcome := "denied"
 	switch choice {
@@ -747,7 +757,7 @@ func (s *session) respond(requestID, choice string) (RespondResult, error) {
 	s.mu.Unlock()
 	s.changed()
 	if choice == "stop" {
-		go func() { _ = s.cancel() }()
+		go func() { _ = s.cancelTurn(turnID) }()
 	}
 	err := awaitWritten(written)
 	if err != nil {

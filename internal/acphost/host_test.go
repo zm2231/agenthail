@@ -545,3 +545,26 @@ func TestRecoveryPicksAModeTheAgentStillOffers(t *testing.T) {
 		t.Fatalf("state=%+v", done)
 	}
 }
+
+func TestALateCancelForAnEndedTurnLeavesTheNextTurnRunning(t *testing.T) {
+	h := startHost(t, fakeAgent(t, "fake"))
+	state := h.create("fake", "", "")
+	first := h.send(state.SessionID, "reply:first")
+	h.waitFor(state.SessionID, func(s State) bool { return s.LastTurnID == first })
+	second := h.send(state.SessionID, "slow")
+	h.waitFor(state.SessionID, func(s State) bool { return s.Status == StatusBusy && s.TurnID == second })
+	s := h.host.heldSession(state.SessionID)
+	if err := s.cancelTurn(first); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if now := s.snapshot(); now.Status != StatusBusy || now.TurnID != second {
+		t.Fatalf("a cancel for an ended turn stopped the next one: %+v", now)
+	}
+	if err := s.cancelTurn(second); err != nil {
+		t.Fatal(err)
+	}
+	if done := h.waitFor(state.SessionID, func(s State) bool { return s.LastTurnID == second }); done.LastStop != "cancelled" {
+		t.Fatalf("done=%+v", done)
+	}
+}
