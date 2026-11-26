@@ -221,6 +221,7 @@ impl Inbox {
         for d in page.decisions {
             let mut d = Decision { host: host.into(), host_name: host_name.into(), session_id: q(&d.session_id), project_id: q(&d.project_id), ..d };
             d.holds_up = d.holds_up.iter().map(|x| q(x)).collect();
+            d.reason = d.reason_text();
             self.decisions.push(d);
         }
         for h in page.lead_handling {
@@ -446,8 +447,8 @@ mod tests {
                 "/api/v1/decisions?host=h2",
                 200,
                 r#"{"decisions":[
-                    {"group":"stopped","kind":"parked","sessionId":"remote","projectId":"p","workItem":"p-W2","reason":"pick a bucket","holdsUp":["w"]},
-                    {"group":"stopped","kind":"parked","sessionId":"remote","projectId":"p","workItem":"p-W3","reason":"pick a bucket"},
+                    {"group":"stopped","kind":"parked","sessionId":"remote","projectId":"p","workItem":"p-W2","reason":"p-W2 waits on you: pick a bucket","holdsUp":["w"]},
+                    {"group":"stopped","kind":"parked","sessionId":"remote","projectId":"p","workItem":"p-W3","reason":"p-W3 waits on you: pick a bucket"},
                     {"group":"waiting","sessionId":"h1::local","since":"2026-11-24T10:00:00Z"}],
                   "leadHandling":[{"sessionId":"crew","heldBy":"lead","reason":"run tests"}]}"#,
             ),
@@ -456,6 +457,7 @@ mod tests {
         let rows: Vec<(&str, &str, &str)> = inbox.decisions.iter().map(|d| (d.session_id.as_str(), d.project_id.as_str(), d.host.as_str())).collect();
         assert_eq!(rows, [("h2::remote", "h2::p", "h2"), ("local", "", "")]);
         assert_eq!(inbox.decisions[0].holds_up, ["h2::w"]);
+        assert_eq!(inbox.decisions[0].reason, "pick a bucket");
         assert_eq!(inbox.decisions[0].dismissals(), [Dismiss::Parked { work_item: "p-W2", host: "h2" }, Dismiss::Parked { work_item: "p-W3", host: "h2" }]);
         assert_eq!(inbox.decisions[0].not_now_label(&Default::default()), "Not now for all 2");
         assert_eq!(inbox.lead_handling[0].session_id, "h2::crew");
