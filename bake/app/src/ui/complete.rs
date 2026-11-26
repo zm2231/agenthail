@@ -412,10 +412,7 @@ pub fn rekey(s: &mut App, old: &str, new: &str) {
     if c.goal_pending.remove(old) {
         c.goal_pending.insert(new.to_string());
     }
-    if let Some(seq) = c.prompts_asked.remove(old) {
-        let newest = c.prompts_asked.entry(new.to_string()).or_insert(seq);
-        *newest = (*newest).max(seq);
-    }
+    c.prompts_asked.remove(old);
     c.commands.remove(old);
     c.commands_asked.remove(old);
     if c.session.as_deref() == Some(old) {
@@ -427,6 +424,7 @@ pub fn rekey(s: &mut App, old: &str, new: &str) {
         search.results = None;
     }
     rebuild(s, new);
+    refresh(s, new);
 }
 
 pub fn done(s: &mut App, done: Done) {
