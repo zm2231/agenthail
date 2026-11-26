@@ -53,6 +53,7 @@ pub struct Menus {
     newest: HashMap<(String, &'static str), u64>,
     rename_seq: u64,
     refreshed: Option<(String, Instant)>,
+    models_asked: HashSet<String>,
     tx: Sender<Done>,
     rx: Receiver<Done>,
 }
@@ -79,6 +80,7 @@ impl Menus {
             newest: HashMap::new(),
             rename_seq: 0,
             refreshed: None,
+            models_asked: HashSet::new(),
             tx,
             rx,
         }
@@ -154,11 +156,17 @@ pub fn load(s: &mut App, id: &str) {
     s.menus.refreshed = Some((id.to_string(), Instant::now()));
     fetch_settings(s, id, Duration::ZERO);
     fetch_context(s, id, Duration::ZERO);
+    fetch_models(s, id);
+}
+
+fn fetch_models(s: &mut App, id: &str) {
     let surface = session(s, id).map(|x| x.surface.clone()).unwrap_or_default();
-    if !surface.is_empty() {
-        let id = id.to_string();
-        spawn(s, Duration::ZERO, move |c| c.session_models(&surface, &id).ok().map(|m| Done::Models(id, m)));
+    if surface.is_empty() {
+        return;
     }
+    s.menus.models_asked.insert(id.to_string());
+    let id = id.to_string();
+    spawn(s, Duration::ZERO, move |c| c.session_models(&surface, &id).ok().map(|m| Done::Models(id, m)));
 }
 
 fn refresh_shown(s: &mut App) {
@@ -166,6 +174,9 @@ fn refresh_shown(s: &mut App) {
         return;
     }
     let Some(id) = s.selected.clone() else { return };
+    if !s.menus.models_asked.contains(&id) {
+        fetch_models(s, &id);
+    }
     let due = s.menus.refreshed.as_ref().is_none_or(|(shown, at)| *shown != id || at.elapsed() >= REFRESH);
     if due {
         s.menus.refreshed = Some((id.clone(), Instant::now()));
