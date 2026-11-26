@@ -100,6 +100,10 @@ fn an_unsettled_send_is_retried_under_its_own_key_only_while_unchanged() {
     assert_ne!(u.key_for("ops", "hello"), "k1");
     u.record("ship", "hello", "k1", &Ok(()));
     assert_ne!(u.key_for("ship", "hello"), "k1");
+    u.record("ship", "hello", "k4", &maybe);
+    u.forget_channel("ship");
+    assert_ne!(u.key_for("ship", "hello"), "k4", "a deleted channel recreated under its name is new");
+    assert_eq!(u.key_for("ops", "status"), "k2");
     let (client, _rx) = daemon(replies(&[(400, r#"{"error":{"code":"invalid_request","message":"no members"}}"#)]));
     let plain = client.channel_send("ship", "hello", "k4").unwrap_err();
     assert!(!plain.uncertain && plain.message == "no members");

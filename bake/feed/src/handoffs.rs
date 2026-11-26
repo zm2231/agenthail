@@ -285,6 +285,10 @@ impl Unsettled {
             Err(_) => {}
         }
     }
+
+    pub fn forget_channel(&mut self, channel: &str) {
+        self.0.retain(|(at, _), _| at != channel);
+    }
 }
 
 pub const MAY_HAVE_REACHED: &str = "Some members may already have this message, so sending it again unchanged only reports what became of it and doesn't deliver it twice. Edit it to send it as a new message.";

@@ -104,9 +104,12 @@ pub fn saved(s: &mut Prefs, key: &str) {
         f.member = TextEdit::new("");
     } else if key.strip_prefix("channel-send-") == Some(f.picked.as_str()) {
         f.message = TextEdit::new("");
-    } else if key.strip_prefix("channel-delete-") == Some(f.picked.as_str()) {
-        f.picked.clear();
-        f.message = TextEdit::new("");
+    } else if let Some(name) = key.strip_prefix("channel-delete-") {
+        f.unsettled.lock().unwrap().forget_channel(name);
+        if name == f.picked {
+            f.picked.clear();
+            f.message = TextEdit::new("");
+        }
     }
 }
 
@@ -186,6 +189,7 @@ pub fn forget(s: &mut Prefs) {
 fn choose(s: &mut Prefs, who: Who, target: &str) {
     forget(s);
     *text_of(s, who) = TextEdit::new(target);
+    edited(s, if who == Who::Member { Section::Channels } else { Section::Relays });
 }
 
 pub fn matches(s: &Prefs, who: Who, off: bool) -> Option<El> {
