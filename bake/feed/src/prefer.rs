@@ -98,6 +98,7 @@ pub struct ProxyGroup {
     pub local: bool,
     pub accounts: Vec<ProxyAccount>,
     pub problem: String,
+    pub reading: bool,
 }
 
 impl ProxyGroup {
@@ -115,9 +116,14 @@ pub fn proxies(sets: &[Set]) -> Vec<ProxyGroup> {
         if out.iter().any(|g| g.proxy.id == proxy.id) {
             continue;
         }
-        out.push(ProxyGroup { proxy, host: set.host.clone(), local: set.local, accounts: set.accounts.clone(), problem: set.proxy_problem.clone() });
+        let problem = if set.problem.is_empty() { set.proxy_problem.clone() } else { set.problem.clone() };
+        out.push(ProxyGroup { proxy, host: set.host.clone(), local: set.local, accounts: set.accounts.clone(), problem, reading: set.proxy_problem == "reading" });
     }
     out
+}
+
+pub fn still_reading(sets: &[Set]) -> bool {
+    proxies(sets).iter().any(|g| g.reading)
 }
 
 pub fn accounts(sets: &[Set]) -> Vec<&Set> {
@@ -306,6 +312,24 @@ mod tests {
         assert!(!set.runs(&session(json!({"id": "h2", "state": "connected"}), "/r/a")));
         let far: Set = serde_json::from_value(json!({"host": "forge", "hostId": "h2", "root": "/r/a"})).unwrap();
         assert!(far.runs(&session(json!({"id": "h2", "state": "connected"}), "/r/a")));
+    }
+
+    #[test]
+    fn a_proxy_says_what_the_daemon_explains_and_whether_it_is_still_reading() {
+        let sets: Vec<Set> = serde_json::from_value(json!([
+            {"host": "mac", "local": true, "provider": "proxy", "proxy": {"name": "shared", "id": "px"}, "accounts": [], "proxyProblem": "reading", "problem": "Reading the shared proxy's accounts."},
+            {"host": "mac", "local": true, "provider": "proxy", "proxy": {"name": "team", "id": "pt"}, "accounts": [{"id": "a.json", "provider": "claude"}], "problem": "Every team Claude account is over its ceiling."},
+            {"host": "mac", "local": true, "provider": "proxy", "proxy": {"name": "old", "id": "po"}, "proxyProblem": "unauthorized"}
+        ]))
+        .unwrap();
+        let groups = proxies(&sets);
+        assert_eq!(groups.iter().map(|g| (g.problem.as_str(), g.reading)).collect::<Vec<_>>(), [
+            ("Reading the shared proxy's accounts.", true),
+            ("Every team Claude account is over its ceiling.", false),
+            ("unauthorized", false),
+        ]);
+        assert!(still_reading(&sets));
+        assert!(!still_reading(&sets[1..]));
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::time::{Duration, Instant};
 
 use feed::catalog::{Client, RespondError};
 use feed::limit::span;
@@ -38,6 +39,9 @@ pub struct Accounts {
     pub planning: Option<Planning>,
     seq: u64,
     sets_seq: u64,
+    pub refresh_error: Option<String>,
+    asked_at: Option<Instant>,
+    in_flight: bool,
     tx: Sender<Done>,
     rx: Receiver<Done>,
 }
@@ -45,7 +49,7 @@ pub struct Accounts {
 impl Accounts {
     pub fn new() -> Accounts {
         let (tx, rx) = channel();
-        Accounts { open: false, sets: None, planning: None, seq: 0, sets_seq: 0, tx, rx }
+        Accounts { open: false, sets: None, planning: None, seq: 0, sets_seq: 0, refresh_error: None, asked_at: None, in_flight: false, tx, rx }
     }
 }
 
@@ -59,6 +63,8 @@ fn spawn(s: &App, job: impl FnOnce(&Client) -> Done + Send + 'static) {
 
 fn fetch(s: &mut App) {
     s.accounts.sets_seq += 1;
+    s.accounts.asked_at = Some(Instant::now());
+    s.accounts.in_flight = true;
     let seq = s.accounts.sets_seq;
     spawn(s, move |c| Done::Sets(seq, c.usage_sets().map_err(|e| e.to_string())));
 }
@@ -134,7 +140,14 @@ fn settled(s: &mut App, done: Done) {
     match done {
         Done::Sets(seq, sets) => {
             if seq == s.accounts.sets_seq {
-                s.accounts.sets = Some(sets);
+                s.accounts.in_flight = false;
+                match sets {
+                    Err(error) if matches!(s.accounts.sets, Some(Ok(_))) => s.accounts.refresh_error = Some(error),
+                    sets => {
+                        s.accounts.refresh_error = None;
+                        s.accounts.sets = Some(sets);
+                    }
+                }
             }
         }
         Done::Plan(seq, plan) => {
@@ -175,6 +188,13 @@ pub fn drain(s: &mut App) -> bool {
     while let Ok(done) = s.accounts.rx.try_recv() {
         changed = true;
         settled(s, done);
+    }
+    if s.accounts.open && s.client.is_some() && !s.accounts.in_flight {
+        let reading = matches!(&s.accounts.sets, Some(Ok(sets)) if prefer::still_reading(sets));
+        let every = if reading { Duration::from_secs(2) } else { Duration::from_secs(30) };
+        if s.accounts.asked_at.is_none_or(|at| at.elapsed() >= every) {
+            fetch(s);
+        }
     }
     changed
 }
@@ -279,6 +299,9 @@ fn proxy_account(s: &App, group: &ProxyGroup, a: &ProxyAccount) -> El {
 fn panel(s: &App, layer: &mut Vec<El>) {
     let k = theme::kit();
     let mut body = col().w_full().gap(10.0);
+    if let Some(error) = &s.accounts.refresh_error {
+        body = body.child(text(format!("Couldn't refresh usage, so these readings may be out of date: {error}")).font(META).color(failed()).wrap());
+    }
     match &s.accounts.sets {
         None => body = body.child(text("Reading usage…").font(META).color(muted())),
         Some(Err(error)) => body = body.child(text(error.clone()).font(META).color(failed()).wrap()),
