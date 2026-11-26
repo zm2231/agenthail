@@ -136,6 +136,11 @@ func (d *Daemon) cleanWork(ctx context.Context, worktreePath string, options wor
 			return d.setWorkCleanup(record, registry.WorkCleanupKept, registry.WorkKeptOpen, nil)
 		}
 	}
+	if automatic {
+		if added, err := d.addedProjectRoot(record.WorktreePath); err != nil || added {
+			return d.setWorkCleanup(record, registry.WorkCleanupKept, registry.WorkKeptProject, nil)
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, workCleanTimeout)
 	defer cancel()
 	options.MergedHeads = append(options.MergedHeads, d.branchMergedHeads(ctx, record.RepoRoot, record.Branch)...)
@@ -267,4 +272,12 @@ func (d *Daemon) doWorkClean(ctx context.Context, p principal, sessionID string,
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 	}
 	return actionOK(map[string]any{"ok": true, "sessionId": sessionID, "worktree": newWorkView(record)}), nil
+}
+
+func (d *Daemon) addedProjectRoot(path string) (bool, error) {
+	records, err := d.Registry.ListProjects()
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(records, func(record registry.ProjectRecord) bool { return record.Added && record.WorkspaceRoot == path }), nil
 }

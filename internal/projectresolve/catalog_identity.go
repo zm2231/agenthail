@@ -138,7 +138,7 @@ func (c *CatalogIdentityCache) SetProjects(records []registry.ProjectRecord) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if slices.EqualFunc(c.projects, added, func(left, right registry.ProjectRecord) bool {
-		return left.ID == right.ID && left.WorkspaceRoot == right.WorkspaceRoot && left.Title == right.Title && left.Key == right.Key
+		return left.ID == right.ID && left.WorkspaceRoot == right.WorkspaceRoot && left.Title == right.Title && left.Key == right.Key && left.Worktree == right.Worktree
 	}) {
 		return
 	}
@@ -408,11 +408,9 @@ func resolveUnlinkedCatalogIdentity(ctx context.Context, path string, projects [
 		return identity, catalogGitDirs{}, true
 	}
 	inRepository := err == nil
-	candidates := []string{path}
-	if inRepository {
-		candidates = append(candidates, repository.Translate(path))
-	}
-	if added := deepestCatalogProject(projects, candidates); added != nil {
+	if worktree := WorktreeProjectHolding(projects, path); worktree != nil {
+		identity.Project = AddedCatalogProject(*deepestCatalogProject(projectsWithin(projects, worktree.WorkspaceRoot), []string{path}), inRepository)
+	} else if added := deepestCatalogProject(outsideWorktreeProjects(projects), translatedCandidates(path, repository, inRepository)); added != nil {
 		identity.Project = AddedCatalogProject(*added, inRepository && catalogWithin(repository.MainRoot, added.WorkspaceRoot))
 	} else if inRepository {
 		identity.Project = repository.implicitProject()
@@ -434,7 +432,10 @@ func resolveUnlinkedCatalogIdentity(ctx context.Context, path string, projects [
 }
 
 type CatalogRepository struct {
-	Bare        bool
+	Bare bool
+	// CommonBare is a bare repository behind the checkout, which then has no
+	// main checkout: its linked worktrees are peers.
+	CommonBare  bool
 	Toplevel    string
 	commonDir   string
 	gitDir      string
@@ -454,6 +455,12 @@ func (repository CatalogRepository) Translate(path string) string {
 		return path
 	}
 	return filepath.Join(repository.MainRoot, rel)
+}
+
+// LinkedWorktreeRoot reports that path is the root of a linked worktree of a
+// repository with a main checkout, which is added as a project of its own.
+func (repository CatalogRepository) LinkedWorktreeRoot(path string) bool {
+	return !repository.Bare && !repository.CommonBare && repository.gitDir != repository.commonDir && repository.Toplevel == path
 }
 
 // Key names root, a folder in the main checkout, on every host. A repository
@@ -486,7 +493,7 @@ func CatalogImplicitProjectID(mainRoot string) string { return "implicit:" + mai
 
 func AddedCatalogProject(record registry.ProjectRecord, inRepository bool) *CatalogProject {
 	found := &CatalogProject{ID: record.ID, LocalID: record.ID, DisplayName: record.Title, RootPath: record.WorkspaceRoot, Kind: CatalogProjectFolder, Added: true}
-	if inRepository {
+	if inRepository || record.Worktree {
 		found.Kind = CatalogProjectGit
 	}
 	if record.Key != "" {
@@ -497,6 +504,45 @@ func AddedCatalogProject(record registry.ProjectRecord, inRepository bool) *Cata
 		}
 	}
 	return found
+}
+
+func translatedCandidates(path string, repository CatalogRepository, inRepository bool) []string {
+	if !inRepository {
+		return []string{path}
+	}
+	return []string{path, repository.Translate(path)}
+}
+
+// WorktreeProjectHolding is the deepest added worktree project whose folder
+// holds path as it is, without reading it as the main checkout.
+func WorktreeProjectHolding(projects []registry.ProjectRecord, path string) *registry.ProjectRecord {
+	var deepest *registry.ProjectRecord
+	for index := range projects {
+		if projects[index].Added && projects[index].Worktree && catalogWithin(projects[index].WorkspaceRoot, path) && (deepest == nil || len(projects[index].WorkspaceRoot) > len(deepest.WorkspaceRoot)) {
+			deepest = &projects[index]
+		}
+	}
+	return deepest
+}
+
+func projectsWithin(projects []registry.ProjectRecord, root string) []registry.ProjectRecord {
+	var within []registry.ProjectRecord
+	for _, record := range projects {
+		if catalogWithin(root, record.WorkspaceRoot) {
+			within = append(within, record)
+		}
+	}
+	return within
+}
+
+func outsideWorktreeProjects(projects []registry.ProjectRecord) []registry.ProjectRecord {
+	var outside []registry.ProjectRecord
+	for _, record := range projects {
+		if WorktreeProjectHolding(projects, record.WorkspaceRoot) == nil {
+			outside = append(outside, record)
+		}
+	}
+	return outside
 }
 
 func deepestCatalogProject(projects []registry.ProjectRecord, paths []string) *registry.ProjectRecord {
@@ -671,6 +717,11 @@ func ResolveCatalogRepository(ctx context.Context, path string, repositories *Ca
 		repository.MainRoot = repository.Toplevel
 	default:
 		repository.MainRoot = repository.commonDir
+		bare, err := CatalogGit(gitCtx, repository.commonDir, "rev-parse", "--is-bare-repository")
+		if err != nil {
+			return CatalogRepository{}, false, err
+		}
+		repository.CommonBare = bare == "true"
 	}
 	if repository.Repository, repository.rootCommits, err = repositories.repository(gitCtx, repository.commonDir); err != nil {
 		return CatalogRepository{}, false, err

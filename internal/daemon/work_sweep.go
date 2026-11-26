@@ -34,13 +34,17 @@ func (d *Daemon) sweepHandMadeWorktrees(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, handMadeSweepTimeout)
 	defer cancel()
 	var found []handMadeWorktree
-	for _, root := range d.projectCheckouts(ctx) {
+	roots, added := d.projectCheckouts(ctx)
+	for _, root := range roots {
 		listed, err := worktree.List(ctx, root)
 		if err != nil {
 			d.log.Printf("list worktrees in %s: %s", root, err)
 			continue
 		}
 		for _, entry := range listed {
+			if added[entry.Path] {
+				continue
+			}
 			_, recorded, err := d.Registry.WorkAt(entry.Path)
 			if err != nil {
 				d.log.Printf("read the record of worktree %s: %s", entry.Path, err)
@@ -98,23 +102,32 @@ func (d *Daemon) removeHandMadeWorktree(ctx context.Context, item handMadeWorktr
 	}
 }
 
-// projectCheckouts are the main checkouts of the projects this host knows,
-// each once.
-func (d *Daemon) projectCheckouts(ctx context.Context) []string {
+// projectCheckouts are the checkouts whose worktrees folders the sweep
+// searches, each once: the main checkout of every project this host knows,
+// and every added worktree project, which holds worktrees of its own. added
+// names every added project's folder, which is never swept.
+func (d *Daemon) projectCheckouts(ctx context.Context) ([]string, map[string]bool) {
 	projects, err := d.Registry.ListProjects()
 	if err != nil {
 		d.log.Printf("list projects for worktrees: %s", err)
-		return nil
+		return nil, nil
 	}
 	var roots []string
+	added := map[string]bool{}
 	for _, project := range projects {
+		if project.Added {
+			added[project.WorkspaceRoot] = true
+		}
 		if !project.ArchivedAt.IsZero() || project.WorkspaceRoot == "" {
 			continue
+		}
+		if project.Added && project.Worktree && !slices.Contains(roots, project.WorkspaceRoot) {
+			roots = append(roots, project.WorkspaceRoot)
 		}
 		root, err := worktree.MainCheckout(ctx, project.WorkspaceRoot)
 		if err == nil && !slices.Contains(roots, root) {
 			roots = append(roots, root)
 		}
 	}
-	return roots
+	return roots, added
 }

@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 
+	"github.com/zm2231/agenthail/internal/projectresolve"
 	"github.com/zm2231/agenthail/internal/worktree"
 )
 
@@ -28,7 +30,11 @@ func wantsWorktree(request dashboardActionRequest) (bool, error) {
 }
 
 func (d *Daemon) beginWork(ctx context.Context, request dashboardActionRequest, cwd, alias string) (worktree.Plan, error) {
-	plan, err := worktree.Begin(ctx, d.Registry, worktree.Spec{Cwd: cwd, Branch: strings.TrimSpace(request.Worktree), Base: strings.TrimSpace(request.Base), Name: alias})
+	holder, err := d.worktreeHolder(cwd)
+	if err != nil {
+		return worktree.Plan{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
+	}
+	plan, err := worktree.Begin(ctx, d.Registry, worktree.Spec{Cwd: cwd, Branch: strings.TrimSpace(request.Worktree), Base: strings.TrimSpace(request.Base), Name: alias, Holder: holder})
 	var refused worktree.RefusedError
 	if errors.As(err, &refused) {
 		return plan, invalidRequest(fmt.Sprintf("worktree: %s", refused.Err))
@@ -37,6 +43,22 @@ func (d *Daemon) beginWork(ctx context.Context, request dashboardActionRequest, 
 		return plan, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 	}
 	return plan, nil
+}
+
+// worktreeHolder is the added worktree project holding cwd, whose own
+// worktrees folder takes the worktree so the session stays in that project.
+func (d *Daemon) worktreeHolder(cwd string) (string, error) {
+	records, err := d.Registry.ListProjects()
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = resolved
+	}
+	if holder := projectresolve.WorktreeProjectHolding(records, cwd); holder != nil {
+		return holder.WorkspaceRoot, nil
+	}
+	return "", nil
 }
 
 func (d *Daemon) abandonWork(plan worktree.Plan) {

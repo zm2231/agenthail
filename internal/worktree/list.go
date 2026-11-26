@@ -54,6 +54,9 @@ func DefaultBase(ctx context.Context, repoRoot string) string {
 	if ref, err := git(ctx, repoRoot, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil && ref != "" {
 		return ref
 	}
+	if branch := mainBranch(ctx, repoRoot); branch != "" {
+		return branch
+	}
 	return "HEAD"
 }
 
@@ -64,6 +67,16 @@ func DefaultBranch(ctx context.Context, repoRoot string) string {
 	if ref, err := git(ctx, repoRoot, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil && ref != "" {
 		return strings.TrimPrefix(ref, "origin/")
 	}
-	branch, _ := git(ctx, repoRoot, "symbolic-ref", "--quiet", "--short", "HEAD")
+	return mainBranch(ctx, repoRoot)
+}
+
+// mainBranch is the branch the main checkout has out, which repoRoot, a
+// linked worktree on a branch of its own, does not share.
+func mainBranch(ctx context.Context, repoRoot string) string {
+	main, err := MainCheckout(ctx, repoRoot)
+	if err != nil {
+		return ""
+	}
+	branch, _ := git(ctx, main, "symbolic-ref", "--quiet", "--short", "HEAD")
 	return branch
 }

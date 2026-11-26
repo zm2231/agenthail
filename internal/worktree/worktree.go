@@ -22,6 +22,10 @@ type Spec struct {
 	Branch string
 	Base   string
 	Name   string
+	// Holder is a checkout of the same repository whose worktrees folder
+	// takes the worktree, and which then stands for the repository in the
+	// plan's RepoRoot; the main checkout when empty or of another repository.
+	Holder string
 }
 
 // Plan is a worktree resolved but not yet made: nothing on disk has changed.
@@ -54,6 +58,9 @@ func NewPlan(ctx context.Context, spec Spec) (Plan, error) {
 		return Plan{}, err
 	}
 	plan := Plan{RepoRoot: main, Toplevel: toplevel, Branch: spec.Branch}
+	if spec.Holder != "" && sameRepository(ctx, cwd, spec.Holder) {
+		plan.RepoRoot = spec.Holder
+	}
 	if plan.Branch == "" {
 		plan.Branch = defaultBranch(spec.Name)
 	}
@@ -156,6 +163,15 @@ func mainWorktree(ctx context.Context, cwd, toplevel string) (string, error) {
 		return filepath.EvalSymlinks(configured)
 	}
 	return "", fmt.Errorf("the repository has no main checkout to hold worktrees")
+}
+
+func sameRepository(ctx context.Context, left, right string) bool {
+	leftCommon, err := git(ctx, left, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return false
+	}
+	rightCommon, err := git(ctx, right, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	return err == nil && leftCommon == rightCommon
 }
 
 // excludeWorktrees keeps the worktrees folder out of the main checkout's

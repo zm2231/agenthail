@@ -70,6 +70,8 @@ func newWorkHint(record registry.WorkRecord) *workHint {
 		return &workHint{Reason: "Its session is still working; it is removed once the turn ends."}
 	case registry.WorkKeptOpen:
 		return &workHint{Reason: "A session that is not archived still works in it; it is removed once that session is archived."}
+	case registry.WorkKeptProject:
+		return &workHint{Reason: "It is added as a project; it is removed once that project is removed."}
 	default:
 		return &workHint{Reason: "Removing it " + strings.TrimSpace(reason) + "."}
 	}

@@ -692,7 +692,8 @@ CREATE TABLE IF NOT EXISTS projects (
 	project_key TEXT NOT NULL DEFAULT '',
 	repository BLOB NOT NULL DEFAULT '',
 	created_at_ms INTEGER NOT NULL DEFAULT 0,
-	archived_at_ms INTEGER NOT NULL DEFAULT 0
+	archived_at_ms INTEGER NOT NULL DEFAULT 0,
+	worktree INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS project_links (
 	joined TEXT PRIMARY KEY,

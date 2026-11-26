@@ -19,7 +19,11 @@ The folder can be anywhere, including a folder inside a Git repository, such as
   title is not applied (rename it instead).
 - A folder in a linked worktree is added at the same place in the main
   checkout. The project then holds that folder in every worktree, and adding
-  it from another worktree is the same folder.
+  it from another worktree is the same folder. Two exceptions, described in
+  [worktree-projects.md](worktree-projects.md): the root of a linked worktree
+  of a repository with a main checkout is added as it is, as a project of its
+  own on this host, and a folder inside such a worktree project is added at
+  its own path.
 - The title defaults to the folder's name.
 - `project-remove` (`agenthail project remove <name|id|folder>`) removes an
   added project. Its sessions move to the next project that holds them; no
@@ -40,6 +44,10 @@ The folder can be anywhere, including a folder inside a Git repository, such as
 The host that owns a session resolves its `project` from its working
 directory (see `session-stream-catalog.md` for the row fields):
 
+0. A folder inside an added worktree project belongs to the deepest added
+   project inside that worktree project that holds it, without translation
+   (see [worktree-projects.md](worktree-projects.md)). Worktree projects take
+   no part in the steps below.
 1. In a Git repository, the folder is translated to the same place in the main
    checkout: the checkout's path relative to its own root, joined to the main
    checkout root. The worktree and branch stay on the row as `checkout`.
