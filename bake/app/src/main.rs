@@ -206,12 +206,15 @@ fn init() -> App {
         over::layout::load(&mut app);
     }
     app.ov.notice = world_error;
+    let looked = (app.ov.looked_now.clone(), app.ov.looked.clone());
     if let Some(project) = arg("--project") {
         over::go(&mut app, Screen::Project(project));
     }
     if let Some(id) = arg("--select") {
         over::open_session(&mut app, &id);
     }
+    (app.ov.looked_now, app.ov.looked) = looked;
+    app.ov.arrange();
     if arg("--tab").as_deref() == Some("changes") {
         app.tab = Tab::Changes;
     }

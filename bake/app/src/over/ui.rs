@@ -371,10 +371,10 @@ pub enum Slot<'a> {
     Divider,
 }
 
-pub fn need_slots<'a>(needs: &'a [Need], looked: Option<&str>, max: usize) -> Vec<Slot<'a>> {
+pub fn need_slots<'a>(needs: &'a [Need], looked: Option<&str>, per_group: usize) -> Vec<Slot<'a>> {
     let mut out = Vec::new();
     for g in crate::over::GROUPS {
-        let rows: Vec<(usize, &Need)> = needs.iter().enumerate().filter(|(i, n)| n.group == g && *i < max).collect();
+        let rows: Vec<(usize, &Need)> = needs.iter().enumerate().filter(|(_, n)| n.group == g).take(per_group).collect();
         if rows.is_empty() {
             continue;
         }
@@ -466,7 +466,7 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -
         .key("sessions");
     let mut sb = Sidebar::new().label("Navigation").inset(0.0).header_gap(2.0).header_padding(0.0, 12.0).row_gap(2.0).header(home).header(search).header(all);
     let mut needs = SidebarSection::new("Needs you").key("sec-needs").count(s.ov.needs.len());
-    for (si, slot) in need_slots(&s.ov.needs, s.ov.looked_now.as_deref(), 6).into_iter().enumerate() {
+    for (si, slot) in need_slots(&s.ov.needs, s.ov.looked_now.as_deref(), 4).into_iter().enumerate() {
         let (i, n) = match slot {
             Slot::Head(g, count) => {
                 needs = needs.row(group_head(g, count).key(format!("need-group-{si}")));
