@@ -67,7 +67,6 @@ fn attach(s: &mut App, client: Client) {
     crate::watch_overview(client.clone(), s.outbox.clone(), poked);
     s.overview_poke = Some(poke);
     crate::over::inbox::start(&mut s.ov.inbox, &client);
-    crate::notify::start(s);
     s.client = Some(client);
 }
 

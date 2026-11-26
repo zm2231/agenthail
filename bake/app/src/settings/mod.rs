@@ -526,7 +526,7 @@ fn take_one(s: &mut Prefs, done: Done) {
 }
 
 pub fn notify(s: &mut Prefs, what: Notify) {
-    write(s, what.action(), Section::Notify, &[Read::Settings], move |c| c.notifications(what));
+    write(s, what.action(), Section::Notify, &[Read::Settings], move |c| c.notifications(what).inspect(|_| crate::notify::recheck()));
 }
 
 fn poll(s: &mut Prefs, _: f64, tx: &mut Tx) -> bool {
