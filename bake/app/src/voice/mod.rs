@@ -114,7 +114,7 @@ impl Win {
                     let quoted = serde_json::to_string(&attempt).unwrap_or_default();
                     self.eval(&format!("window.agenthailCall = {quoted}; void window.agenthailVoice.start()"));
                 }
-                Effect::PeerEnd => self.eval("window.agenthailCall = \"\"; window.agenthailVoice && window.agenthailVoice.end()"),
+                Effect::PeerEnd => self.fresh_page(),
                 Effect::PeerAnswer(sdp) => {
                     let quoted = serde_json::to_string(&sdp).unwrap_or_default();
                     self.eval(&format!("void window.agenthailVoice.answer({quoted})"));
@@ -152,6 +152,19 @@ impl Win {
 
     #[cfg(not(target_os = "macos"))]
     fn eval(&self, _: &str) {}
+
+    #[cfg(target_os = "macos")]
+    fn fresh_page(&mut self) {
+        let (Some(web), Ok(peer)) = (&self.web, &self.peer) else { return };
+        web.eval("window.agenthailCall = \"\"; window.agenthailVoice && window.agenthailVoice.end()");
+        web.reload(peer);
+        let mut effects = self.call.peer("loading", "", self.clock);
+        effects.extend(self.call.setup(Setup::Page));
+        self.run(effects);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn fresh_page(&mut self) {}
 
     #[cfg(target_os = "macos")]
     fn build_peer(&mut self) -> bool {

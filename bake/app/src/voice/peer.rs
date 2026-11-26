@@ -18,8 +18,7 @@ pub struct Web {
 
 impl Web {
     pub fn build(slot: &NativeView, peer: &Peer, heard: Sender<Heard>) -> Result<Web, String> {
-        let mut headers = HeaderMap::new();
-        headers.insert(AUTHORIZATION, HeaderValue::from_str(&peer.authorization).map_err(|e| e.to_string())?);
+        let headers = authorized(peer)?;
         let (navigation, messages, loads) = (peer.clone(), peer.clone(), peer.clone());
         let from_page = heard.clone();
         let view = WebViewBuilder::new()
@@ -79,11 +78,24 @@ impl Web {
         }
     }
 
+    pub fn reload(&self, peer: &Peer) {
+        let loaded = authorized(peer).and_then(|headers| self.view.load_url_with_headers(&peer.url, headers).map_err(|e| e.to_string()));
+        if let Err(error) = loaded {
+            eprintln!("voice: the audio page couldn't be reloaded: {error}");
+        }
+    }
+
     pub fn eval(&self, js: &str) {
         if let Err(error) = self.view.evaluate_script(js) {
             log_eval(&error.to_string());
         }
     }
+}
+
+fn authorized(peer: &Peer) -> Result<HeaderMap, String> {
+    let mut headers = HeaderMap::new();
+    headers.insert(AUTHORIZATION, HeaderValue::from_str(&peer.authorization).map_err(|e| e.to_string())?);
+    Ok(headers)
 }
 
 fn without_query(url: &str) -> &str {
