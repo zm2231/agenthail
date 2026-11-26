@@ -112,6 +112,10 @@ fn settle(s: &mut App) -> bool {
 
 pub fn drain(s: &mut App) -> bool {
     let mut changed = false;
+    if s.new_session.is_some() && s.ov.search.activity.panel.is_some() {
+        close(s);
+        changed = true;
+    }
     while let Ok((generation, reset, page)) = s.ov.search.activity.rx.try_recv() {
         let Some(p) = s.ov.search.activity.panel.as_mut().filter(|p| p.generation == generation) else { continue };
         changed = true;

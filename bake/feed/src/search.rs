@@ -259,17 +259,22 @@ pub fn reread(detail: crate::gone::Detail, known: &Session) -> Recheck {
 impl Client {
     pub fn recheck(&self, known: &Session) -> Recheck {
         let detail = crate::gone::Detail::read(self.get_coded(&format!("/api/v1/session?id={}&limit=1", enc(&known.id))));
-        let mut found = reread(detail, known);
-        let Recheck::Fresh(row) = &mut found else { return found };
-        let terms = crate::gone::search_terms(std::iter::once(&**row));
+        let stored = match &detail {
+            crate::gone::Detail::Found(v) => v["session"]["name"].as_str().unwrap_or_default().to_string(),
+            _ => String::new(),
+        };
+        let found = reread(detail, known);
+        let Recheck::Fresh(row) = &found else { return found };
+        let probe = Session { name: stored, alias: row.alias.clone(), cwd: row.cwd.clone(), ..Session::default() };
+        let terms = crate::gone::search_terms(std::iter::once(&probe));
         if terms.is_empty() {
             return Recheck::Unknown("it has no name or folder to look it up by".into());
         }
         for term in terms {
             match self.listed(&row.id, &term) {
-                Ok(Some(listed)) => {
-                    row.archived = listed.archived;
-                    return found;
+                Ok(Some(mut listed)) => {
+                    listed.name = one_line(&listed.name);
+                    return Recheck::Fresh(Box::new(listed));
                 }
                 Ok(None) => {}
                 Err(e) => return Recheck::Unknown(e),
@@ -432,13 +437,14 @@ mod tests {
     #[test]
     fn a_recheck_reads_the_archived_state_from_the_session_list() {
         let known = Session { id: "c1".into(), name: "Fix the importer".into(), ..Session::default() };
-        let detail = r#"{"session": {"id": "c1", "surface": "codex", "name": "Fix the importer", "status": "idle"}, "capabilities": {"lifecycle": {"resume": true}}}"#;
-        let listing = r#"{"sessions": [{"id": "c0", "name": "Fix the importer too"}, {"id": "c1", "name": "Fix the importer", "archived": true}], "nextCursor": ""}"#;
+        let detail = r#"{"session": {"id": "c1", "surface": "codex", "name": "Fix the\nimporter", "status": "busy"}, "capabilities": {"lifecycle": {"resume": true}}}"#;
+        let listing = r#"{"sessions": [{"id": "c0", "name": "Fix the importer too"}, {"id": "c1", "name": "Fix the\nimporter", "status": "busy", "archived": true, "attention": {"kind": "request", "reason": "Pick a schema"}, "turnState": {"state": "waiting_person"}}], "nextCursor": ""}"#;
         let (client, asked) = crate::mock::daemon(vec![(200, detail.into()), (200, listing.into())]);
         let Recheck::Fresh(row) = client.recheck(&known) else { panic!("expected a fresh row") };
-        assert!(row.archived);
+        assert!(row.archived && row.attention.is_some() && row.turn_state.is_some());
+        assert_eq!(row.name, "Fix the importer");
         assert_eq!(asked.recv().unwrap().0, "/api/v1/session?id=c1&limit=1");
-        assert_eq!(asked.recv().unwrap().0, "/api/v1/snapshot?q=Fix+the+importer&limit=200");
+        assert_eq!(asked.recv().unwrap().0, "/api/v1/snapshot?q=Fix+the%0Aimporter&limit=200");
         let unlisted = r#"{"sessions": [], "nextCursor": ""}"#;
         let (client, _asked) = crate::mock::daemon(vec![(200, detail.into()), (200, unlisted.into())]);
         assert!(matches!(client.recheck(&known), Recheck::Unknown(_)));
