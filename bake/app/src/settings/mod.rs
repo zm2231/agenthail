@@ -6,7 +6,7 @@ mod parts;
 use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
@@ -53,8 +53,8 @@ pub struct Prefs {
     client: Option<Client>,
     no_client: String,
     pub draft_orphaned: bool,
-    watching: Arc<AtomicBool>,
-    cursor: Arc<AtomicU64>,
+    watcher: Arc<AtomicU64>,
+    rest_pending: bool,
     external: bool,
     pub tab: usize,
     pub base: Option<Result<Base, Failure>>,
@@ -142,8 +142,8 @@ fn init() -> Prefs {
         client,
         no_client,
         draft_orphaned: false,
-        watching: Arc::new(AtomicBool::new(false)),
-        cursor: Arc::new(AtomicU64::new(0)),
+        watcher: Arc::new(AtomicU64::new(0)),
+        rest_pending: false,
         external: false,
         tab: 0,
         base: None,
@@ -224,11 +224,26 @@ pub fn reload(s: &mut Prefs) {
     if s.client.is_none() {
         (s.client, s.no_client) = connect();
     }
-    if s.client.is_some() {
-        s.settling.extend(ALL);
+    if s.client.is_none() {
+        for what in ALL {
+            fetch(s, what);
+        }
+        return;
     }
-    for what in ALL {
-        fetch(s, what);
+    s.settling.extend(ALL);
+    s.rest_pending = true;
+    fetch(s, Read::Base);
+}
+
+fn read_rest(s: &mut Prefs) {
+    if !std::mem::take(&mut s.rest_pending) {
+        return;
+    }
+    if let Some(Ok(b)) = &s.base {
+        watch(s, b.event_cursor);
+    }
+    for what in &ALL[1..] {
+        fetch(s, *what);
     }
 }
 
@@ -315,25 +330,29 @@ fn denied<T>(r: &Result<T, Failure>) -> bool {
     r.as_ref().is_err_and(|f| f.denied)
 }
 
-fn watch(s: &Prefs) {
+fn watch(s: &Prefs, from: u64) {
     let Some(client) = s.client.clone() else { return };
     let Some(handle) = WINDOW.with(|w| w.get().map(|(h, _)| h.clone())) else { return };
-    if s.cursor.load(Ordering::Relaxed) == 0 || s.watching.swap(true, Ordering::AcqRel) {
-        return;
-    }
-    let (running, cursor) = (s.watching.clone(), s.cursor.clone());
+    let current = s.watcher.clone();
+    let mine = current.fetch_add(1, Ordering::AcqRel) + 1;
     std::thread::spawn(move || {
-        while handle.is_visible() {
-            let _ = client.follow_events(cursor.load(Ordering::Relaxed), |kind, id| {
-                cursor.fetch_max(id, Ordering::Relaxed);
-                if feed::prefs::rereads(kind) {
+        let mut after = from;
+        while current.load(Ordering::Acquire) == mine {
+            let _ = client.follow_events(after, |kind, id| {
+                if current.load(Ordering::Acquire) != mine {
+                    return false;
+                }
+                after = after.max(id);
+                if feed::prefs::rereads(kind) && handle.is_visible() {
                     handle.update(|s: &mut Prefs, _| changed_elsewhere(s));
                 }
-                handle.is_visible()
+                true
             });
             std::thread::sleep(Duration::from_secs(2));
+            if !handle.is_visible() {
+                return;
+            }
         }
-        running.store(false, Ordering::Release);
     });
 }
 
@@ -364,12 +383,11 @@ fn take_one(s: &mut Prefs, done: Done) {
             s.settling.remove(&what);
             let refusal = match got {
                 Got::Base(r) => {
-                    if let Ok(b) = &r {
+                    if r.is_ok() {
                         s.base_ok_at = s.tick;
-                        s.cursor.fetch_max(b.event_cursor, Ordering::Relaxed);
                     }
                     s.base = Some(r);
-                    watch(s);
+                    read_rest(s);
                     seed_name(s);
                     false
                 }
