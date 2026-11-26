@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const messageSendersMigration = "2026-11-26-messages-know-their-sender"
+const messageSendersMigration = "2026-11-26-yours-told-apart-from-your-agents"
 
 func init() {
 	registerMigration(messageSendersMigration, func(tx *sql.Tx) error {

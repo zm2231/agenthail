@@ -58,7 +58,7 @@ func TestAPromptClaudeSentItselfKeepsItsPromptIDAndIsNotThePersons(t *testing.T)
 		t.Fatalf("a meta record inside the person's turn must not carry their prompt id: %+v", skill)
 	}
 	person := claudeTimelineItems(map[string]any{"type": "user", "uuid": "record-h", "promptId": "sdk-1", "turnOrigin": "human", "promptSource": "sdk", "origin": map[string]any{"kind": "human"}, "message": map[string]any{"role": "user", "content": "reply with ok"}})
-	if len(person) != 1 || person[0].Origin != "" || person[0].PromptID != "sdk-1" {
+	if len(person) != 1 || person[0].Origin != surface.OriginPerson || person[0].PromptID != "sdk-1" {
 		t.Fatalf("the person's own prompt: %+v", person)
 	}
 }

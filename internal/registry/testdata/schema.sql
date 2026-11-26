@@ -18,6 +18,7 @@
 -- migration 2026-11-26-your-reviews-push-once
 -- migration 2026-11-26-your-work-items-carry-asks
 -- migration 2026-11-26-your-workers-stopped-mid-turn-close-their-turn
+-- migration 2026-11-26-yours-told-apart-from-your-agents
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -759,6 +760,13 @@ CREATE TABLE message_queue (
 	holder_start TEXT NOT NULL DEFAULT '',
 	deferred_since_ms INTEGER NOT NULL DEFAULT 0
 );
+
+-- table message_senders
+CREATE TABLE message_senders (
+	message_id TEXT PRIMARY KEY,
+	sender_session_id TEXT NOT NULL,
+	recorded_at_ms INTEGER NOT NULL
+) WITHOUT ROWID;
 
 -- table move_dropped_relays
 CREATE TABLE move_dropped_relays (
