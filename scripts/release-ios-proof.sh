@@ -30,7 +30,7 @@ find_proof() {
 	local -a inputs
 	sha="$(git -C "$ROOT" rev-parse --verify "${1:?}^{commit}")"
 	mapfile -t inputs < <("$ROOT/scripts/ios-inputs.sh" list)
-	proof="$(git -C "$ROOT" log -1 --first-parent --format=%H "$sha" -- "${inputs[@]}")"
+	proof="$("$ROOT/scripts/ios-inputs.sh" last "$sha")"
 	if [ -z "$proof" ]; then
 		outcome false "" "" "no commit at or before $sha changed an iOS input"
 		say "iOS proof: no commit at or before $sha changed an iOS input; the release runs the iOS suite."
