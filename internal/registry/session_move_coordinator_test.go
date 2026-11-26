@@ -33,8 +33,13 @@ func TestALeadMovesOnlyWithItsSessionAndOnlyAsTheSameProject(t *testing.T) {
 		t.Fatalf("a move that carries the lead was refused: %q err=%v", refusal, err)
 	}
 
+	shared := leadRegistry(t, "shared:widget")
+	if refusal, err := shared.SessionMoveRefusal(moveConversation, true); err != nil || refusal != "" {
+		t.Fatalf("a lead of a project folders on other hosts have joined was refused: %q err=%v", refusal, err)
+	}
+
 	local := leadRegistry(t, "project-widget")
-	if refusal, err := local.SessionMoveRefusal(moveConversation, true); err != nil || !strings.Contains(refusal, "not a Git repository") {
+	if refusal, err := local.SessionMoveRefusal(moveConversation, true); err != nil || !strings.Contains(refusal, "a project of this host only") {
 		t.Fatalf("a lead of a project only this host knows answered %q err=%v, want it refused", refusal, err)
 	}
 	if refusal, err := local.SessionMoveRefusal(moveConversation, false); err != nil || refusal != "" {

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -53,7 +52,7 @@ func (a *App) cmdProjectSetting(ctx context.Context, client *daemonAPIClient, po
 }
 
 func (a *App) settingTarget(ctx context.Context, client *daemonAPIClient, selector string) (projectRef, error) {
-	if strings.HasPrefix(selector, hosts.RepositoryPrefix) {
+	if hosts.ProjectKey(selector) {
 		return projectRef{ID: selector, DisplayName: selector}, nil
 	}
 	if info, err := os.Stat(selector); err == nil && info.IsDir() {

@@ -17,6 +17,11 @@ func (d *Daemon) routeActionRequest(ctx context.Context, request map[string]any)
 	if reportedPark(request) {
 		return d.routeReportedPark(request)
 	}
+	// A join runs where it is asked, which calls the project's host and
+	// then the folder's host.
+	if action, _ := request["action"].(string); action == "project-add" && request["join"] != nil {
+		return nil, false, nil
+	}
 	var host *pairedHost
 	local := false
 	rewritten := false

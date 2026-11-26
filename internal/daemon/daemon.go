@@ -122,22 +122,25 @@ type Daemon struct {
 	catalogLive       map[string]*catalogLiveSession
 	catalogIdentities *projectresolve.CatalogIdentityCache
 	repositoryKeys    repositoryKeyWatch
-	ledgerOnce        sync.Once
-	heldWorkVersion   atomic.Uint64
-	heldWorkRows      heldWorkCache
-	ledger            *ledger.Store
-	ledgerHub         *ledgerChangeHub
-	ledgerBoards      ledgerBoardWatch
-	ledgerSync        ledgerSyncHealth
-	backlog           backlogWatch
-	ledgerClaims      ledgerClaims
-	sorter            *ledgerSorter
-	judge             *turnJudge
-	contexts          *messageContexts
-	checks            checkerRunner
-	g2                *g2Counter
-	delivered         deliveredWords
-	notPerson         promptMarks
+	// projectWrites runs one add, join, share, unjoin or removal of this
+	// host's projects at a time, so none acts on a plan another changed.
+	projectWrites   sync.Mutex
+	ledgerOnce      sync.Once
+	heldWorkVersion atomic.Uint64
+	heldWorkRows    heldWorkCache
+	ledger          *ledger.Store
+	ledgerHub       *ledgerChangeHub
+	ledgerBoards    ledgerBoardWatch
+	ledgerSync      ledgerSyncHealth
+	backlog         backlogWatch
+	ledgerClaims    ledgerClaims
+	sorter          *ledgerSorter
+	judge           *turnJudge
+	contexts        *messageContexts
+	checks          checkerRunner
+	g2              *g2Counter
+	delivered       deliveredWords
+	notPerson       promptMarks
 	// catalogProjectUnarchived is set by either catalog goroutine when a
 	// session's activity unarchived its project.
 	catalogProjectUnarchived atomic.Bool

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/hosts"
@@ -57,8 +56,8 @@ func coordinatorMoveRefusal(q catalogQuerier, conversation string) (string, erro
 	if err != nil || lead == nil {
 		return "", err
 	}
-	if !strings.HasPrefix(lead.ProjectID, hosts.RepositoryPrefix) {
-		return fmt.Sprintf("it coordinates %s, a project that is not a Git repository and so not the same project on another host", lead.ProjectID), nil
+	if !hosts.ProjectKey(lead.ProjectID) {
+		return fmt.Sprintf("it coordinates %s, a project of this host only and so not the same project on another host; join a folder there to it to share it", lead.ProjectID), nil
 	}
 	return "", nil
 }

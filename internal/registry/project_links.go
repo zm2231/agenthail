@@ -27,9 +27,7 @@ func (l ProjectLink) Shared() bool {
 	return SharedProjectID(l.Joined) && SharedProjectID(l.Survivor)
 }
 
-func SharedProjectID(id string) bool {
-	return len(id) > len(hosts.RepositoryPrefix) && id[:len(hosts.RepositoryPrefix)] == hosts.RepositoryPrefix
-}
+func SharedProjectID(id string) bool { return hosts.ProjectKey(id) }
 
 func (l ProjectLink) newerThan(other ProjectLink) bool {
 	if !l.ChangedAt.Equal(other.ChangedAt) {

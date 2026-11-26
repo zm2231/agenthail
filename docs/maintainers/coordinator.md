@@ -6,7 +6,7 @@ Each project can have one coordinator, the agent its sessions report to and a pe
 
 A coordinator belongs to a project (see [projects](projects.md)). The CLI and the daemon resolve a folder's project with `daemon.ResolvePathProject`, the resolution the catalog uses, so a folder lands in the same project everywhere. A folder outside every project has no coordinator: `coordinator new`, `coordinator set` and `@lead` refuse there and say to use a Git repository or `agenthail project add`.
 
-A coordinator is keyed by the project's logical id. For a project in a repository with a remote that is its `repo:` key, the same on every paired host, so a project has one coordinator across hosts. A project without a remote is keyed by the host's own project id, which paired hosts see as `host::<id>`.
+A coordinator is keyed by the project's logical id. For a project in a repository with a remote that is its `repo:` key, the same on every paired host, so a project has one coordinator across hosts. A project without a remote is keyed by the host's own project id, which paired hosts see as `host::<id>`, until a folder on another host joins it; it is then keyed by its shared key, the same on every host (see [projects](projects.md#joining-a-folder-on-another-computer)).
 
 ## State
 

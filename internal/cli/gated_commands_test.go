@@ -130,6 +130,7 @@ var gatedCommands = []struct {
 	{"project-unarchive", func(gatedFixture) []string { return []string{"project", "unarchive", widgetProject} }, refused, runs, refused},
 	{"project-link", func(f gatedFixture) []string { return []string{"project", "link", f.addedFolder(), widgetProject} }, refused, runs, refused},
 	{"project-unlink", func(f gatedFixture) []string { return []string{"project", "unlink", f.linkedFolder()} }, refused, runs, refused},
+	{"project-unjoin", func(gatedFixture) []string { return []string{"project", "unjoin", widgetProject} }, refused, refused, refused},
 	{"project-setting", func(gatedFixture) []string { return []string{"project", "mcp", widgetProject, "off"} }, refused, runs, refused},
 	{"coordinator-set", func(f gatedFixture) []string {
 		return []string{"coordinator", "set", "widget-other", "--cwd", f.widget, "--replace"}

@@ -61,15 +61,12 @@ struct HostCatalog {
         func server(of sessionID: String) -> String? { servers[sessionID] }
     }
 
-    /// Names the same project on every computer, so it is never qualified.
-    static let repositoryPrefix = "repo:"
-
     static func qualify(_ hostID: String, _ sessionID: String) -> String {
-        hostID.isEmpty || sessionID.isEmpty || sessionID.contains(separator) || sessionID.hasPrefix(repositoryPrefix) ? sessionID : hostID + separator + sessionID
+        hostID.isEmpty || sessionID.isEmpty || sessionID.contains(separator) || ProjectKey.names(sessionID) ? sessionID : hostID + separator + sessionID
     }
 
     static func owner(of sessionID: String) -> String? {
-        guard !sessionID.hasPrefix(repositoryPrefix), let range = sessionID.range(of: separator), range.lowerBound > sessionID.startIndex else { return nil }
+        guard !ProjectKey.names(sessionID), let range = sessionID.range(of: separator), range.lowerBound > sessionID.startIndex else { return nil }
         return String(sessionID[..<range.lowerBound])
     }
 

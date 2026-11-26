@@ -20,6 +20,8 @@
     {"name": "the same keyless project relayed through another computer", "id": "server-1::notes", "owner": "laptop", "colourId": "server-1::notes", "colour": 1},
     {"name": "a repository project on any computer", "id": "repo:github.com/example/api", "owner": "server-1", "colourId": "repo:github.com/example/api", "colour": 5},
     {"name": "the same repository project on another computer", "id": "repo:github.com/example/api", "owner": "laptop", "colourId": "repo:github.com/example/api", "colour": 5},
+    {"name": "a project folders on several computers joined, on the computer that holds it", "id": "shared:5f0c2a9e-7d41-4b8e-9a13-2c6f8e0b4d71", "owner": "server-1", "colourId": "shared:5f0c2a9e-7d41-4b8e-9a13-2c6f8e0b4d71", "colour": 0},
+    {"name": "the same joined project on another computer", "id": "shared:5f0c2a9e-7d41-4b8e-9a13-2c6f8e0b4d71", "owner": "laptop", "colourId": "shared:5f0c2a9e-7d41-4b8e-9a13-2c6f8e0b4d71", "colour": 0},
     {"name": "a project before the computer's own id is known", "id": "scratch", "owner": "", "colourId": "scratch", "colour": 5}
   ]
 }

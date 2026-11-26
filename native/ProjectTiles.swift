@@ -1,5 +1,10 @@
 import Foundation
 
+/// Mirrors hosts.ProjectKey (internal/hosts/ref.go): a repository key or a shared key names the same project on every computer, so it is never host-qualified.
+enum ProjectKey {
+    static func names(_ id: String) -> Bool { id.hasPrefix("repo:") || id.hasPrefix("shared:") }
+}
+
 struct ProjectTiles: Equatable {
     var shown: [ProjectState]
     var more: [ProjectState]
@@ -81,7 +86,7 @@ struct ProjectTiles: Equatable {
     }
 
     static func colourID(_ projectID: String, owner hostID: String) -> String {
-        hostID.isEmpty || projectID.isEmpty || projectID.contains("::") || projectID.hasPrefix("repo:") ? projectID : hostID + "::" + projectID
+        hostID.isEmpty || projectID.isEmpty || projectID.contains("::") || ProjectKey.names(projectID) ? projectID : hostID + "::" + projectID
     }
 
     static func colour(_ projectID: String) -> Int {

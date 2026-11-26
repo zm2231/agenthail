@@ -105,8 +105,26 @@ func projectHoldings(tx *sql.Tx, id string) (projectHolding, error) {
 }
 
 func moveProjectRowsTx(tx *sql.Tx, move ProjectMove, held projectHolding) error {
+	if err := moveLedgerTx(tx, move.From, move.To, held.ledger); err != nil {
+		return err
+	}
+	for _, statement := range []string{
+		`UPDATE coordinators SET project_id=?2 WHERE project_id=?1 AND host_id=''`,
+		`UPDATE coordinator_history SET project_id=?2 WHERE project_id=?1`,
+		`UPDATE coordinator_replaced SET project_id=?2 WHERE project_id=?1`,
+		`UPDATE OR IGNORE projects SET id=?2 WHERE id=?1 AND added=0`,
+		`DELETE FROM projects WHERE id=?1 AND added=0`,
+	} {
+		if _, err := tx.Exec(statement, move.From, move.To); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func moveLedgerTx(tx *sql.Tx, from, to string, held bool) error {
 	state := `DELETE FROM ledger_state WHERE project_key=?1`
-	if held.ledger {
+	if held {
 		state = `DELETE FROM ledger_state WHERE project_key=?2`
 	}
 	for _, statement := range []string{
@@ -116,13 +134,8 @@ func moveProjectRowsTx(tx *sql.Tx, move ProjectMove, held projectHolding) error 
 		`UPDATE ledger_grants SET project_key=?2 WHERE project_key=?1`,
 		`UPDATE OR IGNORE ledger_backlog_told SET project_key=?2 WHERE project_key=?1`,
 		`DELETE FROM ledger_backlog_told WHERE project_key=?1`,
-		`UPDATE coordinators SET project_id=?2 WHERE project_id=?1 AND host_id=''`,
-		`UPDATE coordinator_history SET project_id=?2 WHERE project_id=?1`,
-		`UPDATE coordinator_replaced SET project_id=?2 WHERE project_id=?1`,
-		`UPDATE OR IGNORE projects SET id=?2 WHERE id=?1 AND added=0`,
-		`DELETE FROM projects WHERE id=?1 AND added=0`,
 	} {
-		if _, err := tx.Exec(statement, move.From, move.To); err != nil {
+		if _, err := tx.Exec(statement, from, to); err != nil {
 			return err
 		}
 	}

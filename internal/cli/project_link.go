@@ -118,7 +118,7 @@ func (p projectRow) linkSelector() string {
 // linkTarget names the project a selector means before any link joins it,
 // so a linked checkout's folder still names its own project.
 func (a *App) linkTarget(projects []projectRow, selector string) (projectRef, error) {
-	if strings.HasPrefix(selector, hosts.RepositoryPrefix) {
+	if hosts.ProjectKey(selector) {
 		return projectRef{ID: selector, DisplayName: selector}, nil
 	}
 	if info, err := os.Stat(selector); err == nil && info.IsDir() {

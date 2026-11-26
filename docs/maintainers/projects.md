@@ -37,7 +37,9 @@ The folder can be anywhere, including a folder inside a Git repository, such as
 - Project actions refuse with a typed error (`{"error":{"code","message"}}`):
   `invalid_request`, `folder_not_found`, `project_not_found`,
   `project_not_added`, `project_ambiguous`, `project_linked`,
-  `project_not_linked`, `project_history`.
+  `project_not_linked`, `project_history`, `project_keyed`,
+  `project_joined`, `project_not_joined`, `host_not_found`,
+  `host_unreachable`, `host_incompatible`.
 
 ## Which project a session belongs to
 
@@ -85,6 +87,16 @@ host:
   that does not. It would also put a fork in the same project as every other
   clone of its upstream, which is wrong for a project's coordinator.
 
+A project without a repository key gets a shared key, `shared:<uuid>`, when a
+folder on another host joins it (see [Joining a folder on another
+computer](#joining-a-folder-on-another-computer)). The uuid is random and made
+once, by the host that holds the project, so the key never changes: renaming
+the project changes its title on every checkout and leaves the key as it is.
+Every place that treats a repository key as the same project on every host
+(mirrored rows, coordinators and lead moves, links, settings, rename and
+archive forwarding, the ledger key) treats a shared key the same way, through
+one check, `hosts.ProjectKey`.
+
 The project's `id` is its `key` when it has one, so the same folder of the same
 repository is one project on every paired host. `repository` carries
 `canonicalKey`, `remoteName`, `remoteUrl` and `name`. A project without a key
@@ -114,6 +126,81 @@ A move is refused when both keys already keep a ledger, or both have a lead,
 because two histories cannot be merged. Nothing moves; `agenthail doctor`
 and the ledger board of either key name the history that stayed behind, and
 the refusal clears when the folder names its old remote again.
+
+## Joining a folder on another computer
+
+A folder that has no repository key, such as a linked worktree project or a
+clone whose only remote is a path on its machine, belongs to its host. Joining
+puts it into an existing project, so folders on several hosts are one project
+with one key, one lead, who may run on any of them, and one ledger.
+
+- `project-add` with `join` (`agenthail project add <path> [--host <host>]
+  --join <name|id|path>`) joins the folder `path`, on `host` or this host, to
+  the project `join` names: an id the project list gives it, a paired host's
+  `host::<id>`, or its key. The action runs on the host it is asked on, which
+  is not routed by `host`; it calls the two hosts involved in turn.
+  1. The host holding the project answers `project-share`: if the project has
+     no key yet, it records the shared key on its added checkout, marked
+     `joined`, and moves what the project kept under its own id, its lead
+     and their history, settings, links, tile and ledger, to the key in one
+     registry transaction (`JoinProjectKey`), announcing a moved lead as a
+     `coordinator.changed` event. It answers the key, the project's title
+     and the host keeping its ledger: itself, or the owner it already
+     replicates.
+  2. The folder's host answers `project-join` with that key: it makes its
+     ledger of the key a replica of that host's (the two-phase owner
+     assignment of `agenthail ledger owner`), then records the folder as an
+     added checkout with the key and the project's title, marked `joined`,
+     so the repository refresh never replaces the key. A folder it already
+     added without a key gains the key in place.
+  Both `project-share` and `project-join` are accepted only from a paired
+  host. A host from before joins refuses them as unknown, which answers
+  `409 host_incompatible`.
+- The answer is the joined checkout's project with `created`, as for
+  `project-add`. Joining a folder that is already a checkout of the project
+  answers `created: false`.
+- Sessions in the folder belong to the project from the next catalog pass;
+  nothing is stopped. Their `@lead` reaches the project's lead on whichever
+  host runs it, and a lead of a shared key can move with its session to
+  another host, as a repository project's lead can.
+- A paired host that is not one of the two learns the key from the rows and
+  snapshot it already mirrors when it next reads them; nothing is stored for
+  it.
+- The join needs both hosts. When the folder's host cannot be reached the join
+  is refused (`502 host_unreachable`) and that host is unchanged; the project
+  may already have its shared key, which changes nothing the person sees. A
+  joined host that later goes offline keeps the key, and its checkout shows it
+  unavailable, as for a repository's checkout.
+
+A join is refused, with nothing changed on the folder's host, when:
+
+- the folder is in a repository with a remote (`409 project_keyed`): it is
+  already one project on every host by its repository, and `project link`
+  joins two of those;
+- the folder is already joined to another project (`409 project_joined`):
+  unjoin it first;
+- the folder's own project, the added one or the implicit project it
+  supersedes, has its own lead, ledger or ledger grants (`409
+  project_history`), as for a link: join the other way round, adding the
+  other folder to this one's project, since two histories cannot be merged;
+- the project's own ledger is a replica of another host's, or both sides keep
+  a ledger (`409 project_history`);
+- the folder's host has not paired with the host keeping the ledger (`409
+  host_not_found`), or that host refuses the replica.
+
+`project-unjoin` (`agenthail project unjoin <name|id|path> [--host <host>]`)
+takes `projectId`, a joined checkout's id (host-qualified for a paired host's)
+or the key when this host has one joined folder of it. The checkout drops the
+key and is a project of its own again under its own id, with no lead and no
+ledger; its sessions follow on the next catalog pass. The project keeps its
+key, lead and ledger on its other checkouts; a lead is held by the project's
+key, so a lead whose session works in the unjoined folder stays the project's
+lead. Folders not joined are refused with `409
+project_not_joined`. Unjoining is the person's: an agent asks.
+
+`project-remove` of a joined checkout removes that host's folder only. Its
+lead is not handed to the project its folder falls back to; the key, lead and
+ledger stay with the project's other checkouts.
 
 ## Project settings
 

@@ -14,6 +14,7 @@
 -- migration 2026-11-25-worktree-projects
 -- migration 2026-11-26-turns-wait-on-the-person
 -- migration 2026-11-26-waits-on-the-lead-escalate
+-- migration 2026-11-26-workspace-folders-join-projects
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';
@@ -869,7 +870,8 @@ CREATE TABLE projects (
 	repository BLOB NOT NULL DEFAULT '',
 	created_at_ms INTEGER NOT NULL DEFAULT 0,
 	archived_at_ms INTEGER NOT NULL DEFAULT 0,
-	worktree INTEGER NOT NULL DEFAULT 0
+	worktree INTEGER NOT NULL DEFAULT 0,
+	joined INTEGER NOT NULL DEFAULT 0
 );
 
 -- table push_outcomes
@@ -1547,7 +1549,7 @@ BEGIN
 END;
 
 -- trigger catalog_presentation_version_projects_update
-CREATE TRIGGER catalog_presentation_version_projects_update AFTER UPDATE OF added,archived_at_ms,created_at_ms,id,project_key,repository,title,workspace_root,worktree ON projects WHEN (NEW.added IS NOT OLD.added OR NEW.archived_at_ms IS NOT OLD.archived_at_ms OR NEW.created_at_ms IS NOT OLD.created_at_ms OR NEW.id IS NOT OLD.id OR NEW.project_key IS NOT OLD.project_key OR NEW.repository IS NOT OLD.repository OR NEW.title IS NOT OLD.title OR NEW.workspace_root IS NOT OLD.workspace_root OR NEW.worktree IS NOT OLD.worktree)
+CREATE TRIGGER catalog_presentation_version_projects_update AFTER UPDATE OF added,archived_at_ms,created_at_ms,id,joined,project_key,repository,title,workspace_root,worktree ON projects WHEN (NEW.added IS NOT OLD.added OR NEW.archived_at_ms IS NOT OLD.archived_at_ms OR NEW.created_at_ms IS NOT OLD.created_at_ms OR NEW.id IS NOT OLD.id OR NEW.joined IS NOT OLD.joined OR NEW.project_key IS NOT OLD.project_key OR NEW.repository IS NOT OLD.repository OR NEW.title IS NOT OLD.title OR NEW.workspace_root IS NOT OLD.workspace_root OR NEW.worktree IS NOT OLD.worktree)
 BEGIN
 	UPDATE catalog_presentation_version SET version=version+1;
 END;

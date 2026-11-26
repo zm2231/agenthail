@@ -459,6 +459,9 @@ func (d *Daemon) requestCatalogDiscovery() {
 func (d *Daemon) doProjectAction(ctx context.Context, _ principal, request projectRequest) (actionResult, error) {
 	switch request.Action {
 	case "project-add":
+		if request.Join != "" {
+			return d.doProjectJoin(ctx, request)
+		}
 		project, created, err := d.addProject(ctx, request.Path, request.Title)
 		var missing *folderNotFoundError
 		var handOver registry.ProjectHandOverError
@@ -472,6 +475,12 @@ func (d *Daemon) doProjectAction(ctx context.Context, _ principal, request proje
 		default:
 			return actionOK(map[string]any{"ok": true, "project": project, "created": created}), nil
 		}
+	case "project-share":
+		return d.doProjectShare(ctx, request)
+	case "project-join":
+		return d.doProjectJoinFolder(ctx, request)
+	case "project-unjoin":
+		return d.doProjectUnjoin(request)
 	case "project-link":
 		return d.doProjectLink(request)
 	case "project-unlink":
@@ -488,6 +497,10 @@ func (d *Daemon) doProjectAction(ctx context.Context, _ principal, request proje
 	title := strings.TrimSpace(request.Title)
 	if request.Action == "project-rename" && (title == "" || len(title) > projectTitleLimit) {
 		return actionResult{}, invalidRequest(fmt.Sprintf("a project name is 1 to %d characters", projectTitleLimit))
+	}
+	if request.Action == "project-remove" {
+		d.projectWrites.Lock()
+		defer d.projectWrites.Unlock()
 	}
 	targets, err := d.localProjectCheckouts(request.ProjectID)
 	if err != nil {
@@ -580,13 +593,17 @@ func (d *Daemon) doProjectAction(ctx context.Context, _ principal, request proje
 const projectTitleLimit = 120
 
 type projectRequest struct {
-	Action    string
-	ProjectID string
-	Path      string
-	Title     string
-	Survivor  string
-	Setting   string
-	Value     string
+	Action      string
+	ProjectID   string
+	Path        string
+	Title       string
+	Survivor    string
+	Setting     string
+	Value       string
+	Host        string
+	Join        string
+	JoinKey     string
+	LedgerOwner string
 }
 
 // localProjectCheckouts lists this host's projects a project id names: the
@@ -693,8 +710,10 @@ func (d *Daemon) removeProject(ctx context.Context, projectID string, targets []
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
 	}
 	// A worktree project, or a folder inside one, hands nothing to the
-	// repository's project, which keeps a lead and ledger of its own.
-	if !added[0].Worktree && !insideWorktreeProject(records, added[0].WorkspaceRoot) {
+	// repository's project, which keeps a lead and ledger of its own; a
+	// joined checkout leaves its lead and ledger to the project's other
+	// checkouts.
+	if !added[0].Worktree && !added[0].Joined && !insideWorktreeProject(records, added[0].WorkspaceRoot) {
 		repository, notRepository, err := projectresolve.ResolveCatalogRepository(ctx, added[0].WorkspaceRoot, nil, projectAddGitTimeout)
 		switch {
 		case err == nil:
@@ -726,20 +745,7 @@ func folderGone(path string) bool {
 // returned as its status and error code; only a host that cannot answer is
 // an error.
 func (d *Daemon) forwardProjectAction(ctx context.Context, host *pairedHost, request map[string]string) (int, string, error) {
-	body, err := json.Marshal(request)
-	if err != nil {
-		return 0, "", err
-	}
-	key := actionKey(ctx)
-	if key == "" {
-		key = "fwd-" + uuid.NewString()
-	}
-	header := http.Header{actionIdempotencyHeader: []string{key + ":" + host.record.ID}}
-	response, err := host.client.Do(ctx, http.MethodPost, "/api/v1/actions", nil, body, header)
-	if err != nil {
-		return 0, "", err
-	}
-	answer, err := readHostAnswer(host, response)
+	answer, err := d.callProjectAction(ctx, host, request)
 	if err != nil {
 		return 0, "", err
 	}
@@ -756,6 +762,25 @@ func (d *Daemon) forwardProjectAction(ctx context.Context, host *pairedHost, req
 		return answer.status, envelope.Error.Code, nil
 	}
 	return answer.status, envelope.Error.Code, fmt.Errorf("%s answered %d: %s", host.record.Name, answer.status, strings.TrimSpace(string(answer.payload)))
+}
+
+// callProjectAction runs a project action on a paired host and returns its
+// answer, a refusal too; only a host that cannot answer is an error.
+func (d *Daemon) callProjectAction(ctx context.Context, host *pairedHost, request map[string]string) (hostAnswer, error) {
+	body, err := json.Marshal(request)
+	if err != nil {
+		return hostAnswer{}, err
+	}
+	key := actionKey(ctx)
+	if key == "" {
+		key = "fwd-" + uuid.NewString()
+	}
+	header := http.Header{actionIdempotencyHeader: []string{key + ":" + request["action"] + ":" + host.record.ID}}
+	response, err := host.client.Do(ctx, http.MethodPost, "/api/v1/actions", nil, body, header)
+	if err != nil {
+		return hostAnswer{}, err
+	}
+	return readHostAnswer(host, response)
 }
 
 func (d *Daemon) archiveSession(sessionID string, at time.Time) error {
@@ -835,57 +860,94 @@ func (d *Daemon) stopRun(ctx context.Context, session *surface.Session) (surface
 var projectAddGitTimeout = 30 * time.Second
 
 func (d *Daemon) addProject(ctx context.Context, path, title string) (projectresolve.CatalogProject, bool, error) {
-	path, err := workspace.NormalizeCWD(path)
-	if err != nil || path == "" {
-		return projectresolve.CatalogProject{}, false, fmt.Errorf("a folder path is required")
-	}
-	if info, err := os.Stat(path); err != nil || !info.IsDir() {
-		return projectresolve.CatalogProject{}, false, &folderNotFoundError{path: path, host: d.hostIdentity().Name}
-	}
-	if path, err = projectresolve.CanonicalCatalogPath(path); err != nil {
-		return projectresolve.CatalogProject{}, false, err
-	}
-	record := registry.ProjectRecord{ID: "p-" + uuid.NewString(), WorkspaceRoot: path, Title: strings.TrimSpace(title), CreatedAt: time.Now().UTC()}
-	if len(record.Title) > projectTitleLimit {
-		return projectresolve.CatalogProject{}, false, fmt.Errorf("a project name is 1 to %d characters", projectTitleLimit)
-	}
-	repository, notRepository, err := projectresolve.ResolveCatalogRepository(ctx, path, nil, projectAddGitTimeout)
-	inRepository := err == nil
-	if !inRepository && !notRepository {
-		return projectresolve.CatalogProject{}, false, fmt.Errorf("read repository for %s: %w", path, err)
-	}
-	records, err := d.Registry.ListProjects()
+	d.projectWrites.Lock()
+	defer d.projectWrites.Unlock()
+	plan, err := d.planProjectAdd(ctx, path, title)
 	if err != nil {
 		return projectresolve.CatalogProject{}, false, err
 	}
-	// supersedes is the implicit project whose lead and archive state the
-	// added project takes over. A worktree project, or a folder inside one,
-	// splits off part of its repository's project and takes over nothing.
-	supersedes := ""
-	switch {
-	case inRepository && repository.LinkedWorktreeRoot(path):
-		record.Worktree = true
-	case inRepository && !insideWorktreeProject(records, path):
-		record.WorkspaceRoot = repository.Translate(path)
-		if record.Key = repository.Key(record.WorkspaceRoot); record.Key != "" {
-			record.Repository, _ = json.Marshal(repository.Repository)
+	if existing := plan.existing(); existing != nil {
+		return *projectresolve.AddedCatalogProject(*existing, plan.inRepository), false, nil
+	}
+	return d.recordProjectAdd(plan)
+}
+
+// projectAddPlan is the record adding a folder would write, and the
+// implicit project whose lead and archive state it takes over.
+type projectAddPlan struct {
+	record       registry.ProjectRecord
+	supersedes   string
+	inRepository bool
+	records      []registry.ProjectRecord
+}
+
+// existing is the project already added at the planned folder.
+func (p projectAddPlan) existing() *registry.ProjectRecord {
+	for index := range p.records {
+		if p.records[index].Added && p.records[index].WorkspaceRoot == p.record.WorkspaceRoot {
+			return &p.records[index]
 		}
-		supersedes = implicitProjectID(repository, record.WorkspaceRoot)
 	}
-	if record.Title == "" {
-		record.Title = filepath.Base(record.WorkspaceRoot)
+	return nil
+}
+
+func (d *Daemon) planProjectAdd(ctx context.Context, path, title string) (projectAddPlan, error) {
+	path, err := workspace.NormalizeCWD(path)
+	if err != nil || path == "" {
+		return projectAddPlan{}, fmt.Errorf("a folder path is required")
 	}
-	if id, kept, err := d.keptProjectID(records, record.WorkspaceRoot); err != nil {
-		return projectresolve.CatalogProject{}, false, err
+	if info, err := os.Stat(path); err != nil || !info.IsDir() {
+		return projectAddPlan{}, &folderNotFoundError{path: path, host: d.hostIdentity().Name}
+	}
+	if path, err = projectresolve.CanonicalCatalogPath(path); err != nil {
+		return projectAddPlan{}, err
+	}
+	plan := projectAddPlan{record: registry.ProjectRecord{ID: "p-" + uuid.NewString(), WorkspaceRoot: path, Title: strings.TrimSpace(title), CreatedAt: time.Now().UTC()}}
+	if len(plan.record.Title) > projectTitleLimit {
+		return projectAddPlan{}, fmt.Errorf("a project name is 1 to %d characters", projectTitleLimit)
+	}
+	repository, notRepository, err := projectresolve.ResolveCatalogRepository(ctx, path, nil, projectAddGitTimeout)
+	plan.inRepository = err == nil
+	if !plan.inRepository && !notRepository {
+		return projectAddPlan{}, fmt.Errorf("read repository for %s: %w", path, err)
+	}
+	if plan.records, err = d.Registry.ListProjects(); err != nil {
+		return projectAddPlan{}, err
+	}
+	// A worktree project, or a folder inside one, splits off part of its
+	// repository's project and takes over nothing.
+	switch {
+	case plan.inRepository && repository.LinkedWorktreeRoot(path):
+		plan.record.Worktree = true
+	case plan.inRepository && !insideWorktreeProject(plan.records, path):
+		plan.record.WorkspaceRoot = repository.Translate(path)
+		if plan.record.Key = repository.Key(plan.record.WorkspaceRoot); plan.record.Key != "" {
+			plan.record.Repository, _ = json.Marshal(repository.Repository)
+		}
+		plan.supersedes = implicitProjectID(repository, plan.record.WorkspaceRoot)
+	}
+	if plan.record.Title == "" {
+		plan.record.Title = filepath.Base(plan.record.WorkspaceRoot)
+	}
+	if id, kept, err := d.keptProjectID(plan.records, plan.record.WorkspaceRoot); err != nil {
+		return projectAddPlan{}, err
 	} else if kept {
-		record.ID = id
+		plan.record.ID = id
 	}
-	outcome, err := d.Registry.AddProject(record, supersedes)
+	return plan, nil
+}
+
+func (d *Daemon) recordProjectAdd(plan projectAddPlan) (projectresolve.CatalogProject, bool, error) {
+	outcome, err := d.Registry.AddProject(plan.record, plan.supersedes)
 	var taken *registry.WorkspaceTakenError
 	if errors.As(err, &taken) {
+		records, listErr := d.Registry.ListProjects()
+		if listErr != nil {
+			return projectresolve.CatalogProject{}, false, listErr
+		}
 		for _, existing := range records {
 			if existing.ID == taken.ProjectID {
-				return *projectresolve.AddedCatalogProject(existing, inRepository), false, nil
+				return *projectresolve.AddedCatalogProject(existing, plan.inRepository), false, nil
 			}
 		}
 		return projectresolve.CatalogProject{}, false, taken
@@ -895,7 +957,7 @@ func (d *Daemon) addProject(ctx context.Context, path, title string) (projectres
 	}
 	d.projectMovesApplied([]registry.ProjectMoveOutcome{outcome})
 	d.requestCatalogDiscovery()
-	return *projectresolve.AddedCatalogProject(record, inRepository), true, nil
+	return *projectresolve.AddedCatalogProject(plan.record, plan.inRepository), true, nil
 }
 
 func insideWorktreeProject(records []registry.ProjectRecord, path string) bool {
@@ -949,7 +1011,7 @@ func (e *folderNotFoundError) Error() string {
 func (d *Daemon) refreshProjectRepositories(ctx context.Context, records []registry.ProjectRecord, now time.Time) {
 	for index := range records {
 		record := &records[index]
-		if !record.Added || record.Worktree || insideWorktreeProject(records, record.WorkspaceRoot) {
+		if !record.Added || record.Worktree || record.Joined || insideWorktreeProject(records, record.WorkspaceRoot) {
 			continue
 		}
 		key, repository, ok := d.catalogIdentities.RootRepository(ctx, record.WorkspaceRoot, now)
@@ -959,7 +1021,9 @@ func (d *Daemon) refreshProjectRepositories(ctx context.Context, records []regis
 		if !ok || (key == record.Key && bytes.Equal(repository, record.Repository)) {
 			continue
 		}
-		if err := d.Registry.SetProjectRepository(record.ID, key, repository); err != nil {
+		if err := d.Registry.SetProjectRepository(record.ID, key, repository); errors.Is(err, sql.ErrNoRows) {
+			continue
+		} else if err != nil {
 			d.log.Printf("project %s repository: %s", record.WorkspaceRoot, err)
 			continue
 		}

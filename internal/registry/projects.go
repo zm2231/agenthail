@@ -18,7 +18,10 @@ type ProjectRecord struct {
 	Repository    []byte
 	// Worktree marks an added linked worktree root: a project of its own on
 	// this host, whose folders are never read as the main checkout's.
-	Worktree   bool
+	Worktree bool
+	// Joined marks a key given by joining the folder to a project, which
+	// the folder's repository never replaces.
+	Joined     bool
 	CreatedAt  time.Time
 	ArchivedAt time.Time
 }
@@ -63,8 +66,8 @@ func (r *Registry) AddProject(project ProjectRecord, supersedes string) (Project
 	case !errors.Is(err, sql.ErrNoRows):
 		return ProjectMoveOutcome{}, err
 	}
-	if _, err := tx.Exec(`INSERT INTO projects(id,workspace_root,title,added,project_key,repository,created_at_ms,archived_at_ms,worktree) VALUES(?,?,?,1,?,?,?,?,?)`,
-		project.ID, project.WorkspaceRoot, project.Title, project.Key, append([]byte{}, project.Repository...), project.CreatedAt.UnixMilli(), archivedAt, project.Worktree); err != nil {
+	if _, err := tx.Exec(`INSERT INTO projects(id,workspace_root,title,added,project_key,repository,created_at_ms,archived_at_ms,worktree,joined) VALUES(?,?,?,1,?,?,?,?,?,?)`,
+		project.ID, project.WorkspaceRoot, project.Title, project.Key, append([]byte{}, project.Repository...), project.CreatedAt.UnixMilli(), archivedAt, project.Worktree, project.Joined); err != nil {
 		return ProjectMoveOutcome{}, err
 	}
 	if _, err := tx.Exec(`DELETE FROM removed_project_ledgers WHERE workspace_root=? AND project_id=?`, project.WorkspaceRoot, project.ID); err != nil {
@@ -145,23 +148,34 @@ func (r *Registry) SetProjectTitle(id, title string) error {
 	return nil
 }
 
+// SetProjectRepository answers sql.ErrNoRows when id is no longer an added
+// project whose key follows its repository: removed, or joined to a project.
 func (r *Registry) SetProjectRepository(id, key string, repository []byte) error {
-	_, err := r.db.Exec(`UPDATE projects SET project_key=?,repository=? WHERE id=? AND added=1`, key, append([]byte{}, repository...), id)
-	return err
+	result, err := r.db.Exec(`UPDATE projects SET project_key=?,repository=? WHERE id=? AND added=1 AND joined=0`, key, append([]byte{}, repository...), id)
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil {
+		return err
+	} else if changed == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (r *Registry) ListProjects() ([]ProjectRecord, error) {
-	rows, err := r.read.Query(`SELECT id,workspace_root,title,added,project_key,repository,created_at_ms,archived_at_ms,worktree FROM projects ORDER BY title,workspace_root`)
+	rows, err := r.read.Query(`SELECT id,workspace_root,title,added,project_key,repository,created_at_ms,archived_at_ms,worktree,joined FROM projects ORDER BY title,workspace_root`)
 	if err != nil {
 		return nil, err
 	}
 	return appendRows([]ProjectRecord{}, rows, func(row rowScanner) (ProjectRecord, error) {
 		var project ProjectRecord
-		var added, worktree int
+		var added, worktree, joined int
 		var createdAt, archivedAt int64
-		err := row.Scan(&project.ID, &project.WorkspaceRoot, &project.Title, &added, &project.Key, &project.Repository, &createdAt, &archivedAt, &worktree)
+		err := row.Scan(&project.ID, &project.WorkspaceRoot, &project.Title, &added, &project.Key, &project.Repository, &createdAt, &archivedAt, &worktree, &joined)
 		project.Added = added == 1
 		project.Worktree = worktree == 1
+		project.Joined = joined == 1
 		project.CreatedAt = time.UnixMilli(createdAt).UTC()
 		if archivedAt > 0 {
 			project.ArchivedAt = time.UnixMilli(archivedAt).UTC()

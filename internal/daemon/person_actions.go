@@ -105,7 +105,7 @@ func (d *Daemon) leadActsOnOwn(ctx context.Context, caller *mcpCaller, api strin
 	case "channel-create":
 		return true
 	case "project-add":
-		if request.Host != "" || strings.TrimSpace(request.Path) == "" {
+		if request.Host != "" || request.Join != "" || strings.TrimSpace(request.Path) == "" {
 			return false
 		}
 		found, err := projectresolve.ResolvePathProject(ctx, d.Registry, request.Path)
@@ -267,7 +267,12 @@ func (d *Daemon) describePersonAction(api string, request personActionRequest) (
 	channel := "#" + strings.TrimPrefix(strings.TrimSpace(request.Channel), "#")
 	switch request.Action {
 	case "project-add":
+		if request.Join != "" {
+			return fmt.Sprintf("Join %s%s to project %s", strings.TrimSpace(request.Path), onHost, project(request.Join)), nil
+		}
 		return "Add " + strings.TrimSpace(request.Path) + onHost + " as a project", nil
+	case "project-unjoin":
+		return "Unjoin " + project(request.ProjectID) + " from the project it is joined to", nil
 	case "project-remove":
 		return "Remove project " + project(request.ProjectID), nil
 	case "project-archive":

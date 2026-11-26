@@ -89,7 +89,7 @@ export const projectColourCount = 6;
 
 export function projectColourID(projectID, ownerHostID) {
   const id = String(projectID ?? "");
-  if (!ownerHostID || !id || id.includes(separator) || id.startsWith("repo:")) return id;
+  if (!ownerHostID || !id || id.includes(separator) || id.startsWith("repo:") || id.startsWith("shared:")) return id;
   return `${ownerHostID}${separator}${id}`;
 }
 
