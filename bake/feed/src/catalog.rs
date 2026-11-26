@@ -467,7 +467,7 @@ pub struct Client {
     agent: ureq::Agent,
 }
 
-fn enc(value: &str) -> String {
+pub(crate) fn enc(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
 }
 
@@ -487,6 +487,28 @@ impl Client {
             .call()
             .map_err(|e| anyhow!(e.to_string()))?;
         Ok(response.into_json()?)
+    }
+
+    pub(crate) fn get_json(&self, path: &str) -> Result<Value> {
+        self.get(path)
+    }
+
+    pub(crate) fn ledger_rows(&self, project: &str) -> Result<Vec<Value>> {
+        let mut rows = Vec::new();
+        let mut cursor: Option<String> = None;
+        for _ in 0..20 {
+            let mut path = format!("/api/v1/ledger?projectKey={}&view=work&limit=100", enc(project));
+            if let Some(c) = &cursor {
+                path.push_str(&format!("&cursor={}", enc(c)));
+            }
+            let value = self.get(&path)?;
+            rows.extend(value["work"].as_array().cloned().unwrap_or_default());
+            cursor = value["nextCursor"].as_str().filter(|c| !c.is_empty()).map(String::from);
+            if cursor.is_none() {
+                break;
+            }
+        }
+        Ok(rows)
     }
 
     pub fn snapshot(&self) -> Result<Snapshot> {
