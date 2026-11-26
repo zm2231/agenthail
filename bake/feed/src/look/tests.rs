@@ -1,0 +1,154 @@
+use serde_json::json;
+
+use super::*;
+use crate::catalog::parse_time;
+
+const LIVE: &str = r##"{"rev":"a070bfe77ead","text":"version = 1\nbackground = art: field\n","values":{"background":"image: art/field-dark.jpg","background.dim":0,"background.fit":"cover","background.light":"image: art/field-light.jpg","background.opacity":1,"background.position":"center","background.session-opacity":1,"glass":"on","glass.blur":0,"glass.border":0.08,"glass.composer.opacity":0.3,"glass.gutter":0,"glass.opacity":0,"glass.readability":"auto","glass.tint":"ground","scrim.tint":"auto","text.scale":1,"texture":"none","texture.spacing":3,"texture.strength":0.2,"theme":"system","theme.accent":"system","contrast.target":4.5},"colors":{"accent":{"systemAccent":true},"body":{"dark":"#ececee","light":"#1d1d1f"},"muted":{"dark":"#a3a3a8","light":"#55565c"}},"chosen":{"background":"art: field","glass.blur":"0"},"overrides":{"glass.blur":"mac"},"problems":[{"line":7,"key":"glass.sidebar.opacity","message":"glass.sidebar.opacity was removed"}]}"##;
+
+#[test]
+fn reads_the_daemon_view() {
+    let view: View = serde_json::from_str(LIVE).unwrap();
+    let look = Look::from_view(&view);
+    assert_eq!(look.rev, "a070bfe77ead");
+    assert_eq!(look.theme, Theme::System);
+    assert_eq!(look.background, Wallpaper::Image("art/field-dark.jpg".into()));
+    assert_eq!(look.background_light, Wallpaper::Image("art/field-light.jpg".into()));
+    assert_eq!(look.images(), vec!["art/field-dark.jpg".to_string(), "art/field-light.jpg".to_string()]);
+    assert_eq!((look.fit, look.position), (Fit::Cover, Position::Center));
+    assert_eq!((look.blur, look.pane_opacity, look.float_opacity), (0.0, 0.0, 0.3));
+    assert!(look.glass && look.readable);
+    assert_eq!(look.accent, None);
+    assert_eq!(look.role("body", true), Some([0xec as f32 / 255.0, 0xec as f32 / 255.0, 0xee as f32 / 255.0]));
+    assert_eq!(look.role("muted", false), hex("#55565c"));
+    assert!(look.translucent(true));
+    assert!(!look.translucent(false));
+    assert_eq!(view.overrides.get("glass.blur").map(String::as_str), Some("mac"));
+    assert_eq!(view.problems[0].line, 7);
+}
+
+#[test]
+fn defaults_follow_the_schema_without_a_daemon() {
+    let look = Look::default();
+    assert_eq!(look.background, Wallpaper::None);
+    assert_eq!((look.blur, look.pane_opacity, look.float_opacity, look.text_scale, look.target), (30.0, 0.3, 0.5, 1.0, 4.5));
+    assert!(!look.translucent(true));
+}
+
+#[test]
+fn out_of_range_numbers_are_held_to_the_schema() {
+    let view = View { values: serde_json::from_value(json!({"text.scale": 3, "glass.blur": -2, "background.dim": 0.95, "theme": "light"})).unwrap(), ..View::default() };
+    let look = Look::from_view(&view);
+    assert_eq!((look.text_scale, look.blur, look.dim), (1.6, 0.0, 0.8));
+    assert!(!look.dark(true));
+}
+
+#[test]
+fn backgrounds_parse_as_the_mac_app_reads_them() {
+    assert_eq!(parse_background("none"), Some(Wallpaper::None));
+    assert_eq!(parse_background("desktop"), Some(Wallpaper::Desktop));
+    assert_eq!(parse_background("image: uploads/sea.png"), Some(Wallpaper::Image("uploads/sea.png".into())));
+    assert_eq!(parse_background("gradient: 135deg, #000000 0%, #ffffff 100%"), Some(Wallpaper::Linear { angle: 135.0, stops: vec![([0.0; 3], 0.0), ([1.0; 3], 1.0)] }));
+    let Some(Wallpaper::Mesh { columns, rows, colors }) = parse_background("mesh: 2x2, #000000, #ffffff, #ff0000, #00ff00") else { panic!() };
+    assert_eq!((columns, rows, colors.len()), (2, 2, 4));
+    assert_eq!(parse_background("mesh: 2x2, #000000"), None);
+    assert_eq!(parse_background("gradient: 90deg, #000000 0%"), None);
+    assert_eq!(parse_background("gradient: dusk"), None);
+    assert_eq!(parse_background("image:"), None);
+}
+
+#[test]
+fn images_are_placed_by_fit_and_position() {
+    let p = place(Fit::Cover, Position::Center, (200.0, 100.0), (100.0, 100.0));
+    assert_eq!(p.rect, [-50.0, 0.0, 200.0, 100.0]);
+    assert_eq!(place(Fit::Cover, Position::Left, (200.0, 100.0), (100.0, 100.0)).rect, [0.0, 0.0, 200.0, 100.0]);
+    assert_eq!(place(Fit::Cover, Position::Right, (200.0, 100.0), (100.0, 100.0)).rect, [-100.0, 0.0, 200.0, 100.0]);
+    assert_eq!(place(Fit::Contain, Position::Top, (200.0, 100.0), (100.0, 100.0)).rect, [0.0, 0.0, 100.0, 50.0]);
+    assert_eq!(place(Fit::Contain, Position::Bottom, (200.0, 100.0), (100.0, 100.0)).rect, [0.0, 50.0, 100.0, 50.0]);
+    assert_eq!(place(Fit::Center, Position::Center, (40.0, 20.0), (100.0, 100.0)).rect, [30.0, 40.0, 40.0, 20.0]);
+    let tile = place(Fit::Tile, Position::Right, (40.0, 20.0), (100.0, 100.0));
+    assert!(tile.tile);
+    assert_eq!(tile.rect, [0.0, 0.0, 40.0, 20.0]);
+}
+
+#[test]
+fn panes_darken_only_as_far_as_text_needs() {
+    let roles = [luminance(hex("#ececee").unwrap()), luminance(hex("#a3a3a8").unwrap())];
+    let edge = boundary(&roles, true, 4.5);
+    let ground = luminance(hex("#161618").unwrap());
+    let bright = luminance([0.9; 3]);
+    let a = pane_alpha(bright, ground, edge, true, 0.0);
+    assert!(a > 0.5 && a < 1.0, "{a}");
+    let shown = a * ground + (1.0 - a) * bright;
+    for l in roles {
+        assert!(contrast(l, shown) >= 4.5 - 1e-3, "{}", contrast(l, shown));
+    }
+    assert_eq!(pane_alpha(luminance([0.05; 3]), ground, edge, true, 0.2), 0.2);
+    assert!(pane_alpha(bright, ground, edge, true, 0.95) >= 0.95);
+
+    let light_roles = [luminance(hex("#1d1d1f").unwrap())];
+    let light_edge = boundary(&light_roles, false, 4.5);
+    let paper = luminance([0.97; 3]);
+    let dark_bg = luminance([0.1; 3]);
+    let b = pane_alpha(dark_bg, paper, light_edge, false, 0.0);
+    let shown = b * paper + (1.0 - b) * dark_bg;
+    assert!(contrast(light_roles[0], shown) >= 4.5 - 1e-3);
+}
+
+#[test]
+fn the_worst_pixel_ignores_a_few_outliers() {
+    let mut rgba = vec![20u8; 400 * 4];
+    for px in rgba.chunks_exact_mut(4).take(10) {
+        px.copy_from_slice(&[255, 255, 255, 255]);
+    }
+    assert_eq!(worst(&rgba, true), [20.0 / 255.0; 3]);
+    assert_eq!(worst(&rgba, false), [20.0 / 255.0; 3]);
+    assert_eq!(worst(&[], true), [1.0; 3]);
+}
+
+#[test]
+fn a_mesh_runs_corner_to_corner() {
+    let (w, h, px) = mesh(2, 2, &[[0.0; 3], [1.0; 3], [0.0; 3], [1.0; 3]], 2.0);
+    assert_eq!((w, h), (192, 96));
+    assert_eq!(&px[0..4], &[0, 0, 0, 255]);
+    let last = ((w - 1) * 4) as usize;
+    assert_eq!(&px[last..last + 4], &[255, 255, 255, 255]);
+}
+
+#[test]
+fn textures_are_tiles() {
+    let (w, h, px) = scanlines(4.0, 0.5);
+    assert_eq!((w, h), (1, SCANLINE_ROWS));
+    assert_eq!(px[3], 128);
+    assert_eq!(px[16 * 4 + 3], 0);
+    let (gw, gh, g) = grain(0.2);
+    assert_eq!((gw, gh, g.len()), (GRAIN_SIDE, GRAIN_SIDE, (GRAIN_SIDE * GRAIN_SIDE * 4) as usize));
+    assert!(g.chunks_exact(4).all(|p| p[3] <= 26));
+}
+
+#[test]
+fn changes_are_the_lines_the_daemon_checks() {
+    let everywhere = Scope::Everywhere;
+    let here = Scope::ThisComputer("Studio".into());
+    assert_eq!(Change::set(&everywhere, "glass.blur", "12", "glass blur to 12").0, json!({"action": "set", "set": ["glass.blur = 12"], "message": "Set glass blur to 12"}));
+    assert_eq!(Change::set(&here, "theme", "dark", "appearance to dark").0, json!({"action": "set", "set": ["theme@device:Studio = dark"], "message": "Set appearance to dark on Studio"}));
+    let reset = Change::reset(&here).0;
+    assert_eq!(reset["unset"].as_array().unwrap().len(), KEYS.len());
+    assert_eq!(reset["unset"][0], "theme@device:Studio");
+    assert_eq!(reset["message"], "Reset appearance on Studio");
+    assert_eq!(Change::undo(None).0, json!({"action": "undo"}));
+    assert_eq!(Change::undo(Some("abc")).0, json!({"action": "undo", "rev": "abc"}));
+    assert_eq!(Change::clear_override("glass.blur", "mac", "All Macs").0, json!({"action": "unset", "unset": ["glass.blur@mac"], "message": "Reset glass.blur for All Macs"}));
+    assert_eq!(owner("mac", "Studio"), "All Macs");
+    assert_eq!(owner("device:Studio", "Studio"), "This computer");
+    assert_eq!(owner("device:Pocket", "Studio"), "Pocket");
+}
+
+#[test]
+fn history_names_who_and_when() {
+    let now = parse_time("2026-11-26T12:00:00Z").unwrap();
+    let e = |author: &str, time: &str| Entry { rev: "r".into(), author: author.into(), time: time.into(), message: "m".into() };
+    assert_eq!(describe(&e("person", "2026-11-26T11:55:00Z"), now), "You · 5 min ago");
+    assert_eq!(describe(&e("@collab", "2026-11-16T16:46:27-05:00"), now), "@collab · 9 d ago");
+    assert_eq!(describe(&e("person", "2026-11-26T09:00:00Z"), now), "You · 3 h ago");
+    assert_eq!(describe(&e("person", ""), now), "You");
+}

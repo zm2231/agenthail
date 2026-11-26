@@ -23,6 +23,7 @@ pub mod handoffs;
 pub mod history;
 pub mod item;
 pub mod limit;
+pub mod look;
 pub mod menu;
 pub mod notify;
 #[cfg(test)]
