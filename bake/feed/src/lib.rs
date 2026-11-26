@@ -4,6 +4,7 @@ pub mod blocks;
 pub mod brief;
 pub mod question;
 pub mod review;
+pub mod search;
 pub mod settings;
 pub mod catalog;
 pub mod create;

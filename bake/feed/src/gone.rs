@@ -236,7 +236,7 @@ impl Client {
         classify(id, &detail, listing, known)
     }
 
-    fn listed(&self, id: &str, term: &str) -> Result<Option<Session>, String> {
+    pub(crate) fn listed(&self, id: &str, term: &str) -> Result<Option<Session>, String> {
         let mut cursor: Option<String> = None;
         loop {
             let mut path = format!("/api/v1/snapshot?q={}&limit=200", enc(term));

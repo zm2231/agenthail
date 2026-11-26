@@ -135,6 +135,7 @@ pub struct App {
     pub notify: notify::State,
     last_row: Option<Session>,
     client: Option<Client>,
+    overview_poke: Option<Sender<()>>,
     fixtures: Option<Fixtures>,
     inbox: Receiver<Bg>,
     outbox: Sender<Bg>,
@@ -158,7 +159,7 @@ fn load_recorded(path: &str) -> Result<Recorded, String> {
     serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))
 }
 
-fn watch_overview(client: Client, tx: Sender<Bg>) {
+fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<()>) {
     std::thread::spawn(move || {
         loop {
             let message = match feed::derive::live::fetch(&client) {
@@ -168,7 +169,8 @@ fn watch_overview(client: Client, tx: Sender<Bg>) {
             if tx.send(message).is_err() {
                 return;
             }
-            std::thread::sleep(Duration::from_secs(20));
+            let _ = poke.recv_timeout(Duration::from_secs(20));
+            while poke.try_recv().is_ok() {}
         }
     });
 }
@@ -238,6 +240,7 @@ fn init() -> App {
         notify: notify::State::default(),
         last_row: None,
         client: None,
+        overview_poke: None,
         fixtures: None,
         inbox,
         outbox,
@@ -281,7 +284,9 @@ fn init() -> App {
                         std::thread::sleep(Duration::from_secs(2));
                     }
                 });
-                watch_overview(client.clone(), app.outbox.clone());
+                let (poke, poked) = channel();
+                watch_overview(client.clone(), app.outbox.clone(), poked);
+                app.overview_poke = Some(poke);
                 over::inbox::start(&mut app.ov.inbox, &client);
                 notify::start(&mut app);
                 app.client = Some(client);
@@ -323,7 +328,7 @@ impl App {
 }
 
 pub fn session<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
-    s.sessions.iter().find(|x| x.id == id)
+    s.sessions.iter().find(|x| x.id == id).or_else(|| over::search::pinned(s, id))
 }
 
 pub fn select(s: &mut App, id: &str) {
@@ -1097,6 +1102,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     }
     changed |= ui::session_menu::drain(s);
     changed |= over::inbox::drain(s);
+    changed |= over::search::drain(s);
     changed |= notify::tick(s);
     changed |= ui::gone::watch(s);
     changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s);
