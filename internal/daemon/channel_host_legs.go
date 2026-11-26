@@ -29,12 +29,14 @@ type channelHostLeg struct {
 	Name       string `json:"name"`
 	State      string `json:"state"`
 	Recipients int    `json:"recipients"`
+	Older      int    `json:"older,omitempty"`
 	Detail     string `json:"detail,omitempty"`
 	Rule       string `json:"rule,omitempty"`
 }
 
 type channelDeliverAnswer struct {
 	Recipients []broadcast.Recipient `json:"recipients"`
+	Older      int                   `json:"older"`
 	Error      struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
@@ -169,7 +171,7 @@ func channelLegAnswer(leg channelHostLeg, answer hostAnswer) ([]broadcast.Recipi
 				reply.Recipients[index].Coordinator = leg.ID + "::" + name
 			}
 		}
-		leg.State, leg.Recipients = channelLegReached, broadcast.Result{Recipients: reply.Recipients}.Reached()
+		leg.State, leg.Recipients, leg.Older = channelLegReached, broadcast.Result{Recipients: reply.Recipients}.Reached(), reply.Older
 		return reply.Recipients, leg
 	}
 	leg.State, leg.Rule = channelLegRefused, reply.Detail.Rule

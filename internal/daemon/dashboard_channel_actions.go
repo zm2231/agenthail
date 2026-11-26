@@ -81,6 +81,9 @@ func (d *Daemon) doChannelSend(ctx context.Context, _ principal, request dashboa
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", sendErr.Error())
 	}
 	result.Recipients = append(result.Recipients, remote...)
+	for _, leg := range legs {
+		result.Older += leg.Older
+	}
 	if result.Reached() == 0 && !slices.ContainsFunc(legs, func(leg channelHostLeg) bool { return leg.State != channelLegReached }) {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", d.noMembers(target, result))
 	}
@@ -94,10 +97,21 @@ func (d *Daemon) noMembers(target broadcast.Target, result broadcast.Result) str
 			skipped = append(skipped, d.resolveDisplay(recipient.SessionID)+" ("+recipient.Detail+")")
 		}
 	}
-	if len(skipped) == 0 {
-		return fmt.Sprintf("#%s has no members other than the sender", target.Name)
+	message := fmt.Sprintf("#%s has no members other than the sender", target.Name)
+	if len(skipped) > 0 {
+		message = fmt.Sprintf("#%s has no reachable members other than the sender; skipped %s", target.Name, strings.Join(skipped, ", "))
 	}
-	return fmt.Sprintf("#%s has no reachable members other than the sender; skipped %s", target.Name, strings.Join(skipped, ", "))
+	return message + olderNote(result.Older)
+}
+
+func olderNote(older int) string {
+	switch older {
+	case 0:
+		return ""
+	case 1:
+		return "; 1 older session not reached"
+	}
+	return fmt.Sprintf("; %d older sessions not reached", older)
 }
 
 func (d *Daemon) channelSender(request dashboardActionRequest) (string, string, error) {
