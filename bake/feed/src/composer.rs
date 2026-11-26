@@ -144,12 +144,78 @@ pub fn put_back(draft: &str, text: &str) -> String {
     }
 }
 
-pub fn take_back(composer: &str, text: &str) -> Option<String> {
-    let composer = composer.trim();
-    if composer == text {
+pub fn take_back(composer: &str, text: &str, restored: Option<&(String, String)>) -> Option<String> {
+    if composer.trim() == text {
         return Some(String::new());
     }
-    composer.strip_prefix(text).and_then(|rest| rest.strip_prefix("\n\n")).map(|rest| rest.trim_start().to_string())
+    restored.filter(|(merged, _)| merged == composer).map(|(_, before)| before.clone())
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Unconfirmed(HashMap<String, Vec<Unsent>>);
+
+impl Unconfirmed {
+    pub fn latest(&self, id: &str) -> Option<&Unsent> {
+        self.0.get(id).and_then(|list| list.last())
+    }
+
+    pub fn has(&self, id: &str) -> bool {
+        self.latest(id).is_some()
+    }
+
+    pub fn matching(&self, id: &str, text: &str) -> Option<&Unsent> {
+        self.0.get(id).and_then(|list| list.iter().rev().find(|u| u.resend(text)))
+    }
+
+    pub fn add(&mut self, id: &str, unsent: Unsent) {
+        let list = self.0.entry(id.to_string()).or_default();
+        list.retain(|u| u.key != unsent.key);
+        list.push(unsent);
+    }
+
+    pub fn remove(&mut self, id: &str, key: &str) {
+        if let Some(list) = self.0.get_mut(id) {
+            list.retain(|u| u.key != key);
+            if list.is_empty() {
+                self.0.remove(id);
+            }
+        }
+    }
+
+    pub fn note(&self, id: &str) -> Option<String> {
+        let list = self.0.get(id)?;
+        let latest = list.last()?.note();
+        Some(if list.len() > 1 { format!("{} messages not sent or not confirmed. {latest}", list.len()) } else { latest })
+    }
+
+    pub fn rekey(&mut self, rekeyed: &HashMap<String, String>) {
+        let retired: Vec<String> = self.0.keys().filter(|id| current(rekeyed, id) != id.as_str()).cloned().collect();
+        for old in retired {
+            let new = current(rekeyed, &old).to_string();
+            for unsent in self.0.remove(&old).unwrap_or_default() {
+                self.add(&new, unsent);
+            }
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &Unsent)> {
+        self.0.iter().flat_map(|(id, list)| list.iter().map(move |u| (id, u)))
+    }
+
+    pub fn to_json(&self) -> Value {
+        Value::Object(self.0.iter().map(|(id, list)| (id.clone(), Value::Array(list.iter().map(Unsent::to_json).collect()))).collect())
+    }
+
+    pub fn from_json(value: &Value) -> Unconfirmed {
+        let mut out = Unconfirmed::default();
+        for (id, raw) in value.as_object().into_iter().flatten() {
+            let list = raw.as_array().cloned().unwrap_or_else(|| vec![raw.clone()]);
+            for unsent in list.iter().filter_map(|u| Unsent::from_json(id, u)) {
+                out.add(id, unsent);
+            }
+        }
+        out
+    }
 }
 
 pub fn current<'a>(rekeyed: &'a HashMap<String, String>, mut id: &'a str) -> &'a str {
@@ -269,10 +335,49 @@ mod tests {
 
     #[test]
     fn a_retry_takes_back_only_the_copy_that_was_put_back() {
-        assert_eq!(take_back("hello", "hello").as_deref(), Some(""));
-        assert_eq!(take_back(&put_back("and more", "hello"), "hello").as_deref(), Some("and more"));
-        assert_eq!(take_back("hello world", "hello"), None);
-        assert_eq!(take_back("say hello", "hello"), None);
+        assert_eq!(take_back("hello", "hello", None).as_deref(), Some(""));
+        let merged = put_back("and more", "hello");
+        let restored = (merged.clone(), "and more".to_string());
+        assert_eq!(take_back(&merged, "hello", Some(&restored)).as_deref(), Some("and more"));
+        assert_eq!(take_back("hello\n\n  and more", "hello", Some(&restored)), None);
+        assert_eq!(take_back(&merged, "hello", None), None);
+        assert_eq!(take_back("hello world", "hello", None), None);
+    }
+
+    fn unsent(key: &str, text: &str, maybe_delivered: bool) -> Unsent {
+        Unsent { session: "s1".into(), text: text.into(), key: key.into(), busy: None, maybe_delivered, error: "timeout".into() }
+    }
+
+    #[test]
+    fn each_unconfirmed_send_is_kept_until_it_is_resolved() {
+        let mut held = Unconfirmed::default();
+        held.add("s1", unsent("k1", "hello", true));
+        held.add("s1", unsent("k2", "hello world", false));
+        assert_eq!(held.latest("s1").map(|u| u.key.as_str()), Some("k2"));
+        assert_eq!(held.matching("s1", "hello").map(|u| u.key.as_str()), Some("k1"));
+        assert_eq!(held.matching("s1", "hello world"), None);
+        assert!(held.note("s1").unwrap().starts_with("2 messages"));
+        held.add("s1", unsent("k1", "hello", true));
+        assert_eq!(held.iter().count(), 2);
+        held.remove("s1", "k2");
+        assert_eq!(held.latest("s1").map(|u| u.key.as_str()), Some("k1"));
+        held.remove("s1", "k1");
+        assert!(!held.has("s1"));
+        assert_eq!(held, Unconfirmed::default());
+    }
+
+    #[test]
+    fn unconfirmed_sends_follow_a_rekey_and_survive_a_restart() {
+        let mut held = Unconfirmed::default();
+        held.add("old", unsent("k1", "hello", true));
+        held.add("new", unsent("k2", "again", true));
+        held.rekey(&map(&[("old", "new")]));
+        assert!(!held.has("old"));
+        assert_eq!(held.0["new"].len(), 2);
+        assert_eq!(held.matching("new", "hello").map(|u| u.session.as_str()), Some("s1"));
+        assert_eq!(Unconfirmed::from_json(&held.to_json()), held);
+        let single = Unconfirmed::from_json(&json!({"s9": {"text": "hi", "key": "k"}}));
+        assert_eq!(single.latest("s9").map(|u| u.session.as_str()), Some("s9"));
     }
 
     #[test]

@@ -48,9 +48,9 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
         .on_press_tx(|s: &mut App, tx: &mut Tx| send(s, tx))
         .child(icon(&icons::ARROW_UP, 15.0).color(if ready { Color::WHITE } else { faint() }));
     let busy = crate::busy_delivery(s, &x.id);
-    let unsent = s.unsent.get(&x.id);
+    let unsent = s.unsent.has(&x.id);
     let status = match crate::composer_note(s, &x.id) {
-        Some(note) => text(note).font(META).color(if unsent.is_some() { attention() } else { muted() }),
+        Some(note) => text(note).font(META).color(if unsent { attention() } else { muted() }),
         None => text(busy.map(|b| b.hint()).unwrap_or("Return to send · Shift-Return for a new line")).font(META).color(faint()),
     };
     let mut controls = row().w_full().px(10.0).pb(10.0).gap(8.0).items_center().child(chip(&icons::SPARKLES, x.surface.clone()));
@@ -73,8 +73,9 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
         );
     }
     controls = controls.child(status.truncate()).child(spacer());
-    if unsent.is_some() {
-        let id = x.id.clone();
+    if unsent {
+        let (id, again) = (x.id.clone(), x.id.clone());
+        controls = controls.child(Button::new("Dismiss").variant(ButtonVariant::Ghost).build(theme::kit()).key("send-dismiss").on_press(move |s: &mut App| crate::dismiss_unsent(s, &again)));
         controls = controls.child(Button::new("Retry").variant(ButtonVariant::Ghost).icon(&icons::ROTATE).build(theme::kit()).key("send-retry").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::retry(s, &id, tx)));
     }
     if crate::can_stop(s, &x.id) {

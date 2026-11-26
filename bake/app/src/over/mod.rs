@@ -153,7 +153,7 @@ pub fn go(s: &mut App, to: Screen) {
 pub fn composer_target(s: &App) -> Option<String> {
     match &s.screen {
         Screen::Session => s.selected.clone(),
-        Screen::Project(key) => lead_of(s, key),
+        Screen::Project(key) => lead_of(s, key).map(|lead| feed::composer::current(&s.rekeyed, &lead).to_string()),
         _ => None,
     }
 }

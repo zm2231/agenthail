@@ -74,9 +74,11 @@ pub fn restore(s: &mut App) -> bool {
 }
 
 fn unsent(s: &App) -> Value {
-    let mut all: serde_json::Map<String, Value> = s.unsent.iter().map(|(id, u)| (id.clone(), u.to_json())).collect();
-    all.extend(s.in_flight.iter().map(|(id, u)| (id.clone(), u.to_json())));
-    Value::Object(all)
+    let mut all = s.unsent.clone();
+    for (id, pending) in &s.in_flight {
+        all.add(id, pending.clone());
+    }
+    all.to_json()
 }
 
 fn encode(s: &App) -> String {
@@ -116,18 +118,16 @@ pub fn load(s: &mut App) {
         s.ov.looked = m.iter().filter_map(|(k, t)| t.as_str().map(|t| (k.clone(), t.to_string()))).collect();
     }
     s.drafts = feed::composer::Drafts::from_json(&v["drafts"]);
-    for (id, raw) in v["unsent"].as_object().into_iter().flatten() {
-        if let Some(unsent) = feed::composer::Unsent::from_json(id, raw) {
-            let draft = feed::composer::put_back(s.drafts.get(id), &unsent.text);
-            s.drafts.set(id, &draft);
-            s.unsent.insert(id.clone(), unsent);
-        }
+    s.unsent = feed::composer::Unconfirmed::from_json(&v["unsent"]);
+    for (id, unsent) in s.unsent.iter() {
+        let draft = feed::composer::put_back(s.drafts.get(id), &unsent.text);
+        s.drafts.set(id, &draft);
     }
     s.ov.arrange();
     *LAST.lock().expect("layout lock") = encode(s);
 }
 
-type Write = (String, Option<Sender<()>>);
+type Write = (String, Option<Sender<Result<(), String>>>);
 
 fn writer() -> &'static Sender<Write> {
     static WRITER: OnceLock<Sender<Write>> = OnceLock::new();
@@ -136,15 +136,15 @@ fn writer() -> &'static Sender<Write> {
         std::thread::spawn(move || {
             for (text, done) in rx {
                 let Some(p) = path() else { continue };
-                let written = p.parent().is_none_or(|dir| std::fs::create_dir_all(dir).is_ok()) && std::fs::write(&p, &text).is_ok();
-                if !written {
+                let written = p.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&p, &text)).map_err(|e| e.to_string());
+                if written.is_err() {
                     let mut last = LAST.lock().expect("layout lock");
                     if *last == text {
                         last.clear();
                     }
                 }
                 if let Some(done) = done {
-                    let _ = done.send(());
+                    let _ = done.send(written);
                 }
             }
         });
@@ -164,14 +164,13 @@ pub fn save(s: &App) {
     }
 }
 
-pub fn save_now(s: &App) {
+pub fn save_now(s: &App) -> Result<(), String> {
     if !s.ov.persist || path().is_none() {
-        return;
+        return Ok(());
     }
     let now = encode(s);
     let (done, wait) = channel();
     *LAST.lock().expect("layout lock") = now.clone();
-    if writer().send((now, Some(done))).is_ok() {
-        let _ = wait.recv_timeout(std::time::Duration::from_secs(2));
-    }
+    writer().send((now, Some(done))).map_err(|_| "the layout writer stopped".to_string())?;
+    wait.recv_timeout(std::time::Duration::from_secs(5)).map_err(|_| "saving took too long".to_string())?
 }

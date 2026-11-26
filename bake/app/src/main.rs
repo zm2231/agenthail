@@ -9,7 +9,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
 use feed::catalog::{Client, OpenRequest, Session, WorkItem};
-use feed::composer::{Busy, Delivered, Drafts, Unsent};
+use feed::composer::{Busy, Delivered, Drafts, Unconfirmed, Unsent};
 use feed::derive::Recorded;
 use feed::derive::live::{Fetched, Ledger, Overview};
 use feed::derive::tails::{self, Tail};
@@ -29,7 +29,7 @@ pub enum Bg {
     OverviewError(String),
     SendSettings(String, HashMap<String, String>),
     Sent(String, Unsent, Result<Delivered, feed::catalog::RespondError>),
-    Stopped(String, Result<(), feed::catalog::RespondError>),
+    Stopped(String, Result<Delivered, feed::catalog::RespondError>),
     Requests(String, Vec<OpenRequest>, std::time::Instant),
     Answered(String, String, Result<(), feed::catalog::RespondError>),
     Error(String),
@@ -69,13 +69,15 @@ pub struct App {
     pub composer: TextEdit,
     pub composer_for: Option<String>,
     pub drafts: Drafts,
-    pub unsent: HashMap<String, Unsent>,
+    pub unsent: Unconfirmed,
     pub in_flight: HashMap<String, Unsent>,
-    pub queued: HashSet<String>,
+    restored: HashMap<String, (String, String)>,
+    pub queued: HashMap<String, u64>,
+    snapshots: u64,
     pub stopping: HashSet<String>,
     pub busy_default: Option<Busy>,
     pub busy_pick: HashMap<String, Busy>,
-    rekeyed: HashMap<String, String>,
+    pub rekeyed: HashMap<String, String>,
     pub items: HashMap<String, WorkItem>,
     pub requests: HashMap<String, Vec<OpenRequest>>,
     pub answering: Option<String>,
@@ -154,9 +156,11 @@ fn init() -> App {
         composer: TextEdit::new(""),
         composer_for: None,
         drafts: Drafts::default(),
-        unsent: HashMap::new(),
+        unsent: Unconfirmed::default(),
         in_flight: HashMap::new(),
-        queued: HashSet::new(),
+        restored: HashMap::new(),
+        queued: HashMap::new(),
+        snapshots: 0,
         stopping: HashSet::new(),
         busy_default: None,
         busy_pick: HashMap::new(),
@@ -479,41 +483,71 @@ pub fn send_to(s: &mut App, id: &str, tx: &mut Tx) {
         return;
     }
     s.composer = TextEdit::new("");
-    let again = s.unsent.get(id).filter(|u| u.resend(&message)).cloned();
-    dispatch(s, id, again.unwrap_or_else(|| fresh(s, id, message)), tx);
+    s.restored.remove(id);
+    match s.unsent.matching(id, &message).cloned() {
+        Some(again) => {
+            s.unsent.remove(id, &again.key);
+            dispatch(s, id, again, true, tx);
+        }
+        None => {
+            let pending = fresh(s, id, message);
+            dispatch(s, id, pending, false, tx);
+        }
+    }
 }
 
 pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
-    let Some(unsent) = s.unsent.get(id).cloned() else { return };
+    let Some(unsent) = s.unsent.latest(id).cloned() else { return };
     if s.sending.contains(id) || s.client.is_none() {
         return;
     }
     if s.composer_for.as_deref() == Some(id)
-        && let Some(rest) = feed::composer::take_back(&s.composer.text, &unsent.text)
+        && let Some(rest) = feed::composer::take_back(&s.composer.text, &unsent.text, s.restored.get(id))
     {
         s.composer = TextEdit::new(rest);
         s.composer.focused = true;
     }
-    let pending = if unsent.maybe_delivered { unsent } else { fresh(s, id, unsent.text) };
-    dispatch(s, id, pending, tx);
+    s.restored.remove(id);
+    s.unsent.remove(id, &unsent.key);
+    if unsent.maybe_delivered {
+        dispatch(s, id, unsent, true, tx);
+    } else {
+        let pending = fresh(s, id, unsent.text);
+        dispatch(s, id, pending, false, tx);
+    }
+}
+
+pub fn dismiss_unsent(s: &mut App, id: &str) {
+    if let Some(key) = s.unsent.latest(id).map(|u| u.key.clone()) {
+        s.unsent.remove(id, &key);
+        s.restored.remove(id);
+        over::layout::save(s);
+    }
 }
 
 fn fresh(s: &App, id: &str, text: String) -> Unsent {
     Unsent { session: id.to_string(), text, key: feed::catalog::request_key(), busy: busy_delivery(s, id), maybe_delivered: true, error: "the app closed before the daemon answered".into() }
 }
 
-fn dispatch(s: &mut App, id: &str, pending: Unsent, tx: &mut Tx) {
+fn dispatch(s: &mut App, id: &str, pending: Unsent, resent: bool, tx: &mut Tx) {
     let Some(client) = s.client.clone() else { return };
     let id = id.to_string();
-    tx.scroll_to_bottom(format!("transcript-{id}"));
-    s.sending.insert(id.clone());
-    s.unsent.remove(&id);
-    s.queued.remove(&id);
     s.in_flight.insert(id.clone(), pending.clone());
     if s.composer_for.as_deref() == Some(id.as_str()) {
         s.drafts.set(&id, &s.composer.text);
     }
-    over::layout::save_now(s);
+    if let Err(error) = over::layout::save_now(s) {
+        s.in_flight.remove(&id);
+        put_back(s, &id, &pending.text);
+        note(s, &id, format!("Not sent: the message couldn't be saved first ({error})"));
+        if resent {
+            s.unsent.add(&id, pending);
+        }
+        return;
+    }
+    tx.scroll_to_bottom(format!("transcript-{id}"));
+    s.sending.insert(id.clone());
+    s.queued.remove(&id);
     let out = s.outbox.clone();
     std::thread::spawn(move || {
         let result = client.send_as(&pending.session, &pending.text, pending.busy, &pending.key);
@@ -566,25 +600,29 @@ pub fn composer_note(s: &App, id: &str) -> Option<String> {
     if s.sending.contains(id) {
         return Some("Sending…".into());
     }
-    if let Some(unsent) = s.unsent.get(id) {
-        return Some(unsent.note());
+    if let Some(note) = s.unsent.note(id) {
+        return Some(note);
     }
-    if s.queued.contains(id) {
+    if let Some(at) = s.queued.get(id) {
         let waiting = session(s, id).map(|x| x.queue_count).unwrap_or_default();
-        return (waiting > 0 || busy_now(s, id)).then(|| Delivered::Queued.note(waiting));
+        let cleared = s.snapshots >= at + 2 && waiting == 0 && !busy_now(s, id);
+        return (!cleared).then(|| Delivered::Queued.note(waiting));
     }
     s.status_line.get(id).cloned()
 }
 
 fn put_back(s: &mut App, id: &str, text: &str) {
-    if s.composer_for.as_deref() == Some(id) {
+    let shown = s.composer_for.as_deref() == Some(id);
+    let before = if shown { s.composer.text.clone() } else { s.drafts.get(id).to_string() };
+    let merged = feed::composer::put_back(&before, text);
+    if shown {
         let focused = s.composer.focused;
-        s.composer = TextEdit::new(feed::composer::put_back(&s.composer.text, text));
+        s.composer = TextEdit::new(merged.as_str());
         s.composer.focused = focused;
     } else {
-        let merged = feed::composer::put_back(s.drafts.get(id), text);
         s.drafts.set(id, &merged);
     }
+    s.restored.insert(id.to_string(), (merged, before.trim_end().to_string()));
 }
 
 fn take_sent(s: &mut App, id: String, pending: Unsent, result: Result<Delivered, feed::catalog::RespondError>) {
@@ -594,13 +632,11 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, result: Result<Delivered,
     let failure = match result {
         Ok(Delivered::Unconfirmed) => Some((true, "the daemon took it but hasn't confirmed delivery".to_string())),
         Ok(Delivered::Queued) => {
-            s.unsent.remove(&id);
             s.status_line.remove(&id);
-            s.queued.insert(id.clone());
+            s.queued.insert(id.clone(), s.snapshots);
             None
         }
         Ok(delivered) => {
-            s.unsent.remove(&id);
             note(s, &id, delivered.note(0));
             None
         }
@@ -609,7 +645,7 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, result: Result<Delivered,
     if let Some((maybe_delivered, error)) = failure {
         put_back(s, &id, &pending.text);
         s.queued.remove(&id);
-        s.unsent.insert(id, Unsent { maybe_delivered, error, ..pending });
+        s.unsent.add(&id, Unsent { maybe_delivered, error, ..pending });
     }
 }
 
@@ -653,6 +689,7 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
         s.drafts.set(&id, &s.composer.text);
     }
     s.drafts.rekey(&s.rekeyed);
+    s.unsent.rekey(&s.rekeyed);
     let retired: Vec<(String, String)> = s.rekeyed.keys().map(|old| (old.clone(), feed::composer::current(&s.rekeyed, old).to_string())).filter(|(old, new)| old != new).collect();
     for (old, new) in retired {
         if s.selected.as_deref() == Some(old.as_str()) {
@@ -665,12 +702,12 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
             s.lru.retain(|x| x != &old);
             load_pane(s, &new);
         }
-        move_key(&mut s.unsent, &old, &new);
         move_key(&mut s.in_flight, &old, &new);
+        move_key(&mut s.restored, &old, &new);
+        move_key(&mut s.queued, &old, &new);
         move_key(&mut s.status_line, &old, &new);
         move_key(&mut s.busy_pick, &old, &new);
         move_key(&mut s.work_pick, &old, &new);
-        move_member(&mut s.queued, &old, &new);
         move_member(&mut s.sending, &old, &new);
         move_member(&mut s.stopping, &old, &new);
     }
@@ -721,6 +758,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             }
             Bg::OverviewError(error) => s.ov.notice = Some(format!("Couldn't refresh the overview: {error}")),
             Bg::SendSettings(busy, rekeyed) => {
+                s.snapshots += 1;
                 s.busy_default = Busy::parse(&busy);
                 follow_rekeys(s, rekeyed);
             }
@@ -729,7 +767,8 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 let id = feed::composer::current(&s.rekeyed, &id).to_string();
                 s.stopping.remove(&id);
                 let status = match result {
-                    Ok(()) => "Stopped".to_string(),
+                    Ok(Delivered::Unconfirmed) => "Stop sent, not confirmed yet".to_string(),
+                    Ok(_) => "Stopped".to_string(),
                     Err(error) if error.maybe_delivered => format!("Stop sent, not confirmed: {}", error.message),
                     Err(error) => format!("Couldn't stop: {}", error.message),
                 };
@@ -812,9 +851,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         tx.scroll_into_view_in("sidebar-list", format!("row-{id}"));
         s.revealed = Some(id);
     }
-    if s.composer_for.is_none() {
-        switch_composer(s);
-    }
+    switch_composer(s);
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &s.composer.text);
     }

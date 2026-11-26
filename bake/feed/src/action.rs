@@ -24,8 +24,8 @@ pub struct ReadState {
 }
 
 impl Client {
-    pub fn interrupt(&self, session: &str) -> Outcome<()> {
-        self.action("interrupt", json!({"sessionId": session})).map(drop)
+    pub fn interrupt(&self, session: &str) -> Outcome<Delivered> {
+        Ok(Delivered::read(&self.action("interrupt", json!({"sessionId": session}))?))
     }
 
     /// `busy` None leaves a busy session to the daemon's busy-delivery setting.
@@ -159,7 +159,7 @@ mod tests {
     fn each_action_sends_the_body_its_handler_reads() {
         type Call = Box<dyn Fn(&Client) -> Outcome<()>>;
         let calls: Vec<(Call, Value)> = vec![
-            (Box::new(|c| c.interrupt("s1")), json!({"action": "interrupt", "sessionId": "s1"})),
+            (Box::new(|c| c.interrupt("s1").map(drop)), json!({"action": "interrupt", "sessionId": "s1"})),
             (Box::new(|c| c.steer("s1", "stop")), json!({"action": "steer", "sessionId": "s1", "message": "stop", "author": "person"})),
             (Box::new(|c| c.queue_cancel(7, "").map(drop)), json!({"action": "queue-cancel", "queueId": 7, "host": ""})),
             (Box::new(|c| c.queue_cancel(7, "mac").map(drop)), json!({"action": "queue-cancel", "queueId": 7, "host": "mac"})),
@@ -247,6 +247,13 @@ mod tests {
         assert!(client.steer("s1", "stop").unwrap_err().maybe_delivered);
         assert!(client.turn_setting("s1", "effort", "high").unwrap_err().maybe_delivered);
         assert!(client.respond("s1", "ask-1", vec!["Yes".into()], Default::default()).unwrap_err().maybe_delivered);
+    }
+
+    #[test]
+    fn a_stop_still_in_progress_is_not_reported_as_done() {
+        let (client, _seen) = daemon(vec![(202, r#"{"ok":true,"status":"submitted"}"#), (200, r#"{"ok":true,"result":{"action":"interrupt","evidence":"delivered"}}"#)]);
+        assert_eq!(client.interrupt("s1").unwrap(), Delivered::Unconfirmed);
+        assert_eq!(client.interrupt("s1").unwrap(), Delivered::Sent);
     }
 
     #[test]

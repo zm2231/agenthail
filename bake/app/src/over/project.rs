@@ -315,6 +315,7 @@ fn lead_chat(s: &App, lead: &str) -> El {
 }
 
 fn composer(s: &App, placeholder: &str, lead: &str) -> El {
+    let lead = feed::composer::current(&s.rekeyed, lead);
     let k = kit();
     let (to, to2) = (lead.to_string(), lead.to_string());
     let input = text_input(&s.composer, BODY.lh(21.0))
@@ -346,9 +347,9 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
     } else {
         controls
     };
-    let controls = if s.unsent.contains_key(lead) {
-        let again = lead.to_string();
-        controls.child(Button::new("Retry").variant(ButtonVariant::Ghost).build(k).key("send-retry").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::retry(s, &again, tx)))
+    let controls = if s.unsent.has(lead) {
+        let (again, drop) = (lead.to_string(), lead.to_string());
+        controls.child(Button::new("Dismiss").variant(ButtonVariant::Ghost).build(k).key("send-dismiss").on_press(move |s: &mut App| crate::dismiss_unsent(s, &drop))).child(Button::new("Retry").variant(ButtonVariant::Ghost).build(k).key("send-retry").on_press_tx(move |s: &mut App, tx: &mut Tx| crate::retry(s, &again, tx)))
     } else {
         controls
     };
