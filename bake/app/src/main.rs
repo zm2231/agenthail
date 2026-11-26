@@ -48,6 +48,7 @@ pub enum Bg {
     Older(String, u64, Result<feed::history::Older, feed::history::Miss>),
     Body(String, u64, String, u64, Result<String, String>),
     Attach(ui::attach::Done),
+    Crew(ui::subagents::Done),
     Error(String),
 }
 
@@ -107,6 +108,8 @@ pub struct App {
     queue_epoch: u64,
     pub queue_note: HashMap<String, String>,
     pub queue_taking: Vec<feed::queue::Taking>,
+    pub crew: ui::subagents::Crew,
+    pub dock: feed::background::DockChoices,
     pub busy_default: Option<Busy>,
     pub busy_pick: HashMap<String, Busy>,
     pub rekeyed: HashMap<String, String>,
@@ -212,6 +215,8 @@ fn init() -> App {
         queue_epoch: 0,
         queue_note: HashMap::new(),
         queue_taking: Vec::new(),
+        crew: Default::default(),
+        dock: Default::default(),
         busy_default: None,
         busy_pick: HashMap::new(),
         rekeyed: HashMap::new(),
@@ -329,7 +334,7 @@ impl App {
 }
 
 pub fn session<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
-    s.sessions.iter().find(|x| x.id == id).or_else(|| over::search::pinned(s, id))
+    s.sessions.iter().find(|x| x.id == id).or_else(|| over::search::pinned(s, id)).or_else(|| ui::subagents::fetched(s, id))
 }
 
 pub fn select(s: &mut App, id: &str) {
@@ -346,6 +351,7 @@ pub fn select(s: &mut App, id: &str) {
     fetch_requests(s, id);
     ui::session_menu::load(s, id);
     ui::queue::fetch(s, id);
+    ui::subagents::load(s, id);
 }
 
 pub fn load_pane(s: &mut App, id: &str) {
@@ -945,6 +951,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                     if ui::queue::wants(s, &id) {
                         ui::queue::fetch(s, &id);
                     }
+                    ui::subagents::refresh(s, &id);
                     if let Some(work) = session(s, &id).and_then(|x| x.primary_work(s.work_pick.get(&id).map(String::as_str)).cloned()) {
                         fetch_item(s, &work.project_key, &work.item_id);
                     }
@@ -1018,6 +1025,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             }
             Bg::NewSession(loaded) => ui::new_session::take(s, loaded),
             Bg::Queue(id, asked, result) => ui::queue::take(s, id, asked, result),
+            Bg::Crew(done) => ui::subagents::done(s, done),
             Bg::QueueDone(id, queue_id, done) => ui::queue::done(s, id, queue_id, done),
             Bg::Recovered(back) => ui::queue::restore(s, back),
             Bg::Older(id, generation, result) => history::take_older(s, id, generation, result),

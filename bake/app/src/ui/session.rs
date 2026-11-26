@@ -114,6 +114,7 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
         .fill(card().alpha(0.78))
         .border(if s.attach.dropping { 1.5 } else { 1.0 }, if s.attach.dropping { accent() } else { Color::WHITE.alpha(0.10) })
         .shadow(10.0, 34.0, Color::BLACK.alpha(0.45))
+        .children(crate::ui::background::dock(s, x))
         .children(crate::ui::queue::dock(s, x))
         .children(super::attach::chips(s, &x.id).map(|c| col().w_full().px(12.0).pt(10.0).child(c)))
         .child(col().w_full().px(16.0).pt(13.0).pb(4.0).child(input))
@@ -207,7 +208,7 @@ pub(crate) fn changes_view(s: &App, id: &str) -> El {
         .min_h(0.0)
         .px(20.0)
         .pt(10.0)
-        .pb(120.0)
+        .pb(120.0 + super::queue::reserve(s, id) + super::background::reserve(s, id))
         .child(rune_kit::diff::DiffView::new(|s: &App| &s.diff, |s: &mut App| &mut s.diff).key("diff").build(s, theme::kit()))
 }
 

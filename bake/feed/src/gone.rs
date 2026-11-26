@@ -146,7 +146,7 @@ impl Detail {
         let raw = &v["session"];
         let text = |k: &str| raw[k].as_str().unwrap_or_default().to_string();
         let alias = v["alias"].as_str().filter(|a| !a.is_empty()).map(String::from);
-        Some(Session { id: id.to_string(), surface: text("surface"), name: text("name"), alias, status: text("status"), last_active: text("lastActive"), cwd: raw["cwd"].as_str().map(String::from), ..Session::default() })
+        Some(Session { id: id.to_string(), surface: text("surface"), name: text("name"), alias, status: text("status"), last_active: text("lastActive"), cwd: raw["cwd"].as_str().map(String::from), subagent: raw.get("subagent").filter(|v| !v.is_null()).cloned(), ..Session::default() })
     }
 }
 
@@ -278,6 +278,14 @@ mod tests {
 
     fn detail() -> Detail {
         Detail::Found(json!({"session": {"id": "s1", "name": "Fix the importer", "surface": "codex", "status": "idle", "lastActive": "2026-11-26T07:00:00Z"}, "alias": "fixer", "capabilities": {"lifecycle": {"resume": true}}}))
+    }
+
+    #[test]
+    fn a_looked_up_subagent_keeps_its_parent() {
+        let found = Detail::Found(json!({"session": {"id": "c1", "name": "Check the parser", "subagent": {"parentId": "p1", "rootId": "p1", "depth": 1, "nickname": "Boyle"}}}));
+        let row = found.row("c1").unwrap();
+        assert_eq!(crate::subagents::parent_of(&row).as_deref(), Some("p1"));
+        assert_eq!(detail().row("s1").unwrap().subagent, None);
     }
 
     #[test]

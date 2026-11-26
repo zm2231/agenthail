@@ -11,6 +11,7 @@ use crate::{App, Bg, Screen, Tab, answer_request, pick_work, session_edits, shor
 
 pub mod accounts;
 pub mod attach;
+pub(crate) mod background;
 mod chips;
 pub mod gone;
 pub(crate) mod queue;
@@ -20,6 +21,7 @@ pub mod pr_link;
 mod rail;
 mod session;
 mod session_dialogs;
+pub(crate) mod subagents;
 pub mod session_menu;
 mod waiting;
 

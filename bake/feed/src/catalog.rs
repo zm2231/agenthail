@@ -177,6 +177,16 @@ pub struct Session {
     #[serde(default)]
     pub subagent: Option<Value>,
     #[serde(default)]
+    pub subagents: Option<crate::subagents::Rollup>,
+    #[serde(default)]
+    pub hidden_subagents: Option<crate::subagents::Rollup>,
+    #[serde(default)]
+    pub live_hidden_subagents: Option<crate::subagents::Rollup>,
+    #[serde(default)]
+    pub registered_at: String,
+    #[serde(default)]
+    pub background_tasks: Option<crate::background::BackgroundTasks>,
+    #[serde(default)]
     pub delegated: Option<bool>,
     #[serde(default)]
     pub pinned_at: Option<String>,

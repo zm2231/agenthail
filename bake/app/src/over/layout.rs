@@ -98,6 +98,7 @@ fn encode(s: &App) -> String {
         "attachments": crate::ui::attach::saved(s),
         "unsent": unsent(s),
         "queueTaking": feed::queue::Taking::to_json(&s.queue_taking),
+        "backgroundDock": s.dock.to_json(),
     })
     .to_string()
 }
@@ -135,6 +136,7 @@ pub fn load(s: &mut App) {
         }
     }
     s.queue_taking = feed::queue::Taking::from_json(&v["queueTaking"]);
+    s.dock = feed::background::DockChoices::from_json(&v["backgroundDock"]);
     crate::ui::queue::recover(s);
     s.ov.arrange();
     *LAST.lock().expect("layout lock") = encode(s);
