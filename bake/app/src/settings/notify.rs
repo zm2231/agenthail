@@ -1,4 +1,4 @@
-use feed::notify::{NOTIFICATION_SETTINGS, Permission};
+use feed::notify::{NOTIFICATION_SETTINGS, Permission, daemon_posts};
 use feed::prefs::{Notify, NotifyStatus, Preference};
 use rune::{El, row};
 use rune_kit::{Button, ButtonVariant, ControlSize};
@@ -70,6 +70,12 @@ pub fn page(s: &Prefs) -> El {
         None => out = out.child(parts::reading("notification access")),
         Some(Err(f)) => out = out.child(parts::failure(s, f)),
         Some(Ok(st)) => out = out.child(desktop(s, &st.notifications)),
+    }
+    if !matches!(&s.settings, Some(Ok(_)))
+        && !std::env::var_os("HOME").is_some_and(|home| daemon_posts(std::path::Path::new(&home)))
+        && let Some(note) = s.permission.and_then(own)
+    {
+        out = out.child(section("", vec![note], None));
     }
     match &s.preferences {
         None => out.child(parts::reading("notification preferences")),
