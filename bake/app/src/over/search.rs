@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
@@ -12,11 +12,13 @@ use crate::over::ui::{self, BODY, BODY_MED, META, kit, strong, weak};
 use crate::{App, Screen};
 
 const SETTLE: Duration = Duration::from_millis(250);
+const RECHECK: Duration = Duration::from_secs(20);
 const ALL_EVENTS: &str = "All events";
 
 pub enum Got {
     Codex(String, Result<Codex, String>),
     History(u64, bool, Result<Page, String>),
+    Looked(String, u64, Result<feed::gone::Gone, String>),
 }
 
 pub struct Panel {
@@ -37,6 +39,9 @@ pub struct State {
     pub pinned: Vec<Session>,
     pub panel: Option<Panel>,
     typed: Option<(String, Instant)>,
+    requests: u64,
+    checking: Option<(String, u64)>,
+    checked: HashMap<String, Instant>,
     tx: Sender<Got>,
     rx: Receiver<Got>,
 }
@@ -44,7 +49,7 @@ pub struct State {
 impl Default for State {
     fn default() -> State {
         let (tx, rx) = channel();
-        State { codex: None, pinned: Vec::new(), panel: None, typed: None, tx, rx }
+        State { codex: None, pinned: Vec::new(), panel: None, typed: None, requests: 0, checking: None, checked: HashMap::new(), tx, rx }
     }
 }
 
@@ -57,7 +62,59 @@ pub fn open_codex(s: &mut App, row: Session) {
     let pins = &mut s.ov.search.pinned;
     pins.retain(|x| x.id != id);
     pins.push(row);
+    s.ov.search.checked.remove(&id);
     crate::over::open_session(s, &id);
+}
+
+pub fn patch_pinned(s: &mut App, id: &str, patch: &feed::menu::Patch) {
+    if let Some(x) = s.ov.search.pinned.iter_mut().find(|x| x.id == id) {
+        patch.apply(x);
+    }
+}
+
+fn unpin(s: &mut App, id: &str) {
+    s.ov.search.pinned.retain(|x| x.id != id);
+    s.ov.search.checked.remove(id);
+}
+
+fn recheck_pinned(s: &mut App) -> bool {
+    let listed: HashSet<&str> = s.sessions.iter().map(|x| x.id.as_str()).collect();
+    let before = s.ov.search.pinned.len();
+    s.ov.search.pinned.retain(|x| !listed.contains(x.id.as_str()));
+    let dropped = s.ov.search.pinned.len() != before;
+    let Some(id) = selected(s) else { return dropped };
+    let Some(row) = pinned(s, &id).cloned() else { return dropped };
+    let st = &mut s.ov.search;
+    if st.checking.is_some() || st.checked.get(&id).is_some_and(|at| at.elapsed() < RECHECK) {
+        return dropped;
+    }
+    let Some(client) = s.client.clone() else { return dropped };
+    let st = &mut s.ov.search;
+    st.requests += 1;
+    let seq = st.requests;
+    st.checking = Some((id.clone(), seq));
+    let tx = st.tx.clone();
+    std::thread::spawn(move || {
+        let result = client.look_up(&id, Some(&row));
+        let _ = tx.send(Got::Looked(id, seq, result));
+    });
+    dropped
+}
+
+fn looked(s: &mut App, id: String, seq: u64, result: Result<feed::gone::Gone, String>) {
+    if s.ov.search.checking.as_ref() != Some(&(id.clone(), seq)) {
+        return;
+    }
+    s.ov.search.checking = None;
+    match result {
+        Ok(g) if matches!(g.why, feed::gone::Why::Unlisted | feed::gone::Why::Unchecked(_)) => {
+            if let Some(x) = s.ov.search.pinned.iter_mut().find(|x| x.id == id) {
+                *x = g.row;
+            }
+            s.ov.search.checked.insert(id, Instant::now());
+        }
+        _ => unpin(s, &id),
+    }
 }
 
 fn jump_query(s: &App) -> Option<String> {
@@ -114,13 +171,15 @@ fn filter(p: &Panel) -> Filter {
 fn load(s: &mut App, reset: bool) {
     let client = s.client.clone();
     let tx = s.ov.search.tx.clone();
+    s.ov.search.requests += 1;
+    let generation = s.ov.search.requests;
     let Some(p) = s.ov.search.panel.as_mut() else { return };
     let f = filter(p);
+    let reset = reset || p.asked.as_ref() != Some(&f);
     let before = if reset { 0 } else { p.list.next_before };
-    p.generation += 1;
+    p.generation = generation;
     p.asked = Some(f.clone());
     p.loading = true;
-    let generation = p.generation;
     let Some(client) = client else {
         p.loading = false;
         p.error = Some("Activity history needs a running Agenthail.".into());
@@ -159,6 +218,10 @@ pub fn drain(s: &mut App) -> bool {
             Got::History(generation, reset, page) => {
                 let Some(p) = s.ov.search.panel.as_mut().filter(|p| p.generation == generation) else { continue };
                 p.loading = false;
+                if p.asked.as_ref() != Some(&filter(p)) {
+                    changed = true;
+                    continue;
+                }
                 match page {
                     Ok(page) => {
                         p.list.take(page, reset);
@@ -168,8 +231,13 @@ pub fn drain(s: &mut App) -> bool {
                 }
                 changed = true;
             }
+            Got::Looked(id, seq, result) => {
+                looked(s, id, seq, result);
+                changed = true;
+            }
         }
     }
+    changed |= recheck_pinned(s);
     changed |= settle_codex(s);
     changed |= settle_panel(s);
     changed

@@ -160,7 +160,12 @@ pub struct Filter {
 
 impl Filter {
     pub fn new(kind: &str, query: &str) -> Filter {
-        Filter { kind: kind.trim().to_string(), query: query.trim().chars().take(HISTORY_MAX_QUERY).collect() }
+        let query = query.trim();
+        let mut end = query.len().min(HISTORY_MAX_QUERY);
+        while !query.is_char_boundary(end) {
+            end -= 1;
+        }
+        Filter { kind: kind.trim().to_string(), query: query[..end].trim_end().to_string() }
     }
 
     pub fn path(&self, before: i64) -> String {
@@ -303,7 +308,11 @@ mod tests {
     fn history_paths_carry_only_the_filters_set() {
         assert_eq!(Filter::new("", " ").path(0), "/api/v1/history?limit=25");
         assert_eq!(Filter::new(" delivery ", "fix the build").path(42), "/api/v1/history?limit=25&before=42&kind=delivery&q=fix+the+build");
-        assert_eq!(Filter::new("", &"x".repeat(300)).query.chars().count(), 200);
+        assert_eq!(Filter::new("", &"x".repeat(300)).query.len(), 200);
+        let wide = Filter::new("", &"é".repeat(150)).query;
+        assert_eq!(wide.len(), 200);
+        assert_eq!(wide.chars().count(), 100);
+        assert_eq!(Filter::new("", &format!("{}€", "x".repeat(199))).query.len(), 199);
     }
 
     fn entry(v: Value) -> Entry {

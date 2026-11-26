@@ -352,6 +352,7 @@ fn leave_archived(s: &mut App, id: &str) {
 }
 
 fn land(s: &mut App, id: &str, patch: Patch) {
+    crate::over::search::patch_pinned(s, id, &patch);
     if s.ov.live.patch(id, patch, Instant::now()) {
         s.sessions = s.ov.live.sessions().to_vec();
     }

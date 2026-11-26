@@ -43,6 +43,12 @@ fn command_icon(c: Command) -> &'static Icon {
 fn entries(s: &App) -> Vec<Entry> {
     let q = s.ov.jump.as_ref().map(|e| e.text.as_str()).unwrap_or_default();
     let mut out: Vec<Entry> = s.ov.d.jump(q, &s.ov.needs, &s.ov.hands_on).into_iter().map(|h| Entry { group: h.group, title: h.title, status: h.status, badge: h.badge, look: Look::Avatar(h.avatar), pick: Some(Pick::Target(h.target)) }).collect();
+    let selected = search::selected(s);
+    let title = selected.as_deref().map(|id| search::selected_title(s, id)).unwrap_or_default();
+    let current = selected.as_deref().map(|id| Selected { title: &title, can_stop: search::can_stop(s, id) });
+    for c in commands(q, current) {
+        out.push(Entry { group: "Commands", title: c.title, status: String::new(), badge: c.shortcut.to_string(), look: Look::Icon(command_icon(c.command)), pick: Some(Pick::Command(c.command)) });
+    }
     if let Some(found) = search::codex_for(s) {
         let group = "Codex history";
         let note = |text: String| Entry { group, title: text, status: String::new(), badge: String::new(), look: Look::Icon(&ah::CLOCK), pick: None };
@@ -67,12 +73,6 @@ fn entries(s: &App) -> Vec<Entry> {
                 }
             }
         }
-    }
-    let selected = search::selected(s);
-    let title = selected.as_deref().map(|id| search::selected_title(s, id)).unwrap_or_default();
-    let current = selected.as_deref().map(|id| Selected { title: &title, can_stop: search::can_stop(s, id) });
-    for c in commands(q, current) {
-        out.push(Entry { group: "Commands", title: c.title, status: String::new(), badge: c.shortcut.to_string(), look: Look::Icon(command_icon(c.command)), pick: Some(Pick::Command(c.command)) });
     }
     out
 }
@@ -188,7 +188,7 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
         .child(row().gap(6.0).items_center().child(ui::ghost_keys(&["↑", "↓"])).child(text("move".to_string()).font(META).color(weak())))
         .child(row().gap(6.0).items_center().child(ui::ghost_keys(&["⏎"])).child(text("open".to_string()).font(META).color(weak())))
         .child(ui::spacer())
-        .child(text("Projects, work, sessions, older Codex threads, then commands".to_string()).font(META).color(weak()));
+        .child(text("Projects, work, sessions, commands, then older Codex threads".to_string()).font(META).color(weak()));
     let panel = col()
         .key("jump")
         .w(680.0)
