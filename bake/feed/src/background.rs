@@ -89,15 +89,11 @@ impl BackgroundTask {
         parse_time(&self.since)
     }
 
-    pub fn since_text(&self, now: OffsetDateTime, offset_at: impl Fn(OffsetDateTime) -> i32) -> Option<String> {
+    pub fn since_text(&self, now: OffsetDateTime, clock: Clock, offset_at: impl Fn(OffsetDateTime) -> i32) -> Option<String> {
         let local = |t: OffsetDateTime| t.to_offset(UtcOffset::from_whole_seconds(offset_at(t)).unwrap_or(UtcOffset::UTC));
         let at = local(self.since_at()?);
         let now = local(now);
-        let hour = match at.hour() % 12 {
-            0 => 12,
-            h => h,
-        };
-        let clock = format!("{hour}:{:02} {}", at.minute(), if at.hour() < 12 { "AM" } else { "PM" });
+        let clock = clock.show(at.hour(), at.minute());
         if at.date() == now.date() {
             Some(format!("since {clock}"))
         } else {
@@ -106,10 +102,44 @@ impl BackgroundTask {
         }
     }
 
-    pub fn timed_line(&self, now: OffsetDateTime, offset_at: impl Fn(OffsetDateTime) -> i32) -> String {
-        match self.since_text(now, offset_at) {
+    pub fn timed_line(&self, now: OffsetDateTime, clock: Clock, offset_at: impl Fn(OffsetDateTime) -> i32) -> String {
+        match self.since_text(now, clock, offset_at) {
             Some(since) => format!("{} · {since}", self.line()),
             None => self.line(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Clock {
+    Twelve,
+    TwentyFour,
+}
+
+const TWELVE_HOUR_REGIONS: [&str; 12] = ["US", "CA", "AU", "NZ", "IN", "PH", "PK", "EG", "SA", "BD", "CO", "MX"];
+
+impl Clock {
+    pub fn from_settings(force_24: bool, force_12: bool, locale: &str) -> Clock {
+        if force_24 {
+            return Clock::TwentyFour;
+        }
+        if force_12 {
+            return Clock::Twelve;
+        }
+        let region = locale.split(['_', '-', '@', '.']).nth(1).unwrap_or_default();
+        if TWELVE_HOUR_REGIONS.contains(&region) { Clock::Twelve } else { Clock::TwentyFour }
+    }
+
+    fn show(self, hour: u8, minute: u8) -> String {
+        match self {
+            Clock::TwentyFour => format!("{hour:02}:{minute:02}"),
+            Clock::Twelve => {
+                let h = match hour % 12 {
+                    0 => 12,
+                    h => h,
+                };
+                format!("{h}:{minute:02} {}", if hour < 12 { "AM" } else { "PM" })
+            }
         }
     }
 }
@@ -212,12 +242,12 @@ mod tests {
     fn since_reads_as_a_local_clock() {
         let t = BackgroundTask { id: "x".into(), kind: "shell".into(), description: "build".into(), since: "2026-11-26T13:16:50Z".into(), ..Default::default() };
         let now = at("2026-11-26T15:00:00Z");
-        assert_eq!(t.timed_line(now, |_| 0), "Shell: build · since 1:16 PM");
-        assert_eq!(t.timed_line(now, |_| -5 * 3600), "Shell: build · since 8:16 AM");
-        assert_eq!(t.timed_line(at("2026-11-27T15:00:00Z"), |_| 0), "Shell: build · since Thu 1:16 PM");
-        assert_eq!(t.timed_line(at("2026-11-26T15:00:00Z"), |_| 11 * 3600), "Shell: build · since 12:16 AM");
+        assert_eq!(t.timed_line(now, Clock::Twelve, |_| 0), "Shell: build · since 1:16 PM");
+        assert_eq!(t.timed_line(now, Clock::Twelve, |_| -5 * 3600), "Shell: build · since 8:16 AM");
+        assert_eq!(t.timed_line(at("2026-11-27T15:00:00Z"), Clock::Twelve, |_| 0), "Shell: build · since Thu 1:16 PM");
+        assert_eq!(t.timed_line(at("2026-11-26T15:00:00Z"), Clock::Twelve, |_| 11 * 3600), "Shell: build · since 12:16 AM");
         let undated = BackgroundTask { since: String::new(), ..t };
-        assert_eq!(undated.timed_line(now, |_| 0), "Shell: build");
+        assert_eq!(undated.timed_line(now, Clock::Twelve, |_| 0), "Shell: build");
     }
 
     #[test]
@@ -225,7 +255,23 @@ mod tests {
         let t = BackgroundTask { id: "x".into(), kind: "shell".into(), description: "watch".into(), since: "2026-11-01T05:30:00Z".into(), ..Default::default() };
         let switch = at("2026-11-01T06:00:00Z");
         let eastern = |when: OffsetDateTime| if when < switch { -4 * 3600 } else { -5 * 3600 };
-        assert_eq!(t.timed_line(at("2026-11-01T09:00:00Z"), eastern), "Shell: watch · since 1:30 AM");
+        assert_eq!(t.timed_line(at("2026-11-01T09:00:00Z"), Clock::Twelve, eastern), "Shell: watch · since 1:30 AM");
+    }
+
+    #[test]
+    fn since_follows_the_clock_setting() {
+        let t = BackgroundTask { id: "x".into(), kind: "shell".into(), description: "build".into(), since: "2026-11-26T08:05:00Z".into(), ..Default::default() };
+        let now = at("2026-11-26T12:00:00Z");
+        assert_eq!(t.timed_line(now, Clock::TwentyFour, |_| 0), "Shell: build · since 08:05");
+        assert_eq!(t.timed_line(now, Clock::TwentyFour, |_| 9 * 3600), "Shell: build · since 17:05");
+        assert_eq!(t.timed_line(now, Clock::Twelve, |_| 9 * 3600), "Shell: build · since 5:05 PM");
+        assert_eq!(Clock::from_settings(false, false, "en_US"), Clock::Twelve);
+        assert_eq!(Clock::from_settings(false, false, "en_GB"), Clock::TwentyFour);
+        assert_eq!(Clock::from_settings(false, false, "de_DE@calendar=gregorian"), Clock::TwentyFour);
+        assert_eq!(Clock::from_settings(true, false, "en_US"), Clock::TwentyFour);
+        assert_eq!(Clock::from_settings(false, true, "fr_FR"), Clock::Twelve);
+        assert_eq!(Clock::from_settings(false, false, "en-US.UTF-8"), Clock::Twelve);
+        assert_eq!(Clock::from_settings(false, false, ""), Clock::TwentyFour);
     }
 
     #[test]
