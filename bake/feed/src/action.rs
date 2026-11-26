@@ -246,6 +246,7 @@ mod tests {
             (200, r#"{"ok":true,"result":{"sessionId":"s2"}}"#),
             (500, r#"{"error":{"code":"internal_error","message":"database is locked"}}"#),
             (200, r#"{"ok":true,"sessionId":"s1"}"#),
+            (200, r#"{"ok":true,"result":{"move":{"state":"done","detail":"its resume under the new account is unconfirmed: timeout"}}}"#),
             (409, r#"{"error":{"code":"move_needs_consent","message":"a terminal runs this session"}}"#),
             (409, r#"{"error":{"code":"move_refused","message":"no other Claude account has room for this session now"}}"#),
         ]);
@@ -259,7 +260,8 @@ mod tests {
         let half = client.pr("s1", PrOp::Watch, "13").unwrap_err();
         assert!(half.maybe_delivered, "the daemon changes the watch before it reads the list back: {half:?}");
         use crate::limit::Moved;
-        assert_eq!(client.limit_move("s1", Some("/r/b"), false).unwrap(), Moved::Done);
+        assert_eq!(client.limit_move("s1", Some("/r/b"), false).unwrap(), Moved::Done(None));
+        assert_eq!(client.limit_move("s1", Some("/r/b"), false).unwrap(), Moved::Done(Some("its resume under the new account is unconfirmed: timeout".into())));
         assert_eq!(client.limit_move("s1", Some("/r/b"), false).unwrap(), Moved::NeedsConsent("a terminal runs this session".into()));
         assert_eq!(client.limit_move("s1", None, false).unwrap_err().code, "move_refused");
     }

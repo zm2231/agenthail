@@ -113,6 +113,14 @@ impl ProxyAccount {
     pub fn set_to_prefer(&self) -> bool {
         self.preferred || self.preference >= 10.0
     }
+
+    pub fn prefer_label(&self) -> &'static str {
+        match (self.preferred, self.set_to_prefer()) {
+            (true, _) => "Preferred ✓",
+            (false, true) => "Set to prefer ✓",
+            (false, false) => "Prefer",
+        }
+    }
 }
 
 impl ProxyGroup {
@@ -340,6 +348,8 @@ mod tests {
         let tied: ProxyAccount = serde_json::from_value(json!({"id": "b.json", "provider": "claude", "preference": 10, "preferred": false})).unwrap();
         assert!(tied.set_to_prefer() && lead.set_to_prefer(), "a tie at the preferred value can still be turned off");
         assert!(!groups[0].accounts[1].set_to_prefer());
+        let disabled: ProxyAccount = serde_json::from_value(json!({"id": "d.json", "provider": "claude", "status": "disabled", "preference": 10})).unwrap();
+        assert_eq!([lead.prefer_label(), tied.prefer_label(), disabled.prefer_label(), groups[0].accounts[1].prefer_label()], ["Preferred ✓", "Set to prefer ✓", "Set to prefer ✓", "Prefer"]);
         assert_eq!(accounts(&sets).iter().map(|s| s.title()).collect::<Vec<_>>(), ["a@example.com", "spare", "Codex"]);
     }
 

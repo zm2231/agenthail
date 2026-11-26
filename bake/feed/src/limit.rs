@@ -141,7 +141,7 @@ pub fn targets(stop: &Stop, current: Option<&str>, roots: &[ConfigRoot], now: Of
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Moved {
-    Done,
+    Done(Option<String>),
     NeedsConsent(String),
 }
 
@@ -152,7 +152,7 @@ impl Client {
             payload["configRoot"] = Value::String(root.into());
         }
         match self.action("limit-move", payload) {
-            Ok(_) => Ok(Moved::Done),
+            Ok(reply) => Ok(Moved::Done(reply["result"]["move"]["detail"].as_str().filter(|d| !d.is_empty()).map(String::from))),
             Err(error) if error.code == "move_needs_consent" => Ok(Moved::NeedsConsent(error.message)),
             Err(error) => Err(error),
         }

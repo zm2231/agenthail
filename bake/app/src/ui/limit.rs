@@ -210,8 +210,11 @@ fn settled(s: &mut App, done: Done) {
         Done::Moved(id, stop, target, result) => {
             s.limits.busy.remove(&id);
             match result {
-                Ok(Moved::Done) => {
+                Ok(Moved::Done(None)) => {
                     note(s, &id, stop, format!("Moved to {}", target.name), false);
+                }
+                Ok(Moved::Done(Some(detail))) => {
+                    note(s, &id, stop, format!("Moved to {}, but {detail}", target.name), true);
                 }
                 Ok(Moved::NeedsConsent(message)) => {
                     s.limits.note.remove(&id);

@@ -277,13 +277,9 @@ fn proxy_account(s: &App, group: &ProxyGroup, a: &ProxyAccount) -> El {
     c = c.children(a.meters.iter().map(|m| meter_row(s, m)));
     let on = a.set_to_prefer();
     let toggle = if on { change(Prefer::Off) } else { change(Prefer::On) };
-    let help = if on && !a.preferred { "Preferred, but tied with another preferred account; turning it off changes only this account" } else { "Changes only this account's preference" };
+    let help = if on && !a.preferred { "Set to prefer, though it doesn't lead routing now; turning it off changes only this account" } else { "Changes only this account's preference" };
     let mut actions = row().gap(8.0).items_center().child(
-        Button::new(match (on, a.preferred) {
-            (true, true) => "Preferred ✓",
-            (true, false) => "Preferred, tied ✓",
-            _ => "Prefer",
-        })
+        Button::new(a.prefer_label())
             .variant(if on { ButtonVariant::Submit } else { ButtonVariant::Neutral })
             .control_size(ControlSize::Small)
             .help(help)

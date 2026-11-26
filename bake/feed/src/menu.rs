@@ -201,7 +201,11 @@ fn pr_link(asked: &str) -> Option<(String, u64)> {
     }
     let host = link.host_str()?;
     let after = asked.split_once("://")?.1;
-    let raw = after.find('/').map(|i| &after[i..]).unwrap_or("");
+    let end = after.find(['/', '?', '#']).unwrap_or(after.len());
+    if after[..end].contains('@') {
+        return None;
+    }
+    let raw = after[end..].strip_prefix('/').map(|_| &after[end..]).unwrap_or("");
     let path = decoded(raw.split(['?', '#']).next().unwrap_or(""));
     let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
     let [owner, name, "pull", number] = parts[..] else { return None };
@@ -387,7 +391,7 @@ mod tests {
         let pr = Pr { repo: "github.com/o/r".into(), number: 12, ..Default::default() };
         assert!(names_pr("#https://github.com/o/r/pull/12", &pr));
         assert!(!names_pr("https://github.com/o/./r/pull/12", &pr));
-        for refused in ["##12", "9223372036854775808", "https://github.com/o/./r/pull/12", "https://github.com/x/../o/r/pull/12", "https://github.com/o/r/pull/9223372036854775808", "https://github.com/o w/r/pull/3", "https://github.com/o/../pull/3", "https://github.com/o/r!/pull/3"] {
+        for refused in ["##12", "9223372036854775808", "https://github.com?x=/o/r/pull/12", "https://@github.com/o/r/pull/12", "https://github.com/o/./r/pull/12", "https://github.com/x/../o/r/pull/12", "https://github.com/o/r/pull/9223372036854775808", "https://github.com/o w/r/pull/3", "https://github.com/o/../pull/3", "https://github.com/o/r!/pull/3"] {
             assert_eq!(pr_problem(refused), Some("That isn't a pull request link or number."), "{refused}");
         }
         assert_eq!(pr_problem("0"), Some("That isn't a pull request link or number."));
