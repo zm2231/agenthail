@@ -43,6 +43,7 @@ pub struct Complete {
     recorded: HashMap<String, Vec<Prompt>>,
     prompts_asked: HashMap<String, u64>,
     goal_pending: HashSet<String>,
+    goal_keys: HashMap<(String, String), (String, String)>,
     local: HashMap<String, Vec<(String, time::OffsetDateTime)>>,
     pub search: Option<Search>,
     seq: u64,
@@ -402,6 +403,12 @@ pub fn rekey(s: &mut App, old: &str, new: &str) {
             c.fork_keys.insert(format!("{new}/{}", &point[prefix.len()..]), request);
         }
     }
+    let goals: Vec<(String, String)> = c.goal_keys.keys().filter(|(sess, _)| sess == old).cloned().collect();
+    for point in goals {
+        if let Some(request) = c.goal_keys.remove(&point) {
+            c.goal_keys.insert((new.to_string(), point.1), request);
+        }
+    }
     if c.goal_pending.remove(old) {
         c.goal_pending.insert(new.to_string());
     }
@@ -483,6 +490,13 @@ pub fn done(s: &mut App, done: Done) {
         Done::Goal(asked, typed, result) => {
             let id = feed::composer::current(&s.rekeyed, &asked).to_string();
             s.complete.goal_pending.remove(&id);
+            let unsure = match &result {
+                Ok(d) => *d == feed::composer::Delivered::Unconfirmed,
+                Err(e) => e.maybe_delivered,
+            };
+            if !unsure {
+                s.complete.goal_keys.retain(|_, (_, sent)| feed::composer::current(&s.rekeyed, sent) != id);
+            }
             if result.as_ref().is_ok_and(|d| *d != feed::composer::Delivered::Unconfirmed) {
                 if s.composer_for.as_deref() == Some(id.as_str()) {
                     if s.composer.text.trim() == typed {
@@ -494,9 +508,9 @@ pub fn done(s: &mut App, done: Done) {
             }
             let line = match result {
                 Ok(feed::composer::Delivered::Queued(_) | feed::composer::Delivered::QueuedUntilAnswer(_)) => "Goal queued; it's set when this turn ends".to_string(),
-                Ok(feed::composer::Delivered::Unconfirmed) => "Goal sent, not confirmed yet".to_string(),
+                Ok(feed::composer::Delivered::Unconfirmed) => "Goal sent, not confirmed yet. Sending the same /goal again checks it; it won't set it twice.".to_string(),
                 Ok(_) => "Goal set".to_string(),
-                Err(error) if error.maybe_delivered => format!("Goal sent, not confirmed: {}", error.message),
+                Err(error) if error.maybe_delivered => format!("Goal sent, not confirmed: {}. Sending the same /goal again checks it; it won't set it twice.", error.message),
                 Err(error) => format!("Couldn't set the goal: {}", error.message),
             };
             crate::note(s, &id, line);
@@ -534,9 +548,10 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
             crate::note(s, id, "The goal is still being set.".into());
             return true;
         }
-        let (asked, typed) = (id.to_string(), s.composer.text.trim().to_string());
+        let typed = s.composer.text.trim().to_string();
+        let (key, asked) = s.complete.goal_keys.entry((id.to_string(), argument.clone())).or_insert_with(|| (feed::catalog::request_key(), id.to_string())).clone();
         crate::note(s, id, "Setting the goal…".into());
-        spawn(s, move |c| Done::Goal(asked.clone(), typed.clone(), c.goal_set(&asked, &argument)));
+        spawn(s, move |c| Done::Goal(asked.clone(), typed.clone(), c.goal_set(&asked, &argument, &key)));
         return true;
     }
     let busy = |what: &str| s.menus.busy.iter().any(|(k, w)| *w == what && feed::composer::current(&s.rekeyed, k) == id);

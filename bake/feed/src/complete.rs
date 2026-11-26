@@ -555,8 +555,8 @@ impl Client {
         })
     }
 
-    pub fn goal_set(&self, session: &str, goal: &str) -> Result<crate::composer::Delivered, RespondError> {
-        Ok(crate::composer::Delivered::read(&self.action("goal-set", json!({"sessionId": session, "message": goal}))?))
+    pub fn goal_set(&self, session: &str, goal: &str, key: &str) -> Result<crate::composer::Delivered, RespondError> {
+        Ok(crate::composer::Delivered::read(&self.action_keyed("goal-set", json!({"sessionId": session, "message": goal}), key)?))
     }
 }
 
@@ -793,7 +793,7 @@ mod tests {
         assert_eq!(seen.recv().unwrap().1, json!({"action": "session-fork", "sessionId": "h::s1", "fork": {"beforeTurnId": "t2"}}));
         assert_eq!(client.fork("s1", None, "k2").unwrap(), "other");
         assert_eq!(seen.recv().unwrap().1, json!({"action": "session-fork", "sessionId": "s1"}));
-        assert_eq!(client.goal_set("h::s1", "Ship the importer").unwrap(), crate::composer::Delivered::Sent);
+        assert_eq!(client.goal_set("h::s1", "Ship the importer", "k4").unwrap(), crate::composer::Delivered::Sent);
         assert_eq!(seen.recv().unwrap().1, json!({"action": "goal-set", "sessionId": "h::s1", "message": "Ship the importer"}));
         let (client, _seen) = daemon(replies(&[(202, r#"{"ok":true,"status":"submitted"}"#), (200, r#"{"ok":true,"result":{}}"#)]));
         assert!(client.fork("s1", Some("t1"), "k3").unwrap_err().maybe_delivered, "a request still running isn't a fork yet");
