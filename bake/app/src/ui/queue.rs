@@ -1,5 +1,5 @@
 use super::*;
-use feed::queue::{Done, Op, Queued, waiting};
+use feed::queue::{Done, Op, Queued, Taking, waiting};
 use rune::TextEdit;
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
@@ -42,7 +42,7 @@ pub(crate) fn fetch(s: &mut App, id: &str) {
     });
 }
 
-pub(crate) fn take(s: &mut App, id: String, asked: u64, result: Result<Vec<Queued>, String>) {
+pub(crate) fn take(s: &mut App, id: String, asked: u64, result: Result<feed::queue::Read, String>) {
     if s.queue_fetching.get(&id) == Some(&asked) {
         s.queue_fetching.remove(&id);
     }
@@ -51,11 +51,14 @@ pub(crate) fn take(s: &mut App, id: String, asked: u64, result: Result<Vec<Queue
         return;
     }
     match result {
-        Ok(list) => {
+        Ok(read) => {
             if s.queue_note.get(&id).is_some_and(|n| n.starts_with(READ_FAILED)) {
                 s.queue_note.remove(&id);
             }
-            s.queue.insert(id, list);
+            if let Some(partial) = read.partial {
+                s.queue_note.insert(id.clone(), partial);
+            }
+            s.queue.insert(id, read.rows);
         }
         Err(error) => {
             s.queue_note.insert(id, format!("{READ_FAILED}: {error}"));
@@ -70,6 +73,15 @@ fn run(s: &mut App, id: &str, row: Queued, op: Op) {
         return;
     }
     s.queue_note.remove(id);
+    if op != Op::Remove {
+        s.queue_taking.push(Taking { session: id.to_string(), host: row.host.clone(), id: row.id, text: row.message.clone() });
+        if let Err(error) = crate::over::layout::save_now(s) {
+            s.queue_taking.retain(|t| (t.host.as_str(), t.id) != (row.host.as_str(), row.id));
+            s.queue_working.remove(&working);
+            s.queue_note.insert(id.to_string(), format!("Nothing was changed: the message couldn't be saved first ({error})"));
+            return;
+        }
+    }
     invalidate(s, id);
     let (out, id) = (s.outbox.clone(), id.to_string());
     std::thread::spawn(move || {
@@ -89,6 +101,7 @@ fn hand_back(s: &mut App, id: &str, message: &str) {
 
 pub(crate) fn done(s: &mut App, id: String, working: (String, i64), done: Done) {
     s.queue_working.remove(&working);
+    s.queue_taking.retain(|t| (t.host.as_str(), t.id) != (working.0.as_str(), working.1));
     let (host, queue_id) = working;
     let id = feed::composer::current(&s.rekeyed, &id).to_string();
     invalidate(s, &id);
@@ -133,6 +146,13 @@ pub(crate) fn done(s: &mut App, id: String, working: (String, i64), done: Done) 
     }
     crate::over::layout::save(s);
     fetch(s, &id);
+}
+
+pub(crate) fn recover(s: &mut App) {
+    for taking in std::mem::take(&mut s.queue_taking) {
+        hand_back(s, &taking.session, &taking.text);
+        s.queue_note.insert(taking.session.clone(), "A queued message you were taking back or steering when the app closed is back in the composer; check the queue before sending.".into());
+    }
 }
 
 pub(crate) fn reserve(s: &App, id: &str) -> f32 {

@@ -127,21 +127,31 @@ impl Client {
             |start| {
                 let path = format!("/api/v1/session-stream-body?id={}&ref={}&start={start}", enc(session), enc(body_ref));
                 let value = self.get_reply(&path).map_err(|(code, text)| refusal(code, &text))?;
-                let end = value["end"].as_u64().map_or(start, |e| e as usize);
-                Ok((value["body"].as_str().unwrap_or_default().to_string(), end, value["truncated"].as_bool().unwrap_or(false)))
+                let (end, total) = (value["end"].as_u64().map_or(start, |e| e as usize), value["total"].as_u64().unwrap_or_default() as usize);
+                Ok(Chunk { text: value["body"].as_str().unwrap_or_default().to_string(), end, total, more: value["truncated"].as_bool().unwrap_or(false) })
             },
             BODY_CAP,
         )
     }
 }
 
-pub fn collect_body(mut fetch: impl FnMut(usize) -> Result<(String, usize, bool), String>, cap: usize) -> Result<String, String> {
-    let (mut body, mut start) = (String::new(), 0);
+pub struct Chunk {
+    pub text: String,
+    pub end: usize,
+    pub total: usize,
+    pub more: bool,
+}
+
+pub fn collect_body(mut fetch: impl FnMut(usize) -> Result<Chunk, String>, cap: usize) -> Result<String, String> {
+    let (mut body, mut start, mut size) = (String::new(), 0, None);
     loop {
-        let (chunk, end, more) = fetch(start)?;
-        body.push_str(&chunk);
+        let Chunk { text, end, total, more } = fetch(start)?;
+        if *size.get_or_insert(total) != total {
+            return Err("it changed while loading; try again".into());
+        }
+        body.push_str(&text);
         if !more {
-            return Ok(body);
+            return if body.len() == total { Ok(body) } else { Err("it changed while loading; try again".into()) };
         }
         if end <= start {
             return Err("the daemon stopped returning more of it".into());
@@ -257,15 +267,24 @@ mod tests {
     fn a_body_stops_at_the_cap_the_daemon_keeps() {
         assert_eq!(BODY_CAP, 8 << 20);
         let mut starts = Vec::new();
+        let chunk = |text: &str, end: usize, total: usize, more: bool| Ok(Chunk { text: text.into(), end, total, more });
         let read = collect_body(
             |start| {
                 starts.push(start);
-                Ok(("abcd".into(), start + 4, start < 8))
+                chunk("abcd", start + 4, 12, start < 8)
             },
             16,
         );
         assert_eq!((read.unwrap(), starts), ("abcdabcdabcd".to_string(), vec![0, 4, 8]));
-        assert!(collect_body(|start| Ok(("abcdef".into(), start + 6, true)), 16).unwrap_err().contains("larger"));
-        assert!(collect_body(|start| Ok((String::new(), start, true)), 16).unwrap_err().contains("stopped"));
+        assert!(collect_body(|start| chunk("abcdef", start + 6, 30, true), 16).unwrap_err().contains("larger"));
+        assert!(collect_body(|start| chunk("", start, 9, true), 16).unwrap_err().contains("stopped"));
+    }
+
+    #[test]
+    fn a_body_replaced_between_pieces_is_not_stitched_together() {
+        let resized = collect_body(|start| Ok(Chunk { text: "ab".into(), end: start + 2, total: if start == 0 { 4 } else { 6 }, more: start == 0 }), 16);
+        assert!(resized.unwrap_err().contains("changed"));
+        let short = collect_body(|start| Ok(Chunk { text: "ab".into(), end: start + 2, total: 5, more: start == 0 }), 16);
+        assert!(short.unwrap_err().contains("changed"));
     }
 }

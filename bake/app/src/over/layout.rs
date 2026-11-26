@@ -91,6 +91,7 @@ fn encode(s: &App) -> String {
         "looked": { "now": s.ov.looked_now, "projects": s.ov.looked },
         "drafts": s.drafts.to_json(),
         "unsent": unsent(s),
+        "queueTaking": feed::queue::Taking::to_json(&s.queue_taking),
     })
     .to_string()
 }
@@ -125,6 +126,8 @@ pub fn load(s: &mut App) {
             s.drafts.set(&id, &text);
         }
     }
+    s.queue_taking = feed::queue::Taking::from_json(&v["queueTaking"]);
+    crate::ui::queue::recover(s);
     s.ov.arrange();
     *LAST.lock().expect("layout lock") = encode(s);
 }

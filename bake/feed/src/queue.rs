@@ -125,6 +125,34 @@ pub fn waiting(rows: &[Queued], rekeyed: &HashMap<String, String>, session: &str
     out
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Read {
+    pub rows: Vec<Queued>,
+    pub partial: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Taking {
+    pub session: String,
+    pub host: String,
+    pub id: i64,
+    pub text: String,
+}
+
+impl Taking {
+    pub fn to_json(list: &[Taking]) -> Value {
+        Value::Array(list.iter().map(|t| serde_json::json!({"session": t.session, "host": t.host, "id": t.id, "text": t.text})).collect())
+    }
+
+    pub fn from_json(value: &Value) -> Vec<Taking> {
+        let read = |v: &Value| -> Option<Taking> {
+            let text = v["text"].as_str().filter(|t| !t.trim().is_empty())?.to_string();
+            Some(Taking { session: v["session"].as_str().filter(|s| !s.is_empty())?.to_string(), host: v["host"].as_str().unwrap_or_default().to_string(), id: v["id"].as_i64()?, text })
+        };
+        value.as_array().map(|a| a.iter().filter_map(read).collect()).unwrap_or_default()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Op {
     Remove,
@@ -152,13 +180,18 @@ impl Client {
         Ok(rows)
     }
 
-    pub fn queue(&self, session: &str, remote: Option<&str>) -> anyhow::Result<Vec<Queued>> {
+    pub fn queue(&self, session: &str, remote: Option<&str>) -> anyhow::Result<Read> {
         let routed = self.queue_rows(&format!("/api/v1/queue?sessionId={}", enc(session)), remote.unwrap_or_default());
-        let Some(_) = remote else { return routed };
+        let Some(host) = remote else { return routed.map(|rows| Read { rows, partial: None }) };
         let held = self.queue_rows("/api/v1/queue", "").map(|rows| rows.into_iter().filter(|r| r.session_id == session).collect::<Vec<_>>());
         match (routed, held) {
             (Err(error), Err(_)) => Err(error),
-            (routed, held) => Ok(routed.unwrap_or_default().into_iter().chain(held.unwrap_or_default()).collect()),
+            (Ok(mut rows), Ok(held)) => {
+                rows.extend(held);
+                Ok(Read { rows, partial: None })
+            }
+            (Err(error), Ok(rows)) => Ok(Read { rows, partial: Some(format!("Couldn't read the queue on {host}, so only what this computer holds is shown: {error}")) }),
+            (Ok(rows), Err(error)) => Ok(Read { rows, partial: Some(format!("Couldn't read the queue this computer holds for this session: {error}")) }),
         }
     }
 
@@ -237,9 +270,17 @@ mod tests {
     }
 
     #[test]
+    fn a_message_being_taken_back_survives_a_restart() {
+        let taking = vec![Taking { session: "s1".into(), host: "vps".into(), id: 7, text: "hold on".into() }];
+        assert_eq!(Taking::from_json(&Taking::to_json(&taking)), taking);
+        assert!(Taking::from_json(&json!([{"session": "s1", "id": 7, "text": " "}, {"id": 7, "text": "x"}, {"session": "s1", "text": "x"}])).is_empty());
+        assert_eq!(Taking::from_json(&json!(null)), vec![]);
+    }
+
+    #[test]
     fn the_queue_is_read_for_one_session() {
         let (client, seen) = daemon(replies(&[(200, r#"{"items":[{"id":3,"sessionId":"s 1","message":"hi","status":"pending"}]}"#)]));
-        let rows = client.queue("s 1", None).unwrap();
+        let rows = client.queue("s 1", None).unwrap().rows;
         assert_eq!(seen.recv().unwrap().0, "/api/v1/queue?sessionId=s+1");
         assert_eq!((rows[0].id, rows[0].message.as_str(), rows[0].host.as_str()), (3, "hi", ""));
     }
@@ -252,13 +293,16 @@ mod tests {
             (502, r#"{"error":{"code":"host_unreachable","message":"Host vps is unreachable"}}"#),
             (200, r#"{"items":[{"id":5,"sessionId":"vps/s1","message":"held","status":"pending"}]}"#),
         ]));
-        let rows = client.queue("vps/s1", Some("vps")).unwrap();
+        let read = client.queue("vps/s1", Some("vps")).unwrap();
+        assert_eq!(read.partial, None);
+        let rows = read.rows;
         assert_eq!(seen.recv().unwrap().0, "/api/v1/queue?sessionId=vps%2Fs1");
         assert_eq!(seen.recv().unwrap().0, "/api/v1/queue");
         let got: Vec<(i64, &str, &str)> = rows.iter().map(|r| (r.id, r.host.as_str(), r.message.as_str())).collect();
         assert_eq!(got, vec![(3, "vps", "there"), (3, "", "held here")]);
         let down = client.queue("vps/s1", Some("vps")).unwrap();
-        assert_eq!((down.len(), down[0].id, down[0].host.as_str()), (1, 5, ""));
+        assert_eq!((down.rows.len(), down.rows[0].id, down.rows[0].host.as_str()), (1, 5, ""));
+        assert!(down.partial.unwrap().starts_with("Couldn't read the queue on vps"));
     }
 
     #[test]
