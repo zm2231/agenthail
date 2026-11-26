@@ -15,36 +15,45 @@ import (
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
-// stallingManager starts hosts whose event loop is blocked for block ms out of
-// every block+gap ms once marker holds their pid; with stopOnHangup the stall ends at
-// SIGHUP, as a host busy on a long synchronous task eventually runs its
-// signal handlers.
-func stallingManager(t *testing.T, f *claudehosttest.Fixture, block, gap int, stopOnHangup bool) (*claudehost.Manager, string) {
+// stallingManager starts hosts that, once marker holds their pid, block their
+// event loop for block ms out of every block+gap ms.
+func stallingManager(t *testing.T, f *claudehosttest.Fixture, block, gap int) (*claudehost.Manager, string) {
 	t.Helper()
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "stall")
-	script := filepath.Join(dir, "stall.cjs")
-	hangup := ""
-	if stopOnHangup {
-		hangup = "process.on('SIGHUP', () => { stopped = true; });\n"
-	}
-	source := "const fs = require('fs');\nlet stopped = false;\n" + hangup +
-		"setInterval(() => {\n  let target = '';\n" +
-		"  try { target = fs.readFileSync(" + strconv.Quote(marker) + ", 'utf8'); } catch {}\n" +
-		"  if (stopped || target !== String(process.pid)) return;\n" +
-		"  const end = Date.now() + " + strconv.Itoa(block) + ";\n  while (Date.now() < end) {}\n}, " + strconv.Itoa(gap) + ").unref();\n"
+	marker := filepath.Join(t.TempDir(), "stall")
+	return preloadedManager(t, f, "const fs = require('fs');\n"+
+		"setInterval(() => {\n  let target = '';\n"+
+		"  try { target = fs.readFileSync("+strconv.Quote(marker)+", 'utf8'); } catch {}\n"+
+		"  if (target !== String(process.pid)) return;\n"+
+		"  const end = Date.now() + "+strconv.Itoa(block)+";\n  while (Date.now() < end) {}\n}, "+strconv.Itoa(gap)+").unref();\n"), marker
+}
+
+// silentManager starts hosts that, once marker holds their pid, leave every
+// new connection unanswered until they receive SIGHUP.
+func silentManager(t *testing.T, f *claudehosttest.Fixture) (*claudehost.Manager, string) {
+	t.Helper()
+	marker := filepath.Join(t.TempDir(), "silent")
+	return preloadedManager(t, f, "const fs = require('fs');\nconst net = require('net');\n"+
+		"let hungUp = false;\nprocess.on('SIGHUP', () => { hungUp = true; });\n"+
+		"const silent = () => { try { return !hungUp && fs.readFileSync("+strconv.Quote(marker)+", 'utf8') === String(process.pid); } catch { return false; } };\n"+
+		"const createServer = net.createServer;\n"+
+		"net.createServer = (listener) => createServer((socket) => { if (!silent()) listener(socket); });\n"), marker
+}
+
+func preloadedManager(t *testing.T, f *claudehosttest.Fixture, source string) *claudehost.Manager {
+	t.Helper()
+	script := filepath.Join(t.TempDir(), "preload.cjs")
 	if err := os.WriteFile(script, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
 	owner := claudehosttest.OwnerEnv()
-	return f.Manager(t, "test", owner[1]+" --require="+script), marker
+	return f.Manager(t, "test", owner[1]+" --require="+script)
 }
 
 func TestEnsureRetiresAHostThatStoppedAnsweringAndKeepsItsSession(t *testing.T) {
 	t.Cleanup(claudehost.SetUnansweredWaits(2*time.Second, 10*time.Second))
 	f := claudehosttest.New(t, "")
 	ctx := testContext(t)
-	manager, marker := stallingManager(t, f, 3000, 10, true)
+	manager, marker := silentManager(t, f)
 	client, err := manager.Ensure(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -120,7 +129,7 @@ func TestEnsureKeepsASlowHostThatStillAnswers(t *testing.T) {
 	t.Cleanup(claudehost.SetUnansweredWaits(2*time.Second, 2*time.Second))
 	f := claudehosttest.New(t, "")
 	ctx := testContext(t)
-	manager, marker := stallingManager(t, f, 500, 300, false)
+	manager, marker := stallingManager(t, f, 500, 300)
 	client, err := manager.Ensure(ctx)
 	if err != nil {
 		t.Fatal(err)
