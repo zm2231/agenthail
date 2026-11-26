@@ -1074,6 +1074,66 @@ test('a recorded pid now used by another process is not an orphan', async () => 
   c.close();
 });
 
+// slowPs puts a ps on PATH that takes delay seconds, as on a loaded machine,
+// and reports another start time once the marker file exists.
+function slowPs(f, delay) {
+  const real = spawnSync('sh', ['-c', 'command -v ps'], { encoding: 'utf8' }).stdout.trim();
+  const bin = path.join(f.root, 'bin');
+  const marker = path.join(f.root, 'reused');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'ps'), `#!/bin/sh\nsleep ${delay}\nif [ -e '${marker}' ]; then echo 'Thu Jan  1 00:00:00 1970'; exit 0; fi\nexec '${real}' "$@"\n`, { mode: 0o755 });
+  return { PATH: `${bin}:${process.env.PATH}`, marker };
+}
+
+function recordedProcesses(f, count) {
+  const sessions = {};
+  for (let i = 0; i < count; i++) {
+    const p = spawn('sleep', ['60'], { stdio: 'ignore' });
+    after(() => p.kill('SIGKILL'));
+    const started = spawnSync('ps', ['-o', 'lstart=', '-p', String(p.pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', TZ: 'UTC0' } }).stdout.trim();
+    sessions[randomUUID()] = { pid: p.pid, started, cwd: f.cwd };
+  }
+  fs.writeFileSync(path.join(f.state, 'state.json'), JSON.stringify({ sessions }));
+  return sessions;
+}
+
+test('listings answer at once while the host holds many sessions of an earlier host and ps is slow', async () => {
+  const f = fixture();
+  const sessions = recordedProcesses(f, 12);
+  const { PATH } = slowPs(f, 0.3);
+  await startHost(f, { env: { PATH } });
+  const started = Date.now();
+  const listed = await Promise.all(
+    Array.from({ length: 6 }, async () => {
+      const c = new Client(f.socket);
+      const result = await c.call('list');
+      c.close();
+      return result;
+    }),
+  );
+  const took = Date.now() - started;
+  for (const result of listed) assert.deepEqual(result.orphans.map((o) => o.sessionId).sort(), Object.keys(sessions).sort());
+  assert.ok(took < 1500, `six listings over new connections took ${took} ms`);
+});
+
+test('a recorded pid reused after the host started stops being an orphan at the next recheck', async () => {
+  const f = fixture();
+  const sessions = recordedProcesses(f, 1);
+  const { PATH, marker } = slowPs(f, 0);
+  await startHost(f, { env: { PATH, AGENTHAIL_CLAUDE_HOST_ORPHAN_RECHECK_MS: '200' } });
+  const c = new Client(f.socket);
+  assert.deepEqual((await c.call('list')).orphans.map((o) => o.sessionId), Object.keys(sessions));
+  fs.writeFileSync(marker, '');
+  let orphans = [];
+  for (let i = 0; i < 40; i++) {
+    orphans = (await c.call('list')).orphans;
+    if (orphans.length === 0) break;
+    await sleep(50);
+  }
+  assert.deepEqual(orphans, []);
+  c.close();
+});
+
 test('a session whose process start time cannot be read does not open', async () => {
   const f = fixture();
   const bin = path.join(f.root, 'bin');

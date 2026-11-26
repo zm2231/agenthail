@@ -33,6 +33,7 @@ const HUMAN_KEPT = 64;
 // together stay well inside the daemon's 20 s deadline for a stop.
 const CLOSE_GRACE_MS = Number(process.env.AGENTHAIL_CLAUDE_HOST_CLOSE_GRACE_MS) || 5_000;
 const KILL_WAIT_MS = 2_000;
+const ORPHAN_RECHECK_MS = Number(process.env.AGENTHAIL_CLAUDE_HOST_ORPHAN_RECHECK_MS) || 30_000;
 const SUBSCRIBER_FLUSH_MS = 5_000;
 // How long after a session's last activity a host closes it at its next
 // idle point without the daemon's release: its prompt cache has expired by
@@ -536,13 +537,13 @@ const methods = {
     s.end();
     if (!(await by(deadline, s.done.then(() => true)))) {
       log(`Claude ${s.pid} for session ${s.id} did not exit ${CLOSE_GRACE_MS} ms after close; killing it`);
-      killSession(s);
+      await killSession(s);
       if (!(await by(Date.now() + KILL_WAIT_MS, s.done.then(() => true)))) {
         throw new HostError('stuck', `Claude ${s.pid} for session ${s.id} did not exit after it was killed`);
       }
     }
     // done also settles when Claude ends its output but its process lingers.
-    killSession(s);
+    await killSession(s);
     return {};
   },
   // release lets the host close a session it keeps for the daemon, retiring
@@ -619,7 +620,7 @@ async function open(params) {
     }
     return existing.describe();
   }
-  refuseOrphaned(id);
+  await refuseRunningOrphan(id);
 
   // Claude starts a resumed conversation in the settings' default mode and
   // model, so a resume without them reopens in the ones it last ran with here.
@@ -1345,7 +1346,7 @@ function loadOrphans(statePath) {
   }
   const out = new Map();
   for (const [sessionId, entry] of Object.entries(state.sessions ?? {})) {
-    if (runs(entry)) out.set(sessionId, { sessionId, pid: entry.pid, started: entry.started, cwd: entry.cwd, openedAt: entry.openedAt });
+    if (alive(entry.pid) && entry.started) out.set(sessionId, { sessionId, pid: entry.pid, started: entry.started, cwd: entry.cwd, openedAt: entry.openedAt });
   }
   return out;
 }
@@ -1420,9 +1421,31 @@ function refuseOrphaned(id) {
   if (orphan) throw new HostError('held', `Claude process ${orphan.pid} from an earlier host still runs this session`);
 }
 
+async function refuseRunningOrphan(id) {
+  const orphan = orphans.get(id);
+  if (orphan && !(await runsNow(orphan))) orphans.delete(id);
+  refuseOrphaned(id);
+}
+
+// liveOrphans answers every listing, so it spawns nothing: a busy machine can
+// take a tenth of a second per ps, and a ps per orphan per listing stalls the
+// host's event loop until it stops accepting. A dead pid drops here at once;
+// a reused pid drops at the next start-time recheck.
 function liveOrphans() {
-  for (const [id, orphan] of orphans) if (!runs(orphan)) orphans.delete(id);
+  for (const [id, orphan] of orphans) if (!alive(orphan.pid)) orphans.delete(id);
   return [...orphans.values()];
+}
+
+let recheckingOrphans = null;
+function recheckOrphans() {
+  recheckingOrphans ??= Promise.all(
+    [...orphans].map(async ([id, orphan]) => {
+      if (!(await runsNow(orphan)) && orphans.get(id) === orphan) orphans.delete(id);
+    }),
+  ).finally(() => {
+    recheckingOrphans = null;
+  });
+  return recheckingOrphans;
 }
 
 // A retiring host stops recording: state.json belongs to the host that
@@ -1440,21 +1463,29 @@ function writeState() {
 
 // A recorded Claude process still runs only if its pid has the start time it
 // had when the host spawned it; a reused pid belongs to another process.
-function runs(entry) {
-  return alive(entry.pid) && entry.started !== '' && entry.started === processStart(entry.pid);
+async function runsNow(entry) {
+  return alive(entry.pid) && entry.started !== '' && entry.started === (await processStartLater(entry.pid));
 }
 
+const PS_ENV = { ...process.env, LC_ALL: 'C', TZ: 'UTC0' };
+
 function processStart(pid) {
-  const ps = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', TZ: 'UTC0' } });
+  const ps = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: PS_ENV });
   return ps.status === 0 ? ps.stdout.trim() : '';
+}
+
+function processStartLater(pid) {
+  return new Promise((resolve) => {
+    execFile('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: PS_ENV, timeout: 30_000 }, (error, stdout) => resolve(error ? '' : stdout.trim()));
+  });
 }
 
 // killSession kills a session's Claude process and the processes it started
 // in its group, such as background shells, if Claude still runs; its start
 // time tells it from a later process given the same pid. Claude is spawned
 // detached, so it leads its own process group.
-function killSession(s) {
-  if (!runs({ pid: s.pid, started: s.started })) return;
+async function killSession(s) {
+  if (!(await runsNow({ pid: s.pid, started: s.started }))) return;
   try {
     process.kill(-s.pid, 'SIGKILL');
   } catch {
@@ -1567,6 +1598,7 @@ function fail(message) {
   process.exit(2);
 }
 
+await recheckOrphans();
 try {
   fs.unlinkSync(args.socket);
 } catch {}
@@ -1579,6 +1611,7 @@ server.on('error', (error) => {
 });
 server.listen(args.socket, () => {
   fs.chmodSync(args.socket, 0o600);
+  setInterval(() => recheckOrphans().catch(() => {}), ORPHAN_RECHECK_MS).unref();
   writeState();
   log(`pid ${process.pid} protocol ${PROTOCOL} version ${args.version} listening on ${args.socket}`);
 });
@@ -1586,6 +1619,10 @@ process.on('exit', () => {
   exiting = true;
 });
 process.on('SIGTERM', () => shutdown(0));
+// The daemon sends SIGHUP to a host that stopped answering on its socket.
+process.on('SIGHUP', () => {
+  if (!draining) methods.drain().catch((error) => log(`retire on SIGHUP: ${error.message}`));
+});
 process.on('SIGINT', () => shutdown(0));
 // stderr is host.log. A log that cannot be written loses lines, not sessions.
 process.stderr.on('error', () => {});

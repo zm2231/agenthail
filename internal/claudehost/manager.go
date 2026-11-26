@@ -70,18 +70,48 @@ func (m *Manager) Ensure(ctx context.Context) (Client, error) {
 	if err != nil {
 		return Client{}, err
 	}
-	client := m.Client()
 	if err := os.MkdirAll(m.stateDir(), 0700); err != nil {
 		return Client{}, err
 	}
+	ready, err := m.ensure(ctx, launch)
+	if !errors.Is(err, errUnanswered) {
+		return ready, err
+	}
+	pid, err := m.replaceUnanswered(ctx)
+	if err != nil {
+		return Client{}, err
+	}
+	ready, err = m.ensure(ctx, launch)
+	if err != nil {
+		return Client{}, fmt.Errorf("replaced the Claude host (pid %d) that stopped answering: %w", pid, err)
+	}
+	return ready, nil
+}
+
+func (m *Manager) ensure(ctx context.Context, launch Launch) (Client, error) {
+	client := m.Client()
 	ctx, cancel := context.WithTimeout(ctx, startTimeout)
 	defer cancel()
 	var ready Client
 	lockHeld := false
-	err = poll.Until(ctx, 50*time.Millisecond, func() (bool, error) {
+	var silentSince time.Time
+	silent := func() (bool, error) {
+		if silentSince.IsZero() {
+			silentSince = time.Now()
+		}
+		if time.Since(silentSince) >= unansweredAfter {
+			return false, errUnanswered
+		}
+		return false, nil
+	}
+	err := poll.Until(ctx, 50*time.Millisecond, func() (bool, error) {
 		attempt, stop := context.WithTimeout(ctx, time.Second)
 		hello, err := client.Hello(attempt)
 		stop()
+		if unanswered(err) && ctx.Err() == nil {
+			return silent()
+		}
+		silentSince = time.Time{}
 		if err == nil {
 			if current(hello, launch) {
 				ready = client
@@ -107,7 +137,7 @@ func (m *Manager) Ensure(ctx context.Context) (Client, error) {
 		}
 		lockHeld = true
 		lockTaken()
-		return false, nil
+		return silent()
 	})
 	if lockHeld && errors.Is(err, context.DeadlineExceeded) {
 		return Client{}, fmt.Errorf("another process holds the Claude host lock, and no host answered within %s: %w", startTimeout, err)
