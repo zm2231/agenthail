@@ -187,6 +187,7 @@ fn verb(act: &Act) -> &'static str {
         Act::Rename => "Renaming",
         Act::Terminal => "Opening the terminal",
         Act::Pr(_) => "Opening the pull request",
+        Act::PrWatch(..) | Act::PrUnlink(_) | Act::PrLink => "Changing the pull request",
         Act::Pin(true) => "Pinning",
         Act::Pin(false) => "Unpinning",
         Act::Read(true) => "Marking as read",
@@ -205,6 +206,9 @@ pub fn run(s: &mut App, id: &str, act: Act) {
     match act {
         Act::Rename => start_rename(s, id),
         Act::Pr(url) => open_link(&url),
+        Act::PrLink => super::pr_link::start(s, id),
+        Act::PrWatch(url, on) => super::pr_link::change(s, id, if on { feed::action::PrOp::Watch } else { feed::action::PrOp::Unwatch }, &url),
+        Act::PrUnlink(url) => super::pr_link::change(s, id, feed::action::PrOp::Unlink, &url),
         act => {
             if not_sent(s) || changing(s, id) || !super::gone::settled(s, id) || !s.menus.busy.insert((id.to_string(), "menu")) {
                 return;
@@ -223,7 +227,7 @@ pub fn run(s: &mut App, id: &str, act: Act) {
                     Act::Pin(on) => c.session_pin(&id, *on).map(|_| None),
                     Act::Read(read) => c.session_read(&id, &revision, *read),
                     Act::Archive(on) => c.session_archive(&id, *on).map(|_| None),
-                    Act::Rename | Act::Pr(_) => Ok(None),
+                    Act::Rename | Act::Pr(_) | Act::PrWatch(..) | Act::PrUnlink(_) | Act::PrLink => Ok(None),
                 };
                 Some(Done::Acted(id, act, revision, result))
             });

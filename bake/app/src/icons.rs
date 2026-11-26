@@ -44,3 +44,4 @@ lucide!(ROTATE, "ah-rotate", r#"<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5"/><path d
 lucide!(COPY, "ah-copy", r#"<rect x="8.5" y="8.5" width="12" height="12" rx="2"/><path d="M15.5 8.5V5.5a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3"/>"#);
 lucide!(PENCIL, "ah-pencil", r#"<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7.5 18.5 3.5 19.5l1-4z"/><path d="m14.5 5.5 3 3"/>"#);
 lucide!(TRASH, "ah-trash", r#"<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4.5h6V7"/>"#);
+lucide!(GAUGE, "ah-gauge", r#"<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>"#);

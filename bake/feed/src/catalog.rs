@@ -97,6 +97,16 @@ pub struct Pr {
     pub title: String,
     #[serde(default)]
     pub url: String,
+    #[serde(default)]
+    pub repo: String,
+    #[serde(default)]
+    pub watch: bool,
+    #[serde(default)]
+    pub state: String,
+    #[serde(default)]
+    pub checks: String,
+    #[serde(default)]
+    pub problem: String,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -150,6 +160,12 @@ pub struct Session {
     pub plan: Option<Plan>,
     #[serde(default)]
     pub prs: Vec<Pr>,
+    #[serde(default)]
+    pub usage_limit: Option<crate::limit::UsageLimit>,
+    #[serde(default)]
+    pub limit_resume: Option<crate::limit::LimitResume>,
+    #[serde(default)]
+    pub claude_config_root: Option<crate::limit::SessionRoot>,
     #[serde(default)]
     pub queue_count: i64,
     #[serde(default)]
@@ -295,6 +311,9 @@ impl Session {
     }
 
     pub fn summary(&self) -> String {
+        if let Some(stop) = self.limit(OffsetDateTime::now_utc()) {
+            return stop.label;
+        }
         if let Some(a) = &self.attention {
             if !a.reason.is_empty() {
                 return a.reason.clone();
@@ -675,6 +694,14 @@ impl Client {
 
     pub fn send(&self, session: &str, message: &str) -> std::result::Result<(), RespondError> {
         self.action("send", serde_json::json!({"sessionId": session, "message": message, "author": "person"})).map(drop)
+    }
+
+    pub(crate) fn post_json(&self, path: &str, body: Value) -> std::result::Result<Value, RespondError> {
+        match self.agent.post(&format!("{}{path}", self.base)).set("Authorization", &format!("Bearer {}", self.token)).set("Accept", "application/json").send_json(body) {
+            Ok(response) => response.into_json().map_err(|e| RespondError { message: format!("the daemon's reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: true, answered: true, reply: Value::Null, status: 0 }),
+            Err(ureq::Error::Status(code, response)) => Err(RespondError::from_status(path, code, &response.into_string().unwrap_or_default())),
+            Err(ureq::Error::Transport(error)) => Err(RespondError::from_transport(&error)),
+        }
     }
 
     pub fn action(&self, name: &str, payload: Value) -> std::result::Result<Value, RespondError> {

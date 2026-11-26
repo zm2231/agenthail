@@ -9,10 +9,13 @@ use crate::theme::{
 use crate::transcript::{self, session_avatar};
 use crate::{App, Bg, Screen, Tab, answer_request, pick_work, session_edits, short_path, show_changes, send, draft_reply, session, toggle_pick, open_link};
 
+pub mod accounts;
 mod chips;
 pub mod gone;
 pub(crate) mod queue;
+pub mod limit;
 pub mod new_session;
+pub mod pr_link;
 mod rail;
 mod session;
 mod session_dialogs;
@@ -98,6 +101,9 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     };
     crate::over::overlays(s, &mut layer);
     session_menu::overlays(s, &mut layer);
+    pr_link::overlays(s, &mut layer);
+    limit::overlays(s, &mut layer);
+    accounts::overlays(s, &mut layer);
     new_session::view(s, &mut layer);
     let root = col()
         .w_full()

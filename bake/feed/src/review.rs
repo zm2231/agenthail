@@ -89,7 +89,7 @@ pub fn timeline_pr(w: &Work) -> Option<Pr> {
             let digits: String = tail.chars().take_while(|c| c.is_ascii_digit()).collect();
             if let Ok(number) = digits.parse() {
                 let url = url[..url.len() - tail.len() + digits.len()].to_string();
-                return Some(Pr { number, title: String::new(), url });
+                return Some(Pr { number, url, ..Pr::default() });
             }
         }
     }
@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn open_pr_takes_a_real_link_matching_the_number() {
-        let prs = vec![Pr { number: 7, title: String::new(), url: String::new() }, Pr { number: 12, title: String::new(), url: "https://github.com/o/r/pull/12".into() }, Pr { number: 13, title: String::new(), url: "https://github.com/o/r/pull/13".into() }];
+        let prs = vec![Pr { number: 7, url: String::new(), ..Pr::default() }, Pr { number: 12, url: "https://github.com/o/r/pull/12".into(), ..Pr::default() }, Pr { number: 13, url: "https://github.com/o/r/pull/13".into(), ..Pr::default() }];
         assert_eq!(pr_link(&prs, Some("13")).map(|p| p.number), Some(13));
         assert_eq!(pr_link(&prs, Some("99")).map(|p| p.number), Some(12));
         assert_eq!(pr_link(&prs, None).map(|p| p.number), Some(12));
@@ -249,7 +249,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        assert_eq!(timeline_pr(&w), Some(Pr { number: 1328, title: String::new(), url: "https://github.com/o/r/pull/1328".into() }));
+        assert_eq!(timeline_pr(&w), Some(Pr { number: 1328, url: "https://github.com/o/r/pull/1328".into(), ..Pr::default() }));
         assert_eq!(timeline_pr(&Work::default()), None);
     }
 }

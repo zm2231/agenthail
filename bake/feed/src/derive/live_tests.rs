@@ -190,6 +190,47 @@ fn a_confirmed_change_outlasts_a_stale_row_until_the_daemon_shows_it() {
 }
 
 #[test]
+fn a_pull_request_change_holds_only_that_pull_request_until_the_daemon_shows_it() {
+    use crate::catalog::Pr;
+    use crate::menu::Patch;
+    let pr = |n: u64, watch: bool, checks: &str| Pr { number: n, url: format!("https://github.com/o/r/pull/{n}"), watch, checks: checks.into(), ..Default::default() };
+    let row = |prs: Vec<Pr>| {
+        let mut x = session("a", "p", "2026-11-24T11:00:00Z", "idle");
+        x.prs = prs;
+        x
+    };
+    let mut ov = Overview::default();
+    assert!(ov.take_sessions("2026-11-24T12:00:00Z", vec![row(vec![pr(12, false, "pending"), pr(13, false, "")])]));
+    assert!(ov.patch("a", Patch::Pr { pr: pr(12, true, "pending"), linked: true }, Instant::now()));
+    assert!(ov.patch("a", Patch::Pr { pr: pr(13, false, ""), linked: false }, Instant::now()), "a change to another pull request is its own");
+    assert!(ov.take_sessions("2026-11-24T12:00:04Z", vec![row(vec![pr(12, false, "failing"), pr(13, false, "")])]));
+    let shown: Vec<(u64, bool, String)> = ov.sessions()[0].prs.iter().map(|p| (p.number, p.watch, p.checks.clone())).collect();
+    assert_eq!(shown, vec![(12, true, "failing".to_string())], "a stale row keeps both changes but its newer checks still show");
+    assert!(ov.take_sessions("2026-11-24T12:00:06Z", vec![row(vec![pr(12, true, "passing")])]));
+    assert!(ov.take_sessions("2026-11-24T12:00:08Z", vec![row(vec![pr(12, false, "passing"), pr(14, false, "")])]));
+    let shown: Vec<(u64, bool)> = ov.sessions()[0].prs.iter().map(|p| (p.number, p.watch)).collect();
+    assert_eq!(shown, vec![(12, false), (14, false)], "once shown, the daemon's later word wins");
+}
+
+#[test]
+fn the_same_pull_request_change_confirmed_twice_keeps_its_hold() {
+    use crate::catalog::Pr;
+    use crate::menu::Patch;
+    let pr = |checks: &str, watch: bool| Pr { number: 12, url: "https://github.com/o/r/pull/12".into(), watch, checks: checks.into(), ..Default::default() };
+    let row = |prs: Vec<Pr>| {
+        let mut x = session("a", "p", "2026-11-24T11:00:00Z", "idle");
+        x.prs = prs;
+        x
+    };
+    let mut ov = Overview::default();
+    assert!(ov.take_sessions("2026-11-24T12:00:00Z", vec![row(Vec::new())]));
+    assert!(ov.patch("a", Patch::Pr { pr: pr("pending", true), linked: true }, Instant::now()));
+    ov.patch("a", Patch::Pr { pr: pr("passing", true), linked: true }, Instant::now());
+    assert!(ov.take_sessions("2026-11-24T12:00:04Z", vec![row(Vec::new())]));
+    assert_eq!(ov.sessions()[0].prs.len(), 1, "a stale row still shows the linked pull request");
+}
+
+#[test]
 fn a_change_the_daemon_never_shows_gives_way() {
     use crate::menu::Patch;
     let mut ov = Overview::default();

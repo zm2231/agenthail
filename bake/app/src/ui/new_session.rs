@@ -186,10 +186,11 @@ impl Sheet {
             None => "Default".to_string(),
         };
         let mut choices = vec![(default, String::new())];
+        let now = time::OffsetDateTime::now_utc();
         for root in roots.iter().filter(|r| r.selectable()) {
             let title = root.title();
             let title = if roots.iter().filter(|r| r.title() == title).count() > 1 { format!("{title} · {}", root.name) } else { title };
-            let label = match root.usage_line() {
+            let label = match root.usage_line(now) {
                 Some(usage) => format!("{title} · {usage}"),
                 None => title,
             };

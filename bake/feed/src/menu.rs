@@ -6,6 +6,9 @@ pub enum Act {
     Rename,
     Terminal,
     Pr(String),
+    PrWatch(String, bool),
+    PrUnlink(String),
+    PrLink,
     Pin(bool),
     Read(bool),
     Archive(bool),
@@ -31,6 +34,7 @@ pub enum Patch {
     Archived(bool),
     Read { receipt: ReadState, from: Vec<String> },
     Alias(Option<String>),
+    Pr { pr: crate::catalog::Pr, linked: bool },
 }
 
 impl Patch {
@@ -40,6 +44,11 @@ impl Patch {
             Patch::Archived(on) => x.archived = *on,
             Patch::Read { receipt, .. } => x.read_state = Some(receipt.clone()),
             Patch::Alias(alias) => x.alias = alias.clone(),
+            Patch::Pr { pr, linked: true } => match x.prs.iter_mut().find(|p| p.url == pr.url) {
+                Some(shown) => shown.watch = pr.watch,
+                None => x.prs.push(pr.clone()),
+            },
+            Patch::Pr { pr, linked: false } => x.prs.retain(|p| p.url != pr.url),
         }
     }
 
@@ -50,10 +59,17 @@ impl Patch {
             Patch::Archived(on) => x.archived == *on,
             Patch::Read { from, .. } => x.read_state.as_ref().is_none_or(|r| !from.contains(&r.revision)),
             Patch::Alias(alias) => x.alias == *alias,
+            Patch::Pr { pr, linked } => match x.prs.iter().find(|p| p.url == pr.url) {
+                Some(shown) => *linked && shown.watch == pr.watch,
+                None => !linked,
+            },
         }
     }
 
     pub fn same_field(&self, other: &Patch) -> bool {
+        if let (Patch::Pr { pr: a, .. }, Patch::Pr { pr: b, .. }) = (self, other) {
+            return a.url == b.url;
+        }
         std::mem::discriminant(self) == std::mem::discriminant(other)
     }
 
@@ -71,6 +87,7 @@ impl Patch {
         match (self, other) {
             (Patch::Pinned(a), Patch::Pinned(b)) => a.is_some() == b.is_some(),
             (Patch::Read { receipt: a, .. }, Patch::Read { receipt: b, .. }) => a.revision == b.revision,
+            (Patch::Pr { pr: a, linked: x }, Patch::Pr { pr: b, linked: y }) => a.url == b.url && a.watch == b.watch && x == y,
             _ => self == other,
         }
     }
@@ -81,6 +98,10 @@ impl Patch {
             Patch::Archived(_) => x.archived = daemon.archived,
             Patch::Read { .. } => x.read_state = daemon.read_state.clone(),
             Patch::Alias(_) => x.alias = daemon.alias.clone(),
+            Patch::Pr { pr, .. } => {
+                x.prs.retain(|p| p.url != pr.url);
+                x.prs.extend(daemon.prs.iter().filter(|p| p.url == pr.url).cloned());
+            }
         }
     }
 }
@@ -122,12 +143,107 @@ pub fn entries(x: &Session) -> Vec<Vec<Entry>> {
         }
         open.push(entry);
     }
+    let mut groups = vec![open];
+    if !x.read_only {
+        groups.push(pull_requests(x));
+    }
     let mut keep = vec![Entry::on(Act::Pin(!x.pinned()), if x.pinned() { "Unpin" } else { "Pin" })];
     if x.read_state.is_some() {
         keep.push(Entry::on(Act::Read(x.unread()), if x.unread() { "Mark as read" } else { "Mark as unread" }));
     }
     keep.push(Entry::on(Act::Archive(!x.archived), if x.archived { "Unarchive" } else { "Archive" }));
-    vec![open, keep]
+    groups.push(keep);
+    groups
+}
+
+fn pull_requests(x: &Session) -> Vec<Entry> {
+    let linked: Vec<_> = x.prs.iter().filter(|p| !p.url.is_empty()).collect();
+    let mut out = Vec::new();
+    for pr in &linked {
+        let which = if linked.len() == 1 { "pull request".to_string() } else { format!("#{}", pr.number) };
+        let mut watch = if pr.watch {
+            Entry::on(Act::PrWatch(pr.url.clone(), false), format!("Stop watching {which}"))
+        } else {
+            Entry::on(Act::PrWatch(pr.url.clone(), true), format!("Watch {which}"))
+        };
+        watch.note = Some(if !pr.problem.is_empty() {
+            pr.problem.clone()
+        } else if pr.watch {
+            "Changes to it wake this session".into()
+        } else {
+            "Wakes this session when it changes, and settles its worktree on merge".into()
+        });
+        out.push(watch);
+        out.push(Entry::on(Act::PrUnlink(pr.url.clone()), format!("Unlink {which}")));
+    }
+    out.push(Entry::on(Act::PrLink, "Link a pull request…"));
+    out
+}
+
+fn pr_number(asked: &str) -> Option<u64> {
+    let asked = asked.trim();
+    asked.strip_prefix('#').unwrap_or(asked).parse::<u64>().ok().filter(|n| *n > 0 && *n <= i64::MAX as u64)
+}
+
+pub fn names_pr(asked: &str, pr: &crate::catalog::Pr) -> bool {
+    if let Some(number) = pr_number(asked) {
+        return pr.number == number;
+    }
+    pr_link(asked).is_some_and(|(repo, number)| pr.number == number && pr.repo.to_lowercase() == repo)
+}
+
+fn pr_link(asked: &str) -> Option<(String, u64)> {
+    let asked = asked.trim();
+    let asked = asked.strip_prefix('#').unwrap_or(asked).trim();
+    let link = url::Url::parse(asked).ok()?;
+    if !matches!(link.scheme(), "http" | "https") || !link.username().is_empty() || link.password().is_some() {
+        return None;
+    }
+    let host = link.host_str()?;
+    let after = asked.split_once("://")?.1;
+    let end = after.find(['/', '?', '#']).unwrap_or(after.len());
+    if after[..end].contains('@') {
+        return None;
+    }
+    let raw = after[end..].strip_prefix('/').map(|_| &after[end..]).unwrap_or("");
+    let path = decoded(raw.split(['?', '#']).next().unwrap_or(""));
+    let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
+    let [owner, name, "pull", number] = parts[..] else { return None };
+    let number = number.parse::<u64>().ok().filter(|n| *n > 0 && *n <= i64::MAX as u64)?;
+    let name = name.strip_suffix(".git").unwrap_or(name);
+    let segment = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
+    if !segment(owner) || !segment(name) || name == "." || name == ".." {
+        return None;
+    }
+    Some((format!("{host}/{owner}/{name}").to_lowercase(), number))
+}
+
+fn decoded(path: &str) -> String {
+    let bytes = path.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = bytes.get(i + 1..i + 3).and_then(|h| std::str::from_utf8(h).ok()).and_then(|h| u8::from_str_radix(h, 16).ok());
+        match (bytes[i], hex) {
+            (b'%', Some(byte)) => {
+                out.push(byte);
+                i += 3;
+            }
+            (byte, _) => {
+                out.push(byte);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+pub fn pr_problem(text: &str) -> Option<&'static str> {
+    let text = text.trim();
+    if text.is_empty() || text == "#" {
+        return Some("Paste a pull request link, or its number.");
+    }
+    if pr_number(text).is_some() || pr_link(text).is_some() { None } else { Some("That isn't a pull request link or number.") }
 }
 
 pub fn normalized(text: &str) -> String {
@@ -175,7 +291,7 @@ mod tests {
 
     #[test]
     fn a_plain_session_offers_rename_pin_and_archive() {
-        assert_eq!(labels(&session()), vec![vec!["Rename…"], vec!["Pin", "Archive"]]);
+        assert_eq!(labels(&session()), vec![vec!["Rename…"], vec!["Link a pull request…"], vec!["Pin", "Archive"]]);
     }
 
     #[test]
@@ -184,10 +300,10 @@ mod tests {
         x.pinned_at = Some("2026-11-26T10:00:00Z".into());
         x.archived = true;
         x.read_state = Some(ReadState { first_unread: "item-4".into(), revision: "r1".into() });
-        let keep = &entries(&x)[1];
+        let keep = &entries(&x)[2];
         assert_eq!(keep.iter().map(|e| (e.label.as_str(), e.act.clone())).collect::<Vec<_>>(), vec![("Unpin", Act::Pin(false)), ("Mark as read", Act::Read(true)), ("Unarchive", Act::Archive(false))]);
         x.read_state = Some(ReadState { first_unread: String::new(), revision: "r1".into() });
-        assert_eq!(entries(&x)[1][1], Entry::on(Act::Read(false), "Mark as unread"));
+        assert_eq!(entries(&x)[2][1], Entry::on(Act::Read(false), "Mark as unread"));
     }
 
     #[test]
@@ -218,14 +334,68 @@ mod tests {
     #[test]
     fn each_pull_request_with_a_link_gets_an_entry() {
         let mut x = session();
-        x.prs = vec![Pr { number: 12, title: "Fix it".into(), url: "https://github.com/o/r/pull/12".into() }];
+        x.prs = vec![Pr { number: 12, title: "Fix it".into(), url: "https://github.com/o/r/pull/12".into(), ..Default::default() }];
         let open = &entries(&x)[0];
         assert_eq!(open[1].label, "Open pull request");
         assert_eq!(open[1].act, Act::Pr("https://github.com/o/r/pull/12".into()));
         assert_eq!(open[1].note.as_deref(), Some("Fix it"));
-        x.prs.push(Pr { number: 13, title: String::new(), url: "https://github.com/o/r/pull/13".into() });
-        x.prs.push(Pr { number: 14, title: "No link".into(), url: String::new() });
+        x.prs.push(Pr { number: 13, title: String::new(), url: "https://github.com/o/r/pull/13".into(), watch: true, ..Default::default() });
+        x.prs.push(Pr { number: 14, title: "No link".into(), url: String::new(), ..Default::default() });
         assert_eq!(labels(&x)[0], vec!["Rename…", "Open pull request #12", "Open pull request #13"]);
+    }
+
+    #[test]
+    fn each_linked_pull_request_can_be_watched_or_unlinked_and_another_linked() {
+        let mut x = session();
+        x.prs = vec![Pr { number: 12, url: "https://github.com/o/r/pull/12".into(), ..Default::default() }];
+        let group = &entries(&x)[1];
+        assert_eq!(group.iter().map(|e| (e.label.as_str(), e.act.clone())).collect::<Vec<_>>(), vec![
+            ("Watch pull request", Act::PrWatch("https://github.com/o/r/pull/12".into(), true)),
+            ("Unlink pull request", Act::PrUnlink("https://github.com/o/r/pull/12".into())),
+            ("Link a pull request…", Act::PrLink),
+        ]);
+        x.prs.push(Pr { number: 13, url: "https://github.com/o/r/pull/13".into(), watch: true, problem: "GitHub rate limits reads".into(), ..Default::default() });
+        let group = &entries(&x)[1];
+        assert_eq!(group[0].label, "Watch #12");
+        assert_eq!((group[2].label.as_str(), group[2].act.clone()), ("Stop watching #13", Act::PrWatch("https://github.com/o/r/pull/13".into(), false)));
+        assert_eq!(group[2].note.as_deref(), Some("GitHub rate limits reads"));
+        x.read_only = true;
+        assert_eq!(entries(&x).len(), 2);
+    }
+
+    #[test]
+    fn the_pull_request_the_daemon_linked_is_found_from_what_was_typed() {
+        let pr = Pr { repo: "github.com/Owner/Repo".into(), number: 12, url: "https://github.com/Owner/Repo/pull/12".into(), ..Default::default() };
+        for asked in ["12", "#12", " https://github.com/owner/repo/pull/12 ", "https://github.com/Owner/Repo/pull/12/", "https://github.com/Owner/Repo/pull/12?w=1", "https://github.com/Owner/Repo/pull/12#discussion", "https://github.com/Owner/Repo.git/pull/12", "https://github.com//Owner/Repo/pull/12", "https://github.com/%4Fwner/Rep%6F/pull/12"] {
+            assert!(names_pr(asked, &pr), "{asked}");
+        }
+        for asked in ["13", "https://github.com/Owner/Repo//pull/12", "https://me@github.com/Owner/Repo/pull/12", "ftp://github.com/Owner/Repo/pull/12", "https://git.example.com/Owner/Repo/pull/12", "https://github.com/Owner/Other/pull/12", "https://github.com/Owner/Repo/pull/13", "https://github.com/Owner/Repo/issues/12", "fix"] {
+            assert!(!names_pr(asked, &pr), "{asked}");
+        }
+        let enterprise = Pr { repo: "git.example.com/team/app".into(), number: 3, ..Default::default() };
+        assert!(names_pr("https://git.example.com/team/app/pull/3", &enterprise));
+        assert!(names_pr("https://GIT.example.com:443/team/app/pull/3", &enterprise));
+        assert!(!names_pr("https://git.example.com/other/team/app/pull/3", &enterprise));
+    }
+
+    #[test]
+    fn a_pull_request_is_a_link_or_a_number() {
+        assert_eq!(pr_problem(" "), Some("Paste a pull request link, or its number."));
+        assert_eq!(pr_problem("#34"), None);
+        assert_eq!(pr_problem("https://github.com/o/r/pull/34"), None);
+        assert_eq!(pr_problem("https://github.com/o/r/%70ull/34"), None);
+        assert_eq!(pr_problem("https://github.com/o/r/issues/34"), Some("That isn't a pull request link or number."));
+        assert_eq!(pr_problem("https://github.com/o/r/pull/0"), Some("That isn't a pull request link or number."));
+        assert_eq!(pr_problem("9223372036854775807"), None);
+        assert_eq!(pr_problem("#https://github.com/o/r/pull/12"), None);
+        let pr = Pr { repo: "github.com/o/r".into(), number: 12, ..Default::default() };
+        assert!(names_pr("#https://github.com/o/r/pull/12", &pr));
+        assert!(!names_pr("https://github.com/o/./r/pull/12", &pr));
+        for refused in ["##12", "9223372036854775808", "https://github.com?x=/o/r/pull/12", "https://@github.com/o/r/pull/12", "https://github.com/o/./r/pull/12", "https://github.com/x/../o/r/pull/12", "https://github.com/o/r/pull/9223372036854775808", "https://github.com/o w/r/pull/3", "https://github.com/o/../pull/3", "https://github.com/o/r!/pull/3"] {
+            assert_eq!(pr_problem(refused), Some("That isn't a pull request link or number."), "{refused}");
+        }
+        assert_eq!(pr_problem("0"), Some("That isn't a pull request link or number."));
+        assert_eq!(pr_problem("fix it"), Some("That isn't a pull request link or number."));
     }
 
     #[test]

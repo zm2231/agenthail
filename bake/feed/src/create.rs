@@ -100,6 +100,8 @@ pub struct Limit {
 pub struct Usage {
     #[serde(default)]
     pub limits: Vec<Limit>,
+    #[serde(default, rename = "fetchedAt")]
+    pub fetched_at: Option<String>,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -141,6 +143,27 @@ impl ConfigRoot {
         self.full_until = usage.full_until;
     }
 
+    pub fn spent(&self, now: time::OffsetDateTime) -> bool {
+        let at_limit = |l: &Limit| l.percent >= 100.0 && l.resets_at.as_deref().and_then(crate::catalog::parse_time).is_some_and(|at| at > now);
+        self.full_now(now) || self.usage.as_ref().is_some_and(|u| u.limits.iter().any(at_limit))
+    }
+
+    fn full_now(&self, now: time::OffsetDateTime) -> bool {
+        self.full && self.full_until.as_deref().and_then(crate::catalog::parse_time).is_none_or(|at| at > now)
+    }
+
+    pub fn same_account(&self, other: &ConfigRoot) -> bool {
+        self.root == other.root && self.login == other.login && self.proxy == other.proxy && self.signed_in_as.as_ref().map(|l| &l.email) == other.signed_in_as.as_ref().map(|l| &l.email)
+    }
+
+    pub fn take_reading(&mut self, usage: RootUsage) -> bool {
+        let unread = usage.usage.is_none() && !usage.full && usage.usage_problem.as_deref().is_some_and(|p| !p.is_empty());
+        if !unread {
+            self.take_usage(usage);
+        }
+        !unread
+    }
+
     pub fn title(&self) -> String {
         if let Some(proxy) = self.proxy.as_deref().filter(|p| !p.is_empty()) {
             return format!("{proxy} via proxy");
@@ -151,20 +174,28 @@ impl ConfigRoot {
         }
     }
 
-    pub fn usage_line(&self) -> Option<String> {
-        if self.full {
-            return Some(match &self.full_until {
-                Some(until) => format!("out of usage until {until}"),
+    pub fn usage_line(&self, now: time::OffsetDateTime) -> Option<String> {
+        let minutes = |at: &str| crate::catalog::parse_time(at).map(|at| ((at - now).whole_seconds() as f64 / 60.0).ceil() as i64);
+        if self.full_now(now) {
+            return Some(match self.full_until.as_deref().and_then(minutes) {
+                Some(left) => format!("out of usage for {}", crate::limit::span(left)),
                 None => "out of usage".into(),
             });
         }
-        let limits = &self.usage.as_ref()?.limits;
+        let usage = self.usage.as_ref()?;
+        let limits = &usage.limits;
         let windows = [("session", ["session", "5h"]), ("week", ["weekly", "weekly_all"])];
         let parts: Vec<String> = windows
             .iter()
             .filter_map(|(label, kinds)| limits.iter().find(|l| kinds.contains(&l.kind.as_str())).map(|l| format!("{label} {:.0}%", l.percent)))
             .collect();
-        (!parts.is_empty()).then(|| parts.join(", "))
+        let old = usage.fetched_at.as_deref().and_then(minutes).map(|m| -m).filter(|ago| *ago >= 60);
+        let line = parts.join(", ");
+        match old {
+            _ if parts.is_empty() => None,
+            Some(ago) => Some(format!("{line}, read {} ago", crate::limit::span(ago))),
+            None => Some(line),
+        }
     }
 }
 
@@ -183,6 +214,8 @@ pub struct RootPick {
 #[serde(rename_all = "camelCase")]
 pub struct RootUsage {
     pub root: String,
+    #[serde(default)]
+    pub usage_problem: Option<String>,
     #[serde(default)]
     pub usage: Option<Usage>,
     #[serde(default)]
@@ -676,14 +709,43 @@ mod tests {
     }
 
     #[test]
+    fn an_account_with_a_window_at_its_limit_is_spent_until_that_window_resets() {
+        let now = crate::catalog::parse_time("2026-11-26T10:00:00Z").unwrap();
+        let reading = |percent: f64, resets: Option<&str>| ConfigRoot { usage: Some(Usage { limits: vec![Limit { kind: "5h".into(), percent, resets_at: resets.map(String::from) }], fetched_at: None }), ..Default::default() };
+        assert!(reading(100.0, Some("2026-11-26T11:00:00Z")).spent(now));
+        assert!(!reading(100.0, None).spent(now), "a window with no reset is not held out, as the daemon reads it");
+        assert!(!reading(100.0, Some("2026-11-26T09:00:00Z")).spent(now));
+        assert!(!reading(99.0, Some("2026-11-26T11:00:00Z")).spent(now));
+        assert!(ConfigRoot { full: true, ..Default::default() }.spent(now));
+        assert!(ConfigRoot { full: true, full_until: Some("2026-11-26T11:00:00Z".into()), ..Default::default() }.spent(now));
+        let freed = ConfigRoot { full: true, full_until: Some("2026-11-26T09:59:00Z".into()), ..Default::default() };
+        assert!(!freed.spent(now), "a proxy past the time it frees up is not held out");
+        assert_eq!(freed.usage_line(now), None);
+        let held = ConfigRoot { full: true, full_until: Some("2026-11-26T12:30:00Z".into()), ..Default::default() };
+        assert_eq!(held.usage_line(now).as_deref(), Some("out of usage for 2h 30m"));
+    }
+
+    #[test]
+    fn an_unreadable_reading_keeps_what_was_known() {
+        let mut root = ConfigRoot { root: "/r".into(), full: true, full_until: Some("Friday".into()), ..Default::default() };
+        let unread: RootUsage = serde_json::from_str(r#"{"root":"/r","proxy":"shared","usageProblem":"the shared proxy's accounts are not readable from this host"}"#).unwrap();
+        assert!(!root.take_reading(unread));
+        assert!(root.full, "an account known to be out stays out");
+        assert!(root.take_reading(RootUsage { root: "/r".into(), ..Default::default() }));
+        assert!(!root.full);
+    }
+
+    #[test]
     fn a_root_reads_its_usage_once_it_arrives() {
         let mut root: ConfigRoot = serde_json::from_value(json!({"name": "default", "root": "/r", "login": "proxy", "proxy": "shared"})).unwrap();
-        assert_eq!(root.usage_line(), None);
+        let now = crate::catalog::parse_time("2026-11-26T08:00:00Z").unwrap();
+        assert_eq!(root.usage_line(now), None);
         let usage: RootUsage = serde_json::from_str(r#"{"best":"a@example.com","proxy":"shared","root":"/r","usage":{"fetchedAt":"2026-11-26T07:07:00Z","limits":[{"kind":"weekly_all","percent":74.4,"resetsAt":"2026-11-28T01:00:00Z"},{"kind":"5h","percent":12}]}}"#).unwrap();
         root.take_usage(usage);
-        assert_eq!(root.usage_line().as_deref(), Some("session 12%, week 74%"));
+        assert_eq!(root.usage_line(now).as_deref(), Some("session 12%, week 74%"));
+        assert_eq!(root.usage_line(crate::catalog::parse_time("2026-11-26T09:30:00Z").unwrap()).as_deref(), Some("session 12%, week 74%, read 2h 23m ago"));
         root.take_usage(RootUsage { root: "/r".into(), full: true, full_until: Some("Friday".into()), ..Default::default() });
-        assert_eq!(root.usage_line().as_deref(), Some("out of usage until Friday"));
+        assert_eq!(root.usage_line(now).as_deref(), Some("out of usage"));
     }
 
     #[test]
