@@ -145,7 +145,10 @@ free-form file each package reads its own key from
 - `label`: the name the apps show.
 - `command`: argv. `command[0]` is resolved on `PATH` as the daemon's
   environment has it, so an agent that is not installed is listed as not
-  connected rather than failing at start.
+  connected rather than failing at start. `agenthail doctor` reads a built-in
+  agent that is not installed as unavailable (`agentUnavailable`), not as a
+  fault; an agent the
+  config adds or changes whose command is missing is a failure.
 - `env`: added to the agent's environment.
 - `modes`: the rank of each of the agent's mode ids on the ceiling scale
   (`plan`, `ask`, `edits`, `auto`, `full`; `internal/daemon/mcp_ceiling.go:20`).

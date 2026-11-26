@@ -11,12 +11,13 @@ import (
 )
 
 type Agent struct {
-	ID       string            `json:"id"`
-	Label    string            `json:"label,omitempty"`
-	Command  []string          `json:"command,omitempty"`
-	Env      map[string]string `json:"env,omitempty"`
-	Modes    map[string]string `json:"modes,omitempty"`
-	Disabled bool              `json:"disabled,omitempty"`
+	ID         string            `json:"id"`
+	Label      string            `json:"label,omitempty"`
+	Command    []string          `json:"command,omitempty"`
+	Env        map[string]string `json:"env,omitempty"`
+	Modes      map[string]string `json:"modes,omitempty"`
+	Disabled   bool              `json:"disabled,omitempty"`
+	Configured bool              `json:"-"`
 }
 
 var (
@@ -51,6 +52,7 @@ func LoadAgents(home string) ([]Agent, []error) {
 	}
 	var problems []error
 	for _, entry := range entries {
+		entry.Configured = true
 		if err := entry.validate(); err != nil {
 			problems = append(problems, err)
 			continue
@@ -92,6 +94,10 @@ func (a Agent) DisplayName() string {
 		return a.Label
 	}
 	return a.ID
+}
+
+func (a Agent) BuiltIn() bool {
+	return !a.Configured && slices.ContainsFunc(BuiltInAgents(), func(b Agent) bool { return b.ID == a.ID })
 }
 
 func (a Agent) Installed() bool {

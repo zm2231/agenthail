@@ -1,6 +1,7 @@
 package acphost
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -39,5 +40,29 @@ func TestConfigEntriesAddReplaceAndRemoveAgents(t *testing.T) {
 	}
 	if agents, problems := LoadAgents(home); len(agents) != 0 || len(problems) != 0 {
 		t.Fatalf("a disabled entry removes the built-in agent: %+v %v", agents, problems)
+	}
+}
+
+func TestOnlyTheShippedAgentIsBuiltIn(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".agenthail"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if agents, _ := LoadAgents(home); len(agents) != 1 || !agents[0].BuiltIn() {
+		t.Fatalf("the shipped Devin is built in: %+v", agents)
+	}
+	shipped := BuiltInAgents()[0].Command
+	override, _ := json.Marshal(map[string]any{"acpAgents": []map[string]any{{"id": "devin", "label": "My Devin", "command": shipped}, {"id": "helper", "command": []string{"helper-agent"}}}})
+	if err := os.WriteFile(surface.AgenthailConfigPath(home), override, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agents, problems := LoadAgents(home)
+	if len(agents) != 2 || len(problems) != 0 {
+		t.Fatalf("agents=%+v problems=%v", agents, problems)
+	}
+	for _, agent := range agents {
+		if agent.BuiltIn() {
+			t.Fatalf("an entry from the config is not built in, even with the shipped command: %+v", agent)
+		}
 	}
 }

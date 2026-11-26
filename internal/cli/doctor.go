@@ -36,10 +36,12 @@ func (a *App) cmdDoctor(args []string) error {
 		Error             string                 `json:"error,omitempty"`
 		SigninOff         string                 `json:"signinOff,omitempty"`
 		SigninUnavailable string                 `json:"signinUnavailable,omitempty"`
+		AgentUnavailable  string                 `json:"agentUnavailable,omitempty"`
 		Runtime           *surface.RuntimeStatus `json:"runtime,omitempty"`
 	}
 	var results []doctorResult
 	failures := 0
+	home, _ := os.UserHomeDir()
 	for _, e := range a.Surfaces {
 		if !surface.Listed(e.Surface) {
 			continue
@@ -79,6 +81,14 @@ func (a *App) cmdDoctor(args []string) error {
 		var healthErr error
 		if checker, ok := e.Surface.(surface.HealthChecker); ok {
 			healthErr = checker.Health(ctx)
+		}
+		if acp, ok := e.Surface.(interface{ Agent() acphost.Agent }); ok && !acp.Agent().Installed() {
+			if acp.Agent().BuiltIn() {
+				agent := acp.Agent()
+				results = append(results, doctorResult{Surface: e.Name, Capabilities: enabled, OK: true, AgentUnavailable: fmt.Sprintf("%s is not installed on this computer, so it is unavailable here. Install %q to start %s sessions, or turn it off with {\"id\": %q, \"disabled\": true} under acpAgents in %s.", agent.DisplayName(), agent.Command[0], agent.DisplayName(), agent.ID, surface.AgenthailConfigPath(home))})
+				continue
+			}
+			healthErr = fmt.Errorf("%s: command %q is not installed", acp.Agent().DisplayName(), acp.Agent().Command[0])
 		}
 		var sessions []surface.Session
 		var err error
@@ -144,7 +154,6 @@ func (a *App) cmdDoctor(args []string) error {
 		settingsErr = fmt.Errorf("%s cannot be read; until it is fixed new sessions can be refused and queued messages wait for an idle session rather than steer: %w", dashconfig.Path(), settingsErr)
 		failures++
 	}
-	home, _ := os.UserHomeDir()
 	var agentProblems []string
 	_, problems := acphost.LoadAgents(home)
 	for _, problem := range problems {
@@ -550,7 +559,9 @@ func (a *App) cmdDoctor(args []string) error {
 			if result.SigninUnavailable != "" {
 				fmt.Printf("  sign-in unavailable: %s\n", result.SigninUnavailable)
 			}
-			if result.OK {
+			if result.AgentUnavailable != "" {
+				fmt.Printf("  unavailable: %s\n", result.AgentUnavailable)
+			} else if result.OK {
 				fmt.Printf("  sessions: %d\n", result.Sessions)
 				fmt.Printf("  writes: %s\n", result.WritePath)
 			} else {
