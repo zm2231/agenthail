@@ -12,6 +12,7 @@ use crate::transcript::{self, session_avatar};
 use crate::{App, Screen, Tab, answer_request, pick_work, session_edits, short_path, show_changes, select, send, draft_reply, session, toggle_pick, open_link};
 
 mod chips;
+pub(crate) mod queue;
 pub mod new_session;
 mod rail;
 mod session;

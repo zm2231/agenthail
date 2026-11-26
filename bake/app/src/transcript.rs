@@ -309,7 +309,7 @@ fn gap_for(blocks: &[Block], ix: usize) -> f32 {
 pub fn view(s: &App, id: &str) -> El {
     let count = s.panes.get(id).map(|p| p.blocks.len()).unwrap_or(0);
     let key = id.to_string();
-    let stack = col().key(format!("rows-{id}")).w_full().items_center().growth(GrowthSpec::default()).selection_group(true).pb(130.0).virtual_rows(
+    let stack = col().key(format!("rows-{id}")).w_full().items_center().growth(GrowthSpec::default()).selection_group(true).pb(130.0 + crate::ui::queue::reserve(s, id)).virtual_rows(
         count,
         60.0,
         {

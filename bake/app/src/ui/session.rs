@@ -111,6 +111,7 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
         .fill(card().alpha(0.78))
         .border(1.0, Color::WHITE.alpha(0.10))
         .shadow(10.0, 34.0, Color::BLACK.alpha(0.45))
+        .children(crate::ui::queue::dock(s, x))
         .child(col().w_full().px(16.0).pt(13.0).pb(4.0).child(input))
         .child(controls.child(send_button));
     col().w_full().items_center().px(28.0).pb(18.0).mt(-120.0).child(box_el)

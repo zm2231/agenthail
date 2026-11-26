@@ -33,6 +33,8 @@ pub enum Bg {
     Requests(String, Vec<OpenRequest>, std::time::Instant),
     Answered(String, String, Result<(), feed::catalog::RespondError>),
     NewSession(ui::new_session::Loaded),
+    Queue(String, Result<Vec<feed::queue::Queued>, String>),
+    QueueDone(String, i64, feed::queue::Done),
     Error(String),
 }
 
@@ -84,6 +86,10 @@ pub struct App {
     snapshots: u64,
     queue_rows: Vec<feed::catalog::QueueRow>,
     pub stopping: HashSet<String>,
+    pub queue: HashMap<String, Vec<feed::queue::Queued>>,
+    pub queue_working: HashSet<i64>,
+    queue_fetching: HashSet<String>,
+    pub queue_note: HashMap<String, String>,
     pub busy_default: Option<Busy>,
     pub busy_pick: HashMap<String, Busy>,
     pub rekeyed: HashMap<String, String>,
@@ -173,6 +179,10 @@ fn init() -> App {
         snapshots: 0,
         queue_rows: Vec::new(),
         stopping: HashSet::new(),
+        queue: HashMap::new(),
+        queue_working: HashSet::new(),
+        queue_fetching: HashSet::new(),
+        queue_note: HashMap::new(),
         busy_default: None,
         busy_pick: HashMap::new(),
         rekeyed: HashMap::new(),
@@ -292,6 +302,7 @@ pub fn select(s: &mut App, id: &str) {
     }
     fetch_requests(s, id);
     ui::session_menu::load(s, id);
+    ui::queue::fetch(s, id);
 }
 
 pub fn load_pane(s: &mut App, id: &str) {
@@ -823,6 +834,8 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
         move_key(&mut s.busy_pick, &old, &new);
         move_key(&mut s.work_pick, &old, &new);
         move_member(&mut s.stopping, &old, &new);
+        move_key(&mut s.queue_note, &old, &new);
+        move_key(&mut s.queue, &old, &new);
     }
     if let Some(id) = s.composer_for.clone()
         && s.drafts.get(&id) != s.composer.text
@@ -848,6 +861,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 s.status = "live".into();
                 if let Some(id) = s.selected.clone() {
                     fetch_requests(s, &id);
+                    if ui::queue::wants(s, &id) {
+                        ui::queue::fetch(s, &id);
+                    }
                     if let Some(work) = session(s, &id).and_then(|x| x.primary_work(s.work_pick.get(&id).map(String::as_str)).cloned()) {
                         fetch_item(s, &work.project_key, &work.item_id);
                     }
@@ -918,6 +934,8 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 fetch_requests_at(s, &id, &[0, 2000, 6000, 9000]);
             }
             Bg::NewSession(loaded) => ui::new_session::take(s, loaded),
+            Bg::Queue(id, result) => ui::queue::take(s, id, result),
+            Bg::QueueDone(id, queue_id, done) => ui::queue::done(s, id, queue_id, done),
             Bg::Error(error) => s.status = format!("daemon: {error}"),
         }
     }
