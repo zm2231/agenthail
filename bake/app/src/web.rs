@@ -15,7 +15,7 @@ const SLOW: Duration = Duration::from_secs(10);
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 enum Load {
     Started(String),
-    Finished,
+    Finished(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -38,6 +38,8 @@ pub struct Web {
     loaded: Option<String>,
     ready: Option<String>,
     loading_since: Option<Instant>,
+    committed: bool,
+    slow_shown: bool,
     left: Option<String>,
     page: Rc<RefCell<String>>,
     loads: (Sender<Load>, Receiver<Load>),
@@ -58,6 +60,8 @@ impl Web {
             loaded: None,
             ready: None,
             loading_since: None,
+            committed: false,
+            slow_shown: false,
             left: None,
             page: Rc::new(RefCell::new(String::new())),
             loads: channel(),
@@ -96,6 +100,7 @@ impl Web {
         self.renew_at = None;
         self.loaded = None;
         self.ready = None;
+        self.committed = false;
         self.loading_since = None;
     }
 
@@ -117,9 +122,15 @@ impl Web {
         while let Ok(load) = self.loads.1.try_recv() {
             let Some(page) = self.loaded.clone() else { continue };
             match load {
-                Load::Started(url) if leaves(&url, &page) => self.left = Some(url),
-                Load::Started(_) => self.loading_since = Some(Instant::now()),
-                Load::Finished => {
+                Load::Started(url) if leaves(&url, &page) => {
+                    self.left = Some(url);
+                    self.committed = false;
+                }
+                Load::Started(url) => {
+                    self.committed |= feed::extensions::same_origin(&url, &page);
+                    self.loading_since = Some(Instant::now());
+                }
+                Load::Finished(url) if self.committed && self.left.is_none() && feed::extensions::same_origin(&url, &page) => {
                     self.loading_since = None;
                     if self.phase == Phase::Loading {
                         self.phase = Phase::Shown;
@@ -127,7 +138,12 @@ impl Web {
                     }
                     changed = true;
                 }
+                Load::Finished(_) => {}
             }
+        }
+        if self.slow() != self.slow_shown {
+            self.slow_shown = self.slow();
+            changed = true;
         }
         let Some(want) = want else { return changed };
         if self.failed() {
@@ -165,8 +181,14 @@ impl Web {
         }
         if let Some(url) = self.left.take() {
             crate::open_link(&url);
+            if self.phase == Phase::Loading {
+                return Err(format!("This page sent you to {url}, so it opened in your browser."));
+            }
             if let Some(page) = &self.loaded {
                 view.load_url(page).map_err(|e| format!("Couldn't open {page}: {e}"))?;
+                self.ready = None;
+                self.committed = false;
+                self.phase = Phase::Loading;
                 self.loading_since = Some(Instant::now());
             }
         }
@@ -180,6 +202,7 @@ impl Web {
             view.load_url(want).map_err(|e| format!("Couldn't open {want}: {e}"))?;
             self.loaded = Some(want.to_string());
             self.ready = None;
+            self.committed = false;
             self.loading_since = Some(Instant::now());
             self.phase = Phase::Loading;
             return Ok(true);
@@ -252,7 +275,7 @@ fn build(slot: &NativeView, page: Rc<RefCell<String>>, loads: Sender<Load>, foll
         .with_on_page_load_handler(move |event, url| {
             let _ = loads.send(match event {
                 wry::PageLoadEvent::Started => Load::Started(url),
-                wry::PageLoadEvent::Finished => Load::Finished,
+                wry::PageLoadEvent::Finished => Load::Finished(url),
             });
         })
         .build_as_child(slot)
@@ -341,14 +364,36 @@ mod tests {
         web.phase = Phase::Loading;
         web.loading_since = Some(Instant::now() - SLOW);
         assert!(web.slow());
+        web.loads.0.send(Load::Finished(page.into())).unwrap();
+        web.pump(None);
+        assert_eq!(web.phase, Phase::Loading, "a finish before this load commits belongs to an earlier one");
         web.loads.0.send(Load::Started(format!("{page}report"))).unwrap();
         web.pump(None);
         assert!(!web.slow(), "a commit restarts the clock");
-        web.loads.0.send(Load::Finished).unwrap();
+        web.loads.0.send(Load::Finished(format!("{page}report"))).unwrap();
         web.pump(None);
         assert_eq!(web.phase, Phase::Shown);
         assert_eq!(web.ready.as_deref(), Some(page));
         assert!(web.loading_since.is_none());
+    }
+
+    #[test]
+    fn a_page_still_loading_that_leaves_is_not_reopened() {
+        let mut web = Web::new();
+        web.loaded = Some("http://127.0.0.1:48200/".into());
+        web.phase = Phase::Loading;
+        web.loads.0.send(Load::Started("https://example.com/".into())).unwrap();
+        web.pump(None);
+        assert_eq!(web.left.as_deref(), Some("https://example.com/"));
+    }
+
+    #[test]
+    fn the_slow_note_redraws_when_it_appears() {
+        let mut web = Web::new();
+        web.loaded = Some("http://127.0.0.1:48200/".into());
+        web.loading_since = Some(Instant::now() - SLOW);
+        assert!(web.pump(None));
+        assert!(!web.pump(None));
     }
 
     #[test]
@@ -358,8 +403,11 @@ mod tests {
         web.loaded = Some(page.into());
         web.phase = Phase::Shown;
         web.loads.0.send(Load::Started("https://example.com/".into())).unwrap();
+        web.loads.0.send(Load::Finished("https://example.com/".into())).unwrap();
         web.pump(None);
         assert_eq!(web.left.as_deref(), Some("https://example.com/"));
+        assert_eq!(web.phase, Phase::Shown);
+        assert!(web.ready.is_none(), "another site's finish never marks the page ready");
         web.left = None;
         web.loads.0.send(Load::Started("about:blank".into())).unwrap();
         web.loads.0.send(Load::Started("http://127.0.0.1:48300/".into())).unwrap();
