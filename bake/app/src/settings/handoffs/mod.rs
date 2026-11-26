@@ -93,6 +93,7 @@ pub fn flush(s: &mut Prefs) {
             s.handoffs.picked.clear();
             s.handoffs.message = TextEdit::new("");
             s.handoffs.member = TextEdit::new("");
+            edited(s, Section::Channels);
         }
     }
     if s.handoffs.stale {
