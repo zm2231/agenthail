@@ -15,7 +15,7 @@ const REFRESH: Duration = Duration::from_secs(30);
 
 pub enum Done {
     Settings(String, u64, Result<SessionSettings, String>),
-    Models(String, Vec<ModelOption>),
+    Models(String, Result<Vec<ModelOption>, String>),
     Context(String, u64, Result<Option<ContextUsage>, String>),
     Acted(String, Act, String, Result<Option<feed::action::ReadState>, RespondError>),
     Renamed(String, u64, Result<String, RespondError>),
@@ -54,6 +54,7 @@ pub struct Menus {
     rename_seq: u64,
     refreshed: Option<(String, Instant)>,
     models_asked: HashSet<String>,
+    pub models_error: HashMap<String, String>,
     tx: Sender<Done>,
     rx: Receiver<Done>,
 }
@@ -81,6 +82,7 @@ impl Menus {
             rename_seq: 0,
             refreshed: None,
             models_asked: HashSet::new(),
+            models_error: HashMap::new(),
             tx,
             rx,
         }
@@ -166,7 +168,7 @@ fn fetch_models(s: &mut App, id: &str) {
     }
     s.menus.models_asked.insert(id.to_string());
     let id = id.to_string();
-    spawn(s, Duration::ZERO, move |c| c.session_models(&surface, &id).ok().map(|m| Done::Models(id, m)));
+    spawn(s, Duration::ZERO, move |c| Some(Done::Models(id.clone(), c.session_models(&surface, &id).map_err(|e| e.to_string()))));
 }
 
 fn refresh_shown(s: &mut App) {
@@ -182,6 +184,9 @@ fn refresh_shown(s: &mut App) {
         s.menus.refreshed = Some((id.clone(), Instant::now()));
         fetch_settings(s, &id, Duration::ZERO);
         fetch_context(s, &id, Duration::ZERO);
+        if s.menus.models_error.contains_key(&id) {
+            fetch_models(s, &id);
+        }
     }
 }
 
@@ -390,8 +395,12 @@ fn settled(s: &mut App, done: Done) {
                 }
             }
         }
-        Done::Models(id, models) => {
+        Done::Models(id, Ok(models)) => {
+            s.menus.models_error.remove(&id);
             s.menus.models.insert(id, models);
+        }
+        Done::Models(id, Err(error)) => {
+            s.menus.models_error.insert(id, error);
         }
         Done::Context(id, seq, result) => {
             if !s.menus.fresh(&id, "context", seq) {
