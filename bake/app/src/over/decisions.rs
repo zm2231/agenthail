@@ -10,7 +10,7 @@ use crate::over::ui::{self, BODY, BODY_MED, META, META_MED, base, kit, strong, w
 
 const HISTORY_SHOWN: usize = 6;
 
-fn line(s: &App, i: usize, d: &Decision, first_accept: bool) -> El {
+fn line(s: &App, i: usize, d: &Decision, shift: bool) -> El {
     let k = kit();
     let id = d.id();
     let acting = s.ov.inbox.acting.contains(&id);
@@ -40,6 +40,9 @@ fn line(s: &App, i: usize, d: &Decision, first_accept: bool) -> El {
     if !d.work_item.is_empty() {
         facts = facts.child(ui::id_label(&crate::over::short_id(&d.work_item)));
     }
+    for (q, answer) in d.recommended_lines() {
+        body = body.child(row().gap(6.0).items_center().child(text(crate::over::plain(&q)).font(META).color(base()).truncate().shrink()).child(text("→".to_string()).font(META).color(weak())).child(text(answer).font(META_MED).color(strong())));
+    }
     body = body.child(facts);
     if !d.request_error.is_empty() {
         body = body.child(text(d.request_error.clone()).font(META).color(ui::needs_color()).wrap());
@@ -56,7 +59,7 @@ fn line(s: &App, i: usize, d: &Decision, first_accept: bool) -> El {
     } else if d.recommended().is_some() {
         let dd = d.clone();
         let mut accept = Button::new(if acting { "Answering…" } else if unconfirmed { "Sent, not confirmed" } else { "Accept recommended" }).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(acting || unconfirmed).on_press(move |s: &mut App| inbox::accept(s, &dd));
-        if first_accept {
+        if shift {
             accept = accept.shortcut("⇧↩");
         }
         actions = actions.child(accept.build(k).key(format!("decision-{i}-accept")));
@@ -97,7 +100,7 @@ pub fn section(s: &App) -> El {
     }
     let mut list = col().w_full().gap(2.0).padding(4.0);
     let mut last = "";
-    let first_accept = found.decisions.iter().position(|d| d.recommended().is_some());
+    let target = inbox::shift_target(st).map(Decision::id);
     for (i, d) in found.decisions.iter().enumerate() {
         let group = d.group_title();
         if group != last {
@@ -105,7 +108,7 @@ pub fn section(s: &App) -> El {
             list = list.child(text(format!("{group} · {n}")).font(META_MED).color(weak()).px(14.0).pt(if last.is_empty() { 6.0 } else { 12.0 }).pb(2.0));
             last = group;
         }
-        list = list.child(line(s, i, d, first_accept == Some(i)));
+        list = list.child(line(s, i, d, target.as_deref() == Some(d.id().as_str())));
     }
     if found.decisions.is_empty() {
         list = list.child(row().gap(8.0).items_center().px(14.0).py(10.0).child(icon(&icons::CIRCLE_CHECK, 14.0).color(weak())).child(text(if st.error.is_some() { "Nothing needed you when decisions last loaded." } else if found.notes.is_empty() { "Nothing needs you." } else { "Nothing needs you on the computers that answered." }.to_string()).font(BODY).color(weak())));

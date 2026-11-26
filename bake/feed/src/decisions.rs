@@ -127,6 +127,14 @@ impl Decision {
         Some((request.id.clone(), choices))
     }
 
+    pub fn recommended_lines(&self) -> Vec<(String, String)> {
+        if self.recommended().is_none() {
+            return Vec::new();
+        }
+        let questions = self.requests.first().and_then(|r| r.questions.as_ref()).cloned().unwrap_or_default();
+        questions.iter().filter_map(|q| q.suggested.and_then(|i| q.options.get(i)).map(|o| (q.question.clone(), o.label.clone()))).collect()
+    }
+
     pub fn dismissals(&self) -> Vec<Dismiss<'_>> {
         if self.is_parked() {
             if self.covers.is_empty() {
@@ -274,6 +282,7 @@ mod tests {
             {"question":"Colour?","suggested":1,"options":[{"id":"red","label":"Red"},{"id":"blue","label":"Blue"}]},
             {"question":"Size?","suggested":0,"options":[{"id":"s","label":"Small"}]}]}]}"#);
         assert_eq!(d.recommended(), Some(("r1".into(), vec!["blue".into(), "s".into()])));
+        assert_eq!(d.recommended_lines(), [("Colour?".to_string(), "Blue".to_string()), ("Size?".to_string(), "Small".to_string())]);
         let partial = decision(r#"{"group":"waiting","sessionId":"s","answerable":true,"requests":[{"id":"r1","questions":[
             {"question":"Colour?","suggested":1,"options":[{"id":"red","label":"Red"},{"id":"blue","label":"Blue"}]},
             {"question":"Size?","options":[{"id":"s","label":"Small"}]}]}]}"#);

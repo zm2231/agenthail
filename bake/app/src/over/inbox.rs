@@ -115,9 +115,9 @@ pub fn drain(s: &mut crate::App) -> bool {
             }
             Done::Acted(id, entry, result) => {
                 st.acting.remove(&id);
+                st.newest = Some(Instant::now());
                 match result {
                     Ok(()) => {
-                        st.newest = Some(Instant::now());
                         st.notes.remove(&id);
                         if let Some(inbox) = &mut st.inbox {
                             inbox.decisions.retain(|d| d.id() != id);
@@ -194,9 +194,12 @@ pub fn accept(s: &mut crate::App, d: &Decision) {
     });
 }
 
+pub fn shift_target(st: &State) -> Option<&Decision> {
+    st.inbox.as_ref()?.decisions.iter().find(|d| d.recommended().is_some() && !st.unconfirmed.contains(&d.id()) && !st.acting.contains(&d.id()))
+}
+
 pub fn accept_first(s: &mut crate::App) -> bool {
-    let first = s.ov.inbox.inbox.as_ref().and_then(|i| i.decisions.iter().find(|d| d.recommended().is_some() && !s.ov.inbox.unconfirmed.contains(&d.id())).cloned());
-    match first {
+    match shift_target(&s.ov.inbox).cloned() {
         Some(d) => {
             accept(s, &d);
             true
