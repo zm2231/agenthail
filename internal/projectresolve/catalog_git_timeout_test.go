@@ -20,12 +20,18 @@ func slowGit(t *testing.T, slow, stall string) {
 		t.Fatal(err)
 	}
 	bin := t.TempDir()
-	script := "#!/bin/sh\nfor a in \"$@\"; do [ \"$a\" = " + slow + " ] && " + stall + "; done\nexec " + real + " \"$@\"\n"
+	script := "#!/bin/sh\nfor a in \"$@\"; do [ \"$a\" = " + slow + " ] && " + stall + "; done\nexec " + shellQuoted(real) + " \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// macOS checks a new executable on its first run, which can take longer than the budget.
+	if output, err := exec.Command(filepath.Join(bin, "git"), "--version").CombinedOutput(); err != nil {
+		t.Fatalf("the stand-in git: %v %s", err, output)
+	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
+
+func shellQuoted(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 func gitIn(t *testing.T, dir string, args ...string) {
 	t.Helper()
@@ -74,4 +80,36 @@ func TestARepositoryLookupThatRunsOutOfTimeSaysSoAndNamesTheGitStep(t *testing.T
 			}
 		})
 	}
+}
+
+func TestAGitAnswerThatReachesTheLookupAfterItsBudgetIsGitsAnswer(t *testing.T) {
+	answerLate := func(t *testing.T, answer string) string {
+		pidFile := filepath.Join(t.TempDir(), "holder.pid")
+		t.Cleanup(func() {
+			if pid, err := os.ReadFile(pidFile); err == nil {
+				exec.Command("kill", strings.TrimSpace(string(pid))).Run()
+			}
+		})
+		return "{ sleep 3 & echo $! > " + shellQuoted(pidFile) + "; " + answer + "; }"
+	}
+	t.Run("a refusal", func(t *testing.T) {
+		folder := filepath.Join(t.TempDir(), "widget")
+		gitIn(t, filepath.Dir(folder), "init", "-q", folder)
+		slowGit(t, "--show-toplevel", answerLate(t, "echo 'fatal: detected dubious ownership in repository' >&2; exit 128"))
+		_, notRepository, err := ResolveCatalogRepository(context.Background(), folder, nil, time.Second)
+		var timeout *CatalogGitTimeoutError
+		if err == nil || errors.As(err, &timeout) || notRepository || !strings.Contains(err.Error(), "dubious ownership") {
+			t.Fatalf("a refusal git gave after the budget answered %v (not a repository: %v), want the refusal", err, notRepository)
+		}
+	})
+	t.Run("no root commits", func(t *testing.T) {
+		folder := filepath.Join(t.TempDir(), "widget")
+		gitIn(t, filepath.Dir(folder), "init", "-q", folder)
+		gitIn(t, folder, "commit", "-q", "--allow-empty", "-m", "first")
+		slowGit(t, "rev-list", answerLate(t, "echo 'fatal: bad revision' >&2; exit 128"))
+		repository, _, err := ResolveCatalogRepository(context.Background(), folder, nil, time.Second)
+		if err != nil || repository.Toplevel == "" {
+			t.Fatalf("a rev-list git answered after the budget gave %+v, %v; want the repository without root commits", repository, err)
+		}
+	})
 }

@@ -20,7 +20,7 @@ func failingGitStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	bin := t.TempDir()
-	script := "#!/bin/sh\nfor arg in \"$@\"; do\n  if [ \"$arg\" = status ]; then echo 'fatal: index file corrupt' >&2; exit 128; fi\ndone\nexec " + real + " \"$@\"\n"
+	script := "#!/bin/sh\nfor arg in \"$@\"; do\n  if [ \"$arg\" = status ]; then echo 'fatal: index file corrupt' >&2; exit 128; fi\ndone\nexec '" + strings.ReplaceAll(real, "'", `'\''`) + "' \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
