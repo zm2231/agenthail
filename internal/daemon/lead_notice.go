@@ -52,12 +52,23 @@ func (d *Daemon) answerTarget(sessionID string) string {
 	return sessionID
 }
 
-func (d *Daemon) askAddress(sessionID, hearerID string) (string, bool) {
+// Qualified for a hearer on a paired host: a bare @alias there is ambiguous
+// once a session on that host has the same alias.
+func (d *Daemon) noticeTarget(sessionID, hearerID string) string {
 	target := d.answerTarget(sessionID)
-	if owner, err := d.Registry.SessionHost(hearerID); err == nil && owner != "" {
-		return hosts.Qualify(d.hostIdentity().ID, target), true
+	if d.hearsFromAnotherHost(hearerID) {
+		return hosts.Qualify(d.hostIdentity().ID, target)
 	}
-	return target, d.usesMCP(hearerID)
+	return target
+}
+
+func (d *Daemon) hearsFromAnotherHost(hearerID string) bool {
+	owner, err := d.Registry.SessionHost(hearerID)
+	return err == nil && owner != ""
+}
+
+func (d *Daemon) askAddress(sessionID, hearerID string) (string, bool) {
+	return d.noticeTarget(sessionID, hearerID), d.hearsFromAnotherHost(hearerID) || d.usesMCP(hearerID)
 }
 
 func (d *Daemon) usesMCP(sessionID string) bool {

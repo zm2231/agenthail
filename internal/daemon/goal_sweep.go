@@ -117,7 +117,6 @@ func goalStopNoticeKey(sessionID string, goal *surface.GoalState) string {
 func (d *Daemon) noticeStoppedGoal(ctx context.Context, session surface.Session, goal *surface.GoalState) error {
 	key := goalStopNoticeKey(session.ID, goal)
 	name := d.resolveDisplay(session.ID)
-	note := goalStopNote(d.answerTarget(session.ID), goal)
 	to, ok := d.noticeRecipient(session)
 	if ok {
 		if used, err := d.Registry.DeliveryKeyUsed(key); err != nil || used {
@@ -125,12 +124,12 @@ func (d *Daemon) noticeStoppedGoal(ctx context.Context, session surface.Session,
 		}
 	}
 	if d.goalSweep.firstNotice(session.ID, key) {
-		d.notifyStoppedGoal(ctx, session.ID, key, fmt.Sprintf("%s: %s", name, note))
+		d.notifyStoppedGoal(ctx, session.ID, key, fmt.Sprintf("%s: %s", name, goalStopNote(d.answerTarget(session.ID), goal)))
 	}
 	if !ok {
 		return nil
 	}
-	message := fmt.Sprintf("[agenthail] %s stopped working on its goal. %s The person was notified too.", name, note)
+	message := fmt.Sprintf("[agenthail] %s stopped working on its goal. %s The person was notified too.", name, goalStopNote(d.noticeTarget(session.ID, to.sessionID), goal))
 	if _, err := d.sendNotice(to, message, key); err != nil {
 		d.log.Printf("tell the %s that %s stopped on its goal: %s", to.role, name, err)
 		return err

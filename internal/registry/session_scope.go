@@ -46,23 +46,27 @@ func (r *Registry) LiveLocalSessionsAmong(ids []string) ([]SessionRef, error) {
 }
 
 // HostSessionRef is a paired host's session as this host mirrors it, with the
-// alias, project and starter that host gives it.
+// alias, project and starter that host gives it. AgentAsk is the open ask its
+// row shows routed to an agent rather than the person; only that host knows
+// which agent.
 type HostSessionRef struct {
 	SessionRef
 	HostID    string
 	Alias     string
 	Project   json.RawMessage
 	StartedBy string
+	AgentAsk  string
 }
 
 func (r *Registry) LiveHostSessions() ([]HostSessionRef, error) {
 	return queryRows(r.read, nil, func(row rowScanner) (HostSessionRef, error) {
 		var ref HostSessionRef
 		var project []byte
-		err := row.Scan(&ref.ID, &ref.Order, &ref.HostID, &ref.Alias, &project, &ref.StartedBy)
+		err := row.Scan(&ref.ID, &ref.Order, &ref.HostID, &ref.Alias, &project, &ref.StartedBy, &ref.AgentAsk)
 		ref.Project = project
 		return ref, err
-	}, `SELECT s.id,s.rowid,s.host_id,coalesce(json_extract(cs.projection_fingerprint,'$.alias'),''),cs.host_project,coalesce(json_extract(cs.projection_fingerprint,'$.startedBy'),'') FROM sessions s JOIN catalog_sessions cs ON cs.session_id=s.id
+	}, `SELECT s.id,s.rowid,s.host_id,coalesce(json_extract(cs.projection_fingerprint,'$.alias'),''),cs.host_project,coalesce(json_extract(cs.projection_fingerprint,'$.startedBy'),''),
+		coalesce(CASE WHEN json_extract(cs.projection_fingerprint,'$.ask.routedTo')<>'`+AskToPerson+`' AND json_extract(cs.projection_fingerprint,'$.ask.answeredAt') IS NULL THEN json_extract(cs.projection_fingerprint,'$.ask.id') END,'') FROM sessions s JOIN catalog_sessions cs ON cs.session_id=s.id
 		WHERE s.host_id<>'' AND cs.retired=0 AND cs.unavailable_reason='' AND NOT EXISTS (SELECT 1 FROM session_archive a WHERE a.session_id=s.id) ORDER BY s.rowid`)
 }
 

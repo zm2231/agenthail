@@ -25,7 +25,7 @@ func (d *Daemon) requestsHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, "not_found", "session not found")
 		return
 	}
-	open, err := d.openRequests(r.Context(), session)
+	open, err := d.readOpenRequests(r.Context(), session, true, r.URL.Query().Get("reader"))
 	if err != nil {
 		writeActionResult(w, actionResult{}, err)
 		return
@@ -47,13 +47,15 @@ type openRequests struct {
 // Agenthail holds: an approval or a delivery problem shows while its session
 // is offline.
 func (d *Daemon) openRequests(ctx context.Context, session *surface.Session) (openRequests, error) {
-	return d.readOpenRequests(ctx, session, true)
+	return d.readOpenRequests(ctx, session, true, "")
 }
 
 // readOpenRequests reads them without first recording a request the
 // provider opened since its last observation unless observe is set; such a
-// request is left out until it is observed.
-func (d *Daemon) readOpenRequests(ctx context.Context, session *surface.Session, observe bool) (openRequests, error) {
+// request is left out until it is observed. Besides the asks routed to the
+// person they hold those routed to reader, a session here or, by the id its
+// own host gives it, on a paired host.
+func (d *Daemon) readOpenRequests(ctx context.Context, session *surface.Session, observe bool, reader string) (openRequests, error) {
 	adapter, err := d.adapters().For(session)
 	if err != nil {
 		return openRequests{}, actionFailed(http.StatusConflict, "conflict", "surface is not configured")
@@ -81,14 +83,14 @@ func (d *Daemon) readOpenRequests(ctx context.Context, session *surface.Session,
 		}
 	}
 	permission := map[string]string{}
-	var asking []surface.Request
+	var asking []registry.Ask
 	for _, ask := range asks {
 		switch {
 		case ask.State != registry.AskOpen:
 		case ask.Origin == registry.AskOriginPermission && ask.Answerable:
 			permission[ask.Ref] = ask.ID
-		case ask.Origin != registry.AskOriginPermission && ask.RoutedTo == registry.AskToPerson:
-			asking = append(asking, askRequest(ask))
+		case ask.Origin != registry.AskOriginPermission && (ask.RoutedTo == registry.AskToPerson || d.routedTo(ask, reader)):
+			asking = append(asking, ask)
 		}
 	}
 	if !answers && len(asking) == 0 {
@@ -106,7 +108,9 @@ func (d *Daemon) readOpenRequests(ctx context.Context, session *surface.Session,
 		requests = append(requests, viewOpenRequest(request, d.publicSessionID(replacedBy)))
 	}
 	for _, ask := range asking {
-		requests = append(requests, viewOpenRequest(ask, ""))
+		view := viewOpenRequest(askRequest(ask), "")
+		view.Ask = newRequestAsk(ask)
+		requests = append(requests, view)
 	}
 	return openRequests{requests: requests, permissionMode: state.PermissionMode, providerError: providerError}, nil
 }
@@ -150,7 +154,27 @@ type openRequestView struct {
 	Summary string                  `json:"summary,omitempty"`
 	Actions []surface.RequestAction `json:"actions,omitempty"`
 	// ReplacedBy is the project's current lead when this request is from a lead a restart replaced.
-	ReplacedBy string `json:"replacedBy,omitempty"`
+	ReplacedBy string      `json:"replacedBy,omitempty"`
+	Ask        *requestAsk `json:"ask,omitempty"`
+}
+
+type requestAsk struct {
+	Title     string                 `json:"title"`
+	Questions []registry.AskQuestion `json:"questions"`
+	DefaultAt time.Time              `json:"defaultAt,omitzero"`
+	WorkItem  string                 `json:"workItem,omitempty"`
+}
+
+func newRequestAsk(ask registry.Ask) *requestAsk {
+	view := &requestAsk{Title: ask.Title, Questions: ask.Questions, WorkItem: ask.WorkItem}
+	if _, defaulted := askDefault(ask); defaulted {
+		view.DefaultAt = ask.Deadline
+	}
+	return view
+}
+
+func (d *Daemon) routedTo(ask registry.Ask, reader string) bool {
+	return reader != "" && ask.RoutedTo != registry.AskToPerson && d.hostQualified(ask.RoutedTo) == d.hostQualified(reader)
 }
 
 // sessionResponder is the provider that answers a session's requests through
