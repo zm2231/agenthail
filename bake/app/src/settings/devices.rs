@@ -33,6 +33,7 @@ pub enum Got {
 pub struct Devices {
     pub list: Option<Result<Vec<Device>, Failure>>,
     pairing: Option<(Pairing, Option<Pixels>)>,
+    expires: Option<Instant>,
     starting: bool,
     attempt: u64,
     checking: bool,
@@ -84,11 +85,33 @@ fn cancel(s: &mut Prefs) {
     s.dev.starting = false;
     s.dev.checking = false;
     s.dev.pairing = None;
+    s.dev.expires = None;
     s.dev.next_check = None;
 }
 
+fn set_phone(s: &mut Prefs, on: bool) {
+    cancel(s);
+    hide_link(s);
+    write(s, "phone-access", Section::Devices, &[Read::Settings], move |c| c.set_phone_access(on));
+}
+
+fn revoke(s: &mut Prefs) {
+    let Some(d) = s.dev.revoking.take() else { return };
+    let id = d.id;
+    write(s, format!("revoke-{id}"), Section::Devices, &[Read::Devices], move |c| c.revoke_device(&id));
+}
+
+fn expire(s: &mut Prefs, now: Instant) -> bool {
+    if !s.dev.expires.is_some_and(|at| now >= at) {
+        return false;
+    }
+    cancel(s);
+    s.dev.notice = Progress::Expired.notice();
+    true
+}
+
 fn link(s: &mut Prefs, purpose: Use) {
-    if s.dev.linking.is_some() {
+    if s.dev.linking.is_some() || busy(s) {
         return;
     }
     s.dev.link_attempt += 1;
@@ -122,6 +145,8 @@ pub fn take(s: &mut Prefs, got: Got) {
             s.dev.starting = false;
             match result {
                 Ok(p) => {
+                    let left = feed::catalog::parse_time(&p.expires_at).map(|at| at - OffsetDateTime::now_utc());
+                    s.dev.expires = left.map(|d| now + Duration::try_from(d).unwrap_or_default());
                     let pixels = picture(&p.pairing_url);
                     s.dev.pairing = Some((p, pixels));
                     s.dev.next_check = Some(now + CHECK_EVERY);
@@ -195,6 +220,7 @@ pub fn poll(s: &mut Prefs, tx: &mut Tx) -> bool {
         hide_link(s);
         changed = true;
     }
+    changed |= expire(s, now);
     if !s.dev.checking
         && s.dev.next_check.is_some_and(|at| now >= at)
         && let Some((p, _)) = &s.dev.pairing
@@ -204,7 +230,7 @@ pub fn poll(s: &mut Prefs, tx: &mut Tx) -> bool {
         s.dev.next_check = None;
         s.dev.checking = spawn(s, move |c| Got::Status(attempt, c.pairing_status(&id)));
     }
-    let next = [s.dev.next_check, s.dev.copied_until, s.dev.link_qr.as_ref().map(|(_, at)| *at)].into_iter().flatten().min();
+    let next = [s.dev.next_check, s.dev.expires, s.dev.copied_until, s.dev.link_qr.as_ref().map(|(_, at)| *at)].into_iter().flatten().min();
     if let Some(at) = next {
         tx.wake_after(at.saturating_duration_since(now).max(Duration::from_millis(16)));
     }
@@ -221,10 +247,7 @@ fn note(s: &Prefs, f: &Failure) -> El {
 
 fn phone(s: &Prefs, r: &RemoteAccess) -> El {
     let on = r.enabled;
-    let switch = parts::switch("phone-access", "Phone access", on, busy(s), move |s| {
-        cancel(s);
-        write(s, "phone-access", Section::Devices, &[Read::Settings], move |c| c.set_phone_access(!on));
-    });
+    let switch = parts::switch("phone-access", "Phone access", on, busy(s), move |s| set_phone(s, !on));
     let saving = saving(s, "phone-access");
     let detail = if saving {
         if on { "Turning phone access off…".to_string() } else { "Turning phone access on…".to_string() }
@@ -247,12 +270,12 @@ fn browser(s: &Prefs, r: &RemoteAccess) -> El {
         None => "Browser link hidden".into(),
     };
     let copy_label = if s.dev.copied_until.is_some() { "Copied" } else { "Copy Browser Link" };
-    let copy = Button::new(copy_label).control_size(ControlSize::Small).disabled(s.dev.linking.is_some()).on_press(|s: &mut Prefs| link(s, Use::Copy)).build(k).key("settings-browser-copy");
+    let copy = Button::new(copy_label).control_size(ControlSize::Small).disabled(s.dev.linking.is_some() || busy(s)).on_press(|s: &mut Prefs| link(s, Use::Copy)).build(k).key("settings-browser-copy");
     let show_label = if shown.is_some() { "Hide QR Code" } else { "Show QR Code" };
     let showing = shown.is_some();
     let show = Button::new(show_label)
         .control_size(ControlSize::Small)
-        .disabled(s.dev.linking.is_some() && !showing)
+        .disabled(!showing && (s.dev.linking.is_some() || busy(s)))
         .on_press(move |s: &mut Prefs| if showing { hide_link(s) } else { link(s, Use::Show) })
         .build(k)
         .key("settings-browser-qr");
@@ -324,7 +347,6 @@ fn devices(s: &Prefs) -> El {
 fn confirm(s: &Prefs, layer: &mut Vec<El>) {
     let Some(d) = &s.dev.revoking else { return };
     let k = theme::kit();
-    let id = d.id.clone();
     let close = |s: &mut Prefs| s.dev.revoking = None;
     let buttons = row()
         .w_full()
@@ -338,11 +360,7 @@ fn confirm(s: &Prefs, layer: &mut Vec<El>) {
                 .variant(ButtonVariant::Danger)
                 .control_size(ControlSize::Small)
                 .disabled(busy(s))
-                .on_press(move |s: &mut Prefs| {
-                    s.dev.revoking = None;
-                    let id = id.clone();
-                    write(s, format!("revoke-{id}"), Section::Devices, &[Read::Devices], move |c| c.revoke_device(&id));
-                })
+                .on_press(revoke)
                 .build(k)
                 .key("revoke-confirm"),
         );
@@ -416,4 +434,131 @@ pub fn page(s: &Prefs, layer: &mut Vec<El>) -> El {
     }
     confirm(s, layer);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn prefs() -> Prefs {
+        let mut s = super::super::init();
+        s.client = Some(Client::new("http://127.0.0.1:9", "t"));
+        s
+    }
+
+    fn pairing(id: &str, minutes: i64) -> Pairing {
+        let at = OffsetDateTime::now_utc() + time::Duration::minutes(minutes);
+        Pairing { id: id.into(), expires_at: at.format(&time::format_description::well_known::Rfc3339).unwrap(), pairing_url: "agenthail://pair?secret=s".into(), endpoint: "https://studio:7412".into() }
+    }
+
+    fn started(s: &mut Prefs, id: &str, minutes: i64) {
+        start(s);
+        take(s, Got::Started(s.dev.attempt, Ok(pairing(id, minutes))));
+    }
+
+    #[test]
+    fn a_start_that_returns_after_cancel_shows_nothing() {
+        let mut s = prefs();
+        start(&mut s);
+        let first = s.dev.attempt;
+        cancel(&mut s);
+        take(&mut s, Got::Started(first, Ok(pairing("p1", 5))));
+        assert!(s.dev.pairing.is_none() && !s.dev.starting);
+    }
+
+    #[test]
+    fn a_cancelled_check_neither_blocks_nor_ends_the_next_pairing() {
+        let mut s = prefs();
+        started(&mut s, "p1", 5);
+        let old = s.dev.attempt;
+        s.dev.checking = true;
+        cancel(&mut s);
+        assert!(!s.dev.checking);
+        started(&mut s, "p2", 5);
+        take(&mut s, Got::Status(old, Ok(PairingStatus { state: "expired".into(), device: None })));
+        assert_eq!(s.dev.pairing.as_ref().map(|(p, _)| p.id.as_str()), Some("p2"));
+        assert!(s.dev.next_check.is_some() && s.dev.expires.is_some());
+    }
+
+    #[test]
+    fn a_refused_check_stops_pairing_and_says_why() {
+        let mut s = prefs();
+        started(&mut s, "p1", 5);
+        let refused = Failure { denied: true, scope: "settings", ..Failure::new("refused") };
+        let current = s.dev.attempt;
+        take(&mut s, Got::Status(current, Err(refused)));
+        assert!(s.dev.pairing.is_none());
+        assert!(s.dev.problem.as_ref().is_some_and(|f| f.denied));
+    }
+
+    #[test]
+    fn a_failed_check_keeps_waiting_and_pairing_ends_at_its_deadline() {
+        let mut s = prefs();
+        started(&mut s, "p1", 5);
+        let current = s.dev.attempt;
+        take(&mut s, Got::Status(current, Err(Failure::new("timed out"))));
+        assert!(s.dev.pairing.is_some() && s.dev.next_check.is_some());
+        assert!(!expire(&mut s, Instant::now()));
+        assert!(expire(&mut s, Instant::now() + Duration::from_secs(301)));
+        assert!(s.dev.pairing.is_none());
+        assert_eq!(s.dev.notice.as_deref(), Some(dev::EXPIRED));
+    }
+
+    #[test]
+    fn a_paired_phone_ends_pairing_with_its_name() {
+        let mut s = prefs();
+        started(&mut s, "p1", 5);
+        let current = s.dev.attempt;
+        take(&mut s, Got::Status(current, Ok(PairingStatus { state: "paired".into(), device: Some(dev::PairedName { name: "Ada's iPhone".into() }) })));
+        assert!(s.dev.pairing.is_none());
+        assert_eq!(s.dev.notice.as_deref(), Some("Paired Ada's iPhone."));
+    }
+
+    #[test]
+    fn nothing_starts_while_a_setting_saves() {
+        let mut s = prefs();
+        s.writing = Some("phone-access".into());
+        start(&mut s);
+        link(&mut s, Use::Copy);
+        assert!(!s.dev.starting && s.dev.linking.is_none());
+    }
+
+    #[test]
+    fn turning_phone_access_off_drops_the_code_and_the_browser_link() {
+        let mut s = prefs();
+        started(&mut s, "p1", 5);
+        link(&mut s, Use::Show);
+        let shown = s.dev.link_attempt;
+        set_phone(&mut s, false);
+        assert!(s.dev.pairing.is_none() && s.dev.linking.is_none());
+        take(&mut s, Got::Link(shown, Use::Show, Ok("https://studio/login?t=1".into())));
+        assert!(s.dev.link_qr.is_none());
+        assert!(saving(&s, "phone-access"));
+    }
+
+    #[test]
+    fn a_shown_link_hides_and_a_late_one_never_appears() {
+        let mut s = prefs();
+        link(&mut s, Use::Show);
+        let current = s.dev.link_attempt;
+        take(&mut s, Got::Link(current, Use::Show, Ok("https://studio/login?t=1".into())));
+        assert!(s.dev.link_qr.is_some());
+        hide_link(&mut s);
+        assert!(s.dev.link_qr.is_none());
+        link(&mut s, Use::Show);
+        let late = s.dev.link_attempt;
+        hide_link(&mut s);
+        take(&mut s, Got::Link(late, Use::Show, Ok("https://studio/login?t=2".into())));
+        assert!(s.dev.link_qr.is_none());
+    }
+
+    #[test]
+    fn revoke_writes_only_after_the_confirm() {
+        let mut s = prefs();
+        revoke(&mut s);
+        assert!(s.writing.is_none());
+        s.dev.revoking = Some(Device { id: "d1".into(), name: "Sam's iPhone".into(), ..Default::default() });
+        revoke(&mut s);
+        assert!(s.dev.revoking.is_none() && saving(&s, "revoke-d1"));
+    }
 }

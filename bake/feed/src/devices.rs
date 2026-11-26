@@ -126,7 +126,6 @@ impl Progress {
         match status.map(|s| s.state.as_str()) {
             Some("paired") => Progress::Paired(status.and_then(|s| s.device.as_ref()).map(|d| d.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| "the iPhone".into())),
             Some("expired") => Progress::Expired,
-            Some("pending") => Progress::Waiting,
             _ if pairing.expired(now) => Progress::Expired,
             _ => Progress::Waiting,
         }
@@ -309,7 +308,8 @@ mod tests {
         let status = |state: &str, name: Option<&str>| PairingStatus { state: state.into(), device: name.map(|n| PairedName { name: n.into() }) };
         assert_eq!(Progress::of(None, &p, before), Progress::Waiting);
         assert_eq!(Progress::of(None, &p, after), Progress::Expired);
-        assert_eq!(Progress::of(Some(&status("pending", None)), &p, after), Progress::Waiting);
+        assert_eq!(Progress::of(Some(&status("pending", None)), &p, before), Progress::Waiting);
+        assert_eq!(Progress::of(Some(&status("pending", None)), &p, after), Progress::Expired);
         assert_eq!(Progress::of(Some(&status("expired", None)), &p, before), Progress::Expired);
         assert_eq!(Progress::of(Some(&status("paired", Some("Ada's iPhone"))), &p, after), Progress::Paired("Ada's iPhone".into()));
         assert_eq!(Progress::of(Some(&status("paired", Some(""))), &p, before).notice().as_deref(), Some("Paired the iPhone."));
