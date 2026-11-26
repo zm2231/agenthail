@@ -2,6 +2,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::catalog::{Client, RespondError};
+use crate::composer::{Busy, Delivered};
 
 type Outcome<T> = std::result::Result<T, RespondError>;
 
@@ -25,6 +26,15 @@ pub struct ReadState {
 impl Client {
     pub fn interrupt(&self, session: &str) -> Outcome<()> {
         self.action("interrupt", json!({"sessionId": session})).map(drop)
+    }
+
+    /// `busy` None leaves a busy session to the daemon's busy-delivery setting.
+    pub fn send_as(&self, session: &str, message: &str, busy: Option<Busy>, key: &str) -> Outcome<Delivered> {
+        let mut payload = json!({"sessionId": session, "message": message, "author": "person"});
+        if let Some(busy) = busy {
+            payload["busyDelivery"] = Value::String(busy.as_str().into());
+        }
+        Ok(Delivered::read(&self.action_keyed("send", payload, key)?))
     }
 
     pub fn steer(&self, session: &str, message: &str) -> Outcome<()> {
@@ -171,6 +181,15 @@ mod tests {
             (Box::new(|c| c.limit_move("s1", None, false).map(drop)), json!({"action": "limit-move", "sessionId": "s1", "stopTerminal": false})),
             (Box::new(|c| c.limit_move("s1", Some("/home/a/.claude-b"), true).map(drop)), json!({"action": "limit-move", "sessionId": "s1", "configRoot": "/home/a/.claude-b", "stopTerminal": true})),
             (Box::new(|c| c.send("s1", "hi")), json!({"action": "send", "sessionId": "s1", "message": "hi", "author": "person"})),
+            (Box::new(|c| c.send_as("s1", "hi", None, &crate::catalog::request_key()).map(drop)), json!({"action": "send", "sessionId": "s1", "message": "hi", "author": "person"})),
+            (
+                Box::new(|c| c.send_as("s1", "hi", Some(Busy::Steer), &crate::catalog::request_key()).map(drop)),
+                json!({"action": "send", "sessionId": "s1", "message": "hi", "author": "person", "busyDelivery": "steer"}),
+            ),
+            (
+                Box::new(|c| c.send_as("s1", "hi", Some(Busy::Queue), &crate::catalog::request_key()).map(drop)),
+                json!({"action": "send", "sessionId": "s1", "message": "hi", "author": "person", "busyDelivery": "queue"}),
+            ),
             (
                 Box::new(|c| c.respond("s1", "ask-2", vec!["Yes".into()], Default::default())),
                 json!({"action": "respond", "sessionId": "s1", "requestId": "ask-2", "decision": {"choices": ["Yes"], "answers": {}}}),
@@ -228,6 +247,18 @@ mod tests {
         assert!(client.steer("s1", "stop").unwrap_err().maybe_delivered);
         assert!(client.turn_setting("s1", "effort", "high").unwrap_err().maybe_delivered);
         assert!(client.respond("s1", "ask-1", vec!["Yes".into()], Default::default()).unwrap_err().maybe_delivered);
+    }
+
+    #[test]
+    fn a_retried_send_carries_the_request_id_it_was_given() {
+        let (client, seen) = daemon(vec![
+            (200, r#"{"ok":true,"result":{"evidence":"queued","queueId":3}}"#),
+            (202, r#"{"ok":true,"status":"submitted"}"#),
+        ]);
+        assert_eq!(client.send_as("s1", "hi", Some(Busy::Queue), "retry-1").unwrap(), Delivered::Queued);
+        assert_eq!(seen.recv().unwrap().key, "retry-1");
+        assert_eq!(client.send_as("s1", "hi", Some(Busy::Queue), "retry-1").unwrap(), Delivered::Unconfirmed);
+        assert_eq!(seen.recv().unwrap().key, "retry-1");
     }
 
     #[test]

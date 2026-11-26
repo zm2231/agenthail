@@ -2,6 +2,7 @@ pub mod action;
 pub mod blocks;
 pub mod question;
 pub mod catalog;
+pub mod composer;
 pub mod derive;
 pub mod edits;
 pub mod focus;

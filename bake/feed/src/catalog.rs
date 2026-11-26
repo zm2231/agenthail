@@ -156,6 +156,17 @@ pub struct Session {
     pub subagent: Option<Value>,
     #[serde(default)]
     pub delegated: Option<bool>,
+    #[serde(default)]
+    pub capabilities: Option<Capabilities>,
+}
+
+#[derive(Deserialize, Clone, Copy, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Capabilities {
+    #[serde(default)]
+    pub interrupt: bool,
+    #[serde(default)]
+    pub steer: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -273,6 +284,10 @@ pub struct Snapshot {
     pub updated_at: String,
     #[serde(default)]
     pub sessions: Vec<Session>,
+    #[serde(default)]
+    pub busy_delivery: String,
+    #[serde(default)]
+    pub rekeyed: std::collections::HashMap<String, String>,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -576,12 +591,16 @@ impl Client {
     }
 
     pub fn action(&self, name: &str, payload: Value) -> std::result::Result<Value, RespondError> {
+        self.action_keyed(name, payload, &request_key())
+    }
+
+    pub fn action_keyed(&self, name: &str, payload: Value, key: &str) -> std::result::Result<Value, RespondError> {
         let body = action_body(name, payload)?;
         match self
             .agent
             .post(&format!("{}/api/v1/actions", self.base))
             .set("Authorization", &format!("Bearer {}", self.token))
-            .set("Idempotency-Key", &request_key())
+            .set("Idempotency-Key", key)
             .send_json(body)
         {
             Ok(response) => Ok(response.into_json().unwrap_or(Value::Null)),
@@ -599,7 +618,7 @@ fn action_body(name: &str, payload: Value) -> std::result::Result<Value, Respond
     Ok(Value::Object(fields))
 }
 
-fn request_key() -> String {
+pub fn request_key() -> String {
     static SEQ: AtomicU64 = AtomicU64::new(0);
     format!("bake-{}-{}-{}", std::process::id(), OffsetDateTime::now_utc().unix_timestamp_nanos(), SEQ.fetch_add(1, Ordering::Relaxed))
 }
