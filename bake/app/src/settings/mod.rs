@@ -570,6 +570,7 @@ pub fn view(s: &Prefs, _: &mut Cx<Prefs>) -> El {
     let tabs = SegmentedControl::new(&TABS, Some(s.tab)).label("Settings").as_tabs().fit().on_pick(|s: &mut Prefs, i, _| {
         s.tab = i;
         s.open_select = None;
+        devices::hide_link(s);
     });
     let page = match s.tab {
         1 => claude::page(s, &mut layer),
@@ -584,5 +585,9 @@ pub fn view(s: &Prefs, _: &mut Cx<Prefs>) -> El {
         .child(col().w_full().items_center().pt(14.0).pb(10.0).child(tabs.build(k)))
         .children(unfollowed(s))
         .child(parts::scroll(page));
-    rune_kit::root(body, layer)
+    rune_kit::root(body, layer).on_window_focus(|s: &mut Prefs, focused, _| {
+        if !focused {
+            devices::hide_link(s);
+        }
+    })
 }

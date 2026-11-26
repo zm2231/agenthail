@@ -25,7 +25,7 @@ pub enum Use {
 
 pub enum Got {
     Started(u64, Result<Pairing, Failure>),
-    Status(String, Result<PairingStatus, Failure>),
+    Status(u64, Result<PairingStatus, Failure>),
     Link(u64, Use, Result<String, Failure>),
 }
 
@@ -69,7 +69,7 @@ fn spawn(s: &mut Prefs, job: impl FnOnce(&Client) -> Got + Send + 'static) -> bo
 }
 
 fn start(s: &mut Prefs) {
-    if s.dev.starting || s.dev.pairing.is_some() {
+    if s.dev.starting || s.dev.pairing.is_some() || busy(s) {
         return;
     }
     s.dev.attempt += 1;
@@ -82,6 +82,7 @@ fn start(s: &mut Prefs) {
 fn cancel(s: &mut Prefs) {
     s.dev.attempt += 1;
     s.dev.starting = false;
+    s.dev.checking = false;
     s.dev.pairing = None;
     s.dev.next_check = None;
 }
@@ -98,7 +99,7 @@ fn link(s: &mut Prefs, purpose: Use) {
     }
 }
 
-fn hide_link(s: &mut Prefs) {
+pub fn hide_link(s: &mut Prefs) {
     if s.dev.linking == Some(Use::Show) {
         s.dev.link_attempt += 1;
         s.dev.linking = None;
@@ -132,9 +133,19 @@ pub fn take(s: &mut Prefs, got: Got) {
                 }
             }
         }
-        Got::Status(id, result) => {
+        Got::Status(attempt, result) => {
+            if attempt != s.dev.attempt {
+                return;
+            }
             s.dev.checking = false;
-            let Some((p, _)) = s.dev.pairing.as_ref().filter(|(p, _)| p.id == id) else { return };
+            if let Some(f) = result.as_ref().err().filter(|f| f.denied) {
+                let f = f.clone();
+                cancel(s);
+                s.dev.problem = Some(f);
+                super::refused(s, None, true);
+                return;
+            }
+            let Some((p, _)) = &s.dev.pairing else { return };
             match Progress::of(result.as_ref().ok(), p, OffsetDateTime::now_utc()) {
                 Progress::Waiting => s.dev.next_check = Some(now + CHECK_EVERY),
                 progress => {
@@ -189,8 +200,9 @@ pub fn poll(s: &mut Prefs, tx: &mut Tx) -> bool {
         && let Some((p, _)) = &s.dev.pairing
     {
         let id = p.id.clone();
+        let attempt = s.dev.attempt;
         s.dev.next_check = None;
-        s.dev.checking = spawn(s, move |c| Got::Status(id.clone(), c.pairing_status(&id)));
+        s.dev.checking = spawn(s, move |c| Got::Status(attempt, c.pairing_status(&id)));
     }
     let next = [s.dev.next_check, s.dev.copied_until, s.dev.link_qr.as_ref().map(|(_, at)| *at)].into_iter().flatten().min();
     if let Some(at) = next {
@@ -271,7 +283,7 @@ fn pair(s: &Prefs, enabled: bool) -> El {
         rows.push(row().w_full().gap(14.0).items_start().px(14.0).py(12.0).children(pixels.as_ref().map(qr)).child(words));
     } else {
         let label = if s.dev.starting { "Starting…" } else { "Show Pairing Code" };
-        let button = Button::new(label).control_size(ControlSize::Small).disabled(!enabled || s.dev.starting || s.client.is_none()).on_press(start).build(k).key("settings-pair");
+        let button = Button::new(label).control_size(ControlSize::Small).disabled(!enabled || s.dev.starting || busy(s) || s.client.is_none()).on_press(start).build(k).key("settings-pair");
         rows.push(row().w_full().px(14.0).py(10.0).child(button));
     }
     if let Some(n) = &s.dev.notice {
