@@ -553,7 +553,14 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -
         .on_select(|s: &mut App, _| go(s, Screen::Sessions))
         .build(k)
         .key("sessions");
-    let mut sb = Sidebar::new().label("Navigation").inset(0.0).header_gap(2.0).header_padding(0.0, 12.0).row_gap(2.0).header(home).header(search).header(all);
+    let apps = SidebarRow::new("Apps")
+        .icon(&icons::EXTENSIONS)
+        .height(32.0)
+        .selected(matches!(s.screen, Screen::Extensions | Screen::Extension(_)))
+        .on_select(|s: &mut App, _| go(s, Screen::Extensions))
+        .build(k)
+        .key("apps");
+    let mut sb = Sidebar::new().label("Navigation").inset(0.0).header_gap(2.0).header_padding(0.0, 12.0).row_gap(2.0).header(home).header(search).header(all).header(apps);
     let mut needs = SidebarSection::new("Needs you").key("sec-needs").count(s.ov.needs.len());
     for (si, slot) in need_slots(&s.ov.needs, s.ov.looked_now.as_deref(), 4).into_iter().enumerate() {
         let (i, n) = match slot {

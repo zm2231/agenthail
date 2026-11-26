@@ -1,4 +1,5 @@
 pub mod decisions;
+pub mod extensions;
 pub mod inbox;
 mod jump;
 pub mod layout;
@@ -47,6 +48,7 @@ pub struct Over {
     pub sessions_project_open: bool,
     pub sessions_query: TextEdit,
     pub inbox: inbox::State,
+    pub ext: extensions::State,
 }
 
 impl Over {
@@ -81,6 +83,7 @@ impl Over {
             sessions_project_open: false,
             sessions_query: TextEdit::new(""),
             inbox: inbox::State::default(),
+            ext: extensions::State::new(),
         }
     }
 
@@ -138,6 +141,7 @@ pub fn arrive(s: &mut App) {
                 crate::load_pane(s, &id);
             }
         }
+        Screen::Extensions | Screen::Extension(_) => extensions::arrived(s),
         _ => {}
     }
 }
@@ -232,6 +236,8 @@ pub fn view(s: &App, cx: &mut Cx<App>, layer: &mut Vec<El>) -> El {
         Screen::Project(key) => project::lead(s, cx, key, layer),
         Screen::Work(id) => work::view(s, cx, id, layer),
         Screen::Sessions => sessions::view(s, cx, layer),
+        Screen::Extensions => extensions::hub(s, cx),
+        Screen::Extension(id) => extensions::page(s, cx, id),
         Screen::Session => rune::col(),
     }
 }
