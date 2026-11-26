@@ -433,6 +433,19 @@ pub fn page_host(page: &str) -> Option<String> {
     url::Url::parse(page).ok()?.host_str().map(|h| h.trim_start_matches('[').trim_end_matches(']').to_string())
 }
 
+pub fn session_known(page: &str, session: &WebSession) -> std::result::Result<bool, String> {
+    let mut url = url::Url::parse(page).map_err(|e| e.to_string())?;
+    url.set_path("/_agenthail/signin.js");
+    url.set_query(None);
+    let agent = ureq::AgentBuilder::new().timeout_connect(std::time::Duration::from_secs(5)).timeout(std::time::Duration::from_secs(10)).redirects(0).build();
+    match agent.get(url.as_str()).set("Cookie", &format!("{}={}", session.name, session.value)).call() {
+        Ok(_) => Ok(true),
+        Err(ureq::Error::Status(401, _)) => Ok(false),
+        Err(ureq::Error::Status(_, _)) => Ok(true),
+        Err(ureq::Error::Transport(error)) => Err(error.to_string()),
+    }
+}
+
 pub fn holds_settings(client: &Client) -> bool {
     crate::dashboard_token().is_some_and(|token| token == client.token)
 }

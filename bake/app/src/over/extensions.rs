@@ -22,6 +22,7 @@ pub enum Done {
     Listed(u64, String, Result<List, String>),
     Acted(String, Result<List, RespondError>),
     Signed(Result<WebSession, String>),
+    Checked(String, Result<bool, String>),
 }
 
 pub struct Catalog {
@@ -186,6 +187,7 @@ fn take(s: &mut App, done: Done) {
             }
         }
         Done::Signed(result) => ext.web.signed(result),
+        Done::Checked(value, known) => ext.web.checked(&value, known),
     }
 }
 
@@ -219,6 +221,15 @@ pub fn drain(s: &mut App) -> bool {
         let tx = s.ov.ext.tx.clone();
         std::thread::spawn(move || {
             let _ = tx.send(Done::Signed(client.web_session().map_err(|e| e.message)));
+        });
+    }
+    if want.is_some()
+        && let Some((page, cookie)) = s.ov.ext.web.check_due()
+    {
+        let tx = s.ov.ext.tx.clone();
+        std::thread::spawn(move || {
+            let known = feed::extensions::session_known(&page, &cookie);
+            let _ = tx.send(Done::Checked(cookie.value, known));
         });
     }
     changed | s.ov.ext.web.pump(want.as_deref())

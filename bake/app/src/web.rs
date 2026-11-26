@@ -11,6 +11,7 @@ use time::format_description::well_known::Rfc3339;
 const RENEW_BEFORE: time::Duration = time::Duration::hours(1);
 const RENEW_RETRY: Duration = Duration::from_secs(60);
 const SLOW: Duration = Duration::from_secs(10);
+const CHECK_EVERY: Duration = Duration::from_secs(20);
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 enum Load {
@@ -35,6 +36,8 @@ pub struct Web {
     cookie_set: bool,
     signing: bool,
     renew_at: Option<Instant>,
+    checking: bool,
+    checked_at: Option<Instant>,
     loaded: Option<String>,
     ready: Option<String>,
     loading_since: Option<Instant>,
@@ -58,6 +61,8 @@ impl Web {
             cookie_set: false,
             signing: false,
             renew_at: None,
+            checking: false,
+            checked_at: None,
             loaded: None,
             ready: None,
             loading_since: None,
@@ -92,6 +97,24 @@ impl Web {
             }
             Err(_) if self.cookie.as_ref().is_some_and(|c| !expired(c, OffsetDateTime::now_utc())) => self.renew_at = Some(Instant::now() + RENEW_RETRY),
             Err(error) => self.phase = Phase::Failed(format!("Couldn't sign in to the page: {error}")),
+        }
+    }
+
+    pub fn check_due(&mut self) -> Option<(String, WebSession)> {
+        if self.failed() || self.signing || self.checking || self.checked_at.is_some_and(|at| at.elapsed() < CHECK_EVERY) {
+            return None;
+        }
+        let (page, cookie) = (self.loaded.clone()?, self.cookie.clone()?);
+        self.checking = true;
+        self.checked_at = Some(Instant::now());
+        Some((page, cookie))
+    }
+
+    pub fn checked(&mut self, value: &str, known: Result<bool, String>) {
+        self.checking = false;
+        if known == Ok(false) && self.cookie.as_ref().is_some_and(|c| c.value == value) {
+            self.cookie = None;
+            self.renew_at = None;
         }
     }
 
@@ -401,6 +424,31 @@ mod tests {
         assert!(web.pump(None), "leaving redraws at once");
         assert!(web.arrived, "it arrived first, so the entry is reopened");
         assert!(web.ready.is_none());
+    }
+
+    #[test]
+    fn a_cookie_the_daemon_forgot_is_replaced_without_reloading() {
+        let page = "http://127.0.0.1:48200/";
+        let mut web = Web::new();
+        web.cookie = Some(session("2026-11-26T22:00:00Z"));
+        assert!(web.check_due().is_none(), "nothing to check before a page is open");
+        web.loaded = Some(page.into());
+        web.ready = Some(page.into());
+        web.phase = Phase::Shown;
+        let (checked, cookie) = web.check_due().unwrap();
+        assert_eq!(checked, page);
+        assert!(web.check_due().is_none(), "one check at a time");
+        web.checked("someone-else", Ok(false));
+        assert!(web.cookie.is_some(), "an answer about an older cookie changes nothing");
+        web.checked_at = None;
+        web.check_due().unwrap();
+        web.checked(&cookie.value, Ok(false));
+        assert!(web.cookie.is_none());
+        assert!(web.sign_in_due(now()));
+        assert_eq!(web.loaded.as_deref(), Some(page));
+        assert_eq!(web.phase, Phase::Shown);
+        web.checked_at = None;
+        assert!(web.check_due().is_none(), "no check while signing in");
     }
 
     #[test]
