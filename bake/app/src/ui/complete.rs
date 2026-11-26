@@ -39,7 +39,7 @@ pub struct Complete {
     files_asked: Option<(String, String)>,
     history: HashMap<String, History>,
     recorded: HashMap<String, Vec<Prompt>>,
-    local: HashMap<String, Vec<String>>,
+    local: HashMap<String, Vec<(String, time::OffsetDateTime)>>,
     pub search: Option<Search>,
     seq: u64,
     forking: bool,
@@ -73,7 +73,7 @@ fn files_for<'a>(c: &'a Complete, id: &str, query: &str) -> Option<&'a Result<Se
 
 fn shown(s: &App, x: &Session) -> (Vec<Item>, Option<String>) {
     let text = s.composer.text.as_str();
-    if s.complete.dismissed.as_deref() == Some(text) || s.complete.search.is_some() {
+    if s.complete.dismissed.as_deref() == Some(text) || s.complete.search.as_ref().is_some_and(|q| q.session == x.id) {
         return (Vec::new(), None);
     }
     let plain = !super::attach::has(s, &x.id);
@@ -83,7 +83,7 @@ fn shown(s: &App, x: &Session) -> (Vec<Item>, Option<String>) {
     {
         return match models(s, &x.id) {
             Some((list, current)) => (complete::model_items(query, &list, &current), None),
-            None => (Vec::new(), Some("This session's models are still loading.".into())),
+            None => (Vec::new(), Some(models_note(s, &x.id))),
         };
     }
     let Some(token) = token(s) else { return (Vec::new(), None) };
@@ -237,10 +237,17 @@ fn accept(s: &mut App, item: &Item) {
 pub fn pump(s: &mut App) -> bool {
     let Some(id) = s.composer_for.clone() else { return false };
     let mut changed = false;
+    if s.complete.search.as_ref().is_some_and(|q| q.session != id) {
+        s.complete.search = None;
+    }
     if s.complete.session.as_deref() != Some(id.as_str()) {
         s.complete.session = Some(id.clone());
         s.complete.highlighted = 0;
         s.complete.dismissed = None;
+        if matches!(s.complete.commands.get(&id), Some(Err(_))) {
+            s.complete.commands.remove(&id);
+            s.complete.commands_asked.remove(&id);
+        }
         let asked = id.clone();
         spawn(s, move |c| Done::Prompts(asked.clone(), c.prompts(Some(&asked), "")));
         changed = true;
@@ -267,6 +274,8 @@ pub fn pump(s: &mut App) -> bool {
             s.complete.seq += 1;
             search.seq = s.complete.seq;
             search.asked = Some(wanted.clone());
+            search.ix = 0;
+            search.results = s.client.is_none().then(|| Err("Fixture mode: searching needs the daemon".to_string()));
             let (seq, session) = (search.seq, (!wanted.1).then(|| search.session.clone()));
             spawn(s, move |c| Done::Found(seq, c.prompts(session.as_deref(), &wanted.0)));
             changed = true;
@@ -286,8 +295,8 @@ pub fn sent(s: &mut App, id: &str, text: &str) {
         return;
     }
     let local = s.complete.local.entry(id.to_string()).or_default();
-    local.retain(|t| t != text);
-    local.insert(0, text.to_string());
+    local.retain(|(t, _)| t != text);
+    local.insert(0, (text.to_string(), time::OffsetDateTime::now_utc()));
     s.complete.history.entry(id.to_string()).or_default().stop();
     rebuild(s, id);
 }
@@ -297,7 +306,11 @@ pub fn done(s: &mut App, done: Done) {
         Done::Commands(id, result) => {
             s.complete.commands.insert(id, result);
         }
-        Done::Files(id, query, result) => s.complete.files = Some((id, query, result)),
+        Done::Files(id, query, result) => {
+            if s.complete.files_asked.as_ref() == Some(&(id.clone(), query.clone())) {
+                s.complete.files = Some((id, query, result));
+            }
+        }
         Done::Prompts(id, result) => {
             if let Ok(prompts) = result {
                 s.complete.recorded.insert(id.clone(), prompts);
@@ -350,6 +363,10 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
         crate::note(s, id, problem.to_string());
         return true;
     }
+    if command == Slash::Steer && crate::sending(s, id) {
+        crate::note(s, id, "Wait for the message being sent, then steer.".into());
+        return true;
+    }
     s.complete.dismissed = None;
     replace_composer(s, "");
     match command {
@@ -385,7 +402,17 @@ fn pick_model(s: &mut App, id: &str, query: &str) {
             }
         }
         (None, false) => super::session_menu::set(s, id, "model", query),
-        (None, true) => crate::note(s, id, "This session's models are still loading.".into()),
+        (None, true) => {
+            let line = models_note(s, id);
+            crate::note(s, id, line);
+        }
+    }
+}
+
+fn models_note(s: &App, id: &str) -> String {
+    match s.menus.models_error.get(id) {
+        Some(error) => format!("Couldn't load this session's models: {error}"),
+        None => "This session's models are still loading.".into(),
     }
 }
 
@@ -494,7 +521,7 @@ pub fn search(s: &App, x: &Session) -> Option<El> {
             let at = search.ix.min(found.len() - 1);
             for (i, p) in found.iter().enumerate().skip(at.saturating_sub(SHOWN - 1)).take(SHOWN) {
                 let chosen = p.text.clone();
-                let mut body = col().grow(1.0).min_w(0.0).gap(2.0).child(text(p.text.lines().next().unwrap_or_default().to_string()).font(META).color(theme::text()).truncate());
+                let mut body = col().grow(1.0).min_w(0.0).gap(2.0).child(text(p.text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().to_string()).font(META).color(theme::text()).truncate());
                 if search.all {
                     let title = session(s, &p.session_id).map(|x| x.title()).unwrap_or_else(|| "Another session".into());
                     body = body.child(text(title).font(META).color(faint()).truncate());
@@ -510,7 +537,7 @@ pub fn search(s: &App, x: &Session) -> Option<El> {
                     .hover(Color::WHITE.alpha(0.06))
                     .on_press(move |s: &mut App| use_prompt(s, &chosen))
                     .child(body);
-                if forks && complete::forkable(p) {
+                if forks && p.session_id == x.id && complete::forkable(p) {
                     let (from, prompt) = (x.id.clone(), p.clone());
                     let label = if s.complete.forking { "Forking…" } else { "Fork from here" };
                     r = r.child(
