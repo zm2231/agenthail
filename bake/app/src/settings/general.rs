@@ -24,7 +24,7 @@ fn name_section(s: &Prefs, person: &Person, writable: bool) -> El {
         .label("Your name")
         .placeholder(person.name.clone())
         .width(None)
-        .disabled(!writable)
+        .disabled(!writable || busy)
         .on_edit(|s: &mut Prefs| &mut s.name)
         .on_submit(move |s: &mut Prefs, _: &mut Tx| save_name(s, &current))
         .build(k);
@@ -125,7 +125,7 @@ pub fn page(s: &Prefs, layer: &mut Vec<El>) -> El {
     let writable = settings.is_some();
     match &s.settings {
         None => out = out.child(parts::reading("settings")),
-        Some(Err(f)) if f.denied && base.is_some() => out = out.child(parts::failure(s, &Failure { message: READ_ONLY.into(), scope: "", ..f.clone() })),
+        Some(Err(f)) if f.denied && super::token_verified(s) => out = out.child(parts::failure(s, &Failure { message: READ_ONLY.into(), scope: "", ..f.clone() })),
         Some(Err(f)) => out = out.child(parts::failure(s, f)),
         Some(Ok(_)) => {}
     }

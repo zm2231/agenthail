@@ -58,6 +58,8 @@ pub struct Prefs {
     writing: Option<String>,
     settling: HashSet<Read>,
     sent: Option<CompactDraft>,
+    generation: u64,
+    verified: u64,
     pub notes: HashMap<Section, Failure>,
     pub name: TextEdit,
     seeded: Option<Person>,
@@ -139,6 +141,8 @@ fn init() -> Prefs {
         writing: None,
         settling: HashSet::new(),
         sent: None,
+        generation: 0,
+        verified: 0,
         notes: HashMap::new(),
         name: TextEdit::new(""),
         seeded: None,
@@ -193,6 +197,10 @@ fn fetch(s: &mut Prefs, what: Read) {
 
 pub fn reload(s: &mut Prefs) {
     s.loaded = true;
+    s.generation += 1;
+    if s.client.is_some() {
+        s.settling.extend(ALL);
+    }
     for what in ALL {
         fetch(s, what);
     }
@@ -240,9 +248,12 @@ pub fn send_compaction(s: &mut Prefs, sent: CompactDraft) {
     write(s, "compaction", Section::Compaction, &[Read::Compaction], move |c| c.save_compaction(body).map(drop));
 }
 
+pub fn token_verified(s: &Prefs) -> bool {
+    s.verified == s.generation && matches!(&s.base, Some(Ok(_)))
+}
+
 pub fn explain(s: &Prefs, f: &Failure) -> Failure {
-    let token_works = matches!(&s.base, Some(Ok(_)));
-    if f.denied && token_works && !f.scope.is_empty() {
+    if f.denied && token_verified(s) && !f.scope.is_empty() {
         return Failure { message: feed::prefs::scope_message(f.scope).into(), ..f.clone() };
     }
     f.clone()
@@ -275,6 +286,9 @@ fn take(s: &mut Prefs, done: Done) {
             s.settling.remove(&what);
             match got {
                 Got::Base(r) => {
+                    if r.is_ok() {
+                        s.verified = s.generation;
+                    }
                     s.base = Some(r);
                     seed_name(s);
                 }
