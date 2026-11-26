@@ -65,6 +65,7 @@ pub struct Attach {
     pub sent: HashMap<String, Sent>,
     pub thumbs: HashMap<u64, rune::Image>,
     pub adding: HashMap<u64, (String, Vec<String>)>,
+    pub unsaved: Option<String>,
     next_job: u64,
     pub menu: Option<Open>,
     pub dropping: bool,
@@ -174,17 +175,15 @@ fn prepare(s: &mut App, id: &str, names: Vec<String>, work: impl FnOnce() -> Vec
     s.attach.next_job += 1;
     let job = s.attach.next_job;
     s.attach.adding.insert(job, (id.clone(), names));
-    keep_draft(s, &id);
+    keep_draft(s);
     let out = s.outbox.clone();
     std::thread::spawn(move || {
         let _ = out.send(Bg::Attach(Done::Prepared(job, work())));
     });
 }
 
-fn keep_draft(s: &mut App, id: &str) {
-    if let Err(error) = crate::over::layout::save_now(s) {
-        crate::note(s, id, format!("The draft couldn't be saved ({error}), so its attachments may not come back if the app closes."));
-    }
+fn keep_draft(s: &mut App) {
+    s.attach.unsaved = crate::over::layout::save_now(s).err().map(|error| format!("The draft couldn't be saved ({error}), so its attachments may not come back if the app closes."));
 }
 
 pub fn choose(s: &mut App, tx: &mut Tx) {
@@ -292,7 +291,7 @@ pub fn done(s: &mut App, done: Done, tx: &mut Tx) {
             if let Some(problem) = problem {
                 crate::note(s, &id, problem.message());
             }
-            keep_draft(s, &id);
+            keep_draft(s);
         }
         Done::Uploaded(local, result) => s.attach.tray.uploaded(local, result),
         Done::Picture(id, result) => {
@@ -510,7 +509,7 @@ pub fn button(s: &App, id: &str) -> Option<El> {
 pub fn chips(s: &App, id: &str) -> Option<El> {
     let list = s.attach.tray.chips(id);
     let preparing = adding(s, id);
-    if list.is_empty() && preparing == 0 {
+    if list.is_empty() && preparing == 0 && s.attach.unsaved.is_none() {
         return None;
     }
     let mut r = row().key("attachment-chips").w_full().flex_wrap().gap(6.0);
@@ -564,6 +563,9 @@ pub fn chips(s: &App, id: &str) -> Option<El> {
                 .child(icon(&icons::CLOSE, 10.0).color(muted())),
         );
         r = r.child(c);
+    }
+    if let Some(warning) = &s.attach.unsaved {
+        r = r.child(text(warning.clone()).font(META).color(failed()).wrap().w_full());
     }
     if preparing > 0 {
         r = r.child(row().h(24.0).gap(6.0).items_center().child(rune_kit::Loader::new().size(10.0).color(faint()).build(theme::kit())).child(text("Adding…").font(META).color(faint())));
