@@ -125,7 +125,7 @@ pub fn drain(s: &mut App) -> bool {
     let mut changed = false;
     while let Ok((id, seq, revision, found)) = s.ov.search.pins.rx.try_recv() {
         if let Some(gone) = s.ov.search.pins.take(id, seq, revision, found) {
-            crate::ui::subagents::forget(s, gone);
+            crate::ui::subagents::forget(s, &gone);
         }
         changed = true;
     }
