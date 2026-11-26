@@ -89,9 +89,25 @@ fn cancel(s: &mut Prefs) {
     s.dev.next_check = None;
 }
 
+fn drop_link(s: &mut Prefs) {
+    s.dev.link_attempt += 1;
+    s.dev.linking = None;
+    s.dev.link_qr = None;
+    s.dev.copy = None;
+    s.dev.copied_until = None;
+}
+
+pub fn settled(s: &mut Prefs) {
+    let on = matches!(&s.settings, Some(Ok(st)) if st.remote_access.as_ref().is_some_and(|r| r.enabled));
+    if !on {
+        cancel(s);
+        drop_link(s);
+    }
+}
+
 fn set_phone(s: &mut Prefs, on: bool) {
     cancel(s);
-    hide_link(s);
+    drop_link(s);
     write(s, "phone-access", Section::Devices, &[Read::Settings], move |c| c.set_phone_access(on));
 }
 
@@ -439,6 +455,7 @@ pub fn page(s: &Prefs, layer: &mut Vec<El>) -> El {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use feed::prefs::Settings;
 
     fn prefs() -> Prefs {
         let mut s = super::super::init();
@@ -534,6 +551,38 @@ mod tests {
         take(&mut s, Got::Link(shown, Use::Show, Ok("https://studio/login?t=1".into())));
         assert!(s.dev.link_qr.is_none());
         assert!(saving(&s, "phone-access"));
+    }
+
+    #[test]
+    fn a_copy_still_out_when_phone_access_goes_off_never_reaches_the_clipboard() {
+        let mut s = prefs();
+        link(&mut s, Use::Copy);
+        let pending = s.dev.link_attempt;
+        set_phone(&mut s, false);
+        take(&mut s, Got::Link(pending, Use::Copy, Ok("https://studio/login?t=1".into())));
+        assert!(s.dev.copy.is_none() && s.dev.copied_until.is_none());
+    }
+
+    #[test]
+    fn phone_access_turned_off_elsewhere_ends_pairing_and_drops_links() {
+        let mut s = prefs();
+        let access = |on: bool| Settings { remote_access: Some(RemoteAccess { enabled: on, ..Default::default() }), ..Default::default() };
+        s.settings = Some(Ok(access(true)));
+        started(&mut s, "p1", 5);
+        link(&mut s, Use::Show);
+        let shown = s.dev.link_attempt;
+        take(&mut s, Got::Link(shown, Use::Show, Ok("https://studio/login?t=1".into())));
+        settled(&mut s);
+        assert!(s.dev.pairing.is_some() && s.dev.link_qr.is_some());
+        link(&mut s, Use::Copy);
+        let pending = s.dev.link_attempt;
+        s.settings = Some(Ok(access(false)));
+        settled(&mut s);
+        assert!(s.dev.pairing.is_none() && s.dev.link_qr.is_none());
+        take(&mut s, Got::Link(pending, Use::Copy, Ok("https://studio/login?t=2".into())));
+        s.settings = Some(Ok(access(true)));
+        settled(&mut s);
+        assert!(s.dev.link_qr.is_none() && s.dev.copy.is_none());
     }
 
     #[test]

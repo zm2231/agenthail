@@ -445,6 +445,7 @@ fn take_one(s: &mut Prefs, done: Done) {
                 Got::Settings(r) => {
                     let d = denied(&r);
                     s.settings = Some(r);
+                    devices::settled(s);
                     d
                 }
                 Got::Remote(r) => {
