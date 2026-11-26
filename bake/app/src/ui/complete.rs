@@ -51,6 +51,7 @@ pub struct Complete {
     forking: bool,
     fork_keys: HashMap<String, (String, String)>,
     shown_ids: Vec<String>,
+    pub keys: super::composer_keys::State,
 }
 
 fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'static) {
@@ -165,7 +166,7 @@ fn line_end(t: &str, caret: usize) -> bool {
     !t[caret.min(t.len())..].contains('\n')
 }
 
-fn replace_composer(s: &mut App, text: &str) {
+pub(super) fn replace_composer(s: &mut App, text: &str) {
     let focused = s.composer.focused;
     s.composer = TextEdit::new(text);
     s.composer.focused = focused;
@@ -207,6 +208,9 @@ pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         open_search(s, &x.id);
         return true;
     }
+    if super::composer_keys::key(s, &x, ev, tx) {
+        return true;
+    }
     if !bare || ev.mods.shift || s.composer.anchor != s.composer.focus {
         return false;
     }
@@ -234,6 +238,15 @@ pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         }
         _ => false,
     }
+}
+
+pub(super) fn clear_into_history(s: &mut App, id: &str) -> bool {
+    let text = s.composer.text.clone();
+    if !s.complete.history.entry(id.to_string()).or_default().clear(&text) {
+        return false;
+    }
+    replace_composer(s, "");
+    true
 }
 
 fn completed(s: &App, item: &Item) -> bool {
@@ -641,7 +654,7 @@ fn models_note(s: &App, id: &str) -> String {
     }
 }
 
-fn open_search(s: &mut App, id: &str) {
+pub(super) fn open_search(s: &mut App, id: &str) {
     let mut query = TextEdit::new("");
     query.focused = true;
     s.composer.focused = false;
