@@ -32,7 +32,7 @@ func (d *Daemon) decisionsHandler(w http.ResponseWriter, r *http.Request) {
 	read := func(asking []dashboardSession) map[string]decisionRequests {
 		return d.readDecisionRequests(r.Context(), asking)
 	}
-	page := buildDecisions(decisionSources{rows: rows, hearer: d.decisionHearer, requests: read, queued: queued, parked: d.parkedDecisionsNow, dismissed: d.decisionDismissals()})
+	page := buildDecisions(decisionSources{rows: rows, hearer: d.decisionHearer, requests: read, queued: queued, parked: d.parkedDecisionsNow, dismissed: d.decisionDismissals(), lead: d.decisionLead(), workTitle: d.decisionWorkTitle})
 	tag, err := contentTag(epoch, page)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", err.Error())
@@ -79,6 +79,27 @@ func (d *Daemon) queuedBehind() (map[string][]string, error) {
 		sort.Strings(queued[target])
 	}
 	return queued, nil
+}
+
+func (d *Daemon) decisionLead() func(dashboardSession) (string, bool) {
+	leads, err := d.loadLeadDirectory()
+	if err != nil {
+		d.log.Printf("decisions: read the leads: %s", err)
+		return nil
+	}
+	return func(row dashboardSession) (string, bool) {
+		lead, ok := leads.leadOf(row.Project)
+		return d.publicSessionID(lead.sessionID), ok
+	}
+}
+
+func (d *Daemon) decisionWorkTitle(ledgerKey, itemID string) string {
+	board, err := d.ledgerStore().Board(ledgerKey)
+	if err != nil {
+		return ""
+	}
+	item, _ := board.WorkItem(itemID)
+	return item.Text
 }
 
 // decisionHearer is the agent a session's oldest permission request is routed to, while one is.

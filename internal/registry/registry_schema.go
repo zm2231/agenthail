@@ -724,6 +724,10 @@ CREATE TABLE IF NOT EXISTS turn_ends (
 	next_json TEXT NOT NULL DEFAULT 'null',
 	source TEXT NOT NULL DEFAULT '',
 	typed INTEGER NOT NULL DEFAULT 0,
+	waiting_person TEXT NOT NULL DEFAULT '',
+	work_item TEXT NOT NULL DEFAULT '',
+	ledger_key TEXT NOT NULL DEFAULT '',
+	waiting_pushed_at_ms INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (session_id, started_at_ms)
 );
 CREATE TABLE IF NOT EXISTS asks (

@@ -27,13 +27,13 @@ await dashboardModules(["decisions", "inbox"], context);
 
 const local = {
   decisions: [
-    { group: "waiting", sessionId: "worker", projectId: "web-app", kind: "request", reason: "Needs your approval", since: "2026-03-01T09:09:00Z", answerable: true, requests: [{ id: "r1", kind: "approval", tool: "Bash", prompt: "Bash: make <release>" }] },
-    { group: "holding", sessionId: "lead", projectId: "web-app", kind: "ask", reason: "Asks: which layout", since: "2026-03-01T09:05:00Z", answerable: true, holdsUp: ["worker"], requests: [{ id: "a1", kind: "ask", tool: "", title: "Which layout?" }] },
-    { group: "stopped", sessionId: "lead", kind: "usageLimit", reason: "Usage limit until 3:00", since: "2026-03-01T09:00:00Z", answerable: false },
+    { key: "request:worker", group: "waiting", sessionId: "worker", projectId: "web-app", kind: "request", reason: "Needs your approval", since: "2026-03-01T09:09:00Z", answerable: true, requests: [{ id: "r1", kind: "approval", tool: "Bash", prompt: "Bash: make <release>" }] },
+    { key: "ask:a1", group: "holding", sessionId: "lead", projectId: "web-app", kind: "ask", reason: "Asks: which layout", since: "2026-03-01T09:05:00Z", answerable: true, holdsUp: ["worker"], requests: [{ id: "a1", kind: "ask", tool: "", title: "Which layout?" }] },
+    { key: "stopped:lead", group: "stopped", sessionId: "lead", kind: "usageLimit", reason: "Usage limit until 3:00", since: "2026-03-01T09:00:00Z", answerable: false },
   ],
   leadHandling: [{ sessionId: "worker2", heldBy: "lead", role: "lead", reason: "Needs your approval" }],
 };
-const remote = { decisions: [{ group: "stopped", sessionId: "far", kind: "stopped", reason: "Stopped: tool error", since: "2026-03-01T08:00:00Z", answerable: false }], leadHandling: [] };
+const remote = { decisions: [{ key: "stopped:far", group: "stopped", sessionId: "far", kind: "stopped", reason: "Stopped: tool error", since: "2026-03-01T08:00:00Z", answerable: false }], leadHandling: [] };
 const asked = [];
 context.fetch = async (url) => {
   asked.push(url);
@@ -63,7 +63,7 @@ const html = elements.list.innerHTML;
 assert.equal(elements.panel.hidden, false);
 assert.ok(html.indexOf("Stopped on you") < html.indexOf("Holding up work") && html.indexOf("Holding up work") < html.indexOf("Waiting on you"));
 assert.match(html, /Usage limit until 3:00/, "a local stop is listed in Stopped on you");
-assert.match(html, /data-decision="server::far"/, "a remote stop opens its session");
+assert.match(html, /data-decision="server::stopped:far"/, "a remote stop opens its session");
 assert.match(html, /Holds up 1/);
 assert.match(html, /data-open-decision="worker"[^>]*>Answer</, "answering opens the Inbox card on that decision");
 assert.match(html, /data-session="server::far"[^>]*>Open</, "a decision that cannot be answered here opens its session");
@@ -100,7 +100,7 @@ await vm.runInContext("refreshDecisions(countingLoader)", context);
 assert.equal(loads, 2, "a decisions change asks again, including a remote wait ending outside the loaded rows");
 assert.match(elements.detail.textContent, /needs? you/, `the overview counts the decisions as soon as they load: ${elements.detail.textContent}`);
 
-const stale = { decisions: [{ group: "waiting", sessionId: "stale-session", kind: "request", reason: "already answered elsewhere", answerable: true, requests: [{ id: "old", kind: "approval", tool: "Bash", prompt: "old prompt" }] }], leadHandling: [], unreachable: [], outdated: [] };
+const stale = { decisions: [{ key: "request:stale-session", group: "waiting", sessionId: "stale-session", kind: "request", reason: "already answered elsewhere", answerable: true, requests: [{ id: "old", kind: "approval", tool: "Bash", prompt: "old prompt" }] }], leadHandling: [], unreachable: [], outdated: [] };
 const fresh = { decisions: [], leadHandling: [], unreachable: [], outdated: [] };
 const pending = [];
 context.slowLoader = () => { loads++; return new Promise((resolve) => pending.push(resolve)); };
@@ -130,7 +130,7 @@ assert.equal(loads, sameStart, "a render asking again for the position being loa
 assert.equal(app.decisions.decisions[0].sessionId, "stale-session", "and does not drop the load it asked for");
 assert.equal(app.decisionsKey.endsWith("|r6"), true);
 
-const busy = (n) => ({ decisions: [{ group: "waiting", sessionId: `busy-${n}`, kind: "request", reason: "r", answerable: false }], leadHandling: [], unreachable: [], outdated: [] });
+const busy = (n) => ({ decisions: [{ key: `request:busy-${n}`, group: "waiting", sessionId: `busy-${n}`, kind: "request", reason: "r", answerable: false }], leadHandling: [], unreachable: [], outdated: [] });
 const streamStart = loads;
 app.state.decisionsRev = "r10";
 const streaming = vm.runInContext("refreshDecisions(slowLoader)", context);
@@ -146,8 +146,15 @@ pending.shift()(busy(4));
 await streaming;
 assert.equal(app.decisions.decisions[0].sessionId, "busy-4");
 assert.equal(app.decisionsKey.endsWith("|r13"), true, "the quiet decisions' load is kept as current");
-const parked = { group: "waiting", sessionId: "worker", kind: "parked", workItem: "widget-W12", reason: "titles only?", workTitle: "search titles", since: "2026-03-01T09:09:00Z", answerable: false };
+const parked = { key: "parked:repo:github.com/acme/widget:widget-W12", group: "waiting", sessionId: "worker", kind: "parked", workItem: "widget-W12", reason: "titles only?", workTitle: "search titles", since: "2026-03-01T09:09:00Z", answerable: false };
 const withParked = plain(vm.runInContext("mergeDecisions", context)([{ host: { id: "", name: "laptop" }, page: { decisions: [parked, local.decisions[0]], leadHandling: [] } }]));
 const decisionKey = vm.runInContext("decisionKey", context);
-assert.deepEqual(withParked.decisions.map(decisionKey), ["worker", "worker#widget-W12"], "a parked item is a row of its own beside its session's request");
+assert.deepEqual(withParked.decisions.map(decisionKey), ["parked:repo:github.com/acme/widget:widget-W12", "request:worker"], "a parked item is a row of its own beside its session's request");
+const fromPeer = plain(vm.runInContext("mergeDecisions", context)([{ host: { id: "mini", name: "mini" }, page: { decisions: [{ key: "turn:worker:t9", group: "waiting", sessionId: "worker", kind: "turn", reason: "Upload the March export", answerable: false }], leadHandling: [] } }]));
+assert.equal(decisionKey(fromPeer.decisions[0]), "mini::turn:worker:t9", "a key from a paired host names that host, so two hosts' entries never collide");
+const older = plain(vm.runInContext("mergeDecisions", context)([
+  { host: { id: "", name: "laptop" }, page: { decisions: [parked], leadHandling: [] } },
+  { host: { id: "old", name: "old" }, page: { decisions: [{ group: "waiting", sessionId: "w", kind: "request", reason: "r", answerable: true }, { group: "waiting", sessionId: "w", kind: "parked", workItem: "widget-W3", reason: "p", answerable: false }], leadHandling: [] } },
+]));
+assert.deepEqual(older.decisions.map(decisionKey), ["old::w", "old::w#widget-W3", "parked:repo:github.com/acme/widget:widget-W12"], "a paired host on an older build, sending no keys, still lists each item once under its own key");
 console.log("dashboard decisions ok");

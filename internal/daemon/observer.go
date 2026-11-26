@@ -312,6 +312,9 @@ func (d *Daemon) observeInScan(ctx context.Context, scan *relayScan, adapter sur
 		if !stale && observation.Reply != nil && observation.Reply.Done && observation.Reply.Error == "" {
 			d.queueTurnJudgment(session, observation.CompletedTurnID, observation.Reply.Text, observation.BackgroundTasks)
 		}
+		if !stale {
+			d.pushWaitingTurn(session, observation.CompletedTurnID)
+		}
 	}
 	notice := turnCompletedNotice{title: notificationTitle, desktop: notificationBody, mobile: notificationBody, outcome: notificationOutcome}
 	if notice.desktop != "" && observation.Reply.Error == "" {

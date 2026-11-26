@@ -61,7 +61,7 @@ func (d *Daemon) doDismissDecision(ctx context.Context, p principal, request das
 	case requestID != "":
 		err = d.dismissRequest(ctx, p, strings.TrimSpace(request.SessionID), requestID)
 	default:
-		err = d.dismissStopped(ctx, strings.TrimSpace(request.SessionID))
+		err = d.dismissSessionDecision(ctx, strings.TrimSpace(request.SessionID))
 	}
 	if err != nil {
 		return actionResult{}, err
@@ -71,7 +71,11 @@ func (d *Daemon) doDismissDecision(ctx context.Context, p principal, request das
 }
 
 func decisionStateKey(item decisionItem) string {
-	return item.Kind + "\x1f" + item.Reason + "\x1f" + strconv.FormatInt(item.Since.UnixMilli(), 10)
+	key := item.Kind + "\x1f" + item.Reason + "\x1f" + strconv.FormatInt(item.Since.UnixMilli(), 10)
+	if item.Kind == decisionTurn {
+		key += "\x1f" + item.Key
+	}
+	return key
 }
 
 func (s decisionSources) dismissedNow(item decisionItem) bool {
@@ -87,7 +91,7 @@ func (d *Daemon) decisionDismissals() map[string]string {
 	return dismissed
 }
 
-func (d *Daemon) dismissStopped(ctx context.Context, sessionID string) error {
+func (d *Daemon) dismissSessionDecision(ctx context.Context, sessionID string) error {
 	if sessionID == "" {
 		return invalidRequest("sessionId is required")
 	}
@@ -99,11 +103,11 @@ func (d *Daemon) dismissStopped(ctx context.Context, sessionID string) error {
 	if err != nil {
 		return actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 	}
-	page := buildDecisions(decisionSources{rows: rows, hearer: d.decisionHearer, queued: queued, requests: func(asking []dashboardSession) map[string]decisionRequests {
+	page := buildDecisions(decisionSources{rows: rows, hearer: d.decisionHearer, queued: queued, lead: d.decisionLead(), requests: func(asking []dashboardSession) map[string]decisionRequests {
 		return d.readDecisionRequests(ctx, asking)
 	}})
 	at := slices.IndexFunc(page.Decisions, func(item decisionItem) bool {
-		return item.Group == decisionStopped && item.SessionID == sessionID && item.WorkItem == ""
+		return item.SessionID == sessionID && (item.Group == decisionStopped && item.WorkItem == "" || item.Kind == decisionTurn)
 	})
 	if at < 0 {
 		return staleRequest()

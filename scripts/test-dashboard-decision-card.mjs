@@ -12,8 +12,8 @@ const app = {
   state: { sessions: [{ id: "S", name: "builder" }, { id: "T", name: "writer" }], projects: [] },
   decisions: {
     decisions: [
-      { group: "waiting", sessionId: "S", kind: "ask", reason: "Ready to ship", answerable: true, requests: [ask] },
-      { group: "waiting", sessionId: "T", kind: "request", reason: "Needs approval", answerable: true, requests: [{ id: "ask-0b5e1c2d3a4f", kind: "approval", tool: "Bash" }] },
+      { key: "ask:ask-1", group: "waiting", sessionId: "S", kind: "ask", reason: "Ready to ship", answerable: true, requests: [ask] },
+      { key: "request:T", group: "waiting", sessionId: "T", kind: "request", reason: "Needs approval", answerable: true, requests: [{ id: "ask-0b5e1c2d3a4f", kind: "approval", tool: "Bash" }] },
     ],
     leadHandling: [], unreachable: [], outdated: [],
   },
@@ -61,7 +61,7 @@ assert.deepEqual(shown, ["T"], "the answered ask leaves the Inbox while the same
 assert.equal(run("selectedDecision")().sessionId, "T", "the next decision is selected");
 await key({ key: "Enter", shiftKey: true });
 assert.equal(posts.length, 1, "an approval has nothing to accept with Shift+Enter");
-assert.ok(element("#session-list").innerHTML.includes('data-decision-select="T"'), "the Inbox list shows what is left");
+assert.ok(element("#session-list").innerHTML.includes('data-decision-select="request:T"'), "the Inbox list shows what is left");
 
 const scopeKeeps = run("scopeKeeps");
 const after = run("scopeAfterSelecting");
