@@ -152,11 +152,14 @@ impl Overview {
     /// The daemon can publish a row read before a confirmed change; hold it until shown.
     pub fn patch(&mut self, id: &str, patch: Patch, at: Instant) -> bool {
         self.expected.retain(|(other, p, _)| !(other == id && p.same_field(&patch)));
+        let Some(x) = self.base.sessions.iter_mut().find(|x| x.id == id) else { return false };
+        if patch.shown(x) || at.elapsed() >= EXPECT_HOLD {
+            return false;
+        }
+        patch.apply(x);
         self.expected.push((id.to_string(), patch, at));
-        let before = self.base.sessions.clone();
-        self.reconcile();
         self.stale = true;
-        self.base.sessions != before
+        true
     }
 
     fn reconcile(&mut self) {
@@ -173,14 +176,17 @@ impl Overview {
 
     pub fn refresh(&mut self, fetched: Fetched) {
         let Fetched { mut recorded, ledgers, started } = fetched;
-        if !newer(&recorded.updated_at, &self.base.updated_at) {
+        let fresh = newer(&recorded.updated_at, &self.base.updated_at);
+        if !fresh {
             recorded.updated_at = std::mem::take(&mut self.base.updated_at);
             recorded.sessions = std::mem::take(&mut self.base.sessions);
         }
         let actors = std::mem::replace(&mut recorded.actors, std::mem::take(&mut self.base.actors));
         recorded.transcripts = std::mem::take(&mut self.base.transcripts);
         self.base = recorded;
-        self.reconcile();
+        if fresh {
+            self.reconcile();
+        }
         self.stale = true;
         self.take_actors(started, actors);
         self.covered = ledgers.keys().cloned().collect();

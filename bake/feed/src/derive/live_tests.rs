@@ -212,3 +212,17 @@ fn a_late_confirmation_does_not_undo_what_the_daemon_already_shows() {
     assert!(ov.take_sessions("2026-11-24T12:00:04Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
     assert!(ov.sessions()[0].pinned_at.is_none(), "an unpin after it wins");
 }
+
+#[test]
+fn an_older_overview_does_not_count_as_the_daemon_showing_a_change() {
+    use crate::menu::Patch;
+    let mut ov = Overview::default();
+    assert!(ov.take_sessions("2026-11-24T12:00:05Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(ov.patch("a", Patch::Archived(true), Instant::now()));
+    ov.refresh(fetched("2026-11-24T12:00:01Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")], vec![]));
+    assert!(ov.sessions()[0].archived);
+    assert!(ov.take_sessions("2026-11-24T12:00:07Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(ov.sessions()[0].archived, "a row read before the archive");
+    ov.refresh(fetched("2026-11-24T12:00:09Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")], vec![]));
+    assert!(ov.sessions()[0].archived, "a newer overview with the old row still holds");
+}

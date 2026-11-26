@@ -17,7 +17,7 @@ pub enum Done {
     Settings(String, u64, Result<SessionSettings, String>),
     Models(String, Vec<ModelOption>),
     Context(String, u64, Result<Option<ContextUsage>, String>),
-    Acted(String, Act, Result<Option<feed::action::ReadState>, RespondError>),
+    Acted(String, Act, String, Result<Option<feed::action::ReadState>, RespondError>),
     Renamed(String, u64, Result<String, RespondError>),
     Set(String, &'static str, String, Result<(), RespondError>),
     Compacted(String, Result<(), RespondError>),
@@ -217,7 +217,7 @@ pub fn run(s: &mut App, id: &str, act: Act) {
                     Act::Archive(on) => c.session_archive(&id, *on).map(|_| None),
                     Act::Rename | Act::Pr(_) => Ok(None),
                 };
-                Some(Done::Acted(id, act, result))
+                Some(Done::Acted(id, act, revision, result))
             });
         }
     }
@@ -302,11 +302,11 @@ fn stamp() -> String {
     time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap_or_default()
 }
 
-fn patch_of(act: &Act, read: Option<feed::action::ReadState>) -> Option<Patch> {
+fn patch_of(act: &Act, read: Option<feed::action::ReadState>, from: String) -> Option<Patch> {
     match act {
         Act::Pin(on) => Some(Patch::Pinned(on.then(stamp))),
         Act::Archive(on) => Some(Patch::Archived(*on)),
-        Act::Read(_) => read.map(Patch::Read),
+        Act::Read(_) => read.map(|receipt| Patch::Read { receipt, from }),
         _ => None,
     }
 }
@@ -355,12 +355,12 @@ fn settled(s: &mut App, done: Done) {
                 }
             }
         }
-        Done::Acted(id, act, Ok(read)) => {
-            if let Some(patch) = patch_of(&act, read) {
+        Done::Acted(id, act, from, Ok(read)) => {
+            if let Some(patch) = patch_of(&act, read, from) {
                 land(s, &id, patch);
             }
         }
-        Done::Acted(_, act, Err(error)) => s.ov.notice = Some(failure(verb(&act), &error)),
+        Done::Acted(_, act, _, Err(error)) => s.ov.notice = Some(failure(verb(&act), &error)),
         Done::Renamed(id, seq, result) => {
             let current = s.menus.renaming.as_deref() == Some(id.as_str()) && s.menus.rename_seq == seq;
             match result {

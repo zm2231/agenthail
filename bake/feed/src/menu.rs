@@ -29,7 +29,7 @@ impl Entry {
 pub enum Patch {
     Pinned(Option<String>),
     Archived(bool),
-    Read(ReadState),
+    Read { receipt: ReadState, from: String },
     Alias(Option<String>),
 }
 
@@ -38,17 +38,17 @@ impl Patch {
         match self {
             Patch::Pinned(at) => x.pinned_at = at.clone(),
             Patch::Archived(on) => x.archived = *on,
-            Patch::Read(state) => x.read_state = Some(state.clone()),
+            Patch::Read { receipt, .. } => x.read_state = Some(receipt.clone()),
             Patch::Alias(alias) => x.alias = alias.clone(),
         }
     }
 
-    /// A read receipt for an older revision is settled by the daemon's newer one.
+    /// A read receipt holds while the row still carries the revision it replaced.
     pub fn shown(&self, x: &Session) -> bool {
         match self {
             Patch::Pinned(at) => x.pinned_at.is_some() == at.is_some(),
             Patch::Archived(on) => x.archived == *on,
-            Patch::Read(state) => x.read_state.as_ref().is_none_or(|r| r.revision != state.revision || r.first_unread.is_empty() == state.first_unread.is_empty()),
+            Patch::Read { from, .. } => x.read_state.as_ref().is_none_or(|r| r.revision != *from),
             Patch::Alias(alias) => x.alias == *alias,
         }
     }
@@ -224,7 +224,7 @@ mod tests {
         Patch::Pinned(Some("2026-11-26T10:00:00Z".into())).apply(&mut x);
         Patch::Archived(true).apply(&mut x);
         Patch::Alias(Some("scout".into())).apply(&mut x);
-        Patch::Read(ReadState { first_unread: "item-2".into(), revision: "r2".into() }).apply(&mut x);
+        Patch::Read { receipt: ReadState { first_unread: "item-2".into(), revision: "r2".into() }, from: "r1".into() }.apply(&mut x);
         assert!(x.pinned() && x.archived && x.unread());
         assert_eq!(x.title(), "@scout");
         Patch::Pinned(None).apply(&mut x);
@@ -234,15 +234,15 @@ mod tests {
     }
 
     #[test]
-    fn a_read_receipt_is_settled_by_the_same_state_or_a_newer_revision() {
+    fn a_read_receipt_holds_until_the_row_moves_past_the_revision_it_replaced() {
         let mut x = session();
-        let read = Patch::Read(ReadState { first_unread: String::new(), revision: "r2".into() });
-        x.read_state = Some(ReadState { first_unread: "item-1".into(), revision: "r2".into() });
-        assert!(!read.shown(&x));
-        x.read_state = Some(ReadState { first_unread: "item-7".into(), revision: "r3".into() });
+        let read = Patch::Read { receipt: ReadState { first_unread: String::new(), revision: "B".into() }, from: "A".into() };
+        x.read_state = Some(ReadState { first_unread: "item-1".into(), revision: "A".into() });
+        assert!(!read.shown(&x), "the row is still at the revision the mark replaced");
+        x.read_state = Some(ReadState { first_unread: String::new(), revision: "B".into() });
         assert!(read.shown(&x));
-        x.read_state = Some(ReadState { first_unread: String::new(), revision: "r2".into() });
-        assert!(read.shown(&x));
+        x.read_state = Some(ReadState { first_unread: "item-7".into(), revision: "C".into() });
+        assert!(read.shown(&x), "a later revision is the daemon's word");
     }
 
     #[test]
