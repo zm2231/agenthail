@@ -54,6 +54,7 @@ pub struct Menus {
     rename_seq: u64,
     refreshed: Option<(String, Instant)>,
     models_asked: HashMap<String, Instant>,
+    models_loading: HashSet<String>,
     settings_asked: HashMap<String, Instant>,
     pub models_error: HashMap<String, String>,
     tx: Sender<Done>,
@@ -83,6 +84,7 @@ impl Menus {
             rename_seq: 0,
             refreshed: None,
             models_asked: HashMap::new(),
+            models_loading: HashSet::new(),
             settings_asked: HashMap::new(),
             models_error: HashMap::new(),
             tx,
@@ -182,7 +184,7 @@ pub fn ensure_models(s: &mut App, id: &str) {
 
 fn fetch_models(s: &mut App, id: &str) {
     let surface = session(s, id).map(|x| x.surface.clone()).unwrap_or_default();
-    if surface.is_empty() {
+    if surface.is_empty() || s.client.is_none() || !s.menus.models_loading.insert(id.to_string()) {
         return;
     }
     s.menus.models_asked.insert(id.to_string(), Instant::now());
@@ -422,10 +424,12 @@ fn settled(s: &mut App, done: Done) {
         }
         Done::Models(id, seq, _) if s.menus.newest.get(&(id.clone(), "models")) != Some(&seq) => {}
         Done::Models(id, _, Ok(models)) => {
+            s.menus.models_loading.remove(&id);
             s.menus.models_error.remove(&id);
             s.menus.models.insert(id, models);
         }
         Done::Models(id, _, Err(error)) => {
+            s.menus.models_loading.remove(&id);
             s.menus.models_error.insert(id, error);
         }
         Done::Context(id, seq, result) => {

@@ -39,7 +39,7 @@ pub struct Crew {
     claude_errors: HashMap<String, String>,
     claude_asked: HashMap<String, ClaudeAsk>,
     rows: HashMap<String, Session>,
-    deleted: HashSet<String>,
+    seen: feed::subagents::Seen,
     row_asked: HashMap<String, RowAsk>,
     expanded: HashSet<String>,
     recent: Vec<String>,
@@ -211,6 +211,11 @@ fn claude(s: &mut App, id: &str) {
 }
 
 pub(crate) fn done(s: &mut App, done: Done) {
+    take(s, done);
+    settle(s);
+}
+
+fn take(s: &mut App, done: Done) {
     match done {
         Done::Page(id, seq, result) => {
             let Some(asked) = s.crew.asked.get_mut(&id).filter(|a| a.seq == seq) else { return };
@@ -221,7 +226,8 @@ pub(crate) fn done(s: &mut App, done: Done) {
             }
             match result {
                 Ok(mut rows) => {
-                    rows.retain(|x| !s.crew.deleted.contains(&x.id));
+                    let seen = &mut s.crew.seen;
+                    rows.retain(|x| seen.read(&x.id, seq, true) || !seen.absent(&x.id));
                     s.crew.errors.remove(&id);
                     keep_open_lineage(s, &id, &rows);
                     s.crew.pages.insert(id, rows);
@@ -256,18 +262,14 @@ pub(crate) fn done(s: &mut App, done: Done) {
             asked.at = Instant::now();
             match result {
                 RowRead::Found(row) => {
-                    s.crew.deleted.remove(&id);
-                    s.crew.rows.insert(id, row);
+                    if s.crew.seen.read(&id, seq, true) {
+                        s.crew.rows.insert(id, row);
+                    }
                 }
                 RowRead::Gone => {
-                    s.crew.rows.remove(&id);
-                    for rows in s.crew.pages.values_mut() {
-                        rows.retain(|x| x.id != id);
+                    if s.crew.seen.read(&id, seq, false) {
+                        evict(s, &id);
                     }
-                    if s.crew.deleted.len() >= 100 {
-                        s.crew.deleted.clear();
-                    }
-                    s.crew.deleted.insert(id);
                 }
                 RowRead::Failed(_) => {}
             }
@@ -275,10 +277,31 @@ pub(crate) fn done(s: &mut App, done: Done) {
     }
 }
 
+pub(crate) fn forget(s: &mut App, id: &str) {
+    let asked = s.crew.seq;
+    s.crew.seen.gone(id, asked);
+    evict(s, id);
+    settle(s);
+}
+
+fn evict(s: &mut App, id: &str) {
+    s.crew.rows.remove(id);
+    for rows in s.crew.pages.values_mut() {
+        rows.retain(|x| x.id != id);
+    }
+}
+
+fn settle(s: &mut App) {
+    let pages = s.crew.asked.values().filter(|a| a.in_flight).map(|a| a.seq);
+    let rows = s.crew.row_asked.values().filter(|a| a.in_flight).map(|a| a.seq);
+    let oldest = pages.chain(rows).min();
+    s.crew.seen.settle(oldest);
+}
+
 fn keep_open_lineage(s: &mut App, parent: &str, rows: &[Session]) {
     let Some(old) = s.crew.pages.get(parent) else { return };
     let held = held(s);
-    let kept: Vec<Session> = old.iter().filter(|x| held.contains(&x.id) && !rows.iter().any(|r| r.id == x.id) && !listed(s, &x.id) && !s.crew.deleted.contains(&x.id)).cloned().collect();
+    let kept: Vec<Session> = old.iter().filter(|x| held.contains(&x.id) && !rows.iter().any(|r| r.id == x.id) && !listed(s, &x.id) && !s.crew.seen.absent(&x.id)).cloned().collect();
     for row in kept {
         s.crew.rows.insert(row.id.clone(), row);
     }

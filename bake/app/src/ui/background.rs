@@ -28,16 +28,6 @@ fn shown<'a>(s: &App, x: &'a Session) -> Option<&'a BackgroundTasks> {
     x.background_tasks.as_ref().filter(|b| s.dock.shows(b, &x.id))
 }
 
-fn lines(b: &BackgroundTasks) -> usize {
-    if b.source_note().is_some() { LINES_SHOWN } else { b.tasks.len() }
-}
-
-pub(crate) fn reserve(s: &App, id: &str) -> f32 {
-    let Some(b) = session(s, id).and_then(|x| shown(s, x)) else { return 0.0 };
-    let open = if s.dock.is_open(b, id) { lines(b).min(LINES_SHOWN) as f32 * LINE_HEIGHT + LINES_PAD } else { 0.0 };
-    HEADER_HEIGHT + open
-}
-
 fn toggle(s: &mut App, id: &str) {
     let Some(b) = session(s, id).and_then(|x| x.background_tasks.clone()) else { return };
     s.dock.toggle(&b, id);

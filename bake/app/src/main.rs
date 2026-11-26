@@ -111,6 +111,7 @@ pub struct App {
     pub queue_taking: Vec<feed::queue::Taking>,
     pub crew: ui::subagents::Crew,
     pub dock: feed::background::DockChoices,
+    pub cover: feed::composer::Cover,
     pub busy_default: Option<Busy>,
     pub busy_pick: HashMap<String, Busy>,
     pub rekeyed: HashMap<String, String>,
@@ -219,6 +220,7 @@ fn init() -> App {
         queue_taking: Vec::new(),
         crew: Default::default(),
         dock: Default::default(),
+        cover: Default::default(),
         busy_default: None,
         busy_pick: HashMap::new(),
         rekeyed: HashMap::new(),
@@ -337,7 +339,7 @@ impl App {
 }
 
 pub fn session<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
-    s.sessions.iter().find(|x| x.id == id).or_else(|| over::search::pinned(s, id)).or_else(|| ui::subagents::fetched(s, id))
+    feed::search::lookup(s.sessions.iter().find(|x| x.id == id), over::search::pinned(s, id), || ui::subagents::fetched(s, id))
 }
 
 pub fn select(s: &mut App, id: &str) {

@@ -69,7 +69,7 @@ fn compact_el(s: &App, x: &Session) -> El {
 }
 
 pub fn turn(s: &App, x: &Session) -> El {
-    let mut r = row().key("turn-chips").gap(6.0).items_center();
+    let mut r = row().key("turn-chips").w_full().flex_wrap().gap(6.0).items_center();
     for chip in chips_for(s, &x.id) {
         r = r.child(chip_el(s, x, &chip));
     }

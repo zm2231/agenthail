@@ -80,7 +80,7 @@ pub(crate) fn pill(glyph: &'static Icon, value: impl Into<String>, color: Color)
         .fill(color.alpha(0.14))
         .border(1.0, color.alpha(0.30))
         .child(icon(glyph, 12.0).color(color))
-        .child(text(value.into()).font(META_BOLD).color(color))
+        .child(text(value.into()).font(META_BOLD).color(color).truncate().max_w(240.0))
 }
 
 pub(crate) fn keys(k: &[&str]) -> El {

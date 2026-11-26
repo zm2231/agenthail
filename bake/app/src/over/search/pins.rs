@@ -3,7 +3,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
 use feed::catalog::Session;
-use feed::search::Recheck;
+use feed::search::{Pinned, Recheck};
 
 use crate::App;
 
@@ -28,8 +28,12 @@ impl Default for Pins {
 }
 
 impl Pins {
-    pub fn get(&self, id: &str) -> Option<&Session> {
-        self.row(id).filter(|_| self.verified.contains(id))
+    pub fn get(&self, id: &str) -> Pinned<'_> {
+        match self.row(id) {
+            Some(x) if self.verified.contains(id) => Pinned::Verified(x),
+            Some(_) => Pinned::Withheld,
+            None => Pinned::Unpinned,
+        }
     }
 
     fn row(&self, id: &str) -> Option<&Session> {
@@ -63,13 +67,13 @@ impl Pins {
         self.checked.remove(id);
     }
 
-    fn take(&mut self, id: String, seq: u64, revision: u64, found: Recheck) {
+    fn take(&mut self, id: String, seq: u64, revision: u64, found: Recheck) -> Option<String> {
         if self.checking.get(&id) != Some(&seq) {
-            return;
+            return None;
         }
         self.checking.remove(&id);
         if self.revision.get(&id).copied().unwrap_or_default() != revision {
-            return;
+            return None;
         }
         match found {
             Recheck::Fresh(row) => {
@@ -79,12 +83,16 @@ impl Pins {
                 self.verified.insert(id.clone());
                 self.checked.insert(id, Instant::now());
             }
-            Recheck::Gone => self.unpin(&id),
+            Recheck::Gone => {
+                self.unpin(&id);
+                return Some(id);
+            }
             Recheck::Unknown(_) => {
                 self.verified.remove(&id);
                 self.checked.insert(id, Instant::now());
             }
         }
+        None
     }
 }
 
@@ -116,8 +124,48 @@ fn recheck(s: &mut App) -> bool {
 pub fn drain(s: &mut App) -> bool {
     let mut changed = false;
     while let Ok((id, seq, revision, found)) = s.ov.search.pins.rx.try_recv() {
-        s.ov.search.pins.take(id, seq, revision, found);
+        if let Some(gone) = s.ov.search.pins.take(id, seq, revision, found) {
+            crate::ui::subagents::forget(s, &gone);
+        }
         changed = true;
     }
     changed | recheck(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn verdict(p: &Pins, id: &str) -> &'static str {
+        match p.get(id) {
+            Pinned::Unpinned => "unpinned",
+            Pinned::Verified(_) => "verified",
+            Pinned::Withheld => "withheld",
+        }
+    }
+
+    fn check(p: &mut Pins, id: &str, found: Recheck) -> Option<String> {
+        p.requests += 1;
+        let (seq, revision) = (p.requests, p.revision.get(id).copied().unwrap_or_default());
+        p.checking.insert(id.to_string(), seq);
+        p.take(id.to_string(), seq, revision, found)
+    }
+
+    #[test]
+    fn a_pin_is_withheld_until_verified_and_a_gone_one_is_handed_back() {
+        let row = Session { id: "c1".into(), ..Session::default() };
+        let mut p = Pins::default();
+        assert_eq!(verdict(&p, "c1"), "unpinned");
+        p.pin(row.clone());
+        assert_eq!(verdict(&p, "c1"), "withheld");
+        check(&mut p, "c1", Recheck::Fresh(Box::new(row.clone())));
+        assert_eq!(verdict(&p, "c1"), "verified");
+        check(&mut p, "c1", Recheck::Unknown("offline".into()));
+        assert_eq!(verdict(&p, "c1"), "withheld");
+        assert_eq!(check(&mut p, "c1", Recheck::Gone), Some("c1".to_string()));
+        assert_eq!(verdict(&p, "c1"), "unpinned");
+        p.pin(row);
+        check(&mut p, "c1", Recheck::Fresh(Box::new(Session { id: "c1".into(), ..Session::default() })));
+        assert_eq!(verdict(&p, "c1"), "verified");
+    }
 }

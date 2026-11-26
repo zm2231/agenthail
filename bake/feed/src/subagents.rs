@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -268,6 +268,38 @@ impl Client {
     }
 }
 
+#[derive(Default)]
+pub struct Seen(HashMap<String, ((u64, bool), bool)>);
+
+impl Seen {
+    fn apply(&mut self, id: &str, at: (u64, bool), present: bool) -> bool {
+        if self.0.get(id).is_some_and(|(newest, _)| at <= *newest) {
+            return false;
+        }
+        self.0.insert(id.to_string(), (at, present));
+        true
+    }
+
+    pub fn read(&mut self, id: &str, asked: u64, present: bool) -> bool {
+        self.apply(id, (asked, false), present)
+    }
+
+    pub fn gone(&mut self, id: &str, last_asked: u64) {
+        self.apply(id, (last_asked, true), false);
+    }
+
+    pub fn absent(&self, id: &str) -> bool {
+        matches!(self.0.get(id), Some((_, false)))
+    }
+
+    pub fn settle(&mut self, oldest_in_flight: Option<u64>) {
+        match oldest_in_flight {
+            Some(oldest) => self.0.retain(|_, (at, _)| *at >= (oldest, false)),
+            None => self.0.clear(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -462,5 +494,35 @@ mod tests {
         assert_eq!(got.total, 1);
         assert!(got.links[0].working);
         assert_eq!(asked.recv().unwrap().0, "/api/v1/session-metadata?id=s&subagents=all");
+    }
+
+    #[test]
+    fn the_newest_asked_answer_about_a_session_wins() {
+        let mut seen = Seen::default();
+        assert!(seen.read("c1", 3, true));
+        seen.gone("c1", 7);
+        assert!(seen.absent("c1"));
+        assert!(!seen.read("c1", 5, true));
+        assert!(!seen.read("c1", 7, true));
+        assert!(seen.read("c1", 8, true));
+        assert!(!seen.absent("c1"));
+        assert!(!seen.read("c1", 6, false));
+        assert!(!seen.read("c1", 7, true));
+        assert!(!seen.absent("c1"));
+        assert!(seen.read("c1", 9, false));
+        assert!(seen.absent("c1"));
+    }
+
+    #[test]
+    fn answers_are_forgotten_once_no_older_read_can_arrive() {
+        let mut seen = Seen::default();
+        seen.gone("c1", 4);
+        seen.gone("c2", 9);
+        seen.settle(Some(5));
+        assert!(!seen.absent("c1"));
+        assert!(seen.absent("c2"));
+        assert!(!seen.read("c2", 8, true));
+        seen.settle(None);
+        assert!(seen.read("c2", 8, true));
     }
 }

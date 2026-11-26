@@ -29,7 +29,7 @@ impl Default for State {
     }
 }
 
-pub fn pinned<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
+pub fn pinned<'a>(s: &'a App, id: &str) -> feed::search::Pinned<'a> {
     s.ov.search.pins.get(id)
 }
 
