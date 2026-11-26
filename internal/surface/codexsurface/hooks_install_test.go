@@ -231,6 +231,28 @@ func TestCodexHooksStateReturnsByItsDeadlineWhenCodexWillNotExit(t *testing.T) {
 	}
 }
 
+func TestCodexAppServerThatExitsSaysWhyFromTheEndOfItsStderr(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	bin := t.TempDir()
+	failing := "#!/bin/sh\ni=0\nwhile [ $i -lt 200 ]; do echo \"early noise line $i\" >&2; i=$((i+1)); done\necho 'Error: failed to load config.toml: invalid key' >&2\nexit 3\n"
+	if err := os.WriteFile(filepath.Join(bin, "codex"), []byte(failing), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+":/usr/bin:/bin")
+	_, err := InstallCodexContext(codexContext(t), CodexHome{Codex: filepath.Join(home, ".codex")}, testAgenthail)
+	if err == nil {
+		t.Fatal("install succeeded against a Codex that exited")
+	}
+	message := err.Error()
+	if !strings.Contains(message, "exit status 3") || !strings.HasSuffix(message, "Error: failed to load config.toml: invalid key") {
+		t.Fatalf("error does not say why the app-server exited: %q", message)
+	}
+	if strings.Contains(message, "early noise line 0\n") || len(message) > codexStderrTailBytes+128 {
+		t.Fatalf("error kept more than the end of stderr (%d bytes)", len(message))
+	}
+}
+
 func TestRetiringCodexHooksRemovesOnlyAHookAgenthailNoLongerWritesAndKeepsTrust(t *testing.T) {
 	retired := `exec '` + testAgenthail + `' hook stop --surface codex`
 	home := isolatedCodexHome(t)
