@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use feed::action::PrOp;
 use feed::catalog::{Pr, RespondError};
-use feed::menu::{Patch, pr_problem};
+use feed::menu::{Patch, names_pr, pr_problem};
 use rune::{El, TextEdit, Tx, el, row, text, text_input};
 use rune_kit::{Button, ButtonVariant, ControlSize, Dialog};
 
@@ -99,10 +99,9 @@ fn settled(s: &mut App, done: Done) {
     let dialog = op == PrOp::Link && s.prs.linking.as_deref() == Some(id.as_str()) && s.prs.link_seq == seq;
     match result {
         Ok(prs) => {
-            let number = asked.trim().trim_start_matches('#').parse::<u64>().ok();
             let changed = match op {
                 PrOp::Unlink => Some(Pr { url: asked.clone(), ..Default::default() }),
-                _ => prs.iter().find(|p| p.url == asked || Some(p.number) == number).cloned(),
+                _ => prs.iter().find(|p| p.url == asked).or_else(|| prs.iter().find(|p| names_pr(&asked, p))).cloned(),
             };
             if let Some(pr) = changed
                 && s.ov.live.patch(&id, Patch::Pr { pr, linked: op != PrOp::Unlink }, Instant::now())

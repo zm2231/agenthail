@@ -10,7 +10,7 @@ use crate::theme::{self, BODY_BOLD, LABEL, META, attention, done, failed, faint,
 use crate::{App, select};
 
 pub enum Done {
-    Sets(Result<Vec<Set>, String>),
+    Sets(u64, Result<Vec<Set>, String>),
     Plan(u64, Result<Plan, String>),
     Applied(u64, Result<String, RespondError>),
 }
@@ -37,6 +37,7 @@ pub struct Accounts {
     pub sets: Option<Result<Vec<Set>, String>>,
     pub planning: Option<Planning>,
     seq: u64,
+    sets_seq: u64,
     tx: Sender<Done>,
     rx: Receiver<Done>,
 }
@@ -44,7 +45,7 @@ pub struct Accounts {
 impl Accounts {
     pub fn new() -> Accounts {
         let (tx, rx) = channel();
-        Accounts { open: false, sets: None, planning: None, seq: 0, tx, rx }
+        Accounts { open: false, sets: None, planning: None, seq: 0, sets_seq: 0, tx, rx }
     }
 }
 
@@ -57,7 +58,9 @@ fn spawn(s: &App, job: impl FnOnce(&Client) -> Done + Send + 'static) {
 }
 
 fn fetch(s: &mut App) {
-    spawn(s, |c| Done::Sets(c.usage_sets().map_err(|e| e.to_string())));
+    s.accounts.sets_seq += 1;
+    let seq = s.accounts.sets_seq;
+    spawn(s, move |c| Done::Sets(seq, c.usage_sets().map_err(|e| e.to_string())));
 }
 
 pub fn open(s: &mut App) {
@@ -129,7 +132,11 @@ fn apply(s: &mut App) {
 
 fn settled(s: &mut App, done: Done) {
     match done {
-        Done::Sets(sets) => s.accounts.sets = Some(sets),
+        Done::Sets(seq, sets) => {
+            if seq == s.accounts.sets_seq {
+                s.accounts.sets = Some(sets);
+            }
+        }
         Done::Plan(seq, plan) => {
             if let Some(p) = s.accounts.planning.as_mut().filter(|p| p.seq == seq) {
                 p.plan = Some(plan);

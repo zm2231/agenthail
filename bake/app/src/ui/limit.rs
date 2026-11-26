@@ -13,9 +13,10 @@ use crate::theme::{self, BODY_BOLD, LABEL, META, TITLE, attention, failed, faint
 use crate::{App, session};
 
 pub enum Done {
-    Roots(String, Result<Vec<ConfigRoot>, String>),
-    Usage(String, RootUsage),
-    Unread(String, String),
+    Roots(String, u64, Result<Vec<ConfigRoot>, String>),
+    Usage(String, u64, RootUsage),
+    Unread(String, u64, String),
+    Read(String, u64),
     Resumed(String, bool, Result<(), RespondError>),
     Moved(String, Target, Result<Moved, RespondError>),
 }
@@ -37,7 +38,9 @@ pub struct Limits {
     pub consent: Option<Consent>,
     pub roots: HashMap<String, Result<Vec<ConfigRoot>, String>>,
     pub unread: HashSet<(String, String)>,
-    pub reading: HashSet<String>,
+    pub reading: HashMap<String, u64>,
+    pub refresh_error: HashMap<String, String>,
+    generation: u64,
     pub busy: HashSet<String>,
     pub note: HashMap<String, (String, bool)>,
     tx: Sender<Done>,
@@ -47,7 +50,7 @@ pub struct Limits {
 impl Limits {
     pub fn new() -> Limits {
         let (tx, rx) = channel();
-        Limits { picking: None, confirm: None, consent: None, roots: HashMap::new(), unread: HashSet::new(), reading: HashSet::new(), busy: HashSet::new(), note: HashMap::new(), tx, rx }
+        Limits { picking: None, confirm: None, consent: None, roots: HashMap::new(), unread: HashSet::new(), reading: HashMap::new(), refresh_error: HashMap::new(), generation: 0, busy: HashSet::new(), note: HashMap::new(), tx, rx }
     }
 }
 
@@ -95,19 +98,20 @@ fn open_picker(s: &mut App, id: &str) {
         }
         return;
     }
-    if !s.limits.reading.insert(host.clone()) {
-        return;
-    }
+    s.limits.generation += 1;
+    let generation = s.limits.generation;
+    s.limits.reading.insert(host.clone(), generation);
     spawn(s, move |c, tx| {
         let roots = c.session_options(&host).map(|o| o.claude_config_roots).map_err(|e| e.to_string());
         let readable: Vec<String> = roots.as_ref().map(|r| r.iter().filter(|r| r.reads_usage()).map(|r| r.root.clone()).collect()).unwrap_or_default();
-        let _ = tx.send(Done::Roots(host.clone(), roots));
+        let _ = tx.send(Done::Roots(host.clone(), generation, roots));
         for root in readable {
             let _ = tx.send(match c.claude_usage(&root, &host) {
-                Ok(usage) => Done::Usage(host.clone(), usage),
-                Err(_) => Done::Unread(host.clone(), root),
+                Ok(usage) => Done::Usage(host.clone(), generation, usage),
+                Err(_) => Done::Unread(host.clone(), generation, root),
             });
         }
+        let _ = tx.send(Done::Read(host, generation));
     });
 }
 
@@ -128,18 +132,27 @@ fn move_to(s: &mut App, id: &str, target: Target, stop_terminal: bool) {
 
 fn settled(s: &mut App, done: Done) {
     match done {
-        Done::Roots(host, roots) => {
-            s.limits.reading.remove(&host);
+        Done::Roots(host, generation, _) | Done::Usage(host, generation, _) | Done::Unread(host, generation, _) | Done::Read(host, generation)
+            if s.limits.reading.get(&host) != Some(&generation) => {}
+        Done::Roots(host, _, roots) => {
             s.limits.unread.retain(|(h, _)| *h != host);
-            let kept = matches!(s.limits.roots.get(&host), Some(Ok(_))) && roots.is_err();
-            if !kept {
-                s.limits.roots.insert(host, roots);
+            match roots {
+                Err(error) if matches!(s.limits.roots.get(&host), Some(Ok(_))) => {
+                    s.limits.refresh_error.insert(host, error);
+                }
+                roots => {
+                    s.limits.refresh_error.remove(&host);
+                    s.limits.roots.insert(host, roots);
+                }
             }
         }
-        Done::Unread(host, root) => {
+        Done::Unread(host, _, root) => {
             s.limits.unread.insert((host, root));
         }
-        Done::Usage(host, usage) => {
+        Done::Read(host, _) => {
+            s.limits.reading.remove(&host);
+        }
+        Done::Usage(host, _, usage) => {
             if let Some(Ok(roots)) = s.limits.roots.get_mut(&host)
                 && let Some(root) = roots.iter_mut().find(|r| r.root == usage.root)
             {
@@ -252,7 +265,12 @@ fn target_row(id: &str, t: &Target, busy: bool, unread: bool) -> El {
     if t.offered {
         name = name.child(row().px(7.0).py(2.0).radius(6.0).fill(attention().alpha(0.2)).child(text("Suggested").font(META).color(attention())));
     }
-    let detail = if t.full { Some("Out of usage".to_string()) } else { t.detail.clone().or_else(|| unread.then(|| "Usage couldn't be read".to_string())) };
+    let detail = match (t.full, t.detail.clone(), unread) {
+        (true, _, _) => Some("Out of usage".to_string()),
+        (false, Some(detail), true) => Some(format!("{detail} · usage couldn't be read")),
+        (false, None, true) => Some("Usage couldn't be read".to_string()),
+        (false, detail, false) => detail,
+    };
     let mut r = row()
         .key(format!("limit-target-{}", t.root))
         .w_full()
@@ -298,7 +316,9 @@ fn picker(s: &App, id: &str, layer: &mut Vec<El>) {
             }
             let host = host_key(x);
             body = body.children(list.iter().map(|t| target_row(id, t, busy, s.limits.unread.contains(&(host.clone(), t.root.clone())))));
-            if s.limits.reading.contains(&host) {
+            if let Some(error) = s.limits.refresh_error.get(&host) {
+                body = body.child(text(format!("Couldn't refresh the accounts, so this list may be out of date: {error}")).font(META).color(failed()).wrap());
+            } else if s.limits.reading.contains_key(&host) {
                 body = body.child(text("Checking for changes…").font(META).color(faint()));
             }
         }
