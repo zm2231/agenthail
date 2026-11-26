@@ -543,7 +543,11 @@ func TestARemoteSessionInstallsOnlyAnAppInItsFolders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.(map[string]any)["installed"] != app || !f.commands.ran("xcrun simctl install U1 ") {
+	real, err := filepath.EvalSymlinks(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.(map[string]any)["installed"] != real || !f.commands.ran("xcrun simctl install U1 ") {
 		t.Fatalf("install of the session's own app = %v", out)
 	}
 }
