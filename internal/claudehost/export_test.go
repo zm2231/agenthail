@@ -1,6 +1,7 @@
 package claudehost
 
 import (
+	"errors"
 	"context"
 	"syscall"
 	"time"
@@ -21,4 +22,17 @@ func SetUnansweredWaits(after, retire time.Duration) (restore func()) {
 
 func SignalHost(m *Manager, pid int, started string, signal syscall.Signal) (bool, error) {
 	return m.signalHost(context.Background(), hostProcess{pid: pid, started: started}, signal)
+}
+
+func FailHandleOpensAfter(opens int) (restore func()) {
+	previous := openHandle
+	count := 0
+	openHandle = func(pid int) (processHandle, error) {
+		count++
+		if count > opens {
+			return processHandle{}, errors.New("no handle")
+		}
+		return previous(pid)
+	}
+	return func() { openHandle = previous }
 }

@@ -228,3 +228,30 @@ func TestReplacementLeavesAReusedPIDAlone(t *testing.T) {
 		t.Fatal("the process now holding the pid was killed")
 	}
 }
+
+func TestAHostThatIgnoresRetiringIsNamedWhenNoHandleOpensToStopIt(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("only Linux holds a process handle to signal a host safely")
+	}
+	t.Cleanup(claudehost.SetUnansweredWaits(2*time.Second, 2*time.Second))
+	f := claudehosttest.New(t, "")
+	ctx := testContext(t)
+	client := f.Start(t)
+	old, err := client.Hello(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Kill(old.PID, syscall.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(old.PID, syscall.SIGCONT) })
+	t.Cleanup(claudehost.FailHandleOpensAfter(1))
+
+	_, err = f.Manager(t, "test").Ensure(ctx)
+	if err == nil || !strings.Contains(err.Error(), "stop pid "+strconv.Itoa(old.PID)) {
+		t.Fatalf("Ensure when no handle opens to stop the host = %v, want the host named", err)
+	}
+	if !claudehosttest.Alive(old.PID) {
+		t.Fatal("the host was stopped without a process handle")
+	}
+}

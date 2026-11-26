@@ -39,12 +39,16 @@ func (m *Manager) replaceUnanswered(ctx context.Context) (int, error) {
 	}
 	signalled, err := m.signalHost(ctx, host, syscall.SIGHUP)
 	if err != nil {
-		return host.pid, fmt.Errorf("%w; stop pid %d to start a new one: %v", errUnanswered, host.pid, err)
+		return host.pid, noHandle(host, err)
 	}
 	if !signalled || m.awaitRelease(ctx, host.pid, retireWait) {
 		return host.pid, nil
 	}
-	if signalled, _ := m.signalHost(ctx, host, syscall.SIGKILL); !signalled {
+	signalled, err = m.signalHost(ctx, host, syscall.SIGKILL)
+	if err != nil {
+		return host.pid, noHandle(host, err)
+	}
+	if !signalled {
 		return host.pid, nil
 	}
 	if m.awaitRelease(ctx, host.pid, killWait) {
@@ -53,6 +57,12 @@ func (m *Manager) replaceUnanswered(ctx context.Context) (int, error) {
 	return host.pid, fmt.Errorf("the Claude host (pid %d) neither retired nor exited", host.pid)
 }
 
+func noHandle(host hostProcess, err error) error {
+	return fmt.Errorf("%w; stop pid %d to start a new one: %v", errUnanswered, host.pid, err)
+}
+
+var openHandle = openProcess
+
 type hostProcess struct {
 	pid     int
 	started string
@@ -60,7 +70,7 @@ type hostProcess struct {
 
 // The handle is opened before the identity check, so a later owner of the pid is never signalled.
 func (m *Manager) signalHost(ctx context.Context, host hostProcess, signal syscall.Signal) (bool, error) {
-	handle, err := openProcess(host.pid)
+	handle, err := openHandle(host.pid)
 	if err != nil {
 		if errors.Is(err, syscall.ESRCH) {
 			return false, nil
