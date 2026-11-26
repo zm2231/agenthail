@@ -179,7 +179,7 @@ impl Unsent {
         if self.tries == 0 {
             return Unsent { maybe_delivered, error, ..self };
         }
-        let tries = if maybe_delivered || answered { self.tries } else { self.tries - 1 };
+        let tries = if answered { self.tries } else { self.tries - 1 };
         Unsent { maybe_delivered: true, tries, error, ..self }
     }
 
@@ -418,9 +418,11 @@ mod tests {
         let refused = retry.clone().failed(false, true, "action_reservation_failed".into());
         assert!(refused.reuses_key() && refused.offers_new_send());
         assert!(refused.note().starts_with("Still not confirmed after a retry: action_reservation_failed"));
-        let unknown = retry.failed(true, true, "timeout".into());
+        let unknown = retry.clone().failed(true, true, "host_outcome_unknown".into());
         assert!(unknown.reuses_key() && unknown.offers_new_send());
-        assert_eq!(unknown.error, "timeout");
+        assert_eq!(unknown.error, "host_outcome_unknown");
+        let timed_out = retry.failed(true, false, "timeout".into());
+        assert!(timed_out.reuses_key() && !timed_out.offers_new_send());
     }
 
     #[test]
