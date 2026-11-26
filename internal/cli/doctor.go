@@ -104,14 +104,6 @@ func (a *App) cmdDoctor(args []string) error {
 		if checker, ok := e.Surface.(surface.HealthChecker); ok {
 			healthErr = checker.Health(ctx)
 		}
-		if acp, ok := e.Surface.(interface{ Agent() acphost.Agent }); ok && !acp.Agent().Installed() {
-			if acp.Agent().BuiltIn() {
-				agent := acp.Agent()
-				results = append(results, doctorResult{Surface: e.Name, Capabilities: enabled, OK: true, AgentUnavailable: fmt.Sprintf("%s is not installed on this computer, so it is unavailable here. Install %q to start %s sessions, or turn it off with {\"id\": %q, \"disabled\": true} under acpAgents in %s.", agent.DisplayName(), agent.Command[0], agent.DisplayName(), agent.ID, surface.AgenthailConfigPath(home))})
-				continue
-			}
-			healthErr = fmt.Errorf("%s: command %q is not installed", acp.Agent().DisplayName(), acp.Agent().Command[0])
-		}
 		var sessions []surface.Session
 		var err error
 		signinOff, signinUnavailable := "", ""

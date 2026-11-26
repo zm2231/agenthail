@@ -210,14 +210,14 @@ if tail -c "+$((daemon_log_offset + 1))" "$HOME/.agenthail/daemon.log" | grep -F
 	echo "error: menu app attempted an unsupervised daemon start" >&2
 	exit 1
 fi
-# The runner has neither Codex nor Claude Code, and nothing signed into
+# The runner has neither Codex, Claude Code nor Devin, and nothing signed into
 # Notion. Sign-in off and an agent not installed are each a stated limit, so
 # doctor is healthy; only an agent turned on and missing fails it.
 /usr/local/bin/agenthail signin use notion none >/dev/null
 /usr/local/bin/agenthail signin use claude none >/dev/null
 doctor_json="$(/usr/local/bin/agenthail doctor --json)"
-jq -e '.ok and (.surfaces | length == 3)' <<<"$doctor_json" >/dev/null
-jq -e '[.surfaces[] | select(.surface == "codex" or .surface == "claude") | select(.ok and (.agentUnavailable // "") != "")] | length == 2' <<<"$doctor_json" >/dev/null
+jq -e '.ok and (.surfaces | length == 4)' <<<"$doctor_json" >/dev/null
+jq -e '[.surfaces[] | select(.surface == "codex" or .surface == "claude" or .surface == "devin") | select(.ok and .error == null and (.agentUnavailable // "") != "")] | length == 3' <<<"$doctor_json" >/dev/null
 /usr/local/bin/agenthail agents use codex off >/dev/null
 jq -e '.ok and any(.surfaces[]; .surface == "codex" and .ok and (.agentOff // "") != "")' <<<"$(/usr/local/bin/agenthail doctor --json)" >/dev/null
 /usr/local/bin/agenthail agents use codex on >/dev/null

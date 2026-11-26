@@ -46,12 +46,12 @@ type Config struct {
 	SimulatorHost string `json:"simulatorHost,omitempty"`
 	// NotificationPreferences holds the person's choices that differ from each preference's default.
 	NotificationPreferences map[string]bool `json:"notificationPreferences,omitempty"`
-	// Agents holds each agent the person set to on or off; an agent not listed is auto.
-	Agents map[string]agentswitch.Mode `json:"agents,omitempty"`
+	// AgentModes holds each agent the person set to on or off; an agent not listed is auto.
+	AgentModes map[string]agentswitch.Mode `json:"agentModes,omitempty"`
 }
 
 func (c Config) AgentMode(agent string) agentswitch.Mode {
-	if mode, ok := c.Agents[agent]; ok {
+	if mode, ok := c.AgentModes[agent]; ok {
 		return mode
 	}
 	return agentswitch.Auto
@@ -59,13 +59,13 @@ func (c Config) AgentMode(agent string) agentswitch.Mode {
 
 func (c *Config) SetAgentMode(agent string, mode agentswitch.Mode) {
 	if mode == agentswitch.Auto {
-		delete(c.Agents, agent)
+		delete(c.AgentModes, agent)
 		return
 	}
-	if c.Agents == nil {
-		c.Agents = map[string]agentswitch.Mode{}
+	if c.AgentModes == nil {
+		c.AgentModes = map[string]agentswitch.Mode{}
 	}
-	c.Agents[agent] = mode
+	c.AgentModes[agent] = mode
 }
 
 // ResumesAfterLimit reports whether sessions a usage limit stopped resume
@@ -113,7 +113,7 @@ func Load() (Config, error) {
 	if err := validateCodexRecentHours(config.CodexRecentHours); err != nil {
 		return Config{}, err
 	}
-	if err := validateAgents(config.Agents); err != nil {
+	if err := validateAgents(config.AgentModes); err != nil {
 		return Config{}, err
 	}
 	if err := validateDashboardListen(config.Listen); err != nil {
@@ -138,7 +138,7 @@ func Save(config Config) error {
 	if err := validateCodexRecentHours(config.CodexRecentHours); err != nil {
 		return err
 	}
-	if err := validateAgents(config.Agents); err != nil {
+	if err := validateAgents(config.AgentModes); err != nil {
 		return err
 	}
 	if err := validateDashboardListen(config.Listen); err != nil {
@@ -157,7 +157,7 @@ func Save(config Config) error {
 func validateAgents(agents map[string]agentswitch.Mode) error {
 	for agent, mode := range agents {
 		if _, err := agentswitch.ParseMode(string(mode)); err != nil {
-			return fmt.Errorf("agents.%s: %w", agent, err)
+			return fmt.Errorf("agentModes.%s: %w", agent, err)
 		}
 	}
 	return nil

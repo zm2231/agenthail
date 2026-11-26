@@ -9,12 +9,21 @@ type LocalAgent interface {
 	LocateProgram() error
 }
 
+// RequiredAgent is a local agent the person set up themselves, such as an
+// agent added in config; it fails when missing even on auto.
+type RequiredAgent interface {
+	RequiredOnAuto() bool
+}
+
 // AgentGate is nil for an adapter Agenthail works with here under mode, and
 // otherwise the agentswitch error that says why not.
 func AgentGate(adapter Surface, mode agentswitch.Mode) error {
 	local, ok := adapter.(LocalAgent)
 	if !ok {
 		return nil
+	}
+	if required, ok := adapter.(RequiredAgent); ok && mode == agentswitch.Auto && required.RequiredOnAuto() {
+		mode = agentswitch.On
 	}
 	return agentswitch.Check(agentswitch.Agent{ID: string(adapter.Name()), Label: local.AgentLabel(), Locate: local.LocateProgram}, mode)
 }

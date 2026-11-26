@@ -193,7 +193,7 @@ Phones:
   devices remove <device>        Disconnect a phone from this host
 
 Agents on this computer:
-  agents [list] [--json]        Show whether Agenthail works with Codex and Claude here
+  agents [list] [--json]        Show whether Agenthail works with each agent installed here
   agents use <agent> auto|on|off
                                 auto: used when installed (default); on: missing is a failure; off: left alone
 

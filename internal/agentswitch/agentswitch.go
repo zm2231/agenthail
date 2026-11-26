@@ -62,7 +62,7 @@ type MissingError struct {
 }
 
 func (e MissingError) Error() string {
-	return fmt.Sprintf("%s is turned on but not installed on this computer (%s); install it, or run `agenthail agents use %s auto` so a missing %s is not a failure", e.Label, e.Err, e.Agent, e.Label)
+	return fmt.Sprintf("%s is turned on but not installed on this computer (%s); install it, or run `agenthail agents use %s off`", e.Label, e.Err, e.Agent)
 }
 
 func (e MissingError) Unwrap() error { return e.Err }
