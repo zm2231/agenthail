@@ -36,3 +36,7 @@ lucide!(ARROW_RIGHT, "ah-arrow-right", r#"<path d="M5 12h14"/><path d="m13 6 6 6
 lucide!(ACTIVITY, "ah-activity", r#"<path d="M3 12h4l2.5-6 5 12 2.5-6h4"/>"#);
 lucide!(LIST, "ah-list", r#"<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>"#);
 lucide!(CORNER, "ah-corner", r#"<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5A5.5 5.5 0 0 1 20 14.5 5.5 5.5 0 0 1 14.5 20H11"/>"#);
+lucide!(MORE, "ah-more", r#"<circle cx="5.5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18.5" cy="12" r="1.2"/>"#);
+lucide!(PIN, "ah-pin", r#"<path d="M12 17v4.5"/><path d="M8.5 3.5h7l-1 6 3.5 3.5v2.5h-12V13l3.5-3.5z"/>"#);
+lucide!(SHRINK, "ah-shrink", r#"<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>"#);
+lucide!(SELECTOR, "ah-selector", r#"<path d="m8 9 4-4 4 4"/><path d="m8 15 4 4 4-4"/>"#);

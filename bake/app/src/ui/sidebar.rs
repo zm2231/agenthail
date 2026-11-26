@@ -10,6 +10,7 @@ pub(crate) fn session_row(s: &App, x: &Session) -> El {
     let state = x.state(s.now);
     let selected = s.selected.as_deref() == Some(x.id.as_str());
     let id = x.id.clone();
+    let menu_id = x.id.clone();
     let branch = x.checkout.branch.clone().unwrap_or_default();
     let place = if branch.is_empty() { format!("{} · {}", x.project_name(), x.host.name) } else { format!("{} · {}", x.project_name(), branch) };
     let summary_color = if state == State::NeedsYou { attention() } else { muted() };
@@ -34,13 +35,14 @@ pub(crate) fn session_row(s: &App, x: &Session) -> El {
         .press_scale(0.985)
         .motion(SPRING)
         .on_press(move |s: &mut App| select(s, &id))
+        .on_secondary_press(move |s: &mut App, p, _: &mut Tx| session_menu::open_at(s, &menu_id, p))
         .child(avatar_with_state(&x.title(), state, 30.0))
         .child(
             col()
                 .grow(1.0)
                 .min_w(0.0)
                 .gap(2.0)
-                .child(row().w_full().gap(6.0).items_center().child(text(x.title()).font(BODY_BOLD).color(theme::text()).truncate().grow(1.0).min_w(0.0)).child(trailing))
+                .child(row().w_full().gap(6.0).items_center().child(text(x.title()).font(BODY_BOLD).color(theme::text()).truncate().grow(1.0).min_w(0.0)).child(session_menu::marks(x)).child(trailing))
                 .child(row().gap(4.0).items_center().child(icon(&icons::BRANCH, 11.0).color(faint())).child(text(place).font(META).color(faint()).truncate().min_w(0.0)))
                 .child(text(summary).font(META).color(summary_color).wrap().max_lines(2).pt(2.0)),
         );

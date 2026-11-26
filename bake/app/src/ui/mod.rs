@@ -11,8 +11,10 @@ use crate::theme::{
 use crate::transcript::{self, session_avatar};
 use crate::{App, Screen, Tab, answer_request, pick_work, session_edits, short_path, show_changes, select, send, draft_reply, session, toggle_pick, open_link};
 
+mod chips;
 mod rail;
 mod session;
+pub mod session_menu;
 mod sidebar;
 mod waiting;
 
@@ -98,6 +100,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         _ => crate::over::view(s, cx, &mut layer),
     };
     crate::over::overlays(s, &mut layer);
+    session_menu::overlays(s, &mut layer);
     let root = col()
         .w_full()
         .h_full()

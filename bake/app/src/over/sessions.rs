@@ -59,6 +59,7 @@ fn state_dot(s: &App, x: &Session) -> El {
 pub fn session_row(s: &App, x: &Session, depth: u8, selected: bool) -> El {
     let k = kit();
     let id = x.id.clone();
+    let menu_id = x.id.clone();
     let branch = x.checkout.branch.clone().unwrap_or_default();
     let mut place = vec![s.ov.d.role(x).to_string(), agent(x), x.host.name.clone()];
     if !branch.is_empty() {
@@ -77,7 +78,7 @@ pub fn session_row(s: &App, x: &Session, depth: u8, selected: bool) -> El {
         status = status.child(Spinner::new().size(11.0).build(k));
     }
     status = status.child(text(line).font(META).color(color).truncate().shrink());
-    let mut headline = row().w_full().gap(8.0).items_center().child(text(s.ov.d.title(x)).font(BODY_MED).color(strong()).truncate().shrink());
+    let mut headline = row().w_full().gap(8.0).items_center().child(text(s.ov.d.title(x)).font(BODY_MED).color(strong()).truncate().shrink()).child(crate::ui::session_menu::marks(x));
     if let Some((h, _)) = feed::derive::needs::headline(x).filter(|_| need_of(s, x).is_some() || busy(x)) {
         headline = headline.child(text(ui::short_title(&crate::over::plain(&h), 60)).font(META).color(weak()).truncate().shrink());
     }
@@ -92,6 +93,7 @@ pub fn session_row(s: &App, x: &Session, depth: u8, selected: bool) -> El {
         .py(9.0)
         .radius(10.0)
         .on_press(move |s: &mut App| crate::over::open_session(s, &id))
+        .on_secondary_press(move |s: &mut App, p, _: &mut rune::Tx| crate::ui::session_menu::open_at(s, &menu_id, p))
         .child(col().size(28.0, 28.0).child(ui::avatar(&s.ov.d.title(x), 28.0)).child(state_dot(s, x).absolute(20.0, 20.0)))
         .child(
             col()

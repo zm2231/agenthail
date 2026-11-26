@@ -165,7 +165,8 @@ pub(crate) fn rail(s: &App, x: &Session) -> El {
             "Pull requests",
             &icons::PULL,
             col().w_full().gap(8.0).children(x.prs.iter().map(|p| {
-                row().w_full().gap(8.0).items_center().child(icon(&icons::PULL, 13.0).color(done())).child(text(format!("#{}", p.number)).font(META_BOLD).color(accent())).child(text(p.title.clone()).font(META).color(theme::text()).truncate().min_w(0.0))
+                let url = p.url.clone();
+                row().key(format!("pr-{}", p.number)).w_full().gap(8.0).items_center().radius(6.0).hover(Color::WHITE.alpha(0.06)).on_press(move |_: &mut App| open_link(&url)).child(icon(&icons::PULL, 13.0).color(done())).child(text(format!("#{}", p.number)).font(META_BOLD).color(accent())).child(text(p.title.clone()).font(META).color(theme::text()).truncate().min_w(0.0))
             })),
         ));
     }

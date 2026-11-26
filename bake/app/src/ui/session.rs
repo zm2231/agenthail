@@ -20,8 +20,9 @@ pub(crate) fn header(s: &App, x: &Session) -> El {
         .pb(16.0)
         .window_drag()
         .child(avatar_with_state(&x.title(), state, 40.0))
-        .child(col().grow(1.0).min_w(0.0).gap(7.0).child(text(x.title()).font(HEADING).color(theme::text()).truncate()).child(chips))
+        .child(col().grow(1.0).min_w(0.0).gap(7.0).child(text(x.title()).font(HEADING).color(theme::text()).truncate()).child(chips).child(crate::ui::chips::turn(s, x)))
         .child(pill(state_icon(state), label_value, state_color(state)))
+        .child(session_menu::button(x))
 }
 
 pub(crate) fn composer(s: &App, x: &Session) -> El {

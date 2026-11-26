@@ -80,6 +80,7 @@ pub struct App {
     pub diff: rune_kit::diff::DiffState,
     pub diff_key: (String, usize),
     pub ov: Over,
+    pub menus: ui::session_menu::Menus,
     revealed: Option<String>,
     client: Option<Client>,
     fixtures: Option<Fixtures>,
@@ -157,6 +158,7 @@ fn init() -> App {
         diff: rune_kit::diff::DiffState::new(Vec::new()),
         diff_key: (String::new(), usize::MAX),
         ov: Over::new(live, recording.is_none()),
+        menus: ui::session_menu::Menus::new(),
         revealed: None,
         client: None,
         fixtures: None,
@@ -251,6 +253,7 @@ pub fn select(s: &mut App, id: &str) {
         fetch_item(s, &work.project_key, &work.item_id);
     }
     fetch_requests(s, id);
+    ui::session_menu::load(s, id);
 }
 
 pub fn load_pane(s: &mut App, id: &str) {
@@ -558,6 +561,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Error(error) => s.status = format!("daemon: {error}"),
         }
     }
+    changed |= ui::session_menu::drain(s);
     let mut busy = false;
     let mut counter = s.counter;
     let mut panes_moved = false;

@@ -522,7 +522,8 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -
             if waiting {
                 row_ = row_.subtitle_color(kit().c.warning.icon);
             }
-            sec = sec.row(row_.build(k).key(format!("s-{id}")));
+            let menu_id = id.clone();
+            sec = sec.row(row_.build(k).key(format!("s-{id}")).on_secondary_press(move |s: &mut App, p, _: &mut rune::Tx| crate::ui::session_menu::open_at(s, &menu_id, p)));
         }
         let pname = p.name.clone();
         sec = sec.row(
