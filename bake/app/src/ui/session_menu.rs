@@ -324,10 +324,11 @@ fn patch_of(act: &Act, read: Option<feed::action::ReadState>, from: String) -> O
 
 fn leave_archived(s: &mut App, id: &str) {
     let Some(order) = s.menus.leaving.remove(id) else { return };
-    if s.screen != Screen::Session || s.selected.as_deref() != Some(id) {
+    let now = feed::composer::current(&s.rekeyed, id).to_string();
+    if s.screen != Screen::Session || s.selected.as_deref() != Some(now.as_str()) {
         return;
     }
-    match feed::gone::next_after(&order, id, |x| session(s, x).is_some_and(|x| !x.archived)) {
+    match feed::gone::next_after(&order, id, |x| x != now && session(s, x).is_some_and(|x| !x.archived)) {
         Some(next) => crate::over::open_session(s, &next),
         None => crate::over::go(s, Screen::Now),
     }

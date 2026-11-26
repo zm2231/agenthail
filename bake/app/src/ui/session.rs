@@ -208,7 +208,7 @@ pub(crate) fn changes_view(s: &App, id: &str) -> El {
 
 pub(crate) fn session_screen(s: &App) -> El {
     let Some(id) = s.selected.clone() else { return transcript::loading("Pick a session".into()) };
-    let Some(x) = session(s, &id) else { return super::gone::screen(s, &id) };
+    let Some(x) = session(s, &id).filter(|x| !x.archived) else { return super::gone::screen(s, &id) };
     let mut center = col().grow(1.0).h_full().min_w(0.0).child(header(s, x));
     let open = open_request(s, x).is_some();
     let sent = has_settled(s, x);

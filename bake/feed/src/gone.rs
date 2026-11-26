@@ -56,20 +56,22 @@ pub struct Gone {
     pub history: History,
 }
 
+pub const PAGE: usize = 50;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct History {
     pub returned: usize,
-    pub total: usize,
-    pub truncated: bool,
+    pub cut_text: bool,
 }
 
 impl History {
     pub fn note(self) -> Option<String> {
-        (self.truncated || self.returned < self.total).then(|| if self.total > self.returned { format!("Showing the last {} of {} exchanges.", self.returned, self.total) } else { "Showing only the latest part of this conversation.".to_string() })
-    }
-
-    pub fn more(self, limit: usize) -> bool {
-        self.returned >= limit && self.total > self.returned
+        match (self.returned >= PAGE, self.cut_text) {
+            (true, true) => Some(format!("Showing the last {PAGE} exchanges, with long messages cut short. Older ones aren't loaded here.")),
+            (true, false) => Some(format!("Showing the last {PAGE} exchanges. Older ones aren't loaded here.")),
+            (false, true) => Some("Long messages are cut short here.".into()),
+            (false, false) => None,
+        }
     }
 }
 
@@ -128,10 +130,8 @@ impl Detail {
 
     fn history(&self) -> History {
         let Detail::Found(v) = self else { return History::default() };
-        let n = |k: &str| v[k].as_u64().map(|x| x as usize);
-        let returned = n("transcriptReturnedExchanges").unwrap_or_else(|| v["exchanges"].as_array().map_or(0, Vec::len));
-        let total = n("transcriptOriginalExchanges").or(n("exchangeCount")).unwrap_or(returned).max(returned);
-        History { returned, total, truncated: v["transcriptTruncated"].as_bool().unwrap_or(false) }
+        let returned = v["transcriptReturnedExchanges"].as_u64().map(|x| x as usize).unwrap_or_else(|| v["exchanges"].as_array().map_or(0, Vec::len));
+        History { returned, cut_text: v["transcriptTruncated"].as_bool().unwrap_or(false) }
     }
 
     fn read_error(&self) -> Option<String> {
@@ -215,8 +215,8 @@ pub fn search_terms<'a>(rows: impl Iterator<Item = &'a Session>) -> Vec<String> 
 }
 
 impl Client {
-    pub fn look_up(&self, id: &str, known: Option<&Session>, limit: usize) -> Result<Gone, String> {
-        let detail = Detail::read(self.get_coded(&format!("/api/v1/session?id={}&limit={limit}", enc(id))));
+    pub fn look_up(&self, id: &str, known: Option<&Session>) -> Result<Gone, String> {
+        let detail = Detail::read(self.get_coded(&format!("/api/v1/session?id={}&limit={PAGE}", enc(id))));
         let found = detail.row(id);
         let terms = search_terms([known, found.as_ref()].into_iter().flatten());
         let mut listing = if terms.is_empty() { Listing::Unchecked("it has no name or folder to search by".into()) } else { Listing::Absent };
@@ -384,14 +384,11 @@ mod tests {
     }
 
     #[test]
-    fn a_cut_short_transcript_says_so_and_offers_more_only_when_the_limit_cut_it() {
+    fn a_full_page_or_cut_text_says_what_is_missing() {
         let d = |v: Value| classify("s1", &Detail::Found(v), Listing::Absent, None).unwrap().history;
-        let h = d(json!({"session": {}, "exchanges": [], "exchangeCount": 50, "transcriptTruncated": true, "transcriptReturnedExchanges": 20, "transcriptOriginalExchanges": 50}));
-        assert_eq!(h.note().as_deref(), Some("Showing the last 20 of 50 exchanges."));
-        assert!(h.more(20) && !h.more(80));
-        let bytes = d(json!({"session": {}, "exchanges": [], "transcriptTruncated": true, "transcriptReturnedExchanges": 5, "transcriptOriginalExchanges": 5}));
-        assert_eq!(bytes.note().as_deref(), Some("Showing only the latest part of this conversation."));
-        assert!(!bytes.more(20));
+        assert_eq!(d(json!({"session": {}, "exchanges": [], "transcriptReturnedExchanges": 50})).note().as_deref(), Some("Showing the last 50 exchanges. Older ones aren't loaded here."));
+        assert!(d(json!({"session": {}, "exchanges": [], "transcriptReturnedExchanges": 50, "transcriptTruncated": true})).note().unwrap().contains("long messages cut short"));
+        assert_eq!(d(json!({"session": {}, "exchanges": [{"user": "a"}], "transcriptTruncated": true})).note().as_deref(), Some("Long messages are cut short here."));
         assert_eq!(d(json!({"session": {}, "exchanges": [{"user": "a"}]})).note(), None);
     }
 
