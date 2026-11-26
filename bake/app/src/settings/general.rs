@@ -53,12 +53,12 @@ fn name_section(s: &Prefs, person: &Person, writable: bool) -> El {
     section("Your name", vec![field], Some(prefs::name_footer(person)))
 }
 
-fn delivery(s: &Prefs, busy: &str, hours: i64, writable: bool) -> El {
+fn delivery(s: &Prefs, current: &str, writable: bool) -> El {
     let k = theme::kit();
     let off = !writable || super::busy(s);
     let item = |label: &str, mode: &'static str| {
-        RadioItem::new(label, busy == mode).disabled(off).on_select(move |s: &mut Prefs| {
-            write(s, "delivery", Section::General, GENERAL, move |c| c.set_delivery(mode, hours));
+        RadioItem::new(label, current == mode).disabled(off).on_select(move |s: &mut Prefs| {
+            write(s, "delivery", Section::General, GENERAL, move |c| c.change_delivery(prefs::Delivery::Busy(mode.into())));
         })
     };
     let group = RadioGroup::new().item(item("Queue the message (default)", "queue")).item(item("Steer the running turn", "steer")).disabled(off).build(k);
@@ -69,14 +69,12 @@ fn delivery(s: &Prefs, busy: &str, hours: i64, writable: bool) -> El {
     )
 }
 
-fn recent(s: &Prefs, busy: &str, hours: i64, writable: bool, layer: &mut Vec<El>) -> El {
+fn recent(s: &Prefs, hours: i64, writable: bool, layer: &mut Vec<El>) -> El {
     let choices = prefs::codex_recent_choices(hours).into_iter().map(|h| (prefs::hours_label(h), h.to_string())).collect();
-    let busy = busy.to_string();
     let pick = parts::select(s, "settings-codex-recent", "Codex recent window", choices, &hours.to_string(), !writable || super::busy(s), layer, move |s, value| {
         let Ok(h) = value.parse::<i64>() else { return };
         if h != hours {
-            let busy = busy.clone();
-            write(s, "delivery", Section::General, GENERAL, move |c| c.set_delivery(&busy, h));
+            write(s, "delivery", Section::General, GENERAL, move |c| c.change_delivery(prefs::Delivery::Hours(h)));
         }
     });
     section("Current work", vec![line("Codex recent window", None, pick)], Some("Codex threads stay in Recent this long after their last activity.".into()))
@@ -146,7 +144,7 @@ pub fn page(s: &Prefs, layer: &mut Vec<El>) -> El {
         (None, None) => return out,
     };
     let busy = if busy.is_empty() { "queue".to_string() } else { busy };
-    out = out.child(delivery(s, &busy, hours, writable)).child(recent(s, &busy, hours, writable, layer));
+    out = out.child(delivery(s, &busy, writable)).child(recent(s, hours, writable, layer));
     if let Some(st) = settings {
         out = out.child(limits(s, &st.dashboard, writable));
         if let Some(root) = default_root(s, st, layer) {

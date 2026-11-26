@@ -53,7 +53,11 @@ fn holds(s: &Prefs, root: &CompactRoot, all: &[Hold]) -> Option<El> {
     Some(row().w_full().px(6.0).py(4.0).child(c.build(theme::kit()).w_full()))
 }
 
-fn root_card(s: &Prefs, root: &CompactRoot, all: &[Hold]) -> El {
+fn titles(s: &Prefs, c: &Compaction) -> Vec<String> {
+    prefs::root_titles(&c.roots.iter().map(|r| r.root.as_str()).collect::<Vec<_>>(), &s.home)
+}
+
+fn root_card(s: &Prefs, title: &str, root: &CompactRoot, all: &[Hold]) -> El {
     let idle = &root.agenthail_idle_compaction;
     let mut rows = vec![fact("Window", prefs::window_label(root.auto_compact_window.as_ref()))];
     rows.extend(prefs::model_lines(root).into_iter().map(|(model, window)| fact(&model, window)));
@@ -65,7 +69,7 @@ fn root_card(s: &Prefs, root: &CompactRoot, all: &[Hold]) -> El {
     }
     rows.extend(prefs::override_lines(root).into_iter().map(parts::words));
     rows.extend(holds(s, root, all));
-    section(&prefs::root_title(&root.root, &s.home), rows, Some(root.settings_path.clone()))
+    section(title, rows, Some(root.settings_path.clone()))
 }
 
 fn tri(key: &'static str, value: Option<bool>, set: fn(&mut CompactDraft, Option<bool>)) -> El {
@@ -105,7 +109,7 @@ fn input(s: &Prefs, edit: &rune::TextEdit, label: &str, hint: &str, pick: for<'a
 }
 
 fn change(s: &Prefs, c: &Compaction, layer: &mut Vec<El>) -> El {
-    let choices = c.roots.iter().map(|r| (prefs::root_title(&r.root, &s.home), r.root.clone())).collect();
+    let choices = titles(s, c).into_iter().zip(&c.roots).map(|(t, r)| (t, r.root.clone())).collect();
     let root = parts::select(s, "settings-compact-root", "Account folder", choices, &s.draft.root, busy(s), layer, |s, value| s.draft.root = value);
     let d = draft(s);
     let busy = busy(s);
@@ -150,6 +154,6 @@ pub fn page(s: &Prefs, layer: &mut Vec<El>) -> El {
         None => out.child(parts::reading("Claude settings")),
         Some(Err(f)) => out.child(parts::failure(s, f)),
         Some(Ok(c)) if c.roots.is_empty() => out.child(text("No Claude accounts.").font(META).color(muted()).px(4.0)),
-        Some(Ok(c)) => out.children(c.roots.iter().map(|r| root_card(s, r, c.holds()))).child(change(s, c, layer)),
+        Some(Ok(c)) => out.children(titles(s, c).iter().zip(&c.roots).map(|(t, r)| root_card(s, t, r, c.holds()))).child(change(s, c, layer)),
     }
 }

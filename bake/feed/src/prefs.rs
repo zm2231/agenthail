@@ -265,6 +265,22 @@ fn reply<T: DeserializeOwned>(value: Value) -> Result<T, Failure> {
     serde_json::from_value(value).map_err(|e| Failure { uncertain: true, ..Failure::new(format!("the daemon's reply couldn't be read: {e}")) })
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Delivery {
+    Busy(String),
+    Hours(i64),
+}
+
+impl Delivery {
+    pub fn over(&self, now: &Dashboard) -> (String, i64) {
+        let busy = if now.busy_delivery.is_empty() { "queue".to_string() } else { now.busy_delivery.clone() };
+        match self {
+            Delivery::Busy(mode) => (mode.clone(), now.codex_recent_hours),
+            Delivery::Hours(hours) => (busy, *hours),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Notify {
     Enable,
@@ -312,6 +328,12 @@ impl Client {
 
     pub fn set_delivery(&self, busy_delivery: &str, codex_recent_hours: i64) -> Result<(), Failure> {
         self.post_settings(json!({"action": "dashboard-config", "busyDelivery": busy_delivery, "codexRecentHours": codex_recent_hours}))
+    }
+
+    pub fn change_delivery(&self, change: Delivery) -> Result<(), Failure> {
+        let now = self.settings()?.dashboard;
+        let (busy, hours) = change.over(&now);
+        self.set_delivery(&busy, hours)
     }
 
     pub fn set_resume_after_limit(&self, on: bool) -> Result<(), Failure> {
@@ -446,6 +468,11 @@ pub fn model_lines(root: &CompactRoot) -> Vec<(String, String)> {
 
 fn components(path: &str) -> Vec<&str> {
     path.split('/').filter(|p| !p.is_empty() && *p != ".").collect()
+}
+
+pub fn root_titles(roots: &[&str], home: &str) -> Vec<String> {
+    let titles: Vec<String> = roots.iter().map(|r| root_title(r, home)).collect();
+    titles.iter().zip(roots).map(|(t, r)| if titles.iter().filter(|o| *o == t).count() > 1 { format!("{t} ({r})") } else { t.clone() }).collect()
 }
 
 pub fn root_title(root: &str, home: &str) -> String {
@@ -632,6 +659,25 @@ mod tests {
         assert_eq!(root_title("/Users/a/.claude-work", "/Users/a"), "claude-work");
         assert_eq!(root_title("/Users/a/accounts/backup/.claude", "/Users/a"), "backup");
         assert_eq!(root_title("/Users/a/.claude/", "/Users/a/"), "Default");
+        assert_eq!(
+            root_titles(&["/Users/a/.claude", "/x/work/.claude", "/y/work/.claude"], "/Users/a"),
+            vec!["Default", "work (/x/work/.claude)", "work (/y/work/.claude)"]
+        );
+    }
+
+    #[test]
+    fn a_delivery_change_keeps_the_other_value_the_daemon_holds_now() {
+        let settings = |busy: &str, hours: i64| format!(r#"{{"dashboard":{{"busyDelivery":"{busy}","codexRecentHours":{hours}}}}}"#);
+        let (s1, s2) = (settings("queue", 12), settings("", 3));
+        let (client, rx) = daemon(replies(&[(200, &s1), (200, r#"{"ok":true}"#), (200, &s2), (200, r#"{"ok":true}"#), (401, r#"{"error":{"message":"no"}}"#)]));
+        client.change_delivery(Delivery::Busy("steer".into())).unwrap();
+        client.change_delivery(Delivery::Hours(24)).unwrap();
+        assert!(client.change_delivery(Delivery::Hours(8)).unwrap_err().denied);
+        let sent: Vec<(String, Value)> = rx.try_iter().filter(|(p, _)| p == "/api/v1/settings").map(|(p, b)| (p, b)).collect();
+        assert_eq!(
+            sent.into_iter().map(|(_, b)| b).filter(|b| !b.is_null()).collect::<Vec<_>>(),
+            vec![json!({"action": "dashboard-config", "busyDelivery": "steer", "codexRecentHours": 12}), json!({"action": "dashboard-config", "busyDelivery": "queue", "codexRecentHours": 24})]
+        );
     }
 
     #[test]

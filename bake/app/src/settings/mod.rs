@@ -58,8 +58,9 @@ pub struct Prefs {
     writing: Option<String>,
     settling: HashSet<Read>,
     sent: Option<CompactDraft>,
-    generation: u64,
-    verified: u64,
+    tick: u64,
+    base_ok_at: u64,
+    denied_at: u64,
     pub notes: HashMap<Section, Failure>,
     pub name: TextEdit,
     seeded: Option<Person>,
@@ -141,8 +142,9 @@ fn init() -> Prefs {
         writing: None,
         settling: HashSet::new(),
         sent: None,
-        generation: 0,
-        verified: 0,
+        tick: 0,
+        base_ok_at: 0,
+        denied_at: 0,
         notes: HashMap::new(),
         name: TextEdit::new(""),
         seeded: None,
@@ -197,7 +199,6 @@ fn fetch(s: &mut Prefs, what: Read) {
 
 pub fn reload(s: &mut Prefs) {
     s.loaded = true;
-    s.generation += 1;
     if s.client.is_some() {
         s.settling.extend(ALL);
     }
@@ -249,7 +250,14 @@ pub fn send_compaction(s: &mut Prefs, sent: CompactDraft) {
 }
 
 pub fn token_verified(s: &Prefs) -> bool {
-    s.verified == s.generation && matches!(&s.base, Some(Ok(_)))
+    matches!(&s.base, Some(Ok(_))) && s.base_ok_at > s.denied_at
+}
+
+fn refused(s: &mut Prefs, what: Option<Read>, failed: bool) {
+    if failed && what != Some(Read::Base) {
+        s.denied_at = s.tick;
+        fetch(s, Read::Base);
+    }
 }
 
 pub fn explain(s: &Prefs, f: &Failure) -> Failure {
@@ -276,30 +284,51 @@ fn settle_compaction(s: &mut Prefs) {
     }
 }
 
+fn denied<T>(r: &Result<T, Failure>) -> bool {
+    r.as_ref().is_err_and(|f| f.denied)
+}
+
 fn take(s: &mut Prefs, done: Done) {
     s.in_flight = s.in_flight.saturating_sub(1);
+    s.tick += 1;
     match done {
         Done::Read(what, seq, got) => {
             if s.seq.get(&what) != Some(&seq) {
                 return;
             }
             s.settling.remove(&what);
-            match got {
+            let refusal = match got {
                 Got::Base(r) => {
                     if r.is_ok() {
-                        s.verified = s.generation;
+                        s.base_ok_at = s.tick;
                     }
                     s.base = Some(r);
                     seed_name(s);
+                    false
                 }
-                Got::Settings(r) => s.settings = Some(r),
-                Got::Remote(r) => s.remote = Some(r),
+                Got::Settings(r) => {
+                    let d = denied(&r);
+                    s.settings = Some(r);
+                    d
+                }
+                Got::Remote(r) => {
+                    let d = denied(&r);
+                    s.remote = Some(r);
+                    d
+                }
                 Got::Compaction(r) => {
+                    let d = denied(&r);
                     s.compaction = Some(r);
                     settle_compaction(s);
+                    d
                 }
-                Got::Preferences(r) => s.preferences = Some(r),
-            }
+                Got::Preferences(r) => {
+                    let d = denied(&r);
+                    s.preferences = Some(r);
+                    d
+                }
+            };
+            refused(s, Some(what), refusal);
         }
         Done::Wrote(key, section, result, then) => {
             if s.writing.as_deref() == Some(key.as_str()) {
@@ -318,7 +347,9 @@ fn take(s: &mut Prefs, done: Done) {
                 }
                 Ok(()) => {}
                 Err(failure) => {
+                    let refusal = failure.denied;
                     s.notes.insert(section, failure);
+                    refused(s, None, refusal);
                 }
             }
             for what in then {
