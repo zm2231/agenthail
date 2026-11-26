@@ -227,6 +227,15 @@ impl Notified {
     }
 }
 
+pub fn daemon_posts(home: &Path) -> bool {
+    #[derive(Deserialize)]
+    struct Config {
+        #[serde(default)]
+        enabled: bool,
+    }
+    std::fs::read(home.join(".agenthail/notifications.json")).ok().and_then(|b| serde_json::from_slice::<Config>(&b).ok()).is_some_and(|c| c.enabled)
+}
+
 #[cfg(test)]
 #[path = "notify_tests.rs"]
 mod tests;

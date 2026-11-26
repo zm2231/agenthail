@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use feed::catalog::RespondError;
 use feed::derive::needs::{NeedKind, Target};
-use feed::notify::{Kind, Notice, Notified, Prefs, REPLY, choice_of};
+use feed::notify::{Kind, Notice, Notified, Prefs, REPLY, choice_of, daemon_posts};
 use rune_notify::{Click, Notification};
 
 use crate::{App, Screen};
@@ -193,6 +193,7 @@ pub fn tick(s: &mut App) -> bool {
         steps.push(store.take(Kind::Finished, found, &[String::new()], now, |n| focused && on_screen(s, n)));
         s.notify.store = store;
     }
+    let quiet = !steps.is_empty() && std::env::var_os("HOME").is_some_and(|home| daemon_posts(Path::new(&home)));
     let mut dirty = false;
     let mut withdrawn = std::mem::take(&mut s.notify.withdrawn);
     for step in steps {
@@ -201,8 +202,10 @@ pub fn tick(s: &mut App) -> bool {
         let gone: Vec<&str> = withdrawn.iter().map(String::as_str).collect();
         rune_notify::remove(&gone);
         withdrawn.drain(..withdrawn.len().saturating_sub(WITHDRAWN_KEPT));
-        for n in &step.post {
-            post(n);
+        if !quiet {
+            for n in &step.post {
+                post(n);
+            }
         }
     }
     s.notify.withdrawn = withdrawn;

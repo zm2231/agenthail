@@ -223,3 +223,18 @@ fn the_inbox_names_each_computer_it_read() {
     inbox.add(Page::default(), "studio", "Studio", "own");
     assert_eq!(inbox.read, ["", "studio"]);
 }
+
+#[test]
+fn the_daemon_posts_only_while_its_desktop_notifications_are_on() {
+    let home = std::env::temp_dir().join(format!("notify-daemon-posts-{}", std::process::id()));
+    let config = home.join(".agenthail/notifications.json");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    assert!(!daemon_posts(&home));
+    std::fs::write(&config, "{\n  \"enabled\": true\n}\n").unwrap();
+    assert!(daemon_posts(&home));
+    std::fs::write(&config, "{}\n").unwrap();
+    assert!(!daemon_posts(&home));
+    std::fs::write(&config, "not json").unwrap();
+    assert!(!daemon_posts(&home));
+    std::fs::remove_dir_all(&home).unwrap();
+}
