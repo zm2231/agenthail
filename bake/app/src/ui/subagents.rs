@@ -6,12 +6,18 @@ use feed::subagents::{self as crew, Asked, ClaudeSubagent, ClaudeSubagents};
 use rune_kit::ControlSize;
 
 const KEPT: usize = 6;
-const PARENT_RETRY: Duration = Duration::from_secs(15);
+const PARENT_EVERY: Duration = Duration::from_secs(15);
 
 struct PageAsk {
     key: String,
     at: Instant,
     seq: u64,
+}
+
+struct RowAsk {
+    at: Instant,
+    seq: u64,
+    in_flight: bool,
 }
 
 struct ClaudeAsk {
@@ -31,7 +37,7 @@ pub struct Crew {
     claude_asked: HashMap<String, ClaudeAsk>,
     claude_loading: HashSet<String>,
     parents: HashMap<String, Session>,
-    parent_asked: HashMap<String, Option<Instant>>,
+    parent_asked: HashMap<String, RowAsk>,
     expanded: HashSet<String>,
     recent: Vec<String>,
 }
@@ -39,7 +45,7 @@ pub struct Crew {
 pub enum Done {
     Page(String, u64, Result<Vec<Session>, String>),
     Claude(String, Result<ClaudeSubagents, String>),
-    Parent(String, Result<Session, String>),
+    Parent(String, u64, Result<Session, String>),
 }
 
 pub(crate) fn fetched<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
@@ -84,7 +90,7 @@ fn touch(s: &mut App, id: &str) {
         s.crew.parents.retain(|id, _| held.contains(id));
     }
     if s.crew.parent_asked.len() > KEPT {
-        s.crew.parent_asked.retain(|id, failed| failed.is_none() || held.contains(id));
+        s.crew.parent_asked.retain(|id, a| a.in_flight || held.contains(id));
     }
 }
 
@@ -94,7 +100,7 @@ pub(crate) fn load(s: &mut App, id: &str) {
         s.crew.asked.remove(id);
     }
     if let Some(parent) = parent_of(s, id) {
-        s.crew.parent_asked.remove(&parent);
+        s.crew.parent_asked.retain(|p, a| *p != parent || a.in_flight);
     }
     refresh(s, id);
 }
@@ -109,13 +115,20 @@ pub(crate) fn refresh(s: &mut App, id: &str) {
     }
     touch(s, id);
     page(s, id);
+    if s.crew.parents.contains_key(id) && outside(s, id) {
+        parent_row(s, id);
+    }
     if let Some(parent) = parent {
-        if session(s, &parent).is_none() {
+        if outside(s, &parent) {
             parent_row(s, &parent);
         }
         page(s, &parent);
     }
     claude(s, id);
+}
+
+fn outside(s: &App, id: &str) -> bool {
+    !s.sessions.iter().any(|x| x.id == id) && !s.crew.pages.values().flatten().any(|x| x.id == id)
 }
 
 fn parent_of(s: &App, id: &str) -> Option<String> {
@@ -126,14 +139,14 @@ fn parent_of(s: &App, id: &str) -> Option<String> {
 }
 
 fn parent_row(s: &mut App, id: &str) {
-    match s.crew.parent_asked.get(id) {
-        Some(None) => return,
-        Some(Some(failed)) if failed.elapsed() < PARENT_RETRY => return,
-        _ => {}
+    if s.crew.parent_asked.get(id).is_some_and(|a| a.in_flight || a.at.elapsed() < PARENT_EVERY) {
+        return;
     }
-    s.crew.parent_asked.insert(id.to_string(), None);
+    s.crew.seq += 1;
+    let seq = s.crew.seq;
+    s.crew.parent_asked.insert(id.to_string(), RowAsk { at: Instant::now(), seq, in_flight: true });
     let id = id.to_string();
-    spawn(s, move |c| Done::Parent(id.clone(), c.session_row(&id)));
+    spawn(s, move |c| Done::Parent(id.clone(), seq, c.session_row(&id)));
 }
 
 fn page(s: &mut App, id: &str) {
@@ -207,15 +220,14 @@ pub(crate) fn done(s: &mut App, done: Done) {
                 }
             }
         }
-        Done::Parent(id, result) => match result {
-            Ok(row) => {
-                s.crew.parent_asked.remove(&id);
+        Done::Parent(id, seq, result) => {
+            let Some(asked) = s.crew.parent_asked.get_mut(&id).filter(|a| a.seq == seq) else { return };
+            asked.in_flight = false;
+            asked.at = Instant::now();
+            if let Ok(row) = result {
                 s.crew.parents.insert(id, row);
             }
-            Err(_) => {
-                s.crew.parent_asked.insert(id, Some(Instant::now()));
-            }
-        },
+        }
     }
 }
 

@@ -57,6 +57,7 @@ pub fn page_key(x: &Session) -> String {
 
 pub const PAGE_EVERY: Duration = Duration::from_secs(60);
 pub const CLAUDE_EVERY: Duration = Duration::from_secs(15);
+pub const CLAUDE_IDLE_EVERY: Duration = Duration::from_secs(60);
 
 pub fn page_due(same_key: bool, since: Duration) -> bool {
     !same_key || since >= PAGE_EVERY
@@ -71,7 +72,8 @@ pub struct Asked<'a> {
 pub fn claude_due(asked: Option<Asked>, stamp: &str, working: bool) -> bool {
     match asked {
         None => true,
-        Some(a) => a.since >= CLAUDE_EVERY && (a.stamp != stamp || working || a.failed),
+        Some(a) if a.stamp != stamp || working || a.failed => a.since >= CLAUDE_EVERY,
+        Some(a) => a.since >= CLAUDE_IDLE_EVERY,
     }
 }
 
@@ -313,7 +315,8 @@ mod tests {
     fn claude_subagents_are_read_again_while_any_could_have_changed() {
         let asked = |stamp, secs, failed| Some(Asked { stamp, since: Duration::from_secs(secs), failed });
         assert!(claude_due(None, "t1", false));
-        assert!(!claude_due(asked("t1", 60, false), "t1", false));
+        assert!(!claude_due(asked("t1", 59, false), "t1", false));
+        assert!(claude_due(asked("t1", 60, false), "t1", false));
         assert!(claude_due(asked("t1", 15, false), "t1", true));
         assert!(!claude_due(asked("t1", 5, false), "t1", true));
         assert!(claude_due(asked("t0", 15, false), "t1", false));
