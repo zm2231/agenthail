@@ -29,7 +29,7 @@ impl Entry {
 pub enum Patch {
     Pinned(Option<String>),
     Archived(bool),
-    Read { receipt: ReadState, from: String },
+    Read { receipt: ReadState, from: Vec<String> },
     Alias(Option<String>),
 }
 
@@ -43,18 +43,28 @@ impl Patch {
         }
     }
 
-    /// A read receipt holds while the row still carries the revision it replaced.
+    /// A read receipt holds while the row still carries a revision it replaced.
     pub fn shown(&self, x: &Session) -> bool {
         match self {
             Patch::Pinned(at) => x.pinned_at.is_some() == at.is_some(),
             Patch::Archived(on) => x.archived == *on,
-            Patch::Read { from, .. } => x.read_state.as_ref().is_none_or(|r| r.revision != *from),
+            Patch::Read { from, .. } => x.read_state.as_ref().is_none_or(|r| !from.contains(&r.revision)),
             Patch::Alias(alias) => x.alias == *alias,
         }
     }
 
     pub fn same_field(&self, other: &Patch) -> bool {
         std::mem::discriminant(self) == std::mem::discriminant(other)
+    }
+
+    pub fn inherit(&mut self, older: &Patch) {
+        if let (Patch::Read { from, .. }, Patch::Read { receipt, from: before }) = (self, older) {
+            for revision in before.iter().chain([&receipt.revision]) {
+                if !from.contains(revision) {
+                    from.push(revision.clone());
+                }
+            }
+        }
     }
 
     pub fn same_target(&self, other: &Patch) -> bool {
@@ -241,7 +251,7 @@ mod tests {
         Patch::Pinned(Some("2026-11-26T10:00:00Z".into())).apply(&mut x);
         Patch::Archived(true).apply(&mut x);
         Patch::Alias(Some("scout".into())).apply(&mut x);
-        Patch::Read { receipt: ReadState { first_unread: "item-2".into(), revision: "r2".into() }, from: "r1".into() }.apply(&mut x);
+        Patch::Read { receipt: ReadState { first_unread: "item-2".into(), revision: "r2".into() }, from: vec!["r1".into()] }.apply(&mut x);
         assert!(x.pinned() && x.archived && x.unread());
         assert_eq!(x.title(), "@scout");
         Patch::Pinned(None).apply(&mut x);
@@ -253,13 +263,27 @@ mod tests {
     #[test]
     fn a_read_receipt_holds_until_the_row_moves_past_the_revision_it_replaced() {
         let mut x = session();
-        let read = Patch::Read { receipt: ReadState { first_unread: String::new(), revision: "B".into() }, from: "A".into() };
+        let read = Patch::Read { receipt: ReadState { first_unread: String::new(), revision: "B".into() }, from: vec!["A".into()] };
         x.read_state = Some(ReadState { first_unread: "item-1".into(), revision: "A".into() });
         assert!(!read.shown(&x), "the row is still at the revision the mark replaced");
         x.read_state = Some(ReadState { first_unread: String::new(), revision: "B".into() });
         assert!(read.shown(&x));
         x.read_state = Some(ReadState { first_unread: "item-7".into(), revision: "C".into() });
         assert!(read.shown(&x), "a later revision is the daemon's word");
+    }
+
+    #[test]
+    fn a_later_read_mark_remembers_every_revision_before_it() {
+        let read = Patch::Read { receipt: ReadState { first_unread: String::new(), revision: "B".into() }, from: vec!["A".into()] };
+        let mut unread = Patch::Read { receipt: ReadState { first_unread: "item-1".into(), revision: "C".into() }, from: vec!["B".into()] };
+        unread.inherit(&read);
+        let mut x = session();
+        for stale in ["A", "B"] {
+            x.read_state = Some(ReadState { first_unread: String::new(), revision: stale.into() });
+            assert!(!unread.shown(&x), "{stale} is older than C");
+        }
+        x.read_state = Some(ReadState { first_unread: "item-1".into(), revision: "C".into() });
+        assert!(unread.shown(&x));
     }
 
     #[test]

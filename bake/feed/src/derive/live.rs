@@ -157,10 +157,14 @@ impl Overview {
     }
 
     /// The daemon can publish a row read before a confirmed change; hold it until shown.
-    pub fn patch(&mut self, id: &str, patch: Patch, at: Instant) -> bool {
+    pub fn patch(&mut self, id: &str, mut patch: Patch, at: Instant) -> bool {
         let Some(x) = self.base.sessions.iter_mut().find(|x| x.id == id) else { return false };
         let held = self.expected.iter().position(|e| e.id == id && e.patch.same_field(&patch));
-        let daemon = match held.map(|i| self.expected.remove(i)) {
+        let held = held.map(|i| self.expected.remove(i));
+        if let Some(e) = &held {
+            patch.inherit(&e.patch);
+        }
+        let daemon = match held {
             Some(e) if e.patch.same_target(&patch) || !patch.shown(x) => e.daemon,
             Some(_) => return false,
             None if patch.shown(x) => return false,

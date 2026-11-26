@@ -64,7 +64,7 @@ fn session_menu(s: &App, open: &Open, layer: &mut Vec<El>) {
         }
         for entry in group {
             let (id, act) = (x.id.clone(), entry.act.clone());
-            let mut item = MenuItem::new(entry.label).icon(act_icon(&entry.act)).disabled(!entry.enabled || waiting && !matches!(entry.act, Act::Rename | Act::Pr(_)));
+            let mut item = MenuItem::new(entry.label).icon(act_icon(&entry.act)).disabled(!entry.enabled || waiting && !matches!(entry.act, Act::Pr(_)));
             if let Some(note) = entry.note {
                 item = item.description(note);
             }

@@ -255,3 +255,17 @@ fn a_held_change_gives_way_after_the_hold_without_a_newer_snapshot() {
     assert!(!ov.sessions()[0].archived, "the daemon's last value");
     assert!(!ov.expire());
 }
+
+#[test]
+fn chained_read_marks_hold_against_a_row_older_than_both() {
+    use crate::action::ReadState;
+    use crate::menu::Patch;
+    let mut ov = Overview::default();
+    let mut at_a = session("a", "p", "2026-11-24T11:00:00Z", "idle");
+    at_a.read_state = Some(ReadState { first_unread: "item-1".into(), revision: "A".into() });
+    assert!(ov.take_sessions("2026-11-24T12:00:00Z", vec![at_a.clone()]));
+    assert!(ov.patch("a", Patch::Read { receipt: ReadState { first_unread: String::new(), revision: "B".into() }, from: vec!["A".into()] }, Instant::now()));
+    assert!(ov.patch("a", Patch::Read { receipt: ReadState { first_unread: "item-1".into(), revision: "C".into() }, from: vec!["B".into()] }, Instant::now()));
+    assert!(ov.take_sessions("2026-11-24T12:00:03Z", vec![at_a]));
+    assert_eq!(ov.sessions()[0].read_state.as_ref().unwrap().revision, "C");
+}

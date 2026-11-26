@@ -261,6 +261,10 @@ pub fn save_rename(s: &mut App) {
         close_rename(s);
         return;
     }
+    if !s.menus.busy.insert((id.clone(), "menu")) {
+        s.menus.rename_error = Some("Another change to this session is still on its way.".into());
+        return;
+    }
     s.menus.rename_saving = true;
     s.menus.rename_error = None;
     let (name, seq) = (menu::normalized(&text), s.menus.rename_seq);
@@ -306,7 +310,7 @@ fn patch_of(act: &Act, read: Option<feed::action::ReadState>, from: String) -> O
     match act {
         Act::Pin(on) => Some(Patch::Pinned(on.then(stamp))),
         Act::Archive(on) => Some(Patch::Archived(*on)),
-        Act::Read(_) => read.map(|receipt| Patch::Read { receipt, from }),
+        Act::Read(_) => read.map(|receipt| Patch::Read { receipt, from: vec![from] }),
         _ => None,
     }
 }
@@ -366,6 +370,7 @@ fn settled(s: &mut App, done: Done) {
             s.ov.notice = Some(failure(verb(&act), &error));
         }
         Done::Renamed(id, seq, result) => {
+            s.menus.busy.remove(&(id.clone(), "menu"));
             let current = s.menus.renaming.as_deref() == Some(id.as_str()) && s.menus.rename_seq == seq;
             match result {
                 Ok(alias) => {
