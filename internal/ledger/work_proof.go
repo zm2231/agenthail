@@ -30,7 +30,7 @@ const (
 
 var proofOutcomes = []string{ProofPass, ProofFail, ProofPending}
 
-var proofStates = []WorkState{WorkInProgress, WorkBlocked, WorkInReview, WorkOpen}
+var proofStates = []WorkState{WorkInProgress, WorkBlocked, WorkInReview}
 
 type ProofLink struct {
 	Title string `json:"title"`
@@ -139,7 +139,7 @@ func (b *Board) planProof(req WorkRequest, w ProofWrite) (WorkProofPayload, stri
 		return WorkProofPayload{}, "", refuse("%q is not a work item in %s", req.ItemID, req.ProjectKey)
 	}
 	if item.Assignee == "" || item.Assignee != req.SessionID || !slices.Contains(proofStates, item.State) {
-		return WorkProofPayload{}, "", refuse("only the session holding %s writes its proof, while it is in_progress, blocked, in_review or open after an unblock", item.ID)
+		return WorkProofPayload{}, "", refuse("only the session holding %s writes its proof, while it is in_progress, blocked or in_review", item.ID)
 	}
 	payload := WorkProofPayload{ItemID: item.ID, Op: w.Op, Actor: req.SessionID}
 	current := func() (*ProofStep, error) {
