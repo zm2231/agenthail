@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::time::Instant;
 
 use serde_json::json;
 
@@ -75,7 +76,7 @@ fn hands_on_comes_from_fetched_tails_and_loaded_panes() {
     let at = "2026-11-24T12:00:00Z";
     let recorded: Recorded = serde_json::from_value(json!({"updatedAt": at, "projects": [{"id": "p", "displayName": "P"}]})).unwrap();
     let mut ov = Overview::default();
-    ov.refresh(Fetched { recorded: Recorded { sessions: vec![session("fetched", "2026-11-24T11:58:00Z"), session("paned", "2026-11-24T11:59:00Z")], ..recorded }, ledgers: Default::default() });
+    ov.refresh(Fetched { recorded: Recorded { sessions: vec![session("fetched", "2026-11-24T11:58:00Z"), session("paned", "2026-11-24T11:59:00Z")], ..recorded }, ledgers: Default::default(), started: Instant::now() });
     assert!(ov.world(&[]).hands_on(&[]).is_empty());
     let open: HashSet<String> = ["paned".to_string()].into();
     let due = ov.due_tails(&open);

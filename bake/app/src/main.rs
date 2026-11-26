@@ -22,7 +22,7 @@ pub enum Bg {
     Snapshot(String, Vec<Session>),
     Item(String, WorkItem),
     Overview(Box<Fetched>),
-    Ledger(String, Result<Ledger, String>),
+    Ledger(String, std::time::Instant, Result<Ledger, String>),
     Tail(String, String, Result<Vec<feed::Item>, String>),
     OverviewError(String),
     Sent(String, Result<(), feed::catalog::RespondError>),
@@ -300,10 +300,10 @@ pub fn fetch_ledger(s: &mut App, project: &str) {
         return;
     }
     rebuild(s);
-    let (tx, project, sessions) = (s.outbox.clone(), project.to_string(), s.sessions.clone());
+    let (tx, project, sessions, started) = (s.outbox.clone(), project.to_string(), s.sessions.clone(), std::time::Instant::now());
     std::thread::spawn(move || {
         let result = feed::derive::live::ledger(&client, &project, &sessions);
-        let _ = tx.send(Bg::Ledger(project, result));
+        let _ = tx.send(Bg::Ledger(project, started, result));
     });
 }
 
@@ -508,8 +508,8 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 s.ov.live.take_tail(&id, last_active, result);
                 rebuild(s);
             }
-            Bg::Ledger(project, result) => {
-                s.ov.live.take_ledger(&project, result);
+            Bg::Ledger(project, started, result) => {
+                s.ov.live.take_ledger(&project, started, result);
                 rebuild(s);
             }
             Bg::OverviewError(error) => s.ov.notice = Some(format!("Couldn't refresh the overview: {error}")),

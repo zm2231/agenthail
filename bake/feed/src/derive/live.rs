@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::time::Instant;
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -16,6 +17,7 @@ const RECENT_DAYS: i64 = 4;
 pub struct Fetched {
     pub recorded: Recorded,
     pub ledgers: HashMap<String, Result<Vec<Work>, String>>,
+    pub started: Instant,
 }
 
 pub struct Ledger {
@@ -24,6 +26,7 @@ pub struct Ledger {
 }
 
 pub fn fetch(client: &Client) -> Result<Fetched> {
+    let started = Instant::now();
     let snap = client.get_json("/api/v1/snapshot")?;
     let now = snap["updatedAt"].as_str().and_then(parse_time).unwrap_or_else(OffsetDateTime::now_utc);
     let sessions: Vec<Session> = serde_json::from_value(snap["sessions"].clone()).unwrap_or_default();
@@ -52,7 +55,7 @@ pub fn fetch(client: &Client) -> Result<Fetched> {
     let mut recorded: Recorded = serde_json::from_value(raw)?;
     recorded.actors = actors(client, &sessions, ledgers.values().filter_map(|r| r.as_ref().ok()).flatten());
     recorded.sessions = sessions;
-    Ok(Fetched { recorded, ledgers })
+    Ok(Fetched { recorded, ledgers, started })
 }
 
 pub fn ledger(client: &Client, project: &str, sessions: &[Session]) -> Result<Ledger, String> {
@@ -94,11 +97,13 @@ fn actors<'a>(client: &Client, sessions: &[Session], rows: impl Iterator<Item = 
     })
 }
 
-// Sessions only move forward in time, and a project's rows survive a failed fetch.
+// Sessions only move forward in time, a project's rows survive a failed fetch,
+// and a ledger fetch never overwrites one that started after it.
 #[derive(Default)]
 pub struct Overview {
     base: Recorded,
     ledgers: HashMap<String, Vec<Work>>,
+    ledger_at: HashMap<String, Instant>,
     failed: HashSet<String>,
     covered: HashSet<String>,
     pending: HashSet<String>,
@@ -108,8 +113,8 @@ pub struct Overview {
 fn newer(at: &str, than: &str) -> bool {
     match (parse_time(at), parse_time(than)) {
         (Some(a), Some(b)) => a > b,
-        (_, None) => true,
-        (None, Some(_)) => false,
+        (Some(_), None) => true,
+        (None, _) => false,
     }
 }
 
@@ -134,7 +139,7 @@ impl Overview {
     }
 
     pub fn refresh(&mut self, fetched: Fetched) {
-        let Fetched { mut recorded, ledgers } = fetched;
+        let Fetched { mut recorded, ledgers, started } = fetched;
         if !newer(&recorded.updated_at, &self.base.updated_at) {
             recorded.updated_at = std::mem::take(&mut self.base.updated_at);
             recorded.sessions = std::mem::take(&mut self.base.sessions);
@@ -146,11 +151,12 @@ impl Overview {
         self.base = recorded;
         self.covered = ledgers.keys().cloned().collect();
         for (key, result) in ledgers {
-            self.apply(key, result);
+            self.apply(key, started, result);
         }
         let listed: HashSet<&str> = self.base.projects.iter().filter(|p| !p.archived).map(|p| p.id.as_str()).collect();
         self.ledgers.retain(|k, _| listed.contains(k.as_str()));
         self.failed.retain(|k| listed.contains(k.as_str()));
+        self.ledger_at.retain(|k, _| listed.contains(k.as_str()));
     }
 
     pub fn wants(&mut self, project: &str) -> bool {
@@ -161,16 +167,20 @@ impl Overview {
         true
     }
 
-    pub fn take_ledger(&mut self, project: &str, result: Result<Ledger, String>) {
+    pub fn take_ledger(&mut self, project: &str, started: Instant, result: Result<Ledger, String>) {
         self.pending.remove(project);
         let rows = result.map(|l| {
             self.base.actors.extend(l.actors);
             l.rows
         });
-        self.apply(project.to_string(), rows);
+        self.apply(project.to_string(), started, rows);
     }
 
-    fn apply(&mut self, key: String, result: Result<Vec<Work>, String>) {
+    fn apply(&mut self, key: String, started: Instant, result: Result<Vec<Work>, String>) {
+        if self.ledger_at.get(&key).is_some_and(|at| *at > started) {
+            return;
+        }
+        self.ledger_at.insert(key.clone(), started);
         match result {
             Ok(rows) => {
                 self.failed.remove(&key);
