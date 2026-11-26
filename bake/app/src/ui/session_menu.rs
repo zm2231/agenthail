@@ -211,7 +211,7 @@ pub fn run(s: &mut App, id: &str, act: Act) {
             }
             super::gone::recheck(s, id);
             if act == Act::Archive(true) {
-                let project = session(s, id).and_then(|x| crate::over::ui::project_for(s, x));
+                let project = super::gone::shown(s, id).and_then(|x| crate::over::ui::project_for(s, x));
                 let order = crate::over::ui::sidebar_order(s, project.as_deref(), Some(id));
                 s.menus.leaving.insert(id.to_string(), order);
             }
@@ -273,6 +273,7 @@ pub fn save_rename(s: &mut App) {
         s.menus.rename_error = Some("Another change to this session is still on its way.".into());
         return;
     }
+    super::gone::recheck(s, &id);
     s.menus.rename_saving = true;
     s.menus.rename_error = None;
     let (name, seq) = (menu::normalized(&text), s.menus.rename_seq);
