@@ -57,13 +57,14 @@ fn session_menu(s: &App, open: &Open, layer: &mut Vec<El>) {
         Some(p) => m.at(p.x, p.y),
         None => m.placement(Placement::BottomEnd),
     };
+    let waiting = s.menus.busy.contains(&(x.id.clone(), "menu"));
     for (i, group) in menu::entries(x).into_iter().enumerate() {
         if i > 0 {
             m = m.separator();
         }
         for entry in group {
             let (id, act) = (x.id.clone(), entry.act.clone());
-            let mut item = MenuItem::new(entry.label).icon(act_icon(&entry.act)).disabled(!entry.enabled);
+            let mut item = MenuItem::new(entry.label).icon(act_icon(&entry.act)).disabled(!entry.enabled || waiting && !matches!(entry.act, Act::Rename | Act::Pr(_)));
             if let Some(note) = entry.note {
                 item = item.description(note);
             }

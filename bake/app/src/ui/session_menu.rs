@@ -204,7 +204,7 @@ pub fn run(s: &mut App, id: &str, act: Act) {
         Act::Rename => start_rename(s, id),
         Act::Pr(url) => open_link(&url),
         act => {
-            if not_sent(s) {
+            if not_sent(s) || !s.menus.busy.insert((id.to_string(), "menu")) {
                 return;
             }
             let revision = session(s, id).and_then(|x| x.read_state.as_ref()).map(|r| r.revision.clone()).unwrap_or_default();
@@ -356,11 +356,15 @@ fn settled(s: &mut App, done: Done) {
             }
         }
         Done::Acted(id, act, from, Ok(read)) => {
+            s.menus.busy.remove(&(id.clone(), "menu"));
             if let Some(patch) = patch_of(&act, read, from) {
                 land(s, &id, patch);
             }
         }
-        Done::Acted(_, act, _, Err(error)) => s.ov.notice = Some(failure(verb(&act), &error)),
+        Done::Acted(id, act, _, Err(error)) => {
+            s.menus.busy.remove(&(id, "menu"));
+            s.ov.notice = Some(failure(verb(&act), &error));
+        }
         Done::Renamed(id, seq, result) => {
             let current = s.menus.renaming.as_deref() == Some(id.as_str()) && s.menus.rename_seq == seq;
             match result {
@@ -411,6 +415,10 @@ pub fn drain(s: &mut App) -> bool {
     while let Ok(done) = s.menus.rx.try_recv() {
         changed = true;
         settled(s, done);
+    }
+    if s.ov.live.expire() {
+        s.sessions = s.ov.live.sessions().to_vec();
+        changed = true;
     }
     if let Some((id, key)) = s.menus.chip.clone()
         && !chips_for(s, &id).iter().any(|c| c.key == key && c.changeable)

@@ -226,3 +226,32 @@ fn an_older_overview_does_not_count_as_the_daemon_showing_a_change() {
     ov.refresh(fetched("2026-11-24T12:00:09Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")], vec![]));
     assert!(ov.sessions()[0].archived, "a newer overview with the old row still holds");
 }
+
+#[test]
+fn a_repeated_confirmation_keeps_the_change_held() {
+    use crate::menu::Patch;
+    let mut ov = Overview::default();
+    assert!(ov.take_sessions("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(ov.patch("a", Patch::Pinned(Some("2026-11-24T12:00:01Z".into())), Instant::now()));
+    assert!(ov.patch("a", Patch::Pinned(Some("2026-11-24T12:00:02Z".into())), Instant::now()));
+    assert!(ov.take_sessions("2026-11-24T12:00:03Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(ov.sessions()[0].pinned(), "a row read before both pins");
+    assert!(ov.patch("a", Patch::Pinned(None), Instant::now()));
+    assert!(!ov.sessions()[0].pinned());
+}
+
+#[test]
+fn a_held_change_gives_way_after_the_hold_without_a_newer_snapshot() {
+    use crate::menu::Patch;
+    let mut ov = Overview::default();
+    assert!(ov.take_sessions("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    let almost = Instant::now().checked_sub(super::live::EXPECT_HOLD - std::time::Duration::from_millis(300)).unwrap();
+    assert!(ov.patch("a", Patch::Archived(true), almost));
+    assert!(!ov.expire());
+    assert!(ov.sessions()[0].archived);
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    assert!(!ov.take_sessions("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]), "the same cached snapshot");
+    assert!(ov.expire());
+    assert!(!ov.sessions()[0].archived, "the daemon's last value");
+    assert!(!ov.expire());
+}

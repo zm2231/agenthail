@@ -56,6 +56,23 @@ impl Patch {
     pub fn same_field(&self, other: &Patch) -> bool {
         std::mem::discriminant(self) == std::mem::discriminant(other)
     }
+
+    pub fn same_target(&self, other: &Patch) -> bool {
+        match (self, other) {
+            (Patch::Pinned(a), Patch::Pinned(b)) => a.is_some() == b.is_some(),
+            (Patch::Read { receipt: a, .. }, Patch::Read { receipt: b, .. }) => a.revision == b.revision,
+            _ => self == other,
+        }
+    }
+
+    pub fn restore(&self, x: &mut Session, daemon: &Session) {
+        match self {
+            Patch::Pinned(_) => x.pinned_at = daemon.pinned_at.clone(),
+            Patch::Archived(_) => x.archived = daemon.archived,
+            Patch::Read { .. } => x.read_state = daemon.read_state.clone(),
+            Patch::Alias(_) => x.alias = daemon.alias.clone(),
+        }
+    }
 }
 
 impl Session {

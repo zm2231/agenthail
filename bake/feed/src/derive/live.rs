@@ -112,7 +112,14 @@ pub struct Overview {
     covered: HashSet<String>,
     pending: HashSet<String>,
     tails: Tails,
-    expected: Vec<(String, Patch, Instant)>,
+    expected: Vec<Expected>,
+}
+
+struct Expected {
+    id: String,
+    patch: Patch,
+    at: Instant,
+    daemon: Session,
 }
 
 fn newer(at: &str, than: &str) -> bool {
@@ -151,27 +158,51 @@ impl Overview {
 
     /// The daemon can publish a row read before a confirmed change; hold it until shown.
     pub fn patch(&mut self, id: &str, patch: Patch, at: Instant) -> bool {
-        self.expected.retain(|(other, p, _)| !(other == id && p.same_field(&patch)));
         let Some(x) = self.base.sessions.iter_mut().find(|x| x.id == id) else { return false };
-        if patch.shown(x) || at.elapsed() >= EXPECT_HOLD {
+        let held = self.expected.iter().position(|e| e.id == id && e.patch.same_field(&patch));
+        let daemon = match held.map(|i| self.expected.remove(i)) {
+            Some(e) if e.patch.same_target(&patch) || !patch.shown(x) => e.daemon,
+            Some(_) => return false,
+            None if patch.shown(x) => return false,
+            None => x.clone(),
+        };
+        if at.elapsed() >= EXPECT_HOLD {
             return false;
         }
         patch.apply(x);
-        self.expected.push((id.to_string(), patch, at));
+        self.expected.push(Expected { id: id.to_string(), patch, at, daemon });
         self.stale = true;
         true
     }
 
     fn reconcile(&mut self) {
         let sessions = &mut self.base.sessions;
-        self.expected.retain(|(id, patch, at)| {
-            let Some(x) = sessions.iter_mut().find(|x| x.id == *id) else { return false };
-            if patch.shown(x) || at.elapsed() >= EXPECT_HOLD {
+        self.expected.retain_mut(|e| {
+            let Some(x) = sessions.iter_mut().find(|x| x.id == e.id) else { return false };
+            if e.patch.shown(x) || e.at.elapsed() >= EXPECT_HOLD {
                 return false;
             }
-            patch.apply(x);
+            e.daemon = x.clone();
+            e.patch.apply(x);
             true
         });
+    }
+
+    pub fn expire(&mut self) -> bool {
+        let mut changed = false;
+        let sessions = &mut self.base.sessions;
+        self.expected.retain(|e| {
+            if e.at.elapsed() < EXPECT_HOLD {
+                return true;
+            }
+            if let Some(x) = sessions.iter_mut().find(|x| x.id == e.id) {
+                e.patch.restore(x, &e.daemon);
+                changed = true;
+            }
+            false
+        });
+        self.stale |= changed;
+        changed
     }
 
     pub fn refresh(&mut self, fetched: Fetched) {
