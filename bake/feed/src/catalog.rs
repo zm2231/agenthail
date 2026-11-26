@@ -164,20 +164,29 @@ pub struct Session {
     pub read_state: Option<crate::action::ReadState>,
     #[serde(default)]
     pub runtime: Option<Runtime>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "capabilities_or_default")]
     pub capabilities: Capabilities,
     #[serde(default)]
     pub read_only: bool,
 }
 
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase")]
 pub struct Capabilities {
+    #[serde(default)]
     pub interrupt: bool,
+    #[serde(default)]
     pub steer: bool,
+    #[serde(default)]
     pub model: bool,
+    #[serde(default)]
     pub compact: bool,
+    #[serde(default)]
     pub commands: bool,
+}
+
+fn capabilities_or_default<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Capabilities, D::Error> {
+    Ok(Option::<Capabilities>::deserialize(d)?.unwrap_or_default())
 }
 
 impl Default for Capabilities {
@@ -703,5 +712,32 @@ mod respond_error_tests {
         assert!(RespondError::from_status("send", 504, "").maybe_delivered);
         assert!(RespondError::from_status("send", 502, "").maybe_delivered);
         assert!(!RespondError::from_status("send", 503, r#"{"error":{"code":"unavailable","message":"down"}}"#).maybe_delivered);
+    }
+}
+
+#[cfg(test)]
+mod capabilities_tests {
+    use super::Session;
+
+    fn caps(json: &str) -> super::Capabilities {
+        serde_json::from_str::<Session>(&format!(r#"{{"id":"s"{json}}}"#)).unwrap().capabilities
+    }
+
+    #[test]
+    fn a_session_without_capabilities_can_be_stopped_and_steered() {
+        for c in [caps(""), caps(r#","capabilities":null"#)] {
+            assert!(c.interrupt && c.steer);
+            assert!(!c.model && !c.compact && !c.commands);
+        }
+    }
+
+    #[test]
+    fn a_capability_the_daemon_leaves_out_is_not_offered() {
+        let c = caps(r#","capabilities":{}"#);
+        assert!(!c.interrupt && !c.steer && !c.model && !c.compact && !c.commands);
+        let c = caps(r#","capabilities":{"model":true}"#);
+        assert!(c.model && !c.interrupt && !c.steer);
+        let c = caps(r#","capabilities":{"interrupt":true,"steer":false,"compact":true}"#);
+        assert!(c.interrupt && !c.steer && c.compact && !c.commands);
     }
 }
