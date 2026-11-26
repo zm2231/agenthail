@@ -1,19 +1,22 @@
 package simhost
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 )
 
+// axe copies these fields from untyped accessibility attributes, so a value
+// can arrive as a string, number, bool or null depending on the element.
 type axNode struct {
-	Type    string  `json:"type"`
-	Label   *string `json:"AXLabel"`
-	Value   *string `json:"AXValue"`
-	ID      *string `json:"AXUniqueId"`
-	Title   *string `json:"title"`
-	Enabled *bool   `json:"enabled"`
+	Type    axText  `json:"type"`
+	Label   axText  `json:"AXLabel"`
+	Value   axText  `json:"AXValue"`
+	ID      axText  `json:"AXUniqueId"`
+	Title   axText  `json:"title"`
+	Enabled *axBool `json:"enabled"`
 	Frame   struct {
 		X      float64 `json:"x"`
 		Y      float64 `json:"y"`
@@ -21,6 +24,47 @@ type axNode struct {
 		Height float64 `json:"height"`
 	} `json:"frame"`
 	Children []axNode `json:"children"`
+}
+
+type axText string
+
+func (t *axText) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	switch {
+	case bytes.Equal(data, []byte("null")):
+		*t = ""
+	case len(data) > 0 && data[0] == '"':
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			return err
+		}
+		*t = axText(s)
+	default:
+		var b bytes.Buffer
+		if err := json.Compact(&b, data); err != nil {
+			return err
+		}
+		*t = axText(b.String())
+	}
+	return nil
+}
+
+type axBool bool
+
+func (v *axBool) UnmarshalJSON(data []byte) error {
+	var raw any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	switch x := raw.(type) {
+	case bool:
+		*v = axBool(x)
+	case float64:
+		*v = x != 0
+	default:
+		*v = true
+	}
+	return nil
 }
 
 func describeLines(raw []byte) ([]string, map[string]point, error) {
@@ -50,11 +94,8 @@ func describeLines(raw []byte) ([]string, map[string]point, error) {
 }
 
 func describeNode(node axNode) string {
-	text := func(p *string) string {
-		if p == nil {
-			return ""
-		}
-		value := strings.TrimSpace(*p)
+	text := func(t axText) string {
+		value := strings.TrimSpace(string(t))
 		if len(value) > 200 {
 			value = value[:200] + "…"
 		}
@@ -67,7 +108,7 @@ func describeNode(node axNode) string {
 	if label == "" && value == "" && id == "" {
 		return ""
 	}
-	parts := []string{node.Type}
+	parts := []string{string(node.Type)}
 	if label != "" {
 		parts = append(parts, strconv.Quote(label))
 	}
