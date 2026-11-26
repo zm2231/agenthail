@@ -75,7 +75,7 @@ impl History {
 impl Gone {
     pub fn empty_note(&self) -> String {
         match (&self.read_error, &self.why) {
-            (Some(e), _) => format!("Couldn't read this session's conversation: {e}"),
+            (Some(_), _) => "Nothing could be read from this conversation.".into(),
             (None, Why::Offline(_)) => "Its conversation can't be read while it's offline.".into(),
             (None, _) => "Agenthail returned no conversation for this session.".into(),
         }
@@ -402,7 +402,8 @@ mod tests {
         let listed = row(json!({"id": "s1", "archived": true}));
         let g = classify("s1", &Detail::Failed("conflict".into()), Listing::Found(listed), None).unwrap();
         assert_eq!(g.why, Why::Archived);
-        assert_eq!(g.empty_note(), "Couldn't read this session's conversation: conflict");
+        assert_eq!(g.read_error.as_deref(), Some("conflict"));
+        assert_eq!(g.empty_note(), "Nothing could be read from this conversation.");
     }
 
     #[test]
