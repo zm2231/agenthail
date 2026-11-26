@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::time::{Duration, Instant};
 
 use feed::extensions::{Probe, WebSession};
 use rune::NativeView;
@@ -8,6 +9,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 const RENEW_BEFORE: time::Duration = time::Duration::hours(1);
+const LOAD_LIMIT: Duration = Duration::from_secs(20);
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Phase {
@@ -29,6 +31,9 @@ pub struct Web {
     cleared: Option<String>,
     resigned: bool,
     loaded: Option<String>,
+    ready: Option<String>,
+    recheck: bool,
+    loading_since: Option<Instant>,
     want: Option<String>,
     page: Rc<RefCell<String>>,
     finished: (Sender<String>, Receiver<String>),
@@ -49,6 +54,9 @@ impl Web {
             cleared: None,
             resigned: false,
             loaded: None,
+            ready: None,
+            recheck: false,
+            loading_since: None,
             want: None,
             page: Rc::new(RefCell::new(String::new())),
             finished: channel(),
@@ -77,13 +85,24 @@ impl Web {
         }
     }
 
+    pub fn select(&mut self, want: Option<&str>) {
+        self.want = want.map(str::to_string);
+    }
+
     pub fn probe_due(&mut self, want: Option<&str>) -> Option<(String, WebSession)> {
         let want = want?;
         self.want = Some(want.to_string());
-        if self.failed() || self.probing.is_some() || self.cleared.as_deref() == Some(want) {
+        if self.failed() || self.probing.is_some() {
             return None;
         }
         let cookie = self.cookie.clone()?;
+        if self.cleared.as_deref() == Some(want) {
+            if !std::mem::take(&mut self.recheck) || self.ready.as_deref() != Some(want) {
+                return None;
+            }
+            self.probing = Some(want.to_string());
+            return Some((want.to_string(), cookie));
+        }
         self.probing = Some(want.to_string());
         if self.loaded.is_none() {
             self.phase = Phase::Loading;
@@ -102,11 +121,13 @@ impl Web {
         match result {
             Probe::Open => {
                 self.cleared = Some(page);
-                self.resigned = false;
             }
             Probe::SignIn if !self.resigned => {
                 self.resigned = true;
                 self.cookie = None;
+                self.cleared = None;
+                self.loaded = None;
+                self.ready = None;
             }
             Probe::SignIn => self.phase = Phase::Failed("The page turned down this app's sign-in. Reload to try again.".into()),
             Probe::Unreachable(error) => self.phase = Phase::Failed(format!("Couldn't reach the page: {error}")),
@@ -117,13 +138,14 @@ impl Web {
         self.phase = if self.cookie.is_some() { Phase::Loading } else { Phase::SigningIn };
         self.cleared = None;
         self.loaded = None;
+        self.ready = None;
         self.resigned = false;
     }
 
     pub fn shows(&self, want: &str) -> bool {
         #[cfg(target_os = "macos")]
         if self.view.is_some() {
-            return self.loaded.as_deref() == Some(want);
+            return self.ready.as_deref() == Some(want);
         }
         let _ = want;
         true
@@ -132,10 +154,18 @@ impl Web {
     pub fn pump(&mut self, want: Option<&str>) -> bool {
         let mut changed = false;
         while self.finished.1.try_recv().is_ok() {
-            if self.phase == Phase::Loading {
+            if self.phase == Phase::Loading && self.loaded.is_some() {
                 self.phase = Phase::Shown;
+                self.ready = self.loaded.clone();
+                self.recheck = true;
+                self.loading_since = None;
                 changed = true;
             }
+        }
+        if self.phase == Phase::Loading && self.loading_since.is_some_and(|at| at.elapsed() >= LOAD_LIMIT) {
+            self.phase = Phase::Failed(format!("The page didn't finish loading in {} seconds.", LOAD_LIMIT.as_secs()));
+            self.loading_since = None;
+            changed = true;
         }
         self.want = want.map(str::to_string);
         let Some(want) = want else { return changed };
@@ -182,6 +212,8 @@ impl Web {
             *self.page.borrow_mut() = want.to_string();
             view.load_url(want).map_err(|e| format!("Couldn't open {want}: {e}"))?;
             self.loaded = Some(want.to_string());
+            self.ready = None;
+            self.loading_since = Some(Instant::now());
             self.phase = Phase::Loading;
             return Ok(true);
         }
@@ -190,7 +222,7 @@ impl Web {
 
     #[cfg(not(target_os = "macos"))]
     fn show(&mut self, _want: &str, _cookie: &WebSession, cleared: bool, _in_window: bool) -> Result<bool, String> {
-        let _ = (&self.page, &self.finished.0, &self.follow.0, &self.cookie_set, &self.loaded);
+        let _ = (&self.page, &self.finished.0, &self.follow.0, &self.cookie_set, &self.loaded, &self.loading_since);
         if cleared { Err("Pages open in the Mac app.".into()) } else { Ok(false) }
     }
 }
@@ -340,6 +372,37 @@ mod tests {
         web.reload();
         assert_eq!(web.phase, Phase::Loading);
         assert!(web.probe_due(Some(page)).is_some());
+    }
+
+    #[test]
+    fn a_loaded_page_is_checked_again_and_a_refusal_signs_in_and_reloads_once() {
+        let page = "http://127.0.0.1:48200/";
+        let mut web = Web::new();
+        web.sign_in_due(now());
+        web.signed(Ok(session("2026-11-26T22:00:00Z")));
+        let (url, _) = web.probe_due(Some(page)).unwrap();
+        web.probed(url, Probe::Open);
+        web.loaded = Some(page.into());
+        web.phase = Phase::Loading;
+        web.finished.0.send(page.into()).unwrap();
+        web.pump(None);
+        assert_eq!(web.phase, Phase::Shown);
+        assert!(web.shows(page));
+        let (url, _) = web.probe_due(Some(page)).expect("a finished load is checked");
+        assert!(web.probe_due(Some(page)).is_none());
+        web.probed(url, Probe::SignIn);
+        assert_eq!(web.loaded, None, "the page loads again after a fresh sign-in");
+        assert!(web.sign_in_due(now()));
+    }
+
+    #[test]
+    fn a_page_that_never_finishes_fails_with_reload() {
+        let mut web = Web::new();
+        web.phase = Phase::Loading;
+        web.loaded = Some("http://127.0.0.1:48200/".into());
+        web.loading_since = Some(Instant::now() - LOAD_LIMIT);
+        web.pump(None);
+        assert_eq!(web.phase, Phase::Failed("The page didn't finish loading in 20 seconds.".into()));
     }
 
     #[test]

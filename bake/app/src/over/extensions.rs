@@ -194,6 +194,8 @@ fn find(s: &App, id: &str) -> Option<Entry> {
 }
 
 pub fn drain(s: &mut App) -> bool {
+    let selected = current_entry(s).and_then(|e| e.url);
+    s.ov.ext.web.select(selected.as_deref());
     let mut changed = false;
     while let Ok(done) = s.ov.ext.rx.try_recv() {
         take(s, done);
@@ -441,7 +443,10 @@ fn catalog_block(s: &App, catalog: &Catalog, titled: bool, origin: &str) -> El {
 
 fn reload_button(s: &App) -> Option<El> {
     let has_local = s.ov.ext.catalogs.iter().any(|c| c.host.is_local() && c.list.is_some());
-    (s.ov.ext.settings && has_local).then(|| {
+    if !s.ov.ext.settings {
+        return has_local.then(|| text("Reload them with agenthail extensions reload".to_string()).font(META).color(weak()));
+    }
+    has_local.then(|| {
         let busy = s.ov.ext.acting.is_some();
         Button::new(if busy { "Working…" } else { "Reload extensions" })
             .variant(ButtonVariant::Ghost)
