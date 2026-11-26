@@ -164,7 +164,9 @@ fn take(s: &mut App, done: Done) {
             if let Some(catalog) = ext.catalogs.iter_mut().find(|c| c.key() == key) {
                 match result {
                     Ok(list) => {
-                        catalog.error = list.host_problem(&catalog.host.name);
+                        if catalog.host.available() {
+                            catalog.error = list.host_problem(&catalog.host.name);
+                        }
                         catalog.list = Some(list);
                     }
                     Err(error) => catalog.error = Some(error),
@@ -237,9 +239,6 @@ pub fn arrived(s: &mut App) {
     if s.ov.ext.fetched_at.is_none_or(|at| at.elapsed() >= Duration::from_secs(2)) {
         refresh(s);
     }
-    if matches!(s.ov.ext.web.phase, Phase::Failed(_)) {
-        s.ov.ext.web.reload();
-    }
 }
 
 fn covered(s: &App) -> bool {
@@ -264,7 +263,12 @@ fn covered(s: &App) -> bool {
 pub fn open(s: &mut App, entry: &Entry) {
     match &entry.approval_session {
         Some(session) => open_session(s, session),
-        None => go(s, Screen::Extension(entry.id())),
+        None => {
+            if let Some(url) = &entry.url {
+                s.ov.ext.web.retry(url);
+            }
+            go(s, Screen::Extension(entry.id()))
+        }
     }
 }
 
@@ -506,7 +510,7 @@ fn closed(title: &str, detail: String, session: Option<String>) -> El {
 }
 
 fn phase_note(web: &Web, host: &str) -> Option<El> {
-    let label = match web.phase {
+    let label = match web.phase() {
         _ if web.slow() => format!("Still loading. If it doesn't open, check that {host} is serving it, then Reload."),
         Phase::SigningIn => "Signing in…".into(),
         Phase::Loading => "Loading…".into(),
@@ -537,7 +541,7 @@ pub fn page(s: &App, cx: &mut Cx<App>, id: &str) -> El {
     let entry = find(s, id);
     let label = entry.as_ref().map(|e| e.label.clone()).unwrap_or_else(|| "App".into());
     let main = match &entry {
-        Some(entry) => match (&entry.url, &s.ov.ext.web.phase, &s.ov.ext.web.slot) {
+        Some(entry) => match (&entry.url, &s.ov.ext.web.phase(), s.ov.ext.web.slot()) {
             (Some(_), Phase::Failed(message), _) => {
                 let k = kit();
                 col()
