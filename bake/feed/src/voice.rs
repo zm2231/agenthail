@@ -354,7 +354,7 @@ pub struct Job {
 pub enum Effect {
     Fetch(Job),
     AskMic(String),
-    PeerStart,
+    PeerStart(String),
     PeerEnd,
     PeerAnswer(String),
     PeerMute(bool),
@@ -621,13 +621,21 @@ impl Call {
         let work = self.work;
         if granted {
             self.trail.mark(attempt, "microphone_granted", self.clock);
-            self.out.push(Effect::PeerStart);
+            self.out.push(Effect::PeerStart(attempt.to_string()));
             self.end_work(work);
         } else {
             self.dial_failed(MIC_DENIED.into(), work, "microphone_denied");
             self.mic_denied = true;
         }
         self.drain()
+    }
+
+    pub fn heard(&mut self, call: &str, kind: &str, value: &str, now: f64) -> Vec<Effect> {
+        let of_a_call = matches!(kind, "offer" | "connection" | "channel" | "error");
+        if of_a_call && self.attempt.as_deref() != Some(call) {
+            return Vec::new();
+        }
+        self.peer(kind, value, now)
     }
 
     pub fn peer(&mut self, kind: &str, value: &str, now: f64) -> Vec<Effect> {

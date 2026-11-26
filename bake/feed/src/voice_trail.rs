@@ -57,8 +57,8 @@ pub struct Trail {
 }
 
 impl Trail {
-    pub fn load(saved: &str) -> Trail {
-        let mut attempts: Vec<Attempt> = serde_json::from_str(saved).unwrap_or_default();
+    pub fn load(saved: &str) -> Result<Trail, String> {
+        let mut attempts: Vec<Attempt> = serde_json::from_str(saved).map_err(|e| e.to_string())?;
         let keep = attempts.len().saturating_sub(KEPT_CALLS);
         attempts.drain(..keep);
         let mut changed = false;
@@ -66,7 +66,7 @@ impl Trail {
             attempt.cause = Some(UNFINISHED.into());
             changed = true;
         }
-        Trail { attempts, changed }
+        Ok(Trail { attempts, changed })
     }
 
     pub fn save(&self) -> String {

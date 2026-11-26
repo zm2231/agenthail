@@ -48,7 +48,7 @@ fn dialed(call: &mut Call) -> String {
     let asked = call.reply(prepare, Ok(state(json!({"phase": "ready", "session": {"id": "op", "name": "Agenthail orchestrator"}}))), 0.0);
     let id = call.attempt().unwrap().to_string();
     assert_eq!(asked, vec![Effect::AskMic(id.clone())]);
-    assert_eq!(call.mic(&id, true), vec![Effect::PeerStart]);
+    assert_eq!(call.mic(&id, true), vec![Effect::PeerStart(id.clone())]);
     assert!(call.mic(&id, true).is_empty(), "one answer per ask");
     assert!(!call.working(), "the call button frees once the peer starts");
     id
@@ -374,7 +374,7 @@ fn a_microphone_answer_for_an_earlier_attempt_is_ignored() {
     call.reply(prepare, Ok(state(json!({"phase": "ready"}))), 1.0);
     assert!(call.mic(&old, true).is_empty());
     let new = call.attempt().unwrap().to_string();
-    assert_eq!(call.mic(&new, true), vec![Effect::PeerStart]);
+    assert_eq!(call.mic(&new, true), vec![Effect::PeerStart(new.clone())]);
 }
 
 #[test]
@@ -436,6 +436,23 @@ fn a_failed_select_is_logged_as_its_own_step() {
     let select = only_job(&call.call());
     call.reply(select, Err("no such session".into()), 0.0);
     assert_eq!(call.trail.last().unwrap().cause.as_deref(), Some("select_failed"));
+}
+
+#[test]
+fn page_events_from_an_earlier_call_are_ignored() {
+    let mut call = ready();
+    let old = dialed(&mut call);
+    call.hangup();
+    let mut call = ready();
+    let id = dialed(&mut call);
+    assert_ne!(old, id);
+    assert!(call.heard(&old, "offer", "v=0", 0.0).is_empty());
+    assert!(call.heard(&old, "error", "The microphone capture ended.", 0.0).is_empty());
+    assert!(call.heard("", "connection", "failed", 0.0).is_empty());
+    assert_eq!(call.error, None);
+    assert!(call.trail.last().unwrap().milestones.iter().all(|(name, _)| name != "offer_submitted"));
+    assert_eq!(named(&only_job(&call.heard(&id, "offer", "v=0", 0.0))), "start");
+    assert!(call.heard("", "ready", "", 0.0).is_empty());
 }
 
 fn dialed_routed(call: &mut Call) -> String {
@@ -626,10 +643,58 @@ fn a_saved_call_log_keeps_the_last_twenty_and_closes_unfinished_calls() {
     }
     assert_eq!(trail.attempts.len(), KEPT_CALLS);
     assert_eq!(trail.attempts[0].id, "call-5");
-    let loaded = Trail::load(&trail.save());
+    let loaded = Trail::load(&trail.save()).unwrap();
     assert_eq!(loaded.attempts.len(), KEPT_CALLS);
     assert_eq!(loaded.last().unwrap().cause.as_deref(), Some(UNFINISHED));
     assert!(loaded.changed, "closing an unfinished call is saved");
     assert_eq!(loaded.attempts[0].milestones, vec![("local_ended".to_string(), 1.0)]);
-    assert!(Trail::load("not json").attempts.is_empty());
+    assert!(Trail::load("not json").is_err());
+}
+
+#[test]
+fn the_brief_says_who_was_briefed_how_much_and_how_long_ago() {
+    let now = crate::catalog::parse_time("2026-11-26T12:00:00Z").unwrap();
+    let brief = Brief { session_id: "s-builder".into(), as_of: "2026-11-26T11:55:00Z".into(), bytes: 900, exchanges: 3, omitted: vec![] };
+    assert_eq!(brief.summary("Builder", now), "The call was briefed on Builder: 3 recent exchanges, read 5m ago.");
+    assert_eq!(brief.left_out(), None);
+    let fresh = Brief { as_of: "2026-11-26T11:59:40Z".into(), exchanges: 1, omitted: vec!["tool output".into(), "images".into()], ..brief.clone() };
+    assert_eq!(fresh.summary("Builder", now), "The call was briefed on Builder: 1 recent exchange, read just now.");
+    assert_eq!(fresh.left_out().as_deref(), Some("Left out of the brief: tool output, images."));
+    let undated = Brief { as_of: String::new(), ..brief };
+    assert_eq!(undated.summary("Builder", now), "The call was briefed on Builder: 3 recent exchanges.");
+}
+
+#[test]
+fn voice_details_list_the_connection_call_log_and_orchestrator() {
+    let mut call = Call::new("s-builder");
+    call.peer("ready", "", 0.0);
+    let first = only_job(&call.tick(0.0));
+    let host = json!({
+        "phase": "ready",
+        "audioProvider": "openai",
+        "codingProvider": "codex",
+        "skillDigest": "abc123",
+        "target": {"id": "s-builder", "name": "Builder"},
+        "session": {"id": "s-operator", "name": "Operator"}
+    });
+    call.reply(first, Ok(state(host.clone())), 0.0);
+    let select = only_job(&call.call());
+    let prepare = only_job(&call.reply(select, Ok(state(host.clone())), 0.0));
+    call.reply(prepare, Ok(state(host)), 0.0);
+    let id = call.attempt().unwrap().to_string();
+    call.mic(&id, true);
+    let sections = call.details();
+    let titles: Vec<_> = sections.iter().map(|s| s.title).collect();
+    assert_eq!(titles, ["Connection", "Call log", "Persistent orchestrator"]);
+    let rows = |title: &str| sections.iter().find(|s| s.title == title).unwrap().rows.clone();
+    let connection = rows("Connection");
+    assert!(connection.contains(&("Coding target".into(), "Builder".into())));
+    assert!(connection.contains(&("Coding provider".into(), "codex".into())));
+    assert!(connection.contains(&("Audio provider".into(), "openai".into())));
+    assert!(connection.iter().all(|(name, value)| !value.trim().is_empty() && name != "Host close"));
+    assert_eq!(rows("Call log")[0], ("Call".to_string(), id));
+    assert!(rows("Call log").iter().any(|(name, _)| name == "microphone_granted"));
+    let orchestrator = rows("Persistent orchestrator");
+    assert!(orchestrator.contains(&("Session".into(), "Operator".into())));
+    assert!(orchestrator.contains(&("Skill digest".into(), "abc123".into())));
 }

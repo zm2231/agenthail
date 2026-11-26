@@ -29,6 +29,10 @@ pub enum Ask {
     StopTarget,
 }
 
+pub type Heard = (String, String, String);
+
+const SAVE_RETRY_SECS: f64 = 5.0;
+
 pub struct Win {
     pub call: Call,
     pub name: String,
@@ -45,10 +49,11 @@ pub struct Win {
     #[cfg(target_os = "macos")]
     web: Option<peer::Web>,
     replies: (Sender<(Job, Result<State, Failure>)>, Receiver<(Job, Result<State, Failure>)>),
-    heard: (Sender<(String, String)>, Receiver<(String, String)>),
+    heard: (Sender<Heard>, Receiver<Heard>),
     mic: (Sender<(String, bool)>, Receiver<(String, bool)>),
     gone: Arc<AtomicBool>,
     clock: f64,
+    save_after: f64,
 }
 
 impl Win {
@@ -84,6 +89,7 @@ impl Win {
             mic: channel(),
             gone: Arc::new(AtomicBool::new(false)),
             clock: 0.0,
+            save_after: 0.0,
         }
     }
 
@@ -96,7 +102,10 @@ impl Win {
             match effect {
                 Effect::Fetch(job) => self.fetch(job),
                 Effect::AskMic(attempt) => ask_mic(self.mic.0.clone(), attempt),
-                Effect::PeerStart => self.eval("void window.agenthailVoice.start()"),
+                Effect::PeerStart(attempt) => {
+                    let quoted = serde_json::to_string(&attempt).unwrap_or_default();
+                    self.eval(&format!("window.agenthailCall = {quoted}; void window.agenthailVoice.start()"));
+                }
                 Effect::PeerEnd => self.eval("window.agenthailVoice && window.agenthailVoice.end()"),
                 Effect::PeerAnswer(sdp) => {
                     let quoted = serde_json::to_string(&sdp).unwrap_or_default();
@@ -167,6 +176,15 @@ impl Win {
     #[cfg(not(target_os = "macos"))]
     fn build_peer(&mut self) -> bool {
         false
+    }
+
+    pub fn sync_route(&mut self) -> bool {
+        let typed = self.route_edit.text.trim().to_string();
+        if typed == self.route_typed {
+            return false;
+        }
+        self.route(&typed, "");
+        true
     }
 
     pub fn route(&mut self, target: &str, name: &str) {
@@ -242,7 +260,6 @@ fn closed(w: &mut Win, _: &mut Tx) {
     let effects = w.call.close();
     w.run(effects);
     if w.call.trail.changed {
-        w.call.trail.changed = false;
         save_trail(&w.call.trail);
     }
     #[cfg(target_os = "macos")]
@@ -289,11 +306,7 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
         w.route(&target, &name);
         changed = true;
     }
-    let typed = w.route_edit.text.trim().to_string();
-    if typed != w.route_typed {
-        w.route(&typed, "");
-        changed = true;
-    }
+    changed |= w.sync_route();
     if !w.call.active() {
         if let Some((target, name)) = w.offer.take() {
             w.route(&target, &name);
@@ -305,7 +318,7 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
         w.run(effects);
         changed = true;
     }
-    while let Ok((kind, value)) = w.heard.1.try_recv() {
+    while let Ok((call, kind, value)) = w.heard.1.try_recv() {
         match kind.as_str() {
             "loaded" => {}
             "offer" => eprintln!("voice: the audio page made its offer"),
@@ -322,7 +335,7 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
             }
             continue;
         }
-        let effects = w.call.peer(&kind, &value, t);
+        let effects = w.call.heard(&call, &kind, &value, t);
         w.run(effects);
         changed = true;
     }
@@ -334,9 +347,12 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
     let effects = w.call.tick(t);
     changed |= effects.iter().any(|e| matches!(e, Effect::Note(_)));
     w.run(effects);
-    if w.call.trail.changed {
-        w.call.trail.changed = false;
-        save_trail(&w.call.trail);
+    if w.call.trail.changed && t >= w.save_after {
+        if save_trail(&w.call.trail) {
+            w.call.trail.changed = false;
+        } else {
+            w.save_after = t + SAVE_RETRY_SECS;
+        }
     }
     tx.wake_after(Duration::from_millis(100));
     trace("poll", w);
@@ -353,14 +369,24 @@ fn trail_file() -> Option<std::path::PathBuf> {
 }
 
 fn load_trail() -> Trail {
-    trail_file().and_then(|path| std::fs::read_to_string(path).ok()).map(|saved| Trail::load(&saved)).unwrap_or_default()
+    let Some(path) = trail_file() else { return Trail::default() };
+    let Ok(saved) = std::fs::read_to_string(&path) else { return Trail::default() };
+    Trail::load(&saved).unwrap_or_else(|error| {
+        let aside = path.with_extension("unreadable.json");
+        eprintln!("voice: the call log couldn't be read ({error}); it was moved to {}", aside.display());
+        if let Err(error) = std::fs::rename(&path, &aside) {
+            eprintln!("voice: the unreadable call log couldn't be moved: {error}");
+        }
+        Trail::default()
+    })
 }
 
-fn save_trail(trail: &Trail) {
-    let Some(path) = trail_file() else { return };
+fn save_trail(trail: &Trail) -> bool {
+    let Some(path) = trail_file() else { return true };
     let part = path.with_extension("json.part");
     let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&part, trail.save())).and_then(|()| std::fs::rename(&part, &path));
-    if let Err(error) = written {
+    if let Err(error) = &written {
         eprintln!("voice: the call log couldn't be saved: {error}");
     }
+    written.is_ok()
 }

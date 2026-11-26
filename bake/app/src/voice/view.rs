@@ -280,6 +280,7 @@ fn controls(w: &Win) -> El {
                 .icon(&icons::PHONE)
                 .disabled(!call.can_call())
                 .on_press(|w: &mut Win| {
+                    w.sync_route();
                     let effects = w.call.call();
                     w.run(effects);
                 })
