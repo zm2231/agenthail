@@ -39,7 +39,7 @@ pub fn watch(s: &mut App) -> bool {
         s.last_row = Some(x.clone());
         return s.missing.take().is_some();
     }
-    if s.menus.busy.contains(&(id.clone(), "menu")) {
+    if super::session_menu::changing(s, &id) {
         return false;
     }
     let Some(client) = s.client.clone() else {
@@ -91,10 +91,11 @@ pub fn recheck(s: &mut App, id: &str) {
 
 fn fix(s: &mut App, fix: Fix) {
     let Some(client) = s.client.clone() else { return };
-    let Some(m) = s.missing.as_mut().filter(|m| m.fixing.is_none()) else { return };
-    if !s.menus.busy.insert((m.id.clone(), "menu")) {
+    if s.missing.as_ref().is_none_or(|m| m.fixing.is_some() || super::session_menu::changing(s, &m.id)) {
         return;
     }
+    let Some(m) = s.missing.as_mut() else { return };
+    s.menus.busy.insert((m.id.clone(), "menu"));
     let seq = LOOKUPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
     m.fixing = Some((fix, seq));
     m.asking = None;

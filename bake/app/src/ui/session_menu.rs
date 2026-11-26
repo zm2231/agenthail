@@ -206,7 +206,7 @@ pub fn run(s: &mut App, id: &str, act: Act) {
         Act::Rename => start_rename(s, id),
         Act::Pr(url) => open_link(&url),
         act => {
-            if not_sent(s) || !s.menus.busy.insert((id.to_string(), "menu")) {
+            if not_sent(s) || changing(s, id) || !s.menus.busy.insert((id.to_string(), "menu")) {
                 return;
             }
             super::gone::recheck(s, id);
@@ -229,6 +229,11 @@ pub fn run(s: &mut App, id: &str, act: Act) {
             });
         }
     }
+}
+
+pub fn changing(s: &App, id: &str) -> bool {
+    let now = feed::composer::current(&s.rekeyed, id);
+    s.menus.busy.iter().any(|(k, what)| *what == "menu" && feed::composer::current(&s.rekeyed, k) == now)
 }
 
 pub fn open_at(s: &mut App, id: &str, at: PointerPress) {
@@ -269,7 +274,7 @@ pub fn save_rename(s: &mut App) {
         close_rename(s);
         return;
     }
-    if !s.menus.busy.insert((id.clone(), "menu")) {
+    if changing(s, &id) || !s.menus.busy.insert((id.clone(), "menu")) {
         s.menus.rename_error = Some("Another change to this session is still on its way.".into());
         return;
     }
