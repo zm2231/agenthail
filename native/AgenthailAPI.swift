@@ -922,14 +922,17 @@ final class AgenthailAPI: @unchecked Sendable {
         if !Task.isCancelled { throw AgenthailAPIError.streamClosed }
     }
 
-    func ledgerReadyCount(projectKey: String) async throws -> Int {
-        struct Page: Decodable { let total: Int }
+    func ledgerReadyCount(projectID: String) async throws -> (ledgerKey: String, ready: Int) {
+        struct Page: Decodable {
+            let projectKey: String
+            let total: Int
+        }
         var components = URLComponents()
         components.path = "/api/v1/ledger"
-        components.queryItems = [URLQueryItem(name: "projectKey", value: projectKey), URLQueryItem(name: "view", value: "backlog"), URLQueryItem(name: "ready", value: "true"), URLQueryItem(name: "limit", value: "1")]
+        components.queryItems = [URLQueryItem(name: "projectKey", value: projectID), URLQueryItem(name: "view", value: "backlog"), URLQueryItem(name: "ready", value: "true"), URLQueryItem(name: "limit", value: "1")]
         guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
         let page: Page = try await get(path)
-        return page.total
+        return (page.projectKey, page.total)
     }
 
     func streamLedgerChanges(onEvent: @escaping @Sendable (LedgerChange) async -> Void) async throws {
