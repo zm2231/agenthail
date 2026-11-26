@@ -33,6 +33,8 @@ pub struct Queued {
     #[serde(default)]
     pub author: String,
     #[serde(default)]
+    pub source_session_id: String,
+    #[serde(default)]
     pub model: String,
     #[serde(default)]
     pub service_tier: String,
@@ -41,6 +43,14 @@ pub struct Queued {
 }
 
 impl Queued {
+    pub fn from_person(&self) -> bool {
+        match self.author.as_str() {
+            "person" => true,
+            "" => matches!(self.source_session_id.as_str(), "" | "agenthail-person"),
+            _ => false,
+        }
+    }
+
     pub fn first_line(&self) -> &str {
         self.message.lines().find(|l| !l.trim().is_empty()).unwrap_or_default().trim()
     }
@@ -83,7 +93,7 @@ impl Queued {
         if !caps.steer {
             return Some("This session can't take a steer. It sends when the turn ends.");
         }
-        if !self.author.is_empty() && self.author != "person" {
+        if !self.from_person() {
             return Some("This message came from another session, and Steer would send it as yours. It sends when the turn ends.");
         }
         if !self.model.is_empty() || !self.service_tier.is_empty() || self.output_schema.as_ref().is_some_and(|s| !s.is_null()) {
@@ -96,7 +106,7 @@ impl Queued {
     }
 
     pub fn take_back_refusal(&self) -> Option<&'static str> {
-        if !self.author.is_empty() && self.author != "person" {
+        if !self.from_person() {
             return Some("This message came from another session; editing it would resend it as yours.");
         }
         if !self.model.is_empty() || !self.service_tier.is_empty() || self.output_schema.as_ref().is_some_and(|s| !s.is_null()) {
@@ -198,6 +208,13 @@ mod tests {
         assert!(attached.take_back_refusal().is_some());
         assert_eq!(mine.take_back_refusal(), None);
         assert!(Queued { author: "agent".into(), ..mine.clone() }.take_back_refusal().unwrap().contains("as yours"));
+        let from_writer = Queued { author: String::new(), source_session_id: "writer".into(), ..mine.clone() };
+        assert!(from_writer.steer_refusal(&caps).unwrap().contains("another session") && from_writer.take_back_refusal().is_some());
+        for source in ["", "agenthail-person"] {
+            assert!(Queued { author: String::new(), source_session_id: source.into(), ..mine.clone() }.take_back_refusal().is_none());
+        }
+        assert!(Queued { author: String::new(), source_session_id: "agenthail".into(), ..mine.clone() }.take_back_refusal().is_some());
+        assert!(Queued { source_session_id: "writer".into(), ..mine.clone() }.take_back_refusal().is_none());
         assert!(Queued { service_tier: "flex".into(), ..mine.clone() }.take_back_refusal().unwrap().contains("turn settings"));
     }
 
