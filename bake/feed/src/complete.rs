@@ -489,8 +489,11 @@ impl Client {
     }
 
     pub fn prompts_everywhere(&self, query: &str) -> Result<Found, String> {
-        let Found { mut prompts, mut more, .. } = self.search_session(None, query)?;
         let mut problems = Vec::new();
+        let Found { mut prompts, mut more, .. } = self.search_session(None, query).unwrap_or_else(|error| {
+            problems.push(format!("Couldn't search this computer: {error}"));
+            Found::default()
+        });
         let hosts = self.read("/api/v1/snapshot?sessions=none").map(|v| connected_hosts(&v)).unwrap_or_else(|error| {
             problems.push(format!("Couldn't find the other computers to search: {error}"));
             Vec::new()
@@ -775,6 +778,10 @@ mod tests {
         let (client, _seen) = daemon(replies(&[(200, r#"{"prompts":[{"sessionId":"s1","text":"here"}]}"#), (500, r#"{"error":{"message":"snapshot failed"}}"#)]));
         let found = client.prompts_everywhere("").unwrap();
         assert_eq!((found.prompts.len(), found.problems), (1, vec!["Couldn't find the other computers to search: snapshot failed".to_string()]));
+        let (client, _down) = daemon(replies(&[(500, r#"{"error":{"message":"journal locked"}}"#), (200, r#"{"daemon":{"hosts":[{"id":"h1","name":"buildbox","state":"connected"}]}}"#), (200, r#"{"prompts":[{"sessionId":"s9","text":"there"}]}"#)]));
+        let found = client.prompts_everywhere("").unwrap();
+        assert_eq!(found.prompts.iter().map(|p| p.session_id.as_str()).collect::<Vec<_>>(), vec!["h1::s9"]);
+        assert_eq!(found.problems, vec!["Couldn't search this computer: journal locked".to_string()]);
     }
 
     #[test]
