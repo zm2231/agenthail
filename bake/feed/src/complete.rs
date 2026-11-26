@@ -285,7 +285,12 @@ pub fn edit(item: &Item, text: &str, token: &Token) -> (Range<usize>, String, us
     } else {
         format!("{insertion} ")
     };
-    let caret = token.range.start + insertion.len() + usize::from(!open);
+    let past = match next {
+        _ if open => 0,
+        Some(c) if c.is_whitespace() => c.len_utf8(),
+        _ => 1,
+    };
+    let caret = token.range.start + insertion.len() + past;
     (token.range.clone(), replacement, caret)
 }
 
@@ -407,6 +412,29 @@ pub fn can_fork(session: &Session) -> bool {
     session.surface == "codex" && !session.read_only
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Found {
+    pub prompts: Vec<Prompt>,
+    pub problems: Vec<String>,
+}
+
+fn connected_hosts(snapshot: &Value) -> Vec<(String, String)> {
+    snapshot["daemon"]["hosts"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|h| h["state"] == "connected")
+        .filter_map(|h| Some((h["id"].as_str()?.to_string(), h["name"].as_str().unwrap_or_default().to_string())))
+        .collect()
+}
+
+fn on_host(mut prompt: Prompt, host: &str) -> Prompt {
+    if !prompt.session_id.contains("::") {
+        prompt.session_id = format!("{host}::{}", prompt.session_id);
+    }
+    prompt
+}
+
 fn reply_error(code: u16, body: &str) -> String {
     let value: Value = serde_json::from_str(body).unwrap_or_default();
     match value["error"]["message"].as_str() {
@@ -430,9 +458,40 @@ impl Client {
     }
 
     pub fn prompts(&self, session: Option<&str>, query: &str) -> Result<Vec<Prompt>, String> {
+        self.prompts_on(session, query, None)
+    }
+
+    pub fn prompts_everywhere(&self, query: &str) -> Result<Found, String> {
+        let mut prompts = self.prompts(None, query)?;
+        let hosts = self.read("/api/v1/snapshot?sessions=none").map(|v| connected_hosts(&v)).unwrap_or_default();
+        let asked: Vec<(String, Result<Vec<Prompt>, String>)> = std::thread::scope(|scope| {
+            let running: Vec<_> = hosts.iter().map(|(id, name)| (name.clone(), scope.spawn(move || self.prompts_on(None, query, Some(id))), id.clone())).collect();
+            running
+                .into_iter()
+                .map(|(name, job, id)| {
+                    let found = job.join().unwrap_or_else(|_| Err("the search stopped".into())).map(|list| list.into_iter().map(|p| on_host(p, &id)).collect());
+                    (name, found)
+                })
+                .collect()
+        });
+        let mut problems = Vec::new();
+        for (name, found) in asked {
+            match found {
+                Ok(list) => prompts.extend(list),
+                Err(error) => problems.push(format!("Couldn't search {name}: {error}")),
+            }
+        }
+        prompts.sort_by_key(|p| std::cmp::Reverse(crate::catalog::parse_time(&p.ts).unwrap_or(OffsetDateTime::UNIX_EPOCH)));
+        Ok(Found { prompts, problems })
+    }
+
+    fn prompts_on(&self, session: Option<&str>, query: &str, host: Option<&str>) -> Result<Vec<Prompt>, String> {
         let mut path = format!("/api/v1/prompts?limit={PROMPTS_ASKED}");
         if let Some(id) = session {
             path.push_str(&format!("&sessionId={}", enc(id)));
+        }
+        if let Some(host) = host {
+            path.push_str(&format!("&host={}", enc(host)));
         }
         if !query.trim().is_empty() {
             path.push_str(&format!("&q={}", enc(query.trim())));
@@ -561,6 +620,7 @@ mod tests {
         let inside = Token::at("@srmain", 3).unwrap();
         assert_eq!(apply(&item("@src/"), "@srmain", &inside), ("@src/ main".into(), 5));
         assert_eq!(apply(&item("@scout"), "@sc and", &Token::at("@sc and", 3).unwrap()), ("@scout and".into(), 7));
+        assert_eq!(apply(&item("@scout"), "@sc\u{a0}and", &Token::at("@sc\u{a0}and", 3).unwrap()), ("@scout\u{a0}and".into(), 8), "past a wide space");
         assert!(completes(&item("/compact"), "/compact", &tok("/compact").unwrap()));
         assert!(completes(&item("/steer "), "/steer", &tok("/steer").unwrap()));
         assert!(!completes(&item("/compact"), "/com", &t));
@@ -645,6 +705,22 @@ mod tests {
         assert!(client.prompts(None, " ship ").unwrap().is_empty());
         assert_eq!(seen.recv().unwrap().0, "/api/v1/prompts?limit=100&q=ship");
         assert_eq!(client.prompts(None, "").unwrap_err(), "This token can't read prompts.");
+    }
+
+    #[test]
+    fn all_sessions_searches_each_connected_host_and_names_the_ones_that_failed() {
+        let (client, seen) = daemon(replies(&[
+            (200, r#"{"prompts":[{"sessionId":"s1","itemId":"i1","ts":"2026-11-26T10:00:00Z","text":"here"}]}"#),
+            (200, r#"{"daemon":{"hosts":[{"id":"h1","name":"buildbox","state":"connected"},{"id":"h2","name":"laptop","state":"unreachable"}]}}"#),
+            (200, r#"{"prompts":[{"sessionId":"s9","itemId":"i9","ts":"2026-11-26T11:00:00Z","text":"there"},{"sessionId":"h1::s8","itemId":"i8","ts":"2026-11-26T09:00:00Z","text":"older"}]}"#),
+        ]));
+        let found = client.prompts_everywhere("t").unwrap();
+        assert_eq!(found.prompts.iter().map(|p| (p.session_id.as_str(), p.text.as_str())).collect::<Vec<_>>(), vec![("h1::s9", "there"), ("s1", "here"), ("h1::s8", "older")]);
+        assert!(found.problems.is_empty());
+        let paths: Vec<String> = seen.try_iter().map(|(p, _)| p).collect();
+        assert_eq!(paths, vec!["/api/v1/prompts?limit=100&q=t", "/api/v1/snapshot?sessions=none", "/api/v1/prompts?limit=100&host=h1&q=t"]);
+        let (client, _seen) = daemon(replies(&[(200, r#"{"prompts":[]}"#), (200, r#"{"daemon":{"hosts":[{"id":"h1","name":"buildbox","state":"connected"}]}}"#), (502, r#"{"error":{"message":"host timed out"}}"#)]));
+        assert_eq!(client.prompts_everywhere("").unwrap().problems, vec!["Couldn't search buildbox: host timed out".to_string()]);
     }
 
     #[test]
