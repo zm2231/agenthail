@@ -336,13 +336,17 @@ impl Tray {
     }
 
     fn put(&mut self, id: &str, upload: &Upload, gone: bool) {
-        let list = self.chips.entry(id.to_string()).or_default();
-        if list.iter().any(|c| matches!(&c.state, State::Ready(u) | State::Gone(u) if u.id == upload.id)) {
+        self.put_in(id, upload, gone, false);
+    }
+
+    fn put_in(&mut self, id: &str, upload: &Upload, gone: bool, stashed: bool) {
+        let held = if stashed { &self.stashed } else { &self.chips };
+        if held.get(id).into_iter().flatten().any(|c| matches!(&c.state, State::Ready(u) | State::Gone(u) if u.id == upload.id)) {
             return;
         }
         self.next += 1;
-        let state = if gone { State::Gone(upload.clone()) } else { State::Ready(upload.clone()) };
-        list.push(Chip { local: self.next, name: upload.name.clone(), image: upload.is_image(), size: upload.bytes, data: None, state });
+        let (next, state) = (self.next, if gone { State::Gone(upload.clone()) } else { State::Ready(upload.clone()) });
+        self.list(id, stashed).push(Chip { local: next, name: upload.name.clone(), image: upload.is_image(), size: upload.bytes, data: None, state });
     }
 
     pub fn rekey(&mut self, rekeyed: &HashMap<String, String>) {
@@ -368,55 +372,78 @@ impl Tray {
     }
 
     pub fn to_json(&self) -> Value {
-        Value::Object(
-            self.chips
-                .iter()
-                .map(|(id, list)| {
-                    let kept: Vec<Value> = list
-                        .iter()
-                        .filter_map(|c| match &c.state {
-                            State::Ready(u) => Some(u.to_json()),
-                            State::Gone(u) => Some(json!({"upload": u.to_json(), "gone": true})),
-                            State::Uploading | State::Failed(_) => Some(json!({"lost": {"name": c.name, "bytes": c.size, "image": c.image}})),
-                        })
-                        .collect();
-                    (id.clone(), Value::Array(kept))
-                })
-                .filter(|(_, v)| v.as_array().is_some_and(|a| !a.is_empty()))
-                .collect(),
-        )
+        lists_json(&self.chips)
     }
 
     pub fn to_json_with(&self, adding: &[(String, String)]) -> Value {
-        let mut value = self.to_json();
-        for (id, name) in adding {
-            let entry = json!({"lost": {"name": name, "bytes": 0, "image": false}});
-            match value[id.as_str()].as_array_mut() {
-                Some(list) => list.push(entry),
-                None => value[id.as_str()] = json!([entry]),
-            }
-        }
-        value
+        with_lost(self.to_json(), adding)
+    }
+
+    pub fn stashed_json_with(&self, adding: &[(String, String)]) -> Value {
+        with_lost(lists_json(&self.stashed), adding)
     }
 
     pub fn from_json(value: &Value) -> Tray {
         let mut tray = Tray::default();
+        tray.load(value, false);
+        tray
+    }
+
+    pub fn load_stashed(&mut self, value: &Value) {
+        self.load(value, true);
+    }
+
+    fn load(&mut self, value: &Value, stashed: bool) {
         for (id, raw) in value.as_object().into_iter().flatten() {
             for entry in raw.as_array().into_iter().flatten() {
                 if let Some(name) = entry["lost"]["name"].as_str() {
-                    tray.next += 1;
-                    let chip = Chip { local: tray.next, name: name.to_string(), image: entry["lost"]["image"] == true, size: entry["lost"]["bytes"].as_u64().unwrap_or_default(), data: None, state: State::Failed(UNSAVED.into()) };
-                    tray.chips.entry(id.clone()).or_default().push(chip);
+                    self.next += 1;
+                    let chip = Chip { local: self.next, name: name.to_string(), image: entry["lost"]["image"] == true, size: entry["lost"]["bytes"].as_u64().unwrap_or_default(), data: None, state: State::Failed(UNSAVED.into()) };
+                    self.list(id, stashed).push(chip);
                     continue;
                 }
                 let (value, gone) = if entry["gone"] == true { (&entry["upload"], true) } else { (entry, false) };
                 if let Some(upload) = Upload::from_json(value) {
-                    tray.put(id, &upload, gone);
+                    self.put_in(id, &upload, gone, stashed);
                 }
             }
         }
-        tray
     }
+
+    fn list(&mut self, id: &str, stashed: bool) -> &mut Vec<Chip> {
+        if stashed { &mut self.stashed } else { &mut self.chips }.entry(id.to_string()).or_default()
+    }
+}
+
+fn with_lost(mut value: Value, adding: &[(String, String)]) -> Value {
+    for (id, name) in adding {
+        let entry = json!({"lost": {"name": name, "bytes": 0, "image": false}});
+        match value[id.as_str()].as_array_mut() {
+            Some(list) => list.push(entry),
+            None => value[id.as_str()] = json!([entry]),
+        }
+    }
+    value
+}
+
+fn lists_json(lists: &HashMap<String, Vec<Chip>>) -> Value {
+    Value::Object(
+        lists
+            .iter()
+            .map(|(id, list)| {
+                let kept: Vec<Value> = list
+                    .iter()
+                    .filter_map(|c| match &c.state {
+                        State::Ready(u) => Some(u.to_json()),
+                        State::Gone(u) => Some(json!({"upload": u.to_json(), "gone": true})),
+                        State::Uploading | State::Failed(_) => Some(json!({"lost": {"name": c.name, "bytes": c.size, "image": c.image}})),
+                    })
+                    .collect();
+                (id.clone(), Value::Array(kept))
+            })
+            .filter(|(_, v)| v.as_array().is_some_and(|a| !a.is_empty()))
+            .collect(),
+    )
 }
 
 pub fn missing_upload(error: &str) -> Option<String> {
@@ -678,6 +705,20 @@ mod tests {
         tray.swap_stash("s2");
         assert_eq!(tray.ready("s2").unwrap(), vec![upload("a")]);
         assert!(!tray.has_stashed("s2"), "an empty draft leaves nothing set aside");
+    }
+
+    #[test]
+    fn stashed_attachments_come_back_after_a_restart() {
+        let mut tray = Tray::default();
+        tray.restore("s1", &[upload("kept")]);
+        tray.swap_stash("s1");
+        tray.restore("s1", &[upload("shown")]);
+        let mut back = Tray::from_json(&tray.to_json());
+        back.load_stashed(&tray.stashed_json_with(&[]));
+        assert_eq!(back.ready("s1").unwrap(), vec![upload("shown")]);
+        back.swap_stash("s1");
+        assert_eq!(back.ready("s1").unwrap(), vec![upload("kept")]);
+        assert!(!Tray::from_json(&tray.to_json()).has_stashed("s1"), "the draft list alone holds nothing set aside");
     }
 
     #[test]
