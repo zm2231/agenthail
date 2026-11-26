@@ -60,7 +60,7 @@ fn talk(w: &mut Win, events: Value) {
     let id = dial(w);
     let target = (!w.call.target.is_empty()).then(|| json!({"id": w.call.target, "name": w.name}));
     let start = w.call.peer("offer", "v=0", 0.0);
-    answer(&mut w.call, start, json!({"phase": "negotiating", "attemptId": id}));
+    answer(&mut w.call, start, json!({"phase": "negotiating", "attemptId": id, "target": target}));
     w.call.peer("connection", "connected", 0.0);
     let connected = w.call.peer("channel", "open", 0.0);
     answer(&mut w.call, connected, json!({"phase": "connected", "attemptId": id, "session": {"id": "operator", "name": "Agenthail orchestrator"}, "target": target, "events": events}));

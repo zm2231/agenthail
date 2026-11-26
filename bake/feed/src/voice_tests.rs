@@ -438,3 +438,23 @@ fn an_old_heartbeat_reply_does_not_let_a_second_heartbeat_out() {
     call.reply(pending, Ok(state(json!({"phase": "negotiating", "attemptId": new}))), 3.0);
     assert!(beat(&call.tick(13.0)).is_some());
 }
+
+#[test]
+fn a_start_refused_because_another_window_called_first_leaves_this_window_free() {
+    let mut call = ready();
+    let id = dialed(&mut call);
+    let start = only_job(&call.peer("offer", "v=0", 0.0));
+    let after = call.reply(start, Err("end the current audio call before starting another".into()), 1.0);
+    assert!(after.contains(&Effect::PeerEnd));
+    let cleanup = only_job(&after);
+    assert_eq!((cleanup.req.clone(), cleanup.action.clone().unwrap().attempt_id), (Req::Abandon, Some(id)));
+    assert!(call.reply(cleanup, Err("stop requires the current call".into()), 1.5).is_empty());
+    assert!(!call.hangup_unconfirmed && !call.hangup_pending && call.attempt().is_none());
+    let seen = refresh(&call.tick(2.0));
+    call.reply(seen, Ok(state(json!({"phase": "connected", "attemptId": "another-window"}))), 2.0);
+    assert_eq!(call.unavailable().as_deref(), Some(ELSEWHERE));
+    assert!(jobs(&call.hangup()).is_empty(), "the other window's call is never stopped from here");
+    let seen = refresh(&call.tick(3.0));
+    call.reply(seen, Ok(state(json!({"phase": "ended", "attemptId": "another-window"}))), 3.0);
+    assert!(call.can_call());
+}

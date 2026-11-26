@@ -763,8 +763,10 @@ impl Call {
                 Err(error) if current => {
                     self.error = Some(error);
                     self.dialing = false;
+                    self.attempt = None;
+                    self.start_submitted = false;
                     self.out.push(Effect::PeerEnd);
-                    self.fetch(Req::Stop, Some(Action::new("stop").attempt(&id)));
+                    self.fetch(Req::Abandon, Some(Action::new("stop").attempt(&id)));
                 }
                 _ => {
                     let stale = Job { generation: self.generation, work: 0, req: Req::Abandon, action: Some(Action::new("stop").attempt(&id)) };
