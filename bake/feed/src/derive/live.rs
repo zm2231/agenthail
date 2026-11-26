@@ -132,7 +132,7 @@ impl Overview {
 
     pub fn refresh(&mut self, fetched: Fetched) {
         let Fetched { mut recorded, ledgers } = fetched;
-        if newer(&self.base.updated_at, &recorded.updated_at) {
+        if !newer(&recorded.updated_at, &self.base.updated_at) {
             recorded.updated_at = std::mem::take(&mut self.base.updated_at);
             recorded.sessions = std::mem::take(&mut self.base.sessions);
         }

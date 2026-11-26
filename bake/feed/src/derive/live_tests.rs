@@ -45,6 +45,8 @@ fn an_overview_fetched_before_a_newer_session_snapshot_keeps_the_newer_sessions(
     assert_eq!(board_ids(&w, "p"), ["w1"], "the rest of the older refresh still lands");
     assert!(!ov.take_sessions("2026-11-24T12:00:03Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
     assert_eq!(status(&ov.world(), "a"), "busy");
+    ov.refresh(fetched("2026-11-24T12:00:04Z", vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")], vec![]));
+    assert_eq!(status(&ov.world(), "a"), "busy", "a refresh stamped the same time keeps the sessions held");
     ov.refresh(fetched("2026-11-24T12:00:10Z", vec![session("a", "p", "2026-11-24T12:00:09Z", "idle")], vec![]));
     assert_eq!(status(&ov.world(), "a"), "idle", "a newer overview replaces the sessions");
 }
