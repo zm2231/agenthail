@@ -113,7 +113,8 @@ fn rename_needs_a_new_name_of_at_most_120_characters() {
     assert!(rename_problem("  ", "App").is_some());
     assert!(rename_problem(&"x".repeat(121), "App").is_some());
     assert_eq!(rename_problem(" App ", "App"), Some(""));
-    assert_eq!(rename_problem(&"é".repeat(120), "App"), None);
+    assert_eq!(rename_problem(&"e".repeat(120), "App"), None);
+    assert!(rename_problem(&"é".repeat(61), "App").is_some(), "the daemon counts bytes");
 }
 
 #[test]
@@ -370,4 +371,25 @@ fn a_failed_change_is_sent_again_on_the_next_fresh_read_even_when_the_order_is_u
     assert_eq!(tiles.poll(Some(&daemon), true), None, "nothing more while it is out");
     tiles.answered(TileReply::Saved(order(&["b", "a"], &[], 2)));
     assert_eq!(tiles.poll(Some(&daemon), true), None, "nothing is left to send");
+}
+
+#[test]
+fn a_newer_order_seen_while_a_write_is_out_is_taken_once_the_write_lands() {
+    let mut tiles = Tiles::default();
+    tiles.poll(Some(&order(&["a", "b"], &[], 1)), true);
+    tiles.change(&TileChange::Pin("b".into(), true), &ids(&["a", "b"])).unwrap();
+    let newer = order(&["c", "b", "a"], &[], 3);
+    assert_eq!(tiles.poll(Some(&newer), true), None);
+    tiles.answered(TileReply::Saved(order(&["a", "b"], &["b"], 2)));
+    assert_eq!(tiles.poll(Some(&newer), false), None);
+    assert_eq!(tiles.arrangement.order, ids(&["c", "b", "a"]), "the newer order from elsewhere wins");
+}
+
+#[test]
+fn an_action_the_daemon_only_took_is_not_reported_as_done() {
+    let submitted = r#"{"ok":true,"status":"submitted"}"#;
+    let (client, _seen) = daemon(replies(&[(202, submitted); 4]));
+    for e in [client.project_remove("p1").unwrap_err(), client.lead_send("p1", "hi").unwrap_err(), client.lead_set("s1", false).unwrap_err(), client.work_clean("s1", &[]).unwrap_err()] {
+        assert!(e.maybe_delivered && e.code == "submitted", "{e:?}");
+    }
 }

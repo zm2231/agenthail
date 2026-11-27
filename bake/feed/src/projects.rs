@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::catalog::{Client, RespondError};
+use crate::catalog::{Client, RespondError, confirmed};
 use crate::derive::world::{Coordinator, ProjectRecord};
 
 type Outcome<T> = std::result::Result<T, RespondError>;
@@ -204,8 +204,8 @@ pub fn rename_problem(title: &str, current: &str) -> Option<&'static str> {
     let t = title.trim();
     if t.is_empty() {
         Some("A project needs a name.")
-    } else if t.chars().count() > NAME_LIMIT {
-        Some("A project name is at most 120 characters.")
+    } else if t.len() > NAME_LIMIT {
+        Some("A project name is too long.")
     } else if t == current {
         Some("")
     } else {
@@ -450,6 +450,9 @@ impl Tiles {
     }
 
     pub fn poll(&mut self, remote: Option<&TileOrder>, fresh: bool) -> Option<TileOrder> {
+        if self.flight.is_some() {
+            return None;
+        }
         let retry = fresh && self.unsent && self.flight.is_none();
         if remote == self.seen.as_ref() && !retry {
             return None;
@@ -545,25 +548,25 @@ impl Client {
         if !host.is_empty() {
             payload["host"] = json!(host);
         }
-        let reply = self.action("project-add", payload)?;
+        let reply = self.action("project-add", payload).and_then(confirmed)?;
         let name = reply["project"]["displayName"].as_str().filter(|n| !n.is_empty()).unwrap_or("This folder").to_string();
         Ok(Added { name, created: reply["created"].as_bool().unwrap_or(true) })
     }
 
     pub fn project_rename(&self, project: &str, title: &str) -> Outcome<()> {
-        self.action("project-rename", json!({"projectId": project, "title": title})).map(drop)
+        self.action("project-rename", json!({"projectId": project, "title": title})).and_then(confirmed).map(drop)
     }
 
     pub fn project_remove(&self, project: &str) -> Outcome<()> {
-        self.action("project-remove", json!({"projectId": project})).map(drop)
+        self.action("project-remove", json!({"projectId": project})).and_then(confirmed).map(drop)
     }
 
     pub fn project_archive(&self, project: &str, archived: bool) -> Outcome<()> {
-        self.action(if archived { "project-archive" } else { "project-unarchive" }, json!({"projectId": project})).map(drop)
+        self.action(if archived { "project-archive" } else { "project-unarchive" }, json!({"projectId": project})).and_then(confirmed).map(drop)
     }
 
     pub fn project_tools(&self, project: &str, on: bool) -> Outcome<()> {
-        self.action("project-setting", json!({"projectId": project, "setting": "mcp", "value": if on { "on" } else { "off" }})).map(drop)
+        self.action("project-setting", json!({"projectId": project, "setting": "mcp", "value": if on { "on" } else { "off" }})).and_then(confirmed).map(drop)
     }
 
     pub fn lead_start(&self, surface: &str, folder: &str, host: &str, name: &str, replace: bool) -> Outcome<Lead> {
@@ -577,7 +580,7 @@ impl Client {
         if replace {
             payload["replace"] = json!(true);
         }
-        lead(self.action("coordinator-new", payload)?)
+        lead(self.action("coordinator-new", payload).and_then(confirmed)?)
     }
 
     pub fn lead_set(&self, session: &str, replace: bool) -> Outcome<Lead> {
@@ -585,15 +588,15 @@ impl Client {
         if replace {
             payload["replace"] = json!(true);
         }
-        lead(self.action("coordinator-set", payload)?)
+        lead(self.action("coordinator-set", payload).and_then(confirmed)?)
     }
 
     pub fn lead_send(&self, project: &str, message: &str) -> Outcome<()> {
-        self.action("coordinator-send", json!({"project": project, "message": message, "author": "person"})).map(drop)
+        self.action("coordinator-send", json!({"project": project, "message": message, "author": "person"})).and_then(confirmed).map(drop)
     }
 
     pub fn lead_clear(&self, project: &str) -> Outcome<()> {
-        self.action("coordinator-clear", json!({"projectId": project})).map(drop)
+        self.action("coordinator-clear", json!({"projectId": project})).and_then(confirmed).map(drop)
     }
 
     pub fn put_tiles(&self, order: &TileOrder) -> TileReply {
@@ -610,7 +613,7 @@ impl Client {
         if !remove_ignored.is_empty() {
             payload["removeIgnored"] = json!(remove_ignored);
         }
-        let reply = self.action("work-clean", payload)?;
+        let reply = self.action("work-clean", payload).and_then(confirmed)?;
         Ok(serde_json::from_value(reply["worktree"].clone()).unwrap_or_default())
     }
 }

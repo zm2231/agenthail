@@ -1,4 +1,4 @@
-use rune::{Cx, El, ScrollSpec, Tx, col, row, text, text_input};
+use rune::{Cx, El, ScrollSpec, TextEdit, Tx, col, row, text, text_input};
 use rune_kit::shell::Toolbar;
 use rune_kit::{Badge, BadgeVariant, Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant, SegmentedControl};
 use rune_theme_opencode::icons;
@@ -334,14 +334,17 @@ fn pending_composer(s: &App, key: &str, lead: &str) -> El {
     let k = kit();
     let (to, to2) = (key.to_string(), key.to_string());
     let sending = crate::over::projects::messaging(s, key);
-    let input = text_input(&s.ov.projects.lead_text, BODY.lh(21.0))
+    let empty = TextEdit::new("");
+    let draft = s.ov.projects.lead_drafts.get(key).unwrap_or(&empty);
+    let edit_key = key.to_string();
+    let input = text_input(draft, BODY.lh(21.0))
         .key("lead-first-message")
         .label("Message")
         .w_full()
         .min_h(44.0)
         .color(strong())
         .placeholder(format!("Tell {lead}…"), weak())
-        .on_edit(|s: &mut App| &mut s.ov.projects.lead_text)
+        .on_edit(move |s: &mut App| crate::over::projects::lead_draft(s, &edit_key))
         .on_submit(move |s: &mut App, _: &mut Tx| crate::over::projects::message_lead(s, &to));
     let send = IconButton::new(&icons::ARROW_UP).variant(IconButtonVariant::Submit).label("Send").on_press(move |s: &mut App| crate::over::projects::message_lead(s, &to2)).build(k);
     col()

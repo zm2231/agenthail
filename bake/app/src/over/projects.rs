@@ -108,7 +108,7 @@ pub struct State {
     error: Option<String>,
     confirm: Option<(Confirm, Job, Option<u64>)>,
     seen_at: Option<time::OffsetDateTime>,
-    pub lead_text: TextEdit,
+    pub lead_drafts: HashMap<String, TextEdit>,
     sending_to: HashSet<String>,
     hosts: Vec<Host>,
     folders: HashMap<String, Vec<String>>,
@@ -132,7 +132,7 @@ impl Default for State {
             error: None,
             confirm: None,
             seen_at: None,
-            lead_text: TextEdit::new(""),
+            lead_drafts: HashMap::new(),
             sending_to: HashSet::new(),
             hosts: Vec::new(),
             folders: HashMap::new(),
@@ -264,13 +264,17 @@ pub fn set_lead(s: &mut App, key: &str, tx: &mut Tx) {
 }
 
 pub fn message_lead(s: &mut App, key: &str) {
-    let text = s.ov.projects.lead_text.text.trim().to_string();
+    let text = s.ov.projects.lead_drafts.get(key).map(|t| t.text.trim().to_string()).unwrap_or_default();
     let Some(p) = s.ov.d.project(key) else { return };
     if text.is_empty() || s.ov.projects.sending_to.contains(key) {
         return;
     }
     let lead = p.lead_name.clone();
     run(s, Job::Message { project: key.to_string(), lead, text }, None);
+}
+
+pub fn lead_draft<'a>(s: &'a mut App, key: &str) -> &'a mut TextEdit {
+    s.ov.projects.lead_drafts.entry(key.to_string()).or_insert_with(|| TextEdit::new(""))
 }
 
 pub fn messaging(s: &App, key: &str) -> bool {
@@ -350,10 +354,10 @@ fn settled(s: &mut App, job: Job, from_sheet: Option<u64>, result: Result<(Strin
     if let Job::Clean { session, .. } = &job {
         s.ov.projects.cleaning.remove(session);
     }
-    if let Job::Message { project, .. } = &job {
+    if let Job::Message { project, text, .. } = &job {
         s.ov.projects.sending_to.remove(project);
-        if result.is_ok() && s.screen == crate::Screen::Project(project.clone()) {
-            s.ov.projects.lead_text = TextEdit::new("");
+        if result.is_ok() && s.ov.projects.lead_drafts.get(project).is_some_and(|d| d.text.trim() == text) {
+            s.ov.projects.lead_drafts.remove(project);
         }
     }
     match result {
