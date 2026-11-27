@@ -62,6 +62,7 @@ pub mod trace;
 pub mod version;
 pub mod voice;
 pub mod watch;
+pub mod windows;
 pub mod wire;
 
 pub use blocks::{Block, Kind};

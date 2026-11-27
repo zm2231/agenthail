@@ -54,6 +54,25 @@ pub struct Complete {
     pub keys: super::composer_keys::State,
 }
 
+#[derive(Default)]
+pub struct Popup {
+    session: Option<String>,
+    highlighted: usize,
+    dismissed: Option<String>,
+    search: Option<Search>,
+    shown_ids: Vec<String>,
+}
+
+impl Complete {
+    pub fn swap_popup(&mut self, p: &mut Popup) {
+        std::mem::swap(&mut self.session, &mut p.session);
+        std::mem::swap(&mut self.highlighted, &mut p.highlighted);
+        std::mem::swap(&mut self.dismissed, &mut p.dismissed);
+        std::mem::swap(&mut self.search, &mut p.search);
+        std::mem::swap(&mut self.shown_ids, &mut p.shown_ids);
+    }
+}
+
 fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'static) {
     let Some(client) = s.client.clone() else { return };
     let out = s.outbox.clone();

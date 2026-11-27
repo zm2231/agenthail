@@ -174,6 +174,7 @@ pub struct App {
     revealed: Option<String>,
     pub missing: Option<ui::gone::Missing>,
     pub notify: notify::State,
+    pub windows: ui::window::Windows,
     last_row: Option<Session>,
     client: Option<Client>,
     overview_poke: Option<Sender<Ask>>,
@@ -373,6 +374,7 @@ fn empty(live: Overview, persist: bool) -> App {
         revealed: None,
         missing: None,
         notify: notify::State::default(),
+        windows: Default::default(),
         last_row: None,
         client: None,
         overview_poke: None,
@@ -494,7 +496,8 @@ pub fn load_pane(s: &mut App, id: &str) {
         s.panes.insert(id.to_string(), pane);
     }
     while s.lru.len() > 8 {
-        let old = s.lru.remove(0);
+        let Some(at) = s.lru.iter().position(|x| !s.windows.holds(x)) else { break };
+        let old = s.lru.remove(at);
         s.panes.remove(&old);
     }
 }
@@ -1291,6 +1294,7 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
         }
         ui::attach::rekey(s, &old, &new);
         ui::complete::rekey(s, &old, &new);
+        ui::window::rekeyed(s, &old, &new);
         move_key(&mut s.status_line, &old, &new);
         move_key(&mut s.busy_pick, &old, &new);
         move_key(&mut s.redeliver, &old, &new);

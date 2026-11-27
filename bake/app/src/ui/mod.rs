@@ -19,6 +19,7 @@ pub mod composer_keys;
 pub mod connect;
 pub(crate) mod delivery;
 pub mod watch;
+pub mod window;
 pub mod gone;
 pub(crate) mod holders;
 pub(crate) mod inspect;
@@ -116,15 +117,21 @@ pub(crate) fn avatar_with_state(name: &str, state: State, size: f32) -> El {
 pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let in_session = s.screen == Screen::Session;
     let themes = crate::look::frame(cx, in_session, true, true);
-    cx.with_kit(&themes.main, |cx| window(s, cx, &themes.chrome, in_session))
+    cx.with_kit(&themes.main, |cx| window(s, cx, &themes.chrome, in_session, true))
 }
 
-fn window(s: &App, cx: &mut Cx<App>, chrome: &KitTheme, in_session: bool) -> El {
+pub fn session_window(s: &App, cx: &mut Cx<App>) -> El {
+    let themes = crate::look::frame(cx, true, true, true);
+    cx.with_kit(&themes.main, |cx| window(s, cx, &themes.chrome, true, false))
+}
+
+fn window(s: &App, cx: &mut Cx<App>, chrome: &KitTheme, in_session: bool, main: bool) -> El {
     let k = cx.kit();
     let mut layer = Vec::new();
     let body = match (connect::screen(s, cx, chrome), &s.screen) {
         (Some(body), _) => body,
-        (None, Screen::Session) => session_body(s, cx, chrome),
+        (None, _) if !main => session_body(s, cx, chrome, false),
+        (None, Screen::Session) => session_body(s, cx, chrome, true),
         (None, _) => cx.with_kit(chrome, |cx| crate::over::view(s, cx, &mut layer, &k)),
     };
     let c = cx.with_kit(chrome, |cx| cx.kit());
@@ -147,7 +154,7 @@ fn window(s: &App, cx: &mut Cx<App>, chrome: &KitTheme, in_session: bool) -> El 
     rune_kit::root(root, layer)
 }
 
-fn session_body(s: &App, cx: &mut Cx<App>, chrome: &KitTheme) -> El {
+fn session_body(s: &App, cx: &mut Cx<App>, chrome: &KitTheme, with_sidebar: bool) -> El {
     let k = cx.kit();
     let selected = s.selected.as_deref();
     let x = selected.and_then(|id| gone::shown(s, id));
@@ -156,8 +163,8 @@ fn session_body(s: &App, cx: &mut Cx<App>, chrome: &KitTheme) -> El {
     let rail = x.map(|x| rail(s, x, &k));
     cx.with_kit(chrome, |cx| {
         let c = cx.kit();
-        let sidebar = crate::over::ui::sidebar(s, project.as_deref(), selected, &c);
-        crate::over::ui::frame(cx, s, Some(sidebar), screen, rail, session_toolbar(s, x, &c), &k)
+        let sidebar = with_sidebar.then(|| crate::over::ui::sidebar(s, project.as_deref(), selected, &c));
+        crate::over::ui::frame(cx, s, sidebar, screen, rail, session_toolbar(s, x, &c), &k)
     })
 }
 
