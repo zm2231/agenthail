@@ -758,7 +758,11 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
     ui::attach::clear(s, id);
     ui::complete::sending(s, id);
     match s.unsent.take_same(id, &message, &attachments) {
-        Some(again) if again.reuses_key() && again.turn == turn && same_delivery(&again, busy, busy.or_else(|| send_busy(s, id))) => dispatch(s, id, again, true, tx),
+        Some(again) if again.reuses_key() && again.turn != turn => {
+            note(s, id, "Sent again with the turn options it first had, since it may already have arrived".into());
+            dispatch(s, id, again, true, tx);
+        }
+        Some(again) if again.reuses_key() && same_delivery(&again, busy, busy.or_else(|| send_busy(s, id))) => dispatch(s, id, again, true, tx),
         found => {
             if let Some(again) = found.filter(|u| u.reuses_key()) {
                 s.unsent.add(id, again);
@@ -767,9 +771,19 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
             pending.draft = Some(draft).filter(|d| *d != pending.text);
             pending.busy = busy.or(pending.busy);
             pending.turn = turn;
-            dispatch(s, id, pending, false, tx);
+            if waiting_earlier(s, id) {
+                s.unsent.add(id, Unsent { maybe_delivered: false, error: "an earlier message isn't confirmed yet".into(), ..pending });
+                over::layout::save(s);
+            } else {
+                dispatch(s, id, pending, false, tx);
+            }
         }
     }
+}
+
+fn waiting_earlier(s: &App, id: &str) -> bool {
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    s.unsent.list(id).iter().any(|u| u.redelivering(now))
 }
 
 fn clear_sent(s: &mut App, id: &str, unsent: &Unsent) {
@@ -792,8 +806,10 @@ pub fn can_retry(s: &App, id: &str) -> bool {
 }
 
 pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
-    if let Some(key) = s.unsent.latest(id).map(|u| u.key.clone()) {
-        retry_key(s, id, &key, false, tx);
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    let oldest = s.unsent.list(id).iter().find(|u| u.redelivering(now)).or(s.unsent.latest(id)).map(|u| (u.key.clone(), u.redelivering(now)));
+    if let Some((key, auto)) = oldest {
+        retry_key(s, id, &key, auto, tx);
     }
 }
 
@@ -818,13 +834,21 @@ fn retry_key(s: &mut App, id: &str, key: &str, auto: bool, tx: &mut Tx) {
 
 fn redeliver(s: &mut App, tx: &mut Tx) {
     let now = OffsetDateTime::now_utc().unix_timestamp();
+    let expired: Vec<(String, Unsent)> = s.unsent.iter().filter(|(_, u)| u.unanswered && u.sent_at > 0 && !u.redelivering(now)).map(|(id, u)| (id.clone(), u.clone())).collect();
+    for (id, unsent) in expired {
+        let stopped = Unsent { unanswered: false, ..unsent };
+        s.unsent.remove(&id, &stopped.key);
+        put_back(s, &id, &stopped);
+        s.unsent.add(&id, stopped);
+    }
     let mut due: Vec<(String, String)> = Vec::new();
     for (id, unsent) in s.unsent.iter().filter(|(_, u)| u.redelivering(now) && feed::attach::missing_upload(&u.error).is_none()) {
         if !due.iter().any(|(seen, _)| seen == id) {
             due.push((id.clone(), unsent.key.clone()));
         }
     }
-    s.redeliver.retain(|id, _| due.iter().any(|(d, _)| d == id));
+    let flying: Vec<String> = s.in_flight.keys().cloned().collect();
+    s.redeliver.retain(|id, _| due.iter().any(|(d, _)| d == id) || flying.contains(id));
     if s.client.is_none() {
         return;
     }
@@ -1037,9 +1061,11 @@ pub fn composer_note(s: &App, id: &str) -> Option<String> {
         parts.push(latest.quoted());
     }
     let now = OffsetDateTime::now_utc().unix_timestamp();
-    match s.unsent.latest(id).filter(|u| u.redelivering(now)) {
-        Some(latest) => parts.push(format!("Not confirmed yet: {}. Sending again automatically.", latest.error)),
-        None => parts.extend(s.unsent.note(id)),
+    let waiting: Vec<&Unsent> = s.unsent.list(id).iter().filter(|u| u.redelivering(now)).collect();
+    match waiting.as_slice() {
+        [] => parts.extend(s.unsent.note(id)),
+        [first] => parts.push(format!("Not confirmed yet: {}. Sending again automatically.", first.error)),
+        [first, ..] => parts.push(format!("{} messages waiting. Not confirmed yet: {}. Sending them in order automatically.", waiting.len(), first.error)),
     }
     let queued = s.queued.get(id).into_iter().flatten().find_map(|(at, receipt)| feed::composer::queued_note(&s.queue_rows, &s.rekeyed, id, receipt, s.snapshots >= at + 2));
     if !parts.is_empty() {
@@ -1102,10 +1128,11 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
             let failed = Unsent { unanswered: again, ..pending.failed(retry, maybe_delivered, answered, error) };
             if failed.redelivering(OffsetDateTime::now_utc().unix_timestamp()) {
                 s.redeliver.entry(id.clone()).or_insert_with(|| feed::composer::Backoff::starting(clock)).failed(clock);
+                s.unsent.add_first(&id, failed);
             } else {
                 put_back(s, &id, &failed);
+                s.unsent.add(&id, failed);
             }
-            s.unsent.add(&id, failed);
         }
         None => {
             s.redeliver.insert(id.clone(), feed::composer::Backoff::starting(clock));

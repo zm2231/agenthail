@@ -192,7 +192,7 @@ pub const REDELIVER_FOR: i64 = 60 * 60;
 pub const REDELIVER_MAX_WAIT: f64 = 20.0;
 
 pub fn redelivers(error: &crate::catalog::RespondError) -> bool {
-    !error.answered || matches!(error.code.as_str(), "unreadable_reply" | "host_outcome_unknown") || error.code == "control_failed" && error.reply["result"]["evidence"] == "unknown"
+    !error.answered
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -356,6 +356,12 @@ impl Unconfirmed {
         let list = self.0.entry(id.to_string()).or_default();
         list.retain(|u| u.key != unsent.key);
         list.push(unsent);
+    }
+
+    pub fn add_first(&mut self, id: &str, unsent: Unsent) {
+        let list = self.0.entry(id.to_string()).or_default();
+        list.retain(|u| u.key != unsent.key);
+        list.insert(0, unsent);
     }
 
     pub fn remove(&mut self, id: &str, key: &str) {
@@ -546,10 +552,8 @@ mod tests {
     fn only_a_message_without_an_answer_is_sent_again_and_only_for_an_hour() {
         let error = |answered: bool, code: &str, reply: Value| crate::catalog::RespondError { message: "x".into(), code: code.into(), maybe_delivered: true, reply, answered, status: 0 };
         assert!(redelivers(&error(false, "", Value::Null)));
-        assert!(redelivers(&error(true, "unreadable_reply", Value::Null)));
-        assert!(redelivers(&error(true, "host_outcome_unknown", Value::Null)));
-        assert!(redelivers(&error(true, "control_failed", json!({"result": {"evidence": "unknown"}}))));
-        assert!(!redelivers(&error(true, "control_failed", json!({"result": {"evidence": "refused"}}))));
+        assert!(!redelivers(&error(true, "unreadable_reply", Value::Null)));
+        assert!(!redelivers(&error(true, "host_outcome_unknown", Value::Null)));
         assert!(!redelivers(&error(true, "bad_gateway", Value::Null)));
         assert!(!redelivers(&error(true, "invalid_request", Value::Null)));
         let unsent = Unsent { unanswered: true, sent_at: 1000, ..Default::default() };
@@ -557,6 +561,16 @@ mod tests {
         assert!(!unsent.redelivering(1000 + REDELIVER_FOR));
         assert!(!Unsent { sent_at: 0, ..unsent.clone() }.redelivering(1000));
         assert!(!Unsent { unanswered: false, ..unsent }.redelivering(1000));
+    }
+
+    #[test]
+    fn a_resend_that_fails_again_keeps_its_place_at_the_front() {
+        let mut list = Unconfirmed::default();
+        list.add("s1", Unsent { key: "a".into(), text: "a".into(), ..Default::default() });
+        list.add("s1", Unsent { key: "b".into(), text: "b".into(), ..Default::default() });
+        list.add_first("s1", Unsent { key: "b".into(), text: "b".into(), ..Default::default() });
+        assert_eq!(list.list("s1").iter().map(|u| u.key.as_str()).collect::<Vec<_>>(), ["b", "a"]);
+        assert!(list.list("gone").is_empty());
     }
 
     #[test]
