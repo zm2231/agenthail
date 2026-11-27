@@ -62,7 +62,7 @@ func removedWorktreeSession(t *testing.T, roots func(worktree string) []string) 
 }
 
 // forwardPeer hands a send the daemon's peer manager took to its target's
-// messaging socket, as the manager does.
+// messaging socket in the frame the manager's worker writes.
 func forwardPeer(t *testing.T, send claudetest.PeerSend) {
 	t.Helper()
 	conn, err := net.Dial("unix", send.Target)
@@ -70,7 +70,9 @@ func forwardPeer(t *testing.T, send claudetest.PeerSend) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	frame, _ := json.Marshal(map[string]any{"type": "user", "from": "claude:peer", "message": map[string]string{"role": "user", "content": send.Message}})
+	id, from := uuid.NewString(), "/tmp/cc-socks/sender.sock"
+	content := "<cross-session-message from=\"uds:" + from + "\" from-session=\"" + uuid.NewString() + "\" from-name=\"sender\">\n" + send.Message + "\n</cross-session-message>"
+	frame, _ := json.Marshal(map[string]any{"msgV": 1, "msg_id": id, "uuid": id, "type": "user", "message": map[string]string{"role": "user", "content": content}, "priority": "next", "from": "uds:" + from})
 	if _, err := conn.Write(append(frame, '\n')); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +108,7 @@ func TestAMessageToAWorkerWhoseWorktreeWasRemovedResumesItInItsCheckoutAndSaysSo
 			}
 			testkit.Eventually(t, "the turn", 15*time.Second, func() bool {
 				turns := host.Turns(t, fixtureConversation)
-				return len(turns) == 1 && turns[0].Text == "are you there?"
+				return len(turns) == 1 && strings.Contains(turns[0].Text, "are you there?")
 			})
 			line := (surface.FolderMove{Gone: worktree, Into: checkout, Checkout: true}).Line()
 			if told := prompted(); !strings.Contains(told, line) {
