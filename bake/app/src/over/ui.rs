@@ -821,8 +821,8 @@ pub fn sessions_block(s: &App, compact: bool, k: &Kit) -> El {
     let listed = s.ov.d.listed();
     let open = Button::new("All sessions").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).icon(&icons::ARROW_RIGHT).shortcut("⌘⇧S").on_press(|s: &mut App| go(s, Screen::Sessions)).build(k);
     let mut chips = row().gap(6.0).flex_wrap().items_center();
-    for (name, n) in &by {
-        let pname = name.clone();
+    for (key, name, n) in &by {
+        let pkey = Some(key.clone()).filter(|k| !k.is_empty());
         chips = chips.child(
             row()
                 .gap(6.0)
@@ -834,7 +834,7 @@ pub fn sessions_block(s: &App, compact: bool, k: &Kit) -> El {
                 .border(1.0, edge())
                 .hover(k.c.surface_raised_hover)
                 .on_press(move |s: &mut App| {
-                    s.ov.sessions_project = s.ov.d.projects.iter().find(|p| p.name == pname).map(|p| p.key.clone());
+                    s.ov.sessions_project = pkey.clone();
                     s.ov.list.scope = 0;
                     go(s, Screen::Sessions);
                 })

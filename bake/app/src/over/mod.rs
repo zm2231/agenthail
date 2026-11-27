@@ -10,7 +10,7 @@ mod now;
 mod project;
 pub mod projects;
 pub mod search;
-mod sessions;
+pub mod sessions;
 pub mod ui;
 pub mod work;
 

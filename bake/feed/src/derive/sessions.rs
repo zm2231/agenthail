@@ -64,16 +64,16 @@ pub fn groups<'a>(list: &[&'a Session], needy: &HashSet<String>) -> Vec<Group<'a
     out
 }
 
-pub fn busy_by_group(sessions: &[Session]) -> Vec<(String, usize)> {
-    let mut by: Vec<(String, usize)> = Vec::new();
+pub fn busy_by_group(sessions: &[Session]) -> Vec<(String, String, usize)> {
+    let mut by: Vec<(String, String, usize)> = Vec::new();
     for x in sessions.iter().filter(|x| !x.archived && busy(x)) {
-        let name = group_name(x);
-        match by.iter_mut().find(|b| b.0 == name) {
-            Some(b) => b.1 += 1,
-            None => by.push((name, 1)),
+        let key = x.project_key();
+        match by.iter_mut().find(|b| b.0 == key) {
+            Some(b) => b.2 += 1,
+            None => by.push((key, group_name(x), 1)),
         }
     }
-    by.sort_by_key(|b| Reverse(b.1));
+    by.sort_by_key(|b| Reverse(b.2));
     by
 }
 

@@ -113,9 +113,11 @@ fn ask(s: &mut App, read: Read, request: Request) {
     let Some(client) = s.client.clone() else { return };
     let st = &mut s.ov.list;
     st.seq += 1;
-    st.due = None;
+    if read != Read::More {
+        st.due = None;
+        st.stale = false;
+    }
     st.typed = None;
-    st.stale = false;
     st.failed = None;
     st.error = None;
     let (seq, tx) = (st.seq, st.tx.clone());
