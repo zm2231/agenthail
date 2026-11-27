@@ -218,8 +218,7 @@ pub(crate) fn compound_answer(s: &App, request: &OpenRequest) -> Option<Response
         }
     }
     let answered = |qi: usize, q: &feed::catalog::RequestQuestion| !typed_for(qi).is_empty() || q.options.iter().any(|o| picks.contains(&o.id));
-    let mut each = questions.iter().enumerate();
-    let ready = if request.kind == "ask" { each.any(|(qi, q)| answered(qi, q)) } else { !questions.is_empty() && each.all(|(qi, q)| answered(qi, q)) };
+    let ready = !questions.is_empty() && questions.iter().enumerate().all(|(qi, q)| answered(qi, q));
     let note = if request.takes_note() { s.typed.get(&format!("{}|note", request.id)).map(|t| t.text.trim().to_string()).unwrap_or_default() } else { String::new() };
     ready.then(|| Response { message: note, ..Response::picks(chosen, answers) })
 }

@@ -61,12 +61,13 @@ pub struct State {
     pub replying: HashSet<String>,
     pub replied: HashMap<String, String>,
     reply_keys: HashMap<String, (String, String)>,
+    answered: HashMap<String, String>,
 }
 
 impl Default for State {
     fn default() -> Self {
         let (tx, rx) = channel();
-        State { tx, rx, inbox: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, reads: 0, review_old: HashMap::new(), note: None, daemon: None, newest: None, rev: None, started: false, open: None, replies: HashMap::new(), replying: HashSet::new(), replied: HashMap::new(), reply_keys: HashMap::new() }
+        State { tx, rx, inbox: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, reads: 0, review_old: HashMap::new(), note: None, daemon: None, newest: None, rev: None, started: false, open: None, replies: HashMap::new(), replying: HashSet::new(), replied: HashMap::new(), reply_keys: HashMap::new(), answered: HashMap::new() }
     }
 }
 
@@ -143,6 +144,7 @@ pub fn drain(s: &mut crate::App) -> bool {
             }
             Done::Acted(id, entry, reviewed, host, result) => {
                 st.acting.remove(&id);
+                let answered = st.answered.remove(&id);
                 st.newest = Some(Instant::now());
                 match result {
                     Err((e, _)) if reviewed && review::needs_newer(&e) => {
@@ -152,7 +154,10 @@ pub fn drain(s: &mut crate::App) -> bool {
                     Ok(()) => {
                         st.notes.remove(&id);
                         if let Some(inbox) = &mut st.inbox {
-                            inbox.decisions.retain(|d| d.id() != id);
+                            if let Some(request) = &answered {
+                                inbox.decisions.iter_mut().filter(|d| d.id() == id).for_each(|d| d.requests.retain(|r| &r.id != request));
+                            }
+                            inbox.decisions.retain(|d| d.id() != id || answered.is_some() && !d.requests.is_empty());
                         }
                         remember(&mut st.history, entry);
                     }
@@ -265,6 +270,9 @@ pub fn answer(s: &mut crate::App, d: &Decision, request: &str, response: Respons
         return;
     }
     let request = request.to_string();
+    if !s.ov.inbox.acting.contains(&d.id()) && s.client.is_some() {
+        s.ov.inbox.answered.insert(d.id(), request.clone());
+    }
     let outcome = if response.choices.is_empty() { "Answered in your own words" } else { "Answered" };
     act(s, d, outcome, move |client, d| client.answer(&d.session_id, &request, &response).map_err(|e| (e, request_hold(&d.session_id, &request))));
 }
