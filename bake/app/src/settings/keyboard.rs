@@ -18,7 +18,7 @@ pub struct Form {
 pub const PAGE: usize = 2;
 
 pub fn opened(s: &mut Prefs) {
-    if s.tab != 0 || s.general_page != PAGE {
+    if s.tab != super::GENERAL_TAB || s.general_page != PAGE {
         return;
     }
     bindings::refresh();

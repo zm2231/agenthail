@@ -673,7 +673,9 @@ fn unfollowed(s: &Prefs) -> Option<El> {
     Some(col().w_full().items_center().pb(8.0).child(parts::failure(s, &note).w(parts::WIDTH)))
 }
 
-pub const TABS: [&str; 7] = ["Overview", "General", "Claude", "Devices", "Handoffs", "Appearance", "Agents"];
+pub const TABS: [&str; 7] = ["Overview", "General", "Appearance", "Devices", "Delivery", "Claude", "Agents"];
+pub const GENERAL_TAB: usize = 1;
+pub const CLAUDE_TAB: usize = 5;
 pub const GENERAL: [&str; 3] = ["General", "Notifications", "Keyboard"];
 
 fn general_pages(s: &Prefs, layer: &mut Vec<El>, k: &rune_kit::Kit) -> El {
@@ -711,7 +713,7 @@ fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
     });
     let page = match s.tab {
         overview::TAB => overview::page(s, &k),
-        2 => claude::page(s, &mut layer, &k),
+        CLAUDE_TAB => claude::page(s, &mut layer, &k),
         signin::TAB => signin::pages(s, &mut layer, &k),
         handoffs::TAB => handoffs::page(s, &mut layer, &k),
         appearance::TAB => appearance::page(s, &k),
