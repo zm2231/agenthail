@@ -171,7 +171,15 @@ fn want_thumb(s: &mut Prefs, path: &str) {
 }
 
 pub fn choose_image(s: &mut Prefs, tx: &mut Tx) {
-    if s.appearance.writing || s.client.is_none() {
+    if s.appearance.writing {
+        return;
+    }
+    if s.client.is_none() {
+        (s.client, s.no_client) = super::connect();
+    }
+    if s.client.is_none() {
+        s.appearance.error = Some(super::unread(s));
+        changed(s);
         return;
     }
     s.appearance.writing = true;
