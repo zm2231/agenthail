@@ -1,0 +1,315 @@
+use super::*;
+use super::rows_memo_lines::{now, settle, world, x};
+use feed::decisions::{Decision, Handled, Inbox, LeadHandled};
+
+fn drawn(rt: &Runtime<App>) -> Vec<String> {
+    rt.elements()
+        .into_iter()
+        .filter(|e| !e.exiting && !e.path.starts_with("kit-root/#0/backdrop"))
+        .map(|e| format!("{} {} {:?} {:?} {:?} {:?} {:?} {:?}", e.path, e.role, e.text, e.label, e.rect.map(f32::round), e.fill, e.text_color, e.border_color))
+        .collect()
+}
+
+fn quiet(rt: &mut Runtime<App>) {
+    let mut seen = crate::look::generation();
+    let mut still = 0;
+    for _ in 0..1000 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        settle(rt);
+        let now = crate::look::generation();
+        still = if now == seen { still + 1 } else { 0 };
+        seen = now;
+        if still == 100 {
+            return;
+        }
+    }
+    panic!("the look kept changing on its own");
+}
+
+fn matches_fresh(rt: &mut Runtime<App>, what: &str) {
+    let kept = drawn(rt);
+    rt.invalidate_memos_by_prefix("");
+    settle(rt);
+    let fresh = drawn(rt);
+    if let Some(i) = (0..kept.len().max(fresh.len())).find(|&i| kept.get(i) != fresh.get(i)) {
+        panic!("{what}: the kept view differs from a fresh build at element {i}:\n kept  {:?}\n fresh {:?}", kept.get(i), fresh.get(i));
+    }
+}
+
+fn shows(rt: &mut Runtime<App>, what: &str, change: impl FnOnce(&mut App)) {
+    settle(rt);
+    let before = drawn(rt);
+    rt.update(|s, _| change(s));
+    settle(rt);
+    assert_ne!(drawn(rt), before, "{what} changes what Now shows");
+    matches_fresh(rt, what);
+}
+
+#[test]
+fn every_region_on_now_shows_each_change_as_a_fresh_build_would() {
+    if !isolated("now_regions::every_region_on_now_shows_each_change_as_a_fresh_build_would") {
+        return;
+    }
+    let dir = Dir::new("now-regions");
+    let mut rt = world(&dir);
+    let review = |item: &str| Decision { group: "review".into(), key: format!("review:p1:{item}"), work_item: item.into(), ledger_key: "p1".into(), session_id: "a".into(), project_id: "p1".into(), since: "2026-11-27T09:00:00Z".into(), ..Default::default() };
+    let lead = |item: &str| LeadHandled { session_id: "b".into(), held_by: "a".into(), reason: "Checking it first".into(), work_item: item.into(), ledger_key: "p1".into(), ..Default::default() };
+    rt.update(|s, _| {
+        s.ov.inbox.inbox = Some(Inbox { decisions: vec![review("W1")], lead_handling: vec![lead("W3")], ..Default::default() });
+        s.ov.d.usage = vec![serde_json::from_value(json!({"provider": "claude", "label": "5h", "percent": 40.0})).unwrap()];
+        s.ov.d.hosts = vec![serde_json::from_value(json!({"id": "h1", "name": "studio", "state": "local"})).unwrap()];
+    });
+    now(&mut rt, false);
+    let need = |s: &App, title: &str| crate::over::Need {
+        kind: crate::over::NeedKind::Question,
+        group: crate::over::Group::Waiting,
+        project: "Alpha".into(),
+        project_key: "p1".into(),
+        title: title.into(),
+        who: "Charlie three".into(),
+        at: s.ov.d.sessions[0].last_active.clone(),
+        target: crate::over::Target::Session(title.into()),
+        label: None,
+    };
+    rt.update(|s, _| s.ov.needs = vec![need(s, "first"), need(s, "second")]);
+    quiet(&mut rt);
+    matches_fresh(&mut rt, "the first build");
+
+    shows(&mut rt, "a usage meter's level", |s| s.ov.d.usage[0].percent = Some(85.0));
+    shows(&mut rt, "a computer going offline", |s| s.ov.d.hosts[0].state = "unreachable".into());
+    shows(&mut rt, "a new daemon version", |s| s.ov.inbox.version = Some("A newer daemon is running".into()));
+    shows(&mut rt, "a restart starting", |s| s.link.starting = true);
+    shows(&mut rt, "the focused need's title", |s| s.ov.needs[0].title = "first, reworded".into());
+    shows(&mut rt, "focus moving to the next need", |s| s.ov.need_ix = 1);
+    shows(&mut rt, "a need leaving", |s| {
+        s.ov.needs.remove(0);
+        s.ov.need_ix = 0;
+    });
+    shows(&mut rt, "a focused pane", |s| s.ov.now_focus = Some((1, [false, false, false])));
+    shows(&mut rt, "the panes restored", |s| s.ov.now_focus = None);
+    shows(&mut rt, "a project renamed in the sidebar", |s| s.ov.d.projects[1].name = "Beta renamed".into());
+    shows(&mut rt, "activity that couldn't be read", |s| s.earlier.activity_missing = true);
+    shows(&mut rt, "a session that stops working", |s| x(s, "a").status = "idle".into());
+    shows(&mut rt, "a session hands-on", |s| s.ov.hands_on = vec!["c".into()]);
+    shows(&mut rt, "a note from a computer", |s| s.ov.inbox.inbox.as_mut().unwrap().notes = vec!["studio isn't answering, so its decisions aren't shown.".into()]);
+    shows(&mut rt, "a second decision in the group", |s| s.ov.inbox.inbox.as_mut().unwrap().decisions.push(review("W2")));
+    shows(&mut rt, "a lead's reason", |s| s.ov.inbox.inbox.as_mut().unwrap().lead_handling[0].reason = "Running the tests".into());
+    shows(&mut rt, "a decision handled here", |s| s.ov.inbox.history = vec![Handled { title: "Wire the export".into(), session: "a".into(), outcome: "Approved".into(), at: "2026-11-27T09:58:00Z".into() }]);
+    shows(&mut rt, "the last look", |s| s.ov.looked_now = Some("2026-11-27T09:45:00Z".into()));
+    shows(&mut rt, "a newer last look", |s| s.ov.looked_now = Some("2026-11-27T09:55:00Z".into()));
+    shows(&mut rt, "the rail collapsed", |s| crate::over::layout::set_collapsed(s, [false, false, true]));
+    shows(&mut rt, "the sidebar collapsed", |s| crate::over::layout::set_collapsed(s, [true, false, true]));
+    shows(&mut rt, "the centre collapsed", |s| crate::over::layout::set_collapsed(s, [false, true, false]));
+    shows(&mut rt, "every pane back", |s| crate::over::layout::set_collapsed(s, [false, false, false]));
+    shows(&mut rt, "the sidebar narrower", |s| s.ov.now_side = rune_kit::shell::PaneState::new(240.0).range(200.0, 480.0));
+    shows(&mut rt, "the brief layout", |s| s.ov.now_brief = true);
+    shows(&mut rt, "the three panes again", |s| s.ov.now_brief = false);
+}
+
+#[test]
+fn the_brief_layout_shows_each_change_as_a_fresh_build_would() {
+    if !isolated("now_regions::the_brief_layout_shows_each_change_as_a_fresh_build_would") {
+        return;
+    }
+    let dir = Dir::new("now-regions-brief");
+    let mut rt = world(&dir);
+    now(&mut rt, true);
+    quiet(&mut rt);
+    matches_fresh(&mut rt, "the first build");
+    shows(&mut rt, "a digest line's text", |s| super::rows_memo_lines::work(s, "W2").text = "Check the import twice".into());
+    shows(&mut rt, "a catch-up being asked", |s| s.ov.inbox.briefs.entry("p1".into()).or_default().asking = true);
+    shows(&mut rt, "a catch-up's note", |s| {
+        let b = s.ov.inbox.briefs.entry("p1".into()).or_default();
+        b.asking = false;
+        b.notice = Some("The lead is writing it".into());
+    });
+    shows(&mut rt, "a moving session's detail", |s| x(s, "b").display.detail = "Running the import tests".into());
+    shows(&mut rt, "a session that stops working", |s| x(s, "b").status = "idle".into());
+    shows(&mut rt, "the last look", |s| s.ov.looked_now = Some("2026-11-27T09:45:00Z".into()));
+}
+
+#[test]
+fn a_row_opens_what_it_is_about_after_that_changes_out_of_sight() {
+    if !isolated("now_regions::a_row_opens_what_it_is_about_after_that_changes_out_of_sight") {
+        return;
+    }
+    let dir = Dir::new("now-regions-press");
+    let mut rt = world(&dir);
+    let handled = |session: &str| Handled { title: "Wire the export".into(), session: session.into(), outcome: "Approved".into(), at: "2026-11-27T09:58:00Z".into() };
+    rt.update(|s, _| {
+        s.ov.inbox.inbox = Some(Inbox::default());
+        s.ov.inbox.history = vec![handled("a")];
+    });
+    now(&mut rt, false);
+    rt.update(|s, _| s.ov.inbox.history = vec![handled("c")]);
+    settle(&mut rt);
+    let (x, y) = rt.find("handled-0").expect("the handled row is on screen");
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(DT);
+    assert_eq!(rt.state.selected.as_deref(), Some("c"), "the row opens the session it lists now, though it reads the same");
+}
+
+fn overview(updated: &str, sessions: Vec<Session>, sent: &mut std::sync::Arc<Vec<Session>>, activity_missing: bool) -> Bg {
+    let mut recorded: Recorded = serde_json::from_value(json!({
+        "updatedAt": updated,
+        "hostEpoch": EPOCH,
+        "catalogSeq": 1,
+        "projects": [{"id": "p1", "displayName": "Alpha", "lastActive": "2026-11-27T10:00:00Z"}, {"id": "p2", "displayName": "Beta", "lastActive": "2026-11-27T09:00:00Z"}],
+    }))
+    .unwrap();
+    recorded.activity_missing = activity_missing;
+    *sent = feed::derive::live::shared_sessions(sent, sessions);
+    Bg::Overview(Box::new(Fetched { recorded, sessions: sent.clone(), ledgers: HashMap::new(), held: Vec::new(), asked: Vec::new(), actors_at: std::time::Instant::now(), usage: None, moved: Vec::new() }))
+}
+
+#[test]
+fn a_refresh_that_changes_nothing_shown_skips_the_view() {
+    if !isolated("now_regions::a_refresh_that_changes_nothing_shown_skips_the_view") {
+        return;
+    }
+    use super::rows_memo_lines::people;
+    use crate::over::rows::built;
+    let dir = Dir::new("now-regions-skip");
+    let mut rt = world(&dir);
+    now(&mut rt, false);
+    let mut sent = std::sync::Arc::default();
+    let runs = |rt: &mut Runtime<App>, message: Bg| {
+        let before = built::views();
+        send(rt, message);
+        rt.frame(DT);
+        rt.frame(DT);
+        built::views() > before
+    };
+    runs(&mut rt, overview("2026-11-27T10:00:05Z", people(), &mut sent, false));
+    assert!(!runs(&mut rt, overview("2026-11-27T10:00:40Z", people(), &mut sent, false)), "the same rows later in the same minute");
+    assert!(runs(&mut rt, overview("2026-11-27T10:01:02Z", people(), &mut sent, false)), "the minute turning");
+    assert!(!runs(&mut rt, overview("2026-11-27T10:01:30Z", people(), &mut sent, false)), "the same rows again");
+    let mut renamed = people();
+    renamed[2] = session("c", 2, json!({"name": "Charlie renamed"}));
+    assert!(runs(&mut rt, overview("2026-11-27T10:01:40Z", renamed.clone(), &mut sent, false)), "a session renamed");
+    assert!(runs(&mut rt, overview("2026-11-27T10:01:45Z", renamed.clone(), &mut sent, true)), "activity that couldn't be read");
+    assert!(runs(&mut rt, Bg::OverviewError("offline".into())), "anything else that arrives");
+}
+
+fn people_done() -> Vec<Session> {
+    let mut sessions = super::rows_memo_lines::people();
+    sessions[0] = session("a", 0, json!({"name": "Alpha one", "lastActive": "2026-11-27T07:00:30Z", "endTurn": {"headline": "Landed the fix", "outcome": "done", "at": "2026-11-27T07:00:30Z"}}));
+    sessions
+}
+
+#[test]
+fn a_session_crossing_into_idle_within_the_minute_shows_as_a_fresh_build_would() {
+    if !isolated("now_regions::a_session_crossing_into_idle_within_the_minute_shows_as_a_fresh_build_would") {
+        return;
+    }
+    use crate::over::rows::built;
+    let dir = Dir::new("now-regions-done");
+    let mut rt = world(&dir);
+    let sessions = people_done();
+    let mut sent = std::sync::Arc::default();
+    send(&rt, overview("2026-11-27T10:00:20Z", sessions.clone(), &mut sent, false));
+    rt.frame(DT);
+    rt.update(|s, _| {
+        crate::over::go(s, Screen::Sessions);
+        let view = serde_json::from_value(json!({
+            "projects": [{"id": "p1", "name": "Alpha", "counts": {"families": 1, "sessions": 1}, "collapsedFamilyIds": ["a"]}],
+            "families": [{"id": "a", "rootId": "a", "projectId": "p1", "members": [{"id": "a"}]}],
+        }))
+        .unwrap();
+        let page = feed::listing::Page { sessions: s.ov.d.sessions.to_vec(), view, next: None };
+        crate::over::listing::show(s, feed::listing::Listing::first(page));
+    });
+    quiet(&mut rt);
+    assert!(rt.presented("srow-a").is_some(), "the session's row is on screen");
+    let views = built::views();
+    send(&rt, overview("2026-11-27T10:00:40Z", sessions, &mut sent, false));
+    rt.frame(DT);
+    rt.frame(DT);
+    assert_eq!(built::views(), views, "a refresh later in the same minute skips the view");
+    matches_fresh(&mut rt, "three hours since the session's turn, passed within the minute");
+    let done = |rt: &Runtime<App>| {
+        let mark = rt.elements().into_iter().find(|e| e.path.ends_with("srow-a/#0/#1")).expect("the row's status mark");
+        mark.fill.g > 0.9 && mark.fill.r < 0.1
+    };
+    assert!(done(&rt), "within the minute the row still shows the session done, as of the shown minute");
+    send(&rt, overview("2026-11-27T10:01:05Z", people_done(), &mut sent, false));
+    rt.frame(DT);
+    rt.frame(DT);
+    assert!(!done(&rt), "once the minute turns, the row shows the session idle");
+    matches_fresh(&mut rt, "the minute after the session went idle");
+}
+
+#[test]
+fn the_app_clock_turning_runs_the_view_at_each_minute_and_each_deadline() {
+    if !isolated("now_regions::the_app_clock_turning_runs_the_view_at_each_minute_and_each_deadline") {
+        return;
+    }
+    use crate::over::rows::built;
+    let dir = Dir::new("now-regions-clock");
+    let mut rt = world(&dir);
+    now(&mut rt, false);
+    let fixtures = rt.state.fixtures.take();
+    rt.state.now -= time::Duration::hours(3);
+    let views = built::views();
+    rt.frame(DT);
+    assert!(built::views() > views, "the app clock turning to another minute redraws what reads it");
+    assert_eq!(rt.state.now, feed::wake::minute_of(time::OffsetDateTime::now_utc()), "the app clock sits on the start of the minute");
+    if time::OffsetDateTime::now_utc().second() >= 55 {
+        std::thread::sleep(std::time::Duration::from_secs(6));
+        rt.frame(DT);
+    }
+    let reset = time::OffsetDateTime::now_utc().replace_nanosecond(0).unwrap() + time::Duration::seconds(2);
+    let mut sessions = rt.state.sessions.to_vec();
+    sessions[0].usage_limit = Some(feed::limit::UsageLimit { resets_at: Some(reset.format(&time::format_description::well_known::Rfc3339).unwrap()) });
+    rt.state.sessions = sessions.into();
+    rt.frame(DT);
+    std::thread::sleep(std::time::Duration::from_millis(2100));
+    let views = built::views();
+    rt.frame(DT);
+    assert_eq!(rt.state.now, reset, "the app clock turns when a usage limit resets, not at the next minute");
+    assert!(built::views() > views, "a usage limit resetting redraws what reads it");
+    rt.state.fixtures = fixtures;
+}
+
+#[test]
+fn leaving_now_marks_the_moment_it_was_left() {
+    if !isolated("now_regions::leaving_now_marks_the_moment_it_was_left") {
+        return;
+    }
+    let dir = Dir::new("now-regions-left");
+    let mut rt = world(&dir);
+    now(&mut rt, false);
+    let before = time::OffsetDateTime::now_utc().replace_nanosecond(0).unwrap();
+    rt.update(|s, _| {
+        let fixtures = s.fixtures.take();
+        crate::over::go(s, Screen::Sessions);
+        s.fixtures = fixtures;
+    });
+    let looked = rt.state.ov.looked_now.clone().expect("leaving Now records a look");
+    let looked = feed::catalog::parse_time(&looked).expect("the look is a time");
+    assert!(looked >= before, "the look is when Now was left ({looked}), not when the overview was last rebuilt ({})", rt.state.ov.d.now);
+}
+
+#[test]
+fn a_clock_set_back_turns_the_minute_and_marks_looks_by_the_wall() {
+    if !isolated("now_regions::a_clock_set_back_turns_the_minute_and_marks_looks_by_the_wall") {
+        return;
+    }
+    let dir = Dir::new("now-regions-back");
+    let mut rt = world(&dir);
+    now(&mut rt, false);
+    rt.update(|s, _| {
+        let fixtures = s.fixtures.take();
+        let ahead = time::OffsetDateTime::now_utc() + time::Duration::hours(3);
+        s.now = ahead;
+        assert!(crate::minute(s), "the minute turns when the clock is set back");
+        assert!(s.now < ahead, "the app clock follows the clock back");
+        assert_eq!(Some(s.now), crate::quiet::shown_minute(s), "the app clock sits on the minute ages and states read, so a session header and its list row agree");
+        s.ov.d.now = ahead;
+        crate::over::go(s, Screen::Sessions);
+        s.fixtures = fixtures;
+    });
+    let looked = feed::catalog::parse_time(rt.state.ov.looked_now.as_deref().expect("leaving Now records a look")).unwrap();
+    assert!(looked < rt.state.ov.d.now, "the look is the wall clock, not a world from a clock since set back");
+}

@@ -78,6 +78,12 @@ fn minutes_until(at: Option<&str>, now: OffsetDateTime) -> Option<i64> {
 }
 
 impl Session {
+    pub fn deadlines(&self) -> impl Iterator<Item = OffsetDateTime> + '_ {
+        let reset = self.usage_limit.as_ref().and_then(|l| l.resets_at.as_deref());
+        let resume = self.limit_resume.as_ref().and_then(|r| r.resets_at.as_deref());
+        [reset, resume].into_iter().flatten().filter_map(parse_time)
+    }
+
     pub fn limit(&self, now: OffsetDateTime) -> Option<Stop> {
         let outranked = !matches!(self.display.kind.as_str(), "" | "limited") || self.attention.as_ref().is_some_and(|a| a.kind != "usageLimit");
         if outranked {

@@ -101,9 +101,22 @@ pub fn to_thread<T>() -> (mpsc::Sender<T>, Receiver<T>) {
     mpsc::channel()
 }
 
+pub fn minute_of(at: time::OffsetDateTime) -> time::OffsetDateTime {
+    at.replace_nanosecond(0).and_then(|t| t.replace_second(0)).unwrap_or(at)
+}
+
 pub fn next_minute(at: time::OffsetDateTime) -> time::OffsetDateTime {
-    let start = at.replace_nanosecond(0).and_then(|t| t.replace_second(0)).unwrap_or(at);
-    start + time::Duration::MINUTE
+    minute_of(at) + time::Duration::MINUTE
+}
+
+pub fn turn(now: time::OffsetDateTime, at: time::OffsetDateTime, deadlines: &[time::OffsetDateTime]) -> Option<time::OffsetDateTime> {
+    let minute = minute_of(now);
+    let next = deadlines.iter().copied().filter(|d| *d >= minute && *d <= now).max().unwrap_or(minute);
+    (next != at).then_some(next)
+}
+
+pub fn next_turn(now: time::OffsetDateTime, deadlines: &[time::OffsetDateTime]) -> time::OffsetDateTime {
+    deadlines.iter().copied().filter(|d| *d > now).fold(next_minute(now), time::OffsetDateTime::min)
 }
 
 #[cfg(test)]

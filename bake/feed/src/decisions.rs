@@ -307,6 +307,14 @@ impl Inbox {
             }
         }
         self.decisions = out;
+        let mut seen = std::collections::HashSet::new();
+        self.lead_handling.retain(|h| seen.insert(h.row_key()));
+    }
+}
+
+impl LeadHandled {
+    pub fn row_key(&self) -> String {
+        format!("{}|{}|{}", self.ledger_key, self.work_item, self.session_id)
     }
 }
 
@@ -606,6 +614,19 @@ mod tests {
         let hosts: Vec<&str> = inbox.decisions.iter().map(|d| d.host.as_str()).collect();
         assert_eq!(hosts, ["", "h2"]);
         assert!(!inbox.failed, "an older or offline computer is not a failed read");
+    }
+
+    #[test]
+    fn a_lead_handled_row_two_computers_report_shows_once() {
+        let mut inbox = Inbox::default();
+        let page = |json: &str| serde_json::from_str::<Page>(json).unwrap();
+        let row = r#"{"leadHandling":[{"sessionId":"h2::crew","heldBy":"h2::lead","reason":"run tests","workItem":"p-W1","ledgerKey":"p"}]}"#;
+        inbox.add(page(row), "", "", "h1");
+        inbox.add(page(row), "h2", "forge", "h1");
+        inbox.add(page(r#"{"leadHandling":[{"sessionId":"h2::crew","heldBy":"h2::lead","reason":"run tests","workItem":"p-W2","ledgerKey":"p"}]}"#), "h2", "forge", "h1");
+        inbox.settle();
+        let rows: Vec<String> = inbox.lead_handling.iter().map(LeadHandled::row_key).collect();
+        assert_eq!(rows, ["p|p-W1|h2::crew", "p|p-W2|h2::crew"]);
     }
 
     #[test]

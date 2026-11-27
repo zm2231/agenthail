@@ -6,6 +6,7 @@ use rune_theme_opencode::icons;
 
 use feed::derive::needs::is_new;
 
+use crate::over::rows::Part;
 use crate::over::{Group, Happened, Need, NeedKind, PHASES, Target};
 use crate::over::{go, next_need, open_target};
 use crate::{App, Screen};
@@ -330,21 +331,17 @@ pub fn notice(message: &str, k: &Kit) -> El {
     col().absolute(0.0, 0.0).w_full().h_full().items_end().justify_end().padding(24.0).child(toast)
 }
 
-pub fn need_actions(s: &App, n: &Need, compact: bool, k: &Kit) -> El {
-    crate::over::need_acts::Acts::of(s, n).build(s, n, compact, k)
-}
-
-pub fn need_row(s: &App, n: &Need, focused: bool, k: &Kit) -> El {
+pub fn need_part<'a>(s: &'a App, n: &'a Need, focused: bool, k: &'a Kit) -> Part<'a> {
     let who = if matches!(n.target, Target::Session(_)) { format!("{} · {}", short_title(&n.who, 24), s.ov.d.ago(&n.at)) } else { s.ov.d.ago(&n.at) };
     let fit = format!("need-{}", n.title);
     let width = fit_width(s, &fit);
     let acts = crate::over::need_acts::Acts::of(s, n);
-    let shows = (n.kind, &n.project, &who, &n.label, &n.title, width.map(f32::to_bits), focused, &n.target, &acts);
+    let shows = crate::over::rows::hash(&(n.kind, &n.project, &who, &n.label, &n.title, width.map(f32::to_bits), focused, &n.target, &acts));
     let row_id = format!("need-{}", crate::over::rows::target_id(&n.target));
-    crate::over::rows::memo(row_id.clone(), shows, k, || {
+    Part::row(row_id.clone(), shows, move || {
         let t = n.target.clone();
         let r = row()
-            .key(row_id.clone())
+            .key(row_id)
             .w_full()
             .items_center()
             .gap(16.0)
@@ -409,15 +406,26 @@ pub fn need_slots<'a>(needs: &'a [Need], looked: Option<&str>, per_group: usize)
 }
 
 pub fn needs_list(s: &App, k: &Kit) -> El {
-    let mut c = col().w_full().gap(2.0).padding(6.0);
-    for (si, slot) in need_slots(&s.ov.needs, s.ov.looked_now.as_deref(), usize::MAX).into_iter().enumerate() {
-        c = c.child(match slot {
-            Slot::Head(g, count) => group_head(g, count, k).key(format!("needs-group-{si}")),
-            Slot::Divider => new_divider(format!("needs-new-{si}"), k),
-            Slot::Need(i, n) => need_row(s, n, i == s.ov.need_ix, k),
-        });
-    }
-    card(c, k)
+    needs_part(s, k).el(k)
+}
+
+pub fn needs_part<'a>(s: &'a App, k: &'a Kit) -> Part<'a> {
+    let parts: Vec<Part<'a>> = need_slots(&s.ov.needs, s.ov.looked_now.as_deref(), usize::MAX)
+        .into_iter()
+        .enumerate()
+        .map(|(si, slot)| match slot {
+            Slot::Head(g, count) => Part::row(format!("needs-group-{si}"), (g, count), move || group_head(g, count, k).key(format!("needs-group-{si}"))),
+            Slot::Divider => Part::row(format!("needs-new-{si}"), (), move || new_divider(format!("needs-new-{si}"), k)),
+            Slot::Need(i, n) => need_part(s, n, i == s.ov.need_ix, k),
+        })
+        .collect();
+    Part::group("needs-list", crate::over::rows::version((), &parts), move || {
+        let mut c = col().w_full().gap(2.0).padding(6.0);
+        for p in parts {
+            c = c.child(p.el(k));
+        }
+        card(c, k)
+    })
 }
 
 pub fn needs_button(s: &App, k: &Kit) -> El {
@@ -479,7 +487,7 @@ fn with_menu(row_: El, id: &str) -> El {
     row_.on_secondary_press(move |s: &mut App, p, _: &mut rune::Tx| crate::ui::session_menu::open_at(s, &id, p))
 }
 
-fn session_row(s: &App, x: &feed::catalog::Session, depth: u8, lead: bool, selected: Option<&str>, k: &Kit) -> El {
+fn session_row<'a>(s: &App, x: &'a feed::catalog::Session, depth: u8, lead: bool, selected: Option<&str>, k: &'a Kit) -> Part<'a> {
     let title = s.ov.d.title(x);
     let waiting = x.display.label.starts_with("Waiting on");
     let subtitle = if waiting { x.display.label.clone() } else if lead { format!("Lead · {}", short_title(&s.ov.d.gist(x), 40)) } else { short_title(&s.ov.d.gist(x), 48) };
@@ -487,8 +495,8 @@ fn session_row(s: &App, x: &feed::catalog::Session, depth: u8, lead: bool, selec
     let marks = crate::ui::session_menu::Marks::of(x);
     let busy = busy(x);
     let key = session_key(&x.id);
-    let shows = (&x.id, &title, depth, &subtitle, waiting, on, marks, busy);
-    crate::over::rows::memo(key.clone(), shows, k, || {
+    let shows = crate::over::rows::hash(&(&x.id, &title, depth, &subtitle, waiting, on, marks, busy));
+    Part::row(key.clone(), shows, move || {
         let id = x.id.clone();
         let mut r = SidebarRow::new(short_title(&title, 40))
             .height(k.text_size(44.0))
@@ -540,83 +548,116 @@ pub fn session_key(id: &str) -> String {
 }
 
 pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k: &Kit) -> El {
-    let home = SidebarRow::new("Now").icon(&icons::DOT_GRID).detail("⌘0").height(k.text_size(32.0)).selected(matches!(s.screen, Screen::Now)).on_select(|s: &mut App, _| go(s, Screen::Now)).build(k).key("home");
-    let search = SidebarRow::new("Jump to").icon(&icons::MAGNIFYING_GLASS).detail("⌘K").height(k.text_size(32.0)).on_select(|s: &mut App, tx: &mut rune::Tx| crate::over::open_jump(s, tx)).build(k).key("jump");
-    let all = SidebarRow::new("Sessions")
-        .icon(&icons::BULLET_LIST)
-        .detail("⌘⇧S")
-        .height(k.text_size(32.0))
-        .selected(matches!(s.screen, Screen::Sessions))
-        .on_select(|s: &mut App, _| go(s, Screen::Sessions))
-        .build(k)
-        .key("sessions");
-    let apps = SidebarRow::new("Apps")
-        .icon(&icons::EXTENSIONS)
-        .height(k.text_size(32.0))
-        .selected(matches!(s.screen, Screen::Extensions | Screen::Extension(_)))
-        .on_select(|s: &mut App, _| go(s, Screen::Extensions))
-        .build(k)
-        .key("apps");
-    let mut sb = Sidebar::new().label("Navigation").inset(0.0).header_gap(2.0).header_padding(0.0, 12.0).row_gap(2.0).header(home).header(search).header(all).header(apps);
-    for entry in crate::over::extensions::pinned(s) {
-        let (id, badge) = (entry.id(), entry.badge.clone());
-        let mut pin = SidebarRow::new(entry.label.clone())
-            .icon(crate::over::extensions::entry_icon(&entry))
-            .height(k.text_size(32.0))
-            .selected(matches!(&s.screen, Screen::Extension(open) if *open == id))
-            .on_select(move |s: &mut App, _| crate::over::extensions::open(s, &entry));
-        if let Some(badge) = badge {
-            pin = pin.detail(badge);
+    sidebar_part(s, current_project, selected, k).el(k)
+}
+
+fn nav_row<'a>(id: &'static str, label: &'static str, glyph: &'static Icon, detail: Option<&'static str>, on: bool, k: &'a Kit, pick: fn(&mut App, &mut rune::Tx)) -> Part<'a> {
+    Part::row(id, on, move || {
+        let mut r = SidebarRow::new(label).icon(glyph).height(k.text_size(32.0)).selected(on).on_select(move |s: &mut App, tx: &mut rune::Tx| pick(s, tx));
+        if let Some(d) = detail {
+            r = r.detail(d);
         }
-        sb = sb.header(pin.build(k).key(format!("pin-{id}")));
+        r.build(k).key(id)
+    })
+}
+
+struct Section<'a> {
+    title: String,
+    key: String,
+    count: Option<usize>,
+    rows: Vec<Part<'a>>,
+}
+
+impl<'a> Section<'a> {
+    fn new(title: impl Into<String>, key: impl Into<String>, count: Option<usize>) -> Section<'a> {
+        Section { title: title.into(), key: key.into(), count, rows: Vec::new() }
     }
-    let mut needs = SidebarSection::new("Needs you").key("sec-needs").count(s.ov.needs.len());
-    let now = matches!(s.screen, Screen::Now);
-    let slots = if now { Vec::new() } else { need_slots(&s.ov.needs, s.ov.looked_now.as_deref(), 4) };
-    for (si, slot) in slots.into_iter().enumerate() {
-        let n = match slot {
-            Slot::Head(g, count) => {
-                needs = needs.row(group_head(g, count, k).key(format!("need-group-{si}")));
-                continue;
+
+    fn v(&self) -> Option<u64> {
+        crate::over::rows::version((&self.title, &self.key, self.count), &self.rows)
+    }
+
+    fn build(self, k: &Kit) -> SidebarSection {
+        let mut sec = SidebarSection::new(self.title).key(self.key);
+        if let Some(n) = self.count {
+            sec = sec.count(n);
+        }
+        for r in self.rows {
+            sec = sec.row(r.el(k));
+        }
+        sec
+    }
+}
+
+pub fn sidebar_part<'a>(s: &'a App, current_project: Option<&str>, selected: Option<&str>, k: &'a Kit) -> Part<'a> {
+    let mut heads = vec![
+        nav_row("home", "Now", &icons::DOT_GRID, Some("⌘0"), matches!(s.screen, Screen::Now), k, |s, _| go(s, Screen::Now)),
+        nav_row("jump", "Jump to", &icons::MAGNIFYING_GLASS, Some("⌘K"), false, k, |s, tx| crate::over::open_jump(s, tx)),
+        nav_row("sessions", "Sessions", &icons::BULLET_LIST, Some("⌘⇧S"), matches!(s.screen, Screen::Sessions), k, |s, _| go(s, Screen::Sessions)),
+        nav_row("apps", "Apps", &icons::EXTENSIONS, None, matches!(s.screen, Screen::Extensions | Screen::Extension(_)), k, |s, _| go(s, Screen::Extensions)),
+    ];
+    for entry in crate::over::extensions::pinned(s) {
+        let id = entry.id();
+        let on = matches!(&s.screen, Screen::Extension(open) if *open == id);
+        heads.push(Part::row(format!("pin-{id}"), (format!("{entry:?}"), on), move || {
+            let badge = entry.badge.clone();
+            let mut pin = SidebarRow::new(entry.label.clone())
+                .icon(crate::over::extensions::entry_icon(&entry))
+                .height(k.text_size(32.0))
+                .selected(on)
+                .on_select(move |s: &mut App, _| crate::over::extensions::open(s, &entry));
+            if let Some(badge) = badge {
+                pin = pin.detail(badge);
             }
-            Slot::Divider => {
-                needs = needs.row(new_divider(format!("need-new-{si}"), k));
-                continue;
-            }
-            Slot::Need(_, n) => n,
-        };
-        let sel = match &n.target {
-            Target::Session(id) => selected == Some(id.as_str()),
-            Target::Work(key) => matches!(&s.screen, Screen::Work(open) if open == key),
-            Target::Project(_) => false,
-        };
-        let marks = match &n.target {
-            Target::Session(id) => s.ov.d.session(id).map(crate::ui::session_menu::Marks::of).unwrap_or_default(),
-            _ => Default::default(),
-        };
-        let shows = (&n.target, &n.title, &n.project, n.kind, sel, marks);
-        let row_id = format!("need-{}", crate::over::rows::target_id(&n.target));
-        needs = needs.row(crate::over::rows::memo(row_id.clone(), shows, k, || {
-            let t = n.target.clone();
-            let mut need = SidebarRow::new(short_title(&n.title, 60))
-                .height(k.text_size(44.0))
-                .avatar(row_avatar(&n.project, k))
-                .subtitle(n.kind.wanted())
-                .subtitle_color(needs_color(k))
-                .selected(sel)
-                .on_select(move |s: &mut App, _| open_target(s, &t));
-            if marks.any() {
-                need = need.trailing(crate::ui::session_menu::drawn_marks(marks, k));
-            }
-            let mut need = need.build(k).key(row_id.clone());
-            if let Target::Session(id) = &n.target {
-                need = with_menu(need, id);
-            }
-            need
+            pin.build(k).key(format!("pin-{id}"))
         }));
     }
-    if !now {
-        sb = sb.section(needs);
+    let mut sections: Vec<Section<'a>> = Vec::new();
+    if !matches!(s.screen, Screen::Now) {
+        let mut needs = Section::new("Needs you", "sec-needs", Some(s.ov.needs.len()));
+        for (si, slot) in need_slots(&s.ov.needs, s.ov.looked_now.as_deref(), 4).into_iter().enumerate() {
+            let n = match slot {
+                Slot::Head(g, count) => {
+                    needs.rows.push(Part::row(format!("need-group-{si}"), (g, count), move || group_head(g, count, k)));
+                    continue;
+                }
+                Slot::Divider => {
+                    needs.rows.push(Part::row(format!("need-new-{si}"), (), move || new_divider(format!("need-new-{si}"), k)));
+                    continue;
+                }
+                Slot::Need(_, n) => n,
+            };
+            let sel = match &n.target {
+                Target::Session(id) => selected == Some(id.as_str()),
+                Target::Work(key) => matches!(&s.screen, Screen::Work(open) if open == key),
+                Target::Project(_) => false,
+            };
+            let marks = match &n.target {
+                Target::Session(id) => s.ov.d.session(id).map(crate::ui::session_menu::Marks::of).unwrap_or_default(),
+                _ => Default::default(),
+            };
+            let shows = (&n.target, &n.title, &n.project, n.kind, sel, marks);
+            let row_id = format!("need-{}", crate::over::rows::target_id(&n.target));
+            needs.rows.push(Part::row(row_id.clone(), shows, move || {
+                let t = n.target.clone();
+                let mut need = SidebarRow::new(short_title(&n.title, 60))
+                    .height(k.text_size(44.0))
+                    .avatar(row_avatar(&n.project, k))
+                    .subtitle(n.kind.wanted())
+                    .subtitle_color(needs_color(k))
+                    .selected(sel)
+                    .on_select(move |s: &mut App, _| open_target(s, &t));
+                if marks.any() {
+                    need = need.trailing(crate::ui::session_menu::drawn_marks(marks, k));
+                }
+                let mut need = need.build(k).key(row_id);
+                if let Target::Session(id) = &n.target {
+                    need = with_menu(need, id);
+                }
+                need
+            }));
+        }
+        sections.push(needs);
     }
     let mut order = crate::over::projects::listed(s);
     if let Some(cp) = current_project {
@@ -624,61 +665,75 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k
     }
     let mut shown = false;
     for (pi, p) in order.iter().take(if current_project.is_some() { 1 } else { 0 }).enumerate() {
-        let mut sec = SidebarSection::new(p.name.clone()).key(format!("sec-p{pi}")).count(p.sessions.len());
+        let mut sec = Section::new(p.name.clone(), format!("sec-p{pi}"), Some(p.sessions.len()));
         for (_, (id, depth)) in s.ov.d.project_rows(p).iter().enumerate().filter(|(n, (id, _))| *n < 8 || selected == Some(id.as_str())) {
             let Some(x) = s.ov.d.session(id) else { continue };
             shown |= selected == Some(id.as_str());
-            sec = sec.row(session_row(s, x, *depth, p.lead.as_deref() == Some(id.as_str()), selected, k));
+            sec.rows.push(session_row(s, x, *depth, p.lead.as_deref() == Some(id.as_str()), selected, k));
         }
-        let pkey = p.key.clone();
-        sec = sec.row(
+        let (pkey, count) = (p.key.clone(), p.sessions.len());
+        sec.rows.push(Part::row(format!("all-{}", p.key), crate::over::rows::hash(&(&pkey, count)), move || {
+            let key = format!("all-{pkey}");
             SidebarRow::new("All sessions")
                 .icon(&icons::ARROW_RIGHT)
                 .height(k.text_size(30.0))
-                .detail(format!("{}", p.sessions.len()))
+                .detail(format!("{count}"))
                 .on_select(move |s: &mut App, _| {
                     s.ov.sessions_project = Some(pkey.clone());
                     go(s, Screen::Sessions);
                 })
                 .build(k)
-                .key(format!("all-{}", p.key)),
-        );
-        sb = sb.section(sec);
+                .key(key)
+        }));
+        sections.push(sec);
     }
     if !shown
         && matches!(s.screen, Screen::Session)
         && let Some(x) = selected.and_then(|id| s.ov.d.session(id).or_else(|| crate::ui::gone::shown(s, id)))
     {
-        sb = sb.section(SidebarSection::new(x.project_name()).key("sec-open").row(session_row(s, x, 0, false, selected, k)));
+        let mut sec = Section::new(x.project_name(), "sec-open", None);
+        sec.rows.push(session_row(s, x, 0, false, selected, k));
+        sections.push(sec);
     }
-    let mut others = SidebarSection::new("Projects").key("sec-projects").count(s.ov.d.projects.len());
+    let mut others = Section::new("Projects", "sec-projects", Some(s.ov.d.projects.len()));
     for p in order.iter().skip(if current_project.is_some() { 1 } else { 0 }).take(10) {
         let waiting = s.ov.needs.iter().filter(|n| n.project_key == p.key).count();
         let ago = s.ov.d.ago(&p.last_active);
         let on = matches!(&s.screen, Screen::Project(k2) if *k2 == p.key);
-        let shows = (&p.key, &p.name, &ago, on, waiting);
-        others = others.row(crate::over::rows::memo(format!("p-{}", p.key), shows, k, || {
-            let key = p.key.clone();
-            let mut r = SidebarRow::new(p.name.clone())
+        let (key, name) = (p.key.clone(), p.name.clone());
+        let shows = crate::over::rows::hash(&(&key, &name, &ago, on, waiting));
+        others.rows.push(Part::row(format!("p-{key}"), shows, move || {
+            let id = format!("p-{key}");
+            let menu_key = key.clone();
+            let mut r = SidebarRow::new(name.clone())
                 .height(k.text_size(32.0))
-                .avatar(row_avatar(&p.name, k))
-                .detail(ago.clone())
+                .avatar(row_avatar(&name, k))
+                .detail(ago)
                 .selected(on)
                 .on_select(move |s: &mut App, _| go(s, Screen::Project(key.clone())));
             if waiting > 0 {
                 r = r.badge(waiting.to_string());
             }
-            let menu_key = p.key.clone();
-            r.build(k).key(format!("p-{}", p.key)).on_secondary_press(move |s: &mut App, at, _: &mut rune::Tx| crate::over::projects::open_menu(s, &menu_key, Some(at)))
+            r.build(k).key(id).on_secondary_press(move |s: &mut App, at, _: &mut rune::Tx| crate::over::projects::open_menu(s, &menu_key, Some(at)))
         }));
     }
     let hidden: Vec<String> = order.iter().skip(if current_project.is_some() { 1 } else { 0 }).skip(10).map(|p| p.key.clone()).collect();
-    others = others.rows(crate::over::earlier::activity_note(s, k));
-    for extra in crate::over::projects::sidebar_rows(s, hidden, k) {
-        others = others.row(extra);
+    if s.earlier.activity_missing {
+        others.rows.push(Part::row("activity-unread", (), move || crate::over::earlier::activity_note(s, k).unwrap_or_else(col)));
     }
-    sb = sb.section(others);
-    sb.build(k)
+    others.rows.extend(crate::over::projects::sidebar_parts(s, hidden, k));
+    sections.push(others);
+    let v = crate::over::rows::version(sections.iter().map(Section::v).collect::<Vec<_>>(), &heads);
+    Part::group("sidebar", v, move || {
+        let mut sb = Sidebar::new().label("Navigation").inset(0.0).header_gap(2.0).header_padding(0.0, 12.0).row_gap(2.0);
+        for h in heads {
+            sb = sb.header(h.el(k));
+        }
+        for sec in sections {
+            sb = sb.section(sec.build(k));
+        }
+        sb.build(k)
+    })
 }
 
 pub fn frame(cx: &mut Cx<App>, s: &App, sidebar: Option<El>, main: El, inspector: Option<El>, toolbar: Toolbar, main_kit: &Kit) -> El {
@@ -704,27 +759,46 @@ pub fn frame(cx: &mut Cx<App>, s: &App, sidebar: Option<El>, main: El, inspector
     col().w_full().h_full().child(col().w_full().grow(1.0).min_h(0.0).child(split)).child(status_bar(s, &k, main_kit))
 }
 
-pub fn frame_now(cx: &mut Cx<App>, s: &App, sidebar: Option<El>, main: El, inspector: Option<El>, toolbar: Toolbar, main_kit: &Kit) -> El {
-    let k = cx.kit();
-    let mut v = SplitView::new(main);
-    if let Some(sb) = sidebar {
-        v = v.sidebar(&s.ov.now_side, |s: &mut App| &mut s.ov.now_side, sb).sidebar_toggle(SidebarToggle::new().size(ControlSize::Large).past_lights(16.0).edge(18.0).gap(4.0).in_header());
-    } else {
-        v = v.hide_sidebar_toggle();
-    }
-    if let Some(i) = inspector {
-        v = v.inspector(&s.ov.now_rail, |s: &mut App| &mut s.ov.now_rail, i);
-    }
-    let split = v
-        .toolbar(toolbar)
-        .titlebar_inset(cx.titlebar_inset())
-        .frame_inset(8.0)
-        .toolbar_in_panel()
-        .sidebar_padding(14.0, 10.0)
-        .pane_motion(PaneMotion::new().spring(Spring::new(0.3, 0.0)))
-        .reduced_motion(cx.is_reduced_motion())
-        .build(&k);
-    col().w_full().h_full().child(col().w_full().grow(1.0).min_h(0.0).child(split)).child(status_bar(s, &k, main_kit))
+pub struct Bar<'a> {
+    pub leading: Part<'a>,
+    pub center: Option<Part<'a>>,
+    pub trailing: Part<'a>,
+}
+
+pub fn frame_now<'a>(cx: &mut Cx<App>, s: &'a App, sidebar: Option<Part<'a>>, main: Part<'a>, inspector: Option<Part<'a>>, bar: Bar<'a>, k: &'a Kit, main_kit: &'a Kit) -> El {
+    let inset = cx.titlebar_inset();
+    let reduced = cx.is_reduced_motion();
+    let status = status_part(s, k, main_kit);
+    let panes = format!("{:?}{:?}", s.ov.now_side, s.ov.now_rail);
+    let parts = [Some(&main), sidebar.as_ref(), inspector.as_ref(), Some(&bar.leading), bar.center.as_ref(), Some(&bar.trailing), Some(&status)];
+    let shape: Vec<bool> = parts.iter().map(Option::is_some).collect();
+    let v = crate::over::rows::version((inset.to_bits(), reduced, &panes, shape), parts.into_iter().flatten());
+    Part::group("now-frame", v, move || {
+        let mut v = SplitView::new(main.el(k));
+        if let Some(sb) = sidebar {
+            v = v.sidebar(&s.ov.now_side, |s: &mut App| &mut s.ov.now_side, sb.el(k)).sidebar_toggle(SidebarToggle::new().size(ControlSize::Large).past_lights(16.0).edge(18.0).gap(4.0).in_header());
+        } else {
+            v = v.hide_sidebar_toggle();
+        }
+        if let Some(i) = inspector {
+            v = v.inspector(&s.ov.now_rail, |s: &mut App| &mut s.ov.now_rail, i.el(k));
+        }
+        let mut t = Toolbar::new().leading(bar.leading.el(k)).trailing(bar.trailing.el(k));
+        if let Some(c) = bar.center {
+            t = t.center(c.el(k));
+        }
+        let split = v
+            .toolbar(t)
+            .titlebar_inset(inset)
+            .frame_inset(8.0)
+            .toolbar_in_panel()
+            .sidebar_padding(14.0, 10.0)
+            .pane_motion(PaneMotion::new().spring(Spring::new(0.3, 0.0)))
+            .reduced_motion(reduced)
+            .build(k);
+        col().w_full().h_full().child(col().w_full().grow(1.0).min_h(0.0).child(split)).child(status.el(k))
+    })
+    .el(k)
 }
 
 pub fn pane_strip(i: usize, glyph: &'static Icon, count: Option<(usize, Color)>, k: &Kit) -> El {
@@ -750,27 +824,33 @@ pub fn pane_strip(i: usize, glyph: &'static Icon, count: Option<(usize, Color)>,
     c.child(label).child(spacer()).child(ghost_keys(&[format!("⌥⌘{}", i + 1).as_str()], k).pb(12.0))
 }
 
-pub fn pane_head(s: &App, i: usize, title: &str, k: &Kit) -> El {
+pub fn pane_head_part<'a>(s: &App, i: usize, title: &'a str, k: &'a Kit) -> Part<'a> {
     let focused = s.ov.now_focus.map(|(f, _)| f) == Some(i);
-    let focus = rune_kit::IconButton::new(if focused { &icons::COLLAPSE } else { &icons::EXPAND })
-        .variant(rune_kit::IconButtonVariant::GhostMuted)
-        .control_size(ControlSize::Small)
-        .label(if focused { "Restore panes" } else { "Focus this pane" })
-        .help(if focused { format!("Restore panes (⌥⇧⌘{} or esc)", i + 1) } else { format!("Focus this pane (⌥⇧⌘{})", i + 1) })
-        .on_press(move |s: &mut App| crate::over::layout::focus_pane(s, i))
-        .build(k);
-    let hide = rune_kit::IconButton::new(if i == 2 { &icons::CHEVRON_DOUBLE_RIGHT } else { &icons::MINUS })
-        .variant(rune_kit::IconButtonVariant::GhostMuted)
-        .control_size(ControlSize::Small)
-        .label("Collapse this pane")
-        .help(format!("Collapse to a strip (⌥⌘{})", i + 1))
-        .on_press(move |s: &mut App| crate::over::layout::toggle_pane(s, i))
-        .build(k);
-    let mut r = row().key(format!("pane-head-{i}")).w_full().h(k.text_size(36.0)).px(14.0).gap(6.0).items_center().border_sides([0.0, 0.0, 1.0, 0.0], rule(k)).child(label(title, k));
-    if focused {
-        r = r.child(text("focused".to_string()).font(k.text(META)).color(k.c.text_accent));
-    }
-    r.child(spacer()).child(focus).child(hide)
+    Part::row(format!("pane-head-{i}"), (i, title, focused), move || {
+        let focus = rune_kit::IconButton::new(if focused { &icons::COLLAPSE } else { &icons::EXPAND })
+            .variant(rune_kit::IconButtonVariant::GhostMuted)
+            .control_size(ControlSize::Small)
+            .label(if focused { "Restore panes" } else { "Focus this pane" })
+            .help(if focused { format!("Restore panes (⌥⇧⌘{} or esc)", i + 1) } else { format!("Focus this pane (⌥⇧⌘{})", i + 1) })
+            .on_press(move |s: &mut App| crate::over::layout::focus_pane(s, i))
+            .build(k);
+        let hide = rune_kit::IconButton::new(if i == 2 { &icons::CHEVRON_DOUBLE_RIGHT } else { &icons::MINUS })
+            .variant(rune_kit::IconButtonVariant::GhostMuted)
+            .control_size(ControlSize::Small)
+            .label("Collapse this pane")
+            .help(format!("Collapse to a strip (⌥⌘{})", i + 1))
+            .on_press(move |s: &mut App| crate::over::layout::toggle_pane(s, i))
+            .build(k);
+        let mut r = row().key(format!("pane-head-{i}")).w_full().h(k.text_size(36.0)).px(14.0).gap(6.0).items_center().border_sides([0.0, 0.0, 1.0, 0.0], rule(k)).child(label(title, k));
+        if focused {
+            r = r.child(text("focused".to_string()).font(k.text(META)).color(k.c.text_accent));
+        }
+        r.child(spacer()).child(focus).child(hide)
+    })
+}
+
+pub fn head_part<'a>(id: &str, title: &'a str, count: Option<usize>, note: Option<String>, k: &'a Kit) -> Part<'a> {
+    Part::row(id.to_string(), crate::over::rows::hash(&(title, count, &note)), move || section_head(title, count, note.map(|n| text(n).font(k.text(META)).color(weak(k))), k))
 }
 
 fn until(s: &App, at: &str) -> String {
@@ -786,48 +866,88 @@ fn until(s: &App, at: &str) -> String {
     }
 }
 
+#[derive(Hash)]
+struct MeterShown {
+    who: String,
+    tier: u8,
+    fill: u32,
+    pct: String,
+    until: String,
+}
+
 pub fn status_bar(s: &App, k: &Kit, main_kit: &Kit) -> El {
-    let mut meters = row().key("usage-meters").h_full().gap(12.0).px(6.0).radius(6.0).items_center().hover(k.c.surface_raised_hover).label("Usage by account").on_press(crate::ui::accounts::open).child(text("Used".to_string()).font(k.text(META)).color(weak(k)));
-    for m in &s.ov.d.usage {
-        let pct = m.percent.unwrap_or(0.0);
-        let color = if pct >= 80.0 { k.c.danger.icon } else if pct >= 60.0 { k.c.warning.icon } else { base(k) };
-        let window = if m.label.ends_with("week") { "wk" } else { "5h" };
-        let who = match &m.name {
-            Some(n) if n != "default" => format!("{n} {window}"),
-            _ => format!("{} {window}", m.provider.chars().next().map(|c| c.to_uppercase().collect::<String>() + &m.provider[1..]).unwrap_or_default()),
-        };
-        let bar = row().w(28.0).h(4.0).radius(2.0).fill(k.c.border_base).child(el().w((28.0 * pct / 100.0).clamp(2.0, 28.0) as f32).h(4.0).radius(2.0).fill(color));
-        meters = meters.child(
-            row()
-                .gap(6.0)
-                .items_center()
-                .child(text(who).font(k.text(META)).color(weak(k)))
-                .child(bar)
-                .child(text(format!("{pct:.0}%")).font(k.text(META_MED)).color(color))
-                .child(text(until(s, m.resets_at.as_deref().unwrap_or(""))).font(k.text(META)).color(weak(k))),
-        );
-    }
-    let mut r = row().key("status-bar").w_full().h(k.text_size(30.0)).px(10.0).gap(12.0).items_center().fill(k.c.bg_deep).child(meters);
+    status_part(s, k, main_kit).el(k)
+}
+
+pub fn status_part<'a>(s: &'a App, k: &'a Kit, main_kit: &'a Kit) -> Part<'a> {
+    let meters: Vec<MeterShown> = s
+        .ov
+        .d
+        .usage
+        .iter()
+        .map(|m| {
+            let pct = m.percent.unwrap_or(0.0);
+            let window = if m.label.ends_with("week") { "wk" } else { "5h" };
+            let who = match &m.name {
+                Some(n) if n != "default" => format!("{n} {window}"),
+                _ => format!("{} {window}", m.provider.chars().next().map(|c| c.to_uppercase().collect::<String>() + &m.provider[1..]).unwrap_or_default()),
+            };
+            MeterShown {
+                who,
+                tier: if pct >= 80.0 { 2 } else if pct >= 60.0 { 1 } else { 0 },
+                fill: ((28.0 * pct / 100.0).clamp(2.0, 28.0) as f32).to_bits(),
+                pct: format!("{pct:.0}%"),
+                until: until(s, m.resets_at.as_deref().unwrap_or("")),
+            }
+        })
+        .collect();
     let working = s.ov.d.working();
-    r = r.child(spacer());
-    if let Some(down) = crate::ui::connect::bar(s, main_kit) {
-        r = r.child(down);
-    } else if let Some(v) = &s.ov.inbox.version {
-        let restart = Button::new(if s.link.starting { "Restarting…" } else { "Restart for this version" }).variant(ButtonVariant::GhostMuted).control_size(ControlSize::Small).disabled(s.link.starting).on_press(crate::ui::connect::start_daemon).build(k).key("version-restart");
-        r = r.child(row().gap(6.0).items_center().shrink().min_w(0.0).child(icon(&rune_theme_opencode::icons::INFO, k.text_size(12.0)).color(k.c.warning.icon)).child(text(v.clone()).font(k.text(META)).color(k.c.warning.icon).truncate().shrink()).child(restart));
+    let hosts: Vec<(&str, bool)> = s.ov.d.hosts.iter().map(|h| (h.name.as_str(), matches!(h.state.as_str(), "local" | "connected"))).collect();
+    let down = crate::ui::connect::bar(s, main_kit);
+    let shows = crate::over::rows::hash(&(&meters, working, &s.ov.inbox.version, s.link.starting, &hosts));
+    let build = move |down: Option<El>| {
+        let mut row_ = row().key("usage-meters").h_full().gap(12.0).px(6.0).radius(6.0).items_center().hover(k.c.surface_raised_hover).label("Usage by account").on_press(crate::ui::accounts::open).child(text("Used".to_string()).font(k.text(META)).color(weak(k)));
+        for m in &meters {
+            let color = match m.tier {
+                2 => k.c.danger.icon,
+                1 => k.c.warning.icon,
+                _ => base(k),
+            };
+            let bar = row().w(28.0).h(4.0).radius(2.0).fill(k.c.border_base).child(el().w(f32::from_bits(m.fill)).h(4.0).radius(2.0).fill(color));
+            row_ = row_.child(
+                row()
+                    .gap(6.0)
+                    .items_center()
+                    .child(text(m.who.clone()).font(k.text(META)).color(weak(k)))
+                    .child(bar)
+                    .child(text(m.pct.clone()).font(k.text(META_MED)).color(color))
+                    .child(text(m.until.clone()).font(k.text(META)).color(weak(k))),
+            );
+        }
+        let mut r = row().key("status-bar").w_full().h(k.text_size(30.0)).px(10.0).gap(12.0).items_center().fill(k.c.bg_deep).child(row_);
+        r = r.child(spacer());
+        if let Some(down) = down {
+            r = r.child(down);
+        } else if let Some(v) = &s.ov.inbox.version {
+            let restart = Button::new(if s.link.starting { "Restarting…" } else { "Restart for this version" }).variant(ButtonVariant::GhostMuted).control_size(ControlSize::Small).disabled(s.link.starting).on_press(crate::ui::connect::start_daemon).build(k).key("version-restart");
+            r = r.child(row().gap(6.0).items_center().shrink().min_w(0.0).child(icon(&rune_theme_opencode::icons::INFO, k.text_size(12.0)).color(k.c.warning.icon)).child(text(v.clone()).font(k.text(META)).color(k.c.warning.icon).truncate().shrink()).child(restart));
+        }
+        r = r.child(row().gap(6.0).items_center().child(el().size(7.0, 7.0).radius(3.5).fill(crate::theme::accent())).child(text(format!("{working} working")).font(k.text(META)).color(base(k))));
+        for (name, up) in &hosts {
+            r = r.child(
+                row()
+                    .gap(6.0)
+                    .items_center()
+                    .child(el().size(7.0, 7.0).radius(3.5).fill(if *up { k.c.success.icon } else { k.c.text_weak }))
+                    .child(text(name.to_string()).font(k.text(META)).color(if *up { base(k) } else { weak(k) })),
+            );
+        }
+        r
+    };
+    if down.is_some() {
+        return Part::always("status-bar", move || build(down));
     }
-    r = r.child(row().gap(6.0).items_center().child(el().size(7.0, 7.0).radius(3.5).fill(crate::theme::accent())).child(text(format!("{working} working")).font(k.text(META)).color(base(k))));
-    for h in &s.ov.d.hosts {
-        let up = matches!(h.state.as_str(), "local" | "connected");
-        r = r.child(
-            row()
-                .gap(6.0)
-                .items_center()
-                .child(el().size(7.0, 7.0).radius(3.5).fill(if up { k.c.success.icon } else { k.c.text_weak }))
-                .child(text(h.name.clone()).font(k.text(META)).color(if up { base(k) } else { weak(k) })),
-        );
-    }
-    r
+    Part::group("status-bar", Some(shows), move || build(None))
 }
 
 pub fn crumb(parts: &[(&str, bool)], k: &Kit) -> El {
@@ -842,42 +962,54 @@ pub fn crumb(parts: &[(&str, bool)], k: &Kit) -> El {
 }
 
 pub fn sessions_block(s: &App, compact: bool, k: &Kit) -> El {
+    sessions_part(s, compact, k).el(k)
+}
+
+pub fn sessions_part<'a>(s: &App, compact: bool, k: &'a Kit) -> Part<'a> {
     let by = feed::derive::sessions::busy_by_project(&s.ov.d.sessions);
     let total = s.ov.d.working();
     let listed = s.ov.d.listed();
-    let open = Button::new("All sessions").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).icon(&icons::ARROW_RIGHT).shortcut("⌘⇧S").on_press(|s: &mut App| go(s, Screen::Sessions)).build(k);
-    let mut chips = row().gap(6.0).flex_wrap().items_center();
-    for (key, name, n) in &by {
-        chips = chips.child(crate::over::rows::memo(format!("chip-{key}"), (key, name, n), k, || {
-            let pkey = Some(key.clone()).filter(|k| !k.is_empty());
-            row()
-                .key(format!("chip-{key}"))
-                .gap(6.0)
-                .items_center()
-                .px(8.0)
-                .py(4.0)
-                .radius(7.0)
-                .fill(k.c.surface_base)
-                .border(1.0, edge())
-                .hover(k.c.surface_raised_hover)
-                .on_press(move |s: &mut App| {
-                    s.ov.sessions_project = pkey.clone();
-                    s.ov.list.scope = 0;
-                    go(s, Screen::Sessions);
-                })
-                .child(avatar(name, 14.0))
-                .child(text(name.clone()).font(k.text(META)).color(base(k)))
-                .child(text(n.to_string()).font(k.text(META_MED)).color(k.c.text_accent))
-        }));
-    }
-    let head = row()
-        .w_full()
-        .gap(8.0)
-        .items_center()
-        .child(text("Sessions".to_string()).font(k.text(HEAD)).color(strong(k)))
-        .child(text(format!("{total} working of {listed}")).font(k.text(META)).color(weak(k)).truncate().shrink().min_w(0.0))
-        .child(spacer())
-        .child(open);
-    let c = col().w_full().gap(8.0).child(head).child(chips);
-    if compact { c } else { card(c.padding(14.0), k) }
+    let chips: Vec<Part<'a>> = by
+        .into_iter()
+        .map(|(key, name, n)| {
+            Part::row(format!("chip-{key}"), crate::over::rows::hash(&(&key, &name, n)), move || {
+                let pkey = Some(key.clone()).filter(|k| !k.is_empty());
+                row()
+                    .key(format!("chip-{key}"))
+                    .gap(6.0)
+                    .items_center()
+                    .px(8.0)
+                    .py(4.0)
+                    .radius(7.0)
+                    .fill(k.c.surface_base)
+                    .border(1.0, edge())
+                    .hover(k.c.surface_raised_hover)
+                    .on_press(move |s: &mut App| {
+                        s.ov.sessions_project = pkey.clone();
+                        s.ov.list.scope = 0;
+                        go(s, Screen::Sessions);
+                    })
+                    .child(avatar(&name, 14.0))
+                    .child(text(name.clone()).font(k.text(META)).color(base(k)))
+                    .child(text(n.to_string()).font(k.text(META_MED)).color(k.c.text_accent))
+            })
+        })
+        .collect();
+    Part::group("sessions-block", crate::over::rows::version((compact, total, listed), &chips), move || {
+        let open = Button::new("All sessions").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).icon(&icons::ARROW_RIGHT).shortcut("⌘⇧S").on_press(|s: &mut App| go(s, Screen::Sessions)).build(k);
+        let mut row_ = row().gap(6.0).flex_wrap().items_center();
+        for c in chips {
+            row_ = row_.child(c.el(k));
+        }
+        let head = row()
+            .w_full()
+            .gap(8.0)
+            .items_center()
+            .child(text("Sessions".to_string()).font(k.text(HEAD)).color(strong(k)))
+            .child(text(format!("{total} working of {listed}")).font(k.text(META)).color(weak(k)).truncate().shrink().min_w(0.0))
+            .child(spacer())
+            .child(open);
+        let c = col().w_full().gap(8.0).child(head).child(row_);
+        if compact { c } else { card(c.padding(14.0), k) }
+    })
 }

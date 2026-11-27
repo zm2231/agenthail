@@ -49,6 +49,7 @@ fn work<'a>(w: &'a mut World, id: &str) -> &'a mut Work {
 
 fn later(w: &mut World, hours: i64) {
     w.now += time::Duration::hours(hours);
+    w.shown = w.now;
 }
 
 #[test]
@@ -100,6 +101,7 @@ fn a_kept_duplicate_leaving_the_window_brings_back_the_one_it_hid() {
     let first = shown(&w, &mut held, 12.0);
     assert!(first[0].contains("p-A") && !first[0].contains("p-B"), "the same text shows once: {first:?}");
     w.now += time::Duration::milliseconds(30 * 60_000 + 200);
+    w.shown = w.now;
     let after = shown(&w, &mut held, 12.0);
     assert_eq!(after, fresh(&w, 12.0));
     assert!(after[0].contains("p-B"), "the newer one shows once the other leaves: {after:?}");
@@ -111,6 +113,7 @@ fn a_clock_moving_back_works_the_lines_out_again() {
     let mut held = Held::default();
     assert_eq!(shown(&w, &mut held, 72.0), Vec::<String>::new(), "a review 48.5 hours old has left");
     w.now -= time::Duration::hours(1);
+    w.shown = w.now;
     let back = shown(&w, &mut held, 12.0);
     assert_eq!(back, fresh(&w, 12.0));
     assert_eq!(back.len(), 1, "an hour earlier it is 47.5 hours old: {back:?}");

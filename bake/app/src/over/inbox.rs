@@ -306,7 +306,7 @@ fn act(s: &mut crate::App, d: &Decision, outcome: &str, run: impl FnOnce(&Client
         s.ov.inbox.notes.insert(id, (d.hold_key(), "Fixture mode: not sent".into()));
         return;
     };
-    let at = s.ov.d.now.format(&time::format_description::well_known::Rfc3339).unwrap_or_default();
+    let at = crate::quiet::wall(s).format(&time::format_description::well_known::Rfc3339).unwrap_or_default();
     let entry = Handled { title: title_of(s, d), session: d.session_id.clone(), outcome: outcome.into(), at };
     s.ov.inbox.acting.insert(id.clone());
     s.ov.inbox.notes.remove(&id);

@@ -113,16 +113,23 @@ impl Over {
         }
     }
 
-    pub fn rebuild(&mut self, panes: &[(&str, &[feed::Item])]) {
-        let d = self.live.world(panes);
+    pub fn rebuild(&mut self, panes: &[(&str, &[feed::Item])], shown: Option<time::OffsetDateTime>) -> bool {
+        let mut d = self.live.world(panes);
+        if let Some(shown) = shown {
+            d.shown = shown;
+        }
         let focused = self.needs.get(self.need_ix).map(|n| n.target.clone());
-        self.hands_on = d.hands_on(&[]).iter().map(|x| x.id.clone()).collect();
-        self.needs = d.needs();
+        let hands_on: Vec<String> = d.hands_on(&[]).iter().map(|x| x.id.clone()).collect();
+        let mut needs = d.needs();
+        self.worksearch.keep(&mut d);
+        feed::derive::needs::arrange(&mut needs, self.looked_now.as_deref());
+        let moved = !(self.d.same_shown(&d) && self.needs == needs && self.hands_on == hands_on);
+        self.hands_on = hands_on;
+        self.needs = needs;
         self.d = d;
-        self.worksearch.keep(&mut self.d);
         self.world_changed();
-        feed::derive::needs::arrange(&mut self.needs, self.looked_now.as_deref());
         self.refocus(focused);
+        moved
     }
 
     pub fn world_changed(&mut self) {
@@ -163,7 +170,7 @@ impl Over {
 }
 
 fn leave(s: &mut App) {
-    let Ok(at) = s.ov.d.now.format(&time::format_description::well_known::Rfc3339) else { return };
+    let Ok(at) = crate::quiet::wall(s).format(&time::format_description::well_known::Rfc3339) else { return };
     match &s.screen {
         Screen::Now => {
             s.ov.looked_now = Some(at);

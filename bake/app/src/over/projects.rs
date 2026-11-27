@@ -595,11 +595,12 @@ fn archived_menu(s: &App, layer: &mut Vec<El>, k: &Kit) {
     let _ = m.build(k, layer);
 }
 
-pub fn sidebar_rows(s: &App, hidden: Vec<String>, k: &Kit) -> Vec<El> {
+pub fn sidebar_parts<'a>(s: &App, hidden: Vec<String>, k: &'a Kit) -> Vec<crate::over::rows::Part<'a>> {
+    use crate::over::rows::Part;
     let mut rows = Vec::new();
     if !hidden.is_empty() {
-        let count = hidden.len();
-        rows.push(
+        rows.push(Part::row("more-projects-trigger", crate::over::rows::hash(&hidden), move || {
+            let count = hidden.len();
             rune_kit::SidebarRow::new("More projects")
                 .icon(&crate::icons::MORE)
                 .height(k.text_size(30.0))
@@ -610,21 +611,21 @@ pub fn sidebar_rows(s: &App, hidden: Vec<String>, k: &Kit) -> Vec<El> {
                     s.ov.projects.more_menu = if s.ov.projects.more_menu.is_some() { None } else { Some(hidden.clone()) };
                 })
                 .build(k)
-                .key("more-projects-trigger"),
-        );
+                .key("more-projects-trigger")
+        }));
     }
-    rows.extend([rune_kit::SidebarRow::new("Add project…").icon(&icons::PLUS).height(k.text_size(30.0)).on_select(|s: &mut App, _| add(s)).build(k).key("add-project")]);
+    rows.push(Part::row("add-project", (), move || rune_kit::SidebarRow::new("Add project…").icon(&icons::PLUS).height(k.text_size(30.0)).on_select(|s: &mut App, _| add(s)).build(k).key("add-project")));
     let count = archived(s).len();
     if count > 0 {
-        rows.push(
+        rows.push(Part::row("archived-projects-trigger", count, move || {
             rune_kit::SidebarRow::new("Archived projects")
                 .icon(&crate::icons::INBOX)
                 .height(k.text_size(30.0))
                 .detail(count.to_string())
                 .on_select(|s: &mut App, _| open_archived(s))
                 .build(k)
-                .key("archived-projects-trigger"),
-        );
+                .key("archived-projects-trigger")
+        }));
     }
     rows
 }

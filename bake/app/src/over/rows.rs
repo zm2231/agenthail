@@ -9,13 +9,75 @@ pub fn memo(id: impl Into<String>, shows: impl Hash, k: &Kit, build: impl FnOnce
     let id = id.into();
     #[cfg(test)]
     let named = id.clone();
-    let look = fx(&(crate::theme::paint_key(), k.dark, k.c, k.ty, k.radius, k.roles, k.text_scale.to_bits()));
-    let v = fx(&(shows, look));
+    #[cfg(all(test, feature = "frame-profile"))]
+    built::called(&id);
+    let v = fx(&(shows, look(k)));
     rune::memo::memo_with_hash(id, v, move || {
+        #[cfg(all(test, feature = "frame-profile"))]
+        built::rebuilt(&named);
         #[cfg(test)]
         built::note(named);
         build()
     })
+}
+
+fn look(k: &Kit) -> u64 {
+    fx(&(crate::theme::paint_key(), k.dark, k.c, k.ty, k.radius, k.roles, k.text_scale.to_bits()))
+}
+
+pub struct Part<'a> {
+    id: String,
+    v: Option<u64>,
+    row: bool,
+    build: Box<dyn FnOnce() -> El + 'a>,
+}
+
+impl<'a> Part<'a> {
+    pub fn row(id: impl Into<String>, shows: impl Hash, build: impl FnOnce() -> El + 'a) -> Part<'a> {
+        Part { id: id.into(), v: Some(fx(&shows)), row: true, build: Box::new(build) }
+    }
+
+    pub fn group(id: impl Into<String>, v: Option<u64>, build: impl FnOnce() -> El + 'a) -> Part<'a> {
+        Part { id: id.into(), v, row: false, build: Box::new(build) }
+    }
+
+    pub fn always(id: impl Into<String>, build: impl FnOnce() -> El + 'a) -> Part<'a> {
+        Part { id: id.into(), v: None, row: false, build: Box::new(build) }
+    }
+
+    pub fn v(&self) -> Option<u64> {
+        self.v.map(|v| fx(&(&self.id, v)))
+    }
+
+    pub fn el(self, k: &Kit) -> El {
+        let Part { id, v, row, build } = self;
+        let Some(v) = v else { return build() };
+        #[cfg(all(test, feature = "frame-profile"))]
+        built::called(&id);
+        #[cfg(all(test, feature = "frame-profile"))]
+        let any = id.clone();
+        #[cfg(test)]
+        let named = row.then(|| id.clone());
+        #[cfg(not(test))]
+        let _ = row;
+        rune::memo::memo_with_hash(id, fx(&(v, look(k))), move || {
+            #[cfg(all(test, feature = "frame-profile"))]
+            built::rebuilt(&any);
+            #[cfg(test)]
+            if let Some(named) = named {
+                built::note(named);
+            }
+            build()
+        })
+    }
+}
+
+pub fn hash(v: &impl Hash) -> u64 {
+    fx(v)
+}
+
+pub fn version<'p, 'q: 'p>(shows: impl Hash, parts: impl IntoIterator<Item = &'p Part<'q>>) -> Option<u64> {
+    parts.into_iter().try_fold(fx(&shows), |h, p| p.v().map(|v| fx(&(h, v))))
 }
 
 pub fn target_id(t: &Target) -> String {
@@ -32,6 +94,40 @@ pub mod built {
 
     thread_local! {
         static BUILT: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+        static VIEWS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+        #[cfg(feature = "frame-profile")]
+        static CALLED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+        #[cfg(feature = "frame-profile")]
+        static REBUILT: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    }
+
+    #[cfg(feature = "frame-profile")]
+    pub fn rebuilt(id: &str) {
+        REBUILT.with_borrow_mut(|c| c.push(id.to_string()));
+    }
+
+    #[cfg(feature = "frame-profile")]
+    pub fn take_rebuilt() -> Vec<String> {
+        REBUILT.with_borrow_mut(std::mem::take)
+    }
+
+    #[cfg(feature = "frame-profile")]
+    pub fn called(id: &str) {
+        CALLED.with_borrow_mut(|c| c.push(id.to_string()));
+    }
+
+    #[cfg(feature = "frame-profile")]
+    pub fn take_called() -> Vec<String> {
+        CALLED.with_borrow_mut(std::mem::take)
+    }
+
+
+    pub fn viewed() {
+        VIEWS.set(VIEWS.get() + 1);
+    }
+
+    pub fn views() -> u64 {
+        VIEWS.get()
     }
 
     pub fn note(id: String) {

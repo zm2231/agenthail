@@ -6,6 +6,7 @@ use feed::decisions::Decision;
 use feed::review::{self, Verdict};
 
 use crate::App;
+use crate::over::rows::Part;
 use crate::over::inbox;
 use crate::ui::waiting::{self, Route};
 use crate::over::ui::{self, BODY, BODY_MED, META, META_MED, base, strong, weak};
@@ -47,13 +48,13 @@ impl Shown {
     }
 }
 
-fn line(s: &App, d: &Decision, id: &str, shift: bool, k: &Kit, main_kit: &Kit) -> El {
-    let shown = Shown::of(s, d, id, shift);
+fn line<'a>(s: &'a App, d: &'a Decision, id: String, shift: bool, k: &'a Kit, main_kit: &'a Kit) -> Part<'a> {
+    let shown = Shown::of(s, d, &id, shift);
     if shown.open {
-        return line_of(s, d, id, &shown, k, main_kit);
+        return Part::always(format!("decision-{id}"), move || line_of(s, d, &id, &shown, k, main_kit));
     }
-    let rev = s.ov.inbox.drawn.borrow_mut().of(id, d);
-    crate::over::rows::memo(format!("decision-{id}"), (rev, &shown), k, || line_of(s, d, id, &shown, k, main_kit))
+    let rev = s.ov.inbox.drawn.borrow_mut().of(&id, d);
+    Part::row(format!("decision-{id}"), crate::over::rows::hash(&(rev, &shown)), move || line_of(s, d, &id, &shown, k, main_kit))
 }
 
 fn line_of(s: &App, d: &Decision, id: &str, shown: &Shown, k: &Kit, main_kit: &Kit) -> El {
@@ -282,18 +283,20 @@ pub fn note_dialog(s: &App, layer: &mut Vec<El>, k: &Kit) {
 }
 
 pub fn section(s: &App, k: &Kit, main_kit: &Kit) -> El {
+    section_part(s, k, main_kit).el(k)
+}
+
+pub fn section_part<'a>(s: &'a App, k: &'a Kit, main_kit: &'a Kit) -> Part<'a> {
     let st = &s.ov.inbox;
     let count = st.inbox.as_ref().map(|i| i.decisions.len());
-    let mut c = col().w_full().gap(6.0).child(ui::section_head("Decisions", count, Some(text("from every connected computer".to_string()).font(k.text(META)).color(weak(k))), k));
+    let head = Part::row("decisions-head", count, move || ui::section_head("Decisions", count, Some(text("from every connected computer".to_string()).font(k.text(META)).color(weak(k))), k));
     let Some(found) = &st.inbox else {
         st.drawn.borrow_mut().keep(|_| false);
         let note = if s.client.is_some() { "Looking for decisions…" } else { "Decisions show when the app is connected to the daemon." };
-        return c.child(text(note.to_string()).font(k.text(META)).color(weak(k)));
+        return Part::group("decisions", crate::over::rows::version(note, [&head]), move || col().w_full().gap(6.0).child(head.el(k)).child(text(note.to_string()).font(k.text(META)).color(weak(k))));
     };
-    for n in &found.notes {
-        c = c.child(row().gap(6.0).items_center().child(icon(&icons::INFO, k.text_size(13.0)).color(weak(k))).child(text(n.clone()).font(k.text(META)).color(weak(k)).wrap()));
-    }
-    let mut list = col().w_full().gap(2.0).padding(4.0);
+    let notes = found.notes.clone();
+    let mut list: Vec<Part<'a>> = Vec::new();
     let mut last = "";
     let target = inbox::shift_target(st).map(Decision::id);
     let ids: Vec<String> = found.decisions.iter().map(Decision::id).collect();
@@ -301,26 +304,31 @@ pub fn section(s: &App, k: &Kit, main_kit: &Kit) -> El {
         let group = d.group_title();
         if group != last {
             let n = found.decisions.iter().filter(|x| x.group_title() == group).count();
-            list = list.child(text(format!("{group} · {n}")).font(k.text(META_MED)).color(weak(k)).px(14.0).pt(if last.is_empty() { 6.0 } else { 12.0 }).pb(2.0));
+            let first = last.is_empty();
+            list.push(Part::row(format!("decisions-group-{group}"), (group, n, first), move || text(format!("{group} · {n}")).font(k.text(META_MED)).color(weak(k)).px(14.0).pt(if first { 6.0 } else { 12.0 }).pb(2.0)));
             last = group;
         }
-        list = list.child(line(s, d, id, target.as_deref() == Some(id.as_str()), k, main_kit));
+        list.push(line(s, d, id.clone(), target.as_deref() == Some(id.as_str()), k, main_kit));
     }
     let listed: std::collections::HashSet<&str> = ids.iter().map(String::as_str).collect();
     s.ov.inbox.drawn.borrow_mut().keep(|id| listed.contains(id));
     if found.decisions.is_empty() {
-        list = list.child(row().gap(8.0).items_center().px(14.0).py(10.0).child(icon(&icons::CIRCLE_CHECK, k.text_size(14.0)).color(weak(k))).child(text(if found.notes.is_empty() { "Nothing needs you." } else { "Nothing needs you on the computers that answered." }.to_string()).font(k.text(BODY)).color(weak(k))));
+        let quiet = found.notes.is_empty();
+        list.push(Part::row("decisions-none", quiet, move || {
+            row().gap(8.0).items_center().px(14.0).py(10.0).child(icon(&icons::CIRCLE_CHECK, k.text_size(14.0)).color(weak(k))).child(text(if quiet { "Nothing needs you." } else { "Nothing needs you on the computers that answered." }.to_string()).font(k.text(BODY)).color(weak(k)))
+        }));
     }
     if !found.lead_handling.is_empty() {
-        list = list.child(text("Handled by a lead".to_string()).font(k.text(META_MED)).color(weak(k)).px(14.0).pt(12.0).pb(2.0));
+        list.push(Part::row("lead-handled-head", (), move || text("Handled by a lead".to_string()).font(k.text(META_MED)).color(weak(k)).px(14.0).pt(12.0).pb(2.0)));
         for h in &found.lead_handling {
             let who = s.ov.d.session(&h.session_id).map(|x| s.ov.d.title(x)).unwrap_or_else(|| crate::over::short_id(&h.session_id));
             let holder = s.ov.d.name_of(&h.held_by);
-            let key = format!("lead-handled-{}|{}|{}", h.ledger_key, h.work_item, h.session_id);
-            list = list.child(crate::over::rows::memo(key.clone(), (&who, &holder, &h.reason, &h.session_id), k, || {
+            let key = format!("lead-handled-{}", h.row_key());
+            let shows = crate::over::rows::hash(&(&who, &holder, &h.reason, &h.session_id));
+            list.push(Part::row(key.clone(), shows, move || {
                 let id = h.session_id.clone();
                 row()
-                    .key(key.clone())
+                    .key(key)
                     .w_full()
                     .gap(8.0)
                     .items_center()
@@ -334,32 +342,67 @@ pub fn section(s: &App, k: &Kit, main_kit: &Kit) -> El {
             }));
         }
     }
-    c = c.child(ui::card(list, k));
-    if !st.history.is_empty() {
-        let mut h = col().w_full().gap(2.0).padding(4.0).child(text("Handled here".to_string()).font(k.text(META_MED)).color(weak(k)).px(14.0).pt(6.0).pb(2.0));
-        for (i, e) in st.history.iter().take(HISTORY_SHOWN).enumerate() {
+    let mut history: Vec<Part<'a>> = Vec::new();
+    for (i, e) in st.history.iter().take(HISTORY_SHOWN).enumerate() {
+        let ago = s.ov.d.ago(&e.at);
+        let shows = crate::over::rows::hash(&(&e.title, &e.session, &e.outcome, &ago));
+        history.push(Part::row(format!("handled-{i}"), shows, move || {
             let id = e.session.clone();
-            h = h.child(
-                row()
-                    .key(format!("handled-{i}"))
-                    .w_full()
-                    .gap(8.0)
-                    .items_center()
-                    .px(14.0)
-                    .py(6.0)
-                    .radius(8.0)
-                    .hover(k.c.surface_raised_hover)
-                    .on_press(move |s: &mut App| crate::over::open_session(s, &id))
-                    .child(icon(&icons::CIRCLE_CHECK, k.text_size(12.0)).color(weak(k)))
-                    .child(text(ui::short_title(&e.title, 40)).font(k.text(META_MED)).color(base(k)).truncate().shrink())
-                    .child(text(e.outcome.clone()).font(k.text(META)).color(weak(k)))
-                    .child(ui::spacer())
-                    .child(text(s.ov.d.ago(&e.at)).font(k.text(META)).color(weak(k))),
-            );
-        }
-        c = c.child(ui::card(h, k));
+            row()
+                .key(format!("handled-{i}"))
+                .w_full()
+                .gap(8.0)
+                .items_center()
+                .px(14.0)
+                .py(6.0)
+                .radius(8.0)
+                .hover(k.c.surface_raised_hover)
+                .on_press(move |s: &mut App| crate::over::open_session(s, &id))
+                .child(icon(&icons::CIRCLE_CHECK, k.text_size(12.0)).color(weak(k)))
+                .child(text(ui::short_title(&e.title, 40)).font(k.text(META_MED)).color(base(k)).truncate().shrink())
+                .child(text(e.outcome.clone()).font(k.text(META)).color(weak(k)))
+                .child(ui::spacer())
+                .child(text(ago).font(k.text(META)).color(weak(k)))
+        }));
     }
-    c
+    let v = crate::over::rows::version((&notes, crate::over::rows::version((), &history)), list.iter().chain(&history).chain([&head]));
+    Part::group("decisions", v, move || {
+        let mut c = col().w_full().gap(6.0).child(head.el(k));
+        for n in notes {
+            c = c.child(row().gap(6.0).items_center().child(icon(&icons::INFO, k.text_size(13.0)).color(weak(k))).child(text(n).font(k.text(META)).color(weak(k)).wrap()));
+        }
+        let mut l = col().w_full().gap(2.0).padding(4.0);
+        for p in list {
+            l = l.child(p.el(k));
+        }
+        c = c.child(ui::card(l, k));
+        if !history.is_empty() {
+            let mut h = col().w_full().gap(2.0).padding(4.0).child(text("Handled here".to_string()).font(k.text(META_MED)).color(weak(k)).px(14.0).pt(6.0).pb(2.0));
+            for p in history {
+                h = h.child(p.el(k));
+            }
+            c = c.child(ui::card(h, k));
+        }
+        c
+    })
+}
+
+#[derive(Hash)]
+pub struct BriefShown {
+    asking: bool,
+    unknown: bool,
+    lead: String,
+    notice: Option<(String, bool)>,
+}
+
+pub fn brief_shown(s: &App, project: &str) -> BriefShown {
+    let b = s.ov.inbox.briefs.get(project);
+    BriefShown {
+        asking: b.is_some_and(|b| b.asking),
+        unknown: b.is_some_and(|b| b.unknown),
+        lead: s.ov.d.project(project).filter(|p| p.lead.is_some()).map(|p| p.lead_name.clone()).unwrap_or_else(|| "the lead".into()),
+        notice: b.and_then(|b| b.notice.clone().map(|n| (n, b.failed))),
+    }
 }
 
 pub fn brief_button(s: &App, project: &str, k: &Kit) -> El {

@@ -123,6 +123,79 @@ fn probe() {
         feed::shared::copies() - copies,
         median(built_rows)
     ));
+    let mut measure = |name: &str, from: i64, to: i64, lines: &mut Vec<String>| {
+        send(&rt, poll(&path, from, None, &mut sent));
+        rt.frame(DT);
+        built::take();
+        built::take_called();
+        built::take_rebuilt();
+        let views = built::views();
+        send(&rt, poll(&path, to, None, &mut sent));
+        rt.frame(DT);
+        if built::views() == views {
+            lines.push(format!("{name}: the view was skipped"));
+            return Vec::new();
+        }
+        let rows = built::take();
+        let memos: std::collections::HashSet<String> = built::take_called().into_iter().collect();
+        let fresh: std::collections::HashSet<String> = built::take_rebuilt().into_iter().collect();
+        let all: Vec<String> = rt.elements().into_iter().filter(|e| !e.exiting).map(|e| e.path).collect();
+        let id_of = |seg: &str| seg.strip_prefix("#!").unwrap_or(seg).replace("%2F", "/").replace("%25", "%");
+        let nearest = |p: &str| p.split('/').map(id_of).filter(|id| memos.contains(id)).last();
+        let outside = all.iter().filter(|p| nearest(p).is_none()).count();
+        let rebuilt: Vec<String> = all.iter().filter(|p| nearest(p).is_none_or(|id| fresh.contains(&id))).cloned().collect();
+        lines.push(format!("{name}: {} nodes, {outside} outside memos, {} rebuilt, rows built {}", all.len(), rebuilt.len(), tally(rows)));
+        rebuilt
+    };
+    measure("poll, nothing shown changes", 206, 207, &mut lines);
+    let rebuilt = measure("poll, a minute turns", 290, 350, &mut lines);
+    if let Ok(dump) = std::env::var("AGENTHAIL_LIVE_OUTSIDE") {
+        std::fs::write(dump, rebuilt.join("\n")).unwrap();
+    }
+    let drawn = |rt: &Runtime<App>| rt.elements().into_iter().filter(|e| !e.exiting && !e.path.starts_with("kit-root/#0/backdrop")).map(|e| format!("{} {:?} {:?} {:?} {:?}", e.path, e.text, e.rect.map(f32::round), e.fill, e.text_color)).collect::<Vec<_>>();
+    let (mut skipped, mut minute, mut dropped) = (0, Vec::new(), Vec::new());
+    let (mut left, mut back) = (0, 0);
+    for round in 0..48 {
+        let later = 400 + round * 5;
+        let without = if round % 8 == 7 { top.as_deref() } else { None };
+        let views = built::views();
+        let shown = rt.state.ov.d.shown;
+        built::take();
+        phases();
+        send(&rt, poll(&path, later, without, &mut sent));
+        rt.frame(DT);
+        let p = phase_ms();
+        let rows = built::take().len();
+        let listed = top.as_deref().is_some_and(|id| rt.state.ov.d.session(id).is_some());
+        if without.is_some() {
+            assert!(!listed, "the session leaving at +{later} s left");
+            left += 1;
+        } else if round % 8 == 0 && round > 0 {
+            assert!(listed, "the session coming back at +{later} s came back");
+            back += 1;
+        }
+        if built::views() == views {
+            skipped += 1;
+            let kept = drawn(&rt);
+            rt.invalidate();
+            rt.frame(DT);
+            assert_eq!(built::take(), Vec::<String>::new(), "the poll at +{later} s skipped the view, but running it builds rows");
+            rt.invalidate_memos_by_prefix("");
+            rt.frame(DT);
+            built::take();
+            let fresh = drawn(&rt);
+            if let Some(i) = (0..kept.len().max(fresh.len())).find(|&i| kept.get(i) != fresh.get(i)) {
+                panic!("the poll at +{later} s skipped the view, but a fresh build differs at element {i}:\n kept  {:?}\n fresh {:?}", kept.get(i), fresh.get(i));
+            }
+        } else if rt.state.ov.d.shown != shown && without.is_none() && round % 8 != 0 {
+            minute.push((p[0], p[1], rows));
+        } else {
+            dropped.push((p[0], p[1], rows));
+        }
+    }
+    assert!(skipped > 0 && left == 6 && back == 5, "{skipped} skipped, {left} left, {back} came back");
+    let said = |v: &[(f64, f64, usize)]| v.iter().map(|(view, commit, rows)| format!("view {view:.2} ms commit {commit:.2} ms rows {rows}")).collect::<Vec<_>>().join("; ");
+    lines.push(format!("48 polls 5 s apart over 4 minutes, a session leaving and coming back every 8: {skipped} skipped the view, each matching a fresh build; minute turns: {}; a session left or came back, or other: {}", said(&minute), said(&dropped)));
     if let Ok(dump) = std::env::var("AGENTHAIL_LIVE_PATHS") {
         let paths: Vec<String> = rt.elements().into_iter().filter(|e| !e.exiting).map(|e| e.path).collect();
         std::fs::write(dump, paths.join("\n")).unwrap();

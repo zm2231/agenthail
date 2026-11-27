@@ -262,6 +262,7 @@ pub fn prepared(mut w: Work, project: &str, ledger_key: &str, steps: &super::pha
 
 pub struct World {
     pub now: OffsetDateTime,
+    pub shown: OffsetDateTime,
     pub sessions: Arc<Vec<Session>>,
     pub projects: Vec<Project>,
     pub work: HashMap<WorkKey, Arc<Work>>,
@@ -315,6 +316,7 @@ impl World {
         let projects = projects(&raw.records, &raw.sessions);
         World {
             now,
+            shown: crate::wake::minute_of(now),
             sessions: raw.sessions,
             projects,
             work,
@@ -358,7 +360,7 @@ impl World {
     }
 
     pub fn hours(&self, at: &str) -> f64 {
-        parse_time(at).map(|t| (self.now - t).as_seconds_f64() / 3600.0).unwrap_or(1e9)
+        parse_time(at).map(|t| (self.shown - t).as_seconds_f64() / 3600.0).unwrap_or(1e9)
     }
 
     pub fn ago(&self, at: &str) -> String {
