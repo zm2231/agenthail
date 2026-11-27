@@ -25,7 +25,7 @@ pub struct State {
     typed: Option<(String, f64)>,
     requests: u64,
     reads: HashMap<WorkKey, u64>,
-    found: HashMap<WorkKey, Work>,
+    found: HashMap<WorkKey, std::sync::Arc<Work>>,
     steps: HashMap<String, (u64, Steps)>,
     names: HashMap<String, String>,
     opening: HashMap<WorkKey, Option<String>>,
@@ -46,9 +46,12 @@ impl State {
         d.found_names.extend(self.names.iter().map(|(k, v)| (k.clone(), v.clone())));
         self.steps.retain(|ledger, _| d.steps_for(ledger).is_none());
         d.steps.extend(self.steps.iter().map(|(k, (_, v))| (k.clone(), v.clone())));
-        for (key, w) in &self.found {
+        for (key, w) in self.found.iter_mut() {
             let steps = d.steps_of(&key.ledger);
-            d.work.entry(key.clone()).or_insert_with(|| std::sync::Arc::new(Work { steps, ..w.clone() }));
+            if w.steps != steps {
+                feed::shared::own(w).steps = steps;
+            }
+            d.work.entry(key.clone()).or_insert_with(|| w.clone());
         }
     }
 
@@ -171,9 +174,10 @@ pub fn drain(s: &mut App) -> bool {
                         let work = s.ov.d.place(work, &key.ledger);
                         let work = s.ov.worksearch.learn(&mut s.ov.d, work, seq);
                         s.ov.worksearch.opening.remove(&key);
+                        let work = std::sync::Arc::new(work);
                         s.ov.worksearch.found.insert(key.clone(), work.clone());
                         super::jump::keep_highlight(s, |s| {
-                            s.ov.d.work.insert(key, work.into());
+                            s.ov.d.work.insert(key, work);
                         });
                         s.ov.world_changed();
                     }
@@ -258,12 +262,28 @@ mod tests {
     }
 
     #[test]
+    fn a_kept_item_is_shared_across_rebuilds_until_its_names_change() {
+        let mut state = State::default();
+        let key = WorkKey::new("shared:z", "z-W1");
+        state.found.insert(key.clone(), item("z-W1", "shared:z", "shared:z", "Make").into());
+        let (mut first, mut second) = (world(), world());
+        state.keep(&mut first);
+        state.keep(&mut second);
+        assert!(std::sync::Arc::ptr_eq(&first.work[&key], &second.work[&key]), "an unchanged kept item isn't copied per rebuild");
+        let mut named = World::new(serde_json::from_value(serde_json::json!({"projects": [{"id": "shared:z", "ledgerKey": "shared:z"}], "phaseLabels": {"shared:z": {"build": "Forge"}}})).unwrap());
+        state.keep(&mut named);
+        assert_eq!(word(&named, key.clone()), "Forge", "the project's names still reach it");
+        assert!(!std::sync::Arc::ptr_eq(&second.work[&key], &named.work[&key]));
+        assert_eq!(word(&second, key.clone()), word(&first, key), "a World already built keeps what it showed");
+    }
+
+    #[test]
     fn a_search_item_takes_its_projects_ledger_names_over_its_own_reply() {
         let mut state = State::default();
         let mut d = world();
         let w = state.learn(&mut d, item("p-1-W9", "p-1", "project:p-1", "Make"), 1);
         assert_eq!(w.steps.name(1), "Craft", "an older item reply doesn't replace the project's ledger names");
-        state.found.insert(w.key(), item("p-1-W9", "p-1", "project:p-1", "Make"));
+        state.found.insert(w.key(), item("p-1-W9", "p-1", "project:p-1", "Make").into());
         let mut d = world();
         state.keep(&mut d);
         assert_eq!(word(&d, WorkKey::new("project:p-1", "p-1-W9")), "Craft", "a rebuild stamps the kept item with the project's names");
@@ -274,11 +294,11 @@ mod tests {
         let mut state = State::default();
         let mut d = world();
         let first = state.learn(&mut d, item("z-W1", "shared:z", "shared:z", "Make"), 1);
-        state.found.insert(first.key(), first.clone());
+        state.found.insert(first.key(), first.clone().into());
         d.work.insert(first.key(), first.into());
         assert_eq!(d.steps_of("shared:z").name(1), "Make", "the reply's names reach the project's other search rows");
         let second = state.learn(&mut d, item("z-W2", "shared:z", "shared:z", "Forge"), 3);
-        state.found.insert(second.key(), second.clone());
+        state.found.insert(second.key(), second.clone().into());
         d.work.insert(second.key(), second.into());
         assert_eq!(word(&d, WorkKey::new("shared:z", "z-W1")), "Forge", "an item opened earlier takes the newer names at once");
         let late = state.learn(&mut d, item("z-W3", "shared:z", "shared:z", "Old"), 2);
@@ -300,7 +320,7 @@ mod tests {
         let mut state = State::default();
         let mut d = world();
         let first = state.learn(&mut d, item("q-W1", "project:q", "project:q", "Make"), 1);
-        state.found.insert(first.key(), first.clone());
+        state.found.insert(first.key(), first.clone().into());
         d.work.insert(first.key(), first.into());
         let known = || World::new(serde_json::from_value(serde_json::json!({"projects": [{"id": "q", "ledgerKey": "project:q"}]})).unwrap());
         let mut d = known();
