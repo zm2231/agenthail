@@ -47,7 +47,7 @@ pub struct Crew {
 
 pub enum Done {
     Page(String, u64, Result<Vec<Session>, String>),
-    Claude(String, u64, Result<ClaudeSubagents, String>),
+    Claude(String, u64, u64, crew::ClaudeRead),
     Row(String, u64, RowRead),
 }
 
@@ -207,7 +207,8 @@ fn claude(s: &mut App, id: &str) {
     let seq = s.crew.seq;
     s.crew.claude_asked.insert(id.to_string(), ClaudeAsk { stamp, at: Instant::now(), failed: false, seq, in_flight: true });
     let id = id.to_string();
-    spawn(s, move |c| Done::Claude(id.clone(), seq, c.claude_subagents(&id)));
+    let ticket = super::inspect::ticket(s);
+    spawn(s, move |c| Done::Claude(id.clone(), seq, ticket, c.claude_subagents(&id)));
 }
 
 pub(crate) fn done(s: &mut App, done: Done) {
@@ -237,9 +238,12 @@ fn take(s: &mut App, done: Done) {
                 }
             }
         }
-        Done::Claude(id, seq, result) => {
+        Done::Claude(id, seq, ticket, read) => {
             let Some(asked) = s.crew.claude_asked.get_mut(&id).filter(|a| a.seq == seq) else { return };
             asked.in_flight = false;
+            super::inspect::read(s, &id, ticket, read.metadata);
+            let Some(asked) = s.crew.claude_asked.get_mut(&id) else { return };
+            let result = read.subagents;
             if !s.crew.recent.contains(&id) {
                 s.crew.claude_asked.remove(&id);
                 return;

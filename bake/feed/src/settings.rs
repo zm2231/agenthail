@@ -97,13 +97,25 @@ impl Client {
         Ok(serde_json::from_value(value["models"].clone()).unwrap_or_default())
     }
 
-    pub fn context_usage(&self, session: &str) -> Result<Option<ContextUsage>> {
-        let value = self.get_json(&format!("/api/v1/session-metadata?id={}", enc(session)))?;
-        if let Some(error) = value["errors"]["context"].as_str() {
-            anyhow::bail!("{error}");
+    pub fn context_read(&self, session: &str) -> ContextRead {
+        match self.get_json(&format!("/api/v1/session-metadata?id={}", enc(session))) {
+            Ok(value) => ContextRead { context: context_of(&value).map_err(|e| e.to_string()), metadata: Ok(crate::inspect::metadata(&value)) },
+            Err(error) => ContextRead { context: Err(error.to_string()), metadata: Err(error.to_string()) },
         }
-        Ok(serde_json::from_value(value["context"].clone()).ok())
     }
+}
+
+fn context_of(value: &serde_json::Value) -> Result<Option<ContextUsage>> {
+    if let Some(error) = value["errors"]["context"].as_str() {
+        anyhow::bail!("{error}");
+    }
+    Ok(serde_json::from_value(value["context"].clone()).ok())
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContextRead {
+    pub context: std::result::Result<Option<ContextUsage>, String>,
+    pub metadata: std::result::Result<crate::inspect::Metadata, String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -477,9 +489,13 @@ mod tests {
         let client = Client::new(&base, "secret");
         assert_eq!(client.session_settings("h1::s 1").unwrap().model.unwrap().value, "gpt-6.1-sol");
         assert_eq!(client.session_models("codex", "h1::s 1").unwrap()[0].display_name, "GPT-6.1-Sol");
-        assert_eq!(client.context_usage("h1::s 1").unwrap().unwrap().fraction(), Some(0.1));
-        assert_eq!(client.context_usage("h1::s 1").unwrap_err().to_string(), "timed out");
-        assert_eq!(client.context_usage("h1::s 1").unwrap(), None);
+        let read = client.context_read("h1::s 1");
+        assert_eq!(read.context.unwrap().unwrap().fraction(), Some(0.1));
+        assert!(read.metadata.is_ok());
+        let failed = client.context_read("h1::s 1");
+        assert_eq!(failed.context.unwrap_err(), "timed out");
+        assert!(failed.metadata.unwrap().warnings.contains(&"Context usage: timed out".to_string()));
+        assert_eq!(client.context_read("h1::s 1").context.unwrap(), None);
         assert_eq!(
             paths.join().unwrap(),
             vec![

@@ -194,11 +194,20 @@ pub fn claude_subagents(metadata: &Value) -> Result<ClaudeSubagents, String> {
     Ok(ClaudeSubagents { links, total })
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClaudeRead {
+    pub subagents: Result<ClaudeSubagents, String>,
+    pub metadata: Result<crate::inspect::Metadata, String>,
+}
+
 const PAGE_TRIES: usize = 3;
 
 impl Client {
-    pub fn claude_subagents(&self, session: &str) -> Result<ClaudeSubagents, String> {
-        claude_subagents(&self.get_json(&format!("/api/v1/session-metadata?id={}&subagents=all", enc(session))).map_err(|e| e.to_string())?)
+    pub fn claude_subagents(&self, session: &str) -> ClaudeRead {
+        match self.get_json(&format!("/api/v1/session-metadata?id={}&subagents=all", enc(session))) {
+            Ok(value) => ClaudeRead { subagents: claude_subagents(&value), metadata: Ok(crate::inspect::metadata(&value)) },
+            Err(error) => ClaudeRead { subagents: Err(error.to_string()), metadata: Err(error.to_string()) },
+        }
     }
 
     pub fn session_row(&self, id: &str) -> RowRead {
@@ -221,7 +230,7 @@ pub enum RowRead {
 
 pub fn detail_row(detail: &Value) -> Result<Session, String> {
     let Value::Object(mut raw) = detail["session"].clone() else { return Err("Agenthail returned no session".into()) };
-    for key in ["capabilities", "readOnly", "archived", "attention"] {
+    for key in ["capabilities", "readOnly", "readOnlyReason", "archived", "attention"] {
         if let Some(v) = detail.get(key).filter(|v| !v.is_null()) {
             raw.insert(key.into(), v.clone());
         }
@@ -489,11 +498,16 @@ mod tests {
 
     #[test]
     fn claude_subagents_are_read_in_full() {
-        let (client, asked) = daemon(replies(&[(200, r#"{"sessionId":"s","claudeSubagents":[{"parentSessionId":"s","agentId":"a1","working":true,"transcriptPath":"/t"}],"claudeSubagentsTotal":1}"#)]));
-        let got = client.claude_subagents("s").unwrap();
+        let (client, asked) = daemon(replies(&[(200, r#"{"sessionId":"s","goal":{"objective":"Ship","status":"active"},"claudeRuns":[],"claudeSubagents":[{"parentSessionId":"s","agentId":"a1","working":true,"transcriptPath":"/t"}],"claudeSubagentsTotal":1}"#), (500, "")]));
+        let read = client.claude_subagents("s");
+        let got = read.subagents.unwrap();
         assert_eq!(got.total, 1);
         assert!(got.links[0].working);
+        let metadata = read.metadata.unwrap();
+        assert_eq!((metadata.goal.unwrap().objective.as_str(), metadata.runs), ("Ship", Some(vec![])));
         assert_eq!(asked.recv().unwrap().0, "/api/v1/session-metadata?id=s&subagents=all");
+        let failed = client.claude_subagents("s");
+        assert!(failed.subagents.is_err() && failed.metadata.is_err());
     }
 
     #[test]

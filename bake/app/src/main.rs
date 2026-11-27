@@ -144,6 +144,7 @@ pub struct App {
     pub limits: ui::limit::Limits,
     pub accounts: ui::accounts::Accounts,
     pub prs: ui::pr_link::Prs,
+    pub inspect: ui::inspect::Inspect,
     pub new_session: Option<ui::new_session::Sheet>,
     bar: menubar::Bar,
     pub attach: ui::attach::Attach,
@@ -339,6 +340,7 @@ fn init() -> App {
         limits: ui::limit::Limits::new(),
         accounts: ui::accounts::Accounts::new(),
         prs: ui::pr_link::Prs::new(),
+        inspect: ui::inspect::Inspect::new(),
         new_session: None,
         bar: menubar::Bar::default(),
         attach: ui::attach::Attach::default(),
@@ -428,6 +430,7 @@ pub fn select(s: &mut App, id: &str) {
     ui::session_menu::load(s, id);
     ui::queue::fetch(s, id);
     ui::subagents::load(s, id);
+    ui::inspect::load(s, id);
 }
 
 pub fn load_pane(s: &mut App, id: &str) {
@@ -675,12 +678,22 @@ pub fn send(s: &mut App, tx: &mut Tx) {
 }
 
 pub fn send_to(s: &mut App, id: &str, tx: &mut Tx) {
+    if closed(s, id) {
+        return;
+    }
     if !ui::complete::run(s, id, tx) {
         send_with(s, id, None, tx);
     }
 }
 
+fn closed(s: &App, id: &str) -> bool {
+    session(s, id).is_some_and(|x| feed::notice::read_only(x).is_some())
+}
+
 pub fn steer_text(s: &mut App, id: &str, text: String, tx: &mut Tx) {
+    if closed(s, id) {
+        return;
+    }
     ui::paste::set_composer(s, &text);
     send_with(s, id, Some(Busy::Steer), tx);
 }
@@ -744,7 +757,7 @@ fn clear_sent(s: &mut App, id: &str, unsent: &Unsent) {
 }
 
 pub fn can_retry(s: &App, id: &str) -> bool {
-    s.unsent.latest(id).is_some_and(|u| feed::attach::missing_upload(&u.error).is_none())
+    !closed(s, id) && s.unsent.latest(id).is_some_and(|u| feed::attach::missing_upload(&u.error).is_none())
 }
 
 pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
@@ -1223,6 +1236,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     let mut counter = s.counter;
     let mut panes_moved = false;
     let mut caught: Vec<String> = Vec::new();
+    let mut goals: Vec<String> = Vec::new();
     for (id, pane) in s.panes.iter_mut() {
         let mut moved = false;
         if let Some(replay) = &mut pane.replay {
@@ -1239,6 +1253,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             for message in arrived {
                 match message {
                     Message::Batch(b) => {
+                        if feed::inspect::moves_goal(&b.events) {
+                            goals.push(id.clone());
+                        }
                         history::batch_arrived(pane, t);
                         moved |= pane.transcript.apply(b.seq, b.events);
                     }
@@ -1268,6 +1285,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     s.panes_moved |= panes_moved;
     for id in caught {
         history::caught_up(s, &id);
+    }
+    for id in goals {
+        ui::inspect::goal_moved(s, &id);
     }
     if s.ov.live.stale() || (s.panes_moved && s.clock - s.built_at >= PANE_REBUILD_SECS) {
         rebuild(s);
@@ -1299,7 +1319,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= over::search::drain(s);
     changed |= notify::tick(s);
     changed |= ui::gone::watch(s);
-    changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s);
+    changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s) | ui::inspect::drain(s);
     changed |= ui::attach::pump(s);
     changed |= over::extensions::drain(s);
     changed |= over::projects::drain(s);

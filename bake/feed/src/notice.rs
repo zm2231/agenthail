@@ -7,6 +7,26 @@ use crate::catalog::Session;
 
 pub const REMEMBERED: usize = 500;
 pub const SENDS_AS_NOTE: &str = "Sends as a note";
+pub const READ_ONLY: &str = "This session is closed. You can read it, but not message it.";
+
+pub fn reply_refusal(row: &crate::subagents::RowRead) -> Option<String> {
+    match row {
+        crate::subagents::RowRead::Found(x) => read_only(x),
+        crate::subagents::RowRead::Gone => Some("This session no longer exists.".into()),
+        crate::subagents::RowRead::Failed(error) => Some(format!("Couldn't check the session is still open: {error}")),
+    }
+}
+
+pub fn refused(why: String) -> crate::catalog::RespondError {
+    crate::catalog::RespondError { message: why, code: "read_only".into(), maybe_delivered: false, answered: false, reply: Value::Null, status: 0 }
+}
+
+pub fn read_only(x: &Session) -> Option<String> {
+    if !x.read_only && x.capabilities.send {
+        return None;
+    }
+    Some(x.read_only_reason.clone().filter(|r| !r.trim().is_empty()).unwrap_or_else(|| READ_ONLY.to_string()))
+}
 
 pub fn turn_notice(x: &Session) -> String {
     if !x.capabilities.reaches_as_note {
@@ -79,6 +99,34 @@ mod tests {
 
     fn session(capabilities: Value, read_only: bool) -> Session {
         serde_json::from_value(json!({"id": "s1", "capabilities": capabilities, "readOnly": read_only})).unwrap()
+    }
+
+    #[test]
+    fn a_read_only_session_or_one_that_takes_no_messages_gets_the_closed_notice() {
+        assert_eq!(read_only(&session(json!({"send": true}), false)), None);
+        assert_eq!(read_only(&serde_json::from_value(json!({"id": "s1"})).unwrap()), None);
+        assert_eq!(read_only(&session(json!({"send": true}), true)).as_deref(), Some(READ_ONLY));
+        assert_eq!(read_only(&session(json!({"send": false}), false)).as_deref(), Some(READ_ONLY));
+        assert_eq!(read_only(&session(json!({}), false)).as_deref(), Some(READ_ONLY));
+        let why: Session = serde_json::from_value(json!({"id": "s1", "capabilities": {"send": true}, "readOnly": true, "readOnlyReason": "This Claude session is being written to from another computer."})).unwrap();
+        assert_eq!(read_only(&why).as_deref(), Some("This Claude session is being written to from another computer."));
+        let blank: Session = serde_json::from_value(json!({"id": "s1", "readOnly": true, "readOnlyReason": " "})).unwrap();
+        assert_eq!(read_only(&blank).as_deref(), Some(READ_ONLY));
+    }
+
+    #[test]
+    fn a_reply_goes_only_to_a_session_read_as_open() {
+        use crate::subagents::{RowRead, detail_row};
+        let closed = detail_row(&json!({"session": {"id": "s1"}, "capabilities": {"send": true}, "readOnly": true, "readOnlyReason": "Read-only here."})).unwrap();
+        assert_eq!(reply_refusal(&RowRead::Found(closed)).as_deref(), Some("Read-only here."));
+        let open = detail_row(&json!({"session": {"id": "s1"}, "capabilities": {"send": true}})).unwrap();
+        assert_eq!(reply_refusal(&RowRead::Found(open)), None);
+        let archived = detail_row(&json!({"session": {"id": "s1"}, "capabilities": {"send": true}, "archived": true})).unwrap();
+        assert_eq!(reply_refusal(&RowRead::Found(archived)), None, "archiving files a session away; it can still be messaged");
+        assert!(reply_refusal(&RowRead::Gone).is_some());
+        assert_eq!(reply_refusal(&RowRead::Failed("timed out".into())).as_deref(), Some("Couldn't check the session is still open: timed out"));
+        let error = refused("Read-only here.".into());
+        assert!(!error.maybe_delivered && error.message == "Read-only here.");
     }
 
     #[test]

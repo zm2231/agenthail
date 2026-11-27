@@ -534,6 +534,7 @@ pub fn done(s: &mut App, done: Done) {
         Done::Goal(asked, typed, goal, result) => {
             let id = feed::composer::current(&s.rekeyed, &asked).to_string();
             s.complete.goal_pending.remove(&id);
+            super::inspect::goal_moved(s, &id);
             let unsure = match &result {
                 Ok(d) => *d == feed::composer::Delivered::Unconfirmed,
                 Err(e) => e.maybe_delivered,

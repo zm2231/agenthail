@@ -16,7 +16,7 @@ const REFRESH: Duration = Duration::from_secs(30);
 pub enum Done {
     Settings(String, u64, Result<SessionSettings, String>),
     Models(String, u64, Result<Vec<ModelOption>, String>),
-    Context(String, u64, Result<Option<ContextUsage>, String>),
+    Context(String, u64, Result<Option<ContextUsage>, String>, u64, Result<feed::inspect::Metadata, String>),
     Acted(String, Act, Result<Option<Patch>, RespondError>),
     Renamed(String, u64, Result<String, RespondError>),
     Set(String, &'static str, String, Result<(), RespondError>),
@@ -137,9 +137,18 @@ fn fetch_settings(s: &mut App, id: &str, after: Duration) {
     spawn(s, after, move |c| Some(Done::Settings(id.clone(), seq, c.session_settings(&id).map_err(|e| e.to_string()))));
 }
 
-fn fetch_context(s: &mut App, id: &str, after: Duration) {
+fn fetch_context(s: &mut App, id: &str, after: Duration) -> u64 {
     let (id, seq) = (id.to_string(), s.menus.next());
-    spawn(s, after, move |c| Some(Done::Context(id.clone(), seq, c.context_usage(&id).map_err(|e| e.to_string()))));
+    let ticket = super::inspect::ticket(s);
+    spawn(s, after, move |c| {
+        let read = c.context_read(&id);
+        Some(Done::Context(id.clone(), seq, read.context, ticket, read.metadata))
+    });
+    ticket
+}
+
+pub(crate) fn reread(s: &mut App, id: &str) -> u64 {
+    fetch_context(s, id, Duration::ZERO)
 }
 
 fn load_fixture(s: &mut App, id: &str) {
@@ -241,6 +250,7 @@ fn verb(act: &Act) -> &'static str {
         Act::Snooze(_) => "Snoozing",
         Act::Wake => "Waking",
         Act::MakeLead => "Making it the project's lead",
+        Act::Process(_) => "Running it",
     }
 }
 
@@ -259,6 +269,7 @@ pub fn run(s: &mut App, id: &str, act: Act) {
         Act::Adopt => super::session_ops::open_adopt(s, id),
         Act::Move => super::session_ops::open_move(s, id),
         Act::MakeLead => crate::over::projects::make_lead(s, id),
+        Act::Process(act) => super::inspect::run(s, id, act, true),
         Act::Call => {
             let name = super::gone::shown(s, id).map(|x| x.title()).unwrap_or_default();
             crate::voice::open(id, &name);
@@ -287,7 +298,7 @@ pub fn run(s: &mut App, id: &str, act: Act) {
                     Act::Archive(on) => c.session_archive(&id, *on).map(|_| Some(Patch::Archived(*on))),
                     Act::Snooze(_) => c.session_snooze(&id, until).map(|snooze| Some(Patch::Snoozed(snooze))),
                     Act::Wake => c.session_wake(&id).map(|_| Some(Patch::Snoozed(None))),
-                    Act::Rename | Act::Pr(_) | Act::PrWatch(..) | Act::PrUnlink(_) | Act::PrLink | Act::Call | Act::Adopt | Act::Move | Act::MakeLead => Ok(None),
+                    Act::Rename | Act::Pr(_) | Act::PrWatch(..) | Act::PrUnlink(_) | Act::PrLink | Act::Call | Act::Adopt | Act::Move | Act::MakeLead | Act::Process(_) => Ok(None),
                 };
                 Some(Done::Acted(id, act, result))
             });
@@ -440,7 +451,8 @@ fn settled(s: &mut App, done: Done) {
             s.menus.models_loading.remove(&id);
             s.menus.models_error.insert(id, error);
         }
-        Done::Context(id, seq, result) => {
+        Done::Context(id, seq, result, ticket, metadata) => {
+            super::inspect::read(s, &id, ticket, metadata);
             if !s.menus.fresh(&id, "context", seq) {
                 return;
             }

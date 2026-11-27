@@ -60,6 +60,7 @@ fn act_icon(act: &Act) -> &'static rune::Icon {
         Act::Move => &icons::SERVER,
         Act::Snooze(_) | Act::Wake => &icons::CLOCK,
         Act::MakeLead => &icons::CORNER,
+        Act::Process(_) => &icons::TERMINAL,
     }
 }
 

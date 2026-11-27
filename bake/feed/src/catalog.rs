@@ -194,10 +194,14 @@ pub struct Session {
     pub read_state: Option<crate::action::ReadState>,
     #[serde(default)]
     pub runtime: Option<Runtime>,
+    #[serde(default)]
+    pub runtime_kind: Option<String>,
     #[serde(default, deserialize_with = "capabilities_or_default")]
     pub capabilities: Capabilities,
     #[serde(default)]
     pub read_only: bool,
+    #[serde(default)]
+    pub read_only_reason: Option<String>,
     #[serde(default)]
     pub unavailable_reason: Option<String>,
     #[serde(default)]
@@ -216,6 +220,8 @@ pub struct Session {
 #[serde(rename_all = "camelCase")]
 pub struct Capabilities {
     #[serde(default)]
+    pub send: bool,
+    #[serde(default)]
     pub interrupt: bool,
     #[serde(default)]
     pub steer: bool,
@@ -227,6 +233,8 @@ pub struct Capabilities {
     pub commands: bool,
     #[serde(default)]
     pub attach: bool,
+    #[serde(default)]
+    pub goal: bool,
     #[serde(default)]
     pub goal_set: bool,
     #[serde(default)]
@@ -241,6 +249,12 @@ pub struct Capabilities {
 
 #[derive(Deserialize, Clone, Copy, Debug, Default, PartialEq)]
 pub struct Lifecycle {
+    #[serde(default)]
+    pub status: bool,
+    #[serde(default)]
+    pub logs: bool,
+    #[serde(default)]
+    pub stop: bool,
     #[serde(default)]
     pub resume: bool,
     #[serde(default)]
@@ -262,7 +276,7 @@ fn capabilities_or_default<'de, D: serde::Deserializer<'de>>(d: D) -> std::resul
 
 impl Default for Capabilities {
     fn default() -> Self {
-        Capabilities { interrupt: true, steer: true, model: false, compact: false, commands: false, attach: false, goal_set: false, steer_images: None, lifecycle: Lifecycle::default(), reaches_as_note: false, remote_control: false }
+        Capabilities { send: true, interrupt: true, steer: true, model: false, compact: false, commands: false, attach: false, goal: false, goal_set: false, steer_images: None, lifecycle: Lifecycle::default(), reaches_as_note: false, remote_control: false }
     }
 }
 
@@ -985,7 +999,7 @@ mod capabilities_tests {
     #[test]
     fn a_session_without_capabilities_can_be_stopped_and_steered() {
         for c in [caps(""), caps(r#","capabilities":null"#)] {
-            assert!(c.interrupt && c.steer);
+            assert!(c.send && c.interrupt && c.steer);
             assert!(!c.model && !c.compact && !c.commands);
         }
     }
@@ -993,7 +1007,7 @@ mod capabilities_tests {
     #[test]
     fn a_capability_the_daemon_leaves_out_is_not_offered() {
         let c = caps(r#","capabilities":{}"#);
-        assert!(!c.interrupt && !c.steer && !c.model && !c.compact && !c.commands);
+        assert!(!c.send && !c.interrupt && !c.steer && !c.model && !c.compact && !c.commands);
         let c = caps(r#","capabilities":{"model":true}"#);
         assert!(c.model && !c.interrupt && !c.steer);
         assert!(!c.attach && caps(r#","capabilities":{"attach":true}"#).attach);
