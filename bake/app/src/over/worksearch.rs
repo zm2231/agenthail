@@ -41,7 +41,8 @@ impl State {
         self.found.retain(|key, _| !d.work.contains_key(key));
         d.found_names.extend(self.names.iter().map(|(k, v)| (k.clone(), v.clone())));
         for (key, w) in &self.found {
-            d.work.entry(key.clone()).or_insert_with(|| w.clone());
+            let steps = d.steps.get(&w.project).cloned().unwrap_or_else(|| w.steps.clone());
+            d.work.entry(key.clone()).or_insert_with(|| Work { steps, ..w.clone() });
         }
     }
 }
@@ -206,5 +207,32 @@ pub fn note(s: &App, key: &WorkKey) -> Option<String> {
         None => Some("Loading this work item…".into()),
         Some(e) if shown => Some(format!("Couldn't refresh this work item, so it may be out of date: {e}")),
         Some(e) => Some(format!("Couldn't open this work item: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_kept_search_item_takes_its_projects_current_step_names() {
+        let steps = |build: &str| serde_json::from_value::<feed::derive::phase::Steps>(serde_json::json!({"build": build})).unwrap();
+        let item = |id: &str, project: &str, ledger: &str| {
+            let w: Work = serde_json::from_value(serde_json::json!({"id": id, "state": "in_progress", "phase": "build"})).unwrap();
+            Work { project: project.into(), ledger_key: ledger.into(), steps: steps("Make"), ..w }
+        };
+        let mut state = State::default();
+        for w in [item("p-1-W9", "p-1", "project:p-1"), item("z-W1", "shared:z", "shared:z")] {
+            state.found.insert(w.key(), w);
+        }
+        let raw: feed::derive::Recorded = serde_json::from_value(serde_json::json!({"projects": [{"id": "p-1", "ledgerKey": "project:p-1"}], "phaseLabels": {"p-1": {"build": "Craft"}}})).unwrap();
+        let mut d = World::new(raw);
+        state.keep(&mut d);
+        let word = |key: WorkKey| {
+            let w = &d.work[&key];
+            feed::derive::phase::step_word(&w.phase, &w.state, &w.steps)
+        };
+        assert_eq!(word(WorkKey::new("project:p-1", "p-1-W9")), "Craft", "the project's reread names replace the item's older ones");
+        assert_eq!(word(WorkKey::new("shared:z", "z-W1")), "Make", "a project with no ledger read keeps the item's own names");
     }
 }

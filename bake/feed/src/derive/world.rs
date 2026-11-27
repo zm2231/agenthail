@@ -45,7 +45,7 @@ pub struct Work {
     pub acceptance: String,
     #[serde(default)]
     pub timeline: Vec<Entry>,
-    #[serde(default, rename = "phaseLabels")]
+    #[serde(skip)]
     pub steps: super::phase::Steps,
     #[serde(skip)]
     pub project: String,
@@ -169,6 +169,8 @@ pub struct Recorded {
     pub sessions: Vec<Session>,
     #[serde(default)]
     pub ledgers: HashMap<String, Vec<Work>>,
+    #[serde(default, rename = "phaseLabels")]
+    pub steps: HashMap<String, super::phase::Steps>,
     #[serde(default)]
     pub transcripts: HashMap<String, Vec<Item>>,
     #[serde(skip)]
@@ -218,6 +220,7 @@ pub struct World {
     pub sessions: Vec<Session>,
     pub projects: Vec<Project>,
     pub work: HashMap<WorkKey, Work>,
+    pub steps: HashMap<String, super::phase::Steps>,
     pub transcripts: HashMap<String, Vec<Item>>,
     pub prompted_before: HashSet<String>,
     pub started_by: HashMap<String, String>,
@@ -243,9 +246,11 @@ impl World {
         let mut work = HashMap::new();
         for (key, rows) in raw.ledgers {
             let ledger_key = raw.projects.iter().find(|p| p.id == key).map(|p| p.ledger_key.clone()).unwrap_or_default();
+            let steps = raw.steps.get(&key).cloned().unwrap_or_default();
             for mut w in rows {
                 w.project = key.clone();
                 w.ledger_key = ledger_key.clone();
+                w.steps = steps.clone();
                 work.insert(w.key(), w);
             }
         }
@@ -256,6 +261,7 @@ impl World {
             sessions: raw.sessions,
             projects,
             work,
+            steps: raw.steps,
             transcripts: raw.transcripts,
             prompted_before: raw.prompted_before,
             started_by,

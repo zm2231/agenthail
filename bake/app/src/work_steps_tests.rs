@@ -110,14 +110,19 @@ fn a_read_of_an_item_dropped_by_its_ledger_changing_does_not_come_back() {
     assert!(!rt.state.items.contains_key(&hidden), "its read from before the change doesn't put it back");
 }
 
-fn renamed(dir: &Dir) -> Runtime<App> {
+fn renamed(dir: &Dir, item_read: bool) -> Runtime<App> {
     let labels = json!({"scope": "Scope", "build": "Make", "review": "Review", "verify": "Verify", "check": "Sign-off", "ship": "Ship"});
-    let w1 = json!({"id": "W1", "text": "Wire the export", "state": "in_progress", "phase": "build", "priority": "P2", "type": "task", "phaseLabels": labels});
-    let w2 = json!({"id": "W2", "text": "Check the import", "state": "in_review", "phase": "check", "priority": "P1", "type": "task", "phaseLabels": labels});
-    std::fs::write(dir.0.join("items/W1.json"), w1.to_string()).unwrap();
+    let w1 = json!({"id": "W1", "text": "Wire the export", "state": "in_progress", "phase": "build", "priority": "P2", "type": "task"});
+    let w2 = json!({"id": "W2", "text": "Check the import", "state": "in_review", "phase": "check", "priority": "P1", "type": "task"});
+    if item_read {
+        let mut item = w1.clone();
+        item["phaseLabels"] = labels.clone();
+        std::fs::write(dir.0.join("items/W1.json"), item.to_string()).unwrap();
+    }
     let held = json!({"heldWork": [{"itemId": "W1", "projectKey": "p1", "state": "in_progress"}]});
     let mut raw = recorded(1, vec![session("a", 0, held)]);
     raw.ledgers.insert("p1".into(), serde_json::from_value(json!([w1, w2])).unwrap());
+    raw.steps.insert("p1".into(), serde_json::from_value(labels).unwrap());
     let mut app = crate::empty(Overview::recorded(raw), false);
     app.sessions = app.ov.d.sessions.clone();
     app.now = app.ov.d.now;
@@ -151,7 +156,7 @@ fn a_project_that_renames_two_steps_shows_its_names_on_every_step_bar() {
         return;
     }
     let dir = Dir::new("work-steps-renamed");
-    let mut rt = renamed(&dir);
+    let mut rt = renamed(&dir, true);
     assert_eq!(rt.state.items[&zk("p1", "W1")].steps.name(1), "Make");
     assert!(shows(&rt, "Make") && shows(&rt, "Sign-off"), "the session's step bar names the project's steps");
     assert!(!shows(&rt, "Build") && !shows(&rt, "Check"));
@@ -171,7 +176,7 @@ fn renamed_shot() {
     }
     let out = std::path::PathBuf::from(out);
     let dir = Dir::new("work-steps-renamed-shot");
-    let mut rt = renamed(&dir);
+    let mut rt = renamed(&dir, true);
     let gpu = rune::render::Gpu::headless();
     let mut renderer = rune::render::Renderer::new(&gpu.device, rune::render::OFFSCREEN_FORMAT);
     let target = rune::render::Offscreen::new(&gpu.device, SIZE.0 as u32, SIZE.1 as u32);
@@ -183,4 +188,15 @@ fn renamed_shot() {
         renderer.render_runtime_to_offscreen(&gpu.device, &gpu.queue, &target, &mut rt);
         rune::render::write_png(&out.join(format!("renamed-{name}-1.png")), SIZE.0 as u32, SIZE.1 as u32, &target.read(&gpu.device)).unwrap();
     }
+}
+
+#[test]
+fn the_session_step_bar_follows_the_loaded_ledger_before_its_item_read_lands() {
+    if !isolated("work_steps::the_session_step_bar_follows_the_loaded_ledger_before_its_item_read_lands") {
+        return;
+    }
+    let dir = Dir::new("work-steps-unread");
+    let rt = renamed(&dir, false);
+    assert!(!rt.state.items.contains_key(&zk("p1", "W1")), "no item read has landed");
+    assert!(shows(&rt, "Make") && shows(&rt, "Sign-off") && !shows(&rt, "In progress"), "the rail shows the project's steps from its loaded row");
 }

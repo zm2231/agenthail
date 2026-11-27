@@ -69,13 +69,15 @@ pub(crate) fn rail(s: &App, x: &Session, k: &Kit) -> El {
     parts.extend(super::ready::led_by(s, &x.id).and_then(|p| super::ready::link(s, &p.key, k)).map(|link| row().w_full().pt(12.0).items_center().child(label("Lead", k)).child(spacer()).child(link)));
     if let Some(work) = x.primary_work(s.work_pick.get(&x.id)) {
         let item = s.items.get(&work.key());
+        let loaded = s.ov.d.work.get(&work.key());
         let state = item.map(|i| i.state.clone()).unwrap_or_else(|| work.state.clone());
-        let phase = item.map(|i| i.phase.as_str()).unwrap_or_default();
+        let phase = item.map(|i| i.phase.as_str()).or(loaded.map(|w| w.phase.as_str())).unwrap_or_default();
+        let steps = item.map(|i| i.steps.clone()).unwrap_or_else(|| s.ov.d.steps_of(&work.project_key));
         let mut tags = row().gap(6.0).items_center().child(row().px(7.0).py(2.0).radius(6.0).fill(wash()).child(text(work.item_id.clone()).font(k.text(META)).color(muted())));
         if let Some(i) = item {
             tags = tags.child(priority(&i.priority, k)).child(text(i.kind.clone()).font(k.text(META)).color(faint()));
         }
-        let mut body = col().w_full().gap(12.0).child(tags).child(text(work.text.clone()).font(k.text(BODY_BOLD)).color(theme::text()).wrap_anywhere()).child(phase_stepper(phase, &state, &item.map(|i| i.steps.clone()).unwrap_or_else(|| s.ov.d.steps_of(&work.project_key)), k));
+        let mut body = col().w_full().gap(12.0).child(tags).child(text(work.text.clone()).font(k.text(BODY_BOLD)).color(theme::text()).wrap_anywhere()).child(phase_stepper(phase, &state, &steps, k));
         if let Some(i) = item.filter(|i| !i.acceptance.is_empty()) {
             body = body.child(note("Expected", done(), i.acceptance.clone(), k));
         }

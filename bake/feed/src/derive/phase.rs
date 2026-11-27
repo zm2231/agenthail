@@ -103,7 +103,8 @@ pub fn phase(w: &Work) -> usize {
 
 impl World {
     pub fn steps_of(&self, ledger: &str) -> Steps {
-        self.work.values().find(|w| w.ledger_key() == ledger || w.project == ledger).map(|w| w.steps.clone()).unwrap_or_default()
+        let project = self.records.iter().find(|p| p.ledger_key == ledger || p.id == ledger).map_or(ledger, |p| p.id.as_str());
+        self.steps.get(project).cloned().unwrap_or_default()
     }
 
     pub fn whose_move(&self, w: &Work) -> String {
