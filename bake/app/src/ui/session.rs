@@ -65,7 +65,7 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
                 super::complete::submit(s, &id, tx);
             }
         })
-        .child(icon(&icons::ARROW_UP, 15.0).color(if ready { Color::WHITE } else { faint() }));
+        .child(icon(&icons::ARROW_UP, 15.0).color(if ready { theme::on_accent() } else { faint() }));
     let busy = crate::busy_delivery(s, &x.id);
     let unsent = s.unsent.has(&x.id);
     let status = match crate::composer_note(s, &x.id) {

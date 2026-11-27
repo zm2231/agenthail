@@ -198,3 +198,9 @@ pub fn paint_key() -> u64 {
     (p.dark, p.text, p.muted, p.faint, p.line, p.wash, p.accent, p.done, p.failed, p.attention).hash(&mut h);
     h.finish()
 }
+
+pub fn on_accent() -> Color {
+    let p = paint();
+    let l = p.accent.mix(p.accent_deep, 0.5).luminance();
+    if 1.05 / (l + 0.05) >= (l + 0.05) / 0.05 { Color::WHITE } else { Color::BLACK }
+}

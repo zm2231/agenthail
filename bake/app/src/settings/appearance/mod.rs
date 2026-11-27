@@ -45,6 +45,9 @@ pub enum Got {
 }
 
 fn spawn(s: &mut Prefs, job: impl FnOnce(&Client) -> Got + Send + 'static) -> bool {
+    if s.client.is_none() {
+        (s.client, s.no_client) = super::connect();
+    }
     let Some(client) = s.client.clone() else {
         s.appearance.error = Some(super::unread(s));
         return false;
@@ -154,15 +157,17 @@ fn thumbs(s: &mut Prefs) {
 }
 
 fn want_thumb(s: &mut Prefs, path: &str) {
-    if s.appearance.thumbs.contains_key(path) || s.appearance.asked.contains(path) || s.client.is_none() {
+    if s.appearance.thumbs.contains_key(path) || s.appearance.asked.contains(path) {
         return;
     }
-    s.appearance.asked.insert(path.to_string());
-    let path = path.to_string();
-    spawn(s, move |c| {
-        let got = c.ui_background(&path).and_then(|data| fl::thumbnail(&data, THUMB_SIDE));
-        Got::Thumb(path, got)
+    let asked = path.to_string();
+    let started = spawn(s, move |c| {
+        let got = c.ui_background(&asked).and_then(|data| fl::thumbnail(&data, THUMB_SIDE));
+        Got::Thumb(asked, got)
     });
+    if started {
+        s.appearance.asked.insert(path.to_string());
+    }
 }
 
 pub fn choose_image(s: &mut Prefs, tx: &mut Tx) {
