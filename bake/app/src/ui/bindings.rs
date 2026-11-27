@@ -138,41 +138,33 @@ mod store {
 mod store {
     use std::path::PathBuf;
 
-    use feed::shortcuts::Shortcuts;
+    use feed::shortcuts::{ANY_APP_ID, Shortcuts};
+    use serde_json::{Map, Value};
 
-    fn path(name: &str) -> Option<PathBuf> {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".agenthail").join(name))
+    fn path() -> Option<PathBuf> {
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".agenthail/keyboard-shortcuts.json"))
     }
-
-    const COMMANDS: &str = "keyboard-shortcuts.json";
-    const ANY_APP: &str = "keyboard-shortcut-any-app.json";
 
     pub fn load() -> Shortcuts {
-        let read = |name| path(name).and_then(|p| std::fs::read(p).ok());
-        let any_app = read(ANY_APP).and_then(|b| String::from_utf8(b).ok());
-        Shortcuts::load(read(COMMANDS).as_deref(), any_app.as_deref())
+        let mut map: Map<String, Value> = path().and_then(|p| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let any_app = map.remove(ANY_APP_ID).map(|v| v.to_string());
+        let commands = (!map.is_empty()).then(|| serde_json::to_vec(&map).ok()).flatten();
+        Shortcuts::load(commands.as_deref(), any_app.as_deref())
     }
 
-    fn write(name: &str, bytes: Option<Vec<u8>>) -> Result<(), String> {
-        let path = path(name).ok_or("HOME isn't set")?;
-        let result = match bytes {
-            Some(bytes) => {
-                let staged = path.with_extension("json.new");
-                std::fs::write(&staged, bytes).and_then(|()| std::fs::rename(&staged, &path))
-            }
-            None => std::fs::remove_file(&path).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }),
+    pub fn save(_: &Shortcuts, saved: &Shortcuts) -> Result<(), String> {
+        let path = path().ok_or("HOME isn't set")?;
+        let mut map: Map<String, Value> = saved.data().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        if let Some(any_app) = saved.any_app_json().and_then(|j| serde_json::from_str(&j).ok()) {
+            map.insert(ANY_APP_ID.into(), any_app);
+        }
+        let result = if map.is_empty() {
+            std::fs::remove_file(&path).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) })
+        } else {
+            let staged = path.with_extension("json.new");
+            serde_json::to_vec(&map).map_err(std::io::Error::other).and_then(|bytes| std::fs::write(&staged, bytes)).and_then(|()| std::fs::rename(&staged, &path))
         };
         result.map_err(|e| e.to_string())
-    }
-
-    pub fn save(before: &Shortcuts, saved: &Shortcuts) -> Result<(), String> {
-        write(COMMANDS, saved.data())?;
-        if before.any_app() == saved.any_app() {
-            return Ok(());
-        }
-        write(ANY_APP, saved.any_app_json().map(String::into_bytes)).inspect_err(|_| {
-            let _ = write(COMMANDS, before.data());
-        })
     }
 }
 

@@ -101,6 +101,7 @@ fn message(id: &'static str, error: &ShortcutError, shortcut: Option<&Shortcut>)
             Some(owner) => format!("{keys} is already used by {owner}."),
             None => shortcut_error_message(error, Some(shortcut)),
         },
+        ShortcutError::InvalidAccelerator(_) if bindings::stored(shortcut).is_none() => format!("{keys} can't be saved as a shortcut."),
         ShortcutError::InvalidAccelerator(_) if bindings::stored(shortcut).is_some_and(|s| s.types()) => format!("{keys} types in the message box. Add ⌘, ⌃ or ⌥."),
         _ => shortcut_error_message(error, Some(shortcut)),
     }
