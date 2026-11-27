@@ -7,7 +7,6 @@ use feed::derive::live::{Fetched, Overview};
 use rune::{AppSpec, Env, Runtime};
 use serde_json::json;
 
-use crate::over::Over;
 use crate::transcript::Pane;
 use crate::{App, Bg, Fixtures, Screen};
 
@@ -62,7 +61,8 @@ struct Dir(PathBuf);
 
 impl Dir {
     fn new(name: &str) -> Dir {
-        let dir = std::env::temp_dir().join(format!("agenthail-loop-{}-{name}", std::process::id()));
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+        let dir = std::env::temp_dir().join(format!("agenthail-loop-{}-{unique}-{name}", std::process::id()));
         std::fs::create_dir_all(dir.join("items")).unwrap();
         Dir(dir)
     }
@@ -78,8 +78,34 @@ impl Drop for Dir {
     }
 }
 
+fn isolated(test: &str) -> bool {
+    if std::env::var_os("AGENTHAIL_LOOP_CHILD").is_some() {
+        return true;
+    }
+    let home = Dir::new(&format!("home-{test}"));
+    let api = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    api.set_nonblocking(true).unwrap();
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([&format!("loop_tests::{test}"), "--exact", "--nocapture", "--test-threads=1"])
+        .env("AGENTHAIL_LOOP_CHILD", "1")
+        .env("HOME", &home.0)
+        .env("CFFIXED_USER_HOME", &home.0)
+        .env("AGENTHAIL_API_URL", format!("http://{}", api.local_addr().unwrap()))
+        .env_remove("AGENTHAIL_API_TOKEN")
+        .env_remove("AGENTHAIL_FIXTURES")
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("XDG_STATE_HOME")
+        .output()
+        .unwrap();
+    let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(out.status.success() && said.contains("1 passed"), "{said}");
+    assert!(api.accept().is_err_and(|e| e.kind() == std::io::ErrorKind::WouldBlock), "the test reached the API");
+    false
+}
+
 fn app(sessions: Vec<Session>, dir: &Dir) -> App {
-    let mut app = crate::empty(Over::new(Overview::recorded(recorded(1, sessions)), false));
+    let mut app = crate::empty(Overview::recorded(recorded(1, sessions)), false);
     app.sessions = app.ov.d.sessions.clone();
     app.now = app.ov.d.now;
     app.fixtures = Some(Fixtures { dir: dir.path(), streams: HashMap::new(), speed: 1.0 });
@@ -117,9 +143,12 @@ fn shown_in_sidebar(rt: &Runtime<App>, id: &str) -> bool {
 
 #[test]
 fn a_burst_of_updates_in_one_frame_rebuilds_the_overview_once_from_the_newest() {
+    if !isolated("a_burst_of_updates_in_one_frame_rebuilds_the_overview_once_from_the_newest") {
+        return;
+    }
     let dir = Dir::new("burst");
     let mut rt = runtime(app(sessions(&["a"]), &dir), (1440.0, 900.0));
-    let before = rt.state.built_at;
+    let before = rt.state.rebuilds;
 
     send(&rt, snapshot(2, sessions(&["a", "b"]), None));
     send(&rt, snapshot(3, sessions(&["a", "b", "c"]), None));
@@ -130,26 +159,30 @@ fn a_burst_of_updates_in_one_frame_rebuilds_the_overview_once_from_the_newest() 
 
     assert!(rt.state.inbox.try_recv().is_err(), "one frame takes every queued message");
     assert!(!rt.state.ov.live.stale(), "the overview is rebuilt in the same frame");
-    assert!(rt.state.built_at > before && rt.state.built_at == rt.state.clock);
+    assert_eq!(rt.state.rebuilds, before + 1, "five updates in one frame rebuild the overview once");
     assert_eq!(rt.state.ov.d.sessions.len(), 6);
     assert!(rt.state.ov.d.session("f").is_some());
     assert_eq!(rt.state.sessions.len(), 6);
 
-    let built = rt.state.built_at;
     rt.frame(DT);
     rt.frame(DT);
-    assert_eq!(rt.state.built_at, built, "quiet frames don't rebuild again");
+    assert_eq!(rt.state.rebuilds, before + 1, "quiet frames don't rebuild again");
 }
 
 #[test]
 fn an_older_snapshot_in_a_burst_does_not_replace_a_newer_one() {
+    if !isolated("an_older_snapshot_in_a_burst_does_not_replace_a_newer_one") {
+        return;
+    }
     let dir = Dir::new("older");
     let mut rt = runtime(app(sessions(&["a"]), &dir), (1440.0, 900.0));
 
+    let before = rt.state.rebuilds;
     send(&rt, snapshot(5, sessions(&["a", "b", "c"]), None));
     send(&rt, snapshot(3, sessions(&["a"]), None));
     rt.frame(DT);
 
+    assert_eq!(rt.state.rebuilds, before + 1);
     assert_eq!(rt.state.ov.d.sessions.len(), 3);
     assert!(!rt.state.ov.live.stale());
 }
@@ -173,6 +206,9 @@ fn streaming(app: &mut App, id: &str) -> std::sync::mpsc::Sender<feed::source::M
 
 #[test]
 fn an_idle_loop_asks_to_wake_in_a_quarter_second_and_keeps_that_pace() {
+    if !isolated("an_idle_loop_asks_to_wake_in_a_quarter_second_and_keeps_that_pace") {
+        return;
+    }
     let dir = Dir::new("idle");
     let mut rt = unframed(app(sessions(&["a"]), &dir));
     rt.frame(DT);
@@ -187,6 +223,9 @@ fn an_idle_loop_asks_to_wake_in_a_quarter_second_and_keeps_that_pace() {
 
 #[test]
 fn an_open_stream_makes_the_loop_ask_for_the_next_frame() {
+    if !isolated("an_open_stream_makes_the_loop_ask_for_the_next_frame") {
+        return;
+    }
     let dir = Dir::new("busy");
     let mut first = app(sessions(&["a"]), &dir);
     let stream = streaming(&mut first, "a");
@@ -212,6 +251,9 @@ fn many(target: &str) -> Vec<Session> {
 
 #[test]
 fn a_link_waiting_for_the_list_opens_when_a_snapshot_lists_its_session_and_reveals_it() {
+    if !isolated("a_link_waiting_for_the_list_opens_when_a_snapshot_lists_its_session_and_reveals_it") {
+        return;
+    }
     let dir = Dir::new("link");
     let mut first = app(sessions(&["s00"]), &dir);
     let fixtures = first.fixtures.take();
@@ -236,6 +278,9 @@ fn a_link_waiting_for_the_list_opens_when_a_snapshot_lists_its_session_and_revea
 
 #[test]
 fn selecting_a_session_scrolls_the_sidebar_to_it() {
+    if !isolated("selecting_a_session_scrolls_the_sidebar_to_it") {
+        return;
+    }
     let dir = Dir::new("reveal");
     let mut rt = runtime(app(many("target"), &dir), (1100.0, 420.0));
 
@@ -259,6 +304,9 @@ fn selecting_a_session_scrolls_the_sidebar_to_it() {
 
 #[test]
 fn a_snapshot_that_did_not_touch_the_selected_session_does_not_reread_it() {
+    if !isolated("a_snapshot_that_did_not_touch_the_selected_session_does_not_reread_it") {
+        return;
+    }
     let dir = Dir::new("touched");
     std::fs::write(dir.0.join("items/W1.json"), r#"{"id":"W1","text":"Ship it","state":"in_progress"}"#).unwrap();
     let held = json!({"heldWork": [{"itemId": "W1", "projectKey": "p1", "state": "in_progress"}]});

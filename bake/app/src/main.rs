@@ -173,6 +173,8 @@ pub struct App {
     clock: f64,
     panes_moved: bool,
     built_at: f64,
+    #[cfg(test)]
+    rebuilds: u64,
 }
 
 fn args() -> Vec<String> {
@@ -287,7 +289,7 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: f
     });
 }
 
-fn empty(ov: Over) -> App {
+fn empty(live: Overview, persist: bool) -> App {
     let (outbox, inbox) = channel();
     App {
         sessions: Vec::new(),
@@ -336,7 +338,7 @@ fn empty(ov: Over) -> App {
         work_pick: HashMap::new(),
         diff: rune_kit::diff::DiffState::new(Vec::new()),
         diff_key: (String::new(), usize::MAX),
-        ov,
+        ov: Over::new(live, persist),
         menus: ui::session_menu::Menus::new(),
         limits: ui::limit::Limits::new(),
         accounts: ui::accounts::Accounts::new(),
@@ -362,6 +364,8 @@ fn empty(ov: Over) -> App {
         clock: 0.0,
         panes_moved: false,
         built_at: 0.0,
+        #[cfg(test)]
+        rebuilds: 0,
     }
 }
 
@@ -374,7 +378,7 @@ fn init() -> App {
         Some(Err(error)) => (Overview::default(), Some(error)),
         None => (Overview::default(), None),
     };
-    let mut app = empty(Over::new(live, recording.is_none()));
+    let mut app = empty(live, recording.is_none());
     if recording.is_some() {
         app.sessions = app.ov.d.sessions.clone();
         app.now = app.ov.d.now;
@@ -479,6 +483,10 @@ fn rebuild(s: &mut App) {
     s.ov.rebuild(&panes);
     s.panes_moved = false;
     s.built_at = s.clock;
+    #[cfg(test)]
+    {
+        s.rebuilds += 1;
+    }
 }
 
 fn fetch_tails(s: &mut App) {
