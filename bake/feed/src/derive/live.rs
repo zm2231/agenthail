@@ -109,6 +109,11 @@ impl Known {
         self.opened.iter().filter(|id| !self.wanted.contains(*id)).filter_map(|id| Some((id, self.ledgers.get(id)?.retry?)))
     }
 
+    pub fn open(&mut self, id: &str) -> bool {
+        self.opened.insert(id.to_string());
+        !self.ledgers.contains_key(id)
+    }
+
     pub fn opened(&self) -> Vec<String> {
         self.opened.iter().filter(|id| !self.wanted.contains(*id)).cloned().collect()
     }

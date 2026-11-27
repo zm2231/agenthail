@@ -179,6 +179,7 @@ pub enum Ask {
     Refresh,
     Reset,
     Reopened,
+    Open(String),
     Ledger(String, std::time::Instant),
     Read(String),
 }
@@ -229,6 +230,11 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: f
                     feed::derive::live::Change::Nothing => {}
                 },
                 Ask::Read(id) => reads.push(id),
+                Ask::Open(id) => {
+                    if known.open(&id) {
+                        reads.push(id);
+                    }
+                }
                 Ask::Reopened => {
                     due = true;
                     reads.extend(known.opened());
@@ -458,9 +464,8 @@ fn fetch_tails(s: &mut App) {
 }
 
 pub fn fetch_ledger(s: &mut App, project: &str) {
-    if s.ov.live.wants(project) {
-        ask_overview(s, Ask::Read(project.to_string()));
-    }
+    let ask = if s.ov.live.wants(project) { Ask::Read(project.to_string()) } else { Ask::Open(project.to_string()) };
+    ask_overview(s, ask);
 }
 
 fn selected_changed(s: &mut App, id: &str) {

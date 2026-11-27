@@ -429,3 +429,16 @@ fn a_reopened_ledger_stream_reads_opened_projects_again() {
     known.read("p", Instant::now(), &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: Vec::new() }));
     assert_eq!(known.opened(), ["old".to_string()], "projects the overview reads anyway aren't read twice");
 }
+
+#[test]
+fn opening_a_project_the_overview_already_reads_keeps_following_it_after_it_goes_quiet() {
+    let mut known = super::live::Known::default();
+    known.learn(&fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("p", Ok(Vec::new()))]));
+    assert!(!known.open("p"), "its rows are already held");
+    assert!(known.open("new"), "a project with nothing held is read");
+    known.learn(&fetched("2026-11-24T12:01:00Z", Vec::new(), Vec::new()));
+    let mut opened = known.opened();
+    opened.sort();
+    assert_eq!(opened, ["new", "p"]);
+    assert_eq!(known.changed("p", Instant::now()), Change::Read("p".into()), "once out of the overview, its changes still read it");
+}
