@@ -567,30 +567,67 @@ fn failed_session_settings_are_retried_for_every_window() {
     assert!(["a", "b"].iter().all(|id| crate::ui::session_menu::asked(&s, id)), "each shown session's settings are read again");
 }
 
+fn goal(text: &str) -> feed::wire::Streamed {
+    feed::wire::Streamed::Goal(Some(feed::inspect::Goal { objective: text.into(), ..Default::default() }))
+}
+
 #[test]
-fn a_window_s_session_coming_back_leaves_the_inspector_on_the_session_it_follows() {
+fn a_window_s_session_coming_back_leaves_main_s_inspector_stream_alone() {
     let (mut s, _) = beside(false);
     s.screen = Screen::Session;
-    crate::ui::inspect::load(&mut s, "a");
+    crate::ui::inspect::streamed(&mut s, "a", goal("main's goal"));
     s.snapshots = 1;
     let rows = s.sessions.clone();
     s.sessions.retain(|x| x.id != "b");
     crate::ui::gone::watch(&mut s);
     s.sessions = rows;
     crate::ui::gone::watch(&mut s);
-    assert!(crate::ui::inspect::follows(&s, "a"), "b returning in its window doesn't take main's inspector");
+    assert!(crate::ui::inspect::is_streamed(&s, "a", "goal"), "b returning in its window doesn't touch main's stream");
 }
 
 #[test]
 fn each_window_s_inspector_takes_its_own_session_s_streamed_goal() {
     let (mut s, w) = beside(false);
     s.screen = Screen::Session;
-    let goal = |text: &str| feed::wire::Streamed::Goal(Some(feed::inspect::Goal { objective: text.into(), ..Default::default() }));
     crate::ui::inspect::streamed(&mut s, "a", goal("main's goal"));
     crate::ui::inspect::streamed(&mut s, "b", goal("the window's goal"));
     assert!(crate::ui::inspect::is_streamed(&s, "a", "goal") && crate::ui::inspect::is_streamed(&s, "b", "goal"), "both windows stream");
     crate::select(&mut s, "c");
     assert!(crate::ui::inspect::is_streamed(&s, "b", "goal"), "main moving on leaves the window's stream");
     close(&mut s, w);
-    assert!(!crate::ui::inspect::follows(&s, "b"), "the stream closes with its window");
+    assert!(!crate::ui::inspect::holds_any(&s, "b"), "the stream is let go with its window");
+    crate::ui::inspect::streamed(&mut s, "b", goal("late"));
+    assert!(!crate::ui::inspect::holds_any(&s, "b"), "and nothing shows it, so a late event is ignored");
+}
+
+#[test]
+fn selecting_a_session_another_window_shows_keeps_its_stream_ahead_of_reads() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    crate::ui::inspect::streamed(&mut s, "b", goal("streamed"));
+    crate::select(&mut s, "b");
+    assert!(crate::ui::inspect::is_streamed(&s, "b", "goal"), "a read landing now must not undo the window's streamed goal");
+}
+
+#[test]
+fn a_rekeyed_session_s_new_id_streams_at_once() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    s.selected = Some("a2".into());
+    crate::ui::inspect::streamed(&mut s, "a2", goal("after the rekey"));
+    assert!(crate::ui::inspect::is_streamed(&s, "a2", "goal"));
+}
+
+#[test]
+fn main_coming_back_to_its_session_finds_its_inspector_state_kept() {
+    let (mut s, w) = beside(false);
+    s.screen = Screen::Session;
+    crate::ui::inspect::streamed(&mut s, "a", goal("main's goal"));
+    crate::ui::inspect::expand(&mut s, "a");
+    s.screen = Screen::Now;
+    within(&mut s, w, |s| crate::select(s, "c"));
+    s.screen = Screen::Session;
+    assert!(crate::ui::inspect::is_streamed(&s, "a", "goal") && crate::ui::inspect::expanded(&s, "a"), "another window's selection keeps a's stream and expanded goal");
+    crate::ui::inspect::streamed(&mut s, "a", goal("newer"));
+    assert!(crate::ui::inspect::is_streamed(&s, "a", "goal"));
 }

@@ -355,22 +355,20 @@ impl Overlay {
         self.sessions.insert(id.to_string(), Default::default());
     }
 
-    pub fn keep(&mut self, shown: &[String]) {
-        self.sessions.retain(|id, _| shown.contains(id));
+    pub fn keep(&mut self, held: &[String]) {
+        self.sessions.retain(|id, _| held.contains(id));
     }
 
     pub fn stream(&mut self, id: &str, kind: &'static str, shown: bool) -> bool {
-        let Some(kinds) = self.sessions.get_mut(id).filter(|_| shown) else { return false };
-        kinds.insert(kind);
+        if !shown {
+            return false;
+        }
+        self.sessions.entry(id.to_string()).or_default().insert(kind);
         true
     }
 
     pub fn holds(&self, id: &str, kind: &str) -> bool {
         self.sessions.get(id).is_some_and(|kinds| kinds.contains(kind))
-    }
-
-    pub fn follows(&self, id: &str) -> bool {
-        self.sessions.contains_key(id)
     }
 }
 
@@ -629,14 +627,13 @@ mod tests {
     }
 
     #[test]
-    fn only_the_shown_session_streams_over_its_reads() {
+    fn a_shown_session_streams_over_its_reads() {
         let mut o = Overlay::default();
         o.open("a");
-        assert!(!o.stream("b", "goal", true), "another session's stream is ignored");
         assert!(!o.stream("a", "goal", false), "a removed session's stream is ignored");
         assert!(!o.holds("a", "goal"));
         assert!(o.stream("a", "context", true));
-        assert!(o.holds("a", "context") && !o.holds("a", "goal") && !o.holds("b", "context"));
+        assert!(o.holds("a", "context") && !o.holds("a", "goal"));
         o.open("a");
         assert!(!o.holds("a", "context"), "selecting again starts from the reads");
     }
@@ -651,7 +648,8 @@ mod tests {
         o.open("a");
         assert!(o.holds("b", "context"), "selecting one session leaves the other's stream alone");
         o.keep(&["a".to_string()]);
-        assert!(!o.follows("b") && !o.stream("b", "goal", true), "a closed window's session stops streaming");
+        assert!(!o.holds("b", "context"), "a closed window's session is let go");
+        assert!(!o.stream("b", "goal", false) && !o.holds("b", "goal"), "and its stream is ignored while nothing shows it");
     }
 
     #[test]

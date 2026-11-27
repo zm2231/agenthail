@@ -41,7 +41,7 @@ pub struct Inspect {
     goal_busy: HashMap<String, GoalAct>,
     goal_note: HashMap<String, (bool, String)>,
     overlay: inspect::Overlay,
-    expanded: Option<String>,
+    expanded: std::collections::HashSet<String>,
     pub editing: Option<Editing>,
     pub logs: Option<(String, String)>,
     seq: u64,
@@ -52,7 +52,7 @@ pub struct Inspect {
 impl Inspect {
     pub fn new() -> Inspect {
         let (tx, rx) = channel();
-        Inspect { meta: HashMap::new(), reads: inspect::Reads::default(), process: HashMap::new(), goal_busy: HashMap::new(), goal_note: HashMap::new(), overlay: inspect::Overlay::default(), expanded: None, editing: None, logs: None, seq: 0, tx, rx }
+        Inspect { meta: HashMap::new(), reads: inspect::Reads::default(), process: HashMap::new(), goal_busy: HashMap::new(), goal_note: HashMap::new(), overlay: inspect::Overlay::default(), expanded: Default::default(), editing: None, logs: None, seq: 0, tx, rx }
     }
 }
 
@@ -71,17 +71,17 @@ fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'sta
 
 pub fn load(s: &mut App, id: &str) {
     keep_shown(s);
-    s.inspect.overlay.open(id);
-    if s.inspect.expanded.as_deref() != Some(id) {
-        s.inspect.expanded = None;
+    if !super::window::shown_elsewhere(s, id) {
+        s.inspect.overlay.open(id);
     }
 }
 
 pub fn keep_shown(s: &mut App) {
-    let shown: Vec<String> = super::window::shown(s).into_iter().map(|(_, id)| id).collect();
-    s.inspect.overlay.keep(&shown);
-    s.inspect.meta.retain(|k, _| shown.contains(k));
-    s.inspect.reads.keep_only(&shown);
+    let held = super::window::selected_anywhere(s);
+    s.inspect.overlay.keep(&held);
+    s.inspect.meta.retain(|k, _| held.contains(k));
+    s.inspect.reads.keep_only(&held);
+    s.inspect.expanded.retain(|k| held.contains(k));
 }
 
 pub(crate) fn ticket(s: &mut App) -> u64 {
@@ -127,14 +127,22 @@ pub(crate) fn is_streamed(s: &App, id: &str, kind: &'static str) -> bool {
 }
 
 #[cfg(test)]
-pub fn follows(s: &App, id: &str) -> bool {
-    s.inspect.overlay.follows(id)
+pub fn holds_any(s: &App, id: &str) -> bool {
+    s.inspect.overlay.holds(id, "goal") || s.inspect.overlay.holds(id, "context")
+}
+
+#[cfg(test)]
+pub fn expanded(s: &App, id: &str) -> bool {
+    s.inspect.expanded.contains(id)
+}
+
+#[cfg(test)]
+pub fn expand(s: &mut App, id: &str) {
+    s.inspect.expanded.insert(id.to_string());
 }
 
 pub(crate) fn returned(s: &mut App, id: &str) {
-    if s.inspect.overlay.follows(id) {
-        s.inspect.overlay.open(id);
-    }
+    s.inspect.overlay.open(id);
 }
 
 pub(crate) fn metadata_moved(s: &mut App, id: &str) {
@@ -347,7 +355,7 @@ fn goal_section(s: &App, x: &Session, k: &Kit) -> Option<El> {
         let tint = if goal.needs_attention() { attention() } else { muted() };
         let status = row().gap(5.0).items_center().px(7.0).py(2.0).radius(9.0).fill(wash()).child(icon(&icons::TARGET, k.text_size(11.0)).color(tint)).child(text(goal.display_status()).font(k.text(META)).color(tint));
         let long = goal.objective.len() > 240 || goal.objective.lines().count() > 4;
-        let expanded = s.inspect.expanded.as_deref() == Some(x.id.as_str());
+        let expanded = s.inspect.expanded.contains(&x.id);
         let objective = text(goal.objective.clone()).font(k.text(BODY)).color(theme::text()).wrap().w_full();
         body = body.child(row().w_full().child(el().grow(1.0)).child(status)).child(if expanded || !long { objective } else { objective.max_lines(4) });
         if long {
@@ -358,7 +366,11 @@ fn goal_section(s: &App, x: &Session, k: &Kit) -> Option<El> {
                     .color(accent())
                     .key("goal-more")
                     .help(if expanded { "Show less of the goal" } else { "Show the whole goal" })
-                    .on_press(move |s: &mut App| s.inspect.expanded = if s.inspect.expanded.as_deref() == Some(id.as_str()) { None } else { Some(id.clone()) }),
+                    .on_press(move |s: &mut App| {
+                        if !s.inspect.expanded.remove(&id) {
+                            s.inspect.expanded.insert(id.clone());
+                        }
+                    }),
             );
         }
         let now = OffsetDateTime::now_utc();
