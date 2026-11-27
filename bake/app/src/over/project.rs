@@ -48,7 +48,7 @@ pub fn work_card(s: &App, w: &Work, compact: bool, k: &Kit) -> El {
     let last = w.timeline.last().map(|t| s.ov.d.ago(&t.at)).unwrap_or_default();
     let id = short_id(&w.id);
     let card = format!("w-{}-{}", w.ledger_key(), w.id);
-    let shows = (&key, phase, &who, width.map(f32::to_bits), &title, &mini, &last, &id);
+    let shows = (&key, compact, phase, &who, width.map(f32::to_bits), &title, &mini, &last, &id);
     crate::over::rows::memo(card.clone(), shows, k, || {
         let open = key.clone();
         col()

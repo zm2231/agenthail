@@ -261,4 +261,11 @@ fn a_work_change_rebuilds_only_its_board_card() {
     assert_eq!(rebuilt(&mut rt, "w-", |_| {}), Vec::<String>::new(), "nothing changed");
     assert_eq!(rebuilt(&mut rt, "w-", |s| work(s, "W2").text = "Check the import again".into()), [card(&rt, "W2")], "its text");
     assert_eq!(rebuilt(&mut rt, "w-", |s| work(s, "W1").phase = "review".into()), [card(&rt, "W1")], "its step");
+    let lead = rebuilt(&mut rt, "w-", |s| {
+        let id = s.ov.d.work.values().find(|w| w.id == "W1").unwrap().id.clone();
+        let wide = s.ov.widths.get(&format!("card-{id}-false")).copied().unwrap();
+        s.ov.widths.insert(format!("card-{id}-true"), wide);
+        s.ov.boards.insert("p1".into(), false);
+    });
+    assert!(lead.contains(&card(&rt, "W1")), "the lead view's compact cards build their own: {lead:?}");
 }

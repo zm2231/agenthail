@@ -12,7 +12,7 @@ use crate::over::ui::{self, BODY_MED, META, META_MED, strong, weak};
 use crate::over::{Target, WorkKey, open_target};
 use crate::App;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Pick {
     Target(Target),
     Found(WorkKey),
@@ -243,14 +243,14 @@ pub fn view(s: &App, layer: &mut Vec<El>, k: &Kit) {
             Look::Avatar(name) => (name.as_str(), 0),
             Look::Icon(glyph) => ("", *glyph as *const Icon as usize),
         };
-        if h.pick.is_none() {
+        let Some(pick) = &h.pick else {
             list = list.child(row().w_full().gap(12.0).items_center().px(10.0).py(6.0).child(mark(&h.look)).child(text(h.title).font(k.text(META)).color(weak(k)).wrap().shrink()));
             continue;
-        }
+        };
         let active = i == ix;
         let at = i;
         i += 1;
-        let shows = (at, active, &h.title, &h.status, &h.badge, look);
+        let shows = (at, active, &h.title, &h.status, &h.badge, look, format!("{pick:?}"));
         list = list.child(crate::over::rows::memo(format!("hit-{at}"), shows, k, || {
             let mut body = col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(text(h.title.clone()).font(k.text(BODY_MED)).color(strong(k)).truncate());
             if !h.status.is_empty() {
@@ -264,7 +264,10 @@ pub fn view(s: &App, layer: &mut Vec<El>, k: &Kit) {
                 .px(10.0)
                 .py(8.0)
                 .radius(8.0)
-                .on_press_tx(move |s: &mut App, tx: &mut Tx| run_at(s, at, tx))
+                .on_press_tx({
+                    let pick = pick.clone();
+                    move |s: &mut App, tx: &mut Tx| run(s, pick.clone(), tx)
+                })
                 .child(mark(&h.look))
                 .child(body)
                 .child(text(h.badge.clone()).font(k.text(META)).color(weak(k)));
