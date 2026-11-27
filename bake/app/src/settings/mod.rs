@@ -1,8 +1,10 @@
+mod agents;
 mod appearance;
 mod claude;
 mod devices;
 mod general;
 mod handoffs;
+mod keyboard;
 mod notify;
 mod overview;
 mod parts;
@@ -61,6 +63,7 @@ pub enum Section {
     Queue,
     Overview,
     Signin,
+    Agents,
 }
 
 enum Done {
@@ -68,6 +71,7 @@ enum Done {
     Wrote(String, Section, Result<(), Failure>, &'static [Read]),
     Devices(devices::Got),
     Look(appearance::Got),
+    Agents(agents::Got),
 }
 
 pub struct Prefs {
@@ -83,6 +87,7 @@ pub struct Prefs {
     pub wake: crate::wake::Wake,
     stream_down: Option<String>,
     pub tab: usize,
+    pub general_page: usize,
     pub base: Option<Result<Base, Failure>>,
     pub settings: Option<Result<Settings, Failure>>,
     pub remote: Option<Result<RemoteControl, Failure>>,
@@ -112,6 +117,8 @@ pub struct Prefs {
     pub appearance: appearance::Form,
     pub overview: overview::Overview,
     pub signin: signin::Form,
+    pub agents: agents::Form,
+    pub keyboard: keyboard::Form,
     loaded: bool,
     in_flight: usize,
     seq: HashMap<Read, u64>,
@@ -163,6 +170,7 @@ pub fn open() {
                 reload(s);
                 appearance::opened(s);
                 overview::opened(s);
+                keyboard::opened(s);
             });
             window.open();
             window.focus();
@@ -219,7 +227,8 @@ fn init() -> Prefs {
         wake: crate::wake::Wake::default(),
         stream_down: None,
         external: false,
-        tab: 0,
+        tab: overview::TAB,
+        general_page: 0,
         base: None,
         settings: None,
         remote: None,
@@ -248,6 +257,8 @@ fn init() -> Prefs {
         appearance: appearance::Form::default(),
         overview: overview::initial(),
         signin: signin::Form::default(),
+        agents: agents::Form::default(),
+        keyboard: keyboard::Form::default(),
         loaded: false,
         in_flight: 0,
         seq: HashMap::new(),
@@ -314,6 +325,7 @@ pub fn reload(s: &mut Prefs) {
         (s.client, s.no_client) = (fresh, why);
     }
     signin::opened(s);
+    agents::reload(s);
     if s.client.is_none() {
         for what in ALL {
             fetch(s, what);
@@ -564,6 +576,7 @@ fn take_one(s: &mut Prefs, done: Done) {
         }
         Done::Devices(got) => devices::take(s, got),
         Done::Look(got) => appearance::take(s, got),
+        Done::Agents(got) => agents::take(s, got),
         Done::Wrote(key, section, result, then) => {
             if s.writing.as_deref() == Some(key.as_str()) {
                 s.writing = None;
@@ -638,7 +651,7 @@ fn on_key(s: &mut Prefs, ev: &KeyEvent, tx: &mut Tx) -> bool {
         tx.close_window();
         return true;
     }
-    if matches!(ev.key, rune::Key::Escape) && s.open_select.take().is_some() {
+    if matches!(ev.key, rune::Key::Escape) && (s.open_select.take().is_some() || agents::escape(s)) {
         return true;
     }
     false
@@ -660,7 +673,22 @@ fn unfollowed(s: &Prefs) -> Option<El> {
     Some(col().w_full().items_center().pb(8.0).child(parts::failure(s, &note).w(parts::WIDTH)))
 }
 
-pub const TABS: [&str; 7] = ["General", "Claude", "Notifications", "Devices", "Handoffs", "Appearance", "Overview"];
+pub const TABS: [&str; 7] = ["Overview", "General", "Claude", "Devices", "Handoffs", "Appearance", "Agents"];
+pub const GENERAL: [&str; 3] = ["General", "Notifications", "Keyboard"];
+
+fn general_pages(s: &Prefs, layer: &mut Vec<El>, k: &rune_kit::Kit) -> El {
+    let pages = SegmentedControl::new(&GENERAL, Some(s.general_page)).label("General").fit().on_pick(|s: &mut Prefs, i, _| {
+        s.general_page = i;
+        s.open_select = None;
+        keyboard::opened(s);
+    });
+    let page = match s.general_page {
+        1 => notify::page(s, k),
+        keyboard::PAGE => keyboard::page(s, k),
+        _ => general::page(s, layer, k),
+    };
+    col().w_full().gap(14.0).child(rune::row().w_full().justify_center().child(pages.build(k).key("settings-general-page"))).child(page)
+}
 
 pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
     let themes = crate::look::frame(cx, false, false, false);
@@ -678,15 +706,17 @@ fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         appearance::opened(s);
         overview::opened(s);
         signin::opened(s);
+        agents::opened(s);
+        keyboard::opened(s);
     });
     let page = match s.tab {
-        1 => claude::page(s, &mut layer, &k),
-        2 => notify::page(s, &k),
-        3 => signin::pages(s, &mut layer, &k),
+        overview::TAB => overview::page(s, &k),
+        2 => claude::page(s, &mut layer, &k),
+        signin::TAB => signin::pages(s, &mut layer, &k),
         handoffs::TAB => handoffs::page(s, &mut layer, &k),
         appearance::TAB => appearance::page(s, &k),
-        overview::TAB => overview::page(s, &k),
-        _ => general::page(s, &mut layer, &k),
+        agents::TAB => agents::page(s, &mut layer, &k),
+        _ => general_pages(s, &mut layer, &k),
     };
     let body = col()
         .w_full()

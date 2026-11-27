@@ -11,7 +11,7 @@ use super::parts::{self, section};
 use super::{Prefs, Read, Section, WINDOW, busy, fetch, saving, write};
 use crate::theme::{self, BODY, BODY_BOLD, LABEL, META, TITLE, done, failed, faint, muted};
 
-pub const TAB: usize = 6;
+pub const TAB: usize = 0;
 
 #[derive(Default)]
 pub struct Overview {
@@ -274,6 +274,7 @@ mod tests {
     #[test]
     fn opening_the_tab_reads_permissions_and_the_surfaces() {
         let mut s = prefs();
+        s.tab = 1;
         opened(&mut s);
         assert_eq!(s.in_flight, 0);
         s.tab = TAB;
@@ -294,7 +295,7 @@ mod tests {
         flush(&mut s);
         assert_eq!(s.in_flight, 1);
         assert!(!s.overview.stale);
-        s.tab = 0;
+        s.tab = 1;
         changed(&mut s);
         assert!(!s.overview.stale);
     }
