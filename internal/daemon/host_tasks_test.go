@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -261,5 +262,46 @@ func TestARetriedRemoteTaskIsNotRecordedHereOnceItsParentMovedAway(t *testing.T)
 	}
 	if running, _ := local.reg.RunningChildren("local-a"); len(running) != 0 {
 		t.Fatalf("a task was recorded here for a parent that moved: %v", running)
+	}
+}
+
+func TestARetriedRemoteTaskTheHostIsStillStartingStaysOpen(t *testing.T) {
+	local, remote, _ := pairedFederation(t)
+	body, _ := json.Marshal(map[string]any{"action": "session-create", "host": "vps", "surface": "codex", "cwd": t.TempDir(), "message": "build the parser", "task": true, "sourceSessionId": "local-a"})
+	create := func() actionReply {
+		return local.daemon.performAction(context.Background(), sessionPrincipal("local-a"), actionFormatAPIv1, body, "slow-task")
+	}
+	remote.gate.drops.Store(2)
+	if lost := create(); lost.Status != http.StatusGatewayTimeout {
+		t.Fatalf("a create whose answer was lost = %d %s", lost.Status, lost.Body)
+	}
+	remote.gate.drops.Store(0)
+	db, err := sql.Open("sqlite", remote.reg.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`PRAGMA busy_timeout=10000`); err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	if err := db.QueryRow(`SELECT idempotency_key FROM action_receipts WHERE idempotency_key LIKE '%slow-task'`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE action_receipts SET status='pending', receipt=x'' WHERE idempotency_key=?`, stored); err != nil {
+		t.Fatal(err)
+	}
+	length, rest, _ := strings.Cut(stored, ":")
+	size, _ := strconv.Atoi(length)
+	remote.daemon.actionRuns.mu.Lock()
+	remote.daemon.actionRuns.running = map[string]bool{actionRunID(rest[:size], rest[size:]): true}
+	remote.daemon.actionRuns.mu.Unlock()
+	if still := create(); still.Status != http.StatusAccepted {
+		t.Fatalf("a retry while the host is still starting it = %d %s, want it still submitted", still.Status, still.Body)
+	}
+	receipt, found, err := local.reg.ActionReceipt(sessionPrincipal("local-a").ID, "slow-task")
+	if err != nil || !found || receipt.Status != registry.ActionReceiptRetry {
+		t.Fatalf("receipt here=%+v found=%v err=%v, want it open for the next retry", receipt, found, err)
 	}
 }

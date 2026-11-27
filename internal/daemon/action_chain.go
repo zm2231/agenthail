@@ -81,7 +81,7 @@ func (d *Daemon) routeHostAction(ctx context.Context, p principal, raw []byte, k
 	}
 	body, _ := json.Marshal(request)
 	reply := d.forwardHostAction(ctx, p, key, host, request, body)
-	if hostTask {
+	if hostTask && !provisionalActionReply(reply) {
 		reply = d.recordHostTask(host, request, reply)
 	}
 	return reply
@@ -107,7 +107,7 @@ func (d *Daemon) resendHostAction(ctx context.Context, p principal, key string, 
 	var request map[string]any
 	_ = json.Unmarshal(prior.Body, &request)
 	reply := d.forwardHostAction(ctx, p, key, host, request, prior.Body)
-	if task, _ := request["task"].(bool); !task || request["action"] != "session-create" {
+	if task, _ := request["task"].(bool); !task || request["action"] != "session-create" || provisionalActionReply(reply) {
 		return reply
 	}
 	if reply.Status >= http.StatusOK && reply.Status < http.StatusMultipleChoices {
