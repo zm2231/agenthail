@@ -740,3 +740,50 @@ fn a_read_without_context_leaves_a_missed_context_to_catch_up() {
     crate::ui::inspect::streamed(&mut s, "a", goal("fresh"));
     assert!(!crate::ui::inspect::missed(&s, "a"), "a fresh stream once shown is caught up too");
 }
+
+#[test]
+fn a_read_asked_before_a_stream_keeps_the_streamed_goal_and_one_asked_after_replaces_it() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    let before = crate::ui::inspect::ticket(&mut s);
+    crate::ui::inspect::streamed(&mut s, "a", goal("streamed"));
+    let after = crate::ui::inspect::ticket(&mut s);
+    crate::ui::inspect::read(&mut s, "a", before, Ok(feed::inspect::Metadata::default()));
+    assert_eq!(crate::ui::inspect::goal_of(&s, "a").as_deref(), Some("streamed"));
+    let read = feed::inspect::Metadata { goal: Some(feed::inspect::Goal { objective: "read".into(), ..Default::default() }), ..Default::default() };
+    crate::ui::inspect::read(&mut s, "a", after, Ok(read));
+    assert_eq!(crate::ui::inspect::goal_of(&s, "a").as_deref(), Some("read"));
+}
+
+#[test]
+fn a_session_coming_back_keeps_its_streamed_goal_from_an_older_read_and_reads_again() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    s.snapshots = 1;
+    let before = crate::ui::inspect::ticket(&mut s);
+    crate::ui::inspect::streamed(&mut s, "a", goal("streamed"));
+    let rows = s.sessions.clone();
+    s.sessions.retain(|x| x.id != "a");
+    crate::ui::gone::watch(&mut s);
+    assert!(s.missing.contains_key("a"));
+    s.sessions = rows;
+    crate::ui::gone::watch(&mut s);
+    assert!(!s.missing.contains_key("a"));
+    crate::ui::inspect::read(&mut s, "a", before, Ok(feed::inspect::Metadata::default()));
+    assert_eq!(crate::ui::inspect::goal_of(&s, "a").as_deref(), Some("streamed"), "a read asked before the stream doesn't undo it");
+    assert!(crate::ui::inspect::missed(&s, "a"), "coming back reads the goal and context again");
+}
+
+#[test]
+fn a_rekey_onto_a_session_another_window_shows_keeps_its_values_and_rereads_what_the_old_id_streamed() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    crate::ui::inspect::streamed(&mut s, "b", goal("b's goal"));
+    crate::ui::inspect::streamed(&mut s, "a", goal("a's goal"));
+    assert!(crate::ui::session_menu::context_fresh(&mut s, "a", 9) && crate::ui::session_menu::context_fresh(&mut s, "b", 4));
+    crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "b".to_string())]));
+    assert_eq!(crate::ui::inspect::goal_of(&s, "b").as_deref(), Some("b's goal"));
+    assert!(crate::ui::inspect::is_streamed(&s, "b", "goal") && !crate::ui::inspect::holds_any(&s, "a"));
+    assert!(crate::ui::inspect::missed(&s, "b"), "what a streamed is read again on b");
+    assert!(!crate::ui::session_menu::context_fresh(&mut s, "b", 9), "a's newer context read still counts on b");
+}

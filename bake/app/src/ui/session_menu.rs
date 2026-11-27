@@ -197,7 +197,8 @@ pub(crate) fn rekey_context(s: &mut App, old: &str, new: &str) {
     crate::move_key(&mut s.menus.context, old, new);
     crate::move_key(&mut s.menus.context_error, old, new);
     if let Some(seq) = s.menus.newest.remove(&(old.to_string(), "context")) {
-        s.menus.newest.insert((new.to_string(), "context"), seq);
+        let kept = s.menus.newest.entry((new.to_string(), "context")).or_insert(seq);
+        *kept = (*kept).max(seq);
     }
 }
 
@@ -526,7 +527,7 @@ fn settled(s: &mut App, done: Done) {
         Done::Context(id, seq, result, ticket, metadata) => {
             let id = feed::composer::current(&s.rekeyed, &id).to_string();
             super::inspect::read(s, &id, ticket, metadata);
-            if !s.menus.fresh(&id, "context", seq) || super::inspect::is_streamed(s, &id, "context") {
+            if !s.menus.fresh(&id, "context", seq) || super::inspect::streamed_since(s, &id, "context", ticket) {
                 return;
             }
             if result.is_ok() {
@@ -619,6 +620,11 @@ fn settled(s: &mut App, done: Done) {
             }
         }
     }
+}
+
+#[cfg(test)]
+pub fn context_fresh(s: &mut App, id: &str, seq: u64) -> bool {
+    s.menus.fresh(id, "context", seq)
 }
 
 #[cfg(test)]

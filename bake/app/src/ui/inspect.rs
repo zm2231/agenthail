@@ -84,14 +84,19 @@ pub fn load(s: &mut App, id: &str) {
 }
 
 pub(crate) fn rekey(s: &mut App, old: &str, new: &str) {
-    s.inspect.overlay.rekey(old, new);
+    let dropped = s.inspect.overlay.rekey(old, new);
     s.inspect.reads.rekey(old, new);
     crate::move_key(&mut s.inspect.meta, old, new);
     crate::move_key(&mut s.inspect.process, old, new);
     crate::move_key(&mut s.inspect.goal_busy, old, new);
     crate::move_key(&mut s.inspect.goal_note, old, new);
     crate::move_member(&mut s.inspect.expanded, old, new);
-    crate::move_key(&mut s.inspect.missed, old, new);
+    if let Some(gone) = s.inspect.missed.remove(old) {
+        let miss = s.inspect.missed.entry(new.to_string()).or_insert_with(|| Missed { after: gone.after, asked: None, kinds: Default::default() });
+        miss.after = miss.after.max(gone.after);
+        miss.asked = None;
+        miss.kinds.extend(gone.kinds);
+    }
     if let Some(editing) = s.inspect.editing.as_mut().filter(|e| e.session == old) {
         editing.session = new.to_string();
     }
@@ -99,6 +104,9 @@ pub(crate) fn rekey(s: &mut App, old: &str, new: &str) {
         logs.0 = new.to_string();
     }
     super::session_menu::rekey_context(s, old, new);
+    if !dropped.is_empty() {
+        miss(s, new, &dropped);
+    }
 }
 
 fn current(s: &App, id: &str) -> String {
@@ -145,7 +153,7 @@ pub(crate) fn read(s: &mut App, id: &str, ticket: u64, result: Result<Metadata, 
             Ok(data) => data.after(old),
             Err(error) => Metadata::failed(old, error),
         };
-        let data = if is_streamed(s, id, "goal") { data.keep_goal(s.inspect.meta.get(id)) } else { data };
+        let data = if streamed_since(s, id, "goal", ticket) { data.keep_goal(s.inspect.meta.get(id)) } else { data };
         let goal = !data.goal_failed;
         s.inspect.meta.insert(id.to_string(), data);
         if goal {
@@ -163,18 +171,14 @@ pub(crate) fn streamed(s: &mut App, id: &str, x: feed::wire::Streamed) {
         feed::wire::Streamed::Context(_) => "context",
         feed::wire::Streamed::Goal(_) => "goal",
     };
-    if !s.inspect.overlay.stream(id, kind, shown) {
-        if !shown && super::window::selected_anywhere(s).iter().any(|x| x == id) {
-            let after = s.inspect.reads.issued();
-            let miss = s.inspect.missed.entry(id.to_string()).or_insert_with(|| Missed { after, asked: None, kinds: Default::default() });
-            miss.after = after;
-            miss.asked = None;
-            miss.kinds.insert(kind);
+    let at = s.inspect.reads.issued();
+    if !s.inspect.overlay.stream(id, kind, shown, at) {
+        if !shown {
+            miss(s, id, &[kind]);
         }
         return;
     }
-    let newest = s.inspect.reads.issued() + 1;
-    caught_up(s, id, kind, newest);
+    caught_up(s, id, kind, at + 1);
     match x {
         feed::wire::Streamed::Context(usage) => super::session_menu::streamed_context(s, id, usage),
         feed::wire::Streamed::Goal(goal) => {
@@ -185,8 +189,29 @@ pub(crate) fn streamed(s: &mut App, id: &str, x: feed::wire::Streamed) {
     }
 }
 
-pub(crate) fn is_streamed(s: &App, id: &str, kind: &'static str) -> bool {
+fn miss(s: &mut App, id: &str, kinds: &[&'static str]) {
+    if !super::window::selected_anywhere(s).iter().any(|x| x == id) {
+        return;
+    }
+    let after = s.inspect.reads.issued();
+    let miss = s.inspect.missed.entry(id.to_string()).or_insert_with(|| Missed { after, asked: None, kinds: Default::default() });
+    miss.after = after;
+    miss.asked = None;
+    miss.kinds.extend(kinds);
+}
+
+pub(crate) fn streamed_since(s: &App, id: &str, kind: &str, ticket: u64) -> bool {
+    s.inspect.overlay.streamed_since(id, kind, ticket)
+}
+
+#[cfg(test)]
+pub fn is_streamed(s: &App, id: &str, kind: &str) -> bool {
     s.inspect.overlay.holds(id, kind)
+}
+
+#[cfg(test)]
+pub fn goal_of(s: &App, id: &str) -> Option<String> {
+    s.inspect.meta.get(id).and_then(|m| m.goal.as_ref()).map(|g| g.objective.clone())
 }
 
 #[cfg(test)]
@@ -215,7 +240,7 @@ pub fn expand(s: &mut App, id: &str) {
 }
 
 pub(crate) fn returned(s: &mut App, id: &str) {
-    s.inspect.overlay.open(id);
+    miss(s, id, &["goal", "context"]);
 }
 
 pub(crate) fn metadata_moved(s: &mut App, id: &str) {

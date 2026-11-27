@@ -361,41 +361,44 @@ pub fn can_save(act: GoalAct, text: &str, budget: Option<i64>) -> bool {
 
 #[derive(Default)]
 pub struct Overlay {
-    sessions: std::collections::HashMap<String, std::collections::HashSet<&'static str>>,
+    sessions: std::collections::HashMap<String, std::collections::HashMap<&'static str, u64>>,
 }
 
 impl Overlay {
-    pub fn open(&mut self, id: &str) {
-        self.sessions.insert(id.to_string(), Default::default());
-    }
-
     pub fn hold(&mut self, id: &str) {
         self.sessions.entry(id.to_string()).or_default();
-    }
-
-    pub fn rekey(&mut self, old: &str, new: &str) {
-        if let Some(kinds) = self.sessions.remove(old) {
-            self.sessions.entry(new.to_string()).or_default().extend(kinds);
-        }
     }
 
     pub fn keep(&mut self, held: &[String]) {
         self.sessions.retain(|id, _| held.contains(id));
     }
 
-    pub fn stream(&mut self, id: &str, kind: &'static str, shown: bool) -> bool {
+    pub fn rekey(&mut self, old: &str, new: &str) -> Vec<&'static str> {
+        let Some(kinds) = self.sessions.remove(old) else { return Vec::new() };
+        if self.sessions.contains_key(new) {
+            return kinds.into_keys().collect();
+        }
+        self.sessions.insert(new.to_string(), kinds);
+        Vec::new()
+    }
+
+    pub fn stream(&mut self, id: &str, kind: &'static str, shown: bool, at: u64) -> bool {
         if !shown {
             if let Some(kinds) = self.sessions.get_mut(id) {
                 kinds.remove(kind);
             }
             return false;
         }
-        self.sessions.entry(id.to_string()).or_default().insert(kind);
+        self.sessions.entry(id.to_string()).or_default().insert(kind, at);
         true
     }
 
     pub fn holds(&self, id: &str, kind: &str) -> bool {
-        self.sessions.get(id).is_some_and(|kinds| kinds.contains(kind))
+        self.sessions.get(id).is_some_and(|kinds| kinds.contains_key(kind))
+    }
+
+    pub fn streamed_since(&self, id: &str, kind: &str, ticket: u64) -> bool {
+        self.sessions.get(id).and_then(|kinds| kinds.get(kind)).is_some_and(|at| ticket <= *at)
     }
 }
 
@@ -654,47 +657,49 @@ mod tests {
     }
 
     #[test]
-    fn a_shown_session_streams_over_its_reads() {
+    fn a_stream_wins_over_reads_asked_before_it_and_not_after() {
         let mut o = Overlay::default();
-        o.open("a");
-        assert!(!o.stream("a", "goal", false), "a removed session's stream is ignored");
-        assert!(!o.holds("a", "goal"));
-        assert!(o.stream("a", "context", true));
-        assert!(o.holds("a", "context") && !o.holds("a", "goal"));
-        o.open("a");
-        assert!(!o.holds("a", "context"), "selecting again starts from the reads");
+        o.hold("a");
+        assert!(!o.stream("a", "goal", false, 1), "a stream nothing shows is ignored");
+        assert!(o.stream("a", "goal", true, 5));
+        assert!(o.streamed_since("a", "goal", 5) && o.streamed_since("a", "goal", 3), "a read asked before the stream keeps the streamed goal");
+        assert!(!o.streamed_since("a", "goal", 6), "a read asked after it is newer");
+        assert!(!o.streamed_since("a", "context", 1));
+        o.hold("a");
+        assert!(o.holds("a", "goal"), "holding again keeps what streamed");
     }
 
     #[test]
     fn each_shown_session_streams_on_its_own_until_its_window_closes() {
         let mut o = Overlay::default();
-        o.open("a");
-        o.open("b");
-        assert!(o.stream("a", "goal", true) && o.stream("b", "context", true), "two windows, two streams");
+        assert!(o.stream("a", "goal", true, 1) && o.stream("b", "context", true, 1), "two windows, two streams");
         assert!(o.holds("a", "goal") && o.holds("b", "context") && !o.holds("a", "context"));
-        o.open("a");
-        assert!(o.holds("b", "context"), "selecting one session leaves the other's stream alone");
         o.keep(&["a".to_string()]);
         assert!(!o.holds("b", "context"), "a closed window's session is let go");
-        assert!(!o.stream("b", "goal", false) && !o.holds("b", "goal"), "and its stream is ignored while nothing shows it");
+        assert!(!o.stream("b", "goal", false, 2) && !o.holds("b", "goal"));
     }
 
     #[test]
     fn a_hidden_session_s_missed_stream_lets_reads_through_again() {
         let mut o = Overlay::default();
-        o.open("a");
-        assert!(o.stream("a", "goal", true));
-        assert!(!o.stream("a", "goal", false));
-        assert!(!o.holds("a", "goal"), "a value streamed while hidden was missed, so the next read wins");
-        o.stream("a", "context", true);
-        o.hold("a");
-        assert!(o.holds("a", "context"), "holding a session already followed keeps its streams");
-        o.rekey("a", "a2");
-        assert!(o.holds("a2", "context") && !o.holds("a", "context"));
-        o.stream("b", "goal", true);
-        o.open("c");
-        o.rekey("c", "b");
-        assert!(o.holds("b", "goal"), "rekeying onto a held session keeps what it streamed");
+        assert!(o.stream("a", "goal", true, 4));
+        assert!(!o.stream("a", "goal", false, 6));
+        assert!(!o.streamed_since("a", "goal", 1), "a value streamed while hidden was missed, so the next read wins");
+    }
+
+    #[test]
+    fn a_rekey_onto_a_held_session_keeps_its_streams_and_hands_back_the_old_ones() {
+        let mut o = Overlay::default();
+        o.stream("a", "goal", true, 3);
+        o.stream("b", "goal", true, 7);
+        o.stream("b", "context", true, 2);
+        let mut dropped = o.rekey("b", "a");
+        dropped.sort();
+        assert_eq!(dropped, ["context", "goal"], "the old id's streams are handed back to be read again");
+        assert!(o.streamed_since("a", "goal", 3) && !o.streamed_since("a", "goal", 4) && !o.holds("a", "context") && !o.holds("b", "goal"));
+        o.stream("c", "goal", true, 5);
+        assert!(o.rekey("c", "d").is_empty());
+        assert!(o.streamed_since("d", "goal", 5), "a rekey onto a free id carries its streams");
     }
 
     #[test]
