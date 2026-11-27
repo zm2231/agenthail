@@ -85,7 +85,7 @@ impl<I: Copy> Hotkey<I> {
     }
 
     pub fn choose<R: Registrar<Id = I>>(&mut self, registrar: &mut R, shortcut: Option<Stored>) -> bool {
-        if shortcut == self.tried && self.refused.is_none() {
+        if shortcut == self.tried && matches!(self.refused, None | Some(Refusal::Taken(_))) {
             return false;
         }
         self.attempt(registrar, shortcut);
@@ -240,6 +240,7 @@ mod tests {
         hk.want(&mut fake, Some(s("alt+mod+k")));
         assert_eq!(hk.refused(), Some(&Refusal::Taken(None)));
         assert!(!hk.want(&mut fake, Some(s("alt+mod+k"))), "no retry without a change");
+        assert!(!hk.choose(&mut fake, Some(s("alt+mod+k"))), "choosing the taken shortcut again waits for a return");
         assert_eq!(fake.calls, 1);
         assert!(hk.regain(&mut fake, Some(s("alt+mod+k"))), "coming back retries a taken shortcut");
         assert_eq!(fake.calls, 2);

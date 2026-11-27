@@ -34,27 +34,27 @@ pub fn poll(s: &mut Prefs) -> bool {
     if changed {
         sync_rows(s);
     }
-    if crate::hotkey::refused() {
+    if crate::hotkey::asks_again() {
         s.keyboard.any_app.mark_unregistered();
     }
     changed
 }
 
+fn follow(state: &mut ShortcutRecorderState, stored: Option<Shortcut>) -> bool {
+    if state.is_recording() {
+        return false;
+    }
+    if state.shortcut() != stored.as_ref() {
+        *state = ShortcutRecorderState::new(stored);
+    }
+    true
+}
+
 fn sync_rows(s: &mut Prefs) {
     crate::hotkey::sync();
-    let mut all = true;
-    if s.keyboard.any_app.is_recording() {
-        all = false;
-    } else {
-        s.keyboard.any_app = ShortcutRecorderState::new(bindings::any_app());
-    }
+    let mut all = follow(&mut s.keyboard.any_app, bindings::any_app());
     for c in COMMANDS {
-        let state = s.keyboard.rows.entry(c.id).or_default();
-        if state.is_recording() {
-            all = false;
-        } else {
-            *state = ShortcutRecorderState::new(bindings::shortcut(c.id));
-        }
+        all &= follow(s.keyboard.rows.entry(c.id).or_default(), bindings::shortcut(c.id));
     }
     if all {
         s.keyboard.seen = bindings::generation();

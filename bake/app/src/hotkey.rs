@@ -121,8 +121,8 @@ fn current() -> Option<(Refusal, Shortcut)> {
     Some((refused.0, chord(now?)?))
 }
 
-pub fn refused() -> bool {
-    current().is_some()
+pub fn asks_again() -> bool {
+    current().is_some_and(|(refusal, _)| !matches!(refusal, Refusal::Taken(_)))
 }
 
 pub fn keycaps(shortcut: &Shortcut) -> String {
