@@ -167,15 +167,15 @@ fn pane_tint_follows_strength_dim_and_the_readability_switch() {
     let mut look = Look::from_view(&view);
     let ground = hex("#161618").unwrap();
     let white = [1.0; 3];
-    let full = look.pane_tint(true, white, ground, ground, 1.0, 0.0).0;
+    let full = look.pane_tint(true, [0.5; 3], white, ground, ground, 1.0, 0.0).0;
     assert!(full > 0.5, "{full}");
-    assert!(look.pane_tint(true, white, ground, ground, 0.1, 0.0).0 < full);
+    assert!(look.pane_tint(true, [0.5; 3], white, ground, ground, 0.1, 0.0).0 < full);
     look.dim = 0.8;
-    assert!(look.pane_tint(true, white, ground, ground, 1.0, 0.0).0 < full);
-    let (a, t) = look.pane_tint(true, white, ground, [1.0; 3], 1.0, 0.0);
+    assert!(look.pane_tint(true, [0.5; 3], white, ground, ground, 1.0, 0.0).0 < full);
+    let (a, t) = look.pane_tint(true, [0.5; 3], white, ground, [1.0; 3], 1.0, 0.0);
     assert!(a <= 1.0 && luminance(t) < luminance([1.0; 3]));
     look.readable = false;
-    assert_eq!(look.pane_tint(true, white, ground, ground, 1.0, 0.25), (0.25, ground));
+    assert_eq!(look.pane_tint(true, [0.5; 3], white, ground, ground, 1.0, 0.25), (0.25, ground));
 }
 
 #[test]
@@ -210,4 +210,14 @@ fn roles_on_the_system_accent_are_named() {
     let mut roles = Look::from_view(&view).accent_roles;
     roles.sort();
     assert_eq!(roles, vec!["body".to_string(), "link".to_string()]);
+}
+
+#[test]
+fn text_in_the_system_accent_counts_toward_pane_tint() {
+    let view: View = serde_json::from_str(r##"{"values":{"glass":"on"},"colors":{"body":{"systemAccent":true}}}"##).unwrap();
+    let look = Look::from_view(&view);
+    let ground = hex("#161618").unwrap();
+    let pale = look.pane_tint(true, [0.95, 0.95, 1.0], [0.6; 3], ground, ground, 1.0, 0.0).0;
+    let deep = look.pane_tint(true, [0.2, 0.25, 0.9], [0.6; 3], ground, ground, 1.0, 0.0).0;
+    assert!(deep > pale, "{deep} {pale}");
 }

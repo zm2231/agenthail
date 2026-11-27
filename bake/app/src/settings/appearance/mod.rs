@@ -218,7 +218,9 @@ pub fn take(s: &mut Prefs, got: Got) {
             pixels.set(w, h, rgba);
             s.appearance.thumbs.insert(path, pixels);
         }
-        Got::Thumb(..) => {}
+        Got::Thumb(path, Err(_)) => {
+            s.appearance.asked.remove(&path);
+        }
         Got::Wrote(ticket, result) => {
             s.appearance.writing = false;
             s.appearance.drafts.clear();

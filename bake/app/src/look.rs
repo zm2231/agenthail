@@ -377,8 +377,8 @@ pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool) {
             let tint = tint_rgb(&s.look, dark, accent_rgb);
             let strength = if session { s.look.session_opacity } else { s.look.opacity };
             let worst = worst_of(s, dark).unwrap_or(ground);
-            let (pane, pane_rgb) = s.look.pane_tint(dark, worst, ground, tint, strength, s.look.pane_opacity);
-            let (float, float_rgb) = s.look.pane_tint(dark, worst, ground, tint, strength, s.look.float_opacity);
+            let (pane, pane_rgb) = s.look.pane_tint(dark, accent_rgb, worst, ground, tint, strength, s.look.pane_opacity);
+            let (float, float_rgb) = s.look.pane_tint(dark, accent_rgb, worst, ground, tint, strength, s.look.float_opacity);
             paint.card = paint.card.alpha(0.6);
             paint.card_deep = paint.card_deep.alpha(0.7);
             paint.raised = paint.raised.alpha(0.78);

@@ -289,12 +289,12 @@ impl Look {
         self.roles.get(name).map(|(d, l)| if dark { *d } else { *l })
     }
 
-    pub fn pane_tint(&self, dark: bool, worst: Rgb, ground: Rgb, tint: Rgb, strength: f32, minimum: f32) -> (f32, Rgb) {
+    pub fn pane_tint(&self, dark: bool, accent: Rgb, worst: Rgb, ground: Rgb, tint: Rgb, strength: f32, minimum: f32) -> (f32, Rgb) {
         if !self.readable {
             return (minimum, tint);
         }
         let behind = blend(blend(ground, worst, strength), if dark { [0.0; 3] } else { [1.0; 3] }, self.dim);
-        let mut roles: Vec<f32> = READ_ON_PANES.iter().filter_map(|r| self.role(r, dark)).map(luminance).collect();
+        let mut roles: Vec<f32> = READ_ON_PANES.iter().filter_map(|r| if self.accent_roles.iter().any(|a| a == r) { Some(accent) } else { self.role(r, dark) }).map(luminance).collect();
         if roles.is_empty() {
             roles.push(if dark { 0.84 } else { 0.012 });
         }
