@@ -213,8 +213,8 @@ fn digest_lines_follow_the_minute_and_the_last_look_without_a_poll() {
 }
 
 #[test]
-fn a_review_need_rebuilds_when_its_buttons_change_and_acts_on_the_review_listed_at_press() {
-    if !isolated("rows_memo_lines::a_review_need_rebuilds_when_its_buttons_change_and_acts_on_the_review_listed_at_press") {
+fn a_review_need_rebuilds_when_its_review_changes_and_acts_on_the_review_it_showed() {
+    if !isolated("rows_memo_lines::a_review_need_rebuilds_when_its_review_changes_and_acts_on_the_review_it_showed") {
         return;
     }
     use crate::over::{Group, Need, NeedKind, Target};
@@ -254,7 +254,9 @@ fn a_review_need_rebuilds_when_its_buttons_change_and_acts_on_the_review_listed_
     rt.pointer_up(x, y);
     rt.frame(DT);
     let acted = rt.state.ov.inbox.notes.get(&id).map(|(hold, _)| hold.clone());
-    assert_eq!(acted, Some(review("2026-11-27T09:45:00Z").hold_key()), "approve acts on the review listed when it is pressed");
+    assert_eq!(acted, Some(review("2026-11-27T09:40:00Z").hold_key()), "approve acts on the review it showed, not a resubmission listed since");
+    settle(&mut rt);
+    assert_eq!(rebuilt(&mut rt, "need-", |s| listed(s, review("2026-11-27T09:50:00Z"))), [row.clone()], "a resubmission rebuilds the row its buttons act on");
 }
 
 #[test]

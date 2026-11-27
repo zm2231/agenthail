@@ -286,6 +286,7 @@ pub fn section(s: &App, k: &Kit, main_kit: &Kit) -> El {
     let count = st.inbox.as_ref().map(|i| i.decisions.len());
     let mut c = col().w_full().gap(6.0).child(ui::section_head("Decisions", count, Some(text("from every connected computer".to_string()).font(k.text(META)).color(weak(k))), k));
     let Some(found) = &st.inbox else {
+        st.drawn.borrow_mut().keep(|_| false);
         let note = if s.client.is_some() { "Looking for decisions…" } else { "Decisions show when the app is connected to the daemon." };
         return c.child(text(note.to_string()).font(k.text(META)).color(weak(k)));
     };
@@ -305,7 +306,8 @@ pub fn section(s: &App, k: &Kit, main_kit: &Kit) -> El {
         }
         list = list.child(line(s, d, id, target.as_deref() == Some(id.as_str()), k, main_kit));
     }
-    s.ov.inbox.drawn.borrow_mut().keep(|id| ids.iter().any(|x| x == id));
+    let listed: std::collections::HashSet<&str> = ids.iter().map(String::as_str).collect();
+    s.ov.inbox.drawn.borrow_mut().keep(|id| listed.contains(id));
     if found.decisions.is_empty() {
         list = list.child(row().gap(8.0).items_center().px(14.0).py(10.0).child(icon(&icons::CIRCLE_CHECK, k.text_size(14.0)).color(weak(k))).child(text(if found.notes.is_empty() { "Nothing needs you." } else { "Nothing needs you on the computers that answered." }.to_string()).font(k.text(BODY)).color(weak(k))));
     }

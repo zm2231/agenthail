@@ -7,7 +7,7 @@ use crate::over::{Need, NeedKind, Target, open_target};
 
 #[derive(Hash)]
 pub enum Acts {
-    Review { id: String, shown: ReviewShown },
+    Review { id: String, rev: u64, shown: ReviewShown },
     OpenOnly,
     Pr(Option<String>),
     Primary { open: bool },
@@ -20,7 +20,11 @@ impl Acts {
             _ => None,
         };
         match (n.kind, work) {
-            (NeedKind::Check, Some((_, Some(d)))) => Acts::Review { id: d.id(), shown: ReviewShown::of(s, d, true) },
+            (NeedKind::Check, Some((_, Some(d)))) => {
+                let id = d.id();
+                let rev = s.ov.inbox.drawn.borrow_mut().of(&id, d);
+                Acts::Review { id, rev, shown: ReviewShown::of(s, d, true) }
+            }
             (NeedKind::Check, _) => Acts::OpenOnly,
             (NeedKind::CiFailing, Some((w, d))) => {
                 let fallback = feed::decisions::Decision::default();
@@ -30,7 +34,7 @@ impl Acts {
         }
     }
 
-    pub fn build(&self, n: &Need, compact: bool, k: &Kit) -> El {
+    pub fn build(&self, s: &App, n: &Need, compact: bool, k: &Kit) -> El {
         let size = if compact { ControlSize::Small } else { ControlSize::Regular };
         let r = row().gap(6.0).items_center();
         let opens = |variant| {
@@ -38,11 +42,16 @@ impl Acts {
             Button::new("Open").variant(variant).control_size(size).on_press(move |s: &mut App| open_target(s, &t)).build(k)
         };
         match self {
-            Acts::Review { id, shown } => {
-                let Target::Work(key) = &n.target else { return r };
-                let (ka, kc) = (key.clone(), key.clone());
-                let approve = move |s: &mut App| crate::over::review_key(s, &ka, feed::review::Verdict::Approve);
-                let changes = move |s: &mut App| crate::over::review_key(s, &kc, feed::review::Verdict::Reject);
+            Acts::Review { id, shown, .. } => {
+                let Some(d) = (match &n.target {
+                    Target::Work(key) => crate::over::listed_review(s, key),
+                    _ => None,
+                }) else {
+                    return r;
+                };
+                let (da, dc) = (d.clone(), d.clone());
+                let approve = move |s: &mut App| crate::over::inbox::review(s, &da, feed::review::Verdict::Approve, "");
+                let changes = move |s: &mut App| crate::over::inbox::ask_changes(s, &dc);
                 let key = format!("{}-{id}", if compact { "need-row" } else { "need-focus" });
                 shown_review_buttons(shown, size, &key, r, k, approve, changes).child(opens(ButtonVariant::Ghost))
             }

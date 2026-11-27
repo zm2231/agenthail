@@ -310,7 +310,7 @@ pub fn listed_review<'a>(s: &'a App, key: &WorkKey) -> Option<&'a feed::decision
     feed::review::find_of_work(&inbox.decisions, w)
 }
 
-pub fn review_key(s: &mut App, key: &WorkKey, verdict: feed::review::Verdict) {
+fn review_key(s: &mut App, key: &WorkKey, verdict: feed::review::Verdict) {
     let Some(d) = work_review(s, key) else { return };
     match verdict {
         feed::review::Verdict::Approve => inbox::review(s, &d, verdict, ""),

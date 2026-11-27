@@ -331,7 +331,7 @@ pub fn notice(message: &str, k: &Kit) -> El {
 }
 
 pub fn need_actions(s: &App, n: &Need, compact: bool, k: &Kit) -> El {
-    crate::over::need_acts::Acts::of(s, n).build(n, compact, k)
+    crate::over::need_acts::Acts::of(s, n).build(s, n, compact, k)
 }
 
 pub fn need_row(s: &App, n: &Need, focused: bool, k: &Kit) -> El {
@@ -352,7 +352,7 @@ pub fn need_row(s: &App, n: &Need, focused: bool, k: &Kit) -> El {
             .py(13.0)
             .radius(10.0)
             .child(need_info(n, &who, &fit, width, k))
-            .child(acts.build(n, true, k))
+            .child(acts.build(s, n, true, k))
             .on_press(move |s: &mut App| {
                 if let Some(at) = s.ov.needs.iter().position(|n| n.target == t) {
                     s.ov.need_ix = at;

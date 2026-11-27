@@ -63,6 +63,7 @@ fn probe() {
         let page: feed::decisions::Page = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
         let mut inbox = feed::decisions::Inbox::default();
         inbox.add(page, "", "", "");
+        inbox.settle();
         app.ov.inbox.inbox = Some(inbox);
     }
     let mut rt = runtime(app, (1440.0, 900.0));
