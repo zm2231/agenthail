@@ -33,31 +33,35 @@ fn variant(s: &App, k: &Kit) -> El {
 }
 
 pub fn digest_line(s: &App, key: String, l: &Line, k: &Kit) -> El {
-    let (glyph, color) = ui::happened_style(l.kind, k);
-    let t = l.target.clone();
-    let mut body = col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(
+    let ago = s.ov.d.ago(&l.at);
+    let shows = (l.kind, &l.text, &l.detail, &ago, &l.target);
+    crate::over::rows::memo(key.clone(), shows, k, || {
+        let (glyph, color) = ui::happened_style(l.kind, k);
+        let t = l.target.clone();
+        let mut body = col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(
+            row()
+                .gap(8.0)
+                .items_center()
+                .child(text(l.kind.label().to_string()).font(k.text(META_MED)).color(color))
+                .child(text(l.text.clone()).font(k.text(BODY)).color(strong(k)).truncate().shrink()),
+        );
+        if !l.detail.is_empty() {
+            body = body.child(text(l.detail.clone()).font(k.text(META)).color(weak(k)).truncate());
+        }
         row()
-            .gap(8.0)
-            .items_center()
-            .child(text(l.kind.label().to_string()).font(k.text(META_MED)).color(color))
-            .child(text(l.text.clone()).font(k.text(BODY)).color(strong(k)).truncate().shrink()),
-    );
-    if !l.detail.is_empty() {
-        body = body.child(text(l.detail.clone()).font(k.text(META)).color(weak(k)).truncate());
-    }
-    row()
-        .key(key)
-        .w_full()
-        .gap(10.0)
-        .items_start()
-        .px(10.0)
-        .py(7.0)
-        .radius(8.0)
-        .hover(k.c.surface_raised_hover)
-        .on_press(move |s: &mut App| open_target(s, &t))
-        .child(row().pt(2.0).child(icon(glyph, k.text_size(15.0)).color(color)))
-        .child(body)
-        .child(text(s.ov.d.ago(&l.at)).font(k.text(META)).color(weak(k)))
+            .key(key)
+            .w_full()
+            .gap(10.0)
+            .items_start()
+            .px(10.0)
+            .py(7.0)
+            .radius(8.0)
+            .hover(k.c.surface_raised_hover)
+            .on_press(move |s: &mut App| open_target(s, &t))
+            .child(row().pt(2.0).child(icon(glyph, k.text_size(15.0)).color(color)))
+            .child(body)
+            .child(text(ago.clone()).font(k.text(META)).color(weak(k)))
+    })
 }
 
 pub fn digest_block(s: &App, p: &Project, lines: &[Line], max: usize, looked: Option<&str>, catch_up: bool, k: &Kit) -> El {
@@ -99,55 +103,68 @@ pub fn digest_block(s: &App, p: &Project, lines: &[Line], max: usize, looked: Op
 pub fn hands_on_card(s: &App, i: usize, id: &str, k: &Kit) -> El {
     let Some(x) = s.ov.d.session(id) else { return col() };
     let busy = busy(x);
-    let idc = id.to_string();
-    let status = if busy {
-        row().gap(6.0).items_center().child(Spinner::new().size(k.text_size(11.0)).build(k)).child(text("Working".to_string()).font(k.text(META_MED)).color(k.c.text_accent))
-    } else {
-        row().gap(6.0).items_center().child(icon(&icons::CIRCLE_CHECK, k.text_size(12.0)).color(weak(k))).child(text(format!("Idle {}", s.ov.d.ago(&x.last_active))).font(k.text(META)).color(weak(k)))
-    };
-    let c = col()
-        .w_full()
-        .gap(8.0)
-        .padding(12.0)
-        .child(
-            row()
-                .w_full()
-                .gap(8.0)
-                .items_center()
-                .child(ui::avatar(&x.project_name(), 18.0))
-                .child(text(ui::short_title(&s.ov.d.title(x), 30)).font(k.text(BODY_MED)).color(strong(k)).truncate().shrink())
-                .child(ui::spacer())
-                .child(ui::ghost_keys(&[format!("⌘{}", i + 1).as_str()], k)),
-        )
-        .child(text(if s.ov.d.gist(x) == x.display.label { "No summary yet".to_string() } else { s.ov.d.gist(x) }).font(k.text(META)).color(weak(k)).max_lines(2).wrap())
-        .child(row().w_full().items_center().child(status).child(ui::spacer()).child(text(x.project_name()).font(k.text(META)).color(weak(k))));
-    ui::card(c, k).key(format!("hands-{i}")).on_press(move |s: &mut App| crate::over::open_session(s, &idc))
+    let idle = s.ov.d.ago(&x.last_active);
+    let title = ui::short_title(&s.ov.d.title(x), 30);
+    let gist = s.ov.d.gist(x);
+    let gist = if gist == x.display.label { "No summary yet".to_string() } else { gist };
+    let project = x.project_name();
+    let shows = (i, id, busy, &idle, &title, &gist, &project);
+    crate::over::rows::memo(format!("hands-{i}"), shows, k, || {
+        let idc = id.to_string();
+        let status = if busy {
+            row().gap(6.0).items_center().child(Spinner::new().size(k.text_size(11.0)).build(k)).child(text("Working".to_string()).font(k.text(META_MED)).color(k.c.text_accent))
+        } else {
+            row().gap(6.0).items_center().child(icon(&icons::CIRCLE_CHECK, k.text_size(12.0)).color(weak(k))).child(text(format!("Idle {idle}")).font(k.text(META)).color(weak(k)))
+        };
+        let c = col()
+            .w_full()
+            .gap(8.0)
+            .padding(12.0)
+            .child(
+                row()
+                    .w_full()
+                    .gap(8.0)
+                    .items_center()
+                    .child(ui::avatar(&project, 18.0))
+                    .child(text(title.clone()).font(k.text(BODY_MED)).color(strong(k)).truncate().shrink())
+                    .child(ui::spacer())
+                    .child(ui::ghost_keys(&[format!("⌘{}", i + 1).as_str()], k)),
+            )
+            .child(text(gist.clone()).font(k.text(META)).color(weak(k)).max_lines(2).wrap())
+            .child(row().w_full().items_center().child(status).child(ui::spacer()).child(text(project.clone()).font(k.text(META)).color(weak(k))));
+        ui::card(c, k).key(format!("hands-{i}")).on_press(move |s: &mut App| crate::over::open_session(s, &idc))
+    })
 }
 
 pub fn moving_row(s: &App, i: usize, id: &str, k: &Kit) -> El {
     let Some(x) = s.ov.d.session(id) else { return col() };
-    let idc = id.to_string();
-    let what = if !x.display.detail.is_empty() { x.display.detail.clone() } else { s.ov.d.gist(x) };
-    row()
-        .key(format!("moving-{i}"))
-        .w_full()
-        .gap(10.0)
-        .items_start()
-        .px(10.0)
-        .py(8.0)
-        .radius(8.0)
-        .hover(k.c.surface_raised_hover)
-        .on_press(move |s: &mut App| crate::over::open_session(s, &idc))
-        .child(row().pt(3.0).child(Spinner::new().size(k.text_size(12.0)).build(k)))
-        .child(
-            col()
-                .grow(1.0)
-                .shrink()
-                .min_w(0.0)
-                .gap(2.0)
-                .child(row().gap(6.0).items_center().child(text(ui::short_title(&s.ov.d.title(x), 34)).font(k.text(META_MED)).color(strong(k)).truncate().shrink()).child(text(x.project_name()).font(k.text(META)).color(weak(k))))
-                .child(text(crate::over::plain(&what)).font(k.text(META)).color(weak(k)).max_lines(2).wrap()),
-        )
+    let what = crate::over::plain(&if !x.display.detail.is_empty() { x.display.detail.clone() } else { s.ov.d.gist(x) });
+    let title = ui::short_title(&s.ov.d.title(x), 34);
+    let project = x.project_name();
+    let shows = (i, id, &what, &title, &project);
+    crate::over::rows::memo(format!("moving-{i}"), shows, k, || {
+        let idc = id.to_string();
+        row()
+            .key(format!("moving-{i}"))
+            .w_full()
+            .gap(10.0)
+            .items_start()
+            .px(10.0)
+            .py(8.0)
+            .radius(8.0)
+            .hover(k.c.surface_raised_hover)
+            .on_press(move |s: &mut App| crate::over::open_session(s, &idc))
+            .child(row().pt(3.0).child(Spinner::new().size(k.text_size(12.0)).build(k)))
+            .child(
+                col()
+                    .grow(1.0)
+                    .shrink()
+                    .min_w(0.0)
+                    .gap(2.0)
+                    .child(row().gap(6.0).items_center().child(text(title.clone()).font(k.text(META_MED)).color(strong(k)).truncate().shrink()).child(text(project.clone()).font(k.text(META)).color(weak(k))))
+                    .child(text(what.clone()).font(k.text(META)).color(weak(k)).max_lines(2).wrap()),
+            )
+    })
 }
 
 fn focus_card(s: &App, k: &Kit) -> El {

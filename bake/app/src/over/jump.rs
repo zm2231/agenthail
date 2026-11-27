@@ -235,39 +235,41 @@ pub fn view(s: &App, layer: &mut Vec<El>, k: &Kit) {
             list = list.child(text(h.group.to_string()).font(k.text(META_MED)).color(weak(k)).px(10.0).pt(if last.is_empty() { 4.0 } else { 12.0 }).pb(4.0));
             last = h.group;
         }
-        let mark = match &h.look {
+        let mark = |look: &Look| match look {
             Look::Avatar(name) => ui::avatar(name, k.text_size(22.0)),
             Look::Icon(glyph) => row().w(k.text_size(22.0)).h(k.text_size(22.0)).items_center().justify_center().child(icon(glyph, k.text_size(15.0)).color(k.c.icon_base)),
         };
-        let Some(pick) = h.pick else {
-            list = list.child(row().w_full().gap(12.0).items_center().px(10.0).py(6.0).child(mark).child(text(h.title).font(k.text(META)).color(weak(k)).wrap().shrink()));
-            continue;
+        let look = match &h.look {
+            Look::Avatar(name) => (name.as_str(), 0),
+            Look::Icon(glyph) => ("", *glyph as *const Icon as usize),
         };
+        if h.pick.is_none() {
+            list = list.child(row().w_full().gap(12.0).items_center().px(10.0).py(6.0).child(mark(&h.look)).child(text(h.title).font(k.text(META)).color(weak(k)).wrap().shrink()));
+            continue;
+        }
         let active = i == ix;
         let at = i;
         i += 1;
-        let mut body = col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(text(h.title).font(k.text(BODY_MED)).color(strong(k)).truncate());
-        if !h.status.is_empty() {
-            body = body.child(text(h.status).font(k.text(META)).color(weak(k)).truncate());
-        }
-        let mut r = row()
-            .key(format!("hit-{at}"))
-            .w_full()
-            .gap(12.0)
-            .items_center()
-            .px(10.0)
-            .py(8.0)
-            .radius(8.0)
-            .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, pick.clone(), tx))
-            .child(mark)
-            .child(body)
-            .child(text(h.badge).font(k.text(META)).color(weak(k)));
-        if active {
-            r = r.fill(k.c.surface_raised_hover).child(icon(&icons::ENTER, k.text_size(14.0)).color(k.c.icon_base));
-        } else {
-            r = r.hover(k.c.surface_raised_hover);
-        }
-        list = list.child(r);
+        let shows = (at, active, &h.title, &h.status, &h.badge, look);
+        list = list.child(crate::over::rows::memo(format!("hit-{at}"), shows, k, || {
+            let mut body = col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(text(h.title.clone()).font(k.text(BODY_MED)).color(strong(k)).truncate());
+            if !h.status.is_empty() {
+                body = body.child(text(h.status.clone()).font(k.text(META)).color(weak(k)).truncate());
+            }
+            let r = row()
+                .key(format!("hit-{at}"))
+                .w_full()
+                .gap(12.0)
+                .items_center()
+                .px(10.0)
+                .py(8.0)
+                .radius(8.0)
+                .on_press_tx(move |s: &mut App, tx: &mut Tx| run_at(s, at, tx))
+                .child(mark(&h.look))
+                .child(body)
+                .child(text(h.badge.clone()).font(k.text(META)).color(weak(k)));
+            if active { r.fill(k.c.surface_raised_hover).child(icon(&icons::ENTER, k.text_size(14.0)).color(k.c.icon_base)) } else { r.hover(k.c.surface_raised_hover) }
+        }));
     }
     let foot = row()
         .w_full()

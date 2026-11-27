@@ -38,8 +38,8 @@ pub fn status_line(s: &App, x: &Session, k: &Kit) -> (String, Color, bool) {
     (s.ov.d.gist(x), base(k), false)
 }
 
-fn state_dot(s: &App, x: &Session, k: &Kit) -> El {
-    let color = if need_of(s, x).is_some() {
+fn state_color(s: &App, x: &Session, k: &Kit) -> Color {
+    if need_of(s, x).is_some() {
         ui::needs_color(k)
     } else if busy(x) {
         k.c.text_accent
@@ -47,72 +47,96 @@ fn state_dot(s: &App, x: &Session, k: &Kit) -> El {
         k.c.success.icon
     } else {
         k.c.text_weak
-    };
-    el().size(10.0, 10.0).radius(5.0).fill(color).border(2.0, k.c.bg_base)
+    }
+}
+
+#[derive(Hash)]
+enum Trailing {
+    Live,
+    Done(String),
+    Idle(String),
+}
+
+fn paged(s: &App, id: &str) -> Option<Session> {
+    if s.ov.d.session(id).is_some() {
+        return None;
+    }
+    s.ov.list.listing.as_ref().and_then(|l| l.rows.get(id)).cloned()
 }
 
 pub fn session_row(s: &App, x: &Session, depth: u8, selected: bool, k: &Kit) -> El {
-    let id = x.id.clone();
-    let menu_id = x.id.clone();
-    let paged = s.ov.d.session(&x.id).is_none().then(|| x.clone());
-    let menu_paged = paged.clone();
     let branch = x.checkout.branch.clone().unwrap_or_default();
     let mut place = vec![s.ov.d.role(x).to_string(), agent(x), x.host.name.clone()];
     if !branch.is_empty() {
         place.push(branch);
     }
+    let place = place.join(" · ");
     let (line, color, live) = status_line(s, x, k);
     let trailing = if busy(x) {
-        row().gap(5.0).items_center().child(el().size(6.0, 6.0).radius(3.0).fill(k.c.text_accent)).child(text("live".to_string()).font(k.text(META)).color(k.c.text_accent))
+        Trailing::Live
     } else if x.state(s.ov.d.now) == State::Done {
-        row().gap(5.0).items_center().child(icon(&icons::CIRCLE_CHECK, k.text_size(12.0)).color(k.c.success.icon)).child(text(format!("done {}", s.ov.d.ago(&x.last_active))).font(k.text(META)).color(weak(k)))
+        Trailing::Done(s.ov.d.ago(&x.last_active))
     } else {
-        text(format!("idle {}", s.ov.d.ago(&x.last_active))).font(k.text(META)).color(weak(k))
+        Trailing::Idle(s.ov.d.ago(&x.last_active))
     };
-    let mut status = row().gap(6.0).items_center();
-    if live {
-        status = status.child(Spinner::new().size(k.text_size(11.0)).build(k));
-    }
-    status = status.child(text(line).font(k.text(META)).color(color).truncate().shrink());
-    let mut headline = row().w_full().gap(8.0).items_center().child(text(s.ov.d.title(x)).font(k.text(BODY_MED)).color(strong(k)).truncate().shrink()).child(crate::ui::session_menu::marks(x, k));
-    if let Some((h, _)) = feed::derive::needs::headline(x).filter(|_| need_of(s, x).is_some() || busy(x)) {
-        headline = headline.child(text(ui::short_title(&crate::over::plain(&h), 60)).font(k.text(META)).color(weak(k)).truncate().shrink());
-    }
-    headline = headline.child(ui::spacer()).child(trailing);
-    let mut r = row()
-        .key(format!("srow-{}", x.id))
-        .w_full()
-        .gap(12.0)
-        .items_start()
-        .pl(12.0 + 28.0 * depth as f32)
-        .pr(12.0)
-        .py(9.0)
-        .radius(10.0)
-        .on_press(move |s: &mut App| {
-            if let Some(row) = &paged {
-                crate::over::search::pin_read(s, row.clone());
-            }
-            crate::over::open_session(s, &id)
-        })
-        .on_secondary_press(move |s: &mut App, p, _: &mut rune::Tx| {
-            if let Some(row) = &menu_paged {
-                crate::over::search::pin_read(s, row.clone());
-            }
-            crate::ui::session_menu::open_at(s, &menu_id, p)
-        })
-        .child(col().size(28.0, 28.0).child(ui::avatar(&s.ov.d.title(x), 28.0)).child(state_dot(s, x, k).absolute(20.0, 20.0)))
-        .child(
-            col()
-                .grow(1.0)
-                .shrink()
-                .min_w(0.0)
-                .gap(3.0)
-                .child(headline)
-                .child(row().gap(4.0).items_center().child(icon(&icons::BRANCH, k.text_size(11.0)).color(weak(k))).child(text(place.join(" · ")).font(k.text(META)).color(weak(k)).truncate().shrink()))
-                .child(status),
-        );
-    r = if selected { r.fill(k.c.surface_raised_hover).border(1.0, ui::edge()) } else { r.hover(k.c.surface_raised_hover) };
-    r
+    let title = s.ov.d.title(x);
+    let marks = crate::ui::session_menu::Marks::of(x);
+    let headline = feed::derive::needs::headline(x).filter(|_| need_of(s, x).is_some() || busy(x)).map(|(h, _)| ui::short_title(&crate::over::plain(&h), 60));
+    let dot = state_color(s, x, k);
+    let shows = (&x.id, depth, selected, &place, &line, color, live, &trailing, &title, marks, &headline, dot);
+    crate::over::rows::memo(format!("srow-{}", x.id), shows, k, || {
+        let id = x.id.clone();
+        let menu_id = x.id.clone();
+        let trailing = match &trailing {
+            Trailing::Live => row().gap(5.0).items_center().child(el().size(6.0, 6.0).radius(3.0).fill(k.c.text_accent)).child(text("live".to_string()).font(k.text(META)).color(k.c.text_accent)),
+            Trailing::Done(ago) => row().gap(5.0).items_center().child(icon(&icons::CIRCLE_CHECK, k.text_size(12.0)).color(k.c.success.icon)).child(text(format!("done {ago}")).font(k.text(META)).color(weak(k))),
+            Trailing::Idle(ago) => text(format!("idle {ago}")).font(k.text(META)).color(weak(k)),
+        };
+        let mut status = row().gap(6.0).items_center();
+        if live {
+            status = status.child(Spinner::new().size(k.text_size(11.0)).build(k));
+        }
+        status = status.child(text(line.clone()).font(k.text(META)).color(color).truncate().shrink());
+        let mut head = row().w_full().gap(8.0).items_center().child(text(title.clone()).font(k.text(BODY_MED)).color(strong(k)).truncate().shrink()).child(crate::ui::session_menu::drawn_marks(marks, k));
+        if let Some(h) = &headline {
+            head = head.child(text(h.clone()).font(k.text(META)).color(weak(k)).truncate().shrink());
+        }
+        head = head.child(ui::spacer()).child(trailing);
+        let dot = el().size(10.0, 10.0).radius(5.0).fill(dot).border(2.0, k.c.bg_base);
+        let r = row()
+            .key(format!("srow-{}", x.id))
+            .w_full()
+            .gap(12.0)
+            .items_start()
+            .pl(12.0 + 28.0 * depth as f32)
+            .pr(12.0)
+            .py(9.0)
+            .radius(10.0)
+            .on_press(move |s: &mut App| {
+                if let Some(row) = paged(s, &id) {
+                    crate::over::search::pin_read(s, row);
+                }
+                crate::over::open_session(s, &id)
+            })
+            .on_secondary_press(move |s: &mut App, p, _: &mut rune::Tx| {
+                if let Some(row) = paged(s, &menu_id) {
+                    crate::over::search::pin_read(s, row);
+                }
+                crate::ui::session_menu::open_at(s, &menu_id, p)
+            })
+            .child(col().size(28.0, 28.0).child(ui::avatar(&title, 28.0)).child(dot.absolute(20.0, 20.0)))
+            .child(
+                col()
+                    .grow(1.0)
+                    .shrink()
+                    .min_w(0.0)
+                    .gap(3.0)
+                    .child(head)
+                    .child(row().gap(4.0).items_center().child(icon(&icons::BRANCH, k.text_size(11.0)).color(weak(k))).child(text(place.clone()).font(k.text(META)).color(weak(k)).truncate().shrink()))
+                    .child(status),
+            );
+        if selected { r.fill(k.c.surface_raised_hover).border(1.0, ui::edge()) } else { r.hover(k.c.surface_raised_hover) }
+    })
 }
 
 const ALL_PROJECTS: &str = "All projects";

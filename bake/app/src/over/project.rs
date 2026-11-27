@@ -36,35 +36,44 @@ fn toolbar(s: &App, key: &str, k: &Kit) -> Toolbar {
 pub fn work_card(s: &App, w: &Work, compact: bool, k: &Kit) -> El {
     let key = w.key();
     let phase = phase(w);
-    let whose = s.ov.d.whose_move(w);
     let who = match phase {
         CHECK => "Your move".to_string(),
         SHIP => "Shipped".to_string(),
-        _ => feed::derive::phase::move_of(&ui::short_title(&whose, 22)),
+        _ => feed::derive::phase::move_of(&ui::short_title(&s.ov.d.whose_move(w), 22)),
     };
-    let mut c = col()
-        .key(format!("w-{}-{}", w.ledger_key(), w.id))
-        .w_full()
-        .gap(8.0)
-        .padding(12.0)
-        .radius(10.0)
-        .fill(k.c.surface_base)
-        .border(1.0, if phase == CHECK { k.c.warning.icon.alpha(0.35) } else { ui::edge() })
-        .hover(k.c.surface_raised_hover)
-        .on_press(move |s: &mut App| go(s, Screen::Work(key.clone())))
-        .child(ui::title_fit(s, &format!("card-{}-{compact}", w.id), &plain(&w.text), BODY_MED.lh(19.0), strong(k), 2, k));
-    c = c.child(ui::mini_phase(w, k));
+    let fit = format!("card-{}-{compact}", w.id);
+    let width = ui::fit_width(s, &fit);
+    let title = plain(&w.text);
+    let mini = ui::mini_shown(w);
     let last = w.timeline.last().map(|t| s.ov.d.ago(&t.at)).unwrap_or_default();
-    c.child(
-        row()
+    let id = short_id(&w.id);
+    let card = format!("w-{}-{}", w.ledger_key(), w.id);
+    let shows = (&key, phase, &who, width.map(f32::to_bits), &title, &mini, &last, &id);
+    crate::over::rows::memo(card.clone(), shows, k, || {
+        let open = key.clone();
+        col()
+            .key(card)
             .w_full()
-            .gap(6.0)
-            .items_center()
-            .child(text(who).font(k.text(if phase == CHECK { META_MED } else { META })).color(if phase == CHECK { ui::needs_color(k) } else { weak(k) }).truncate().shrink())
-            .child(ui::spacer())
-            .child(text(last).font(k.text(META)).color(weak(k)))
-            .child(ui::id_label(&short_id(&w.id), k)),
-    )
+            .gap(8.0)
+            .padding(12.0)
+            .radius(10.0)
+            .fill(k.c.surface_base)
+            .border(1.0, if phase == CHECK { k.c.warning.icon.alpha(0.35) } else { ui::edge() })
+            .hover(k.c.surface_raised_hover)
+            .on_press(move |s: &mut App| go(s, Screen::Work(open.clone())))
+            .child(ui::fitted(&fit, &title, width, BODY_MED.lh(19.0), strong(k), 2, k))
+            .child(ui::mini_phase(mini.0, &mini.1, k))
+            .child(
+                row()
+                    .w_full()
+                    .gap(6.0)
+                    .items_center()
+                    .child(text(who.clone()).font(k.text(if phase == CHECK { META_MED } else { META })).color(if phase == CHECK { ui::needs_color(k) } else { weak(k) }).truncate().shrink())
+                    .child(ui::spacer())
+                    .child(text(last.clone()).font(k.text(META)).color(weak(k)))
+                    .child(ui::id_label(&id, k)),
+            )
+    })
 }
 
 fn lane(s: &App, key: &str, title: &str, items: &[&Work], compact: bool, k: &Kit) -> (Vec<El>, Option<El>) {
@@ -250,21 +259,27 @@ pub fn board(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>, main_ki
     let looked = s.ov.looked.get(key).map(String::as_str);
     let lines = s.ov.d.digest(p, s.ov.d.window(looked));
     let card = |i: usize, l: &Line| {
-        let (glyph, color) = ui::happened_style(l.kind, &k);
-        let t = l.target.clone();
-        col()
-            .key(format!("since-{i}"))
-            .grow(1.0)
-            .w(1.0)
-            .gap(5.0)
-            .padding(10.0)
-            .radius(10.0)
-            .fill(k.c.surface_base)
-            .border(1.0, ui::edge())
-            .hover(k.c.surface_raised_hover)
-            .on_press(move |s: &mut App| crate::over::open_target(s, &t))
-            .child(row().gap(6.0).items_center().child(rune::icon(glyph, k.text_size(13.0)).color(color)).child(text(l.kind.label().to_string()).font(k.text(META_MED)).color(color)).child(ui::spacer()).child(text(s.ov.d.ago(&l.at)).font(k.text(META)).color(weak(&k))))
-            .child(ui::title_fit(s, &format!("since-{i}"), &l.text, META, strong(&k), 2, &k))
+        let fit = format!("since-{i}");
+        let width = ui::fit_width(s, &fit);
+        let ago = s.ov.d.ago(&l.at);
+        let shows = (i, l.kind, &l.target, &l.text, &ago, width.map(f32::to_bits));
+        crate::over::rows::memo(format!("since-{i}"), shows, &k, || {
+            let (glyph, color) = ui::happened_style(l.kind, &k);
+            let t = l.target.clone();
+            col()
+                .key(format!("since-{i}"))
+                .grow(1.0)
+                .w(1.0)
+                .gap(5.0)
+                .padding(10.0)
+                .radius(10.0)
+                .fill(k.c.surface_base)
+                .border(1.0, ui::edge())
+                .hover(k.c.surface_raised_hover)
+                .on_press(move |s: &mut App| crate::over::open_target(s, &t))
+                .child(row().gap(6.0).items_center().child(rune::icon(glyph, k.text_size(13.0)).color(color)).child(text(l.kind.label().to_string()).font(k.text(META_MED)).color(color)).child(ui::spacer()).child(text(ago.clone()).font(k.text(META)).color(weak(&k))))
+                .child(ui::fitted(&fit, &l.text, width, META, strong(&k), 2, &k))
+        })
     };
     let (new, old) = cut(pick(&lines, 1), looked);
     let mut since = col().w_full().gap(8.0);

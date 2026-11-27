@@ -20,6 +20,11 @@ mod role_pickers;
 mod project_menus;
 #[path = "work_steps_tests.rs"]
 mod work_steps;
+#[path = "row_memo_tests.rs"]
+mod rows_memo;
+#[cfg(feature = "frame-profile")]
+#[path = "row_cost_tests.rs"]
+mod row_cost;
 
 const DT: f64 = 1.0 / 60.0;
 const EPOCH: &str = "e1";
