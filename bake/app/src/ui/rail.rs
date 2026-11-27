@@ -173,17 +173,21 @@ pub(crate) fn rail(s: &App, x: &Session) -> El {
     parts.extend(super::inspect::above(s, x));
     parts.extend(super::subagents::section(s, x));
     parts.extend(super::inspect::below(s, x));
-    let facts: [(&'static Icon, &str, String); 4] = [
-        (&icons::SPARKLES, "Agent", x.surface.clone()),
-        (&icons::SERVER, "Host", x.host.name.clone()),
-        (&icons::BRANCH, "Branch", x.checkout.branch.clone().unwrap_or_else(|| "none".into())),
-        (&icons::INBOX, "Queued", x.queue_count.to_string()),
+    let mut facts: Vec<(&'static Icon, &str, String, &str)> = vec![
+        (&icons::SPARKLES, "Agent", x.surface.clone(), ""),
+        (&icons::SERVER, "Host", x.host.name.clone(), ""),
+        (&icons::BRANCH, "Branch", x.checkout.branch.clone().unwrap_or_else(|| "none".into()), ""),
+        (&icons::INBOX, "Queued", x.queue_count.to_string(), ""),
     ];
+    if let Some((role, source)) = super::role::shown(s, &x.id) {
+        facts.insert(1, (&icons::USERS, "Role", role.to_string(), source));
+    }
     parts.push(rail_section(
         "Session",
         &icons::LAYERS,
-        col().w_full().gap(9.0).children(facts.into_iter().map(|(g, k, v)| {
-            row().w_full().gap(8.0).items_center().child(icon(g, 12.0).color(faint())).child(text(k.to_string()).font(META).color(muted())).child(spacer()).child(text(v).font(META_BOLD).color(theme::text()).truncate().max_w(150.0))
+        col().w_full().gap(9.0).children(facts.into_iter().map(|(g, k, v, why)| {
+            let fact = row().w_full().gap(8.0).items_center().child(icon(g, 12.0).color(faint())).child(text(k.to_string()).font(META).color(muted())).child(spacer()).child(text(v).font(META_BOLD).color(theme::text()).truncate().max_w(150.0));
+            if why.is_empty() { fact } else { fact.help(why.to_string()) }
         })),
     ));
     col().key("rail").w_full().h_full().scroll(ScrollSpec { stick_bottom: false }).child(col().w_full().px(12.0).pb(16.0).children(parts))

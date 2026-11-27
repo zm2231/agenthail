@@ -6,6 +6,7 @@ pub mod brief;
 pub mod question;
 pub mod request;
 pub mod review;
+pub mod role;
 pub mod search;
 pub mod adopt;
 pub mod snooze;
