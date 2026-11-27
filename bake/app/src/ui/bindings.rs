@@ -218,13 +218,13 @@ mod tests {
     #[test]
     fn a_change_starts_from_what_the_mac_app_saved_since() {
         assert_eq!(chord("refresh").map(|c| c.to_string()), Some("mod+r".parse::<Chord>().unwrap().to_string()));
-        store::save(&Shortcuts::default(), &Shortcuts::load(Some(br#"{"refresh":{"carbonKeyCode":15,"carbonModifiers":768}}"#), None));
+        store::save(&Shortcuts::default(), &Shortcuts::load(Some(br#"{"refresh":{"carbonKeyCode":15,"carbonModifiers":768}}"#), None)).unwrap();
         assert_eq!(change(|s| s.set("stop", Stored::parse("mod+g"))), Ok(Ok(())));
         let saved = store::load();
         assert_eq!(saved.spec("refresh").as_deref(), Some("shift+mod+r"), "the other app's change survives");
         assert_eq!(saved.spec("stop").as_deref(), Some("mod+g"));
         assert_eq!(shortcut("refresh").map(|s| s.to_string()), "shift+mod+r".parse::<Shortcut>().ok().map(|s| s.to_string()));
-        store::save(&Shortcuts::default(), &Shortcuts::default());
+        store::save(&Shortcuts::default(), &Shortcuts::default()).unwrap();
         let before = generation();
         refresh();
         assert!(generation() > before);
