@@ -265,3 +265,18 @@ fn an_open_page_checks_its_cookie_again_only_after_the_daemon_comes_back() {
     web.checked(A, &cookie.value, Ok(true));
     assert!(web.check_due(Some(A)).is_none());
 }
+
+#[test]
+fn an_unclear_check_on_an_open_page_is_tried_again_a_minute_later() {
+    let mut web = signed_in();
+    open(&mut web, A, true);
+    web.recheck();
+    let (_, cookie) = web.check_due(Some(A)).unwrap();
+    web.checked(A, &cookie.value, Err("connection refused".into()));
+    assert!(web.check_due(Some(A)).is_none(), "not straight away");
+    web.checked_at = Some(Instant::now() - Duration::from_secs(61));
+    let (_, cookie) = web.check_due(Some(A)).expect("a minute later");
+    web.checked(A, &cookie.value, Ok(true));
+    web.checked_at = Some(Instant::now() - Duration::from_secs(3600));
+    assert!(web.check_due(Some(A)).is_none(), "a clear answer needs no more checks");
+}

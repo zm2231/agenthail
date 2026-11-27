@@ -222,16 +222,21 @@ impl Catalog {
 #[derive(Default)]
 pub struct Ledgers {
     versions: HashMap<String, String>,
+    reopened: bool,
 }
 
 impl Ledgers {
+    pub fn reopened(&mut self) {
+        self.reopened = true;
+    }
+
     pub fn changed(&mut self, event: &Event) -> Option<String> {
         let key = event.data["projectKey"].as_str()?.to_string();
         let version = event.data["version"].as_str().unwrap_or_default().to_string();
         match self.versions.insert(key.clone(), version.clone()) {
             Some(was) if was == version => None,
-            None => None,
-            Some(_) => Some(key),
+            None if !self.reopened => None,
+            _ => Some(key),
         }
     }
 }

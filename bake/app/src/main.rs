@@ -179,7 +179,8 @@ fn load_recorded(path: &str) -> Result<Recorded, String> {
 pub enum Ask {
     Refresh,
     Reset,
-    Ledger(String),
+    Ledger(String, std::time::Instant),
+    Read(String),
 }
 
 fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, streamed: Arc<AtomicBool>) {
@@ -200,9 +201,10 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, streamed:
                 }
                 due = false;
                 last = Some(std::time::Instant::now());
-                let message = match feed::derive::live::fetch(&client, &known, streamed.load(Ordering::Acquire)) {
+                let trusted = streamed.load(Ordering::Acquire);
+                let message = match feed::derive::live::fetch(&client, &known, trusted) {
                     Ok(fetched) => {
-                        due = known.learn(&fetched);
+                        due = known.learn(&fetched, trusted);
                         Bg::Overview(Box::new(fetched))
                     }
                     Err(error) => Bg::OverviewError(error.to_string()),
@@ -212,10 +214,16 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, streamed:
                 }
             }
             let wait = if due { Duration::ZERO } else { feed::watch::OVERVIEW_EVERY.saturating_sub(last.map(|at| at.elapsed()).unwrap_or_default()) };
+            let mut reads = Vec::new();
             let mut take = |ask: Ask| match ask {
                 Ask::Refresh => due = true,
                 Ask::Reset => (due, reset) = (true, true),
-                Ask::Ledger(key) => due |= known.changed(&key),
+                Ask::Ledger(key, at) => match known.changed(&key, at) {
+                    feed::derive::live::Change::Read(id) => reads.push(id),
+                    feed::derive::live::Change::Overview => due = true,
+                    feed::derive::live::Change::Nothing => {}
+                },
+                Ask::Read(id) => reads.push(id),
             };
             match poke.recv_timeout(wait) {
                 Ok(ask) => take(ask),
@@ -224,6 +232,16 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, streamed:
             }
             while let Ok(ask) = poke.try_recv() {
                 take(ask);
+            }
+            reads.sort();
+            reads.dedup();
+            for id in reads {
+                let (started, trusted) = (std::time::Instant::now(), streamed.load(Ordering::Acquire));
+                let result = feed::derive::live::ledger(&client, &id, &known);
+                known.read(&id, started, trusted, &result);
+                if tx.send(Bg::Ledger(id, started, result)).is_err() {
+                    return;
+                }
             }
         }
     });
@@ -427,17 +445,8 @@ fn fetch_tails(s: &mut App) {
 
 pub fn fetch_ledger(s: &mut App, project: &str) {
     if s.ov.live.wants(project) {
-        spawn_ledger(s, project.to_string());
+        ask_overview(s, Ask::Read(project.to_string()));
     }
-}
-
-fn spawn_ledger(s: &App, project: String) {
-    let Some(client) = s.client.clone() else { return };
-    let (tx, sessions, known, started) = (s.outbox.clone(), s.sessions.clone(), s.ov.live.actor_ids(), std::time::Instant::now());
-    std::thread::spawn(move || {
-        let result = feed::derive::live::ledger(&client, &project, &sessions, &known);
-        let _ = tx.send(Bg::Ledger(project, started, result));
-    });
 }
 
 fn selected_changed(s: &mut App, id: &str) {
@@ -1081,10 +1090,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Changed(wants) => changed_elsewhere(s, wants),
             Bg::Reopened => reopened(s),
             Bg::LedgerChanged(key) => {
-                ask_overview(s, Ask::Ledger(key.clone()));
-                if let Some(project) = s.ov.live.ledger_changed(&key) {
-                    spawn_ledger(s, project);
-                }
+                ask_overview(s, Ask::Ledger(key, std::time::Instant::now()));
             }
             Bg::SessionNews => ask_overview(s, Ask::Refresh),
             Bg::Item(id, item) => {

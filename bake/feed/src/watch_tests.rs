@@ -151,3 +151,13 @@ fn history_stays_short_once_snapshots_cover_it() {
         c.adopt(vec![row("a", "idle")], "e", base + 1500);
     }
 }
+
+#[test]
+fn after_a_reconnect_a_ledger_seen_for_the_first_time_counts_as_changed() {
+    let mut l = Ledgers::default();
+    let e = |key: &str, v: &str| Event { id: 0, kind: "ledger.changed".into(), data: json!({"projectKey": key, "version": v}) };
+    assert_eq!(l.changed(&e("project:p-1", "v1")), None);
+    l.reopened();
+    assert_eq!(l.changed(&e("project:p-1", "v1")), None);
+    assert_eq!(l.changed(&e("project:p-2", "v1")).as_deref(), Some("project:p-2"));
+}

@@ -26,19 +26,33 @@ pub struct Fetched {
 
 pub const RETRY: std::time::Duration = std::time::Duration::from_secs(60);
 
+struct Held {
+    read_at: Instant,
+    trusted: bool,
+    retry: Option<Instant>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Change {
+    Read(String),
+    Overview,
+    Nothing,
+}
+
 #[derive(Default)]
 pub struct Known {
-    ledgers: HashMap<String, Option<Instant>>,
+    ledgers: HashMap<String, Held>,
     keys: HashMap<String, String>,
     wanted: HashSet<String>,
+    opened: HashSet<String>,
     changed: HashMap<String, Instant>,
     actors: HashMap<String, Option<Instant>>,
     candidates: BTreeSet<String>,
+    sessions: Vec<Session>,
 }
 
 impl Known {
-    pub fn learn(&mut self, fetched: &Fetched) -> bool {
-        let now = Instant::now();
+    pub fn learn(&mut self, fetched: &Fetched, trusted: bool) -> bool {
         let key_of = |id: &str| fetched.recorded.projects.iter().find(|p| p.id == id && !p.ledger_key.is_empty()).map_or(id.to_string(), |p| p.ledger_key.clone());
         let mut again = false;
         for (id, result) in &fetched.ledgers {
@@ -49,28 +63,55 @@ impl Known {
                 again = true;
                 continue;
             }
-            self.ledgers.insert(id.clone(), result.is_err().then(|| now + RETRY));
-            if let Ok(rows) = result {
-                self.candidates.extend(rows.iter().flat_map(|w| &w.timeline).map(|t| t.actor.clone()));
-            }
+            self.hold(id, fetched.started, trusted, result.as_ref().ok());
         }
         self.wanted = fetched.ledgers.keys().chain(&fetched.held).cloned().collect();
-        for id in &fetched.asked {
-            self.actors.insert(id.clone(), (!fetched.recorded.actors.contains_key(id)).then(|| now + RETRY));
-        }
+        self.sessions = fetched.recorded.sessions.clone();
+        self.asked(&fetched.asked, &fetched.recorded.actors);
         again
     }
 
-    pub fn changed(&mut self, key: &str) -> bool {
-        self.changed.insert(key.to_string(), Instant::now());
-        let id = self.keys.get(key).map_or(key, String::as_str);
-        self.wanted.contains(id) && !matches!(self.ledgers.get(id), Some(None))
+    pub fn read(&mut self, id: &str, started: Instant, trusted: bool, result: &Result<Ledger, String>) {
+        self.opened.insert(id.to_string());
+        self.hold(id, started, trusted, result.as_ref().ok().map(|l| &l.rows));
+        if let Ok(l) = result {
+            self.asked(&l.asked, &l.actors);
+        }
+    }
+
+    fn hold(&mut self, id: &str, read_at: Instant, trusted: bool, rows: Option<&Vec<Work>>) {
+        self.ledgers.insert(id.to_string(), Held { read_at, trusted, retry: rows.is_none().then(|| Instant::now() + RETRY) });
+        self.candidates.extend(rows.into_iter().flatten().flat_map(|w| &w.timeline).map(|t| t.actor.clone()));
+    }
+
+    fn asked(&mut self, asked: &[String], found: &HashMap<String, Actor>) {
+        let now = Instant::now();
+        for id in asked {
+            self.actors.insert(id.clone(), (!found.contains_key(id)).then(|| now + RETRY));
+        }
+    }
+
+    pub fn changed(&mut self, key: &str, at: Instant) -> Change {
+        self.changed.insert(key.to_string(), at);
+        let id = self.keys.get(key).map_or(key, String::as_str).to_string();
+        if !self.wanted.contains(&id) && !self.opened.contains(&id) {
+            return Change::Nothing;
+        }
+        match self.ledgers.get(&id) {
+            None => Change::Overview,
+            Some(h) if h.retry.is_none() && h.read_at < at => Change::Read(id),
+            Some(_) => Change::Nothing,
+        }
+    }
+
+    pub fn sessions(&self) -> &[Session] {
+        &self.sessions
     }
 
     pub fn skips_ledger(&self, key: &str, streamed: bool) -> bool {
         match self.ledgers.get(key) {
-            Some(None) => streamed,
-            Some(Some(until)) => Instant::now() < *until,
+            Some(Held { retry: Some(until), .. }) => Instant::now() < *until,
+            Some(Held { trusted, .. }) => streamed && *trusted,
             None => false,
         }
     }
@@ -87,6 +128,7 @@ impl Known {
 pub struct Ledger {
     pub rows: Vec<Work>,
     pub actors: HashMap<String, Actor>,
+    pub asked: Vec<String>,
 }
 
 pub fn fetch(client: &Client, known: &Known, streamed: bool) -> Result<Fetched> {
@@ -124,10 +166,10 @@ pub fn fetch(client: &Client, known: &Known, streamed: bool) -> Result<Fetched> 
     Ok(Fetched { recorded, ledgers, held, asked, started })
 }
 
-pub fn ledger(client: &Client, project: &str, sessions: &[Session], known: &HashSet<String>) -> Result<Ledger, String> {
+pub fn ledger(client: &Client, project: &str, known: &Known) -> Result<Ledger, String> {
     let rows = rows(client, project, OffsetDateTime::now_utc())?;
-    let (actors, _) = actors(client, sessions, |a| known.contains(a), rows.iter().flat_map(|w| &w.timeline).map(|t| t.actor.clone()).collect());
-    Ok(Ledger { rows, actors })
+    let (actors, asked) = actors(client, known.sessions(), |a| known.skips_actor(a), rows.iter().flat_map(|w| &w.timeline).map(|t| t.actor.clone()).collect());
+    Ok(Ledger { rows, actors, asked })
 }
 
 fn hours(now: OffsetDateTime, at: &str) -> f64 {
@@ -317,19 +359,6 @@ impl Overview {
         self.pending.insert(project.to_string());
         self.stale = true;
         true
-    }
-
-    pub fn actor_ids(&self) -> HashSet<String> {
-        self.base.actors.keys().cloned().collect()
-    }
-
-    pub fn ledger_changed(&mut self, ledger_key: &str) -> Option<String> {
-        let id = self.base.projects.iter().find(|p| !p.archived && (p.ledger_key == ledger_key || p.id == ledger_key))?.id.clone();
-        if !self.ledgers.contains_key(&id) && !self.failed.contains(&id) {
-            return None;
-        }
-        self.pending.insert(id.clone());
-        Some(id)
     }
 
     pub fn take_ledger(&mut self, project: &str, started: Instant, result: Result<Ledger, String>) {

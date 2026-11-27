@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use serde_json::{Value, json};
 
-use super::live::{Fetched, Ledger, Overview};
+use super::live::{Change, Fetched, Ledger, Overview};
 use super::world::Actor;
 use super::*;
 use crate::catalog::Session;
@@ -86,7 +86,7 @@ fn a_listed_project_without_recent_sessions_gets_its_board_when_opened() {
     assert!(ov.wants("old"));
     assert!(!ov.wants("old"), "one fetch at a time");
     assert_eq!(ov.world(&[]).rows.get("old"), Some(&Rows::Loading));
-    ov.take_ledger("old", Instant::now(), Ok(Ledger { rows: vec![work("w9", "open")], actors: HashMap::new() }));
+    ov.take_ledger("old", Instant::now(), Ok(Ledger { rows: vec![work("w9", "open")], actors: HashMap::new(), asked: Vec::new() }));
     let w = ov.world(&[]);
     assert_eq!(board_ids(&w, "old"), ["w9"]);
     assert_eq!(w.rows.get("old"), None);
@@ -118,14 +118,14 @@ fn a_ledger_fetch_that_started_earlier_never_overwrites_a_later_one() {
     let sessions = || vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")];
     let (earlier, later) = (Instant::now(), Instant::now() + std::time::Duration::from_millis(1));
     let mut ov = Overview::default();
-    ov.take_ledger("p", later, Ok(Ledger { rows: vec![work("new", "open")], actors: HashMap::new() }));
+    ov.take_ledger("p", later, Ok(Ledger { rows: vec![work("new", "open")], actors: HashMap::new(), asked: Vec::new() }));
     ov.refresh(Fetched { started: earlier, ..fetched("2026-11-24T12:00:00Z", sessions(), vec![("p", Ok(vec![work("old", "open")]))]) });
     assert_eq!(board_ids(&ov.world(&[]), "p"), ["new"], "a refresh that started first and landed last");
     ov.take_ledger("p", earlier, Err("timed out".into()));
     assert_eq!(ov.world(&[]).rows.get("p"), None, "nor does its failure mark the newer rows stale");
     let latest = later + std::time::Duration::from_millis(1);
     ov.refresh(Fetched { started: latest, ..fetched("2026-11-24T12:00:20Z", sessions(), vec![("p", Ok(vec![work("newest", "open")]))]) });
-    ov.take_ledger("p", later, Ok(Ledger { rows: vec![work("new", "open")], actors: HashMap::new() }));
+    ov.take_ledger("p", later, Ok(Ledger { rows: vec![work("new", "open")], actors: HashMap::new(), asked: Vec::new() }));
     assert_eq!(board_ids(&ov.world(&[]), "p"), ["newest"], "an on-demand fetch that started first and landed last");
 }
 
@@ -138,7 +138,7 @@ fn actors_from_a_fetch_that_started_earlier_never_replace_later_ones() {
     let sessions = || vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")];
     let (earlier, later) = (Instant::now(), Instant::now() + std::time::Duration::from_millis(1));
     let mut ov = Overview::default();
-    ov.take_ledger("p", later, Ok(Ledger { rows: vec![], actors: actor("fresh") }));
+    ov.take_ledger("p", later, Ok(Ledger { rows: vec![], actors: actor("fresh"), asked: Vec::new() }));
     let mut stale = fetched("2026-11-24T12:00:00Z", sessions(), vec![]);
     stale.recorded.actors = actor("stale");
     ov.refresh(Fetched { started: earlier, ..stale });
@@ -147,7 +147,7 @@ fn actors_from_a_fetch_that_started_earlier_never_replace_later_ones() {
     let mut newest = fetched("2026-11-24T12:00:20Z", sessions(), vec![]);
     newest.recorded.actors = actor("newest");
     ov.refresh(Fetched { started: latest, ..newest });
-    ov.take_ledger("p", later, Ok(Ledger { rows: vec![], actors: actor("fresh") }));
+    ov.take_ledger("p", later, Ok(Ledger { rows: vec![], actors: actor("fresh"), asked: Vec::new() }));
     assert!(ov.world(&[]).name_of("helper-1").contains("newest"), "an on-demand fetch that started first and landed last");
 }
 
@@ -163,7 +163,7 @@ fn a_burst_of_arrivals_leaves_one_rebuild_pending() {
     for id in ["t1", "t2", "t3"] {
         ov.take_tail(id, "2026-11-24T11:59:00Z".into(), Err("timed out".into()));
     }
-    ov.take_ledger("p", Instant::now(), Ok(Ledger { rows: vec![work("w1", "open")], actors: HashMap::new() }));
+    ov.take_ledger("p", Instant::now(), Ok(Ledger { rows: vec![work("w1", "open")], actors: HashMap::new(), asked: Vec::new() }));
     ov.refresh(fetched("2026-11-24T12:00:20Z", sessions(), vec![]));
     assert!(ov.stale());
     ov.world(&[]);
@@ -312,18 +312,6 @@ fn chained_read_marks_hold_against_a_row_older_than_both() {
 }
 
 #[test]
-fn a_ledger_change_refetches_only_a_project_whose_rows_are_shown() {
-    let mut ov = Overview::default();
-    let mut r = recorded("2026-11-24T12:00:00Z", vec![session("s", "p", "2026-11-24T11:00:00Z", "idle")]);
-    r.projects[0].ledger_key = "shared:x".into();
-    ov.refresh(Fetched { recorded: r, ledgers: [("p".to_string(), Ok(vec![work("p-W1", "open")]))].into(), held: Vec::new(), asked: Vec::new(), started: Instant::now() });
-    assert_eq!(ov.ledger_changed("shared:x").as_deref(), Some("p"));
-    assert_eq!(ov.ledger_changed("p").as_deref(), Some("p"));
-    assert_eq!(ov.ledger_changed("old"), None);
-    assert_eq!(ov.ledger_changed("project:elsewhere"), None);
-}
-
-#[test]
 fn ledgers_held_from_the_change_stream_survive_an_overview_that_skips_them() {
     let mut ov = Overview::default();
     let sessions = || vec![session("s", "p", "2026-11-24T11:00:00Z", "idle")];
@@ -331,35 +319,6 @@ fn ledgers_held_from_the_change_stream_survive_an_overview_that_skips_them() {
     ov.refresh(Fetched { held: vec!["p".into()], ..fetched("2026-11-24T12:01:00Z", sessions(), Vec::new()) });
     assert_eq!(board_ids(&ov.world(&[]), "p"), vec!["p-W1".to_string()]);
     assert!(!ov.wants("p"));
-}
-
-#[test]
-fn an_overview_skips_ledgers_the_stream_covers_and_retries_failures_later() {
-    let mut known = super::live::Known::default();
-    let mut f = Fetched { asked: vec!["found".into(), "gone".into()], ..fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("p", Ok(Vec::new())), ("h2::p", Err("status code 404".into()))]) };
-    f.recorded.actors.insert("found".into(), Actor::default());
-    assert!(!known.learn(&f));
-    assert!(known.skips_ledger("p", true), "a read ledger waits for the stream to say it changed");
-    assert!(!known.skips_ledger("p", false), "without the stream every overview reads it");
-    assert!(known.skips_ledger("h2::p", true) && known.skips_ledger("h2::p", false), "a failed read waits a minute");
-    assert!(!known.skips_ledger("q", true));
-    assert!(known.skips_actor("found") && known.skips_actor("gone") && !known.skips_actor("new"));
-}
-
-#[test]
-fn a_ledger_that_changes_while_the_overview_reads_it_is_read_again() {
-    let mut known = super::live::Known::default();
-    let mut f = fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("p", Ok(vec![work("p-W1", "open")]))]);
-    f.recorded.projects[0].ledger_key = "shared:x".into();
-    f.started = Instant::now();
-    assert!(!known.changed("shared:x"), "nothing is known yet; the read in flight checks for itself");
-    assert!(known.learn(&f), "the read began before the change, so it goes again");
-    assert!(!known.skips_ledger("p", true));
-    let again = Fetched { started: Instant::now(), ..f };
-    assert!(!known.learn(&again));
-    assert!(known.skips_ledger("p", true));
-    assert!(!known.changed("shared:x"), "a held ledger is refetched on its own, not by the overview");
-    assert!(!known.changed("project:elsewhere"));
 }
 
 #[test]
@@ -374,4 +333,50 @@ fn sessions_are_ordered_by_catalog_position_not_by_whose_clock_is_later() {
     assert_eq!(ov.sessions()[0].status, "busy", "a later read of an earlier catalog position doesn't undo a change");
     assert!(!ov.take_sessions("2026-11-24T12:00:10Z", "e", 104, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
     assert!(ov.take_sessions("2026-11-24T12:00:11Z", "e2", 3, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]), "a restarted catalog starts over");
+}
+
+#[test]
+fn an_overview_skips_ledgers_the_stream_covers_and_retries_failures_later() {
+    let mut known = super::live::Known::default();
+    let mut f = Fetched { asked: vec!["found".into(), "gone".into()], ..fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("p", Ok(Vec::new())), ("h2::p", Err("status code 404".into()))]) };
+    f.recorded.actors.insert("found".into(), Actor::default());
+    assert!(!known.learn(&f, true));
+    assert!(known.skips_ledger("p", true), "a read ledger waits for the stream to say it changed");
+    assert!(!known.skips_ledger("p", false), "without the stream every overview reads it");
+    assert!(known.skips_ledger("h2::p", true) && known.skips_ledger("h2::p", false), "a failed read waits a minute");
+    assert!(!known.skips_ledger("q", true));
+    assert!(known.skips_actor("found") && known.skips_actor("gone") && !known.skips_actor("new"));
+    let mut late = super::live::Known::default();
+    late.learn(&f, false);
+    assert!(!late.skips_ledger("p", true), "a ledger read before its stream opened is read again");
+}
+
+fn keyed(started: Instant) -> Fetched {
+    let mut f = Fetched { started, ..fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("p", Ok(vec![work("p-W1", "open")]))]) };
+    f.recorded.projects[0].ledger_key = "shared:x".into();
+    f
+}
+
+#[test]
+fn a_ledger_that_changes_during_an_overview_read_is_read_again() {
+    let mut known = super::live::Known::default();
+    let f = keyed(Instant::now());
+    assert_eq!(known.changed("shared:x", Instant::now()), Change::Nothing, "nothing is known yet; the read in flight checks for itself");
+    assert!(known.learn(&f, true), "the read began before the change, so it goes again");
+    assert!(!known.skips_ledger("p", true));
+    assert_eq!(known.changed("shared:x", Instant::now()), Change::Overview, "a wanted ledger that isn't held needs the overview");
+}
+
+#[test]
+fn a_change_heard_after_the_read_landed_reads_that_ledger_alone() {
+    let mut known = super::live::Known::default();
+    let heard_at = Instant::now();
+    let started = heard_at - std::time::Duration::from_millis(10);
+    assert!(!known.learn(&keyed(started), true));
+    assert_eq!(known.changed("shared:x", heard_at), Change::Read("p".into()), "a change that happened during the read, processed after it");
+    assert_eq!(known.changed("shared:x", started - std::time::Duration::from_millis(1)), Change::Nothing, "a change older than the read is already in it");
+    assert_eq!(known.changed("project:elsewhere", Instant::now()), Change::Nothing);
+    let read = Ok(Ledger { rows: vec![work("p-W1", "open")], actors: HashMap::new(), asked: vec!["missing".into()] });
+    known.read("p", Instant::now(), true, &read);
+    assert!(known.skips_ledger("p", true) && known.skips_actor("missing"), "a single read also records its failed lookups");
 }

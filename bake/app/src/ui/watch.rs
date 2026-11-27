@@ -61,6 +61,7 @@ pub fn ledgers(client: Client, tx: Sender<Bg>, streamed: Arc<AtomicBool>) {
                 !gone
             });
             streamed.store(false, Ordering::Release);
+            seen.reopened();
             if gone {
                 return;
             }
