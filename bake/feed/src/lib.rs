@@ -57,6 +57,7 @@ pub mod source;
 pub mod store;
 pub mod subagents;
 pub mod summary;
+pub mod tabs;
 pub mod trace;
 pub mod version;
 pub mod voice;
