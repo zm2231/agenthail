@@ -82,10 +82,7 @@ pub fn begin(window: Window) {
 pub fn next(window: Window) -> Option<Instant> {
     DUE.with_borrow_mut(|(current, main, settings)| {
         *current = Window::Main;
-        let list = if window == Window::Main { main } else { settings };
-        let now = Instant::now();
-        list.retain(|at| *at > now);
-        list.iter().min().copied()
+        if window == Window::Main { main } else { settings }.iter().min().copied()
     })
 }
 
@@ -109,3 +106,7 @@ impl Wake {
         self.after(tx, at.saturating_duration_since(Instant::now()));
     }
 }
+
+#[cfg(test)]
+#[path = "wake_tests.rs"]
+mod tests;
