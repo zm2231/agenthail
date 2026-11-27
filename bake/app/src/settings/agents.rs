@@ -103,7 +103,7 @@ fn session_choices(sessions: &[feed::catalog::Session]) -> Vec<(String, String)>
     let labels: Vec<String> = out.iter().map(|(_, l)| l.clone()).collect();
     for (id, label) in &mut out {
         if labels.iter().filter(|l| *l == label).count() > 1 {
-            *label = format!("{label} · {}", id.chars().take(8).collect::<String>());
+            *label = format!("{label} · {id}");
         }
     }
     out
@@ -666,9 +666,9 @@ mod tests {
 
     #[test]
     fn sessions_with_the_same_label_stay_apart() {
-        let list = session_choices(&[session("aaaaaaaa-1", "Fix tests", None), session("bbbbbbbb-2", "Fix tests", None), session("c", "Other", Some("rev"))]);
+        let list = session_choices(&[session("host-1::aaaa", "Fix tests", None), session("host-1::bbbb", "Fix tests", None), session("c", "Other", Some("rev"))]);
         let labels: Vec<&str> = list.iter().map(|(_, l)| l.as_str()).collect();
-        assert_eq!(labels, ["@rev", "Fix tests · aaaaaaaa", "Fix tests · bbbbbbbb"]);
-        assert_eq!(list[2].0, "bbbbbbbb-2");
+        assert_eq!(labels, ["@rev", "Fix tests · host-1::aaaa", "Fix tests · host-1::bbbb"]);
+        assert_eq!(list[2].0, "host-1::bbbb");
     }
 }
