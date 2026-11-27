@@ -69,8 +69,21 @@ impl Known {
         }
         self.wanted = fetched.ledgers.keys().chain(&fetched.held).cloned().collect();
         self.sessions = fetched.recorded.sessions.clone();
+        self.actors.retain(|_, until| until.is_none_or(|at| at > fetched.started));
         self.asked(&fetched.asked, &fetched.recorded.actors, fetched.started);
         again
+    }
+
+    pub fn unread(&mut self, at: Instant) {
+        let later = at + RETRY;
+        for until in self.actors.values_mut().flatten().filter(|u| **u <= at) {
+            *until = later;
+        }
+        for held in self.ledgers.values_mut() {
+            if let Some(until) = held.retry.as_mut().filter(|u| **u <= at) {
+                *until = later;
+            }
+        }
     }
 
     pub fn read(&mut self, id: &str, started: Instant, result: &Result<Ledger, String>) {

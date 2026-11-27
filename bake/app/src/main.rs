@@ -208,7 +208,10 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: f
                         due = known.learn(&fetched);
                         Bg::Overview(Box::new(fetched))
                     }
-                    Err(error) => Bg::OverviewError(error.to_string()),
+                    Err(error) => {
+                        known.unread(std::time::Instant::now());
+                        Bg::OverviewError(error.to_string())
+                    }
                 };
                 if tx.send(message).is_err() {
                     return;

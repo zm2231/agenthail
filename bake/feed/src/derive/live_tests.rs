@@ -466,3 +466,18 @@ fn a_failed_lookup_sets_the_overview_retry_timer() {
     assert_eq!(known.next_retry(), Some(at + super::live::RETRY));
     assert!(!known.actors_due(at) && known.actors_due(at + super::live::RETRY));
 }
+
+#[test]
+fn a_due_lookup_retires_once_an_overview_no_longer_asks_for_it_and_a_failed_overview_waits() {
+    let mut known = super::live::Known::default();
+    let long_ago = Instant::now() - std::time::Duration::from_secs(120);
+    known.read("old", long_ago, &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: vec!["listed-now".into()] }));
+    known.unread(Instant::now());
+    assert!(!known.actors_due(Instant::now()), "a failed overview read puts due retries off a minute");
+    assert!(known.skips_actor("listed-now"));
+    let mut known = super::live::Known::default();
+    known.read("old", long_ago, &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: vec!["listed-now".into()] }));
+    assert!(known.actors_due(Instant::now()));
+    known.learn(&fetched("2026-11-24T12:00:00Z", Vec::new(), Vec::new()));
+    assert!(!known.actors_due(Instant::now()) && known.next_retry().is_none(), "an overview that no longer asks retires it");
+}
