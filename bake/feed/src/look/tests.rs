@@ -221,3 +221,13 @@ fn text_in_the_system_accent_counts_toward_pane_tint() {
     let deep = look.pane_tint(true, [0.2, 0.25, 0.9], [0.6; 3], ground, ground, 1.0, 0.0).0;
     assert!(deep > pale, "{deep} {pale}");
 }
+
+#[test]
+fn every_drawn_text_colour_counts_toward_pane_tint() {
+    let quiet: View = serde_json::from_str(r##"{"colors":{"body":{"dark":"#ececee","light":"#1d1d1f"}}}"##).unwrap();
+    let loud: View = serde_json::from_str(r##"{"colors":{"body":{"dark":"#ececee","light":"#1d1d1f"},"error":{"dark":"#b03030","light":"#b3241a"}}}"##).unwrap();
+    let ground = hex("#161618").unwrap();
+    let a = Look::from_view(&quiet).pane_tint(true, [0.9; 3], [0.5; 3], ground, ground, 1.0, 0.0).0;
+    let b = Look::from_view(&loud).pane_tint(true, [0.9; 3], [0.5; 3], ground, ground, 1.0, 0.0).0;
+    assert!(b > a, "{b} {a}");
+}

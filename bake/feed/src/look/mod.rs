@@ -294,7 +294,7 @@ impl Look {
             return (minimum, tint);
         }
         let behind = blend(blend(ground, worst, strength), if dark { [0.0; 3] } else { [1.0; 3] }, self.dim);
-        let mut roles: Vec<f32> = READ_ON_PANES.iter().filter_map(|r| if self.accent_roles.iter().any(|a| a == r) { Some(accent) } else { self.role(r, dark) }).map(luminance).collect();
+        let mut roles: Vec<f32> = self.roles.values().map(|(d, l)| if dark { *d } else { *l }).chain(std::iter::once(accent)).map(luminance).collect();
         if roles.is_empty() {
             roles.push(if dark { 0.84 } else { 0.012 });
         }
@@ -311,8 +311,6 @@ impl Look {
         !matches!(self.wallpaper(dark), Wallpaper::None | Wallpaper::Desktop)
     }
 }
-
-const READ_ON_PANES: [&str; 5] = ["body", "muted", "faint", "meta", "code"];
 
 pub const NOT_DRAWN: [&str; 6] = [
     "Text colours for timestamps, links, code, live work, removed diff lines and other agents' messages: this app keeps its own; body, secondary, quiet, needs-you, done and error text follow the settings.",

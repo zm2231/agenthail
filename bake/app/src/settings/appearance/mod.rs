@@ -65,7 +65,9 @@ pub fn opened(s: &mut Prefs) {
         return;
     }
     history(s);
-    if !matches!(s.appearance.presets, Some(Ok(_))) {
+    if matches!(s.appearance.presets, Some(Ok(_))) {
+        thumbs(s);
+    } else {
         spawn(s, |c| Got::Presets(c.ui_presets()));
     }
 }
