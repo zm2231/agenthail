@@ -912,6 +912,7 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
         return;
     }
     s.rekeyed = rekeyed;
+    ui::complete::leave_all_history(s);
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &ui::paste::draft(s));
     }

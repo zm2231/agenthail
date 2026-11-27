@@ -373,11 +373,24 @@ pub fn pump(s: &mut App) -> bool {
 
 fn leave_history(s: &mut App, left: &str) {
     let Some(h) = s.complete.history.get_mut(left) else { return };
-    let recalled = h.current().map(str::to_string);
+    let recalled = h.current().map(super::paste::expand);
     if let Some(draft) = h.leave()
-        && recalled.as_deref() == Some(s.drafts.get(left))
+        && recalled == Some(super::paste::expand(s.drafts.get(left)))
     {
         s.drafts.set(left, &draft);
+    }
+}
+
+pub fn leave_all_history(s: &mut App) {
+    for (id, origin) in browse_origins(s) {
+        if s.composer_for.as_deref() == Some(id.as_str()) {
+            super::paste::set_composer(s, &origin);
+        } else {
+            s.drafts.set(&id, &origin);
+        }
+    }
+    for h in s.complete.history.values_mut() {
+        h.leave();
     }
 }
 
