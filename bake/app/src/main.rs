@@ -111,6 +111,7 @@ pub struct App {
     pub counter: u64,
     pub composer: TextEdit,
     pub composer_for: Option<String>,
+    pub wake_due: Option<f64>,
     pub drafts: Drafts,
     pub unsent: Unconfirmed,
     pub in_flight: HashMap<String, Vec<Unsent>>,
@@ -302,6 +303,7 @@ fn empty(live: Overview, persist: bool) -> App {
         counter: 0,
         composer: TextEdit::new(""),
         composer_for: None,
+        wake_due: None,
         drafts: Drafts::default(),
         unsent: Unconfirmed::default(),
         in_flight: HashMap::new(),
@@ -1380,7 +1382,12 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     menubar::sync_keys(s);
     menubar::warn(s);
     menubar::badge(s);
-    tx.wake_after(Duration::from_millis(if busy { 16 } else { 250 }));
+    let step = if busy { 0.016 } else { 0.25 };
+    let now = tx.clock();
+    if s.wake_due.is_none_or(|due| now >= due || due > now + step) {
+        s.wake_due = Some(now + step);
+        tx.wake_at(now + step);
+    }
     changed
 }
 

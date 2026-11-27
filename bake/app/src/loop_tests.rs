@@ -222,6 +222,25 @@ fn an_idle_loop_asks_to_wake_in_a_quarter_second_and_keeps_that_pace() {
 }
 
 #[test]
+fn polls_run_early_by_other_frames_do_not_add_wakes() {
+    if !isolated("polls_run_early_by_other_frames_do_not_add_wakes") {
+        return;
+    }
+    let dir = Dir::new("early");
+    let mut rt = unframed(app(sessions(&["a"]), &dir));
+    rt.frame(DT);
+    for _ in 0..10 {
+        rt.frame(0.03);
+    }
+    rt.frame(wake_in(&rt));
+    for _ in 0..8 {
+        let polled = rt.state.clock;
+        rt.frame(wake_in(&rt));
+        assert!(rt.state.clock - polled > 0.249, "woke {} after the last poll", rt.state.clock - polled);
+    }
+}
+
+#[test]
 fn an_open_stream_makes_the_loop_ask_for_the_next_frame() {
     if !isolated("an_open_stream_makes_the_loop_ask_for_the_next_frame") {
         return;
