@@ -24,24 +24,47 @@ pub struct Fetched {
     pub started: Instant,
 }
 
-pub const ACTOR_FRESH: std::time::Duration = std::time::Duration::from_secs(600);
 pub const RETRY: std::time::Duration = std::time::Duration::from_secs(60);
 
 #[derive(Default)]
 pub struct Known {
     ledgers: HashMap<String, Option<Instant>>,
-    actors: HashMap<String, Instant>,
+    keys: HashMap<String, String>,
+    wanted: HashSet<String>,
+    changed: HashMap<String, Instant>,
+    actors: HashMap<String, Option<Instant>>,
+    candidates: BTreeSet<String>,
 }
 
 impl Known {
-    pub fn learn(&mut self, fetched: &Fetched) {
+    pub fn learn(&mut self, fetched: &Fetched) -> bool {
         let now = Instant::now();
-        for (key, result) in &fetched.ledgers {
-            self.ledgers.insert(key.clone(), result.is_err().then(|| now + RETRY));
+        let key_of = |id: &str| fetched.recorded.projects.iter().find(|p| p.id == id && !p.ledger_key.is_empty()).map_or(id.to_string(), |p| p.ledger_key.clone());
+        let mut again = false;
+        for (id, result) in &fetched.ledgers {
+            let key = key_of(id);
+            self.keys.insert(key.clone(), id.clone());
+            if [key.as_str(), id.as_str()].iter().any(|k| self.changed.get(*k).is_some_and(|at| *at > fetched.started)) {
+                self.ledgers.remove(id);
+                again = true;
+                continue;
+            }
+            self.ledgers.insert(id.clone(), result.is_err().then(|| now + RETRY));
+            if let Ok(rows) = result {
+                self.candidates.extend(rows.iter().flat_map(|w| &w.timeline).map(|t| t.actor.clone()));
+            }
         }
+        self.wanted = fetched.ledgers.keys().chain(&fetched.held).cloned().collect();
         for id in &fetched.asked {
-            self.actors.insert(id.clone(), now + if fetched.recorded.actors.contains_key(id) { ACTOR_FRESH } else { RETRY });
+            self.actors.insert(id.clone(), (!fetched.recorded.actors.contains_key(id)).then(|| now + RETRY));
         }
+        again
+    }
+
+    pub fn changed(&mut self, key: &str) -> bool {
+        self.changed.insert(key.to_string(), Instant::now());
+        let id = self.keys.get(key).map_or(key, String::as_str);
+        self.wanted.contains(id) && !matches!(self.ledgers.get(id), Some(None))
     }
 
     pub fn skips_ledger(&self, key: &str, streamed: bool) -> bool {
@@ -53,7 +76,11 @@ impl Known {
     }
 
     pub fn skips_actor(&self, id: &str) -> bool {
-        self.actors.get(id).is_some_and(|until| Instant::now() < *until)
+        match self.actors.get(id) {
+            Some(None) => true,
+            Some(Some(until)) => Instant::now() < *until,
+            None => false,
+        }
     }
 }
 
@@ -90,7 +117,8 @@ pub fn fetch(client: &Client, known: &Known, streamed: bool) -> Result<Fetched> 
         .unwrap_or_default();
     let raw = json!({"updatedAt": snap["updatedAt"], "hostEpoch": snap["hostEpoch"], "catalogSeq": snap["catalogSeq"], "projects": snap["projects"], "usage": usage, "hosts": hosts});
     let mut recorded: Recorded = serde_json::from_value(raw)?;
-    let (found, asked) = actors(client, &sessions, |a| known.skips_actor(a), ledgers.values().filter_map(|r| r.as_ref().ok()).flatten());
+    let pool: BTreeSet<String> = ledgers.values().filter_map(|r| r.as_ref().ok()).flatten().flat_map(|w| &w.timeline).map(|t| t.actor.clone()).chain(known.candidates.iter().cloned()).collect();
+    let (found, asked) = actors(client, &sessions, |a| known.skips_actor(a), pool);
     recorded.actors = found;
     recorded.sessions = sessions;
     Ok(Fetched { recorded, ledgers, held, asked, started })
@@ -98,7 +126,7 @@ pub fn fetch(client: &Client, known: &Known, streamed: bool) -> Result<Fetched> 
 
 pub fn ledger(client: &Client, project: &str, sessions: &[Session], known: &HashSet<String>) -> Result<Ledger, String> {
     let rows = rows(client, project, OffsetDateTime::now_utc())?;
-    let (actors, _) = actors(client, sessions, |a| known.contains(a), rows.iter());
+    let (actors, _) = actors(client, sessions, |a| known.contains(a), rows.iter().flat_map(|w| &w.timeline).map(|t| t.actor.clone()).collect());
     Ok(Ledger { rows, actors })
 }
 
@@ -120,9 +148,9 @@ fn trim(rows: Vec<Value>, cutoff: OffsetDateTime) -> Vec<Value> {
     rows.into_iter().filter(|r| !matches!(r["state"].as_str(), Some("done" | "deleted")) || r["id"].as_str().is_some_and(|id| kept.contains(id)) || recent(r)).collect()
 }
 
-fn actors<'a>(client: &Client, sessions: &[Session], skip: impl Fn(&str) -> bool, rows: impl Iterator<Item = &'a Work>) -> (HashMap<String, Actor>, Vec<String>) {
+fn actors(client: &Client, sessions: &[Session], skip: impl Fn(&str) -> bool, pool: BTreeSet<String>) -> (HashMap<String, Actor>, Vec<String>) {
     let listed: BTreeSet<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
-    let wanted: BTreeSet<String> = rows.flat_map(|w| &w.timeline).map(|t| t.actor.clone()).filter(|a| !a.is_empty() && !listed.contains(a.as_str()) && !skip(a) && !a.contains(' ') && !a.starts_with("td:")).collect();
+    let wanted: BTreeSet<String> = pool.into_iter().filter(|a| !a.is_empty() && !listed.contains(a.as_str()) && !skip(a) && !a.contains(' ') && !a.starts_with("td:")).collect();
     let found = std::thread::scope(|scope| {
         let jobs: Vec<_> = wanted.iter().map(|a| (a.clone(), scope.spawn(|| client.get_json(&format!("/api/v1/session?id={}", crate::catalog::enc(a)))))).collect();
         jobs.into_iter()

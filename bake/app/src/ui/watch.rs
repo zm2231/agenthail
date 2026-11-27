@@ -11,6 +11,7 @@ use crate::Bg;
 pub enum Feed {
     Poke,
     Changed,
+    Confirm,
     Catalog(CatalogEvent),
     Gap,
 }

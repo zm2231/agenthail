@@ -338,12 +338,28 @@ fn an_overview_skips_ledgers_the_stream_covers_and_retries_failures_later() {
     let mut known = super::live::Known::default();
     let mut f = Fetched { asked: vec!["found".into(), "gone".into()], ..fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("p", Ok(Vec::new())), ("h2::p", Err("status code 404".into()))]) };
     f.recorded.actors.insert("found".into(), Actor::default());
-    known.learn(&f);
+    assert!(!known.learn(&f));
     assert!(known.skips_ledger("p", true), "a read ledger waits for the stream to say it changed");
     assert!(!known.skips_ledger("p", false), "without the stream every overview reads it");
     assert!(known.skips_ledger("h2::p", true) && known.skips_ledger("h2::p", false), "a failed read waits a minute");
     assert!(!known.skips_ledger("q", true));
     assert!(known.skips_actor("found") && known.skips_actor("gone") && !known.skips_actor("new"));
+}
+
+#[test]
+fn a_ledger_that_changes_while_the_overview_reads_it_is_read_again() {
+    let mut known = super::live::Known::default();
+    let mut f = fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("p", Ok(vec![work("p-W1", "open")]))]);
+    f.recorded.projects[0].ledger_key = "shared:x".into();
+    f.started = Instant::now();
+    assert!(!known.changed("shared:x"), "nothing is known yet; the read in flight checks for itself");
+    assert!(known.learn(&f), "the read began before the change, so it goes again");
+    assert!(!known.skips_ledger("p", true));
+    let again = Fetched { started: Instant::now(), ..f };
+    assert!(!known.learn(&again));
+    assert!(known.skips_ledger("p", true));
+    assert!(!known.changed("shared:x"), "a held ledger is refetched on its own, not by the overview");
+    assert!(!known.changed("project:elsewhere"));
 }
 
 #[test]

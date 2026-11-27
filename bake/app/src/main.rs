@@ -175,10 +175,11 @@ fn load_recorded(path: &str) -> Result<Recorded, String> {
     serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq)]
 pub enum Ask {
     Refresh,
     Reset,
+    Ledger(String),
 }
 
 fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, streamed: Arc<AtomicBool>) {
@@ -188,31 +189,41 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, streamed:
             std::thread::sleep(Duration::from_millis(50));
         }
         let mut known = feed::derive::live::Known::default();
+        let (mut due, mut reset, mut last) = (true, false, None::<std::time::Instant>);
         loop {
-            let started = std::time::Instant::now();
-            let message = match feed::derive::live::fetch(&client, &known, streamed.load(Ordering::Acquire)) {
-                Ok(fetched) => {
-                    known.learn(&fetched);
-                    Bg::Overview(Box::new(fetched))
+            if due {
+                if let Some(at) = last.filter(|_| !reset) {
+                    std::thread::sleep(feed::watch::OVERVIEW_GAP.saturating_sub(at.elapsed()));
                 }
-                Err(error) => Bg::OverviewError(error.to_string()),
-            };
-            if tx.send(message).is_err() {
-                return;
+                if std::mem::take(&mut reset) {
+                    known = Default::default();
+                }
+                due = false;
+                last = Some(std::time::Instant::now());
+                let message = match feed::derive::live::fetch(&client, &known, streamed.load(Ordering::Acquire)) {
+                    Ok(fetched) => {
+                        due = known.learn(&fetched);
+                        Bg::Overview(Box::new(fetched))
+                    }
+                    Err(error) => Bg::OverviewError(error.to_string()),
+                };
+                if tx.send(message).is_err() {
+                    return;
+                }
             }
-            let mut asked = match poke.recv_timeout(feed::watch::OVERVIEW_EVERY) {
-                Ok(ask) => Some(ask),
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+            let wait = if due { Duration::ZERO } else { feed::watch::OVERVIEW_EVERY.saturating_sub(last.map(|at| at.elapsed()).unwrap_or_default()) };
+            let mut take = |ask: Ask| match ask {
+                Ask::Refresh => due = true,
+                Ask::Reset => (due, reset) = (true, true),
+                Ask::Ledger(key) => due |= known.changed(&key),
             };
-            if asked != Some(Ask::Reset) {
-                std::thread::sleep(feed::watch::OVERVIEW_GAP.saturating_sub(started.elapsed()));
+            match poke.recv_timeout(wait) {
+                Ok(ask) => take(ask),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => take(Ask::Refresh),
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
             }
             while let Ok(ask) = poke.try_recv() {
-                asked = asked.max(Some(ask));
-            }
-            if asked == Some(Ask::Reset) {
-                known = Default::default();
+                take(ask);
             }
         }
     });
@@ -937,7 +948,7 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
         Ok(receipt @ (Delivered::Queued(_) | Delivered::QueuedUntilAnswer(_))) => {
             s.status_line.remove(&id);
             s.queued.entry(id.clone()).or_default().push((s.snapshots, receipt));
-            ui::connect::poke(s);
+            ui::connect::confirm(s);
             None
         }
         Ok(delivered) => {
@@ -1070,6 +1081,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Changed(wants) => changed_elsewhere(s, wants),
             Bg::Reopened => reopened(s),
             Bg::LedgerChanged(key) => {
+                ask_overview(s, Ask::Ledger(key.clone()));
                 if let Some(project) = s.ov.live.ledger_changed(&key) {
                     spawn_ledger(s, project);
                 }

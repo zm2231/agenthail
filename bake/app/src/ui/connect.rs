@@ -54,7 +54,7 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
         let (resume, resumed) = channel();
         let mut resumed = Some(resumed);
         let (mut checked, mut last): (Option<Instant>, Option<Instant>) = (None, None);
-        let (mut due, mut down, mut gap) = (true, false, false);
+        let (mut due, mut down, mut gap, mut confirm) = (true, false, false, 0u8);
         loop {
             if due && last.is_none_or(|at| at.elapsed() >= GAP) {
                 last = Some(Instant::now());
@@ -67,7 +67,8 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                     }
                     Ok(snap) => {
                         down = false;
-                        due = false;
+                        due = confirm > 0;
+                        confirm = confirm.saturating_sub(1);
                         let applied = catalog.adopt(snap.sessions, &snap.host_epoch, snap.catalog_seq);
                         let rev = applied.rev.unwrap_or(snap.decisions_rev);
                         if tx.send(Bg::SendSettings(snap.busy_delivery, snap.rekeyed, snap.queue)).is_err() || tx.send(Bg::DecisionsRev(rev)).is_err() {
@@ -104,10 +105,14 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                                 last = None;
                             }
                             Feed::Changed => due = true,
+                            Feed::Confirm => {
+                                due = true;
+                                last = None;
+                                confirm = 1;
+                            }
                             Feed::Gap => {
                                 due = true;
                                 gap = true;
-                                catalog.forget();
                             }
                             Feed::Catalog(event) => batch.push(event),
                         }
@@ -116,9 +121,15 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                 }
             }
             if batch.is_empty() {
+                if gap {
+                    catalog.forget();
+                }
                 continue;
             }
             let applied = catalog.apply(batch);
+            if gap {
+                catalog.forget();
+            }
             due |= applied.reread;
             if let Some(rev) = applied.rev
                 && tx.send(Bg::DecisionsRev(rev)).is_err()
@@ -149,9 +160,9 @@ pub fn up(s: &mut App) {
     }
 }
 
-pub fn poke(s: &App) {
+pub fn confirm(s: &App) {
     if let Some(poke) = &s.link.poke {
-        let _ = poke.send(Feed::Poke);
+        let _ = poke.send(Feed::Confirm);
     }
 }
 

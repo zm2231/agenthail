@@ -51,6 +51,7 @@ pub struct State {
     fetched_at: Option<Instant>,
     ages: Vec<String>,
     hosts_pending: bool,
+    again: bool,
     listing: HashSet<String>,
     generation: HashMap<String, u64>,
     tx: Sender<Done>,
@@ -60,7 +61,7 @@ pub struct State {
 impl State {
     pub fn new() -> State {
         let (tx, rx) = channel();
-        State { catalogs: Vec::new(), hosts_error: None, settings: false, acting: None, web: Web::new(), fetched_at: None, ages: Vec::new(), hosts_pending: false, listing: HashSet::new(), generation: HashMap::new(), tx, rx }
+        State { catalogs: Vec::new(), hosts_error: None, settings: false, acting: None, web: Web::new(), fetched_at: None, ages: Vec::new(), hosts_pending: false, again: false, listing: HashSet::new(), generation: HashMap::new(), tx, rx }
     }
 }
 
@@ -216,6 +217,10 @@ pub fn drain(s: &mut App) -> bool {
     if !shown(s) {
         return changed;
     }
+    if s.ov.ext.again && s.ov.ext.listing.is_empty() && !s.ov.ext.hosts_pending {
+        s.ov.ext.again = false;
+        refresh(s);
+    }
     let paired = s.ov.ext.catalogs.iter().any(|c| !c.host.is_local());
     if s.ov.ext.fetched_at.is_none_or(|at| paired && at.elapsed() >= PAIRED_EVERY) {
         refresh(s);
@@ -247,6 +252,7 @@ pub fn drain(s: &mut App) -> bool {
 
 pub fn changed(s: &mut App) {
     if shown(s) {
+        s.ov.ext.again = !s.ov.ext.listing.is_empty() || s.ov.ext.hosts_pending;
         refresh(s);
     } else {
         s.ov.ext.fetched_at = None;
