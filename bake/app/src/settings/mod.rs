@@ -88,6 +88,7 @@ pub struct Prefs {
     pub wake: crate::wake::Wake,
     stream_down: Option<String>,
     pub tab: usize,
+    revealed_tab: Option<(usize, Option<u32>)>,
     pub general_page: usize,
     pub base: Option<Result<Base, Failure>>,
     pub settings: Option<Result<Settings, Failure>>,
@@ -229,6 +230,7 @@ pub(crate) fn init() -> Prefs {
         stream_down: None,
         external: false,
         tab: overview::TAB,
+        revealed_tab: None,
         general_page: 0,
         base: None,
         settings: None,
@@ -614,7 +616,7 @@ pub fn notify(s: &mut Prefs, what: Notify) {
     write(s, what.action(), Section::Notify, &[Read::Settings], move |c| c.notifications(what).inspect(|_| crate::notify::recheck()));
 }
 
-fn poll(s: &mut Prefs, _: f64, tx: &mut Tx) -> bool {
+pub(crate) fn poll(s: &mut Prefs, _: f64, tx: &mut Tx) -> bool {
     let mut changed = false;
     if !s.loaded && (visible() || std::env::args().any(|a| a == "--window")) {
         s.rewatch = true;
@@ -629,6 +631,11 @@ fn poll(s: &mut Prefs, _: f64, tx: &mut Tx) -> bool {
     if crate::look::poll(crate::look::Window::Settings, tx) {
         appearance::changed(s);
         changed = true;
+    }
+    let shown = (s.tab, crate::look::text_scale().map(f32::to_bits));
+    if s.revealed_tab != Some(shown) {
+        s.revealed_tab = Some(shown);
+        tx.scroll_into_view_in("settings-tabs", format!("segment{}", s.tab));
     }
     if let Some(at) = s.retry_base
         && std::time::Instant::now() >= at
@@ -724,7 +731,7 @@ fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         .w_full()
         .h_full()
         .child(el().absolute(0.0, 0.0).w_full().h_full().fill(theme::card_deep()))
-        .child(col().w_full().scroll_x().scroll_edge_fade(24.0).child(col().w_full().items_center().pt(14.0).pb(10.0).child(tabs.build(&k))))
+        .child(col().key("settings-tabs").w_full().scroll_x().scroll_edge_fade(24.0).child(col().w_full().items_center().pt(14.0).pb(10.0).child(tabs.build(&k))))
         .children(unfollowed(s, &k))
         .child(parts::scroll(page));
     rune_kit::root(body, layer).on_window_focus(|s: &mut Prefs, focused, _| {
