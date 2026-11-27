@@ -3,6 +3,7 @@ package claudesurface
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,13 +11,16 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/claudesurface/claudetest"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
-func removedWorktreeSession(t *testing.T, roots func(worktree string) []string) (checkout, worktree string, session surface.Session, c *Claude, spawns func() int, hooks func() string) {
+func removedWorktreeSession(t *testing.T, roots func(worktree string) []string) (checkout, worktree string, session surface.Session, c *Claude, host *claudehosttest.Fixture, peers *claudetest.PeerManager, prompted func() string) {
 	t.Helper()
 	fixture, host, c := hostResume(t)
+	peers = claudetest.ListenPeerManager(t, fixture.Home)
 	checkout = filepath.Join(fixture.Home, "work", "repo")
 	worktree = filepath.Join(checkout, ".worktrees", "task")
 	if err := os.MkdirAll(worktree, 0o755); err != nil {
@@ -33,13 +37,12 @@ func removedWorktreeSession(t *testing.T, roots func(worktree string) []string) 
 		}
 		return roots(worktree), nil
 	})
-	spawns = func() int { return len(host.Spawns(t, fixtureConversation)) }
-	hooks = func() string {
+	prompted = func() string {
 		data, err := os.ReadFile(filepath.Join(host.ClaudeDir, "hooks.jsonl"))
 		if err != nil {
 			return ""
 		}
-		var started []string
+		var told []string
 		for line := range strings.Lines(string(data)) {
 			var record struct {
 				Event  string `json:"event"`
@@ -49,46 +52,83 @@ func removedWorktreeSession(t *testing.T, roots func(worktree string) []string) 
 					} `json:"hookSpecificOutput"`
 				} `json:"output"`
 			}
-			if json.Unmarshal([]byte(line), &record) == nil && record.Event == "SessionStart" {
-				started = append(started, record.Output.HookSpecificOutput.AdditionalContext)
+			if json.Unmarshal([]byte(line), &record) == nil && record.Event == "UserPromptSubmit" {
+				told = append(told, record.Output.HookSpecificOutput.AdditionalContext)
 			}
 		}
-		return strings.Join(started, "\n")
+		return strings.Join(told, "\n")
 	}
-	return checkout, worktree, session, c, spawns, hooks
+	return checkout, worktree, session, c, host, peers, prompted
+}
+
+// forwardPeer hands a send the daemon's peer manager took to its target's
+// messaging socket, as the manager does.
+func forwardPeer(t *testing.T, send claudetest.PeerSend) {
+	t.Helper()
+	conn, err := net.Dial("unix", send.Target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	frame, _ := json.Marshal(map[string]any{"type": "user", "from": "claude:peer", "message": map[string]string{"role": "user", "content": send.Message}})
+	if _, err := conn.Write(append(frame, '\n')); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestAMessageToAWorkerWhoseWorktreeWasRemovedResumesItInItsCheckoutAndSaysSo(t *testing.T) {
-	checkout, worktree, session, c, spawns, hooks := removedWorktreeSession(t, func(worktree string) []string { return []string{worktree} })
-	result, err := c.SendHumanTurn(context.Background(), &session, "are you there?", nil)
-	if err != nil || !result.Accepted {
-		t.Fatalf("result=%+v err=%v", result, err)
-	}
-	if want := "Its folder " + worktree + " is gone, so it resumed in " + checkout + "."; result.Notice != want {
-		t.Fatalf("notice %q, want %q", result.Notice, want)
-	}
-	if spawns() != 1 || !samePath(t, session.Cwd, checkout) {
-		t.Fatalf("spawns=%d session cwd %s, want one resume in %s", spawns(), session.Cwd, checkout)
-	}
-	line := (surface.FolderMove{Gone: worktree, Into: checkout, Checkout: true}).Line()
-	if started := hooks(); !strings.Contains(started, line) {
-		t.Fatalf("SessionStart told Claude %q, want %q", started, line)
-	}
-	if _, err := os.Stat(worktree); !os.IsNotExist(err) {
-		t.Fatalf("the removed worktree was recreated: %v", err)
+	for _, route := range []struct {
+		name string
+		send func(t *testing.T, c *Claude, session *surface.Session, peers *claudetest.PeerManager) (*surface.SendResult, error)
+	}{
+		{"a person's turn", func(t *testing.T, c *Claude, session *surface.Session, _ *claudetest.PeerManager) (*surface.SendResult, error) {
+			return c.SendHumanTurn(context.Background(), session, "are you there?", nil)
+		}},
+		{"another session's message on the peer socket", func(t *testing.T, c *Claude, session *surface.Session, peers *claudetest.PeerManager) (*surface.SendResult, error) {
+			result, err := c.Send(context.Background(), session, "are you there?")
+			if sends := peers.Sends(); err == nil && len(sends) == 1 {
+				forwardPeer(t, sends[0])
+			}
+			return result, err
+		}},
+	} {
+		t.Run(route.name, func(t *testing.T) {
+			checkout, worktree, session, c, host, peers, prompted := removedWorktreeSession(t, func(worktree string) []string { return []string{worktree} })
+			result, err := route.send(t, c, &session, peers)
+			if err != nil || !result.Accepted {
+				t.Fatalf("result=%+v err=%v", result, err)
+			}
+			if want := "Its folder " + worktree + " is gone, so it resumed in " + checkout + "."; result.Notice != want {
+				t.Fatalf("notice %q, want %q", result.Notice, want)
+			}
+			if spawns := host.Spawns(t, fixtureConversation); len(spawns) != 1 || !samePath(t, session.Cwd, checkout) {
+				t.Fatalf("spawns=%+v session cwd %s, want one resume in %s", spawns, session.Cwd, checkout)
+			}
+			testkit.Eventually(t, "the turn", 15*time.Second, func() bool {
+				turns := host.Turns(t, fixtureConversation)
+				return len(turns) == 1 && turns[0].Text == "are you there?"
+			})
+			line := (surface.FolderMove{Gone: worktree, Into: checkout, Checkout: true}).Line()
+			if told := prompted(); !strings.Contains(told, line) {
+				t.Fatalf("the first prompt told Claude %q, want %q", told, line)
+			}
+			if _, err := os.Stat(worktree); !os.IsNotExist(err) {
+				t.Fatalf("the removed worktree was recreated: %v", err)
+			}
+		})
 	}
 }
 
 func TestAMessageToASessionWhoseFolderIsGoneAndWhoseRootsAreElsewhereIsRefusedWithoutAStart(t *testing.T) {
-	_, worktree, session, c, spawns, _ := removedWorktreeSession(t, func(worktree string) []string {
+	_, worktree, session, c, host, _, _ := removedWorktreeSession(t, func(worktree string) []string {
 		return []string{filepath.Join(filepath.Dir(worktree), "..", "..", "elsewhere")}
 	})
 	_, err := c.SendHumanTurn(context.Background(), &session, "are you there?", nil)
 	if !surface.IsDeliveryTerminal(err) || !strings.Contains(err.Error(), "its folder "+worktree+" is gone") || !strings.Contains(err.Error(), "or archive the session") {
 		t.Fatalf("err=%v, want a terminal refusal that says what to do", err)
 	}
-	if spawns() != 0 {
-		t.Fatalf("spawns=%d, want none", spawns())
+	if spawns := host.Spawns(t, fixtureConversation); len(spawns) != 0 {
+		t.Fatalf("spawns=%+v, want none", spawns)
 	}
 }
 
