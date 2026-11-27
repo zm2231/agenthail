@@ -57,7 +57,7 @@ pub fn offset(at: OffsetDateTime) -> UtcOffset {
 }
 
 pub fn offer(s: &App, id: &str) -> Offer {
-    Offer { paired_hosts: s.ov.d.hosts.iter().any(|h| h.state != "local"), moving: s.menus.ops.sent.contains(id), now: Some(OffsetDateTime::now_utc()) }
+    Offer { paired_hosts: s.ov.d.hosts.iter().any(|h| h.state != "local"), moving: s.menus.ops.sent.contains(id), now: Some(OffsetDateTime::now_utc()), fork_unknown: crate::ui::complete::fork_unknown(s, id, "") }
 }
 
 fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'static) {

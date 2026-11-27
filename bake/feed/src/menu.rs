@@ -150,7 +150,10 @@ pub struct Offer {
     pub paired_hosts: bool,
     pub moving: bool,
     pub now: Option<time::OffsetDateTime>,
+    pub fork_unknown: bool,
 }
+
+pub const FORK_AS_NEW: &str = "Fork again as new";
 
 pub fn entries(x: &Session) -> Vec<Vec<Entry>> {
     offered(x, Offer::default())
@@ -166,7 +169,7 @@ pub fn offered(x: &Session, offer: Offer) -> Vec<Vec<Entry>> {
         open.push(Entry::on(Act::Move, "Move to Another Computer…"));
     }
     if x.forkable() {
-        open.push(Entry::on(Act::Fork, "Fork"));
+        open.push(Entry::on(Act::Fork, if offer.fork_unknown { FORK_AS_NEW } else { "Fork" }));
     }
     if x.focusable() {
         let mut terminal = Entry::on(Act::Terminal, "Open in terminal");
@@ -413,6 +416,7 @@ mod tests {
         assert!(!labels(&x)[0].contains(&"Fork".to_string()));
         x.surface = "codex".into();
         assert_eq!(entries(&x)[0][1], Entry::on(Act::Fork, "Fork"));
+        assert_eq!(offered(&x, Offer { fork_unknown: true, ..Offer::default() })[0][1], Entry::on(Act::Fork, FORK_AS_NEW));
         x.read_only = true;
         assert!(!entries(&x).concat().iter().any(|e| e.act == Act::Fork));
     }

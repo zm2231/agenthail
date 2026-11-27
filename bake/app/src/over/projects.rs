@@ -111,7 +111,7 @@ pub enum Sheet {
     Add { host: String, folder: TextEdit, title: TextEdit },
     Rename { project: String, name: TextEdit },
     Lead { project: String, checkout: String, surface: &'static str, name: TextEdit },
-    Broadcast { project: String, text: TextEdit, key: String, sent: Option<String> },
+    Broadcast { project: String, text: TextEdit, key: String, sent: Option<String>, unknown: bool },
 }
 
 pub struct State {
@@ -237,7 +237,7 @@ fn choose(s: &mut App, key: &str, item: Item, tx: &mut Tx) {
     match item {
         Item::NewConversation { host, folder } => crate::ui::new_session::open(s, crate::ui::new_session::Prefill { host, folder }, tx),
         Item::Rename => open_sheet(s, Sheet::Rename { project: p.id.clone(), name: focused(&name) }),
-        Item::Message => open_sheet(s, Sheet::Broadcast { project: p.id.clone(), text: focused(""), key: String::new(), sent: None }),
+        Item::Message => open_sheet(s, Sheet::Broadcast { project: p.id.clone(), text: focused(""), key: String::new(), sent: None, unknown: false }),
         Item::Lead { .. } => {
             let first = p.lead_places().first().map(|c| c.key()).unwrap_or_default();
             open_sheet(s, Sheet::Lead { project: p.id.clone(), checkout: first, surface: "claude", name: focused("") });
@@ -369,10 +369,11 @@ fn save(s: &mut App) {
     if s.ov.projects.saving {
         return;
     }
-    if let Some(Sheet::Broadcast { key, .. }) = s.ov.projects.sheet.as_mut()
-        && key.is_empty()
+    if let Some(Sheet::Broadcast { key, unknown, .. }) = s.ov.projects.sheet.as_mut()
+        && (key.is_empty() || *unknown)
     {
         *key = feed::catalog::request_key();
+        *unknown = false;
     }
     if let Some(job) = sheet_job(s) {
         let id = s.ov.projects.sheet_id;
@@ -417,7 +418,12 @@ fn settled(s: &mut App, job: Job, from_sheet: Option<u64>, result: Result<Settle
             s.ov.projects.confirm = Some((projects::confirm_replace(&error), again, from_sheet));
         }
         Err(error) => {
-            let message = if error.code == "no_members" {
+            if let (true, Job::Broadcast { .. }, Some(Sheet::Broadcast { unknown, .. })) = (sheet_open, &job, s.ov.projects.sheet.as_mut()) {
+                *unknown = error.outcome_unknown();
+            }
+            let message = if error.outcome_unknown() {
+                feed::catalog::unknown_outcome(&error.message)
+            } else if error.code == "no_members" {
                 "No conversation in this project can take a message right now.".to_string()
             } else if error.code == "partial" {
                 format!("{} was only partly done. {}.", job.what(), error.message)
@@ -707,7 +713,7 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>, k: &Kit) {
     let can_save = sheet_job(s).is_some();
     let open = s.ov.projects.picking;
     let (title, note, mut body, save_label) = match sheet {
-        Sheet::Broadcast { project, text, sent, .. } => {
+        Sheet::Broadcast { project, text, sent, unknown, .. } => {
             let name = s.ov.d.record(project).map(|p| p.name().to_string()).unwrap_or_default();
             let body = match sent {
                 Some(summary) => col().w_full().child(rune::text(summary.clone()).font(k.text(META)).color(base(k)).wrap().w_full()),
@@ -738,13 +744,14 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>, k: &Kit) {
                             _ => &mut s.composer,
                         })
                         .on_input_change(|s: &mut App, _: &mut Tx| {
-                            if let Some(Sheet::Broadcast { key, .. }) = s.ov.projects.sheet.as_mut() {
+                            if let Some(Sheet::Broadcast { key, unknown, .. }) = s.ov.projects.sheet.as_mut() {
                                 key.clear();
+                                *unknown = false;
                             }
                         }),
                 ),
             };
-            (feed::project_message::prompt(&name), None, body, if sent.is_some() { "" } else { "Send" })
+            (feed::project_message::prompt(&name), None, body, if sent.is_some() { "" } else if *unknown { "Send as new" } else { "Send" })
         }
         Sheet::Add { host, folder, title } => {
             let mut body = col().w_full().gap(12.0);

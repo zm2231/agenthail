@@ -244,7 +244,13 @@ pub fn drain(s: &mut crate::App) -> bool {
                     }
                     Err(e) => {
                         let hold = st.inbox.as_ref().and_then(|i| i.decisions.iter().find(|d| d.id() == id)).map(Decision::hold_key).unwrap_or_default();
-                        let why = if e.maybe_delivered { format!("Sent to {who}, not confirmed: {}", e.message) } else { format!("Couldn't send to {who}: {}. Open the session to retry.", e.message) };
+                        let why = if e.outcome_unknown() {
+                            format!("{} Edit the words to send them as a new message.", feed::catalog::unknown_outcome(&e.message))
+                        } else if e.maybe_delivered {
+                            format!("Sent to {who}, not confirmed: {}", e.message)
+                        } else {
+                            format!("Couldn't send to {who}: {}. Open the session to retry.", e.message)
+                        };
                         st.notes.insert(id, (hold, why));
                     }
                 }

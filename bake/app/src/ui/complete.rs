@@ -530,8 +530,7 @@ pub fn done(s: &mut App, done: Done) {
                 }
                 Ok(_) => s.ov.notice = Some("The fork started, but the daemon didn't say which session it made.".into()),
                 Err(error) if error.outcome_unknown() => {
-                    let again = if point.ends_with('/') { "Fork" } else { "Fork from here" };
-                    crate::note(s, &from, format!("{} {again} again sends a new request.", feed::catalog::unknown_outcome(&error.message)));
+                    crate::note(s, &from, format!("{} {} sends a new request.", feed::catalog::unknown_outcome(&error.message), feed::menu::FORK_AS_NEW));
                 }
                 Err(error) if error.maybe_delivered => {
                     let again = if point.ends_with('/') { "Fork" } else { "Fork from here" };
@@ -757,6 +756,10 @@ fn search_key(s: &mut App, ev: &KeyEvent, _: &mut Tx) -> bool {
     true
 }
 
+pub fn fork_unknown(s: &App, from: &str, item: &str) -> bool {
+    s.complete.fork_keys.get(&format!("{from}/{item}")).is_some_and(|(key, _)| s.complete.told_unknown.contains(key))
+}
+
 fn fork(s: &mut App, from: &str, prompt: &Prompt) {
     fork_at(s, from, &prompt.item_id, prompt.turn_id.clone(), prompt.text.clone());
 }
@@ -852,7 +855,13 @@ pub fn search(s: &App, x: &Session, k: &Kit) -> Option<El> {
                     .child(body);
                 if forks && p.session_id == x.id && complete::forkable(p) {
                     let (from, prompt) = (x.id.clone(), p.clone());
-                    let label = if s.complete.forking { "Forking…" } else { "Fork from here" };
+                    let label = if s.complete.forking {
+                        "Forking…"
+                    } else if fork_unknown(s, &x.id, &p.item_id) {
+                        feed::menu::FORK_AS_NEW
+                    } else {
+                        "Fork from here"
+                    };
                     r = r.child(
                         text(label)
                             .font(k.text(META_BOLD))
