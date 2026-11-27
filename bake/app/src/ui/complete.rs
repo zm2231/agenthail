@@ -551,13 +551,17 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
     }
     let Some(x) = session(s, id).cloned() else { return false };
     let draft = super::paste::draft(s);
-    let input = Input::parse(&draft, &Slash::available(&x.capabilities, can(s, &x)));
+    let available = Slash::available(&x.capabilities, can(s, &x));
+    let input = Input::parse(&super::paste::expand(&draft), &available);
     if let Some(problem) = input.problem() {
         crate::note(s, id, problem);
         return true;
     }
-    let Input::Command(command, typed_argument) = input else { return false };
-    let argument = super::paste::expand(&typed_argument);
+    let Input::Command(command, argument) = input else { return false };
+    let typed_argument = match Input::parse(&draft, &available) {
+        Input::Command(typed, kept) if typed == command => kept,
+        _ => argument.clone(),
+    };
     if command == Slash::Name
         && let Some(problem) = feed::menu::rename_problem(&argument, super::session_menu::current_alias(s, id).as_deref())
     {
