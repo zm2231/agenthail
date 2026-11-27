@@ -4,7 +4,7 @@ use feed::link::{self, Link};
 use feed::search::Command;
 use rune::Tx;
 
-use crate::{App, Bg};
+use crate::{App, Bg, Screen};
 
 const RELEASE: bool = matches!(env!("AGENTHAIL_RELEASE").as_bytes(), b"true");
 pub const SCHEME: &str = if RELEASE { "agenthail" } else { "agenthail-bake" };
@@ -13,14 +13,14 @@ pub const LOCK: &str = if RELEASE { "menu-app.lock" } else { "bake-app.lock" };
 
 pub struct Found {
     reference: String,
-    result: Result<String, String>,
+    result: Result<feed::catalog::Session, String>,
 }
 
 #[derive(Default)]
 struct Waiting {
     listed: bool,
     reference: Option<String>,
-    asked: Option<String>,
+    asked: Option<(String, Screen, Option<String>)>,
 }
 
 thread_local! {
@@ -66,7 +66,8 @@ fn open(s: &mut App, reference: &str) {
         crate::over::open_session(s, &reference);
         return;
     };
-    WAITING.with_borrow_mut(|w| w.asked = Some(reference.clone()));
+    let at = (reference.clone(), s.screen.clone(), s.selected.clone());
+    WAITING.with_borrow_mut(|w| w.asked = Some(at));
     let tx = s.outbox.clone();
     std::thread::spawn(move || {
         let result = client.session_for_link(&reference);
@@ -75,14 +76,16 @@ fn open(s: &mut App, reference: &str) {
 }
 
 pub fn found(s: &mut App, found: Found) {
-    if WAITING.with_borrow_mut(|w| w.asked.take_if(|r| *r == found.reference)).is_none() {
+    let asked = WAITING.with_borrow_mut(|w| w.asked.take_if(|(r, ..)| *r == found.reference));
+    let Some((_, screen, selected)) = asked else { return };
+    if s.screen != screen || s.selected != selected {
         return;
     }
     match found.result {
-        Ok(id) => {
-            let id = feed::composer::current(&s.rekeyed, &id).to_string();
-            crate::over::open_session(s, &id);
-        }
+        Ok(row) => match link::resolve(&s.sessions, &row.id).map(str::to_string) {
+            Some(id) => crate::over::open_session(s, &id),
+            None => crate::over::search::open_pinned(s, row),
+        },
         Err(message) => s.ov.notice = Some(message),
     }
 }

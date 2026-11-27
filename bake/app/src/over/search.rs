@@ -37,7 +37,7 @@ pub fn patch_pinned(s: &mut App, id: &str, patch: &feed::menu::Patch) {
     s.ov.search.pins.patch(id, patch);
 }
 
-pub fn open_codex(s: &mut App, row: Session) {
+pub fn open_pinned(s: &mut App, row: Session) {
     let id = row.id.clone();
     s.ov.search.pins.pin(row);
     crate::over::open_session(s, &id);

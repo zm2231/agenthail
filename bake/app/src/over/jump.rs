@@ -101,7 +101,7 @@ fn picks(s: &App) -> usize {
 fn run(s: &mut App, pick: Pick, tx: &mut Tx) {
     match pick {
         Pick::Target(t) => open_target(s, &t),
-        Pick::Codex(x) => search::open_codex(s, *x),
+        Pick::Codex(x) => search::open_pinned(s, *x),
         Pick::Command(c) => search::run(s, c, tx),
     }
 }

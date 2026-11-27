@@ -46,19 +46,32 @@ pub fn resolve<'a>(sessions: &'a [Session], reference: &str) -> Option<&'a str> 
 
 pub const NOT_FOUND: &str = "No session matches that link.";
 
+const DETAIL_FIELDS: [&str; 7] = ["alias", "capabilities", "readOnly", "readOnlyReason", "limitResume", "attention", "ask"];
+
 impl Client {
-    pub fn session_for_link(&self, reference: &str) -> Result<String, String> {
+    pub fn session_for_link(&self, reference: &str) -> Result<Session, String> {
         match self.get_coded(&format!("/api/v1/session?id={}&limit=1", enc(reference))) {
-            Ok(v) => canonical(&v).ok_or_else(|| NOT_FOUND.to_string()),
+            Ok(v) => listed_row(&v).ok_or_else(|| NOT_FOUND.to_string()),
             Err((404, _)) => Err(NOT_FOUND.to_string()),
-            Err((_, message)) if !message.is_empty() => Err(format!("Couldn't open the session in that link: {message}")),
-            Err((code, _)) => Err(format!("Couldn't open the session in that link: status code {code}")),
+            Err((503, code)) if code == "host_unreachable" => Err("The computer that session runs on isn't reachable right now.".into()),
+            Err((0, _)) => Err("Couldn't reach Agenthail to open that link.".into()),
+            Err((code, _)) => Err(format!("Couldn't open the session in that link (status code {code}).")),
         }
     }
 }
 
-pub fn canonical(detail: &Value) -> Option<String> {
-    detail["session"]["id"].as_str().map(str::trim).filter(|id| !id.is_empty()).map(String::from)
+pub fn listed_row(detail: &Value) -> Option<Session> {
+    let mut row = detail["session"].as_object()?.clone();
+    for key in DETAIL_FIELDS {
+        if let Some(v) = detail.get(key).filter(|v| !v.is_null()) {
+            row.insert(key.into(), v.clone());
+        }
+    }
+    row.insert("open".into(), Value::Bool(true));
+    let mut session: Session = serde_json::from_value(Value::Object(row)).ok()?;
+    session.id = session.id.trim().to_string();
+    session.alias = session.alias.filter(|a| !a.is_empty());
+    (!session.id.is_empty()).then_some(session)
 }
 
 fn decode(part: &str) -> Option<String> {
@@ -134,22 +147,41 @@ mod tests {
     }
 
     #[test]
-    fn an_unlisted_reference_takes_the_id_the_daemon_returns() {
-        assert_eq!(canonical(&serde_json::json!({"session": {"id": "019a-thread", "name": "Fix"}})), Some("019a-thread".into()));
-        assert_eq!(canonical(&serde_json::json!({"session": {"id": "  "}})), None);
-        assert_eq!(canonical(&serde_json::json!({"session": {}})), None);
-        assert_eq!(canonical(&serde_json::json!({})), None);
+    fn an_unlisted_reference_reads_the_session_the_daemon_returns() {
+        let detail = serde_json::json!({
+            "session": {"id": "019a-thread", "surface": "codex", "name": "Fix the importer", "status": "idle", "cwd": "/work"},
+            "alias": "optimizer",
+            "capabilities": {"interrupt": true, "steer": true},
+            "readOnly": true,
+            "readOnlyReason": "Another computer owns it",
+            "exchanges": [],
+        });
+        let row = listed_row(&detail).unwrap();
+        assert_eq!((row.id.as_str(), row.surface.as_str(), row.name.as_str(), row.status.as_str()), ("019a-thread", "codex", "Fix the importer", "idle"));
+        assert_eq!(row.alias.as_deref(), Some("optimizer"));
+        assert_eq!(row.cwd.as_deref(), Some("/work"));
+        assert!(row.open);
+        assert!(row.read_only);
+        assert_eq!(listed_row(&serde_json::json!({"session": {"id": "c1"}, "alias": ""})).unwrap().alias, None);
+        assert_eq!(listed_row(&serde_json::json!({"session": {"id": "  "}})), None);
+        assert_eq!(listed_row(&serde_json::json!({"session": {}})), None);
+        assert_eq!(listed_row(&serde_json::json!({})), None);
     }
 
     #[test]
-    fn the_daemon_resolves_an_unlisted_alias_to_its_id() {
+    fn the_daemon_resolves_an_unlisted_alias_to_its_session() {
         let (client, paths) = crate::mock::daemon(vec![
-            (200, r#"{"session": {"id": "019a-thread"}}"#.into()),
+            (200, r#"{"session": {"id": "019a-thread"}, "alias": "optimizer"}"#.into()),
             (404, r#"{"error": {"code": "not_found"}}"#.into()),
+            (503, r#"{"error": {"code": "host_unreachable", "message": "raw"}}"#.into()),
+            (500, r#"{"error": {"code": "internal"}}"#.into()),
         ]);
-        assert_eq!(client.session_for_link("@optimizer"), Ok("019a-thread".into()));
+        let row = client.session_for_link("@optimizer").unwrap();
+        assert_eq!((row.id.as_str(), row.alias.as_deref()), ("019a-thread", Some("optimizer")));
         assert_eq!(paths.recv().unwrap().0, "/api/v1/session?id=%40optimizer&limit=1");
         assert_eq!(client.session_for_link("@nobody"), Err(NOT_FOUND.into()));
+        assert_eq!(client.session_for_link("x"), Err("The computer that session runs on isn't reachable right now.".into()));
+        assert_eq!(client.session_for_link("x"), Err("Couldn't open the session in that link (status code 500).".into()));
     }
 
     #[test]
