@@ -759,8 +759,7 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
         pending.draft = Some(draft).filter(|d| *d != pending.text);
         pending.busy = busy.or(pending.busy);
         pending.turn = turn;
-        s.unsent.add(id, Unsent { maybe_delivered: false, error: "an earlier message isn't confirmed yet".into(), ..pending });
-        over::layout::save(s);
+        hold(s, id, pending);
         return;
     }
     match s.unsent.take_same(id, &message, &attachments) {
@@ -777,6 +776,16 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
             pending.turn = turn;
             dispatch(s, id, pending, false, tx);
         }
+    }
+}
+
+fn hold(s: &mut App, id: &str, pending: Unsent) {
+    let held = Unsent { maybe_delivered: false, error: "an earlier message isn't confirmed yet".into(), ..pending };
+    s.unsent.add(id, held.clone());
+    if let Err(error) = over::layout::save_now(s) {
+        let kept = Unsent { unanswered: false, error: format!("the message couldn't be saved first ({error})"), ..held };
+        put_back(s, id, &kept);
+        s.unsent.add(id, kept);
     }
 }
 
@@ -948,8 +957,7 @@ pub fn send_as_new(s: &mut App, id: &str, tx: &mut Tx) {
         pending.busy = Some(Busy::Queue);
     }
     if waiting_earlier(s, id) {
-        s.unsent.add(id, Unsent { maybe_delivered: false, error: "an earlier message isn't confirmed yet".into(), ..pending });
-        over::layout::save(s);
+        hold(s, id, pending);
         return;
     }
     dispatch(s, id, pending, false, tx);
