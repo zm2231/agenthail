@@ -98,6 +98,7 @@ pub struct Win {
     gone: Arc<AtomicBool>,
     clock: f64,
     save_after: f64,
+    wake: crate::wake::Wake,
     #[cfg(target_os = "macos")]
     page_spent: bool,
 }
@@ -141,6 +142,7 @@ impl Win {
             gone: Arc::new(AtomicBool::new(false)),
             clock: 0.0,
             save_after: 0.0,
+            wake: crate::wake::Wake::default(),
             #[cfg(target_os = "macos")]
             page_spent: false,
         }
@@ -483,7 +485,7 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
             w.save_after = t + SAVE_RETRY_SECS;
         }
     }
-    tx.wake_after(Duration::from_millis(100));
+    w.wake.after(tx, Duration::from_millis(100));
     trace("poll", w);
     changed
 }

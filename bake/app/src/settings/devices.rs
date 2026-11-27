@@ -268,7 +268,7 @@ pub fn poll(s: &mut Prefs, tx: &mut Tx) -> bool {
     }
     let next = [s.dev.next_check, s.dev.expires, s.dev.copied_until, s.dev.link_qr.as_ref().map(|(_, at)| *at)].into_iter().flatten().min();
     if let Some(at) = next {
-        tx.wake_after(at.saturating_duration_since(now).max(Duration::from_millis(16)));
+        s.wake.after(tx, at.saturating_duration_since(now).max(Duration::from_millis(16)));
     }
     changed
 }

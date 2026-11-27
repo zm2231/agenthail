@@ -69,6 +69,7 @@ pub struct Prefs {
     seen: u64,
     rewatch: bool,
     retry_base: Option<std::time::Instant>,
+    pub wake: crate::wake::Wake,
     stream_down: Option<String>,
     pub tab: usize,
     pub base: Option<Result<Base, Failure>>,
@@ -201,6 +202,7 @@ fn init() -> Prefs {
         seen: 0,
         rewatch: false,
         retry_base: None,
+        wake: crate::wake::Wake::default(),
         stream_down: None,
         external: false,
         tab: 0,
@@ -580,11 +582,11 @@ fn poll(s: &mut Prefs, _: f64, tx: &mut Tx) -> bool {
         fetch(s, Read::Base);
     }
     if s.in_flight > 0 {
-        tx.wake_after(Duration::from_millis(60));
+        s.wake.after(tx, Duration::from_millis(60));
     } else if s.tab == appearance::TAB && (visible() || std::env::args().any(|a| a == "--window")) {
-        tx.wake_after(Duration::from_millis(300));
+        s.wake.after(tx, Duration::from_millis(300));
     } else if s.retry_base.is_some() && visible() {
-        tx.wake_after(Duration::from_secs(1));
+        s.wake.after(tx, Duration::from_secs(1));
     }
     changed
 }
