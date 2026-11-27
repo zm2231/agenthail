@@ -49,7 +49,23 @@ pub struct Work {
     pub ledger_key: String,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct WorkKey {
+    pub ledger: String,
+    pub id: String,
+}
+
+impl WorkKey {
+    pub fn new(ledger: impl Into<String>, id: impl Into<String>) -> WorkKey {
+        WorkKey { ledger: ledger.into(), id: id.into() }
+    }
+}
+
 impl Work {
+    pub fn key(&self) -> WorkKey {
+        WorkKey::new(self.ledger_key(), &self.id)
+    }
+
     pub fn ledger_key(&self) -> &str {
         if self.ledger_key.is_empty() { &self.project } else { &self.ledger_key }
     }
@@ -197,7 +213,7 @@ pub struct World {
     pub now: OffsetDateTime,
     pub sessions: Vec<Session>,
     pub projects: Vec<Project>,
-    pub work: HashMap<String, Work>,
+    pub work: HashMap<WorkKey, Work>,
     pub transcripts: HashMap<String, Vec<Item>>,
     pub prompted_before: HashSet<String>,
     pub started_by: HashMap<String, String>,
@@ -226,7 +242,7 @@ impl World {
             for mut w in rows {
                 w.project = key.clone();
                 w.ledger_key = ledger_key.clone();
-                work.insert(w.id.clone(), w);
+                work.insert(w.key(), w);
             }
         }
         let names = crate::derive::names::build(&raw.sessions, &raw.actors, &work);

@@ -21,7 +21,7 @@ pub enum Screen {
     Now,
     Session(String),
     Project(String),
-    Work(String),
+    Work(feed::derive::WorkKey),
     Sessions,
 }
 
@@ -134,7 +134,11 @@ fn init() -> App {
             app.screen = Screen::Sessions;
             app.sessions_filter = 1;
         }
-        "work" => app.screen = Screen::Work(arg("--item").unwrap_or_else(|| "agenthail-W595".into())),
+        "work" => {
+            let id = arg("--item").unwrap_or_else(|| "agenthail-W595".into());
+            let key = app.d.work.keys().filter(|k| k.id == id).min().cloned();
+            app.screen = Screen::Work(key.unwrap_or_else(|| feed::derive::WorkKey::new("", id)));
+        }
         "jump" => {
             app.now_brief = true;
             open_jump(&mut app, arg("--query").as_deref().unwrap_or(""));
@@ -158,7 +162,7 @@ pub fn go(s: &mut App, to: Screen) {
 pub fn open_target(s: &mut App, t: &Target) {
     match t {
         Target::Session(id) => go(s, Screen::Session(id.clone())),
-        Target::Work(id) => go(s, Screen::Work(id.clone())),
+        Target::Work(key) => go(s, Screen::Work(key.clone())),
         Target::Project(key) => go(s, Screen::Project(key.clone())),
     }
 }
@@ -169,7 +173,7 @@ pub fn next_need(s: &mut App) {
     }
     let current = match &s.screen {
         Screen::Session(id) => s.needs.iter().position(|n| n.target == Target::Session(id.clone())),
-        Screen::Work(id) => s.needs.iter().position(|n| n.target == Target::Work(id.clone())),
+        Screen::Work(key) => s.needs.iter().position(|n| matches!(&n.target, Target::Work(k) if k == key)),
         _ => None,
     };
     let ix = current.map(|i| (i + 1) % s.needs.len()).unwrap_or(0);
@@ -358,7 +362,7 @@ fn window(s: &App, cx: &mut Cx<App>) -> El {
                 project::lead(s, cx, key, &mut layer)
             }
         }
-        Screen::Work(id) => work::view(s, cx, id, &mut layer),
+        Screen::Work(key) => work::view(s, cx, key, &mut layer),
         Screen::Sessions => sessions::view(s, cx, &mut layer),
     };
     if s.jump.is_some() {

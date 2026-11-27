@@ -125,7 +125,7 @@ fn step(s: &mut App, by: isize) -> bool {
     let project = match (&s.screen, &selected) {
         (_, Some(id)) => crate::ui::gone::shown(s, id).and_then(|x| over::ui::project_for(s, x)),
         (Screen::Project(key), None) => Some(key.clone()),
-        (Screen::Work(id), None) => s.ov.d.work.get(id).map(|w| w.project.clone()),
+        (Screen::Work(key), None) => s.ov.d.work.get(key).map(|w| w.project.clone()),
         _ => None,
     };
     let order = over::ui::sidebar_order(s, project.as_deref(), selected.as_deref());

@@ -67,8 +67,8 @@ pub(crate) fn priority(p: &str, k: &Kit) -> El {
 pub(crate) fn rail(s: &App, x: &Session, k: &Kit) -> El {
     let mut parts: Vec<El> = Vec::new();
     parts.extend(super::ready::led_by(s, &x.id).and_then(|p| super::ready::link(s, &p.key, k)).map(|link| row().w_full().pt(12.0).items_center().child(label("Lead", k)).child(spacer()).child(link)));
-    if let Some(work) = x.primary_work(s.work_pick.get(&x.id).map(String::as_str)) {
-        let item = s.items.get(&work.item_id);
+    if let Some(work) = x.primary_work(s.work_pick.get(&x.id)) {
+        let item = s.items.get(&work.key());
         let state = item.map(|i| i.state.clone()).unwrap_or_else(|| work.state.clone());
         let mut tags = row().gap(6.0).items_center().child(row().px(7.0).py(2.0).radius(6.0).fill(wash()).child(text(work.item_id.clone()).font(k.text(META)).color(muted())));
         if let Some(i) = item {
@@ -81,7 +81,7 @@ pub(crate) fn rail(s: &App, x: &Session, k: &Kit) -> El {
         if let Some(latest) = item.and_then(|i| i.timeline.iter().rev().find(|e| e.kind == "log").and_then(|e| e.text.clone())) {
             body = body.child(note("Latest", accent(), latest, k));
         }
-        let others: Vec<_> = x.held_work.iter().filter(|w| w.item_id != work.item_id).collect();
+        let others: Vec<_> = x.held_work.iter().filter(|w| w.key() != work.key()).collect();
         if !others.is_empty() {
             body = body.child(
                 col()
@@ -90,9 +90,9 @@ pub(crate) fn rail(s: &App, x: &Session, k: &Kit) -> El {
                     .pt(2.0)
                     .child(text(format!("ALSO HOLDS {}", others.len())).font(k.text(LABEL)).color(faint()).pb(2.0))
                     .children(others.into_iter().take(6).map(|w| {
-                        let item = w.item_id.clone();
+                        let item = w.key();
                         row()
-                            .key(format!("held-{}", w.item_id))
+                            .key(format!("held-{}-{}", w.project_key, w.item_id))
                             .w_full()
                             .gap(8.0)
                             .items_center()

@@ -337,21 +337,21 @@ fn a_snapshot_that_did_not_touch_the_selected_session_does_not_reread_it() {
 
     rt.update(|s, _| crate::over::open_session(s, "a"));
     rt.frame(DT);
-    assert!(rt.state.items.contains_key("W1"), "opening the session reads its work item");
+    assert!(rt.state.items.contains_key(&zk("p1", "W1")), "opening the session reads its work item");
 
     rt.state.items.clear();
     send(&rt, snapshot(2, list(), Some(&["b"])));
     rt.frame(DT);
-    assert!(!rt.state.items.contains_key("W1"), "an untouched selected session isn't read again");
+    assert!(!rt.state.items.contains_key(&zk("p1", "W1")), "an untouched selected session isn't read again");
 
     send(&rt, snapshot(3, list(), Some(&["a"])));
     rt.frame(DT);
-    assert!(rt.state.items.contains_key("W1"), "a touched selected session is read again");
+    assert!(rt.state.items.contains_key(&zk("p1", "W1")), "a touched selected session is read again");
 
     rt.state.items.clear();
     send(&rt, snapshot(4, list(), None));
     rt.frame(DT);
-    assert!(rt.state.items.contains_key("W1"), "a snapshot without a touched set rereads it");
+    assert!(rt.state.items.contains_key(&zk("p1", "W1")), "a snapshot without a touched set rereads it");
 }
 
 #[test]
@@ -496,6 +496,8 @@ fn ledger_api(paths: std::sync::mpsc::Sender<String>) -> String {
                     (200, json!({"items": [item("z-W9", "Parked export")], "truncated": false}))
                 } else if path.starts_with("/api/v1/ledger/search?") || path.ends_with("&id=z-W6") || (path == "/api/v1/ledger?projectKey=shared%3Az&view=item&id=z-W8" && w8.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0) {
                     (500, json!({"error": {"code": "internal", "message": "the ledger store is busy"}}))
+                } else if path == "/api/v1/ledger?projectKey=shared%3Aq&view=item&id=z-W9" {
+                    (200, json!({"item": {"item": {"id": "z-W9", "text": "Other export", "state": "open", "type": "task", "priority": "P3"}}}))
                 } else if path.starts_with("/api/v1/ledger?projectKey=shared%3Az&view=item&id=") {
                     let id = path.rsplit('=').next().unwrap_or_default();
                     let state = match id {
@@ -518,6 +520,10 @@ fn ledger_api(paths: std::sync::mpsc::Sender<String>) -> String {
         }
     });
     base
+}
+
+fn zk(ledger: &str, id: &str) -> feed::derive::WorkKey {
+    feed::derive::WorkKey::new(ledger, id)
 }
 
 fn until(rt: &mut Runtime<App>, done: impl Fn(&App) -> bool) {
@@ -602,24 +608,24 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     assert_eq!(asked(&paths).len(), 1, "the next keystroke retries");
 
     let item = "/api/v1/ledger?projectKey=shared%3Az&view=item&id=z-W9";
-    crate::over::worksearch::open(&mut rt.state, "shared:z", "z-W9");
-    assert!(rt.state.screen == Screen::Work("z-W9".into()));
+    crate::over::worksearch::open(&mut rt.state, &zk("shared:z", "z-W9"));
+    assert!(rt.state.screen == Screen::Work(zk("shared:z", "z-W9")));
     assert!(rt.state.ov.jump.is_none());
-    assert_eq!(crate::over::worksearch::note(&rt.state, "z-W9").as_deref(), Some("Loading this work item…"));
-    until(&mut rt, |s| s.ov.d.work.contains_key("z-W9"));
+    assert_eq!(crate::over::worksearch::note(&rt.state, &zk("shared:z", "z-W9")).as_deref(), Some("Loading this work item…"));
+    until(&mut rt, |s| s.ov.d.work.contains_key(&zk("shared:z", "z-W9")));
     assert_eq!(asked(&paths), [item]);
     send(&rt, overview(2, sessions(&["a"])));
     rt.frame(DT);
-    let w = &rt.state.ov.d.work["z-W9"];
+    let w = &rt.state.ov.d.work[&zk("shared:z", "z-W9")];
     assert_eq!((w.state.as_str(), w.ledger_key(), w.project.as_str()), ("parked", "shared:z", "shared:z"), "a rebuild keeps the opened item");
     assert_eq!(rt.state.ov.d.project_name("shared:z"), "Zed", "and the project name the search gave it");
-    assert_eq!(crate::over::worksearch::note(&rt.state, "z-W9"), None);
+    assert_eq!(crate::over::worksearch::note(&rt.state, &zk("shared:z", "z-W9")), None);
 
-    crate::over::open_target(&mut rt.state, &crate::over::Target::Work("z-W9".into()));
+    crate::over::open_target(&mut rt.state, &crate::over::Target::Work(zk("shared:z", "z-W9")));
     quiet(&mut rt);
     assert_eq!(asked(&paths), [item], "opening a found item again rereads it");
 
-    crate::over::worksearch::open(&mut rt.state, "shared:z", "z-W9");
+    crate::over::worksearch::open(&mut rt.state, &zk("shared:z", "z-W9"));
     let mut loaded = Fetched { recorded: recorded(3, sessions(&["a"])), ledgers: HashMap::new(), held: Vec::new(), asked: Vec::new(), started: std::time::Instant::now(), usage: None, moved: Vec::new() };
     let row: feed::derive::world::Work = serde_json::from_value(json!({"id": "z-W9", "text": "Parked export", "state": "in_progress"})).unwrap();
     loaded.recorded.projects[0].ledger_key = "shared:z".into();
@@ -628,9 +634,9 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     rt.frame(DT);
     quiet(&mut rt);
     assert_eq!(asked(&paths), [item]);
-    let w = &rt.state.ov.d.work["z-W9"];
+    let w = &rt.state.ov.d.work[&zk("shared:z", "z-W9")];
     assert_eq!((w.state.as_str(), w.project.as_str()), ("in_progress", "p1"), "a read that lands after the ledger loads leaves the loaded item");
-    crate::over::worksearch::open(&mut rt.state, "shared:z", "z-W9");
+    crate::over::worksearch::open(&mut rt.state, &zk("shared:z", "z-W9"));
     quiet(&mut rt);
     assert!(asked(&paths).is_empty(), "a loaded item opens without a read");
 
@@ -640,17 +646,39 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     assert_eq!(crate::over::jump::shown(&rt.state), [("Parked export".to_string(), "Build · Someone's move · Alpha · …a parked export…".to_string())], "a loaded match takes the search's snippet instead of listing twice");
     assert_eq!(asked(&paths), ["/api/v1/ledger/search?q=export&limit=20"]);
 
-    crate::over::worksearch::open(&mut rt.state, "shared:q", "z-W9");
-    assert!(rt.state.ov.notice.as_deref().is_some_and(|n| n.contains("same id")), "{:?}", rt.state.ov.notice);
+    let (mine, other) = (zk("shared:z", "z-W9"), zk("shared:q", "z-W9"));
+    crate::over::worksearch::open(&mut rt.state, &other);
+    assert!(rt.state.screen == Screen::Work(other.clone()) && rt.state.ov.notice.is_none());
+    until(&mut rt, |s| s.ov.d.work.contains_key(&other));
+    assert_eq!(asked(&paths), ["/api/v1/ledger?projectKey=shared%3Aq&view=item&id=z-W9"], "the same id in another ledger is read from that ledger");
+    let w = &rt.state.ov.d.work[&mine];
+    assert_eq!((w.text.as_str(), w.state.as_str(), w.project.as_str()), ("Parked export", "in_progress", "p1"), "the loaded item keeps its place");
+    let w = &rt.state.ov.d.work[&other];
+    assert_eq!((w.text.as_str(), w.state.as_str(), w.ledger_key()), ("Other export", "open", "shared:q"), "and the other ledger's item is its own");
+    crate::over::work::start(&mut rt.state, &other, feed::ledger::Move::Claim);
+    let mut claimed = Vec::new();
+    for _ in 0..400 {
+        claimed.extend(asked(&paths));
+        if claimed.len() >= 2 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        rt.frame(DT);
+    }
+    let posted: serde_json::Value = serde_json::from_str(claimed[0].strip_prefix("/api/v1/ledger/work ").expect("the claim is posted first")).unwrap();
+    assert_eq!((posted["projectKey"].as_str(), posted["itemId"].as_str(), posted["action"].as_str()), (Some("shared:q"), Some("z-W9"), Some("claim")), "a move on one of them goes to its own ledger");
+    assert_eq!(claimed[1], "/api/v1/ledger?projectKey=shared%3Aq&view=item&id=z-W9", "and only that one is read again");
+    assert_eq!(rt.state.ov.d.work[&mine].state, "in_progress", "the other is untouched");
+    crate::over::go(&mut rt.state, Screen::Work(mine.clone()));
     quiet(&mut rt);
-    assert!(asked(&paths).is_empty(), "work that shares an id with another project's isn't read or opened as the other");
+    assert!(asked(&paths).is_empty(), "the loaded one still opens without a read");
 
-    crate::over::worksearch::open(&mut rt.state, "shared:z", "z-W8");
-    until(&mut rt, |s| s.ov.d.work.contains_key("z-W8"));
-    crate::over::open_target(&mut rt.state, &crate::over::Target::Work("z-W8".into()));
+    crate::over::worksearch::open(&mut rt.state, &zk("shared:z", "z-W8"));
+    until(&mut rt, |s| s.ov.d.work.contains_key(&zk("shared:z", "z-W8")));
+    crate::over::open_target(&mut rt.state, &crate::over::Target::Work(zk("shared:z", "z-W8")));
     quiet(&mut rt);
-    assert_eq!(rt.state.ov.d.work["z-W8"].state, "parked", "a failed refresh keeps what it last had");
-    assert_eq!(crate::over::worksearch::note(&rt.state, "z-W8").as_deref(), Some("Couldn't refresh this work item, so it may be out of date: the ledger store is busy"));
+    assert_eq!(rt.state.ov.d.work[&zk("shared:z", "z-W8")].state, "parked", "a failed refresh keeps what it last had");
+    assert_eq!(crate::over::worksearch::note(&rt.state, &zk("shared:z", "z-W8")).as_deref(), Some("Couldn't refresh this work item, so it may be out of date: the ledger store is busy"));
 
     assert_eq!(asked(&paths).len(), 2, "z-W8 was read on open and again on reopen");
     send(&rt, Bg::LedgerChanged("shared:q".into(), std::time::Instant::now()));
@@ -670,47 +698,47 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     rt.frame(DT);
     quiet(&mut rt);
     assert!(asked(&paths).is_empty(), "a found item that isn't on screen isn't reread on every change");
-    crate::over::go(&mut rt.state, Screen::Work("z-W8".into()));
+    crate::over::go(&mut rt.state, Screen::Work(zk("shared:z", "z-W8")));
     quiet(&mut rt);
     assert_eq!(asked(&paths).len(), 1, "coming back to a found item rereads it");
 
-    crate::over::worksearch::open(&mut rt.state, "shared:z", "z-W7");
+    crate::over::worksearch::open(&mut rt.state, &zk("shared:z", "z-W7"));
     rt.frame(DT);
     send(&rt, Bg::LedgerChanged("shared:z".into(), std::time::Instant::now()));
     rt.frame(DT);
-    until(&mut rt, |s| s.ov.d.work.contains_key("z-W7"));
+    until(&mut rt, |s| s.ov.d.work.contains_key(&zk("shared:z", "z-W7")));
     std::thread::sleep(std::time::Duration::from_millis(400));
     quiet(&mut rt);
     assert_eq!(asked(&paths).len(), 2, "a change during the first read reads it again");
 
-    crate::over::worksearch::open(&mut rt.state, "shared:z", "z-W6");
-    until(&mut rt, |s| crate::over::worksearch::note(s, "z-W6").is_some_and(|n| n.starts_with("Couldn't open")));
+    crate::over::worksearch::open(&mut rt.state, &zk("shared:z", "z-W6"));
+    until(&mut rt, |s| crate::over::worksearch::note(s, &zk("shared:z", "z-W6")).is_some_and(|n| n.starts_with("Couldn't open")));
     crate::over::go(&mut rt.state, Screen::Now);
-    crate::over::go(&mut rt.state, Screen::Work("z-W6".into()));
+    crate::over::go(&mut rt.state, Screen::Work(zk("shared:z", "z-W6")));
     quiet(&mut rt);
     send(&rt, Bg::LedgerChanged("shared:z".into(), std::time::Instant::now()));
     rt.frame(DT);
     quiet(&mut rt);
     assert_eq!(asked(&paths), ["/api/v1/ledger?projectKey=shared%3Az&view=item&id=z-W6"; 3], "a failed first read still rereads on return and on its ledger's change");
-    crate::over::worksearch::open(&mut rt.state, "shared:z", "z-W6");
+    crate::over::worksearch::open(&mut rt.state, &zk("shared:z", "z-W6"));
     quiet(&mut rt);
     assert_eq!(asked(&paths).len(), 1, "reopening it from search reads it once");
 
-    crate::over::worksearch::open(&mut rt.state, "shared:z", "z-W5");
-    until(&mut rt, |s| s.ov.d.work.contains_key("z-W5"));
+    crate::over::worksearch::open(&mut rt.state, &zk("shared:z", "z-W5"));
+    until(&mut rt, |s| s.ov.d.work.contains_key(&zk("shared:z", "z-W5")));
     assert_eq!(asked(&paths).len(), 1);
-    crate::over::work::start(&mut rt.state, "z-W5", feed::ledger::Move::Reopen);
+    crate::over::work::start(&mut rt.state, &zk("shared:z", "z-W5"), feed::ledger::Move::Reopen);
     let mut moved = Vec::new();
     for _ in 0..400 {
         moved.extend(asked(&paths));
-        if moved.len() >= 2 && rt.state.ov.d.work["z-W5"].state == "open" {
+        if moved.len() >= 2 && rt.state.ov.d.work[&zk("shared:z", "z-W5")].state == "open" {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(5));
         rt.frame(DT);
     }
     assert_eq!(moved.len(), 2, "{moved:?}");
-    assert_eq!(rt.state.ov.d.work["z-W5"].state, "open", "the screen shows the reopened item");
+    assert_eq!(rt.state.ov.d.work[&zk("shared:z", "z-W5")].state, "open", "the screen shows the reopened item");
     let posted: serde_json::Value = serde_json::from_str(moved[0].strip_prefix("/api/v1/ledger/work ").expect("the move is posted first")).unwrap();
     assert_eq!((posted["projectKey"].as_str(), posted["itemId"].as_str(), posted["action"].as_str()), (Some("shared:z"), Some("z-W5"), Some("reopen")), "a move on found work goes to its own ledger");
     assert_eq!(moved[1], "/api/v1/ledger?projectKey=shared%3Az&view=item&id=z-W5", "and the item is read again after it");
@@ -733,9 +761,9 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     grew.ledgers.insert("p1".into(), Ok(vec![serde_json::from_value(json!({"id": "p1-W1", "text": "Fix the exporter", "state": "in_progress"})).unwrap()]));
     send(&rt, Bg::Overview(Box::new(grew)));
     rt.frame(DT);
-    assert!(rt.state.ov.d.work.contains_key("p1-W1"));
+    assert!(rt.state.ov.d.work.contains_key(&zk("p1", "p1-W1")));
     assert_eq!(highlighted_session(&rt), Some("exporter".into()), "a rebuild that adds a matching row above keeps the highlight");
-    assert_eq!(crate::over::worksearch::note(&rt.state, "z-W9"), None);
+    assert_eq!(crate::over::worksearch::note(&rt.state, &zk("shared:z", "z-W9")), None);
 }
 
 #[test]

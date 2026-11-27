@@ -41,9 +41,9 @@ fn tile(i: usize, expected: &str, observed: &str, passed: Option<bool>, k: &Kit)
         .child(text(observed.to_string()).font(META.lh(18.0)).color(if passed.is_some() { base(k) } else { weak(k) }).wrap())
 }
 
-pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
+pub fn view(s: &App, cx: &mut Cx<App>, key: &feed::derive::WorkKey, _layer: &mut Vec<El>) -> El {
     let k = cx.kit();
-    let Some(w) = s.d.work.get(id) else { return col() };
+    let Some(w) = s.d.work.get(key) else { return col() };
     let project = s.d.project(&w.project).map(|p| p.name.clone()).unwrap_or_default();
     let phase = phase(w);
     let pr = pr(w);
@@ -163,7 +163,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
         .child(brief)
         .child(proof)
         .child(gaps);
-    let main = col().key(format!("work-{id}")).w_full().h_full().items_center().scroll(ScrollSpec { stick_bottom: false }).child(body);
+    let main = col().key(format!("work-{}-{}", key.ledger, key.id)).w_full().h_full().items_center().scroll(ScrollSpec { stick_bottom: false }).child(body);
 
     let mut people: Vec<String> = Vec::new();
     let mut seen = BTreeSet::new();
@@ -195,7 +195,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
                 .child(row().on_press(move |s: &mut App| go(s, Screen::Project(pkey.clone()))).child(ui::crumb(&[(&project, false), ("Work", false), (&ui::short_title(&plain(&w.text), 34), true)], &k))),
         )
         .trailing(ui::needs_button(s, &k));
-    ui::frame(cx, s, Some(ui::sidebar(s, Some(&w.project), Some(id), &k)), main, Some(rail), toolbar)
+    ui::frame(cx, s, Some(ui::sidebar(s, Some(&w.project), None, &k)), main, Some(rail), toolbar)
 }
 
 fn gap_line(t: &str, k: &Kit) -> El {

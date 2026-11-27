@@ -5,7 +5,7 @@ use crate::catalog::{Session, parse_time};
 use super::asks::Ask;
 use super::sessions::busy;
 use super::text::{plain, short_id};
-use super::world::{Work, World};
+use super::world::{Work, WorkKey, World};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum NeedKind {
@@ -86,7 +86,7 @@ impl Group {
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Target {
     Session(String),
-    Work(String),
+    Work(WorkKey),
     Project(String),
 }
 
@@ -179,7 +179,7 @@ impl World {
         }
         let stopped = s.attention.as_ref().is_some_and(|a| a.kind != "replacedRequest") || s.turn_state.as_ref().is_some_and(|t| t.state == "waiting_person");
         let worker = self.started_by.contains_key(&s.id) && !s.archived;
-        let in_progress = s.held_work.iter().any(|h| self.work.get(&h.item_id).map_or(h.state.as_str(), |w| w.state.as_str()) == "in_progress");
+        let in_progress = s.held_work.iter().any(|h| self.work.get(&h.key()).map_or(h.state.as_str(), |w| w.state.as_str()) == "in_progress");
         if busy(s) || stopped || worker || in_progress || s.queue_count > 0 { Group::Holding } else { Group::Waiting }
     }
 
@@ -212,7 +212,7 @@ impl World {
                 title: plain(&w.text),
                 who: self.worker(w),
                 at: w.submitted_at(),
-                target: Target::Work(w.id.clone()),
+                target: Target::Work(w.key()),
                 label: Some(short_id(&w.id)),
             });
         }

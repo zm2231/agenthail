@@ -14,7 +14,7 @@ use feed::derive::phase::{CHECK, SHIP, off_board, phase};
 use feed::derive::proof::proof;
 use feed::derive::work::{commit, pr, unchecked};
 
-use crate::over::{PHASES, plain, short_id};
+use crate::over::{PHASES, WorkKey, plain, short_id};
 use crate::over::ui::{self, BODY, BODY_MED, HEAD, META, META_MED, TITLE, base, strong, weak};
 use crate::over::go;
 use crate::{App, Screen};
@@ -47,10 +47,10 @@ fn tile(i: usize, expected: &str, observed: &str, passed: Option<bool>, k: &Kit)
         .child(text(observed.to_string()).font(k.text(META.lh(18.0))).color(if passed.is_some() { base(k) } else { weak(k) }).wrap())
 }
 
-pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>, main_kit: &Kit) -> El {
+pub fn view(s: &App, cx: &mut Cx<App>, key: &WorkKey, _layer: &mut Vec<El>, main_kit: &Kit) -> El {
     let k = cx.kit();
-    let Some(w) = s.ov.d.work.get(id) else {
-        return col().w_full().padding(24.0).children(crate::over::worksearch::note(s, id).map(|n| text(n).font(k.text(BODY)).color(weak(&k)).wrap()));
+    let Some(w) = s.ov.d.work.get(key) else {
+        return col().w_full().padding(24.0).children(crate::over::worksearch::note(s, key).map(|n| text(n).font(k.text(BODY)).color(weak(&k)).wrap()));
     };
     let project = s.ov.d.project_name(&w.project);
     let phase = phase(w);
@@ -77,9 +77,9 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>, main_kit:
         })
         .child(text(plain(&w.text)).font(k.text(TITLE.lh(30.0))).color(strong(&k)).wrap())
         .child(text(plain(&w.description)).font(k.text(BODY)).color(base(&k)).wrap().max_lines(3))
-        .children(crate::over::worksearch::note(s, id).map(|n| text(n).font(k.text(META)).color(ui::needs_color(&k)).wrap()));
+        .children(crate::over::worksearch::note(s, key).map(|n| text(n).font(k.text(META)).color(ui::needs_color(&k)).wrap()));
 
-    let listed = crate::over::work_review(s, id);
+    let listed = crate::over::work_review(s, key);
     let review = listed.clone().unwrap_or_default();
     let mut links = row().gap(4.0).items_center();
     if let Some(p) = pr_of(s, w, &review, pr.as_deref()) {
@@ -177,7 +177,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>, main_kit:
         .child(brief)
         .child(proof)
         .child(gaps);
-    let main = col().key(format!("work-{id}")).w_full().h_full().items_center().scroll(ScrollSpec { stick_bottom: false }).child(body);
+    let main = col().key(format!("work-{}-{}", key.ledger, key.id)).w_full().h_full().items_center().scroll(ScrollSpec { stick_bottom: false }).child(body);
 
     let mut people: Vec<String> = Vec::new();
     let mut seen = BTreeSet::new();
@@ -209,7 +209,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>, main_kit:
                 .child(row().on_press(move |s: &mut App| go(s, Screen::Project(pkey.clone()))).child(ui::crumb(&[(&project, false), ("Work", false), (&ui::short_title(&plain(&w.text), 34), true)], &k))),
         )
         .trailing(ui::needs_button(s, &k));
-    ui::frame(cx, s, Some(ui::sidebar(s, Some(&w.project), Some(id), &k)), main, Some(rail), toolbar, main_kit)
+    ui::frame(cx, s, Some(ui::sidebar(s, Some(&w.project), None, &k)), main, Some(rail), toolbar, main_kit)
 }
 
 pub fn pr_of(s: &App, w: &crate::over::Work, review: &feed::decisions::Decision, number: Option<&str>) -> Option<feed::catalog::Pr> {
@@ -285,13 +285,10 @@ fn timeline(s: &App, w: &crate::over::Work, max: usize, k: &Kit) -> El {
     c
 }
 
-type Done = (String, Move, Result<Value, RespondError>);
-
-const SWAPPED: &str = "Another project's work item with this id replaced it while you wrote. Cancel and open it again from Jump to.";
+type Done = (WorkKey, Move, Result<Value, RespondError>);
 
 pub struct Words {
-    item: String,
-    ledger: String,
+    item: WorkKey,
     title: String,
     m: Move,
     text: TextEdit,
@@ -301,8 +298,8 @@ pub struct Words {
 pub struct State {
     tx: Sender<Done>,
     rx: Receiver<Done>,
-    acting: HashSet<String>,
-    notes: HashMap<String, (bool, String)>,
+    acting: HashSet<WorkKey>,
+    notes: HashMap<WorkKey, (bool, String)>,
     sends: ledger::Sends,
     pub words: Option<Words>,
 }
@@ -314,22 +311,18 @@ impl Default for State {
     }
 }
 
-pub fn start(s: &mut App, id: &str, m: Move) {
-    let Some(w) = s.ov.d.work.get(id) else { return };
+pub fn start(s: &mut App, key: &WorkKey, m: Move) {
+    let Some(w) = s.ov.d.work.get(key) else { return };
     if !m.needs_words() {
-        send(s, id, m, "");
+        send(s, key, m, "");
         return;
     }
     let sends = &s.ov.work.sends;
-    let held = sends.held_key(id, m).map(str::to_string);
-    let mut text = TextEdit::new(sends.held_words(id, m).unwrap_or_default().to_string());
+    let held = sends.held_key(key, m).map(str::to_string);
+    let mut text = TextEdit::new(sends.held_words(key, m).unwrap_or_default().to_string());
     text.focused = true;
     s.composer.focused = false;
-    s.ov.work.words = Some(Words { item: id.into(), ledger: w.ledger_key().to_string(), title: plain(&w.text), m, text, held });
-}
-
-fn swapped(s: &App, n: &Words) -> bool {
-    s.ov.d.work.get(&n.item).is_none_or(|w| w.ledger_key() != n.ledger)
+    s.ov.work.words = Some(Words { item: key.clone(), title: plain(&w.text), m, text, held });
 }
 
 fn changed_while_held(s: &App, n: &Words) -> bool {
@@ -342,50 +335,50 @@ fn settled_while_open(s: &App, n: &Words) -> bool {
 
 fn send_words(s: &mut App) {
     let Some(n) = &s.ov.work.words else { return };
-    if ledger::words_problem(n.m, &n.text.text).is_some() || changed_while_held(s, n) || settled_while_open(s, n) || swapped(s, n) || s.ov.work.acting.contains(&n.item) {
+    if ledger::words_problem(n.m, &n.text.text).is_some() || changed_while_held(s, n) || settled_while_open(s, n) || s.ov.work.acting.contains(&n.item) {
         return;
     }
-    let (id, m, words) = (n.item.clone(), n.m, n.text.text.trim().to_string());
+    let (item, m, words) = (n.item.clone(), n.m, n.text.text.trim().to_string());
     s.ov.work.words = None;
-    send(s, &id, m, &words);
+    send(s, &item, m, &words);
 }
 
-fn send(s: &mut App, id: &str, m: Move, words: &str) {
-    let Some(w) = s.ov.d.work.get(id) else { return };
-    let asking = s.ov.work.sends.held_words(id, m) == Some(words);
-    if s.ov.work.acting.contains(id) || !(asking || ledger::offered(w).contains(&m)) || s.ov.work.sends.held(id).is_some_and(|h| h != m) {
+fn send(s: &mut App, item: &WorkKey, m: Move, words: &str) {
+    let Some(w) = s.ov.d.work.get(item) else { return };
+    let asking = s.ov.work.sends.held_words(item, m) == Some(words);
+    if s.ov.work.acting.contains(item) || !(asking || ledger::offered(w).contains(&m)) || s.ov.work.sends.held(item).is_some_and(|h| h != m) {
         return;
     }
-    post(s, id, m, words);
+    post(s, item, m, words);
 }
 
-fn post(s: &mut App, id: &str, m: Move, words: &str) {
-    let Some(w) = s.ov.d.work.get(id) else { return };
+fn post(s: &mut App, item: &WorkKey, m: Move, words: &str) {
+    let Some(w) = s.ov.d.work.get(item) else { return };
     if s.client.is_none() {
-        s.ov.work.notes.insert(id.into(), (true, "Fixture mode: not sent".into()));
+        s.ov.work.notes.insert(item.clone(), (true, "Fixture mode: not sent".into()));
         return;
     }
     let (key, body) = s.ov.work.sends.sending(w, m, words);
-    fly(s, id, m, key, body);
+    fly(s, item, m, key, body);
 }
 
-fn fly(s: &mut App, id: &str, m: Move, key: String, body: Value) {
+fn fly(s: &mut App, item: &WorkKey, m: Move, key: String, body: Value) {
     let Some(client) = s.client.clone() else { return };
-    s.ov.work.acting.insert(id.into());
-    s.ov.work.notes.remove(id);
-    let (tx, id) = (s.ov.work.tx.clone(), id.to_string());
+    s.ov.work.acting.insert(item.clone());
+    s.ov.work.notes.remove(item);
+    let (tx, item) = (s.ov.work.tx.clone(), item.clone());
     std::thread::spawn(move || {
         let result = client.work_post(m, body, &key);
-        let _ = tx.send((id, m, result));
+        let _ = tx.send((item, m, result));
     });
 }
 
-fn send_new(s: &mut App, id: &str, m: Move) {
-    if s.ov.work.acting.contains(id) || !s.ov.d.work.contains_key(id) {
+fn send_new(s: &mut App, item: &WorkKey, m: Move) {
+    if s.ov.work.acting.contains(item) || !s.ov.d.work.contains_key(item) {
         return;
     }
-    let Some(p) = s.ov.work.sends.forget(id, m) else { return };
-    post(s, id, m, &p.words);
+    let Some(p) = s.ov.work.sends.forget(item, m) else { return };
+    post(s, item, m, &p.words);
 }
 
 pub fn reopened(s: &mut App) {
@@ -396,21 +389,21 @@ pub fn reopened(s: &mut App) {
 pub fn drain(s: &mut App) -> bool {
     let mut changed = false;
     let clock = s.clock;
-    while let Ok((id, m, result)) = s.ov.work.rx.try_recv() {
+    while let Ok((item, m, result)) = s.ov.work.rx.try_recv() {
         changed = true;
-        s.ov.work.acting.remove(&id);
-        crate::over::worksearch::reread(s, &id);
-        let note = s.ov.work.sends.answered(&id, m, &result, clock);
-        s.ov.work.notes.insert(id, note);
+        s.ov.work.acting.remove(&item);
+        crate::over::worksearch::reread(s, &item);
+        let note = s.ov.work.sends.answered(&item, m, &result, clock);
+        s.ov.work.notes.insert(item, note);
         if result.as_ref().map_or_else(|e| e.maybe_delivered, |_| true) {
             crate::ask_overview(s, crate::Ask::Refresh);
         }
     }
-    for (id, m, _) in s.ov.work.sends.due(clock) {
-        if !s.ov.work.acting.contains(&id)
-            && let Some((key, body)) = s.ov.work.sends.resending(&id, m)
+    for (item, m, _) in s.ov.work.sends.due(clock) {
+        if !s.ov.work.acting.contains(&item)
+            && let Some((key, body)) = s.ov.work.sends.resending(&item, m)
         {
-            fly(s, &id, m, key, body);
+            fly(s, &item, m, key, body);
             changed = true;
         }
     }
@@ -419,22 +412,23 @@ pub fn drain(s: &mut App) -> bool {
 
 fn moves(s: &App, w: &crate::over::Work, k: &Kit) -> Option<El> {
     let offered = ledger::offered(w);
-    let note = s.ov.work.notes.get(&w.id);
+    let item = w.key();
+    let note = s.ov.work.notes.get(&item);
     if offered.is_empty() && note.is_none() {
         return None;
     }
-    let busy = s.ov.work.acting.contains(&w.id);
-    let held = s.ov.work.sends.held(&w.id);
+    let busy = s.ov.work.acting.contains(&item);
+    let held = s.ov.work.sends.held(&item);
     let mut r = row().w_full().gap(8.0).items_center().flex_wrap();
     for m in offered {
-        let id = w.id.clone();
+        let id = item.clone();
         let variant = if matches!(m, Move::Claim | Move::Submit | Move::Reopen) { ButtonVariant::Outline } else { ButtonVariant::Ghost };
         r = r.child(Button::new(m.label()).variant(variant).control_size(ControlSize::Small).disabled(busy || held.is_some_and(|h| h != m)).on_press(move |s: &mut App| start(s, &id, m)).build(k).key(format!("work-move-{m:?}")));
     }
     if let Some(m) = held.filter(|_| !busy) {
-        let (id, words) = (w.id.clone(), s.ov.work.sends.held_words(&w.id, m).unwrap_or_default().to_string());
+        let (id, words) = (item.clone(), s.ov.work.sends.held_words(&item, m).unwrap_or_default().to_string());
         r = r.child(Button::new("Ask again").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).help("Asks Agenthail about the same send").on_press(move |s: &mut App| send(s, &id, m, &words)).build(k).key("work-ask-again"));
-        let id = w.id.clone();
+        let id = item.clone();
         r = r.child(Button::new("Send as new").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).help("Sends it again as a fresh request, so it can show up twice if the first one landed").on_press(move |s: &mut App| send_new(s, &id, m)).build(k).key("work-send-new"));
     }
     if busy {
@@ -450,8 +444,7 @@ pub fn words_dialog(s: &App, layer: &mut Vec<El>, k: &Kit) {
     let held = changed_while_held(s, n);
     let settled = settled_while_open(s, n);
     let busy = s.ov.work.acting.contains(&n.item);
-    let swapped = swapped(s, n);
-    let problem = ledger::words_problem(n.m, &n.text.text).or(swapped.then_some(SWAPPED)).or(held.then_some(ledger::CHANGED_WORDS)).or(settled.then_some(ledger::SETTLED_WHILE_OPEN)).or(busy.then_some("Sending…"));
+    let problem = ledger::words_problem(n.m, &n.text.text).or(held.then_some(ledger::CHANGED_WORDS)).or(settled.then_some(ledger::SETTLED_WHILE_OPEN)).or(busy.then_some("Sending…"));
     let (title, label, placeholder, yes, about) = match n.m {
         Move::Park => ("Park", "Why it waits", "What should happen before anyone picks this up?", "Park", "It leaves the board until someone unparks it."),
         _ => ("Comment on", "Comment", "Your note for whoever works on this", "Add comment", "It goes on the item's timeline, where its workers read it."),
@@ -473,9 +466,7 @@ pub fn words_dialog(s: &App, layer: &mut Vec<El>, k: &Kit) {
         .child(Button::new("Cancel").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(|s: &mut App| s.ov.work.words = None).build(k).key("work-words-cancel"))
         .child(Button::new(yes).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(problem.is_some()).on_press(send_words).build(k).key("work-words-send"));
     let mut body = col().w_full().gap(10.0).px(16.0).pb(16.0).child(field);
-    if swapped {
-        body = body.child(text(SWAPPED.to_string()).font(k.text(META)).color(ui::needs_color(k)).wrap().w_full());
-    } else if held {
+    if held {
         body = body.child(text(ledger::CHANGED_WORDS.to_string()).font(k.text(META)).color(ui::needs_color(k)).wrap().w_full());
     } else if settled {
         body = body.child(text(ledger::SETTLED_WHILE_OPEN.to_string()).font(k.text(META)).color(ui::needs_color(k)).wrap().w_full());

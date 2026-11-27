@@ -9,13 +9,13 @@ use feed::worksearch::Found;
 use crate::icons as ah;
 use crate::over::search;
 use crate::over::ui::{self, BODY_MED, META, META_MED, strong, weak};
-use crate::over::{Target, open_target};
+use crate::over::{Target, WorkKey, open_target};
 use crate::App;
 
 #[derive(Clone)]
 pub enum Pick {
     Target(Target),
-    Found(String, String),
+    Found(WorkKey),
     Codex(Box<Session>),
     Command(Command),
 }
@@ -84,10 +84,9 @@ fn entries(s: &App) -> Vec<Entry> {
     out
 }
 
-fn lists(s: &App, e: &Entry, f: &Found) -> bool {
+fn lists(e: &Entry, f: &Found) -> bool {
     match &e.pick {
-        Some(Pick::Target(Target::Work(x))) => *x == f.id && s.ov.d.work.get(x).is_some_and(|w| w.ledger_key() == f.project_key),
-        Some(Pick::Found(ledger, x)) => *x == f.id && *ledger == f.project_key,
+        Some(Pick::Target(Target::Work(k)) | Pick::Found(k)) => *k == f.key(),
         _ => false,
     }
 }
@@ -100,14 +99,14 @@ fn work_found(s: &App, out: &mut Vec<Entry>, lead: bool) {
         Ok(search) => {
             for f in &search.items {
                 let extra = s.ov.d.found_extra(f);
-                if let Some(e) = out.iter_mut().find(|e| lists(s, e, f))
+                if let Some(e) = out.iter_mut().find(|e| lists(e, f))
                     && !extra.is_empty()
                 {
                     e.status = std::iter::once(e.status.clone()).filter(|t| !t.is_empty()).chain(extra).collect::<Vec<_>>().join(" · ");
                 }
             }
-            let listed = |f: &Found| out.iter().any(|e| lists(s, e, f));
-            let mut rows: Vec<Entry> = s.ov.d.found_rows(search, listed).into_iter().map(|r| Entry { group: "Work", title: r.title, status: r.status, badge: r.badge, look: Look::Avatar(r.avatar), pick: Some(Pick::Found(r.ledger, r.id)) }).collect();
+            let listed = |f: &Found| out.iter().any(|e| lists(e, f));
+            let mut rows: Vec<Entry> = s.ov.d.found_rows(search, listed).into_iter().map(|r| Entry { group: "Work", title: r.title, status: r.status, badge: r.badge, look: Look::Avatar(r.avatar), pick: Some(Pick::Found(r.key)) }).collect();
             rows.extend(search.note().map(note));
             rows
         }
@@ -130,12 +129,10 @@ fn highlighted(s: &App) -> usize {
     if at == query(s) { *ix } else { 0 }
 }
 
-fn same(s: &App, a: &Pick, b: &Pick) -> bool {
-    let loaded_as = |ledger: &str, id: &str, x: &str| id == x && s.ov.d.work.get(x).is_some_and(|w| w.ledger_key() == ledger);
+fn same(a: &Pick, b: &Pick) -> bool {
     match (a, b) {
-        (Pick::Found(ledger, id), Pick::Target(Target::Work(x))) | (Pick::Target(Target::Work(x)), Pick::Found(ledger, id)) => loaded_as(ledger, id, x),
+        (Pick::Found(x) | Pick::Target(Target::Work(x)), Pick::Found(y) | Pick::Target(Target::Work(y))) => x == y,
         (Pick::Target(x), Pick::Target(y)) => x == y,
-        (Pick::Found(a, x), Pick::Found(b, y)) => a == b && x == y,
         (Pick::Codex(x), Pick::Codex(y)) => x.id == y.id,
         (Pick::Command(x), Pick::Command(y)) => x == y,
         _ => false,
@@ -153,7 +150,7 @@ pub fn keep_highlight(s: &mut App, change: impl FnOnce(&mut App)) {
     let before = highlighted_pick(s);
     change(s);
     if let Some(p) = before
-        && let Some(ix) = entries(s).into_iter().filter_map(|e| e.pick).position(|q| same(s, &p, &q))
+        && let Some(ix) = entries(s).into_iter().filter_map(|e| e.pick).position(|q| same(&p, &q))
     {
         s.ov.jump_ix = (query(s).to_string(), ix);
     }
@@ -171,7 +168,7 @@ fn picks(s: &App) -> usize {
 fn run(s: &mut App, pick: Pick, tx: &mut Tx) {
     match pick {
         Pick::Target(t) => open_target(s, &t),
-        Pick::Found(ledger, id) => crate::over::worksearch::open(s, &ledger, &id),
+        Pick::Found(key) => crate::over::worksearch::open(s, &key),
         Pick::Codex(x) => search::open_pinned(s, *x),
         Pick::Command(c) => search::run(s, c, tx),
     }

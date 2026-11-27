@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use crate::catalog::Session;
 
 use super::text::{clip_words, plain};
-use super::world::{Actor, Work, World};
+use super::world::{Actor, Work, WorkKey, World};
 
-pub(crate) fn build(sessions: &[Session], actors: &HashMap<String, Actor>, work: &HashMap<String, Work>) -> HashMap<String, String> {
+pub(crate) fn build(sessions: &[Session], actors: &HashMap<String, Actor>, work: &HashMap<WorkKey, Work>) -> HashMap<String, String> {
     let mut names = HashMap::new();
     for s in sessions {
         names.insert(s.id.clone(), title_of(s, work));
@@ -17,12 +17,12 @@ pub(crate) fn build(sessions: &[Session], actors: &HashMap<String, Actor>, work:
     names
 }
 
-fn title_of(s: &Session, work: &HashMap<String, Work>) -> String {
+fn title_of(s: &Session, work: &HashMap<WorkKey, Work>) -> String {
     let t = s.title();
     if t.starts_with('@') || (t.split_whitespace().count() <= 3 && t.len() <= 32) {
         return t;
     }
-    if let Some(w) = s.held_work.first().and_then(|h| work.get(&h.item_id)) {
+    if let Some(w) = s.held_work.first().and_then(|h| work.get(&h.key())) {
         return clip_words(&plain(&w.text), 44);
     }
     clip_words(&t, 44)

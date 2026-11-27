@@ -1,7 +1,7 @@
 use crate::catalog::Session;
 
 use super::text::{first_sentence, plain};
-use super::world::{Work, World};
+use super::world::{Work, WorkKey, World};
 
 fn is_commit(word: &str) -> bool {
     (7..=12).contains(&word.len()) && word.chars().all(|c| c.is_ascii_hexdigit()) && word.chars().any(|c| c.is_ascii_digit()) && word.chars().any(|c| c.is_ascii_alphabetic())
@@ -40,8 +40,8 @@ pub fn unchecked(w: &Work) -> Vec<String> {
 }
 
 impl World {
-    pub fn also_holds<'a>(&'a self, s: &Session, except: &str) -> Vec<&'a Work> {
-        s.held_work.iter().filter(|h| h.item_id != except).filter_map(|h| self.work.get(&h.item_id)).collect()
+    pub fn also_holds<'a>(&'a self, s: &Session, except: &WorkKey) -> Vec<&'a Work> {
+        s.held_work.iter().map(|h| h.key()).filter(|k| k != except).filter_map(|k| self.work.get(&k)).collect()
     }
 }
 
