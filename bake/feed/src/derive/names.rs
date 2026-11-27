@@ -5,7 +5,7 @@ use crate::catalog::Session;
 use super::text::{clip_words, plain};
 use super::world::{Actor, Work, WorkKey, World};
 
-pub(crate) fn build(sessions: &[Session], actors: &HashMap<String, Actor>, work: &HashMap<WorkKey, Work>) -> HashMap<String, String> {
+pub(crate) fn build(sessions: &[Session], actors: &HashMap<String, Actor>, work: &HashMap<WorkKey, std::sync::Arc<Work>>) -> HashMap<String, String> {
     let mut names = HashMap::new();
     for s in sessions {
         names.insert(s.id.clone(), title_of(s, work));
@@ -17,7 +17,7 @@ pub(crate) fn build(sessions: &[Session], actors: &HashMap<String, Actor>, work:
     names
 }
 
-fn title_of(s: &Session, work: &HashMap<WorkKey, Work>) -> String {
+fn title_of(s: &Session, work: &HashMap<WorkKey, std::sync::Arc<Work>>) -> String {
     let t = s.title();
     if t.starts_with('@') || (t.split_whitespace().count() <= 3 && t.len() <= 32) {
         return t;

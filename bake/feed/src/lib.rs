@@ -14,6 +14,7 @@ pub mod adopt;
 pub mod agents;
 pub mod snooze;
 pub mod settings;
+pub mod shared;
 pub mod shortcuts;
 pub mod catalog;
 pub mod complete;

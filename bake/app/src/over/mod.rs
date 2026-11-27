@@ -17,7 +17,9 @@ pub mod work;
 pub mod worksearch;
 
 use rune_kit::Kit;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use rune::{Cx, El, Key, KeyEvent, TextEdit, Tx};
 use rune_kit::shell::{self, PaneState};
@@ -61,7 +63,10 @@ pub struct Over {
     pub projects: projects::State,
     pub work: work::State,
     pub worksearch: worksearch::State,
+    digests: RefCell<Option<(Option<String>, Digests)>>,
 }
+
+pub type Digests = Rc<Vec<(Project, Vec<Line>)>>;
 
 impl Over {
     pub fn new(mut live: Overview, persist: bool) -> Over {
@@ -100,6 +105,7 @@ impl Over {
             projects: projects::State::default(),
             work: work::State::default(),
             worksearch: worksearch::State::default(),
+            digests: RefCell::new(None),
         }
     }
 
@@ -110,8 +116,24 @@ impl Over {
         self.needs = d.needs();
         self.d = d;
         self.worksearch.keep(&mut self.d);
+        self.world_changed();
         feed::derive::needs::arrange(&mut self.needs, self.looked_now.as_deref());
         self.refocus(focused);
+    }
+
+    pub fn world_changed(&mut self) {
+        self.digests.get_mut().take();
+    }
+
+    pub fn digests(&self) -> Digests {
+        let looked = self.looked_now.clone();
+        let mut held = self.digests.borrow_mut();
+        if let Some((_, digests)) = held.as_ref().filter(|(at, _)| *at == looked) {
+            return digests.clone();
+        }
+        let digests: Digests = Rc::new(self.d.digests(self.d.window(looked.as_deref())).into_iter().map(|(p, lines)| (p.clone(), lines)).collect());
+        *held = Some((looked, digests.clone()));
+        digests
     }
 
     pub fn arrange(&mut self) {

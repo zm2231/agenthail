@@ -38,7 +38,7 @@ impl World {
             status.push(if p.lead.is_some() { format!("lead {}", p.lead_name) } else { "no lead yet".into() });
             out.push(Hit { group: "Projects", title: p.name.clone(), status: status.join(" · "), badge: self.ago(&p.last_active), avatar: p.name.clone(), target: Target::Project(p.key.clone()) });
         }
-        let mut work: Vec<&Work> = self.work.values().filter(|w| matches!(w.state.as_str(), "in_progress" | "in_review")).filter(|w| has(&w.text) || has(&w.id)).collect();
+        let mut work: Vec<&Work> = self.works().filter(|w| matches!(w.state.as_str(), "in_progress" | "in_review")).filter(|w| has(&w.text) || has(&w.id)).collect();
         let shown = |w: &Work| super::phase::step(&w.phase, &w.state);
         work.sort_by(|a, b| shown(b).cmp(&shown(a)).then(b.last_at().cmp(a.last_at())).then(a.id.cmp(&b.id)));
         for w in work.into_iter().take(cap) {
@@ -48,7 +48,7 @@ impl World {
             out.push(Hit { group: "Work", title: plain(&w.text), status: format!("{} · {whose} · {project}", super::phase::step_word(&w.phase, &w.state, &w.steps)), badge: short_id(&w.id), avatar: project, target: Target::Work(w.key()) });
         }
         if !q.is_empty() {
-            let mut quiet: Vec<&Work> = self.work.values().filter(|w| is_quiet(&w.state) && (has(&w.text) || has(&w.id))).collect();
+            let mut quiet: Vec<&Work> = self.works().filter(|w| is_quiet(&w.state) && (has(&w.text) || has(&w.id))).collect();
             quiet.sort_by(|a, b| b.last_at().cmp(a.last_at()).then(a.id.cmp(&b.id)));
             for w in quiet {
                 let project = self.project_name(&w.project);

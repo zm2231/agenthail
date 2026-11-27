@@ -41,7 +41,7 @@ pub fn unchecked(w: &Work) -> Vec<String> {
 
 impl World {
     pub fn also_holds<'a>(&'a self, s: &Session, except: &WorkKey) -> Vec<&'a Work> {
-        s.held_work.iter().map(|h| h.key()).filter(|k| k != except).filter_map(|k| self.work.get(&k)).collect()
+        s.held_work.iter().map(|h| h.key()).filter(|k| k != except).filter_map(|k| self.work_item(&k)).collect()
     }
 }
 

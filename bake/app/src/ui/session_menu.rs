@@ -492,7 +492,7 @@ fn leave_archived(s: &mut App, id: &str) {
 pub(super) fn land(s: &mut App, id: &str, patch: Patch) {
     crate::over::search::patch_pinned(s, id, &patch);
     if s.ov.live.patch(id, patch, Instant::now()) {
-        s.sessions = s.ov.live.sessions().to_vec();
+        s.sessions = s.ov.live.shared_sessions();
     }
 }
 
@@ -652,7 +652,7 @@ pub fn drain(s: &mut App) -> bool {
         settled(s, done);
     }
     if s.ov.live.expire() {
-        s.sessions = s.ov.live.sessions().to_vec();
+        s.sessions = s.ov.live.shared_sessions();
         changed = true;
     }
     if let Some(at) = s.ov.live.next_expiry() {

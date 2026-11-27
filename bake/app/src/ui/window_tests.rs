@@ -146,7 +146,7 @@ fn turn_with(s: &mut App, rt: &mut rune::Runtime<App>, key: &str, f: impl FnOnce
 
 fn two_windows() -> (App, rune::Runtime<App>, rune::Runtime<App>, Id) {
     let mut s = app();
-    s.sessions = ["a", "b"].iter().map(|id| serde_json::from_value(serde_json::json!({"id": id, "surface": "claude", "name": id, "status": "idle", "open": true})).unwrap()).collect();
+    s.sessions = ["a", "b"].iter().map(|id| serde_json::from_value(serde_json::json!({"id": id, "surface": "claude", "name": id, "status": "idle", "open": true})).unwrap()).collect::<Vec<_>>().into();
     crate::select(&mut s, "a");
     let w = show(&mut s, "b");
     let env = rune::Env { system_dark: true, scale: 1.0 };
@@ -176,7 +176,7 @@ fn a_session_window_opens_with_its_inspector_hidden_and_its_toolbar_shows_it() {
 #[test]
 fn two_windows_take_turns_over_one_app() {
     let mut s = app();
-    s.sessions = ["a", "b"].iter().map(|id| serde_json::from_value(serde_json::json!({"id": id, "surface": "claude", "name": id, "status": "idle", "open": true})).unwrap()).collect();
+    s.sessions = ["a", "b"].iter().map(|id| serde_json::from_value(serde_json::json!({"id": id, "surface": "claude", "name": id, "status": "idle", "open": true})).unwrap()).collect::<Vec<_>>().into();
     crate::select(&mut s, "a");
     let w = show(&mut s, "b");
     let env = rune::Env { system_dark: true, scale: 1.0 };
@@ -203,7 +203,7 @@ fn two_windows_take_turns_over_one_app() {
 #[test]
 fn a_session_window_draws_the_conversation_without_the_sidebar() {
     let mut s = app();
-    s.sessions = ["a", "b"].iter().map(|id| serde_json::from_value(serde_json::json!({"id": id, "surface": "claude", "name": id, "status": "idle", "open": true})).unwrap()).collect();
+    s.sessions = ["a", "b"].iter().map(|id| serde_json::from_value(serde_json::json!({"id": id, "surface": "claude", "name": id, "status": "idle", "open": true})).unwrap()).collect::<Vec<_>>().into();
     crate::select(&mut s, "a");
     let w = open(&mut s, "b");
     enter(&mut s, w);
@@ -373,7 +373,7 @@ fn codex(id: &str) -> feed::catalog::Session {
 fn a_session_window_keeps_its_codex_queue_and_editor_while_main_shows_another_session() {
     use crate::ui::native_queue::{Editor, drain, queue};
     let mut s = app();
-    s.sessions = vec![codex("a"), codex("b")];
+    s.sessions = vec![codex("a"), codex("b")].into();
     crate::select(&mut s, "a");
     s.screen = Screen::Session;
     let w = open(&mut s, "b");
@@ -416,7 +416,7 @@ fn a_fork_result_lands_in_the_window_that_asked() {
 #[test]
 fn a_codex_queue_row_menu_open_in_one_window_is_not_taken_over_by_another() {
     let mut s = app();
-    s.sessions = vec![codex("a"), codex("b")];
+    s.sessions = vec![codex("a"), codex("b")].into();
     crate::select(&mut s, "a");
     s.screen = Screen::Session;
     let w = open(&mut s, "b");
@@ -459,7 +459,7 @@ fn beside(queued: bool) -> (App, Id) {
     let mut s = app();
     s.client = Some(feed::catalog::Client::new("http://127.0.0.1:9", "t"));
     let row = |id: &str, count: i64| serde_json::from_value(serde_json::json!({"id": id, "surface": "codex", "name": id, "status": "idle", "open": true, "queueCount": count})).unwrap();
-    s.sessions = vec![row("a", 0), row("b", if queued { 1 } else { 0 })];
+    s.sessions = vec![row("a", 0), row("b", if queued { 1 } else { 0 })].into();
     crate::select(&mut s, "a");
     let w = open(&mut s, "b");
     s.queue_fetching.clear();
@@ -578,7 +578,7 @@ fn a_window_s_session_coming_back_leaves_main_s_inspector_stream_alone() {
     crate::ui::inspect::streamed(&mut s, "a", goal("main's goal"));
     s.snapshots = 1;
     let rows = s.sessions.clone();
-    s.sessions.retain(|x| x.id != "b");
+    feed::shared::own(&mut s.sessions).retain(|x| x.id != "b");
     crate::ui::gone::watch(&mut s);
     s.sessions = rows;
     crate::ui::gone::watch(&mut s);
@@ -781,7 +781,7 @@ fn a_session_coming_back_keeps_its_streamed_goal_from_an_older_read_and_reads_ag
     let before = crate::ui::inspect::ticket(&mut s);
     crate::ui::inspect::streamed(&mut s, "a", goal("streamed"));
     let rows = s.sessions.clone();
-    s.sessions.retain(|x| x.id != "a");
+    feed::shared::own(&mut s.sessions).retain(|x| x.id != "a");
     crate::ui::gone::watch(&mut s);
     assert!(s.missing.contains_key("a"));
     s.sessions = rows;

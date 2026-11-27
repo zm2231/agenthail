@@ -238,7 +238,7 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>, main_kit: &Kit) ->
             .child(ui::section_head("Since you left", None, Some(text(format!("{}, from the records", since_note(s, looked))).font(k.text(META)).color(weak(&k))), &k))
             .child(text("Each line opens what it is about.".to_string()).font(k.text(META)).color(weak(&k))),
     );
-    for (p, lines) in s.ov.d.digests(s.ov.d.window(looked)).iter().take(6) {
+    for (p, lines) in s.ov.digests().iter().take(6) {
         centre = centre.child(digest_block(s, p, lines, 5, looked, false, &k));
     }
     let centre = col()
@@ -302,7 +302,7 @@ pub fn brief(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>, main_kit: &Kit) ->
     let k = cx.kit();
     let moving = s.ov.d.moving(&s.ov.hands_on);
     let looked = s.ov.looked_now.as_deref();
-    let digests = s.ov.d.digests(s.ov.d.window(looked));
+    let digests = s.ov.digests();
     let shipped: usize = digests.iter().map(|(_, l)| count(l, Happened::Shipped)).sum();
     let intro = col()
         .w_full()

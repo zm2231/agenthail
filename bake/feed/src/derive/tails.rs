@@ -21,7 +21,7 @@ const LIVE: &str = ": live";
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Tail {
-    pub items: Vec<Item>,
+    pub items: std::sync::Arc<[Item]>,
     pub prompted_before: bool,
 }
 

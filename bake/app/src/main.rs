@@ -105,7 +105,7 @@ pub struct Fixtures {
 }
 
 pub struct App {
-    pub sessions: Vec<Session>,
+    pub sessions: std::sync::Arc<Vec<Session>>,
     pub now: OffsetDateTime,
     pub selected: Option<String>,
     pub screen: Screen,
@@ -311,7 +311,7 @@ fn watch_overview(client: Client, tx: feed::wake::Sender<Bg>, poke: Receiver<Ask
 fn empty(live: Overview, persist: bool) -> App {
     let (outbox, inbox) = wake::channel();
     App {
-        sessions: Vec::new(),
+        sessions: Default::default(),
         now: OffsetDateTime::now_utc(),
         selected: None,
         screen: Screen::Now,
@@ -1392,7 +1392,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         match message {
             Bg::Snapshot(at, epoch, seq, sessions, touched) => {
                 if s.ov.live.take_sessions(&at, &epoch, seq, sessions) && s.ov.live.stale() {
-                    s.sessions = s.ov.live.sessions().to_vec();
+                    s.sessions = s.ov.live.shared_sessions();
                     s.notify.sessions_moved = true;
                     feed::holders::pins().prune(&s.sessions);
                     ui::tabs::reconcile(s);
@@ -1450,7 +1450,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 s.earlier.activity_missing = fetched.recorded.activity_missing;
                 ui::ready::moved(s, &fetched.moved);
                 s.ov.live.refresh(*fetched);
-                s.sessions = s.ov.live.sessions().to_vec();
+                s.sessions = s.ov.live.shared_sessions();
                 s.notify.sessions_moved = true;
                 feed::holders::pins().prune(&s.sessions);
                 ui::tabs::reconcile(s);
