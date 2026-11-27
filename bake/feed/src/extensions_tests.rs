@@ -206,3 +206,25 @@ fn a_list_says_how_old_it_is() {
     assert_eq!(age(125, true), "Refreshing… last read 2m ago");
     assert_eq!(age(7300, false), "Updated 2h ago");
 }
+
+#[test]
+fn pinned_entries_follow_the_offered_order_then_label() {
+    let list = sample();
+    let all = entries(&list, "mac", "this Mac", ORIGIN);
+    let pins: std::collections::BTreeSet<String> = ["mac/proxy/mount/console", "mac/board/page", "mac/proxy/mount/admin", "mac/gone/page"].into_iter().map(String::from).collect();
+    let shown: Vec<String> = pinned(all, &pins).iter().map(Entry::id).collect();
+    assert_eq!(shown, ["mac/proxy/mount/admin", "mac/board/page", "mac/proxy/mount/console"]);
+    assert!(pins_host(&pins, "mac"));
+    assert!(!pins_host(&pins, "ma"));
+}
+
+#[test]
+fn an_offered_entry_asks_to_be_pinned() {
+    let all = entries(&sample(), "mac", "this Mac", ORIGIN);
+    let console = all.iter().find(|e| e.id() == "mac/proxy/mount/console").unwrap();
+    assert!(console.offered);
+    assert_eq!(console.order, 2);
+    assert_eq!(pin_help(false, console.offered), "This extension asks for a sidebar entry. Pin it.");
+    assert_eq!(pin_help(false, false), "Pin to the sidebar");
+    assert_eq!(pin_help(true, true), "Unpin from the sidebar");
+}
