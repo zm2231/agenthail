@@ -270,7 +270,7 @@ impl Web {
         }
         let cookie = self.cookie.clone()?;
         let opening = !self.pages.get(want).is_some_and(|p| p.opened) && !self.verified_for(&cookie.value, want);
-        if !opening && self.checked_at.is_some_and(|at| !self.unclear || at.elapsed() < CHECK_RETRY) {
+        if self.checked_at.is_some_and(|at| if self.unclear { at.elapsed() < CHECK_RETRY } else { !opening }) {
             return None;
         }
         self.checking = true;

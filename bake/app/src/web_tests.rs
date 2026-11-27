@@ -280,3 +280,16 @@ fn an_unclear_check_on_an_open_page_is_tried_again_a_minute_later() {
     web.checked_at = Some(Instant::now() - Duration::from_secs(3600));
     assert!(web.check_due(Some(A)).is_none(), "a clear answer needs no more checks");
 }
+
+#[test]
+fn a_page_waiting_to_open_waits_a_minute_after_an_unclear_check_before_checking_again() {
+    let mut web = signed_in();
+    web.verified = None;
+    open(&mut web, A, true);
+    let (_, cookie) = web.check_due(Some(B)).unwrap();
+    web.checked(B, &cookie.value, Err("the page's port answered 503".into()));
+    web.signed(Err("daemon down".into()), now());
+    assert!(web.check_due(Some(B)).is_none(), "no second check straight after an unclear one, even for a page still opening");
+    web.checked_at = Some(Instant::now() - CHECK_RETRY);
+    assert!(web.check_due(Some(B)).is_some(), "a minute later it checks again");
+}
