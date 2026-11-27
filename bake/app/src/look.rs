@@ -28,7 +28,7 @@ struct Picture {
 enum Got {
     Device(String),
     View(u64, Box<View>),
-    Image(String, Result<fl::Decoded, String>),
+    Image(String, u32, Result<fl::Decoded, String>),
     Problem(Option<String>),
 }
 
@@ -120,7 +120,7 @@ fn redecode(s: &mut State) {
         let Ok(client) = Client::from_env() else { return };
         for path in paths {
             let got = client.ui_background(&path).and_then(|data| fl::decode(&data, side, SAMPLE_SIDE));
-            if tx.send(Got::Image(path, got)).is_err() {
+            if tx.send(Got::Image(path, side, got)).is_err() {
                 return;
             }
         }
@@ -220,7 +220,7 @@ fn read(client: &Client, class: &str, device: &str, decoded_at: &mut u32, tx: &S
         } else {
             outcome = Read::Retry;
         }
-        if tx.send(Got::Image(path, got)).is_err() {
+        if tx.send(Got::Image(path, side, got)).is_err() {
             return Read::Closed;
         }
     }
@@ -267,9 +267,8 @@ fn pump(s: &mut State) {
             Got::View(ticket, v) if ticket > s.applied => {
                 s.applied = ticket;
                 s.view = Some(*v);
-                s.screen = screen_side();
-                SCREEN.store(s.screen, Ordering::Relaxed);
                 relook(s);
+                redecode(s);
                 let keep = s.look.images();
                 s.pictures.retain(|p, _| keep.contains(p));
                 let meshes = [wallpaper_key(&s.look.background), wallpaper_key(&s.look.background_light)];
@@ -277,11 +276,12 @@ fn pump(s: &mut State) {
                 s.problem = None;
             }
             Got::View(..) => {}
-            Got::Image(path, Ok(d)) => {
+            Got::Image(_, side, _) if side != s.screen => {}
+            Got::Image(path, _, Ok(d)) => {
                 let p = picture(d);
                 s.pictures.insert(path, Ok(p));
             }
-            Got::Image(path, Err(e)) => {
+            Got::Image(path, _, Err(e)) => {
                 s.pictures.insert(path, Err(e));
             }
             Got::Problem(p) => s.problem = p,
@@ -416,7 +416,7 @@ pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool, zoom: bool) {
         paint.accent_deep = rgb(fl::blend(accent_rgb, [0.0; 3], 0.35));
         let translucent = glass && s.look.translucent(dark);
         let drawn = s.look.drawn(dark);
-        let mut key = format!("{dark}:{translucent}:{drawn}:{:?}:{:?}:{:?}", accent_rgb.map(quant), srgb(paint.text).map(quant), srgb(paint.muted).map(quant));
+        let mut key = format!("{dark}:{translucent}:{drawn}:{:?}:{:?}:{:?}:{:?}", accent_rgb.map(quant), srgb(paint.text).map(quant), srgb(paint.muted).map(quant), srgb(paint.faint).map(quant));
         if translucent {
             let ground = ground_rgb(dark);
             let tint = tint_rgb(&s.look, dark, accent_rgb);
