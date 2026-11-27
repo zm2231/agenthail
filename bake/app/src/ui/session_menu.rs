@@ -11,7 +11,7 @@ use rune::{PointerPress, TextEdit};
 use crate::{App, Screen, open_link, session};
 use crate::wake::channel;
 
-pub use super::session_dialogs::{button, has_marks, marks, overlays};
+pub use super::session_dialogs::{Marks, button, drawn_marks, overlays};
 
 const RETRY: Duration = Duration::from_secs(30);
 

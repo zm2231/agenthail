@@ -8,19 +8,32 @@ use crate::theme::{self, BODY, META, accent, failed, faint, muted};
 use crate::ui::session_menu::{Confirm, Open, chips_for, choose, close_rename, current_alias, run, save_rename, set};
 use crate::App;
 
-pub fn has_marks(x: &Session) -> bool {
-    x.unread() || x.pinned() || x.snoozed(time::OffsetDateTime::now_utc())
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Marks {
+    pub unread: bool,
+    pub pinned: bool,
+    pub snoozed: bool,
 }
 
-pub fn marks(x: &Session, k: &Kit) -> El {
+impl Marks {
+    pub fn of(x: &Session) -> Marks {
+        Marks { unread: x.unread(), pinned: x.pinned(), snoozed: x.snoozed(time::OffsetDateTime::now_utc()) }
+    }
+
+    pub fn any(self) -> bool {
+        self.unread || self.pinned || self.snoozed
+    }
+}
+
+pub fn drawn_marks(m: Marks, k: &Kit) -> El {
     let mut r = row().gap(4.0).items_center();
-    if x.unread() {
+    if m.unread {
         r = r.child(el().size(7.0, 7.0).radius(3.5).fill(accent()));
     }
-    if x.pinned() {
+    if m.pinned {
         r = r.child(icon(&icons::PIN, k.text_size(11.0)).color(faint()));
     }
-    if x.snoozed(time::OffsetDateTime::now_utc()) {
+    if m.snoozed {
         r = r.child(icon(&icons::CLOCK, k.text_size(11.0)).color(faint()).label("Snoozed"));
     }
     r

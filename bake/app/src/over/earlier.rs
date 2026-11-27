@@ -184,28 +184,33 @@ pub fn poll(s: &mut App) -> bool {
     changed
 }
 
-fn open(s: &mut App, x: &Session) {
-    if s.ov.d.session(&x.id).is_some() {
-        crate::over::open_session(s, &x.id);
-    } else {
-        crate::over::search::open_read(s, x.clone());
+fn open(s: &mut App, key: &str, id: &str) {
+    if s.ov.d.session(id).is_some() {
+        crate::over::open_session(s, id);
+    } else if let Some(x) = s.earlier.projects.get(key).and_then(|p| p.sessions.iter().find(|x| x.id == id)).cloned() {
+        crate::over::search::open_read(s, x);
     }
 }
 
-fn session_row(s: &App, i: usize, x: &Session, k: &Kit) -> El {
-    let it = x.clone();
+fn session_row(s: &App, key: &str, i: usize, x: &Session, k: &Kit) -> El {
     let place = [feed::projects::surface_label(&x.surface), x.host.name.clone()].into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" · ");
-    col()
-        .key(format!("earlier-{i}"))
-        .w_full()
-        .gap(2.0)
-        .px(8.0)
-        .py(7.0)
-        .radius(8.0)
-        .hover(k.c.surface_raised_hover)
-        .on_press(move |s: &mut App| open(s, &it))
-        .child(row().w_full().gap(6.0).items_center().child(text(ui::short_title(&s.ov.d.title(x), 34)).font(k.text(META_MED)).color(strong(k)).truncate().shrink()).child(ui::spacer()).child(text(s.ov.d.ago(&x.last_active)).font(k.text(META)).color(weak(k))))
-        .children((!place.is_empty()).then(|| text(place).font(k.text(META)).color(weak(k)).truncate()))
+    let title = ui::short_title(&s.ov.d.title(x), 34);
+    let ago = s.ov.d.ago(&x.last_active);
+    let shows = (key, i, &x.id, &place, &title, &ago);
+    crate::over::rows::memo(format!("earlier-{i}"), shows, k, || {
+        let (key, id) = (key.to_string(), x.id.clone());
+        col()
+            .key(format!("earlier-{i}"))
+            .w_full()
+            .gap(2.0)
+            .px(8.0)
+            .py(7.0)
+            .radius(8.0)
+            .hover(k.c.surface_raised_hover)
+            .on_press(move |s: &mut App| open(s, &key, &id))
+            .child(row().w_full().gap(6.0).items_center().child(text(title.clone()).font(k.text(META_MED)).color(strong(k)).truncate().shrink()).child(ui::spacer()).child(text(ago.clone()).font(k.text(META)).color(weak(k))))
+            .children((!place.is_empty()).then(|| text(place.clone()).font(k.text(META)).color(weak(k)).truncate()))
+    })
 }
 
 pub fn section(s: &App, key: &str, k: &Kit) -> El {
@@ -231,7 +236,7 @@ pub fn section(s: &App, key: &str, k: &Kit) -> El {
     if rows.is_empty() && !loading && shown.is_some_and(|x| x.read && x.next.is_none()) {
         c = c.child(text("No earlier sessions.".to_string()).font(k.text(META)).color(weak(k)));
     }
-    c = c.children(rows.iter().enumerate().map(|(i, x)| session_row(s, i, x, k)));
+    c = c.children(rows.iter().enumerate().map(|(i, x)| session_row(s, key, i, x, k)));
     if let Some(error) = shown.and_then(|x| x.error.clone()) {
         c = c.child(text(error).font(k.text(META)).color(ui::needs_color(k)).wrap());
     }

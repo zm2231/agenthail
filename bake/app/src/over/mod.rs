@@ -9,6 +9,7 @@ pub mod listing;
 mod now;
 mod project;
 pub mod projects;
+pub mod rows;
 pub mod search;
 pub mod sessions;
 pub mod ui;

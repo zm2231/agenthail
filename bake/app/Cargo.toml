@@ -25,6 +25,9 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSUserDefaults", "NSData", "NSString", "NSBundle"] }
 
+[features]
+frame-profile = ["rune/frame-profile"]
+
 [patch.crates-io]
 winit = { git = "https://github.com/zm2231/rune", rev = "090c0fe6d0e990fbbaa6ffc0b3830c6589f0b5a4" }
 sctk-adwaita = { git = "https://github.com/zm2231/rune", rev = "090c0fe6d0e990fbbaa6ffc0b3830c6589f0b5a4" }

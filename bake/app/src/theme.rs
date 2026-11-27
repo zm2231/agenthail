@@ -192,7 +192,8 @@ pub fn paint_key() -> u64 {
     use std::hash::{Hash, Hasher};
     let p = paint();
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    (p.dark, p.text, p.muted, p.faint, p.line, p.wash, p.accent, p.done, p.failed, p.attention).hash(&mut h);
+    (p.dark, p.text, p.muted, p.faint, p.card, p.card_deep, p.raised, p.line, p.wash, p.accent, p.accent_deep, p.attention).hash(&mut h);
+    (p.done, p.failed, p.glass_tint, p.ground, p.pane, p.border, p.blur.to_bits()).hash(&mut h);
     h.finish()
 }
 

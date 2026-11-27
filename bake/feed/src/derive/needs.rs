@@ -7,7 +7,7 @@ use super::sessions::busy;
 use super::text::{plain, short_id};
 use super::world::{Work, WorkKey, World};
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum NeedKind {
     Question,
     Approval,
@@ -66,7 +66,7 @@ impl NeedKind {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Group {
     Holding,
     Waiting,
@@ -83,7 +83,7 @@ impl Group {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Target {
     Session(String),
     Work(WorkKey),
