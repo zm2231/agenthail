@@ -236,8 +236,8 @@ fn notice(s: &App, k: &Kit) -> Option<El> {
                 .py(3.0)
                 .radius(10.0)
                 .fill(k.c.surface_raised)
-                .child(text(format!("Closed {t} ·")).font(META).color(muted()).truncate())
-                .child(text("Reopen".to_string()).font(META).color(accent()))
+                .child(text(format!("Closed {t} ·")).font(k.text(META)).color(muted()).truncate())
+                .child(text("Reopen".to_string()).font(k.text(META)).color(accent()))
                 .help("Agenthail closed the least recently used tab to make room")
                 .on_press(|s: &mut App| reopen(s)),
         );
@@ -248,9 +248,9 @@ fn notice(s: &App, k: &Kit) -> Option<El> {
         (false, true) => (format!("Unarchiving {}…", a.title), ""),
         (false, false) => (format!("{} was archived ·", a.title), "Unarchive"),
     };
-    let mut n = row().key("tab-archived").gap(4.0).px(8.0).py(3.0).radius(10.0).fill(k.c.surface_raised).child(text(said).font(META).color(muted()).truncate());
+    let mut n = row().key("tab-archived").gap(4.0).px(8.0).py(3.0).radius(10.0).fill(k.c.surface_raised).child(text(said).font(k.text(META)).color(muted()).truncate());
     if !action.is_empty() {
-        n = n.child(text(action.to_string()).font(META).color(accent())).on_press(|s: &mut App| {
+        n = n.child(text(action.to_string()).font(k.text(META)).color(accent())).on_press(|s: &mut App| {
             if let Some(a) = s.tabs.archived.as_mut() {
                 a.unarchiving = false;
             }
