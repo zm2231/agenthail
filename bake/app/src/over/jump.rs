@@ -234,7 +234,7 @@ pub fn view(s: &App, layer: &mut Vec<El>, k: &Kit) {
             last = h.group;
         }
         let mark = match &h.look {
-            Look::Avatar(name) => ui::avatar(name, 22.0),
+            Look::Avatar(name) => ui::avatar(name, k.text_size(22.0)),
             Look::Icon(glyph) => row().w(k.text_size(22.0)).h(k.text_size(22.0)).items_center().justify_center().child(icon(glyph, k.text_size(15.0)).color(k.c.icon_base)),
         };
         let Some(pick) = h.pick else {
