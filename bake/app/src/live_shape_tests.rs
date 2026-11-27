@@ -123,19 +123,29 @@ fn probe() {
         feed::shared::copies() - copies,
         median(built_rows)
     ));
-    send(&rt, poll(&path, 200, None, &mut sent));
-    rt.frame(DT);
-    built::take();
-    built::take_called();
-    send(&rt, poll(&path, 205, None, &mut sent));
-    rt.frame(DT);
-    let rebuilt_rows = built::take();
-    let memos: std::collections::HashSet<String> = built::take_called().into_iter().collect();
-    let all: Vec<String> = rt.elements().into_iter().filter(|e| !e.exiting).map(|e| e.path).collect();
-    let outside: Vec<&String> = all.iter().filter(|p| !p.split('/').any(|seg| memos.contains(seg))).collect();
-    lines.push(format!("steady poll: {} nodes, {} memos, {} nodes outside memos, rows built {:?}", all.len(), memos.len(), outside.len(), rebuilt_rows));
+    let mut measure = |name: &str, from: i64, to: i64, lines: &mut Vec<String>| {
+        send(&rt, poll(&path, from, None, &mut sent));
+        rt.frame(DT);
+        built::take();
+        built::take_called();
+        built::take_rebuilt();
+        send(&rt, poll(&path, to, None, &mut sent));
+        rt.frame(DT);
+        let rows = built::take();
+        let memos: std::collections::HashSet<String> = built::take_called().into_iter().collect();
+        let fresh: std::collections::HashSet<String> = built::take_rebuilt().into_iter().collect();
+        let all: Vec<String> = rt.elements().into_iter().filter(|e| !e.exiting).map(|e| e.path).collect();
+        let id_of = |seg: &str| seg.strip_prefix("#!").unwrap_or(seg).replace("%2F", "/").replace("%25", "%");
+        let nearest = |p: &str| p.split('/').map(id_of).filter(|id| memos.contains(id)).last();
+        let outside = all.iter().filter(|p| nearest(p).is_none()).count();
+        let rebuilt: Vec<String> = all.iter().filter(|p| nearest(p).is_none_or(|id| fresh.contains(&id))).cloned().collect();
+        lines.push(format!("{name}: {} nodes, {outside} outside memos, {} rebuilt, rows built {}", all.len(), rebuilt.len(), tally(rows)));
+        rebuilt
+    };
+    measure("poll, nothing shown changes", 206, 207, &mut lines);
+    let rebuilt = measure("poll, a minute passes for two needs", 260, 265, &mut lines);
     if let Ok(dump) = std::env::var("AGENTHAIL_LIVE_OUTSIDE") {
-        std::fs::write(dump, outside.iter().map(|p| p.as_str()).collect::<Vec<_>>().join("\n")).unwrap();
+        std::fs::write(dump, rebuilt.join("\n")).unwrap();
     }
     if let Ok(dump) = std::env::var("AGENTHAIL_LIVE_PATHS") {
         let paths: Vec<String> = rt.elements().into_iter().filter(|e| !e.exiting).map(|e| e.path).collect();
