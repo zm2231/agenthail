@@ -354,6 +354,10 @@ pub fn changing(s: &App, id: &str) -> bool {
 }
 
 impl Menus {
+    pub fn renaming_with(&self, id: &str, seq: u64) -> bool {
+        self.renaming.as_deref() == Some(id) && self.rename_seq == seq
+    }
+
     pub fn swap_rename_seq(&mut self, seq: &mut u64) {
         std::mem::swap(&mut self.rename_seq, seq);
     }
@@ -541,8 +545,8 @@ fn settled(s: &mut App, done: Done) {
             s.ov.notice = Some(failure(verb(&act), &error));
         }
         Done::Renamed(id, seq, result) => {
-            if s.menus.renaming.as_deref() != Some(id.as_str())
-                && let Some(w) = super::window::holder(s, |l| l.renaming() == Some(id.as_str()))
+            if !s.menus.renaming_with(&id, seq)
+                && let Some(w) = super::window::holder(s, |l| l.renaming() == Some(id.as_str()) && l.rename_seq() == seq)
             {
                 super::window::within(s, w, |s| settled(s, Done::Renamed(id, seq, result)));
                 return;

@@ -171,3 +171,18 @@ fn a_rename_started_elsewhere_does_not_outdate_this_window_s_rename() {
     enter(&mut s, MAIN);
     assert_eq!(s.windows.stash[&w].rename_seq, mine);
 }
+
+#[test]
+fn a_result_goes_to_the_window_whose_request_it_answers_when_two_rename_one_session() {
+    let mut s = app();
+    crate::select(&mut s, "b");
+    let w = open(&mut s, "b");
+    s.menus.renaming = Some("b".into());
+    enter(&mut s, w);
+    s.menus.renaming = Some("b".into());
+    let theirs = s.windows.stash[&MAIN].rename_seq;
+    enter(&mut s, MAIN);
+    let mine = s.windows.stash[&w].rename_seq;
+    assert_eq!(holder(&s, |l| l.renaming() == Some("b") && l.rename_seq() == mine), Some(w));
+    assert!(s.menus.renaming_with("b", theirs) && !s.menus.renaming_with("b", mine));
+}

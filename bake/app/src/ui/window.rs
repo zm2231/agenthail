@@ -78,6 +78,10 @@ impl Local {
         self.renaming.as_deref()
     }
 
+    pub fn rename_seq(&self) -> u64 {
+        self.rename_seq
+    }
+
     pub fn popup(&self) -> &super::complete::Popup {
         &self.popup
     }

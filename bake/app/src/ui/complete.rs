@@ -61,11 +61,17 @@ pub struct Popup {
     dismissed: Option<String>,
     search: Option<Search>,
     shown_ids: Vec<String>,
+    files: Option<(String, String, Result<SessionFiles, String>)>,
+    files_asked: Option<(u64, String, String)>,
 }
 
 impl Popup {
     pub fn searching(&self, seq: u64) -> bool {
         self.search.as_ref().is_some_and(|x| x.seq == seq)
+    }
+
+    pub fn asked_files(&self, seq: u64) -> bool {
+        self.files_asked.as_ref().is_some_and(|(asked, _, _)| *asked == seq)
     }
 }
 
@@ -76,6 +82,8 @@ impl Complete {
         std::mem::swap(&mut self.dismissed, &mut p.dismissed);
         std::mem::swap(&mut self.search, &mut p.search);
         std::mem::swap(&mut self.shown_ids, &mut p.shown_ids);
+        std::mem::swap(&mut self.files, &mut p.files);
+        std::mem::swap(&mut self.files_asked, &mut p.files_asked);
     }
 }
 
@@ -497,6 +505,12 @@ pub fn done(s: &mut App, done: Done) {
             s.complete.commands.insert(id, result);
         }
         Done::Files(seq, id, query, result) => {
+            if s.complete.files_asked.as_ref().is_none_or(|(asked, _, _)| *asked != seq)
+                && let Some(w) = super::window::holder(s, |l| l.popup().asked_files(seq))
+            {
+                super::window::within(s, w, |s| crate::ui::complete::done(s, Done::Files(seq, id, query, result)));
+                return;
+            }
             if s.complete.files_asked.as_ref().is_some_and(|(asked, _, _)| *asked == seq) {
                 s.complete.files = Some((id, query, result));
             }
