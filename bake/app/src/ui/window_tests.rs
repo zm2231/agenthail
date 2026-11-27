@@ -567,16 +567,321 @@ fn failed_session_settings_are_retried_for_every_window() {
     assert!(["a", "b"].iter().all(|id| crate::ui::session_menu::asked(&s, id)), "each shown session's settings are read again");
 }
 
+fn goal(text: &str) -> feed::wire::Streamed {
+    feed::wire::Streamed::Goal(Some(feed::inspect::Goal { objective: text.into(), ..Default::default() }))
+}
+
 #[test]
-fn a_window_s_session_coming_back_leaves_the_inspector_on_the_session_it_follows() {
+fn a_window_s_session_coming_back_leaves_main_s_inspector_stream_alone() {
     let (mut s, _) = beside(false);
     s.screen = Screen::Session;
-    crate::ui::inspect::load(&mut s, "a");
+    crate::ui::inspect::streamed(&mut s, "a", goal("main's goal"));
     s.snapshots = 1;
     let rows = s.sessions.clone();
     s.sessions.retain(|x| x.id != "b");
     crate::ui::gone::watch(&mut s);
     s.sessions = rows;
     crate::ui::gone::watch(&mut s);
-    assert!(crate::ui::inspect::follows(&s, "a"), "b returning in its window doesn't take main's inspector");
+    assert!(crate::ui::inspect::is_streamed(&s, "a", "goal"), "b returning in its window doesn't touch main's stream");
+}
+
+#[test]
+fn each_window_s_inspector_takes_its_own_session_s_streamed_goal() {
+    let (mut s, w) = beside(false);
+    s.screen = Screen::Session;
+    crate::ui::inspect::streamed(&mut s, "a", goal("main's goal"));
+    crate::ui::inspect::streamed(&mut s, "b", goal("the window's goal"));
+    assert!(crate::ui::inspect::is_streamed(&s, "a", "goal") && crate::ui::inspect::is_streamed(&s, "b", "goal"), "both windows stream");
+    crate::select(&mut s, "c");
+    assert!(crate::ui::inspect::is_streamed(&s, "b", "goal"), "main moving on leaves the window's stream");
+    close(&mut s, w);
+    assert!(!crate::ui::inspect::holds_any(&s, "b"), "the stream is let go with its window");
+    crate::ui::inspect::streamed(&mut s, "b", goal("late"));
+    assert!(!crate::ui::inspect::holds_any(&s, "b"), "and nothing shows it, so a late event is ignored");
+}
+
+#[test]
+fn selecting_a_session_another_window_shows_keeps_its_stream_ahead_of_reads() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    crate::ui::inspect::streamed(&mut s, "b", goal("streamed"));
+    crate::select(&mut s, "b");
+    assert!(crate::ui::inspect::is_streamed(&s, "b", "goal"), "a read landing now must not undo the window's streamed goal");
+}
+
+#[test]
+fn a_rekeyed_session_s_new_id_streams_at_once() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    s.selected = Some("a2".into());
+    crate::ui::inspect::streamed(&mut s, "a2", goal("after the rekey"));
+    assert!(crate::ui::inspect::is_streamed(&s, "a2", "goal"));
+}
+
+#[test]
+fn main_coming_back_to_its_session_finds_its_inspector_state_kept() {
+    let (mut s, w) = beside(false);
+    s.screen = Screen::Session;
+    crate::ui::inspect::streamed(&mut s, "a", goal("main's goal"));
+    crate::ui::inspect::expand(&mut s, "a");
+    s.screen = Screen::Now;
+    within(&mut s, w, |s| crate::select(s, "c"));
+    s.screen = Screen::Session;
+    assert!(crate::ui::inspect::is_streamed(&s, "a", "goal") && crate::ui::inspect::expanded(&s, "a"), "another window's selection keeps a's stream and expanded goal");
+    crate::ui::inspect::streamed(&mut s, "a", goal("newer"));
+    assert!(crate::ui::inspect::is_streamed(&s, "a", "goal"));
+}
+
+#[test]
+fn selecting_the_session_already_shown_keeps_its_stream_ahead_of_reads() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    crate::ui::inspect::streamed(&mut s, "a", goal("streamed"));
+    crate::select(&mut s, "a");
+    assert!(crate::ui::inspect::is_streamed(&s, "a", "goal"));
+}
+
+#[test]
+fn a_stream_missed_while_hidden_is_read_again_when_the_session_shows() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    crate::ui::inspect::streamed(&mut s, "a", goal("first"));
+    let before = crate::ui::inspect::ticket(&mut s);
+    s.screen = Screen::Now;
+    crate::ui::inspect::streamed(&mut s, "a", goal("while hidden"));
+    crate::ui::inspect::read(&mut s, "a", before, Ok(feed::inspect::Metadata::default()));
+    assert!(crate::ui::inspect::missed(&s, "a"), "a read asked before the miss doesn't count as catching up");
+    assert!(!crate::ui::inspect::is_streamed(&s, "a", "goal") && crate::ui::inspect::missed(&s, "a"), "the next read may replace the stale goal");
+    crate::ui::inspect::drain(&mut s);
+    assert!(crate::ui::inspect::missed(&s, "a"), "nothing is read while it stays hidden");
+    s.screen = Screen::Session;
+    crate::ui::inspect::drain(&mut s);
+    let failed = feed::inspect::Metadata { goal_failed: true, ..Default::default() };
+    let ticket = crate::ui::inspect::ticket(&mut s);
+    crate::ui::inspect::read(&mut s, "a", ticket, Ok(failed));
+    assert!(crate::ui::inspect::missed(&s, "a"), "a read that couldn't get the goal leaves it to try again");
+    let ticket = crate::ui::inspect::ticket(&mut s);
+    crate::ui::inspect::read(&mut s, "a", ticket, Ok(feed::inspect::Metadata::default()));
+    assert!(!crate::ui::inspect::missed(&s, "a"), "a read with the goal catches up");
+}
+
+#[test]
+fn a_rekey_keeps_an_open_goal_edit_and_logs_on_the_session() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    s.inspect.editing = Some(crate::ui::inspect::Editing { session: "a".into(), act: feed::inspect::GoalAct::Set, text: rune::TextEdit::new("typed") });
+    s.inspect.logs = Some(("a".into(), "output".into()));
+    crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "a2".to_string())]));
+    assert_eq!(s.inspect.logs.as_ref().map(|(id, _)| id.as_str()), Some("a2"));
+    assert_eq!(s.inspect.editing.as_ref().map(|e| e.session.as_str()), Some("a2"));
+}
+
+#[test]
+fn a_rekey_carries_the_inspector_to_the_new_id() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    crate::ui::inspect::streamed(&mut s, "a", goal("streamed"));
+    crate::ui::inspect::expand(&mut s, "a");
+    crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "a2".to_string())]));
+    assert_eq!(s.selected.as_deref(), Some("a2"));
+    assert!(crate::ui::inspect::is_streamed(&s, "a2", "goal") && crate::ui::inspect::expanded(&s, "a2") && crate::ui::inspect::has_meta(&s, "a2"));
+}
+
+#[test]
+fn a_rekey_keeps_the_streamed_context_and_lands_late_reads_on_the_new_id() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    let usage: feed::settings::ContextUsage = serde_json::from_value(serde_json::json!({"usedTokens": 10, "contextWindow": 100})).unwrap();
+    crate::ui::inspect::streamed(&mut s, "a", feed::wire::Streamed::Context(Some(usage)));
+    let ticket = crate::ui::inspect::ticket(&mut s);
+    crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "a2".to_string())]));
+    assert!(s.menus.context.contains_key("a2") && !s.menus.context.contains_key("a"), "the streamed context moves with the session");
+    crate::ui::inspect::read(&mut s, "a", ticket, Ok(feed::inspect::Metadata::default()));
+    assert!(crate::ui::inspect::has_meta(&s, "a2") && !crate::ui::inspect::has_meta(&s, "a"), "a read asked under the old id lands on the new one");
+}
+
+#[test]
+fn a_read_landing_after_its_window_closed_is_not_kept() {
+    let (mut s, w) = beside(false);
+    s.screen = Screen::Session;
+    close(&mut s, w);
+    crate::ui::inspect::read(&mut s, "b", 1, Ok(feed::inspect::Metadata::default()));
+    assert!(!crate::ui::inspect::has_meta(&s, "b"));
+}
+
+#[test]
+fn a_context_read_that_failed_for_a_shown_session_is_tried_again() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    s.menus.context_error.insert("b".into(), "unreachable".into());
+    crate::ui::session_menu::failed_a_while_ago(&mut s, "b");
+    s.menus.note.remove("b");
+    crate::ui::session_menu::drain(&mut s);
+    assert!(crate::ui::session_menu::asked(&s, "b"), "the window's failed context is read again");
+}
+
+#[test]
+fn a_read_without_context_leaves_a_missed_context_to_catch_up() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Now;
+    let usage: feed::settings::ContextUsage = serde_json::from_value(serde_json::json!({"usedTokens": 10, "contextWindow": 100})).unwrap();
+    crate::ui::inspect::streamed(&mut s, "a", feed::wire::Streamed::Context(Some(usage.clone())));
+    assert!(crate::ui::inspect::missed(&s, "a"));
+    let ticket = crate::ui::inspect::ticket(&mut s);
+    crate::ui::inspect::read(&mut s, "a", ticket, Ok(feed::inspect::Metadata::default()));
+    assert!(crate::ui::inspect::missed(&s, "a"), "a goal-only read doesn't settle the missed context");
+    crate::ui::inspect::caught_up(&mut s, "a", "context", ticket);
+    assert!(!crate::ui::inspect::missed(&s, "a"), "a context read asked after the miss does");
+    s.screen = Screen::Session;
+    crate::ui::inspect::streamed(&mut s, "a", goal("first"));
+    s.screen = Screen::Now;
+    crate::ui::inspect::streamed(&mut s, "a", goal("unseen"));
+    s.screen = Screen::Session;
+    crate::ui::inspect::streamed(&mut s, "a", goal("fresh"));
+    assert!(!crate::ui::inspect::missed(&s, "a"), "a fresh stream once shown is caught up too");
+}
+
+#[test]
+fn a_read_asked_before_a_stream_keeps_the_streamed_goal_and_one_asked_after_replaces_it() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    let before = crate::ui::inspect::ticket(&mut s);
+    crate::ui::inspect::streamed(&mut s, "a", goal("streamed"));
+    let after = crate::ui::inspect::ticket(&mut s);
+    crate::ui::inspect::read(&mut s, "a", before, Ok(feed::inspect::Metadata::default()));
+    assert_eq!(crate::ui::inspect::goal_of(&s, "a").as_deref(), Some("streamed"));
+    let read = feed::inspect::Metadata { goal: Some(feed::inspect::Goal { objective: "read".into(), ..Default::default() }), ..Default::default() };
+    crate::ui::inspect::read(&mut s, "a", after, Ok(read));
+    assert_eq!(crate::ui::inspect::goal_of(&s, "a").as_deref(), Some("read"));
+}
+
+#[test]
+fn a_session_coming_back_keeps_its_streamed_goal_from_an_older_read_and_reads_again() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    s.snapshots = 1;
+    let before = crate::ui::inspect::ticket(&mut s);
+    crate::ui::inspect::streamed(&mut s, "a", goal("streamed"));
+    let rows = s.sessions.clone();
+    s.sessions.retain(|x| x.id != "a");
+    crate::ui::gone::watch(&mut s);
+    assert!(s.missing.contains_key("a"));
+    s.sessions = rows;
+    crate::ui::gone::watch(&mut s);
+    assert!(!s.missing.contains_key("a"));
+    crate::ui::inspect::read(&mut s, "a", before, Ok(feed::inspect::Metadata::default()));
+    assert_eq!(crate::ui::inspect::goal_of(&s, "a").as_deref(), Some("streamed"), "a read asked before the stream doesn't undo it");
+    assert!(crate::ui::inspect::missed(&s, "a"), "coming back reads the goal and context again");
+}
+
+#[test]
+fn a_rekey_onto_a_session_another_window_shows_keeps_its_values_and_rereads_what_the_old_id_streamed() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    crate::ui::inspect::streamed(&mut s, "b", goal("b's goal"));
+    crate::ui::inspect::streamed(&mut s, "a", goal("a's goal"));
+    assert!(crate::ui::session_menu::context_fresh(&mut s, "a", 9) && crate::ui::session_menu::context_fresh(&mut s, "b", 4));
+    crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "b".to_string())]));
+    assert_eq!(crate::ui::inspect::goal_of(&s, "b").as_deref(), Some("b's goal"));
+    assert!(crate::ui::inspect::is_streamed(&s, "b", "goal") && !crate::ui::inspect::holds_any(&s, "a"));
+    assert!(crate::ui::inspect::missed(&s, "b"), "what a streamed is read again on b");
+    assert!(!crate::ui::session_menu::context_fresh(&mut s, "b", 9), "a's newer context read still counts on b");
+}
+
+#[test]
+fn after_a_rekey_onto_a_shown_session_the_old_id_s_late_read_and_actions_leave_its_own_alone() {
+    use crate::ui::inspect::{Done, busy, settle, start};
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    let mine = feed::inspect::Metadata { goal: Some(feed::inspect::Goal { objective: "b's goal".into(), ..Default::default() }), ..Default::default() };
+    let b_read = crate::ui::inspect::ticket(&mut s);
+    crate::ui::inspect::read(&mut s, "b", b_read, Ok(mine));
+    let b_done = start(&mut s, "b", None);
+    settle(&mut s, Done::Goal("b".into(), b_done, feed::inspect::GoalAct::Pause, Ok(false)));
+    let b_note = crate::ui::inspect::note_of(&s, "b");
+    assert!(b_note.is_some());
+    crate::ui::inspect::streamed(&mut s, "a", goal("a's goal"));
+    let late = crate::ui::inspect::ticket(&mut s);
+    let (a_goal, b_goal) = (start(&mut s, "a", None), start(&mut s, "b", None));
+    let (a_life, b_life) = (start(&mut s, "a", Some(feed::inspect::LifecycleAct::Status)), start(&mut s, "b", Some(feed::inspect::LifecycleAct::Status)));
+    crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "b".to_string())]));
+    let read = feed::inspect::Metadata { goal: Some(feed::inspect::Goal { objective: "a's read".into(), ..Default::default() }), ..Default::default() };
+    crate::ui::inspect::read(&mut s, "a", late, Ok(read));
+    assert_eq!(crate::ui::inspect::goal_of(&s, "b").as_deref(), Some("b's goal"), "a read asked under a before the rekey doesn't replace b's goal");
+    let usage: feed::settings::ContextUsage = serde_json::from_value(serde_json::json!({"usedTokens": 10, "contextWindow": 100})).unwrap();
+    crate::ui::session_menu::settle(&mut s, crate::ui::session_menu::Done::Context("a".into(), 50, Ok(Some(usage)), late, Ok(Default::default())));
+    assert!(!s.menus.context.contains_key("b"), "nor its context");
+    assert!(crate::ui::inspect::missed(&s, "b"), "b is read again after the rekey");
+    settle(&mut s, Done::Status("b".into(), b_life, Ok(feed::inspect::LifecycleResult { state: Some("b".into()), ..Default::default() })));
+    settle(&mut s, Done::Goal("a".into(), a_goal, feed::inspect::GoalAct::Pause, Err(feed::catalog::RespondError { message: "a failed".into(), code: String::new(), maybe_delivered: false, reply: serde_json::Value::Null, answered: false, status: 500 })));
+    assert_eq!(busy(&s, "b"), (true, true), "a's actions are still running");
+    settle(&mut s, Done::Status("a".into(), a_life, Ok(feed::inspect::LifecycleResult { state: Some("a".into()), ..Default::default() })));
+    assert_eq!(busy(&s, "b"), (true, false));
+    assert_eq!(crate::ui::inspect::note_of(&s, "b"), b_note, "a's goal result doesn't replace b's note");
+    settle(&mut s, Done::Goal("b".into(), b_goal, feed::inspect::GoalAct::Pause, Ok(true)));
+    assert_eq!(busy(&s, "b"), (false, false));
+    assert_eq!(crate::ui::inspect::status_of(&s, "b").as_deref(), Some("b"), "a's late status doesn't replace b's");
+    let fresh = crate::ui::inspect::ticket(&mut s);
+    let newer = feed::inspect::Metadata { goal: Some(feed::inspect::Goal { objective: "after".into(), ..Default::default() }), ..Default::default() };
+    crate::ui::inspect::read(&mut s, "b", fresh, Ok(newer));
+    assert_eq!(crate::ui::inspect::goal_of(&s, "b").as_deref(), Some("after"), "a read asked after the rekey brings b up to date");
+}
+
+#[test]
+fn a_released_session_s_late_read_doesn_t_land_on_the_shown_session_it_rekeys_onto() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    let mine = feed::inspect::Metadata { goal: Some(feed::inspect::Goal { objective: "b's goal".into(), ..Default::default() }), ..Default::default() };
+    let b_read = crate::ui::inspect::ticket(&mut s);
+    crate::ui::inspect::read(&mut s, "b", b_read, Ok(mine));
+    let late = crate::ui::inspect::ticket(&mut s);
+    crate::select(&mut s, "c");
+    assert!(!crate::ui::inspect::has_meta(&s, "a"));
+    crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "b".to_string())]));
+    let read = feed::inspect::Metadata { goal: Some(feed::inspect::Goal { objective: "a's read".into(), ..Default::default() }), ..Default::default() };
+    crate::ui::inspect::read(&mut s, "a", late, Ok(read));
+    assert_eq!(crate::ui::inspect::goal_of(&s, "b").as_deref(), Some("b's goal"));
+    assert!(crate::ui::inspect::missed(&s, "b"));
+}
+
+#[test]
+fn a_rekey_onto_a_shown_session_without_values_doesn_t_show_the_old_id_s() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    let usage: feed::settings::ContextUsage = serde_json::from_value(serde_json::json!({"usedTokens": 10, "contextWindow": 100})).unwrap();
+    crate::ui::inspect::streamed(&mut s, "a", goal("a's goal"));
+    crate::ui::inspect::streamed(&mut s, "a", feed::wire::Streamed::Context(Some(usage.clone())));
+    crate::ui::inspect::streamed(&mut s, "b", feed::wire::Streamed::Context(None));
+    crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "b".to_string())]));
+    assert!(!s.menus.context.contains_key("b") && !s.menus.context.contains_key("a"), "b had no context, and a's isn't b's");
+    assert!(!crate::ui::inspect::has_meta(&s, "b") && !crate::ui::inspect::has_meta(&s, "a"), "b hadn't been read, and a's goal isn't b's");
+    let ticket = crate::ui::inspect::ticket(&mut s);
+    crate::ui::session_menu::settle(&mut s, crate::ui::session_menu::Done::Context("b".into(), 50, Ok(Some(usage)), ticket, Ok(feed::inspect::Metadata { goal: Some(feed::inspect::Goal { objective: "b's goal".into(), ..Default::default() }), ..Default::default() })));
+    assert!(s.menus.context.contains_key("b"));
+    assert_eq!(crate::ui::inspect::goal_of(&s, "b").as_deref(), Some("b's goal"));
+    assert!(!crate::ui::inspect::missed(&s, "b"), "a read asked after the rekey catches b up");
+}
+
+#[test]
+fn a_rekey_onto_a_shown_session_closes_the_old_id_s_goal_edit_and_logs() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    s.inspect.editing = Some(crate::ui::inspect::Editing { session: "a".into(), act: feed::inspect::GoalAct::Set, text: rune::TextEdit::new("for a") });
+    s.inspect.logs = Some(("a".into(), "a's output".into()));
+    crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "b".to_string())]));
+    assert!(s.inspect.editing.is_none() && s.inspect.logs.is_none());
+}
+
+#[test]
+fn a_later_unrelated_rekey_doesn_t_count_an_earlier_one_again() {
+    use crate::ui::inspect::{Done, busy, settle, start};
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    let life = start(&mut s, "a", Some(feed::inspect::LifecycleAct::Status));
+    crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "a2".to_string())]));
+    assert_eq!(s.selected.as_deref(), Some("a2"));
+    crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "a2".to_string()), ("x".to_string(), "y".to_string())]));
+    settle(&mut s, Done::Status("a".into(), life, Ok(feed::inspect::LifecycleResult { state: Some("running".into()), ..Default::default() })));
+    assert_eq!(busy(&s, "a2"), (false, false));
+    assert_eq!(crate::ui::inspect::status_of(&s, "a2").as_deref(), Some("running"), "the status asked under a still lands on a2");
 }

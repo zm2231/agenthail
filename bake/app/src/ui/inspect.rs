@@ -13,19 +13,26 @@ use crate::theme::{self, BODY, META, META_BOLD, accent, attention, failed, faint
 use crate::{App, session};
 
 pub enum Done {
-    Goal(String, GoalAct, Result<bool, RespondError>),
+    Goal(String, u64, GoalAct, Result<bool, RespondError>),
     Life(String, u64, LifecycleAct, bool, super::window::Id, Result<LifecycleResult, RespondError>),
     Status(String, u64, Result<LifecycleResult, RespondError>),
 }
 
 #[derive(Default)]
 struct Process {
-    generation: u64,
+    running: HashMap<u64, LifecycleAct>,
     status: Option<LifecycleResult>,
-    busy: Option<LifecycleAct>,
     outcome: Option<String>,
     logs: Option<String>,
     error: Option<String>,
+}
+
+const CATCH_UP: std::time::Duration = std::time::Duration::from_secs(30);
+
+struct Missed {
+    after: u64,
+    asked: Option<std::time::Instant>,
+    kinds: std::collections::HashSet<&'static str>,
 }
 
 pub struct Editing {
@@ -38,10 +45,12 @@ pub struct Inspect {
     meta: HashMap<String, Metadata>,
     reads: inspect::Reads,
     process: HashMap<String, Process>,
-    goal_busy: HashMap<String, GoalAct>,
+    goal_busy: HashMap<String, std::collections::HashSet<u64>>,
     goal_note: HashMap<String, (bool, String)>,
     overlay: inspect::Overlay,
-    expanded: Option<String>,
+    expanded: std::collections::HashSet<String>,
+    missed: HashMap<String, Missed>,
+    merged: HashMap<String, (u64, u64)>,
     pub editing: Option<Editing>,
     pub logs: Option<(String, String)>,
     seq: u64,
@@ -52,7 +61,7 @@ pub struct Inspect {
 impl Inspect {
     pub fn new() -> Inspect {
         let (tx, rx) = channel();
-        Inspect { meta: HashMap::new(), reads: inspect::Reads::default(), process: HashMap::new(), goal_busy: HashMap::new(), goal_note: HashMap::new(), overlay: inspect::Overlay::default(), expanded: None, editing: None, logs: None, seq: 0, tx, rx }
+        Inspect { meta: HashMap::new(), reads: inspect::Reads::default(), process: HashMap::new(), goal_busy: HashMap::new(), goal_note: HashMap::new(), overlay: inspect::Overlay::default(), expanded: Default::default(), missed: Default::default(), merged: HashMap::new(), editing: None, logs: None, seq: 0, tx, rx }
     }
 }
 
@@ -70,12 +79,101 @@ fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'sta
 }
 
 pub fn load(s: &mut App, id: &str) {
-    s.inspect.overlay.select(id);
-    s.inspect.meta.retain(|k, _| k == id);
-    s.inspect.reads.keep_only(id);
-    if s.inspect.expanded.as_deref() != Some(id) {
-        s.inspect.expanded = None;
+    keep_shown(s);
+    s.inspect.overlay.hold(id);
+}
+
+pub(crate) fn rekey(s: &mut App, old: &str, new: &str) {
+    let collided = s.inspect.overlay.rekey(old, new);
+    if collided {
+        s.inspect.merged.insert(old.to_string(), (s.inspect.reads.issued(), s.inspect.seq));
     }
+    s.inspect.reads.rekey(old, new);
+    carry(&mut s.inspect.meta, old, new, collided);
+    if let Some(gone) = s.inspect.process.remove(old) {
+        let into = s.inspect.process.entry(new.to_string()).or_default();
+        into.running.extend(gone.running);
+        if !collided {
+            into.status = into.status.take().or(gone.status);
+            into.outcome = into.outcome.take().or(gone.outcome);
+            into.logs = into.logs.take().or(gone.logs);
+            into.error = into.error.take().or(gone.error);
+        }
+    }
+    if let Some(gone) = s.inspect.goal_busy.remove(old) {
+        s.inspect.goal_busy.entry(new.to_string()).or_default().extend(gone);
+    }
+    carry(&mut s.inspect.goal_note, old, new, collided);
+    crate::move_member(&mut s.inspect.expanded, old, new);
+    if let Some(gone) = s.inspect.missed.remove(old) {
+        let miss = s.inspect.missed.entry(new.to_string()).or_insert_with(|| Missed { after: gone.after, asked: None, kinds: Default::default() });
+        miss.after = miss.after.max(gone.after);
+        miss.asked = None;
+        miss.kinds.extend(gone.kinds);
+    }
+    if let Some(editing) = s.inspect.editing.as_mut().filter(|e| e.session == old) {
+        editing.session = new.to_string();
+        if collided {
+            s.inspect.editing = None;
+        }
+    }
+    if let Some(logs) = s.inspect.logs.as_mut().filter(|(id, _)| id == old) {
+        logs.0 = new.to_string();
+        if collided {
+            s.inspect.logs = None;
+        }
+    }
+    super::session_menu::rekey_context(s, old, new, collided);
+    if collided {
+        miss(s, new, &["goal", "context"]);
+    }
+}
+
+pub(crate) fn carry<V>(map: &mut HashMap<String, V>, old: &str, new: &str, collided: bool) {
+    match collided {
+        true => drop(map.remove(old)),
+        false => crate::move_key(map, old, new),
+    }
+}
+
+pub(crate) fn asked_before_merge(s: &App, asked: &str, ticket: u64) -> bool {
+    s.inspect.merged.get(asked).is_some_and(|(read, _)| ticket <= *read)
+}
+
+fn acted_before_merge(s: &App, asked: &str, token: u64) -> bool {
+    s.inspect.merged.get(asked).is_some_and(|(_, act)| token <= *act)
+}
+
+fn current(s: &App, id: &str) -> String {
+    feed::composer::current(&s.rekeyed, id).to_string()
+}
+
+fn catch_up(s: &mut App) {
+    let due: Vec<String> = s.inspect.missed.iter().filter(|(id, m)| m.asked.is_none_or(|at| at.elapsed() >= CATCH_UP) && showing(s, id)).map(|(id, _)| id.clone()).collect();
+    for id in due {
+        if let Some(miss) = s.inspect.missed.get_mut(&id) {
+            miss.asked = Some(std::time::Instant::now());
+        }
+        metadata_moved(s, &id);
+    }
+}
+
+pub(crate) fn caught_up(s: &mut App, id: &str, kind: &str, ticket: u64) {
+    let Some(miss) = s.inspect.missed.get_mut(id).filter(|m| ticket > m.after) else { return };
+    miss.kinds.remove(kind);
+    if miss.kinds.is_empty() {
+        s.inspect.missed.remove(id);
+    }
+}
+
+pub fn keep_shown(s: &mut App) {
+    let held = super::window::selected_anywhere(s);
+    s.inspect.overlay.keep(&held);
+    s.inspect.meta.retain(|k, _| held.contains(k));
+    s.inspect.reads.keep_only(&held);
+    s.inspect.expanded.retain(|k| held.contains(k));
+    s.inspect.missed.retain(|k, _| held.contains(k));
+    s.inspect.merged.retain(|old, _| s.rekeyed.contains_key(old));
 }
 
 pub(crate) fn ticket(s: &mut App) -> u64 {
@@ -83,14 +181,21 @@ pub(crate) fn ticket(s: &mut App) -> u64 {
 }
 
 pub(crate) fn read(s: &mut App, id: &str, ticket: u64, result: Result<Metadata, String>) {
-    if s.inspect.reads.accept(id, ticket) {
+    let stale = asked_before_merge(s, id, ticket);
+    let id = &current(s, id);
+    let held = super::window::selected_anywhere(s).iter().any(|x| x == id);
+    if held && !stale && s.inspect.reads.accept(id, ticket) {
         let old = s.inspect.meta.get(id);
         let data = match result {
             Ok(data) => data.after(old),
             Err(error) => Metadata::failed(old, error),
         };
-        let data = if is_streamed(s, id, "goal") { data.keep_goal(s.inspect.meta.get(id)) } else { data };
+        let data = if streamed_since(s, id, "goal", ticket) { data.keep_goal(s.inspect.meta.get(id)) } else { data };
+        let goal = !data.goal_failed;
         s.inspect.meta.insert(id.to_string(), data);
+        if goal {
+            caught_up(s, id, "goal", ticket);
+        }
     }
     if s.inspect.reads.landed(id, ticket) {
         metadata_moved(s, id);
@@ -103,9 +208,14 @@ pub(crate) fn streamed(s: &mut App, id: &str, x: feed::wire::Streamed) {
         feed::wire::Streamed::Context(_) => "context",
         feed::wire::Streamed::Goal(_) => "goal",
     };
-    if !s.inspect.overlay.stream(id, kind, shown) {
+    let at = s.inspect.reads.issued();
+    if !s.inspect.overlay.stream(id, kind, shown, at) {
+        if !shown {
+            miss(s, id, &[kind]);
+        }
         return;
     }
+    caught_up(s, id, kind, at + 1);
     match x {
         feed::wire::Streamed::Context(usage) => super::session_menu::streamed_context(s, id, usage),
         feed::wire::Streamed::Goal(goal) => {
@@ -116,19 +226,89 @@ pub(crate) fn streamed(s: &mut App, id: &str, x: feed::wire::Streamed) {
     }
 }
 
-pub(crate) fn is_streamed(s: &App, id: &str, kind: &'static str) -> bool {
+fn miss(s: &mut App, id: &str, kinds: &[&'static str]) {
+    if !super::window::selected_anywhere(s).iter().any(|x| x == id) {
+        return;
+    }
+    let after = s.inspect.reads.issued();
+    let miss = s.inspect.missed.entry(id.to_string()).or_insert_with(|| Missed { after, asked: None, kinds: Default::default() });
+    miss.after = after;
+    miss.asked = None;
+    miss.kinds.extend(kinds);
+}
+
+pub(crate) fn streamed_since(s: &App, id: &str, kind: &str, ticket: u64) -> bool {
+    s.inspect.overlay.streamed_since(id, kind, ticket)
+}
+
+#[cfg(test)]
+pub fn is_streamed(s: &App, id: &str, kind: &str) -> bool {
     s.inspect.overlay.holds(id, kind)
 }
 
 #[cfg(test)]
-pub fn follows(s: &App, id: &str) -> bool {
-    s.inspect.overlay.follows(id)
+pub fn goal_of(s: &App, id: &str) -> Option<String> {
+    s.inspect.meta.get(id).and_then(|m| m.goal.as_ref()).map(|g| g.objective.clone())
+}
+
+#[cfg(test)]
+pub fn settle(s: &mut App, done: Done) {
+    settled(s, done);
+}
+
+#[cfg(test)]
+pub fn start(s: &mut App, id: &str, life: Option<LifecycleAct>) -> u64 {
+    s.inspect.seq += 1;
+    let token = s.inspect.seq;
+    match life {
+        Some(act) => drop(s.inspect.process.entry(id.to_string()).or_default().running.insert(token, act)),
+        None => drop(s.inspect.goal_busy.entry(id.to_string()).or_default().insert(token)),
+    }
+    token
+}
+
+#[cfg(test)]
+pub fn busy(s: &App, id: &str) -> (bool, bool) {
+    (s.inspect.goal_busy.contains_key(id), s.inspect.process.get(id).is_some_and(|p| !p.running.is_empty()))
+}
+
+#[cfg(test)]
+pub fn status_of(s: &App, id: &str) -> Option<String> {
+    s.inspect.process.get(id).and_then(|p| p.status.as_ref()).and_then(|r| r.state.clone())
+}
+
+#[cfg(test)]
+pub fn note_of(s: &App, id: &str) -> Option<String> {
+    s.inspect.goal_note.get(id).map(|(_, n)| n.clone())
+}
+
+#[cfg(test)]
+pub fn holds_any(s: &App, id: &str) -> bool {
+    s.inspect.overlay.holds(id, "goal") || s.inspect.overlay.holds(id, "context")
+}
+
+#[cfg(test)]
+pub fn missed(s: &App, id: &str) -> bool {
+    s.inspect.missed.contains_key(id)
+}
+
+#[cfg(test)]
+pub fn has_meta(s: &App, id: &str) -> bool {
+    s.inspect.meta.contains_key(id)
+}
+
+#[cfg(test)]
+pub fn expanded(s: &App, id: &str) -> bool {
+    s.inspect.expanded.contains(id)
+}
+
+#[cfg(test)]
+pub fn expand(s: &mut App, id: &str) {
+    s.inspect.expanded.insert(id.to_string());
 }
 
 pub(crate) fn returned(s: &mut App, id: &str) {
-    if s.inspect.overlay.follows(id) {
-        s.inspect.overlay.select(id);
-    }
+    miss(s, id, &["goal", "context"]);
 }
 
 pub(crate) fn metadata_moved(s: &mut App, id: &str) {
@@ -147,10 +327,12 @@ fn goal_act(s: &mut App, id: &str, act: GoalAct, typed: &str) -> bool {
     if s.inspect.goal_busy.contains_key(id) || !session(s, id).is_some_and(|x| inspect::goal_controls(x).editable) {
         return false;
     }
-    s.inspect.goal_busy.insert(id.to_string(), act);
+    s.inspect.seq += 1;
+    let token = s.inspect.seq;
+    s.inspect.goal_busy.entry(id.to_string()).or_default().insert(token);
     s.inspect.goal_note.remove(id);
     let (id, typed) = (id.to_string(), typed.to_string());
-    spawn(s, move |c| Done::Goal(id.clone(), act, c.goal(&id, act, &typed)))
+    spawn(s, move |c| Done::Goal(id.clone(), token, act, c.goal(&id, act, &typed)))
 }
 
 fn press_goal(s: &mut App, id: &str, act: GoalAct) {
@@ -205,15 +387,14 @@ pub(crate) fn run(s: &mut App, id: &str, act: LifecycleAct, tell: bool) {
     let asker = s.windows.current();
     s.inspect.seq += 1;
     let fresh = s.inspect.seq;
-    let p = s.inspect.process.entry(id.to_string()).or_insert_with(|| Process { generation: fresh, ..Process::default() });
-    if p.busy.is_some() {
+    let p = s.inspect.process.entry(id.to_string()).or_default();
+    if !p.running.is_empty() {
         return;
     }
-    p.busy = Some(act);
+    p.running.insert(fresh, act);
     p.outcome = None;
-    let generation = p.generation;
     let id = id.to_string();
-    spawn(s, move |c| Done::Life(id.clone(), generation, act, tell, asker, c.lifecycle(&id, act)));
+    spawn(s, move |c| Done::Life(id.clone(), fresh, act, tell, asker, c.lifecycle(&id, act)));
 }
 
 fn failure(error: &RespondError) -> String {
@@ -222,8 +403,18 @@ fn failure(error: &RespondError) -> String {
 
 fn settled(s: &mut App, done: Done) {
     match done {
-        Done::Goal(id, act, result) => {
-            s.inspect.goal_busy.remove(&id);
+        Done::Goal(id, token, act, result) => {
+            let stale = acted_before_merge(s, &id, token);
+            let id = current(s, &id);
+            if let Some(busy) = s.inspect.goal_busy.get_mut(&id) {
+                busy.remove(&token);
+                if busy.is_empty() {
+                    s.inspect.goal_busy.remove(&id);
+                }
+            }
+            if stale {
+                return;
+            }
             let note = match result {
                 Ok(true) => None,
                 Ok(false) => Some((false, format!("{} was sent, not confirmed yet.", act.doing()))),
@@ -234,11 +425,16 @@ fn settled(s: &mut App, done: Done) {
             }
             metadata_moved(s, &id);
         }
-        Done::Life(id, generation, act, tell, asker, result) => {
+        Done::Life(id, ticket, act, tell, asker, result) => {
+            let stale = acted_before_merge(s, &id, ticket);
+            let id = current(s, &id);
             let to = super::window::asker_or_showing(s, asker, &id);
             let elsewhere = (to.is_none() || super::window::is_open(s, super::window::Kind::Logs)).then(|| session(s, &id).map(|x| x.title()).unwrap_or_default());
-            let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.generation == generation) else { return };
-            p.busy = None;
+            let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.running.contains_key(&ticket)) else { return };
+            p.running.remove(&ticket);
+            if stale {
+                return;
+            }
             if tell || elsewhere.is_some() {
                 let line = match &result {
                     Ok(r) if act == LifecycleAct::Status => Some(r.line()).filter(|l| !l.is_empty()),
@@ -268,10 +464,12 @@ fn settled(s: &mut App, done: Done) {
                             }
                         }
                         _ if session(s, &id).is_some_and(|x| inspect::lifecycle(x).status) => {
+                            s.inspect.seq += 1;
+                            let fresh = s.inspect.seq;
                             if let Some(p) = s.inspect.process.get_mut(&id) {
-                                p.busy = Some(LifecycleAct::Status);
+                                p.running.insert(fresh, LifecycleAct::Status);
                             }
-                            spawn(s, move |c| Done::Status(id.clone(), generation, c.lifecycle(&id, LifecycleAct::Status)));
+                            spawn(s, move |c| Done::Status(id.clone(), fresh, c.lifecycle(&id, LifecycleAct::Status)));
                         }
                         _ => {}
                     }
@@ -279,9 +477,14 @@ fn settled(s: &mut App, done: Done) {
                 Err(error) => p.error = Some(failure(&error)),
             }
         }
-        Done::Status(id, generation, result) => {
-            let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.generation == generation) else { return };
-            p.busy = None;
+        Done::Status(id, ticket, result) => {
+            let stale = acted_before_merge(s, &id, ticket);
+            let id = current(s, &id);
+            let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.running.contains_key(&ticket)) else { return };
+            p.running.remove(&ticket);
+            if stale {
+                return;
+            }
             match result {
                 Ok(result) => p.status = Some(result),
                 Err(error) => p.error = Some(format!("Couldn't read its status: {}", failure(&error))),
@@ -296,6 +499,7 @@ pub fn drain(s: &mut App) -> bool {
         changed = true;
         settled(s, done);
     }
+    catch_up(s);
     if let Some(editing) = &s.inspect.editing
         && (!showing(s, &editing.session) || !session(s, &editing.session).is_some_and(|x| inspect::goal_controls(x).editable))
     {
@@ -341,7 +545,7 @@ fn goal_section(s: &App, x: &Session, k: &Kit) -> Option<El> {
         let tint = if goal.needs_attention() { attention() } else { muted() };
         let status = row().gap(5.0).items_center().px(7.0).py(2.0).radius(9.0).fill(wash()).child(icon(&icons::TARGET, k.text_size(11.0)).color(tint)).child(text(goal.display_status()).font(k.text(META)).color(tint));
         let long = goal.objective.len() > 240 || goal.objective.lines().count() > 4;
-        let expanded = s.inspect.expanded.as_deref() == Some(x.id.as_str());
+        let expanded = s.inspect.expanded.contains(&x.id);
         let objective = text(goal.objective.clone()).font(k.text(BODY)).color(theme::text()).wrap().w_full();
         body = body.child(row().w_full().child(el().grow(1.0)).child(status)).child(if expanded || !long { objective } else { objective.max_lines(4) });
         if long {
@@ -352,7 +556,11 @@ fn goal_section(s: &App, x: &Session, k: &Kit) -> Option<El> {
                     .color(accent())
                     .key("goal-more")
                     .help(if expanded { "Show less of the goal" } else { "Show the whole goal" })
-                    .on_press(move |s: &mut App| s.inspect.expanded = if s.inspect.expanded.as_deref() == Some(id.as_str()) { None } else { Some(id.clone()) }),
+                    .on_press(move |s: &mut App| {
+                        if !s.inspect.expanded.remove(&id) {
+                            s.inspect.expanded.insert(id.clone());
+                        }
+                    }),
             );
         }
         let now = OffsetDateTime::now_utc();
@@ -388,7 +596,7 @@ fn process_section(s: &App, x: &Session, k: &Kit) -> Option<El> {
         return None;
     }
     let p = s.inspect.process.get(&x.id);
-    let busy = p.and_then(|p| p.busy).is_some();
+    let busy = p.is_some_and(|p| !p.running.is_empty());
     let mut body = col().w_full().gap(8.0);
     match p.and_then(|p| p.status.as_ref()) {
         Some(status) => body = body.child(text(status.line()).font(k.text(META)).color(theme::text()).wrap()),

@@ -219,6 +219,16 @@ pub fn ids(s: &App) -> Vec<Id> {
     ids
 }
 
+pub fn selected_anywhere(s: &App) -> Vec<String> {
+    let mut out: Vec<String> = s.selected.iter().cloned().collect();
+    for l in s.windows.stash.iter().filter(|(id, _)| **id != s.windows.current).map(|(_, l)| l) {
+        if let Some(id) = l.selected.clone().filter(|id| !out.contains(id)) {
+            out.push(id);
+        }
+    }
+    out
+}
+
 pub fn shown(s: &App) -> Vec<(Id, String)> {
     let mut out: Vec<(Id, String)> = shown_sessions(s).into_iter().filter_map(|id| showing(s, &id).map(|w| (w, id))).collect();
     if let Some(id) = s.selected.clone().filter(|id| !out.iter().any(|(_, x)| x == id)) {
@@ -297,6 +307,7 @@ pub fn close(s: &mut App, id: Id) {
         slot.take_if(|w| *w == id);
     }
     s.windows.to_show.retain(|(o, _)| *o != id);
+    super::inspect::keep_shown(s);
 }
 
 fn closed(s: &mut App, tx: &mut Tx) {

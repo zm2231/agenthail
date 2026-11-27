@@ -1295,13 +1295,13 @@ pub fn switch_composer(s: &mut App) {
     s.composer_for = target;
 }
 
-fn move_key<V>(map: &mut HashMap<String, V>, old: &str, new: &str) {
+pub(crate) fn move_key<V>(map: &mut HashMap<String, V>, old: &str, new: &str) {
     if let Some(v) = map.remove(old) {
         map.entry(new.to_string()).or_insert(v);
     }
 }
 
-fn move_member(set: &mut HashSet<String>, old: &str, new: &str) {
+pub(crate) fn move_member(set: &mut HashSet<String>, old: &str, new: &str) {
     if set.remove(old) {
         set.insert(new.to_string());
     }
@@ -1311,7 +1311,7 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
     if rekeyed == s.rekeyed {
         return;
     }
-    s.rekeyed = rekeyed;
+    let before = std::mem::replace(&mut s.rekeyed, rekeyed);
     ui::complete::leave_all_history(s);
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &ui::paste::draft(s));
@@ -1356,6 +1356,9 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
         move_key(&mut s.busy_pick, &old, &new);
         move_key(&mut s.redeliver, &old, &new);
         ui::turn_options::rekey(s, &old, &new);
+        if feed::composer::current(&before, &old) != new {
+            ui::inspect::rekey(s, &old, &new);
+        }
         move_key(&mut s.work_pick, &old, &new);
         move_member(&mut s.stopping, &old, &new);
         move_key(&mut s.queue_note, &old, &new);
