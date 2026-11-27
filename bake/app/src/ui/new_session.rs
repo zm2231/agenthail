@@ -147,12 +147,23 @@ impl Sheet {
     }
 
     fn efforts(&self) -> Vec<String> {
-        if self.launch.in_terminal() {
+        if self.launch.in_terminal() || create::is_acp(&self.launch.surface) {
             return Vec::new();
         }
         let listed = self.listed_models();
         let chosen = if self.launch.model.is_empty() { listed.iter().find(|m| m.default) } else { listed.iter().find(|m| m.id == self.launch.model) };
         chosen.map(|m| m.supported_reasoning_efforts.clone()).unwrap_or_default()
+    }
+
+    fn agent_modes(&self) -> Vec<(String, String)> {
+        if !create::is_acp(&self.launch.surface) || self.launch.in_terminal() {
+            return Vec::new();
+        }
+        let modes = self.options.as_ref().and_then(|o| o.surface(&self.launch.surface)).map(|x| x.modes.clone()).unwrap_or_default();
+        if modes.is_empty() {
+            return Vec::new();
+        }
+        std::iter::once(("Agent default".to_string(), String::new())).chain(modes.into_iter().map(|m| (m.clone(), m))).collect()
     }
 
     fn place_choices(&self) -> Vec<(String, String, &'static str)> {
@@ -653,6 +664,10 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
             let choices: Vec<(String, String)> = std::iter::once((default.to_string(), String::new())).chain(modes.iter().map(|(value, label)| (label.to_string(), value.to_string()))).collect();
             tune = tune.child(field(name, select("new-session-permission", Choice::Permission, &choices, &sheet.launch.permission, sheet.open, &mut popups)));
         }
+        let agent_modes = sheet.agent_modes();
+        if !agent_modes.is_empty() {
+            tune = tune.child(field("Mode", select("new-session-agent-mode", Choice::Permission, &agent_modes, &sheet.launch.permission, sheet.open, &mut popups)));
+        }
         if request.takes_codex_options() {
             let with_default = |default: &str, pairs: &[(&str, &str)]| -> Vec<(String, String)> {
                 std::iter::once((default.to_string(), String::new())).chain(pairs.iter().map(|(value, label)| (label.to_string(), value.to_string()))).collect()
@@ -824,6 +839,21 @@ mod tests {
         assert_eq!(sheet.message.text, "Fix the build");
         assert!(sheet.can_start());
         assert!(matches!(sheet.settle(Outcome::Started { session: "s2".into(), note: String::new() }), Next::Open { session, notice: None } if session == "s2"));
+    }
+
+    #[test]
+    fn an_acp_agent_offers_its_own_modes_and_no_effort() {
+        let mut sheet = ready();
+        let devin = create::Surface { id: "devin".into(), modes: vec!["ask".into(), "bypass".into()], ..Default::default() };
+        sheet.options = Some(SessionOptions { surfaces: vec![devin], ..Default::default() });
+        assert!(sheet.agent_modes().is_empty(), "Claude keeps its permission modes");
+        sheet.launch.surface = "devin".into();
+        sheet.models.insert("devin".into(), vec![ModelOption { id: "swe-2".into(), default: true, supported_reasoning_efforts: vec!["high".into()], ..Default::default() }]);
+        let modes: Vec<String> = sheet.agent_modes().into_iter().map(|(label, _)| label).collect();
+        assert_eq!(modes, ["Agent default", "ask", "bypass"]);
+        assert!(sheet.efforts().is_empty());
+        sheet.launch.launcher = Some(create::Launcher { id: "tmux".into(), available: true, ..Default::default() });
+        assert!(sheet.agent_modes().is_empty(), "a terminal takes no mode");
     }
 
     #[test]
