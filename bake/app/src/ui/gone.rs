@@ -57,6 +57,7 @@ pub fn watch(s: &mut App) -> bool {
         if s.missing.take().is_none() {
             return false;
         }
+        super::inspect::returned(s, &id);
         super::session_menu::changed(s, &id);
         return true;
     }

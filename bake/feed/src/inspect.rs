@@ -345,6 +345,31 @@ pub fn can_save(act: GoalAct, text: &str, budget: Option<i64>) -> bool {
     }
 }
 
+#[derive(Default)]
+pub struct Overlay {
+    session: String,
+    kinds: std::collections::HashSet<&'static str>,
+}
+
+impl Overlay {
+    pub fn select(&mut self, id: &str) {
+        self.session = id.to_string();
+        self.kinds.clear();
+    }
+
+    pub fn stream(&mut self, id: &str, kind: &'static str, shown: bool) -> bool {
+        if !shown || id != self.session {
+            return false;
+        }
+        self.kinds.insert(kind);
+        true
+    }
+
+    pub fn holds(&self, id: &str, kind: &str) -> bool {
+        id == self.session && self.kinds.contains(kind)
+    }
+}
+
 pub fn streamed(events: &[crate::wire::Event]) -> Vec<crate::wire::Streamed> {
     events.iter().filter_map(|e| if let crate::wire::Event::State(x) = e { Some(x.clone()) } else { None }).collect()
 }
@@ -597,6 +622,19 @@ mod tests {
         reads.keep_only("b");
         reads.keep_only("a");
         assert!(!reads.accept("a", old));
+    }
+
+    #[test]
+    fn only_the_shown_session_streams_over_its_reads() {
+        let mut o = Overlay::default();
+        o.select("a");
+        assert!(!o.stream("b", "goal", true), "another session's stream is ignored");
+        assert!(!o.stream("a", "goal", false), "a removed session's stream is ignored");
+        assert!(!o.holds("a", "goal"));
+        assert!(o.stream("a", "context", true));
+        assert!(o.holds("a", "context") && !o.holds("a", "goal") && !o.holds("b", "context"));
+        o.select("a");
+        assert!(!o.holds("a", "context"), "selecting again starts from the reads");
     }
 
     #[test]
