@@ -23,7 +23,7 @@ fn recorded(at: &str, sessions: Vec<Session>) -> Recorded {
 }
 
 fn fetched(at: &str, sessions: Vec<Session>, ledgers: Vec<(&str, Result<Vec<Work>, String>)>) -> Fetched {
-    Fetched { recorded: recorded(at, sessions), ledgers: ledgers.into_iter().map(|(k, r)| (k.to_string(), r)).collect(), held: Vec::new(), started: Instant::now() }
+    Fetched { recorded: recorded(at, sessions), ledgers: ledgers.into_iter().map(|(k, r)| (k.to_string(), r)).collect(), held: Vec::new(), asked: Vec::new(), started: Instant::now() }
 }
 
 fn status(w: &World, id: &str) -> String {
@@ -316,7 +316,7 @@ fn a_ledger_change_refetches_only_a_project_whose_rows_are_shown() {
     let mut ov = Overview::default();
     let mut r = recorded("2026-11-24T12:00:00Z", vec![session("s", "p", "2026-11-24T11:00:00Z", "idle")]);
     r.projects[0].ledger_key = "shared:x".into();
-    ov.refresh(Fetched { recorded: r, ledgers: [("p".to_string(), Ok(vec![work("p-W1", "open")]))].into(), held: Vec::new(), started: Instant::now() });
+    ov.refresh(Fetched { recorded: r, ledgers: [("p".to_string(), Ok(vec![work("p-W1", "open")]))].into(), held: Vec::new(), asked: Vec::new(), started: Instant::now() });
     assert_eq!(ov.ledger_changed("shared:x").as_deref(), Some("p"));
     assert_eq!(ov.ledger_changed("p").as_deref(), Some("p"));
     assert_eq!(ov.ledger_changed("old"), None);
@@ -331,4 +331,13 @@ fn ledgers_held_from_the_change_stream_survive_an_overview_that_skips_them() {
     ov.refresh(Fetched { held: vec!["p".into()], ..fetched("2026-11-24T12:01:00Z", sessions(), Vec::new()) });
     assert_eq!(board_ids(&ov.world(&[]), "p"), vec!["p-W1".to_string()]);
     assert!(!ov.wants("p"));
+}
+
+#[test]
+fn an_overview_remembers_every_ledger_and_actor_it_asked_for() {
+    let mut known = super::live::Known::default();
+    let f = Fetched { asked: vec!["gone-actor".into()], ..fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("p", Ok(Vec::new())), ("h2::p", Err("status code 404".into()))]) };
+    known.learn(&f);
+    assert!(known.ledgers.contains("p") && known.ledgers.contains("h2::p"));
+    assert!(known.actors.contains("gone-actor"));
 }

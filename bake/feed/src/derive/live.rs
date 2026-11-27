@@ -20,7 +20,21 @@ pub struct Fetched {
     pub recorded: Recorded,
     pub ledgers: HashMap<String, Result<Vec<Work>, String>>,
     pub held: Vec<String>,
+    pub asked: Vec<String>,
     pub started: Instant,
+}
+
+#[derive(Default)]
+pub struct Known {
+    pub ledgers: HashSet<String>,
+    pub actors: HashSet<String>,
+}
+
+impl Known {
+    pub fn learn(&mut self, fetched: &Fetched) {
+        self.ledgers.extend(fetched.ledgers.keys().cloned());
+        self.actors.extend(fetched.asked.iter().cloned());
+    }
 }
 
 pub struct Ledger {
@@ -28,13 +42,13 @@ pub struct Ledger {
     pub actors: HashMap<String, Actor>,
 }
 
-pub fn fetch(client: &Client, held: &HashSet<String>) -> Result<Fetched> {
+pub fn fetch(client: &Client, known: &Known) -> Result<Fetched> {
     let started = Instant::now();
     let snap = client.get_json("/api/v1/snapshot")?;
     let now = snap["updatedAt"].as_str().and_then(parse_time).unwrap_or_else(OffsetDateTime::now_utc);
     let sessions: Vec<Session> = serde_json::from_value(snap["sessions"].clone()).unwrap_or_default();
     let recent: BTreeSet<String> = sessions.iter().filter(|s| hours(now, &s.last_active) < LEDGER_WINDOW_H).map(|s| s.project_key()).collect();
-    let (held, keys): (Vec<String>, Vec<String>) = snap["projects"].as_array().into_iter().flatten().filter(|p| p["archived"] != json!(true)).filter_map(|p| p["id"].as_str()).filter(|k| recent.contains(*k)).map(String::from).partition(|k| held.contains(k));
+    let (held, keys): (Vec<String>, Vec<String>) = snap["projects"].as_array().into_iter().flatten().filter(|p| p["archived"] != json!(true)).filter_map(|p| p["id"].as_str()).filter(|k| recent.contains(*k)).map(String::from).partition(|k| known.ledgers.contains(k));
     let ledgers: HashMap<String, Result<Vec<Work>, String>> = std::thread::scope(|scope| {
         let jobs: Vec<_> = keys.iter().map(|k| (k.clone(), scope.spawn(|| rows(client, k, now)))).collect();
         jobs.into_iter().map(|(k, h)| (k, h.join().unwrap_or_else(|_| Err("the fetch stopped".into())))).collect()
@@ -56,14 +70,15 @@ pub fn fetch(client: &Client, held: &HashSet<String>) -> Result<Fetched> {
         .unwrap_or_default();
     let raw = json!({"updatedAt": snap["updatedAt"], "projects": snap["projects"], "usage": usage, "hosts": hosts});
     let mut recorded: Recorded = serde_json::from_value(raw)?;
-    recorded.actors = actors(client, &sessions, ledgers.values().filter_map(|r| r.as_ref().ok()).flatten());
+    let (found, asked) = actors(client, &sessions, &known.actors, ledgers.values().filter_map(|r| r.as_ref().ok()).flatten());
+    recorded.actors = found;
     recorded.sessions = sessions;
-    Ok(Fetched { recorded, ledgers, held, started })
+    Ok(Fetched { recorded, ledgers, held, asked, started })
 }
 
-pub fn ledger(client: &Client, project: &str, sessions: &[Session]) -> Result<Ledger, String> {
+pub fn ledger(client: &Client, project: &str, sessions: &[Session], known: &HashSet<String>) -> Result<Ledger, String> {
     let rows = rows(client, project, OffsetDateTime::now_utc())?;
-    let actors = actors(client, sessions, rows.iter());
+    let (actors, _) = actors(client, sessions, known, rows.iter());
     Ok(Ledger { rows, actors })
 }
 
@@ -85,10 +100,10 @@ fn trim(rows: Vec<Value>, cutoff: OffsetDateTime) -> Vec<Value> {
     rows.into_iter().filter(|r| !matches!(r["state"].as_str(), Some("done" | "deleted")) || r["id"].as_str().is_some_and(|id| kept.contains(id)) || recent(r)).collect()
 }
 
-fn actors<'a>(client: &Client, sessions: &[Session], rows: impl Iterator<Item = &'a Work>) -> HashMap<String, Actor> {
-    let known: BTreeSet<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
-    let wanted: BTreeSet<String> = rows.flat_map(|w| &w.timeline).map(|t| t.actor.clone()).filter(|a| !a.is_empty() && !known.contains(a.as_str()) && !a.contains(' ') && !a.starts_with("td:")).collect();
-    std::thread::scope(|scope| {
+fn actors<'a>(client: &Client, sessions: &[Session], asked: &HashSet<String>, rows: impl Iterator<Item = &'a Work>) -> (HashMap<String, Actor>, Vec<String>) {
+    let listed: BTreeSet<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+    let wanted: BTreeSet<String> = rows.flat_map(|w| &w.timeline).map(|t| t.actor.clone()).filter(|a| !a.is_empty() && !listed.contains(a.as_str()) && !asked.contains(a) && !a.contains(' ') && !a.starts_with("td:")).collect();
+    let found = std::thread::scope(|scope| {
         let jobs: Vec<_> = wanted.iter().map(|a| (a.clone(), scope.spawn(|| client.get_json(&format!("/api/v1/session?id={}", crate::catalog::enc(a)))))).collect();
         jobs.into_iter()
             .filter_map(|(a, h)| {
@@ -97,7 +112,8 @@ fn actors<'a>(client: &Client, sessions: &[Session], rows: impl Iterator<Item = 
                 Some((a, Actor { alias: v["alias"].as_str().map(String::from), name: x["name"].as_str().map(String::from), surface: x["surface"].as_str().map(String::from) }))
             })
             .collect()
-    })
+    });
+    (found, wanted.into_iter().collect())
 }
 
 // Sessions only move forward in time, a project's rows survive a failed fetch,
@@ -211,7 +227,7 @@ impl Overview {
     }
 
     pub fn refresh(&mut self, fetched: Fetched) {
-        let Fetched { mut recorded, ledgers, held, started } = fetched;
+        let Fetched { mut recorded, ledgers, held, started, .. } = fetched;
         let fresh = newer(&recorded.updated_at, &self.base.updated_at);
         if !fresh {
             recorded.updated_at = std::mem::take(&mut self.base.updated_at);
@@ -242,6 +258,10 @@ impl Overview {
         self.pending.insert(project.to_string());
         self.stale = true;
         true
+    }
+
+    pub fn actor_ids(&self) -> HashSet<String> {
+        self.base.actors.keys().cloned().collect()
     }
 
     pub fn ledger_changed(&mut self, ledger_key: &str) -> Option<String> {

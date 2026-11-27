@@ -181,12 +181,12 @@ pub enum Ask {
 
 fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>) {
     std::thread::spawn(move || {
-        let mut held: HashSet<String> = HashSet::new();
+        let mut known = feed::derive::live::Known::default();
         loop {
             let started = std::time::Instant::now();
-            let message = match feed::derive::live::fetch(&client, &held) {
+            let message = match feed::derive::live::fetch(&client, &known) {
                 Ok(fetched) => {
-                    held.extend(fetched.ledgers.iter().filter(|(_, r)| r.is_ok()).map(|(k, _)| k.clone()));
+                    known.learn(&fetched);
                     Bg::Overview(Box::new(fetched))
                 }
                 Err(error) => Bg::OverviewError(error.to_string()),
@@ -206,7 +206,7 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>) {
                 asked = asked.max(Some(ask));
             }
             if asked == Some(Ask::Reset) {
-                held.clear();
+                known = Default::default();
             }
         }
     });
@@ -416,9 +416,9 @@ pub fn fetch_ledger(s: &mut App, project: &str) {
 
 fn spawn_ledger(s: &App, project: String) {
     let Some(client) = s.client.clone() else { return };
-    let (tx, sessions, started) = (s.outbox.clone(), s.sessions.clone(), std::time::Instant::now());
+    let (tx, sessions, known, started) = (s.outbox.clone(), s.sessions.clone(), s.ov.live.actor_ids(), std::time::Instant::now());
     std::thread::spawn(move || {
-        let result = feed::derive::live::ledger(&client, &project, &sessions);
+        let result = feed::derive::live::ledger(&client, &project, &sessions, &known);
         let _ = tx.send(Bg::Ledger(project, started, result));
     });
 }
