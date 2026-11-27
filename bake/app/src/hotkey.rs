@@ -1,4 +1,5 @@
 use std::cell::{OnceCell, RefCell};
+use std::sync::mpsc::{Receiver, Sender, channel};
 
 use feed::hotkey::{Hotkey, Refusal, Registrar};
 use feed::shortcuts::{ANY_APP, ANY_APP_ID, Stored};
@@ -7,9 +8,17 @@ use rune::{AppHandle, Shortcut, ShortcutError, ShortcutId, Tx};
 use crate::App;
 use crate::ui::bindings;
 
+#[derive(Clone, Copy)]
+enum Ask {
+    Want,
+    Choose,
+    Regain,
+}
+
 thread_local! {
     static HANDLE: OnceCell<AppHandle<App>> = const { OnceCell::new() };
-    static STATE: RefCell<Hotkey<ShortcutId>> = RefCell::new(Hotkey::default());
+    static WORKER: OnceCell<Sender<(Ask, Option<Stored>)>> = const { OnceCell::new() };
+    static REFUSED: RefCell<Option<Refusal>> = const { RefCell::new(None) };
 }
 
 struct Live<'a>(&'a AppHandle<App>);
@@ -18,8 +27,8 @@ impl Registrar for Live<'_> {
     type Id = ShortcutId;
 
     fn register(&mut self, shortcut: Stored) -> Result<ShortcutId, Refusal> {
-        let parsed: Shortcut = shortcut.spec().and_then(|s| s.parse().ok()).ok_or(Refusal::Invalid)?;
-        self.0.register_shortcut_named(parsed.clone(), ANY_APP_ID, ANY_APP, pressed).map_err(|e| refusal(e, || self.0.shortcut_owner(&parsed)))
+        let parsed = chord(shortcut).ok_or(Refusal::Invalid)?;
+        self.0.register_shortcut_named(parsed, ANY_APP_ID, ANY_APP, pressed).map_err(refusal)
     }
 
     fn unregister(&mut self, id: ShortcutId) {
@@ -29,9 +38,13 @@ impl Registrar for Live<'_> {
     }
 }
 
-fn refusal(error: ShortcutError, owner: impl FnOnce() -> Option<String>) -> Refusal {
+fn chord(shortcut: Stored) -> Option<Shortcut> {
+    shortcut.spec()?.parse().ok()
+}
+
+fn refusal(error: ShortcutError) -> Refusal {
     match error {
-        ShortcutError::Conflict => Refusal::Taken(owner()),
+        ShortcutError::Conflict => Refusal::Taken(None),
         ShortcutError::PermissionDenied => Refusal::Denied,
         ShortcutError::Unsupported => Refusal::Unsupported,
         ShortcutError::InvalidAccelerator(_) => Refusal::Invalid,
@@ -39,36 +52,75 @@ fn refusal(error: ShortcutError, owner: impl FnOnce() -> Option<String>) -> Refu
     }
 }
 
-pub fn keep(handle: AppHandle<App>) {
-    HANDLE.with(|h| {
-        let _ = h.set(handle);
-    });
-}
-
-fn with_live(f: impl FnOnce(&mut Hotkey<ShortcutId>, &mut Live) -> bool) {
-    let changed = HANDLE.with(|h| {
-        let Some(handle) = h.get() else { return false };
-        STATE.with_borrow_mut(|state| f(state, &mut Live(handle)))
-    });
-    if changed {
-        crate::settings::redraw();
+fn run(handle: AppHandle<App>, asks: Receiver<(Ask, Option<Stored>)>) {
+    let mut state = Hotkey::default();
+    for (ask, want) in asks {
+        let mut live = Live(&handle);
+        let acted = match ask {
+            Ask::Want => state.want(&mut live, want),
+            Ask::Choose => state.choose(&mut live, want),
+            Ask::Regain => state.regain(&mut live, want),
+        };
+        if acted {
+            let refused = state.refused().cloned();
+            handle.update(move |_, _| shown(refused, want));
+        }
     }
 }
 
-pub fn sync() {
+fn shown(refused: Option<Refusal>, tried: Option<Stored>) {
+    let named = match refused {
+        Some(Refusal::Taken(None)) => {
+            let owner = HANDLE.with(|h| Some(h.get()?.shortcut_owner(&chord(tried?)?)?));
+            Some(Refusal::Taken(owner))
+        }
+        other => other,
+    };
+    REFUSED.set(named);
+    crate::settings::redraw();
+}
+
+pub fn keep(handle: AppHandle<App>) {
+    let (tx, rx) = channel();
+    let worker = handle.clone();
+    let spawned = std::thread::Builder::new().name("agenthail-shortcut".into()).spawn(move || run(worker, rx));
+    if let Err(error) = spawned {
+        eprintln!("agenthail: the shortcut from any app is off: {error}");
+        return;
+    }
+    HANDLE.with(|h| {
+        let _ = h.set(handle);
+    });
+    WORKER.with(|w| {
+        let _ = w.set(tx);
+    });
+}
+
+fn ask(ask: Ask) {
     let want = bindings::read(|sc| sc.any_app());
-    with_live(|state, live| state.want(live, want));
+    WORKER.with(|w| {
+        if let Some(tx) = w.get() {
+            let _ = tx.send((ask, want));
+        }
+    });
+}
+
+pub fn sync() {
+    ask(Ask::Want);
+}
+
+pub fn chose() {
+    ask(Ask::Choose);
 }
 
 pub fn regained() {
     bindings::refresh();
-    sync();
-    with_live(|state, live| state.retry(live));
+    ask(Ask::Regain);
 }
 
 pub fn note() -> Option<String> {
     let keys = bindings::any_app().map(|s| bindings::keycaps(&s))?;
-    STATE.with_borrow(|state| state.refused().map(|r| feed::hotkey::note(r, &keys)))
+    REFUSED.with_borrow(|refused| refused.as_ref().map(|r| feed::hotkey::note(r, &keys)))
 }
 
 fn pressed(s: &mut App, tx: &mut Tx) {
@@ -90,19 +142,17 @@ mod tests {
 
     #[test]
     fn shortcut_errors_read_as_the_keyboard_page_says_them() {
-        assert_eq!(refusal(ShortcutError::Conflict, || Some("Spotlight".into())), Refusal::Taken(Some("Spotlight".into())));
-        assert_eq!(refusal(ShortcutError::Conflict, || None), Refusal::Taken(None));
-        assert_eq!(refusal(ShortcutError::PermissionDenied, || unreachable!()), Refusal::Denied);
-        assert_eq!(refusal(ShortcutError::Unsupported, || unreachable!()), Refusal::Unsupported);
-        assert_eq!(refusal(ShortcutError::InvalidAccelerator("space".into()), || unreachable!()), Refusal::Invalid);
-        assert_eq!(refusal(ShortcutError::NotRunning, || unreachable!()), Refusal::Failed("the shortcut's app is not running".into()));
+        assert_eq!(refusal(ShortcutError::Conflict), Refusal::Taken(None));
+        assert_eq!(refusal(ShortcutError::PermissionDenied), Refusal::Denied);
+        assert_eq!(refusal(ShortcutError::Unsupported), Refusal::Unsupported);
+        assert_eq!(refusal(ShortcutError::InvalidAccelerator("space".into())), Refusal::Invalid);
+        assert_eq!(refusal(ShortcutError::NotRunning), Refusal::Failed("the shortcut's app is not running".into()));
     }
 
     #[test]
     fn every_stored_shortcut_from_any_app_parses_for_rune() {
         for spec in ["alt+mod+k", "ctrl+alt+space", "shift+mod+f12", "ctrl+backquote"] {
-            let stored = Stored::parse(spec).unwrap();
-            assert!(stored.spec().and_then(|s| s.parse::<Shortcut>().ok()).is_some(), "{spec}");
+            assert!(chord(Stored::parse(spec).unwrap()).is_some(), "{spec}");
         }
     }
 }

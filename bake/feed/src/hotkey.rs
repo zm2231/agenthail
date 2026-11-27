@@ -37,11 +37,19 @@ impl<I: Copy> Hotkey<I> {
         true
     }
 
-    pub fn retry<R: Registrar<Id = I>>(&mut self, registrar: &mut R) -> bool {
-        if !matches!(self.refused, Some(Refusal::Taken(_))) {
+    pub fn choose<R: Registrar<Id = I>>(&mut self, registrar: &mut R, shortcut: Option<Stored>) -> bool {
+        if shortcut == self.tried && self.refused.is_none() {
             return false;
         }
-        self.attempt(registrar, self.tried);
+        self.attempt(registrar, shortcut);
+        true
+    }
+
+    pub fn regain<R: Registrar<Id = I>>(&mut self, registrar: &mut R, shortcut: Option<Stored>) -> bool {
+        if shortcut == self.tried && !matches!(self.refused, Some(Refusal::Taken(_))) {
+            return false;
+        }
+        self.attempt(registrar, shortcut);
         true
     }
 
@@ -71,7 +79,7 @@ pub fn note(refusal: &Refusal, keys: &str) -> String {
     match refusal {
         Refusal::Taken(Some(owner)) => format!("{keys} is already used by {owner}. Agenthail tries again when you change it or come back to Agenthail."),
         Refusal::Taken(None) => format!("{keys} is already used by another app. Agenthail tries again when you change it or come back to Agenthail."),
-        Refusal::Denied => format!("{keys} wasn't allowed from other apps. It works once the desktop allows it."),
+        Refusal::Denied => format!("{keys} wasn't allowed from other apps. Choose it again to ask once more."),
         Refusal::Unsupported => "This desktop doesn't offer shortcuts that work from other apps.".to_string(),
         Refusal::Invalid => format!("{keys} can't be used from other apps. Add ⌘, ⌃ or ⌥."),
         Refusal::Failed(why) => format!("{keys} couldn't be set up: {why}."),
@@ -147,13 +155,14 @@ mod tests {
         assert_eq!(hk.refused(), Some(&Refusal::Taken(None)));
         assert!(!hk.want(&mut fake, Some(s("alt+mod+k"))), "no retry without a change");
         assert_eq!(fake.calls, 1);
-        assert!(hk.retry(&mut fake), "coming back retries a taken shortcut");
+        assert!(hk.regain(&mut fake, Some(s("alt+mod+k"))), "coming back retries a taken shortcut");
         assert_eq!(fake.calls, 2);
         fake.taken.clear();
-        assert!(hk.retry(&mut fake));
+        assert!(hk.regain(&mut fake, Some(s("alt+mod+k"))));
         assert!(hk.held());
         assert_eq!(hk.refused(), None);
-        assert!(!hk.retry(&mut fake), "a held shortcut isn't retried");
+        assert!(!hk.regain(&mut fake, Some(s("alt+mod+k"))), "a held shortcut isn't retried");
+        assert!(!hk.choose(&mut fake, Some(s("alt+mod+k"))), "choosing the held shortcut again does nothing");
         assert_eq!(fake.calls, 3);
 
         let mut fake = Fake { taken: vec![(s("mod+space"), Some("Spotlight".into()))], ..Fake::default() };
@@ -165,14 +174,28 @@ mod tests {
     }
 
     #[test]
-    fn a_refusal_other_than_taken_waits_for_a_rebinding() {
+    fn coming_back_to_a_binding_changed_elsewhere_tries_it_once() {
+        let mut fake = Fake { taken: vec![(s("ctrl+alt+space"), None)], ..Fake::default() };
+        let mut hk = Hotkey::default();
+        hk.want(&mut fake, Some(s("alt+mod+k")));
+        assert!(hk.regain(&mut fake, Some(s("ctrl+alt+space"))));
+        assert_eq!(fake.calls, 2, "one attempt for the new binding, no second retry in the same return");
+        assert!(fake.live.is_empty(), "the old shortcut was released");
+        assert_eq!(hk.refused(), Some(&Refusal::Taken(None)));
+    }
+
+    #[test]
+    fn a_refusal_other_than_taken_waits_for_a_choice() {
         for refusal in [Refusal::Unsupported, Refusal::Denied, Refusal::Invalid, Refusal::Failed("native status -1".into())] {
             let mut fake = Fake { refuse: Some(refusal.clone()), ..Fake::default() };
             let mut hk = Hotkey::default();
             hk.want(&mut fake, Some(s("alt+mod+k")));
             assert_eq!(hk.refused(), Some(&refusal));
-            assert!(!hk.retry(&mut fake));
+            assert!(!hk.regain(&mut fake, Some(s("alt+mod+k"))));
             assert_eq!(fake.calls, 1);
+            fake.refuse = None;
+            assert!(hk.choose(&mut fake, Some(s("alt+mod+k"))), "choosing it again asks again");
+            assert!(hk.held());
             assert!(!note(&refusal, "⌥⌘K").is_empty());
         }
         assert_eq!(note(&Refusal::Unsupported, "⌥⌘K"), "This desktop doesn't offer shortcuts that work from other apps.");

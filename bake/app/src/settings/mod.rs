@@ -630,6 +630,7 @@ pub(crate) fn poll(s: &mut Prefs, _: f64, tx: &mut Tx) -> bool {
         changed = true;
     }
     changed |= devices::poll(s, tx);
+    changed |= keyboard::poll(s);
     if crate::look::poll(crate::look::Window::Settings, tx) {
         appearance::changed(s);
         changed = true;

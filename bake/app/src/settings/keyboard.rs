@@ -14,6 +14,7 @@ pub struct Form {
     any_app: ShortcutRecorderState,
     kept: Vec<(&'static str, &'static str)>,
     kept_at: u64,
+    seen: u64,
 }
 
 pub const PAGE: usize = 2;
@@ -27,7 +28,16 @@ pub fn opened(s: &mut Prefs) {
     sync_rows(s);
 }
 
+pub fn poll(s: &mut Prefs) -> bool {
+    if s.keyboard.seen == bindings::generation() {
+        return false;
+    }
+    sync_rows(s);
+    true
+}
+
 fn sync_rows(s: &mut Prefs) {
+    s.keyboard.seen = bindings::generation();
     if !s.keyboard.any_app.is_recording() {
         s.keyboard.any_app = ShortcutRecorderState::new(bindings::any_app());
     }
@@ -64,7 +74,7 @@ fn propose_any_app(next: Option<&Shortcut>) -> Result<(), ShortcutError> {
         Some(shortcut) => Some(bindings::stored(shortcut).ok_or_else(|| ShortcutError::InvalidAccelerator(shortcut.to_string()))?),
     };
     let changed = bindings::change(|sc| sc.set_any_app(stored)).map_err(|_| ShortcutError::Conflict);
-    crate::hotkey::sync();
+    crate::hotkey::chose();
     changed
 }
 
