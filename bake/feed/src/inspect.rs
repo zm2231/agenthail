@@ -162,6 +162,19 @@ pub struct Metadata {
     pub warnings: Vec<String>,
 }
 
+impl Metadata {
+    pub fn after(mut self, old: Option<&Metadata>) -> Metadata {
+        if self.goal_failed && self.goal.is_none() {
+            self.goal = old.and_then(|m| m.goal.clone());
+        }
+        self
+    }
+
+    pub fn failed(old: Option<&Metadata>, error: String) -> Metadata {
+        Metadata { goal: old.and_then(|m| m.goal.clone()), goal_failed: true, runs: old.and_then(|m| m.runs.clone()), warnings: vec![error] }
+    }
+}
+
 fn field_name(key: &str) -> &str {
     match key {
         "context" => "Context usage",
@@ -462,6 +475,20 @@ mod tests {
         let failed = metadata(&json!({"errors": {"goal": "timed out"}}));
         assert!(failed.goal.is_none() && failed.goal_failed);
         assert_eq!(failed.warnings, ["Goal: timed out"]);
+    }
+
+    #[test]
+    fn a_failed_read_keeps_what_was_known_and_never_reads_as_no_goal() {
+        let known = metadata(&json!({"goal": {"objective": "Ship", "status": "active"}, "claudeRuns": []}));
+        let field = metadata(&json!({"errors": {"goal": "timed out"}})).after(Some(&known));
+        assert_eq!(field.goal.as_ref().map(|g| g.objective.as_str()), Some("Ship"));
+        let cleared = metadata(&json!({"goal": null})).after(Some(&known));
+        assert_eq!(cleared.goal, None, "a read that answered drops a cleared goal");
+        let whole = Metadata::failed(Some(&known), "connection refused".into());
+        assert!(whole.goal_failed && whole.goal.is_some() && whole.runs == Some(vec![]));
+        assert_eq!(whole.warnings, ["connection refused"]);
+        let first = Metadata::failed(None, "connection refused".into());
+        assert!(first.goal_failed && first.goal.is_none());
     }
 
     #[test]

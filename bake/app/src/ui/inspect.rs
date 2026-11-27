@@ -125,17 +125,10 @@ fn fetch(s: &mut App, id: &str, force: bool) {
     }
 }
 
-fn keep_goal(old: Option<&Metadata>, mut new: Metadata) -> Metadata {
-    if new.goal_failed && new.goal.is_none() {
-        new.goal = old.and_then(|m| m.goal.clone());
-    }
-    new
-}
-
 pub(crate) fn took(s: &mut App, id: &str, data: Metadata) {
     let stamp = session(s, id).map(|x| x.last_active.clone()).unwrap_or_default();
     let entry = s.inspect.meta.entry(id.to_string()).or_default();
-    entry.data = Some(keep_goal(entry.data.as_ref(), data));
+    entry.data = Some(data.after(entry.data.as_ref()));
     entry.stamp = stamp;
     entry.at = Some(Instant::now());
 }
@@ -222,8 +215,8 @@ fn settled(s: &mut App, done: Done) {
             let Some(m) = s.inspect.meta.get_mut(&id).filter(|m| m.seq == seq) else { return };
             m.in_flight = false;
             match result {
-                Ok(data) => m.data = Some(keep_goal(m.data.as_ref(), data)),
-                Err(error) => m.data = Some(Metadata { warnings: vec![error], ..m.data.take().unwrap_or_default() }),
+                Ok(data) => m.data = Some(data.after(m.data.as_ref())),
+                Err(error) => m.data = Some(Metadata::failed(m.data.as_ref(), error)),
             }
             if m.again && s.selected.as_deref() == Some(id.as_str()) {
                 fetch(s, &id, true);
