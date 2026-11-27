@@ -105,10 +105,15 @@ func (m *Manager) ensure(ctx context.Context, launch Launch) (Client, error) {
 		return false, nil
 	}
 	err := poll.Until(ctx, 50*time.Millisecond, func() (bool, error) {
-		attempt, stop := context.WithTimeout(ctx, time.Second)
+		since := silentSince
+		if since.IsZero() {
+			since = time.Now()
+		}
+		attempt, stop := context.WithDeadline(ctx, since.Add(unansweredAfter))
 		hello, err := client.Hello(attempt)
 		stop()
 		if unanswered(err) && ctx.Err() == nil {
+			silentSince = since
 			return silent()
 		}
 		silentSince = time.Time{}

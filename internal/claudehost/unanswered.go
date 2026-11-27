@@ -17,7 +17,8 @@ import (
 	"github.com/zm2231/agenthail/internal/procstart"
 )
 
-// Any hello answered within this window resets it, so a slow host is kept.
+// A host is silent once no hello is answered for unansweredAfter. Each hello
+// may wait out the rest of that window, so a host that answers slowly is kept.
 var (
 	unansweredAfter = 10 * time.Second
 	retireWait      = 10 * time.Second
