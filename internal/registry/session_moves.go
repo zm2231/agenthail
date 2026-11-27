@@ -583,7 +583,7 @@ func (r *Registry) completeMoveOutTx(move SessionMove, items []MovedQueueItem, h
 		VALUES(?,?,?,?,?,?,?,0,0,?,?)`, move.Conversation, []byte(`null`), []byte(`{}`), placeholder.UnavailableReason, formatTimestamp(movedAt), string(encoded), generation, []byte{}, []byte{}); err != nil {
 		return nil, false, err
 	}
-	event, created, err := appendHostUpsertTx(tx, placeholder.EntityID, projection, generation, movedAt, placeholder.UnavailableReason)
+	event, created, err := appendHostUpsertTx(tx, placeholder.EntityID, projection, nil, generation, movedAt, placeholder.UnavailableReason)
 	if err != nil {
 		return nil, false, err
 	}

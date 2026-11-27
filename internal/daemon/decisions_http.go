@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"context"
+	"maps"
 	"net/http"
+	"slices"
 	"sort"
 	"sync"
 
@@ -52,8 +54,8 @@ func (d *Daemon) decisionRows(ctx context.Context) ([]dashboardSession, string, 
 		return nil, "", err
 	}
 	rows := make([]dashboardSession, 0, len(build.rows))
-	for _, row := range build.rows {
-		rows = append(rows, *row)
+	for _, id := range slices.Sorted(maps.Keys(build.rows)) {
+		rows = append(rows, *build.rows[id])
 	}
 	return rows, build.hostEpoch, nil
 }
