@@ -8,17 +8,17 @@ license = "MIT"
 [dependencies]
 feed = { path = "../feed" }
 serde_json = "1"
-rune = { git = "https://github.com/zm2231/rune", rev = "9ec529348410579cce5e796c56a211d6c06476d0", features = ["tooling"] }
-rune-kit = { git = "https://github.com/zm2231/rune", rev = "9ec529348410579cce5e796c56a211d6c06476d0", features = ["markdown"] }
+rune = { git = "https://github.com/zm2231/rune", rev = "35ab9e522306382d17bd1e9dd149f7673d216f92", features = ["tooling"] }
+rune-kit = { git = "https://github.com/zm2231/rune", rev = "35ab9e522306382d17bd1e9dd149f7673d216f92", features = ["markdown"] }
 
 [patch.crates-io]
-winit = { git = "https://github.com/zm2231/rune", rev = "9ec529348410579cce5e796c56a211d6c06476d0" }
-sctk-adwaita = { git = "https://github.com/zm2231/rune", rev = "9ec529348410579cce5e796c56a211d6c06476d0" }
-parley_engine = { git = "https://github.com/zm2231/rune", rev = "9ec529348410579cce5e796c56a211d6c06476d0" }
-wgpu-hal = { git = "https://github.com/zm2231/rune", rev = "9ec529348410579cce5e796c56a211d6c06476d0" }
-accesskit_windows = { git = "https://github.com/zm2231/rune", rev = "9ec529348410579cce5e796c56a211d6c06476d0" }
-accesskit_macos = { git = "https://github.com/zm2231/rune", rev = "9ec529348410579cce5e796c56a211d6c06476d0" }
-sonora-aec3 = { git = "https://github.com/zm2231/rune", rev = "9ec529348410579cce5e796c56a211d6c06476d0" }
+winit = { git = "https://github.com/zm2231/rune", rev = "35ab9e522306382d17bd1e9dd149f7673d216f92" }
+sctk-adwaita = { git = "https://github.com/zm2231/rune", rev = "35ab9e522306382d17bd1e9dd149f7673d216f92" }
+parley_engine = { git = "https://github.com/zm2231/rune", rev = "35ab9e522306382d17bd1e9dd149f7673d216f92" }
+wgpu-hal = { git = "https://github.com/zm2231/rune", rev = "35ab9e522306382d17bd1e9dd149f7673d216f92" }
+accesskit_windows = { git = "https://github.com/zm2231/rune", rev = "35ab9e522306382d17bd1e9dd149f7673d216f92" }
+accesskit_macos = { git = "https://github.com/zm2231/rune", rev = "35ab9e522306382d17bd1e9dd149f7673d216f92" }
+sonora-aec3 = { git = "https://github.com/zm2231/rune", rev = "35ab9e522306382d17bd1e9dd149f7673d216f92" }
 
 [profile.release]
 debug = false
