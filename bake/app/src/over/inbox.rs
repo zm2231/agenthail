@@ -254,6 +254,9 @@ pub fn accept(s: &mut crate::App, d: &Decision) {
     if d.recommended().is_none() || s.ov.inbox.unconfirmed.contains(&d.hold_key()) {
         return;
     }
+    if let Some((request, _)) = d.recommended().filter(|_| !s.ov.inbox.acting.contains(&d.id()) && s.client.is_some()) {
+        s.ov.inbox.answered.insert(d.id(), request);
+    }
     act(s, d, "Accepted the recommended answer", |client, d| {
         let (request, choices) = d.recommended().expect("checked above");
         client.respond(&d.session_id, &request, choices, Default::default()).map_err(|e| (e, d.hold_key()))
