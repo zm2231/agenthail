@@ -102,7 +102,7 @@ fn a_work_change_rebuilds_only_its_digest_line() {
     let dir = Dir::new("rows-digest");
     let mut rt = world(&dir);
     now(&mut rt, false);
-    let line = |id: &str| format!("d-p1-Shipped-w:p1:{id}");
+    let line = |id: &str| format!("d-p1-Shipped-w:p1|{id}");
     shown(&rt, &line("W1"));
     shown(&rt, &line("W2"));
     assert_eq!(rebuilt(&mut rt, "d-", |_| {}), Vec::<String>::new(), "nothing changed");
@@ -117,7 +117,7 @@ fn a_work_change_rebuilds_only_its_since_card() {
     let dir = Dir::new("rows-since");
     let mut rt = world(&dir);
     board(&mut rt);
-    let card = |id: &str| format!("since-Shipped-w:p1:{id}");
+    let card = |id: &str| format!("since-Shipped-w:p1|{id}");
     shown(&rt, &card("W1"));
     assert_eq!(rebuilt(&mut rt, "since-", |_| {}), Vec::<String>::new(), "nothing changed");
     let changed = rebuilt(&mut rt, "since-", |s| work(s, "W1").text = "Wire the export again".into());

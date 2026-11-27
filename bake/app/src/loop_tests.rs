@@ -24,6 +24,7 @@ mod work_steps;
 mod rows_memo;
 #[path = "row_memo_lines_tests.rs"]
 mod rows_memo_lines;
+#[cfg(feature = "frame-profile")]
 #[path = "live_shape_tests.rs"]
 mod live_shape;
 #[cfg(feature = "frame-profile")]

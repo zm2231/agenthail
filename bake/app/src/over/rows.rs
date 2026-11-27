@@ -20,7 +20,7 @@ pub fn memo(id: impl Into<String>, shows: impl Hash, k: &Kit, build: impl FnOnce
 pub fn target_id(t: &Target) -> String {
     match t {
         Target::Session(id) => format!("s:{id}"),
-        Target::Work(w) => format!("w:{}:{}", w.ledger, w.id),
+        Target::Work(w) => format!("w:{}|{}", w.ledger, w.id),
         Target::Project(key) => format!("p:{key}"),
     }
 }

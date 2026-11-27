@@ -67,7 +67,9 @@ fn probe() {
         rt.frame(DT);
         lines.push(format!("{name}: rows built {}", tally(built::take())));
     }
-    let extra = rt.state.ov.needs[rt.state.ov.needs.len() - 1].clone();
+    let mut extra = rt.state.ov.needs[rt.state.ov.needs.len() - 1].clone();
+    extra.target = crate::over::Target::Session("probe-inserted".into());
+    extra.title = "A need inserted by the probe".into();
     let (mut view, mut commit, mut apply, mut rows) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for i in 0..40 {
         rt.update(|s, _| {
@@ -93,15 +95,8 @@ fn probe() {
     std::fs::write(out, lines.join("\n")).unwrap();
 }
 
-#[cfg(feature = "frame-profile")]
-fn phases() -> String {
-    let p = rune::take_frame_phases();
-    format!("view {:.2} commit {:.2} apply {:.2} paint {:.2}", p[0], p[1], p[5], p[4])
-}
-
-#[cfg(not(feature = "frame-profile"))]
-fn phases() -> String {
-    String::new()
+fn phases() {
+    rune::take_frame_phases();
 }
 
 fn median(mut v: Vec<f64>) -> f64 {
@@ -109,12 +104,6 @@ fn median(mut v: Vec<f64>) -> f64 {
     v[v.len() / 2]
 }
 
-#[cfg(feature = "frame-profile")]
 fn phase_ms() -> [f64; 12] {
     rune::take_frame_phases()
-}
-
-#[cfg(not(feature = "frame-profile"))]
-fn phase_ms() -> [f64; 12] {
-    [0.0; 12]
 }
