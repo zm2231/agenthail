@@ -14,7 +14,7 @@ use crate::ui::watch::{self, Feed};
 use crate::theme::{self, BODY, HEADING, META, failed, faint, muted};
 use crate::{App, Bg};
 
-const EVERY: Duration = Duration::from_secs(2);
+const RECONNECT: Duration = Duration::from_secs(5);
 const SETTLE: Duration = Duration::from_secs(2);
 const RECHECK: Duration = Duration::from_secs(30);
 const GAP: Duration = Duration::from_secs(1);
@@ -102,7 +102,7 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                 }
             }
             let since = last.map(|at| at.elapsed()).unwrap_or_default();
-            let wait = if down { EVERY } else if due { GAP.saturating_sub(since) } else { SAFETY.saturating_sub(since) };
+            let wait = if down { RECONNECT } else if due { GAP.saturating_sub(since) } else { SAFETY.saturating_sub(since) };
             let mut batch = Vec::new();
             match poked.recv_timeout(wait) {
                 Err(RecvTimeoutError::Disconnected) => return,
@@ -137,7 +137,7 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                     }
                 }
             }
-            due |= last.is_none_or(|at| at.elapsed() >= if down { EVERY } else { SAFETY });
+            due |= last.is_none_or(|at| at.elapsed() >= if down { RECONNECT } else { SAFETY });
             if batch.is_empty() {
                 if gap {
                     catalog.forget();
