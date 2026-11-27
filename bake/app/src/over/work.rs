@@ -300,6 +300,7 @@ struct Pending {
     words: String,
     key: String,
     unconfirmed: bool,
+    since: time::OffsetDateTime,
 }
 
 pub struct State {
@@ -346,7 +347,7 @@ fn send_words(s: &mut App) {
 
 fn send(s: &mut App, id: &str, m: Move, words: &str) {
     let Some(w) = s.ov.d.work.get(id).cloned() else { return };
-    if s.ov.work.acting.contains(id) || !ledger::offered(&w).contains(&m) {
+    if s.ov.work.acting.contains(id) || !ledger::offered(&w).contains(&m) || held(s, id).is_some_and(|h| h != m) {
         return;
     }
     let Some(client) = s.client.clone() else {
@@ -358,7 +359,7 @@ fn send(s: &mut App, id: &str, m: Move, words: &str) {
         Some(p) if p.words == words => p.key.clone(),
         _ => {
             let key = feed::catalog::request_key();
-            s.ov.work.keys.insert(slot, Pending { words: words.to_string(), key: key.clone(), unconfirmed: false });
+            s.ov.work.keys.insert(slot, Pending { words: words.to_string(), key: key.clone(), unconfirmed: false, since: time::OffsetDateTime::now_utc() });
             key
         }
     };
@@ -371,13 +372,35 @@ fn send(s: &mut App, id: &str, m: Move, words: &str) {
     });
 }
 
+fn held(s: &App, id: &str) -> Option<Move> {
+    s.ov.work.keys.iter().find(|((item, _), p)| item == id && p.unconfirmed).map(|((_, m), _)| *m)
+}
+
 fn send_new(s: &mut App, id: &str, m: Move) {
+    if s.ov.work.acting.contains(id) || !s.ov.d.work.get(id).is_some_and(|w| ledger::offered(w).contains(&m)) {
+        return;
+    }
     let Some(p) = s.ov.work.keys.remove(&(id.to_string(), m)) else { return };
     send(s, id, m, &p.words);
 }
 
+fn settle(s: &mut App) -> bool {
+    let (d, st) = (&s.ov.d, &mut s.ov.work);
+    let landed: Vec<(String, Move, String)> = st
+        .keys
+        .iter()
+        .filter(|((id, _), p)| p.unconfirmed && !st.acting.contains(id))
+        .filter_map(|((id, m), p)| d.work.get(id).filter(|w| ledger::landed(w, *m, &p.words, p.since)).map(|w| (id.clone(), *m, ledger::settled_note(w, *m))))
+        .collect();
+    for (id, m, note) in &landed {
+        st.keys.remove(&(id.clone(), *m));
+        st.notes.insert(id.clone(), (false, note.clone()));
+    }
+    !landed.is_empty()
+}
+
 pub fn drain(s: &mut App) -> bool {
-    let mut changed = false;
+    let mut changed = settle(s);
     while let Ok((id, m, _words, result)) = s.ov.work.rx.try_recv() {
         changed = true;
         let st = &mut s.ov.work;
@@ -417,14 +440,14 @@ fn moves(s: &App, w: &crate::over::Work) -> Option<El> {
     }
     let k = kit();
     let busy = s.ov.work.acting.contains(&w.id);
+    let held = held(s, &w.id);
     let mut r = row().w_full().gap(8.0).items_center().flex_wrap();
     for m in offered {
         let id = w.id.clone();
         let variant = if matches!(m, Move::Claim | Move::Submit | Move::Reopen) { ButtonVariant::Outline } else { ButtonVariant::Ghost };
-        r = r.child(Button::new(m.label()).variant(variant).control_size(ControlSize::Small).disabled(busy).on_press(move |s: &mut App| start(s, &id, m)).build(k).key(format!("work-move-{m:?}")));
+        r = r.child(Button::new(m.label()).variant(variant).control_size(ControlSize::Small).disabled(busy || held.is_some_and(|h| h != m)).on_press(move |s: &mut App| start(s, &id, m)).build(k).key(format!("work-move-{m:?}")));
     }
-    let held = s.ov.work.keys.iter().find(|((item, _), p)| item == &w.id && p.unconfirmed).map(|((_, m), _)| *m);
-    if let Some(m) = held.filter(|_| !busy) {
+    if let Some(m) = held.filter(|m| !busy && ledger::offered(w).contains(m)) {
         let id = w.id.clone();
         r = r.child(Button::new("Send as new").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).help("Check the timeline first: this sends it again with a fresh request").on_press(move |s: &mut App| send_new(s, &id, m)).build(k).key("work-send-new"));
     }

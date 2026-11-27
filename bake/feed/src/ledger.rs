@@ -1,6 +1,8 @@
 use serde_json::{Value, json};
 
-use crate::catalog::{Client, RespondError};
+use time::{Duration, OffsetDateTime};
+
+use crate::catalog::{Client, RespondError, parse_time};
 use crate::derive::Work;
 
 pub const PERSON: &str = "agenthail-person";
@@ -92,6 +94,22 @@ pub fn refusal(e: &RespondError) -> String {
 
 pub const CHANGED_WORDS: &str = "The last send isn't confirmed yet. Changed words go as a new one, so check the timeline first.";
 
+pub fn landed(w: &Work, m: Move, words: &str, since: OffsetDateTime) -> bool {
+    match m {
+        Move::Comment => w.timeline.iter().any(|t| {
+            t.kind == "comment" && t.actor == PERSON && t.text.as_deref().map(str::trim) == Some(words.trim()) && parse_time(&t.at).is_some_and(|at| at >= since - Duration::minutes(5))
+        }),
+        _ => !offered(w).contains(&m),
+    }
+}
+
+pub fn settled_note(w: &Work, m: Move) -> String {
+    match m {
+        Move::Comment => m.done().into(),
+        _ => format!("Settled: it's {} now.", crate::derive::phase::state_word(&w.state)),
+    }
+}
+
 pub fn settles(e: &RespondError) -> bool {
     e.answered && (400..500).contains(&e.status)
 }
@@ -102,9 +120,9 @@ pub fn unreached(e: &RespondError) -> String {
 
 pub fn unconfirmed(e: &RespondError, again: bool) -> String {
     if again {
-        format!("Still not confirmed: {}. If the timeline doesn't show it, Send as new starts a fresh one.", e.message)
+        format!("Still not confirmed: {}. If it never shows up, Send as new starts a fresh one.", e.message)
     } else {
-        format!("Sent, not confirmed: {}. Check the timeline; pressing again asks about the same send.", e.message)
+        format!("Sent, not confirmed: {}. It settles here once the item shows it; pressing again asks about the same send.", e.message)
     }
 }
 
@@ -135,6 +153,25 @@ mod tests {
         assert_eq!(offered(&work("closed", None)), vec![Move::Reopen, Move::Comment]);
         assert_eq!(offered(&work("deleted", None)), vec![]);
         assert_eq!(offered(&work("", None)), vec![]);
+    }
+
+    #[test]
+    fn an_unconfirmed_move_settles_once_the_item_shows_it() {
+        let since = parse_time("2026-11-27T06:00:00Z").unwrap();
+        let entry = |actor: &str, text: &str, at: &str| crate::derive::Entry { at: at.into(), actor: actor.into(), kind: "comment".into(), text: Some(text.into()), ..Default::default() };
+        let mut w = work("open", None);
+        assert!(!landed(&w, Move::Comment, "looks right", since));
+        w.timeline.push(entry("worker", "looks right", "2026-11-27T06:00:01Z"));
+        w.timeline.push(entry(PERSON, "looks right", "2026-11-27T05:00:00Z"));
+        assert!(!landed(&w, Move::Comment, "looks right", since), "someone else's words, or the person's from long before, don't settle it");
+        w.timeline.push(entry(PERSON, "looks right ", "2026-11-27T05:59:00Z"));
+        assert!(landed(&w, Move::Comment, " looks right", since));
+        assert!(!landed(&work("open", None), Move::Claim, "", since));
+        let claimed = work("in_progress", Some(PERSON));
+        assert!(landed(&claimed, Move::Claim, "", since));
+        assert_eq!(settled_note(&claimed, Move::Claim), "Settled: it's Build now.");
+        assert!(landed(&work("parked", None), Move::Park, "later", since));
+        assert_eq!(settled_note(&w, Move::Comment), "Comment added.");
     }
 
     #[test]
@@ -182,7 +219,7 @@ mod tests {
         assert_eq!(refusal(&unknown), "Agenthail doesn't know you yet. Send any session a message once, then try again.");
         let lost = client.work_move(&w, Move::Claim, "", "k3").unwrap_err();
         assert!(lost.maybe_delivered);
-        assert_eq!(unconfirmed(&lost, false), "Sent, not confirmed: Host mac did not answer. Check the timeline; pressing again asks about the same send.");
+        assert_eq!(unconfirmed(&lost, false), "Sent, not confirmed: Host mac did not answer. It settles here once the item shows it; pressing again asks about the same send.");
         let unsent = Client::new("http://127.0.0.1:0", "secret").work_move(&w, Move::Comment, "hi", "k4").unwrap_err();
         assert!(!unsent.answered && !unsent.maybe_delivered);
         assert!(!settles(&unsent));
@@ -190,7 +227,7 @@ mod tests {
         assert!(settles(&RespondError::from_status("claim", 409, r#"{"error":{"code":"refused","message":"no"}}"#)));
         assert!(unreached(&unsent).starts_with("Agenthail didn't settle it: "));
         assert!(unreached(&unsent).ends_with("The earlier send is still unconfirmed; pressing again asks about it."));
-        assert_eq!(unconfirmed(&lost, true), "Still not confirmed: Host mac did not answer. If the timeline doesn't show it, Send as new starts a fresh one.");
+        assert_eq!(unconfirmed(&lost, true), "Still not confirmed: Host mac did not answer. If it never shows up, Send as new starts a fresh one.");
     }
 
     #[test]
