@@ -90,14 +90,24 @@ pub fn refresh(s: &mut App, id: &str) {
 const EVERY: Duration = Duration::from_secs(10);
 
 fn fetch(s: &mut App, id: &str, force: bool) {
-    let Some(stamp) = session(s, id).map(|x| x.last_active.clone()) else { return };
+    let Some(x) = session(s, id) else { return };
+    let stamp = x.last_active.clone();
+    if x.surface == "claude" {
+        if force {
+            super::subagents::reload_claude(s, id);
+        }
+        return;
+    }
     let entry = s.inspect.meta.entry(id.to_string()).or_default();
     if entry.in_flight {
         entry.again |= force;
         return;
     }
-    if !force && entry.data.is_some() && (entry.stamp == stamp || entry.at.is_some_and(|at| at.elapsed() < EVERY)) {
-        return;
+    if !force && let Some(data) = &entry.data {
+        let recent = entry.at.is_some_and(|at| at.elapsed() < EVERY);
+        if recent || (entry.stamp == stamp && data.warnings.is_empty()) {
+            return;
+        }
     }
     s.inspect.seq += 1;
     let seq = s.inspect.seq;
@@ -113,6 +123,14 @@ fn fetch(s: &mut App, id: &str, force: bool) {
     {
         m.in_flight = false;
     }
+}
+
+pub(crate) fn took(s: &mut App, id: &str, data: Metadata) {
+    let stamp = session(s, id).map(|x| x.last_active.clone()).unwrap_or_default();
+    let entry = s.inspect.meta.entry(id.to_string()).or_default();
+    entry.data = Some(data);
+    entry.stamp = stamp;
+    entry.at = Some(Instant::now());
 }
 
 fn goal_act(s: &mut App, id: &str, act: GoalAct, typed: &str) -> bool {
@@ -239,10 +257,13 @@ fn settled(s: &mut App, done: Done) {
                     match act {
                         LifecycleAct::Status => p.status = Some(result),
                         LifecycleAct::Logs => s.inspect.logs = Some((id.clone(), result.output.unwrap_or_default())),
-                        _ => {
-                            p.busy = Some(LifecycleAct::Status);
+                        _ if session(s, &id).is_some_and(|x| inspect::lifecycle(x).status) => {
+                            if let Some(p) = s.inspect.process.get_mut(&id) {
+                                p.busy = Some(LifecycleAct::Status);
+                            }
                             spawn(s, move |c| Done::Status(id.clone(), generation, c.lifecycle(&id, LifecycleAct::Status)));
                         }
+                        _ => {}
                     }
                 }
                 Err(error) => p.error = Some(failure(&error)),
