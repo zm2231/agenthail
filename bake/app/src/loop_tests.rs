@@ -468,13 +468,22 @@ fn ledger_api(paths: std::sync::mpsc::Sender<String>) -> String {
                 let mut line = String::new();
                 reader.read_line(&mut line).unwrap();
                 let path = line.split_whitespace().nth(1).unwrap_or_default().to_string();
+                let mut length = 0usize;
                 loop {
                     let mut header = String::new();
                     if reader.read_line(&mut header).unwrap() == 0 || header.trim_end().is_empty() {
                         break;
                     }
+                    if let Some((name, value)) = header.trim_end().split_once(':')
+                        && name.eq_ignore_ascii_case("content-length")
+                    {
+                        length = value.trim().parse().unwrap_or(0);
+                    }
                 }
-                paths.send(path.clone()).unwrap();
+                let mut sent = vec![0; length];
+                std::io::Read::read_exact(&mut reader, &mut sent).unwrap();
+                let sent = String::from_utf8_lossy(&sent).to_string();
+                paths.send(if sent.is_empty() { path.clone() } else { format!("{path} {sent}") }).unwrap();
                 let item = |id: &str, title: &str| json!({"projectKey": "shared:z", "projectName": "Zed", "id": id, "title": title, "state": "parked", "updatedAt": "2026-09-01T00:00:00Z", "matched": "description", "snippet": "…a parked\nexport…"});
                 let (status, body) = if path.starts_with("/api/v1/ledger/search?q=exp&") {
                     std::thread::sleep(std::time::Duration::from_millis(300));
@@ -485,10 +494,13 @@ fn ledger_api(paths: std::sync::mpsc::Sender<String>) -> String {
                     (500, json!({"error": {"code": "internal", "message": "the ledger store is busy"}}))
                 } else if path.starts_with("/api/v1/ledger?projectKey=shared%3Az&view=item&id=") {
                     let id = path.rsplit('=').next().unwrap_or_default();
+                    let state = if id == "z-W5" { "done" } else { "parked" };
                     if id == "z-W7" {
                         std::thread::sleep(std::time::Duration::from_millis(300));
                     }
-                    (200, json!({"item": {"item": {"id": id, "text": "Parked export", "state": "parked", "type": "task", "priority": "P3"}}}))
+                    (200, json!({"item": {"item": {"id": id, "text": "Parked export", "state": state, "type": "task", "priority": "P3"}}}))
+                } else if path == "/api/v1/ledger/work" {
+                    (200, json!({"ok": true}))
                 } else {
                     (404, json!({"error": {"code": "unknown_route", "message": "no"}}))
                 };
@@ -675,6 +687,18 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     crate::over::worksearch::open(&mut rt.state, "shared:z", "z-W6");
     quiet(&mut rt);
     assert_eq!(asked(&paths).len(), 1, "reopening it from search reads it once");
+
+    crate::over::worksearch::open(&mut rt.state, "shared:z", "z-W5");
+    until(&mut rt, |s| s.ov.d.work.contains_key("z-W5"));
+    assert_eq!(asked(&paths).len(), 1);
+    crate::over::work::start(&mut rt.state, "z-W5", feed::ledger::Move::Reopen);
+    quiet(&mut rt);
+    quiet(&mut rt);
+    let moved = asked(&paths);
+    assert_eq!(moved.len(), 2, "{moved:?}");
+    let posted: serde_json::Value = serde_json::from_str(moved[0].strip_prefix("/api/v1/ledger/work ").expect("the move is posted first")).unwrap();
+    assert_eq!((posted["projectKey"].as_str(), posted["itemId"].as_str(), posted["action"].as_str()), (Some("shared:z"), Some("z-W5"), Some("reopen")), "a move on found work goes to its own ledger");
+    assert_eq!(moved[1], "/api/v1/ledger?projectKey=shared%3Az&view=item&id=z-W5", "and the item is read again after it");
 
     typed(&mut rt, "export");
     rt.frame(0.21);

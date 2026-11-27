@@ -314,7 +314,7 @@ impl Default for State {
     }
 }
 
-fn start(s: &mut App, id: &str, m: Move) {
+pub fn start(s: &mut App, id: &str, m: Move) {
     let Some(w) = s.ov.d.work.get(id) else { return };
     if !m.needs_words() {
         send(s, id, m, "");
