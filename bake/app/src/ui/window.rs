@@ -550,6 +550,17 @@ pub fn asker_or_showing(s: &App, asker: Id, session: &str) -> Option<Id> {
 }
 
 
+pub fn shown_sessions(s: &App) -> Vec<String> {
+    let shows = |screen: &Screen, selected: &Option<String>| selected.clone().filter(|_| *screen == Screen::Session);
+    let mut out: Vec<String> = shows(&s.screen, &s.selected).into_iter().collect();
+    for (_, l) in s.windows.stash.iter().filter(|(id, _)| **id != s.windows.current) {
+        if let Some(id) = shows(&l.screen, &l.selected).filter(|id| !out.contains(id)) {
+            out.push(id);
+        }
+    }
+    out
+}
+
 pub fn showing(s: &App, session: &str) -> Option<Id> {
     let shows = |screen: &Screen, selected: &Option<String>| *screen == Screen::Session && selected.as_deref() == Some(session);
     if shows(&s.screen, &s.selected) {

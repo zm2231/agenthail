@@ -534,6 +534,12 @@ pub fn phase(state: &str) -> usize {
     }
 }
 
+pub const OUTCOME_UNKNOWN: &str = "action_outcome_unknown";
+
+pub fn unknown_outcome(message: &str) -> String {
+    format!("{} The outcome is unknown; check the session before retrying.", message.trim_end())
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct RespondError {
     pub message: String,
@@ -554,9 +560,14 @@ impl RespondError {
         let maybe_delivered = match status {
             504 => true,
             502 => !released_answer,
+            409 => code == OUTCOME_UNKNOWN,
             _ => false,
         };
         RespondError { message, code, maybe_delivered, reply, answered: true, status }
+    }
+
+    pub fn outcome_unknown(&self) -> bool {
+        self.status == 409 && self.code == OUTCOME_UNKNOWN
     }
 
     fn from_transport(error: &ureq::Transport) -> Self {
@@ -1025,6 +1036,16 @@ mod respond_error_tests {
         assert!(RespondError::from_status("send", 504, "").maybe_delivered);
         assert!(RespondError::from_status("send", 502, "").maybe_delivered);
         assert!(!RespondError::from_status("send", 503, r#"{"error":{"code":"unavailable","message":"down"}}"#).maybe_delivered);
+    }
+
+    #[test]
+    fn an_interrupted_request_may_have_happened() {
+        let e = RespondError::from_status("send", 409, r#"{"error":{"code":"action_outcome_unknown","message":"This request was interrupted before its outcome was recorded, so it may have happened."},"sessionId":"s1"}"#);
+        assert!(e.maybe_delivered && e.answered && e.outcome_unknown());
+        assert_eq!(e.message, "This request was interrupted before its outcome was recorded, so it may have happened.");
+        let conflict = RespondError::from_status("send", 409, r#"{"error":{"code":"read_state_conflict","message":"moved on"}}"#);
+        assert!(!conflict.maybe_delivered && !conflict.outcome_unknown());
+        assert!(!RespondError::from_status("send", 502, r#"{"error":{"code":"action_outcome_unknown","message":"x"}}"#).outcome_unknown());
     }
 }
 

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use feed::native_queue::{self as nq, Act, Keys, Outcome, Page, Queue};
@@ -21,23 +22,29 @@ pub struct Editor {
     pub text: TextEdit,
     pub saving: Option<u64>,
     pub error: Option<String>,
+    pub unknown: bool,
 }
 
 pub struct NativeQueue {
-    queue: Queue,
+    queues: HashMap<String, Queue>,
     keys: Keys,
     ops: u64,
-    seen: Option<(String, String)>,
-    menu: Option<String>,
+    generations: u64,
+    menu: Option<(String, String)>,
     pub editor: Option<Editor>,
     tx: Sender<Done>,
     rx: Receiver<Done>,
 }
 
 impl NativeQueue {
+    #[cfg(test)]
+    pub fn row_menu(&self) -> Option<(&str, &str)> {
+        self.menu.as_ref().map(|(session, item)| (session.as_str(), item.as_str()))
+    }
+
     pub fn new() -> NativeQueue {
         let (tx, rx) = channel();
-        NativeQueue { queue: Queue::default(), keys: Keys::default(), ops: 0, seen: None, menu: None, editor: None, tx, rx }
+        NativeQueue { queues: HashMap::new(), keys: Keys::default(), ops: 0, generations: 0, menu: None, editor: None, tx, rx }
     }
 }
 
@@ -45,8 +52,8 @@ pub fn covering(s: &App) -> bool {
     s.native_queue.menu.is_some() || s.native_queue.editor.is_some()
 }
 
-fn showing(s: &App, id: &str) -> bool {
-    s.screen == crate::Screen::Session && s.selected.as_deref() == Some(id)
+pub fn queue<'a>(s: &'a App, id: &str) -> Option<&'a Queue> {
+    s.native_queue.queues.get(id)
 }
 
 fn writable(s: &App, id: &str) -> bool {
@@ -61,62 +68,54 @@ fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'sta
     });
 }
 
-fn status(s: &App, id: &str) -> Option<(String, String)> {
-    session(s, id).map(|x| (x.id.clone(), x.status.clone()))
-}
-
 pub fn load(s: &mut App, id: &str) {
     if !session(s, id).is_some_and(nq::shown) {
         return;
     }
-    s.native_queue.seen = status(s, id);
-    s.native_queue.queue.reset(id);
-    s.native_queue.menu = None;
-    fetch(s, false);
+    if !s.native_queue.queues.contains_key(id) {
+        s.native_queue.generations += 1;
+        let q = Queue::of(id, s.native_queue.generations);
+        s.native_queue.queues.insert(id.to_string(), q);
+    }
+    fetch(s, id, false);
 }
 
 pub fn changed(s: &mut App, id: &str) {
-    let now = status(s, id);
-    if now.is_none() || now == s.native_queue.seen {
-        return;
-    }
-    s.native_queue.seen = now;
-    if s.native_queue.queue.invalidate(id) {
-        fetch(s, false);
+    if s.native_queue.queues.get_mut(id).is_some_and(|q| q.invalidate(id)) {
+        fetch(s, id, false);
     }
 }
 
 fn reload(s: &mut App, id: &str) {
-    s.native_queue.queue.reset(id);
-    fetch(s, false);
+    fetch(s, id, false);
 }
 
-fn fetch(s: &mut App, more: bool) {
+fn fetch(s: &mut App, id: &str, more: bool) {
     if s.client.is_none() {
         return;
     }
-    let cursor = match (more, s.native_queue.queue.next_cursor.clone()) {
+    let Some(q) = s.native_queue.queues.get_mut(id) else { return };
+    let cursor = match (more, q.next_cursor.clone()) {
         (false, _) => None,
         (true, Some(c)) => Some(c),
         (true, None) => return,
     };
-    let Some((id, generation)) = s.native_queue.queue.begin() else { return };
+    let Some((id, generation)) = q.begin() else { return };
     let read = s.native_queue.keys.read_started();
     spawn(s, move |c| Done::Listed { result: c.native_queue_list(&id, cursor.as_deref()).map_err(|e| e.message), session: id, generation, read, more });
 }
 
-fn act(s: &mut App, act: Act) -> Option<u64> {
+fn act(s: &mut App, id: &str, act: Act) -> Option<u64> {
     s.native_queue.menu = None;
     if s.client.is_none() {
         s.ov.notice = Some("Fixture mode: not sent".into());
         return None;
     }
-    let id = s.native_queue.queue.session.clone()?;
-    if !writable(s, &id) || s.native_queue.queue.busy {
+    if !writable(s, id) || queue(s, id).is_none_or(|q| q.busy) {
         return None;
     }
-    let key = s.native_queue.keys.key(&id, &act);
-    let (id, generation) = s.native_queue.queue.begin()?;
+    let key = s.native_queue.keys.key(id, &act);
+    let (id, generation) = s.native_queue.queues.get_mut(id)?.begin()?;
     s.native_queue.ops += 1;
     let op = s.native_queue.ops;
     spawn(s, move |c| Done::Changed { outcome: Outcome::of(c.native_queue(&id, &act, &key)), session: id, generation, op, key, act });
@@ -129,8 +128,8 @@ fn settled(s: &mut App, done: Done) {
             if result.is_ok() {
                 s.native_queue.keys.observed(&session, read);
             }
-            if s.native_queue.queue.listed(&session, generation, more, result) && s.native_queue.queue.take_dirty() {
-                fetch(s, false);
+            if s.native_queue.queues.get_mut(&session).is_some_and(|q| q.listed(&session, generation, more, result) && q.take_dirty()) {
+                fetch(s, &session, false);
             }
         }
         Done::Changed { session, generation, op, key, act, outcome } => {
@@ -139,13 +138,12 @@ fn settled(s: &mut App, done: Done) {
             if editing && let Some(e) = s.native_queue.editor.as_mut() {
                 e.saving = None;
                 e.error = outcome.error().map(str::to_string);
+                e.unknown = matches!(outcome, Outcome::Unknown(_));
             }
-            if !s.native_queue.queue.current(&session, generation) {
-                return;
-            }
-            if !s.native_queue.queue.mutated(&session, generation, &outcome) {
-                if s.native_queue.queue.take_dirty() {
-                    fetch(s, false);
+            let Some(q) = s.native_queue.queues.get_mut(&session).filter(|q| q.current(&session, generation)) else { return };
+            if !q.mutated(&session, generation, &outcome) {
+                if q.take_dirty() || matches!(outcome, Outcome::Unknown(_)) {
+                    fetch(s, &session, false);
                 }
                 return;
             }
@@ -155,7 +153,7 @@ fn settled(s: &mut App, done: Done) {
             if matches!(act, Act::Start(_)) {
                 crate::ask_overview(s, crate::Ask::Refresh);
             }
-            fetch(s, false);
+            fetch(s, &session, false);
         }
     }
 }
@@ -166,35 +164,46 @@ pub fn drain(s: &mut App) -> bool {
         changed = true;
         settled(s, done);
     }
-    if let Some(id) = s.selected.clone().filter(|id| showing(s, id) && s.native_queue.queue.session.as_deref() != Some(id.as_str()))
-        && s.client.is_some()
-        && session(s, &id).is_some_and(nq::shown)
-    {
-        load(s, &id);
-        changed = true;
+    let shown: Vec<String> = super::window::shown_sessions(s).into_iter().filter(|id| session(s, id).is_some_and(nq::shown)).collect();
+    if s.client.is_some() {
+        for id in shown.iter().filter(|id| !s.native_queue.queues.contains_key(id.as_str())).cloned().collect::<Vec<_>>() {
+            load(s, &id);
+            changed = true;
+        }
     }
-    let gone = |s: &App, id: &str| !showing(s, id) || !writable(s, id);
+    let before = s.native_queue.queues.len();
+    s.native_queue.queues.retain(|id, _| shown.contains(id));
+    changed |= s.native_queue.queues.len() != before;
+    let gone = |s: &App, id: &str| !shown.iter().any(|x| x == id) || !writable(s, id);
     if s.native_queue.editor.as_ref().is_some_and(|e| gone(s, &e.session)) {
         s.native_queue.editor = None;
         changed = true;
     }
-    if s.native_queue.menu.is_some() && s.native_queue.queue.session.as_deref().is_none_or(|id| gone(s, id)) {
+    if s.native_queue.menu.as_ref().is_some_and(|(id, _)| gone(s, id)) {
         s.native_queue.menu = None;
         changed = true;
     }
     changed
 }
 
-fn open_editor(s: &mut App, item: Option<String>, original: String) {
+pub fn open_row_menu(s: &mut App, session: &str, item: &str) {
     if !super::window::may_open(s, super::window::Kind::Queue) {
         return;
     }
-    let Some(id) = s.native_queue.queue.session.clone() else { return };
+    let open = (session.to_string(), item.to_string());
+    s.native_queue.menu = if s.native_queue.menu.as_ref() == Some(&open) { None } else { Some(open) };
+}
+
+fn open_editor(s: &mut App, id: &str, item: Option<String>, original: String) {
+    if !super::window::may_open(s, super::window::Kind::Queue) || !s.native_queue.queues.contains_key(id) {
+        return;
+    }
+    let id = id.to_string();
     s.native_queue.menu = None;
     let mut text = TextEdit::new(&original);
     text.focused = true;
     s.composer.focused = false;
-    s.native_queue.editor = Some(Editor { session: id, item, original, text, saving: None, error: None });
+    s.native_queue.editor = Some(Editor { session: id, item, original, text, saving: None, error: None, unknown: false });
 }
 
 fn close_editor(s: &mut App) {
@@ -203,7 +212,7 @@ fn close_editor(s: &mut App) {
 
 fn save_editor(s: &mut App) {
     let Some(e) = s.native_queue.editor.as_ref() else { return };
-    if e.saving.is_some() || !nq::can_save(&e.original, &e.text.text) || s.native_queue.queue.busy {
+    if e.saving.is_some() || !nq::can_save(&e.original, &e.text.text) || queue(s, &e.session).is_none_or(|q| q.busy) {
         return;
     }
     let typed = e.text.text.trim().to_string();
@@ -211,7 +220,11 @@ fn save_editor(s: &mut App) {
         Some(id) => Act::Update { id: id.clone(), text: typed },
         None => Act::Add(typed),
     };
-    let op = act(s, a);
+    let session = e.session.clone();
+    if e.unknown {
+        s.native_queue.keys.abandon(&session, &a);
+    }
+    let op = act(s, &session, a);
     if let Some(e) = s.native_queue.editor.as_mut().filter(|_| op.is_some()) {
         e.saving = op;
         e.error = None;

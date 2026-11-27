@@ -549,7 +549,6 @@ fn selected_changed(s: &mut App, id: &str) {
         ui::queue::fetch(s, id);
     }
     ui::subagents::refresh(s, id);
-    ui::native_queue::changed(s, id);
     if let Some(work) = session(s, id).and_then(|x| x.primary_work(s.work_pick.get(id)).cloned()) {
         fetch_item(s, &work.key());
     }
@@ -578,6 +577,9 @@ fn changed_elsewhere(s: &mut App, wants: feed::watch::Wants) {
     if wants.extensions {
         over::extensions::changed(s);
     }
+    if let Some(id) = wants.native_queue {
+        ui::native_queue::changed(s, &id);
+    }
     if let Some(id) = wants.session
         && s.selected.as_deref() == Some(id.as_str())
     {
@@ -605,6 +607,7 @@ fn reopened(s: &mut App) {
     if let Some(id) = s.selected.clone() {
         selected_changed(s, &id);
         selected_moved(s, &id);
+        ui::native_queue::changed(s, &id);
     }
 }
 
@@ -812,6 +815,10 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
         }
         _ => busy,
     };
+    if s.unsent.list(id).iter().any(|u| u.outcome_unknown && u.same(&message, &attachments)) {
+        note(s, id, ASKED_UNKNOWN.into());
+        return;
+    }
     ui::paste::set_composer(s, "");
     ui::attach::clear(s, id);
     ui::complete::sending(s, id);
@@ -871,11 +878,18 @@ fn clear_sent(s: &mut App, id: &str, unsent: &Unsent) {
     ui::attach::clear(s, id);
 }
 
-pub fn can_retry(s: &App, id: &str) -> bool {
+fn resendable(s: &App, id: &str) -> bool {
     !closed(s, id) && s.unsent.latest(id).is_some_and(|u| feed::attach::missing_upload(&u.error).is_none())
 }
 
+pub fn can_retry(s: &App, id: &str) -> bool {
+    resendable(s, id) && s.unsent.latest(id).is_some_and(|u| !u.outcome_unknown)
+}
+
 pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
+    if !can_retry(s, id) {
+        return;
+    }
     let now = feed::composer::now_ms();
     let oldest = s.unsent.list(id).iter().find(|u| u.redelivering(now)).or(s.unsent.latest(id)).map(|u| (u.key.clone(), u.redelivering(now)));
     if let Some((key, auto)) = oldest {
@@ -1002,11 +1016,18 @@ fn shows(s: &App, id: &str, unsent: &Unsent) -> bool {
 }
 
 pub fn offers_new_send(s: &App, id: &str) -> bool {
-    can_retry(s, id) && s.unsent.latest(id).is_some_and(|u| u.offers_new_send())
+    resendable(s, id) && new_send_target(s, id).is_some()
+}
+
+const ASKED_UNKNOWN: &str = "Agenthail can't tell whether this message arrived, and sending it the same way gets the same answer. Check the conversation, then use Send as new.";
+
+fn new_send_target(s: &App, id: &str) -> Option<Unsent> {
+    let list = s.unsent.list(id);
+    list.iter().rev().find(|u| u.outcome_unknown && u.offers_new_send()).or_else(|| list.last().filter(|u| u.offers_new_send())).cloned()
 }
 
 pub fn send_as_new(s: &mut App, id: &str, tx: &mut Tx) {
-    let Some(unsent) = s.unsent.latest(id).cloned().filter(|u| u.offers_new_send()) else { return };
+    let Some(unsent) = new_send_target(s, id) else { return };
     if sending(s, id) || s.client.is_none() || !confirmed(s, id, Confirm::SendNew, true) {
         return;
     }
@@ -1052,6 +1073,7 @@ fn fresh(s: &App, id: &str, text: String, attachments: Vec<feed::attach::Upload>
         sent_at: feed::composer::now_ms(),
         order: feed::composer::send_stamp(feed::composer::now_ms()),
         unanswered: true,
+        outcome_unknown: false,
     }
 }
 
@@ -1195,7 +1217,7 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
     settle(s, &id, &pending.key);
     s.unsent.remove(&id, &pending.key);
     let failure = match result {
-        Ok(Delivered::Unconfirmed) => Some((true, true, "the daemon took it but hasn't confirmed delivery".to_string(), false)),
+        Ok(Delivered::Unconfirmed) => Some((true, true, "the daemon took it but hasn't confirmed delivery".to_string(), false, false)),
         Ok(receipt @ (Delivered::Queued(_) | Delivered::QueuedUntilAnswer(_))) => {
             s.status_line.remove(&id);
             s.queued.entry(id.clone()).or_default().push((s.snapshots, receipt));
@@ -1207,12 +1229,12 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
             ui::complete::delivered(s, &id, &pending.text);
             None
         }
-        Err(error) => Some((error.maybe_delivered, error.answered, error.message.clone(), feed::composer::redelivers(&error))),
+        Err(error) => Some((error.maybe_delivered, error.answered, error.message.clone(), feed::composer::redelivers(&error), error.outcome_unknown())),
     };
     let clock = s.clock;
     match failure {
-        Some((maybe_delivered, answered, error, again)) => {
-            let failed = Unsent { unanswered: again, ..pending.failed(retry, maybe_delivered, answered, error) };
+        Some((maybe_delivered, answered, error, again, outcome_unknown)) => {
+            let failed = Unsent { unanswered: again, outcome_unknown, ..pending.failed(retry, maybe_delivered, answered, error) };
             if failed.redelivering(feed::composer::now_ms()) {
                 s.redeliver.entry(id.clone()).or_insert_with(|| feed::composer::Backoff::starting(clock)).failed(clock);
                 s.unsent.add(&id, failed);

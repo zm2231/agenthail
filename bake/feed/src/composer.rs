@@ -254,6 +254,7 @@ pub struct Unsent {
     pub sent_at: i64,
     pub order: i64,
     pub unanswered: bool,
+    pub outcome_unknown: bool,
 }
 
 impl Unsent {
@@ -263,7 +264,7 @@ impl Unsent {
 
     /// The daemon replays a finished reply for a reused id, so after a retry a fresh send is the only way to try again.
     pub fn offers_new_send(&self) -> bool {
-        self.maybe_delivered && self.tries > 0
+        self.maybe_delivered && (self.tries > 0 || self.outcome_unknown)
     }
 
     pub fn same(&self, text: &str, attachments: &[Upload]) -> bool {
@@ -284,7 +285,7 @@ impl Unsent {
 
     pub fn to_json(&self) -> Value {
         let attachments: Vec<Value> = self.attachments.iter().map(Upload::to_json).collect();
-        let mut out = json!({"session": self.session, "text": self.text, "attachments": attachments, "key": self.key, "busy": self.busy.map(Busy::as_str), "maybeDelivered": self.maybe_delivered, "error": self.error, "tries": self.tries, "pid": self.pin.map(|p| p.pid), "pidStartedAt": self.pin.and_then(|p| p.started_at), "draft": self.draft, "sentAt": self.sent_at, "order": self.order, "unanswered": self.unanswered});
+        let mut out = json!({"session": self.session, "text": self.text, "attachments": attachments, "key": self.key, "busy": self.busy.map(Busy::as_str), "maybeDelivered": self.maybe_delivered, "error": self.error, "tries": self.tries, "pid": self.pin.map(|p| p.pid), "pidStartedAt": self.pin.and_then(|p| p.started_at), "draft": self.draft, "sentAt": self.sent_at, "order": self.order, "unanswered": self.unanswered, "outcomeUnknown": self.outcome_unknown});
         if let Some(turn) = &self.turn {
             turn.apply(&mut out);
         }
@@ -304,7 +305,8 @@ impl Unsent {
         let tries = value["tries"].as_u64().unwrap_or_default() as u32;
         let pin = value["pid"].as_i64().map(|pid| crate::holders::Pin { pid, started_at: value["pidStartedAt"].as_i64() });
         let (turn, sent_at, order, unanswered) = (TurnOptions::from_json(value), value["sentAt"].as_i64().unwrap_or_default(), value["order"].as_i64().unwrap_or_default(), value["unanswered"].as_bool().unwrap_or_default());
-        Some(Unsent { session, text, attachments, key, busy, maybe_delivered, error: value["error"].as_str().unwrap_or_default().to_string(), tries, pin, draft: value["draft"].as_str().map(str::to_string), turn, sent_at, order, unanswered })
+        let outcome_unknown = value["outcomeUnknown"].as_bool().unwrap_or_default();
+        Some(Unsent { session, text, attachments, key, busy, maybe_delivered, error: value["error"].as_str().unwrap_or_default().to_string(), tries, pin, draft: value["draft"].as_str().map(str::to_string), turn, sent_at, order, unanswered, outcome_unknown })
     }
 
     pub fn failed(self, retry: bool, maybe_delivered: bool, answered: bool, error: String) -> Unsent {
@@ -328,7 +330,9 @@ impl Unsent {
     }
 
     pub fn note(&self) -> String {
-        if self.maybe_delivered && self.tries > 0 {
+        if self.maybe_delivered && self.outcome_unknown {
+            crate::catalog::unknown_outcome(&self.error)
+        } else if self.maybe_delivered && self.tries > 0 {
             format!("Still not confirmed after a retry: {}", self.error)
         } else if self.maybe_delivered { format!("Not confirmed: {}. Retry is safe: it won't send twice.", self.error) } else { format!("Not sent: {}", self.error) }
     }
@@ -695,6 +699,17 @@ mod tests {
         let refused = Unsent { maybe_delivered: false, ..unsent };
         assert!(!refused.resend("ship it", &[]));
         assert!(refused.note().starts_with("Not sent: timeout"));
+    }
+
+    #[test]
+    fn an_interrupted_send_keeps_its_key_offers_a_new_send_and_says_what_the_daemon_said() {
+        let said = "This request was interrupted before its outcome was recorded, so it may have happened. Check the session's transcript for the message before sending it again as a new request.";
+        let unsent = Unsent { session: "s1".into(), text: "ship it".into(), key: "k1".into(), maybe_delivered: true, error: said.into(), outcome_unknown: true, ..Default::default() };
+        assert!(unsent.resend("ship it", &[]) && unsent.offers_new_send());
+        assert_eq!(unsent.note(), format!("{said} The outcome is unknown; check the session before retrying."));
+        let kept = Unsent::from_json("s1", &unsent.to_json()).unwrap();
+        assert_eq!(kept, unsent);
+        assert!(!Unsent::from_json("s1", &json!({"text": "hi", "key": "k2"})).unwrap().outcome_unknown);
     }
 
     #[test]

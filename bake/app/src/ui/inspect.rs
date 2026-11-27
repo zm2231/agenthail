@@ -311,7 +311,8 @@ fn goal_section(s: &App, x: &Session, k: &Kit) -> Option<El> {
     let can = inspect::goal_controls(x);
     let data = s.inspect.meta.get(&x.id);
     let goal = data.and_then(|d| d.goal.as_ref());
-    if goal.is_none() && (!can.editable || data.is_none_or(|d| d.goal_failed)) {
+    let unknown = super::complete::unknown_goals(s, &x.id);
+    if goal.is_none() && unknown.is_empty() && (!can.editable || data.is_none_or(|d| d.goal_failed)) {
         return None;
     }
     let busy = s.inspect.goal_busy.contains_key(&x.id);
@@ -320,6 +321,14 @@ fn goal_section(s: &App, x: &Session, k: &Kit) -> Option<El> {
         let variant = if act == GoalAct::Clear { ButtonVariant::Ghost } else { ButtonVariant::Neutral };
         small(label, format!("goal-{}", act.action()), variant, busy, move |s: &mut App| press_goal(s, &id, act), k)
     }));
+    let interrupted: Vec<El> = unknown
+        .into_iter()
+        .enumerate()
+        .map(|(i, again)| {
+            let (id, shown) = (x.id.clone(), again.clone());
+            col().w_full().gap(4.0).key(format!("goal-interrupted-{i}")).child(text(shown).font(k.text(META)).color(theme::text()).wrap().w_full()).child(small(super::complete::GOAL_AS_NEW, format!("goal-again-as-new-{i}"), ButtonVariant::Neutral, busy, move |s: &mut App| super::complete::goal_as_new(s, &id, &again), k))
+        })
+        .collect();
     let mut body = col().w_full().gap(8.0);
     if let Some(goal) = goal {
         let tint = if goal.needs_attention() { attention() } else { muted() };
@@ -346,7 +355,7 @@ fn goal_section(s: &App, x: &Session, k: &Kit) -> Option<El> {
             body = body.child(text(line).font(k.text(META)).color(muted()).wrap());
         }
     }
-    body = body.child(buttons);
+    body = body.children(interrupted).child(buttons);
     if let Some((bad, note)) = s.inspect.goal_note.get(&x.id) {
         body = body.child(text(note.clone()).font(k.text(META)).color(if *bad { failed() } else { muted() }).wrap());
     }

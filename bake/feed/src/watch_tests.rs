@@ -52,6 +52,11 @@ fn the_native_rereads_refresh_the_snapshot_and_host_changes_the_decisions() {
     assert_eq!(quiet, Wants::default());
     let turn = wants(&e("turn.completed", json!({"entityId": "s1"})));
     assert_eq!(turn, Wants { session: Some("s1".into()), ..Wants::default() });
+    let queue = wants(&e("native.queue.changed", json!({"entityId": "s1", "source": "codex"})));
+    assert_eq!(queue, Wants { native_queue: Some("s1".into()), ..Wants::default() });
+    let mut merged = turn.clone();
+    merged.merge(queue);
+    assert_eq!(merged, Wants { session: Some("s1".into()), native_queue: Some("s1".into()), ..Wants::default() });
 }
 
 #[test]
