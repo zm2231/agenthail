@@ -160,7 +160,23 @@ pub fn keep_highlight(s: &mut App, change: impl FnOnce(&mut App)) {
 
 fn highlight(s: &mut App, ix: usize, tx: &mut Tx) {
     s.ov.jump_ix = (query(s).to_string(), ix);
-    tx.scroll_into_view_in("jump-list", format!("hit-{ix}"));
+    if let Some(pick) = entries(s).into_iter().filter_map(|e| e.pick).nth(ix) {
+        tx.scroll_into_view_in("jump-list", hit_key(&pick));
+    }
+}
+
+pub fn hit_key(p: &Pick) -> String {
+    match p {
+        Pick::Target(t) => format!("hit-{}", crate::over::rows::target_id(t)),
+        Pick::Found(w) => format!("hit-{}", crate::over::rows::target_id(&Target::Work(w.clone()))),
+        Pick::Codex(x) => format!("hit-c:{}", x.id),
+        Pick::Command(c) => format!("hit-cmd:{c:?}"),
+    }
+}
+
+#[cfg(test)]
+pub fn hit_keys(s: &App) -> Vec<String> {
+    entries(s).into_iter().filter_map(|e| e.pick).map(|p| hit_key(&p)).collect()
 }
 
 fn picks(s: &App) -> usize {
@@ -248,16 +264,16 @@ pub fn view(s: &App, layer: &mut Vec<El>, k: &Kit) {
             continue;
         };
         let active = i == ix;
-        let at = i;
         i += 1;
-        let shows = (at, active, &h.title, &h.status, &h.badge, look, format!("{pick:?}"));
-        list = list.child(crate::over::rows::memo(format!("hit-{at}"), shows, k, || {
+        let key = hit_key(pick);
+        let shows = (active, &h.title, &h.status, &h.badge, look, format!("{pick:?}"));
+        list = list.child(crate::over::rows::memo(key.clone(), shows, k, || {
             let mut body = col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(text(h.title.clone()).font(k.text(BODY_MED)).color(strong(k)).truncate());
             if !h.status.is_empty() {
                 body = body.child(text(h.status.clone()).font(k.text(META)).color(weak(k)).truncate());
             }
             let r = row()
-                .key(format!("hit-{at}"))
+                .key(key.clone())
                 .w_full()
                 .gap(12.0)
                 .items_center()

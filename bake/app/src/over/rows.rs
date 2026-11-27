@@ -3,6 +3,8 @@ use std::hash::Hash;
 use rune::El;
 use rune_kit::Kit;
 
+use crate::over::Target;
+
 pub fn memo(id: impl Into<String>, shows: impl Hash, k: &Kit, build: impl FnOnce() -> El) -> El {
     let id = id.into();
     #[cfg(test)]
@@ -13,6 +15,14 @@ pub fn memo(id: impl Into<String>, shows: impl Hash, k: &Kit, build: impl FnOnce
         built::note(named);
         build()
     })
+}
+
+pub fn target_id(t: &Target) -> String {
+    match t {
+        Target::Session(id) => format!("s:{id}"),
+        Target::Work(w) => format!("w:{}:{}", w.ledger, w.id),
+        Target::Project(key) => format!("p:{key}"),
+    }
 }
 
 #[cfg(test)]

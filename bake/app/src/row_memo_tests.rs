@@ -161,29 +161,41 @@ fn a_change_rebuilds_only_its_row_on_now() {
     all.push(session("d", 3, json!({"name": "Delta four"})));
     let mut rt = runtime(app(all, &dir), SIZE);
     now_with(&mut rt);
-    for id in ["hands-0", "hands-1", "moving-0", "moving-1", "need-0", "need-1", "need-2"] {
+    for id in ["hands-a", "hands-b", "moving-c", "moving-d", "need-s:a", "need-s:b", "need-s:c"] {
         shown(&rt, id);
     }
     assert_eq!(rebuilt(&mut rt, "", |_| {}), Vec::<String>::new(), "nothing changed");
 
-    assert_eq!(rebuilt(&mut rt, "hands-", |s| x(s, "b").status = "busy".into()), ["hands-1"], "a hands-on session starts working");
+    assert_eq!(rebuilt(&mut rt, "hands-", |s| x(s, "b").status = "busy".into()), ["hands-b"], "a hands-on session starts working");
     assert_eq!(rebuilt(&mut rt, "hands-", |s| x(s, "b").last_active = "2026-01-01T00:00:00Z".into()), Vec::<String>::new(), "a working card shows no age");
-    assert_eq!(rebuilt(&mut rt, "hands-", |s| x(s, "a").last_active = "2026-01-01T00:00:00Z".into()), ["hands-0"], "its idle age");
-    assert_eq!(rebuilt(&mut rt, "hands-", |s| x(s, "a").project.as_mut().unwrap().display_name = "Renamed".into()), ["hands-0"], "its project");
-    assert_eq!(rebuilt(&mut rt, "hands-", |s| s.ov.hands_on.swap(0, 1)), ["hands-0", "hands-1"], "a reorder renumbers both");
+    assert_eq!(rebuilt(&mut rt, "hands-", |s| x(s, "a").last_active = "2026-01-01T00:00:00Z".into()), ["hands-a"], "its idle age");
+    assert_eq!(rebuilt(&mut rt, "hands-", |s| x(s, "a").project.as_mut().unwrap().display_name = "Renamed".into()), ["hands-a"], "its project");
+    assert_eq!(rebuilt(&mut rt, "hands-", |s| s.ov.hands_on.swap(0, 1)), ["hands-a", "hands-b"], "a reorder renumbers both shortcuts");
 
     let moving = rebuilt(&mut rt, "moving-", |s| x(s, "d").display.detail = "Running the tests".into());
     assert_eq!(moving.len(), 1, "one moving row rebuilds: {moving:?}");
     let moving = rebuilt(&mut rt, "moving-", |s| x(s, "d").project.as_mut().unwrap().display_name = "Other".into());
     assert_eq!(moving.len(), 1, "its project: {moving:?}");
 
-    assert_eq!(rebuilt(&mut rt, "need-", |s| s.ov.needs[1].title = "Second, reworded".into()), ["need-1"], "a need's title");
-    assert_eq!(rebuilt(&mut rt, "need-", |s| s.ov.needs[2].who = "someone else".into()), ["need-2"], "who asked");
-    assert_eq!(rebuilt(&mut rt, "need-", |s| s.ov.needs[0].label = Some("W7".into())), ["need-0"], "its label");
-    assert_eq!(rebuilt(&mut rt, "need-", |s| s.ov.needs[0].at = "2026-01-01T00:00:00Z".into()), ["need-0"], "its age");
-    assert_eq!(rebuilt(&mut rt, "need-", |s| s.ov.needs[0].kind = NeedKind::Approval), ["need-0"], "its kind");
+    assert_eq!(rebuilt(&mut rt, "need-", |s| s.ov.needs[1].title = "Second, reworded".into()), ["need-s:b"], "a need's title");
+    assert_eq!(rebuilt(&mut rt, "need-", |s| s.ov.needs[2].who = "someone else".into()), ["need-s:c"], "who asked");
+    assert_eq!(rebuilt(&mut rt, "need-", |s| s.ov.needs[0].label = Some("W7".into())), ["need-s:a"], "its label");
+    assert_eq!(rebuilt(&mut rt, "need-", |s| s.ov.needs[0].at = "2026-01-01T00:00:00Z".into()), ["need-s:a"], "its age");
+    assert_eq!(rebuilt(&mut rt, "need-", |s| s.ov.needs[0].kind = NeedKind::Approval), ["need-s:a"], "its kind");
 
-    assert_eq!(rebuilt(&mut rt, "need-", |s| s.ov.need_ix = 1), ["need-0", "need-1"], "focus moves between two rows");
+    assert_eq!(rebuilt(&mut rt, "need-", |s| s.ov.need_ix = 1), ["need-s:a", "need-s:b"], "focus moves between two rows");
+
+    let fresh = |s: &App| Need { kind: NeedKind::Question, group: Group::Waiting, project: "Alpha".into(), project_key: "p1".into(), title: "A new question".into(), who: "d".into(), at: s.ov.needs[0].at.clone(), target: Target::Session("d".into()), label: None };
+    assert_eq!(rebuilt(&mut rt, "need-", |s| {
+        let n = fresh(s);
+        s.ov.needs.insert(0, n);
+        s.ov.need_ix = 2;
+    }), ["need-s:d"], "a need inserted at the top builds only its own row");
+    assert_eq!(rebuilt(&mut rt, "need-", |s| {
+        s.ov.needs.remove(0);
+        s.ov.need_ix = 1;
+    }), Vec::<String>::new(), "removing it builds nothing");
+    assert_eq!(rebuilt(&mut rt, "moving-", |s| x(s, "c").status = "idle".into()), Vec::<String>::new(), "a session that stops moving leaves the rows below it");
 
     let any = rebuilt(&mut rt, "", |s| s.ov.needs[2].title = "Third, reworded".into());
     assert!(any.iter().all(|id| !id.starts_with("hands-") && !id.starts_with("moving-")), "a need's change leaves the rail: {any:?}");
@@ -198,13 +210,9 @@ fn a_session_change_rebuilds_only_its_jump_row() {
     let mut rt = runtime(app(three(), &dir), SIZE);
     rt.update(|s, _| s.ov.jump = Some(rune::TextEdit::new("")));
     settle(&mut rt);
-    let at = |rt: &Runtime<App>, id: &str| {
-        let shown: Vec<String> = rt.state.ov.d.jump("", &rt.state.ov.needs, &rt.state.ov.hands_on).into_iter().map(|h| h.target).filter_map(|t| match t {
-            Target::Session(x) => Some(x),
-            Target::Project(p) => Some(format!("project {p}")),
-            _ => None,
-        }).collect();
-        format!("hit-{}", shown.iter().position(|x| x == id).unwrap())
+    let at = |_: &Runtime<App>, id: &str| match id.strip_prefix("project ") {
+        Some(p) => format!("hit-p:{p}"),
+        None => format!("hit-s:{id}"),
     };
     let b = at(&rt, "b");
     shown(&rt, &b);

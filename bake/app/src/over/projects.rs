@@ -892,18 +892,26 @@ pub fn close_top(s: &mut App) {
     close_sheet(s);
 }
 
-fn merged_row(s: &App, i: usize, x: &feed::catalog::Session, w: &Worktree, k: &Kit) -> El {
+fn merged_row(s: &App, x: &feed::catalog::Session, w: &Worktree, k: &Kit) -> El {
     let id = x.id.clone();
     let cleaning = s.ov.projects.cleaning.contains(&id);
+    let title = ui::short_title(&s.ov.d.title(x), 30);
+    let ago = s.ov.d.ago(&x.last_active);
+    let kept = s.ov.projects.kept.get(&id).cloned();
+    let shows = (&id, cleaning, &title, &ago, &kept, format!("{w:?}"));
+    crate::over::rows::memo(format!("merged-{id}"), shows, k, || merged_card(id.clone(), cleaning, &title, &ago, kept.as_deref(), w, k))
+}
+
+fn merged_card(id: String, cleaning: bool, title: &str, ago: &str, kept: Option<&str>, w: &Worktree, k: &Kit) -> El {
     let mut c = col()
-        .key(format!("merged-{i}"))
+        .key(format!("merged-{id}"))
         .w_full()
         .gap(6.0)
         .padding(10.0)
         .radius(10.0)
         .fill(k.c.surface_base)
         .border(1.0, ui::edge())
-        .child(row().w_full().gap(8.0).items_center().child(text(ui::short_title(&s.ov.d.title(x), 30)).font(k.text(META_MED)).color(strong(k)).truncate().shrink()).child(ui::spacer()).child(text(s.ov.d.ago(&x.last_active)).font(k.text(META)).color(weak(k))))
+        .child(row().w_full().gap(8.0).items_center().child(text(title.to_string()).font(k.text(META_MED)).color(strong(k)).truncate().shrink()).child(ui::spacer()).child(text(ago.to_string()).font(k.text(META)).color(weak(k))))
         .child(text(w.name().to_string()).font(k.text(META)).color(base(k)).truncate());
     let offer = w.offer();
     if offer == Offer::Remove {
@@ -914,8 +922,8 @@ fn merged_row(s: &App, i: usize, x: &feed::catalog::Session, w: &Worktree, k: &K
             c = c.child(text(h.command.clone()).font(k.text(META)).color(base(k)).wrap());
         }
     }
-    if let Some(note) = s.ov.projects.kept.get(&id) {
-        c = c.child(text(note.clone()).font(k.text(META)).color(ui::needs_color(k)).wrap());
+    if let Some(note) = kept {
+        c = c.child(text(note.to_string()).font(k.text(META)).color(ui::needs_color(k)).wrap());
     }
     let button = |label: &str, key: String, job: Job, confirm: Confirm| {
         Button::new(if cleaning { "Removing…" } else { label })
@@ -929,11 +937,11 @@ fn merged_row(s: &App, i: usize, x: &feed::catalog::Session, w: &Worktree, k: &K
     let clean = Job::Clean { session: id.clone(), ignored: Vec::new() };
     let mut actions = row().gap(6.0).items_center();
     actions = match &offer {
-        Offer::Remove => actions.child(button("Remove…", format!("merged-{i}-remove"), clean, projects::confirm_worktree(w))),
-        Offer::Check | Offer::Ignored(_) => actions.child(button("Check again…", format!("merged-{i}-check"), clean, projects::confirm_worktree(w))),
+        Offer::Remove => actions.child(button("Remove…", format!("merged-{id}-remove"), clean, projects::confirm_worktree(w))),
+        Offer::Check | Offer::Ignored(_) => actions.child(button("Check again…", format!("merged-{id}-check"), clean, projects::confirm_worktree(w))),
     };
     if let Offer::Ignored(paths) = &offer {
-        actions = actions.child(button("Remove anyway…", format!("merged-{i}-ignored"), Job::Clean { session: id.clone(), ignored: paths.clone() }, projects::confirm_ignored(w, paths)));
+        actions = actions.child(button("Remove anyway…", format!("merged-{id}-ignored"), Job::Clean { session: id.clone(), ignored: paths.clone() }, projects::confirm_ignored(w, paths)));
     }
     c.child(actions)
 }
@@ -944,8 +952,8 @@ pub fn merged(s: &App, key: &str, k: &Kit) -> Option<El> {
         return None;
     }
     let mut c = col().w_full().gap(8.0).child(ui::section_head("Merged", Some(rows.len()), Some(text("worktrees left behind".to_string()).font(k.text(META)).color(weak(k))), k));
-    for (i, (x, w)) in rows.into_iter().enumerate() {
-        c = c.child(merged_row(s, i, x, w, k));
+    for (x, w) in rows {
+        c = c.child(merged_row(s, x, w, k));
     }
     Some(c)
 }

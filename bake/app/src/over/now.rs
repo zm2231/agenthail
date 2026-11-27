@@ -64,6 +64,10 @@ pub fn digest_line(s: &App, key: String, l: &Line, k: &Kit) -> El {
     })
 }
 
+pub fn line_id(project: &str, l: &Line) -> String {
+    format!("d-{project}-{:?}-{}", l.kind, crate::over::rows::target_id(&l.target))
+}
+
 pub fn digest_block(s: &App, p: &Project, lines: &[Line], max: usize, looked: Option<&str>, catch_up: bool, k: &Kit) -> El {
     let key = p.key.clone();
     let summary: Vec<String> = HAPPENED.iter().map(|h| (count(lines, *h), h.word())).filter(|(n, _)| *n > 0).map(|(n, w)| format!("{n} {w}")).collect();
@@ -85,14 +89,14 @@ pub fn digest_block(s: &App, p: &Project, lines: &[Line], max: usize, looked: Op
     shown.truncate(max);
     let (new, old) = cut(shown, looked);
     let divider = !new.is_empty() && !old.is_empty();
-    for (i, l) in new.iter().enumerate() {
-        c = c.child(digest_line(s, format!("d-{}-{i}", p.key), l, k));
+    for l in &new {
+        c = c.child(digest_line(s, line_id(&p.key, l), l, k));
     }
     if divider {
         c = c.child(ui::new_divider(format!("d-{}-new", p.key), k));
     }
-    for (i, l) in old.iter().enumerate() {
-        c = c.child(digest_line(s, format!("d-{}-{}", p.key, new.len() + i), l, k));
+    for l in &old {
+        c = c.child(digest_line(s, line_id(&p.key, l), l, k));
     }
     if lines.len() > max {
         c = c.child(text(format!("{} more in {}", lines.len() - max, p.name)).font(k.text(META)).color(weak(k)).pl(35.0).pt(4.0));
@@ -109,7 +113,7 @@ pub fn hands_on_card(s: &App, i: usize, id: &str, k: &Kit) -> El {
     let gist = if gist == x.display.label { "No summary yet".to_string() } else { gist };
     let project = x.project_name();
     let shows = (i, id, busy, &idle, &title, &gist, &project);
-    crate::over::rows::memo(format!("hands-{i}"), shows, k, || {
+    crate::over::rows::memo(format!("hands-{id}"), shows, k, || {
         let idc = id.to_string();
         let status = if busy {
             row().gap(6.0).items_center().child(Spinner::new().size(k.text_size(11.0)).build(k)).child(text("Working".to_string()).font(k.text(META_MED)).color(k.c.text_accent))
@@ -132,20 +136,20 @@ pub fn hands_on_card(s: &App, i: usize, id: &str, k: &Kit) -> El {
             )
             .child(text(gist.clone()).font(k.text(META)).color(weak(k)).max_lines(2).wrap())
             .child(row().w_full().items_center().child(status).child(ui::spacer()).child(text(project.clone()).font(k.text(META)).color(weak(k))));
-        ui::card(c, k).key(format!("hands-{i}")).on_press(move |s: &mut App| crate::over::open_session(s, &idc))
+        ui::card(c, k).key(format!("hands-{id}")).on_press(move |s: &mut App| crate::over::open_session(s, &idc))
     })
 }
 
-pub fn moving_row(s: &App, i: usize, id: &str, k: &Kit) -> El {
+pub fn moving_row(s: &App, id: &str, k: &Kit) -> El {
     let Some(x) = s.ov.d.session(id) else { return col() };
     let what = crate::over::plain(&if !x.display.detail.is_empty() { x.display.detail.clone() } else { s.ov.d.gist(x) });
     let title = ui::short_title(&s.ov.d.title(x), 34);
     let project = x.project_name();
-    let shows = (i, id, &what, &title, &project);
-    crate::over::rows::memo(format!("moving-{i}"), shows, k, || {
+    let shows = (id, &what, &title, &project);
+    crate::over::rows::memo(format!("moving-{id}"), shows, k, || {
         let idc = id.to_string();
         row()
-            .key(format!("moving-{i}"))
+            .key(format!("moving-{id}"))
             .w_full()
             .gap(10.0)
             .items_start()
@@ -262,8 +266,8 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>, main_kit: &Kit) ->
     if moving.is_empty() {
         rail = rail.child(text("Nothing else is running.".to_string()).font(k.text(META)).color(weak(&k)));
     }
-    for (i, x) in moving.iter().take(6).enumerate() {
-        rail = rail.child(moving_row(s, i, &x.id, &k));
+    for x in moving.iter().take(6) {
+        rail = rail.child(moving_row(s, &x.id, &k));
     }
     let rail = col()
         .w_full()
@@ -322,8 +326,8 @@ pub fn brief(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>, main_kit: &Kit) ->
         c = c.child(digest_block(s, p, lines, 4, looked, true, &k));
     }
     let mut mv = col().w_full().gap(2.0).padding(6.0);
-    for (i, x) in moving.iter().take(6).enumerate() {
-        mv = mv.child(moving_row(s, i, &x.id, &k));
+    for x in moving.iter().take(6) {
+        mv = mv.child(moving_row(s, &x.id, &k));
     }
     c = c.child(ui::section_head("What's moving", Some(moving.len()), None, &k).mt(10.0)).child(ui::card(mv, &k));
     let main = col().key("now-b").w_full().h_full().items_center().scroll(ScrollSpec { stick_bottom: false }).child(c);
