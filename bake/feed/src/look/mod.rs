@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 pub use edit::{Change, Entry, KEYS, Preset, Scope, describe, device_class, device_name, owner};
-pub use paint::{Decoded, Placement, blend, boundary, contrast, decode, extreme, gamma, linear, luminance, mesh, pane_alpha, place, reachable, worst};
+pub use paint::{Decoded, Placement, blend, boundary, contrast, decode, extreme, gamma, linear, luminance, mesh, pane_alpha, place, reachable, thumbnail, worst};
 
 pub type Rgb = [f32; 3];
 

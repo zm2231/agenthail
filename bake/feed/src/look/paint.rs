@@ -151,6 +151,11 @@ pub fn decode(data: &[u8], max_side: u32, sample_side: u32) -> Result<Decoded, S
     Ok(Decoded { original, shown, brightest, darkest })
 }
 
+pub fn thumbnail(data: &[u8], side: u32) -> Result<(u32, u32, Vec<u8>), String> {
+    let small = image::load_from_memory(data).map_err(|e| e.to_string())?.thumbnail(side, side).to_rgba8();
+    Ok((small.width(), small.height(), small.into_raw()))
+}
+
 pub fn extreme(rgba: &[u8], w: u32, h: u32, side: u32, bright: bool) -> (u32, u32, Vec<u8>) {
     let cell = w.max(h).div_ceil(side.max(1)).max(1) as usize;
     let (w, h) = (w as usize, h as usize);
