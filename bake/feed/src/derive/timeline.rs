@@ -25,7 +25,9 @@ fn what(t: &Entry, moved_back: bool) -> String {
 }
 
 fn park_why(text: &str) -> Option<&str> {
-    let part = text.split("; ").find(|p| p.starts_with("parked ("))?;
+    let start = text.find("parked (")?;
+    let part = &text[start..];
+    let part = part.find("; handoff: ").map_or(part, |end| &part[..end]);
     part.split_once("): ").map(|(_, why)| why).filter(|w| !w.is_empty())
 }
 

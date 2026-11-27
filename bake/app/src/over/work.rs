@@ -66,7 +66,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
         .w_full()
         .gap(8.0)
         .child({
-            let mut r = row().gap(8.0).items_center().child(phase_badge(phase)).child(ui::id_label(&short_id(&w.id))).child(ui::chip(&icons::TASK, &format!("{} · {}", w.priority, w.kind)));
+            let mut r = row().gap(8.0).items_center().child(if w.state == "closed" { ui::pill(&icons::STATUS, "Closed", weak()) } else { phase_badge(phase) }).child(ui::id_label(&short_id(&w.id))).child(ui::chip(&icons::TASK, &format!("{} · {}", w.priority, w.kind)));
             if let Some(c) = &commit {
                 r = r.child(ui::chip(&icons::BRANCH, c));
             }
@@ -171,7 +171,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
         .pb(48.0)
         .child(goal)
         .children(moves(s, w))
-        .child(ui::card(col().w_full().padding(18.0).child(ui::stepper(phase, &s.ov.d.whose_move(w)))))
+        .children((w.state != "closed").then(|| ui::card(col().w_full().padding(18.0).child(ui::stepper(phase, &s.ov.d.whose_move(w))))))
         .child(waiting)
         .child(brief)
         .child(proof)

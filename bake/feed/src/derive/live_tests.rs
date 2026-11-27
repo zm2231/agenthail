@@ -643,5 +643,8 @@ fn a_parked_step_shows_why_it_waits() {
     w.timeline.push(serde_json::from_value(json!({"at": "2026-11-24T11:40:00Z", "actor": "x", "kind": "state", "state": "parked", "text": "handoff: done []"})).unwrap());
     let steps = super::timeline::timeline(&w, 5);
     assert_eq!(steps[1].what, "Parked: after the release");
+    let mut semi = work("w2", "parked");
+    semi.timeline.push(serde_json::from_value(json!({"at": "2026-11-24T11:30:00Z", "actor": "x", "kind": "state", "state": "parked", "text": "took over; parked (later): wait for release; then check logs; handoff: done [\"a\"]"})).unwrap());
+    assert_eq!(super::timeline::timeline(&semi, 5)[0].what, "Parked: wait for release; then check logs");
     assert!(steps[0].what.starts_with("Moved to "), "{}", steps[0].what);
 }
