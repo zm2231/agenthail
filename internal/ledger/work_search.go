@@ -28,6 +28,7 @@ type WorkHit struct {
 	ID         string    `json:"id"`
 	Title      string    `json:"title"`
 	State      WorkState `json:"state"`
+	Phase      Phase     `json:"phase,omitempty"`
 	Type       WorkType  `json:"type"`
 	Priority   string    `json:"priority"`
 	Assignee   string    `json:"assignee,omitempty"`
@@ -126,7 +127,7 @@ func (b *Board) searchWork(key string, q WorkQuery) []WorkHit {
 }
 
 func (item *WorkItem) hit(key string, terms []string) WorkHit {
-	h := WorkHit{ProjectKey: key, ID: item.ID, Title: item.Text, State: item.State, Type: item.Type, Priority: item.Priority,
+	h := WorkHit{ProjectKey: key, ID: item.ID, Title: item.Text, State: item.State, Phase: item.Phase, Type: item.Type, Priority: item.Priority,
 		Assignee: item.Assignee, UpdatedAt: item.updated(), rank: rankOther}
 	if len(terms) == 1 {
 		if field := item.exactID(terms[0]); field != "" {

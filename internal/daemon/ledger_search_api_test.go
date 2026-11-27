@@ -10,6 +10,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/ledger"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func TestLedgerSearchFindsWorkInEveryLedgerWithItsProject(t *testing.T) {
@@ -27,9 +28,20 @@ func TestLedgerSearchFindsWorkInEveryLedgerWithItsProject(t *testing.T) {
 	if err := store.AssignOwner(synced, "h-laptop"); err != nil {
 		t.Fatal(err)
 	}
+	for key, claim := range map[string]struct{ id, session string }{"repo:github.com/acme/widget": {widget.ID, "aliased-worker"}, synced: {remote.ID, "plain-worker"}} {
+		if _, err := store.Work(ledger.WorkRequest{ProjectKey: key, SessionID: claim.session, Action: ledger.WorkClaim, ItemID: claim.id}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.RecordObservedSession(surface.Session{ID: "aliased-worker", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetAlias("parser-fixer", "aliased-worker"); err != nil {
+		t.Fatal(err)
+	}
 
 	type item struct {
-		ProjectKey, ProjectName, Host, ID, State, Matched string
+		ProjectKey, ProjectName, Host, ID, State, Phase, Assignee, AssigneeAlias, Matched string
 	}
 	search := func(query string) ([]item, bool) {
 		t.Helper()
@@ -59,9 +71,9 @@ func TestLedgerSearchFindsWorkInEveryLedgerWithItsProject(t *testing.T) {
 		t.Errorf("the done item ranks %+v, want it after the unfinished ones", items)
 	}
 	for id, want := range map[string]item{
-		widget.ID: {ProjectKey: "repo:github.com/acme/widget", ProjectName: "p-widget", ID: widget.ID, State: "open", Matched: "title"},
-		notes.ID:  {ProjectKey: notesKey, ProjectName: "p-notes", ID: notes.ID, State: "done", Matched: "title"},
-		remote.ID: {ProjectKey: synced, ProjectName: synced, Host: "h-laptop", ID: remote.ID, State: "open", Matched: "title"},
+		widget.ID: {ProjectKey: "repo:github.com/acme/widget", ProjectName: "p-widget", ID: widget.ID, State: "in_progress", Phase: "build", Assignee: "aliased-worker", AssigneeAlias: "parser-fixer", Matched: "title"},
+		notes.ID:  {ProjectKey: notesKey, ProjectName: "p-notes", ID: notes.ID, State: "done", Phase: "ship", Matched: "title"},
+		remote.ID: {ProjectKey: synced, ProjectName: synced, Host: "h-laptop", ID: remote.ID, State: "in_progress", Phase: "build", Assignee: "plain-worker", Matched: "title"},
 	} {
 		if byID[id] != want {
 			t.Errorf("%s = %+v, want %+v", id, byID[id], want)
@@ -72,8 +84,8 @@ func TestLedgerSearchFindsWorkInEveryLedgerWithItsProject(t *testing.T) {
 		"q=parser&project=p-notes": notes.ID,
 		"q=parser&project=" + url.QueryEscape("repo:github.com/acme/widget"): widget.ID,
 		"q=parser&state=done": notes.ID,
-		"q=parser&state=open,blocked&project=" + url.QueryEscape(synced): remote.ID,
-		"q=" + url.QueryEscape(widget.ID):                                widget.ID,
+		"q=parser&state=in_progress,blocked&project=" + url.QueryEscape(synced): remote.ID,
+		"q=" + url.QueryEscape(widget.ID):                                       widget.ID,
 	} {
 		items, _ := search(query)
 		if len(items) != 1 || items[0].ID != want {

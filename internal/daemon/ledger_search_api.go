@@ -14,8 +14,9 @@ import (
 
 type ledgerSearchItem struct {
 	ledger.WorkHit
-	ProjectName string `json:"projectName"`
-	Host        string `json:"host,omitempty"`
+	ProjectName   string `json:"projectName"`
+	Host          string `json:"host,omitempty"`
+	AssigneeAlias string `json:"assigneeAlias,omitempty"`
 }
 
 type ledgerSearchResponse struct {
@@ -70,7 +71,7 @@ func (d *Daemon) apiLedgerSearchHandler(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusInternalServerError, "projects_unavailable", err.Error())
 		return
 	}
-	owners := map[string]string{}
+	owners, aliases := map[string]string{}, map[string]string{}
 	response := ledgerSearchResponse{Items: make([]ledgerSearchItem, len(result.Items)), Truncated: result.Truncated}
 	for i, hit := range result.Items {
 		owner, seen := owners[hit.ProjectKey]
@@ -85,7 +86,12 @@ func (d *Daemon) apiLedgerSearchHandler(w http.ResponseWriter, r *http.Request) 
 		if name == "" {
 			name = hit.ProjectKey
 		}
-		response.Items[i] = ledgerSearchItem{WorkHit: hit, ProjectName: name, Host: owner}
+		alias, seen := aliases[hit.Assignee]
+		if !seen && hit.Assignee != "" {
+			alias = d.sessionAlias(hit.Assignee)
+			aliases[hit.Assignee] = alias
+		}
+		response.Items[i] = ledgerSearchItem{WorkHit: hit, ProjectName: name, Host: owner, AssigneeAlias: alias}
 	}
 	writeLedgerRead(w, r, response)
 }

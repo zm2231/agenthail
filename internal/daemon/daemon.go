@@ -226,11 +226,22 @@ type observeRetry struct {
 	retryAt  time.Time
 }
 
+func (d *Daemon) sessionAlias(sessionID string) string {
+	if d.Registry == nil {
+		return ""
+	}
+	alias, err := d.Registry.ReverseAlias(sessionID)
+	if err != nil {
+		return ""
+	}
+	return alias
+}
+
 func (d *Daemon) resolveDisplay(sessionID string) string {
+	if alias := d.sessionAlias(sessionID); alias != "" {
+		return "@" + alias
+	}
 	if d.Registry != nil {
-		if alias, err := d.Registry.ReverseAlias(sessionID); err == nil && alias != "" {
-			return "@" + alias
-		}
 		if sfc, name, _, err := d.Registry.GetSession(sessionID); err == nil {
 			if name != "" {
 				return sfc + "/" + truncate(name, 20)
