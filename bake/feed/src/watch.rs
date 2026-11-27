@@ -11,7 +11,7 @@ pub const SAFETY: Duration = Duration::from_secs(30);
 pub const OVERVIEW_EVERY: Duration = Duration::from_secs(60);
 pub const SETTLE: Duration = Duration::from_millis(180);
 pub const OVERVIEW_GAP: Duration = Duration::from_secs(5);
-pub const DECISIONS_GAP: Duration = Duration::from_secs(3);
+pub const DECISIONS_GAP: Duration = Duration::from_secs(10);
 const KEEP: usize = 2000;
 const IDLE: Duration = Duration::from_secs(120);
 
