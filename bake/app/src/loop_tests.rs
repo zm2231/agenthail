@@ -730,6 +730,52 @@ fn selecting_a_session_scrolls_the_sidebar_to_it() {
 }
 
 #[test]
+fn previous_and_next_session_from_now_walk_needs_you_from_its_first_session() {
+    if !isolated("previous_and_next_session_from_now_walk_needs_you_from_its_first_session") {
+        return;
+    }
+    use crate::over::{Group, Need, NeedKind, Target};
+    let dir = Dir::new("now-step");
+    let mut rt = runtime(app(sessions(&["a", "b", "c"]), &dir), (1440.0, 900.0));
+    let need = |target: Target, title: &str| Need { kind: NeedKind::Question, group: Group::Waiting, project: "Alpha".into(), project_key: "p1".into(), title: title.into(), who: "a".into(), at: "2026-11-27T08:50:00Z".into(), target, label: None };
+    let cmd = |key: rune::Key| rune::KeyEvent { key, mods: rune::Mods { cmd: true, ..rune::Mods::default() } };
+    rt.update(|s, _| {
+        s.ov.needs = vec![need(Target::Work(zk("p1", "p1-W1")), "Approve the plan"), need(Target::Session("c".into()), "First question"), need(Target::Session("a".into()), "Second question")];
+        crate::over::go(s, Screen::Now);
+    });
+    rt.frame(DT);
+    let on = |rt: &Runtime<App>| (rt.state.screen == Screen::Now, crate::over::search::selected(&rt.state));
+
+    rt.key(cmd(rune::Key::Down));
+    rt.frame(DT);
+    assert_eq!(on(&rt), (false, Some("c".into())), "next session from Now opens the first session in Needs you");
+    rt.key(cmd(rune::Key::Down));
+    rt.frame(DT);
+    assert_eq!(on(&rt), (false, Some("a".into())), "and next again walks down Needs you");
+    rt.key(cmd(rune::Key::Up));
+    rt.frame(DT);
+    assert_eq!(on(&rt), (false, Some("c".into())), "previous walks back up");
+
+    rt.update(|s, _| crate::over::go(s, Screen::Now));
+    rt.frame(DT);
+    rt.key(cmd(rune::Key::Up));
+    rt.frame(DT);
+    assert_eq!(on(&rt), (false, Some("c".into())), "previous session from Now opens the first session in Needs you, as the Mac app does with none selected");
+    rt.key(cmd(rune::Key::Up));
+    rt.frame(DT);
+    assert_eq!(on(&rt), (false, Some("c".into())), "and stops there");
+
+    rt.update(|s, _| {
+        s.ov.needs.clear();
+        crate::over::go(s, Screen::Now);
+    });
+    rt.frame(DT);
+    rt.key(cmd(rune::Key::Down));
+    rt.frame(DT);
+    assert_eq!(on(&rt), (true, None), "with nothing in Needs you Now stays put");
+}
+
+#[test]
 fn a_snapshot_that_did_not_touch_the_selected_session_does_not_reread_it() {
     if !isolated("a_snapshot_that_did_not_touch_the_selected_session_does_not_reread_it") {
         return;
