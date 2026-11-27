@@ -133,3 +133,25 @@ func TestAResendGoesToTheHostThatMayHaveRunItEvenAfterTheRouteChanged(t *testing
 		t.Fatalf("interrupts remote=%d local=%d, want the first host's one run only", remote.fake.interrupts(), local.fake.interrupts())
 	}
 }
+
+func TestAResendToAHostNoLongerPairedIsUnknownNotARoutingError(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	action := map[string]string{"action": "interrupt", "sessionId": hosts.Qualify(record.ID, "remote-a")}
+	remote.gate.drops.Store(2)
+	if lost := local.keyedAction(t, "stop-unpaired", action); lost.Code != http.StatusGatewayTimeout {
+		t.Fatalf("lost answer status=%d body=%s", lost.Code, lost.Body.String())
+	}
+	remote.gate.drops.Store(0)
+	if removed := local.request(t, http.MethodDelete, "/api/v1/hosts", map[string]string{"host": "vps"}); removed.Code >= http.StatusMultipleChoices {
+		t.Fatalf("unpair status=%d body=%s", removed.Code, removed.Body.String())
+	}
+	for range 2 {
+		resend := local.keyedAction(t, "stop-unpaired", action)
+		if resend.Code != http.StatusConflict || apiErrorCode(t, resend) != "action_outcome_unknown" {
+			t.Fatalf("resend status=%d body=%s, want the outcome unknown", resend.Code, resend.Body.String())
+		}
+	}
+	if local.fake.interrupts() != 0 {
+		t.Fatalf("the resend ran locally: interrupts=%d", local.fake.interrupts())
+	}
+}

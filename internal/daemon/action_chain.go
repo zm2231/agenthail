@@ -36,6 +36,9 @@ func (d *Daemon) routeHostAction(ctx context.Context, p principal, raw []byte, k
 	if action, _ := request["action"].(string); !p.forThePerson() && personOnlyActions[action] != nil {
 		return replyWith(func(w http.ResponseWriter) { writeActionResult(w, actionResult{}, personOnlyActions[action]) })
 	}
+	if attempt := attemptFrom(ctx); attempt != nil && attempt.prior != nil {
+		return d.resendHostAction(ctx, p, key, *attempt.prior)
+	}
 	host, rewritten, err := d.routeActionRequest(ctx, request)
 	if err != nil {
 		return replyWith(func(w http.ResponseWriter) {
@@ -50,18 +53,6 @@ func (d *Daemon) routeHostAction(ctx context.Context, p principal, raw []byte, k
 				writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			}
 		})
-	}
-	// Only the host the action was last forwarded to holds a receipt for its
-	// key, so a resend goes there whatever the route says now; a host that
-	// never got it answers that the session moved, and the forward follows.
-	if attempt := attemptFrom(ctx); attempt != nil && attempt.prior != nil {
-		prior, paired := d.pairedHost(attempt.prior.Host)
-		if !paired {
-			return replyWith(func(w http.ResponseWriter) {
-				writeAPIError(w, http.StatusConflict, "action_outcome_unknown", "This request was forwarded to a host that is no longer paired, and it did not answer, so it may have happened. Check what it was meant to change before sending it again as a new request.")
-			})
-		}
-		host = prior
 	}
 	if host == nil {
 		if rewritten {
@@ -88,11 +79,34 @@ func (d *Daemon) routeHostAction(ctx context.Context, p principal, raw []byte, k
 		hostTask = true
 	}
 	body, _ := json.Marshal(request)
-	if attempt := attemptFrom(ctx); attempt != nil && attempt.prior != nil && attempt.prior.Host == host.record.ID {
-		body = attempt.prior.Body
-	}
 	reply := d.forwardHostAction(ctx, p, key, host, request, body)
 	if hostTask {
+		reply = d.recordHostTask(host, request, reply)
+	}
+	return reply
+}
+
+// Only the host a forward last reached holds a receipt for its key, so a
+// resend goes there with the bytes it sent, whatever the route says now. A
+// host that never got the request answers that the session moved, and the
+// forward follows it.
+func (d *Daemon) resendHostAction(ctx context.Context, p principal, key string, prior actionForward) actionReply {
+	host, paired := d.pairedHost(prior.Host)
+	if !paired {
+		return replyWith(func(w http.ResponseWriter) {
+			writeAPIError(w, http.StatusConflict, "action_outcome_unknown", "This request was forwarded to a host that is no longer paired, and it did not answer, so it may have happened. Check what it was meant to change before sending it again as a new request.")
+		})
+	}
+	if err := d.hostTransit(ctx, host); err != nil {
+		return replyWith(func(w http.ResponseWriter) { writeActionResult(w, actionResult{}, err) })
+	}
+	if err := incompatibleHost(host); err != nil {
+		return replyWith(func(w http.ResponseWriter) { writeActionResult(w, actionResult{}, err) })
+	}
+	var request map[string]any
+	_ = json.Unmarshal(prior.Body, &request)
+	reply := d.forwardHostAction(ctx, p, key, host, request, prior.Body)
+	if task, _ := request["task"].(bool); task && request["action"] == "session-create" {
 		reply = d.recordHostTask(host, request, reply)
 	}
 	return reply
