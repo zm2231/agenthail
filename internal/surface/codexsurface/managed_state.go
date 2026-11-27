@@ -64,6 +64,10 @@ func (c *Codex) watchManagedClient(ctx context.Context, client codexClient, sess
 				if event.Method == "thread/status/changed" && !subscribed {
 					subscribed = c.subscribeManagedThread(ctx, client, sess.ID)
 				}
+				if event.Method == "thread/queue/changed" {
+					onEvent(surface.StreamEvent{Kind: surface.StreamKindNativeQueue})
+					continue
+				}
 				if goalEvent, ok := codexGoalStreamEvent(event); ok {
 					onEvent(goalEvent)
 					continue

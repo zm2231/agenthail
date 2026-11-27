@@ -101,7 +101,7 @@ func (d *Daemon) doSessionOperation(ctx context.Context, adapter surface.Surface
 		return actionResult{}, actionFailed(http.StatusBadGateway, code, err.Error())
 	}
 	data, _ := json.Marshal(result)
-	if action != "session-lifecycle-status" && action != "session-lifecycle-logs" && !(action == "native-queue" && queue.Action == "list") {
+	if actionChanges(action, queue) {
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "session-operation", SessionID: session.ID, Result: action + ": " + string(data)})
 	}
 	return actionOK(map[string]any{"ok": true, "result": result}), nil

@@ -86,14 +86,14 @@ func actionKey(ctx context.Context) string {
 	return key
 }
 
-// doAction dispatches one decoded action and announces a state change when it succeeds.
+// doAction dispatches one decoded action and announces what it changed when it succeeds.
 func (d *Daemon) doAction(ctx context.Context, p principal, request dashboardActionRequest) actionReply {
 	recorder := newActionRecorder()
 	result, err := d.dispatchAction(p.context(ctx), p, request)
 	writeActionResult(recorder, result, d.movedAnswer(err))
 	reply := recorder.reply()
 	if reply.Status >= http.StatusOK && reply.Status < http.StatusMultipleChoices {
-		d.publishEvent("state.changed", "", map[string]string{"source": "action"})
+		d.announceAction(request)
 	}
 	return reply
 }

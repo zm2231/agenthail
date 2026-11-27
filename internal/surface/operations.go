@@ -75,3 +75,11 @@ type NativeQueueRequest struct {
 type NativeQueuer interface {
 	NativeQueue(context.Context, *Session, NativeQueueRequest) (map[string]any, error)
 }
+
+// NativeQueueActions holds every native queue action and whether it changes
+// the queue; list only reads it.
+var NativeQueueActions = map[string]bool{"list": false, "add": true, "update": true, "delete": true, "reorder": true, "start": true}
+
+// StreamKindNativeQueue marks a stream event that says the session's native
+// queue changed. It carries nothing else: readers list the queue again.
+const StreamKindNativeQueue = "native-queue"

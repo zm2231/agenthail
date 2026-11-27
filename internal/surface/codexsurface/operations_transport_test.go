@@ -23,7 +23,7 @@ func TestCodexOperationsUseNativeSocketAndReturnedIdentity(t *testing.T) {
 	if err != nil || fork.ID != "fork-id" || fork.Cwd != "/fork" || fork.Source != "appServer" || fork.Transport != codexTransportManaged {
 		t.Fatalf("fork=%+v err=%v", fork, err)
 	}
-	for _, action := range []string{"list", "add", "update", "delete", "reorder", "start"} {
+	for action := range surface.NativeQueueActions {
 		result, err := codex.NativeQueue(context.Background(), session, surface.NativeQueueRequest{Action: action, Message: "next", ID: "q1", ClientID: "stable", IDs: []string{"q1"}, Cursor: "page-one"})
 		if err != nil || result["nextCursor"] != "page-two" {
 			t.Fatal(action, result, err)
