@@ -391,7 +391,7 @@ pub fn drain(s: &mut App) -> bool {
     while let Ok((id, m, result)) = s.ov.work.rx.try_recv() {
         changed = true;
         s.ov.work.acting.remove(&id);
-        crate::over::worksearch::moved(s, &id);
+        crate::over::worksearch::reread(s, &id);
         let note = s.ov.work.sends.answered(&id, m, &result, clock);
         s.ov.work.notes.insert(id, note);
         if result.as_ref().map_or_else(|e| e.maybe_delivered, |_| true) {

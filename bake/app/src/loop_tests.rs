@@ -503,6 +503,13 @@ fn until(rt: &mut Runtime<App>, done: impl Fn(&App) -> bool) {
     panic!("timed out");
 }
 
+fn highlighted_session(rt: &Runtime<App>) -> Option<String> {
+    match crate::over::jump::highlighted_pick(&rt.state)? {
+        crate::over::jump::Pick::Target(crate::over::Target::Session(id)) => Some(id),
+        _ => None,
+    }
+}
+
 fn work_found(s: &App) -> Option<Result<Vec<String>, String>> {
     match crate::over::worksearch::found_for(s)? {
         Some(Ok(found)) => Some(Ok(found.items.iter().map(|f| f.id.clone()).collect())),
@@ -518,12 +525,19 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     }
     let dir = Dir::new("worksearch");
     let (tx, paths) = std::sync::mpsc::channel();
-    let mut a = app(sessions(&["a"]), &dir);
+    let mut a = app(sessions(&["a", "exporter"]), &dir);
     a.client = Some(feed::catalog::Client::new(&ledger_api(tx), "t"));
     let mut rt = runtime(a, (1440.0, 900.0));
     let typed = |rt: &mut Runtime<App>, q: &str| {
         rt.state.ov.jump = Some(rune::TextEdit::new(q));
         rt.frame(DT);
+    };
+    let asked = |paths: &std::sync::mpsc::Receiver<String>| -> Vec<String> { paths.try_iter().filter(|p| p.starts_with("/api/v1/ledger")).collect() };
+    let quiet = |rt: &mut Runtime<App>| {
+        for _ in 0..4 {
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            rt.frame(DT);
+        }
     };
 
     typed(&mut rt, "e");
@@ -531,18 +545,18 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     typed(&mut rt, "exp");
     assert!((wake_in(&rt) - 0.2).abs() < 0.02, "the loop wakes when typing settles, in {}", wake_in(&rt));
     rt.frame(0.1);
-    assert!(paths.try_iter().all(|p| !p.starts_with("/api/v1/ledger")), "no search before typing settles");
+    assert!(asked(&paths).is_empty(), "no search before typing settles");
     rt.frame(wake_in(&rt));
     typed(&mut rt, "export");
     rt.frame(0.2);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    assert_eq!(asked(&paths), ["/api/v1/ledger/search?q=exp&limit=20"], "a newer query waits for the one in flight instead of piling on");
+    assert_eq!(highlighted_session(&rt), Some("exporter".into()));
     until(&mut rt, |s| work_found(s).is_some());
-    std::thread::sleep(std::time::Duration::from_millis(400));
-    rt.frame(DT);
-    assert_eq!(work_found(&rt.state), Some(Ok(vec!["z-W9".to_string()])), "the older, slower search doesn't replace the newer one");
-    let mut asked: Vec<String> = paths.try_iter().filter(|p| p.starts_with("/api/v1/ledger")).collect();
-    asked.sort();
-    assert_eq!(asked, ["/api/v1/ledger/search?q=exp&limit=20", "/api/v1/ledger/search?q=export&limit=20"]);
-    assert!(rt.presented("hit-0").is_some() && rt.presented("hit-1").is_none(), "the one match is listed");
+    assert_eq!(work_found(&rt.state), Some(Ok(vec!["z-W9".to_string()])), "the older search's reply is dropped");
+    assert_eq!(asked(&paths), ["/api/v1/ledger/search?q=export&limit=20"]);
+    assert_eq!(highlighted_session(&rt), Some("exporter".into()), "arriving matches don't move the highlight");
+    assert!(rt.presented("hit-1").is_some() && rt.presented("hit-2").is_none(), "the work match and the session are listed");
 
     typed(&mut rt, "broken");
     rt.frame(0.2);
@@ -551,20 +565,41 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     for _ in 0..20 {
         rt.frame(0.25);
     }
-    assert_eq!(paths.try_iter().filter(|p| p.starts_with("/api/v1/ledger")).count(), 1, "a failed search waits for the next keystroke");
+    assert_eq!(asked(&paths).len(), 1, "a failed search waits for the next keystroke");
     typed(&mut rt, "broken2");
     rt.frame(0.2);
     until(&mut rt, |s| work_found(s).is_some());
-    assert_eq!(paths.try_iter().filter(|p| p.starts_with("/api/v1/ledger")).count(), 1, "the next keystroke retries");
+    assert_eq!(asked(&paths).len(), 1, "the next keystroke retries");
 
+    let item = "/api/v1/ledger?projectKey=shared%3Az&view=item&id=z-W9";
     crate::over::worksearch::open(&mut rt.state, "shared:z", "z-W9");
     assert!(rt.state.screen == Screen::Work("z-W9".into()));
     assert!(rt.state.ov.jump.is_none());
     assert_eq!(crate::over::worksearch::note(&rt.state, "z-W9").as_deref(), Some("Loading this work item…"));
     until(&mut rt, |s| s.ov.d.work.contains_key("z-W9"));
+    assert_eq!(asked(&paths), [item]);
     send(&rt, overview(2, sessions(&["a"])));
     rt.frame(DT);
     let w = &rt.state.ov.d.work["z-W9"];
     assert_eq!((w.state.as_str(), w.ledger_key(), w.project.as_str()), ("parked", "shared:z", "shared:z"), "a rebuild keeps the opened item");
+    assert_eq!(crate::over::worksearch::note(&rt.state, "z-W9"), None);
+
+    crate::over::open_target(&mut rt.state, &crate::over::Target::Work("z-W9".into()));
+    quiet(&mut rt);
+    assert_eq!(asked(&paths), [item], "opening a found item again rereads it");
+
+    crate::over::worksearch::open(&mut rt.state, "shared:z", "z-W9");
+    let mut loaded = Fetched { recorded: recorded(3, sessions(&["a"])), ledgers: HashMap::new(), held: Vec::new(), asked: Vec::new(), started: std::time::Instant::now(), usage: None, moved: Vec::new() };
+    let row: feed::derive::world::Work = serde_json::from_value(json!({"id": "z-W9", "text": "Parked export", "state": "in_progress"})).unwrap();
+    loaded.ledgers.insert("p1".into(), Ok(vec![row]));
+    send(&rt, Bg::Overview(Box::new(loaded)));
+    rt.frame(DT);
+    quiet(&mut rt);
+    assert_eq!(asked(&paths), [item]);
+    let w = &rt.state.ov.d.work["z-W9"];
+    assert_eq!((w.state.as_str(), w.project.as_str()), ("in_progress", "p1"), "a read that lands after the ledger loads leaves the loaded item");
+    crate::over::worksearch::open(&mut rt.state, "shared:z", "z-W9");
+    quiet(&mut rt);
+    assert!(asked(&paths).is_empty(), "a loaded item opens without a read");
     assert_eq!(crate::over::worksearch::note(&rt.state, "z-W9"), None);
 }

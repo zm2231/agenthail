@@ -3,7 +3,7 @@ pub mod earlier;
 pub mod extension_sheets;
 pub mod extensions;
 pub mod inbox;
-mod jump;
+pub mod jump;
 pub mod layout;
 mod now;
 mod project;
@@ -195,7 +195,10 @@ pub fn open_session(s: &mut App, id: &str) {
 pub fn open_target(s: &mut App, t: &Target) {
     match t {
         Target::Session(id) => open_session(s, id),
-        Target::Work(id) => go(s, Screen::Work(id.clone())),
+        Target::Work(id) => {
+            worksearch::reread(s, id);
+            go(s, Screen::Work(id.clone()));
+        }
         Target::Project(key) => go(s, Screen::Project(key.clone())),
     }
 }

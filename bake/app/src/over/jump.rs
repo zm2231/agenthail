@@ -108,6 +108,33 @@ fn highlighted(s: &App) -> usize {
     if at == query(s) { *ix } else { 0 }
 }
 
+fn same(a: &Pick, b: &Pick) -> bool {
+    match (a, b) {
+        (Pick::Target(x), Pick::Target(y)) => x == y,
+        (Pick::Found(_, x), Pick::Found(_, y)) => x == y,
+        (Pick::Codex(x), Pick::Codex(y)) => x.id == y.id,
+        (Pick::Command(x), Pick::Command(y)) => x == y,
+        _ => false,
+    }
+}
+
+pub fn highlighted_pick(s: &App) -> Option<Pick> {
+    s.ov.jump.as_ref()?;
+    let picks: Vec<Pick> = entries(s).into_iter().filter_map(|e| e.pick).collect();
+    let ix = highlighted(s).min(picks.len().checked_sub(1)?);
+    picks.into_iter().nth(ix)
+}
+
+pub fn keep_highlight(s: &mut App, change: impl FnOnce(&mut App)) {
+    let before = highlighted_pick(s);
+    change(s);
+    if let Some(p) = before
+        && let Some(ix) = entries(s).into_iter().filter_map(|e| e.pick).position(|q| same(&p, &q))
+    {
+        s.ov.jump_ix = (query(s).to_string(), ix);
+    }
+}
+
 fn highlight(s: &mut App, ix: usize, tx: &mut Tx) {
     s.ov.jump_ix = (query(s).to_string(), ix);
     tx.scroll_into_view_in("jump-list", format!("hit-{ix}"));

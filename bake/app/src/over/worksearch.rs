@@ -12,7 +12,7 @@ pub const SETTLE: Duration = Duration::from_millis(200);
 
 enum Reply {
     Search(u64, Result<Search, String>),
-    Item(String, String, Box<Result<Work, String>>),
+    Item(u64, String, String, Box<Result<Work, String>>),
 }
 
 type Asked = (String, u64, Option<Result<Search, String>>);
@@ -21,6 +21,8 @@ pub struct State {
     asked: Option<Asked>,
     typed: Option<(String, f64)>,
     requests: u64,
+    flying: bool,
+    reads: HashMap<String, u64>,
     found: HashMap<String, Work>,
     opening: HashMap<String, Option<String>>,
     tx: Sender<Reply>,
@@ -30,12 +32,13 @@ pub struct State {
 impl Default for State {
     fn default() -> State {
         let (tx, rx) = channel();
-        State { asked: None, typed: None, requests: 0, found: HashMap::new(), opening: HashMap::new(), tx, rx }
+        State { asked: None, typed: None, requests: 0, flying: false, reads: HashMap::new(), found: HashMap::new(), opening: HashMap::new(), tx, rx }
     }
 }
 
 impl State {
-    pub fn keep(&self, d: &mut World) {
+    pub fn keep(&mut self, d: &mut World) {
+        self.found.retain(|id, _| !d.work.contains_key(id));
         for (id, w) in &self.found {
             d.work.entry(id.clone()).or_insert_with(|| w.clone());
         }
@@ -69,6 +72,7 @@ fn ask(s: &mut App, q: String) {
     };
     let st = &mut s.ov.worksearch;
     st.asked = Some((q.clone(), seq, None));
+    st.flying = true;
     let tx = st.tx.clone();
     std::thread::spawn(move || {
         let _ = tx.send(Reply::Search(seq, client.search_work(&q)));
@@ -93,7 +97,7 @@ fn settle(s: &mut App) -> bool {
     }
     let due = st.typed.as_ref().is_some_and(|(_, at)| clock - at >= SETTLE.as_secs_f64());
     let asked = st.asked.as_ref().is_some_and(|(a, _, _)| *a == q);
-    if due && !asked {
+    if due && !asked && !st.flying {
         ask(s, q);
         return true;
     }
@@ -104,7 +108,7 @@ pub fn wait(s: &App) -> Option<Duration> {
     let st = &s.ov.worksearch;
     let (typed, at) = st.typed.as_ref()?;
     let asked = st.asked.as_ref().is_some_and(|(a, _, _)| a == typed);
-    (!asked).then(|| SETTLE.saturating_sub(Duration::from_secs_f64((s.clock - at).max(0.0))))
+    (!asked && !st.flying).then(|| SETTLE.saturating_sub(Duration::from_secs_f64((s.clock - at).max(0.0))))
 }
 
 pub fn drain(s: &mut App) -> bool {
@@ -112,13 +116,26 @@ pub fn drain(s: &mut App) -> bool {
     while let Ok(reply) = s.ov.worksearch.rx.try_recv() {
         match reply {
             Reply::Search(seq, found) => {
-                if let Some((_, _, slot)) = s.ov.worksearch.asked.as_mut().filter(|(_, asked, _)| *asked == seq) {
-                    *slot = Some(found);
+                s.ov.worksearch.flying = false;
+                if s.ov.worksearch.asked.as_ref().is_some_and(|(_, asked, _)| *asked == seq) {
+                    super::jump::keep_highlight(s, |s| {
+                        if let Some((_, _, slot)) = s.ov.worksearch.asked.as_mut() {
+                            *slot = Some(found);
+                        }
+                    });
                     changed = true;
                 }
             }
-            Reply::Item(ledger, id, read) => {
+            Reply::Item(seq, ledger, id, read) => {
+                if s.ov.worksearch.reads.get(&id) != Some(&seq) {
+                    continue;
+                }
+                s.ov.worksearch.reads.remove(&id);
                 changed = true;
+                if loaded(s, &id) {
+                    s.ov.worksearch.opening.remove(&id);
+                    continue;
+                }
                 match *read {
                     Ok(work) => {
                         let work = s.ov.d.place(work, &ledger);
@@ -148,10 +165,14 @@ fn read(s: &mut App, ledger: &str, id: &str) {
     if !s.ov.d.work.contains_key(id) {
         s.ov.worksearch.opening.insert(id.into(), None);
     }
-    let (tx, ledger, id) = (s.ov.worksearch.tx.clone(), ledger.to_string(), id.to_string());
+    let st = &mut s.ov.worksearch;
+    st.requests += 1;
+    let seq = st.requests;
+    st.reads.insert(id.to_string(), seq);
+    let (tx, ledger, id) = (st.tx.clone(), ledger.to_string(), id.to_string());
     std::thread::spawn(move || {
         let read = client.found_work(&ledger, &id);
-        let _ = tx.send(Reply::Item(ledger, id, Box::new(read)));
+        let _ = tx.send(Reply::Item(seq, ledger, id, Box::new(read)));
     });
 }
 
@@ -162,7 +183,7 @@ pub fn open(s: &mut App, ledger: &str, id: &str) {
     go(s, Screen::Work(id.to_string()));
 }
 
-pub fn moved(s: &mut App, id: &str) {
+pub fn reread(s: &mut App, id: &str) {
     if let Some(ledger) = s.ov.worksearch.found.get(id).map(|w| w.ledger_key().to_string()) {
         read(s, &ledger, id);
     }
