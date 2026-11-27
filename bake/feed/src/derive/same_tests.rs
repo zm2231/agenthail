@@ -56,3 +56,21 @@ fn a_world_with_the_same_rows_in_the_same_minute_shows_the_same() {
     b.prompted_before.insert("s1".into());
     assert!(!a.same_shown(&b), "a session's earlier prompt");
 }
+
+#[test]
+fn since_you_looked_holds_only_what_came_after_the_look_within_its_minute() {
+    let v = json!({
+        "updatedAt": "2026-11-24T12:00:40Z",
+        "projects": [{"id": "p", "displayName": "P"}],
+        "sessions": [{"id": "s1", "name": "s1", "lastActive": "2026-11-24T11:50:00Z", "project": {"id": "p", "name": "P"}}],
+        "ledgers": {"p": [
+            {"id": "p-A", "text": "Before the look", "state": "done", "timeline": [{"at": "2026-11-24T12:00:20Z", "kind": "state", "state": "done"}]},
+            {"id": "p-B", "text": "After the look", "state": "done", "timeline": [{"at": "2026-11-24T12:00:35Z", "kind": "state", "state": "done"}]}
+        ]}
+    });
+    let w = World::from_json(&v.to_string()).unwrap();
+    let window = w.window(Some("2026-11-24T12:00:30Z"));
+    let p = w.project("p").unwrap();
+    let shown: Vec<String> = w.digest(p, window).into_iter().map(|l| l.text).collect();
+    assert_eq!(shown, ["After the look"]);
+}

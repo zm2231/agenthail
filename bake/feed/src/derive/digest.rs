@@ -71,7 +71,7 @@ pub(super) fn ci_failed(body: &str) -> bool {
 
 impl World {
     pub fn window(&self, looked: Option<&str>) -> f64 {
-        looked.filter(|t| parse_time(t).is_some()).map_or(WINDOW_HOURS, |t| self.hours(t).max(0.0))
+        looked.filter(|t| parse_time(t).is_some()).map_or(WINDOW_HOURS, |t| self.hours(t))
     }
 
     pub fn digest(&self, project: &Project, window_hours: f64) -> Vec<Line> {
