@@ -43,6 +43,7 @@ pub enum Bg {
     LedgerChanged(String, std::time::Instant),
     LedgersReopened,
     SessionNews,
+    SessionsMoved,
     Removed(Vec<feed::watch::Removal>),
     Item(String, WorkItem),
     Overview(Box<Fetched>),
@@ -1345,6 +1346,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 ask_overview(s, Ask::Refresh);
                 over::listing::news(s);
             }
+            Bg::SessionsMoved => over::listing::news(s),
             Bg::Removed(gone) => {
                 over::earlier::removed(s, &gone);
                 over::listing::removed(s, &gone);

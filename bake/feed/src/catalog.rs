@@ -173,6 +173,8 @@ pub struct Session {
     #[serde(default)]
     pub cwd: Option<String>,
     #[serde(default)]
+    pub placement: Option<String>,
+    #[serde(default)]
     pub started_by: Option<String>,
     #[serde(default)]
     pub subagent: Option<Value>,

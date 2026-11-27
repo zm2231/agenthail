@@ -103,6 +103,7 @@ pub struct Applied {
     pub changed: bool,
     pub reread: bool,
     pub news: bool,
+    pub placed: bool,
     pub rev: Option<String>,
     pub touched: Vec<String>,
     pub restart: bool,
@@ -191,7 +192,10 @@ impl Catalog {
                 Ok(row) if !row.id.is_empty() => {
                     out.touched.push(row.id.clone());
                     match self.sessions.iter_mut().find(|x| x.id == row.id) {
-                        Some(x) => *x = row,
+                        Some(x) => {
+                            out.placed |= row.placement.is_none() || x.placement != row.placement;
+                            *x = row;
+                        }
                         None => {
                             self.sessions.push(row);
                             out.news = true;
@@ -207,6 +211,7 @@ impl Catalog {
                     out.changed = true;
                     out.touched.push(id);
                 }
+                out.placed = true;
                 out.reread = true;
             }
             "session.removed" => {

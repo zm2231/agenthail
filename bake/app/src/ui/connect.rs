@@ -157,6 +157,9 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
             if applied.news && tx.send(Bg::SessionNews).is_err() {
                 return;
             }
+            if applied.placed && !applied.news && tx.send(Bg::SessionsMoved).is_err() {
+                return;
+            }
             if !applied.removed.is_empty() && tx.send(Bg::Removed(applied.removed)).is_err() {
                 return;
             }
