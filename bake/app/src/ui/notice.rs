@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use feed::catalog::{LeadReplacement, Session};
 use rune::{Color, El, col, icon, row, text};
-use rune_kit::{Button, ButtonVariant};
+use rune_kit::{Button, ButtonVariant, Kit};
 
 use crate::theme::{self, BODY, BODY_BOLD, META, accent, attention, faint, muted};
 use crate::{App, Bg, icons};
@@ -61,9 +61,9 @@ fn acknowledge(s: &mut App, id: i64) {
     });
 }
 
-fn banner(r: &LeadReplacement) -> El {
+fn banner(r: &LeadReplacement, k: &Kit) -> El {
     let id = r.id;
-    let ack = Button::new("Acknowledge").variant(ButtonVariant::Ghost).build(theme::kit()).key(format!("lead-replacement-ack-{id}")).on_press(move |s: &mut App| acknowledge(s, id));
+    let ack = Button::new("Acknowledge").variant(ButtonVariant::Ghost).build(k).key(format!("lead-replacement-ack-{id}")).on_press(move |s: &mut App| acknowledge(s, id));
     row()
         .key(format!("lead-replacement-{id}"))
         .w_full()
@@ -122,8 +122,8 @@ fn turn(x: &Session) -> Option<El> {
     Some(row().key("turn-notice").w_full().gap(8.0).items_start().px(15.0).pb(8.0).child(text(notice).font(META).color(muted()).wrap().grow(1.0).w(1.0).min_w(0.0)).child(never).child(close))
 }
 
-pub fn above(s: &App, x: &Session) -> Option<El> {
-    let banners: Vec<El> = s.notices.replacements.iter().filter(|r| r.session_id == x.id && !s.notices.acking.contains(&r.id)).map(banner).collect();
+pub fn above(s: &App, x: &Session, k: &Kit) -> Option<El> {
+    let banners: Vec<El> = s.notices.replacements.iter().filter(|r| r.session_id == x.id && !s.notices.acking.contains(&r.id)).map(|r| banner(r, k)).collect();
     let error = s.notices.error.as_ref().filter(|_| !banners.is_empty()).map(|e| text(e.clone()).font(META).color(attention()).wrap().w_full());
     let turn = turn(x);
     if banners.is_empty() && turn.is_none() {

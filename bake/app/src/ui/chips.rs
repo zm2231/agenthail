@@ -1,11 +1,11 @@
 use feed::catalog::Session;
 use feed::settings::{Chip, ContextUsage};
 use rune::{El, icon, row, text};
-use rune_kit::ProgressCircle;
+use rune_kit::{Kit, ProgressCircle};
 
 use crate::App;
 use crate::icons;
-use crate::theme::{self, META, faint, line, muted, wash};
+use crate::theme::{META, faint, line, muted, wash};
 use crate::ui::session_menu::{chips_for, compact};
 
 fn chip_el(s: &App, x: &Session, chip: &Chip) -> El {
@@ -40,10 +40,10 @@ fn chip_el(s: &App, x: &Session, chip: &Chip) -> El {
         .child(icon(&icons::SELECTOR, 11.0).color(faint()))
 }
 
-fn context_el(usage: &ContextUsage) -> El {
+fn context_el(usage: &ContextUsage, k: &Kit) -> El {
     let mut r = row().key("context-use").gap(5.0).items_center().px(4.0).label(format!("Context {}", usage.label()));
     if let Some(f) = usage.fraction() {
-        r = r.child(ProgressCircle::new(f).size(14.0).label("Context used").build(theme::kit()));
+        r = r.child(ProgressCircle::new(f).size(14.0).label("Context used").build(k));
     }
     let words = if usage.compacting { "Compacting…".to_string() } else { usage.label() };
     r.child(text(words).font(META).color(faint()))
@@ -68,13 +68,13 @@ fn compact_el(s: &App, x: &Session) -> El {
     b
 }
 
-pub fn turn(s: &App, x: &Session) -> El {
+pub fn turn(s: &App, x: &Session, k: &Kit) -> El {
     let mut r = row().key("turn-chips").w_full().flex_wrap().gap(6.0).items_center();
     for chip in chips_for(s, &x.id) {
         r = r.child(chip_el(s, x, &chip));
     }
     if let Some(usage) = s.menus.context.get(&x.id) {
-        r = r.child(context_el(usage));
+        r = r.child(context_el(usage, k));
     } else if let Some(error) = s.menus.context_error.get(&x.id) {
         r = r.child(text(format!("Context use unknown: {error}")).font(META).color(faint()).truncate().max_w(280.0).key("context-use"));
     }

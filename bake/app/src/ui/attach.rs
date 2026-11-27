@@ -7,7 +7,7 @@ use feed::blocks::Kind;
 use feed::item::{Attachment, AttachedFile, Item};
 use rune::image::ImageCache;
 use rune::{ClipboardContent, El, FileDialogOptions, Icon, PointerPress, SurfaceFit, Tx, Waker, col, el, icon, row, text};
-use rune_kit::{Menu, MenuItem};
+use rune_kit::{Kit, Menu, MenuItem};
 
 use crate::icons;
 use crate::theme::{self, META, META_BOLD, failed, faint, line, muted, wash};
@@ -502,7 +502,7 @@ fn run(s: &mut App, target: Target, act_: &'static str, tx: &mut Tx) {
     }
 }
 
-pub fn overlays(s: &App, layer: &mut Vec<El>) {
+pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
     let Some(open) = &s.attach.menu else { return };
     let mut m = Menu::new("attachment-menu").open(true).min_width(200.0).at(open.at.x, open.at.y).on_close(|s: &mut App| s.attach.menu = None);
     let entries: Vec<(&str, &'static str, bool)> = match &open.target {
@@ -522,7 +522,7 @@ pub fn overlays(s: &App, layer: &mut Vec<El>) {
         let target = open.target.clone();
         m = m.item(MenuItem::new(label).disabled(!enabled).on_select_tx(move |s: &mut App, tx: &mut Tx| run(s, target.clone(), act_, tx)));
     }
-    let _ = m.build(theme::kit(), layer);
+    let _ = m.build(k, layer);
 }
 
 fn menu_at(target: Target) -> impl Fn(&mut App, PointerPress, &mut Tx) + 'static {
@@ -556,7 +556,7 @@ pub fn button(s: &App, id: &str) -> Option<El> {
     })
 }
 
-pub fn chips(s: &App, id: &str) -> Option<El> {
+pub fn chips(s: &App, id: &str, k: &Kit) -> Option<El> {
     let list = s.attach.tray.chips(id);
     let preparing = adding(s, id);
     if list.is_empty() && preparing == 0 && s.attach.unsaved.is_none() {
@@ -584,7 +584,7 @@ pub fn chips(s: &App, id: &str) -> Option<El> {
             .child(thumb)
             .child(text(chip.name.clone()).font(META).color(theme::text()).truncate().max_w(220.0));
         match chip.state {
-            State::Uploading => c = c.child(rune_kit::Loader::new().size(10.0).color(faint()).build(theme::kit())),
+            State::Uploading => c = c.child(rune_kit::Loader::new().size(10.0).color(faint()).build(k)),
             State::Failed(_) if chip.data.is_some() => {
                 let session = id.to_string();
                 c = c.child(
@@ -618,12 +618,12 @@ pub fn chips(s: &App, id: &str) -> Option<El> {
         r = r.child(text(warning.clone()).font(META).color(failed()).wrap().w_full());
     }
     if preparing > 0 {
-        r = r.child(row().h(24.0).gap(6.0).items_center().child(rune_kit::Loader::new().size(10.0).color(faint()).build(theme::kit())).child(text("Adding…").font(META).color(faint())));
+        r = r.child(row().h(24.0).gap(6.0).items_center().child(rune_kit::Loader::new().size(10.0).color(faint()).build(k)).child(text("Adding…").font(META).color(faint())));
     }
     Some(col().key("attachment-tray").w_full().max_h(CHIP_ROWS_SHOWN * 24.0 + (CHIP_ROWS_SHOWN - 1.0) * 6.0).scroll(rune::ScrollSpec { stick_bottom: false }).child(r))
 }
 
-pub fn image_el(s: &App, session: &str, a: &Attachment) -> El {
+pub fn image_el(s: &App, session: &str, a: &Attachment, k: &Kit) -> El {
     let picture = s.attach.pictures.get(&a.id);
     let decoded = match picture {
         Some(Picture::Ready(image)) => image.size().filter(|[w, h]| *w > 0 && *h > 0).map(|[w, h]| w as f32 / h as f32),
@@ -652,12 +652,12 @@ pub fn image_el(s: &App, session: &str, a: &Attachment) -> El {
                     .child(row().key(format!("image-retry-{}", a.id)).px(6.0).py(2.0).radius(5.0).hover(wash()).on_press(move |s: &mut App| retry_picture(s, &id)).child(text("Retry").font(META_BOLD).color(theme::accent()))),
             )
         }
-        _ => frame.child(rune_kit::Loader::new().size(14.0).color(faint()).build(theme::kit())),
+        _ => frame.child(rune_kit::Loader::new().size(14.0).color(faint()).build(k)),
     };
     row().w_full().child(body)
 }
 
-pub fn file_el(s: &App, session: &str, item: &Item) -> El {
+pub fn file_el(s: &App, session: &str, item: &Item, k: &Kit) -> El {
     let name = attach::sent_name(item);
     let host = crate::session(s, session).map(|x| x.host.name.clone());
     let reason = attach::sent_reason(item, host.as_deref());
@@ -683,7 +683,7 @@ pub fn file_el(s: &App, session: &str, item: &Item) -> El {
         .child(col().w(28.0).items_center().child(icon(kind_icon(attach::file_kind(&name, media)), 20.0).color(muted())))
         .child(col().grow(1.0).min_w(0.0).gap(2.0).child(text(name.clone()).font(META_BOLD).color(theme::text()).truncate()).child(text(detail).font(META).color(faint()).wrap().max_lines(2)));
     if sent.is_some_and(|x| x.loading) {
-        card = card.child(rune_kit::Loader::new().size(12.0).color(faint()).build(theme::kit()));
+        card = card.child(rune_kit::Loader::new().size(12.0).color(faint()).build(k));
     }
     let target = Target::File { session: session.to_string(), item: item.clone() };
     card = card.on_secondary_press(menu_at(target));

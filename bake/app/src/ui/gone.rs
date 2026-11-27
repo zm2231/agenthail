@@ -1,3 +1,4 @@
+use rune_kit::Kit;
 use super::*;
 use feed::gone::{Fix, Gone, Lost};
 
@@ -154,8 +155,7 @@ pub fn fixed(s: &mut App, id: &str, seq: u64, fix: Fix, result: Result<(), feed:
     }
 }
 
-fn banner(m: &Missing, g: &Gone) -> El {
-    let k = theme::kit();
+fn banner(m: &Missing, g: &Gone, k: &Kit) -> El {
     let mut text_col = col().grow(1.0).min_w(0.0).gap(3.0).child(text(g.note()).font(BODY_BOLD).color(theme::text()).wrap());
     if let Some(e) = &g.read_error {
         text_col = text_col.child(text(format!("Couldn't read all of its conversation: {e}")).font(META).color(attention()).wrap());
@@ -186,8 +186,7 @@ fn banner(m: &Missing, g: &Gone) -> El {
     col().w_full().px(32.0).pb(12.0).child(r)
 }
 
-fn failed_view(message: &str) -> El {
-    let k = theme::kit();
+fn failed_view(message: &str, k: &Kit) -> El {
     col()
         .key("gone-failed")
         .w_full()
@@ -217,17 +216,17 @@ fn exchanges(g: &Gone) -> El {
     col().key("gone-exchanges").w_full().grow(1.0).min_h(0.0).items_center().scroll(ScrollSpec { stick_bottom: true }).child(list)
 }
 
-pub fn screen(s: &App, id: &str) -> El {
-    let Some(m) = s.missing.as_ref().filter(|m| m.id == id) else { return transcript::loading("Loading sessions…".into()) };
+pub fn screen(s: &App, id: &str, k: &Kit) -> El {
+    let Some(m) = s.missing.as_ref().filter(|m| m.id == id) else { return transcript::loading("Loading sessions…".into(), k) };
     match &m.look {
-        Look::Pending => transcript::loading("Looking for this session…".into()),
-        Look::Deleted(e) | Look::Failed(e) => failed_view(e),
+        Look::Pending => transcript::loading("Looking for this session…".into(), k),
+        Look::Deleted(e) | Look::Failed(e) => failed_view(e, k),
         Look::Found(g) => {
-            let center = col().grow(1.0).h_full().min_w(0.0).child(header(s, &g.row)).child(banner(m, g));
+            let center = col().grow(1.0).h_full().min_w(0.0).child(header(s, &g.row, k)).child(banner(m, g, k));
             if !g.exchanges.is_empty() {
                 center.child(exchanges(g))
             } else if s.panes.get(id).is_some_and(|p| !p.blocks.is_empty()) {
-                conversation(s, id, center)
+                conversation(s, id, center, k)
             } else {
                 center.child(col().key("gone-empty").w_full().grow(1.0).items_center().justify_center().child(text(g.empty_note()).font(BODY_BOLD).color(faint()).wrap()).child(el().h(80.0)))
             }

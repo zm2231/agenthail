@@ -1,9 +1,9 @@
 use feed::catalog::Session;
 use feed::holders::{self, pins};
 use rune::{El, icon, row, text};
-use rune_kit::{Menu, MenuItem, Placement};
+use rune_kit::{Kit, Menu, MenuItem, Placement};
 
-use crate::theme::{self, META, accent};
+use crate::theme::{META, accent};
 use crate::{App, icons};
 
 pub fn picker(s: &App, x: &Session) -> Option<El> {
@@ -34,7 +34,7 @@ pub fn picker(s: &App, x: &Session) -> Option<El> {
     )
 }
 
-pub fn overlays(s: &App, layer: &mut Vec<El>) {
+pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
     let Some(x) = s.holder_menu.as_deref().and_then(|id| crate::session(s, id)) else { return };
     let shared = x.shared_holders();
     if shared.is_empty() {
@@ -49,7 +49,7 @@ pub fn overlays(s: &App, layer: &mut Vec<El>) {
         let (id, pin) = (id.clone(), h.pin());
         m = m.item(MenuItem::new(h.label()).checked(picked == Some(h.pid)).on_select(move |s: &mut App| pick(s, &id, Some(pin))));
     }
-    let _ = m.build(theme::kit(), layer);
+    let _ = m.build(k, layer);
 }
 
 fn pick(s: &mut App, id: &str, pin: Option<holders::Pin>) {

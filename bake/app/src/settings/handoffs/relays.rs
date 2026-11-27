@@ -1,3 +1,4 @@
+use rune_kit::Kit;
 use feed::handoffs::{GOAL_COMPLETED, Handoffs, Relay, TURN_FINISHED};
 use rune::{El, col, row, text};
 use time::OffsetDateTime;
@@ -17,7 +18,7 @@ fn add(s: &mut Prefs) {
     }
 }
 
-fn relay(s: &Prefs, r: &Relay, now: OffsetDateTime, off: bool) -> El {
+fn relay(s: &Prefs, r: &Relay, now: OffsetDateTime, off: bool, k: &Kit) -> El {
     let mut words = col()
         .gap(2.0)
         .grow(1.0)
@@ -30,14 +31,14 @@ fn relay(s: &Prefs, r: &Relay, now: OffsetDateTime, off: bool) -> El {
     }
     let id = r.id;
     let key = format!("relay-remove-{id}");
-    let button = remove(&key, off || saving(s, &key), move |s| change(s, Section::Relays, format!("relay-remove-{id}"), move |c| c.relay_remove(id)));
+    let button = remove(&key, off || saving(s, &key), move |s| change(s, Section::Relays, format!("relay-remove-{id}"), move |c| c.relay_remove(id)), k);
     row().w_full().gap(16.0).items_center().px(14.0).py(10.0).child(words).child(button)
 }
 
-pub fn section(s: &Prefs, h: &Handoffs, off: bool, layer: &mut Vec<El>) -> El {
+pub fn section(s: &Prefs, h: &Handoffs, off: bool, layer: &mut Vec<El>, k: &Kit) -> El {
     let now = OffsetDateTime::now_utc();
     let f = &s.handoffs;
-    let mut rows: Vec<El> = h.relays.iter().map(|r| relay(s, r, now, off)).collect();
+    let mut rows: Vec<El> = h.relays.iter().map(|r| relay(s, r, now, off, k)).collect();
     if rows.is_empty() {
         rows.push(parts::words("No automatic handoffs yet."));
     }
@@ -45,20 +46,20 @@ pub fn section(s: &Prefs, h: &Handoffs, off: bool, layer: &mut Vec<El>) -> El {
     let when = parts::select(s, "settings-relay-handoff", "Hand off when", choices, &f.relay_handoff, off, layer, |s, value| {
         s.handoffs.relay_handoff = value;
         edited(s, Section::Relays);
-    });
+    }, k);
     let once = f.relay_once;
-    rows.push(line("When", Some("The session whose replies hand off".into()), field("relay-from", Section::Relays, &f.relay_from, "When", "Find a session or @alias", off, Some(Who::From), |s| &mut s.handoffs.relay_from, add)));
-    rows.extend(matches(s, Who::From, off));
+    rows.push(line("When", Some("The session whose replies hand off".into()), field("relay-from", Section::Relays, &f.relay_from, "When", "Find a session or @alias", off, Some(Who::From), |s| &mut s.handoffs.relay_from, add, k)));
+    rows.extend(matches(s, Who::From, off, k));
     rows.push(line("Hand off when", None, when));
-    rows.push(line("Finishes with text matching", Some("A regular expression; .* matches every reply".into()), field("relay-pattern", Section::Relays, &f.relay_pattern, "Finishes with text matching", ".*", off, None, |s| &mut s.handoffs.relay_pattern, add)));
-    rows.push(line("Hand off to", None, field("relay-to", Section::Relays, &f.relay_to, "Hand off to", "Find a session or @alias", off, Some(Who::To), |s| &mut s.handoffs.relay_to, add)));
-    rows.extend(matches(s, Who::To, off));
+    rows.push(line("Finishes with text matching", Some("A regular expression; .* matches every reply".into()), field("relay-pattern", Section::Relays, &f.relay_pattern, "Finishes with text matching", ".*", off, None, |s| &mut s.handoffs.relay_pattern, add, k)));
+    rows.push(line("Hand off to", None, field("relay-to", Section::Relays, &f.relay_to, "Hand off to", "Find a session or @alias", off, Some(Who::To), |s| &mut s.handoffs.relay_to, add, k)));
+    rows.extend(matches(s, Who::To, off, k));
     rows.push(line("Run this handoff once", None, parts::switch("relay-once", "Run this handoff once", once, off, move |s| {
         s.handoffs.relay_once = !once;
         edited(s, Section::Relays);
-    })));
+    }, k)));
     rows.extend(status(s, Section::Relays));
     let ready = draft(s).problem().is_none();
-    rows.push(row().w_full().px(14.0).py(10.0).child(col().grow(1.0)).child(small("Add Handoff", "relay-add", off || !ready, add)));
+    rows.push(row().w_full().px(14.0).py(10.0).child(col().grow(1.0)).child(small("Add Handoff", "relay-add", off || !ready, add, k)));
     parts::section(&format!("Automatic handoffs · {}", h.relays.len()), rows, Some("When one session finishes with matching text, Agenthail sends its reply to another.".into()))
 }

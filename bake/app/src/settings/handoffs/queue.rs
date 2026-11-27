@@ -2,7 +2,7 @@ use feed::delivery::{Tone, outcomes};
 use feed::handoffs::Handoffs;
 use feed::queue::Queued;
 use rune::{El, col, row, text};
-use rune_kit::{Button, ButtonVariant, ControlSize};
+use rune_kit::{Button, ButtonVariant, ControlSize, Kit};
 use time::OffsetDateTime;
 
 use super::super::parts;
@@ -15,8 +15,7 @@ fn take_back(s: &mut Prefs, row: &Queued) {
     super::forget(s);
 }
 
-fn item(s: &Prefs, q: &Queued, now: OffsetDateTime, off: bool) -> El {
-    let k = theme::kit();
+fn item(s: &Prefs, q: &Queued, now: OffsetDateTime, off: bool, k: &Kit) -> El {
     let mut words = col()
         .gap(2.0)
         .grow(1.0)
@@ -70,9 +69,9 @@ fn item(s: &Prefs, q: &Queued, now: OffsetDateTime, off: bool) -> El {
     row().w_full().gap(16.0).items_center().px(14.0).py(10.0).child(words).child(actions)
 }
 
-pub fn waiting(s: &Prefs, h: &Handoffs, off: bool) -> El {
+pub fn waiting(s: &Prefs, h: &Handoffs, off: bool, k: &Kit) -> El {
     let now = OffsetDateTime::now_utc();
-    let mut rows: Vec<El> = h.queue.iter().map(|q| item(s, q, now, off)).collect();
+    let mut rows: Vec<El> = h.queue.iter().map(|q| item(s, q, now, off, k)).collect();
     if rows.is_empty() {
         rows.push(parts::words("Nothing is waiting to be delivered."));
     }

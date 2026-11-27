@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use super::*;
 use feed::subagents::{self as crew, Asked, ClaudeSubagent, ClaudeSubagents, RowRead};
-use rune_kit::ControlSize;
+use rune_kit::{ControlSize, Kit};
 
 const KEPT: usize = 6;
 const ROW_EVERY: Duration = Duration::from_secs(15);
@@ -346,7 +346,7 @@ fn claude_row(s: &App, link: &ClaudeSubagent) -> El {
     c
 }
 
-pub(crate) fn section(s: &App, x: &Session) -> Option<El> {
+pub(crate) fn section(s: &App, x: &Session, k: &Kit) -> Option<El> {
     let parent = crew::parent_of(x).and_then(|p| session(s, &p));
     let mut children = crew::children(&x.id, &s.sessions, s.crew.pages.get(&x.id).map(Vec::as_slice).unwrap_or_default());
     crew::in_daemon_order(&mut children, &s.sessions);
@@ -396,7 +396,7 @@ pub(crate) fn section(s: &App, x: &Session) -> Option<El> {
                     .on_press(move |s: &mut App| {
                         s.crew.expanded.insert(id.clone());
                     })
-                    .build(theme::kit())
+                    .build(k)
                     .key("claude-subagents-earlier"),
             );
         }

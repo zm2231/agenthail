@@ -1,6 +1,6 @@
 use feed::paste::{self, Piece};
 use rune::{ClipboardContent, El, Key, KeyEvent, Mark, MarkRange, PillStyle, TextEdit, Tx, col, row, text, text_input};
-use rune_kit::{Button, ButtonVariant};
+use rune_kit::{Button, ButtonVariant, Kit};
 
 use crate::App;
 use crate::theme::{self, BODY, META, faint, line, wash};
@@ -133,7 +133,7 @@ fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     closes
 }
 
-pub fn editor(s: &App) -> Option<El> {
+pub fn editor(s: &App, k: &Kit) -> Option<El> {
     let editing = s.paste.as_ref()?;
     let input = text_input(&editing.edit, BODY.mono())
         .key("paste-editor")
@@ -148,7 +148,7 @@ pub fn editor(s: &App) -> Option<El> {
         .color(theme::text())
         .on_edit(|s: &mut App| &mut s.paste.as_mut().expect("the pasted text is open").edit)
         .on_input_key(key);
-    let done = Button::new("Done").variant(ButtonVariant::Submit).build(theme::kit()).key("paste-done").on_press_tx(done);
+    let done = Button::new("Done").variant(ButtonVariant::Submit).build(k).key("paste-done").on_press_tx(done);
     Some(
         col()
             .key("paste-edit")

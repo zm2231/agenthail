@@ -4,7 +4,7 @@ use feed::catalog::Client;
 use feed::devices::{self as dev, Device, Host, Pairing, PairingStatus, Progress, RemoteAccess};
 use feed::prefs::Failure;
 use rune::{El, ImageFilter, Pixels, Tx, col, el, row, text};
-use rune_kit::{Button, ButtonVariant, ControlSize, Dialog};
+use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit};
 use time::OffsetDateTime;
 
 use super::parts::{self, line, section};
@@ -281,9 +281,9 @@ fn note(s: &Prefs, f: &Failure) -> El {
     row().w_full().px(10.0).py(10.0).child(parts::failure(s, f).grow(1.0))
 }
 
-fn phone(s: &Prefs, r: &RemoteAccess) -> El {
+fn phone(s: &Prefs, r: &RemoteAccess, k: &Kit) -> El {
     let on = r.enabled;
-    let switch = parts::switch("phone-access", "Phone access", on, busy(s), move |s| set_phone(s, !on));
+    let switch = parts::switch("phone-access", "Phone access", on, busy(s), move |s| set_phone(s, !on), k);
     let saving = saving(s, "phone-access");
     let detail = if saving {
         if on { "Turning phone access off…".to_string() } else { "Turning phone access on…".to_string() }
@@ -298,8 +298,7 @@ fn phone(s: &Prefs, r: &RemoteAccess) -> El {
     section("", rows, None)
 }
 
-fn browser(s: &Prefs, r: &RemoteAccess) -> El {
-    let k = theme::kit();
+fn browser(s: &Prefs, r: &RemoteAccess, k: &Kit) -> El {
     let shown = s.dev.link_qr.as_ref().map(|(p, _)| p);
     let title = match shown {
         Some(_) => r.dns_name.clone().filter(|d| !d.is_empty()).unwrap_or_else(|| "Browser link".into()),
@@ -326,8 +325,7 @@ fn browser(s: &Prefs, r: &RemoteAccess) -> El {
     section("Open in a browser", vec![body], None)
 }
 
-fn pair(s: &Prefs, enabled: bool) -> El {
-    let k = theme::kit();
+fn pair(s: &Prefs, enabled: bool, k: &Kit) -> El {
     let mut rows = Vec::new();
     if let Some((p, pixels)) = &s.dev.pairing {
         let cancel = Button::new("Cancel").control_size(ControlSize::Small).on_press(cancel).build(k).key("settings-pair-cancel");
@@ -354,8 +352,7 @@ fn pair(s: &Prefs, enabled: bool) -> El {
     section("Pair an iPhone", rows, None)
 }
 
-fn devices(s: &Prefs) -> El {
-    let k = theme::kit();
+fn devices(s: &Prefs, k: &Kit) -> El {
     let rows = match &s.dev.list {
         None => vec![parts::words("Reading paired devices…")],
         Some(Err(f)) => vec![note(s, f)],
@@ -380,9 +377,8 @@ fn devices(s: &Prefs) -> El {
     section("Paired devices", rows, None)
 }
 
-fn confirm(s: &Prefs, layer: &mut Vec<El>) {
+fn confirm(s: &Prefs, layer: &mut Vec<El>, k: &Kit) {
     let Some(d) = &s.dev.revoking else { return };
-    let k = theme::kit();
     let close = |s: &mut Prefs| s.dev.revoking = None;
     let buttons = row()
         .w_full()
@@ -442,7 +438,7 @@ fn hosts(s: &Prefs) -> Option<El> {
     Some(section("Hosts", rows, None))
 }
 
-pub fn page(s: &Prefs, layer: &mut Vec<El>) -> El {
+pub fn page(s: &Prefs, layer: &mut Vec<El>, k: &Kit) -> El {
     let mut out = parts::page();
     if let Some(f) = s.notes.get(&Section::Devices) {
         out = out.child(parts::failure(s, f));
@@ -459,16 +455,16 @@ pub fn page(s: &Prefs, layer: &mut Vec<El>) -> El {
         Some(Ok(st)) => st.remote_access.as_ref(),
     };
     if let Some(r) = remote {
-        out = out.child(phone(s, r));
+        out = out.child(phone(s, r, k));
         if r.enabled {
-            out = out.child(browser(s, r));
+            out = out.child(browser(s, r, k));
         }
     }
-    out = out.child(pair(s, remote.is_some_and(|r| r.enabled))).child(devices(s));
+    out = out.child(pair(s, remote.is_some_and(|r| r.enabled), k)).child(devices(s, k));
     if let Some(h) = hosts(s) {
         out = out.child(h);
     }
-    confirm(s, layer);
+    confirm(s, layer, k);
     out
 }
 

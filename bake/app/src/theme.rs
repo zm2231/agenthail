@@ -1,8 +1,7 @@
-use std::cell::Cell;
-use std::sync::OnceLock;
+use std::cell::{Cell, RefCell};
 
 use rune::{Color, Spring, TextStyle, oklch};
-use rune_kit::Kit;
+use rune_kit::{Kit, KitEnv, KitTheme};
 
 pub const META: TextStyle = TextStyle::new(12.0, 450.0);
 pub const META_BOLD: TextStyle = TextStyle::new(12.0, 600.0);
@@ -87,43 +86,41 @@ impl Paint {
     }
 }
 
-fn first_kit() -> &'static Kit {
-    static KIT: OnceLock<Kit> = OnceLock::new();
-    KIT.get_or_init(|| Kit::neutral(true))
+fn first_chrome(env: &KitEnv) -> Kit {
+    let mut k = rune_theme_opencode::kit(&env.dark(true).increased_contrast(false));
+    k.c.bg_deep = Color::TRANSPARENT;
+    k.c.border_muted = Color::WHITE.alpha(0.09);
+    k
 }
 
-fn first_chrome() -> &'static Kit {
-    static KIT: OnceLock<Kit> = OnceLock::new();
-    KIT.get_or_init(|| {
-        let mut k = rune_theme_opencode::kit(true).clone();
-        k.c.bg_deep = Color::TRANSPARENT;
-        k.c.border_muted = Color::WHITE.alpha(0.09);
-        k
-    })
+#[derive(Clone)]
+pub struct Themes {
+    pub main: KitTheme,
+    pub chrome: KitTheme,
+}
+
+impl Themes {
+    fn first() -> Themes {
+        Themes { main: KitTheme::new(|_| Kit::neutral(true)), chrome: KitTheme::new(first_chrome) }
+    }
 }
 
 thread_local! {
     static PAINT: Cell<Paint> = Cell::new(Paint::dark());
-    static KIT: Cell<Option<&'static Kit>> = const { Cell::new(None) };
-    static CHROME: Cell<Option<&'static Kit>> = const { Cell::new(None) };
+    static THEMES: RefCell<Option<Themes>> = const { RefCell::new(None) };
 }
 
-pub fn set(paint: Paint, kit: &'static Kit, chrome: &'static Kit) {
+pub fn set(paint: Paint, themes: Themes) {
     PAINT.set(paint);
-    KIT.set(Some(kit));
-    CHROME.set(Some(chrome));
+    THEMES.set(Some(themes));
 }
 
-pub fn chrome_kit() -> &'static Kit {
-    CHROME.get().unwrap_or_else(first_chrome)
+pub fn themes() -> Themes {
+    THEMES.with_borrow_mut(|t| t.get_or_insert_with(Themes::first).clone())
 }
 
 pub fn paint() -> Paint {
     PAINT.get()
-}
-
-pub fn kit() -> &'static Kit {
-    KIT.get().unwrap_or_else(first_kit)
 }
 
 pub fn text() -> Color {

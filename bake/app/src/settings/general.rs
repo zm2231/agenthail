@@ -1,10 +1,9 @@
 use feed::prefs::{self, Failure, Person};
 use rune::{El, Tx, row};
-use rune_kit::{Button, ButtonVariant, ControlSize, RadioGroup, RadioItem, TextInput};
+use rune_kit::{Button, ButtonVariant, ControlSize, Kit, RadioGroup, RadioItem, TextInput};
 
 use super::parts::{self, line, section};
 use super::{Prefs, Read, Section, busy, write};
-use crate::theme;
 
 const READ_ONLY: &str = "This app's sign-in doesn't include the settings permission, so these show read-only. Usage limit and Claude root settings need that permission to be read.";
 
@@ -16,8 +15,7 @@ fn save_name(s: &mut Prefs, current: &Person) {
     }
 }
 
-fn name_section(s: &Prefs, person: &Person, writable: bool) -> El {
-    let k = theme::kit();
+fn name_section(s: &Prefs, person: &Person, writable: bool, k: &Kit) -> El {
     let busy = busy(s);
     let current = person.clone();
     let input = TextInput::new(&s.name)
@@ -53,14 +51,13 @@ fn name_section(s: &Prefs, person: &Person, writable: bool) -> El {
     section("Your name", vec![field], Some(prefs::name_footer(person)))
 }
 
-fn composer() -> El {
+fn composer(k: &Kit) -> El {
     let shown = !feed::notice::shared().hidden;
-    let flip = parts::switch("turn-notice", "Show the terminal session note above the composer", shown, false, |_: &mut Prefs| feed::notice::change(|n| n.set_shown(n.hidden)));
+    let flip = parts::switch("turn-notice", "Show the terminal session note above the composer", shown, false, |_: &mut Prefs| feed::notice::change(|n| n.set_shown(n.hidden)), k);
     section("Composer", vec![line("Show the terminal session note above the composer", None, flip)], None)
 }
 
-fn delivery(s: &Prefs, current: &str, writable: bool) -> El {
-    let k = theme::kit();
+fn delivery(s: &Prefs, current: &str, writable: bool, k: &Kit) -> El {
     let off = !writable || super::busy(s);
     let item = |label: &str, mode: &'static str| {
         RadioItem::new(label, current == mode).disabled(off).on_select(move |s: &mut Prefs| {
@@ -75,26 +72,26 @@ fn delivery(s: &Prefs, current: &str, writable: bool) -> El {
     )
 }
 
-fn recent(s: &Prefs, hours: i64, writable: bool, layer: &mut Vec<El>) -> El {
+fn recent(s: &Prefs, hours: i64, writable: bool, layer: &mut Vec<El>, k: &Kit) -> El {
     let choices = prefs::codex_recent_choices(hours).into_iter().map(|h| (prefs::hours_label(h), h.to_string())).collect();
     let pick = parts::select(s, "settings-codex-recent", "Codex recent window", choices, &hours.to_string(), !writable || super::busy(s), layer, move |s, value| {
         let Ok(h) = value.parse::<i64>() else { return };
         if h != hours {
             write(s, "delivery", Section::General, GENERAL, move |c| c.change_delivery(prefs::Delivery::Hours(h)));
         }
-    });
+    }, k);
     section("Current work", vec![line("Codex recent window", None, pick)], Some("Codex threads stay in Recent this long after their last activity.".into()))
 }
 
-fn limits(s: &Prefs, d: &prefs::Dashboard, writable: bool) -> El {
+fn limits(s: &Prefs, d: &prefs::Dashboard, writable: bool, k: &Kit) -> El {
     let resumes = d.resumes_after_limit();
     let moves = d.moves_after_limit();
     let resume = parts::switch("resume-after-limit", "Resume sessions after a usage limit resets", resumes, !writable || busy(s), move |s| {
         write(s, "resume", Section::General, GENERAL, move |c| c.set_resume_after_limit(!resumes));
-    });
+    }, k);
     let mv = parts::switch("move-after-limit", "Move stopped sessions to a proxy with room", moves, !writable || !resumes || busy(s), move |s| {
         write(s, "move", Section::General, GENERAL, move |c| c.set_move_after_limit(!moves));
-    });
+    }, k);
     section(
         "After a usage limit",
         vec![line("Resume sessions after a usage limit resets", None, resume), line("Move stopped sessions to a proxy with room", None, mv)],
@@ -102,7 +99,7 @@ fn limits(s: &Prefs, d: &prefs::Dashboard, writable: bool) -> El {
     )
 }
 
-fn default_root(s: &Prefs, settings: &prefs::Settings, layer: &mut Vec<El>) -> Option<El> {
+fn default_root(s: &Prefs, settings: &prefs::Settings, layer: &mut Vec<El>, k: &Kit) -> Option<El> {
     if settings.claude_roots.len() < 2 {
         return None;
     }
@@ -114,7 +111,7 @@ fn default_root(s: &Prefs, settings: &prefs::Settings, layer: &mut Vec<El>) -> O
         if value != current {
             write(s, "default-root", Section::General, GENERAL, move |c| c.set_claude_default_root(&value));
         }
-    });
+    }, k);
     Some(section(
         "Claude root",
         vec![line("Claude root for sessions you start", None, pick)],
@@ -122,7 +119,7 @@ fn default_root(s: &Prefs, settings: &prefs::Settings, layer: &mut Vec<El>) -> O
     ))
 }
 
-pub fn page(s: &Prefs, layer: &mut Vec<El>) -> El {
+pub fn page(s: &Prefs, layer: &mut Vec<El>, k: &Kit) -> El {
     let mut out = parts::page();
     let settings = s.settings.as_ref().and_then(|r| r.as_ref().ok());
     let base = s.base.as_ref().and_then(|r| r.as_ref().ok());
@@ -137,19 +134,19 @@ pub fn page(s: &Prefs, layer: &mut Vec<El>) -> El {
         out = out.child(parts::failure(s, f));
     }
     if let Some(person) = base.and_then(|b| b.person.as_ref()) {
-        out = out.child(name_section(s, person, writable));
+        out = out.child(name_section(s, person, writable, k));
     }
-    out = out.child(composer());
+    out = out.child(composer(k));
     let (busy, hours) = match (settings, base) {
         (Some(st), _) => (st.dashboard.busy_delivery.clone(), st.dashboard.codex_recent_hours),
         (None, Some(b)) => (b.busy_delivery.clone(), b.codex_recent_hours),
         (None, None) => return out,
     };
     let busy = if busy.is_empty() { "queue".to_string() } else { busy };
-    out = out.child(delivery(s, &busy, writable)).child(recent(s, hours, writable, layer));
+    out = out.child(delivery(s, &busy, writable, k)).child(recent(s, hours, writable, layer, k));
     if let Some(st) = settings {
-        out = out.child(limits(s, &st.dashboard, writable));
-        if let Some(root) = default_root(s, st, layer) {
+        out = out.child(limits(s, &st.dashboard, writable, k));
+        if let Some(root) = default_root(s, st, layer, k) {
             out = out.child(root);
         }
     }

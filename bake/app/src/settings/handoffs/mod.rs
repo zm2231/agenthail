@@ -11,11 +11,11 @@ use feed::catalog::Client;
 use feed::handoffs::{Pick, RelayDraft, TURN_FINISHED, Unsettled, picks};
 use feed::prefs::Failure;
 use rune::{El, TextEdit, Tx, col, row, text};
-use rune_kit::{Button, ButtonVariant, ControlSize, TextInput};
+use rune_kit::{Button, ButtonVariant, ControlSize, Kit, TextInput};
 
 use super::parts;
 use super::{Prefs, Read, Section, WINDOW, busy, explain, fetch, token_verified, write};
-use crate::theme::{self, META, failed, muted};
+use crate::theme::{META, failed, muted};
 
 pub const TAB: usize = 4;
 
@@ -206,12 +206,11 @@ fn choose(s: &mut Prefs, who: Who, target: &str) {
     edited(s, if who == Who::Member { Section::Channels } else { Section::Relays });
 }
 
-pub fn matches(s: &Prefs, who: Who, off: bool) -> Option<El> {
+pub fn matches(s: &Prefs, who: Who, off: bool, k: &Kit) -> Option<El> {
     let (at, found) = s.handoffs.found.as_ref()?;
     if *at != who || off {
         return None;
     }
-    let k = theme::kit();
     let mut list = col().w_full().gap(2.0).px(10.0).pb(8.0);
     if found.is_empty() {
         list = list.child(text("No session matches.").font(META).color(muted()).px(4.0));
@@ -225,7 +224,7 @@ pub fn matches(s: &Prefs, who: Who, off: bool) -> Option<El> {
     Some(list)
 }
 
-pub fn field(key: &str, section: Section, edit: &TextEdit, label: &str, hint: &str, off: bool, who: Option<Who>, pick: for<'a> fn(&'a mut Prefs) -> &'a mut TextEdit, submit: fn(&mut Prefs)) -> El {
+pub fn field(key: &str, section: Section, edit: &TextEdit, label: &str, hint: &str, off: bool, who: Option<Who>, pick: for<'a> fn(&'a mut Prefs) -> &'a mut TextEdit, submit: fn(&mut Prefs), k: &Kit) -> El {
     TextInput::new(edit)
         .label(label.to_string())
         .placeholder(hint.to_string())
@@ -239,16 +238,16 @@ pub fn field(key: &str, section: Section, edit: &TextEdit, label: &str, hint: &s
             }
         })
         .on_submit(move |s: &mut Prefs, _: &mut Tx| submit(s))
-        .build(theme::kit())
+        .build(k)
         .key(format!("settings-{key}"))
 }
 
-pub fn small(label: &str, key: &str, off: bool, press: impl Fn(&mut Prefs) + 'static) -> El {
-    Button::new(label).control_size(ControlSize::Small).disabled(off).on_press(press).build(theme::kit()).key(format!("settings-{key}"))
+pub fn small(label: &str, key: &str, off: bool, press: impl Fn(&mut Prefs) + 'static, k: &Kit) -> El {
+    Button::new(label).control_size(ControlSize::Small).disabled(off).on_press(press).build(k).key(format!("settings-{key}"))
 }
 
-pub fn remove(key: &str, off: bool, press: impl Fn(&mut Prefs) + 'static) -> El {
-    Button::new("Remove").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).disabled(off).on_press(press).build(theme::kit()).key(format!("settings-{key}"))
+pub fn remove(key: &str, off: bool, press: impl Fn(&mut Prefs) + 'static, k: &Kit) -> El {
+    Button::new("Remove").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).disabled(off).on_press(press).build(k).key(format!("settings-{key}"))
 }
 
 pub fn status(s: &Prefs, section: Section) -> Option<El> {
@@ -275,7 +274,7 @@ fn read_only(s: &Prefs) -> Failure {
     Failure { message: READ_ONLY.into(), scope: "", ..explain(s, &why) }
 }
 
-pub fn page(s: &Prefs, layer: &mut Vec<El>) -> El {
+pub fn page(s: &Prefs, layer: &mut Vec<El>, k: &Kit) -> El {
     let mut out = parts::page();
     let h = match &s.base {
         None => return out.child(parts::reading("channels and handoffs")),
@@ -287,5 +286,5 @@ pub fn page(s: &Prefs, layer: &mut Vec<El>) -> El {
         out = out.child(parts::failure(s, &read_only(s)));
     }
     let off = !writable || busy(s);
-    out.child(queue::waiting(s, h, off)).child(queue::recent(h)).child(relays::section(s, h, off, layer)).child(channels::section(s, h, off, layer))
+    out.child(queue::waiting(s, h, off, k)).child(queue::recent(h)).child(relays::section(s, h, off, layer, k)).child(channels::section(s, h, off, layer, k))
 }

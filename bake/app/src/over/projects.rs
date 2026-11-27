@@ -6,11 +6,11 @@ use feed::create::Host;
 use feed::derive::world::ProjectRecord;
 use feed::projects::{self, Confirm, Entry, Item, Offer, TileChange, TileOrder, TileReply, Tiles, Worktree};
 use rune::{El, PointerPress, TextEdit, Tx, col, el, row, text, text_input};
-use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, IconButton, IconButtonVariant, Menu, MenuItem, Placement, SegmentedControl, Select, SelectAppearance};
+use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, IconButton, IconButtonVariant, Kit, Menu, MenuItem, Placement, SegmentedControl, Select, SelectAppearance};
 use rune_theme_opencode::icons;
 
 use crate::App;
-use crate::over::ui::{self, BODY, META, META_MED, base, kit, strong, weak};
+use crate::over::ui::{self, BODY, META, META_MED, base, strong, weak};
 
 const SURFACES: [(&str, &str); 2] = [("claude", "Claude"), ("codex", "Codex")];
 
@@ -451,7 +451,7 @@ pub fn drain(s: &mut App) -> bool {
         s.ov.notice = Some("That project is no longer listed, so the sheet was closed.".into());
         changed = true;
     }
-    let started: Vec<(String, String)> = s.ov.projects.lead_drafts.keys().filter(|k| !s.ov.projects.sending_to.contains(*k)).filter_map(|k| Some((k.clone(), s.ov.d.project(k)?.lead.clone()?))).collect();
+    let started: Vec<(String, String)> = s.ov.projects.lead_drafts.keys().filter(|key| !s.ov.projects.sending_to.contains(*key)).filter_map(|key| Some((key.clone(), s.ov.d.project(key)?.lead.clone()?))).collect();
     for (key, lead) in started {
         if let Some(draft) = s.ov.projects.lead_drafts.remove(&key)
             && !draft.text.trim().is_empty()
@@ -509,13 +509,13 @@ pub fn open_menu(s: &mut App, key: &str, at: Option<PointerPress>) {
     };
 }
 
-pub fn menu_button(key: &str) -> El {
+pub fn menu_button(key: &str, k: &Kit) -> El {
     let key = key.to_string();
     IconButton::new(&crate::icons::MORE)
         .variant(IconButtonVariant::Ghost)
         .label("Project actions")
         .on_press(move |s: &mut App| open_menu(s, &key, None))
-        .build(kit())
+        .build(k)
         .key("project-menu-trigger")
 }
 
@@ -533,7 +533,7 @@ fn entry_item(key: &str, entry: Entry) -> MenuItem {
     m.on_select_tx(move |s: &mut App, tx: &mut Tx| choose(s, &key, item.clone(), tx))
 }
 
-fn project_menu(s: &App, key: &str, at: Option<PointerPress>, layer: &mut Vec<El>) {
+fn project_menu(s: &App, key: &str, at: Option<PointerPress>, layer: &mut Vec<El>, k: &Kit) {
     let Some(p) = record(s, key) else { return };
     let mut m = Menu::new("project-menu").open(true).min_width(240.0).on_close(|s: &mut App| s.ov.projects.menu = None);
     m = match at {
@@ -548,7 +548,7 @@ fn project_menu(s: &App, key: &str, at: Option<PointerPress>, layer: &mut Vec<El
             m = m.item(entry_item(key, entry));
         }
     }
-    let _ = m.build(kit(), layer);
+    let _ = m.build(k, layer);
 }
 
 pub fn archived(s: &App) -> Vec<&ProjectRecord> {
@@ -557,16 +557,16 @@ pub fn archived(s: &App) -> Vec<&ProjectRecord> {
     list
 }
 
-fn more_menu(s: &App, keys: &[String], layer: &mut Vec<El>) {
+fn more_menu(s: &App, keys: &[String], layer: &mut Vec<El>, k: &Kit) {
     let mut m = Menu::new("more-projects").open(true).min_width(240.0).placement(Placement::BottomStart).on_close(|s: &mut App| s.ov.projects.more_menu = None);
-    for p in keys.iter().filter_map(|k| s.ov.d.project(k)) {
+    for p in keys.iter().filter_map(|key| s.ov.d.project(key)) {
         let key = p.key.clone();
         m = m.item(MenuItem::new(p.name.clone()).on_select(move |s: &mut App| {
             s.ov.projects.more_menu = None;
             crate::over::go(s, crate::Screen::Project(key.clone()));
         }));
     }
-    let _ = m.build(kit(), layer);
+    let _ = m.build(k, layer);
 }
 
 pub fn open_archived(s: &mut App) {
@@ -575,7 +575,7 @@ pub fn open_archived(s: &mut App) {
     s.ov.projects.archived_menu = !s.ov.projects.archived_menu;
 }
 
-fn archived_menu(s: &App, layer: &mut Vec<El>) {
+fn archived_menu(s: &App, layer: &mut Vec<El>, k: &Kit) {
     let mut m = Menu::new("archived-projects").open(true).min_width(240.0).placement(Placement::BottomStart).group_label("Archived projects").on_close(|s: &mut App| s.ov.projects.archived_menu = false);
     for p in archived(s) {
         let (id, name) = (p.id.clone(), p.name().to_string());
@@ -584,11 +584,10 @@ fn archived_menu(s: &App, layer: &mut Vec<El>) {
             run(s, Job::Archive { project: id.clone(), name: name.clone(), archived: false }, None);
         }));
     }
-    let _ = m.build(kit(), layer);
+    let _ = m.build(k, layer);
 }
 
-pub fn sidebar_rows(s: &App, hidden: Vec<String>) -> Vec<El> {
-    let k = kit();
+pub fn sidebar_rows(s: &App, hidden: Vec<String>, k: &Kit) -> Vec<El> {
     let mut rows = Vec::new();
     if !hidden.is_empty() {
         let count = hidden.len();
@@ -622,7 +621,7 @@ pub fn sidebar_rows(s: &App, hidden: Vec<String>) -> Vec<El> {
     rows
 }
 
-fn line_input(edit: &TextEdit, key: &'static str, label: &str, pick: fn(&mut Sheet) -> Option<&mut TextEdit>) -> El {
+fn line_input(edit: &TextEdit, key: &'static str, label: &str, pick: fn(&mut Sheet) -> Option<&mut TextEdit>, k: &Kit) -> El {
     text_input(edit, BODY)
         .single_line()
         .key(key)
@@ -633,8 +632,8 @@ fn line_input(edit: &TextEdit, key: &'static str, label: &str, pick: fn(&mut She
         .radius(8.0)
         .fill(crate::theme::wash())
         .border(1.0, crate::theme::line())
-        .color(strong())
-        .placeholder(label.to_string(), weak())
+        .color(strong(k))
+        .placeholder(label.to_string(), weak(k))
         .on_edit(move |s: &mut App| match s.ov.projects.sheet.as_mut().and_then(pick) {
             Some(edit) => edit,
             None => &mut s.composer,
@@ -642,11 +641,11 @@ fn line_input(edit: &TextEdit, key: &'static str, label: &str, pick: fn(&mut She
         .on_submit(|s: &mut App, _: &mut Tx| save(s))
 }
 
-fn field(name: &str, control: El) -> El {
-    col().w_full().gap(5.0).child(text(name.to_string()).font(META).color(weak())).child(control)
+fn field(name: &str, control: El, k: &Kit) -> El {
+    col().w_full().gap(5.0).child(text(name.to_string()).font(META).color(weak(k))).child(control)
 }
 
-fn select(key: &'static str, pick: Pick, choices: Vec<(String, String)>, current: &str, placeholder: &str, open: bool, on: fn(&mut App, String), popups: &mut Vec<El>) -> El {
+fn select(key: &'static str, pick: Pick, choices: Vec<(String, String)>, current: &str, placeholder: &str, open: bool, on: fn(&mut App, String), popups: &mut Vec<El>, k: &Kit) -> El {
     let labels: Vec<&str> = choices.iter().map(|(label, _)| label.as_str()).collect();
     let values = choices.clone();
     Select::new(key, &labels)
@@ -663,7 +662,7 @@ fn select(key: &'static str, pick: Pick, choices: Vec<(String, String)>, current
                 on(s, v.clone());
             }
         })
-        .build(kit(), popups)
+        .build(k, popups)
 }
 
 fn pick_host(s: &mut App, host: String) {
@@ -685,8 +684,7 @@ fn pick_checkout(s: &mut App, id: String) {
     }
 }
 
-fn buttons(s: &App, label: &str, can_save: bool) -> El {
-    let k = kit();
+fn buttons(s: &App, label: &str, can_save: bool, k: &Kit) -> El {
     let saving = s.ov.projects.saving;
     row()
         .w_full()
@@ -704,8 +702,7 @@ fn buttons(s: &App, label: &str, can_save: bool) -> El {
         )
 }
 
-fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>) {
-    let k = kit();
+fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>, k: &Kit) {
     let mut popups = Vec::new();
     let can_save = sheet_job(s).is_some();
     let open = s.ov.projects.picking;
@@ -713,7 +710,7 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>) {
         Sheet::Broadcast { project, text, sent, .. } => {
             let name = s.ov.d.record(project).map(|p| p.name().to_string()).unwrap_or_default();
             let body = match sent {
-                Some(summary) => col().w_full().child(rune::text(summary.clone()).font(META).color(base()).wrap().w_full()),
+                Some(summary) => col().w_full().child(rune::text(summary.clone()).font(META).color(base(k)).wrap().w_full()),
                 None if s.ov.projects.saving => col()
                     .w_full()
                     .min_h(100.0)
@@ -722,7 +719,7 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>) {
                     .radius(8.0)
                     .fill(crate::theme::wash())
                     .border(1.0, crate::theme::line())
-                    .child(rune::text(text.text.clone()).font(BODY).color(weak()).wrap().w_full()),
+                    .child(rune::text(text.text.clone()).font(BODY).color(weak(k)).wrap().w_full()),
                 None => col().w_full().child(
                     text_input(text, BODY)
                         .key("project-message-text")
@@ -734,8 +731,8 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>) {
                         .radius(8.0)
                         .fill(crate::theme::wash())
                         .border(1.0, crate::theme::line())
-                        .color(strong())
-                        .placeholder("Message".to_string(), weak())
+                        .color(strong(k))
+                        .placeholder("Message".to_string(), weak(k))
                         .on_edit(|s: &mut App| match s.ov.projects.sheet.as_mut() {
                             Some(Sheet::Broadcast { text, .. }) => text,
                             _ => &mut s.composer,
@@ -757,20 +754,20 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>) {
                     let name = labels.get(&h.id).cloned().unwrap_or_else(|| h.name.clone());
                     (if h.is_local() { format!("{name} · this computer") } else { name }, h.id.clone())
                 }).collect();
-                body = body.child(field("Computer", select("project-host", Pick::Host, choices, host, "This computer", open == Some(Pick::Host), pick_host, &mut popups)));
+                body = body.child(field("Computer", select("project-host", Pick::Host, choices, host, "This computer", open == Some(Pick::Host), pick_host, &mut popups, k), k));
             }
-            body = body.child(field("Folder", line_input(folder, "project-folder", "Folder", |sh| if let Sheet::Add { folder, .. } = sh { Some(folder) } else { None })));
+            body = body.child(field("Folder", line_input(folder, "project-folder", "Folder", |sh| if let Sheet::Add { folder, .. } = sh { Some(folder) } else { None }, k), k));
             let recent = s.ov.projects.folders.get(host).cloned().unwrap_or_default();
             if !recent.is_empty() {
                 let choices = recent.into_iter().map(|f| (f.clone(), f)).collect();
-                body = body.child(field("Recent", select("project-recent", Pick::Recent, choices, "", "Pick a recent folder…", open == Some(Pick::Recent), pick_recent, &mut popups)));
+                body = body.child(field("Recent", select("project-recent", Pick::Recent, choices, "", "Pick a recent folder…", open == Some(Pick::Recent), pick_recent, &mut popups, k), k));
             }
-            body = body.child(field("Name (optional)", line_input(title, "project-title", "Name", |sh| if let Sheet::Add { title, .. } = sh { Some(title) } else { None })));
+            body = body.child(field("Name (optional)", line_input(title, "project-title", "Name", |sh| if let Sheet::Add { title, .. } = sh { Some(title) } else { None }, k), k));
             ("Add Project".to_string(), None, body, "Add")
         }
         Sheet::Rename { project, name } => {
             let current = record(s, project).map(|p| p.name().to_string()).unwrap_or_default();
-            let mut body = col().w_full().gap(12.0).child(line_input(name, "project-name", "Name", |sh| if let Sheet::Rename { name, .. } = sh { Some(name) } else { None }));
+            let mut body = col().w_full().gap(12.0).child(line_input(name, "project-name", "Name", |sh| if let Sheet::Rename { name, .. } = sh { Some(name) } else { None }, k));
             if let Some(problem) = projects::rename_problem(&name.text, &current).filter(|p| !p.is_empty()) {
                 body = body.child(text(problem.to_string()).font(META).color(crate::theme::failed()));
             }
@@ -781,12 +778,12 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>) {
             let places = p.lead_places();
             let mut body = col().w_full().gap(12.0);
             if let [only] = places.as_slice() {
-                body = body.child(field("Starts on", text(format!("{}: {}", only.host.name, only.root_path)).font(META).color(base()).wrap().w_full()));
+                body = body.child(field("Starts on", text(format!("{}: {}", only.host.name, only.root_path)).font(META).color(base(k)).wrap().w_full(), k));
             }
             if places.len() > 1 {
                 let labels = projects::host_labels(p.checkouts.iter().map(|c| (c.host.id.as_str(), c.host.name.as_str())));
                 let choices = places.iter().map(|c| (format!("{}: {}", labels.get(&c.host.id).cloned().unwrap_or_else(|| c.host.name.clone()), c.root_path), c.key())).collect();
-                body = body.child(field("Checkout", select("lead-checkout", Pick::Checkout, choices, checkout, "Choose…", open == Some(Pick::Checkout), pick_checkout, &mut popups)));
+                body = body.child(field("Checkout", select("lead-checkout", Pick::Checkout, choices, checkout, "Choose…", open == Some(Pick::Checkout), pick_checkout, &mut popups, k), k));
             }
             let at = SURFACES.iter().position(|(id, _)| id == surface);
             let agents = SegmentedControl::new(&SURFACES.map(|(_, l)| l), at)
@@ -798,7 +795,7 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>) {
                     }
                 })
                 .build(k);
-            body = body.child(field("Agent", agents)).child(field("Name (optional)", line_input(name, "lead-name", "Name", |sh| if let Sheet::Lead { name, .. } = sh { Some(name) } else { None })));
+            body = body.child(field("Agent", agents, k)).child(field("Name (optional)", line_input(name, "lead-name", "Name", |sh| if let Sheet::Lead { name, .. } = sh { Some(name) } else { None }, k), k));
             if places.is_empty() {
                 body = body.child(text("No computer with this project is connected.".to_string()).font(META).color(crate::theme::failed()).wrap().w_full());
             }
@@ -819,14 +816,13 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>) {
     let actions = if save_label.is_empty() {
         row().w_full().child(el().grow(1.0)).child(Button::new("Done").variant(ButtonVariant::Contrast).control_size(ControlSize::Small).on_press(close_sheet).build(k).key("project-sheet-done"))
     } else {
-        buttons(s, save_label, can_save)
+        buttons(s, save_label, can_save, k)
     };
     dialog.child(col().w_full().gap(14.0).px(16.0).pb(16.0).child(body).child(actions)).build(k, layer);
     layer.extend(popups);
 }
 
-fn confirm_view(c: &Confirm, layer: &mut Vec<El>) {
-    let k = kit();
+fn confirm_view(c: &Confirm, layer: &mut Vec<El>, k: &Kit) {
     let buttons = row()
         .w_full()
         .gap(8.0)
@@ -849,21 +845,21 @@ fn confirm_view(c: &Confirm, layer: &mut Vec<El>) {
     Dialog::new("project-confirm", format!("{}?", c.action)).description(c.message.clone()).open(true).fit().width(420.0).on_close(|s: &mut App| s.ov.projects.confirm = None).child(buttons).build(k, layer);
 }
 
-pub fn overlays(s: &App, layer: &mut Vec<El>) {
+pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
     if let Some((key, at)) = &s.ov.projects.menu {
-        project_menu(s, key, *at, layer);
+        project_menu(s, key, *at, layer, k);
     }
     if s.ov.projects.archived_menu {
-        archived_menu(s, layer);
+        archived_menu(s, layer, k);
     }
     if let Some(keys) = &s.ov.projects.more_menu {
-        more_menu(s, keys, layer);
+        more_menu(s, keys, layer, k);
     }
     if let Some(sheet) = &s.ov.projects.sheet {
-        sheet_view(s, sheet, layer);
+        sheet_view(s, sheet, layer, k);
     }
     if let Some((c, ..)) = &s.ov.projects.confirm {
-        confirm_view(c, layer);
+        confirm_view(c, layer, k);
     }
 }
 
@@ -882,8 +878,7 @@ pub fn close_top(s: &mut App) {
     close_sheet(s);
 }
 
-fn merged_row(s: &App, i: usize, x: &feed::catalog::Session, w: &Worktree) -> El {
-    let k = kit();
+fn merged_row(s: &App, i: usize, x: &feed::catalog::Session, w: &Worktree, k: &Kit) -> El {
     let id = x.id.clone();
     let cleaning = s.ov.projects.cleaning.contains(&id);
     let mut c = col()
@@ -894,19 +889,19 @@ fn merged_row(s: &App, i: usize, x: &feed::catalog::Session, w: &Worktree) -> El
         .radius(10.0)
         .fill(k.c.surface_base)
         .border(1.0, ui::edge())
-        .child(row().w_full().gap(8.0).items_center().child(text(ui::short_title(&s.ov.d.title(x), 30)).font(META_MED).color(strong()).truncate().shrink()).child(ui::spacer()).child(text(s.ov.d.ago(&x.last_active)).font(META).color(weak())))
-        .child(text(w.name().to_string()).font(META).color(base()).truncate());
+        .child(row().w_full().gap(8.0).items_center().child(text(ui::short_title(&s.ov.d.title(x), 30)).font(META_MED).color(strong(k)).truncate().shrink()).child(ui::spacer()).child(text(s.ov.d.ago(&x.last_active)).font(META).color(weak(k))))
+        .child(text(w.name().to_string()).font(META).color(base(k)).truncate());
     let offer = w.offer();
     if offer == Offer::Remove {
-        c = c.child(text("Remove deletes its folder and branch if nothing in them would be lost.".to_string()).font(META).color(weak()).wrap());
+        c = c.child(text("Remove deletes its folder and branch if nothing in them would be lost.".to_string()).font(META).color(weak(k)).wrap());
     } else if let Some(h) = &w.hint {
-        c = c.child(text(h.reason.clone()).font(META).color(weak()).wrap());
+        c = c.child(text(h.reason.clone()).font(META).color(weak(k)).wrap());
         if !h.command.is_empty() {
-            c = c.child(text(h.command.clone()).font(META).color(base()).wrap());
+            c = c.child(text(h.command.clone()).font(META).color(base(k)).wrap());
         }
     }
     if let Some(note) = s.ov.projects.kept.get(&id) {
-        c = c.child(text(note.clone()).font(META).color(ui::needs_color()).wrap());
+        c = c.child(text(note.clone()).font(META).color(ui::needs_color(k)).wrap());
     }
     let button = |label: &str, key: String, job: Job, confirm: Confirm| {
         Button::new(if cleaning { "Removing…" } else { label })
@@ -929,14 +924,14 @@ fn merged_row(s: &App, i: usize, x: &feed::catalog::Session, w: &Worktree) -> El
     c.child(actions)
 }
 
-pub fn merged(s: &App, key: &str) -> Option<El> {
+pub fn merged(s: &App, key: &str, k: &Kit) -> Option<El> {
     let rows: Vec<(&feed::catalog::Session, &Worktree)> = s.ov.d.sessions.iter().filter(|x| x.project_key() == key).filter_map(|x| Some((x, x.worktree.as_ref().filter(|w| w.merged())?))).collect();
     if rows.is_empty() {
         return None;
     }
-    let mut c = col().w_full().gap(8.0).child(ui::section_head("Merged", Some(rows.len()), Some(text("worktrees left behind".to_string()).font(META).color(weak()))));
+    let mut c = col().w_full().gap(8.0).child(ui::section_head("Merged", Some(rows.len()), Some(text("worktrees left behind".to_string()).font(META).color(weak(k))), k));
     for (i, (x, w)) in rows.into_iter().enumerate() {
-        c = c.child(merged_row(s, i, x, w));
+        c = c.child(merged_row(s, i, x, w, k));
     }
     Some(c)
 }

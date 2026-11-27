@@ -4,7 +4,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use feed::catalog::{RespondError, Session};
 use feed::inspect::{self, GoalAct, LifecycleAct, LifecycleResult, Metadata};
 use rune::{El, ScrollSpec, TextEdit, Tx, col, el, icon, row, text, text_input};
-use rune_kit::{Button, ButtonVariant, ControlSize, Dialog};
+use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit};
 use time::OffsetDateTime;
 
 use super::rail::rail_section;
@@ -293,11 +293,11 @@ pub fn drain(s: &mut App) -> bool {
     changed
 }
 
-fn small(label: &str, key: String, variant: ButtonVariant, disabled: bool, on: impl Fn(&mut App) + 'static) -> El {
-    Button::new(label).variant(variant).control_size(ControlSize::Small).disabled(disabled).on_press(on).build(theme::kit()).key(key)
+fn small(label: &str, key: String, variant: ButtonVariant, disabled: bool, on: impl Fn(&mut App) + 'static, k: &Kit) -> El {
+    Button::new(label).variant(variant).control_size(ControlSize::Small).disabled(disabled).on_press(on).build(k).key(key)
 }
 
-fn goal_section(s: &App, x: &Session) -> Option<El> {
+fn goal_section(s: &App, x: &Session, k: &Kit) -> Option<El> {
     let can = inspect::goal_controls(x);
     let data = s.inspect.meta.get(&x.id);
     let goal = data.and_then(|d| d.goal.as_ref());
@@ -308,7 +308,7 @@ fn goal_section(s: &App, x: &Session) -> Option<El> {
     let buttons = row().w_full().flex_wrap().gap(6.0).children(inspect::goal_buttons(goal, can).into_iter().map(|(act, label)| {
         let id = x.id.clone();
         let variant = if act == GoalAct::Clear { ButtonVariant::Ghost } else { ButtonVariant::Neutral };
-        small(label, format!("goal-{}", act.action()), variant, busy, move |s: &mut App| press_goal(s, &id, act))
+        small(label, format!("goal-{}", act.action()), variant, busy, move |s: &mut App| press_goal(s, &id, act), k)
     }));
     let mut body = col().w_full().gap(8.0);
     if let Some(goal) = goal {
@@ -353,7 +353,7 @@ fn local_offset(at: OffsetDateTime) -> i32 {
     super::session_ops::offset(at).whole_seconds()
 }
 
-fn process_section(s: &App, x: &Session) -> Option<El> {
+fn process_section(s: &App, x: &Session, k: &Kit) -> Option<El> {
     let lifecycle = inspect::lifecycle(x);
     if !inspect::lifecycle_any(lifecycle) {
         return None;
@@ -370,11 +370,11 @@ fn process_section(s: &App, x: &Session) -> Option<El> {
     }
     if p.is_some_and(|p| p.logs.is_some()) {
         let id = x.id.clone();
-        body = body.child(small("Show logs", "process-show-logs".into(), ButtonVariant::Ghost, false, move |s: &mut App| show_logs(s, &id)));
+        body = body.child(small("Show logs", "process-show-logs".into(), ButtonVariant::Ghost, false, move |s: &mut App| show_logs(s, &id), k));
     }
     let buttons = row().w_full().flex_wrap().gap(6.0).items_center().children(LifecycleAct::ALL.into_iter().filter(|a| a.offered(lifecycle)).map(|act| {
         let id = x.id.clone();
-        small(act.label(), format!("process-{}", act.name()), ButtonVariant::Neutral, busy, move |s: &mut App| run(s, &id, act, false))
+        small(act.label(), format!("process-{}", act.name()), ButtonVariant::Neutral, busy, move |s: &mut App| run(s, &id, act, false), k)
     }));
     body = body.child(if busy { buttons.child(text("Working…").font(META).color(faint())) } else { buttons });
     if let Some(error) = p.and_then(|p| p.error.clone()) {
@@ -409,16 +409,15 @@ fn runs_section(s: &App, x: &Session) -> Vec<El> {
     out
 }
 
-pub(crate) fn above(s: &App, x: &Session) -> Vec<El> {
-    goal_section(s, x).into_iter().chain(process_section(s, x)).collect()
+pub(crate) fn above(s: &App, x: &Session, k: &Kit) -> Vec<El> {
+    goal_section(s, x, k).into_iter().chain(process_section(s, x, k)).collect()
 }
 
 pub(crate) fn below(s: &App, x: &Session) -> Vec<El> {
     runs_section(s, x)
 }
 
-fn editor(s: &App, editing: &Editing, layer: &mut Vec<El>) {
-    let k = theme::kit();
+fn editor(s: &App, editing: &Editing, layer: &mut Vec<El>, k: &Kit) {
     let budget = editing.act == GoalAct::Budget;
     let ok = inspect::can_save(editing.act, &editing.text.text, budget_of(s, &editing.session));
     let mut input = text_input(&editing.text, BODY).key("goal-editor-input").grow(1.0).min_w(0.0).color(theme::text()).on_edit(|s: &mut App| &mut s.inspect.editing.as_mut().expect("goal editor is open").text);
@@ -437,8 +436,7 @@ fn editor(s: &App, editing: &Editing, layer: &mut Vec<El>) {
     Dialog::new("goal-editor", editing.act.title()).open(true).fit().width(400.0).on_close(close_editor).child(body.child(buttons)).build(k, layer);
 }
 
-fn logs(s: &App, id: &str, output: &str, layer: &mut Vec<El>) {
-    let k = theme::kit();
+fn logs(s: &App, id: &str, output: &str, layer: &mut Vec<El>, k: &Kit) {
     let title = session(s, id).map(|x| x.title()).unwrap_or_default();
     let shown = if output.is_empty() { inspect::NO_LOGS.to_string() } else { output.to_string() };
     let copy = output.to_string();
@@ -459,11 +457,11 @@ fn logs(s: &App, id: &str, output: &str, layer: &mut Vec<El>) {
     Dialog::new("session-logs", format!("Logs for {title}")).open(true).fit().width(560.0).on_close(|s: &mut App| s.inspect.logs = None).child(body).build(k, layer);
 }
 
-pub fn overlays(s: &App, layer: &mut Vec<El>) {
+pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
     if let Some(editing) = &s.inspect.editing {
-        editor(s, editing, layer);
+        editor(s, editing, layer, k);
     }
     if let Some((id, output)) = &s.inspect.logs {
-        logs(s, id, output, layer);
+        logs(s, id, output, layer, k);
     }
 }

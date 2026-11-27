@@ -1,6 +1,6 @@
 use super::*;
 use feed::queue::{Done, Op, Queued, READ_FAILED, Recovered, Taking, waiting};
-use rune_kit::{ControlSize, IconButton, IconButtonVariant};
+use rune_kit::{ControlSize, IconButton, IconButtonVariant, Kit};
 
 use crate::Bg;
 
@@ -194,8 +194,7 @@ pub(crate) fn restore(s: &mut App, back: Vec<(Taking, Recovered)>) {
     crate::over::layout::save(s);
 }
 
-fn row_el(s: &App, x: &Session, item: &Queued) -> El {
-    let k = theme::kit();
+fn row_el(s: &App, x: &Session, item: &Queued, k: &Kit) -> El {
     let working = s.queue_working.contains(&(item.host.clone(), item.id));
     let mut actions = row().gap(2.0).items_center();
     if crate::busy_now(s, &x.id) && x.capabilities.steer {
@@ -268,7 +267,7 @@ fn row_el(s: &App, x: &Session, item: &Queued) -> El {
         .child(actions)
 }
 
-pub(crate) fn dock(s: &App, x: &Session) -> Option<El> {
+pub(crate) fn dock(s: &App, x: &Session, k: &Kit) -> Option<El> {
     let list = rows(s, &x.id);
     let note = s.queue_note.get(&x.id);
     if list.is_empty() && note.is_none() {
@@ -276,7 +275,7 @@ pub(crate) fn dock(s: &App, x: &Session) -> Option<El> {
     }
     let mut c = col().key("queue-dock").w_full().pt(6.0).pb(6.0).border_sides([0.0, 0.0, 1.0, 0.0], line());
     if !list.is_empty() {
-        let rows_el = col().w_full().children(list.iter().map(|item| row_el(s, x, item)));
+        let rows_el = col().w_full().children(list.iter().map(|item| row_el(s, x, item, k)));
         c = c.child(col().key("queue-dock-rows").w_full().max_h(SHOWN as f32 * ROW_HEIGHT).scroll(ScrollSpec { stick_bottom: false }).child(rows_el));
     }
     if let Some(note) = note {

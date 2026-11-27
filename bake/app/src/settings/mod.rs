@@ -16,7 +16,7 @@ use std::time::Duration;
 use feed::catalog::Client;
 use feed::prefs::{Base, Compaction, CompactDraft, Failure, Notify, Person, Preference, RemoteControl, Settings};
 use rune::{AppHandle, Cx, El, KeyEvent, TextEdit, Tx, WindowHandle, col, el};
-use rune_kit::SegmentedControl;
+use rune_kit::{KitCx, SegmentedControl};
 
 use crate::theme;
 
@@ -625,8 +625,12 @@ fn unfollowed(s: &Prefs) -> Option<El> {
 pub const TABS: [&str; 6] = ["General", "Claude", "Notifications", "Devices", "Handoffs", "Appearance"];
 
 pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
-    crate::look::frame(cx, false, false, false);
-    let k = theme::kit();
+    let themes = crate::look::frame(cx, false, false, false);
+    cx.with_kit(&themes.main, |cx| window(s, cx))
+}
+
+fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
+    let k = cx.kit();
     let mut layer = Vec::new();
     let tabs = SegmentedControl::new(&TABS, Some(s.tab)).label("Settings").as_tabs().fit().on_pick(|s: &mut Prefs, i, _| {
         s.tab = i;
@@ -636,18 +640,18 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         appearance::opened(s);
     });
     let page = match s.tab {
-        1 => claude::page(s, &mut layer),
-        2 => notify::page(s),
-        3 => devices::page(s, &mut layer),
-        handoffs::TAB => handoffs::page(s, &mut layer),
-        appearance::TAB => appearance::page(s),
-        _ => general::page(s, &mut layer),
+        1 => claude::page(s, &mut layer, &k),
+        2 => notify::page(s, &k),
+        3 => devices::page(s, &mut layer, &k),
+        handoffs::TAB => handoffs::page(s, &mut layer, &k),
+        appearance::TAB => appearance::page(s, &k),
+        _ => general::page(s, &mut layer, &k),
     };
     let body = col()
         .w_full()
         .h_full()
         .child(el().absolute(0.0, 0.0).w_full().h_full().fill(theme::card_deep()))
-        .child(col().w_full().items_center().pt(14.0).pb(10.0).child(tabs.build(k)))
+        .child(col().w_full().items_center().pt(14.0).pb(10.0).child(tabs.build(&k)))
         .children(unfollowed(s))
         .child(parts::scroll(page));
     rune_kit::root(body, layer).on_window_focus(|s: &mut Prefs, focused, _| {

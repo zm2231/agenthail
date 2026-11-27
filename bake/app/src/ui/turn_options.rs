@@ -4,7 +4,7 @@ use feed::catalog::Session;
 use feed::composer::{TurnOptions, turn_label};
 use feed::create::CODEX_SERVICE_TIERS;
 use rune::{El, TextEdit, col, el, icon, row, text, text_input};
-use rune_kit::{Button, ButtonVariant, ControlSize, Dialog};
+use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit};
 
 use crate::theme::{self, META, META_BOLD, failed, faint, muted};
 use crate::{App, icons};
@@ -105,8 +105,7 @@ fn schema_of(s: &mut App) -> &mut TextEdit {
     &mut s.turn.drafts.entry(id).or_default().schema
 }
 
-fn dialog(s: &App, id: &str, layer: &mut Vec<El>) {
-    let k = theme::kit();
+fn dialog(s: &App, id: &str, layer: &mut Vec<El>, k: &Kit) {
     let Some(d) = s.turn.drafts.get(id) else { return };
     let mut tiers = row().w_full().gap(4.0);
     for (value, label) in std::iter::once(("", "Session default")).chain(CODEX_SERVICE_TIERS) {
@@ -161,8 +160,8 @@ fn dialog(s: &App, id: &str, layer: &mut Vec<El>) {
         .build(k, layer);
 }
 
-pub fn overlays(s: &App, layer: &mut Vec<El>) {
+pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
     if let Some(id) = &s.turn.open {
-        dialog(s, id, layer);
+        dialog(s, id, layer, k);
     }
 }

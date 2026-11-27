@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use feed::create::{self, Host, Launch, Launcher, ModelOption, Outcome, RootPick, RootUsage, SessionOptions};
 use rune::{El, Key, KeyEvent, TextEdit, Tx, col, row, text, text_input};
-use rune_kit::{Button, ButtonVariant, Dialog, Select, SelectAppearance, Switch};
+use rune_kit::{Button, ButtonVariant, Dialog, Kit, Select, SelectAppearance, Switch};
 
 use crate::theme::{self, BODY, META, failed, faint, muted};
 use crate::{App, Bg, Screen, session};
@@ -568,7 +568,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     }
 }
 
-fn select(key: &'static str, which: Choice, choices: &[(String, String)], current: &str, open: Option<Choice>, popups: &mut Vec<El>) -> El {
+fn select(key: &'static str, which: Choice, choices: &[(String, String)], current: &str, open: Option<Choice>, popups: &mut Vec<El>, k: &Kit) -> El {
     let labels: Vec<&str> = choices.iter().map(|(label, _)| label.as_str()).collect();
     let values: Vec<(String, String)> = choices.to_vec();
     Select::new(key, &labels)
@@ -588,7 +588,7 @@ fn select(key: &'static str, which: Choice, choices: &[(String, String)], curren
                 choose(s, which, value.clone());
             }
         })
-        .build(theme::kit(), popups)
+        .build(k, popups)
 }
 
 fn field(name: &str, control: El) -> El {
@@ -615,9 +615,8 @@ fn note(message: &str, color: rune::Color) -> El {
     text(message.to_string()).font(META).color(color).wrap().w_full()
 }
 
-pub fn view(s: &App, layer: &mut Vec<El>) {
+pub fn view(s: &App, layer: &mut Vec<El>, k: &Kit) {
     let Some(sheet) = &s.new_session else { return };
-    let k = theme::kit();
     let mut popups = Vec::new();
     let request = sheet.request();
     let mut body = col().w_full().gap(14.0).px(16.0).pt(2.0).pb(16.0);
@@ -625,11 +624,11 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
     let mut first = row().w_full().gap(12.0).flex_wrap();
     if sheet.hosts.len() > 1 {
         let hosts: Vec<(String, String)> = sheet.hosts.iter().filter(|h| h.available()).map(|h| (h.name.clone(), h.id.clone())).collect();
-        first = first.child(field("Computer", select("new-session-host", Choice::Host, &hosts, &sheet.launch.host, sheet.open, &mut popups)));
+        first = first.child(field("Computer", select("new-session-host", Choice::Host, &hosts, &sheet.launch.host, sheet.open, &mut popups, k)));
     }
     if let Some(options) = &sheet.options {
         let surfaces: Vec<(String, String)> = options.surfaces.iter().map(|x| (x.title(), x.id.clone())).collect();
-        first = first.child(field("Agent", select("new-session-surface", Choice::Surface, &surfaces, &sheet.launch.surface, sheet.open, &mut popups)));
+        first = first.child(field("Agent", select("new-session-surface", Choice::Surface, &surfaces, &sheet.launch.surface, sheet.open, &mut popups, k)));
     }
     body = body.child(first);
 
@@ -637,7 +636,7 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
         let places: Vec<(String, String)> = sheet.place_choices().into_iter().map(|(label, value, _)| (label, value)).collect();
         let mut place = row().w_full().gap(12.0).flex_wrap();
         if !places.is_empty() {
-            place = place.child(field("Project", select("new-session-place", Choice::Place, &places, sheet.folder.text.trim(), sheet.open, &mut popups)));
+            place = place.child(field("Project", select("new-session-place", Choice::Place, &places, sheet.folder.text.trim(), sheet.open, &mut popups, k)));
         }
         place = place.child(field(&format!("Folder on {}", sheet.host_name()), line_input(&sheet.folder, "new-session-folder", "/path/to/folder", |x| &mut x.folder)));
         body = body.child(place);
@@ -647,34 +646,34 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
         let mut tune = row().w_full().gap(12.0).flex_wrap();
         let models = sheet.model_choices();
         if !models.is_empty() {
-            tune = tune.child(field("Model", select("new-session-model", Choice::Model, &models, &sheet.launch.model, sheet.open, &mut popups)));
+            tune = tune.child(field("Model", select("new-session-model", Choice::Model, &models, &sheet.launch.model, sheet.open, &mut popups, k)));
         }
         let efforts = sheet.efforts();
         if !efforts.is_empty() {
             let choices: Vec<(String, String)> = std::iter::once(("Default".to_string(), String::new())).chain(efforts.iter().map(|e| (capitalized(e), e.clone()))).collect();
-            tune = tune.child(field("Effort", select("new-session-effort", Choice::Effort, &choices, &sheet.launch.effort, sheet.open, &mut popups)));
+            tune = tune.child(field("Effort", select("new-session-effort", Choice::Effort, &choices, &sheet.launch.effort, sheet.open, &mut popups, k)));
         }
         let accounts = sheet.account_choices();
         if !accounts.is_empty() {
-            tune = tune.child(field("Account", select("new-session-account", Choice::Account, &accounts, &sheet.launch.config_root, sheet.open, &mut popups)));
+            tune = tune.child(field("Account", select("new-session-account", Choice::Account, &accounts, &sheet.launch.config_root, sheet.open, &mut popups, k)));
         }
         let modes = create::permission_modes(&sheet.launch.surface);
         if !modes.is_empty() && !request.in_terminal() {
             let (name, default) = if sheet.launch.surface == create::CODEX { ("Approvals", "Codex default") } else { ("Permission mode", "Claude default") };
             let choices: Vec<(String, String)> = std::iter::once((default.to_string(), String::new())).chain(modes.iter().map(|(value, label)| (label.to_string(), value.to_string()))).collect();
-            tune = tune.child(field(name, select("new-session-permission", Choice::Permission, &choices, &sheet.launch.permission, sheet.open, &mut popups)));
+            tune = tune.child(field(name, select("new-session-permission", Choice::Permission, &choices, &sheet.launch.permission, sheet.open, &mut popups, k)));
         }
         let agent_modes = sheet.agent_modes();
         if !agent_modes.is_empty() {
-            tune = tune.child(field("Mode", select("new-session-agent-mode", Choice::Permission, &agent_modes, &sheet.launch.permission, sheet.open, &mut popups)));
+            tune = tune.child(field("Mode", select("new-session-agent-mode", Choice::Permission, &agent_modes, &sheet.launch.permission, sheet.open, &mut popups, k)));
         }
         if request.takes_codex_options() {
             let with_default = |default: &str, pairs: &[(&str, &str)]| -> Vec<(String, String)> {
                 std::iter::once((default.to_string(), String::new())).chain(pairs.iter().map(|(value, label)| (label.to_string(), value.to_string()))).collect()
             };
             tune = tune
-                .child(field("Mode", select("new-session-mode", Choice::Mode, &with_default("Session default", &create::CODEX_MODES), &sheet.launch.mode, sheet.open, &mut popups)))
-                .child(field("Service tier", select("new-session-tier", Choice::Tier, &with_default("Runtime default", &create::CODEX_SERVICE_TIERS), &sheet.launch.service_tier, sheet.open, &mut popups)));
+                .child(field("Mode", select("new-session-mode", Choice::Mode, &with_default("Session default", &create::CODEX_MODES), &sheet.launch.mode, sheet.open, &mut popups, k)))
+                .child(field("Service tier", select("new-session-tier", Choice::Tier, &with_default("Runtime default", &create::CODEX_SERVICE_TIERS), &sheet.launch.service_tier, sheet.open, &mut popups, k)));
         }
         if sheet.launch.surface == create::CLAUDE && !request.in_terminal() {
             tune = tune.child(field("Claude agent", line_input(&sheet.agent, "new-session-agent", "Optional", |x| &mut x.agent)));
@@ -685,7 +684,7 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
                 .chain(launchers.iter().map(|l| (if l.available { l.title().to_string() } else { format!("{} (unavailable)", l.title()) }, l.id.clone())))
                 .collect();
             let current = sheet.launch.launcher.as_ref().map(|l| l.id.clone()).unwrap_or_default();
-            tune = tune.child(field("Runs in", select("new-session-launcher", Choice::Launcher, &choices, &current, sheet.open, &mut popups)));
+            tune = tune.child(field("Runs in", select("new-session-launcher", Choice::Launcher, &choices, &current, sheet.open, &mut popups, k)));
         }
         body = body.child(tune);
     }

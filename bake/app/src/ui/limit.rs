@@ -5,7 +5,7 @@ use feed::catalog::{Client, RespondError, Session};
 use feed::create::{ConfigRoot, RootUsage};
 use feed::limit::{Moved, Stop, Target, targets};
 use rune::{El, col, el, icon, row, text};
-use rune_kit::{Button, ButtonVariant, ControlSize, Dialog};
+use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit};
 
 use super::spacer;
 use crate::icons;
@@ -277,8 +277,7 @@ fn button(label: impl Into<String>, variant: ButtonVariant, disabled: bool) -> B
     Button::new(label).variant(variant).control_size(ControlSize::Small).disabled(disabled)
 }
 
-pub(crate) fn card(s: &App, x: &Session, stop: &Stop) -> El {
-    let k = theme::kit();
+pub(crate) fn card(s: &App, x: &Session, stop: &Stop, k: &Kit) -> El {
     let busy = s.limits.busy.contains(&x.id);
     let mut body = col()
         .grow(1.0)
@@ -375,8 +374,7 @@ fn target_row(id: &str, since: &str, t: &Target, busy: bool, unread: bool) -> El
     r
 }
 
-fn picker(s: &App, id: &str, since: &str, layer: &mut Vec<El>) {
-    let k = theme::kit();
+fn picker(s: &App, id: &str, since: &str, layer: &mut Vec<El>, k: &Kit) {
     let Some(x) = session(s, id) else { return };
     let Some(stop) = x.limit(s.now) else { return };
     let busy = s.limits.busy.contains(id);
@@ -417,8 +415,7 @@ fn picker(s: &App, id: &str, since: &str, layer: &mut Vec<El>) {
         .build(k, layer);
 }
 
-fn confirm(c: &Confirm, layer: &mut Vec<El>) {
-    let k = theme::kit();
+fn confirm(c: &Confirm, layer: &mut Vec<El>, k: &Kit) {
     let (id, since, target) = (c.session.clone(), c.since.clone(), c.target.clone());
     let reason = c.target.detail.as_ref().filter(|d| c.target.offered && !d.is_empty()).map(|d| format!(" Chosen for {d}."));
     let buttons = row()
@@ -439,8 +436,7 @@ fn confirm(c: &Confirm, layer: &mut Vec<El>) {
         .build(k, layer);
 }
 
-fn consent(c: &Consent, layer: &mut Vec<El>) {
-    let k = theme::kit();
+fn consent(c: &Consent, layer: &mut Vec<El>, k: &Kit) {
     let (id, since, target) = (c.session.clone(), c.since.clone(), c.target.clone());
     let buttons = row()
         .w_full()
@@ -460,8 +456,7 @@ fn consent(c: &Consent, layer: &mut Vec<El>) {
         .build(k, layer);
 }
 
-fn warnings(s: &App, layer: &mut Vec<El>) {
-    let k = theme::kit();
+fn warnings(s: &App, layer: &mut Vec<El>, k: &Kit) {
     let mut stack = col().gap(8.0).w(420.0);
     for (i, warning) in s.limits.warnings.iter().enumerate() {
         let toast = rune_kit::Toast::new(format!("move-warning-{i}"), warning.clone()).icon(k, &icons::GAUGE).on_close(move |s: &mut App| {
@@ -474,17 +469,17 @@ fn warnings(s: &App, layer: &mut Vec<El>) {
     layer.push(col().absolute(0.0, 0.0).w_full().h_full().items_end().justify_start().padding(24.0).child(stack));
 }
 
-pub fn overlays(s: &App, layer: &mut Vec<El>) {
+pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
     if !s.limits.warnings.is_empty() {
-        warnings(s, layer);
+        warnings(s, layer, k);
     }
     if let Some((id, since)) = &s.limits.picking {
-        picker(s, id, since, layer);
+        picker(s, id, since, layer, k);
     }
     if let Some(c) = &s.limits.confirm {
-        confirm(c, layer);
+        confirm(c, layer, k);
     }
     if let Some(c) = &s.limits.consent {
-        consent(c, layer);
+        consent(c, layer, k);
     }
 }

@@ -1,6 +1,7 @@
 mod activity;
 mod pins;
 
+use rune_kit::Kit;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
@@ -49,8 +50,8 @@ pub fn open_read(s: &mut App, row: Session) {
     crate::over::open_session(s, &id);
 }
 
-pub fn activity_view(s: &App, layer: &mut Vec<El>) {
-    activity::view(s, layer);
+pub fn activity_view(s: &App, layer: &mut Vec<El>, k: &Kit) {
+    activity::view(s, layer, k);
 }
 
 pub fn activity_key(s: &mut App, ev: &KeyEvent) -> Option<bool> {

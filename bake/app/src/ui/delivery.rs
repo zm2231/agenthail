@@ -6,7 +6,7 @@ use feed::catalog::Session;
 use feed::queue::{Op, Queued, undelivered};
 use feed::search::Entry;
 use rune::{El, col, el, icon, row, text};
-use rune_kit::{Button, ButtonVariant, ControlSize};
+use rune_kit::{Button, ButtonVariant, ControlSize, Kit};
 
 use super::rail::rail_section;
 use crate::icons;
@@ -138,25 +138,25 @@ pub fn poll(s: &mut App) -> bool {
     changed
 }
 
-fn small(label: &str, key: String, disabled: bool, help: &str, on: impl Fn(&mut App) + 'static) -> El {
-    Button::new(label).variant(ButtonVariant::Ghost).control_size(ControlSize::Small).disabled(disabled).help(help.to_string()).on_press(on).build(theme::kit()).key(key)
+fn small(label: &str, key: String, disabled: bool, help: &str, on: impl Fn(&mut App) + 'static, k: &Kit) -> El {
+    Button::new(label).variant(ButtonVariant::Ghost).control_size(ControlSize::Small).disabled(disabled).help(help.to_string()).on_press(on).build(k).key(key)
 }
 
-fn queued_row(s: &App, x: &Session, item: &Queued) -> El {
+fn queued_row(s: &App, x: &Session, item: &Queued, k: &Kit) -> El {
     let working = s.queue_working.contains(&(item.host.clone(), item.id));
     let problem = item.stuck();
     let mut actions = row().gap(4.0).items_center();
     if item.can_take_back() && !x.read_only {
         let (id, it) = (x.id.clone(), item.clone());
-        actions = actions.child(small("Take back", format!("delivery-take-{}-{}", item.host, item.id), working, "Cancel this queued message and put its text back in the composer", move |s: &mut App| super::queue::run(s, &id, it.clone(), Op::TakeBack)));
+        actions = actions.child(small("Take back", format!("delivery-take-{}-{}", item.host, item.id), working, "Cancel this queued message and put its text back in the composer", move |s: &mut App| super::queue::run(s, &id, it.clone(), Op::TakeBack), k));
     }
     if item.can_cancel() {
         let (id, it) = (x.id.clone(), item.clone());
-        actions = actions.child(small("Cancel", format!("delivery-cancel-{}-{}", item.host, item.id), working, "Cancel this queued message", move |s: &mut App| super::queue::run(s, &id, it.clone(), Op::Remove)));
+        actions = actions.child(small("Cancel", format!("delivery-cancel-{}-{}", item.host, item.id), working, "Cancel this queued message", move |s: &mut App| super::queue::run(s, &id, it.clone(), Op::Remove), k));
     }
     if waits_on_decision(s, &item.ask_id) {
         let (id, ask) = (x.id.clone(), item.ask_id.clone());
-        actions = actions.child(small("Answer", format!("delivery-answer-{}-{}", item.host, item.id), false, "Open the decision this message is waiting on", move |s: &mut App| answer(s, &id, &ask)));
+        actions = actions.child(small("Answer", format!("delivery-answer-{}-{}", item.host, item.id), false, "Open the decision this message is waiting on", move |s: &mut App| answer(s, &id, &ask), k));
     }
     let tone = if problem { attention() } else { muted() };
     let title = if item.target.is_empty() { x.name.clone() } else { item.target.clone() };
@@ -216,7 +216,7 @@ fn caption(label: &str) -> El {
     text(label.to_uppercase()).font(crate::theme::LABEL).color(faint()).pt(4.0)
 }
 
-pub(crate) fn section(s: &App, x: &Session) -> Option<El> {
+pub(crate) fn section(s: &App, x: &Session, k: &Kit) -> Option<El> {
     if s.delivery.id != x.id {
         return None;
     }
@@ -224,7 +224,7 @@ pub(crate) fn section(s: &App, x: &Session) -> Option<El> {
     let queued = s.queue.get(&x.id).map(|rows| undelivered(rows, &s.rekeyed, &x.id)).unwrap_or_default();
     let history: &[Entry] = s.delivery.history.as_ref().and_then(|r| r.as_ref().ok()).map(Vec::as_slice).unwrap_or_default();
     if !queued.is_empty() {
-        body = body.child(caption("Undelivered")).children(queued.iter().map(|q| queued_row(s, x, q)));
+        body = body.child(caption("Undelivered")).children(queued.iter().map(|q| queued_row(s, x, q, k)));
     }
     let queue_failed = s.queue_note.get(&x.id).filter(|n| n.starts_with(feed::queue::READ_FAILED));
     for problem in queue_failed.into_iter().chain(s.delivery.history.as_ref().and_then(|r| r.as_ref().err())) {

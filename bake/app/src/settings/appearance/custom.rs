@@ -1,6 +1,6 @@
 use feed::look::{self as fl, Wallpaper};
 use rune::{El, Pixels, TextEdit, col, el, row, text};
-use rune_kit::{Button, ButtonVariant, ColorPicker, ControlSize, Hsv};
+use rune_kit::{Button, ButtonVariant, ColorPicker, ControlSize, Hsv, Kit};
 
 use super::controls::chosen;
 use super::{Prefs, set, writing};
@@ -30,9 +30,8 @@ pub(super) fn open_accent(s: &mut Prefs) {
     s.appearance.accent_edit = Some(pick(hsv));
 }
 
-pub(super) fn accent_editor(s: &Prefs) -> Option<El> {
+pub(super) fn accent_editor(s: &Prefs, k: &Kit) -> Option<El> {
     let p = s.appearance.accent_edit.as_ref()?;
-    let k = theme::kit();
     let hex = p.hsv.hex();
     let picker = ColorPicker::new(p.hsv)
         .label("Accent colour")
@@ -82,9 +81,8 @@ pub(super) fn mesh_value(colors: &[Hsv]) -> String {
     format!("mesh: {MESH}x{MESH}, {}", colors.iter().map(|c| c.hex()).collect::<Vec<_>>().join(", "))
 }
 
-pub(super) fn mesh_editor(s: &Prefs) -> Option<El> {
+pub(super) fn mesh_editor(s: &Prefs, k: &Kit) -> Option<El> {
     let m = s.appearance.mesh_edit.as_ref()?;
-    let k = theme::kit();
     let mut grid = col().gap(6.0);
     for r in 0..MESH {
         let mut line = row().gap(6.0);

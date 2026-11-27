@@ -6,11 +6,11 @@ use feed::create::Host;
 use feed::extension_changes::{Change, Shown, Started, build_title};
 use rune::{El, ScrollSpec, TextEdit, col, el, row, text, text_input};
 use rune_kit::diff::{DiffState, DiffView, parse};
-use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Spinner};
+use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit, Spinner};
 
 use crate::App;
 use crate::over::open_session;
-use crate::over::ui::{BODY, META, kit, strong, weak};
+use crate::over::ui::{BODY, META, strong, weak};
 
 const HISTORY_LIMIT: usize = 50;
 
@@ -258,8 +258,7 @@ fn small(label: &str, variant: ButtonVariant) -> Button {
     Button::new(label).variant(variant).control_size(ControlSize::Small)
 }
 
-fn change_row(s: &App, h: &History, change: &Change) -> El {
-    let k = kit();
+fn change_row(s: &App, h: &History, change: &Change, k: &Kit) -> El {
     let busy = h.undoing.is_some();
     let open = h.patch.as_ref().is_some_and(|(rev, _, _)| *rev == change.rev);
     let offset = |t: time::OffsetDateTime| rune::time::LocalTime::at(t.unix_timestamp() * 1000).offset;
@@ -281,22 +280,22 @@ fn change_row(s: &App, h: &History, change: &Change) -> El {
                 .w_full()
                 .gap(10.0)
                 .items_start()
-                .child(col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(text(change.describe()).font(BODY).color(strong()).wrap().w_full()).child(text(change.meta(crate::ui::background::clock(), offset)).font(META).color(weak()).wrap().w_full()))
+                .child(col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(text(change.describe()).font(BODY).color(strong(k)).wrap().w_full()).child(text(change.meta(crate::ui::background::clock(), offset)).font(META).color(weak(k)).wrap().w_full()))
                 .child(actions),
         );
     if let Some((_, _, shown)) = h.patch.as_ref().filter(|_| open) {
         card = card.child(match shown {
-            None => row().gap(6.0).items_center().child(Spinner::new().size(11.0).build(k)).child(text("Reading the patch…".to_string()).font(META).color(weak())),
+            None => row().gap(6.0).items_center().child(Spinner::new().size(11.0).build(k)).child(text("Reading the patch…".to_string()).font(META).color(weak(k))),
             Some(Err(error)) => text(error.clone()).font(META).color(crate::theme::failed()).wrap().w_full(),
             Some(Ok(truncated)) => {
                 let mut patch = col().w_full().gap(4.0);
                 if s.ov.ext.sheets.diff.files().is_empty() {
-                    patch = patch.child(text("This change has no file differences to show.".to_string()).font(META).color(weak()));
+                    patch = patch.child(text("This change has no file differences to show.".to_string()).font(META).color(weak(k)));
                 } else {
                     patch = patch.child(el().w_full().h(320.0).radius(8.0).border(1.0, crate::over::ui::edge()).child(DiffView::new(|s: &App| &s.ov.ext.sheets.diff, |s: &mut App| &mut s.ov.ext.sheets.diff).key("ext-change-diff").build(s, k)));
                 }
                 if *truncated {
-                    patch = patch.child(text("Cut: the change is larger than this view.".to_string()).font(META).color(weak()));
+                    patch = patch.child(text("Cut: the change is larger than this view.".to_string()).font(META).color(weak(k)));
                 }
                 patch
             }
@@ -305,8 +304,7 @@ fn change_row(s: &App, h: &History, change: &Change) -> El {
     card
 }
 
-fn history_dialog(s: &App, h: &History, layer: &mut Vec<El>) {
-    let k = kit();
+fn history_dialog(s: &App, h: &History, layer: &mut Vec<El>, k: &Kit) {
     let note = if h.host.is_local() { "Changes are kept as they are made. Undo any change here.".to_string() } else { format!("Changes on {}. Undo any change here.", h.host.name) };
     let mut body = col().w_full().gap(8.0).px(16.0).pb(16.0);
     if let Some(failure) = &h.failure {
@@ -315,15 +313,14 @@ fn history_dialog(s: &App, h: &History, layer: &mut Vec<El>) {
     body = body.child(match &h.changes {
         None => row().w_full().h(120.0).items_center().justify_center().child(Spinner::new().size(14.0).build(k)),
         Some(Err(error)) => text(error.clone()).font(META).color(crate::theme::failed()).wrap().w_full(),
-        Some(Ok(changes)) if changes.is_empty() => text("No changes recorded yet.".to_string()).font(BODY).color(weak()),
-        Some(Ok(changes)) => col().key("ext-history-list").w_full().max_h(460.0).scroll(ScrollSpec { stick_bottom: false }).children(changes.iter().map(|c| change_row(s, h, c))),
+        Some(Ok(changes)) if changes.is_empty() => text("No changes recorded yet.".to_string()).font(BODY).color(weak(k)),
+        Some(Ok(changes)) => col().key("ext-history-list").w_full().max_h(460.0).scroll(ScrollSpec { stick_bottom: false }).children(changes.iter().map(|c| change_row(s, h, c, k))),
     });
     let done = row().w_full().child(el().grow(1.0)).child(small("Done", ButtonVariant::Contrast).disabled(h.undoing.is_some()).on_press(close_history).build(k).key("ext-history-done"));
     Dialog::new("ext-history", "Extension History").description(note).open(true).fit().width(620.0).on_close(close_history).child(body.child(done)).build(k, layer);
 }
 
-fn build_dialog(b: &Building, layer: &mut Vec<El>) {
-    let k = kit();
+fn build_dialog(b: &Building, layer: &mut Vec<El>, k: &Kit) {
     let input = text_input(&b.text, BODY)
         .key("ext-build-message")
         .label("What the extension should do".to_string())
@@ -334,8 +331,8 @@ fn build_dialog(b: &Building, layer: &mut Vec<El>) {
         .radius(8.0)
         .fill(crate::theme::wash())
         .border(1.0, crate::theme::line())
-        .color(strong())
-        .placeholder("A board of open work across my projects".to_string(), weak())
+        .color(strong(k))
+        .placeholder("A board of open work across my projects".to_string(), weak(k))
         .on_edit(|s: &mut App| match s.ov.ext.sheets.building.as_mut() {
             Some(b) => &mut b.text,
             None => &mut s.composer,
@@ -362,11 +359,11 @@ fn build_dialog(b: &Building, layer: &mut Vec<El>) {
         .build(k, layer);
 }
 
-pub fn overlays(s: &App, layer: &mut Vec<El>) {
+pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
     if let Some(h) = &s.ov.ext.sheets.history {
-        history_dialog(s, h, layer);
+        history_dialog(s, h, layer, k);
     }
     if let Some(b) = &s.ov.ext.sheets.building {
-        build_dialog(b, layer);
+        build_dialog(b, layer, k);
     }
 }

@@ -1,13 +1,12 @@
 use feed::look::{self as fl, Change};
 use rune::{El, col, row, text};
-use rune_kit::{Button, ButtonVariant, ControlSize};
+use rune_kit::{Button, ButtonVariant, ControlSize, Kit};
 
 use super::{Prefs, scope, write, writing};
 use crate::settings::parts;
 use crate::theme::{self, BODY, META, muted};
 
-pub(super) fn history(s: &Prefs) -> El {
-    let k = theme::kit();
+pub(super) fn history(s: &Prefs, k: &Kit) -> El {
     let now = time::OffsetDateTime::now_utc();
     let entries = match &s.appearance.history {
         Some(Ok(e)) => e.clone(),

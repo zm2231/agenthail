@@ -1,11 +1,10 @@
 use feed::handoffs::{self, Channel, Handoffs, session_ref};
 use rune::{El, TextEdit, col, row};
-use rune_kit::{Button, ButtonVariant, ControlSize, TextArea};
+use rune_kit::{Button, ButtonVariant, ControlSize, Kit, TextArea};
 
 use super::super::parts::{self, line};
 use super::super::{Prefs, Section, busy, saving};
 use super::{Who, change, edited, field, forget, matches, note, refused, remove, small, status};
-use crate::theme;
 
 fn create(s: &mut Prefs) {
     let name = match handoffs::channel_name(&s.handoffs.channel_name.text) {
@@ -41,7 +40,7 @@ fn send(s: &mut Prefs) {
     });
 }
 
-fn members(s: &Prefs, c: &Channel, off: bool) -> Vec<El> {
+fn members(s: &Prefs, c: &Channel, off: bool, k: &Kit) -> Vec<El> {
     let people = c.people();
     if people.is_empty() {
         return vec![parts::words(format!("#{} has no members yet.", c.name))];
@@ -54,20 +53,19 @@ fn members(s: &Prefs, c: &Channel, off: bool) -> Vec<El> {
             let button = remove(&key, off || saving(s, &key), move |s| {
                 let (channel, id) = (channel.clone(), id.clone());
                 change(s, Section::Channels, format!("channel-remove-{channel}-{id}"), move |c| c.channel_remove(&channel, &id));
-            });
+            }, k);
             line(&m.display, None, button)
         })
         .collect()
 }
 
-fn picked(s: &Prefs, c: &Channel, off: bool) -> Vec<El> {
+fn picked(s: &Prefs, c: &Channel, off: bool, k: &Kit) -> Vec<El> {
     let f = &s.handoffs;
-    let k = theme::kit();
-    let mut rows = members(s, c, off);
-    let add = small("Add", "channel-add", off || session_ref(&f.member.text).is_none(), add_member);
-    let input = field("channel-member", Section::Channels, &f.member, "Add a session", "Find a session or @alias", off, Some(Who::Member), |s| &mut s.handoffs.member, add_member);
+    let mut rows = members(s, c, off, k);
+    let add = small("Add", "channel-add", off || session_ref(&f.member.text).is_none(), add_member, k);
+    let input = field("channel-member", Section::Channels, &f.member, "Add a session", "Find a session or @alias", off, Some(Who::Member), |s| &mut s.handoffs.member, add_member, k);
     rows.push(line("Add a session", None, row().gap(8.0).items_center().child(input).child(add)));
-    rows.extend(matches(s, Who::Member, off));
+    rows.extend(matches(s, Who::Member, off, k));
     let message = TextArea::new(&f.message)
         .label(format!("Message everyone in #{}", c.name))
         .placeholder(format!("Message everyone in #{}", c.name))
@@ -91,7 +89,7 @@ fn picked(s: &Prefs, c: &Channel, off: bool) -> Vec<El> {
         })
         .build(k)
         .key("settings-channel-delete");
-    let send_button = small("Send", "channel-send", off || f.message.text.trim().is_empty(), send);
+    let send_button = small("Send", "channel-send", off || f.message.text.trim().is_empty(), send, k);
     rows.push(row().w_full().gap(8.0).items_center().px(14.0).py(10.0).child(delete).child(col().grow(1.0)).child(send_button));
     rows
 }
@@ -109,21 +107,21 @@ fn pick(s: &mut Prefs, value: String) {
     }
 }
 
-pub fn section(s: &Prefs, h: &Handoffs, off: bool, layer: &mut Vec<El>) -> El {
+pub fn section(s: &Prefs, h: &Handoffs, off: bool, layer: &mut Vec<El>, k: &Kit) -> El {
     let f = &s.handoffs;
     let mut rows = Vec::new();
     if h.channels.is_empty() {
         rows.push(parts::words("No shared channels yet."));
     }
-    let create_button = small("Create", "channel-create", off || handoffs::channel_name(&f.channel_name.text).is_err(), create);
-    let input = field("channel-name", Section::Channels, &f.channel_name, "New channel", "launch-review", off, None, |s| &mut s.handoffs.channel_name, create);
+    let create_button = small("Create", "channel-create", off || handoffs::channel_name(&f.channel_name.text).is_err(), create, k);
+    let input = field("channel-name", Section::Channels, &f.channel_name, "New channel", "launch-review", off, None, |s| &mut s.handoffs.channel_name, create, k);
     rows.push(line("New channel", None, row().gap(8.0).items_center().child(input).child(create_button)));
     if !h.channels.is_empty() {
         let choices = h.channels.iter().map(|c| (format!("#{}", c.name), c.name.clone())).collect();
-        rows.push(line("Channel", None, parts::select(s, "settings-channel-pick", "Channel", choices, &f.picked, busy(s), layer, pick)));
+        rows.push(line("Channel", None, parts::select(s, "settings-channel-pick", "Channel", choices, &f.picked, busy(s), layer, pick, k)));
     }
     if let Some(c) = h.channel(&f.picked) {
-        rows.extend(picked(s, c, off));
+        rows.extend(picked(s, c, off, k));
     }
     rows.extend(status(s, Section::Channels));
     parts::section(&format!("Channels · {}", h.channels.len()), rows, Some("Everyone in a channel receives what is sent to it.".into()))

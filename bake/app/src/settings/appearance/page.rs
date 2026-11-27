@@ -1,6 +1,6 @@
 use feed::look as fl;
 use rune::{El, text};
-use rune_kit::SegmentedControl;
+use rune_kit::{Kit, SegmentedControl};
 
 use super::Prefs;
 use super::backgrounds::grid;
@@ -10,7 +10,7 @@ use super::history::history;
 use crate::settings::parts;
 use crate::theme::{self, META};
 
-pub fn page(s: &Prefs) -> El {
+pub fn page(s: &Prefs, k: &Kit) -> El {
     let mut out = parts::page().key("appearance-page");
     let Some(view) = crate::look::view() else {
         return out.child(match crate::look::problem() {
@@ -34,39 +34,39 @@ pub fn page(s: &Prefs) -> El {
         .label("Apply changes to")
         .fit()
         .on_pick(|s: &mut Prefs, i, _| s.appearance.here = i == 1 && !crate::look::device().is_empty())
-        .build(theme::kit())
+        .build(k)
         .key("appearance-scope");
     let scope_detail = (!device.is_empty()).then(|| format!("This computer is {device}."));
     let mut general = vec![
         parts::line("Apply changes to", scope_detail, scope_control),
-        segmented(s, &view, "theme", "Appearance", &[("System", "system"), ("Light", "light"), ("Dark", "dark")], "system", false),
-        accents(s, &view),
+        segmented(s, &view, "theme", "Appearance", &[("System", "system"), ("Light", "light"), ("Dark", "dark")], "system", false, k),
+        accents(s, &view, k),
     ];
-    general.extend(accent_editor(s));
-    general.push(slider(s, &view, "text.scale", "Text size", (0.8, 1.6), 1.0, "×", false));
+    general.extend(accent_editor(s, k));
+    general.push(slider(s, &view, "text.scale", "Text size", (0.8, 1.6), 1.0, "×", false, k));
     out = out.child(parts::section("", general, None));
     let chosen_background = chosen(&view, "background", "");
     let is_image = chosen_background.starts_with("image:") || chosen_background.starts_with("art:");
-    let mut background = vec![grid(s, &view)];
-    background.extend(mesh_editor(s));
-    background.push(slider(s, &view, "background.dim", "Dim", (0.0, 0.8), 0.0, "", false));
-    background.push(slider(s, &view, "background.opacity", "Strength on empty views", (0.0, 1.0), 1.0, "", false));
-    background.push(slider(s, &view, "background.session-opacity", "Strength in a session", (0.0, 1.0), 1.0, "", false));
+    let mut background = vec![grid(s, &view, k)];
+    background.extend(mesh_editor(s, k));
+    background.push(slider(s, &view, "background.dim", "Dim", (0.0, 0.8), 0.0, "", false, k));
+    background.push(slider(s, &view, "background.opacity", "Strength on empty views", (0.0, 1.0), 1.0, "", false, k));
+    background.push(slider(s, &view, "background.session-opacity", "Strength in a session", (0.0, 1.0), 1.0, "", false, k));
     if is_image {
-        background.push(segmented(s, &view, "background.fit", "Fit", &[("Cover", "cover"), ("Contain", "contain"), ("Center", "center"), ("Tile", "tile")], "cover", false));
-        background.push(segmented(s, &view, "background.position", "Position", &[("Center", "center"), ("Top", "top"), ("Bottom", "bottom"), ("Left", "left"), ("Right", "right")], "center", false));
+        background.push(segmented(s, &view, "background.fit", "Fit", &[("Cover", "cover"), ("Contain", "contain"), ("Center", "center"), ("Tile", "tile")], "cover", false, k));
+        background.push(segmented(s, &view, "background.position", "Position", &[("Center", "center"), ("Top", "top"), ("Bottom", "bottom"), ("Left", "left"), ("Right", "right")], "center", false, k));
     }
     out = out.child(parts::section("Background", background, None));
     let glass_off = chosen(&view, "glass", "on") != "on";
     out = out.child(parts::section(
         "Glass",
         vec![
-            switch(s, &view, "glass", "Translucent panes", "on", false),
-            slider(s, &view, "glass.blur", "Blur", (0.0, 64.0), 30.0, " pt", glass_off),
-            slider(s, &view, "glass.opacity", "Pane tint", (0.0, 1.0), 0.3, "", glass_off),
-            slider(s, &view, "glass.composer.opacity", "Floating controls tint", (0.0, 1.0), 0.5, "", glass_off),
-            segmented(s, &view, "glass.tint", "Tint colour", &[("Window", "ground"), ("Accent", "accent")], "ground", glass_off),
-            switch(s, &view, "glass.readability", "Keep text readable", "auto", glass_off),
+            switch(s, &view, "glass", "Translucent panes", "on", false, k),
+            slider(s, &view, "glass.blur", "Blur", (0.0, 64.0), 30.0, " pt", glass_off, k),
+            slider(s, &view, "glass.opacity", "Pane tint", (0.0, 1.0), 0.3, "", glass_off, k),
+            slider(s, &view, "glass.composer.opacity", "Floating controls tint", (0.0, 1.0), 0.5, "", glass_off, k),
+            segmented(s, &view, "glass.tint", "Tint colour", &[("Window", "ground"), ("Accent", "accent")], "ground", glass_off, k),
+            switch(s, &view, "glass.readability", "Keep text readable", "auto", glass_off, k),
         ],
         Some("Panes are translucent only in dark appearance; light appearance uses solid panes.".into()),
     ));
@@ -74,12 +74,12 @@ pub fn page(s: &Prefs) -> El {
     out = out.child(parts::section(
         "Texture",
         vec![
-            segmented(s, &view, "texture", "Texture", &[("None", "none"), ("Grain", "grain"), ("Scanlines", "scanlines")], "none", false),
-            slider(s, &view, "texture.strength", "Strength", (0.0, 0.6), 0.2, "", no_texture),
+            segmented(s, &view, "texture", "Texture", &[("None", "none"), ("Grain", "grain"), ("Scanlines", "scanlines")], "none", false, k),
+            slider(s, &view, "texture.strength", "Strength", (0.0, 0.6), 0.2, "", no_texture, k),
         ],
         None,
     ));
-    out = out.child(history(s));
+    out = out.child(history(s, k));
     let notes = fl::NOT_DRAWN.iter().map(|n| parts::words(*n)).collect();
     out.child(parts::section("Not drawn in this app yet", notes, Some("These still apply on the other Agenthail apps.".into())))
 }

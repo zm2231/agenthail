@@ -7,11 +7,11 @@ use feed::catalog::Client;
 use feed::connect::{self, Problem};
 use feed::watch::{Catalog, SAFETY};
 use rune::{Cx, El, col, el, icon, row, text};
-use rune_kit::{Button, ButtonVariant, ControlSize};
+use rune_kit::{Button, ButtonVariant, ControlSize, Kit, KitCx, KitTheme};
 
 use crate::icons;
 use crate::ui::watch::{self, Feed};
-use crate::theme::{self, BODY, HEADING, META, failed, faint, muted};
+use crate::theme::{BODY, HEADING, META, failed, faint, muted};
 use crate::{App, Bg};
 
 const RECONNECT: Duration = Duration::from_secs(5);
@@ -236,16 +236,17 @@ pub fn started(s: &mut App, result: Result<(), Problem>) {
     }
 }
 
-pub fn screen(s: &App, cx: &mut Cx<App>) -> Option<El> {
+pub fn screen(s: &App, cx: &mut Cx<App>, chrome: &KitTheme) -> Option<El> {
+    let k = cx.kit();
     if s.snapshots > 0 || s.fixtures.is_some() {
         return None;
     }
     let problem = s.link.problem.as_ref()?;
-    Some(crate::over::ui::frame(cx, s, None, panel(s, problem), None, rune_kit::shell::Toolbar::new()))
+    let panel = panel(s, problem, &k);
+    Some(cx.with_kit(chrome, |cx| crate::over::ui::frame(cx, s, None, panel, None, rune_kit::shell::Toolbar::new(), &k)))
 }
 
-fn actions(s: &App, problem: &Problem, size: ControlSize) -> El {
-    let k = theme::kit();
+fn actions(s: &App, problem: &Problem, size: ControlSize, k: &Kit) -> El {
     let mut r = row().gap(8.0).items_center();
     if s.link.starting {
         return r.child(rune_kit::Loader::new().size(12.0).color(faint()).build(k)).child(text("Starting Agenthail…").font(META).color(muted()));
@@ -259,18 +260,17 @@ fn actions(s: &App, problem: &Problem, size: ControlSize) -> El {
     r
 }
 
-fn panel(s: &App, problem: &Problem) -> El {
-    let k = theme::kit();
+fn panel(s: &App, problem: &Problem, k: &Kit) -> El {
     let glyph = if *problem == Problem::Slow { &icons::CLOCK } else { &icons::BOLT };
     let mut c = col().key("connect").w_full().h_full().items_center().justify_center().gap(12.0).child(icon(glyph, 28.0).color(faint())).child(text(problem.title()).font(HEADING).color(muted()));
     c = c.child(text(problem.detail()).font(BODY).color(faint()).wrap().max_w(460.0));
     if *problem == Problem::Slow {
         c = c.child(rune_kit::Loader::new().size(16.0).color(faint()).build(k));
     }
-    c.child(actions(s, problem, ControlSize::Regular)).child(el().h(80.0))
+    c.child(actions(s, problem, ControlSize::Regular, k)).child(el().h(80.0))
 }
 
-pub fn bar(s: &App) -> Option<El> {
+pub fn bar(s: &App, k: &Kit) -> Option<El> {
     if s.snapshots == 0 || s.fixtures.is_some() {
         return None;
     }
@@ -282,7 +282,7 @@ pub fn bar(s: &App) -> Option<El> {
             .items_center()
             .child(el().size(6.0, 6.0).radius(3.0).fill(failed()))
             .child(text(problem.bar(s.link.as_of.map(|at| at.elapsed()))).font(META).color(muted()))
-            .child(actions(s, problem, ControlSize::Small))
+            .child(actions(s, problem, ControlSize::Small, k))
             .help(problem.detail()),
     )
 }

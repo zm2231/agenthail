@@ -1,6 +1,6 @@
 use feed::catalog::{self, PHASES, Session, State};
 use rune::{Color, Cx, El, Icon, ScrollSpec, Transition, Tx, col, el, icon, row, text, text_input};
-use rune_kit::{Button, ButtonVariant, Keybind, KeybindVariant};
+use rune_kit::{Button, ButtonVariant, Keybind, KeybindVariant, Kit, KitCx, KitTheme};
 
 use crate::icons;
 use crate::theme::{
@@ -97,8 +97,8 @@ pub(crate) fn pill(glyph: &'static Icon, value: impl Into<String>, color: Color)
         .child(text(value.into()).font(META_BOLD).color(color).truncate().max_w(240.0))
 }
 
-pub(crate) fn keys(k: &[&str]) -> El {
-    Keybind::new(k).variant(KeybindVariant::Ghost).build(theme::kit())
+pub(crate) fn keys(keys: &[&str], k: &Kit) -> El {
+    Keybind::new(keys).variant(KeybindVariant::Ghost).build(k)
 }
 
 pub(crate) fn status_mark(state: State) -> El {
@@ -113,23 +113,29 @@ pub(crate) fn avatar_with_state(name: &str, state: State, size: f32) -> El {
 
 pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let in_session = s.screen == Screen::Session;
-    crate::look::frame(cx, in_session, true, true);
+    let themes = crate::look::frame(cx, in_session, true, true);
+    cx.with_kit(&themes.main, |cx| window(s, cx, &themes.chrome, in_session))
+}
+
+fn window(s: &App, cx: &mut Cx<App>, chrome: &KitTheme, in_session: bool) -> El {
+    let k = cx.kit();
     let mut layer = Vec::new();
-    let body = match (connect::screen(s, cx), &s.screen) {
+    let body = match (connect::screen(s, cx, chrome), &s.screen) {
         (Some(body), _) => body,
-        (None, Screen::Session) => session_body(s, cx),
-        (None, _) => crate::over::view(s, cx, &mut layer),
+        (None, Screen::Session) => session_body(s, cx, chrome),
+        (None, _) => cx.with_kit(chrome, |cx| crate::over::view(s, cx, &mut layer, &k)),
     };
-    crate::over::overlays(s, &mut layer);
-    session_menu::overlays(s, &mut layer);
-    attach::overlays(s, &mut layer);
-    pr_link::overlays(s, &mut layer);
-    turn_options::overlays(s, &mut layer);
-    inspect::overlays(s, &mut layer);
-    limit::overlays(s, &mut layer);
-    accounts::overlays(s, &mut layer);
-    holders::overlays(s, &mut layer);
-    new_session::view(s, &mut layer);
+    let c = cx.with_kit(chrome, |cx| cx.kit());
+    crate::over::overlays(s, &mut layer, &c);
+    session_menu::overlays(s, &mut layer, &k);
+    attach::overlays(s, &mut layer, &k);
+    pr_link::overlays(s, &mut layer, &k);
+    turn_options::overlays(s, &mut layer, &k);
+    inspect::overlays(s, &mut layer, &k);
+    limit::overlays(s, &mut layer, &k);
+    accounts::overlays(s, &mut layer, &k);
+    holders::overlays(s, &mut layer, &k);
+    new_session::view(s, &mut layer, &k);
     let root = col()
         .w_full()
         .h_full()
@@ -138,20 +144,26 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     rune_kit::root(root, layer)
 }
 
-fn session_body(s: &App, cx: &mut Cx<App>) -> El {
+fn session_body(s: &App, cx: &mut Cx<App>, chrome: &KitTheme) -> El {
+    let k = cx.kit();
     let selected = s.selected.as_deref();
     let x = selected.and_then(|id| gone::shown(s, id));
     let project = x.and_then(|x| crate::over::ui::project_for(s, x));
-    let sidebar = crate::over::ui::sidebar(s, project.as_deref(), selected);
-    crate::over::ui::frame(cx, s, Some(sidebar), session_screen(s), x.map(|x| rail(s, x)), session_toolbar(s, x))
+    let screen = session_screen(s, &k);
+    let rail = x.map(|x| rail(s, x, &k));
+    cx.with_kit(chrome, |cx| {
+        let c = cx.kit();
+        let sidebar = crate::over::ui::sidebar(s, project.as_deref(), selected, &c);
+        crate::over::ui::frame(cx, s, Some(sidebar), screen, rail, session_toolbar(s, x, &c), &k)
+    })
 }
 
-fn session_toolbar(s: &App, x: Option<&Session>) -> rune_kit::shell::Toolbar {
-    let bar = rune_kit::shell::Toolbar::new().trailing(crate::over::ui::needs_button(s));
+fn session_toolbar(s: &App, x: Option<&Session>, c: &Kit) -> rune_kit::shell::Toolbar {
+    let bar = rune_kit::shell::Toolbar::new().trailing(crate::over::ui::needs_button(s, c));
     let Some(x) = x else { return bar };
     let (name, key) = (x.project_name(), x.project_key());
     let title = s.ov.d.session(&x.id).map(|w| s.ov.d.title(w)).unwrap_or_else(|| x.title());
-    let crumb = crate::over::ui::crumb(&[(&name, false), (&crate::over::ui::short_title(&title, 40), true)]);
+    let crumb = crate::over::ui::crumb(&[(&name, false), (&crate::over::ui::short_title(&title, 40), true)], c);
     let crumb = if s.ov.d.project(&key).is_some() { row().on_press(move |s: &mut App| crate::over::go(s, Screen::Project(key.clone()))).child(crumb) } else { crumb };
     bar.leading(row().gap(14.0).items_center().child(crate::over::ui::avatar(&name, 18.0)).child(crumb))
 }

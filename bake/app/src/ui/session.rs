@@ -1,10 +1,11 @@
+use rune_kit::Kit;
 use super::*;
 use feed::composer::Busy;
 use crate::Confirm;
 
 const COMPOSER_BELOW: f32 = 18.0;
 
-pub(crate) fn header(s: &App, x: &Session) -> El {
+pub(crate) fn header(s: &App, x: &Session, k: &Kit) -> El {
     let state = x.state(s.now);
     let label_value = if state == State::NeedsYou || x.display.label.is_empty() { state.label().to_string() } else { x.display.label.clone() };
     let mut chips = row().w_full().flex_wrap().gap(6.0).items_center().child(chip(&icons::FOLDER, x.project_name()));
@@ -32,13 +33,13 @@ pub(crate) fn header(s: &App, x: &Session) -> El {
                 .flex_wrap()
                 .gap(12.0)
                 .items_center()
-                .child(col().grow(1.0).w(1.0).min_w(260.0).gap(7.0).child(text(x.title()).font(HEADING).color(theme::text()).truncate()).child(chips).child(crate::ui::chips::turn(s, x)))
+                .child(col().grow(1.0).w(1.0).min_w(260.0).gap(7.0).child(text(x.title()).font(HEADING).color(theme::text()).truncate()).child(chips).child(crate::ui::chips::turn(s, x, k)))
                 .child(pill(state_icon(state), label_value.clone(), state_color(state)).help(label_value)),
         )
         .child(session_menu::button(x))
 }
 
-pub(crate) fn composer(s: &App, x: &Session) -> El {
+pub(crate) fn composer(s: &App, x: &Session, k: &Kit) -> El {
     let input = super::paste::field(text_input(&s.composer, BODY)
         .key("composer")
         .w_full()
@@ -101,7 +102,6 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
     }
     controls = controls.child(status.truncate()).child(spacer());
     if unsent {
-        let k = theme::kit();
         let (id, back, drop, new) = (x.id.clone(), x.id.clone(), x.id.clone(), x.id.clone());
         if crate::unsent_held(s, &x.id) {
             controls = controls.child(Button::new(crate::confirm_label(s, &x.id, Confirm::PutBack)).variant(ButtonVariant::Ghost).build(k).key("send-put-back").on_press(move |s: &mut App| crate::put_back_unsent(s, &back)));
@@ -145,14 +145,14 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
                 .shrink()
                 .min_h(0.0)
                 .scroll(ScrollSpec { stick_bottom: false })
-                .children(super::notice::above(s, x))
-                .children(crate::ui::background::dock(s, x))
-                .children(crate::ui::queue::dock(s, x))
-                .children(super::attach::chips(s, &x.id).map(|c| col().w_full().px(12.0).pt(10.0).child(c))),
+                .children(super::notice::above(s, x, k))
+                .children(crate::ui::background::dock(s, x, k))
+                .children(crate::ui::queue::dock(s, x, k))
+                .children(super::attach::chips(s, &x.id, k).map(|c| col().w_full().px(12.0).pt(10.0).child(c))),
         )
         .children(super::complete::search(s, x))
         .children(super::complete::menu(s, x))
-        .children(super::paste::editor(s))
+        .children(super::paste::editor(s, k))
         .child(col().w_full().px(16.0).pt(13.0).pb(4.0).child(input))
         .child(controls.child(send_button))
         .on_layout(|s: &mut App, r: [f32; 4]| {
@@ -257,7 +257,7 @@ fn focus_switch() -> El {
         .child(side("focus-off", "Show work", !on, false))
 }
 
-pub(crate) fn changes_view(s: &App, id: &str) -> El {
+pub(crate) fn changes_view(s: &App, id: &str, k: &Kit) -> El {
     if session_edits(s, id).is_empty() {
         return col()
             .w_full()
@@ -278,20 +278,20 @@ pub(crate) fn changes_view(s: &App, id: &str) -> El {
         .pt(10.0)
         .pb(s.cover.reserve())
         .on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_view(r))
-        .child(rune_kit::diff::DiffView::new(|s: &App| &s.diff, |s: &mut App| &mut s.diff).key("diff").build(s, theme::kit()))
+        .child(rune_kit::diff::DiffView::new(|s: &App| &s.diff, |s: &mut App| &mut s.diff).key("diff").build(s, k))
 }
 
-pub(crate) fn session_screen(s: &App) -> El {
-    let Some(id) = s.selected.clone() else { return transcript::loading("Pick a session".into()) };
-    let Some(x) = session(s, &id).filter(|x| !x.archived) else { return super::gone::screen(s, &id) };
-    let mut center = col().grow(1.0).h_full().min_w(0.0).child(header(s, x));
+pub(crate) fn session_screen(s: &App, k: &Kit) -> El {
+    let Some(id) = s.selected.clone() else { return transcript::loading("Pick a session".into(), k) };
+    let Some(x) = session(s, &id).filter(|x| !x.archived) else { return super::gone::screen(s, &id, k) };
+    let mut center = col().grow(1.0).h_full().min_w(0.0).child(header(s, x, k));
     let open = open_request(s, x).is_some();
     let sent = has_settled(s, x);
     let stop = x.limit(s.now);
     if let Some(stop) = stop.as_ref().filter(|_| !open) {
-        center = center.child(super::limit::card(s, x, stop));
+        center = center.child(super::limit::card(s, x, stop, k));
     } else if open || (x.state(s.now) == State::NeedsYou && !sent) {
-        center = center.child(waiting_card(s, x));
+        center = center.child(waiting_card(s, x, k));
     } else if sent {
         let request = settled_request(s, x).map(|r| r.id.clone()).unwrap_or_default();
         let in_flight = s.answering.as_deref() == Some(request.as_str());
@@ -303,10 +303,10 @@ pub(crate) fn session_screen(s: &App) -> El {
         center = center.child(col().w_full().items_center().px(32.0).pb(12.0).child(pill(glyph, label, color)));
     }
     let bottom = match feed::notice::read_only(x) {
-        Some(why) => read_only(s, x, why),
-        None => composer(s, x),
+        Some(why) => read_only(s, x, why, k),
+        None => composer(s, x, k),
     };
-    let screen = conversation(s, &id, center).child(bottom).on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_bottom(r[1] + r[3]));
+    let screen = conversation(s, &id, center, k).child(bottom).on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_bottom(r[1] + r[3]));
     if x.read_only || !x.capabilities.send { screen } else { super::attach::drop_target(screen) }
 }
 
@@ -314,7 +314,7 @@ pub(crate) fn closed_note(why: String) -> El {
     col().w_full().px(15.0).py(13.0).child(text(why).font(BODY).color(muted()).wrap())
 }
 
-pub(crate) fn read_only(s: &App, x: &Session, why: String) -> El {
+pub(crate) fn read_only(s: &App, x: &Session, why: String, k: &Kit) -> El {
     let notice = col()
         .key("read-only")
         .w_full()
@@ -323,22 +323,22 @@ pub(crate) fn read_only(s: &App, x: &Session, why: String) -> El {
         .backdrop_blur(theme::paint().blur)
         .fill(theme::glass_tint())
         .border(1.0, theme::line())
-        .children(crate::ui::background::dock(s, x))
+        .children(crate::ui::background::dock(s, x, k))
         .child(closed_note(why))
         .on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_composer(r));
     col().w_full().items_center().px(28.0).pb(COMPOSER_BELOW).mt(-120.0).child(notice)
 }
 
-pub(crate) fn conversation(s: &App, id: &str, center: El) -> El {
+pub(crate) fn conversation(s: &App, id: &str, center: El, k: &Kit) -> El {
     let center = center.child(tabs(s, id)).child(el().w_full().h(1.0).fill(line()).on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_top(r[1] + r[3])));
     let empty = s.panes.get(id).is_none_or(|p| p.blocks.is_empty());
     if s.tab == Tab::Changes && !empty {
-        center.child(changes_view(s, id))
+        center.child(changes_view(s, id, k))
     } else if empty {
         let status = s.panes.get(id).map(|p| p.status.clone()).unwrap_or_default();
         let note = if matches!(status.as_str(), "" | "loading" | "live") { "Loading the transcript…".to_string() } else { status };
-        center.child(transcript::empty(s, id, note))
+        center.child(transcript::empty(s, id, note, k))
     } else {
-        center.child(transcript::view(s, id))
+        center.child(transcript::view(s, id, k))
     }
 }

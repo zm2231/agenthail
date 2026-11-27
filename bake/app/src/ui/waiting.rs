@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use feed::catalog::OpenRequest;
 use feed::request::{Field, Form, PagerKey, Response};
 use rune::{Key, KeyEvent};
-use rune_kit::Switch;
+use rune_kit::{Kit, Switch};
 
 use super::*;
 
@@ -98,7 +98,7 @@ fn clock_line(s: &App, request: &OpenRequest) -> Option<El> {
     request.deadline_label(s.now, super::background::clock(), offset).map(|t| row().key("request-deadline").gap(5.0).items_center().child(icon(&icons::CLOCK, 12.0).color(attention())).child(text(t).font(META_BOLD).color(attention())))
 }
 
-fn replaced_note(s: &App, request: &OpenRequest, route: &Route, busy: bool) -> Option<El> {
+fn replaced_note(s: &App, request: &OpenRequest, route: &Route, busy: bool, k: &Kit) -> Option<El> {
     if request.replaced_by.is_empty() {
         return None;
     }
@@ -106,7 +106,7 @@ fn replaced_note(s: &App, request: &OpenRequest, route: &Route, busy: bool) -> O
     let mut note = row().key("request-replaced").w_full().gap(10.0).items_center().child(text(format!("From a replaced lead. {lead} leads this project now, so this request no longer needs you.")).font(META).color(muted()).wrap().grow(1.0).min_w(0.0));
     if matches!(route, Route::Session) {
         let id = request.id.clone();
-        let withdraw = Button::new("Withdraw").variant(ButtonVariant::Neutral).build(theme::kit()).key("request-withdraw");
+        let withdraw = Button::new("Withdraw").variant(ButtonVariant::Neutral).build(k).key("request-withdraw");
         note = note.child(if busy { withdraw.opacity(0.5) } else { withdraw.on_press(move |s: &mut App| crate::withdraw_request(s, &id)) });
     }
     Some(note)
@@ -225,7 +225,7 @@ pub(crate) fn compound_answer(s: &App, request: &OpenRequest) -> Option<Response
     ready.then(|| Response { message: note, ..Response::picks(chosen, answers) })
 }
 
-fn compound_el(s: &App, request: &OpenRequest, route: &Route, busy: bool) -> El {
+fn compound_el(s: &App, request: &OpenRequest, route: &Route, busy: bool, k: &Kit) -> El {
     let picks = s.picks.get(&request.id).cloned().unwrap_or_default();
     let questions = request.questions.clone().unwrap_or_default();
     let step = s.asks.step.get(&request.id).copied().unwrap_or(0);
@@ -264,21 +264,21 @@ fn compound_el(s: &App, request: &OpenRequest, route: &Route, busy: bool) -> El 
         list = list.child(own_words(s, format!("{}|note", request.id), "Add a note for the agent (optional)", None));
     }
     let response = if busy { None } else { compound_answer(s, request) };
-    let submit = Button::new("Send answers").variant(if response.is_some() { ButtonVariant::Submit } else { ButtonVariant::Neutral }).icon(&icons::ARROW_UP).build(theme::kit()).key("pick-submit");
+    let submit = Button::new("Send answers").variant(if response.is_some() { ButtonVariant::Submit } else { ButtonVariant::Neutral }).icon(&icons::ARROW_UP).build(k).key("pick-submit");
     let submit = if reviewing { row().radius(10.0).border(1.0, attention().alpha(0.6)).child(submit) } else { submit };
     let (id, to) = (request.id.clone(), route.clone());
     let submit = match response {
         Some(response) => submit.on_press(move |s: &mut App| to.answer(s, &id, response.clone())),
         None => submit.opacity(0.5),
     };
-    list.child(row().gap(10.0).items_center().child(submit).children(decline(request, route, busy)).child(spacer()).child(pager_hint()))
+    list.child(row().gap(10.0).items_center().child(submit).children(decline(request, route, busy, k)).child(spacer()).child(pager_hint(k)))
 }
 
-fn decline(request: &OpenRequest, route: &Route, busy: bool) -> Option<El> {
+fn decline(request: &OpenRequest, route: &Route, busy: bool, k: &Kit) -> Option<El> {
     if request.kind == "ask" {
         return None;
     }
-    let b = Button::new("Decline").variant(ButtonVariant::Neutral).build(theme::kit()).key("question-decline");
+    let b = Button::new("Decline").variant(ButtonVariant::Neutral).build(k).key("question-decline");
     let (id, route) = (request.id.clone(), route.clone());
     Some(if busy { b.opacity(0.5) } else { b.on_press(move |s: &mut App| route.answer(s, &id, Response::choose("deny"))) })
 }
@@ -287,8 +287,8 @@ pub(crate) fn put_down_composer(s: &mut App, _: &mut Tx) {
     s.composer.focused = false;
 }
 
-fn pager_hint() -> El {
-    row().gap(4.0).items_center().child(keys(&["1–9"])).child(keys(&["←", "→"])).child(keys(&["↩"]))
+fn pager_hint(k: &Kit) -> El {
+    row().gap(4.0).items_center().child(keys(&["1–9"], k)).child(keys(&["←", "→"], k)).child(keys(&["↩"], k))
 }
 
 pub(crate) fn request_heading(request: &OpenRequest, who: &str) -> String {
@@ -346,12 +346,12 @@ fn form_content(s: &App, request: &OpenRequest, fields: &[Field]) -> Option<serd
     form.content(fields, |f| s.typed.get(&field_key(&request.id, f)).map(|t| t.text.clone()).unwrap_or_else(|| f.default_text()))
 }
 
-fn field_el(s: &App, request: &str, field: &Field, busy: bool) -> El {
+fn field_el(s: &App, request: &str, field: &Field, busy: bool, k: &Kit) -> El {
     let form = s.asks.forms.get(request).cloned().unwrap_or_default();
     let mut c = col().key(format!("field-{}", field.name)).w_full().gap(5.0);
     if field.is_switch() {
         let (rid, f) = (request.to_string(), field.clone());
-        c = c.child(Switch::new(form.is_on(field)).label(field.label()).disabled(busy).on_toggle(move |s: &mut App| s.asks.forms.entry(rid.clone()).or_default().flip(&f)).build(theme::kit()));
+        c = c.child(Switch::new(form.is_on(field)).label(field.label()).disabled(busy).on_toggle(move |s: &mut App| s.asks.forms.entry(rid.clone()).or_default().flip(&f)).build(k));
     } else if field.is_choice() {
         let picked = form.picked(field);
         c = c.child(text(field.label()).font(META_BOLD).color(muted())).child(row().w_full().flex_wrap().gap(6.0).children(field.options.iter().map(|o| {
@@ -395,10 +395,10 @@ fn field_el(s: &App, request: &str, field: &Field, busy: bool) -> El {
     c.children((!field.description.trim().is_empty()).then(|| text(field.description.clone()).font(META).color(muted()).wrap()))
 }
 
-fn input_el(s: &App, request: &OpenRequest, e: &feed::request::Elicitation, route: &Route, busy: bool) -> El {
+fn input_el(s: &App, request: &OpenRequest, e: &feed::request::Elicitation, route: &Route, busy: bool, k: &Kit) -> El {
     let mut c = col().w_full().gap(10.0).pt(4.0).child(row().gap(6.0).items_center().child(icon(&icons::MESSAGE, 12.0).color(muted())).child(text(format!("{} asks for input", e.asker())).font(META_BOLD).color(muted())));
     let answer = |label: &str, variant: ButtonVariant, response: Option<Response>, key: &str| {
-        let b = Button::new(label.to_string()).variant(variant).build(theme::kit()).key(format!("input-{key}"));
+        let b = Button::new(label.to_string()).variant(variant).build(k).key(format!("input-{key}"));
         match response.filter(|_| !busy) {
             Some(response) => {
                 let (id, route) = (request.id.clone(), route.clone());
@@ -417,21 +417,21 @@ fn input_el(s: &App, request: &OpenRequest, e: &feed::request::Elicitation, rout
         return c.child(link).child(row().gap(8.0).child(answer("Opened, continue", ButtonVariant::Submit, Some(Response::choose("allow")), "continue")).child(spacer()).child(answer("Decline", ButtonVariant::Neutral, Some(Response::choose("deny")), "decline")));
     }
     for field in &e.fields {
-        c = c.child(field_el(s, &request.id, field, busy));
+        c = c.child(field_el(s, &request.id, field, busy, k));
     }
     let content = form_content(s, request, &e.fields);
     let submit = if e.fields.is_empty() { Some(Response::choose("allow")) } else { content.map(Response::form) };
     c.child(row().gap(8.0).pt(2.0).child(answer("Submit", ButtonVariant::Submit, submit, "submit")).child(spacer()).child(answer("Decline", ButtonVariant::Neutral, Some(Response::choose("deny")), "decline")))
 }
 
-fn reply_box(s: &App, request: &OpenRequest, route: &Route, busy: bool) -> El {
+fn reply_box(s: &App, request: &OpenRequest, route: &Route, busy: bool, k: &Kit) -> El {
     let key = format!("{}|reply", request.id);
     let words = s.typed.get(&key).map(|t| t.text.trim().to_string()).unwrap_or_default();
     let send = {
         let (id, route) = (request.id.clone(), route.clone());
         move |s: &mut App, words: String| route.answer(s, &id, Response::with_message(feed::request::REPLY, &words))
     };
-    let button = Button::new("Send").variant(ButtonVariant::Neutral).build(theme::kit()).key("request-reply-send");
+    let button = Button::new("Send").variant(ButtonVariant::Neutral).build(k).key("request-reply-send");
     let button = if busy || words.is_empty() {
         button.opacity(0.5)
     } else {
@@ -442,13 +442,13 @@ fn reply_box(s: &App, request: &OpenRequest, route: &Route, busy: bool) -> El {
     row().w_full().gap(8.0).items_center().child(col().grow(1.0).min_w(0.0).child(input)).child(button)
 }
 
-pub(crate) fn request_body(s: &App, request: &OpenRequest, route: Route, busy: bool) -> El {
-    let mut c = col().w_full().gap(8.0).children(clock_line(s, request)).children(replaced_note(s, request, &route, busy));
+pub(crate) fn request_body(s: &App, request: &OpenRequest, route: Route, busy: bool, k: &Kit) -> El {
+    let mut c = col().w_full().gap(8.0).children(clock_line(s, request)).children(replaced_note(s, request, &route, busy, k));
     if let Some(e) = request.elicitation.as_ref().filter(|_| request.is_input()) {
-        return c.child(input_el(s, request, e, &route, busy));
+        return c.child(input_el(s, request, e, &route, busy, k));
     }
     if request.uses_pager() {
-        return c.child(col().key("compound-scroll").w_full().max_h(420.0).scroll(ScrollSpec { stick_bottom: false }).child(compound_el(s, request, &route, busy)));
+        return c.child(col().key("compound-scroll").w_full().max_h(420.0).scroll(ScrollSpec { stick_bottom: false }).child(compound_el(s, request, &route, busy, k)));
     }
     let question = single_question(request);
     if let Some(q) = question {
@@ -465,9 +465,9 @@ pub(crate) fn request_body(s: &App, request: &OpenRequest, route: Route, busy: b
     if let Some(q) = question.filter(|_| !request.options_only) {
         let (id, to, asked) = (request.id.clone(), route.clone(), q.question.clone());
         let send = move |s: &mut App, words: String| to.answer(s, &id, Response::picks(Vec::new(), [(asked.clone(), words)].into_iter().collect()));
-        c = c.child(own_words(s, format!("{}|0", request.id), "Or answer in your own words, then press Return", if busy { None } else { Some(Box::new(send)) })).child(row().gap(10.0).items_center().children(decline(request, &route, busy)).child(spacer()).child(pager_hint()));
+        c = c.child(own_words(s, format!("{}|0", request.id), "Or answer in your own words, then press Return", if busy { None } else { Some(Box::new(send)) })).child(row().gap(10.0).items_center().children(decline(request, &route, busy, k)).child(spacer()).child(pager_hint(k)));
     } else if replying {
-        c = c.child(reply_box(s, request, &route, busy));
+        c = c.child(reply_box(s, request, &route, busy, k));
     }
     c
 }
@@ -602,7 +602,7 @@ pub(crate) fn pager_key(s: &mut App, ev: &KeyEvent, route: &Route) -> bool {
     true
 }
 
-pub(crate) fn waiting_card(s: &App, x: &Session) -> El {
+pub(crate) fn waiting_card(s: &App, x: &Session, k: &Kit) -> El {
     let open = open_requests(s, x);
     let shown = shown_of(s, &x.id, &open);
     let busy = s.answering.is_some();
@@ -614,10 +614,10 @@ pub(crate) fn waiting_card(s: &App, x: &Session) -> El {
     let reply = Button::new(if offers { "Something else" } else { "Reply" })
         .variant(if offers { ButtonVariant::Neutral } else { ButtonVariant::Submit })
         .icon(&icons::CORNER)
-        .build(theme::kit())
+        .build(k)
         .key("waiting-reply")
         .on_press_tx(|_: &mut App, tx: &mut Tx| tx.focus("composer", true));
-    let next = Button::new("Next waiting").variant(ButtonVariant::Ghost).icon(&icons::ARROW_RIGHT).build(theme::kit()).key("waiting-next").on_press(crate::over::next_need);
+    let next = Button::new("Next waiting").variant(ButtonVariant::Ghost).icon(&icons::ARROW_RIGHT).build(k).key("waiting-next").on_press(crate::over::next_need);
     let source = match shown {
         Some(_) => Some("Answers the agent's question directly"),
         None if !choices.is_empty() => Some("Puts your pick in the reply box; press Return to send"),
@@ -630,11 +630,11 @@ pub(crate) fn waiting_card(s: &App, x: &Session) -> El {
         .child(row().w_full().gap(8.0).items_center().child(text("WAITING ON YOU").font(LABEL).color(attention())).children(source.map(|t| text(t).font(META).color(faint()))).child(spacer()).children(shown.and_then(|r| switcher(&x.id, &open, &r.id))))
         .child(text(question).font(TITLE).color(theme::text()).wrap());
     if let Some(request) = shown {
-        body = body.child(request_body(s, request, Route::Session, busy));
+        body = body.child(request_body(s, request, Route::Session, busy, k));
     } else if !choices.is_empty() {
         body = body.child(col().w_full().gap(6.0).pt(4.0).children(choices.into_iter().enumerate().map(|(i, c)| choice_el(i, c, busy, &Route::Session))));
     }
-    body = body.child(row().gap(8.0).pt(4.0).items_center().child(reply).child(next).child(spacer()).child(keys(&["⌘", "J"])));
+    body = body.child(row().gap(8.0).pt(4.0).items_center().child(reply).child(next).child(spacer()).child(keys(&["⌘", "J"], k)));
     let card_el = row()
         .w_full()
         .max_w(780.0)

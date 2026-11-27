@@ -1,17 +1,15 @@
 use feed::notify::{NOTIFICATION_SETTINGS, Permission, daemon_posts};
 use feed::prefs::{Notify, NotifyStatus, Preference};
 use rune::{El, row};
-use rune_kit::{Button, ButtonVariant, ControlSize};
+use rune_kit::{Button, ButtonVariant, ControlSize, Kit};
 
 use super::parts::{self, line, section};
 use super::{Prefs, Read, Section, busy, notify, saving, write};
-use crate::theme;
 
-fn desktop(s: &Prefs, status: &NotifyStatus) -> El {
-    let k = theme::kit();
+fn desktop(s: &Prefs, status: &NotifyStatus, k: &Kit) -> El {
     let toggling = busy(s);
     let on = status.enabled;
-    let switch = parts::switch("desktop-notifications", "Desktop notifications", on, toggling, move |s| notify(s, if on { Notify::Disable } else { Notify::Enable }));
+    let switch = parts::switch("desktop-notifications", "Desktop notifications", on, toggling, move |s| notify(s, if on { Notify::Disable } else { Notify::Enable }), k);
     let detail = if saving(s, Notify::Enable.action()) { "Asking macOS for permission…".to_string() } else { status.detail() };
     let test = Button::new("Send Test Notification")
         .control_size(ControlSize::Small)
@@ -32,17 +30,17 @@ fn desktop(s: &Prefs, status: &NotifyStatus) -> El {
     section("", rows, Some("Agenthail notifies when an agent finishes or fails, and when a message can't be delivered.".into()))
 }
 
-fn own(permission: Permission) -> Option<El> {
+fn own(permission: Permission, k: &Kit) -> Option<El> {
     let (head, how) = permission.note()?;
     let control = if permission.warns() {
-        Button::new("Open System Settings…").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(|_: &mut Prefs| crate::open_settings(NOTIFICATION_SETTINGS)).build(theme::kit()).key("settings-notify-permission")
+        Button::new("Open System Settings…").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(|_: &mut Prefs| crate::open_settings(NOTIFICATION_SETTINGS)).build(k).key("settings-notify-permission")
     } else {
         row()
     };
     Some(line(head, Some(how.to_string()), control))
 }
 
-fn preferences(s: &Prefs, list: &[Preference]) -> El {
+fn preferences(s: &Prefs, list: &[Preference], k: &Kit) -> El {
     let rows = list
         .iter()
         .map(|p| {
@@ -51,14 +49,14 @@ fn preferences(s: &Prefs, list: &[Preference]) -> El {
             let control = parts::switch(&key, &p.title, value, busy(s), move |s| {
                 let id = id.clone();
                 write(s, format!("preference-{id}"), Section::Notify, &[Read::Preferences], move |c| c.set_notification_preference(&id, !value).map(|_| crate::notify::preference_saved(&id, !value)));
-            });
+            }, k);
             line(&p.title, Some(p.detail.clone()), control)
         })
         .collect();
     section("What notifies", rows, None)
 }
 
-pub fn page(s: &Prefs) -> El {
+pub fn page(s: &Prefs, k: &Kit) -> El {
     let mut out = parts::page();
     if let Some(f) = s.notes.get(&Section::Notify) {
         out = out.child(parts::failure(s, f));
@@ -66,10 +64,10 @@ pub fn page(s: &Prefs) -> El {
     match &s.settings {
         None => out = out.child(parts::reading("notification access")),
         Some(Err(f)) => out = out.child(parts::failure(s, f)),
-        Some(Ok(st)) => out = out.child(desktop(s, &st.notifications)),
+        Some(Ok(st)) => out = out.child(desktop(s, &st.notifications, k)),
     }
     if !std::env::var_os("HOME").is_some_and(|home| daemon_posts(std::path::Path::new(&home)))
-        && let Some(note) = s.permission.and_then(own)
+        && let Some(note) = s.permission.and_then(|p| own(p, k))
     {
         out = out.child(section("", vec![note], None));
     }
@@ -77,6 +75,6 @@ pub fn page(s: &Prefs) -> El {
         None => out.child(parts::reading("notification preferences")),
         Some(Err(f)) => out.child(parts::failure(s, f)),
         Some(Ok(list)) if list.is_empty() => out,
-        Some(Ok(list)) => out.child(preferences(s, list)),
+        Some(Ok(list)) => out.child(preferences(s, list, k)),
     }
 }

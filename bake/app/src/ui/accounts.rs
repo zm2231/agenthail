@@ -5,7 +5,7 @@ use feed::catalog::{Client, RespondError};
 use feed::limit::span;
 use feed::prefer::{self, Meter, Plan, Prefer, ProxyAccount, ProxyGroup, Set};
 use rune::{El, ScrollSpec, col, el, row, text};
-use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Switch};
+use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit, Switch};
 
 use crate::theme::{self, BODY_BOLD, LABEL, META, attention, done, failed, faint, muted};
 use crate::{App, select};
@@ -200,8 +200,7 @@ pub fn drain(s: &mut App) -> bool {
     changed
 }
 
-fn meter_row(s: &App, m: &Meter) -> El {
-    let k = theme::kit();
+fn meter_row(s: &App, m: &Meter, k: &Kit) -> El {
     let pct = m.percent;
     let color = if m.critical() { failed() } else if pct >= 60.0 || m.severity == "warning" { attention() } else { theme::text() };
     let read = m.as_of.as_deref().and_then(feed::catalog::parse_time).map(|at| ((s.now - at).whole_seconds() / 60).max(1));
@@ -245,7 +244,7 @@ fn sessions_on(s: &App, set: &Set) -> Vec<El> {
         .collect()
 }
 
-fn account_card(s: &App, set: &Set) -> El {
+fn account_card(s: &App, set: &Set, k: &Kit) -> El {
     let mut c = col()
         .w_full()
         .gap(6.0)
@@ -253,7 +252,7 @@ fn account_card(s: &App, set: &Set) -> El {
         .radius(8.0)
         .fill(crate::theme::ink(0.04))
         .child(row().gap(8.0).items_center().child(text(set.title()).font(BODY_BOLD).color(theme::text()).truncate()).child(el().grow(1.0)).child(text(set.host.clone()).font(META).color(faint())));
-    c = c.children(set.meters.iter().map(|m| meter_row(s, m)));
+    c = c.children(set.meters.iter().map(|m| meter_row(s, m, k)));
     if !set.problem.is_empty() {
         c = c.child(text(set.problem.clone()).font(META).color(attention()).wrap());
     } else if let Some(proxy) = set.via() {
@@ -264,8 +263,7 @@ fn account_card(s: &App, set: &Set) -> El {
     c.children(sessions_on(s, set))
 }
 
-fn proxy_account(s: &App, group: &ProxyGroup, a: &ProxyAccount) -> El {
-    let k = theme::kit();
+fn proxy_account(s: &App, group: &ProxyGroup, a: &ProxyAccount, k: &Kit) -> El {
     let change = |set: Prefer| Change { proxy: group.proxy.id.clone(), account: a.id.clone(), label: a.label.clone(), set, now: false };
     let mut head = row().gap(8.0).items_center().child(text(a.label.clone()).font(BODY_BOLD).color(theme::text()).truncate());
     if a.routed {
@@ -275,7 +273,7 @@ fn proxy_account(s: &App, group: &ProxyGroup, a: &ProxyAccount) -> El {
         head = head.child(text(a.status.clone()).font(META).color(attention()));
     }
     let mut c = col().w_full().gap(6.0).padding(10.0).radius(8.0).fill(crate::theme::ink(0.04)).child(head);
-    c = c.children(a.meters.iter().map(|m| meter_row(s, m)));
+    c = c.children(a.meters.iter().map(|m| meter_row(s, m, k)));
     let on = a.set_to_prefer();
     let toggle = if on { change(Prefer::Off) } else { change(Prefer::On) };
     let help = if on && !a.preferred { "Set to prefer, though it doesn't lead routing now; turning it off changes only this account" } else { "Changes only this account's preference" };
@@ -306,8 +304,7 @@ fn proxy_account(s: &App, group: &ProxyGroup, a: &ProxyAccount) -> El {
     c.child(actions)
 }
 
-fn panel(s: &App, layer: &mut Vec<El>) {
-    let k = theme::kit();
+fn panel(s: &App, layer: &mut Vec<El>, k: &Kit) {
     let mut body = col().w_full().gap(10.0);
     if let Some(error) = &s.accounts.refresh_error {
         body = body.child(text(format!("Couldn't refresh usage, so these readings may be out of date: {error}")).font(META).color(failed()).wrap());
@@ -318,12 +315,12 @@ fn panel(s: &App, layer: &mut Vec<El>) {
         Some(Ok(sets)) => {
             let plain = prefer::accounts(sets);
             if !plain.is_empty() {
-                body = body.child(text("ACCOUNTS").font(LABEL).color(faint())).children(plain.into_iter().map(|set| account_card(s, set)));
+                body = body.child(text("ACCOUNTS").font(LABEL).color(faint())).children(plain.into_iter().map(|set| account_card(s, set, k)));
             }
             for group in prefer::proxies(sets) {
                 let heading = if group.local { format!("{} PROXY", group.proxy.name.to_uppercase()) } else { format!("{} PROXY · READ FROM {}", group.proxy.name.to_uppercase(), group.host.to_uppercase()) };
                 body = body.child(text(heading).font(LABEL).color(faint()).pt(4.0));
-                body = body.children(group.accounts.iter().map(|a| proxy_account(s, &group, a)));
+                body = body.children(group.accounts.iter().map(|a| proxy_account(s, &group, a, k)));
                 if !group.problem.is_empty() {
                     body = body.child(text(group.problem.clone()).font(META).color(attention()).wrap());
                 }
@@ -346,8 +343,7 @@ fn title(c: &Change) -> String {
     }
 }
 
-fn sheet(p: &Planning, layer: &mut Vec<El>) {
-    let k = theme::kit();
+fn sheet(p: &Planning, layer: &mut Vec<El>, k: &Kit) {
     let mut body = col().w_full().gap(6.0).px(16.0);
     let ready = match &p.plan {
         None => {
@@ -399,11 +395,11 @@ fn sheet(p: &Planning, layer: &mut Vec<El>) {
     Dialog::new("prefer", title(&p.change)).open(true).fit().width(440.0).on_close(close_sheet).child(body).child(buttons).build(k, layer);
 }
 
-pub fn overlays(s: &App, layer: &mut Vec<El>) {
+pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
     if s.accounts.open {
-        panel(s, layer);
+        panel(s, layer, k);
     }
     if let Some(p) = &s.accounts.planning {
-        sheet(p, layer);
+        sheet(p, layer, k);
     }
 }

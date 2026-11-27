@@ -1,6 +1,6 @@
 use feed::prefs::Failure;
 use rune::{El, ScrollSpec, Tx, col, el, row, text};
-use rune_kit::{Select, SelectAppearance, Switch};
+use rune_kit::{Kit, Select, SelectAppearance, Switch};
 
 use super::{Prefs, toggle_select};
 use crate::theme::{self, BODY, BODY_BOLD, META, attention, failed, faint, muted};
@@ -64,11 +64,11 @@ pub fn reading(what: &str) -> El {
     text(format!("Reading {what}…")).font(META).color(faint()).px(4.0)
 }
 
-pub fn switch(key: &str, label: &str, on: bool, disabled: bool, flip: impl Fn(&mut Prefs) + 'static) -> El {
-    Switch::new(on).label(label.to_string()).hide_label().disabled(disabled).on_toggle(flip).build(theme::kit()).key(format!("settings-{key}"))
+pub fn switch(key: &str, label: &str, on: bool, disabled: bool, flip: impl Fn(&mut Prefs) + 'static, k: &Kit) -> El {
+    Switch::new(on).label(label.to_string()).hide_label().disabled(disabled).on_toggle(flip).build(k).key(format!("settings-{key}"))
 }
 
-pub fn select(s: &Prefs, key: &'static str, label: &str, choices: Vec<(String, String)>, current: &str, disabled: bool, layer: &mut Vec<El>, choose: impl Fn(&mut Prefs, String) + Clone + 'static) -> El {
+pub fn select(s: &Prefs, key: &'static str, label: &str, choices: Vec<(String, String)>, current: &str, disabled: bool, layer: &mut Vec<El>, choose: impl Fn(&mut Prefs, String) + Clone + 'static, k: &Kit) -> El {
     let labels: Vec<&str> = choices.iter().map(|(label, _)| label.as_str()).collect();
     let picked = choices.iter().find(|(_, value)| value == current).map(|(label, _)| label.as_str());
     let values = choices.clone();
@@ -88,5 +88,5 @@ pub fn select(s: &Prefs, key: &'static str, label: &str, choices: Vec<(String, S
                 choose(s, value.clone());
             }
         })
-        .build(theme::kit(), layer)
+        .build(k, layer)
 }

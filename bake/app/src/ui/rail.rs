@@ -1,3 +1,4 @@
+use rune_kit::Kit;
 use super::*;
 
 pub(crate) fn rail_section(title: &str, glyph: &'static Icon, body: El) -> El {
@@ -57,7 +58,7 @@ pub(crate) fn priority(p: &str) -> El {
     row().px(6.0).py(2.0).radius(6.0).fill(color.alpha(0.15)).child(text(p.to_string()).font(META_BOLD).color(color))
 }
 
-pub(crate) fn rail(s: &App, x: &Session) -> El {
+pub(crate) fn rail(s: &App, x: &Session, k: &Kit) -> El {
     let mut parts: Vec<El> = Vec::new();
     parts.extend(super::ready::led_by(s, &x.id).and_then(|p| super::ready::link(s, &p.key)).map(|link| row().w_full().pt(12.0).items_center().child(label("Lead")).child(spacer()).child(link)));
     if let Some(work) = x.primary_work(s.work_pick.get(&x.id).map(String::as_str)) {
@@ -174,10 +175,10 @@ pub(crate) fn rail(s: &App, x: &Session) -> El {
             })),
         ));
     }
-    parts.extend(super::inspect::above(s, x));
-    parts.extend(super::subagents::section(s, x));
+    parts.extend(super::inspect::above(s, x, k));
+    parts.extend(super::subagents::section(s, x, k));
     parts.extend(super::inspect::below(s, x));
-    parts.extend(super::delivery::section(s, x));
+    parts.extend(super::delivery::section(s, x, k));
     let mut facts: Vec<(&'static Icon, &str, String, &str)> = vec![
         (&icons::SPARKLES, "Agent", x.surface.clone(), ""),
         (&icons::SERVER, "Host", x.host.name.clone(), ""),

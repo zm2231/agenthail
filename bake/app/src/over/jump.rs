@@ -1,3 +1,4 @@
+use rune_kit::Kit;
 use rune::{Color, El, Icon, Key, KeyEvent, ScrollSpec, TextStyle, Tx, col, icon, row, text, text_input};
 use rune_theme_opencode::icons;
 
@@ -6,7 +7,7 @@ use feed::search::{Command, Selected, commands, commands_lead, one_line};
 
 use crate::icons as ah;
 use crate::over::search;
-use crate::over::ui::{self, BODY_MED, META, META_MED, kit, strong, weak};
+use crate::over::ui::{self, BODY_MED, META, META_MED, strong, weak};
 use crate::over::{Target, open_target};
 use crate::App;
 
@@ -137,8 +138,7 @@ pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     }
 }
 
-pub fn view(s: &App, layer: &mut Vec<El>) {
-    let k = kit();
+pub fn view(s: &App, layer: &mut Vec<El>, k: &Kit) {
     let Some(edit) = &s.ov.jump else { return };
     let input = text_input(edit, TextStyle::new(16.0, 450.0).lh(22.0))
         .single_line()
@@ -146,8 +146,8 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
         .label("Jump to")
         .grow(1.0)
         .shrink()
-        .color(strong())
-        .placeholder("Jump to a project, work item or session, or run a command".to_string(), weak())
+        .color(strong(k))
+        .placeholder("Jump to a project, work item or session, or run a command".to_string(), weak(k))
         .on_edit(|s: &mut App| {
             if s.ov.jump_ix.0 != query(s) {
                 s.ov.jump_ix = (query(s).to_string(), 0);
@@ -155,7 +155,7 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
             s.ov.jump.as_mut().expect("jump open")
         })
         .on_input_key(|s: &mut App, ev: &KeyEvent, tx: &mut Tx| key(s, ev, tx));
-    let search = row().w_full().gap(10.0).items_center().px(16.0).py(14.0).border_sides([0.0, 0.0, 1.0, 0.0], ui::rule()).child(icon(&icons::MAGNIFYING_GLASS, 18.0).color(k.c.icon_base)).child(input).child(ui::ghost_keys(&["esc"]));
+    let search = row().w_full().gap(10.0).items_center().px(16.0).py(14.0).border_sides([0.0, 0.0, 1.0, 0.0], ui::rule(k)).child(icon(&icons::MAGNIFYING_GLASS, 18.0).color(k.c.icon_base)).child(input).child(ui::ghost_keys(&["esc"], k));
     let mut list = col().w_full().gap(2.0).padding(8.0);
     let mut last = "";
     let found = entries(s);
@@ -163,7 +163,7 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
     let mut i = 0;
     for h in found {
         if h.group != last {
-            list = list.child(text(h.group.to_string()).font(META_MED).color(weak()).px(10.0).pt(if last.is_empty() { 4.0 } else { 12.0 }).pb(4.0));
+            list = list.child(text(h.group.to_string()).font(META_MED).color(weak(k)).px(10.0).pt(if last.is_empty() { 4.0 } else { 12.0 }).pb(4.0));
             last = h.group;
         }
         let mark = match &h.look {
@@ -171,15 +171,15 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
             Look::Icon(glyph) => row().w(22.0).h(22.0).items_center().justify_center().child(icon(glyph, 15.0).color(k.c.icon_base)),
         };
         let Some(pick) = h.pick else {
-            list = list.child(row().w_full().gap(12.0).items_center().px(10.0).py(6.0).child(mark).child(text(h.title).font(META).color(weak()).wrap().shrink()));
+            list = list.child(row().w_full().gap(12.0).items_center().px(10.0).py(6.0).child(mark).child(text(h.title).font(META).color(weak(k)).wrap().shrink()));
             continue;
         };
         let active = i == ix;
         let at = i;
         i += 1;
-        let mut body = col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(text(h.title).font(BODY_MED).color(strong()).truncate());
+        let mut body = col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(text(h.title).font(BODY_MED).color(strong(k)).truncate());
         if !h.status.is_empty() {
-            body = body.child(text(h.status).font(META).color(weak()).truncate());
+            body = body.child(text(h.status).font(META).color(weak(k)).truncate());
         }
         let mut r = row()
             .key(format!("hit-{at}"))
@@ -192,7 +192,7 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
             .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, pick.clone(), tx))
             .child(mark)
             .child(body)
-            .child(text(h.badge).font(META).color(weak()));
+            .child(text(h.badge).font(META).color(weak(k)));
         if active {
             r = r.fill(k.c.surface_raised_hover).child(icon(&icons::ENTER, 14.0).color(k.c.icon_base));
         } else {
@@ -206,11 +206,11 @@ pub fn view(s: &App, layer: &mut Vec<El>) {
         .items_center()
         .px(16.0)
         .py(10.0)
-        .border_sides([1.0, 0.0, 0.0, 0.0], ui::rule())
-        .child(row().gap(6.0).items_center().child(ui::ghost_keys(&["↑", "↓"])).child(text("move".to_string()).font(META).color(weak())))
-        .child(row().gap(6.0).items_center().child(ui::ghost_keys(&["⏎"])).child(text("open".to_string()).font(META).color(weak())))
+        .border_sides([1.0, 0.0, 0.0, 0.0], ui::rule(k))
+        .child(row().gap(6.0).items_center().child(ui::ghost_keys(&["↑", "↓"], k)).child(text("move".to_string()).font(META).color(weak(k))))
+        .child(row().gap(6.0).items_center().child(ui::ghost_keys(&["⏎"], k)).child(text("open".to_string()).font(META).color(weak(k))))
         .child(ui::spacer())
-        .child(text("Projects, work, sessions and commands, then older Codex threads".to_string()).font(META).color(weak()));
+        .child(text("Projects, work, sessions and commands, then older Codex threads".to_string()).font(META).color(weak(k)));
     let panel = col()
         .key("jump")
         .w(680.0)

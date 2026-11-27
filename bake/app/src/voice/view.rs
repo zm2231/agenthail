@@ -1,29 +1,34 @@
 use feed::voice::{ELSEWHERE, MIC_SETTINGS, OCCUPIED, Pick, Role, matching, without_tools_notice};
 use rune::{Cx, El, Key, KeyEvent, ScrollSpec, Tx, col, el, icon, row, text, text_input};
-use rune_kit::{Button, ButtonVariant, ControlSize};
+use rune_kit::{Button, ButtonVariant, ControlSize, Kit, KitCx};
 use rune_theme_opencode::icons as theme_icons;
 
 use super::{Ask, Win, open_timeline};
 use crate::icons;
-use crate::theme::{self, BODY, BODY_BOLD, META, META_BOLD, TITLE, accent, failed, faint, kit, line, muted, wash};
+use crate::theme::{self, BODY, BODY_BOLD, META, META_BOLD, TITLE, accent, failed, faint, line, muted, wash};
 
-pub fn view(w: &Win, _: &mut Cx<Win>) -> El {
+pub fn view(w: &Win, cx: &mut Cx<Win>) -> El {
     super::trace("view", w);
+    cx.with_kit(&theme::themes().main, |cx| window(w, cx))
+}
+
+fn window(w: &Win, cx: &mut Cx<Win>) -> El {
+    let k = cx.kit();
     col()
         .w_full()
         .h_full()
         .fill(theme::card_deep())
         .child(el().key("voice-peer").absolute(0.0, 0.0).size(1.0, 1.0).opacity(0.01).native_view(&w.slot))
-        .child(header(w))
-        .child(col().key("voice-body").w_full().grow(1.0).shrink().scroll(ScrollSpec { stick_bottom: true }).child(body(w)))
-        .child(controls(w))
+        .child(header(w, &k))
+        .child(col().key("voice-body").w_full().grow(1.0).shrink().scroll(ScrollSpec { stick_bottom: true }).child(body(w, &k)))
+        .child(controls(w, &k))
 }
 
 fn small(label: impl Into<String>, variant: ButtonVariant) -> Button {
     Button::new(label).variant(variant).control_size(ControlSize::Small)
 }
 
-fn header(w: &Win) -> El {
+fn header(w: &Win, k: &Kit) -> El {
     let live = w.call.audio_connected;
     let glyph = col()
         .size(36.0, 36.0)
@@ -48,7 +53,7 @@ fn header(w: &Win) -> El {
         .help("Start a new orchestrator conversation")
         .disabled(!w.call.can_start_new())
         .on_press(|w: &mut Win| w.ask = Some(Ask::NewConversation))
-        .build(kit())
+        .build(k)
         .key("voice-new");
     let mut head = col().w_full().px(20.0).pt(40.0).pb(14.0).gap(10.0).window_drag().border_sides([0.0, 0.0, 1.0, 0.0], line())
         .child(row().w_full().gap(12.0).items_center().child(glyph).child(titles).child(new));
@@ -62,12 +67,13 @@ fn header(w: &Win) -> El {
                 let effects = w.call.start_new();
                 w.run(effects);
             },
+            k,
         ));
     }
     head
 }
 
-fn confirm(title: &str, detail: &str, yes: &str, act: fn(&mut Win)) -> El {
+fn confirm(title: &str, detail: &str, yes: &str, act: fn(&mut Win), k: &Kit) -> El {
     col()
         .w_full()
         .gap(8.0)
@@ -82,8 +88,8 @@ fn confirm(title: &str, detail: &str, yes: &str, act: fn(&mut Win)) -> El {
                 .w_full()
                 .gap(8.0)
                 .child(el().grow(1.0))
-                .child(small("Cancel", ButtonVariant::Ghost).on_press(|w: &mut Win| w.ask = None).build(kit()).key("voice-ask-cancel"))
-                .child(small(yes.to_string(), ButtonVariant::Danger).on_press(act).build(kit()).key("voice-ask-yes")),
+                .child(small("Cancel", ButtonVariant::Ghost).on_press(|w: &mut Win| w.ask = None).build(k).key("voice-ask-cancel"))
+                .child(small(yes.to_string(), ButtonVariant::Danger).on_press(act).build(k).key("voice-ask-yes")),
         )
 }
 
@@ -95,10 +101,10 @@ fn note(value: impl Into<String>, color: rune::Color) -> El {
     text(value.into()).font(BODY).color(color).wrap().w_full()
 }
 
-fn body(w: &Win) -> El {
+fn body(w: &Win, k: &Kit) -> El {
     let mut b = col().w_full().gap(14.0).padding(20.0);
     if w.call.mic_denied {
-        let settings = small("Open System Settings", ButtonVariant::Neutral).on_press(|_: &mut Win| crate::open_settings(MIC_SETTINGS)).build(kit()).key("voice-mic-settings");
+        let settings = small("Open System Settings", ButtonVariant::Neutral).on_press(|_: &mut Win| crate::open_settings(MIC_SETTINGS)).build(k).key("voice-mic-settings");
         b = b.child(
             col()
                 .key("voice-mic-denied")
@@ -126,7 +132,7 @@ fn body(w: &Win) -> El {
         b = b.child(note(message, failed()));
     }
     if let Some(notice) = from_message.or(from_error) {
-        b = b.child(tools_notice(w, notice));
+        b = b.child(tools_notice(w, notice, k));
     }
     if w.call.state.as_ref().is_some_and(|s| s.occupied) {
         b = b.child(note(OCCUPIED, muted()).key("voice-occupied"));
@@ -138,14 +144,14 @@ fn body(w: &Win) -> El {
         b = b.child(brief);
     }
     if let Some(session) = w.call.state.as_ref().and_then(|s| s.session.clone()) {
-        b = b.child(operator(w, session.id));
+        b = b.child(operator(w, session.id, k));
     }
     if let Some(id) = w.call.attempt() {
         b = b.child(text(format!("Call ID {id}")).font(META).color(faint()).selectable(true));
     }
     let toggle = small(if w.details { "Hide voice details" } else { "Voice details" }, ButtonVariant::GhostMuted)
         .on_press(|w: &mut Win| w.details = !w.details)
-        .build(kit())
+        .build(k)
         .key("voice-details-toggle");
     b = b.child(row().child(toggle));
     if w.details {
@@ -154,12 +160,12 @@ fn body(w: &Win) -> El {
     b
 }
 
-fn tools_notice(w: &Win, notice: String) -> El {
+fn tools_notice(w: &Win, notice: String, k: &Kit) -> El {
     let new = small("New conversation", ButtonVariant::Neutral)
         .icon(&icons::PENCIL)
         .disabled(!w.call.can_start_new())
         .on_press(|w: &mut Win| w.ask = Some(Ask::NewConversation))
-        .build(kit())
+        .build(k)
         .key("voice-tools-new");
     col()
         .key("voice-tools-notice")
@@ -174,7 +180,7 @@ fn tools_notice(w: &Win, notice: String) -> El {
         .child(row().child(new))
 }
 
-fn operator(w: &Win, id: String) -> El {
+fn operator(w: &Win, id: String, k: &Kit) -> El {
     let label = match w.activity.as_ref().and_then(|a| a.state.as_deref()) {
         Some(state) => format!("Orchestrator · {state}"),
         None => "Orchestrator".to_string(),
@@ -193,11 +199,11 @@ fn operator(w: &Win, id: String) -> El {
                 .help("Interrupt the orchestrator's current turn")
                 .disabled(!w.call.can_interrupt())
                 .on_press(|w: &mut Win| w.ask = Some(Ask::Interrupt))
-                .build(kit())
+                .build(k)
                 .key("voice-interrupt"),
         );
     }
-    head = head.child(small("Open timeline", ButtonVariant::GhostMuted).on_press(move |_: &mut Win| open_timeline(&id)).build(kit()).key("voice-timeline"));
+    head = head.child(small("Open timeline", ButtonVariant::GhostMuted).on_press(move |_: &mut Win| open_timeline(&id)).build(k).key("voice-timeline"));
     let mut block = col().key("voice-operator").w_full().gap(6.0).child(head);
     if let Some(latest) = w.activity.as_ref().and_then(|a| a.latest.clone()) {
         block = block.child(text(latest).font(META).color(faint()).wrap().w_full().key("voice-operator-latest"));
@@ -212,6 +218,7 @@ fn operator(w: &Win, id: String) -> El {
                 let effects = w.call.interrupt();
                 w.run(effects);
             },
+            k,
         ));
     }
     block
@@ -383,7 +390,7 @@ fn transcript(w: &Win) -> El {
     list
 }
 
-fn controls(w: &Win) -> El {
+fn controls(w: &Win, k: &Kit) -> El {
     let mut dock = col().key("voice-controls").w_full().gap(10.0).padding(20.0).fill(theme::card()).border_sides([1.0, 0.0, 0.0, 0.0], line());
     let call = &w.call;
     let occupied = call.state.as_ref().is_some_and(|s| s.occupied);
@@ -400,7 +407,7 @@ fn controls(w: &Win) -> El {
                         let effects = w.call.hangup();
                         w.run(effects);
                     })
-                    .build(kit())
+                    .build(k)
                     .key("voice-hangup-again"),
             ),
         );
@@ -419,7 +426,7 @@ fn controls(w: &Win) -> El {
                     let effects = w.call.call();
                     w.run(effects);
                 })
-                .build(kit())
+                .build(k)
                 .key("voice-call")
                 .w_full(),
         );
@@ -429,7 +436,7 @@ fn controls(w: &Win) -> El {
         }
         if call.routed() {
             dock = dock.child(
-                row().child(small("Talk to the orchestrator instead", ButtonVariant::GhostMuted).on_press(|w: &mut Win| w.route("", "")).build(kit()).key("voice-unroute")),
+                row().child(small("Talk to the orchestrator instead", ButtonVariant::GhostMuted).on_press(|w: &mut Win| w.route("", "")).build(k).key("voice-unroute")),
             );
         }
         return dock;
@@ -444,6 +451,7 @@ fn controls(w: &Win) -> El {
                 let effects = w.call.interrupt_target();
                 w.run(effects);
             },
+            k,
         ));
     }
     let connected = call.connected_call();
@@ -463,13 +471,13 @@ fn controls(w: &Win) -> El {
                         let effects = w.call.transfer(&target);
                         w.run(effects);
                     })
-                    .build(kit())
+                    .build(k)
                     .key("voice-transfer"),
             );
         }
         if call.state.as_ref().is_some_and(|s| s.target.is_some()) {
             buttons = buttons.child(
-                small("Stop selected session", ButtonVariant::Ghost).icon(&icons::STOP).disabled(call.working()).on_press(|w: &mut Win| w.ask = Some(Ask::StopTarget)).build(kit()).key("voice-stop-target"),
+                small("Stop selected session", ButtonVariant::Ghost).icon(&icons::STOP).disabled(call.working()).on_press(|w: &mut Win| w.ask = Some(Ask::StopTarget)).build(k).key("voice-stop-target"),
             );
         }
     }
@@ -483,7 +491,7 @@ fn controls(w: &Win) -> El {
                     let effects = w.call.toggle_mute();
                     w.run(effects);
                 })
-                .build(kit())
+                .build(k)
                 .key("voice-mute"),
         )
         .child(
@@ -494,7 +502,7 @@ fn controls(w: &Win) -> El {
                     let effects = w.call.hangup();
                     w.run(effects);
                 })
-                .build(kit())
+                .build(k)
                 .key("voice-hangup"),
         );
     dock = dock.child(buttons);

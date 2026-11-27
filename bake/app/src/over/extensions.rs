@@ -8,11 +8,11 @@ use feed::extension_changes::build_blocked;
 use feed::extensions::{Approval, Entry, Extension, Kind, List, Tone, WebSession, approval, entries, pin_help, pins_host, problems, status};
 use rune::{Color, Cx, El, ScrollSpec, col, el, icon, row, text};
 use rune_kit::shell::Toolbar;
-use rune_kit::{Button, ButtonVariant, ControlSize, Spinner};
+use rune_kit::{Button, ButtonVariant, ControlSize, Kit, KitCx, Spinner};
 use rune_theme_opencode::icons;
 
 use crate::over::extension_sheets::{self, Sheets};
-use crate::over::ui::{self, BODY, BODY_MED, HEAD, META, META_MED, kit, strong, weak};
+use crate::over::ui::{self, BODY, BODY_MED, HEAD, META, META_MED, strong, weak};
 use crate::over::{go, open_session};
 use crate::web::{Phase, Web};
 use crate::{App, Screen};
@@ -374,13 +374,12 @@ pub fn open(s: &mut App, entry: &Entry) {
     }
 }
 
-fn tone_color(tone: Tone) -> Color {
-    let k = kit();
+fn tone_color(tone: Tone, k: &Kit) -> Color {
     match tone {
         Tone::Good => k.c.success.icon,
-        Tone::Waiting => ui::needs_color(),
+        Tone::Waiting => ui::needs_color(k),
         Tone::Failed => crate::theme::failed(),
-        Tone::Quiet => weak(),
+        Tone::Quiet => weak(k),
     }
 }
 
@@ -415,7 +414,7 @@ pub(crate) fn entry_icon(entry: &Entry) -> &'static rune::Icon {
     })
 }
 
-fn pin_button(entry: &Entry, pinned: bool) -> El {
+fn pin_button(entry: &Entry, pinned: bool, k: &Kit) -> El {
     let id = entry.id();
     let label = if pinned { format!("Unpin {}", entry.label) } else { format!("Pin {}", entry.label) };
     rune_kit::IconButton::new(&crate::icons::PIN)
@@ -423,13 +422,12 @@ fn pin_button(entry: &Entry, pinned: bool) -> El {
         .help(pin_help(pinned, entry.offered))
         .control_size(ControlSize::Small)
         .on_press(move |s: &mut App| toggle_pin(s, id.clone()))
-        .build(kit())
+        .build(k)
         .opacity(if pinned { 1.0 } else if entry.offered { 0.85 } else { 0.5 })
         .key(format!("ext-pin-{}", entry.id()))
 }
 
-fn entry_row(entry: &Entry, pinned: bool) -> El {
-    let k = kit();
+fn entry_row(entry: &Entry, pinned: bool, k: &Kit) -> El {
     let mut r = row()
         .key(format!("ext-entry-{}", entry.id()))
         .w_full()
@@ -439,23 +437,22 @@ fn entry_row(entry: &Entry, pinned: bool) -> El {
         .py(8.0)
         .radius(8.0)
         .hover(k.c.surface_raised_hover)
-        .child(col().size(28.0, 28.0).radius(7.0).items_center().justify_center().fill(k.c.surface_raised_hover).child(icon(entry_icon(entry), 14.0).color(strong())))
+        .child(col().size(28.0, 28.0).radius(7.0).items_center().justify_center().fill(k.c.surface_raised_hover).child(icon(entry_icon(entry), 14.0).color(strong(k))))
         .child(
             col()
                 .grow(1.0)
                 .shrink()
                 .min_w(0.0)
                 .gap(2.0)
-                .child(row().gap(6.0).items_center().child(text(entry.label.clone()).font(BODY_MED).color(strong()).truncate().shrink()).children(entry.badge.clone().map(|b| text(b).font(META_MED).color(ui::needs_color()))))
-                .child(text(entry.subtitle()).font(META).color(if entry.awaits_approval { ui::needs_color() } else { weak() }).truncate()),
+                .child(row().gap(6.0).items_center().child(text(entry.label.clone()).font(BODY_MED).color(strong(k)).truncate().shrink()).children(entry.badge.clone().map(|b| text(b).font(META_MED).color(ui::needs_color(k)))))
+                .child(text(entry.subtitle()).font(META).color(if entry.awaits_approval { ui::needs_color(k) } else { weak(k) }).truncate()),
         );
-    r = r.child(pin_button(entry, pinned)).child(icon(&icons::CHEVRON_RIGHT, 12.0).color(weak()));
+    r = r.child(pin_button(entry, pinned, k)).child(icon(&icons::CHEVRON_RIGHT, 12.0).color(weak(k)));
     let e = entry.clone();
     r.on_press(move |s: &mut App| open(s, &e))
 }
 
-fn approval_line(s: &App, ext: &Extension, host_local: bool, host_name: &str) -> Option<El> {
-    let k = kit();
+fn approval_line(s: &App, ext: &Extension, host_local: bool, host_name: &str, k: &Kit) -> Option<El> {
     let busy = s.ov.ext.acting.is_some();
     match approval(ext) {
         Approval::Nothing => None,
@@ -482,53 +479,51 @@ fn approval_line(s: &App, ext: &Extension, host_local: bool, host_name: &str) ->
                     .key(format!("ext-approve-{}", ext.id)),
             )
         }
-        Approval::Direct => Some(text(format!("Nothing has asked for it yet. {}, approve it with agenthail extensions approve {}.", if host_local { "On this computer".to_string() } else { format!("On {host_name}") }, ext.id)).font(META).color(weak()).wrap().w_full()),
+        Approval::Direct => Some(text(format!("Nothing has asked for it yet. {}, approve it with agenthail extensions approve {}.", if host_local { "On this computer".to_string() } else { format!("On {host_name}") }, ext.id)).font(META).color(weak(k)).wrap().w_full()),
     }
 }
 
-fn capabilities(ext: &Extension) -> El {
-    let k = kit();
-    let mut line = row().w_full().gap(6.0).items_center().wrap().child(text("Can".to_string()).font(META_MED).color(weak()));
+fn capabilities(ext: &Extension, k: &Kit) -> El {
+    let mut line = row().w_full().gap(6.0).items_center().wrap().child(text("Can".to_string()).font(META_MED).color(weak(k)));
     if ext.capabilities.is_empty() {
-        line = line.child(text("nothing yet".to_string()).font(META).color(weak()));
+        line = line.child(text("nothing yet".to_string()).font(META).color(weak(k)));
     }
     for cap in &ext.capabilities {
-        line = line.child(row().px(7.0).py(2.0).radius(6.0).fill(k.c.surface_raised_hover).child(text(cap.clone()).font(META).color(strong())));
+        line = line.child(row().px(7.0).py(2.0).radius(6.0).fill(k.c.surface_raised_hover).child(text(cap.clone()).font(META).color(strong(k))));
     }
     for cap in &ext.pending_capabilities {
-        line = line.child(row().px(7.0).py(2.0).radius(6.0).border(1.0, ui::needs_color().alpha(0.6)).child(text(cap.clone()).font(META).color(ui::needs_color())));
+        line = line.child(row().px(7.0).py(2.0).radius(6.0).border(1.0, ui::needs_color(k).alpha(0.6)).child(text(cap.clone()).font(META).color(ui::needs_color(k))));
     }
     line
 }
 
-fn extension_card(s: &App, ext: &Extension, own: &[&Entry], host: &Host) -> El {
+fn extension_card(s: &App, ext: &Extension, own: &[&Entry], host: &Host, k: &Kit) -> El {
     let host_local = host.is_local();
-    let k = kit();
     let (state, tone) = status(ext);
     let mut head = row()
         .w_full()
         .gap(10.0)
         .items_center()
-        .child(icon(&icons::EXTENSIONS, 16.0).color(strong()))
-        .child(text(ext.label.clone()).font(HEAD).color(strong()).truncate().shrink())
-        .child(ui::pill(&icons::STATUS, &state, tone_color(tone)));
+        .child(icon(&icons::EXTENSIONS, 16.0).color(strong(k)))
+        .child(text(ext.label.clone()).font(HEAD).color(strong(k)).truncate().shrink())
+        .child(ui::pill(&icons::STATUS, &state, tone_color(tone, k)));
     if !ext.badge.is_empty() {
-        head = head.child(text(ext.badge.clone()).font(META_MED).color(ui::needs_color()));
+        head = head.child(text(ext.badge.clone()).font(META_MED).color(ui::needs_color(k)));
     }
-    head = head.child(ui::spacer()).child(text(ext.id.clone()).font(META).color(weak()));
+    head = head.child(ui::spacer()).child(text(ext.id.clone()).font(META).color(weak(k)));
     let mut body = col().w_full().gap(8.0).padding(14.0).child(head);
     if !ext.description.is_empty() {
-        body = body.child(text(ext.description.clone()).font(META).color(ui::base()).wrap().w_full());
+        body = body.child(text(ext.description.clone()).font(META).color(ui::base(k)).wrap().w_full());
     }
-    body = body.child(capabilities(ext));
+    body = body.child(capabilities(ext, k));
     for p in problems(ext) {
-        body = body.child(text(p.text).font(META).color(if p.failed { crate::theme::failed() } else { ui::needs_color() }).wrap().w_full());
+        body = body.child(text(p.text).font(META).color(if p.failed { crate::theme::failed() } else { ui::needs_color(k) }).wrap().w_full());
     }
-    body = body.children(approval_line(s, ext, host_local, &host.name).map(|line| row().w_full().child(line)));
+    body = body.children(approval_line(s, ext, host_local, &host.name, k).map(|line| row().w_full().child(line)));
     if own.is_empty() {
-        body = body.child(text("No page. Its jobs and actions run in the background.".to_string()).font(META).color(weak()));
+        body = body.child(text("No page. Its jobs and actions run in the background.".to_string()).font(META).color(weak(k)));
     } else {
-        body = body.child(col().w_full().gap(2.0).children(own.iter().map(|e| entry_row(e, s.ov.ext.pins.contains(&e.id())))));
+        body = body.child(col().w_full().gap(2.0).children(own.iter().map(|e| entry_row(e, s.ov.ext.pins.contains(&e.id()), k))));
     }
     col().key(format!("ext-card-{}", ext.id)).w_full().radius(12.0).fill(k.c.surface_base).border(1.0, ui::edge()).child(body)
 }
@@ -537,9 +532,8 @@ fn sections(s: &App) -> Vec<&Catalog> {
     s.ov.ext.catalogs.iter().collect()
 }
 
-fn host_tools(s: &App, catalog: &Catalog) -> Option<El> {
+fn host_tools(s: &App, catalog: &Catalog, k: &Kit) -> Option<El> {
     s.client.as_ref()?;
-    let k = kit();
     let key = catalog.key();
     let blocked = build_blocked(catalog.list.is_some(), catalog.error.as_deref(), &catalog.host.name);
     let (history_host, build_host) = (catalog.host.clone(), catalog.host.clone());
@@ -563,44 +557,44 @@ fn host_tools(s: &App, catalog: &Catalog) -> Option<El> {
     Some(row().gap(6.0).items_center().child(history).child(build))
 }
 
-fn catalog_block(s: &App, catalog: &Catalog, titled: bool, origin: &str) -> El {
+fn catalog_block(s: &App, catalog: &Catalog, titled: bool, origin: &str, k: &Kit) -> El {
     let mut block = col().w_full().gap(10.0);
     let mut head = row().w_full().gap(8.0).items_center().pt(6.0);
     if titled {
         let title = if catalog.host.is_local() { "On this computer".to_string() } else { format!("On {}", catalog.host.name) };
-        head = head.child(text(title).font(HEAD).color(strong()));
+        head = head.child(text(title).font(HEAD).color(strong(k)));
     }
     head = head.child(ui::spacer());
     if let Some(at) = catalog.fetched {
         let refreshing = s.ov.ext.listing.contains(&catalog.key());
-        head = head.child(text(feed::extensions::age(at.elapsed().as_secs(), refreshing)).font(META).color(weak()).key(format!("ext-age-{}", catalog.key())));
+        head = head.child(text(feed::extensions::age(at.elapsed().as_secs(), refreshing)).font(META).color(weak(k)).key(format!("ext-age-{}", catalog.key())));
     }
-    block = block.child(head.children(host_tools(s, catalog)));
+    block = block.child(head.children(host_tools(s, catalog, k)));
     if let Some(error) = &catalog.error {
         block = block.child(text(error.clone()).font(META).color(crate::theme::failed()).wrap().w_full());
     }
     let Some(list) = &catalog.list else {
         if catalog.error.is_none() {
-            block = block.child(row().gap(8.0).items_center().child(Spinner::new().size(12.0).build(kit())).child(text("Looking for extensions…".to_string()).font(META).color(weak())));
+            block = block.child(row().gap(8.0).items_center().child(Spinner::new().size(12.0).build(k)).child(text("Looking for extensions…".to_string()).font(META).color(weak(k))));
         }
         return block;
     };
     if list.extensions.is_empty() && catalog.error.is_none() {
         let empty = if catalog.host.is_local() { "No extensions on this computer yet. Use New App to describe one; each one is a folder in ~/.agenthail/extensions.".to_string() } else { format!("No extensions on {}.", catalog.host.name) };
-        return block.child(text(empty).font(BODY).color(weak()));
+        return block.child(text(empty).font(BODY).color(weak(k)));
     }
     let all = catalog.entries(origin);
     for ext in &list.extensions {
         let own: Vec<&Entry> = all.iter().filter(|e| e.extension_id == ext.id).collect();
-        block = block.child(extension_card(s, ext, &own, &catalog.host));
+        block = block.child(extension_card(s, ext, &own, &catalog.host, k));
     }
     block
 }
 
-fn reload_button(s: &App) -> Option<El> {
+fn reload_button(s: &App, k: &Kit) -> Option<El> {
     let has_local = s.ov.ext.catalogs.iter().any(|c| c.host.is_local() && c.list.is_some());
     if !s.ov.ext.settings {
-        return has_local.then(|| text("Reload them with agenthail extensions reload".to_string()).font(META).color(weak()));
+        return has_local.then(|| text("Reload them with agenthail extensions reload".to_string()).font(META).color(weak(k)));
     }
     has_local.then(|| {
         let busy = s.ov.ext.acting.is_some();
@@ -611,17 +605,18 @@ fn reload_button(s: &App) -> Option<El> {
             .disabled(busy)
             .help("Read every extension folder on this computer again")
             .on_press(reload_all)
-            .build(kit())
+            .build(k)
             .key("ext-reload-all")
     })
 }
 
-pub fn hub(s: &App, cx: &mut Cx<App>) -> El {
+pub fn hub(s: &App, cx: &mut Cx<App>, main_kit: &Kit) -> El {
+    let k = cx.kit();
     let origin = s.client.as_ref().map(|c| c.origin().to_string()).unwrap_or_default();
     let mut list = col().w_full().max_w(880.0).gap(16.0).px(24.0).pt(16.0).pb(32.0);
-    list = list.child(row().w_full().items_center().child(text("Apps".to_string()).font(ui::TITLE).color(strong())).child(ui::spacer()).children(reload_button(s)));
+    list = list.child(row().w_full().items_center().child(text("Apps".to_string()).font(ui::TITLE).color(strong(&k))).child(ui::spacer()).children(reload_button(s, &k)));
     if s.client.is_none() {
-        list = list.child(text("Fixture mode: no daemon to list extensions from.".to_string()).font(BODY).color(weak()));
+        list = list.child(text("Fixture mode: no daemon to list extensions from.".to_string()).font(BODY).color(weak(&k)));
     }
     if let Some(error) = &s.ov.ext.hosts_error {
         list = list.child(text(error.clone()).font(META).color(crate::theme::failed()).wrap().w_full());
@@ -629,15 +624,14 @@ pub fn hub(s: &App, cx: &mut Cx<App>) -> El {
     let shown = sections(s);
     let titled = shown.len() > 1 || shown.iter().any(|c| !c.host.is_local());
     for catalog in shown {
-        list = list.child(catalog_block(s, catalog, titled, &origin));
+        list = list.child(catalog_block(s, catalog, titled, &origin, &k));
     }
     let main = col().key("extensions").w_full().h_full().items_center().scroll(ScrollSpec { stick_bottom: false }).child(list);
-    let toolbar = Toolbar::new().leading(ui::crumb(&[("Apps", true)])).trailing(ui::needs_button(s));
-    ui::frame(cx, s, Some(ui::sidebar(s, None, None)), main, None, toolbar)
+    let toolbar = Toolbar::new().leading(ui::crumb(&[("Apps", true)], &k)).trailing(ui::needs_button(s, &k));
+    ui::frame(cx, s, Some(ui::sidebar(s, None, None, &k)), main, None, toolbar, main_kit)
 }
 
-fn closed(title: &str, detail: String, session: Option<String>) -> El {
-    let k = kit();
+fn closed(title: &str, detail: String, session: Option<String>, k: &Kit) -> El {
     let mut actions = row().gap(8.0).child(Button::new("All apps").variant(ButtonVariant::Neutral).control_size(ControlSize::Small).on_press(|s: &mut App| go(s, Screen::Extensions)).build(k).key("ext-all"));
     if let Some(session) = session {
         actions = actions.child(Button::new("Open the request").variant(ButtonVariant::Contrast).control_size(ControlSize::Small).on_press(move |s: &mut App| open_session(s, &session)).build(k).key("ext-open-ask"));
@@ -649,24 +643,23 @@ fn closed(title: &str, detail: String, session: Option<String>) -> El {
         .justify_center()
         .gap(10.0)
         .padding(32.0)
-        .child(icon(&icons::EXTENSIONS, 28.0).color(weak()))
-        .child(text(title.to_string()).font(HEAD).color(strong()))
-        .child(text(detail).font(BODY).color(weak()).wrap().max_w(520.0))
+        .child(icon(&icons::EXTENSIONS, 28.0).color(weak(k)))
+        .child(text(title.to_string()).font(HEAD).color(strong(k)))
+        .child(text(detail).font(BODY).color(weak(k)).wrap().max_w(520.0))
         .child(actions)
 }
 
-fn phase_note(web: &Web, host: &str) -> Option<El> {
+fn phase_note(web: &Web, host: &str, k: &Kit) -> Option<El> {
     let label = match web.phase() {
         _ if web.slow() => format!("Still loading. If it doesn't open, check that {host} is serving it, then Reload."),
         Phase::SigningIn => "Signing in…".into(),
         Phase::Loading => "Loading…".into(),
         _ => return None,
     };
-    Some(row().gap(6.0).items_center().child(Spinner::new().size(11.0).build(kit())).child(text(label).font(META).color(weak()).truncate().max_w(420.0)))
+    Some(row().gap(6.0).items_center().child(Spinner::new().size(11.0).build(k)).child(text(label).font(META).color(weak(k)).truncate().max_w(420.0)))
 }
 
-fn page_tools(s: &App) -> El {
-    let k = kit();
+fn page_tools(s: &App, k: &Kit) -> El {
     let fill = !s.ov.sidebar.is_open();
     row()
         .gap(4.0)
@@ -683,13 +676,13 @@ fn page_tools(s: &App) -> El {
         )
 }
 
-pub fn page(s: &App, cx: &mut Cx<App>, id: &str) -> El {
+pub fn page(s: &App, cx: &mut Cx<App>, id: &str, main_kit: &Kit) -> El {
+    let k = cx.kit();
     let entry = find(s, id);
     let label = entry.as_ref().map(|e| e.label.clone()).unwrap_or_else(|| "App".into());
     let main = match &entry {
         Some(entry) => match (&entry.url, &s.ov.ext.web.phase(), s.ov.ext.web.slot()) {
             (Some(_), Phase::Failed(message), _) => {
-                let k = kit();
                 col()
                     .w_full()
                     .h_full()
@@ -698,26 +691,26 @@ pub fn page(s: &App, cx: &mut Cx<App>, id: &str) -> El {
                     .gap(10.0)
                     .padding(32.0)
                     .child(icon(&icons::WARNING, 28.0).color(crate::theme::failed()))
-                    .child(text(entry.label.clone()).font(HEAD).color(strong()))
-                    .child(text(message.clone()).font(BODY).color(weak()).wrap().max_w(520.0))
-                    .child(Button::new("Reload").variant(ButtonVariant::Contrast).control_size(ControlSize::Small).on_press(|s: &mut App| s.ov.ext.web.reload()).build(k).key("ext-retry"))
+                    .child(text(entry.label.clone()).font(HEAD).color(strong(&k)))
+                    .child(text(message.clone()).font(BODY).color(weak(&k)).wrap().max_w(520.0))
+                    .child(Button::new("Reload").variant(ButtonVariant::Contrast).control_size(ControlSize::Small).on_press(|s: &mut App| s.ov.ext.web.reload()).build(&k).key("ext-retry"))
             }
             (Some(url), _, Some(_)) if covered(s) || !s.ov.ext.web.shows(url) => el().w_full().h_full(),
             (Some(_), _, Some(slot)) => el().key("ext-page").w_full().h_full().radius(10.0).native_view(slot),
             (Some(_), _, None) => el().w_full().h_full(),
-            (None, _, _) => closed(&entry.label, entry.closed_reason(), entry.approval_session.clone()),
+            (None, _, _) => closed(&entry.label, entry.closed_reason(), entry.approval_session.clone(), &k),
         },
-        None if s.ov.ext.catalogs.iter().all(|c| c.list.is_none()) => col().w_full().h_full().items_center().justify_center().child(Spinner::new().size(16.0).build(kit())),
-        None => closed("This extension was removed", "It is no longer on any computer this app can reach.".into(), None),
+        None if s.ov.ext.catalogs.iter().all(|c| c.list.is_none()) => col().w_full().h_full().items_center().justify_center().child(Spinner::new().size(16.0).build(&k)),
+        None => closed("This extension was removed", "It is no longer on any computer this app can reach.".into(), None, &k),
     };
     let host = entry.as_ref().map(|e| format!("on {}", e.host_name)).unwrap_or_default();
-    let crumb = row().gap(8.0).items_center().child(row().on_press(|s: &mut App| go(s, Screen::Extensions)).child(ui::crumb(&[("Apps", false)]))).child(text("/".to_string()).font(BODY).color(weak())).child(text(label).font(BODY_MED).color(strong()).truncate().max_w(380.0)).child(text(host).font(META).color(weak()));
+    let crumb = row().gap(8.0).items_center().child(row().on_press(|s: &mut App| go(s, Screen::Extensions)).child(ui::crumb(&[("Apps", false)], &k))).child(text("/".to_string()).font(BODY).color(weak(&k))).child(text(label).font(BODY_MED).color(strong(&k)).truncate().max_w(380.0)).child(text(host).font(META).color(weak(&k)));
     let mut trailing = row().gap(10.0).items_center();
     if entry.as_ref().is_some_and(|e| e.url.is_some()) {
-        trailing = trailing.children(phase_note(&s.ov.ext.web, entry.as_ref().map_or("the computer", |e| e.host_name.as_str()))).child(page_tools(s));
+        trailing = trailing.children(phase_note(&s.ov.ext.web, entry.as_ref().map_or("the computer", |e| e.host_name.as_str()), &k)).child(page_tools(s, &k));
     }
-    let toolbar = Toolbar::new().leading(crumb).trailing(trailing.child(ui::needs_button(s)));
-    ui::frame(cx, s, Some(ui::sidebar(s, None, None)), col().w_full().h_full().padding(6.0).child(main), None, toolbar)
+    let toolbar = Toolbar::new().leading(crumb).trailing(trailing.child(ui::needs_button(s, &k)));
+    ui::frame(cx, s, Some(ui::sidebar(s, None, None, &k)), col().w_full().h_full().padding(6.0).child(main), None, toolbar, main_kit)
 }
 
 #[cfg(test)]

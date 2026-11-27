@@ -1,7 +1,7 @@
 use feed::catalog::Session;
 use feed::menu::{self, Act};
 use rune::{El, Tx, col, el, icon, row, text, text_input};
-use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Menu, MenuEntry, MenuItem, Placement};
+use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit, Menu, MenuEntry, MenuItem, Placement};
 
 use crate::icons;
 use crate::theme::{self, BODY, META, accent, failed, faint, muted};
@@ -65,7 +65,7 @@ fn act_icon(act: &Act) -> &'static rune::Icon {
     }
 }
 
-fn session_menu(s: &App, open: &Open, layer: &mut Vec<El>) {
+fn session_menu(s: &App, open: &Open, layer: &mut Vec<El>, k: &Kit) {
     let Some(x) = crate::ui::gone::shown(s, &open.session) else { return };
     let mut m = Menu::new("session-menu").open(true).min_width(220.0).on_close(|s: &mut App| s.menus.open = None);
     m = match open.at {
@@ -103,10 +103,10 @@ fn session_menu(s: &App, open: &Open, layer: &mut Vec<El>) {
             m = m.item(parent);
         }
     }
-    let _ = m.build(theme::kit(), layer);
+    let _ = m.build(k, layer);
 }
 
-fn chip_menu(s: &App, id: &str, key: &'static str, layer: &mut Vec<El>) {
+fn chip_menu(s: &App, id: &str, key: &'static str, layer: &mut Vec<El>, k: &Kit) {
     let Some(chip) = chips_for(s, id).into_iter().find(|c| c.key == key) else { return };
     let mut m = Menu::new(format!("chip-{key}")).open(true).min_width(200.0).placement(Placement::BottomStart).on_close(|s: &mut App| s.menus.chip = None).group_label(chip.name);
     for choice in &chip.choices {
@@ -116,11 +116,10 @@ fn chip_menu(s: &App, id: &str, key: &'static str, layer: &mut Vec<El>) {
     if chip.next_turn {
         m = m.separator().group_label("Applies from the next turn");
     }
-    let _ = m.build(theme::kit(), layer);
+    let _ = m.build(k, layer);
 }
 
-fn rename_dialog(s: &App, id: &str, layer: &mut Vec<El>) {
-    let k = theme::kit();
+fn rename_dialog(s: &App, id: &str, layer: &mut Vec<El>, k: &Kit) {
     let current = current_alias(s, id);
     let text_now = s.menus.rename_text.text.clone();
     let problem = menu::rename_problem(&text_now, current.as_deref());
@@ -161,8 +160,7 @@ fn rename_dialog(s: &App, id: &str, layer: &mut Vec<El>) {
     Dialog::new("rename", format!("Rename {title}")).description(description).open(true).fit().width(400.0).on_close(close_rename).child(body.child(buttons)).build(k, layer);
 }
 
-fn confirm_dialog(c: &Confirm, layer: &mut Vec<El>) {
-    let k = theme::kit();
+fn confirm_dialog(c: &Confirm, layer: &mut Vec<El>, k: &Kit) {
     let (id, key, value) = (c.session.clone(), c.key, c.choice.id.clone());
     let buttons = row()
         .w_full()
@@ -182,18 +180,18 @@ fn confirm_dialog(c: &Confirm, layer: &mut Vec<El>) {
         .build(k, layer);
 }
 
-pub fn overlays(s: &App, layer: &mut Vec<El>) {
+pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
     if let Some(open) = &s.menus.open {
-        session_menu(s, open, layer);
+        session_menu(s, open, layer, k);
     }
-    crate::ui::session_ops::overlays(s, layer);
+    crate::ui::session_ops::overlays(s, layer, k);
     if let Some((id, key)) = &s.menus.chip {
-        chip_menu(s, id, key, layer);
+        chip_menu(s, id, key, layer, k);
     }
     if let Some(id) = &s.menus.renaming {
-        rename_dialog(s, id, layer);
+        rename_dialog(s, id, layer, k);
     }
     if let Some(c) = &s.menus.confirm {
-        confirm_dialog(c, layer);
+        confirm_dialog(c, layer, k);
     }
 }

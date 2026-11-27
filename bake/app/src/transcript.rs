@@ -1,11 +1,12 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use feed::Transcript;
 use feed::blocks::{AgentEntry, Block, Kind, Work};
 use feed::summary::Entry;
 use feed::wire::{Outcome, Rebuild, Sse, Wire};
 use rune::{Color, El, GrowthSpec, ScrollSpec, col, el, icon, memo, row, text};
-use rune_kit::MarkdownStyle;
+use rune_kit::{Kit, MarkdownStyle};
 use rune_kit::markdown::Markdown;
 
 use crate::App;
@@ -395,7 +396,7 @@ fn agent_el(entry: &AgentEntry) -> El {
         )
 }
 
-fn block_el(cx: &Cx, block: &Block, open: bool, gap: f32, last: bool) -> El {
+fn block_el(cx: &Cx, block: &Block, open: bool, gap: f32, last: bool, k: &Kit) -> El {
     let body = match &block.kind {
         Kind::User(body) if body.trim_start().starts_with("<hook_prompt") => {
             let inner = body.split_once('>').map(|(_, rest)| rest).unwrap_or(body).replace("</hook_prompt>", "");
@@ -451,8 +452,8 @@ fn block_el(cx: &Cx, block: &Block, open: bool, gap: f32, last: bool) -> El {
         }
         Kind::Annotation(note) | Kind::Notice(note) => row().gap(6.0).child(text(note.clone()).font(META).color(faint()).wrap()),
         Kind::Instructions(_) => row().gap(6.0).items_center().child(icon(&icons::LAYERS, 12.0).color(faint())).child(text("Instructions").font(META).color(faint())),
-        Kind::Image(attachment) => crate::ui::attach::image_el(cx.app, cx.session, attachment),
-        Kind::File(item) => crate::ui::attach::file_el(cx.app, cx.session, item),
+        Kind::Image(attachment) => crate::ui::attach::image_el(cx.app, cx.session, attachment, k),
+        Kind::File(item) => crate::ui::attach::file_el(cx.app, cx.session, item, k),
         Kind::Files(files) => crate::ui::attach::files_el(cx.app, &block.id, files),
         Kind::Unknown { title, kind, text: body } => {
             let head = row().w_full().gap(8.0).items_center().child(text(title.clone()).font(META_BOLD).color(theme::text()).truncate().min_w(0.0)).child(row().px(5.0).py(1.0).radius(8.0).fill(wash()).child(text(kind.clone()).font(META.mono()).color(muted())));
@@ -510,25 +511,25 @@ fn footer(cx: &Cx, block: &Block) -> Option<El> {
     Some(if user { col().w_full().items_end().child(line) } else { line })
 }
 
-pub fn empty(s: &App, id: &str, note: String) -> El {
+pub fn empty(s: &App, id: &str, note: String, k: &Kit) -> El {
     let settled = s.panes.get(id).is_some_and(|p| p.caught_up && !p.earlier.loading && p.earlier.next == Some(0));
     let note = if settled && note == "Loading the transcript…" { "Nothing to show in this conversation yet".to_string() } else { note };
     let mut c = col().w_full().grow(1.0).items_center().justify_center().gap(12.0);
     if !settled {
-        c = c.child(rune_kit::Loader::new().size(22.0).color(accent()).build(theme::kit()));
+        c = c.child(rune_kit::Loader::new().size(22.0).color(accent()).build(k));
     }
     c = c.child(text(note).font(BODY_BOLD).color(faint()));
-    if let Some(earlier) = earlier_el(s, id) {
+    if let Some(earlier) = earlier_el(s, id, k) {
         c = c.child(earlier);
     }
     c.child(el().h(80.0))
 }
 
-fn earlier_el(s: &App, id: &str) -> Option<El> {
+fn earlier_el(s: &App, id: &str, k: &Kit) -> Option<El> {
     let pane = s.panes.get(id)?;
     let key = id.to_string();
     let body = if pane.earlier.loading {
-        row().gap(8.0).items_center().child(rune_kit::Loader::new().size(12.0).color(faint()).build(theme::kit())).child(text("Loading earlier messages…").font(META).color(faint()))
+        row().gap(8.0).items_center().child(rune_kit::Loader::new().size(12.0).color(faint()).build(k)).child(text("Loading earlier messages…").font(META).color(faint()))
     } else if let Some(note) = &pane.earlier.note {
         let mut r = row().gap(8.0).items_center().child(text(note.clone()).font(META).color(faint()));
         if pane.earlier.next != Some(0) {
@@ -554,7 +555,8 @@ fn gap_for(blocks: &[Block], ix: usize) -> f32 {
     }
 }
 
-pub fn view(s: &App, id: &str) -> El {
+pub fn view(s: &App, id: &str, k: &Kit) -> El {
+    let row_kit = Rc::new(k.clone());
     let count = s.panes.get(id).map(|p| p.blocks.len()).unwrap_or(0);
     let key = id.to_string();
     let stack = col().key(format!("rows-{id}")).w_full().items_center().growth(GrowthSpec::default()).selection_group(true).pb(s.cover.reserve()).virtual_rows(
@@ -576,13 +578,13 @@ pub fn view(s: &App, id: &str) -> El {
                 (Kind::Image(_) | Kind::File(_) | Kind::Files(_), _) => s.attach.rev as usize,
                 _ => 0,
             };
-            memo(&block.id, (pane.revs[i], open, last, gap.to_bits(), images, crate::theme::paint_key()), || block_el(&cx, block, open, gap, last))
+            memo(&block.id, (pane.revs[i], open, last, gap.to_bits(), images, crate::theme::paint_key()), || block_el(&cx, block, open, gap, last, &row_kit))
         },
     );
     let watch = id.to_string();
     let stack = stack.on_visible_rows(move |s: &mut App, rows| crate::history::seen_rows(s, &watch, rows.start));
     let mut scroll = col().key(format!("transcript-{id}")).w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: true }).on_scroll_offset(watch_end(id.to_string())).on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_view(r));
-    if let Some(earlier) = earlier_el(s, id) {
+    if let Some(earlier) = earlier_el(s, id, k) {
         scroll = scroll.child(earlier);
     }
     let scroll = scroll.child(stack);
@@ -609,14 +611,14 @@ pub fn view(s: &App, id: &str) -> El {
     frame.child(col().absolute(0.0, 0.0).w_full().h_full().items_end().justify_end().px(28.0).pb(s.cover.reserve() + 12.0).child(jump))
 }
 
-pub fn loading(note: String) -> El {
+pub fn loading(note: String, k: &Kit) -> El {
     col()
         .w_full()
         .grow(1.0)
         .items_center()
         .justify_center()
         .gap(12.0)
-        .child(rune_kit::Loader::new().size(22.0).color(accent()).build(theme::kit()))
+        .child(rune_kit::Loader::new().size(22.0).color(accent()).build(k))
         .child(text(note).font(BODY_BOLD).color(faint()))
         .child(el().h(80.0))
 }

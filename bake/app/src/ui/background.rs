@@ -2,7 +2,7 @@ use super::*;
 use std::sync::OnceLock;
 
 use feed::background::{BackgroundTasks, Clock};
-use rune_kit::{ControlSize, IconButton, IconButtonVariant};
+use rune_kit::{ControlSize, IconButton, IconButtonVariant, Kit};
 
 const HEADER_HEIGHT: f32 = 34.0;
 const LINE_HEIGHT: f32 = 20.0;
@@ -40,10 +40,9 @@ fn dismiss(s: &mut App, id: &str) {
     crate::over::layout::save(s);
 }
 
-pub(crate) fn dock(s: &App, x: &Session) -> Option<El> {
+pub(crate) fn dock(s: &App, x: &Session, k: &Kit) -> Option<El> {
     let b = shown(s, x)?;
     let open = s.dock.is_open(b, &x.id);
-    let k = theme::kit();
     let (on, off) = (x.id.clone(), x.id.clone());
     let header = row()
         .key("background-tasks-toggle")

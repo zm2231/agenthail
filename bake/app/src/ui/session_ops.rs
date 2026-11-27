@@ -7,7 +7,7 @@ use feed::create::Host;
 use feed::menu::Offer;
 use feed::moves::{self, Notice};
 use rune::{El, col, el, icon, row, text};
-use rune_kit::{Button, ButtonVariant, ControlSize, Dialog};
+use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit};
 use time::{OffsetDateTime, UtcOffset};
 
 use crate::App;
@@ -192,8 +192,7 @@ fn buttons(children: Vec<El>) -> El {
     r
 }
 
-fn adopt_dialog(a: &Adopting, layer: &mut Vec<El>) {
-    let k = theme::kit();
+fn adopt_dialog(a: &Adopting, layer: &mut Vec<El>, k: &Kit) {
     let mut body = col().w_full().gap(10.0).px(16.0).pb(16.0);
     let line = |t: &str| text(t.to_string()).font(META).color(muted()).wrap().w_full();
     match &a.phase {
@@ -258,8 +257,7 @@ fn host_row(h: &Host, picked: bool) -> El {
     r
 }
 
-fn move_dialog(m: &Moving, layer: &mut Vec<El>) {
-    let k = theme::kit();
+fn move_dialog(m: &Moving, layer: &mut Vec<El>, k: &Kit) {
     let mut body = col().w_full().gap(4.0).px(16.0).pb(16.0);
     match &m.hosts {
         None => body = body.child(text("Looking for your other computers…".to_string()).font(META).color(muted())),
@@ -289,8 +287,7 @@ fn move_dialog(m: &Moving, layer: &mut Vec<El>) {
         .build(k, layer);
 }
 
-fn notice_dialog(n: &Notice, layer: &mut Vec<El>) {
-    let k = theme::kit();
+fn notice_dialog(n: &Notice, layer: &mut Vec<El>, k: &Kit) {
     let dismiss = |s: &mut App| {
         s.menus.ops.notices.pop_front();
     };
@@ -306,14 +303,14 @@ fn notice_dialog(n: &Notice, layer: &mut Vec<El>) {
     Dialog::new("move-notice", n.title.clone()).open(true).fit().width(420.0).on_close(dismiss).child(body.child(buttons(actions))).build(k, layer);
 }
 
-pub fn overlays(s: &App, layer: &mut Vec<El>) {
+pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
     if let Some(a) = &s.menus.ops.adopting {
-        adopt_dialog(a, layer);
+        adopt_dialog(a, layer, k);
     }
     if let Some(m) = &s.menus.ops.moving {
-        move_dialog(m, layer);
+        move_dialog(m, layer, k);
     }
     if let Some(n) = s.menus.ops.notices.front() {
-        notice_dialog(n, layer);
+        notice_dialog(n, layer, k);
     }
 }

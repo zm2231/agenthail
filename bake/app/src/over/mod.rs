@@ -13,6 +13,7 @@ mod sessions;
 pub mod ui;
 pub mod work;
 
+use rune_kit::Kit;
 use std::collections::{HashMap, HashSet};
 
 use rune::{Cx, El, Key, KeyEvent, TextEdit, Tx};
@@ -244,32 +245,32 @@ fn review_key(s: &mut App, id: &str, verdict: feed::review::Verdict) {
     }
 }
 
-pub fn view(s: &App, cx: &mut Cx<App>, layer: &mut Vec<El>) -> El {
+pub fn view(s: &App, cx: &mut Cx<App>, layer: &mut Vec<El>, main_kit: &Kit) -> El {
     match &s.screen {
-        Screen::Now if s.ov.now_brief => now::brief(s, cx, layer),
-        Screen::Now => now::panes(s, cx, layer),
-        Screen::Project(key) if layout::board_for(s, key) => project::board(s, cx, key, layer),
-        Screen::Project(key) => project::lead(s, cx, key, layer),
-        Screen::Work(id) => work::view(s, cx, id, layer),
-        Screen::Sessions => sessions::view(s, cx, layer),
-        Screen::Extensions => extensions::hub(s, cx),
-        Screen::Extension(id) => extensions::page(s, cx, id),
+        Screen::Now if s.ov.now_brief => now::brief(s, cx, layer, main_kit),
+        Screen::Now => now::panes(s, cx, layer, main_kit),
+        Screen::Project(key) if layout::board_for(s, key) => project::board(s, cx, key, layer, main_kit),
+        Screen::Project(key) => project::lead(s, cx, key, layer, main_kit),
+        Screen::Work(id) => work::view(s, cx, id, layer, main_kit),
+        Screen::Sessions => sessions::view(s, cx, layer, main_kit),
+        Screen::Extensions => extensions::hub(s, cx, main_kit),
+        Screen::Extension(id) => extensions::page(s, cx, id, main_kit),
         Screen::Session => rune::col(),
     }
 }
 
-pub fn overlays(s: &App, layer: &mut Vec<El>) {
+pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
     if s.ov.jump.is_some() {
-        jump::view(s, layer);
+        jump::view(s, layer, k);
     }
-    search::activity_view(s, layer);
+    search::activity_view(s, layer, k);
     if let Some(n) = &s.ov.notice {
-        layer.push(ui::notice(n));
+        layer.push(ui::notice(n, k));
     }
-    decisions::note_dialog(s, layer);
-    work::words_dialog(s, layer);
-    projects::overlays(s, layer);
-    extension_sheets::overlays(s, layer);
+    decisions::note_dialog(s, layer, k);
+    work::words_dialog(s, layer, k);
+    projects::overlays(s, layer, k);
+    extension_sheets::overlays(s, layer, k);
 }
 
 pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {

@@ -5,10 +5,10 @@ use feed::activity::{Page, earlier};
 use feed::catalog::Session;
 use feed::watch::Removal;
 use rune::{El, col, row, text};
-use rune_kit::{Button, ButtonVariant, ControlSize};
+use rune_kit::{Button, ButtonVariant, ControlSize, Kit};
 
 use crate::App;
-use crate::over::ui::{self, META, META_MED, base, kit, strong, weak};
+use crate::over::ui::{self, META, META_MED, base, strong, weak};
 
 #[derive(Default)]
 struct Shown {
@@ -190,8 +190,7 @@ fn open(s: &mut App, x: &Session) {
     }
 }
 
-fn session_row(s: &App, i: usize, x: &Session) -> El {
-    let k = kit();
+fn session_row(s: &App, i: usize, x: &Session, k: &Kit) -> El {
     let it = x.clone();
     let place = [feed::projects::surface_label(&x.surface), x.host.name.clone()].into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" · ");
     col()
@@ -203,58 +202,58 @@ fn session_row(s: &App, i: usize, x: &Session) -> El {
         .radius(8.0)
         .hover(k.c.surface_raised_hover)
         .on_press(move |s: &mut App| open(s, &it))
-        .child(row().w_full().gap(6.0).items_center().child(text(ui::short_title(&s.ov.d.title(x), 34)).font(META_MED).color(strong()).truncate().shrink()).child(ui::spacer()).child(text(s.ov.d.ago(&x.last_active)).font(META).color(weak())))
-        .children((!place.is_empty()).then(|| text(place).font(META).color(weak()).truncate()))
+        .child(row().w_full().gap(6.0).items_center().child(text(ui::short_title(&s.ov.d.title(x), 34)).font(META_MED).color(strong(k)).truncate().shrink()).child(ui::spacer()).child(text(s.ov.d.ago(&x.last_active)).font(META).color(weak(k))))
+        .children((!place.is_empty()).then(|| text(place).font(META).color(weak(k)).truncate()))
 }
 
-pub fn section(s: &App, key: &str) -> El {
+pub fn section(s: &App, key: &str, k: &Kit) -> El {
     let shown = s.earlier.projects.get(key);
     let lead = s.ov.d.project(key).and_then(|p| p.lead.clone());
     let fetched: &[Session] = shown.map(|x| x.sessions.as_slice()).unwrap_or_default();
     let open = shown.is_some_and(|x| x.open);
-    let k = key.to_string();
+    let id = key.to_string();
     let toggle = if open {
-        Button::new("Hide").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(move |s: &mut App| hide(s, &k)).build(kit())
+        Button::new("Hide").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(move |s: &mut App| hide(s, &id)).build(k)
     } else {
         Button::new("Show earlier").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(move |s: &mut App| {
-            show(s, &k);
-        }).build(kit())
+            show(s, &id);
+        }).build(k)
     }
     .key(format!("earlier-toggle-{key}"));
     let rows = if open { earlier(&s.ov.d.sessions, fetched, key, lead.as_deref(), s.now) } else { Vec::new() };
-    let mut c = col().w_full().gap(6.0).child(ui::section_head("Earlier", open.then_some(rows.len()), Some(toggle)));
+    let mut c = col().w_full().gap(6.0).child(ui::section_head("Earlier", open.then_some(rows.len()), Some(toggle), k));
     if !open {
-        return c.child(text("Sessions quiet for more than a day.".to_string()).font(META).color(weak()));
+        return c.child(text("Sessions quiet for more than a day.".to_string()).font(META).color(weak(k)));
     }
     let loading = shown.is_some_and(|x| x.asked.is_some());
     if rows.is_empty() && !loading && shown.is_some_and(|x| x.read && x.next.is_none()) {
-        c = c.child(text("No earlier sessions.".to_string()).font(META).color(weak()));
+        c = c.child(text("No earlier sessions.".to_string()).font(META).color(weak(k)));
     }
-    c = c.children(rows.iter().enumerate().map(|(i, x)| session_row(s, i, x)));
+    c = c.children(rows.iter().enumerate().map(|(i, x)| session_row(s, i, x, k)));
     if let Some(error) = shown.and_then(|x| x.error.clone()) {
-        c = c.child(text(error).font(META).color(ui::needs_color()).wrap());
+        c = c.child(text(error).font(META).color(ui::needs_color(k)).wrap());
     }
     if loading {
-        c = c.child(text("Loading…".to_string()).font(META).color(weak()));
+        c = c.child(text("Loading…".to_string()).font(META).color(weak(k)));
     } else if shown.is_some_and(|x| x.next.is_some() || x.error.is_some()) {
-        let k = key.to_string();
+        let id = key.to_string();
         let label = if shown.is_some_and(|x| x.error.is_some()) { "Try again" } else { "Show more" };
-        c = c.child(Button::new(label).variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(move |s: &mut App| again(s, &k)).build(kit()).key(format!("earlier-more-{key}")));
+        c = c.child(Button::new(label).variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(move |s: &mut App| again(s, &id)).build(k).key(format!("earlier-more-{key}")));
     }
     c
 }
 
-pub fn activity_note(s: &App) -> Option<El> {
-    s.earlier.activity_missing.then(|| text(feed::activity::ACTIVITY_UNREAD.to_string()).font(META).color(ui::needs_color()).wrap().px(10.0).py(6.0).key("activity-unread"))
+pub fn activity_note(s: &App, k: &Kit) -> Option<El> {
+    s.earlier.activity_missing.then(|| text(feed::activity::ACTIVITY_UNREAD.to_string()).font(META).color(ui::needs_color(k)).wrap().px(10.0).py(6.0).key("activity-unread"))
 }
 
-pub fn folders(s: &App, key: &str) -> Option<El> {
+pub fn folders(s: &App, key: &str, k: &Kit) -> Option<El> {
     let record = s.ov.d.record(key)?;
     if record.checkouts.is_empty() {
         return None;
     }
     let here = s.ov.d.hosts.first().map(|h| h.name.clone()).filter(|n| !n.is_empty());
-    let mut c = col().w_full().gap(6.0).child(ui::section_head("Folders", Some(record.checkouts.len()), None));
+    let mut c = col().w_full().gap(6.0).child(ui::section_head("Folders", Some(record.checkouts.len()), None, k));
     for (i, checkout) in record.checkouts.iter().enumerate() {
         let host = if checkout.host.local() { here.clone().unwrap_or_else(|| checkout.host.name.clone()) } else { checkout.host.name.clone() };
         c = c.child(
@@ -264,8 +263,8 @@ pub fn folders(s: &App, key: &str) -> Option<El> {
                 .gap(10.0)
                 .items_center()
                 .px(8.0)
-                .child(text(host).font(META).color(weak()).truncate().w(96.0))
-                .child(text(checkout.root_path.clone()).font(META.mono()).color(base()).truncate().shrink().min_w(0.0).selectable(true)),
+                .child(text(host).font(META).color(weak(k)).truncate().w(96.0))
+                .child(text(checkout.root_path.clone()).font(META.mono()).color(base(k)).truncate().shrink().min_w(0.0).selectable(true)),
         );
     }
     Some(c)

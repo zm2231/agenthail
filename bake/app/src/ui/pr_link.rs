@@ -5,7 +5,7 @@ use feed::action::PrOp;
 use feed::catalog::{Pr, RespondError};
 use feed::menu::{Patch, names_pr, pr_problem};
 use rune::{El, TextEdit, Tx, el, row, text, text_input};
-use rune_kit::{Button, ButtonVariant, ControlSize, Dialog};
+use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit};
 
 use crate::theme::{self, BODY, META, failed, faint};
 use crate::{App, session};
@@ -149,8 +149,7 @@ pub fn drain(s: &mut App) -> bool {
     changed
 }
 
-fn dialog(s: &App, id: &str, layer: &mut Vec<El>) {
-    let k = theme::kit();
+fn dialog(s: &App, id: &str, layer: &mut Vec<El>, k: &Kit) {
     let typed = s.prs.text.text.clone();
     let problem = pr_problem(&typed);
     let input = text_input(&s.prs.text, BODY)
@@ -185,8 +184,8 @@ fn dialog(s: &App, id: &str, layer: &mut Vec<El>) {
         .build(k, layer);
 }
 
-pub fn overlays(s: &App, layer: &mut Vec<El>) {
+pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
     if let Some(id) = &s.prs.linking {
-        dialog(s, id, layer);
+        dialog(s, id, layer, k);
     }
 }

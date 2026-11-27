@@ -8,7 +8,7 @@ use feed::catalog::Client;
 use feed::watch::Reconnect;
 use feed::look::{self as fl, Fit, Look, Rgb, Tint, View, Wallpaper};
 use rune::{Color, Cx, El, Pixels, PixelsWrap, SystemMaterial, Tx, el};
-use rune_kit::Kit;
+use rune_kit::{Kit, KitEnv, KitTheme};
 
 use crate::theme::{self, Paint};
 
@@ -41,7 +41,7 @@ struct State {
     device: String,
     pictures: HashMap<String, Result<Picture, String>>,
     meshes: HashMap<String, Picture>,
-    kits: HashMap<String, &'static Kit>,
+    kits: HashMap<String, KitTheme>,
     rx: Option<Receiver<Got>>,
     tx: Option<Sender<Got>>,
     problem: Option<String>,
@@ -424,8 +424,13 @@ fn quant(x: f32) -> u32 {
     (x.clamp(0.0, 1.0) * 255.0).round() as u32
 }
 
-fn cached(s: &mut State, key: String, build: impl FnOnce() -> Kit) -> &'static Kit {
-    *s.kits.entry(key).or_insert_with(|| Box::leak(Box::new(build())))
+const KEPT_KITS: usize = 16;
+
+fn cached(s: &mut State, key: String, build: impl Fn(&KitEnv) -> Kit + 'static) -> KitTheme {
+    if !s.kits.contains_key(&key) && s.kits.len() >= KEPT_KITS {
+        s.kits.clear();
+    }
+    s.kits.entry(key).or_insert_with(|| KitTheme::new(build)).clone()
 }
 
 fn accented(k: &mut Kit, a: Color) {
@@ -435,7 +440,7 @@ fn accented(k: &mut Kit, a: Color) {
     k.c.border_focus = a;
 }
 
-pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool, zoom: bool) {
+pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool, zoom: bool) -> theme::Themes {
     let system_dark = cx.system_dark();
     let system_accent = srgb(cx.accent());
     let increased = cx.system_increased_contrast();
@@ -483,7 +488,7 @@ pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool, zoom: bool) {
         } else {
             paint.glass_tint = paint.card.alpha(if dark { 0.78 } else { 1.0 });
         }
-        let kit = cached(s, format!("kit:{key}"), || {
+        let kit = cached(s, format!("kit:{key}"), move |_| {
             let mut k = Kit::neutral(dark);
             if translucent {
                 k.c.bg_deep = paint.pane;
@@ -496,8 +501,8 @@ pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool, zoom: bool) {
             accented(&mut k, paint.accent);
             k
         });
-        let chrome = cached(s, format!("chrome:{key}"), || {
-            let mut k = rune_theme_opencode::kit(dark).clone();
+        let chrome = cached(s, format!("chrome:{key}"), move |env| {
+            let mut k = rune_theme_opencode::kit(&env.dark(dark).increased_contrast(false));
             if translucent {
                 k.c.bg_deep = paint.pane;
                 k.c.bg_base = Color::WHITE.alpha(0.025);
@@ -519,10 +524,12 @@ pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool, zoom: bool) {
         }
         (paint, kit, chrome, s.zoom)
     });
-    theme::set(paint, kit, chrome);
+    let themes = theme::Themes { main: kit, chrome };
+    theme::set(paint, themes.clone());
     if zoom {
         cx.zoom(scale);
     }
+    themes
 }
 
 pub fn backdrop(session: bool) -> El {
