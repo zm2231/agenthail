@@ -19,6 +19,8 @@ const SETTLE: Duration = Duration::from_secs(2);
 const RECHECK: Duration = Duration::from_secs(30);
 const GAP: Duration = Duration::from_secs(1);
 
+type Settings = (String, std::collections::HashMap<String, String>, Vec<feed::catalog::QueueRow>);
+
 #[derive(Default)]
 pub struct Link {
     pub problem: Option<Problem>,
@@ -56,22 +58,36 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
         let mut resumed = Some(resumed);
         let (mut checked, mut last): (Option<Instant>, Option<Instant>) = (None, None);
         let (mut due, mut down, mut gap, mut confirm) = (true, false, false, 0u8);
+        let (mut tag, mut settings): (Option<String>, Option<Settings>) = (None, None);
         loop {
             if due && last.is_none_or(|at| at.elapsed() >= GAP) {
                 last = Some(Instant::now());
                 let probed = if checked.is_some_and(|at| at.elapsed() < RECHECK) { Ok(()) } else { c.probe().map(|_| checked = Some(Instant::now())) };
-                let message = match probed.and_then(|()| c.snapshot().map_err(|e| c.probe().err().unwrap_or_else(|| Problem::of(&e.to_string())))) {
+                let since = tag.as_deref().filter(|_| !gap && resumed.is_none());
+                let message = match probed.and_then(|()| c.snapshot_since(since).map_err(|e| c.probe().err().unwrap_or_else(|| Problem::of(&e.to_string())))) {
                     Err(problem) => {
                         checked = None;
                         down = true;
+                        tag = None;
                         Bg::Down(problem)
                     }
-                    Ok(snap) => {
+                    Ok(None) => {
                         down = false;
                         due = confirm > 0;
                         confirm = confirm.saturating_sub(1);
+                        if settings.clone().is_some_and(|(busy, rekeyed, queue)| tx.send(Bg::SendSettings(busy, rekeyed, queue)).is_err()) {
+                            return;
+                        }
+                        Bg::Unchanged
+                    }
+                    Ok(Some((snap, fresh))) => {
+                        down = false;
+                        due = confirm > 0;
+                        confirm = confirm.saturating_sub(1);
+                        tag = fresh;
                         let applied = catalog.adopt(snap.sessions, &snap.host_epoch, snap.catalog_seq);
                         let rev = applied.rev.unwrap_or(snap.decisions_rev);
+                        settings = Some((snap.busy_delivery.clone(), snap.rekeyed.clone(), snap.queue.clone()));
                         if tx.send(Bg::SendSettings(snap.busy_delivery, snap.rekeyed, snap.queue)).is_err() || tx.send(Bg::DecisionsRev(rev)).is_err() || tx.send(Bg::LeadReplacements(snap.lead_replacements)).is_err() {
                             return;
                         }

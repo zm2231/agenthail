@@ -56,6 +56,7 @@ pub struct Wants {
     pub extensions: bool,
     pub reset: bool,
     pub session: Option<String>,
+    pub scoped: bool,
 }
 
 impl Wants {
@@ -65,9 +66,14 @@ impl Wants {
         self.hosts |= other.hosts;
         self.extensions |= other.extensions;
         self.reset |= other.reset;
+        self.scoped &= other.scoped;
         if other.session.is_some() {
             self.session = other.session;
         }
+    }
+
+    pub fn overview_unless(&self, known: impl Fn(&str) -> bool) -> bool {
+        self.overview && !(self.scoped && self.session.as_deref().is_some_and(known))
     }
 }
 
@@ -78,7 +84,8 @@ pub fn wants(event: &Event) -> Wants {
     let snapshot = reset || hosts || matches!(kind, "state.changed" | "settings.updated" | "signin.changed");
     let extensions = reset || hosts || matches!(kind, "extension.changed" | "extension.badge");
     let session = event.data["entityId"].as_str().filter(|e| !e.is_empty()).map(String::from);
-    Wants { snapshot, overview: snapshot, hosts, extensions, reset, session }
+    let scoped = kind == "state.changed" && session.is_some();
+    Wants { snapshot, overview: snapshot, hosts, extensions, reset, session, scoped }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -212,7 +219,6 @@ impl Catalog {
                     out.touched.push(id);
                 }
                 out.placed = true;
-                out.reread = true;
             }
             "session.removed" => {
                 if id.is_empty() {

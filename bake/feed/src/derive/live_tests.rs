@@ -161,7 +161,7 @@ fn a_burst_of_arrivals_leaves_one_rebuild_pending() {
     assert!(!ov.take_sessions("2026-11-24T11:00:00Z", "", 0, sessions()));
     assert!(!ov.stale(), "a snapshot that changes nothing asks for no rebuild");
     for id in ["t1", "t2", "t3"] {
-        ov.take_tail(id, "2026-11-24T11:59:00Z".into(), Err("timed out".into()));
+        ov.take_tail(id, "2026-11-24T11:59:00Z".into(), Err("timed out".into()), None);
     }
     ov.take_ledger("p", Instant::now(), Ok(Ledger { rows: vec![work("w1", "open")], actors: HashMap::new(), asked: Vec::new() }));
     ov.refresh(fetched("2026-11-24T12:00:20Z", sessions(), vec![]));

@@ -384,9 +384,9 @@ impl Overview {
         self.base.updated_at = at.to_string();
         self.base.host_epoch = epoch.to_string();
         self.base.catalog_seq = seq;
-        self.base.sessions = sessions;
+        let before = std::mem::replace(&mut self.base.sessions, sessions);
         self.reconcile();
-        self.stale = true;
+        self.stale |= self.base.sessions != before;
         true
     }
 
@@ -530,9 +530,15 @@ impl Overview {
         }
     }
 
-    pub fn due_tails(&mut self, open: &HashSet<String>) -> Vec<(String, String)> {
+    pub fn due_tails(&mut self, open: &HashSet<String>) -> Vec<(String, String, Option<tails::Resume>)> {
         let now = parse_time(&self.base.updated_at).unwrap_or_else(OffsetDateTime::now_utc);
-        self.tails.due(&self.base.sessions, now, open)
+        let due = self.tails.due(&self.base.sessions, now, open);
+        due.into_iter()
+            .map(|(id, last_active)| {
+                let at = self.tails.resume(&id);
+                (id, last_active, at)
+            })
+            .collect()
     }
 
     pub fn follow_tail(&mut self, session: Option<String>) -> bool {
@@ -543,9 +549,11 @@ impl Overview {
         self.tails.retry_due()
     }
 
-    pub fn take_tail(&mut self, session: &str, last_active: String, result: Result<Tail, String>) {
-        self.tails.take(session, last_active, result);
-        self.stale = true;
+    pub fn take_tail(&mut self, session: &str, last_active: String, result: Result<Tail, String>, at: Option<tails::Resume>) {
+        if let Some(at) = at {
+            self.tails.hold(session, at);
+        }
+        self.stale |= self.tails.take(session, last_active, result);
     }
 
     pub fn world(&mut self, panes: &[(&str, &[Item])]) -> World {

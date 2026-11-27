@@ -37,6 +37,7 @@ use crate::transcript::{Pane, Replay};
 
 pub enum Bg {
     Snapshot(String, String, u64, Vec<Session>, Option<Vec<String>>),
+    Unchanged,
     DecisionsRev(String),
     Changed(feed::watch::Wants),
     Reopened,
@@ -48,7 +49,7 @@ pub enum Bg {
     Item(WorkKey, WorkItem),
     Overview(Box<Fetched>),
     Ledger(String, std::time::Instant, Result<Ledger, String>),
-    Tail(String, String, Result<Tail, String>),
+    Tail(String, String, Result<Tail, String>, Option<tails::Resume>),
     OverviewError(String),
     SendSettings(String, HashMap<String, String>, Vec<feed::catalog::QueueRow>),
     Sent(String, Unsent, bool, Result<(Delivered, serde_json::Value), feed::catalog::RespondError>),
@@ -516,12 +517,12 @@ fn rebuild(s: &mut App) {
 fn fetch_tails(s: &mut App) {
     let Some(client) = s.client.clone() else { return };
     let open: HashSet<String> = s.panes.keys().cloned().collect();
-    for (id, last_active) in s.ov.live.due_tails(&open) {
+    for (id, last_active, at) in s.ov.live.due_tails(&open) {
         let (tx, client) = (s.outbox.clone(), client.clone());
         std::thread::spawn(move || {
-            let read = std::panic::AssertUnwindSafe(|| tails::fetch(&client, &id, tails::READ_BUDGET));
-            let result = std::panic::catch_unwind(read).unwrap_or_else(|_| Err("the read stopped".into()));
-            let _ = tx.send(Bg::Tail(id, last_active, result));
+            let read = std::panic::AssertUnwindSafe(|| tails::fetch(&client, &id, tails::READ_BUDGET, at));
+            let (result, at) = std::panic::catch_unwind(read).unwrap_or_else(|_| (Err("the read stopped".into()), None));
+            let _ = tx.send(Bg::Tail(id, last_active, result, at));
         });
     }
 }
@@ -558,7 +559,7 @@ fn changed_elsewhere(s: &mut App, wants: feed::watch::Wants) {
         ui::connect::changed(s);
         ui::delivery::stale(s);
     }
-    if wants.overview {
+    if wants.overview_unless(|id| s.ov.live.sessions().iter().any(|x| x.id == id)) {
         ask_overview(s, Ask::Refresh);
     }
     if wants.hosts {
@@ -1320,7 +1321,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         changed = true;
         match message {
             Bg::Snapshot(at, epoch, seq, sessions, touched) => {
-                if s.ov.live.take_sessions(&at, &epoch, seq, sessions) {
+                if s.ov.live.take_sessions(&at, &epoch, seq, sessions) && s.ov.live.stale() {
                     s.sessions = s.ov.live.sessions().to_vec();
                     s.notify.sessions_moved = true;
                     feed::holders::pins().prune(&s.sessions);
@@ -1338,6 +1339,11 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                         selected_moved(s, &id);
                     }
                 }
+            }
+            Bg::Unchanged => {
+                s.now = OffsetDateTime::now_utc();
+                s.status = "live".into();
+                ui::connect::up(s);
             }
             Bg::Changed(wants) => changed_elsewhere(s, wants),
             Bg::Reopened => reopened(s),
@@ -1373,8 +1379,8 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 fetch_tails(s);
                 arrived = true;
             }
-            Bg::Tail(id, last_active, result) => {
-                s.ov.live.take_tail(&id, last_active, result);
+            Bg::Tail(id, last_active, result, at) => {
+                s.ov.live.take_tail(&id, last_active, result, at);
                 fetch_tails(s);
             }
             Bg::Ledger(project, started, result) => {

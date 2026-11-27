@@ -173,6 +173,29 @@ fn a_burst_of_updates_in_one_frame_rebuilds_the_overview_once_from_the_newest() 
 }
 
 #[test]
+fn a_reread_that_finds_the_same_sessions_does_not_rebuild_the_overview() {
+    if !isolated("a_reread_that_finds_the_same_sessions_does_not_rebuild_the_overview") {
+        return;
+    }
+    let dir = Dir::new("same");
+    let mut rt = runtime(app(sessions(&["a"]), &dir), (1440.0, 900.0));
+    send(&rt, snapshot(2, sessions(&["a", "b"]), None));
+    rt.frame(DT);
+    let before = rt.state.rebuilds;
+
+    send(&rt, snapshot(3, sessions(&["a", "b"]), None));
+    send(&rt, Bg::Unchanged);
+    rt.frame(DT);
+    assert_eq!(rt.state.rebuilds, before, "nothing the overview shows moved");
+    assert_eq!(rt.state.status, "live");
+
+    send(&rt, snapshot(4, sessions(&["a", "b", "c"]), None));
+    rt.frame(DT);
+    assert_eq!(rt.state.rebuilds, before + 1, "a real change still rebuilds in the same frame");
+    assert!(rt.state.ov.d.session("c").is_some());
+}
+
+#[test]
 fn an_older_snapshot_in_a_burst_does_not_replace_a_newer_one() {
     if !isolated("an_older_snapshot_in_a_burst_does_not_replace_a_newer_one") {
         return;

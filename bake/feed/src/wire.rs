@@ -70,6 +70,10 @@ pub struct Rebuild {
 }
 
 impl Rebuild {
+    pub fn keep(&mut self, ids: &std::collections::HashSet<String>) {
+        self.rows.retain(|id, _| ids.contains(id));
+    }
+
     pub fn apply(&mut self, wire: Wire) -> Outcome {
         if wire.kind.as_deref() == Some("append") {
             let (Some(id), Some(from), Some(text)) = (wire.item_id, wire.from, wire.text) else { return Outcome::Resync };

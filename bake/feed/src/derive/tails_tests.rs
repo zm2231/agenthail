@@ -146,7 +146,7 @@ fn hands_on_comes_from_fetched_tails_and_loaded_panes() {
     let open: HashSet<String> = ["paned".to_string()].into();
     let due = ov.due_tails(&open);
     assert_eq!(due.len(), 1);
-    ov.take_tail("fetched", due[0].1.clone(), Ok(tail(vec![said("1", "2026-11-24T10:00:00Z", "start"), said("2", "2026-11-24T11:50:00Z", "try again")])));
+    ov.take_tail("fetched", due[0].1.clone(), Ok(tail(vec![said("1", "2026-11-24T10:00:00Z", "start"), said("2", "2026-11-24T11:50:00Z", "try again")])), None);
     let pane = [said("1", "2026-11-24T10:00:00Z", "start"), said("2", "2026-11-24T11:55:00Z", "and this")];
     assert_eq!(hands_on_ids(&ov.world(&[("paned", &pane)])), ["fetched", "paned"]);
 }
@@ -162,9 +162,9 @@ fn a_long_conversation_steered_once_recently_is_hands_on() {
     }
     v.push(": live".into());
     let open: HashSet<String> = ["paned".to_string()].into();
-    for (id, at) in ov.due_tails(&open) {
+    for (id, at, _) in ov.due_tails(&open) {
         let read = if id == "fetched" { tails::read(lines(v.clone())) } else { Ok(tails::trim(&conversation[conversation.len() - 20..conversation.len() - 1])) };
-        ov.take_tail(&id, at, read);
+        ov.take_tail(&id, at, read, None);
     }
     assert_eq!(hands_on_ids(&ov.world(&[("paned", &conversation)])), ["fetched", "paned"], "a session whose only kept prompt is not its first still counts; one with none does not");
 }
@@ -195,7 +195,7 @@ fn a_tail_read_ends_within_its_budget_when_headers_are_slow() {
         let _ = stream.write_all(HEAD);
     });
     let start = Instant::now();
-    assert!(tails::fetch(&client, "a", BUDGET).is_err());
+    assert!(tails::fetch(&client, "a", BUDGET, None).0.is_err());
     assert!(start.elapsed() < BUDGET + SLACK, "took {:?}", start.elapsed());
 }
 
@@ -214,7 +214,7 @@ fn a_tail_read_ends_within_its_budget_when_rows_trickle_in() {
         }
     });
     let start = Instant::now();
-    assert!(tails::fetch(&client, "a", BUDGET).is_err(), "rows that never reach the live point are not a tail");
+    assert!(tails::fetch(&client, "a", BUDGET, None).0.is_err(), "rows that never reach the live point are not a tail");
     assert!(start.elapsed() < BUDGET + SLACK, "took {:?}", start.elapsed());
 }
 
@@ -228,7 +228,7 @@ fn a_tail_read_returns_at_the_live_point_while_the_stream_stays_open() {
         std::thread::sleep(Duration::from_secs(5));
     });
     let start = Instant::now();
-    let tail = tails::fetch(&client, "a", BUDGET).unwrap();
+    let tail = tails::fetch(&client, "a", BUDGET, None).0.unwrap();
     assert_eq!(tail.items.len(), 1);
     assert!(start.elapsed() < Duration::from_millis(500), "took {:?}", start.elapsed());
 }
@@ -248,4 +248,83 @@ fn a_followed_session_is_read_even_when_it_is_not_among_the_recent_ones() {
     assert!(tails.follow(None));
     tails.due(&sessions, now, &HashSet::new());
     assert!(tails.held().all(|(id, _)| id != "operator"), "an unfollowed old session is let go");
+}
+
+fn journal(rows: &[(u64, Value)]) -> String {
+    let mut body = String::new();
+    for (seq, row) in rows {
+        body.push_str(&upsert(*seq, row.clone()).join("\n"));
+        body.push('\n');
+    }
+    body.push_str(": live\n\n");
+    body
+}
+
+fn daemon(replies: Vec<String>) -> (Client, std::sync::mpsc::Receiver<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let (asked, paths) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for reply in replies {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            request.read_line(&mut line).unwrap();
+            asked.send(line.split_whitespace().nth(1).unwrap_or_default().to_string()).unwrap();
+            loop {
+                line.clear();
+                if request.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                    break;
+                }
+            }
+            let _ = stream.write_all(reply.as_bytes());
+        }
+    });
+    (Client::new(&base, "t"), paths)
+}
+
+#[test]
+fn a_tail_read_again_takes_only_what_came_after_the_last_one() {
+    let head = String::from_utf8(HEAD.to_vec()).unwrap();
+    let first = head.clone() + &journal(&[(1, said_row("1", "2026-11-24T10:00:00Z", "start")), (2, reply_row("2"))]);
+    let second = head + &journal(&[(3, said_row("3", "2026-11-24T11:50:00Z", "and now this"))]);
+    let (client, paths) = daemon(vec![first, second]);
+    let (tail, at) = tails::fetch(&client, "a", BUDGET, None);
+    assert_eq!(tail.unwrap().items.len(), 2);
+    assert!(paths.recv().unwrap().ends_with("after=0"));
+    let (tail, at) = tails::fetch(&client, "a", BUDGET, at);
+    assert!(paths.recv().unwrap().ends_with("after=2"), "the second read starts where the first stopped");
+    let ids: Vec<String> = tail.unwrap().items.iter().map(|i| i.id.clone()).collect();
+    assert_eq!(ids, ["1", "2", "3"], "the held rows and the new one make the tail");
+    assert!(at.is_some());
+}
+
+#[test]
+fn a_tail_that_cannot_resume_reads_the_whole_journal_again() {
+    let head = String::from_utf8(HEAD.to_vec()).unwrap();
+    let first = head.clone() + &journal(&[(1, said_row("1", "2026-11-24T10:00:00Z", "start"))]);
+    let gap = "HTTP/1.1 409 Conflict\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".to_string();
+    let full = head + &journal(&[(1, said_row("1", "2026-11-24T10:00:00Z", "start")), (9, said_row("9", "2026-11-24T11:50:00Z", "later"))]);
+    let (client, paths) = daemon(vec![first, gap, full]);
+    let (_, at) = tails::fetch(&client, "a", BUDGET, None);
+    let (tail, _) = tails::fetch(&client, "a", BUDGET, at);
+    let asked: Vec<String> = paths.try_iter().collect();
+    assert!(asked[1].ends_with("after=1") && asked[2].ends_with("after=0"), "{asked:?}");
+    assert_eq!(tail.unwrap().items.len(), 2);
+}
+
+#[test]
+fn a_held_tail_keeps_only_its_recent_rows_and_still_knows_an_early_prompt() {
+    let mut rows = vec![(1, said_row("p", "2026-11-24T09:00:00Z", "the first ask"))];
+    rows.extend((2..=400u64).map(|seq| (seq, reply_row(&format!("r{seq}")))));
+    let head = String::from_utf8(HEAD.to_vec()).unwrap();
+    let late = head.clone() + &journal(&[(401, reply_row("r401")), (402, reply_row("p"))]);
+    let (client, _paths) = daemon(vec![head + &journal(&rows), late]);
+    let (tail, at) = tails::fetch(&client, "a", BUDGET, None);
+    let tail = tail.unwrap();
+    assert!(tail.prompted_before && tail.items.len() == tails::TAIL_ITEMS);
+    let (tail, _) = tails::fetch(&client, "a", BUDGET, at);
+    let tail = tail.unwrap();
+    assert!(tail.prompted_before, "a prompt let go from the held rows still counts");
+    assert_eq!(tail.items.last().unwrap().id, "r401", "a late change to a row let go doesn't come back as a new one");
 }
