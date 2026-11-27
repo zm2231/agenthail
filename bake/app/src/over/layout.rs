@@ -104,6 +104,7 @@ fn encode(s: &App) -> String {
     let boards: serde_json::Map<String, Value> = s.ov.boards.iter().map(|(k, v)| (k.clone(), Value::Bool(*v))).collect();
     json!({
         "brief": s.ov.now_brief,
+        "transcriptFocus": crate::transcript::focused(),
         "collapsed": collapsed(s),
         "focus": s.ov.now_focus.map(|(i, before)| json!({ "pane": i, "before": before })),
         "boards": boards,
@@ -132,6 +133,7 @@ pub fn load(s: &mut App) {
         Some([a.first()?.as_bool()?, a.get(1)?.as_bool()?, a.get(2)?.as_bool()?])
     };
     s.ov.now_brief = v["brief"].as_bool().unwrap_or(false);
+    crate::transcript::restore_focus(v["transcriptFocus"].as_bool().unwrap_or(false));
     if let Some(c) = flags(&v["collapsed"]).filter(|c| !c.iter().all(|x| *x)) {
         set_collapsed(s, c);
     }

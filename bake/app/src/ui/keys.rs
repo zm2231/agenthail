@@ -128,10 +128,11 @@ fn step(s: &mut App, by: isize) -> bool {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct MenuState {
     stop: bool,
+    focus: bool,
 }
 
 pub fn menu_state(s: &App) -> MenuState {
-    MenuState { stop: search::selected(s).is_some_and(|id| search::can_stop(s, &id)) }
+    MenuState { stop: search::selected(s).is_some_and(|id| search::can_stop(s, &id)), focus: crate::transcript::focused() }
 }
 
 pub fn menu_items(state: MenuState) -> Vec<MenuItem<App>> {
@@ -143,7 +144,10 @@ pub fn menu_items(state: MenuState) -> Vec<MenuItem<App>> {
             let enabled = act != Act::Stop || state.stop;
             Some(MenuItem::with_action(title, move |s: &mut App, tx| run(s, act, tx)).id(format!("key-{act:?}")).menu(menu).key_equivalent(shortcut).keys_first().enabled(enabled))
         })
-        .chain([MenuItem::with_action("Actual Text Size", |s: &mut App, tx| run(s, Act::TextActual, tx)).id("key-TextActual").menu("View")])
+        .chain([
+            MenuItem::with_action("Actual Text Size", |s: &mut App, tx| run(s, Act::TextActual, tx)).id("key-TextActual").menu("View"),
+            MenuItem::with_action("Focus", |s: &mut App, _| crate::transcript::set_focus(s, !crate::transcript::focused())).id("key-Focus").menu("View").checked(state.focus),
+        ])
         .collect()
 }
 
