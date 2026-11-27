@@ -136,6 +136,9 @@ fn settled(s: &mut App, done: Done) {
                 e.saving = None;
                 e.error = outcome.error().map(str::to_string);
             }
+            if !s.native_queue.queue.current(&session, generation) {
+                return;
+            }
             if !s.native_queue.queue.mutated(&session, generation, &outcome) {
                 if s.native_queue.queue.take_dirty() {
                     fetch(s, false);

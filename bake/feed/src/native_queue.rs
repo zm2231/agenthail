@@ -7,6 +7,7 @@ pub const TITLE: &str = "Codex queue";
 pub const EMPTY: &str = "Nothing queued in Codex.";
 pub const UNAVAILABLE: &str = "Codex's queue isn't available for this session.";
 pub const EMPTY_INPUT: &str = "Empty input";
+pub const LOADING: &str = "Loading Codex's queue";
 pub const EDITOR_NOTE: &str = "Codex starts queued input after the current turn, in order.";
 const STILL_FINISHING: &str = "Agenthail is still finishing this request.";
 const UNKNOWN_SUFFIX: &str = "The outcome is unknown; check the session before retrying.";
@@ -149,6 +150,8 @@ struct Pending {
     identity: String,
     session: String,
     key: String,
+    sent: u32,
+    answered: bool,
     recorded: Option<u64>,
 }
 
@@ -162,25 +165,32 @@ impl Keys {
     pub fn key(&mut self, session: &str, act: &Act) -> String {
         let identity = act.identity(session);
         if let Some(p) = self.pending.iter_mut().find(|p| p.identity == identity) {
+            p.sent += 1;
             return p.key.clone();
         }
         let key = crate::catalog::request_key();
-        self.pending.push(Pending { identity, session: session.to_string(), key: key.clone(), recorded: None });
+        self.pending.push(Pending { identity, session: session.to_string(), key: key.clone(), sent: 1, answered: false, recorded: None });
         key
     }
 
     pub fn settled(&mut self, key: &str, outcome: &Outcome) {
+        self.seq += 1;
+        let at = self.seq;
+        let Some(p) = self.pending.iter_mut().find(|p| p.key == key) else { return };
+        p.sent = p.sent.saturating_sub(1);
         match outcome {
-            Outcome::Done | Outcome::Failed(_) => self.pending.retain(|p| p.key != key),
+            Outcome::Done | Outcome::Failed(_) => p.answered = true,
             Outcome::Unknown(_) => {
-                self.seq += 1;
-                let at = self.seq;
-                if let Some(p) = self.pending.iter_mut().find(|p| p.key == key) {
-                    p.recorded = Some(at);
-                }
+                p.answered = false;
+                p.recorded = Some(at);
             }
-            Outcome::Pending(_) => {}
+            Outcome::Pending(_) => {
+                p.answered = false;
+                p.recorded = None;
+            }
         }
+        let done = (*outcome == Outcome::Done).then(|| p.session.clone());
+        self.pending.retain(|p| p.sent > 0 || (!p.answered && done.as_deref() != Some(p.session.as_str())));
     }
 
     pub fn read_started(&mut self) -> u64 {
@@ -189,7 +199,7 @@ impl Keys {
     }
 
     pub fn observed(&mut self, session: &str, read: u64) {
-        self.pending.retain(|p| p.session != session || p.recorded.is_none_or(|at| at > read));
+        self.pending.retain(|p| p.session != session || p.sent > 0 || p.recorded.is_none_or(|at| at > read));
     }
 }
 
@@ -239,7 +249,7 @@ impl Queue {
         std::mem::take(&mut self.dirty)
     }
 
-    fn current(&self, session: &str, generation: u64) -> bool {
+    pub fn current(&self, session: &str, generation: u64) -> bool {
         self.generation == generation && self.session.as_deref() == Some(session)
     }
 

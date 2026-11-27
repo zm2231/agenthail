@@ -7,7 +7,7 @@ use super::{Editor, act, close_editor, fetch, open_editor, reload, save_editor};
 use crate::App;
 use crate::icons;
 use crate::theme::{self, BODY, META, accent, failed, faint, muted, wash};
-use crate::ui::rail::rail_section;
+use crate::ui::rail::rail_section_with;
 
 fn small(label: &str, key: &str, disabled: bool, on: impl Fn(&mut App) + 'static, k: &Kit) -> El {
     Button::new(label).variant(ButtonVariant::Neutral).control_size(ControlSize::Small).disabled(disabled).on_press(on).build(k).key(key)
@@ -53,15 +53,18 @@ pub(crate) fn section(s: &App, x: &Session, k: &Kit) -> Option<El> {
         .on_press(move |s: &mut App| reload(s, &reload_id))
         .build(k)
         .key("codex-queue-reload");
-    let top = row().w_full().gap(6.0).items_center().children(busy.then(|| text("Working…").font(META).color(faint()))).child(el().grow(1.0)).child(reload);
-    let mut body = col().w_full().gap(8.0).child(top);
+    let trailing: Vec<El> = busy.then(|| text("Working…").font(META).color(faint())).into_iter().chain([reload]).collect();
+    let section = |body: El| rail_section_with(nq::TITLE, &icons::INBOX, trailing, body);
+    let mut body = col().w_full().gap(8.0);
     if !current {
-        return Some(rail_section(nq::TITLE, &icons::INBOX, body));
+        return Some(section(body.child(text(nq::LOADING).font(META).color(muted()))));
     }
     if q.loaded && q.items.is_empty() {
         body = body.child(text(nq::EMPTY).font(META).color(muted()));
     } else if !q.loaded && let Some(error) = &q.error {
         body = body.child(text(nq::UNAVAILABLE).font(META).color(muted()).wrap().help(error.clone()));
+    } else if !q.loaded {
+        body = body.child(text(nq::LOADING).font(META).color(muted()));
     }
     body = body.children(q.items.iter().map(|i| item_row(i, can_write, busy, k)));
     if q.next_cursor.is_some() {
@@ -81,7 +84,7 @@ pub(crate) fn section(s: &App, x: &Session, k: &Kit) -> Option<El> {
     if q.loaded && let Some(error) = &q.error {
         body = body.child(text(error.clone()).font(META).color(failed()).wrap_anywhere());
     }
-    Some(rail_section(nq::TITLE, &icons::INBOX, body))
+    Some(section(body))
 }
 
 fn row_menu(s: &App, item_id: &str, layer: &mut Vec<El>, k: &Kit) {

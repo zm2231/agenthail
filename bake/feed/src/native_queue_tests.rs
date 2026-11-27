@@ -99,34 +99,41 @@ fn outcomes_follow_the_daemon_codes() {
     assert_eq!(Outcome::Done.error(), None);
 }
 
+fn send(keys: &mut Keys, session: &str, act: &Act, outcome: Outcome) -> String {
+    let key = keys.key(session, act);
+    keys.settled(&key, &outcome);
+    key
+}
+
+fn unknown() -> Outcome {
+    Outcome::Unknown("lost".into())
+}
+
 #[test]
 fn a_retry_after_an_unknown_outcome_reuses_its_key_until_a_later_read() {
     let mut keys = Keys::default();
     let add = Act::Add("Ship it".into());
-    let first = keys.key("s", &add);
     let early = keys.read_started();
-    keys.settled(&first, &Outcome::Unknown("lost".into()));
-    assert_eq!(keys.key("s", &add), first, "the same add retries with the same key");
-    assert_ne!(keys.key("s", &Act::Add("Other".into())), first);
-    assert_ne!(keys.key("t", &add), first, "another session's add is its own request");
+    let first = send(&mut keys, "s", &add, unknown());
+    assert_eq!(send(&mut keys, "s", &add, unknown()), first, "the same add retries with the same key");
+    assert_ne!(send(&mut keys, "s", &Act::Add("Other".into()), unknown()), first);
+    assert_ne!(send(&mut keys, "t", &add, unknown()), first, "another session's add is its own request");
     keys.observed("s", early);
-    assert_eq!(keys.key("s", &add), first, "a read that started before the answer doesn't count");
+    assert_eq!(send(&mut keys, "s", &add, unknown()), first, "a read that started before the answer doesn't count");
     let late = keys.read_started();
     keys.observed("s", late);
-    assert_ne!(keys.key("s", &add), first, "after a later read the next add is a new request");
+    assert_ne!(send(&mut keys, "s", &add, unknown()), first, "after a later read the next add is a new request");
 }
 
 #[test]
 fn a_still_running_request_keeps_its_key_across_reads() {
     let mut keys = Keys::default();
     let add = Act::Add("Ship it".into());
-    let first = keys.key("s", &add);
-    keys.settled(&first, &Outcome::Pending("still finishing".into()));
+    let first = send(&mut keys, "s", &add, Outcome::Pending("still finishing".into()));
     let read = keys.read_started();
     keys.observed("s", read);
-    assert_eq!(keys.key("s", &add), first, "a submitted add retries with the same key and message id");
-    keys.settled(&first, &Outcome::Done);
-    assert_ne!(keys.key("s", &add), first);
+    assert_eq!(send(&mut keys, "s", &add, Outcome::Done), first, "a submitted add retries with the same key and message id");
+    assert_ne!(send(&mut keys, "s", &add, Outcome::Done), first, "once answered, the next add is a new request");
 }
 
 #[test]
@@ -135,11 +142,45 @@ fn a_late_answer_only_settles_its_own_request() {
     let del = Act::Delete("q1".into());
     let add = Act::Add("Ship it".into());
     let old = keys.key("s", &del);
-    let newer = keys.key("s", &add);
-    keys.settled(&newer, &Outcome::Pending("still finishing".into()));
+    let newer = send(&mut keys, "s", &add, Outcome::Pending("still finishing".into()));
     keys.settled(&old, &Outcome::Failed("nope".into()));
-    assert_ne!(keys.key("s", &del), old, "a definite answer clears its key");
-    assert_eq!(keys.key("s", &add), newer, "and leaves the other request's key alone");
+    assert_eq!(send(&mut keys, "s", &add, Outcome::Pending("still finishing".into())), newer, "the other request keeps its key");
+    assert_ne!(send(&mut keys, "s", &del, Outcome::Failed("nope".into())), old, "a definite answer clears its key");
+}
+
+#[test]
+fn an_older_answer_does_not_retire_a_key_a_newer_send_still_uses() {
+    let mut keys = Keys::default();
+    let add = Act::Add("Ship it".into());
+    let older = keys.key("s", &add);
+    let newer = keys.key("s", &add);
+    assert_eq!(older, newer);
+    keys.settled(&older, &Outcome::Failed("nope".into()));
+    keys.settled(&newer, &Outcome::Pending("still finishing".into()));
+    let read = keys.read_started();
+    keys.observed("s", read);
+    assert_eq!(send(&mut keys, "s", &add, Outcome::Done), older, "the retry keeps the key and message id of the unresolved send");
+}
+
+#[test]
+fn a_done_change_starts_the_session_over_like_native() {
+    let mut keys = Keys::default();
+    let add = Act::Add("Ship it".into());
+    let first = send(&mut keys, "s", &add, Outcome::Pending("still finishing".into()));
+    let other = send(&mut keys, "t", &add, Outcome::Pending("still finishing".into()));
+    send(&mut keys, "s", &Act::Delete("q1".into()), Outcome::Done);
+    assert_ne!(send(&mut keys, "s", &add, Outcome::Done), first, "adding the same words later is a new request");
+    assert_eq!(send(&mut keys, "t", &add, Outcome::Done), other, "another session keeps its key");
+}
+
+#[test]
+fn a_reply_from_an_older_generation_is_not_current() {
+    let mut q = Queue::default();
+    q.reset("a");
+    let (a, ga) = q.begin().unwrap();
+    q.reset("b");
+    let (b, gb) = q.begin().unwrap();
+    assert!(!q.current(&a, ga) && q.current(&b, gb));
 }
 
 #[test]
