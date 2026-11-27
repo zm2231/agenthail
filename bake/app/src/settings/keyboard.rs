@@ -12,6 +12,7 @@ use crate::ui::bindings;
 pub struct Form {
     rows: HashMap<&'static str, ShortcutRecorderState>,
     kept: Vec<(&'static str, &'static str)>,
+    kept_at: u64,
 }
 
 pub const PAGE: usize = 2;
@@ -21,6 +22,7 @@ pub fn opened(s: &mut Prefs) {
         return;
     }
     bindings::refresh();
+    s.keyboard.kept.clear();
     for c in COMMANDS {
         let state = s.keyboard.rows.entry(c.id).or_default();
         if !state.is_recording() {
@@ -69,6 +71,7 @@ fn reset(s: &mut Prefs, id: &'static str) {
 
 fn restore(s: &mut Prefs) {
     s.keyboard.kept = bindings::change(Shortcuts::reset_all);
+    s.keyboard.kept_at = bindings::generation();
     s.keyboard.rows.clear();
     opened(s);
 }
@@ -119,7 +122,8 @@ pub fn page(s: &Prefs, k: &Kit) -> El {
         .on_press(restore)
         .build(k)
         .key("settings-shortcuts-restore");
-    for (title, owner) in &s.keyboard.kept {
+    let current = s.keyboard.kept_at == bindings::generation();
+    for (title, owner) in s.keyboard.kept.iter().filter(|_| current) {
         out = out.child(text(format!("{title} kept its shortcut: its default is used by {owner}.")).font(crate::theme::META).color(crate::theme::muted()).wrap().px(4.0));
     }
     out.child(row().w_full().child(el().grow(1.0)).child(restore))
