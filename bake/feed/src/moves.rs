@@ -100,11 +100,12 @@ impl Outcome {
             Ok(reply) => return Outcome::Moved(moved(&reply, host_name)),
             Err(error) => error,
         };
-        match (error.status, error.code.as_str()) {
-            (202, "move_outcome_unknown") => Outcome::Unsettled,
-            (409, "move_busy") => Outcome::Busy(error.reply["busy"].as_str().filter(|b| !b.is_empty()).map(str::to_string).unwrap_or(error.message)),
-            (409, "move_needs_consent") => Outcome::NeedsConsent,
-            (0, _) if error.maybe_delivered => Outcome::Lost,
+        match error.code.as_str() {
+            "move_outcome_unknown" => Outcome::Unsettled,
+            "move_busy" => Outcome::Busy(error.reply["busy"].as_str().filter(|b| !b.is_empty()).map(str::to_string).unwrap_or(error.message)),
+            "move_needs_consent" => Outcome::NeedsConsent,
+            "move_refused" | "move_failed" => Outcome::Refused(error.message),
+            _ if error.maybe_delivered => Outcome::Lost,
             _ => Outcome::Refused(error.message),
         }
     }
@@ -222,6 +223,10 @@ mod tests {
         assert_eq!(Outcome::of(Err(lost), "forge"), Outcome::Lost);
         let unsent = RespondError { message: "connection refused".into(), code: String::new(), maybe_delivered: false, reply: Value::Null, answered: false, status: 0 };
         assert_eq!(Outcome::of(Err(unsent), "forge"), Outcome::Refused("connection refused".into()));
+        let gateway = RespondError::from_status("session-moves", 504, "upstream timed out");
+        assert_eq!(Outcome::of(Err(gateway), "forge"), Outcome::Lost, "the daemon keeps moving after the connection drops");
+        let refused = RespondError::from_status("session-moves", 400, r#"{"error":{"code":"invalid_request","message":"sessionId and a host or root are required"}}"#);
+        assert_eq!(Outcome::of(Err(refused), "forge"), Outcome::Refused("sessionId and a host or root are required".into()));
     }
 
     #[test]
