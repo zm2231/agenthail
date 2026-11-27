@@ -27,10 +27,12 @@ pub struct Form {
     pub history_open: bool,
     pub confirm_reset: bool,
     seen_rev: String,
+    history_asked: u64,
+    history_shown: u64,
 }
 
 pub enum Got {
-    History(Result<Vec<Entry>, Failure>),
+    History(u64, Result<Vec<Entry>, Failure>),
     Presets(Result<Vec<Preset>, Failure>),
     Thumb(String, Result<(u32, u32, Vec<u8>), String>),
     Wrote(u64, Result<View, Failure>),
@@ -49,11 +51,17 @@ fn spawn(s: &mut Prefs, job: impl FnOnce(&Client) -> Got + Send + 'static) -> bo
     true
 }
 
+fn history(s: &mut Prefs) {
+    s.appearance.history_asked += 1;
+    let asked = s.appearance.history_asked;
+    spawn(s, move |c| Got::History(asked, c.ui_log(50)));
+}
+
 pub fn opened(s: &mut Prefs) {
     if s.tab != TAB {
         return;
     }
-    spawn(s, |c| Got::History(c.ui_log(50)));
+    history(s);
     if !matches!(s.appearance.presets, Some(Ok(_))) {
         spawn(s, |c| Got::Presets(c.ui_presets()));
     }
@@ -67,7 +75,7 @@ pub fn changed(s: &mut Prefs) {
     s.appearance.seen_rev = rev;
     s.appearance.drafts.clear();
     if s.tab == TAB {
-        spawn(s, |c| Got::History(c.ui_log(50)));
+        history(s);
     }
 }
 
@@ -179,7 +187,12 @@ fn upload(s: &mut Prefs, path: std::path::PathBuf) {
 
 pub fn take(s: &mut Prefs, got: Got) {
     match got {
-        Got::History(h) => s.appearance.history = Some(h),
+        Got::History(asked, h) => {
+            if asked > s.appearance.history_shown {
+                s.appearance.history_shown = asked;
+                s.appearance.history = Some(h);
+            }
+        }
         Got::Presets(p) => {
             s.appearance.presets = Some(p);
             thumbs(s);
@@ -200,7 +213,7 @@ pub fn take(s: &mut Prefs, got: Got) {
                 }
                 Err(f) => s.appearance.error = Some(f),
             }
-            spawn(s, |c| Got::History(c.ui_log(50)));
+            history(s);
         }
     }
 }

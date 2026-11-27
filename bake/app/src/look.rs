@@ -300,7 +300,7 @@ pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool) {
         }
         let accent_rgb = accent.unwrap_or_else(|| srgb(paint.accent));
         let translucent = glass && s.look.translucent(dark);
-        let mut key = format!("{dark}:{translucent}:{accent:?}");
+        let mut key = format!("{dark}:{translucent}:{accent:?}:{:?}:{:?}", srgb(paint.text).map(quant), srgb(paint.muted).map(quant));
         if translucent {
             let ground = ground_rgb(dark);
             let tint = tint_rgb(&s.look, dark, accent_rgb);
@@ -340,6 +340,9 @@ pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool) {
                 k.c.bg_deep = Color::TRANSPARENT;
                 k.c.border_muted = Color::WHITE.alpha(0.09);
             }
+            k.c.text_strong = paint.text;
+            k.c.text_base = paint.text;
+            k.c.text_weak = paint.muted;
             accented(&mut k, accent.map(|_| paint.accent));
             k
         });

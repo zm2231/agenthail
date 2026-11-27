@@ -214,7 +214,7 @@ fn history(s: &Prefs) -> El {
     let reset = Button::new("Reset to Default…").control_size(ControlSize::Small).disabled(busy).on_press(|s: &mut Prefs| s.appearance.confirm_reset = true).build(k).key("appearance-reset");
     let mut rows = vec![row().w_full().gap(10.0).items_center().px(14.0).py(10.0).child(last).child(undo).child(reset)];
     if s.appearance.confirm_reset {
-        let message = if s.appearance.here { "This removes every appearance setting made for this computer only." } else { "This removes every appearance setting that applies to all devices, and this computer's own settings that would hide the reset. Other devices keep their own settings." };
+        let message = if s.appearance.here { "This resets the settings on this page made for this computer only. Text colours and other ui.conf lines stay." } else { "This resets the settings on this page for all devices, and this computer's own values that would hide the reset. Other devices keep their own values; text colours and other ui.conf lines stay." };
         let confirm = Button::new("Reset").variant(ButtonVariant::Danger).control_size(ControlSize::Small).disabled(busy).on_press(|s: &mut Prefs| {
             let change = Change::reset(&scope(s));
             write(s, change);

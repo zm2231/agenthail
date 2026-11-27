@@ -6,7 +6,7 @@ pub(crate) fn rail_section(title: &str, glyph: &'static Icon, body: El) -> El {
         .gap(8.0)
         .pt(14.0)
         .child(row().gap(6.0).items_center().px(4.0).child(icon(glyph, 12.0).color(faint())).child(label(title)))
-        .child(col().w_full().px(12.0).py(12.0).radius(14.0).fill(Color::BLACK.alpha(0.20)).border(1.0, crate::theme::ink(0.07)).child(body))
+        .child(col().w_full().px(12.0).py(12.0).radius(14.0).fill(if crate::theme::paint().dark { Color::BLACK.alpha(0.20) } else { Color::BLACK.alpha(0.035) }).border(1.0, crate::theme::ink(0.07)).child(body))
 }
 
 pub(crate) fn phase_stepper(state: &str) -> El {
