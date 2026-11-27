@@ -1,4 +1,6 @@
 use std::cell::RefCell;
+use std::collections::BTreeSet;
+use std::sync::{Condvar, Mutex};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
@@ -35,6 +37,47 @@ pub fn step(s: &mut App, steps: Option<i32>) {
         st.due = Some((next, Instant::now() + WRITE_AFTER));
         st.latest = Some(next);
     });
+}
+
+struct Line {
+    taken: u64,
+    done: u64,
+    finished: BTreeSet<u64>,
+}
+
+static LINE: Mutex<Line> = Mutex::new(Line { taken: 0, done: 0, finished: BTreeSet::new() });
+static MOVED: Condvar = Condvar::new();
+
+pub struct Turn(u64);
+
+pub fn turn() -> Turn {
+    let mut line = LINE.lock().expect("text size line");
+    line.taken += 1;
+    Turn(line.taken)
+}
+
+impl Turn {
+    pub fn wait(&self) {
+        let mut line = LINE.lock().expect("text size line");
+        while line.done + 1 < self.0 {
+            line = MOVED.wait(line).expect("text size line");
+        }
+    }
+}
+
+impl Drop for Turn {
+    fn drop(&mut self) {
+        let mut line = LINE.lock().expect("text size line");
+        line.finished.insert(self.0);
+        loop {
+            let next = line.done + 1;
+            if !line.finished.remove(&next) {
+                break;
+            }
+            line.done = next;
+        }
+        MOVED.notify_all();
+    }
 }
 
 pub fn supersede() {
@@ -81,8 +124,34 @@ pub fn pump(s: &mut App) -> bool {
         return changed;
     };
     let device = crate::look::device();
+    let turn = turn();
     std::thread::spawn(move || {
+        turn.wait();
         let _ = tx.send(client.ui_change(fl::device_class(), &device, &Change::text_scale(scale, &device)).map(drop));
     });
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_size_writes_go_in_the_order_they_were_asked() {
+        let (first, second) = (turn(), turn());
+        let base = first.0 - 1;
+        let waiting = std::thread::spawn(move || {
+            second.wait();
+            LINE.lock().unwrap().done
+        });
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(!waiting.is_finished());
+        drop(first);
+        assert_eq!(waiting.join().unwrap(), base + 1);
+        let (third, fourth) = (turn(), turn());
+        drop(fourth);
+        assert_eq!(LINE.lock().unwrap().done, base + 2);
+        drop(third);
+        assert_eq!(LINE.lock().unwrap().done, base + 4);
+    }
 }

@@ -689,7 +689,7 @@ pub fn file_el(s: &App, session: &str, item: &Item) -> El {
     card = card.on_secondary_press(menu_at(target));
     if reason.is_none() {
         let (session, item) = (session.to_string(), item.clone());
-        card = card.hover(crate::theme::ink(0.08)).help(format!("Open {name}")).on_press_tx(move |s: &mut App, tx: &mut Tx| fetch_sent(s, &session, &item, Then::Open, tx));
+        card = card.hover(crate::theme::ink(0.08)).help(format!("Preview {name}")).on_press_tx(move |s: &mut App, tx: &mut Tx| fetch_sent(s, &session, &item, Then::Look, tx));
     } else if item.files.first().is_some_and(|f| !f.path.is_empty()) {
         let (key, path) = (item.id.clone(), item.files[0].path.clone());
         card = card.help(reason.unwrap_or_default()).child(row().key(format!("copy-path-{}", item.id)).px(6.0).py(2.0).radius(5.0).hover(crate::theme::ink(0.08)).on_press_tx(move |s: &mut App, tx: &mut Tx| copy_path(s, &key, &path, tx)).child(text("Copy Path").font(META).color(theme::accent())));
