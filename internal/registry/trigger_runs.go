@@ -39,8 +39,8 @@ type TriggerRun struct {
 	Stderr     string          `json:"stderr,omitempty"`
 	Error      string          `json:"error,omitempty"`
 	QueuedAt   time.Time       `json:"queuedAt"`
-	StartedAt  *time.Time      `json:"startedAt,omitempty"`
-	FinishedAt *time.Time      `json:"finishedAt,omitempty"`
+	StartedAt  *time.Time      `json:"startedAt,omitzero"`
+	FinishedAt *time.Time      `json:"finishedAt,omitzero"`
 }
 
 type TriggerOutcome struct {

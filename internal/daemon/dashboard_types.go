@@ -44,7 +44,7 @@ type dashboardSession struct {
 	LimitResume       *dashboardLimitResume           `json:"limitResume,omitempty"`
 	Activity          *surface.Activity               `json:"activity,omitempty"`
 	Plan              *surface.Plan                   `json:"plan,omitempty"`
-	LastActive        time.Time                       `json:"lastActive,omitempty"`
+	LastActive        time.Time                       `json:"lastActive,omitzero"`
 	RegisteredAt      time.Time                       `json:"registeredAt,omitzero"`
 	QueueCount        int                             `json:"queueCount"`
 	Open              bool                            `json:"open"`
@@ -71,7 +71,7 @@ type dashboardSession struct {
 	PRs               []prwatch.View                  `json:"prs,omitempty"`
 	HeldWork          []heldWorkRow                   `json:"heldWork,omitempty"`
 	Move              *moveView                       `json:"move,omitempty"`
-	ObservedAt        time.Time                       `json:"observedAt,omitempty"`
+	ObservedAt        time.Time                       `json:"observedAt,omitzero"`
 	UnavailableReason string                          `json:"unavailableReason,omitempty"`
 	Runtime           *surface.Runtime                `json:"runtime,omitempty"`
 	Freshness         *registry.CatalogFreshness      `json:"freshness,omitempty"`

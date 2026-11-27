@@ -98,7 +98,7 @@ type projectRow struct {
 	Kind         string               `json:"kind"`
 	Checkouts    []projectCheckout    `json:"checkouts"`
 	Coordinators []projectCoordinator `json:"coordinators"`
-	LastActive   time.Time            `json:"lastActive,omitempty"`
+	LastActive   time.Time            `json:"lastActive,omitzero"`
 	SessionCount int                  `json:"sessionCount"`
 	Archived     bool                 `json:"archived"`
 	Linked       []projectRef         `json:"linked,omitempty"`

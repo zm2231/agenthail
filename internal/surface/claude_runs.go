@@ -12,8 +12,8 @@ type ClaudeRunObservation struct {
 	ResumeSessionID string    `json:"resumeSessionId,omitempty"`
 	RunType         string    `json:"runType,omitempty"`
 	ProviderState   string    `json:"providerState,omitempty"`
-	CreatedAt       time.Time `json:"createdAt,omitempty"`
-	UpdatedAt       time.Time `json:"updatedAt,omitempty"`
+	CreatedAt       time.Time `json:"createdAt,omitzero"`
+	UpdatedAt       time.Time `json:"updatedAt,omitzero"`
 }
 
 // ClaudeSubagentLink is one Claude Code subagent of a session, observed from
@@ -27,7 +27,7 @@ type ClaudeSubagentLink struct {
 	Depth           int       `json:"depth"`
 	Working         bool      `json:"working"`
 	StartedAt       time.Time `json:"startedAt,omitzero"`
-	LastActive      time.Time `json:"lastActive,omitempty"`
+	LastActive      time.Time `json:"lastActive,omitzero"`
 	TranscriptPath  string    `json:"transcriptPath"`
 }
 
