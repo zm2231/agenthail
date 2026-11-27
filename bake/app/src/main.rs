@@ -1173,6 +1173,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= ui::complete::pump(s);
     changed |= look::poll(look::Window::Main, tx);
     ui::paste::settle(s);
+    changed |= ui::notice::poll(s);
     switch_composer(s);
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &ui::paste::draft(s));

@@ -53,6 +53,12 @@ fn name_section(s: &Prefs, person: &Person, writable: bool) -> El {
     section("Your name", vec![field], Some(prefs::name_footer(person)))
 }
 
+fn composer() -> El {
+    let shown = !feed::notice::shared().hidden;
+    let flip = parts::switch("turn-notice", "Show the terminal session note above the composer", shown, false, move |_: &mut Prefs| feed::notice::change(|n| n.set_shown(!shown)));
+    section("Composer", vec![line("Show the terminal session note above the composer", None, flip)], None)
+}
+
 fn delivery(s: &Prefs, current: &str, writable: bool) -> El {
     let k = theme::kit();
     let off = !writable || super::busy(s);
@@ -133,6 +139,7 @@ pub fn page(s: &Prefs, layer: &mut Vec<El>) -> El {
     if let Some(person) = base.and_then(|b| b.person.as_ref()) {
         out = out.child(name_section(s, person, writable));
     }
+    out = out.child(composer());
     let (busy, hours) = match (settings, base) {
         (Some(st), _) => (st.dashboard.busy_delivery.clone(), st.dashboard.codex_recent_hours),
         (None, Some(b)) => (b.busy_delivery.clone(), b.codex_recent_hours),
