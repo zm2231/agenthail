@@ -224,9 +224,6 @@ fn body_tools(cx: &Cx, item: &feed::Item, mut head: El) -> El {
             None => head.child(action(format!("full-{}", item.id), &icons::CHEVRON_DOWN, "Show all").on_press(move |s: &mut App| crate::history::load_body(s, &sid, &iid))),
         };
     }
-    if let Some(call) = item.call_id.clone().filter(|c| !c.is_empty()) {
-        head = head.child(action(format!("copy-call-{}", item.id), &icons::TERMINAL, "Copy call ID").help(call.clone()).on_press_tx(crate::history::copy(call)));
-    }
     head.child(action(format!("copy-{}", item.id), &icons::COPY, "Copy").on_press_tx(crate::history::copy(item.text.clone())))
 }
 
@@ -278,7 +275,14 @@ fn entry_el(cx: &Cx, block: &str, entry: &Entry) -> El {
     if !expanded {
         return line_el;
     }
-    col().w_full().gap(4.0).child(line_el).child(col().w_full().pl(10.0).pb(6.0).gap(8.0).children(entry.bodies().into_iter().map(|(label, item)| entry_body(cx, label, item))))
+    let call_id = match entry {
+        Entry::Call { call, results } => std::iter::once(call).chain(results).find_map(|i| i.call_id.clone()),
+        Entry::Output(item) => item.call_id.clone(),
+        Entry::Reasoning(_) => None,
+    }
+    .filter(|c| !c.is_empty());
+    let copy_id = call_id.map(|call| row().child(action(format!("copy-call-{}", entry.id()), &icons::TERMINAL, "Copy call ID").help(call.clone()).on_press_tx(crate::history::copy(call))));
+    col().w_full().gap(4.0).child(line_el).child(col().w_full().pl(10.0).pb(6.0).gap(8.0).children(copy_id).children(entry.bodies().into_iter().map(|(label, item)| entry_body(cx, label, item))))
 }
 
 fn toggle_in(id: String, block: String) -> impl Fn(&mut App) + 'static {
