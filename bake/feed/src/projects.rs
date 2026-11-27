@@ -102,6 +102,11 @@ impl ProjectRecord {
         if hosts.len() > 1 || !checkout.host.local() { format!(" on {}", checkout.host.name) } else { String::new() }
     }
 
+    pub fn start_place(&self) -> Option<&Checkout> {
+        let open: Vec<&Checkout> = self.checkouts.iter().filter(|c| !c.archived && c.host.reachable()).collect();
+        open.iter().find(|c| c.host.local() && c.added).or_else(|| open.iter().find(|c| c.host.local())).or_else(|| open.first()).copied()
+    }
+
     pub fn lead_note(&self) -> String {
         if self.coordinators.is_empty() {
             return "Starts a lead conversation. Its first message starts it.".into();

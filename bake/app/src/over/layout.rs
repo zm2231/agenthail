@@ -32,7 +32,7 @@ pub fn set_collapsed(s: &mut App, c: [bool; 3]) {
 }
 
 pub fn board_for(s: &App, key: &str) -> bool {
-    s.ov.boards.get(key).copied().unwrap_or_else(|| s.ov.d.project(key).is_none_or(|p| p.lead.is_none()))
+    s.ov.boards.get(key).copied().unwrap_or_else(|| s.ov.d.project(key).is_none_or(|p| p.lead.is_none() && p.lead_pending.is_none()))
 }
 
 pub fn toggle_board(s: &mut App, key: &str) {

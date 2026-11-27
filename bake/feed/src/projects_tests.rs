@@ -393,3 +393,19 @@ fn an_action_the_daemon_only_took_is_not_reported_as_done() {
         assert!(e.maybe_delivered && e.code == "submitted", "{e:?}");
     }
 }
+
+#[test]
+fn a_project_without_sessions_starts_new_work_in_its_own_folder_here_first() {
+    let p = record(json!({"id": "p1", "checkouts": [
+        {"host": {"id": "h2", "name": "forge", "state": "connected"}, "projectId": "h2::p1", "rootPath": "/home/a/app", "added": true},
+        {"host": {"id": "h1", "name": "mac", "state": "local"}, "projectId": "p1", "rootPath": "/w/app", "added": true},
+    ]}));
+    let c = p.start_place().unwrap();
+    assert_eq!((c.host.target(), c.root_path.as_str()), ("", "/w/app"));
+    let far = record(json!({"id": "p2", "checkouts": [
+        {"host": {"id": "h3", "name": "old", "state": "unreachable"}, "projectId": "h3::p2", "rootPath": "/x"},
+        {"host": {"id": "h2", "name": "forge", "state": "connected"}, "projectId": "h2::p2", "rootPath": "/home/a/p2"},
+    ]}));
+    assert_eq!(far.start_place().map(|c| c.host.target()), Some("h2"));
+    assert_eq!(record(json!({"id": "p3"})).start_place(), None);
+}

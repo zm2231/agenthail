@@ -395,6 +395,13 @@ fn settled(s: &mut App, job: Job, from_sheet: Option<u64>, result: Result<(Strin
 
 pub fn drain(s: &mut App) -> bool {
     let mut changed = false;
+    if let crate::Screen::Project(key) = &s.screen
+        && s.ov.d.project(key).is_none()
+        && !s.ov.d.records.is_empty()
+    {
+        crate::over::go(s, crate::Screen::Now);
+        changed = true;
+    }
     let remote = s.ov.d.tile_order.clone().or_else(|| s.client.is_none().then(TileOrder::default));
     let fresh = s.ov.projects.seen_at != Some(s.ov.d.now);
     s.ov.projects.seen_at = Some(s.ov.d.now);
