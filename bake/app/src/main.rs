@@ -834,6 +834,7 @@ fn retry_key(s: &mut App, id: &str, key: &str, auto: bool, tx: &mut Tx) {
         }
         if auto {
             pending.sent_at = unsent.sent_at;
+            pending.pin = unsent.pin;
         }
         dispatch(s, id, pending, false, tx);
     }

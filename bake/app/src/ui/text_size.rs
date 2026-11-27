@@ -38,7 +38,7 @@ pub fn step(s: &mut App, steps: Option<i32>) {
 }
 
 pub fn pump(s: &mut App) -> bool {
-    let (due, wrote, latest) = STATE.with_borrow_mut(|st| {
+    let (due, wrote, latest, newer) = STATE.with_borrow_mut(|st| {
         if st.tx.is_none() {
             let (tx, rx) = channel();
             st.tx = Some(tx);
@@ -56,7 +56,7 @@ pub fn pump(s: &mut App) -> bool {
         if st.due.is_none() && !st.writing && due.is_none() {
             st.latest = None;
         }
-        (due.zip(st.tx.clone()), wrote, st.latest)
+        (due.zip(st.tx.clone()), wrote, st.latest, st.due.is_some())
     });
     if let Some(latest) = latest
         && crate::look::text_scale().is_some_and(|shown| shown != latest)
@@ -66,7 +66,8 @@ pub fn pump(s: &mut App) -> bool {
     let changed = !wrote.is_empty();
     for (ticket, result) in wrote {
         match result {
-            Ok(view) => crate::look::take_view(ticket, view),
+            Ok(view) if !newer && due.is_none() => crate::look::take_view(ticket, view),
+            Ok(_) => {}
             Err(failure) => s.ov.notice = Some(format!("Couldn't save the text size: {}", failure.message)),
         }
     }
