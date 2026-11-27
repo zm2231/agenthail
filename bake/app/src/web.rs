@@ -260,7 +260,9 @@ impl Web {
     }
 
     pub fn recheck(&mut self) {
-        self.checked_at = None;
+        if !self.unclear {
+            self.checked_at = None;
+        }
     }
 
     pub fn check_due(&mut self, want: Option<&str>) -> Option<(String, WebSession)> {
@@ -285,6 +287,9 @@ impl Web {
             return;
         }
         self.unclear = known.is_err();
+        if self.unclear {
+            self.checked_at = Some(Instant::now());
+        }
         match known {
             Ok(true) => self.verified = Some((value.to_string(), Some(page.to_string()))),
             Ok(false) => {

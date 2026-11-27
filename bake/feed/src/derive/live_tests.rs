@@ -561,3 +561,13 @@ fn a_moved_ledger_key_drops_the_old_rows_even_when_the_new_read_fails_or_the_pro
     ov.refresh(failed);
     assert!(board_ids(&ov.world(&[]), "p").is_empty(), "a failed read under the new key never shows the old ledger's work as the new one's");
 }
+
+#[test]
+fn a_reconnect_keeps_the_usage_wait() {
+    let mut known = super::live::Known::default();
+    let t0 = Instant::now();
+    let meters = vec![serde_json::json!({"provider": "claude", "percent": 3})];
+    known.learn(&Fetched { started: t0, usage: Some((t0, Some(meters.clone()))), ..fetched("2026-11-24T12:00:00Z", Vec::new(), Vec::new()) });
+    let fresh = known.carry();
+    assert_eq!(fresh.usage_kept(t0 + std::time::Duration::from_secs(30)), Some(meters));
+}

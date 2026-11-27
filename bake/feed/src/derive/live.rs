@@ -160,7 +160,7 @@ impl Known {
     }
 
     pub fn carry(&mut self) -> Known {
-        Known { opened: std::mem::take(&mut self.opened), wanted: std::mem::take(&mut self.wanted), ..Known::default() }
+        Known { opened: std::mem::take(&mut self.opened), wanted: std::mem::take(&mut self.wanted), usage: self.usage.take(), ..Known::default() }
     }
 
     pub fn orphans(&self) -> Vec<String> {

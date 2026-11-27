@@ -290,6 +290,20 @@ fn a_page_waiting_to_open_waits_a_minute_after_an_unclear_check_before_checking_
     web.checked(B, &cookie.value, Err("the page's port answered 503".into()));
     web.signed(Err("daemon down".into()), now());
     assert!(web.check_due(Some(B)).is_none(), "no second check straight after an unclear one, even for a page still opening");
+    web.recheck();
+    assert!(web.check_due(Some(B)).is_none(), "a reconnect doesn't cut the wait short");
     web.checked_at = Some(Instant::now() - CHECK_RETRY);
     assert!(web.check_due(Some(B)).is_some(), "a minute later it checks again");
+}
+
+#[test]
+fn the_wait_after_an_unclear_check_runs_from_its_answer() {
+    let mut web = signed_in();
+    web.verified = None;
+    open(&mut web, A, true);
+    let (_, cookie) = web.check_due(Some(B)).unwrap();
+    web.checked_at = Some(Instant::now() - CHECK_RETRY);
+    web.checked(B, &cookie.value, Err("timed out".into()));
+    web.signed(Err("daemon down".into()), now());
+    assert!(web.check_due(Some(B)).is_none(), "a check that took long to fail still waits a full minute from its answer");
 }
