@@ -23,7 +23,15 @@ fn recorded(at: &str, sessions: Vec<Session>) -> Recorded {
 }
 
 fn fetched(at: &str, sessions: Vec<Session>, ledgers: Vec<(&str, Result<Vec<Work>, String>)>) -> Fetched {
-    Fetched { recorded: recorded(at, sessions), ledgers: ledgers.into_iter().map(|(k, r)| (k.to_string(), r)).collect(), held: Vec::new(), asked: Vec::new(), started: Instant::now(), usage: None, moved: Vec::new() }
+    Fetched { recorded: recorded(at, sessions), ledgers: ledgers.into_iter().map(|(k, r)| (k.to_string(), (Instant::now(), r))).collect(), held: Vec::new(), asked: Vec::new(), actors_at: Instant::now(), usage: None, moved: Vec::new() }
+}
+
+fn stamped(mut f: Fetched, at: Instant) -> Fetched {
+    for (read, _) in f.ledgers.values_mut() {
+        *read = at;
+    }
+    f.actors_at = at;
+    f
 }
 
 fn status(w: &World, id: &str) -> String {
@@ -86,7 +94,7 @@ fn a_listed_project_without_recent_sessions_gets_its_board_when_opened() {
     assert!(ov.wants("old"));
     assert!(!ov.wants("old"), "one fetch at a time");
     assert_eq!(ov.world(&[]).rows.get("old"), Some(&Rows::Loading));
-    ov.take_ledger("old", Instant::now(), Ok(Ledger { rows: vec![work("w9", "open")], actors: HashMap::new(), asked: Vec::new(), steps: Default::default() }));
+    ov.take_ledger("old", Instant::now(), Ok(Ledger { rows: vec![work("w9", "open")], actors: HashMap::new(), asked: Vec::new(), actors_at: Instant::now(), steps: Default::default() }));
     let w = ov.world(&[]);
     assert_eq!(board_ids(&w, "old"), ["w9"]);
     assert_eq!(w.rows.get("old"), None);
@@ -118,14 +126,14 @@ fn a_ledger_fetch_that_started_earlier_never_overwrites_a_later_one() {
     let sessions = || vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")];
     let (earlier, later) = (Instant::now(), Instant::now() + std::time::Duration::from_millis(1));
     let mut ov = Overview::default();
-    ov.take_ledger("p", later, Ok(Ledger { rows: vec![work("new", "open")], actors: HashMap::new(), asked: Vec::new(), steps: Default::default() }));
-    ov.refresh(Fetched { started: earlier, ..fetched("2026-11-24T12:00:00Z", sessions(), vec![("p", Ok(vec![work("old", "open")]))]) });
+    ov.take_ledger("p", later, Ok(Ledger { rows: vec![work("new", "open")], actors: HashMap::new(), asked: Vec::new(), actors_at: later, steps: Default::default() }));
+    ov.refresh(stamped(fetched("2026-11-24T12:00:00Z", sessions(), vec![("p", Ok(vec![work("old", "open")]))]), earlier));
     assert_eq!(board_ids(&ov.world(&[]), "p"), ["new"], "a refresh that started first and landed last");
     ov.take_ledger("p", earlier, Err("timed out".into()));
     assert_eq!(ov.world(&[]).rows.get("p"), None, "nor does its failure mark the newer rows stale");
     let latest = later + std::time::Duration::from_millis(1);
-    ov.refresh(Fetched { started: latest, ..fetched("2026-11-24T12:00:20Z", sessions(), vec![("p", Ok(vec![work("newest", "open")]))]) });
-    ov.take_ledger("p", later, Ok(Ledger { rows: vec![work("new", "open")], actors: HashMap::new(), asked: Vec::new(), steps: Default::default() }));
+    ov.refresh(stamped(fetched("2026-11-24T12:00:20Z", sessions(), vec![("p", Ok(vec![work("newest", "open")]))]), latest));
+    ov.take_ledger("p", later, Ok(Ledger { rows: vec![work("new", "open")], actors: HashMap::new(), asked: Vec::new(), actors_at: later, steps: Default::default() }));
     assert_eq!(board_ids(&ov.world(&[]), "p"), ["newest"], "an on-demand fetch that started first and landed last");
 }
 
@@ -138,16 +146,16 @@ fn actors_from_a_fetch_that_started_earlier_never_replace_later_ones() {
     let sessions = || vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")];
     let (earlier, later) = (Instant::now(), Instant::now() + std::time::Duration::from_millis(1));
     let mut ov = Overview::default();
-    ov.take_ledger("p", later, Ok(Ledger { rows: vec![], actors: actor("fresh"), asked: Vec::new(), steps: Default::default() }));
+    ov.take_ledger("p", later, Ok(Ledger { rows: vec![], actors: actor("fresh"), asked: Vec::new(), actors_at: later, steps: Default::default() }));
     let mut stale = fetched("2026-11-24T12:00:00Z", sessions(), vec![]);
     stale.recorded.actors = actor("stale");
-    ov.refresh(Fetched { started: earlier, ..stale });
+    ov.refresh(stamped(stale, earlier));
     assert!(ov.world(&[]).name_of("helper-1").contains("fresh"), "a refresh that started first and landed last");
     let latest = later + std::time::Duration::from_millis(1);
     let mut newest = fetched("2026-11-24T12:00:20Z", sessions(), vec![]);
     newest.recorded.actors = actor("newest");
-    ov.refresh(Fetched { started: latest, ..newest });
-    ov.take_ledger("p", later, Ok(Ledger { rows: vec![], actors: actor("fresh"), asked: Vec::new(), steps: Default::default() }));
+    ov.refresh(stamped(newest, latest));
+    ov.take_ledger("p", later, Ok(Ledger { rows: vec![], actors: actor("fresh"), asked: Vec::new(), actors_at: later, steps: Default::default() }));
     assert!(ov.world(&[]).name_of("helper-1").contains("newest"), "an on-demand fetch that started first and landed last");
 }
 
@@ -163,7 +171,7 @@ fn a_burst_of_arrivals_leaves_one_rebuild_pending() {
     for id in ["t1", "t2", "t3"] {
         ov.take_tail(id, "2026-11-24T11:59:00Z".into(), Err("timed out".into()), None);
     }
-    ov.take_ledger("p", Instant::now(), Ok(Ledger { rows: vec![work("w1", "open")], actors: HashMap::new(), asked: Vec::new(), steps: Default::default() }));
+    ov.take_ledger("p", Instant::now(), Ok(Ledger { rows: vec![work("w1", "open")], actors: HashMap::new(), asked: Vec::new(), actors_at: Instant::now(), steps: Default::default() }));
     ov.refresh(fetched("2026-11-24T12:00:20Z", sessions(), vec![]));
     assert!(ov.stale());
     ov.world(&[]);
@@ -356,7 +364,7 @@ fn an_overview_skips_ledgers_read_after_their_stream_settled_and_retries_failure
 }
 
 fn keyed(started: Instant) -> Fetched {
-    let mut f = Fetched { started, ..fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("p", Ok(vec![work("p-W1", "open")]))]) };
+    let mut f = stamped(fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("p", Ok(vec![work("p-W1", "open")]))]), started);
     f.recorded.projects[0].ledger_key = "shared:x".into();
     f
 }
@@ -367,7 +375,7 @@ fn a_ledger_that_changes_during_an_overview_read_is_read_again() {
     let f = keyed(Instant::now() - std::time::Duration::from_millis(10));
     assert_eq!(known.changed("shared:x", Instant::now()), Change::Nothing, "nothing is known yet; the read in flight checks for itself");
     assert!(known.learn(&f), "the read began before the change, so it goes again");
-    assert!(!known.skips_ledger("p", Some(f.started)));
+    assert!(!known.skips_ledger("p", Some(f.actors_at)));
     assert_eq!(known.changed("shared:x", Instant::now()), Change::Overview, "a wanted ledger that isn't held needs the overview");
 }
 
@@ -380,8 +388,8 @@ fn a_change_heard_after_the_read_landed_reads_that_ledger_alone() {
     assert_eq!(known.changed("shared:x", heard_at), Change::Read("p".into()), "a change that happened during the read, processed after it");
     assert_eq!(known.changed("shared:x", started - std::time::Duration::from_millis(1)), Change::Nothing, "a change older than the read is already in it");
     assert_eq!(known.changed("project:elsewhere", Instant::now()), Change::Nothing);
-    let read = Ok(Ledger { rows: vec![work("p-W1", "open")], actors: HashMap::new(), asked: vec!["missing".into()], steps: Default::default() });
     let at = Instant::now();
+    let read = Ok(Ledger { rows: vec![work("p-W1", "open")], actors: HashMap::new(), asked: vec!["missing".into()], actors_at: at, steps: Default::default() });
     known.read("p", at, &read);
     assert!(known.skips_ledger("p", Some(at)) && known.skips_actor("missing"), "a single read also records its failed lookups");
 }
@@ -393,7 +401,7 @@ fn a_project_opened_outside_the_overview_hears_its_ledger_change_by_key() {
     f.recorded.projects[1].ledger_key = "project:old".into();
     known.learn(&f);
     let opened = Instant::now() - std::time::Duration::from_millis(10);
-    known.read("old", opened, &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: Vec::new(), steps: Default::default() }));
+    known.read("old", opened, &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: Vec::new(), actors_at: opened, steps: Default::default() }));
     assert_eq!(known.changed("project:old", Instant::now()), Change::Read("old".into()));
 }
 
@@ -408,7 +416,7 @@ fn a_failed_read_of_an_opened_project_is_tried_again_on_its_own_timer() {
     assert!(known.retries_due(at).is_empty());
     assert_eq!(known.retries_due(due), ["old".to_string()]);
     assert_eq!(known.changed("old", Instant::now()), Change::Nothing, "a change to a failed one waits for its retry");
-    known.read("old", Instant::now(), &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: Vec::new(), steps: Default::default() }));
+    known.read("old", Instant::now(), &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: Vec::new(), actors_at: Instant::now(), steps: Default::default() }));
     assert_eq!(known.next_retry(), None);
 }
 
@@ -416,7 +424,7 @@ fn a_failed_read_of_an_opened_project_is_tried_again_on_its_own_timer() {
 fn failed_lookups_come_due_when_the_next_overview_starts() {
     let mut known = super::live::Known::default();
     let started = Instant::now() - std::time::Duration::from_secs(61);
-    let f = Fetched { started, asked: vec!["gone".into()], ..fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("h2::p", Err("status code 404".into()))]) };
+    let f = stamped(Fetched { asked: vec!["gone".into()], ..fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("h2::p", Err("status code 404".into()))]) }, started);
     known.learn(&f);
     assert!(!known.skips_actor("gone") && !known.skips_ledger("h2::p", None), "retries count from when the read started");
 }
@@ -425,8 +433,8 @@ fn failed_lookups_come_due_when_the_next_overview_starts() {
 fn a_reopened_ledger_stream_reads_opened_projects_again() {
     let mut known = super::live::Known::default();
     known.learn(&fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("p", Ok(Vec::new()))]));
-    known.read("old", Instant::now(), &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: Vec::new(), steps: Default::default() }));
-    known.read("p", Instant::now(), &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: Vec::new(), steps: Default::default() }));
+    known.read("old", Instant::now(), &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: Vec::new(), actors_at: Instant::now(), steps: Default::default() }));
+    known.read("p", Instant::now(), &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: Vec::new(), actors_at: Instant::now(), steps: Default::default() }));
     assert_eq!(known.opened(), ["old".to_string()], "projects the overview reads anyway aren't read twice");
 }
 
@@ -448,7 +456,7 @@ fn a_reset_keeps_every_opened_project_but_forgets_what_was_read() {
     let mut known = super::live::Known::default();
     known.learn(&fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("p", Ok(Vec::new()))]));
     known.open("p");
-    known.read("old", Instant::now(), &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: vec!["gone".into()], steps: Default::default() }));
+    known.read("old", Instant::now(), &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: vec!["gone".into()], actors_at: Instant::now(), steps: Default::default() }));
     assert_eq!(known.opened(), ["old".to_string()], "only projects outside the overview are read again");
     let mut fresh = known.carry();
     assert_eq!(fresh.opened(), ["old".to_string()], "the overview still reads the other");
@@ -461,7 +469,7 @@ fn a_reset_keeps_every_opened_project_but_forgets_what_was_read() {
 fn a_failed_lookup_sets_the_overview_retry_timer() {
     let mut known = super::live::Known::default();
     let at = Instant::now();
-    known.read("old", at, &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: vec!["gone".into()], steps: Default::default() }));
+    known.read("old", at, &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: vec!["gone".into()], actors_at: at, steps: Default::default() }));
     assert_eq!(known.next_retry(), Some(at + super::live::RETRY));
     assert!(!known.actors_due(at) && known.actors_due(at + super::live::RETRY));
 }
@@ -470,12 +478,12 @@ fn a_failed_lookup_sets_the_overview_retry_timer() {
 fn a_due_lookup_retires_once_an_overview_no_longer_asks_for_it_and_a_failed_overview_waits() {
     let mut known = super::live::Known::default();
     let long_ago = Instant::now() - std::time::Duration::from_secs(120);
-    known.read("old", long_ago, &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: vec!["listed-now".into()], steps: Default::default() }));
+    known.read("old", long_ago, &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: vec!["listed-now".into()], actors_at: long_ago, steps: Default::default() }));
     known.unread(Instant::now());
     assert!(!known.actors_due(Instant::now()), "a failed overview read puts due retries off a minute");
     assert!(known.skips_actor("listed-now"));
     let mut known = super::live::Known::default();
-    known.read("old", long_ago, &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: vec!["listed-now".into()], steps: Default::default() }));
+    known.read("old", long_ago, &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: vec!["listed-now".into()], actors_at: long_ago, steps: Default::default() }));
     assert!(known.actors_due(Instant::now()));
     known.learn(&fetched("2026-11-24T12:00:00Z", Vec::new(), Vec::new()));
     assert!(!known.actors_due(Instant::now()) && known.next_retry().is_none(), "an overview that no longer asks retires it");
@@ -491,7 +499,7 @@ fn an_opened_project_that_drops_out_of_the_overview_after_a_reset_is_read_on_its
     known.learn(&fetched("2026-11-24T12:01:00Z", Vec::new(), Vec::new()));
     assert_eq!(known.orphans(), ["p".to_string()], "the overview no longer reads it, so it is read alone");
     assert_eq!(known.changed("p", Instant::now()), Change::Read("p".into()));
-    known.read("p", Instant::now(), &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: Vec::new(), steps: Default::default() }));
+    known.read("p", Instant::now(), &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: Vec::new(), actors_at: Instant::now(), steps: Default::default() }));
     assert!(known.orphans().is_empty());
 }
 
@@ -527,14 +535,14 @@ fn usage_read_in_one_overview_is_kept_for_two_minutes() {
     assert_eq!(known.usage_kept(t0), None);
     let meters = vec![serde_json::json!({"provider": "claude", "percent": 12})];
     let read_at = t0 + std::time::Duration::from_secs(20);
-    known.learn(&Fetched { started: t0, usage: Some((read_at, Some(meters.clone()))), ..fetched("2026-11-24T12:00:00Z", Vec::new(), Vec::new()) });
+    known.learn(&stamped(Fetched { usage: Some((read_at, Some(meters.clone()))), ..fetched("2026-11-24T12:00:00Z", Vec::new(), Vec::new()) }, t0));
     assert_eq!(known.usage_kept(t0 + std::time::Duration::from_secs(60)), Some(meters.clone()), "an overview a minute later, after an actor retry say, reuses it");
     assert_eq!(known.usage_kept(t0 + super::live::USAGE_EVERY), Some(meters.clone()), "two minutes run from the usage read itself, not from the overview that began earlier");
-    known.learn(&Fetched { started: t0 + std::time::Duration::from_secs(60), ..fetched("2026-11-24T12:01:00Z", Vec::new(), Vec::new()) });
+    known.learn(&stamped(fetched("2026-11-24T12:01:00Z", Vec::new(), Vec::new()), t0 + std::time::Duration::from_secs(60)));
     assert_eq!(known.usage_kept(t0 + std::time::Duration::from_secs(90)), Some(meters.clone()), "an overview that reused it doesn't extend it");
     assert_eq!(known.usage_kept(read_at + super::live::USAGE_EVERY), None);
     let failed_at = read_at + super::live::USAGE_EVERY;
-    known.learn(&Fetched { started: failed_at, usage: Some((failed_at, None)), ..fetched("2026-11-24T12:03:00Z", Vec::new(), Vec::new()) });
+    known.learn(&stamped(Fetched { usage: Some((failed_at, None)), ..fetched("2026-11-24T12:03:00Z", Vec::new(), Vec::new()) }, failed_at));
     assert_eq!(known.usage_kept(failed_at + std::time::Duration::from_secs(5)), Some(meters), "a failed read waits two minutes too, as the Mac app does, and the last figures stay");
 }
 
@@ -567,7 +575,7 @@ fn a_reconnect_keeps_the_usage_wait() {
     let mut known = super::live::Known::default();
     let t0 = Instant::now();
     let meters = vec![serde_json::json!({"provider": "claude", "percent": 3})];
-    known.learn(&Fetched { started: t0, usage: Some((t0, Some(meters.clone()))), ..fetched("2026-11-24T12:00:00Z", Vec::new(), Vec::new()) });
+    known.learn(&stamped(Fetched { usage: Some((t0, Some(meters.clone()))), ..fetched("2026-11-24T12:00:00Z", Vec::new(), Vec::new()) }, t0));
     let fresh = known.carry();
     assert_eq!(fresh.usage_kept(t0 + std::time::Duration::from_secs(30)), Some(meters));
 }

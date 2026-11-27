@@ -19,10 +19,10 @@ pub const EXPECT_HOLD: std::time::Duration = std::time::Duration::from_secs(15);
 
 pub struct Fetched {
     pub recorded: Recorded,
-    pub ledgers: HashMap<String, Result<Vec<Work>, String>>,
+    pub ledgers: HashMap<String, (Instant, Result<Vec<Work>, String>)>,
     pub held: Vec<String>,
     pub asked: Vec<String>,
-    pub started: Instant,
+    pub actors_at: Instant,
     pub usage: Option<(Instant, Option<Vec<Value>>)>,
     pub moved: Vec<String>,
 }
@@ -60,15 +60,15 @@ impl Known {
     pub fn learn(&mut self, fetched: &Fetched) -> bool {
         let key_of = |id: &str| fetched.recorded.projects.iter().find(|p| p.id == id && !p.ledger_key.is_empty()).map_or(id.to_string(), |p| p.ledger_key.clone());
         let mut again = false;
-        for (id, result) in &fetched.ledgers {
+        for (id, (read_at, result)) in &fetched.ledgers {
             let key = key_of(id);
             self.keys.insert(key.clone(), id.clone());
-            if [key.as_str(), id.as_str()].iter().any(|k| self.changed.get(*k).is_some_and(|at| *at > fetched.started)) {
+            if [key.as_str(), id.as_str()].iter().any(|k| self.changed.get(*k).is_some_and(|at| at > read_at)) {
                 self.ledgers.remove(id);
                 again = true;
                 continue;
             }
-            self.hold(id, fetched.started, result.as_ref().ok());
+            self.hold(id, *read_at, result.as_ref().ok());
         }
         if let Some((at, read)) = &fetched.usage {
             let meters = read.clone().or_else(|| self.usage.take().map(|(_, m)| m)).unwrap_or_default();
@@ -85,8 +85,8 @@ impl Known {
         }
         self.wanted = fetched.ledgers.keys().chain(&fetched.held).cloned().collect();
         self.sessions = fetched.recorded.sessions.clone();
-        self.actors.retain(|_, until| until.is_none_or(|at| at > fetched.started));
-        self.asked(&fetched.asked, &fetched.recorded.actors, fetched.started);
+        self.actors.retain(|_, until| until.is_none_or(|at| at > fetched.actors_at));
+        self.asked(&fetched.asked, &fetched.recorded.actors, fetched.actors_at);
         again
     }
 
@@ -106,7 +106,7 @@ impl Known {
         self.opened.insert(id.to_string());
         self.hold(id, started, result.as_ref().ok().map(|l| &l.rows));
         if let Ok(l) = result {
-            self.asked(&l.asked, &l.actors, started);
+            self.asked(&l.asked, &l.actors, l.actors_at);
         }
     }
 
@@ -218,6 +218,7 @@ pub struct Ledger {
     pub rows: Vec<Work>,
     pub actors: HashMap<String, Actor>,
     pub asked: Vec<String>,
+    pub actors_at: Instant,
     pub steps: Steps,
 }
 
@@ -230,19 +231,19 @@ pub fn fetch(client: &Client, known: &Known, settled: Option<Instant>) -> Result
     let key_of: HashMap<String, String> = snap["projects"].as_array().into_iter().flatten().filter_map(|p| Some((p["id"].as_str()?.to_string(), p["ledgerKey"].as_str().filter(|k| !k.is_empty())?.to_string()))).collect();
     let moved = known.moved(&key_of);
     let (held, keys): (Vec<String>, Vec<String>) = snap["projects"].as_array().into_iter().flatten().filter(|p| p["archived"] != json!(true)).filter_map(|p| p["id"].as_str()).filter(|k| recent.contains(*k)).map(String::from).partition(|k| known.holds(k, key_of.get(k).unwrap_or(k), settled));
-    let read: HashMap<String, Result<(Vec<Work>, Steps), String>> = std::thread::scope(|scope| {
-        let jobs: Vec<_> = keys.iter().map(|k| (k.clone(), scope.spawn(|| rows(client, key_of.get(k).unwrap_or(k), now)))).collect();
-        jobs.into_iter().map(|(k, h)| (k, h.join().unwrap_or_else(|_| Err("the fetch stopped".into())))).collect()
+    let read: HashMap<String, (Instant, Result<(Vec<Work>, Steps), String>)> = std::thread::scope(|scope| {
+        let jobs: Vec<_> = keys.iter().map(|k| (k.clone(), scope.spawn(|| (Instant::now(), rows(client, key_of.get(k).unwrap_or(k), now))))).collect();
+        jobs.into_iter().map(|(k, h)| (k, h.join().unwrap_or_else(|_| (Instant::now(), Err("the fetch stopped".into()))))).collect()
     });
     let mut steps = HashMap::new();
-    let ledgers: HashMap<String, Result<Vec<Work>, String>> = read
+    let ledgers: HashMap<String, (Instant, Result<Vec<Work>, String>)> = read
         .into_iter()
-        .map(|(k, r)| {
+        .map(|(k, (at, r))| {
             let rows = r.map(|(rows, s)| {
                 steps.insert(k.clone(), s);
                 rows
             });
-            (k, rows)
+            (k, (at, rows))
         })
         .collect();
     let kept = known.usage_kept(started);
@@ -268,13 +269,14 @@ pub fn fetch(client: &Client, known: &Known, settled: Option<Instant>) -> Result
     let projects = with_activity(snap["projects"].clone(), activity.unwrap_or_default());
     let raw = json!({"updatedAt": snap["updatedAt"], "hostEpoch": snap["hostEpoch"], "catalogSeq": snap["catalogSeq"], "projects": projects, "usage": usage, "hosts": hosts, "tileOrder": snap["tileOrder"]});
     let mut recorded: Recorded = serde_json::from_value(raw)?;
-    let pool: BTreeSet<String> = ledgers.values().filter_map(|r| r.as_ref().ok()).flatten().flat_map(|w| &w.timeline).map(|t| t.actor.clone()).chain(known.candidates.iter().cloned()).collect();
+    let pool: BTreeSet<String> = ledgers.values().filter_map(|(_, r)| r.as_ref().ok()).flatten().flat_map(|w| &w.timeline).map(|t| t.actor.clone()).chain(known.candidates.iter().cloned()).collect();
+    let actors_at = Instant::now();
     let (found, asked) = actors(client, &sessions, |a| known.skips_actor(a), pool);
     recorded.actors = found;
     recorded.sessions = sessions;
     recorded.activity_missing = activity_missing;
     recorded.steps = steps;
-    Ok(Fetched { recorded, ledgers, held, asked, started, usage: fresh, moved })
+    Ok(Fetched { recorded, ledgers, held, asked, actors_at, usage: fresh, moved })
 }
 
 pub fn with_activity(mut projects: Value, activity: Vec<crate::activity::ProjectActivity>) -> Value {
@@ -301,8 +303,9 @@ fn keep_activity(projects: &mut [crate::derive::world::ProjectRecord], before: &
 
 pub fn ledger(client: &Client, project: &str, known: &Known) -> Result<Ledger, String> {
     let (rows, steps) = rows(client, &known.ledger_key_of(project), OffsetDateTime::now_utc())?;
+    let actors_at = Instant::now();
     let (actors, asked) = actors(client, known.sessions(), |a| known.skips_actor(a), rows.iter().flat_map(|w| &w.timeline).map(|t| t.actor.clone()).collect());
-    Ok(Ledger { rows, actors, asked, steps })
+    Ok(Ledger { rows, actors, asked, actors_at, steps })
 }
 
 fn hours(now: OffsetDateTime, at: &str) -> f64 {
@@ -341,7 +344,7 @@ fn actors(client: &Client, sessions: &[Session], skip: impl Fn(&str) -> bool, po
 }
 
 // Sessions only move forward in time, a project's rows survive a failed fetch,
-// and neither rows nor actors from a fetch replace ones from a fetch that started after it.
+// and neither a project's rows nor an actor from one read replace ones from a read that started after it.
 #[derive(Default)]
 pub struct Overview {
     base: Recorded,
@@ -478,7 +481,7 @@ impl Overview {
     }
 
     pub fn refresh(&mut self, fetched: Fetched) {
-        let Fetched { mut recorded, ledgers, held, started, moved, .. } = fetched;
+        let Fetched { mut recorded, ledgers, held, actors_at, moved, .. } = fetched;
         for id in &moved {
             self.ledgers.remove(id);
             self.steps.remove(id);
@@ -503,12 +506,12 @@ impl Overview {
         }
         self.follow_archive();
         self.stale = true;
-        self.take_actors(started, actors);
+        self.take_actors(actors_at, actors);
         let opened: Vec<String> = self.covered.iter().filter(|k| self.ledgers.contains_key(*k)).cloned().collect();
         self.covered = ledgers.keys().cloned().chain(held).chain(opened).collect();
-        for (key, result) in ledgers {
+        for (key, (read_at, result)) in ledgers {
             let own = steps.remove(&key).unwrap_or_default();
-            self.apply(key, started, result.map(|rows| (rows, own)));
+            self.apply(key, read_at, result.map(|rows| (rows, own)));
         }
         let listed: HashSet<&str> = self.base.projects.iter().filter(|p| !p.archived).map(|p| p.id.as_str()).collect();
         self.ledgers.retain(|k, _| listed.contains(k.as_str()));
@@ -553,7 +556,7 @@ impl Overview {
         }
         self.stale = true;
         let rows = result.map(|l| {
-            self.take_actors(started, l.actors);
+            self.take_actors(l.actors_at, l.actors);
             (l.rows, l.steps)
         });
         self.apply(project.to_string(), started, rows);
