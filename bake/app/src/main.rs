@@ -1156,6 +1156,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s);
     changed |= ui::attach::pump(s);
     changed |= over::extensions::drain(s);
+    changed |= over::projects::drain(s);
     changed |= ui::complete::pump(s);
     changed |= look::poll(look::Window::Main, tx);
     switch_composer(s);

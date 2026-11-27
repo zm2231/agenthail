@@ -596,7 +596,7 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -
     if !matches!(s.screen, Screen::Now) {
         sb = sb.section(needs);
     }
-    let mut order: Vec<&crate::over::Project> = s.ov.d.projects.iter().collect();
+    let mut order = crate::over::projects::listed(s);
     if let Some(cp) = current_project {
         order.sort_by_key(|p| p.key != cp);
     }
@@ -642,7 +642,11 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -
         if waiting > 0 {
             r = r.badge(waiting.to_string());
         }
-        others = others.row(r.build(k).key(format!("p-{}", p.key)));
+        let menu_key = p.key.clone();
+        others = others.row(r.build(k).key(format!("p-{}", p.key)).on_secondary_press(move |s: &mut App, at, _: &mut rune::Tx| crate::over::projects::open_menu(s, &menu_key, Some(at))));
+    }
+    for extra in crate::over::projects::sidebar_rows(s) {
+        others = others.row(extra);
     }
     sb = sb.section(others);
     sb.build(k)

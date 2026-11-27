@@ -30,7 +30,7 @@ fn toolbar(s: &App, key: &str) -> Toolbar {
     let name = s.ov.d.project(key).map(|p| p.name.clone()).unwrap_or_default();
     Toolbar::new()
         .leading(row().gap(14.0).items_center().child(ui::avatar(&name, 18.0)).child(ui::crumb(&[("Projects", false), (&name, true)])))
-        .trailing(row().gap(10.0).items_center().child(crate::over::decisions::brief_button(s, key)).child(ui::new_session_button(Some(key))).child(variant(s, key)).child(ui::needs_button(s)))
+        .trailing(row().gap(10.0).items_center().child(crate::over::decisions::brief_button(s, key)).child(ui::new_session_button(Some(key))).child(variant(s, key)).child(crate::over::projects::menu_button(key)).child(ui::needs_button(s)))
 }
 
 pub fn work_card(s: &App, w: &Work, compact: bool) -> El {
@@ -191,6 +191,7 @@ pub fn lead(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>) -> El {
                 .pt(14.0)
                 .pb(24.0)
                 .child(crew_panel(s, p.lead.as_deref()))
+                .children(crate::over::projects::merged(s, key))
                 .children(rows_note(s, key))
                 .child(group(s, key, LANES[0], &cols[0], "Nothing waits on you here."))
                 .child(group(s, key, LANES[1], &cols[1], "Nothing is being built."))
@@ -219,7 +220,11 @@ pub fn lead(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>) -> El {
                 .child(waiting_line(s, lead))
                 .child(composer(s, &format!("Tell {}…", p.lead_name), lead)))
         }
-        None => col().w_full().h_full().center().gap(8.0).child(text("This project has no lead yet.".to_string()).font(BODY_MED).color(weak())).children(crate::over::decisions::brief_note(s, key)),
+        None => {
+            let pk = key.to_string();
+            let start = Button::new("Set Lead…").variant(ButtonVariant::Contrast).control_size(ControlSize::Small).on_press(move |s: &mut App| crate::over::projects::set_lead(s, &pk)).build(kit()).key("set-lead");
+            col().w_full().h_full().center().gap(8.0).child(text("This project has no lead yet.".to_string()).font(BODY_MED).color(weak())).child(start).children(crate::over::decisions::brief_note(s, key))
+        }
     };
     ui::frame(cx, s, Some(ui::sidebar(s, Some(key), p.lead.as_deref())), main, Some(panel), toolbar(s, key))
 }
@@ -289,7 +294,8 @@ pub fn board(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>) -> El {
         .children(crate::over::decisions::brief_note(s, key))
         .child(since)
         .children(rows_note(s, key))
-        .child(board.mt(8.0));
+        .child(board.mt(8.0))
+        .children(crate::over::projects::merged(s, key).map(|m| m.mt(8.0)));
     let hint = row()
         .gap(6.0)
         .items_center()
