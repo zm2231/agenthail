@@ -168,6 +168,7 @@ pub fn news(s: &mut App) {
 }
 
 pub fn reopened(s: &mut App) {
+    s.ov.list.failed = None;
     soon(s, Duration::ZERO);
 }
 

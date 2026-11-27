@@ -54,6 +54,8 @@ fn state_dot(s: &App, x: &Session, k: &Kit) -> El {
 pub fn session_row(s: &App, x: &Session, depth: u8, selected: bool, k: &Kit) -> El {
     let id = x.id.clone();
     let menu_id = x.id.clone();
+    let paged = s.ov.d.session(&x.id).is_none().then(|| x.clone());
+    let menu_paged = paged.clone();
     let branch = x.checkout.branch.clone().unwrap_or_default();
     let mut place = vec![s.ov.d.role(x).to_string(), agent(x), x.host.name.clone()];
     if !branch.is_empty() {
@@ -86,8 +88,18 @@ pub fn session_row(s: &App, x: &Session, depth: u8, selected: bool, k: &Kit) -> 
         .pr(12.0)
         .py(9.0)
         .radius(10.0)
-        .on_press(move |s: &mut App| crate::over::open_session(s, &id))
-        .on_secondary_press(move |s: &mut App, p, _: &mut rune::Tx| crate::ui::session_menu::open_at(s, &menu_id, p))
+        .on_press(move |s: &mut App| {
+            if let Some(row) = &paged {
+                crate::over::search::pin_read(s, row.clone());
+            }
+            crate::over::open_session(s, &id)
+        })
+        .on_secondary_press(move |s: &mut App, p, _: &mut rune::Tx| {
+            if let Some(row) = &menu_paged {
+                crate::over::search::pin_read(s, row.clone());
+            }
+            crate::ui::session_menu::open_at(s, &menu_id, p)
+        })
         .child(col().size(28.0, 28.0).child(ui::avatar(&s.ov.d.title(x), 28.0)).child(state_dot(s, x, k).absolute(20.0, 20.0)))
         .child(
             col()
