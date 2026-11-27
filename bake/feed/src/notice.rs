@@ -9,6 +9,18 @@ pub const REMEMBERED: usize = 500;
 pub const SENDS_AS_NOTE: &str = "Sends as a note";
 pub const READ_ONLY: &str = "This session is closed. You can read it, but not message it.";
 
+pub fn reply_refusal(row: &crate::subagents::RowRead) -> Option<String> {
+    match row {
+        crate::subagents::RowRead::Found(x) => read_only(x),
+        crate::subagents::RowRead::Gone => Some("This session no longer exists.".into()),
+        crate::subagents::RowRead::Failed(_) => None,
+    }
+}
+
+pub fn refused(why: String) -> crate::catalog::RespondError {
+    crate::catalog::RespondError { message: why, code: "read_only".into(), maybe_delivered: false, answered: false, reply: Value::Null, status: 0 }
+}
+
 pub fn read_only(x: &Session) -> Option<String> {
     if !x.read_only && x.capabilities.send {
         return None;
@@ -100,6 +112,19 @@ mod tests {
         assert_eq!(read_only(&why).as_deref(), Some("This Claude session is being written to from another computer."));
         let blank: Session = serde_json::from_value(json!({"id": "s1", "readOnly": true, "readOnlyReason": " "})).unwrap();
         assert_eq!(read_only(&blank).as_deref(), Some(READ_ONLY));
+    }
+
+    #[test]
+    fn a_reply_is_refused_for_a_closed_or_gone_session_and_left_to_the_daemon_when_unread() {
+        use crate::subagents::{RowRead, detail_row};
+        let closed = detail_row(&json!({"session": {"id": "s1"}, "capabilities": {"send": true}, "readOnly": true, "readOnlyReason": "Read-only here."})).unwrap();
+        assert_eq!(reply_refusal(&RowRead::Found(closed)).as_deref(), Some("Read-only here."));
+        let open = detail_row(&json!({"session": {"id": "s1"}, "capabilities": {"send": true}})).unwrap();
+        assert_eq!(reply_refusal(&RowRead::Found(open)), None);
+        assert!(reply_refusal(&RowRead::Gone).is_some());
+        assert_eq!(reply_refusal(&RowRead::Failed("timed out".into())), None);
+        let error = refused("Read-only here.".into());
+        assert!(!error.maybe_delivered && error.message == "Read-only here.");
     }
 
     #[test]

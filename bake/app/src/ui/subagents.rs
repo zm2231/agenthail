@@ -38,7 +38,6 @@ pub struct Crew {
     claude: HashMap<String, ClaudeSubagents>,
     claude_errors: HashMap<String, String>,
     claude_asked: HashMap<String, ClaudeAsk>,
-    claude_again: HashSet<String>,
     rows: HashMap<String, Session>,
     seen: feed::subagents::Seen,
     row_asked: HashMap<String, RowAsk>,
@@ -194,15 +193,6 @@ fn page(s: &mut App, id: &str) {
     spawn(s, move |c| Done::Page(id.clone(), seq, c.subagent_sessions(&id)));
 }
 
-pub(crate) fn reload_claude(s: &mut App, id: &str) {
-    if s.crew.claude_asked.get(id).is_some_and(|a| a.in_flight) {
-        s.crew.claude_again.insert(id.to_string());
-        return;
-    }
-    s.crew.claude_asked.remove(id);
-    claude(s, id);
-}
-
 fn claude(s: &mut App, id: &str) {
     let Some(stamp) = known(s, id).filter(|x| x.surface == "claude").map(|x| x.last_active.clone()) else { return };
     if s.crew.claude_asked.get(id).is_some_and(|a| a.in_flight) {
@@ -250,15 +240,7 @@ fn take(s: &mut App, done: Done) {
         Done::Claude(id, seq, read) => {
             let Some(asked) = s.crew.claude_asked.get_mut(&id).filter(|a| a.seq == seq) else { return };
             asked.in_flight = false;
-            match (read.metadata, &read.subagents) {
-                (Some(metadata), _) => super::inspect::took(s, &id, metadata),
-                (None, Err(error)) => super::inspect::read_failed(s, &id, error.clone()),
-                (None, Ok(_)) => {}
-            }
-            if s.crew.claude_again.remove(&id) {
-                reload_claude(s, &id);
-                return;
-            }
+            super::inspect::read(s, &id, read.metadata);
             let Some(asked) = s.crew.claude_asked.get_mut(&id) else { return };
             let result = read.subagents;
             if !s.crew.recent.contains(&id) {

@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use time::{OffsetDateTime, UtcOffset};
 
 use crate::background::Clock;
-use crate::catalog::{Client, Lifecycle, RespondError, Session, enc, parse_time};
+use crate::catalog::{Client, Lifecycle, RespondError, Session, parse_time};
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -289,6 +289,10 @@ pub fn can_save(act: GoalAct, text: &str, budget: Option<i64>) -> bool {
     }
 }
 
+pub fn moves_goal(events: &[crate::wire::Event]) -> bool {
+    events.iter().any(|e| matches!(e, crate::wire::Event::Upsert(item) if item.kind == "goal"))
+}
+
 pub fn lifecycle(x: &Session) -> Lifecycle {
     if x.read_only || x.archived { Lifecycle::default() } else { x.capabilities.lifecycle }
 }
@@ -382,10 +386,6 @@ pub const NO_RUNS: &str = "No observed Claude runs.";
 pub const NO_LOGS: &str = "No log output.";
 
 impl Client {
-    pub fn session_inspect(&self, session: &str) -> Result<Metadata, String> {
-        Ok(metadata(&self.get_json(&format!("/api/v1/session-metadata?id={}", enc(session))).map_err(|e| e.to_string())?))
-    }
-
     pub fn goal(&self, session: &str, act: GoalAct, text: &str) -> Result<bool, RespondError> {
         let payload = if act.takes_text() { json!({"sessionId": session, "message": text.trim()}) } else { json!({"sessionId": session}) };
         let reply = self.action(act.action(), payload)?;
@@ -489,6 +489,13 @@ mod tests {
         assert_eq!(whole.warnings, ["connection refused"]);
         let first = Metadata::failed(None, "connection refused".into());
         assert!(first.goal_failed && first.goal.is_none());
+    }
+
+    #[test]
+    fn a_goal_event_in_the_stream_asks_for_a_reread() {
+        let item = |kind: &str| crate::wire::Event::Upsert(crate::Item { kind: kind.into(), ..Default::default() });
+        assert!(moves_goal(&[item("message"), item("goal")]));
+        assert!(!moves_goal(&[item("message"), crate::wire::Event::Done]));
     }
 
     #[test]

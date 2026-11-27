@@ -16,7 +16,7 @@ const REFRESH: Duration = Duration::from_secs(30);
 pub enum Done {
     Settings(String, u64, Result<SessionSettings, String>),
     Models(String, u64, Result<Vec<ModelOption>, String>),
-    Context(String, u64, Result<Option<ContextUsage>, String>),
+    Context(String, u64, Result<Option<ContextUsage>, String>, Result<feed::inspect::Metadata, String>),
     Acted(String, Act, Result<Option<Patch>, RespondError>),
     Renamed(String, u64, Result<String, RespondError>),
     Set(String, &'static str, String, Result<(), RespondError>),
@@ -139,7 +139,14 @@ fn fetch_settings(s: &mut App, id: &str, after: Duration) {
 
 fn fetch_context(s: &mut App, id: &str, after: Duration) {
     let (id, seq) = (id.to_string(), s.menus.next());
-    spawn(s, after, move |c| Some(Done::Context(id.clone(), seq, c.context_usage(&id).map_err(|e| e.to_string()))));
+    spawn(s, after, move |c| {
+        let read = c.context_read(&id);
+        Some(Done::Context(id.clone(), seq, read.context, read.metadata))
+    });
+}
+
+pub(crate) fn reread(s: &mut App, id: &str) {
+    fetch_context(s, id, Duration::ZERO);
 }
 
 fn load_fixture(s: &mut App, id: &str) {
@@ -442,10 +449,11 @@ fn settled(s: &mut App, done: Done) {
             s.menus.models_loading.remove(&id);
             s.menus.models_error.insert(id, error);
         }
-        Done::Context(id, seq, result) => {
+        Done::Context(id, seq, result, metadata) => {
             if !s.menus.fresh(&id, "context", seq) {
                 return;
             }
+            super::inspect::read(s, &id, metadata);
             match result {
                 Ok(Some(usage)) => {
                     s.menus.context_error.remove(&id);

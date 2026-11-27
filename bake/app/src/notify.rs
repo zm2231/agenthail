@@ -179,13 +179,12 @@ fn clicked(s: &mut App, click: Click) {
     let Some(client) = s.client.clone() else { return };
     let tx = s.notify.tx.clone();
     if action == REPLY {
-        if let Some(why) = crate::session(s, &session).and_then(feed::notice::read_only) {
-            trouble(&session, &title(s, &session), format!("Not sent: {why}"));
-            return;
-        }
         let Some(text) = click.input(REPLY).map(str::trim).filter(|t| !t.is_empty()).map(str::to_string) else { return };
         std::thread::spawn(move || {
-            let result = client.send(&session, &text);
+            let result = match feed::notice::reply_refusal(&client.session_row(&session)) {
+                Some(why) => Err(feed::notice::refused(why)),
+                None => client.send(&session, &text),
+            };
             let _ = tx.send(Done::Acted(session, "reply".into(), result));
         });
         return;

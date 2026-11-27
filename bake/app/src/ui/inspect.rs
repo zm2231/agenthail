@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::time::{Duration, Instant};
 
 use feed::catalog::{RespondError, Session};
 use feed::inspect::{self, GoalAct, LifecycleAct, LifecycleResult, Metadata};
@@ -14,20 +13,9 @@ use crate::theme::{self, BODY, META, META_BOLD, accent, attention, failed, faint
 use crate::{App, session};
 
 pub enum Done {
-    Meta(String, u64, Result<Metadata, String>),
     Goal(String, GoalAct, Result<bool, RespondError>),
     Life(String, u64, LifecycleAct, bool, Result<LifecycleResult, RespondError>),
     Status(String, u64, Result<LifecycleResult, RespondError>),
-}
-
-#[derive(Default)]
-struct Meta {
-    data: Option<Metadata>,
-    at: Option<Instant>,
-    stamp: String,
-    seq: u64,
-    in_flight: bool,
-    again: bool,
 }
 
 #[derive(Default)]
@@ -46,7 +34,7 @@ pub struct Editing {
 }
 
 pub struct Inspect {
-    meta: HashMap<String, Meta>,
+    meta: HashMap<String, Metadata>,
     process: HashMap<String, Process>,
     goal_busy: HashMap<String, GoalAct>,
     goal_note: HashMap<String, (bool, String)>,
@@ -75,69 +63,26 @@ fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'sta
 }
 
 pub fn load(s: &mut App, id: &str) {
-    s.inspect.meta.retain(|k, m| k == id || m.in_flight);
+    s.inspect.meta.retain(|k, _| k == id);
     s.inspect.process.retain(|k, _| k == id);
     if s.inspect.expanded.as_deref() != Some(id) {
         s.inspect.expanded = None;
     }
-    let shared = session(s, id).is_some_and(|x| x.surface == "claude");
-    fetch(s, id, !shared);
 }
 
-pub fn refresh(s: &mut App, id: &str) {
-    fetch(s, id, false);
+pub(crate) fn read(s: &mut App, id: &str, result: Result<Metadata, String>) {
+    let old = s.inspect.meta.get(id);
+    let data = match result {
+        Ok(data) => data.after(old),
+        Err(error) => Metadata::failed(old, error),
+    };
+    s.inspect.meta.insert(id.to_string(), data);
 }
 
-const EVERY: Duration = Duration::from_secs(10);
-
-fn fetch(s: &mut App, id: &str, force: bool) {
-    let Some(x) = session(s, id) else { return };
-    let stamp = x.last_active.clone();
-    if x.surface == "claude" {
-        if force {
-            super::subagents::reload_claude(s, id);
-        }
-        return;
+pub(crate) fn goal_moved(s: &mut App, id: &str) {
+    if s.selected.as_deref() == Some(id) {
+        super::session_menu::reread(s, id);
     }
-    let entry = s.inspect.meta.entry(id.to_string()).or_default();
-    if entry.in_flight {
-        entry.again |= force;
-        return;
-    }
-    if !force && let Some(data) = &entry.data {
-        let recent = entry.at.is_some_and(|at| at.elapsed() < EVERY);
-        if recent || (entry.stamp == stamp && data.warnings.is_empty()) {
-            return;
-        }
-    }
-    s.inspect.seq += 1;
-    let seq = s.inspect.seq;
-    let entry = s.inspect.meta.entry(id.to_string()).or_default();
-    entry.seq = seq;
-    entry.stamp = stamp;
-    entry.at = Some(Instant::now());
-    entry.in_flight = true;
-    entry.again = false;
-    let key = id.to_string();
-    if !spawn(s, move |c| Done::Meta(key.clone(), seq, c.session_inspect(&key)))
-        && let Some(m) = s.inspect.meta.get_mut(id)
-    {
-        m.in_flight = false;
-    }
-}
-
-pub(crate) fn took(s: &mut App, id: &str, data: Metadata) {
-    let stamp = session(s, id).map(|x| x.last_active.clone()).unwrap_or_default();
-    let entry = s.inspect.meta.entry(id.to_string()).or_default();
-    entry.data = Some(data.after(entry.data.as_ref()));
-    entry.stamp = stamp;
-    entry.at = Some(Instant::now());
-}
-
-pub(crate) fn read_failed(s: &mut App, id: &str, error: String) {
-    let entry = s.inspect.meta.entry(id.to_string()).or_default();
-    entry.data = Some(Metadata::failed(entry.data.as_ref(), error));
-    entry.at = Some(Instant::now());
 }
 
 fn goal_act(s: &mut App, id: &str, act: GoalAct, typed: &str) -> bool {
@@ -159,7 +104,7 @@ fn press_goal(s: &mut App, id: &str, act: GoalAct) {
         goal_act(s, id, act, "");
         return;
     }
-    let goal = s.inspect.meta.get(id).and_then(|m| m.data.as_ref()).and_then(|d| d.goal.clone());
+    let goal = s.inspect.meta.get(id).and_then(|d| d.goal.clone());
     let start = match act {
         GoalAct::Edit => goal.map(|g| g.objective).unwrap_or_default(),
         GoalAct::Budget => goal.and_then(|g| g.token_budget).map(|b| b.to_string()).unwrap_or_default(),
@@ -176,7 +121,7 @@ fn close_editor(s: &mut App) {
 }
 
 fn budget_of(s: &App, id: &str) -> Option<i64> {
-    s.inspect.meta.get(id).and_then(|m| m.data.as_ref()).and_then(|d| d.goal.as_ref()).and_then(|g| g.token_budget)
+    s.inspect.meta.get(id).and_then(|d| d.goal.as_ref()).and_then(|g| g.token_budget)
 }
 
 fn save_editor(s: &mut App) {
@@ -218,17 +163,6 @@ fn failure(error: &RespondError) -> String {
 
 fn settled(s: &mut App, done: Done) {
     match done {
-        Done::Meta(id, seq, result) => {
-            let Some(m) = s.inspect.meta.get_mut(&id).filter(|m| m.seq == seq) else { return };
-            m.in_flight = false;
-            match result {
-                Ok(data) => m.data = Some(data.after(m.data.as_ref())),
-                Err(error) => m.data = Some(Metadata::failed(m.data.as_ref(), error)),
-            }
-            if m.again && s.selected.as_deref() == Some(id.as_str()) {
-                fetch(s, &id, true);
-            }
-        }
         Done::Goal(id, act, result) => {
             s.inspect.goal_busy.remove(&id);
             let note = match result {
@@ -239,9 +173,7 @@ fn settled(s: &mut App, done: Done) {
             if let Some(note) = note {
                 s.inspect.goal_note.insert(id.clone(), note);
             }
-            if s.selected.as_deref() == Some(id.as_str()) {
-                fetch(s, &id, true);
-            }
+            goal_moved(s, &id);
         }
         Done::Life(id, generation, act, tell, result) => {
             let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.generation == generation) else { return };
@@ -307,7 +239,7 @@ fn small(label: &str, key: String, variant: ButtonVariant, disabled: bool, on: i
 
 fn goal_section(s: &App, x: &Session) -> Option<El> {
     let can = inspect::goal_controls(x);
-    let data = s.inspect.meta.get(&x.id).and_then(|m| m.data.as_ref());
+    let data = s.inspect.meta.get(&x.id);
     let goal = data.and_then(|d| d.goal.as_ref());
     if goal.is_none() && (!can.editable || data.is_none_or(|d| d.goal_failed)) {
         return None;
@@ -384,7 +316,7 @@ fn process_section(s: &App, x: &Session) -> Option<El> {
 }
 
 fn runs_section(s: &App, x: &Session) -> Vec<El> {
-    let Some(data) = s.inspect.meta.get(&x.id).and_then(|m| m.data.as_ref()) else { return Vec::new() };
+    let Some(data) = s.inspect.meta.get(&x.id) else { return Vec::new() };
     let mut out = Vec::new();
     if let Some(runs) = &data.runs {
         let now = OffsetDateTime::now_utc();

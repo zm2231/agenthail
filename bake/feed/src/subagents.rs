@@ -197,7 +197,7 @@ pub fn claude_subagents(metadata: &Value) -> Result<ClaudeSubagents, String> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClaudeRead {
     pub subagents: Result<ClaudeSubagents, String>,
-    pub metadata: Option<crate::inspect::Metadata>,
+    pub metadata: Result<crate::inspect::Metadata, String>,
 }
 
 const PAGE_TRIES: usize = 3;
@@ -205,8 +205,8 @@ const PAGE_TRIES: usize = 3;
 impl Client {
     pub fn claude_subagents(&self, session: &str) -> ClaudeRead {
         match self.get_json(&format!("/api/v1/session-metadata?id={}&subagents=all", enc(session))) {
-            Ok(value) => ClaudeRead { subagents: claude_subagents(&value), metadata: Some(crate::inspect::metadata(&value)) },
-            Err(error) => ClaudeRead { subagents: Err(error.to_string()), metadata: None },
+            Ok(value) => ClaudeRead { subagents: claude_subagents(&value), metadata: Ok(crate::inspect::metadata(&value)) },
+            Err(error) => ClaudeRead { subagents: Err(error.to_string()), metadata: Err(error.to_string()) },
         }
     }
 
@@ -230,7 +230,7 @@ pub enum RowRead {
 
 pub fn detail_row(detail: &Value) -> Result<Session, String> {
     let Value::Object(mut raw) = detail["session"].clone() else { return Err("Agenthail returned no session".into()) };
-    for key in ["capabilities", "readOnly", "archived", "attention"] {
+    for key in ["capabilities", "readOnly", "readOnlyReason", "archived", "attention"] {
         if let Some(v) = detail.get(key).filter(|v| !v.is_null()) {
             raw.insert(key.into(), v.clone());
         }
@@ -507,7 +507,7 @@ mod tests {
         assert_eq!((metadata.goal.unwrap().objective.as_str(), metadata.runs), ("Ship", Some(vec![])));
         assert_eq!(asked.recv().unwrap().0, "/api/v1/session-metadata?id=s&subagents=all");
         let failed = client.claude_subagents("s");
-        assert!(failed.subagents.is_err() && failed.metadata.is_none());
+        assert!(failed.subagents.is_err() && failed.metadata.is_err());
     }
 
     #[test]

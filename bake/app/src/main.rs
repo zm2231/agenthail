@@ -1003,7 +1003,6 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                         ui::queue::fetch(s, &id);
                     }
                     ui::subagents::refresh(s, &id);
-                    ui::inspect::refresh(s, &id);
                     if let Some(work) = session(s, &id).and_then(|x| x.primary_work(s.work_pick.get(&id).map(String::as_str)).cloned()) {
                         fetch_item(s, &work.project_key, &work.item_id);
                     }
@@ -1105,6 +1104,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     let mut counter = s.counter;
     let mut panes_moved = false;
     let mut caught: Vec<String> = Vec::new();
+    let mut goals: Vec<String> = Vec::new();
     for (id, pane) in s.panes.iter_mut() {
         let mut moved = false;
         if let Some(replay) = &mut pane.replay {
@@ -1121,6 +1121,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             for message in arrived {
                 match message {
                     Message::Batch(b) => {
+                        if feed::inspect::moves_goal(&b.events) {
+                            goals.push(id.clone());
+                        }
                         history::batch_arrived(pane, t);
                         moved |= pane.transcript.apply(b.seq, b.events);
                     }
@@ -1150,6 +1153,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     s.panes_moved |= panes_moved;
     for id in caught {
         history::caught_up(s, &id);
+    }
+    for id in goals {
+        ui::inspect::goal_moved(s, &id);
     }
     if s.ov.live.stale() || (s.panes_moved && s.clock - s.built_at >= PANE_REBUILD_SECS) {
         rebuild(s);
