@@ -227,8 +227,9 @@ pub fn shown(s: &App) -> Vec<(Id, String)> {
     out
 }
 
-pub fn shows_changes(s: &App, w: Id) -> bool {
-    if w == s.windows.current { s.tab == Tab::Changes } else { s.windows.stash.get(&w).is_some_and(|l| l.tab == Tab::Changes) }
+pub fn diff_due(s: &App, w: Id, changed: bool) -> bool {
+    let due = |tab: &Tab, key: &(String, usize), selected: &Option<String>| *tab == Tab::Changes && (changed || key.0 != selected.clone().unwrap_or_default());
+    if w == s.windows.current { due(&s.tab, &s.diff_key, &s.selected) } else { s.windows.stash.get(&w).is_some_and(|l| due(&l.tab, &l.diff_key, &l.selected)) }
 }
 
 pub fn open(s: &mut App, session: &str) -> Id {

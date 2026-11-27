@@ -98,7 +98,7 @@ pub(crate) fn read(s: &mut App, id: &str, ticket: u64, result: Result<Metadata, 
 }
 
 pub(crate) fn streamed(s: &mut App, id: &str, x: feed::wire::Streamed) {
-    let shown = showing(s, id) && s.missing.as_ref().is_none_or(|m| m.id != id);
+    let shown = showing(s, id) && !s.missing.contains_key(id);
     let kind = match x {
         feed::wire::Streamed::Context(_) => "context",
         feed::wire::Streamed::Goal(_) => "goal",

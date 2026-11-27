@@ -173,11 +173,11 @@ pub struct App {
     pub notices: ui::notice::Notices,
     pub holder_menu: Option<String>,
     revealed: Option<String>,
-    pub missing: Option<ui::gone::Missing>,
+    pub missing: HashMap<String, ui::gone::Missing>,
     pub notify: notify::State,
     pub windows: ui::window::Windows,
     pub tabs: ui::tabs::State,
-    last_row: Option<Session>,
+    last_rows: HashMap<String, Session>,
     client: Option<Client>,
     overview_poke: Option<Sender<Ask>>,
     fixtures: Option<Fixtures>,
@@ -378,11 +378,11 @@ fn empty(live: Overview, persist: bool) -> App {
         notices: Default::default(),
         holder_menu: None,
         revealed: None,
-        missing: None,
+        missing: HashMap::new(),
         notify: notify::State::default(),
         windows: Default::default(),
         tabs: Default::default(),
-        last_row: None,
+        last_rows: HashMap::new(),
         client: None,
         overview_poke: None,
         fixtures: None,
@@ -1572,13 +1572,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     if arrived {
         over::arrive(s);
     }
-    let on_changes: Vec<ui::window::Id> = ui::window::ids(s).into_iter().filter(|w| ui::window::shows_changes(s, *w)).collect();
-    for w in on_changes {
-        ui::window::within(s, w, |s| {
-            if changed || s.diff_key.0 != s.selected.clone().unwrap_or_default() {
-                refresh_diff(s);
-            }
-        });
+    let due: Vec<ui::window::Id> = ui::window::ids(s).into_iter().filter(|w| ui::window::diff_due(s, *w, changed)).collect();
+    for w in due {
+        ui::window::within(s, w, refresh_diff);
     }
     if s.screen != Screen::Session {
         s.revealed = None;

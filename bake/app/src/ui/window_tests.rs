@@ -541,3 +541,28 @@ fn subagent_rows_a_window_shows_are_held_while_main_shows_another_session() {
     let (s, _) = beside(false);
     assert!(crate::ui::subagents::holds(&s, "a") && crate::ui::subagents::holds(&s, "b"));
 }
+
+#[test]
+fn a_missing_session_in_each_window_gets_its_own_lookup() {
+    let (mut s, _) = beside(false);
+    s.snapshots = 1;
+    crate::select(&mut s, "x");
+    s.screen = Screen::Session;
+    let w = open(&mut s, "y");
+    assert!(crate::ui::gone::watch(&mut s));
+    assert!(s.missing.contains_key("x") && s.missing.contains_key("y"), "main's and the window's missing sessions are both looked up");
+    close(&mut s, w);
+    crate::ui::gone::watch(&mut s);
+    assert!(!s.missing.contains_key("y"), "a session no window shows is let go");
+}
+
+#[test]
+fn failed_session_settings_are_retried_for_every_window() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    for id in ["a", "b"] {
+        crate::ui::session_menu::failed_a_while_ago(&mut s, id);
+    }
+    crate::ui::session_menu::drain(&mut s);
+    assert!(["a", "b"].iter().all(|id| crate::ui::session_menu::asked(&s, id)), "each shown session's settings are read again");
+}
