@@ -147,6 +147,7 @@ pub struct Unsent {
     pub maybe_delivered: bool,
     pub error: String,
     pub tries: u32,
+    pub pin: Option<crate::holders::Pin>,
 }
 
 impl Unsent {
@@ -173,7 +174,7 @@ impl Unsent {
 
     pub fn to_json(&self) -> Value {
         let attachments: Vec<Value> = self.attachments.iter().map(Upload::to_json).collect();
-        json!({"session": self.session, "text": self.text, "attachments": attachments, "key": self.key, "busy": self.busy.map(Busy::as_str), "maybeDelivered": self.maybe_delivered, "error": self.error, "tries": self.tries})
+        json!({"session": self.session, "text": self.text, "attachments": attachments, "key": self.key, "busy": self.busy.map(Busy::as_str), "maybeDelivered": self.maybe_delivered, "error": self.error, "tries": self.tries, "pid": self.pin.map(|p| p.pid), "pidStartedAt": self.pin.and_then(|p| p.started_at)})
     }
 
     pub fn from_json(id: &str, value: &Value) -> Option<Unsent> {
@@ -187,7 +188,8 @@ impl Unsent {
         let busy = value["busy"].as_str().and_then(Busy::parse);
         let maybe_delivered = value["maybeDelivered"].as_bool().unwrap_or(true);
         let tries = value["tries"].as_u64().unwrap_or_default() as u32;
-        Some(Unsent { session, text, attachments, key, busy, maybe_delivered, error: value["error"].as_str().unwrap_or_default().to_string(), tries })
+        let pin = value["pid"].as_i64().map(|pid| crate::holders::Pin { pid, started_at: value["pidStartedAt"].as_i64() });
+        Some(Unsent { session, text, attachments, key, busy, maybe_delivered, error: value["error"].as_str().unwrap_or_default().to_string(), tries, pin })
     }
 
     pub fn failed(self, retry: bool, maybe_delivered: bool, answered: bool, error: String) -> Unsent {
@@ -460,7 +462,7 @@ mod tests {
 
     #[test]
     fn only_an_unconfirmed_message_is_sent_again_as_it_was() {
-        let unsent = Unsent { session: "s1".into(), text: "ship it".into(), attachments: vec![], key: "k1".into(), busy: Some(Busy::Steer), maybe_delivered: true, error: "timeout".into(), tries: 0 };
+        let unsent = Unsent { session: "s1".into(), text: "ship it".into(), attachments: vec![], key: "k1".into(), busy: Some(Busy::Steer), maybe_delivered: true, error: "timeout".into(), tries: 0, pin: None };
         assert!(unsent.resend("ship it", &[]));
         assert!(!unsent.resend("ship it now", &[]));
         let retried = Unsent { tries: 1, ..unsent.clone() };
@@ -475,7 +477,7 @@ mod tests {
     #[test]
     fn attachments_travel_with_an_unconfirmed_message() {
         let shot = Upload { id: "up/1/shot.png".into(), name: "shot.png".into(), media_type: "image/png".into(), bytes: 9, width: 3, height: 3 };
-        let unsent = Unsent { session: "s1".into(), text: String::new(), attachments: vec![shot.clone()], key: "k1".into(), busy: None, maybe_delivered: true, error: "timeout".into(), tries: 0 };
+        let unsent = Unsent { session: "s1".into(), text: String::new(), attachments: vec![shot.clone()], key: "k1".into(), busy: None, maybe_delivered: true, error: "timeout".into(), tries: 0, pin: None };
         assert_eq!(Unsent::from_json("s1", &unsent.to_json()), Some(unsent.clone()));
         assert_eq!(unsent.quoted(), "“shot.png”");
         assert_eq!(unsent.ids(), vec!["up/1/shot.png".to_string()]);
@@ -491,8 +493,10 @@ mod tests {
 
     #[test]
     fn an_unconfirmed_message_survives_a_restart_with_its_request_id() {
-        let unsent = Unsent { session: "old".into(), text: "ship it".into(), attachments: vec![], key: "k1".into(), busy: Some(Busy::Queue), maybe_delivered: true, error: "the app closed".into(), tries: 0 };
+        let unsent = Unsent { session: "old".into(), text: "ship it".into(), attachments: vec![], key: "k1".into(), busy: Some(Busy::Queue), maybe_delivered: true, error: "the app closed".into(), tries: 0, pin: None };
         assert_eq!(Unsent::from_json("new", &unsent.to_json()), Some(unsent.clone()));
+        let pinned = Unsent { pin: Some(crate::holders::Pin { pid: 41, started_at: Some(7) }), ..unsent.clone() };
+        assert_eq!(Unsent::from_json("new", &pinned.to_json()), Some(pinned));
         let idle = Unsent { busy: None, maybe_delivered: false, tries: 2, ..unsent };
         assert_eq!(Unsent::from_json("new", &idle.to_json()), Some(idle));
         assert_eq!(Unsent::from_json("s1", &json!({"text": "hi"})), None);
@@ -536,7 +540,7 @@ mod tests {
     }
 
     fn unsent(key: &str, text: &str, maybe_delivered: bool) -> Unsent {
-        Unsent { session: "s1".into(), text: text.into(), attachments: vec![], key: key.into(), busy: None, maybe_delivered, error: "timeout".into(), tries: 0 }
+        Unsent { session: "s1".into(), text: text.into(), attachments: vec![], key: key.into(), busy: None, maybe_delivered, error: "timeout".into(), tries: 0, pin: None }
     }
 
     #[test]
