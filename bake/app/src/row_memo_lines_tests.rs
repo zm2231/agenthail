@@ -211,3 +211,48 @@ fn digest_lines_follow_the_minute_and_the_last_look_without_a_poll() {
     settle(&mut rt);
     shown(&rt, &line("W2"));
 }
+
+#[test]
+fn a_review_need_rebuilds_when_its_buttons_change_and_acts_on_the_review_listed_at_press() {
+    if !isolated("rows_memo_lines::a_review_need_rebuilds_when_its_buttons_change_and_acts_on_the_review_listed_at_press") {
+        return;
+    }
+    use crate::over::{Group, Need, NeedKind, Target};
+    use feed::decisions::{Decision, Inbox};
+    let dir = Dir::new("rows-review-need");
+    let mut rt = world(&dir);
+    let review = |since: &str| Decision { group: "review".into(), key: "review:p1:W1".into(), work_item: "W1".into(), ledger_key: "p1".into(), since: since.into(), ..Default::default() };
+    let listed = |s: &mut App, d: Decision| s.ov.inbox.inbox = Some(Inbox { decisions: vec![d], ..Default::default() });
+    rt.update(|s, _| {
+        let key = |id: &str| s.ov.d.work.values().find(|w| w.id == id).unwrap().key();
+        let need = |kind, id: &str, title: &str| Need { kind, group: Group::Waiting, project: "Alpha".into(), project_key: "p1".into(), title: title.into(), who: "a".into(), at: "2026-11-27T09:00:00Z".into(), target: Target::Work(key(id)), label: None };
+        s.ov.needs = vec![need(NeedKind::Approval, "W2", "Approve the import"), need(NeedKind::Check, "W1", "Check the export"), need(NeedKind::CiFailing, "W3", "Fix the menu build")];
+        listed(s, review("2026-11-27T09:00:00Z"));
+    });
+    now(&mut rt, false);
+    let row = "need-w:p1|W1".to_string();
+    shown(&rt, &row);
+    shown(&rt, "need-row-review:p1:W1-approve");
+    let id = review("").id();
+    assert_eq!(rebuilt(&mut rt, "need-", |_| {}), Vec::<String>::new(), "nothing changed");
+    assert_eq!(rebuilt(&mut rt, "need-", |s| { s.ov.inbox.acting.insert(id.clone()); }), [row.clone()], "sending");
+    assert_eq!(rebuilt(&mut rt, "need-", |s| { s.ov.inbox.acting.clear(); }), [row.clone()], "sent");
+    let hold = review("2026-11-27T09:00:00Z").hold_key();
+    assert_eq!(rebuilt(&mut rt, "need-", |s| { s.ov.inbox.unconfirmed.insert(hold.clone()); }), [row.clone()], "not confirmed");
+    assert_eq!(rebuilt(&mut rt, "need-", |s| { s.ov.inbox.unconfirmed.clear(); }), [row.clone()], "confirmed");
+    assert_eq!(rebuilt(&mut rt, "need-", |s| { s.ov.inbox.notes.insert(id.clone(), (hold.clone(), "Try again".into())); }), [row.clone()], "a note on it");
+    assert_eq!(rebuilt(&mut rt, "need-", |s| listed(s, review("2026-11-27T09:30:00Z"))), [row.clone()], "a resubmitted review no longer holds the note");
+    assert_eq!(rebuilt(&mut rt, "need-", |s| s.ov.inbox.inbox = None), [row.clone()], "no review listed");
+    let pr = "need-w:p1|W3".to_string();
+    assert_eq!(rebuilt(&mut rt, "need-", |s| work(s, "W3").timeline.push(serde_json::from_value(json!({"kind": "log", "at": "2026-11-27T09:55:00Z", "text": "Opened https://github.com/o/r/pull/7"})).unwrap())), [pr], "the pull request a failing build opens");
+
+    rt.update(|s, _| listed(s, review("2026-11-27T09:40:00Z")));
+    settle(&mut rt);
+    let (x, y) = rt.find("need-row-review:p1:W1-approve").expect("approve is on screen");
+    rt.update(|s, _| listed(s, review("2026-11-27T09:45:00Z")));
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(DT);
+    let acted = rt.state.ov.inbox.notes.get(&id).map(|(hold, _)| hold.clone());
+    assert_eq!(acted, Some(review("2026-11-27T09:45:00Z").hold_key()), "approve acts on the review listed when it is pressed");
+}

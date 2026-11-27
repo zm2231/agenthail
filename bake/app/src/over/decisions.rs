@@ -169,24 +169,47 @@ fn reply_panel(s: &App, i: usize, d: &Decision, who: &str, k: &Kit) -> El {
     c.child(field).child(row().gap(8.0).items_center().child(send).child(text("It goes to the session holding the work, as your message.".to_string()).font(k.text(META)).color(weak(k)).wrap().shrink()))
 }
 
-pub fn review_buttons(s: &App, d: &Decision, size: ControlSize, key: &str, show_note: bool, mut r: El, k: &Kit) -> El {
-    let st = &s.ov.inbox;
-    let acting = st.acting.contains(&d.id());
-    let unconfirmed = st.unconfirmed.contains(&d.hold_key());
-    let old = inbox::too_old(st, d);
-    let ready = inbox::reviewable(st, d);
-    let approve = if acting { "Sending…" } else if unconfirmed { "Sent, not confirmed" } else { "Approve" };
+#[derive(Hash)]
+pub struct ReviewShown {
+    approve: &'static str,
+    ready: bool,
+    old: bool,
+    note: Option<String>,
+}
+
+impl ReviewShown {
+    pub fn of(s: &App, d: &Decision, show_note: bool) -> ReviewShown {
+        let st = &s.ov.inbox;
+        let old = inbox::too_old(st, d);
+        let approve = if st.acting.contains(&d.id()) {
+            "Sending…"
+        } else if st.unconfirmed.contains(&d.hold_key()) {
+            "Sent, not confirmed"
+        } else {
+            "Approve"
+        };
+        let note = st.notes.get(&d.id()).filter(|(hold, _)| show_note && d.holds(hold)).map(|(_, n)| n.clone()).or_else(|| old.then(review::needs_newer_note));
+        ReviewShown { approve, ready: inbox::reviewable(st, d), old, note }
+    }
+}
+
+pub fn review_buttons(s: &App, d: &Decision, size: ControlSize, key: &str, show_note: bool, r: El, k: &Kit) -> El {
     let (da, dc) = (d.clone(), d.clone());
-    let mut a = Button::new(approve).variant(ButtonVariant::Contrast).control_size(size).disabled(!ready).on_press(move |s: &mut App| inbox::review(s, &da, Verdict::Approve, ""));
-    let mut c = Button::new("Ask for changes").variant(ButtonVariant::Ghost).control_size(size).disabled(!ready).on_press(move |s: &mut App| inbox::ask_changes(s, &dc));
-    if old {
+    let approve = move |s: &mut App| inbox::review(s, &da, Verdict::Approve, "");
+    let changes = move |s: &mut App| inbox::ask_changes(s, &dc);
+    shown_review_buttons(&ReviewShown::of(s, d, show_note), size, key, r, k, approve, changes)
+}
+
+pub fn shown_review_buttons(shown: &ReviewShown, size: ControlSize, key: &str, mut r: El, k: &Kit, approve: impl Fn(&mut App) + 'static, changes: impl Fn(&mut App) + 'static) -> El {
+    let mut a = Button::new(shown.approve).variant(ButtonVariant::Contrast).control_size(size).disabled(!shown.ready).on_press(approve);
+    let mut c = Button::new("Ask for changes").variant(ButtonVariant::Ghost).control_size(size).disabled(!shown.ready).on_press(changes);
+    if shown.old {
         a = a.help(review::needs_newer_note());
         c = c.help(review::needs_newer_note());
     }
     r = r.child(a.build(k).key(format!("{key}-approve"))).child(c.build(k).key(format!("{key}-changes")));
-    let note = st.notes.get(&d.id()).filter(|(hold, _)| show_note && d.holds(hold)).map(|(_, n)| n.clone()).or_else(|| old.then(review::needs_newer_note));
-    if let Some(n) = note {
-        r = r.child(text(n).font(k.text(META)).color(ui::needs_color(k)).wrap().shrink());
+    if let Some(n) = &shown.note {
+        r = r.child(text(n.clone()).font(k.text(META)).color(ui::needs_color(k)).wrap().shrink());
     }
     r
 }

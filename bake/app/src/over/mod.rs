@@ -6,6 +6,7 @@ pub mod inbox;
 pub mod jump;
 pub mod layout;
 pub mod listing;
+mod need_acts;
 mod now;
 mod project;
 pub mod projects;
@@ -299,12 +300,16 @@ pub fn note_open(s: &App) -> bool {
 }
 
 pub fn work_review(s: &App, key: &WorkKey) -> Option<feed::decisions::Decision> {
-    let w = s.ov.d.work.get(key)?;
-    let inbox = s.ov.inbox.inbox.as_ref()?;
-    feed::review::of_work(&inbox.decisions, w)
+    listed_review(s, key).cloned()
 }
 
-fn review_key(s: &mut App, key: &WorkKey, verdict: feed::review::Verdict) {
+pub fn listed_review<'a>(s: &'a App, key: &WorkKey) -> Option<&'a feed::decisions::Decision> {
+    let w = s.ov.d.work.get(key)?;
+    let inbox = s.ov.inbox.inbox.as_ref()?;
+    feed::review::find_of_work(&inbox.decisions, w)
+}
+
+pub fn review_key(s: &mut App, key: &WorkKey, verdict: feed::review::Verdict) {
     let Some(d) = work_review(s, key) else { return };
     match verdict {
         feed::review::Verdict::Approve => inbox::review(s, &d, verdict, ""),
