@@ -44,7 +44,7 @@ pub struct Inspect {
     goal_note: HashMap<String, (bool, String)>,
     overlay: inspect::Overlay,
     expanded: std::collections::HashSet<String>,
-    missed: HashMap<String, Option<std::time::Instant>>,
+    missed: HashMap<String, (u64, Option<std::time::Instant>)>,
     pub editing: Option<Editing>,
     pub logs: Option<(String, String)>,
     seq: u64,
@@ -100,9 +100,11 @@ fn current(s: &App, id: &str) -> String {
 }
 
 fn catch_up(s: &mut App) {
-    let due: Vec<String> = s.inspect.missed.iter().filter(|(id, at)| at.is_none_or(|at| at.elapsed() >= CATCH_UP) && showing(s, id)).map(|(id, _)| id.clone()).collect();
+    let due: Vec<String> = s.inspect.missed.iter().filter(|(id, (_, at))| at.is_none_or(|at| at.elapsed() >= CATCH_UP) && showing(s, id)).map(|(id, _)| id.clone()).collect();
     for id in due {
-        s.inspect.missed.insert(id.clone(), Some(std::time::Instant::now()));
+        if let Some(miss) = s.inspect.missed.get_mut(&id) {
+            miss.1 = Some(std::time::Instant::now());
+        }
         metadata_moved(s, &id);
     }
 }
@@ -130,7 +132,7 @@ pub(crate) fn read(s: &mut App, id: &str, ticket: u64, result: Result<Metadata, 
             Err(error) => Metadata::failed(old, error),
         };
         let data = if is_streamed(s, id, "goal") { data.keep_goal(s.inspect.meta.get(id)) } else { data };
-        if !data.goal_failed {
+        if !data.goal_failed && s.inspect.missed.get(id).is_some_and(|(after, _)| ticket > *after) {
             s.inspect.missed.remove(id);
         }
         s.inspect.meta.insert(id.to_string(), data);
@@ -148,7 +150,8 @@ pub(crate) fn streamed(s: &mut App, id: &str, x: feed::wire::Streamed) {
     };
     if !s.inspect.overlay.stream(id, kind, shown) {
         if !shown && super::window::selected_anywhere(s).iter().any(|x| x == id) {
-            s.inspect.missed.insert(id.to_string(), None);
+            let after = s.inspect.reads.issued();
+            s.inspect.missed.insert(id.to_string(), (after, None));
         }
         return;
     }

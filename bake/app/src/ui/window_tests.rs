@@ -646,8 +646,11 @@ fn a_stream_missed_while_hidden_is_read_again_when_the_session_shows() {
     let (mut s, _) = beside(false);
     s.screen = Screen::Session;
     crate::ui::inspect::streamed(&mut s, "a", goal("first"));
+    let before = crate::ui::inspect::ticket(&mut s);
     s.screen = Screen::Now;
     crate::ui::inspect::streamed(&mut s, "a", goal("while hidden"));
+    crate::ui::inspect::read(&mut s, "a", before, Ok(feed::inspect::Metadata::default()));
+    assert!(crate::ui::inspect::missed(&s, "a"), "a read asked before the miss doesn't count as catching up");
     assert!(!crate::ui::inspect::is_streamed(&s, "a", "goal") && crate::ui::inspect::missed(&s, "a"), "the next read may replace the stale goal");
     crate::ui::inspect::drain(&mut s);
     assert!(crate::ui::inspect::missed(&s, "a"), "nothing is read while it stays hidden");
@@ -704,4 +707,15 @@ fn a_read_landing_after_its_window_closed_is_not_kept() {
     close(&mut s, w);
     crate::ui::inspect::read(&mut s, "b", 1, Ok(feed::inspect::Metadata::default()));
     assert!(!crate::ui::inspect::has_meta(&s, "b"));
+}
+
+#[test]
+fn a_context_read_that_failed_for_a_shown_session_is_tried_again() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    s.menus.context_error.insert("b".into(), "unreachable".into());
+    crate::ui::session_menu::failed_a_while_ago(&mut s, "b");
+    s.menus.note.remove("b");
+    crate::ui::session_menu::drain(&mut s);
+    assert!(crate::ui::session_menu::asked(&s, "b"), "the window's failed context is read again");
 }

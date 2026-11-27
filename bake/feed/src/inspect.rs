@@ -223,6 +223,10 @@ impl Reads {
         self.next
     }
 
+    pub fn issued(&self) -> u64 {
+        self.next
+    }
+
     pub fn accept(&mut self, id: &str, ticket: u64) -> bool {
         if self.applied.get(id).is_some_and(|newest| *newest > ticket) {
             return false;
