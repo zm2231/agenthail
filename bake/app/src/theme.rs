@@ -107,10 +107,12 @@ impl Themes {
 
 thread_local! {
     static PAINT: Cell<Paint> = Cell::new(Paint::dark());
+    static PAINT_KEY: Cell<u64> = Cell::new(key_of(&Paint::dark()));
     static THEMES: RefCell<Option<Themes>> = const { RefCell::new(None) };
 }
 
 pub fn set(paint: Paint, themes: Themes) {
+    PAINT_KEY.set(key_of(&paint));
     PAINT.set(paint);
     THEMES.set(Some(themes));
 }
@@ -189,8 +191,11 @@ pub fn ink(alpha: f32) -> Color {
 }
 
 pub fn paint_key() -> u64 {
+    PAINT_KEY.get()
+}
+
+fn key_of(p: &Paint) -> u64 {
     use std::hash::{Hash, Hasher};
-    let p = paint();
     let mut h = std::collections::hash_map::DefaultHasher::new();
     (p.dark, p.text, p.muted, p.faint, p.card, p.card_deep, p.raised, p.line, p.wash, p.accent, p.accent_deep, p.attention).hash(&mut h);
     (p.done, p.failed, p.glass_tint, p.ground, p.pane, p.border, p.blur.to_bits()).hash(&mut h);
