@@ -524,10 +524,10 @@ fn settled(s: &mut App, done: Done) {
             s.menus.models_loading.remove(&id);
             s.menus.models_error.insert(id, error);
         }
-        Done::Context(id, seq, result, ticket, metadata) => {
-            let id = feed::composer::current(&s.rekeyed, &id).to_string();
-            super::inspect::read(s, &id, ticket, metadata);
-            if !s.menus.fresh(&id, "context", seq) || super::inspect::streamed_since(s, &id, "context", ticket) {
+        Done::Context(asked, seq, result, ticket, metadata) => {
+            super::inspect::read(s, &asked, ticket, metadata);
+            let id = feed::composer::current(&s.rekeyed, &asked).to_string();
+            if super::inspect::asked_before_merge(s, &asked, ticket) || !s.menus.fresh(&id, "context", seq) || super::inspect::streamed_since(s, &id, "context", ticket) {
                 return;
             }
             if result.is_ok() {
@@ -620,6 +620,11 @@ fn settled(s: &mut App, done: Done) {
             }
         }
     }
+}
+
+#[cfg(test)]
+pub fn settle(s: &mut App, done: Done) {
+    settled(s, done);
 }
 
 #[cfg(test)]

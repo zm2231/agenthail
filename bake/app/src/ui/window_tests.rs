@@ -793,9 +793,13 @@ fn after_a_rekey_onto_a_shown_session_the_old_id_s_late_read_and_actions_leave_i
     use crate::ui::inspect::{Done, busy, settle, start};
     let (mut s, _) = beside(false);
     s.screen = Screen::Session;
-    let b_read = crate::ui::inspect::ticket(&mut s);
     let mine = feed::inspect::Metadata { goal: Some(feed::inspect::Goal { objective: "b's goal".into(), ..Default::default() }), ..Default::default() };
+    let b_read = crate::ui::inspect::ticket(&mut s);
     crate::ui::inspect::read(&mut s, "b", b_read, Ok(mine));
+    let b_done = start(&mut s, "b", None);
+    settle(&mut s, Done::Goal("b".into(), b_done, feed::inspect::GoalAct::Pause, Ok(false)));
+    let b_note = crate::ui::inspect::note_of(&s, "b");
+    assert!(b_note.is_some());
     crate::ui::inspect::streamed(&mut s, "a", goal("a's goal"));
     let late = crate::ui::inspect::ticket(&mut s);
     let (a_goal, b_goal) = (start(&mut s, "a", None), start(&mut s, "b", None));
@@ -804,14 +808,38 @@ fn after_a_rekey_onto_a_shown_session_the_old_id_s_late_read_and_actions_leave_i
     let read = feed::inspect::Metadata { goal: Some(feed::inspect::Goal { objective: "a's read".into(), ..Default::default() }), ..Default::default() };
     crate::ui::inspect::read(&mut s, "a", late, Ok(read));
     assert_eq!(crate::ui::inspect::goal_of(&s, "b").as_deref(), Some("b's goal"), "a read asked under a before the rekey doesn't replace b's goal");
-    assert!(crate::ui::inspect::streamed_since(&s, "b", "context", late), "nor its context");
+    let usage: feed::settings::ContextUsage = serde_json::from_value(serde_json::json!({"usedTokens": 10, "contextWindow": 100})).unwrap();
+    crate::ui::session_menu::settle(&mut s, crate::ui::session_menu::Done::Context("a".into(), 50, Ok(Some(usage)), late, Ok(Default::default())));
+    assert!(!s.menus.context.contains_key("b"), "nor its context");
     assert!(crate::ui::inspect::missed(&s, "b"), "b is read again after the rekey");
     settle(&mut s, Done::Status("b".into(), b_life, Ok(feed::inspect::LifecycleResult { state: Some("b".into()), ..Default::default() })));
     settle(&mut s, Done::Goal("a".into(), a_goal, feed::inspect::GoalAct::Pause, Err(feed::catalog::RespondError { message: "a failed".into(), code: String::new(), maybe_delivered: false, reply: serde_json::Value::Null, answered: false, status: 500 })));
     assert_eq!(busy(&s, "b"), (true, true), "a's actions are still running");
     settle(&mut s, Done::Status("a".into(), a_life, Ok(feed::inspect::LifecycleResult { state: Some("a".into()), ..Default::default() })));
+    assert_eq!(busy(&s, "b"), (true, false));
+    assert_eq!(crate::ui::inspect::note_of(&s, "b"), b_note, "a's goal result doesn't replace b's note");
     settle(&mut s, Done::Goal("b".into(), b_goal, feed::inspect::GoalAct::Pause, Ok(true)));
     assert_eq!(busy(&s, "b"), (false, false));
     assert_eq!(crate::ui::inspect::status_of(&s, "b").as_deref(), Some("b"), "a's late status doesn't replace b's");
-    assert!(crate::ui::inspect::note_of(&s, "b").is_none(), "nor does a's goal result");
+    let fresh = crate::ui::inspect::ticket(&mut s);
+    let newer = feed::inspect::Metadata { goal: Some(feed::inspect::Goal { objective: "after".into(), ..Default::default() }), ..Default::default() };
+    crate::ui::inspect::read(&mut s, "b", fresh, Ok(newer));
+    assert_eq!(crate::ui::inspect::goal_of(&s, "b").as_deref(), Some("after"), "a read asked after the rekey brings b up to date");
+}
+
+#[test]
+fn a_released_session_s_late_read_doesn_t_land_on_the_shown_session_it_rekeys_onto() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    let mine = feed::inspect::Metadata { goal: Some(feed::inspect::Goal { objective: "b's goal".into(), ..Default::default() }), ..Default::default() };
+    let b_read = crate::ui::inspect::ticket(&mut s);
+    crate::ui::inspect::read(&mut s, "b", b_read, Ok(mine));
+    let late = crate::ui::inspect::ticket(&mut s);
+    crate::select(&mut s, "c");
+    assert!(!crate::ui::inspect::has_meta(&s, "a"));
+    crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "b".to_string())]));
+    let read = feed::inspect::Metadata { goal: Some(feed::inspect::Goal { objective: "a's read".into(), ..Default::default() }), ..Default::default() };
+    crate::ui::inspect::read(&mut s, "a", late, Ok(read));
+    assert_eq!(crate::ui::inspect::goal_of(&s, "b").as_deref(), Some("b's goal"));
+    assert!(crate::ui::inspect::missed(&s, "b"));
 }

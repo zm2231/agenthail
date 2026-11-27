@@ -50,7 +50,7 @@ pub struct Inspect {
     overlay: inspect::Overlay,
     expanded: std::collections::HashSet<String>,
     missed: HashMap<String, Missed>,
-    adopted: std::collections::HashSet<u64>,
+    merged: HashMap<String, (u64, u64)>,
     pub editing: Option<Editing>,
     pub logs: Option<(String, String)>,
     seq: u64,
@@ -61,7 +61,7 @@ pub struct Inspect {
 impl Inspect {
     pub fn new() -> Inspect {
         let (tx, rx) = channel();
-        Inspect { meta: HashMap::new(), reads: inspect::Reads::default(), process: HashMap::new(), goal_busy: HashMap::new(), goal_note: HashMap::new(), overlay: inspect::Overlay::default(), expanded: Default::default(), missed: Default::default(), adopted: Default::default(), editing: None, logs: None, seq: 0, tx, rx }
+        Inspect { meta: HashMap::new(), reads: inspect::Reads::default(), process: HashMap::new(), goal_busy: HashMap::new(), goal_note: HashMap::new(), overlay: inspect::Overlay::default(), expanded: Default::default(), missed: Default::default(), merged: HashMap::new(), editing: None, logs: None, seq: 0, tx, rx }
     }
 }
 
@@ -84,26 +84,24 @@ pub fn load(s: &mut App, id: &str) {
 }
 
 pub(crate) fn rekey(s: &mut App, old: &str, new: &str) {
-    let reread = s.inspect.overlay.rekey(old, new, s.inspect.reads.issued());
+    let collided = s.inspect.overlay.rekey(old, new);
+    if collided {
+        s.inspect.merged.insert(old.to_string(), (s.inspect.reads.issued(), s.inspect.seq));
+    }
     s.inspect.reads.rekey(old, new);
     crate::move_key(&mut s.inspect.meta, old, new);
     if let Some(gone) = s.inspect.process.remove(old) {
-        match s.inspect.process.get_mut(new) {
-            Some(into) => {
-                s.inspect.adopted.extend(gone.running.keys());
-                into.running.extend(gone.running);
-            }
-            None => drop(s.inspect.process.insert(new.to_string(), gone)),
+        let into = s.inspect.process.entry(new.to_string()).or_default();
+        into.running.extend(gone.running);
+        if !collided {
+            into.status = into.status.take().or(gone.status);
+            into.outcome = into.outcome.take().or(gone.outcome);
+            into.logs = into.logs.take().or(gone.logs);
+            into.error = into.error.take().or(gone.error);
         }
     }
     if let Some(gone) = s.inspect.goal_busy.remove(old) {
-        match s.inspect.goal_busy.get_mut(new) {
-            Some(into) => {
-                s.inspect.adopted.extend(&gone);
-                into.extend(gone);
-            }
-            None => drop(s.inspect.goal_busy.insert(new.to_string(), gone)),
-        }
+        s.inspect.goal_busy.entry(new.to_string()).or_default().extend(gone);
     }
     crate::move_key(&mut s.inspect.goal_note, old, new);
     crate::move_member(&mut s.inspect.expanded, old, new);
@@ -120,9 +118,17 @@ pub(crate) fn rekey(s: &mut App, old: &str, new: &str) {
         logs.0 = new.to_string();
     }
     super::session_menu::rekey_context(s, old, new);
-    if !reread.is_empty() {
-        miss(s, new, &reread);
+    if collided {
+        miss(s, new, &["goal", "context"]);
     }
+}
+
+pub(crate) fn asked_before_merge(s: &App, asked: &str, ticket: u64) -> bool {
+    s.inspect.merged.get(asked).is_some_and(|(read, _)| ticket <= *read)
+}
+
+fn acted_before_merge(s: &App, asked: &str, token: u64) -> bool {
+    s.inspect.merged.get(asked).is_some_and(|(_, act)| token <= *act)
 }
 
 fn current(s: &App, id: &str) -> String {
@@ -154,6 +160,7 @@ pub fn keep_shown(s: &mut App) {
     s.inspect.reads.keep_only(&held);
     s.inspect.expanded.retain(|k| held.contains(k));
     s.inspect.missed.retain(|k, _| held.contains(k));
+    s.inspect.merged.retain(|old, _| s.rekeyed.contains_key(old));
 }
 
 pub(crate) fn ticket(s: &mut App) -> u64 {
@@ -161,9 +168,10 @@ pub(crate) fn ticket(s: &mut App) -> u64 {
 }
 
 pub(crate) fn read(s: &mut App, id: &str, ticket: u64, result: Result<Metadata, String>) {
+    let stale = asked_before_merge(s, id, ticket);
     let id = &current(s, id);
     let held = super::window::selected_anywhere(s).iter().any(|x| x == id);
-    if held && s.inspect.reads.accept(id, ticket) {
+    if held && !stale && s.inspect.reads.accept(id, ticket) {
         let old = s.inspect.meta.get(id);
         let data = match result {
             Ok(data) => data.after(old),
@@ -383,6 +391,7 @@ fn failure(error: &RespondError) -> String {
 fn settled(s: &mut App, done: Done) {
     match done {
         Done::Goal(id, token, act, result) => {
+            let stale = acted_before_merge(s, &id, token);
             let id = current(s, &id);
             if let Some(busy) = s.inspect.goal_busy.get_mut(&id) {
                 busy.remove(&token);
@@ -390,7 +399,7 @@ fn settled(s: &mut App, done: Done) {
                     s.inspect.goal_busy.remove(&id);
                 }
             }
-            if s.inspect.adopted.remove(&token) {
+            if stale {
                 return;
             }
             let note = match result {
@@ -404,12 +413,13 @@ fn settled(s: &mut App, done: Done) {
             metadata_moved(s, &id);
         }
         Done::Life(id, ticket, act, tell, asker, result) => {
+            let stale = acted_before_merge(s, &id, ticket);
             let id = current(s, &id);
             let to = super::window::asker_or_showing(s, asker, &id);
             let elsewhere = (to.is_none() || super::window::is_open(s, super::window::Kind::Logs)).then(|| session(s, &id).map(|x| x.title()).unwrap_or_default());
             let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.running.contains_key(&ticket)) else { return };
             p.running.remove(&ticket);
-            if s.inspect.adopted.remove(&ticket) {
+            if stale {
                 return;
             }
             if tell || elsewhere.is_some() {
@@ -455,10 +465,11 @@ fn settled(s: &mut App, done: Done) {
             }
         }
         Done::Status(id, ticket, result) => {
+            let stale = acted_before_merge(s, &id, ticket);
             let id = current(s, &id);
             let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.running.contains_key(&ticket)) else { return };
             p.running.remove(&ticket);
-            if s.inspect.adopted.remove(&ticket) {
+            if stale {
                 return;
             }
             match result {
