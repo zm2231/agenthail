@@ -490,7 +490,7 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
         changed = true;
     }
     let effects = w.call.tick(t);
-    changed |= effects.iter().any(|e| matches!(e, Effect::Note(_)));
+    changed |= !effects.is_empty();
     w.run(effects);
     if w.call.trail.changed && t >= w.save_after {
         if save_trail(&mut w.call.trail) {

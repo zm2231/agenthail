@@ -307,3 +307,15 @@ fn the_wait_after_an_unclear_check_runs_from_its_answer() {
     web.signed(Err("daemon down".into()), now());
     assert!(web.check_due(Some(B)).is_none(), "a check that took long to fail still waits a full minute from its answer");
 }
+
+#[test]
+fn a_load_that_starts_arms_its_slow_and_unreached_wakes() {
+    let mut web = Web::new();
+    open(&mut web, A, false);
+    crate::wake::begin(crate::wake::Window::Main);
+    send(&web, A, Load::Started(format!("{A}report")));
+    web.pump(None);
+    let next = crate::wake::next(crate::wake::Window::Main).expect("the slow message is woken for");
+    let left = next.saturating_duration_since(Instant::now());
+    assert!(left > SLOW - std::time::Duration::from_secs(1) && left <= SLOW, "{left:?}");
+}

@@ -566,6 +566,22 @@ fn a_layout_that_cannot_be_written_retries_on_a_wait_not_in_a_loop() {
 }
 
 #[test]
+fn a_copied_path_note_arms_its_own_expiry() {
+    if !isolated("a_copied_path_note_arms_its_own_expiry") {
+        return;
+    }
+    let dir = Dir::new("copied");
+    let mut rt = unframed(app(sessions(&["a"]), &dir));
+    rt.frame(DT);
+    rt.update(|s, _| s.attach.sent.entry("k".into()).or_default().copied = Some(std::time::Instant::now()));
+    let clock = rt.state.clock + DT;
+    rt.update_if(|s, tx| crate::poll(s, clock, tx));
+    let next = crate::wake::next(crate::wake::Window::Main).expect("the note's expiry is woken for");
+    let left = next.saturating_duration_since(std::time::Instant::now()).as_secs_f64();
+    assert!(left > 1.8 && left <= 2.0, "wakes when the note lapses, in {left}");
+}
+
+#[test]
 fn a_module_result_wakes_the_loop_and_shows_in_one_frame() {
     if !isolated("a_module_result_wakes_the_loop_and_shows_in_one_frame") {
         return;
