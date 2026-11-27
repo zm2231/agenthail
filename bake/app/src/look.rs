@@ -86,6 +86,7 @@ fn scheme_of(look: &Look) -> rune::ColorScheme {
 
 static TICKET: AtomicU64 = AtomicU64::new(0);
 static SCREEN: AtomicU32 = AtomicU32::new(2880);
+static CHOSEN: AtomicU64 = AtomicU64::new(0);
 
 pub fn ticket() -> u64 {
     TICKET.fetch_add(1, Ordering::Relaxed) + 1
@@ -116,9 +117,10 @@ fn redecode(s: &mut State) {
     s.screen = side;
     SCREEN.store(side, Ordering::Relaxed);
     let (Some(tx), paths) = (s.tx.clone(), s.look.images()) else { return };
+    let chosen = CHOSEN.load(Ordering::Relaxed);
     std::thread::spawn(move || {
         let mut left = paths;
-        while !left.is_empty() && SCREEN.load(Ordering::Relaxed) == side {
+        while !left.is_empty() && SCREEN.load(Ordering::Relaxed) == side && CHOSEN.load(Ordering::Relaxed) == chosen {
             let Ok(client) = Client::from_env() else {
                 std::thread::sleep(RETRY);
                 continue;
@@ -146,7 +148,7 @@ fn screen_side() -> u32 {
 }
 
 fn follow(tx: Sender<Got>) {
-    let client = loop {
+    let mut client = loop {
         match Client::from_env() {
             Ok(client) => break client,
             Err(e) => {
@@ -165,6 +167,9 @@ fn follow(tx: Sender<Got>) {
     let mut fetched: Vec<String> = Vec::new();
     let mut decoded_at = 0u32;
     loop {
+        if let Ok(fresh) = Client::from_env() {
+            client = fresh;
+        }
         let cursor = client.base_settings().map(|b| b.event_cursor).unwrap_or(0);
         match read(&client, class, &device, &mut decoded_at, &tx, &mut fetched) {
             Read::Closed => return,
@@ -281,7 +286,11 @@ fn pump(s: &mut State) {
             Got::View(ticket, v) if ticket > s.applied => {
                 s.applied = ticket;
                 s.view = Some(*v);
+                let before = s.look.images();
                 relook(s);
+                if s.look.images() != before {
+                    CHOSEN.fetch_add(1, Ordering::Relaxed);
+                }
                 redecode(s);
                 let keep = s.look.images();
                 s.pictures.retain(|p, _| keep.contains(p));
@@ -296,7 +305,9 @@ fn pump(s: &mut State) {
                 s.pictures.insert(path, Ok(p));
             }
             Got::Image(path, _, Err(e)) => {
-                s.pictures.insert(path, Err(e));
+                if !matches!(s.pictures.get(&path), Some(Ok(_))) {
+                    s.pictures.insert(path, Err(e));
+                }
             }
             Got::Problem(p) => s.problem = p,
         }
