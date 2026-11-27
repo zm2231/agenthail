@@ -15,6 +15,9 @@ const (
 	homePrefix = "agenthail-test-home-"
 	homeOwner  = ".agenthail-test-owner"
 	staleAfter = 5 * time.Minute
+	// The suite's deepest Unix sockets sit below TMPDIR and fit under macOS's
+	// 104-byte limit only while TMPDIR is no longer than macOS's own.
+	maxTempDir = len("/var/folders/xx/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/T/")
 )
 
 // RunInOwnHome runs a test binary in a new HOME, with its TMPDIR inside, and
@@ -30,7 +33,7 @@ func RunInOwnHome(run func() int) int {
 		fmt.Fprintf(os.Stderr, "FAIL: keep the go command's caches: %v\n", err)
 		return 1
 	}
-	base := os.TempDir()
+	base := tempBase()
 	removeDeadHomes(base)
 	home, err := os.MkdirTemp(base, homePrefix)
 	if err != nil {
@@ -83,6 +86,14 @@ func keepGoEnv() error {
 		}
 	}
 	return nil
+}
+
+func tempBase() string {
+	base := os.TempDir()
+	if len(filepath.Join(base, homePrefix+"4294967295", "t")) > maxTempDir {
+		return "/tmp"
+	}
+	return base
 }
 
 // removeDeadHomes clears homes whose test binary was killed before its deferred

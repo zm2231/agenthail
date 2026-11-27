@@ -184,19 +184,53 @@ func runsInOwnHome(path string) bool {
 
 func TestHoldHomeUntilKilled(t *testing.T) {
 	if os.Getenv("AGENTHAIL_TESTKIT_HOLD_HOME") == "" {
-		t.Skip("run by TestAKilledTestBinarysHomeIsRemovedByTheNextOne")
+		t.Skip("run as a child by the tests below")
 	}
 	fmt.Println(os.Getenv("HOME"))
 	fmt.Println(t.TempDir())
-	time.Sleep(time.Minute)
+	if os.Getenv("AGENTHAIL_TESTKIT_HOLD_HOME") == "until-killed" {
+		time.Sleep(time.Minute)
+	}
+}
+
+// shortTempBase is a folder in /tmp short enough that a test binary started
+// with it as TMPDIR keeps its home there.
+func shortTempBase(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}
+
+func TestATestBinaryWhoseTempDirIsTooLongForItsSocketsKeepsItsHomeInTmp(t *testing.T) {
+	long := filepath.Join(shortTempBase(t), strings.Repeat("x", maxTempDir))
+	if err := os.Mkdir(long, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHoldHomeUntilKilled$")
+	cmd.Env = append(os.Environ(), "TMPDIR="+long, "AGENTHAIL_TESTKIT_HOLD_HOME=print")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if filepath.Dir(lines[0]) != "/tmp" {
+		t.Fatalf("with TMPDIR=%s the home is %s, want one in /tmp", long, lines[0])
+	}
+	if temp := filepath.Join(lines[0], "t"); len(temp) > maxTempDir || !strings.HasPrefix(lines[1], temp+"/") {
+		t.Fatalf("t.TempDir %s is not in a TMPDIR of at most %d bytes inside the home %s", lines[1], maxTempDir, lines[0])
+	}
 }
 
 func TestAKilledTestBinarysHomeIsRemovedByTheNextOne(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := shortTempBase(t)
 	env := append(os.Environ(), "TMPDIR="+tmp)
 	killedHome := func() (string, string, int) {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestHoldHomeUntilKilled$")
-		cmd.Env = append(env, "AGENTHAIL_TESTKIT_HOLD_HOME=1")
+		cmd.Env = append(env, "AGENTHAIL_TESTKIT_HOLD_HOME=until-killed")
 		out, err := cmd.StdoutPipe()
 		if err != nil {
 			t.Fatal(err)
