@@ -218,6 +218,61 @@ fn a_session_list_that_brings_a_quiet_project_back_reads_its_work_at_once() {
     assert!(asked.try_iter().any(|a| a == crate::Ask::Read("p2".into())), "its work is asked for in the same frame, not at the next overview read");
 }
 
+fn daemon_log() -> (feed::catalog::Client, std::sync::mpsc::Receiver<(String, std::time::Instant)>) {
+    use std::io::{BufRead, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let (heard, log) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let heard = heard.clone();
+            std::thread::spawn(move || {
+                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap_or_default();
+                let path = line.split_whitespace().nth(1).unwrap_or_default().to_string();
+                loop {
+                    let mut header = String::new();
+                    if reader.read_line(&mut header).unwrap_or(0) == 0 || header == "\r\n" {
+                        break;
+                    }
+                }
+                let _ = heard.send((path, std::time::Instant::now()));
+                let mut stream = stream;
+                let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}");
+            });
+        }
+    });
+    (feed::catalog::Client::new(&base, "t"), log)
+}
+
+#[test]
+fn a_ledger_asked_for_between_overview_reads_is_read_without_waiting_for_the_next_one() {
+    let (client, log) = daemon_log();
+    let (outbox, _inbox) = std::sync::mpsc::channel();
+    let (poke, poked) = std::sync::mpsc::channel();
+    let stream = feed::watch::Stream::default();
+    stream.open();
+    crate::watch_overview(client, outbox, poked, stream);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !log.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).is_ok_and(|(path, _)| path.starts_with("/api/v1/snapshot")) {
+        assert!(std::time::Instant::now() < deadline, "the first overview read never came");
+    }
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    log.try_iter().for_each(drop);
+    poke.send(crate::Ask::Refresh).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let asked = std::time::Instant::now();
+    poke.send(crate::Ask::Read("p2".into())).unwrap();
+    let ledger = loop {
+        let (path, at) = log.recv_timeout(std::time::Duration::from_secs(10)).expect("the ledger was never read");
+        if path.starts_with("/api/v1/ledger") {
+            break at;
+        }
+    };
+    assert!(ledger.duration_since(asked) < std::time::Duration::from_secs(1), "waited {:?} behind the overview's spacing", ledger.duration_since(asked));
+}
+
 #[test]
 fn an_older_snapshot_in_a_burst_does_not_replace_a_newer_one() {
     if !isolated("an_older_snapshot_in_a_burst_does_not_replace_a_newer_one") {
