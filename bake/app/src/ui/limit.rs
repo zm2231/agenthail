@@ -161,6 +161,7 @@ fn move_to(s: &mut App, id: &str, since: &str, target: Target, stop_terminal: bo
     if not_sent(s) || !s.limits.busy.insert(id.to_string()) {
         return;
     }
+    super::window::asking(s, id);
     let stop = since.to_string();
     note(s, id, stop.clone(), format!("Moving to {}…", target.name), false);
     let id = id.to_string();

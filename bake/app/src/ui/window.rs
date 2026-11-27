@@ -135,6 +135,7 @@ pub struct Windows {
     look: u64,
     overlay: Option<Id>,
     overlay_kinds: u32,
+    asked: HashMap<String, Id>,
 }
 
 impl Windows {
@@ -276,6 +277,7 @@ pub fn close(s: &mut App, id: Id) {
     s.windows.stash.remove(&id);
     s.windows.open.retain(|o| o.id != id);
     s.windows.overlay.take_if(|w| *w == id);
+    s.windows.asked.retain(|_, w| *w != id);
     s.windows.to_show.retain(|(o, _)| *o != id);
 }
 
@@ -478,8 +480,13 @@ pub fn showing(s: &App, session: &str) -> Option<Id> {
     s.windows.stash.iter().filter(|(id, _)| **id != s.windows.current).find(|(_, l)| shows(&l.screen, &l.selected)).map(|(id, _)| *id)
 }
 
+pub fn asking(s: &mut App, session: &str) {
+    let w = s.windows.current;
+    s.windows.asked.insert(session.to_string(), w);
+}
+
 pub fn overlay_for(s: &mut App, session: &str) {
-    if let Some(w) = showing(s, session) {
+    if let Some(w) = s.windows.asked.get(session).copied().or_else(|| showing(s, session)) {
         overlays_to(s, w);
     }
 }

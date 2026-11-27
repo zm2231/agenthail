@@ -109,6 +109,7 @@ fn send_move(s: &mut App, session: &str, title: &str, host: &str, host_name: &st
     if !s.menus.ops.sent.insert(session.to_string()) {
         return;
     }
+    super::window::asking(s, session);
     let here = if s.menus.ops.here.is_empty() { "this computer".to_string() } else { s.menus.ops.here.clone() };
     let (session, title, host, host_name) = (session.to_string(), title.to_string(), host.to_string(), host_name.to_string());
     spawn(s, move |c| Done::Moved(c.move_session(&session, &host, &host_name, stop_terminal).notice(&session, &title, &host, &host_name, &here)));
@@ -123,8 +124,15 @@ fn confirm_move(s: &mut App) {
     send_move(s, &m.session, &m.title, &host.id, &host.name, false);
 }
 
+fn front_to_its_window(s: &mut App) {
+    if let Some(session) = s.menus.ops.notices.front().map(|n| n.session.clone()) {
+        super::window::overlay_for(s, &session);
+    }
+}
+
 fn retry(s: &mut App) {
     let Some(n) = s.menus.ops.notices.pop_front() else { return };
+    front_to_its_window(s);
     let title = title(s, &n.session);
     send_move(s, &n.session, if title.is_empty() { &n.session } else { &title }, &n.host, &n.host_name, true);
 }
@@ -173,9 +181,10 @@ pub fn drain(s: &mut App) -> bool {
             Done::Moved(notice) => {
                 s.menus.ops.sent.remove(&notice.session);
                 super::gone::recheck(s, &notice.session);
-                let session = notice.session.clone();
                 s.menus.ops.notices.push_back(notice);
-                super::window::overlay_for(s, &session);
+                if s.menus.ops.notices.len() == 1 {
+                    front_to_its_window(s);
+                }
             }
         }
     }
@@ -292,6 +301,7 @@ fn move_dialog(m: &Moving, layer: &mut Vec<El>, k: &Kit) {
 fn notice_dialog(n: &Notice, layer: &mut Vec<El>, k: &Kit) {
     let dismiss = |s: &mut App| {
         s.menus.ops.notices.pop_front();
+        front_to_its_window(s);
     };
     let actions = if n.retry {
         vec![small("Cancel", ButtonVariant::Ghost).on_press(dismiss).build(k).key("move-notice-cancel"), small("Stop and Move", ButtonVariant::Danger).on_press(retry).build(k).key("move-notice-retry")]
@@ -314,5 +324,35 @@ pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
     }
     if let Some(n) = s.menus.ops.notices.front() {
         notice_dialog(n, layer, k);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::window::{self, MAIN};
+
+    fn notice(session: &str) -> Notice {
+        Notice { session: session.into(), host: "h".into(), host_name: "Other".into(), title: session.into(), message: "Moved".into(), retry: false }
+    }
+
+    #[test]
+    fn each_move_notice_shows_in_the_window_that_asked_for_its_move() {
+        let mut s = crate::empty(feed::derive::live::Overview::default(), false);
+        crate::select(&mut s, "a");
+        let w = window::open(&mut s, "b");
+        window::enter(&mut s, w);
+        window::asking(&mut s, "b");
+        window::enter(&mut s, MAIN);
+        window::asking(&mut s, "a");
+        let _ = s.menus.ops.tx.send(Done::Moved(notice("a")));
+        let _ = s.menus.ops.tx.send(Done::Moved(notice("b")));
+        drain(&mut s);
+        assert!(window::shows_shared(&s), "a's notice is in front, in main");
+        s.menus.ops.notices.pop_front();
+        front_to_its_window(&mut s);
+        assert!(!window::shows_shared(&s), "b's notice moves to b's window once a's is dismissed");
+        window::enter(&mut s, w);
+        assert!(window::shows_shared(&s));
     }
 }

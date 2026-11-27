@@ -192,6 +192,7 @@ pub(crate) fn run(s: &mut App, id: &str, act: LifecycleAct, tell: bool) {
     if !session(s, id).is_some_and(|x| act.offered(inspect::lifecycle(x))) {
         return;
     }
+    super::window::asking(s, id);
     s.inspect.seq += 1;
     let fresh = s.inspect.seq;
     let p = s.inspect.process.entry(id.to_string()).or_insert_with(|| Process { generation: fresh, ..Process::default() });

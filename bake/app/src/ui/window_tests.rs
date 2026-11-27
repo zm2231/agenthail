@@ -330,3 +330,28 @@ fn opening_a_second_kind_of_dialog_in_another_window_takes_them_there() {
     turn_with(&mut s, &mut win, &key(w), |s, _| s.prs.linking = Some("b".into()));
     assert_eq!(s.windows.overlay, Some(w));
 }
+
+#[test]
+fn a_result_goes_to_the_window_that_asked_even_when_both_show_the_session() {
+    let mut s = app();
+    crate::select(&mut s, "b");
+    let w = open(&mut s, "b");
+    enter(&mut s, w);
+    asking(&mut s, "b");
+    enter(&mut s, MAIN);
+    s.inspect.logs = Some(("b".into(), "log lines".into()));
+    overlay_for(&mut s, "b");
+    assert_eq!(s.windows.overlay, Some(w));
+    close(&mut s, w);
+    assert!(s.windows.asked.is_empty() && s.windows.overlay.is_none());
+}
+
+#[test]
+fn a_command_run_in_one_window_leaves_another_window_s_palette_open() {
+    let (mut s, mut main, mut win, w) = two_windows();
+    turn_with(&mut s, &mut win, &key(w), |s, tx| crate::over::open_jump(s, tx));
+    turn_with(&mut s, &mut main, "main", |s, tx| crate::over::search::run(s, feed::search::Command::Refresh, tx));
+    assert!(s.ov.jump.is_some() && s.windows.overlay == Some(w));
+    turn_with(&mut s, &mut win, &key(w), |s, tx| crate::over::search::run(s, feed::search::Command::Refresh, tx));
+    assert!(s.ov.jump.is_none(), "a command picked in the palette's own window closes it");
+}

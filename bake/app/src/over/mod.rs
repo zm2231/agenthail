@@ -175,10 +175,14 @@ pub fn go(s: &mut App, to: Screen) {
     landed(s);
 }
 
-fn left_overlays(s: &mut App) {
+pub fn close_palette(s: &mut App) {
     if crate::ui::window::shows_shared(s) {
         s.ov.jump = None;
     }
+}
+
+fn left_overlays(s: &mut App) {
+    close_palette(s);
     if s.windows.current() == crate::ui::window::MAIN {
         s.ov.notice = None;
     }

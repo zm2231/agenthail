@@ -154,7 +154,7 @@ pub fn can_stop(s: &App, id: &str) -> bool {
 }
 
 pub fn run(s: &mut App, command: Command, tx: &mut Tx) {
-    s.ov.jump = None;
+    crate::over::close_palette(s);
     match command {
         Command::NewSession => {
             let prefill = crate::ui::new_session::prefill_for(s);
