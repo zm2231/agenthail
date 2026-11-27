@@ -300,7 +300,7 @@ struct Pending {
     words: String,
     key: String,
     unconfirmed: bool,
-    since: time::OffsetDateTime,
+    before: usize,
 }
 
 pub struct State {
@@ -363,7 +363,7 @@ fn send(s: &mut App, id: &str, m: Move, words: &str) {
         Some(p) if p.words == words => p.key.clone(),
         _ => {
             let key = feed::catalog::request_key();
-            s.ov.work.keys.insert(slot, Pending { words: words.to_string(), key: key.clone(), unconfirmed: false, since: time::OffsetDateTime::now_utc() });
+            s.ov.work.keys.insert(slot, Pending { words: words.to_string(), key: key.clone(), unconfirmed: false, before: ledger::said(&w, words) });
             key
         }
     };
@@ -394,7 +394,7 @@ fn settle(s: &mut App) -> bool {
         .keys
         .iter()
         .filter(|((id, _), p)| p.unconfirmed && !st.acting.contains(id))
-        .filter_map(|((id, m), p)| d.work.get(id).filter(|w| ledger::landed(w, *m, &p.words, p.since)).map(|w| (id.clone(), *m, ledger::settled_note(w, *m))))
+        .filter_map(|((id, m), p)| d.work.get(id).filter(|w| ledger::landed(w, *m, &p.words, p.before)).map(|w| (id.clone(), *m, ledger::settled_note(w, *m))))
         .collect();
     for (id, m, note) in &landed {
         st.keys.remove(&(id.clone(), *m));

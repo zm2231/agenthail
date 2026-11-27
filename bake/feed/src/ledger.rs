@@ -1,8 +1,6 @@
 use serde_json::{Value, json};
 
-use time::{Duration, OffsetDateTime};
-
-use crate::catalog::{Client, RespondError, parse_time};
+use crate::catalog::{Client, RespondError};
 use crate::derive::Work;
 
 pub const PERSON: &str = "agenthail-person";
@@ -94,11 +92,13 @@ pub fn refusal(e: &RespondError) -> String {
 
 pub const CHANGED_WORDS: &str = "The last send isn't settled yet, so only the same words can go now. Change them once it settles.";
 
-pub fn landed(w: &Work, m: Move, words: &str, since: OffsetDateTime) -> bool {
+pub fn said(w: &Work, words: &str) -> usize {
+    w.timeline.iter().filter(|t| t.kind == "comment" && t.actor == PERSON && t.text.as_deref().map(str::trim) == Some(words.trim())).count()
+}
+
+pub fn landed(w: &Work, m: Move, words: &str, before: usize) -> bool {
     match m {
-        Move::Comment => w.timeline.iter().any(|t| {
-            t.kind == "comment" && t.actor == PERSON && t.text.as_deref().map(str::trim) == Some(words.trim()) && parse_time(&t.at).is_some_and(|at| at >= since - Duration::minutes(5))
-        }),
+        Move::Comment => said(w, words) > before,
         _ => !offered(w).contains(&m),
     }
 }
@@ -157,20 +157,21 @@ mod tests {
 
     #[test]
     fn an_unconfirmed_move_settles_once_the_item_shows_it() {
-        let since = parse_time("2026-11-27T06:00:00Z").unwrap();
-        let entry = |actor: &str, text: &str, at: &str| crate::derive::Entry { at: at.into(), actor: actor.into(), kind: "comment".into(), text: Some(text.into()), ..Default::default() };
+        let entry = |actor: &str, text: &str| crate::derive::Entry { actor: actor.into(), kind: "comment".into(), text: Some(text.into()), ..Default::default() };
         let mut w = work("open", None);
-        assert!(!landed(&w, Move::Comment, "looks right", since));
-        w.timeline.push(entry("worker", "looks right", "2026-11-27T06:00:01Z"));
-        w.timeline.push(entry(PERSON, "looks right", "2026-11-27T05:00:00Z"));
-        assert!(!landed(&w, Move::Comment, "looks right", since), "someone else's words, or the person's from long before, don't settle it");
-        w.timeline.push(entry(PERSON, "looks right ", "2026-11-27T05:59:00Z"));
-        assert!(landed(&w, Move::Comment, " looks right", since));
-        assert!(!landed(&work("open", None), Move::Claim, "", since));
+        w.timeline.push(entry(PERSON, "looks right"));
+        let before = said(&w, "looks right");
+        assert_eq!(before, 1);
+        assert!(!landed(&w, Move::Comment, "looks right", before), "the same words said before don't settle a new send");
+        w.timeline.push(entry("worker", "looks right"));
+        assert!(!landed(&w, Move::Comment, "looks right", before), "someone else's words don't settle it");
+        w.timeline.push(entry(PERSON, "looks right "));
+        assert!(landed(&w, Move::Comment, " looks right", before));
+        assert!(!landed(&work("open", None), Move::Claim, "", 0));
         let claimed = work("in_progress", Some(PERSON));
-        assert!(landed(&claimed, Move::Claim, "", since));
+        assert!(landed(&claimed, Move::Claim, "", 0));
         assert_eq!(settled_note(&claimed, Move::Claim), "Settled: it's Build now.");
-        assert!(landed(&work("parked", None), Move::Park, "later", since));
+        assert!(landed(&work("parked", None), Move::Park, "later", 0));
         assert_eq!(settled_note(&w, Move::Comment), "Comment added.");
     }
 
