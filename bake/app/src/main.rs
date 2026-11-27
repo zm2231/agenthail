@@ -754,7 +754,7 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let flying = s.in_flight.get(id).into_iter().flatten().any(|u| u.same(&message, &attachments));
     if flying || s.unsent.list(id).iter().any(|u| u.redelivering(now) && u.reuses_key() && u.same(&message, &attachments)) {
-        note(s, id, "That message is already on its way; it won't send twice.".into());
+        s.ov.notice = Some("That message is already on its way; it won't send twice.".into());
         return;
     }
     ui::paste::set_composer(s, "");
