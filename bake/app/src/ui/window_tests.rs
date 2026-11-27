@@ -668,6 +668,19 @@ fn a_rekey_carries_the_inspector_to_the_new_id() {
 }
 
 #[test]
+fn a_rekey_keeps_the_streamed_context_and_lands_late_reads_on_the_new_id() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    let usage: feed::settings::ContextUsage = serde_json::from_value(serde_json::json!({"usedTokens": 10, "contextWindow": 100})).unwrap();
+    crate::ui::inspect::streamed(&mut s, "a", feed::wire::Streamed::Context(Some(usage)));
+    let ticket = crate::ui::inspect::ticket(&mut s);
+    crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "a2".to_string())]));
+    assert!(s.menus.context.contains_key("a2") && !s.menus.context.contains_key("a"), "the streamed context moves with the session");
+    crate::ui::inspect::read(&mut s, "a", ticket, Ok(feed::inspect::Metadata::default()));
+    assert!(crate::ui::inspect::has_meta(&s, "a2") && !crate::ui::inspect::has_meta(&s, "a"), "a read asked under the old id lands on the new one");
+}
+
+#[test]
 fn a_read_landing_after_its_window_closed_is_not_kept() {
     let (mut s, w) = beside(false);
     s.screen = Screen::Session;

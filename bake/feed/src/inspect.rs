@@ -255,6 +255,15 @@ impl Reads {
         }
     }
 
+    pub fn rekey(&mut self, old: &str, new: &str) {
+        if let Some(v) = self.applied.remove(old) {
+            self.applied.insert(new.to_string(), v);
+        }
+        if let Some(v) = self.rereading.remove(old) {
+            self.rereading.insert(new.to_string(), v);
+        }
+    }
+
     pub fn keep_only(&mut self, shown: &[String]) {
         self.rereading.retain(|k, _| shown.contains(k));
     }

@@ -1278,13 +1278,13 @@ pub fn switch_composer(s: &mut App) {
     s.composer_for = target;
 }
 
-fn move_key<V>(map: &mut HashMap<String, V>, old: &str, new: &str) {
+pub(crate) fn move_key<V>(map: &mut HashMap<String, V>, old: &str, new: &str) {
     if let Some(v) = map.remove(old) {
         map.entry(new.to_string()).or_insert(v);
     }
 }
 
-fn move_member(set: &mut HashSet<String>, old: &str, new: &str) {
+pub(crate) fn move_member(set: &mut HashSet<String>, old: &str, new: &str) {
     if set.remove(old) {
         set.insert(new.to_string());
     }

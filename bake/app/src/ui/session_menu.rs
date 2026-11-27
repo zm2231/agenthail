@@ -193,6 +193,14 @@ pub(crate) fn agent_mode_changed(s: &mut App, id: &str) {
     }
 }
 
+pub(crate) fn rekey_context(s: &mut App, old: &str, new: &str) {
+    crate::move_key(&mut s.menus.context, old, new);
+    crate::move_key(&mut s.menus.context_error, old, new);
+    if let Some(seq) = s.menus.newest.remove(&(old.to_string(), "context")) {
+        s.menus.newest.insert((new.to_string(), "context"), seq);
+    }
+}
+
 pub(crate) fn streamed_context(s: &mut App, id: &str, usage: Option<ContextUsage>) {
     s.menus.context_error.remove(id);
     match usage {
@@ -516,6 +524,7 @@ fn settled(s: &mut App, done: Done) {
             s.menus.models_error.insert(id, error);
         }
         Done::Context(id, seq, result, ticket, metadata) => {
+            let id = feed::composer::current(&s.rekeyed, &id).to_string();
             super::inspect::read(s, &id, ticket, metadata);
             if !s.menus.fresh(&id, "context", seq) || super::inspect::is_streamed(s, &id, "context") {
                 return;

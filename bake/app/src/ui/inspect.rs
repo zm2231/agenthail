@@ -77,15 +77,18 @@ pub fn load(s: &mut App, id: &str) {
 
 pub(crate) fn rekey(s: &mut App, old: &str, new: &str) {
     s.inspect.overlay.rekey(old, new);
-    if let Some(meta) = s.inspect.meta.remove(old) {
-        s.inspect.meta.insert(new.to_string(), meta);
-    }
-    if s.inspect.expanded.remove(old) {
-        s.inspect.expanded.insert(new.to_string());
-    }
-    if s.inspect.missed.remove(old) {
-        s.inspect.missed.insert(new.to_string());
-    }
+    s.inspect.reads.rekey(old, new);
+    crate::move_key(&mut s.inspect.meta, old, new);
+    crate::move_key(&mut s.inspect.process, old, new);
+    crate::move_key(&mut s.inspect.goal_busy, old, new);
+    crate::move_key(&mut s.inspect.goal_note, old, new);
+    crate::move_member(&mut s.inspect.expanded, old, new);
+    crate::move_member(&mut s.inspect.missed, old, new);
+    super::session_menu::rekey_context(s, old, new);
+}
+
+fn current(s: &App, id: &str) -> String {
+    feed::composer::current(&s.rekeyed, id).to_string()
 }
 
 fn catch_up(s: &mut App) {
@@ -110,6 +113,7 @@ pub(crate) fn ticket(s: &mut App) -> u64 {
 }
 
 pub(crate) fn read(s: &mut App, id: &str, ticket: u64, result: Result<Metadata, String>) {
+    let id = &current(s, id);
     let held = super::window::selected_anywhere(s).iter().any(|x| x == id);
     if held && s.inspect.reads.accept(id, ticket) {
         let old = s.inspect.meta.get(id);
@@ -272,6 +276,7 @@ fn failure(error: &RespondError) -> String {
 fn settled(s: &mut App, done: Done) {
     match done {
         Done::Goal(id, act, result) => {
+            let id = current(s, &id);
             s.inspect.goal_busy.remove(&id);
             let note = match result {
                 Ok(true) => None,
@@ -284,6 +289,7 @@ fn settled(s: &mut App, done: Done) {
             metadata_moved(s, &id);
         }
         Done::Life(id, generation, act, tell, asker, result) => {
+            let id = current(s, &id);
             let to = super::window::asker_or_showing(s, asker, &id);
             let elsewhere = (to.is_none() || super::window::is_open(s, super::window::Kind::Logs)).then(|| session(s, &id).map(|x| x.title()).unwrap_or_default());
             let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.generation == generation) else { return };
@@ -329,6 +335,7 @@ fn settled(s: &mut App, done: Done) {
             }
         }
         Done::Status(id, generation, result) => {
+            let id = current(s, &id);
             let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.generation == generation) else { return };
             p.busy = None;
             match result {
