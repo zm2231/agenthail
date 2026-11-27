@@ -736,15 +736,12 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
             return;
         }
     };
-    let turn = match busy {
-        Some(Busy::Steer) => None,
-        _ => match ui::turn_options::options(s, id) {
-            Ok(turn) => turn,
-            Err(problem) => {
-                note(s, id, problem.into());
-                return;
-            }
-        },
+    let turn = match ui::turn_options::options(s, id) {
+        Ok(turn) => turn,
+        Err(problem) => {
+            note(s, id, problem.into());
+            return;
+        }
     };
     let refusal = session(s, id).and_then(|x| feed::attach::steer_refusal(&attachments, &x.capabilities)).or(turn.as_ref().map(|_| feed::composer::STEER_TURN_OPTIONS));
     let busy = match (busy.or_else(|| send_busy(s, id)), refusal) {
@@ -754,15 +751,15 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
         }
         _ => busy,
     };
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    if s.unsent.list(id).iter().any(|u| u.redelivering(now) && u.reuses_key() && u.same(&message, &attachments)) {
+        note(s, id, "That message is already being sent again; it won't send twice.".into());
+        return;
+    }
     ui::paste::set_composer(s, "");
     ui::attach::clear(s, id);
     ui::complete::sending(s, id);
     if waiting_earlier(s, id) {
-        let now = OffsetDateTime::now_utc().unix_timestamp();
-        if s.unsent.list(id).iter().any(|u| u.redelivering(now) && u.reuses_key() && u.same(&message, &attachments)) {
-            note(s, id, "That message is already being sent again; it won't send twice.".into());
-            return;
-        }
         let mut pending = fresh(s, id, message, attachments);
         pending.draft = Some(draft).filter(|d| *d != pending.text);
         pending.busy = busy.or(pending.busy);
@@ -831,7 +828,10 @@ fn retry_key(s: &mut App, id: &str, key: &str, auto: bool, tx: &mut Tx) {
         dispatch(s, id, unsent, true, tx);
     } else {
         let mut pending = Unsent { draft: unsent.draft.clone(), turn: unsent.turn.clone(), ..fresh(s, id, unsent.text, unsent.attachments) };
-        pending.busy = steered(unsent.busy, pending.busy);
+        pending.busy = if auto { unsent.busy } else { steered(unsent.busy, pending.busy) };
+        if pending.turn.is_some() && pending.busy == Some(Busy::Steer) {
+            pending.busy = Some(Busy::Queue);
+        }
         if auto {
             pending.sent_at = unsent.sent_at;
         }

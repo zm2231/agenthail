@@ -14,6 +14,7 @@ type Wrote = (u64, Result<View, Failure>);
 #[derive(Default)]
 struct State {
     due: Option<(f32, Instant)>,
+    writing: bool,
     tx: Option<Sender<Wrote>>,
     rx: Option<Receiver<Wrote>>,
 }
@@ -34,17 +35,21 @@ pub fn step(s: &mut App, steps: Option<i32>) {
 
 pub fn pump(s: &mut App) -> bool {
     let (due, wrote) = STATE.with_borrow_mut(|st| {
-        let due = st.due.filter(|(_, at)| Instant::now() >= *at).map(|(scale, _)| scale);
-        if due.is_some() {
-            st.due = None;
-        }
         if st.tx.is_none() {
             let (tx, rx) = channel();
             st.tx = Some(tx);
             st.rx = Some(rx);
         }
         let wrote: Vec<Wrote> = st.rx.as_ref().map(|rx| rx.try_iter().collect()).unwrap_or_default();
-        (due.map(|scale| (scale, st.tx.clone())), wrote)
+        if !wrote.is_empty() {
+            st.writing = false;
+        }
+        let due = st.due.filter(|(_, at)| !st.writing && Instant::now() >= *at).map(|(scale, _)| scale);
+        if due.is_some() {
+            st.due = None;
+            st.writing = true;
+        }
+        (due.zip(st.tx.clone()), wrote)
     });
     let changed = !wrote.is_empty();
     for (ticket, result) in wrote {
@@ -53,13 +58,16 @@ pub fn pump(s: &mut App) -> bool {
             Err(failure) => s.ov.notice = Some(format!("Couldn't save the text size: {}", failure.message)),
         }
     }
-    if let (Some((scale, Some(tx))), Some(client)) = (due, s.client.clone()) {
-        let device = crate::look::device();
-        let ticket = crate::look::ticket();
-        std::thread::spawn(move || {
-            let result = client.ui_change(fl::device_class(), &device, &Change::text_scale(scale, &device));
-            let _ = tx.send((ticket, result));
-        });
-    }
+    let Some((scale, tx)) = due else { return changed };
+    let Some(client) = s.client.clone() else {
+        STATE.with_borrow_mut(|st| st.writing = false);
+        return changed;
+    };
+    let device = crate::look::device();
+    let ticket = crate::look::ticket();
+    std::thread::spawn(move || {
+        let result = client.ui_change(fl::device_class(), &device, &Change::text_scale(scale, &device));
+        let _ = tx.send((ticket, result));
+    });
     changed
 }
