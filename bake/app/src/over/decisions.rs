@@ -110,7 +110,7 @@ fn line(s: &App, i: usize, d: &Decision, shift: bool) -> El {
     let head = row().w_full().gap(14.0).items_start().child(body).child(actions);
     let mut c = col().key(format!("decision-{i}")).w_full().gap(10.0).px(14.0).py(12.0).radius(10.0).child(head);
     if open && answers {
-        c = c.child(answer_panel(s, d, acting || unconfirmed));
+        c = c.child(answer_panel(s, d));
     } else if open && replies {
         c = c.child(reply_panel(s, i, d, &who));
     }
@@ -121,9 +121,10 @@ fn st_open(s: &App, d: &Decision) -> bool {
     s.ov.inbox.open.as_deref() == Some(d.id().as_str())
 }
 
-fn answer_panel(s: &App, d: &Decision, busy: bool) -> El {
+fn answer_panel(s: &App, d: &Decision) -> El {
     let open: Vec<&feed::catalog::OpenRequest> = d.requests.iter().collect();
     let Some(request) = waiting::shown_of(s, &d.session_id, &open) else { return el() };
+    let busy = inbox::held(s, d, &request.id);
     let who = s.ov.d.session(&d.session_id).map(|x| s.ov.d.title(x)).unwrap_or_else(|| "The agent".into());
     let head = row().w_full().gap(8.0).items_center().child(text(crate::over::plain(&waiting::request_heading(request, &who))).font(BODY_MED).color(strong()).wrap().grow(1.0).min_w(0.0)).children(waiting::switcher(&d.session_id, &open, &request.id));
     col().key(format!("decision-answer-{}", d.id())).w_full().gap(8.0).pl(4.0).child(head).child(waiting::request_body(s, request, Route::Decision(d.clone()), busy))

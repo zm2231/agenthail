@@ -221,6 +221,25 @@ impl OpenRequest {
         self.kind == "input" && self.elicitation.is_some()
     }
 
+    pub fn uses_pager(&self) -> bool {
+        self.is_compound() || self.kind == "ask" && self.questions.as_ref().is_some_and(|q| !q.is_empty())
+    }
+
+    pub fn takes_note(&self) -> bool {
+        self.kind == "ask" && !self.options_only
+    }
+
+    pub fn shown_detail(&self) -> Option<String> {
+        if !self.detail.trim().is_empty() {
+            return Some(self.detail.clone());
+        }
+        match &self.input {
+            None | Some(Value::Null) => None,
+            Some(Value::Object(fields)) if fields.is_empty() => None,
+            Some(input) => Some(serde_json::to_string_pretty(input).unwrap_or_default()),
+        }
+    }
+
     pub fn takes_reply(&self) -> bool {
         self.actions.iter().any(|a| a.id == REPLY)
     }
@@ -421,6 +440,25 @@ mod tests {
         let both = Decision { work_item: "W7".into(), covers: vec![Decision { work_item: "W7".into(), ..Default::default() }, Decision { work_item: "W9".into(), ..Default::default() }], ..Default::default() };
         assert_eq!(both.parked_reply("yes"), "Answer for W7, W9: yes");
         assert_eq!(Decision::default().parked_reply("hi"), "hi");
+    }
+
+    #[test]
+    fn an_approval_shows_its_detail_or_else_its_input() {
+        assert_eq!(request(json!({"id": "p", "detail": "npm publish", "input": {"command": "npm publish"}})).shown_detail().as_deref(), Some("npm publish"));
+        assert_eq!(request(json!({"id": "p", "input": {"command": "ls"}})).shown_detail().as_deref(), Some("{\n  \"command\": \"ls\"\n}"));
+        assert_eq!(request(json!({"id": "p", "input": {}})).shown_detail(), None);
+        assert_eq!(request(json!({"id": "p"})).shown_detail(), None);
+    }
+
+    #[test]
+    fn an_agents_ask_waits_for_send_and_takes_a_note() {
+        let ask = request(json!({"id": "a", "kind": "ask", "questions": [{"question": "q?", "options": [{"id": "o", "label": "o"}]}]}));
+        assert!(ask.uses_pager() && ask.takes_note());
+        let fixed = request(json!({"id": "a", "kind": "ask", "optionsOnly": true, "questions": [{"question": "q?", "options": [{"id": "o", "label": "o"}]}]}));
+        assert!(fixed.uses_pager() && !fixed.takes_note());
+        let tool = request(json!({"id": "q", "kind": "question", "questions": [{"question": "q?", "options": [{"id": "o", "label": "o"}]}]}));
+        assert!(!tool.uses_pager() && !tool.takes_note(), "a provider's single question answers on a tap");
+        assert!(!request(json!({"id": "a", "kind": "ask", "title": "t"})).uses_pager());
     }
 
     #[test]

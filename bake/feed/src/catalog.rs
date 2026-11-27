@@ -622,6 +622,12 @@ pub struct OpenRequest {
     pub replaced_by: String,
     #[serde(default)]
     pub options_only: bool,
+    #[serde(default)]
+    pub detail: String,
+    #[serde(default)]
+    pub blocked_path: String,
+    #[serde(default)]
+    pub input: Option<serde_json::Value>,
 }
 
 impl OpenRequest {

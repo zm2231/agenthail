@@ -90,7 +90,7 @@ pub(crate) fn switcher(owner: &str, open: &[&OpenRequest], shown: &str) -> Optio
             None => el.opacity(0.5),
         }
     };
-    Some(row().key("ask-switcher").gap(6.0).items_center().child(step(-1, &icons::CHEVRON_LEFT, "back")).child(text(format!("Ask {} of {}", at + 1, open.len())).font(META_BOLD).color(muted())).child(step(1, &icons::CHEVRON_RIGHT, "next")))
+    Some(row().key("ask-switcher").gap(6.0).items_center().child(step(-1, &icons::CHEVRON_LEFT, "back")).child(text(format!("{} of {}", at + 1, open.len())).font(META_BOLD).color(muted())).child(step(1, &icons::CHEVRON_RIGHT, "next")))
 }
 
 fn clock_line(s: &App, request: &OpenRequest) -> Option<El> {
@@ -119,10 +119,6 @@ pub(crate) fn has_settled(s: &App, x: &Session) -> bool {
 pub(crate) fn settled_request<'a>(s: &'a App, x: &Session) -> Option<&'a feed::catalog::OpenRequest> {
     let settled = s.requests.get(&x.id)?.iter().filter(|r| s.is_settled(&r.id));
     settled.max_by_key(|r| s.settled.get(&r.id).copied().flatten().map_or((1, None), |at| (0, Some(at))))
-}
-
-pub(crate) fn is_compound(request: &feed::catalog::OpenRequest) -> bool {
-    request.is_compound()
 }
 
 pub(crate) fn question_context(q: &feed::catalog::RequestQuestion) -> Option<El> {
@@ -224,7 +220,8 @@ pub(crate) fn compound_answer(s: &App, request: &OpenRequest) -> Option<Response
     let answered = |qi: usize, q: &feed::catalog::RequestQuestion| !typed_for(qi).is_empty() || q.options.iter().any(|o| picks.contains(&o.id));
     let mut each = questions.iter().enumerate();
     let ready = if request.kind == "ask" { each.any(|(qi, q)| answered(qi, q)) } else { !questions.is_empty() && each.all(|(qi, q)| answered(qi, q)) };
-    ready.then(|| Response::picks(chosen, answers))
+    let note = if request.takes_note() { s.typed.get(&format!("{}|note", request.id)).map(|t| t.text.trim().to_string()).unwrap_or_default() } else { String::new() };
+    ready.then(|| Response { message: note, ..Response::picks(chosen, answers) })
 }
 
 fn compound_el(s: &App, request: &OpenRequest, route: &Route, busy: bool) -> El {
@@ -261,6 +258,9 @@ fn compound_el(s: &App, request: &OpenRequest, route: &Route, busy: bool) -> El 
                 .children((!request.options_only).then(|| own_words(s, key.clone(), "Or answer in your own words", None))),
         );
     }
+    if request.takes_note() {
+        list = list.child(own_words(s, format!("{}|note", request.id), "Add a note for the agent (optional)", None));
+    }
     let response = if busy { None } else { compound_answer(s, request) };
     let submit = Button::new("Send answers").variant(if response.is_some() { ButtonVariant::Submit } else { ButtonVariant::Neutral }).icon(&icons::ARROW_UP).build(theme::kit()).key("pick-submit");
     let (id, route) = (request.id.clone(), route.clone());
@@ -284,7 +284,12 @@ pub(crate) fn request_heading(request: &OpenRequest, who: &str) -> String {
     if let Some(e) = request.elicitation.as_ref().filter(|_| request.is_input()) {
         return if e.message.trim().is_empty() { format!("{} asks for input", e.asker()) } else { e.message.clone() };
     }
-    if is_compound(request) {
+    if request.kind == "ask"
+        && let Some(title) = request.title.as_ref().filter(|t| !t.trim().is_empty())
+    {
+        return title.clone();
+    }
+    if request.uses_pager() {
         let count = request.questions.as_ref().map_or(0, Vec::len);
         return if count > 1 { format!("The agent has {count} questions") } else { "The agent has a question".to_string() };
     }
@@ -295,7 +300,7 @@ pub(crate) fn request_heading(request: &OpenRequest, who: &str) -> String {
 }
 
 fn single_question(request: &OpenRequest) -> Option<&feed::catalog::RequestQuestion> {
-    request.questions.as_ref().and_then(|q| q.first()).filter(|q| !q.multi_select && !q.options.is_empty() && !is_compound(request))
+    request.questions.as_ref().and_then(|q| q.first()).filter(|q| !q.multi_select && !q.options.is_empty() && !request.uses_pager())
 }
 
 fn request_choices(request: &OpenRequest) -> Vec<Choice> {
@@ -432,14 +437,18 @@ pub(crate) fn request_body(s: &App, request: &OpenRequest, route: Route, busy: b
     if let Some(e) = request.elicitation.as_ref().filter(|_| request.is_input()) {
         return c.child(input_el(s, request, e, &route, busy));
     }
-    if is_compound(request) {
+    if request.uses_pager() {
         return c.child(col().key("compound-scroll").w_full().max_h(420.0).scroll(ScrollSpec { stick_bottom: false }).child(compound_el(s, request, &route, busy)));
     }
     let question = single_question(request);
     if let Some(q) = question {
         c = c.children(question_context(q));
-    } else if let Some(reason) = request.reason.as_ref().filter(|r| !r.trim().is_empty()) {
-        c = c.child(text(reason.clone()).font(META).color(muted()).wrap());
+    } else {
+        c = c
+            .children(request.description.as_ref().filter(|d| !d.trim().is_empty() && request.title.is_some()).map(|d| text(d.clone()).font(META).color(muted()).wrap()))
+            .children(request.reason.as_ref().filter(|r| !r.trim().is_empty()).map(|r| text(r.clone()).font(META).color(muted()).wrap()))
+            .children(request.shown_detail().map(|d| col().key("request-detail").w_full().max_h(140.0).scroll(ScrollSpec { stick_bottom: false }).px(10.0).py(8.0).radius(8.0).fill(crate::theme::ink(0.06)).child(text(d).font(META.mono()).color(theme::text()).wrap())))
+            .children((!request.blocked_path.trim().is_empty()).then(|| text(request.blocked_path.clone()).font(META.mono()).color(muted()).wrap()));
     }
     let replying = s.asks.replying.contains(&request.id);
     c = c.child(col().w_full().gap(6.0).pt(4.0).children(request_choices(request).into_iter().enumerate().map(|(i, choice)| choice_el(i, choice, busy, &route))));
@@ -532,14 +541,14 @@ pub(crate) fn choice_el(i: usize, c: Choice, busy: bool, route: &Route) -> El {
 fn pager_target(s: &App) -> Option<(Route, OpenRequest, bool)> {
     let (route, request, busy) = match &s.screen {
         Screen::Session => {
-            let x = session(s, s.selected.as_deref()?)?;
+            let x = session(s, s.selected.as_deref()?).filter(|x| !x.archived)?;
             (Route::Session, open_request(s, x)?.clone(), s.answering.is_some())
         }
         Screen::Now => {
             let d = crate::over::inbox::opened(s)?;
             let open: Vec<&OpenRequest> = d.requests.iter().collect();
             let request = shown_of(s, &d.session_id, &open)?.clone();
-            let busy = s.ov.inbox.acting.contains(&d.id());
+            let busy = crate::over::inbox::held(s, &d, &request.id);
             (Route::Decision(d), request, busy)
         }
         _ => return None,
@@ -567,9 +576,12 @@ pub(crate) fn pager_key(s: &mut App, ev: &KeyEvent) -> bool {
     let questions = request.questions.clone().unwrap_or_default();
     let step = s.asks.step.get(&request.id).copied().unwrap_or(0);
     let mut picks = s.picks.get(&request.id).cloned().unwrap_or_default();
-    let paged = feed::request::page(&questions, step, key, &mut picks, !is_compound(&request));
-    if let PagerKey::Pick(_) = key {
-        s.typed.remove(&format!("{}|{}", request.id, step.min(questions.len().saturating_sub(1))));
+    let paged = feed::request::page(&questions, step, key, &mut picks, !request.uses_pager());
+    let at = step.min(questions.len().saturating_sub(1));
+    if let PagerKey::Pick(n) = key
+        && questions.get(at).is_some_and(|q| n <= q.options.len())
+    {
+        s.typed.remove(&format!("{}|{at}", request.id));
     }
     s.picks.insert(request.id.clone(), picks);
     s.asks.step.insert(request.id.clone(), paged.step);

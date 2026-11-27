@@ -250,7 +250,15 @@ pub fn accept(s: &mut crate::App, d: &Decision) {
     });
 }
 
+pub fn held(s: &crate::App, d: &Decision, request: &str) -> bool {
+    let st = &s.ov.inbox;
+    st.acting.contains(&d.id()) || st.unconfirmed.contains(&d.hold_key()) || st.unconfirmed.contains(&request_hold(&d.session_id, request))
+}
+
 pub fn answer(s: &mut crate::App, d: &Decision, request: &str, response: Response) {
+    if held(s, d, request) {
+        return;
+    }
     let request = request.to_string();
     let outcome = if response.choices.is_empty() { "Answered in your own words" } else { "Answered" };
     act(s, d, outcome, move |client, d| client.answer(&d.session_id, &request, &response).map_err(|e| (e, request_hold(&d.session_id, &request))));
