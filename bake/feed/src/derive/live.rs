@@ -492,6 +492,7 @@ impl Overview {
         }
         let listed: HashSet<&str> = self.base.projects.iter().filter(|p| !p.archived).map(|p| p.id.as_str()).collect();
         self.ledgers.retain(|k, _| listed.contains(k.as_str()));
+        self.covered.retain(|k| listed.contains(k.as_str()));
         self.failed.retain(|k| listed.contains(k.as_str()));
         self.ledger_at.retain(|k, _| listed.contains(k.as_str()));
     }

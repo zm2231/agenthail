@@ -752,3 +752,21 @@ fn a_revived_project_stays_shown_whatever_the_row_order_or_an_older_overview_say
     assert!(ov.world(&[]).projects.iter().any(|p| p.key == "old"), "an overview read before the revival doesn't hide it again");
     assert_eq!(ov.missing_ledgers().len(), 1);
 }
+
+#[test]
+fn a_project_archived_after_its_work_was_read_reads_it_again_when_revived() {
+    let mut ov = Overview::default();
+    let row = |archived: bool, last: &str| {
+        let mut x = session("s", "old", last, "idle");
+        x.project.as_mut().unwrap().archived = Some(archived);
+        x
+    };
+    ov.refresh(fetched("2026-11-24T12:00:00Z", vec![row(false, "2026-11-24T11:00:00Z")], vec![("old", Ok(vec![work("old-W1", "open")]))]));
+    assert!(ov.holds_ledger_of("s"));
+    let mut archived = fetched("2026-11-24T12:01:00Z", vec![row(true, "2026-11-24T11:00:00Z")], vec![]);
+    archived.recorded.projects.iter_mut().filter(|p| p.id == "old").for_each(|p| p.archived = true);
+    ov.refresh(archived);
+    assert!(!ov.holds_ledger_of("s"), "an archived project's work is let go");
+    assert!(ov.take_sessions("2026-11-24T12:02:00Z", "", 0, vec![row(false, "2026-11-24T12:01:59Z")]));
+    assert_eq!(ov.missing_ledgers().into_iter().collect::<Vec<_>>(), ["old"], "revived, its work is read again");
+}
