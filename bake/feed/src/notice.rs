@@ -1,3 +1,6 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex, MutexGuard};
+
 use serde_json::{Value, json};
 
 use crate::catalog::Session;
@@ -17,6 +20,22 @@ pub fn turn_notice(x: &Session) -> String {
         text.push_str(" Open in Agenthail also makes it your own turn.");
     }
     text
+}
+
+static CHANGES: AtomicU64 = AtomicU64::new(0);
+
+pub fn shared() -> MutexGuard<'static, TurnNotice> {
+    static SHARED: LazyLock<Mutex<TurnNotice>> = LazyLock::new(Mutex::default);
+    SHARED.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+pub fn changes() -> u64 {
+    CHANGES.load(Ordering::Relaxed)
+}
+
+pub fn change(f: impl FnOnce(&mut TurnNotice)) {
+    f(&mut shared());
+    CHANGES.fetch_add(1, Ordering::Relaxed);
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -94,6 +113,14 @@ mod tests {
         assert_eq!(pref.dismissed, vec!["a".to_string()], "hiding everywhere keeps the per-session list");
         pref.set_shown(true);
         assert!(pref.shows("a") && pref.dismissed.is_empty());
+    }
+
+    #[test]
+    fn a_change_from_any_window_is_counted_and_shared() {
+        let before = changes();
+        change(|n| n.set_shown(true));
+        assert!(changes() > before);
+        assert!(!shared().hidden);
     }
 
     #[test]

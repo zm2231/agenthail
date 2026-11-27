@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 
 use feed::catalog::{LeadReplacement, Session};
-use feed::notice::TurnNotice;
 use rune::{Color, El, col, icon, row, text};
 use rune_kit::{Button, ButtonVariant};
 
@@ -14,7 +13,14 @@ pub struct Notices {
     acking: HashSet<i64>,
     acked: HashSet<i64>,
     error: Option<String>,
-    pub turn: TurnNotice,
+    seen: u64,
+}
+
+pub fn poll(s: &mut App) -> bool {
+    let now = feed::notice::changes();
+    let changed = s.notices.seen != now;
+    s.notices.seen = now;
+    changed
 }
 
 pub enum Done {
@@ -81,9 +87,9 @@ fn banner(r: &LeadReplacement) -> El {
         .child(ack)
 }
 
-fn turn(s: &App, x: &Session) -> Option<El> {
+fn turn(x: &Session) -> Option<El> {
     let notice = feed::notice::turn_notice(x);
-    if notice.is_empty() || !s.notices.turn.shows(&x.id) {
+    if notice.is_empty() || !feed::notice::shared().shows(&x.id) {
         return None;
     }
     let id = x.id.clone();
@@ -92,9 +98,10 @@ fn turn(s: &App, x: &Session) -> Option<El> {
         .color(accent())
         .key("turn-notice-hide")
         .role("button")
-        .help("Hide this note for every terminal session.")
+        .help("Hide this note for every terminal session. Turn it back on in Settings > General.")
         .on_press(|s: &mut App| {
-            s.notices.turn.set_shown(false);
+            feed::notice::change(|n| n.set_shown(false));
+            crate::settings::redraw();
             crate::over::layout::save(s);
         });
     let close = col()
@@ -107,7 +114,8 @@ fn turn(s: &App, x: &Session) -> Option<El> {
         .label("Hide for this session")
         .help("Hide for this session")
         .on_press(move |s: &mut App| {
-            s.notices.turn.dismiss(&id);
+            feed::notice::change(|n| n.dismiss(&id));
+            crate::settings::redraw();
             crate::over::layout::save(s);
         })
         .child(icon(&icons::CLOSE, 11.0).color(faint()));
@@ -117,7 +125,7 @@ fn turn(s: &App, x: &Session) -> Option<El> {
 pub fn above(s: &App, x: &Session) -> Option<El> {
     let banners: Vec<El> = s.notices.replacements.iter().filter(|r| r.session_id == x.id && !s.notices.acking.contains(&r.id)).map(banner).collect();
     let error = s.notices.error.as_ref().filter(|_| !banners.is_empty()).map(|e| text(e.clone()).font(META).color(attention()).wrap().w_full());
-    let turn = turn(s, x);
+    let turn = turn(x);
     if banners.is_empty() && turn.is_none() {
         return None;
     }
