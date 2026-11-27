@@ -202,15 +202,7 @@ fn first_line(text: &str, max: usize) -> String {
 fn markdown(body: &str, k: &Kit) -> El {
     let p = crate::theme::paint();
     let kit = Kit { roles: k.roles, ..Kit::neutral(p.dark).with_text_scale(k.text_scale) };
-    let base = rune::TextStyle { line_height: kit.text_size(22.4), ..kit.ty.body };
-    let heading = |size: f32, line: f32| rune::TextStyle { size: kit.text_size(size), weight: 600.0, line_height: kit.text_size(line), ..base };
-    let style = MarkdownStyle::from_kit(&kit)
-        .text(p.text)
-        .muted(p.muted)
-        .code_block_text(kit.roles.code)
-        .heading_font(1, heading(17.0, 24.0))
-        .heading_font(2, heading(15.0, 24.0))
-        .heading_font(3, heading(13.0, 20.0));
+    let style = MarkdownStyle::from_kit(&kit).text(p.text).muted(p.muted).code_block_text(kit.roles.code);
     Markdown::new(body.to_string()).selectable(true).render(&style).selection_group(false)
 }
 

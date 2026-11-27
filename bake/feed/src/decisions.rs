@@ -225,12 +225,18 @@ impl Decision {
     }
 }
 
-fn older(error: &anyhow::Error) -> bool {
-    error.to_string().contains("404")
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Unread {
+    Older,
+    Failed,
 }
 
-fn unread(name: &str, error: &anyhow::Error) -> String {
-    if older(error) {
+fn older(status: u16, code: &str) -> bool {
+    status == 404 && matches!(code, "unknown_route" | "")
+}
+
+fn unread(name: &str, error: Unread) -> String {
+    if error == Unread::Older {
         format!("{name} runs an older Agenthail without the Inbox.")
     } else {
         format!("{name}'s decisions couldn't be read, so they aren't shown.")
@@ -246,7 +252,7 @@ pub fn request_hold(session: &str, request: &str) -> String {
 }
 
 pub fn gone(error: &RespondError) -> bool {
-    error.code == "stale" || error.code == "not_found" || error.message.contains("404")
+    error.code == "stale" || error.code == "not_found" || (error.status == 404 && error.code.is_empty())
 }
 
 pub fn qualify(id: &str, host: &str, own: &str) -> String {
@@ -332,12 +338,13 @@ pub fn restored_history(value: &serde_json::Value) -> Vec<Handled> {
 }
 
 impl Client {
-    pub fn decisions(&self, host: Option<&str>) -> anyhow::Result<Page> {
+    pub fn decisions(&self, host: Option<&str>) -> Result<Page, Unread> {
         let path = match host {
             Some(h) => format!("/api/v1/decisions?host={}", enc(h)),
             None => "/api/v1/decisions".into(),
         };
-        Ok(serde_json::from_value(self.get_json(&path)?)?)
+        let value = self.get_coded(&path).map_err(|(status, code)| if older(status, &code) { Unread::Older } else { Unread::Failed })?;
+        serde_json::from_value(value).map_err(|_| Unread::Failed)
     }
 
     pub fn inbox(&self) -> Inbox {
@@ -345,7 +352,7 @@ impl Client {
         let (local, hosts) = std::thread::scope(|scope| {
             let local = scope.spawn(|| quick.decisions(None));
             let hosts = quick.get_json("/api/v1/hosts");
-            (local.join().unwrap_or_else(|_| Err(anyhow::anyhow!("the fetch stopped"))), hosts)
+            (local.join().unwrap_or(Err(Unread::Failed)), hosts)
         });
         let mut inbox = Inbox::default();
         let listed = hosts.is_ok();
@@ -354,8 +361,8 @@ impl Client {
         match local {
             Ok(page) => inbox.add(page, "", "", &own),
             Err(e) => {
-                inbox.failed |= !older(&e);
-                inbox.notes.push(unread("This computer", &e));
+                inbox.failed |= e == Unread::Failed;
+                inbox.notes.push(unread("This computer", e));
             }
         }
         inbox.failed |= !listed;
@@ -371,16 +378,16 @@ impl Client {
                 _ => inbox.notes.push(format!("{name} isn't answering, so its decisions aren't shown.")),
             }
         }
-        let pages: Vec<(String, String, anyhow::Result<Page>)> = std::thread::scope(|scope| {
+        let pages: Vec<(String, String, Result<Page, Unread>)> = std::thread::scope(|scope| {
             let jobs: Vec<_> = paired.iter().map(|(id, name)| (id.clone(), name.clone(), scope.spawn(|| quick.decisions(Some(id))))).collect();
-            jobs.into_iter().map(|(id, name, job)| (id, name, job.join().unwrap_or_else(|_| Err(anyhow::anyhow!("the fetch stopped"))))).collect()
+            jobs.into_iter().map(|(id, name, job)| (id, name, job.join().unwrap_or(Err(Unread::Failed)))).collect()
         });
         for (id, name, page) in pages {
             match page {
                 Ok(page) => inbox.add(page, &id, &name, &own),
                 Err(e) => {
-                    inbox.failed |= !older(&e);
-                    inbox.notes.push(unread(&name, &e));
+                    inbox.failed |= e == Unread::Failed;
+                    inbox.notes.push(unread(&name, e));
                 }
             }
         }
@@ -501,8 +508,15 @@ mod tests {
     }
 
     fn serve(routes: Vec<(&'static str, u16, &'static str)>) -> String {
+        serve_on(std::net::TcpListener::bind("127.0.0.1:0").unwrap(), routes)
+    }
+
+    fn listener_on_a_404_port() -> std::net::TcpListener {
+        (1024..=u16::MAX).filter(|port| port.to_string().contains("404")).find_map(|port| std::net::TcpListener::bind(("127.0.0.1", port)).ok()).expect("a free port with 404 in it")
+    }
+
+    fn serve_on(listener: std::net::TcpListener, routes: Vec<(&'static str, u16, &'static str)>) -> String {
         use std::io::{BufRead, BufReader, Write};
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         std::thread::spawn(move || {
             for stream in listener.incoming() {
@@ -520,8 +534,8 @@ mod tests {
                     }
                 }
                 let path = line.split_whitespace().nth(1).unwrap_or_default().to_string();
-                let (status, body) = routes.iter().find(|r| r.0 == path).map(|r| (r.1, r.2)).unwrap_or((404, r#"{"error":{"code":"not_found","message":"no"}}"#));
-                if path.ends_with("host=slow") {
+                let (status, body) = routes.iter().find(|r| r.0 == path).map(|r| (r.1, r.2)).unwrap_or((404, r#"{"error":{"code":"unknown_route","message":"no"}}"#));
+                if path.contains("host=slow") {
                     std::thread::sleep(std::time::Duration::from_secs(9));
                 }
                 let mut stream = stream;
@@ -557,6 +571,7 @@ mod tests {
         assert_eq!(inbox.lead_handling[0].session_id, "h2::crew");
         assert_eq!(inbox.lead_handling[0].held_by, "h2::lead");
         assert_eq!(inbox.notes, ["off isn't answering, so its decisions aren't shown.", "legacy runs an older Agenthail without the Inbox.", "old runs an older Agenthail without the Inbox."]);
+        assert!(!inbox.failed, "an older or unanswering computer isn't read again at once");
     }
 
     #[test]
@@ -595,19 +610,57 @@ mod tests {
 
     #[test]
     fn other_computers_still_show_when_this_one_fails_or_one_stalls() {
-        let base = serve(vec![
+        let base = serve_on(listener_on_a_404_port(), vec![
             ("/api/v1/decisions", 500, r#"{"error":{"code":"internal_error","message":"boom"}}"#),
-            ("/api/v1/hosts", 200, r#"{"host":{"id":"h1","name":"studio"},"hosts":[{"id":"h2","name":"forge","state":"connected"},{"id":"slow","name":"stuck","state":"connected"}]}"#),
+            ("/api/v1/hosts", 200, r#"{"host":{"id":"h1","name":"studio"},"hosts":[{"id":"h2","name":"forge","state":"connected"},{"id":"slow404","name":"stuck","state":"connected"},{"id":"h404","name":"unpaired","state":"connected"}]}"#),
             ("/api/v1/decisions?host=h2", 200, r#"{"decisions":[{"group":"waiting","sessionId":"remote"}],"leadHandling":[]}"#),
-            ("/api/v1/decisions?host=slow", 200, r#"{"decisions":[{"group":"waiting","sessionId":"late"}],"leadHandling":[]}"#),
+            ("/api/v1/decisions?host=slow404", 200, r#"{"decisions":[{"group":"waiting","sessionId":"late"}],"leadHandling":[]}"#),
+            ("/api/v1/decisions?host=h404", 404, r#"{"error":{"code":"host_not_found","message":"No paired host is named \"h404\"."}}"#),
         ]);
+        assert!(base.rsplit(':').next().unwrap().contains("404"), "every reply names a port with 404 in it, which is no version");
         let started = std::time::Instant::now();
         let inbox = Client::new(&base, "t").inbox();
         assert!(started.elapsed() < std::time::Duration::from_secs(8));
         let ids: Vec<&str> = inbox.decisions.iter().map(|d| d.session_id.as_str()).collect();
         assert_eq!(ids, ["h2::remote"]);
-        assert_eq!(inbox.notes, ["This computer's decisions couldn't be read, so they aren't shown.", "stuck's decisions couldn't be read, so they aren't shown."]);
+        assert_eq!(
+            inbox.notes,
+            ["This computer's decisions couldn't be read, so they aren't shown.", "stuck's decisions couldn't be read, so they aren't shown.", "unpaired's decisions couldn't be read, so they aren't shown."]
+        );
         assert!(inbox.failed, "a failed read is tried again");
+    }
+
+    #[test]
+    fn only_a_missing_route_reads_as_an_older_agenthail() {
+        let base = serve_on(listener_on_a_404_port(), vec![
+            ("/api/v1/decisions", 200, r#"{"decisions":[],"leadHandling":[]}"#),
+            ("/api/v1/decisions?host=plain404", 404, "404 page not found"),
+            ("/api/v1/decisions?host=gone404", 404, r#"{"error":{"code":"host_not_found","message":"No paired host is named \"gone404\"."}}"#),
+            ("/api/v1/decisions?host=down404", 502, r#"{"error":{"code":"bad_gateway","message":"404 bytes lost"}}"#),
+            ("/api/v1/decisions?host=bad404", 200, "[404]"),
+            ("/api/v1/decisions?host=torn404", 200, "{404"),
+        ]);
+        let client = Client::new(&base, "t");
+        assert!(client.decisions(None).is_ok());
+        let read = |host: &str| client.decisions(Some(host)).err();
+        assert_eq!(read("old404"), Some(Unread::Older), "a daemon without the route");
+        assert_eq!(read("plain404"), Some(Unread::Older), "a 404 with no error code");
+        assert_eq!(read("gone404"), Some(Unread::Failed), "a computer unpaired since the list");
+        assert_eq!(read("down404"), Some(Unread::Failed));
+        assert_eq!(read("bad404"), Some(Unread::Failed), "a reply that isn't a page");
+        assert_eq!(read("torn404"), Some(Unread::Failed), "a reply that isn't JSON");
+        assert_eq!(Client::new("http://127.0.0.1:0/404", "t").decisions(None).err(), Some(Unread::Failed), "nothing listening");
+    }
+
+    #[test]
+    fn a_dismissal_is_gone_only_when_the_daemon_says_so() {
+        let error = |status: u16, code: &str, message: &str| RespondError { message: message.into(), code: code.into(), maybe_delivered: false, reply: serde_json::Value::Null, answered: true, status };
+        assert!(gone(&error(404, "", "status code 404")));
+        assert!(gone(&error(409, "stale", "p-W1 moved on")));
+        assert!(gone(&error(404, "not_found", "No ask p-W2.")));
+        assert!(!gone(&error(409, "conflict", "p-W404 isn't parked any more")));
+        assert!(!gone(&error(0, "", "http://127.0.0.1:40404/api/v1/actions: Connection Failed: timed out")));
+        assert!(!gone(&error(404, "host_not_found", "No paired host is named \"forge\".")));
     }
 
     #[test]
