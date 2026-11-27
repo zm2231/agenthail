@@ -1,4 +1,5 @@
 mod channels;
+mod queue;
 mod relays;
 
 use std::collections::HashMap;
@@ -286,5 +287,5 @@ pub fn page(s: &Prefs, layer: &mut Vec<El>) -> El {
         out = out.child(parts::failure(s, &read_only(s)));
     }
     let off = !writable || busy(s);
-    out.child(relays::section(s, h, off, layer)).child(channels::section(s, h, off, layer))
+    out.child(queue::waiting(s, h, off)).child(queue::recent(h)).child(relays::section(s, h, off, layer)).child(channels::section(s, h, off, layer))
 }

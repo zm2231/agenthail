@@ -56,6 +56,7 @@ pub(crate) fn priority(p: &str) -> El {
 
 pub(crate) fn rail(s: &App, x: &Session) -> El {
     let mut parts: Vec<El> = Vec::new();
+    parts.extend(super::ready::led_by(s, &x.id).and_then(|p| super::ready::link(s, &p.key)).map(|link| row().w_full().pt(12.0).items_center().child(label("Lead")).child(spacer()).child(link)));
     if let Some(work) = x.primary_work(s.work_pick.get(&x.id).map(String::as_str)) {
         let item = s.items.get(&work.item_id);
         let state = item.map(|i| i.state.clone()).unwrap_or_else(|| work.state.clone());
@@ -173,6 +174,7 @@ pub(crate) fn rail(s: &App, x: &Session) -> El {
     parts.extend(super::inspect::above(s, x));
     parts.extend(super::subagents::section(s, x));
     parts.extend(super::inspect::below(s, x));
+    parts.extend(super::delivery::section(s, x));
     let facts: [(&'static Icon, &str, String); 4] = [
         (&icons::SPARKLES, "Agent", x.surface.clone()),
         (&icons::SERVER, "Host", x.host.name.clone()),
