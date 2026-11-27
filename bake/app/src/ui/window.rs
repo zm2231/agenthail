@@ -1,9 +1,10 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem::swap;
 
 use feed::composer::Cover;
 use feed::windows::{Frame, Saved};
-use rune::TextEdit;
+use rune::{AppSpec, Chrome, TextEdit, Tx, WindowOptions, WindowPlacement, WindowSpec};
 use rune_kit::diff::DiffState;
 
 use crate::{App, Screen, Tab};
@@ -91,6 +92,19 @@ pub struct Opened {
     pub id: Id,
     pub session: String,
     pub frame: Option<Frame>,
+    title: String,
+    handle: Option<rune::WindowHandle>,
+}
+
+impl Opened {
+    fn frame(&self) -> Option<Frame> {
+        self.handle.as_ref().and_then(rune::WindowHandle::placement).map(placement_frame).or(self.frame)
+    }
+}
+
+fn placement_frame(p: WindowPlacement) -> Frame {
+    let ((x, y), (width, height)) = p.restore.filter(|_| p.maximized || p.full_screen).unwrap_or((p.position, p.content_size));
+    Frame { x, y, width, height, scale: p.scale, maximized: p.maximized, full_screen: p.full_screen }
 }
 
 #[derive(Default)]
@@ -99,7 +113,7 @@ pub struct Windows {
     stash: HashMap<Id, Local>,
     pub open: Vec<Opened>,
     next: Id,
-    to_show: Vec<Id>,
+    to_show: Vec<(Id, bool)>,
     look: u64,
 }
 
@@ -121,7 +135,7 @@ impl Windows {
     }
 
     pub fn saved(&self) -> Vec<Saved> {
-        self.open.iter().map(|w| Saved { session: w.session.clone(), frame: w.frame }).collect()
+        self.open.iter().map(|w| Saved { session: w.session.clone(), frame: w.frame() }).collect()
     }
 }
 
@@ -187,7 +201,7 @@ pub fn open(s: &mut App, session: &str) -> Id {
     }
     s.windows.next += 1;
     let id = s.windows.next;
-    s.windows.open.push(Opened { id, session: session.clone(), frame: None });
+    s.windows.open.push(Opened { id, session: session.clone(), frame: None, title: String::new(), handle: None });
     s.windows.stash.insert(id, Local::blank(id, Some(session.clone()), Screen::Session));
     let back = s.windows.current;
     enter(s, id);
@@ -198,13 +212,18 @@ pub fn open(s: &mut App, session: &str) -> Id {
 
 pub fn show(s: &mut App, session: &str) -> Id {
     let id = open(s, session);
-    if !s.windows.to_show.contains(&id) {
-        s.windows.to_show.push(id);
-    }
+    queue(s, id, false);
     id
 }
 
-pub fn take_to_show(s: &mut App) -> Vec<Id> {
+fn queue(s: &mut App, id: Id, restored: bool) {
+    let shown = s.windows.open.iter().any(|o| o.id == id && o.handle.is_some());
+    if !shown && !s.windows.to_show.iter().any(|(w, _)| *w == id) {
+        s.windows.to_show.push((id, restored));
+    }
+}
+
+pub fn take_to_show(s: &mut App) -> Vec<(Id, bool)> {
     std::mem::take(&mut s.windows.to_show)
 }
 
@@ -216,17 +235,9 @@ pub fn restore(s: &mut App, saved: &[Saved]) -> Vec<Id> {
             o.frame = w.frame;
         }
         ids.push(id);
-        if !s.windows.to_show.contains(&id) {
-            s.windows.to_show.push(id);
-        }
+        queue(s, id, true);
     }
     ids
-}
-
-pub fn placed(s: &mut App, id: Id, frame: Frame) {
-    if let Some(o) = s.windows.open.iter_mut().find(|o| o.id == id) {
-        o.frame = Some(frame);
-    }
 }
 
 pub fn close(s: &mut App, id: Id) {
@@ -240,7 +251,76 @@ pub fn close(s: &mut App, id: Id) {
     enter(s, back);
     s.windows.stash.remove(&id);
     s.windows.open.retain(|o| o.id != id);
-    s.windows.to_show.retain(|o| *o != id);
+    s.windows.to_show.retain(|(o, _)| *o != id);
+}
+
+fn closed(s: &mut App, tx: &mut Tx) {
+    if rune::quitting() {
+        return;
+    }
+    if let Some(id) = tx.window().map(id_of) {
+        close(s, id);
+    }
+}
+
+thread_local! {
+    static SHARED: RefCell<Option<rune::SharedState<App>>> = const { RefCell::new(None) };
+}
+
+pub fn share(app: App) -> rune::SharedState<App> {
+    let shared = rune::SharedState::with_placeholder(app, crate::placeholder).on_enter(on_enter).on_leave(on_leave);
+    SHARED.with_borrow_mut(|s| *s = Some(shared.clone()));
+    shared
+}
+
+fn spec() -> AppSpec<App> {
+    AppSpec {
+        poll: Some(poll),
+        on_key: Some(crate::on_key),
+        fonts: rune_theme_opencode::FONTS,
+        families: rune_theme_opencode::FAMILIES,
+        min_size: Some((620.0, 480.0)),
+        ..AppSpec::new("Session", (900.0, 820.0), crate::placeholder, super::session_window)
+    }
+}
+
+pub fn open_shown(s: &mut App) {
+    let Some(shared) = SHARED.with_borrow(Clone::clone) else { return };
+    for (id, restored) in take_to_show(s) {
+        let Some(o) = s.windows.open.iter().find(|o| o.id == id) else { continue };
+        let mut options = WindowOptions { transparent: true, resizable: true, visible: true, ..Default::default() };
+        let mut spec = WindowSpec::new(key(id), spec());
+        if let Some(f) = o.frame {
+            options.position = Some((f.x, f.y));
+            options.physical_size = Some((f.width, f.height));
+            spec = spec.maximized(f.maximized).full_screen(f.full_screen);
+        }
+        spec = spec
+            .options(options)
+            .shared(&shared)
+            .chrome(Chrome { full_size_content: true, traffic_lights: Some((20.0, 20.0)), drag_regions: true })
+            .srgb_blend(true)
+            .on_close(closed)
+            .on_quit(crate::on_quit)
+            .map_app(crate::menubar::with_menus);
+        if restored {
+            spec = spec.inactive();
+        }
+        let handle = rune::open_window(spec);
+        if let Some(o) = s.windows.open.iter_mut().find(|o| o.id == id) {
+            o.handle = Some(handle);
+        }
+    }
+}
+
+fn retitle(s: &mut App, tx: &mut Tx) {
+    let id = s.windows.current;
+    let Some(session) = s.windows.session(id) else { return };
+    let title = crate::session(s, session).map(|x| x.title()).unwrap_or_else(|| "Session".into());
+    if let Some(o) = s.windows.open.iter_mut().find(|o| o.id == id && o.title != title) {
+        o.title = title.clone();
+        tx.set_title(title);
+    }
 }
 
 pub fn rekeyed(s: &mut App, old: &str, new: &str) {
@@ -293,6 +373,7 @@ pub fn poll(s: &mut App, _: f64, tx: &mut rune::Tx) -> bool {
         changed = true;
     }
     changed |= crate::look::poll_seen(&mut s.windows.look, tx);
+    retitle(s, tx);
     crate::switch_composer(s);
     changed |= super::complete::pump(s);
     keep_draft(s);

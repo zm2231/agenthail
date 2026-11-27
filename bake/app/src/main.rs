@@ -392,6 +392,10 @@ fn empty(live: Overview, persist: bool) -> App {
     }
 }
 
+fn placeholder() -> App {
+    empty(Overview::default(), false)
+}
+
 fn init() -> App {
     let fixture = arg("--fixture");
     let fixtures = arg("--fixtures").or_else(|| std::env::var("AGENTHAIL_FIXTURES").ok());
@@ -1577,6 +1581,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     ui::paste::settle(s);
     changed |= ui::notice::poll(s);
     changed |= ui::tabs::expire(s);
+    ui::window::open_shown(s);
     switch_composer(s);
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &ui::paste::draft(s));
@@ -1629,7 +1634,8 @@ fn main() {
     if !rune::single_instance(link::INSTANCE) || !instance::only_copy(link::LOCK) {
         return;
     }
-    let mut app = rune::App::new(AppSpec::<App> {
+    let shared = ui::window::share(init());
+    let main = rune::App::new(AppSpec::<App> {
         poll: Some(poll),
         on_key: Some(on_key),
         setup: Some(ui::attach::setup),
@@ -1637,7 +1643,10 @@ fn main() {
         families: rune_theme_opencode::FAMILIES,
         min_size: Some((1100.0, 700.0)),
         ..AppSpec::new("Agenthail", (1440.0, 900.0), init, ui::view)
-    })
+    });
+    let mut app = rune::WindowSpec::from_app("main", main)
+        .shared(&shared)
+        .app
         .chrome(Chrome { full_size_content: true, traffic_lights: Some((20.0, 20.0)), drag_regions: true })
         .window_options(WindowOptions { transparent: true, resizable: true, visible: true, ..Default::default() })
         .srgb_blend(true)

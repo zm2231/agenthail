@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use feed::derive::live::Overview;
 use feed::windows::{Frame, Saved};
+use rune::WindowPlacement;
 
 use super::*;
 use crate::ui::paste;
@@ -113,9 +114,52 @@ fn saved_windows_reopen_with_their_frames() {
     let ids = restore(&mut s, &[Saved { session: "a".into(), frame: Some(frame) }, Saved { session: "b".into(), frame: None }]);
     assert_eq!(ids.len(), 2);
     assert_eq!(s.windows.saved(), vec![Saved { session: "a".into(), frame: Some(frame) }, Saved { session: "b".into(), frame: None }]);
-    let moved = Frame { x: 0, ..frame };
-    placed(&mut s, ids[1], moved);
-    assert_eq!(s.windows.saved()[1].frame, Some(moved));
+    assert_eq!(take_to_show(&mut s), vec![(ids[0], true), (ids[1], true)], "windows saved at quit come back without taking focus");
+    show(&mut s, "c");
+    assert_eq!(take_to_show(&mut s).len(), 1);
+}
+
+#[test]
+fn a_window_saves_where_it_is_and_a_maximized_one_its_normal_frame() {
+    let placed = WindowPlacement { position: (10, 20), content_size: (1800, 1640), scale: 2.0, ..Default::default() };
+    assert_eq!(placement_frame(placed), Frame { x: 10, y: 20, width: 1800, height: 1640, scale: 2.0, maximized: false, full_screen: false });
+    let big = WindowPlacement { maximized: true, restore: Some(((5, 6), (900, 820))), ..placed };
+    assert_eq!(placement_frame(big), Frame { x: 5, y: 6, width: 900, height: 820, scale: 2.0, maximized: true, full_screen: false });
+}
+
+fn turn(s: &mut App, rt: &mut rune::Runtime<App>, key: &str) {
+    std::mem::swap(s, &mut rt.state);
+    on_enter(&mut rt.state, key);
+    rt.frame(1.0 / 60.0);
+    on_leave(&mut rt.state, key);
+    std::mem::swap(s, &mut rt.state);
+}
+
+#[test]
+fn two_windows_take_turns_over_one_app() {
+    let mut s = app();
+    s.sessions = ["a", "b"].iter().map(|id| serde_json::from_value(serde_json::json!({"id": id, "surface": "claude", "name": id, "status": "idle", "open": true})).unwrap()).collect();
+    crate::select(&mut s, "a");
+    let w = show(&mut s, "b");
+    let env = rune::Env { system_dark: true, scale: 1.0 };
+    let main = rune::AppSpec::<App> { poll: Some(crate::poll), ..rune::AppSpec::new("Agenthail", (1440.0, 900.0), crate::placeholder, crate::ui::view) };
+    let mut main = rune::App::new(main).init(crate::placeholder).headless_runtime((1440.0, 900.0), env);
+    let mut win = rune::App::new(spec()).init(crate::placeholder).headless_runtime((900.0, 820.0), env);
+    for _ in 0..2 {
+        turn(&mut s, &mut main, "main");
+        turn(&mut s, &mut win, &key(w));
+    }
+    assert_eq!((s.windows.current(), s.selected.as_deref()), (MAIN, Some("a")), "between turns the app is the main window's");
+    assert!(main.presented("session-tabs").is_some() && win.presented("session-tabs").is_none());
+    assert_eq!(win.state.windows.open.len(), 0, "the window holds a placeholder outside its turn");
+    std::mem::swap(&mut s, &mut win.state);
+    on_enter(&mut win.state, &key(w));
+    assert_eq!(win.state.selected.as_deref(), Some("b"));
+    typed(&mut win.state, "from the window");
+    on_leave(&mut win.state, &key(w));
+    std::mem::swap(&mut s, &mut win.state);
+    assert_eq!(s.drafts.get("b"), "from the window");
+    assert_eq!(s.windows.open[0].title, "b", "the window is named for its session");
 }
 
 #[test]
