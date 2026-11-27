@@ -706,9 +706,9 @@ fn a_quiet_session_turning_active_asks_for_its_project_work() {
     let mut ov = Overview::default();
     let held = || session("s", "p", "2026-11-24T11:00:00Z", "idle");
     ov.refresh(fetched("2026-11-24T12:00:00Z", vec![held(), session("quiet", "old", "2026-11-01T11:00:00Z", "idle")], vec![("p", Ok(vec![work("p-W1", "open")]))]));
-    assert!(!ov.misses_a_ledger(), "every recent project's work is held");
+    assert!(ov.missing_ledgers().is_empty(), "every recent project's work is held");
     assert!(ov.take_sessions("2026-11-24T12:00:05Z", "", 0, vec![held(), session("quiet", "old", "2026-11-24T12:00:04Z", "busy")]));
-    assert!(ov.misses_a_ledger(), "the change list alone brought a quiet project back");
-    ov.refresh(fetched("2026-11-24T12:00:09Z", vec![held(), session("quiet", "old", "2026-11-24T12:00:04Z", "busy")], vec![("p", Ok(vec![])), ("old", Ok(vec![work("old-W1", "open")]))]));
-    assert!(!ov.misses_a_ledger());
+    assert_eq!(ov.missing_ledgers().into_iter().collect::<Vec<_>>(), ["old"], "the change list alone brought a quiet project back");
+    assert!(ov.wants("old"));
+    assert!(ov.missing_ledgers().is_empty(), "asked for once");
 }

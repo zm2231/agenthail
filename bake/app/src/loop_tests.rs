@@ -198,6 +198,27 @@ fn a_reread_that_finds_the_same_sessions_does_not_rebuild_the_overview() {
 }
 
 #[test]
+fn a_session_list_that_brings_a_quiet_project_back_reads_its_work_at_once() {
+    if !isolated("a_session_list_that_brings_a_quiet_project_back_reads_its_work_at_once") {
+        return;
+    }
+    let dir = Dir::new("quiet");
+    let mut rt = runtime(app(sessions(&["a"]), &dir), (1440.0, 900.0));
+    let (poke, asked) = std::sync::mpsc::channel();
+    rt.state.overview_poke = Some(poke);
+    let quiet = |last: &str| session("q", 0, json!({"lastActive": last, "project": {"id": "p2", "name": "Beta"}}));
+    let mut raw = recorded(2, vec![session("a", 0, json!({})), quiet("2026-11-01T10:00:00Z")]);
+    raw.projects.push(serde_json::from_value(json!({"id": "p2", "displayName": "Beta"})).unwrap());
+    send(&rt, Bg::Overview(Box::new(Fetched { recorded: raw, ledgers: HashMap::new(), held: Vec::new(), asked: Vec::new(), started: std::time::Instant::now(), usage: None, moved: Vec::new() })));
+    rt.frame(DT);
+    assert!(!asked.try_iter().any(|a| a == crate::Ask::Read("p2".into())), "a project quiet for weeks isn't read");
+
+    send(&rt, snapshot(3, vec![session("a", 0, json!({})), quiet("2026-11-27T10:02:00Z")], Some(&["q"])));
+    rt.frame(DT);
+    assert!(asked.try_iter().any(|a| a == crate::Ask::Read("p2".into())), "its work is asked for in the same frame, not at the next overview read");
+}
+
+#[test]
 fn an_older_snapshot_in_a_burst_does_not_replace_a_newer_one() {
     if !isolated("an_older_snapshot_in_a_burst_does_not_replace_a_newer_one") {
         return;
