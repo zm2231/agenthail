@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 
 use rune::{AppSpec, Chrome, Cx, El, Key, KeyEvent, TextEdit, Tx, WindowOptions};
 use rune_kit::shell::{self, PaneState};
+use rune_kit::{KitCx, KitTheme};
 
 use crate::data::{Need, Target, World};
 
@@ -25,6 +26,7 @@ pub enum Screen {
 }
 
 pub struct App {
+    pub theme: KitTheme,
     pub d: World,
     pub needs: Vec<Need>,
     pub hands_on: Vec<String>,
@@ -73,6 +75,7 @@ fn init() -> App {
     feed::derive::needs::arrange(&mut needs, None);
     let hands_on = d.hands_on(&[]).iter().map(|s| s.id.clone()).collect();
     let mut app = App {
+        theme: ui::theme(),
         d,
         needs,
         hands_on,
@@ -333,6 +336,11 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
 
 fn view(s: &App, cx: &mut Cx<App>) -> El {
     ui::set_dark(cx.system_dark());
+    cx.with_kit(&s.theme, |cx| window(s, cx))
+}
+
+fn window(s: &App, cx: &mut Cx<App>) -> El {
+    let k = cx.kit();
     let mut layer = Vec::new();
     let body = match &s.screen {
         Screen::Now => {
@@ -354,13 +362,13 @@ fn view(s: &App, cx: &mut Cx<App>) -> El {
         Screen::Sessions => sessions::view(s, cx, &mut layer),
     };
     if s.jump.is_some() {
-        jump::view(s, &mut layer);
+        jump::view(s, &mut layer, &k);
     }
     if let Some(n) = &s.notice {
-        layer.push(ui::notice(n));
+        layer.push(ui::notice(n, &k));
     }
     layout::save(s);
-    rune_kit::root(ui::backdrop(body), layer)
+    rune_kit::root(ui::backdrop(body, &k), layer)
 }
 
 fn main() {
