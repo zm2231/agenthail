@@ -129,6 +129,7 @@ pub struct App {
     pub status_line: HashMap<String, String>,
     pub picks: HashMap<String, Vec<String>>,
     pub typed: HashMap<String, TextEdit>,
+    pub asks: ui::waiting::Asks,
     pub requests_at: HashMap<String, std::time::Instant>,
     pub tab: Tab,
     pub work_pick: HashMap<String, String>,
@@ -242,6 +243,7 @@ fn init() -> App {
         status_line: HashMap::new(),
         picks: HashMap::new(),
         typed: HashMap::new(),
+        asks: Default::default(),
         requests_at: HashMap::new(),
         tab: Tab::Conversation,
         work_pick: HashMap::new(),
@@ -455,7 +457,15 @@ pub fn draft_reply(s: &mut App, reply: &str) {
     s.composer.focused = true;
 }
 
-pub fn answer_request(s: &mut App, request: &str, choices: Vec<String>, answers: std::collections::BTreeMap<String, String>) {
+pub fn answer_request(s: &mut App, request: &str, response: feed::request::Response) {
+    settle_request(s, request, move |client, id, request| client.answer(id, request, &response));
+}
+
+pub fn withdraw_request(s: &mut App, request: &str) {
+    settle_request(s, request, |client, id, request| client.withdraw_request(id, request));
+}
+
+fn settle_request(s: &mut App, request: &str, run: impl FnOnce(&Client, &str, &str) -> Result<(), feed::catalog::RespondError> + Send + 'static) {
     let Some(id) = s.selected.clone() else { return };
     let Some(client) = s.client.clone() else {
         note(s, &id, "Fixture mode: not sent".into());
@@ -469,7 +479,7 @@ pub fn answer_request(s: &mut App, request: &str, choices: Vec<String>, answers:
     note(s, &id, "Answering…".into());
     let (out, request) = (s.outbox.clone(), request.to_string());
     std::thread::spawn(move || {
-        let result = client.respond(&id, &request, choices, answers);
+        let result = run(&client, &id, &request);
         let _ = out.send(Bg::Answered(id, request, result));
     });
 }

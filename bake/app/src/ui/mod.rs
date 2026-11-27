@@ -31,7 +31,7 @@ mod session_dialogs;
 pub(crate) mod session_ops;
 pub(crate) mod subagents;
 pub mod session_menu;
-mod waiting;
+pub(crate) mod waiting;
 
 use rail::*;
 use session::*;
