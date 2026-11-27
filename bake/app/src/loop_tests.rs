@@ -350,3 +350,23 @@ fn a_snapshot_that_did_not_touch_the_selected_session_does_not_reread_it() {
     rt.frame(DT);
     assert!(rt.state.items.contains_key("W1"), "a snapshot without a touched set rereads it");
 }
+
+#[test]
+fn a_refused_send_does_not_pass_its_retry_wait_to_the_next_message() {
+    if !isolated("a_refused_send_does_not_pass_its_retry_wait_to_the_next_message") {
+        return;
+    }
+    let dir = Dir::new("refused");
+    let mut s = app(sessions(&["a"]), &dir);
+    s.clock = 100.0;
+    let refused = |answered: bool| feed::catalog::RespondError { message: "no".into(), code: String::new(), maybe_delivered: false, reply: serde_json::Value::Null, answered, status: if answered { 409 } else { 0 } };
+    for _ in 0..6 {
+        let first = crate::fresh(&s, "a", "first".into(), Vec::new());
+        crate::take_sent(&mut s, "a".into(), first, true, Err(refused(false)));
+    }
+    let first = crate::fresh(&s, "a", "first".into(), Vec::new());
+    crate::take_sent(&mut s, "a".into(), first, true, Err(refused(true)));
+    let next = crate::fresh(&s, "a", "next".into(), Vec::new());
+    crate::take_sent(&mut s, "a".into(), next, false, Err(refused(false)));
+    assert_eq!(s.redeliver["a"].due, 101.0, "the next message retries a second later");
+}

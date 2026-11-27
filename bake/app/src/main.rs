@@ -1186,6 +1186,7 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
                 s.redeliver.entry(id.clone()).or_insert_with(|| feed::composer::Backoff::starting(clock)).failed(clock);
                 s.unsent.add(&id, failed);
             } else {
+                s.redeliver.insert(id.clone(), feed::composer::Backoff::starting(clock));
                 put_back(s, &id, &failed);
                 s.unsent.add(&id, failed);
             }
