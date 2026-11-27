@@ -368,6 +368,10 @@ impl Overlay {
     pub fn holds(&self, id: &str, kind: &str) -> bool {
         id == self.session && self.kinds.contains(kind)
     }
+
+    pub fn follows(&self, id: &str) -> bool {
+        id == self.session
+    }
 }
 
 pub fn streamed(events: &[crate::wire::Event]) -> Vec<crate::wire::Streamed> {

@@ -213,6 +213,25 @@ pub fn enter(s: &mut App, w: Id) {
     take_draft(s);
 }
 
+pub fn ids(s: &App) -> Vec<Id> {
+    let mut ids = vec![s.windows.current];
+    ids.extend(std::iter::once(MAIN).chain(s.windows.open.iter().map(|o| o.id)).filter(|w| *w != s.windows.current));
+    ids
+}
+
+pub fn shown(s: &App) -> Vec<(Id, String)> {
+    let mut out: Vec<(Id, String)> = shown_sessions(s).into_iter().filter_map(|id| showing(s, &id).map(|w| (w, id))).collect();
+    if let Some(id) = s.selected.clone().filter(|id| !out.iter().any(|(_, x)| x == id)) {
+        out.push((s.windows.current, id));
+    }
+    out
+}
+
+pub fn diff_due(s: &App, w: Id, changed: bool) -> bool {
+    let due = |tab: &Tab, key: &(String, usize), selected: &Option<String>| *tab == Tab::Changes && (changed || key.0 != selected.clone().unwrap_or_default());
+    if w == s.windows.current { due(&s.tab, &s.diff_key, &s.selected) } else { s.windows.stash.get(&w).is_some_and(|l| due(&l.tab, &l.diff_key, &l.selected)) }
+}
+
 pub fn open(s: &mut App, session: &str) -> Id {
     let session = feed::composer::current(&s.rekeyed, session).to_string();
     if let Some(id) = s.windows.of(&session) {

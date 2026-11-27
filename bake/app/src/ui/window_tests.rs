@@ -454,3 +454,129 @@ fn a_session_list_rebuilds_the_overview_once_with_a_session_window_open() {
     both(&mut s, &mut main, &mut win);
     assert_eq!(s.rebuilds, before + 1, "a change rebuilds once for the app, not once per window");
 }
+
+fn beside(queued: bool) -> (App, Id) {
+    let mut s = app();
+    s.client = Some(feed::catalog::Client::new("http://127.0.0.1:9", "t"));
+    let row = |id: &str, count: i64| serde_json::from_value(serde_json::json!({"id": id, "surface": "codex", "name": id, "status": "idle", "open": true, "queueCount": count})).unwrap();
+    s.sessions = vec![row("a", 0), row("b", if queued { 1 } else { 0 })];
+    crate::select(&mut s, "a");
+    let w = open(&mut s, "b");
+    s.queue_fetching.clear();
+    (s, w)
+}
+
+#[test]
+fn a_change_to_the_session_a_window_shows_refreshes_it_while_main_shows_another() {
+    let (mut s, _) = beside(true);
+    crate::changed_elsewhere(&mut s, feed::watch::Wants { session: Some("b".into()), ..Default::default() });
+    assert!(s.queue_fetching.contains_key("b"), "the window's session is read again, not only main's");
+    assert_eq!((s.windows.current(), s.selected.as_deref()), (MAIN, Some("a")), "main is left as it was");
+}
+
+#[test]
+fn a_reconnect_rereads_the_codex_queue_of_every_window() {
+    let (mut s, _) = beside(false);
+    for id in ["a", "b"] {
+        crate::ui::native_queue::hold(&mut s, id);
+    }
+    crate::reopened(&mut s);
+    assert!(["a", "b"].iter().all(|id| crate::ui::native_queue::reading(&s, id)), "both shown queues are read again");
+    assert_eq!(s.selected.as_deref(), Some("a"));
+}
+
+#[test]
+fn a_session_window_on_changes_follows_new_edits() {
+    let (mut s, _, _, w) = two_windows();
+    let env = rune::Env { system_dark: true, scale: 1.0 };
+    let main = rune::AppSpec::<App> { poll: Some(crate::poll), ..rune::AppSpec::new("Agenthail", (1440.0, 900.0), crate::placeholder, crate::ui::view) };
+    let mut main = rune::App::new(main).init(crate::placeholder).headless_runtime((1440.0, 900.0), env);
+    let edit = |n: usize| {
+        let item: feed::Item = serde_json::from_value(serde_json::json!({"id": format!("e{n}"), "kind": "toolCall", "title": "Write", "text": serde_json::json!({"file_path": format!("/w/f{n}.txt"), "content": "hi"}).to_string()})).unwrap();
+        feed::wire::Event::Upsert(item)
+    };
+    let key = |s: &mut App| {
+        let mut key = (String::new(), 0);
+        within(s, w, |s| key = s.diff_key.clone());
+        key
+    };
+    s.panes.get_mut("b").unwrap().transcript.apply(1, vec![edit(1)]);
+    within(&mut s, w, crate::show_changes);
+    assert_eq!(key(&mut s), ("b".to_string(), 1));
+
+    s.panes.get_mut("b").unwrap().transcript.apply(2, vec![edit(2)]);
+    s.outbox.send(crate::Bg::SessionsMoved).unwrap();
+    turn(&mut s, &mut main, "main");
+    assert_eq!(key(&mut s), ("b".to_string(), 2), "the window's diff follows the edit");
+    assert_eq!(s.diff_key.0, "", "main's own diff is untouched");
+}
+
+#[test]
+fn a_session_main_left_for_now_is_refreshed_as_the_window_that_shows_it() {
+    let (mut s, w) = beside(false);
+    crate::select(&mut s, "b");
+    s.screen = Screen::Now;
+    assert_eq!(shown(&s), vec![(w, "b".to_string())], "the window on the session, not main on Now");
+    crate::select(&mut s, "a");
+    s.screen = Screen::Session;
+    let mut ids: Vec<String> = shown(&s).into_iter().map(|(_, id)| id).collect();
+    ids.sort();
+    assert_eq!(ids, ["a", "b"]);
+}
+
+#[test]
+fn a_role_read_that_failed_for_a_window_s_session_is_tried_again() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    crate::ui::role::forget(&mut s);
+    crate::ui::role::failed_a_while_ago(&mut s, "b");
+    crate::ui::role::drain(&mut s);
+    assert!(crate::ui::role::asked(&s, "b"), "retried though main shows another session");
+    crate::ui::role::load(&mut s, "a");
+    assert!(crate::ui::role::asked(&s, "b"), "selecting in main keeps what a window shows");
+}
+
+#[test]
+fn subagent_rows_a_window_shows_are_held_while_main_shows_another_session() {
+    let (s, _) = beside(false);
+    assert!(crate::ui::subagents::holds(&s, "a") && crate::ui::subagents::holds(&s, "b"));
+}
+
+#[test]
+fn a_missing_session_in_each_window_gets_its_own_lookup() {
+    let (mut s, _) = beside(false);
+    s.snapshots = 1;
+    crate::select(&mut s, "x");
+    s.screen = Screen::Session;
+    let w = open(&mut s, "y");
+    assert!(crate::ui::gone::watch(&mut s));
+    assert!(s.missing.contains_key("x") && s.missing.contains_key("y"), "main's and the window's missing sessions are both looked up");
+    close(&mut s, w);
+    crate::ui::gone::watch(&mut s);
+    assert!(!s.missing.contains_key("y"), "a session no window shows is let go");
+}
+
+#[test]
+fn failed_session_settings_are_retried_for_every_window() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    for id in ["a", "b"] {
+        crate::ui::session_menu::failed_a_while_ago(&mut s, id);
+    }
+    crate::ui::session_menu::drain(&mut s);
+    assert!(["a", "b"].iter().all(|id| crate::ui::session_menu::asked(&s, id)), "each shown session's settings are read again");
+}
+
+#[test]
+fn a_window_s_session_coming_back_leaves_the_inspector_on_the_session_it_follows() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    crate::ui::inspect::load(&mut s, "a");
+    s.snapshots = 1;
+    let rows = s.sessions.clone();
+    s.sessions.retain(|x| x.id != "b");
+    crate::ui::gone::watch(&mut s);
+    s.sessions = rows;
+    crate::ui::gone::watch(&mut s);
+    assert!(crate::ui::inspect::follows(&s, "a"), "b returning in its window doesn't take main's inspector");
+}
