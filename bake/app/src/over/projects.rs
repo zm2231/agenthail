@@ -345,9 +345,8 @@ fn close_sheet(s: &mut App) {
 fn sheet_job(s: &App) -> Option<Job> {
     match s.ov.projects.sheet.as_ref()? {
         Sheet::Broadcast { project, text, key, sent: None, .. } => {
-            let text = text.text.trim();
             let names = s.ov.d.sessions.iter().map(|x| (x.id.clone(), s.ov.d.title(x))).collect();
-            (!text.is_empty()).then(|| Job::Broadcast { project: project.clone(), text: text.to_string(), key: key.clone(), names })
+            (!text.text.trim().is_empty()).then(|| Job::Broadcast { project: project.clone(), text: text.text.clone(), key: key.clone(), names })
         }
         Sheet::Broadcast { .. } => None,
         Sheet::Add { host, folder, title } => {
@@ -445,6 +444,12 @@ pub fn drain(s: &mut App) -> bool {
     {
         crate::over::go(s, crate::Screen::Now);
         changed = true;
+    }
+    if let Some(Sheet::Broadcast { text, key, keyed, .. }) = s.ov.projects.sheet.as_mut()
+        && *keyed != text.text
+    {
+        key.clear();
+        *keyed = text.text.clone();
     }
     let gone = match &s.ov.projects.sheet {
         Some(Sheet::Rename { project, .. } | Sheet::Lead { project, .. } | Sheet::Broadcast { project, .. }) => s.ov.d.record(project).is_none(),
@@ -696,7 +701,7 @@ fn buttons(s: &App, label: &str, can_save: bool) -> El {
         .w_full()
         .gap(8.0)
         .child(el().grow(1.0))
-        .child(Button::new("Cancel").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(close_sheet).build(k).key("project-sheet-cancel"))
+        .child(Button::new("Cancel").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).disabled(locked(s)).on_press(close_sheet).build(k).key("project-sheet-cancel"))
         .child(
             Button::new(if saving { "Saving…" } else { label })
                 .variant(ButtonVariant::Contrast)
@@ -718,6 +723,15 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>) {
             let name = s.ov.d.record(project).map(|p| p.name().to_string()).unwrap_or_default();
             let body = match sent {
                 Some(summary) => col().w_full().child(rune::text(summary.clone()).font(META).color(base()).wrap().w_full()),
+                None if s.ov.projects.saving => col()
+                    .w_full()
+                    .min_h(100.0)
+                    .px(10.0)
+                    .py(7.0)
+                    .radius(8.0)
+                    .fill(crate::theme::wash())
+                    .border(1.0, crate::theme::line())
+                    .child(rune::text(text.text.clone()).font(BODY).color(weak()).wrap().w_full()),
                 None => col().w_full().child(
                     text_input(text, BODY)
                         .key("project-message-text")
@@ -798,7 +812,11 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>) {
     if let Some(error) = &s.ov.projects.error {
         body = body.child(text(error.clone()).font(META).color(crate::theme::failed()).wrap().w_full());
     }
-    let mut dialog = Dialog::new("project-sheet", title).open(true).fit().width(440.0).on_close(close_sheet);
+    let mut dialog = Dialog::new("project-sheet", title).open(true).fit().width(440.0).on_close(|s: &mut App| {
+        if !locked(s) {
+            close_sheet(s);
+        }
+    });
     if let Some(note) = note {
         dialog = dialog.description(note);
     }
@@ -857,8 +875,12 @@ pub fn open(s: &App) -> bool {
     s.ov.projects.sheet.is_some() || s.ov.projects.confirm.is_some()
 }
 
+fn locked(s: &App) -> bool {
+    s.ov.projects.saving && matches!(s.ov.projects.sheet, Some(Sheet::Broadcast { .. }))
+}
+
 pub fn close_top(s: &mut App) {
-    if s.ov.projects.picking.take().is_some() || s.ov.projects.confirm.take().is_some() {
+    if s.ov.projects.picking.take().is_some() || s.ov.projects.confirm.take().is_some() || locked(s) {
         return;
     }
     close_sheet(s);
