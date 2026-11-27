@@ -21,7 +21,8 @@ pub struct State {
     asked: Option<Asked>,
     typed: Option<(String, f64)>,
     requests: u64,
-    reads: HashMap<String, (u64, String)>,
+    reads: HashMap<String, u64>,
+    keys: HashMap<String, String>,
     found: HashMap<String, Work>,
     names: HashMap<String, String>,
     opening: HashMap<String, Option<String>>,
@@ -32,7 +33,7 @@ pub struct State {
 impl Default for State {
     fn default() -> State {
         let (tx, rx) = channel();
-        State { asked: None, typed: None, requests: 0, reads: HashMap::new(), found: HashMap::new(), names: HashMap::new(), opening: HashMap::new(), tx, rx }
+        State { asked: None, typed: None, requests: 0, reads: HashMap::new(), keys: HashMap::new(), found: HashMap::new(), names: HashMap::new(), opening: HashMap::new(), tx, rx }
     }
 }
 
@@ -133,7 +134,7 @@ pub fn drain(s: &mut App) -> bool {
                 }
             }
             Reply::Item(seq, ledger, id, read) => {
-                if s.ov.worksearch.reads.get(&id).is_none_or(|(at, _)| *at != seq) {
+                if s.ov.worksearch.reads.get(&id) != Some(&seq) {
                     continue;
                 }
                 s.ov.worksearch.reads.remove(&id);
@@ -178,7 +179,8 @@ fn read(s: &mut App, ledger: &str, id: &str) {
     let st = &mut s.ov.worksearch;
     st.requests += 1;
     let seq = st.requests;
-    st.reads.insert(id.to_string(), (seq, ledger.to_string()));
+    st.reads.insert(id.to_string(), seq);
+    st.keys.insert(id.to_string(), ledger.to_string());
     let (tx, ledger, id) = (st.tx.clone(), ledger.to_string(), id.to_string());
     std::thread::spawn(move || {
         let read = client.found_work(&ledger, &id);
@@ -200,8 +202,11 @@ pub fn open(s: &mut App, ledger: &str, id: &str) {
 }
 
 fn ledger_of(s: &App, id: &str) -> Option<String> {
+    if loaded(s, id) {
+        return None;
+    }
     let st = &s.ov.worksearch;
-    st.found.get(id).map(|w| w.ledger_key().to_string()).or_else(|| st.reads.get(id).map(|(_, l)| l.clone()))
+    st.found.get(id).map(|w| w.ledger_key().to_string()).or_else(|| st.keys.get(id).cloned())
 }
 
 pub fn reread(s: &mut App, id: &str) {

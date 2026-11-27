@@ -479,7 +479,7 @@ fn ledger_api(paths: std::sync::mpsc::Sender<String>) -> String {
                 (200, json!({"items": [item("z-W1", "Old export")], "truncated": false}))
             } else if path.starts_with("/api/v1/ledger/search?q=export&") {
                 (200, json!({"items": [item("z-W9", "Parked export")], "truncated": false}))
-            } else if path.starts_with("/api/v1/ledger/search?") || (path == "/api/v1/ledger?projectKey=shared%3Az&view=item&id=z-W8" && w8.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0) {
+            } else if path.starts_with("/api/v1/ledger/search?") || path.ends_with("&id=z-W6") || (path == "/api/v1/ledger?projectKey=shared%3Az&view=item&id=z-W8" && w8.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0) {
                 (500, json!({"error": {"code": "internal", "message": "the ledger store is busy"}}))
             } else if path.starts_with("/api/v1/ledger?projectKey=shared%3Az&view=item&id=") {
                 let id = path.rsplit('=').next().unwrap_or_default();
@@ -659,6 +659,16 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     std::thread::sleep(std::time::Duration::from_millis(400));
     quiet(&mut rt);
     assert_eq!(asked(&paths).len(), 2, "a change during the first read reads it again");
+
+    crate::over::worksearch::open(&mut rt.state, "shared:z", "z-W6");
+    until(&mut rt, |s| crate::over::worksearch::note(s, "z-W6").is_some_and(|n| n.starts_with("Couldn't open")));
+    crate::over::go(&mut rt.state, Screen::Now);
+    crate::over::go(&mut rt.state, Screen::Work("z-W6".into()));
+    quiet(&mut rt);
+    send(&rt, Bg::LedgerChanged("shared:z".into(), std::time::Instant::now()));
+    rt.frame(DT);
+    quiet(&mut rt);
+    assert_eq!(asked(&paths), ["/api/v1/ledger?projectKey=shared%3Az&view=item&id=z-W6"; 3], "a failed first read still rereads on return and on its ledger's change");
 
     typed(&mut rt, "export");
     rt.frame(0.21);
