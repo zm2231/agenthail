@@ -843,3 +843,21 @@ fn a_released_session_s_late_read_doesn_t_land_on_the_shown_session_it_rekeys_on
     assert_eq!(crate::ui::inspect::goal_of(&s, "b").as_deref(), Some("b's goal"));
     assert!(crate::ui::inspect::missed(&s, "b"));
 }
+
+#[test]
+fn a_rekey_onto_a_shown_session_without_values_doesn_t_show_the_old_id_s() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    let usage: feed::settings::ContextUsage = serde_json::from_value(serde_json::json!({"usedTokens": 10, "contextWindow": 100})).unwrap();
+    crate::ui::inspect::streamed(&mut s, "a", goal("a's goal"));
+    crate::ui::inspect::streamed(&mut s, "a", feed::wire::Streamed::Context(Some(usage.clone())));
+    crate::ui::inspect::streamed(&mut s, "b", feed::wire::Streamed::Context(None));
+    crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "b".to_string())]));
+    assert!(!s.menus.context.contains_key("b") && !s.menus.context.contains_key("a"), "b had no context, and a's isn't b's");
+    assert!(!crate::ui::inspect::has_meta(&s, "b") && !crate::ui::inspect::has_meta(&s, "a"), "b hadn't been read, and a's goal isn't b's");
+    let ticket = crate::ui::inspect::ticket(&mut s);
+    crate::ui::session_menu::settle(&mut s, crate::ui::session_menu::Done::Context("b".into(), 50, Ok(Some(usage)), ticket, Ok(feed::inspect::Metadata { goal: Some(feed::inspect::Goal { objective: "b's goal".into(), ..Default::default() }), ..Default::default() })));
+    assert!(s.menus.context.contains_key("b"));
+    assert_eq!(crate::ui::inspect::goal_of(&s, "b").as_deref(), Some("b's goal"));
+    assert!(!crate::ui::inspect::missed(&s, "b"), "a read asked after the rekey catches b up");
+}

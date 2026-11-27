@@ -89,7 +89,7 @@ pub(crate) fn rekey(s: &mut App, old: &str, new: &str) {
         s.inspect.merged.insert(old.to_string(), (s.inspect.reads.issued(), s.inspect.seq));
     }
     s.inspect.reads.rekey(old, new);
-    crate::move_key(&mut s.inspect.meta, old, new);
+    carry(&mut s.inspect.meta, old, new, collided);
     if let Some(gone) = s.inspect.process.remove(old) {
         let into = s.inspect.process.entry(new.to_string()).or_default();
         into.running.extend(gone.running);
@@ -103,7 +103,7 @@ pub(crate) fn rekey(s: &mut App, old: &str, new: &str) {
     if let Some(gone) = s.inspect.goal_busy.remove(old) {
         s.inspect.goal_busy.entry(new.to_string()).or_default().extend(gone);
     }
-    crate::move_key(&mut s.inspect.goal_note, old, new);
+    carry(&mut s.inspect.goal_note, old, new, collided);
     crate::move_member(&mut s.inspect.expanded, old, new);
     if let Some(gone) = s.inspect.missed.remove(old) {
         let miss = s.inspect.missed.entry(new.to_string()).or_insert_with(|| Missed { after: gone.after, asked: None, kinds: Default::default() });
@@ -117,9 +117,16 @@ pub(crate) fn rekey(s: &mut App, old: &str, new: &str) {
     if let Some(logs) = s.inspect.logs.as_mut().filter(|(id, _)| id == old) {
         logs.0 = new.to_string();
     }
-    super::session_menu::rekey_context(s, old, new);
+    super::session_menu::rekey_context(s, old, new, collided);
     if collided {
         miss(s, new, &["goal", "context"]);
+    }
+}
+
+pub(crate) fn carry<V>(map: &mut HashMap<String, V>, old: &str, new: &str, collided: bool) {
+    match collided {
+        true => drop(map.remove(old)),
+        false => crate::move_key(map, old, new),
     }
 }
 

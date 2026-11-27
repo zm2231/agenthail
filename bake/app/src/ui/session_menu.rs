@@ -193,9 +193,9 @@ pub(crate) fn agent_mode_changed(s: &mut App, id: &str) {
     }
 }
 
-pub(crate) fn rekey_context(s: &mut App, old: &str, new: &str) {
-    crate::move_key(&mut s.menus.context, old, new);
-    crate::move_key(&mut s.menus.context_error, old, new);
+pub(crate) fn rekey_context(s: &mut App, old: &str, new: &str, collided: bool) {
+    super::inspect::carry(&mut s.menus.context, old, new, collided);
+    super::inspect::carry(&mut s.menus.context_error, old, new, collided);
     if let Some(seq) = s.menus.newest.remove(&(old.to_string(), "context")) {
         let kept = s.menus.newest.entry((new.to_string(), "context")).or_insert(seq);
         *kept = (*kept).max(seq);
