@@ -136,6 +136,7 @@ pub struct Pending {
     body: Value,
     resend: Option<Resend>,
     woke: bool,
+    answered_unknown: bool,
 }
 
 impl Pending {
@@ -149,7 +150,7 @@ pub struct Sends(HashMap<(WorkKey, Move), Pending>);
 
 impl Sends {
     pub fn sending(&mut self, w: &Work, m: Move, words: &str) -> (String, Value) {
-        let fresh = || Pending { words: words.to_string(), key: crate::catalog::request_key(), body: body(w, m, words), resend: None, woke: false };
+        let fresh = || Pending { words: words.to_string(), key: crate::catalog::request_key(), body: body(w, m, words), resend: None, woke: false, answered_unknown: false };
         let p = self.0.entry((w.key(), m)).or_insert_with(fresh);
         if p.words != words {
             *p = fresh();
@@ -180,6 +181,10 @@ impl Sends {
         self.get(k, m).filter(|p| p.unconfirmed()).map(|p| p.words.as_str())
     }
 
+    pub fn asks_again(&self, k: &WorkKey, m: Move) -> bool {
+        self.get(k, m).is_some_and(|p| p.unconfirmed() && !p.answered_unknown)
+    }
+
     pub fn forget(&mut self, k: &WorkKey, m: Move) -> Option<Pending> {
         self.0.remove(&(k.clone(), m))
     }
@@ -192,6 +197,14 @@ impl Sends {
             Ok(_) => {
                 self.0.remove(&slot);
                 (false, m.done().into())
+            }
+            Err(e) if e.outcome_unknown() => {
+                if let Some(p) = self.0.get_mut(&slot) {
+                    p.resend = Some(held.unwrap_or(Resend { due: now, wait: RESEND_FIRST, since: now }));
+                    p.answered_unknown = true;
+                    p.woke = false;
+                }
+                (true, crate::catalog::unknown_outcome(&e.message))
             }
             Err(e) if e.maybe_delivered || (held.is_some() && !settles(e)) => {
                 let next = match held {
@@ -215,7 +228,7 @@ impl Sends {
     }
 
     pub fn due(&self, now: f64) -> Vec<(WorkKey, Move, String)> {
-        self.0.iter().filter_map(|((k, m), p)| p.resend.filter(|r| r.due <= now && now - r.since < RESEND_FOR).map(|_| (k.clone(), *m, p.words.clone()))).collect()
+        self.0.iter().filter(|(_, p)| !p.answered_unknown).filter_map(|((k, m), p)| p.resend.filter(|r| r.due <= now && now - r.since < RESEND_FOR).map(|_| (k.clone(), *m, p.words.clone()))).collect()
     }
 
     pub fn wake(&mut self, now: f64) {
@@ -386,6 +399,27 @@ mod tests {
         assert!(waits[4..].iter().all(|w| *w == 60.0));
         assert!(now < RESEND_FOR && now + 60.0 >= RESEND_FOR, "it stops asking after an hour");
         assert_eq!(sends.held_words(&k6(), Move::Park), Some("later"), "it stays unconfirmed after that");
+    }
+
+    #[test]
+    fn an_interrupted_move_stays_unconfirmed_on_its_key_and_is_not_sent_again_by_itself() {
+        let interrupted = r#"{"error":{"code":"action_outcome_unknown","message":"This request was interrupted before its outcome was recorded, so it may have happened. Check what it was meant to change before sending it again as a new request."}}"#;
+        let (client, seen) = crate::mock::keyed(replies(&[(504, ""), (409, interrupted)]));
+        let mut sends = Sends::default();
+        let open = work("open", None);
+        sent(&mut sends, &client, &open, Move::Claim, "", 0.0);
+        let key = sends.held_key(&k6(), Move::Claim).unwrap().to_string();
+        assert!(sends.asks_again(&k6(), Move::Claim));
+        let (failed, note) = sent(&mut sends, &client, &open, Move::Claim, "", 10.0);
+        assert!(failed && note.starts_with("This request was interrupted") && note.ends_with("as a new request. The outcome is unknown; check the session before retrying."), "{note}");
+        assert_eq!(sends.held(&k6()), Some(Move::Claim));
+        assert_eq!(sends.held_key(&k6(), Move::Claim), Some(key.as_str()), "the key stays with the send that may have happened");
+        assert!(!sends.asks_again(&k6(), Move::Claim), "asking again gets the same answer");
+        sends.wake(20.0);
+        assert!(sends.due(3600.0).is_empty(), "nothing goes again by itself");
+        let keys: Vec<String> = (0..2).map(|_| seen.recv().unwrap().2).collect();
+        assert_eq!(keys, [key.clone(), key]);
+        assert!(sends.forget(&k6(), Move::Claim).is_some(), "Send as new starts over");
     }
 
     #[test]

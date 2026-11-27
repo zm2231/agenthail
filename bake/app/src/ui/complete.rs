@@ -15,8 +15,8 @@ pub enum Done {
     Files(u64, String, String, Result<SessionFiles, String>),
     Prompts(u64, String, Result<Vec<Prompt>, String>),
     Found(u64, Result<Found, String>),
-    Forked(String, String, String, Result<String, RespondError>),
-    Goal(String, String, String, Result<feed::composer::Delivered, RespondError>),
+    Forked(String, String, String, String, Result<String, RespondError>),
+    Goal(String, String, String, String, Result<feed::composer::Delivered, RespondError>),
 }
 
 pub struct Search {
@@ -51,6 +51,7 @@ pub struct Complete {
     seq: u64,
     forking: bool,
     fork_keys: HashMap<String, (String, String)>,
+    told_unknown: HashSet<String>,
     shown_ids: Vec<String>,
     pub keys: super::composer_keys::State,
 }
@@ -503,8 +504,11 @@ pub fn done(s: &mut App, done: Done) {
                 }
             }
         }
-        Done::Forked(from, point, prompt, result) => {
+        Done::Forked(from, point, prompt, key, result) => {
             s.complete.forking = false;
+            if result.as_ref().is_err_and(RespondError::outcome_unknown) {
+                s.complete.told_unknown.insert(key);
+            }
             if !result.as_ref().is_err_and(|e| e.maybe_delivered) {
                 s.complete.fork_keys.remove(&point);
                 if let Some((sess, item)) = point.split_once('/') {
@@ -525,6 +529,10 @@ pub fn done(s: &mut App, done: Done) {
                     }
                 }
                 Ok(_) => s.ov.notice = Some("The fork started, but the daemon didn't say which session it made.".into()),
+                Err(error) if error.outcome_unknown() => {
+                    let again = if point.ends_with('/') { "Fork" } else { "Fork from here" };
+                    crate::note(s, &from, format!("{} {again} again sends a new request.", feed::catalog::unknown_outcome(&error.message)));
+                }
                 Err(error) if error.maybe_delivered => {
                     let again = if point.ends_with('/') { "Fork" } else { "Fork from here" };
                     crate::note(s, &from, format!("Fork sent, not confirmed: {}. {again} again checks the same request; it won't make a second copy.", error.message));
@@ -532,8 +540,11 @@ pub fn done(s: &mut App, done: Done) {
                 Err(error) => s.ov.notice = Some(format!("Couldn't fork: {}", error.message)),
             }
         }
-        Done::Goal(asked, typed, goal, result) => {
+        Done::Goal(asked, typed, goal, key, result) => {
             let id = feed::composer::current(&s.rekeyed, &asked).to_string();
+            if result.as_ref().is_err_and(RespondError::outcome_unknown) {
+                s.complete.told_unknown.insert(key);
+            }
             s.complete.goal_pending.remove(&id);
             super::inspect::metadata_moved(s, &id);
             let unsure = match &result {
@@ -556,6 +567,7 @@ pub fn done(s: &mut App, done: Done) {
                 Ok(feed::composer::Delivered::Queued(_) | feed::composer::Delivered::QueuedUntilAnswer(_)) => "Goal queued; it's set when this turn ends".to_string(),
                 Ok(feed::composer::Delivered::Unconfirmed) => "Goal sent, not confirmed yet. Sending the same /goal again checks it; it won't set it twice.".to_string(),
                 Ok(_) => "Goal set".to_string(),
+                Err(error) if error.outcome_unknown() => format!("{} Sending the same /goal again sends a new request.", feed::catalog::unknown_outcome(&error.message)),
                 Err(error) if error.maybe_delivered => format!("Goal sent, not confirmed: {}. Sending the same /goal again checks it; it won't set it twice.", error.message),
                 Err(error) => format!("Couldn't set the goal: {}", error.message),
             };
@@ -602,11 +614,15 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
             return true;
         }
         let typed = draft.trim().to_string();
-        let (key, asked) = s.complete.goal_keys.entry((id.to_string(), argument.clone())).or_insert_with(|| (feed::catalog::request_key(), id.to_string())).clone();
+        let point = (id.to_string(), argument.clone());
+        if s.complete.goal_keys.get(&point).is_some_and(|(key, _)| s.complete.told_unknown.remove(key)) {
+            s.complete.goal_keys.remove(&point);
+        }
+        let (key, asked) = s.complete.goal_keys.entry(point).or_insert_with(|| (feed::catalog::request_key(), id.to_string())).clone();
         crate::note(s, id, "Setting the goal…".into());
         spawn(s, move |c| {
             let result = c.goal_set(&asked, &argument, &key);
-            Done::Goal(asked.clone(), typed.clone(), argument.clone(), result)
+            Done::Goal(asked.clone(), typed.clone(), argument.clone(), key.clone(), result)
         });
         return true;
     }
@@ -759,11 +775,14 @@ fn fork_at(s: &mut App, from: &str, item: &str, turn: Option<String>, text: Stri
     }
     s.complete.forking = true;
     let point = format!("{from}/{item}");
+    if s.complete.fork_keys.get(&point).is_some_and(|(key, _)| s.complete.told_unknown.remove(key)) {
+        s.complete.fork_keys.remove(&point);
+    }
     let (key, sent_from) = s.complete.fork_keys.entry(point.clone()).or_insert_with(|| (feed::catalog::request_key(), from.to_string())).clone();
     let from = sent_from;
     spawn(s, move |c| {
         let result = c.fork(&from, turn.as_deref(), &key);
-        Done::Forked(from.clone(), point.clone(), text.clone(), result)
+        Done::Forked(from.clone(), point.clone(), text.clone(), key.clone(), result)
     });
 }
 

@@ -286,3 +286,22 @@ fn saving_needs_a_changed_non_empty_text() {
     assert!(!can_save("Same", " Same \n"));
     assert!(can_save("Same", "Different"));
 }
+
+#[test]
+fn an_interrupted_change_may_have_happened_and_its_retry_keeps_the_key_and_message_id() {
+    let interrupted = r#"{"error":{"code":"action_outcome_unknown","message":"This request was interrupted before its outcome was recorded, so it may have happened. Check what it was meant to change before sending it again as a new request."},"sessionId":"s1"}"#;
+    let (client, seen) = crate::mock::keyed(replies(&[(409, interrupted), (409, interrupted)]));
+    let mut keys = Keys::default();
+    let add = Act::Add("Ship it".into());
+    let mut tries = Vec::new();
+    for _ in 0..2 {
+        let key = keys.key("s1", &add);
+        let outcome = Outcome::of(client.native_queue("s1", &add, &key));
+        assert_eq!(outcome, Outcome::Unknown("This request was interrupted before its outcome was recorded, so it may have happened. Check what it was meant to change before sending it again as a new request. The outcome is unknown; check the session before retrying.".into()));
+        keys.settled(&key, &outcome);
+        let (_, body, header) = seen.recv().unwrap();
+        tries.push((header, body["nativeQueue"]["clientUserMessageId"].as_str().unwrap_or_default().to_string(), key));
+    }
+    assert!(tries.iter().all(|t| t.0 == tries[0].2 && t.1 == tries[0].2), "{tries:?}");
+    assert_eq!(tries[0], tries[1]);
+}

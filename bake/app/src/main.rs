@@ -1045,6 +1045,7 @@ fn fresh(s: &App, id: &str, text: String, attachments: Vec<feed::attach::Upload>
         sent_at: feed::composer::now_ms(),
         order: feed::composer::send_stamp(feed::composer::now_ms()),
         unanswered: true,
+        outcome_unknown: false,
     }
 }
 
@@ -1188,7 +1189,7 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
     settle(s, &id, &pending.key);
     s.unsent.remove(&id, &pending.key);
     let failure = match result {
-        Ok(Delivered::Unconfirmed) => Some((true, true, "the daemon took it but hasn't confirmed delivery".to_string(), false)),
+        Ok(Delivered::Unconfirmed) => Some((true, true, "the daemon took it but hasn't confirmed delivery".to_string(), false, false)),
         Ok(receipt @ (Delivered::Queued(_) | Delivered::QueuedUntilAnswer(_))) => {
             s.status_line.remove(&id);
             s.queued.entry(id.clone()).or_default().push((s.snapshots, receipt));
@@ -1200,12 +1201,12 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
             ui::complete::delivered(s, &id, &pending.text);
             None
         }
-        Err(error) => Some((error.maybe_delivered, error.answered, error.message.clone(), feed::composer::redelivers(&error))),
+        Err(error) => Some((error.maybe_delivered, error.answered, error.message.clone(), feed::composer::redelivers(&error), error.outcome_unknown())),
     };
     let clock = s.clock;
     match failure {
-        Some((maybe_delivered, answered, error, again)) => {
-            let failed = Unsent { unanswered: again, ..pending.failed(retry, maybe_delivered, answered, error) };
+        Some((maybe_delivered, answered, error, again, outcome_unknown)) => {
+            let failed = Unsent { unanswered: again, outcome_unknown, ..pending.failed(retry, maybe_delivered, answered, error) };
             if failed.redelivering(feed::composer::now_ms()) {
                 s.redeliver.entry(id.clone()).or_insert_with(|| feed::composer::Backoff::starting(clock)).failed(clock);
                 s.unsent.add(&id, failed);

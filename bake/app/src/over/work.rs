@@ -444,7 +444,9 @@ fn moves(s: &App, w: &crate::over::Work, k: &Kit) -> Option<El> {
     }
     if let Some(m) = held.filter(|_| !busy) {
         let (id, words) = (item.clone(), s.ov.work.sends.held_words(&item, m).unwrap_or_default().to_string());
-        r = r.child(Button::new("Ask again").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).help("Asks Agenthail about the same send").on_press(move |s: &mut App| send(s, &id, m, &words)).build(k).key("work-ask-again"));
+        if s.ov.work.sends.asks_again(&item, m) {
+            r = r.child(Button::new("Ask again").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).help("Asks Agenthail about the same send").on_press(move |s: &mut App| send(s, &id, m, &words)).build(k).key("work-ask-again"));
+        }
         let id = item.clone();
         r = r.child(Button::new("Send as new").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).help("Sends it again as a fresh request, so it can show up twice if the first one landed").on_press(move |s: &mut App| send_new(s, &id, m)).build(k).key("work-send-new"));
     }
