@@ -690,3 +690,13 @@ fn a_parked_step_shows_why_it_waits() {
     assert_eq!(words("parked (later): wait; handoff: done [ask Sam]"), "Parked: wait; handoff: done [ask Sam]");
     assert!(steps[0].what.starts_with("Moved to "), "{}", steps[0].what);
 }
+
+#[test]
+fn a_session_is_left_to_its_own_reads_only_once_its_project_ledger_is_held() {
+    let mut ov = Overview::default();
+    let sessions = || vec![session("s", "p", "2026-11-24T11:00:00Z", "idle"), session("quiet", "old", "2026-11-01T11:00:00Z", "idle")];
+    ov.refresh(fetched("2026-11-24T12:00:00Z", sessions(), vec![("p", Ok(vec![work("p-W1", "open")]))]));
+    assert!(ov.holds_ledger_of("s"));
+    assert!(!ov.holds_ledger_of("quiet"), "a change can bring a quiet project's work into the overview");
+    assert!(!ov.holds_ledger_of("unknown"));
+}

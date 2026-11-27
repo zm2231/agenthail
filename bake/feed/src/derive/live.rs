@@ -484,6 +484,13 @@ impl Overview {
         self.ledger_at.retain(|k, _| listed.contains(k.as_str()));
     }
 
+    pub fn holds_ledger_of(&self, session: &str) -> bool {
+        self.base.sessions.iter().find(|x| x.id == session).is_some_and(|x| {
+            let project = x.project_key();
+            project.is_empty() || self.ledgers.contains_key(&project) || self.covered.contains(&project)
+        })
+    }
+
     pub fn wants(&mut self, project: &str) -> bool {
         if self.covered.contains(project) || self.pending.contains(project) {
             return false;

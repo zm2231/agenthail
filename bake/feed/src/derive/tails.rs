@@ -46,6 +46,7 @@ pub fn trim(items: &[Item]) -> Tail {
 }
 
 const KEEP: usize = TAIL_ITEMS * 2;
+const JOURNAL_ROWS: usize = 2048;
 const RESYNC: &str = "the replay did not line up";
 
 #[derive(Default)]
@@ -131,7 +132,7 @@ pub fn fetch(client: &Client, session: &str, budget: Duration, held: Option<Resu
         None => from(0, Resume::default()),
     };
     match read {
-        Ok((tail, at)) => (Ok(tail), Some(at)),
+        Ok((tail, at)) => (Ok(tail), (at.dropped.len() < JOURNAL_ROWS).then_some(at)),
         Err(e) => (Err(e), None),
     }
 }

@@ -366,3 +366,16 @@ fn removals_that_thin_a_held_tail_below_its_length_read_the_whole_journal_again(
     assert_eq!(tail.items.len(), TAIL_ITEMS, "the full read brings back rows the held tail had let go");
     assert_eq!(tail.items.last().unwrap().id, "r199");
 }
+
+#[test]
+fn a_tail_that_outgrew_the_daemon_journal_starts_over_from_a_full_read() {
+    let rows: Vec<(u64, Value)> = (1..=2400u64).map(|seq| (seq, reply_row(&format!("r{seq}")))).collect();
+    let head = String::from_utf8(HEAD.to_vec()).unwrap();
+    let (client, paths) = daemon(vec![head.clone() + &journal(&rows), head + &journal(&rows)]);
+    let (tail, at) = tails::fetch(&client, "a", BUDGET, None);
+    assert_eq!(tail.unwrap().items.len(), TAIL_ITEMS);
+    assert!(at.is_none(), "more rows let go than the daemon keeps: the next read sees what a fresh one would");
+    tails::fetch(&client, "a", BUDGET, at).0.unwrap();
+    let asked: Vec<String> = paths.try_iter().collect();
+    assert!(asked.iter().all(|p| p.ends_with("after=0")), "{asked:?}");
+}

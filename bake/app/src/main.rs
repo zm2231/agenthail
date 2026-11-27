@@ -558,7 +558,7 @@ fn changed_elsewhere(s: &mut App, wants: feed::watch::Wants) {
         ui::connect::changed(s);
         ui::delivery::stale(s);
     }
-    if wants.overview_unless(|id| s.ov.live.sessions().iter().any(|x| x.id == id)) {
+    if wants.overview_unless(|id| s.ov.live.holds_ledger_of(id)) {
         ask_overview(s, Ask::Refresh);
     }
     if wants.hosts {
