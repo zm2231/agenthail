@@ -103,7 +103,6 @@ impl Page {
                     self.committed = true;
                     self.arrived = true;
                     self.loading_since = Some(Instant::now());
-                    loading_deadlines();
                 }
                 Load::Finished(url) if self.committed && self.left.is_none() && home(&url) => {
                     self.loading_since = None;
@@ -116,6 +115,11 @@ impl Page {
                 Load::Finished(_) => {}
             }
         }
+        changed
+    }
+
+    fn timeouts(&mut self) -> bool {
+        let mut changed = false;
         if self.opened && !self.arrived && self.phase == Phase::Loading && self.loading_since.is_some_and(|at| crate::wake::due_after(at, UNREACHED)) {
             self.phase = Phase::Failed(format!("Nothing came back from the page in {} seconds. Check that it is serving, then Reload.", UNREACHED.as_secs()));
             self.loading_since = None;
@@ -150,7 +154,6 @@ impl Page {
             self.arrived = false;
             self.phase = Phase::Loading;
             self.loading_since = Some(Instant::now());
-            loading_deadlines();
         }
         while let Ok(url) = self.follow.1.try_recv() {
             if self.opened {
@@ -167,7 +170,6 @@ impl Page {
             self.committed = false;
             self.arrived = false;
             self.loading_since = Some(Instant::now());
-            loading_deadlines();
             self.phase = Phase::Loading;
             return Ok(true);
         }
@@ -334,6 +336,14 @@ impl Web {
     }
 
     pub fn pump(&mut self, want: Option<&str>) -> bool {
+        let mut changed = self.open_wanted(want);
+        for page in self.pages.values_mut() {
+            changed |= page.timeouts();
+        }
+        changed
+    }
+
+    fn open_wanted(&mut self, want: Option<&str>) -> bool {
         let mut changed = false;
         for page in self.pages.values_mut() {
             changed |= page.take_loads();
@@ -441,12 +451,6 @@ fn build(slot: &NativeView, page: &str, loads: Sender<Load>, follow: Sender<Stri
         })
         .build_as_child(slot)
         .map_err(|e| format!("No web view: {e}"))
-}
-
-fn loading_deadlines() {
-    let now = Instant::now();
-    crate::wake::by(now + SLOW);
-    crate::wake::by(now + UNREACHED);
 }
 
 #[cfg(test)]

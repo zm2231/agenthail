@@ -309,13 +309,14 @@ fn the_wait_after_an_unclear_check_runs_from_its_answer() {
 }
 
 #[test]
-fn a_load_that_starts_arms_its_slow_and_unreached_wakes() {
+fn a_page_that_is_loading_wakes_for_its_slow_note_and_its_unreached_failure() {
     let mut web = Web::new();
     open(&mut web, A, false);
+    let since = Instant::now();
+    web.pages.get_mut(A).unwrap().loading_since = Some(since);
     crate::wake::begin(crate::wake::Window::Main);
-    send(&web, A, Load::Started(format!("{A}report")));
     web.pump(None);
-    let next = crate::wake::next(crate::wake::Window::Main).expect("the slow message is woken for");
-    let left = next.saturating_duration_since(Instant::now());
-    assert!(left > SLOW - std::time::Duration::from_secs(1) && left <= SLOW, "{left:?}");
+    let armed = crate::wake::pending(crate::wake::Window::Main);
+    assert!(armed.contains(&(since + SLOW)), "{armed:?}");
+    assert!(armed.contains(&(since + UNREACHED)), "{armed:?}");
 }

@@ -129,6 +129,7 @@ pub struct Prefs {
     loaded: bool,
     in_flight: usize,
     seq: HashMap<Read, u64>,
+    minute: time::OffsetDateTime,
     tx: Sender<Done>,
     rx: Receiver<Done>,
 }
@@ -271,6 +272,7 @@ pub(crate) fn init() -> Prefs {
         loaded: false,
         in_flight: 0,
         seq: HashMap::new(),
+        minute: time::OffsetDateTime::now_utc(),
         tx,
         rx,
     }
@@ -653,10 +655,23 @@ pub(crate) fn poll(s: &mut Prefs, _: f64, tx: &mut Tx) -> bool {
         s.retry_base = None;
         fetch(s, Read::Base);
     }
+    if visible() {
+        changed |= minute(s);
+    }
     if let Some(at) = crate::wake::next(crate::wake::Window::Settings) {
         s.wake.until(tx, at);
     }
     changed
+}
+
+fn minute(s: &mut Prefs) -> bool {
+    let now = time::OffsetDateTime::now_utc();
+    let turned = now >= feed::wake::next_minute(s.minute);
+    if turned {
+        s.minute = now;
+    }
+    crate::wake::later(feed::wake::next_minute(now) - now);
+    turned
 }
 
 fn on_key(s: &mut Prefs, ev: &KeyEvent, tx: &mut Tx) -> bool {
@@ -748,3 +763,7 @@ fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         }
     })
 }
+
+#[cfg(test)]
+#[path = "minute_tests.rs"]
+mod minute_tests;

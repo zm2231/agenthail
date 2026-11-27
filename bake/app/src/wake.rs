@@ -97,6 +97,11 @@ pub fn next(window: Window) -> Option<Instant> {
     })
 }
 
+#[cfg(test)]
+pub fn pending(window: Window) -> Vec<Instant> {
+    DUE.with_borrow(|(_, main, settings)| if window == Window::Main { main.clone() } else { settings.clone() })
+}
+
 #[derive(Default)]
 pub struct Wake(Option<f64>);
 
