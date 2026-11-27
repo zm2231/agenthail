@@ -330,6 +330,7 @@ pub fn session<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
 }
 
 pub fn select(s: &mut App, id: &str) {
+    link::moved();
     let id = &feed::composer::current(&s.rekeyed, id).to_string();
     s.selected = Some(id.to_string());
     s.screen = Screen::Session;
@@ -1180,7 +1181,6 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= look::poll(look::Window::Main, tx);
     ui::paste::settle(s);
     changed |= ui::notice::poll(s);
-    link::watch(s);
     switch_composer(s);
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &ui::paste::draft(s));

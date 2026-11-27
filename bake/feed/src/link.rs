@@ -44,58 +44,41 @@ pub fn resolve<'a>(sessions: &'a [Session], reference: &str) -> Option<&'a str> 
     sessions.iter().find(|x| matches(x, reference)).map(|x| x.id.as_str())
 }
 
-#[derive(Debug)]
-pub struct Waiting<P> {
+#[derive(Debug, Default)]
+pub struct Waiting {
     listed: bool,
-    held: Option<(String, P)>,
-    asked: Option<(u64, P)>,
+    held: Option<String>,
+    asked: Option<u64>,
     asks: u64,
 }
 
-impl<P> Default for Waiting<P> {
-    fn default() -> Waiting<P> {
-        Waiting { listed: false, held: None, asked: None, asks: 0 }
-    }
-}
-
-impl<P: PartialEq> Waiting<P> {
-    pub fn arrived(&mut self) {
+impl Waiting {
+    pub fn moved(&mut self) {
         self.held = None;
         self.asked = None;
     }
 
-    pub fn hold(&mut self, reference: String, at: P) -> Option<String> {
+    pub fn hold(&mut self, reference: String) -> Option<String> {
         if self.listed {
             return Some(reference);
         }
-        self.held = Some((reference, at));
+        self.held = Some(reference);
         None
     }
 
-    pub fn listed(&mut self, now: &P) -> Option<String> {
-        self.moved(now);
+    pub fn listed(&mut self) -> Option<String> {
         self.listed = true;
-        self.held.take().map(|(reference, _)| reference)
+        self.held.take()
     }
 
-    pub fn ask(&mut self, at: P) -> u64 {
+    pub fn ask(&mut self) -> u64 {
         self.asks += 1;
-        self.asked = Some((self.asks, at));
+        self.asked = Some(self.asks);
         self.asks
     }
 
-    pub fn answered(&mut self, ask: u64, now: &P) -> bool {
-        self.moved(now);
-        self.asked.take_if(|(n, _)| *n == ask).is_some()
-    }
-
-    pub fn moved(&mut self, now: &P) {
-        if self.held.as_ref().is_some_and(|(_, at)| at != now) {
-            self.held = None;
-        }
-        if self.asked.as_ref().is_some_and(|(_, at)| at != now) {
-            self.asked = None;
-        }
+    pub fn answered(&mut self, ask: u64) -> bool {
+        self.asked.take_if(|n| *n == ask).is_some()
     }
 }
 
@@ -242,42 +225,35 @@ mod tests {
     #[test]
     fn a_link_before_the_first_list_waits_for_it_unless_the_person_moves() {
         let mut w = Waiting::default();
-        assert_eq!(w.hold("a".into(), "now"), None);
-        assert_eq!(w.listed(&"now"), Some("a".into()));
-        assert_eq!(w.hold("b".into(), "now"), Some("b".into()), "once listed, links open at once");
+        assert_eq!(w.hold("a".into()), None);
+        assert_eq!(w.listed(), Some("a".into()));
+        assert_eq!(w.listed(), None);
+        assert_eq!(w.hold("b".into()), Some("b".into()), "once listed, links open at once");
         let mut w = Waiting::default();
-        w.hold("a".into(), "now");
-        w.moved(&"project");
-        assert_eq!(w.listed(&"project"), None);
+        w.hold("a".into());
+        w.moved();
+        assert_eq!(w.listed(), None, "moving before the list arrives drops the link");
         let mut w = Waiting::default();
-        w.hold("a".into(), "now");
-        assert_eq!(w.listed(&"sessions"), None, "moving before the list arrives drops the link");
-        let mut w = Waiting::default();
-        w.hold("a".into(), "now");
-        w.arrived();
-        assert_eq!(w.listed(&"now"), None, "a newer link replaces a waiting one");
+        w.hold("a".into());
+        w.hold("b".into());
+        assert_eq!(w.listed(), Some("b".into()), "a newer link replaces a waiting one");
     }
 
     #[test]
-    fn only_the_newest_lookup_answers_and_only_where_it_was_asked() {
-        let mut w: Waiting<&str> = Waiting::default();
-        w.listed(&"now");
-        let first = w.ask("now");
-        let second = w.ask("now");
-        assert!(!w.answered(first, &"now"), "an older lookup for the same link is ignored");
-        assert!(w.answered(second, &"now"));
-        assert!(!w.answered(second, &"now"), "an answer is used once");
-        let ask = w.ask("now");
-        assert_eq!(w.listed(&"now"), None);
-        assert!(w.answered(ask, &"now"), "a later list doesn't drop a lookup in flight");
-        let ask = w.ask("now");
-        w.listed(&"now");
-        w.moved(&"work");
-        w.moved(&"now");
-        assert!(!w.answered(ask, &"now"), "moving away and back drops it");
-        let ask = w.ask("now");
-        w.arrived();
-        assert!(!w.answered(ask, &"now"), "a newer link drops it");
+    fn only_the_newest_lookup_answers_and_only_if_the_person_stayed() {
+        let mut w = Waiting::default();
+        w.listed();
+        let first = w.ask();
+        let second = w.ask();
+        assert!(!w.answered(first), "an older lookup for the same link is ignored");
+        assert!(w.answered(second));
+        assert!(!w.answered(second), "an answer is used once");
+        let ask = w.ask();
+        assert_eq!(w.listed(), None);
+        assert!(w.answered(ask), "a later list doesn't drop a lookup in flight");
+        let ask = w.ask();
+        w.moved();
+        assert!(!w.answered(ask), "moving anywhere, even back again, drops it");
     }
 
     #[test]

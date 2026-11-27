@@ -153,6 +153,7 @@ pub fn arrive(s: &mut App) {
 }
 
 pub fn go(s: &mut App, to: Screen) {
+    crate::link::moved();
     if s.screen != to {
         leave(s);
         let from = std::mem::replace(&mut s.screen, to);
@@ -367,6 +368,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
                 return true;
             }
             if let Some(prev) = s.ov.back.pop() {
+                crate::link::moved();
                 leave(s);
                 s.screen = prev;
                 crate::switch_composer(s);
