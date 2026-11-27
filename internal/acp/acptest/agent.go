@@ -228,6 +228,10 @@ func (a *Agent) run(ctx context.Context, s *session, text string, cancel chan st
 		a.update(s.ID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": "about to crash"})
 		os.Exit(3)
 	}
+	if strings.Contains(text, "hangup") {
+		_ = os.Stdout.Close()
+		time.Sleep(time.Hour)
+	}
 	if strings.Contains(text, "think") {
 		a.update(s.ID, map[string]any{"sessionUpdate": "agent_thought_chunk", "content": "thinking it over"})
 	}
