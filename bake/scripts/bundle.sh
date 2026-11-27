@@ -4,6 +4,12 @@ name=$1
 bin=$2
 out=$3
 app="$out/$name.app"
+scheme=agenthail-bake
+if [ "${AGENTHAIL_RELEASE:-}" = true ]; then scheme=agenthail; fi
+links=
+if [ "$(basename "$bin")" = agenthail-rune ]; then
+	links="<key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>com.agenthail.bake.$name.link</string><key>CFBundleURLSchemes</key><array><string>$scheme</string></array></dict></array>"
+fi
 mkdir -p "$app/Contents/MacOS"
 cp "$bin" "$app/Contents/MacOS/$name"
 cat > "$app/Contents/Info.plist" <<PLIST
@@ -17,6 +23,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <key>NSHighResolutionCapable</key><true/>
 <key>NSMicrophoneUsageDescription</key><string>Agenthail uses the microphone when you talk to your agents.</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
+$links
 </dict></plist>
 PLIST
 codesign --force --sign - "$app" >/dev/null 2>&1

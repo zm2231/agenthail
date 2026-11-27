@@ -1,5 +1,6 @@
 mod history;
 mod icons;
+mod link;
 mod look;
 mod menubar;
 mod notify;
@@ -984,6 +985,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 s.now = OffsetDateTime::now_utc();
                 s.status = "live".into();
                 ui::connect::up(s);
+                link::listed(s);
                 if let Some(id) = s.selected.clone() {
                     fetch_requests(s, &id);
                     if ui::queue::wants(s, &id) {
@@ -1213,6 +1215,10 @@ fn main() {
         voice::run_alone();
         return;
     }
+    rune::url_schemes([link::SCHEME]);
+    if !rune::single_instance(link::INSTANCE) {
+        return;
+    }
     let mut app = rune::App::new(AppSpec::<App> {
         poll: Some(poll),
         on_key: Some(on_key),
@@ -1225,7 +1231,8 @@ fn main() {
         .chrome(Chrome { full_size_content: true, traffic_lights: Some((20.0, 20.0)), drag_regions: true })
         .window_options(WindowOptions { transparent: true, resizable: true, visible: true, ..Default::default() })
         .srgb_blend(true)
-        .on_quit(on_quit);
+        .on_quit(on_quit)
+        .on_open_url(link::on_open_url);
     let mut prefs = settings::spec();
     prefs.options = WindowOptions { visible: false, resizable: true, ..Default::default() };
     let (handle, window) = app.window(prefs);
