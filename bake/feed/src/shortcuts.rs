@@ -411,8 +411,8 @@ mod tests {
         assert_eq!(sc.owner_on(s("alt+mod+g"), "refresh", false), Some(ANY_APP), "an in-app Ctrl+Alt+G would clash");
         assert_eq!(sc.owner_on(s("ctrl+alt+g"), "refresh", false), Some(ANY_APP));
         assert_eq!(sc.owner_on(s("ctrl+alt+mod+g"), "refresh", false), Some(ANY_APP), "Ctrl+⌘ folds to Ctrl off macOS");
-        let mut folded = Shortcuts::load(Some(br#"{"refresh":{"carbonKeyCode":15,"carbonModifiers":4352}}"#), None);
-        assert_eq!(folded.set_any_app_on(Some(s("ctrl+r")), false), Err("Refresh"));
+        let mut folded = Shortcuts::load(Some(br#"{"refresh":{"carbonKeyCode":5,"carbonModifiers":4352}}"#), None);
+        assert_eq!(folded.set_any_app_on(Some(s("ctrl+g")), false), Err("Refresh"));
         let mut mac = Shortcuts::default();
         assert_eq!(mac.set_any_app_on(Some(s("super+k")), true), Err("Go to session"), "on macOS Super is ⌘");
         assert_eq!(mac.set_any_app_on(Some(s("ctrl+k")), true), Ok(()));
