@@ -167,14 +167,28 @@ fn reachable(x: &Session) -> bool {
     matches!(x.host.state.as_str(), "" | "local" | "connected") && x.unavailable_reason.as_deref().is_none_or(str::is_empty)
 }
 
-pub fn classify(id: &str, detail: &Detail, listing: Listing, known: Option<&Session>) -> Result<Gone, String> {
+#[derive(Clone, Debug, PartialEq)]
+pub enum Lost {
+    Deleted(String),
+    Failed(String),
+}
+
+impl Lost {
+    pub fn message(&self) -> &str {
+        match self {
+            Lost::Deleted(m) | Lost::Failed(m) => m,
+        }
+    }
+}
+
+pub fn classify(id: &str, detail: &Detail, listing: Listing, known: Option<&Session>) -> Result<Gone, Lost> {
     let listed = match &listing {
         Listing::Found(r) => Some(r.clone()),
         _ => None,
     };
     match (detail, &listed) {
-        (Detail::Missing, _) => return Err("Agenthail has no session with this id any more.".into()),
-        (Detail::Failed(e), None) => return Err(format!("Couldn't look this session up: {e}")),
+        (Detail::Missing, _) => return Err(Lost::Deleted("Agenthail has no session with this id any more.".into())),
+        (Detail::Failed(e), None) => return Err(Lost::Failed(format!("Couldn't look this session up: {e}"))),
         _ => {}
     }
     let mut row = listed.clone().or_else(|| known.cloned()).or_else(|| detail.row(id)).unwrap_or_else(|| Session { id: id.to_string(), ..Session::default() });
@@ -219,7 +233,7 @@ pub fn search_terms<'a>(rows: impl Iterator<Item = &'a Session>) -> Vec<String> 
 }
 
 impl Client {
-    pub fn look_up(&self, id: &str, known: Option<&Session>) -> Result<Gone, String> {
+    pub fn look_up(&self, id: &str, known: Option<&Session>) -> Result<Gone, Lost> {
         let detail = Detail::read(self.get_coded(&format!("/api/v1/session?id={}&limit={PAGE}", enc(id))));
         let found = detail.row(id);
         let terms = search_terms([known, found.as_ref()].into_iter().flatten());
@@ -345,8 +359,8 @@ mod tests {
 
     #[test]
     fn a_session_the_daemon_never_heard_of_gives_an_error_not_a_spinner() {
-        assert!(classify("s1", &Detail::Missing, Listing::Absent, None).unwrap_err().contains("no session"));
-        assert!(classify("s1", &Detail::Failed("refused".into()), Listing::Absent, None).unwrap_err().contains("refused"));
+        assert!(matches!(classify("s1", &Detail::Missing, Listing::Absent, None), Err(Lost::Deleted(m)) if m.contains("no session")));
+        assert!(matches!(classify("s1", &Detail::Failed("refused".into()), Listing::Absent, None), Err(Lost::Failed(m)) if m.contains("refused")));
         let g = classify("s1", &Detail::Unreachable, Listing::Absent, None).unwrap();
         assert_eq!((g.row.id.as_str(), &g.why), ("s1", &Why::Offline(String::new())));
         assert!(g.note().contains("its computer"));
@@ -381,8 +395,8 @@ mod tests {
     #[test]
     fn a_lookup_that_fails_shows_the_error_even_with_a_remembered_row() {
         let known = row(json!({"id": "s1", "name": "Fix it", "host": {"state": "local"}}));
-        assert!(classify("s1", &Detail::Missing, Listing::Absent, Some(&known)).unwrap_err().contains("no session"));
-        assert!(classify("s1", &Detail::Failed("refused".into()), Listing::Unchecked("refused".into()), Some(&known)).unwrap_err().contains("refused"));
+        assert!(matches!(classify("s1", &Detail::Missing, Listing::Absent, Some(&known)), Err(Lost::Deleted(m)) if m.contains("no session")));
+        assert!(matches!(classify("s1", &Detail::Failed("refused".into()), Listing::Unchecked("refused".into()), Some(&known)), Err(Lost::Failed(m)) if m.contains("refused")));
     }
 
     #[test]

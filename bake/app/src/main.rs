@@ -49,7 +49,7 @@ pub enum Bg {
     Requests(String, Vec<OpenRequest>, std::time::Instant),
     Answered(String, String, Result<(), feed::catalog::RespondError>),
     NewSession(ui::new_session::Loaded),
-    Looked(String, u64, Result<feed::gone::Gone, String>),
+    Looked(String, u64, Result<feed::gone::Gone, feed::gone::Lost>),
     Fixed(String, u64, feed::gone::Fix, Result<(), feed::catalog::RespondError>),
     Queue(String, u64, Result<feed::queue::Read, String>),
     QueueDone(String, (String, i64), feed::queue::Done),
@@ -492,6 +492,7 @@ pub fn fetch_ledger(s: &mut App, project: &str) {
 }
 
 fn selected_changed(s: &mut App, id: &str) {
+    ui::gone::changed(s, id);
     fetch_requests(s, id);
     if ui::queue::wants(s, id) {
         ui::queue::fetch(s, id);
