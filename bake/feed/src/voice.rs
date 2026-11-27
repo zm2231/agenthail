@@ -14,6 +14,10 @@ pub use trail::{Attempt, KEPT_CALLS, Setup, Trail, UNFINISHED};
 mod details;
 pub use details::Section;
 
+#[path = "voice_picks.rs"]
+mod picks;
+pub use picks::{Activity, LEADS, Pick, SESSIONS, matching};
+
 pub const PROTOCOL: i64 = 1;
 pub const HEARTBEAT_SECS: f64 = 10.0;
 pub const HEARTBEAT_GRACE_SECS: f64 = 30.0;
@@ -22,6 +26,16 @@ pub const MIC_DENIED: &str = "Microphone access is off for Agenthail. Turn it on
 pub const MIC_SETTINGS: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
 pub const ELSEWHERE: &str = "A call is already active in another Agenthail window. Hang up there to call from here.";
 pub const OCCUPIED: &str = "Another device owns this call. Hang up there to call from this Mac.";
+const TEXT_UNKNOWN: &str = "Text outcome is unknown.";
+pub const TOOLS_OUTDATED: &str = "This voice conversation was created before Agenthail's current tools";
+
+pub fn without_tools_notice(message: &str) -> (Option<String>, Option<String>) {
+    let Some(at) = message.find(TOOLS_OUTDATED) else {
+        return (Some(message.trim().to_string()).filter(|m| !m.is_empty()), None);
+    };
+    let rest = message[..at].trim();
+    ((!rest.is_empty()).then(|| rest.to_string()), Some(message[at..].trim().to_string()))
+}
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct Party {
@@ -64,6 +78,7 @@ pub struct State {
     pub coding_provider: Option<String>,
     pub skill_digest: Option<String>,
     pub brief: Option<Brief>,
+    pub text_receipt: Option<String>,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -126,6 +141,15 @@ impl State {
     pub fn shown_brief(&self) -> Option<(&Brief, &Party)> {
         let target = self.target.as_ref()?;
         self.brief.as_ref().filter(|b| b.session_id == target.id).map(|b| (b, target))
+    }
+
+    fn route(&self) -> String {
+        self.target.as_ref().map(|t| t.id.clone()).unwrap_or_default()
+    }
+
+    pub fn took_text(&self, message: &str) -> bool {
+        self.text_receipt.as_deref().and_then(|r| r.strip_prefix("accepted:")) == Some(message)
+            || self.events.iter().any(|e| matches!(e.method.as_str(), "voice/delegation/dispatched" | "voice/delegation/held") && e.params["messageId"].as_str() == Some(message))
     }
 
     pub fn has_call(&self) -> bool {
@@ -362,6 +386,7 @@ pub struct Job {
     pub work: u64,
     pub req: Req,
     pub action: Option<Action>,
+    moves: u64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -417,6 +442,9 @@ pub struct Call {
     clock: f64,
     setup: Option<(Setup, f64)>,
     setup_stuck: bool,
+    unsent: Vec<(String, String, String)>,
+    moves: u64,
+    sent: Vec<(String, String)>,
 }
 
 impl Call {
@@ -561,7 +589,7 @@ impl Call {
     }
 
     fn fetch(&mut self, req: Req, action: Option<Action>) {
-        let job = Job { generation: self.generation, work: self.work, req, action };
+        let job = Job { generation: self.generation, work: self.work, req, action, moves: self.moves };
         self.out.push(Effect::Fetch(job));
     }
 
@@ -816,10 +844,51 @@ impl Call {
         if self.closed || self.working || text.trim().is_empty() {
             return Vec::new();
         }
+        let text = text.trim().to_string();
+        let route = self.route_now();
+        let message = match self.unsent.iter().find(|(words, _, to)| *words == text && *to == route) {
+            Some((_, message, _)) => message.clone(),
+            None => {
+                let message = fresh_id();
+                self.unsent.push((text.clone(), message.clone(), route));
+                message
+            }
+        };
         self.begin_work();
-        let typed = Action { text: Some(text.trim().into()), message_id: Some(fresh_id()), ..Action::new("text").attempt(&id) };
+        let typed = Action { text: Some(text), message_id: Some(message), ..Action::new("text").attempt(&id) };
         self.fetch(Req::Text, Some(typed));
         self.drain()
+    }
+
+    fn route_now(&self) -> String {
+        self.state.as_ref().map(State::route).unwrap_or_default()
+    }
+
+    pub fn unsent(&self) -> Vec<&str> {
+        self.unsent.iter().map(|(text, _, _)| text.as_str()).collect()
+    }
+
+    pub fn take_sent(&mut self) -> Vec<(String, String)> {
+        std::mem::take(&mut self.sent)
+    }
+
+    fn settle_text(&mut self, message: &str) -> bool {
+        let Some(at) = self.unsent.iter().position(|(_, id, _)| id == message) else { return false };
+        let (words, id, _) = self.unsent.remove(at);
+        self.sent.push((id, words));
+        if self.unsent.is_empty() && self.error.as_ref().is_some_and(|e| e.starts_with(TEXT_UNKNOWN)) {
+            self.error = None;
+        }
+        true
+    }
+
+    fn texts_landed(&mut self, host: Option<&State>) -> bool {
+        let Some(host) = host else { return false };
+        let landed: Vec<String> = self.unsent.iter().filter(|(_, id, _)| host.took_text(id)).map(|(_, id, _)| id.clone()).collect();
+        for id in &landed {
+            self.settle_text(id);
+        }
+        !landed.is_empty()
     }
 
     pub fn can_transfer_to(&self, route: &str) -> bool {
@@ -839,10 +908,15 @@ impl Call {
         self.drain()
     }
 
+    pub fn can_interrupt(&self) -> bool {
+        !self.closed && !self.working && self.state.as_ref().is_some_and(|s| s.session.is_some() && !s.occupied)
+    }
+
     pub fn interrupt(&mut self) -> Vec<Effect> {
-        if self.closed || !self.connected_call() {
+        if !self.can_interrupt() {
             return Vec::new();
         }
+        self.begin_work();
         self.fetch(Req::Interrupt, Some(Action::new("interrupt")));
         self.drain()
     }
@@ -896,7 +970,12 @@ impl Call {
                 self.next_refresh = now + if self.audio_connected { 3.0 } else { 1.0 };
                 if current {
                     match result {
-                        Ok(next) => self.refreshed(next),
+                        Ok(mut next) => {
+                            if job.moves != self.moves {
+                                next.target = self.state.as_ref().and_then(|s| s.target.clone());
+                            }
+                            self.refreshed(next);
+                        }
                         Err(error) => self.connection_error = Some(format!("Reconnecting: {error}")),
                     }
                 }
@@ -962,7 +1041,7 @@ impl Call {
                     self.end_call("host_start_rejected");
                 }
                 _ => {
-                    let stale = Job { generation: self.generation, work: 0, req: Req::Abandon, action: Some(Action::new("stop").attempt(&id)) };
+                    let stale = Job { generation: self.generation, work: 0, req: Req::Abandon, action: Some(Action::new("stop").attempt(&id)), moves: self.moves };
                     self.out.push(Effect::Fetch(stale));
                 }
             },
@@ -1029,10 +1108,28 @@ impl Call {
             }
             Req::Text => {
                 self.end_work(job.work);
-                if current {
-                    match result {
-                        Ok(next) => self.state = Some(next),
-                        Err(error) => self.error = Some(format!("Text outcome is unknown. Check the conversation before resending. {error}")),
+                let asked = job.action.as_ref().and_then(|a| a.message_id.clone());
+                let asked = asked.filter(|id| current && self.unsent.iter().any(|(_, u, _)| u == id));
+                match result {
+                    Ok(next) if current => {
+                        let took = asked.as_ref().is_some_and(|id| next.took_text(id));
+                        self.state = Some(next);
+                        match &asked {
+                            Some(id) if took => {
+                                self.settle_text(id);
+                            }
+                            Some(_) => self.error = Some(format!("{TEXT_UNKNOWN} The call changed while it was sent; check the conversation before sending it again.")),
+                            None => {}
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        let landed = asked.as_ref().is_some_and(|id| host.as_ref().is_some_and(|h| h.took_text(id)));
+                        if let (Some(id), true) = (&asked, landed) {
+                            self.settle_text(id);
+                        } else if asked.is_some() {
+                            self.error = Some(format!("{TEXT_UNKNOWN} Check the conversation; sending the same text again won't repeat it. {error}"));
+                        }
                     }
                 }
             }
@@ -1045,7 +1142,12 @@ impl Call {
                 }
                 if current {
                     match result {
-                        Ok(next) => self.state = Some(next),
+                        Ok(next) => {
+                            if job.req == Req::Transfer {
+                                self.moves += 1;
+                            }
+                            self.state = Some(next);
+                        }
                         Err(error) => self.error = Some(error),
                     }
                 }
@@ -1064,6 +1166,7 @@ impl Call {
         self.reported_muted = false;
         self.input_revision = 0;
         self.asking_mic = false;
+        self.unsent.clear();
     }
 
     fn refreshed(&mut self, next: State) {
@@ -1097,6 +1200,9 @@ impl Call {
             self.error.get_or_insert(next.message().unwrap_or_else(|| fallback.into()));
         }
         let answer = next.sdp.clone().filter(|sdp| ours && self.applied_sdp.as_ref() != Some(sdp));
+        if ours {
+            self.texts_landed(Some(&next));
+        }
         self.state = Some(next);
         self.connection_error = None;
         if terminal {

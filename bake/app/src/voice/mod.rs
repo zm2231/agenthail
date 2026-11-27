@@ -13,7 +13,8 @@ use std::time::Duration;
 use feed::catalog::Client;
 #[cfg(target_os = "macos")]
 use feed::voice::Peer;
-use feed::voice::{Action, Call, Effect, Failure, Job, Req, State, Trail};
+use feed::derive::World;
+use feed::voice::{Action, Activity, Call, Effect, Failure, Job, Pick, Req, State, Trail};
 #[cfg(target_os = "macos")]
 use feed::voice::Setup;
 use rune::{AppSpec, Chrome, MicPermission, NativeView, TextEdit, Tx, Voice, WindowHandle, WindowOptions, WindowSpec};
@@ -23,12 +24,48 @@ thread_local! {
     static ROUTE: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
     static OPENED: RefCell<Option<String>> = const { RefCell::new(None) };
     static UNSAVED: RefCell<Option<Trail>> = const { RefCell::new(None) };
+    static SHARED: RefCell<Shared> = RefCell::new(Shared::default());
+}
+
+#[derive(Default)]
+struct Shared {
+    version: u64,
+    built: Option<f64>,
+    operator: String,
+    shared_for: String,
+    picks: Vec<Pick>,
+    activity: Option<Activity>,
+}
+
+pub fn share(built: f64, world: &World) {
+    if WINDOW.with(|w| w.borrow().is_none()) {
+        return;
+    }
+    SHARED.with_borrow_mut(|s| {
+        if s.built == Some(built) && s.shared_for == s.operator {
+            return;
+        }
+        s.built = Some(built);
+        s.shared_for = s.operator.clone();
+        s.picks = world.voice_picks();
+        s.activity = world.voice_activity(&s.operator);
+        s.version += 1;
+    });
+}
+
+pub fn operator() -> Option<String> {
+    WINDOW.with(|w| w.borrow().is_some()).then(|| SHARED.with_borrow(|s| s.operator.clone())).filter(|id| !id.is_empty())
+}
+
+fn reset_shared() {
+    SHARED.with_borrow_mut(|s| *s = Shared { version: s.version + 1, ..Shared::default() });
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Ask {
     NewConversation,
     StopTarget,
+    Interrupt,
 }
 
 pub type Heard = (String, String, String);
@@ -40,10 +77,15 @@ pub struct Win {
     pub name: String,
     pub offer: Option<(String, String)>,
     pub typed: TextEdit,
+    pub typed_id: Option<String>,
     pub route_edit: TextEdit,
     route_typed: String,
     pub details: bool,
     pub ask: Option<Ask>,
+    pub picks: Vec<Pick>,
+    pub activity: Option<Activity>,
+    pub picking: Option<usize>,
+    shared_seen: u64,
     pub slot: NativeView,
     client: Option<Client>,
     #[cfg(target_os = "macos")]
@@ -78,10 +120,15 @@ impl Win {
             name: name.to_string(),
             offer: None,
             typed: TextEdit::new(""),
+            typed_id: None,
             route_edit: TextEdit::new(target.trim()),
             route_typed: target.trim().to_string(),
             details: false,
             ask: None,
+            picks: Vec::new(),
+            activity: None,
+            picking: None,
+            shared_seen: 0,
             slot: NativeView::new(),
             client,
             #[cfg(target_os = "macos")]
@@ -212,6 +259,27 @@ impl Win {
         false
     }
 
+    fn take_shared(&mut self) -> bool {
+        let operator = self.call.state.as_ref().and_then(|s| s.session.as_ref()).map(|p| p.id.clone()).unwrap_or_default();
+        SHARED.with_borrow_mut(|s| {
+            let moved = s.operator != operator;
+            s.operator = operator;
+            let cleared = moved && self.activity.take().is_some();
+            if s.version == self.shared_seen {
+                return cleared;
+            }
+            self.shared_seen = s.version;
+            self.picks = s.picks.clone();
+            self.activity = s.activity.clone().filter(|_| s.shared_for == s.operator);
+            true
+        })
+    }
+
+    pub fn pick(&mut self, pick: &Pick) {
+        self.picking = None;
+        self.route(&pick.id, &pick.label());
+    }
+
     pub fn sync_route(&mut self) -> bool {
         let typed = self.route_edit.text.trim().to_string();
         if typed == self.route_typed {
@@ -263,6 +331,7 @@ pub fn open(target: &str, name: &str) {
         .options(WindowOptions { transparent: true, resizable: true, visible: true, ..Default::default() })
         .srgb_blend(true)
         .map_app(|app| app.on_close(closed));
+    reset_shared();
     let handle = rune::open_window(window);
     WINDOW.with(|w| *w.borrow_mut() = Some(handle));
 }
@@ -302,6 +371,7 @@ fn closed(w: &mut Win, _: &mut Tx) {
         w.web = None;
     }
     WINDOW.with(|slot| *slot.borrow_mut() = None);
+    reset_shared();
 }
 
 pub fn take_opened_session() -> Option<String> {
@@ -394,6 +464,13 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
     while let Ok((attempt, granted)) = w.mic.1.try_recv() {
         let effects = w.call.mic(&attempt, granted);
         w.run(effects);
+        changed = true;
+    }
+    changed |= w.take_shared();
+    let sent = w.call.take_sent();
+    if w.typed_id.as_ref().is_some_and(|id| sent.iter().any(|(s, _)| s == id)) {
+        w.typed = TextEdit::new("");
+        w.typed_id = None;
         changed = true;
     }
     let effects = w.call.tick(t);

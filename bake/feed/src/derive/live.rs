@@ -506,6 +506,10 @@ impl Overview {
         self.tails.due(&self.base.sessions, now, open)
     }
 
+    pub fn follow_tail(&mut self, session: Option<String>) -> bool {
+        self.tails.follow(session)
+    }
+
     pub fn tail_retry_due(&self) -> bool {
         self.tails.retry_due()
     }
