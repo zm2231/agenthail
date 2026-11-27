@@ -212,6 +212,7 @@ mod tests {
         assert_eq!(w.project_name("shared:z"), "");
         w.found_names.insert("shared:z".into(), "Zed".into());
         assert_eq!(w.project_name("shared:z"), "Zed", "a project known only from search keeps its name");
+        assert_eq!(w.project_name("p-1"), "Atlas", "a project with no sessions or archived keeps its record's name");
         assert_eq!(client.found_work("shared:z", "z-W2").unwrap_err(), "no work item z-W2");
     }
 

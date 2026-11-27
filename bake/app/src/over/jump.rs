@@ -130,8 +130,10 @@ fn highlighted(s: &App) -> usize {
     if at == query(s) { *ix } else { 0 }
 }
 
-fn same(a: &Pick, b: &Pick) -> bool {
+fn same(s: &App, a: &Pick, b: &Pick) -> bool {
+    let loaded_as = |ledger: &str, id: &str, x: &str| id == x && s.ov.d.work.get(x).is_some_and(|w| w.ledger_key() == ledger);
     match (a, b) {
+        (Pick::Found(ledger, id), Pick::Target(Target::Work(x))) | (Pick::Target(Target::Work(x)), Pick::Found(ledger, id)) => loaded_as(ledger, id, x),
         (Pick::Target(x), Pick::Target(y)) => x == y,
         (Pick::Found(a, x), Pick::Found(b, y)) => a == b && x == y,
         (Pick::Codex(x), Pick::Codex(y)) => x.id == y.id,
@@ -151,7 +153,7 @@ pub fn keep_highlight(s: &mut App, change: impl FnOnce(&mut App)) {
     let before = highlighted_pick(s);
     change(s);
     if let Some(p) = before
-        && let Some(ix) = entries(s).into_iter().filter_map(|e| e.pick).position(|q| same(&p, &q))
+        && let Some(ix) = entries(s).into_iter().filter_map(|e| e.pick).position(|q| same(s, &p, &q))
     {
         s.ov.jump_ix = (query(s).to_string(), ix);
     }

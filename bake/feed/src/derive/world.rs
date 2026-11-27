@@ -259,7 +259,7 @@ impl World {
     }
 
     pub fn project_name(&self, key: &str) -> String {
-        self.project(key).map(|p| p.name.clone()).or_else(|| self.found_names.get(key).cloned()).unwrap_or_default()
+        self.project(key).map(|p| p.name.clone()).or_else(|| self.record(key).map(|r| r.display_name.clone())).or_else(|| self.found_names.get(key).cloned()).unwrap_or_default()
     }
 
     pub fn record(&self, key: &str) -> Option<&ProjectRecord> {
