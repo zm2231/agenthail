@@ -134,6 +134,7 @@ impl Outcome {
             "session_operation_unknown" | "host_outcome_unknown" => Outcome::Unknown(unknown(&error.message)),
             "submitted" => Outcome::Pending(unknown(STILL_FINISHING)),
             _ if error.status == 0 && error.maybe_delivered => Outcome::Pending(unknown(&error.message)),
+            _ if error.status == 504 && error.maybe_delivered => Outcome::Unknown(unknown(&error.message)),
             _ => Outcome::Failed(error.message),
         }
     }
@@ -193,8 +194,7 @@ impl Keys {
                 p.recorded = None;
             }
         }
-        let done = (*outcome == Outcome::Done).then(|| p.session.clone());
-        self.pending.retain(|p| p.sent > 0 || (p.unresolved && done.as_deref() != Some(p.session.as_str())));
+        self.pending.retain(|p| p.sent > 0 || p.unresolved);
     }
 
     pub fn read_started(&mut self) -> u64 {

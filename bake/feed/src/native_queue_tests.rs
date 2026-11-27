@@ -177,14 +177,26 @@ fn a_failed_send_does_not_erase_an_earlier_unknown_outcome() {
 }
 
 #[test]
-fn a_done_change_starts_the_session_over_like_native() {
+fn another_change_succeeding_keeps_an_unanswered_add_on_its_key() {
     let mut keys = Keys::default();
     let add = Act::Add("Ship it".into());
     let first = send(&mut keys, "s", &add, Outcome::Pending("still finishing".into()));
     let other = send(&mut keys, "t", &add, Outcome::Pending("still finishing".into()));
     send(&mut keys, "s", &Act::Delete("q1".into()), Outcome::Done);
-    assert_ne!(send(&mut keys, "s", &add, Outcome::Done), first, "adding the same words later is a new request");
+    assert_eq!(send(&mut keys, "s", &add, Outcome::Done), first, "the retry can't add it twice");
+    assert_ne!(send(&mut keys, "s", &add, Outcome::Done), first, "once answered, the same words again are a new request");
     assert_eq!(send(&mut keys, "t", &add, Outcome::Done), other, "another session keeps its key");
+}
+
+#[test]
+fn a_gateway_timeout_keeps_the_key_for_a_retry() {
+    let error = crate::catalog::RespondError::from_status("native-queue", 504, "");
+    let outcome = Outcome::of(Err(error));
+    assert!(matches!(outcome, Outcome::Unknown(_)), "{outcome:?}");
+    let mut keys = Keys::default();
+    let add = Act::Add("Ship it".into());
+    let first = send(&mut keys, "s", &add, outcome);
+    assert_eq!(send(&mut keys, "s", &add, Outcome::Done), first);
 }
 
 #[test]
