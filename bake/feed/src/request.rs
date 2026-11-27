@@ -277,6 +277,7 @@ pub fn page(questions: &[RequestQuestion], step: usize, key: PagerKey, picks: &m
     match key {
         PagerKey::Back => Paged { step: step.saturating_sub(1), send: false },
         PagerKey::Forward => Paged { step: (step + 1).min(last), send: false },
+        PagerKey::Send if step < last => Paged { step: step + 1, send: false },
         PagerKey::Send => Paged { step, send: true },
         PagerKey::Pick(n) => {
             let Some(q) = questions.get(step) else { return Paged { step, send: false } };
@@ -424,6 +425,7 @@ mod tests {
         page(&qs, 0, PagerKey::Pick(1), &mut picks, true);
         assert_eq!(picks, vec!["b-r", "a-x"], "a new single pick replaces the old one");
         assert_eq!(page(&qs, 2, PagerKey::Pick(1), &mut picks, true), Paged { step: 2, send: false }, "the last question never sends on its own");
+        assert_eq!(page(&qs, 0, PagerKey::Send, &mut picks, true), Paged { step: 1, send: false }, "Return moves on until the last question");
         assert_eq!(page(&qs, 2, PagerKey::Send, &mut picks, true), Paged { step: 2, send: true });
         let one = vec![question("solo", &["yes", "no"], false)];
         let mut picks = Vec::new();

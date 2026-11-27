@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use feed::brief::Brief;
 use feed::catalog::{Client, RespondError, request_key};
+use feed::composer::Delivered;
 use feed::decisions::{Decision, Handled, Inbox, gone, remember, request_hold, rev_moved};
 use feed::request::Response;
 use feed::review::{self, Verdict};
@@ -18,7 +19,7 @@ enum Done {
     Inbox(Instant, Inbox),
     Acted(String, Handled, bool, String, Result<(), (RespondError, String)>),
     Brief(String, Result<Brief, RespondError>),
-    Replied(String, String, Result<(), RespondError>),
+    Replied(String, String, String, Result<(), RespondError>),
     Version(Option<String>, Option<String>),
 }
 
@@ -186,12 +187,14 @@ pub fn drain(s: &mut crate::App) -> bool {
                     }
                 }
             }
-            Done::Replied(id, who, result) => {
+            Done::Replied(id, who, words, result) => {
                 st.replying.remove(&id);
                 match result {
                     Ok(()) => {
                         st.notes.remove(&id);
-                        st.replies.remove(&id);
+                        if st.replies.get(&id).is_some_and(|t| t.text.trim() == words) {
+                            st.replies.remove(&id);
+                        }
                         st.reply_keys.remove(&id);
                         st.replied.insert(id, who);
                     }
@@ -298,8 +301,11 @@ pub fn reply(s: &mut crate::App, d: &Decision) {
     s.ov.inbox.reply_keys.insert(id.clone(), (message.clone(), key.clone()));
     let (tx, session) = (s.ov.inbox.tx.clone(), d.session_id.clone());
     std::thread::spawn(move || {
-        let result = client.send_as(&session, &message, &[], None, None, &key).map(drop);
-        let _ = tx.send(Done::Replied(id, who, result));
+        let result = client.send_as(&session, &message, &[], None, None, &key).and_then(|delivered| match delivered {
+            Delivered::Unconfirmed => Err(RespondError { message: "the daemon took it but hasn't confirmed it ran".into(), code: "submitted".into(), maybe_delivered: true, answered: false, reply: serde_json::Value::Null, status: 0 }),
+            _ => Ok(()),
+        });
+        let _ = tx.send(Done::Replied(id, who, words, result));
     });
 }
 
