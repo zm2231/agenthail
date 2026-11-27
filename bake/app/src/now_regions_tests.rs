@@ -192,17 +192,21 @@ fn a_refresh_that_changes_nothing_shown_skips_the_view() {
     assert!(runs(&mut rt, Bg::OverviewError("offline".into())), "anything else that arrives");
 }
 
+fn people_done() -> Vec<Session> {
+    let mut sessions = super::rows_memo_lines::people();
+    sessions[0] = session("a", 0, json!({"name": "Alpha one", "lastActive": "2026-11-27T07:00:30Z", "endTurn": {"headline": "Landed the fix", "outcome": "done", "at": "2026-11-27T07:00:30Z"}}));
+    sessions
+}
+
 #[test]
 fn a_session_crossing_into_idle_within_the_minute_shows_as_a_fresh_build_would() {
     if !isolated("now_regions::a_session_crossing_into_idle_within_the_minute_shows_as_a_fresh_build_would") {
         return;
     }
-    use super::rows_memo_lines::people;
     use crate::over::rows::built;
     let dir = Dir::new("now-regions-done");
     let mut rt = world(&dir);
-    let mut sessions = people();
-    sessions[0] = session("a", 0, json!({"name": "Alpha one", "lastActive": "2026-11-27T07:00:30Z", "endTurn": {"headline": "Landed the fix", "outcome": "done", "at": "2026-11-27T07:00:30Z"}}));
+    let sessions = people_done();
     let mut sent = std::sync::Arc::default();
     send(&rt, overview("2026-11-27T10:00:20Z", sessions.clone(), &mut sent, false));
     rt.frame(DT);
@@ -224,6 +228,16 @@ fn a_session_crossing_into_idle_within_the_minute_shows_as_a_fresh_build_would()
     rt.frame(DT);
     assert_eq!(built::views(), views, "a refresh later in the same minute skips the view");
     matches_fresh(&mut rt, "three hours since the session's turn, passed within the minute");
+    let done = |rt: &Runtime<App>| {
+        let mark = rt.elements().into_iter().find(|e| e.path.ends_with("srow-a/#0/#1")).expect("the row's status mark");
+        mark.fill.g > 0.9 && mark.fill.r < 0.1
+    };
+    assert!(done(&rt), "within the minute the row still shows the session done, as of the shown minute");
+    send(&rt, overview("2026-11-27T10:01:05Z", people_done(), &mut sent, false));
+    rt.frame(DT);
+    rt.frame(DT);
+    assert!(!done(&rt), "once the minute turns, the row shows the session idle");
+    matches_fresh(&mut rt, "the minute after the session went idle");
 }
 
 #[test]
