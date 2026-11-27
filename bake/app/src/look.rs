@@ -41,7 +41,7 @@ struct State {
     device: String,
     pictures: HashMap<String, Result<Picture, String>>,
     meshes: HashMap<String, Picture>,
-    kits: HashMap<String, KitTheme>,
+    kits: Vec<(String, KitTheme)>,
     rx: Option<Receiver<Got>>,
     tx: Option<Sender<Got>>,
     problem: Option<String>,
@@ -427,10 +427,14 @@ fn quant(x: f32) -> u32 {
 const KEPT_KITS: usize = 16;
 
 fn cached(s: &mut State, key: String, build: impl Fn(&KitEnv) -> Kit + 'static) -> KitTheme {
-    if !s.kits.contains_key(&key) && s.kits.len() >= KEPT_KITS {
-        s.kits.clear();
-    }
-    s.kits.entry(key).or_insert_with(|| KitTheme::new(build)).clone()
+    let hit = match s.kits.iter().position(|(k, _)| *k == key) {
+        Some(i) => s.kits.remove(i),
+        None => (key, KitTheme::new(build)),
+    };
+    let theme = hit.1.clone();
+    s.kits.insert(0, hit);
+    s.kits.truncate(KEPT_KITS);
+    theme
 }
 
 fn accented(k: &mut Kit, a: Color) {
