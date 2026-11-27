@@ -1,13 +1,15 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 
 use feed::catalog::Session;
 use feed::queue::{Op, Queued, undelivered};
 use feed::search::Entry;
+use feed::wake::Sender;
 use rune::{El, col, el, icon, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize, Kit};
 
+use crate::wake::channel;
 use super::rail::rail_section;
 use crate::icons;
 use crate::theme::{self, BODY, META, META_BOLD, accent, attention, failed, faint, muted};
@@ -25,6 +27,7 @@ thread_local! {
 
 pub fn ask(what: Asked) {
     ASKED.with_borrow_mut(|list| list.push(what));
+    crate::wake::poke();
 }
 
 pub struct Delivery {

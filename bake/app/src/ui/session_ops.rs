@@ -1,11 +1,12 @@
 use std::collections::{HashSet, VecDeque};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 
 use feed::adopt::{self, Adopted, Phase};
 use feed::catalog::{RespondError, Session};
 use feed::create::Host;
 use feed::menu::Offer;
 use feed::moves::{self, Notice};
+use feed::wake::Sender;
 use rune::{El, col, el, icon, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit};
 use time::{OffsetDateTime, UtcOffset};
@@ -14,6 +15,7 @@ use crate::App;
 use crate::ui::window::{Id, Kind, may_open, shows};
 use crate::icons;
 use crate::theme::{self, BODY, META, failed, faint, muted};
+use crate::wake::channel;
 
 pub enum Done {
     Adopted(String, Result<Adopted, RespondError>),

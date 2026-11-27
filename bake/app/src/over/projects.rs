@@ -1,16 +1,18 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 
 use feed::catalog::{Client, RespondError};
 use feed::create::Host;
 use feed::derive::world::ProjectRecord;
 use feed::projects::{self, Confirm, Entry, Item, Offer, TileChange, TileOrder, TileReply, Tiles, Worktree};
+use feed::wake::Sender;
 use rune::{El, PointerPress, TextEdit, Tx, col, el, row, text, text_input};
 use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, IconButton, IconButtonVariant, Kit, Menu, MenuItem, Placement, SegmentedControl, Select, SelectAppearance};
 use rune_theme_opencode::icons;
 
 use crate::App;
 use crate::over::ui::{self, BODY, META, META_MED, base, strong, weak};
+use crate::wake::channel;
 
 const SURFACES: [(&str, &str); 2] = [("claude", "Claude"), ("codex", "Codex")];
 

@@ -7,8 +7,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender, channel};
-use std::time::Duration;
+use std::sync::mpsc::Receiver;
 
 use feed::catalog::Client;
 #[cfg(target_os = "macos")]
@@ -17,7 +16,10 @@ use feed::derive::World;
 use feed::voice::{Action, Activity, Call, Effect, Failure, Job, Pick, Req, State, Trail};
 #[cfg(target_os = "macos")]
 use feed::voice::Setup;
+use feed::wake::Sender;
 use rune::{AppSpec, Chrome, MicPermission, NativeView, TextEdit, Tx, Voice, WindowHandle, WindowOptions, WindowSpec};
+
+use crate::wake::voice_channel;
 
 thread_local! {
     static WINDOW: RefCell<Option<WindowHandle>> = const { RefCell::new(None) };
@@ -51,6 +53,7 @@ pub fn share(built: f64, world: &World) {
         s.activity = world.voice_activity(&s.operator);
         s.version += 1;
     });
+    crate::wake::VOICE.ring();
 }
 
 pub fn operator() -> Option<String> {
@@ -98,6 +101,7 @@ pub struct Win {
     gone: Arc<AtomicBool>,
     clock: f64,
     save_after: f64,
+    minute: time::OffsetDateTime,
     wake: crate::wake::Wake,
     #[cfg(target_os = "macos")]
     page_spent: bool,
@@ -136,12 +140,13 @@ impl Win {
             peer,
             #[cfg(target_os = "macos")]
             web: None,
-            replies: channel(),
-            heard: channel(),
-            mic: channel(),
+            replies: voice_channel(),
+            heard: voice_channel(),
+            mic: voice_channel(),
             gone: Arc::new(AtomicBool::new(false)),
             clock: 0.0,
             save_after: 0.0,
+            minute: time::OffsetDateTime::now_utc(),
             wake: crate::wake::Wake::default(),
             #[cfg(target_os = "macos")]
             page_spent: false,
@@ -266,6 +271,9 @@ impl Win {
         SHARED.with_borrow_mut(|s| {
             let moved = s.operator != operator;
             s.operator = operator;
+            if moved {
+                crate::wake::poke();
+            }
             let cleared = moved && self.activity.take().is_some();
             if s.version == self.shared_seen {
                 return cleared;
@@ -324,6 +332,7 @@ pub fn open(target: &str, name: &str) {
     let open = WINDOW.with(|w| w.borrow().clone());
     if let Some(handle) = open {
         ROUTE.with(|r| *r.borrow_mut() = Some((target.to_string(), name.to_string())));
+        crate::wake::VOICE.ring();
         handle.focus();
         return;
     }
@@ -334,6 +343,7 @@ pub fn open(target: &str, name: &str) {
         .srgb_blend(true)
         .map_app(|app| app.on_close(closed));
     reset_shared();
+    crate::wake::connect(&crate::wake::VOICE, window.app.handle());
     let handle = rune::open_window(window);
     WINDOW.with(|w| *w.borrow_mut() = Some(handle));
 }
@@ -350,8 +360,9 @@ fn spec() -> AppSpec<Win> {
 }
 
 pub fn run_alone() {
-    rune::App::new(spec())
-        .chrome(CHROME)
+    let app = rune::App::new(spec());
+    crate::wake::connect(&crate::wake::VOICE, app.handle());
+    app.chrome(CHROME)
         .window_options(WindowOptions { transparent: true, resizable: true, visible: true, ..Default::default() })
         .srgb_blend(true)
         .on_close(closed)
@@ -373,6 +384,7 @@ fn closed(w: &mut Win, _: &mut Tx) {
         w.web = None;
     }
     WINDOW.with(|slot| *slot.borrow_mut() = None);
+    crate::wake::VOICE.uninstall();
     reset_shared();
 }
 
@@ -382,6 +394,7 @@ pub fn take_opened_session() -> Option<String> {
 
 pub fn open_timeline(id: &str) {
     OPENED.with(|o| *o.borrow_mut() = Some(id.to_string()));
+    crate::wake::poke();
 }
 
 thread_local! {
@@ -407,6 +420,7 @@ pub fn trace(from: &'static str, w: &Win) {
 }
 
 fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
+    crate::wake::VOICE.rearm();
     w.clock = t;
     let mut changed = w.fresh_page();
     changed |= w.build_peer();
@@ -476,7 +490,7 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
         changed = true;
     }
     let effects = w.call.tick(t);
-    changed |= effects.iter().any(|e| matches!(e, Effect::Note(_)));
+    changed |= !effects.is_empty();
     w.run(effects);
     if w.call.trail.changed && t >= w.save_after {
         if save_trail(&mut w.call.trail) {
@@ -485,7 +499,17 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
             w.save_after = t + SAVE_RETRY_SECS;
         }
     }
-    w.wake.after(tx, Duration::from_millis(100));
+    let now = time::OffsetDateTime::now_utc();
+    if now >= feed::wake::next_minute(w.minute) {
+        w.minute = now;
+        changed = true;
+    }
+    let minute = t + (feed::wake::next_minute(now) - now).as_seconds_f64();
+    let save = w.call.trail.changed.then_some(w.save_after);
+    let due = [w.call.next_due(), save, Some(minute)].into_iter().flatten().min_by(f64::total_cmp);
+    if let Some(at) = due {
+        w.wake.at(tx, at.max(t));
+    }
     trace("poll", w);
     changed
 }

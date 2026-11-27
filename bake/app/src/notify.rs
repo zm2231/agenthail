@@ -2,14 +2,16 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 
 use feed::catalog::RespondError;
 use feed::derive::needs::{NeedKind, Target};
 use feed::notify::{Kind, Notice, Notified, Permission, Prefs, REPLY, choice_of, daemon_posts};
+use feed::wake::Sender;
 use rune_notify::{Authorization, Click, Failure, Notification, PostError};
 
 use crate::{App, Screen};
+use crate::wake::channel;
 
 const WITHDRAWN_KEPT: usize = 64;
 
@@ -25,10 +27,12 @@ static RECHECK: AtomicBool = AtomicBool::new(false);
 
 pub fn recheck() {
     RECHECK.store(true, Ordering::Relaxed);
+    crate::wake::poke();
 }
 
 pub fn preference_saved(id: &str, value: bool) {
     SAVED.lock().unwrap_or_else(|e| e.into_inner()).push((id.to_string(), value));
+    crate::wake::poke();
 }
 
 pub struct State {

@@ -666,6 +666,24 @@ fn a_stream_missed_while_hidden_is_read_again_when_the_session_shows() {
 }
 
 #[test]
+fn a_missed_stream_still_pending_wakes_for_its_next_catch_up() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    crate::ui::inspect::streamed(&mut s, "a", goal("first"));
+    s.screen = Screen::Now;
+    crate::ui::inspect::streamed(&mut s, "a", goal("while hidden"));
+    crate::wake::begin(crate::wake::Window::Main);
+    crate::ui::inspect::drain(&mut s);
+    assert_eq!(crate::wake::next(crate::wake::Window::Main), None, "a hidden session's catch-up waits for it to show, not for a timer");
+    s.screen = Screen::Session;
+    crate::wake::begin(crate::wake::Window::Main);
+    crate::ui::inspect::drain(&mut s);
+    let next = crate::wake::next(crate::wake::Window::Main).expect("the next catch-up is woken for while it is pending");
+    let left = next.saturating_duration_since(std::time::Instant::now()).as_secs();
+    assert!((29..=30).contains(&left), "{left}");
+}
+
+#[test]
 fn a_rekey_keeps_an_open_goal_edit_and_logs_on_the_session() {
     let (mut s, _) = beside(false);
     s.screen = Screen::Session;

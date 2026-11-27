@@ -53,7 +53,10 @@ fn name_section(s: &Prefs, person: &Person, writable: bool, k: &Kit) -> El {
 
 fn composer(k: &Kit) -> El {
     let shown = !feed::notice::shared().hidden;
-    let flip = parts::switch("turn-notice", "Show the terminal session note above the composer", shown, false, |_: &mut Prefs| feed::notice::change(|n| n.set_shown(n.hidden)), k);
+    let flip = parts::switch("turn-notice", "Show the terminal session note above the composer", shown, false, |_: &mut Prefs| {
+        feed::notice::change(|n| n.set_shown(n.hidden));
+        crate::wake::poke();
+    }, k);
     section("Composer", vec![line("Show the terminal session note above the composer", None, flip, k)], None, k)
 }
 

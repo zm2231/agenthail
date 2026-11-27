@@ -2,13 +2,15 @@ mod activity;
 mod pins;
 
 use rune_kit::Kit;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use feed::catalog::Session;
 use feed::search::{Codex, Command, codex_query};
+use feed::wake::Sender;
 use rune::{El, KeyEvent, Tx};
 
+use crate::wake::channel;
 use crate::{App, Screen};
 
 pub(super) const SETTLE: Duration = Duration::from_millis(250);
@@ -115,10 +117,11 @@ fn settle_codex(s: &mut App) -> bool {
                 st.codex = None;
             }
             st.typed = Some((q, Instant::now()));
+            crate::wake::due_after(Instant::now(), SETTLE);
             return false;
         }
     }
-    let due = st.typed.as_ref().is_some_and(|(_, at)| at.elapsed() >= SETTLE);
+    let due = st.typed.as_ref().is_some_and(|(_, at)| crate::wake::due_after(*at, SETTLE));
     let asked = st.codex.as_ref().is_some_and(|(a, _, _)| *a == q);
     if due && !asked {
         ask_codex(s, q);

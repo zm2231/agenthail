@@ -7,13 +7,13 @@ use serde_json::Value;
 use crate::catalog::Client;
 
 pub fn daemon(replies: Vec<(u16, String)>) -> (Client, mpsc::Receiver<(String, Value)>) {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = crate::wake::to_thread();
     let client = serve(replies, move |path, body, _| tx.send((path, body)).unwrap());
     (client, rx)
 }
 
 pub fn keyed(replies: Vec<(u16, String)>) -> (Client, mpsc::Receiver<(String, Value, String)>) {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = crate::wake::to_thread();
     let client = serve(replies, move |path, body, key| tx.send((path, body, key)).unwrap());
     (client, rx)
 }

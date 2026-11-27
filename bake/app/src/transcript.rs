@@ -124,6 +124,7 @@ fn watch_end(id: String) -> impl Fn(rune::ScrollPos) + 'static {
         BEHIND.with_borrow_mut(|b| {
             if b.0 != id || b.1 != hidden {
                 *b = (id.clone(), hidden, true);
+                crate::wake::poke();
             }
         });
     }

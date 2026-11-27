@@ -1,10 +1,12 @@
 use std::collections::HashMap;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use feed::role::SessionRole;
+use feed::wake::Sender;
 
 use crate::App;
+use crate::wake::channel;
 
 type Read = (String, u64, Result<Option<SessionRole>, String>);
 
@@ -81,7 +83,7 @@ pub fn drain(s: &mut App) -> bool {
         }
     }
     let shown = super::window::shown_sessions(s);
-    let due: Vec<String> = s.roles.failed.iter().filter(|(id, at)| at.elapsed() >= RETRY && shown.contains(id)).map(|(id, _)| id.clone()).collect();
+    let due: Vec<String> = s.roles.failed.iter().filter(|(id, at)| shown.contains(id) && crate::wake::due_after(**at, RETRY)).map(|(id, _)| id.clone()).collect();
     for id in due {
         s.roles.failed.remove(&id);
         refresh(s, &id);

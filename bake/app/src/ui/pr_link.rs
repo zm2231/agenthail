@@ -1,14 +1,16 @@
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 use std::time::Instant;
 
 use feed::action::PrOp;
 use feed::catalog::{Pr, RespondError};
 use feed::menu::{Patch, names_pr, pr_problem};
+use feed::wake::Sender;
 use rune::{El, TextEdit, Tx, el, row, text, text_input};
 use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit};
 
 use crate::theme::{self, BODY, META, failed, faint};
 use crate::{App, session};
+use crate::wake::channel;
 
 pub enum Done {
     Changed(String, PrOp, String, u64, Result<Vec<Pr>, RespondError>),

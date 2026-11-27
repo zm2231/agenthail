@@ -1,14 +1,16 @@
 use std::collections::HashMap;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 
 use feed::activity::{Page, earlier};
 use feed::catalog::Session;
+use feed::wake::Sender;
 use feed::watch::Removal;
 use rune::{El, col, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize, Kit};
 
 use crate::App;
 use crate::over::ui::{self, META, META_MED, base, strong, weak};
+use crate::wake::channel;
 
 #[derive(Default)]
 struct Shown {

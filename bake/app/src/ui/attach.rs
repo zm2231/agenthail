@@ -431,9 +431,8 @@ pub fn pump(s: &mut App) -> bool {
         s.attach.rev += 1;
         changed = true;
     }
-    let now = Instant::now();
     for sent in s.attach.sent.values_mut() {
-        if sent.copied.is_some_and(|at| now.duration_since(at) >= COPIED_FOR) {
+        if sent.copied.is_some_and(|at| crate::wake::due_after(at, COPIED_FOR)) {
             sent.copied = None;
             s.attach.rev += 1;
             changed = true;

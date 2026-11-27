@@ -1385,3 +1385,34 @@ fn a_refresh_sent_before_a_transfer_lands_does_not_bring_the_old_route_back() {
     call.reply(fresh, Ok(state(json!({"phase": "connected", "attemptId": attempt}))), 10.0);
     assert!(call.state.as_ref().is_some_and(|s| s.target.is_none()), "a later refresh is believed");
 }
+
+#[test]
+fn a_call_is_woken_at_each_deadline_its_tick_acts_on_and_not_before() {
+    let mut call = ready();
+    let id = started(&mut call, 0.0);
+    let answer = |call: &mut Call, effects: &[Effect], now: f64| {
+        for job in jobs(effects) {
+            call.reply(job, Ok(state(json!({"phase": "negotiating", "attemptId": id}))), now);
+        }
+    };
+    let first = call.tick(0.0);
+    answer(&mut call, &first, 0.0);
+    let mut now = 0.0;
+    let mut acted = 0;
+    while let Some(due) = call.next_due() {
+        if due > 60.0 {
+            break;
+        }
+        let due = due.max(now);
+        if due - 0.01 > now {
+            assert!(call.tick(due - 0.01).is_empty(), "nothing is due before {due}");
+        }
+        let effects = call.tick(due);
+        assert!(!effects.is_empty(), "the tick acts at {due}");
+        acted += 1;
+        answer(&mut call, &effects, due);
+        now = due;
+    }
+    assert!(acted >= 5, "refreshes and heartbeats each came due: {acted}");
+}
+

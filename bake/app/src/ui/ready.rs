@@ -1,13 +1,15 @@
 use rune_kit::Kit;
 use std::collections::HashMap;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use feed::activity::{Ready, ready_label};
+use feed::wake::Sender;
 use rune::{El, row, text};
 
 use crate::theme::{META_BOLD, accent};
 use crate::{App, Screen};
+use crate::wake::channel;
 
 pub const RETRY: Duration = Duration::from_secs(10);
 
@@ -133,7 +135,7 @@ pub fn poll(s: &mut App) -> bool {
     let Some(project) = wanted(s) else { return changed };
     let due = match s.readies.counts.get(&project) {
         None => true,
-        Some(c) => !c.asked && c.retry_at.is_some_and(|at| Instant::now() >= at),
+        Some(c) => !c.asked && c.retry_at.is_some_and(crate::wake::due),
     };
     if due {
         read(s, &project);

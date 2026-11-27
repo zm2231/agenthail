@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 use feed::catalog::Client;
@@ -13,6 +13,7 @@ use crate::icons;
 use crate::ui::watch::{self, Feed};
 use crate::theme::{BODY, HEADING, META, failed, faint, muted};
 use crate::{App, Bg};
+use crate::wake::to_thread;
 
 const RECONNECT: Duration = Duration::from_secs(5);
 const SETTLE: Duration = Duration::from_secs(2);
@@ -35,23 +36,23 @@ pub fn start(s: &mut App) {
 }
 
 fn attach(s: &mut App, client: Client) {
-    let (poke, poked) = channel();
+    let (poke, poked) = to_thread();
     s.link.poke = Some(poke.clone());
     sessions(client.clone(), s.outbox.clone(), poke, poked);
     let stream = feed::watch::Stream::default();
     watch::ledgers(client.clone(), s.outbox.clone(), stream.clone());
-    let (poke, poked) = channel();
+    let (poke, poked) = to_thread();
     crate::watch_overview(client.clone(), s.outbox.clone(), poked, stream);
     s.overview_poke = Some(poke);
     crate::over::inbox::start(&mut s.ov.inbox, &client);
     s.client = Some(client);
 }
 
-fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>) {
+fn sessions(c: Client, tx: feed::wake::Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>) {
     std::thread::spawn(move || {
         let mut catalog = Catalog::default();
         let mut cursor = Arc::new(AtomicU64::new(0));
-        let (mut resume, resumed) = channel();
+        let (mut resume, resumed) = to_thread();
         let generation = Arc::new(AtomicU64::new(0));
         let mut resumed = Some(resumed);
         let (mut checked, mut last): (Option<Instant>, Option<Instant>) = (None, None);
@@ -83,7 +84,7 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                             gap = false;
                             let mine = generation.fetch_add(1, Ordering::AcqRel) + 1;
                             cursor = Arc::new(AtomicU64::new(catalog.seq()));
-                            let (fresh, resumed) = channel();
+                            let (fresh, resumed) = to_thread();
                             resume = fresh;
                             watch::catalog(c.clone(), cursor.clone(), resumed, poke.clone(), generation.clone(), mine);
                             watch::events(c.clone(), snap.event_cursor, tx.clone(), generation.clone(), mine);
@@ -397,7 +398,7 @@ mod tests {
     fn a_change_rereads_the_session_list_once_things_go_quiet_not_a_second_later() {
         use std::time::{Duration, Instant};
         let (client, reads) = snapshot_reads();
-        let (outbox, _inbox) = std::sync::mpsc::channel();
+        let (outbox, _inbox) = crate::wake::channel();
         let (poke, poked) = std::sync::mpsc::channel();
         super::sessions(client, outbox, poke.clone(), poked);
         reads.recv_timeout(Duration::from_secs(5)).expect("the first read never came");

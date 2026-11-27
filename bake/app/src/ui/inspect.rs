@@ -1,12 +1,14 @@
 use std::collections::HashMap;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 
 use feed::catalog::{RespondError, Session};
 use feed::inspect::{self, GoalAct, LifecycleAct, LifecycleResult, Metadata};
+use feed::wake::Sender;
 use rune::{El, ScrollSpec, TextEdit, Tx, col, el, icon, row, text, text_input};
 use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit};
 use time::OffsetDateTime;
 
+use crate::wake::channel;
 use super::rail::rail_section;
 use crate::icons;
 use crate::theme::{self, BODY, META, META_BOLD, accent, attention, failed, faint, muted, wash};
@@ -149,10 +151,12 @@ fn current(s: &App, id: &str) -> String {
 }
 
 fn catch_up(s: &mut App) {
-    let due: Vec<String> = s.inspect.missed.iter().filter(|(id, m)| m.asked.is_none_or(|at| at.elapsed() >= CATCH_UP) && showing(s, id)).map(|(id, _)| id.clone()).collect();
+    let due: Vec<String> = s.inspect.missed.iter().filter(|(id, m)| showing(s, id) && m.asked.is_none_or(|at| crate::wake::due_after(at, CATCH_UP))).map(|(id, _)| id.clone()).collect();
     for id in due {
         if let Some(miss) = s.inspect.missed.get_mut(&id) {
-            miss.asked = Some(std::time::Instant::now());
+            let now = std::time::Instant::now();
+            miss.asked = Some(now);
+            crate::wake::by(now + CATCH_UP);
         }
         metadata_moved(s, &id);
     }

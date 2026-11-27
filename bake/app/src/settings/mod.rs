@@ -15,11 +15,12 @@ use std::cell::{Cell, OnceCell};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 use feed::catalog::Client;
 use feed::prefs::{Base, Compaction, CompactDraft, Failure, Notify, Person, Preference, RemoteControl, Settings};
+use feed::wake::Sender;
 use rune::{AppHandle, Cx, El, KeyEvent, TextEdit, Tx, WindowHandle, col, el};
 use rune_kit::{KitCx, SegmentedControl};
 
@@ -128,6 +129,7 @@ pub struct Prefs {
     loaded: bool,
     in_flight: usize,
     seq: HashMap<Read, u64>,
+    minute: time::OffsetDateTime,
     tx: Sender<Done>,
     rx: Receiver<Done>,
 }
@@ -162,6 +164,7 @@ pub fn spec() -> rune::WindowSpec<Prefs> {
 }
 
 pub fn keep(handle: AppHandle<Prefs>, window: WindowHandle) {
+    crate::wake::connect(&crate::wake::SETTINGS, handle.clone());
     WINDOW.with(|w| {
         let _ = w.set((handle, window));
     });
@@ -218,7 +221,7 @@ fn fixtures() -> bool {
 }
 
 pub(crate) fn init() -> Prefs {
-    let (tx, rx) = channel();
+    let (tx, rx) = crate::wake::settings_channel();
     let (client, no_client) = connect();
     Prefs {
         client,
@@ -269,6 +272,7 @@ pub(crate) fn init() -> Prefs {
         loaded: false,
         in_flight: 0,
         seq: HashMap::new(),
+        minute: time::OffsetDateTime::now_utc(),
         tx,
         rx,
     }
@@ -621,6 +625,8 @@ pub fn notify(s: &mut Prefs, what: Notify) {
 }
 
 pub(crate) fn poll(s: &mut Prefs, _: f64, tx: &mut Tx) -> bool {
+    crate::wake::SETTINGS.rearm();
+    crate::wake::begin(crate::wake::Window::Settings);
     let mut changed = false;
     if !s.loaded && (visible() || std::env::args().any(|a| a == "--window")) {
         s.rewatch = true;
@@ -643,20 +649,29 @@ pub(crate) fn poll(s: &mut Prefs, _: f64, tx: &mut Tx) -> bool {
         tx.scroll_into_view_in("settings-tabs", format!("segment{}", s.tab));
     }
     if let Some(at) = s.retry_base
-        && std::time::Instant::now() >= at
         && visible()
+        && crate::wake::due(at)
     {
         s.retry_base = None;
         fetch(s, Read::Base);
     }
-    if s.in_flight > 0 {
-        s.wake.after(tx, Duration::from_millis(60));
-    } else if s.tab == appearance::TAB && (visible() || std::env::args().any(|a| a == "--window")) {
-        s.wake.after(tx, Duration::from_millis(300));
-    } else if s.retry_base.is_some() && visible() {
-        s.wake.after(tx, Duration::from_secs(1));
+    if visible() {
+        changed |= minute(s);
+    }
+    if let Some(at) = crate::wake::next(crate::wake::Window::Settings) {
+        s.wake.until(tx, at);
     }
     changed
+}
+
+fn minute(s: &mut Prefs) -> bool {
+    let now = time::OffsetDateTime::now_utc();
+    let turned = now >= feed::wake::next_minute(s.minute);
+    if turned {
+        s.minute = now;
+    }
+    crate::wake::later(feed::wake::next_minute(now) - now);
+    turned
 }
 
 fn on_key(s: &mut Prefs, ev: &KeyEvent, tx: &mut Tx) -> bool {
@@ -748,3 +763,7 @@ fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         }
     })
 }
+
+#[cfg(test)]
+#[path = "minute_tests.rs"]
+mod minute_tests;

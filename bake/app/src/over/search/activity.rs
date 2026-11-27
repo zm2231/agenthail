@@ -1,12 +1,14 @@
 use std::collections::HashSet;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 use std::time::Instant;
 
 use feed::search::{Activity, Filter, Page, kind_label};
+use feed::wake::Sender;
 use rune::{Color, El, Key, KeyEvent, ScrollSpec, TextEdit, TextStyle, Tx, col, el, icon, row, text, text_input};
 use rune_kit::{Button, ButtonVariant, ControlSize, Kit, Select, Spinner};
 use rune_theme_opencode::icons;
 
+use crate::wake::channel;
 use super::SETTLE;
 use crate::App;
 use crate::over::ui::{self, BODY, BODY_MED, META, strong, weak};
@@ -101,9 +103,10 @@ fn settle(s: &mut App) -> bool {
     let f = filter(p);
     if p.typed.0 != f {
         p.typed = (f, Instant::now());
+        crate::wake::due_after(Instant::now(), SETTLE);
         return false;
     }
-    if p.asked.as_ref() != Some(&f) && p.typed.1.elapsed() >= SETTLE {
+    if p.asked.as_ref() != Some(&f) && crate::wake::due_after(p.typed.1, SETTLE) {
         load(s, true);
         return true;
     }

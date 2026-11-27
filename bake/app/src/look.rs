@@ -1,16 +1,18 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 use feed::catalog::Client;
+use feed::wake::Sender;
 use feed::watch::Reconnect;
 use feed::look::{self as fl, Fit, Look, Rgb, Tint, View, Wallpaper};
 use rune::{Color, Cx, El, Pixels, PixelsWrap, SystemMaterial, Tx, el};
 use rune_kit::{Kit, KitCx, KitEnv, KitTheme, TextRoles, TextScale};
 
 use crate::theme::{self, Paint};
+use crate::wake::channel;
 
 const SAMPLE_SIDE: u32 = 512;
 const SIGN_IN_WAIT: Duration = Duration::from_secs(10);
@@ -301,6 +303,9 @@ fn pump(s: &mut State) {
     }
     let got: Vec<Got> = s.rx.as_ref().map(|rx| rx.try_iter().collect()).unwrap_or_default();
     for g in got {
+        if matches!(&g, Got::Problem(p) if *p == s.problem) {
+            continue;
+        }
         s.generation += 1;
         match g {
             Got::Device(d) => s.device = d,
@@ -616,3 +621,7 @@ pub fn backdrop(session: bool) -> El {
         root
     })
 }
+
+#[cfg(test)]
+#[path = "look_tests.rs"]
+mod tests;

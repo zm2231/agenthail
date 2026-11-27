@@ -1,11 +1,14 @@
 use std::collections::HashMap;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use feed::extensions::WebSession;
+use feed::wake::Sender;
 use rune::NativeView;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+
+use crate::wake::channel;
 
 const RENEW_BEFORE: time::Duration = time::Duration::hours(1);
 const RENEW_RETRY: Duration = Duration::from_secs(60);
@@ -68,7 +71,7 @@ impl Page {
     }
 
     fn slow(&self) -> bool {
-        self.loading_since.is_some_and(|at| at.elapsed() >= SLOW)
+        self.loading_since.is_some_and(|at| crate::wake::due_after(at, SLOW))
     }
 
     fn reopen(&mut self) {
@@ -112,7 +115,12 @@ impl Page {
                 Load::Finished(_) => {}
             }
         }
-        if self.opened && !self.arrived && self.phase == Phase::Loading && self.loading_since.is_some_and(|at| at.elapsed() >= UNREACHED) {
+        changed
+    }
+
+    fn timeouts(&mut self) -> bool {
+        let mut changed = false;
+        if self.opened && !self.arrived && self.phase == Phase::Loading && self.loading_since.is_some_and(|at| crate::wake::due_after(at, UNREACHED)) {
             self.phase = Phase::Failed(format!("Nothing came back from the page in {} seconds. Check that it is serving, then Reload.", UNREACHED.as_secs()));
             self.loading_since = None;
             changed = true;
@@ -234,8 +242,12 @@ impl Web {
     }
 
     pub fn sign_in_due(&mut self, now: OffsetDateTime) -> bool {
-        let waiting = self.renew_at.is_some_and(|at| at > Instant::now());
-        let due = self.failure.is_none() && !self.signing && !waiting && (self.remint || self.cookie.as_ref().is_none_or(|c| expiring(c, now)));
+        let waiting = self.renew_at.is_some_and(|at| !crate::wake::due(at));
+        let renew = self.cookie.as_ref().is_none_or(|c| expiring(c, now));
+        if !renew && let Some(at) = self.cookie.as_ref().and_then(|c| OffsetDateTime::parse(&c.expires_at, &Rfc3339).ok()) {
+            crate::wake::later(at - RENEW_BEFORE - now);
+        }
+        let due = self.failure.is_none() && !self.signing && !waiting && (self.remint || renew);
         self.signing |= due;
         due
     }
@@ -272,7 +284,7 @@ impl Web {
         }
         let cookie = self.cookie.clone()?;
         let opening = !self.pages.get(want).is_some_and(|p| p.opened) && !self.verified_for(&cookie.value, want);
-        if self.checked_at.is_some_and(|at| if self.unclear { at.elapsed() < CHECK_RETRY } else { !opening }) {
+        if self.checked_at.is_some_and(|at| if self.unclear { !crate::wake::due_after(at, CHECK_RETRY) } else { !opening }) {
             return None;
         }
         self.checking = true;
@@ -324,6 +336,14 @@ impl Web {
     }
 
     pub fn pump(&mut self, want: Option<&str>) -> bool {
+        let mut changed = self.open_wanted(want);
+        for page in self.pages.values_mut() {
+            changed |= page.timeouts();
+        }
+        changed
+    }
+
+    fn open_wanted(&mut self, want: Option<&str>) -> bool {
         let mut changed = false;
         for page in self.pages.values_mut() {
             changed |= page.take_loads();
