@@ -394,13 +394,11 @@ impl Overview {
     }
 
     fn follow_archive(&mut self) -> bool {
+        let active: HashSet<&str> = self.base.sessions.iter().filter_map(|x| x.project.as_ref()).filter(|p| p.archived == Some(false)).map(|p| p.id.as_str()).collect();
         let mut moved = false;
-        for x in &self.base.sessions {
-            let Some((id, archived)) = x.project.as_ref().and_then(|p| Some((&p.id, p.archived?))) else { continue };
-            if let Some(record) = self.base.projects.iter_mut().find(|r| &r.id == id && r.archived != archived) {
-                record.archived = archived;
-                moved = true;
-            }
+        for record in self.base.projects.iter_mut().filter(|r| r.archived && active.contains(r.id.as_str())) {
+            record.archived = false;
+            moved = true;
         }
         moved
     }
@@ -484,6 +482,7 @@ impl Overview {
         if fresh {
             self.reconcile();
         }
+        self.follow_archive();
         self.stale = true;
         self.take_actors(started, actors);
         let opened: Vec<String> = self.covered.iter().filter(|k| self.ledgers.contains_key(*k)).cloned().collect();

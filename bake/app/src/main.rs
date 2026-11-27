@@ -1378,6 +1378,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 s.notify.sessions_moved = true;
                 feed::holders::pins().prune(&s.sessions);
                 fetch_tails(s);
+                for project in s.ov.live.missing_ledgers() {
+                    fetch_ledger(s, &project);
+                }
                 arrived = true;
             }
             Bg::Tail(id, last_active, result, at) => {

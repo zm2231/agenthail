@@ -112,14 +112,19 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                 Err(RecvTimeoutError::Timeout) => due = true,
                 Ok(first) => {
                     let mut next = Some(first);
-                    let settle = Instant::now() + feed::watch::SETTLE;
+                    let opened = Instant::now();
+                    let mut settle = opened + feed::watch::SETTLE;
                     while let Some(feed) = next.take() {
                         match feed {
                             Feed::Poke => {
                                 due = true;
                                 last = None;
                             }
-                            Feed::Changed => due = true,
+                            Feed::Changed => {
+                                due = true;
+                                last = None;
+                                settle = (Instant::now() + feed::watch::SETTLE).min(opened + GAP);
+                            }
                             Feed::Confirm => {
                                 due = true;
                                 last = None;
@@ -357,6 +362,60 @@ mod tests {
         let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
         assert!(out.status.success() && said.contains("1 passed"), "{said}");
         None
+    }
+
+    fn snapshot_reads() -> (feed::catalog::Client, std::sync::mpsc::Receiver<std::time::Instant>) {
+        use std::io::{BufRead, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let (heard, reads) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let heard = heard.clone();
+                std::thread::spawn(move || {
+                    let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap_or_default();
+                    loop {
+                        let mut header = String::new();
+                        if reader.read_line(&mut header).unwrap_or(0) == 0 || header == "\r\n" {
+                            break;
+                        }
+                    }
+                    if line.split_whitespace().nth(1).is_some_and(|p| p.starts_with("/api/v1/snapshot")) {
+                        let _ = heard.send(std::time::Instant::now());
+                    }
+                    let mut stream = stream;
+                    let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}");
+                });
+            }
+        });
+        (feed::catalog::Client::new(&base, "t"), reads)
+    }
+
+    #[test]
+    fn a_change_rereads_the_session_list_once_things_go_quiet_not_a_second_later() {
+        use std::time::{Duration, Instant};
+        let (client, reads) = snapshot_reads();
+        let (outbox, _inbox) = std::sync::mpsc::channel();
+        let (poke, poked) = std::sync::mpsc::channel();
+        super::sessions(client, outbox, poke.clone(), poked);
+        reads.recv_timeout(Duration::from_secs(5)).expect("the first read never came");
+        std::thread::sleep(Duration::from_millis(1200));
+        reads.try_iter().for_each(drop);
+
+        poke.send(super::Feed::Changed).unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        poke.send(super::Feed::Changed).unwrap();
+        let burst = Instant::now();
+        let read = reads.recv_timeout(Duration::from_secs(3)).expect("no reread");
+        assert!(read >= burst + Duration::from_millis(150), "read {:?} before the burst went quiet", burst.saturating_duration_since(read));
+
+        std::thread::sleep(Duration::from_millis(220));
+        poke.send(super::Feed::Changed).unwrap();
+        let next = Instant::now();
+        let read = reads.recv_timeout(Duration::from_secs(3)).expect("no second reread");
+        assert!(read < next + Duration::from_millis(600), "the next change waited {:?}", read.duration_since(next));
     }
 
     #[test]

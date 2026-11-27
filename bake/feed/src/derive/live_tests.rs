@@ -731,3 +731,24 @@ fn a_project_unarchived_by_its_session_comes_back_with_the_session_list() {
     assert_eq!(ov.missing_ledgers().into_iter().collect::<Vec<_>>(), ["old"], "the session's word on its project is taken at once");
     assert!(ov.world(&[]).projects.iter().any(|p| p.key == "old"));
 }
+
+#[test]
+fn a_revived_project_stays_shown_whatever_the_row_order_or_an_older_overview_says() {
+    let mut ov = Overview::default();
+    let row = |id: &str, archived: bool, last: &str| {
+        let mut x = session(id, "old", last, "idle");
+        x.project.as_mut().unwrap().archived = Some(archived);
+        x
+    };
+    let archived = |at: &str, sessions: Vec<Session>| {
+        let mut f = fetched(at, sessions, vec![]);
+        f.recorded.projects.iter_mut().filter(|p| p.id == "old").for_each(|p| p.archived = true);
+        f
+    };
+    ov.refresh(archived("2026-11-24T12:00:00Z", vec![row("a", true, "2026-11-01T11:00:00Z"), row("b", true, "2026-11-01T11:00:00Z")]));
+    assert!(ov.take_sessions("2026-11-24T12:00:05Z", "", 0, vec![row("a", false, "2026-11-24T12:00:04Z"), row("b", true, "2026-11-01T11:00:00Z")]));
+    assert_eq!(ov.missing_ledgers().len(), 1, "one row's word is enough, before or after the others");
+    ov.refresh(archived("2026-11-24T12:00:02Z", vec![row("a", true, "2026-11-01T11:00:00Z"), row("b", true, "2026-11-01T11:00:00Z")]));
+    assert!(ov.world(&[]).projects.iter().any(|p| p.key == "old"), "an overview read before the revival doesn't hide it again");
+    assert_eq!(ov.missing_ledgers().len(), 1);
+}
