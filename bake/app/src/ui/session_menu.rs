@@ -11,7 +11,7 @@ use crate::{App, Screen, open_link, session};
 
 pub use super::session_dialogs::{button, has_marks, marks, overlays};
 
-const REFRESH: Duration = Duration::from_secs(30);
+const RETRY: Duration = Duration::from_secs(30);
 
 pub enum Done {
     Settings(String, u64, Result<SessionSettings, String>),
@@ -177,17 +177,26 @@ pub fn load(s: &mut App, id: &str) {
     fetch_models(s, id);
 }
 
+pub(crate) fn changed(s: &mut App, id: &str) {
+    if s.screen != Screen::Session || s.selected.as_deref() != Some(id) || s.client.is_none() {
+        return;
+    }
+    s.menus.refreshed = Some((id.to_string(), Instant::now()));
+    fetch_settings(s, id, Duration::ZERO);
+    fetch_context(s, id, Duration::ZERO);
+}
+
 pub fn ensure_models(s: &mut App, id: &str) {
     if s.client.is_none() || session(s, id).is_none() {
         return;
     }
-    if !s.menus.settings.contains_key(id) && s.menus.settings_asked.get(id).is_none_or(|at| at.elapsed() >= REFRESH) {
+    if !s.menus.settings.contains_key(id) && s.menus.settings_asked.get(id).is_none_or(|at| at.elapsed() >= RETRY) {
         s.menus.settings_asked.insert(id.to_string(), Instant::now());
         fetch_settings(s, id, Duration::ZERO);
     }
     let retry = match s.menus.models_asked.get(id) {
         None => true,
-        Some(at) => s.menus.models_error.contains_key(id) && at.elapsed() >= REFRESH,
+        Some(at) => s.menus.models_error.contains_key(id) && at.elapsed() >= RETRY,
     };
     if retry {
         fetch_models(s, id);
@@ -213,14 +222,20 @@ fn refresh_shown(s: &mut App) {
     if !s.menus.models_asked.contains_key(&id) {
         fetch_models(s, &id);
     }
-    let due = s.menus.refreshed.as_ref().is_none_or(|(shown, at)| *shown != id || at.elapsed() >= REFRESH);
-    if due {
-        s.menus.refreshed = Some((id.clone(), Instant::now()));
+    let failed = s.menus.note.contains_key(&id) || s.menus.context_error.contains_key(&id) || s.menus.models_error.contains_key(&id);
+    let due = s.menus.refreshed.as_ref().is_none_or(|(shown, at)| *shown != id || at.elapsed() >= RETRY);
+    if !failed || !due {
+        return;
+    }
+    s.menus.refreshed = Some((id.clone(), Instant::now()));
+    if s.menus.note.contains_key(&id) {
         fetch_settings(s, &id, Duration::ZERO);
+    }
+    if s.menus.context_error.contains_key(&id) {
         fetch_context(s, &id, Duration::ZERO);
-        if s.menus.models_error.contains_key(&id) {
-            fetch_models(s, &id);
-        }
+    }
+    if s.menus.models_error.contains_key(&id) {
+        fetch_models(s, &id);
     }
 }
 
@@ -518,6 +533,7 @@ fn settled(s: &mut App, done: Done) {
                         settings::apply(set, key, &value);
                     }
                     fetch_settings(s, &id, Duration::from_millis(1500));
+                    fetch_context(s, &id, Duration::from_millis(1500));
                 }
                 Err(error) => s.ov.notice = Some(failure("Changing the setting", &error)),
             }

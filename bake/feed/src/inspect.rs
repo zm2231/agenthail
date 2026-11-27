@@ -339,8 +339,8 @@ pub fn can_save(act: GoalAct, text: &str, budget: Option<i64>) -> bool {
     }
 }
 
-pub fn moves_goal(events: &[crate::wire::Event]) -> bool {
-    events.iter().any(|e| matches!(e, crate::wire::Event::Upsert(item) if item.kind == "goal"))
+pub fn moves_metadata(events: &[crate::wire::Event]) -> bool {
+    events.iter().any(|e| matches!(e, crate::wire::Event::Upsert(item) if item.kind == "goal" || item.kind == "context"))
 }
 
 pub fn lifecycle(x: &Session) -> Lifecycle {
@@ -594,10 +594,11 @@ mod tests {
     }
 
     #[test]
-    fn a_goal_event_in_the_stream_asks_for_a_reread() {
+    fn a_goal_or_context_event_in_the_stream_asks_for_a_reread() {
         let item = |kind: &str| crate::wire::Event::Upsert(crate::Item { kind: kind.into(), ..Default::default() });
-        assert!(moves_goal(&[item("message"), item("goal")]));
-        assert!(!moves_goal(&[item("message"), crate::wire::Event::Done]));
+        assert!(moves_metadata(&[item("message"), item("goal")]));
+        assert!(moves_metadata(&[item("context")]));
+        assert!(!moves_metadata(&[item("message"), crate::wire::Event::Done]));
     }
 
     #[test]

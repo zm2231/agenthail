@@ -90,11 +90,11 @@ pub(crate) fn read(s: &mut App, id: &str, ticket: u64, result: Result<Metadata, 
         s.inspect.meta.insert(id.to_string(), data);
     }
     if s.inspect.reads.landed(id, ticket) {
-        goal_moved(s, id);
+        metadata_moved(s, id);
     }
 }
 
-pub(crate) fn goal_moved(s: &mut App, id: &str) {
+pub(crate) fn metadata_moved(s: &mut App, id: &str) {
     if !showing(s, id) || s.client.is_none() || !s.inspect.reads.want(id) {
         return;
     }
@@ -191,7 +191,7 @@ fn settled(s: &mut App, done: Done) {
             if let Some(note) = note {
                 s.inspect.goal_note.insert(id.clone(), note);
             }
-            goal_moved(s, &id);
+            metadata_moved(s, &id);
         }
         Done::Life(id, generation, act, tell, result) => {
             let elsewhere = (!showing(s, &id)).then(|| session(s, &id).map(|x| x.title()).unwrap_or_default());
