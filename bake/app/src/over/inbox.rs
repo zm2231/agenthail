@@ -352,6 +352,16 @@ pub fn toggle_open(s: &mut crate::App, d: &Decision, tx: &mut rune::Tx) {
 }
 
 pub fn reply(s: &mut crate::App, d: &Decision) {
+    if !s.ov.inbox.reply_unknown.contains(&d.id()) {
+        send_reply(s, d);
+    }
+}
+
+pub fn reply_as_new(s: &mut crate::App, d: &Decision) {
+    send_reply(s, d);
+}
+
+fn send_reply(s: &mut crate::App, d: &Decision) {
     let id = d.id();
     let words = s.ov.inbox.replies.get(&id).map(|t| t.text.trim().to_string()).unwrap_or_default();
     if words.is_empty() || d.session_id.is_empty() || s.ov.inbox.replying.contains(&id) || crate::closed(s, &d.session_id) {

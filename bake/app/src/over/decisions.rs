@@ -161,7 +161,7 @@ fn reply_panel(s: &App, i: usize, d: &Decision, who: &str, k: &Kit) -> El {
         "Send as new".to_string()
     } else {
         format!("Send to {}", ui::short_title(who, 24))
-    }).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(!ready).on_press(move |s: &mut App| inbox::reply(s, &dd)).build(k).key(format!("decision-{i}-reply-send"));
+    }).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(!ready).on_press(move |s: &mut App| inbox::reply_as_new(s, &dd)).build(k).key(format!("decision-{i}-reply-send"));
     let mut c = col().key(format!("decision-reply-{id}")).w_full().gap(8.0).pl(4.0);
     if let Some(sent) = st.replied.get(&id) {
         c = c.child(row().gap(6.0).items_center().child(icon(&icons::CIRCLE_CHECK, k.text_size(12.0)).color(base(k))).child(text(sent.clone()).font(k.text(META_MED)).color(base(k))));

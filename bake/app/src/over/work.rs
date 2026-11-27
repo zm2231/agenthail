@@ -342,6 +342,8 @@ fn refusal(s: &App, item: &WorkKey, m: Move, words: &str) -> Option<&'static str
         Some(SENDING)
     } else if sends.held(item).is_some_and(|h| h != m) {
         Some(ledger::OTHER_HELD)
+    } else if sends.held(item) == Some(m) && !sends.asks_again(item, m) {
+        Some(ledger::ANSWERED_UNKNOWN)
     } else if sends.held_words(item, m) != Some(words) && !ledger::offered(w).contains(&m) {
         Some(ledger::NOT_OFFERED)
     } else {

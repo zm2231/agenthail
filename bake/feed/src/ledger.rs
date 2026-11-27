@@ -100,6 +100,8 @@ pub const NOT_OFFERED: &str = "This work item moved on while you wrote, so it do
 
 pub const OTHER_HELD: &str = "Another move on this work item isn't settled yet. Your words stay here until it settles.";
 
+pub const ANSWERED_UNKNOWN: &str = "Agenthail can't tell whether the earlier send happened, and asking again gets the same answer. Check the item, then use Send as new.";
+
 pub const CHANGED_WORDS: &str = "The last send isn't settled yet, so only the same words can go now. Change them once it settles.";
 
 pub fn settles(e: &RespondError) -> bool {

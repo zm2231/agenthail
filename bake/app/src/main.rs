@@ -805,8 +805,8 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
         }
         _ => busy,
     };
-    if s.unsent.latest(id).is_some_and(|u| u.outcome_unknown && u.same(&message, &attachments)) {
-        send_as_new(s, id, tx);
+    if let Some(key) = s.unsent.list(id).iter().find(|u| u.outcome_unknown && u.same(&message, &attachments)).map(|u| u.key.clone()) {
+        send_new(s, id, &key, tx);
         return;
     }
     ui::paste::set_composer(s, "");
@@ -1010,7 +1010,13 @@ pub fn offers_new_send(s: &App, id: &str) -> bool {
 }
 
 pub fn send_as_new(s: &mut App, id: &str, tx: &mut Tx) {
-    let Some(unsent) = s.unsent.latest(id).cloned().filter(|u| u.offers_new_send()) else { return };
+    if let Some(key) = s.unsent.latest(id).map(|u| u.key.clone()) {
+        send_new(s, id, &key, tx);
+    }
+}
+
+fn send_new(s: &mut App, id: &str, key: &str, tx: &mut Tx) {
+    let Some(unsent) = s.unsent.list(id).iter().find(|u| u.key == key).cloned().filter(|u| u.offers_new_send()) else { return };
     if sending(s, id) || s.client.is_none() || !confirmed(s, id, Confirm::SendNew, true) {
         return;
     }
