@@ -1186,14 +1186,19 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
                 s.redeliver.entry(id.clone()).or_insert_with(|| feed::composer::Backoff::starting(clock)).failed(clock);
                 s.unsent.add(&id, failed);
             } else {
-                s.redeliver.insert(id.clone(), feed::composer::Backoff::starting(clock));
+                answered_now(s, &id, clock);
                 put_back(s, &id, &failed);
                 s.unsent.add(&id, failed);
             }
         }
-        None => {
-            s.redeliver.insert(id.clone(), feed::composer::Backoff::starting(clock));
-        }
+        None => answered_now(s, &id, clock),
+    }
+}
+
+fn answered_now(s: &mut App, id: &str, clock: f64) {
+    let now = feed::composer::now_ms();
+    if !s.unsent.list(id).iter().any(|u| u.redelivering(now)) {
+        s.redeliver.insert(id.to_string(), feed::composer::Backoff::starting(clock));
     }
 }
 
