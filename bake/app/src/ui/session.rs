@@ -65,7 +65,7 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
                 super::complete::submit(s, &id, tx);
             }
         })
-        .child(icon(&icons::ARROW_UP, 15.0).color(if ready { Color::WHITE } else { faint() }));
+        .child(icon(&icons::ARROW_UP, 15.0).color(if ready { theme::on_accent() } else { faint() }));
     let busy = crate::busy_delivery(s, &x.id);
     let unsent = s.unsent.has(&x.id);
     let status = match crate::composer_note(s, &x.id) {
@@ -84,7 +84,7 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
                 .py(3.0)
                 .radius(7.0)
                 .fill(wash())
-                .hover(Color::WHITE.alpha(0.08))
+                .hover(crate::theme::ink(0.08))
                 .motion(SPRING)
                 .on_press(move |s: &mut App| crate::pick_busy(s, &id, choice.other()))
                 .child(icon(if choice == Busy::Steer { &icons::BOLT } else { &icons::CLOCK }, 12.0).color(accent()))
@@ -126,9 +126,9 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
         .w_full()
         .max_w(780.0)
         .radius(18.0)
-        .backdrop_blur(22.0)
-        .fill(card().alpha(0.78))
-        .border(if s.attach.dropping { 1.5 } else { 1.0 }, if s.attach.dropping { accent() } else { Color::WHITE.alpha(0.10) })
+        .backdrop_blur(theme::paint().blur)
+        .fill(theme::glass_tint())
+        .border(if s.attach.dropping { 1.5 } else { 1.0 }, if s.attach.dropping { accent() } else { theme::line() })
         .shadow(10.0, 34.0, Color::BLACK.alpha(0.45))
         .child(
             col()
@@ -203,11 +203,11 @@ pub(crate) fn tabs(s: &App, id: &str) -> El {
             .py(5.0)
             .radius(8.0)
             .motion(SPRING)
-            .hover(Color::WHITE.alpha(0.06))
+            .hover(crate::theme::ink(0.06))
             .child(icon(glyph, 13.0).color(if on { theme::text() } else { faint() }))
             .child(text(title).font(META_BOLD).color(if on { theme::text() } else { faint() }));
         if on {
-            t = t.fill(Color::WHITE.alpha(0.10)).border(1.0, Color::WHITE.alpha(0.08));
+            t = t.fill(crate::theme::ink(0.10)).border(1.0, crate::theme::ink(0.08));
         }
         t
     };

@@ -19,17 +19,11 @@ pub const META_MED: TextStyle = TextStyle::new(12.5, 560.0);
 pub const LABEL: TextStyle = TextStyle::new(11.0, 600.0);
 
 pub fn kit() -> &'static Kit {
-    static GLASS: std::sync::OnceLock<Kit> = std::sync::OnceLock::new();
-    GLASS.get_or_init(|| {
-        let mut k = rune_theme_opencode::kit(true).clone();
-        k.c.bg_deep = Color::TRANSPARENT;
-        k.c.border_muted = Color::WHITE.alpha(0.09);
-        k
-    })
+    crate::theme::chrome_kit()
 }
 
 pub fn edge() -> Color {
-    Color::WHITE.alpha(0.07)
+    crate::theme::paint().border
 }
 
 pub fn strong() -> Color {
@@ -783,7 +777,7 @@ pub fn status_bar(s: &App) -> El {
                 .child(text(until(s, m.resets_at.as_deref().unwrap_or(""))).font(META).color(weak())),
         );
     }
-    let mut r = row().key("status-bar").w_full().h(30.0).px(10.0).gap(12.0).items_center().child(meters);
+    let mut r = row().key("status-bar").w_full().h(30.0).px(10.0).gap(12.0).items_center().fill(k.c.bg_deep).child(meters);
     let working = s.ov.d.working();
     r = r.child(spacer());
     if let Some(down) = crate::ui::connect::bar(s) {

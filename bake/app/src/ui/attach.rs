@@ -6,7 +6,7 @@ use feed::attach::{self, FileKind, Prepared, Problem, State};
 use feed::blocks::Kind;
 use feed::item::{Attachment, AttachedFile, Item};
 use rune::image::ImageCache;
-use rune::{ClipboardContent, Color, El, FileDialogOptions, Icon, PointerPress, SurfaceFit, Tx, Waker, col, el, icon, row, text};
+use rune::{ClipboardContent, El, FileDialogOptions, Icon, PointerPress, SurfaceFit, Tx, Waker, col, el, icon, row, text};
 use rune_kit::{Menu, MenuItem};
 
 use crate::icons;
@@ -535,7 +535,7 @@ pub fn button(s: &App, id: &str) -> Option<El> {
             .radius(9.0)
             .items_center()
             .justify_center()
-            .hover(Color::WHITE.alpha(0.08))
+            .hover(crate::theme::ink(0.08))
             .label("Attach files or images")
             .help("Attach files or images")
             .on_press_tx(choose)
@@ -594,7 +594,7 @@ pub fn chips(s: &App, id: &str) -> Option<El> {
                 .radius(4.0)
                 .items_center()
                 .justify_center()
-                .hover(Color::WHITE.alpha(0.08))
+                .hover(crate::theme::ink(0.08))
                 .label(format!("Remove {}", chip.name))
                 .on_press(move |s: &mut App| remove(s, local))
                 .child(icon(&icons::CLOSE, 10.0).color(muted())),
@@ -676,10 +676,10 @@ pub fn file_el(s: &App, session: &str, item: &Item) -> El {
     card = card.on_secondary_press(menu_at(target));
     if reason.is_none() {
         let (session, item) = (session.to_string(), item.clone());
-        card = card.hover(Color::WHITE.alpha(0.08)).help(format!("Open {name}")).on_press_tx(move |s: &mut App, tx: &mut Tx| fetch_sent(s, &session, &item, Then::Open, tx));
+        card = card.hover(crate::theme::ink(0.08)).help(format!("Open {name}")).on_press_tx(move |s: &mut App, tx: &mut Tx| fetch_sent(s, &session, &item, Then::Open, tx));
     } else if item.files.first().is_some_and(|f| !f.path.is_empty()) {
         let (key, path) = (item.id.clone(), item.files[0].path.clone());
-        card = card.help(reason.unwrap_or_default()).child(row().key(format!("copy-path-{}", item.id)).px(6.0).py(2.0).radius(5.0).hover(Color::WHITE.alpha(0.08)).on_press_tx(move |s: &mut App, tx: &mut Tx| copy_path(s, &key, &path, tx)).child(text("Copy Path").font(META).color(theme::accent())));
+        card = card.help(reason.unwrap_or_default()).child(row().key(format!("copy-path-{}", item.id)).px(6.0).py(2.0).radius(5.0).hover(crate::theme::ink(0.08)).on_press_tx(move |s: &mut App, tx: &mut Tx| copy_path(s, &key, &path, tx)).child(text("Copy Path").font(META).color(theme::accent())));
     }
     row().w_full().child(card)
 }

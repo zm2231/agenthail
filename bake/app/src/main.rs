@@ -1,5 +1,6 @@
 mod history;
 mod icons;
+mod look;
 mod menubar;
 mod notify;
 mod over;
@@ -1156,6 +1157,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= ui::attach::pump(s);
     changed |= over::extensions::drain(s);
     changed |= ui::complete::pump(s);
+    changed |= look::poll(look::Window::Main, tx);
     switch_composer(s);
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &s.composer.text);

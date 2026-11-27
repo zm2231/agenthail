@@ -139,7 +139,7 @@ pub fn menu(s: &App, x: &Session) -> Option<El> {
             .py(5.0)
             .radius(8.0)
             .motion(SPRING)
-            .hover(Color::WHITE.alpha(0.06))
+            .hover(crate::theme::ink(0.06))
             .label(format!("{} {}", item.title, item.detail))
             .on_press_tx(move |s: &mut App, _: &mut Tx| accept(s, &picked))
             .child(text(item.title.clone()).font(META_BOLD).color(if on { theme::text() } else { muted() }).truncate().max_w(320.0))
@@ -749,7 +749,7 @@ pub fn search(s: &App, x: &Session) -> Option<El> {
             .py(3.0)
             .radius(7.0)
             .fill(if on { wash() } else { Color::TRANSPARENT })
-            .hover(Color::WHITE.alpha(0.06))
+            .hover(crate::theme::ink(0.06))
             .on_press(move |s: &mut App| {
                 if let Some(q) = s.complete.search.as_mut() {
                     q.all = all;
@@ -790,7 +790,7 @@ pub fn search(s: &App, x: &Session) -> Option<El> {
                     .px(10.0)
                     .py(5.0)
                     .radius(8.0)
-                    .hover(Color::WHITE.alpha(0.06))
+                    .hover(crate::theme::ink(0.06))
                     .on_press(move |s: &mut App| use_prompt(s, &chosen))
                     .child(body);
                 if forks && p.session_id == x.id && complete::forkable(p) {

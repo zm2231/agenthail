@@ -318,7 +318,7 @@ fn child_row(s: &App, c: &Session) -> El {
         .px(6.0)
         .py(5.0)
         .radius(7.0)
-        .hover(Color::WHITE.alpha(0.06))
+        .hover(crate::theme::ink(0.06))
         .help(state.label())
         .on_press(move |s: &mut App| crate::select(s, &id))
         .child(el().size(7.0, 7.0).radius(3.5).fill(state_color(state)))
@@ -366,7 +366,7 @@ pub(crate) fn section(s: &App, x: &Session) -> Option<El> {
                 .px(6.0)
                 .py(5.0)
                 .radius(7.0)
-                .hover(Color::WHITE.alpha(0.06))
+                .hover(crate::theme::ink(0.06))
                 .on_press(move |s: &mut App| crate::select(s, &id))
                 .child(icon(&icons::CORNER, 12.0).color(accent()))
                 .child(text(format!("Spawned by {}", p.title())).font(META_BOLD).color(accent()).truncate().min_w(0.0)),
