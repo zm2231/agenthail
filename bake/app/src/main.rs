@@ -751,12 +751,6 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
         }
         _ => busy,
     };
-    let now = feed::composer::now_ms();
-    let flying = s.in_flight.get(id).into_iter().flatten().any(|u| u.same(&message, &attachments));
-    if flying || s.unsent.list(id).iter().any(|u| u.redelivering(now) && u.reuses_key() && u.same(&message, &attachments)) {
-        s.ov.notice = Some("That message is already on its way; it won't send twice.".into());
-        return;
-    }
     ui::paste::set_composer(s, "");
     ui::attach::clear(s, id);
     ui::complete::sending(s, id);
@@ -1146,7 +1140,7 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
             let failed = Unsent { unanswered: again, ..pending.failed(retry, maybe_delivered, answered, error) };
             if failed.redelivering(feed::composer::now_ms()) {
                 s.redeliver.entry(id.clone()).or_insert_with(|| feed::composer::Backoff::starting(clock)).failed(clock);
-                s.unsent.add_first(&id, failed);
+                s.unsent.add(&id, failed);
             } else {
                 put_back(s, &id, &failed);
                 s.unsent.add(&id, failed);

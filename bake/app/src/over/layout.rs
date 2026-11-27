@@ -159,6 +159,7 @@ pub fn load(s: &mut App) {
     }
     s.drafts = feed::composer::Drafts::from_json(&v["drafts"]);
     s.unsent = feed::composer::Unconfirmed::from_json(&v["unsent"]);
+    feed::composer::saw_stamp(s.unsent.newest_stamp());
     s.ov.inbox.history = feed::decisions::restored_history(&v["handledHere"]);
     s.attach.tray = feed::attach::Tray::from_json(&v["attachments"]);
     s.attach.tray.load_stashed(&v["stashedAttachments"]);

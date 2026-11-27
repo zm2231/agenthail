@@ -194,17 +194,23 @@ pub fn now_ms() -> i64 {
     (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
 }
 
+static LAST_STAMP: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+pub fn saw_stamp(stamp: i64) {
+    LAST_STAMP.fetch_max(stamp, std::sync::atomic::Ordering::Relaxed);
+}
+
 pub fn send_stamp(now: i64) -> i64 {
-    static LAST: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
-    let mut last = LAST.load(std::sync::atomic::Ordering::Relaxed);
+    let mut last = LAST_STAMP.load(std::sync::atomic::Ordering::Relaxed);
     loop {
         let next = now.max(last + 1);
-        match LAST.compare_exchange_weak(last, next, std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed) {
+        match LAST_STAMP.compare_exchange_weak(last, next, std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed) {
             Ok(_) => return next,
             Err(seen) => last = seen,
         }
     }
 }
+
 pub const REDELIVER_MAX_WAIT: f64 = 20.0;
 
 pub fn redelivers(error: &crate::catalog::RespondError) -> bool {
@@ -371,13 +377,12 @@ impl Unconfirmed {
     pub fn add(&mut self, id: &str, unsent: Unsent) {
         let list = self.0.entry(id.to_string()).or_default();
         list.retain(|u| u.key != unsent.key);
-        list.push(unsent);
+        let at = list.iter().position(|u| u.sent_at > unsent.sent_at).unwrap_or(list.len());
+        list.insert(at, unsent);
     }
 
-    pub fn add_first(&mut self, id: &str, unsent: Unsent) {
-        let list = self.0.entry(id.to_string()).or_default();
-        list.retain(|u| u.key != unsent.key);
-        list.insert(0, unsent);
+    pub fn newest_stamp(&self) -> i64 {
+        self.iter().map(|(_, u)| u.sent_at).max().unwrap_or_default()
     }
 
     pub fn remove(&mut self, id: &str, key: &str) {
@@ -401,9 +406,6 @@ impl Unconfirmed {
             let new = current(rekeyed, &old).to_string();
             for unsent in self.0.remove(&old).unwrap_or_default() {
                 self.add(&new, unsent);
-            }
-            if let Some(list) = self.0.get_mut(&new) {
-                list.sort_by_key(|u| u.sent_at);
             }
         }
     }
@@ -583,12 +585,14 @@ mod tests {
     }
 
     #[test]
-    fn a_resend_that_fails_again_keeps_its_place_at_the_front() {
+    fn unsent_messages_stay_in_sending_order_however_they_come_back() {
         let mut list = Unconfirmed::default();
-        list.add("s1", Unsent { key: "a".into(), text: "a".into(), ..Default::default() });
-        list.add("s1", Unsent { key: "b".into(), text: "b".into(), ..Default::default() });
-        list.add_first("s1", Unsent { key: "b".into(), text: "b".into(), ..Default::default() });
-        assert_eq!(list.list("s1").iter().map(|u| u.key.as_str()).collect::<Vec<_>>(), ["b", "a"]);
+        list.add("s1", Unsent { key: "b".into(), text: "b".into(), sent_at: 2, ..Default::default() });
+        list.add("s1", Unsent { key: "c".into(), text: "c".into(), sent_at: 3, ..Default::default() });
+        list.add("s1", Unsent { key: "a".into(), text: "a".into(), sent_at: 1, ..Default::default() });
+        list.add("s1", Unsent { key: "b".into(), text: "b again".into(), sent_at: 2, ..Default::default() });
+        assert_eq!(list.list("s1").iter().map(|u| u.text.as_str()).collect::<Vec<_>>(), ["a", "b again", "c"]);
+        assert_eq!(list.newest_stamp(), 3);
         assert!(list.list("gone").is_empty());
     }
 
@@ -609,6 +613,8 @@ mod tests {
         let b = send_stamp(5_000);
         let c = send_stamp(1);
         assert!(a < b && b < c, "{a} {b} {c}");
+        saw_stamp(c + 1000);
+        assert!(send_stamp(1) > c + 1000);
     }
 
     #[test]
