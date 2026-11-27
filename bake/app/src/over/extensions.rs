@@ -221,8 +221,8 @@ pub fn drain(s: &mut App) -> bool {
         s.ov.ext.again = false;
         refresh(s);
     }
-    let paired = s.ov.ext.catalogs.iter().any(|c| !c.host.is_local());
-    if s.ov.ext.fetched_at.is_none_or(|at| paired && at.elapsed() >= PAIRED_EVERY) {
+    let due = s.ov.ext.hosts_error.is_some() || s.ov.ext.catalogs.iter().any(|c| !c.host.is_local() || c.error.is_some());
+    if s.ov.ext.fetched_at.is_none_or(|at| due && at.elapsed() >= PAIRED_EVERY) {
         refresh(s);
     }
     let ages: Vec<String> = s.ov.ext.catalogs.iter().filter_map(|c| Some(feed::extensions::age(c.fetched?.elapsed().as_secs(), s.ov.ext.listing.contains(&c.key())))).collect();
