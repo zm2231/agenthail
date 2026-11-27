@@ -1011,11 +1011,13 @@ test('a host restart keeps the running turn and resumes the session afterwards',
   const f = fixture();
   const first = await startHost(f);
   const c = new Client(f.socket);
+  await c.call('subscribe');
   const id = randomUUID();
   const { pid } = await c.call('open', { sessionId: id, cwd: f.cwd });
-  const running = randomUUID();
-  await c.call('send', { sessionId: id, uuid: running, text: 'SLOW 1500' });
-  await sleep(300);
+  const turn = randomUUID();
+  const release = path.join(f.root, 'release');
+  await c.call('send', { sessionId: id, uuid: turn, text: `WAIT ${release}` });
+  await c.event(running(id));
   first.kill('SIGKILL');
   await first.exited;
   c.close();
@@ -1030,17 +1032,18 @@ test('a host restart keeps the running turn and resumes the session afterwards',
   await assert.rejects(d.call('open', { resume: id, cwd: f.cwd }), { code: 'held' });
   await assert.rejects(d.call('send', { sessionId: id, uuid: randomUUID(), text: 'early' }), { code: 'held' });
 
-  for (let i = 0; i < 100 && alive(pid); i++) await sleep(50);
+  fs.writeFileSync(release, '');
+  for (let i = 0; i < 200 && alive(pid); i++) await sleep(50);
   assert.ok(!alive(pid), 'the orphan exits after its turn');
-  assert.deepEqual(transcript(f, id).map((l) => [l.uuid, l.reply, l.inputClosed]), [[running, 'slow:1500', true]]);
+  assert.deepEqual(transcript(f, id).map((l) => [l.uuid, l.reply, l.inputClosed]), [[turn, 'waited', true]]);
   assert.deepEqual((await d.call('list')).orphans, []);
 
   await d.call('open', { resume: id, cwd: f.cwd });
-  await d.call('send', { sessionId: id, uuid: running, text: 'SLOW 1500' });
+  await d.call('send', { sessionId: id, uuid: turn, text: `WAIT ${release}` });
   const next = randomUUID();
   await d.call('send', { sessionId: id, uuid: next, text: 'next' });
   await d.event(turnResult(id, next));
-  assert.deepEqual(transcript(f, id).map((l) => l.uuid), [running, next]);
+  assert.deepEqual(transcript(f, id).map((l) => l.uuid), [turn, next]);
   d.close();
 });
 
