@@ -45,9 +45,15 @@ pub struct Work {
     pub timeline: Vec<Entry>,
     #[serde(skip)]
     pub project: String,
+    #[serde(skip)]
+    pub ledger_key: String,
 }
 
 impl Work {
+    pub fn ledger_key(&self) -> &str {
+        if self.ledger_key.is_empty() { &self.project } else { &self.ledger_key }
+    }
+
     pub fn submitted_at(&self) -> String {
         self.timeline.iter().rev().find(|t| t.state.as_deref() == Some("in_review")).map(|t| t.at.clone()).unwrap_or_default()
     }
@@ -110,6 +116,8 @@ pub struct ProjectRecord {
     pub mcp: Option<String>,
     #[serde(default, deserialize_with = "crate::catalog::known_time")]
     pub last_active: String,
+    #[serde(default)]
+    pub ledger_key: String,
 }
 
 #[derive(Deserialize, Clone, Default, Debug)]
@@ -127,6 +135,10 @@ pub struct Actor {
 pub struct Recorded {
     #[serde(default)]
     pub updated_at: String,
+    #[serde(default)]
+    pub host_epoch: String,
+    #[serde(default)]
+    pub catalog_seq: u64,
     #[serde(default)]
     pub projects: Vec<ProjectRecord>,
     #[serde(default)]
@@ -203,8 +215,10 @@ impl World {
         let started_by = raw.sessions.iter().filter_map(|s| s.started_by.clone().filter(|b| !b.is_empty()).map(|b| (s.id.clone(), b))).collect();
         let mut work = HashMap::new();
         for (key, rows) in raw.ledgers {
+            let ledger_key = raw.projects.iter().find(|p| p.id == key).map(|p| p.ledger_key.clone()).unwrap_or_default();
             for mut w in rows {
                 w.project = key.clone();
+                w.ledger_key = ledger_key.clone();
                 work.insert(w.id.clone(), w);
             }
         }

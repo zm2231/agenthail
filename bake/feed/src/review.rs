@@ -48,14 +48,13 @@ pub fn target(d: &Decision) -> Option<Target> {
 }
 
 pub fn of_work(listed: &[Decision], w: &Work) -> Option<Decision> {
-    let ledger_key = crate::catalog::ledger_key(&w.project);
-    let key = key(&ledger_key, &w.id);
+    let ledger_key = w.ledger_key();
+    let key = key(ledger_key, &w.id);
     listed.iter().find(|d| d.is_review() && (d.key == key || target(d).is_some_and(|t| t.ledger_key == ledger_key && t.work_item == w.id))).cloned()
 }
 
 pub fn lead_of<'a>(handled: &'a [LeadHandled], w: &Work) -> Option<&'a LeadHandled> {
-    let ledger_key = crate::catalog::ledger_key(&w.project);
-    handled.iter().find(|h| h.work_item == w.id && h.ledger_key == ledger_key)
+    handled.iter().find(|h| h.work_item == w.id && h.ledger_key == w.ledger_key())
 }
 
 pub fn unlisted_note(inbox: Option<&Inbox>, w: &Work, name_of: impl Fn(&str) -> String) -> String {
@@ -66,7 +65,7 @@ pub fn unlisted_note(inbox: Option<&Inbox>, w: &Work, name_of: impl Fn(&str) -> 
     if !inbox.read.iter().any(String::is_empty) {
         return "This computer's decisions couldn't be read, so this review can't be found yet.".into();
     }
-    if !inbox.notes.is_empty() && !crate::catalog::ledger_key(&w.project).starts_with("project:") {
+    if !inbox.notes.is_empty() && !w.ledger_key().starts_with("project:") {
         return format!("This review can't be found yet. {}", inbox.notes.join(" "));
     }
     "This isn't in your reviews right now. It may have just been reviewed.".into()
@@ -190,12 +189,12 @@ mod tests {
 
     #[test]
     fn the_work_screen_acts_only_on_a_review_listed_for_the_person() {
-        let w = Work { id: "p-W6".into(), text: "Wire review".into(), assignee: Some("holder".into()), project: "p-1".into(), ..Default::default() };
+        let w = Work { id: "p-W6".into(), text: "Wire review".into(), assignee: Some("holder".into()), project: "p-1".into(), ledger_key: "project:p-1".into(), ..Default::default() };
         let listed = vec![Decision { host: "h2".into(), ..decision(r#"{"group":"review","key":"review:project:p-1:p-W6","sessionId":"h2::holder","workItem":"p-W6","ledgerKey":"project:p-1"}"#) }];
         assert_eq!(target(&of_work(&listed, &w).unwrap()).unwrap().host, "h2");
         let unkeyed = vec![Decision { key: "review:project:p-1:p-W6".into(), ledger_key: String::new(), ..listed[0].clone() }];
         assert_eq!(target(&of_work(&unkeyed, &w).unwrap()).unwrap().ledger_key, "project:p-1");
-        let repo = Work { project: "repo:github.com/o/r".into(), ..w.clone() };
+        let repo = Work { project: "repo:github.com/o/r".into(), ledger_key: String::new(), ..w.clone() };
         let repo_listed = vec![Decision { key: "review:repo:github.com/o/r:p-W6".into(), ledger_key: "repo:github.com/o/r".into(), ..listed[0].clone() }];
         assert!(of_work(&repo_listed, &repo).is_some());
         let other = vec![Decision { key: "review:project:p-0:p-W6".into(), ledger_key: "project:p-0".into(), ..listed[0].clone() }];
@@ -205,7 +204,7 @@ mod tests {
 
     #[test]
     fn an_unlisted_review_says_why_it_is_missing() {
-        let w = Work { id: "p-W31".into(), project: "p-1".into(), ..Default::default() };
+        let w = Work { id: "p-W31".into(), project: "p-1".into(), ledger_key: "project:p-1".into(), ..Default::default() };
         let name = |id: &str| if id == "lead" { "Lead".to_string() } else { id.to_string() };
         let page = |json: &str| serde_json::from_str::<crate::decisions::Page>(json).unwrap();
         assert_eq!(unlisted_note(None, &w, name), "Looking for this review…");
@@ -220,14 +219,14 @@ mod tests {
         assert_eq!(unlisted_note(Some(&waiting), &w, name), unlisted_note(Some(&held), &w, name));
         let other = Work { id: "p-W32".into(), ..w.clone() };
         assert_eq!(lead_of(&held.lead_handling, &other), None);
-        let elsewhere = Work { project: "p-0".into(), ..w.clone() };
+        let elsewhere = Work { project: "p-0".into(), ledger_key: "project:p-0".into(), ..w.clone() };
         assert_eq!(lead_of(&held.lead_handling, &elsewhere), None);
 
         let mut read = Inbox::default();
         read.add(page(r#"{"decisions":[]}"#), "", "", "h1");
         read.notes.push("katbox isn't answering, so its decisions aren't shown.".into());
         assert_eq!(unlisted_note(Some(&read), &w, name), "This isn't in your reviews right now. It may have just been reviewed.");
-        let repo = Work { project: "repo:github.com/o/r".into(), ..w.clone() };
+        let repo = Work { project: "repo:github.com/o/r".into(), ledger_key: "repo:github.com/o/r".into(), ..w.clone() };
         assert_eq!(unlisted_note(Some(&read), &repo, name), "This review can't be found yet. katbox isn't answering, so its decisions aren't shown.");
         read.notes.clear();
         assert_eq!(unlisted_note(Some(&read), &repo, name), "This isn't in your reviews right now. It may have just been reviewed.");

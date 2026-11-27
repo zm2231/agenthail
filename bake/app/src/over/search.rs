@@ -161,9 +161,7 @@ pub fn run(s: &mut App, command: Command, tx: &mut Tx) {
 }
 
 fn refresh(s: &mut App) {
-    if let Some(poke) = &s.overview_poke {
-        let _ = poke.send(());
-    }
+    crate::ask_overview(s, crate::Ask::Reset);
     if let Some(client) = s.client.clone() {
         crate::over::inbox::refresh(&client, &s.ov.inbox);
     }

@@ -45,6 +45,7 @@ pub mod summary;
 pub mod trace;
 pub mod version;
 pub mod voice;
+pub mod watch;
 pub mod wire;
 
 pub use blocks::{Block, Kind};

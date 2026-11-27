@@ -29,8 +29,13 @@ use crate::over::Over;
 use crate::transcript::{Pane, Replay};
 
 pub enum Bg {
-    Snapshot(String, Vec<Session>),
+    Snapshot(String, String, u64, Vec<Session>, Option<Vec<String>>),
     DecisionsRev(String),
+    Changed(feed::watch::Wants),
+    Reopened,
+    LedgerChanged(String, std::time::Instant),
+    LedgersReopened,
+    SessionNews,
     Item(String, WorkItem),
     Overview(Box<Fetched>),
     Ledger(String, std::time::Instant, Result<Ledger, String>),
@@ -151,7 +156,7 @@ pub struct App {
     pub notify: notify::State,
     last_row: Option<Session>,
     client: Option<Client>,
-    overview_poke: Option<Sender<()>>,
+    overview_poke: Option<Sender<Ask>>,
     fixtures: Option<Fixtures>,
     inbox: Receiver<Bg>,
     outbox: Sender<Bg>,
@@ -175,18 +180,100 @@ fn load_recorded(path: &str) -> Result<Recorded, String> {
     serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))
 }
 
-fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<()>) {
+#[derive(Clone, PartialEq)]
+pub enum Ask {
+    Refresh,
+    Reset,
+    Reopened,
+    Open(String),
+    Ledger(String, std::time::Instant),
+    Read(String),
+}
+
+fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: feed::watch::Stream) {
     std::thread::spawn(move || {
+        let first = std::time::Instant::now();
+        while !stream.settled() && first.elapsed() < feed::watch::LEDGERS_FIRST {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let mut known = feed::derive::live::Known::default();
+        let (mut due, mut reset, mut last) = (true, false, None::<std::time::Instant>);
         loop {
-            let message = match feed::derive::live::fetch(&client) {
-                Ok(fetched) => Bg::Overview(Box::new(fetched)),
-                Err(error) => Bg::OverviewError(error.to_string()),
-            };
-            if tx.send(message).is_err() {
-                return;
+            if due {
+                if let Some(at) = last.filter(|_| !reset) {
+                    std::thread::sleep(feed::watch::OVERVIEW_GAP.saturating_sub(at.elapsed()));
+                }
+                reset = false;
+                if let Some(at) = stream.settles_at() {
+                    std::thread::sleep(at.saturating_duration_since(std::time::Instant::now()));
+                }
+                due = false;
+                last = Some(std::time::Instant::now());
+                let message = match feed::derive::live::fetch(&client, &known, stream.settles_at()) {
+                    Ok(fetched) => {
+                        due = known.learn(&fetched);
+                        Bg::Overview(Box::new(fetched))
+                    }
+                    Err(error) => {
+                        known.unread(std::time::Instant::now());
+                        Bg::OverviewError(error.to_string())
+                    }
+                };
+                if tx.send(message).is_err() {
+                    return;
+                }
             }
-            let _ = poke.recv_timeout(Duration::from_secs(20));
-            while poke.try_recv().is_ok() {}
+            let retry = known.next_retry().map(|at| at.saturating_duration_since(std::time::Instant::now()));
+            let wait = if due || !known.orphans().is_empty() { Duration::ZERO } else { feed::watch::OVERVIEW_EVERY.saturating_sub(last.map(|at| at.elapsed()).unwrap_or_default()).min(retry.unwrap_or(Duration::MAX)) };
+            let mut reads = Vec::new();
+            let mut take = |ask: Ask| match ask {
+                Ask::Refresh => due = true,
+                Ask::Reset => {
+                    reads.extend(known.opened());
+                    known = known.carry();
+                    (due, reset) = (true, true);
+                }
+                Ask::Ledger(key, at) => match known.changed(&key, at) {
+                    feed::derive::live::Change::Read(id) => reads.push(id),
+                    feed::derive::live::Change::Overview => due = true,
+                    feed::derive::live::Change::Nothing => {}
+                },
+                Ask::Read(id) => reads.push(id),
+                Ask::Open(id) => {
+                    if known.open(&id) {
+                        reads.push(id);
+                    }
+                }
+                Ask::Reopened => {
+                    due = true;
+                    reads.extend(known.opened());
+                }
+            };
+            match poke.recv_timeout(wait) {
+                Ok(ask) => take(ask),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) if retry.is_some_and(|r| r <= wait) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => take(Ask::Refresh),
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+            }
+            while let Ok(ask) = poke.try_recv() {
+                take(ask);
+            }
+            due |= last.is_none_or(|at| at.elapsed() >= feed::watch::OVERVIEW_EVERY) || known.actors_due(std::time::Instant::now());
+            reads.extend(known.retries_due(std::time::Instant::now()));
+            reads.extend(known.orphans());
+            reads.sort();
+            reads.dedup();
+            if let Some(at) = stream.settles_at().filter(|_| !reads.is_empty()) {
+                std::thread::sleep(at.saturating_duration_since(std::time::Instant::now()));
+            }
+            for id in reads {
+                let started = std::time::Instant::now();
+                let result = feed::derive::live::ledger(&client, &id, &known);
+                known.read(&id, started, &result);
+                if tx.send(Bg::Ledger(id, started, result)).is_err() {
+                    return;
+                }
+            }
         }
     });
 }
@@ -391,15 +478,58 @@ fn fetch_tails(s: &mut App) {
 }
 
 pub fn fetch_ledger(s: &mut App, project: &str) {
-    let Some(client) = s.client.clone() else { return };
-    if !s.ov.live.wants(project) {
-        return;
+    let ask = if s.ov.live.wants(project) { Ask::Read(project.to_string()) } else { Ask::Open(project.to_string()) };
+    ask_overview(s, ask);
+}
+
+fn selected_changed(s: &mut App, id: &str) {
+    fetch_requests(s, id);
+    if ui::queue::wants(s, id) {
+        ui::queue::fetch(s, id);
     }
-    let (tx, project, sessions, started) = (s.outbox.clone(), project.to_string(), s.sessions.clone(), std::time::Instant::now());
-    std::thread::spawn(move || {
-        let result = feed::derive::live::ledger(&client, &project, &sessions);
-        let _ = tx.send(Bg::Ledger(project, started, result));
-    });
+    ui::subagents::refresh(s, id);
+    if let Some(work) = session(s, id).and_then(|x| x.primary_work(s.work_pick.get(id).map(String::as_str)).cloned()) {
+        fetch_item(s, &work.project_key, &work.item_id);
+    }
+}
+
+pub fn ask_overview(s: &App, ask: Ask) {
+    if let Some(poke) = &s.overview_poke {
+        let _ = poke.send(ask);
+    }
+}
+
+fn changed_elsewhere(s: &mut App, wants: feed::watch::Wants) {
+    if wants.reset {
+        return reopened(s);
+    }
+    if wants.snapshot {
+        ui::connect::changed(s);
+    }
+    if wants.overview {
+        ask_overview(s, Ask::Refresh);
+    }
+    if wants.hosts {
+        over::inbox::changed(s);
+    }
+    if wants.extensions {
+        over::extensions::changed(s);
+    }
+    if let Some(id) = wants.session
+        && s.selected.as_deref() == Some(id.as_str())
+    {
+        selected_changed(s, &id);
+    }
+}
+
+fn reopened(s: &mut App) {
+    ui::connect::retry(s);
+    ask_overview(s, Ask::Reset);
+    over::inbox::reopened(s);
+    over::extensions::reopened(s);
+    if let Some(id) = s.selected.clone() {
+        selected_changed(s, &id);
+    }
 }
 
 fn fetch_requests(s: &mut App, id: &str) {
@@ -862,6 +992,7 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
         Ok(receipt @ (Delivered::Queued(_) | Delivered::QueuedUntilAnswer(_))) => {
             s.status_line.remove(&id);
             s.queued.entry(id.clone()).or_default().push((s.snapshots, receipt));
+            ui::connect::confirm(s);
             None
         }
         Ok(delivered) => {
@@ -975,26 +1106,27 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     while let Ok(message) = s.inbox.try_recv() {
         changed = true;
         match message {
-            Bg::Snapshot(at, sessions) => {
-                if s.ov.live.take_sessions(&at, sessions) {
+            Bg::Snapshot(at, epoch, seq, sessions, touched) => {
+                if s.ov.live.take_sessions(&at, &epoch, seq, sessions) {
                     s.sessions = s.ov.live.sessions().to_vec();
                     s.notify.sessions_moved = true;
                     feed::holders::pins().prune(&s.sessions);
+                    fetch_tails(s);
                 }
                 s.now = OffsetDateTime::now_utc();
                 s.status = "live".into();
                 ui::connect::up(s);
-                if let Some(id) = s.selected.clone() {
-                    fetch_requests(s, &id);
-                    if ui::queue::wants(s, &id) {
-                        ui::queue::fetch(s, &id);
-                    }
-                    ui::subagents::refresh(s, &id);
-                    if let Some(work) = session(s, &id).and_then(|x| x.primary_work(s.work_pick.get(&id).map(String::as_str)).cloned()) {
-                        fetch_item(s, &work.project_key, &work.item_id);
-                    }
+                if let Some(id) = s.selected.clone()
+                    && touched.is_none_or(|t| t.contains(&id))
+                {
+                    selected_changed(s, &id);
                 }
             }
+            Bg::Changed(wants) => changed_elsewhere(s, wants),
+            Bg::Reopened => reopened(s),
+            Bg::LedgerChanged(key, at) => ask_overview(s, Ask::Ledger(key, at)),
+            Bg::LedgersReopened => ask_overview(s, Ask::Reopened),
+            Bg::SessionNews => ask_overview(s, Ask::Refresh),
             Bg::Item(id, item) => {
                 s.items.insert(id, item);
             }
@@ -1171,6 +1303,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= ui::attach::pump(s);
     changed |= over::extensions::drain(s);
     changed |= over::projects::drain(s);
+    if s.ov.live.tail_retry_due() {
+        fetch_tails(s);
+    }
     changed |= ui::complete::pump(s);
     changed |= look::poll(look::Window::Main, tx);
     ui::paste::settle(s);

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::io::BufRead;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use time::OffsetDateTime;
 
@@ -13,6 +13,7 @@ use crate::wire::{Outcome, Rebuild, Sse, Wire};
 pub const TAIL_ITEMS: usize = 160;
 pub const READ_BUDGET: Duration = Duration::from_secs(15);
 pub const IN_FLIGHT: usize = 4;
+pub const TAIL_RETRY: Duration = Duration::from_secs(10);
 const TAIL_HOURS: f64 = 24.0;
 const TAIL_SESSIONS: usize = 14;
 const LONG_TEXT: usize = 1200;
@@ -72,6 +73,7 @@ pub fn fetch(client: &Client, session: &str, budget: Duration) -> Result<Tail, S
 pub struct Tails {
     held: HashMap<String, (String, Tail)>,
     fetching: HashSet<String>,
+    failed: HashMap<String, (String, Instant)>,
 }
 
 impl Tails {
@@ -82,9 +84,12 @@ impl Tails {
         recent.truncate(TAIL_SESSIONS);
         let keep: HashSet<&str> = recent.iter().map(|s| s.id.as_str()).collect();
         self.held.retain(|id, _| keep.contains(id.as_str()));
+        let now_i = Instant::now();
+        self.failed.retain(|id, (_, until)| keep.contains(id.as_str()) && now_i < *until);
+        let waiting = |s: &Session| self.failed.get(&s.id).is_some_and(|(at, _)| *at == s.last_active);
         let due: Vec<(String, String)> = recent
             .into_iter()
-            .filter(|s| !open.contains(&s.id) && !self.fetching.contains(&s.id) && self.held.get(&s.id).is_none_or(|(at, _)| *at != s.last_active))
+            .filter(|s| !open.contains(&s.id) && !self.fetching.contains(&s.id) && !waiting(s) && self.held.get(&s.id).is_none_or(|(at, _)| *at != s.last_active))
             .take(IN_FLIGHT.saturating_sub(self.fetching.len()))
             .map(|s| (s.id.clone(), s.last_active.clone()))
             .collect();
@@ -94,9 +99,20 @@ impl Tails {
 
     pub fn take(&mut self, session: &str, last_active: String, result: Result<Tail, String>) {
         self.fetching.remove(session);
-        if let Ok(tail) = result {
-            self.held.insert(session.to_string(), (last_active, tail));
+        match result {
+            Ok(tail) => {
+                self.failed.remove(session);
+                self.held.insert(session.to_string(), (last_active, tail));
+            }
+            Err(_) => {
+                self.failed.insert(session.to_string(), (last_active, Instant::now() + TAIL_RETRY));
+            }
         }
+    }
+
+    pub fn retry_due(&self) -> bool {
+        let now = Instant::now();
+        self.failed.values().any(|(_, until)| now >= *until)
     }
 
     pub fn held(&self) -> impl Iterator<Item = (&String, &Tail)> {

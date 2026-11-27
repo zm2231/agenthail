@@ -15,7 +15,7 @@ use crate::over::{go, open_session};
 use crate::web::{Phase, Web};
 use crate::{App, Screen};
 
-const REFRESH: Duration = Duration::from_secs(20);
+const PAIRED_EVERY: Duration = Duration::from_secs(30);
 
 pub enum Done {
     Hosts(Result<Vec<Host>, String>),
@@ -51,6 +51,7 @@ pub struct State {
     fetched_at: Option<Instant>,
     ages: Vec<String>,
     hosts_pending: bool,
+    again: bool,
     listing: HashSet<String>,
     generation: HashMap<String, u64>,
     tx: Sender<Done>,
@@ -60,7 +61,7 @@ pub struct State {
 impl State {
     pub fn new() -> State {
         let (tx, rx) = channel();
-        State { catalogs: Vec::new(), hosts_error: None, settings: false, acting: None, web: Web::new(), fetched_at: None, ages: Vec::new(), hosts_pending: false, listing: HashSet::new(), generation: HashMap::new(), tx, rx }
+        State { catalogs: Vec::new(), hosts_error: None, settings: false, acting: None, web: Web::new(), fetched_at: None, ages: Vec::new(), hosts_pending: false, again: false, listing: HashSet::new(), generation: HashMap::new(), tx, rx }
     }
 }
 
@@ -216,8 +217,24 @@ pub fn drain(s: &mut App) -> bool {
     if !shown(s) {
         return changed;
     }
-    if s.ov.ext.fetched_at.is_none_or(|at| at.elapsed() >= REFRESH) {
+    if s.ov.ext.again && s.ov.ext.listing.is_empty() && !s.ov.ext.hosts_pending {
+        s.ov.ext.again = false;
         refresh(s);
+    }
+    let failed = s.ov.ext.hosts_error.is_some() || s.ov.ext.catalogs.iter().any(|c| c.error.is_some() && (c.host.is_local() || c.host.available()));
+    let paired = s.ov.ext.catalogs.iter().any(|c| !c.host.is_local());
+    match s.ov.ext.fetched_at {
+        None => refresh(s),
+        Some(at) if at.elapsed() < PAIRED_EVERY => {}
+        Some(_) if failed => refresh(s),
+        Some(_) if paired => {
+            s.ov.ext.fetched_at = Some(Instant::now());
+            let hosts: Vec<Host> = s.ov.ext.catalogs.iter().filter(|c| !c.host.is_local() && c.host.available()).map(|c| c.host.clone()).collect();
+            for host in hosts {
+                list(s, &host);
+            }
+        }
+        Some(_) => {}
     }
     let ages: Vec<String> = s.ov.ext.catalogs.iter().filter_map(|c| Some(feed::extensions::age(c.fetched?.elapsed().as_secs(), s.ov.ext.listing.contains(&c.key())))).collect();
     if ages != s.ov.ext.ages {
@@ -242,6 +259,20 @@ pub fn drain(s: &mut App) -> bool {
         });
     }
     changed | s.ov.ext.web.pump(want.as_deref())
+}
+
+pub fn changed(s: &mut App) {
+    if shown(s) {
+        s.ov.ext.again = !s.ov.ext.listing.is_empty() || s.ov.ext.hosts_pending;
+        refresh(s);
+    } else {
+        s.ov.ext.fetched_at = None;
+    }
+}
+
+pub fn reopened(s: &mut App) {
+    s.ov.ext.web.recheck();
+    changed(s);
 }
 
 pub fn arrived(s: &mut App) {

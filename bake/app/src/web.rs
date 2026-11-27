@@ -9,8 +9,8 @@ use time::format_description::well_known::Rfc3339;
 
 const RENEW_BEFORE: time::Duration = time::Duration::hours(1);
 const RENEW_RETRY: Duration = Duration::from_secs(60);
+const CHECK_RETRY: Duration = Duration::from_secs(60);
 const SLOW: Duration = Duration::from_secs(10);
-const CHECK_EVERY: Duration = Duration::from_secs(20);
 const KEPT: usize = 6;
 const UNREACHED: Duration = Duration::from_secs(20);
 
@@ -186,13 +186,14 @@ pub struct Web {
     checking: bool,
     opening: bool,
     checked_at: Option<Instant>,
+    unclear: bool,
     verified: Option<(String, Option<String>)>,
     remint: bool,
 }
 
 impl Web {
     pub fn new() -> Web {
-        Web { pages: HashMap::new(), recent: Vec::new(), current: None, failure: None, cookie: None, signing: false, renew_at: None, checking: false, opening: false, checked_at: None, verified: None, remint: false }
+        Web { pages: HashMap::new(), recent: Vec::new(), current: None, failure: None, cookie: None, signing: false, renew_at: None, checking: false, opening: false, checked_at: None, unclear: false, verified: None, remint: false }
     }
 
     fn page(&self) -> Option<&Page> {
@@ -258,6 +259,10 @@ impl Web {
         self.verified.as_ref().is_some_and(|(v, p)| v == value && p.as_deref().is_none_or(|p| p == page))
     }
 
+    pub fn recheck(&mut self) {
+        self.checked_at = None;
+    }
+
     pub fn check_due(&mut self, want: Option<&str>) -> Option<(String, WebSession)> {
         let want = want?;
         if self.failed() || self.signing || self.checking {
@@ -265,7 +270,7 @@ impl Web {
         }
         let cookie = self.cookie.clone()?;
         let opening = !self.pages.get(want).is_some_and(|p| p.opened) && !self.verified_for(&cookie.value, want);
-        if !opening && self.checked_at.is_some_and(|at| at.elapsed() < CHECK_EVERY) {
+        if !opening && self.checked_at.is_some_and(|at| !self.unclear || at.elapsed() < CHECK_RETRY) {
             return None;
         }
         self.checking = true;
@@ -279,6 +284,7 @@ impl Web {
         if self.cookie.as_ref().is_none_or(|c| c.value != value) {
             return;
         }
+        self.unclear = known.is_err();
         match known {
             Ok(true) => self.verified = Some((value.to_string(), Some(page.to_string()))),
             Ok(false) => {

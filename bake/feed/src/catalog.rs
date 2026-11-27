@@ -404,6 +404,12 @@ pub struct Snapshot {
     pub queue: Vec<QueueRow>,
     #[serde(default)]
     pub decisions_rev: String,
+    #[serde(default)]
+    pub host_epoch: String,
+    #[serde(default)]
+    pub catalog_seq: u64,
+    #[serde(default)]
+    pub event_cursor: u64,
     #[serde(default, deserialize_with = "null_list")]
     pub lead_replacements: Vec<LeadReplacement>,
 }
@@ -661,14 +667,6 @@ pub(crate) fn enc(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
 }
 
-pub fn ledger_key(project: &str) -> String {
-    if project.starts_with("p-") {
-        format!("project:{project}")
-    } else {
-        project.to_string()
-    }
-}
-
 impl Client {
     pub fn from_env() -> Result<Self> {
         let (base, token) = crate::daemon()?;
@@ -732,7 +730,7 @@ impl Client {
         let mut rows = Vec::new();
         let mut cursor: Option<String> = None;
         for _ in 0..20 {
-            let mut path = format!("/api/v1/ledger?projectKey={}&view=work&limit=100", enc(&ledger_key(project)));
+            let mut path = format!("/api/v1/ledger?projectKey={}&view=work&limit=100", enc(project));
             if let Some(c) = &cursor {
                 path.push_str(&format!("&cursor={}", enc(c)));
             }
@@ -800,7 +798,7 @@ impl Client {
     }
 
     pub fn work_item(&self, project: &str, id: &str) -> Result<WorkItem> {
-        let value = self.get(&format!("/api/v1/ledger?projectKey={}&view=item&id={}", enc(&ledger_key(project)), enc(id)))?;
+        let value = self.get(&format!("/api/v1/ledger?projectKey={}&view=item&id={}", enc(project), enc(id)))?;
         Ok(serde_json::from_value(value["item"]["item"].clone())?)
     }
 
@@ -808,7 +806,7 @@ impl Client {
         let mut rows = Vec::new();
         let mut cursor: Option<String> = None;
         for _ in 0..20 {
-            let mut path = format!("/api/v1/ledger?projectKey={}&view=work&limit=100", enc(&ledger_key(project)));
+            let mut path = format!("/api/v1/ledger?projectKey={}&view=work&limit=100", enc(project));
             if let Some(c) = &cursor {
                 path.push_str(&format!("&cursor={}", enc(c)));
             }
@@ -1001,20 +999,6 @@ mod capabilities_tests {
         assert!(!c.attach && caps(r#","capabilities":{"attach":true}"#).attach);
         let c = caps(r#","capabilities":{"interrupt":true,"steer":false,"compact":true}"#);
         assert!(c.interrupt && !c.steer && c.compact && !c.commands);
-    }
-}
-
-#[cfg(test)]
-mod ledger_key_tests {
-    use super::ledger_key;
-
-    #[test]
-    fn an_added_project_reads_its_ledger_under_its_project_key() {
-        assert_eq!(ledger_key("p-2cbafd5a-af10-467c-9fdc-a48ba8de665f"), "project:p-2cbafd5a-af10-467c-9fdc-a48ba8de665f");
-        assert_eq!(ledger_key("project:p-1"), "project:p-1");
-        assert_eq!(ledger_key("repo:github.com/o/r"), "repo:github.com/o/r");
-        assert_eq!(ledger_key("implicit:/work/r"), "implicit:/work/r");
-        assert_eq!(ledger_key("h1::p-1"), "h1::p-1");
     }
 }
 

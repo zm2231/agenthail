@@ -235,3 +235,14 @@ fn jump_lists_every_match_when_you_search_and_three_a_group_when_you_dont() {
     assert_eq!(sessions("probe"), 5);
     assert_eq!(sessions(""), 3);
 }
+
+#[test]
+fn work_carries_the_ledger_key_the_daemon_gives_its_project() {
+    let w = world(json!({
+        "projects": [{"id": "p-1", "displayName": "P", "ledgerKey": "shared:x"}, {"id": "repo:github.com/o/r", "displayName": "R"}],
+        "ledgers": {"p-1": [{"id": "x-W1", "state": "open"}], "repo:github.com/o/r": [{"id": "r-W1", "state": "open"}]}
+    }));
+    assert_eq!(w.work["x-W1"].project, "p-1");
+    assert_eq!(w.work["x-W1"].ledger_key(), "shared:x");
+    assert_eq!(w.work["r-W1"].ledger_key(), "repo:github.com/o/r");
+}

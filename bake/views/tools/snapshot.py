@@ -87,9 +87,6 @@ def main():
         except (OSError, ValueError):
             return 1e9
 
-    def ledger_key(project_id):
-        return f"project:{project_id}" if project_id.startswith("p-") else project_id
-
     projects = [p for p in snap.get("projects", []) if not p.get("archived")]
     live = {s["project"]["id"] for s in sessions if s.get("project") and age_h(s) < 72}
     ledgers = {}
@@ -98,7 +95,7 @@ def main():
             continue
         rows, cursor = [], None
         for _ in range(20):
-            path = f"/api/v1/ledger?projectKey={enc(ledger_key(p['id']))}&view=work&limit=100"
+            path = f"/api/v1/ledger?projectKey={enc(p['id'])}&view=work&limit=100"
             if cursor:
                 path += f"&cursor={enc(cursor)}"
             try:
