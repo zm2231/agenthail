@@ -160,6 +160,7 @@ pub fn poll(s: &mut App) -> bool {
                 shown.sessions = page.sessions.into_iter().filter(|x| !shown.removed.contains(&x.id)).collect();
                 shown.pages = shown.pages.max(1);
                 shown.replace = false;
+                shown.read = true;
                 shown.next = page.next;
             }
             Ok(page) => {
@@ -323,4 +324,10 @@ pub(crate) fn status(s: &App, key: &str, id: &str) -> Option<String> {
 #[cfg(test)]
 pub(crate) fn error(s: &App, key: &str) -> Option<String> {
     s.earlier.projects.get(key)?.error.clone()
+}
+
+#[cfg(test)]
+pub(crate) fn fail(s: &mut App, key: &str, seq: u64) {
+    let _ = s.earlier.tx.send((key.to_string(), seq, false, Err("offline".into())));
+    poll(s);
 }

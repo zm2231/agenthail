@@ -414,6 +414,15 @@ fn earlier_reads_its_pages_again_when_a_shown_session_leaves_the_list() {
     crate::over::earlier::removed(&mut s, &unlisted);
     crate::over::earlier::answer_reread(&mut s, "p1", third, Some(vec![session("kept", 0, json!({}))]));
     assert!(crate::over::earlier::asks_again(&s, "p1"), "leaving the list during a reread reads once more after it");
+
+    let seq = crate::over::earlier::asking(&mut s, "p2");
+    let other = [feed::watch::Removal { id: "elsewhere".into(), unlisted: true }];
+    crate::over::earlier::removed(&mut s, &other);
+    crate::over::earlier::fail(&mut s, "p2", seq);
+    let retry = crate::over::earlier::start_reread(&mut s, "p2");
+    crate::over::earlier::answer_reread(&mut s, "p2", retry, Some(Vec::new()));
+    crate::over::earlier::removed(&mut s, &other);
+    assert!(crate::over::earlier::asks_again(&s, "p2"), "a project first read by a reread still reads again");
 }
 
 #[test]
