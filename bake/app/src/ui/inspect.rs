@@ -55,6 +55,10 @@ impl Inspect {
     }
 }
 
+fn showing(s: &App, id: &str) -> bool {
+    s.screen == crate::Screen::Session && s.selected.as_deref() == Some(id)
+}
+
 fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'static) -> bool {
     let Some(client) = s.client.clone() else { return false };
     let tx = s.inspect.tx.clone();
@@ -91,7 +95,7 @@ pub(crate) fn read(s: &mut App, id: &str, ticket: u64, result: Result<Metadata, 
 }
 
 pub(crate) fn goal_moved(s: &mut App, id: &str) {
-    if s.selected.as_deref() != Some(id) || s.client.is_none() || !s.inspect.reads.want(id) {
+    if !showing(s, id) || s.client.is_none() || !s.inspect.reads.want(id) {
         return;
     }
     let ticket = super::session_menu::reread(s, id);
@@ -140,8 +144,8 @@ fn budget_of(s: &App, id: &str) -> Option<i64> {
 fn save_editor(s: &mut App) {
     let Some(editing) = s.inspect.editing.as_ref() else { return };
     let (id, act, typed) = (editing.session.clone(), editing.act, editing.text.text.clone());
-    if s.selected.as_deref() != Some(id.as_str()) || !inspect::can_save(act, &typed, budget_of(s, &id)) {
-        if s.selected.as_deref() != Some(id.as_str()) {
+    if !showing(s, &id) || !inspect::can_save(act, &typed, budget_of(s, &id)) {
+        if !showing(s, &id) {
             close_editor(s);
         }
         return;
@@ -190,7 +194,7 @@ fn settled(s: &mut App, done: Done) {
             goal_moved(s, &id);
         }
         Done::Life(id, generation, act, tell, result) => {
-            let elsewhere = (s.selected.as_deref() != Some(id.as_str())).then(|| session(s, &id).map(|x| x.title()).unwrap_or_default());
+            let elsewhere = (!showing(s, &id)).then(|| session(s, &id).map(|x| x.title()).unwrap_or_default());
             let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.generation == generation) else { return };
             p.busy = None;
             if tell || elsewhere.is_some() {
@@ -246,9 +250,14 @@ pub fn drain(s: &mut App) -> bool {
         settled(s, done);
     }
     if let Some(editing) = &s.inspect.editing
-        && (s.selected.as_deref() != Some(editing.session.as_str()) || !session(s, &editing.session).is_some_and(|x| inspect::goal_controls(x).editable))
+        && (!showing(s, &editing.session) || !session(s, &editing.session).is_some_and(|x| inspect::goal_controls(x).editable))
     {
         close_editor(s);
+        changed = true;
+    }
+    if let Some((id, output)) = s.inspect.logs.as_ref().filter(|(id, _)| !showing(s, id)).cloned() {
+        s.inspect.logs = None;
+        s.inspect.process.entry(id).or_default().logs = Some(output);
         changed = true;
     }
     changed
