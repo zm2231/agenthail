@@ -136,8 +136,8 @@ fn init() -> App {
         }
         "work" => {
             let id = arg("--item").unwrap_or_else(|| "agenthail-W595".into());
-            let key = app.d.work.keys().filter(|k| k.id == id).min().cloned();
-            app.screen = Screen::Work(key.unwrap_or_else(|| feed::derive::WorkKey::new("", id)));
+            let key = app.d.work.keys().filter(|k| k.id == id && arg("--ledger").is_none_or(|l| k.ledger == l)).min().cloned();
+            app.screen = Screen::Work(key.unwrap_or_else(|| feed::derive::WorkKey::new(arg("--ledger").unwrap_or_default(), id)));
         }
         "jump" => {
             app.now_brief = true;

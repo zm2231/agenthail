@@ -94,6 +94,8 @@ pub fn refusal(e: &RespondError) -> String {
 
 pub const SETTLED_WHILE_OPEN: &str = "The earlier send settled while this was open. Close it and start again to send another.";
 
+pub const ITEM_GONE: &str = "This work item isn't loaded right now, so it can't take this yet. Your words stay here until it's back.";
+
 pub const CHANGED_WORDS: &str = "The last send isn't settled yet, so only the same words can go now. Change them once it settles.";
 
 pub fn settles(e: &RespondError) -> bool {
@@ -413,15 +415,17 @@ mod tests {
         let mut sends = Sends::default();
         sent(&mut sends, &client, &work("open", None), Move::Claim, "", 0.0);
         let first = seen.recv().unwrap().1;
-        let (key, body) = sends.resending(&k6(), Move::Claim).unwrap();
-        assert_eq!(body, first);
         assert_eq!(first["projectKey"], "project:p-1");
+        let key = sends.held_key(&k6(), Move::Claim).unwrap().to_string();
         let other = Work { ledger_key: "project:p-2".into(), ..work("open", None) };
         let (other_key, other_body) = sends.sending(&other, Move::Claim, "");
         assert_ne!(other_key, key, "the same id in another ledger is another item");
         assert_eq!(other_body["projectKey"], "project:p-2");
         assert_eq!(sends.held(&k6()), Some(Move::Claim));
         assert_eq!(sends.held(&WorkKey::new("project:p-2", "p-W6")), None);
+        sent(&mut sends, &client, &work("open", None), Move::Claim, "", 10.0);
+        assert_eq!(seen.recv().unwrap().1, first, "the resend posts the first body");
+        assert_eq!(sends.held(&k6()), None);
     }
 
     #[test]

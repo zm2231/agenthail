@@ -291,7 +291,7 @@ pub struct Words {
     item: WorkKey,
     title: String,
     m: Move,
-    text: TextEdit,
+    pub(crate) text: TextEdit,
     held: Option<String>,
 }
 
@@ -333,9 +333,13 @@ fn settled_while_open(s: &App, n: &Words) -> bool {
     n.held.as_deref().is_some_and(|key| s.ov.work.sends.held_key(&n.item, n.m) != Some(key))
 }
 
-fn send_words(s: &mut App) {
+fn gone(s: &App, n: &Words) -> bool {
+    !s.ov.d.work.contains_key(&n.item)
+}
+
+pub(crate) fn send_words(s: &mut App) {
     let Some(n) = &s.ov.work.words else { return };
-    if ledger::words_problem(n.m, &n.text.text).is_some() || changed_while_held(s, n) || settled_while_open(s, n) || s.ov.work.acting.contains(&n.item) {
+    if ledger::words_problem(n.m, &n.text.text).is_some() || gone(s, n) || changed_while_held(s, n) || settled_while_open(s, n) || s.ov.work.acting.contains(&n.item) {
         return;
     }
     let (item, m, words) = (n.item.clone(), n.m, n.text.text.trim().to_string());
@@ -444,7 +448,8 @@ pub fn words_dialog(s: &App, layer: &mut Vec<El>, k: &Kit) {
     let held = changed_while_held(s, n);
     let settled = settled_while_open(s, n);
     let busy = s.ov.work.acting.contains(&n.item);
-    let problem = ledger::words_problem(n.m, &n.text.text).or(held.then_some(ledger::CHANGED_WORDS)).or(settled.then_some(ledger::SETTLED_WHILE_OPEN)).or(busy.then_some("Sending…"));
+    let gone = gone(s, n);
+    let problem = ledger::words_problem(n.m, &n.text.text).or(gone.then_some(ledger::ITEM_GONE)).or(held.then_some(ledger::CHANGED_WORDS)).or(settled.then_some(ledger::SETTLED_WHILE_OPEN)).or(busy.then_some("Sending…"));
     let (title, label, placeholder, yes, about) = match n.m {
         Move::Park => ("Park", "Why it waits", "What should happen before anyone picks this up?", "Park", "It leaves the board until someone unparks it."),
         _ => ("Comment on", "Comment", "Your note for whoever works on this", "Add comment", "It goes on the item's timeline, where its workers read it."),
@@ -466,7 +471,9 @@ pub fn words_dialog(s: &App, layer: &mut Vec<El>, k: &Kit) {
         .child(Button::new("Cancel").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(|s: &mut App| s.ov.work.words = None).build(k).key("work-words-cancel"))
         .child(Button::new(yes).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(problem.is_some()).on_press(send_words).build(k).key("work-words-send"));
     let mut body = col().w_full().gap(10.0).px(16.0).pb(16.0).child(field);
-    if held {
+    if gone {
+        body = body.child(text(ledger::ITEM_GONE.to_string()).font(k.text(META)).color(ui::needs_color(k)).wrap().w_full());
+    } else if held {
         body = body.child(text(ledger::CHANGED_WORDS.to_string()).font(k.text(META)).color(ui::needs_color(k)).wrap().w_full());
     } else if settled {
         body = body.child(text(ledger::SETTLED_WHILE_OPEN.to_string()).font(k.text(META)).color(ui::needs_color(k)).wrap().w_full());

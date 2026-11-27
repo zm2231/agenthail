@@ -672,6 +672,30 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     crate::over::go(&mut rt.state, Screen::Work(mine.clone()));
     quiet(&mut rt);
     assert!(asked(&paths).is_empty(), "the loaded one still opens without a read");
+    crate::over::work::start(&mut rt.state, &mine, feed::ledger::Move::Comment);
+    rt.state.ov.work.words.as_mut().expect("a comment opens its dialog").text = rune::TextEdit::new("Check the other one too");
+    let held = rt.state.ov.d.work.remove(&mine).expect("the loaded one");
+    crate::over::work::send_words(&mut rt.state);
+    quiet(&mut rt);
+    assert!(rt.state.ov.work.words.as_ref().is_some_and(|n| n.text.text == "Check the other one too"), "a comment on an item that left keeps its words");
+    assert!(asked(&paths).is_empty(), "and isn't sent");
+    rt.state.ov.d.work.insert(mine.clone(), held);
+    crate::over::work::send_words(&mut rt.state);
+    let mut commented = Vec::new();
+    for _ in 0..400 {
+        commented.extend(asked(&paths));
+        if !commented.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        rt.frame(DT);
+    }
+    quiet(&mut rt);
+    commented.extend(asked(&paths));
+    assert_eq!(commented.len(), 1, "{commented:?}");
+    let posted: serde_json::Value = serde_json::from_str(commented[0].strip_prefix("/api/v1/ledger/work ").expect("the comment is posted")).unwrap();
+    assert_eq!((posted["projectKey"].as_str(), posted["itemId"].as_str(), posted["action"].as_str(), posted["text"].as_str()), (Some("shared:z"), Some("z-W9"), Some("comment"), Some("Check the other one too")), "the other one's move goes to its own ledger");
+    assert!(rt.state.ov.work.words.is_none());
 
     crate::over::worksearch::open(&mut rt.state, &zk("shared:z", "z-W8"));
     until(&mut rt, |s| s.ov.d.work.contains_key(&zk("shared:z", "z-W8")));
