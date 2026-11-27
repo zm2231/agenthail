@@ -1325,6 +1325,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                     s.notify.sessions_moved = true;
                     feed::holders::pins().prune(&s.sessions);
                     fetch_tails(s);
+                    if s.ov.live.misses_a_ledger() {
+                        ask_overview(s, Ask::Refresh);
+                    }
                 }
                 s.now = OffsetDateTime::now_utc();
                 s.status = "live".into();

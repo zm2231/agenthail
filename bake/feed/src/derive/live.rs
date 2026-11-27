@@ -484,6 +484,14 @@ impl Overview {
         self.ledger_at.retain(|k, _| listed.contains(k.as_str()));
     }
 
+    pub fn misses_a_ledger(&self) -> bool {
+        let now = parse_time(&self.base.updated_at).unwrap_or_else(OffsetDateTime::now_utc);
+        let listed = |p: &str| self.base.projects.iter().any(|r| r.id == p && !r.archived);
+        self.base.sessions.iter().filter(|x| hours(now, &x.last_active) < LEDGER_WINDOW_H).map(|x| x.project_key()).any(|p| {
+            !p.is_empty() && listed(&p) && !self.ledgers.contains_key(&p) && !self.covered.contains(&p) && !self.failed.contains(&p) && !self.pending.contains(&p)
+        })
+    }
+
     pub fn holds_ledger_of(&self, session: &str) -> bool {
         self.base.sessions.iter().find(|x| x.id == session).is_some_and(|x| {
             let project = x.project_key();
