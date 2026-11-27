@@ -100,6 +100,22 @@ fn an_unconfirmed_build_that_names_its_session_still_opens_it() {
 }
 
 #[test]
+fn a_failed_build_that_made_its_session_opens_it_with_the_failure() {
+    let (client, _rx) = daemon(replies(&[
+        (502, r#"{"error":{"code":"initial_turn_failed","message":"claude exited before its first turn"},"session":{"id":"s-builder"},"deliveryId":4}"#),
+        (500, r#"{"error":{"code":"create_storage_failed","message":"session was created, but its delivery intent could not be persisted"},"session":{"id":"s-other"}}"#),
+        (500, r#"{"error":{"code":"internal_error","message":"no workspace"}}"#),
+    ]));
+    let failed = client.build_extension(None, "a board", "k1").unwrap();
+    assert_eq!(failed.session_id().as_deref(), Some("s-builder"));
+    assert_eq!(failed.failure.as_deref(), Some("claude exited before its first turn"));
+    let stored = client.build_extension(None, "a board", "k2").unwrap();
+    assert_eq!(stored.session_id().as_deref(), Some("s-other"));
+    assert!(stored.failure.is_some());
+    assert_eq!(client.build_extension(None, "a board", "k3").unwrap_err().message, "no workspace");
+}
+
+#[test]
 fn a_build_or_undo_reply_that_proves_nothing_may_have_happened() {
     let (client, _rx) = daemon(replies(&[(200, r#"{"ok":true}"#), (202, r#"{"ok":true,"status":"submitted"}"#)]));
     let nameless = client.build_extension(None, "a board", "k1").unwrap_err();

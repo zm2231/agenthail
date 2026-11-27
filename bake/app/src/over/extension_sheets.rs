@@ -210,7 +210,9 @@ fn settle(s: &mut App, done: Done) {
                     crate::over::extensions::relist(s, &host);
                     if let Some(id) = started.session_id() {
                         open_session(s, &id);
-                        if started.unconfirmed() {
+                        if let Some(failure) = &started.failure {
+                            s.ov.notice = Some(format!("The builder session was made, but its first message didn't run: {failure}"));
+                        } else if started.unconfirmed() {
                             s.ov.notice = Some("The builder session was made, but the daemon hasn't confirmed its first message ran yet.".into());
                         }
                     }

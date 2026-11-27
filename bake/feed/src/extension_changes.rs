@@ -98,6 +98,8 @@ pub struct Started {
     pub session: Option<StartedSession>,
     #[serde(default)]
     pub status: String,
+    #[serde(skip)]
+    pub failure: Option<String>,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -168,7 +170,16 @@ impl Client {
     }
 
     pub fn build_extension(&self, host: Option<&str>, message: &str, key: &str) -> std::result::Result<Started, RespondError> {
-        let reply = self.post_json_keyed(&on_host("/api/v1/extensions/build", host), "build", json!({"message": message}), key)?;
+        let reply = match self.post_json_keyed(&on_host("/api/v1/extensions/build", host), "build", json!({"message": message}), key) {
+            Ok(reply) => reply,
+            Err(error) => {
+                let made: Started = serde_json::from_value(error.reply.clone()).unwrap_or_default();
+                return match made.session_id() {
+                    Some(_) => Ok(Started { failure: Some(error.message), ..made }),
+                    None => Err(error),
+                };
+            }
+        };
         let started: Started = serde_json::from_value(reply.clone()).map_err(|e| unreadable("builder", e, true))?;
         match started.session_id() {
             Some(_) => Ok(started),
