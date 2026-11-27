@@ -76,23 +76,36 @@ pub fn worst(rgba: &[u8], width: u32, dark: bool, cell: usize) -> Rgb {
     if h == 0 {
         return if dark { [1.0; 3] } else { [0.0; 3] };
     }
-    let cell = cell.max(1);
-    let (cw, ch) = (w.div_ceil(cell), h.div_ceil(cell));
-    let mut sums = vec![([0.0f32; 3], 0u32); cw * ch];
+    let size = cell.max(1).min(w).min(h);
+    let stride = w + 1;
+    let mut table = vec![[0.0f64; 3]; stride * (h + 1)];
     for y in 0..h {
+        let mut row = [0.0f64; 3];
         for x in 0..w {
             let i = (y * w + x) * 4;
-            let slot = &mut sums[(y / cell) * cw + x / cell];
             for k in 0..3 {
-                slot.0[k] += rgba[i + k] as f32 / 255.0;
+                row[k] += rgba[i + k] as f64 / 255.0;
+                table[(y + 1) * stride + x + 1][k] = table[y * stride + x + 1][k] + row[k];
             }
-            slot.1 += 1;
         }
     }
-    let cells = sums.into_iter().filter(|(_, n)| *n > 0).map(|(c, n)| c.map(|v| v / n as f32));
-    let key = |c: &Rgb| luminance(*c);
-    let pick = if dark { cells.max_by(|a, b| key(a).total_cmp(&key(b))) } else { cells.min_by(|a, b| key(a).total_cmp(&key(b))) };
-    pick.unwrap_or(if dark { [1.0; 3] } else { [0.0; 3] })
+    let area = (size * size) as f64;
+    let mut best: Option<(f32, Rgb)> = None;
+    for y in 0..=h - size {
+        for x in 0..=w - size {
+            let (a, b, c, d) = (table[y * stride + x], table[y * stride + x + size], table[(y + size) * stride + x], table[(y + size) * stride + x + size]);
+            let mean = [0, 1, 2].map(|k| ((d[k] - b[k] - c[k] + a[k]) / area) as f32);
+            let l = luminance(mean);
+            let better = match best {
+                None => true,
+                Some((b, _)) => if dark { l > b } else { l < b },
+            };
+            if better {
+                best = Some((l, mean));
+            }
+        }
+    }
+    best.map(|(_, c)| c).unwrap_or(if dark { [1.0; 3] } else { [0.0; 3] })
 }
 
 pub fn readable_text(color: Rgb, surfaces: &[Rgb], dark: bool, target: f32) -> Rgb {
@@ -152,10 +165,14 @@ fn is_heic(data: &[u8]) -> bool {
 }
 
 fn load(data: &[u8]) -> Result<image::DynamicImage, String> {
-    if !is_heic(data) {
-        return image::load_from_memory(data).map_err(|e| e.to_string());
+    if is_heic(data) {
+        return from_heic(data);
     }
-    from_heic(data)
+    let mut decoder = image::ImageReader::new(std::io::Cursor::new(data)).with_guessed_format().map_err(|e| e.to_string())?.into_decoder().map_err(|e| e.to_string())?;
+    let orientation = image::ImageDecoder::orientation(&mut decoder).map_err(|e| e.to_string())?;
+    let mut picture = image::DynamicImage::from_decoder(decoder).map_err(|e| e.to_string())?;
+    picture.apply_orientation(orientation);
+    Ok(picture)
 }
 
 #[cfg(target_os = "macos")]

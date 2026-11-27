@@ -263,3 +263,35 @@ fn a_heic_picture_is_recognised_before_decoding() {
         assert_eq!(got.err().as_deref(), Some("HEIC pictures can be shown only on a Mac"));
     }
 }
+
+#[test]
+fn a_bright_spot_across_two_cells_still_counts_in_full() {
+    let side = 40u32;
+    let mut rgba = vec![10u8; (side * side * 4) as usize];
+    for y in 5..15 {
+        for x in 5..15 {
+            let i = ((y * side + x) * 4) as usize;
+            rgba[i..i + 4].copy_from_slice(&[250, 250, 250, 255]);
+        }
+    }
+    let w = worst(&rgba, side, true, 10);
+    assert!(w[0] > 0.97, "{w:?}");
+}
+
+#[test]
+fn a_photo_turned_by_its_orientation_tag_is_drawn_upright() {
+    use image::{ImageEncoder, RgbImage};
+    let mut wide = RgbImage::new(40, 20);
+    for px in wide.pixels_mut() {
+        *px = image::Rgb([200, 30, 30]);
+    }
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 90).write_image(wide.as_raw(), 40, 20, image::ExtendedColorType::Rgb8).unwrap();
+    let exif: [u8; 34] = [0xFF, 0xE1, 0x00, 0x20, b'E', b'x', b'i', b'f', 0, 0, b'M', b'M', 0, 0x2A, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0];
+    let mut tagged = jpeg[..2].to_vec();
+    tagged.extend_from_slice(&exif);
+    tagged.extend_from_slice(&jpeg[2..]);
+    let d = decode(&tagged, 2560, 16).unwrap();
+    assert_eq!(d.original, (20, 40));
+    assert_eq!((d.shown.0, d.shown.1), (20, 40));
+}
