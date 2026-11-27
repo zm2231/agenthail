@@ -72,7 +72,12 @@ fn lineage(s: &App, id: &str) -> Vec<String> {
 }
 
 fn held(s: &App) -> HashSet<String> {
-    s.selected.as_deref().map(|sel| lineage(s, sel).into_iter().collect()).unwrap_or_default()
+    super::window::shown(s).into_iter().flat_map(|(_, id)| lineage(s, &id)).collect()
+}
+
+#[cfg(test)]
+pub fn holds(s: &App, id: &str) -> bool {
+    held(s).contains(id)
 }
 
 fn touch(s: &mut App, id: &str) {

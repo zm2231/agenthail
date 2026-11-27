@@ -1,4 +1,4 @@
-use super::phase::{state_phase, state_word};
+use super::phase::{state_name, state_phase};
 use super::text::plain;
 use super::world::{Entry, Work};
 
@@ -13,10 +13,10 @@ fn what(t: &Entry, moved_back: bool) -> String {
     let text = match (t.kind.as_str(), t.state.as_deref()) {
         ("state", Some("parked")) => match t.text.as_deref().and_then(park_why) {
             Some(why) => format!("Parked: {why}"),
-            None => format!("Moved to {}", state_word("parked")),
+            None => format!("Moved to {}", state_name("parked")),
         },
-        ("state", Some(st)) if moved_back => format!("Moved back to {}", state_word(st)),
-        ("state", Some(st)) => format!("Moved to {}", state_word(st)),
+        ("state", Some(st)) if moved_back => format!("Moved back to {}", state_name(st)),
+        ("state", Some(st)) => format!("Moved to {}", state_name(st)),
         ("created", _) => "Created".into(),
         ("comment", _) => format!("Note: {}", t.text.as_deref().unwrap_or("")),
         _ => t.text.clone().unwrap_or_default(),

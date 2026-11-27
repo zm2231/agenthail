@@ -18,6 +18,8 @@ mod keyboard;
 mod role_pickers;
 #[path = "project_menus_tests.rs"]
 mod project_menus;
+#[path = "work_steps_tests.rs"]
+mod work_steps;
 
 const DT: f64 = 1.0 / 60.0;
 const EPOCH: &str = "e1";
@@ -1036,7 +1038,7 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     typed(&mut rt, "export");
     rt.frame(0.21);
     until(&mut rt, |s| work_found(s).is_some());
-    assert_eq!(crate::over::jump::shown(&rt.state), [("Parked export".to_string(), "Build · Someone's move · Alpha · …a parked export…".to_string())], "a loaded match takes the search's snippet instead of listing twice");
+    assert_eq!(crate::over::jump::shown(&rt.state), [("Parked export".to_string(), "In progress · Someone's move · Alpha · …a parked export…".to_string())], "a loaded match takes the search's snippet instead of listing twice");
     assert_eq!(asked(&paths), ["/api/v1/ledger/search?q=export&limit=20"]);
 
     let (mine, other) = (zk("shared:z", "z-W9"), zk("shared:q", "z-W9"));

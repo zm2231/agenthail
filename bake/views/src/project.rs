@@ -51,7 +51,7 @@ pub fn work_card(s: &App, w: &Work, compact: bool, k: &Kit) -> El {
         .hover(k.c.surface_raised_hover)
         .on_press(move |s: &mut App| go(s, Screen::Work(key.clone())))
         .child(ui::title_fit(s, &format!("card-{}-{compact}", w.id), &plain(&w.text), BODY_MED.lh(19.0), strong(k), 2));
-    c = c.child(ui::mini_phase(phase, k));
+    c = c.child(ui::mini_phase(w, k));
     let last = w.timeline.last().map(|t| s.d.ago(&t.at)).unwrap_or_default();
     c.child(
         row()

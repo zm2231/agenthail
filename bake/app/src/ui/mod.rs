@@ -1,4 +1,4 @@
-use feed::catalog::{self, PHASES, Session, State};
+use feed::catalog::{self, Session, State};
 use rune::{Color, Cx, El, Icon, ScrollSpec, Transition, Tx, col, el, icon, row, text, text_input};
 use rune_kit::{Button, ButtonVariant, Keybind, KeybindVariant, Kit, KitCx, KitTheme};
 

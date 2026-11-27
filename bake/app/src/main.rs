@@ -46,7 +46,7 @@ pub enum Bg {
     SessionNews,
     SessionsMoved,
     Removed(Vec<feed::watch::Removal>),
-    Item(WorkKey, WorkItem),
+    Item(WorkKey, u64, Option<WorkItem>),
     Overview(Box<Fetched>),
     Ledger(String, std::time::Instant, Result<Ledger, String>),
     Tail(String, String, Result<Tail, String>, Option<tails::Resume>),
@@ -139,6 +139,7 @@ pub struct App {
     pub busy_pick: HashMap<String, Busy>,
     pub rekeyed: HashMap<String, String>,
     pub items: HashMap<WorkKey, WorkItem>,
+    pub item_reads: (u64, HashMap<WorkKey, u64>),
     pub requests: HashMap<String, Vec<OpenRequest>>,
     pub answering: Option<String>,
     pub settled: HashMap<String, Option<std::time::Instant>>,
@@ -173,11 +174,11 @@ pub struct App {
     pub notices: ui::notice::Notices,
     pub holder_menu: Option<String>,
     revealed: Option<String>,
-    pub missing: Option<ui::gone::Missing>,
+    pub missing: HashMap<String, ui::gone::Missing>,
     pub notify: notify::State,
     pub windows: ui::window::Windows,
     pub tabs: ui::tabs::State,
-    last_row: Option<Session>,
+    last_rows: HashMap<String, Session>,
     client: Option<Client>,
     overview_poke: Option<Sender<Ask>>,
     fixtures: Option<Fixtures>,
@@ -344,6 +345,7 @@ fn empty(live: Overview, persist: bool) -> App {
         busy_pick: HashMap::new(),
         rekeyed: HashMap::new(),
         items: HashMap::new(),
+        item_reads: (0, HashMap::new()),
         requests: HashMap::new(),
         answering: None,
         settled: HashMap::new(),
@@ -378,11 +380,11 @@ fn empty(live: Overview, persist: bool) -> App {
         notices: Default::default(),
         holder_menu: None,
         revealed: None,
-        missing: None,
+        missing: HashMap::new(),
         notify: notify::State::default(),
         windows: Default::default(),
         tabs: Default::default(),
-        last_row: None,
+        last_rows: HashMap::new(),
         client: None,
         overview_poke: None,
         fixtures: None,
@@ -585,10 +587,12 @@ fn changed_elsewhere(s: &mut App, wants: feed::watch::Wants) {
         ui::native_queue::changed(s, &id);
     }
     if let Some(id) = wants.session
-        && s.selected.as_deref() == Some(id.as_str())
+        && let Some((w, _)) = ui::window::shown(s).into_iter().find(|(_, x)| *x == id)
     {
-        selected_changed(s, &id);
-        selected_moved(s, &id);
+        ui::window::within(s, w, |s| {
+            selected_changed(s, &id);
+            selected_moved(s, &id);
+        });
     }
 }
 
@@ -608,10 +612,12 @@ fn reopened(s: &mut App) {
     ask_overview(s, Ask::Reset);
     over::inbox::reopened(s);
     over::extensions::reopened(s);
-    if let Some(id) = s.selected.clone() {
-        selected_changed(s, &id);
-        selected_moved(s, &id);
-        ui::native_queue::changed(s, &id);
+    for (w, id) in ui::window::shown(s) {
+        ui::window::within(s, w, |s| {
+            selected_changed(s, &id);
+            selected_moved(s, &id);
+            ui::native_queue::changed(s, &id);
+        });
     }
 }
 
@@ -738,9 +744,22 @@ pub fn send_text(s: &mut App, message: String, tx: &mut Tx) {
 }
 
 fn fetch_item(s: &mut App, key: &WorkKey) {
-    if s.items.contains_key(key) {
-        return;
+    if !s.items.contains_key(key) {
+        read_item(s, key);
     }
+}
+
+fn items_changed(s: &mut App, ledger: Option<&str>) {
+    let shown: Vec<WorkKey> = ui::window::shown(s).into_iter().filter_map(|(_, id)| session(s, &id).and_then(|x| x.primary_work(s.work_pick.get(&id))).map(|w| w.key())).collect();
+    let kept = |k: &WorkKey| shown.contains(k) || ledger.is_some_and(|l| l != k.ledger);
+    s.items.retain(|k, _| kept(k));
+    s.item_reads.1.retain(|k, _| kept(k));
+    for key in shown.iter().filter(|k| ledger.is_none_or(|l| l == k.ledger)) {
+        read_item(s, key);
+    }
+}
+
+fn read_item(s: &mut App, key: &WorkKey) {
     if let Some(f) = &s.fixtures {
         if let Ok(text) = std::fs::read_to_string(format!("{}/items/{}.json", f.dir, key.id)) {
             if let Ok(value) = serde_json::from_str(&text) {
@@ -750,11 +769,13 @@ fn fetch_item(s: &mut App, key: &WorkKey) {
         return;
     }
     if let Some(client) = s.client.clone() {
+        s.item_reads.0 += 1;
+        let seq = s.item_reads.0;
+        s.item_reads.1.insert(key.clone(), seq);
         let (tx, item) = (s.outbox.clone(), key.clone());
         std::thread::spawn(move || {
-            if let Ok(work) = client.work_item(&item.ledger, &item.id) {
-                let _ = tx.send(Bg::Item(item, work));
-            }
+            let work = client.work_item(&item.ledger, &item.id).ok();
+            let _ = tx.send(Bg::Item(item, seq, work));
         });
     }
 }
@@ -1280,13 +1301,13 @@ pub fn switch_composer(s: &mut App) {
     s.composer_for = target;
 }
 
-fn move_key<V>(map: &mut HashMap<String, V>, old: &str, new: &str) {
+pub(crate) fn move_key<V>(map: &mut HashMap<String, V>, old: &str, new: &str) {
     if let Some(v) = map.remove(old) {
         map.entry(new.to_string()).or_insert(v);
     }
 }
 
-fn move_member(set: &mut HashSet<String>, old: &str, new: &str) {
+pub(crate) fn move_member(set: &mut HashSet<String>, old: &str, new: &str) {
     if set.remove(old) {
         set.insert(new.to_string());
     }
@@ -1296,7 +1317,7 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
     if rekeyed == s.rekeyed {
         return;
     }
-    s.rekeyed = rekeyed;
+    let before = std::mem::replace(&mut s.rekeyed, rekeyed);
     ui::complete::leave_all_history(s);
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &ui::paste::draft(s));
@@ -1341,6 +1362,9 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
         move_key(&mut s.busy_pick, &old, &new);
         move_key(&mut s.redeliver, &old, &new);
         ui::turn_options::rekey(s, &old, &new);
+        if feed::composer::current(&before, &old) != new {
+            ui::inspect::rekey(s, &old, &new);
+        }
         move_key(&mut s.work_pick, &old, &new);
         move_member(&mut s.stopping, &old, &new);
         move_key(&mut s.queue_note, &old, &new);
@@ -1381,24 +1405,26 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 s.status = "live".into();
                 ui::connect::up(s);
                 link::listed(s);
-                if let Some(id) = s.selected.clone()
-                    && touched.as_ref().is_none_or(|t| t.contains(&id))
-                {
-                    selected_changed(s, &id);
-                    if touched.is_some() {
-                        selected_moved(s, &id);
-                    }
+                for (w, id) in ui::window::shown(s).into_iter().filter(|(_, id)| touched.as_ref().is_none_or(|t| t.contains(id))) {
+                    ui::window::within(s, w, |s| {
+                        selected_changed(s, &id);
+                        if touched.is_some() {
+                            selected_moved(s, &id);
+                        }
+                    });
                 }
             }
             Bg::Changed(wants) => changed_elsewhere(s, wants),
             Bg::Reopened => reopened(s),
             Bg::LedgerChanged(key, at) => {
                 ui::ready::ledger_changed(s, &key);
+                items_changed(s, Some(&key));
                 over::worksearch::ledger_changed(s, Some(&key));
                 ask_overview(s, Ask::Ledger(key, at));
             }
             Bg::LedgersReopened => {
                 ui::ready::reopened(s);
+                items_changed(s, None);
                 over::worksearch::ledger_changed(s, None);
                 ask_overview(s, Ask::Reopened);
             }
@@ -1411,8 +1437,14 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 over::earlier::removed(s, &gone);
                 over::listing::removed(s, &gone);
             }
-            Bg::Item(id, item) => {
-                s.items.insert(id, item);
+            Bg::Item(id, seq, item) => {
+                if s.item_reads.1.get(&id) == Some(&seq) {
+                    s.item_reads.1.remove(&id);
+                    match item {
+                        Some(item) => s.items.insert(id, item),
+                        None => s.items.remove(&id),
+                    };
+                }
             }
             Bg::Overview(fetched) => {
                 s.earlier.activity_missing = fetched.recorded.activity_missing;
@@ -1578,8 +1610,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     if arrived {
         over::arrive(s);
     }
-    if s.tab == Tab::Changes && (changed || s.diff_key.0 != s.selected.clone().unwrap_or_default()) {
-        refresh_diff(s);
+    let due: Vec<ui::window::Id> = ui::window::ids(s).into_iter().filter(|w| ui::window::diff_due(s, *w, changed)).collect();
+    for w in due {
+        ui::window::within(s, w, refresh_diff);
     }
     if s.screen != Screen::Session {
         s.revealed = None;

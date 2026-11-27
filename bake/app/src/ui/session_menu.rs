@@ -55,7 +55,7 @@ pub struct Menus {
     seq: u64,
     newest: HashMap<(String, &'static str), u64>,
     rename_seq: u64,
-    refreshed: Option<(String, Instant)>,
+    refreshed: HashMap<String, Instant>,
     models_asked: HashMap<String, Instant>,
     models_loading: HashSet<String>,
     settings_asked: HashMap<String, Instant>,
@@ -86,7 +86,7 @@ impl Menus {
             seq: 0,
             newest: HashMap::new(),
             rename_seq: 0,
-            refreshed: None,
+            refreshed: HashMap::new(),
             models_asked: HashMap::new(),
             models_loading: HashSet::new(),
             settings_asked: HashMap::new(),
@@ -174,17 +174,17 @@ pub fn load(s: &mut App, id: &str) {
         load_fixture(s, id);
         return;
     }
-    s.menus.refreshed = Some((id.to_string(), Instant::now()));
+    s.menus.refreshed.insert(id.to_string(), Instant::now());
     fetch_settings(s, id, Duration::ZERO);
     fetch_context(s, id, Duration::ZERO);
     fetch_models(s, id);
 }
 
 pub(crate) fn changed(s: &mut App, id: &str) {
-    if s.screen != Screen::Session || s.selected.as_deref() != Some(id) || s.client.is_none() {
+    if s.client.is_none() || !super::window::shown_sessions(s).iter().any(|x| x == id) {
         return;
     }
-    s.menus.refreshed = Some((id.to_string(), Instant::now()));
+    s.menus.refreshed.insert(id.to_string(), Instant::now());
     fetch_settings(s, id, Duration::ZERO);
     fetch_context(s, id, Duration::ZERO);
 }
@@ -192,6 +192,15 @@ pub(crate) fn changed(s: &mut App, id: &str) {
 pub(crate) fn agent_mode_changed(s: &mut App, id: &str) {
     if s.client.is_some() && session(s, id).is_some_and(|x| feed::create::is_acp(&x.surface)) {
         fetch_settings(s, id, Duration::ZERO);
+    }
+}
+
+pub(crate) fn rekey_context(s: &mut App, old: &str, new: &str, collided: bool) {
+    super::inspect::carry(&mut s.menus.context, old, new, collided);
+    super::inspect::carry(&mut s.menus.context_error, old, new, collided);
+    if let Some(seq) = s.menus.newest.remove(&(old.to_string(), "context")) {
+        let kept = s.menus.newest.entry((new.to_string(), "context")).or_insert(seq);
+        *kept = (*kept).max(seq);
     }
 }
 
@@ -232,34 +241,41 @@ fn fetch_models(s: &mut App, id: &str) {
 }
 
 fn failed_now(s: &mut App, id: &str) {
-    if s.selected.as_deref() == Some(id) {
-        s.menus.refreshed = Some((id.to_string(), Instant::now()));
+    if super::window::shown_sessions(s).iter().any(|x| x == id) {
+        s.menus.refreshed.insert(id.to_string(), Instant::now());
     }
 }
 
 fn refresh_shown(s: &mut App) {
-    if s.screen != Screen::Session || s.client.is_none() {
+    if s.client.is_none() {
         return;
     }
-    let Some(id) = s.selected.clone() else { return };
-    if !s.menus.models_asked.contains_key(&id) {
-        fetch_models(s, &id);
+    let shown = super::window::shown_sessions(s);
+    s.menus.refreshed.retain(|id, _| shown.contains(id));
+    for id in shown {
+        refresh_one(s, &id);
     }
-    let unread = s.menus.settings.get(&id).is_some_and(|x| x.agent_mode_unread);
-    let failed = unread || s.menus.note.contains_key(&id) || s.menus.context_error.contains_key(&id) || s.menus.models_error.contains_key(&id);
-    let due = s.menus.refreshed.as_ref().is_none_or(|(shown, at)| *shown != id || crate::wake::due_after(*at, RETRY));
+}
+
+fn refresh_one(s: &mut App, id: &str) {
+    if !s.menus.models_asked.contains_key(id) {
+        fetch_models(s, id);
+    }
+    let unread = s.menus.settings.get(id).is_some_and(|x| x.agent_mode_unread);
+    let failed = unread || s.menus.note.contains_key(id) || s.menus.context_error.contains_key(id) || s.menus.models_error.contains_key(id);
+    let due = s.menus.refreshed.get(id).is_none_or(|at| crate::wake::due_after(*at, RETRY));
     if !failed || !due {
         return;
     }
-    s.menus.refreshed = Some((id.clone(), Instant::now()));
-    if unread || s.menus.note.contains_key(&id) {
-        fetch_settings(s, &id, Duration::ZERO);
+    s.menus.refreshed.insert(id.to_string(), Instant::now());
+    if unread || s.menus.note.contains_key(id) {
+        fetch_settings(s, id, Duration::ZERO);
     }
-    if s.menus.context_error.contains_key(&id) {
-        fetch_context(s, &id, Duration::ZERO);
+    if s.menus.context_error.contains_key(id) {
+        fetch_context(s, id, Duration::ZERO);
     }
-    if s.menus.models_error.contains_key(&id) {
-        fetch_models(s, &id);
+    if s.menus.models_error.contains_key(id) {
+        fetch_models(s, id);
     }
 }
 
@@ -510,10 +526,14 @@ fn settled(s: &mut App, done: Done) {
             s.menus.models_loading.remove(&id);
             s.menus.models_error.insert(id, error);
         }
-        Done::Context(id, seq, result, ticket, metadata) => {
-            super::inspect::read(s, &id, ticket, metadata);
-            if !s.menus.fresh(&id, "context", seq) || super::inspect::is_streamed(s, &id, "context") {
+        Done::Context(asked, seq, result, ticket, metadata) => {
+            super::inspect::read(s, &asked, ticket, metadata);
+            let id = feed::composer::current(&s.rekeyed, &asked).to_string();
+            if super::inspect::asked_before_merge(s, &asked, ticket) || !s.menus.fresh(&id, "context", seq) || super::inspect::streamed_since(s, &id, "context", ticket) {
                 return;
+            }
+            if result.is_ok() {
+                super::inspect::caught_up(s, &id, "context", ticket);
             }
             match result {
                 Ok(Some(usage)) => {
@@ -602,6 +622,27 @@ fn settled(s: &mut App, done: Done) {
             }
         }
     }
+}
+
+#[cfg(test)]
+pub fn settle(s: &mut App, done: Done) {
+    settled(s, done);
+}
+
+#[cfg(test)]
+pub fn context_fresh(s: &mut App, id: &str, seq: u64) -> bool {
+    s.menus.fresh(id, "context", seq)
+}
+
+#[cfg(test)]
+pub fn failed_a_while_ago(s: &mut App, id: &str) {
+    s.menus.note.insert(id.to_string(), "unread".into());
+    s.menus.refreshed.insert(id.to_string(), Instant::now() - RETRY);
+}
+
+#[cfg(test)]
+pub fn asked(s: &App, id: &str) -> bool {
+    s.menus.refreshed.get(id).is_some_and(|at| at.elapsed() < RETRY)
 }
 
 pub fn drain(s: &mut App) -> bool {

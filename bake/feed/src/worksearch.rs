@@ -88,27 +88,6 @@ pub struct Row {
     pub key: WorkKey,
 }
 
-fn state_word(state: &str) -> String {
-    match state {
-        "open" => "Open".into(),
-        "in_progress" => "In progress".into(),
-        "in_review" => "In review".into(),
-        "done" => "Done".into(),
-        "closed" => "Closed".into(),
-        "parked" => "Parked".into(),
-        "blocked" => "Blocked".into(),
-        other => crate::derive::text::capital(&other.replace('_', " ")),
-    }
-}
-
-fn step_word(f: &Found) -> String {
-    let phase = f.phase.trim();
-    if phase.is_empty() {
-        return state_word(&f.state);
-    }
-    crate::derive::phase::PHASES.iter().find(|p| p.eq_ignore_ascii_case(phase)).map_or_else(|| crate::derive::text::capital(&phase.replace('_', " ")), |p| p.to_string())
-}
-
 impl World {
     pub fn found_extra(&self, f: &Found) -> Vec<String> {
         let mut out = Vec::new();
@@ -128,7 +107,7 @@ impl World {
             .iter()
             .filter(|f| !listed(f))
             .map(|f| {
-                let mut status = vec![step_word(f)];
+                let mut status = vec![crate::derive::phase::step_word(&f.phase, &f.state)];
                 let alias = f.assignee_alias.trim().trim_start_matches('@');
                 if !alias.is_empty() {
                     status.push(format!("@{alias}"));
@@ -212,17 +191,15 @@ mod tests {
         let seen: Vec<(&str, &str, &str)> = rows.iter().map(|r| (r.key.id.as_str(), r.status.as_str(), r.key.ledger.as_str())).collect();
         assert_eq!(seen, [("y-W1", "Parked · Y", "repo:x/y"), ("y-W2", "Parked · Y · on build-box · …drops rows…", "repo:x/y"), ("y-W3", "Parked · Y · on h9", "repo:x/y")]);
         assert_eq!((rows[0].badge.as_str(), rows[0].avatar.as_str()), (short_id("y-W1").as_str(), "Y"));
-        assert_eq!(state_word("in_review"), "In review");
-        assert_eq!(state_word("deleted"), "Deleted");
     }
 
     #[test]
     fn rows_show_the_step_and_the_assignee_and_fall_back_to_the_state() {
         let w = world();
         let item = |id: &str, state: &str, phase: &str, alias: &str| Found { project_key: "repo:x/y".into(), project_name: "Y".into(), id: id.into(), state: state.into(), phase: phase.into(), assignee_alias: alias.into(), ..Found::default() };
-        let search = Search { items: vec![item("y-W1", "in_progress", "review", "builder"), item("y-W2", "in_progress", "build", ""), item("y-W3", "in_review", "", "@checker"), item("y-W4", "open", "triage_later", "")], truncated: false };
+        let search = Search { items: vec![item("y-W1", "in_progress", "review", "builder"), item("y-W2", "in_progress", "build", ""), item("y-W3", "in_review", "", "@checker"), item("y-W4", "open", "triage_later", ""), item("y-W5", "parked", "scope", "")], truncated: false };
         let rows: Vec<String> = w.found_rows(&search, |_| false).into_iter().map(|r| r.status).collect();
-        assert_eq!(rows, ["Review · @builder · Y", "Build · Y", "In review · @checker · Y", "Triage later · Y"]);
+        assert_eq!(rows, ["Review · @builder · Y", "Build · Y", "In review · @checker · Y", "Triage later · Y", "Parked · Y"]);
     }
 
     #[test]
