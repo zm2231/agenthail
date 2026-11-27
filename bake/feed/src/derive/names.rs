@@ -45,6 +45,9 @@ impl World {
     }
 
     pub fn name_of(&self, actor: &str) -> String {
+        if actor == crate::ledger::PERSON {
+            return "You".into();
+        }
         if let Some(n) = self.names.get(actor) {
             return n.clone();
         }

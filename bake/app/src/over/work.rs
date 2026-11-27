@@ -1,9 +1,14 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::mpsc::{Receiver, Sender, channel};
 
-use rune::{Cx, El, ScrollSpec, col, el, icon, row, text};
+use rune::{Cx, El, ScrollSpec, TextEdit, Tx, col, el, icon, row, text, text_input};
 use rune_kit::shell::Toolbar;
-use rune_kit::{Button, ButtonVariant, ControlSize};
+use rune_kit::{Button, ButtonVariant, ControlSize, Dialog};
 use rune_theme_opencode::icons;
+use serde_json::Value;
+
+use feed::catalog::RespondError;
+use feed::ledger::{self, Move};
 
 use feed::derive::phase::{CHECK, SHIP, phase};
 use feed::derive::proof::proof;
@@ -160,6 +165,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
         .pt(22.0)
         .pb(48.0)
         .child(goal)
+        .children(moves(s, w))
         .child(ui::card(col().w_full().padding(18.0).child(ui::stepper(phase, &s.ov.d.whose_move(w)))))
         .child(waiting)
         .child(brief)
@@ -274,4 +280,155 @@ fn timeline(s: &App, w: &crate::over::Work, max: usize) -> El {
         );
     }
     c
+}
+
+type Done = (String, Move, String, Result<Value, RespondError>);
+
+pub struct Words {
+    item: String,
+    title: String,
+    m: Move,
+    text: TextEdit,
+}
+
+pub struct State {
+    tx: Sender<Done>,
+    rx: Receiver<Done>,
+    acting: HashSet<String>,
+    notes: HashMap<String, (bool, String)>,
+    keys: HashMap<(String, Move), (String, String)>,
+    pub words: Option<Words>,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        let (tx, rx) = channel();
+        State { tx, rx, acting: HashSet::new(), notes: HashMap::new(), keys: HashMap::new(), words: None }
+    }
+}
+
+fn start(s: &mut App, id: &str, m: Move) {
+    let Some(w) = s.ov.d.work.get(id) else { return };
+    if !m.needs_words() {
+        send(s, id, m, "");
+        return;
+    }
+    let mut text = TextEdit::new("");
+    text.focused = true;
+    s.composer.focused = false;
+    s.ov.work.words = Some(Words { item: id.into(), title: plain(&w.text), m, text });
+}
+
+fn send_words(s: &mut App) {
+    let Some(n) = &s.ov.work.words else { return };
+    if ledger::words_problem(n.m, &n.text.text).is_some() {
+        return;
+    }
+    let (id, m, words) = (n.item.clone(), n.m, n.text.text.trim().to_string());
+    s.ov.work.words = None;
+    send(s, &id, m, &words);
+}
+
+fn send(s: &mut App, id: &str, m: Move, words: &str) {
+    let Some(w) = s.ov.d.work.get(id).cloned() else { return };
+    if s.ov.work.acting.contains(id) || !ledger::offered(&w).contains(&m) {
+        return;
+    }
+    let Some(client) = s.client.clone() else {
+        s.ov.work.notes.insert(id.into(), (true, "Fixture mode: not sent".into()));
+        return;
+    };
+    let slot = (id.to_string(), m);
+    let key = match s.ov.work.keys.get(&slot) {
+        Some((said, key)) if said == words => key.clone(),
+        _ => feed::catalog::request_key(),
+    };
+    s.ov.work.keys.insert(slot, (words.to_string(), key.clone()));
+    s.ov.work.acting.insert(id.into());
+    s.ov.work.notes.remove(id);
+    let (tx, id, words) = (s.ov.work.tx.clone(), id.to_string(), words.to_string());
+    std::thread::spawn(move || {
+        let result = client.work_move(&w, m, &words, &key);
+        let _ = tx.send((id, m, words, result));
+    });
+}
+
+pub fn drain(s: &mut App) -> bool {
+    let mut changed = false;
+    while let Ok((id, m, _words, result)) = s.ov.work.rx.try_recv() {
+        changed = true;
+        let st = &mut s.ov.work;
+        st.acting.remove(&id);
+        match result {
+            Ok(_) => {
+                st.keys.remove(&(id.clone(), m));
+                st.notes.insert(id, (false, m.done().into()));
+                crate::ask_overview(s, crate::Ask::Refresh);
+            }
+            Err(e) if e.maybe_delivered => {
+                st.notes.insert(id, (true, format!("Sent, not confirmed: {}. Trying again won't do it twice.", e.message)));
+            }
+            Err(e) => {
+                st.keys.remove(&(id.clone(), m));
+                st.notes.insert(id, (true, format!("Not done: {}", ledger::refusal(&e))));
+            }
+        }
+    }
+    changed
+}
+
+fn moves(s: &App, w: &crate::over::Work) -> Option<El> {
+    let offered = ledger::offered(w);
+    let note = s.ov.work.notes.get(&w.id);
+    if offered.is_empty() && note.is_none() {
+        return None;
+    }
+    let k = kit();
+    let busy = s.ov.work.acting.contains(&w.id);
+    let mut r = row().w_full().gap(8.0).items_center().flex_wrap();
+    for m in offered {
+        let id = w.id.clone();
+        let variant = if matches!(m, Move::Claim | Move::Submit | Move::Reopen) { ButtonVariant::Outline } else { ButtonVariant::Ghost };
+        r = r.child(Button::new(m.label()).variant(variant).control_size(ControlSize::Small).disabled(busy).on_press(move |s: &mut App| start(s, &id, m)).build(k).key(format!("work-move-{m:?}")));
+    }
+    if busy {
+        r = r.child(text("Sending…".to_string()).font(META).color(weak()));
+    } else if let Some((failed, n)) = note {
+        r = r.child(text(n.clone()).font(META).color(if *failed { ui::needs_color() } else { base() }).wrap().shrink());
+    }
+    Some(r)
+}
+
+pub fn words_dialog(s: &App, layer: &mut Vec<El>) {
+    let Some(n) = &s.ov.work.words else { return };
+    let k = kit();
+    let problem = ledger::words_problem(n.m, &n.text.text);
+    let (title, label, placeholder, yes, about) = match n.m {
+        Move::Park => ("Park", "Why it waits", "What should happen before anyone picks this up?", "Park", "It leaves the board until someone unparks it."),
+        _ => ("Comment on", "Comment", "Your note for whoever works on this", "Add comment", "It goes on the item's timeline, where its workers read it."),
+    };
+    let input = text_input(&n.text, BODY)
+        .key("work-words-input")
+        .label(label)
+        .w_full()
+        .min_h(72.0)
+        .color(strong())
+        .placeholder(placeholder, weak())
+        .on_edit(|s: &mut App| &mut s.ov.work.words.as_mut().expect("the dialog is open").text)
+        .on_submit(|s: &mut App, _: &mut Tx| send_words(s));
+    let field = col().w_full().px(10.0).py(8.0).radius(8.0).fill(k.c.surface_base).border(1.0, ui::rule()).child(input);
+    let buttons = row()
+        .w_full()
+        .gap(8.0)
+        .child(el().grow(1.0))
+        .child(Button::new("Cancel").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(|s: &mut App| s.ov.work.words = None).build(k).key("work-words-cancel"))
+        .child(Button::new(yes).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(problem.is_some()).on_press(send_words).build(k).key("work-words-send"));
+    Dialog::new("work-words", format!("{title} {}", ui::short_title(&n.title, 48)))
+        .description(about)
+        .open(true)
+        .fit()
+        .width(460.0)
+        .on_close(|s: &mut App| s.ov.work.words = None)
+        .child(col().w_full().gap(10.0).px(16.0).pb(16.0).child(field).child(buttons))
+        .build(k, layer);
 }

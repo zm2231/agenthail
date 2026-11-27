@@ -580,3 +580,10 @@ fn a_ledger_change_waits_out_a_failed_reads_retry() {
     known.read("p", t0, &Err("status code 503".into()));
     assert!(matches!(known.changed("p", t0 + std::time::Duration::from_secs(1)), Change::Nothing), "a change inside the wait leaves it to the retry");
 }
+
+#[test]
+fn the_person_reads_as_you_wherever_they_acted() {
+    let w = Overview::default().world(&[]);
+    assert_eq!(w.name_of(crate::ledger::PERSON), "You");
+    assert_eq!(w.name_of(""), "Someone");
+}
