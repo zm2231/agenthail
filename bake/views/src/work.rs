@@ -5,7 +5,7 @@ use rune_kit::shell::Toolbar;
 use rune_kit::{Button, ButtonVariant, Kit, KitCx};
 use rune_theme_opencode::icons;
 
-use feed::derive::phase::{CHECK, SHIP, phase};
+use feed::derive::phase::{CHECK, SHIP, phase, shown_step, step_word};
 use feed::derive::proof::proof;
 use feed::derive::work::{commit, pr, unchecked};
 
@@ -13,9 +13,12 @@ use crate::data::{PHASES, plain, short_id};
 use crate::ui::{self, BODY, BODY_MED, HEAD, META, META_MED, TITLE, base, strong, weak};
 use crate::{App, Screen, go};
 
-fn phase_badge(phase: usize, k: &Kit) -> El {
+fn phase_badge(w: &feed::derive::Work, k: &Kit) -> El {
+    let Some(phase) = shown_step(&w.phase, &w.state) else {
+        return ui::pill(&icons::STATUS, &step_word(&w.phase, &w.state), weak(k));
+    };
     let color = if phase == CHECK { k.c.warning.icon } else if phase == SHIP { k.c.success.icon } else { k.c.text_accent };
-    ui::pill(&icons::STATUS, PHASES[phase.min(SHIP)], color)
+    ui::pill(&icons::STATUS, PHASES[phase], color)
 }
 
 fn tile(i: usize, expected: &str, observed: &str, passed: Option<bool>, k: &Kit) -> El {
@@ -58,7 +61,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, key: &feed::derive::WorkKey, _layer: &mut
         .w_full()
         .gap(8.0)
         .child({
-            let mut r = row().gap(8.0).items_center().child(phase_badge(phase, &k)).child(ui::id_label(&short_id(&w.id), &k)).child(ui::chip(&icons::TASK, &format!("{} · {}", w.priority, w.kind), &k));
+            let mut r = row().gap(8.0).items_center().child(phase_badge(w, &k)).child(ui::id_label(&short_id(&w.id), &k)).child(ui::chip(&icons::TASK, &format!("{} · {}", w.priority, w.kind), &k));
             if let Some(c) = &commit {
                 r = r.child(ui::chip(&icons::BRANCH, c, &k));
             }
@@ -158,7 +161,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, key: &feed::derive::WorkKey, _layer: &mut
         .pt(22.0)
         .pb(48.0)
         .child(goal)
-        .child(ui::card(col().w_full().padding(18.0).child(ui::stepper(phase, &s.d.whose_move(w), &k)), &k))
+        .children(shown_step(&w.phase, &w.state).is_some().then(|| ui::card(col().w_full().padding(18.0).child(ui::stepper(w, &s.d.whose_move(w), &k)), &k)))
         .child(waiting)
         .child(brief)
         .child(proof)

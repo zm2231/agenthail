@@ -1,7 +1,7 @@
 use crate::catalog::Session;
 
 use super::needs::{Need, Target};
-use super::phase::{CHECK, PHASES, phase};
+use super::phase::{CHECK, phase};
 use super::sessions::{busy, hidden};
 use super::text::{plain, short_id, short_title};
 use super::world::{Work, World};
@@ -17,14 +17,8 @@ pub struct Hit {
     pub target: Target,
 }
 
-fn quiet_word(state: &str) -> Option<&'static str> {
-    match state {
-        "done" => Some("Done"),
-        "closed" => Some("Closed"),
-        "parked" => Some("Parked"),
-        "blocked" => Some("Blocked"),
-        _ => None,
-    }
+fn is_quiet(state: &str) -> bool {
+    matches!(state, "done" | "closed" | "parked" | "blocked")
 }
 
 impl World {
@@ -45,19 +39,20 @@ impl World {
             out.push(Hit { group: "Projects", title: p.name.clone(), status: status.join(" · "), badge: self.ago(&p.last_active), avatar: p.name.clone(), target: Target::Project(p.key.clone()) });
         }
         let mut work: Vec<&Work> = self.work.values().filter(|w| matches!(w.state.as_str(), "in_progress" | "in_review")).filter(|w| has(&w.text) || has(&w.id)).collect();
-        work.sort_by(|a, b| phase(b).cmp(&phase(a)).then(b.last_at().cmp(a.last_at())).then(a.id.cmp(&b.id)));
+        let shown = |w: &Work| super::phase::step(&w.phase, &w.state);
+        work.sort_by(|a, b| shown(b).cmp(&shown(a)).then(b.last_at().cmp(a.last_at())).then(a.id.cmp(&b.id)));
         for w in work.into_iter().take(cap) {
             let ph = phase(w);
             let whose = if ph == CHECK { "your move".to_string() } else { super::phase::move_of(&short_title(&self.whose_move(w), 24)) };
             let project = self.project_name(&w.project);
-            out.push(Hit { group: "Work", title: plain(&w.text), status: format!("{} · {whose} · {project}", PHASES[ph]), badge: short_id(&w.id), avatar: project, target: Target::Work(w.key()) });
+            out.push(Hit { group: "Work", title: plain(&w.text), status: format!("{} · {whose} · {project}", super::phase::step_word(&w.phase, &w.state)), badge: short_id(&w.id), avatar: project, target: Target::Work(w.key()) });
         }
         if !q.is_empty() {
-            let mut quiet: Vec<(&Work, &str)> = self.work.values().filter_map(|w| quiet_word(&w.state).map(|s| (w, s))).filter(|(w, _)| has(&w.text) || has(&w.id)).collect();
-            quiet.sort_by(|a, b| b.0.last_at().cmp(a.0.last_at()).then(a.0.id.cmp(&b.0.id)));
-            for (w, word) in quiet {
+            let mut quiet: Vec<&Work> = self.work.values().filter(|w| is_quiet(&w.state) && (has(&w.text) || has(&w.id))).collect();
+            quiet.sort_by(|a, b| b.last_at().cmp(a.last_at()).then(a.id.cmp(&b.id)));
+            for w in quiet {
                 let project = self.project_name(&w.project);
-                out.push(Hit { group: "Work", title: plain(&w.text), status: format!("{word} · {project}"), badge: short_id(&w.id), avatar: project, target: Target::Work(w.key()) });
+                out.push(Hit { group: "Work", title: plain(&w.text), status: format!("{} · {project}", super::phase::step_word(&w.phase, &w.state)), badge: short_id(&w.id), avatar: project, target: Target::Work(w.key()) });
             }
         }
         let mut sessions: Vec<&Session> = hands_on.iter().filter_map(|id| self.session(id)).collect();

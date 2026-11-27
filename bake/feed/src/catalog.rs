@@ -500,6 +500,8 @@ pub struct WorkItem {
     #[serde(default)]
     pub state: String,
     #[serde(default)]
+    pub phase: String,
+    #[serde(default)]
     pub priority: String,
     #[serde(rename = "type", default)]
     pub kind: String,
@@ -524,16 +526,6 @@ pub struct BoardRow {
     pub priority: String,
     #[serde(rename = "type", default)]
     pub kind: String,
-}
-
-pub fn phase(state: &str) -> usize {
-    match state {
-        "open" | "ready" => 0,
-        "in_progress" => 1,
-        "in_review" => 2,
-        "done" | "closed" => 4,
-        _ => 0,
-    }
 }
 
 pub const OUTCOME_UNKNOWN: &str = "action_outcome_unknown";
@@ -578,8 +570,6 @@ impl RespondError {
         RespondError { message: error.to_string(), code: String::new(), maybe_delivered: !unsent, reply: Value::Null, answered: false, status: 0 }
     }
 }
-
-pub const PHASES: [&str; 5] = ["Plan", "Build", "Review", "Merge", "Done"];
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]

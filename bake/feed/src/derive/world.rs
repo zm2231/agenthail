@@ -36,6 +36,8 @@ pub struct Work {
     #[serde(default)]
     pub state: String,
     #[serde(default)]
+    pub phase: String,
+    #[serde(default)]
     pub assignee: Option<String>,
     #[serde(default)]
     pub description: String,
