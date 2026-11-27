@@ -575,6 +575,7 @@ fn selected_moved(s: &mut App, id: &str) {
 fn reopened(s: &mut App) {
     let clock = s.clock;
     s.redeliver.values_mut().for_each(|b| b.wake(clock));
+    over::work::reopened(s);
     ui::connect::retry(s);
     ui::delivery::stale(s);
     over::earlier::reopened(s);

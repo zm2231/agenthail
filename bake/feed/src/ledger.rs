@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde_json::{Value, json};
 
 use crate::catalog::{Client, RespondError};
@@ -92,24 +94,6 @@ pub fn refusal(e: &RespondError) -> String {
 
 pub const CHANGED_WORDS: &str = "The last send isn't settled yet, so only the same words can go now. Change them once it settles.";
 
-pub fn said(w: &Work, words: &str) -> usize {
-    w.timeline.iter().filter(|t| t.kind == "comment" && t.actor == PERSON && t.text.as_deref().map(str::trim) == Some(words.trim())).count()
-}
-
-pub fn landed(w: &Work, m: Move, words: &str, before: usize) -> bool {
-    match m {
-        Move::Comment => said(w, words) > before,
-        _ => !offered(w).contains(&m),
-    }
-}
-
-pub fn settled_note(w: &Work, m: Move) -> String {
-    match m {
-        Move::Comment => m.done().into(),
-        _ => format!("Settled: it's {} now.", crate::derive::phase::state_word(&w.state)),
-    }
-}
-
 pub fn settles(e: &RespondError) -> bool {
     e.answered && (400..500).contains(&e.status)
 }
@@ -120,9 +104,104 @@ pub fn unreached(e: &RespondError) -> String {
 
 pub fn unconfirmed(e: &RespondError, again: bool) -> String {
     if again {
-        format!("Still not confirmed: {}. If it never shows up, Send as new starts a fresh one.", e.message)
+        format!("Still not confirmed: {}. If it never settles, Send as new starts a fresh one.", e.message)
     } else {
-        format!("Sent, not confirmed: {}. It settles here once the item shows it; pressing again asks about the same send.", e.message)
+        format!("Sent, not confirmed: {}. It asks Agenthail about the same send again until it answers.", e.message)
+    }
+}
+
+pub const RESEND_FIRST: f64 = 10.0;
+pub const RESEND_MAX: f64 = 60.0;
+pub const RESEND_FOR: f64 = 3600.0;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Resend {
+    due: f64,
+    wait: f64,
+    since: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Pending {
+    pub words: String,
+    pub key: String,
+    resend: Option<Resend>,
+}
+
+impl Pending {
+    pub fn unconfirmed(&self) -> bool {
+        self.resend.is_some()
+    }
+}
+
+#[derive(Default)]
+pub struct Sends(HashMap<(String, Move), Pending>);
+
+impl Sends {
+    pub fn key(&mut self, id: &str, m: Move, words: &str) -> String {
+        let slot = (id.to_string(), m);
+        match self.0.get(&slot) {
+            Some(p) if p.words == words => p.key.clone(),
+            _ => {
+                let key = crate::catalog::request_key();
+                self.0.insert(slot, Pending { words: words.to_string(), key: key.clone(), resend: None });
+                key
+            }
+        }
+    }
+
+    pub fn get(&self, id: &str, m: Move) -> Option<&Pending> {
+        self.0.get(&(id.to_string(), m))
+    }
+
+    pub fn held(&self, id: &str) -> Option<Move> {
+        self.0.iter().find(|((item, _), p)| item == id && p.unconfirmed()).map(|((_, m), _)| *m)
+    }
+
+    pub fn held_words(&self, id: &str, m: Move) -> Option<&str> {
+        self.get(id, m).filter(|p| p.unconfirmed()).map(|p| p.words.as_str())
+    }
+
+    pub fn forget(&mut self, id: &str, m: Move) -> Option<Pending> {
+        self.0.remove(&(id.to_string(), m))
+    }
+
+    pub fn answered(&mut self, id: &str, m: Move, result: &Result<Value, RespondError>, now: f64) -> (bool, String) {
+        let slot = (id.to_string(), m);
+        let held = self.0.get(&slot).and_then(|p| p.resend);
+        match result {
+            Ok(_) => {
+                self.0.remove(&slot);
+                (false, m.done().into())
+            }
+            Err(e) if e.maybe_delivered || (held.is_some() && !settles(e)) => {
+                let next = match held {
+                    Some(r) => {
+                        let wait = (r.wait * 2.0).min(RESEND_MAX);
+                        Resend { due: now + wait, wait, since: r.since }
+                    }
+                    None => Resend { due: now + RESEND_FIRST, wait: RESEND_FIRST, since: now },
+                };
+                if let Some(p) = self.0.get_mut(&slot) {
+                    p.resend = Some(next);
+                }
+                (true, if e.maybe_delivered { unconfirmed(e, held.is_some()) } else { unreached(e) })
+            }
+            Err(e) => {
+                self.0.remove(&slot);
+                (true, format!("Not done: {}", refusal(e)))
+            }
+        }
+    }
+
+    pub fn due(&self, now: f64) -> Vec<(String, Move, String)> {
+        self.0.iter().filter_map(|((id, m), p)| p.resend.filter(|r| r.due <= now && now - r.since < RESEND_FOR).map(|_| (id.clone(), *m, p.words.clone()))).collect()
+    }
+
+    pub fn wake(&mut self, now: f64) {
+        for r in self.0.values_mut().filter_map(|p| p.resend.as_mut()) {
+            r.due = r.due.min(now);
+        }
     }
 }
 
@@ -153,26 +232,6 @@ mod tests {
         assert_eq!(offered(&work("closed", None)), vec![Move::Reopen, Move::Comment]);
         assert_eq!(offered(&work("deleted", None)), vec![]);
         assert_eq!(offered(&work("", None)), vec![]);
-    }
-
-    #[test]
-    fn an_unconfirmed_move_settles_once_the_item_shows_it() {
-        let entry = |actor: &str, text: &str| crate::derive::Entry { actor: actor.into(), kind: "comment".into(), text: Some(text.into()), ..Default::default() };
-        let mut w = work("open", None);
-        w.timeline.push(entry(PERSON, "looks right"));
-        let before = said(&w, "looks right");
-        assert_eq!(before, 1);
-        assert!(!landed(&w, Move::Comment, "looks right", before), "the same words said before don't settle a new send");
-        w.timeline.push(entry("worker", "looks right"));
-        assert!(!landed(&w, Move::Comment, "looks right", before), "someone else's words don't settle it");
-        w.timeline.push(entry(PERSON, "looks right "));
-        assert!(landed(&w, Move::Comment, " looks right", before));
-        assert!(!landed(&work("open", None), Move::Claim, "", 0));
-        let claimed = work("in_progress", Some(PERSON));
-        assert!(landed(&claimed, Move::Claim, "", 0));
-        assert_eq!(settled_note(&claimed, Move::Claim), "Settled: it's Build now.");
-        assert!(landed(&work("parked", None), Move::Park, "later", 0));
-        assert_eq!(settled_note(&w, Move::Comment), "Comment added.");
     }
 
     #[test]
@@ -220,7 +279,7 @@ mod tests {
         assert_eq!(refusal(&unknown), "Agenthail doesn't know you yet. Send any session a message once, then try again.");
         let lost = client.work_move(&w, Move::Claim, "", "k3").unwrap_err();
         assert!(lost.maybe_delivered);
-        assert_eq!(unconfirmed(&lost, false), "Sent, not confirmed: Host mac did not answer. It settles here once the item shows it; pressing again asks about the same send.");
+        assert_eq!(unconfirmed(&lost, false), "Sent, not confirmed: Host mac did not answer. It asks Agenthail about the same send again until it answers.");
         let unsent = Client::new("http://127.0.0.1:0", "secret").work_move(&w, Move::Comment, "hi", "k4").unwrap_err();
         assert!(!unsent.answered && !unsent.maybe_delivered);
         assert!(!settles(&unsent));
@@ -228,7 +287,7 @@ mod tests {
         assert!(settles(&RespondError::from_status("claim", 409, r#"{"error":{"code":"refused","message":"no"}}"#)));
         assert!(unreached(&unsent).starts_with("Agenthail didn't settle it: "));
         assert!(unreached(&unsent).ends_with("The earlier send is still unconfirmed; pressing again asks about it."));
-        assert_eq!(unconfirmed(&lost, true), "Still not confirmed: Host mac did not answer. If it never shows up, Send as new starts a fresh one.");
+        assert_eq!(unconfirmed(&lost, true), "Still not confirmed: Host mac did not answer. If it never settles, Send as new starts a fresh one.");
     }
 
     #[test]
@@ -237,4 +296,90 @@ mod tests {
         let e = client.work_move(&work("open", None), Move::Comment, "hi", "k").unwrap_err();
         assert!(e.maybe_delivered && e.code == "submitted");
     }
+
+    const SUBMITTED: &str = r#"{"ok":true,"status":"submitted"}"#;
+
+    fn sent(sends: &mut Sends, client: &Client, w: &Work, m: Move, words: &str, now: f64) -> (bool, String) {
+        let key = sends.key(&w.id, m, words);
+        let result = client.work_move(w, m, words, &key);
+        sends.answered(&w.id, m, &result, now)
+    }
+
+    #[test]
+    fn an_unconfirmed_claim_keeps_its_key_when_someone_else_claims_it() {
+        let ok = r#"{"item":{"id":"p-W6","state":"in_progress","assignee":"agenthail-person"}}"#;
+        let (client, _seen) = daemon(replies(&[(202, SUBMITTED), (200, ok)]));
+        let mut sends = Sends::default();
+        let open = work("open", None);
+        sent(&mut sends, &client, &open, Move::Claim, "", 0.0);
+        let key = sends.get("p-W6", Move::Claim).unwrap().key.clone();
+        assert_eq!(sends.held("p-W6"), Some(Move::Claim));
+        let theirs = work("in_progress", Some("worker"));
+        assert!(!offered(&theirs).contains(&Move::Claim));
+        assert!(sends.due(9.9).is_empty(), "nothing goes again before ten seconds");
+        assert_eq!(sends.due(10.0), vec![("p-W6".to_string(), Move::Claim, String::new())]);
+        assert_eq!(sends.key("p-W6", Move::Claim, ""), key, "the resend asks about the same send");
+        assert_eq!(sent(&mut sends, &client, &theirs, Move::Claim, "", 10.0), (false, "You hold it now.".into()));
+        assert!(sends.get("p-W6", Move::Claim).is_none());
+    }
+
+    #[test]
+    fn an_unconfirmed_claim_settles_from_the_reply_when_someone_else_parks_it() {
+        let refused = r#"{"error":{"code":"refused","message":"p-W6 is parked"}}"#;
+        let (client, _seen) = daemon(replies(&[(504, r#"{"error":{"code":"host_outcome_unknown","message":"Host mac did not answer"}}"#), (202, SUBMITTED), (409, refused)]));
+        let mut sends = Sends::default();
+        sent(&mut sends, &client, &work("open", None), Move::Claim, "", 0.0);
+        let parked = work("parked", None);
+        assert_eq!(sends.held("p-W6"), Some(Move::Claim), "someone else's park is no answer to our claim");
+        let (failed, note) = sent(&mut sends, &client, &parked, Move::Claim, "", 10.0);
+        assert!(failed && note.starts_with("Still not confirmed: "), "a replayed submitted is still no answer");
+        assert!(sends.due(29.9).is_empty() && !sends.due(30.0).is_empty(), "the wait doubles");
+        assert_eq!(sent(&mut sends, &client, &parked, Move::Claim, "", 30.0), (true, "Not done: p-W6 is parked".into()));
+        assert_eq!(sends.held("p-W6"), None);
+    }
+
+    #[test]
+    fn resends_wait_at_least_ten_seconds_up_to_a_minute_for_an_hour() {
+        let lost = Err(RespondError::from_status("claim", 504, ""));
+        let mut sends = Sends::default();
+        sends.key("p-W6", Move::Park, "later");
+        let mut now = 0.0;
+        let mut waits = Vec::new();
+        sends.answered("p-W6", Move::Park, &lost, now);
+        while let Some(due) = (0..=60).map(|s| now + s as f64).find(|t| !sends.due(*t).is_empty()) {
+            waits.push(due - now);
+            now = due;
+            sends.answered("p-W6", Move::Park, &lost, now);
+        }
+        assert_eq!(&waits[..4], &[10.0, 20.0, 40.0, 60.0]);
+        assert!(waits[4..].iter().all(|w| *w == 60.0));
+        assert!(now < RESEND_FOR && now + 60.0 >= RESEND_FOR, "it stops asking after an hour");
+        assert_eq!(sends.held_words("p-W6", Move::Park), Some("later"), "it stays unconfirmed after that");
+    }
+
+    #[test]
+    fn a_reconnect_asks_again_now() {
+        let mut sends = Sends::default();
+        sends.key("p-W6", Move::Claim, "");
+        sends.answered("p-W6", Move::Claim, &Err(RespondError::from_status("claim", 504, "")), 0.0);
+        assert!(sends.due(3.0).is_empty());
+        sends.wake(3.0);
+        assert_eq!(sends.due(3.0).len(), 1);
+    }
+
+    #[test]
+    fn an_unreachable_daemon_keeps_an_unconfirmed_send_and_drops_a_fresh_one() {
+        let unreached = Err(RespondError { message: "down".into(), code: String::new(), maybe_delivered: false, reply: Value::Null, answered: false, status: 0 });
+        let mut sends = Sends::default();
+        sends.key("p-W6", Move::Claim, "");
+        assert_eq!(sends.answered("p-W6", Move::Claim, &unreached, 0.0), (true, "Not done: down".into()));
+        assert!(sends.get("p-W6", Move::Claim).is_none());
+        sends.key("p-W6", Move::Claim, "");
+        sends.answered("p-W6", Move::Claim, &Err(RespondError::from_status("claim", 504, "")), 0.0);
+        let (failed, note) = sends.answered("p-W6", Move::Claim, &unreached, 10.0);
+        assert!(failed && note.starts_with("Agenthail didn't settle it: down."));
+        assert_eq!(sends.held("p-W6"), Some(Move::Claim));
+        assert!(sends.due(29.9).is_empty() && !sends.due(30.0).is_empty());
+    }
 }
+

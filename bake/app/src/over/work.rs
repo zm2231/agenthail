@@ -10,7 +10,7 @@ use serde_json::Value;
 use feed::catalog::RespondError;
 use feed::ledger::{self, Move};
 
-use feed::derive::phase::{CHECK, SHIP, phase};
+use feed::derive::phase::{CHECK, SHIP, off_board, phase};
 use feed::derive::proof::proof;
 use feed::derive::work::{commit, pr, unchecked};
 
@@ -66,7 +66,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
         .w_full()
         .gap(8.0)
         .child({
-            let mut r = row().gap(8.0).items_center().child(if w.state == "closed" { ui::pill(&icons::STATUS, "Closed", weak()) } else { phase_badge(phase) }).child(ui::id_label(&short_id(&w.id))).child(ui::chip(&icons::TASK, &format!("{} · {}", w.priority, w.kind)));
+            let mut r = row().gap(8.0).items_center().child(match off_board(&w.state) { Some(word) => ui::pill(&icons::STATUS, word, weak()), None => phase_badge(phase) }).child(ui::id_label(&short_id(&w.id))).child(ui::chip(&icons::TASK, &format!("{} · {}", w.priority, w.kind)));
             if let Some(c) = &commit {
                 r = r.child(ui::chip(&icons::BRANCH, c));
             }
@@ -171,7 +171,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
         .pb(48.0)
         .child(goal)
         .children(moves(s, w))
-        .children((w.state != "closed").then(|| ui::card(col().w_full().padding(18.0).child(ui::stepper(phase, &s.ov.d.whose_move(w))))))
+        .children(off_board(&w.state).is_none().then(|| ui::card(col().w_full().padding(18.0).child(ui::stepper(phase, &s.ov.d.whose_move(w))))))
         .child(waiting)
         .child(brief)
         .child(proof)
@@ -287,7 +287,7 @@ fn timeline(s: &App, w: &crate::over::Work, max: usize) -> El {
     c
 }
 
-type Done = (String, Move, String, Result<Value, RespondError>);
+type Done = (String, Move, Result<Value, RespondError>);
 
 pub struct Words {
     item: String,
@@ -296,26 +296,19 @@ pub struct Words {
     text: TextEdit,
 }
 
-struct Pending {
-    words: String,
-    key: String,
-    unconfirmed: bool,
-    before: usize,
-}
-
 pub struct State {
     tx: Sender<Done>,
     rx: Receiver<Done>,
     acting: HashSet<String>,
     notes: HashMap<String, (bool, String)>,
-    keys: HashMap<(String, Move), Pending>,
+    sends: ledger::Sends,
     pub words: Option<Words>,
 }
 
 impl Default for State {
     fn default() -> Self {
         let (tx, rx) = channel();
-        State { tx, rx, acting: HashSet::new(), notes: HashMap::new(), keys: HashMap::new(), words: None }
+        State { tx, rx, acting: HashSet::new(), notes: HashMap::new(), sends: ledger::Sends::default(), words: None }
     }
 }
 
@@ -325,18 +318,14 @@ fn start(s: &mut App, id: &str, m: Move) {
         send(s, id, m, "");
         return;
     }
-    let mut text = TextEdit::new(pending_words(s, id, m).unwrap_or_default());
+    let mut text = TextEdit::new(s.ov.work.sends.held_words(id, m).unwrap_or_default().to_string());
     text.focused = true;
     s.composer.focused = false;
     s.ov.work.words = Some(Words { item: id.into(), title: plain(&w.text), m, text });
 }
 
 fn changed_while_held(s: &App, n: &Words) -> bool {
-    pending_words(s, &n.item, n.m).is_some_and(|said| said != n.text.text.trim())
-}
-
-fn pending_words<'a>(s: &'a App, id: &str, m: Move) -> Option<&'a str> {
-    s.ov.work.keys.get(&(id.to_string(), m)).filter(|p| p.unconfirmed).map(|p| p.words.as_str())
+    s.ov.work.sends.held_words(&n.item, n.m).is_some_and(|said| said != n.text.text.trim())
 }
 
 fn send_words(s: &mut App) {
@@ -350,87 +339,59 @@ fn send_words(s: &mut App) {
 }
 
 fn send(s: &mut App, id: &str, m: Move, words: &str) {
-    let Some(w) = s.ov.d.work.get(id).cloned() else { return };
-    if s.ov.work.acting.contains(id) || !ledger::offered(&w).contains(&m) || held(s, id).is_some_and(|h| h != m) {
+    let Some(w) = s.ov.d.work.get(id) else { return };
+    let asking = s.ov.work.sends.held_words(id, m) == Some(words);
+    if s.ov.work.acting.contains(id) || !(asking || ledger::offered(w).contains(&m)) || s.ov.work.sends.held(id).is_some_and(|h| h != m) {
         return;
     }
+    post(s, id, m, words);
+}
+
+fn post(s: &mut App, id: &str, m: Move, words: &str) {
+    let Some(w) = s.ov.d.work.get(id).cloned() else { return };
     let Some(client) = s.client.clone() else {
         s.ov.work.notes.insert(id.into(), (true, "Fixture mode: not sent".into()));
         return;
     };
-    let slot = (id.to_string(), m);
-    let key = match s.ov.work.keys.get(&slot) {
-        Some(p) if p.words == words => p.key.clone(),
-        _ => {
-            let key = feed::catalog::request_key();
-            s.ov.work.keys.insert(slot, Pending { words: words.to_string(), key: key.clone(), unconfirmed: false, before: ledger::said(&w, words) });
-            key
-        }
-    };
+    let key = s.ov.work.sends.key(id, m, words);
     s.ov.work.acting.insert(id.into());
     s.ov.work.notes.remove(id);
     let (tx, id, words) = (s.ov.work.tx.clone(), id.to_string(), words.to_string());
     std::thread::spawn(move || {
         let result = client.work_move(&w, m, &words, &key);
-        let _ = tx.send((id, m, words, result));
+        let _ = tx.send((id, m, result));
     });
-}
-
-fn held(s: &App, id: &str) -> Option<Move> {
-    s.ov.work.keys.iter().find(|((item, _), p)| item == id && p.unconfirmed).map(|((_, m), _)| *m)
 }
 
 fn send_new(s: &mut App, id: &str, m: Move) {
     if s.ov.work.acting.contains(id) || !s.ov.d.work.get(id).is_some_and(|w| ledger::offered(w).contains(&m)) {
         return;
     }
-    let Some(p) = s.ov.work.keys.remove(&(id.to_string(), m)) else { return };
+    let Some(p) = s.ov.work.sends.forget(id, m) else { return };
     send(s, id, m, &p.words);
 }
 
-fn settle(s: &mut App) -> bool {
-    let (d, st) = (&s.ov.d, &mut s.ov.work);
-    let landed: Vec<(String, Move, String)> = st
-        .keys
-        .iter()
-        .filter(|((id, _), p)| p.unconfirmed && !st.acting.contains(id))
-        .filter_map(|((id, m), p)| d.work.get(id).filter(|w| ledger::landed(w, *m, &p.words, p.before)).map(|w| (id.clone(), *m, ledger::settled_note(w, *m))))
-        .collect();
-    for (id, m, note) in &landed {
-        st.keys.remove(&(id.clone(), *m));
-        st.notes.insert(id.clone(), (false, note.clone()));
-    }
-    !landed.is_empty()
+pub fn reopened(s: &mut App) {
+    let clock = s.clock;
+    s.ov.work.sends.wake(clock);
 }
 
 pub fn drain(s: &mut App) -> bool {
-    let mut changed = settle(s);
-    while let Ok((id, m, _words, result)) = s.ov.work.rx.try_recv() {
+    let mut changed = false;
+    let clock = s.clock;
+    while let Ok((id, m, result)) = s.ov.work.rx.try_recv() {
         changed = true;
-        let st = &mut s.ov.work;
-        st.acting.remove(&id);
-        match result {
-            Ok(_) => {
-                st.keys.remove(&(id.clone(), m));
-                st.notes.insert(id, (false, m.done().into()));
-                crate::ask_overview(s, crate::Ask::Refresh);
-            }
-            Err(e) if e.maybe_delivered => {
-                let slot = (id.clone(), m);
-                let again = st.keys.get(&slot).is_some_and(|p| p.unconfirmed);
-                if let Some(p) = st.keys.get_mut(&slot) {
-                    p.unconfirmed = true;
-                }
-                st.notes.insert(id, (true, ledger::unconfirmed(&e, again)));
-                crate::ask_overview(s, crate::Ask::Refresh);
-            }
-            Err(e) if !ledger::settles(&e) && st.keys.get(&(id.clone(), m)).is_some_and(|p| p.unconfirmed) => {
-                st.notes.insert(id, (true, ledger::unreached(&e)));
-            }
-            Err(e) => {
-                st.keys.remove(&(id.clone(), m));
-                st.notes.insert(id, (true, format!("Not done: {}", ledger::refusal(&e))));
-            }
+        s.ov.work.acting.remove(&id);
+        let note = s.ov.work.sends.answered(&id, m, &result, clock);
+        s.ov.work.notes.insert(id, note);
+        if result.as_ref().map_or_else(|e| e.maybe_delivered, |_| true) {
+            crate::ask_overview(s, crate::Ask::Refresh);
+        }
+    }
+    for (id, m, words) in s.ov.work.sends.due(clock) {
+        if !s.ov.work.acting.contains(&id) {
+            post(s, &id, m, &words);
+            changed = true;
         }
     }
     changed
@@ -444,12 +405,16 @@ fn moves(s: &App, w: &crate::over::Work) -> Option<El> {
     }
     let k = kit();
     let busy = s.ov.work.acting.contains(&w.id);
-    let held = held(s, &w.id);
+    let held = s.ov.work.sends.held(&w.id);
     let mut r = row().w_full().gap(8.0).items_center().flex_wrap();
     for m in offered {
         let id = w.id.clone();
         let variant = if matches!(m, Move::Claim | Move::Submit | Move::Reopen) { ButtonVariant::Outline } else { ButtonVariant::Ghost };
         r = r.child(Button::new(m.label()).variant(variant).control_size(ControlSize::Small).disabled(busy || held.is_some_and(|h| h != m)).on_press(move |s: &mut App| start(s, &id, m)).build(k).key(format!("work-move-{m:?}")));
+    }
+    if let Some(m) = held.filter(|m| !busy && !ledger::offered(w).contains(m)) {
+        let (id, words) = (w.id.clone(), s.ov.work.sends.held_words(&w.id, m).unwrap_or_default().to_string());
+        r = r.child(Button::new("Ask again").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).help("Asks Agenthail about the same send").on_press(move |s: &mut App| send(s, &id, m, &words)).build(k).key("work-ask-again"));
     }
     if let Some(m) = held.filter(|m| !busy && ledger::offered(w).contains(m)) {
         let id = w.id.clone();
