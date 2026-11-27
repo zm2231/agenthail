@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 
-use super::live::{Known, Ledger, Overview, ledger};
+use super::live::{Fetched, Known, Ledger, Overview, ledger};
 use super::phase::{Steps, step_word};
 use super::world::{Recorded, World};
 use crate::mock::{daemon, replies};
@@ -63,7 +63,7 @@ fn a_renamed_project_with_no_work_shown_still_names_its_steps_in_search() {
 #[test]
 fn a_reread_ledger_replaces_its_step_names_and_an_older_read_does_not() {
     let row = |id: &str| serde_json::from_value(json!({"id": id, "text": "t", "state": "in_progress", "phase": "build"})).unwrap();
-    let ledger = |steps: Steps| Ok(Ledger { rows: vec![row("p-1-W1")], actors: HashMap::new(), asked: Vec::new(), steps });
+    let ledger = |steps: Steps| Ok(Ledger { rows: vec![row("p-1-W1")], actors: HashMap::new(), asked: Vec::new(), actors_at: Instant::now(), steps });
     let mut ov = Overview::recorded(recorded(json!({}), json!({})));
     let (older, newer) = (Instant::now(), Instant::now() + Duration::from_millis(5));
     ov.take_ledger("p-1", older, ledger(renamed()));
@@ -117,4 +117,31 @@ fn a_work_item_read_carries_its_projects_step_names() {
     assert_eq!(item.steps.name(1), "Make");
     let found = client.found_work("project:p-1", "p-1-W1").unwrap();
     assert_eq!(step_word(&found.phase, &found.state, &found.steps), "Make");
+}
+
+#[test]
+fn an_overview_ledger_read_that_started_after_a_single_read_wins_whichever_lands_first() {
+    let row = |id: &str| serde_json::from_value(json!({"id": id, "text": "t", "state": "in_progress", "phase": "build"})).unwrap();
+    let snapshot = Instant::now();
+    let (single_at, overview_at) = (snapshot + Duration::from_millis(1), snapshot + Duration::from_millis(2));
+    let single = || Ok(Ledger { rows: vec![row("p-1-W1")], actors: HashMap::new(), asked: Vec::new(), actors_at: single_at, steps: renamed() });
+    let overview = || {
+        let mut recorded = recorded(json!({}), json!({}));
+        recorded.steps.insert("p-1".into(), Steps::default());
+        Fetched { recorded, ledgers: [("p-1".to_string(), (overview_at, Ok(vec![row("p-1-W2")])))].into(), held: Vec::new(), asked: Vec::new(), actors_at: overview_at, usage: None, moved: Vec::new() }
+    };
+    for single_lands_first in [true, false] {
+        let mut ov = Overview::recorded(recorded(json!({}), json!({})));
+        if single_lands_first {
+            ov.take_ledger("p-1", single_at, single());
+            ov.refresh(overview());
+        } else {
+            ov.refresh(overview());
+            ov.take_ledger("p-1", single_at, single());
+        }
+        let w = ov.world(&[]);
+        let shown: Vec<(String, String)> = w.work.values().map(|x| (x.id.clone(), step_word(&x.phase, &x.state, &x.steps))).collect();
+        assert_eq!(shown, [("p-1-W2".to_string(), "Build".to_string())], "single read landed first: {single_lands_first}");
+        assert_eq!(w.steps_of("project:p-1").name(1), "Build");
+    }
 }
