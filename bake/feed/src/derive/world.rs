@@ -108,7 +108,7 @@ pub struct ProjectRecord {
     pub checkouts: Vec<crate::projects::Checkout>,
     #[serde(default)]
     pub mcp: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::catalog::known_time")]
     pub last_active: String,
 }
 

@@ -132,7 +132,7 @@ pub struct Session {
     pub alias: Option<String>,
     #[serde(default)]
     pub status: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "known_time")]
     pub last_active: String,
     #[serde(default)]
     pub open: bool,
@@ -290,6 +290,11 @@ impl State {
             State::Idle => "Idle",
         }
     }
+}
+
+pub fn known_time<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<String, D::Error> {
+    let ts = String::deserialize(d)?;
+    Ok(if !ts.is_empty() && parse_time(&ts).is_none() { String::new() } else { ts })
 }
 
 pub fn parse_time(ts: &str) -> Option<OffsetDateTime> {
@@ -1023,5 +1028,15 @@ mod time_tests {
         assert_eq!(parse_time("0001-01-01T00:00:00.000000000Z"), None);
         assert_eq!(ago("0001-01-01T00:00:00.000000000Z", now), "");
         assert!(parse_time("2026-11-26T21:00:00Z").is_some());
+    }
+
+    #[test]
+    fn a_zero_time_arrives_empty_so_it_sorts_with_the_missing_ones() {
+        let read = |v: serde_json::Value| serde_json::from_value::<super::Session>(v).unwrap().last_active;
+        let base = serde_json::json!({"id": "s1", "surface": "claude", "name": "n"});
+        let with = |t: &str| { let mut v = base.clone(); v["lastActive"] = t.into(); v };
+        assert_eq!(read(with("0001-01-01T00:00:00.000000000Z")), "");
+        assert_eq!(read(base.clone()), "");
+        assert_eq!(read(with("2026-11-26T21:00:00Z")), "2026-11-26T21:00:00Z");
     }
 }
