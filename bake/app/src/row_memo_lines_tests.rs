@@ -7,7 +7,7 @@ fn shipped(id: &str, text: &str, at: &str) -> serde_json::Value {
     json!({"id": id, "text": text, "state": "done", "type": "task", "timeline": [{"kind": "state", "state": "done", "at": at, "actor": "a"}]})
 }
 
-fn people() -> Vec<Session> {
+pub(super) fn people() -> Vec<Session> {
     vec![
         session("a", 0, json!({"name": "Alpha one", "status": "busy"})),
         session("b", 1, json!({"name": "Bravo two", "status": "busy", "project": {"id": "p2", "name": "Beta"}})),

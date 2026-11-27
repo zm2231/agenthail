@@ -149,3 +149,45 @@ fn a_row_opens_what_it_is_about_after_that_changes_out_of_sight() {
     rt.frame(DT);
     assert_eq!(rt.state.selected.as_deref(), Some("c"), "the row opens the session it lists now, though it reads the same");
 }
+
+fn overview(updated: &str, sessions: Vec<Session>, sent: &mut std::sync::Arc<Vec<Session>>, activity_missing: bool) -> Bg {
+    let mut recorded: Recorded = serde_json::from_value(json!({
+        "updatedAt": updated,
+        "hostEpoch": EPOCH,
+        "catalogSeq": 1,
+        "projects": [{"id": "p1", "displayName": "Alpha", "lastActive": "2026-11-27T10:00:00Z"}, {"id": "p2", "displayName": "Beta", "lastActive": "2026-11-27T09:00:00Z"}],
+    }))
+    .unwrap();
+    recorded.activity_missing = activity_missing;
+    *sent = feed::derive::live::shared_sessions(sent, sessions);
+    Bg::Overview(Box::new(Fetched { recorded, sessions: sent.clone(), ledgers: HashMap::new(), held: Vec::new(), asked: Vec::new(), actors_at: std::time::Instant::now(), usage: None, moved: Vec::new() }))
+}
+
+#[test]
+fn a_refresh_that_changes_nothing_shown_skips_the_view() {
+    if !isolated("now_regions::a_refresh_that_changes_nothing_shown_skips_the_view") {
+        return;
+    }
+    use super::rows_memo_lines::people;
+    use crate::over::rows::built;
+    let dir = Dir::new("now-regions-skip");
+    let mut rt = world(&dir);
+    now(&mut rt, false);
+    let mut sent = std::sync::Arc::default();
+    let runs = |rt: &mut Runtime<App>, message: Bg| {
+        let before = built::views();
+        send(rt, message);
+        rt.frame(DT);
+        rt.frame(DT);
+        built::views() > before
+    };
+    runs(&mut rt, overview("2026-11-27T10:00:05Z", people(), &mut sent, false));
+    assert!(!runs(&mut rt, overview("2026-11-27T10:00:40Z", people(), &mut sent, false)), "the same rows later in the same minute");
+    assert!(runs(&mut rt, overview("2026-11-27T10:01:02Z", people(), &mut sent, false)), "the minute turning");
+    assert!(!runs(&mut rt, overview("2026-11-27T10:01:30Z", people(), &mut sent, false)), "the same rows again");
+    let mut renamed = people();
+    renamed[2] = session("c", 2, json!({"name": "Charlie renamed"}));
+    assert!(runs(&mut rt, overview("2026-11-27T10:01:40Z", renamed.clone(), &mut sent, false)), "a session renamed");
+    assert!(runs(&mut rt, overview("2026-11-27T10:01:45Z", renamed.clone(), &mut sent, true)), "activity that couldn't be read");
+    assert!(runs(&mut rt, Bg::OverviewError("offline".into())), "anything else that arrives");
+}

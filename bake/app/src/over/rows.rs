@@ -94,6 +94,7 @@ pub mod built {
 
     thread_local! {
         static BUILT: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+        static VIEWS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
         #[cfg(feature = "frame-profile")]
         static CALLED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
         #[cfg(feature = "frame-profile")]
@@ -120,6 +121,14 @@ pub mod built {
         CALLED.with_borrow_mut(std::mem::take)
     }
 
+
+    pub fn viewed() {
+        VIEWS.set(VIEWS.get() + 1);
+    }
+
+    pub fn views() -> u64 {
+        VIEWS.get()
+    }
 
     pub fn note(id: String) {
         BUILT.with_borrow_mut(|b| b.push(id));
