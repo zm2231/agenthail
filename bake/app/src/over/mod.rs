@@ -64,9 +64,10 @@ pub struct Over {
     pub work: work::State,
     pub worksearch: worksearch::State,
     digests: RefCell<Option<(Option<String>, Digests)>>,
+    held: RefCell<feed::derive::digest_held::Held>,
 }
 
-pub type Digests = Rc<Vec<(Project, Vec<Line>)>>;
+pub type Digests = Rc<Vec<(Project, std::sync::Arc<Vec<Line>>)>>;
 
 impl Over {
     pub fn new(mut live: Overview, persist: bool) -> Over {
@@ -106,6 +107,7 @@ impl Over {
             work: work::State::default(),
             worksearch: worksearch::State::default(),
             digests: RefCell::new(None),
+            held: RefCell::default(),
         }
     }
 
@@ -131,7 +133,7 @@ impl Over {
         if let Some((_, digests)) = held.as_ref().filter(|(at, _)| *at == looked) {
             return digests.clone();
         }
-        let digests: Digests = Rc::new(self.d.digests(self.d.window(looked.as_deref())).into_iter().map(|(p, lines)| (p.clone(), lines)).collect());
+        let digests: Digests = Rc::new(self.d.digests_held(&mut self.held.borrow_mut(), self.d.window(looked.as_deref())).into_iter().map(|(p, lines)| (p.clone(), lines)).collect());
         *held = Some((looked, digests.clone()));
         digests
     }

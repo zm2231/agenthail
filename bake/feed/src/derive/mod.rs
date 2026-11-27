@@ -1,6 +1,7 @@
 pub mod asks;
 pub mod board;
 pub mod digest;
+pub mod digest_held;
 mod gist;
 pub mod hands_on;
 pub mod jump;
@@ -37,3 +38,5 @@ mod live_tests;
 mod tails_tests;
 #[cfg(test)]
 mod steps_tests;
+#[cfg(test)]
+mod digest_held_tests;
