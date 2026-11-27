@@ -19,7 +19,7 @@ fn people() -> Vec<Session> {
     ]
 }
 
-fn world(dir: &Dir) -> Runtime<App> {
+pub(super) fn world(dir: &Dir) -> Runtime<App> {
     let mut raw: Recorded = serde_json::from_value(json!({
         "updatedAt": "2026-11-27T10:00:00Z",
         "hostEpoch": EPOCH,
@@ -45,7 +45,7 @@ fn world(dir: &Dir) -> Runtime<App> {
     runtime(app, SIZE)
 }
 
-fn settle(rt: &mut Runtime<App>) {
+pub(super) fn settle(rt: &mut Runtime<App>) {
     rt.settle_all();
     rt.frame(DT);
     rt.frame(DT);
@@ -69,7 +69,7 @@ fn work<'a>(s: &'a mut App, id: &str) -> &'a mut feed::derive::Work {
     feed::shared::own(s.ov.d.work.values_mut().find(|w| w.id == id).unwrap())
 }
 
-fn x<'a>(s: &'a mut App, id: &str) -> &'a mut Session {
+pub(super) fn x<'a>(s: &'a mut App, id: &str) -> &'a mut Session {
     s.ov.world_changed();
     feed::shared::own(&mut s.ov.d.sessions).iter_mut().find(|x| x.id == id).unwrap()
 }
@@ -78,7 +78,7 @@ fn shown(rt: &Runtime<App>, key: &str) {
     assert!(rt.presented(key).is_some(), "{key} is on screen");
 }
 
-fn now(rt: &mut Runtime<App>, brief: bool) {
+pub(super) fn now(rt: &mut Runtime<App>, brief: bool) {
     rt.update(|s, _| {
         crate::over::go(s, Screen::Now);
         s.ov.now_brief = brief;
