@@ -146,7 +146,7 @@ fn tile(name: &str, key: String, fill: El, selected: bool, press: impl Fn(&mut P
         .label(name.to_string())
         .checked(selected)
         .on_press_tx(press)
-        .child(fill.w_full().h(52.0).radius(8.0).border(border.0, border.1))
+        .child(el().w_full().h(56.0).radius(10.0).padding(2.0).border(border.0, border.1).child(fill.w_full().h_full().radius(7.0)))
         .child(text(name.to_string()).font(if selected { META_BOLD } else { META }).color(if selected { theme::text() } else { muted() }).truncate())
 }
 

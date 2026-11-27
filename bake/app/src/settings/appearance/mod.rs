@@ -154,7 +154,7 @@ pub fn choose_image(s: &mut Prefs, tx: &mut Tx) {
         return;
     }
     s.appearance.writing = true;
-    let options = FileDialogOptions { title: "Choose a background image".into(), ..Default::default() }.filter("Images", &["png", "jpg", "jpeg", "webp", "gif"]);
+    let options = FileDialogOptions { title: "Choose a background image".into(), ..Default::default() }.filter("Images", &["png", "jpg", "jpeg", "webp"]);
     tx.open_file(options, |s: &mut Prefs, result, _| match result {
         Ok(Some(path)) => upload(s, path),
         Ok(None) => s.appearance.writing = false,

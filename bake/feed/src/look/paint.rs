@@ -63,15 +63,13 @@ pub fn pane_alpha(behind: f32, tint: f32, boundary: f32, dark: bool, minimum: f3
     need.clamp(0.0, 1.0).max(minimum)
 }
 
-pub const POOL_CELLS: u32 = 96;
-
-pub fn worst(rgba: &[u8], width: u32, dark: bool) -> Rgb {
+pub fn worst(rgba: &[u8], width: u32, dark: bool, cell: usize) -> Rgb {
     let w = width.max(1) as usize;
     let h = rgba.len() / 4 / w;
     if h == 0 {
         return if dark { [1.0; 3] } else { [0.0; 3] };
     }
-    let cell = (w.max(h) / POOL_CELLS as usize).max(1);
+    let cell = cell.max(1);
     let (cw, ch) = (w.div_ceil(cell), h.div_ceil(cell));
     let mut sums = vec![([0.0f32; 3], 0u32); cw * ch];
     for y in 0..h {

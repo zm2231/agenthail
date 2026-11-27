@@ -12,17 +12,22 @@ use rune_kit::Kit;
 use crate::theme::{self, Paint};
 
 const IMAGE_SIDE: u32 = 2560;
+const SAMPLE_SIDE: u32 = 512;
+const RETRY: Duration = Duration::from_secs(5);
+
+type Decoded = (u32, u32, Vec<u8>);
 
 struct Picture {
     pixels: Pixels,
     size: (f32, f32),
-    worst: Rgb,
+    sample: Decoded,
+    worst: HashMap<(bool, usize), Rgb>,
 }
 
 enum Got {
     Device(String),
     View(u64, Box<View>),
-    Image(String, Result<(u32, u32, Vec<u8>), String>),
+    Image(String, Result<(Decoded, Decoded), String>),
     Problem(Option<String>),
 }
 
@@ -104,7 +109,7 @@ fn follow(tx: Sender<Got>) {
                 if tx.send(Got::Problem(Some(format!("Can't read appearance settings without Agenthail's sign-in ({e}); retrying.")))).is_err() {
                     return;
                 }
-                std::thread::sleep(Duration::from_secs(5));
+                std::thread::sleep(RETRY);
             }
         }
     };
@@ -116,49 +121,90 @@ fn follow(tx: Sender<Got>) {
     let mut fetched: Vec<String> = Vec::new();
     loop {
         let cursor = client.base_settings().map(|b| b.event_cursor).unwrap_or(0);
-        if !read(&client, class, &device, &tx, &mut fetched) {
-            return;
+        match read(&client, class, &device, &tx, &mut fetched) {
+            Read::Closed => return,
+            Read::Retry => {
+                std::thread::sleep(RETRY);
+                continue;
+            }
+            Read::Done => {}
         }
-        let result = client.follow_events(cursor, || {}, |kind, _| kind != "ui.changed" && kind != "stream.reset" || read(&client, class, &device, &tx, &mut fetched));
-        if let Err(e) = result
-            && tx.send(Got::Problem(Some(format!("Can't follow appearance changes right now ({e}); retrying.")))).is_err()
-        {
-            return;
+        let mut after = Read::Done;
+        let result = client.follow_events(cursor, || {}, |kind, _| {
+            if kind != "ui.changed" && kind != "stream.reset" {
+                return true;
+            }
+            after = read(&client, class, &device, &tx, &mut fetched);
+            after == Read::Done
+        });
+        match after {
+            Read::Closed => return,
+            Read::Retry => std::thread::sleep(RETRY),
+            Read::Done => {
+                if let Err(e) = result
+                    && tx.send(Got::Problem(Some(format!("Can't follow appearance changes right now ({e}); retrying.")))).is_err()
+                {
+                    return;
+                }
+                std::thread::sleep(Duration::from_secs(2));
+            }
         }
-        std::thread::sleep(Duration::from_secs(2));
     }
 }
 
-fn read(client: &Client, class: &str, device: &str, tx: &Sender<Got>, fetched: &mut Vec<String>) -> bool {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Read {
+    Done,
+    Retry,
+    Closed,
+}
+
+fn read(client: &Client, class: &str, device: &str, tx: &Sender<Got>, fetched: &mut Vec<String>) -> Read {
     let ticket = ticket();
     let view = match client.ui_view(class, device) {
         Ok(view) => view,
-        Err(f) => return tx.send(Got::Problem(Some(format!("Couldn't read appearance settings: {}", f.message)))).is_ok(),
+        Err(f) => {
+            let sent = tx.send(Got::Problem(Some(format!("Couldn't read appearance settings: {}; retrying.", f.message))));
+            return if sent.is_ok() { Read::Retry } else { Read::Closed };
+        }
     };
     let paths = Look::from_view(&view).images();
+    fetched.retain(|p| paths.contains(p));
     if tx.send(Got::View(ticket, Box::new(view))).is_err() {
-        return false;
+        return Read::Closed;
     }
+    let mut outcome = Read::Done;
     for path in paths {
         if fetched.contains(&path) {
             continue;
         }
-        let got = client.ui_background(&path).and_then(|data| fl::decode(&data, IMAGE_SIDE));
+        let got = client.ui_background(&path).and_then(|data| Ok((fl::decode(&data, IMAGE_SIDE)?, fl::decode(&data, SAMPLE_SIDE)?)));
         if got.is_ok() {
             fetched.push(path.clone());
+        } else {
+            outcome = Read::Retry;
         }
         if tx.send(Got::Image(path, got)).is_err() {
-            return false;
+            return Read::Closed;
         }
     }
-    true
+    outcome
 }
 
-fn picture(w: u32, h: u32, rgba: Vec<u8>, scale: f32, dark_worst: bool) -> Picture {
-    let worst = fl::worst(&rgba, w, dark_worst);
+fn picture((w, h, rgba): Decoded, sample: Decoded, scale: f32) -> Picture {
     let pixels = Pixels::new();
     pixels.set(w, h, rgba);
-    Picture { pixels, size: (w as f32 / scale.max(1.0), h as f32 / scale.max(1.0)), worst }
+    Picture { pixels, size: (w as f32 / scale.max(1.0), h as f32 / scale.max(1.0)), sample, worst: HashMap::new() }
+}
+
+impl Picture {
+    fn worst(&mut self, dark: bool, blur: f32, area: (f32, f32)) -> Rgb {
+        let (sw, sh, _) = self.sample;
+        let per_point = sw.max(sh) as f32 / area.0.max(area.1).max(1.0);
+        let cell = (blur * per_point).round().max(1.0) as usize;
+        let sample = &self.sample;
+        *self.worst.entry((dark, cell)).or_insert_with(|| fl::worst(&sample.2, sample.0, dark, cell))
+    }
 }
 
 fn pump(s: &mut State) {
@@ -173,13 +219,16 @@ fn pump(s: &mut State) {
             Got::View(ticket, v) if ticket > s.applied => {
                 s.applied = ticket;
                 s.look = Look::from_view(&v);
+                let keep = s.look.images();
+                s.pictures.retain(|p, _| keep.contains(p));
+                let meshes = [wallpaper_key(&s.look.background), wallpaper_key(&s.look.background_light)];
+                s.meshes.retain(|k, _| meshes.contains(k));
                 s.view = Some(*v);
                 s.problem = None;
             }
             Got::View(..) => {}
-            Got::Image(path, Ok((w, h, rgba))) => {
-                let dark = s.look.wallpaper(true) == &Wallpaper::Image(path.clone());
-                let p = picture(w, h, rgba, s.scale, dark);
+            Got::Image(path, Ok((full, sample))) => {
+                let p = picture(full, sample, s.scale);
                 s.pictures.insert(path, Ok(p));
             }
             Got::Image(path, Err(e)) => {
@@ -234,9 +283,11 @@ fn wallpaper_key(w: &Wallpaper) -> String {
 
 fn worst_of(s: &mut State, dark: bool) -> Option<Rgb> {
     let w = s.look.wallpaper(dark).clone();
+    let blur = if s.look.translucent(dark) { s.look.blur / 3.0 } else { 0.0 };
+    let area = s.area;
     match &w {
-        Wallpaper::Image(path) => s.pictures.get(path).and_then(|p| p.as_ref().ok()).map(|p| p.worst),
-        Wallpaper::Mesh { .. } => mesh_picture(s, &w, dark).map(|p| p.worst),
+        Wallpaper::Image(path) => s.pictures.get_mut(path).and_then(|p| p.as_mut().ok()).map(|p| p.worst(dark, blur, area)),
+        Wallpaper::Mesh { .. } => mesh_picture(s, &w).map(|p| p.worst(dark, blur, area)),
         Wallpaper::Linear { stops, .. } => {
             let key = |c: &Rgb| fl::luminance(*c);
             let colors = stops.iter().map(|(c, _)| *c);
@@ -246,14 +297,15 @@ fn worst_of(s: &mut State, dark: bool) -> Option<Rgb> {
     }
 }
 
-fn mesh_picture<'a>(s: &'a mut State, w: &Wallpaper, dark: bool) -> Option<&'a Picture> {
+fn mesh_picture<'a>(s: &'a mut State, w: &Wallpaper) -> Option<&'a mut Picture> {
     let Wallpaper::Mesh { columns, rows, colors } = w else { return None };
     let key = wallpaper_key(w);
     if !s.meshes.contains_key(&key) {
         let (mw, mh, rgba) = fl::mesh(*columns, *rows, colors, 1.0);
-        s.meshes.insert(key.clone(), picture(mw, mh, rgba, 1.0, dark));
+        let sample = (mw, mh, rgba.clone());
+        s.meshes.insert(key.clone(), picture((mw, mh, rgba), sample, 1.0));
     }
-    s.meshes.get(&key)
+    s.meshes.get_mut(&key)
 }
 
 fn tint_rgb(look: &Look, dark: bool, accent: Rgb) -> Rgb {
@@ -379,7 +431,7 @@ pub fn backdrop(session: bool) -> El {
                 }
                 _ => None,
             },
-            Wallpaper::Mesh { .. } => mesh_picture(s, &w, dark).map(|p| el().w_full().h_full().pixels(&p.pixels)),
+            Wallpaper::Mesh { .. } => mesh_picture(s, &w).map(|p| el().w_full().h_full().pixels(&p.pixels)),
             Wallpaper::Linear { angle, stops } => {
                 let stops: Vec<(f32, Color)> = stops.iter().map(|(c, at)| (*at, rgb(*c))).collect();
                 Some(el().w_full().h_full().linear_gradient(angle.to_radians(), stops))
