@@ -2,7 +2,6 @@ package codexsurface
 
 import (
 	"context"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/transcript"
@@ -14,7 +13,7 @@ func (c *Codex) Commands(ctx context.Context, sess *surface.Session) (*surface.R
 	if sess == nil || sess.Cwd == "" {
 		return &surface.RuntimeCommands{Commands: []surface.RuntimeCommand{}}, nil
 	}
-	resp, err := c.requestSession(ctx, sess, false, "skills/list", codexSkillsParams(sess), 5*time.Second)
+	resp, err := c.requestSession(ctx, sess, false, "skills/list", codexSkillsParams(sess))
 	if err != nil {
 		return nil, err
 	}

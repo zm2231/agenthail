@@ -48,7 +48,7 @@ func realTurn(t *testing.T, client codexClient, threadID, text string) {
 	t.Helper()
 	ctx := context.Background()
 	count := func() (int, string) {
-		response, err := client.Request(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": true}, 10*time.Second)
+		response, err := client.Request(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": true}, codexAppServerWait)
 		if err != nil {
 			return 0, ""
 		}
@@ -59,7 +59,7 @@ func realTurn(t *testing.T, client codexClient, threadID, text string) {
 		return len(turns), turns[len(turns)-1].Get("status").String()
 	}
 	before, _ := count()
-	if _, err := client.Request(ctx, "turn/start", map[string]any{"threadId": threadID, "input": []any{map[string]any{"type": "text", "text": text}}}, 30*time.Second); err != nil {
+	if _, err := client.Request(ctx, "turn/start", map[string]any{"threadId": threadID, "input": []any{map[string]any{"type": "text", "text": text}}}, codexAppServerWait); err != nil {
 		t.Fatal(err)
 	}
 	for deadline := time.Now().Add(60 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
@@ -80,14 +80,14 @@ func TestARealCodexThreadTakesItsCompactWindowWhileAgenthailFollowsIt(t *testing
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { owner.Close() })
-	started, err := owner.Request(ctx, "thread/start", map[string]any{"cwd": t.TempDir()}, 30*time.Second)
+	started, err := owner.Request(ctx, "thread/start", map[string]any{"cwd": t.TempDir()}, codexAppServerWait)
 	if err != nil {
 		t.Fatal(err)
 	}
 	threadID := gjson.Get(codexJSON(started), "result.thread.id").String()
 	session := &surface.Session{ID: threadID, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Source: "agenthail", Transport: codexTransportManaged, Status: surface.StatusIdle}
 	realTurn(t, owner, threadID, "first")
-	if _, err := owner.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": threadID}, 10*time.Second); err != nil {
+	if _, err := owner.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": threadID}, codexAppServerWait); err != nil {
 		t.Fatal(err)
 	}
 	follower, err := dialManagedCodex(ctx)
@@ -107,7 +107,7 @@ func TestARealCodexThreadTakesItsCompactWindowWhileAgenthailFollowsIt(t *testing
 	if got := rolloutCompactions(t, threadID); got != 0 {
 		t.Fatalf("a limit of 100000 compacted a 9000-token context %d times", got)
 	}
-	if _, err := codex.codexThreadRequest(ctx, follower, codexThreadResume, session, map[string]any{"threadId": threadID}, 30*time.Second); err != nil {
+	if _, err := codex.codexThreadRequest(ctx, follower, codexThreadResume, session, map[string]any{"threadId": threadID}); err != nil {
 		t.Fatal(err)
 	}
 	store := codex.codexConfigStore()

@@ -15,7 +15,7 @@ func (m hangingModel) ServeHTTP(http.ResponseWriter, *http.Request) { <-m.done }
 
 func realThread(t *testing.T, client codexClient) string {
 	t.Helper()
-	started, err := client.Request(context.Background(), "thread/start", map[string]any{"cwd": t.TempDir()}, 30*time.Second)
+	started, err := client.Request(context.Background(), "thread/start", map[string]any{"cwd": t.TempDir()}, codexAppServerWait)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestACodexCompactionHoldsReloadsOnlyUntilItsTurnEnds(t *testing.T) {
 	threadID := realThread(t, client)
 	realTurn(t, client, threadID, "first")
 	codex := &Codex{}
-	if _, err := codex.startTurn(ctx, client, threadID, "thread/compact/start", map[string]any{"threadId": threadID}, 10*time.Second); err != nil {
+	if _, err := codex.startTurn(ctx, client, threadID, "thread/compact/start", map[string]any{"threadId": threadID}); err != nil {
 		t.Fatal(err)
 	}
 	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(100 * time.Millisecond) {
@@ -68,7 +68,7 @@ func TestATurnStartedBeforeTheCodexAppServerRestartedIsNotRunning(t *testing.T) 
 	threadID := realThread(t, client)
 	codex := &Codex{}
 	input := map[string]any{"threadId": threadID, "input": []any{map[string]any{"type": "text", "text": "hang"}}}
-	if _, err := codex.startTurn(ctx, client, threadID, "turn/start", input, 10*time.Second); err != nil {
+	if _, err := codex.startTurn(ctx, client, threadID, "turn/start", input); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(time.Second)
@@ -79,7 +79,7 @@ func TestATurnStartedBeforeTheCodexAppServerRestartedIsNotRunning(t *testing.T) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { client.Close() })
-	if _, err := client.Request(ctx, "thread/resume", map[string]any{"threadId": threadID}, 30*time.Second); err != nil {
+	if _, err := client.Request(ctx, "thread/resume", map[string]any{"threadId": threadID}, codexAppServerWait); err != nil {
 		t.Fatal(err)
 	}
 	if id, err := codex.activeTurnID(ctx, client, threadID, ""); err != nil || id != "" {

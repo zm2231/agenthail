@@ -3,7 +3,6 @@ package codexsurface
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/transcript"
@@ -33,7 +32,7 @@ func (c *Codex) SetModel(ctx context.Context, sess *surface.Session, name string
 }
 
 func codexThreadModel(ctx context.Context, client codexClient, threadID string) (string, error) {
-	response, err := client.Request(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": false}, 5*time.Second)
+	response, err := client.Request(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": false}, codexAppServerWait)
 	if err != nil {
 		return "", err
 	}
@@ -68,7 +67,7 @@ func listCodexModels(ctx context.Context, conn codexClient) ([]surface.ModelOpti
 		if cursor != "" {
 			params["cursor"] = cursor
 		}
-		response, err := conn.Request(ctx, "model/list", params, 10*time.Second)
+		response, err := conn.Request(ctx, "model/list", params, codexAppServerWait)
 		if err != nil {
 			return nil, err
 		}

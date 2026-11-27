@@ -35,7 +35,7 @@ func applyCodexLaunchSettings(ctx context.Context, client codexClient, session *
 	}
 	if options.Mode != "" {
 		if model == "" {
-			response, err := client.Request(ctx, "thread/read", map[string]any{"threadId": session.ID, "includeTurns": false}, 5*time.Second)
+			response, err := client.Request(ctx, "thread/read", map[string]any{"threadId": session.ID, "includeTurns": false}, codexAppServerWait)
 			if err != nil {
 				return err
 			}
@@ -66,7 +66,7 @@ func (c *Codex) ForkSession(ctx context.Context, session *surface.Session, optio
 		}
 	}
 	response, err := c.requestSessionWith(ctx, session, true, func(client codexClient) (map[string]any, error) {
-		return c.codexThreadRequest(ctx, client, codexThreadFork, session, params, 15*time.Second)
+		return c.codexThreadRequest(ctx, client, codexThreadFork, session, params)
 	})
 	if err != nil {
 		return nil, codexOperationOutcome(err)
@@ -147,7 +147,7 @@ func (c *Codex) NativeQueue(ctx context.Context, session *surface.Session, reque
 	if err != nil {
 		return nil, err
 	}
-	response, err := c.requestSession(ctx, session, request.Action != "list", method, params, 10*time.Second)
+	response, err := c.requestSession(ctx, session, request.Action != "list", method, params)
 	if err != nil {
 		if request.Action != "list" {
 			return nil, codexOperationOutcome(err)

@@ -2,7 +2,6 @@ package codexsurface
 
 import (
 	"context"
-	"time"
 )
 
 // A second request, or one of several resolving, changes neither status nor file; only subscribers hear it.
@@ -36,7 +35,7 @@ func newRequestWatch(codex *Codex, client *managedCodexClient) *requestWatch {
 func (w *requestWatch) seed(ctx context.Context, ids []string) {
 	go func() {
 		for _, id := range ids {
-			response, err := w.client.Request(ctx, "thread/read", map[string]any{"threadId": id, "includeTurns": false}, 5*time.Second)
+			response, err := w.client.Request(ctx, "thread/read", map[string]any{"threadId": id, "includeTurns": false}, codexAppServerWait)
 			if err != nil {
 				continue
 			}
@@ -89,7 +88,7 @@ func (w *requestWatch) reconcile(ctx context.Context, threadID string) {
 		} else {
 			release := w.codex.subscriptions.shared(threadID)
 			w.codex.subscriptions.remove(threadID, w.client)
-			_, _ = w.client.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": threadID}, 5*time.Second)
+			_, _ = w.client.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": threadID}, codexAppServerWait)
 			release()
 		}
 		select {

@@ -25,7 +25,7 @@ func TestACodexTurnReadWhileItStartsIsStillReportedOnceItCompletes(t *testing.T)
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { client.Close() })
-	started, err := client.Request(ctx, "thread/start", map[string]any{"cwd": t.TempDir()}, 30*time.Second)
+	started, err := client.Request(ctx, "thread/start", map[string]any{"cwd": t.TempDir()}, codexAppServerWait)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestACodexTurnReadWhileItStartsIsStillReportedOnceItCompletes(t *testing.T)
 		t.Fatal(err)
 	}
 	cursor := batch.Cursor
-	turn, err := client.Request(ctx, "turn/start", map[string]any{"threadId": threadID, "input": []any{map[string]any{"type": "text", "text": "second"}}}, 30*time.Second)
+	turn, err := client.Request(ctx, "turn/start", map[string]any{"threadId": threadID, "input": []any{map[string]any{"type": "text", "text": "second"}}}, codexAppServerWait)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestAnInterruptSentWhileACodexTurnStartsStopsThatTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { client.Close() })
-	started, err := client.Request(ctx, "thread/start", map[string]any{"cwd": t.TempDir()}, 30*time.Second)
+	started, err := client.Request(ctx, "thread/start", map[string]any{"cwd": t.TempDir()}, codexAppServerWait)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestAnInterruptSentWhileACodexTurnStartsStopsThatTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { controller.Close() })
-	turn, err := client.Request(ctx, "turn/start", map[string]any{"threadId": threadID, "input": []any{map[string]any{"type": "text", "text": "second"}}}, 30*time.Second)
+	turn, err := client.Request(ctx, "turn/start", map[string]any{"threadId": threadID, "input": []any{map[string]any{"type": "text", "text": "second"}}}, codexAppServerWait)
 	if err != nil {
 		t.Fatal(err)
 	}

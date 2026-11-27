@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/transcript"
@@ -117,7 +116,7 @@ func (c *Codex) SetTurnSetting(ctx context.Context, sess *surface.Session, key, 
 		}
 		params["collaborationMode"] = map[string]any{"mode": value, "settings": map[string]any{"model": model, "reasoning_effort": effort, "developer_instructions": nil}}
 	}
-	if _, err := client.Request(ctx, "thread/settings/update", params, 10*time.Second); err != nil {
+	if _, err := client.Request(ctx, "thread/settings/update", params, codexAppServerWait); err != nil {
 		return codexThreadSettingsError(err)
 	}
 	return nil

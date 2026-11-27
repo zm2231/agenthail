@@ -3,7 +3,6 @@ package codexsurface
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -35,7 +34,7 @@ func (c *Codex) desktopAppServer(ctx context.Context) (*surface.AppServer, error
 }
 
 func codexServerProcess(ctx context.Context, client codexClient) (int64, error) {
-	response, err := client.Request(ctx, "server/diagnostics", map[string]any{}, 3*time.Second)
+	response, err := client.Request(ctx, "server/diagnostics", map[string]any{}, codexAppServerWait)
 	if err != nil {
 		return 0, err
 	}

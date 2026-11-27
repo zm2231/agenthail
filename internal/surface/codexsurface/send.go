@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/transcript"
@@ -51,7 +50,7 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 		return nil, surface.DeliveryUnavailable(err)
 	}
 	delivered := c.withTurnContext(ctx, conn, *sess, params)
-	resp, err := c.startTurn(ctx, conn, sess.ID, "turn/start", params, 10*time.Second)
+	resp, err := c.startTurn(ctx, conn, sess.ID, "turn/start", params)
 	if err != nil {
 		return nil, codexOperationOutcome(fmt.Errorf("turn/start: %w", err))
 	}

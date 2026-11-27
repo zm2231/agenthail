@@ -53,7 +53,7 @@ func TestARealCodexThreadListsItsBackgroundTerminalUntilItExits(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { owner.Close() })
-	started, err := owner.Request(ctx, "thread/start", map[string]any{"cwd": t.TempDir(), "sandbox": "danger-full-access", "approvalPolicy": "never"}, 30*time.Second)
+	started, err := owner.Request(ctx, "thread/start", map[string]any{"cwd": t.TempDir(), "sandbox": "danger-full-access", "approvalPolicy": "never"}, codexAppServerWait)
 	if err != nil {
 		t.Fatal(err)
 	}

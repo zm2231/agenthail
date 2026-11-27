@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -83,7 +82,7 @@ func (c *Codex) reloadThread(ctx context.Context, client codexClient, sess *surf
 			continue
 		}
 		c.subscriptions.remove(sess.ID, follower)
-		if _, err := follower.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": sess.ID}, 5*time.Second); err != nil {
+		if _, err := follower.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": sess.ID}, codexAppServerWait); err != nil {
 			_ = follower.Close()
 			continue
 		}
@@ -114,14 +113,12 @@ func errCompactWhileWorking() error {
 	return fmt.Errorf("%w: the thread is working; change its compact window once it is idle", surface.ErrInvalidTurnSetting)
 }
 
-var codexReloadWait = 10 * time.Second
-
 func (c *Codex) resumeAlone(ctx context.Context, client codexClient, sess *surface.Session) (sent bool, err error) {
 	c.subscriptions.remove(sess.ID, client)
-	if _, err := client.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": sess.ID}, 5*time.Second); err != nil {
+	if _, err := client.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": sess.ID}, codexAppServerWait); err != nil {
 		return false, fmt.Errorf("thread/unsubscribe: %w", err)
 	}
-	if _, err := c.resumeThread(ctx, client, sess, map[string]any{"threadId": sess.ID}, codexReloadWait); err != nil {
+	if _, err := c.resumeThread(ctx, client, sess, map[string]any{"threadId": sess.ID}); err != nil {
 		return true, fmt.Errorf("reload the thread with its compact window: %w", err)
 	}
 	c.subscriptions.add(sess.ID, client)

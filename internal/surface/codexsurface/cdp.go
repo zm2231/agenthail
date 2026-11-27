@@ -109,7 +109,13 @@ func resolveCodexRendererEndpoint(ctx context.Context, endpoint string) ([]codex
 
 func (c *cdpConn) close() error { return c.ws.Close() }
 
+// evaluate waits for the result until timeout, or until ctx ends: a
+// cancelled caller closes the connection to stop the read at once, since
+// Close is the one call that may run alongside a read.
 func (c *cdpConn) evaluate(ctx context.Context, expr string, timeout time.Duration) (any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	c.mu.Lock()
 	id := c.next
 	c.next++
@@ -132,10 +138,23 @@ func (c *cdpConn) evaluate(ctx context.Context, expr string, timeout time.Durati
 	}
 
 	deadline := time.Now().Add(timeout)
+	c.ws.SetReadDeadline(deadline)
+	abandoned := make(chan struct{})
+	stopAbandon := context.AfterFunc(ctx, func() {
+		_ = c.ws.Close()
+		close(abandoned)
+	})
+	defer func() {
+		if !stopAbandon() {
+			<-abandoned
+		}
+	}()
 	for time.Now().Before(deadline) {
-		c.ws.SetReadDeadline(time.Now().Add(timeout))
 		_, raw, err := c.ws.ReadMessage()
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, fmt.Errorf("wait for eval response: %w", ctxErr)
+			}
 			return nil, err
 		}
 		var msg map[string]any

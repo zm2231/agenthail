@@ -35,8 +35,13 @@ func (c *Codex) watchManagedClient(ctx context.Context, client codexClient, sess
 	}
 	poll()
 	defer c.subscriptions.remove(sess.ID, client)
+	subscribe := func() bool {
+		stepCtx, cancel := context.WithTimeout(ctx, codexAppServerWait)
+		defer cancel()
+		return c.subscribeManagedThread(stepCtx, client, sess.ID)
+	}
 	notifier, _ := client.(codexNotifier)
-	subscribed := notifier != nil && c.subscribeManagedThread(ctx, client, sess.ID)
+	subscribed := notifier != nil && subscribe()
 	var notified <-chan struct{}
 	if notifier != nil {
 		notified = notifier.Notified()
@@ -62,7 +67,7 @@ func (c *Codex) watchManagedClient(ctx context.Context, client codexClient, sess
 					continue
 				}
 				if event.Method == "thread/status/changed" && !subscribed {
-					subscribed = c.subscribeManagedThread(ctx, client, sess.ID)
+					subscribed = subscribe()
 				}
 				if event.Method == "thread/queue/changed" {
 					onEvent(surface.StreamEvent{Kind: surface.StreamKindNativeQueue})

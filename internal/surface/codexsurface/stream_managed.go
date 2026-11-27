@@ -49,7 +49,7 @@ func (c *Codex) followLoadedThread(ctx context.Context, client codexClient, thre
 	if err != nil || !slices.Contains(loaded, threadID) {
 		return false
 	}
-	_, err = c.resumeFollower(ctx, client, &surface.Session{ID: threadID}, map[string]any{"threadId": threadID, "excludeTurns": true}, 5*time.Second)
+	_, err = c.resumeFollower(ctx, client, &surface.Session{ID: threadID}, map[string]any{"threadId": threadID, "excludeTurns": true})
 	return err == nil
 }
 

@@ -117,7 +117,7 @@ func (s *codexTurnStarts) pending(threadID string) bool {
 // its turn is listed ended. thread/compact/start names no turn and answers
 // before Codex creates one, so its turn is the one this connection receives
 // after the answer and sees run a contextCompaction item.
-func (c *Codex) startTurn(ctx context.Context, client codexClient, threadID, method string, params map[string]any, wait time.Duration) (map[string]any, error) {
+func (c *Codex) startTurn(ctx context.Context, client codexClient, threadID, method string, params map[string]any) (map[string]any, error) {
 	var server *codexServer
 	if managed, ok := client.(*managedCodexClient); ok {
 		server = managed.server
@@ -130,9 +130,9 @@ func (c *Codex) startTurn(ctx context.Context, client codexClient, threadID, met
 	var err error
 	after := int64(-1)
 	if ordered, ok := client.(codexOrderedClient); ok {
-		response, after, err = ordered.requestOrdered(ctx, method, params, wait)
+		response, after, err = ordered.requestOrdered(ctx, method, params, codexAppServerWait)
 	} else {
-		response, err = client.Request(ctx, method, params, wait)
+		response, err = client.Request(ctx, method, params, codexAppServerWait)
 	}
 	var refused *codexRPCError
 	if errors.As(err, &refused) {
@@ -154,7 +154,7 @@ func (c *Codex) startTurn(ctx context.Context, client codexClient, threadID, met
 }
 
 func codexRecentTurns(ctx context.Context, client codexClient, threadID string, limit int) ([]map[string]any, error) {
-	response, err := client.Request(ctx, "thread/turns/list", map[string]any{"threadId": threadID, "limit": limit, "sortDirection": "desc", "itemsView": "notLoaded"}, 5*time.Second)
+	response, err := client.Request(ctx, "thread/turns/list", map[string]any{"threadId": threadID, "limit": limit, "sortDirection": "desc", "itemsView": "notLoaded"}, codexAppServerWait)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +223,7 @@ func awaitTurnUnderway(ctx context.Context, client codexClient, threadID string,
 // recorded counts until its turn is listed with completedAt or behind a newer
 // turn.
 func (c *Codex) turnInFlight(ctx context.Context, client codexClient, threadID string) (bool, error) {
-	response, err := client.Request(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": false}, 5*time.Second)
+	response, err := client.Request(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": false}, codexAppServerWait)
 	if codexRolloutNotWrittenYet(err) {
 		return true, nil
 	}

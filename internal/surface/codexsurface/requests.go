@@ -75,7 +75,7 @@ func (c *Codex) preciseWait(ctx context.Context, client codexClient, sess *surfa
 // meanwhile. Requests of kinds Agenthail does not answer are left out.
 func (c *Codex) codexOpenRequests(ctx context.Context, client codexAnswerer, sess *surface.Session) ([]codexOpenRequest, error) {
 	client.DrainNotifications()
-	if _, err := c.codexThreadRequest(ctx, client, codexThreadResume, sess, map[string]any{"threadId": sess.ID, "excludeTurns": true}, 5*time.Second); err != nil {
+	if _, err := c.codexThreadRequest(ctx, client, codexThreadResume, sess, map[string]any{"threadId": sess.ID, "excludeTurns": true}); err != nil {
 		return nil, fmt.Errorf("thread/resume: %w", err)
 	}
 	defer c.subscriptions.remove(sess.ID, client)
@@ -362,7 +362,7 @@ func (c *Codex) Requests(ctx context.Context, sess *surface.Session) (surface.Re
 		return state, err
 	}
 	defer client.Close()
-	response, err := client.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 5*time.Second)
+	response, err := client.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, codexAppServerWait)
 	if err != nil {
 		return state, fmt.Errorf("thread/read: %w", err)
 	}

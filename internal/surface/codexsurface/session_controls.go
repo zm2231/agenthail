@@ -3,7 +3,6 @@ package codexsurface
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -11,13 +10,13 @@ import (
 func (c *Codex) GoalClear(ctx context.Context, sess *surface.Session) error {
 	_, err := c.requestSession(ctx, sess, true, "thread/goal/clear", map[string]any{
 		"threadId": sess.ID,
-	}, 5*time.Second)
+	})
 	return err
 }
 
 func (c *Codex) Compact(ctx context.Context, sess *surface.Session) error {
 	_, err := c.requestSessionWith(ctx, sess, true, func(client codexClient) (map[string]any, error) {
-		return c.startTurn(ctx, client, sess.ID, "thread/compact/start", map[string]any{"threadId": sess.ID}, 10*time.Second)
+		return c.startTurn(ctx, client, sess.ID, "thread/compact/start", map[string]any{"threadId": sess.ID})
 	})
 	return err
 }
@@ -58,7 +57,7 @@ func (c *Codex) interruptActiveTurn(ctx context.Context, conn codexClient, threa
 	_, err = conn.Request(ctx, "turn/interrupt", map[string]any{
 		"threadId": threadID,
 		"turnId":   turnID,
-	}, 5*time.Second)
+	}, codexAppServerWait)
 	return err
 }
 
@@ -95,7 +94,7 @@ func (c *Codex) SteerWithImages(ctx context.Context, sess *surface.Session, mess
 	}
 	setCodexClientMessageID(ctx, params)
 	delivered := c.withTurnContext(ctx, conn, *sess, params)
-	if _, err := conn.Request(ctx, "turn/steer", params, 5*time.Second); err != nil {
+	if _, err := conn.Request(ctx, "turn/steer", params, codexAppServerWait); err != nil {
 		return codexOperationOutcome(fmt.Errorf("turn/steer: %w", err))
 	}
 	delivered()
@@ -134,7 +133,7 @@ func (c *Codex) StopRun(ctx context.Context, sess *surface.Session) (surface.Run
 		return surface.RunStop{}, surface.DeliveryUnavailable(err)
 	}
 	if turnID != "" {
-		if _, err := client.Request(ctx, "turn/interrupt", map[string]any{"threadId": sess.ID, "turnId": turnID}, 5*time.Second); err != nil {
+		if _, err := client.Request(ctx, "turn/interrupt", map[string]any{"threadId": sess.ID, "turnId": turnID}, codexAppServerWait); err != nil {
 			return surface.RunStop{}, fmt.Errorf("turn/interrupt: %w", err)
 		}
 	}
@@ -142,11 +141,11 @@ func (c *Codex) StopRun(ctx context.Context, sess *surface.Session) (surface.Run
 	defer unlock()
 	for _, follower := range c.subscriptions.clients(sess.ID) {
 		c.subscriptions.remove(sess.ID, follower)
-		if _, err := follower.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": sess.ID}, 5*time.Second); err != nil {
+		if _, err := follower.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": sess.ID}, codexAppServerWait); err != nil {
 			_ = follower.Close()
 		}
 	}
-	if _, err := client.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": sess.ID}, 5*time.Second); err != nil {
+	if _, err := client.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": sess.ID}, codexAppServerWait); err != nil {
 		return surface.RunStop{}, fmt.Errorf("thread/unsubscribe: %w", err)
 	}
 	return surface.RunStop{Stopped: true}, nil

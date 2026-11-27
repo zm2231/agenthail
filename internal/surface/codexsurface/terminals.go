@@ -231,7 +231,7 @@ func (w *terminalWatch) start(ctx context.Context, now time.Time) {
 func (w *terminalWatch) list(ctx context.Context, threadID string, readStatus bool) terminalResult {
 	result := terminalResult{threadID: threadID}
 	if readStatus {
-		response, err := w.client.Request(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": false}, 5*time.Second)
+		response, err := w.client.Request(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": false}, codexAppServerWait)
 		if err != nil {
 			result.err = err
 			return result
@@ -243,7 +243,7 @@ func (w *terminalWatch) list(ctx context.Context, threadID string, readStatus bo
 	params := map[string]any{"threadId": threadID}
 	result.asked = time.Now()
 	for range codexTerminalsPages {
-		response, err := w.client.Request(ctx, codexTerminalsMethod, params, 5*time.Second)
+		response, err := w.client.Request(ctx, codexTerminalsMethod, params, codexAppServerWait)
 		if err != nil {
 			result.err = err
 			return result

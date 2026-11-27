@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/transcript"
@@ -91,7 +90,7 @@ func (r *codexRuntimes) openTarget(threadID string) (codexClient, bool) {
 }
 
 func (c *Codex) updateReadState(ctx context.Context, client codexClient, threadID, operation, revision string) (surface.ReadState, error) {
-	response, err := client.Request(ctx, "thread/readState/update", map[string]any{"threadId": threadID, "expectedRevision": revision, "operation": map[string]any{"type": operation}}, 5*time.Second)
+	response, err := client.Request(ctx, "thread/readState/update", map[string]any{"threadId": threadID, "expectedRevision": revision, "operation": map[string]any{"type": operation}}, codexAppServerWait)
 	if rpcErr := (*codexRPCError)(nil); errors.As(err, &rpcErr) {
 		return surface.ReadState{}, codexReadStateRefusal(rpcErr)
 	}

@@ -53,7 +53,7 @@ func (m *memoryCodexConfig) RestoreCodexConfigOverrides(id string, overrides map
 
 func resumeAgain(t *testing.T, codex *Codex, session *surface.Session) {
 	t.Helper()
-	if _, err := codex.codexThreadRequest(context.Background(), mustRoute(t, codex, session), codexThreadResume, session, map[string]any{"threadId": session.ID}, 5*time.Second); err != nil {
+	if _, err := codex.codexThreadRequest(context.Background(), mustRoute(t, codex, session), codexThreadResume, session, map[string]any{"threadId": session.ID}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -205,9 +205,9 @@ func TestAReloadCodexDoesNotAnswerKeepsTheNewWindow(t *testing.T) {
 	})
 	store := newMemoryCodexConfig()
 	codex.SetCodexConfigStore(store)
-	wait := codexReloadWait
-	codexReloadWait = 100 * time.Millisecond
-	t.Cleanup(func() { codexReloadWait = wait })
+	wait := codexAppServerWait
+	codexAppServerWait = 100 * time.Millisecond
+	t.Cleanup(func() { codexAppServerWait = wait })
 	stall.Store(true)
 	if err := codex.SetCompactSetting(context.Background(), session, surface.CompactSettingWindow, "300000"); err == nil {
 		t.Fatal("a reload Codex never answered reported success")

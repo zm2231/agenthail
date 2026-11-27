@@ -189,7 +189,7 @@ func TestAThreadAgenthailStartsHasOnlyItsOwnServerWhileThePersonsThreadsGetTheRe
 	}
 	t.Cleanup(func() { client.Close() })
 	servers := func(threadID string) map[string]string {
-		response, err := client.Request(ctx, "mcpServerStatus/list", map[string]any{"threadId": threadID, "detail": "toolsAndAuthOnly"}, 10*time.Second)
+		response, err := client.Request(ctx, "mcpServerStatus/list", map[string]any{"threadId": threadID, "detail": "toolsAndAuthOnly"}, codexAppServerWait)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -208,13 +208,13 @@ func TestAThreadAgenthailStartsHasOnlyItsOwnServerWhileThePersonsThreadsGetTheRe
 
 	c := &Codex{}
 	c.SetMCPCredentials(&surfacetest.FakeCredentials{})
-	ours := threadID(c.codexThreadRequest(ctx, client, codexThreadStart, nil, map[string]any{"cwd": t.TempDir()}, 30*time.Second))
+	ours := threadID(c.codexThreadRequest(ctx, client, codexThreadStart, nil, map[string]any{"cwd": t.TempDir()}))
 	got := servers(ours)
 	if _, ok := got[surface.MCPServerName]; !ok || got[CodexRelayServerName] != "disabled" {
 		t.Fatalf("a thread Agenthail started has servers %v, want its own %s and the relay disabled", got, surface.MCPServerName)
 	}
 
-	persons := threadID(client.Request(ctx, codexThreadStart, map[string]any{"cwd": t.TempDir()}, 30*time.Second))
+	persons := threadID(client.Request(ctx, codexThreadStart, map[string]any{"cwd": t.TempDir()}, codexAppServerWait))
 	got = servers(persons)
 	if _, ok := got[CodexRelayServerName]; !ok || got[CodexRelayServerName] == "disabled" {
 		t.Fatalf("the person's thread has servers %v, want the relay", got)

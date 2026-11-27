@@ -50,7 +50,7 @@ func (c *Codex) UpdateGoal(ctx context.Context, sess *surface.Session, update su
 	if err != nil {
 		return err
 	}
-	_, err = c.requestSession(ctx, sess, true, "thread/goal/set", params, 5*time.Second)
+	_, err = c.requestSession(ctx, sess, true, "thread/goal/set", params)
 	return err
 }
 
@@ -84,7 +84,7 @@ func (c *Codex) GoalSet(ctx context.Context, sess *surface.Session, text string)
 }
 
 func (c *Codex) GoalGet(ctx context.Context, sess *surface.Session) (*surface.GoalState, error) {
-	resp, err := c.requestSession(ctx, sess, false, "thread/goal/get", map[string]any{"threadId": sess.ID}, 5*time.Second)
+	resp, err := c.requestSession(ctx, sess, false, "thread/goal/get", map[string]any{"threadId": sess.ID})
 	if err != nil {
 		return nil, err
 	}

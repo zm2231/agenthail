@@ -34,7 +34,7 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 	}
 	if observation.Status == surface.StatusBusy {
 		// Only thread status carries the pending approval and input flags.
-		response, err := conn.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 5*time.Second)
+		response, err := conn.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, codexAppServerWait)
 		if err != nil {
 			return nil, fmt.Errorf("thread/read: %w", err)
 		}
@@ -62,7 +62,7 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 const codexTurnInterrupted = "turn interrupted"
 
 func codexThreadReadsNotLoaded(ctx context.Context, conn codexClient, threadID string) (bool, error) {
-	response, err := conn.Request(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": false}, 5*time.Second)
+	response, err := conn.Request(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": false}, codexAppServerWait)
 	if err != nil {
 		return false, err
 	}
@@ -129,7 +129,7 @@ func codexNewestTurn(ctx context.Context, conn codexClient, threadID string) (ma
 		"threadId":      threadID,
 		"limit":         1,
 		"sortDirection": "desc",
-	}, 5*time.Second)
+	}, codexAppServerWait)
 	if codexTurnsNotListedYet(err) {
 		return nil, nil
 	}

@@ -110,7 +110,7 @@ func codexCompactedSince(ctx context.Context, client codexClient, threadID strin
 		if cursor != "" {
 			params["cursor"] = cursor
 		}
-		response, err := client.Request(ctx, "thread/turns/list", params, 10*time.Second)
+		response, err := client.Request(ctx, "thread/turns/list", params, codexAppServerWait)
 		if err != nil {
 			return false, err
 		}

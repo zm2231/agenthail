@@ -352,7 +352,9 @@ func (d *Daemon) doSessionFocus(ctx context.Context, session *surface.Session) (
 	if err != nil {
 		return unfocusable("session surface is unavailable")
 	}
-	located, err := adapter.List(ctx)
+	listCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+	located, err := adapter.List(listCtx)
+	cancel()
 	if err != nil {
 		return unfocusable("session location is unavailable")
 	}

@@ -60,7 +60,7 @@ func (v *CodexVoice) openVoiceLink(ctx context.Context, session *surface.Session
 		_ = client.Close()
 		return nil, surface.DeliveryUnavailable(errors.New("managed voice needs an app-server connection"))
 	}
-	resumed, err := v.Codex.codexThreadRequest(ctx, managed, codexThreadResume, session, codexResumeParams(session), 10*time.Second)
+	resumed, err := v.Codex.codexThreadRequest(ctx, managed, codexThreadResume, session, codexResumeParams(session))
 	if err != nil {
 		_ = managed.Close()
 		return nil, classifyCodexWrite(fmt.Errorf("thread/resume: %w", err))
@@ -73,7 +73,7 @@ func (v *CodexVoice) openVoiceLink(ctx context.Context, session *surface.Session
 		}
 	}
 	link := &voiceLink{client: managed, threadID: session.ID, source: "managed:" + uuid.NewString(), requests: map[string]voiceToolRequest{}, followed: make(chan struct{}), appended: make(chan struct{})}
-	if response, err := managed.Request(ctx, "account/read", map[string]any{}, 5*time.Second); err == nil {
+	if response, err := managed.Request(ctx, "account/read", map[string]any{}, codexAppServerWait); err == nil {
 		result, _ := response["result"].(map[string]any)
 		link.account, _ = result["account"].(map[string]any)
 		link.accountRead = true

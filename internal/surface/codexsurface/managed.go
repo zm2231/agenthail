@@ -19,6 +19,12 @@ import (
 	"github.com/zm2231/agenthail/internal/surface/transcript"
 )
 
+// codexAppServerWait bounds one request to a Codex app-server. Codex answers
+// late but does answer while its state database waits on a busy disk: under
+// load on macOS single requests took up to 14 s with milliseconds of work.
+// Callers bound a whole operation with their context.
+var codexAppServerWait = 30 * time.Second
+
 type codexClient interface {
 	Request(context.Context, string, map[string]any, time.Duration) (map[string]any, error)
 	Close() error
@@ -385,7 +391,7 @@ func (c *Codex) requireDirectInput(ctx context.Context, client codexClient, sess
 // with model as the resume's override; Codex ignores the override for a
 // thread it already has loaded.
 func (c *Codex) loadForDirectInput(ctx context.Context, client codexClient, sess *surface.Session, model string) error {
-	readResponse, err := client.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 5*time.Second)
+	readResponse, err := client.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, codexAppServerWait)
 	if err == nil && codexDirectInputAccepted(readResponse) && c.mcpCurrent(sess.ID) {
 		return nil
 	}
@@ -393,10 +399,10 @@ func (c *Codex) loadForDirectInput(ctx context.Context, client codexClient, sess
 	if model != "" {
 		params["model"] = model
 	}
-	if _, err := c.codexThreadRequest(ctx, client, codexThreadResume, sess, params, 10*time.Second); err != nil {
+	if _, err := c.codexThreadRequest(ctx, client, codexThreadResume, sess, params); err != nil {
 		return classifyCodexWrite(fmt.Errorf("thread/resume: %w", err))
 	}
-	readResponse, err = client.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 5*time.Second)
+	readResponse, err = client.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, codexAppServerWait)
 	if err != nil {
 		return fmt.Errorf("thread/read after resume: %w", err)
 	}
@@ -550,9 +556,9 @@ func (h CodexHome) acquireThreadWrite(ctx context.Context, threadID string) (rel
 	return func() { releaseCodexWriteLock(lock) }, nil
 }
 
-func (c *Codex) requestSession(ctx context.Context, sess *surface.Session, writable bool, method string, params map[string]any, wait time.Duration) (map[string]any, error) {
+func (c *Codex) requestSession(ctx context.Context, sess *surface.Session, writable bool, method string, params map[string]any) (map[string]any, error) {
 	return c.requestSessionWith(ctx, sess, writable, func(client codexClient) (map[string]any, error) {
-		return client.Request(ctx, method, params, wait)
+		return client.Request(ctx, method, params, codexAppServerWait)
 	})
 }
 

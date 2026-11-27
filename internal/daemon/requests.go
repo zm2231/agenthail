@@ -75,6 +75,8 @@ func (d *Daemon) readOpenRequests(ctx context.Context, session *surface.Session,
 		return openRequests{}, actionFailed(http.StatusInternalServerError, "registry_error", err.Error())
 	}
 	if observe && answers && providerError == "" && !asksCover(asks, state.Requests) {
+		ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+		defer cancel()
 		if _, err := d.observeTurn(ctx, adapter, session); err != nil {
 			d.log.Printf("observe %s for its requests: %s", d.resolveDisplay(session.ID), err)
 		}
