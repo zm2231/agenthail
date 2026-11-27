@@ -246,6 +246,7 @@ fn the_app_clock_moving_to_another_minute_runs_the_view() {
     rt.frame(DT);
     rt.frame(DT);
     assert!(built::views() > views, "a repeated snapshot that moves the app clock to another minute redraws what reads it");
+    assert_eq!(rt.state.now, feed::wake::minute_of(rt.state.now), "the app clock moves to the start of the minute");
 }
 
 #[test]
@@ -281,6 +282,7 @@ fn a_clock_set_back_turns_the_minute_and_marks_looks_by_the_wall() {
         s.now = ahead;
         assert!(crate::minute(s), "the minute turns when the clock is set back");
         assert!(s.now < ahead, "the app clock follows the clock back");
+        assert_eq!(Some(s.now), crate::quiet::shown_minute(s), "the app clock sits on the minute ages and states read, so a session header and its list row agree");
         s.ov.d.now = ahead;
         crate::over::go(s, Screen::Sessions);
         s.fixtures = fixtures;

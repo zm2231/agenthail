@@ -313,7 +313,7 @@ fn empty(live: Overview, persist: bool) -> App {
     let (outbox, inbox) = wake::channel();
     App {
         sessions: Default::default(),
-        now: OffsetDateTime::now_utc(),
+        now: feed::wake::minute_of(OffsetDateTime::now_utc()),
         selected: None,
         screen: Screen::Now,
         panes: HashMap::new(),
@@ -1407,8 +1407,8 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                     }
                 }
                 let now = OffsetDateTime::now_utc();
-                if feed::wake::minute_of(now) != feed::wake::minute_of(s.now) {
-                    s.now = now;
+                if feed::wake::minute_of(now) != s.now {
+                    s.now = feed::wake::minute_of(now);
                     changed = true;
                 }
                 s.status = "live".into();
@@ -1706,9 +1706,9 @@ fn minute(s: &mut App) -> bool {
         return false;
     }
     let now = OffsetDateTime::now_utc();
-    let turned = feed::wake::minute_of(now) != feed::wake::minute_of(s.now);
+    let turned = feed::wake::minute_of(now) != s.now;
     if turned {
-        s.now = now;
+        s.now = feed::wake::minute_of(now);
     }
     wake::later(feed::wake::next_minute(now) - now);
     turned
