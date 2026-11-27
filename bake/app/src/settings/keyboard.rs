@@ -77,7 +77,7 @@ fn propose(id: &'static str, next: Option<&Shortcut>) -> Result<(), ShortcutErro
     if stored.is_some_and(|s| s.types()) {
         return Err(ShortcutError::InvalidAccelerator(next.map(Shortcut::to_string).unwrap_or_default()));
     }
-    bindings::change(|sc| sc.set(id, stored)).map_err(|_| ShortcutError::Conflict)
+    bindings::change(|sc| sc.set(id, stored)).map_err(ShortcutError::Backend)?.map_err(|_| ShortcutError::Conflict)
 }
 
 fn propose_any_app(next: Option<&Shortcut>) -> Result<(), ShortcutError> {
@@ -85,7 +85,7 @@ fn propose_any_app(next: Option<&Shortcut>) -> Result<(), ShortcutError> {
         None => None,
         Some(shortcut) => Some(bindings::stored(shortcut).ok_or_else(|| ShortcutError::InvalidAccelerator(shortcut.to_string()))?),
     };
-    bindings::change(|sc| sc.set_any_app(stored)).map_err(|_| ShortcutError::Conflict)?;
+    bindings::change(|sc| sc.set_any_app(stored)).map_err(ShortcutError::Backend)?.map_err(|_| ShortcutError::Conflict)?;
     crate::hotkey::chose();
     Ok(())
 }
@@ -94,6 +94,7 @@ fn message(id: &'static str, error: &ShortcutError, shortcut: Option<&Shortcut>)
     let Some(shortcut) = shortcut else { return shortcut_error_message(error, None) };
     let keys = if id == ANY_APP_ID { crate::hotkey::keycaps(shortcut) } else { bindings::keycaps(shortcut) };
     match error {
+        ShortcutError::Backend(why) => format!("{keys} couldn't be saved: {why}."),
         ShortcutError::Conflict => match bindings::stored(shortcut).and_then(|s| bindings::read(|sc| sc.owner(s, id))) {
             Some(owner) => format!("{keys} is already used by {owner}."),
             None => shortcut_error_message(error, Some(shortcut)),
@@ -104,13 +105,13 @@ fn message(id: &'static str, error: &ShortcutError, shortcut: Option<&Shortcut>)
 }
 
 fn reset(s: &mut Prefs, id: &'static str) {
-    if bindings::change(|sc| sc.reset(id)).is_ok() {
+    if bindings::change(|sc| sc.reset(id)).is_ok_and(|r| r.is_ok()) {
         *row_state(s, id) = ShortcutRecorderState::new(bindings::shortcut(id));
     }
 }
 
 fn restore(s: &mut Prefs) {
-    s.keyboard.kept = bindings::change(Shortcuts::reset_all);
+    s.keyboard.kept = bindings::change(Shortcuts::reset_all).unwrap_or_default();
     s.keyboard.kept_at = bindings::generation();
     s.keyboard.rows.clear();
     s.keyboard.any_app = ShortcutRecorderState::default();
