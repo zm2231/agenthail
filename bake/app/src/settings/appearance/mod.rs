@@ -144,7 +144,7 @@ fn want_thumb(s: &mut Prefs, path: &str) {
     }
     let path = path.to_string();
     spawn(s, move |c| {
-        let got = c.ui_background(&path).and_then(|data| fl::decode(&data, THUMB_SIDE));
+        let got = c.ui_background(&path).and_then(|data| fl::decode(&data, THUMB_SIDE, 1)).map(|d| d.shown);
         Got::Thumb(path, got)
     });
 }

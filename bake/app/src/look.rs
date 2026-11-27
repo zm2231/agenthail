@@ -15,19 +15,20 @@ const IMAGE_SIDE: u32 = 2560;
 const SAMPLE_SIDE: u32 = 512;
 const RETRY: Duration = Duration::from_secs(5);
 
-type Decoded = (u32, u32, Vec<u8>);
+type Raw = (u32, u32, Vec<u8>);
 
 struct Picture {
     pixels: Pixels,
-    size: (f32, f32),
-    sample: Decoded,
+    original: (u32, u32),
+    brightest: Raw,
+    darkest: Raw,
     worst: HashMap<(bool, usize), Rgb>,
 }
 
 enum Got {
     Device(String),
     View(u64, Box<View>),
-    Image(String, Result<(Decoded, Decoded), String>),
+    Image(String, Result<fl::Decoded, String>),
     Problem(Option<String>),
 }
 
@@ -178,7 +179,7 @@ fn read(client: &Client, class: &str, device: &str, tx: &Sender<Got>, fetched: &
         if fetched.contains(&path) {
             continue;
         }
-        let got = client.ui_background(&path).and_then(|data| Ok((fl::decode(&data, IMAGE_SIDE)?, fl::decode(&data, SAMPLE_SIDE)?)));
+        let got = client.ui_background(&path).and_then(|data| fl::decode(&data, IMAGE_SIDE, SAMPLE_SIDE));
         if got.is_ok() {
             fetched.push(path.clone());
         } else {
@@ -191,18 +192,22 @@ fn read(client: &Client, class: &str, device: &str, tx: &Sender<Got>, fetched: &
     outcome
 }
 
-fn picture((w, h, rgba): Decoded, sample: Decoded, scale: f32) -> Picture {
+fn picture(d: fl::Decoded) -> Picture {
     let pixels = Pixels::new();
+    let (w, h, rgba) = d.shown;
     pixels.set(w, h, rgba);
-    Picture { pixels, size: (w as f32 / scale.max(1.0), h as f32 / scale.max(1.0)), sample, worst: HashMap::new() }
+    Picture { pixels, original: d.original, brightest: d.brightest, darkest: d.darkest, worst: HashMap::new() }
 }
 
 impl Picture {
+    fn size(&self, scale: f32) -> (f32, f32) {
+        (self.original.0 as f32 / scale.max(1.0), self.original.1 as f32 / scale.max(1.0))
+    }
+
     fn worst(&mut self, dark: bool, blur: f32, area: (f32, f32)) -> Rgb {
-        let (sw, sh, _) = self.sample;
-        let per_point = sw.max(sh) as f32 / area.0.max(area.1).max(1.0);
+        let sample = if dark { &self.brightest } else { &self.darkest };
+        let per_point = sample.0.max(sample.1) as f32 / area.0.max(area.1).max(1.0);
         let cell = (blur * per_point).round().max(1.0) as usize;
-        let sample = &self.sample;
         *self.worst.entry((dark, cell)).or_insert_with(|| fl::worst(&sample.2, sample.0, dark, cell))
     }
 }
@@ -227,8 +232,8 @@ fn pump(s: &mut State) {
                 s.problem = None;
             }
             Got::View(..) => {}
-            Got::Image(path, Ok((full, sample))) => {
-                let p = picture(full, sample, s.scale);
+            Got::Image(path, Ok(d)) => {
+                let p = picture(d);
                 s.pictures.insert(path, Ok(p));
             }
             Got::Image(path, Err(e)) => {
@@ -302,8 +307,8 @@ fn mesh_picture<'a>(s: &'a mut State, w: &Wallpaper) -> Option<&'a mut Picture> 
     let key = wallpaper_key(w);
     if !s.meshes.contains_key(&key) {
         let (mw, mh, rgba) = fl::mesh(*columns, *rows, colors, 1.0);
-        let sample = (mw, mh, rgba.clone());
-        s.meshes.insert(key.clone(), picture((mw, mh, rgba), sample, 1.0));
+        let d = fl::Decoded { original: (mw, mh), shown: (mw, mh, rgba.clone()), brightest: (mw, mh, rgba.clone()), darkest: (mw, mh, rgba) };
+        s.meshes.insert(key.clone(), picture(d));
     }
     s.meshes.get_mut(&key)
 }
@@ -424,7 +429,7 @@ pub fn backdrop(session: bool) -> El {
         let art = match &w {
             Wallpaper::Image(path) => match s.pictures.get(path) {
                 Some(Ok(p)) => {
-                    let placed = fl::place(s.look.fit, s.look.position, p.size, s.area);
+                    let placed = fl::place(s.look.fit, s.look.position, p.size(s.scale), s.area);
                     let wrap = if s.look.fit == Fit::Tile { PixelsWrap::Repeat } else { PixelsWrap::Extend };
                     let full = el().w_full().h_full();
                     Some(if placed.tile || s.look.fit == Fit::Cover { full.pixels_wrap(&p.pixels, placed.rect, wrap) } else { el().clip_rounded(0.0).w_full().h_full().child(el().absolute(placed.rect[0], placed.rect[1]).size(placed.rect[2], placed.rect[3]).pixels(&p.pixels)) })

@@ -177,3 +177,18 @@ fn pane_tint_follows_strength_dim_and_the_readability_switch() {
     look.readable = false;
     assert_eq!(look.pane_tint(true, white, ground, ground, 1.0, 0.25), (0.25, ground));
 }
+
+#[test]
+fn sampling_keeps_the_brightest_and_darkest_pixel_of_each_area() {
+    let (w, h) = (1000u32, 500u32);
+    let mut rgba = vec![60u8; (w * h * 4) as usize];
+    let at = ((250 * w + 777) * 4) as usize;
+    rgba[at..at + 4].copy_from_slice(&[255, 255, 255, 255]);
+    let at = ((10 * w + 3) * 4) as usize;
+    rgba[at..at + 4].copy_from_slice(&[0, 0, 0, 255]);
+    let (sw, sh, bright) = extreme(&rgba, w, h, 100, true);
+    assert_eq!((sw, sh), (100, 50));
+    assert_eq!(worst(&bright, sw, true, 1), [1.0; 3]);
+    let (_, _, dark) = extreme(&rgba, w, h, 100, false);
+    assert_eq!(worst(&dark, sw, false, 1), [0.0; 3]);
+}

@@ -127,9 +127,53 @@ pub fn mesh(columns: usize, rows: usize, colors: &[Rgb], aspect: f32) -> (u32, u
     (mw as u32, mh as u32, out)
 }
 
-pub fn decode(data: &[u8], max_side: u32) -> Result<(u32, u32, Vec<u8>), String> {
+pub struct Decoded {
+    pub original: (u32, u32),
+    pub shown: (u32, u32, Vec<u8>),
+    pub brightest: (u32, u32, Vec<u8>),
+    pub darkest: (u32, u32, Vec<u8>),
+}
+
+pub fn decode(data: &[u8], max_side: u32, sample_side: u32) -> Result<Decoded, String> {
     let picture = image::load_from_memory(data).map_err(|e| e.to_string())?;
-    let picture = if picture.width().max(picture.height()) > max_side { picture.resize(max_side, max_side, image::imageops::FilterType::Triangle) } else { picture };
-    let rgba = picture.to_rgba8();
-    Ok((rgba.width(), rgba.height(), rgba.into_raw()))
+    let original = (picture.width(), picture.height());
+    let full = picture.to_rgba8();
+    let (fw, fh) = (full.width(), full.height());
+    let full = full.into_raw();
+    let brightest = extreme(&full, fw, fh, sample_side, true);
+    let darkest = extreme(&full, fw, fh, sample_side, false);
+    let shown = if fw.max(fh) > max_side {
+        let small = picture.resize(max_side, max_side, image::imageops::FilterType::Triangle).to_rgba8();
+        (small.width(), small.height(), small.into_raw())
+    } else {
+        (fw, fh, full)
+    };
+    Ok(Decoded { original, shown, brightest, darkest })
+}
+
+pub fn extreme(rgba: &[u8], w: u32, h: u32, side: u32, bright: bool) -> (u32, u32, Vec<u8>) {
+    let cell = w.max(h).div_ceil(side.max(1)).max(1) as usize;
+    let (w, h) = (w as usize, h as usize);
+    let (cw, ch) = (w.div_ceil(cell), h.div_ceil(cell));
+    let mut best: Vec<Option<(f32, [u8; 3])>> = vec![None; cw * ch];
+    for y in 0..h {
+        for x in 0..w {
+            let i = (y * w + x) * 4;
+            let c = [rgba[i], rgba[i + 1], rgba[i + 2]];
+            let l = luminance(c.map(|v| v as f32 / 255.0));
+            let slot = &mut best[(y / cell) * cw + x / cell];
+            let better = match slot {
+                None => true,
+                Some((b, _)) => if bright { l > *b } else { l < *b },
+            };
+            if better {
+                *slot = Some((l, c));
+            }
+        }
+    }
+    let out = best.into_iter().flat_map(|b| {
+        let [r, g, bl] = b.map(|(_, c)| c).unwrap_or([0; 3]);
+        [r, g, bl, 255]
+    });
+    (cw as u32, ch as u32, out.collect())
 }

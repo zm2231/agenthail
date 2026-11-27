@@ -190,3 +190,11 @@ pub fn hue_for(name: &str) -> f32 {
 pub fn ink(alpha: f32) -> Color {
     if paint().dark { Color::WHITE.alpha(alpha) } else { Color::BLACK.alpha(alpha * 0.9) }
 }
+
+pub fn paint_key() -> u64 {
+    use std::hash::{Hash, Hasher};
+    let p = paint();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (p.dark, p.text, p.muted, p.faint, p.line, p.wash, p.accent, p.done, p.failed, p.attention).hash(&mut h);
+    h.finish()
+}
