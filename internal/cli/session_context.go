@@ -97,7 +97,11 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 		switch {
 		case err != nil:
 		case change == registry.ContextNew:
+			// No start hook has run for this session: Claude's settings may lack
+			// Agenthail's, and an SDK host's start callbacks run only after a
+			// compaction.
 			text = agentcard.Render(card)
+			ledgerContext = a.ledgerStartContext(ctx, session.ID, card.MCP)
 		case change == registry.ContextChanged:
 			text = agentcard.RenderChange(card)
 		}
@@ -105,8 +109,9 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 	if hook.PromptID == "" {
 		hook.PromptID = hook.TurnID
 	}
+	captured := ""
 	if hook.Event == claudehooks.PromptSubmit.Event && hook.Prompt != "" && hook.PromptID != "" && session.Cwd != "" {
-		ledgerContext = a.captureTerminalUtterance(ctx, session, hook)
+		captured = a.captureTerminalUtterance(ctx, session, hook)
 	}
 	backlog := ""
 	if _, coordinates, err := store.CoordinatorOfSession(session.ID); hook.Event == claudehooks.PromptSubmit.Event && err == nil && coordinates {
@@ -114,7 +119,7 @@ func (a *App) sessionContext(input io.Reader, kind surface.SurfaceKind, parent i
 	}
 
 	combined := ""
-	for _, part := range []string{text, ledgerContext, backlog} {
+	for _, part := range []string{text, ledgerContext, captured, backlog} {
 		if part == "" {
 			continue
 		}
