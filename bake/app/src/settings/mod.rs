@@ -40,6 +40,8 @@ pub enum Read {
 pub use overview::sessions_changed;
 #[cfg(test)]
 pub use agents::show as show_agent_roles;
+#[cfg(test)]
+pub use keyboard::{PAGE as KEYBOARD_PAGE, opened as keyboard_opened, recorder as keyboard_recorder};
 
 const ALL: [Read; 6] = [Read::Base, Read::Settings, Read::Remote, Read::Compaction, Read::Preferences, Read::Devices];
 
@@ -630,7 +632,7 @@ pub(crate) fn poll(s: &mut Prefs, _: f64, tx: &mut Tx) -> bool {
         changed = true;
     }
     changed |= devices::poll(s, tx);
-    changed |= keyboard::poll(s);
+    changed |= keyboard::poll(s, tx.clock());
     if crate::look::poll(crate::look::Window::Settings, tx) {
         appearance::changed(s);
         changed = true;
