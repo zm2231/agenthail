@@ -49,7 +49,7 @@ func (d *Daemon) idempotentActionHandler(next http.HandlerFunc) http.HandlerFunc
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "The action request is invalid.")
 			return
 		}
-		d.idempotentReply(principalFromRequest(r).ID, key, raw, mcpRequestHash(r.Context()), func(_ time.Time, body []byte) actionReply {
+		d.idempotentReply(principalFromRequest(r).ID, key, raw, mcpRequestHash(r.Context()), func(_ *actionAttempt, body []byte) actionReply {
 			r.Body = io.NopCloser(bytes.NewReader(body))
 			recorder := newActionRecorder()
 			next(recorder, r)
@@ -58,10 +58,10 @@ func (d *Daemon) idempotentActionHandler(next http.HandlerFunc) http.HandlerFunc
 	}
 }
 
-func (d *Daemon) idempotentReply(principalID, rawKey string, body []byte, requestHash string, run func(firstSent time.Time, body []byte) actionReply) actionReply {
+func (d *Daemon) idempotentReply(principalID, rawKey string, body []byte, requestHash string, run func(attempt *actionAttempt, body []byte) actionReply) actionReply {
 	key := strings.TrimSpace(rawKey)
 	if key == "" {
-		return run(time.Now().UTC(), body)
+		return run(&actionAttempt{}, body)
 	}
 	if len(key) > registry.ActionReceiptKeyLimit {
 		return replyWith(func(w http.ResponseWriter) {
@@ -99,14 +99,21 @@ func (d *Daemon) idempotentReply(principalID, rawKey string, body []byte, reques
 		})
 	}
 	defer d.actionRuns.done(principalID, key)
-	firstSent, err := time.Parse(time.RFC3339Nano, claim.Receipt.CreatedAt)
-	if err != nil {
-		firstSent = time.Now().UTC()
+	attempt := &actionAttempt{}
+	if len(claim.Receipt.Receipt) > 0 {
+		var prior actionForward
+		if json.Unmarshal(claim.Receipt.Receipt, &prior) == nil && prior.Host != "" {
+			attempt.prior = &prior
+		}
 	}
-	reply := run(firstSent, body)
+	reply := run(attempt, body)
 	now := time.Now().UTC()
 	if provisionalActionReply(reply) {
-		if err := d.Registry.RetryActionReceipt(principalID, key, requestHash, now); err != nil {
+		var memo []byte
+		if attempt.forwarded != nil {
+			memo, _ = json.Marshal(attempt.forwarded)
+		}
+		if err := d.Registry.RetryActionReceipt(principalID, key, requestHash, memo, now); err != nil {
 			d.logRuntimeError("action receipt "+key, err)
 		}
 		return reply
@@ -141,10 +148,10 @@ func encodeActionReplay(reply actionReply) ([]byte, error) {
 	}))
 }
 
-// A paired host that was not reached, did not answer, or is still running the
-// request has not given this action's outcome. A resend under the same key
-// forwards again, and the host's own receipt for that key keeps it from
-// running twice.
+// A 503 says the request was not served; a paired host that did not answer or
+// is still running the request has not given this action's outcome either. A
+// resend under the same key runs again, and a forward goes to the host's own
+// receipt for that key, which keeps it from running twice.
 func provisionalActionReply(reply actionReply) bool {
 	var body map[string]json.RawMessage
 	if json.Unmarshal(reply.Body, &body) != nil {
@@ -156,7 +163,7 @@ func provisionalActionReply(reply actionReply) bool {
 	case http.StatusAccepted:
 		return len(body) == 2 && string(body["ok"]) == "true" && string(body["status"]) == `"submitted"`
 	case http.StatusServiceUnavailable:
-		return failure.Code == "host_unreachable"
+		return true
 	case http.StatusGatewayTimeout:
 		return failure.Code == "host_outcome_unknown"
 	}

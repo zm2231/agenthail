@@ -89,7 +89,7 @@ func TestActionReceiptRetryReopensOnlyForTheSameRequestAndKeepsFirstTime(t *test
 	if _, err := r.ReserveActionReceipt("device-a", "unanswered", hash, first); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RetryActionReceipt("device-a", "unanswered", hash, first.Add(time.Second)); err != nil {
+	if err := r.RetryActionReceipt("device-a", "unanswered", hash, []byte("first attempt"), first.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	mismatch, err := r.ReserveActionReceipt("device-a", "unanswered", other, first.Add(time.Minute))
@@ -97,7 +97,7 @@ func TestActionReceiptRetryReopensOnlyForTheSameRequestAndKeepsFirstTime(t *test
 		t.Fatalf("different request=%+v err=%v", mismatch, err)
 	}
 	again, err := r.ReserveActionReceipt("device-a", "unanswered", hash, first.Add(time.Hour))
-	if err != nil || !again.Acquired || again.Receipt.Status != ActionReceiptPending || again.Receipt.CreatedAt != formatTimestamp(first) {
+	if err != nil || !again.Acquired || again.Receipt.Status != ActionReceiptPending || again.Receipt.CreatedAt != formatTimestamp(first) || string(again.Receipt.Receipt) != "first attempt" {
 		t.Fatalf("resend=%+v err=%v", again, err)
 	}
 	concurrent, err := r.ReserveActionReceipt("device-a", "unanswered", hash, first.Add(time.Hour))
@@ -120,7 +120,7 @@ func TestActionReceiptPruneDeletesSettledBeforeCutoffInBatches(t *testing.T) {
 		}
 		var err error
 		if retry {
-			err = r.RetryActionReceipt("device-a", key, hash, at)
+			err = r.RetryActionReceipt("device-a", key, hash, nil, at)
 		} else {
 			err = r.CompleteActionReceipt("device-a", key, hash, []byte("done"), at)
 		}

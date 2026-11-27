@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
 )
@@ -98,7 +97,7 @@ func (d *Daemon) mcpOnce(ctx context.Context, caller *mcpCaller, key string, inp
 	}
 	var value any
 	ran := false
-	reply := d.idempotentReply(sessionPrincipal(caller.session.ID).ID, key, body, mcpRequestHash(ctx), func(time.Time, []byte) actionReply {
+	reply := d.idempotentReply(sessionPrincipal(caller.session.ID).ID, key, body, mcpRequestHash(ctx), func(*actionAttempt, []byte) actionReply {
 		ran = true
 		value, err = run()
 		return mcpOutcomeReply(value, err)

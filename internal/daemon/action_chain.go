@@ -65,7 +65,7 @@ func (d *Daemon) routeHostAction(ctx context.Context, p principal, raw []byte, k
 	}
 	if action, _ := request["action"].(string); action == "send" || action == "channel-send" {
 		if _, fromHost := requestingHost(ctx); !fromHost || request["sentAt"] == nil {
-			request["sentAt"] = actionFirstSent(ctx).UTC().Format(time.RFC3339Nano)
+			request["sentAt"] = time.Now().UTC().Format(time.RFC3339Nano)
 		}
 	}
 	hostTask := false
@@ -76,6 +76,9 @@ func (d *Daemon) routeHostAction(ctx context.Context, p principal, raw []byte, k
 		hostTask = true
 	}
 	body, _ := json.Marshal(request)
+	if attempt := attemptFrom(ctx); attempt != nil && attempt.prior != nil && attempt.prior.Host == host.record.ID {
+		body = attempt.prior.Body
+	}
 	reply := d.forwardHostAction(ctx, p, key, host, request, body)
 	if hostTask {
 		reply = d.recordHostTask(host, request, reply)

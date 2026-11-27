@@ -18,6 +18,9 @@ func (d *Daemon) forwardHostAction(ctx context.Context, p principal, key string,
 	if key == "" {
 		key = "fwd-" + uuid.NewString()
 	}
+	if attempt := attemptFrom(ctx); attempt != nil {
+		attempt.forwarded = &actionForward{Host: host.record.ID, Body: body}
+	}
 	header := http.Header{actionIdempotencyHeader: []string{key}, daemonapi.ActionActorHeader: []string{p.actor()}}
 	response, err := host.client.Do(ctx, http.MethodPost, "/api/v1/actions", nil, body, header)
 	if err == nil {

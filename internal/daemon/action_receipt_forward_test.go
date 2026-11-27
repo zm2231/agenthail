@@ -80,16 +80,23 @@ func TestConcurrentResendsAfterAnUnansweredForwardRunOnceAndAgree(t *testing.T) 
 	}
 }
 
-// A forwarded channel message carries the time it was sent; a resend has to
-// forward the same body, or the host refuses the key as a different request.
+// A forwarded channel message carries the time it was sent and the person's
+// name; a resend has to forward the same body, or the host refuses the key as
+// a different request.
 func TestAResendForwardsTheSameBodyItFirstSent(t *testing.T) {
 	local, remote, _ := pairedFederation(t)
+	if err := local.reg.SetPersonName("Ada"); err != nil {
+		t.Fatal(err)
+	}
 	action := map[string]string{"action": "channel-send", "host": "vps", "channel": "release", "message": "ship it"}
 	remote.gate.drops.Store(2)
 	if lost := local.keyedAction(t, "channel-once", action); lost.Code != http.StatusGatewayTimeout {
 		t.Fatalf("lost answer status=%d body=%s", lost.Code, lost.Body.String())
 	}
 	remote.gate.drops.Store(0)
+	if err := local.reg.SetPersonName("Ada Lovelace"); err != nil {
+		t.Fatal(err)
+	}
 	resend := local.keyedAction(t, "channel-once", action)
 	if resend.Code == http.StatusGatewayTimeout || apiErrorCode(t, resend) == "action_idempotency_mismatch" {
 		t.Fatalf("resend status=%d body=%s, want the host's stored outcome", resend.Code, resend.Body.String())

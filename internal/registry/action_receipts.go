@@ -70,10 +70,10 @@ func (r *Registry) ReserveActionReceipt(principal, key, requestHash string, now 
 	}
 	acquired := receipt.Status == ActionReceiptRetry && receipt.RequestHash == requestHash
 	if acquired {
-		if _, err := tx.Exec(`UPDATE action_receipts SET status=?,receipt=?,updated_at=? WHERE idempotency_key=?`, ActionReceiptPending, []byte{}, stamp, storageKey); err != nil {
+		if _, err := tx.Exec(`UPDATE action_receipts SET status=?,updated_at=? WHERE idempotency_key=?`, ActionReceiptPending, stamp, storageKey); err != nil {
 			return ActionReceiptReservation{}, err
 		}
-		receipt.Status, receipt.Receipt, receipt.UpdatedAt = ActionReceiptPending, []byte{}, stamp
+		receipt.Status, receipt.UpdatedAt = ActionReceiptPending, stamp
 	}
 	if err := tx.Commit(); err != nil {
 		return ActionReceiptReservation{}, err
@@ -99,8 +99,10 @@ func (r *Registry) CompleteActionReceipt(principal, key, requestHash string, rec
 	return r.settleActionReceipt(principal, key, requestHash, ActionReceiptCompleted, receipt, now)
 }
 
-func (r *Registry) RetryActionReceipt(principal, key, requestHash string, now time.Time) error {
-	return r.settleActionReceipt(principal, key, requestHash, ActionReceiptRetry, []byte{}, now)
+// The retry receipt keeps what the caller needs to repeat the attempt
+// exactly; the next reservation of the key returns it.
+func (r *Registry) RetryActionReceipt(principal, key, requestHash string, attempt []byte, now time.Time) error {
+	return r.settleActionReceipt(principal, key, requestHash, ActionReceiptRetry, attempt, now)
 }
 
 func (r *Registry) settleActionReceipt(principal, key, requestHash, status string, receipt []byte, now time.Time) error {
