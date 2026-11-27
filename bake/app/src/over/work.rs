@@ -355,12 +355,17 @@ fn send(s: &mut App, id: &str, m: Move, words: &str) {
 }
 
 fn post(s: &mut App, id: &str, m: Move, words: &str) {
-    let Some(w) = s.ov.d.work.get(id).cloned() else { return };
-    let Some(client) = s.client.clone() else {
+    let Some(w) = s.ov.d.work.get(id) else { return };
+    if s.client.is_none() {
         s.ov.work.notes.insert(id.into(), (true, "Fixture mode: not sent".into()));
         return;
-    };
-    let (key, body) = s.ov.work.sends.sending(&w, m, words);
+    }
+    let (key, body) = s.ov.work.sends.sending(w, m, words);
+    fly(s, id, m, key, body);
+}
+
+fn fly(s: &mut App, id: &str, m: Move, key: String, body: Value) {
+    let Some(client) = s.client.clone() else { return };
     s.ov.work.acting.insert(id.into());
     s.ov.work.notes.remove(id);
     let (tx, id) = (s.ov.work.tx.clone(), id.to_string());
@@ -371,11 +376,11 @@ fn post(s: &mut App, id: &str, m: Move, words: &str) {
 }
 
 fn send_new(s: &mut App, id: &str, m: Move) {
-    if s.ov.work.acting.contains(id) || !s.ov.d.work.get(id).is_some_and(|w| ledger::offered(w).contains(&m)) {
+    if s.ov.work.acting.contains(id) || !s.ov.d.work.contains_key(id) {
         return;
     }
     let Some(p) = s.ov.work.sends.forget(id, m) else { return };
-    send(s, id, m, &p.words);
+    post(s, id, m, &p.words);
 }
 
 pub fn reopened(s: &mut App) {
@@ -395,9 +400,11 @@ pub fn drain(s: &mut App) -> bool {
             crate::ask_overview(s, crate::Ask::Refresh);
         }
     }
-    for (id, m, words) in s.ov.work.sends.due(clock) {
-        if !s.ov.work.acting.contains(&id) {
-            post(s, &id, m, &words);
+    for (id, m, _) in s.ov.work.sends.due(clock) {
+        if !s.ov.work.acting.contains(&id)
+            && let Some((key, body)) = s.ov.work.sends.resending(&id, m)
+        {
+            fly(s, &id, m, key, body);
             changed = true;
         }
     }
@@ -423,7 +430,7 @@ fn moves(s: &App, w: &crate::over::Work) -> Option<El> {
         let (id, words) = (w.id.clone(), s.ov.work.sends.held_words(&w.id, m).unwrap_or_default().to_string());
         r = r.child(Button::new("Ask again").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).help("Asks Agenthail about the same send").on_press(move |s: &mut App| send(s, &id, m, &words)).build(k).key("work-ask-again"));
     }
-    if let Some(m) = held.filter(|m| !busy && ledger::offered(w).contains(m)) {
+    if let Some(m) = held.filter(|_| !busy) {
         let id = w.id.clone();
         r = r.child(Button::new("Send as new").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).help("Sends it again as a fresh request, so it can show up twice if the first one landed").on_press(move |s: &mut App| send_new(s, &id, m)).build(k).key("work-send-new"));
     }
