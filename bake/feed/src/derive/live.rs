@@ -145,6 +145,7 @@ impl Known {
         match self.ledgers.get(&id) {
             None if !self.wanted.contains(&id) => Change::Read(id),
             None => Change::Overview,
+            Some(h) if h.retry.is_some_and(|until| Instant::now() < until) => Change::Nothing,
             Some(h) if h.retry.is_some() || h.read_at < at => Change::Read(id),
             Some(_) => Change::Nothing,
         }

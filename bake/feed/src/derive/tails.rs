@@ -85,7 +85,7 @@ impl Tails {
         let keep: HashSet<&str> = recent.iter().map(|s| s.id.as_str()).collect();
         self.held.retain(|id, _| keep.contains(id.as_str()));
         let now_i = Instant::now();
-        self.failed.retain(|id, until| keep.contains(id.as_str()) && now_i < *until);
+        self.failed.retain(|_, until| now_i < *until);
         let waiting = |s: &Session| self.failed.contains_key(&s.id);
         let due: Vec<(String, String)> = recent
             .into_iter()

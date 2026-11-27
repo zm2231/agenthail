@@ -407,7 +407,7 @@ fn a_failed_read_of_an_opened_project_is_tried_again_on_its_own_timer() {
     assert!(due > at);
     assert!(known.retries_due(at).is_empty());
     assert_eq!(known.retries_due(due), ["old".to_string()]);
-    assert_eq!(known.changed("old", Instant::now()), Change::Read("old".into()), "a change to a failed one tries at once");
+    assert_eq!(known.changed("old", Instant::now()), Change::Nothing, "a change to a failed one waits for its retry");
     known.read("old", Instant::now(), &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: Vec::new() }));
     assert_eq!(known.next_retry(), None);
 }
@@ -570,4 +570,13 @@ fn a_reconnect_keeps_the_usage_wait() {
     known.learn(&Fetched { started: t0, usage: Some((t0, Some(meters.clone()))), ..fetched("2026-11-24T12:00:00Z", Vec::new(), Vec::new()) });
     let fresh = known.carry();
     assert_eq!(fresh.usage_kept(t0 + std::time::Duration::from_secs(30)), Some(meters));
+}
+
+#[test]
+fn a_ledger_change_waits_out_a_failed_reads_retry() {
+    let mut known = super::live::Known::default();
+    let t0 = Instant::now();
+    assert!(known.open("p"));
+    known.read("p", t0, &Err("status code 503".into()));
+    assert!(matches!(known.changed("p", t0 + std::time::Duration::from_secs(1)), Change::Nothing), "a change inside the wait leaves it to the retry");
 }

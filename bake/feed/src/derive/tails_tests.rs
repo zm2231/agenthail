@@ -90,6 +90,8 @@ fn a_replay_cut_off_before_the_live_point_is_not_kept_and_is_read_again_later() 
     assert!(tails.due(&sessions, now, &HashSet::new()).is_empty(), "a failed read waits before trying again");
     let moved = vec![session("a", "2026-11-24T11:55:00Z")];
     assert!(tails.due(&moved, now, &HashSet::new()).is_empty(), "new activity doesn't cut the wait after a failure short");
+    assert!(tails.due(&[], now, &HashSet::new()).is_empty());
+    assert!(tails.due(&moved, now, &HashSet::new()).is_empty(), "dropping out of the recent sessions and back doesn't cut it short either");
     tails.failed_until_now("a");
     assert_eq!(tails.due(&moved, now, &HashSet::new()).len(), 1, "once the wait is over the session is read again");
     tails.take("a", "2026-11-24T11:55:00Z".into(), tails::read(lines(vec![": live".into()])));
