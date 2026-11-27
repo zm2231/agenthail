@@ -10,6 +10,8 @@ func (d *Daemon) doRelayAdd(ctx context.Context, _ principal, request dashboardA
 	if request.FromID == "" || request.ToID == "" {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", "fromId and toId are required")
 	}
+	ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+	defer cancel()
 	fromID, fromErr := d.Registry.ResolveTarget(request.FromID)
 	if fromErr != nil {
 		return actionResult{}, actionFailed(http.StatusBadRequest, "invalid_request", fmt.Sprintf("resolve source agent: %s", fromErr))

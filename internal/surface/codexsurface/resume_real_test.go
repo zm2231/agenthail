@@ -144,7 +144,7 @@ func TestATurnAnotherClientStartsSurvivesAgenthailFollowingItWithItsOverrides(t 
 	if _, err := store.SetCodexConfigOverride(threadID, codexCompactLimit, 100000); err != nil {
 		t.Fatal(err)
 	}
-	turn, err := owner.Request(ctx, "turn/start", map[string]any{"threadId": threadID, "input": []any{map[string]any{"type": "text", "text": "second"}}}, 30*time.Second)
+	turn, err := owner.Request(ctx, "turn/start", map[string]any{"threadId": threadID, "input": []any{map[string]any{"type": "text", "text": "second"}}}, codexAppServerWait)
 	if err != nil {
 		t.Fatal(err)
 	}

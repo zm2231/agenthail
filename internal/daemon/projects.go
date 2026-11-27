@@ -821,7 +821,9 @@ func (d *Daemon) doSessionArchive(ctx context.Context, action string, session *s
 	if err != nil {
 		return actionResult{}, actionFailed(http.StatusInternalServerError, "internal_error", err.Error())
 	}
-	if err := d.presentUnlisted(ctx, session); err != nil {
+	presentCtx, cancelPresent := context.WithTimeout(ctx, surfaceOperationTimeout)
+	defer cancelPresent()
+	if err := d.presentUnlisted(presentCtx, session); err != nil {
 		d.log.Printf("present %s in the catalog: %s", d.resolveDisplay(sessionID), err)
 	}
 	d.publishCatalogPresence()

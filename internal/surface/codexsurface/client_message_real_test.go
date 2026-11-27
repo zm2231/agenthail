@@ -3,7 +3,6 @@ package codexsurface
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/tidwall/gjson"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -31,7 +30,7 @@ func TestEachMessageAgenthailGivesCodexCarriesItsDeliveryIDOnItsTurn(t *testing.
 	if end := rolloutTurnEnd(t, session.ID, sent.UUID); end != "task_complete" {
 		t.Fatalf("the sent turn ended with %s", end)
 	}
-	response, err := follower.Request(ctx, "thread/turns/list", map[string]any{"threadId": session.ID, "limit": 5, "sortDirection": "desc", "itemsView": "full"}, 10*time.Second)
+	response, err := follower.Request(ctx, "thread/turns/list", map[string]any{"threadId": session.ID, "limit": 5, "sortDirection": "desc", "itemsView": "full"}, codexAppServerWait)
 	if err != nil {
 		t.Fatal(err)
 	}

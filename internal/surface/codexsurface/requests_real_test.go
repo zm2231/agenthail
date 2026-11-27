@@ -61,11 +61,11 @@ func TestACodexApprovalAnotherClientLeftOpenIsAnsweredThroughAgenthail(t *testin
 		t.Fatal(err)
 	}
 	threadID := gjson.Get(codexJSON(started), "result.thread.id").String()
-	if _, err := owner.Request(ctx, "turn/start", map[string]any{"threadId": threadID, "input": []any{map[string]any{"type": "text", "text": "write the marker"}}}, 10*time.Second); err != nil {
+	if _, err := owner.Request(ctx, "turn/start", map[string]any{"threadId": threadID, "input": []any{map[string]any{"type": "text", "text": "write the marker"}}}, codexAppServerWait); err != nil {
 		t.Fatal(err)
 	}
 	status := func() string {
-		response, err := owner.Request(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": false}, 5*time.Second)
+		response, err := owner.Request(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": false}, codexAppServerWait)
 		if err != nil {
 			return ""
 		}

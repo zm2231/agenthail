@@ -189,7 +189,7 @@ func TestAThreadAgenthailStartsHasOnlyItsOwnServerWhileThePersonsThreadsGetTheRe
 	}
 	t.Cleanup(func() { client.Close() })
 	servers := func(threadID string) map[string]string {
-		response, err := client.Request(ctx, "mcpServerStatus/list", map[string]any{"threadId": threadID, "detail": "toolsAndAuthOnly"}, 10*time.Second)
+		response, err := client.Request(ctx, "mcpServerStatus/list", map[string]any{"threadId": threadID, "detail": "toolsAndAuthOnly"}, codexAppServerWait)
 		if err != nil {
 			t.Fatal(err)
 		}
