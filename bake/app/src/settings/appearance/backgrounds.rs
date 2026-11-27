@@ -67,6 +67,14 @@ pub(super) fn grid(s: &Prefs, view: &View) -> El {
             set(s, "background", "none", "no background");
         }
     }));
+    let preset = presets.iter().any(|p| p.value == current);
+    let custom = current.starts_with("mesh:") || current.starts_with("gradient:") && !preset;
+    let custom_fill = if custom { swatch_fill(s, &current) } else { el().fill(theme::wash()).center().child(text("Make…").font(META).color(muted())) };
+    tiles.push(tile("Custom…", "appearance-bg-custom".into(), custom_fill, custom, |s: &mut Prefs, _| {
+        if !writing(s) {
+            super::custom::open_mesh(s);
+        }
+    }));
     let image_fill = if current.starts_with("image:") { swatch_fill(s, &current) } else { el().fill(theme::wash()).center().child(text("Choose…").font(META).color(muted())) };
     tiles.push(tile("Image…", "appearance-bg-image".into(), image_fill, current.starts_with("image:"), super::choose_image));
     let mut grid = col().w_full().gap(12.0).px(14.0).py(12.0).key("appearance-backgrounds");

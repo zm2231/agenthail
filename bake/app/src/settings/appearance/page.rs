@@ -5,6 +5,7 @@ use rune_kit::SegmentedControl;
 use super::Prefs;
 use super::backgrounds::grid;
 use super::controls::{accents, chosen, segmented, slider, switch};
+use super::custom::{accent_editor, mesh_editor};
 use super::history::history;
 use crate::settings::parts;
 use crate::theme::{self, META};
@@ -36,18 +37,17 @@ pub fn page(s: &Prefs) -> El {
         .build(theme::kit())
         .key("appearance-scope");
     let scope_detail = (!device.is_empty()).then(|| format!("This computer is {device}."));
-    out = out.child(parts::section(
-        "",
-        vec![
-            parts::line("Apply changes to", scope_detail, scope_control),
-            segmented(s, &view, "theme", "Appearance", &[("System", "system"), ("Light", "light"), ("Dark", "dark")], "system", false),
-            accents(s, &view),
-            slider(s, &view, "text.scale", "Text size", (0.8, 1.6), 1.0, "×", false),
-        ],
-        None,
-    ));
+    let mut general = vec![
+        parts::line("Apply changes to", scope_detail, scope_control),
+        segmented(s, &view, "theme", "Appearance", &[("System", "system"), ("Light", "light"), ("Dark", "dark")], "system", false),
+        accents(s, &view),
+    ];
+    general.extend(accent_editor(s));
+    general.push(slider(s, &view, "text.scale", "Text size", (0.8, 1.6), 1.0, "×", false));
+    out = out.child(parts::section("", general, None));
     let is_image = chosen(&view, "background", "").starts_with("image:");
     let mut background = vec![grid(s, &view)];
+    background.extend(mesh_editor(s));
     background.push(slider(s, &view, "background.dim", "Dim", (0.0, 0.8), 0.0, "", false));
     background.push(slider(s, &view, "background.opacity", "Strength on empty views", (0.0, 1.0), 1.0, "", false));
     background.push(slider(s, &view, "background.session-opacity", "Strength in a session", (0.0, 1.0), 1.0, "", false));

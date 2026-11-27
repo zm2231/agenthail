@@ -90,7 +90,7 @@ pub(super) fn switch(s: &Prefs, view: &View, key: &'static str, label: &'static 
 
 pub(super) fn swatch(fill: El, selected: bool, help: &str, press: impl Fn(&mut Prefs) + 'static) -> El {
     let ring = if selected { theme::text() } else { Color::TRANSPARENT };
-    el().size(24.0, 24.0).radius(12.0).border(1.5, ring).center().child(fill.size(18.0, 18.0).radius(9.0)).label(help.to_string()).help(help.to_string()).on_press(press)
+    el().size(24.0, 24.0).radius(12.0).border(1.5, ring).center().child(fill.size(18.0, 18.0).radius(9.0)).key(format!("appearance-swatch-{help}")).role("button").label(help.to_string()).help(help.to_string()).on_press(press)
 }
 
 pub(super) fn accents(s: &Prefs, view: &View) -> El {
@@ -111,8 +111,17 @@ pub(super) fn accents(s: &Prefs, view: &View) -> El {
             }
         }));
     }
-    if current != "system" && !ACCENTS.contains(&current.as_str()) {
-        r = r.child(text(current).font(META).color(muted()));
-    }
+    let custom = current != "system" && !ACCENTS.contains(&current.as_str());
+    let any = if custom {
+        let c = fl::hex(&current).unwrap_or([0.5; 3]);
+        el().fill(Color { r: fl::linear(c[0]), g: fl::linear(c[1]), b: fl::linear(c[2]), a: 1.0 })
+    } else {
+        el().fill(theme::wash()).border(1.0, theme::faint()).center().child(text("+").font(META).color(theme::text()))
+    };
+    r = r.child(swatch(any, custom, "Any colour", |s: &mut Prefs| {
+        if !writing(s) {
+            super::custom::open_accent(s);
+        }
+    }));
     row_for(s, view, "theme.accent", "Accent", r)
 }

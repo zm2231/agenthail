@@ -51,7 +51,7 @@ pub(super) fn history(s: &Prefs) -> El {
                 .key("appearance-history-toggle")
                 .role("button")
                 .on_press(|s: &mut Prefs| s.appearance.history_open = !s.appearance.history_open)
-                .child(text(if open { "▾ History" } else { "▸ History" }).font(BODY).color(theme::text())),
+                .child(text(if open { "Hide History" } else { "Show History" }).font(BODY).color(theme::text())),
         );
         if open {
             for (i, e) in entries.iter().enumerate().skip(1) {

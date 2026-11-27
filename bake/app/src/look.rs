@@ -205,9 +205,9 @@ impl Picture {
         (self.original.0 as f32 / scale.max(1.0), self.original.1 as f32 / scale.max(1.0))
     }
 
-    fn worst(&mut self, dark: bool, blur: f32, area: (f32, f32)) -> Rgb {
+    fn worst(&mut self, dark: bool, blur: f32, shown: (f32, f32)) -> Rgb {
         let sample = if dark { &self.brightest } else { &self.darkest };
-        let per_point = sample.0.max(sample.1) as f32 / area.0.max(area.1).max(1.0);
+        let per_point = (sample.0 as f32 / shown.0.max(1.0)).min(sample.1 as f32 / shown.1.max(1.0));
         let cell = (blur * per_point).round().max(1.0) as usize;
         *self.worst.entry((dark, cell)).or_insert_with(|| fl::worst(&sample.2, sample.0, dark, cell))
     }
@@ -300,9 +300,12 @@ fn wallpaper_key(w: &Wallpaper) -> String {
 fn worst_of(s: &mut State, dark: bool) -> Option<Rgb> {
     let w = s.look.wallpaper(dark).clone();
     let blur = if s.look.translucent(dark) { s.look.blur / 3.0 } else { 0.0 };
-    let area = s.area;
+    let (area, scale, fit, position) = (s.area, s.scale, s.look.fit, s.look.position);
     match &w {
-        Wallpaper::Image(path) => s.pictures.get_mut(path).and_then(|p| p.as_mut().ok()).map(|p| p.worst(dark, blur, area)),
+        Wallpaper::Image(path) => s.pictures.get_mut(path).and_then(|p| p.as_mut().ok()).map(|p| {
+            let placed = fl::place(fit, position, p.size(scale), area);
+            p.worst(dark, blur, (placed.rect[2], placed.rect[3]))
+        }),
         Wallpaper::Mesh { .. } => mesh_picture(s, &w).map(|p| p.worst(dark, blur, area)),
         Wallpaper::Linear { stops, .. } => {
             let key = |c: &Rgb| fl::luminance(*c);

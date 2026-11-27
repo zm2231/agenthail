@@ -1,5 +1,6 @@
 mod backgrounds;
 mod controls;
+mod custom;
 mod history;
 mod page;
 
@@ -30,6 +31,8 @@ pub struct Form {
     pub history_open: bool,
     pub confirm_reset: bool,
     seen_rev: String,
+    pub accent_edit: Option<custom::Pick>,
+    pub mesh_edit: Option<custom::Mesh>,
     history_asked: u64,
     history_shown: u64,
 }
@@ -150,9 +153,10 @@ fn thumbs(s: &mut Prefs) {
 }
 
 fn want_thumb(s: &mut Prefs, path: &str) {
-    if s.appearance.thumbs.contains_key(path) || !s.appearance.asked.insert(path.to_string()) {
+    if s.appearance.thumbs.contains_key(path) || s.appearance.asked.contains(path) || s.client.is_none() {
         return;
     }
+    s.appearance.asked.insert(path.to_string());
     let path = path.to_string();
     spawn(s, move |c| {
         let got = c.ui_background(&path).and_then(|data| fl::thumbnail(&data, THUMB_SIDE));
