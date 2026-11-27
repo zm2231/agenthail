@@ -90,15 +90,15 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
             .padding(20.0)
             .child(row().gap(8.0).items_center().child(ui::pill(&icons::CHECKLIST, &heading, if held.is_some() { k.c.text_accent } else { k.c.warning.icon })).child(text(format!("submitted {} ago", s.ov.d.ago(&w.submitted_at()))).font(META).color(weak())))
             .child(text("Does this revision do what was agreed?".to_string()).font(HEAD.lh(22.0)).color(strong()))
-            .child(
+            .children((!w.acceptance.trim().is_empty()).then(|| {
                 col()
                     .w_full()
                     .gap(4.0)
                     .pl(12.0)
                     .border_sides([0.0, 0.0, 0.0, 2.0], k.c.border_strong)
                     .child(text("What was asked".to_string()).font(META_MED).color(weak()))
-                    .child(text(plain(&w.acceptance)).font(BODY).color(base()).wrap()),
-            )
+                    .child(text(plain(&w.acceptance)).font(BODY).color(base()).wrap())
+            }))
             .child(verdict_row(s, w, listed.as_ref(), &revision))
             .child(links)
             .child(row().gap(6.0).items_center().child(icon(&icons::INFO, 13.0).color(weak())).child(text(format!("Approval covers {revision} only. A new commit asks again. Merging is a separate step.").to_string()).font(META).color(weak())));
@@ -108,11 +108,15 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
     };
 
     let first_result = w.timeline.iter().rev().find(|t| t.kind == "log" && t.log_type.as_deref() == Some("result")).and_then(|t| t.text.clone()).unwrap_or_default();
-    let brief_rows = [
-        ("What was asked", plain(w.acceptance.split(": ").next().unwrap_or(&w.acceptance))),
+    let asked = plain(w.acceptance.split(": ").next().unwrap_or(&w.acceptance));
+    let brief_rows: Vec<(&str, String)> = [
+        ("What was asked", asked),
         ("What was built", crate::over::clip_words(&plain(&first_result), 150)),
         ("Before you approve", format!("{passed} of {} checks have a recorded pass. {} raised after it was submitted.", steps.len(), if unchecked.is_empty() { "Nothing was".to_string() } else { format!("{} thing{} {}", unchecked.len(), if unchecked.len() == 1 { "" } else { "s" }, if unchecked.len() == 1 { "was" } else { "were" }) })),
-    ];
+    ]
+    .into_iter()
+    .filter(|(t, b)| *t != "What was asked" || !b.trim().is_empty())
+    .collect();
     let mut brief = col().w_full().gap(2.0).padding(8.0);
     for (i, (t, b)) in brief_rows.iter().enumerate() {
         brief = brief.child(
