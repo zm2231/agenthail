@@ -70,6 +70,7 @@ pub fn show(s: &mut Prefs, roles: Roles, selected: &str) {
     s.agents.page = 1;
     s.agents.selected = Some(selected.to_string());
     s.agents.read = Some(Ok(Loaded { roles, read_only: None }));
+    settle(s);
 }
 
 pub fn opened(s: &mut Prefs) {

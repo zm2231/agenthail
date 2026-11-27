@@ -153,22 +153,43 @@ fn shot() {
         let mut rt = settings_on(tab, page);
         render(&mut rt, SETTINGS, &out.join(format!("{name}-{scale}.png")));
     }
-    let mut rt = settings_on(agents, 0);
-    rt.update(|s, _| {
-        let roles = serde_json::from_value(json!({"roles": [
-            {"name": "lead", "builtIn": true},
-            {"name": "release-captain-for-the-weekly-train-42", "edited": true},
-            {"name": "reviewer", "builtIn": true},
-        ]}))
-        .unwrap();
-        crate::settings::show_agent_roles(s, roles, "lead");
-    });
-    rt.frame(DT);
-    rt.settle_all();
+    let mut rt = roles_shown();
     render(&mut rt, SETTINGS, &out.join(format!("roles-{scale}.png")));
 }
 
 const SETTINGS: (f32, f32) = (720.0, 620.0);
+const LONG_ROLE: &str = "release-captain-for-the-weekly-train-42";
+
+fn roles_shown() -> Runtime<crate::settings::Prefs> {
+    let agents = crate::settings::TABS.iter().position(|t| *t == "Agents").expect("an Agents tab");
+    let mut rt = settings_on(agents, 0);
+    rt.update(|s, _| {
+        let roles = serde_json::from_value(json!({"roles": [
+            {"name": "lead", "builtIn": true},
+            {"name": LONG_ROLE, "edited": true, "description": "Runs the weekly release train."},
+            {"name": "reviewer", "builtIn": true},
+        ]}))
+        .unwrap();
+        crate::settings::show_agent_roles(s, roles, LONG_ROLE);
+    });
+    rt.frame(DT);
+    rt.settle_all();
+    rt.frame(DT);
+    rt
+}
+
+#[test]
+fn a_long_role_name_stays_inside_the_role_list_at_larger_text() {
+    if !isolated("text_scale::a_long_role_name_stays_inside_the_role_list_at_larger_text") {
+        return;
+    }
+    crate::look::hold_text_scale(Some(1.6));
+    let rt = roles_shown();
+    let row = rt.presented(&format!("agent-role-{LONG_ROLE}")).expect("the long role is listed").0;
+    let lead = rt.presented("agent-role-lead").expect("lead is listed").0;
+    assert!(row[0] >= lead[0] && row[0] + row[2] <= lead[0] + lead[2] + 0.5, "the long role {row:?} keeps the list's width {lead:?}");
+    assert!(row[3] > lead[3] * 1.5, "the long name wraps onto more lines: {row:?} vs {lead:?}");
+}
 
 fn settings_on(tab: usize, page: usize) -> Runtime<crate::settings::Prefs> {
     let spec = AppSpec::<crate::settings::Prefs> {
