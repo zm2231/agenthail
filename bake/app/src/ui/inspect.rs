@@ -35,6 +35,7 @@ pub struct Editing {
 
 pub struct Inspect {
     meta: HashMap<String, Metadata>,
+    reads: inspect::Reads,
     process: HashMap<String, Process>,
     goal_busy: HashMap<String, GoalAct>,
     goal_note: HashMap<String, (bool, String)>,
@@ -49,7 +50,7 @@ pub struct Inspect {
 impl Inspect {
     pub fn new() -> Inspect {
         let (tx, rx) = channel();
-        Inspect { meta: HashMap::new(), process: HashMap::new(), goal_busy: HashMap::new(), goal_note: HashMap::new(), expanded: None, editing: None, logs: None, seq: 0, tx, rx }
+        Inspect { meta: HashMap::new(), reads: inspect::Reads::default(), process: HashMap::new(), goal_busy: HashMap::new(), goal_note: HashMap::new(), expanded: None, editing: None, logs: None, seq: 0, tx, rx }
     }
 }
 
@@ -64,25 +65,37 @@ fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'sta
 
 pub fn load(s: &mut App, id: &str) {
     s.inspect.meta.retain(|k, _| k == id);
+    s.inspect.reads.keep_only(id);
     s.inspect.process.retain(|k, _| k == id);
     if s.inspect.expanded.as_deref() != Some(id) {
         s.inspect.expanded = None;
     }
 }
 
-pub(crate) fn read(s: &mut App, id: &str, result: Result<Metadata, String>) {
-    let old = s.inspect.meta.get(id);
-    let data = match result {
-        Ok(data) => data.after(old),
-        Err(error) => Metadata::failed(old, error),
-    };
-    s.inspect.meta.insert(id.to_string(), data);
+pub(crate) fn ticket(s: &mut App) -> u64 {
+    s.inspect.reads.ticket()
+}
+
+pub(crate) fn read(s: &mut App, id: &str, ticket: u64, result: Result<Metadata, String>) {
+    if s.inspect.reads.accept(id, ticket) {
+        let old = s.inspect.meta.get(id);
+        let data = match result {
+            Ok(data) => data.after(old),
+            Err(error) => Metadata::failed(old, error),
+        };
+        s.inspect.meta.insert(id.to_string(), data);
+    }
+    if s.inspect.reads.landed(id, ticket) {
+        goal_moved(s, id);
+    }
 }
 
 pub(crate) fn goal_moved(s: &mut App, id: &str) {
-    if s.selected.as_deref() == Some(id) {
-        super::session_menu::reread(s, id);
+    if s.selected.as_deref() != Some(id) || s.client.is_none() || !s.inspect.reads.want(id) {
+        return;
     }
+    let ticket = super::session_menu::reread(s, id);
+    s.inspect.reads.started(id, ticket);
 }
 
 fn goal_act(s: &mut App, id: &str, act: GoalAct, typed: &str) -> bool {

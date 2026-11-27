@@ -13,7 +13,7 @@ pub fn reply_refusal(row: &crate::subagents::RowRead) -> Option<String> {
     match row {
         crate::subagents::RowRead::Found(x) => read_only(x),
         crate::subagents::RowRead::Gone => Some("This session no longer exists.".into()),
-        crate::subagents::RowRead::Failed(_) => None,
+        crate::subagents::RowRead::Failed(error) => Some(format!("Couldn't check the session is still open: {error}")),
     }
 }
 
@@ -115,14 +115,14 @@ mod tests {
     }
 
     #[test]
-    fn a_reply_is_refused_for_a_closed_or_gone_session_and_left_to_the_daemon_when_unread() {
+    fn a_reply_goes_only_to_a_session_read_as_open() {
         use crate::subagents::{RowRead, detail_row};
         let closed = detail_row(&json!({"session": {"id": "s1"}, "capabilities": {"send": true}, "readOnly": true, "readOnlyReason": "Read-only here."})).unwrap();
         assert_eq!(reply_refusal(&RowRead::Found(closed)).as_deref(), Some("Read-only here."));
         let open = detail_row(&json!({"session": {"id": "s1"}, "capabilities": {"send": true}})).unwrap();
         assert_eq!(reply_refusal(&RowRead::Found(open)), None);
         assert!(reply_refusal(&RowRead::Gone).is_some());
-        assert_eq!(reply_refusal(&RowRead::Failed("timed out".into())), None);
+        assert_eq!(reply_refusal(&RowRead::Failed("timed out".into())).as_deref(), Some("Couldn't check the session is still open: timed out"));
         let error = refused("Read-only here.".into());
         assert!(!error.maybe_delivered && error.message == "Read-only here.");
     }

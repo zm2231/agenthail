@@ -204,6 +204,57 @@ pub fn metadata(value: &Value) -> Metadata {
     Metadata { goal, goal_failed: value["errors"].get("goal").is_some(), runs, warnings }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct Reads {
+    next: u64,
+    applied: std::collections::HashMap<String, u64>,
+    rereading: std::collections::HashMap<String, (u64, bool)>,
+}
+
+impl Reads {
+    pub fn ticket(&mut self) -> u64 {
+        self.next += 1;
+        self.next
+    }
+
+    pub fn accept(&mut self, id: &str, ticket: u64) -> bool {
+        if self.applied.get(id).is_some_and(|newest| *newest > ticket) {
+            return false;
+        }
+        self.applied.insert(id.to_string(), ticket);
+        true
+    }
+
+    pub fn want(&mut self, id: &str) -> bool {
+        match self.rereading.get_mut(id) {
+            Some(pending) => {
+                pending.1 = true;
+                false
+            }
+            None => true,
+        }
+    }
+
+    pub fn started(&mut self, id: &str, ticket: u64) {
+        self.rereading.insert(id.to_string(), (ticket, false));
+    }
+
+    pub fn landed(&mut self, id: &str, ticket: u64) -> bool {
+        match self.rereading.get(id).copied() {
+            Some((asked, again)) if ticket >= asked => {
+                self.rereading.remove(id);
+                again
+            }
+            _ => false,
+        }
+    }
+
+    pub fn keep_only(&mut self, id: &str) {
+        self.applied.retain(|k, _| k == id);
+        self.rereading.retain(|k, _| k == id);
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GoalAct {
     Set,
@@ -489,6 +540,35 @@ mod tests {
         assert_eq!(whole.warnings, ["connection refused"]);
         let first = Metadata::failed(None, "connection refused".into());
         assert!(first.goal_failed && first.goal.is_none());
+    }
+
+    #[test]
+    fn an_older_read_never_replaces_a_newer_one() {
+        let mut reads = Reads::default();
+        let (old, new) = (reads.ticket(), reads.ticket());
+        assert!(reads.accept("s", new));
+        assert!(!reads.accept("s", old));
+        assert!(reads.accept("s", new) && reads.accept("other", old));
+    }
+
+    #[test]
+    fn goal_changes_during_a_reread_ask_for_one_more_read_only() {
+        let mut reads = Reads::default();
+        assert!(reads.want("s"));
+        let first = reads.ticket();
+        reads.started("s", first);
+        assert!(!reads.want("s") && !reads.want("s"), "events while a reread runs are coalesced");
+        let before = first - 1;
+        assert!(!reads.landed("s", before), "an earlier read doesn't settle the reread");
+        assert!(reads.landed("s", first), "one more read follows the coalesced events");
+        assert!(reads.want("s"));
+        let second = reads.ticket();
+        reads.started("s", second);
+        assert!(!reads.landed("s", second));
+        assert!(reads.want("s"));
+        reads.started("s", reads.next + 1);
+        reads.keep_only("other");
+        assert!(reads.want("s"), "switching sessions forgets a pending reread");
     }
 
     #[test]
