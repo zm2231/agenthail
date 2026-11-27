@@ -176,7 +176,7 @@ pub fn go(s: &mut App, to: Screen) {
 }
 
 pub fn close_palette(s: &mut App) {
-    if crate::ui::window::shows_shared(s) {
+    if crate::ui::window::shows(s, crate::ui::window::Kind::Jump) {
         s.ov.jump = None;
     }
 }
@@ -248,7 +248,12 @@ pub fn open_jump(s: &mut App, tx: &mut Tx) {
     s.ov.jump_ix = (String::new(), 0);
     search::forget_codex(s);
     worksearch::forget(s);
-    tx.focus("jump-input", false);
+    crate::ui::window::give(s, crate::ui::window::Kind::Jump, crate::ui::window::MAIN);
+    if s.windows.current() == crate::ui::window::MAIN {
+        tx.focus("jump-input", false);
+    } else {
+        crate::ui::window::bring_forward(s, crate::ui::window::MAIN);
+    }
 }
 
 pub fn note_open(s: &App) -> bool {
@@ -284,61 +289,65 @@ pub fn view(s: &App, cx: &mut Cx<App>, layer: &mut Vec<El>, main_kit: &Kit) -> E
 }
 
 pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
-    if s.ov.jump.is_some() {
+    use crate::ui::window::{Kind, shows};
+    if s.ov.jump.is_some() && shows(s, Kind::Jump) {
         jump::view(s, layer, k);
     }
-    search::activity_view(s, layer, k);
-    decisions::note_dialog(s, layer, k);
-    work::words_dialog(s, layer, k);
-    projects::overlays(s, layer, k);
-    extension_sheets::overlays(s, layer, k);
+    if shows(s, Kind::Activity) {
+        search::activity_view(s, layer, k);
+    }
+    if shows(s, Kind::Note) {
+        decisions::note_dialog(s, layer, k);
+        work::words_dialog(s, layer, k);
+    }
+    if shows(s, Kind::Projects) {
+        projects::overlays(s, layer, k);
+    }
+    if shows(s, Kind::Sheets) {
+        extension_sheets::overlays(s, layer, k);
+    }
 }
 
 pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
-    let mine = crate::ui::window::shows_shared(s);
-    if !mine {
-        if crate::ui::keys::is(crate::ui::keys::Act::GoToSession, ev, tx) && s.ov.jump.is_some() {
-            crate::ui::window::overlays_to(s, s.windows.current());
-            return true;
-        }
-        return ordinary(s, ev, tx);
-    }
-    if s.ov.ext.sheets.is_open() {
+    use crate::ui::window::{Kind, shows};
+    if s.ov.ext.sheets.is_open() && shows(s, Kind::Sheets) {
         return matches!(ev.key, Key::Escape) && extension_sheets::escape(s);
     }
-    if projects::open(s) {
+    if projects::open(s) && shows(s, Kind::Projects) {
         if matches!(ev.key, Key::Escape) {
             projects::close_top(s);
             return true;
         }
         return false;
     }
-    if s.ov.inbox.note.is_some() {
+    if s.ov.inbox.note.is_some() && shows(s, Kind::Note) {
         if matches!(ev.key, Key::Escape) {
             s.ov.inbox.note = None;
             return true;
         }
         return false;
     }
-    if s.ov.work.words.is_some() {
+    if s.ov.work.words.is_some() && shows(s, Kind::Note) {
         if matches!(ev.key, Key::Escape) {
             s.ov.work.words = None;
             return true;
         }
         return false;
     }
-    if let Some(done) = search::activity_key(s, ev) {
+    if shows(s, Kind::Activity)
+        && let Some(done) = search::activity_key(s, ev)
+    {
         return done;
     }
     if crate::ui::keys::is(crate::ui::keys::Act::GoToSession, ev, tx) {
-        if s.ov.jump.is_some() {
+        if s.ov.jump.is_some() && shows(s, Kind::Jump) {
             s.ov.jump = None;
         } else {
             open_jump(s, tx);
         }
         return true;
     }
-    if s.ov.jump.is_some() {
+    if s.ov.jump.is_some() && shows(s, Kind::Jump) {
         if !ev.mods.cmd {
             return jump::key(s, ev, tx);
         }

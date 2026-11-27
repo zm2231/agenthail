@@ -96,7 +96,7 @@ pub fn run(s: &mut App, act: Act, tx: &mut Tx) {
     match act {
         Act::NewSession => search::run(s, Command::NewSession, tx),
         Act::GoToSession => {
-            if s.ov.jump.take().is_none() {
+            if s.windows.current() != super::window::MAIN || s.ov.jump.take().is_none() {
                 over::open_jump(s, tx);
             }
         }

@@ -287,6 +287,9 @@ pub fn project_prefill(s: &App, key: &str) -> Prefill {
 }
 
 pub fn open(s: &mut App, prefill: Prefill, tx: &mut Tx) {
+    if !super::window::may_open(s, super::window::Kind::NewSession) {
+        return;
+    }
     if s.new_session.is_some() {
         tx.focus("new-session-message", false);
         return;

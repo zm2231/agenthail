@@ -157,38 +157,6 @@ fn two_windows() -> (App, rune::Runtime<App>, rune::Runtime<App>, Id) {
 }
 
 #[test]
-fn the_palette_shows_only_in_the_window_that_opened_it_until_the_shortcut_calls_it_to_main() {
-    let (mut s, mut main, mut win, w) = two_windows();
-    turn_with(&mut s, &mut win, &key(w), |s, tx| crate::over::open_jump(s, tx));
-    turn(&mut s, &mut main, "main");
-    turn(&mut s, &mut win, &key(w));
-    assert_eq!((win.presented("jump-input").is_some(), main.presented("jump-input").is_some(), s.windows.overlay), (true, false, Some(w)));
-    let esc = rune::KeyEvent { key: rune::Key::Escape, mods: rune::Mods::default() };
-    turn_with(&mut s, &mut main, "main", move |s, tx| {
-        crate::on_key(s, &esc, tx);
-    });
-    assert!(s.ov.jump.is_some() && s.windows.overlay == Some(w), "Escape in main leaves the other window's palette alone");
-    let cmd = rune::Mods { cmd: true, ..rune::Mods::default() };
-    let now = rune::KeyEvent { key: rune::Key::Command('s'), mods: rune::Mods { shift: true, ..cmd } };
-    turn_with(&mut s, &mut main, "main", move |s, tx| {
-        crate::on_key(s, &now, tx);
-    });
-    assert!(s.screen == crate::Screen::Sessions && s.ov.jump.is_some(), "main's own commands still work while the palette is elsewhere");
-    let jump = rune::KeyEvent { key: rune::Key::Command('k'), mods: cmd };
-    turn_with(&mut s, &mut main, "main", move |s, tx| {
-        crate::on_key(s, &jump, tx);
-    });
-    assert_eq!(s.windows.overlay, Some(MAIN), "Command-K in main brings the open palette over");
-    turn_with(&mut s, &mut win, &key(w), |s, _| overlays_to(s, s.windows.current()));
-    turn_with(&mut s, &mut main, "main", |s, _| overlays_to(s, MAIN));
-    turn(&mut s, &mut win, &key(w));
-    turn(&mut s, &mut main, "main");
-    assert!(main.presented("jump-input").is_some() && win.presented("jump-input").is_none());
-    turn_with(&mut s, &mut main, "main", |s, _| s.ov.jump = None);
-    assert_eq!(s.windows.overlay, None);
-}
-
-#[test]
 fn a_session_window_opens_with_its_inspector_hidden_and_its_toolbar_shows_it() {
     let (mut s, mut main, mut win, w) = two_windows();
     let main_open = s.ov.inspector.is_open();
@@ -311,47 +279,73 @@ fn the_image_cache_made_for_the_main_window_reaches_the_shared_app() {
     assert!(s.attach.cache.is_some());
 }
 
-#[test]
-fn a_result_for_a_session_opens_in_the_window_showing_it() {
-    let (mut s, _main, _win, w) = two_windows();
-    s.inspect.logs = Some(("b".into(), "log lines".into()));
-    overlay_for(&mut s, MAIN + 99, "b");
-    assert_eq!(s.windows.overlay, Some(w));
-    assert!(!crate::ui::inspect::drain(&mut s) && s.inspect.logs.is_some(), "logs for the session window's session stay open while main shows another");
-    assert_eq!(showing(&s, "a"), Some(MAIN));
-    assert_eq!(showing(&s, "zzz"), None);
+fn press(s: &mut App, rt: &mut rune::Runtime<App>, key: &str, ev: rune::KeyEvent) {
+    turn_with(s, rt, key, move |s, tx| {
+        crate::on_key(s, &ev, tx);
+    });
+}
+
+const ESCAPE: rune::KeyEvent = rune::KeyEvent { key: rune::Key::Escape, mods: rune::Mods { shift: false, cmd: false, alt: false, ctrl: false, logo: false } };
+
+fn confirm(session: &str) -> crate::ui::limit::Confirm {
+    let target = feed::limit::Target { root: "/r".into(), name: "Work".into(), detail: None, full: false, offered: true };
+    crate::ui::limit::Confirm { session: session.into(), since: "t".into(), target }
 }
 
 #[test]
-fn opening_a_second_kind_of_dialog_in_another_window_takes_them_there() {
+fn a_dialog_stays_with_its_window_when_another_window_opens_the_palette_and_keys_go_to_each_one_s_own() {
     let (mut s, mut main, mut win, w) = two_windows();
+    turn_with(&mut s, &mut win, &key(w), |s, _| s.limits.confirm = Some(confirm("b")));
     turn_with(&mut s, &mut main, "main", |s, tx| crate::over::open_jump(s, tx));
-    assert_eq!(s.windows.overlay, Some(MAIN));
-    turn_with(&mut s, &mut win, &key(w), |s, _| s.prs.linking = Some("b".into()));
-    assert_eq!(s.windows.overlay, Some(w));
+    turn(&mut s, &mut win, &key(w));
+    turn(&mut s, &mut main, "main");
+    assert_eq!((owner(&s, Kind::LimitConfirm), owner(&s, Kind::Jump)), (Some(w), Some(MAIN)));
+    assert_eq!((win.presented("limit-confirm-cancel").is_some(), main.presented("limit-confirm-cancel").is_some()), (true, false));
+    assert!(main.presented("jump-input").is_some() && win.presented("jump-input").is_none());
+    press(&mut s, &mut win, &key(w), ESCAPE);
+    assert!(s.ov.jump.is_some(), "Escape in the session window doesn't reach main's palette");
+    press(&mut s, &mut main, "main", ESCAPE);
+    assert!(s.ov.jump.is_none(), "Escape in main closes its palette");
+    assert_eq!((s.limits.confirm.as_ref().map(|c| c.session.as_str()), owner(&s, Kind::LimitConfirm)), (Some("b"), Some(w)), "the confirm never moved");
 }
 
 #[test]
-fn a_result_goes_to_the_window_that_asked_even_when_both_show_the_session() {
+fn opening_a_kind_another_window_has_open_leaves_it_there() {
+    let (mut s, mut main, mut win, w) = two_windows();
+    turn_with(&mut s, &mut win, &key(w), |s, _| s.limits.confirm = Some(confirm("b")));
+    turn_with(&mut s, &mut main, "main", |s, _| assert!(!may_open(s, Kind::LimitConfirm), "main may not open a second confirm"));
+    assert!(may_open(&s, Kind::PrLink));
+    assert_eq!(owner(&s, Kind::LimitConfirm), Some(w));
+    close(&mut s, w);
+    assert_eq!(owner(&s, Kind::LimitConfirm), None, "closing the owner frees its dialogs");
+}
+
+#[test]
+fn the_palette_lives_in_main_and_command_k_in_a_session_window_opens_it_there() {
+    let (mut s, mut main, mut win, w) = two_windows();
+    let cmd_k = || rune::KeyEvent { key: rune::Key::Command('k'), mods: rune::Mods { cmd: true, ..rune::Mods::default() } };
+    press(&mut s, &mut win, &key(w), cmd_k());
+    assert_eq!((s.ov.jump.is_some(), owner(&s, Kind::Jump)), (true, Some(MAIN)));
+    press(&mut s, &mut win, &key(w), cmd_k());
+    assert!(s.ov.jump.is_some(), "pressing it again in the session window doesn't close main's palette");
+    turn_with(&mut s, &mut win, &key(w), |s, tx| crate::over::search::run(s, feed::search::Command::Refresh, tx));
+    assert!(s.ov.jump.is_some(), "a command in the session window leaves main's palette open");
+    turn(&mut s, &mut main, "main");
+    assert!(main.presented("jump-input").is_some());
+    press(&mut s, &mut main, "main", cmd_k());
+    assert!(s.ov.jump.is_none());
+}
+
+#[test]
+fn a_result_goes_to_the_window_that_asked_or_else_the_one_showing_its_session() {
     let mut s = app();
     crate::select(&mut s, "b");
     let w = open(&mut s, "b");
+    assert_eq!(asker_or_showing(&s, w, "b"), Some(w), "the asker wins even though main shows the session too");
+    assert_eq!(asker_or_showing(&s, MAIN, "b"), Some(MAIN));
+    assert_eq!(asker_or_showing(&s, w + 9, "b"), Some(MAIN), "a closed asker falls back to the window showing the session");
+    assert_eq!(asker_or_showing(&s, w + 9, "zzz"), None);
     s.inspect.logs = Some(("b".into(), "log lines".into()));
-    overlay_for(&mut s, w, "b");
-    assert_eq!(s.windows.overlay, Some(w), "the asker wins even though main shows the session too");
-    overlay_for(&mut s, MAIN, "b");
-    assert_eq!(s.windows.overlay, Some(MAIN), "a later request from main is routed by its own asker");
-    close(&mut s, w);
-    overlay_for(&mut s, w, "b");
-    assert_eq!(s.windows.overlay, Some(MAIN), "a closed asker falls back to the window showing the session");
-}
-
-#[test]
-fn a_command_run_in_one_window_leaves_another_window_s_palette_open() {
-    let (mut s, mut main, mut win, w) = two_windows();
-    turn_with(&mut s, &mut win, &key(w), |s, tx| crate::over::open_jump(s, tx));
-    turn_with(&mut s, &mut main, "main", |s, tx| crate::over::search::run(s, feed::search::Command::Refresh, tx));
-    assert!(s.ov.jump.is_some() && s.windows.overlay == Some(w));
-    turn_with(&mut s, &mut win, &key(w), |s, tx| crate::over::search::run(s, feed::search::Command::Refresh, tx));
-    assert!(s.ov.jump.is_none(), "a command picked in the palette's own window closes it");
+    give(&mut s, Kind::Logs, w);
+    assert!(!free_for(&s, Kind::Logs, Some(MAIN)) && free_for(&s, Kind::Logs, Some(w)));
 }

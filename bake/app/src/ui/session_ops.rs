@@ -11,7 +11,7 @@ use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit};
 use time::{OffsetDateTime, UtcOffset};
 
 use crate::App;
-use crate::ui::window::Id;
+use crate::ui::window::{Id, Kind, may_open, shows};
 use crate::icons;
 use crate::theme::{self, BODY, META, failed, faint, muted};
 
@@ -74,7 +74,7 @@ fn title(s: &App, id: &str) -> String {
 }
 
 pub fn open_adopt(s: &mut App, id: &str) {
-    if super::session_menu::not_sent(s) {
+    if super::session_menu::not_sent(s) || !may_open(s, Kind::Adopting) {
         return;
     }
     s.menus.ops.adopting = Some(Adopting { session: id.to_string(), title: title(s, id), phase: Phase::Ready });
@@ -97,7 +97,7 @@ fn close_adopt(s: &mut App) {
 }
 
 pub fn open_move(s: &mut App, id: &str) {
-    if super::session_menu::not_sent(s) || s.menus.ops.sent.contains(id) {
+    if super::session_menu::not_sent(s) || s.menus.ops.sent.contains(id) || !may_open(s, Kind::Moving) {
         return;
     }
     s.menus.ops.seq += 1;
@@ -126,8 +126,10 @@ fn confirm_move(s: &mut App) {
 }
 
 fn front_to_its_window(s: &mut App) {
-    if let Some((session, asker)) = s.menus.ops.notices.front().map(|(n, w)| (n.session.clone(), *w)) {
-        super::window::overlay_for(s, asker, &session);
+    if let Some((session, asker)) = s.menus.ops.notices.front().map(|(n, w)| (n.session.clone(), *w))
+        && let Some(w) = super::window::asker_or_showing(s, asker, &session)
+    {
+        super::window::give(s, Kind::Notices, w);
     }
 }
 
@@ -317,13 +319,13 @@ fn notice_dialog(n: &Notice, layer: &mut Vec<El>, k: &Kit) {
 }
 
 pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
-    if let Some(a) = &s.menus.ops.adopting {
+    if let Some(a) = s.menus.ops.adopting.as_ref().filter(|_| shows(s, Kind::Adopting)) {
         adopt_dialog(a, layer, k);
     }
-    if let Some(m) = &s.menus.ops.moving {
+    if let Some(m) = s.menus.ops.moving.as_ref().filter(|_| shows(s, Kind::Moving)) {
         move_dialog(m, layer, k);
     }
-    if let Some((n, _)) = s.menus.ops.notices.front() {
+    if let Some((n, _)) = s.menus.ops.notices.front().filter(|_| shows(s, Kind::Notices)) {
         notice_dialog(n, layer, k);
     }
 }
@@ -345,11 +347,11 @@ mod tests {
         let _ = s.menus.ops.tx.send(Done::Moved(notice("a"), MAIN));
         let _ = s.menus.ops.tx.send(Done::Moved(notice("a"), w));
         drain(&mut s);
-        assert!(window::shows_shared(&s), "a's notice is in front, in main");
+        assert!(window::shows(&s, Kind::Notices), "the first notice is in front, in main");
         s.menus.ops.notices.pop_front();
         front_to_its_window(&mut s);
-        assert!(!window::shows_shared(&s), "the second notice for the same session goes to the window that asked for that move");
+        assert!(!window::shows(&s, Kind::Notices), "the second notice for the same session goes to the window that asked for that move");
         window::enter(&mut s, w);
-        assert!(window::shows_shared(&s));
+        assert!(window::shows(&s, Kind::Notices));
     }
 }

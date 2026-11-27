@@ -121,6 +121,9 @@ fn open_picker(s: &mut App, id: &str) {
     let Some(x) = session(s, id) else { return };
     let host = host_key(x);
     let Some(stop) = waiting_since(s, id) else { return };
+    if !super::window::may_open(s, super::window::Kind::LimitPick) {
+        return;
+    }
     s.limits.picking = Some((id.to_string(), stop));
     if s.client.is_none() {
         let recorded = s.fixtures.as_ref().and_then(|f| std::fs::read_to_string(format!("{}/session-options.json", f.dir)).ok());
@@ -144,6 +147,12 @@ fn open_picker(s: &mut App, id: &str) {
         }
         let _ = tx.send(Done::Read(host, generation));
     });
+}
+
+fn ask_confirm(s: &mut App, c: Confirm) {
+    if super::window::may_open(s, super::window::Kind::LimitConfirm) {
+        s.limits.confirm = Some(c);
+    }
 }
 
 fn move_to(s: &mut App, id: &str, since: &str, target: Target, stop_terminal: bool) {
@@ -231,9 +240,15 @@ fn settled(s: &mut App, done: Done) {
                 }
                 Ok(Moved::NeedsConsent(message)) => {
                     s.limits.note.remove(&id);
-                    if current(s, &id, &stop) {
+                    let to = super::window::asker_or_showing(s, asker, &id);
+                    if !current(s, &id, &stop) {
+                    } else if to.is_some() && super::window::free_for(s, super::window::Kind::LimitConsent, to) {
                         s.limits.consent = Some(Consent { session: id.clone(), since: stop, target, message });
-                        super::window::overlay_for(s, asker, &id);
+                        if let Some(w) = to {
+                            super::window::give(s, super::window::Kind::LimitConsent, w);
+                        }
+                    } else {
+                        note(s, &id, stop, format!("Moving to {} needs your OK. Try it again from its window.", target.name), true);
                     }
                 }
                 Err(error) => {
@@ -311,7 +326,7 @@ pub(crate) fn card(s: &App, x: &Session, stop: &Stop, k: &Kit) -> El {
                 button(format!("Move to {}…", offer.name()), ButtonVariant::Neutral, busy || full)
                     .icon(&icons::ARROW_RIGHT)
                     .help(help)
-                    .on_press(move |s: &mut App| s.limits.confirm = Some(Confirm { session: id.clone(), since: since.clone(), target: target.clone() }))
+                    .on_press(move |s: &mut App| ask_confirm(s, Confirm { session: id.clone(), since: since.clone(), target: target.clone() }))
                     .build(k)
                     .key("limit-move"),
             );
@@ -367,7 +382,7 @@ fn target_row(id: &str, since: &str, t: &Target, busy: bool, unread: bool, k: &K
         let (id, since, target) = (id.to_string(), since.to_string(), t.clone());
         r = r.hover(crate::theme::ink(0.09)).on_press(move |s: &mut App| {
             s.limits.picking = None;
-            s.limits.confirm = Some(Confirm { session: id.clone(), since: since.clone(), target: target.clone() });
+            ask_confirm(s, Confirm { session: id.clone(), since: since.clone(), target: target.clone() });
         });
         r = r.child(icon(&icons::ARROW_RIGHT, k.text_size(13.0)).color(faint()));
     } else {
@@ -471,17 +486,18 @@ fn warnings(s: &App, layer: &mut Vec<El>, k: &Kit) {
     layer.push(col().absolute(0.0, 0.0).w_full().h_full().items_end().justify_start().padding(24.0).child(stack));
 }
 
-pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
-    if !s.limits.warnings.is_empty() {
+pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit, main: bool) {
+    use super::window::{Kind, shows};
+    if main && !s.limits.warnings.is_empty() {
         warnings(s, layer, k);
     }
-    if let Some((id, since)) = &s.limits.picking {
+    if let Some((id, since)) = s.limits.picking.as_ref().filter(|_| shows(s, Kind::LimitPick)) {
         picker(s, id, since, layer, k);
     }
-    if let Some(c) = &s.limits.confirm {
+    if let Some(c) = s.limits.confirm.as_ref().filter(|_| shows(s, Kind::LimitConfirm)) {
         confirm(c, layer, k);
     }
-    if let Some(c) = &s.limits.consent {
+    if let Some(c) = s.limits.consent.as_ref().filter(|_| shows(s, Kind::LimitConsent)) {
         consent(c, layer, k);
     }
 }

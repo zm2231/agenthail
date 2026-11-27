@@ -125,6 +125,7 @@ pub fn session_window(s: &App, cx: &mut Cx<App>) -> El {
 }
 
 fn window(s: &App, cx: &mut Cx<App>, chrome: &KitTheme, in_session: bool, main: bool) -> El {
+    use self::window::Kind;
     let k = cx.kit();
     let mut layer = Vec::new();
     let body = match (connect::screen(s, cx, chrome), &s.screen) {
@@ -137,15 +138,21 @@ fn window(s: &App, cx: &mut Cx<App>, chrome: &KitTheme, in_session: bool, main: 
     if main && let Some(n) = &s.ov.notice {
         layer.push(crate::over::ui::notice(n, &c));
     }
-    if self::window::shows_shared(s) {
-        crate::over::overlays(s, &mut layer, &c);
-        session_ops::overlays(s, &mut layer, &k);
+    crate::over::overlays(s, &mut layer, &c);
+    session_ops::overlays(s, &mut layer, &k);
+    if self::window::shows(s, Kind::PrLink) {
         pr_link::overlays(s, &mut layer, &k);
+    }
+    if self::window::shows(s, Kind::TurnOptions) {
         turn_options::overlays(s, &mut layer, &k);
-        inspect::overlays(s, &mut layer, &k);
+    }
+    inspect::overlays(s, &mut layer, &k);
+    if self::window::shows(s, Kind::Queue) {
         native_queue::overlays(s, &mut layer, &k);
-        limit::overlays(s, &mut layer, &k);
-        accounts::overlays(s, &mut layer, &k);
+    }
+    limit::overlays(s, &mut layer, &k, main);
+    accounts::overlays(s, &mut layer, &k);
+    if self::window::shows(s, Kind::NewSession) {
         new_session::view(s, &mut layer, &k);
     }
     session_menu::overlays(s, &mut layer, &k);

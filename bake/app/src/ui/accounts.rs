@@ -70,6 +70,9 @@ fn fetch(s: &mut App) {
 }
 
 pub fn open(s: &mut App) {
+    if !super::window::may_open(s, super::window::Kind::Accounts) {
+        return;
+    }
     s.accounts.open = true;
     if s.client.is_none() {
         let recorded = s.fixtures.as_ref().and_then(|f| std::fs::read_to_string(format!("{}/usage.json", f.dir)).ok()).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
@@ -97,7 +100,7 @@ fn close_sheet(s: &mut App) {
 }
 
 fn preview(s: &mut App, change: Change) {
-    if s.accounts.planning.as_ref().is_some_and(|p| p.applying) {
+    if s.accounts.planning.as_ref().is_some_and(|p| p.applying) || !super::window::may_open(s, super::window::Kind::AccountPlan) {
         return;
     }
     s.accounts.seq += 1;
@@ -396,10 +399,11 @@ fn sheet(p: &Planning, layer: &mut Vec<El>, k: &Kit) {
 }
 
 pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
-    if s.accounts.open {
+    use super::window::{Kind, shows};
+    if s.accounts.open && shows(s, Kind::Accounts) {
         panel(s, layer, k);
     }
-    if let Some(p) = &s.accounts.planning {
+    if let Some(p) = s.accounts.planning.as_ref().filter(|_| shows(s, Kind::AccountPlan)) {
         sheet(p, layer, k);
     }
 }

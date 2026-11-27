@@ -153,16 +153,14 @@ fn pressed(s: &mut App, tx: &mut Tx) {
             None => handle.open(),
         }
     });
-    if s.ov.jump.is_some() {
-        crate::ui::window::overlays_to(s, crate::ui::window::MAIN);
-    } else if !covered(s) {
+    if s.ov.jump.is_none() && !covered(s) {
         crate::over::open_jump(s, tx);
     }
 }
 
 fn covered(s: &App) -> bool {
     let menus = &s.menus;
-    crate::ui::window::shared_open(s)
+    crate::ui::window::open_in(s, crate::ui::window::MAIN)
         || menus.open.is_some()
         || menus.chip.is_some()
         || menus.renaming.is_some()

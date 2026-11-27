@@ -133,8 +133,7 @@ pub struct Windows {
     next: Id,
     to_show: Vec<(Id, bool)>,
     look: u64,
-    overlay: Option<Id>,
-    overlay_kinds: u32,
+    owners: [Option<Id>; 19],
 }
 
 impl Windows {
@@ -275,7 +274,9 @@ pub fn close(s: &mut App, id: Id) {
     enter(s, back);
     s.windows.stash.remove(&id);
     s.windows.open.retain(|o| o.id != id);
-    s.windows.overlay.take_if(|w| *w == id);
+    for slot in &mut s.windows.owners {
+        slot.take_if(|w| *w == id);
+    }
     s.windows.to_show.retain(|(o, _)| *o != id);
 }
 
@@ -417,57 +418,135 @@ pub fn on_leave(s: &mut App, _: &str) {
     enter(s, MAIN);
 }
 
-fn open_kinds(s: &App) -> u32 {
-    let menus = &s.menus;
-    [
-        s.ov.jump.is_some(),
-        crate::over::note_open(s),
-        s.ov.ext.sheets.is_open(),
-        crate::over::projects::covering(s),
-        super::turn_options::covering(s),
-        super::native_queue::covering(s),
-        menus.ops.adopting.is_some(),
-        menus.ops.moving.is_some(),
-        !menus.ops.notices.is_empty(),
-        s.prs.linking.is_some(),
-        s.inspect.editing.is_some(),
-        s.inspect.logs.is_some(),
-        s.limits.picking.is_some(),
-        s.limits.confirm.is_some(),
-        s.limits.consent.is_some(),
-        crate::over::search::activity_open(s),
-        s.accounts.open,
-        s.accounts.planning.is_some(),
-        s.new_session.is_some(),
-    ]
-    .iter()
-    .enumerate()
-    .fold(0, |kinds, (i, open)| if *open { kinds | 1 << i } else { kinds })
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Jump,
+    Note,
+    Sheets,
+    Projects,
+    TurnOptions,
+    Queue,
+    Adopting,
+    Moving,
+    Notices,
+    PrLink,
+    Editor,
+    Logs,
+    LimitPick,
+    LimitConfirm,
+    LimitConsent,
+    Activity,
+    Accounts,
+    AccountPlan,
+    NewSession,
 }
 
-pub fn shared_open(s: &App) -> bool {
-    open_kinds(s) != 0
+const KINDS: [Kind; 19] = [
+    Kind::Jump,
+    Kind::Note,
+    Kind::Sheets,
+    Kind::Projects,
+    Kind::TurnOptions,
+    Kind::Queue,
+    Kind::Adopting,
+    Kind::Moving,
+    Kind::Notices,
+    Kind::PrLink,
+    Kind::Editor,
+    Kind::Logs,
+    Kind::LimitPick,
+    Kind::LimitConfirm,
+    Kind::LimitConsent,
+    Kind::Activity,
+    Kind::Accounts,
+    Kind::AccountPlan,
+    Kind::NewSession,
+];
+
+pub fn is_open(s: &App, kind: Kind) -> bool {
+    let ops = &s.menus.ops;
+    match kind {
+        Kind::Jump => s.ov.jump.is_some(),
+        Kind::Note => crate::over::note_open(s),
+        Kind::Sheets => s.ov.ext.sheets.is_open(),
+        Kind::Projects => crate::over::projects::covering(s),
+        Kind::TurnOptions => super::turn_options::covering(s),
+        Kind::Queue => super::native_queue::covering(s),
+        Kind::Adopting => ops.adopting.is_some(),
+        Kind::Moving => ops.moving.is_some(),
+        Kind::Notices => !ops.notices.is_empty(),
+        Kind::PrLink => s.prs.linking.is_some(),
+        Kind::Editor => s.inspect.editing.is_some(),
+        Kind::Logs => s.inspect.logs.is_some(),
+        Kind::LimitPick => s.limits.picking.is_some(),
+        Kind::LimitConfirm => s.limits.confirm.is_some(),
+        Kind::LimitConsent => s.limits.consent.is_some(),
+        Kind::Activity => crate::over::search::activity_open(s),
+        Kind::Accounts => s.accounts.open,
+        Kind::AccountPlan => s.accounts.planning.is_some(),
+        Kind::NewSession => s.new_session.is_some(),
+    }
 }
 
-pub fn shows_shared(s: &App) -> bool {
-    s.windows.overlay.is_none_or(|w| w == s.windows.current)
+fn owner(s: &App, kind: Kind) -> Option<Id> {
+    s.windows.owners[kind as usize]
+}
+
+pub fn shows(s: &App, kind: Kind) -> bool {
+    owner(s, kind).is_none_or(|w| w == s.windows.current)
+}
+
+pub fn open_in(s: &App, w: Id) -> bool {
+    KINDS.iter().any(|k| is_open(s, *k) && owner(s, *k).is_none_or(|o| o == w))
 }
 
 fn claim(s: &mut App) {
-    let kinds = open_kinds(s);
-    if kinds == 0 {
-        s.windows.overlay = None;
-    } else if s.windows.overlay.is_none() || kinds & !s.windows.overlay_kinds != 0 {
-        s.windows.overlay = Some(s.windows.current);
+    for kind in KINDS {
+        let open = is_open(s, kind);
+        let slot = &mut s.windows.owners[kind as usize];
+        if !open {
+            *slot = None;
+        } else if slot.is_none() {
+            *slot = Some(s.windows.current);
+        }
     }
-    s.windows.overlay_kinds = kinds;
 }
 
-pub fn overlays_to(s: &mut App, w: Id) {
-    s.windows.overlay_kinds = open_kinds(s);
-    if s.windows.overlay_kinds != 0 {
-        s.windows.overlay = Some(w);
+fn exists(s: &App, w: Id) -> bool {
+    w == MAIN || s.windows.open.iter().any(|o| o.id == w)
+}
+
+pub fn give(s: &mut App, kind: Kind, w: Id) {
+    if is_open(s, kind) && exists(s, w) {
+        s.windows.owners[kind as usize] = Some(w);
     }
+}
+
+pub fn bring_forward(s: &App, w: Id) {
+    if w == MAIN {
+        crate::menubar::front(s);
+    } else if let Some(handle) = s.windows.open.iter().find(|o| o.id == w).and_then(|o| o.handle.as_ref()) {
+        handle.show();
+        handle.focus();
+    }
+}
+
+pub fn may_open(s: &App, kind: Kind) -> bool {
+    match owner(s, kind).filter(|w| *w != s.windows.current && is_open(s, kind)) {
+        Some(w) => {
+            bring_forward(s, w);
+            false
+        }
+        None => true,
+    }
+}
+
+pub fn asker_or_showing(s: &App, asker: Id, session: &str) -> Option<Id> {
+    Some(asker).filter(|w| exists(s, *w)).or_else(|| showing(s, session))
+}
+
+pub fn free_for(s: &App, kind: Kind, w: Option<Id>) -> bool {
+    !is_open(s, kind) || owner(s, kind).is_none_or(|o| Some(o) == w)
 }
 
 pub fn showing(s: &App, session: &str) -> Option<Id> {
@@ -476,13 +555,6 @@ pub fn showing(s: &App, session: &str) -> Option<Id> {
         return Some(s.windows.current);
     }
     s.windows.stash.iter().filter(|(id, _)| **id != s.windows.current).find(|(_, l)| shows(&l.screen, &l.selected)).map(|(id, _)| *id)
-}
-
-pub fn overlay_for(s: &mut App, asker: Id, session: &str) {
-    let open = asker == MAIN || s.windows.open.iter().any(|o| o.id == asker);
-    if let Some(w) = Some(asker).filter(|_| open).or_else(|| showing(s, session)) {
-        overlays_to(s, w);
-    }
 }
 
 pub fn poll(s: &mut App, _: f64, tx: &mut rune::Tx) -> bool {
