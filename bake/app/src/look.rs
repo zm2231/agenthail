@@ -5,7 +5,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
 use feed::catalog::Client;
-use feed::watch::backoff;
+use feed::watch::Reconnect;
 use feed::look::{self as fl, Fit, Look, Rgb, Tint, View, Wallpaper};
 use rune::{Color, Cx, El, Pixels, PixelsWrap, SystemMaterial, Tx, el};
 use rune_kit::Kit;
@@ -15,6 +15,7 @@ use crate::theme::{self, Paint};
 const SAMPLE_SIDE: u32 = 512;
 const MIN_LAYOUT: (f32, f32) = (1440.0, 900.0);
 const SIGN_IN_WAIT: Duration = Duration::from_secs(10);
+const FIRST_READ_RETRY: Duration = Duration::from_secs(10);
 
 type Raw = (u32, u32, Vec<u8>);
 
@@ -162,39 +163,51 @@ fn follow(tx: Sender<Got>) {
         return;
     }
     let reader = RefCell::new(Reader { class: fl::device_class(), device, decoded_at: 0, fetched: Vec::new(), tx: tx.clone() });
-    let mut failures = 0u32;
+    let mut cursor: Option<u64> = None;
+    let mut reconnect = Reconnect::default();
     loop {
         if let Ok(fresh) = Client::from_env() {
             client = fresh;
         }
-        let result = client.base_settings().map_err(|f| f.message).and_then(|base| {
-            let open = Cell::new(true);
-            let followed = client.follow_events(
-                base.event_cursor,
-                || open.set(read(&client, &mut reader.borrow_mut())),
-                |kind, _| {
-                    if kind == "ui.changed" || kind == "stream.reset" {
-                        open.set(read(&client, &mut reader.borrow_mut()));
+        let after = match cursor {
+            Some(after) => after,
+            None => match client.base_settings() {
+                Ok(base) => base.event_cursor,
+                Err(f) => {
+                    if tx.send(Got::Problem(Some(format!("Couldn't read appearance settings: {}", f.message)))).is_err() {
+                        return;
                     }
-                    open.get()
-                },
-            );
-            if !open.get() {
-                return Ok(false);
-            }
-            followed.map(|()| true).map_err(|e| e.to_string())
-        });
-        failures = match result {
-            Ok(false) => return,
-            Ok(true) => 0,
-            Err(e) => {
-                if tx.send(Got::Problem(Some(format!("Can't follow appearance changes right now ({e}); reconnecting.")))).is_err() {
-                    return;
+                    std::thread::sleep(FIRST_READ_RETRY);
+                    continue;
                 }
-                failures + 1
-            }
+            },
         };
-        std::thread::sleep(backoff(failures));
+        let (open, last, heard) = (Cell::new(true), Cell::new(after), Cell::new(false));
+        let result = client.follow_events(
+            after,
+            || open.set(read(&client, &mut reader.borrow_mut())),
+            |kind, id| {
+                last.set(last.get().max(id));
+                heard.set(true);
+                if kind == "ui.changed" || kind == "stream.reset" {
+                    open.set(read(&client, &mut reader.borrow_mut()));
+                }
+                open.get()
+            },
+        );
+        if !open.get() {
+            return;
+        }
+        cursor = Some(last.get());
+        if heard.get() {
+            reconnect.reset();
+        }
+        if let Err(e) = result
+            && tx.send(Got::Problem(Some(format!("Can't follow appearance changes right now ({e}); reconnecting.")))).is_err()
+        {
+            return;
+        }
+        std::thread::sleep(reconnect.next());
     }
 }
 

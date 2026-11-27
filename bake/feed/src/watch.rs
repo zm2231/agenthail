@@ -331,6 +331,28 @@ pub fn stamp() -> String {
     time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap_or_default()
 }
 
+pub struct Reconnect {
+    delay: u64,
+}
+
+impl Default for Reconnect {
+    fn default() -> Reconnect {
+        Reconnect { delay: 1 }
+    }
+}
+
+impl Reconnect {
+    pub fn next(&mut self) -> Duration {
+        let now = self.delay;
+        self.delay = (self.delay * 2).min(20);
+        Duration::from_secs(now)
+    }
+
+    pub fn reset(&mut self) {
+        self.delay = 1;
+    }
+}
+
 pub fn backoff(failures: u32) -> Duration {
     Duration::from_secs(1u64 << failures.min(3)).min(Duration::from_secs(5))
 }
