@@ -54,6 +54,7 @@ struct State {
     increased: bool,
     screen: u32,
     zoom: f32,
+    held_scale: Option<f32>,
 }
 
 thread_local! {
@@ -62,6 +63,20 @@ thread_local! {
 
 pub fn view() -> Option<View> {
     STATE.with_borrow(|s| s.view.clone())
+}
+
+pub fn text_scale() -> Option<f32> {
+    STATE.with_borrow(|s| s.view.is_some().then_some(s.look.text_scale))
+}
+
+pub fn hold_text_scale(scale: Option<f32>) {
+    STATE.with_borrow_mut(|s| {
+        s.held_scale = scale;
+        if let Some(scale) = scale.filter(|scale| *scale != s.look.text_scale) {
+            s.look.text_scale = scale;
+            s.generation += 1;
+        }
+    });
 }
 
 pub fn device() -> String {
@@ -264,9 +279,20 @@ impl Picture {
     }
 }
 
+pub fn release_text_scale() {
+    STATE.with_borrow_mut(|s| {
+        s.held_scale = None;
+        relook(s);
+        s.generation += 1;
+    });
+}
+
 fn relook(s: &mut State) {
     if let Some(v) = &s.view {
         s.look = if s.increased { Look::with_increased_contrast(v) } else { Look::from_view(v) };
+        if let Some(scale) = s.held_scale {
+            s.look.text_scale = scale;
+        }
     }
 }
 

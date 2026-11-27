@@ -33,6 +33,8 @@ pub(crate) mod session;
 mod session_dialogs;
 pub(crate) mod session_ops;
 pub(crate) mod subagents;
+pub mod text_size;
+pub mod turn_options;
 pub mod session_menu;
 pub(crate) mod waiting;
 
@@ -120,6 +122,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     session_menu::overlays(s, &mut layer);
     attach::overlays(s, &mut layer);
     pr_link::overlays(s, &mut layer);
+    turn_options::overlays(s, &mut layer);
     inspect::overlays(s, &mut layer);
     limit::overlays(s, &mut layer);
     accounts::overlays(s, &mut layer);

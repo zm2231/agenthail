@@ -147,6 +147,20 @@ pub fn copy(text: String) -> impl Fn(&mut App, &mut Tx) + 'static {
     move |_: &mut App, tx: &mut Tx| tx.copy(text.clone())
 }
 
+pub fn share(session: String, anchor: String, text: String) -> impl Fn(&mut App, &mut Tx) + 'static {
+    move |_: &mut App, tx: &mut Tx| {
+        let session = session.clone();
+        tx.share(rune::Share::new().text(text.clone()), anchor.clone(), move |s: &mut App, result, _| {
+            let why = match result {
+                Err(rune::ShareError::Failed(why)) => why,
+                Err(error) => error.to_string(),
+                Ok(_) => return,
+            };
+            crate::note(s, &session, format!("Couldn't share: {why}"));
+        });
+    }
+}
+
 pub fn edit(text: String) -> impl Fn(&mut App) + 'static {
     move |s: &mut App| {
         let merged = feed::composer::put_back(&crate::ui::paste::draft(s), &text);

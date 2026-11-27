@@ -91,6 +91,16 @@ impl Change {
         }
     }
 
+    pub fn text_scale(scale: f32, device: &str) -> Change {
+        let place = if device.is_empty() { "mac".to_string() } else { format!("device:{device}") };
+        let percent = (scale * 100.0).round() as i64;
+        Change(json!({"action": "set", "set": [format!("text.scale@{place} = {}", percent as f64 / 100.0)], "message": format!("Text size {percent}%")}))
+    }
+
+    pub fn touches(&self, key: &str) -> bool {
+        ["set", "unset"].iter().flat_map(|field| self.0[*field].as_array().into_iter().flatten()).filter_map(Value::as_str).any(|line| line.trim_start().starts_with(key))
+    }
+
     pub fn clear_override(key: &str, line: &str, owner: &str) -> Change {
         Change(json!({"action": "unset", "unset": [format!("{key}@{line}")], "message": format!("Reset {key} for {owner}")}))
     }
@@ -131,6 +141,14 @@ pub fn describe(entry: &Entry, now: OffsetDateTime) -> String {
         _ => format!("{} d ago", minutes / 1440),
     };
     format!("{who} · {ago}")
+}
+
+pub const TEXT_SCALE: (f32, f32) = (0.8, 1.6);
+
+pub fn text_scale_step(scale: f32, steps: Option<i32>) -> f32 {
+    let Some(steps) = steps else { return 1.0 };
+    let next = scale + steps as f32 * 0.1;
+    ((next * 20.0).round() / 20.0).clamp(TEXT_SCALE.0, TEXT_SCALE.1)
 }
 
 fn device_query(class: &str, device: &str) -> String {

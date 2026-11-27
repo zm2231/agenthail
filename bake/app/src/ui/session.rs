@@ -75,11 +75,12 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
                 None => moving,
             }
         }
+        _ if super::turn_options::problem(s, &x.id).is_some() => text(super::turn_options::problem(s, &x.id).unwrap_or_default()).font(META).color(failed()),
         Some(note) => text(note).font(META).color(if unsent { attention() } else { muted() }),
         None if x.capabilities.reaches_as_note => text(feed::notice::SENDS_AS_NOTE).font(META).color(faint()),
         None => text(crate::send_busy(s, &x.id).map(|b| b.hint()).unwrap_or("Return to send · Shift-Return for a new line")).font(META).color(faint()),
     };
-    let mut controls = row().w_full().px(10.0).pb(10.0).gap(8.0).items_center().children(super::attach::button(s, &x.id)).child(chip(&icons::SPARKLES, x.surface.clone())).children(super::holders::picker(s, x));
+    let mut controls = row().w_full().px(10.0).pb(10.0).gap(8.0).items_center().children(super::attach::button(s, &x.id)).child(chip(&icons::SPARKLES, x.surface.clone())).children(super::turn_options::chip(s, x)).children(super::holders::picker(s, x));
     if let Some(choice) = busy {
         let id = x.id.clone();
         controls = controls.child(
@@ -230,6 +231,30 @@ pub(crate) fn tabs(s: &App, id: &str) -> El {
         .pb(10.0)
         .child(tab("tab-conversation", &icons::MESSAGE, "Conversation".into(), s.tab == Tab::Conversation).on_press(|s: &mut App| s.tab = Tab::Conversation))
         .child(tab("tab-changes", &icons::BRANCH, if files == 0 { "Changes".into() } else { format!("Changes · {files} files") }, s.tab == Tab::Changes).on_press(show_changes))
+        .child(spacer())
+        .children((s.tab == Tab::Conversation).then(focus_switch))
+}
+
+fn focus_switch() -> El {
+    let on = transcript::focused();
+    let side = |key: &'static str, label: &'static str, chosen: bool, to: bool| {
+        let mut t = row().key(key).px(9.0).py(4.0).radius(7.0).role("button").label(label).on_press(move |s: &mut App| transcript::set_focus(s, to)).child(text(label).font(META_BOLD).color(if chosen { theme::text() } else { faint() }));
+        if chosen {
+            t = t.fill(crate::theme::ink(0.10));
+        } else {
+            t = t.hover(crate::theme::ink(0.06));
+        }
+        t
+    };
+    row()
+        .key("focus-switch")
+        .gap(2.0)
+        .padding(2.0)
+        .radius(9.0)
+        .border(1.0, crate::theme::ink(0.08))
+        .help(if on { "Show each turn's tool work where it happened" } else { "Fold each turn's tool work just before its reply" })
+        .child(side("focus-on", "Focus", on, true))
+        .child(side("focus-off", "Show work", !on, false))
 }
 
 pub(crate) fn changes_view(s: &App, id: &str) -> El {

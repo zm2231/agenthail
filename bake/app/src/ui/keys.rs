@@ -15,6 +15,9 @@ pub enum Act {
     JumpToLatest,
     Find,
     Talk,
+    TextBigger,
+    TextSmaller,
+    TextActual,
 }
 
 pub struct Binding {
@@ -23,7 +26,7 @@ pub struct Binding {
     pub menu: Option<(&'static str, &'static str)>,
 }
 
-pub const APP: [Binding; 9] = [
+pub const APP: [Binding; 11] = [
     Binding { act: Act::NewSession, chord: "mod+n", menu: Some(("File", "New Session")) },
     Binding { act: Act::GoToSession, chord: "mod+k", menu: Some(("Session", "Go to Session…")) },
     Binding { act: Act::Stop, chord: "mod+period", menu: Some(("Session", "Stop")) },
@@ -33,6 +36,8 @@ pub const APP: [Binding; 9] = [
     Binding { act: Act::JumpToLatest, chord: "mod+l", menu: None },
     Binding { act: Act::Find, chord: "mod+f", menu: None },
     Binding { act: Act::Talk, chord: "mod+alt+t", menu: Some(("Session", "Talk to Orchestrator…")) },
+    Binding { act: Act::TextBigger, chord: "mod+=", menu: Some(("View", "Make Text Bigger")) },
+    Binding { act: Act::TextSmaller, chord: "mod+-", menu: Some(("View", "Make Text Smaller")) },
 ];
 
 fn chord(spec: &str) -> Chord {
@@ -93,6 +98,9 @@ pub fn run(s: &mut App, act: Act, tx: &mut Tx) {
             tx.focus("sessions-search", false);
         }
         Act::Talk => crate::voice::open("", ""),
+        Act::TextBigger => super::text_size::step(s, Some(1)),
+        Act::TextSmaller => super::text_size::step(s, Some(-1)),
+        Act::TextActual => super::text_size::step(s, None),
     }
 }
 
@@ -120,10 +128,11 @@ fn step(s: &mut App, by: isize) -> bool {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct MenuState {
     stop: bool,
+    focus: bool,
 }
 
 pub fn menu_state(s: &App) -> MenuState {
-    MenuState { stop: search::selected(s).is_some_and(|id| search::can_stop(s, &id)) }
+    MenuState { stop: search::selected(s).is_some_and(|id| search::can_stop(s, &id)), focus: crate::transcript::focused() }
 }
 
 pub fn menu_items(state: MenuState) -> Vec<MenuItem<App>> {
@@ -135,6 +144,10 @@ pub fn menu_items(state: MenuState) -> Vec<MenuItem<App>> {
             let enabled = act != Act::Stop || state.stop;
             Some(MenuItem::with_action(title, move |s: &mut App, tx| run(s, act, tx)).id(format!("key-{act:?}")).menu(menu).key_equivalent(shortcut).keys_first().enabled(enabled))
         })
+        .chain([
+            MenuItem::with_action("Actual Text Size", |s: &mut App, tx| run(s, Act::TextActual, tx)).id("key-TextActual").menu("View"),
+            MenuItem::with_action("Focus", |s: &mut App, _| crate::transcript::set_focus(s, !crate::transcript::focused())).id("key-Focus").menu("View").checked(state.focus),
+        ])
         .collect()
 }
 
@@ -162,6 +175,8 @@ mod tests {
         assert_eq!(press(Key::Command('l'), CMD), Some(Act::JumpToLatest));
         assert_eq!(press(Key::Command('f'), CMD), Some(Act::Find));
         assert_eq!(press(Key::Command('t'), Mods { alt: true, ..CMD }), Some(Act::Talk));
+        assert_eq!(press(Key::Command('='), CMD), Some(Act::TextBigger));
+        assert_eq!(press(Key::Command('-'), CMD), Some(Act::TextSmaller));
     }
 
     #[test]
@@ -186,7 +201,7 @@ mod tests {
             }
         }
         let menus: Vec<_> = APP.iter().filter_map(|b| b.menu).collect();
-        assert_eq!(menus, vec![("File", "New Session"), ("Session", "Go to Session…"), ("Session", "Stop"), ("View", "Refresh"), ("Session", "Talk to Orchestrator…")]);
+        assert_eq!(menus, vec![("File", "New Session"), ("Session", "Go to Session…"), ("Session", "Stop"), ("View", "Refresh"), ("Session", "Talk to Orchestrator…"), ("View", "Make Text Bigger"), ("View", "Make Text Smaller")]);
     }
 
     #[test]

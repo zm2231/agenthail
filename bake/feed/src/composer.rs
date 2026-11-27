@@ -149,7 +149,96 @@ impl Delivered {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+pub const STEER_TURN_OPTIONS: &str = "Steer can't carry turn options. Send queues this for next.";
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TurnOptions {
+    pub service_tier: String,
+    pub output_schema: Option<Value>,
+}
+
+impl TurnOptions {
+    pub fn read(service_tier: &str, schema: &str) -> Result<Option<TurnOptions>, &'static str> {
+        let options = TurnOptions { service_tier: service_tier.trim().to_string(), output_schema: crate::create::output_schema(schema)? };
+        Ok((!options.is_empty()).then_some(options))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.service_tier.is_empty() && self.output_schema.is_none()
+    }
+
+    pub fn apply(&self, payload: &mut Value) {
+        if !self.service_tier.is_empty() {
+            payload["serviceTier"] = Value::String(self.service_tier.clone());
+        }
+        if let Some(schema) = &self.output_schema {
+            payload["outputSchema"] = schema.clone();
+        }
+    }
+
+    fn from_json(value: &Value) -> Option<TurnOptions> {
+        let options = TurnOptions { service_tier: value["serviceTier"].as_str().unwrap_or_default().to_string(), output_schema: value.get("outputSchema").filter(|s| s.is_object()).cloned() };
+        (!options.is_empty()).then_some(options)
+    }
+}
+
+pub fn turn_label(service_tier: &str, schema: &str) -> String {
+    let tier = crate::create::CODEX_SERVICE_TIERS.iter().find(|(id, _)| *id == service_tier).map(|(_, label)| *label);
+    let parts: Vec<&str> = [tier, (!schema.trim().is_empty()).then_some("Schema")].into_iter().flatten().collect();
+    if parts.is_empty() { "Turn options".into() } else { parts.join(" · ") }
+}
+
+pub const REDELIVER_FOR: i64 = 60 * 60 * 1000;
+
+pub fn now_ms() -> i64 {
+    (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
+}
+
+static LAST_STAMP: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+pub fn saw_stamp(stamp: i64) {
+    LAST_STAMP.fetch_max(stamp, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn send_stamp(now: i64) -> i64 {
+    let mut last = LAST_STAMP.load(std::sync::atomic::Ordering::Relaxed);
+    loop {
+        let next = now.max(last + 1);
+        match LAST_STAMP.compare_exchange_weak(last, next, std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed) {
+            Ok(_) => return next,
+            Err(seen) => last = seen,
+        }
+    }
+}
+
+pub const REDELIVER_MAX_WAIT: f64 = 20.0;
+
+pub fn redelivers(error: &crate::catalog::RespondError) -> bool {
+    !error.answered
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Backoff {
+    pub due: f64,
+    wait: f64,
+}
+
+impl Backoff {
+    pub fn starting(now: f64) -> Backoff {
+        Backoff { due: now, wait: 1.0 }
+    }
+
+    pub fn failed(&mut self, now: f64) {
+        self.due = now + self.wait;
+        self.wait = (self.wait * 2.0).min(REDELIVER_MAX_WAIT);
+    }
+
+    pub fn wake(&mut self, now: f64) {
+        self.due = self.due.min(now);
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Unsent {
     pub session: String,
     pub text: String,
@@ -161,6 +250,10 @@ pub struct Unsent {
     pub tries: u32,
     pub pin: Option<crate::holders::Pin>,
     pub draft: Option<String>,
+    pub turn: Option<TurnOptions>,
+    pub sent_at: i64,
+    pub order: i64,
+    pub unanswered: bool,
 }
 
 impl Unsent {
@@ -181,13 +274,21 @@ impl Unsent {
         self.reuses_key() && self.same(text, attachments)
     }
 
+    pub fn redelivering(&self, now: i64) -> bool {
+        self.unanswered && self.sent_at > 0 && (0..REDELIVER_FOR).contains(&(now - self.sent_at))
+    }
+
     pub fn ids(&self) -> Vec<String> {
         self.attachments.iter().map(|a| a.id.clone()).collect()
     }
 
     pub fn to_json(&self) -> Value {
         let attachments: Vec<Value> = self.attachments.iter().map(Upload::to_json).collect();
-        json!({"session": self.session, "text": self.text, "attachments": attachments, "key": self.key, "busy": self.busy.map(Busy::as_str), "maybeDelivered": self.maybe_delivered, "error": self.error, "tries": self.tries, "pid": self.pin.map(|p| p.pid), "pidStartedAt": self.pin.and_then(|p| p.started_at), "draft": self.draft})
+        let mut out = json!({"session": self.session, "text": self.text, "attachments": attachments, "key": self.key, "busy": self.busy.map(Busy::as_str), "maybeDelivered": self.maybe_delivered, "error": self.error, "tries": self.tries, "pid": self.pin.map(|p| p.pid), "pidStartedAt": self.pin.and_then(|p| p.started_at), "draft": self.draft, "sentAt": self.sent_at, "order": self.order, "unanswered": self.unanswered});
+        if let Some(turn) = &self.turn {
+            turn.apply(&mut out);
+        }
+        out
     }
 
     pub fn from_json(id: &str, value: &Value) -> Option<Unsent> {
@@ -202,7 +303,8 @@ impl Unsent {
         let maybe_delivered = value["maybeDelivered"].as_bool().unwrap_or(true);
         let tries = value["tries"].as_u64().unwrap_or_default() as u32;
         let pin = value["pid"].as_i64().map(|pid| crate::holders::Pin { pid, started_at: value["pidStartedAt"].as_i64() });
-        Some(Unsent { session, text, attachments, key, busy, maybe_delivered, error: value["error"].as_str().unwrap_or_default().to_string(), tries, pin, draft: value["draft"].as_str().map(str::to_string) })
+        let (turn, sent_at, order, unanswered) = (TurnOptions::from_json(value), value["sentAt"].as_i64().unwrap_or_default(), value["order"].as_i64().unwrap_or_default(), value["unanswered"].as_bool().unwrap_or_default());
+        Some(Unsent { session, text, attachments, key, busy, maybe_delivered, error: value["error"].as_str().unwrap_or_default().to_string(), tries, pin, draft: value["draft"].as_str().map(str::to_string), turn, sent_at, order, unanswered })
     }
 
     pub fn failed(self, retry: bool, maybe_delivered: bool, answered: bool, error: String) -> Unsent {
@@ -259,6 +361,10 @@ impl Unconfirmed {
         self.latest(id).is_some()
     }
 
+    pub fn list(&self, id: &str) -> &[Unsent] {
+        self.0.get(id).map(Vec::as_slice).unwrap_or_default()
+    }
+
     pub fn take_same(&mut self, id: &str, text: &str, attachments: &[Upload]) -> Option<Unsent> {
         let list = self.0.get(id)?;
         let at = list.iter().rposition(|u| u.resend(text, attachments)).or_else(|| list.iter().rposition(|u| u.same(text, attachments)))?;
@@ -272,7 +378,12 @@ impl Unconfirmed {
     pub fn add(&mut self, id: &str, unsent: Unsent) {
         let list = self.0.entry(id.to_string()).or_default();
         list.retain(|u| u.key != unsent.key);
-        list.push(unsent);
+        let at = list.iter().position(|u| u.order > unsent.order).unwrap_or(list.len());
+        list.insert(at, unsent);
+    }
+
+    pub fn newest_stamp(&self) -> i64 {
+        self.iter().map(|(_, u)| u.order).max().unwrap_or_default()
     }
 
     pub fn remove(&mut self, id: &str, key: &str) {
@@ -436,6 +547,93 @@ fn moved(a: [f32; 4], b: [f32; 4]) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn turn_options_read_like_the_new_session_sheet_and_name_themselves() {
+        assert_eq!(TurnOptions::read("", "  "), Ok(None));
+        assert_eq!(TurnOptions::read("fast", "").unwrap().unwrap().service_tier, "fast");
+        assert_eq!(TurnOptions::read("", r#"{"type":"object"}"#).unwrap().unwrap().output_schema, Some(json!({"type": "object"})));
+        assert!(TurnOptions::read("", "[1]").is_err());
+        assert!(TurnOptions::read("", "nope").is_err());
+        assert_eq!(turn_label("", ""), "Turn options");
+        assert_eq!(turn_label("flex", ""), "Flex");
+        assert_eq!(turn_label("fast", "{}"), "Fast · Schema");
+        assert_eq!(turn_label("", "{}"), "Schema");
+    }
+
+    #[test]
+    fn an_unsent_message_keeps_its_turn_options_and_when_it_was_sent() {
+        let turn = TurnOptions { service_tier: "flex".into(), output_schema: Some(json!({"type": "object"})) };
+        let unsent = Unsent { session: "s1".into(), text: "ship it".into(), key: "k1".into(), maybe_delivered: true, turn: Some(turn), sent_at: 1_800_000_000, order: 7, unanswered: true, ..Default::default() };
+        assert_eq!(Unsent::from_json("s1", &unsent.to_json()), Some(unsent.clone()));
+        let older = json!({"text": "ship it", "key": "k1"});
+        let read = Unsent::from_json("s1", &older).unwrap();
+        assert_eq!((read.turn, read.sent_at, read.unanswered), (None, 0, false));
+    }
+
+    #[test]
+    fn only_a_message_without_an_answer_is_sent_again_and_only_for_an_hour() {
+        let error = |answered: bool, code: &str, reply: Value| crate::catalog::RespondError { message: "x".into(), code: code.into(), maybe_delivered: true, reply, answered, status: 0 };
+        assert!(redelivers(&error(false, "", Value::Null)));
+        assert!(!redelivers(&error(true, "unreadable_reply", Value::Null)));
+        assert!(!redelivers(&error(true, "host_outcome_unknown", Value::Null)));
+        assert!(!redelivers(&error(true, "bad_gateway", Value::Null)));
+        assert!(!redelivers(&error(true, "invalid_request", Value::Null)));
+        let unsent = Unsent { unanswered: true, sent_at: 1000, ..Default::default() };
+        assert!(unsent.redelivering(1000 + REDELIVER_FOR - 1));
+        assert!(!unsent.redelivering(1000 + REDELIVER_FOR));
+        assert!(!unsent.redelivering(999), "a clock moved back ends the window");
+        assert!(!Unsent { sent_at: 0, ..unsent.clone() }.redelivering(1000));
+        assert!(!Unsent { unanswered: false, ..unsent }.redelivering(1000));
+    }
+
+    #[test]
+    fn unsent_messages_stay_in_sending_order_however_they_come_back() {
+        let mut list = Unconfirmed::default();
+        list.add("s1", Unsent { key: "b".into(), text: "b".into(), order: 2, ..Default::default() });
+        list.add("s1", Unsent { key: "c".into(), text: "c".into(), order: 3, ..Default::default() });
+        list.add("s1", Unsent { key: "a".into(), text: "a".into(), order: 1, ..Default::default() });
+        list.add("s1", Unsent { key: "b".into(), text: "b again".into(), order: 2, ..Default::default() });
+        assert_eq!(list.list("s1").iter().map(|u| u.text.as_str()).collect::<Vec<_>>(), ["a", "b again", "c"]);
+        assert_eq!(list.newest_stamp(), 3);
+        assert!(list.list("gone").is_empty());
+    }
+
+    #[test]
+    fn merging_a_continued_session_keeps_messages_in_the_order_they_were_sent() {
+        let mut list = Unconfirmed::default();
+        list.add("old", Unsent { key: "a".into(), text: "a".into(), order: 10, sent_at: 500, ..Default::default() });
+        list.add("new", Unsent { key: "b".into(), text: "b".into(), order: 20, sent_at: 100, ..Default::default() });
+        list.add("old", Unsent { key: "c".into(), text: "c".into(), order: 30, sent_at: 100, ..Default::default() });
+        list.rekey(&HashMap::from([("old".to_string(), "new".to_string())]));
+        assert_eq!(list.list("new").iter().map(|u| u.key.as_str()).collect::<Vec<_>>(), ["a", "b", "c"]);
+        assert!(list.list("old").is_empty());
+    }
+
+    #[test]
+    fn send_stamps_always_move_forward_within_a_millisecond() {
+        let a = send_stamp(5_000);
+        let b = send_stamp(5_000);
+        let c = send_stamp(1);
+        assert!(a < b && b < c, "{a} {b} {c}");
+        saw_stamp(c + 1000);
+        assert!(send_stamp(1) > c + 1000);
+    }
+
+    #[test]
+    fn redelivery_waits_one_second_doubling_to_twenty_and_wakes_early() {
+        let mut b = Backoff::starting(5.0);
+        assert_eq!(b.due, 5.0);
+        let waits: Vec<f64> = (0..7).map(|_| {
+            b.failed(100.0);
+            b.due - 100.0
+        }).collect();
+        assert_eq!(waits, vec![1.0, 2.0, 4.0, 8.0, 16.0, 20.0, 20.0]);
+        b.wake(50.0);
+        assert_eq!(b.due, 50.0);
+        b.wake(200.0);
+        assert_eq!(b.due, 50.0);
+    }
+
     fn map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         pairs.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
     }
@@ -487,7 +685,7 @@ mod tests {
 
     #[test]
     fn only_an_unconfirmed_message_is_sent_again_as_it_was() {
-        let unsent = Unsent { session: "s1".into(), text: "ship it".into(), attachments: vec![], key: "k1".into(), busy: Some(Busy::Steer), maybe_delivered: true, error: "timeout".into(), tries: 0, pin: None, draft: None };
+        let unsent = Unsent { session: "s1".into(), text: "ship it".into(), attachments: vec![], key: "k1".into(), busy: Some(Busy::Steer), maybe_delivered: true, error: "timeout".into(), tries: 0, pin: None, draft: None, ..Default::default() };
         assert!(unsent.resend("ship it", &[]));
         assert!(!unsent.resend("ship it now", &[]));
         let retried = Unsent { tries: 1, ..unsent.clone() };
@@ -502,7 +700,7 @@ mod tests {
     #[test]
     fn attachments_travel_with_an_unconfirmed_message() {
         let shot = Upload { id: "up/1/shot.png".into(), name: "shot.png".into(), media_type: "image/png".into(), bytes: 9, width: 3, height: 3 };
-        let unsent = Unsent { session: "s1".into(), text: String::new(), attachments: vec![shot.clone()], key: "k1".into(), busy: None, maybe_delivered: true, error: "timeout".into(), tries: 0, pin: None, draft: None };
+        let unsent = Unsent { session: "s1".into(), text: String::new(), attachments: vec![shot.clone()], key: "k1".into(), busy: None, maybe_delivered: true, error: "timeout".into(), tries: 0, pin: None, draft: None, ..Default::default() };
         assert_eq!(Unsent::from_json("s1", &unsent.to_json()), Some(unsent.clone()));
         assert_eq!(unsent.quoted(), "“shot.png”");
         assert_eq!(unsent.ids(), vec!["up/1/shot.png".to_string()]);
@@ -518,7 +716,7 @@ mod tests {
 
     #[test]
     fn an_unconfirmed_message_survives_a_restart_with_its_request_id() {
-        let unsent = Unsent { session: "old".into(), text: "ship it".into(), attachments: vec![], key: "k1".into(), busy: Some(Busy::Queue), maybe_delivered: true, error: "the app closed".into(), tries: 0, pin: None, draft: None };
+        let unsent = Unsent { session: "old".into(), text: "ship it".into(), attachments: vec![], key: "k1".into(), busy: Some(Busy::Queue), maybe_delivered: true, error: "the app closed".into(), tries: 0, pin: None, draft: None, ..Default::default() };
         assert_eq!(Unsent::from_json("new", &unsent.to_json()), Some(unsent.clone()));
         let pinned = Unsent { pin: Some(crate::holders::Pin { pid: 41, started_at: Some(7) }), draft: Some("ship \u{fdd0}\u{e000}".into()), ..unsent.clone() };
         assert_eq!(Unsent::from_json("new", &pinned.to_json()), Some(pinned));
@@ -565,7 +763,7 @@ mod tests {
     }
 
     fn unsent(key: &str, text: &str, maybe_delivered: bool) -> Unsent {
-        Unsent { session: "s1".into(), text: text.into(), attachments: vec![], key: key.into(), busy: None, maybe_delivered, error: "timeout".into(), tries: 0, pin: None, draft: None }
+        Unsent { session: "s1".into(), text: text.into(), attachments: vec![], key: key.into(), busy: None, maybe_delivered, error: "timeout".into(), tries: 0, pin: None, draft: None, ..Default::default() }
     }
 
     #[test]

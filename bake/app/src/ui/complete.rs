@@ -522,12 +522,17 @@ pub fn done(s: &mut App, done: Done) {
                     s.drafts.set(&id, &prompt);
                     if s.composer_for.as_deref() == Some(from.as_str()) {
                         crate::over::open_session(s, &id);
+                    } else if prompt.is_empty() {
+                        s.ov.notice = Some("The fork is ready. Find it in the sidebar.".into());
                     } else {
                         s.ov.notice = Some("The fork is ready, with your prompt in its composer. Find it in the sidebar.".into());
                     }
                 }
                 Ok(_) => s.ov.notice = Some("The fork started, but the daemon didn't say which session it made.".into()),
-                Err(error) if error.maybe_delivered => crate::note(s, &from, format!("Fork sent, not confirmed: {}. Fork from here again checks the same request; it won't make a second copy.", error.message)),
+                Err(error) if error.maybe_delivered => {
+                    let again = if point.ends_with('/') { "Fork" } else { "Fork from here" };
+                    crate::note(s, &from, format!("Fork sent, not confirmed: {}. {again} again checks the same request; it won't make a second copy.", error.message));
+                }
                 Err(error) => s.ov.notice = Some(format!("Couldn't fork: {}", error.message)),
             }
         }
@@ -741,6 +746,14 @@ fn search_key(s: &mut App, ev: &KeyEvent, _: &mut Tx) -> bool {
 }
 
 fn fork(s: &mut App, from: &str, prompt: &Prompt) {
+    fork_at(s, from, &prompt.item_id, prompt.turn_id.clone(), prompt.text.clone());
+}
+
+pub fn fork_session(s: &mut App, from: &str) {
+    fork_at(s, from, "", None, String::new());
+}
+
+fn fork_at(s: &mut App, from: &str, item: &str, turn: Option<String>, text: String) {
     if s.complete.forking {
         return;
     }
@@ -749,9 +762,9 @@ fn fork(s: &mut App, from: &str, prompt: &Prompt) {
         return;
     }
     s.complete.forking = true;
-    let point = format!("{from}/{}", prompt.item_id);
+    let point = format!("{from}/{item}");
     let (key, sent_from) = s.complete.fork_keys.entry(point.clone()).or_insert_with(|| (feed::catalog::request_key(), from.to_string())).clone();
-    let (from, turn, text) = (sent_from, prompt.turn_id.clone(), prompt.text.clone());
+    let from = sent_from;
     spawn(s, move |c| {
         let result = c.fork(&from, turn.as_deref(), &key);
         Done::Forked(from.clone(), point.clone(), text.clone(), result)

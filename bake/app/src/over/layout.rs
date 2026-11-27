@@ -79,9 +79,12 @@ pub fn restore(s: &mut App) -> bool {
 }
 
 fn unsent(s: &App) -> Value {
-    let mut all = s.unsent.clone();
+    let mut all = feed::composer::Unconfirmed::default();
     for (id, pending) in s.in_flight.iter().flat_map(|(id, list)| list.iter().map(move |p| (id, p))) {
         all.add(id, pending.clone());
+    }
+    for (id, unsent) in s.unsent.iter() {
+        all.add(id, unsent.clone());
     }
     all.to_json()
 }
@@ -104,6 +107,7 @@ fn encode(s: &App) -> String {
     let boards: serde_json::Map<String, Value> = s.ov.boards.iter().map(|(k, v)| (k.clone(), Value::Bool(*v))).collect();
     json!({
         "brief": s.ov.now_brief,
+        "transcriptFocus": crate::transcript::focused(),
         "collapsed": collapsed(s),
         "focus": s.ov.now_focus.map(|(i, before)| json!({ "pane": i, "before": before })),
         "boards": boards,
@@ -114,6 +118,7 @@ fn encode(s: &App) -> String {
         "stashes": s.complete.keys.to_json(),
         "stashedAttachments": crate::ui::attach::stashed_saved(s),
         "unsent": unsent(s),
+        "handledHere": feed::decisions::saved_history(&s.ov.inbox.history),
         "queueTaking": feed::queue::Taking::to_json(&s.queue_taking),
         "backgroundDock": s.dock.to_json(),
         "turnNotice": feed::notice::shared().to_json(),
@@ -133,6 +138,7 @@ pub fn load(s: &mut App) {
         Some([a.first()?.as_bool()?, a.get(1)?.as_bool()?, a.get(2)?.as_bool()?])
     };
     s.ov.now_brief = v["brief"].as_bool().unwrap_or(false);
+    crate::transcript::restore_focus(v["transcriptFocus"].as_bool().unwrap_or(false));
     if let Some(c) = flags(&v["collapsed"]).filter(|c| !c.iter().all(|x| *x)) {
         set_collapsed(s, c);
     }
@@ -154,10 +160,13 @@ pub fn load(s: &mut App) {
     }
     s.drafts = feed::composer::Drafts::from_json(&v["drafts"]);
     s.unsent = feed::composer::Unconfirmed::from_json(&v["unsent"]);
+    feed::composer::saw_stamp(s.unsent.newest_stamp());
+    s.ov.inbox.history = feed::decisions::restored_history(&v["handledHere"]);
     s.attach.tray = feed::attach::Tray::from_json(&v["attachments"]);
     s.attach.tray.load_stashed(&v["stashedAttachments"]);
     s.complete.keys = crate::ui::composer_keys::State::from_json(&v["stashes"]);
-    let held: Vec<(String, feed::composer::Unsent)> = s.unsent.iter().map(|(id, u)| (id.clone(), u.clone())).collect();
+    let now = feed::composer::now_ms();
+    let held: Vec<(String, feed::composer::Unsent)> = s.unsent.iter().filter(|(_, u)| !u.redelivering(now)).map(|(id, u)| (id.clone(), u.clone())).collect();
     for (id, unsent) in held {
         if s.drafts.get(&id).trim().is_empty() && !s.attach.tray.has(&id) {
             s.drafts.set(&id, &crate::ui::paste::unsent_draft(&unsent));

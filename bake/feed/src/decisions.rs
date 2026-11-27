@@ -101,7 +101,7 @@ pub struct Inbox {
     pub failed: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize, serde::Serialize)]
 pub struct Handled {
     pub title: String,
     pub session: String,
@@ -321,6 +321,16 @@ pub fn remember(history: &mut Vec<Handled>, entry: Handled) {
     history.truncate(HISTORY_KEPT);
 }
 
+pub fn saved_history(history: &[Handled]) -> serde_json::Value {
+    serde_json::to_value(&history[..history.len().min(HISTORY_KEPT)]).unwrap_or_default()
+}
+
+pub fn restored_history(value: &serde_json::Value) -> Vec<Handled> {
+    let mut list: Vec<Handled> = value.as_array().into_iter().flatten().filter_map(|v| serde_json::from_value(v.clone()).ok()).collect();
+    list.truncate(HISTORY_KEPT);
+    list
+}
+
 impl Client {
     pub fn decisions(&self, host: Option<&str>) -> anyhow::Result<Page> {
         let path = match host {
@@ -382,6 +392,17 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn handled_here_survives_a_relaunch_and_stays_bounded() {
+        let entry = |n: usize| Handled { title: format!("Ask {n}"), session: "s1".into(), outcome: "Accepted".into(), at: "2026-11-27T05:00:00Z".into() };
+        let history: Vec<Handled> = (0..HISTORY_KEPT + 3).map(entry).collect();
+        let saved = saved_history(&history);
+        assert_eq!(saved.as_array().unwrap().len(), HISTORY_KEPT);
+        assert_eq!(restored_history(&saved), history[..HISTORY_KEPT].to_vec());
+        assert_eq!(restored_history(&serde_json::json!([{"title": "x"}, 4, {"title": "y", "session": "s", "outcome": "Not now", "at": ""}])).len(), 1);
+        assert!(restored_history(&serde_json::Value::Null).is_empty());
+    }
 
     fn decision(json: &str) -> Decision {
         serde_json::from_str(json).unwrap()

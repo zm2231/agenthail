@@ -105,10 +105,17 @@ pub fn write(s: &mut Prefs, change: Change) {
     if s.appearance.writing {
         return;
     }
+    let turn = change.touches("text.scale").then(|| {
+        crate::ui::text_size::supersede();
+        crate::ui::text_size::turn()
+    });
     let device = crate::look::device();
     s.appearance.error = None;
     s.appearance.confirm_reset = false;
     if spawn(s, move |c| {
+        if let Some(turn) = &turn {
+            turn.wait();
+        }
         let ticket = crate::look::ticket();
         Got::Wrote(ticket, c.ui_change(fl::device_class(), &device, &change))
     }) {

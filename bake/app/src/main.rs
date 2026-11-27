@@ -154,6 +154,8 @@ pub struct App {
     pub limits: ui::limit::Limits,
     pub accounts: ui::accounts::Accounts,
     pub prs: ui::pr_link::Prs,
+    pub turn: ui::turn_options::Turns,
+    redeliver: HashMap<String, feed::composer::Backoff>,
     pub inspect: ui::inspect::Inspect,
     pub roles: ui::role::Roles,
     pub new_session: Option<ui::new_session::Sheet>,
@@ -347,6 +349,8 @@ fn empty(live: Overview, persist: bool) -> App {
         limits: ui::limit::Limits::new(),
         accounts: ui::accounts::Accounts::new(),
         prs: ui::pr_link::Prs::new(),
+        turn: ui::turn_options::Turns::default(),
+        redeliver: HashMap::new(),
         inspect: ui::inspect::Inspect::new(),
         roles: ui::role::Roles::new(),
         new_session: None,
@@ -561,6 +565,8 @@ fn selected_moved(s: &mut App, id: &str) {
 }
 
 fn reopened(s: &mut App) {
+    let clock = s.clock;
+    s.redeliver.values_mut().for_each(|b| b.wake(clock));
     ui::connect::retry(s);
     ask_overview(s, Ask::Reset);
     over::inbox::reopened(s);
@@ -746,7 +752,7 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
     ui::paste::finish(s);
     let draft = ui::paste::draft(s).trim().to_string();
     let message = ui::paste::expand(&draft).trim().to_string();
-    if message.is_empty() && !ui::attach::has(s, id) || sending(s, id) {
+    if message.is_empty() && !ui::attach::has(s, id) {
         return;
     }
     if s.client.is_none() {
@@ -760,7 +766,14 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
             return;
         }
     };
-    let refusal = session(s, id).and_then(|x| feed::attach::steer_refusal(&attachments, &x.capabilities));
+    let turn = match ui::turn_options::options(s, id) {
+        Ok(turn) => turn,
+        Err(problem) => {
+            note(s, id, problem.into());
+            return;
+        }
+    };
+    let refusal = session(s, id).and_then(|x| feed::attach::steer_refusal(&attachments, &x.capabilities)).or(turn.as_ref().map(|_| feed::composer::STEER_TURN_OPTIONS));
     let busy = match (busy.or_else(|| send_busy(s, id)), refusal) {
         (Some(Busy::Steer), Some(why)) => {
             note(s, id, why.into());
@@ -771,18 +784,45 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
     ui::paste::set_composer(s, "");
     ui::attach::clear(s, id);
     ui::complete::sending(s, id);
+    if waiting_earlier(s, id) || sending(s, id) {
+        let mut pending = fresh(s, id, message, attachments);
+        pending.draft = Some(draft).filter(|d| *d != pending.text);
+        pending.busy = busy.or(pending.busy);
+        pending.turn = turn;
+        hold(s, id, pending);
+        return;
+    }
     match s.unsent.take_same(id, &message, &attachments) {
-        Some(again) if again.reuses_key() && same_delivery(&again, busy, busy.or_else(|| send_busy(s, id))) => dispatch(s, id, again, true, tx),
-        found => {
-            if let Some(again) = found.filter(|u| u.reuses_key()) {
-                s.unsent.add(id, again);
+        Some(again) if again.reuses_key() => {
+            if again.turn != turn || !same_delivery(&again, busy, busy.or_else(|| send_busy(s, id))) {
+                note(s, id, "Sent again just as it first went, since it may already have arrived".into());
             }
+            dispatch(s, id, again, true, tx);
+        }
+        _ => {
             let mut pending = fresh(s, id, message, attachments);
             pending.draft = Some(draft).filter(|d| *d != pending.text);
             pending.busy = busy.or(pending.busy);
+            pending.turn = turn;
             dispatch(s, id, pending, false, tx);
         }
     }
+}
+
+fn hold(s: &mut App, id: &str, pending: Unsent) {
+    let held = Unsent { maybe_delivered: false, error: "an earlier message isn't confirmed yet".into(), ..pending };
+    s.unsent.add(id, held.clone());
+    if let Err(error) = over::layout::save_now(s) {
+        let kept = Unsent { unanswered: false, error: format!("the message couldn't be saved first ({error})"), ..held };
+        put_back(s, id, &kept);
+        s.unsent.add(id, kept);
+        over::layout::save(s);
+    }
+}
+
+fn waiting_earlier(s: &App, id: &str) -> bool {
+    let now = feed::composer::now_ms();
+    s.unsent.list(id).iter().any(|u| u.redelivering(now))
 }
 
 fn clear_sent(s: &mut App, id: &str, unsent: &Unsent) {
@@ -805,18 +845,67 @@ pub fn can_retry(s: &App, id: &str) -> bool {
 }
 
 pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
-    let Some(unsent) = s.unsent.latest(id).cloned() else { return };
-    if sending(s, id) || s.client.is_none() || !can_retry(s, id) {
+    let now = feed::composer::now_ms();
+    let oldest = s.unsent.list(id).iter().find(|u| u.redelivering(now)).or(s.unsent.latest(id)).map(|u| (u.key.clone(), u.redelivering(now)));
+    if let Some((key, auto)) = oldest {
+        retry_key(s, id, &key, auto, tx);
+    }
+}
+
+fn retry_key(s: &mut App, id: &str, key: &str, auto: bool, tx: &mut Tx) {
+    let Some(unsent) = s.unsent.list(id).iter().find(|u| u.key == key).cloned() else { return };
+    if sending(s, id) || s.client.is_none() || closed(s, id) || feed::attach::missing_upload(&unsent.error).is_some() {
         return;
     }
-    clear_sent(s, id, &unsent);
+    if !auto {
+        clear_sent(s, id, &unsent);
+    }
     s.unsent.remove(id, &unsent.key);
     if unsent.reuses_key() {
         dispatch(s, id, unsent, true, tx);
     } else {
-        let mut pending = Unsent { draft: unsent.draft.clone(), ..fresh(s, id, unsent.text, unsent.attachments) };
-        pending.busy = steered(unsent.busy, pending.busy);
+        let mut pending = Unsent { draft: unsent.draft.clone(), turn: unsent.turn.clone(), ..fresh(s, id, unsent.text, unsent.attachments) };
+        pending.busy = if auto { unsent.busy } else { steered(unsent.busy, pending.busy) };
+        if pending.turn.is_some() && pending.busy == Some(Busy::Steer) {
+            pending.busy = Some(Busy::Queue);
+        }
+        if auto {
+            pending.sent_at = unsent.sent_at;
+            pending.order = unsent.order;
+            pending.pin = unsent.pin;
+        }
         dispatch(s, id, pending, false, tx);
+    }
+}
+
+fn redeliver(s: &mut App, tx: &mut Tx) {
+    let now = feed::composer::now_ms();
+    let expired: Vec<(String, Unsent)> = s.unsent.iter().filter(|(_, u)| u.unanswered && u.sent_at > 0 && !u.redelivering(now)).map(|(id, u)| (id.clone(), u.clone())).collect();
+    for (id, unsent) in expired {
+        let stopped = Unsent { unanswered: false, ..unsent };
+        s.unsent.remove(&id, &stopped.key);
+        put_back(s, &id, &stopped);
+        s.unsent.add(&id, stopped);
+    }
+    let mut due: Vec<(String, String)> = Vec::new();
+    for (id, unsent) in s.unsent.iter().filter(|(_, u)| u.redelivering(now) && feed::attach::missing_upload(&u.error).is_none()) {
+        if !due.iter().any(|(seen, _)| seen == id) {
+            due.push((id.clone(), unsent.key.clone()));
+        }
+    }
+    let flying: Vec<String> = s.in_flight.keys().cloned().collect();
+    s.redeliver.retain(|id, _| due.iter().any(|(d, _)| d == id) || flying.contains(id));
+    if s.client.is_none() {
+        return;
+    }
+    for (id, key) in due {
+        if sending(s, &id) || closed(s, &id) {
+            continue;
+        }
+        let clock = s.clock;
+        if s.redeliver.entry(id.clone()).or_insert_with(|| feed::composer::Backoff::starting(clock)).due <= clock {
+            retry_key(s, &id, &key, true, tx);
+        }
     }
 }
 
@@ -892,8 +981,16 @@ pub fn send_as_new(s: &mut App, id: &str, tx: &mut Tx) {
     }
     clear_sent(s, id, &unsent);
     s.unsent.remove(id, &unsent.key);
-    let mut pending = Unsent { draft: unsent.draft.clone(), ..fresh(s, id, unsent.text, unsent.attachments) };
+    let mut pending = Unsent { draft: unsent.draft.clone(), turn: unsent.turn.clone(), ..fresh(s, id, unsent.text, unsent.attachments) };
     pending.busy = steered(unsent.busy, pending.busy);
+    if pending.turn.is_some() && pending.busy == Some(Busy::Steer) {
+        note(s, id, feed::composer::STEER_TURN_OPTIONS.into());
+        pending.busy = Some(Busy::Queue);
+    }
+    if waiting_earlier(s, id) {
+        hold(s, id, pending);
+        return;
+    }
     dispatch(s, id, pending, false, tx);
 }
 
@@ -909,7 +1006,22 @@ pub fn dismiss_unsent(s: &mut App, id: &str) {
 }
 
 fn fresh(s: &App, id: &str, text: String, attachments: Vec<feed::attach::Upload>) -> Unsent {
-    Unsent { session: id.to_string(), text, attachments, key: feed::catalog::request_key(), busy: send_busy(s, id), maybe_delivered: true, error: "the app closed before the daemon answered".into(), tries: 0, pin: feed::holders::pins().get(id), draft: None }
+    Unsent {
+        session: id.to_string(),
+        text,
+        attachments,
+        key: feed::catalog::request_key(),
+        busy: send_busy(s, id),
+        maybe_delivered: true,
+        error: "the app closed before the daemon answered".into(),
+        tries: 0,
+        pin: feed::holders::pins().get(id),
+        draft: None,
+        turn: None,
+        sent_at: feed::composer::now_ms(),
+        order: feed::composer::send_stamp(feed::composer::now_ms()),
+        unanswered: true,
+    }
 }
 
 pub fn send_busy(s: &App, id: &str) -> Option<Busy> {
@@ -929,13 +1041,14 @@ fn dispatch(s: &mut App, id: &str, pending: Unsent, resent: bool, tx: &mut Tx) {
         settle(s, &id, &pending.key);
         put_back(s, &id, &pending);
         let maybe_delivered = resent && pending.maybe_delivered;
-        s.unsent.add(&id, Unsent { maybe_delivered, error: format!("the message couldn't be saved first ({error})"), ..pending });
+        s.unsent.add(&id, Unsent { maybe_delivered, unanswered: false, error: format!("the message couldn't be saved first ({error})"), ..pending });
+        over::layout::save(s);
         return;
     }
     tx.scroll_to_bottom(format!("transcript-{id}"));
     let out = s.outbox.clone();
     std::thread::spawn(move || {
-        let result = client.send_receipt(&pending.session, &pending.text, &pending.ids(), pending.busy, pending.pin, &pending.key);
+        let result = client.send_receipt(&pending.session, &pending.text, &pending.ids(), pending.busy, pending.turn.as_ref(), pending.pin, &pending.key);
         let _ = out.send(Bg::Sent(id, pending, resent, result));
     });
 }
@@ -1003,7 +1116,13 @@ pub fn composer_note(s: &App, id: &str) -> Option<String> {
     {
         parts.push(latest.quoted());
     }
-    parts.extend(s.unsent.note(id));
+    let now = feed::composer::now_ms();
+    let waiting: Vec<&Unsent> = s.unsent.list(id).iter().filter(|u| u.redelivering(now)).collect();
+    match waiting.as_slice() {
+        [] => parts.extend(s.unsent.note(id)),
+        [first] => parts.push(format!("Not confirmed yet: {}. Sending again automatically.", first.error)),
+        [first, ..] => parts.push(format!("{} messages waiting. Not confirmed yet: {}. Sending them in order automatically.", waiting.len(), first.error)),
+    }
     let queued = s.queued.get(id).into_iter().flatten().find_map(|(at, receipt)| feed::composer::queued_note(&s.queue_rows, &s.rekeyed, id, receipt, s.snapshots >= at + 2));
     if !parts.is_empty() {
         parts.extend(queued);
@@ -1045,7 +1164,7 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
     settle(s, &id, &pending.key);
     s.unsent.remove(&id, &pending.key);
     let failure = match result {
-        Ok(Delivered::Unconfirmed) => Some((true, true, "the daemon took it but hasn't confirmed delivery".to_string())),
+        Ok(Delivered::Unconfirmed) => Some((true, true, "the daemon took it but hasn't confirmed delivery".to_string(), false)),
         Ok(receipt @ (Delivered::Queued(_) | Delivered::QueuedUntilAnswer(_))) => {
             s.status_line.remove(&id);
             s.queued.entry(id.clone()).or_default().push((s.snapshots, receipt));
@@ -1057,12 +1176,23 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
             ui::complete::delivered(s, &id, &pending.text);
             None
         }
-        Err(error) => Some((error.maybe_delivered, error.answered, error.message)),
+        Err(error) => Some((error.maybe_delivered, error.answered, error.message.clone(), feed::composer::redelivers(&error))),
     };
-    if let Some((maybe_delivered, answered, error)) = failure {
-        let failed = pending.failed(retry, maybe_delivered, answered, error);
-        put_back(s, &id, &failed);
-        s.unsent.add(&id, failed);
+    let clock = s.clock;
+    match failure {
+        Some((maybe_delivered, answered, error, again)) => {
+            let failed = Unsent { unanswered: again, ..pending.failed(retry, maybe_delivered, answered, error) };
+            if failed.redelivering(feed::composer::now_ms()) {
+                s.redeliver.entry(id.clone()).or_insert_with(|| feed::composer::Backoff::starting(clock)).failed(clock);
+                s.unsent.add(&id, failed);
+            } else {
+                put_back(s, &id, &failed);
+                s.unsent.add(&id, failed);
+            }
+        }
+        None => {
+            s.redeliver.insert(id.clone(), feed::composer::Backoff::starting(clock));
+        }
     }
 }
 
@@ -1105,7 +1235,8 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &ui::paste::draft(s));
     }
-    let mut restored: Vec<(String, String)> = s.unsent.iter().filter(|(id, u)| ui::paste::expand(s.drafts.get(id)).trim() == u.text).map(|(id, u)| (id.clone(), ui::paste::unsent_draft(u))).collect();
+    let now = feed::composer::now_ms();
+    let mut restored: Vec<(String, String)> = s.unsent.iter().filter(|(id, u)| !u.redelivering(now) && ui::paste::expand(s.drafts.get(id)).trim() == u.text).map(|(id, u)| (id.clone(), ui::paste::unsent_draft(u))).collect();
     restored.dedup_by(|a, b| a.0 == b.0);
     for (id, _) in &restored {
         s.drafts.set(id, "");
@@ -1141,6 +1272,8 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
         ui::complete::rekey(s, &old, &new);
         move_key(&mut s.status_line, &old, &new);
         move_key(&mut s.busy_pick, &old, &new);
+        move_key(&mut s.redeliver, &old, &new);
+        ui::turn_options::rekey(s, &old, &new);
         move_key(&mut s.work_pick, &old, &new);
         move_member(&mut s.stopping, &old, &new);
         move_key(&mut s.queue_note, &old, &new);
@@ -1377,6 +1510,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s) | ui::inspect::drain(s);
     changed |= ui::role::drain(s);
     changed |= ui::attach::pump(s);
+    changed |= ui::text_size::pump(s);
+    redeliver(s, tx);
+    changed |= transcript::take_behind_moved();
     changed |= over::extensions::drain(s);
     changed |= over::projects::drain(s);
     if s.ov.live.tail_retry_due() {

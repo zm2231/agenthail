@@ -87,6 +87,54 @@ pub struct Pane {
 }
 
 static PANES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+static FOCUS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+const BEHIND_PX: f32 = 120.0;
+
+thread_local! {
+    static BEHIND: std::cell::RefCell<(String, bool, bool)> = const { std::cell::RefCell::new((String::new(), false, false)) };
+}
+
+pub fn focused() -> bool {
+    FOCUS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn restore_focus(on: bool) {
+    FOCUS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn set_focus(s: &mut App, on: bool) {
+    if focused() == on {
+        return;
+    }
+    restore_focus(on);
+    let mut counter = s.counter;
+    for pane in s.panes.values_mut() {
+        pane.rebuild(&mut counter);
+    }
+    s.counter = counter;
+    s.panes_moved = true;
+    crate::over::layout::save(s);
+}
+
+fn watch_end(id: String) -> impl Fn(rune::ScrollPos) + 'static {
+    move |at| {
+        crate::trace::scroll(at);
+        let hidden = at.max[1] - at.offset[1] > BEHIND_PX;
+        BEHIND.with_borrow_mut(|b| {
+            if b.0 != id || b.1 != hidden {
+                *b = (id.clone(), hidden, true);
+            }
+        });
+    }
+}
+
+fn behind(id: &str) -> bool {
+    BEHIND.with_borrow(|b| b.0 == id && b.1)
+}
+
+pub fn take_behind_moved() -> bool {
+    BEHIND.with_borrow_mut(|b| std::mem::take(&mut b.2))
+}
 
 impl Pane {
     pub fn new() -> Self {
@@ -109,7 +157,7 @@ impl Pane {
     }
 
     pub fn rebuild(&mut self, counter: &mut u64) {
-        let Some((start, tail)) = self.transcript.tail(true) else { return };
+        let Some((start, tail)) = self.transcript.tail(focused()) else { return };
         let start = start.min(self.blocks.len());
         let previous: HashMap<&str, usize> = self.blocks[start..].iter().enumerate().map(|(i, b)| (b.id.as_str(), start + i)).collect();
         let mut revs = Vec::with_capacity(tail.len());
@@ -227,7 +275,14 @@ fn entry_el(cx: &Cx, block: &str, entry: &Entry) -> El {
     if !expanded {
         return line_el;
     }
-    col().w_full().gap(4.0).child(line_el).child(col().w_full().pl(10.0).pb(6.0).gap(8.0).children(entry.bodies().into_iter().map(|(label, item)| entry_body(cx, label, item))))
+    let call_id = match entry {
+        Entry::Call { call, results } => std::iter::once(call).chain(results).find_map(|i| i.call_id.clone()),
+        Entry::Output(item) => item.call_id.clone(),
+        Entry::Reasoning(_) => None,
+    }
+    .filter(|c| !c.is_empty());
+    let copy_id = call_id.map(|call| row().child(action(format!("copy-call-{}", entry.id()), &icons::TERMINAL, "Copy call ID").help(call.clone()).on_press_tx(crate::history::copy(call))));
+    col().w_full().gap(4.0).child(line_el).child(col().w_full().pl(10.0).pb(6.0).gap(8.0).children(copy_id).children(entry.bodies().into_iter().map(|(label, item)| entry_body(cx, label, item))))
 }
 
 fn toggle_in(id: String, block: String) -> impl Fn(&mut App) + 'static {
@@ -435,6 +490,7 @@ fn footer(cx: &Cx, block: &Block) -> Option<El> {
     };
     let mut tools = row().gap(2.0).items_center().group_opacity(0.0, 1.0);
     tools = tools.child(action(format!("copy-{item}"), &icons::COPY, "Copy").on_press_tx(crate::history::copy(body.clone())));
+    tools = tools.child(action(format!("share-{item}"), &icons::SHARE, "Share").on_press_tx(crate::history::share(cx.session.to_string(), format!("share-{item}"), body.clone())));
     let images = cx.pane.transcript.images_with(item);
     if user && images > 0 {
         tools = tools.child(action(format!("edit-{item}"), &icons::PENCIL, "Edit").opacity(0.45).help("Edit would resend this message without its images"));
@@ -443,7 +499,11 @@ fn footer(cx: &Cx, block: &Block) -> Option<El> {
     }
     let mut line = row().gap(6.0).items_center().pt(2.0);
     if let Some(full) = cx.pane.transcript.item(item).filter(|i| i.truncated && i.body_ref.is_some()) {
-        line = body_tools(cx, full, line);
+        line = body_tools(cx, full, line).child(
+            action(format!("share-{item}"), &icons::SHARE, "Share")
+                .help("Shares what has loaded so far; Show all loads the rest first")
+                .on_press_tx(crate::history::share(cx.session.to_string(), format!("share-{item}"), full.text.clone())),
+        );
         return Some(if user { col().w_full().items_end().child(line) } else { line });
     }
     let line = line.child(tools);
@@ -521,11 +581,32 @@ pub fn view(s: &App, id: &str) -> El {
     );
     let watch = id.to_string();
     let stack = stack.on_visible_rows(move |s: &mut App, rows| crate::history::seen_rows(s, &watch, rows.start));
-    let mut scroll = col().key(format!("transcript-{id}")).w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: true }).on_scroll_offset(crate::trace::scroll).on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_view(r));
+    let mut scroll = col().key(format!("transcript-{id}")).w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: true }).on_scroll_offset(watch_end(id.to_string())).on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_view(r));
     if let Some(earlier) = earlier_el(s, id) {
         scroll = scroll.child(earlier);
     }
-    scroll.child(stack)
+    let scroll = scroll.child(stack);
+    let frame = col().w_full().grow(1.0).min_h(0.0).child(scroll);
+    if !behind(id) {
+        return frame;
+    }
+    let target = format!("transcript-{id}");
+    let jump = row()
+        .key("jump-to-latest")
+        .gap(6.0)
+        .items_center()
+        .px(10.0)
+        .py(6.0)
+        .radius(14.0)
+        .fill(crate::theme::raised())
+        .border(1.0, line())
+        .hover(crate::theme::ink(0.08))
+        .role("button")
+        .label("Jump to latest")
+        .on_press_tx(move |_: &mut App, tx: &mut rune::Tx| tx.scroll_to_bottom(target.clone()))
+        .child(icon(&icons::ARROW_DOWN, 12.0).color(muted()))
+        .child(text("Jump to latest").font(META).color(muted()));
+    frame.child(col().absolute(0.0, 0.0).w_full().h_full().items_end().justify_end().px(28.0).pb(s.cover.reserve() + 12.0).child(jump))
 }
 
 pub fn loading(note: String) -> El {
