@@ -348,6 +348,7 @@ fn covered(s: &App) -> bool {
         || s.ov.notice.is_some()
         || s.new_session.is_some()
         || s.ov.inbox.note.is_some()
+        || s.ov.work.words.is_some()
         || menus.open.is_some()
         || menus.chip.is_some()
         || menus.confirm.is_some()

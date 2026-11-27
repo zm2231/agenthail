@@ -55,6 +55,7 @@ pub struct Over {
     pub ext: extensions::State,
     pub search: search::State,
     pub projects: projects::State,
+    pub work: work::State,
 }
 
 impl Over {
@@ -92,6 +93,7 @@ impl Over {
             ext: extensions::State::new(),
             search: search::State::default(),
             projects: projects::State::default(),
+            work: work::State::default(),
         }
     }
 
@@ -224,6 +226,10 @@ pub fn open_jump(s: &mut App, tx: &mut Tx) {
     tx.focus("jump-input", false);
 }
 
+pub fn note_open(s: &App) -> bool {
+    s.ov.inbox.note.is_some() || s.ov.work.words.is_some()
+}
+
 pub fn work_review(s: &App, id: &str) -> Option<feed::decisions::Decision> {
     let w = s.ov.d.work.get(id)?;
     let inbox = s.ov.inbox.inbox.as_ref()?;
@@ -261,6 +267,7 @@ pub fn overlays(s: &App, layer: &mut Vec<El>) {
         layer.push(ui::notice(n));
     }
     decisions::note_dialog(s, layer);
+    work::words_dialog(s, layer);
     projects::overlays(s, layer);
     extension_sheets::overlays(s, layer);
 }
@@ -279,6 +286,13 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     if s.ov.inbox.note.is_some() {
         if matches!(ev.key, Key::Escape) {
             s.ov.inbox.note = None;
+            return true;
+        }
+        return false;
+    }
+    if s.ov.work.words.is_some() {
+        if matches!(ev.key, Key::Escape) {
+            s.ov.work.words = None;
             return true;
         }
         return false;

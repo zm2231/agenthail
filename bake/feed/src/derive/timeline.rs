@@ -11,6 +11,10 @@ pub struct Step<'a> {
 
 fn what(t: &Entry, moved_back: bool) -> String {
     let text = match (t.kind.as_str(), t.state.as_deref()) {
+        ("state", Some("parked")) => match t.text.as_deref().and_then(park_why) {
+            Some(why) => format!("Parked: {why}"),
+            None => format!("Moved to {}", state_word("parked")),
+        },
         ("state", Some(st)) if moved_back => format!("Moved back to {}", state_word(st)),
         ("state", Some(st)) => format!("Moved to {}", state_word(st)),
         ("created", _) => "Created".into(),
@@ -18,6 +22,17 @@ fn what(t: &Entry, moved_back: bool) -> String {
         _ => t.text.clone().unwrap_or_default(),
     };
     plain(&text)
+}
+
+fn is_handoff(text: &str) -> bool {
+    text.ends_with(']') && [", remaining [", ", decisions [", ", uncertain ["].iter().all(|k| text.contains(k))
+}
+
+fn park_why(text: &str) -> Option<&str> {
+    let start = text.find("parked (")?;
+    let part = &text[start..];
+    let part = part.rfind("; handoff: done [").filter(|&end| is_handoff(&part[end + 2..])).map_or(part, |end| &part[..end]);
+    part.split_once("): ").map(|(_, why)| why).filter(|w| !w.is_empty())
 }
 
 pub fn timeline(w: &Work, max: usize) -> Vec<Step<'_>> {

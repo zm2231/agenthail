@@ -1,9 +1,14 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::mpsc::{Receiver, Sender, channel};
 
-use rune::{Cx, El, ScrollSpec, col, el, icon, row, text};
+use rune::{Cx, El, ScrollSpec, TextEdit, Tx, col, el, icon, row, text, text_input};
 use rune_kit::shell::Toolbar;
-use rune_kit::{Button, ButtonVariant, ControlSize};
+use rune_kit::{Button, ButtonVariant, ControlSize, Dialog};
 use rune_theme_opencode::icons;
+use serde_json::Value;
+
+use feed::catalog::RespondError;
+use feed::ledger::{self, Move};
 
 use feed::derive::phase::{CHECK, SHIP, phase};
 use feed::derive::proof::proof;
@@ -61,7 +66,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
         .w_full()
         .gap(8.0)
         .child({
-            let mut r = row().gap(8.0).items_center().child(phase_badge(phase)).child(ui::id_label(&short_id(&w.id))).child(ui::chip(&icons::TASK, &format!("{} · {}", w.priority, w.kind)));
+            let mut r = row().gap(8.0).items_center().child(if w.state == "closed" { ui::pill(&icons::STATUS, "Closed", weak()) } else { phase_badge(phase) }).child(ui::id_label(&short_id(&w.id))).child(ui::chip(&icons::TASK, &format!("{} · {}", w.priority, w.kind)));
             if let Some(c) = &commit {
                 r = r.child(ui::chip(&icons::BRANCH, c));
             }
@@ -90,29 +95,38 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
             .padding(20.0)
             .child(row().gap(8.0).items_center().child(ui::pill(&icons::CHECKLIST, &heading, if held.is_some() { k.c.text_accent } else { k.c.warning.icon })).child(text(format!("submitted {} ago", s.ov.d.ago(&w.submitted_at()))).font(META).color(weak())))
             .child(text("Does this revision do what was agreed?".to_string()).font(HEAD.lh(22.0)).color(strong()))
-            .child(
+            .children((!w.acceptance.trim().is_empty()).then(|| {
                 col()
                     .w_full()
                     .gap(4.0)
                     .pl(12.0)
                     .border_sides([0.0, 0.0, 0.0, 2.0], k.c.border_strong)
                     .child(text("What was asked".to_string()).font(META_MED).color(weak()))
-                    .child(text(plain(&w.acceptance)).font(BODY).color(base()).wrap()),
-            )
+                    .child(text(plain(&w.acceptance)).font(BODY).color(base()).wrap())
+            }))
             .child(verdict_row(s, w, listed.as_ref(), &revision))
             .child(links)
             .child(row().gap(6.0).items_center().child(icon(&icons::INFO, 13.0).color(weak())).child(text(format!("Approval covers {revision} only. A new commit asks again. Merging is a separate step.").to_string()).font(META).color(weak())));
         col().w_full().radius(14.0).fill(k.c.surface_raised).border(1.0, k.c.warning.icon.alpha(0.4)).child(c)
     } else {
-        ui::card(col().w_full().padding(16.0).gap(8.0).child(text(format!("{}'s move. Nothing waits on you yet.", s.ov.d.whose_move(w))).font(BODY_MED).color(strong())).child(links))
+        ui::card(col().w_full().padding(16.0).gap(8.0).child(text(match s.ov.d.whose_move(w).as_str() {
+            _ if w.state == "parked" => "Parked. It's off the board until someone unparks it.".to_string(),
+            _ if w.state == "closed" => "Closed without shipping. Reopen it to put it back on the board.".to_string(),
+            "You" => "Your move. You hold it.".to_string(),
+            whose => format!("{whose}'s move. Nothing waits on you yet."),
+        }).font(BODY_MED).color(strong())).child(links))
     };
 
     let first_result = w.timeline.iter().rev().find(|t| t.kind == "log" && t.log_type.as_deref() == Some("result")).and_then(|t| t.text.clone()).unwrap_or_default();
-    let brief_rows = [
-        ("What was asked", plain(w.acceptance.split(": ").next().unwrap_or(&w.acceptance))),
+    let asked = plain(w.acceptance.split(": ").next().unwrap_or(&w.acceptance));
+    let brief_rows: Vec<(&str, String)> = [
+        ("What was asked", asked),
         ("What was built", crate::over::clip_words(&plain(&first_result), 150)),
         ("Before you approve", format!("{passed} of {} checks have a recorded pass. {} raised after it was submitted.", steps.len(), if unchecked.is_empty() { "Nothing was".to_string() } else { format!("{} thing{} {}", unchecked.len(), if unchecked.len() == 1 { "" } else { "s" }, if unchecked.len() == 1 { "was" } else { "were" }) })),
-    ];
+    ]
+    .into_iter()
+    .filter(|(_, b)| !b.trim().is_empty())
+    .collect();
     let mut brief = col().w_full().gap(2.0).padding(8.0);
     for (i, (t, b)) in brief_rows.iter().enumerate() {
         brief = brief.child(
@@ -156,7 +170,8 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
         .pt(22.0)
         .pb(48.0)
         .child(goal)
-        .child(ui::card(col().w_full().padding(18.0).child(ui::stepper(phase, &s.ov.d.whose_move(w)))))
+        .children(moves(s, w))
+        .children((w.state != "closed").then(|| ui::card(col().w_full().padding(18.0).child(ui::stepper(phase, &s.ov.d.whose_move(w))))))
         .child(waiting)
         .child(brief)
         .child(proof)
@@ -270,4 +285,220 @@ fn timeline(s: &App, w: &crate::over::Work, max: usize) -> El {
         );
     }
     c
+}
+
+type Done = (String, Move, String, Result<Value, RespondError>);
+
+pub struct Words {
+    item: String,
+    title: String,
+    m: Move,
+    text: TextEdit,
+}
+
+struct Pending {
+    words: String,
+    key: String,
+    unconfirmed: bool,
+    before: usize,
+}
+
+pub struct State {
+    tx: Sender<Done>,
+    rx: Receiver<Done>,
+    acting: HashSet<String>,
+    notes: HashMap<String, (bool, String)>,
+    keys: HashMap<(String, Move), Pending>,
+    pub words: Option<Words>,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        let (tx, rx) = channel();
+        State { tx, rx, acting: HashSet::new(), notes: HashMap::new(), keys: HashMap::new(), words: None }
+    }
+}
+
+fn start(s: &mut App, id: &str, m: Move) {
+    let Some(w) = s.ov.d.work.get(id) else { return };
+    if !m.needs_words() {
+        send(s, id, m, "");
+        return;
+    }
+    let mut text = TextEdit::new(pending_words(s, id, m).unwrap_or_default());
+    text.focused = true;
+    s.composer.focused = false;
+    s.ov.work.words = Some(Words { item: id.into(), title: plain(&w.text), m, text });
+}
+
+fn changed_while_held(s: &App, n: &Words) -> bool {
+    pending_words(s, &n.item, n.m).is_some_and(|said| said != n.text.text.trim())
+}
+
+fn pending_words<'a>(s: &'a App, id: &str, m: Move) -> Option<&'a str> {
+    s.ov.work.keys.get(&(id.to_string(), m)).filter(|p| p.unconfirmed).map(|p| p.words.as_str())
+}
+
+fn send_words(s: &mut App) {
+    let Some(n) = &s.ov.work.words else { return };
+    if ledger::words_problem(n.m, &n.text.text).is_some() || changed_while_held(s, n) {
+        return;
+    }
+    let (id, m, words) = (n.item.clone(), n.m, n.text.text.trim().to_string());
+    s.ov.work.words = None;
+    send(s, &id, m, &words);
+}
+
+fn send(s: &mut App, id: &str, m: Move, words: &str) {
+    let Some(w) = s.ov.d.work.get(id).cloned() else { return };
+    if s.ov.work.acting.contains(id) || !ledger::offered(&w).contains(&m) || held(s, id).is_some_and(|h| h != m) {
+        return;
+    }
+    let Some(client) = s.client.clone() else {
+        s.ov.work.notes.insert(id.into(), (true, "Fixture mode: not sent".into()));
+        return;
+    };
+    let slot = (id.to_string(), m);
+    let key = match s.ov.work.keys.get(&slot) {
+        Some(p) if p.words == words => p.key.clone(),
+        _ => {
+            let key = feed::catalog::request_key();
+            s.ov.work.keys.insert(slot, Pending { words: words.to_string(), key: key.clone(), unconfirmed: false, before: ledger::said(&w, words) });
+            key
+        }
+    };
+    s.ov.work.acting.insert(id.into());
+    s.ov.work.notes.remove(id);
+    let (tx, id, words) = (s.ov.work.tx.clone(), id.to_string(), words.to_string());
+    std::thread::spawn(move || {
+        let result = client.work_move(&w, m, &words, &key);
+        let _ = tx.send((id, m, words, result));
+    });
+}
+
+fn held(s: &App, id: &str) -> Option<Move> {
+    s.ov.work.keys.iter().find(|((item, _), p)| item == id && p.unconfirmed).map(|((_, m), _)| *m)
+}
+
+fn send_new(s: &mut App, id: &str, m: Move) {
+    if s.ov.work.acting.contains(id) || !s.ov.d.work.get(id).is_some_and(|w| ledger::offered(w).contains(&m)) {
+        return;
+    }
+    let Some(p) = s.ov.work.keys.remove(&(id.to_string(), m)) else { return };
+    send(s, id, m, &p.words);
+}
+
+fn settle(s: &mut App) -> bool {
+    let (d, st) = (&s.ov.d, &mut s.ov.work);
+    let landed: Vec<(String, Move, String)> = st
+        .keys
+        .iter()
+        .filter(|((id, _), p)| p.unconfirmed && !st.acting.contains(id))
+        .filter_map(|((id, m), p)| d.work.get(id).filter(|w| ledger::landed(w, *m, &p.words, p.before)).map(|w| (id.clone(), *m, ledger::settled_note(w, *m))))
+        .collect();
+    for (id, m, note) in &landed {
+        st.keys.remove(&(id.clone(), *m));
+        st.notes.insert(id.clone(), (false, note.clone()));
+    }
+    !landed.is_empty()
+}
+
+pub fn drain(s: &mut App) -> bool {
+    let mut changed = settle(s);
+    while let Ok((id, m, _words, result)) = s.ov.work.rx.try_recv() {
+        changed = true;
+        let st = &mut s.ov.work;
+        st.acting.remove(&id);
+        match result {
+            Ok(_) => {
+                st.keys.remove(&(id.clone(), m));
+                st.notes.insert(id, (false, m.done().into()));
+                crate::ask_overview(s, crate::Ask::Refresh);
+            }
+            Err(e) if e.maybe_delivered => {
+                let slot = (id.clone(), m);
+                let again = st.keys.get(&slot).is_some_and(|p| p.unconfirmed);
+                if let Some(p) = st.keys.get_mut(&slot) {
+                    p.unconfirmed = true;
+                }
+                st.notes.insert(id, (true, ledger::unconfirmed(&e, again)));
+                crate::ask_overview(s, crate::Ask::Refresh);
+            }
+            Err(e) if !ledger::settles(&e) && st.keys.get(&(id.clone(), m)).is_some_and(|p| p.unconfirmed) => {
+                st.notes.insert(id, (true, ledger::unreached(&e)));
+            }
+            Err(e) => {
+                st.keys.remove(&(id.clone(), m));
+                st.notes.insert(id, (true, format!("Not done: {}", ledger::refusal(&e))));
+            }
+        }
+    }
+    changed
+}
+
+fn moves(s: &App, w: &crate::over::Work) -> Option<El> {
+    let offered = ledger::offered(w);
+    let note = s.ov.work.notes.get(&w.id);
+    if offered.is_empty() && note.is_none() {
+        return None;
+    }
+    let k = kit();
+    let busy = s.ov.work.acting.contains(&w.id);
+    let held = held(s, &w.id);
+    let mut r = row().w_full().gap(8.0).items_center().flex_wrap();
+    for m in offered {
+        let id = w.id.clone();
+        let variant = if matches!(m, Move::Claim | Move::Submit | Move::Reopen) { ButtonVariant::Outline } else { ButtonVariant::Ghost };
+        r = r.child(Button::new(m.label()).variant(variant).control_size(ControlSize::Small).disabled(busy || held.is_some_and(|h| h != m)).on_press(move |s: &mut App| start(s, &id, m)).build(k).key(format!("work-move-{m:?}")));
+    }
+    if let Some(m) = held.filter(|m| !busy && ledger::offered(w).contains(m)) {
+        let id = w.id.clone();
+        r = r.child(Button::new("Send as new").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).help("Sends it again as a fresh request, so it can show up twice if the first one landed").on_press(move |s: &mut App| send_new(s, &id, m)).build(k).key("work-send-new"));
+    }
+    if busy {
+        r = r.child(text("Sending…".to_string()).font(META).color(weak()));
+    } else if let Some((failed, n)) = note {
+        r = r.child(text(n.clone()).font(META).color(if *failed { ui::needs_color() } else { base() }).wrap().shrink());
+    }
+    Some(r)
+}
+
+pub fn words_dialog(s: &App, layer: &mut Vec<El>) {
+    let Some(n) = &s.ov.work.words else { return };
+    let k = kit();
+    let held = changed_while_held(s, n);
+    let problem = ledger::words_problem(n.m, &n.text.text).or(held.then_some(ledger::CHANGED_WORDS));
+    let (title, label, placeholder, yes, about) = match n.m {
+        Move::Park => ("Park", "Why it waits", "What should happen before anyone picks this up?", "Park", "It leaves the board until someone unparks it."),
+        _ => ("Comment on", "Comment", "Your note for whoever works on this", "Add comment", "It goes on the item's timeline, where its workers read it."),
+    };
+    let input = text_input(&n.text, BODY)
+        .key("work-words-input")
+        .label(label)
+        .w_full()
+        .min_h(72.0)
+        .color(strong())
+        .placeholder(placeholder, weak())
+        .on_edit(|s: &mut App| &mut s.ov.work.words.as_mut().expect("the dialog is open").text)
+        .on_submit(|s: &mut App, _: &mut Tx| send_words(s));
+    let field = col().w_full().px(10.0).py(8.0).radius(8.0).fill(k.c.surface_base).border(1.0, ui::rule()).child(input);
+    let buttons = row()
+        .w_full()
+        .gap(8.0)
+        .child(el().grow(1.0))
+        .child(Button::new("Cancel").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(|s: &mut App| s.ov.work.words = None).build(k).key("work-words-cancel"))
+        .child(Button::new(yes).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(problem.is_some()).on_press(send_words).build(k).key("work-words-send"));
+    let mut body = col().w_full().gap(10.0).px(16.0).pb(16.0).child(field);
+    if held {
+        body = body.child(text(ledger::CHANGED_WORDS.to_string()).font(META).color(ui::needs_color()).wrap().w_full());
+    }
+    let body = body.child(buttons);
+    Dialog::new("work-words", format!("{title} {}", ui::short_title(&n.title, 48)))
+        .description(about)
+        .open(true)
+        .fit()
+        .width(460.0)
+        .on_close(|s: &mut App| s.ov.work.words = None)
+        .child(body)
+        .build(k, layer);
 }

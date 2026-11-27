@@ -1526,6 +1526,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     }
     changed |= ui::session_menu::drain(s);
     changed |= over::inbox::drain(s);
+    changed |= over::work::drain(s);
     changed |= over::search::drain(s);
     changed |= notify::tick(s);
     changed |= ui::gone::watch(s);
@@ -1561,6 +1562,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
 }
 
 fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
+    if over::note_open(s) {
+        return over::on_key(s, ev, tx);
+    }
     if ev.is_command(',') {
         settings::open();
         return true;

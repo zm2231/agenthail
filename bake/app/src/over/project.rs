@@ -41,7 +41,7 @@ pub fn work_card(s: &App, w: &Work, compact: bool) -> El {
     let who = match phase {
         CHECK => "Your move".to_string(),
         SHIP => "Shipped".to_string(),
-        _ => format!("{}'s move", ui::short_title(&whose, 22)),
+        _ => feed::derive::phase::move_of(&ui::short_title(&whose, 22)),
     };
     let mut c = col()
         .key(format!("w-{}", w.id))
