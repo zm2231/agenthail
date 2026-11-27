@@ -18,6 +18,7 @@ pub enum Act {
     Snooze(crate::snooze::For),
     Wake,
     MakeLead,
+    Process(crate::inspect::LifecycleAct),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -184,6 +185,9 @@ pub fn offered(x: &Session, offer: Offer) -> Vec<Vec<Entry>> {
         open.push(entry);
     }
     let mut groups = vec![open];
+    if let Some(process) = process(x) {
+        groups.push(vec![process]);
+    }
     if !x.read_only {
         groups.push(pull_requests(x));
     }
@@ -206,6 +210,13 @@ fn snooze(x: &Session, now: time::OffsetDateTime) -> Entry {
     let mut entry = Entry::on(Act::Snooze(crate::snooze::For::Hour), "Snooze");
     entry.sub = crate::snooze::choices(x).into_iter().map(|c| Entry::on(Act::Snooze(c), c.label())).collect();
     entry
+}
+
+fn process(x: &Session) -> Option<Entry> {
+    let lifecycle = crate::inspect::lifecycle(x);
+    let sub: Vec<Entry> = crate::inspect::LifecycleAct::ALL.into_iter().filter(|a| a.offered(lifecycle)).map(|a| Entry::on(Act::Process(a), if a == crate::inspect::LifecycleAct::Logs { "Logs…" } else { a.label() })).collect();
+    let first = sub.first()?.act.clone();
+    Some(Entry { sub, ..Entry::on(first, crate::inspect::lifecycle_title(x)) })
 }
 
 pub fn make_lead(x: &Session, leads_it: bool) -> Option<Entry> {
@@ -353,6 +364,27 @@ mod tests {
     #[test]
     fn a_plain_session_offers_rename_pin_and_archive() {
         assert_eq!(labels(&session()), vec![vec!["Rename…"], vec!["Link a pull request…"], vec!["Pin", "Snooze", "Archive"]]);
+    }
+
+    #[test]
+    fn the_process_submenu_offers_what_the_runtime_does_and_nothing_when_closed() {
+        let mut x = session();
+        x.runtime_kind = Some("claude-host".into());
+        x.capabilities.lifecycle = crate::catalog::Lifecycle { status: true, logs: true, stop: true, resume: true, adopt: false };
+        let groups = entries(&x);
+        let process = &groups[1][0];
+        assert_eq!(process.label, "Process");
+        assert_eq!(process.sub.iter().map(|e| e.label.as_str()).collect::<Vec<_>>(), ["Status", "Logs…", "Stop", "Resume"]);
+        assert_eq!(process.sub[2].act, Act::Process(crate::inspect::LifecycleAct::Stop));
+        x.runtime_kind = Some("claude-bg".into());
+        x.capabilities.lifecycle = crate::catalog::Lifecycle { stop: true, ..Default::default() };
+        let groups = entries(&x);
+        assert_eq!((groups[1][0].label.as_str(), groups[1][0].sub.len()), ("Background session", 1));
+        x.read_only = true;
+        assert!(!entries(&x).concat().iter().any(|e| matches!(e.act, Act::Process(_))));
+        x.read_only = false;
+        x.capabilities.lifecycle = crate::catalog::Lifecycle { resume: true, adopt: true, ..Default::default() };
+        assert_eq!(entries(&x)[1][0].sub.len(), 1);
     }
 
     #[test]

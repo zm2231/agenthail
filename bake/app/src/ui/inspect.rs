@@ -16,7 +16,7 @@ use crate::{App, session};
 pub enum Done {
     Meta(String, u64, Result<Metadata, String>),
     Goal(String, GoalAct, Result<bool, RespondError>),
-    Life(String, u64, LifecycleAct, Result<LifecycleResult, RespondError>),
+    Life(String, u64, LifecycleAct, bool, Result<LifecycleResult, RespondError>),
     Status(String, u64, Result<LifecycleResult, RespondError>),
 }
 
@@ -167,7 +167,7 @@ fn save_editor(s: &mut App) {
     close_editor(s);
 }
 
-fn run(s: &mut App, id: &str, act: LifecycleAct) {
+pub(crate) fn run(s: &mut App, id: &str, act: LifecycleAct, tell: bool) {
     if s.client.is_none() {
         s.ov.notice = Some("Fixture mode: not sent".into());
         return;
@@ -184,7 +184,7 @@ fn run(s: &mut App, id: &str, act: LifecycleAct) {
     p.busy = Some(act);
     let generation = p.generation;
     let id = id.to_string();
-    spawn(s, move |c| Done::Life(id.clone(), generation, act, c.lifecycle(&id, act)));
+    spawn(s, move |c| Done::Life(id.clone(), generation, act, tell, c.lifecycle(&id, act)));
 }
 
 fn failure(error: &RespondError) -> String {
@@ -218,9 +218,20 @@ fn settled(s: &mut App, done: Done) {
                 fetch(s, &id, true);
             }
         }
-        Done::Life(id, generation, act, result) => {
+        Done::Life(id, generation, act, tell, result) => {
             let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.generation == generation) else { return };
             p.busy = None;
+            if tell {
+                let line = match &result {
+                    Ok(r) if act == LifecycleAct::Status => Some(r.line()).filter(|l| !l.is_empty()),
+                    Ok(r) if act == LifecycleAct::Resume && r.unchanged == Some(true) => Some(inspect::RESUME_UNCHANGED.to_string()),
+                    Err(error) => Some(format!("{} didn't work: {}", act.label(), failure(error))),
+                    _ => None,
+                };
+                if let Some(line) = line {
+                    s.ov.notice = Some(line);
+                }
+            }
             match result {
                 Ok(result) => {
                     p.error = None;
@@ -334,7 +345,7 @@ fn process_section(s: &App, x: &Session) -> Option<El> {
     }
     let buttons = row().w_full().flex_wrap().gap(6.0).items_center().children(LifecycleAct::ALL.into_iter().filter(|a| a.offered(lifecycle)).map(|act| {
         let id = x.id.clone();
-        small(act.label(), format!("process-{}", act.name()), ButtonVariant::Neutral, busy, move |s: &mut App| run(s, &id, act))
+        small(act.label(), format!("process-{}", act.name()), ButtonVariant::Neutral, busy, move |s: &mut App| run(s, &id, act, false))
     }));
     body = body.child(if busy { buttons.child(text("Working…").font(META).color(faint())) } else { buttons });
     if let Some(error) = p.and_then(|p| p.error.clone()) {
