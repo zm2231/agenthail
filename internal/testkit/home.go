@@ -17,10 +17,11 @@ const (
 	staleAfter = 5 * time.Minute
 )
 
-// RunInOwnHome runs a test binary in a new HOME it removes afterwards, so no
-// test touches the person's own Agenthail, Claude or Codex state. It also
-// drops the Claude configuration directory and every variable an agent session
-// sets for its children: with them, a fixture writes into the real
+// RunInOwnHome runs a test binary in a new HOME, with its TMPDIR inside, and
+// removes it afterwards, so no test touches the person's own Agenthail, Claude
+// or Codex state, and a killed binary's leftovers sit in one marked folder.
+// It also drops the Claude configuration directory and every variable an agent
+// session sets for its children: with them, a fixture writes into the real
 // configuration directory and takes the enclosing session as its caller. Go's
 // caches stay where they were, or a test that runs the go command downloads
 // every module again.
@@ -29,8 +30,9 @@ func RunInOwnHome(run func() int) int {
 		fmt.Fprintf(os.Stderr, "FAIL: keep the go command's caches: %v\n", err)
 		return 1
 	}
-	removeDeadHomes(os.TempDir())
-	home, err := os.MkdirTemp("", homePrefix)
+	base := os.TempDir()
+	removeDeadHomes(base)
+	home, err := os.MkdirTemp(base, homePrefix)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: make the test binary's HOME: %v\n", err)
 		return 1
@@ -40,9 +42,16 @@ func RunInOwnHome(run func() int) int {
 		fmt.Fprintf(os.Stderr, "FAIL: mark the test binary's HOME: %v\n", err)
 		return 1
 	}
+	tmp := filepath.Join(home, "t")
+	if err := os.Mkdir(tmp, 0o700); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: make the test binary's TMPDIR: %v\n", err)
+		return 1
+	}
 	for _, name := range []string{"HOME", "CFFIXED_USER_HOME"} {
 		os.Setenv(name, home)
 	}
+	os.Setenv("TMPDIR", tmp)
+	stopGitAt(tmp, base)
 	for _, name := range []string{"CODEX_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"} {
 		os.Unsetenv(name)
 	}

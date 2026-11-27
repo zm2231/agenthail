@@ -187,13 +187,14 @@ func TestHoldHomeUntilKilled(t *testing.T) {
 		t.Skip("run by TestAKilledTestBinarysHomeIsRemovedByTheNextOne")
 	}
 	fmt.Println(os.Getenv("HOME"))
+	fmt.Println(t.TempDir())
 	time.Sleep(time.Minute)
 }
 
 func TestAKilledTestBinarysHomeIsRemovedByTheNextOne(t *testing.T) {
 	tmp := t.TempDir()
 	env := append(os.Environ(), "TMPDIR="+tmp)
-	killedHome := func() (string, int) {
+	killedHome := func() (string, string, int) {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestHoldHomeUntilKilled$")
 		cmd.Env = append(env, "AGENTHAIL_TESTKIT_HOLD_HOME=1")
 		out, err := cmd.StdoutPipe()
@@ -203,13 +204,18 @@ func TestAKilledTestBinarysHomeIsRemovedByTheNextOne(t *testing.T) {
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
-		home, err := bufio.NewReader(out).ReadString('\n')
+		lines := bufio.NewReader(out)
+		home, err := lines.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		temp, err := lines.ReadString('\n')
 		if err != nil {
 			t.Fatal(err)
 		}
 		cmd.Process.Kill()
 		cmd.Wait()
-		return strings.TrimSpace(home), cmd.Process.Pid
+		return strings.TrimSpace(home), strings.TrimSpace(temp), cmd.Process.Pid
 	}
 	backdate := func(path string) {
 		old := time.Now().Add(-time.Hour)
@@ -228,7 +234,10 @@ func TestAKilledTestBinarysHomeIsRemovedByTheNextOne(t *testing.T) {
 		return home
 	}
 
-	dead, pid := killedHome()
+	dead, deadTemp, pid := killedHome()
+	if !strings.HasPrefix(deadTemp, dead+string(filepath.Separator)) {
+		t.Fatalf("the child's t.TempDir %s is not inside its home %s", deadTemp, dead)
+	}
 	if filepath.Dir(dead) != tmp {
 		t.Fatalf("the child's home %s is not in %s", dead, tmp)
 	}

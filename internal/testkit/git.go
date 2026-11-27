@@ -4,17 +4,21 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
-// StopGitAtTempDir keeps git from looking above the temporary directory for a
+// stopGitAt keeps git from looking above a test's temporary directories for a
 // repository, so a test's folder is never taken for part of a checkout the
 // temporary directory happens to sit in.
-func StopGitAtTempDir() {
-	ceilings := filepath.Clean(os.TempDir())
-	if existing := os.Getenv("GIT_CEILING_DIRECTORIES"); existing != "" {
-		ceilings += string(os.PathListSeparator) + existing
+func stopGitAt(dirs ...string) {
+	ceilings := make([]string, 0, len(dirs)+1)
+	for _, dir := range dirs {
+		ceilings = append(ceilings, filepath.Clean(dir))
 	}
-	os.Setenv("GIT_CEILING_DIRECTORIES", ceilings)
+	if existing := os.Getenv("GIT_CEILING_DIRECTORIES"); existing != "" {
+		ceilings = append(ceilings, existing)
+	}
+	os.Setenv("GIT_CEILING_DIRECTORIES", strings.Join(ceilings, string(os.PathListSeparator)))
 }
 
 // stopGitAutoMaintenance keeps the git commands a test runs from leaving
