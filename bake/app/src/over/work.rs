@@ -394,7 +394,7 @@ pub fn drain(s: &mut App) -> bool {
                 st.notes.insert(id, (true, ledger::unconfirmed(&e, again)));
                 crate::ask_overview(s, crate::Ask::Refresh);
             }
-            Err(e) if !e.answered && st.keys.get(&(id.clone(), m)).is_some_and(|p| p.unconfirmed) => {
+            Err(e) if !ledger::settles(&e) && st.keys.get(&(id.clone(), m)).is_some_and(|p| p.unconfirmed) => {
                 st.notes.insert(id, (true, ledger::unreached(&e)));
             }
             Err(e) => {

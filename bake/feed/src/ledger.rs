@@ -92,8 +92,12 @@ pub fn refusal(e: &RespondError) -> String {
 
 pub const CHANGED_WORDS: &str = "The last send isn't confirmed yet. Changed words go as a new one, so check the timeline first.";
 
+pub fn settles(e: &RespondError) -> bool {
+    e.answered && (400..500).contains(&e.status)
+}
+
 pub fn unreached(e: &RespondError) -> String {
-    format!("Couldn't reach Agenthail: {}. The earlier send is still unconfirmed; pressing again asks about it.", e.message)
+    format!("Agenthail didn't settle it: {}. The earlier send is still unconfirmed; pressing again asks about it.", e.message)
 }
 
 pub fn unconfirmed(e: &RespondError, again: bool) -> String {
@@ -181,7 +185,10 @@ mod tests {
         assert_eq!(unconfirmed(&lost, false), "Sent, not confirmed: Host mac did not answer. Check the timeline; pressing again asks about the same send.");
         let unsent = Client::new("http://127.0.0.1:0", "secret").work_move(&w, Move::Comment, "hi", "k4").unwrap_err();
         assert!(!unsent.answered && !unsent.maybe_delivered);
-        assert!(unreached(&unsent).starts_with("Couldn't reach Agenthail: "));
+        assert!(!settles(&unsent));
+        assert!(!settles(&RespondError::from_status("claim", 500, r#"{"error":{"code":"action_reservation_failed","message":"busy"}}"#)));
+        assert!(settles(&RespondError::from_status("claim", 409, r#"{"error":{"code":"refused","message":"no"}}"#)));
+        assert!(unreached(&unsent).starts_with("Agenthail didn't settle it: "));
         assert!(unreached(&unsent).ends_with("The earlier send is still unconfirmed; pressing again asks about it."));
         assert_eq!(unconfirmed(&lost, true), "Still not confirmed: Host mac did not answer. If the timeline doesn't show it, pressing again sends it as new.");
     }
