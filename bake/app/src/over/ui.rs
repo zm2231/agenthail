@@ -555,7 +555,8 @@ pub fn project_for(s: &App, x: &feed::catalog::Session) -> Option<String> {
 
 pub fn sidebar_order(s: &App, current_project: Option<&str>, selected: Option<&str>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for slot in need_slots(&s.ov.needs, s.ov.looked_now.as_deref(), 4) {
+    let per_group = if matches!(s.screen, Screen::Now) { usize::MAX } else { 4 };
+    for slot in need_slots(&s.ov.needs, s.ov.looked_now.as_deref(), per_group) {
         if let Slot::Need(_, n) = slot
             && let Target::Session(id) = &n.target
         {

@@ -766,6 +766,15 @@ fn previous_and_next_session_from_now_walk_needs_you_from_its_first_session() {
     assert_eq!(on(&rt), (false, Some("c".into())), "and stops there");
 
     rt.update(|s, _| {
+        s.ov.needs = (2..=5).map(|i| need(Target::Work(zk("p1", &format!("p1-W{i}"))), "Approve the plan")).chain([need(Target::Session("b".into()), "A later question")]).collect();
+        crate::over::go(s, Screen::Now);
+    });
+    rt.frame(DT);
+    rt.key(cmd(rune::Key::Down));
+    rt.frame(DT);
+    assert_eq!(on(&rt), (false, Some("b".into())), "Now reaches a session below more needs than the sidebar shows");
+
+    rt.update(|s, _| {
         s.ov.needs.clear();
         crate::over::go(s, Screen::Now);
     });
