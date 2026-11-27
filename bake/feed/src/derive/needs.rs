@@ -169,10 +169,6 @@ impl World {
         w.state == "in_review" && self.hours(&w.submitted_at()) <= REVIEW_WINDOW_HOURS
     }
 
-    pub fn waiting_on_you(&self, project: &str) -> Vec<&Work> {
-        self.works().filter(|w| w.project == project && self.is_waiting_on_you(w)).collect()
-    }
-
     pub fn group(&self, kind: NeedKind, s: &Session) -> Group {
         if kind == NeedKind::Finished {
             return Group::Waiting;

@@ -48,9 +48,13 @@ pub fn target(d: &Decision) -> Option<Target> {
 }
 
 pub fn of_work(listed: &[Decision], w: &Work) -> Option<Decision> {
+    find_of_work(listed, w).cloned()
+}
+
+pub fn find_of_work<'a>(listed: &'a [Decision], w: &Work) -> Option<&'a Decision> {
     let ledger_key = w.ledger_key();
     let key = key(ledger_key, &w.id);
-    listed.iter().find(|d| d.is_review() && (d.key == key || target(d).is_some_and(|t| t.ledger_key == ledger_key && t.work_item == w.id))).cloned()
+    listed.iter().find(|d| d.is_review() && (d.key == key || d.work_item == w.id && target(d).is_some_and(|t| t.ledger_key == ledger_key)))
 }
 
 pub fn lead_of<'a>(handled: &'a [LeadHandled], w: &Work) -> Option<&'a LeadHandled> {

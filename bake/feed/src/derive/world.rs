@@ -22,6 +22,29 @@ pub struct Entry {
     pub text: Option<String>,
     #[serde(default)]
     pub log_type: Option<String>,
+    #[serde(skip)]
+    pub(crate) ci_failed: Lazy<bool>,
+}
+
+impl Entry {
+    pub fn reports_ci_failure(&self) -> bool {
+        *self.ci_failed.0.get_or_init(|| self.kind == "log" && super::digest::ci_failed(self.text.as_deref().unwrap_or("")))
+    }
+}
+
+#[derive(Default, Debug)]
+pub(crate) struct Lazy<T>(std::sync::OnceLock<T>);
+
+impl<T> Clone for Lazy<T> {
+    fn clone(&self) -> Self {
+        Lazy(std::sync::OnceLock::new())
+    }
+}
+
+impl<T> PartialEq for Lazy<T> {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
 }
 
 #[derive(Deserialize, Clone, Default, Debug, PartialEq)]

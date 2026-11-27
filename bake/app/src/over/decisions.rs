@@ -12,29 +12,70 @@ use crate::over::ui::{self, BODY, BODY_MED, META, META_MED, base, strong, weak};
 
 const HISTORY_SHOWN: usize = 6;
 
-fn line(s: &App, i: usize, d: &Decision, shift: bool, k: &Kit, main_kit: &Kit) -> El {
-    let id = d.id();
-    let acting = s.ov.inbox.acting.contains(&id);
-    let unconfirmed = s.ov.inbox.unconfirmed.contains(&d.hold_key());
-    let who = s.ov.d.session(&d.session_id).map(|x| s.ov.d.title(x)).unwrap_or_else(|| crate::over::short_id(&d.session_id));
-    let project = s.ov.d.project(&d.project_id).map(|p| p.name.clone()).unwrap_or_default();
-    let mut meta: Vec<String> = vec![ui::short_title(&who, 28)];
+#[derive(Hash)]
+struct Shown {
+    who: String,
+    project: String,
+    since: String,
+    acting: bool,
+    unconfirmed: bool,
+    note: Option<String>,
+    review: Option<ReviewShown>,
+    replies: bool,
+    not_now: Option<(String, bool)>,
+    shift: bool,
+    open: bool,
+}
+
+impl Shown {
+    fn of(s: &App, d: &Decision, id: &str, shift: bool) -> Shown {
+        let st = &s.ov.inbox;
+        let acting = st.acting.contains(id);
+        Shown {
+            who: s.ov.d.session(&d.session_id).map(|x| s.ov.d.title(x)).unwrap_or_else(|| crate::over::short_id(&d.session_id)),
+            project: s.ov.d.project(&d.project_id).map(|p| p.name.clone()).unwrap_or_default(),
+            since: s.ov.d.ago(&d.since),
+            acting,
+            unconfirmed: st.unconfirmed.contains(&d.hold_key()),
+            note: st.notes.get(id).filter(|(hold, _)| d.holds(hold)).map(|(_, n)| n.clone()),
+            review: d.is_review().then(|| ReviewShown::of(s, d, false)),
+            replies: d.is_parked() && !d.session_id.is_empty() && !crate::closed(s, &d.session_id),
+            not_now: (!d.is_review()).then(|| (d.not_now_label(&st.unconfirmed), acting || d.open_dismissals(&st.unconfirmed).is_empty())),
+            shift,
+            open: st.open.as_deref() == Some(id),
+        }
+    }
+}
+
+fn line(s: &App, d: &Decision, id: &str, shift: bool, k: &Kit, main_kit: &Kit) -> El {
+    let shown = Shown::of(s, d, id, shift);
+    if shown.open {
+        return line_of(s, d, id, &shown, k, main_kit);
+    }
+    let rev = s.ov.inbox.drawn.borrow_mut().of(id, d);
+    crate::over::rows::memo(format!("decision-{id}"), (rev, &shown), k, || line_of(s, d, id, &shown, k, main_kit))
+}
+
+fn line_of(s: &App, d: &Decision, id: &str, shown: &Shown, k: &Kit, main_kit: &Kit) -> El {
+    let (shift, open) = (shown.shift, shown.open);
+    let tag = format!("decision-{id}");
+    let (who, project) = (&shown.who, &shown.project);
+    let mut meta: Vec<String> = vec![ui::short_title(who, 28)];
     if !project.is_empty() {
         meta.push(project.clone());
     }
     if !d.host_name.is_empty() {
         meta.push(format!("on {}", d.host_name));
     }
-    let since = s.ov.d.ago(&d.since);
-    if !since.is_empty() {
-        meta.push(since);
+    if !shown.since.is_empty() {
+        meta.push(shown.since.clone());
     }
     let title = if d.work_title.is_empty() { d.reason_text() } else { d.work_title.clone() };
     let mut body = col().grow(1.0).shrink().min_w(0.0).gap(4.0).child(text(crate::over::plain(&title)).font(k.text(BODY_MED)).color(strong(k)).max_lines(2).wrap());
     if !d.work_title.is_empty() && !d.reason.is_empty() {
         body = body.child(text(crate::over::plain(&d.reason_text())).font(k.text(META)).color(base(k)).max_lines(2).wrap());
     }
-    let mut facts = row().gap(8.0).items_center().child(ui::avatar(if project.is_empty() { &who } else { &project }, 16.0)).child(text(meta.join(" · ")).font(k.text(META)).color(weak(k)).truncate().shrink());
+    let mut facts = row().gap(8.0).items_center().child(ui::avatar(if project.is_empty() { who } else { project }, 16.0)).child(text(meta.join(" · ")).font(k.text(META)).color(weak(k)).truncate().shrink());
     if !d.holds_up.is_empty() {
         facts = facts.child(text(format!("Holds up {}", d.holds_up.len())).font(k.text(META_MED)).color(ui::needs_color(k)));
     }
@@ -58,66 +99,64 @@ fn line(s: &App, i: usize, d: &Decision, shift: bool, k: &Kit, main_kit: &Kit) -
     if !d.request_error.is_empty() {
         body = body.child(text(d.request_error.clone()).font(k.text(META)).color(ui::needs_color(k)).wrap());
     }
-    if let Some((_, note)) = s.ov.inbox.notes.get(&id).filter(|(hold, _)| d.holds(hold)) {
+    if let Some(note) = &shown.note {
         body = body.child(text(note.clone()).font(k.text(META)).color(ui::needs_color(k)).wrap());
     }
     let mut actions = row().gap(6.0).items_center();
-    if d.is_review() {
-        actions = review_buttons(s, d, ControlSize::Small, &format!("decision-{i}"), false, actions, k);
+    if let Some(review) = &shown.review {
+        let (da, dc) = (d.clone(), d.clone());
+        let approve = move |s: &mut App| inbox::review(s, &da, Verdict::Approve, "");
+        let changes = move |s: &mut App| inbox::ask_changes(s, &dc);
+        actions = shown_review_buttons(review, ControlSize::Small, &tag, actions, k, approve, changes);
         if let Some(p) = review::pr_link(&d.prs, None) {
             let url = p.url.clone();
             let label = if p.number > 0 { format!("Open PR #{}", p.number) } else { "Open PR".into() };
-            actions = actions.child(Button::new(label).variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(move |_: &mut App| crate::open_link(&url)).build(k).key(format!("decision-{i}-pr")));
+            actions = actions.child(Button::new(label).variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(move |_: &mut App| crate::open_link(&url)).build(k).key(format!("{tag}-pr")));
         }
     } else if d.recommended().is_some() {
         let dd = d.clone();
+        let (acting, unconfirmed) = (shown.acting, shown.unconfirmed);
         let mut accept = Button::new(if acting { "Answering…" } else if unconfirmed { "Sent, not confirmed" } else { "Accept recommended" }).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(acting || unconfirmed).on_press(move |s: &mut App| inbox::accept(s, &dd));
         if shift {
             accept = accept.shortcut("⇧↩");
         }
-        actions = actions.child(accept.build(k).key(format!("decision-{i}-accept")));
+        actions = actions.child(accept.build(k).key(format!("{tag}-accept")));
     }
-    let open = st_open(s, d);
     let answers = !d.is_review() && d.answerable && !d.requests.is_empty();
-    let replies = d.is_parked() && !d.session_id.is_empty() && !crate::closed(s, &d.session_id);
-    if answers || replies {
+    if answers || shown.replies {
         let dd = d.clone();
         let label = match (open, answers) {
             (true, _) => "Hide",
             (false, true) => "Answer…",
             (false, false) => "Reply…",
         };
-        actions = actions.child(Button::new(label).variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press_tx(move |s: &mut App, tx: &mut Tx| inbox::toggle_open(s, &dd, tx)).build(k).key(format!("decision-{i}-open")));
+        actions = actions.child(Button::new(label).variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press_tx(move |s: &mut App, tx: &mut Tx| inbox::toggle_open(s, &dd, tx)).build(k).key(format!("{tag}-open")));
     }
     let session = d.session_id.clone();
     if !session.is_empty() {
         actions = actions.child(Button::new("Open session").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(move |s: &mut App| crate::over::open_session(s, &session)).build(k));
     }
-    if !d.is_review() {
+    if let Some((label, disabled)) = &shown.not_now {
         let dd = d.clone();
         actions = actions.child(
-            Button::new(d.not_now_label(&s.ov.inbox.unconfirmed))
+            Button::new(label.clone())
                 .variant(ButtonVariant::Ghost)
                 .control_size(ControlSize::Small)
-                .disabled(acting || d.open_dismissals(&s.ov.inbox.unconfirmed).is_empty())
+                .disabled(*disabled)
                 .help("Take this off Needs you without answering")
                 .on_press(move |s: &mut App| inbox::not_now(s, &dd))
                 .build(k)
-                .key(format!("decision-{i}-not-now")),
+                .key(format!("{tag}-not-now")),
         );
     }
     let head = row().w_full().gap(14.0).items_start().child(body).child(actions);
-    let mut c = col().key(format!("decision-{i}")).w_full().gap(10.0).px(14.0).py(12.0).radius(10.0).child(head);
+    let mut c = col().key(tag.clone()).w_full().gap(10.0).px(14.0).py(12.0).radius(10.0).child(head);
     if open && answers {
         c = c.child(answer_panel(s, d, k, main_kit));
-    } else if open && replies {
-        c = c.child(reply_panel(s, i, d, &who, k));
+    } else if open && shown.replies {
+        c = c.child(reply_panel(s, &tag, d, who, k));
     }
     c
-}
-
-fn st_open(s: &App, d: &Decision) -> bool {
-    s.ov.inbox.open.as_deref() == Some(d.id().as_str())
 }
 
 fn answer_panel(s: &App, d: &Decision, k: &Kit, main_kit: &Kit) -> El {
@@ -138,7 +177,7 @@ fn answer_panel(s: &App, d: &Decision, k: &Kit, main_kit: &Kit) -> El {
         .child(waiting::request_body(s, request, Route::Decision(d.clone()), busy, main_kit))
 }
 
-fn reply_panel(s: &App, i: usize, d: &Decision, who: &str, k: &Kit) -> El {
+fn reply_panel(s: &App, tag: &str, d: &Decision, who: &str, k: &Kit) -> El {
     let st = &s.ov.inbox;
     let id = d.id();
     let sending = st.replying.contains(&id);
@@ -147,7 +186,7 @@ fn reply_panel(s: &App, i: usize, d: &Decision, who: &str, k: &Kit) -> El {
     let ready = !sending && !edit.text.trim().is_empty();
     let (lens, dd, de) = (id.clone(), d.clone(), d.clone());
     let input = text_input(edit, k.text(BODY))
-        .key(format!("decision-{i}-reply"))
+        .key(format!("{tag}-reply"))
         .w_full()
         .min_h(44.0)
         .color(strong(k))
@@ -161,7 +200,7 @@ fn reply_panel(s: &App, i: usize, d: &Decision, who: &str, k: &Kit) -> El {
         "Send as new".to_string()
     } else {
         format!("Send to {}", ui::short_title(who, 24))
-    }).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(!ready).on_press(move |s: &mut App| inbox::reply_as_new(s, &dd)).build(k).key(format!("decision-{i}-reply-send"));
+    }).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(!ready).on_press(move |s: &mut App| inbox::reply_as_new(s, &dd)).build(k).key(format!("{tag}-reply-send"));
     let mut c = col().key(format!("decision-reply-{id}")).w_full().gap(8.0).pl(4.0);
     if let Some(sent) = st.replied.get(&id) {
         c = c.child(row().gap(6.0).items_center().child(icon(&icons::CIRCLE_CHECK, k.text_size(12.0)).color(base(k))).child(text(sent.clone()).font(k.text(META_MED)).color(base(k))));
@@ -169,24 +208,40 @@ fn reply_panel(s: &App, i: usize, d: &Decision, who: &str, k: &Kit) -> El {
     c.child(field).child(row().gap(8.0).items_center().child(send).child(text("It goes to the session holding the work, as your message.".to_string()).font(k.text(META)).color(weak(k)).wrap().shrink()))
 }
 
-pub fn review_buttons(s: &App, d: &Decision, size: ControlSize, key: &str, show_note: bool, mut r: El, k: &Kit) -> El {
-    let st = &s.ov.inbox;
-    let acting = st.acting.contains(&d.id());
-    let unconfirmed = st.unconfirmed.contains(&d.hold_key());
-    let old = inbox::too_old(st, d);
-    let ready = inbox::reviewable(st, d);
-    let approve = if acting { "Sending…" } else if unconfirmed { "Sent, not confirmed" } else { "Approve" };
-    let (da, dc) = (d.clone(), d.clone());
-    let mut a = Button::new(approve).variant(ButtonVariant::Contrast).control_size(size).disabled(!ready).on_press(move |s: &mut App| inbox::review(s, &da, Verdict::Approve, ""));
-    let mut c = Button::new("Ask for changes").variant(ButtonVariant::Ghost).control_size(size).disabled(!ready).on_press(move |s: &mut App| inbox::ask_changes(s, &dc));
-    if old {
+#[derive(Hash)]
+pub struct ReviewShown {
+    approve: &'static str,
+    ready: bool,
+    old: bool,
+    note: Option<String>,
+}
+
+impl ReviewShown {
+    pub fn of(s: &App, d: &Decision, show_note: bool) -> ReviewShown {
+        let st = &s.ov.inbox;
+        let old = inbox::too_old(st, d);
+        let approve = if st.acting.contains(&d.id()) {
+            "Sending…"
+        } else if st.unconfirmed.contains(&d.hold_key()) {
+            "Sent, not confirmed"
+        } else {
+            "Approve"
+        };
+        let note = st.notes.get(&d.id()).filter(|(hold, _)| show_note && d.holds(hold)).map(|(_, n)| n.clone()).or_else(|| old.then(review::needs_newer_note));
+        ReviewShown { approve, ready: inbox::reviewable(st, d), old, note }
+    }
+}
+
+pub fn shown_review_buttons(shown: &ReviewShown, size: ControlSize, key: &str, mut r: El, k: &Kit, approve: impl Fn(&mut App) + 'static, changes: impl Fn(&mut App) + 'static) -> El {
+    let mut a = Button::new(shown.approve).variant(ButtonVariant::Contrast).control_size(size).disabled(!shown.ready).on_press(approve);
+    let mut c = Button::new("Ask for changes").variant(ButtonVariant::Ghost).control_size(size).disabled(!shown.ready).on_press(changes);
+    if shown.old {
         a = a.help(review::needs_newer_note());
         c = c.help(review::needs_newer_note());
     }
     r = r.child(a.build(k).key(format!("{key}-approve"))).child(c.build(k).key(format!("{key}-changes")));
-    let note = st.notes.get(&d.id()).filter(|(hold, _)| show_note && d.holds(hold)).map(|(_, n)| n.clone()).or_else(|| old.then(review::needs_newer_note));
-    if let Some(n) = note {
-        r = r.child(text(n).font(k.text(META)).color(ui::needs_color(k)).wrap().shrink());
+    if let Some(n) = &shown.note {
+        r = r.child(text(n.clone()).font(k.text(META)).color(ui::needs_color(k)).wrap().shrink());
     }
     r
 }
@@ -231,6 +286,7 @@ pub fn section(s: &App, k: &Kit, main_kit: &Kit) -> El {
     let count = st.inbox.as_ref().map(|i| i.decisions.len());
     let mut c = col().w_full().gap(6.0).child(ui::section_head("Decisions", count, Some(text("from every connected computer".to_string()).font(k.text(META)).color(weak(k))), k));
     let Some(found) = &st.inbox else {
+        st.drawn.borrow_mut().keep(|_| false);
         let note = if s.client.is_some() { "Looking for decisions…" } else { "Decisions show when the app is connected to the daemon." };
         return c.child(text(note.to_string()).font(k.text(META)).color(weak(k)));
     };
@@ -240,26 +296,31 @@ pub fn section(s: &App, k: &Kit, main_kit: &Kit) -> El {
     let mut list = col().w_full().gap(2.0).padding(4.0);
     let mut last = "";
     let target = inbox::shift_target(st).map(Decision::id);
-    for (i, d) in found.decisions.iter().enumerate() {
+    let ids: Vec<String> = found.decisions.iter().map(Decision::id).collect();
+    for (d, id) in found.decisions.iter().zip(&ids) {
         let group = d.group_title();
         if group != last {
             let n = found.decisions.iter().filter(|x| x.group_title() == group).count();
             list = list.child(text(format!("{group} · {n}")).font(k.text(META_MED)).color(weak(k)).px(14.0).pt(if last.is_empty() { 6.0 } else { 12.0 }).pb(2.0));
             last = group;
         }
-        list = list.child(line(s, i, d, target.as_deref() == Some(d.id().as_str()), k, main_kit));
+        list = list.child(line(s, d, id, target.as_deref() == Some(id.as_str()), k, main_kit));
     }
+    let listed: std::collections::HashSet<&str> = ids.iter().map(String::as_str).collect();
+    s.ov.inbox.drawn.borrow_mut().keep(|id| listed.contains(id));
     if found.decisions.is_empty() {
         list = list.child(row().gap(8.0).items_center().px(14.0).py(10.0).child(icon(&icons::CIRCLE_CHECK, k.text_size(14.0)).color(weak(k))).child(text(if found.notes.is_empty() { "Nothing needs you." } else { "Nothing needs you on the computers that answered." }.to_string()).font(k.text(BODY)).color(weak(k))));
     }
     if !found.lead_handling.is_empty() {
         list = list.child(text("Handled by a lead".to_string()).font(k.text(META_MED)).color(weak(k)).px(14.0).pt(12.0).pb(2.0));
-        for (i, h) in found.lead_handling.iter().enumerate() {
+        for h in &found.lead_handling {
             let who = s.ov.d.session(&h.session_id).map(|x| s.ov.d.title(x)).unwrap_or_else(|| crate::over::short_id(&h.session_id));
-            let id = h.session_id.clone();
-            list = list.child(
+            let holder = s.ov.d.name_of(&h.held_by);
+            let key = format!("lead-handled-{}|{}|{}", h.ledger_key, h.work_item, h.session_id);
+            list = list.child(crate::over::rows::memo(key.clone(), (&who, &holder, &h.reason, &h.session_id), k, || {
+                let id = h.session_id.clone();
                 row()
-                    .key(format!("lead-handled-{i}"))
+                    .key(key.clone())
                     .w_full()
                     .gap(8.0)
                     .items_center()
@@ -269,8 +330,8 @@ pub fn section(s: &App, k: &Kit, main_kit: &Kit) -> El {
                     .hover(k.c.surface_raised_hover)
                     .on_press(move |s: &mut App| crate::over::open_session(s, &id))
                     .child(text(ui::short_title(&who, 28)).font(k.text(META_MED)).color(strong(k)))
-                    .child(text(format!("{} has it · {}", s.ov.d.name_of(&h.held_by), crate::over::plain(&h.reason))).font(k.text(META)).color(weak(k)).truncate().shrink()),
-            );
+                    .child(text(format!("{holder} has it · {}", crate::over::plain(&h.reason))).font(k.text(META)).color(weak(k)).truncate().shrink())
+            }));
         }
     }
     c = c.child(ui::card(list, k));

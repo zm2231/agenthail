@@ -331,51 +331,17 @@ pub fn notice(message: &str, k: &Kit) -> El {
 }
 
 pub fn need_actions(s: &App, n: &Need, compact: bool, k: &Kit) -> El {
-    let t = n.target.clone();
-    let size = if compact { ControlSize::Small } else { ControlSize::Regular };
-    let r = row().gap(6.0).items_center();
-    let work = match &t {
-        Target::Work(key) => s.ov.d.work.get(key).map(|w| (w, crate::over::work_review(s, key))),
-        _ => None,
-    };
-    let r = match (n.kind, work) {
-        (NeedKind::Check, Some((_, Some(d)))) => crate::over::decisions::review_buttons(s, &d, size, &format!("{}-{}", if compact { "need-row" } else { "need-focus" }, d.id()), true, r, k),
-        (NeedKind::Check, _) => {
-            return r.child(Button::new("Open").variant(ButtonVariant::Contrast).control_size(size).on_press(move |s: &mut App| open_target(s, &t)).build(k));
-        }
-        (NeedKind::CiFailing, Some((w, d))) => {
-            let url = crate::over::work::pr_of(s, w, &d.unwrap_or_default(), feed::derive::work::pr(w).as_deref()).map(|p| p.url);
-            let t = t.clone();
-            r.child(
-                Button::new(n.kind.primary())
-                    .variant(ButtonVariant::Contrast)
-                    .control_size(size)
-                    .on_press(move |s: &mut App| match &url {
-                        Some(url) => crate::open_link(url),
-                        None => open_target(s, &t),
-                    })
-                    .build(k),
-            )
-        }
-        _ => r.child(Button::new(n.kind.primary()).variant(ButtonVariant::Contrast).control_size(size).on_press({
-            let t = t.clone();
-            move |s: &mut App| open_target(s, &t)
-        }).build(k)),
-    };
-    if n.kind == NeedKind::CiFailing || matches!(t, Target::Session(_)) {
-        return r;
-    }
-    r.child(Button::new("Open").variant(ButtonVariant::Ghost).control_size(size).on_press(move |s: &mut App| open_target(s, &t)).build(k))
+    crate::over::need_acts::Acts::of(s, n).build(s, n, compact, k)
 }
 
 pub fn need_row(s: &App, n: &Need, focused: bool, k: &Kit) -> El {
     let who = if matches!(n.target, Target::Session(_)) { format!("{} · {}", short_title(&n.who, 24), s.ov.d.ago(&n.at)) } else { s.ov.d.ago(&n.at) };
     let fit = format!("need-{}", n.title);
     let width = fit_width(s, &fit);
-    let shows = (n.kind, &n.project, &who, &n.label, &n.title, width.map(f32::to_bits));
-    let info = || need_info(n, &who, &fit, width, k);
+    let acts = crate::over::need_acts::Acts::of(s, n);
+    let shows = (n.kind, &n.project, &who, &n.label, &n.title, width.map(f32::to_bits), focused, &n.target, &acts);
     let row_id = format!("need-{}", crate::over::rows::target_id(&n.target));
-    let row_ = |info: El, actions: El| {
+    crate::over::rows::memo(row_id.clone(), shows, k, || {
         let t = n.target.clone();
         let r = row()
             .key(row_id.clone())
@@ -385,8 +351,8 @@ pub fn need_row(s: &App, n: &Need, focused: bool, k: &Kit) -> El {
             .px(16.0)
             .py(13.0)
             .radius(10.0)
-            .child(info)
-            .child(actions)
+            .child(need_info(n, &who, &fit, width, k))
+            .child(acts.build(s, n, true, k))
             .on_press(move |s: &mut App| {
                 if let Some(at) = s.ov.needs.iter().position(|n| n.target == t) {
                     s.ov.need_ix = at;
@@ -394,12 +360,7 @@ pub fn need_row(s: &App, n: &Need, focused: bool, k: &Kit) -> El {
                 open_target(s, &t);
             });
         if focused { r.fill(k.c.surface_raised_hover) } else { r.hover(k.c.surface_raised_hover) }
-    };
-    if matches!(n.target, Target::Work(_)) {
-        let info = crate::over::rows::memo(format!("need-info-{}", crate::over::rows::target_id(&n.target)), shows, k, info);
-        return row_(info, need_actions(s, n, true, k));
-    }
-    crate::over::rows::memo(row_id.clone(), (shows, focused, &n.target), k, || row_(info(), need_actions(s, n, true, k)))
+    })
 }
 
 fn need_info(n: &Need, who: &str, fit: &str, width: Option<f32>, k: &Kit) -> El {
