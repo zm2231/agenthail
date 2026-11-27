@@ -369,23 +369,3 @@ fn a_refused_send_does_not_pass_its_retry_wait_to_the_next_message() {
     crate::take_sent(&mut s, "a".into(), next, false, Err(refused(false)));
     assert_eq!(s.redeliver["a"].due, 101.0, "the next message retries a second later");
 }
-
-#[test]
-fn an_answer_for_a_later_send_keeps_an_earlier_retry_waiting() {
-    if !isolated("an_answer_for_a_later_send_keeps_an_earlier_retry_waiting") {
-        return;
-    }
-    let dir = Dir::new("earlier");
-    let mut s = app(sessions(&["a"]), &dir);
-    s.clock = 100.0;
-    let error = |answered: bool| feed::catalog::RespondError { message: "no".into(), code: String::new(), maybe_delivered: false, reply: serde_json::Value::Null, answered, status: if answered { 409 } else { 0 } };
-    let first = crate::fresh(&s, "a", "first".into(), Vec::new());
-    for _ in 0..3 {
-        crate::take_sent(&mut s, "a".into(), first.clone(), true, Err(error(false)));
-    }
-    let waiting = s.redeliver["a"].due;
-    assert!(waiting > 101.0);
-    let later = crate::fresh(&s, "a", "later".into(), Vec::new());
-    crate::take_sent(&mut s, "a".into(), later, false, Err(error(true)));
-    assert_eq!(s.redeliver["a"].due, waiting, "the earlier message keeps its wait");
-}

@@ -1196,10 +1196,7 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
 }
 
 fn answered_now(s: &mut App, id: &str, clock: f64) {
-    let now = feed::composer::now_ms();
-    if !s.unsent.list(id).iter().any(|u| u.redelivering(now)) {
-        s.redeliver.insert(id.to_string(), feed::composer::Backoff::starting(clock));
-    }
+    s.redeliver.insert(id.to_string(), feed::composer::Backoff::starting(clock));
 }
 
 pub fn switch_composer(s: &mut App) {
