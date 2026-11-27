@@ -90,7 +90,7 @@ pub enum Target {
     Project(String),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Need {
     pub kind: NeedKind,
     pub group: Group,

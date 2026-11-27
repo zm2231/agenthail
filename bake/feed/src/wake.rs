@@ -101,9 +101,12 @@ pub fn to_thread<T>() -> (mpsc::Sender<T>, Receiver<T>) {
     mpsc::channel()
 }
 
+pub fn minute_of(at: time::OffsetDateTime) -> time::OffsetDateTime {
+    at.replace_nanosecond(0).and_then(|t| t.replace_second(0)).unwrap_or(at)
+}
+
 pub fn next_minute(at: time::OffsetDateTime) -> time::OffsetDateTime {
-    let start = at.replace_nanosecond(0).and_then(|t| t.replace_second(0)).unwrap_or(at);
-    start + time::Duration::MINUTE
+    minute_of(at) + time::Duration::MINUTE
 }
 
 #[cfg(test)]
