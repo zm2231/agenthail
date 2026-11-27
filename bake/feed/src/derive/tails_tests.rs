@@ -76,7 +76,7 @@ fn a_stream_tail_rebuilds_items_with_appends_and_removals() {
 }
 
 #[test]
-fn a_replay_cut_off_before_the_live_point_is_not_kept_and_is_read_again() {
+fn a_replay_cut_off_before_the_live_point_is_not_kept_and_is_read_again_later() {
     let now = parse_time("2026-11-24T12:00:00Z").unwrap();
     let sessions = vec![session("a", "2026-11-24T11:50:00Z")];
     let prefix = upsert(1, said_row("1", "2026-11-24T10:00:00Z", "start"));
@@ -87,8 +87,11 @@ fn a_replay_cut_off_before_the_live_point_is_not_kept_and_is_read_again() {
     let mut tails = Tails::default();
     assert_eq!(tails.due(&sessions, now, &HashSet::new()).len(), 1);
     tails.take("a", "2026-11-24T11:50:00Z".into(), broken);
-    assert_eq!(tails.due(&sessions, now, &HashSet::new()).len(), 1, "the next refresh reads it again");
-    tails.take("a", "2026-11-24T11:50:00Z".into(), tails::read(lines(vec![": live".into()])));
+    assert!(tails.due(&sessions, now, &HashSet::new()).is_empty(), "a failed read waits before trying again");
+    let moved = vec![session("a", "2026-11-24T11:55:00Z")];
+    assert_eq!(tails.due(&moved, now, &HashSet::new()).len(), 1, "a session that moves is read again at once");
+    tails.take("a", "2026-11-24T11:55:00Z".into(), tails::read(lines(vec![": live".into()])));
+    let sessions = moved;
     assert!(tails.due(&sessions, now, &HashSet::new()).is_empty(), "a complete tail is kept, even an empty one");
 }
 
