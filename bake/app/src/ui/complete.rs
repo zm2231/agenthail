@@ -214,7 +214,7 @@ pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         return false;
     }
     let id = x.id.clone();
-    let draft = super::paste::draft(&s.composer);
+    let draft = super::paste::draft(s);
     if let Some(h) = s.complete.history.get_mut(&id).filter(|h| h.browsing() && h.current() != Some(draft.as_str())) {
         h.stop();
         return false;
@@ -241,7 +241,7 @@ pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
 }
 
 pub(super) fn clear_into_history(s: &mut App, id: &str) -> bool {
-    let text = super::paste::draft(&s.composer);
+    let text = super::paste::draft(s);
     if !s.complete.history.entry(id.to_string()).or_default().clear(&text) {
         return false;
     }
@@ -521,7 +521,7 @@ pub fn done(s: &mut App, done: Done) {
             }
             if result.as_ref().is_ok_and(|d| *d != feed::composer::Delivered::Unconfirmed) && !super::attach::has(s, &id) {
                 if s.composer_for.as_deref() == Some(id.as_str()) {
-                    if super::paste::draft(&s.composer).trim() == typed {
+                    if super::paste::draft(s).trim() == typed {
                         replace_composer(s, "");
                     }
                 } else if s.drafts.get(&id).trim() == typed {
@@ -545,7 +545,7 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
         return false;
     }
     let Some(x) = session(s, id).cloned() else { return false };
-    let draft = super::paste::draft(&s.composer);
+    let draft = super::paste::draft(s);
     let input = Input::parse(&super::paste::expand(&draft), &Slash::available(&x.capabilities, can(s, &x)));
     if let Some(problem) = input.problem() {
         crate::note(s, id, problem);

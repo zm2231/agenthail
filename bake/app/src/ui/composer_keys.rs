@@ -111,7 +111,7 @@ fn send_now(s: &mut App, x: &Session, tx: &mut Tx) {
         return;
     }
     if crate::busy_now(s, &x.id) && x.capabilities.steer {
-        let text = super::paste::draft(&s.composer);
+        let text = super::paste::draft(s);
         crate::steer_text(s, &x.id, text, tx);
     } else {
         super::complete::submit(s, &x.id, tx);
@@ -153,7 +153,7 @@ fn stash(s: &mut App, id: &str) -> bool {
     }
     let back = s.complete.keys.stash.remove(id).unwrap_or_default();
     if !s.composer.text.is_empty() {
-        s.complete.keys.stash.insert(id.to_string(), super::paste::draft(&s.composer));
+        s.complete.keys.stash.insert(id.to_string(), super::paste::draft(s));
     }
     super::attach::swap_stash(s, id);
     super::complete::replace_composer(s, &back);

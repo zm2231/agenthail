@@ -7,6 +7,7 @@ use crate::theme::{self, BODY, META, faint, line, wash};
 
 pub struct Editing {
     marker: String,
+    pending: String,
     edit: TextEdit,
 }
 
@@ -31,8 +32,12 @@ pub fn edit(draft: &str) -> TextEdit {
     out
 }
 
-pub fn draft(e: &TextEdit) -> String {
-    paste::shared().draft(&e.text, e.pills())
+// An open edit lives under its own marker so every draft read, save and merge carries it.
+pub fn draft(s: &App) -> String {
+    let mut store = paste::shared();
+    let Some(open) = &s.paste else { return store.draft(&s.composer.text, s.composer.pills()) };
+    store.restore(&open.pending, &open.edit.text);
+    store.draft(&s.composer.text, s.composer.pills().map(|(r, id)| (r, if id == open.marker { open.pending.as_str() } else { id })))
 }
 
 pub fn expand(draft: &str) -> String {
@@ -65,12 +70,13 @@ pub fn field(input: El) -> El {
 }
 
 fn open(s: &mut App, marker: &str, tx: &mut Tx) -> bool {
-    let Some(pasted) = paste::shared().text(marker).map(str::to_string) else { return false };
     finish(s);
+    let Some(pasted) = paste::shared().text(marker).map(str::to_string) else { return false };
+    let Some(pending) = paste::shared().add(&pasted) else { return false };
     let mut edit = TextEdit::new(pasted);
     edit.focused = true;
     s.composer.focused = false;
-    s.paste = Some(Editing { marker: marker.to_string(), edit });
+    s.paste = Some(Editing { marker: marker.to_string(), pending, edit });
     tx.focus("paste-editor", false);
     true
 }
@@ -93,13 +99,14 @@ fn done(s: &mut App, tx: &mut Tx) {
 
 pub fn finish(s: &mut App) {
     let Some(done) = s.paste.take() else { return };
-    let Some(range) = s.composer.pills().find(|(_, id)| *id == done.marker).map(|(r, _)| r) else { return };
     let edited = done.edit.text.clone();
+    paste::shared().restore(&done.pending, &edited);
+    let Some(range) = s.composer.pills().find(|(_, id)| *id == done.marker).map(|(r, _)| r) else { return };
     if paste::shared().text(&done.marker) == Some(edited.as_str()) {
         return;
     }
     let (caret, before) = (s.composer.focus, s.composer.text.len());
-    let marker = if edited.is_empty() { None } else { paste::shared().add(&edited) };
+    let marker = (!edited.is_empty()).then_some(done.pending);
     match marker {
         Some(marker) => s.composer.replace_with_pill(range.clone(), marker, &paste::label(&edited)),
         None => {
@@ -157,8 +164,7 @@ mod tests {
         let e = edit(&format!("before {marker} after"));
         assert_eq!(e.text, "before Pasted text · 12 lines after");
         assert_eq!(e.pills().map(|(_, id)| id.to_string()).collect::<Vec<_>>(), vec![marker.clone()]);
-        assert_eq!(draft(&e), format!("before {marker} after"));
-        assert_eq!(expand(&draft(&e)), format!("before {pasted} after"));
+        assert_eq!(paste::shared().draft(&e.text, e.pills()), format!("before {marker} after"));
     }
 
     #[test]
@@ -166,6 +172,6 @@ mod tests {
         let e = edit("just words");
         assert_eq!(e.text, "just words");
         assert_eq!(e.pills().count(), 0);
-        assert_eq!(expand(&draft(&e)), "just words");
+        assert_eq!(paste::shared().draft(&e.text, e.pills()), "just words");
     }
 }

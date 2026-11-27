@@ -447,7 +447,7 @@ pub fn open_settings(url: &str) {
 }
 
 pub fn draft_reply(s: &mut App, reply: &str) {
-    let draft = ui::paste::draft(&s.composer);
+    let draft = ui::paste::draft(s);
     let draft = draft.trim_end();
     let text = if draft.is_empty() { reply.to_string() } else { format!("{draft}\n{reply}") };
     s.composer = ui::paste::edit(&text);
@@ -556,7 +556,7 @@ pub fn steer_text(s: &mut App, id: &str, text: String, tx: &mut Tx) {
 
 fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
     ui::paste::finish(s);
-    let draft = ui::paste::draft(&s.composer).trim().to_string();
+    let draft = ui::paste::draft(s).trim().to_string();
     let message = ui::paste::expand(&draft).trim().to_string();
     if message.is_empty() && !ui::attach::has(s, id) || sending(s, id) {
         return;
@@ -737,7 +737,7 @@ fn dispatch(s: &mut App, id: &str, pending: Unsent, resent: bool, tx: &mut Tx) {
     s.confirming.remove(&id);
     s.in_flight.entry(id.clone()).or_default().push(pending.clone());
     if s.composer_for.as_deref() == Some(id.as_str()) {
-        s.drafts.set(&id, &ui::paste::draft(&s.composer));
+        s.drafts.set(&id, &ui::paste::draft(s));
     }
     if let Err(error) = over::layout::save_now(s) {
         settle(s, &id, &pending.key);
@@ -831,7 +831,7 @@ pub fn composer_note(s: &App, id: &str) -> Option<String> {
 }
 
 fn shown_text(s: &App, id: &str) -> String {
-    if s.composer_for.as_deref() == Some(id) { ui::paste::draft(&s.composer) } else { s.drafts.get(id).to_string() }
+    if s.composer_for.as_deref() == Some(id) { ui::paste::draft(s) } else { s.drafts.get(id).to_string() }
 }
 
 fn put_back(s: &mut App, id: &str, unsent: &Unsent) {
@@ -887,10 +887,10 @@ pub fn switch_composer(s: &mut App) {
     ui::paste::finish(s);
     let carried = match s.composer_for.take() {
         Some(old) => {
-            s.drafts.set(&old, &ui::paste::draft(&s.composer));
+            s.drafts.set(&old, &ui::paste::draft(s));
             String::new()
         }
-        None => ui::paste::draft(&s.composer).trim().to_string(),
+        None => ui::paste::draft(s).trim().to_string(),
     };
     let draft = target.as_deref().map(|id| s.drafts.get(id).to_string()).unwrap_or_default();
     ui::paste::set_composer(s, &if carried.is_empty() { draft } else { feed::composer::put_back(&draft, &carried) });
@@ -915,7 +915,7 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
     }
     s.rekeyed = rekeyed;
     if let Some(id) = s.composer_for.clone() {
-        s.drafts.set(&id, &ui::paste::draft(&s.composer));
+        s.drafts.set(&id, &ui::paste::draft(s));
     }
     let mut restored: Vec<(String, String)> = s.unsent.iter().filter(|(id, u)| ui::paste::expand(s.drafts.get(id)).trim() == u.text).map(|(id, u)| (id.clone(), ui::paste::unsent_draft(u))).collect();
     restored.dedup_by(|a, b| a.0 == b.0);
@@ -961,7 +961,7 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
         ui::queue::invalidate(s, &new);
     }
     if let Some(id) = s.composer_for.clone()
-        && s.drafts.get(&id) != ui::paste::draft(&s.composer)
+        && s.drafts.get(&id) != ui::paste::draft(s)
     {
         let draft = s.drafts.get(&id).to_string();
         ui::paste::set_composer(s, &draft);
@@ -1173,7 +1173,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     ui::paste::settle(s);
     switch_composer(s);
     if let Some(id) = s.composer_for.clone() {
-        s.drafts.set(&id, &ui::paste::draft(&s.composer));
+        s.drafts.set(&id, &ui::paste::draft(s));
     }
     over::layout::save(s);
     if changed || !s.bar.is_shown() {
@@ -1197,7 +1197,7 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
 fn on_quit(s: &mut App, _: &mut Tx) {
     ui::paste::finish(s);
     if let Some(id) = s.composer_for.clone() {
-        s.drafts.set(&id, &ui::paste::draft(&s.composer));
+        s.drafts.set(&id, &ui::paste::draft(s));
     }
     if let Err(error) = over::layout::save_now(s) {
         eprintln!("agenthail: couldn't save before quitting: {error}");
