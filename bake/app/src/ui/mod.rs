@@ -1,10 +1,10 @@
 use feed::catalog::{self, PHASES, Session, State};
-use rune::{Color, Cx, El, Icon, ScrollSpec, SystemMaterial, Transition, Tx, col, el, icon, row, text, text_input};
+use rune::{Color, Cx, El, Icon, ScrollSpec, Transition, Tx, col, el, icon, row, text, text_input};
 use rune_kit::{Button, ButtonVariant, Keybind, KeybindVariant};
 
 use crate::icons;
 use crate::theme::{
-    self, BODY, BODY_BOLD, HEADING, LABEL, META, META_BOLD, SPRING, TITLE, accent, accent_deep, attention, card, done, failed, faint, line, muted, raised, wash,
+    self, BODY, BODY_BOLD, HEADING, LABEL, META, META_BOLD, SPRING, TITLE, accent, accent_deep, attention, done, failed, faint, line, muted, raised, wash,
 };
 use crate::transcript::{self, session_avatar};
 use crate::{App, Bg, Screen, Tab, answer_request, pick_work, session_edits, short_path, show_changes, send, draft_reply, session, toggle_pick, open_link};
@@ -28,6 +28,7 @@ pub mod pr_link;
 mod rail;
 mod session;
 mod session_dialogs;
+pub(crate) mod session_ops;
 pub(crate) mod subagents;
 pub mod session_menu;
 mod waiting;
@@ -104,6 +105,8 @@ pub(crate) fn avatar_with_state(name: &str, state: State, size: f32) -> El {
 }
 
 pub fn view(s: &App, cx: &mut Cx<App>) -> El {
+    let in_session = s.screen == Screen::Session;
+    crate::look::frame(cx, in_session, true, true);
     let mut layer = Vec::new();
     let body = match (connect::screen(s, cx), &s.screen) {
         (Some(body), _) => body,
@@ -121,8 +124,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let root = col()
         .w_full()
         .h_full()
-        .child(el().absolute(0.0, 0.0).w_full().h_full().system_material(SystemMaterial::Glass).fill(theme::card_deep()))
-        .child(el().absolute(0.0, 0.0).w_full().h_full().fill(theme::glass_tint()))
+        .child(crate::look::backdrop(in_session))
         .child(body);
     rune_kit::root(root, layer)
 }

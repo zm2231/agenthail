@@ -202,6 +202,12 @@ pub struct Session {
     pub unavailable_reason: Option<String>,
     #[serde(default)]
     pub holders: Option<Vec<crate::holders::Holder>>,
+    #[serde(default)]
+    pub snooze: Option<crate::snooze::Snooze>,
+    #[serde(default)]
+    pub activity: Option<crate::snooze::Activity>,
+    #[serde(default, rename = "move")]
+    pub moving: Option<crate::moves::Move>,
 }
 
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq)]

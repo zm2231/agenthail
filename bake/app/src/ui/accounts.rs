@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use feed::catalog::{Client, RespondError};
 use feed::limit::span;
 use feed::prefer::{self, Meter, Plan, Prefer, ProxyAccount, ProxyGroup, Set};
-use rune::{Color, El, ScrollSpec, col, el, row, text};
+use rune::{El, ScrollSpec, col, el, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Switch};
 
 use crate::theme::{self, BODY_BOLD, LABEL, META, attention, done, failed, faint, muted};
@@ -231,7 +231,7 @@ fn sessions_on(s: &App, set: &Set) -> Vec<El> {
                 .key(format!("usage-session-{}", x.id))
                 .gap(6.0)
                 .items_center()
-                .hover(Color::WHITE.alpha(0.06))
+                .hover(crate::theme::ink(0.06))
                 .radius(6.0)
                 .px(4.0)
                 .on_press(move |s: &mut App| {
@@ -250,7 +250,7 @@ fn account_card(s: &App, set: &Set) -> El {
         .gap(6.0)
         .padding(10.0)
         .radius(8.0)
-        .fill(Color::WHITE.alpha(0.04))
+        .fill(crate::theme::ink(0.04))
         .child(row().gap(8.0).items_center().child(text(set.title()).font(BODY_BOLD).color(theme::text()).truncate()).child(el().grow(1.0)).child(text(set.host.clone()).font(META).color(faint())));
     c = c.children(set.meters.iter().map(|m| meter_row(s, m)));
     if !set.problem.is_empty() {
@@ -273,7 +273,7 @@ fn proxy_account(s: &App, group: &ProxyGroup, a: &ProxyAccount) -> El {
     if !a.status.is_empty() && a.status != "active" {
         head = head.child(text(a.status.clone()).font(META).color(attention()));
     }
-    let mut c = col().w_full().gap(6.0).padding(10.0).radius(8.0).fill(Color::WHITE.alpha(0.04)).child(head);
+    let mut c = col().w_full().gap(6.0).padding(10.0).radius(8.0).fill(crate::theme::ink(0.04)).child(head);
     c = c.children(a.meters.iter().map(|m| meter_row(s, m)));
     let on = a.set_to_prefer();
     let toggle = if on { change(Prefer::Off) } else { change(Prefer::On) };

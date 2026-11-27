@@ -29,7 +29,7 @@ fn chip_el(s: &App, x: &Session, chip: &Chip) -> El {
         return el;
     }
     let (id, key) = (x.id.clone(), chip.key);
-    el.hover(rune::Color::WHITE.alpha(0.08))
+    el.hover(crate::theme::ink(0.08))
         .on_press(move |s: &mut App| {
             s.menus.open = None;
             s.menus.chip = match &s.menus.chip {
@@ -63,7 +63,7 @@ fn compact_el(s: &App, x: &Session) -> El {
         .child(icon(&icons::SHRINK, 11.0).color(faint()))
         .child(text(if busy { "Compacting…" } else { "Compact" }).font(META).color(muted()));
     if !busy {
-        b = b.hover(rune::Color::WHITE.alpha(0.08)).on_press(move |s: &mut App| compact(s, &id));
+        b = b.hover(crate::theme::ink(0.08)).on_press(move |s: &mut App| compact(s, &id));
     }
     b
 }

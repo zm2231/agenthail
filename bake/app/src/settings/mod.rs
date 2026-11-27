@@ -1,3 +1,4 @@
+mod appearance;
 mod claude;
 mod devices;
 mod general;
@@ -55,6 +56,7 @@ enum Done {
     Read(Read, u64, Got),
     Wrote(String, Section, Result<(), Failure>, &'static [Read]),
     Devices(devices::Got),
+    Look(appearance::Got),
 }
 
 pub struct Prefs {
@@ -95,6 +97,7 @@ pub struct Prefs {
     pub holds_open: HashSet<String>,
     pub home: String,
     pub handoffs: handoffs::Form,
+    pub appearance: appearance::Form,
     loaded: bool,
     in_flight: usize,
     seq: HashMap<Read, u64>,
@@ -144,9 +147,22 @@ pub fn open() {
                 s.rewatch = true;
                 devices::opened(s);
                 reload(s);
+                appearance::opened(s);
             });
             window.open();
             window.focus();
+        }
+    });
+}
+
+pub fn nudge() {
+    WINDOW.with(|w| {
+        if let Some((handle, _)) = w.get() {
+            handle.update(|s: &mut Prefs, tx| {
+                if crate::look::poll(crate::look::Window::Settings, tx) {
+                    appearance::changed(s);
+                }
+            });
         }
     });
 }
@@ -205,6 +221,7 @@ fn init() -> Prefs {
         holds_open: HashSet::new(),
         home: std::env::var("HOME").unwrap_or_default(),
         handoffs: handoffs::Form::default(),
+        appearance: appearance::Form::default(),
         loaded: false,
         in_flight: 0,
         seq: HashMap::new(),
@@ -259,8 +276,9 @@ fn fetch(s: &mut Prefs, what: Read) {
 
 pub fn reload(s: &mut Prefs) {
     s.loaded = true;
-    if s.client.is_none() {
-        (s.client, s.no_client) = connect();
+    let (fresh, why) = connect();
+    if fresh.is_some() || s.client.is_none() {
+        (s.client, s.no_client) = (fresh, why);
     }
     if s.client.is_none() {
         for what in ALL {
@@ -493,6 +511,7 @@ fn take_one(s: &mut Prefs, done: Done) {
             refused(s, Some(what), refusal);
         }
         Done::Devices(got) => devices::take(s, got),
+        Done::Look(got) => appearance::take(s, got),
         Done::Wrote(key, section, result, then) => {
             if s.writing.as_deref() == Some(key.as_str()) {
                 s.writing = None;
@@ -541,6 +560,10 @@ fn poll(s: &mut Prefs, _: f64, tx: &mut Tx) -> bool {
         changed = true;
     }
     changed |= devices::poll(s, tx);
+    if crate::look::poll(crate::look::Window::Settings, tx) {
+        appearance::changed(s);
+        changed = true;
+    }
     if let Some(at) = s.retry_base
         && std::time::Instant::now() >= at
         && visible()
@@ -550,6 +573,8 @@ fn poll(s: &mut Prefs, _: f64, tx: &mut Tx) -> bool {
     }
     if s.in_flight > 0 {
         tx.wake_after(Duration::from_millis(60));
+    } else if s.tab == appearance::TAB && (visible() || std::env::args().any(|a| a == "--window")) {
+        tx.wake_after(Duration::from_millis(300));
     } else if s.retry_base.is_some() && visible() {
         tx.wake_after(Duration::from_secs(1));
     }
@@ -583,9 +608,10 @@ fn unfollowed(s: &Prefs) -> Option<El> {
     Some(col().w_full().items_center().pb(8.0).child(parts::failure(s, &note).w(parts::WIDTH)))
 }
 
-pub const TABS: [&str; 5] = ["General", "Claude", "Notifications", "Devices", "Handoffs"];
+pub const TABS: [&str; 6] = ["General", "Claude", "Notifications", "Devices", "Handoffs", "Appearance"];
 
-pub fn view(s: &Prefs, _: &mut Cx<Prefs>) -> El {
+pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
+    crate::look::frame(cx, false, false, false);
     let k = theme::kit();
     let mut layer = Vec::new();
     let tabs = SegmentedControl::new(&TABS, Some(s.tab)).label("Settings").as_tabs().fit().on_pick(|s: &mut Prefs, i, _| {
@@ -593,12 +619,14 @@ pub fn view(s: &Prefs, _: &mut Cx<Prefs>) -> El {
         s.open_select = None;
         devices::hide_link(s);
         handoffs::changed(s);
+        appearance::opened(s);
     });
     let page = match s.tab {
         1 => claude::page(s, &mut layer),
         2 => notify::page(s),
         3 => devices::page(s, &mut layer),
         handoffs::TAB => handoffs::page(s, &mut layer),
+        appearance::TAB => appearance::page(s),
         _ => general::page(s, &mut layer),
     };
     let body = col()

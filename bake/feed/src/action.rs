@@ -81,12 +81,12 @@ impl Client {
 
     pub fn session_archive(&self, session: &str, archived: bool) -> Outcome<()> {
         let name = if archived { "session-archive" } else { "session-unarchive" };
-        self.action(name, json!({"sessionId": session})).map(drop)
+        self.action(name, json!({"sessionId": session})).and_then(crate::catalog::confirmed).map(drop)
     }
 
     pub fn session_pin(&self, session: &str, pinned: bool) -> Outcome<()> {
         let name = if pinned { "session-pin" } else { "session-unpin" };
-        self.action(name, json!({"sessionId": session})).map(drop)
+        self.action(name, json!({"sessionId": session})).and_then(crate::catalog::confirmed).map(drop)
     }
 
     pub fn alias(&self, session: &str, name: &str) -> Outcome<String> {
@@ -96,7 +96,7 @@ impl Client {
 
     pub fn session_read(&self, session: &str, revision: &str, read: bool) -> Outcome<Option<ReadState>> {
         let name = if read { "session-read" } else { "session-unread" };
-        let reply = self.action(name, json!({"sessionId": session, "revision": revision}))?;
+        let reply = crate::catalog::confirmed(self.action(name, json!({"sessionId": session, "revision": revision}))?)?;
         Ok(serde_json::from_value(reply["readState"].clone()).ok())
     }
 
@@ -109,7 +109,7 @@ impl Client {
     }
 
     pub fn session_focus(&self, session: &str) -> Outcome<()> {
-        self.action("session-focus", json!({"sessionId": session})).map(drop)
+        self.action("session-focus", json!({"sessionId": session})).and_then(crate::catalog::confirmed).map(drop)
     }
 
     pub fn dismiss_decision(&self, target: Dismiss) -> Outcome<()> {
@@ -215,6 +215,16 @@ mod tests {
         client.compact("s-frozen").unwrap();
         assert_eq!(seen.recv().unwrap().body["pid"], 42);
         pins.pick("s-frozen", None);
+    }
+
+    #[test]
+    fn a_submitted_menu_change_is_not_shown_as_landed() {
+        let submitted = r#"{"ok":true,"status":"submitted"}"#;
+        let (client, _seen) = daemon(vec![(202, submitted); 4]);
+        assert_eq!(client.session_pin("s1", true).unwrap_err().code, "submitted");
+        assert_eq!(client.session_archive("s1", true).unwrap_err().code, "submitted");
+        assert_eq!(client.session_read("s1", "r1", true).unwrap_err().code, "submitted");
+        assert_eq!(client.session_focus("s1").unwrap_err().code, "submitted");
     }
 
     #[test]

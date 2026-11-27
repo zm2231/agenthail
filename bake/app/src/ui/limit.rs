@@ -4,7 +4,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use feed::catalog::{Client, RespondError, Session};
 use feed::create::{ConfigRoot, RootUsage};
 use feed::limit::{Moved, Stop, Target, targets};
-use rune::{Color, El, col, el, icon, row, text};
+use rune::{El, col, el, icon, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize, Dialog};
 
 use super::spacer;
@@ -354,12 +354,12 @@ fn target_row(id: &str, since: &str, t: &Target, busy: bool, unread: bool) -> El
         .px(12.0)
         .py(9.0)
         .radius(10.0)
-        .fill(Color::WHITE.alpha(0.04))
-        .border(1.0, Color::WHITE.alpha(0.08))
+        .fill(crate::theme::ink(0.04))
+        .border(1.0, crate::theme::ink(0.08))
         .child(col().grow(1.0).min_w(0.0).gap(2.0).child(name).children(detail.map(|d| text(d).font(META).color(muted()).truncate())));
     if usable {
         let (id, since, target) = (id.to_string(), since.to_string(), t.clone());
-        r = r.hover(Color::WHITE.alpha(0.09)).on_press(move |s: &mut App| {
+        r = r.hover(crate::theme::ink(0.09)).on_press(move |s: &mut App| {
             s.limits.picking = None;
             s.limits.confirm = Some(Confirm { session: id.clone(), since: since.clone(), target: target.clone() });
         });
