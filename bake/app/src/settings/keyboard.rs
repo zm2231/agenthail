@@ -29,11 +29,14 @@ pub fn opened(s: &mut Prefs) {
 }
 
 pub fn poll(s: &mut Prefs) -> bool {
-    if s.keyboard.seen == bindings::generation() {
-        return false;
+    let changed = s.keyboard.seen != bindings::generation();
+    if changed {
+        sync_rows(s);
     }
-    sync_rows(s);
-    true
+    if crate::hotkey::refused() {
+        s.keyboard.any_app.mark_unregistered();
+    }
+    changed
 }
 
 fn sync_rows(s: &mut Prefs) {

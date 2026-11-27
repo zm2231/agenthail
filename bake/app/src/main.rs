@@ -1598,9 +1598,7 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
 }
 
 fn on_focus(_: &mut App, focused: bool, _: &mut Tx) {
-    if focused {
-        hotkey::regained();
-    }
+    hotkey::focus(focused);
 }
 
 fn on_quit(s: &mut App, _: &mut Tx) {

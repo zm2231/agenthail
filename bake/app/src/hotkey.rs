@@ -1,7 +1,7 @@
 use std::cell::{OnceCell, RefCell};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use feed::hotkey::{Hotkey, Refusal, Registrar};
+use feed::hotkey::{Hotkey, Refusal, Registrar, Return};
 use feed::shortcuts::{ANY_APP, ANY_APP_ID, Stored};
 use rune::{AppHandle, Shortcut, ShortcutError, ShortcutId, Tx};
 
@@ -18,7 +18,8 @@ enum Ask {
 thread_local! {
     static HANDLE: OnceCell<AppHandle<App>> = const { OnceCell::new() };
     static WORKER: OnceCell<Sender<(Ask, Option<Stored>)>> = const { OnceCell::new() };
-    static REFUSED: RefCell<Option<Refusal>> = const { RefCell::new(None) };
+    static REFUSED: RefCell<Option<(Refusal, Option<Stored>)>> = const { RefCell::new(None) };
+    static RETURN: RefCell<Return> = RefCell::new(Return::default());
 }
 
 struct Live<'a>(&'a AppHandle<App>);
@@ -76,7 +77,7 @@ fn shown(refused: Option<Refusal>, tried: Option<Stored>) {
         }
         other => other,
     };
-    REFUSED.set(named);
+    REFUSED.set(named.map(|r| (r, tried)));
     crate::settings::redraw();
 }
 
@@ -113,14 +114,25 @@ pub fn chose() {
     ask(Ask::Choose);
 }
 
-pub fn regained() {
-    bindings::refresh();
-    ask(Ask::Regain);
+pub fn focus(focused: bool) {
+    if RETURN.with_borrow_mut(|r| r.focus(focused, std::time::Instant::now())) {
+        bindings::refresh();
+        ask(Ask::Regain);
+    }
+}
+
+fn current() -> Option<(Refusal, Shortcut)> {
+    let now = bindings::read(|sc| sc.any_app());
+    let refused = REFUSED.with_borrow(|r| r.clone().filter(|(_, tried)| *tried == now))?;
+    Some((refused.0, chord(now?)?))
+}
+
+pub fn refused() -> bool {
+    current().is_some()
 }
 
 pub fn note() -> Option<String> {
-    let keys = bindings::any_app().map(|s| bindings::keycaps(&s))?;
-    REFUSED.with_borrow(|refused| refused.as_ref().map(|r| feed::hotkey::note(r, &keys)))
+    current().map(|(refusal, shortcut)| feed::hotkey::note(&refusal, &bindings::keycaps(&shortcut)))
 }
 
 fn pressed(s: &mut App, tx: &mut Tx) {

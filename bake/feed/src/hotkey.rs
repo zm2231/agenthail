@@ -1,4 +1,23 @@
+use std::time::{Duration, Instant};
+
 use crate::shortcuts::Stored;
+
+const WINDOW_SWITCH: Duration = Duration::from_millis(300);
+
+#[derive(Debug, Default)]
+pub struct Return {
+    left: Option<Instant>,
+}
+
+impl Return {
+    pub fn focus(&mut self, focused: bool, now: Instant) -> bool {
+        if !focused {
+            self.left = Some(now);
+            return false;
+        }
+        !self.left.take().is_some_and(|left| now.saturating_duration_since(left) < WINDOW_SWITCH)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Refusal {
@@ -122,6 +141,18 @@ mod tests {
 
     fn s(spec: &str) -> Stored {
         Stored::parse(spec).unwrap()
+    }
+
+    #[test]
+    fn moving_between_agenthails_own_windows_is_not_coming_back() {
+        let t = Instant::now();
+        let mut r = Return::default();
+        assert!(r.focus(true, t), "the first focus is coming back");
+        assert!(!r.focus(false, t + Duration::from_secs(1)));
+        assert!(!r.focus(true, t + Duration::from_millis(1005)), "another of its windows took focus straight away");
+        assert!(!r.focus(false, t + Duration::from_secs(2)));
+        assert!(r.focus(true, t + Duration::from_secs(9)), "coming back from another app");
+        assert!(r.focus(true, t + Duration::from_secs(10)), "a focus without a blur is coming back");
     }
 
     #[test]
