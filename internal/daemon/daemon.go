@@ -70,6 +70,7 @@ type Daemon struct {
 	idleWake             chan struct{}
 	retiringDecisions    retiringDecisions
 	unnamedCallers       unnamedCallers
+	actionRuns           actionRuns
 	errorMu              sync.Mutex
 	observeErrors        map[string]observedError
 	ui                   *uiState
@@ -452,6 +453,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.superviseExtensions(ctx)
 	}()
 	go d.sweepUploads(ctx)
+	go d.runActionReceiptPrunes(ctx)
 	go trimCodexRolloutCache(ctx)
 	go d.sweepSimulatorLeases(ctx)
 	go d.runLimitResumes(ctx)

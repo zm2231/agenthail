@@ -80,3 +80,71 @@ func TestActionReceiptCompletionIsBoundedAndDoesNotReopenReservation(t *testing.
 		t.Fatalf("second completion err=%v", err)
 	}
 }
+
+func TestActionReceiptRetryReopensOnlyForTheSameRequestAndKeepsFirstTime(t *testing.T) {
+	r := openTestRegistry(t)
+	const hash = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	const other = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+	first := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
+	if _, err := r.ReserveActionReceipt("device-a", "unanswered", hash, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RetryActionReceipt("device-a", "unanswered", hash, first.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	mismatch, err := r.ReserveActionReceipt("device-a", "unanswered", other, first.Add(time.Minute))
+	if err != nil || mismatch.Acquired || mismatch.Receipt.RequestHash != hash {
+		t.Fatalf("different request=%+v err=%v", mismatch, err)
+	}
+	again, err := r.ReserveActionReceipt("device-a", "unanswered", hash, first.Add(time.Hour))
+	if err != nil || !again.Acquired || again.Receipt.Status != ActionReceiptPending || again.Receipt.CreatedAt != formatTimestamp(first) {
+		t.Fatalf("resend=%+v err=%v", again, err)
+	}
+	concurrent, err := r.ReserveActionReceipt("device-a", "unanswered", hash, first.Add(time.Hour))
+	if err != nil || concurrent.Acquired {
+		t.Fatalf("second resend while the first runs=%+v err=%v", concurrent, err)
+	}
+	if err := r.CompleteActionReceipt("device-a", "unanswered", hash, []byte("answer"), first.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestActionReceiptPruneDeletesSettledBeforeCutoffInBatches(t *testing.T) {
+	r := openTestRegistry(t)
+	const hash = "abababababababababababababababababababababababababababababababab"
+	cutoff := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	settle := func(key string, at time.Time, retry bool) {
+		t.Helper()
+		if _, err := r.ReserveActionReceipt("device-a", key, hash, at); err != nil {
+			t.Fatal(err)
+		}
+		var err error
+		if retry {
+			err = r.RetryActionReceipt("device-a", key, hash, at)
+		} else {
+			err = r.CompleteActionReceipt("device-a", key, hash, []byte("done"), at)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, key := range []string{"old-1", "old-2", "old-3"} {
+		settle(key, cutoff.Add(-time.Hour), false)
+	}
+	settle("old-retry", cutoff.Add(-time.Hour), true)
+	settle("recent", cutoff.Add(time.Hour), false)
+	if _, err := r.ReserveActionReceipt("device-a", "old-pending", hash, cutoff.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if removed, err := r.PruneActionReceipts(cutoff, 3); err != nil || removed != 3 {
+		t.Fatalf("first batch removed=%d err=%v", removed, err)
+	}
+	if removed, err := r.PruneActionReceipts(cutoff, 3); err != nil || removed != 1 {
+		t.Fatalf("second batch removed=%d err=%v", removed, err)
+	}
+	for key, kept := range map[string]bool{"old-1": false, "old-2": false, "old-3": false, "old-retry": false, "recent": true, "old-pending": true} {
+		if _, found, err := r.ActionReceipt("device-a", key); err != nil || found != kept {
+			t.Fatalf("%s found=%v err=%v, want %v", key, found, err, kept)
+		}
+	}
+}

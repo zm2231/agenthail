@@ -43,6 +43,10 @@ func (d *Daemon) replayHostHeldAction(ctx context.Context, host *pairedHost, ite
 		}
 		return
 	}
+	if heldReplayTooOld(inflightAt) {
+		d.settleHostHeldAction(host, item, registry.HostActionDead, fmt.Sprintf("host %s did not confirm %s within %d days, so it may not have happened; sending it again now could run it twice", host.record.Name, item.Label, int(heldReplayLimit.Hours()/24)))
+		return
+	}
 	unconfirmed := func() {
 		if time.Since(inflightAt) > d.federation.patience {
 			d.settleHostHeldAction(host, item, registry.HostActionDead, fmt.Sprintf("host %s has not confirmed %s", host.record.Name, item.Label))

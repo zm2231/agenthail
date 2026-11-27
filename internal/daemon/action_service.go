@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
 )
@@ -64,12 +65,23 @@ func (w *actionRecorder) reply() actionReply {
 
 type actionKeyContextKey struct{}
 
+// A resend carries the time of its first attempt, so a forwarded body and its
+// hash on the paired host stay the same.
+type actionFirstSentKey struct{}
+
+func actionFirstSent(ctx context.Context) time.Time {
+	if sent, ok := ctx.Value(actionFirstSentKey{}).(time.Time); ok && !sent.IsZero() {
+		return sent
+	}
+	return time.Now()
+}
+
 // performAction runs one action for any front end: idempotency, routing to the
 // host that owns its target, decoding and dispatch.
 func (d *Daemon) performAction(ctx context.Context, p principal, format actionFormat, body []byte, idempotencyKey string) actionReply {
 	ctx = p.context(ctx)
-	return d.idempotentReply(p.ID, idempotencyKey, body, mcpRequestHash(ctx), func(body []byte) actionReply {
-		reply := d.routeHostAction(ctx, p, body, idempotencyKey)
+	return d.idempotentReply(p.ID, idempotencyKey, body, mcpRequestHash(ctx), func(firstSent time.Time, body []byte) actionReply {
+		reply := d.routeHostAction(context.WithValue(ctx, actionFirstSentKey{}, firstSent), p, body, idempotencyKey)
 		if format == actionFormatAPIv1 {
 			reply = apiV1Reply(reply)
 		}

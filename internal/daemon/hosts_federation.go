@@ -1131,6 +1131,10 @@ func (d *Daemon) replayHostDelivery(ctx context.Context, host *pairedHost, item 
 	if !claimed {
 		return
 	}
+	if heldReplayTooOld(inflightAt) {
+		_ = d.Registry.DeadLetterUnknown(item.ID, fmt.Errorf("host %s did not confirm the message within %d days, and sending it again now could deliver it twice", host.record.Name, int(heldReplayLimit.Hours()/24)))
+		return
+	}
 	answer := d.postHostDelivery(ctx, host, item)
 	var moved hosts.StatusError
 	if errors.As(answer.readErr, &moved) && moved.Code == movedCode {

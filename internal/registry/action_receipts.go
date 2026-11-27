@@ -11,6 +11,9 @@ import (
 const (
 	ActionReceiptPending   = "pending"
 	ActionReceiptCompleted = "completed"
+	// A retry receipt holds an answer that was not the action's outcome, such as
+	// a paired host that did not answer; the next request with its key runs again.
+	ActionReceiptRetry     = "retry"
 	ActionReceiptKeyLimit  = 128
 	ActionReceiptHashSize  = 64
 	ActionReceiptBodyLimit = 256 << 10
@@ -65,12 +68,19 @@ func (r *Registry) ReserveActionReceipt(principal, key, requestHash string, now 
 	if err != nil {
 		return ActionReceiptReservation{}, err
 	}
+	acquired := receipt.Status == ActionReceiptRetry && receipt.RequestHash == requestHash
+	if acquired {
+		if _, err := tx.Exec(`UPDATE action_receipts SET status=?,receipt=?,updated_at=? WHERE idempotency_key=?`, ActionReceiptPending, []byte{}, stamp, storageKey); err != nil {
+			return ActionReceiptReservation{}, err
+		}
+		receipt.Status, receipt.Receipt, receipt.UpdatedAt = ActionReceiptPending, []byte{}, stamp
+	}
 	if err := tx.Commit(); err != nil {
 		return ActionReceiptReservation{}, err
 	}
 	receipt.Principal = principal
 	receipt.Key = key
-	return ActionReceiptReservation{Receipt: receipt}, nil
+	return ActionReceiptReservation{Acquired: acquired, Receipt: receipt}, nil
 }
 
 func (r *Registry) ActionReceipt(principal, key string) (ActionReceipt, bool, error) {
@@ -86,6 +96,14 @@ func (r *Registry) ActionReceipt(principal, key string) (ActionReceipt, bool, er
 }
 
 func (r *Registry) CompleteActionReceipt(principal, key, requestHash string, receipt []byte, now time.Time) error {
+	return r.settleActionReceipt(principal, key, requestHash, ActionReceiptCompleted, receipt, now)
+}
+
+func (r *Registry) RetryActionReceipt(principal, key, requestHash string, now time.Time) error {
+	return r.settleActionReceipt(principal, key, requestHash, ActionReceiptRetry, []byte{}, now)
+}
+
+func (r *Registry) settleActionReceipt(principal, key, requestHash, status string, receipt []byte, now time.Time) error {
 	if err := validateActionReceiptInput(principal, key, requestHash); err != nil {
 		return err
 	}
@@ -95,7 +113,7 @@ func (r *Registry) CompleteActionReceipt(principal, key, requestHash string, rec
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	result, err := r.db.Exec(`UPDATE action_receipts SET status=?,receipt=?,updated_at=? WHERE idempotency_key=? AND request_hash=? AND status=?`, ActionReceiptCompleted, append([]byte(nil), receipt...), formatTimestamp(now), actionReceiptStorageKey(principal, key), requestHash, ActionReceiptPending)
+	result, err := r.db.Exec(`UPDATE action_receipts SET status=?,receipt=?,updated_at=? WHERE idempotency_key=? AND request_hash=? AND status=?`, status, append([]byte{}, receipt...), formatTimestamp(now), actionReceiptStorageKey(principal, key), requestHash, ActionReceiptPending)
 	if err != nil {
 		return err
 	}
@@ -107,6 +125,16 @@ func (r *Registry) CompleteActionReceipt(principal, key, requestHash string, rec
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+// Pending receipts are kept: their run may still be going, and a resend has to
+// learn that it was interrupted.
+func (r *Registry) PruneActionReceipts(cutoff time.Time, limit int) (int64, error) {
+	result, err := r.db.Exec(`DELETE FROM action_receipts WHERE idempotency_key IN (SELECT idempotency_key FROM action_receipts WHERE status IN (?,?) AND updated_at<? LIMIT ?)`, ActionReceiptCompleted, ActionReceiptRetry, formatTimestamp(cutoff), limit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 func actionReceiptByStorageKey(q interface {

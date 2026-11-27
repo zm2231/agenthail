@@ -65,7 +65,7 @@ func (d *Daemon) routeHostAction(ctx context.Context, p principal, raw []byte, k
 	}
 	if action, _ := request["action"].(string); action == "send" || action == "channel-send" {
 		if _, fromHost := requestingHost(ctx); !fromHost || request["sentAt"] == nil {
-			request["sentAt"] = time.Now().UTC().Format(time.RFC3339Nano)
+			request["sentAt"] = actionFirstSent(ctx).UTC().Format(time.RFC3339Nano)
 		}
 	}
 	hostTask := false

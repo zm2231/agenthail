@@ -467,6 +467,7 @@ CREATE TABLE IF NOT EXISTS action_receipts (
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS action_receipts_updated ON action_receipts(updated_at) WHERE status='completed';
 CREATE TABLE IF NOT EXISTS delivery_intents (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	sender_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
