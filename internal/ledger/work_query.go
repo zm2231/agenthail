@@ -102,10 +102,34 @@ func (q WorkQuery) keeps(item *WorkItem) bool {
 	return true
 }
 
-func (item *WorkItem) searchText() string {
-	parts := []string{item.ID, item.ImportedFrom, item.Text, item.Description, item.Acceptance, item.From, item.Reason, strings.Join(item.Labels, " ")}
+const (
+	MatchID          = "id"
+	MatchTdID        = "tdId"
+	MatchTitle       = "title"
+	MatchDescription = "description"
+	MatchAcceptance  = "acceptance"
+	MatchFrom        = "from"
+	MatchReason      = "reason"
+	MatchLabels      = "labels"
+	MatchNotes       = "notes"
+)
+
+type searchField struct{ name, text string }
+
+func (item *WorkItem) searchFields() []searchField {
+	fields := []searchField{{MatchID, item.ID}, {MatchTdID, item.ImportedFrom}, {MatchTitle, item.Text}, {MatchDescription, item.Description},
+		{MatchAcceptance, item.Acceptance}, {MatchFrom, item.From}, {MatchReason, item.Reason}, {MatchLabels, strings.Join(item.Labels, " ")}}
 	for _, e := range item.Timeline {
-		parts = append(parts, e.Text)
+		fields = append(fields, searchField{MatchNotes, e.Text})
+	}
+	return fields
+}
+
+func (item *WorkItem) searchText() string {
+	fields := item.searchFields()
+	parts := make([]string, len(fields))
+	for i, f := range fields {
+		parts[i] = f.text
 	}
 	return strings.ToLower(strings.Join(parts, "\n"))
 }
