@@ -41,6 +41,7 @@ pub fn poll(s: &mut Prefs) -> bool {
 
 fn sync_rows(s: &mut Prefs) {
     s.keyboard.seen = bindings::generation();
+    crate::hotkey::sync();
     if !s.keyboard.any_app.is_recording() {
         s.keyboard.any_app = ShortcutRecorderState::new(bindings::any_app());
     }
@@ -76,9 +77,9 @@ fn propose_any_app(next: Option<&Shortcut>) -> Result<(), ShortcutError> {
         None => None,
         Some(shortcut) => Some(bindings::stored(shortcut).ok_or_else(|| ShortcutError::InvalidAccelerator(shortcut.to_string()))?),
     };
-    let changed = bindings::change(|sc| sc.set_any_app(stored)).map_err(|_| ShortcutError::Conflict);
+    bindings::change(|sc| sc.set_any_app(stored)).map_err(|_| ShortcutError::Conflict)?;
     crate::hotkey::chose();
-    changed
+    Ok(())
 }
 
 fn message(id: &'static str, error: &ShortcutError, shortcut: Option<&Shortcut>) -> String {
@@ -106,7 +107,6 @@ fn restore(s: &mut Prefs) {
     s.keyboard.rows.clear();
     s.keyboard.any_app = ShortcutRecorderState::default();
     sync_rows(s);
-    crate::hotkey::sync();
 }
 
 fn any_app_state(s: &mut Prefs) -> &mut ShortcutRecorderState {
