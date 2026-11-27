@@ -124,9 +124,9 @@ fn a_new_catalog_epoch_drops_events_from_the_old_one() {
     let mut c = Catalog::default();
     c.adopt(vec![row("a", "idle")], "e1", 10);
     c.apply(vec![upsert(50, "a", "old-epoch")]);
-    c.reconnected();
-    c.adopt(vec![row("a", "fresh")], "e2", 3);
+    assert!(c.adopt(vec![row("a", "fresh")], "e2", 3).restart, "a new epoch restarts the reader from the snapshot");
     assert_eq!(statuses(&c), vec![("a".into(), "fresh".into())]);
+    assert!(!c.adopt(vec![row("a", "fresh")], "e2", 3).restart);
     let out = c.apply(vec![upsert(4, "a", "working")]);
     assert!(out.changed);
     assert_eq!(statuses(&c), vec![("a".into(), "working".into())]);
@@ -187,15 +187,4 @@ fn decisions_are_read_at_once_when_asked_now_and_otherwise_no_sooner_than_ten_se
     assert_eq!(p.wait(t0 + Duration::from_secs(3)), Some(DECISIONS_RETRY), "a failed read tries again 30 seconds after it");
     assert!(!p.ask(false, t0 + Duration::from_secs(4)));
     assert_eq!(p.wait(t0 + Duration::from_secs(4)), Some(Duration::from_secs(9)), "a change waiting sooner than the retry goes first");
-}
-
-#[test]
-fn a_new_epoch_keeps_the_events_that_came_on_the_new_connection() {
-    let mut c = Catalog::default();
-    c.adopt(vec![row("a", "idle")], "e1", 10);
-    c.apply(vec![upsert(50, "a", "old-epoch")]);
-    c.reconnected();
-    c.apply(vec![upsert(5, "b", "new")]);
-    c.adopt(vec![row("a", "fresh")], "e2", 3);
-    assert_eq!(statuses(&c), vec![("a".into(), "fresh".into()), ("b".into(), "new".into())]);
 }

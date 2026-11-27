@@ -251,9 +251,12 @@ fn newer(at: &str, than: &str) -> bool {
     }
 }
 
-fn later(at: &str, epoch: &str, seq: u64, base: &Recorded) -> bool {
-    if epoch.is_empty() || epoch != base.host_epoch {
+fn later(at: &str, epoch: &str, seq: u64, base: &Recorded, follows_catalog: bool) -> bool {
+    if epoch.is_empty() || base.host_epoch.is_empty() {
         return newer(at, &base.updated_at);
+    }
+    if epoch != base.host_epoch {
+        return follows_catalog;
     }
     seq > base.catalog_seq || seq == base.catalog_seq && newer(at, &base.updated_at)
 }
@@ -270,7 +273,7 @@ impl Overview {
     }
 
     pub fn take_sessions(&mut self, at: &str, epoch: &str, seq: u64, sessions: Vec<Session>) -> bool {
-        if !later(at, epoch, seq, &self.base) {
+        if !later(at, epoch, seq, &self.base, true) {
             return false;
         }
         self.base.updated_at = at.to_string();
@@ -341,7 +344,7 @@ impl Overview {
 
     pub fn refresh(&mut self, fetched: Fetched) {
         let Fetched { mut recorded, ledgers, held, started, .. } = fetched;
-        let fresh = later(&recorded.updated_at, &recorded.host_epoch, recorded.catalog_seq, &self.base);
+        let fresh = later(&recorded.updated_at, &recorded.host_epoch, recorded.catalog_seq, &self.base, false);
         if !fresh {
             recorded.updated_at = std::mem::take(&mut self.base.updated_at);
             recorded.host_epoch = std::mem::take(&mut self.base.host_epoch);

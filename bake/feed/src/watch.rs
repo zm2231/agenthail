@@ -106,18 +106,7 @@ pub struct Applied {
     pub news: bool,
     pub rev: Option<String>,
     pub touched: Vec<String>,
-}
-
-impl Applied {
-    pub fn merge(&mut self, other: Applied) {
-        self.changed |= other.changed;
-        self.reread |= other.reread;
-        self.news |= other.news;
-        if other.rev.is_some() {
-            self.rev = other.rev;
-        }
-        self.touched.extend(other.touched);
-    }
+    pub restart: bool,
 }
 
 #[derive(Default)]
@@ -126,8 +115,7 @@ pub struct Catalog {
     epoch: String,
     seq: u64,
     adopted: bool,
-    connection: u64,
-    recent: VecDeque<(u64, CatalogEvent)>,
+    recent: VecDeque<CatalogEvent>,
 }
 
 impl Catalog {
@@ -147,38 +135,33 @@ impl Catalog {
         self.recent.clear();
     }
 
-    pub fn reconnected(&mut self) {
-        self.connection += 1;
-    }
-
     pub fn adopt(&mut self, sessions: Vec<Session>, epoch: &str, seq: u64) -> Applied {
-        if epoch != self.epoch {
-            if !self.epoch.is_empty() {
-                let connection = self.connection;
-                self.recent.retain(|(c, _)| *c == connection);
-            }
-            self.epoch = epoch.to_string();
+        let restart = epoch != self.epoch && !self.epoch.is_empty();
+        if restart {
+            self.recent.clear();
         }
+        self.epoch = epoch.to_string();
         self.sessions = sessions;
         self.seq = seq;
         self.adopted = true;
-        self.recent.retain(|(_, e)| e.seq > seq);
-        let later: Vec<CatalogEvent> = self.recent.iter().map(|(_, e)| e.clone()).collect();
+        self.recent.retain(|e| e.seq > seq);
+        let later: Vec<CatalogEvent> = self.recent.iter().cloned().collect();
         let mut out = Applied::default();
         for e in later {
             self.step(e, &mut out);
         }
         out.changed = true;
+        out.restart = restart;
         out
     }
 
     pub fn apply(&mut self, events: Vec<CatalogEvent>) -> Applied {
         let mut out = Applied::default();
         for e in events {
-            if self.recent.iter().any(|(_, r)| r.seq == e.seq) {
+            if self.recent.iter().any(|r| r.seq == e.seq) {
                 continue;
             }
-            self.recent.push_back((self.connection, e.clone()));
+            self.recent.push_back(e.clone());
             if self.recent.len() > KEEP {
                 self.recent.pop_front();
                 out.reread = true;

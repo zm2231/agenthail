@@ -334,7 +334,12 @@ fn sessions_are_ordered_by_catalog_position_not_by_whose_clock_is_later() {
     ov.refresh(older);
     assert_eq!(ov.sessions()[0].status, "busy", "a later read of an earlier catalog position doesn't undo a change");
     assert!(!ov.take_sessions("2026-11-24T12:00:10Z", "e", 104, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
-    assert!(ov.take_sessions("2026-11-24T12:00:11Z", "e2", 3, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]), "a restarted catalog starts over");
+    assert!(ov.take_sessions("2026-11-24T11:00:00Z", "e2", 3, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]), "the catalog follower's move to a new epoch wins whatever the clocks say");
+    let mut stale = fetched("2026-11-24T11:30:00Z", vec![session("a", "p", "2026-11-24T11:59:00Z", "busy")], Vec::new());
+    stale.recorded.host_epoch = "e".into();
+    stale.recorded.catalog_seq = 200;
+    ov.refresh(stale);
+    assert_eq!(ov.sessions()[0].status, "idle", "an overview read from the old epoch doesn't undo it");
 }
 
 #[test]

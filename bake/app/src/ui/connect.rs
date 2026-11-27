@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use feed::catalog::Client;
 use feed::connect::{self, Problem};
-use feed::watch::{Applied, Catalog, SAFETY};
+use feed::watch::{Catalog, SAFETY};
 use rune::{Cx, El, col, el, icon, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize};
 
@@ -51,7 +51,8 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
     std::thread::spawn(move || {
         let mut catalog = Catalog::default();
         let cursor = Arc::new(AtomicU64::new(0));
-        let (resume, resumed) = channel();
+        let (mut resume, resumed) = channel();
+        let generation = Arc::new(AtomicU64::new(0));
         let mut resumed = Some(resumed);
         let (mut checked, mut last): (Option<Instant>, Option<Instant>) = (None, None);
         let (mut due, mut down, mut gap, mut confirm) = (true, false, false, 0u8);
@@ -76,8 +77,15 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                         }
                         if let Some(resumed) = resumed.take() {
                             cursor.store(catalog.seq(), Ordering::Release);
-                            watch::catalog(c.clone(), cursor.clone(), resumed, poke.clone());
+                            watch::catalog(c.clone(), cursor.clone(), resumed, poke.clone(), generation.clone());
                             watch::events(c.clone(), snap.event_cursor, tx.clone());
+                        } else if applied.restart {
+                            gap = false;
+                            generation.fetch_add(1, Ordering::AcqRel);
+                            cursor.store(catalog.seq(), Ordering::Release);
+                            let (fresh, resumed) = channel();
+                            resume = fresh;
+                            watch::catalog(c.clone(), cursor.clone(), resumed, poke.clone(), generation.clone());
                         } else if std::mem::take(&mut gap) {
                             cursor.store(catalog.seq(), Ordering::Release);
                             let _ = resume.send(());
@@ -114,8 +122,7 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                                 due = true;
                                 gap = true;
                             }
-                            Feed::Catalog(event) => batch.push(Some(event)),
-                            Feed::Reconnected => batch.push(None),
+                            Feed::Catalog(event) => batch.push(event),
                         }
                         next = poked.recv_timeout(settle.saturating_duration_since(Instant::now())).ok();
                     }
@@ -127,17 +134,7 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                 }
                 continue;
             }
-            let (mut applied, mut run) = (Applied::default(), Vec::new());
-            for item in batch {
-                match item {
-                    Some(event) => run.push(event),
-                    None => {
-                        applied.merge(catalog.apply(std::mem::take(&mut run)));
-                        catalog.reconnected();
-                    }
-                }
-            }
-            applied.merge(catalog.apply(run));
+            let applied = catalog.apply(batch);
             if gap {
                 catalog.forget();
             }
