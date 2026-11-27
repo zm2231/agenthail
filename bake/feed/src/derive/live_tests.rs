@@ -852,3 +852,14 @@ fn rows_read_before_their_project_had_a_ledger_key_take_it_when_it_arrives() {
     let w = ov.world(&[]);
     assert!(w.work.contains_key(&WorkKey::new("shared:p", "p-W1")) && !w.work.contains_key(&WorkKey::new("p", "p-W1")));
 }
+
+#[test]
+fn the_watcher_keeps_rows_only_for_projects_it_still_reads() {
+    let mut known = super::live::Known::default();
+    let read = |held: &[&str], ledgers: Vec<(&str, Result<Vec<Work>, String>)>| Fetched { held: held.iter().map(|x| x.to_string()).collect(), ..fetched("2026-11-24T12:00:00Z", Vec::new(), ledgers) };
+    known.learn(&read(&[], vec![("p", Ok(vec![work("p-W1", "open")])), ("old", Ok(vec![work("old-W1", "open")]))]));
+    assert_eq!(known.rows_held().into_iter().collect::<Vec<_>>(), ["old", "p"]);
+    known.read("opened", Instant::now(), &Ok(Ledger { rows: vec![work("o-W1", "open").into()], actors: HashMap::new(), asked: Vec::new(), actors_at: Instant::now(), steps: Default::default() }));
+    known.learn(&read(&["p"], vec![]));
+    assert_eq!(known.rows_held().into_iter().collect::<Vec<_>>(), ["opened", "p"], "a project no longer read lets its rows go; held and opened ones keep theirs");
+}
