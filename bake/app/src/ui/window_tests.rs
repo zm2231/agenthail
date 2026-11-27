@@ -117,3 +117,20 @@ fn saved_windows_reopen_with_their_frames() {
     placed(&mut s, ids[1], moved);
     assert_eq!(s.windows.saved()[1].frame, Some(moved));
 }
+
+#[test]
+fn a_session_window_draws_the_conversation_without_the_sidebar() {
+    let mut s = app();
+    s.sessions = ["a", "b"].iter().map(|id| serde_json::from_value(serde_json::json!({"id": id, "surface": "claude", "name": id, "status": "idle", "open": true})).unwrap()).collect();
+    crate::select(&mut s, "a");
+    let w = open(&mut s, "b");
+    enter(&mut s, w);
+    let spec = rune::AppSpec::<App> { poll: Some(poll), ..rune::AppSpec::new("Session", (900.0, 820.0), crate::init, crate::ui::session_window) };
+    let mut rt = rune::App::new(spec).init(move || s).headless_runtime((900.0, 820.0), rune::Env { system_dark: true, scale: 1.0 });
+    rt.frame(1.0 / 60.0);
+    rt.frame(1.0 / 60.0);
+    assert!(rt.presented("composer").is_some(), "the window shows its session and composer");
+    assert!(rt.presented("sidebar-scroll").is_none(), "a session window has no sidebar");
+    assert!(rt.presented("session-tabs").is_none(), "tabs live in the main window only");
+    assert_eq!(rt.state.selected.as_deref(), Some("b"));
+}

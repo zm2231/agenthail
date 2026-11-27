@@ -37,6 +37,7 @@ fn command_icon(c: Command) -> &'static Icon {
         Command::NewSession => &icons::PLUS,
         Command::Stop => &ah::STOP,
         Command::Rename => &ah::PENCIL,
+        Command::Window => &ah::LAYERS,
         Command::Refresh => &ah::ROTATE,
         Command::Restart => &ah::ROTATE_CW,
         Command::Activity => &ah::ACTIVITY,

@@ -362,6 +362,10 @@ pub fn poll(window: Window, tx: &mut Tx) -> bool {
     changed
 }
 
+pub fn tabs() -> feed::tabs::Setting {
+    STATE.with_borrow(|s| s.view.as_ref().map(|v| feed::tabs::setting(&v.values)).unwrap_or_default())
+}
+
 pub fn poll_seen(seen: &mut u64, tx: &mut Tx) -> bool {
     STATE.with_borrow_mut(|s| {
         pump(s);

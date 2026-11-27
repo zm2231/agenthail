@@ -124,6 +124,8 @@ fn encode(s: &App) -> String {
         "turnNotice": feed::notice::shared().to_json(),
         "extensionPins": s.ov.ext.pins.iter().collect::<Vec<_>>(),
         "projectTiles": serde_json::to_value(s.ov.projects.tiles.saved()).unwrap_or(Value::Null),
+        "tabs": crate::ui::tabs::saved(s),
+        "windows": feed::windows::write(&s.windows.saved()),
         "leadDrafts": s.ov.projects.lead_drafts.iter().filter(|(_, d)| !d.text.trim().is_empty()).map(|(k, d)| (k.clone(), Value::String(d.text.clone()))).collect::<serde_json::Map<String, Value>>(),
     })
     .to_string()
@@ -186,6 +188,8 @@ pub fn load(s: &mut App) {
         s.ov.projects.lead_drafts = m.iter().filter_map(|(k, t)| t.as_str().map(|t| (k.clone(), rune::TextEdit::new(t)))).collect();
     }
     crate::ui::queue::recover(s);
+    crate::ui::tabs::load(s, &v["tabs"]);
+    crate::ui::window::restore(s, &feed::windows::read(&v["windows"]));
     s.ov.arrange();
     *LAST.lock().expect("layout lock") = encode(s);
 }

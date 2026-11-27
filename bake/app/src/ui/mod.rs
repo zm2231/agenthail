@@ -19,6 +19,7 @@ pub mod composer_keys;
 pub mod connect;
 pub(crate) mod delivery;
 pub mod watch;
+pub mod tabs;
 pub mod window;
 pub mod gone;
 pub(crate) mod holders;
@@ -145,6 +146,7 @@ fn window(s: &App, cx: &mut Cx<App>, chrome: &KitTheme, in_session: bool, main: 
     limit::overlays(s, &mut layer, &k);
     accounts::overlays(s, &mut layer, &k);
     holders::overlays(s, &mut layer, &k);
+    tabs::overlays(s, &mut layer, &k);
     new_session::view(s, &mut layer, &k);
     let root = col()
         .w_full()
@@ -170,6 +172,9 @@ fn session_body(s: &App, cx: &mut Cx<App>, chrome: &KitTheme, with_sidebar: bool
 
 fn session_toolbar(s: &App, x: Option<&Session>, c: &Kit) -> rune_kit::shell::Toolbar {
     let bar = rune_kit::shell::Toolbar::new().trailing(crate::over::ui::needs_button(s, c));
+    if let Some(strip) = tabs::strip(s, c) {
+        return bar.leading(strip);
+    }
     let Some(x) = x else { return bar };
     let (name, key) = (x.project_name(), x.project_key());
     let title = s.ov.d.session(&x.id).map(|w| s.ov.d.title(w)).unwrap_or_else(|| x.title());

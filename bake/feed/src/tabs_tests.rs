@@ -104,3 +104,11 @@ fn names_survive_an_unknown_session_and_titles_follow_the_label() {
     assert_eq!(title(None, Some("https://github.com/acme/site/pull/4"), "x", "title"), "acme / site");
     assert_eq!(title(None, None, NEW_SESSION, "alias"), "New Session");
 }
+
+#[test]
+fn tabs_follow_the_titlebar_setting_and_fit_the_width() {
+    let values = |v: serde_json::Value| v.as_object().unwrap().clone();
+    assert_eq!(setting(&values(serde_json::json!({}))), Setting { on: true, label: "alias".into() });
+    assert_eq!(setting(&values(serde_json::json!({"titlebar.tabs": "off", "titlebar.tabs.label": "title"}))), Setting { on: false, label: "title".into() });
+    assert_eq!((capacity(0.0), capacity(380.0), capacity(1440.0)), (1, 2, 8));
+}

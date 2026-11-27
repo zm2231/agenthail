@@ -3,6 +3,7 @@ use crate::catalog::Session;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Act {
+    Window,
     Rename,
     Terminal,
     Pr(String),
@@ -158,7 +159,7 @@ pub fn entries(x: &Session) -> Vec<Vec<Entry>> {
 
 /// The daemon refuses session-focus for a session on another host.
 pub fn offered(x: &Session, offer: Offer) -> Vec<Vec<Entry>> {
-    let mut open = vec![Entry::on(Act::Rename, "Rename…")];
+    let mut open = vec![Entry::on(Act::Window, "Open in New Window"), Entry::on(Act::Rename, "Rename…")];
     if x.adoptable() {
         open.push(Entry::on(Act::Adopt, "Open in Agenthail"));
     }
@@ -371,7 +372,7 @@ mod tests {
 
     #[test]
     fn a_plain_session_offers_rename_pin_and_archive() {
-        assert_eq!(labels(&session()), vec![vec!["Rename…"], vec!["Link a pull request…"], vec!["Pin", "Snooze", "Archive"]]);
+        assert_eq!(labels(&session()), vec![vec!["Open in New Window", "Rename…"], vec!["Link a pull request…"], vec!["Pin", "Snooze", "Archive"]]);
     }
 
     #[test]
@@ -412,7 +413,7 @@ mod tests {
         let mut x = session();
         assert!(!labels(&x)[0].contains(&"Fork".to_string()));
         x.surface = "codex".into();
-        assert_eq!(entries(&x)[0][1], Entry::on(Act::Fork, "Fork"));
+        assert_eq!(entries(&x)[0][2], Entry::on(Act::Fork, "Fork"));
         x.read_only = true;
         assert!(!entries(&x).concat().iter().any(|e| e.act == Act::Fork));
     }
@@ -422,7 +423,7 @@ mod tests {
         let mut x = session();
         assert!(!labels(&x)[0].contains(&"Open in Agenthail".to_string()));
         x.capabilities.lifecycle.adopt = true;
-        assert_eq!(labels(&x)[0], vec!["Rename…", "Open in Agenthail"]);
+        assert_eq!(labels(&x)[0], vec!["Open in New Window", "Rename…", "Open in Agenthail"]);
         x.read_only = true;
         assert!(!labels(&x)[0].contains(&"Open in Agenthail".to_string()));
     }
@@ -532,12 +533,12 @@ mod tests {
         let mut x = session();
         x.prs = vec![Pr { number: 12, title: "Fix it".into(), url: "https://github.com/o/r/pull/12".into(), ..Default::default() }];
         let open = &entries(&x)[0];
-        assert_eq!(open[1].label, "Open pull request");
-        assert_eq!(open[1].act, Act::Pr("https://github.com/o/r/pull/12".into()));
-        assert_eq!(open[1].note.as_deref(), Some("Fix it"));
+        assert_eq!(open[2].label, "Open pull request");
+        assert_eq!(open[2].act, Act::Pr("https://github.com/o/r/pull/12".into()));
+        assert_eq!(open[2].note.as_deref(), Some("Fix it"));
         x.prs.push(Pr { number: 13, title: String::new(), url: "https://github.com/o/r/pull/13".into(), watch: true, ..Default::default() });
         x.prs.push(Pr { number: 14, title: "No link".into(), url: String::new(), ..Default::default() });
-        assert_eq!(labels(&x)[0], vec!["Rename…", "Open pull request #12", "Open pull request #13"]);
+        assert_eq!(labels(&x)[0], vec!["Open in New Window", "Rename…", "Open pull request #12", "Open pull request #13"]);
     }
 
     #[test]

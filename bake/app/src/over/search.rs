@@ -166,6 +166,11 @@ pub fn run(s: &mut App, command: Command, tx: &mut Tx) {
                 crate::ui::session_menu::run(s, &id, feed::menu::Act::Rename);
             }
         }
+        Command::Window => {
+            if let Some(id) = selected(s) {
+                crate::ui::window::show(s, &id);
+            }
+        }
         Command::Refresh => refresh(s),
         Command::Restart => crate::ui::connect::start_daemon(s),
         Command::Activity => activity::open(s, tx),

@@ -48,6 +48,7 @@ pub fn button(x: &Session) -> El {
 
 fn act_icon(act: &Act) -> &'static rune::Icon {
     match act {
+        Act::Window => &icons::LAYERS,
         Act::Rename => &icons::CORNER,
         Act::Terminal => &icons::TERMINAL,
         Act::Call => &icons::PHONE,

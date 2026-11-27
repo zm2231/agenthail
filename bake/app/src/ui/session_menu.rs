@@ -271,7 +271,7 @@ pub(super) fn not_sent(s: &mut App) -> bool {
 
 fn verb(act: &Act) -> &'static str {
     match act {
-        Act::Rename => "Renaming",
+        Act::Window | Act::Rename => "Renaming",
         Act::Terminal => "Opening the terminal",
         Act::Call => "Calling",
         Act::Pr(_) => "Opening the pull request",
@@ -299,6 +299,9 @@ pub(super) fn failure(what: &str, error: &RespondError) -> String {
 pub fn run(s: &mut App, id: &str, act: Act) {
     s.menus.open = None;
     match act {
+        Act::Window => {
+            super::window::show(s, id);
+        }
         Act::Rename => start_rename(s, id),
         Act::Pr(url) => open_link(&url),
         Act::PrLink => super::pr_link::start(s, id),
@@ -337,7 +340,7 @@ pub fn run(s: &mut App, id: &str, act: Act) {
                     Act::Archive(on) => c.session_archive(&id, *on).map(|_| Some(Patch::Archived(*on))),
                     Act::Snooze(_) => c.session_snooze(&id, until).map(|snooze| Some(Patch::Snoozed(snooze))),
                     Act::Wake => c.session_wake(&id).map(|_| Some(Patch::Snoozed(None))),
-                    Act::Rename | Act::Pr(_) | Act::PrWatch(..) | Act::PrUnlink(_) | Act::PrLink | Act::Call | Act::Adopt | Act::Move | Act::MakeLead | Act::Process(_) | Act::Fork => Ok(None),
+                    Act::Window | Act::Rename | Act::Pr(_) | Act::PrWatch(..) | Act::PrUnlink(_) | Act::PrLink | Act::Call | Act::Adopt | Act::Move | Act::MakeLead | Act::Process(_) | Act::Fork => Ok(None),
                 };
                 Some(Done::Acted(id, act, result))
             });

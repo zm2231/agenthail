@@ -66,6 +66,27 @@ pub fn title(alias: Option<&str>, name: Option<&str>, id: &str, label: &str) -> 
     if title.is_empty() { "Untitled conversation".into() } else { title }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct Setting {
+    pub on: bool,
+    pub label: String,
+}
+
+impl Default for Setting {
+    fn default() -> Setting {
+        Setting { on: true, label: "alias".into() }
+    }
+}
+
+pub fn setting(values: &serde_json::Map<String, serde_json::Value>) -> Setting {
+    let text = |key: &str| values.get(key).and_then(serde_json::Value::as_str);
+    Setting { on: text("titlebar.tabs").is_none_or(|v| v == "sessions"), label: text("titlebar.tabs.label").unwrap_or("alias").to_string() }
+}
+
+pub fn capacity(width: f32) -> usize {
+    (((width - 40.0) / 170.0).floor() as usize).max(1)
+}
+
 impl Tabs {
     pub fn tabs(&self) -> &[Tab] {
         &self.tabs

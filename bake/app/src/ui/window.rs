@@ -83,6 +83,7 @@ pub struct Windows {
     stash: HashMap<Id, Local>,
     pub open: Vec<Opened>,
     next: Id,
+    to_show: Vec<Id>,
     look: u64,
 }
 
@@ -178,6 +179,18 @@ pub fn open(s: &mut App, session: &str) -> Id {
     id
 }
 
+pub fn show(s: &mut App, session: &str) -> Id {
+    let id = open(s, session);
+    if !s.windows.to_show.contains(&id) {
+        s.windows.to_show.push(id);
+    }
+    id
+}
+
+pub fn take_to_show(s: &mut App) -> Vec<Id> {
+    std::mem::take(&mut s.windows.to_show)
+}
+
 pub fn restore(s: &mut App, saved: &[Saved]) -> Vec<Id> {
     let mut ids = Vec::new();
     for w in saved {
@@ -186,6 +199,9 @@ pub fn restore(s: &mut App, saved: &[Saved]) -> Vec<Id> {
             o.frame = w.frame;
         }
         ids.push(id);
+        if !s.windows.to_show.contains(&id) {
+            s.windows.to_show.push(id);
+        }
     }
     ids
 }
@@ -207,6 +223,7 @@ pub fn close(s: &mut App, id: Id) {
     enter(s, back);
     s.windows.stash.remove(&id);
     s.windows.open.retain(|o| o.id != id);
+    s.windows.to_show.retain(|o| *o != id);
 }
 
 pub fn rekeyed(s: &mut App, old: &str, new: &str) {

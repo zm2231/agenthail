@@ -175,6 +175,7 @@ pub struct App {
     pub missing: Option<ui::gone::Missing>,
     pub notify: notify::State,
     pub windows: ui::window::Windows,
+    pub tabs: ui::tabs::State,
     last_row: Option<Session>,
     client: Option<Client>,
     overview_poke: Option<Sender<Ask>>,
@@ -375,6 +376,7 @@ fn empty(live: Overview, persist: bool) -> App {
         missing: None,
         notify: notify::State::default(),
         windows: Default::default(),
+        tabs: Default::default(),
         last_row: None,
         client: None,
         overview_poke: None,
@@ -459,6 +461,7 @@ pub fn select(s: &mut App, id: &str) {
     s.selected = Some(id.to_string());
     s.screen = Screen::Session;
     s.tab = Tab::Conversation;
+    ui::tabs::shown(s, id);
     switch_composer(s);
     s.composer.focused = true;
     load_pane(s, id);
@@ -1326,6 +1329,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                     s.sessions = s.ov.live.sessions().to_vec();
                     s.notify.sessions_moved = true;
                     feed::holders::pins().prune(&s.sessions);
+                    ui::tabs::reconcile(s);
                     fetch_tails(s);
                 }
                 s.now = OffsetDateTime::now_utc();
@@ -1370,6 +1374,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 s.sessions = s.ov.live.sessions().to_vec();
                 s.notify.sessions_moved = true;
                 feed::holders::pins().prune(&s.sessions);
+                ui::tabs::reconcile(s);
                 fetch_tails(s);
                 arrived = true;
             }
@@ -1566,6 +1571,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= look::poll(look::Window::Main, tx);
     ui::paste::settle(s);
     changed |= ui::notice::poll(s);
+    changed |= ui::tabs::expire(s);
     switch_composer(s);
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &ui::paste::draft(s));
