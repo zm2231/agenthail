@@ -24,6 +24,7 @@ var (
 	stopGrace     = 5 * time.Second
 	handoverWait  = 3 * stopGrace
 	errNotRunning = errors.New("the agent is not running")
+	sendStarting  = func() {}
 )
 
 type permissionAnswer struct {
@@ -257,15 +258,23 @@ func (s *session) cancelRequestsLocked() {
 
 func (s *session) ensureRunning(ctx context.Context, mcp []acp.MCPServer, preferred string) error {
 	s.mu.Lock()
-	running := s.conn != nil
+	running, exited := s.conn, s.exited
+	s.mu.Unlock()
+	if running != nil {
+		select {
+		case <-running.Done():
+			// A crashed agent's turn can end before its watcher reaps the process and clears the connection.
+			<-exited
+		default:
+			return nil
+		}
+	}
+	s.mu.Lock()
 	agentSession, recorded := s.state.AgentSessionID, s.state.Mode
 	if s.aboveCeilingLocked(recorded) {
 		recorded = ""
 	}
 	s.mu.Unlock()
-	if running {
-		return nil
-	}
 	if err := s.startProcess(ctx); err != nil {
 		return err
 	}
@@ -627,6 +636,7 @@ func (s *session) send(ctx context.Context, params SendParams) (SendResult, erro
 	s.mu.Lock()
 	cancels := s.cancels
 	s.mu.Unlock()
+	sendStarting()
 	s.startMu.Lock()
 	defer s.startMu.Unlock()
 	if err := s.closedError(); err != nil {
@@ -750,7 +760,10 @@ func (s *session) cancelTurn(turnID string, interrupt bool) error {
 	if conn == nil {
 		return errNotRunning
 	}
-	return conn.Notify("session/cancel", acp.SessionIDParams{SessionID: agentSession})
+	if err := conn.Notify("session/cancel", acp.SessionIDParams{SessionID: agentSession}); !errors.Is(err, acp.ErrClosed) {
+		return err
+	}
+	return nil
 }
 
 func (s *session) respond(requestID, choice string) (RespondResult, error) {

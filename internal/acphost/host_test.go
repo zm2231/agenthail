@@ -248,6 +248,45 @@ func TestHostRecordsACrashAndLoadsTheSessionAgain(t *testing.T) {
 	}
 }
 
+func TestASendRightAfterTheAgentDropsItsConnectionStartsTheAgentAgain(t *testing.T) {
+	previous := stopGrace
+	t.Cleanup(func() { stopGrace = previous })
+	stopGrace = 300 * time.Millisecond
+	h := startHost(t, fakeAgent(t, "fake"))
+	state := h.create("fake", "", "")
+	h.send(state.SessionID, "remember:PINEAPPLE-42")
+	h.waitFor(state.SessionID, idle)
+	turn := h.send(state.SessionID, "hangup")
+	h.waitFor(state.SessionID, func(s State) bool { return s.Status == StatusIdle && s.LastTurnID == turn })
+	recall := h.send(state.SessionID, "recall")
+	h.waitFor(state.SessionID, func(s State) bool { return s.Status == StatusIdle && s.LastTurnID == recall })
+	if text := h.items("fake", state.SessionID)[recall+":a1"].Text; text != "PINEAPPLE-42" {
+		t.Fatalf("recall=%q", text)
+	}
+}
+
+func TestAnInterruptAfterTheAgentDropsItsConnectionSucceeds(t *testing.T) {
+	previous := stopGrace
+	t.Cleanup(func() { stopGrace = previous })
+	stopGrace = time.Minute
+	h := startHost(t, fakeAgent(t, "fake"))
+	state := h.create("fake", "", "")
+	turn := h.send(state.SessionID, "hangup")
+	h.waitFor(state.SessionID, func(s State) bool { return s.Status == StatusIdle && s.LastTurnID == turn })
+	s := h.host.heldSession(state.SessionID)
+	s.mu.Lock()
+	s.state.Status, s.state.TurnID = StatusBusy, "turn-on-a-dropped-connection"
+	s.mu.Unlock()
+	t.Cleanup(func() {
+		s.mu.Lock()
+		s.state.Status, s.state.TurnID = StatusIdle, ""
+		s.mu.Unlock()
+	})
+	if err := h.client.Cancel(context.Background(), state.SessionID); err != nil {
+		t.Fatalf("an interrupt that reaches a dropped connection must still succeed: %v", err)
+	}
+}
+
 func TestHostReopensAfterRestartAndClosesAnOpenTurn(t *testing.T) {
 	agent := fakeAgent(t, "fake")
 	h := startHost(t, agent)
@@ -616,6 +655,14 @@ func TestACancelRacingTheNextPromptNeverEndsIt(t *testing.T) {
 }
 
 func TestAnInterruptDuringALoadAnswersRequestsAndStopsEverySendAlreadyStarting(t *testing.T) {
+	starting := make(chan struct{}, 2)
+	t.Cleanup(func() { sendStarting = func() {} })
+	sendStarting = func() {
+		select {
+		case starting <- struct{}{}:
+		default:
+		}
+	}
 	agent := fakeAgent(t, "fake")
 	h := startHost(t, agent)
 	state := h.create("fake", "", "")
@@ -632,7 +679,7 @@ func TestAnInterruptDuringALoadAnswersRequestsAndStopsEverySendAlreadyStarting(t
 			result, err := h.client.Send(context.Background(), SendParams{SessionID: state.SessionID, Text: text})
 			results <- sent{result, err}
 		}()
-		time.Sleep(150 * time.Millisecond)
+		<-starting
 	}
 	pending := &pendingRequest{request: Request{ID: "req-load"}, answer: make(chan permissionAnswer, 1)}
 	s.mu.Lock()
