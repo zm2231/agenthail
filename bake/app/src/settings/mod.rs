@@ -4,7 +4,9 @@ mod devices;
 mod general;
 mod handoffs;
 mod notify;
+mod overview;
 mod parts;
+mod signin;
 
 use std::cell::{Cell, OnceCell};
 use std::collections::{HashMap, HashSet};
@@ -28,7 +30,11 @@ pub enum Read {
     Compaction,
     Preferences,
     Devices,
+    Permissions,
+    Signin,
 }
+
+pub use overview::sessions_changed;
 
 const ALL: [Read; 6] = [Read::Base, Read::Settings, Read::Remote, Read::Compaction, Read::Preferences, Read::Devices];
 
@@ -39,6 +45,8 @@ enum Got {
     Compaction(Result<Compaction, Failure>),
     Preferences(Result<Vec<Preference>, Failure>),
     Devices(Result<Vec<feed::devices::Device>, Failure>),
+    Permissions(Result<feed::health::Permissions, Failure>),
+    Signin(Result<feed::signin::Signin, Failure>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -51,6 +59,8 @@ pub enum Section {
     Relays,
     Channels,
     Queue,
+    Overview,
+    Signin,
 }
 
 enum Done {
@@ -100,6 +110,8 @@ pub struct Prefs {
     pub home: String,
     pub handoffs: handoffs::Form,
     pub appearance: appearance::Form,
+    pub overview: overview::Overview,
+    pub signin: signin::Form,
     loaded: bool,
     in_flight: usize,
     seq: HashMap<Read, u64>,
@@ -150,6 +162,8 @@ pub fn open() {
                 devices::opened(s);
                 reload(s);
                 appearance::opened(s);
+                overview::opened(s);
+                signin::opened(s);
             });
             window.open();
             window.focus();
@@ -233,6 +247,8 @@ fn init() -> Prefs {
         home: std::env::var("HOME").unwrap_or_default(),
         handoffs: handoffs::Form::default(),
         appearance: appearance::Form::default(),
+        overview: overview::initial(),
+        signin: signin::Form::default(),
         loaded: false,
         in_flight: 0,
         seq: HashMap::new(),
@@ -264,6 +280,8 @@ fn fetch(s: &mut Prefs, what: Read) {
             Read::Compaction => s.compaction = Some(Err(unread(s))),
             Read::Preferences => s.preferences = Some(Err(unread(s))),
             Read::Devices => s.dev.list = Some(Err(unread(s))),
+            Read::Permissions => s.overview.permissions = Some(Err(unread(s))),
+            Read::Signin => s.signin.data = Some(Err(unread(s))),
         }
         return;
     };
@@ -283,6 +301,8 @@ fn fetch(s: &mut Prefs, what: Read) {
             Read::Compaction => Got::Compaction(client.compaction()),
             Read::Preferences => Got::Preferences(client.notification_preferences()),
             Read::Devices => Got::Devices(client.devices()),
+            Read::Permissions => Got::Permissions(client.permissions()),
+            Read::Signin => Got::Signin(client.signin()),
         };
         let _ = tx.send(Done::Read(what, seq, got));
     });
@@ -424,7 +444,12 @@ fn watch(s: &Prefs, from: u64) {
                     let reset = kind == "stream.reset";
                     handle.update(move |s: &mut Prefs, _| changed_elsewhere(s, id, reset));
                 } else if kind == "state.changed" && handle.is_visible() {
-                    handle.update(|s: &mut Prefs, _| handoffs::changed(s));
+                    handle.update(|s: &mut Prefs, _| {
+                        handoffs::changed(s);
+                        overview::changed(s);
+                    });
+                } else if kind == "signin.changed" && handle.is_visible() {
+                    handle.update(|s: &mut Prefs, _| signin::changed(s));
                 }
                 true
             });
@@ -519,6 +544,17 @@ fn take_one(s: &mut Prefs, done: Done) {
                 Got::Devices(r) => {
                     let d = denied(&r);
                     s.dev.list = Some(r);
+                    d
+                }
+                Got::Permissions(r) => {
+                    let d = denied(&r);
+                    s.overview.permissions = Some(r);
+                    d
+                }
+                Got::Signin(r) => {
+                    let d = denied(&r);
+                    s.signin.data = Some(r);
+                    signin::settled(s);
                     d
                 }
             };
@@ -622,7 +658,7 @@ fn unfollowed(s: &Prefs) -> Option<El> {
     Some(col().w_full().items_center().pb(8.0).child(parts::failure(s, &note).w(parts::WIDTH)))
 }
 
-pub const TABS: [&str; 6] = ["General", "Claude", "Notifications", "Devices", "Handoffs", "Appearance"];
+pub const TABS: [&str; 7] = ["General", "Claude", "Notifications", "Devices", "Handoffs", "Appearance", "Overview"];
 
 pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
     let themes = crate::look::frame(cx, false, false, false);
@@ -638,13 +674,16 @@ fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         devices::hide_link(s);
         handoffs::changed(s);
         appearance::opened(s);
+        overview::opened(s);
+        signin::opened(s);
     });
     let page = match s.tab {
         1 => claude::page(s, &mut layer, &k),
         2 => notify::page(s, &k),
-        3 => devices::page(s, &mut layer, &k),
+        3 => signin::pages(s, &mut layer, &k),
         handoffs::TAB => handoffs::page(s, &mut layer, &k),
         appearance::TAB => appearance::page(s, &k),
+        overview::TAB => overview::page(s, &k),
         _ => general::page(s, &mut layer, &k),
     };
     let body = col()
@@ -657,6 +696,8 @@ fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
     rune_kit::root(body, layer).on_window_focus(|s: &mut Prefs, focused, _| {
         if !focused {
             devices::hide_link(s);
+        } else {
+            overview::focused(s);
         }
     })
 }

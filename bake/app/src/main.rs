@@ -498,6 +498,7 @@ pub fn load_pane(s: &mut App, id: &str) {
 fn rebuild(s: &mut App) {
     let panes: Vec<(&str, &[feed::Item])> = s.panes.iter().map(|(id, p)| (id.as_str(), p.transcript.items())).collect();
     s.ov.rebuild(&panes);
+    settings::sessions_changed(&s.sessions, s.ov.needs.len());
     s.panes_moved = false;
     s.built_at = s.clock;
     #[cfg(test)]
