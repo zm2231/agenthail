@@ -94,8 +94,9 @@ func TestLedgerSearchFindsWorkInEveryLedgerWithItsProject(t *testing.T) {
 	}
 	got := wire.Items[0]
 	updated, _ := got["updatedAt"].(string)
+	_, ranked := got["rank"]
 	if at, err := time.Parse(time.RFC3339Nano, updated); err != nil || at.IsZero() || got["id"] != described.Item.ID ||
-		got["matched"] != "description" || got["snippet"] != "profiling shows the tokenizer dominates" || got["rank"] != nil {
+		got["matched"] != "description" || got["snippet"] != "profiling shows the tokenizer dominates" || ranked {
 		t.Errorf("a description hit on the wire = %v", got)
 	}
 	if items, truncated := search("q=parser&limit=1"); len(items) != 1 || !truncated {
