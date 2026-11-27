@@ -3,6 +3,22 @@
 version = 4
 
 [[package]]
+name = "ab_glyph"
+version = "0.2.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01c0457472c38ea5bd1c3b5ada5e368271cb550be7a4ca4a0b4634e9913f6cc2"
+dependencies = [
+ "ab_glyph_rasterizer",
+ "owned_ttf_parser",
+]
+
+[[package]]
+name = "ab_glyph_rasterizer"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
+
+[[package]]
 name = "accesskit"
 version = "0.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -38,7 +54,7 @@ dependencies = [
 [[package]]
 name = "accesskit_macos"
 version = "0.27.2"
-source = "git+https://github.com/zm2231/rune?rev=99527ae68d598d11b4410c3ab0c72c8309f12950#99527ae68d598d11b4410c3ab0c72c8309f12950"
+source = "git+https://github.com/zm2231/rune?rev=034995ec8aea425f00cd20e5b704420b636f3bae#034995ec8aea425f00cd20e5b704420b636f3bae"
 dependencies = [
  "accesskit",
  "accesskit_consumer",
@@ -69,7 +85,7 @@ dependencies = [
 [[package]]
 name = "accesskit_windows"
 version = "0.35.2"
-source = "git+https://github.com/zm2231/rune?rev=99527ae68d598d11b4410c3ab0c72c8309f12950#99527ae68d598d11b4410c3ab0c72c8309f12950"
+source = "git+https://github.com/zm2231/rune?rev=034995ec8aea425f00cd20e5b704420b636f3bae#034995ec8aea425f00cd20e5b704420b636f3bae"
 dependencies = [
  "accesskit",
  "accesskit_consumer",
@@ -374,6 +390,39 @@ dependencies = [
  "atspi-common",
  "serde",
  "zbus",
+]
+
+[[package]]
+name = "audio-codec-algorithms"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1254ebf6529f3763c491acfb5ab6e960809e3c75a38584cc664f8c5667fb7107"
+
+[[package]]
+name = "audioadapter"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1292ef9edf681b7426ed089004b021a42896492f58bd0c909ad44e5faec9ac4"
+
+[[package]]
+name = "audioadapter-buffers"
+version = "5.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46289a81a3bfa26d0f8b2415f8ca9decde9a66308a150568af5c102381b3c8ce"
+dependencies = [
+ "audioadapter",
+ "audioadapter-sample",
+ "num-traits",
+]
+
+[[package]]
+name = "audioadapter-sample"
+version = "5.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5258faecf4edbe35ec483bda9b1f7438e6b391891819269c6b5461aeaa0e8d7d"
+dependencies = [
+ "audio-codec-algorithms",
+ "num-traits",
 ]
 
 [[package]]
@@ -711,6 +760,28 @@ name = "deranged"
 version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e9de72ce2ad1f90dc62fa25f0f430ef85eb4b0d8fa0be4f30373bc40a21d28e"
+
+[[package]]
+name = "derive_more"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d751e9e49156b02b44f9c1815bcb94b984cdcc4396ecc32521c739452808b134"
+dependencies = [
+ "derive_more-impl",
+]
+
+[[package]]
+name = "derive_more-impl"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "799a97264921d8623a957f6c3b9011f3b5492f557bbb7a5a19b7fa6d06ba8dcb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "rustc_version",
+ "syn 2.0.119",
+ "unicode-xid",
+]
 
 [[package]]
 name = "dispatch"
@@ -1703,6 +1774,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "521739c6d2bac4aa25192232afe6841231376b2b26d4d9fae5ecf8ca5772e441"
 
 [[package]]
+name = "num-integer"
+version = "0.1.47"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ce2d95d4b3734dc35aa2f45e1aa22cd416814592a4f9d9205e11affd5b8e10b"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2196,6 +2276,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "owned_ttf_parser"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36820e9051aca1014ddc75770aab4d68bc1e9e632f0f5627c4086bc216fb583b"
+dependencies = [
+ "ttf-parser",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2263,7 +2352,7 @@ checksum = "9c4482d912d7671a7cd2089794f90ef3bb5f5f8c738230fb0fcd50fa020f0ed3"
 [[package]]
 name = "parley_engine"
 version = "0.12.0"
-source = "git+https://github.com/zm2231/rune?rev=99527ae68d598d11b4410c3ab0c72c8309f12950#99527ae68d598d11b4410c3ab0c72c8309f12950"
+source = "git+https://github.com/zm2231/rune?rev=034995ec8aea425f00cd20e5b704420b636f3bae#034995ec8aea425f00cd20e5b704420b636f3bae"
 dependencies = [
  "fontique",
  "harfrust",
@@ -2692,9 +2781,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5974e397833d890f2f74963408e0d4a6cd8eda2f6a445ae06750291b5d7a997e"
 
 [[package]]
+name = "rubato"
+version = "5.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b4da228e06632d025557f798114057cf27a4c6a71d40024c84d6db82fa5ef4a"
+dependencies = [
+ "audioadapter",
+ "audioadapter-buffers",
+ "num-integer",
+ "num-traits",
+ "visibility",
+ "windowfunctions",
+]
+
+[[package]]
 name = "rune"
 version = "0.0.1"
-source = "git+https://github.com/zm2231/rune?rev=99527ae68d598d11b4410c3ab0c72c8309f12950#99527ae68d598d11b4410c3ab0c72c8309f12950"
+source = "git+https://github.com/zm2231/rune?rev=034995ec8aea425f00cd20e5b704420b636f3bae#034995ec8aea425f00cd20e5b704420b636f3bae"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -2764,7 +2867,7 @@ dependencies = [
 [[package]]
 name = "rune-core"
 version = "0.0.1"
-source = "git+https://github.com/zm2231/rune?rev=99527ae68d598d11b4410c3ab0c72c8309f12950#99527ae68d598d11b4410c3ab0c72c8309f12950"
+source = "git+https://github.com/zm2231/rune?rev=034995ec8aea425f00cd20e5b704420b636f3bae#034995ec8aea425f00cd20e5b704420b636f3bae"
 dependencies = [
  "js-sys",
  "libc",
@@ -2783,7 +2886,7 @@ dependencies = [
 [[package]]
 name = "rune-edit"
 version = "0.0.1"
-source = "git+https://github.com/zm2231/rune?rev=99527ae68d598d11b4410c3ab0c72c8309f12950#99527ae68d598d11b4410c3ab0c72c8309f12950"
+source = "git+https://github.com/zm2231/rune?rev=034995ec8aea425f00cd20e5b704420b636f3bae#034995ec8aea425f00cd20e5b704420b636f3bae"
 dependencies = [
  "js-sys",
  "parley",
@@ -2797,7 +2900,7 @@ dependencies = [
 [[package]]
 name = "rune-gpu"
 version = "0.0.1"
-source = "git+https://github.com/zm2231/rune?rev=99527ae68d598d11b4410c3ab0c72c8309f12950#99527ae68d598d11b4410c3ab0c72c8309f12950"
+source = "git+https://github.com/zm2231/rune?rev=034995ec8aea425f00cd20e5b704420b636f3bae#034995ec8aea425f00cd20e5b704420b636f3bae"
 dependencies = [
  "blake3",
  "bytemuck",
@@ -2824,7 +2927,7 @@ dependencies = [
 [[package]]
 name = "rune-highlights"
 version = "0.0.1"
-source = "git+https://github.com/zm2231/rune?rev=99527ae68d598d11b4410c3ab0c72c8309f12950#99527ae68d598d11b4410c3ab0c72c8309f12950"
+source = "git+https://github.com/zm2231/rune?rev=034995ec8aea425f00cd20e5b704420b636f3bae#034995ec8aea425f00cd20e5b704420b636f3bae"
 dependencies = [
  "unicode-ident",
  "wasmparser",
@@ -2833,7 +2936,7 @@ dependencies = [
 [[package]]
 name = "rune-image"
 version = "0.0.1"
-source = "git+https://github.com/zm2231/rune?rev=99527ae68d598d11b4410c3ab0c72c8309f12950#99527ae68d598d11b4410c3ab0c72c8309f12950"
+source = "git+https://github.com/zm2231/rune?rev=034995ec8aea425f00cd20e5b704420b636f3bae#034995ec8aea425f00cd20e5b704420b636f3bae"
 dependencies = [
  "blake3",
  "image",
@@ -2851,7 +2954,7 @@ dependencies = [
 [[package]]
 name = "rune-kit"
 version = "0.0.1"
-source = "git+https://github.com/zm2231/rune?rev=99527ae68d598d11b4410c3ab0c72c8309f12950#99527ae68d598d11b4410c3ab0c72c8309f12950"
+source = "git+https://github.com/zm2231/rune?rev=034995ec8aea425f00cd20e5b704420b636f3bae#034995ec8aea425f00cd20e5b704420b636f3bae"
 dependencies = [
  "icu_normalizer",
  "pulldown-cmark",
@@ -2864,12 +2967,13 @@ dependencies = [
 [[package]]
 name = "rune-media"
 version = "0.0.1"
-source = "git+https://github.com/zm2231/rune?rev=99527ae68d598d11b4410c3ab0c72c8309f12950#99527ae68d598d11b4410c3ab0c72c8309f12950"
+source = "git+https://github.com/zm2231/rune?rev=034995ec8aea425f00cd20e5b704420b636f3bae#034995ec8aea425f00cd20e5b704420b636f3bae"
 dependencies = [
  "ash",
  "blake3",
  "block2 0.6.2",
  "bytemuck",
+ "js-sys",
  "libc",
  "objc2 0.6.5",
  "objc2-audio-toolbox",
@@ -2887,25 +2991,29 @@ dependencies = [
  "opuscule",
  "pollster",
  "rtrb",
+ "rubato",
  "rune-core",
  "rune-gpu",
  "rune-image",
  "rune-staging",
+ "sonora",
  "symphonia",
+ "wasm-bindgen",
  "wgpu",
  "windows",
+ "windows-core",
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "rune-motion"
 version = "0.1.0"
-source = "git+https://github.com/zm2231/rune?rev=99527ae68d598d11b4410c3ab0c72c8309f12950#99527ae68d598d11b4410c3ab0c72c8309f12950"
+source = "git+https://github.com/zm2231/rune?rev=034995ec8aea425f00cd20e5b704420b636f3bae#034995ec8aea425f00cd20e5b704420b636f3bae"
 
 [[package]]
 name = "rune-spell"
 version = "0.0.1"
-source = "git+https://github.com/zm2231/rune?rev=99527ae68d598d11b4410c3ab0c72c8309f12950#99527ae68d598d11b4410c3ab0c72c8309f12950"
+source = "git+https://github.com/zm2231/rune?rev=034995ec8aea425f00cd20e5b704420b636f3bae#034995ec8aea425f00cd20e5b704420b636f3bae"
 dependencies = [
  "js-sys",
  "objc2 0.6.5",
@@ -2925,7 +3033,7 @@ dependencies = [
 [[package]]
 name = "rune-staging"
 version = "0.0.1"
-source = "git+https://github.com/zm2231/rune?rev=99527ae68d598d11b4410c3ab0c72c8309f12950#99527ae68d598d11b4410c3ab0c72c8309f12950"
+source = "git+https://github.com/zm2231/rune?rev=034995ec8aea425f00cd20e5b704420b636f3bae#034995ec8aea425f00cd20e5b704420b636f3bae"
 dependencies = [
  "wgpu",
  "windows",
@@ -2934,7 +3042,7 @@ dependencies = [
 [[package]]
 name = "rune-taffy"
 version = "0.0.1"
-source = "git+https://github.com/zm2231/rune?rev=99527ae68d598d11b4410c3ab0c72c8309f12950#99527ae68d598d11b4410c3ab0c72c8309f12950"
+source = "git+https://github.com/zm2231/rune?rev=034995ec8aea425f00cd20e5b704420b636f3bae#034995ec8aea425f00cd20e5b704420b636f3bae"
 dependencies = [
  "stacker",
  "taffy",
@@ -2943,7 +3051,7 @@ dependencies = [
 [[package]]
 name = "rune-text"
 version = "0.0.1"
-source = "git+https://github.com/zm2231/rune?rev=99527ae68d598d11b4410c3ab0c72c8309f12950#99527ae68d598d11b4410c3ab0c72c8309f12950"
+source = "git+https://github.com/zm2231/rune?rev=034995ec8aea425f00cd20e5b704420b636f3bae#034995ec8aea425f00cd20e5b704420b636f3bae"
 dependencies = [
  "bytemuck",
  "fontique",
@@ -2972,7 +3080,7 @@ dependencies = [
 [[package]]
 name = "rune-tiny-skia-path"
 version = "0.11.4"
-source = "git+https://github.com/zm2231/rune?rev=99527ae68d598d11b4410c3ab0c72c8309f12950#99527ae68d598d11b4410c3ab0c72c8309f12950"
+source = "git+https://github.com/zm2231/rune?rev=034995ec8aea425f00cd20e5b704420b636f3bae#034995ec8aea425f00cd20e5b704420b636f3bae"
 dependencies = [
  "arrayref",
  "bytemuck",
@@ -3097,9 +3205,11 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 [[package]]
 name = "sctk-adwaita"
 version = "0.10.1"
-source = "git+https://github.com/zm2231/rune?rev=99527ae68d598d11b4410c3ab0c72c8309f12950#99527ae68d598d11b4410c3ab0c72c8309f12950"
+source = "git+https://github.com/zm2231/rune?rev=034995ec8aea425f00cd20e5b704420b636f3bae#034995ec8aea425f00cd20e5b704420b636f3bae"
 dependencies = [
+ "ab_glyph",
  "log",
+ "memmap2",
  "smithay-client-toolkit",
  "tiny-skia",
 ]
@@ -3280,6 +3390,82 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd538fb6910ac1099850255cf94a94df6551fbdd602454387d0adb2d1ca6dead"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "sonora"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d461e6c9ad112f8728919387a4bc5639fd28631f2070171efad38676e907edd8"
+dependencies = [
+ "sonora-aec3",
+ "sonora-agc2",
+ "sonora-common-audio",
+ "sonora-ns",
+ "sonora-simd",
+ "tracing",
+]
+
+[[package]]
+name = "sonora-aec3"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2809c3fda13f71deac22d0ddb6c02c493f254d3da2afe59a7e256a8f15bcffe"
+dependencies = [
+ "sonora-common-audio",
+ "sonora-fft",
+ "sonora-simd",
+]
+
+[[package]]
+name = "sonora-agc2"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "501b5dd3f8bdc8c983dc64a131cef22a429f3ff879d6f0007b8bfe46ec7b96aa"
+dependencies = [
+ "bytemuck",
+ "derive_more",
+ "sonora-common-audio",
+ "sonora-fft",
+ "sonora-simd",
+ "tracing",
+]
+
+[[package]]
+name = "sonora-common-audio"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c05dfa300c14dc8498751ce2c5b87aad2acf1892d4f9d66b92ae2f372a83410"
+dependencies = [
+ "derive_more",
+ "sonora-simd",
+]
+
+[[package]]
+name = "sonora-fft"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec3529f2cf748f1acc85d9403ffa08a3fe69dec6bf22383910b3bd21aca2fd26"
+dependencies = [
+ "sonora-simd",
+]
+
+[[package]]
+name = "sonora-ns"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "31c0a62e78419a174dbf9c9c01943c1ecd8c298a68d15c4fb4906cb19f0428b9"
+dependencies = [
+ "sonora-fft",
+]
+
+[[package]]
+name = "sonora-simd"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f939d8e63a2a0baa7555294d7b09c5e3d382f28358755b920e13ad527658c8fa"
+dependencies = [
+ "cpufeatures",
 ]
 
 [[package]]
@@ -3716,6 +3902,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "ttf-parser"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
+
+[[package]]
 name = "uds_windows"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3749,6 +3941,12 @@ name = "unicode-width"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ca718471876992059f251e33aafc334346ada08042b7661dd1fe313a9bced557"
+
+[[package]]
+name = "unicode-xid"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "untrusted"
@@ -3839,6 +4037,17 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "visibility"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d674d135b4a8c1d7e813e2f8d1c9a58308aee4a680323066025e53132218bd91"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
 
 [[package]]
 name = "walkdir"
@@ -4158,7 +4367,7 @@ dependencies = [
 [[package]]
 name = "wgpu-hal"
 version = "30.0.1"
-source = "git+https://github.com/zm2231/rune?rev=99527ae68d598d11b4410c3ab0c72c8309f12950#99527ae68d598d11b4410c3ab0c72c8309f12950"
+source = "git+https://github.com/zm2231/rune?rev=034995ec8aea425f00cd20e5b704420b636f3bae#034995ec8aea425f00cd20e5b704420b636f3bae"
 dependencies = [
  "android_system_properties",
  "arrayvec",
@@ -4234,6 +4443,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "windowfunctions"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90628d739333b7c5d2ee0b70210b97b8cddc38440c682c96fd9e2c24c2db5f3a"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]
@@ -4451,7 +4669,7 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 [[package]]
 name = "winit"
 version = "0.30.13"
-source = "git+https://github.com/zm2231/rune?rev=99527ae68d598d11b4410c3ab0c72c8309f12950#99527ae68d598d11b4410c3ab0c72c8309f12950"
+source = "git+https://github.com/zm2231/rune?rev=034995ec8aea425f00cd20e5b704420b636f3bae#034995ec8aea425f00cd20e5b704420b636f3bae"
 dependencies = [
  "ahash",
  "android-activity",
