@@ -183,7 +183,7 @@ impl Listing {
     }
 
     pub fn short(&self) -> Vec<String> {
-        self.view.projects.iter().filter(|p| !p.id.is_empty() && self.view.families.iter().filter(|f| f.project_id == p.id).count() < p.counts.families).map(|p| p.id.clone()).collect()
+        self.view.projects.iter().filter(|p| self.view.families.iter().filter(|f| f.project_id == p.id).count() < p.counts.families).map(|p| p.id.clone()).collect()
     }
 
     pub fn remove(&mut self, id: &str) -> bool {
@@ -205,7 +205,14 @@ impl Client {
 
     pub fn listing_project(&self, request: &Request, project: &str) -> Result<Page, String> {
         let scoped = Request { project: Some(project.to_string()), ..request.clone() };
-        read(self, &scoped.path(None, REREAD_PAGE))
+        let mut page = read(self, &scoped.path(None, REREAD_PAGE))?;
+        while let Some(cursor) = page.next.take() {
+            let next = read(self, &scoped.path(Some(&cursor), REREAD_PAGE))?;
+            page.view.merge(next.view);
+            page.sessions.extend(next.sessions);
+            page.next = next.next;
+        }
+        Ok(page)
     }
 
     pub fn listing_reread(&self, request: &Request, families: usize) -> Result<Listing, String> {

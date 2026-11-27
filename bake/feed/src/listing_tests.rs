@@ -130,10 +130,12 @@ fn a_project_with_unread_families_is_filled_from_its_own_scoped_read() {
     let mut listing = Listing::first(first);
     assert_eq!(listing.short(), vec!["p".to_string()]);
     let body = json!({"sessions": [{"id": "b"}, {"id": "c"}], "view": {"projects": [], "families": [family("a", "p", "c", &[("a", 0)]), family("b", "p", "c", &[("b", 0)]), family("c", "p", "c", &[("c", 0)])]}}).to_string();
-    let (client, seen) = daemon(replies(&[(200, &body)]));
+    let more = json!({"sessions": [], "nextCursor": "p2", "view": {"projects": [], "families": []}}).to_string();
+    let (client, seen) = daemon(replies(&[(200, &more), (200, &body)]));
     let request = Request { scope: "all".into(), surface: Some("codex".into()), ..Request::default() };
     listing.fill(client.listing_project(&request, "p").unwrap());
     assert_eq!(seen.recv().unwrap().0, "/api/v1/snapshot?scope=all&members=1&limit=200&projectId=p&surface=codex");
+    assert_eq!(seen.recv().unwrap().0, "/api/v1/snapshot?scope=all&members=1&limit=200&projectId=p&surface=codex&cursor=p2", "a project's later pages are read too");
     assert!(listing.short().is_empty());
     assert_eq!((listing.families(), listing.rows.len(), listing.next.as_deref(), listing.view.count("all")), (4, 3, Some("n"), Some(9)), "the list's own cursor and counts stay");
 }

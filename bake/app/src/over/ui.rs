@@ -816,7 +816,7 @@ pub fn crumb(parts: &[(&str, bool)], k: &Kit) -> El {
 }
 
 pub fn sessions_block(s: &App, compact: bool, k: &Kit) -> El {
-    let by = feed::derive::sessions::busy_by_group(&s.ov.d.sessions);
+    let by = feed::derive::sessions::busy_by_project(&s.ov.d.sessions);
     let total = s.ov.d.working();
     let listed = s.ov.d.listed();
     let open = Button::new("All sessions").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).icon(&icons::ARROW_RIGHT).shortcut("⌘⇧S").on_press(|s: &mut App| go(s, Screen::Sessions)).build(k);

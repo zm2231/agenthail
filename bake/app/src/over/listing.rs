@@ -291,9 +291,14 @@ pub fn poll(s: &mut App) -> bool {
     }
     let st = &s.ov.list;
     let short = st.listing.as_ref().map(Listing::short).unwrap_or_default();
-    if let Some(project) = short.into_iter().find(|p| st.expanded.contains(p) && !st.filled.contains(p)) {
-        s.ov.list.filled.insert(project.clone());
-        ask(s, Read::Fill(project), want);
+    let paged = st.listing.as_ref().is_some_and(|l| l.next.is_some());
+    if let Some(project) = short.into_iter().find(|p| st.expanded.contains(p) && !st.filled.contains(p) && (!p.is_empty() || paged)) {
+        if project.is_empty() {
+            ask(s, Read::More, want);
+        } else {
+            s.ov.list.filled.insert(project.clone());
+            ask(s, Read::Fill(project), want);
+        }
         return true;
     }
     changed

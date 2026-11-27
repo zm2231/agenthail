@@ -741,7 +741,7 @@ pub fn sessions_block(s: &App, compact: bool, k: &Kit) -> El {
     let listed = s.d.listed();
     let open = Button::new("All sessions").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).icon(&icons::ARROW_RIGHT).shortcut("⌘⇧S").on_press(|s: &mut App| go(s, Screen::Sessions)).build(k);
     let mut chips = row().gap(6.0).flex_wrap().items_center();
-    for (_, name, n) in &by {
+    for (name, n) in &by {
         let pname = name.clone();
         chips = chips.child(
             row()
