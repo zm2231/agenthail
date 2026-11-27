@@ -368,16 +368,17 @@ pub fn need_actions(s: &App, n: &Need, compact: bool, k: &Kit) -> El {
     r.child(Button::new("Open").variant(ButtonVariant::Ghost).control_size(size).on_press(move |s: &mut App| open_target(s, &t)).build(k))
 }
 
-pub fn need_row(s: &App, i: usize, n: &Need, focused: bool, k: &Kit) -> El {
+pub fn need_row(s: &App, n: &Need, focused: bool, k: &Kit) -> El {
     let who = if matches!(n.target, Target::Session(_)) { format!("{} · {}", short_title(&n.who, 24), s.ov.d.ago(&n.at)) } else { s.ov.d.ago(&n.at) };
     let fit = format!("need-{}", n.title);
     let width = fit_width(s, &fit);
     let shows = (n.kind, &n.project, &who, &n.label, &n.title, width.map(f32::to_bits));
     let info = || need_info(n, &who, &fit, width, k);
+    let row_id = format!("need-{}", crate::over::rows::target_id(&n.target));
     let row_ = |info: El, actions: El| {
         let t = n.target.clone();
         let r = row()
-            .key(format!("need-{i}"))
+            .key(row_id.clone())
             .w_full()
             .items_center()
             .gap(16.0)
@@ -387,16 +388,18 @@ pub fn need_row(s: &App, i: usize, n: &Need, focused: bool, k: &Kit) -> El {
             .child(info)
             .child(actions)
             .on_press(move |s: &mut App| {
-                s.ov.need_ix = i;
+                if let Some(at) = s.ov.needs.iter().position(|n| n.target == t) {
+                    s.ov.need_ix = at;
+                }
                 open_target(s, &t);
             });
         if focused { r.fill(k.c.surface_raised_hover) } else { r.hover(k.c.surface_raised_hover) }
     };
     if matches!(n.target, Target::Work(_)) {
-        let info = crate::over::rows::memo(format!("need-info-{i}"), shows, k, info);
+        let info = crate::over::rows::memo(format!("need-info-{}", crate::over::rows::target_id(&n.target)), shows, k, info);
         return row_(info, need_actions(s, n, true, k));
     }
-    crate::over::rows::memo(format!("need-{i}"), (shows, focused, &n.target), k, || row_(info(), need_actions(s, n, true, k)))
+    crate::over::rows::memo(row_id.clone(), (shows, focused, &n.target), k, || row_(info(), need_actions(s, n, true, k)))
 }
 
 fn need_info(n: &Need, who: &str, fit: &str, width: Option<f32>, k: &Kit) -> El {
@@ -450,7 +453,7 @@ pub fn needs_list(s: &App, k: &Kit) -> El {
         c = c.child(match slot {
             Slot::Head(g, count) => group_head(g, count, k).key(format!("needs-group-{si}")),
             Slot::Divider => new_divider(format!("needs-new-{si}"), k),
-            Slot::Need(i, n) => need_row(s, i, n, i == s.ov.need_ix, k),
+            Slot::Need(i, n) => need_row(s, n, i == s.ov.need_ix, k),
         });
     }
     card(c, k)
@@ -481,10 +484,10 @@ pub fn strip(s: &App, current: Option<&str>, k: &Kit) -> El {
         let title = short_title(&s.ov.d.title(x), 18);
         let keyed = i < s.ov.hands_on.len();
         let shows = (i, id, on, busy, &project, &title, keyed);
-        r = r.child(crate::over::rows::memo(format!("tab-{i}"), shows, k, || {
+        r = r.child(crate::over::rows::memo(format!("tab-{id}"), shows, k, || {
             let id2 = id.clone();
             let mut tab = row()
-                .key(format!("tab-{i}"))
+                .key(format!("tab-{id}"))
                 .gap(7.0)
                 .items_center()
                 .px(9.0)
@@ -611,7 +614,7 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k
     let now = matches!(s.screen, Screen::Now);
     let slots = if now { Vec::new() } else { need_slots(&s.ov.needs, s.ov.looked_now.as_deref(), 4) };
     for (si, slot) in slots.into_iter().enumerate() {
-        let (i, n) = match slot {
+        let n = match slot {
             Slot::Head(g, count) => {
                 needs = needs.row(group_head(g, count, k).key(format!("need-group-{si}")));
                 continue;
@@ -620,7 +623,7 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k
                 needs = needs.row(new_divider(format!("need-new-{si}"), k));
                 continue;
             }
-            Slot::Need(i, n) => (i, n),
+            Slot::Need(_, n) => n,
         };
         let sel = match &n.target {
             Target::Session(id) => selected == Some(id.as_str()),
@@ -632,7 +635,8 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k
             _ => Default::default(),
         };
         let shows = (&n.target, &n.title, &n.project, n.kind, sel, marks);
-        needs = needs.row(crate::over::rows::memo(format!("need-{i}"), shows, k, || {
+        let row_id = format!("need-{}", crate::over::rows::target_id(&n.target));
+        needs = needs.row(crate::over::rows::memo(row_id.clone(), shows, k, || {
             let t = n.target.clone();
             let mut need = SidebarRow::new(short_title(&n.title, 60))
                 .height(k.text_size(44.0))
@@ -644,7 +648,7 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k
             if marks.any() {
                 need = need.trailing(crate::ui::session_menu::drawn_marks(marks, k));
             }
-            let mut need = need.build(k).key(format!("need-{i}"));
+            let mut need = need.build(k).key(row_id.clone());
             if let Target::Session(id) = &n.target {
                 need = with_menu(need, id);
             }

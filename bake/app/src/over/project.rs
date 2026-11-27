@@ -258,16 +258,16 @@ pub fn board(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>, main_ki
     let cols = s.ov.d.board(key).lanes;
     let looked = s.ov.looked.get(key).map(String::as_str);
     let lines = s.ov.d.digest(p, s.ov.d.window(looked));
-    let card = |i: usize, l: &Line| {
-        let fit = format!("since-{i}");
+    let card = |l: &Line| {
+        let fit = format!("since-{:?}-{}", l.kind, crate::over::rows::target_id(&l.target));
         let width = ui::fit_width(s, &fit);
         let ago = s.ov.d.ago(&l.at);
-        let shows = (i, l.kind, &l.target, &l.text, &ago, width.map(f32::to_bits));
-        crate::over::rows::memo(format!("since-{i}"), shows, &k, || {
+        let shows = (l.kind, &l.target, &l.text, &ago, width.map(f32::to_bits));
+        crate::over::rows::memo(fit.clone(), shows, &k, || {
             let (glyph, color) = ui::happened_style(l.kind, &k);
             let t = l.target.clone();
             col()
-                .key(format!("since-{i}"))
+                .key(fit.clone())
                 .grow(1.0)
                 .w(1.0)
                 .gap(5.0)
@@ -290,7 +290,7 @@ pub fn board(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>, main_ki
         if start > 0 {
             since = since.child(ui::new_divider("since-new".into(), &k));
         }
-        since = since.child(row().w_full().gap(8.0).items_stretch().children(half.iter().enumerate().map(|(i, l)| card(start + i, l))));
+        since = since.child(row().w_full().gap(8.0).items_stretch().children(half.iter().map(|l| card(l))));
     }
     let counts: Vec<String> = HAPPENED.iter().map(|h| format!("{} {}", count(&lines, *h), h.word())).collect();
     let summary = format!("{}, {}", counts.join(" · "), crate::over::now::since_note(s, looked).to_lowercase());

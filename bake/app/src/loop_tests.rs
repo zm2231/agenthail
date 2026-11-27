@@ -22,6 +22,11 @@ mod project_menus;
 mod work_steps;
 #[path = "row_memo_tests.rs"]
 mod rows_memo;
+#[path = "row_memo_lines_tests.rs"]
+mod rows_memo_lines;
+#[cfg(feature = "frame-profile")]
+#[path = "live_shape_tests.rs"]
+mod live_shape;
 #[cfg(feature = "frame-profile")]
 #[path = "row_cost_tests.rs"]
 mod row_cost;
@@ -992,7 +997,8 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     let mut both = asked(&paths);
     both.sort();
     assert_eq!(both, ["/api/v1/ledger/search?q=exp&limit=20", "/api/v1/ledger/search?q=export&limit=20"], "the newer query doesn't wait for the older one");
-    assert!(rt.presented("hit-1").is_some() && rt.presented("hit-2").is_none(), "the work match and the session are listed");
+    let hits = crate::over::jump::hit_keys(&rt.state);
+    assert!(hits.len() == 2 && hits.iter().all(|h| rt.presented(h).is_some()), "the work match and the session are listed: {hits:?}");
 
     typed(&mut rt, "broken");
     rt.frame(0.21);

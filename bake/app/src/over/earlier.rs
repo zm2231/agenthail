@@ -192,15 +192,15 @@ fn open(s: &mut App, key: &str, id: &str) {
     }
 }
 
-fn session_row(s: &App, key: &str, i: usize, x: &Session, k: &Kit) -> El {
+fn session_row(s: &App, key: &str, x: &Session, k: &Kit) -> El {
     let place = [feed::projects::surface_label(&x.surface), x.host.name.clone()].into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" · ");
     let title = ui::short_title(&s.ov.d.title(x), 34);
     let ago = s.ov.d.ago(&x.last_active);
-    let shows = (key, i, &x.id, &place, &title, &ago);
-    crate::over::rows::memo(format!("earlier-{i}"), shows, k, || {
+    let shows = (key, &x.id, &place, &title, &ago);
+    crate::over::rows::memo(format!("earlier-row-{}", x.id), shows, k, || {
         let (key, id) = (key.to_string(), x.id.clone());
         col()
-            .key(format!("earlier-{i}"))
+            .key(format!("earlier-row-{}", x.id))
             .w_full()
             .gap(2.0)
             .px(8.0)
@@ -236,7 +236,7 @@ pub fn section(s: &App, key: &str, k: &Kit) -> El {
     if rows.is_empty() && !loading && shown.is_some_and(|x| x.read && x.next.is_none()) {
         c = c.child(text("No earlier sessions.".to_string()).font(k.text(META)).color(weak(k)));
     }
-    c = c.children(rows.iter().enumerate().map(|(i, x)| session_row(s, key, i, x, k)));
+    c = c.children(rows.iter().map(|x| session_row(s, key, x, k)));
     if let Some(error) = shown.and_then(|x| x.error.clone()) {
         c = c.child(text(error).font(k.text(META)).color(ui::needs_color(k)).wrap());
     }
