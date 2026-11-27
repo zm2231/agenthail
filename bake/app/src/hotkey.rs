@@ -50,8 +50,9 @@ fn refusal(error: ShortcutError) -> Refusal {
 fn run(handle: AppHandle<App>, asks: Receiver<(Ask, Option<Stored>)>) {
     let mut state = Hotkey::default();
     while let Ok(first) = asks.recv() {
-        let Some((ask, want)) = feed::hotkey::latest(std::iter::once(first).chain(asks.try_iter())) else { continue };
-        if state.ask(&mut Live(&handle), ask, want) {
+        let Some(asked) = feed::hotkey::latest(std::iter::once(first).chain(asks.try_iter())) else { continue };
+        if state.ask(&mut Live(&handle), asked) {
+            let want = asked.shortcut;
             let refused = state.refused().cloned();
             handle.update(move |_, _| shown(refused, want));
         }
@@ -141,7 +142,7 @@ fn pressed(s: &mut App, tx: &mut Tx) {
             None => handle.open(),
         }
     });
-    if s.ov.jump.is_none() {
+    if s.ov.jump.is_none() && !crate::over::dialog_open(s) {
         crate::over::open_jump(s, tx);
     }
 }

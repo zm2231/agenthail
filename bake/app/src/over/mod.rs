@@ -244,6 +244,10 @@ pub fn note_open(s: &App) -> bool {
     s.ov.inbox.note.is_some() || s.ov.work.words.is_some()
 }
 
+pub fn dialog_open(s: &App) -> bool {
+    note_open(s) || s.ov.ext.sheets.is_open() || projects::open(s)
+}
+
 pub fn work_review(s: &App, id: &str) -> Option<feed::decisions::Decision> {
     let w = s.ov.d.work.get(id)?;
     let inbox = s.ov.inbox.inbox.as_ref()?;

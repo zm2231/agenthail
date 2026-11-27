@@ -26,17 +26,21 @@ pub enum Ask {
     Regain,
 }
 
-pub fn latest(asks: impl IntoIterator<Item = (Ask, Option<Stored>)>) -> Option<(Ask, Option<Stored>)> {
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Asked {
+    pub shortcut: Option<Stored>,
+    pub chose: bool,
+    pub returned: bool,
+}
+
+pub fn latest(asks: impl IntoIterator<Item = (Ask, Option<Stored>)>) -> Option<Asked> {
     let asks: Vec<_> = asks.into_iter().collect();
     let (_, shortcut) = *asks.last()?;
-    let kind = if asks.iter().any(|a| *a == (Ask::Choose, shortcut)) {
-        Ask::Choose
-    } else if asks.iter().any(|(ask, _)| *ask == Ask::Regain) {
-        Ask::Regain
-    } else {
-        Ask::Want
-    };
-    Some((kind, shortcut))
+    Some(Asked {
+        shortcut,
+        chose: asks.iter().any(|a| *a == (Ask::Choose, shortcut)),
+        returned: asks.iter().any(|(ask, _)| *ask == Ask::Regain),
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -68,36 +72,29 @@ impl<I> Default for Hotkey<I> {
 }
 
 impl<I: Copy> Hotkey<I> {
-    pub fn ask<R: Registrar<Id = I>>(&mut self, registrar: &mut R, ask: Ask, shortcut: Option<Stored>) -> bool {
-        match ask {
-            Ask::Want => self.want(registrar, shortcut),
-            Ask::Choose => self.choose(registrar, shortcut),
-            Ask::Regain => self.regain(registrar, shortcut),
+    pub fn ask<R: Registrar<Id = I>>(&mut self, registrar: &mut R, asked: Asked) -> bool {
+        let again = match &self.refused {
+            None => false,
+            Some(Refusal::Taken(_)) => asked.returned,
+            Some(_) => asked.chose,
+        };
+        if asked.shortcut == self.tried && !again {
+            return false;
         }
+        self.attempt(registrar, asked.shortcut);
+        true
     }
 
     pub fn want<R: Registrar<Id = I>>(&mut self, registrar: &mut R, shortcut: Option<Stored>) -> bool {
-        if shortcut == self.tried {
-            return false;
-        }
-        self.attempt(registrar, shortcut);
-        true
+        self.ask(registrar, Asked { shortcut, ..Asked::default() })
     }
 
     pub fn choose<R: Registrar<Id = I>>(&mut self, registrar: &mut R, shortcut: Option<Stored>) -> bool {
-        if shortcut == self.tried && matches!(self.refused, None | Some(Refusal::Taken(_))) {
-            return false;
-        }
-        self.attempt(registrar, shortcut);
-        true
+        self.ask(registrar, Asked { shortcut, chose: true, ..Asked::default() })
     }
 
     pub fn regain<R: Registrar<Id = I>>(&mut self, registrar: &mut R, shortcut: Option<Stored>) -> bool {
-        if shortcut == self.tried && !matches!(self.refused, Some(Refusal::Taken(_))) {
-            return false;
-        }
-        self.attempt(registrar, shortcut);
-        true
+        self.ask(registrar, Asked { shortcut, returned: true, ..Asked::default() })
     }
 
     fn attempt<R: Registrar<Id = I>>(&mut self, registrar: &mut R, shortcut: Option<Stored>) {
@@ -186,28 +183,30 @@ mod tests {
     #[test]
     fn asks_waiting_behind_a_slow_one_settle_on_the_newest_binding() {
         let (a, b) = (Some(s("alt+mod+k")), Some(s("ctrl+alt+space")));
+        let asked = |shortcut, chose, returned| Some(Asked { shortcut, chose, returned });
         assert_eq!(latest([]), None);
-        assert_eq!(latest([(Ask::Choose, b), (Ask::Want, None)]), Some((Ask::Want, None)));
-        assert_eq!(latest([(Ask::Choose, b), (Ask::Want, a)]), Some((Ask::Want, a)), "a choice of another binding doesn't re-ask for this one");
-        assert_eq!(latest([(Ask::Choose, a), (Ask::Want, a)]), Some((Ask::Choose, a)));
-        assert_eq!(latest([(Ask::Want, a), (Ask::Regain, a)]), Some((Ask::Regain, a)));
-        assert_eq!(latest([(Ask::Want, a), (Ask::Want, b)]), Some((Ask::Want, b)));
+        assert_eq!(latest([(Ask::Choose, b), (Ask::Want, None)]), asked(None, false, false));
+        assert_eq!(latest([(Ask::Choose, b), (Ask::Want, a)]), asked(a, false, false), "a choice of another binding doesn't re-ask for this one");
+        assert_eq!(latest([(Ask::Choose, a), (Ask::Want, a)]), asked(a, true, false));
+        assert_eq!(latest([(Ask::Want, a), (Ask::Regain, a)]), asked(a, false, true));
+        assert_eq!(latest([(Ask::Choose, b), (Ask::Choose, a), (Ask::Regain, a)]), asked(a, true, true));
 
         let mut fake = Fake::default();
         let mut hk = Hotkey::default();
-        hk.ask(&mut fake, Ask::Choose, a);
-        let (ask, shortcut) = latest([(Ask::Choose, b), (Ask::Want, None)]).unwrap();
-        hk.ask(&mut fake, ask, shortcut);
+        hk.choose(&mut fake, a);
+        assert!(hk.ask(&mut fake, latest([(Ask::Choose, b), (Ask::Want, None)]).unwrap()));
         assert_eq!(fake.calls, 1, "the passed-over choice is never registered");
         assert!(fake.live.is_empty());
         assert!(!hk.held());
 
         let mut fake = Fake { taken: vec![(s("alt+mod+k"), None)], ..Fake::default() };
         let mut hk = Hotkey::default();
-        hk.ask(&mut fake, Ask::Choose, a);
-        let (ask, shortcut) = latest([(Ask::Choose, b), (Ask::Want, a)]).unwrap();
-        assert!(!hk.ask(&mut fake, ask, shortcut), "a refused binding restored elsewhere isn't retried");
+        hk.choose(&mut fake, a);
+        assert!(!hk.ask(&mut fake, latest([(Ask::Choose, b), (Ask::Want, a)]).unwrap()), "a refused binding restored elsewhere isn't retried");
         assert_eq!(fake.calls, 1);
+        fake.taken.clear();
+        assert!(hk.ask(&mut fake, latest([(Ask::Choose, b), (Ask::Choose, a), (Ask::Regain, a)]).unwrap()), "a return waiting behind a choice still retries");
+        assert!(hk.held());
     }
 
     #[test]
