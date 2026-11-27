@@ -14,17 +14,17 @@ feed = { path = "../feed" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 time = { version = "0.3", features = ["parsing", "formatting"] }
-rune = { git = "https://github.com/zm2231/rune", rev = "f3e30331152e0bf4d701d33ca3bd4d27c66cc48b", features = ["tooling"] }
-rune-kit = { git = "https://github.com/zm2231/rune", rev = "f3e30331152e0bf4d701d33ca3bd4d27c66cc48b", features = ["markdown"] }
-rune-theme-opencode = { git = "https://github.com/zm2231/rune", rev = "f3e30331152e0bf4d701d33ca3bd4d27c66cc48b" }
+rune = { git = "https://github.com/zm2231/rune", rev = "4197e5c828c3cded9dec3d105105eef5bc37855a", features = ["tooling"] }
+rune-kit = { git = "https://github.com/zm2231/rune", rev = "4197e5c828c3cded9dec3d105105eef5bc37855a", features = ["markdown"] }
+rune-theme-opencode = { git = "https://github.com/zm2231/rune", rev = "4197e5c828c3cded9dec3d105105eef5bc37855a" }
 
 [patch.crates-io]
-winit = { git = "https://github.com/zm2231/rune", rev = "f3e30331152e0bf4d701d33ca3bd4d27c66cc48b" }
-sctk-adwaita = { git = "https://github.com/zm2231/rune", rev = "f3e30331152e0bf4d701d33ca3bd4d27c66cc48b" }
-parley_engine = { git = "https://github.com/zm2231/rune", rev = "f3e30331152e0bf4d701d33ca3bd4d27c66cc48b" }
-wgpu-hal = { git = "https://github.com/zm2231/rune", rev = "f3e30331152e0bf4d701d33ca3bd4d27c66cc48b" }
-accesskit_windows = { git = "https://github.com/zm2231/rune", rev = "f3e30331152e0bf4d701d33ca3bd4d27c66cc48b" }
-accesskit_macos = { git = "https://github.com/zm2231/rune", rev = "f3e30331152e0bf4d701d33ca3bd4d27c66cc48b" }
+winit = { git = "https://github.com/zm2231/rune", rev = "4197e5c828c3cded9dec3d105105eef5bc37855a" }
+sctk-adwaita = { git = "https://github.com/zm2231/rune", rev = "4197e5c828c3cded9dec3d105105eef5bc37855a" }
+parley_engine = { git = "https://github.com/zm2231/rune", rev = "4197e5c828c3cded9dec3d105105eef5bc37855a" }
+wgpu-hal = { git = "https://github.com/zm2231/rune", rev = "4197e5c828c3cded9dec3d105105eef5bc37855a" }
+accesskit_windows = { git = "https://github.com/zm2231/rune", rev = "4197e5c828c3cded9dec3d105105eef5bc37855a" }
+accesskit_macos = { git = "https://github.com/zm2231/rune", rev = "4197e5c828c3cded9dec3d105105eef5bc37855a" }
 
 [profile.release]
 debug = false

@@ -39,6 +39,8 @@ fn command_icon(c: Command) -> &'static Icon {
         Command::NewSession => &icons::PLUS,
         Command::Stop => &ah::STOP,
         Command::Rename => &ah::PENCIL,
+        Command::Window => &ah::LAYERS,
+        Command::Inspector => &ah::PANEL_RIGHT,
         Command::Refresh => &ah::ROTATE,
         Command::Restart => &ah::ROTATE_CW,
         Command::Activity => &ah::ACTIVITY,
@@ -50,7 +52,7 @@ fn entries(s: &App) -> Vec<Entry> {
     let hits = s.ov.d.jump(q, &s.ov.needs, &s.ov.hands_on).into_iter().map(|h| Entry { group: h.group, title: h.title, status: h.status, badge: h.badge, look: Look::Avatar(h.avatar), pick: Some(Pick::Target(h.target)) });
     let selected = search::selected(s);
     let title = selected.as_deref().map(|id| search::selected_title(s, id)).unwrap_or_default();
-    let current = selected.as_deref().map(|id| Selected { title: &title, can_stop: search::can_stop(s, id) });
+    let current = selected.as_deref().map(|id| Selected { title: &title, can_stop: search::can_stop(s, id), inspector: s.ov.inspector.is_open() });
     let rows = commands(q, current);
     let lead = commands_lead(q, &rows);
     let cmds = rows.into_iter().map(|c| Entry { group: "Commands", title: c.title, status: String::new(), badge: c.shortcut.to_string(), look: Look::Icon(command_icon(c.command)), pick: Some(Pick::Command(c.command)) });

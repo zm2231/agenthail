@@ -113,6 +113,10 @@ pub fn tick() {
     RETURN.with_borrow_mut(Return::tick);
 }
 
+pub fn closed(window: Window) {
+    RETURN.with_borrow_mut(|r| r.closed(window));
+}
+
 pub fn focus(window: Window, focused: bool) {
     if RETURN.with_borrow_mut(|r| r.focus(window, focused)) {
         bindings::refresh();
@@ -156,31 +160,14 @@ fn pressed(s: &mut App, tx: &mut Tx) {
 
 fn covered(s: &App) -> bool {
     let menus = &s.menus;
-    crate::over::note_open(s)
-        || s.ov.ext.sheets.is_open()
-        || crate::over::projects::covering(s)
-        || crate::ui::turn_options::covering(s)
-        || crate::ui::native_queue::covering(s)
+    crate::ui::window::open_in(s, crate::ui::window::MAIN)
         || menus.open.is_some()
         || menus.chip.is_some()
         || menus.renaming.is_some()
         || menus.confirm.is_some()
-        || menus.ops.adopting.is_some()
-        || menus.ops.moving.is_some()
-        || !menus.ops.notices.is_empty()
         || s.attach.menu.is_some()
-        || s.prs.linking.is_some()
-        || s.inspect.editing.is_some()
-        || s.inspect.logs.is_some()
-        || s.limits.picking.is_some()
-        || s.limits.confirm.is_some()
-        || s.limits.consent.is_some()
-        || crate::over::search::activity_open(s)
         || (s.screen == crate::Screen::Sessions && (s.ov.list.status_open || s.ov.list.surface_open || s.ov.sessions_project_open))
-        || s.accounts.open
-        || s.accounts.planning.is_some()
         || s.holder_menu.is_some()
-        || s.new_session.is_some()
 }
 
 #[cfg(test)]

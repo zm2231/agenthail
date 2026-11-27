@@ -175,6 +175,8 @@ pub struct App {
     revealed: Option<String>,
     pub missing: Option<ui::gone::Missing>,
     pub notify: notify::State,
+    pub windows: ui::window::Windows,
+    pub tabs: ui::tabs::State,
     last_row: Option<Session>,
     client: Option<Client>,
     overview_poke: Option<Sender<Ask>>,
@@ -374,6 +376,8 @@ fn empty(live: Overview, persist: bool) -> App {
         revealed: None,
         missing: None,
         notify: notify::State::default(),
+        windows: Default::default(),
+        tabs: Default::default(),
         last_row: None,
         client: None,
         overview_poke: None,
@@ -387,6 +391,10 @@ fn empty(live: Overview, persist: bool) -> App {
         #[cfg(test)]
         rebuilds: 0,
     }
+}
+
+fn placeholder() -> App {
+    empty(Overview::default(), false)
 }
 
 fn init() -> App {
@@ -459,6 +467,7 @@ pub fn select(s: &mut App, id: &str) {
     s.screen = Screen::Session;
     s.tab = Tab::Conversation;
     switch_composer(s);
+    ui::tabs::shown(s, id);
     s.composer.focused = true;
     load_pane(s, id);
     if let Some(work) = session(s, id).and_then(|x| x.primary_work(s.work_pick.get(id)).cloned()) {
@@ -495,7 +504,8 @@ pub fn load_pane(s: &mut App, id: &str) {
         s.panes.insert(id.to_string(), pane);
     }
     while s.lru.len() > 8 {
-        let old = s.lru.remove(0);
+        let Some(at) = s.lru.iter().position(|x| !s.windows.holds(x) && s.selected.as_ref() != Some(x)) else { break };
+        let old = s.lru.remove(at);
         s.panes.remove(&old);
     }
 }
@@ -1294,6 +1304,7 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
         }
         ui::attach::rekey(s, &old, &new);
         ui::complete::rekey(s, &old, &new);
+        ui::window::rekeyed(s, &old, &new);
         move_key(&mut s.status_line, &old, &new);
         move_key(&mut s.busy_pick, &old, &new);
         move_key(&mut s.redeliver, &old, &new);
@@ -1314,6 +1325,7 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
 }
 
 fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
+    ui::attach::adopt(s);
     s.clock = t;
     let mut changed = false;
     let mut arrived = false;
@@ -1325,6 +1337,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                     s.sessions = s.ov.live.sessions().to_vec();
                     s.notify.sessions_moved = true;
                     feed::holders::pins().prune(&s.sessions);
+                    ui::tabs::reconcile(s);
                     fetch_tails(s);
                 }
                 s.now = OffsetDateTime::now_utc();
@@ -1371,6 +1384,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 s.sessions = s.ov.live.sessions().to_vec();
                 s.notify.sessions_moved = true;
                 feed::holders::pins().prune(&s.sessions);
+                ui::tabs::reconcile(s);
                 fetch_tails(s);
                 arrived = true;
             }
@@ -1568,6 +1582,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= look::poll(look::Window::Main, tx);
     ui::paste::settle(s);
     changed |= ui::notice::poll(s);
+    changed |= ui::tabs::expire(s);
+    ui::window::open_shown(s);
+    ui::window::note_frames(s);
     switch_composer(s);
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &ui::paste::draft(s));
@@ -1588,14 +1605,15 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
 }
 
 fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
-    if over::note_open(s) {
+    use ui::window::{Kind, shows};
+    if over::note_open(s) && shows(s, Kind::Note) {
         return over::on_key(s, ev, tx);
     }
     if ev.is_command(',') {
         settings::open();
         return true;
     }
-    (!over::projects::open(s) && ui::new_session::on_key(s, ev, tx)) || over::on_key(s, ev, tx)
+    (shows(s, Kind::NewSession) && !(over::projects::open(s) && shows(s, Kind::Projects)) && ui::new_session::on_key(s, ev, tx)) || over::on_key(s, ev, tx)
 }
 
 fn on_focus(_: &mut App, focused: bool, _: &mut Tx) {
@@ -1625,7 +1643,8 @@ fn main() {
     if !rune::single_instance(link::INSTANCE) || !instance::only_copy(link::LOCK) {
         return;
     }
-    let mut app = rune::App::new(AppSpec::<App> {
+    let shared = ui::window::share(init());
+    let main = rune::App::new(AppSpec::<App> {
         poll: Some(poll),
         on_key: Some(on_key),
         setup: Some(ui::attach::setup),
@@ -1633,7 +1652,10 @@ fn main() {
         families: rune_theme_opencode::FAMILIES,
         min_size: Some((1100.0, 700.0)),
         ..AppSpec::new("Agenthail", (1440.0, 900.0), init, ui::view)
-    })
+    });
+    let mut app = rune::WindowSpec::from_app("main", main)
+        .shared(&shared)
+        .app
         .chrome(Chrome { full_size_content: true, traffic_lights: Some((20.0, 20.0)), drag_regions: true })
         .window_options(WindowOptions { transparent: true, resizable: true, visible: true, ..Default::default() })
         .srgb_blend(true)

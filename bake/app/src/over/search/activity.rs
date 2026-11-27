@@ -112,7 +112,7 @@ fn settle(s: &mut App) -> bool {
 
 pub fn drain(s: &mut App) -> bool {
     let mut changed = false;
-    if s.new_session.is_some() && s.ov.search.activity.panel.is_some() {
+    if s.new_session.is_some() && s.ov.search.activity.panel.is_some() && crate::ui::window::together(s, crate::ui::window::Kind::NewSession, crate::ui::window::Kind::Activity) {
         close(s);
         changed = true;
     }

@@ -158,6 +158,12 @@ pub const COMMANDS: &[Command] = &[
     cmd("previousSession", "Previous session", "mod+up", Group::Sessions),
     cmd("nextSession", "Next session", "mod+down", Group::Sessions),
     cmd("talk", "Talk to orchestrator", "alt+mod+t", Group::Sessions),
+    Command { id: "openInNewWindow", title: "Open session in new window", default: None, group: Group::Sessions },
+    cmd("newTab", "New tab", "mod+t", Group::Sessions),
+    cmd("closeTab", "Close tab", "mod+w", Group::Sessions),
+    cmd("nextTab", "Next tab", "shift+mod+bracketright", Group::Sessions),
+    cmd("previousTab", "Previous tab", "shift+mod+bracketleft", Group::Sessions),
+    cmd("toggleInspector", "Show or hide inspector", "alt+mod+i", Group::View),
     cmd("jumpToLatest", "Jump to latest", "mod+l", Group::View),
     cmd("refresh", "Refresh", "mod+r", Group::View),
     cmd("textBigger", "Make text bigger", "mod+equal", Group::View),
@@ -194,7 +200,6 @@ pub const FIXED: &[(&str, &str)] = &[
     ("shift+alt+mod+2", "Focus the second pane"),
     ("shift+alt+mod+3", "Focus the third pane"),
     ("mod+q", "Quit Agenthail"),
-    ("mod+w", "Close window"),
     ("mod+h", "Hide Agenthail"),
     ("mod+m", "Minimize"),
     ("mod+c", "Copy"),
@@ -211,16 +216,10 @@ pub const MAC_APP_ONLY: &[(&str, &str, Option<&str>)] = &[
     ("showAll", "Show All", Some("mod+3")),
     ("showArchived", "Show Archived", Some("mod+4")),
     ("toggleSidebar", "Show or hide sidebar", Some("ctrl+mod+s")),
-    ("toggleInspector", "Show or hide inspector", Some("alt+mod+i")),
     ("expandAgentMessages", "Expand agent messages", Some("alt+mod+e")),
     ("send", "Send", Some("mod+enter")),
     ("sendAlternate", "Send the other way (queue or steer)", Some("alt+mod+enter")),
     ("rename", "Rename session", None),
-    ("openInNewWindow", "Open session in new window", None),
-    ("newTab", "New tab", Some("mod+t")),
-    ("closeTab", "Close tab", Some("mod+w")),
-    ("nextTab", "Next tab", Some("shift+mod+bracketright")),
-    ("previousTab", "Previous tab", Some("shift+mod+bracketleft")),
 ];
 
 pub fn command(id: &str) -> Option<&'static Command> {
@@ -421,7 +420,7 @@ mod tests {
     #[test]
     fn every_default_parses_and_none_clash() {
         let sc = Shortcuts::default();
-        for c in COMMANDS {
+        for c in COMMANDS.iter().filter(|c| c.default.is_some()) {
             let mine = sc.get(c.id).unwrap_or_else(|| panic!("{} parses", c.id));
             assert_eq!(sc.owner(mine, c.id), None, "{} clashes", c.id);
         }

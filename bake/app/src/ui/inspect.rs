@@ -14,7 +14,7 @@ use crate::{App, session};
 
 pub enum Done {
     Goal(String, GoalAct, Result<bool, RespondError>),
-    Life(String, u64, LifecycleAct, bool, Result<LifecycleResult, RespondError>),
+    Life(String, u64, LifecycleAct, bool, super::window::Id, Result<LifecycleResult, RespondError>),
     Status(String, u64, Result<LifecycleResult, RespondError>),
 }
 
@@ -57,7 +57,7 @@ impl Inspect {
 }
 
 fn showing(s: &App, id: &str) -> bool {
-    s.screen == crate::Screen::Session && s.selected.as_deref() == Some(id)
+    super::window::showing(s, id).is_some()
 }
 
 fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'static) -> bool {
@@ -157,6 +157,9 @@ fn press_goal(s: &mut App, id: &str, act: GoalAct) {
         GoalAct::Budget => goal.and_then(|g| g.token_budget).map(|b| b.to_string()).unwrap_or_default(),
         _ => String::new(),
     };
+    if !super::window::may_open(s, super::window::Kind::Editor) {
+        return;
+    }
     let mut text = TextEdit::new(&start);
     text.focused = true;
     s.composer.focused = false;
@@ -192,6 +195,7 @@ pub(crate) fn run(s: &mut App, id: &str, act: LifecycleAct, tell: bool) {
     if !session(s, id).is_some_and(|x| act.offered(inspect::lifecycle(x))) {
         return;
     }
+    let asker = s.windows.current();
     s.inspect.seq += 1;
     let fresh = s.inspect.seq;
     let p = s.inspect.process.entry(id.to_string()).or_insert_with(|| Process { generation: fresh, ..Process::default() });
@@ -202,7 +206,7 @@ pub(crate) fn run(s: &mut App, id: &str, act: LifecycleAct, tell: bool) {
     p.outcome = None;
     let generation = p.generation;
     let id = id.to_string();
-    spawn(s, move |c| Done::Life(id.clone(), generation, act, tell, c.lifecycle(&id, act)));
+    spawn(s, move |c| Done::Life(id.clone(), generation, act, tell, asker, c.lifecycle(&id, act)));
 }
 
 fn failure(error: &RespondError) -> String {
@@ -223,8 +227,9 @@ fn settled(s: &mut App, done: Done) {
             }
             metadata_moved(s, &id);
         }
-        Done::Life(id, generation, act, tell, result) => {
-            let elsewhere = (!showing(s, &id)).then(|| session(s, &id).map(|x| x.title()).unwrap_or_default());
+        Done::Life(id, generation, act, tell, asker, result) => {
+            let to = super::window::asker_or_showing(s, asker, &id);
+            let elsewhere = (to.is_none() || super::window::is_open(s, super::window::Kind::Logs)).then(|| session(s, &id).map(|x| x.title()).unwrap_or_default());
             let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.generation == generation) else { return };
             p.busy = None;
             if tell || elsewhere.is_some() {
@@ -249,7 +254,12 @@ fn settled(s: &mut App, done: Done) {
                     match act {
                         LifecycleAct::Status => p.status = Some(result),
                         LifecycleAct::Logs if elsewhere.is_some() => p.logs = Some(result.output.unwrap_or_default()),
-                        LifecycleAct::Logs => s.inspect.logs = Some((id.clone(), result.output.unwrap_or_default())),
+                        LifecycleAct::Logs => {
+                            s.inspect.logs = Some((id.clone(), result.output.unwrap_or_default()));
+                            if let Some(w) = to {
+                                super::window::give(s, super::window::Kind::Logs, w);
+                            }
+                        }
                         _ if session(s, &id).is_some_and(|x| inspect::lifecycle(x).status) => {
                             if let Some(p) = s.inspect.process.get_mut(&id) {
                                 p.busy = Some(LifecycleAct::Status);
@@ -344,6 +354,9 @@ fn goal_section(s: &App, x: &Session, k: &Kit) -> Option<El> {
 }
 
 fn show_logs(s: &mut App, id: &str) {
+    if !super::window::may_open(s, super::window::Kind::Logs) {
+        return;
+    }
     if let Some(output) = s.inspect.process.get_mut(id).and_then(|p| p.logs.take()) {
         s.inspect.logs = Some((id.to_string(), output));
     }
@@ -458,10 +471,11 @@ fn logs(s: &App, id: &str, output: &str, layer: &mut Vec<El>, k: &Kit) {
 }
 
 pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
-    if let Some(editing) = &s.inspect.editing {
+    use super::window::{Kind, shows};
+    if let Some(editing) = s.inspect.editing.as_ref().filter(|_| shows(s, Kind::Editor)) {
         editor(s, editing, layer, k);
     }
-    if let Some((id, output)) = &s.inspect.logs {
+    if let Some((id, output)) = s.inspect.logs.as_ref().filter(|_| shows(s, Kind::Logs)) {
         logs(s, id, output, layer, k);
     }
 }

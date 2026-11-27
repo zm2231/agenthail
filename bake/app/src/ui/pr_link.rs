@@ -66,6 +66,9 @@ pub fn change(s: &mut App, id: &str, op: PrOp, pr: &str) {
 }
 
 pub fn start(s: &mut App, id: &str) {
+    if !super::window::may_open(s, super::window::Kind::PrLink) {
+        return;
+    }
     s.prs.linking = Some(id.to_string());
     s.prs.link_seq = 0;
     s.prs.text = TextEdit::new("");

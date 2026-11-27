@@ -76,6 +76,9 @@ pub fn chip(s: &App, x: &Session, k: &Kit) -> Option<El> {
 }
 
 fn open(s: &mut App, id: &str) {
+    if !super::window::may_open(s, super::window::Kind::TurnOptions) {
+        return;
+    }
     let draft = s.turn.drafts.entry(id.to_string()).or_default();
     draft.schema.focused = false;
     s.turn.open = Some(id.to_string());

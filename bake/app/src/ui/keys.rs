@@ -19,6 +19,12 @@ pub enum Act {
     TextBigger,
     TextSmaller,
     TextActual,
+    NewTab,
+    CloseTab,
+    NextTab,
+    PreviousTab,
+    OpenInNewWindow,
+    ToggleInspector,
 }
 
 pub struct Binding {
@@ -27,7 +33,7 @@ pub struct Binding {
     pub menu: Option<(&'static str, &'static str)>,
 }
 
-pub const APP: [Binding; 11] = [
+pub const APP: [Binding; 17] = [
     Binding { act: Act::NewSession, id: "newSession", menu: Some(("File", "New Session")) },
     Binding { act: Act::GoToSession, id: "goToSession", menu: Some(("Session", "Go to Session…")) },
     Binding { act: Act::Stop, id: "stop", menu: Some(("Session", "Stop")) },
@@ -37,8 +43,14 @@ pub const APP: [Binding; 11] = [
     Binding { act: Act::JumpToLatest, id: "jumpToLatest", menu: None },
     Binding { act: Act::Find, id: "findSession", menu: None },
     Binding { act: Act::Talk, id: "talk", menu: Some(("Session", "Talk to Orchestrator…")) },
+    Binding { act: Act::ToggleInspector, id: "toggleInspector", menu: Some(("View", "Show Inspector")) },
     Binding { act: Act::TextBigger, id: "textBigger", menu: Some(("View", "Make Text Bigger")) },
     Binding { act: Act::TextSmaller, id: "textSmaller", menu: Some(("View", "Make Text Smaller")) },
+    Binding { act: Act::NewTab, id: "newTab", menu: Some(("File", "New Tab")) },
+    Binding { act: Act::CloseTab, id: "closeTab", menu: None },
+    Binding { act: Act::OpenInNewWindow, id: "openInNewWindow", menu: Some(("Session", "Open in New Window")) },
+    Binding { act: Act::NextTab, id: "nextTab", menu: Some(("Session", "Next Tab")) },
+    Binding { act: Act::PreviousTab, id: "previousTab", menu: Some(("Session", "Previous Tab")) },
 ];
 
 pub fn find(matches: impl Fn(&Chord) -> bool) -> Option<Act> {
@@ -63,6 +75,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             step(s, if act == Act::NextSession { 1 } else { -1 });
             true
         }
+        Some(Act::CloseTab) => close_tab(s),
         Some(act) => {
             run(s, act, tx);
             true
@@ -83,7 +96,7 @@ pub fn run(s: &mut App, act: Act, tx: &mut Tx) {
     match act {
         Act::NewSession => search::run(s, Command::NewSession, tx),
         Act::GoToSession => {
-            if s.ov.jump.take().is_none() {
+            if s.windows.current() != super::window::MAIN || s.ov.jump.take().is_none() {
                 over::open_jump(s, tx);
             }
         }
@@ -110,7 +123,31 @@ pub fn run(s: &mut App, act: Act, tx: &mut Tx) {
         Act::TextBigger => super::text_size::step(s, Some(1)),
         Act::TextSmaller => super::text_size::step(s, Some(-1)),
         Act::TextActual => super::text_size::step(s, None),
+        Act::NewTab => search::run(s, Command::NewSession, tx),
+        Act::CloseTab => {
+            if !close_tab(s) {
+                tx.close_window();
+            }
+        }
+        Act::NextTab => super::tabs::step(s, 1),
+        Act::PreviousTab => super::tabs::step(s, -1),
+        Act::OpenInNewWindow => {
+            if let Some(id) = search::selected(s) {
+                super::window::show(s, &id);
+            }
+        }
+        Act::ToggleInspector => {
+            if s.screen == Screen::Session {
+                s.ov.inspector.toggle();
+            }
+        }
     }
+}
+
+fn close_tab(s: &mut App) -> bool {
+    let Some(id) = super::tabs::active_tab(s).map(str::to_string) else { return false };
+    super::tabs::close(s, &id);
+    true
 }
 
 pub fn stepped<'a>(order: &'a [String], current: Option<&str>, by: isize) -> Option<&'a str> {
@@ -138,11 +175,12 @@ fn step(s: &mut App, by: isize) -> bool {
 pub struct MenuState {
     stop: bool,
     focus: bool,
+    inspector: bool,
     keys: u64,
 }
 
 pub fn menu_state(s: &App) -> MenuState {
-    MenuState { stop: search::selected(s).is_some_and(|id| search::can_stop(s, &id)), focus: crate::transcript::focused(), keys: bindings::generation() }
+    MenuState { stop: search::selected(s).is_some_and(|id| search::can_stop(s, &id)), focus: crate::transcript::focused(), inspector: s.screen == Screen::Session && s.ov.inspector.is_open(), keys: bindings::generation() }
 }
 
 pub fn menu_items(state: MenuState) -> Vec<MenuItem<App>> {
@@ -151,6 +189,7 @@ pub fn menu_items(state: MenuState) -> Vec<MenuItem<App>> {
             let (menu, title) = b.menu?;
             let act = b.act;
             let enabled = act != Act::Stop || state.stop;
+            let title = if act == Act::ToggleInspector && state.inspector { "Hide Inspector" } else { title };
             let item = MenuItem::with_action(title, move |s: &mut App, tx| run(s, act, tx)).id(format!("key-{act:?}")).menu(menu).keys_first().enabled(enabled);
             Some(match bindings::shortcut(b.id) {
                 Some(shortcut) => item.key_equivalent(shortcut),
@@ -201,22 +240,26 @@ mod tests {
         assert_eq!(press(Key::Command('s'), Mods { shift: true, ..CMD }), None, "⇧⌘S stays the Sessions screen's");
         assert_eq!(press(Key::Command('0'), CMD), None, "⌘0 stays Now");
         assert_eq!(press(Key::Command('j'), CMD), None, "⌘J stays next need");
-        assert_eq!(press(Key::Command('t'), CMD), None, "⌘T alone is left free");
+        assert_eq!(press(Key::Command('t'), CMD), Some(Act::NewTab), "⌘T opens a new tab, as the Mac app does");
         assert_eq!(press(Key::Command('b'), Mods { alt: true, ..CMD }), None, "⌥⌘B stays the brief toggle");
     }
 
     #[test]
     fn every_binding_is_distinct_and_menu_keys_parse() {
         for (i, a) in APP.iter().enumerate() {
-            assert!(bindings::shortcut(a.id).is_some(), "{}", a.id);
             assert!(feed::shortcuts::command(a.id).is_some(), "{} is listed in Settings", a.id);
+            let Some(x) = bindings::chord(a.id) else {
+                assert_eq!(a.act, Act::OpenInNewWindow, "{} has no shortcut", a.id);
+                continue;
+            };
+            assert!(bindings::shortcut(a.id).is_some(), "{}", a.id);
             for b in &APP[i + 1..] {
-                let (x, y) = (bindings::chord(a.id).unwrap(), bindings::chord(b.id).unwrap());
+                let Some(y) = bindings::chord(b.id) else { continue };
                 assert!(!x.same_keys(&y, KeyPlatform::Mac), "{} and {} clash", a.id, b.id);
             }
         }
         let menus: Vec<_> = APP.iter().filter_map(|b| b.menu).collect();
-        assert_eq!(menus, vec![("File", "New Session"), ("Session", "Go to Session…"), ("Session", "Stop"), ("View", "Refresh"), ("Session", "Talk to Orchestrator…"), ("View", "Make Text Bigger"), ("View", "Make Text Smaller")]);
+        assert_eq!(menus, vec![("File", "New Session"), ("Session", "Go to Session…"), ("Session", "Stop"), ("View", "Refresh"), ("Session", "Talk to Orchestrator…"), ("View", "Show Inspector"), ("View", "Make Text Bigger"), ("View", "Make Text Smaller"), ("File", "New Tab"), ("Session", "Open in New Window"), ("Session", "Next Tab"), ("Session", "Previous Tab")]);
     }
 
     #[test]
