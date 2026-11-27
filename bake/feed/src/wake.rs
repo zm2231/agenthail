@@ -111,9 +111,7 @@ pub fn next_minute(at: time::OffsetDateTime) -> time::OffsetDateTime {
 
 pub fn turn(now: time::OffsetDateTime, at: time::OffsetDateTime, deadlines: &[time::OffsetDateTime]) -> Option<time::OffsetDateTime> {
     let minute = minute_of(now);
-    let passed = deadlines.iter().copied().filter(|d| *d > at && *d <= now).max();
-    let base = if minute == minute_of(at) { at } else { minute };
-    let next = if minute < minute_of(at) { minute } else { passed.map_or(base, |d| d.max(base)) };
+    let next = deadlines.iter().copied().filter(|d| *d >= minute && *d <= now).max().unwrap_or(minute);
     (next != at).then_some(next)
 }
 

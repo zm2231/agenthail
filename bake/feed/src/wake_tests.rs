@@ -179,6 +179,9 @@ fn the_clock_turns_at_each_minute_and_each_deadline_passed() {
     assert_eq!(turn(t("2026-11-24T12:00:40Z"), reset, &[reset]), None, "a reset already turned");
     assert_eq!(turn(t("2026-11-24T12:01:30Z"), reset, &[reset]), Some(t("2026-11-24T12:01:00Z")), "the minute after a reset");
     assert_eq!(turn(t("2026-11-24T11:58:30Z"), at, &[reset]), Some(t("2026-11-24T11:58:00Z")), "a clock set back");
+    let late = t("2026-11-24T12:00:45Z");
+    assert_eq!(turn(t("2026-11-24T12:00:10Z"), late, &[late]), Some(at), "a clock set back within the minute, past a deadline it had turned at");
+    assert_eq!(turn(t("2026-11-24T12:00:50Z"), at, &[late]), Some(late), "the deadline passing again");
     assert_eq!(next_turn(t("2026-11-24T12:00:01Z"), &[reset, t("2026-11-24T11:00:00Z")]), reset, "the wake is the nearer of the minute and a deadline");
     assert_eq!(next_turn(t("2026-11-24T12:00:30Z"), &[reset]), t("2026-11-24T12:01:00Z"), "a passed deadline doesn't wake");
 }
