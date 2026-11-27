@@ -62,8 +62,9 @@ func removedWorktreeSession(t *testing.T, roots func(worktree string) []string) 
 }
 
 // forwardPeer hands a send the daemon's peer manager took to its target's
-// messaging socket in the frame the manager's worker writes.
-func forwardPeer(t *testing.T, send claudetest.PeerSend) {
+// messaging socket in the frame shape the manager's worker writes, and returns
+// the text Claude is given.
+func forwardPeer(t *testing.T, send claudetest.PeerSend) string {
 	t.Helper()
 	conn, err := net.Dial("unix", send.Target)
 	if err != nil {
@@ -76,27 +77,30 @@ func forwardPeer(t *testing.T, send claudetest.PeerSend) {
 	if _, err := conn.Write(append(frame, '\n')); err != nil {
 		t.Fatal(err)
 	}
+	return content
 }
 
 func TestAMessageToAWorkerWhoseWorktreeWasRemovedResumesItInItsCheckoutAndSaysSo(t *testing.T) {
 	for _, route := range []struct {
 		name string
-		send func(t *testing.T, c *Claude, session *surface.Session, peers *claudetest.PeerManager) (*surface.SendResult, error)
+		send func(t *testing.T, c *Claude, session *surface.Session, peers *claudetest.PeerManager) (result *surface.SendResult, delivered string, err error)
 	}{
-		{"a person's turn", func(t *testing.T, c *Claude, session *surface.Session, _ *claudetest.PeerManager) (*surface.SendResult, error) {
-			return c.SendHumanTurn(context.Background(), session, "are you there?", nil)
+		{"a person's turn", func(t *testing.T, c *Claude, session *surface.Session, _ *claudetest.PeerManager) (*surface.SendResult, string, error) {
+			result, err := c.SendHumanTurn(context.Background(), session, "are you there?", nil)
+			return result, "are you there?", err
 		}},
-		{"another session's message on the peer socket", func(t *testing.T, c *Claude, session *surface.Session, peers *claudetest.PeerManager) (*surface.SendResult, error) {
+		{"another session's message on the peer socket", func(t *testing.T, c *Claude, session *surface.Session, peers *claudetest.PeerManager) (*surface.SendResult, string, error) {
 			result, err := c.Send(context.Background(), session, "are you there?")
-			if sends := peers.Sends(); err == nil && len(sends) == 1 {
-				forwardPeer(t, sends[0])
+			sends := peers.Sends()
+			if err != nil || len(sends) != 1 || sends[0].Message != "are you there?" {
+				t.Fatalf("err=%v sends=%+v, want the message handed to the peer manager once", err, sends)
 			}
-			return result, err
+			return result, forwardPeer(t, sends[0]), nil
 		}},
 	} {
 		t.Run(route.name, func(t *testing.T) {
 			checkout, worktree, session, c, host, peers, prompted := removedWorktreeSession(t, func(worktree string) []string { return []string{worktree} })
-			result, err := route.send(t, c, &session, peers)
+			result, delivered, err := route.send(t, c, &session, peers)
 			if err != nil || !result.Accepted {
 				t.Fatalf("result=%+v err=%v", result, err)
 			}
@@ -108,7 +112,7 @@ func TestAMessageToAWorkerWhoseWorktreeWasRemovedResumesItInItsCheckoutAndSaysSo
 			}
 			testkit.Eventually(t, "the turn", 15*time.Second, func() bool {
 				turns := host.Turns(t, fixtureConversation)
-				return len(turns) == 1 && strings.Contains(turns[0].Text, "are you there?")
+				return len(turns) == 1 && turns[0].Text == delivered
 			})
 			line := (surface.FolderMove{Gone: worktree, Into: checkout, Checkout: true}).Line()
 			if told := prompted(); !strings.Contains(told, line) {
