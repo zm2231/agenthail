@@ -304,7 +304,7 @@ impl Look {
         }
         let edge = boundary(&roles, dark, self.target);
         let tint = reachable(tint, edge, dark);
-        (pane_alpha(luminance(behind), luminance(tint), edge, dark, minimum), tint)
+        (pane_alpha(behind, tint, edge, dark, minimum), tint)
     }
 
     pub fn translucent(&self, dark: bool) -> bool {
@@ -316,7 +316,8 @@ impl Look {
     }
 }
 
-pub const NOT_DRAWN: [&str; 6] = [
+pub const NOT_DRAWN: [&str; 7] = [
+    "HEIC pictures show only on a Mac; elsewhere this app says it can't show them.",
     "Text colours for timestamps, links, code, live work, removed diff lines and other agents' messages: this app keeps its own; body, secondary, quiet, needs-you, done and error text follow the settings.",
     "Texture: it lies only over open background, and this app's panes cover the whole window.",
     "Desktop: this app can't read the desktop picture yet, so it draws no background for it.",

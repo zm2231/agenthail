@@ -54,13 +54,20 @@ pub fn boundary(roles: &[f32], dark: bool, target: f32) -> f32 {
     }
 }
 
-pub fn pane_alpha(behind: f32, tint: f32, boundary: f32, dark: bool, minimum: f32) -> f32 {
-    let short = if dark { behind > boundary } else { behind < boundary };
-    if !short || (behind - tint).abs() < 1e-6 {
-        return minimum;
+pub fn pane_alpha(behind: Rgb, tint: Rgb, boundary: f32, dark: bool, minimum: f32) -> f32 {
+    let fits = |a: f32| {
+        let l = luminance(blend(behind, tint, a));
+        if dark { l <= boundary } else { l >= boundary }
+    };
+    if fits(minimum) || !fits(1.0) {
+        return if fits(minimum) { minimum } else { 1.0 };
     }
-    let need = (behind - boundary) / (behind - tint);
-    need.clamp(0.0, 1.0).max(minimum)
+    let (mut lo, mut hi) = (minimum, 1.0f32);
+    for _ in 0..24 {
+        let mid = (lo + hi) / 2.0;
+        if fits(mid) { hi = mid } else { lo = mid }
+    }
+    hi
 }
 
 pub fn worst(rgba: &[u8], width: u32, dark: bool, cell: usize) -> Rgb {
@@ -140,8 +147,39 @@ pub struct Decoded {
     pub darkest: (u32, u32, Vec<u8>),
 }
 
+fn is_heic(data: &[u8]) -> bool {
+    data.len() > 12 && &data[4..8] == b"ftyp" && matches!(&data[8..12], b"heic" | b"heix" | b"heim" | b"heis" | b"mif1" | b"msf1")
+}
+
+fn load(data: &[u8]) -> Result<image::DynamicImage, String> {
+    if !is_heic(data) {
+        return image::load_from_memory(data).map_err(|e| e.to_string());
+    }
+    from_heic(data)
+}
+
+#[cfg(target_os = "macos")]
+fn from_heic(data: &[u8]) -> Result<image::DynamicImage, String> {
+    let dir = std::env::temp_dir().join(format!("agenthail-heic-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)));
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let (input, output) = (dir.join("in.heic"), dir.join("out.png"));
+    let converted = std::fs::write(&input, data)
+        .map_err(|e| e.to_string())
+        .and_then(|_| std::process::Command::new("/usr/bin/sips").args(["-s", "format", "png"]).arg(&input).arg("--out").arg(&output).output().map_err(|e| e.to_string()))
+        .and_then(|o| if o.status.success() { std::fs::read(&output).map_err(|e| e.to_string()) } else { Err(String::from_utf8_lossy(&o.stderr).trim().to_string()) });
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&output);
+    let _ = std::fs::remove_dir(&dir);
+    image::load_from_memory(&converted?).map_err(|e| e.to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn from_heic(_: &[u8]) -> Result<image::DynamicImage, String> {
+    Err("HEIC pictures can be shown only on a Mac".into())
+}
+
 pub fn decode(data: &[u8], max_side: u32, sample_side: u32) -> Result<Decoded, String> {
-    let picture = image::load_from_memory(data).map_err(|e| e.to_string())?;
+    let picture = load(data)?;
     let original = (picture.width(), picture.height());
     let full = picture.to_rgba8();
     let (fw, fh) = (full.width(), full.height());
@@ -158,7 +196,7 @@ pub fn decode(data: &[u8], max_side: u32, sample_side: u32) -> Result<Decoded, S
 }
 
 pub fn thumbnail(data: &[u8], side: u32) -> Result<(u32, u32, Vec<u8>), String> {
-    let small = image::load_from_memory(data).map_err(|e| e.to_string())?.thumbnail(side, side).to_rgba8();
+    let small = load(data)?.thumbnail(side, side).to_rgba8();
     Ok((small.width(), small.height(), small.into_raw()))
 }
 

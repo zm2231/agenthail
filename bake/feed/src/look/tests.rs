@@ -74,23 +74,25 @@ fn images_are_placed_by_fit_and_position() {
 fn panes_darken_only_as_far_as_text_needs() {
     let roles = [luminance(hex("#ececee").unwrap()), luminance(hex("#a3a3a8").unwrap())];
     let edge = boundary(&roles, true, 4.5);
-    let ground = luminance(hex("#161618").unwrap());
-    let bright = luminance([0.9; 3]);
+    let ground = hex("#161618").unwrap();
+    let bright = [0.9; 3];
     let a = pane_alpha(bright, ground, edge, true, 0.0);
-    assert!(a > 0.5 && a < 1.0, "{a}");
-    let shown = a * ground + (1.0 - a) * bright;
+    assert!(a > 0.3 && a < 1.0, "{a}");
+    let shown = luminance(blend(bright, ground, a));
     for l in roles {
         assert!(contrast(l, shown) >= 4.5 - 1e-3, "{}", contrast(l, shown));
     }
-    assert_eq!(pane_alpha(luminance([0.05; 3]), ground, edge, true, 0.2), 0.2);
+    let barely = luminance(blend(bright, ground, a - 0.02));
+    assert!(roles.iter().any(|l| contrast(*l, barely) < 4.5), "the tint is no darker than it needs to be");
+    assert_eq!(pane_alpha([0.05; 3], ground, edge, true, 0.2), 0.2);
     assert!(pane_alpha(bright, ground, edge, true, 0.95) >= 0.95);
 
     let light_roles = [luminance(hex("#1d1d1f").unwrap())];
     let light_edge = boundary(&light_roles, false, 4.5);
-    let paper = luminance([0.97; 3]);
-    let dark_bg = luminance([0.1; 3]);
+    let paper = [0.97; 3];
+    let dark_bg = [0.1; 3];
     let b = pane_alpha(dark_bg, paper, light_edge, false, 0.0);
-    let shown = b * paper + (1.0 - b) * dark_bg;
+    let shown = luminance(blend(dark_bg, paper, b));
     assert!(contrast(light_roles[0], shown) >= 4.5 - 1e-3);
 }
 
@@ -247,4 +249,17 @@ fn increase_contrast_takes_the_stronger_explicit_accent() {
     let view: View = serde_json::from_str(r##"{"colors":{"accent":{"dark":"#4f8ff7","light":"#2459b8","increased":{"dark":"#8ab4ff","light":"#1a4490"}}}}"##).unwrap();
     assert_eq!(Look::from_view(&view).accent, Some((hex("#4f8ff7").unwrap(), hex("#2459b8").unwrap())));
     assert_eq!(Look::with_increased_contrast(&view).accent, Some((hex("#8ab4ff").unwrap(), hex("#1a4490").unwrap())));
+}
+
+#[test]
+fn a_heic_picture_is_recognised_before_decoding() {
+    let mut data = vec![0u8, 0, 0, 24];
+    data.extend_from_slice(b"ftypheic");
+    data.extend_from_slice(&[0; 16]);
+    let got = thumbnail(&data, 64);
+    if cfg!(target_os = "macos") {
+        assert!(got.is_err());
+    } else {
+        assert_eq!(got.err().as_deref(), Some("HEIC pictures can be shown only on a Mac"));
+    }
 }
