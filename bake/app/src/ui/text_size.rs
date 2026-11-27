@@ -15,6 +15,7 @@ type Wrote = (u64, Result<View, Failure>);
 struct State {
     due: Option<(f32, Instant)>,
     writing: bool,
+    latest: Option<f32>,
     tx: Option<Sender<Wrote>>,
     rx: Option<Receiver<Wrote>>,
 }
@@ -24,17 +25,20 @@ thread_local! {
 }
 
 pub fn step(s: &mut App, steps: Option<i32>) {
-    let Some(scale) = crate::look::text_scale() else {
+    let Some(scale) = STATE.with_borrow(|st| st.latest).or_else(crate::look::text_scale) else {
         s.ov.notice = Some("Text size is still loading. Try again in a moment.".into());
         return;
     };
     let next = fl::text_scale_step(scale, steps);
     crate::look::preview_text_scale(next);
-    STATE.with_borrow_mut(|st| st.due = Some((next, Instant::now() + WRITE_AFTER)));
+    STATE.with_borrow_mut(|st| {
+        st.due = Some((next, Instant::now() + WRITE_AFTER));
+        st.latest = Some(next);
+    });
 }
 
 pub fn pump(s: &mut App) -> bool {
-    let (due, wrote) = STATE.with_borrow_mut(|st| {
+    let (due, wrote, latest) = STATE.with_borrow_mut(|st| {
         if st.tx.is_none() {
             let (tx, rx) = channel();
             st.tx = Some(tx);
@@ -49,8 +53,16 @@ pub fn pump(s: &mut App) -> bool {
             st.due = None;
             st.writing = true;
         }
-        (due.zip(st.tx.clone()), wrote)
+        if st.due.is_none() && !st.writing && due.is_none() {
+            st.latest = None;
+        }
+        (due.zip(st.tx.clone()), wrote, st.latest)
     });
+    if let Some(latest) = latest
+        && crate::look::text_scale().is_some_and(|shown| shown != latest)
+    {
+        crate::look::preview_text_scale(latest);
+    }
     let changed = !wrote.is_empty();
     for (ticket, result) in wrote {
         match result {

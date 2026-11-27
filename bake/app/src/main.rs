@@ -944,6 +944,10 @@ pub fn send_as_new(s: &mut App, id: &str, tx: &mut Tx) {
     s.unsent.remove(id, &unsent.key);
     let mut pending = Unsent { draft: unsent.draft.clone(), turn: unsent.turn.clone(), ..fresh(s, id, unsent.text, unsent.attachments) };
     pending.busy = steered(unsent.busy, pending.busy);
+    if pending.turn.is_some() && pending.busy == Some(Busy::Steer) {
+        note(s, id, feed::composer::STEER_TURN_OPTIONS.into());
+        pending.busy = Some(Busy::Queue);
+    }
     dispatch(s, id, pending, false, tx);
 }
 
