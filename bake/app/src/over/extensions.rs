@@ -1,15 +1,17 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
 use feed::catalog::RespondError;
 use feed::create::Host;
-use feed::extensions::{Approval, Entry, Extension, Kind, List, Tone, WebSession, approval, entries, problems, status};
+use feed::extension_changes::build_blocked;
+use feed::extensions::{Approval, Entry, Extension, Kind, List, Tone, WebSession, approval, entries, pin_help, pins_host, problems, status};
 use rune::{Color, Cx, El, ScrollSpec, col, el, icon, row, text};
 use rune_kit::shell::Toolbar;
 use rune_kit::{Button, ButtonVariant, ControlSize, Spinner};
 use rune_theme_opencode::icons;
 
+use crate::over::extension_sheets::{self, Sheets};
 use crate::over::ui::{self, BODY, BODY_MED, HEAD, META, META_MED, kit, strong, weak};
 use crate::over::{go, open_session};
 use crate::web::{Phase, Web};
@@ -48,6 +50,8 @@ pub struct State {
     pub settings: bool,
     pub acting: Option<String>,
     pub web: Web,
+    pub sheets: Sheets,
+    pub pins: BTreeSet<String>,
     fetched_at: Option<Instant>,
     ages: Vec<String>,
     hosts_pending: bool,
@@ -61,7 +65,7 @@ pub struct State {
 impl State {
     pub fn new() -> State {
         let (tx, rx) = channel();
-        State { catalogs: Vec::new(), hosts_error: None, settings: false, acting: None, web: Web::new(), fetched_at: None, ages: Vec::new(), hosts_pending: false, again: false, listing: HashSet::new(), generation: HashMap::new(), tx, rx }
+        State { catalogs: Vec::new(), hosts_error: None, settings: false, acting: None, web: Web::new(), sheets: Sheets::new(), pins: BTreeSet::new(), fetched_at: None, ages: Vec::new(), hosts_pending: false, again: false, listing: HashSet::new(), generation: HashMap::new(), tx, rx }
     }
 }
 
@@ -75,6 +79,28 @@ fn host_key(host: &Host) -> String {
 
 fn shown(s: &App) -> bool {
     matches!(s.screen, Screen::Extensions | Screen::Extension(_))
+}
+
+fn wanted(s: &App, host: &Host) -> bool {
+    shown(s) || pins_host(&s.ov.ext.pins, &host_key(host))
+}
+
+pub fn relist(s: &mut App, host: &Host) {
+    list(s, host);
+}
+
+pub fn pinned(s: &App) -> Vec<Entry> {
+    if s.ov.ext.pins.is_empty() {
+        return Vec::new();
+    }
+    let origin = s.client.as_ref().map(|c| c.origin().to_string()).unwrap_or_default();
+    feed::extensions::pinned(s.ov.ext.catalogs.iter().flat_map(|c| c.entries(&origin)).collect(), &s.ov.ext.pins)
+}
+
+fn toggle_pin(s: &mut App, id: String) {
+    if !s.ov.ext.pins.remove(&id) {
+        s.ov.ext.pins.insert(id);
+    }
 }
 
 pub fn refresh(s: &mut App) {
@@ -137,7 +163,8 @@ fn take(s: &mut App, done: Done) {
     match &done {
         Done::Hosts(result) => {
             s.ov.ext.hosts_pending = false;
-            for host in result.iter().flatten().filter(|h| h.available() && !h.is_local()) {
+            let hosts: Vec<Host> = result.iter().flatten().filter(|h| h.available() && !h.is_local() && wanted(s, h)).cloned().collect();
+            for host in &hosts {
                 list(s, host);
             }
         }
@@ -209,27 +236,27 @@ fn find(s: &App, id: &str) -> Option<Entry> {
 }
 
 pub fn drain(s: &mut App) -> bool {
-    let mut changed = false;
+    let mut changed = extension_sheets::drain(s);
     while let Ok(done) = s.ov.ext.rx.try_recv() {
         take(s, done);
         changed = true;
     }
-    if !shown(s) {
+    if !shown(s) && s.ov.ext.pins.is_empty() {
         return changed;
     }
     if s.ov.ext.again && s.ov.ext.listing.is_empty() && !s.ov.ext.hosts_pending {
         s.ov.ext.again = false;
         refresh(s);
     }
-    let failed = s.ov.ext.hosts_error.is_some() || s.ov.ext.catalogs.iter().any(|c| c.error.is_some() && (c.host.is_local() || c.host.available()));
-    let paired = s.ov.ext.catalogs.iter().any(|c| !c.host.is_local());
+    let failed = s.ov.ext.hosts_error.is_some() || s.ov.ext.catalogs.iter().any(|c| c.error.is_some() && (c.host.is_local() || c.host.available()) && wanted(s, &c.host));
+    let paired = s.ov.ext.catalogs.iter().any(|c| !c.host.is_local() && wanted(s, &c.host));
     match s.ov.ext.fetched_at {
         None => refresh(s),
         Some(at) if at.elapsed() < PAIRED_EVERY => {}
         Some(_) if failed => refresh(s),
         Some(_) if paired => {
             s.ov.ext.fetched_at = Some(Instant::now());
-            let hosts: Vec<Host> = s.ov.ext.catalogs.iter().filter(|c| !c.host.is_local() && c.host.available()).map(|c| c.host.clone()).collect();
+            let hosts: Vec<Host> = s.ov.ext.catalogs.iter().filter(|c| !c.host.is_local() && c.host.available() && wanted(s, &c.host)).map(|c| c.host.clone()).collect();
             for host in hosts {
                 list(s, &host);
             }
@@ -262,7 +289,7 @@ pub fn drain(s: &mut App) -> bool {
 }
 
 pub fn changed(s: &mut App) {
-    if shown(s) {
+    if shown(s) || !s.ov.ext.pins.is_empty() {
         s.ov.ext.again = !s.ov.ext.listing.is_empty() || s.ov.ext.hosts_pending;
         refresh(s);
     } else {
@@ -283,7 +310,8 @@ pub fn arrived(s: &mut App) {
 
 fn covered(s: &App) -> bool {
     let menus = &s.menus;
-    s.ov.jump.is_some()
+    s.ov.ext.sheets.is_open()
+        || s.ov.jump.is_some()
         || s.ov.notice.is_some()
         || s.new_session.is_some()
         || s.ov.inbox.note.is_some()
@@ -346,14 +374,27 @@ fn offered_icon(name: &str) -> Option<&'static rune::Icon> {
     OFFERED.iter().find(|(word, _)| words.iter().any(|w| w.contains(word))).map(|(_, icon)| *icon)
 }
 
-fn entry_icon(entry: &Entry) -> &'static rune::Icon {
+pub(crate) fn entry_icon(entry: &Entry) -> &'static rune::Icon {
     offered_icon(&entry.icon).unwrap_or(match entry.kind {
         Kind::Mount(_) => &icons::GLOBE,
         Kind::Page => &icons::WINDOW_CURSOR,
     })
 }
 
-fn entry_row(entry: &Entry) -> El {
+fn pin_button(entry: &Entry, pinned: bool) -> El {
+    let id = entry.id();
+    let label = if pinned { format!("Unpin {}", entry.label) } else { format!("Pin {}", entry.label) };
+    rune_kit::IconButton::new(&crate::icons::PIN)
+        .label(label)
+        .help(pin_help(pinned, entry.offered))
+        .control_size(ControlSize::Small)
+        .on_press(move |s: &mut App| toggle_pin(s, id.clone()))
+        .build(kit())
+        .opacity(if pinned { 1.0 } else if entry.offered { 0.85 } else { 0.5 })
+        .key(format!("ext-pin-{}", entry.id()))
+}
+
+fn entry_row(entry: &Entry, pinned: bool) -> El {
     let k = kit();
     let mut r = row()
         .key(format!("ext-entry-{}", entry.id()))
@@ -374,7 +415,7 @@ fn entry_row(entry: &Entry) -> El {
                 .child(row().gap(6.0).items_center().child(text(entry.label.clone()).font(BODY_MED).color(strong()).truncate().shrink()).children(entry.badge.clone().map(|b| text(b).font(META_MED).color(ui::needs_color()))))
                 .child(text(entry.subtitle()).font(META).color(if entry.awaits_approval { ui::needs_color() } else { weak() }).truncate()),
         );
-    r = r.child(icon(&icons::CHEVRON_RIGHT, 12.0).color(weak()));
+    r = r.child(pin_button(entry, pinned)).child(icon(&icons::CHEVRON_RIGHT, 12.0).color(weak()));
     let e = entry.clone();
     r.on_press(move |s: &mut App| open(s, &e))
 }
@@ -453,13 +494,39 @@ fn extension_card(s: &App, ext: &Extension, own: &[&Entry], host: &Host) -> El {
     if own.is_empty() {
         body = body.child(text("No page. Its jobs and actions run in the background.".to_string()).font(META).color(weak()));
     } else {
-        body = body.child(col().w_full().gap(2.0).children(own.iter().map(|e| entry_row(e))));
+        body = body.child(col().w_full().gap(2.0).children(own.iter().map(|e| entry_row(e, s.ov.ext.pins.contains(&e.id())))));
     }
     col().key(format!("ext-card-{}", ext.id)).w_full().radius(12.0).fill(k.c.surface_base).border(1.0, ui::edge()).child(body)
 }
 
 fn sections(s: &App) -> Vec<&Catalog> {
     s.ov.ext.catalogs.iter().collect()
+}
+
+fn host_tools(s: &App, catalog: &Catalog) -> Option<El> {
+    s.client.as_ref()?;
+    let k = kit();
+    let key = catalog.key();
+    let blocked = build_blocked(catalog.list.is_some(), catalog.error.as_deref(), &catalog.host.name);
+    let (history_host, build_host) = (catalog.host.clone(), catalog.host.clone());
+    let history = Button::new("History")
+        .variant(ButtonVariant::Ghost)
+        .control_size(ControlSize::Small)
+        .icon(&crate::icons::CLOCK)
+        .help(if catalog.host.is_local() { "Every change to the extensions on this computer, with Undo".to_string() } else { format!("Every change to the extensions on {}, with Undo", catalog.host.name) })
+        .on_press(move |s: &mut App| extension_sheets::open_history(s, history_host.clone()))
+        .build(k)
+        .key(format!("ext-history-{key}"));
+    let build = Button::new("New App…")
+        .variant(ButtonVariant::Neutral)
+        .control_size(ControlSize::Small)
+        .icon(&icons::PLUS)
+        .disabled(blocked.is_some())
+        .help(blocked.unwrap_or_else(|| "Describe an app and a builder session makes it".into()))
+        .on_press(move |s: &mut App| extension_sheets::open_build(s, build_host.clone()))
+        .build(k)
+        .key(format!("ext-new-{key}"));
+    Some(row().gap(6.0).items_center().child(history).child(build))
 }
 
 fn catalog_block(s: &App, catalog: &Catalog, titled: bool, origin: &str) -> El {
@@ -469,13 +536,12 @@ fn catalog_block(s: &App, catalog: &Catalog, titled: bool, origin: &str) -> El {
         let title = if catalog.host.is_local() { "On this computer".to_string() } else { format!("On {}", catalog.host.name) };
         head = head.child(text(title).font(HEAD).color(strong()));
     }
+    head = head.child(ui::spacer());
     if let Some(at) = catalog.fetched {
         let refreshing = s.ov.ext.listing.contains(&catalog.key());
-        head = head.child(ui::spacer()).child(text(feed::extensions::age(at.elapsed().as_secs(), refreshing)).font(META).color(weak()).key(format!("ext-age-{}", catalog.key())));
+        head = head.child(text(feed::extensions::age(at.elapsed().as_secs(), refreshing)).font(META).color(weak()).key(format!("ext-age-{}", catalog.key())));
     }
-    if titled || catalog.fetched.is_some() {
-        block = block.child(head);
-    }
+    block = block.child(head.children(host_tools(s, catalog)));
     if let Some(error) = &catalog.error {
         block = block.child(text(error.clone()).font(META).color(crate::theme::failed()).wrap().w_full());
     }
@@ -486,7 +552,7 @@ fn catalog_block(s: &App, catalog: &Catalog, titled: bool, origin: &str) -> El {
         return block;
     };
     if list.extensions.is_empty() && catalog.error.is_none() {
-        let empty = if catalog.host.is_local() { "No extensions on this computer yet. Each one is a folder in ~/.agenthail/extensions.".to_string() } else { format!("No extensions on {}.", catalog.host.name) };
+        let empty = if catalog.host.is_local() { "No extensions on this computer yet. Use New App to describe one; each one is a folder in ~/.agenthail/extensions.".to_string() } else { format!("No extensions on {}.", catalog.host.name) };
         return block.child(text(empty).font(BODY).color(weak()));
     }
     let all = catalog.entries(origin);

@@ -117,6 +117,7 @@ fn encode(s: &App) -> String {
         "queueTaking": feed::queue::Taking::to_json(&s.queue_taking),
         "backgroundDock": s.dock.to_json(),
         "turnNotice": feed::notice::shared().to_json(),
+        "extensionPins": s.ov.ext.pins.iter().collect::<Vec<_>>(),
         "projectTiles": serde_json::to_value(s.ov.projects.tiles.saved()).unwrap_or(Value::Null),
         "leadDrafts": s.ov.projects.lead_drafts.iter().filter(|(_, d)| !d.text.trim().is_empty()).map(|(k, d)| (k.clone(), Value::String(d.text.clone()))).collect::<serde_json::Map<String, Value>>(),
     })
@@ -166,6 +167,9 @@ pub fn load(s: &mut App) {
     s.queue_taking = feed::queue::Taking::from_json(&v["queueTaking"]);
     s.dock = feed::background::DockChoices::from_json(&v["backgroundDock"]);
     *feed::notice::shared() = feed::notice::TurnNotice::from_json(&v["turnNotice"]);
+    if let Some(pins) = v["extensionPins"].as_array() {
+        s.ov.ext.pins = pins.iter().filter_map(|p| p.as_str().map(str::to_string)).collect();
+    }
     if let Ok(saved) = serde_json::from_value(v["projectTiles"].clone()) {
         s.ov.projects.tiles = feed::projects::Tiles::restore(saved);
     }
