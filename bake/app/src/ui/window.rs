@@ -488,12 +488,16 @@ pub fn is_open(s: &App, kind: Kind) -> bool {
     }
 }
 
-fn owner(s: &App, kind: Kind) -> Option<Id> {
+pub fn owner(s: &App, kind: Kind) -> Option<Id> {
     s.windows.owners[kind as usize]
 }
 
 pub fn shows(s: &App, kind: Kind) -> bool {
     owner(s, kind).is_none_or(|w| w == s.windows.current)
+}
+
+pub fn together(s: &App, a: Kind, b: Kind) -> bool {
+    owner(s, a).is_none() || owner(s, b).is_none() || owner(s, a) == owner(s, b)
 }
 
 pub fn open_in(s: &App, w: Id) -> bool {

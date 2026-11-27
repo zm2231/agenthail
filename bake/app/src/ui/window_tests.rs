@@ -326,8 +326,13 @@ fn the_palette_lives_in_main_and_command_k_in_a_session_window_opens_it_there() 
     let cmd_k = || rune::KeyEvent { key: rune::Key::Command('k'), mods: rune::Mods { cmd: true, ..rune::Mods::default() } };
     press(&mut s, &mut win, &key(w), cmd_k());
     assert_eq!((s.ov.jump.is_some(), owner(&s, Kind::Jump)), (true, Some(MAIN)));
+    turn_with(&mut s, &mut main, "main", |s, _| {
+        if s.ov.jump.is_some() {
+            s.ov.jump = Some(rune::TextEdit::new("fix"));
+        }
+    });
     press(&mut s, &mut win, &key(w), cmd_k());
-    assert!(s.ov.jump.is_some(), "pressing it again in the session window doesn't close main's palette");
+    assert_eq!(s.ov.jump.as_ref().map(|j| j.text.as_str()), Some("fix"), "pressing it again in the session window keeps main's palette and its query");
     turn_with(&mut s, &mut win, &key(w), |s, tx| crate::over::search::run(s, feed::search::Command::Refresh, tx));
     assert!(s.ov.jump.is_some(), "a command in the session window leaves main's palette open");
     turn(&mut s, &mut main, "main");
@@ -348,4 +353,13 @@ fn a_result_goes_to_the_window_that_asked_or_else_the_one_showing_its_session() 
     s.inspect.logs = Some(("b".into(), "log lines".into()));
     give(&mut s, Kind::Logs, w);
     assert!(!free_for(&s, Kind::Logs, Some(MAIN)) && free_for(&s, Kind::Logs, Some(w)));
+}
+
+#[test]
+fn a_move_from_one_window_leaves_another_window_s_limit_dialog_and_new_session_leaves_activity_alone() {
+    let (mut s, mut main, mut win, w) = two_windows();
+    turn_with(&mut s, &mut win, &key(w), |s, _| s.limits.confirm = Some(confirm("b")));
+    turn_with(&mut s, &mut main, "main", |s, _| s.limits.picking = Some(("a".into(), "t".into())));
+    assert_eq!((owner(&s, Kind::LimitConfirm), owner(&s, Kind::LimitPick)), (Some(w), Some(MAIN)));
+    assert!(together(&s, Kind::LimitPick, Kind::Jump) && !together(&s, Kind::LimitConfirm, Kind::LimitPick));
 }

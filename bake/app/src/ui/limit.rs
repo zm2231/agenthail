@@ -156,9 +156,16 @@ fn ask_confirm(s: &mut App, c: Confirm) {
 }
 
 fn move_to(s: &mut App, id: &str, since: &str, target: Target, stop_terminal: bool) {
-    s.limits.confirm = None;
-    s.limits.consent = None;
-    s.limits.picking = None;
+    use super::window::{Kind, shows};
+    if shows(s, Kind::LimitConfirm) {
+        s.limits.confirm = None;
+    }
+    if shows(s, Kind::LimitConsent) {
+        s.limits.consent = None;
+    }
+    if shows(s, Kind::LimitPick) {
+        s.limits.picking = None;
+    }
     if !current(s, id, since) {
         s.ov.notice = Some("The session's usage stop changed, so nothing was moved. Check it again.".into());
         return;

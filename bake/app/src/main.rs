@@ -1613,7 +1613,7 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         settings::open();
         return true;
     }
-    (shows(s, Kind::NewSession) && !over::projects::open(s) && ui::new_session::on_key(s, ev, tx)) || over::on_key(s, ev, tx)
+    (shows(s, Kind::NewSession) && !(over::projects::open(s) && shows(s, Kind::Projects)) && ui::new_session::on_key(s, ev, tx)) || over::on_key(s, ev, tx)
 }
 
 fn on_focus(_: &mut App, focused: bool, _: &mut Tx) {

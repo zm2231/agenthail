@@ -242,6 +242,10 @@ pub fn next_need(s: &mut App) {
 }
 
 pub fn open_jump(s: &mut App, tx: &mut Tx) {
+    if s.ov.jump.is_some() && s.windows.current() != crate::ui::window::MAIN {
+        crate::ui::window::bring_forward(s, crate::ui::window::MAIN);
+        return;
+    }
     let mut edit = TextEdit::new("");
     edit.focused = true;
     s.ov.jump = Some(edit);
