@@ -608,7 +608,7 @@ pub fn sidebar_rows(s: &App, hidden: Vec<String>, k: &Kit) -> Vec<El> {
                     s.ov.projects.more_menu = if s.ov.projects.more_menu.is_some() { None } else { Some(hidden.clone()) };
                 })
                 .build(k)
-                .key("more-projects-menu-trigger"),
+                .key("more-projects-trigger"),
         );
     }
     rows.extend([rune_kit::SidebarRow::new("Add project…").icon(&icons::PLUS).height(k.text_size(30.0)).on_select(|s: &mut App, _| add(s)).build(k).key("add-project")]);
@@ -621,7 +621,7 @@ pub fn sidebar_rows(s: &App, hidden: Vec<String>, k: &Kit) -> Vec<El> {
                 .detail(count.to_string())
                 .on_select(|s: &mut App, _| open_archived(s))
                 .build(k)
-                .key("archived-menu-trigger"),
+                .key("archived-projects-trigger"),
         );
     }
     rows

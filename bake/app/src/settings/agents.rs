@@ -73,6 +73,11 @@ pub fn show(s: &mut Prefs, roles: Roles, selected: &str) {
     settle(s);
 }
 
+#[cfg(test)]
+pub fn drafted(s: &Prefs) -> Option<&agents::Definition> {
+    s.agents.draft.as_ref().map(|d| &d.definition)
+}
+
 pub fn opened(s: &mut Prefs) {
     if s.tab == TAB {
         reload(s);
@@ -265,7 +270,7 @@ fn picker(s: &Prefs, key: String, label: &str, choices: Vec<String>, current: Op
     let open = s.agents.open.as_deref() == Some(key.as_str());
     let values = choices.clone();
     let toggled = key.clone();
-    Select::new(key.clone(), &choices)
+    Select::new(format!("settings-{key}"), &choices)
         .appearance(SelectAppearance::Field)
         .width(width)
         .current(current)
@@ -282,7 +287,6 @@ fn picker(s: &Prefs, key: String, label: &str, choices: Vec<String>, current: Op
             }
         })
         .build(k, layer)
-        .key(format!("settings-{key}"))
 }
 
 fn small(label: &str, key: &str, disabled: bool, press: impl Fn(&mut Prefs) + 'static, k: &Kit) -> El {
@@ -327,7 +331,7 @@ fn decision_row(s: &Prefs, d: &Draft, role: &RoleView, a: &ActionView, locked: b
     choices.extend(Decision::ALL.iter().map(|x| x.title().to_string()));
     let current = chosen.map_or(choices[0].clone(), |x| x.title().to_string());
     let name = a.name.clone();
-    let control = picker(s, format!("agent-decision-{}", a.name), &a.detail, choices, Some(&current), 150.0, locked, layer, move |s, i| edit(s, |d| d.set_decision(&name, i.checked_sub(1).map(|i| Decision::ALL[i]))), k);
+    let control = picker(s, format!("agent-decision-{}", a.name), &a.detail, choices, Some(&current), k.text_size(150.0), locked, layer, move |s, i| edit(s, |d| d.set_decision(&name, i.checked_sub(1).map(|i| Decision::ALL[i]))), k);
     let dot = el().w(6.0).h(6.0).radius(3.0).fill(if chosen.is_some() { accent() } else { theme::line() });
     let words = col().gap(1.0).grow(1.0).min_w(0.0).child(text(a.detail.clone()).font(k.text(BODY)).color(theme::text()).wrap()).child(text(a.name.clone()).font(k.text(META)).color(faint()));
     row().w_full().gap(10.0).items_center().px(14.0).py(8.0).child(dot).child(words).child(control)
