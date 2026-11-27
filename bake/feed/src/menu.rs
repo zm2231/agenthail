@@ -13,6 +13,7 @@ pub enum Act {
     Pin(bool),
     Read(bool),
     Archive(bool),
+    MakeLead,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -169,6 +170,11 @@ pub fn entries(x: &Session) -> Vec<Vec<Entry>> {
     groups
 }
 
+pub fn make_lead(x: &Session, leads_it: bool) -> Option<Entry> {
+    let able = x.project.is_some() && x.subagent.is_none() && x.callable() && !leads_it && !x.read_only;
+    able.then(|| Entry::on(Act::MakeLead, "Make Project Lead"))
+}
+
 fn pull_requests(x: &Session) -> Vec<Entry> {
     let linked: Vec<_> = x.prs.iter().filter(|p| !p.url.is_empty()).collect();
     let mut out = Vec::new();
@@ -317,6 +323,21 @@ mod tests {
         assert_eq!(keep.iter().map(|e| (e.label.as_str(), e.act.clone())).collect::<Vec<_>>(), vec![("Unpin", Act::Pin(false)), ("Mark as read", Act::Read(true)), ("Unarchive", Act::Archive(false))]);
         x.read_state = Some(ReadState { first_unread: String::new(), revision: "r1".into() });
         assert_eq!(entries(&x)[2][1], Entry::on(Act::Read(false), "Mark as unread"));
+    }
+
+    #[test]
+    fn only_a_claude_or_codex_conversation_in_a_project_can_be_made_its_lead() {
+        let mut x = session();
+        x.surface = "claude".into();
+        assert_eq!(make_lead(&x, false), None, "a session outside any project");
+        x.project = Some(Named { name: "app".into(), ..Default::default() });
+        assert_eq!(make_lead(&x, false), Some(Entry::on(Act::MakeLead, "Make Project Lead")));
+        assert_eq!(make_lead(&x, true), None, "it already leads the project");
+        x.subagent = Some(serde_json::json!({"parentId": "s0"}));
+        assert_eq!(make_lead(&x, false), None);
+        x.subagent = None;
+        x.surface = "notion".into();
+        assert_eq!(make_lead(&x, false), None);
     }
 
     #[test]

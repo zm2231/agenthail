@@ -233,6 +233,7 @@ fn verb(act: &Act) -> &'static str {
         Act::Read(false) => "Marking as unread",
         Act::Archive(true) => "Archiving",
         Act::Archive(false) => "Unarchiving",
+        Act::MakeLead => "Making it the project's lead",
     }
 }
 
@@ -248,6 +249,7 @@ pub fn run(s: &mut App, id: &str, act: Act) {
         Act::PrLink => super::pr_link::start(s, id),
         Act::PrWatch(url, on) => super::pr_link::change(s, id, if on { feed::action::PrOp::Watch } else { feed::action::PrOp::Unwatch }, &url),
         Act::PrUnlink(url) => super::pr_link::change(s, id, feed::action::PrOp::Unlink, &url),
+        Act::MakeLead => crate::over::projects::make_lead(s, id),
         Act::Call => {
             let name = super::gone::shown(s, id).map(|x| x.title()).unwrap_or_default();
             crate::voice::open(id, &name);
@@ -270,7 +272,7 @@ pub fn run(s: &mut App, id: &str, act: Act) {
                     Act::Pin(on) => c.session_pin(&id, *on).map(|_| None),
                     Act::Read(read) => c.session_read(&id, &revision, *read),
                     Act::Archive(on) => c.session_archive(&id, *on).map(|_| None),
-                    Act::Rename | Act::Pr(_) | Act::PrWatch(..) | Act::PrUnlink(_) | Act::PrLink | Act::Call => Ok(None),
+                    Act::Rename | Act::Pr(_) | Act::PrWatch(..) | Act::PrUnlink(_) | Act::PrLink | Act::Call | Act::MakeLead => Ok(None),
                 };
                 Some(Done::Acted(id, act, revision, result))
             });

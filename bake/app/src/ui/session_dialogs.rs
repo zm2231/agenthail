@@ -49,6 +49,7 @@ fn act_icon(act: &Act) -> &'static rune::Icon {
         Act::Pin(_) => &icons::PIN,
         Act::Read(_) => &icons::CHECK_CIRCLE,
         Act::Archive(_) => &icons::INBOX,
+        Act::MakeLead => &icons::CORNER,
     }
 }
 
@@ -60,7 +61,11 @@ fn session_menu(s: &App, open: &Open, layer: &mut Vec<El>) {
         None => m.placement(Placement::BottomEnd),
     };
     let waiting = s.menus.busy.contains(&(x.id.clone(), "menu"));
-    for (i, group) in menu::entries(x).into_iter().enumerate() {
+    let mut groups = menu::entries(x);
+    if let Some(lead) = menu::make_lead(x, crate::over::projects::leads(s, &x.id)) {
+        groups[0].push(lead);
+    }
+    for (i, group) in groups.into_iter().enumerate() {
         if i > 0 {
             m = m.separator();
         }
