@@ -446,6 +446,17 @@ fn lists_json(lists: &HashMap<String, Vec<Chip>>) -> Value {
     )
 }
 
+pub fn steer_refusal(attachments: &[Upload], capabilities: &crate::catalog::Capabilities) -> Option<&'static str> {
+    if attachments.is_empty() {
+        return None;
+    }
+    match capabilities.steer_images {
+        None => Some("Update Agenthail on this computer to steer attachments, so this was queued for next."),
+        Some(false) if attachments.iter().any(Upload::is_image) => Some("Attached images can't join a running turn on this session, so this was queued for next."),
+        Some(_) => None,
+    }
+}
+
 pub fn missing_upload(error: &str) -> Option<String> {
     let rest = error.split_once("attachment \"")?.1;
     let (id, tail) = rest.split_once('"')?;
@@ -682,6 +693,18 @@ mod tests {
         tray.remove(a);
         assert_eq!(tray.ready("s1").unwrap().len(), 1);
         assert_eq!(tray.ready("other"), Ok(vec![]));
+    }
+
+    #[test]
+    fn a_steer_carries_only_attachments_the_session_can_take() {
+        use crate::catalog::Capabilities;
+        let image = Upload { media_type: "image/png".into(), ..upload("pic") };
+        let with = |steer_images| Capabilities { steer_images, ..Capabilities::default() };
+        assert_eq!(steer_refusal(&[], &with(None)), None, "plain text always steers");
+        assert!(steer_refusal(&[upload("a")], &with(None)).unwrap().starts_with("Update Agenthail"));
+        assert_eq!(steer_refusal(&[upload("a")], &with(Some(false))), None);
+        assert!(steer_refusal(&[upload("a"), image.clone()], &with(Some(false))).unwrap().starts_with("Attached images"));
+        assert_eq!(steer_refusal(&[image], &with(Some(true))), None);
     }
 
     #[test]
