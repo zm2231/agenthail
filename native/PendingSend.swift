@@ -1,5 +1,16 @@
 import Foundation
 
+/// The daemon keeps a send's receipt for 30 days. A day short of that, a retry
+/// under the same key could run as a new message, so an older unconfirmed send
+/// can only go out again as a new one. A daemon test pins this to its own limit.
+enum SendKey {
+    static let lifetime: TimeInterval = 29 * 24 * 60 * 60
+
+    static func expired(_ sentAt: Date, now: Date = Date()) -> Bool {
+        now.timeIntervalSince(sentAt) >= lifetime
+    }
+}
+
 /// A message that left the composer and has no answer from its computer yet.
 struct PendingSend: Identifiable, Equatable {
     var alreadyUploaded: [String]? {
@@ -7,8 +18,12 @@ struct PendingSend: Identifiable, Equatable {
         return !attachments.isEmpty && ids.count == attachments.count ? ids : nil
     }
 
-    var unconfirmedTitle: String { retryStopped ? "Not confirmed" : "Not confirmed yet · retrying" }
-    var offersRetry: Bool { retryStopped }
+    var keyExpired: Bool { SendKey.expired(sentAt) }
+    var unconfirmedTitle: String {
+        if keyExpired { return "Not confirmed, and too old to retry. It may already have arrived; put it back to send it again as a new message." }
+        return retryStopped ? "Not confirmed" : "Not confirmed yet · retrying"
+    }
+    var offersRetry: Bool { retryStopped && !keyExpired }
 
     var previewLine: String {
         let line = message.split(whereSeparator: \.isNewline).first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""

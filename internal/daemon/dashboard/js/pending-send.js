@@ -3,6 +3,9 @@ import { isNetworkFailure, postAction } from "./actions.js";
 const storagePrefix = "agenthail.pendingSend.";
 const autoRetryWindow = 60 * 60 * 1000;
 const abandonedAfter = 60 * 1000;
+// The daemon keeps a send's receipt for 30 days; a day short of that, a retry
+// under the same key could run as a new message. A daemon test pins this.
+const keyLifetime = 29 * 24 * 60 * 60 * 1000;
 
 let handlers = { answered() {}, refused() {}, changed() {} };
 const startedHere = new Set();
@@ -64,6 +67,10 @@ function unanswered(item, now) {
 
 function retriesByItself(item, now) {
   return now - item.createdAt < autoRetryWindow;
+}
+
+function keyExpired(item, now) {
+  return now - (item.sentAt || 0) >= keyLifetime;
 }
 
 function nextFor(sessionId, now) {
@@ -129,7 +136,7 @@ let sequence = 0;
 
 export function enqueueSend(sessionId, wire, text, attachments = []) {
   const id = crypto.randomUUID();
-  const item = { id, key: crypto.randomUUID(), sessionId, wire, text, attachments, createdAt: Date.now(), sequence: ++sequence, attemptedAt: 0, unconfirmed: false };
+  const item = { id, key: crypto.randomUUID(), sessionId, wire, text, attachments, createdAt: Date.now(), sentAt: Date.now(), sequence: ++sequence, attemptedAt: 0, unconfirmed: false };
   if (!save(item)) return false;
   startedHere.add(id);
   pump(sessionId);
@@ -142,7 +149,7 @@ export function retryPendingSends() {
 
 export async function retrySend(id) {
   const item = readOne(storagePrefix + id);
-  if (!item) return;
+  if (!item || keyExpired(item, Date.now())) return;
   await attempt(id);
   await pump(item.sessionId);
 }
@@ -158,7 +165,7 @@ export function keepSend(item) {
 function showable(now) {
   return read()
     .filter((item) => !startedHere.has(item.id) && unanswered(item, now))
-    .map((item) => ({ ...item, retrying: retriesByItself(item, now) }));
+    .map((item) => ({ ...item, retrying: retriesByItself(item, now), expired: keyExpired(item, now) }));
 }
 
 export function unconfirmedSends(sessionId, now = Date.now()) {

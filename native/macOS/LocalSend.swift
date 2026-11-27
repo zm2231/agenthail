@@ -18,8 +18,10 @@ struct LocalSend: Identifiable, Equatable {
     var queueID: Int64? = nil
 
     var canDelete: Bool { failure != nil && (ask?.offersDelete ?? true) }
+    var keyExpired: Bool { failure == nil && SendKey.expired(sentAt) }
     var unconfirmedTitle: String? {
         guard unconfirmed, failure == nil else { return nil }
+        if keyExpired { return "Not confirmed, and too old to retry. It may already have arrived; put it back to send it again as a new message." }
         return retryStopped ? "Not confirmed. It may already have arrived." : "Not confirmed yet · retrying"
     }
 

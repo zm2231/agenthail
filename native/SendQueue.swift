@@ -42,6 +42,10 @@ final class SendQueue {
     }
 
     func retry(_ send: PendingSend) {
+        guard !SendKey.expired(send.sentAt, now: now()) else {
+            stopRetrying(send)
+            return
+        }
         update(send) {
             $0.retryStopped = false
             $0.retryingOnTap = true

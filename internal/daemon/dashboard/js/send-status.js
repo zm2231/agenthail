@@ -61,7 +61,12 @@ export function renderSendStatus() {
   row.hidden = sends.length === 0;
   if (!sends.length) return;
   const [oldest] = sends;
-  const state = oldest.retrying ? "Not confirmed yet · retrying" : "Not confirmed. It may already have arrived.";
+  const state = oldest.expired
+    ? "Not confirmed, and too old to retry. It may already have arrived; put it back to send it again as a new message."
+    : oldest.retrying
+      ? "Not confirmed yet · retrying"
+      : "Not confirmed. It may already have arrived.";
+  $("#send-status-retry").hidden = Boolean(oldest.expired);
   const elsewhere = listed(oldest.sessionId) ? "" : " Its conversation is no longer listed.";
   const more = sends.length > 1 ? ` and ${sends.length - 1} more` : "";
   $("#send-status-text").textContent = `${state}${elsewhere} “${oldest.text}”${more}`;
@@ -70,7 +75,7 @@ export function renderSendStatus() {
 export function bindSendStatus() {
   $("#send-status-retry").addEventListener("click", () => {
     const [item] = sendsToShow();
-    if (item) retrySend(item.id);
+    if (item && !item.expired) retrySend(item.id);
   });
   $("#send-status-put-back").addEventListener("click", () => {
     const [item] = sendsToShow();

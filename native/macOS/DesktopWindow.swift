@@ -898,7 +898,7 @@ struct TranscriptView: View {
                     UserBubble(text: send.text, receipt: send.status, files: send.files, failure: send.failure, unconfirmed: send.unconfirmedTitle, onEdit: canResend ? { text in
                         if send.failure != nil { pane.model.discardSend(send, in: session.id) }
                         pane.composerDraft.edit(text, attachments: send.failure != nil ? send.attachments : [])
-                    } : nil, onRetry: (send.failure == nil && !send.retryStopped) || !canResend ? nil : { pane.model.retrySend(send, in: session.id) },
+                    } : nil, onRetry: (send.failure == nil && (!send.retryStopped || send.keyExpired)) || !canResend ? nil : { pane.model.retrySend(send, in: session.id) },
                     onDelete: send.canDelete ? { pane.model.deleteSend(send, in: session.id) } : nil,
                     onPutBack: send.unconfirmedTitle != nil && send.retryStopped ? { pane.model.putBackSend(send, in: session.id) } : nil)
                     .transcriptScrimRow(turn: send.id.description)
