@@ -201,6 +201,7 @@ pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     }
     if (!items.is_empty() || notice.is_some()) && ev.key == Key::Escape {
         s.complete.dismissed = Some(s.composer.text.clone());
+        s.complete.keys.escape_handled();
         return true;
     }
     let r = tx.key_base().map(|c| c.to_ascii_lowercase()) == Some('r') || matches!(&ev.key, Key::Command('r')) || matches!(&ev.key, Key::Text(t) if t.eq_ignore_ascii_case("r"));

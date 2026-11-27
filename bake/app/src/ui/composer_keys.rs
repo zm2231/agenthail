@@ -8,7 +8,15 @@ use serde_json::{Value, json};
 use crate::App;
 use crate::over::search;
 
-const DOUBLE_ESCAPE: Duration = Duration::from_millis(500);
+#[cfg(target_os = "macos")]
+fn double_escape() -> Duration {
+    Duration::from_secs_f64(objc2_app_kit::NSEvent::doubleClickInterval())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn double_escape() -> Duration {
+    Duration::from_millis(500)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Edit {
@@ -47,6 +55,10 @@ impl State {
     pub fn from_json(value: &Value) -> State {
         let stash = value.as_object().into_iter().flatten().filter_map(|(id, text)| Some((id.clone(), text.as_str()?.to_string()))).collect();
         State { escaped: None, stash }
+    }
+
+    pub fn escape_handled(&mut self) {
+        self.escaped = None;
     }
 
     pub fn rekey(&mut self, old: &str, new: &str) {
@@ -116,7 +128,7 @@ fn interrupt(s: &mut App, id: &str) {
         return;
     }
     let now = Instant::now();
-    if !s.complete.keys.escaped.take().is_some_and(|(at_id, at)| at_id == id && now.duration_since(at) < DOUBLE_ESCAPE) {
+    if !s.complete.keys.escaped.take().is_some_and(|(at_id, at)| at_id == id && now.duration_since(at) < double_escape()) {
         s.complete.keys.escaped = Some((id.to_string(), now));
         return;
     }
