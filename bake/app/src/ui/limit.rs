@@ -231,7 +231,8 @@ fn settled(s: &mut App, done: Done) {
                 Ok(Moved::NeedsConsent(message)) => {
                     s.limits.note.remove(&id);
                     if current(s, &id, &stop) {
-                        s.limits.consent = Some(Consent { session: id, since: stop, target, message });
+                        s.limits.consent = Some(Consent { session: id.clone(), since: stop, target, message });
+                        super::window::overlay_for(s, &id);
                     }
                 }
                 Err(error) => {

@@ -169,11 +169,19 @@ pub fn go(s: &mut App, to: Screen) {
         let from = std::mem::replace(&mut s.screen, to);
         s.ov.back.push(from);
     }
-    s.ov.jump = None;
-    s.ov.notice = None;
+    left_overlays(s);
     crate::switch_composer(s);
     arrive(s);
     landed(s);
+}
+
+fn left_overlays(s: &mut App) {
+    if crate::ui::window::shows_shared(s) {
+        s.ov.jump = None;
+    }
+    if s.windows.current() == crate::ui::window::MAIN {
+        s.ov.notice = None;
+    }
 }
 
 fn landed(s: &mut App) {
@@ -195,8 +203,7 @@ pub fn open_session(s: &mut App, id: &str) {
         leave(s);
         s.ov.back.push(s.screen.clone());
     }
-    s.ov.jump = None;
-    s.ov.notice = None;
+    left_overlays(s);
     crate::select(s, id);
 }
 
@@ -284,6 +291,14 @@ pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
 }
 
 pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
+    let mine = crate::ui::window::shows_shared(s);
+    if !mine {
+        if crate::ui::keys::is(crate::ui::keys::Act::GoToSession, ev, tx) && s.ov.jump.is_some() {
+            crate::ui::window::overlays_to(s, s.windows.current());
+            return true;
+        }
+        return ordinary(s, ev, tx);
+    }
     if s.ov.ext.sheets.is_open() {
         return matches!(ev.key, Key::Escape) && extension_sheets::escape(s);
     }
@@ -325,6 +340,10 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         }
         s.ov.jump = None;
     }
+    ordinary(s, ev, tx)
+}
+
+fn ordinary(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     if crate::ui::keys::on_key(s, ev, tx) {
         return true;
     }

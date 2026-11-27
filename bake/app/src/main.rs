@@ -1605,17 +1605,15 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
 }
 
 fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
-    if !ui::window::shows_shared(s) {
-        return false;
-    }
-    if over::note_open(s) {
+    let mine = ui::window::shows_shared(s);
+    if mine && over::note_open(s) {
         return over::on_key(s, ev, tx);
     }
     if ev.is_command(',') {
         settings::open();
         return true;
     }
-    (!over::projects::open(s) && ui::new_session::on_key(s, ev, tx)) || over::on_key(s, ev, tx)
+    (mine && !over::projects::open(s) && ui::new_session::on_key(s, ev, tx)) || over::on_key(s, ev, tx)
 }
 
 fn on_focus(_: &mut App, focused: bool, _: &mut Tx) {

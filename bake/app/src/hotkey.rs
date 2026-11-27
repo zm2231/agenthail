@@ -154,7 +154,7 @@ fn pressed(s: &mut App, tx: &mut Tx) {
         }
     });
     if s.ov.jump.is_some() {
-        crate::ui::window::overlays_to_main(s);
+        crate::ui::window::overlays_to(s, crate::ui::window::MAIN);
     } else if !covered(s) {
         crate::over::open_jump(s, tx);
     }

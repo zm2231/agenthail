@@ -173,7 +173,9 @@ pub fn drain(s: &mut App) -> bool {
             Done::Moved(notice) => {
                 s.menus.ops.sent.remove(&notice.session);
                 super::gone::recheck(s, &notice.session);
+                let session = notice.session.clone();
                 s.menus.ops.notices.push_back(notice);
+                super::window::overlay_for(s, &session);
             }
         }
     }

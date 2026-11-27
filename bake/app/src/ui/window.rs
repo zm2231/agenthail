@@ -134,6 +134,7 @@ pub struct Windows {
     to_show: Vec<(Id, bool)>,
     look: u64,
     overlay: Option<Id>,
+    overlay_kinds: u32,
 }
 
 impl Windows {
@@ -416,27 +417,36 @@ pub fn on_leave(s: &mut App, _: &str) {
     enter(s, MAIN);
 }
 
-pub fn shared_open(s: &App) -> bool {
+fn open_kinds(s: &App) -> u32 {
     let menus = &s.menus;
-    s.ov.jump.is_some()
-        || crate::over::note_open(s)
-        || s.ov.ext.sheets.is_open()
-        || crate::over::projects::covering(s)
-        || super::turn_options::covering(s)
-        || super::native_queue::covering(s)
-        || menus.ops.adopting.is_some()
-        || menus.ops.moving.is_some()
-        || !menus.ops.notices.is_empty()
-        || s.prs.linking.is_some()
-        || s.inspect.editing.is_some()
-        || s.inspect.logs.is_some()
-        || s.limits.picking.is_some()
-        || s.limits.confirm.is_some()
-        || s.limits.consent.is_some()
-        || crate::over::search::activity_open(s)
-        || s.accounts.open
-        || s.accounts.planning.is_some()
-        || s.new_session.is_some()
+    [
+        s.ov.jump.is_some(),
+        crate::over::note_open(s),
+        s.ov.ext.sheets.is_open(),
+        crate::over::projects::covering(s),
+        super::turn_options::covering(s),
+        super::native_queue::covering(s),
+        menus.ops.adopting.is_some(),
+        menus.ops.moving.is_some(),
+        !menus.ops.notices.is_empty(),
+        s.prs.linking.is_some(),
+        s.inspect.editing.is_some(),
+        s.inspect.logs.is_some(),
+        s.limits.picking.is_some(),
+        s.limits.confirm.is_some(),
+        s.limits.consent.is_some(),
+        crate::over::search::activity_open(s),
+        s.accounts.open,
+        s.accounts.planning.is_some(),
+        s.new_session.is_some(),
+    ]
+    .iter()
+    .enumerate()
+    .fold(0, |kinds, (i, open)| if *open { kinds | 1 << i } else { kinds })
+}
+
+pub fn shared_open(s: &App) -> bool {
+    open_kinds(s) != 0
 }
 
 pub fn shows_shared(s: &App) -> bool {
@@ -444,16 +454,33 @@ pub fn shows_shared(s: &App) -> bool {
 }
 
 fn claim(s: &mut App) {
-    if !shared_open(s) {
+    let kinds = open_kinds(s);
+    if kinds == 0 {
         s.windows.overlay = None;
-    } else if s.windows.overlay.is_none() {
+    } else if s.windows.overlay.is_none() || kinds & !s.windows.overlay_kinds != 0 {
         s.windows.overlay = Some(s.windows.current);
+    }
+    s.windows.overlay_kinds = kinds;
+}
+
+pub fn overlays_to(s: &mut App, w: Id) {
+    s.windows.overlay_kinds = open_kinds(s);
+    if s.windows.overlay_kinds != 0 {
+        s.windows.overlay = Some(w);
     }
 }
 
-pub fn overlays_to_main(s: &mut App) {
-    if shared_open(s) {
-        s.windows.overlay = Some(MAIN);
+pub fn showing(s: &App, session: &str) -> Option<Id> {
+    let shows = |screen: &Screen, selected: &Option<String>| *screen == Screen::Session && selected.as_deref() == Some(session);
+    if shows(&s.screen, &s.selected) {
+        return Some(s.windows.current);
+    }
+    s.windows.stash.iter().filter(|(id, _)| **id != s.windows.current).find(|(_, l)| shows(&l.screen, &l.selected)).map(|(id, _)| *id)
+}
+
+pub fn overlay_for(s: &mut App, session: &str) {
+    if let Some(w) = showing(s, session) {
+        overlays_to(s, w);
     }
 }
 

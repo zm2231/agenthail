@@ -163,13 +163,24 @@ fn the_palette_shows_only_in_the_window_that_opened_it_until_the_shortcut_calls_
     turn(&mut s, &mut main, "main");
     turn(&mut s, &mut win, &key(w));
     assert_eq!((win.presented("jump-input").is_some(), main.presented("jump-input").is_some(), s.windows.overlay), (true, false, Some(w)));
-    std::mem::swap(&mut s, &mut main.state);
-    on_enter(&mut main.state, "main");
     let esc = rune::KeyEvent { key: rune::Key::Escape, mods: rune::Mods::default() };
-    assert!(!main.update_if(|s, tx| crate::on_key(s, &esc, tx)), "keys in main don't reach a palette open in another window");
-    on_leave(&mut main.state, "main");
-    std::mem::swap(&mut s, &mut main.state);
-    turn_with(&mut s, &mut main, "main", |s, _| overlays_to_main(s));
+    turn_with(&mut s, &mut main, "main", move |s, tx| {
+        crate::on_key(s, &esc, tx);
+    });
+    assert!(s.ov.jump.is_some() && s.windows.overlay == Some(w), "Escape in main leaves the other window's palette alone");
+    let cmd = rune::Mods { cmd: true, ..rune::Mods::default() };
+    let now = rune::KeyEvent { key: rune::Key::Command('s'), mods: rune::Mods { shift: true, ..cmd } };
+    turn_with(&mut s, &mut main, "main", move |s, tx| {
+        crate::on_key(s, &now, tx);
+    });
+    assert!(s.screen == crate::Screen::Sessions && s.ov.jump.is_some(), "main's own commands still work while the palette is elsewhere");
+    let jump = rune::KeyEvent { key: rune::Key::Command('k'), mods: cmd };
+    turn_with(&mut s, &mut main, "main", move |s, tx| {
+        crate::on_key(s, &jump, tx);
+    });
+    assert_eq!(s.windows.overlay, Some(MAIN), "Command-K in main brings the open palette over");
+    turn_with(&mut s, &mut win, &key(w), |s, _| overlays_to(s, s.windows.current()));
+    turn_with(&mut s, &mut main, "main", |s, _| overlays_to(s, MAIN));
     turn(&mut s, &mut win, &key(w));
     turn(&mut s, &mut main, "main");
     assert!(main.presented("jump-input").is_some() && win.presented("jump-input").is_none());
@@ -298,4 +309,24 @@ fn the_image_cache_made_for_the_main_window_reaches_the_shared_app() {
     assert!(stand_in.attach.cache.is_none() && s.attach.cache.is_none());
     crate::ui::attach::adopt(&mut s);
     assert!(s.attach.cache.is_some());
+}
+
+#[test]
+fn a_result_for_a_session_opens_in_the_window_showing_it() {
+    let (mut s, _main, _win, w) = two_windows();
+    s.inspect.logs = Some(("b".into(), "log lines".into()));
+    overlay_for(&mut s, "b");
+    assert_eq!(s.windows.overlay, Some(w));
+    assert!(!crate::ui::inspect::drain(&mut s) && s.inspect.logs.is_some(), "logs for the session window's session stay open while main shows another");
+    assert_eq!(showing(&s, "a"), Some(MAIN));
+    assert_eq!(showing(&s, "zzz"), None);
+}
+
+#[test]
+fn opening_a_second_kind_of_dialog_in_another_window_takes_them_there() {
+    let (mut s, mut main, mut win, w) = two_windows();
+    turn_with(&mut s, &mut main, "main", |s, tx| crate::over::open_jump(s, tx));
+    assert_eq!(s.windows.overlay, Some(MAIN));
+    turn_with(&mut s, &mut win, &key(w), |s, _| s.prs.linking = Some("b".into()));
+    assert_eq!(s.windows.overlay, Some(w));
 }

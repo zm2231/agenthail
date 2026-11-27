@@ -57,7 +57,7 @@ impl Inspect {
 }
 
 fn showing(s: &App, id: &str) -> bool {
-    s.screen == crate::Screen::Session && s.selected.as_deref() == Some(id)
+    super::window::showing(s, id).is_some()
 }
 
 fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'static) -> bool {
@@ -249,7 +249,10 @@ fn settled(s: &mut App, done: Done) {
                     match act {
                         LifecycleAct::Status => p.status = Some(result),
                         LifecycleAct::Logs if elsewhere.is_some() => p.logs = Some(result.output.unwrap_or_default()),
-                        LifecycleAct::Logs => s.inspect.logs = Some((id.clone(), result.output.unwrap_or_default())),
+                        LifecycleAct::Logs => {
+                            s.inspect.logs = Some((id.clone(), result.output.unwrap_or_default()));
+                            super::window::overlay_for(s, &id);
+                        }
                         _ if session(s, &id).is_some_and(|x| inspect::lifecycle(x).status) => {
                             if let Some(p) = s.inspect.process.get_mut(&id) {
                                 p.busy = Some(LifecycleAct::Status);
