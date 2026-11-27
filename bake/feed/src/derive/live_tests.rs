@@ -527,12 +527,15 @@ fn usage_read_in_one_overview_is_kept_for_two_minutes() {
     assert_eq!(known.usage_kept(t0), None);
     let meters = vec![serde_json::json!({"provider": "claude", "percent": 12})];
     let read_at = t0 + std::time::Duration::from_secs(20);
-    known.learn(&Fetched { started: t0, usage: Some((read_at, meters.clone())), ..fetched("2026-11-24T12:00:00Z", Vec::new(), Vec::new()) });
+    known.learn(&Fetched { started: t0, usage: Some((read_at, Some(meters.clone()))), ..fetched("2026-11-24T12:00:00Z", Vec::new(), Vec::new()) });
     assert_eq!(known.usage_kept(t0 + std::time::Duration::from_secs(60)), Some(meters.clone()), "an overview a minute later, after an actor retry say, reuses it");
     assert_eq!(known.usage_kept(t0 + super::live::USAGE_EVERY), Some(meters.clone()), "two minutes run from the usage read itself, not from the overview that began earlier");
     known.learn(&Fetched { started: t0 + std::time::Duration::from_secs(60), ..fetched("2026-11-24T12:01:00Z", Vec::new(), Vec::new()) });
-    assert_eq!(known.usage_kept(t0 + std::time::Duration::from_secs(90)), Some(meters), "an overview that reused it doesn't extend it");
+    assert_eq!(known.usage_kept(t0 + std::time::Duration::from_secs(90)), Some(meters.clone()), "an overview that reused it doesn't extend it");
     assert_eq!(known.usage_kept(read_at + super::live::USAGE_EVERY), None);
+    let failed_at = read_at + super::live::USAGE_EVERY;
+    known.learn(&Fetched { started: failed_at, usage: Some((failed_at, None)), ..fetched("2026-11-24T12:03:00Z", Vec::new(), Vec::new()) });
+    assert_eq!(known.usage_kept(failed_at + std::time::Duration::from_secs(5)), Some(meters), "a failed read waits two minutes too, as the Mac app does, and the last figures stay");
 }
 
 #[test]

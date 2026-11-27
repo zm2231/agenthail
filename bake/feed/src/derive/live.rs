@@ -22,7 +22,7 @@ pub struct Fetched {
     pub held: Vec<String>,
     pub asked: Vec<String>,
     pub started: Instant,
-    pub usage: Option<(Instant, Vec<Value>)>,
+    pub usage: Option<(Instant, Option<Vec<Value>>)>,
     pub moved: Vec<String>,
 }
 
@@ -69,8 +69,9 @@ impl Known {
             }
             self.hold(id, fetched.started, result.as_ref().ok());
         }
-        if let Some(usage) = &fetched.usage {
-            self.usage = Some(usage.clone());
+        if let Some((at, read)) = &fetched.usage {
+            let meters = read.clone().or_else(|| self.usage.take().map(|(_, m)| m)).unwrap_or_default();
+            self.usage = Some((*at, meters));
         }
         for id in &fetched.moved {
             if !fetched.ledgers.contains_key(id) {
@@ -117,6 +118,10 @@ impl Known {
         for id in asked {
             self.actors.insert(id.clone(), (!found.contains_key(id)).then(|| now + RETRY));
         }
+    }
+
+    pub fn usage_last(&self) -> Option<Vec<Value>> {
+        self.usage.as_ref().map(|(_, u)| u.clone())
     }
 
     pub fn usage_kept(&self, now: Instant) -> Option<Vec<Value>> {
@@ -227,20 +232,18 @@ pub fn fetch(client: &Client, known: &Known, settled: Option<Instant>) -> Result
         jobs.into_iter().map(|(k, h)| (k, h.join().unwrap_or_else(|_| Err("the fetch stopped".into())))).collect()
     });
     let kept = known.usage_kept(started);
-    let fresh: Option<(Instant, Vec<Value>)> = if kept.is_some() {
-        None
-    } else {
-        client.get_json("/api/v1/usage").ok().map(|u| {
-            let meters: Vec<Value> = u["sets"]
+    let fresh: Option<(Instant, Option<Vec<Value>>)> = kept.is_none().then(|| {
+        let read = client.get_json("/api/v1/usage").ok().map(|u| {
+            u["sets"]
                 .as_array()
                 .into_iter()
                 .flatten()
                 .flat_map(|st| st["meters"].as_array().cloned().unwrap_or_default().into_iter().map(move |m| json!({"provider": m["provider"], "label": m["label"], "percent": m["percent"], "resetsAt": m["resetsAt"], "name": st["name"]})))
-                .collect();
-            (Instant::now(), meters)
-        })
-    };
-    let usage = kept.or_else(|| fresh.as_ref().map(|(_, u)| u.clone())).unwrap_or_default();
+                .collect::<Vec<Value>>()
+        });
+        (Instant::now(), read)
+    });
+    let usage = kept.or_else(|| fresh.as_ref().and_then(|(_, read)| read.clone())).or_else(|| known.usage_last()).unwrap_or_default();
     let hosts: Vec<Value> = client
         .get_json("/api/v1/hosts")
         .ok()
