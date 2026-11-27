@@ -103,8 +103,9 @@ pub fn phase(w: &Work) -> usize {
 
 impl World {
     pub fn steps_for(&self, ledger: &str) -> Option<&Steps> {
-        let project = self.records.iter().find(|p| p.ledger_key == ledger || p.id == ledger).map_or(ledger, |p| p.id.as_str());
-        self.steps.get(project)
+        let record = self.records.iter().find(|p| p.ledger_key == ledger || p.id == ledger);
+        let keys = [record.map(|p| p.id.as_str()), Some(ledger), record.map(|p| p.ledger_key.as_str())];
+        keys.into_iter().flatten().find_map(|k| self.steps.get(k))
     }
 
     pub fn steps_of(&self, ledger: &str) -> Steps {

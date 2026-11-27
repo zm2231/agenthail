@@ -42,28 +42,28 @@ impl State {
     pub fn keep(&mut self, d: &mut World) {
         self.found.retain(|key, _| !d.work.contains_key(key));
         d.found_names.extend(self.names.iter().map(|(k, v)| (k.clone(), v.clone())));
-        self.steps.retain(|project, _| !d.steps.contains_key(project));
+        self.steps.retain(|ledger, _| d.steps_for(ledger).is_none());
         d.steps.extend(self.steps.iter().map(|(k, (_, v))| (k.clone(), v.clone())));
         for (key, w) in &self.found {
-            let steps = d.steps_for(&w.project).cloned().unwrap_or_default();
+            let steps = d.steps_of(&key.ledger);
             d.work.entry(key.clone()).or_insert_with(|| Work { steps, ..w.clone() });
         }
     }
 
     fn learn(&mut self, d: &mut World, work: Work, seq: u64) -> Work {
-        let project = work.project.clone();
-        let ours = match self.steps.get(&project) {
+        let ledger = work.ledger_key().to_string();
+        let ours = match self.steps.get(&ledger) {
             Some((at, _)) => *at < seq,
-            None => !d.steps.contains_key(&project),
+            None => d.steps_for(&ledger).is_none(),
         };
         if ours {
-            self.steps.insert(project.clone(), (seq, work.steps.clone()));
-            d.steps.insert(project.clone(), work.steps.clone());
-            for w in d.work.values_mut().filter(|w| w.project == project) {
+            self.steps.insert(ledger.clone(), (seq, work.steps.clone()));
+            d.steps.insert(ledger.clone(), work.steps.clone());
+            for w in d.work.values_mut().filter(|w| w.ledger_key() == ledger) {
                 w.steps = work.steps.clone();
             }
         }
-        let steps = d.steps_of(&project);
+        let steps = d.steps_of(&ledger);
         Work { steps, ..work }
     }
 }
@@ -289,6 +289,28 @@ mod tests {
         let mut d = World::new(serde_json::from_value(serde_json::json!({"projects": [{"id": "shared:z", "ledgerKey": "shared:z"}], "phaseLabels": {"shared:z": {"build": "Craft"}}})).unwrap());
         state.keep(&mut d);
         assert_eq!(word(&d, WorkKey::new("shared:z", "z-W1")), "Craft", "once the project's ledger is read its names win");
+        assert!(state.steps.is_empty());
+    }
+
+    #[test]
+    fn names_learned_from_search_survive_the_project_joining_the_catalog() {
+        let mut state = State::default();
+        let mut d = world();
+        let first = state.learn(&mut d, item("q-W1", "project:q", "project:q", "Make"), 1);
+        state.found.insert(first.key(), first.clone());
+        d.work.insert(first.key(), first);
+        let known = || World::new(serde_json::from_value(serde_json::json!({"projects": [{"id": "q", "ledgerKey": "project:q"}]})).unwrap());
+        let mut d = known();
+        state.keep(&mut d);
+        assert_eq!(word(&d, WorkKey::new("project:q", "q-W1")), "Make", "the kept item keeps its names once its project is listed");
+        assert_eq!(d.steps_of("q").name(1), "Make");
+        assert_eq!(d.steps_of("project:q").name(1), "Make");
+        let second = state.learn(&mut d, item("q-W2", "q", "project:q", "Forge"), 2);
+        d.work.insert(second.key(), second);
+        assert_eq!(word(&d, WorkKey::new("project:q", "q-W1")), "Forge", "a newer reply reaches the item opened before the project was listed");
+        let mut d = World::new(serde_json::from_value(serde_json::json!({"projects": [{"id": "q", "ledgerKey": "project:q"}], "phaseLabels": {"q": {"build": "Craft"}}})).unwrap());
+        state.keep(&mut d);
+        assert_eq!(word(&d, WorkKey::new("project:q", "q-W1")), "Craft", "the project's ledger read wins once it lands");
         assert!(state.steps.is_empty());
     }
 }
