@@ -167,6 +167,14 @@ pub fn nudge() {
     });
 }
 
+pub fn redraw() {
+    WINDOW.with(|w| {
+        if let Some((handle, _)) = w.get() {
+            handle.update(|_: &mut Prefs, _| {});
+        }
+    });
+}
+
 pub fn open_from_menu(_: &mut crate::App, _: &mut Tx) {
     open();
 }

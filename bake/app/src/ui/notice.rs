@@ -101,6 +101,7 @@ fn turn(x: &Session) -> Option<El> {
         .help("Hide this note for every terminal session. Turn it back on in Settings > General.")
         .on_press(|s: &mut App| {
             feed::notice::change(|n| n.set_shown(false));
+            crate::settings::redraw();
             crate::over::layout::save(s);
         });
     let close = col()
@@ -114,6 +115,7 @@ fn turn(x: &Session) -> Option<El> {
         .help("Hide for this session")
         .on_press(move |s: &mut App| {
             feed::notice::change(|n| n.dismiss(&id));
+            crate::settings::redraw();
             crate::over::layout::save(s);
         })
         .child(icon(&icons::CLOSE, 11.0).color(faint()));
