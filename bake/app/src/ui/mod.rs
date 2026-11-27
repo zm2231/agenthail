@@ -16,6 +16,7 @@ mod chips;
 pub mod complete;
 pub mod composer_keys;
 pub mod connect;
+pub mod watch;
 pub mod gone;
 pub mod keys;
 pub(crate) mod queue;

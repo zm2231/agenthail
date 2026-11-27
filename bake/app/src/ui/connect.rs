@@ -1,24 +1,29 @@
-use std::sync::mpsc::{RecvTimeoutError, Sender, channel};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::{Duration, Instant};
 
 use feed::catalog::Client;
 use feed::connect::{self, Problem};
+use feed::watch::{Catalog, SAFETY};
 use rune::{Cx, El, col, el, icon, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize};
 
 use crate::icons;
+use crate::ui::watch::{self, Feed};
 use crate::theme::{self, BODY, HEADING, META, failed, faint, muted};
 use crate::{App, Bg};
 
 const EVERY: Duration = Duration::from_secs(2);
 const SETTLE: Duration = Duration::from_secs(2);
 const RECHECK: Duration = Duration::from_secs(30);
+const GAP: Duration = Duration::from_secs(1);
 
 #[derive(Default)]
 pub struct Link {
     pub problem: Option<Problem>,
     pub starting: bool,
-    poke: Option<Sender<()>>,
+    poke: Option<Sender<Feed>>,
     as_of: Option<Instant>,
 }
 
@@ -30,44 +35,102 @@ pub fn start(s: &mut App) {
 }
 
 fn attach(s: &mut App, client: Client) {
-    let (tx, c) = (s.outbox.clone(), client.clone());
     let (poke, poked) = channel();
-    s.link.poke = Some(poke);
-    std::thread::spawn(move || {
-        let mut checked: Option<Instant> = None;
-        loop {
-            let probed = if checked.is_some_and(|at| at.elapsed() < RECHECK) { Ok(()) } else { c.probe().map(|_| checked = Some(Instant::now())) };
-            let message = match probed {
-                Err(problem) => {
-                    checked = None;
-                    Bg::Down(problem)
-                }
-                Ok(()) => match c.snapshot() {
-                    Ok(snap) => {
-                        if tx.send(Bg::SendSettings(snap.busy_delivery, snap.rekeyed, snap.queue)).is_err() || tx.send(Bg::DecisionsRev(snap.decisions_rev)).is_err() {
-                            return;
-                        }
-                        Bg::Snapshot(snap.updated_at, snap.sessions)
-                    }
-                    Err(error) => {
-                        checked = None;
-                        Bg::Down(c.probe().err().unwrap_or_else(|| Problem::of(&error.to_string())))
-                    }
-                },
-            };
-            if tx.send(message).is_err() {
-                return;
-            }
-            if let Err(RecvTimeoutError::Disconnected) = poked.recv_timeout(EVERY) {
-                std::thread::sleep(EVERY);
-            }
-        }
-    });
+    s.link.poke = Some(poke.clone());
+    sessions(client.clone(), s.outbox.clone(), poke, poked);
     let (poke, poked) = channel();
     crate::watch_overview(client.clone(), s.outbox.clone(), poked);
     s.overview_poke = Some(poke);
     crate::over::inbox::start(&mut s.ov.inbox, &client);
     s.client = Some(client);
+}
+
+fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>) {
+    std::thread::spawn(move || {
+        let mut catalog = Catalog::default();
+        let cursor = Arc::new(AtomicU64::new(0));
+        let (resume, resumed) = channel();
+        let mut resumed = Some(resumed);
+        let (mut checked, mut last): (Option<Instant>, Option<Instant>) = (None, None);
+        let (mut due, mut down, mut gap) = (true, false, false);
+        loop {
+            if due && last.is_none_or(|at| at.elapsed() >= GAP) {
+                last = Some(Instant::now());
+                let probed = if checked.is_some_and(|at| at.elapsed() < RECHECK) { Ok(()) } else { c.probe().map(|_| checked = Some(Instant::now())) };
+                let message = match probed.and_then(|()| c.snapshot().map_err(|e| c.probe().err().unwrap_or_else(|| Problem::of(&e.to_string())))) {
+                    Err(problem) => {
+                        checked = None;
+                        down = true;
+                        Bg::Down(problem)
+                    }
+                    Ok(snap) => {
+                        down = false;
+                        due = false;
+                        let applied = catalog.adopt(snap.sessions, snap.catalog_seq);
+                        let rev = applied.rev.unwrap_or(snap.decisions_rev);
+                        if tx.send(Bg::SendSettings(snap.busy_delivery, snap.rekeyed, snap.queue)).is_err() || tx.send(Bg::DecisionsRev(rev)).is_err() {
+                            return;
+                        }
+                        if let Some(resumed) = resumed.take() {
+                            cursor.store(catalog.seq(), Ordering::Release);
+                            watch::catalog(c.clone(), cursor.clone(), resumed, poke.clone());
+                            watch::events(c.clone(), snap.event_cursor, tx.clone());
+                            watch::ledgers(c.clone(), tx.clone());
+                        } else if std::mem::take(&mut gap) {
+                            cursor.store(catalog.seq(), Ordering::Release);
+                            let _ = resume.send(());
+                        }
+                        Bg::Snapshot(snap.updated_at, catalog.sessions().to_vec(), None)
+                    }
+                };
+                if tx.send(message).is_err() {
+                    return;
+                }
+            }
+            let since = last.map(|at| at.elapsed()).unwrap_or_default();
+            let wait = if down { EVERY } else if due { GAP.saturating_sub(since) } else { SAFETY.saturating_sub(since) };
+            let mut batch = Vec::new();
+            match poked.recv_timeout(wait) {
+                Err(RecvTimeoutError::Disconnected) => return,
+                Err(RecvTimeoutError::Timeout) => due = true,
+                Ok(first) => {
+                    let mut next = Some(first);
+                    let settle = Instant::now() + feed::watch::SETTLE;
+                    while let Some(feed) = next.take() {
+                        match feed {
+                            Feed::Poke => {
+                                due = true;
+                                last = None;
+                            }
+                            Feed::Changed => due = true,
+                            Feed::Gap => {
+                                due = true;
+                                gap = true;
+                            }
+                            Feed::Catalog(event) => batch.push(event),
+                        }
+                        next = poked.recv_timeout(settle.saturating_duration_since(Instant::now())).ok();
+                    }
+                }
+            }
+            if batch.is_empty() {
+                continue;
+            }
+            let applied = catalog.apply(batch);
+            due |= applied.reread;
+            if let Some(rev) = applied.rev
+                && tx.send(Bg::DecisionsRev(rev)).is_err()
+            {
+                return;
+            }
+            if applied.news && tx.send(Bg::SessionNews).is_err() {
+                return;
+            }
+            if applied.changed && tx.send(Bg::Snapshot(feed::watch::stamp(), catalog.sessions().to_vec(), Some(applied.touched))).is_err() {
+                return;
+            }
+        }
+    });
 }
 
 pub fn down(s: &mut App, problem: Problem) {
@@ -84,6 +147,12 @@ pub fn up(s: &mut App) {
     }
 }
 
+pub fn changed(s: &App) {
+    if let Some(poke) = &s.link.poke {
+        let _ = poke.send(Feed::Changed);
+    }
+}
+
 pub fn retry(s: &mut App) {
     if matches!(s.link.problem, Some(Problem::StartFailed(_))) {
         s.link.problem = None;
@@ -92,7 +161,7 @@ pub fn retry(s: &mut App) {
         return start(s);
     }
     if let Some(poke) = &s.link.poke {
-        let _ = poke.send(());
+        let _ = poke.send(Feed::Poke);
     }
 }
 

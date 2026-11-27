@@ -9,8 +9,6 @@ use feed::review::{self, Verdict};
 use feed::version::{Build, notice};
 use rune::TextEdit;
 
-const EVERY: Duration = Duration::from_secs(10);
-const VERSION_EVERY: Duration = Duration::from_secs(60);
 const OLD_RECHECK: Duration = Duration::from_secs(300);
 
 enum Done {
@@ -52,13 +50,13 @@ pub struct State {
     daemon: Option<String>,
     newest: Option<Instant>,
     rev: Option<String>,
-    started: bool,
+    ask: Option<Sender<()>>,
 }
 
 impl Default for State {
     fn default() -> Self {
         let (tx, rx) = channel();
-        State { tx, rx, inbox: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, reads: 0, review_old: HashMap::new(), note: None, daemon: None, newest: None, rev: None, started: false }
+        State { tx, rx, inbox: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, reads: 0, review_old: HashMap::new(), note: None, daemon: None, newest: None, rev: None, ask: None }
     }
 }
 
@@ -77,27 +75,46 @@ fn fetch(client: &Client, tx: &Sender<Done>) -> bool {
 }
 
 pub fn start(state: &mut State, client: &Client) {
-    if state.started {
+    if state.ask.is_some() {
         return;
     }
-    state.started = true;
+    let (ask, asked) = channel::<()>();
+    let _ = ask.send(());
+    state.ask = Some(ask);
     let (client, tx) = (client.clone(), state.tx.clone());
-    let (versions, said) = (client.clone(), tx.clone());
+    check_version(&client, &tx);
     std::thread::spawn(move || {
-        loop {
-            let daemon = versions.version().ok();
-            let shown = daemon.as_ref().and_then(|d| notice(&app_build(), d));
-            if said.send(Done::Version(shown, daemon.filter(|d| d.known()).map(|d| d.revision))).is_err() {
+        while asked.recv().is_ok() {
+            while asked.try_recv().is_ok() {}
+            let started = Instant::now();
+            if !fetch(&client, &tx) {
                 return;
             }
-            std::thread::sleep(VERSION_EVERY);
+            std::thread::sleep(feed::watch::DECISIONS_GAP.saturating_sub(started.elapsed()));
         }
     });
+}
+
+fn check_version(client: &Client, tx: &Sender<Done>) {
+    let (client, tx) = (client.clone(), tx.clone());
     std::thread::spawn(move || {
-        while fetch(&client, &tx) {
-            std::thread::sleep(EVERY);
-        }
+        let daemon = client.version().ok();
+        let shown = daemon.as_ref().and_then(|d| notice(&app_build(), d));
+        let _ = tx.send(Done::Version(shown, daemon.filter(|d| d.known()).map(|d| d.revision)));
     });
+}
+
+pub fn changed(s: &crate::App) {
+    if let Some(ask) = &s.ov.inbox.ask {
+        let _ = ask.send(());
+    }
+}
+
+pub fn reopened(s: &crate::App) {
+    if let Some(client) = &s.client {
+        check_version(client, &s.ov.inbox.tx);
+    }
+    changed(s);
 }
 
 pub fn refresh(client: &Client, st: &State) {
@@ -109,10 +126,8 @@ pub fn refresh(client: &Client, st: &State) {
 }
 
 pub fn rev_seen(s: &mut crate::App, rev: &str) {
-    if rev_moved(&mut s.ov.inbox.rev, rev)
-        && let Some(client) = &s.client
-    {
-        refresh(client, &s.ov.inbox);
+    if rev_moved(&mut s.ov.inbox.rev, rev) {
+        changed(s);
     }
 }
 

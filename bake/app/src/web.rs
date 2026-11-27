@@ -10,7 +10,6 @@ use time::format_description::well_known::Rfc3339;
 const RENEW_BEFORE: time::Duration = time::Duration::hours(1);
 const RENEW_RETRY: Duration = Duration::from_secs(60);
 const SLOW: Duration = Duration::from_secs(10);
-const CHECK_EVERY: Duration = Duration::from_secs(20);
 const KEPT: usize = 6;
 const UNREACHED: Duration = Duration::from_secs(20);
 
@@ -258,6 +257,10 @@ impl Web {
         self.verified.as_ref().is_some_and(|(v, p)| v == value && p.as_deref().is_none_or(|p| p == page))
     }
 
+    pub fn recheck(&mut self) {
+        self.checked_at = None;
+    }
+
     pub fn check_due(&mut self, want: Option<&str>) -> Option<(String, WebSession)> {
         let want = want?;
         if self.failed() || self.signing || self.checking {
@@ -265,7 +268,7 @@ impl Web {
         }
         let cookie = self.cookie.clone()?;
         let opening = !self.pages.get(want).is_some_and(|p| p.opened) && !self.verified_for(&cookie.value, want);
-        if !opening && self.checked_at.is_some_and(|at| at.elapsed() < CHECK_EVERY) {
+        if !opening && self.checked_at.is_some() {
             return None;
         }
         self.checking = true;

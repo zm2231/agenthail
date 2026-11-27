@@ -28,8 +28,12 @@ use crate::over::Over;
 use crate::transcript::{Pane, Replay};
 
 pub enum Bg {
-    Snapshot(String, Vec<Session>),
+    Snapshot(String, Vec<Session>, Option<Vec<String>>),
     DecisionsRev(String),
+    Changed(feed::watch::Wants),
+    Reopened,
+    LedgerChanged(String),
+    SessionNews,
     Item(String, WorkItem),
     Overview(Box<Fetched>),
     Ledger(String, std::time::Instant, Result<Ledger, String>),
@@ -145,7 +149,7 @@ pub struct App {
     pub notify: notify::State,
     last_row: Option<Session>,
     client: Option<Client>,
-    overview_poke: Option<Sender<()>>,
+    overview_poke: Option<Sender<Ask>>,
     fixtures: Option<Fixtures>,
     inbox: Receiver<Bg>,
     outbox: Sender<Bg>,
@@ -169,18 +173,41 @@ fn load_recorded(path: &str) -> Result<Recorded, String> {
     serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))
 }
 
-fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<()>) {
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Ask {
+    Refresh,
+    Reset,
+}
+
+fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>) {
     std::thread::spawn(move || {
+        let mut held: HashSet<String> = HashSet::new();
         loop {
-            let message = match feed::derive::live::fetch(&client) {
-                Ok(fetched) => Bg::Overview(Box::new(fetched)),
+            let started = std::time::Instant::now();
+            let message = match feed::derive::live::fetch(&client, &held) {
+                Ok(fetched) => {
+                    held.extend(fetched.ledgers.iter().filter(|(_, r)| r.is_ok()).map(|(k, _)| k.clone()));
+                    Bg::Overview(Box::new(fetched))
+                }
                 Err(error) => Bg::OverviewError(error.to_string()),
             };
             if tx.send(message).is_err() {
                 return;
             }
-            let _ = poke.recv_timeout(Duration::from_secs(20));
-            while poke.try_recv().is_ok() {}
+            let mut asked = match poke.recv_timeout(feed::watch::OVERVIEW_EVERY) {
+                Ok(ask) => Some(ask),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+            };
+            if asked != Some(Ask::Reset) {
+                std::thread::sleep(feed::watch::OVERVIEW_GAP.saturating_sub(started.elapsed()));
+            }
+            while let Ok(ask) = poke.try_recv() {
+                asked = asked.max(Some(ask));
+            }
+            if asked == Some(Ask::Reset) {
+                held.clear();
+            }
         }
     });
 }
@@ -382,15 +409,68 @@ fn fetch_tails(s: &mut App) {
 }
 
 pub fn fetch_ledger(s: &mut App, project: &str) {
-    let Some(client) = s.client.clone() else { return };
-    if !s.ov.live.wants(project) {
-        return;
+    if s.ov.live.wants(project) {
+        spawn_ledger(s, project.to_string());
     }
-    let (tx, project, sessions, started) = (s.outbox.clone(), project.to_string(), s.sessions.clone(), std::time::Instant::now());
+}
+
+fn spawn_ledger(s: &App, project: String) {
+    let Some(client) = s.client.clone() else { return };
+    let (tx, sessions, started) = (s.outbox.clone(), s.sessions.clone(), std::time::Instant::now());
     std::thread::spawn(move || {
         let result = feed::derive::live::ledger(&client, &project, &sessions);
         let _ = tx.send(Bg::Ledger(project, started, result));
     });
+}
+
+fn selected_changed(s: &mut App, id: &str) {
+    fetch_requests(s, id);
+    if ui::queue::wants(s, id) {
+        ui::queue::fetch(s, id);
+    }
+    ui::subagents::refresh(s, id);
+    if let Some(work) = session(s, id).and_then(|x| x.primary_work(s.work_pick.get(id).map(String::as_str)).cloned()) {
+        fetch_item(s, &work.project_key, &work.item_id);
+    }
+}
+
+pub fn ask_overview(s: &App, ask: Ask) {
+    if let Some(poke) = &s.overview_poke {
+        let _ = poke.send(ask);
+    }
+}
+
+fn changed_elsewhere(s: &mut App, wants: feed::watch::Wants) {
+    if wants.reset {
+        return reopened(s);
+    }
+    if wants.snapshot {
+        ui::connect::changed(s);
+    }
+    if wants.overview {
+        ask_overview(s, Ask::Refresh);
+    }
+    if wants.hosts {
+        over::inbox::changed(s);
+    }
+    if wants.extensions {
+        over::extensions::changed(s);
+    }
+    if let Some(id) = wants.session
+        && s.selected.as_deref() == Some(id.as_str())
+    {
+        selected_changed(s, &id);
+    }
+}
+
+fn reopened(s: &mut App) {
+    ui::connect::retry(s);
+    ask_overview(s, Ask::Reset);
+    over::inbox::reopened(s);
+    over::extensions::reopened(s);
+    if let Some(id) = s.selected.clone() {
+        selected_changed(s, &id);
+    }
 }
 
 fn fetch_requests(s: &mut App, id: &str) {
@@ -965,7 +1045,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     while let Ok(message) = s.inbox.try_recv() {
         changed = true;
         match message {
-            Bg::Snapshot(at, sessions) => {
+            Bg::Snapshot(at, sessions, touched) => {
                 if s.ov.live.take_sessions(&at, sessions) {
                     s.sessions = s.ov.live.sessions().to_vec();
                     s.notify.sessions_moved = true;
@@ -973,17 +1053,20 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 s.now = OffsetDateTime::now_utc();
                 s.status = "live".into();
                 ui::connect::up(s);
-                if let Some(id) = s.selected.clone() {
-                    fetch_requests(s, &id);
-                    if ui::queue::wants(s, &id) {
-                        ui::queue::fetch(s, &id);
-                    }
-                    ui::subagents::refresh(s, &id);
-                    if let Some(work) = session(s, &id).and_then(|x| x.primary_work(s.work_pick.get(&id).map(String::as_str)).cloned()) {
-                        fetch_item(s, &work.project_key, &work.item_id);
-                    }
+                if let Some(id) = s.selected.clone()
+                    && touched.is_none_or(|t| t.contains(&id))
+                {
+                    selected_changed(s, &id);
                 }
             }
+            Bg::Changed(wants) => changed_elsewhere(s, wants),
+            Bg::Reopened => reopened(s),
+            Bg::LedgerChanged(key) => {
+                if let Some(project) = s.ov.live.ledger_changed(&key) {
+                    spawn_ledger(s, project);
+                }
+            }
+            Bg::SessionNews => ask_overview(s, Ask::Refresh),
             Bg::Item(id, item) => {
                 s.items.insert(id, item);
             }

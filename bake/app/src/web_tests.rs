@@ -252,3 +252,16 @@ fn a_page_that_never_answers_fails_but_one_that_arrived_only_turns_slow() {
     assert_eq!(web.pages[B].phase, Phase::Loading);
     assert!(web.pages[B].slow());
 }
+
+#[test]
+fn an_open_page_checks_its_cookie_again_only_after_the_daemon_comes_back() {
+    let mut web = signed_in();
+    open(&mut web, A, true);
+    assert!(web.check_due(Some(A)).is_none());
+    web.checked_at = Some(Instant::now() - Duration::from_secs(3600));
+    assert!(web.check_due(Some(A)).is_none(), "time alone doesn't ask again");
+    web.recheck();
+    let (_, cookie) = web.check_due(Some(A)).expect("a reconnect checks the cookie");
+    web.checked(A, &cookie.value, Ok(true));
+    assert!(web.check_due(Some(A)).is_none());
+}

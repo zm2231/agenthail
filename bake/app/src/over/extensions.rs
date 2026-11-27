@@ -15,7 +15,7 @@ use crate::over::{go, open_session};
 use crate::web::{Phase, Web};
 use crate::{App, Screen};
 
-const REFRESH: Duration = Duration::from_secs(20);
+const PAIRED_EVERY: Duration = Duration::from_secs(30);
 
 pub enum Done {
     Hosts(Result<Vec<Host>, String>),
@@ -216,7 +216,8 @@ pub fn drain(s: &mut App) -> bool {
     if !shown(s) {
         return changed;
     }
-    if s.ov.ext.fetched_at.is_none_or(|at| at.elapsed() >= REFRESH) {
+    let paired = s.ov.ext.catalogs.iter().any(|c| !c.host.is_local());
+    if s.ov.ext.fetched_at.is_none_or(|at| paired && at.elapsed() >= PAIRED_EVERY) {
         refresh(s);
     }
     let ages: Vec<String> = s.ov.ext.catalogs.iter().filter_map(|c| Some(feed::extensions::age(c.fetched?.elapsed().as_secs(), s.ov.ext.listing.contains(&c.key())))).collect();
@@ -242,6 +243,19 @@ pub fn drain(s: &mut App) -> bool {
         });
     }
     changed | s.ov.ext.web.pump(want.as_deref())
+}
+
+pub fn changed(s: &mut App) {
+    if shown(s) {
+        refresh(s);
+    } else {
+        s.ov.ext.fetched_at = None;
+    }
+}
+
+pub fn reopened(s: &mut App) {
+    s.ov.ext.web.recheck();
+    changed(s);
 }
 
 pub fn arrived(s: &mut App) {
