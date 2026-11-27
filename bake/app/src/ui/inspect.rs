@@ -154,7 +154,9 @@ fn catch_up(s: &mut App) {
     let due: Vec<String> = s.inspect.missed.iter().filter(|(id, m)| showing(s, id) && m.asked.is_none_or(|at| crate::wake::due_after(at, CATCH_UP))).map(|(id, _)| id.clone()).collect();
     for id in due {
         if let Some(miss) = s.inspect.missed.get_mut(&id) {
-            miss.asked = Some(std::time::Instant::now());
+            let now = std::time::Instant::now();
+            miss.asked = Some(now);
+            crate::wake::by(now + CATCH_UP);
         }
         metadata_moved(s, &id);
     }

@@ -678,7 +678,6 @@ fn a_missed_stream_still_pending_wakes_for_its_next_catch_up() {
     s.screen = Screen::Session;
     crate::wake::begin(crate::wake::Window::Main);
     crate::ui::inspect::drain(&mut s);
-    crate::ui::inspect::drain(&mut s);
     let next = crate::wake::next(crate::wake::Window::Main).expect("the next catch-up is woken for while it is pending");
     let left = next.saturating_duration_since(std::time::Instant::now()).as_secs();
     assert!((29..=30).contains(&left), "{left}");
