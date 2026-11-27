@@ -373,13 +373,19 @@ impl Overlay {
         self.sessions.retain(|id, _| held.contains(id));
     }
 
-    pub fn rekey(&mut self, old: &str, new: &str) -> Vec<&'static str> {
+    pub fn rekey(&mut self, old: &str, new: &str, at: u64) -> Vec<&'static str> {
         let Some(kinds) = self.sessions.remove(old) else { return Vec::new() };
-        if self.sessions.contains_key(new) {
-            return kinds.into_keys().collect();
+        let Some(into) = self.sessions.get_mut(new) else {
+            self.sessions.insert(new.to_string(), kinds);
+            return Vec::new();
+        };
+        for kept in into.values_mut() {
+            *kept = (*kept).max(at);
         }
-        self.sessions.insert(new.to_string(), kinds);
-        Vec::new()
+        let mut reread: Vec<&'static str> = into.keys().chain(kinds.keys()).copied().collect();
+        reread.sort();
+        reread.dedup();
+        reread
     }
 
     pub fn stream(&mut self, id: &str, kind: &'static str, shown: bool, at: u64) -> bool {
@@ -688,17 +694,16 @@ mod tests {
     }
 
     #[test]
-    fn a_rekey_onto_a_held_session_keeps_its_streams_and_hands_back_the_old_ones() {
+    fn a_rekey_onto_a_held_session_keeps_its_streams_over_older_reads_and_reads_both_again() {
         let mut o = Overlay::default();
         o.stream("a", "goal", true, 3);
         o.stream("b", "goal", true, 7);
         o.stream("b", "context", true, 2);
-        let mut dropped = o.rekey("b", "a");
-        dropped.sort();
-        assert_eq!(dropped, ["context", "goal"], "the old id's streams are handed back to be read again");
-        assert!(o.streamed_since("a", "goal", 3) && !o.streamed_since("a", "goal", 4) && !o.holds("a", "context") && !o.holds("b", "goal"));
+        assert_eq!(o.rekey("b", "a", 9), ["context", "goal"], "both ids' streams are read again");
+        assert!(o.streamed_since("a", "goal", 9) && !o.streamed_since("a", "goal", 10), "the held id's stream outranks every read asked before the rekey");
+        assert!(!o.holds("a", "context") && !o.holds("b", "goal"));
         o.stream("c", "goal", true, 5);
-        assert!(o.rekey("c", "d").is_empty());
+        assert!(o.rekey("c", "d", 9).is_empty());
         assert!(o.streamed_since("d", "goal", 5), "a rekey onto a free id carries its streams");
     }
 

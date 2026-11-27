@@ -787,3 +787,27 @@ fn a_rekey_onto_a_session_another_window_shows_keeps_its_values_and_rereads_what
     assert!(crate::ui::inspect::missed(&s, "b"), "what a streamed is read again on b");
     assert!(!crate::ui::session_menu::context_fresh(&mut s, "b", 9), "a's newer context read still counts on b");
 }
+
+#[test]
+fn after_a_rekey_onto_a_shown_session_the_old_id_s_late_read_and_actions_leave_its_own_alone() {
+    use crate::ui::inspect::{Done, busy, settle, start};
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    let usage: feed::settings::ContextUsage = serde_json::from_value(serde_json::json!({"usedTokens": 10, "contextWindow": 100})).unwrap();
+    crate::ui::inspect::streamed(&mut s, "b", goal("b's goal"));
+    crate::ui::inspect::streamed(&mut s, "b", feed::wire::Streamed::Context(Some(usage)));
+    let late = crate::ui::inspect::ticket(&mut s);
+    let (a_goal, b_goal) = (start(&mut s, "a", None), start(&mut s, "b", None));
+    let (a_life, b_life) = (start(&mut s, "a", Some(feed::inspect::LifecycleAct::Status)), start(&mut s, "b", Some(feed::inspect::LifecycleAct::Status)));
+    crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "b".to_string())]));
+    let read = feed::inspect::Metadata { goal: Some(feed::inspect::Goal { objective: "a's goal".into(), ..Default::default() }), ..Default::default() };
+    crate::ui::inspect::read(&mut s, "a", late, Ok(read));
+    assert_eq!(crate::ui::inspect::goal_of(&s, "b").as_deref(), Some("b's goal"), "a read asked under a before the rekey doesn't replace b's streamed goal");
+    assert!(crate::ui::inspect::streamed_since(&s, "b", "context", late), "nor its streamed context");
+    settle(&mut s, Done::Goal("a".into(), a_goal, feed::inspect::GoalAct::Pause, Ok(true)));
+    settle(&mut s, Done::Status("a".into(), a_life, Ok(Default::default())));
+    assert_eq!(busy(&s, "b"), (true, true), "a's actions finishing leave b's still running");
+    settle(&mut s, Done::Goal("b".into(), b_goal, feed::inspect::GoalAct::Pause, Ok(true)));
+    settle(&mut s, Done::Status("b".into(), b_life, Ok(Default::default())));
+    assert_eq!(busy(&s, "b"), (false, false));
+}

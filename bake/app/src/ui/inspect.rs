@@ -13,16 +13,15 @@ use crate::theme::{self, BODY, META, META_BOLD, accent, attention, failed, faint
 use crate::{App, session};
 
 pub enum Done {
-    Goal(String, GoalAct, Result<bool, RespondError>),
+    Goal(String, u64, GoalAct, Result<bool, RespondError>),
     Life(String, u64, LifecycleAct, bool, super::window::Id, Result<LifecycleResult, RespondError>),
     Status(String, u64, Result<LifecycleResult, RespondError>),
 }
 
 #[derive(Default)]
 struct Process {
-    generation: u64,
+    running: HashMap<u64, LifecycleAct>,
     status: Option<LifecycleResult>,
-    busy: Option<LifecycleAct>,
     outcome: Option<String>,
     logs: Option<String>,
     error: Option<String>,
@@ -46,7 +45,7 @@ pub struct Inspect {
     meta: HashMap<String, Metadata>,
     reads: inspect::Reads,
     process: HashMap<String, Process>,
-    goal_busy: HashMap<String, GoalAct>,
+    goal_busy: HashMap<String, std::collections::HashSet<u64>>,
     goal_note: HashMap<String, (bool, String)>,
     overlay: inspect::Overlay,
     expanded: std::collections::HashSet<String>,
@@ -84,11 +83,20 @@ pub fn load(s: &mut App, id: &str) {
 }
 
 pub(crate) fn rekey(s: &mut App, old: &str, new: &str) {
-    let dropped = s.inspect.overlay.rekey(old, new);
+    let reread = s.inspect.overlay.rekey(old, new, s.inspect.reads.issued());
     s.inspect.reads.rekey(old, new);
     crate::move_key(&mut s.inspect.meta, old, new);
-    crate::move_key(&mut s.inspect.process, old, new);
-    crate::move_key(&mut s.inspect.goal_busy, old, new);
+    if let Some(gone) = s.inspect.process.remove(old) {
+        let into = s.inspect.process.entry(new.to_string()).or_default();
+        into.running.extend(gone.running);
+        into.status = into.status.take().or(gone.status);
+        into.outcome = into.outcome.take().or(gone.outcome);
+        into.logs = into.logs.take().or(gone.logs);
+        into.error = into.error.take().or(gone.error);
+    }
+    if let Some(gone) = s.inspect.goal_busy.remove(old) {
+        s.inspect.goal_busy.entry(new.to_string()).or_default().extend(gone);
+    }
     crate::move_key(&mut s.inspect.goal_note, old, new);
     crate::move_member(&mut s.inspect.expanded, old, new);
     if let Some(gone) = s.inspect.missed.remove(old) {
@@ -104,8 +112,8 @@ pub(crate) fn rekey(s: &mut App, old: &str, new: &str) {
         logs.0 = new.to_string();
     }
     super::session_menu::rekey_context(s, old, new);
-    if !dropped.is_empty() {
-        miss(s, new, &dropped);
+    if !reread.is_empty() {
+        miss(s, new, &reread);
     }
 }
 
@@ -215,6 +223,27 @@ pub fn goal_of(s: &App, id: &str) -> Option<String> {
 }
 
 #[cfg(test)]
+pub fn settle(s: &mut App, done: Done) {
+    settled(s, done);
+}
+
+#[cfg(test)]
+pub fn start(s: &mut App, id: &str, life: Option<LifecycleAct>) -> u64 {
+    s.inspect.seq += 1;
+    let token = s.inspect.seq;
+    match life {
+        Some(act) => drop(s.inspect.process.entry(id.to_string()).or_default().running.insert(token, act)),
+        None => drop(s.inspect.goal_busy.entry(id.to_string()).or_default().insert(token)),
+    }
+    token
+}
+
+#[cfg(test)]
+pub fn busy(s: &App, id: &str) -> (bool, bool) {
+    (s.inspect.goal_busy.contains_key(id), s.inspect.process.get(id).is_some_and(|p| !p.running.is_empty()))
+}
+
+#[cfg(test)]
 pub fn holds_any(s: &App, id: &str) -> bool {
     s.inspect.overlay.holds(id, "goal") || s.inspect.overlay.holds(id, "context")
 }
@@ -259,10 +288,12 @@ fn goal_act(s: &mut App, id: &str, act: GoalAct, typed: &str) -> bool {
     if s.inspect.goal_busy.contains_key(id) || !session(s, id).is_some_and(|x| inspect::goal_controls(x).editable) {
         return false;
     }
-    s.inspect.goal_busy.insert(id.to_string(), act);
+    s.inspect.seq += 1;
+    let token = s.inspect.seq;
+    s.inspect.goal_busy.entry(id.to_string()).or_default().insert(token);
     s.inspect.goal_note.remove(id);
     let (id, typed) = (id.to_string(), typed.to_string());
-    spawn(s, move |c| Done::Goal(id.clone(), act, c.goal(&id, act, &typed)))
+    spawn(s, move |c| Done::Goal(id.clone(), token, act, c.goal(&id, act, &typed)))
 }
 
 fn press_goal(s: &mut App, id: &str, act: GoalAct) {
@@ -317,15 +348,14 @@ pub(crate) fn run(s: &mut App, id: &str, act: LifecycleAct, tell: bool) {
     let asker = s.windows.current();
     s.inspect.seq += 1;
     let fresh = s.inspect.seq;
-    let p = s.inspect.process.entry(id.to_string()).or_insert_with(|| Process { generation: fresh, ..Process::default() });
-    if p.busy.is_some() {
+    let p = s.inspect.process.entry(id.to_string()).or_default();
+    if !p.running.is_empty() {
         return;
     }
-    p.busy = Some(act);
+    p.running.insert(fresh, act);
     p.outcome = None;
-    let generation = p.generation;
     let id = id.to_string();
-    spawn(s, move |c| Done::Life(id.clone(), generation, act, tell, asker, c.lifecycle(&id, act)));
+    spawn(s, move |c| Done::Life(id.clone(), fresh, act, tell, asker, c.lifecycle(&id, act)));
 }
 
 fn failure(error: &RespondError) -> String {
@@ -334,9 +364,14 @@ fn failure(error: &RespondError) -> String {
 
 fn settled(s: &mut App, done: Done) {
     match done {
-        Done::Goal(id, act, result) => {
+        Done::Goal(id, token, act, result) => {
             let id = current(s, &id);
-            s.inspect.goal_busy.remove(&id);
+            if let Some(busy) = s.inspect.goal_busy.get_mut(&id) {
+                busy.remove(&token);
+                if busy.is_empty() {
+                    s.inspect.goal_busy.remove(&id);
+                }
+            }
             let note = match result {
                 Ok(true) => None,
                 Ok(false) => Some((false, format!("{} was sent, not confirmed yet.", act.doing()))),
@@ -347,12 +382,12 @@ fn settled(s: &mut App, done: Done) {
             }
             metadata_moved(s, &id);
         }
-        Done::Life(id, generation, act, tell, asker, result) => {
+        Done::Life(id, ticket, act, tell, asker, result) => {
             let id = current(s, &id);
             let to = super::window::asker_or_showing(s, asker, &id);
             let elsewhere = (to.is_none() || super::window::is_open(s, super::window::Kind::Logs)).then(|| session(s, &id).map(|x| x.title()).unwrap_or_default());
-            let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.generation == generation) else { return };
-            p.busy = None;
+            let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.running.contains_key(&ticket)) else { return };
+            p.running.remove(&ticket);
             if tell || elsewhere.is_some() {
                 let line = match &result {
                     Ok(r) if act == LifecycleAct::Status => Some(r.line()).filter(|l| !l.is_empty()),
@@ -382,10 +417,12 @@ fn settled(s: &mut App, done: Done) {
                             }
                         }
                         _ if session(s, &id).is_some_and(|x| inspect::lifecycle(x).status) => {
+                            s.inspect.seq += 1;
+                            let fresh = s.inspect.seq;
                             if let Some(p) = s.inspect.process.get_mut(&id) {
-                                p.busy = Some(LifecycleAct::Status);
+                                p.running.insert(fresh, LifecycleAct::Status);
                             }
-                            spawn(s, move |c| Done::Status(id.clone(), generation, c.lifecycle(&id, LifecycleAct::Status)));
+                            spawn(s, move |c| Done::Status(id.clone(), fresh, c.lifecycle(&id, LifecycleAct::Status)));
                         }
                         _ => {}
                     }
@@ -393,10 +430,10 @@ fn settled(s: &mut App, done: Done) {
                 Err(error) => p.error = Some(failure(&error)),
             }
         }
-        Done::Status(id, generation, result) => {
+        Done::Status(id, ticket, result) => {
             let id = current(s, &id);
-            let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.generation == generation) else { return };
-            p.busy = None;
+            let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.running.contains_key(&ticket)) else { return };
+            p.running.remove(&ticket);
             match result {
                 Ok(result) => p.status = Some(result),
                 Err(error) => p.error = Some(format!("Couldn't read its status: {}", failure(&error))),
@@ -508,7 +545,7 @@ fn process_section(s: &App, x: &Session, k: &Kit) -> Option<El> {
         return None;
     }
     let p = s.inspect.process.get(&x.id);
-    let busy = p.and_then(|p| p.busy).is_some();
+    let busy = p.is_some_and(|p| !p.running.is_empty());
     let mut body = col().w_full().gap(8.0);
     match p.and_then(|p| p.status.as_ref()) {
         Some(status) => body = body.child(text(status.line()).font(k.text(META)).color(theme::text()).wrap()),
