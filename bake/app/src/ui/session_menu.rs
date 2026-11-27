@@ -273,7 +273,7 @@ pub fn run(s: &mut App, id: &str, act: Act) {
             }
             let revision = super::gone::shown(s, id).and_then(|x| x.read_state.as_ref()).map(|r| r.revision.clone()).unwrap_or_default();
             let until = match act {
-                Act::Snooze(choice) => feed::snooze::until(choice, s.now, super::session_ops::offset),
+                Act::Snooze(choice) => feed::snooze::until(choice, time::OffsetDateTime::now_utc(), super::session_ops::offset),
                 _ => None,
             };
             let id = id.to_string();
