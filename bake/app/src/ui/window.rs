@@ -549,9 +549,6 @@ pub fn asker_or_showing(s: &App, asker: Id, session: &str) -> Option<Id> {
     Some(asker).filter(|w| exists(s, *w)).or_else(|| showing(s, session))
 }
 
-pub fn free_for(s: &App, kind: Kind, w: Option<Id>) -> bool {
-    !is_open(s, kind) || owner(s, kind).is_none_or(|o| Some(o) == w)
-}
 
 pub fn showing(s: &App, session: &str) -> Option<Id> {
     let shows = |screen: &Screen, selected: &Option<String>| *screen == Screen::Session && selected.as_deref() == Some(session);

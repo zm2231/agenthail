@@ -229,7 +229,7 @@ fn settled(s: &mut App, done: Done) {
         }
         Done::Life(id, generation, act, tell, asker, result) => {
             let to = super::window::asker_or_showing(s, asker, &id);
-            let elsewhere = (to.is_none() || !super::window::free_for(s, super::window::Kind::Logs, to)).then(|| session(s, &id).map(|x| x.title()).unwrap_or_default());
+            let elsewhere = (to.is_none() || super::window::is_open(s, super::window::Kind::Logs)).then(|| session(s, &id).map(|x| x.title()).unwrap_or_default());
             let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.generation == generation) else { return };
             p.busy = None;
             if tell || elsewhere.is_some() {

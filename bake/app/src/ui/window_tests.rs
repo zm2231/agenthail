@@ -352,7 +352,8 @@ fn a_result_goes_to_the_window_that_asked_or_else_the_one_showing_its_session() 
     assert_eq!(asker_or_showing(&s, w + 9, "zzz"), None);
     s.inspect.logs = Some(("b".into(), "log lines".into()));
     give(&mut s, Kind::Logs, w);
-    assert!(!free_for(&s, Kind::Logs, Some(MAIN)) && free_for(&s, Kind::Logs, Some(w)));
+    assert_eq!(owner(&s, Kind::Logs), Some(w));
+    assert!(is_open(&s, Kind::Logs), "a second logs result finds the kind open and goes to the Process section instead");
 }
 
 #[test]

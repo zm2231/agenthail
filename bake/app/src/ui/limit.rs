@@ -149,10 +149,12 @@ fn open_picker(s: &mut App, id: &str) {
     });
 }
 
-fn ask_confirm(s: &mut App, c: Confirm) {
-    if super::window::may_open(s, super::window::Kind::LimitConfirm) {
+fn ask_confirm(s: &mut App, c: Confirm) -> bool {
+    let open = super::window::may_open(s, super::window::Kind::LimitConfirm);
+    if open {
         s.limits.confirm = Some(c);
     }
+    open
 }
 
 fn move_to(s: &mut App, id: &str, since: &str, target: Target, stop_terminal: bool) {
@@ -249,7 +251,7 @@ fn settled(s: &mut App, done: Done) {
                     s.limits.note.remove(&id);
                     let to = super::window::asker_or_showing(s, asker, &id);
                     if !current(s, &id, &stop) {
-                    } else if to.is_some() && super::window::free_for(s, super::window::Kind::LimitConsent, to) {
+                    } else if to.is_some() && !super::window::is_open(s, super::window::Kind::LimitConsent) {
                         s.limits.consent = Some(Consent { session: id.clone(), since: stop, target, message });
                         if let Some(w) = to {
                             super::window::give(s, super::window::Kind::LimitConsent, w);
@@ -333,7 +335,9 @@ pub(crate) fn card(s: &App, x: &Session, stop: &Stop, k: &Kit) -> El {
                 button(format!("Move to {}…", offer.name()), ButtonVariant::Neutral, busy || full)
                     .icon(&icons::ARROW_RIGHT)
                     .help(help)
-                    .on_press(move |s: &mut App| ask_confirm(s, Confirm { session: id.clone(), since: since.clone(), target: target.clone() }))
+                    .on_press(move |s: &mut App| {
+                        ask_confirm(s, Confirm { session: id.clone(), since: since.clone(), target: target.clone() });
+                    })
                     .build(k)
                     .key("limit-move"),
             );
@@ -388,8 +392,9 @@ fn target_row(id: &str, since: &str, t: &Target, busy: bool, unread: bool, k: &K
     if usable {
         let (id, since, target) = (id.to_string(), since.to_string(), t.clone());
         r = r.hover(crate::theme::ink(0.09)).on_press(move |s: &mut App| {
-            s.limits.picking = None;
-            ask_confirm(s, Confirm { session: id.clone(), since: since.clone(), target: target.clone() });
+            if ask_confirm(s, Confirm { session: id.clone(), since: since.clone(), target: target.clone() }) {
+                s.limits.picking = None;
+            }
         });
         r = r.child(icon(&icons::ARROW_RIGHT, k.text_size(13.0)).color(faint()));
     } else {
