@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use feed::agents::{self, ActionView, Assignment, Change, Decision, Draft, Kind, Loaded, Request, RoleView, Roles};
 use feed::prefs::Failure;
 use rune::{El, TextEdit, Tx, col, el, row, text};
@@ -33,6 +35,7 @@ pub struct Form {
     page: usize,
     selected: Option<String>,
     draft: Option<Draft>,
+    kept: HashMap<String, Draft>,
     description: TextEdit,
     creating: Option<TextEdit>,
     removing: bool,
@@ -68,7 +71,7 @@ pub fn opened(s: &mut Prefs) {
 }
 
 pub fn reload(s: &mut Prefs) {
-    if s.tab != TAB && s.agents.read.is_none() {
+    if s.tab != TAB {
         return;
     }
     let Some(client) = s.client.clone() else {
@@ -122,14 +125,14 @@ pub fn take(s: &mut Prefs, got: Got) {
                     s.agents.read = Some(Ok(Loaded { roles: updated, read_only }));
                     match after {
                         After::Saved(name) | After::Removed(name) => {
+                            s.agents.kept.remove(&name);
                             if let Some(role) = roles(s).and_then(|r| r.role(&name)).cloned() {
                                 set_draft(s, Draft::of(&role));
                             }
                         }
                         After::Created(name) => {
                             s.agents.creating = None;
-                            s.agents.selected = Some(name);
-                            s.agents.draft = None;
+                            select(s, name);
                         }
                         After::Assigned => {
                             s.agents.typed = TextEdit::new("");
@@ -143,7 +146,13 @@ pub fn take(s: &mut Prefs, got: Got) {
                     s.agents.read_only = Some(agents::READ_ONLY.into());
                     s.agents.save_error = Some(Failure::new(agents::READ_ONLY));
                 }
-                Err(Change::Failed(f)) => s.agents.save_error = Some(f),
+                Err(Change::Failed(f)) => {
+                    let unsure = f.uncertain;
+                    s.agents.save_error = Some(f);
+                    if unsure {
+                        reload(s);
+                    }
+                }
             }
         }
     }
@@ -165,8 +174,25 @@ fn settle(s: &mut Prefs) {
                 s.agents.description = TextEdit::new(d.definition.description.as_deref().unwrap_or(""));
             }
         }
-        _ => set_draft(s, Draft::of(&role)),
+        _ => {
+            let mut d = s.agents.kept.remove(&role.name).unwrap_or_else(|| Draft::of(&role));
+            d.follow(&role);
+            set_draft(s, d);
+        }
     }
+}
+
+fn select(s: &mut Prefs, name: String) {
+    if s.agents.selected.as_deref() == Some(name.as_str()) {
+        return;
+    }
+    if let Some(d) = s.agents.draft.take().filter(Draft::changed) {
+        s.agents.kept.insert(d.name.clone(), d);
+    }
+    s.agents.selected = Some(name);
+    s.agents.save_error = None;
+    s.agents.removing = false;
+    settle(s);
 }
 
 fn set_draft(s: &mut Prefs, d: Draft) {
@@ -175,6 +201,10 @@ fn set_draft(s: &mut Prefs, d: Draft) {
 }
 
 fn send(s: &mut Prefs, request: Request, after: After) {
+    write(s, after, move |c| c.change_agent_role(&request));
+}
+
+fn write(s: &mut Prefs, after: After, job: impl FnOnce(&feed::catalog::Client) -> Result<Roles, Change> + Send + 'static) {
     if !editable(s) {
         return;
     }
@@ -184,7 +214,7 @@ fn send(s: &mut Prefs, request: Request, after: After) {
     s.in_flight += 1;
     let tx = s.tx.clone();
     std::thread::spawn(move || {
-        let _ = tx.send(Done::Agents(Got::Wrote(after, client.change_agent_role(&request))));
+        let _ = tx.send(Done::Agents(Got::Wrote(after, job(&client))));
     });
 }
 
@@ -242,7 +272,8 @@ fn role_list(s: &Prefs, r: &Roles) -> El {
     for role in &r.roles {
         let chosen = s.agents.selected.as_deref() == Some(role.name.as_str());
         let name = role.name.clone();
-        let note = text(agents::role_kind(role)).font(META).color(if role.edited { accent() } else { muted() });
+        let kind = if s.agents.kept.contains_key(&role.name) { format!("{} · not saved", agents::role_kind(role)) } else { agents::role_kind(role).to_string() };
+        let note = text(kind).font(META).color(if role.edited { accent() } else { muted() });
         let mut item = col().w_full().gap(2.0).px(12.0).py(7.0).radius(7.0).child(text(role.name.clone()).font(BODY).color(theme::text())).child(note);
         if chosen {
             item = item.fill(theme::wash());
@@ -250,15 +281,7 @@ fn role_list(s: &Prefs, r: &Roles) -> El {
         list = list.child(
             item.role("button")
                 .label(role.name.clone())
-                .on_press(move |s: &mut Prefs| {
-                    if s.agents.selected.as_deref() != Some(name.as_str()) {
-                        s.agents.selected = Some(name.clone());
-                        s.agents.draft = None;
-                        s.agents.save_error = None;
-                        s.agents.removing = false;
-                        settle(s);
-                    }
-                })
+                .on_press(move |s: &mut Prefs| select(s, name.clone()))
                 .key(format!("agent-role-{}", role.name)),
         );
     }
@@ -364,6 +387,9 @@ fn footer(s: &Prefs, role: &RoleView, d: &Draft, locked: bool, k: &Kit) -> El {
         .child(small("Revert", "agent-role-revert", !changed, |s| {
             s.agents.save_error = None;
             s.agents.draft = None;
+            if let Some(name) = s.agents.selected.clone() {
+                s.agents.kept.remove(&name);
+            }
             settle(s);
         }, k))
         .child(save);
@@ -410,7 +436,8 @@ fn create(s: &mut Prefs) {
         return;
     }
     let Some(from) = s.agents.selected.as_ref().and_then(|n| roles(s)?.role(n)).map(|r| r.definition.clone()) else { return };
-    send(s, Draft::copying(&name, &from).request(), After::Created(name));
+    let named = name.clone();
+    write(s, After::Created(name), move |c| c.create_agent_role(&named, &from));
 }
 
 fn new_dialog(s: &Prefs, r: &Roles, from: &RoleView, layer: &mut Vec<El>, k: &Kit) {

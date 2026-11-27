@@ -161,6 +161,13 @@ pub const FIXED: &[(&str, &str)] = &[
     ("mod+5", "Hands-on session 5"),
     ("alt+mod+b", "Show or hide the brief"),
     ("ctrl+tab", "Next hands-on session"),
+    ("ctrl+shift+tab", "Previous hands-on session"),
+    ("alt+mod+1", "Show or hide the first pane"),
+    ("alt+mod+2", "Show or hide the second pane"),
+    ("alt+mod+3", "Show or hide the third pane"),
+    ("shift+alt+mod+1", "Focus the first pane"),
+    ("shift+alt+mod+2", "Focus the second pane"),
+    ("shift+alt+mod+3", "Focus the third pane"),
     ("mod+q", "Quit Agenthail"),
     ("mod+w", "Close window"),
     ("mod+h", "Hide Agenthail"),
@@ -171,6 +178,24 @@ pub const FIXED: &[(&str, &str)] = &[
     ("mod+a", "Select all"),
     ("mod+z", "Undo"),
     ("shift+mod+z", "Redo"),
+];
+
+pub const MAC_APP_ONLY: &[(&str, &str, Option<&str>)] = &[
+    ("showRunning", "Show Working", Some("mod+1")),
+    ("showRecent", "Show Recent", Some("mod+2")),
+    ("showAll", "Show All", Some("mod+3")),
+    ("showArchived", "Show Archived", Some("mod+4")),
+    ("toggleSidebar", "Show or hide sidebar", Some("ctrl+mod+s")),
+    ("toggleInspector", "Show or hide inspector", Some("alt+mod+i")),
+    ("expandAgentMessages", "Expand agent messages", Some("alt+mod+e")),
+    ("send", "Send", Some("mod+enter")),
+    ("sendAlternate", "Send the other way (queue or steer)", Some("alt+mod+enter")),
+    ("rename", "Rename session", None),
+    ("openInNewWindow", "Open session in new window", None),
+    ("newTab", "New tab", Some("mod+t")),
+    ("closeTab", "Close tab", Some("mod+w")),
+    ("nextTab", "Next tab", Some("shift+mod+bracketright")),
+    ("previousTab", "Previous tab", Some("shift+mod+bracketleft")),
 ];
 
 pub fn command(id: &str) -> Option<&'static Command> {
@@ -223,7 +248,14 @@ impl Shortcuts {
         if self.any_app == Some(shortcut) {
             return Some(ANY_APP);
         }
-        FIXED.iter().find(|(spec, _)| Stored::parse(spec) == Some(shortcut)).map(|(_, title)| *title)
+        let mac_app = |(id, _, default): &&(&str, &str, Option<&str>)| match self.overrides.get(*id) {
+            Some(chosen) => *chosen == Some(shortcut),
+            None => default.and_then(Stored::parse) == Some(shortcut),
+        };
+        if let Some((_, title)) = FIXED.iter().find(|(spec, _)| Stored::parse(spec) == Some(shortcut)) {
+            return Some(title);
+        }
+        MAC_APP_ONLY.iter().find(mac_app).map(|(_, title, _)| *title)
     }
 
     pub fn set(&mut self, id: &str, shortcut: Option<Stored>) -> Result<(), &'static str> {
@@ -301,6 +333,10 @@ mod tests {
         for (spec, _) in FIXED {
             assert!(Stored::parse(spec).is_some(), "{spec}");
         }
+        for (id, _, spec) in MAC_APP_ONLY {
+            assert!(spec.is_none_or(|x| Stored::parse(x).is_some()), "{id}");
+            assert!(command(id).is_none(), "{id} is listed twice");
+        }
     }
 
     #[test]
@@ -349,6 +385,19 @@ mod tests {
         assert!(!sc.any_customized());
         let saved: serde_json::Value = serde_json::from_slice(&sc.data().unwrap()).unwrap();
         assert_eq!(saved, serde_json::json!({"toggleSidebar": null}));
+    }
+
+    #[test]
+    fn the_mac_apps_own_commands_and_pane_keys_are_taken() {
+        let mut sc = Shortcuts::default();
+        assert_eq!(sc.set("refresh", Some(s("mod+enter"))), Err("Send"));
+        assert_eq!(sc.set("refresh", Some(s("alt+mod+2"))), Err("Show or hide the second pane"));
+        assert_eq!(sc.set("refresh", Some(s("shift+alt+mod+3"))), Err("Focus the third pane"));
+        let mut moved = Shortcuts::load(Some(br#"{"send":{"carbonKeyCode":36,"carbonModifiers":4352},"toggleSidebar":null}"#), None);
+        assert_eq!(moved.set("refresh", Some(s("mod+enter"))), Ok(()), "the Mac app moved Send elsewhere");
+        assert_eq!(moved.set("stop", Some(s("ctrl+mod+enter"))), Err("Send"));
+        assert_eq!(moved.set("stop", Some(s("ctrl+mod+s"))), Ok(()), "the Mac app cleared its sidebar shortcut");
+        assert_eq!(sc.set("refresh", Some(s("mod+t"))), Err("New tab"));
     }
 
     #[test]

@@ -417,9 +417,7 @@ fn socket_call(method: &str, target: &str, body: Option<&Value>) -> Result<Value
         stream.read_to_end(&mut raw).map_err(unanswered)?;
         let (status, body) = parse_response(&raw).ok_or_else(|| SocketError::Failed(Failure { uncertain: method != "GET", ..Failure::new("Agenthail's answer could not be read.") }))?;
         if !(200..300).contains(&status) {
-            let reply = serde_json::from_slice::<Value>(&body).unwrap_or_default();
-            let message = reply["error"]["message"].as_str().filter(|m| !m.is_empty()).map_or_else(|| format!("status code {status}"), str::to_string);
-            return Err(SocketError::Failed(Failure::new(message)));
+            return Err(SocketError::Failed(refusal(method, status, &body)));
         }
         serde_json::from_slice(&body).map_err(|e| SocketError::Failed(Failure { uncertain: method != "GET", ..Failure::new(format!("Agenthail's answer could not be read: {e}")) }))
     }
@@ -428,6 +426,15 @@ fn socket_call(method: &str, target: &str, body: Option<&Value>) -> Result<Value
         let _ = (method, target, body);
         Err(SocketError::Missing)
     }
+}
+
+fn refusal(method: &str, status: u16, body: &[u8]) -> Failure {
+    let reply = serde_json::from_slice::<Value>(body).unwrap_or_default();
+    let message = reply["error"]["message"].as_str().filter(|m| !m.is_empty()).map_or_else(|| format!("status code {status}"), str::to_string);
+    if method != "GET" && status >= 500 {
+        return Failure { uncertain: true, ..Failure::new(format!("Agenthail didn't confirm the change ({message}). What shows is what it reports now.")) };
+    }
+    Failure::new(message)
 }
 
 pub fn parse_response(raw: &[u8]) -> Option<(u16, Vec<u8>)> {
@@ -479,6 +486,17 @@ impl Client {
             Err(SocketError::Failed(f)) => Err(f),
             Err(SocketError::Missing) => Ok(Loaded { roles: prefs::read(self, "/api/v1/agents", "settings")?, read_only: Some(READ_ONLY.into()) }),
         }
+    }
+
+    pub fn create_agent_role(&self, name: &str, from: &Definition) -> Result<Roles, Change> {
+        let now = self.agent_roles().map_err(Change::Failed)?;
+        if now.read_only.is_some() {
+            return Err(Change::ReadOnly);
+        }
+        if let Some(hint) = name_hint(name, &now.roles.roles.iter().map(|r| r.name.as_str()).collect::<Vec<_>>()) {
+            return Err(Change::Failed(Failure::new(hint)));
+        }
+        self.change_agent_role(&Draft::copying(name, from).request())
     }
 
     pub fn change_agent_role(&self, request: &Request) -> Result<Roles, Change> {
@@ -617,6 +635,18 @@ mod tests {
         assert_eq!(parse_response(chunked), Some((403, b"{\"a\":1}".to_vec())));
         assert_eq!(parse_response(b"HTTP/1.1 200 OK\r\n"), None);
         assert_eq!(parse_response(b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\n{}"), None);
+    }
+
+    #[test]
+    fn a_change_the_daemon_may_have_made_reads_as_uncertain() {
+        let body = br#"{"error":{"message":"read roles: disk I/O error"}}"#;
+        let after = refusal("POST", 500, body);
+        assert!(after.uncertain);
+        assert!(after.message.contains("read roles: disk I/O error"));
+        let refused = refusal("POST", 403, br#"{"error":{"message":"Agent roles are the person's to change"}}"#);
+        assert_eq!((refused.uncertain, refused.message.as_str()), (false, "Agent roles are the person's to change"));
+        assert!(!refusal("GET", 500, b"").uncertain);
+        assert_eq!(refusal("POST", 400, b"").message, "status code 400");
     }
 
     #[test]
