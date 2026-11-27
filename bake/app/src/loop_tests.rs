@@ -696,6 +696,14 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     let posted: serde_json::Value = serde_json::from_str(commented[0].strip_prefix("/api/v1/ledger/work ").expect("the comment is posted")).unwrap();
     assert_eq!((posted["projectKey"].as_str(), posted["itemId"].as_str(), posted["action"].as_str(), posted["text"].as_str()), (Some("shared:z"), Some("z-W9"), Some("comment"), Some("Check the other one too")), "the other one's move goes to its own ledger");
     assert!(rt.state.ov.work.words.is_none());
+    crate::over::work::start(&mut rt.state, &other, feed::ledger::Move::Park);
+    rt.state.ov.work.words.as_mut().expect("a park opens its dialog").text = rune::TextEdit::new("Wait for the export fix");
+    rt.state.ov.d.work.get_mut(&other).expect("the found one").state = "parked".into();
+    crate::over::work::send_words(&mut rt.state);
+    quiet(&mut rt);
+    assert!(rt.state.ov.work.words.as_ref().is_some_and(|n| n.text.text == "Wait for the export fix"), "a park reason stays when the item was parked meanwhile");
+    assert!(asked(&paths).is_empty(), "and isn't sent");
+    rt.state.ov.work.words = None;
 
     crate::over::worksearch::open(&mut rt.state, &zk("shared:z", "z-W8"));
     until(&mut rt, |s| s.ov.d.work.contains_key(&zk("shared:z", "z-W8")));

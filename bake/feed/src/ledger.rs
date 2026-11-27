@@ -96,6 +96,10 @@ pub const SETTLED_WHILE_OPEN: &str = "The earlier send settled while this was op
 
 pub const ITEM_GONE: &str = "This work item isn't loaded right now, so it can't take this yet. Your words stay here until it's back.";
 
+pub const NOT_OFFERED: &str = "This work item moved on while you wrote, so it doesn't take this now. Your words stay here until you cancel.";
+
+pub const OTHER_HELD: &str = "Another move on this work item isn't settled yet. Your words stay here until it settles.";
+
 pub const CHANGED_WORDS: &str = "The last send isn't settled yet, so only the same words can go now. Change them once it settles.";
 
 pub fn settles(e: &RespondError) -> bool {
