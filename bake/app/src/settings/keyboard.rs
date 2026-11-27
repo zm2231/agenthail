@@ -97,7 +97,7 @@ fn message(id: &'static str, error: &ShortcutError, shortcut: Option<&Shortcut>)
     let keys = if id == ANY_APP_ID { crate::hotkey::keycaps(shortcut) } else { bindings::keycaps(shortcut) };
     match error {
         ShortcutError::Backend(why) => format!("{keys} couldn't be saved: {why}."),
-        ShortcutError::Conflict => match bindings::stored(shortcut).and_then(|s| bindings::read(|sc| sc.owner(s, id))) {
+        ShortcutError::Conflict => match bindings::stored(shortcut).and_then(|s| bindings::read(|sc| if id == ANY_APP_ID { sc.any_app_owner(s) } else { sc.owner(s, id) })) {
             Some(owner) => format!("{keys} is already used by {owner}."),
             None => shortcut_error_message(error, Some(shortcut)),
         },
