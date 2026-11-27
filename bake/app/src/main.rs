@@ -219,6 +219,7 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: f
             let mut take = |ask: Ask| match ask {
                 Ask::Refresh => due = true,
                 Ask::Reset => {
+                    reads.extend(known.opened());
                     known = Default::default();
                     (due, reset) = (true, true);
                 }
@@ -473,11 +474,6 @@ fn selected_changed(s: &mut App, id: &str) {
     }
 }
 
-pub fn reset_overview(s: &mut App) {
-    s.ov.live.uncover();
-    ask_overview(s, Ask::Reset);
-}
-
 pub fn ask_overview(s: &App, ask: Ask) {
     if let Some(poke) = &s.overview_poke {
         let _ = poke.send(ask);
@@ -509,7 +505,7 @@ fn changed_elsewhere(s: &mut App, wants: feed::watch::Wants) {
 
 fn reopened(s: &mut App) {
     ui::connect::retry(s);
-    reset_overview(s);
+    ask_overview(s, Ask::Reset);
     over::inbox::reopened(s);
     over::extensions::reopened(s);
     if let Some(id) = s.selected.clone() {

@@ -373,10 +373,6 @@ impl Overview {
         self.ledger_at.retain(|k, _| listed.contains(k.as_str()));
     }
 
-    pub fn uncover(&mut self) {
-        self.covered.clear();
-    }
-
     pub fn wants(&mut self, project: &str) -> bool {
         if self.covered.contains(project) || self.pending.contains(project) {
             return false;
