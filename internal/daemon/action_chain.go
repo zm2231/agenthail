@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -106,10 +107,17 @@ func (d *Daemon) resendHostAction(ctx context.Context, p principal, key string, 
 	var request map[string]any
 	_ = json.Unmarshal(prior.Body, &request)
 	reply := d.forwardHostAction(ctx, p, key, host, request, prior.Body)
-	if task, _ := request["task"].(bool); task && request["action"] == "session-create" {
-		reply = d.recordHostTask(host, request, reply)
+	if task, _ := request["task"].(bool); !task || request["action"] != "session-create" {
+		return reply
 	}
-	return reply
+	if reply.Status >= http.StatusOK && reply.Status < http.StatusMultipleChoices {
+		if err := d.hostTaskParent(request); err != nil {
+			return replyWith(func(w http.ResponseWriter) {
+				writeAPIError(w, http.StatusConflict, "task_parent_moved", fmt.Sprintf("The session started on host %s, but the session that asked for it is no longer on this computer, so it is not recorded as its task here: %s", host.record.Name, err))
+			})
+		}
+	}
+	return d.recordHostTask(host, request, reply)
 }
 
 func (d *Daemon) decodeAction(ctx context.Context, p principal, raw []byte, key string) actionReply {

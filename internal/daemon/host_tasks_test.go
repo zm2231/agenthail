@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -228,5 +229,37 @@ func TestATaskOnAPairedHostNeedsASessionHereToStartIt(t *testing.T) {
 	}
 	if _, err := remote.reg.Session("started"); err == nil {
 		t.Fatal("the paired host started a child for a task nothing here can wait on")
+	}
+}
+
+func TestARetriedRemoteTaskIsNotRecordedHereOnceItsParentMovedAway(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	body, _ := json.Marshal(map[string]any{"action": "session-create", "host": "vps", "surface": "codex", "cwd": t.TempDir(), "message": "build the parser", "task": true, "sourceSessionId": "local-a"})
+	create := func() actionReply {
+		return local.daemon.performAction(context.Background(), sessionPrincipal("local-a"), actionFormatAPIv1, body, "lost-task")
+	}
+	remote.gate.drops.Store(2)
+	if lost := create(); lost.Status != http.StatusGatewayTimeout {
+		t.Fatalf("a create whose answer was lost = %d %s", lost.Status, lost.Body)
+	}
+	remote.gate.drops.Store(0)
+	db, err := sql.Open("sqlite", local.reg.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`PRAGMA busy_timeout=10000`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE sessions SET host_id=? WHERE id='local-a'`, record.ID); err != nil {
+		t.Fatal(err)
+	}
+	retry := create()
+	if retry.Status != http.StatusConflict || !strings.Contains(string(retry.Body), "task_parent_moved") {
+		t.Fatalf("the retry after the parent moved = %d %s, want it told the task is not kept here", retry.Status, retry.Body)
+	}
+	if running, _ := local.reg.RunningChildren("local-a"); len(running) != 0 {
+		t.Fatalf("a task was recorded here for a parent that moved: %v", running)
 	}
 }
