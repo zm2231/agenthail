@@ -111,7 +111,7 @@ pub enum Sheet {
     Add { host: String, folder: TextEdit, title: TextEdit },
     Rename { project: String, name: TextEdit },
     Lead { project: String, checkout: String, surface: &'static str, name: TextEdit },
-    Broadcast { project: String, text: TextEdit, key: String, keyed: String, sent: Option<String> },
+    Broadcast { project: String, text: TextEdit, key: String, sent: Option<String> },
 }
 
 pub struct State {
@@ -237,7 +237,7 @@ fn choose(s: &mut App, key: &str, item: Item, tx: &mut Tx) {
     match item {
         Item::NewConversation { host, folder } => crate::ui::new_session::open(s, crate::ui::new_session::Prefill { host, folder }, tx),
         Item::Rename => open_sheet(s, Sheet::Rename { project: p.id.clone(), name: focused(&name) }),
-        Item::Message => open_sheet(s, Sheet::Broadcast { project: p.id.clone(), text: focused(""), key: String::new(), keyed: String::new(), sent: None }),
+        Item::Message => open_sheet(s, Sheet::Broadcast { project: p.id.clone(), text: focused(""), key: String::new(), sent: None }),
         Item::Lead { .. } => {
             let first = p.lead_places().first().map(|c| c.key()).unwrap_or_default();
             open_sheet(s, Sheet::Lead { project: p.id.clone(), checkout: first, surface: "claude", name: focused("") });
@@ -369,11 +369,10 @@ fn save(s: &mut App) {
     if s.ov.projects.saving {
         return;
     }
-    if let Some(Sheet::Broadcast { text, key, keyed, .. }) = s.ov.projects.sheet.as_mut()
-        && (key.is_empty() || *keyed != text.text)
+    if let Some(Sheet::Broadcast { key, .. }) = s.ov.projects.sheet.as_mut()
+        && key.is_empty()
     {
         *key = feed::catalog::request_key();
-        *keyed = text.text.clone();
     }
     if let Some(job) = sheet_job(s) {
         let id = s.ov.projects.sheet_id;
@@ -444,12 +443,6 @@ pub fn drain(s: &mut App) -> bool {
     {
         crate::over::go(s, crate::Screen::Now);
         changed = true;
-    }
-    if let Some(Sheet::Broadcast { text, key, keyed, .. }) = s.ov.projects.sheet.as_mut()
-        && *keyed != text.text
-    {
-        key.clear();
-        *keyed = text.text.clone();
     }
     let gone = match &s.ov.projects.sheet {
         Some(Sheet::Rename { project, .. } | Sheet::Lead { project, .. } | Sheet::Broadcast { project, .. }) => s.ov.d.record(project).is_none(),
@@ -703,7 +696,7 @@ fn buttons(s: &App, label: &str, can_save: bool) -> El {
         .child(el().grow(1.0))
         .child(Button::new("Cancel").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).disabled(locked(s)).on_press(close_sheet).build(k).key("project-sheet-cancel"))
         .child(
-            Button::new(if saving { "Saving…" } else { label })
+            Button::new(if saving { if label == "Send" { "Sending…" } else { "Saving…" } } else { label })
                 .variant(ButtonVariant::Contrast)
                 .control_size(ControlSize::Small)
                 .disabled(saving || !can_save)
@@ -748,6 +741,11 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>) {
                         .on_edit(|s: &mut App| match s.ov.projects.sheet.as_mut() {
                             Some(Sheet::Broadcast { text, .. }) => text,
                             _ => &mut s.composer,
+                        })
+                        .on_input_change(|s: &mut App, _: &mut Tx| {
+                            if let Some(Sheet::Broadcast { key, .. }) = s.ov.projects.sheet.as_mut() {
+                                key.clear();
+                            }
                         }),
                 ),
             };
