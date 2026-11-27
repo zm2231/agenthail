@@ -1140,6 +1140,7 @@ dependencies = [
  "serde",
  "serde_json",
  "time",
+ "unicode-segmentation",
  "ureq",
  "url",
 ]

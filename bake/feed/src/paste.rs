@@ -2,14 +2,20 @@ use std::collections::HashMap;
 use std::ops::{Range, RangeInclusive};
 use std::sync::{LazyLock, Mutex, MutexGuard};
 
+use unicode_segmentation::UnicodeSegmentation;
+
 pub const LINE_LIMIT: usize = 8;
 pub const CHARACTER_LIMIT: usize = 600;
 
 const LEADS: RangeInclusive<u32> = 0xFDD0..=0xFDEF;
 const IDS: RangeInclusive<u32> = 0xE000..=0xF6FF;
 
+fn characters(text: &str) -> usize {
+    text.graphemes(true).count()
+}
+
 pub fn is_long(text: &str) -> bool {
-    text.chars().count() > CHARACTER_LIMIT || lines(text) > LINE_LIMIT
+    characters(text) > CHARACTER_LIMIT || lines(text) > LINE_LIMIT
 }
 
 pub fn lines(text: &str) -> usize {
@@ -20,7 +26,7 @@ pub fn lines(text: &str) -> usize {
 pub fn label(text: &str) -> String {
     match lines(text) {
         n if n > 1 => format!("Pasted text · {n} lines"),
-        _ => format!("Pasted text · {} characters", text.chars().count()),
+        _ => format!("Pasted text · {} characters", characters(text)),
     }
 }
 
@@ -55,6 +61,22 @@ impl Store {
         let marker = format!("{lead}{id}");
         self.texts.insert(marker.clone(), text.to_string());
         Some(marker)
+    }
+
+    fn index(marker: &str) -> Option<u32> {
+        let mut chars = marker.chars();
+        let (lead, id) = (chars.next()? as u32, chars.next()? as u32);
+        (chars.next().is_none() && LEADS.contains(&lead) && IDS.contains(&id)).then(|| (lead - LEADS.start()) * (IDS.end() - IDS.start() + 1) + (id - IDS.start()))
+    }
+
+    pub fn restore(&mut self, marker: &str, text: &str) {
+        let Some(index) = Self::index(marker) else { return };
+        self.issued = self.issued.max(index + 1);
+        self.texts.insert(marker.to_string(), text.to_string());
+    }
+
+    pub fn saved<'a>(&self, drafts: impl IntoIterator<Item = &'a str>) -> serde_json::Map<String, serde_json::Value> {
+        drafts.into_iter().flat_map(|d| self.pieces(d)).filter_map(|p| if let Piece::Token(m) = p { self.text(&m).map(|t| (m, t.into())) } else { None }).collect()
     }
 
     pub fn text(&self, marker: &str) -> Option<&str> {
@@ -128,6 +150,8 @@ mod tests {
         assert!(!is_long(&"line\n".repeat(8)));
         assert!(is_long(&"line\n".repeat(9)));
         assert!(!is_long(&"é".repeat(600)), "characters, not bytes");
+        assert!(!is_long(&"e\u{301}".repeat(301)), "a letter and its accent are one character, as on the Mac");
+        assert_eq!(label(&"e\u{301}".repeat(700)), "Pasted text · 700 characters");
     }
 
     #[test]
@@ -177,6 +201,24 @@ mod tests {
         let pills = [(4..4 + label.len(), marker.as_str()), (0..3, "not a paste")];
         assert_eq!(store.draft(&text, pills), format!("see {marker} ok"));
         assert_eq!(store.expand(&store.draft(&text, [(4..4 + label.len(), marker.as_str())])), "see long text ok");
+    }
+
+    #[test]
+    fn a_saved_token_comes_back_after_a_restart() {
+        let mut store = Store::default();
+        let a = store.add("one").unwrap();
+        let draft = format!("x {a} y");
+        let saved = store.saved([draft.as_str(), "plain"]);
+        assert_eq!(saved.len(), 1);
+        let mut later = Store::default();
+        for (marker, text) in &saved {
+            later.restore(marker, text.as_str().unwrap());
+        }
+        assert_eq!(later.expand(&draft), "x one y");
+        let b = later.add("two").unwrap();
+        assert_ne!(a, b, "markers issued after a restore don't reuse a restored one");
+        later.restore("not a marker", "ignored");
+        assert_eq!(later.text("not a marker"), None);
     }
 
     #[test]

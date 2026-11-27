@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 use crate::catalog::Session;
 
 pub const REMEMBERED: usize = 500;
+pub const SENDS_AS_NOTE: &str = "Sends as a note";
 
 pub fn turn_notice(x: &Session) -> String {
     if !x.capabilities.reaches_as_note {

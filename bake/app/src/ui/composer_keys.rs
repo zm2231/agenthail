@@ -49,7 +49,11 @@ pub struct State {
 
 impl State {
     pub fn to_json(&self) -> Value {
-        json!(self.stash.iter().map(|(id, text)| (id, super::paste::expand(text))).collect::<HashMap<_, _>>())
+        json!(self.stash)
+    }
+
+    pub fn texts(&self) -> impl Iterator<Item = &str> {
+        self.stash.values().map(String::as_str)
     }
 
     pub fn from_json(value: &Value) -> State {
@@ -142,6 +146,7 @@ fn held(s: &App, id: &str) -> bool {
 }
 
 fn stash(s: &mut App, id: &str) -> bool {
+    super::paste::finish(s);
     let empty = s.composer.text.is_empty() && !super::attach::has(s, id);
     if empty && !held(s, id) {
         return false;

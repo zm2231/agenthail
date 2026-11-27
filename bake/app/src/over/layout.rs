@@ -86,6 +86,11 @@ fn unsent(s: &App) -> Value {
     all.to_json()
 }
 
+fn pasted(s: &App) -> Value {
+    let unsent: Vec<&str> = s.unsent.iter().map(|(_, u)| u).chain(s.in_flight.values().flatten()).filter_map(|u| u.draft.as_deref()).collect();
+    Value::Object(feed::paste::shared().saved(s.drafts.texts().chain(s.complete.keys.texts()).chain(unsent)))
+}
+
 fn encode(s: &App) -> String {
     let boards: serde_json::Map<String, Value> = s.ov.boards.iter().map(|(k, v)| (k.clone(), Value::Bool(*v))).collect();
     json!({
@@ -94,7 +99,8 @@ fn encode(s: &App) -> String {
         "focus": s.ov.now_focus.map(|(i, before)| json!({ "pane": i, "before": before })),
         "boards": boards,
         "looked": { "now": s.ov.looked_now, "projects": s.ov.looked },
-        "drafts": s.drafts.to_json_with(crate::ui::paste::expand),
+        "drafts": s.drafts.to_json(),
+        "pasted": pasted(s),
         "attachments": crate::ui::attach::saved(s),
         "stashes": s.complete.keys.to_json(),
         "stashedAttachments": crate::ui::attach::stashed_saved(s),
@@ -128,6 +134,12 @@ pub fn load(s: &mut App) {
     if let Some(m) = v["looked"]["projects"].as_object() {
         s.ov.looked = m.iter().filter_map(|(k, t)| t.as_str().map(|t| (k.clone(), t.to_string()))).collect();
     }
+    if let Some(pasted) = v["pasted"].as_object() {
+        let mut store = feed::paste::shared();
+        for (marker, text) in pasted {
+            store.restore(marker, text.as_str().unwrap_or_default());
+        }
+    }
     s.drafts = feed::composer::Drafts::from_json(&v["drafts"]);
     s.unsent = feed::composer::Unconfirmed::from_json(&v["unsent"]);
     s.attach.tray = feed::attach::Tray::from_json(&v["attachments"]);
@@ -136,7 +148,7 @@ pub fn load(s: &mut App) {
     let held: Vec<(String, feed::composer::Unsent)> = s.unsent.iter().map(|(id, u)| (id.clone(), u.clone())).collect();
     for (id, unsent) in held {
         if s.drafts.get(&id).trim().is_empty() && !s.attach.tray.has(&id) {
-            s.drafts.set(&id, &unsent.text);
+            s.drafts.set(&id, &crate::ui::paste::unsent_draft(&unsent));
             crate::ui::attach::restore(s, &id, &unsent);
         }
     }

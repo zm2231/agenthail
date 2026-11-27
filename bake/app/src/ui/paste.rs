@@ -35,16 +35,12 @@ pub fn draft(e: &TextEdit) -> String {
     paste::shared().draft(&e.text, e.pills())
 }
 
-pub fn expanded(e: &TextEdit) -> String {
-    let store = paste::shared();
-    store.expand(&store.draft(&e.text, e.pills()))
-}
-
 pub fn expand(draft: &str) -> String {
     paste::shared().expand(draft)
 }
 
 pub fn set_composer(s: &mut App, draft: &str) {
+    finish(s);
     let focused = s.composer.focused;
     s.composer = edit(draft);
     s.composer.focused = focused;
@@ -79,9 +75,24 @@ fn open(s: &mut App, marker: &str, tx: &mut Tx) -> bool {
     true
 }
 
+pub fn unsent_draft(u: &feed::composer::Unsent) -> String {
+    u.draft.clone().filter(|d| expand(d).trim() == u.text).unwrap_or_else(|| u.text.clone())
+}
+
+pub fn settle(s: &mut App) {
+    if s.paste.as_ref().is_some_and(|p| !p.edit.focused) {
+        finish(s);
+    }
+}
+
+fn done(s: &mut App, tx: &mut Tx) {
+    finish(s);
+    s.composer.focused = true;
+    tx.focus("composer", false);
+}
+
 pub fn finish(s: &mut App) {
     let Some(done) = s.paste.take() else { return };
-    s.composer.focused = true;
     let Some(range) = s.composer.pills().find(|(_, id)| *id == done.marker).map(|(r, _)| r) else { return };
     let edited = done.edit.text.clone();
     if paste::shared().text(&done.marker) == Some(edited.as_str()) {
@@ -100,12 +111,12 @@ pub fn finish(s: &mut App) {
     s.composer.set_caret(if caret > range.start { (caret + after).saturating_sub(before) } else { caret });
 }
 
-fn key(s: &mut App, ev: &KeyEvent, _: &mut Tx) -> bool {
-    let done = ev.key == Key::Escape || ev.key == Key::Enter && (ev.mods.cmd || ev.mods.ctrl);
-    if done {
-        finish(s);
+fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
+    let closes = ev.key == Key::Escape || ev.key == Key::Enter && (ev.mods.cmd || ev.mods.ctrl);
+    if closes {
+        done(s, tx);
     }
-    done
+    closes
 }
 
 pub fn editor(s: &App) -> Option<El> {
@@ -123,7 +134,7 @@ pub fn editor(s: &App) -> Option<El> {
         .color(theme::text())
         .on_edit(|s: &mut App| &mut s.paste.as_mut().expect("the pasted text is open").edit)
         .on_input_key(key);
-    let done = Button::new("Done").variant(ButtonVariant::Submit).build(theme::kit()).key("paste-done").on_press(finish);
+    let done = Button::new("Done").variant(ButtonVariant::Submit).build(theme::kit()).key("paste-done").on_press_tx(done);
     Some(
         col()
             .key("paste-edit")
@@ -147,7 +158,7 @@ mod tests {
         assert_eq!(e.text, "before Pasted text · 12 lines after");
         assert_eq!(e.pills().map(|(_, id)| id.to_string()).collect::<Vec<_>>(), vec![marker.clone()]);
         assert_eq!(draft(&e), format!("before {marker} after"));
-        assert_eq!(expanded(&e), format!("before {pasted} after"));
+        assert_eq!(expand(&draft(&e)), format!("before {pasted} after"));
     }
 
     #[test]
@@ -155,6 +166,6 @@ mod tests {
         let e = edit("just words");
         assert_eq!(e.text, "just words");
         assert_eq!(e.pills().count(), 0);
-        assert_eq!(expanded(&e), "just words");
+        assert_eq!(expand(&draft(&e)), "just words");
     }
 }

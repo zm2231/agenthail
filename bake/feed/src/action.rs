@@ -47,9 +47,13 @@ impl Client {
         Ok(Stop::read(&self.action("interrupt", json!({"sessionId": session}))?))
     }
 
+    pub fn send_as(&self, session: &str, message: &str, attachments: &[String], busy: Option<Busy>, pin: Option<crate::holders::Pin>, key: &str) -> Outcome<Delivered> {
+        self.send_receipt(session, message, attachments, busy, pin, key).map(|(delivered, _)| delivered)
+    }
+
     /// `busy` None leaves a busy session to the daemon's busy-delivery setting.
     // A message keeps the terminal it was written for, so a retry replays the same request.
-    pub fn send_as(&self, session: &str, message: &str, attachments: &[String], busy: Option<Busy>, pin: Option<crate::holders::Pin>, key: &str) -> Outcome<Delivered> {
+    pub fn send_receipt(&self, session: &str, message: &str, attachments: &[String], busy: Option<Busy>, pin: Option<crate::holders::Pin>, key: &str) -> Outcome<(Delivered, Value)> {
         let mut payload = json!({"sessionId": session, "message": message, "author": "person"});
         if !attachments.is_empty() {
             payload["attachments"] = json!(attachments);
@@ -57,7 +61,8 @@ impl Client {
         if let Some(busy) = busy {
             payload["busyDelivery"] = Value::String(busy.as_str().into());
         }
-        Ok(Delivered::read(&self.action_pinned("send", payload, key, pin)?))
+        let reply = self.action_pinned("send", payload, key, pin)?;
+        Ok((Delivered::read(&reply), reply))
     }
 
     pub fn acknowledge_lead_replacement(&self, id: i64) -> Outcome<()> {

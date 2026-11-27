@@ -334,7 +334,8 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
         .on_edit(|s: &mut App| &mut s.composer))
         .on_input_key(crate::ui::complete::key)
         .on_submit(move |s: &mut App, tx: &mut Tx| crate::send_to(s, &to, tx));
-    let status = crate::composer_note(s, lead).or_else(|| crate::send_busy(s, lead).map(|b| b.hint().to_string())).unwrap_or_else(|| "Sends as you".into());
+    let as_note = crate::session(s, lead).is_some_and(|x| x.capabilities.reaches_as_note).then(|| feed::notice::SENDS_AS_NOTE.to_string());
+    let status = crate::composer_note(s, lead).or(as_note).or_else(|| crate::send_busy(s, lead).map(|b| b.hint().to_string())).unwrap_or_else(|| "Sends as you".into());
     let controls = row()
         .w_full()
         .items_center()
