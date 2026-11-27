@@ -96,6 +96,8 @@ pub struct Shown {
 pub struct Started {
     #[serde(default)]
     pub session: Option<StartedSession>,
+    #[serde(default)]
+    pub status: String,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -107,6 +109,10 @@ pub struct StartedSession {
 impl Started {
     pub fn session_id(&self) -> Option<String> {
         self.session.as_ref().map(|s| s.id.trim().to_string()).filter(|id| !id.is_empty())
+    }
+
+    pub fn unconfirmed(&self) -> bool {
+        self.status == "submitted"
     }
 }
 
@@ -162,8 +168,12 @@ impl Client {
     }
 
     pub fn build_extension(&self, host: Option<&str>, message: &str, key: &str) -> std::result::Result<Started, RespondError> {
-        let reply = self.post_json_keyed(&on_host("/api/v1/extensions/build", host), "build", json!({"message": message}), key).and_then(confirmed)?;
-        serde_json::from_value(reply).map_err(|e| unreadable("builder", e, true))
+        let reply = self.post_json_keyed(&on_host("/api/v1/extensions/build", host), "build", json!({"message": message}), key)?;
+        let started: Started = serde_json::from_value(reply.clone()).map_err(|e| unreadable("builder", e, true))?;
+        match started.session_id() {
+            None => confirmed(reply).map(|_| started),
+            Some(_) => Ok(started),
+        }
     }
 }
 

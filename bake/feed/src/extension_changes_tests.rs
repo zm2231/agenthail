@@ -90,3 +90,11 @@ fn a_build_the_daemon_has_not_confirmed_is_not_reported_as_started() {
     assert!(unsure.maybe_delivered);
     assert_eq!(unsure.code, "submitted");
 }
+
+#[test]
+fn an_unconfirmed_build_that_names_its_session_still_opens_it() {
+    let (client, _rx) = daemon(replies(&[(202, r#"{"ok":true,"status":"submitted","session":{"id":"s-builder"}}"#)]));
+    let started = client.build_extension(None, "a board", "k1").unwrap();
+    assert_eq!(started.session_id().as_deref(), Some("s-builder"));
+    assert!(started.unconfirmed());
+}
