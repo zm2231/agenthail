@@ -88,6 +88,12 @@ pub fn worst(rgba: &[u8], width: u32, dark: bool, cell: usize) -> Rgb {
     pick.unwrap_or(if dark { [1.0; 3] } else { [0.0; 3] })
 }
 
+pub fn readable_text(color: Rgb, surfaces: &[Rgb], dark: bool, target: f32) -> Rgb {
+    let toward = if dark { [1.0; 3] } else { [0.0; 3] };
+    let fits = |c: Rgb| surfaces.iter().all(|s| contrast(luminance(c), luminance(*s)) >= target);
+    (0..=20).map(|i| blend(color, toward, i as f32 / 20.0)).find(|c| fits(*c)).unwrap_or(toward)
+}
+
 pub fn reachable(tint: Rgb, boundary: f32, dark: bool) -> Rgb {
     let toward = if dark { [0.0; 3] } else { [1.0; 3] };
     let fits = |c: Rgb| if dark { luminance(c) <= boundary } else { luminance(c) >= boundary };

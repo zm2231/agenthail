@@ -231,3 +231,20 @@ fn every_drawn_text_colour_counts_toward_pane_tint() {
     let b = Look::from_view(&loud).pane_tint(true, [0.9; 3], [0.5; 3], ground, ground, 1.0, 0.0).0;
     assert!(b > a, "{b} {a}");
 }
+
+#[test]
+fn a_dark_system_accent_is_lifted_until_text_in_it_reads() {
+    let surfaces = [hex("#161618").unwrap(), hex("#1f1f23").unwrap()];
+    let navy = hex("#1a237e").unwrap();
+    let lifted = readable_text(navy, &surfaces, true, 7.0);
+    assert!(surfaces.iter().all(|s| contrast(luminance(lifted), luminance(*s)) >= 7.0));
+    let bright = hex("#9ec5ff").unwrap();
+    assert_eq!(readable_text(bright, &surfaces, true, 4.5), bright);
+}
+
+#[test]
+fn increase_contrast_takes_the_stronger_explicit_accent() {
+    let view: View = serde_json::from_str(r##"{"colors":{"accent":{"dark":"#4f8ff7","light":"#2459b8","increased":{"dark":"#8ab4ff","light":"#1a4490"}}}}"##).unwrap();
+    assert_eq!(Look::from_view(&view).accent, Some((hex("#4f8ff7").unwrap(), hex("#2459b8").unwrap())));
+    assert_eq!(Look::with_increased_contrast(&view).accent, Some((hex("#8ab4ff").unwrap(), hex("#1a4490").unwrap())));
+}

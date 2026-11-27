@@ -285,6 +285,10 @@ fn srgb(c: Color) -> Rgb {
     [fl::gamma(c.r), fl::gamma(c.g), fl::gamma(c.b)]
 }
 
+fn text_surfaces(dark: bool) -> [Rgb; 3] {
+    if dark { [ground_rgb(true), [0.11, 0.11, 0.125], [0.14, 0.14, 0.16]] } else { [ground_rgb(false), [1.0; 3], [0.93, 0.93, 0.945]] }
+}
+
 fn ground_rgb(dark: bool) -> Rgb {
     if dark { [0.086, 0.086, 0.094] } else { [0.957, 0.957, 0.965] }
 }
@@ -354,7 +358,7 @@ pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool) {
         }
         let dark = s.look.dark(system_dark);
         let mut paint = if dark { Paint::dark() } else { Paint::light() };
-        let accent_rgb = s.look.accent.map(|(d, l)| if dark { d } else { l }).unwrap_or(system_accent);
+        let accent_rgb = s.look.accent.map(|(d, l)| if dark { d } else { l }).unwrap_or_else(|| fl::readable_text(system_accent, &text_surfaces(dark), dark, s.look.target));
         let role = |name: &str, fallback: Color| {
             if s.look.accent_roles.iter().any(|r| r == name) {
                 return rgb(accent_rgb);

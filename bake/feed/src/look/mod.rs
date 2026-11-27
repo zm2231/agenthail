@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 pub use edit::{Change, Entry, KEYS, Preset, Scope, describe, device_class, device_name, owner};
-pub use paint::{Decoded, Placement, blend, boundary, contrast, decode, extreme, gamma, linear, luminance, mesh, pane_alpha, place, reachable, thumbnail, worst};
+pub use paint::{Decoded, Placement, blend, boundary, contrast, decode, extreme, gamma, linear, luminance, mesh, pane_alpha, place, reachable, readable_text, thumbnail, worst};
 
 pub type Rgb = [f32; 3];
 
@@ -255,7 +255,11 @@ impl Look {
         look.target = look.target.max(7.0);
         for (name, served) in &view.colors {
             if let Some(p) = served.increased.as_ref().and_then(|i| Some((hex(&i.dark)?, hex(&i.light)?))) {
-                look.roles.insert(name.clone(), p);
+                if name == "accent" {
+                    look.accent = Some(p);
+                } else {
+                    look.roles.insert(name.clone(), p);
+                }
             }
         }
         look
