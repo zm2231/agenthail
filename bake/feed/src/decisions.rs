@@ -512,7 +512,7 @@ mod tests {
     }
 
     fn listener_on_a_404_port() -> std::net::TcpListener {
-        (40400..40500).find_map(|port| std::net::TcpListener::bind(("127.0.0.1", port)).ok()).expect("a free port between 40400 and 40499")
+        (1024..=u16::MAX).filter(|port| port.to_string().contains("404")).find_map(|port| std::net::TcpListener::bind(("127.0.0.1", port)).ok()).expect("a free port with 404 in it")
     }
 
     fn serve_on(listener: std::net::TcpListener, routes: Vec<(&'static str, u16, &'static str)>) -> String {
@@ -571,6 +571,7 @@ mod tests {
         assert_eq!(inbox.lead_handling[0].session_id, "h2::crew");
         assert_eq!(inbox.lead_handling[0].held_by, "h2::lead");
         assert_eq!(inbox.notes, ["off isn't answering, so its decisions aren't shown.", "legacy runs an older Agenthail without the Inbox.", "old runs an older Agenthail without the Inbox."]);
+        assert!(!inbox.failed, "an older or unanswering computer isn't read again at once");
     }
 
     #[test]
@@ -616,7 +617,7 @@ mod tests {
             ("/api/v1/decisions?host=slow404", 200, r#"{"decisions":[{"group":"waiting","sessionId":"late"}],"leadHandling":[]}"#),
             ("/api/v1/decisions?host=h404", 404, r#"{"error":{"code":"host_not_found","message":"No paired host is named \"h404\"."}}"#),
         ]);
-        assert!(base.contains(":404"), "every reply names a port with 404 in it, which is no version");
+        assert!(base.rsplit(':').next().unwrap().contains("404"), "every reply names a port with 404 in it, which is no version");
         let started = std::time::Instant::now();
         let inbox = Client::new(&base, "t").inbox();
         assert!(started.elapsed() < std::time::Duration::from_secs(8));
@@ -627,6 +628,29 @@ mod tests {
             ["This computer's decisions couldn't be read, so they aren't shown.", "stuck's decisions couldn't be read, so they aren't shown.", "unpaired's decisions couldn't be read, so they aren't shown."]
         );
         assert!(inbox.failed, "a failed read is tried again");
+    }
+
+    #[test]
+    fn only_a_missing_route_reads_as_an_older_agenthail() {
+        let base = serve_on(listener_on_a_404_port(), vec![
+            ("/api/v1/decisions", 200, r#"{"decisions":[],"leadHandling":[]}"#),
+            ("/api/v1/decisions?host=plain404", 404, "404 page not found"),
+            ("/api/v1/decisions?host=gone404", 404, r#"{"error":{"code":"host_not_found","message":"No paired host is named \"gone404\"."}}"#),
+            ("/api/v1/decisions?host=down404", 502, r#"{"error":{"code":"bad_gateway","message":"404 bytes lost"}}"#),
+            ("/api/v1/decisions?host=bad404", 200, "[404]"),
+        ]);
+        let client = Client::new(&base, "t");
+        assert!(client.decisions(None).is_ok());
+        let read = |host: &str| client.decisions(Some(host)).err();
+        assert_eq!(read("old404"), Some(Unread::Older), "a daemon without the route");
+        assert_eq!(read("plain404"), Some(Unread::Older), "a 404 with no error code");
+        assert_eq!(read("gone404"), Some(Unread::Failed), "a computer unpaired since the list");
+        assert_eq!(read("down404"), Some(Unread::Failed));
+        assert_eq!(read("bad404"), Some(Unread::Failed), "a reply that isn't a page");
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = closed.local_addr().unwrap();
+        drop(closed);
+        assert_eq!(Client::new(&format!("http://{address}/404"), "t").decisions(None).err(), Some(Unread::Failed), "nothing listening");
     }
 
     #[test]
