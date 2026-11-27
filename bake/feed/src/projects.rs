@@ -282,6 +282,7 @@ pub struct Lead {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Added {
+    pub id: String,
     pub name: String,
     pub created: bool,
 }
@@ -608,7 +609,7 @@ impl Client {
         }
         let reply = self.action("project-add", payload).and_then(confirmed)?;
         let name = reply["project"]["displayName"].as_str().filter(|n| !n.is_empty()).unwrap_or("This folder").to_string();
-        Ok(Added { name, created: reply["created"].as_bool().unwrap_or(true) })
+        Ok(Added { id: reply["project"]["id"].as_str().unwrap_or_default().to_string(), name, created: reply["created"].as_bool().unwrap_or(true) })
     }
 
     pub fn project_rename(&self, project: &str, title: &str) -> Outcome<()> {

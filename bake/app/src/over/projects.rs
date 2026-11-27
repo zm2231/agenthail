@@ -29,15 +29,18 @@ pub enum Job {
 }
 
 impl Job {
-    fn run(&self, c: &Client) -> Result<(String, bool), RespondError> {
+    fn run(&self, c: &Client) -> Result<Settled, RespondError> {
         if let Job::Clean { session, ignored } = self {
-            return c.work_clean(session, ignored).map(|w| (w.outcome(), w.cleanup != "removed"));
+            return c.work_clean(session, ignored).map(|w| Settled { note: w.outcome(), held: w.cleanup != "removed", open: None });
         }
         if let Job::Message { project, lead, text } = self {
-            return c.lead_send(project, text).map(|d| (projects::lead_sent(lead, &d), d == feed::composer::Delivered::Unconfirmed));
+            return c.lead_send(project, text).map(|d| Settled { note: projects::lead_sent(lead, &d), held: d == feed::composer::Delivered::Unconfirmed, open: None });
+        }
+        if let Job::Add { path, title, host } = self {
+            return c.project_add(path, title, host).map(|a| Settled { note: a.notice(), held: false, open: Some(a.id).filter(|id| !id.is_empty()) });
         }
         let message = match self {
-            Job::Add { path, title, host } => c.project_add(path, title, host).map(|a| a.notice()),
+            Job::Add { .. } => Ok(String::new()),
             Job::Rename { project, title } => c.project_rename(project, title).map(|_| format!("Renamed to {title}.")),
             Job::Remove { project } => c.project_remove(project).map(|_| "Project removed.".into()),
             Job::Archive { project, name, archived } => c.project_archive(project, *archived).map(|_| format!("{name} {}.", if *archived { "is archived" } else { "is back in Projects" })),
@@ -48,7 +51,7 @@ impl Job {
             Job::Message { .. } => Ok(String::new()),
             Job::Clean { .. } => Ok(String::new()),
         }?;
-        Ok((message, false))
+        Ok(Settled { note: message, held: false, open: None })
     }
 
     fn replacing(&self) -> Option<Job> {
@@ -80,8 +83,14 @@ impl Job {
     }
 }
 
+pub struct Settled {
+    note: String,
+    held: bool,
+    open: Option<String>,
+}
+
 pub enum Done {
-    Changed(Job, Option<u64>, Result<(String, bool), RespondError>),
+    Changed(Job, Option<u64>, Result<Settled, RespondError>),
     Tiles(TileReply),
     Hosts(Result<Vec<Host>, String>),
     Folders(String, Vec<String>),
@@ -113,6 +122,8 @@ pub struct State {
     seen_at: Option<time::OffsetDateTime>,
     pub lead_drafts: HashMap<String, TextEdit>,
     sending_to: HashSet<String>,
+    open_when_listed: Option<(String, std::time::Instant)>,
+    more_menu: Option<Vec<String>>,
     hosts: Vec<Host>,
     folders: HashMap<String, Vec<String>>,
     cleaning: HashSet<String>,
@@ -137,6 +148,8 @@ impl Default for State {
             seen_at: None,
             lead_drafts: HashMap::new(),
             sending_to: HashSet::new(),
+            open_when_listed: None,
+            more_menu: None,
             hosts: Vec::new(),
             folders: HashMap::new(),
             cleaning: HashSet::new(),
@@ -353,7 +366,7 @@ fn save(s: &mut App) {
     }
 }
 
-fn settled(s: &mut App, job: Job, from_sheet: Option<u64>, result: Result<(String, bool), RespondError>) {
+fn settled(s: &mut App, job: Job, from_sheet: Option<u64>, result: Result<Settled, RespondError>) {
     let sheet_open = from_sheet.is_some_and(|id| id == s.ov.projects.sheet_id) && s.ov.projects.sheet.is_some();
     if sheet_open {
         s.ov.projects.saving = false;
@@ -363,12 +376,15 @@ fn settled(s: &mut App, job: Job, from_sheet: Option<u64>, result: Result<(Strin
     }
     if let Job::Message { project, text, .. } = &job {
         s.ov.projects.sending_to.remove(project);
-        if matches!(result, Ok((_, false))) && s.ov.projects.lead_drafts.get(project).is_some_and(|d| d.text.trim() == text) {
+        if result.as_ref().is_ok_and(|r| !r.held) && s.ov.projects.lead_drafts.get(project).is_some_and(|d| d.text.trim() == text) {
             s.ov.projects.lead_drafts.remove(project);
         }
     }
     match result {
-        Ok((message, kept)) => {
+        Ok(Settled { note: message, held: kept, open }) => {
+            if let Some(id) = open {
+                s.ov.projects.open_when_listed = Some((id, std::time::Instant::now()));
+            }
             if let Job::Clean { session, .. } = &job
                 && kept
             {
@@ -409,6 +425,15 @@ pub fn drain(s: &mut App) -> bool {
     {
         crate::over::go(s, crate::Screen::Now);
         changed = true;
+    }
+    if let Some((id, at)) = s.ov.projects.open_when_listed.clone() {
+        if s.ov.d.project(&id).is_some() {
+            s.ov.projects.open_when_listed = None;
+            crate::over::go(s, crate::Screen::Project(id));
+            changed = true;
+        } else if at.elapsed() > std::time::Duration::from_secs(30) {
+            s.ov.projects.open_when_listed = None;
+        }
     }
     let gone = match &s.ov.projects.sheet {
         Some(Sheet::Rename { project, .. } | Sheet::Lead { project, .. }) => s.ov.d.record(project).is_none(),
@@ -470,6 +495,7 @@ pub fn drain(s: &mut App) -> bool {
 
 pub fn open_menu(s: &mut App, key: &str, at: Option<PointerPress>) {
     s.ov.projects.archived_menu = false;
+    s.ov.projects.more_menu = None;
     s.ov.projects.menu = match &s.ov.projects.menu {
         Some((k, None)) if k == key && at.is_none() => None,
         _ => Some((key.to_string(), at)),
@@ -520,8 +546,21 @@ pub fn archived(s: &App) -> Vec<&ProjectRecord> {
     list
 }
 
+fn more_menu(s: &App, keys: &[String], layer: &mut Vec<El>) {
+    let mut m = Menu::new("more-projects").open(true).min_width(240.0).placement(Placement::BottomStart).on_close(|s: &mut App| s.ov.projects.more_menu = None);
+    for p in keys.iter().filter_map(|k| s.ov.d.project(k)) {
+        let key = p.key.clone();
+        m = m.item(MenuItem::new(p.name.clone()).on_select(move |s: &mut App| {
+            s.ov.projects.more_menu = None;
+            crate::over::go(s, crate::Screen::Project(key.clone()));
+        }));
+    }
+    let _ = m.build(kit(), layer);
+}
+
 pub fn open_archived(s: &mut App) {
     s.ov.projects.menu = None;
+    s.ov.projects.more_menu = None;
     s.ov.projects.archived_menu = !s.ov.projects.archived_menu;
 }
 
@@ -537,9 +576,26 @@ fn archived_menu(s: &App, layer: &mut Vec<El>) {
     let _ = m.build(kit(), layer);
 }
 
-pub fn sidebar_rows(s: &App) -> Vec<El> {
+pub fn sidebar_rows(s: &App, hidden: Vec<String>) -> Vec<El> {
     let k = kit();
-    let mut rows = vec![rune_kit::SidebarRow::new("Add project…").icon(&icons::PLUS).height(30.0).on_select(|s: &mut App, _| add(s)).build(k).key("add-project")];
+    let mut rows = Vec::new();
+    if !hidden.is_empty() {
+        let count = hidden.len();
+        rows.push(
+            rune_kit::SidebarRow::new("More projects")
+                .icon(&crate::icons::MORE)
+                .height(30.0)
+                .detail(count.to_string())
+                .on_select(move |s: &mut App, _| {
+                    s.ov.projects.menu = None;
+                    s.ov.projects.archived_menu = false;
+                    s.ov.projects.more_menu = if s.ov.projects.more_menu.is_some() { None } else { Some(hidden.clone()) };
+                })
+                .build(k)
+                .key("more-projects-menu-trigger"),
+        );
+    }
+    rows.extend([rune_kit::SidebarRow::new("Add project…").icon(&icons::PLUS).height(30.0).on_select(|s: &mut App, _| add(s)).build(k).key("add-project")]);
     let count = archived(s).len();
     if count > 0 {
         rows.push(
@@ -740,6 +796,9 @@ pub fn overlays(s: &App, layer: &mut Vec<El>) {
     }
     if s.ov.projects.archived_menu {
         archived_menu(s, layer);
+    }
+    if let Some(keys) = &s.ov.projects.more_menu {
+        more_menu(s, keys, layer);
     }
     if let Some(sheet) = &s.ov.projects.sheet {
         sheet_view(s, sheet, layer);
