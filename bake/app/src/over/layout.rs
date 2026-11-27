@@ -164,7 +164,8 @@ pub fn load(s: &mut App) {
     s.attach.tray = feed::attach::Tray::from_json(&v["attachments"]);
     s.attach.tray.load_stashed(&v["stashedAttachments"]);
     s.complete.keys = crate::ui::composer_keys::State::from_json(&v["stashes"]);
-    let held: Vec<(String, feed::composer::Unsent)> = s.unsent.iter().map(|(id, u)| (id.clone(), u.clone())).collect();
+    let now = feed::composer::now_ms();
+    let held: Vec<(String, feed::composer::Unsent)> = s.unsent.iter().filter(|(_, u)| !u.redelivering(now)).map(|(id, u)| (id.clone(), u.clone())).collect();
     for (id, unsent) in held {
         if s.drafts.get(&id).trim().is_empty() && !s.attach.tray.has(&id) {
             s.drafts.set(&id, &crate::ui::paste::unsent_draft(&unsent));

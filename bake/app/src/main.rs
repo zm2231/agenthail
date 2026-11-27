@@ -817,7 +817,9 @@ fn retry_key(s: &mut App, id: &str, key: &str, auto: bool, tx: &mut Tx) {
     if sending(s, id) || s.client.is_none() || closed(s, id) || feed::attach::missing_upload(&unsent.error).is_some() {
         return;
     }
-    clear_sent(s, id, &unsent);
+    if !auto {
+        clear_sent(s, id, &unsent);
+    }
     s.unsent.remove(id, &unsent.key);
     if unsent.reuses_key() {
         dispatch(s, id, unsent, true, tx);

@@ -274,7 +274,7 @@ impl Unsent {
     }
 
     pub fn redelivering(&self, now: i64) -> bool {
-        self.unanswered && self.sent_at > 0 && now - self.sent_at < REDELIVER_FOR
+        self.unanswered && self.sent_at > 0 && (0..REDELIVER_FOR).contains(&(now - self.sent_at))
     }
 
     pub fn ids(&self) -> Vec<String> {
@@ -580,6 +580,7 @@ mod tests {
         let unsent = Unsent { unanswered: true, sent_at: 1000, ..Default::default() };
         assert!(unsent.redelivering(1000 + REDELIVER_FOR - 1));
         assert!(!unsent.redelivering(1000 + REDELIVER_FOR));
+        assert!(!unsent.redelivering(999), "a clock moved back ends the window");
         assert!(!Unsent { sent_at: 0, ..unsent.clone() }.redelivering(1000));
         assert!(!Unsent { unanswered: false, ..unsent }.redelivering(1000));
     }
