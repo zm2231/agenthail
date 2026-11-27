@@ -192,3 +192,14 @@ fn sampling_keeps_the_brightest_and_darkest_pixel_of_each_area() {
     let (_, _, dark) = extreme(&rgba, w, h, 100, false);
     assert_eq!(worst(&dark, sw, false, 1), [0.0; 3]);
 }
+
+#[test]
+fn increase_contrast_forces_readability_and_the_stronger_colours() {
+    let view: View = serde_json::from_str(r##"{"rev":"r","values":{"glass.readability":"off","contrast.target":4.5},"colors":{"muted":{"dark":"#a3a3a8","light":"#55565c","increased":{"dark":"#b0b0b4","light":"#4b4c51"}}}}"##).unwrap();
+    assert!(!Look::from_view(&view).readable);
+    let look = Look::with_increased_contrast(&view);
+    assert!(look.readable);
+    assert_eq!(look.target, 7.0);
+    assert_eq!(look.role("muted", true), hex("#b0b0b4"));
+    assert_eq!(look.role("muted", false), hex("#4b4c51"));
+}

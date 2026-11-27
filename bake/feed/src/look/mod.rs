@@ -21,6 +21,16 @@ pub struct Served {
     pub light: String,
     #[serde(default, rename = "systemAccent")]
     pub system_accent: bool,
+    #[serde(default)]
+    pub increased: Option<Pair>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct Pair {
+    #[serde(default)]
+    pub dark: String,
+    #[serde(default)]
+    pub light: String,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -235,6 +245,18 @@ impl Look {
             target: number(v, "contrast.target", 4.5, (4.5, 7.0)),
             roles,
         }
+    }
+
+    pub fn with_increased_contrast(view: &View) -> Look {
+        let mut look = Look::from_view(view);
+        look.readable = true;
+        look.target = look.target.max(7.0);
+        for (name, served) in &view.colors {
+            if let Some(p) = served.increased.as_ref().and_then(|i| Some((hex(&i.dark)?, hex(&i.light)?))) {
+                look.roles.insert(name.clone(), p);
+            }
+        }
+        look
     }
 
     pub fn dark(&self, system_dark: bool) -> bool {

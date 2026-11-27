@@ -74,6 +74,7 @@ pub fn changed(s: &mut Prefs) {
     }
     s.appearance.seen_rev = rev;
     s.appearance.drafts.clear();
+    thumbs(s);
     if s.tab == TAB {
         history(s);
     }
@@ -121,6 +122,11 @@ pub fn slide(s: &mut Prefs, key: &'static str, label: &str, value: f32, done: bo
 }
 
 fn thumbs(s: &mut Prefs) {
+    if let Some(view) = crate::look::view() {
+        for path in fl::Look::from_view(&view).images() {
+            want_thumb(s, &path);
+        }
+    }
     let Some(Ok(presets)) = s.appearance.presets.clone() else { return };
     for preset in presets {
         for value in [&preset.dark, &preset.light] {

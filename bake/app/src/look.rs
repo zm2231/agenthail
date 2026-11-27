@@ -49,6 +49,7 @@ struct State {
     generation: u64,
     seen_main: u64,
     seen_settings: u64,
+    increased: bool,
 }
 
 thread_local! {
@@ -212,6 +213,12 @@ impl Picture {
     }
 }
 
+fn relook(s: &mut State) {
+    if let Some(v) = &s.view {
+        s.look = if s.increased { Look::with_increased_contrast(v) } else { Look::from_view(v) };
+    }
+}
+
 fn pump(s: &mut State) {
     if s.rx.is_none() {
         start(s);
@@ -223,12 +230,12 @@ fn pump(s: &mut State) {
             Got::Device(d) => s.device = d,
             Got::View(ticket, v) if ticket > s.applied => {
                 s.applied = ticket;
-                s.look = Look::from_view(&v);
+                s.view = Some(*v);
+                relook(s);
                 let keep = s.look.images();
                 s.pictures.retain(|p, _| keep.contains(p));
                 let meshes = [wallpaper_key(&s.look.background), wallpaper_key(&s.look.background_light)];
                 s.meshes.retain(|k, _| meshes.contains(k));
-                s.view = Some(*v);
                 s.problem = None;
             }
             Got::View(..) => {}
@@ -339,7 +346,12 @@ fn accented(k: &mut Kit, a: Color) {
 pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool) {
     let system_dark = cx.system_dark();
     let system_accent = srgb(cx.accent());
+    let increased = cx.system_increased_contrast();
     let (paint, kit, chrome, scale) = STATE.with_borrow_mut(|s| {
+        if increased != s.increased {
+            s.increased = increased;
+            relook(s);
+        }
         let dark = s.look.dark(system_dark);
         let mut paint = if dark { Paint::dark() } else { Paint::light() };
         let role = |name: &str, fallback: Color| s.look.role(name, dark).map(rgb).unwrap_or(fallback);
@@ -353,7 +365,8 @@ pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool) {
         paint.accent = rgb(accent_rgb);
         paint.accent_deep = rgb(fl::blend(accent_rgb, [0.0; 3], 0.35));
         let translucent = glass && s.look.translucent(dark);
-        let mut key = format!("{dark}:{translucent}:{:?}:{:?}:{:?}", accent_rgb.map(quant), srgb(paint.text).map(quant), srgb(paint.muted).map(quant));
+        let drawn = s.look.drawn(dark);
+        let mut key = format!("{dark}:{translucent}:{drawn}:{:?}:{:?}:{:?}", accent_rgb.map(quant), srgb(paint.text).map(quant), srgb(paint.muted).map(quant));
         if translucent {
             let ground = ground_rgb(dark);
             let tint = tint_rgb(&s.look, dark, accent_rgb);
@@ -390,7 +403,7 @@ pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool) {
                 k.c.bg_base = Color::WHITE.alpha(0.025);
                 k.c.border_muted = paint.border;
             } else if dark {
-                k.c.bg_deep = Color::TRANSPARENT;
+                k.c.bg_deep = if drawn { paint.card_deep } else { Color::TRANSPARENT };
                 k.c.border_muted = Color::WHITE.alpha(0.09);
             }
             k.c.text_strong = paint.text;
@@ -418,7 +431,7 @@ pub fn backdrop(session: bool) -> El {
         });
         if !s.look.drawn(dark) {
             let base = base.fill(paint.card_deep);
-            return if dark { base.system_material(SystemMaterial::Glass) } else { base };
+            return if dark && s.look.glass { base.system_material(SystemMaterial::Glass) } else { base };
         }
         let strength = if session { s.look.session_opacity } else { s.look.opacity };
         let w = s.look.wallpaper(dark).clone();
