@@ -107,6 +107,10 @@ pub struct Handoffs {
     pub channels: Vec<Channel>,
     #[serde(default, deserialize_with = "listed")]
     pub relays: Vec<Relay>,
+    #[serde(default, deserialize_with = "listed")]
+    pub queue: Vec<crate::queue::Queued>,
+    #[serde(skip)]
+    pub history: Option<Result<Vec<crate::search::Entry>, String>>,
 }
 
 impl Handoffs {
@@ -344,6 +348,10 @@ impl Client {
 
     pub fn relay_remove(&self, id: i64) -> Result<(), Failure> {
         act(self, "relay-remove", json!({"relayId": id})).map(drop)
+    }
+
+    pub fn queue_remove(&self, id: i64, host: &str) -> Result<(), Failure> {
+        act(self, "queue-cancel", json!({"queueId": id, "host": host})).map(drop)
     }
 }
 

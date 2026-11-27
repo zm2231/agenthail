@@ -64,8 +64,11 @@ fn session_changes_apply_in_place_without_a_reread() {
 
     let out = c.apply(vec![upsert(12, "c", "idle"), CatalogEvent { seq: 13, kind: "session.removed".into(), data: json!({"sessionId": "b"}) }]);
     assert!(out.changed && out.news && !out.reread);
+    assert_eq!(out.removed, vec!["b".to_string()]);
+    let out = c.apply(vec![CatalogEvent { seq: 14, kind: "session.removed".into(), data: json!({"sessionId": "older"}) }]);
+    assert!(!out.changed && out.removed == vec!["older".to_string()]);
     assert_eq!(statuses(&c), vec![("a".into(), "working".into()), ("c".into(), "idle".into())]);
-    assert_eq!(c.seq(), 13);
+    assert_eq!(c.seq(), 14);
 }
 
 #[test]

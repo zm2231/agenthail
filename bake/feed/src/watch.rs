@@ -106,6 +106,7 @@ pub struct Applied {
     pub rev: Option<String>,
     pub touched: Vec<String>,
     pub restart: bool,
+    pub removed: Vec<String>,
 }
 
 #[derive(Default)]
@@ -212,6 +213,7 @@ impl Catalog {
                 out.changed |= self.sessions.len() != before;
                 out.news = true;
                 out.reread |= d["rekeyedTo"].as_str().is_some_and(|r| !r.is_empty());
+                out.removed.push(id.clone());
                 out.touched.push(id);
             }
             "decisions.changed" => out.rev = d["rev"].as_str().map(String::from).or(out.rev.take()),

@@ -95,6 +95,8 @@ pub struct Entry {
     pub error: Option<String>,
     #[serde(default)]
     pub operation: Option<String>,
+    #[serde(default)]
+    pub evidence: Option<String>,
 }
 
 fn some(v: &Option<String>) -> Option<&str> {

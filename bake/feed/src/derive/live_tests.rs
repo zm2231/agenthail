@@ -580,3 +580,37 @@ fn a_ledger_change_waits_out_a_failed_reads_retry() {
     known.read("p", t0, &Err("status code 503".into()));
     assert!(matches!(known.changed("p", t0 + std::time::Duration::from_secs(1)), Change::Nothing), "a change inside the wait leaves it to the retry");
 }
+
+#[test]
+fn project_activity_lists_a_project_whose_sessions_are_all_older_and_dates_it() {
+    let projects = json!([{"id": "p", "displayName": "P"}, {"id": "quiet", "displayName": "Quiet"}, {"id": "gone", "displayName": "Gone"}]);
+    let activity: Vec<crate::activity::ProjectActivity> = serde_json::from_value(json!([{"id": "quiet", "lastActive": "2026-11-01T00:00:00Z", "sessionCount": 3}, {"id": "gone", "sessionCount": 0}])).unwrap();
+    let merged = super::live::with_activity(projects, activity);
+    assert_eq!(merged[1]["sessionCount"], json!(3));
+    assert_eq!(merged[2].get("lastActive"), None);
+    let mut r: Recorded = serde_json::from_value(json!({"updatedAt": "2026-11-24T12:00:00Z", "projects": merged})).unwrap();
+    r.sessions = vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")];
+    let w = World::new(r);
+    let keys: Vec<&str> = w.projects.iter().map(|p| p.key.as_str()).collect();
+    assert_eq!(keys, vec!["p", "quiet"]);
+    assert_eq!(w.project("quiet").unwrap().last_active, "2026-11-01T00:00:00Z");
+}
+
+#[test]
+fn a_failed_activity_read_keeps_the_last_counts() {
+    let mut ov = Overview::default();
+    let mut first = fetched("2026-11-24T12:00:00Z", vec![], vec![]);
+    first.recorded.projects[1].session_count = 2;
+    first.recorded.projects[1].last_active = "2026-11-01T00:00:00Z".into();
+    ov.refresh(first);
+    assert!(ov.world(&[]).project("old").is_some());
+    let mut second = fetched("2026-11-24T12:00:20Z", vec![], vec![]);
+    second.recorded.activity_missing = true;
+    ov.refresh(second);
+    let w = ov.world(&[]);
+    assert_eq!(w.project("old").map(|p| p.last_active.as_str()), Some("2026-11-01T00:00:00Z"));
+    let mut third = fetched("2026-11-24T12:00:40Z", vec![], vec![]);
+    third.recorded.activity_missing = false;
+    ov.refresh(third);
+    assert!(ov.world(&[]).project("old").is_none(), "a read that answers replaces the counts");
+}

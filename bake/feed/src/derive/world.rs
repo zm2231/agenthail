@@ -118,6 +118,8 @@ pub struct ProjectRecord {
     pub last_active: String,
     #[serde(default)]
     pub ledger_key: String,
+    #[serde(default)]
+    pub session_count: i64,
 }
 
 #[derive(Deserialize, Clone, Default, Debug)]
@@ -157,6 +159,8 @@ pub struct Recorded {
     pub actors: HashMap<String, Actor>,
     #[serde(default)]
     pub tile_order: Option<crate::projects::TileOrder>,
+    #[serde(skip)]
+    pub activity_missing: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -277,7 +281,7 @@ fn projects(records: &[ProjectRecord], sessions: &[Session]) -> Vec<Project> {
     let mut out = Vec::new();
     for p in records.iter().filter(|p| !p.archived) {
         let mut mine: Vec<&Session> = sessions.iter().filter(|s| !s.archived && s.project_key() == p.id).collect();
-        if mine.is_empty() && !p.checkouts.iter().any(|c| c.added) && p.coordinators.is_empty() {
+        if mine.is_empty() && p.session_count == 0 && !p.checkouts.iter().any(|c| c.added) && p.coordinators.is_empty() {
             continue;
         }
         mine.sort_by(|a, b| b.last_active.cmp(&a.last_active));

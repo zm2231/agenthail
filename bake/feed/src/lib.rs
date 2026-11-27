@@ -1,4 +1,5 @@
 pub mod action;
+pub mod activity;
 pub mod attach;
 pub mod background;
 pub mod blocks;
@@ -15,6 +16,7 @@ pub mod complete;
 pub mod connect;
 pub mod create;
 pub mod decisions;
+pub mod delivery;
 pub mod composer;
 pub mod derive;
 pub mod devices;
