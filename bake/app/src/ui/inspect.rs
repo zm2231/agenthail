@@ -70,12 +70,18 @@ fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'sta
 }
 
 pub fn load(s: &mut App, id: &str) {
-    s.inspect.overlay.select(id);
-    s.inspect.meta.retain(|k, _| k == id);
-    s.inspect.reads.keep_only(id);
+    keep_shown(s);
+    s.inspect.overlay.open(id);
     if s.inspect.expanded.as_deref() != Some(id) {
         s.inspect.expanded = None;
     }
+}
+
+pub fn keep_shown(s: &mut App) {
+    let shown: Vec<String> = super::window::shown(s).into_iter().map(|(_, id)| id).collect();
+    s.inspect.overlay.keep(&shown);
+    s.inspect.meta.retain(|k, _| shown.contains(k));
+    s.inspect.reads.keep_only(&shown);
 }
 
 pub(crate) fn ticket(s: &mut App) -> u64 {
@@ -127,7 +133,7 @@ pub fn follows(s: &App, id: &str) -> bool {
 
 pub(crate) fn returned(s: &mut App, id: &str) {
     if s.inspect.overlay.follows(id) {
-        s.inspect.overlay.select(id);
+        s.inspect.overlay.open(id);
     }
 }
 

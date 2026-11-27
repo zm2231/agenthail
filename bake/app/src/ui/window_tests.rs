@@ -580,3 +580,17 @@ fn a_window_s_session_coming_back_leaves_the_inspector_on_the_session_it_follows
     crate::ui::gone::watch(&mut s);
     assert!(crate::ui::inspect::follows(&s, "a"), "b returning in its window doesn't take main's inspector");
 }
+
+#[test]
+fn each_window_s_inspector_takes_its_own_session_s_streamed_goal() {
+    let (mut s, w) = beside(false);
+    s.screen = Screen::Session;
+    let goal = |text: &str| feed::wire::Streamed::Goal(Some(feed::inspect::Goal { objective: text.into(), ..Default::default() }));
+    crate::ui::inspect::streamed(&mut s, "a", goal("main's goal"));
+    crate::ui::inspect::streamed(&mut s, "b", goal("the window's goal"));
+    assert!(crate::ui::inspect::is_streamed(&s, "a", "goal") && crate::ui::inspect::is_streamed(&s, "b", "goal"), "both windows stream");
+    crate::select(&mut s, "c");
+    assert!(crate::ui::inspect::is_streamed(&s, "b", "goal"), "main moving on leaves the window's stream");
+    close(&mut s, w);
+    assert!(!crate::ui::inspect::follows(&s, "b"), "the stream closes with its window");
+}

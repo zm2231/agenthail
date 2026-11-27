@@ -297,6 +297,7 @@ pub fn close(s: &mut App, id: Id) {
         slot.take_if(|w| *w == id);
     }
     s.windows.to_show.retain(|(o, _)| *o != id);
+    super::inspect::keep_shown(s);
 }
 
 fn closed(s: &mut App, tx: &mut Tx) {

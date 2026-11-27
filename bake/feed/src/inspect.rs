@@ -255,8 +255,8 @@ impl Reads {
         }
     }
 
-    pub fn keep_only(&mut self, id: &str) {
-        self.rereading.retain(|k, _| k == id);
+    pub fn keep_only(&mut self, shown: &[String]) {
+        self.rereading.retain(|k, _| shown.contains(k));
     }
 }
 
@@ -347,30 +347,30 @@ pub fn can_save(act: GoalAct, text: &str, budget: Option<i64>) -> bool {
 
 #[derive(Default)]
 pub struct Overlay {
-    session: String,
-    kinds: std::collections::HashSet<&'static str>,
+    sessions: std::collections::HashMap<String, std::collections::HashSet<&'static str>>,
 }
 
 impl Overlay {
-    pub fn select(&mut self, id: &str) {
-        self.session = id.to_string();
-        self.kinds.clear();
+    pub fn open(&mut self, id: &str) {
+        self.sessions.insert(id.to_string(), Default::default());
+    }
+
+    pub fn keep(&mut self, shown: &[String]) {
+        self.sessions.retain(|id, _| shown.contains(id));
     }
 
     pub fn stream(&mut self, id: &str, kind: &'static str, shown: bool) -> bool {
-        if !shown || id != self.session {
-            return false;
-        }
-        self.kinds.insert(kind);
+        let Some(kinds) = self.sessions.get_mut(id).filter(|_| shown) else { return false };
+        kinds.insert(kind);
         true
     }
 
     pub fn holds(&self, id: &str, kind: &str) -> bool {
-        id == self.session && self.kinds.contains(kind)
+        self.sessions.get(id).is_some_and(|kinds| kinds.contains(kind))
     }
 
     pub fn follows(&self, id: &str) -> bool {
-        id == self.session
+        self.sessions.contains_key(id)
     }
 }
 
@@ -614,7 +614,7 @@ mod tests {
         assert!(!reads.landed("s", second));
         assert!(reads.want("s"));
         reads.started("s", reads.next + 1);
-        reads.keep_only("other");
+        reads.keep_only(&["other".to_string()]);
         assert!(reads.want("s"), "switching sessions forgets a pending reread");
     }
 
@@ -623,22 +623,35 @@ mod tests {
         let mut reads = Reads::default();
         let (old, new) = (reads.ticket(), reads.ticket());
         assert!(reads.accept("a", new));
-        reads.keep_only("b");
-        reads.keep_only("a");
+        reads.keep_only(&["b".to_string()]);
+        reads.keep_only(&["a".to_string()]);
         assert!(!reads.accept("a", old));
     }
 
     #[test]
     fn only_the_shown_session_streams_over_its_reads() {
         let mut o = Overlay::default();
-        o.select("a");
+        o.open("a");
         assert!(!o.stream("b", "goal", true), "another session's stream is ignored");
         assert!(!o.stream("a", "goal", false), "a removed session's stream is ignored");
         assert!(!o.holds("a", "goal"));
         assert!(o.stream("a", "context", true));
         assert!(o.holds("a", "context") && !o.holds("a", "goal") && !o.holds("b", "context"));
-        o.select("a");
+        o.open("a");
         assert!(!o.holds("a", "context"), "selecting again starts from the reads");
+    }
+
+    #[test]
+    fn each_shown_session_streams_on_its_own_until_its_window_closes() {
+        let mut o = Overlay::default();
+        o.open("a");
+        o.open("b");
+        assert!(o.stream("a", "goal", true) && o.stream("b", "context", true), "two windows, two streams");
+        assert!(o.holds("a", "goal") && o.holds("b", "context") && !o.holds("a", "context"));
+        o.open("a");
+        assert!(o.holds("b", "context"), "selecting one session leaves the other's stream alone");
+        o.keep(&["a".to_string()]);
+        assert!(!o.follows("b") && !o.stream("b", "goal", true), "a closed window's session stops streaming");
     }
 
     #[test]
