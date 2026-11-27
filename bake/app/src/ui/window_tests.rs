@@ -454,3 +454,54 @@ fn a_session_list_rebuilds_the_overview_once_with_a_session_window_open() {
     both(&mut s, &mut main, &mut win);
     assert_eq!(s.rebuilds, before + 1, "a change rebuilds once for the app, not once per window");
 }
+
+fn beside(queued: bool) -> (App, Id) {
+    let mut s = app();
+    s.client = Some(feed::catalog::Client::new("http://127.0.0.1:9", "t"));
+    let row = |id: &str, count: i64| serde_json::from_value(serde_json::json!({"id": id, "surface": "codex", "name": id, "status": "idle", "open": true, "queueCount": count})).unwrap();
+    s.sessions = vec![row("a", 0), row("b", if queued { 1 } else { 0 })];
+    crate::select(&mut s, "a");
+    let w = open(&mut s, "b");
+    s.queue_fetching.clear();
+    (s, w)
+}
+
+#[test]
+fn a_change_to_the_session_a_window_shows_refreshes_it_while_main_shows_another() {
+    let (mut s, _) = beside(true);
+    crate::changed_elsewhere(&mut s, feed::watch::Wants { session: Some("b".into()), ..Default::default() });
+    assert!(s.queue_fetching.contains_key("b"), "the window's session is read again, not only main's");
+    assert_eq!((s.windows.current(), s.selected.as_deref()), (MAIN, Some("a")), "main is left as it was");
+}
+
+#[test]
+fn a_reconnect_rereads_the_codex_queue_of_every_window() {
+    let (mut s, _) = beside(false);
+    for id in ["a", "b"] {
+        crate::ui::native_queue::hold(&mut s, id);
+    }
+    crate::reopened(&mut s);
+    assert!(["a", "b"].iter().all(|id| crate::ui::native_queue::reading(&s, id)), "both shown queues are read again");
+    assert_eq!(s.selected.as_deref(), Some("a"));
+}
+
+#[test]
+fn a_session_window_on_changes_follows_new_edits() {
+    let (mut s, _, _, w) = two_windows();
+    let env = rune::Env { system_dark: true, scale: 1.0 };
+    let main = rune::AppSpec::<App> { poll: Some(crate::poll), ..rune::AppSpec::new("Agenthail", (1440.0, 900.0), crate::placeholder, crate::ui::view) };
+    let mut main = rune::App::new(main).init(crate::placeholder).headless_runtime((1440.0, 900.0), env);
+    let edit = |n: usize| {
+        let item: feed::Item = serde_json::from_value(serde_json::json!({"id": format!("e{n}"), "kind": "toolCall", "title": "Write", "text": serde_json::json!({"file_path": format!("/w/f{n}.txt"), "content": "hi"}).to_string()})).unwrap();
+        feed::wire::Event::Upsert(item)
+    };
+    s.panes.get_mut("b").unwrap().transcript.apply(1, vec![edit(1)]);
+    as_window(&mut s, w, crate::show_changes);
+    assert_eq!(as_window(&mut s, w, |s| s.diff_key.clone()), ("b".to_string(), 1));
+
+    s.panes.get_mut("b").unwrap().transcript.apply(2, vec![edit(2)]);
+    s.outbox.send(crate::Bg::SessionsMoved).unwrap();
+    turn(&mut s, &mut main, "main");
+    assert_eq!(as_window(&mut s, w, |s| s.diff_key.clone()), ("b".to_string(), 2), "the window's diff follows the edit");
+    assert_eq!(s.diff_key.0, "", "main's own diff is untouched");
+}

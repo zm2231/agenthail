@@ -585,10 +585,12 @@ fn changed_elsewhere(s: &mut App, wants: feed::watch::Wants) {
         ui::native_queue::changed(s, &id);
     }
     if let Some(id) = wants.session
-        && s.selected.as_deref() == Some(id.as_str())
+        && let Some((w, _)) = ui::window::shown(s).into_iter().find(|(_, x)| *x == id)
     {
-        selected_changed(s, &id);
-        selected_moved(s, &id);
+        ui::window::as_window(s, w, |s| {
+            selected_changed(s, &id);
+            selected_moved(s, &id);
+        });
     }
 }
 
@@ -608,10 +610,12 @@ fn reopened(s: &mut App) {
     ask_overview(s, Ask::Reset);
     over::inbox::reopened(s);
     over::extensions::reopened(s);
-    if let Some(id) = s.selected.clone() {
-        selected_changed(s, &id);
-        selected_moved(s, &id);
-        ui::native_queue::changed(s, &id);
+    for (w, id) in ui::window::shown(s) {
+        ui::window::as_window(s, w, |s| {
+            selected_changed(s, &id);
+            selected_moved(s, &id);
+            ui::native_queue::changed(s, &id);
+        });
     }
 }
 
@@ -1373,13 +1377,13 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 s.status = "live".into();
                 ui::connect::up(s);
                 link::listed(s);
-                if let Some(id) = s.selected.clone()
-                    && touched.as_ref().is_none_or(|t| t.contains(&id))
-                {
-                    selected_changed(s, &id);
-                    if touched.is_some() {
-                        selected_moved(s, &id);
-                    }
+                for (w, id) in ui::window::shown(s).into_iter().filter(|(_, id)| touched.as_ref().is_none_or(|t| t.contains(id))) {
+                    ui::window::as_window(s, w, |s| {
+                        selected_changed(s, &id);
+                        if touched.is_some() {
+                            selected_moved(s, &id);
+                        }
+                    });
                 }
             }
             Bg::Changed(wants) => changed_elsewhere(s, wants),
@@ -1568,8 +1572,13 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     if arrived {
         over::arrive(s);
     }
-    if s.tab == Tab::Changes && (changed || s.diff_key.0 != s.selected.clone().unwrap_or_default()) {
-        refresh_diff(s);
+    let on_changes: Vec<ui::window::Id> = ui::window::ids(s).into_iter().filter(|w| ui::window::shows_changes(s, *w)).collect();
+    for w in on_changes {
+        ui::window::as_window(s, w, |s| {
+            if changed || s.diff_key.0 != s.selected.clone().unwrap_or_default() {
+                refresh_diff(s);
+            }
+        });
     }
     if s.screen != Screen::Session {
         s.revealed = None;

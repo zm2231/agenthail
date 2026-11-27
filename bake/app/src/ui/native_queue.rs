@@ -68,6 +68,16 @@ fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'sta
     });
 }
 
+#[cfg(test)]
+pub fn hold(s: &mut App, id: &str) {
+    s.native_queue.queues.insert(id.to_string(), Queue::of(id, 1));
+}
+
+#[cfg(test)]
+pub fn reading(s: &App, id: &str) -> bool {
+    s.native_queue.queues.get(id).is_some_and(|q| q.busy)
+}
+
 pub fn load(s: &mut App, id: &str) {
     if !session(s, id).is_some_and(nq::shown) {
         return;
