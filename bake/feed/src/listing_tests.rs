@@ -113,14 +113,21 @@ fn a_project_shows_its_collapsed_families_and_the_selection_until_expanded() {
     let v = view(json!([{"id": "p", "name": "p", "counts": {"families": 6, "sessions": 6}, "collapsedFamilyIds": ["f1", "f2"]}]), ids.iter().map(|id| family(id, "p", "c", &[(id, 0)])).collect());
     let p = &tree(&v, |id| rows.get(id))[0];
     assert_eq!(p.shown(false, None).family_count(), 2);
-    assert_eq!(p.more_label(false, None).as_deref(), Some("Show 4 more"));
+    assert_eq!(p.more_label(false, None).as_deref(), Some("Show 2 more"), "only families already read are promised");
     assert_eq!(p.shown(false, Some("f4")).family_count(), 3);
-    assert_eq!(p.more_label(false, Some("f4")).as_deref(), Some("Show 3 more"));
+    assert_eq!(p.more_label(false, Some("f4")).as_deref(), Some("Show 1 more"));
     assert_eq!(p.shown(true, None).family_count(), 4);
     assert_eq!(p.more_label(true, None).as_deref(), Some("Show less"));
     let small = view(json!([{"id": "p", "name": "p", "counts": {"families": 2, "sessions": 2}, "collapsedFamilyIds": ["f1", "f2"]}]), ids[..2].iter().map(|id| family(id, "p", "c", &[(id, 0)])).collect());
     let p = &tree(&small, |id| rows.get(id))[0];
     assert_eq!((p.more_label(false, None), p.more_label(true, None)), (None, None));
+}
+
+#[test]
+fn project_choices_keep_ids_and_tell_apart_projects_with_one_name() {
+    let known = [("p2", "site"), ("p1", "app"), ("", "No project"), ("p3", "app"), ("p1", "app")].map(|(i, n)| (i.to_string(), n.to_string()));
+    let got = project_choices(&known);
+    assert_eq!(got, vec![("p1".into(), "app (p1)".into()), ("p3".into(), "app (p3)".into()), ("p2".into(), "site".into())]);
 }
 
 #[test]

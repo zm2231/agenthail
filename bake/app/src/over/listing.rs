@@ -35,7 +35,9 @@ pub struct State {
     pub listing: Option<Listing>,
     pub error: Option<String>,
     surfaces: Vec<String>,
+    projects: Vec<(String, String)>,
     shown: Option<Request>,
+    failed: Option<Request>,
     asked: Option<(u64, Read, Request)>,
     typed: Option<(Request, Instant)>,
     due: Option<Instant>,
@@ -59,7 +61,9 @@ impl Default for State {
             listing: None,
             error: None,
             surfaces: Vec::new(),
+            projects: Vec::new(),
             shown: None,
+            failed: None,
             asked: None,
             typed: None,
             due: None,
@@ -85,6 +89,10 @@ impl State {
         &self.surfaces
     }
 
+    pub fn projects(&self) -> &[(String, String)] {
+        &self.projects
+    }
+
     pub fn clear_refinement(&mut self) {
         self.status = None;
         self.surface = None;
@@ -108,6 +116,7 @@ fn ask(s: &mut App, read: Read, request: Request) {
     st.due = None;
     st.typed = None;
     st.stale = false;
+    st.failed = None;
     st.error = None;
     let (seq, tx) = (st.seq, st.tx.clone());
     let (cursor, families) = (st.listing.as_ref().and_then(|l| l.next.clone()), st.listing.as_ref().map_or(0, Listing::families));
@@ -131,6 +140,10 @@ pub fn more(s: &mut App) {
     ask(s, Read::More, request);
 }
 
+pub fn current(s: &App) -> bool {
+    s.ov.list.shown.as_ref() == Some(&request(s))
+}
+
 pub fn retry(s: &mut App) {
     let want = request(s);
     let read = if s.ov.list.shown.as_ref() == Some(&want) && s.ov.list.listing.is_some() { Read::Again } else { Read::First };
@@ -139,7 +152,7 @@ pub fn retry(s: &mut App) {
 
 fn soon(s: &mut App, after: Duration) {
     let st = &mut s.ov.list;
-    if st.listing.is_none() {
+    if st.listing.is_none() && st.asked.is_none() {
         return;
     }
     if !st.visible {
@@ -159,10 +172,11 @@ pub fn reopened(s: &mut App) {
 }
 
 pub fn removed(s: &mut App, gone: &[Removal]) {
-    let Some(listing) = s.ov.list.listing.as_mut() else { return };
-    let mut again = false;
-    for x in gone {
-        again |= listing.remove(&x.id) || x.unlisted;
+    let mut again = s.ov.list.asked.is_some();
+    if let Some(listing) = s.ov.list.listing.as_mut() {
+        for x in gone {
+            again |= listing.remove(&x.id) || x.unlisted;
+        }
     }
     if again {
         soon(s, SETTLE);
@@ -193,6 +207,11 @@ fn take(s: &mut App, read: Read, request: Request, got: Result<Got, String>) {
                 }
             }
             st.surfaces.sort();
+            for p in &listing.view.projects {
+                if !p.id.is_empty() && !st.projects.iter().any(|(id, _)| *id == p.id) {
+                    st.projects.push((p.id.clone(), p.name.clone()));
+                }
+            }
             if read == Read::First {
                 st.expanded.clear();
             }
@@ -203,7 +222,10 @@ fn take(s: &mut App, read: Read, request: Request, got: Result<Got, String>) {
                 soon(s, wait);
             }
         }
-        Err(error) => st.error = Some(error),
+        Err(error) => {
+            st.error = Some(error);
+            st.failed = Some(request);
+        }
     }
 }
 
@@ -214,8 +236,11 @@ pub fn poll(s: &mut App) -> bool {
             continue;
         }
         s.ov.list.asked = None;
-        take(s, read, request, got);
         changed = true;
+        if request != self::request(s) {
+            continue;
+        }
+        take(s, read, request, got);
     }
     let visible = matches!(s.screen, Screen::Sessions);
     let entered = visible && !s.ov.list.visible;
@@ -225,7 +250,7 @@ pub fn poll(s: &mut App) -> bool {
     }
     let want = request(s);
     let asked = s.ov.list.asked.as_ref().map(|a| &a.2);
-    let current = asked.or(s.ov.list.shown.as_ref());
+    let current = asked.or(s.ov.list.failed.as_ref()).or(s.ov.list.shown.as_ref());
     if current != Some(&want) {
         let typing = current.is_some_and(|c| Request { query: want.query.clone(), ..c.clone() } == want);
         if typing && s.ov.list.typed.as_ref().is_none_or(|t| t.0 != want) {

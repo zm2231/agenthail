@@ -1,7 +1,7 @@
 use feed::catalog::{Session, State};
 use feed::derive::needs::need_of as find_need;
 use feed::derive::sessions::busy;
-use feed::listing::{SCOPES, STATUSES, TreeCheckout, TreeProject, status_label, tree};
+use feed::listing::{SCOPES, STATUSES, TreeCheckout, TreeProject, project_choices, status_label, tree};
 use rune::{Color, Cx, El, ScrollSpec, TextStyle, col, el, icon, row, text, text_input};
 use rune_kit::shell::Toolbar;
 use rune_kit::{Badge, BadgeVariant, Button, ButtonVariant, ControlSize, Kit, KitCx, SegmentedControl, Select, Spinner};
@@ -176,7 +176,7 @@ fn project_group(s: &App, p: &TreeProject, k: &Kit) -> El {
 }
 
 fn bar(s: &App, layer: &mut Vec<El>, k: &Kit) -> El {
-    let view = s.ov.list.listing.as_ref().map(|l| &l.view);
+    let view = s.ov.list.listing.as_ref().filter(|_| crate::over::listing::current(s)).map(|l| &l.view);
     let labels: Vec<String> = SCOPES.iter().map(|(label, scope)| view.and_then(|v| v.count(scope)).map_or(label.to_string(), |n| format!("{label} {n}"))).collect();
     let scopes = SegmentedControl::new(&labels, Some(s.ov.list.scope)).label("Show").fit().on_pick(|s: &mut App, i, _| s.ov.list.scope = i).build(k);
 
@@ -208,16 +208,18 @@ fn bar(s: &App, layer: &mut Vec<El>, k: &Kit) -> El {
         })
         .build(k, layer);
 
+    let known: Vec<(String, String)> = s.ov.d.projects.iter().map(|p| (p.key.clone(), p.name.clone())).chain(s.ov.list.projects().iter().cloned()).collect();
+    let choices = project_choices(&known);
     let mut names: Vec<String> = vec![ALL_PROJECTS.into()];
-    names.extend(s.ov.d.projects.iter().map(|p| p.name.clone()));
-    let current = s.ov.sessions_project.as_deref().and_then(|key| s.ov.d.project(key)).map_or(ALL_PROJECTS.to_string(), |p| p.name.clone());
+    names.extend(choices.iter().map(|(_, label)| label.clone()));
+    let current = s.ov.sessions_project.as_deref().and_then(|key| choices.iter().find(|(id, _)| id == key)).map_or(ALL_PROJECTS.to_string(), |(_, label)| label.clone());
     let project = Select::new("project-filter", &names)
         .current(Some(&current))
         .open(s.ov.sessions_project_open)
         .on_toggle(|s: &mut App| s.ov.sessions_project_open = !s.ov.sessions_project_open)
         .on_close(|s: &mut App| s.ov.sessions_project_open = false)
-        .on_choose(|s: &mut App, v: &str, _| {
-            s.ov.sessions_project = s.ov.d.projects.iter().find(|p| p.name == v).map(|p| p.key.clone());
+        .on_choose(move |s: &mut App, v: &str, _| {
+            s.ov.sessions_project = choices.iter().find(|(_, label)| label == v).map(|(id, _)| id.clone());
             s.ov.sessions_project_open = false;
         })
         .build(k, layer);
@@ -253,7 +255,7 @@ fn bar(s: &App, layer: &mut Vec<El>, k: &Kit) -> El {
 fn empty_note(s: &App) -> &'static str {
     if s.client.is_none() {
         "Connect to Agenthail to list sessions."
-    } else if s.ov.list.loading() {
+    } else if s.ov.list.loading() || !crate::over::listing::current(s) && s.ov.list.error.is_none() {
         "Loading…"
     } else if s.ov.list.error.is_some() {
         ""
@@ -267,7 +269,7 @@ fn empty_note(s: &App) -> &'static str {
 pub fn view(s: &App, cx: &mut Cx<App>, layer: &mut Vec<El>, main_kit: &Kit) -> El {
     let k = cx.kit();
     let mut list = col().w_full().gap(18.0).px(24.0).pt(16.0).pb(32.0).child(bar(s, layer, &k));
-    let listing = s.ov.list.listing.as_ref();
+    let listing = s.ov.list.listing.as_ref().filter(|_| crate::over::listing::current(s));
     let projects = listing.map(|l| tree(&l.view, |id| s.ov.d.session(id).or_else(|| l.rows.get(id)))).unwrap_or_default();
     if projects.is_empty() {
         let note = empty_note(s);

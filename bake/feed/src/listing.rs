@@ -247,10 +247,6 @@ impl<'a> TreeProject<'a> {
         self.checkouts.iter().map(|c| c.families.len()).sum()
     }
 
-    pub fn family_total(&self) -> usize {
-        self.counts.families.max(self.family_count())
-    }
-
     pub fn sessions_label(&self) -> String {
         if self.counts.sessions == 1 { "1 session".into() } else { format!("{} sessions", self.counts.sessions) }
     }
@@ -281,12 +277,26 @@ impl<'a> TreeProject<'a> {
 
     pub fn more_label(&self, expanded: bool, keeping: Option<&str>) -> Option<String> {
         let shown = self.shown(expanded, keeping).family_count();
-        let total = self.family_total();
+        let total = self.family_count();
         if total <= shown && !(expanded && total > self.collapsed.len()) {
             return None;
         }
         Some(if expanded { "Show less".into() } else { format!("Show {} more", total - shown) })
     }
+}
+
+pub fn project_choices(known: &[(String, String)]) -> Vec<(String, String)> {
+    let mut seen: HashSet<&str> = HashSet::new();
+    let unique: Vec<&(String, String)> = known.iter().filter(|(id, _)| !id.is_empty() && seen.insert(id)).collect();
+    let mut out: Vec<(String, String)> = unique
+        .iter()
+        .map(|(id, name)| {
+            let shared = unique.iter().filter(|(_, n)| n == name).count() > 1;
+            (id.clone(), if shared { format!("{name} ({id})") } else { name.clone() })
+        })
+        .collect();
+    out.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+    out
 }
 
 fn branch(x: &Session) -> Option<String> {
