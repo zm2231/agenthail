@@ -493,7 +493,7 @@ fn session_row(s: &App, x: &feed::catalog::Session, depth: u8, lead: bool, selec
         .subtitle(if waiting { x.display.label.clone() } else if lead { format!("Lead · {}", short_title(&s.ov.d.gist(x), 40)) } else { short_title(&s.ov.d.gist(x), 48) })
         .selected(selected == Some(x.id.as_str()))
         .on_select(move |s: &mut App, _| crate::over::open_session(s, &id));
-    if x.unread() || x.pinned() {
+    if crate::ui::session_menu::has_marks(x) {
         r = r.trailing(crate::ui::session_menu::marks(x));
     }
     if busy(x) {
@@ -584,7 +584,7 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -
             Target::Session(id) => s.ov.d.session(id),
             _ => None,
         };
-        if let Some(x) = held.filter(|x| x.unread() || x.pinned()) {
+        if let Some(x) = held.filter(|x| crate::ui::session_menu::has_marks(x)) {
             need = need.trailing(crate::ui::session_menu::marks(x));
         }
         let mut need = need.build(k).key(format!("need-{i}"));

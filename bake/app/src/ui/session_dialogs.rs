@@ -1,12 +1,16 @@
 use feed::catalog::Session;
 use feed::menu::{self, Act};
 use rune::{El, Tx, col, el, icon, row, text, text_input};
-use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Menu, MenuItem, Placement};
+use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Menu, MenuEntry, MenuItem, Placement};
 
 use crate::icons;
 use crate::theme::{self, BODY, META, accent, failed, faint, muted};
 use crate::ui::session_menu::{Confirm, Open, chips_for, choose, close_rename, current_alias, run, save_rename, set};
 use crate::App;
+
+pub fn has_marks(x: &Session) -> bool {
+    x.unread() || x.pinned() || x.snoozed(time::OffsetDateTime::now_utc())
+}
 
 pub fn marks(x: &Session) -> El {
     let mut r = row().gap(4.0).items_center();
@@ -15,6 +19,9 @@ pub fn marks(x: &Session) -> El {
     }
     if x.pinned() {
         r = r.child(icon(&icons::PIN, 11.0).color(faint()));
+    }
+    if x.snoozed(time::OffsetDateTime::now_utc()) {
+        r = r.child(icon(&icons::CLOCK, 11.0).color(faint()).label("Snoozed"));
     }
     r
 }
@@ -33,7 +40,7 @@ pub fn button(x: &Session) -> El {
             s.menus.chip = None;
             s.menus.open = match &s.menus.open {
                 Some(o) if o.session == id && o.at.is_none() => None,
-                _ => Some(Open { session: id.clone(), at: None }),
+                _ => Some(Open { session: id.clone(), at: None, sub: false }),
             };
         })
         .child(icon(&icons::MORE, 16.0).color(muted()))
@@ -49,6 +56,9 @@ fn act_icon(act: &Act) -> &'static rune::Icon {
         Act::Pin(_) => &icons::PIN,
         Act::Read(_) => &icons::CHECK_CIRCLE,
         Act::Archive(_) => &icons::INBOX,
+        Act::Adopt => &icons::ARROW_RIGHT,
+        Act::Move => &icons::SERVER,
+        Act::Snooze(_) | Act::Wake => &icons::CLOCK,
     }
 }
 
@@ -60,17 +70,30 @@ fn session_menu(s: &App, open: &Open, layer: &mut Vec<El>) {
         None => m.placement(Placement::BottomEnd),
     };
     let waiting = s.menus.busy.contains(&(x.id.clone(), "menu"));
-    for (i, group) in menu::entries(x).into_iter().enumerate() {
+    let item = |entry: menu::Entry| {
+        let (id, act) = (x.id.clone(), entry.act.clone());
+        let mut item = MenuItem::new(entry.label).icon(act_icon(&entry.act)).disabled(!entry.enabled || waiting && !matches!(entry.act, Act::Pr(_)));
+        if let Some(note) = entry.note {
+            item = item.description(note);
+        }
+        item.on_select(move |s: &mut App| run(s, &id, act.clone()))
+    };
+    for (i, group) in menu::offered(x, crate::ui::session_ops::offer(s, &x.id)).into_iter().enumerate() {
         if i > 0 {
             m = m.separator();
         }
-        for entry in group {
-            let (id, act) = (x.id.clone(), entry.act.clone());
-            let mut item = MenuItem::new(entry.label).icon(act_icon(&entry.act)).disabled(!entry.enabled || waiting && !matches!(entry.act, Act::Pr(_)));
-            if let Some(note) = entry.note {
-                item = item.description(note);
+        for mut entry in group {
+            if entry.sub.is_empty() {
+                m = m.item(item(entry));
+                continue;
             }
-            m = m.item(item.on_select(move |s: &mut App| run(s, &id, act.clone())));
+            let sub: Vec<MenuEntry> = std::mem::take(&mut entry.sub).into_iter().map(|e| MenuEntry::item(item(e))).collect();
+            let parent = MenuItem::new(entry.label).icon(act_icon(&entry.act)).disabled(waiting).submenu(sub, open.sub).on_submenu(|s: &mut App, on| {
+                if let Some(o) = s.menus.open.as_mut() {
+                    o.sub = on;
+                }
+            });
+            m = m.item(parent);
         }
     }
     let _ = m.build(theme::kit(), layer);
@@ -156,6 +179,7 @@ pub fn overlays(s: &App, layer: &mut Vec<El>) {
     if let Some(open) = &s.menus.open {
         session_menu(s, open, layer);
     }
+    crate::ui::session_ops::overlays(s, layer);
     if let Some((id, key)) = &s.menus.chip {
         chip_menu(s, id, key, layer);
     }

@@ -200,6 +200,12 @@ pub struct Session {
     pub read_only: bool,
     #[serde(default)]
     pub unavailable_reason: Option<String>,
+    #[serde(default)]
+    pub snooze: Option<crate::snooze::Snooze>,
+    #[serde(default)]
+    pub activity: Option<crate::snooze::Activity>,
+    #[serde(default, rename = "move")]
+    pub moving: Option<crate::moves::Move>,
 }
 
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
@@ -229,6 +235,8 @@ pub struct Capabilities {
 pub struct Lifecycle {
     #[serde(default)]
     pub resume: bool,
+    #[serde(default)]
+    pub adopt: bool,
 }
 
 fn capabilities_or_default<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Capabilities, D::Error> {

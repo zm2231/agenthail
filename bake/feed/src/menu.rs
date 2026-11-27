@@ -13,6 +13,10 @@ pub enum Act {
     Pin(bool),
     Read(bool),
     Archive(bool),
+    Adopt,
+    Move,
+    Snooze(crate::snooze::For),
+    Wake,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,11 +25,12 @@ pub struct Entry {
     pub label: String,
     pub note: Option<String>,
     pub enabled: bool,
+    pub sub: Vec<Entry>,
 }
 
 impl Entry {
     fn on(act: Act, label: impl Into<String>) -> Entry {
-        Entry { act, label: label.into(), note: None, enabled: true }
+        Entry { act, label: label.into(), note: None, enabled: true, sub: Vec::new() }
     }
 }
 
@@ -33,6 +38,7 @@ impl Entry {
 pub enum Patch {
     Pinned(Option<String>),
     Archived(bool),
+    Snoozed(Option<crate::snooze::Snooze>),
     Read { receipt: ReadState, from: Vec<String> },
     Alias(Option<String>),
     Pr { pr: crate::catalog::Pr, linked: bool },
@@ -43,6 +49,7 @@ impl Patch {
         match self {
             Patch::Pinned(at) => x.pinned_at = at.clone(),
             Patch::Archived(on) => x.archived = *on,
+            Patch::Snoozed(snooze) => x.snooze = snooze.clone(),
             Patch::Read { receipt, .. } => x.read_state = Some(receipt.clone()),
             Patch::Alias(alias) => x.alias = alias.clone(),
             Patch::Pr { pr, linked: true } => match x.prs.iter_mut().find(|p| p.url == pr.url) {
@@ -58,6 +65,7 @@ impl Patch {
         match self {
             Patch::Pinned(at) => x.pinned_at.is_some() == at.is_some(),
             Patch::Archived(on) => x.archived == *on,
+            Patch::Snoozed(snooze) => x.snooze == *snooze,
             Patch::Read { from, .. } => x.read_state.as_ref().is_none_or(|r| !from.contains(&r.revision)),
             Patch::Alias(alias) => x.alias == *alias,
             Patch::Pr { pr, linked } => match x.prs.iter().find(|p| p.url == pr.url) {
@@ -97,6 +105,7 @@ impl Patch {
         match self {
             Patch::Pinned(_) => x.pinned_at = daemon.pinned_at.clone(),
             Patch::Archived(_) => x.archived = daemon.archived,
+            Patch::Snoozed(_) => x.snooze = daemon.snooze.clone(),
             Patch::Read { .. } => x.read_state = daemon.read_state.clone(),
             Patch::Alias(_) => x.alias = daemon.alias.clone(),
             Patch::Pr { pr, .. } => {
@@ -129,9 +138,26 @@ impl Session {
     }
 }
 
-/// The daemon refuses session-focus for a session on another host.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Offer {
+    pub paired_hosts: bool,
+    pub moving: bool,
+    pub now: Option<time::OffsetDateTime>,
+}
+
 pub fn entries(x: &Session) -> Vec<Vec<Entry>> {
+    offered(x, Offer::default())
+}
+
+/// The daemon refuses session-focus for a session on another host.
+pub fn offered(x: &Session, offer: Offer) -> Vec<Vec<Entry>> {
     let mut open = vec![Entry::on(Act::Rename, "Rename…")];
+    if x.adoptable() {
+        open.push(Entry::on(Act::Adopt, "Open in Agenthail"));
+    }
+    if offer.paired_hosts && !offer.moving && x.movable() {
+        open.push(Entry::on(Act::Move, "Move to Another Computer…"));
+    }
     if x.focusable() {
         let mut terminal = Entry::on(Act::Terminal, "Open in terminal");
         if !x.local() {
@@ -164,9 +190,21 @@ pub fn entries(x: &Session) -> Vec<Vec<Entry>> {
     if x.read_state.is_some() {
         keep.push(Entry::on(Act::Read(x.unread()), if x.unread() { "Mark as read" } else { "Mark as unread" }));
     }
+    if !x.archived {
+        keep.push(snooze(x, offer.now.unwrap_or_else(time::OffsetDateTime::now_utc)));
+    }
     keep.push(Entry::on(Act::Archive(!x.archived), if x.archived { "Unarchive" } else { "Archive" }));
     groups.push(keep);
     groups
+}
+
+fn snooze(x: &Session, now: time::OffsetDateTime) -> Entry {
+    if x.snoozed(now) {
+        return Entry::on(Act::Wake, "Wake");
+    }
+    let mut entry = Entry::on(Act::Snooze(crate::snooze::For::Hour), "Snooze");
+    entry.sub = crate::snooze::choices(x).into_iter().map(|c| Entry::on(Act::Snooze(c), c.label())).collect();
+    entry
 }
 
 fn pull_requests(x: &Session) -> Vec<Entry> {
@@ -298,13 +336,17 @@ mod tests {
         Session { id: "s1".into(), host: Named { name: "mac".into(), state: "local".into(), ..Default::default() }, ..Default::default() }
     }
 
+    fn t(ts: &str) -> time::OffsetDateTime {
+        crate::catalog::parse_time(ts).unwrap()
+    }
+
     fn labels(x: &Session) -> Vec<Vec<String>> {
         entries(x).into_iter().map(|g| g.into_iter().map(|e| e.label).collect()).collect()
     }
 
     #[test]
     fn a_plain_session_offers_rename_pin_and_archive() {
-        assert_eq!(labels(&session()), vec![vec!["Rename…"], vec!["Link a pull request…"], vec!["Pin", "Archive"]]);
+        assert_eq!(labels(&session()), vec![vec!["Rename…"], vec!["Link a pull request…"], vec!["Pin", "Snooze", "Archive"]]);
     }
 
     #[test]
@@ -317,6 +359,63 @@ mod tests {
         assert_eq!(keep.iter().map(|e| (e.label.as_str(), e.act.clone())).collect::<Vec<_>>(), vec![("Unpin", Act::Pin(false)), ("Mark as read", Act::Read(true)), ("Unarchive", Act::Archive(false))]);
         x.read_state = Some(ReadState { first_unread: String::new(), revision: "r1".into() });
         assert_eq!(entries(&x)[2][1], Entry::on(Act::Read(false), "Mark as unread"));
+    }
+
+    #[test]
+    fn open_in_agenthail_is_offered_where_the_daemon_can_adopt() {
+        let mut x = session();
+        assert!(!labels(&x)[0].contains(&"Open in Agenthail".to_string()));
+        x.capabilities.lifecycle.adopt = true;
+        assert_eq!(labels(&x)[0], vec!["Rename…", "Open in Agenthail"]);
+        x.read_only = true;
+        assert!(!labels(&x)[0].contains(&"Open in Agenthail".to_string()));
+    }
+
+    #[test]
+    fn a_move_is_offered_once_another_computer_is_paired_and_none_is_on_its_way() {
+        let mut x = session();
+        x.surface = "claude".into();
+        let first = |x: &Session, offer: Offer| offered(x, offer)[0].iter().map(|e| e.act.clone()).collect::<Vec<_>>();
+        assert!(!first(&x, Offer::default()).contains(&Act::Move));
+        let paired = Offer { paired_hosts: true, ..Offer::default() };
+        assert!(first(&x, paired).contains(&Act::Move));
+        assert!(!first(&x, Offer { moving: true, ..paired }).contains(&Act::Move));
+        x.host = Named { name: "forge".into(), state: "connected".into(), ..Default::default() };
+        assert!(!first(&x, paired).contains(&Act::Move));
+    }
+
+    #[test]
+    fn snooze_offers_its_choices_and_a_snoozed_session_offers_wake() {
+        use crate::snooze::{For, Snooze};
+        let now = t("2026-11-26T10:00:00Z");
+        let at = Offer { now: Some(now), ..Offer::default() };
+        let mut x = session();
+        let snooze = offered(&x, at)[2][1].clone();
+        assert_eq!(snooze.label, "Snooze");
+        assert_eq!(snooze.sub.iter().map(|e| (e.label.as_str(), e.act.clone())).collect::<Vec<_>>(), vec![("For an hour", Act::Snooze(For::Hour)), ("Until tomorrow morning", Act::Snooze(For::Morning))]);
+        x.status = "busy".into();
+        assert_eq!(offered(&x, at)[2][1].sub.last().map(|e| e.act.clone()), Some(Act::Snooze(For::TurnEnds)));
+        x.snooze = Some(Snooze { snoozed_at: "2026-11-26T09:00:00Z".into(), until: "2026-11-26T11:00:00Z".into(), wake: "time".into() });
+        let wake = offered(&x, at)[2][1].clone();
+        assert_eq!((wake.label.as_str(), wake.act, wake.sub.len()), ("Wake", Act::Wake, 0));
+        let later = Offer { now: Some(t("2026-11-26T11:00:00Z")), ..Offer::default() };
+        assert_eq!(offered(&x, later)[2][1].label, "Snooze", "a snooze that ran out is snoozed again, not woken");
+        x.archived = true;
+        assert!(!offered(&x, at).concat().iter().any(|e| matches!(e.act, Act::Snooze(_) | Act::Wake)), "the daemon refuses to snooze an archived session");
+    }
+
+    #[test]
+    fn a_snooze_lands_and_restores_like_the_other_toggles() {
+        use crate::snooze::Snooze;
+        let mut x = session();
+        let snooze = Snooze { snoozed_at: "2026-11-26T09:00:00Z".into(), until: "2026-11-26T11:00:00Z".into(), wake: "time".into() };
+        let patch = Patch::Snoozed(Some(snooze.clone()));
+        assert!(!patch.shown(&x));
+        patch.apply(&mut x);
+        assert!(patch.shown(&x));
+        patch.restore(&mut x, &session());
+        assert_eq!(x.snooze, None);
+        assert!(Patch::Snoozed(None).shown(&x));
     }
 
     #[test]
