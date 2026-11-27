@@ -488,8 +488,15 @@ fn a_message_to_a_lead_says_whether_it_arrived_or_waits() {
 
 #[test]
 fn a_lead_message_without_a_receipt_is_unconfirmed() {
-    let (client, _seen) = daemon(replies(&[(200, r#"{"ok":true}"#), (200, r#"{"ok":true,"result":null}"#), (200, r#"{"ok":true,"result":{}}"#), (200, r#"{"ok":true,"result":"x"}"#)]));
-    for _ in 0..4 {
+    let (client, _seen) = daemon(replies(&[(200, r#"{"ok":true}"#), (200, r#"{"ok":true,"result":null}"#), (200, r#"{"ok":true,"result":{}}"#), (200, r#"{"ok":true,"result":"x"}"#), (200, r#"{"ok":true,"result":{"evidence":"queued","queueId":"bad"}}"#)]));
+    for _ in 0..5 {
         assert_eq!(client.lead_send("p1", "hi").unwrap(), Delivered::Unconfirmed);
     }
+}
+
+#[test]
+fn a_tile_answer_without_a_revision_is_not_taken() {
+    let (client, _seen) = daemon(replies(&[(200, r#"{"tileOrder":{}}"#), (409, r#"{"error":{"code":"conflict","message":"changed"},"tileOrder":{}}"#)]));
+    assert!(matches!(client.put_tiles(&order(&["a"], &[], 1)), TileReply::Failed(_)));
+    assert_eq!(client.put_tiles(&order(&["a"], &[], 1)), TileReply::Failed("changed".into()));
 }

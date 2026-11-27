@@ -651,7 +651,8 @@ impl Client {
 
     pub fn lead_send(&self, project: &str, message: &str) -> Outcome<Delivered> {
         let reply = self.action("coordinator-send", json!({"project": project, "message": message, "author": "person"}))?;
-        if reply["result"]["evidence"].as_str().is_none_or(str::is_empty) {
+        let readable = serde_json::from_value::<crate::composer::Receipt>(reply["result"].clone()).is_ok_and(|r| !r.evidence.is_empty());
+        if !readable {
             return Ok(Delivered::Unconfirmed);
         }
         Ok(Delivered::read(&reply))
@@ -663,9 +664,10 @@ impl Client {
 
     pub fn put_tiles(&self, order: &TileOrder) -> TileReply {
         let body = serde_json::to_value(order).unwrap_or(Value::Null);
+        let read = |v: &Value| v["revision"].is_i64().then(|| serde_json::from_value::<TileOrder>(v.clone()).ok()).flatten();
         match self.put_json("/api/v1/projects/tiles", body) {
-            Ok(reply) => serde_json::from_value(reply["tileOrder"].clone()).map(TileReply::Saved).unwrap_or_else(|e| TileReply::Failed(format!("the daemon's answer had no tile order: {e}"))),
-            Err(e) if e.status == 409 => serde_json::from_value(e.reply["tileOrder"].clone()).map(TileReply::Stale).unwrap_or(TileReply::Failed(e.message)),
+            Ok(reply) => read(&reply["tileOrder"]).map(TileReply::Saved).unwrap_or_else(|| TileReply::Failed("Agenthail's answer had no project order".into())),
+            Err(e) if e.status == 409 => read(&e.reply["tileOrder"]).map(TileReply::Stale).unwrap_or(TileReply::Failed(e.message)),
             Err(e) => TileReply::Failed(e.message),
         }
     }
