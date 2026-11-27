@@ -45,7 +45,8 @@ pub fn page(s: &Prefs) -> El {
     general.extend(accent_editor(s));
     general.push(slider(s, &view, "text.scale", "Text size", (0.8, 1.6), 1.0, "×", false));
     out = out.child(parts::section("", general, None));
-    let is_image = chosen(&view, "background", "").starts_with("image:");
+    let chosen_background = chosen(&view, "background", "");
+    let is_image = chosen_background.starts_with("image:") || chosen_background.starts_with("art:");
     let mut background = vec![grid(s, &view)];
     background.extend(mesh_editor(s));
     background.push(slider(s, &view, "background.dim", "Dim", (0.0, 0.8), 0.0, "", false));
