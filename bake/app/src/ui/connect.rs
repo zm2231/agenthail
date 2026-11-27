@@ -87,6 +87,9 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                             resume = fresh;
                             watch::catalog(c.clone(), cursor.clone(), resumed, poke.clone(), generation.clone(), mine);
                             watch::events(c.clone(), snap.event_cursor, tx.clone(), generation.clone(), mine);
+                            if tx.send(Bg::Reopened).is_err() {
+                                return;
+                            }
                         } else if std::mem::take(&mut gap) {
                             cursor.store(catalog.seq(), Ordering::Release);
                             let _ = resume.send(());
