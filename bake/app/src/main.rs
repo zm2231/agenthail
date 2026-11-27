@@ -1091,7 +1091,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Changed(wants) => changed_elsewhere(s, wants),
             Bg::Reopened => reopened(s),
             Bg::LedgerChanged(key, at) => ask_overview(s, Ask::Ledger(key, at)),
-            Bg::LedgersReopened => ask_overview(s, Ask::Refresh),
+            Bg::LedgersReopened => ask_overview(s, Ask::Reset),
             Bg::SessionNews => ask_overview(s, Ask::Refresh),
             Bg::Item(id, item) => {
                 s.items.insert(id, item);

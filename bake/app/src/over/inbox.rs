@@ -50,7 +50,7 @@ pub struct State {
     daemon: Option<String>,
     newest: Option<Instant>,
     rev: Option<String>,
-    ask: Option<Sender<()>>,
+    ask: Option<Sender<bool>>,
 }
 
 impl Default for State {
@@ -80,23 +80,32 @@ pub fn start(state: &mut State, client: &Client) {
     if state.ask.is_some() {
         return;
     }
-    let (ask, asked) = channel::<()>();
-    let _ = ask.send(());
+    let (ask, asked) = channel::<bool>();
+    let _ = ask.send(false);
     state.ask = Some(ask);
     let (client, tx) = (client.clone(), state.tx.clone());
     check_version(&client, &tx);
     std::thread::spawn(move || {
-        let mut failed = false;
+        let mut pace = feed::watch::Pace::default();
         loop {
-            let woke = if failed { asked.recv_timeout(feed::watch::DECISIONS_RETRY).map_err(|e| e == RecvTimeoutError::Disconnected) } else { asked.recv().map_err(|_| true) };
-            if woke == Err(true) {
-                return;
+            let got = match pace.wait(Instant::now()) {
+                Some(wait) => asked.recv_timeout(wait),
+                None => asked.recv().map_err(|_| RecvTimeoutError::Disconnected),
+            };
+            let mut due = match got {
+                Ok(now) => pace.ask(now, Instant::now()),
+                Err(RecvTimeoutError::Timeout) => true,
+                Err(RecvTimeoutError::Disconnected) => return,
+            };
+            while let Ok(now) = asked.try_recv() {
+                due |= pace.ask(now, Instant::now());
             }
-            while asked.try_recv().is_ok() {}
+            if !due {
+                continue;
+            }
             let started = Instant::now();
-            let Some(again) = fetch(&client, &tx) else { return };
-            failed = again;
-            std::thread::sleep(feed::watch::DECISIONS_GAP.saturating_sub(started.elapsed()));
+            let Some(failed) = fetch(&client, &tx) else { return };
+            pace.read(started, failed);
         }
     });
 }
@@ -112,7 +121,7 @@ fn check_version(client: &Client, tx: &Sender<Done>) {
 
 pub fn changed(s: &crate::App) {
     if let Some(ask) = &s.ov.inbox.ask {
-        let _ = ask.send(());
+        let _ = ask.send(false);
     }
 }
 
@@ -124,11 +133,17 @@ pub fn reopened(s: &crate::App) {
 }
 
 pub fn refresh(client: &Client, st: &State) {
-    let tx = &st.tx;
-    let (client, tx) = (client.clone(), tx.clone());
-    std::thread::spawn(move || {
-        fetch(&client, &tx);
-    });
+    match &st.ask {
+        Some(ask) => {
+            let _ = ask.send(true);
+        }
+        None => {
+            let (client, tx) = (client.clone(), st.tx.clone());
+            std::thread::spawn(move || {
+                fetch(&client, &tx);
+            });
+        }
+    }
 }
 
 pub fn rev_seen(s: &mut crate::App, rev: &str) {

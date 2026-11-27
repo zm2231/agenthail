@@ -380,3 +380,14 @@ fn a_change_heard_after_the_read_landed_reads_that_ledger_alone() {
     known.read("p", at, &read);
     assert!(known.skips_ledger("p", Some(at)) && known.skips_actor("missing"), "a single read also records its failed lookups");
 }
+
+#[test]
+fn a_project_opened_outside_the_overview_hears_its_ledger_change_by_key() {
+    let mut known = super::live::Known::default();
+    let mut f = fetched("2026-11-24T12:00:00Z", Vec::new(), Vec::new());
+    f.recorded.projects[1].ledger_key = "project:old".into();
+    known.learn(&f);
+    let opened = Instant::now() - std::time::Duration::from_millis(10);
+    known.read("old", opened, &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: Vec::new() }));
+    assert_eq!(known.changed("project:old", Instant::now()), Change::Read("old".into()));
+}

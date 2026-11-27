@@ -64,6 +64,9 @@ impl Known {
             }
             self.hold(id, fetched.started, result.as_ref().ok());
         }
+        for p in &fetched.recorded.projects {
+            self.keys.insert(if p.ledger_key.is_empty() { p.id.clone() } else { p.ledger_key.clone() }, p.id.clone());
+        }
         self.wanted = fetched.ledgers.keys().chain(&fetched.held).cloned().collect();
         self.sessions = fetched.recorded.sessions.clone();
         self.asked(&fetched.asked, &fetched.recorded.actors);

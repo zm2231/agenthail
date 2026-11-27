@@ -304,6 +304,32 @@ impl Client {
     }
 }
 
+#[derive(Default)]
+pub struct Pace {
+    last: Option<std::time::Instant>,
+    soon: bool,
+    failed: bool,
+}
+
+impl Pace {
+    pub fn wait(&self, now: std::time::Instant) -> Option<Duration> {
+        let last = self.last?;
+        let due = [self.soon.then_some(last + DECISIONS_GAP), self.failed.then_some(last + DECISIONS_RETRY)].into_iter().flatten().min()?;
+        Some(due.saturating_duration_since(now))
+    }
+
+    pub fn ask(&mut self, now: bool, at: std::time::Instant) -> bool {
+        self.soon = true;
+        now || self.last.is_none_or(|last| at >= last + DECISIONS_GAP)
+    }
+
+    pub fn read(&mut self, at: std::time::Instant, failed: bool) {
+        self.last = Some(at);
+        self.soon = false;
+        self.failed = failed;
+    }
+}
+
 pub fn stamp() -> String {
     time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap_or_default()
 }
