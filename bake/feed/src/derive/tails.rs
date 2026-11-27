@@ -73,7 +73,7 @@ pub fn fetch(client: &Client, session: &str, budget: Duration) -> Result<Tail, S
 pub struct Tails {
     held: HashMap<String, (String, Tail)>,
     fetching: HashSet<String>,
-    failed: HashMap<String, (String, Instant)>,
+    failed: HashMap<String, Instant>,
 }
 
 impl Tails {
@@ -85,8 +85,8 @@ impl Tails {
         let keep: HashSet<&str> = recent.iter().map(|s| s.id.as_str()).collect();
         self.held.retain(|id, _| keep.contains(id.as_str()));
         let now_i = Instant::now();
-        self.failed.retain(|id, (_, until)| keep.contains(id.as_str()) && now_i < *until);
-        let waiting = |s: &Session| self.failed.get(&s.id).is_some_and(|(at, _)| *at == s.last_active);
+        self.failed.retain(|id, until| keep.contains(id.as_str()) && now_i < *until);
+        let waiting = |s: &Session| self.failed.contains_key(&s.id);
         let due: Vec<(String, String)> = recent
             .into_iter()
             .filter(|s| !open.contains(&s.id) && !self.fetching.contains(&s.id) && !waiting(s) && self.held.get(&s.id).is_none_or(|(at, _)| *at != s.last_active))
@@ -105,14 +105,19 @@ impl Tails {
                 self.held.insert(session.to_string(), (last_active, tail));
             }
             Err(_) => {
-                self.failed.insert(session.to_string(), (last_active, Instant::now() + TAIL_RETRY));
+                self.failed.insert(session.to_string(), Instant::now() + TAIL_RETRY);
             }
         }
     }
 
+    #[cfg(test)]
+    pub fn failed_until_now(&mut self, session: &str) {
+        self.failed.insert(session.to_string(), Instant::now());
+    }
+
     pub fn retry_due(&self) -> bool {
         let now = Instant::now();
-        self.failed.values().any(|(_, until)| now >= *until)
+        self.failed.values().any(|until| now >= *until)
     }
 
     pub fn held(&self) -> impl Iterator<Item = (&String, &Tail)> {

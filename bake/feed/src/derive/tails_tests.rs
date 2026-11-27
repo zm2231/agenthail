@@ -89,7 +89,9 @@ fn a_replay_cut_off_before_the_live_point_is_not_kept_and_is_read_again_later() 
     tails.take("a", "2026-11-24T11:50:00Z".into(), broken);
     assert!(tails.due(&sessions, now, &HashSet::new()).is_empty(), "a failed read waits before trying again");
     let moved = vec![session("a", "2026-11-24T11:55:00Z")];
-    assert_eq!(tails.due(&moved, now, &HashSet::new()).len(), 1, "a session that moves is read again at once");
+    assert!(tails.due(&moved, now, &HashSet::new()).is_empty(), "new activity doesn't cut the wait after a failure short");
+    tails.failed_until_now("a");
+    assert_eq!(tails.due(&moved, now, &HashSet::new()).len(), 1, "once the wait is over the session is read again");
     tails.take("a", "2026-11-24T11:55:00Z".into(), tails::read(lines(vec![": live".into()])));
     let sessions = moved;
     assert!(tails.due(&sessions, now, &HashSet::new()).is_empty(), "a complete tail is kept, even an empty one");
