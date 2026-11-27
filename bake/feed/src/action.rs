@@ -48,18 +48,21 @@ impl Client {
     }
 
     pub fn send_as(&self, session: &str, message: &str, attachments: &[String], busy: Option<Busy>, pin: Option<crate::holders::Pin>, key: &str) -> Outcome<Delivered> {
-        self.send_receipt(session, message, attachments, busy, pin, key).map(|(delivered, _)| delivered)
+        self.send_receipt(session, message, attachments, busy, None, pin, key).map(|(delivered, _)| delivered)
     }
 
     /// `busy` None leaves a busy session to the daemon's busy-delivery setting.
     // A message keeps the terminal it was written for, so a retry replays the same request.
-    pub fn send_receipt(&self, session: &str, message: &str, attachments: &[String], busy: Option<Busy>, pin: Option<crate::holders::Pin>, key: &str) -> Outcome<(Delivered, Value)> {
+    pub fn send_receipt(&self, session: &str, message: &str, attachments: &[String], busy: Option<Busy>, turn: Option<&crate::composer::TurnOptions>, pin: Option<crate::holders::Pin>, key: &str) -> Outcome<(Delivered, Value)> {
         let mut payload = json!({"sessionId": session, "message": message, "author": "person"});
         if !attachments.is_empty() {
             payload["attachments"] = json!(attachments);
         }
         if let Some(busy) = busy {
             payload["busyDelivery"] = Value::String(busy.as_str().into());
+        }
+        if let Some(turn) = turn {
+            turn.apply(&mut payload);
         }
         let reply = self.action_pinned("send", payload, key, pin)?;
         Ok((Delivered::read(&reply), reply))
@@ -273,6 +276,13 @@ mod tests {
             (
                 Box::new(|c| c.send_as("s1", "hi", &[], None, Some(crate::holders::Pin { pid: 41, started_at: Some(1_795_687_200_250) }), &crate::catalog::request_key()).map(drop)),
                 json!({"action": "send", "sessionId": "s1", "message": "hi", "author": "person", "pid": 41, "pidStartedAt": 1_795_687_200_250i64}),
+            ),
+            (
+                Box::new(|c| {
+                    let turn = crate::composer::TurnOptions { service_tier: "flex".into(), output_schema: Some(json!({"type": "object"})) };
+                    c.send_receipt("s1", "hi", &[], Some(Busy::Queue), Some(&turn), None, &crate::catalog::request_key()).map(drop)
+                }),
+                json!({"action": "send", "sessionId": "s1", "message": "hi", "author": "person", "busyDelivery": "queue", "serviceTier": "flex", "outputSchema": {"type": "object"}}),
             ),
             (Box::new(|c| c.acknowledge_lead_replacement(5)), json!({"action": "lead-replacement-ack", "replacementId": 5})),
             (

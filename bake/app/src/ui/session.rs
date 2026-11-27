@@ -75,11 +75,12 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
                 None => moving,
             }
         }
+        _ if super::turn_options::problem(s, &x.id).is_some() => text(super::turn_options::problem(s, &x.id).unwrap_or_default()).font(META).color(failed()),
         Some(note) => text(note).font(META).color(if unsent { attention() } else { muted() }),
         None if x.capabilities.reaches_as_note => text(feed::notice::SENDS_AS_NOTE).font(META).color(faint()),
         None => text(crate::send_busy(s, &x.id).map(|b| b.hint()).unwrap_or("Return to send · Shift-Return for a new line")).font(META).color(faint()),
     };
-    let mut controls = row().w_full().px(10.0).pb(10.0).gap(8.0).items_center().children(super::attach::button(s, &x.id)).child(chip(&icons::SPARKLES, x.surface.clone())).children(super::holders::picker(s, x));
+    let mut controls = row().w_full().px(10.0).pb(10.0).gap(8.0).items_center().children(super::attach::button(s, &x.id)).child(chip(&icons::SPARKLES, x.surface.clone())).children(super::turn_options::chip(s, x)).children(super::holders::picker(s, x));
     if let Some(choice) = busy {
         let id = x.id.clone();
         controls = controls.child(

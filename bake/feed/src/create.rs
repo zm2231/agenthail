@@ -292,6 +292,18 @@ pub const CODEX_SERVICE_TIERS: [(&str, &str); 3] = [("default", "Default"), ("fa
 
 const OUTPUT_SCHEMA_LIMIT: usize = 64 << 10;
 
+pub fn output_schema(text: &str) -> std::result::Result<Option<Value>, &'static str> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    match serde_json::from_str::<Value>(text) {
+        Ok(schema @ Value::Object(_)) if schema.to_string().len() <= OUTPUT_SCHEMA_LIMIT => Ok(Some(schema)),
+        Ok(Value::Object(_)) => Err("The output schema must be at most 64 KiB."),
+        _ => Err("The output schema must be a JSON object."),
+    }
+}
+
 pub const CODEX_APPROVALS: [(&str, &str); 3] = [("on-request", "Ask when needed"), ("untrusted", "Ask for untrusted work"), ("never", "Never ask")];
 
 pub fn permission_modes(surface: &str) -> &'static [(&'static str, &'static str)] {
@@ -343,15 +355,10 @@ impl Launch {
     }
 
     fn schema(&self) -> std::result::Result<Option<Value>, &'static str> {
-        let text = self.output_schema.trim();
-        if !self.takes_codex_options() || text.is_empty() {
+        if !self.takes_codex_options() {
             return Ok(None);
         }
-        match serde_json::from_str::<Value>(text) {
-            Ok(schema @ Value::Object(_)) if schema.to_string().len() <= OUTPUT_SCHEMA_LIMIT => Ok(Some(schema)),
-            Ok(Value::Object(_)) => Err("The output schema must be at most 64 KiB."),
-            _ => Err("The output schema must be a JSON object."),
-        }
+        output_schema(&self.output_schema)
     }
 
     pub fn alias_name(&self) -> &str {
