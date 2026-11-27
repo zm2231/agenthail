@@ -115,6 +115,7 @@ fn encode(s: &App) -> String {
         "stashes": s.complete.keys.to_json(),
         "stashedAttachments": crate::ui::attach::stashed_saved(s),
         "unsent": unsent(s),
+        "handledHere": feed::decisions::saved_history(&s.ov.inbox.history),
         "queueTaking": feed::queue::Taking::to_json(&s.queue_taking),
         "backgroundDock": s.dock.to_json(),
         "turnNotice": feed::notice::shared().to_json(),
@@ -155,6 +156,7 @@ pub fn load(s: &mut App) {
     }
     s.drafts = feed::composer::Drafts::from_json(&v["drafts"]);
     s.unsent = feed::composer::Unconfirmed::from_json(&v["unsent"]);
+    s.ov.inbox.history = feed::decisions::restored_history(&v["handledHere"]);
     s.attach.tray = feed::attach::Tray::from_json(&v["attachments"]);
     s.attach.tray.load_stashed(&v["stashedAttachments"]);
     s.complete.keys = crate::ui::composer_keys::State::from_json(&v["stashes"]);
