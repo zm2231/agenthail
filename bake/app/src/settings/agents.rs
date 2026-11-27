@@ -331,7 +331,7 @@ fn decision_row(s: &Prefs, d: &Draft, role: &RoleView, a: &ActionView, locked: b
     choices.extend(Decision::ALL.iter().map(|x| x.title().to_string()));
     let current = chosen.map_or(choices[0].clone(), |x| x.title().to_string());
     let name = a.name.clone();
-    let control = picker(s, format!("agent-decision-{}", a.name), &a.detail, choices, Some(&current), 150.0, locked, layer, move |s, i| edit(s, |d| d.set_decision(&name, i.checked_sub(1).map(|i| Decision::ALL[i]))), k);
+    let control = picker(s, format!("agent-decision-{}", a.name), &a.detail, choices, Some(&current), k.text_size(150.0), locked, layer, move |s, i| edit(s, |d| d.set_decision(&name, i.checked_sub(1).map(|i| Decision::ALL[i]))), k);
     let dot = el().w(6.0).h(6.0).radius(3.0).fill(if chosen.is_some() { accent() } else { theme::line() });
     let words = col().gap(1.0).grow(1.0).min_w(0.0).child(text(a.detail.clone()).font(k.text(BODY)).color(theme::text()).wrap()).child(text(a.name.clone()).font(k.text(META)).color(faint()));
     row().w_full().gap(10.0).items_center().px(14.0).py(8.0).child(dot).child(words).child(control)
