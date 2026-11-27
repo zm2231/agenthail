@@ -1,21 +1,33 @@
-use std::time::{Duration, Instant};
-
 use crate::shortcuts::Stored;
 
-const WINDOW_SWITCH: Duration = Duration::from_millis(300);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Window {
+    Main,
+    Settings,
+}
 
 #[derive(Debug, Default)]
 pub struct Return {
-    left: Option<Instant>,
+    main: bool,
+    settings: bool,
+    seen: bool,
+    away: bool,
 }
 
 impl Return {
-    pub fn focus(&mut self, focused: bool, now: Instant) -> bool {
-        if !focused {
-            self.left = Some(now);
-            return false;
+    pub fn focus(&mut self, window: Window, focused: bool) -> bool {
+        match window {
+            Window::Main => self.main = focused,
+            Window::Settings => self.settings = focused,
         }
-        self.left.take().is_some_and(|left| now.saturating_duration_since(left) >= WINDOW_SWITCH)
+        self.seen |= focused;
+        focused && std::mem::take(&mut self.away)
+    }
+
+    pub fn tick(&mut self) {
+        if self.seen && !self.main && !self.settings {
+            self.away = true;
+        }
     }
 }
 
@@ -179,14 +191,21 @@ mod tests {
 
     #[test]
     fn moving_between_agenthails_own_windows_is_not_coming_back() {
-        let t = Instant::now();
         let mut r = Return::default();
-        assert!(!r.focus(true, t), "the first focus at launch isn't a return");
-        assert!(!r.focus(false, t + Duration::from_secs(1)));
-        assert!(!r.focus(true, t + Duration::from_millis(1005)), "another of its windows took focus straight away");
-        assert!(!r.focus(false, t + Duration::from_secs(2)));
-        assert!(r.focus(true, t + Duration::from_secs(9)), "coming back from another app");
-        assert!(!r.focus(true, t + Duration::from_secs(10)), "a focus without a blur is not a return");
+        r.tick();
+        assert!(!r.focus(Window::Main, true), "the first focus at launch isn't a return");
+        r.tick();
+        assert!(!r.focus(Window::Main, false));
+        assert!(!r.focus(Window::Settings, true), "another of its windows took focus before anyone looked");
+        r.tick();
+        assert!(!r.focus(Window::Settings, false));
+        r.tick();
+        assert!(r.focus(Window::Main, true), "coming back from another app, however quickly");
+        assert!(!r.focus(Window::Main, true), "once per return");
+        r.focus(Window::Main, false);
+        r.focus(Window::Settings, true);
+        r.tick();
+        assert!(!r.focus(Window::Main, true), "a slow switch between its own windows never left the app");
     }
 
     #[test]

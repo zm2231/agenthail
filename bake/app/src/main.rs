@@ -1579,6 +1579,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     menubar::sync_keys(s);
     menubar::warn(s);
     menubar::badge(s);
+    hotkey::tick();
     if let Some(due) = over::worksearch::wait(s) {
         s.wake.after(tx, due);
     }
@@ -1598,7 +1599,7 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
 }
 
 fn on_focus(_: &mut App, focused: bool, _: &mut Tx) {
-    hotkey::focus(focused);
+    hotkey::focus(feed::hotkey::Window::Main, focused);
 }
 
 fn on_quit(s: &mut App, _: &mut Tx) {

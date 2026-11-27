@@ -1,7 +1,7 @@
 use std::cell::{OnceCell, RefCell};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use feed::hotkey::{Ask, Hotkey, Refusal, Registrar, Return};
+use feed::hotkey::{Ask, Hotkey, Refusal, Registrar, Return, Window};
 use feed::shortcuts::{ANY_APP, ANY_APP_ID, Stored};
 use rune::{AppHandle, Shortcut, ShortcutError, ShortcutId, Tx};
 
@@ -109,8 +109,12 @@ pub fn chose() {
     ask(Ask::Choose);
 }
 
-pub fn focus(focused: bool) {
-    if RETURN.with_borrow_mut(|r| r.focus(focused, std::time::Instant::now())) {
+pub fn tick() {
+    RETURN.with_borrow_mut(Return::tick);
+}
+
+pub fn focus(window: Window, focused: bool) {
+    if RETURN.with_borrow_mut(|r| r.focus(window, focused)) {
         bindings::refresh();
         ask(Ask::Regain);
     }

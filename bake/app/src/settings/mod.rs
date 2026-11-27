@@ -738,7 +738,7 @@ fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         .children(unfollowed(s, &k))
         .child(parts::scroll(page));
     rune_kit::root(body, layer).on_window_focus(|s: &mut Prefs, focused, _| {
-        crate::hotkey::focus(focused);
+        crate::hotkey::focus(feed::hotkey::Window::Settings, focused);
         if !focused {
             devices::hide_link(s);
         } else {
