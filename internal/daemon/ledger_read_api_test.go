@@ -185,24 +185,32 @@ func TestTheLedgerStreamSendsAFewVersionsForAReplayOfThousandsOfEvents(t *testin
 		}
 	}
 	took := time.Since(began)
+	_, now := ledgerGetJSON(t, handler, "/api/v1/ledger?projectKey="+p.key)
 	var published []ledgerChange
-	for {
-		change, ok := receive(2 * ledgerChangeWait)
+	for len(published) == 0 || published[len(published)-1].Version != now {
+		change, ok := receive(time.Minute)
 		if !ok {
-			break
+			t.Fatalf("after %d publishes the stream never sent the board's ETag %s", len(published), now)
 		}
 		published = append(published, change)
 	}
-	if most := int(took/ledgerChangeWait) + 2; len(published) == 0 || len(published) > most {
+	if most := int(took/ledgerChangeWait) + 2; len(published) > most {
 		t.Fatalf("%d events written in %s gave %d publishes, want 1 to %d", replayed, took, len(published), most)
 	}
-	_, now := ledgerGetJSON(t, handler, "/api/v1/ledger?projectKey="+p.key)
-	if last := published[len(published)-1]; last.Version != now {
-		t.Fatalf("the last version %s is not the board's ETag %s", last.Version, now)
-	}
+
 	addWork(t, store, p.key, "keep it fast")
-	if change, ok := receive(5 * time.Second); !ok || change.ProjectKey != p.key {
-		t.Fatal("the stream stopped after the replay")
+	_, next := ledgerGetJSON(t, handler, "/api/v1/ledger?projectKey="+p.key)
+	for {
+		change, ok := receive(time.Minute)
+		if !ok {
+			t.Fatal("the stream stopped after the replay")
+		}
+		if change.Version == next {
+			break
+		}
+		if change.Version != now {
+			t.Fatalf("after the replay's final version the stream sent %s, neither %s nor %s", change.Version, now, next)
+		}
 	}
 }
 

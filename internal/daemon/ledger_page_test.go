@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -290,6 +291,58 @@ func TestAProjectsSubscriberIsNotWokenForOtherProjects(t *testing.T) {
 	hub.publish("mine")
 	<-wake
 	if changes := hub.take(id); len(changes) != 1 || changes[0].ProjectKey != "mine" {
+		t.Fatalf("took %+v", changes)
+	}
+}
+
+func TestASlowEarlierPublishDoesNotReplaceANewerVersion(t *testing.T) {
+	reading, release := make(chan struct{}), make(chan struct{})
+	var reads atomic.Int32
+	hub := newLedgerChangeHub(time.Hour, func(string) (string, error) {
+		if reads.Add(1) == 1 {
+			close(reading)
+			<-release
+			return "old", nil
+		}
+		return "new", nil
+	}, t.Logf)
+	id, wake, cancel := hub.subscribe("")
+	defer cancel()
+	slow := make(chan struct{})
+	go func() {
+		defer close(slow)
+		hub.publish("proj")
+	}()
+	<-reading
+	hub.publish("proj")
+	<-wake
+	if changes := hub.take(id); len(changes) != 1 || changes[0].Version != "new" {
+		t.Fatalf("took %+v", changes)
+	}
+	close(release)
+	<-slow
+	if changes := hub.take(id); len(changes) != 0 {
+		t.Fatalf("the slow earlier publish delivered %+v after the newer version", changes)
+	}
+}
+
+func TestAChangeWhoseVersionReadFailsOnceStillReachesTheStream(t *testing.T) {
+	var reads atomic.Int32
+	hub := newLedgerChangeHub(time.Millisecond, func(string) (string, error) {
+		if reads.Add(1) == 1 {
+			return "", errors.New("database is locked")
+		}
+		return "v1", nil
+	}, t.Logf)
+	id, wake, cancel := hub.subscribe("")
+	defer cancel()
+	hub.changed("proj")
+	select {
+	case <-wake:
+	case <-time.After(time.Minute):
+		t.Fatal("the change never reached the stream after a failed version read")
+	}
+	if changes := hub.take(id); len(changes) != 1 || changes[0].Version != "v1" {
 		t.Fatalf("took %+v", changes)
 	}
 }
