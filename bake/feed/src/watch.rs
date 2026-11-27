@@ -77,7 +77,7 @@ pub fn wants(event: &Event) -> Wants {
     let reset = kind == "stream.reset";
     let hosts = matches!(kind, "host.paired" | "host.removed" | "host.state");
     let snapshot = reset || hosts || matches!(kind, "state.changed" | "settings.updated" | "signin.changed");
-    let extensions = reset || matches!(kind, "extension.changed" | "extension.badge");
+    let extensions = reset || hosts || matches!(kind, "extension.changed" | "extension.badge");
     let session = event.data["entityId"].as_str().filter(|e| !e.is_empty()).map(String::from);
     Wants { snapshot, overview: snapshot, hosts, extensions, reset, session }
 }

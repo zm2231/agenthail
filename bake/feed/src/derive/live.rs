@@ -344,7 +344,8 @@ impl Overview {
         }
         self.stale = true;
         self.take_actors(started, actors);
-        self.covered = ledgers.keys().cloned().chain(held).collect();
+        let opened: Vec<String> = self.covered.iter().filter(|k| self.ledgers.contains_key(*k)).cloned().collect();
+        self.covered = ledgers.keys().cloned().chain(held).chain(opened).collect();
         for (key, result) in ledgers {
             self.apply(key, started, result);
         }
@@ -352,6 +353,10 @@ impl Overview {
         self.ledgers.retain(|k, _| listed.contains(k.as_str()));
         self.failed.retain(|k| listed.contains(k.as_str()));
         self.ledger_at.retain(|k, _| listed.contains(k.as_str()));
+    }
+
+    pub fn uncover(&mut self) {
+        self.covered.clear();
     }
 
     pub fn wants(&mut self, project: &str) -> bool {
@@ -365,6 +370,9 @@ impl Overview {
 
     pub fn take_ledger(&mut self, project: &str, started: Instant, result: Result<Ledger, String>) {
         self.pending.remove(project);
+        if result.is_ok() {
+            self.covered.insert(project.to_string());
+        }
         self.stale = true;
         let rows = result.map(|l| {
             self.take_actors(started, l.actors);

@@ -92,7 +92,9 @@ fn a_listed_project_without_recent_sessions_gets_its_board_when_opened() {
     assert_eq!(w.rows.get("old"), None);
     ov.refresh(fetched("2026-11-24T12:00:20Z", sessions(), vec![("p", Ok(vec![]))]));
     assert_eq!(board_ids(&ov.world(&[]), "old"), ["w9"], "a refresh that skips the project keeps its rows");
-    assert!(ov.wants("old"), "and it is fetched again while open");
+    assert!(!ov.wants("old"), "while open, the ledger stream says when it changes");
+    ov.uncover();
+    assert!(ov.wants("old"), "a reset reads it again");
 }
 
 #[test]

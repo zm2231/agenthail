@@ -461,6 +461,11 @@ fn selected_changed(s: &mut App, id: &str) {
     }
 }
 
+pub fn reset_overview(s: &mut App) {
+    s.ov.live.uncover();
+    ask_overview(s, Ask::Reset);
+}
+
 pub fn ask_overview(s: &App, ask: Ask) {
     if let Some(poke) = &s.overview_poke {
         let _ = poke.send(ask);
@@ -492,7 +497,7 @@ fn changed_elsewhere(s: &mut App, wants: feed::watch::Wants) {
 
 fn reopened(s: &mut App) {
     ui::connect::retry(s);
-    ask_overview(s, Ask::Reset);
+    reset_overview(s);
     over::inbox::reopened(s);
     over::extensions::reopened(s);
     if let Some(id) = s.selected.clone() {
@@ -1091,7 +1096,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Changed(wants) => changed_elsewhere(s, wants),
             Bg::Reopened => reopened(s),
             Bg::LedgerChanged(key, at) => ask_overview(s, Ask::Ledger(key, at)),
-            Bg::LedgersReopened => ask_overview(s, Ask::Reset),
+            Bg::LedgersReopened => reset_overview(s),
             Bg::SessionNews => ask_overview(s, Ask::Refresh),
             Bg::Item(id, item) => {
                 s.items.insert(id, item);

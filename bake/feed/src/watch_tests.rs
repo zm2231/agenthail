@@ -43,7 +43,7 @@ fn the_native_rereads_refresh_the_snapshot_and_host_changes_the_decisions() {
     }
     for kind in ["host.paired", "host.removed", "host.state"] {
         let w = wants(&e(kind, Value::Null));
-        assert!(w.snapshot && w.hosts, "{kind}");
+        assert!(w.snapshot && w.hosts && w.extensions, "{kind}");
     }
     let reset = wants(&e("stream.reset", Value::Null));
     assert!(reset.reset && reset.snapshot && reset.extensions);
