@@ -1,0 +1,253 @@
+use std::collections::HashSet;
+use std::sync::mpsc::{Receiver, Sender, channel};
+use std::time::{Duration, Instant};
+
+use feed::listing::{Listing, Page, RECENT, Request, SCOPES};
+use feed::watch::Removal;
+
+use crate::{App, Screen};
+
+const SETTLE: Duration = Duration::from_millis(300);
+const TYPING: Duration = Duration::from_millis(250);
+const SOONEST: Duration = Duration::from_secs(1);
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Read {
+    First,
+    More,
+    Again,
+}
+
+enum Got {
+    Page(Page),
+    Whole(Listing),
+}
+
+type Reply = (u64, Read, Request, Result<Got, String>);
+
+pub struct State {
+    pub scope: usize,
+    pub status: Option<String>,
+    pub surface: Option<String>,
+    pub status_open: bool,
+    pub surface_open: bool,
+    pub expanded: HashSet<String>,
+    pub listing: Option<Listing>,
+    pub error: Option<String>,
+    surfaces: Vec<String>,
+    shown: Option<Request>,
+    asked: Option<(u64, Read, Request)>,
+    typed: Option<(Request, Instant)>,
+    due: Option<Instant>,
+    stale: bool,
+    visible: bool,
+    seq: u64,
+    tx: Sender<Reply>,
+    rx: Receiver<Reply>,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        let (tx, rx) = channel();
+        State {
+            scope: RECENT,
+            status: None,
+            surface: None,
+            status_open: false,
+            surface_open: false,
+            expanded: HashSet::new(),
+            listing: None,
+            error: None,
+            surfaces: Vec::new(),
+            shown: None,
+            asked: None,
+            typed: None,
+            due: None,
+            stale: false,
+            visible: false,
+            seq: 0,
+            tx,
+            rx,
+        }
+    }
+}
+
+impl State {
+    pub fn loading(&self) -> bool {
+        self.asked.is_some()
+    }
+
+    pub fn loading_more(&self) -> bool {
+        self.asked.as_ref().is_some_and(|a| a.1 == Read::More)
+    }
+
+    pub fn surfaces(&self) -> &[String] {
+        &self.surfaces
+    }
+
+    pub fn clear_refinement(&mut self) {
+        self.status = None;
+        self.surface = None;
+    }
+}
+
+pub fn request(s: &App) -> Request {
+    Request {
+        scope: SCOPES[s.ov.list.scope.min(SCOPES.len() - 1)].1.to_string(),
+        project: s.ov.sessions_project.clone(),
+        surface: s.ov.list.surface.clone(),
+        status: s.ov.list.status.clone(),
+        query: s.ov.sessions_query.text.trim().to_string(),
+    }
+}
+
+fn ask(s: &mut App, read: Read, request: Request) {
+    let Some(client) = s.client.clone() else { return };
+    let st = &mut s.ov.list;
+    st.seq += 1;
+    st.due = None;
+    st.typed = None;
+    st.stale = false;
+    st.error = None;
+    let (seq, tx) = (st.seq, st.tx.clone());
+    let (cursor, families) = (st.listing.as_ref().and_then(|l| l.next.clone()), st.listing.as_ref().map_or(0, Listing::families));
+    st.asked = Some((seq, read, request.clone()));
+    std::thread::spawn(move || {
+        let got = match read {
+            Read::First => client.listing_page(&request, None).map(Got::Page),
+            Read::More => client.listing_page(&request, cursor.as_deref()).map(Got::Page),
+            Read::Again => client.listing_reread(&request, families).map(Got::Whole),
+        };
+        let _ = tx.send((seq, read, request, got));
+    });
+}
+
+pub fn more(s: &mut App) {
+    let st = &s.ov.list;
+    if st.asked.is_some() || st.listing.as_ref().is_none_or(|l| l.next.is_none()) {
+        return;
+    }
+    let Some(request) = st.shown.clone() else { return };
+    ask(s, Read::More, request);
+}
+
+pub fn retry(s: &mut App) {
+    let want = request(s);
+    let read = if s.ov.list.shown.as_ref() == Some(&want) && s.ov.list.listing.is_some() { Read::Again } else { Read::First };
+    ask(s, read, want);
+}
+
+fn soon(s: &mut App, after: Duration) {
+    let st = &mut s.ov.list;
+    if st.listing.is_none() {
+        return;
+    }
+    if !st.visible {
+        st.stale = true;
+        return;
+    }
+    let at = Instant::now() + after;
+    st.due = Some(st.due.map_or(at, |d| d.min(at)));
+}
+
+pub fn news(s: &mut App) {
+    soon(s, SETTLE);
+}
+
+pub fn reopened(s: &mut App) {
+    soon(s, Duration::ZERO);
+}
+
+pub fn removed(s: &mut App, gone: &[Removal]) {
+    let Some(listing) = s.ov.list.listing.as_mut() else { return };
+    let mut again = false;
+    for x in gone {
+        again |= listing.remove(&x.id) || x.unlisted;
+    }
+    if again {
+        soon(s, SETTLE);
+    }
+}
+
+fn refresh_at(listing: &Listing) -> Option<Duration> {
+    let at = feed::catalog::parse_time(listing.view.refresh_at.as_deref()?)?;
+    let wait = at - time::OffsetDateTime::now_utc();
+    Some(Duration::try_from(wait).unwrap_or_default().max(SOONEST))
+}
+
+fn take(s: &mut App, read: Read, request: Request, got: Result<Got, String>) {
+    let st = &mut s.ov.list;
+    match got {
+        Ok(got) => {
+            let listing = match (got, st.listing.take()) {
+                (Got::Page(page), Some(mut held)) if read == Read::More => {
+                    held.append(page);
+                    held
+                }
+                (Got::Page(page), _) => Listing::first(page),
+                (Got::Whole(whole), _) => whole,
+            };
+            for x in &listing.view.surfaces {
+                if !st.surfaces.contains(&x.surface) {
+                    st.surfaces.push(x.surface.clone());
+                }
+            }
+            st.surfaces.sort();
+            if read == Read::First {
+                st.expanded.clear();
+            }
+            let wait = refresh_at(&listing);
+            st.listing = Some(listing);
+            st.shown = Some(request);
+            if let Some(wait) = wait {
+                soon(s, wait);
+            }
+        }
+        Err(error) => st.error = Some(error),
+    }
+}
+
+pub fn poll(s: &mut App) -> bool {
+    let mut changed = false;
+    while let Ok((seq, read, request, got)) = s.ov.list.rx.try_recv() {
+        if s.ov.list.asked.as_ref().is_none_or(|a| a.0 != seq) {
+            continue;
+        }
+        s.ov.list.asked = None;
+        take(s, read, request, got);
+        changed = true;
+    }
+    let visible = matches!(s.screen, Screen::Sessions);
+    let entered = visible && !s.ov.list.visible;
+    s.ov.list.visible = visible;
+    if !visible || s.client.is_none() {
+        return changed;
+    }
+    let want = request(s);
+    let asked = s.ov.list.asked.as_ref().map(|a| &a.2);
+    let current = asked.or(s.ov.list.shown.as_ref());
+    if current != Some(&want) {
+        let typing = current.is_some_and(|c| Request { query: want.query.clone(), ..c.clone() } == want);
+        if typing && s.ov.list.typed.as_ref().is_none_or(|t| t.0 != want) {
+            s.ov.list.typed = Some((want, Instant::now() + TYPING));
+            return changed;
+        }
+        if typing && s.ov.list.typed.as_ref().is_some_and(|t| Instant::now() < t.1) {
+            return changed;
+        }
+        ask(s, Read::First, want);
+        return true;
+    }
+    s.ov.list.typed = None;
+    if s.ov.list.asked.is_some() {
+        return changed;
+    }
+    if entered && s.ov.list.stale {
+        s.ov.list.due = Some(Instant::now());
+    }
+    if s.ov.list.due.is_some_and(|d| Instant::now() >= d) {
+        ask(s, Read::Again, want);
+        changed = true;
+    }
+    changed
+}

@@ -579,6 +579,7 @@ fn reopened(s: &mut App) {
     ui::connect::retry(s);
     ui::delivery::stale(s);
     over::earlier::reopened(s);
+    over::listing::reopened(s);
     ask_overview(s, Ask::Reset);
     over::inbox::reopened(s);
     over::extensions::reopened(s);
@@ -1340,8 +1341,14 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 ui::ready::reopened(s);
                 ask_overview(s, Ask::Reopened);
             }
-            Bg::SessionNews => ask_overview(s, Ask::Refresh),
-            Bg::Removed(gone) => over::earlier::removed(s, &gone),
+            Bg::SessionNews => {
+                ask_overview(s, Ask::Refresh);
+                over::listing::news(s);
+            }
+            Bg::Removed(gone) => {
+                over::earlier::removed(s, &gone);
+                over::listing::removed(s, &gone);
+            }
             Bg::Item(id, item) => {
                 s.items.insert(id, item);
             }
@@ -1539,7 +1546,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= transcript::take_behind_moved();
     changed |= over::extensions::drain(s);
     changed |= over::projects::drain(s);
-    changed |= ui::delivery::poll(s) | ui::ready::poll(s) | over::earlier::poll(s);
+    changed |= ui::delivery::poll(s) | ui::ready::poll(s) | over::earlier::poll(s) | over::listing::poll(s);
     if s.ov.live.tail_retry_due() {
         fetch_tails(s);
     }

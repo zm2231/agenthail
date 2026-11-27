@@ -609,14 +609,14 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k
             shown |= selected == Some(id.as_str());
             sec = sec.row(session_row(s, x, *depth, p.lead.as_deref() == Some(id.as_str()), selected, k));
         }
-        let pname = p.name.clone();
+        let pkey = p.key.clone();
         sec = sec.row(
             SidebarRow::new("All sessions")
                 .icon(&icons::ARROW_RIGHT)
                 .height(30.0)
                 .detail(format!("{}", p.sessions.len()))
                 .on_select(move |s: &mut App, _| {
-                    s.ov.sessions_project = Some(pname.clone());
+                    s.ov.sessions_project = Some(pkey.clone());
                     go(s, Screen::Sessions);
                 })
                 .build(k)
@@ -834,8 +834,8 @@ pub fn sessions_block(s: &App, compact: bool, k: &Kit) -> El {
                 .border(1.0, edge())
                 .hover(k.c.surface_raised_hover)
                 .on_press(move |s: &mut App| {
-                    s.ov.sessions_project = if pname == "No project" { None } else { Some(pname.clone()) };
-                    s.ov.sessions_filter = 1;
+                    s.ov.sessions_project = s.ov.d.projects.iter().find(|p| p.name == pname).map(|p| p.key.clone());
+                    s.ov.list.scope = 0;
                     go(s, Screen::Sessions);
                 })
                 .child(avatar(name, 14.0))
