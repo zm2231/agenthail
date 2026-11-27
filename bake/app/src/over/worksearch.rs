@@ -194,11 +194,10 @@ pub fn open(s: &mut App, ledger: &str, id: &str) {
         s.ov.notice = Some(format!("{id} in {ledger} has the same id as work in another project, so it can't open here."));
         return;
     }
-    let fresh = !loaded(s, id) && !s.ov.worksearch.found.contains_key(id);
-    go(s, Screen::Work(id.to_string()));
-    if fresh {
-        read(s, ledger, id);
+    if !loaded(s, id) {
+        s.ov.worksearch.keys.insert(id.to_string(), ledger.to_string());
     }
+    go(s, Screen::Work(id.to_string()));
 }
 
 fn ledger_of(s: &App, id: &str) -> Option<String> {
