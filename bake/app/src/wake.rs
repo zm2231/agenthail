@@ -27,6 +27,13 @@ pub fn poke() {
     MAIN.ring();
 }
 
+pub fn connect<S: 'static>(bell: &'static Bell, handle: rune::AppHandle<S>)
+where
+    rune::AppHandle<S>: Send + Sync,
+{
+    bell.install(move || handle.wake());
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Window {
     Main,

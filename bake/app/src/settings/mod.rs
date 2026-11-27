@@ -163,8 +163,7 @@ pub fn spec() -> rune::WindowSpec<Prefs> {
 }
 
 pub fn keep(handle: AppHandle<Prefs>, window: WindowHandle) {
-    let ring = handle.clone();
-    crate::wake::SETTINGS.install(move || ring.wake());
+    crate::wake::connect(&crate::wake::SETTINGS, handle.clone());
     WINDOW.with(|w| {
         let _ = w.set((handle, window));
     });

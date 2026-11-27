@@ -340,8 +340,7 @@ pub fn open(target: &str, name: &str) {
         .srgb_blend(true)
         .map_app(|app| app.on_close(closed));
     reset_shared();
-    let ring = window.app.handle();
-    crate::wake::VOICE.install(move || ring.wake());
+    crate::wake::connect(&crate::wake::VOICE, window.app.handle());
     let handle = rune::open_window(window);
     WINDOW.with(|w| *w.borrow_mut() = Some(handle));
 }
@@ -358,8 +357,9 @@ fn spec() -> AppSpec<Win> {
 }
 
 pub fn run_alone() {
-    rune::App::new(spec())
-        .chrome(CHROME)
+    let app = rune::App::new(spec());
+    crate::wake::connect(&crate::wake::VOICE, app.handle());
+    app.chrome(CHROME)
         .window_options(WindowOptions { transparent: true, resizable: true, visible: true, ..Default::default() })
         .srgb_blend(true)
         .on_close(closed)

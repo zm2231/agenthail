@@ -1561,6 +1561,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     }
     s.counter = counter;
     s.panes_moved |= panes_moved;
+    changed |= !caught.is_empty();
     for id in caught {
         history::caught_up(s, &id);
     }
@@ -1723,6 +1724,7 @@ fn main() {
         .on_quit(on_quit)
         .on_focus(on_focus)
         .on_open_url(link::on_open_url);
+    wake::connect(&wake::MAIN, app.handle());
     hotkey::keep(app.handle());
     app.handle().update(|_, _| hotkey::sync());
     let mut prefs = settings::spec();

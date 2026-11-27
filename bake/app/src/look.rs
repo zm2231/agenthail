@@ -303,6 +303,9 @@ fn pump(s: &mut State) {
     }
     let got: Vec<Got> = s.rx.as_ref().map(|rx| rx.try_iter().collect()).unwrap_or_default();
     for g in got {
+        if matches!(&g, Got::Problem(p) if *p == s.problem) {
+            continue;
+        }
         s.generation += 1;
         match g {
             Got::Device(d) => s.device = d,
@@ -618,3 +621,7 @@ pub fn backdrop(session: bool) -> El {
         root
     })
 }
+
+#[cfg(test)]
+#[path = "look_tests.rs"]
+mod tests;

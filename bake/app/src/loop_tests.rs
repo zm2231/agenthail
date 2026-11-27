@@ -370,7 +370,12 @@ fn an_idle_loop_arms_no_timer_and_a_poll_with_nothing_to_drain_changes_nothing()
     rt.frame(DT);
     assert_eq!(rt.wake_deadline(), None, "nothing pending arms no timer");
     let clock = rt.state.clock + DT;
-    assert!(!rt.update_if(|s, tx| crate::poll(s, clock, tx)), "a poll that drains nothing changes nothing, so nothing draws");
+    let mut drew = true;
+    rt.update_if(|s, tx| {
+        drew = crate::poll(s, clock, tx);
+        drew
+    });
+    assert!(!drew, "a poll that drains nothing changes nothing, so nothing draws");
     assert_eq!(rt.wake_deadline(), None);
 }
 
@@ -435,6 +440,36 @@ fn a_stream_batch_wakes_the_loop_and_an_open_stream_does_not_poll_every_frame() 
     assert_eq!(rung(&rings), before + 1, "the stream wakes the loop");
     rt.frame(DT);
     assert_eq!(rt.state.panes["a"].status, "live");
+}
+
+#[test]
+fn a_stream_that_goes_quiet_catches_up_at_its_deadline_and_redraws() {
+    if !isolated("a_stream_that_goes_quiet_catches_up_at_its_deadline_and_redraws") {
+        return;
+    }
+    let dir = Dir::new("quiet-stream");
+    let mut first = app(sessions(&["a"]), &dir);
+    let stream = streaming(&mut first, "a");
+    let mut rt = unframed(first);
+    rt.frame(DT);
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    settle(&mut rt);
+    stream.send(feed::source::Message::Status("live".into())).unwrap();
+    rt.frame(DT);
+    let wake = wake_in(&rt);
+    assert!((wake - crate::REPLAY_QUIET_SECS).abs() < 0.1, "wakes when the stream goes quiet, in {wake}");
+    let poll_at = |rt: &mut Runtime<App>, clock: f64| {
+        let mut drew = false;
+        rt.update_if(|s, tx| {
+            drew = crate::poll(s, clock, tx);
+            drew
+        });
+        drew
+    };
+    let before = rt.state.clock + wake / 2.0;
+    assert!(!poll_at(&mut rt, before), "nothing changes before the stream goes quiet");
+    assert!(poll_at(&mut rt, before + wake), "catching up changes what shows");
+    assert!(rt.state.panes["a"].caught_up);
 }
 
 #[test]
