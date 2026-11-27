@@ -16,7 +16,7 @@ use crate::theme::{self, BODY, META, failed, faint, muted};
 
 pub enum Done {
     Adopted(String, Result<Adopted, RespondError>),
-    Hosts(String, Result<Vec<Host>, String>),
+    Hosts(u64, Result<Vec<Host>, String>),
     Moved(Notice),
 }
 
@@ -27,6 +27,7 @@ pub struct Adopting {
 }
 
 pub struct Moving {
+    pub seq: u64,
     pub session: String,
     pub title: String,
     pub hosts: Option<Result<Vec<Host>, String>>,
@@ -39,6 +40,7 @@ pub struct Ops {
     pub notices: VecDeque<Notice>,
     sent: HashSet<String>,
     here: String,
+    seq: u64,
     tx: Sender<Done>,
     rx: Receiver<Done>,
 }
@@ -46,7 +48,7 @@ pub struct Ops {
 impl Ops {
     pub fn new() -> Ops {
         let (tx, rx) = channel();
-        Ops { adopting: None, moving: None, notices: VecDeque::new(), sent: HashSet::new(), here: String::new(), tx, rx }
+        Ops { adopting: None, moving: None, notices: VecDeque::new(), sent: HashSet::new(), here: String::new(), seq: 0, tx, rx }
     }
 }
 
@@ -97,9 +99,10 @@ pub fn open_move(s: &mut App, id: &str) {
     if super::session_menu::not_sent(s) || s.menus.ops.sent.contains(id) {
         return;
     }
-    s.menus.ops.moving = Some(Moving { session: id.to_string(), title: title(s, id), hosts: None, picked: None });
-    let id = id.to_string();
-    spawn(s, move |c| Done::Hosts(id, c.hosts().map_err(|e| e.to_string())));
+    s.menus.ops.seq += 1;
+    let seq = s.menus.ops.seq;
+    s.menus.ops.moving = Some(Moving { seq, session: id.to_string(), title: title(s, id), hosts: None, picked: None });
+    spawn(s, move |c| Done::Hosts(seq, c.hosts().map_err(|e| e.to_string())));
 }
 
 fn send_move(s: &mut App, session: &str, title: &str, host: &str, host_name: &str, stop_terminal: bool) {
@@ -157,13 +160,13 @@ pub fn drain(s: &mut App) -> bool {
                     crate::over::open_session(s, &new);
                 }
             }
-            Done::Hosts(id, result) => {
+            Done::Hosts(seq, result) => {
                 if let Ok(hosts) = &result
                     && let Some(local) = hosts.iter().find(|h| h.is_local())
                 {
                     s.menus.ops.here = local.name.clone();
                 }
-                if let Some(m) = s.menus.ops.moving.as_mut().filter(|m| m.session == id) {
+                if let Some(m) = s.menus.ops.moving.as_mut().filter(|m| m.seq == seq) {
                     m.picked = result.as_deref().ok().and_then(|hosts| paired(hosts).into_iter().find(Host::available)).map(|h| h.id);
                     m.hosts = Some(result);
                 }

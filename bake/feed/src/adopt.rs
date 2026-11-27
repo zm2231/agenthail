@@ -54,7 +54,7 @@ fn summary(result: &Value) -> String {
 
 impl Client {
     pub fn session_adopt(&self, session: &str, stop_terminal: bool) -> Result<Adopted, RespondError> {
-        match self.timed(WAIT).action("session-adopt", json!({"sessionId": session, "stopTerminal": stop_terminal})) {
+        match self.timed(WAIT).action("session-adopt", json!({"sessionId": session, "stopTerminal": stop_terminal})).and_then(crate::catalog::confirmed) {
             Ok(reply) => {
                 let result = &reply["result"];
                 let session = result["session"]["id"].as_str().filter(|id| !id.is_empty()).map(str::to_string);
@@ -101,6 +101,7 @@ mod tests {
             (502, r#"{"error":{"code":"session_adopt_unknown","message":"timed out"}}"#),
             (409, r#"{"error":{"code":"session_adopt_refused","message":"the process ended"}}"#),
             (200, r#"{"ok":true,"result":{"session":{"id":"s1"},"unchanged":true}}"#),
+            (202, r#"{"ok":true,"status":"submitted"}"#),
         ]));
         assert_eq!(client.session_adopt("s1", false).unwrap(), Adopted::Opened { summary: "Opened in Agenthail. Stopped the terminal process that held it.".into(), session: Some("s2".into()) });
         assert_eq!(seen.recv().unwrap().1, json!({"action": "session-adopt", "sessionId": "s1", "stopTerminal": false}));
@@ -113,6 +114,9 @@ mod tests {
         assert!(!refused.maybe_delivered);
         assert_eq!(Phase::after(Err(refused)), Phase::Failed("the process ended".into()));
         assert_eq!(client.session_adopt("s1", false).unwrap(), Adopted::Opened { summary: "Already runs in Agenthail.".into(), session: Some("s1".into()) });
+        let submitted = client.session_adopt("s1", false).unwrap_err();
+        assert!(submitted.maybe_delivered);
+        assert!(matches!(Phase::after(Err(submitted)), Phase::Failed(m) if m.starts_with("Opening it may not have gone through")));
     }
 
     #[test]

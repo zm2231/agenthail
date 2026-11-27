@@ -66,12 +66,13 @@ pub fn choices(x: &Session) -> Vec<For> {
     out
 }
 
-pub fn until(choice: For, now: OffsetDateTime, offset: UtcOffset) -> Option<OffsetDateTime> {
+pub fn until(choice: For, now: OffsetDateTime, offset_at: impl Fn(OffsetDateTime) -> UtcOffset) -> Option<OffsetDateTime> {
     match choice {
         For::Hour => Some(now + Duration::hours(1)),
         For::Morning => {
-            let local = now.to_offset(offset);
-            Some(local.date().next_day()?.with_time(MORNING).assume_offset(offset).to_offset(UtcOffset::UTC))
+            let morning = now.to_offset(offset_at(now)).date().next_day()?.with_time(MORNING);
+            let guess = morning.assume_offset(offset_at(now));
+            Some(morning.assume_offset(offset_at(guess)).to_offset(UtcOffset::UTC))
         }
         For::TurnEnds => None,
     }
@@ -134,12 +135,12 @@ impl Client {
             Some(at) => json!({"sessionId": session, "until": stamp(at)}),
             None => json!({"sessionId": session, "wake": "finished"}),
         };
-        let reply = self.action("session-snooze", payload)?;
+        let reply = crate::catalog::confirmed(self.action("session-snooze", payload)?)?;
         Ok(serde_json::from_value(reply["snooze"].clone()).ok())
     }
 
     pub fn session_wake(&self, session: &str) -> Result<(), RespondError> {
-        self.action("session-wake", json!({"sessionId": session})).map(drop)
+        self.action("session-wake", json!({"sessionId": session})).and_then(crate::catalog::confirmed).map(drop)
     }
 }
 
@@ -192,10 +193,18 @@ mod tests {
     #[test]
     fn tomorrow_morning_is_nine_on_the_local_clock() {
         let now = t("2026-11-27T03:30:00Z");
-        let offset = UtcOffset::from_hms(-5, 0, 0).unwrap();
+        let offset = |_| UtcOffset::from_hms(-5, 0, 0).unwrap();
         assert_eq!(until(For::Morning, now, offset), Some(t("2026-11-27T14:00:00Z")));
         assert_eq!(until(For::Hour, now, offset), Some(t("2026-11-27T04:30:00Z")));
         assert_eq!(until(For::TurnEnds, now, offset), None);
+    }
+
+    #[test]
+    fn tomorrow_morning_takes_the_clock_change_overnight_into_account() {
+        let spring = |at: OffsetDateTime| UtcOffset::from_hms(if at < t("2026-03-08T07:00:00Z") { -8 } else { -7 }, 0, 0).unwrap();
+        assert_eq!(until(For::Morning, t("2026-03-07T20:00:00Z"), spring), Some(t("2026-03-08T16:00:00Z")));
+        let fall = |at: OffsetDateTime| UtcOffset::from_hms(if at < t("2026-11-01T09:00:00Z") { -7 } else { -8 }, 0, 0).unwrap();
+        assert_eq!(until(For::Morning, t("2026-10-31T20:00:00Z"), fall), Some(t("2026-11-01T17:00:00Z")));
     }
 
     #[test]
@@ -223,6 +232,8 @@ mod tests {
             (200, r#"{"ok":true,"sessionId":"s1","snooze":{"snoozedAt":"2026-11-26T10:00:00Z","wake":"finished"}}"#),
             (200, r#"{"ok":true,"sessionId":"s1","snooze":null}"#),
             (409, r#"{"error":{"code":"conflict","message":"the session is not working, so there is no turn to wait for"}}"#),
+            (202, r#"{"ok":true,"status":"submitted"}"#),
+            (202, r#"{"ok":true,"status":"submitted"}"#),
         ]));
         let got = client.session_snooze("s1", Some(t("2026-11-26T11:00:00Z"))).unwrap().unwrap();
         assert_eq!((got.wake.as_str(), got.until.as_str()), ("time", "2026-11-26T11:00:00Z"));
@@ -235,5 +246,7 @@ mod tests {
         assert_eq!(seen.recv().unwrap().1, json!({"action": "session-wake", "sessionId": "s1"}));
         let refused = client.session_snooze("s1", None).unwrap_err();
         assert_eq!(refused.message, "the session is not working, so there is no turn to wait for");
+        assert!(client.session_snooze("s1", None).unwrap_err().maybe_delivered, "a submitted snooze is not shown as landed");
+        assert!(client.session_wake("s1").unwrap_err().maybe_delivered);
     }
 }
