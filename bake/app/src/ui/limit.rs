@@ -18,7 +18,7 @@ pub enum Done {
     Unread(String, u64, String),
     Read(String, u64),
     Resumed(String, String, bool, Result<(), RespondError>),
-    Moved(String, String, Target, Result<Moved, RespondError>),
+    Moved(String, String, Target, super::window::Id, Result<Moved, RespondError>),
 }
 
 pub struct Confirm {
@@ -161,13 +161,13 @@ fn move_to(s: &mut App, id: &str, since: &str, target: Target, stop_terminal: bo
     if not_sent(s) || !s.limits.busy.insert(id.to_string()) {
         return;
     }
-    super::window::asking(s, id);
+    let asker = s.windows.current();
     let stop = since.to_string();
     note(s, id, stop.clone(), format!("Moving to {}…", target.name), false);
     let id = id.to_string();
     spawn(s, move |c, tx| {
         let result = c.limit_move(&id, Some(&target.root), stop_terminal);
-        let _ = tx.send(Done::Moved(id, stop, target, result));
+        let _ = tx.send(Done::Moved(id, stop, target, asker, result));
     });
 }
 
@@ -218,7 +218,7 @@ fn settled(s: &mut App, done: Done) {
             };
             note(s, &id, stop, text, bad);
         }
-        Done::Moved(id, stop, target, result) => {
+        Done::Moved(id, stop, target, asker, result) => {
             s.limits.busy.remove(&id);
             match result {
                 Ok(Moved::Done(None)) => {
@@ -233,7 +233,7 @@ fn settled(s: &mut App, done: Done) {
                     s.limits.note.remove(&id);
                     if current(s, &id, &stop) {
                         s.limits.consent = Some(Consent { session: id.clone(), since: stop, target, message });
-                        super::window::overlay_for(s, &id);
+                        super::window::overlay_for(s, asker, &id);
                     }
                 }
                 Err(error) => {

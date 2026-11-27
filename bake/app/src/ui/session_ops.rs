@@ -11,13 +11,14 @@ use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit};
 use time::{OffsetDateTime, UtcOffset};
 
 use crate::App;
+use crate::ui::window::Id;
 use crate::icons;
 use crate::theme::{self, BODY, META, failed, faint, muted};
 
 pub enum Done {
     Adopted(String, Result<Adopted, RespondError>),
     Hosts(u64, Result<Vec<Host>, String>),
-    Moved(Notice),
+    Moved(Notice, Id),
 }
 
 pub struct Adopting {
@@ -37,7 +38,7 @@ pub struct Moving {
 pub struct Ops {
     pub adopting: Option<Adopting>,
     pub moving: Option<Moving>,
-    pub notices: VecDeque<Notice>,
+    pub notices: VecDeque<(Notice, Id)>,
     sent: HashSet<String>,
     here: String,
     seq: u64,
@@ -109,10 +110,10 @@ fn send_move(s: &mut App, session: &str, title: &str, host: &str, host_name: &st
     if !s.menus.ops.sent.insert(session.to_string()) {
         return;
     }
-    super::window::asking(s, session);
+    let asker = s.windows.current();
     let here = if s.menus.ops.here.is_empty() { "this computer".to_string() } else { s.menus.ops.here.clone() };
     let (session, title, host, host_name) = (session.to_string(), title.to_string(), host.to_string(), host_name.to_string());
-    spawn(s, move |c| Done::Moved(c.move_session(&session, &host, &host_name, stop_terminal).notice(&session, &title, &host, &host_name, &here)));
+    spawn(s, move |c| Done::Moved(c.move_session(&session, &host, &host_name, stop_terminal).notice(&session, &title, &host, &host_name, &here), asker));
 }
 
 fn confirm_move(s: &mut App) {
@@ -125,13 +126,13 @@ fn confirm_move(s: &mut App) {
 }
 
 fn front_to_its_window(s: &mut App) {
-    if let Some(session) = s.menus.ops.notices.front().map(|n| n.session.clone()) {
-        super::window::overlay_for(s, &session);
+    if let Some((session, asker)) = s.menus.ops.notices.front().map(|(n, w)| (n.session.clone(), *w)) {
+        super::window::overlay_for(s, asker, &session);
     }
 }
 
 fn retry(s: &mut App) {
-    let Some(n) = s.menus.ops.notices.pop_front() else { return };
+    let Some((n, _)) = s.menus.ops.notices.pop_front() else { return };
     front_to_its_window(s);
     let title = title(s, &n.session);
     send_move(s, &n.session, if title.is_empty() { &n.session } else { &title }, &n.host, &n.host_name, true);
@@ -178,10 +179,10 @@ pub fn drain(s: &mut App) -> bool {
                     m.hosts = Some(result);
                 }
             }
-            Done::Moved(notice) => {
+            Done::Moved(notice, asker) => {
                 s.menus.ops.sent.remove(&notice.session);
                 super::gone::recheck(s, &notice.session);
-                s.menus.ops.notices.push_back(notice);
+                s.menus.ops.notices.push_back((notice, asker));
                 if s.menus.ops.notices.len() == 1 {
                     front_to_its_window(s);
                 }
@@ -322,7 +323,7 @@ pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
     if let Some(m) = &s.menus.ops.moving {
         move_dialog(m, layer, k);
     }
-    if let Some(n) = s.menus.ops.notices.front() {
+    if let Some((n, _)) = s.menus.ops.notices.front() {
         notice_dialog(n, layer, k);
     }
 }
@@ -341,17 +342,13 @@ mod tests {
         let mut s = crate::empty(feed::derive::live::Overview::default(), false);
         crate::select(&mut s, "a");
         let w = window::open(&mut s, "b");
-        window::enter(&mut s, w);
-        window::asking(&mut s, "b");
-        window::enter(&mut s, MAIN);
-        window::asking(&mut s, "a");
-        let _ = s.menus.ops.tx.send(Done::Moved(notice("a")));
-        let _ = s.menus.ops.tx.send(Done::Moved(notice("b")));
+        let _ = s.menus.ops.tx.send(Done::Moved(notice("a"), MAIN));
+        let _ = s.menus.ops.tx.send(Done::Moved(notice("a"), w));
         drain(&mut s);
         assert!(window::shows_shared(&s), "a's notice is in front, in main");
         s.menus.ops.notices.pop_front();
         front_to_its_window(&mut s);
-        assert!(!window::shows_shared(&s), "b's notice moves to b's window once a's is dismissed");
+        assert!(!window::shows_shared(&s), "the second notice for the same session goes to the window that asked for that move");
         window::enter(&mut s, w);
         assert!(window::shows_shared(&s));
     }

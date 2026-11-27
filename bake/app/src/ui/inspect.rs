@@ -14,7 +14,7 @@ use crate::{App, session};
 
 pub enum Done {
     Goal(String, GoalAct, Result<bool, RespondError>),
-    Life(String, u64, LifecycleAct, bool, Result<LifecycleResult, RespondError>),
+    Life(String, u64, LifecycleAct, bool, super::window::Id, Result<LifecycleResult, RespondError>),
     Status(String, u64, Result<LifecycleResult, RespondError>),
 }
 
@@ -192,7 +192,7 @@ pub(crate) fn run(s: &mut App, id: &str, act: LifecycleAct, tell: bool) {
     if !session(s, id).is_some_and(|x| act.offered(inspect::lifecycle(x))) {
         return;
     }
-    super::window::asking(s, id);
+    let asker = s.windows.current();
     s.inspect.seq += 1;
     let fresh = s.inspect.seq;
     let p = s.inspect.process.entry(id.to_string()).or_insert_with(|| Process { generation: fresh, ..Process::default() });
@@ -203,7 +203,7 @@ pub(crate) fn run(s: &mut App, id: &str, act: LifecycleAct, tell: bool) {
     p.outcome = None;
     let generation = p.generation;
     let id = id.to_string();
-    spawn(s, move |c| Done::Life(id.clone(), generation, act, tell, c.lifecycle(&id, act)));
+    spawn(s, move |c| Done::Life(id.clone(), generation, act, tell, asker, c.lifecycle(&id, act)));
 }
 
 fn failure(error: &RespondError) -> String {
@@ -224,7 +224,7 @@ fn settled(s: &mut App, done: Done) {
             }
             metadata_moved(s, &id);
         }
-        Done::Life(id, generation, act, tell, result) => {
+        Done::Life(id, generation, act, tell, asker, result) => {
             let elsewhere = (!showing(s, &id)).then(|| session(s, &id).map(|x| x.title()).unwrap_or_default());
             let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.generation == generation) else { return };
             p.busy = None;
@@ -252,7 +252,7 @@ fn settled(s: &mut App, done: Done) {
                         LifecycleAct::Logs if elsewhere.is_some() => p.logs = Some(result.output.unwrap_or_default()),
                         LifecycleAct::Logs => {
                             s.inspect.logs = Some((id.clone(), result.output.unwrap_or_default()));
-                            super::window::overlay_for(s, &id);
+                            super::window::overlay_for(s, asker, &id);
                         }
                         _ if session(s, &id).is_some_and(|x| inspect::lifecycle(x).status) => {
                             if let Some(p) = s.inspect.process.get_mut(&id) {

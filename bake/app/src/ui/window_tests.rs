@@ -315,7 +315,7 @@ fn the_image_cache_made_for_the_main_window_reaches_the_shared_app() {
 fn a_result_for_a_session_opens_in_the_window_showing_it() {
     let (mut s, _main, _win, w) = two_windows();
     s.inspect.logs = Some(("b".into(), "log lines".into()));
-    overlay_for(&mut s, "b");
+    overlay_for(&mut s, MAIN + 99, "b");
     assert_eq!(s.windows.overlay, Some(w));
     assert!(!crate::ui::inspect::drain(&mut s) && s.inspect.logs.is_some(), "logs for the session window's session stay open while main shows another");
     assert_eq!(showing(&s, "a"), Some(MAIN));
@@ -336,14 +336,14 @@ fn a_result_goes_to_the_window_that_asked_even_when_both_show_the_session() {
     let mut s = app();
     crate::select(&mut s, "b");
     let w = open(&mut s, "b");
-    enter(&mut s, w);
-    asking(&mut s, "b");
-    enter(&mut s, MAIN);
     s.inspect.logs = Some(("b".into(), "log lines".into()));
-    overlay_for(&mut s, "b");
-    assert_eq!(s.windows.overlay, Some(w));
+    overlay_for(&mut s, w, "b");
+    assert_eq!(s.windows.overlay, Some(w), "the asker wins even though main shows the session too");
+    overlay_for(&mut s, MAIN, "b");
+    assert_eq!(s.windows.overlay, Some(MAIN), "a later request from main is routed by its own asker");
     close(&mut s, w);
-    assert!(s.windows.asked.is_empty() && s.windows.overlay.is_none());
+    overlay_for(&mut s, w, "b");
+    assert_eq!(s.windows.overlay, Some(MAIN), "a closed asker falls back to the window showing the session");
 }
 
 #[test]
