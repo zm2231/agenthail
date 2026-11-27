@@ -167,7 +167,6 @@ pub fn drain(s: &mut App) -> bool {
                     s.menus.ops.here = local.name.clone();
                 }
                 if let Some(m) = s.menus.ops.moving.as_mut().filter(|m| m.seq == seq) {
-                    m.picked = result.as_deref().ok().and_then(|hosts| paired(hosts).into_iter().find(Host::available)).map(|h| h.id);
                     m.hosts = Some(result);
                 }
             }

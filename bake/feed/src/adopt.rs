@@ -61,6 +61,7 @@ impl Client {
                 Ok(Adopted::Opened { summary: summary(result), session })
             }
             Err(error) if error.code == "session_adopt_needs_consent" => Ok(Adopted::NeedsConsent(error.message)),
+            Err(error) if error.code == "session_adopt_unrecorded" => Ok(Adopted::Opened { summary: format!("Opened in Agenthail, but Agenthail couldn't record it: {}", error.message), session: None }),
             Err(error) if error.code == "session_adopt_busy" => Ok(Adopted::Busy(error.reply["busy"].as_str().filter(|b| !b.is_empty()).map(str::to_string).unwrap_or(error.message))),
             Err(mut error) => {
                 error.maybe_delivered |= error.code == "session_adopt_unknown";
@@ -102,6 +103,7 @@ mod tests {
             (409, r#"{"error":{"code":"session_adopt_refused","message":"the process ended"}}"#),
             (200, r#"{"ok":true,"result":{"session":{"id":"s1"},"unchanged":true}}"#),
             (202, r#"{"ok":true,"status":"submitted"}"#),
+            (500, r#"{"error":{"code":"session_adopt_unrecorded","message":"session s1 opened in Agenthail, but its registration failed: disk full"}}"#),
         ]));
         assert_eq!(client.session_adopt("s1", false).unwrap(), Adopted::Opened { summary: "Opened in Agenthail. Stopped the terminal process that held it.".into(), session: Some("s2".into()) });
         assert_eq!(seen.recv().unwrap().1, json!({"action": "session-adopt", "sessionId": "s1", "stopTerminal": false}));
@@ -117,6 +119,7 @@ mod tests {
         let submitted = client.session_adopt("s1", false).unwrap_err();
         assert!(submitted.maybe_delivered);
         assert!(matches!(Phase::after(Err(submitted)), Phase::Failed(m) if m.starts_with("Opening it may not have gone through")));
+        assert_eq!(client.session_adopt("s1", false).unwrap(), Adopted::Opened { summary: "Opened in Agenthail, but Agenthail couldn't record it: session s1 opened in Agenthail, but its registration failed: disk full".into(), session: None });
     }
 
     #[test]
