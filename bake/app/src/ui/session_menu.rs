@@ -9,7 +9,7 @@ use rune::{PointerPress, TextEdit};
 
 use crate::{App, Screen, open_link, session};
 
-pub use super::session_dialogs::{button, marks, overlays};
+pub use super::session_dialogs::{button, has_marks, marks, overlays};
 
 const REFRESH: Duration = Duration::from_secs(30);
 

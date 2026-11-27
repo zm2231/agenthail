@@ -8,6 +8,10 @@ use crate::theme::{self, BODY, META, accent, failed, faint, muted};
 use crate::ui::session_menu::{Confirm, Open, chips_for, choose, close_rename, current_alias, run, save_rename, set};
 use crate::App;
 
+pub fn has_marks(x: &Session) -> bool {
+    x.unread() || x.pinned() || x.snoozed(time::OffsetDateTime::now_utc())
+}
+
 pub fn marks(x: &Session) -> El {
     let mut r = row().gap(4.0).items_center();
     if x.unread() {

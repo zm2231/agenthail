@@ -65,6 +65,7 @@ pub enum Outcome {
     Busy(String),
     NeedsConsent,
     Refused(String),
+    Failed(String),
     Lost,
 }
 
@@ -104,7 +105,8 @@ impl Outcome {
             "move_outcome_unknown" => Outcome::Unsettled,
             "move_busy" => Outcome::Busy(error.reply["busy"].as_str().filter(|b| !b.is_empty()).map(str::to_string).unwrap_or(error.message)),
             "move_needs_consent" => Outcome::NeedsConsent,
-            "move_refused" | "move_failed" => Outcome::Refused(error.message),
+            "move_refused" => Outcome::Refused(error.message),
+            "move_failed" => Outcome::Failed(error.message),
             _ if error.maybe_delivered => Outcome::Lost,
             _ => Outcome::Refused(error.message),
         }
@@ -129,6 +131,7 @@ impl Outcome {
             Outcome::Busy(reason) => (format!("Couldn't move {title}"), format!("{title} is busy ({reason}). Move it once it's idle."), false),
             Outcome::NeedsConsent => ("Stop the terminal and move?".to_string(), format!("A terminal is running {title}. Moving it stops that terminal."), true),
             Outcome::Refused(message) => (format!("Couldn't move {title}"), format!("{message}\n\nIt stays on {here}."), false),
+            Outcome::Failed(message) => (format!("Couldn't finish moving {title}"), format!("{message}\n\nThe session's row shows where it is now."), false),
             Outcome::Lost => ("Lost the connection during the move".to_string(), format!("This app can't tell whether the move to {host_name} went through. The session's row shows how it ends."), false),
         };
         Notice { session: session.to_string(), host: host.to_string(), host_name: host_name.to_string(), title: heading, message, retry }
@@ -214,7 +217,7 @@ mod tests {
         assert_eq!(client.move_session("s1", "h1", "forge", false), Outcome::Busy("a turn is running".into()));
         assert_eq!(client.move_session("s1", "h1", "forge", false), Outcome::NeedsConsent);
         assert_eq!(client.move_session("s1", "h1", "forge", false), Outcome::Refused("forge is on an older version".into()));
-        assert_eq!(client.move_session("s1", "h1", "forge", false), Outcome::Refused("copy failed".into()));
+        assert_eq!(client.move_session("s1", "h1", "forge", false), Outcome::Failed("copy failed".into()));
     }
 
     #[test]
@@ -239,6 +242,8 @@ mod tests {
         let n = Outcome::NeedsConsent.notice("s1", "@scout", "h1", "forge", "mac");
         assert_eq!((n.title.as_str(), n.message.as_str(), n.retry, n.host.as_str()), ("Stop the terminal and move?", "A terminal is running @scout. Moving it stops that terminal.", true, "h1"));
         assert_eq!(Outcome::Refused("no room".into()).notice("s1", "@scout", "h1", "forge", "mac").message, "no room\n\nIt stays on mac.");
+        let failed = Outcome::Failed("record the sent move: disk full".into()).notice("s1", "@scout", "h1", "forge", "mac");
+        assert_eq!((failed.title.as_str(), failed.message.as_str()), ("Couldn't finish moving @scout", "record the sent move: disk full\n\nThe session's row shows where it is now."), "a failure can come after the conversation left, so it doesn't say where it is");
         assert_eq!(Outcome::Busy("a turn is running".into()).notice("s1", "@scout", "h1", "forge", "mac").message, "@scout is busy (a turn is running). Move it once it's idle.");
         assert_eq!(Outcome::Unsettled.notice("s1", "@scout", "h1", "forge", "mac").title, "The move to forge hasn't settled");
         let lost = Outcome::Lost.notice("s1", "@scout", "h1", "forge", "mac");
