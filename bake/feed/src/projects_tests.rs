@@ -26,7 +26,7 @@ fn an_added_project_with_one_lead_offers_the_mac_menu() {
     assert_eq!(
         labels(&got),
         vec![
-            vec!["Rename…", "New conversation", "Change Lead…", "Clear Lead"],
+            vec!["Rename…", "Message Every Conversation…", "New conversation", "Change Lead…", "Clear Lead"],
             vec!["Pin to Front", "Move Earlier", "Move Later"],
             vec!["Keep the Agenthail Tools from Terminal Sessions", "Archive Project…", "Remove…"],
         ]
@@ -38,7 +38,7 @@ fn an_added_project_with_one_lead_offers_the_mac_menu() {
 fn a_project_found_from_sessions_can_be_archived_but_not_renamed_or_removed() {
     let p = record(json!({"id": "implicit:/w/x", "displayName": "x", "checkouts": [here("implicit:/w/x", false)]}));
     let got = labels(&entries(&p, &Arrangement::default(), &ids(&["implicit:/w/x"])));
-    assert_eq!(got, vec![vec!["New conversation", "Set Lead…"], vec!["Pin to Front", "Move Earlier", "Move Later"], vec!["Archive Project…"]]);
+    assert_eq!(got, vec![vec!["Message Every Conversation…", "New conversation", "Set Lead…"], vec!["Pin to Front", "Move Earlier", "Move Later"], vec!["Archive Project…"]]);
 }
 
 #[test]

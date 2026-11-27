@@ -25,6 +25,7 @@ pub enum Job {
     StartLead { surface: String, folder: String, host: String, name: String, project: String, replace: bool },
     SetLead { session: String, replace: bool },
     Message { project: String, lead: String, text: String },
+    Broadcast { project: String, text: String, key: String, names: HashMap<String, String> },
     Clean { session: String, ignored: Vec<String> },
 }
 
@@ -35,6 +36,9 @@ impl Job {
         }
         if let Job::Message { project, lead, text } = self {
             return c.lead_send(project, text).map(|d| Settled { note: projects::lead_sent(lead, &d), held: d == feed::composer::Delivered::Unconfirmed });
+        }
+        if let Job::Broadcast { project, text, key, names } = self {
+            return c.broadcast(project, text, key).map(|b| Settled { note: feed::project_message::sent(&b, |id| names.get(id).cloned().unwrap_or_else(|| id.to_string())), held: false });
         }
         if let Job::Add { path, title, host } = self {
             return c.project_add(path, title, host).map(|a| Settled { note: a.notice(), held: false });
@@ -48,7 +52,7 @@ impl Job {
             Job::ClearLead { project, name } => c.lead_clear(project).map(|_| format!("{name} has no lead now.")),
             Job::StartLead { surface, folder, host, name, project, replace } => c.lead_start(surface, folder, host, name, *replace).map(|l| format!("@{} leads {project}; its first message starts it.", l.name)),
             Job::SetLead { session, replace } => c.lead_set(session, *replace).map(|l| format!("@{} leads {}.", l.name, l.project_root)),
-            Job::Message { .. } => Ok(String::new()),
+            Job::Message { .. } | Job::Broadcast { .. } => Ok(String::new()),
             Job::Clean { .. } => Ok(String::new()),
         }?;
         Ok(Settled { note: message, held: false })
@@ -78,6 +82,7 @@ impl Job {
             Job::ClearLead { .. } => "Clearing the lead",
             Job::StartLead { .. } | Job::SetLead { .. } => "The lead change",
             Job::Message { .. } => "The message to the lead",
+            Job::Broadcast { .. } => "The message to the project",
             Job::Clean { .. } => "Removing the worktree",
         }
     }
@@ -106,6 +111,7 @@ pub enum Sheet {
     Add { host: String, folder: TextEdit, title: TextEdit },
     Rename { project: String, name: TextEdit },
     Lead { project: String, checkout: String, surface: &'static str, name: TextEdit },
+    Broadcast { project: String, text: TextEdit, key: String, sent: Option<String> },
 }
 
 pub struct State {
@@ -231,6 +237,7 @@ fn choose(s: &mut App, key: &str, item: Item, tx: &mut Tx) {
     match item {
         Item::NewConversation { host, folder } => crate::ui::new_session::open(s, crate::ui::new_session::Prefill { host, folder }, tx),
         Item::Rename => open_sheet(s, Sheet::Rename { project: p.id.clone(), name: focused(&name) }),
+        Item::Message => open_sheet(s, Sheet::Broadcast { project: p.id.clone(), text: focused(""), key: String::new(), sent: None }),
         Item::Lead { .. } => {
             let first = p.lead_places().first().map(|c| c.key()).unwrap_or_default();
             open_sheet(s, Sheet::Lead { project: p.id.clone(), checkout: first, surface: "claude", name: focused("") });
@@ -337,6 +344,11 @@ fn close_sheet(s: &mut App) {
 
 fn sheet_job(s: &App) -> Option<Job> {
     match s.ov.projects.sheet.as_ref()? {
+        Sheet::Broadcast { project, text, key, sent: None, .. } => {
+            let names = s.ov.d.sessions.iter().map(|x| (x.id.clone(), s.ov.d.title(x))).collect();
+            (!text.text.trim().is_empty()).then(|| Job::Broadcast { project: project.clone(), text: text.text.clone(), key: key.clone(), names })
+        }
+        Sheet::Broadcast { .. } => None,
         Sheet::Add { host, folder, title } => {
             let path = folder.text.trim();
             (!path.is_empty()).then(|| Job::Add { path: path.to_string(), title: title.text.trim().to_string(), host: host.clone() })
@@ -356,6 +368,11 @@ fn sheet_job(s: &App) -> Option<Job> {
 fn save(s: &mut App) {
     if s.ov.projects.saving {
         return;
+    }
+    if let Some(Sheet::Broadcast { key, .. }) = s.ov.projects.sheet.as_mut()
+        && key.is_empty()
+    {
+        *key = feed::catalog::request_key();
     }
     if let Some(job) = sheet_job(s) {
         let id = s.ov.projects.sheet_id;
@@ -379,23 +396,30 @@ fn settled(s: &mut App, job: Job, from_sheet: Option<u64>, result: Result<Settle
     }
     match result {
         Ok(Settled { note: message, held: kept }) => {
+            crate::ask_overview(s, crate::Ask::Refresh);
             if let Job::Clean { session, .. } = &job
                 && kept
             {
                 s.ov.projects.kept.insert(session.clone(), message.clone());
             }
+            if let (true, Job::Broadcast { .. }, Some(Sheet::Broadcast { text, sent, .. })) = (sheet_open, &job, s.ov.projects.sheet.as_mut()) {
+                *text = TextEdit::new("");
+                *sent = Some(message);
+                return;
+            }
             if sheet_open {
                 close_sheet(s);
             }
             s.ov.notice = Some(message);
-            crate::ask_overview(s, crate::Ask::Refresh);
         }
         Err(error) if projects::needs_replace(&error) && job.replacing().is_some() && (from_sheet.is_none() || sheet_open) => {
             let again = job.replacing().unwrap_or(job);
             s.ov.projects.confirm = Some((projects::confirm_replace(&error), again, from_sheet));
         }
         Err(error) => {
-            let message = if error.code == "partial" {
+            let message = if error.code == "no_members" {
+                "No conversation in this project can take a message right now.".to_string()
+            } else if error.code == "partial" {
                 format!("{} was only partly done. {}.", job.what(), error.message)
             } else if error.maybe_delivered { format!("{} may have gone through anyway: {}. Check before trying again.", job.what(), error.message) } else { format!("{} didn't work: {}", job.what(), error.message) };
             if let Job::Clean { session, .. } = &job {
@@ -419,7 +443,7 @@ pub fn drain(s: &mut App) -> bool {
         changed = true;
     }
     let gone = match &s.ov.projects.sheet {
-        Some(Sheet::Rename { project, .. } | Sheet::Lead { project, .. }) => s.ov.d.record(project).is_none(),
+        Some(Sheet::Rename { project, .. } | Sheet::Lead { project, .. } | Sheet::Broadcast { project, .. }) => s.ov.d.record(project).is_none(),
         _ => false,
     };
     if gone {
@@ -498,7 +522,11 @@ pub fn menu_button(key: &str) -> El {
 fn entry_item(key: &str, entry: Entry) -> MenuItem {
     let key = key.to_string();
     let item = entry.item.clone();
-    let mut m = MenuItem::new(entry.label).disabled(!entry.enabled);
+    let mut m = MenuItem::new(entry.label).key(match &entry.item {
+        Item::NewConversation { host, .. } => format!("project-new-conversation-{host}"),
+        Item::Remove { project_id, .. } => format!("project-remove-{project_id}"),
+        item => format!("project-{}", item.key()),
+    }).disabled(!entry.enabled);
     if let Some(note) = entry.note {
         m = m.description(note);
     }
@@ -664,9 +692,9 @@ fn buttons(s: &App, label: &str, can_save: bool) -> El {
         .w_full()
         .gap(8.0)
         .child(el().grow(1.0))
-        .child(Button::new("Cancel").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(close_sheet).build(k).key("project-sheet-cancel"))
+        .child(Button::new("Cancel").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).disabled(locked(s)).on_press(close_sheet).build(k).key("project-sheet-cancel"))
         .child(
-            Button::new(if saving { "Saving…" } else { label })
+            Button::new(if saving { if label == "Send" { "Sending…" } else { "Saving…" } } else { label })
                 .variant(ButtonVariant::Contrast)
                 .control_size(ControlSize::Small)
                 .disabled(saving || !can_save)
@@ -682,6 +710,45 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>) {
     let can_save = sheet_job(s).is_some();
     let open = s.ov.projects.picking;
     let (title, note, mut body, save_label) = match sheet {
+        Sheet::Broadcast { project, text, sent, .. } => {
+            let name = s.ov.d.record(project).map(|p| p.name().to_string()).unwrap_or_default();
+            let body = match sent {
+                Some(summary) => col().w_full().child(rune::text(summary.clone()).font(META).color(base()).wrap().w_full()),
+                None if s.ov.projects.saving => col()
+                    .w_full()
+                    .min_h(100.0)
+                    .px(10.0)
+                    .py(7.0)
+                    .radius(8.0)
+                    .fill(crate::theme::wash())
+                    .border(1.0, crate::theme::line())
+                    .child(rune::text(text.text.clone()).font(BODY).color(weak()).wrap().w_full()),
+                None => col().w_full().child(
+                    text_input(text, BODY)
+                        .key("project-message-text")
+                        .label("Message".to_string())
+                        .w_full()
+                        .min_h(100.0)
+                        .px(10.0)
+                        .py(7.0)
+                        .radius(8.0)
+                        .fill(crate::theme::wash())
+                        .border(1.0, crate::theme::line())
+                        .color(strong())
+                        .placeholder("Message".to_string(), weak())
+                        .on_edit(|s: &mut App| match s.ov.projects.sheet.as_mut() {
+                            Some(Sheet::Broadcast { text, .. }) => text,
+                            _ => &mut s.composer,
+                        })
+                        .on_input_change(|s: &mut App, _: &mut Tx| {
+                            if let Some(Sheet::Broadcast { key, .. }) = s.ov.projects.sheet.as_mut() {
+                                key.clear();
+                            }
+                        }),
+                ),
+            };
+            (feed::project_message::prompt(&name), None, body, if sent.is_some() { "" } else { "Send" })
+        }
         Sheet::Add { host, folder, title } => {
             let mut body = col().w_full().gap(12.0);
             if s.ov.projects.hosts.len() > 1 {
@@ -741,11 +808,20 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>) {
     if let Some(error) = &s.ov.projects.error {
         body = body.child(text(error.clone()).font(META).color(crate::theme::failed()).wrap().w_full());
     }
-    let mut dialog = Dialog::new("project-sheet", title).open(true).fit().width(440.0).on_close(close_sheet);
+    let mut dialog = Dialog::new("project-sheet", title).open(true).fit().width(440.0).on_close(|s: &mut App| {
+        if !locked(s) {
+            close_sheet(s);
+        }
+    });
     if let Some(note) = note {
         dialog = dialog.description(note);
     }
-    dialog.child(col().w_full().gap(14.0).px(16.0).pb(16.0).child(body).child(buttons(s, save_label, can_save))).build(k, layer);
+    let actions = if save_label.is_empty() {
+        row().w_full().child(el().grow(1.0)).child(Button::new("Done").variant(ButtonVariant::Contrast).control_size(ControlSize::Small).on_press(close_sheet).build(k).key("project-sheet-done"))
+    } else {
+        buttons(s, save_label, can_save)
+    };
+    dialog.child(col().w_full().gap(14.0).px(16.0).pb(16.0).child(body).child(actions)).build(k, layer);
     layer.extend(popups);
 }
 
@@ -795,8 +871,12 @@ pub fn open(s: &App) -> bool {
     s.ov.projects.sheet.is_some() || s.ov.projects.confirm.is_some()
 }
 
+fn locked(s: &App) -> bool {
+    s.ov.projects.saving && matches!(s.ov.projects.sheet, Some(Sheet::Broadcast { .. }))
+}
+
 pub fn close_top(s: &mut App) {
-    if s.ov.projects.picking.take().is_some() || s.ov.projects.confirm.take().is_some() {
+    if s.ov.projects.picking.take().is_some() || s.ov.projects.confirm.take().is_some() || locked(s) {
         return;
     }
     close_sheet(s);
