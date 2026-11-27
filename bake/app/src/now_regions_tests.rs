@@ -5,9 +5,25 @@ use feed::decisions::{Decision, Handled, Inbox, LeadHandled};
 fn drawn(rt: &Runtime<App>) -> Vec<String> {
     rt.elements()
         .into_iter()
-        .filter(|e| !e.exiting)
+        .filter(|e| !e.exiting && !e.path.starts_with("kit-root/#0/backdrop"))
         .map(|e| format!("{} {} {:?} {:?} {:?} {:?} {:?} {:?}", e.path, e.role, e.text, e.label, e.rect.map(f32::round), e.fill, e.text_color, e.border_color))
         .collect()
+}
+
+fn quiet(rt: &mut Runtime<App>) {
+    let mut seen = crate::look::generation();
+    let mut still = 0;
+    for _ in 0..1000 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        settle(rt);
+        let now = crate::look::generation();
+        still = if now == seen { still + 1 } else { 0 };
+        seen = now;
+        if still == 100 {
+            return;
+        }
+    }
+    panic!("the look kept changing on its own");
 }
 
 fn matches_fresh(rt: &mut Runtime<App>, what: &str) {
@@ -56,7 +72,7 @@ fn every_region_on_now_shows_each_change_as_a_fresh_build_would() {
         label: None,
     };
     rt.update(|s, _| s.ov.needs = vec![need(s, "first"), need(s, "second")]);
-    settle(&mut rt);
+    quiet(&mut rt);
     matches_fresh(&mut rt, "the first build");
 
     shows(&mut rt, "a usage meter's level", |s| s.ov.d.usage[0].percent = Some(85.0));
@@ -88,4 +104,48 @@ fn every_region_on_now_shows_each_change_as_a_fresh_build_would() {
     shows(&mut rt, "the sidebar narrower", |s| s.ov.now_side = rune_kit::shell::PaneState::new(240.0).range(200.0, 480.0));
     shows(&mut rt, "the brief layout", |s| s.ov.now_brief = true);
     shows(&mut rt, "the three panes again", |s| s.ov.now_brief = false);
+}
+
+#[test]
+fn the_brief_layout_shows_each_change_as_a_fresh_build_would() {
+    if !isolated("now_regions::the_brief_layout_shows_each_change_as_a_fresh_build_would") {
+        return;
+    }
+    let dir = Dir::new("now-regions-brief");
+    let mut rt = world(&dir);
+    now(&mut rt, true);
+    quiet(&mut rt);
+    matches_fresh(&mut rt, "the first build");
+    shows(&mut rt, "a digest line's text", |s| super::rows_memo_lines::work(s, "W2").text = "Check the import twice".into());
+    shows(&mut rt, "a catch-up being asked", |s| s.ov.inbox.briefs.entry("p1".into()).or_default().asking = true);
+    shows(&mut rt, "a catch-up's note", |s| {
+        let b = s.ov.inbox.briefs.entry("p1".into()).or_default();
+        b.asking = false;
+        b.notice = Some("The lead is writing it".into());
+    });
+    shows(&mut rt, "a moving session's detail", |s| x(s, "b").display.detail = "Running the import tests".into());
+    shows(&mut rt, "a session that stops working", |s| x(s, "b").status = "idle".into());
+    shows(&mut rt, "the last look", |s| s.ov.looked_now = Some("2026-11-27T09:45:00Z".into()));
+}
+
+#[test]
+fn a_row_opens_what_it_is_about_after_that_changes_out_of_sight() {
+    if !isolated("now_regions::a_row_opens_what_it_is_about_after_that_changes_out_of_sight") {
+        return;
+    }
+    let dir = Dir::new("now-regions-press");
+    let mut rt = world(&dir);
+    let handled = |session: &str| Handled { title: "Wire the export".into(), session: session.into(), outcome: "Approved".into(), at: "2026-11-27T09:58:00Z".into() };
+    rt.update(|s, _| {
+        s.ov.inbox.inbox = Some(Inbox::default());
+        s.ov.inbox.history = vec![handled("a")];
+    });
+    now(&mut rt, false);
+    rt.update(|s, _| s.ov.inbox.history = vec![handled("c")]);
+    settle(&mut rt);
+    let (x, y) = rt.find("handled-0").expect("the handled row is on screen");
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(DT);
+    assert_eq!(rt.state.selected.as_deref(), Some("c"), "the row opens the session it lists now, though it reads the same");
 }

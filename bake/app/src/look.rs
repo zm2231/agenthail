@@ -366,6 +366,14 @@ pub fn poll(window: Window, tx: &mut Tx) -> bool {
     changed
 }
 
+#[cfg(test)]
+pub fn generation() -> u64 {
+    STATE.with_borrow_mut(|s| {
+        pump(s);
+        s.generation
+    })
+}
+
 pub fn tabs() -> feed::tabs::Setting {
     STATE.with_borrow(|s| s.view.as_ref().map(|v| feed::tabs::setting(&v.values)).unwrap_or_default())
 }

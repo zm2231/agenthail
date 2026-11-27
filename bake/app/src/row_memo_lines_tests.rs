@@ -64,7 +64,7 @@ fn rebuilt(rt: &mut Runtime<App>, prefix: &str, change: impl FnOnce(&mut App)) -
     ids
 }
 
-fn work<'a>(s: &'a mut App, id: &str) -> &'a mut feed::derive::Work {
+pub(super) fn work<'a>(s: &'a mut App, id: &str) -> &'a mut feed::derive::Work {
     s.ov.world_changed();
     feed::shared::own(s.ov.d.work.values_mut().find(|w| w.id == id).unwrap())
 }
