@@ -500,8 +500,10 @@ pub fn load_pane(s: &mut App, id: &str) {
 }
 
 fn rebuild(s: &mut App) {
-    let panes: Vec<(&str, &[feed::Item])> = s.panes.iter().map(|(id, p)| (id.as_str(), p.transcript.items())).collect();
-    s.ov.rebuild(&panes);
+    over::jump::keep_highlight(s, |s| {
+        let panes: Vec<(&str, &[feed::Item])> = s.panes.iter().map(|(id, p)| (id.as_str(), p.transcript.items())).collect();
+        s.ov.rebuild(&panes);
+    });
     settings::sessions_changed(&s.sessions, s.ov.needs.len());
     s.panes_moved = false;
     s.built_at = s.clock;
@@ -1341,10 +1343,12 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Reopened => reopened(s),
             Bg::LedgerChanged(key, at) => {
                 ui::ready::ledger_changed(s, &key);
+                over::worksearch::ledger_changed(s, Some(&key));
                 ask_overview(s, Ask::Ledger(key, at));
             }
             Bg::LedgersReopened => {
                 ui::ready::reopened(s);
+                over::worksearch::ledger_changed(s, None);
                 ask_overview(s, Ask::Reopened);
             }
             Bg::SessionNews => {
@@ -1543,6 +1547,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= over::inbox::drain(s);
     changed |= over::work::drain(s);
     changed |= over::search::drain(s);
+    changed |= over::worksearch::drain(s);
     changed |= notify::tick(s);
     changed |= ui::gone::watch(s);
     changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s) | ui::inspect::drain(s);
@@ -1573,6 +1578,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     menubar::sync_keys(s);
     menubar::warn(s);
     menubar::badge(s);
+    if let Some(due) = over::worksearch::wait(s) {
+        s.wake.after(tx, due);
+    }
     s.wake.after(tx, Duration::from_millis(if busy { 16 } else { 250 }));
     changed
 }

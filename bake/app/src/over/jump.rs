@@ -4,6 +4,7 @@ use rune_theme_opencode::icons;
 
 use feed::catalog::Session;
 use feed::search::{Command, Selected, commands, commands_lead, one_line};
+use feed::worksearch::Found;
 
 use crate::icons as ah;
 use crate::over::search;
@@ -14,6 +15,7 @@ use crate::App;
 #[derive(Clone)]
 pub enum Pick {
     Target(Target),
+    Found(String, String),
     Codex(Box<Session>),
     Command(Command),
 }
@@ -53,6 +55,7 @@ fn entries(s: &App) -> Vec<Entry> {
     let lead = commands_lead(q, &rows);
     let cmds = rows.into_iter().map(|c| Entry { group: "Commands", title: c.title, status: String::new(), badge: c.shortcut.to_string(), look: Look::Icon(command_icon(c.command)), pick: Some(Pick::Command(c.command)) });
     let mut out: Vec<Entry> = if lead { cmds.chain(hits).collect() } else { hits.chain(cmds).collect() };
+    work_found(s, &mut out, lead);
     if let Some(found) = search::codex_for(s) {
         let group = "Codex history";
         let note = |text: String| Entry { group, title: text, status: String::new(), badge: String::new(), look: Look::Icon(&ah::CLOCK), pick: None };
@@ -81,6 +84,43 @@ fn entries(s: &App) -> Vec<Entry> {
     out
 }
 
+fn lists(s: &App, e: &Entry, f: &Found) -> bool {
+    match &e.pick {
+        Some(Pick::Target(Target::Work(x))) => *x == f.id && s.ov.d.work.get(x).is_some_and(|w| w.ledger_key() == f.project_key),
+        Some(Pick::Found(ledger, x)) => *x == f.id && *ledger == f.project_key,
+        _ => false,
+    }
+}
+
+fn work_found(s: &App, out: &mut Vec<Entry>, lead: bool) {
+    let Some(Some(found)) = crate::over::worksearch::found_for(s) else { return };
+    let note = |text: String| Entry { group: "Work", title: text, status: String::new(), badge: String::new(), look: Look::Icon(&icons::TASK), pick: None };
+    let rows: Vec<Entry> = match found {
+        Err(e) => vec![note(e.clone())],
+        Ok(search) => {
+            for f in &search.items {
+                let extra = s.ov.d.found_extra(f);
+                if let Some(e) = out.iter_mut().find(|e| lists(s, e, f))
+                    && !extra.is_empty()
+                {
+                    e.status = std::iter::once(e.status.clone()).filter(|t| !t.is_empty()).chain(extra).collect::<Vec<_>>().join(" · ");
+                }
+            }
+            let listed = |f: &Found| out.iter().any(|e| lists(s, e, f));
+            let mut rows: Vec<Entry> = s.ov.d.found_rows(search, listed).into_iter().map(|r| Entry { group: "Work", title: r.title, status: r.status, badge: r.badge, look: Look::Avatar(r.avatar), pick: Some(Pick::Found(r.ledger, r.id)) }).collect();
+            rows.extend(search.note().map(note));
+            rows
+        }
+    };
+    let at = feed::worksearch::work_slot(out.iter().map(|e| e.group), lead);
+    out.splice(at..at, rows);
+}
+
+#[cfg(test)]
+pub fn shown(s: &App) -> Vec<(String, String)> {
+    entries(s).into_iter().filter(|e| e.group == "Work").map(|e| (e.title, e.status)).collect()
+}
+
 fn query(s: &App) -> &str {
     s.ov.jump.as_ref().map(|e| e.text.as_str()).unwrap_or_default()
 }
@@ -88,6 +128,35 @@ fn query(s: &App) -> &str {
 fn highlighted(s: &App) -> usize {
     let (at, ix) = &s.ov.jump_ix;
     if at == query(s) { *ix } else { 0 }
+}
+
+fn same(s: &App, a: &Pick, b: &Pick) -> bool {
+    let loaded_as = |ledger: &str, id: &str, x: &str| id == x && s.ov.d.work.get(x).is_some_and(|w| w.ledger_key() == ledger);
+    match (a, b) {
+        (Pick::Found(ledger, id), Pick::Target(Target::Work(x))) | (Pick::Target(Target::Work(x)), Pick::Found(ledger, id)) => loaded_as(ledger, id, x),
+        (Pick::Target(x), Pick::Target(y)) => x == y,
+        (Pick::Found(a, x), Pick::Found(b, y)) => a == b && x == y,
+        (Pick::Codex(x), Pick::Codex(y)) => x.id == y.id,
+        (Pick::Command(x), Pick::Command(y)) => x == y,
+        _ => false,
+    }
+}
+
+pub fn highlighted_pick(s: &App) -> Option<Pick> {
+    s.ov.jump.as_ref()?;
+    let picks: Vec<Pick> = entries(s).into_iter().filter_map(|e| e.pick).collect();
+    let ix = highlighted(s).min(picks.len().checked_sub(1)?);
+    picks.into_iter().nth(ix)
+}
+
+pub fn keep_highlight(s: &mut App, change: impl FnOnce(&mut App)) {
+    let before = highlighted_pick(s);
+    change(s);
+    if let Some(p) = before
+        && let Some(ix) = entries(s).into_iter().filter_map(|e| e.pick).position(|q| same(s, &p, &q))
+    {
+        s.ov.jump_ix = (query(s).to_string(), ix);
+    }
 }
 
 fn highlight(s: &mut App, ix: usize, tx: &mut Tx) {
@@ -102,6 +171,7 @@ fn picks(s: &App) -> usize {
 fn run(s: &mut App, pick: Pick, tx: &mut Tx) {
     match pick {
         Pick::Target(t) => open_target(s, &t),
+        Pick::Found(ledger, id) => crate::over::worksearch::open(s, &ledger, &id),
         Pick::Codex(x) => search::open_pinned(s, *x),
         Pick::Command(c) => search::run(s, c, tx),
     }
