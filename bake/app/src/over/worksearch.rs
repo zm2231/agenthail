@@ -204,6 +204,13 @@ pub fn reread(s: &mut App, id: &str) {
     }
 }
 
+pub fn ledger_changed(s: &mut App, key: Option<&str>) {
+    let Screen::Work(id) = s.screen.clone() else { return };
+    if s.ov.worksearch.found.get(&id).is_some_and(|w| key.is_none_or(|k| w.ledger_key() == k)) {
+        reread(s, &id);
+    }
+}
+
 pub fn note(s: &App, id: &str) -> Option<String> {
     let shown = s.ov.d.work.contains_key(id);
     match s.ov.worksearch.opening.get(id)? {

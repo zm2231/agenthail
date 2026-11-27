@@ -1337,10 +1337,12 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Reopened => reopened(s),
             Bg::LedgerChanged(key, at) => {
                 ui::ready::ledger_changed(s, &key);
+                over::worksearch::ledger_changed(s, Some(&key));
                 ask_overview(s, Ask::Ledger(key, at));
             }
             Bg::LedgersReopened => {
                 ui::ready::reopened(s);
+                over::worksearch::ledger_changed(s, None);
                 ask_overview(s, Ask::Reopened);
             }
             Bg::SessionNews => ask_overview(s, Ask::Refresh),

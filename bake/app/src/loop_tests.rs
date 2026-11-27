@@ -627,6 +627,18 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     assert_eq!(crate::over::worksearch::note(&rt.state, "z-W8").as_deref(), Some("Couldn't refresh this work item, so it may be out of date: the ledger store is busy"));
 
     assert_eq!(asked(&paths).len(), 2, "z-W8 was read on open and again on reopen");
+    send(&rt, Bg::LedgerChanged("shared:q".into(), std::time::Instant::now()));
+    rt.frame(DT);
+    quiet(&mut rt);
+    assert!(asked(&paths).is_empty(), "another ledger's change leaves the open item alone");
+    send(&rt, Bg::LedgerChanged("shared:z".into(), std::time::Instant::now()));
+    rt.frame(DT);
+    quiet(&mut rt);
+    assert_eq!(asked(&paths), ["/api/v1/ledger?projectKey=shared%3Az&view=item&id=z-W8"], "a change to its ledger rereads the open found item");
+    send(&rt, Bg::LedgersReopened);
+    rt.frame(DT);
+    quiet(&mut rt);
+    assert_eq!(asked(&paths).len(), 1, "so does a reconnect that may have missed changes");
 
     typed(&mut rt, "export");
     rt.frame(0.2);
