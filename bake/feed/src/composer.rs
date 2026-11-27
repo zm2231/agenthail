@@ -252,6 +252,7 @@ pub struct Unsent {
     pub draft: Option<String>,
     pub turn: Option<TurnOptions>,
     pub sent_at: i64,
+    pub order: i64,
     pub unanswered: bool,
 }
 
@@ -283,7 +284,7 @@ impl Unsent {
 
     pub fn to_json(&self) -> Value {
         let attachments: Vec<Value> = self.attachments.iter().map(Upload::to_json).collect();
-        let mut out = json!({"session": self.session, "text": self.text, "attachments": attachments, "key": self.key, "busy": self.busy.map(Busy::as_str), "maybeDelivered": self.maybe_delivered, "error": self.error, "tries": self.tries, "pid": self.pin.map(|p| p.pid), "pidStartedAt": self.pin.and_then(|p| p.started_at), "draft": self.draft, "sentAt": self.sent_at, "unanswered": self.unanswered});
+        let mut out = json!({"session": self.session, "text": self.text, "attachments": attachments, "key": self.key, "busy": self.busy.map(Busy::as_str), "maybeDelivered": self.maybe_delivered, "error": self.error, "tries": self.tries, "pid": self.pin.map(|p| p.pid), "pidStartedAt": self.pin.and_then(|p| p.started_at), "draft": self.draft, "sentAt": self.sent_at, "order": self.order, "unanswered": self.unanswered});
         if let Some(turn) = &self.turn {
             turn.apply(&mut out);
         }
@@ -302,8 +303,8 @@ impl Unsent {
         let maybe_delivered = value["maybeDelivered"].as_bool().unwrap_or(true);
         let tries = value["tries"].as_u64().unwrap_or_default() as u32;
         let pin = value["pid"].as_i64().map(|pid| crate::holders::Pin { pid, started_at: value["pidStartedAt"].as_i64() });
-        let (turn, sent_at, unanswered) = (TurnOptions::from_json(value), value["sentAt"].as_i64().unwrap_or_default(), value["unanswered"].as_bool().unwrap_or_default());
-        Some(Unsent { session, text, attachments, key, busy, maybe_delivered, error: value["error"].as_str().unwrap_or_default().to_string(), tries, pin, draft: value["draft"].as_str().map(str::to_string), turn, sent_at, unanswered })
+        let (turn, sent_at, order, unanswered) = (TurnOptions::from_json(value), value["sentAt"].as_i64().unwrap_or_default(), value["order"].as_i64().unwrap_or_default(), value["unanswered"].as_bool().unwrap_or_default());
+        Some(Unsent { session, text, attachments, key, busy, maybe_delivered, error: value["error"].as_str().unwrap_or_default().to_string(), tries, pin, draft: value["draft"].as_str().map(str::to_string), turn, sent_at, order, unanswered })
     }
 
     pub fn failed(self, retry: bool, maybe_delivered: bool, answered: bool, error: String) -> Unsent {
@@ -377,12 +378,12 @@ impl Unconfirmed {
     pub fn add(&mut self, id: &str, unsent: Unsent) {
         let list = self.0.entry(id.to_string()).or_default();
         list.retain(|u| u.key != unsent.key);
-        let at = list.iter().position(|u| u.sent_at > unsent.sent_at).unwrap_or(list.len());
+        let at = list.iter().position(|u| u.order > unsent.order).unwrap_or(list.len());
         list.insert(at, unsent);
     }
 
     pub fn newest_stamp(&self) -> i64 {
-        self.iter().map(|(_, u)| u.sent_at).max().unwrap_or_default()
+        self.iter().map(|(_, u)| u.order).max().unwrap_or_default()
     }
 
     pub fn remove(&mut self, id: &str, key: &str) {
@@ -562,7 +563,7 @@ mod tests {
     #[test]
     fn an_unsent_message_keeps_its_turn_options_and_when_it_was_sent() {
         let turn = TurnOptions { service_tier: "flex".into(), output_schema: Some(json!({"type": "object"})) };
-        let unsent = Unsent { session: "s1".into(), text: "ship it".into(), key: "k1".into(), maybe_delivered: true, turn: Some(turn), sent_at: 1_800_000_000, unanswered: true, ..Default::default() };
+        let unsent = Unsent { session: "s1".into(), text: "ship it".into(), key: "k1".into(), maybe_delivered: true, turn: Some(turn), sent_at: 1_800_000_000, order: 7, unanswered: true, ..Default::default() };
         assert_eq!(Unsent::from_json("s1", &unsent.to_json()), Some(unsent.clone()));
         let older = json!({"text": "ship it", "key": "k1"});
         let read = Unsent::from_json("s1", &older).unwrap();
@@ -588,10 +589,10 @@ mod tests {
     #[test]
     fn unsent_messages_stay_in_sending_order_however_they_come_back() {
         let mut list = Unconfirmed::default();
-        list.add("s1", Unsent { key: "b".into(), text: "b".into(), sent_at: 2, ..Default::default() });
-        list.add("s1", Unsent { key: "c".into(), text: "c".into(), sent_at: 3, ..Default::default() });
-        list.add("s1", Unsent { key: "a".into(), text: "a".into(), sent_at: 1, ..Default::default() });
-        list.add("s1", Unsent { key: "b".into(), text: "b again".into(), sent_at: 2, ..Default::default() });
+        list.add("s1", Unsent { key: "b".into(), text: "b".into(), order: 2, ..Default::default() });
+        list.add("s1", Unsent { key: "c".into(), text: "c".into(), order: 3, ..Default::default() });
+        list.add("s1", Unsent { key: "a".into(), text: "a".into(), order: 1, ..Default::default() });
+        list.add("s1", Unsent { key: "b".into(), text: "b again".into(), order: 2, ..Default::default() });
         assert_eq!(list.list("s1").iter().map(|u| u.text.as_str()).collect::<Vec<_>>(), ["a", "b again", "c"]);
         assert_eq!(list.newest_stamp(), 3);
         assert!(list.list("gone").is_empty());
@@ -600,9 +601,9 @@ mod tests {
     #[test]
     fn merging_a_continued_session_keeps_messages_in_the_order_they_were_sent() {
         let mut list = Unconfirmed::default();
-        list.add("old", Unsent { key: "a".into(), text: "a".into(), sent_at: 10, ..Default::default() });
-        list.add("new", Unsent { key: "b".into(), text: "b".into(), sent_at: 20, ..Default::default() });
-        list.add("old", Unsent { key: "c".into(), text: "c".into(), sent_at: 30, ..Default::default() });
+        list.add("old", Unsent { key: "a".into(), text: "a".into(), order: 10, sent_at: 500, ..Default::default() });
+        list.add("new", Unsent { key: "b".into(), text: "b".into(), order: 20, sent_at: 100, ..Default::default() });
+        list.add("old", Unsent { key: "c".into(), text: "c".into(), order: 30, sent_at: 100, ..Default::default() });
         list.rekey(&HashMap::from([("old".to_string(), "new".to_string())]));
         assert_eq!(list.list("new").iter().map(|u| u.key.as_str()).collect::<Vec<_>>(), ["a", "b", "c"]);
         assert!(list.list("old").is_empty());

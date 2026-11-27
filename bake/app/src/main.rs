@@ -831,6 +831,7 @@ fn retry_key(s: &mut App, id: &str, key: &str, auto: bool, tx: &mut Tx) {
         }
         if auto {
             pending.sent_at = unsent.sent_at;
+            pending.order = unsent.order;
             pending.pin = unsent.pin;
         }
         dispatch(s, id, pending, false, tx);
@@ -978,7 +979,8 @@ fn fresh(s: &App, id: &str, text: String, attachments: Vec<feed::attach::Upload>
         pin: feed::holders::pins().get(id),
         draft: None,
         turn: None,
-        sent_at: feed::composer::send_stamp(feed::composer::now_ms()),
+        sent_at: feed::composer::now_ms(),
+        order: feed::composer::send_stamp(feed::composer::now_ms()),
         unanswered: true,
     }
 }
@@ -1193,7 +1195,8 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &ui::paste::draft(s));
     }
-    let mut restored: Vec<(String, String)> = s.unsent.iter().filter(|(id, u)| ui::paste::expand(s.drafts.get(id)).trim() == u.text).map(|(id, u)| (id.clone(), ui::paste::unsent_draft(u))).collect();
+    let now = feed::composer::now_ms();
+    let mut restored: Vec<(String, String)> = s.unsent.iter().filter(|(id, u)| !u.redelivering(now) && ui::paste::expand(s.drafts.get(id)).trim() == u.text).map(|(id, u)| (id.clone(), ui::paste::unsent_draft(u))).collect();
     restored.dedup_by(|a, b| a.0 == b.0);
     for (id, _) in &restored {
         s.drafts.set(id, "");
