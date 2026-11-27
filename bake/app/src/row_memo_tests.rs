@@ -166,6 +166,7 @@ fn a_change_rebuilds_only_its_row_on_now() {
     assert_eq!(rebuilt(&mut rt, "", |_| {}), Vec::<String>::new(), "nothing changed");
 
     assert_eq!(rebuilt(&mut rt, "hands-", |s| x(s, "b").status = "busy".into()), ["hands-1"], "a hands-on session starts working");
+    assert_eq!(rebuilt(&mut rt, "hands-", |s| x(s, "b").last_active = "2026-01-01T00:00:00Z".into()), Vec::<String>::new(), "a working card shows no age");
     assert_eq!(rebuilt(&mut rt, "hands-", |s| x(s, "a").last_active = "2026-01-01T00:00:00Z".into()), ["hands-0"], "its idle age");
     assert_eq!(rebuilt(&mut rt, "hands-", |s| x(s, "a").project.as_mut().unwrap().display_name = "Renamed".into()), ["hands-0"], "its project");
     assert_eq!(rebuilt(&mut rt, "hands-", |s| s.ov.hands_on.swap(0, 1)), ["hands-0", "hands-1"], "a reorder renumbers both");

@@ -103,7 +103,7 @@ pub fn digest_block(s: &App, p: &Project, lines: &[Line], max: usize, looked: Op
 pub fn hands_on_card(s: &App, i: usize, id: &str, k: &Kit) -> El {
     let Some(x) = s.ov.d.session(id) else { return col() };
     let busy = busy(x);
-    let idle = s.ov.d.ago(&x.last_active);
+    let idle = if busy { String::new() } else { s.ov.d.ago(&x.last_active) };
     let title = ui::short_title(&s.ov.d.title(x), 30);
     let gist = s.ov.d.gist(x);
     let gist = if gist == x.display.label { "No summary yet".to_string() } else { gist };
