@@ -42,6 +42,7 @@ lucide!(SHRINK, "ah-shrink", r#"<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7
 lucide!(SELECTOR, "ah-selector", r#"<path d="m8 9 4-4 4 4"/><path d="m8 15 4 4 4-4"/>"#);
 lucide!(STOP, "ah-stop", r#"<rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor"/>"#);
 lucide!(ROTATE, "ah-rotate", r#"<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5"/><path d="M4 4v4.5h4.5"/>"#);
+lucide!(ROTATE_CW, "ah-rotate-cw", r#"<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>"#);
 lucide!(COPY, "ah-copy", r#"<rect x="8.5" y="8.5" width="12" height="12" rx="2"/><path d="M15.5 8.5V5.5a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3"/>"#);
 lucide!(PENCIL, "ah-pencil", r#"<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7.5 18.5 3.5 19.5l1-4z"/><path d="m14.5 5.5 3 3"/>"#);
 lucide!(TRASH, "ah-trash", r#"<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4.5h6V7"/>"#);

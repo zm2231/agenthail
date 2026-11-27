@@ -135,7 +135,10 @@ fn tray_items(bar: &MenuBar, link: Link, note: Option<&str>) -> Vec<TrayItem> {
     items.extend([
         TrayItem::action("new-session", "New Session"),
         TrayItem::action("open", "Open Agenthail"),
+        TrayItem::action("talk", "Talk to Orchestrator…"),
         TrayItem::action("settings", "Settings…"),
+        TrayItem::Separator,
+        TrayItem::action("restart", "Restart Agenthail"),
         TrayItem::Separator,
         TrayItem::action("quit", "Quit Agenthail"),
     ]);
@@ -187,6 +190,8 @@ fn on_event(app: &AppHandle<App>, event: TrayEvent) {
             "open" => app.open(),
             "quit" => app.quit(),
             "settings" => crate::settings::open(),
+            "talk" => app.update(|_, _| crate::voice::open("", "")),
+            "restart" => app.update(|s, _| crate::ui::connect::start_daemon(s)),
             "notification-settings" => crate::open_settings(feed::notify::NOTIFICATION_SETTINGS),
             "new-session" => {
                 app.open();

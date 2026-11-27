@@ -1,5 +1,7 @@
 mod history;
 mod icons;
+mod instance;
+mod link;
 mod look;
 mod menubar;
 mod notify;
@@ -61,6 +63,7 @@ pub enum Bg {
     Started(Result<(), feed::connect::Problem>),
     LeadReplacements(Vec<feed::catalog::LeadReplacement>),
     Notice(ui::notice::Done),
+    Link(link::Found),
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -418,6 +421,7 @@ pub fn session<'a>(s: &'a App, id: &str) -> Option<&'a Session> {
 }
 
 pub fn select(s: &mut App, id: &str) {
+    link::moved();
     let id = &feed::composer::current(&s.rekeyed, id).to_string();
     s.selected = Some(id.to_string());
     s.screen = Screen::Session;
@@ -1139,6 +1143,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 s.now = OffsetDateTime::now_utc();
                 s.status = "live".into();
                 ui::connect::up(s);
+                link::listed(s);
                 if let Some(id) = s.selected.clone()
                     && touched.is_none_or(|t| t.contains(&id))
                 {
@@ -1191,6 +1196,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::DecisionsRev(rev) => over::inbox::rev_seen(s, &rev),
             Bg::LeadReplacements(list) => ui::notice::take_replacements(s, list),
             Bg::Notice(done) => ui::notice::take(s, done),
+            Bg::Link(found) => link::found(s, found),
             Bg::Sent(id, pending, retry, result) => take_sent(s, id, pending, retry, result),
             Bg::Stopped(id, result) => {
                 let id = feed::composer::current(&s.rekeyed, &id).to_string();
@@ -1381,6 +1387,14 @@ fn main() {
         voice::run_alone();
         return;
     }
+    if args().iter().any(|a| a == "--link-scheme") {
+        println!("{}", link::SCHEME);
+        return;
+    }
+    rune::url_schemes([link::SCHEME]);
+    if !rune::single_instance(link::INSTANCE) || !instance::only_copy(link::LOCK) {
+        return;
+    }
     let mut app = rune::App::new(AppSpec::<App> {
         poll: Some(poll),
         on_key: Some(on_key),
@@ -1393,7 +1407,8 @@ fn main() {
         .chrome(Chrome { full_size_content: true, traffic_lights: Some((20.0, 20.0)), drag_regions: true })
         .window_options(WindowOptions { transparent: true, resizable: true, visible: true, ..Default::default() })
         .srgb_blend(true)
-        .on_quit(on_quit);
+        .on_quit(on_quit)
+        .on_open_url(link::on_open_url);
     let mut prefs = settings::spec();
     prefs.options = WindowOptions { visible: false, resizable: true, ..Default::default() };
     let (handle, window) = app.window(prefs);

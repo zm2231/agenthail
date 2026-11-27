@@ -316,6 +316,7 @@ pub enum Command {
     Stop,
     Rename,
     Refresh,
+    Restart,
     Activity,
 }
 
@@ -341,6 +342,7 @@ pub fn commands(query: &str, selected: Option<Selected>) -> Vec<CommandRow> {
         rows.push(CommandRow { command: Command::Rename, title: format!("Rename {}", one_line(x.title)), shortcut: "" });
     }
     rows.push(CommandRow { command: Command::Refresh, title: "Refresh".into(), shortcut: "⌘R" });
+    rows.push(CommandRow { command: Command::Restart, title: "Restart Agenthail".into(), shortcut: "" });
     rows.push(CommandRow { command: Command::Activity, title: "Activity history".into(), shortcut: "" });
     rows.retain(|r| q.is_empty() || r.title.to_lowercase().contains(&q));
     rows.sort_by_key(|r| !names(&r.title, &q));
@@ -499,9 +501,9 @@ mod tests {
     #[test]
     fn commands_follow_the_selected_session_and_the_query() {
         let all: Vec<Command> = commands("", None).into_iter().map(|r| r.command).collect();
-        assert_eq!(all, [Command::NewSession, Command::Refresh, Command::Activity]);
+        assert_eq!(all, [Command::NewSession, Command::Refresh, Command::Restart, Command::Activity]);
         let idle = commands("", Some(Selected { title: "@fixer", can_stop: false }));
-        assert_eq!(idle.iter().map(|r| r.command).collect::<Vec<_>>(), [Command::NewSession, Command::Rename, Command::Refresh, Command::Activity]);
+        assert_eq!(idle.iter().map(|r| r.command).collect::<Vec<_>>(), [Command::NewSession, Command::Rename, Command::Refresh, Command::Restart, Command::Activity]);
         assert_eq!(idle[1].title, "Rename @fixer");
         let working = commands("stop", Some(Selected { title: "@fixer", can_stop: true }));
         assert_eq!(working.len(), 1);
@@ -518,8 +520,12 @@ mod tests {
             assert!(commands_lead(q, &rows), "{q}");
         }
         let rows = commands("re", Some(Selected { title: "@fixer", can_stop: false }));
-        assert_eq!(rows.iter().map(|r| r.command).collect::<Vec<_>>(), [Command::Rename, Command::Refresh]);
+        assert_eq!(rows.iter().map(|r| r.command).collect::<Vec<_>>(), [Command::Rename, Command::Refresh, Command::Restart]);
         assert!(!commands_lead("re", &rows));
+        let rows = commands("restart", None);
+        assert_eq!(rows.iter().map(|r| r.command).collect::<Vec<_>>(), [Command::Restart]);
+        assert_eq!(rows[0].title, "Restart Agenthail");
+        assert!(commands_lead("restart", &rows));
         let rows = commands("refresh", Some(Selected { title: "@refresher", can_stop: false }));
         assert_eq!(rows.iter().map(|r| r.command).collect::<Vec<_>>(), [Command::Refresh, Command::Rename]);
         assert!(commands_lead("refresh", &rows));
