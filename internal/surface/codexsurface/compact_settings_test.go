@@ -205,9 +205,9 @@ func TestAReloadCodexDoesNotAnswerKeepsTheNewWindow(t *testing.T) {
 	})
 	store := newMemoryCodexConfig()
 	codex.SetCodexConfigStore(store)
-	wait := codexThreadLoadWait
-	codexThreadLoadWait = 100 * time.Millisecond
-	t.Cleanup(func() { codexThreadLoadWait = wait })
+	wait := codexAppServerWait
+	codexAppServerWait = 100 * time.Millisecond
+	t.Cleanup(func() { codexAppServerWait = wait })
 	stall.Store(true)
 	if err := codex.SetCompactSetting(context.Background(), session, surface.CompactSettingWindow, "300000"); err == nil {
 		t.Fatal("a reload Codex never answered reported success")

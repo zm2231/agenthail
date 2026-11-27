@@ -267,7 +267,7 @@ func (c *Codex) listThreadTurnsView(ctx context.Context, conn codexClient, threa
 	if itemsView != "" {
 		params["itemsView"] = itemsView
 	}
-	response, err := conn.Request(ctx, "thread/turns/list", params, 5*time.Second)
+	response, err := conn.Request(ctx, "thread/turns/list", params, codexAppServerWait)
 	if codexTurnsNotListedYet(err) {
 		return nil, nil
 	}

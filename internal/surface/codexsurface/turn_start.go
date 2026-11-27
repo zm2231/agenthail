@@ -154,7 +154,7 @@ func (c *Codex) startTurn(ctx context.Context, client codexClient, threadID, met
 }
 
 func codexRecentTurns(ctx context.Context, client codexClient, threadID string, limit int) ([]map[string]any, error) {
-	response, err := client.Request(ctx, "thread/turns/list", map[string]any{"threadId": threadID, "limit": limit, "sortDirection": "desc", "itemsView": "notLoaded"}, 5*time.Second)
+	response, err := client.Request(ctx, "thread/turns/list", map[string]any{"threadId": threadID, "limit": limit, "sortDirection": "desc", "itemsView": "notLoaded"}, codexAppServerWait)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +223,7 @@ func awaitTurnUnderway(ctx context.Context, client codexClient, threadID string,
 // recorded counts until its turn is listed with completedAt or behind a newer
 // turn.
 func (c *Codex) turnInFlight(ctx context.Context, client codexClient, threadID string) (bool, error) {
-	response, err := client.Request(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": false}, 5*time.Second)
+	response, err := client.Request(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": false}, codexAppServerWait)
 	if codexRolloutNotWrittenYet(err) {
 		return true, nil
 	}

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/transcript"
@@ -162,7 +161,7 @@ func (c *Codex) loadedThreadIDs(ctx context.Context, conn codexClient, limit int
 	if limit > 0 {
 		params["limit"] = limit
 	}
-	resp, err := conn.Request(ctx, "thread/loaded/list", params, 5*time.Second)
+	resp, err := conn.Request(ctx, "thread/loaded/list", params, codexAppServerWait)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +232,7 @@ func (c *Codex) listPage(ctx context.Context, conn codexClient, params map[strin
 }
 
 func (c *Codex) listPageCursor(ctx context.Context, conn codexClient, params map[string]any, runtimes *codexRuntimes) ([]surface.Session, string, error) {
-	resp, err := conn.Request(ctx, "thread/list", params, 10*time.Second)
+	resp, err := conn.Request(ctx, "thread/list", params, codexAppServerWait)
 	if err != nil {
 		return nil, "", err
 	}

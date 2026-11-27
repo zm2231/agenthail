@@ -254,7 +254,7 @@ func TestTheVoiceOperatorThreadStartsWithEveryAgenthailVoiceTool(t *testing.T) {
 	}
 	program := bridge.Request("thread/start")
 	_, params, _ := strings.Cut(program, `request("thread/start",`)
-	params, _, _ = strings.Cut(params, fmt.Sprintf(",%d))", codexThreadLoadWait.Milliseconds()))
+	params, _, _ = strings.Cut(params, fmt.Sprintf(",%d))", codexAppServerWait.Milliseconds()))
 	var request struct {
 		DynamicTools []struct {
 			Name  string `json:"name"`

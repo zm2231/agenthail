@@ -54,7 +54,7 @@ func TestADesktopThatNeverAnswersReleasesTheCallerWhenItsContextEnds(t *testing.
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	began := time.Now()
-	_, err = client.Request(ctx, codexThreadResume, map[string]any{"threadId": "t"}, codexThreadLoadWait)
+	_, err = client.Request(ctx, codexThreadResume, map[string]any{"threadId": "t"}, codexAppServerWait)
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(began) > 5*time.Second {
 		t.Fatalf("a resume Desktop never answered returned %v after %v", err, time.Since(began))
 	}

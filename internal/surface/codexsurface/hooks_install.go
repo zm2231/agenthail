@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/tidwall/gjson"
@@ -114,7 +113,7 @@ func openCodexConfig(ctx context.Context, home CodexHome) (*codexStdioClient, er
 }
 
 func listCodexHooks(ctx context.Context, home CodexHome, client *codexStdioClient) ([]codexListedHook, error) {
-	response, err := client.Request(ctx, "hooks/list", map[string]any{"cwds": []string{home.Codex}}, 30*time.Second)
+	response, err := client.Request(ctx, "hooks/list", map[string]any{"cwds": []string{home.Codex}}, codexAppServerWait)
 	if err != nil {
 		return nil, err
 	}
@@ -462,7 +461,7 @@ func writeCodexUserConfig(ctx context.Context, client *codexStdioClient, build f
 		if version == "" {
 			return false, errors.New("codex did not report the version of the user config, so it can't be written safely")
 		}
-		if _, err = client.Request(ctx, "config/batchWrite", map[string]any{"edits": edits, "expectedVersion": version}, 30*time.Second); err == nil {
+		if _, err = client.Request(ctx, "config/batchWrite", map[string]any{"edits": edits, "expectedVersion": version}, codexAppServerWait); err == nil {
 			return true, nil
 		}
 	}
@@ -470,7 +469,7 @@ func writeCodexUserConfig(ctx context.Context, client *codexStdioClient, build f
 }
 
 func readCodexUserConfig(ctx context.Context, client *codexStdioClient) (user map[string]any, version string, err error) {
-	response, err := client.Request(ctx, "config/read", map[string]any{"includeLayers": true}, 30*time.Second)
+	response, err := client.Request(ctx, "config/read", map[string]any{"includeLayers": true}, codexAppServerWait)
 	if err != nil {
 		return nil, "", err
 	}

@@ -25,7 +25,7 @@ func TestACodexTurnReadWhileItStartsIsStillReportedOnceItCompletes(t *testing.T)
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { client.Close() })
-	started, err := client.Request(ctx, "thread/start", map[string]any{"cwd": t.TempDir()}, codexThreadLoadWait)
+	started, err := client.Request(ctx, "thread/start", map[string]any{"cwd": t.TempDir()}, codexAppServerWait)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestAnInterruptSentWhileACodexTurnStartsStopsThatTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { client.Close() })
-	started, err := client.Request(ctx, "thread/start", map[string]any{"cwd": t.TempDir()}, codexThreadLoadWait)
+	started, err := client.Request(ctx, "thread/start", map[string]any{"cwd": t.TempDir()}, codexAppServerWait)
 	if err != nil {
 		t.Fatal(err)
 	}

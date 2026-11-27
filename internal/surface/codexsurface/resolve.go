@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/transcript"
@@ -67,7 +66,7 @@ func (c *Codex) resolveID(ctx context.Context, id string) (*surface.Session, err
 }
 
 func (c *Codex) readThreadObject(ctx context.Context, conn codexClient, id string) (map[string]any, error) {
-	response, err := conn.Request(ctx, "thread/read", map[string]any{"threadId": id, "includeTurns": false}, 5*time.Second)
+	response, err := conn.Request(ctx, "thread/read", map[string]any{"threadId": id, "includeTurns": false}, codexAppServerWait)
 	if err != nil {
 		return nil, fmt.Errorf("thread/read: %w", err)
 	}

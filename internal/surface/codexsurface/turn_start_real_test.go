@@ -15,7 +15,7 @@ func (m hangingModel) ServeHTTP(http.ResponseWriter, *http.Request) { <-m.done }
 
 func realThread(t *testing.T, client codexClient) string {
 	t.Helper()
-	started, err := client.Request(context.Background(), "thread/start", map[string]any{"cwd": t.TempDir()}, codexThreadLoadWait)
+	started, err := client.Request(context.Background(), "thread/start", map[string]any{"cwd": t.TempDir()}, codexAppServerWait)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestATurnStartedBeforeTheCodexAppServerRestartedIsNotRunning(t *testing.T) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { client.Close() })
-	if _, err := client.Request(ctx, "thread/resume", map[string]any{"threadId": threadID}, codexThreadLoadWait); err != nil {
+	if _, err := client.Request(ctx, "thread/resume", map[string]any{"threadId": threadID}, codexAppServerWait); err != nil {
 		t.Fatal(err)
 	}
 	if id, err := codex.activeTurnID(ctx, client, threadID, ""); err != nil || id != "" {

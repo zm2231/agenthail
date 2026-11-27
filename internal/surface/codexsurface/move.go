@@ -27,7 +27,9 @@ import (
 // a rollout id after it, and Codex compresses rollouts untouched for a week.
 var codexRolloutFileName = regexp.MustCompile(`^rollout-(\d{4})-(\d{2})-(\d{2})T\d{2}-\d{2}-\d{2}-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?\.jsonl(\.zst)?$`)
 
-const codexMoveWait = 30 * time.Second
+// codexMoveOperationWait bounds ArchiveMove and RestoreMove, which run
+// outside any caller's context and send a few requests each.
+const codexMoveOperationWait = 2 * time.Minute
 
 func validCodexMoveThread(id string) bool {
 	return surface.LooksLikeUUID(id) && strings.ToLower(id) == id && !strings.ContainsAny(id, `/\`)
@@ -281,7 +283,7 @@ func (c *Codex) refuseUnmovableThread(ctx context.Context, client codexClient, s
 	if active != "" {
 		return surface.MoveRefusal{Reason: fmt.Sprintf("turn %s is running; move it when the thread is idle", active)}
 	}
-	response, err := client.Request(ctx, "thread/list", map[string]any{"ancestorThreadId": sess.ID, "limit": 20}, codexMoveWait)
+	response, err := client.Request(ctx, "thread/list", map[string]any{"ancestorThreadId": sess.ID, "limit": 20}, codexAppServerWait)
 	if err != nil {
 		return fmt.Errorf("list the thread's subagents: %w", err)
 	}
@@ -298,7 +300,7 @@ func (c *Codex) refuseUnmovableThread(ctx context.Context, client codexClient, s
 	}
 	// Codex starts a queued message as soon as an idle thread is resumed, so
 	// carrying the queue would start turns the person held back here.
-	response, err = client.Request(ctx, "thread/queue/list", map[string]any{"threadId": sess.ID, "limit": 1}, codexMoveWait)
+	response, err = client.Request(ctx, "thread/queue/list", map[string]any{"threadId": sess.ID, "limit": 1}, codexAppServerWait)
 	if err != nil {
 		return fmt.Errorf("thread/queue/list: %w", err)
 	}
@@ -310,7 +312,7 @@ func (c *Codex) refuseUnmovableThread(ctx context.Context, client codexClient, s
 }
 
 func (c *Codex) moveGoal(ctx context.Context, client codexClient, threadID string) (*codexMoveGoal, error) {
-	response, err := client.Request(ctx, "thread/goal/get", map[string]any{"threadId": threadID}, codexMoveWait)
+	response, err := client.Request(ctx, "thread/goal/get", map[string]any{"threadId": threadID}, codexAppServerWait)
 	if err != nil {
 		return nil, fmt.Errorf("thread/goal/get: %w", err)
 	}
@@ -341,7 +343,7 @@ func (c *Codex) ArchiveMove(conversation, moveID string) error {
 	} else if found && c.home.allArchived(record) {
 		return c.home.checkArchivedRollout(conversation, declared)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*codexMoveWait)
+	ctx, cancel := context.WithTimeout(context.Background(), codexMoveOperationWait)
 	defer cancel()
 	lock, err := c.home.acquireWriteLock(ctx)
 	if err != nil {
@@ -375,7 +377,7 @@ func (c *Codex) ArchiveMove(conversation, moveID string) error {
 	if err := c.home.writeMoveRecord(conversation, moveID, "archived", record); err != nil {
 		return err
 	}
-	if _, err := client.Request(ctx, "thread/archive", map[string]any{"threadId": conversation}, codexMoveWait); err != nil {
+	if _, err := client.Request(ctx, "thread/archive", map[string]any{"threadId": conversation}, codexAppServerWait); err != nil {
 		return fmt.Errorf("thread/archive: %w", err)
 	}
 	if !c.home.allArchived(record) {
@@ -423,14 +425,14 @@ func (c *Codex) RestoreMove(conversation, moveID string) error {
 		}
 	}
 	if stillArchived {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*codexMoveWait)
+		ctx, cancel := context.WithTimeout(context.Background(), codexMoveOperationWait)
 		defer cancel()
 		client, err := c.openManaged(ctx)
 		if err != nil {
 			return err
 		}
 		defer client.Close()
-		if _, err := client.Request(ctx, "thread/unarchive", map[string]any{"threadId": conversation}, codexMoveWait); err != nil {
+		if _, err := client.Request(ctx, "thread/unarchive", map[string]any{"threadId": conversation}, codexAppServerWait); err != nil {
 			return fmt.Errorf("thread/unarchive: %w", err)
 		}
 	}
@@ -608,7 +610,7 @@ func (c *Codex) settleMoveIn(ctx context.Context, client codexClient, in surface
 		return fmt.Errorf("%w: %s: %v", surface.ErrMoveInRunning, step, err)
 	}
 	if state.Name != "" {
-		if _, err := client.Request(ctx, "thread/name/set", map[string]any{"threadId": in.Conversation, "name": state.Name}, codexMoveWait); err != nil {
+		if _, err := client.Request(ctx, "thread/name/set", map[string]any{"threadId": in.Conversation, "name": state.Name}, codexAppServerWait); err != nil {
 			return nil, running("thread/name/set", err)
 		}
 	}
@@ -617,7 +619,7 @@ func (c *Codex) settleMoveIn(ctx context.Context, client codexClient, in surface
 		if state.Goal.TokenBudget != nil {
 			params["tokenBudget"] = *state.Goal.TokenBudget
 		}
-		if _, err := client.Request(ctx, "thread/goal/set", params, codexMoveWait); err != nil {
+		if _, err := client.Request(ctx, "thread/goal/set", params, codexAppServerWait); err != nil {
 			return nil, running("thread/goal/set", err)
 		}
 	}
@@ -650,7 +652,7 @@ func (c *Codex) unarchiveEarlierCopy(ctx context.Context, client codexClient, in
 			return fmt.Errorf("Codex thread %s archived here: %w", in.Conversation, err)
 		}
 	}
-	if _, err := client.Request(ctx, "thread/unarchive", map[string]any{"threadId": in.Conversation}, codexMoveWait); err != nil {
+	if _, err := client.Request(ctx, "thread/unarchive", map[string]any{"threadId": in.Conversation}, codexAppServerWait); err != nil {
 		return fmt.Errorf("thread/unarchive the copy here: %w", err)
 	}
 	return nil

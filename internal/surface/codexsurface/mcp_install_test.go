@@ -214,7 +214,7 @@ func TestAThreadAgenthailStartsHasOnlyItsOwnServerWhileThePersonsThreadsGetTheRe
 		t.Fatalf("a thread Agenthail started has servers %v, want its own %s and the relay disabled", got, surface.MCPServerName)
 	}
 
-	persons := threadID(client.Request(ctx, codexThreadStart, map[string]any{"cwd": t.TempDir()}, codexThreadLoadWait))
+	persons := threadID(client.Request(ctx, codexThreadStart, map[string]any{"cwd": t.TempDir()}, codexAppServerWait))
 	got = servers(persons)
 	if _, ok := got[CodexRelayServerName]; !ok || got[CodexRelayServerName] == "disabled" {
 		t.Fatalf("the person's thread has servers %v, want the relay", got)

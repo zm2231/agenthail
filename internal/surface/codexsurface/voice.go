@@ -81,7 +81,7 @@ func (v *CodexVoice) createManaged(ctx context.Context, cwd, instructions string
 // keeps its name; Codex would otherwise title it from the first thing said on
 // a call.
 func nameVoiceOperator(ctx context.Context, client codexClient, threadID string) error {
-	_, err := client.Request(ctx, "thread/name/set", map[string]any{"threadId": threadID, "name": voiceOperatorName}, 5*time.Second)
+	_, err := client.Request(ctx, "thread/name/set", map[string]any{"threadId": threadID, "name": voiceOperatorName}, codexAppServerWait)
 	return err
 }
 
@@ -123,7 +123,7 @@ func (v *CodexVoice) Request(ctx context.Context, s *surface.Session, method str
 				return err
 			}
 		}
-		_, err := link.client.Request(ctx, method, params, 15*time.Second)
+		_, err := link.client.Request(ctx, method, params, codexAppServerWait)
 		if _, refused := codexAppServerRefusal(err); method == "thread/realtime/start" && refused {
 			return link.startRefusal(err)
 		}

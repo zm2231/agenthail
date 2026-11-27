@@ -7,16 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 	"github.com/zm2231/agenthail/internal/surface"
 )
-
-// realRequestWait bounds the test's own requests to a real app-server, which
-// answers seconds late while its state database waits on a busy disk.
-const realRequestWait = time.Minute
 
 type codexMachine struct {
 	cwd   string
@@ -83,7 +78,7 @@ func (m *codexMachine) moveIn(t *testing.T, out *surface.MoveOut, moveID string,
 
 func threadTurns(t *testing.T, client codexClient, threadID string) int {
 	t.Helper()
-	response, err := client.Request(context.Background(), "thread/turns/list", map[string]any{"threadId": threadID, "limit": 50}, realRequestWait)
+	response, err := client.Request(context.Background(), "thread/turns/list", map[string]any{"threadId": threadID, "limit": 50}, codexAppServerWait)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +96,7 @@ func TestARealCodexThreadMovesBetweenTwoAdaptersInOneProcessAndBack(t *testing.T
 	ctx := context.Background()
 
 	owner := source.client(t)
-	started, err := owner.Request(ctx, "thread/start", map[string]any{"cwd": source.cwd}, codexThreadLoadWait)
+	started, err := owner.Request(ctx, "thread/start", map[string]any{"cwd": source.cwd}, codexAppServerWait)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +106,7 @@ func TestARealCodexThreadMovesBetweenTwoAdaptersInOneProcessAndBack(t *testing.T
 		"thread/name/set": {"threadId": threadID, "name": "moving thread"},
 		"thread/goal/set": {"threadId": threadID, "objective": "carry the goal", "status": "paused"},
 	} {
-		if _, err := owner.Request(ctx, method, params, realRequestWait); err != nil {
+		if _, err := owner.Request(ctx, method, params, codexAppServerWait); err != nil {
 			t.Fatalf("%s: %v", method, err)
 		}
 	}
@@ -133,13 +128,13 @@ func TestARealCodexThreadMovesBetweenTwoAdaptersInOneProcessAndBack(t *testing.T
 		t.Fatal(err)
 	}
 	held.Release()
-	if _, err := owner.Request(ctx, "thread/resume", map[string]any{"threadId": threadID}, codexThreadLoadWait); err == nil {
+	if _, err := owner.Request(ctx, "thread/resume", map[string]any{"threadId": threadID}, codexAppServerWait); err == nil {
 		t.Fatal("the source resumed a thread its move archived")
 	}
 	if err := source.codex.RestoreMove(threadID, restoredMove); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := owner.Request(ctx, "thread/resume", map[string]any{"threadId": threadID}, codexThreadLoadWait); err != nil {
+	if _, err := owner.Request(ctx, "thread/resume", map[string]any{"threadId": threadID}, codexAppServerWait); err != nil {
 		t.Fatalf("thread/resume: %v", err)
 	}
 	realTurn(t, owner, threadID, "after the restored move")
@@ -186,7 +181,7 @@ func TestARealCodexThreadMovesBetweenTwoAdaptersInOneProcessAndBack(t *testing.T
 
 func mustRequest(t *testing.T, client codexClient, method string, params map[string]any) map[string]any {
 	t.Helper()
-	response, err := client.Request(context.Background(), method, params, realRequestWait)
+	response, err := client.Request(context.Background(), method, params, codexAppServerWait)
 	if err != nil {
 		t.Fatalf("%s: %v", method, err)
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/transcript"
@@ -36,7 +35,7 @@ func (c *Codex) readCompletions(ctx context.Context, conn codexClient, threadID,
 		if pageCursor != "" {
 			params["cursor"] = pageCursor
 		}
-		response, err := conn.Request(ctx, "thread/turns/list", params, 5*time.Second)
+		response, err := conn.Request(ctx, "thread/turns/list", params, codexAppServerWait)
 		if codexTurnsNotListedYet(err) {
 			break
 		}
@@ -136,7 +135,7 @@ func (c *Codex) completionItems(ctx context.Context, conn codexClient, threadID,
 		if cursor != "" {
 			params["cursor"] = cursor
 		}
-		response, err := conn.Request(ctx, "thread/items/list", params, 5*time.Second)
+		response, err := conn.Request(ctx, "thread/items/list", params, codexAppServerWait)
 		if err != nil {
 			return nil, err
 		}

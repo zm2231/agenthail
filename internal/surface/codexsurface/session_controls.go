@@ -95,7 +95,7 @@ func (c *Codex) SteerWithImages(ctx context.Context, sess *surface.Session, mess
 	}
 	setCodexClientMessageID(ctx, params)
 	delivered := c.withTurnContext(ctx, conn, *sess, params)
-	if _, err := conn.Request(ctx, "turn/steer", params, 5*time.Second); err != nil {
+	if _, err := conn.Request(ctx, "turn/steer", params, codexAppServerWait); err != nil {
 		return codexOperationOutcome(fmt.Errorf("turn/steer: %w", err))
 	}
 	delivered()
@@ -134,7 +134,7 @@ func (c *Codex) StopRun(ctx context.Context, sess *surface.Session) (surface.Run
 		return surface.RunStop{}, surface.DeliveryUnavailable(err)
 	}
 	if turnID != "" {
-		if _, err := client.Request(ctx, "turn/interrupt", map[string]any{"threadId": sess.ID, "turnId": turnID}, 5*time.Second); err != nil {
+		if _, err := client.Request(ctx, "turn/interrupt", map[string]any{"threadId": sess.ID, "turnId": turnID}, codexAppServerWait); err != nil {
 			return surface.RunStop{}, fmt.Errorf("turn/interrupt: %w", err)
 		}
 	}
@@ -142,11 +142,11 @@ func (c *Codex) StopRun(ctx context.Context, sess *surface.Session) (surface.Run
 	defer unlock()
 	for _, follower := range c.subscriptions.clients(sess.ID) {
 		c.subscriptions.remove(sess.ID, follower)
-		if _, err := follower.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": sess.ID}, 5*time.Second); err != nil {
+		if _, err := follower.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": sess.ID}, codexAppServerWait); err != nil {
 			_ = follower.Close()
 		}
 	}
-	if _, err := client.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": sess.ID}, 5*time.Second); err != nil {
+	if _, err := client.Request(ctx, "thread/unsubscribe", map[string]any{"threadId": sess.ID}, codexAppServerWait); err != nil {
 		return surface.RunStop{}, fmt.Errorf("thread/unsubscribe: %w", err)
 	}
 	return surface.RunStop{Stopped: true}, nil

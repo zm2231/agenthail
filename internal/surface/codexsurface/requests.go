@@ -362,7 +362,7 @@ func (c *Codex) Requests(ctx context.Context, sess *surface.Session) (surface.Re
 		return state, err
 	}
 	defer client.Close()
-	response, err := client.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 5*time.Second)
+	response, err := client.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, codexAppServerWait)
 	if err != nil {
 		return state, fmt.Errorf("thread/read: %w", err)
 	}

@@ -35,7 +35,7 @@ func applyCodexLaunchSettings(ctx context.Context, client codexClient, session *
 	}
 	if options.Mode != "" {
 		if model == "" {
-			response, err := client.Request(ctx, "thread/read", map[string]any{"threadId": session.ID, "includeTurns": false}, 5*time.Second)
+			response, err := client.Request(ctx, "thread/read", map[string]any{"threadId": session.ID, "includeTurns": false}, codexAppServerWait)
 			if err != nil {
 				return err
 			}

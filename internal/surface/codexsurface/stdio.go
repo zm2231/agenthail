@@ -57,7 +57,7 @@ func startCodexStdio(ctx context.Context, binary string, env []string) (*codexSt
 	}
 	c := &codexStdioClient{ctx: ctx, cmd: cmd, stdin: stdin, waiting: map[int]chan map[string]any{}, stderr: stderr, done: make(chan struct{})}
 	go c.read(stdout)
-	_, err = c.Request(ctx, "initialize", map[string]any{"clientInfo": map[string]any{"name": "agenthail", "version": "0"}}, 30*time.Second)
+	_, err = c.Request(ctx, "initialize", map[string]any{"clientInfo": map[string]any{"name": "agenthail", "version": "0"}}, codexAppServerWait)
 	if err != nil {
 		c.Close()
 		return nil, err
