@@ -692,7 +692,7 @@ fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         .w_full()
         .h_full()
         .child(el().absolute(0.0, 0.0).w_full().h_full().fill(theme::card_deep()))
-        .child(col().w_full().items_center().pt(14.0).pb(10.0).child(tabs.build(&k.with_text_scale(1.0))))
+        .child(col().w_full().scroll_x().scroll_edge_fade(24.0).child(col().w_full().items_center().pt(14.0).pb(10.0).child(tabs.build(&k))))
         .children(unfollowed(s, &k))
         .child(parts::scroll(page));
     rune_kit::root(body, layer).on_window_focus(|s: &mut Prefs, focused, _| {
