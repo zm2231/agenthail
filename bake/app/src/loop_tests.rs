@@ -453,3 +453,19 @@ fn a_moved_ledger_key_drops_the_ready_count_and_its_old_read_and_follows_the_new
     crate::ui::ready::ledger_changed(&mut rt.state, "new");
     assert_eq!(crate::ui::ready::count(&rt.state, "p1"), 0, "the new key's events refresh it");
 }
+
+#[test]
+fn showing_one_surface_opens_every_session_of_it_with_the_search_cleared() {
+    if !isolated("showing_one_surface_opens_every_session_of_it_with_the_search_cleared") {
+        return;
+    }
+    let dir = Dir::new("show-surface");
+    let mut s = app(sessions(&["a"]), &dir);
+    s.ov.sessions_query = rune::TextEdit::new("old search");
+    s.ov.list.scope = 0;
+    s.ov.list.status = Some("idle".into());
+    crate::over::sessions::show_surface(&mut s, "codex");
+    let want = crate::over::listing::request(&s);
+    assert!(matches!(s.screen, Screen::Sessions));
+    assert_eq!((want.scope.as_str(), want.surface.as_deref(), want.query.as_str(), want.status.as_deref()), ("all", Some("codex"), "", Some("idle")), "like the Mac app, the status filter stays");
+}

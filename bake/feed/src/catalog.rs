@@ -175,6 +175,8 @@ pub struct Session {
     #[serde(default)]
     pub cwd: Option<String>,
     #[serde(default)]
+    pub placement: Option<String>,
+    #[serde(default)]
     pub started_by: Option<String>,
     #[serde(default)]
     pub subagent: Option<Value>,
@@ -274,7 +276,7 @@ fn is_note<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<bool, 
     Ok(Option::<String>::deserialize(d)?.as_deref() == Some("note"))
 }
 
-fn null_list<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(d: D) -> std::result::Result<Vec<T>, D::Error> {
+pub(crate) fn null_list<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(d: D) -> std::result::Result<Vec<T>, D::Error> {
     Ok(Option::<Vec<T>>::deserialize(d)?.unwrap_or_default())
 }
 

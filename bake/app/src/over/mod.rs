@@ -5,11 +5,12 @@ pub mod extensions;
 pub mod inbox;
 mod jump;
 pub mod layout;
+pub mod listing;
 mod now;
 mod project;
 pub mod projects;
 pub mod search;
-mod sessions;
+pub mod sessions;
 pub mod ui;
 pub mod work;
 
@@ -48,7 +49,7 @@ pub struct Over {
     pub open_lanes: HashSet<String>,
     pub widths: HashMap<String, f32>,
     pub notice: Option<String>,
-    pub sessions_filter: usize,
+    pub list: listing::State,
     pub sessions_project: Option<String>,
     pub sessions_project_open: bool,
     pub sessions_query: TextEdit,
@@ -86,7 +87,7 @@ impl Over {
             open_lanes: HashSet::new(),
             widths: HashMap::new(),
             notice: None,
-            sessions_filter: 0,
+            list: listing::State::default(),
             sessions_project: None,
             sessions_project_open: false,
             sessions_query: TextEdit::new(""),

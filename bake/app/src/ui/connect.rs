@@ -93,6 +93,9 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                         } else if std::mem::take(&mut gap) {
                             cursor.store(catalog.seq(), Ordering::Release);
                             let _ = resume.send(());
+                            if tx.send(Bg::SessionsMoved).is_err() {
+                                return;
+                            }
                         }
                         Bg::Snapshot(snap.updated_at, catalog.epoch().to_string(), catalog.seq(), catalog.sessions().to_vec(), None)
                     }
@@ -155,6 +158,9 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                 return;
             }
             if applied.news && tx.send(Bg::SessionNews).is_err() {
+                return;
+            }
+            if applied.placed && !applied.news && tx.send(Bg::SessionsMoved).is_err() {
                 return;
             }
             if !applied.removed.is_empty() && tx.send(Bg::Removed(applied.removed)).is_err() {
