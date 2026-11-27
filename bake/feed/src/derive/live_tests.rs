@@ -23,7 +23,7 @@ fn recorded(at: &str, sessions: Vec<Session>) -> Recorded {
 }
 
 fn fetched(at: &str, sessions: Vec<Session>, ledgers: Vec<(&str, Result<Vec<Work>, String>)>) -> Fetched {
-    Fetched { recorded: recorded(at, sessions), ledgers: ledgers.into_iter().map(|(k, r)| (k.to_string(), r)).collect(), held: Vec::new(), asked: Vec::new(), started: Instant::now(), usage: None }
+    Fetched { recorded: recorded(at, sessions), ledgers: ledgers.into_iter().map(|(k, r)| (k.to_string(), r)).collect(), held: Vec::new(), asked: Vec::new(), started: Instant::now(), usage: None, moved: Vec::new() }
 }
 
 fn status(w: &World, id: &str) -> String {
@@ -526,9 +526,35 @@ fn usage_read_in_one_overview_is_kept_for_two_minutes() {
     let t0 = Instant::now();
     assert_eq!(known.usage_kept(t0), None);
     let meters = vec![serde_json::json!({"provider": "claude", "percent": 12})];
-    known.learn(&Fetched { started: t0, usage: Some(meters.clone()), ..fetched("2026-11-24T12:00:00Z", Vec::new(), Vec::new()) });
+    let read_at = t0 + std::time::Duration::from_secs(20);
+    known.learn(&Fetched { started: t0, usage: Some((read_at, meters.clone())), ..fetched("2026-11-24T12:00:00Z", Vec::new(), Vec::new()) });
     assert_eq!(known.usage_kept(t0 + std::time::Duration::from_secs(60)), Some(meters.clone()), "an overview a minute later, after an actor retry say, reuses it");
+    assert_eq!(known.usage_kept(t0 + super::live::USAGE_EVERY), Some(meters.clone()), "two minutes run from the usage read itself, not from the overview that began earlier");
     known.learn(&Fetched { started: t0 + std::time::Duration::from_secs(60), ..fetched("2026-11-24T12:01:00Z", Vec::new(), Vec::new()) });
     assert_eq!(known.usage_kept(t0 + std::time::Duration::from_secs(90)), Some(meters), "an overview that reused it doesn't extend it");
-    assert_eq!(known.usage_kept(t0 + super::live::USAGE_EVERY), None);
+    assert_eq!(known.usage_kept(read_at + super::live::USAGE_EVERY), None);
+}
+
+#[test]
+fn a_moved_ledger_key_drops_the_old_rows_even_when_the_new_read_fails_or_the_project_is_quiet() {
+    let mut known = super::live::Known::default();
+    let first = keyed(Instant::now());
+    known.learn(&first);
+    assert!(!known.open("p"), "its rows are held");
+    let keys: HashMap<String, String> = [("p".to_string(), "repo:github.com/o/moved".to_string())].into();
+    assert_eq!(known.moved(&keys), vec!["p".to_string()]);
+    let mut quiet = fetched("2026-11-24T12:05:00Z", Vec::new(), Vec::new());
+    quiet.recorded.projects = first.recorded.projects.clone();
+    quiet.recorded.projects[0].ledger_key = "repo:github.com/o/moved".into();
+    quiet.moved = vec!["p".into()];
+    known.learn(&quiet);
+    assert_eq!(known.orphans(), vec!["p".to_string()], "an opened project outside the overview is read again under the new key");
+    let mut ov = Overview::default();
+    ov.refresh(first);
+    assert_eq!(board_ids(&ov.world(&[]), "p"), vec!["p-W1".to_string()]);
+    let mut failed = fetched("2026-11-24T12:05:00Z", Vec::new(), vec![("p", Err("status code 503".into()))]);
+    failed.recorded.projects = quiet.recorded.projects.clone();
+    failed.moved = vec!["p".into()];
+    ov.refresh(failed);
+    assert!(board_ids(&ov.world(&[]), "p").is_empty(), "a failed read under the new key never shows the old ledger's work as the new one's");
 }

@@ -22,7 +22,8 @@ pub struct Fetched {
     pub held: Vec<String>,
     pub asked: Vec<String>,
     pub started: Instant,
-    pub usage: Option<Vec<Value>>,
+    pub usage: Option<(Instant, Vec<Value>)>,
+    pub moved: Vec<String>,
 }
 
 pub const RETRY: std::time::Duration = std::time::Duration::from_secs(60);
@@ -69,7 +70,12 @@ impl Known {
             self.hold(id, fetched.started, result.as_ref().ok());
         }
         if let Some(usage) = &fetched.usage {
-            self.usage = Some((fetched.started, usage.clone()));
+            self.usage = Some(usage.clone());
+        }
+        for id in &fetched.moved {
+            if !fetched.ledgers.contains_key(id) {
+                self.ledgers.remove(id);
+            }
         }
         self.current = fetched.recorded.projects.iter().filter(|p| !p.ledger_key.is_empty()).map(|p| (p.id.clone(), p.ledger_key.clone())).collect();
         for p in &fetched.recorded.projects {
@@ -115,6 +121,10 @@ impl Known {
 
     pub fn usage_kept(&self, now: Instant) -> Option<Vec<Value>> {
         self.usage.as_ref().filter(|(at, _)| now.saturating_duration_since(*at) < USAGE_EVERY).map(|(_, u)| u.clone())
+    }
+
+    pub fn moved(&self, keys: &HashMap<String, String>) -> Vec<String> {
+        keys.iter().filter(|(id, key)| self.current.get(*id).is_some_and(|was| was != *key)).map(|(id, _)| id.clone()).collect()
     }
 
     pub fn ledger_key_of(&self, id: &str) -> String {
@@ -210,25 +220,27 @@ pub fn fetch(client: &Client, known: &Known, settled: Option<Instant>) -> Result
     let sessions: Vec<Session> = serde_json::from_value(snap["sessions"].clone()).unwrap_or_default();
     let recent: BTreeSet<String> = sessions.iter().filter(|s| hours(now, &s.last_active) < LEDGER_WINDOW_H).map(|s| s.project_key()).collect();
     let key_of: HashMap<String, String> = snap["projects"].as_array().into_iter().flatten().filter_map(|p| Some((p["id"].as_str()?.to_string(), p["ledgerKey"].as_str().filter(|k| !k.is_empty())?.to_string()))).collect();
+    let moved = known.moved(&key_of);
     let (held, keys): (Vec<String>, Vec<String>) = snap["projects"].as_array().into_iter().flatten().filter(|p| p["archived"] != json!(true)).filter_map(|p| p["id"].as_str()).filter(|k| recent.contains(*k)).map(String::from).partition(|k| known.holds(k, key_of.get(k).unwrap_or(k), settled));
     let ledgers: HashMap<String, Result<Vec<Work>, String>> = std::thread::scope(|scope| {
         let jobs: Vec<_> = keys.iter().map(|k| (k.clone(), scope.spawn(|| rows(client, key_of.get(k).unwrap_or(k), now)))).collect();
         jobs.into_iter().map(|(k, h)| (k, h.join().unwrap_or_else(|_| Err("the fetch stopped".into())))).collect()
     });
     let kept = known.usage_kept(started);
-    let fresh: Option<Vec<Value>> = if kept.is_some() {
+    let fresh: Option<(Instant, Vec<Value>)> = if kept.is_some() {
         None
     } else {
         client.get_json("/api/v1/usage").ok().map(|u| {
-            u["sets"]
+            let meters: Vec<Value> = u["sets"]
                 .as_array()
                 .into_iter()
                 .flatten()
                 .flat_map(|st| st["meters"].as_array().cloned().unwrap_or_default().into_iter().map(move |m| json!({"provider": m["provider"], "label": m["label"], "percent": m["percent"], "resetsAt": m["resetsAt"], "name": st["name"]})))
-                .collect()
+                .collect();
+            (Instant::now(), meters)
         })
     };
-    let usage = kept.or_else(|| fresh.clone()).unwrap_or_default();
+    let usage = kept.or_else(|| fresh.as_ref().map(|(_, u)| u.clone())).unwrap_or_default();
     let hosts: Vec<Value> = client
         .get_json("/api/v1/hosts")
         .ok()
@@ -240,7 +252,7 @@ pub fn fetch(client: &Client, known: &Known, settled: Option<Instant>) -> Result
     let (found, asked) = actors(client, &sessions, |a| known.skips_actor(a), pool);
     recorded.actors = found;
     recorded.sessions = sessions;
-    Ok(Fetched { recorded, ledgers, held, asked, started, usage: fresh })
+    Ok(Fetched { recorded, ledgers, held, asked, started, usage: fresh, moved })
 }
 
 pub fn ledger(client: &Client, project: &str, known: &Known) -> Result<Ledger, String> {
@@ -406,7 +418,11 @@ impl Overview {
     }
 
     pub fn refresh(&mut self, fetched: Fetched) {
-        let Fetched { mut recorded, ledgers, held, started, .. } = fetched;
+        let Fetched { mut recorded, ledgers, held, started, moved, .. } = fetched;
+        for id in &moved {
+            self.ledgers.remove(id);
+            self.failed.remove(id);
+        }
         let fresh = later(&recorded.updated_at, &recorded.host_epoch, recorded.catalog_seq, &self.base, false);
         if !fresh {
             recorded.updated_at = std::mem::take(&mut self.base.updated_at);
