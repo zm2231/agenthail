@@ -1,4 +1,4 @@
-use rune::{El, Tx, col, el, icon, row, text, text_input};
+use rune::{El, TextEdit, Tx, col, el, icon, row, text, text_input};
 use rune_kit::{Button, ButtonVariant, ControlSize, Dialog};
 use rune_theme_opencode::icons;
 
@@ -7,6 +7,7 @@ use feed::review::{self, Verdict};
 
 use crate::App;
 use crate::over::inbox;
+use crate::ui::waiting::{self, Route};
 use crate::over::ui::{self, BODY, BODY_MED, META, META_MED, base, kit, strong, weak};
 
 const HISTORY_SHOWN: usize = 6;
@@ -77,6 +78,18 @@ fn line(s: &App, i: usize, d: &Decision, shift: bool) -> El {
         }
         actions = actions.child(accept.build(k).key(format!("decision-{i}-accept")));
     }
+    let open = st_open(s, d);
+    let answers = !d.is_review() && d.answerable && !d.requests.is_empty();
+    let replies = d.is_parked() && !d.session_id.is_empty();
+    if answers || replies {
+        let dd = d.clone();
+        let label = match (open, answers) {
+            (true, _) => "Hide",
+            (false, true) => "Answer…",
+            (false, false) => "Reply…",
+        };
+        actions = actions.child(Button::new(label).variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press_tx(move |s: &mut App, tx: &mut Tx| inbox::toggle_open(s, &dd, tx)).build(k).key(format!("decision-{i}-open")));
+    }
     let session = d.session_id.clone();
     if !session.is_empty() {
         actions = actions.child(Button::new("Open session").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(move |s: &mut App| crate::over::open_session(s, &session)).build(k));
@@ -94,7 +107,52 @@ fn line(s: &App, i: usize, d: &Decision, shift: bool) -> El {
                 .key(format!("decision-{i}-not-now")),
         );
     }
-    row().key(format!("decision-{i}")).w_full().gap(14.0).items_start().px(14.0).py(12.0).radius(10.0).child(body).child(actions)
+    let head = row().w_full().gap(14.0).items_start().child(body).child(actions);
+    let mut c = col().key(format!("decision-{i}")).w_full().gap(10.0).px(14.0).py(12.0).radius(10.0).child(head);
+    if open && answers {
+        c = c.child(answer_panel(s, d, acting || unconfirmed));
+    } else if open && replies {
+        c = c.child(reply_panel(s, i, d, &who));
+    }
+    c
+}
+
+fn st_open(s: &App, d: &Decision) -> bool {
+    s.ov.inbox.open.as_deref() == Some(d.id().as_str())
+}
+
+fn answer_panel(s: &App, d: &Decision, busy: bool) -> El {
+    let open: Vec<&feed::catalog::OpenRequest> = d.requests.iter().collect();
+    let Some(request) = waiting::shown_of(s, &d.session_id, &open) else { return el() };
+    let who = s.ov.d.session(&d.session_id).map(|x| s.ov.d.title(x)).unwrap_or_else(|| "The agent".into());
+    let head = row().w_full().gap(8.0).items_center().child(text(crate::over::plain(&waiting::request_heading(request, &who))).font(BODY_MED).color(strong()).wrap().grow(1.0).min_w(0.0)).children(waiting::switcher(&d.session_id, &open, &request.id));
+    col().key(format!("decision-answer-{}", d.id())).w_full().gap(8.0).pl(4.0).child(head).child(waiting::request_body(s, request, Route::Decision(d.clone()), busy))
+}
+
+fn reply_panel(s: &App, i: usize, d: &Decision, who: &str) -> El {
+    let k = kit();
+    let st = &s.ov.inbox;
+    let id = d.id();
+    let sending = st.replying.contains(&id);
+    let empty = TextEdit::new("");
+    let edit = st.replies.get(&id).unwrap_or(&empty);
+    let ready = !sending && !edit.text.trim().is_empty();
+    let (lens, dd, de) = (id.clone(), d.clone(), d.clone());
+    let input = text_input(edit, BODY)
+        .key(format!("decision-{i}-reply"))
+        .w_full()
+        .min_h(44.0)
+        .color(strong())
+        .placeholder(format!("Answer {who}"), weak())
+        .on_edit(move |s: &mut App| s.ov.inbox.replies.entry(lens.clone()).or_insert_with(|| TextEdit::new("")))
+        .on_submit(move |s: &mut App, _: &mut Tx| inbox::reply(s, &de));
+    let field = col().w_full().px(10.0).py(8.0).radius(8.0).fill(k.c.surface_base).border(1.0, ui::rule()).child(input);
+    let send = Button::new(if sending { "Sending…".to_string() } else { format!("Send to {}", ui::short_title(who, 24)) }).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(!ready).on_press(move |s: &mut App| inbox::reply(s, &dd)).build(k).key(format!("decision-{i}-reply-send"));
+    let mut c = col().key(format!("decision-reply-{id}")).w_full().gap(8.0).pl(4.0);
+    if let Some(sent) = st.replied.get(&id) {
+        c = c.child(row().gap(6.0).items_center().child(icon(&icons::CIRCLE_CHECK, 12.0).color(base())).child(text(format!("Sent to {sent}")).font(META_MED).color(base())));
+    }
+    c.child(field).child(row().gap(8.0).items_center().child(send).child(text("It goes to the session holding the work, as your message.".to_string()).font(META).color(weak()).wrap().shrink()))
 }
 
 pub fn review_buttons(s: &App, d: &Decision, size: ControlSize, key: &str, show_note: bool, mut r: El) -> El {
