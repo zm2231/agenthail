@@ -147,7 +147,7 @@ func (c *Codex) NativeQueue(ctx context.Context, session *surface.Session, reque
 	if err != nil {
 		return nil, err
 	}
-	response, err := c.requestSession(ctx, session, request.Action != "list", method, params, 10*time.Second)
+	response, err := c.requestSession(ctx, session, request.Action != "list", method, params)
 	if err != nil {
 		if request.Action != "list" {
 			return nil, codexOperationOutcome(err)

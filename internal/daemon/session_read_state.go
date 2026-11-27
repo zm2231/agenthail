@@ -35,7 +35,10 @@ func (d *Daemon) doSessionReadState(ctx context.Context, p principal, session *s
 	var state *surface.ReadState
 	if unread {
 		var marked surface.ReadState
-		if marked, err = writer.MarkUnread(ctx, session, revision); err == nil {
+		markCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+		marked, err = writer.MarkUnread(markCtx, session, revision)
+		cancel()
+		if err == nil {
 			state = &marked
 		}
 	} else {

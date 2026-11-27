@@ -107,7 +107,7 @@ func TestAStartWhoseTurnFellPastTheScannedTurnsNoLongerHoldsReloads(t *testing.T
 func TestACompactionHoldsReloadsUntilTheStartLimitWhateverTurnsAreListed(t *testing.T) {
 	c := &Codex{}
 	before := []any{listedTurn("turn-1", "completed")}
-	if _, err := c.startTurn(context.Background(), listedTurnClient{turns: before}, "t", "thread/compact/start", map[string]any{"threadId": "t"}, time.Second); err != nil {
+	if _, err := c.startTurn(context.Background(), listedTurnClient{turns: before}, "t", "thread/compact/start", map[string]any{"threadId": "t"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, turns := range [][]any{nil, before, append([]any{listedTurn("turn-2", "completed")}, before...)} {
@@ -193,7 +193,7 @@ func TestACompactionIsMatchedToItsOwnTurnNotAnotherClientsThatEndsFirst(t *testi
 		turnStartedEvent("turn-3"),
 		itemStartedEvent("turn-3", "contextCompaction"),
 	}}
-	if _, err := c.startTurn(context.Background(), client, "t", "thread/compact/start", map[string]any{"threadId": "t"}, time.Second); err != nil {
+	if _, err := c.startTurn(context.Background(), client, "t", "thread/compact/start", map[string]any{"threadId": "t"}); err != nil {
 		t.Fatal(err)
 	}
 	if busy, err := c.turnInFlight(context.Background(), other, "t"); err != nil || !busy {
@@ -215,7 +215,7 @@ func TestACompactionIsNotMatchedToAnEarlierTurnReceivedDuringItsRequest(t *testi
 		turnStartedEvent("turn-2"),
 		itemStartedEvent("turn-2", "contextCompaction"),
 	}}
-	if _, err := c.startTurn(context.Background(), client, "t", "thread/compact/start", map[string]any{"threadId": "t"}, time.Second); err != nil {
+	if _, err := c.startTurn(context.Background(), client, "t", "thread/compact/start", map[string]any{"threadId": "t"}); err != nil {
 		t.Fatal(err)
 	}
 	if busy, err := c.turnInFlight(context.Background(), earlier, "t"); err != nil || !busy {

@@ -11,6 +11,8 @@ import (
 )
 
 func (d *Daemon) ensureDashboardWritable(ctx context.Context, adapter surface.Surface, session *surface.Session) error {
+	ctx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+	defer cancel()
 	read := *session
 	if err := delivery.EnsureDeliverable(ctx, d.Registry, adapter, session); err != nil {
 		return err

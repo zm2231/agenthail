@@ -556,9 +556,9 @@ func (h CodexHome) acquireThreadWrite(ctx context.Context, threadID string) (rel
 	return func() { releaseCodexWriteLock(lock) }, nil
 }
 
-func (c *Codex) requestSession(ctx context.Context, sess *surface.Session, writable bool, method string, params map[string]any, wait time.Duration) (map[string]any, error) {
+func (c *Codex) requestSession(ctx context.Context, sess *surface.Session, writable bool, method string, params map[string]any) (map[string]any, error) {
 	return c.requestSessionWith(ctx, sess, writable, func(client codexClient) (map[string]any, error) {
-		return client.Request(ctx, method, params, wait)
+		return client.Request(ctx, method, params, codexAppServerWait)
 	})
 }
 

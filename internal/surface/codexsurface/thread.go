@@ -79,7 +79,7 @@ func (c *Codex) readThread(ctx context.Context, conn codexClient, threadID strin
 	response, err := conn.Request(ctx, "thread/read", map[string]any{
 		"threadId":     threadID,
 		"includeTurns": true,
-	}, 5*time.Second)
+	}, codexAppServerWait)
 	if err != nil {
 		return nil, fmt.Errorf("thread/read: %w", err)
 	}
@@ -287,7 +287,7 @@ func (c *Codex) listThreadItems(ctx context.Context, conn codexClient, threadID,
 		"threadId": threadID,
 		"turnId":   turnID,
 		"limit":    100,
-	}, 5*time.Second)
+	}, codexAppServerWait)
 	if err != nil {
 		return nil, fmt.Errorf("thread/items/list: %w", err)
 	}

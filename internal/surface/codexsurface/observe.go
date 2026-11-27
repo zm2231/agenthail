@@ -129,7 +129,7 @@ func codexNewestTurn(ctx context.Context, conn codexClient, threadID string) (ma
 		"threadId":      threadID,
 		"limit":         1,
 		"sortDirection": "desc",
-	}, 5*time.Second)
+	}, codexAppServerWait)
 	if codexTurnsNotListedYet(err) {
 		return nil, nil
 	}

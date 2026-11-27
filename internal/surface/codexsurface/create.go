@@ -142,7 +142,7 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 		return session, nil, err
 	}
 	delivered := c.withTurnContext(ctx, client, *session, turnParams)
-	turnResponse, err := c.startTurn(ctx, client, threadID, "turn/start", turnParams, 10*time.Second)
+	turnResponse, err := c.startTurn(ctx, client, threadID, "turn/start", turnParams)
 	if err != nil {
 		return session, nil, codexOperationOutcome(fmt.Errorf("turn/start: %w", err))
 	}

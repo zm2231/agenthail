@@ -33,7 +33,7 @@ func TestACodexCompactionHoldsReloadsOnlyUntilItsTurnEnds(t *testing.T) {
 	threadID := realThread(t, client)
 	realTurn(t, client, threadID, "first")
 	codex := &Codex{}
-	if _, err := codex.startTurn(ctx, client, threadID, "thread/compact/start", map[string]any{"threadId": threadID}, 10*time.Second); err != nil {
+	if _, err := codex.startTurn(ctx, client, threadID, "thread/compact/start", map[string]any{"threadId": threadID}); err != nil {
 		t.Fatal(err)
 	}
 	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(100 * time.Millisecond) {
@@ -68,7 +68,7 @@ func TestATurnStartedBeforeTheCodexAppServerRestartedIsNotRunning(t *testing.T) 
 	threadID := realThread(t, client)
 	codex := &Codex{}
 	input := map[string]any{"threadId": threadID, "input": []any{map[string]any{"type": "text", "text": "hang"}}}
-	if _, err := codex.startTurn(ctx, client, threadID, "turn/start", input, 10*time.Second); err != nil {
+	if _, err := codex.startTurn(ctx, client, threadID, "turn/start", input); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(time.Second)

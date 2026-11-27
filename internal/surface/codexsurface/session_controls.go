@@ -3,7 +3,6 @@ package codexsurface
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -11,13 +10,13 @@ import (
 func (c *Codex) GoalClear(ctx context.Context, sess *surface.Session) error {
 	_, err := c.requestSession(ctx, sess, true, "thread/goal/clear", map[string]any{
 		"threadId": sess.ID,
-	}, 5*time.Second)
+	})
 	return err
 }
 
 func (c *Codex) Compact(ctx context.Context, sess *surface.Session) error {
 	_, err := c.requestSessionWith(ctx, sess, true, func(client codexClient) (map[string]any, error) {
-		return c.startTurn(ctx, client, sess.ID, "thread/compact/start", map[string]any{"threadId": sess.ID}, 10*time.Second)
+		return c.startTurn(ctx, client, sess.ID, "thread/compact/start", map[string]any{"threadId": sess.ID})
 	})
 	return err
 }
@@ -58,7 +57,7 @@ func (c *Codex) interruptActiveTurn(ctx context.Context, conn codexClient, threa
 	_, err = conn.Request(ctx, "turn/interrupt", map[string]any{
 		"threadId": threadID,
 		"turnId":   turnID,
-	}, 5*time.Second)
+	}, codexAppServerWait)
 	return err
 }
 

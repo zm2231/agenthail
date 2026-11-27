@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -68,7 +67,7 @@ func codexQuestions(ctx context.Context, conn codexClient, threadID string) (*su
 		"threadId":      threadID,
 		"limit":         codexQuestionWindow,
 		"sortDirection": "desc",
-	}, 5*time.Second)
+	}, codexAppServerWait)
 	if err != nil {
 		return nil, fmt.Errorf("thread/items/list: %w", err)
 	}

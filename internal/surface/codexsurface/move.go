@@ -27,8 +27,8 @@ import (
 // a rollout id after it, and Codex compresses rollouts untouched for a week.
 var codexRolloutFileName = regexp.MustCompile(`^rollout-(\d{4})-(\d{2})-(\d{2})T\d{2}-\d{2}-\d{2}-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?\.jsonl(\.zst)?$`)
 
-// codexMoveOperationWait bounds ArchiveMove and RestoreMove, which run
-// outside any caller's context and send a few requests each.
+// codexMoveOperationWait bounds PrepareMove, ArchiveMove and RestoreMove,
+// which send a few requests each and run outside any caller's deadline.
 const codexMoveOperationWait = 2 * time.Minute
 
 func validCodexMoveThread(id string) bool {
@@ -159,6 +159,8 @@ func (c *Codex) PrepareMove(ctx context.Context, sess *surface.Session, _ surfac
 	if !validCodexMoveThread(sess.ID) {
 		return nil, fmt.Errorf("Codex session %q is not a thread id", sess.ID)
 	}
+	ctx, cancel := context.WithTimeout(ctx, codexMoveOperationWait)
+	defer cancel()
 	release, err := c.home.holdThread(ctx, sess.ID)
 	if err != nil {
 		return nil, err

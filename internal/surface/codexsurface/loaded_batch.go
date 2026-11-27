@@ -3,7 +3,6 @@ package codexsurface
 import (
 	"context"
 	"github.com/zm2231/agenthail/internal/surface/transcript"
-	"time"
 )
 
 const codexIncludedThreadLimit = 100
@@ -43,7 +42,7 @@ func (c *Codex) listThreadsByID(ctx context.Context, conn codexClient, ids []str
 		"sourceKinds":       codexEverySourceKind,
 		"modelProviders":    []string{},
 		"useStateDbOnly":    true,
-	}, 10*time.Second)
+	}, codexAppServerWait)
 	if err != nil {
 		return nil
 	}

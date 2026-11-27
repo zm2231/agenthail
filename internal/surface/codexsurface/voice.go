@@ -129,7 +129,7 @@ func (v *CodexVoice) Request(ctx context.Context, s *surface.Session, method str
 		}
 		return err
 	}
-	_, err := v.Codex.requestSession(ctx, s, true, method, params, 15*time.Second)
+	_, err := v.Codex.requestSession(ctx, s, true, method, params)
 	if rpc, refused := codexAppServerRefusal(err); method == "thread/realtime/start" && refused {
 		return &voice.RejectedError{Reason: rpc.Message}
 	}
