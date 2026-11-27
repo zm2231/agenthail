@@ -113,9 +113,11 @@ impl Over {
         }
     }
 
-    pub fn rebuild(&mut self, panes: &[(&str, &[feed::Item])], shown: time::OffsetDateTime) -> bool {
+    pub fn rebuild(&mut self, panes: &[(&str, &[feed::Item])], shown: Option<time::OffsetDateTime>) -> bool {
         let mut d = self.live.world(panes);
-        d.shown = d.shown.max(shown);
+        if let Some(shown) = shown {
+            d.shown = shown;
+        }
         let focused = self.needs.get(self.need_ix).map(|n| n.target.clone());
         let hands_on: Vec<String> = d.hands_on(&[]).iter().map(|x| x.id.clone()).collect();
         let mut needs = d.needs();

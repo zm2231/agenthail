@@ -1677,6 +1677,11 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         s.drafts.set(&id, &ui::paste::draft(s));
     }
     over::layout::save(s);
+    changed |= minute(s);
+    if quiet::shown_minute(s).is_some_and(|m| m != s.ov.d.shown) {
+        changed |= rebuild(s);
+    }
+    changed |= quiet::outside(s) != before;
     if changed || !s.bar.is_shown() {
         menubar::refresh(s);
     }
@@ -1684,11 +1689,6 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     menubar::warn(s);
     menubar::badge(s);
     hotkey::tick();
-    changed |= minute(s);
-    if s.ov.d.shown != quiet::shown_minute(s) {
-        changed |= rebuild(s);
-    }
-    changed |= quiet::outside(s) != before;
     if let Some(due) = over::worksearch::wait(s) {
         s.wake.after(tx, due);
     }
@@ -1706,7 +1706,7 @@ fn minute(s: &mut App) -> bool {
         return false;
     }
     let now = OffsetDateTime::now_utc();
-    let turned = now >= feed::wake::next_minute(s.now);
+    let turned = feed::wake::minute_of(now) != feed::wake::minute_of(s.now);
     if turned {
         s.now = now;
     }

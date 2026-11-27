@@ -30,10 +30,9 @@ pub fn outside(s: &App) -> Outside {
 }
 
 pub fn wall(s: &App) -> OffsetDateTime {
-    if s.fixtures.is_some() { s.ov.d.now } else { OffsetDateTime::now_utc().max(s.ov.d.now) }
+    if s.fixtures.is_some() { s.ov.d.now } else { OffsetDateTime::now_utc() }
 }
 
-pub fn shown_minute(s: &App) -> OffsetDateTime {
-    let clock = if s.fixtures.is_some() { s.ov.d.now } else { s.now.max(s.ov.d.now) };
-    feed::wake::minute_of(clock)
+pub fn shown_minute(s: &App) -> Option<OffsetDateTime> {
+    s.fixtures.is_none().then(|| feed::wake::minute_of(s.now))
 }

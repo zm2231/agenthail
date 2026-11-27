@@ -266,3 +266,25 @@ fn leaving_now_marks_the_moment_it_was_left() {
     let looked = feed::catalog::parse_time(&looked).expect("the look is a time");
     assert!(looked >= before, "the look is when Now was left ({looked}), not when the overview was last rebuilt ({})", rt.state.ov.d.now);
 }
+
+#[test]
+fn a_clock_set_back_turns_the_minute_and_marks_looks_by_the_wall() {
+    if !isolated("now_regions::a_clock_set_back_turns_the_minute_and_marks_looks_by_the_wall") {
+        return;
+    }
+    let dir = Dir::new("now-regions-back");
+    let mut rt = world(&dir);
+    now(&mut rt, false);
+    rt.update(|s, _| {
+        let fixtures = s.fixtures.take();
+        let ahead = time::OffsetDateTime::now_utc() + time::Duration::hours(3);
+        s.now = ahead;
+        assert!(crate::minute(s), "the minute turns when the clock is set back");
+        assert!(s.now < ahead, "the app clock follows the clock back");
+        s.ov.d.now = ahead;
+        crate::over::go(s, Screen::Sessions);
+        s.fixtures = fixtures;
+    });
+    let looked = feed::catalog::parse_time(rt.state.ov.looked_now.as_deref().expect("leaving Now records a look")).unwrap();
+    assert!(looked < rt.state.ov.d.now, "the look is the wall clock, not a world from a clock since set back");
+}
