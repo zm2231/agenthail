@@ -39,7 +39,7 @@ pub fn status_line(s: &App, x: &Session) -> (String, Color, bool) {
         return (m.label(), k.c.text_accent, true);
     }
     let offset = |t: time::OffsetDateTime| crate::ui::session_ops::offset(t).whole_seconds();
-    if let Some(note) = feed::snooze::note(x, s.now, crate::ui::background::clock(), offset) {
+    if let Some(note) = feed::snooze::note(x, time::OffsetDateTime::now_utc(), crate::ui::background::clock(), offset) {
         return (note, weak(), false);
     }
     if busy(x) {

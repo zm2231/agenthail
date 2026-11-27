@@ -57,7 +57,7 @@ pub fn offset(at: OffsetDateTime) -> UtcOffset {
 }
 
 pub fn offer(s: &App, id: &str) -> Offer {
-    Offer { paired_hosts: s.ov.d.hosts.iter().any(|h| h.state != "local"), moving: s.menus.ops.sent.contains(id), now: Some(s.now) }
+    Offer { paired_hosts: s.ov.d.hosts.iter().any(|h| h.state != "local"), moving: s.menus.ops.sent.contains(id), now: Some(OffsetDateTime::now_utc()) }
 }
 
 fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'static) {
@@ -81,7 +81,7 @@ pub fn open_adopt(s: &mut App, id: &str) {
 
 fn adopt(s: &mut App, stop_terminal: bool) {
     let Some(a) = s.menus.ops.adopting.as_mut() else { return };
-    if matches!(a.phase, Phase::Adopting | Phase::Done(_)) {
+    if !matches!(a.phase, Phase::Ready | Phase::Confirm(_)) {
         return;
     }
     a.phase = Phase::Adopting;
@@ -219,7 +219,7 @@ fn adopt_dialog(a: &Adopting, layer: &mut Vec<El>) {
         phase => vec![
             cancel,
             small(if *phase == Phase::Adopting { "Opening…" } else { "Open" }, ButtonVariant::Contrast)
-                .disabled(*phase != Phase::Ready && !matches!(phase, Phase::Failed(_)))
+                .disabled(*phase != Phase::Ready)
                 .on_press(|s: &mut App| adopt(s, false))
                 .build(k)
                 .key("adopt-open"),

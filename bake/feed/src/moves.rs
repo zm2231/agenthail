@@ -129,7 +129,7 @@ impl Outcome {
             Outcome::Busy(reason) => (format!("Couldn't move {title}"), format!("{title} is busy ({reason}). Move it once it's idle."), false),
             Outcome::NeedsConsent => ("Stop the terminal and move?".to_string(), format!("A terminal is running {title}. Moving it stops that terminal."), true),
             Outcome::Refused(message) => (format!("Couldn't move {title}"), format!("{message}\n\nIt stays on {here}."), false),
-            Outcome::Lost => ("Lost the connection during the move".to_string(), format!("The move to {host_name} carries on without this app. The session's row shows how it ends."), false),
+            Outcome::Lost => ("Lost the connection during the move".to_string(), format!("This app can't tell whether the move to {host_name} went through. The session's row shows how it ends."), false),
         };
         Notice { session: session.to_string(), host: host.to_string(), host_name: host_name.to_string(), title: heading, message, retry }
     }
@@ -241,6 +241,7 @@ mod tests {
         assert_eq!(Outcome::Refused("no room".into()).notice("s1", "@scout", "h1", "forge", "mac").message, "no room\n\nIt stays on mac.");
         assert_eq!(Outcome::Busy("a turn is running".into()).notice("s1", "@scout", "h1", "forge", "mac").message, "@scout is busy (a turn is running). Move it once it's idle.");
         assert_eq!(Outcome::Unsettled.notice("s1", "@scout", "h1", "forge", "mac").title, "The move to forge hasn't settled");
-        assert_eq!(Outcome::Lost.notice("s1", "@scout", "h1", "forge", "mac").title, "Lost the connection during the move");
+        let lost = Outcome::Lost.notice("s1", "@scout", "h1", "forge", "mac");
+        assert_eq!((lost.title.as_str(), lost.message.as_str()), ("Lost the connection during the move", "This app can't tell whether the move to forge went through. The session's row shows how it ends."));
     }
 }
