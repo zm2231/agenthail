@@ -176,6 +176,7 @@ pub(crate) fn rail(s: &App, x: &Session, k: &Kit) -> El {
         ));
     }
     parts.extend(super::inspect::above(s, x, k));
+    parts.extend(super::native_queue::section(s, x, k));
     parts.extend(super::subagents::section(s, x, k));
     parts.extend(super::inspect::below(s, x));
     parts.extend(super::delivery::section(s, x, k));

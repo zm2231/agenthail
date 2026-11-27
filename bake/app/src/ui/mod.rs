@@ -21,6 +21,7 @@ pub mod watch;
 pub mod gone;
 pub(crate) mod holders;
 pub(crate) mod inspect;
+pub(crate) mod native_queue;
 pub mod keys;
 pub(crate) mod queue;
 pub mod limit;
@@ -132,6 +133,7 @@ fn window(s: &App, cx: &mut Cx<App>, chrome: &KitTheme, in_session: bool) -> El 
     pr_link::overlays(s, &mut layer, &k);
     turn_options::overlays(s, &mut layer, &k);
     inspect::overlays(s, &mut layer, &k);
+    native_queue::overlays(s, &mut layer, &k);
     limit::overlays(s, &mut layer, &k);
     accounts::overlays(s, &mut layer, &k);
     holders::overlays(s, &mut layer, &k);
