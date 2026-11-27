@@ -283,17 +283,9 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: f
     });
 }
 
-fn init() -> App {
+fn empty(ov: Over) -> App {
     let (outbox, inbox) = channel();
-    let fixture = arg("--fixture");
-    let fixtures = arg("--fixtures").or_else(|| std::env::var("AGENTHAIL_FIXTURES").ok());
-    let recording = fixtures.as_ref().map(|dir| format!("{dir}/snapshot.json")).or_else(|| fixture.clone());
-    let (live, world_error) = match recording.as_deref().map(load_recorded) {
-        Some(Ok(raw)) => (Overview::recorded(raw), None),
-        Some(Err(error)) => (Overview::default(), Some(error)),
-        None => (Overview::default(), None),
-    };
-    let mut app = App {
+    App {
         sessions: Vec::new(),
         now: OffsetDateTime::now_utc(),
         selected: None,
@@ -340,7 +332,7 @@ fn init() -> App {
         work_pick: HashMap::new(),
         diff: rune_kit::diff::DiffState::new(Vec::new()),
         diff_key: (String::new(), usize::MAX),
-        ov: Over::new(live, recording.is_none()),
+        ov,
         menus: ui::session_menu::Menus::new(),
         limits: ui::limit::Limits::new(),
         accounts: ui::accounts::Accounts::new(),
@@ -366,7 +358,19 @@ fn init() -> App {
         clock: 0.0,
         panes_moved: false,
         built_at: 0.0,
+    }
+}
+
+fn init() -> App {
+    let fixture = arg("--fixture");
+    let fixtures = arg("--fixtures").or_else(|| std::env::var("AGENTHAIL_FIXTURES").ok());
+    let recording = fixtures.as_ref().map(|dir| format!("{dir}/snapshot.json")).or_else(|| fixture.clone());
+    let (live, world_error) = match recording.as_deref().map(load_recorded) {
+        Some(Ok(raw)) => (Overview::recorded(raw), None),
+        Some(Err(error)) => (Overview::default(), Some(error)),
+        None => (Overview::default(), None),
     };
+    let mut app = empty(Over::new(live, recording.is_none()));
     if recording.is_some() {
         app.sessions = app.ov.d.sessions.clone();
         app.now = app.ov.d.now;
