@@ -315,7 +315,6 @@ pub fn view(s: &App, cx: &mut Cx<App>, layer: &mut Vec<El>, main_kit: &Kit) -> E
     ui::frame(cx, s, Some(ui::sidebar(s, None, None, &k)), main, None, toolbar, main_kit)
 }
 
-#[cfg_attr(not(test), expect(dead_code, reason = "Settings Overview's Show Sessions calls it"))]
 pub fn show_surface(s: &mut App, surface: &str) {
     s.ov.sessions_query = rune::TextEdit::new("");
     s.ov.list.scope = SCOPES.iter().position(|(_, scope)| *scope == "all").unwrap_or_default();
