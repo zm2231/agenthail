@@ -52,7 +52,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>, main_kit:
     let Some(w) = s.ov.d.work.get(id) else {
         return col().w_full().padding(24.0).children(crate::over::worksearch::note(s, id).map(|n| text(n).font(BODY).color(weak(&k)).wrap()));
     };
-    let project = s.ov.d.project(&w.project).map(|p| p.name.clone()).unwrap_or_default();
+    let project = s.ov.d.project_name(&w.project);
     let phase = phase(w);
     let pr = pr(w);
     let commit = commit(w);

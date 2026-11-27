@@ -23,6 +23,7 @@ pub struct State {
     requests: u64,
     reads: HashMap<String, u64>,
     found: HashMap<String, Work>,
+    names: HashMap<String, String>,
     opening: HashMap<String, Option<String>>,
     tx: Sender<Reply>,
     rx: Receiver<Reply>,
@@ -31,13 +32,14 @@ pub struct State {
 impl Default for State {
     fn default() -> State {
         let (tx, rx) = channel();
-        State { asked: None, typed: None, requests: 0, reads: HashMap::new(), found: HashMap::new(), opening: HashMap::new(), tx, rx }
+        State { asked: None, typed: None, requests: 0, reads: HashMap::new(), found: HashMap::new(), names: HashMap::new(), opening: HashMap::new(), tx, rx }
     }
 }
 
 impl State {
     pub fn keep(&mut self, d: &mut World) {
         self.found.retain(|id, _| !d.work.contains_key(id));
+        d.found_names.extend(self.names.iter().map(|(k, v)| (k.clone(), v.clone())));
         for (id, w) in &self.found {
             d.work.entry(id.clone()).or_insert_with(|| w.clone());
         }
@@ -114,6 +116,12 @@ pub fn drain(s: &mut App) -> bool {
     while let Ok(reply) = s.ov.worksearch.rx.try_recv() {
         match reply {
             Reply::Search(seq, found) => {
+                if let Ok(search) = &found {
+                    for f in search.items.iter().filter(|f| !f.project_name.is_empty()) {
+                        s.ov.worksearch.names.insert(f.project_key.clone(), f.project_name.clone());
+                        s.ov.d.found_names.insert(f.project_key.clone(), f.project_name.clone());
+                    }
+                }
                 if s.ov.worksearch.asked.as_ref().is_some_and(|(_, asked, _)| *asked == seq) {
                     super::jump::keep_highlight(s, |s| {
                         if let Some((_, _, slot)) = s.ov.worksearch.asked.as_mut() {
@@ -137,8 +145,10 @@ pub fn drain(s: &mut App) -> bool {
                     Ok(work) => {
                         let work = s.ov.d.place(work, &ledger);
                         s.ov.worksearch.opening.remove(&id);
-                        s.ov.d.work.insert(id.clone(), work.clone());
-                        s.ov.worksearch.found.insert(id, work);
+                        s.ov.worksearch.found.insert(id.clone(), work.clone());
+                        super::jump::keep_highlight(s, |s| {
+                            s.ov.d.work.insert(id, work);
+                        });
                     }
                     Err(e) => {
                         s.ov.worksearch.opening.insert(id, Some(e));

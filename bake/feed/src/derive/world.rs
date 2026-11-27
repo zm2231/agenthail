@@ -207,6 +207,7 @@ pub struct World {
     pub rows: HashMap<String, Rows>,
     pub records: Vec<ProjectRecord>,
     pub tile_order: Option<crate::projects::TileOrder>,
+    pub found_names: HashMap<String, String>,
     pub(crate) names: HashMap<String, String>,
 }
 
@@ -244,6 +245,7 @@ impl World {
             rows: HashMap::new(),
             records: raw.projects,
             tile_order: raw.tile_order,
+            found_names: HashMap::new(),
             names,
         }
     }
@@ -254,6 +256,10 @@ impl World {
 
     pub fn project(&self, key: &str) -> Option<&Project> {
         self.projects.iter().find(|p| p.key == key)
+    }
+
+    pub fn project_name(&self, key: &str) -> String {
+        self.project(key).map(|p| p.name.clone()).or_else(|| self.found_names.get(key).cloned()).unwrap_or_default()
     }
 
     pub fn record(&self, key: &str) -> Option<&ProjectRecord> {

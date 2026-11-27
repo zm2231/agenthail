@@ -206,8 +206,12 @@ mod tests {
         let got = w.place(client.found_work("project:p-1", "p-1-W9").unwrap(), "project:p-1");
         assert_eq!(seen.recv().unwrap().0, "/api/v1/ledger?projectKey=project%3Ap-1&view=item&id=p-1-W9");
         assert_eq!((got.project.as_str(), got.ledger_key(), got.state.as_str(), got.timeline.len()), ("p-1", "project:p-1", "done", 1));
+        let mut w = w;
         let other = w.place(client.found_work("shared:z", "z-W1").unwrap(), "shared:z");
         assert_eq!((other.project.as_str(), other.ledger_key()), ("shared:z", "shared:z"));
+        assert_eq!(w.project_name("shared:z"), "");
+        w.found_names.insert("shared:z".into(), "Zed".into());
+        assert_eq!(w.project_name("shared:z"), "Zed", "a project known only from search keeps its name");
         assert_eq!(client.found_work("shared:z", "z-W2").unwrap_err(), "no work item z-W2");
     }
 

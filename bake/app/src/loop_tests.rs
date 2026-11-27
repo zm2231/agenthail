@@ -586,6 +586,7 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     rt.frame(DT);
     let w = &rt.state.ov.d.work["z-W9"];
     assert_eq!((w.state.as_str(), w.ledger_key(), w.project.as_str()), ("parked", "shared:z", "shared:z"), "a rebuild keeps the opened item");
+    assert_eq!(rt.state.ov.d.project_name("shared:z"), "Zed", "and the project name the search gave it");
     assert_eq!(crate::over::worksearch::note(&rt.state, "z-W9"), None);
 
     crate::over::open_target(&mut rt.state, &crate::over::Target::Work("z-W9".into()));
