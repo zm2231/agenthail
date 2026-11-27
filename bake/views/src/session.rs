@@ -379,7 +379,7 @@ pub fn work_rail(s: &App, id: &str, k: &Kit) -> El {
             c = c
                 .child(row().w_full().items_center().child(ui::label("On this work", k)).child(ui::spacer()).child(ui::id_label(&crate::data::short_id(&w.id), k)))
                 .child(ui::title_fit(s, "rail-title", &plain(&w.text), BODY_MED, strong(k), 2))
-                .child(ui::stepper(feed::derive::phase(w), &s.d.whose_move(w), k).mt(4.0));
+                .child(ui::stepper(w, &s.d.whose_move(w), k).mt(4.0));
             let mut chips = row().gap(6.0).flex_wrap();
             if let Some(pr) = feed::derive::work::pr(w) {
                 chips = chips.child(ui::chip(&icons::BRANCH, &format!("PR #{pr}"), k));
@@ -404,7 +404,7 @@ pub fn work_rail(s: &App, id: &str, k: &Kit) -> El {
                             .items_center()
                             .py(4.0)
                             .on_press(move |s: &mut App| go(s, Screen::Work(aid.clone())))
-                            .child(ui::mini_phase(feed::derive::phase(a), k))
+                            .child(ui::mini_phase(a, k))
                             .child(text(plain(&a.text)).font(META).color(base(k)).truncate().shrink()),
                     );
                 }

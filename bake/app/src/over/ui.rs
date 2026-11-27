@@ -213,7 +213,18 @@ pub fn happened_style(kind: Happened, k: &Kit) -> (&'static Icon, Color) {
     }
 }
 
-pub fn stepper(phase: usize, whose: &str, k: &Kit) -> El {
+pub fn stepper(w: &feed::derive::Work, whose: &str, k: &Kit) -> El {
+    match feed::derive::phase::shown_step(&w.phase, &w.state) {
+        Some(phase) => steps(phase, whose, k),
+        None => step_word(w, k),
+    }
+}
+
+pub fn step_word(w: &feed::derive::Work, k: &Kit) -> El {
+    text(feed::derive::phase::step_word(&w.phase, &w.state)).font(k.text(META)).color(weak(k))
+}
+
+fn steps(phase: usize, whose: &str, k: &Kit) -> El {
     let mut r = row().w_full().items_start();
     for (i, name) in PHASES.iter().enumerate() {
         let done = i < phase;
@@ -254,7 +265,14 @@ pub fn stepper(phase: usize, whose: &str, k: &Kit) -> El {
     )
 }
 
-pub fn mini_phase(phase: usize, k: &Kit) -> El {
+pub fn mini_phase(w: &feed::derive::Work, k: &Kit) -> El {
+    match feed::derive::phase::shown_step(&w.phase, &w.state) {
+        Some(phase) => mini_steps(phase, k),
+        None => step_word(w, k),
+    }
+}
+
+fn mini_steps(phase: usize, k: &Kit) -> El {
     let mut r = row().gap(3.0).items_center();
     for i in 0..PHASES.len() {
         let color = if i < phase {
