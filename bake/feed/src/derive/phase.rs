@@ -46,6 +46,9 @@ pub fn phase(w: &Work) -> usize {
 
 impl World {
     pub fn whose_move(&self, w: &Work) -> String {
+        if matches!(w.state.as_str(), "parked" | "closed") {
+            return "No one".into();
+        }
         match phase(w) {
             CHECK => "You".into(),
             0 | SHIP => match self.project(&w.project) {

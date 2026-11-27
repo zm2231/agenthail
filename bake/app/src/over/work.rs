@@ -110,6 +110,8 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
         col().w_full().radius(14.0).fill(k.c.surface_raised).border(1.0, k.c.warning.icon.alpha(0.4)).child(c)
     } else {
         ui::card(col().w_full().padding(16.0).gap(8.0).child(text(match s.ov.d.whose_move(w).as_str() {
+            _ if w.state == "parked" => "Parked. It's off the board until someone unparks it.".to_string(),
+            _ if w.state == "closed" => "Closed without shipping. Reopen it to put it back on the board.".to_string(),
             "You" => "Your move. You hold it.".to_string(),
             whose => format!("{whose}'s move. Nothing waits on you yet."),
         }).font(BODY_MED).color(strong())).child(links))

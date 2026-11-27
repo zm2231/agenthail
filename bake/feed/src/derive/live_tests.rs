@@ -626,3 +626,12 @@ fn a_search_finds_settled_work_after_the_active_work() {
     assert_eq!(settled, [("w2 export".into(), "Closed".into()), ("w3 export".into(), "Done".into()), ("w4 export".into(), "Parked".into())]);
     assert!(w.jump("", &[], &[]).iter().all(|h| h.title != "w2 export"), "an empty search lists only active work");
 }
+
+#[test]
+fn parked_and_closed_work_is_no_ones_move() {
+    let mut ov = Overview::default();
+    ov.refresh(fetched("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")], vec![("p", Ok(vec![work("w1", "parked"), work("w2", "closed")]))]));
+    let w = ov.world(&[]);
+    assert_eq!(w.whose_move(&w.work["w1"]), "No one");
+    assert_eq!(super::phase::move_of(&w.whose_move(&w.work["w2"])), "No one's move");
+}
