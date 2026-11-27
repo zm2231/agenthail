@@ -567,7 +567,7 @@ pub fn chips(s: &App, id: &str, k: &Kit) -> Option<El> {
         let local = chip.local;
         let failed_ = matches!(chip.state, State::Failed(_) | State::Gone(_));
         let thumb = match s.attach.thumbs.get(&local).filter(|_| chip.image) {
-            Some(image) => el().size(k.text_size(18.0), k.text_size(18.0)).radius(4.0).pixels_fit(image.pixels(), SurfaceFit::Fill),
+            Some(image) => el().size(18.0, 18.0).radius(4.0).pixels_fit(image.pixels(), SurfaceFit::Fill),
             None => col().size(k.text_size(18.0), k.text_size(18.0)).items_center().justify_center().child(icon(if chip.image { &icons::IMAGE } else { &icons::FILE }, k.text_size(12.0)).color(faint())),
         };
         let mut c = row()
