@@ -653,7 +653,24 @@ fn a_stream_missed_while_hidden_is_read_again_when_the_session_shows() {
     assert!(crate::ui::inspect::missed(&s, "a"), "nothing is read while it stays hidden");
     s.screen = Screen::Session;
     crate::ui::inspect::drain(&mut s);
-    assert!(!crate::ui::inspect::missed(&s, "a"), "coming back reads it again");
+    let failed = feed::inspect::Metadata { goal_failed: true, ..Default::default() };
+    let ticket = crate::ui::inspect::ticket(&mut s);
+    crate::ui::inspect::read(&mut s, "a", ticket, Ok(failed));
+    assert!(crate::ui::inspect::missed(&s, "a"), "a read that couldn't get the goal leaves it to try again");
+    let ticket = crate::ui::inspect::ticket(&mut s);
+    crate::ui::inspect::read(&mut s, "a", ticket, Ok(feed::inspect::Metadata::default()));
+    assert!(!crate::ui::inspect::missed(&s, "a"), "a read with the goal catches up");
+}
+
+#[test]
+fn a_rekey_keeps_an_open_goal_edit_and_logs_on_the_session() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    s.inspect.editing = Some(crate::ui::inspect::Editing { session: "a".into(), act: feed::inspect::GoalAct::Set, text: rune::TextEdit::new("typed") });
+    s.inspect.logs = Some(("a".into(), "output".into()));
+    crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "a2".to_string())]));
+    assert_eq!(s.inspect.logs.as_ref().map(|(id, _)| id.as_str()), Some("a2"));
+    assert_eq!(s.inspect.editing.as_ref().map(|e| e.session.as_str()), Some("a2"));
 }
 
 #[test]

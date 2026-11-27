@@ -28,6 +28,8 @@ struct Process {
     error: Option<String>,
 }
 
+const CATCH_UP: std::time::Duration = std::time::Duration::from_secs(30);
+
 pub struct Editing {
     pub session: String,
     pub act: GoalAct,
@@ -42,7 +44,7 @@ pub struct Inspect {
     goal_note: HashMap<String, (bool, String)>,
     overlay: inspect::Overlay,
     expanded: std::collections::HashSet<String>,
-    missed: std::collections::HashSet<String>,
+    missed: HashMap<String, Option<std::time::Instant>>,
     pub editing: Option<Editing>,
     pub logs: Option<(String, String)>,
     seq: u64,
@@ -83,7 +85,13 @@ pub(crate) fn rekey(s: &mut App, old: &str, new: &str) {
     crate::move_key(&mut s.inspect.goal_busy, old, new);
     crate::move_key(&mut s.inspect.goal_note, old, new);
     crate::move_member(&mut s.inspect.expanded, old, new);
-    crate::move_member(&mut s.inspect.missed, old, new);
+    crate::move_key(&mut s.inspect.missed, old, new);
+    if let Some(editing) = s.inspect.editing.as_mut().filter(|e| e.session == old) {
+        editing.session = new.to_string();
+    }
+    if let Some(logs) = s.inspect.logs.as_mut().filter(|(id, _)| id == old) {
+        logs.0 = new.to_string();
+    }
     super::session_menu::rekey_context(s, old, new);
 }
 
@@ -92,9 +100,9 @@ fn current(s: &App, id: &str) -> String {
 }
 
 fn catch_up(s: &mut App) {
-    let due: Vec<String> = s.inspect.missed.iter().filter(|id| showing(s, id)).cloned().collect();
+    let due: Vec<String> = s.inspect.missed.iter().filter(|(id, at)| at.is_none_or(|at| at.elapsed() >= CATCH_UP) && showing(s, id)).map(|(id, _)| id.clone()).collect();
     for id in due {
-        s.inspect.missed.remove(&id);
+        s.inspect.missed.insert(id.clone(), Some(std::time::Instant::now()));
         metadata_moved(s, &id);
     }
 }
@@ -105,7 +113,7 @@ pub fn keep_shown(s: &mut App) {
     s.inspect.meta.retain(|k, _| held.contains(k));
     s.inspect.reads.keep_only(&held);
     s.inspect.expanded.retain(|k| held.contains(k));
-    s.inspect.missed.retain(|k| held.contains(k));
+    s.inspect.missed.retain(|k, _| held.contains(k));
 }
 
 pub(crate) fn ticket(s: &mut App) -> u64 {
@@ -122,6 +130,9 @@ pub(crate) fn read(s: &mut App, id: &str, ticket: u64, result: Result<Metadata, 
             Err(error) => Metadata::failed(old, error),
         };
         let data = if is_streamed(s, id, "goal") { data.keep_goal(s.inspect.meta.get(id)) } else { data };
+        if !data.goal_failed {
+            s.inspect.missed.remove(id);
+        }
         s.inspect.meta.insert(id.to_string(), data);
     }
     if s.inspect.reads.landed(id, ticket) {
@@ -137,7 +148,7 @@ pub(crate) fn streamed(s: &mut App, id: &str, x: feed::wire::Streamed) {
     };
     if !s.inspect.overlay.stream(id, kind, shown) {
         if !shown && super::window::selected_anywhere(s).iter().any(|x| x == id) {
-            s.inspect.missed.insert(id.to_string());
+            s.inspect.missed.insert(id.to_string(), None);
         }
         return;
     }
@@ -162,7 +173,7 @@ pub fn holds_any(s: &App, id: &str) -> bool {
 
 #[cfg(test)]
 pub fn missed(s: &App, id: &str) -> bool {
-    s.inspect.missed.contains(id)
+    s.inspect.missed.contains_key(id)
 }
 
 #[cfg(test)]
