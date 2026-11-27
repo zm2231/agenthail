@@ -58,7 +58,13 @@ pub fn device() -> String {
 }
 
 pub fn problem() -> Option<String> {
-    STATE.with_borrow(|s| s.problem.clone())
+    STATE.with_borrow(|s| {
+        let failed = s.look.images().into_iter().find_map(|p| match s.pictures.get(&p) {
+            Some(Err(e)) => Some(format!("Couldn't show the background {p}: {e}")),
+            _ => None,
+        });
+        s.problem.clone().or(failed)
+    })
 }
 
 fn scheme_of(look: &Look) -> rune::ColorScheme {
@@ -177,7 +183,6 @@ fn pump(s: &mut State) {
                 s.pictures.insert(path, Ok(p));
             }
             Got::Image(path, Err(e)) => {
-                s.problem = Some(format!("Couldn't show the background {path}: {e}"));
                 s.pictures.insert(path, Err(e));
             }
             Got::Problem(p) => s.problem = p,

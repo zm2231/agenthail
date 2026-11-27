@@ -151,7 +151,8 @@ fn first_line(text: &str, max: usize) -> String {
 }
 
 fn markdown(body: &str) -> El {
-    Markdown::new(body.to_string()).selectable(true).render(&MarkdownStyle::neutral(true)).selection_group(false)
+    let p = crate::theme::paint();
+    Markdown::new(body.to_string()).selectable(true).render(&MarkdownStyle::neutral(p.dark).text(p.text).muted(p.muted)).selection_group(false)
 }
 
 pub struct Cx<'a> {
@@ -358,7 +359,7 @@ fn block_el(cx: &Cx, block: &Block, open: bool, gap: f32, last: bool) -> El {
             col()
                 .max_w(560.0)
                 .corners([18.0, 18.0, 6.0, 18.0])
-                .linear_gradient(160.0, [(0.0, rune::oklch(0.33, 0.06, 268.0)), (1.0, rune::oklch(0.27, 0.05, 275.0))])
+                .linear_gradient(160.0, if crate::theme::paint().dark { [(0.0, rune::oklch(0.33, 0.06, 268.0)), (1.0, rune::oklch(0.27, 0.05, 275.0))] } else { [(0.0, rune::oklch(0.93, 0.03, 268.0)), (1.0, rune::oklch(0.90, 0.035, 275.0))] })
                 .border(1.0, crate::theme::ink(0.08))
                 .px(15.0)
                 .py(10.0)

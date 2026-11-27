@@ -61,14 +61,12 @@ pub fn opened(s: &mut Prefs) {
 
 pub fn changed(s: &mut Prefs) {
     let rev = crate::look::view().map(|v| v.rev).unwrap_or_default();
-    if rev == s.appearance.seen_rev {
+    if s.appearance.writing || rev == s.appearance.seen_rev {
         return;
     }
     s.appearance.seen_rev = rev;
-    if !s.appearance.writing {
-        s.appearance.drafts.clear();
-    }
-    if s.tab == TAB && !s.appearance.writing {
+    s.appearance.drafts.clear();
+    if s.tab == TAB {
         spawn(s, |c| Got::History(c.ui_log(50)));
     }
 }
@@ -194,13 +192,15 @@ pub fn take(s: &mut Prefs, got: Got) {
         Got::Thumb(..) => {}
         Got::Wrote(ticket, result) => {
             s.appearance.writing = false;
+            s.appearance.drafts.clear();
             match result {
-                Ok(view) => crate::look::take_view(ticket, view),
-                Err(f) => {
-                    s.appearance.drafts.clear();
-                    s.appearance.error = Some(f);
+                Ok(view) => {
+                    s.appearance.seen_rev = view.rev.clone();
+                    crate::look::take_view(ticket, view);
                 }
+                Err(f) => s.appearance.error = Some(f),
             }
+            spawn(s, |c| Got::History(c.ui_log(50)));
         }
     }
 }
