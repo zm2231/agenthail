@@ -17,7 +17,7 @@ pub enum Done {
     Settings(String, u64, Result<SessionSettings, String>),
     Models(String, u64, Result<Vec<ModelOption>, String>),
     Context(String, u64, Result<Option<ContextUsage>, String>),
-    Acted(String, Act, String, Result<Option<feed::action::ReadState>, RespondError>),
+    Acted(String, Act, Result<Option<Patch>, RespondError>),
     Renamed(String, u64, Result<String, RespondError>),
     Set(String, &'static str, String, Result<(), RespondError>),
     Compacted(String, Result<(), RespondError>),
@@ -26,6 +26,7 @@ pub enum Done {
 pub struct Open {
     pub session: String,
     pub at: Option<PointerPress>,
+    pub sub: bool,
 }
 
 pub struct Confirm {
@@ -57,6 +58,7 @@ pub struct Menus {
     models_loading: HashSet<String>,
     settings_asked: HashMap<String, Instant>,
     pub models_error: HashMap<String, String>,
+    pub ops: super::session_ops::Ops,
     tx: Sender<Done>,
     rx: Receiver<Done>,
 }
@@ -87,6 +89,7 @@ impl Menus {
             models_loading: HashSet::new(),
             settings_asked: HashMap::new(),
             models_error: HashMap::new(),
+            ops: super::session_ops::Ops::new(),
             tx,
             rx,
         }
@@ -212,7 +215,7 @@ fn refresh_shown(s: &mut App) {
     }
 }
 
-fn not_sent(s: &mut App) -> bool {
+pub(super) fn not_sent(s: &mut App) -> bool {
     if s.client.is_none() {
         s.ov.notice = Some("Fixture mode: not sent".into());
         return true;
@@ -233,10 +236,14 @@ fn verb(act: &Act) -> &'static str {
         Act::Read(false) => "Marking as unread",
         Act::Archive(true) => "Archiving",
         Act::Archive(false) => "Unarchiving",
+        Act::Adopt => "Opening it in Agenthail",
+        Act::Move => "Moving",
+        Act::Snooze(_) => "Snoozing",
+        Act::Wake => "Waking",
     }
 }
 
-fn failure(what: &str, error: &RespondError) -> String {
+pub(super) fn failure(what: &str, error: &RespondError) -> String {
     if error.maybe_delivered { format!("{what} may not have gone through: {}", error.message) } else { format!("{what} didn't work: {}", error.message) }
 }
 
@@ -248,6 +255,8 @@ pub fn run(s: &mut App, id: &str, act: Act) {
         Act::PrLink => super::pr_link::start(s, id),
         Act::PrWatch(url, on) => super::pr_link::change(s, id, if on { feed::action::PrOp::Watch } else { feed::action::PrOp::Unwatch }, &url),
         Act::PrUnlink(url) => super::pr_link::change(s, id, feed::action::PrOp::Unlink, &url),
+        Act::Adopt => super::session_ops::open_adopt(s, id),
+        Act::Move => super::session_ops::open_move(s, id),
         Act::Call => {
             let name = super::gone::shown(s, id).map(|x| x.title()).unwrap_or_default();
             crate::voice::open(id, &name);
@@ -263,16 +272,22 @@ pub fn run(s: &mut App, id: &str, act: Act) {
                 s.menus.leaving.insert(id.to_string(), order);
             }
             let revision = super::gone::shown(s, id).and_then(|x| x.read_state.as_ref()).map(|r| r.revision.clone()).unwrap_or_default();
+            let until = match act {
+                Act::Snooze(choice) => feed::snooze::until(choice, s.now, super::session_ops::offset(s.now)),
+                _ => None,
+            };
             let id = id.to_string();
             spawn(s, Duration::ZERO, move |c| {
                 let result = match &act {
                     Act::Terminal => c.session_focus(&id).map(|_| None),
-                    Act::Pin(on) => c.session_pin(&id, *on).map(|_| None),
-                    Act::Read(read) => c.session_read(&id, &revision, *read),
-                    Act::Archive(on) => c.session_archive(&id, *on).map(|_| None),
-                    Act::Rename | Act::Pr(_) | Act::PrWatch(..) | Act::PrUnlink(_) | Act::PrLink | Act::Call => Ok(None),
+                    Act::Pin(on) => c.session_pin(&id, *on).map(|_| Some(Patch::Pinned(on.then(stamp)))),
+                    Act::Read(read) => c.session_read(&id, &revision, *read).map(|r| r.map(|receipt| Patch::Read { receipt, from: vec![revision.clone()] })),
+                    Act::Archive(on) => c.session_archive(&id, *on).map(|_| Some(Patch::Archived(*on))),
+                    Act::Snooze(_) => c.session_snooze(&id, until).map(|snooze| Some(Patch::Snoozed(snooze))),
+                    Act::Wake => c.session_wake(&id).map(|_| Some(Patch::Snoozed(None))),
+                    Act::Rename | Act::Pr(_) | Act::PrWatch(..) | Act::PrUnlink(_) | Act::PrLink | Act::Call | Act::Adopt | Act::Move => Ok(None),
                 };
-                Some(Done::Acted(id, act, revision, result))
+                Some(Done::Acted(id, act, result))
             });
         }
     }
@@ -285,7 +300,7 @@ pub fn changing(s: &App, id: &str) -> bool {
 
 pub fn open_at(s: &mut App, id: &str, at: PointerPress) {
     s.menus.chip = None;
-    s.menus.open = Some(Open { session: id.to_string(), at: Some(at) });
+    s.menus.open = Some(Open { session: id.to_string(), at: Some(at), sub: false });
 }
 
 fn start_rename(s: &mut App, id: &str) {
@@ -377,15 +392,6 @@ fn stamp() -> String {
     time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap_or_default()
 }
 
-fn patch_of(act: &Act, read: Option<feed::action::ReadState>, from: String) -> Option<Patch> {
-    match act {
-        Act::Pin(on) => Some(Patch::Pinned(on.then(stamp))),
-        Act::Archive(on) => Some(Patch::Archived(*on)),
-        Act::Read(_) => read.map(|receipt| Patch::Read { receipt, from: vec![from] }),
-        _ => None,
-    }
-}
-
 fn leave_archived(s: &mut App, id: &str) {
     let Some(order) = s.menus.leaving.remove(id) else { return };
     let now = feed::composer::current(&s.rekeyed, id).to_string();
@@ -399,7 +405,7 @@ fn leave_archived(s: &mut App, id: &str) {
     }
 }
 
-fn land(s: &mut App, id: &str, patch: Patch) {
+pub(super) fn land(s: &mut App, id: &str, patch: Patch) {
     crate::over::search::patch_pinned(s, id, &patch);
     if s.ov.live.patch(id, patch, Instant::now()) {
         s.sessions = s.ov.live.sessions().to_vec();
@@ -451,17 +457,17 @@ fn settled(s: &mut App, done: Done) {
                 }
             }
         }
-        Done::Acted(id, act, from, Ok(read)) => {
+        Done::Acted(id, act, Ok(patch)) => {
             s.menus.busy.remove(&(id.clone(), "menu"));
             super::gone::recheck(s, &id);
-            if let Some(patch) = patch_of(&act, read, from) {
+            if let Some(patch) = patch {
                 land(s, &id, patch);
             }
             if act == Act::Archive(true) {
                 leave_archived(s, &id);
             }
         }
-        Done::Acted(id, act, _, Err(error)) => {
+        Done::Acted(id, act, Err(error)) => {
             s.menus.busy.remove(&(id.clone(), "menu"));
             super::gone::recheck(s, &id);
             s.menus.leaving.remove(&id);
@@ -519,7 +525,7 @@ fn settled(s: &mut App, done: Done) {
 }
 
 pub fn drain(s: &mut App) -> bool {
-    let mut changed = false;
+    let mut changed = super::session_ops::drain(s);
     while let Ok(done) = s.menus.rx.try_recv() {
         changed = true;
         settled(s, done);

@@ -6,6 +6,8 @@ pub mod brief;
 pub mod question;
 pub mod review;
 pub mod search;
+pub mod adopt;
+pub mod snooze;
 pub mod settings;
 pub mod catalog;
 pub mod complete;
@@ -25,6 +27,7 @@ pub mod item;
 pub mod limit;
 pub mod look;
 pub mod menu;
+pub mod moves;
 pub mod notify;
 #[cfg(test)]
 mod mock;

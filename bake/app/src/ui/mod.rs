@@ -25,6 +25,7 @@ pub mod pr_link;
 mod rail;
 mod session;
 mod session_dialogs;
+pub(crate) mod session_ops;
 pub(crate) mod subagents;
 pub mod session_menu;
 mod waiting;

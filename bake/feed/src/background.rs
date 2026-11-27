@@ -131,7 +131,7 @@ impl Clock {
         if TWELVE_HOUR_REGIONS.contains(&region) { Clock::Twelve } else { Clock::TwentyFour }
     }
 
-    fn show(self, hour: u8, minute: u8) -> String {
+    pub(crate) fn show(self, hour: u8, minute: u8) -> String {
         match self {
             Clock::TwentyFour => format!("{hour:02}:{minute:02}"),
             Clock::Twelve => {

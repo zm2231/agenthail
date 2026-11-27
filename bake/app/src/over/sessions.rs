@@ -35,6 +35,13 @@ pub fn status_line(s: &App, x: &Session) -> (String, Color, bool) {
     if let Some(n) = need_of(s, x) {
         return (format!("{}: {}", n.kind.wanted(), ui::short_title(&n.title, 90)), ui::needs_color(), false);
     }
+    if let Some(m) = &x.moving {
+        return (m.label(), k.c.text_accent, true);
+    }
+    let offset = |t: time::OffsetDateTime| crate::ui::session_ops::offset(t).whole_seconds();
+    if let Some(note) = feed::snooze::note(x, s.now, crate::ui::background::clock(), offset) {
+        return (note, weak(), false);
+    }
     if busy(x) {
         let verb = if x.display.detail.is_empty() { "Working".to_string() } else { x.display.detail.clone() };
         return (verb, k.c.text_accent, true);

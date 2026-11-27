@@ -15,7 +15,7 @@ fn global_default(key: &str) -> Option<String> {
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-fn clock() -> Clock {
+pub(crate) fn clock() -> Clock {
     static CLOCK: OnceLock<Clock> = OnceLock::new();
     *CLOCK.get_or_init(|| {
         let set = |key: &str| global_default(key).is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
