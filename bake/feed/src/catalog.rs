@@ -139,6 +139,8 @@ pub struct Session {
     #[serde(default)]
     pub current: bool,
     #[serde(default)]
+    pub current_reason: Option<String>,
+    #[serde(default)]
     pub archived: bool,
     #[serde(default)]
     pub display: Display,

@@ -30,6 +30,8 @@ pub struct Base {
     pub event_cursor: u64,
     #[serde(default)]
     pub daemon: crate::devices::Daemon,
+    #[serde(default, deserialize_with = "crate::health::listed")]
+    pub surfaces: Vec<crate::health::Surface>,
     #[serde(flatten)]
     pub handoffs: crate::handoffs::Handoffs,
 }
