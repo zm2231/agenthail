@@ -8,12 +8,12 @@ use crate::theme::{self, META, muted};
 
 const MESH: usize = 3;
 
-pub struct Pick {
+pub(super) struct Pick {
     pub hsv: Hsv,
     pub hex: TextEdit,
 }
 
-pub struct Mesh {
+pub(super) struct Mesh {
     pub colors: Vec<Hsv>,
     pub cell: usize,
     pub hex: TextEdit,
@@ -23,14 +23,14 @@ fn pick(hsv: Hsv) -> Pick {
     Pick { hsv, hex: TextEdit::new(&hsv.hex()) }
 }
 
-pub fn open_accent(s: &mut Prefs) {
+pub(super) fn open_accent(s: &mut Prefs) {
     let Some(view) = crate::look::view() else { return };
     let current = chosen(&view, "theme.accent", "system");
     let hsv = Hsv::from_hex(current).unwrap_or_else(|| Hsv::from_color(theme::accent()));
     s.appearance.accent_edit = Some(pick(hsv));
 }
 
-pub fn accent_editor(s: &Prefs) -> Option<El> {
+pub(super) fn accent_editor(s: &Prefs) -> Option<El> {
     let p = s.appearance.accent_edit.as_ref()?;
     let k = theme::kit();
     let hex = p.hsv.hex();
@@ -65,7 +65,7 @@ fn mesh_colors(value: &str) -> Option<Vec<Hsv>> {
     }
 }
 
-pub fn open_mesh(s: &mut Prefs) {
+pub(super) fn open_mesh(s: &mut Prefs) {
     let Some(view) = crate::look::view() else { return };
     let dark = theme::paint().dark;
     let current = view.values.get(if dark { "background" } else { "background.light" }).and_then(|v| v.as_str()).or_else(|| view.values.get("background").and_then(|v| v.as_str())).unwrap_or_default();
@@ -78,11 +78,11 @@ pub fn open_mesh(s: &mut Prefs) {
     s.appearance.mesh_edit = Some(Mesh { colors, cell: 0, hex });
 }
 
-pub fn mesh_value(colors: &[Hsv]) -> String {
+pub(super) fn mesh_value(colors: &[Hsv]) -> String {
     format!("mesh: {MESH}x{MESH}, {}", colors.iter().map(|c| c.hex()).collect::<Vec<_>>().join(", "))
 }
 
-pub fn mesh_editor(s: &Prefs) -> Option<El> {
+pub(super) fn mesh_editor(s: &Prefs) -> Option<El> {
     let m = s.appearance.mesh_edit.as_ref()?;
     let k = theme::kit();
     let mut grid = col().gap(6.0);

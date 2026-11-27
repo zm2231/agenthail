@@ -100,7 +100,7 @@ pub(crate) fn avatar_with_state(name: &str, state: State, size: f32) -> El {
 
 pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let in_session = s.screen == Screen::Session;
-    crate::look::frame(cx, in_session, true);
+    crate::look::frame(cx, in_session, true, true);
     let mut layer = Vec::new();
     let body = match (connect::screen(s, cx), &s.screen) {
         (Some(body), _) => body,

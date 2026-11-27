@@ -610,7 +610,7 @@ fn unfollowed(s: &Prefs) -> Option<El> {
 pub const TABS: [&str; 6] = ["General", "Claude", "Notifications", "Devices", "Handoffs", "Appearance"];
 
 pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
-    crate::look::frame(cx, false, false);
+    crate::look::frame(cx, false, false, false);
     let k = theme::kit();
     let mut layer = Vec::new();
     let tabs = SegmentedControl::new(&TABS, Some(s.tab)).label("Settings").as_tabs().fit().on_pick(|s: &mut Prefs, i, _| {

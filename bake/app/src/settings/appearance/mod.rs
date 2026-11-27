@@ -31,8 +31,8 @@ pub struct Form {
     pub history_open: bool,
     pub confirm_reset: bool,
     seen_rev: String,
-    pub accent_edit: Option<custom::Pick>,
-    pub mesh_edit: Option<custom::Mesh>,
+    accent_edit: Option<custom::Pick>,
+    mesh_edit: Option<custom::Mesh>,
     history_asked: u64,
     history_shown: u64,
 }

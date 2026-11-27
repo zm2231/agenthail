@@ -15,6 +15,12 @@ pub(super) fn swatch_fill(s: &Prefs, value: &str) -> El {
             let stops: Vec<(f32, Color)> = stops.iter().map(|(c, at)| (*at, Color { r: fl::linear(c[0]), g: fl::linear(c[1]), b: fl::linear(c[2]), a: 1.0 })).collect();
             return el().linear_gradient(angle.to_radians(), stops);
         }
+        Some(Wallpaper::Mesh { columns, rows, colors }) if !s.appearance.thumbs.contains_key(value) => {
+            let (w, h, rgba) = fl::mesh(columns, rows, &colors, 1.6);
+            let p = rune::Pixels::new();
+            p.set(w, h, rgba);
+            return el().pixels(&p);
+        }
         _ => value.to_string(),
     };
     match s.appearance.thumbs.get(&key) {

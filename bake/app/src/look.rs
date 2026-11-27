@@ -13,6 +13,7 @@ use crate::theme::{self, Paint};
 
 const IMAGE_SIDE: u32 = 2560;
 const SAMPLE_SIDE: u32 = 512;
+const MIN_LAYOUT: (f32, f32) = (1440.0, 900.0);
 const RETRY: Duration = Duration::from_secs(5);
 
 type Raw = (u32, u32, Vec<u8>);
@@ -50,6 +51,8 @@ struct State {
     seen_main: u64,
     seen_settings: u64,
     increased: bool,
+    screen: u32,
+    zoom: f32,
 }
 
 thread_local! {
@@ -201,8 +204,10 @@ fn picture(d: fl::Decoded) -> Picture {
 }
 
 impl Picture {
-    fn size(&self, scale: f32) -> (f32, f32) {
-        (self.original.0 as f32 / scale.max(1.0), self.original.1 as f32 / scale.max(1.0))
+    fn size(&self, scale: f32, screen: u32) -> (f32, f32) {
+        let (w, h) = (self.original.0 as f32, self.original.1 as f32);
+        let fit = (screen as f32 / w.max(h).max(1.0)).min(1.0);
+        (w * fit / scale.max(1.0), h * fit / scale.max(1.0))
     }
 
     fn worst(&mut self, dark: bool, blur: f32, shown: (f32, f32)) -> Rgb {
@@ -231,6 +236,7 @@ fn pump(s: &mut State) {
             Got::View(ticket, v) if ticket > s.applied => {
                 s.applied = ticket;
                 s.view = Some(*v);
+                s.screen = rune::displays().iter().map(|d| d.size.0.max(d.size.1)).max().unwrap_or(2880);
                 relook(s);
                 let keep = s.look.images();
                 s.pictures.retain(|p, _| keep.contains(p));
@@ -300,10 +306,10 @@ fn wallpaper_key(w: &Wallpaper) -> String {
 fn worst_of(s: &mut State, dark: bool) -> Option<Rgb> {
     let w = s.look.wallpaper(dark).clone();
     let blur = if s.look.translucent(dark) { s.look.blur / 3.0 } else { 0.0 };
-    let (area, scale, fit, position) = (s.area, s.scale, s.look.fit, s.look.position);
+    let (area, scale, fit, position, screen) = (s.area, s.scale, s.look.fit, s.look.position, s.screen);
     match &w {
         Wallpaper::Image(path) => s.pictures.get_mut(path).and_then(|p| p.as_mut().ok()).map(|p| {
-            let placed = fl::place(fit, position, p.size(scale), area);
+            let placed = fl::place(fit, position, p.size(scale, screen), area);
             p.worst(dark, blur, (placed.rect[2], placed.rect[3]))
         }),
         Wallpaper::Mesh { .. } => mesh_picture(s, &w).map(|p| p.worst(dark, blur, area)),
@@ -350,7 +356,7 @@ fn accented(k: &mut Kit, a: Color) {
     k.c.border_focus = a;
 }
 
-pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool) {
+pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool, zoom: bool) {
     let system_dark = cx.system_dark();
     let system_accent = srgb(cx.accent());
     let increased = cx.system_increased_contrast();
@@ -424,10 +430,17 @@ pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool) {
             accented(&mut k, paint.accent);
             k
         });
-        (paint, kit, chrome, s.look.text_scale)
+        if zoom {
+            let window = (s.area.0 * s.zoom.max(1.0), s.area.1 * s.zoom.max(1.0));
+            let room = (window.0 / MIN_LAYOUT.0).min(window.1 / MIN_LAYOUT.1).max(1.0);
+            s.zoom = s.look.text_scale.min(room);
+        }
+        (paint, kit, chrome, s.zoom)
     });
     theme::set(paint, kit, chrome);
-    cx.zoom(scale);
+    if zoom {
+        cx.zoom(scale);
+    }
 }
 
 pub fn backdrop(session: bool) -> El {
@@ -450,7 +463,7 @@ pub fn backdrop(session: bool) -> El {
         let art = match &w {
             Wallpaper::Image(path) => match s.pictures.get(path) {
                 Some(Ok(p)) => {
-                    let placed = fl::place(s.look.fit, s.look.position, p.size(s.scale), s.area);
+                    let placed = fl::place(s.look.fit, s.look.position, p.size(s.scale, s.screen), s.area);
                     let wrap = if s.look.fit == Fit::Tile { PixelsWrap::Repeat } else { PixelsWrap::Extend };
                     let full = el().w_full().h_full();
                     Some(if placed.tile || s.look.fit == Fit::Cover { full.pixels_wrap(&p.pixels, placed.rect, wrap) } else { el().clip_rounded(0.0).w_full().h_full().child(el().absolute(placed.rect[0], placed.rect[1]).size(placed.rect[2], placed.rect[3]).pixels(&p.pixels)) })

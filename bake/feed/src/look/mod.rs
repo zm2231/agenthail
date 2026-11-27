@@ -323,5 +323,5 @@ pub const NOT_DRAWN: [&str; 7] = [
     "Desktop: this app can't read the desktop picture yet, so it draws no background for it.",
     "Space between panes (glass.gutter): panes keep this app's fixed spacing.",
     "Readability layer colour (scrim.tint): this app's panes cover the whole window, so there is no open area for it.",
-    "Text size scales the whole window here, not only the text.",
+    "Text size scales the whole main window here, not only the text, as far as the window has room; Settings keeps its own size.",
 ];
